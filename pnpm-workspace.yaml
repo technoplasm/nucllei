@@ -1,0 +1,16 @@
+# Allow native/build postinstall scripts for these deps (pnpm blocks them by
+# default). Required so vite/esbuild/sharp/onnxruntime native binaries build.
+allowBuilds:
+  '@parcel/watcher': true
+  core-js: true
+  cypress: true
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+  svelte-preprocess: true
+
+# The app imports several transitive packages directly (phantom deps that npm's
+# flat node_modules used to hoist, e.g. @codemirror/*, onnxruntime-web, lowlight,
+# @floating-ui/utils). Hoist everything to the root so pnpm resolves them like npm.
+shamefullyHoist: true

@@ -43,7 +43,7 @@ jobs:
           pip install black
 
       - name: Format backend
-        run: npm run format:backend
+        run: black . --exclude ".venv/|/venv/"
 
       - name: Check for changes after format
         run: git diff --exit-code
