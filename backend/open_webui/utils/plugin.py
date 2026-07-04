@@ -167,11 +167,15 @@ def load_function_module_by_id(function_id, content=None):
 
 def install_frontmatter_requirements(requirements: str):
     if requirements:
+        req_list = [req.strip() for req in requirements.split(",")]
+        log.info(f"Installing requirements: {' '.join(req_list)}")
+
+        # uv-created virtualenvs don't ship pip, so `python -m pip install`
+        # fails. Use `uv pip install` targeting the running interpreter's
+        # environment (works for both the dev venv and Docker's --system env).
         try:
-            req_list = [req.strip() for req in requirements.split(",")]
-            log.info(f"Installing requirements: {' '.join(req_list)}")
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install"]
+                ["uv", "pip", "install", "--python", sys.executable]
                 + PIP_OPTIONS
                 + req_list
                 + PIP_PACKAGE_INDEX_OPTIONS
