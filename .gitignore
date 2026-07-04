@@ -307,3 +307,8 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+
+# llens
+_links/
+!.claude/
+.claude/settings.local.json
