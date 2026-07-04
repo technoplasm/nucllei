@@ -1,13 +1,19 @@
 # Allow native/build postinstall scripts for these deps (pnpm blocks them by
-# default). Required so vite/esbuild/sharp/onnxruntime native binaries build.
+# default). Required so vite/esbuild native binaries build.
+# 外した理由:
+# - sharp: @img/sharp-linux-x64 の prebuilt を使うため build script 不要
+#   (ソースビルドは node-gyp/libvips 必須で失敗する)
+# - onnxruntime-node: CPU 用 .so/.node は npm パッケージに同梱済み。
+#   postinstall は GPU(CUDA)用ライブラリの外部ダウンロードで air-gapped に不適
+# - core-js: postinstall は寄付案内の表示のみ
 allowBuilds:
   '@parcel/watcher': true
-  core-js: true
+  core-js: false
   cypress: true
   esbuild: true
-  onnxruntime-node: true
+  onnxruntime-node: false
   protobufjs: true
-  sharp: true
+  sharp: false
   svelte-preprocess: true
 
 # The app imports several transitive packages directly (phantom deps that npm's
