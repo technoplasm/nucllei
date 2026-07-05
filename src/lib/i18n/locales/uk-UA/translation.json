@@ -200,6 +200,7 @@
 	"Code execution": "Виконання коду",
 	"Code Execution": "Виконання коду",
 	"Code Execution Engine": "Рушій виконання коду",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Тайм-аут виконання коду",
 	"Code formatted successfully": "Код успішно відформатовано",
 	"Code Interpreter": "Інтерпретатор коду",

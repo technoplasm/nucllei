@@ -200,6 +200,7 @@
 	"Code execution": "Execució de codi",
 	"Code Execution": "Excució de Codi",
 	"Code Execution Engine": "Motor d'execució de codi",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Temps màxim d'execució de codi",
 	"Code formatted successfully": "Codi formatat correctament",
 	"Code Interpreter": "Intèrpret de codi",

@@ -200,6 +200,7 @@
 	"Code execution": "Code uitvoeren",
 	"Code Execution": "Code-uitvoer",
 	"Code Execution Engine": "Code-uitvoer engine",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Code-uitvoer time-out",
 	"Code formatted successfully": "Code succesvol geformateerd",
 	"Code Interpreter": "Code-interpretatie",

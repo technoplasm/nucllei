@@ -200,6 +200,7 @@
 	"Code execution": "Koodin suoritus",
 	"Code Execution": "Koodin Suoritus",
 	"Code Execution Engine": "Koodin suoritusmoottori",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Koodin suorittamisen aikakatkaisu",
 	"Code formatted successfully": "Koodin muotoilu onnistui",
 	"Code Interpreter": "Ohjelmatulkki",

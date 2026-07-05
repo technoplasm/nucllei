@@ -200,6 +200,7 @@
 	"Code execution": "코드 실행",
 	"Code Execution": "",
 	"Code Execution Engine": "",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "",
 	"Code formatted successfully": "성공적으로 코드가 생성되었습니다",
 	"Code Interpreter": "",

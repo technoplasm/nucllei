@@ -200,6 +200,7 @@
 	"Code execution": "Извршавање кода",
 	"Code Execution": "",
 	"Code Execution Engine": "",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "",
 	"Code formatted successfully": "Код форматиран успешно",
 	"Code Interpreter": "",

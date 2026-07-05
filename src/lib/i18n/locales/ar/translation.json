@@ -200,6 +200,7 @@
 	"Code execution": "تنفيذ الشيفرة",
 	"Code Execution": "تنفيذ الشيفرة",
 	"Code Execution Engine": "محرك تنفيذ الشيفرة",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "مهلة تنفيذ الشيفرة",
 	"Code formatted successfully": "تم تنسيق الشيفرة بنجاح",
 	"Code Interpreter": "مفسر الشيفرة",

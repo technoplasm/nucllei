@@ -200,6 +200,7 @@
 	"Code execution": "Εκτέλεση κώδικα",
 	"Code Execution": "",
 	"Code Execution Engine": "",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "",
 	"Code formatted successfully": "Ο κώδικας μορφοποιήθηκε επιτυχώς",
 	"Code Interpreter": "",

@@ -200,6 +200,7 @@
 	"Code execution": "Kodekjøring",
 	"Code Execution": "Kodekjøring",
 	"Code Execution Engine": "Motor for kodekjøring",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Tidsavbrudd for kodekjøring",
 	"Code formatted successfully": "Koden er formatert",
 	"Code Interpreter": "Kodetolker",

@@ -200,6 +200,7 @@
 	"Code execution": "Изпълнение на код",
 	"Code Execution": "Изпълнение на код",
 	"Code Execution Engine": "Двигател за изпълнение на код",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "",
 	"Code formatted successfully": "Кодът е форматиран успешно",
 	"Code Interpreter": "Интерпретатор на код",

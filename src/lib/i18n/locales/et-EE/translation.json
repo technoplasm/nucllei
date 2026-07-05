@@ -200,6 +200,7 @@
 	"Code execution": "Koodi täitmine",
 	"Code Execution": "Koodi täitmine",
 	"Code Execution Engine": "Koodi täitmise mootor",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Koodi täitmise aegumine",
 	"Code formatted successfully": "Kood vormindatud edukalt",
 	"Code Interpreter": "Koodi interpretaator",

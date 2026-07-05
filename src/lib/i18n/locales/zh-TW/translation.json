@@ -200,6 +200,7 @@
 	"Code execution": "程式碼執行",
 	"Code Execution": "程式碼執行",
 	"Code Execution Engine": "程式碼執行引擎",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "程式執行超時",
 	"Code formatted successfully": "程式碼格式化成功",
 	"Code Interpreter": "程式碼直譯器",

@@ -200,6 +200,7 @@
 	"Code execution": "Thực thi mã",
 	"Code Execution": "Thực thi Mã",
 	"Code Execution Engine": "Engine Thực thi Mã",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Thời gian chờ Thực thi Mã",
 	"Code formatted successfully": "Mã được định dạng thành công",
 	"Code Interpreter": "Trình thông dịch Mã",

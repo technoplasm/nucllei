@@ -200,6 +200,7 @@
 	"Code execution": "Kód végrehajtás",
 	"Code Execution": "Kód végrehajtás",
 	"Code Execution Engine": "Kód végrehajtási motor",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "Kód végrehajtási időtúllépés",
 	"Code formatted successfully": "Kód sikeresen formázva",
 	"Code Interpreter": "Kód értelmező",

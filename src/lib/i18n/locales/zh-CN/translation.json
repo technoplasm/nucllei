@@ -200,6 +200,7 @@
 	"Code execution": "代码执行",
 	"Code Execution": "代码执行",
 	"Code Execution Engine": "代码执行引擎",
+	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "代码执行超时时间",
 	"Code formatted successfully": "代码格式化成功",
 	"Code Interpreter": "代码解释器",
