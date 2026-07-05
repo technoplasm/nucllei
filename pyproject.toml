@@ -95,7 +95,8 @@ dependencies = [
     "youtube-transcript-api==1.0.3",
     "pytube==15.0.0",
 
-    "extract_msg",
+    # extract_msg は GPL 依存連鎖(extract-msg→RTFDE→oletools→pcodedmp[GPLv3])のため除外。
+    # 用途は .msg(Outlook)アップロードのみ(_memos/license-audit.md、issue #2)
     "pydub",
     "duckduckgo-search~=8.0.0",
 
