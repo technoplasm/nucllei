@@ -9,6 +9,8 @@ requirements:
 import json
 from typing import List
 
+from open_webui.utils.tool_render import Code, Table, Text
+
 
 # =========================================================================
 # サンプルビルダ(モジュール関数)
@@ -211,3 +213,33 @@ class Tools:
         }
         pretty = json.dumps(payload, ensure_ascii=False, indent=2)
         return "受け取った引数:\n\n```json\n" + pretty + "\n```"
+
+    def run_python(self, code: Code("python"), timeout: int = 30) -> Text:
+        """Python コードをサンドボックスで実行する(dev ダミー: 実行はせず受領情報を返す)。
+        型駆動レンダリング(#20)の確認用 — code 引数が Python ハイライトで、
+        戻り値が text(pre-wrap)で表示されること。
+
+        :param code: 実行する Python コード
+        :param timeout: タイムアウト秒(scalar 表示の確認用)
+        :return: stdout 風のプレーンテキスト
+        """
+        lines = code.count("\n") + 1
+        return (
+            f"[dev sandbox] {lines} 行 / {len(code)} 文字のコードを受領(実行はダミー)\n"
+            "hello from run_python"
+        )
+
+    def probe_result_table(self, department: str = "") -> Table:
+        """object 配列を返す。戻り型 Table の結果テーブル表示(#20)の確認用。
+
+        :param department: 絞り込み用の診療科名(空なら全件)
+        :return: 診療科別の件数リスト
+        """
+        rows = [
+            {"診療科": "内科", "件数": 12, "備考": ""},
+            {"診療科": "外科", "件数": 8, "備考": "前週比 +2"},
+            {"診療科": "小児科", "件数": 5, "備考": ""},
+        ]
+        if department:
+            rows = [r for r in rows if r["診療科"] == department]
+        return rows

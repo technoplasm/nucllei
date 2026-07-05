@@ -15,5 +15,8 @@ TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auths/signin \
 python3 dev/tools/seed.py --token "$TOKEN"
 ```
 
-`render_probe(kind)` / `echo(text)` / `probe_args(code, items, count)` が使える。
+`render_probe(kind)` / `echo(text)` / `probe_args(code, items, count)` /
+`run_python(code, timeout)` / `probe_result_table(department)` が使える。
 `kind` は `table` / `code` / `math` / `long` / `mixed` / `edge`。
+`run_python` は `Code("python")` 宣言 + `Text` 戻り、`probe_result_table` は `Table` 戻りで、
+型駆動レンダリング(#20)の表示確認用(probe_args は宣言なしのコントロール)。
