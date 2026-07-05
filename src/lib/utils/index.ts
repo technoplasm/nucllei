@@ -16,7 +16,6 @@ import { WEBUI_BASE_URL } from '$lib/constants';
 import { TTS_RESPONSE_SPLIT } from '$lib/types';
 
 import { render } from '$lib/utils/markdown-it';
-import hljs from 'highlight.js';
 
 //////////////////////////
 // Helper functions

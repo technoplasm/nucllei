@@ -10,13 +10,27 @@
 // スキーマの一次情報: _memos/rendering-design.md §3。
 import MarkdownIt from 'markdown-it';
 import type { Token as MDToken } from 'markdown-it/index.js';
+import hljs from 'highlight.js';
 import katexPlugin from './katex';
 
 const md = new MarkdownIt({
 	html: true, // 生 HTML は html トークンとして通し、描画側で DOMPurify する
 	linkify: false, // 裸 URL の自動リンクはしない(marked 既定に寄せる)
 	breaks: false,
-	typographer: false
+	typographer: false,
+	// render()(HTML 直生成: clipboard 整形コピー・ツールチップ等)の code fence を
+	// hljs でハイライトする。lex()(md.parse)経路はトークン content が raw のままで、
+	// チャット本文の CodeBlock(CodeMirror)には影響しない。
+	highlight: (str, lang) => {
+		if (lang && hljs.getLanguage(lang)) {
+			try {
+				return hljs.highlight(str, { language: lang }).value;
+			} catch {
+				// fall through to default escaping
+			}
+		}
+		return '';
+	}
 });
 
 // 遡及文法の無効化(rendering-design.md §2c)。

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lex } from './index';
+import { lex, render } from './index';
 
 describe('markdown-it lexer (#22 L2)', () => {
 	it('setext トラップを解消: 段落 + 次行 --- が heading に化けない', () => {
@@ -92,6 +92,13 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(d.summary).toBe('Thought for 2 seconds');
 		expect(d.attributes.type).toBe('reasoning');
 		expect(d.attributes.duration).toBe('2');
+	});
+
+	it('render() は HTML を返し、code fence を hljs でハイライトする', () => {
+		const html = render('# 見出し\n\n```json\n{"a": 1}\n```');
+		expect(html).toContain('<h1>');
+		// hljs のトークン span が入る(clipboard 整形コピー等の highlight 復元)
+		expect(html).toContain('hljs-attr');
 	});
 
 	it('参照リンク定義は無効(reference disable)', () => {
