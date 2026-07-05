@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext, tick } from 'svelte';
-	import { models, tools, functions, knowledge as knowledgeCollections, user } from '$lib/stores';
+	import { tools, functions, knowledge as knowledgeCollections, user } from '$lib/stores';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
@@ -10,6 +10,7 @@
 	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import { getModels } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
@@ -87,8 +88,13 @@
 
 	let accessControl = {};
 
+	// llens: チャットのモデルピッカー(/api/models = $models)は preset のみを返すよう
+	// になったため、preset のベースモデル選択には生モデルを含む /api/models/base を使う。
+	// admin ゲートのエンドポイントなので admin 前提(workspace.models 既定は False)。
+	let baseModels = [];
+
 	const addUsage = (base_model_id) => {
-		const baseModel = $models.find((m) => m.id === base_model_id);
+		const baseModel = baseModels.find((m) => m.id === base_model_id);
 
 		if (baseModel) {
 			if (baseModel.owned_by === 'openai') {
@@ -169,6 +175,11 @@
 	};
 
 	onMount(async () => {
+		// 生モデル(接続由来のベースモデル)一覧。/api/models/base は admin ゲート。
+		// 既定では preset 作成/編集は admin のみ(workspace.models 既定 False)。
+		// 非 admin では 403 を投げるため、空配列にフォールバックしてエディタを壊さない。
+		baseModels = (await getModels(localStorage.token, null, true).catch(() => [])) ?? [];
+
 		await tools.set(await getTools(localStorage.token));
 		await functions.set(await getFunctions(localStorage.token));
 		await knowledgeCollections.set(await getKnowledgeBases(localStorage.token));
@@ -188,9 +199,9 @@
 			enableDescription = model?.meta?.description !== null;
 
 			if (model.base_model_id) {
-				const base_model = $models
-					.filter((m) => !m?.preset && !(m?.arena ?? false))
-					.find((m) => [model.base_model_id, `${model.base_model_id}:latest`].includes(m.id));
+				const base_model = baseModels.find((m) =>
+					[model.base_model_id, `${model.base_model_id}:latest`].includes(m.id)
+				);
 
 				console.log('base_model', base_model);
 
@@ -472,7 +483,7 @@
 									<option value={null} class=" text-gray-900"
 										>{$i18n.t('Select a base model')}</option
 									>
-									{#each $models.filter((m) => (model ? m.id !== model.id : true) && !m?.preset && m?.owned_by !== 'arena') as model}
+									{#each baseModels.filter((m) => (model ? m.id !== model.id : true)) as model}
 										<option value={model.id} class=" text-gray-900">{model.name}</option>
 									{/each}
 								</select>

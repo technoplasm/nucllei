@@ -216,8 +216,93 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert sent["model"] == "mock-model"
         assert sent["messages"][-1] == {"role": "user", "content": "hi"}
 
-    def test_models_endpoint_lists_openai_models(self):
-        """/api/models が OpenAI 互換エンドポイントのモデルを返す。"""
+    def test_base_models_endpoint_lists_raw_models(self):
+        """/api/models/base(admin ゲート)は接続由来の生モデルを返す。"""
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.get("/api/models/base")
+        assert response.status_code == 200
+        model_ids = [m["id"] for m in response.json()["data"]]
+        assert "mock-model" in model_ids
+
+    def test_models_endpoint_hides_raw_models_from_admin(self):
+        """GHSA-9vvh UX: workspace 行の無い生モデルは admin にもピッカーで見せない。"""
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.get("/api/models")
+        assert response.status_code == 200
+        model_ids = [m["id"] for m in response.json()["data"]]
+        assert "mock-model" not in model_ids
+
+    def test_models_endpoint_hides_raw_models_from_user(self):
+        """生モデルは role=user のピッカーからも除外される。"""
+        with mock_webui_user(id="2", role="user"):
+            response = self.fast_api_client.get("/api/models")
+        assert response.status_code == 200
+        model_ids = [m["id"] for m in response.json()["data"]]
+        assert "mock-model" not in model_ids
+
+    def _create_preset(self, model_id="my-preset", access_control=None):
+        payload = {
+            "id": model_id,
+            "base_model_id": "mock-model",
+            "name": "My Preset",
+            "meta": {
+                "profile_image_url": "/static/favicon.png",
+                "description": "preset with system prompt",
+                "capabilities": None,
+                "model_config": {},
+            },
+            "params": {},
+            "access_control": access_control,
+        }
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/v1/models/create", json=payload
+            )
+        assert response.status_code == 200, response.text
+
+    def test_models_endpoint_returns_preset_but_not_base(self):
+        """preset(Models 行あり)は返るが、そのベースの生モデルは隠れたまま。"""
+        self._create_preset()
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.get("/api/models")
+        assert response.status_code == 200
+        model_ids = [m["id"] for m in response.json()["data"]]
+        assert "my-preset" in model_ids
+        assert "mock-model" not in model_ids
+
+    def test_public_preset_visible_to_user(self):
+        """access_control=None(公開)の preset は role=user のピッカーに出る。"""
+        self._create_preset(model_id="public-preset", access_control=None)
+
+        with mock_webui_user(id="2", role="user"):
+            response = self.fast_api_client.get("/api/models")
+        assert response.status_code == 200
+        model_ids = [m["id"] for m in response.json()["data"]]
+        assert "public-preset" in model_ids
+        assert "mock-model" not in model_ids
+
+    def test_direct_base_model_id_row_kept(self):
+        """id が接続由来と同じ Models 行(admin がベースを直接編集)は表示に残る。"""
+        payload = {
+            "id": "mock-model",
+            "base_model_id": None,
+            "name": "Edited Base",
+            "meta": {
+                "profile_image_url": "/static/favicon.png",
+                "description": None,
+                "capabilities": None,
+                "model_config": {},
+            },
+            "params": {},
+            "access_control": None,
+        }
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/v1/models/create", json=payload
+            )
+        assert response.status_code == 200, response.text
+
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.get("/api/models")
         assert response.status_code == 200

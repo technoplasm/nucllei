@@ -1053,6 +1053,15 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         if "pipeline" in model and model["pipeline"].get("type", None) == "filter":
             continue
 
+        # llens(GHSA-9vvh UX 対応): workspace(Models テーブル)行を持たない
+        # 生モデル(接続由来のベースモデル)は、チャットのモデルピッカーから
+        # 全員(admin 含む)に対して隠す。preset や、admin が直接メタデータを
+        # 編集して Models 行を作ったベースモデルのみ残す。ベースモデル選択・
+        # admin のモデル管理は /api/models/base を使うためここでは隠してよい。
+        # 行を持たない arena 等の仮想モデルもここで併せて除外される。
+        if not Models.get_model_by_id(model["id"]):
+            continue
+
         try:
             model_tags = [
                 tag.get("name")
