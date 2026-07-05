@@ -443,7 +443,18 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
             # Check if the file already exists in the cache
             if file_path.is_file():
                 log.info(f"file_path: {file_path}")
-                return FileResponse(file_path)
+                # llens(GHSA-8gh5-qqh8-hq3x / CVE-2025-46571): アップロードされた HTML は
+                # このエンドポイントで iframe に読み込まれる。フロント側の iframe sandbox に加え、
+                # 配信レスポンス自体に CSP sandbox を付けて opaque origin で隔離する(親オリジンの
+                # localStorage トークン/Cookie に到達させない=Stored XSS→乗っ取りを封じる)。
+                # allow-scripts は正当な HTML プレビューの JS を許可しつつ same-origin は与えない。
+                return FileResponse(
+                    file_path,
+                    headers={
+                        "Content-Security-Policy": "sandbox allow-scripts;",
+                        "X-Content-Type-Options": "nosniff",
+                    },
+                )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

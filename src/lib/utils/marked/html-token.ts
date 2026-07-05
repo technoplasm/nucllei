@@ -31,7 +31,10 @@ export const MARKDOWN_IFRAME_SANITIZE_CONFIG = {
 		'title',
 		'allow',
 		'allowfullscreen',
-		'loading'
+		'loading',
+		// llens(GHSA-8gh5-qqh8-hq3x): file プレビュー iframe の sandbox 属性を保持する。
+		// これが除去されると枠内 HTML が same-origin で実行され Stored XSS→乗っ取りに繋がる。
+		'sandbox'
 	]
 };
 

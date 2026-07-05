@@ -40,6 +40,7 @@
 | GHSA-r29h-37fj-x2w6 | (MED) | SVG レンダラ(SVGPanZoom)未サニタイズ | (本コミット) | #36 |
 | GHSA-cqp4-qqvg-3787 | (MED) | Banner のサニタイズ順誤り(sanitize→parse) | (本コミット) | #36 |
 | GHSA-gf5m-wcrh-7928 | (MED) | Model Description の marked 出力未サニタイズ | (本コミット) | #36 |
+| GHSA-8gh5-qqh8-hq3x / CVE-2025-46571 | HIGH | HTML アップロードが iframe で same-origin 実行 | (本コミット) | #36 |
 
 **#38 残の修正範囲(2026-07-05)**: 認証系 3 件(CRITICAL の LDAP 空 PW は 03e9a9783 で出荷済み)。
 - **h3ww(複数 admin)**: `Auths.insert_new_auth` に `promote_first_user_to_admin` を追加し、
@@ -58,12 +59,25 @@
 - **r29h(SVG)**: `SVGPanZoom.svelte` の `{@html svg}` に `DOMPurify.sanitize` を適用(import 済みだが未使用だった)。
 - **cqp4(Banner)**: `DOMPurify.sanitize(marked.parse(...))` へ順序修正(旧: 生 md を sanitize→parse は生成 HTML 素通し)。
 - **gf5m(Model Description)**: `ChatPlaceholder.svelte` / `Placeholder.svelte` の marked 出力を DOMPurify で包む。
+- **8gh5(HTML アップロード配信)**: `{{HTML_FILE_ID}}` は `/files/{id}/content/html` を iframe で読み込み、
+  従来は same-origin で生 HTML が実行され得た(トークン窃取→乗っ取り)。iframe を `sandbox="allow-scripts"`
+  (same-origin 剥奪)にし、`utils/index.ts` の生成側と `MARKDOWN_IFRAME_SANITIZE_CONFIG` の ADD_ATTR に `sandbox` を追加。
+  バックエンド `routers/files.py` の `/content/html` に CSP `sandbox allow-scripts` + `nosniff` を付与(多層防御)。
+  回帰テスト: `test/apps/webui/routers/test_file_html_serving.py`。
 - 型チェック(svelte-check)は変更行にエラー無し。**mermaid/Artifacts の描画は視覚スモーク未実施**(#12 に合流可能。
   strict は mermaid 既定で図は描画されるが HTML ラベルは文字表示・click 無効になる)。
-- **#36 残(未着手、フロント/mixed でより結合的)**: 8gh5(HTML アップロード配信の無害化)、w7xj(Rich Text 挿入)、
-  jwf8/hcwp(Excel/DOCX プレビュー {@html})、6gh2(Profile Picture)、fq3v(Pending User Overlay)、
-  3vv5(postMessage)、3wgj(OAuth picture SVG)、xc8p/vjm7(iframe 埋め込みの残バリアント)。
-  9f4f(MarkdownTokens 本体)はコア済みだが #17 レンダリング刷新で再検証する。
+
+**#36 の残トリアージ(2026-07-05、実コード確認)**:
+- **w7xj(Insert Prompt as Rich Text)= 構造的に低リスク**: `RichTextInput.svelte` は TipTap/ProseMirror。
+  `editor.commands.setContent(marked.parse(...))` は schema でパースし未知タグ/属性を捨て script を実行しない({@html} 非経由)。
+- **6gh2 / 3wgj(Profile Picture / OAuth picture SVG)= 非該当**: プロフィール画像は `<img src>` で描画され
+  ({@html} での SVG インライン描画は無し)、`<img>` 内の SVG はスクリプトを実行しない。OAuth も data-uri を img 描画。
+- **jwf8 / hcwp(Excel/DOCX プレビュー)= 非該当**: fork に mammoth/xlsx 等のプレビュー実装が無い。
+- **3vv5(postMessage)= 低/非該当**: 受信ハンドラ(Feedbacks/Functions/Prompts/Models/ShareChat)は全て
+  `event.origin !== url` を検証済み。かつ対向は openwebui.com コミュニティ連携(air-gapped では DROP)。
+- **xc8p / vjm7(iframe 埋め込み残)**: 上記 8gh5 の sandbox 化とコアの `sanitizeIframeHtml` でカバー。
+- **9f4f(MarkdownTokens 本体)**: コア済み(DOMPurify)。#17 レンダリング刷新で再検証する。
+- ⇒ **#36 のバックエンド/自己完結面はここで一段落**。残るは #17 刷新に伴う再検証と #12 視覚スモークのみ。
 
 **#40 の修正範囲(2026-07-05)**: file_id / collection 参照の読取権限突合を一元化。
 - `utils/access_control.py` に `has_read_access_to_file` / `has_read_access_to_collection` を新設

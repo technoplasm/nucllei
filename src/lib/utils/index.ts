@@ -41,8 +41,12 @@ export const replaceTokens = (content, sourceIds, char, user) => {
 		},
 		{
 			regex: /{{HTML_FILE_ID_([a-f0-9-]+)}}/gi,
+			// llens(GHSA-8gh5-qqh8-hq3x): iframe を sandbox 化(allow-same-origin は付けない)。
+			// これにより枠内 HTML は opaque origin で動作し、親オリジンの localStorage トークン等に
+			// 到達できず Stored XSS→乗っ取りが成立しない。onload の自動高さ調整は cross-origin で
+			// 参照不可になるため撤去(DOMPurify でも onload は元々除去されていた)。
 			replacement: (_, fileId) =>
-				`<iframe src="${WEBUI_BASE_URL}/api/v1/files/${fileId}/content/html" width="100%" frameborder="0" onload="this.style.height=(this.contentWindow.document.body.scrollHeight+20)+'px';"></iframe>`
+				`<iframe src="${WEBUI_BASE_URL}/api/v1/files/${fileId}/content/html" width="100%" frameborder="0" sandbox="allow-scripts"></iframe>`
 		}
 	];
 
