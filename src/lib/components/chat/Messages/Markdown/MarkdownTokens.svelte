@@ -6,7 +6,8 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { marked, type Token } from 'marked';
+	import type { Token } from 'marked';
+	import { lex } from '$lib/utils/markdown-it';
 	import { unescapeHtml } from '$lib/utils';
 	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 
@@ -260,7 +261,7 @@
 			<div class=" mb-1.5" slot="content">
 				<svelte:self
 					id={`${id}-${tokenIdx}-d`}
-					tokens={marked.lexer(token.text)}
+					tokens={lex(token.text)}
 					attributes={token?.attributes}
 					{onTaskClick}
 					{onSourceClick}

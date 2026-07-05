@@ -1,10 +1,10 @@
 <script>
-	import { marked } from 'marked';
 	import { replaceTokens, processResponseContent } from '$lib/utils';
 	import { user } from '$lib/stores';
 
-	import markedExtension from '$lib/utils/marked/extension';
-	import markedKatexExtension from '$lib/utils/marked/katex-extension';
+	// #22 L2: marked → markdown-it。setext(lheading)・参照リンク定義を文法ごと無効化。
+	// トークンは marked 互換形に変換され、MarkdownTokens.svelte がそのまま消費する。
+	import { lex } from '$lib/utils/markdown-it';
 
 	import MarkdownTokens from './Markdown/MarkdownTokens.svelte';
 	import { createEventDispatcher } from 'svelte';
@@ -23,16 +23,9 @@
 
 	let tokens = [];
 
-	const options = {
-		throwOnError: false
-	};
-
-	marked.use(markedKatexExtension(options));
-	marked.use(markedExtension(options));
-
 	$: (async () => {
 		if (content) {
-			tokens = marked.lexer(
+			tokens = lex(
 				replaceTokens(processResponseContent(content), sourceIds, model?.name, $user?.name)
 			);
 		}
