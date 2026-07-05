@@ -2,7 +2,7 @@
 	import { decode } from 'html-entities';
 	import { v4 as uuidv4 } from 'uuid';
 
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { getContext, createEventDispatcher, onMount } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import dayjs from '$lib/dayjs';
@@ -27,7 +27,6 @@
 	$: loadLocale($i18n.languages);
 
 	const dispatch = createEventDispatcher();
-	$: dispatch('change', open);
 
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
@@ -40,6 +39,14 @@
 	import Image from './Image.svelte';
 
 	export let open = false;
+
+	// Switch.svelte と同じ Svelte 5 互換モード対策: 初期化時の $: dispatch が
+	// 親に届くため、open が実際に変化したときだけ change を発火する。
+	let lastOpen = open;
+	$: if (open !== lastOpen) {
+		lastOpen = open;
+		dispatch('change', open);
+	}
 
 	export let className = '';
 	export let buttonClassName =

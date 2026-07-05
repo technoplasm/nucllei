@@ -5,7 +5,14 @@
 
 	const dispatch = createEventDispatcher();
 
-	$: dispatch('change', state);
+	// Svelte 5(互換モード)では初期化時の $: dispatch が親のリスナーに届いてしまい、
+	// マウントしただけで on:change 側の副作用(API 呼び出し等)が発火する。
+	// 初期値を除き、state が実際に変化したときだけ change を発火する。
+	let lastState = state;
+	$: if (state !== lastState) {
+		lastState = state;
+		dispatch('change', state);
+	}
 </script>
 
 <Switch.Root
