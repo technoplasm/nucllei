@@ -5,6 +5,8 @@ middleware 内部の content_blocks 状態機械の表現から、chat:completio
 message 永続化で共用する最小形へ落とす。消費者のいないフィールドは足さない。
 """
 
+import copy
+
 
 def serialize_text_blocks(content_blocks: list) -> str:
     """text ブロックのみを join した派生 content。
@@ -47,11 +49,14 @@ def snapshot_content_blocks(content_blocks: list) -> list:
             blocks.append(snapshot)
 
         elif block_type == "tool_calls":
+            # deepcopy: ストリーム中(#20 ステップ5)は middleware が calls を
+            # 累積更新し続けるため、参照共有だと emit 済みスナップショットが
+            # 遡って書き換わる。スナップショットは不変の wire 形として切り離す。
             blocks.append(
                 {
                     "type": "tool_calls",
-                    "calls": block.get("content", []),
-                    "results": block.get("results", []),
+                    "calls": copy.deepcopy(block.get("content", [])),
+                    "results": copy.deepcopy(block.get("results", [])),
                 }
             )
 

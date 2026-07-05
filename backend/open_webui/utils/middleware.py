@@ -1628,15 +1628,7 @@ async def process_chat_response(
                                     delta_tool_calls = delta.get("tool_calls", None)
 
                                     if delta_tool_calls:
-                                        if close_open_reasoning_block(content_blocks):
-                                            data = {
-                                                "content": serialize_text_blocks(
-                                                    content_blocks
-                                                ),
-                                                "content_blocks": snapshot_content_blocks(
-                                                    content_blocks
-                                                ),
-                                            }
+                                        close_open_reasoning_block(content_blocks)
 
                                         for delta_tool_call in delta_tool_calls:
                                             tool_call_index = delta_tool_call.get(
@@ -1685,6 +1677,50 @@ async def process_chat_response(
                                                         ][
                                                             "arguments"
                                                         ] += delta_arguments
+
+                                        # llens(#20 ステップ5): 蓄積中の tool_calls を
+                                        # open ブロックとして content_blocks に載せ、部分
+                                        # arguments 込みの snapshot を毎フレーム emit する
+                                        # (フロントは寛容パーサで逐次描画)。ブロックの
+                                        # content は response_tool_calls と同一オブジェクト
+                                        # なので、以後の累積は自動で snapshot に反映される。
+                                        if not (
+                                            content_blocks
+                                            and content_blocks[-1]["type"]
+                                            == "tool_calls"
+                                            and content_blocks[-1]["content"]
+                                            is response_tool_calls
+                                        ):
+                                            content_blocks.append(
+                                                {
+                                                    "type": "tool_calls",
+                                                    "content": response_tool_calls,
+                                                }
+                                            )
+
+                                        # 表示ディスクリプタは name が届いた時点で付与
+                                        # (Kimi は初回フレームで id/name が確定する)
+                                        tools = metadata.get("tools", {})
+                                        for tool_call in response_tool_calls:
+                                            if "render" in tool_call:
+                                                continue
+                                            tool_name = tool_call.get(
+                                                "function", {}
+                                            ).get("name", "")
+                                            tool_render = (
+                                                tools.get(tool_name) or {}
+                                            ).get("render")
+                                            if tool_render:
+                                                tool_call["render"] = tool_render
+
+                                        data = {
+                                            "content": serialize_text_blocks(
+                                                content_blocks
+                                            ),
+                                            "content_blocks": snapshot_content_blocks(
+                                                content_blocks
+                                            ),
+                                        }
 
                                     value = delta.get("content")
 
@@ -1746,7 +1782,12 @@ async def process_chat_response(
                                             )
 
                                         content = f"{content}{value}"
-                                        if not content_blocks:
+                                        # llens(#20 ステップ5): tool_calls ブロックが
+                                        # ストリーム中から存在するため、直後に content
+                                        # デルタが来たら新しい text ブロックを開く
+                                        if not content_blocks or content_blocks[-1][
+                                            "type"
+                                        ] not in ("text", "reasoning"):
                                             content_blocks.append(
                                                 {
                                                     "type": "text",
@@ -1864,18 +1905,26 @@ async def process_chat_response(
                     # llens(#20): 型駆動の表示ディスクリプタを call に同梱する。
                     # snapshot_content_blocks は calls をそのまま通すので、ここで
                     # 付ければイベント・永続化(リロード)双方に render が乗る。
+                    # (通常はストリーム中に付与済み。冪等な保険)
                     for tool_call in response_tool_calls:
                         tool_name = tool_call.get("function", {}).get("name", "")
                         tool_render = (tools.get(tool_name) or {}).get("render")
                         if tool_render:
                             tool_call["render"] = tool_render
 
-                    content_blocks.append(
-                        {
-                            "type": "tool_calls",
-                            "content": response_tool_calls,
-                        }
-                    )
+                    # llens(#20 ステップ5): ストリーム中に open ブロックとして
+                    # 追加済み(content が同一オブジェクト)なら再追加しない
+                    if not (
+                        content_blocks
+                        and content_blocks[-1]["type"] == "tool_calls"
+                        and content_blocks[-1]["content"] is response_tool_calls
+                    ):
+                        content_blocks.append(
+                            {
+                                "type": "tool_calls",
+                                "content": response_tool_calls,
+                            }
+                        )
 
                     await event_emitter(
                         {

@@ -405,6 +405,58 @@ def test_tool_call_render_descriptor_rides_events_and_persistence(monkeypatch):
     assert persisted[-1]["content_blocks"] == final["content_blocks"]
 
 
+def test_streaming_snapshots_carry_partial_tool_call_arguments(monkeypatch):
+    """ストリーム中の chat:completion に open な tool_calls ブロック(results 無し)
+    が載り、部分 arguments が単調に伸びる(#20 ステップ5 = フロント逐次描画の前提)。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_long_code",
+            extra_tools=_run_python_tool(),
+        )
+    )
+
+    open_calls = []  # (call dict) results 未着の snapshot 群
+    for e in events:
+        if e.get("type") != "chat:completion":
+            continue
+        blocks = e.get("data", {}).get("content_blocks")
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            if block["type"] == "tool_calls" and not block.get("results"):
+                open_calls.append(block["calls"][0])
+
+    assert open_calls, "ストリーム中の open tool_calls スナップショットが無い"
+
+    # arguments は単調に伸びる(スナップショットの累積性)
+    prev = ""
+    for call in open_calls:
+        args = call["function"]["arguments"]
+        assert args.startswith(prev), "arguments が後退した"
+        prev = args
+
+    # 途中スナップショットには JSON として閉じていない状態が含まれる
+    # (完成後にまとめて emit していない = 逐次 emit の証明)
+    incomplete = 0
+    for call in open_calls[:-1]:
+        try:
+            json.loads(call["function"]["arguments"])
+        except Exception:
+            incomplete += 1
+    assert incomplete > 0
+
+    # render(表示ディスクリプタ)は最初の snapshot から付与済み
+    # (Kimi は初回フレームで id/name が確定する)
+    assert open_calls[0]["render"] == RUN_PYTHON_RENDER
+
+    # 最終スナップショットに tool_calls ブロックは 1 つだけ(open ブロックの再追加なし)
+    final = _final_done_data(events)
+    assert sum(1 for b in final["content_blocks"] if b["type"] == "tool_calls") == 1
+
+
 def test_tool_call_without_declaration_has_no_render(monkeypatch):
     """宣言の無いツール(get_weather)の call に render は付かない
     (名前・長さヒューリスティックで推測しない)。"""
