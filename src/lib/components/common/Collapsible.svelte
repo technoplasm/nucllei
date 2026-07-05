@@ -131,7 +131,8 @@
 
 				<div class="">
 					{#if attributes?.type === 'reasoning'}
-						{#if attributes?.done === 'true' && attributes?.duration}
+						<!-- duration は 0 秒がありうる(数値 0 / 文字列 "0" とも thought 扱い) -->
+						{#if attributes?.done === 'true' && attributes?.duration != null}
 							{#if attributes.duration < 60}
 								{$i18n.t('Thought for {{DURATION}} seconds', {
 									DURATION: attributes.duration
@@ -293,10 +294,11 @@
 					<!-- svelte-ignore a11y-no-static-element-interactions -->
 					<!-- svelte-ignore a11y-click-events-have-key-events -->
 					<div
-						class="{buttonClassName} w-full flex justify-center py-0.5 cursor-pointer"
+						class="{buttonClassName} flex items-center gap-1 py-0.5 text-xs cursor-pointer"
 						on:pointerup|stopPropagation={collapseFromBottom}
 					>
-						<ChevronUp strokeWidth="3.5" className="size-3.5" />
+						<ChevronUp strokeWidth="3.5" className="size-3" />
+						{$i18n.t('Close')}
 					</div>
 				{/if}
 			</div>
