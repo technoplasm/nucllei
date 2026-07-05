@@ -1,6 +1,6 @@
 # tool 引数/結果のレンダリング仕様(型駆動)
 
-2026-07-06 確定。#20(L3)の実装根拠。設計は #14 レンダリング刷新トラック(`_memos/rendering-design.md`)の上に載る。
+2026-07-06 確定、同日ステップ 1〜4 実装済み(下記「実装状況」)。#20(L3)の実装根拠。設計は #14 レンダリング刷新トラック(`_memos/rendering-design.md`)の上に載る。
 `content_blocks` の tool_calls ブロック(#17 で確定)が土台。
 
 ## 問題
@@ -107,6 +107,33 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 4. **結果(R5)**: 戻り型/内容で `text`/`code`/`json`/`image`/`file` 出し分け。`table` は同時 or 直後
    (レンダコスト高め)。image/file は既存処理を踏襲。
 5. **ストリーミング(R7)**: 寛容 JSON パーサで逐次描画。テストで抑えつつ後段。
+
+## 実装状況(2026-07-06)
+
+ステップ 1〜4 出荷済み。ステップ 5(ストリーミング逐次描画)のみ後段に残る。
+
+- **1. 型/抽出**: `backend/open_webui/utils/tool_render.py`。`RenderAs` / `Code(language)` /
+  `Text` / `Table`、media↔hljs 変換(素通し+alias+fallback plaintext)、
+  `extract_render_from_function`(Annotated)/ `extract_render_from_spec`(contentMediaType)/
+  `apply_render_to_spec`(宣言→spec 反映、既存宣言は上書きしない)。単体テスト
+  `test/apps/webui/utils/test_tool_render.py`。
+- **2. backend 配線**: `get_tool_specs`(保存時)と `get_tools`(実行時。stale な DB spec でも
+  生きた関数から反映)が spec に contentMediaType を注入し `tool_dict["render"]` を持つ。
+  middleware の tool_call ループが `calls[].render` に同梱 — snapshot 素通しでイベント・永続化
+  双方に乗る。**継続リクエストの assistant.tool_calls は {id, type, function} に絞り、render/index を
+  モデルへ漏らさない**。`tool_call_long_code` リプレイで {code, python} を固定。
+- **3+4. フロント**: 純ロジック `src/lib/utils/tool-render/`(vitest 14 件)+ Collapsible 統合。
+  code→HljsCode(言語付き、JSON.parse がアンエスケープ)/ scalar→`key: value` / json→整形、
+  結果は text(pre-wrap)/code/json/table(object 配列のみ、違えば json に落とす)。
+  壊れた JSON のみ従来の一枚岩表示にフォールバック。空引数 {} は Arguments 節ごと省略。
+- **Kimi 耐性 = 検証済み・問題なし**(2026-07-06、実 SGLang)。fixture 同一プロンプト
+  (tool_call_long_code)+短コード+unicode の 3 シナリオを contentMediaType 付き schema で
+  投げ、全て finish_reason=tool_calls・厳密 JSON・id 形式も fixture と同一。**strip 不要が実機で確定**。
+- 実描画確認: dev/tools/render_probe.py に `run_python`(Code+Text)/`probe_result_table`(Table)
+  を追加し、実 Kimi 端到端 + リロード(永続化 render からの再描画)を Playwright で確認。
+- **残(後段)**: ステップ 5 ストリーミング(寛容 JSON パーサで部分値の逐次描画)。
+  OpenAPI tool の**戻り値**ディスクリプタは現状未抽出(consumer が現れる #18-3/nsjail 接続時に、
+  responses スキーマの contentMediaType 対応を検討)。
 
 ## 関連
 
