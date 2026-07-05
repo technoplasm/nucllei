@@ -9,6 +9,17 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(tokens.some((t) => t.type === 'hr')).toBe(true);
 	});
 
+	it('setext join 境界: </details> 直後の --- が heading を飲み込まない(#14 受け入れ基準)', () => {
+		// 旧 prod の実害(serialize が </details> の直後に裸の --- を並べ、marked の
+		// lheading が直前段落まで h2 に飲み込む)を再現。L0 で details 直列化は廃止済み
+		// だが、レガシー本文に details が残るケースでも lheading 無効で heading 化しない。
+		const src =
+			'<details type="reasoning" done="true"><summary>x</summary>思考</details>\n\n本文段落\n---\n次の段落';
+		const tokens = lex(src);
+		expect(tokens.some((t) => t.type === 'heading')).toBe(false);
+		expect(tokens.some((t) => t.type === 'hr')).toBe(true);
+	});
+
 	it('ATX 見出しは heading になる', () => {
 		const [h] = lex('## 見出し');
 		expect(h.type).toBe('heading');
