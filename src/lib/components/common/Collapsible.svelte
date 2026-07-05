@@ -36,6 +36,7 @@
 	import Spinner from './Spinner.svelte';
 	import CodeBlock from '../chat/Messages/CodeBlock.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
+	import HljsCode from './HljsCode.svelte';
 	import Image from './Image.svelte';
 
 	export let open = false;
@@ -231,21 +232,13 @@
 			{#if open && !hide}
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 					{#if attributes?.type === 'tool_calls'}
+						<!-- 引数/結果は構造データ。markdown 経由(blockquote+fence)だと
+						     複数行 JSON で fence が崩壊するため、hljs で直接ハイライト表示する。 -->
+						<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5">Arguments</div>
+						<HljsCode lang="json" code={formatJSONString(args)} />
 						{#if attributes?.done === 'true'}
-							<Markdown
-								id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
-								content={`> \`\`\`json
-> ${formatJSONString(args)}
-> ${formatJSONString(result)}
-> \`\`\``}
-							/>
-						{:else}
-							<Markdown
-								id={`${collapsibleId}-tool-calls-${attributes?.id}-result`}
-								content={`> \`\`\`json
-> ${formatJSONString(args)}
-> \`\`\``}
-							/>
+							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">Result</div>
+							<HljsCode lang="json" code={formatJSONString(result)} />
 						{/if}
 					{:else}
 						<slot name="content" />
