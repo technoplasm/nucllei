@@ -3,16 +3,16 @@ name: Python CI
 on:
   push:
     branches:
-      - main
-      - dev
+      - master
+      - develop
     paths:
       - 'backend/**'
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
     branches:
-      - main
-      - dev
+      - master
+      - develop
     paths:
       - 'backend/**'
       - 'pyproject.toml'
@@ -23,24 +23,19 @@ jobs:
     name: 'Format Backend'
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        python-version:
-          - 3.11.x
-          - 3.12.x
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '${{ matrix.python-version }}'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install black
+          # pyproject.toml の dev 依存と同じバージョンに固定
+          pip install black==25.1.0
 
       - name: Format backend
         run: black . --exclude ".venv/|/venv/"

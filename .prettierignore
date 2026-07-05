@@ -314,3 +314,10 @@ cypress/screenshots
 
 
 /static/*
+# --- llens fork 追加分 ---
+# fork 独自文書・エージェント設定は prettier の対象外(手書きの整形を維持)
+_memos/
+.claude/
+# vendored な静的アセット(swagger-ui 等)は上流配布物のまま保つ
+backend/open_webui/static/
+static/pyodide/

@@ -69,9 +69,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                             "object": "chat.completion.chunk",
                             "created": 0,
                             "model": payload.get("model"),
-                            "choices": [
-                                {"index": 0, "delta": {"content": text}}
-                            ],
+                            "choices": [{"index": 0, "delta": {"content": text}}],
                         }
                         for text in ["chunk-1", "chunk-2"]
                     ]
@@ -109,7 +107,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
 
-E2E_FILTER_CONTENT = '''
+E2E_FILTER_CONTENT = """
 class Filter:
     def inlet(self, body: dict) -> dict:
         for message in body.get("messages", []):
@@ -120,10 +118,10 @@ class Filter:
     def outlet(self, body: dict) -> dict:
         body.setdefault("outlet_trace", []).append("e2e-filter")
         return body
-'''
+"""
 
 
-STREAM_FILTER_CONTENT = '''
+STREAM_FILTER_CONTENT = """
 class Filter:
     def stream(self, event):
         # セッションメタデータ無しの SSE パススルー経路では、event は
@@ -134,7 +132,7 @@ class Filter:
         if isinstance(event, str):
             return event.replace("chunk", "CHUNK")
         return event
-'''
+"""
 
 
 class TestOpenAICompatChat(AbstractPostgresTest):

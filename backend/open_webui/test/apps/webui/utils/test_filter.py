@@ -287,7 +287,7 @@ class TestProcessFilterFunctionsUnit:
         assert captured["user"]["valves"].mode == "custom"
 
 
-FILTER_CONTENT_TEMPLATE = '''
+FILTER_CONTENT_TEMPLATE = """
 from pydantic import BaseModel
 
 
@@ -309,7 +309,7 @@ class Filter:
     def stream(self, event: dict) -> dict:
         event.setdefault("trace", []).append("{fid}:stream")
         return event
-'''
+"""
 
 
 class TestFilterPipelineDB(AbstractPostgresTest):
@@ -394,8 +394,7 @@ class TestFilterPipelineDB(AbstractPostgresTest):
 
         # LLM 相当: 応答(outlet に渡る data)を用意
         response_data = {
-            "messages": body["messages"]
-            + [{"role": "assistant", "content": "hello"}],
+            "messages": body["messages"] + [{"role": "assistant", "content": "hello"}],
         }
 
         # outlet: 応答 body が同じ優先度順に加工される

@@ -3,20 +3,24 @@ name: Frontend Build
 on:
   push:
     branches:
-      - main
-      - dev
+      - master
+      - develop
     paths-ignore:
       - 'backend/**'
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
     branches:
-      - main
-      - dev
+      - master
+      - develop
     paths-ignore:
       - 'backend/**'
       - 'pyproject.toml'
       - 'uv.lock'
+
+env:
+  # CI では cypress を実行しないためバイナリダウンロードをスキップする
+  CYPRESS_INSTALL_BINARY: '0'
 
 jobs:
   build:
@@ -32,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: '.node-version'
           cache: 'pnpm'
 
       - name: Install Dependencies
@@ -63,7 +67,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: '.node-version'
           cache: 'pnpm'
 
       - name: Install Dependencies
