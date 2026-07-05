@@ -110,7 +110,7 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 
 ## 実装状況(2026-07-06)
 
-ステップ 1〜4 出荷済み。ステップ 5(ストリーミング逐次描画)のみ後段に残る。
+**ステップ 1〜5 すべて出荷済み**(5 は同日後半に実装 — 下記)。
 
 - **1. 型/抽出**: `backend/open_webui/utils/tool_render.py`。`RenderAs` / `Code(language)` /
   `Text` / `Table`、media↔hljs 変換(素通し+alias+fallback plaintext)、
@@ -131,9 +131,22 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
   投げ、全て finish_reason=tool_calls・厳密 JSON・id 形式も fixture と同一。**strip 不要が実機で確定**。
 - 実描画確認: dev/tools/render_probe.py に `run_python`(Code+Text)/`probe_result_table`(Table)
   を追加し、実 Kimi 端到端 + リロード(永続化 render からの再描画)を Playwright で確認。
-- **残(後段)**: ステップ 5 ストリーミング(寛容 JSON パーサで部分値の逐次描画)。
-  OpenAPI tool の**戻り値**ディスクリプタは現状未抽出(consumer が現れる #18-3/nsjail 接続時に、
-  responses スキーマの contentMediaType 対応を検討)。
+- **5. ストリーミング逐次描画**(beb04dbe5 / b05ffa141 / 91e9f6f4d):
+  - 寛容パーサ `src/lib/utils/tool-render/partial.ts`: **累積文字列を毎フレーム再スキャンする
+    ステートレス実装**(フレーム間状態なし)。実キャプチャの切断実態 = 文字列値内部が最頻
+    (long_code 129/130 デルタ)・**エスケープの分断**(`…\` で切れ次チャンクが `n…`)・
+    `\uXXXX` 途中・キー/値未確定。不完全エスケープは「保留」し、部分値が最終値の
+    **前方一致で単調に伸びる**ことを fixture 全プレフィックスで検証。
+  - backend: delta 蓄積中から tool_calls を open ブロックとして content_blocks に載せ
+    (content は response_tool_calls と**参照共有**、実行ループは同一オブジェクトなら再追加しない)、
+    部分 arguments 込み snapshot を毎フレーム emit。render は name 確定(初回フレーム)時点で付与。
+    **snapshot_content_blocks は calls/results を deepcopy** — 参照共有だと emit 済み
+    スナップショットが累積更新で遡って書き換わる(テストで発覚した wire 不変性の穴)。
+  - UI: `parseToolArgumentsStreaming`(完全 JSON なら確定表示と同一、未閉鎖なら streaming
+    フラグ付き部分表示)。tool_calls の既定展開は **settings.expandDetails に従う**(ユーザー指定)。
+  - 実 Kimi ストリーミングで部分コードの単調な伸び(124→307→497→520 文字)とハイライト描画を実測。
+- **残**: OpenAPI tool の**戻り値**ディスクリプタは未抽出(consumer が現れる #18-3/nsjail 接続時に、
+  responses スキーマの contentMediaType 対応を検討)。issue #20 の要件 1〜4 はすべて充足。
 
 ## 関連
 
