@@ -1154,10 +1154,11 @@ ENABLE_CHANNELS = PersistentConfig(
 )
 
 
+# llens: evaluation/arena は DROP 対象のため既定 OFF(issue #10)
 ENABLE_EVALUATION_ARENA_MODELS = PersistentConfig(
     "ENABLE_EVALUATION_ARENA_MODELS",
     "evaluation.arena.enable",
-    os.environ.get("ENABLE_EVALUATION_ARENA_MODELS", "True").lower() == "true",
+    os.environ.get("ENABLE_EVALUATION_ARENA_MODELS", "False").lower() == "true",
 )
 EVALUATION_ARENA_MODELS = PersistentConfig(
     "EVALUATION_ARENA_MODELS",
@@ -1185,10 +1186,12 @@ ENABLE_ADMIN_CHAT_ACCESS = (
     os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
 )
 
+# llens: openwebui.com への共有導線は air-gapped 前提のため既定 OFF
+# (issue #10 ストア導線の除去、fork.md §6)
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     "ENABLE_COMMUNITY_SHARING",
     "ui.enable_community_sharing",
-    os.environ.get("ENABLE_COMMUNITY_SHARING", "True").lower() == "true",
+    os.environ.get("ENABLE_COMMUNITY_SHARING", "False").lower() == "true",
 )
 
 ENABLE_MESSAGE_RATING = PersistentConfig(
@@ -1529,16 +1532,20 @@ Responses from models: {{responses}}"""
 # Code Interpreter
 ####################################
 
+# llens: 組み込みコード実行は既定 OFF(issue #11)。
+# コード実行は nsjail + IPython の外部サンドボックス(自前ツール側)で行う。
+# 有効化する場合も Pyodide には戻さず外部 Jupyter 互換接続を前提とする
+# (CLAUDE.md 絶対制約)。コード自体は温存(削除しない)。
 ENABLE_CODE_EXECUTION = PersistentConfig(
     "ENABLE_CODE_EXECUTION",
     "code_execution.enable",
-    os.environ.get("ENABLE_CODE_EXECUTION", "True").lower() == "true",
+    os.environ.get("ENABLE_CODE_EXECUTION", "False").lower() == "true",
 )
 
 CODE_EXECUTION_ENGINE = PersistentConfig(
     "CODE_EXECUTION_ENGINE",
     "code_execution.engine",
-    os.environ.get("CODE_EXECUTION_ENGINE", "pyodide"),
+    os.environ.get("CODE_EXECUTION_ENGINE", "jupyter"),
 )
 
 CODE_EXECUTION_JUPYTER_URL = PersistentConfig(
@@ -1572,16 +1579,17 @@ CODE_EXECUTION_JUPYTER_TIMEOUT = PersistentConfig(
     int(os.environ.get("CODE_EXECUTION_JUPYTER_TIMEOUT", "60")),
 )
 
+# llens: code interpreter も既定 OFF・有効化時は jupyter 前提(issue #11)
 ENABLE_CODE_INTERPRETER = PersistentConfig(
     "ENABLE_CODE_INTERPRETER",
     "code_interpreter.enable",
-    os.environ.get("ENABLE_CODE_INTERPRETER", "True").lower() == "true",
+    os.environ.get("ENABLE_CODE_INTERPRETER", "False").lower() == "true",
 )
 
 CODE_INTERPRETER_ENGINE = PersistentConfig(
     "CODE_INTERPRETER_ENGINE",
     "code_interpreter.engine",
-    os.environ.get("CODE_INTERPRETER_ENGINE", "pyodide"),
+    os.environ.get("CODE_INTERPRETER_ENGINE", "jupyter"),
 )
 
 CODE_INTERPRETER_PROMPT_TEMPLATE = PersistentConfig(
