@@ -27,8 +27,9 @@ gh issue list -R technoplasm/open-webui --state open --json number,title,labels
 gh issue list -R technoplasm/open-webui --state closed --json number,title
 ```
 
-closed issue をフェーズ順(Phase 0 → 4)に照らし、「どのフェーズまで完了しているか」を判定する。
+closed issue を #16 本文の実行順(⓪ → A〜H トラック)に照らし、「どのトラックまで完了しているか」を判定する。
 #16 のチェックリストと closed 状態がズレていたら報告する(実装コミットがあるのに open のままの issue も含む)。
+実行順の一次情報は #16 の**本文**(コメントは改訂履歴)。
 
 ## 3. テスト状態(CORE 保護)
 
@@ -58,5 +59,5 @@ git ls-remote --tags https://github.com/open-webui/open-webui.git 'v*' | awk -F/
 - **fork の差分規模**: v0.6.5(origin/main)から N コミット、M ファイル変更。master への未出荷 K コミット
 - **テスト**: green / red / 未整備
 - **upstream**: 新リリース有無(あればタグ名のみ)
-- **次の一手**: ロードマップ #16 のフェーズ順で、未着手の最若番 issue を根拠付きで提案。
-  ただし依存関係を優先する(例: #29 は #17 の前提、#26 は #17 のフロント実装前に決定)。
+- **次の一手**: #16 本文の実行順(⓪ → A〜H)で、未完了の最先頭項目を根拠付きで提案。
+  ⓪(セキュリティ)が未完了ならトラックに関係なく常に最優先で挙げる。
