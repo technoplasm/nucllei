@@ -255,10 +255,10 @@
 						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<!-- svelte-ignore a11y-click-events-have-key-events -->
 						<div
-							class="{buttonClassName} flex items-center gap-1 py-0.5 text-xs cursor-pointer"
+							class="{buttonClassName} font-medium flex items-center gap-2 py-0.5 cursor-pointer"
 							on:pointerup|stopPropagation={collapseFromBottom}
 						>
-							<ChevronUp strokeWidth="3.5" className="size-3" />
+							<ChevronUp strokeWidth="3.5" className="size-3.5" />
 							{$i18n.t('Close')}
 						</div>
 					{/if}
@@ -288,10 +288,10 @@
 					<!-- svelte-ignore a11y-no-static-element-interactions -->
 					<!-- svelte-ignore a11y-click-events-have-key-events -->
 					<div
-						class="{buttonClassName} flex items-center gap-1 py-0.5 text-xs cursor-pointer"
+						class="{buttonClassName} font-medium flex items-center gap-2 py-0.5 cursor-pointer"
 						on:pointerup|stopPropagation={collapseFromBottom}
 					>
-						<ChevronUp strokeWidth="3.5" className="size-3" />
+						<ChevronUp strokeWidth="3.5" className="size-3.5" />
 						{$i18n.t('Close')}
 					</div>
 				{/if}

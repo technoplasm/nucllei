@@ -52,7 +52,7 @@
 					done: block.done ? 'true' : 'false',
 					duration: block.duration
 				}}
-				className="w-full space-y-1 mb-1.5"
+				className="w-full space-y-1 mb-1.5 text-sm"
 			>
 				<!--
 					reasoning は markdown として解釈しない(#17 決定)。
@@ -90,7 +90,7 @@
 					title=""
 					open={false}
 					attributes={toolCallAttributes(call, block.results)}
-					className="w-full space-y-1 mb-1.5"
+					className="w-full space-y-1 mb-1.5 text-sm"
 				/>
 			{/each}
 		{:else if block.type === 'code_interpreter'}
