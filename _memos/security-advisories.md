@@ -1,0 +1,131 @@
+# Open WebUI セキュリティアドバイザリ棚卸し — v0.6.5 影響判定(issue #24)
+
+調査日: 2026-07-05 / 対象フォーク: llens (open-webui v0.6.5 固定, air-gapped 北大病院向け)
+
+## クリーンルーム順守メモ
+
+本レポートは GitHub Security Advisory API が返す **アドバイザリ本文・CVE 説明・影響バージョン範囲・修正バージョン・リリースノート** のみを根拠にしている。
+アドバイザリ本文中に含まれる **修正コミット URL・blob 行リンク・パッチ差分は一切開いていない**(`_memos/upstream-policy.md` の制約)。
+機能の存在有無は「フォーク自身の作業ツリー(= v0.6.5 ベース)」を grep して確認した(自コードなので参照可)。
+
+## サマリ(数字)
+
+- **公開アドバイジ総数: 111**(`gh api /repos/open-webui/open-webui/security-advisories --paginate`、全て state=published)
+- **バージョン範囲外(v0.6.5 は非該当): 19 件**(0.6.5 以前で既に修正済み or 0.6.6 以降で導入された機能)
+- **範囲内だがフォークに当該機能が無い: 約 11 件**(notes / terminal proxy / calendar / 協調ドキュメント ydoc / responses パススルー / Pyodide)
+- **v0.6.5 に影響しうる: 約 81 件**(コードが存在。ただし多くは RAG/web検索/channels/OAuth/Ollama など既定オフ機能で条件付き)
+- **v0.10.2 で「意図的に未列挙・一時的に伏せられた」修正の存在が明記** → 現時点で **非公開(embargo)相当のアドバイザリが不定数存在**(下記「embargo」節)
+
+## 最重要 TOP 3(id と一言理由)
+
+1. **GHSA-9f4f-jv96-8766 / CVE-2025-46719**(HIGH, 範囲 = **0.6.5 ちょうど**, patched 0.6.6)
+   MarkdownTokens.svelte の未エスケープ Markdown トークン由来の Stored XSS → アクセストークン窃取 → **完全なアカウント乗っ取り、Functions 経由で RCE**。対象ファイルはフォークに存在確認済み。**フォークの正確な基点バージョンを名指しする唯一級の未修正欠陥**で最優先。
+2. **GHSA-2r4p-jpmg-48f4 / CVE-2026-44551**(**CRITICAL**, `<=0.8.12`, patched 0.9.0)
+   LDAP 空パスワードで Simple Bind 認証バイパス。認証は CORE 領域、`routers/auths.py` に LDAP 実装あり。LDAP を有効化する運用なら**無認証ログイン**に直結。
+3. **GHSA-482j-2pq6-q5w4 / CVE-2026-45672**(HIGH, `<=0.8.11`, patched 0.8.12)
+   `/api/v1/utils/code/execute` が `ENABLE_CODE_EXECUTION=false` でも実行してしまう(フィーチャーゲート未適用)。**フォークは nsjail+IPython の Jupyter 実行系を保持**しており、この「実行ゲートを API 側で強制する」ロジックはフォークのクリティカル面に直撃。
+
+## embargo / 非公開について(調査ステップ 2)
+
+- API が返すのは全て `state=published`。ドラフト/embargo のものは API 外形からは列挙できない(仕様どおり)。
+- **v0.10.2 リリースノートに明示の伏字宣言あり**:「Not all security fixes in this version may be enumerated in the fixed section — some may be withheld for a short time to give administrators time to upgrade.」
+  → **v0.10.2 に含まれるが GHSA 未公開の access-control 系修正が不定数存在する**と読める。件数・ID は現時点で特定不能。issue #24 では「v0.10.x で公開追随を継続監視」を TODO とすべき。
+- 参考: 2026-06-29〜07-02 に `< 0.10.0` / `>= 0.9.x` 帯の一括公開が起きており(下記)、v0.10.2 由来の残りが順次公開される流れとみられる。
+
+---
+
+## v0.6.5 に影響する主要アドバイザリと自前バックポートの外形スケッチ
+
+> スケッチは全て「アドバイザリ本文に書かれた症状・エンドポイント名・外形仕様」からの再設計であり、upstream 修正コードは見ていない。
+
+### Tier 1: 既定オン面・高深刻度・フォーク中核に直撃(最優先バックポート候補)
+
+- **GHSA-9f4f-jv96-8766 (CVE-2025-46719, HIGH, =0.6.5)** — MarkdownTokens.svelte の Stored XSS→ATO/RCE。
+  対策: チャットレンダラの Markdown トークン(特に HTML/インライン HTML トークン)を DOMPurify 等でサニタイズしてから描画。`{@html}` に生トークンを渡す経路を洗い出し、許可タグ・属性のホワイトリスト化。共有チャット/コミュニティ共有経路が拡散面になるため、`Enable Community Sharing` の既定オフも合わせて確認。
+- **GHSA-cm35-v4vp-5xvx (CVE-2025-64496, HIGH, <=0.6.34)** — Direct Connections の SSE `execute` イベントによるコード注入→ATO/RCE。
+  対策: 外部モデルサーバから来る SSE イベント種別を厳格な allowlist で受理し、`execute` 等のクライアント側任意実行イベントを破棄。フォークは OpenAI 互換接続が中核なので **SSE ストリームパーサの信頼境界**を要点検。既定オフだが接続経路そのものは中核。
+- **GHSA-9vvh-qmjx-p4q8 (CVE-2026-44555, HIGH, <=0.8.12)** — base_model_id のモデルチェーンでアクセス制御バイパス。
+  対策: `models.py` の create/import と、chat_completion のベースモデル解決時に、**チェーン先モデルへのアクセス権を再チェック**。openai/ollama のペイロード書き換え箇所でも解決後モデル ID の可視性を検証。CORE(group 権限)なので回帰テスト必須。
+- **GHSA-gfm2-xm6c-37qc (CVE-2026-45349, HIGH, <=0.8.12)** — `/api/chat/completions` が chat_id と所有者を突合せず、他人のチャットを継続可能。
+  対策: chat_completion 入口で `chat_id`(および message_id)の所有者/共有権限を検証してから処理。API キー利用時も同様。Filter パイプライン共有時に横断が起きる旨の指摘あり=CORE。
+- **GHSA-p4fx-23fq-jfg6 (CVE-2026-45395, HIGH, <0.9.5)** — `POST /api/v1/tools/id/{id}/update` に `workspace.tools` 権限チェック欠落→サーバ側 Python 差し替えで実行。
+  対策: 更新エンドポイントに作成側と同じ `workspace.tools` 権限チェックを追加。Tools はコード実行の信頼境界なので最優先級。
+- **GHSA-7429-hxcv-268m (CVE-2026-34222, HIGH, <0.8.11)** — Tool Valves のアクセス制御不備。
+  対策: valve(ツール設定値/秘密)の読み書きにユーザ/権限スコープを適用。技術ユーザの API キーが他ユーザに露出しない構造へ。
+- **GHSA-4pcg-253r-rf9w (CVE-2026-45350, HIGH, <=0.8.5)** — chat completion の `tool_ids`/`tool_servers` がユーザ入力で、ツール制限をバイパス。
+  対策: リクエスト由来の tool_ids/tool_servers をユーザの許可ツール集合と突合し、許可外は拒否/無視。
+- **GHSA-482j-2pq6-q5w4 (CVE-2026-45672, HIGH, <=0.8.11)** — code/execute が `ENABLE_CODE_EXECUTION=false` を無視。
+  対策: コード実行 API 入口で当該フラグ(+ユーザ権限)を強制。**フォークの nsjail/Jupyter 実行系は要点検**。ゲートをルータ層で必ず評価。
+- **GHSA-m8f9-9whg-f4xr (CVE-2026-45315, HIGH, <=0.9.2)** — `/api/v1/audio/transcriptions` がユーザ指定拡張子でファイル保存、`/cache/{path}` が Content-Type を推測配信→polyglot(WAV+HTML)で Stored XSS。**audio はフォーク保持機能**。
+  対策: 保存時に拡張子をサーバ側で正規化(mime 判定)し、`/cache` 配信に `Content-Disposition: attachment` と安全な Content-Type を付与。`routers/audio.py` 確認済み。
+- **GHSA-vjqm-6gcc-62cr (CVE-2026-54012, HIGH, <=0.9.5)** / **GHSA-vrhc-3fr6-pc3c (CVE-2026-54010, HIGH, <=0.9.5)** — 偽装した model meta.knowledge / chat-file リンクで**他ユーザファイルの読取・削除**。
+  対策: ファイル参照解決時に file_id と要求ユーザの所有/共有権限を必ず突合。models の meta.knowledge、チャット添付リンクの両経路。
+- **GHSA-r472-mw7m-967f (CVE-2026-45402, HIGH, <=0.9.4)** — Folder Knowledge/KB Attach で file_id 未検証→横断ファイルアクセス。対策同上(file_id 所有者検証)。
+- **GHSA-4g37-7p2c-38r9 (CVE-2026-45398, HIGH, <=0.9.4)** — Retrieval API が KB アクセス制御をバイパス(IDOR)。対策: retrieval 経路で KB/collection のアクセス権を強制。
+- **GHSA-8jjp-r2w2-4v22 (CVE-2026-45399, HIGH, <=0.8.12)** — 低権限ユーザがグローバル背景タスクを列挙/停止→全体のチャット妨害(DoS)。対策: task 列挙/停止 API に所有者/管理者スコープを適用。
+- **GHSA-26g9-27vm-x3q8 (CVE-2026-45671, HIGH, <=0.8.12)** — 共有チャットの branch が access_type を無視→他人ファイル削除。対策: 共有チャット分岐でも書込/削除は access_type を評価。
+- **GHSA-jxwr-g6r6-j3fx (CVE-2026-44569, HIGH, <=0.6.18)** — メッセージアクセスの認可破れ。対策: メッセージ更新/削除に**所有者検証**を追加(channel-level だけでなく message-level)。
+- **GHSA-hmjq-crxp-7rjw (CVE-2026-44570, HIGH, <0.6.19)** — memories API の認可不整合。`routers/memories.py` 存在確認済み。対策: memories CRUD にユーザスコープ徹底。
+
+### Tier 2: 認証/OAuth・SSRF・XSS(該当機能が有効なら高)
+
+- 認証系: **GHSA-2r4p-jpmg-48f4(LDAP 空PW, CRITICAL)**, **GHSA-h3ww-q6xx-w7x3(CVE-2026-45675, LDAP/OAuth 初回ユーザ競合→複数管理者)**, **GHSA-57q6-fvp4-pqmm(CVE-2026-45339, x-api-key で制限エンドポイント回避)**, **GHSA-7rw5-9f7q-xj36(ログインタイミングでアカウント列挙)**。
+- SSRF 系(RAG/web-fetch/画像・OAuth 画像取得): GHSA-24c9-2m8q-qhmh, GHSA-226f-f24g-524w, GHSA-rh5x-h6pp-cjj6(CVE-2026-45401), GHSA-8w7q-q5jp-jvgx, GHSA-c6xv-rcvw-v685(CVE-2025-65958), GHSA-82r6-c5jm-f3mw, GHSA-4v7r-f4w8-8972, GHSA-f776-fp4w-266c(※範囲外), GHSA-jgx9-jr5x-mvpv, GHSA-m69w-p7m4-585j。
+  対策共通: `validate_url` にリダイレクト追従時の再検証、内向き IP/メタデータ IP のブロック、`WEB_FETCH_FILTER_LIST` のホスト境界一致。air-gapped でも SSRF は内部横展開に効くので RAG/画像取得を使うなら要対処。
+- XSS 系(レンダリング面): GHSA-8gh5-qqh8-hq3x(CVE-2025-46571, HTML アップロード, =0.6.5), GHSA-w7xj-8fx7-wfch(Insert Prompt as Rich Text), GHSA-r29h-37fj-x2w6(SVG レンダラ), GHSA-xc8p-9rr6-97r2 / GHSA-vjm7-m4xh-7wrc(iFrame 埋め込み), GHSA-jwf8-pv5p-vhmc / GHSA-hcwp-82g6-8wxc(Excel/DOCX プレビュー {@html}), GHSA-v8qj-hxv7-mgvv(Mermaid), GHSA-gf5m-wcrh-7928(Model Description), GHSA-8wvc-869r-xfqf(Note PDF※notes 無→非該当), GHSA-cqp4-qqvg-3787(Banner), GHSA-6gh2-q7cp-9qf6(Profile Picture), GHSA-fq3v-xjjx-95rc(Pending User Overlay), GHSA-3vv5-8xxp-4f55(postMessage), GHSA-3wgj-c2hg-vm6q(OAuth picture SVG)。
+  対策共通: `{@html}`/`.innerHTML`/SVG/iFrame 描画箇所を洗い出し DOMPurify を一貫適用、SVG・HTML アップロードは配信時に無害化 or attachment 化。
+
+### Tier 3: 既定オフ機能・条件付き(RAG/Ollama/channels/Redis 等)
+
+- RAG/KB 認可: GHSA-7r7x-gjvr-448g, GHSA-cx9v-4qj2-jrw6(CVE-2026-54016), GHSA-65pg-qhhw-mxwg, GHSA-6c2x-gcp3-gp73, GHSA-7r82-qhg4-6wvj, GHSA-h36f-rqpx-j5wx, GHSA-p5cp-r7rg-qpxc(Milvus), GHSA-26gm-93rw-cchf, GHSA-jjp7-g2jw-wh3j。
+- Ollama 特化(フォークは OpenAI 互換一本 = 未使用想定): GHSA-9rpj-v7hf-vv2w, GHSA-rcvp-6fgw-c7fh。
+- channels(既定オフ, コードは存在確認済み): GHSA-73x5-h92w-xc2j, GHSA-3856-3vxq-m6fc, GHSA-7rjh-px4v-5w55, GHSA-c7wp-3qh5-55pv, GHSA-hmgr-67hw-j2cq, GHSA-5gc6-xhv4-2wg6, GHSA-wwhq-cx22-f7vv, GHSA-jgj3-r8hr-9pjw, GHSA-gh7p-78x6-jw6m(※範囲外 >=0.7.0)。
+- Redis/マルチインスタンス前提: GHSA-3x8w-4f7p-xxc2(tool_servers キャッシュ汚染; tool_servers は保持機能)。
+- その他: GHSA-cache /path traversal **GHSA-j2c8-v969-8r5c(CVE-2026-54014, `/cache/{path}` sibling-prefix path traversal)** は audio/画像キャッシュ配信に効くので Tier2 相当で要注意。GHSA-4r4w-2wgp-w7cj(prompt history IDOR), GHSA-rjmp-vjf2-qf4g(feedback 偽装), GHSA-hr43-rjmr-7wmm(folder mass assignment), GHSA-mqq6-cqcx-38vg(model import 上書き), GHSA-j6w6-986j-2m2m(CSRF image url), GHSA-h2cw-7qw9-56xr/GHSA-jh9g-8jqw-m2qx(system prompt 露出), GHSA-v6qf-75pr-p96m(model ACL query param), GHSA-74h3-cxq7-vc5q(Socket.IO session_id でツール実行; code-interpreter 部分は Pyodide 削除で緩和されるがツール実行面は残る)。
+
+---
+
+## 範囲外(v0.6.5 に非該当)19 件
+
+| GHSA | 範囲 | 理由 |
+|---|---|---|
+| GHSA-frvj-c5qp-xj4w | >=0.9.6,<0.10.0 | 0.6.5 は範囲前 |
+| GHSA-mvx4-532p-xfm9 | >=0.9.0,<0.10.0 | 同上 |
+| GHSA-m3qf-58wf-w979 | >=0.8.12,<0.10.0 | 同上(Arena) |
+| GHSA-2xwm-4h2q-ggfx | >=0.9.6,<0.10.0 | 同上 |
+| GHSA-rqj7-6wrp-6g2g | >=0.8.11,<0.10.0 | 同上 |
+| GHSA-3wp3-xxj9-5jqq | >=0.6.27,<0.10.0 | 0.6.5<0.6.27 |
+| GHSA-855v-hq7w-jmjw | >=0.9.0,<0.10.0 | 範囲前 |
+| GHSA-ffpj-xv5c-p3gw | >=0.9.2,<0.10.0 | 範囲前(skills) |
+| GHSA-x2ff-v5v8-m75m | >=0.9.5,<0.10.0 | 範囲前 |
+| GHSA-gh7p-78x6-jw6m | >=0.7.0,<0.10.0 | 0.6.5<0.7.0 |
+| GHSA-gmfw-g93r-vg53 | >=0.6.16,<0.10.0 | 0.6.5<0.6.16 |
+| GHSA-f776-fp4w-266c | <0.5.11 | 0.6.5 は修正後 |
+| GHSA-gm54-m39w-grjp | <=0.5.6 | 0.6.5>0.5.6 |
+| GHSA-4vrc-m9ch-6m3r | <0.6.5 (patched 0.6.5) | **0.6.5 で修正済み** |
+| GHSA-r8wh-8m7r-fh33 | <=0.3.15 | 修正後 |
+| GHSA-6xcp-7mpr-m7wm | <0.3.14 | 修正後 |
+| GHSA-4vg5-rp28-gvjf | <=0.1.123 | 修正後 |
+| GHSA-39wr-r5vm-3jxj | 0.1.111 | 修正後 |
+| GHSA-9pgh-j74g-qj6m | <=0.1.123 | 修正後 |
+
+## 範囲内だがフォークに機能が無く非該当(要再確認)
+
+grep で作業ツリー(v0.6.5 ベース)に該当ルータ/機能が見つからなかったもの:
+
+- **notes 機能なし**(notes ルータ/モデル無): GHSA-8788-j68r-3cgh, GHSA-jx2x-j75f-xq3j, GHSA-x3qm-p8hr-3c3h, GHSA-8wvc-869r-xfqf。GHSA-45m8-cpm2-3v65(Socket.IO 内 stale admin role; 影響実証は note だが根本の役割失効バグは残存しうる→**条件付き要確認**)。
+- **terminal proxy 機能なし**(terminals ルータ無): GHSA-j657-m4c4-24jq, GHSA-r2wg-2mcr-66rv(CVE-2026-54017)。
+- **calendar 機能なし**: GHSA-f3g7-59qc-pqg6(CVE-2026-54006)。
+- **協調ドキュメント(ydoc/awareness)なし**: GHSA-vrfh-rj4q-rmhr(CVE-2026-44564)。
+- **OpenAI Responses パススルー未実装**(openai.py に `/responses` ルータ無、`get_all_models_responses` は別物): GHSA-hp5m-24vp-vq2q(CVE-2026-44556)。
+- **Pyodide 削除済み(issue #11)**: GHSA-4r2p-27mh-5m22(Same-origin Pyodide RCE)は**フォークでは成立しない**。GHSA-74h3(code-interpreter 経由)も Pyodide 部分は無効化、ただしツール実行面は残る。
+
+> 注: notes/terminal/calendar が「本当に v0.6.5 で未実装」なのか「フォークで削除済み」なのかは feature-triage.md と照合して確定させること。少なくとも現作業ツリーには存在しない。
+
+## 推奨アクション(issue #24 向け)
+
+1. **即バックポート**: Tier 1 の TOP3(9f4f / 2r4p / 482j)+ CORE 認可系(9vvh/gfm2/p4fx/4pcg/7429)。いずれも既定オン面かつフォーク中核。
+2. **audio 面**: m8f9 + `/cache/{path}` の j2c8 をセットで(STT はフォーク保持機能)。
+3. **XSS 一括**: レンダリング/アップロード無害化を横断タスク化(9f4f, 8gh5, iFrame/SVG/Mermaid/Excel 群)。DOMPurify 適用箇所の棚卸しで多数を一度に潰せる。
+4. **監視**: v0.10.2 の伏字宣言により未公開 access-control 修正が残る。GHSA ページを定期確認し `< 0.10.0` 帯の新規公開を追う(refs #24)。
+5. RAG/web-search/channels/Ollama/OAuth 系は「既定オフのまま」を維持できるなら優先度を下げてよいが、有効化前提が変わる場合は Tier2/3 を再評価。
