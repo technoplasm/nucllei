@@ -10,7 +10,8 @@
 - **upstream v0.6.6 以降のソースコードを読まない・写さない**(タグ間 diff の実装内容の閲覧も含む)。
   参照してよいのはリリースノート・公式ドキュメント・API 外形仕様のみ。詳細は `_memos/upstream-policy.md`。
 - upstream の無条件マージ禁止。取り込みはファイル/コミット単位、`_memos/upstream-policy.md` に由来を記録。
-- コード実行は nsjail + IPython 外部サンドボックス(Jupyter 互換接続)。Pyodide には戻さない。
+- コード実行は nsjail + IPython 外部サンドボックス(Jupyter 互換接続)。Pyodide には戻さない
+  (Pyodide 実行系はコード・依存・ビルドステップごと削除済み — issue #11)。
 - air-gapped 前提。外部ネットワーク必須の機能を増やさない。
 
 ## ワークフロー

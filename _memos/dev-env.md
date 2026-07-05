@@ -22,6 +22,20 @@
 - `uv sync` で backend 依存を導入(重量 ML 依存は `local-ml` extra に分離済み)。
 - バックエンドテスト: `backend/open_webui/test/` 配下、pytest。
 
+## Pyodide(削除済み)
+
+- Pyodide 実行系は 2026-07-05 に全面撤去(issue #11)。`pnpm dev` / `pnpm build` から
+  `pyodide:fetch`(62MB ダウンロード)が消え、npm 依存・worker・static/pyodide も無い。
+- コード実行は外部 nsjail + IPython(自前 Tool 側)。管理画面のエンジンは jupyter のみ。
+
+## テストの実行
+
+- backend: リポジトリルートで `uv run pytest`(postgres コンテナは conftest が
+  docker で自動起動・セッション共有・終了時削除。docker 必須)。
+- モデル出力フレームの実キャプチャ fixture: `_memos/model-frames.md` 参照。
+  再キャプチャは `uv run python scripts/capture_model_frames.py`(要 SGLang 接続)。
+- fixture(`backend/open_webui/test/fixtures/`)は prettier 対象外(バイト列固定)。
+
 ## svelte-check の状態(2026-07-05)
 
 - `pnpm check`(svelte-check)は v0.6.5 ベースラインで **5056 errors / 67 warnings / 226 files**。
