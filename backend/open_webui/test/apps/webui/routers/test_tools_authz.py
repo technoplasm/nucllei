@@ -89,3 +89,50 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
                 json=self._update_body("probe", TOOL_CONTENT_V2),
             )
         assert r.status_code == 200
+
+    def test_get_tools_skips_inaccessible_tool(self):
+        """GHSA-4pcg: リクエスト由来の tool_id でも read 権限が無ければ get_tools が無視する。
+
+        private(access_control={})の他人所有 tool を tool_ids に渡しても、
+        ユーザーには露出しない(module ロード前にスキップされる)。specs を実関数付きに
+        して、ガードが無ければ result に載る = ガードが効いているときだけ空になる状態にする。
+        """
+        import types
+        from open_webui.models.tools import ToolForm, ToolMeta
+        from open_webui.utils.tools import get_tools
+
+        hello_spec = {
+            "name": "hello",
+            "description": "say hello",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+        # owner=user "1"、private(所有者のみ)。specs は実在関数 hello に対応。
+        self.Tools.insert_new_tool(
+            "1",
+            ToolForm(
+                id="secret_tool",
+                name="secret",
+                content=TOOL_CONTENT,
+                meta=ToolMeta(description="d", manifest={}),
+                access_control={},
+            ),
+            [hello_spec],
+        )
+
+        request = types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(TOOLS={}))
+        )
+        # 権限の無い user "2": スキップされ空
+        denied = get_tools(
+            request, ["secret_tool"], types.SimpleNamespace(id="2", role="user"), {}
+        )
+        assert denied == {}
+
+        # 所有者 user "1": アクセスできるので hello が載る(granted パスの担保)
+        granted = get_tools(
+            request,
+            ["secret_tool"],
+            types.SimpleNamespace(id="1", role="user"),
+            {"__user__": {"id": "1"}},
+        )
+        assert "hello" in granted

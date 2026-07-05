@@ -35,6 +35,7 @@ from langchain_core.utils.function_calling import (
 
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
+from open_webui.utils.access_control import has_access
 from open_webui.utils.plugin import load_tool_module_by_id
 from open_webui.env import AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA
 
@@ -135,6 +136,18 @@ def get_tools(
             else:
                 continue
         else:
+            # llens(GHSA-4pcg-253r-rf9w / CVE-2026-45350): tool_ids はリクエスト由来
+            # (frontend が model の toolIds も含めて送る)。ユーザーが read 権限を
+            # 持たない tool_id を渡してツール制限を回避できるため、ここでアクセスを
+            # 検証し、権限の無い tool は読み込まず無視する(admin / 所有者はバイパス)。
+            if not (
+                user.role == "admin"
+                or tool.user_id == user.id
+                or has_access(user.id, "read", tool.access_control)
+            ):
+                log.warning(f"User {user.id} lacks access to tool {tool_id}; skipping.")
+                continue
+
             module = request.app.state.TOOLS.get(tool_id, None)
             if module is None:
                 module, _ = load_tool_module_by_id(tool_id)
