@@ -70,7 +70,7 @@ export type ResultDisplay =
 
 // 文字列化された JSON を再帰的に剥がして整形する(旧 Collapsible 実装と同じ挙動。
 // tool 結果は dict/list が json.dumps 済み文字列で届くため)。
-const parseJSONString = (str: unknown): unknown => {
+export const parseJSONString = (str: unknown): unknown => {
 	try {
 		return parseJSONString(JSON.parse(str as string));
 	} catch (e) {

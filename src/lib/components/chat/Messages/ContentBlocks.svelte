@@ -34,6 +34,11 @@
 			name: call.function?.name ?? '',
 			arguments: call.function?.arguments ?? ''
 		};
+		// 型駆動レンダリングのディスクリプタ(#20)。バックエンドが tool の型宣言
+		// から抽出して call に同梱する。無ければ型に忠実なフォールバック描画。
+		if (call.render) {
+			attributes.render = call.render;
+		}
 		if (result) {
 			attributes.result = result.content ?? '';
 			if (result.files) {

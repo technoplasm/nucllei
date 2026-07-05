@@ -39,6 +39,13 @@
 	import HljsCode from './HljsCode.svelte';
 	import Image from './Image.svelte';
 
+	import {
+		classifyToolResult,
+		formatJSONString,
+		parseJSONString,
+		parseToolArguments
+	} from '$lib/utils/tool-render';
+
 	export let open = false;
 
 	// Switch.svelte と同じ Svelte 5 互換モード対策: 初期化時の $: dispatch が
@@ -78,30 +85,6 @@
 			rootElement?.scrollIntoView({ block: 'nearest' });
 		});
 	};
-
-	function parseJSONString(str) {
-		try {
-			return parseJSONString(JSON.parse(str));
-		} catch (e) {
-			return str;
-		}
-	}
-
-	function formatJSONString(str) {
-		try {
-			const parsed = parseJSONString(str);
-			// If parsed is an object/array, then it's valid JSON
-			if (typeof parsed === 'object') {
-				return JSON.stringify(parsed, null, 2);
-			} else {
-				// It's a primitive value like a number, boolean, etc.
-				return `${JSON.stringify(String(parsed))}`;
-			}
-		} catch (e) {
-			// Not valid JSON, return as-is
-			return str;
-		}
-	}
 </script>
 
 <div {id} class={className} bind:this={rootElement}>
@@ -236,13 +219,72 @@
 			{#if open && !hide}
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 					{#if attributes?.type === 'tool_calls'}
-						<!-- 引数/結果は構造データ。markdown 経由(blockquote+fence)だと
-						     複数行 JSON で fence が崩壊するため、hljs で直接ハイライト表示する。 -->
-						<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5">Arguments</div>
-						<HljsCode lang="json" code={formatJSONString(args)} />
+						<!-- 引数/結果は構造データ。バックエンドが型宣言から同梱した
+						     ディスクリプタ(attributes.render、#20)の通りに引数単位で描画する。
+						     宣言なしは型に忠実(scalar は key: value、object は JSON)。
+						     JSON が壊れているときだけ従来の一枚岩表示にフォールバック。 -->
+						{@const argDisplays = parseToolArguments(args, attributes?.render?.args)}
+						{#if argDisplays === null || argDisplays.length > 0}
+							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5">Arguments</div>
+						{/if}
+						{#if argDisplays === null}
+							<HljsCode lang="json" code={formatJSONString(args)} />
+						{:else}
+							{#each argDisplays as arg (arg.name)}
+								{#if arg.kind === 'scalar'}
+									<div class="text-xs font-mono my-0.5 px-0.5" dir="ltr">
+										<span class="text-gray-500 dark:text-gray-400">{arg.name}:</span>
+										<span class="whitespace-pre-wrap">{arg.value}</span>
+									</div>
+								{:else}
+									<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5 font-mono">
+										{arg.name}
+									</div>
+									<HljsCode
+										lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
+										code={arg.value}
+									/>
+								{/if}
+							{/each}
+						{/if}
 						{#if attributes?.done === 'true'}
+							{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
 							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">Result</div>
-							<HljsCode lang="json" code={formatJSONString(result)} />
+							{#if resultDisplay.kind === 'text'}
+								<div class="text-xs font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
+									{resultDisplay.value}
+								</div>
+							{:else if resultDisplay.kind === 'code'}
+								<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
+							{:else if resultDisplay.kind === 'table'}
+								<div class="overflow-x-auto my-1">
+									<table class="text-xs border-collapse" dir="ltr">
+										<thead>
+											<tr>
+												{#each resultDisplay.columns as column}
+													<th
+														class="border border-gray-200 dark:border-gray-700 px-2 py-1 text-left font-medium"
+														>{column}</th
+													>
+												{/each}
+											</tr>
+										</thead>
+										<tbody>
+											{#each resultDisplay.rows as row}
+												<tr>
+													{#each row as cell}
+														<td class="border border-gray-200 dark:border-gray-700 px-2 py-1"
+															>{cell}</td
+														>
+													{/each}
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{:else}
+								<HljsCode lang="json" code={resultDisplay.value} />
+							{/if}
 						{/if}
 					{:else}
 						<slot name="content" />
