@@ -1384,10 +1384,11 @@ ENABLE_SEARCH_QUERY_GENERATION = PersistentConfig(
     os.environ.get("ENABLE_SEARCH_QUERY_GENERATION", "True").lower() == "true",
 )
 
+# llens: RAG は使わないため検索クエリ生成も既定 OFF(issue #9、fork.md §5)
 ENABLE_RETRIEVAL_QUERY_GENERATION = PersistentConfig(
     "ENABLE_RETRIEVAL_QUERY_GENERATION",
     "task.query.retrieval.enable",
-    os.environ.get("ENABLE_RETRIEVAL_QUERY_GENERATION", "True").lower() == "true",
+    os.environ.get("ENABLE_RETRIEVAL_QUERY_GENERATION", "False").lower() == "true",
 )
 
 
@@ -1797,10 +1798,13 @@ MISTRAL_OCR_API_KEY = PersistentConfig(
     os.getenv("MISTRAL_OCR_API_KEY", ""),
 )
 
+# llens: 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。
+# Docling 抽出 → data.content 保存の経路はそのまま、vector DB への保存だけを止める。
+# embedding モデルの起動時ロードも main.py 側でこのフラグを見てスキップする。
 BYPASS_EMBEDDING_AND_RETRIEVAL = PersistentConfig(
     "BYPASS_EMBEDDING_AND_RETRIEVAL",
     "rag.bypass_embedding_and_retrieval",
-    os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true",
+    os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "True").lower() == "true",
 )
 
 

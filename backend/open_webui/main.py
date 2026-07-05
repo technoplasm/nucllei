@@ -683,20 +683,28 @@ app.state.rf = None
 app.state.YOUTUBE_LOADER_TRANSLATION = None
 
 
-try:
-    app.state.ef = get_ef(
-        app.state.config.RAG_EMBEDDING_ENGINE,
-        app.state.config.RAG_EMBEDDING_MODEL,
-        RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-    )
+if app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
+    # llens: 全文注入運用では embedding/reranking モデルを使わないため
+    # 起動時ロード(モデルダウンロードを伴う)をスキップする。
+    # air-gapped 環境での起動を軽くする(issue #9、fork.md §6)。
+    # 管理画面から bypass を無効化した場合は /retrieval の embedding 更新
+    # エンドポイント経由で再ロードされる。
+    log.info("BYPASS_EMBEDDING_AND_RETRIEVAL: embedding モデルの起動時ロードをスキップ")
+else:
+    try:
+        app.state.ef = get_ef(
+            app.state.config.RAG_EMBEDDING_ENGINE,
+            app.state.config.RAG_EMBEDDING_MODEL,
+            RAG_EMBEDDING_MODEL_AUTO_UPDATE,
+        )
 
-    app.state.rf = get_rf(
-        app.state.config.RAG_RERANKING_MODEL,
-        RAG_RERANKING_MODEL_AUTO_UPDATE,
-    )
-except Exception as e:
-    log.error(f"Error updating models: {e}")
-    pass
+        app.state.rf = get_rf(
+            app.state.config.RAG_RERANKING_MODEL,
+            RAG_RERANKING_MODEL_AUTO_UPDATE,
+        )
+    except Exception as e:
+        log.error(f"Error updating models: {e}")
+        pass
 
 
 app.state.EMBEDDING_FUNCTION = get_embedding_function(
