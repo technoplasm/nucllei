@@ -64,13 +64,12 @@
 
 	const collapsibleId = uuidv4();
 
-	// llens(#17): 長い reasoning / tool 結果を下端からも閉じられるようにする
+	// llens(#17): reasoning / tool 結果を下端からも閉じられるようにする
 	// (開閉ボタンがヘッダにしか無いと、長い展開の末尾から先頭へ戻る必要がある)
 	let rootElement: HTMLElement | null = null;
-	let contentHeight = 0;
-	$: showBottomCollapse =
-		['reasoning', 'tool_calls', 'code_interpreter'].includes(attributes?.type) &&
-		contentHeight > 300;
+	$: showBottomCollapse = ['reasoning', 'tool_calls', 'code_interpreter'].includes(
+		attributes?.type
+	);
 
 	const collapseFromBottom = () => {
 		open = false;
@@ -230,10 +229,7 @@
 
 		{#if !grow}
 			{#if open && !hide}
-				<div
-					transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
-					bind:clientHeight={contentHeight}
-				>
+				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 					{#if attributes?.type === 'tool_calls'}
 						{#if attributes?.done === 'true'}
 							<Markdown
@@ -259,10 +255,11 @@
 						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<!-- svelte-ignore a11y-click-events-have-key-events -->
 						<div
-							class="{buttonClassName} w-full flex justify-center py-0.5 cursor-pointer"
+							class="{buttonClassName} flex items-center gap-1 py-0.5 text-xs cursor-pointer"
 							on:pointerup|stopPropagation={collapseFromBottom}
 						>
-							<ChevronUp strokeWidth="3.5" className="size-3.5" />
+							<ChevronUp strokeWidth="3.5" className="size-3" />
+							{$i18n.t('Close')}
 						</div>
 					{/if}
 				</div>
@@ -284,10 +281,7 @@
 		{/if}
 	{:else if !grow}
 		{#if open && !hide}
-			<div
-				transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
-				bind:clientHeight={contentHeight}
-			>
+			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 				<slot name="content" />
 
 				{#if showBottomCollapse}
