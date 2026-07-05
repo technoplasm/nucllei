@@ -224,9 +224,13 @@
 	{/if}
 
 	{#if attributes?.type === 'tool_calls'}
-		{@const args = decode(attributes?.arguments)}
+		<!-- decode は旧 details 経路(entity エンコード文字列)の正規化点。content_blocks
+		     経路は生の文字列/配列を渡すため decode は実質 no-op。files は配列で来る -->
+		{@const args = decode(attributes?.arguments ?? '')}
 		{@const result = decode(attributes?.result ?? '')}
-		{@const files = parseJSONString(decode(attributes?.files ?? ''))}
+		{@const files = Array.isArray(attributes?.files)
+			? attributes.files
+			: parseJSONString(decode(attributes?.files ?? ''))}
 
 		{#if !grow}
 			{#if open && !hide}

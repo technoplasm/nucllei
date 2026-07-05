@@ -21,6 +21,10 @@
 		onSelect = (detail: any) => {}
 	} = $props();
 
+	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま渡す
+	// (旧 details 経路の「JSON.stringify → 属性文字列 → decode → 再パース」往復を廃止)。
+	// call.function.arguments はモデル由来の JSON 文字列、result.content は文字列、
+	// files は配列。表示側(Collapsible/HljsCode)がそのまま整形する。
 	const toolCallAttributes = (call: any, results: any[]) => {
 		const result = (results ?? []).find((r) => r.tool_call_id === call.id);
 		const attributes: Record<string, any> = {
@@ -28,12 +32,12 @@
 			done: result ? 'true' : 'false',
 			id: call.id,
 			name: call.function?.name ?? '',
-			arguments: JSON.stringify(call.function?.arguments ?? '')
+			arguments: call.function?.arguments ?? ''
 		};
 		if (result) {
-			attributes.result = JSON.stringify(result.content ?? '');
+			attributes.result = result.content ?? '';
 			if (result.files) {
-				attributes.files = JSON.stringify(result.files);
+				attributes.files = result.files;
 			}
 		}
 		return attributes;

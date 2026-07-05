@@ -6,8 +6,6 @@
 	import { getContext, onMount, tick, onDestroy } from 'svelte';
 	import { copyToClipboard } from '$lib/utils';
 
-	import 'highlight.js/styles/github-dark.min.css';
-
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import SvgPanZoom from '$lib/components/common/SVGPanZoom.svelte';
 	import { config } from '$lib/stores';
@@ -50,7 +48,6 @@
 
 	let mermaidHtml = null;
 
-	let highlightedCode = null;
 	let executing = false;
 
 	let stdout = null;
