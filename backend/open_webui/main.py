@@ -1106,6 +1106,20 @@ async def chat_completion(
     tasks = form_data.pop("background_tasks", None)
 
     metadata = {}
+
+    # llens(GHSA-gfm2-xm6c-37qc / CVE-2026-45349): chat_id の所有者を検証する。
+    # 既存チャットが要求ユーザーの所有でなければ拒否し、他人のチャットへの
+    # 読み書き(クロスユーザー継続)を防ぐ。try の外で行うことで、下の except が
+    # この 403 を被害者チャットへ書き込む(かつ 400 にラップする)のを避ける。
+    _chat_id = form_data.get("chat_id")
+    if _chat_id:
+        _existing_chat = Chats.get_chat_by_id(_chat_id)
+        if _existing_chat is not None and _existing_chat.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this chat.",
+            )
+
     try:
         if not model_item.get("direct", False):
             model_id = form_data.get("model", None)
