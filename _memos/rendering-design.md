@@ -74,6 +74,23 @@ canonical なパースを 1 回で済ませられるが、chat UI では非推�
 
 実装順: #17(L0)→ L1 セグメンタ(#14 の中核)→ #20(L3)。
 
+### reasoning の閉じ規律(2026-07-06 決定 — think タグの閉じ問題)
+
+reasoning ブロックの終了は**タグ対(`</think>`)や content 到着ではなく、
+「次の非 reasoning シグナル」で確定する**: ① content デルタ ② tool_calls デルタ
+③ ストリーム終端(finish / 切断 / エラー)。
+
+- 根拠: Kimi は content を経ず tool_calls や切断に直行する
+  (実キャプチャ: tool_call_no_args / aborted_client_cut)。v0.6.5 の
+  「content 到着でのみ閉じる」実装では done=false の「Thinking…」が
+  永続化され開きっぱなしになる。
+- 現行 middleware に適用済み(`close_open_reasoning_block`、
+  test_native_tool_calling.py で fixture リプレイ固定)。#17 L0 の
+  content blocks 化でもこの規律を引き継ぐ(閉じはストリーム構造から導出)。
+- 生 `<think>` タグ混り content(SGLang reasoning parser 無効)は接続契約外
+  (_memos/model-frames.md)。タグ検出経路は #17 で廃止予定であり堅牢化しない。
+  ただし上記③の終端 close はタグ経路の未閉じブロックにも効く。
+
 ## 4. 教訓(cage メモより)
 
 - LLM ツールの戻り値として「素の markdown」を返すと、ホスト UI のレンダラの曖昧性解決に巻き込まれる。tool 出力・reasoning を本文平面に同居させる UI では、本文中の HR/見出し境界が UI を壊す地雷になる。

@@ -440,8 +440,8 @@ def test_reasoning_not_leaked_into_followup_content(monkeypatch):
 
 
 def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
-    """reasoning が閉じないケース(tool_call_no_args: content デルタが来ず reasoning
-    が done=false のまま)でも、継続リクエストの assistant content に漏れない。"""
+    """content デルタを経ないケース(tool_call_no_args: reasoning から tool_calls へ
+    直行)でも、継続リクエストの assistant content に reasoning が漏れない。"""
 
     async def get_current_time(**kwargs):
         return "12:00"
@@ -467,6 +467,73 @@ def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
     assert assistant is not None
     content = assistant.get("content") or ""
     assert '<details type="reasoning"' not in content
+
+
+def _final_done_content(events):
+    """最終 chat:completion(done=True)イベントの content を返す。"""
+    finals = [
+        e["data"]
+        for e in events
+        if e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+    ]
+    assert finals, "done=True の最終イベントが emit されていない"
+    return finals[-1].get("content", "")
+
+
+def test_reasoning_closes_when_tool_calls_arrive_without_content(monkeypatch):
+    """reasoning から content を経ず tool_calls へ直行しても「Thinking…」
+    (done=false)が残らない(思考中が開きっぱなしになる問題)。
+
+    tool_call_no_args: reasoning デルタの直後に tool_calls が来る実キャプチャ。
+    閉じ条件が content 到着だけだと reasoning が done=false のまま永続化される。
+    """
+
+    async def get_current_time(**kwargs):
+        return "12:00"
+
+    clock_spec = {
+        "name": "get_current_time",
+        "description": "現在時刻を返す。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }
+    extra = {"get_current_time": {"spec": clock_spec, "callable": get_current_time}}
+
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_no_args",
+            extra_tools=extra,
+        )
+    )
+    assert len(completion_calls) == 1
+
+    content = _final_done_content(events)
+    assert '<details type="reasoning" done="true"' in content
+    assert '<details type="reasoning" done="false"' not in content
+
+
+def test_reasoning_closes_at_stream_end_on_client_cut(monkeypatch):
+    """reasoning 途中でストリームが終端(切断)しても「Thinking…」が残らない。
+
+    aborted_client_cut: reasoning デルタ 4 フレームで切断された実キャプチャ
+    (finish/usage/[DONE] 無し)。ストリーム終端で reasoning を閉じる。
+    """
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="aborted_client_cut",
+        )
+    )
+    # tool call は発生しない(継続リクエスト無し)
+    assert len(completion_calls) == 0
+
+    content = _final_done_content(events)
+    assert '<details type="reasoning" done="true"' in content
+    assert '<details type="reasoning" done="false"' not in content
 
 
 def test_tool_call_iteration_cap_emits_chat_error(monkeypatch):

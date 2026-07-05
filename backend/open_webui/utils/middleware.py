@@ -1460,6 +1460,23 @@ async def process_chat_response(
 
                 return content, content_blocks, end_flag
 
+            def close_open_reasoning_block(content_blocks):
+                # llens: reasoning の終了は content 到着だけでなく「次の非 reasoning
+                # シグナル(tool_calls / ストリーム終端)」でも確定させる。Kimi は
+                # content デルタ無しで tool_calls や切断に直行することがあり
+                # (fixture: tool_call_no_args / aborted_client_cut)、閉じ損ねると
+                # done=false の「Thinking…」が永続化される。
+                if (
+                    content_blocks
+                    and content_blocks[-1]["type"] == "reasoning"
+                    and "ended_at" not in content_blocks[-1]
+                ):
+                    block = content_blocks[-1]
+                    block["ended_at"] = time.time()
+                    block["duration"] = int(block["ended_at"] - block["started_at"])
+                    return True
+                return False
+
             message = Chats.get_message_by_id_and_message_id(
                 metadata["chat_id"], metadata["message_id"]
             )
@@ -1601,6 +1618,13 @@ async def process_chat_response(
                                     delta_tool_calls = delta.get("tool_calls", None)
 
                                     if delta_tool_calls:
+                                        if close_open_reasoning_block(content_blocks):
+                                            data = {
+                                                "content": serialize_content_blocks(
+                                                    content_blocks
+                                                )
+                                            }
+
                                         for delta_tool_call in delta_tool_calls:
                                             tool_call_index = delta_tool_call.get(
                                                 "index"
@@ -1782,6 +1806,8 @@ async def process_chat_response(
                             else:
                                 log.debug("Error: ", e)
                                 continue
+
+                    close_open_reasoning_block(content_blocks)
 
                     if content_blocks:
                         # Clean up the last text block
