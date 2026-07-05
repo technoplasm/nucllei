@@ -52,6 +52,9 @@ jobs:
         run: git diff --exit-code
 
       - name: Build Frontend
+        env:
+          # vite build は node 既定の 2GB ヒープでは OOM する
+          NODE_OPTIONS: '--max-old-space-size=4096'
         run: pnpm build
 
   test-frontend:
