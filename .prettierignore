@@ -321,3 +321,5 @@ _memos/
 # vendored な静的アセット(swagger-ui 等)は上流配布物のまま保つ
 backend/open_webui/static/
 static/pyodide/
+# モデル出力の実キャプチャ fixture はバイト列を保存したものなので整形しない
+backend/open_webui/test/fixtures/
