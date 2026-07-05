@@ -81,6 +81,7 @@ from open_webui.utils.filter import (
     process_filter_functions,
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
+from open_webui.utils.content_blocks import snapshot_content_blocks
 
 from open_webui.tasks import create_task
 
@@ -1622,7 +1623,10 @@ async def process_chat_response(
                                             data = {
                                                 "content": serialize_content_blocks(
                                                     content_blocks
-                                                )
+                                                ),
+                                                "content_blocks": snapshot_content_blocks(
+                                                    content_blocks
+                                                ),
                                             }
 
                                         for delta_tool_call in delta_tool_calls:
@@ -1702,7 +1706,10 @@ async def process_chat_response(
                                         data = {
                                             "content": serialize_content_blocks(
                                                 content_blocks
-                                            )
+                                            ),
+                                            "content_blocks": snapshot_content_blocks(
+                                                content_blocks
+                                            ),
                                         }
 
                                     if value:
@@ -1784,11 +1791,17 @@ async def process_chat_response(
                                                     "content": serialize_content_blocks(
                                                         content_blocks
                                                     ),
+                                                    "content_blocks": snapshot_content_blocks(
+                                                        content_blocks
+                                                    ),
                                                 },
                                             )
                                         else:
                                             data = {
                                                 "content": serialize_content_blocks(
+                                                    content_blocks
+                                                ),
+                                                "content_blocks": snapshot_content_blocks(
                                                     content_blocks
                                                 ),
                                             }
@@ -1859,6 +1872,7 @@ async def process_chat_response(
                             "type": "chat:completion",
                             "data": {
                                 "content": serialize_content_blocks(content_blocks),
+                                "content_blocks": snapshot_content_blocks(content_blocks),
                             },
                         }
                     )
@@ -1971,6 +1985,7 @@ async def process_chat_response(
                             "type": "chat:completion",
                             "data": {
                                 "content": serialize_content_blocks(content_blocks),
+                                "content_blocks": snapshot_content_blocks(content_blocks),
                             },
                         }
                     )
@@ -2038,6 +2053,7 @@ async def process_chat_response(
                                 "type": "chat:completion",
                                 "data": {
                                     "content": serialize_content_blocks(content_blocks),
+                                    "content_blocks": snapshot_content_blocks(content_blocks),
                                 },
                             }
                         )
@@ -2175,6 +2191,7 @@ async def process_chat_response(
                                 "type": "chat:completion",
                                 "data": {
                                     "content": serialize_content_blocks(content_blocks),
+                                    "content_blocks": snapshot_content_blocks(content_blocks),
                                 },
                             }
                         )
@@ -2210,6 +2227,7 @@ async def process_chat_response(
                 data = {
                     "done": True,
                     "content": serialize_content_blocks(content_blocks),
+                    "content_blocks": snapshot_content_blocks(content_blocks),
                     "title": title,
                 }
 
@@ -2220,6 +2238,7 @@ async def process_chat_response(
                         metadata["message_id"],
                         {
                             "content": serialize_content_blocks(content_blocks),
+                            "content_blocks": snapshot_content_blocks(content_blocks),
                         },
                     )
 
@@ -2258,6 +2277,7 @@ async def process_chat_response(
                         metadata["message_id"],
                         {
                             "content": serialize_content_blocks(content_blocks),
+                            "content_blocks": snapshot_content_blocks(content_blocks),
                         },
                     )
 

@@ -91,6 +91,37 @@ reasoning ブロックの終了は**タグ対(`</think>`)や content 到着で�
   (_memos/model-frames.md)。タグ検出経路は #17 で廃止予定であり堅牢化しない。
   ただし上記③の終端 close はタグ経路の未閉じブロックにも効く。
 
+### L0 の確定スキーマ(2026-07-06 決定 — #17 / #27 同時決定)
+
+**永続化(#27)**: chat テーブルの JSON blob 続投。message オブジェクトに
+`content_blocks` を追加する(正規化テーブルは #19/監査要件の具体化まで見送り)。
+`content` は移行完了後「text ブロックの join」の派生値になる(会話検索・
+タイトル生成・API 互換用)。旧メッセージ(details 擬似 HTML 埋め込み)は
+`content_blocks` 不在 → フロントが旧パスで表示する読み取りフォールバック。
+
+**イベント**: `chat:completion` の data に `content_blocks`(累積スナップショット、
+差分ではない)を追加。既存 `content` 文字列は移行期間中並走させ、フロント切替後に
+text join へ切替。
+
+**ブロック形(wire = 永続化と同形。消費者のいないフィールドは足さない)**:
+
+```jsonc
+{ "type": "text",      "content": "モデルが書いた散文 1 パートそのまま" }
+{ "type": "reasoning", "content": "推論全文(markdown として解釈しない)",
+  "done": true, "duration": 12 }          // done=false 中は duration 無し
+{ "type": "tool_calls", "calls": [/* OpenAI tool_call 形 */],
+  "results": [{ "tool_call_id": "...", "content": "...", "files": [] }] }
+  // call 単位の done はフロントが results の有無から導出
+{ "type": "code_interpreter", ... }        // 現行踏襲・薄く(自前ツール移行で消える面)
+```
+
+**middleware の扱い(#23 同梱判断)**: L0 では物理分割しない。内部の
+content_blocks 状態機械は v0.6.5 実装をそのまま核とし、wire 変換
+`snapshot_content_blocks()` を追加するだけに留める(リプレイテストは
+`process_chat_response` 境界で書けており分割は前提でない)。#23 の分割は
+「ブロック組み立て(assembler)を独立モジュール化 → filter / tool ループ /
+永続化をオーケストレーション層に残す」方向で、L0 安定後に着手。
+
 ## 4. 教訓(cage メモより)
 
 - LLM ツールの戻り値として「素の markdown」を返すと、ホスト UI のレンダラの曖昧性解決に巻き込まれる。tool 出力・reasoning を本文平面に同居させる UI では、本文中の HR/見出し境界が UI を壊す地雷になる。

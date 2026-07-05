@@ -103,6 +103,7 @@ async def _drive_tool_call_loop(
     followup_responses,
     initial_fixture="tool_call",
     extra_tools=None,
+    upserts=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する。
 
@@ -151,7 +152,9 @@ async def _drive_tool_call_loop(
     monkeypatch.setattr(
         middleware.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
-        lambda chat_id, message_id, data: None,
+        lambda chat_id, message_id, data: (
+            upserts.append(data) if upserts is not None else None
+        ),
     )
     monkeypatch.setattr(
         middleware.Chats, "get_chat_title_by_id", lambda chat_id: "chat"
@@ -732,3 +735,119 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         # 旧経路のプロンプト注入("Available Tools:")が消えている
         for message in sent["messages"]:
             assert "Available Tools:" not in (message.get("content") or "")
+
+
+####################################
+# content_blocks イベント契約(issue #17 L0)
+####################################
+
+
+def _final_done_data(events):
+    """最終 chat:completion(done=True)イベントの data を返す。"""
+    finals = [
+        e["data"]
+        for e in events
+        if e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+    ]
+    assert finals, "done=True の最終イベントが emit されていない"
+    return finals[-1]
+
+
+def _joined_deltas(fixture_name, key):
+    """fixture のデルタ(content / reasoning_content)を結合した生テキスト。"""
+    return "".join(
+        d.get(key) or "" for d, _ in mf.iter_deltas(mf.load_frames(fixture_name))
+    )
+
+
+def test_content_blocks_final_event_reasoning_and_text(monkeypatch):
+    """最終イベントに content_blocks(累積スナップショット)が載る。reasoning は
+    done=true + duration、text はモデルの散文がそのまま(join 破壊なし)入る。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch, cap=None, followup_responses=[], initial_fixture="reasoning"
+        )
+    )
+    assert len(completion_calls) == 0
+
+    blocks = _final_done_data(events).get("content_blocks")
+    assert blocks is not None
+    assert [b["type"] for b in blocks] == ["reasoning", "text"]
+
+    reasoning, text = blocks
+    assert reasoning["done"] is True
+    assert isinstance(reasoning["duration"], int)
+    assert reasoning["content"] == _joined_deltas("reasoning", "reasoning_content")
+    # text はデルタ結合そのまま(終端で末尾ブロックの両端 strip のみ)
+    assert text["content"] == _joined_deltas("reasoning", "content").strip()
+
+
+def test_content_blocks_streaming_snapshot_marks_open_reasoning(monkeypatch):
+    """ストリーミング途中のイベントにも content_blocks が載り、未確定の
+    reasoning は done=false で表現される。"""
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch, cap=None, followup_responses=[], initial_fixture="reasoning"
+        )
+    )
+    open_reasoning_seen = any(
+        any(
+            b["type"] == "reasoning" and b["done"] is False
+            for b in e["data"]["content_blocks"]
+        )
+        for e in events
+        if e.get("type") == "chat:completion"
+        and isinstance(e.get("data", {}).get("content_blocks"), list)
+    )
+    assert open_reasoning_seen
+
+
+def test_content_blocks_tool_call_turn_structure(monkeypatch):
+    """tool call ターンを跨いだブロック列が構造のまま届く:
+    reasoning → text → tool_calls(calls + results)→ reasoning → text。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="reasoning_then_tool",
+        )
+    )
+    assert len(completion_calls) == 1
+
+    blocks = _final_done_data(events)["content_blocks"]
+    assert [b["type"] for b in blocks] == [
+        "reasoning",
+        "text",
+        "tool_calls",
+        "reasoning",
+        "text",
+    ]
+
+    # reasoning_then_tool は並列 2 call の実キャプチャ(index 順直列)
+    tool_calls = blocks[2]
+    assert [c["function"]["name"] for c in tool_calls["calls"]] == [
+        "get_weather",
+        "get_weather",
+    ]
+    assert {r["tool_call_id"] for r in tool_calls["results"]} == {
+        c["id"] for c in tool_calls["calls"]
+    }
+
+
+def test_content_blocks_persisted_with_message(monkeypatch):
+    """最終 upsert(DB 永続化)にもイベントと同形の content_blocks が載る
+    (#27: blob 続投 + message 内 content_blocks)。"""
+    upserts = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="reasoning",
+            upserts=upserts,
+        )
+    )
+    persisted = [u for u in upserts if "content_blocks" in u]
+    assert persisted, "content_blocks が永続化されていない"
+    assert persisted[-1]["content_blocks"] == _final_done_data(events)["content_blocks"]
