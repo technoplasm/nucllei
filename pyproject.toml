@@ -166,6 +166,13 @@ dev = [
 # Run the backend from the repo root with `uv run task dev`.
 package = false
 
+[tool.pytest.ini_options]
+# テストは `from test.util ...` / `from open_webui ...` の両方を import するため、
+# backend(open_webui パッケージ)と backend/open_webui(test パッケージ)を
+# sys.path に載せる。リポジトリルートから `uv run pytest` で実行する。
+testpaths = ["backend/open_webui/test"]
+pythonpath = ["backend", "backend/open_webui"]
+
 [tool.taskipy.tasks]
 # Backend dev server (hot reload). `open_webui` lives under backend/, so we add
 # it to the import path with --app-dir instead of cd-ing there.

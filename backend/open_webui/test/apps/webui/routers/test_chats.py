@@ -188,7 +188,9 @@ class TestChats(AbstractPostgresTest):
     def test_clone_chat_by_id(self):
         chat_id = self.chats.get_chats()[0].id
         with mock_webui_user(id="2"):
-            response = self.fast_api_client.get(self.create_url(f"/{chat_id}/clone"))
+            response = self.fast_api_client.post(
+                self.create_url(f"/{chat_id}/clone"), json={}
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -209,7 +211,9 @@ class TestChats(AbstractPostgresTest):
     def test_archive_chat_by_id(self):
         chat_id = self.chats.get_chats()[0].id
         with mock_webui_user(id="2"):
-            response = self.fast_api_client.get(self.create_url(f"/{chat_id}/archive"))
+            response = self.fast_api_client.post(
+                self.create_url(f"/{chat_id}/archive")
+            )
         assert response.status_code == 200
 
         chat = self.chats.get_chat_by_id(chat_id)

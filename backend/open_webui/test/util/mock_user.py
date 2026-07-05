@@ -5,7 +5,9 @@ from fastapi import FastAPI
 
 @contextmanager
 def mock_webui_user(**kwargs):
-    from open_webui.routers.webui import app
+    # 旧構成では webui サブアプリ(open_webui.routers.webui)に override を当てていたが、
+    # 現構成は単一アプリのため TestClient と同じ open_webui.main:app に当てる。
+    from open_webui.main import app
 
     with mock_user(app, **kwargs):
         yield

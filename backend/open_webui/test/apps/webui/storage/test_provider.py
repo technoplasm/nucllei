@@ -1,5 +1,11 @@
 import io
 import os
+
+# GCSStorageProvider はクラス本体(import 時)にインスタンス化されるため、
+# GCP 資格情報が無い環境でも collection が通るようエミュレータ向けエンドポイントを
+# 先に設定しておく(TestGCSStorageProvider の fixture と同じ値)。
+os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:9023")
+
 import boto3
 import pytest
 from botocore.exceptions import ClientError
@@ -28,7 +34,18 @@ def test_imports():
     provider.Storage
 
 
-def test_get_storage_provider():
+def mock_azure_config(monkeypatch):
+    # AzureStorageProvider は endpoint=None のままだと BlobServiceClient が
+    # ValueError を投げるため、ダミーの接続設定を注入する(接続は発生しない)
+    monkeypatch.setattr(
+        provider, "AZURE_STORAGE_ENDPOINT", "https://myaccount.blob.core.windows.net"
+    )
+    monkeypatch.setattr(provider, "AZURE_STORAGE_CONTAINER_NAME", "my-container")
+    monkeypatch.setattr(provider, "AZURE_STORAGE_KEY", "dummy-key")
+
+
+def test_get_storage_provider(monkeypatch):
+    mock_azure_config(monkeypatch)
     Storage = provider.get_storage_provider("local")
     assert isinstance(Storage, provider.LocalStorageProvider)
     Storage = provider.get_storage_provider("s3")
@@ -41,7 +58,8 @@ def test_get_storage_provider():
         provider.get_storage_provider("invalid")
 
 
-def test_class_instantiation():
+def test_class_instantiation(monkeypatch):
+    mock_azure_config(monkeypatch)
     with pytest.raises(TypeError):
         provider.StorageProvider()
     with pytest.raises(TypeError):
