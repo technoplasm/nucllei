@@ -15,6 +15,14 @@ git diff backend/open_webui/test/fixtures/model_frames/   # 差分 = フレー�
 
 SGLang / モデル更新時は必ず再実行し、差分をこのメモに追記する。
 
+既存 fixture を保全したまま新シナリオだけ追加キャプチャするには `--only` を使う
+(meta.json は既存エントリにマージ、他の `.sse`/`.json` は不変):
+
+```bash
+uv run python scripts/capture_model_frames.py \
+  --only tool_call_no_args --only tool_call_unicode_args
+```
+
 ## フレーム列の全体構造(全シナリオ共通)
 
 ```
@@ -45,6 +53,30 @@ role フレーム → reasoning_content* → content* → (tool_calls*) → fini
 - 並列呼び出しは **index 順に直列に流れる**(index=0 完了後に index=1 開始)。
   interleave はしない。
 - tool call 前に content が少量出ることがある(「調べます」等)。
+
+## 引数エンコーディング(ast.literal_eval / json.loads の要否、issue #15 #28)
+
+middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試し、失敗時のみ
+`json.loads`** にフォールバックする(`utils/middleware.py`)。追加キャプチャ(2026-07-05)で
+実際にどちらが効くかを確認した:
+
+- **`tool_call_no_args`**(引数なしツール `get_current_time`、properties 空):
+  Kimi は `arguments` を **`"{}"`**(空文字ではなく空オブジェクト)で流す。
+  ストリームでは最初のフレームが `arguments: ""`、続く 1 デルタで `"{}"`。
+  → 空引数は `{}` にパースされ、許可引数が無いためツールへは空 dict が渡る。
+- **`tool_call_unicode_args`**(引用符・改行・バックスラッシュ・絵文字を含む detail):
+  Kimi は **厳密な JSON** を出す。引用符は `\"`、改行は `\n`、バックスラッシュは `\\` と
+  正しくエスケープし、日本語・絵文字(☃️)は **`\u` エスケープせず生 UTF-8** で載せる。
+  実測した非ストリーム arguments:
+  `{"city":"札幌","detail":"札幌は\"寒い\"ことが多いです。\n☃️\nバックスラッシュ: \\"}`
+
+**結論(最重要)**: Kimi の tool call 引数は clean な JSON であり、
+その中で使うエスケープ(`\"` `\n` `\\`)は Python 文字列リテラル構文の部分集合なので、
+**`ast.literal_eval`(一次経路)がそのまま成功し、`json.loads` フォールバックには落ちない**。
+両パーサとも同一 dict を返すことをキャプチャ実データで確認済み。
+`json.loads` フォールバックが実際に必要になるのは JSON の `true`/`false`/`null`
+(Python は `True`/`False`/`None`)を含む引数のケースだが、現行ツール schema では発生しない。
+リプレイ回帰は `test_native_tool_calling.py::test_native_tool_loop_parses_{no_args,unicode_args}_call`。
 
 ## 非ストリーミング応答
 

@@ -61,6 +61,17 @@ RUN_PYTHON_TOOL = {
     },
 }
 
+# 引数なし tool call の観察用(properties/required が空)。
+# arguments が空文字/"{}" として流れるか(空引数エッジケース、#20 逐次パーサ + middleware フォールバック)。
+CLOCK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_current_time",
+        "description": "現在時刻を取得する(引数は不要)",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
 
 def scenarios(model: str) -> dict:
     base = {"model": model, "temperature": 0.0}
@@ -112,6 +123,37 @@ def scenarios(model: str) -> dict:
                 }
             ],
             "tools": [RUN_PYTHON_TOOL],
+        },
+        # 引数なし tool call(arguments が空/"{}" になるケースの観察。
+        # middleware は ast.literal_eval → json.loads の順でフォールバックするため、
+        # 空引数("" / "{}")がどちらの経路で {} になるかを実測する)
+        "tool_call_no_args": {
+            **base,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "今何時か教えて。get_current_time ツールを使って。",
+                }
+            ],
+            "tools": [CLOCK_TOOL],
+        },
+        # 特殊文字を含む引数(引用符・改行・バックスラッシュ・絵文字)。
+        # Kimi が厳密 JSON を出すか python 風リテラルを出すかを実測し、
+        # middleware の ast.literal_eval / json.loads フォールバックのどちらが
+        # 実際に効くのかの一次証拠を得る。
+        "tool_call_unicode_args": {
+            **base,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "札幌の天気を調べて。detail 引数には、次の文字を必ずそのまま含めて: "
+                        '二重引用符で囲った語 "寒い"、実際の改行文字、バックスラッシュ \\、'
+                        "および雪だるまの絵文字 ☃️。これらを含む短い説明文にして。"
+                    ),
+                }
+            ],
+            "tools": [WEATHER_TOOL],
         },
         # reasoning → tool call の連続(交互パターンの観察)
         "reasoning_then_tool": {
@@ -172,7 +214,17 @@ def main():
     parser.add_argument(
         "--api-key", default=os.environ.get("LLENS_OPENAI_API_KEY", "EMPTY")
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        help=(
+            "指定した scenario 名だけをキャプチャする(複数指定可)。"
+            "既存 fixture / meta.json のその他エントリは保全する。"
+        ),
+    )
     args = parser.parse_args()
+    only = set(args.only) if args.only else None
 
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     client = httpx.Client(
@@ -184,15 +236,21 @@ def main():
     model = models["data"][0]["id"]
     url = f"{args.base_url}/chat/completions"
 
-    meta = {
-        "captured_at": datetime.now(timezone.utc).isoformat(),
-        "base_url": args.base_url,
-        "model": model,
-        "server": models["data"][0],
-        "scenarios": {},
-    }
+    # --only 指定時は既存 meta.json を土台にマージし、他シナリオの記録を消さない。
+    meta_path = FIXTURE_DIR / "meta.json"
+    if only is not None and meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+    else:
+        meta = {}
+    meta["captured_at"] = datetime.now(timezone.utc).isoformat()
+    meta["base_url"] = args.base_url
+    meta["model"] = model
+    meta["server"] = models["data"][0]
+    meta.setdefault("scenarios", {})
 
     for name, payload in scenarios(model).items():
+        if only is not None and name not in only:
+            continue
         print(f"== {name}", flush=True)
         meta["scenarios"][name] = payload
 
@@ -213,19 +271,20 @@ def main():
             print(f"  stream FAILED: {e}", file=sys.stderr)
 
     # 途中切断(text_basic ベース)
-    print("== aborted", flush=True)
-    try:
-        capture_stream_aborted(
-            client,
-            url,
-            scenarios(model)["reasoning"],
-            FIXTURE_DIR / "aborted_client_cut.sse",
-        )
-        meta["scenarios"]["aborted_client_cut"] = {
-            "note": "reasoning シナリオを 5 frame 受信後にクライアント側から切断",
-        }
-    except Exception as e:
-        print(f"  aborted FAILED: {e}", file=sys.stderr)
+    if only is None or "aborted_client_cut" in only:
+        print("== aborted", flush=True)
+        try:
+            capture_stream_aborted(
+                client,
+                url,
+                scenarios(model)["reasoning"],
+                FIXTURE_DIR / "aborted_client_cut.sse",
+            )
+            meta["scenarios"]["aborted_client_cut"] = {
+                "note": "reasoning シナリオを 5 frame 受信後にクライアント側から切断",
+            }
+        except Exception as e:
+            print(f"  aborted FAILED: {e}", file=sys.stderr)
 
     (FIXTURE_DIR / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1)

@@ -1,0 +1,40 @@
+{
+ "id": "d1d32734145d4c3dbe0c4f7da53f69b5",
+ "object": "chat.completion",
+ "created": 1783233190,
+ "model": "kimi-k2.6",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "現在時刻を確認します。",
+    "reasoning_content": "ユーザーは現在時刻を知りたいようです。`get_current_time` ツールを使用するよう指示されています。\n\nツールの引数は不要（空のオブジェクト）なので、直接呼び出せます。",
+    "tool_calls": [
+     {
+      "id": "functions.get_current_time:0",
+      "index": 0,
+      "type": "function",
+      "function": {
+       "name": "get_current_time",
+       "arguments": "{}"
+      }
+     }
+    ]
+   },
+   "logprobs": null,
+   "finish_reason": "tool_calls",
+   "matched_stop": null
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 67,
+  "total_tokens": 140,
+  "completion_tokens": 73,
+  "prompt_tokens_details": null,
+  "reasoning_tokens": 53
+ },
+ "metadata": {
+  "weight_version": "default"
+ }
+}

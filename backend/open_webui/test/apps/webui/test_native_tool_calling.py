@@ -97,11 +97,19 @@ def _sse_response(name: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-async def _drive_tool_call_loop(monkeypatch, cap, followup_responses):
+async def _drive_tool_call_loop(
+    monkeypatch,
+    cap,
+    followup_responses,
+    initial_fixture="tool_call",
+    extra_tools=None,
+):
     """process_chat_response をツール呼び出し SSE で駆動する。
 
     followup_responses: ツール実行後の継続リクエストへの応答(fixture 名)の列。
     尽きた後は常に tool_call を返す(上限テスト用)。
+    initial_fixture: 初回応答に使う fixture 名(引数なし/特殊文字引数の検証で差し替える)。
+    extra_tools: metadata["tools"] に追加登録するツール(get_current_time など)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from open_webui.utils import middleware
@@ -178,12 +186,15 @@ async def _drive_tool_call_loop(monkeypatch, cap, followup_responses):
         },
     }
 
+    tools = {"get_weather": {"spec": weather_spec, "callable": get_weather}}
+    if extra_tools:
+        tools.update(extra_tools)
     metadata = {
         "chat_id": "chat-1",
         "message_id": "message-1",
         "session_id": "session-1",
         "features": {},
-        "tools": {"get_weather": {"spec": weather_spec, "callable": get_weather}},
+        "tools": tools,
     }
     form_data = {
         "model": "kimi-k2.6",
@@ -206,7 +217,7 @@ async def _drive_tool_call_loop(monkeypatch, cap, followup_responses):
 
     result = await middleware.process_chat_response(
         request,
-        _sse_response("tool_call"),
+        _sse_response(initial_fixture),
         form_data,
         user,
         metadata,
@@ -249,6 +260,80 @@ def test_native_tool_loop_executes_tool_and_completes(monkeypatch):
         e.get("type") == "chat:completion" and e.get("data", {}).get("done")
         for e in events
     )
+
+
+def test_native_tool_loop_parses_no_args_call(monkeypatch):
+    """引数なし tool call(tool_call_no_args): arguments が空 {} でツールが実行される。
+
+    実キャプチャでは Kimi は arguments を "{}" で流す(引数なしツールでも空文字では
+    ない)。middleware は空 {} をそのままツールへ渡す(properties が空なので許可引数も空)。
+    """
+    invocations = []
+
+    async def get_current_time(**kwargs):
+        invocations.append(kwargs)
+        return "12:00"
+
+    clock_spec = {
+        "name": "get_current_time",
+        "description": "現在時刻を返す。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }
+    extra = {"get_current_time": {"spec": clock_spec, "callable": get_current_time}}
+
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_no_args",
+            extra_tools=extra,
+        )
+    )
+
+    # 引数なしでツールが 1 回実行され、渡る引数は空 dict
+    assert len(invocations) == 1
+    assert invocations[0] == {}
+
+    # 継続リクエストは 1 回、エラーなく完了
+    assert len(completion_calls) == 1
+    assert _iteration_limit_errors(events) == []
+    assert any(
+        e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+        for e in events
+    )
+
+
+def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
+    """特殊文字入り引数(tool_call_unicode_args)が dict に正しくパースされる。
+
+    実キャプチャでは Kimi は arguments を厳密 JSON(引用符 \\"、改行 \\n、
+    バックスラッシュ \\\\ を正しくエスケープ、絵文字/日本語は生 UTF-8)で流す。
+    middleware は ast.literal_eval を先に試すが、これらのエスケープは Python の
+    文字列リテラル構文でも有効なため literal_eval で成功し、json.loads
+    フォールバックには落ちない。ここではパース結果の中身を固定する。
+    """
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_unicode_args",
+        )
+    )
+
+    assert len(tool_invocations) == 1
+    args = tool_invocations[0]
+    assert args["city"] == "札幌"
+    # detail には引用符・改行・バックスラッシュ・絵文字が復元されている
+    detail = args["detail"]
+    assert '"寒い"' in detail  # 二重引用符
+    assert "\n" in detail  # 実際の改行文字
+    assert "\\" in detail  # バックスラッシュ
+    assert "☃" in detail  # 絵文字
+
+    assert len(completion_calls) == 1
+    assert _iteration_limit_errors(events) == []
 
 
 def test_tool_call_iteration_cap_emits_chat_error(monkeypatch):

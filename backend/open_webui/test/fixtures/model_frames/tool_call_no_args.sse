@@ -1,0 +1,74 @@
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ユーザー"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は現在"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"時"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"刻"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を知"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"り"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"た"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"い"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と言"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"っ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ています。"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"get_current_timeツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ールを使"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"う"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ように"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"指示"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"されてい"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ます。引"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"数は不要"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"な"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ので、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"空"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"の"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"オブ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ジェクト"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233190,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を渡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"して"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"呼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"び"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"出します"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"。"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":"functions.get_current_time:0","index":0,"type":"function","function":{"name":"get_current_time","arguments":""}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":null,"index":0,"type":"function","function":{"name":null,"arguments":"{}"}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null},"logprobs":null,"finish_reason":"tool_calls","matched_stop":163586}]}
+
+data: {"id":"6ffb6c72f2974f478633505f96ceae4a","object":"chat.completion.chunk","created":1783233191,"model":"kimi-k2.6","choices":[],"usage":{"prompt_tokens":67,"total_tokens":129,"completion_tokens":62,"prompt_tokens_details":null,"reasoning_tokens":49}}
+
+data: [DONE]
+

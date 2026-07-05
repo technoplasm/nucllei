@@ -1,11 +1,11 @@
 {
- "captured_at": "2026-07-05T02:09:39.580040+00:00",
+ "captured_at": "2026-07-05T06:33:09.790620+00:00",
  "base_url": "http://prism-llens:8000/v1",
  "model": "kimi-k2.6",
  "server": {
   "id": "kimi-k2.6",
   "object": "model",
-  "created": 1783217379,
+  "created": 1783233189,
   "owned_by": "sglang",
   "root": "kimi-k2.6",
   "parent": null,
@@ -170,6 +170,65 @@
   },
   "aborted_client_cut": {
    "note": "reasoning シナリオを 5 frame 受信後にクライアント側から切断"
+  },
+  "tool_call_no_args": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "今何時か教えて。get_current_time ツールを使って。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_current_time",
+      "description": "現在時刻を取得する(引数は不要)",
+      "parameters": {
+       "type": "object",
+       "properties": {},
+       "required": []
+      }
+     }
+    }
+   ]
+  },
+  "tool_call_unicode_args": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "札幌の天気を調べて。detail 引数には、次の文字を必ずそのまま含めて: 二重引用符で囲った語 \"寒い\"、実際の改行文字、バックスラッシュ \\、および雪だるまの絵文字 ☃️。これらを含む短い説明文にして。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "指定した都市の現在の天気を取得する",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string",
+         "description": "都市名"
+        },
+        "detail": {
+         "type": "string",
+         "description": "知りたい内容の詳細説明(長文可)"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ]
   }
  }
 }
