@@ -186,6 +186,12 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
     if not ENABLE_LDAP:
         raise HTTPException(400, detail="LDAP authentication is not enabled")
 
+    # llens(GHSA-2r4p-jpmg-48f4 / CVE-2026-44551): 空パスワードでの LDAP simple bind は
+    # 多くのサーバで unauthenticated bind として成功扱いになり、ユーザー名を知る攻撃者が
+    # 無認証でログインできてしまう。bind に至る前に空/空白のみのパスワードを拒否する。
+    if not form_data.password or not form_data.password.strip():
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
     try:
         tls = Tls(
             validate=CERT_REQUIRED,

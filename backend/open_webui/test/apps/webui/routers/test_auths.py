@@ -25,6 +25,30 @@ class TestAuths(AbstractPostgresTest):
         assert data["role"] == "user"
         assert data["profile_image_url"] == "/user.png"
 
+    def test_ldap_empty_password_rejected(self):
+        """GHSA-2r4p-jpmg-48f4: 空パスワードの LDAP simple bind を拒否する。
+
+        空パスワードは多くの LDAP サーバで unauthenticated bind として成功扱いになり
+        認証バイパスになる。ガードは bind に至る前に発火し、汎用資格情報エラー
+        (INVALID_CRED)を返す — LDAP サーバへは一切接続しない。
+        """
+        from open_webui.constants import ERROR_MESSAGES
+
+        config = self.fast_api_client.app.state.config
+        original = config.ENABLE_LDAP
+        config.ENABLE_LDAP = True
+        try:
+            response = self.fast_api_client.post(
+                self.create_url("/ldap"),
+                json={"user": "someone", "password": ""},
+            )
+        finally:
+            config.ENABLE_LDAP = original
+
+        assert response.status_code == 400
+        # detail が INVALID_CRED であることが「ガードが発火した(LDAP 接続前に弾いた)」証拠。
+        assert response.json()["detail"] == ERROR_MESSAGES.INVALID_CRED
+
     def test_update_profile(self):
         from open_webui.utils.auth import get_password_hash
 

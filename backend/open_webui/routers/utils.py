@@ -47,6 +47,15 @@ async def format_code(form_data: CodeForm, user=Depends(get_verified_user)):
 async def execute_code(
     request: Request, form_data: CodeForm, user=Depends(get_verified_user)
 ):
+    # llens(GHSA-482j-2pq6-q5w4 / CVE-2026-45672): このエンドポイントは
+    # ENABLE_CODE_EXECUTION を無視して実行しており、フラグを false にしても
+    # コード実行が可能だった。実行前に管理者トグルを強制する。
+    if not request.app.state.config.ENABLE_CODE_EXECUTION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Code execution is disabled",
+        )
+
     if request.app.state.config.CODE_EXECUTION_ENGINE == "jupyter":
         output = await execute_code_jupyter(
             request.app.state.config.CODE_EXECUTION_JUPYTER_URL,
