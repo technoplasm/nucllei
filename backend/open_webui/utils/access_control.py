@@ -144,6 +144,63 @@ def has_access(
     )
 
 
+def has_read_access_to_file(file_id: str, user: "UserModel") -> bool:
+    """
+    llens(#40, GHSA-vjqm/vrhc/4g37): file_id 単位の読取権限突合。
+    要求ユーザーが 所有 / 管理者 / file 自身の access_control(read)/ 所属 KB の read 権限の
+    いずれかを満たす場合のみ True。存在しない file は False(非公開扱い)。
+    循環 import 回避のため Files/Knowledges は関数内で遅延 import する。
+    """
+    if not file_id:
+        return False
+    if getattr(user, "role", None) == "admin":
+        return True
+
+    from open_webui.models.files import Files
+
+    file = Files.get_file_by_id(file_id)
+    if not file:
+        return False
+    if file.user_id == user.id:
+        return True
+    # 注意: file の access_control=None は「所有者のみ(非公開)」を意味する。
+    # has_access は None を public-read として扱うため、明示設定時のみ委譲する
+    # (アップロード既定は None = 非公開。共有は明示的に user/group を列挙したときだけ)。
+    if file.access_control is not None and has_access(
+        user.id, "read", file.access_control
+    ):
+        return True
+
+    knowledge_base_id = file.meta.get("collection_name") if file.meta else None
+    if knowledge_base_id:
+        return has_read_access_to_collection(knowledge_base_id, user)
+    return False
+
+
+def has_read_access_to_collection(collection_name: str, user: "UserModel") -> bool:
+    """
+    llens(#40): collection(KB)単位の読取権限突合。
+    `file-<id>` 形式のコレクションは対応する file の権限へ委譲、それ以外は KB レコードの
+    所有 / access_control(read)を突合する。未知のコレクションは False(非公開扱い)。
+    """
+    if not collection_name:
+        return False
+    if getattr(user, "role", None) == "admin":
+        return True
+
+    if collection_name.startswith("file-"):
+        return has_read_access_to_file(collection_name[len("file-") :], user)
+
+    from open_webui.models.knowledge import Knowledges
+
+    knowledge = Knowledges.get_knowledge_by_id(collection_name)
+    if not knowledge:
+        return False
+    if knowledge.user_id == user.id:
+        return True
+    return has_access(user.id, "read", knowledge.access_control)
+
+
 # Get all users with access to a resource
 def get_users_with_access(
     type: str = "write", access_control: Optional[dict] = None

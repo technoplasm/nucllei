@@ -29,6 +29,21 @@
 | GHSA-4pcg-253r-rf9w / CVE-2026-45350 | HIGH | リクエスト由来 tool_ids のアクセス検証 | be49c0bef | #37 |
 | GHSA-7429-hxcv-268m / CVE-2026-34222 | HIGH | 管理者 valve 読み取り authz | 7e419395d | #37 |
 | GHSA-gfm2-xm6c-37qc / CVE-2026-45349 | HIGH | chat completion の chat_id 所有者検証 | d60d13724 | #37 |
+| GHSA-vjqm-6gcc-62cr / CVE-2026-54012 | HIGH | 偽装 chat-file / model meta.knowledge で他ユーザファイル読取(IDOR) | (本コミット) | #40 |
+| GHSA-vrhc-3fr6-pc3c / CVE-2026-54010 | HIGH | 同上(read/削除面) | (本コミット) | #40 |
+| GHSA-r472-mw7m-967f / CVE-2026-45402 | HIGH | KB Attach / process で file_id 未検証 | (本コミット) | #40 |
+| GHSA-4g37-7p2c-38r9 / CVE-2026-45398 | HIGH | Retrieval API の KB/collection ACL バイパス(IDOR) | (本コミット) | #40 |
+
+**#40 の修正範囲(2026-07-05)**: file_id / collection 参照の読取権限突合を一元化。
+- `utils/access_control.py` に `has_read_access_to_file` / `has_read_access_to_collection` を新設
+  (所有者 / admin / file 自身の access_control(**None=非公開**、has_access の None=public とは別扱い)/ 所属 KB の read)。
+- チャット経路(`utils/middleware.py`): クライアント供給 `files` を `filter_files_by_user_access` で絞る。
+  direct モードは `model.meta.knowledge` も検証(偽装経路)、非 direct は model アクセス検証済みで信頼。
+- retrieval 経路(`routers/retrieval.py`): `/process/file`・`/query/doc`・`/query/collection` に read 権限ゲート。
+- 回帰テスト: `test/apps/webui/utils/test_file_access_idor.py`(修正前の None=public バグを実際に検出)。
+- **folder 経路は v0.6.5 に該当機能なし**(`routers/folders.py` は全て user スコープ、KB Attach 無し)→ 非該当。
+- **GHSA-26g9-27vm-x3q8**(共有チャット branch の access_type 無視で他人ファイル削除、<=0.8.12): v0.6.5 の
+  chat branch 経路に該当実装が無く、file 削除は `routers/files.py` が所有者検証済み → 現状非該当。#40 では扱わない。
 
 **非該当と確認(捏造回避)**:
 - **GHSA-j2c8-v969-8r5c**(/cache sibling-prefix traversal): Starlette 1.3.1 が `lookup_path` で
@@ -40,7 +55,7 @@
   派生タスク: 生モデルをチャットピッカーから全員向けに隠す(UX、フロント/#6 で対応)。
 
 **未着手(フロント/mixed、フロントバッチ)**: #36(GHSA-9f4f レンダリング XSS = 0.6.5 ちょうど)、
-#40(file/KB IDOR 群)、#38 残(h3ww/57q6/7rw5 の認証系)。
+#38 残(h3ww/57q6/7rw5 の認証系)。
 **継続監視**: v0.10.x の未公開 access-control 修正(下記 embargo 節)。
 
 ## 最重要 TOP 3(id と一言理由)

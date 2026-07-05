@@ -74,6 +74,10 @@ from open_webui.utils.misc import (
     calculate_sha256_string,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.access_control import (
+    has_read_access_to_collection,
+    has_read_access_to_file,
+)
 
 from open_webui.config import (
     ENV,
@@ -958,6 +962,16 @@ def process_file(
     form_data: ProcessFileForm,
     user=Depends(get_verified_user),
 ):
+    # llens(#40, GHSA-vjqm/r472): file_id はクライアント制御。要求ユーザーが読取権限を
+    # 持たない file の処理(= 他ユーザーファイルの内容を vector DB へ取り込む横断アクセス)を拒否。
+    # 内部呼び出し(アップロード直後の自己所有ファイル / KB 追加)は所有者一致で通過する。
+    # try の外に置き、下段の except が 403 を 400 にラップするのを避ける。
+    if not has_read_access_to_file(form_data.file_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     try:
         file = Files.get_file_by_id(form_data.file_id)
 
@@ -1564,6 +1578,15 @@ def query_doc_handler(
     form_data: QueryDocForm,
     user=Depends(get_verified_user),
 ):
+    # llens(#40, GHSA-4g37): collection_name はクライアント制御。読取権限のない
+    # コレクション(他ユーザーの `file-<id>` や KB)への直接クエリ(IDOR)を拒否。
+    if user.role != "admin" and not has_read_access_to_collection(
+        form_data.collection_name, user
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
     try:
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
             collection_results = {}
@@ -1620,6 +1643,15 @@ def query_collection_handler(
     form_data: QueryCollectionsForm,
     user=Depends(get_verified_user),
 ):
+    # llens(#40, GHSA-4g37): collection_names はクライアント制御。1 つでも読取権限の
+    # ないコレクションを含むクエリ(他ユーザーファイル/KB の横断読取・IDOR)を拒否。
+    if user.role != "admin":
+        for collection_name in form_data.collection_names:
+            if not has_read_access_to_collection(collection_name, user):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                )
     try:
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
             return query_collection_with_hybrid_search(

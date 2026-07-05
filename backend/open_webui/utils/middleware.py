@@ -69,7 +69,11 @@ from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
 )
 from open_webui.models.skills import Skills
-from open_webui.utils.access_control import has_access
+from open_webui.utils.access_control import (
+    has_access,
+    has_read_access_to_file,
+    has_read_access_to_collection,
+)
 from open_webui.utils.tools import get_tools
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
@@ -381,6 +385,64 @@ async def chat_image_generation_handler(
     return form_data
 
 
+def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
+    file_type = file.get("type")
+
+    # サーバー生成・インライン内容(この 1 リクエスト内で完結し DB 横断解決を伴わない)は許可。
+    if file_type in ("web_search", "text"):
+        return True
+    if file.get("docs") is not None:
+        return True
+
+    if file_type == "collection":
+        # BYPASS モード: data.file_ids を直接展開する経路
+        for fid in (file.get("data", {}) or {}).get("file_ids", []) or []:
+            if not has_read_access_to_file(fid, user):
+                return False
+
+        if file.get("legacy") or file.get("collection_names"):
+            names = file.get("collection_names", []) or []
+        elif file.get("id"):
+            names = [file.get("id")]
+        else:
+            names = []
+        return all(has_read_access_to_collection(name, user) for name in names)
+
+    if file.get("collection_name"):
+        return has_read_access_to_collection(file.get("collection_name"), user)
+    if file.get("id"):
+        return has_read_access_to_file(file.get("id"), user)
+
+    # id/collection を持たない(サーバー生成のインライン)項目は許可。
+    return True
+
+
+def filter_files_by_user_access(files: list, user: UserModel) -> list:
+    """
+    llens(#40, GHSA-vjqm/vrhc): チャットリクエストの file/collection 参照は
+    クライアント制御(direct モードの model.meta.knowledge も含む)。要求ユーザーが
+    読取権限を持たない項目をここで除外し、他ユーザーのファイル横断読取(IDOR)を防ぐ。
+    """
+    if not files:
+        return files
+    if user.role == "admin":
+        return files
+
+    accessible = []
+    for file in files:
+        if not isinstance(file, dict):
+            continue
+        if _file_entry_is_readable(file, user):
+            accessible.append(file)
+        else:
+            log.warning(
+                "filter_files_by_user_access: dropping inaccessible file reference "
+                f"(user_id={user.id}, id={file.get('id')}, "
+                f"collection_name={file.get('collection_name')}, type={file.get('type')})"
+            )
+    return accessible
+
+
 async def chat_completion_files_handler(
     request: Request, body: dict, user: UserModel
 ) -> tuple[dict, dict[str, list]]:
@@ -568,6 +630,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # 生のユーザーメッセージ先頭の `/command` を skill content へ展開する。
     form_data = apply_skill_command(form_data, user)
 
+    # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
+    # 後段で追加される web_search 等のサーバー生成項目より前に絞ることで、被害者ファイル
+    # を指す偽装 file_id / collection がソース解決に到達しないようにする。
+    if form_data.get("files"):
+        form_data["files"] = filter_files_by_user_access(form_data["files"], user)
+
     event_emitter = get_event_emitter(metadata)
     event_call = get_event_call(metadata)
 
@@ -640,6 +708,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 )
             else:
                 knowledge_files.append(item)
+
+        # llens(#40, GHSA-vjqm): direct モードでは model 全体がクライアント供給のため、
+        # model.meta.knowledge も偽装され得る。この経路の knowledge 参照は読取権限で絞る。
+        # 非 direct(DB 由来の管理者設定モデル)は model アクセス検証済みで信頼するため素通し。
+        if metadata.get("direct"):
+            knowledge_files = filter_files_by_user_access(knowledge_files, user)
 
         files = form_data.get("files", [])
         files.extend(knowledge_files)
