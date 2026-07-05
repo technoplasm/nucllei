@@ -43,9 +43,19 @@ Upstream-Commit: <SHA>
 
 新リリースの存在確認(タグ・リリースノートの閲覧)は可。確認したら下記を更新する。
 
-- 確認済み最新 upstream タグ: **v0.9.6**(2026-07-04 確認、リリースノートレベルのみ。ソース未閲覧)
+- 確認済み最新 upstream タグ: **v0.10.2**(2026-07-05 確認、リリースノートレベルのみ。ソース未閲覧)
+
+過去の確認記録:
+
+- v0.9.6(2026-07-04)
+- v0.10.0(2026-06-29 公開): 共有フォルダ / コンテキスト自動要約 / Event function・webhook イベント基盤 / メモリー刷新 など大型。llens の DROP/放置領域が多く、取り込み対象なし
+- v0.10.1(2026-06-29 公開): 共有フォルダの hotfix のみ
+- v0.10.2(2026-07-01 公開): **セキュリティアドバイザリあり(アクセス制御系、一部は公開猶予で非開示)** — #24 で GHSA を追跡し、v0.6.5 に該当するものは外形情報から自前バックポートを判断する。ほか reasoning のストリーミング表示(#17 と同題材だが実装は見ない)
 
 ## リモート構成
 
 - `origin`: technoplasm/open-webui(本 fork)
-- `remote`: open-webui/open-webui(upstream)— fetch はタグ・リリース情報の把握用途に限定
+- upstream(open-webui/open-webui)は **remote 登録しない**。タグ確認は
+  `git ls-remote --tags https://github.com/open-webui/open-webui.git 'v*'`、
+  リリースノートは `gh api repos/open-webui/open-webui/releases/tags/<tag>` で行う
+  (誤 fetch によるソース混入を防ぐため)

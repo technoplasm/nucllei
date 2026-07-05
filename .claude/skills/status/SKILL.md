@@ -7,12 +7,16 @@ description: llens fork の現在地レポート。ロードマップ(issue #16)
 
 以下を順に収集し、最後に 1 つのレポートにまとめる。独立したコマンドは並列実行してよい。
 
-## 1. fork の進行状況(v0.6.5 基点からの自分の差分)
+ブランチモデル: `main` = upstream v0.6.5 分岐点(凍結)、`master` = 出荷、`develop` = 開発 head。
+v0.6.5 タグはローカルに存在しないため、基点参照は常に `origin/main` を使う。
+
+## 1. fork の進行状況(v0.6.5 基点 = origin/main からの自分の差分)
 
 ```bash
-git log --oneline v0.6.5..HEAD | head -20   # 基点からの自コミット
-git diff --stat v0.6.5...HEAD | tail -3     # 変更規模
-git status --short                           # 未コミットの作業
+git log --oneline origin/main..develop | head -20   # 基点からの自コミット
+git diff --stat origin/main...develop | tail -3     # 変更規模
+git status --short                                   # 未コミットの作業
+git log --oneline master..develop | wc -l            # 未出荷コミット数(develop が master より先行している分)
 ```
 
 ## 2. ロードマップ進捗
@@ -24,21 +28,22 @@ gh issue list -R technoplasm/open-webui --state closed --json number,title
 ```
 
 closed issue をフェーズ順(Phase 0 → 4)に照らし、「どのフェーズまで完了しているか」を判定する。
+#16 のチェックリストと closed 状態がズレていたら報告する(実装コミットがあるのに open のままの issue も含む)。
 
 ## 3. テスト状態(CORE 保護)
 
-CORE 回帰テスト(issue #3 以降で整備)が存在する場合は実行する:
+プロジェクトの venv(リポジトリ直下 `.venv`)の pytest で実行する:
 
 ```bash
-cd backend && pytest open_webui/test -q 2>&1 | tail -5
+cd backend && ../.venv/bin/pytest open_webui/test -q 2>&1 | tail -5
 ```
 
-テストが未整備の段階では「CORE 保護テスト未整備(issue #3 未着手)」と報告する。
+## 4. upstream 新リリース確認(タグ名レベルのみ)
 
-## 4. upstream 新リリース確認(タグ・リリースノートレベルのみ)
+upstream の remote は意図的に登録していない。タグ名だけを ls-remote で確認する:
 
 ```bash
-git fetch remote --tags --quiet && git tag --list 'v*' | sort -V | tail -3
+git ls-remote --tags https://github.com/open-webui/open-webui.git 'v*' | awk -F/ '{print $3}' | grep -v '\^{}' | sort -V | tail -3
 ```
 
 `_memos/upstream-policy.md` の「確認済み最新 upstream タグ」と比較し、新しいタグがあれば報告する。
@@ -50,8 +55,8 @@ git fetch remote --tags --quiet && git tag --list 'v*' | sort -V | tail -3
 以下の形式でまとめる:
 
 - **現在フェーズ**: Phase N(完了: #x, #y / 進行中: #z)
-- **fork の差分規模**: v0.6.5 から N コミット、M ファイル変更
+- **fork の差分規模**: v0.6.5(origin/main)から N コミット、M ファイル変更。master への未出荷 K コミット
 - **テスト**: green / red / 未整備
 - **upstream**: 新リリース有無(あればタグ名のみ)
 - **次の一手**: ロードマップ #16 のフェーズ順で、未着手の最若番 issue を根拠付きで提案。
-  ただし依存関係を優先する(例: #17 は #3 のテスト整備後が安全、#5 は #4 と統合して進める)。
+  ただし依存関係を優先する(例: #29 は #17 の前提、#26 は #17 のフロント実装前に決定)。
