@@ -81,7 +81,10 @@ from open_webui.utils.filter import (
     process_filter_functions,
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
-from open_webui.utils.content_blocks import snapshot_content_blocks
+from open_webui.utils.content_blocks import (
+    serialize_text_blocks,
+    snapshot_content_blocks,
+)
 
 from open_webui.tasks import create_task
 
@@ -1506,22 +1509,13 @@ async def process_chat_response(
                 }
             ]
 
-            # We might want to disable this by default
-            DETECT_REASONING = True
+            # llens(#17): reasoning は SGLang reasoning parser 有効が接続契約で、
+            # 常に reasoning_content デルタとして届く。content 中の生 <think> タグ
+            # 検出(旧 DETECT_REASONING)は契約外につき削除(_memos/rendering-design.md §3)。
             DETECT_SOLUTION = True
             DETECT_CODE_INTERPRETER = metadata.get("features", {}).get(
                 "code_interpreter", False
             )
-
-            reasoning_tags = [
-                ("think", "/think"),
-                ("thinking", "/thinking"),
-                ("reason", "/reason"),
-                ("reasoning", "/reasoning"),
-                ("thought", "/thought"),
-                ("Thought", "/Thought"),
-                ("|begin_of_thought|", "|end_of_thought|"),
-            ]
 
             code_interpreter_tags = [("code_interpreter", "/code_interpreter")]
 
@@ -1621,7 +1615,7 @@ async def process_chat_response(
                                     if delta_tool_calls:
                                         if close_open_reasoning_block(content_blocks):
                                             data = {
-                                                "content": serialize_content_blocks(
+                                                "content": serialize_text_blocks(
                                                     content_blocks
                                                 ),
                                                 "content_blocks": snapshot_content_blocks(
@@ -1704,7 +1698,7 @@ async def process_chat_response(
                                         reasoning_block["content"] += reasoning_content
 
                                         data = {
-                                            "content": serialize_content_blocks(
+                                            "content": serialize_text_blocks(
                                                 content_blocks
                                             ),
                                             "content_blocks": snapshot_content_blocks(
@@ -1749,16 +1743,6 @@ async def process_chat_response(
                                             content_blocks[-1]["content"] + value
                                         )
 
-                                        if DETECT_REASONING:
-                                            content, content_blocks, _ = (
-                                                tag_content_handler(
-                                                    "reasoning",
-                                                    reasoning_tags,
-                                                    content,
-                                                    content_blocks,
-                                                )
-                                            )
-
                                         if DETECT_CODE_INTERPRETER:
                                             content, content_blocks, end = (
                                                 tag_content_handler(
@@ -1788,7 +1772,7 @@ async def process_chat_response(
                                                 metadata["chat_id"],
                                                 metadata["message_id"],
                                                 {
-                                                    "content": serialize_content_blocks(
+                                                    "content": serialize_text_blocks(
                                                         content_blocks
                                                     ),
                                                     "content_blocks": snapshot_content_blocks(
@@ -1798,7 +1782,7 @@ async def process_chat_response(
                                             )
                                         else:
                                             data = {
-                                                "content": serialize_content_blocks(
+                                                "content": serialize_text_blocks(
                                                     content_blocks
                                                 ),
                                                 "content_blocks": snapshot_content_blocks(
@@ -1871,7 +1855,7 @@ async def process_chat_response(
                         {
                             "type": "chat:completion",
                             "data": {
-                                "content": serialize_content_blocks(content_blocks),
+                                "content": serialize_text_blocks(content_blocks),
                                 "content_blocks": snapshot_content_blocks(content_blocks),
                             },
                         }
@@ -1984,7 +1968,7 @@ async def process_chat_response(
                         {
                             "type": "chat:completion",
                             "data": {
-                                "content": serialize_content_blocks(content_blocks),
+                                "content": serialize_text_blocks(content_blocks),
                                 "content_blocks": snapshot_content_blocks(content_blocks),
                             },
                         }
@@ -2052,7 +2036,7 @@ async def process_chat_response(
                             {
                                 "type": "chat:completion",
                                 "data": {
-                                    "content": serialize_content_blocks(content_blocks),
+                                    "content": serialize_text_blocks(content_blocks),
                                     "content_blocks": snapshot_content_blocks(content_blocks),
                                 },
                             }
@@ -2190,7 +2174,7 @@ async def process_chat_response(
                             {
                                 "type": "chat:completion",
                                 "data": {
-                                    "content": serialize_content_blocks(content_blocks),
+                                    "content": serialize_text_blocks(content_blocks),
                                     "content_blocks": snapshot_content_blocks(content_blocks),
                                 },
                             }
@@ -2226,7 +2210,7 @@ async def process_chat_response(
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 data = {
                     "done": True,
-                    "content": serialize_content_blocks(content_blocks),
+                    "content": serialize_text_blocks(content_blocks),
                     "content_blocks": snapshot_content_blocks(content_blocks),
                     "title": title,
                 }
@@ -2237,7 +2221,7 @@ async def process_chat_response(
                         metadata["chat_id"],
                         metadata["message_id"],
                         {
-                            "content": serialize_content_blocks(content_blocks),
+                            "content": serialize_text_blocks(content_blocks),
                             "content_blocks": snapshot_content_blocks(content_blocks),
                         },
                     )
@@ -2276,7 +2260,7 @@ async def process_chat_response(
                         metadata["chat_id"],
                         metadata["message_id"],
                         {
-                            "content": serialize_content_blocks(content_blocks),
+                            "content": serialize_text_blocks(content_blocks),
                             "content_blocks": snapshot_content_blocks(content_blocks),
                         },
                     )

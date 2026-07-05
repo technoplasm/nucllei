@@ -6,6 +6,20 @@ message 永続化で共用する最小形へ落とす。消費者のいないフ
 """
 
 
+def serialize_text_blocks(content_blocks: list) -> str:
+    """text ブロックのみを join した派生 content。
+
+    永続化 message.content・イベント content はこれになる(会話検索・タイトル
+    生成・API 互換・コピー用)。reasoning / tool_calls は content_blocks が
+    正であり、details 擬似 HTML には二度と直列化しない(#17 L0)。
+    """
+    return "\n\n".join(
+        block["content"]
+        for block in content_blocks
+        if block.get("type") == "text" and block.get("content")
+    )
+
+
 def snapshot_content_blocks(content_blocks: list) -> list:
     """内部 content_blocks を wire 形の累積スナップショットに変換する。
 

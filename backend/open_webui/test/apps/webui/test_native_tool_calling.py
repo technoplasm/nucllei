@@ -415,7 +415,7 @@ def test_reasoning_not_leaked_into_followup_content(monkeypatch):
     reasoning_then_tool は reasoning + 実応答 text + tool call を含む。継続リクエストの
     assistant メッセージ content には実応答 text だけが載り、UI 用の
     <details type="reasoning"> マークアップは含まれないこと。ただし UI への emit
-    (chat:completion content イベント)には reasoning が残っていること。
+    (chat:completion の content_blocks)には reasoning が残っていること。
     """
     events, completion_calls, _ = asyncio.run(
         _drive_tool_call_loop(
@@ -432,14 +432,11 @@ def test_reasoning_not_leaked_into_followup_content(monkeypatch):
     # モデル向け履歴に reasoning の UI マークアップが漏れていない
     assert '<details type="reasoning"' not in (assistant.get("content") or "")
 
-    # UI への emit には reasoning が残っている(表示は維持)
-    emitted = "".join(
-        e.get("data", {}).get("content", "")
-        for e in events
-        if e.get("type") == "chat:completion"
-        and isinstance(e.get("data", {}).get("content"), str)
-    )
-    assert '<details type="reasoning"' in emitted
+    # UI への emit(content_blocks)には reasoning が残っている(表示は維持)。
+    # content 文字列は text join 派生値なので reasoning を含まない(#17 L0)
+    final = _final_done_data(events)
+    assert any(b["type"] == "reasoning" for b in final["content_blocks"])
+    assert "<details" not in final["content"]
 
 
 def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
@@ -472,15 +469,9 @@ def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
     assert '<details type="reasoning"' not in content
 
 
-def _final_done_content(events):
-    """最終 chat:completion(done=True)イベントの content を返す。"""
-    finals = [
-        e["data"]
-        for e in events
-        if e.get("type") == "chat:completion" and e.get("data", {}).get("done")
-    ]
-    assert finals, "done=True の最終イベントが emit されていない"
-    return finals[-1].get("content", "")
+def _reasoning_states(data):
+    """final data の content_blocks から reasoning の done 状態を列挙する。"""
+    return [b["done"] for b in data["content_blocks"] if b["type"] == "reasoning"]
 
 
 def test_reasoning_closes_when_tool_calls_arrive_without_content(monkeypatch):
@@ -512,9 +503,8 @@ def test_reasoning_closes_when_tool_calls_arrive_without_content(monkeypatch):
     )
     assert len(completion_calls) == 1
 
-    content = _final_done_content(events)
-    assert '<details type="reasoning" done="true"' in content
-    assert '<details type="reasoning" done="false"' not in content
+    states = _reasoning_states(_final_done_data(events))
+    assert states and all(states), states
 
 
 def test_reasoning_closes_at_stream_end_on_client_cut(monkeypatch):
@@ -534,9 +524,8 @@ def test_reasoning_closes_at_stream_end_on_client_cut(monkeypatch):
     # tool call は発生しない(継続リクエスト無し)
     assert len(completion_calls) == 0
 
-    content = _final_done_content(events)
-    assert '<details type="reasoning" done="true"' in content
-    assert '<details type="reasoning" done="false"' not in content
+    states = _reasoning_states(_final_done_data(events))
+    assert states and all(states), states
 
 
 def test_tool_call_iteration_cap_emits_chat_error(monkeypatch):
@@ -770,7 +759,8 @@ def test_content_blocks_final_event_reasoning_and_text(monkeypatch):
     )
     assert len(completion_calls) == 0
 
-    blocks = _final_done_data(events).get("content_blocks")
+    final = _final_done_data(events)
+    blocks = final.get("content_blocks")
     assert blocks is not None
     assert [b["type"] for b in blocks] == ["reasoning", "text"]
 
@@ -780,6 +770,8 @@ def test_content_blocks_final_event_reasoning_and_text(monkeypatch):
     assert reasoning["content"] == _joined_deltas("reasoning", "reasoning_content")
     # text はデルタ結合そのまま(終端で末尾ブロックの両端 strip のみ)
     assert text["content"] == _joined_deltas("reasoning", "content").strip()
+    # content 文字列は text ブロック join の派生値(details 直列化はしない)
+    assert final["content"] == text["content"]
 
 
 def test_content_blocks_streaming_snapshot_marks_open_reasoning(monkeypatch):
