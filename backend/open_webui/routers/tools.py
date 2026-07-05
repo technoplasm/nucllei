@@ -224,6 +224,19 @@ async def update_tools_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
+    # llens(GHSA-p4fx-23fq-jfg6 / CVE-2026-45395): tool の Python ソース(content)を
+    # 書き換える更新は、作成と同じ workspace.tools 権限(または admin)を要求する。
+    # write 共有だけのユーザーがソースを差し替えてコード実行に至るのを防ぐ。
+    # メタデータのみの更新(content 不変)は従来どおり write アクセスで許可。
+    if form_data.content != tools.content:
+        if user.role != "admin" and not has_permission(
+            user.id, "workspace.tools", request.app.state.config.USER_PERMISSIONS
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.UNAUTHORIZED,
+            )
+
     try:
         form_data.content = replace_imports(form_data.content)
         tool_module, frontmatter = load_tool_module_by_id(id, content=form_data.content)
