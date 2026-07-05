@@ -54,7 +54,12 @@
 				}}
 				className="w-full space-y-1 mb-1.5"
 			>
-				<!-- reasoning は markdown として解釈しない(#17 決定) -->
+				<!--
+					reasoning は markdown として解釈しない(#17 決定)。
+					XSS 不変条件: reasoning は必ず Svelte のテキスト補間({block.content})で
+					出すこと。{@html} に変えてはならない(9f4f 監査 2026-07-06: 生 <think>
+					内容はモデル出力でありサニタイズ対象。テキスト補間なら構造的に無害)。
+				-->
 				<div
 					class="mb-1.5 text-sm text-gray-500 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3 whitespace-pre-wrap"
 					slot="content"
