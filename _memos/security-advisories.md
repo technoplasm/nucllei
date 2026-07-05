@@ -36,6 +36,10 @@
 | GHSA-h3ww-q6xx-w7x3 / CVE-2026-45675 | HIGH | LDAP/OAuth 初回ユーザ競合→複数 admin | (本コミット) | #38 |
 | GHSA-57q6-fvp4-pqmm / CVE-2026-45339 | HIGH | API キーの制限エンドポイント回避(空 allowlist で全許可) | (本コミット) | #38 |
 | GHSA-7rw5-9f7q-xj36 | HIGH | ログインタイミングによるアカウント列挙 | (本コミット) | #38 |
+| GHSA-v8qj-hxv7-mgvv | (MED) | mermaid securityLevel 'loose' で図ラベル/click から XSS | (本コミット) | #36 |
+| GHSA-r29h-37fj-x2w6 | (MED) | SVG レンダラ(SVGPanZoom)未サニタイズ | (本コミット) | #36 |
+| GHSA-cqp4-qqvg-3787 | (MED) | Banner のサニタイズ順誤り(sanitize→parse) | (本コミット) | #36 |
+| GHSA-gf5m-wcrh-7928 | (MED) | Model Description の marked 出力未サニタイズ | (本コミット) | #36 |
 
 **#38 残の修正範囲(2026-07-05)**: 認証系 3 件(CRITICAL の LDAP 空 PW は 03e9a9783 で出荷済み)。
 - **h3ww(複数 admin)**: `Auths.insert_new_auth` に `promote_first_user_to_admin` を追加し、
@@ -46,6 +50,20 @@
   既定 `""` や末尾カンマだと `[""]` → `startswith("/")` で全 path 一致し制限が全許可に無効化されていた。空リスト=全拒否に。
 - **7rw5(タイミング列挙)**: `authenticate_user` がユーザー不在時も**固定ダミーハッシュで bcrypt 検証**を実行し応答時間を一定化。
 - 回帰テスト: `test/apps/webui/routers/test_auths.py`(6 ケース。旧コードで落ちる: 空 allowlist=200、不在時 verify 未実行 等)。
+
+**#36 の部分修正(2026-07-05、レンダリング刷新 #17 と衝突しない自己完結な面のみ)**:
+- **コア markdown の html トークンは既に DOMPurify 済み**(`MarkdownTokens.svelte` / `MarkdownInlineTokens.svelte`、
+  iframe は `sanitizeIframeHtml`=7c8eba59b)。9f4f 相当のチャット本文経路はサニタイズ済みと確認。
+- **v8qj(mermaid)**: `CodeBlock.svelte` の `securityLevel` を `'loose'`→`'strict'`(ラベル HTML/click を無効化)。
+- **r29h(SVG)**: `SVGPanZoom.svelte` の `{@html svg}` に `DOMPurify.sanitize` を適用(import 済みだが未使用だった)。
+- **cqp4(Banner)**: `DOMPurify.sanitize(marked.parse(...))` へ順序修正(旧: 生 md を sanitize→parse は生成 HTML 素通し)。
+- **gf5m(Model Description)**: `ChatPlaceholder.svelte` / `Placeholder.svelte` の marked 出力を DOMPurify で包む。
+- 型チェック(svelte-check)は変更行にエラー無し。**mermaid/Artifacts の描画は視覚スモーク未実施**(#12 に合流可能。
+  strict は mermaid 既定で図は描画されるが HTML ラベルは文字表示・click 無効になる)。
+- **#36 残(未着手、フロント/mixed でより結合的)**: 8gh5(HTML アップロード配信の無害化)、w7xj(Rich Text 挿入)、
+  jwf8/hcwp(Excel/DOCX プレビュー {@html})、6gh2(Profile Picture)、fq3v(Pending User Overlay)、
+  3vv5(postMessage)、3wgj(OAuth picture SVG)、xc8p/vjm7(iframe 埋め込みの残バリアント)。
+  9f4f(MarkdownTokens 本体)はコア済みだが #17 レンダリング刷新で再検証する。
 
 **#40 の修正範囲(2026-07-05)**: file_id / collection 参照の読取権限突合を一元化。
 - `utils/access_control.py` に `has_read_access_to_file` / `has_read_access_to_collection` を新設

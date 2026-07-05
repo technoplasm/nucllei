@@ -49,7 +49,9 @@
 
 <div bind:this={sceneParentElement} class="relative {className}">
 	<div bind:this={sceneElement} class="flex h-full max-h-full justify-center items-center">
-		{@html svg}
+		<!-- llens(GHSA-r29h-37fj-x2w6): SVG レンダラの XSS 対策。mermaid/Artifacts 由来の
+		     SVG を DOMPurify で無害化(script / on* ハンドラ / foreignObject 内の危険 HTML を除去)。 -->
+		{@html DOMPurify.sanitize(svg)}
 	</div>
 
 	{#if content}

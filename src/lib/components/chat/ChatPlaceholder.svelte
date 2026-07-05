@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
@@ -95,8 +96,12 @@
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
-							{@html marked.parse(
-								sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
+							<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
+							     DOMPurify で無害化(javascript: リンク等を除去)。 -->
+							{@html DOMPurify.sanitize(
+								marked.parse(
+									sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
+								)
 							)}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}

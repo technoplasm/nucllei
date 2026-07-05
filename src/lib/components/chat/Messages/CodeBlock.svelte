@@ -273,17 +273,20 @@
 		if (lang) {
 			onCode({ lang, code });
 		}
+		// llens(GHSA-v8qj-hxv7-mgvv): securityLevel 'loose' はラベル内 HTML と click バインドを
+		// 許可し、モデル生成の mermaid コードから XSS が成立する。'strict' でラベルを
+		// エスケープ・click を無効化する(SVG は SVGPanZoom 側で DOMPurify も適用=多層防御)。
 		if (document.documentElement.classList.contains('dark')) {
 			mermaid.initialize({
 				startOnLoad: true,
 				theme: 'dark',
-				securityLevel: 'loose'
+				securityLevel: 'strict'
 			});
 		} else {
 			mermaid.initialize({
 				startOnLoad: true,
 				theme: 'default',
-				securityLevel: 'loose'
+				securityLevel: 'strict'
 			});
 		}
 	});
