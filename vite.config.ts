@@ -37,6 +37,13 @@ export default defineConfig({
 	build: {
 		sourcemap: true
 	},
+	server: {
+		watch: {
+			// _links/ 配下の symlink ループ(llens ⇄ cage)を watcher が辿ると
+			// ELOOP / OOM で dev サーバが落ちる
+			ignored: ['**/_links/**']
+		}
+	},
 	worker: {
 		format: 'es'
 	},

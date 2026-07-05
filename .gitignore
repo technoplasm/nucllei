@@ -311,3 +311,4 @@ _links/
 !.claude/
 .claude/settings.local.json
 /llens
+.playwright-mcp/
