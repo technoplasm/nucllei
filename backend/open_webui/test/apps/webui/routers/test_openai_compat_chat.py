@@ -47,11 +47,36 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
         else:
             self._json({"error": "not found"}, 404)
 
+    def _sse(self, payloads):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        for item in payloads:
+            chunk = item if isinstance(item, str) else json.dumps(item)
+            self.wfile.write(f"data: {chunk}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
         if self.path.rstrip("/") == "/v1/chat/completions":
             self.server.received.append(payload)
+            if payload.get("stream"):
+                self._sse(
+                    [
+                        {
+                            "id": "chatcmpl-mock",
+                            "object": "chat.completion.chunk",
+                            "created": 0,
+                            "model": payload.get("model"),
+                            "choices": [
+                                {"index": 0, "delta": {"content": text}}
+                            ],
+                        }
+                        for text in ["chunk-1", "chunk-2"]
+                    ]
+                )
+                return
             last_user = ""
             for message in reversed(payload.get("messages", [])):
                 if message.get("role") == "user":
@@ -95,6 +120,20 @@ class Filter:
     def outlet(self, body: dict) -> dict:
         body.setdefault("outlet_trace", []).append("e2e-filter")
         return body
+'''
+
+
+STREAM_FILTER_CONTENT = '''
+class Filter:
+    def stream(self, event):
+        # セッションメタデータ無しの SSE パススルー経路では、event は
+        # 生の SSE チャンク(bytes / str)として渡ってくる
+        # (middleware.py stream_wrapper。dict になるのはセッションあり経路のみ)
+        if isinstance(event, (bytes, bytearray)):
+            return event.replace(b"chunk", b"CHUNK")
+        if isinstance(event, str):
+            return event.replace("chunk", "CHUNK")
+        return event
 '''
 
 
@@ -207,6 +246,60 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert sent["messages"][-1]["content"] == "hi [inlet]"
         data = response.json()
         assert data["choices"][0]["message"]["content"] == "echo:hi [inlet]"
+
+    def test_streaming_chat_completion_passthrough(self):
+        """stream=True の SSE がそのままクライアントへ返る(最小構成)。"""
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "mock-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+        assert response.status_code == 200, response.text
+        assert "text/event-stream" in response.headers["content-type"]
+        assert "chunk-1" in response.text
+        assert "chunk-2" in response.text
+        assert "[DONE]" in response.text
+
+    def test_stream_filter_applies_on_sse(self):
+        """global stream フィルタが SSE チャンクに適用される(issue #3)。"""
+        from open_webui.models.functions import (
+            FunctionForm,
+            FunctionMeta,
+            Functions,
+        )
+
+        Functions.insert_new_function(
+            user_id="1",
+            type="filter",
+            form_data=FunctionForm(
+                id="stream_filter",
+                name="stream_filter",
+                content=STREAM_FILTER_CONTENT,
+                meta=FunctionMeta(description=None, manifest={}),
+            ),
+        )
+        Functions.update_function_by_id(
+            "stream_filter", {"is_active": True, "is_global": True}
+        )
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "mock-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+        assert response.status_code == 200, response.text
+        # stream フィルタによる加工が SSE 出力へ反映されている
+        assert "CHUNK-1" in response.text
+        assert "CHUNK-2" in response.text
+        assert "chunk-1" not in response.text
 
     def test_outlet_filter_applies_on_completed(self):
         """/api/chat/completed で global outlet フィルタが応答に適用される。"""
