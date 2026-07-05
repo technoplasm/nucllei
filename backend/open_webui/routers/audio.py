@@ -97,7 +97,9 @@ def convert_audio_to_wav(file_path, output_path, conversion_type):
     log.info(f"Converted {file_path} to {output_path}")
 
 
-def set_faster_whisper_model(model: str, auto_update: bool = False):
+def set_faster_whisper_model(
+    model: str, auto_update: bool = False, compute_type: str = "int8"
+):
     whisper_model = None
     if model:
         from faster_whisper import WhisperModel
@@ -105,7 +107,7 @@ def set_faster_whisper_model(model: str, auto_update: bool = False):
         faster_whisper_kwargs = {
             "model_size_or_path": model,
             "device": DEVICE_TYPE if DEVICE_TYPE and DEVICE_TYPE == "cuda" else "cpu",
-            "compute_type": "int8",
+            "compute_type": compute_type,
             "download_root": WHISPER_MODEL_DIR,
             "local_files_only": not auto_update,
         }
@@ -213,7 +215,9 @@ async def update_audio_config(
 
     if request.app.state.config.STT_ENGINE == "":
         request.app.state.faster_whisper_model = set_faster_whisper_model(
-            form_data.stt.WHISPER_MODEL, WHISPER_MODEL_AUTO_UPDATE
+            form_data.stt.WHISPER_MODEL,
+            WHISPER_MODEL_AUTO_UPDATE,
+            compute_type=request.app.state.config.WHISPER_COMPUTE_TYPE,
         )
 
     return {
@@ -493,7 +497,8 @@ def transcribe(request: Request, file_path):
     if request.app.state.config.STT_ENGINE == "":
         if request.app.state.faster_whisper_model is None:
             request.app.state.faster_whisper_model = set_faster_whisper_model(
-                request.app.state.config.WHISPER_MODEL
+                request.app.state.config.WHISPER_MODEL,
+                compute_type=request.app.state.config.WHISPER_COMPUTE_TYPE,
             )
 
         model = request.app.state.faster_whisper_model
@@ -501,6 +506,8 @@ def transcribe(request: Request, file_path):
             file_path,
             beam_size=5,
             vad_filter=request.app.state.config.WHISPER_VAD_FILTER,
+            # llens: 言語固定(空なら従来通り自動判定)。北大運用は ja 固定
+            language=request.app.state.config.WHISPER_LANGUAGE or None,
         )
         log.info(
             "Detected language '%s' with probability %f"

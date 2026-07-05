@@ -2522,6 +2522,21 @@ WHISPER_VAD_FILTER = PersistentConfig(
     os.getenv("WHISPER_VAD_FILTER", "False").lower() == "true",
 )
 
+# llens 追加(issue #12 キャッチアップ、_memos/prod-config-snapshot.md):
+# 認識言語の固定(空 = 自動判定)。北大運用では ja 固定を推奨
+WHISPER_LANGUAGE = PersistentConfig(
+    "WHISPER_LANGUAGE",
+    "audio.stt.whisper_language",
+    os.getenv("WHISPER_LANGUAGE", ""),
+)
+
+# llens 追加: faster-whisper の compute_type(従来は int8 固定だった)
+WHISPER_COMPUTE_TYPE = PersistentConfig(
+    "WHISPER_COMPUTE_TYPE",
+    "audio.stt.whisper_compute_type",
+    os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
+)
+
 
 # Add Deepgram configuration
 DEEPGRAM_API_KEY = PersistentConfig(
