@@ -21,3 +21,9 @@
 
 - `uv sync` で backend 依存を導入(重量 ML 依存は `local-ml` extra に分離済み)。
 - バックエンドテスト: `backend/open_webui/test/` 配下、pytest。
+
+## svelte-check の状態(2026-07-05)
+
+- `pnpm check`(svelte-check)は v0.6.5 ベースラインで **5056 errors / 67 warnings / 226 files**。
+  upstream も green にしていない領域のため CI には入れていない(lint 再有効化は issue #25 の残タスク)。
+- `pnpm build`(vite build)と `pnpm test:frontend`(vitest)は green。CI 必須化済み。
