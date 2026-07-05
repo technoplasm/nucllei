@@ -408,6 +408,24 @@ class SPAStaticFiles(StaticFiles):
                 raise ex
 
 
+class CacheStaticFiles(StaticFiles):
+    # llens(GHSA-m8f9-9whg-f4xr): /cache は無認証で公開配信される。万一アクティブ型の
+    # ファイル(HTML/SVG/JS)が置かれてもブラウザで実行されないよう、危険な content-type
+    # は添付ダウンロード扱いにし、MIME スニッフィングも無効化する。音声・画像等の
+    # メディアは inline のまま(Content-Disposition を付けない)。
+    ACTIVE_TYPES = ("text/html", "application/xhtml+xml", "image/svg+xml")
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        content_type = (
+            response.headers.get("content-type", "").split(";")[0].strip().lower()
+        )
+        if content_type in self.ACTIVE_TYPES or "javascript" in content_type:
+            response.headers["Content-Disposition"] = "attachment"
+        return response
+
+
 print(
     rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
@@ -1484,7 +1502,7 @@ async def healthcheck_with_db():
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+app.mount("/cache", CacheStaticFiles(directory=CACHE_DIR), name="cache")
 
 
 def swagger_ui_html(*args, **kwargs):

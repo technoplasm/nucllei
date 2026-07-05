@@ -781,7 +781,25 @@ def transcription(
         )
 
     try:
-        ext = file.filename.split(".")[-1]
+        # llens(GHSA-m8f9-9whg-f4xr / CVE-2026-45315): 保存拡張子をユーザー提供の
+        # filename から取ると、audio content-type を詐称した polyglot(WAV+HTML)を
+        # .html 等で保存でき、無認証の /cache 配信で Content-Type が text/html と
+        # 推測され Stored XSS になる。検証済み content-type から安全な音声拡張子を
+        # サーバ側で決める(結果は必ず非アクティブな音声拡張子に限定される)。
+        content_type_to_ext = {
+            "audio/mpeg": "mp3",
+            "audio/wav": "wav",
+            "audio/ogg": "ogg",
+            "audio/x-m4a": "m4a",
+        }
+        ext = next(
+            (
+                e
+                for ct, e in content_type_to_ext.items()
+                if file.content_type.startswith(ct)
+            ),
+            "bin",
+        )
         id = uuid.uuid4()
 
         filename = f"{id}.{ext}"
