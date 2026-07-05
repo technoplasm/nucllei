@@ -318,6 +318,16 @@ ENABLE_REALTIME_CHAT_SAVE = (
     os.environ.get("ENABLE_REALTIME_CHAT_SAVE", "False").lower() == "true"
 )
 
+# llens: native function calling のツール呼び出し反復上限(issue #18)。
+# -1 で無制限。上限到達時はチャット内にエラーを表示する。
+CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = os.environ.get(
+    "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS", "30"
+)
+try:
+    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = int(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)
+except ValueError:
+    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = 30
+
 ####################################
 # REDIS
 ####################################

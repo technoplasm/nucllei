@@ -6,7 +6,6 @@ import base64
 
 import asyncio
 from aiocache import cached
-from typing import Any, Optional
 import random
 import json
 import html
@@ -56,7 +55,6 @@ from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.task import (
     get_task_model_id,
     rag_template,
-    tools_function_calling_generation_template,
 )
 from open_webui.utils.misc import (
     deep_update,
@@ -80,13 +78,13 @@ from open_webui.tasks import create_task
 
 from open_webui.config import (
     CACHE_DIR,
-    DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     DEFAULT_CODE_INTERPRETER_PROMPT,
 )
 from open_webui.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
     BYPASS_MODEL_ACCESS_CONTROL,
+    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     ENABLE_REALTIME_CHAT_SAVE,
 )
 from open_webui.constants import TASKS
@@ -95,199 +93,6 @@ from open_webui.constants import TASKS
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
-
-
-async def chat_completion_tools_handler(
-    request: Request, body: dict, extra_params: dict, user: UserModel, models, tools
-) -> tuple[dict, dict]:
-    async def get_content_from_response(response) -> Optional[str]:
-        content = None
-        if hasattr(response, "body_iterator"):
-            async for chunk in response.body_iterator:
-                data = json.loads(chunk.decode("utf-8"))
-                content = data["choices"][0]["message"]["content"]
-
-            # Cleanup any remaining background tasks if necessary
-            if response.background is not None:
-                await response.background()
-        else:
-            content = response["choices"][0]["message"]["content"]
-        return content
-
-    def get_tools_function_calling_payload(messages, task_model_id, content):
-        user_message = get_last_user_message(messages)
-        history = "\n".join(
-            f"{message['role'].upper()}: \"\"\"{message['content']}\"\"\""
-            for message in messages[::-1][:4]
-        )
-
-        prompt = f"History:\n{history}\nQuery: {user_message}"
-
-        return {
-            "model": task_model_id,
-            "messages": [
-                {"role": "system", "content": content},
-                {"role": "user", "content": f"Query: {prompt}"},
-            ],
-            "stream": False,
-            "metadata": {"task": str(TASKS.FUNCTION_CALLING)},
-        }
-
-    event_caller = extra_params["__event_call__"]
-    metadata = extra_params["__metadata__"]
-
-    task_model_id = get_task_model_id(
-        body["model"],
-        request.app.state.config.TASK_MODEL,
-        request.app.state.config.TASK_MODEL_EXTERNAL,
-        models,
-    )
-
-    skip_files = False
-    sources = []
-
-    specs = [tool["spec"] for tool in tools.values()]
-    tools_specs = json.dumps(specs)
-
-    if request.app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE != "":
-        template = request.app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
-    else:
-        template = DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
-
-    tools_function_calling_prompt = tools_function_calling_generation_template(
-        template, tools_specs
-    )
-    payload = get_tools_function_calling_payload(
-        body["messages"], task_model_id, tools_function_calling_prompt
-    )
-
-    try:
-        response = await generate_chat_completion(request, form_data=payload, user=user)
-        log.debug(f"{response=}")
-        content = await get_content_from_response(response)
-        log.debug(f"{content=}")
-
-        if not content:
-            return body, {}
-
-        try:
-            content = content[content.find("{") : content.rfind("}") + 1]
-            if not content:
-                raise Exception("No JSON object found in the response")
-
-            result = json.loads(content)
-
-            async def tool_call_handler(tool_call):
-                nonlocal skip_files
-
-                log.debug(f"{tool_call=}")
-
-                tool_function_name = tool_call.get("name", None)
-                if tool_function_name not in tools:
-                    return body, {}
-
-                tool_function_params = tool_call.get("parameters", {})
-
-                try:
-                    tool = tools[tool_function_name]
-
-                    spec = tool.get("spec", {})
-                    allowed_params = (
-                        spec.get("parameters", {}).get("properties", {}).keys()
-                    )
-                    tool_function_params = {
-                        k: v
-                        for k, v in tool_function_params.items()
-                        if k in allowed_params
-                    }
-
-                    if tool.get("direct", False):
-                        tool_result = await event_caller(
-                            {
-                                "type": "execute:tool",
-                                "data": {
-                                    "id": str(uuid4()),
-                                    "name": tool_function_name,
-                                    "params": tool_function_params,
-                                    "server": tool.get("server", {}),
-                                    "session_id": metadata.get("session_id", None),
-                                },
-                            }
-                        )
-                    else:
-                        tool_function = tool["callable"]
-                        tool_result = await tool_function(**tool_function_params)
-
-                except Exception as e:
-                    tool_result = str(e)
-
-                tool_result_files = []
-                if isinstance(tool_result, list):
-                    for item in tool_result:
-                        # check if string
-                        if isinstance(item, str) and item.startswith("data:"):
-                            tool_result_files.append(item)
-                            tool_result.remove(item)
-
-                if isinstance(tool_result, dict) or isinstance(tool_result, list):
-                    tool_result = json.dumps(tool_result, indent=2)
-
-                if isinstance(tool_result, str):
-                    tool = tools[tool_function_name]
-                    tool_id = tool.get("tool_id", "")
-
-                    tool_name = (
-                        f"{tool_id}/{tool_function_name}"
-                        if tool_id
-                        else f"{tool_function_name}"
-                    )
-                    if tool.get("metadata", {}).get("citation", False) or tool.get(
-                        "direct", False
-                    ):
-                        # Citation is enabled for this tool
-                        sources.append(
-                            {
-                                "source": {
-                                    "name": (f"TOOL:{tool_name}"),
-                                },
-                                "document": [tool_result],
-                                "metadata": [{"source": (f"TOOL:{tool_name}")}],
-                            }
-                        )
-                    else:
-                        # Citation is not enabled for this tool
-                        body["messages"] = add_or_update_user_message(
-                            f"\nTool `{tool_name}` Output: {tool_result}",
-                            body["messages"],
-                        )
-
-                    if (
-                        tools[tool_function_name]
-                        .get("metadata", {})
-                        .get("file_handler", False)
-                    ):
-                        skip_files = True
-
-            # check if "tool_calls" in result
-            if result.get("tool_calls"):
-                for tool_call in result.get("tool_calls"):
-                    await tool_call_handler(tool_call)
-            else:
-                await tool_call_handler(result)
-
-        except Exception as e:
-            log.debug(f"Error: {e}")
-            content = None
-    except Exception as e:
-        log.debug(f"Error: {e}")
-        content = None
-
-    log.debug(f"tool_contexts: {sources}")
-
-    if skip_files and "files" in body.get("metadata", {}):
-        del body["metadata"]["files"]
-
-    return body, {"sources": sources}
 
 
 async def chat_web_search_handler(
@@ -861,23 +666,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 }
 
     if tools_dict:
-        if metadata.get("function_calling") == "native":
-            # If the function calling is native, then call the tools function calling handler
-            metadata["tools"] = tools_dict
-            form_data["tools"] = [
-                {"type": "function", "function": tool.get("spec", {})}
-                for tool in tools_dict.values()
-            ]
-        else:
-            # If the function calling is not native, then call the tools function calling handler
-            try:
-                form_data, flags = await chat_completion_tools_handler(
-                    request, form_data, extra_params, user, models, tools_dict
-                )
-                sources.extend(flags.get("sources", []))
-
-            except Exception as e:
-                log.exception(e)
+        # llens: native function calling のみサポート(issue #18)。
+        # ツールがあれば常にモデルへ tool spec を渡す(function_calling パラメータは無視)。
+        metadata["tools"] = tools_dict
+        form_data["tools"] = [
+            {"type": "function", "function": tool.get("spec", {})}
+            for tool in tools_dict.values()
+        ]
 
     try:
         form_data, flags = await chat_completion_files_handler(request, form_data, user)
@@ -1853,11 +1648,15 @@ async def process_chat_response(
 
                 await stream_body_handler(response)
 
-                MAX_TOOL_CALL_RETRIES = 10
-                tool_call_retries = 0
+                # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
+                max_tool_call_iterations = CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
+                tool_call_iterations = 0
 
-                while len(tool_calls) > 0 and tool_call_retries < MAX_TOOL_CALL_RETRIES:
-                    tool_call_retries += 1
+                while len(tool_calls) > 0 and (
+                    max_tool_call_iterations < 0
+                    or tool_call_iterations < max_tool_call_iterations
+                ):
+                    tool_call_iterations += 1
 
                     response_tool_calls = tool_calls.pop(0)
 
@@ -2011,6 +1810,33 @@ async def process_chat_response(
                     except Exception as e:
                         log.debug(e)
                         break
+
+                if len(tool_calls) > 0:
+                    # llens: 反復上限に到達(issue #18)。黙って打ち切らず
+                    # チャット内にエラーを表示する。ループ内 break は現ターンの
+                    # tool_calls を pop 済み・新 group 未ストリームで空になるため、
+                    # ここに来るのは上限到達時のみ。
+                    log.warning(
+                        "Tool call iteration limit reached: "
+                        f"{max_tool_call_iterations} "
+                        "(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)"
+                    )
+                    await event_emitter(
+                        {
+                            "type": "chat:completion",
+                            "data": {
+                                "error": {
+                                    "content": (
+                                        "Tool call iteration limit reached "
+                                        f"({max_tool_call_iterations}). "
+                                        "Response stopped. Increase "
+                                        "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS "
+                                        "to allow more tool calls."
+                                    )
+                                },
+                            },
+                        }
+                    )
 
                 if DETECT_CODE_INTERPRETER:
                     MAX_RETRIES = 5

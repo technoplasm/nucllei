@@ -116,5 +116,4 @@ class TASKS(str, Enum):
     QUERY_GENERATION = "query_generation"
     IMAGE_PROMPT_GENERATION = "image_prompt_generation"
     AUTOCOMPLETE_GENERATION = "autocomplete_generation"
-    FUNCTION_CALLING = "function_calling"
     MOA_RESPONSE_GENERATION = "moa_response_generation"
