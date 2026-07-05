@@ -7,16 +7,18 @@ description: llens fork の現在地レポート。ロードマップ(issue #16)
 
 以下を順に収集し、最後に 1 つのレポートにまとめる。独立したコマンドは並列実行してよい。
 
-ブランチモデル: `main` = upstream v0.6.5 分岐点(凍結)、`master` = 出荷、`develop` = 開発 head。
+ブランチモデル(2026-07-05 に単一ブランチへ再編): `main` = upstream v0.6.5 分岐点(凍結)、
+`master` = 唯一の開発+出荷ヘッド。リリースは将来 tag で切る(旧 `develop` は master に統合・廃止済み)。
 v0.6.5 タグはローカルに存在しないため、基点参照は常に `origin/main` を使う。
 
 ## 1. fork の進行状況(v0.6.5 基点 = origin/main からの自分の差分)
 
 ```bash
-git log --oneline origin/main..develop | head -20   # 基点からの自コミット
-git diff --stat origin/main...develop | tail -3     # 変更規模
-git status --short                                   # 未コミットの作業
-git log --oneline master..develop | wc -l            # 未出荷コミット数(develop が master より先行している分)
+git log --oneline origin/main..master | head -20   # 基点からの自コミット
+git diff --stat origin/main...master | tail -3     # 変更規模
+git status --short                                  # 未コミットの作業
+git tag --list --sort=-v:refname | head -3          # 直近リリースタグ(未リリースなら空)
+git log --oneline "$(git describe --tags --abbrev=0 2>/dev/null || echo origin/main)..master" | wc -l  # 最新タグ(無ければ基点)からの未リリース分
 ```
 
 ## 2. ロードマップ進捗
@@ -56,7 +58,7 @@ git ls-remote --tags https://github.com/open-webui/open-webui.git 'v*' | awk -F/
 以下の形式でまとめる:
 
 - **現在フェーズ**: Phase N(完了: #x, #y / 進行中: #z)
-- **fork の差分規模**: v0.6.5(origin/main)から N コミット、M ファイル変更。master への未出荷 K コミット
+- **fork の差分規模**: v0.6.5(origin/main)から N コミット、M ファイル変更。最新リリースタグからの未リリース K コミット(タグ未作成なら基点から)
 - **テスト**: green / red / 未整備
 - **upstream**: 新リリース有無(あればタグ名のみ)
 - **次の一手**: #16 本文の実行順(⓪ → A〜H)で、未完了の最先頭項目を根拠付きで提案。

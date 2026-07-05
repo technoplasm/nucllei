@@ -111,7 +111,7 @@
 #### 移行期の判断(2026-07-05、step1 backend 実装時)
 
 - **prompt テーブル・prompts router・prompts 権限キーは移行期間中そのまま残す**
-  (旧フロントが prompts API に依存しており、両立させないと develop が壊れるため)。
+  (旧フロントが prompts API に依存しており、両立させないと master が壊れるため)。
   当初案の「router 削除・権限キー rename・group/user permissions の rename」は
   **frontend batch(picker/workspace の skills 置換)と同時に実施**する。
 - **picker 補完化と prompts 退役は frontend batch へ延期**(本 step は backend のみ)。
