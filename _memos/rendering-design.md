@@ -32,6 +32,12 @@ reasoning・tool call・引用などの機械構造を、markdown 文字列と�
 
 現行 prod(prism-hu/llens)はこれを 3 層(middleware join パッチ / outlet filter `md_setext_guard` / プロンプト指示)で抑えているが、いずれも対症療法。**根本原因は「1 本の文字列に混ぜて毎フレーム全文再パースする」アーキテクチャ**にある。
 
+同じ病理クラスの症状 2 方向(いずれも details 擬似 HTML 由来、L0 で構造的に消滅):
+- **閉じない**: reasoning が done=false のまま永続化(→ §3 閉じ規律で middleware 側は修正済み)
+- **吸い込む**(0.9.5 prod で観察・2026-07-06 報告): tool 実行が多くなると本文テキストが
+  思考の折りたたみ内に取り込まれ、**出力が空に見える**。details トークナイザの
+  深さカウント(`findMatchingClosingTag`)は details が多段に並ぶほど本文の帰属判定を壊しやすい。
+
 ---
 
 ## 2. 世の中の方策

@@ -46,6 +46,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
+	import ContentBlocks from './ContentBlocks.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 
@@ -777,7 +778,77 @@
 							</div>
 						{:else}
 							<div class="w-full flex flex-col relative" id="response-content-container">
-								{#if message.content === '' && !message.error}
+								{#if (message?.content_blocks ?? []).length > 0 && message.error !== true}
+									<!-- #17 L0: content_blocks があればブロックから直接描画(details 擬似 HTML を経由しない) -->
+									<ContentBlocks
+										id={message.id}
+										blocks={message.content_blocks}
+										{history}
+										sources={message.sources}
+										floatingButtons={message?.done && !readOnly}
+										save={!readOnly}
+										{model}
+										onTaskClick={async (e) => {
+											console.log(e);
+										}}
+										onSourceClick={async (id, idx) => {
+											let sourceButton = document.getElementById(`source-${message.id}-${idx}`);
+											const sourcesCollapsible = document.getElementById(
+												`collapsible-${message.id}`
+											);
+
+											if (sourceButton) {
+												sourceButton.click();
+											} else if (sourcesCollapsible) {
+												sourcesCollapsible
+													.querySelector('div:first-child')
+													.dispatchEvent(new PointerEvent('pointerup', {}));
+
+												await new Promise((resolve) => {
+													requestAnimationFrame(() => {
+														requestAnimationFrame(resolve);
+													});
+												});
+
+												sourceButton = document.getElementById(`source-${message.id}-${idx}`);
+												sourceButton && sourceButton.click();
+											}
+										}}
+										onAddMessages={({ modelId, parentId, messages }) => {
+											addMessages({ modelId, parentId, messages });
+										}}
+										onUpdate={(blockIdx, detail) => {
+											const { raw, oldContent, newContent } = detail;
+											const blocks = history.messages[message.id].content_blocks;
+
+											blocks[blockIdx] = {
+												...blocks[blockIdx],
+												content: blocks[blockIdx].content.replace(
+													raw,
+													raw.replace(oldContent, newContent)
+												)
+											};
+											history.messages[message.id].content = history.messages[
+												message.id
+											].content.replace(raw, raw.replace(oldContent, newContent));
+
+											updateChat();
+										}}
+										onSelect={(detail) => {
+											const { type, content } = detail;
+
+											if (type === 'explain') {
+												submitMessage(
+													message.id,
+													`Explain this section to me in more detail\n\n\`\`\`\n${content}\n\`\`\``
+												);
+											} else if (type === 'ask') {
+												const input = detail?.input ?? '';
+												submitMessage(message.id, `\`\`\`\n${content}\n\`\`\`\n${input}`);
+											}
+										}}
+									/>
+								{:else if message.content === '' && !message.error}
 									<Skeleton />
 								{:else if message.content && message.error !== true}
 									<!-- always show message contents even if there's an error -->

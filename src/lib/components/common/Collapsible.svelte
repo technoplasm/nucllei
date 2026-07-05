@@ -64,6 +64,21 @@
 
 	const collapsibleId = uuidv4();
 
+	// llens(#17): 長い reasoning / tool 結果を下端からも閉じられるようにする
+	// (開閉ボタンがヘッダにしか無いと、長い展開の末尾から先頭へ戻る必要がある)
+	let rootElement: HTMLElement | null = null;
+	let contentHeight = 0;
+	$: showBottomCollapse =
+		['reasoning', 'tool_calls', 'code_interpreter'].includes(attributes?.type) &&
+		contentHeight > 300;
+
+	const collapseFromBottom = () => {
+		open = false;
+		requestAnimationFrame(() => {
+			rootElement?.scrollIntoView({ block: 'nearest' });
+		});
+	};
+
 	function parseJSONString(str) {
 		try {
 			return parseJSONString(JSON.parse(str));
@@ -89,7 +104,7 @@
 	}
 </script>
 
-<div {id} class={className}>
+<div {id} class={className} bind:this={rootElement}>
 	{#if title !== null}
 		<!-- svelte-ignore a11y-no-static-element-interactions -->
 		<!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -214,7 +229,10 @@
 
 		{#if !grow}
 			{#if open && !hide}
-				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
+				<div
+					transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+					bind:clientHeight={contentHeight}
+				>
 					{#if attributes?.type === 'tool_calls'}
 						{#if attributes?.done === 'true'}
 							<Markdown
@@ -235,6 +253,17 @@
 					{:else}
 						<slot name="content" />
 					{/if}
+
+					{#if showBottomCollapse}
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
+						<!-- svelte-ignore a11y-click-events-have-key-events -->
+						<div
+							class="{buttonClassName} w-full flex justify-center py-0.5 cursor-pointer"
+							on:pointerup|stopPropagation={collapseFromBottom}
+						>
+							<ChevronUp strokeWidth="3.5" className="size-3.5" />
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -254,8 +283,22 @@
 		{/if}
 	{:else if !grow}
 		{#if open && !hide}
-			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
+			<div
+				transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+				bind:clientHeight={contentHeight}
+			>
 				<slot name="content" />
+
+				{#if showBottomCollapse}
+					<!-- svelte-ignore a11y-no-static-element-interactions -->
+					<!-- svelte-ignore a11y-click-events-have-key-events -->
+					<div
+						class="{buttonClassName} w-full flex justify-center py-0.5 cursor-pointer"
+						on:pointerup|stopPropagation={collapseFromBottom}
+					>
+						<ChevronUp strokeWidth="3.5" className="size-3.5" />
+					</div>
+				{/if}
 			</div>
 		{/if}
 	{/if}

@@ -1103,7 +1103,8 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, sources, selected_model_id, error, usage } = data;
+		const { id, done, choices, content, content_blocks, sources, selected_model_id, error, usage } =
+			data;
 
 		if (error) {
 			await handleOpenAIError(error, message);
@@ -1111,6 +1112,11 @@
 
 		if (sources) {
 			message.sources = sources;
+		}
+
+		if (content_blocks) {
+			// #17 L0: ブロック構造の累積スナップショット(表示はこちらを優先)
+			message.content_blocks = content_blocks;
 		}
 
 		if (choices) {
