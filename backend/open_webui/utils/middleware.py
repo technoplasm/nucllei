@@ -75,6 +75,7 @@ from open_webui.utils.access_control import (
     has_read_access_to_collection,
 )
 from open_webui.utils.tools import get_tools
+from open_webui.utils.tool_render import extract_render_from_spec
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
     get_sorted_filter_ids,
@@ -818,6 +819,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     "direct": True,
                     "server": tool_server,
                 }
+                # llens(#20): contentMediaType → 表示ディスクリプタ
+                render = extract_render_from_spec(tool)
+                if render:
+                    tools_dict[tool["name"]]["render"] = render
 
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。
@@ -1287,7 +1292,17 @@ async def process_chat_response(
                             {
                                 "role": "assistant",
                                 "content": model_facing_content(temp_blocks),
-                                "tool_calls": block.get("content"),
+                                # llens(#20): render(表示ディスクリプタ)・index 等の
+                                # 内部キーをモデル向け履歴に漏らさず、OpenAI 形の
+                                # {id, type, function} だけを綴じ込む
+                                "tool_calls": [
+                                    {
+                                        "id": call.get("id"),
+                                        "type": call.get("type", "function"),
+                                        "function": call.get("function", {}),
+                                    }
+                                    for call in block.get("content", [])
+                                ],
                             }
                         )
 
@@ -1844,6 +1859,17 @@ async def process_chat_response(
 
                     response_tool_calls = tool_calls.pop(0)
 
+                    tools = metadata.get("tools", {})
+
+                    # llens(#20): 型駆動の表示ディスクリプタを call に同梱する。
+                    # snapshot_content_blocks は calls をそのまま通すので、ここで
+                    # 付ければイベント・永続化(リロード)双方に render が乗る。
+                    for tool_call in response_tool_calls:
+                        tool_name = tool_call.get("function", {}).get("name", "")
+                        tool_render = (tools.get(tool_name) or {}).get("render")
+                        if tool_render:
+                            tool_call["render"] = tool_render
+
                     content_blocks.append(
                         {
                             "type": "tool_calls",
@@ -1860,8 +1886,6 @@ async def process_chat_response(
                             },
                         }
                     )
-
-                    tools = metadata.get("tools", {})
 
                     results = []
                     for tool_call in response_tool_calls:

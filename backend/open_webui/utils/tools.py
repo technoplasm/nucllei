@@ -37,6 +37,11 @@ from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import has_access
 from open_webui.utils.plugin import load_tool_module_by_id
+from open_webui.utils.tool_render import (
+    apply_render_to_spec,
+    extract_render_from_function,
+    extract_render_from_spec,
+)
 from open_webui.env import AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA
 
 import copy
@@ -124,6 +129,11 @@ def get_tools(
                         "callable": callable,
                         "spec": spec,
                     }
+                    # llens(#20): OpenAPI 由来 spec の contentMediaType から
+                    # 表示ディスクリプタを抽出(型駆動レンダリング)
+                    render = extract_render_from_spec(spec)
+                    if render:
+                        tool_dict["render"] = render
 
                     # TODO: if collision, prepend toolkit name
                     if function_name in tools_dict:
@@ -192,6 +202,13 @@ def get_tools(
                 else:
                     spec["description"] = function_name
 
+                # llens(#20): 関数の Annotated 宣言(生きた型が一次情報)から表示
+                # ディスクリプタを抽出し、spec にも contentMediaType として反映する
+                # (DB 保存済み spec が宣言追加前に作られていても、モデルへ渡る spec
+                # には実行時に必ず載る)
+                render = extract_render_from_function(tool_function)
+                apply_render_to_spec(spec, render)
+
                 tool_dict = {
                     "tool_id": tool_id,
                     "callable": callable,
@@ -203,6 +220,8 @@ def get_tools(
                         "citation": hasattr(module, "citation") and module.citation,
                     },
                 }
+                if render:
+                    tool_dict["render"] = render
 
                 # TODO: if collision, prepend toolkit name
                 if function_name in tools_dict:
@@ -283,7 +302,9 @@ def convert_function_to_pydantic_model(func: Callable) -> type[BaseModel]:
     Returns:
         A Pydantic model class.
     """
-    type_hints = get_type_hints(func)
+    # include_extras: Annotated の表示マーカー(RenderAs、#20)を落とさず pydantic に
+    # 渡す(pydantic は未知メタデータを無視するのでバリデーション/スキーマは不変)
+    type_hints = get_type_hints(func, include_extras=True)
     signature = inspect.signature(func)
     parameters = signature.parameters
 
@@ -328,14 +349,15 @@ def get_functions_from_tool(tool: object) -> list[Callable]:
 
 
 def get_tool_specs(tool_module: object) -> list[dict]:
-    function_models = map(
-        convert_function_to_pydantic_model, get_functions_from_tool(tool_module)
-    )
-
-    specs = [
-        convert_pydantic_model_to_openai_function_spec(function_model)
-        for function_model in function_models
-    ]
+    specs = []
+    for function in get_functions_from_tool(tool_module):
+        spec = convert_pydantic_model_to_openai_function_spec(
+            convert_function_to_pydantic_model(function)
+        )
+        # llens(#20): Annotated の表示宣言を標準 JSON Schema(contentMediaType)
+        # として保存時 spec にも反映する(strip しない方針)
+        apply_render_to_spec(spec, extract_render_from_function(function))
+        specs.append(spec)
 
     return specs
 
@@ -400,6 +422,13 @@ def convert_openapi_to_tool_payload(openapi_spec):
                 tool["parameters"]["properties"][param_name] = {
                     "type": param_schema.get("type"),
                     "description": param_schema.get("description", ""),
+                    # llens(#20): 型駆動レンダリングの宣言(contentMediaType)を
+                    # query/path パラメータでも落とさない(body 側は wholesale コピー)
+                    **(
+                        {"contentMediaType": param_schema["contentMediaType"]}
+                        if param_schema.get("contentMediaType")
+                        else {}
+                    ),
                 }
                 if param.get("required"):
                     tool["parameters"]["required"].append(param_name)

@@ -340,6 +340,102 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
 
 
 ####################################
+# tool call 表示ディスクリプタの同梱(issue #20)
+####################################
+
+
+RUN_PYTHON_RENDER = {"args": {"code": {"kind": "code", "language": "python"}}}
+
+
+def _run_python_tool():
+    """tool_call_long_code fixture(run_python 実キャプチャ)に対応するツール。"""
+
+    async def run_python(**kwargs):
+        return "ok"
+
+    spec = {
+        "name": "run_python",
+        "description": "Python コードを実行する。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "contentMediaType": "text/x-python"}
+            },
+            "required": ["code"],
+        },
+    }
+    return {
+        "run_python": {
+            "spec": spec,
+            "callable": run_python,
+            "render": RUN_PYTHON_RENDER,
+        }
+    }
+
+
+def test_tool_call_render_descriptor_rides_events_and_persistence(monkeypatch):
+    """render(型駆動表示ディスクリプタ)が calls に同梱され、chat:completion
+    イベントと DB 永続化の双方に同形で乗る(リロード時に spec 再取得不要)。"""
+    upserts = []
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_long_code",
+            extra_tools=_run_python_tool(),
+            upserts=upserts,
+        )
+    )
+    assert len(completion_calls) == 1
+
+    final = _final_done_data(events)
+    tool_blocks = [b for b in final["content_blocks"] if b["type"] == "tool_calls"]
+    assert len(tool_blocks) == 1
+    call = tool_blocks[0]["calls"][0]
+    assert call["function"]["name"] == "run_python"
+    assert call["render"] == RUN_PYTHON_RENDER
+
+    # code 引数は複数行コードの JSON 文字列(フロントは render に従って
+    # アンエスケープ + python ハイライトで描画する)
+    args = json.loads(call["function"]["arguments"])
+    assert "\n" in args["code"]
+
+    persisted = [u for u in upserts if "content_blocks" in u]
+    assert persisted[-1]["content_blocks"] == final["content_blocks"]
+
+
+def test_tool_call_without_declaration_has_no_render(monkeypatch):
+    """宣言の無いツール(get_weather)の call に render は付かない
+    (名前・長さヒューリスティックで推測しない)。"""
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(monkeypatch, cap=None, followup_responses=["text_basic"])
+    )
+    blocks = _final_done_data(events)["content_blocks"]
+    calls = [c for b in blocks if b["type"] == "tool_calls" for c in b["calls"]]
+    assert calls
+    assert all("render" not in c for c in calls)
+
+
+def test_followup_tool_calls_carry_only_openai_keys(monkeypatch):
+    """継続リクエストの assistant.tool_calls は OpenAI 形 {id, type, function}
+    のみ(render / index などの内部キーをモデルへ漏らさない)。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_long_code",
+            extra_tools=_run_python_tool(),
+        )
+    )
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert assistant is not None
+    for tc in assistant["tool_calls"]:
+        assert set(tc.keys()) == {"id", "type", "function"}
+
+
+####################################
 # multi-turn 履歴の綴じ込み(フォローアップ request の messages を検査)
 ####################################
 
@@ -640,6 +736,17 @@ CLOCK_TOOL_SPEC = {
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
+RUN_PYTHON_TOOL_CONTENT = '''
+from open_webui.utils.tool_render import Code
+
+class Tools:
+    def run_python(self, code: Code("python")) -> str:
+        """Python コードを実行する。
+        :param code: 実行するコード
+        """
+        return "ok"
+'''
+
 
 class TestToolsAlwaysNative(AbstractPostgresTest):
     BASE_PATH = "/api"
@@ -724,6 +831,53 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         # 旧経路のプロンプト注入("Available Tools:")が消えている
         for message in sent["messages"]:
             assert "Available Tools:" not in (message.get("content") or "")
+
+    def test_render_declaration_reaches_model_payload_at_runtime(self):
+        """Annotated(Code)宣言が DB 保存 spec に無くても、get_tools が生きた関数
+        から抽出してモデル payload に contentMediaType を載せる(#20)。
+
+        宣言追加前に保存されたツール(stale spec)でも再保存なしで効くことの固定。
+        """
+        from open_webui.models.tools import ToolForm, ToolMeta, Tools
+
+        Tools.insert_new_tool(
+            user_id="1",
+            form_data=ToolForm(
+                id="runpy",
+                name="runpy",
+                content=RUN_PYTHON_TOOL_CONTENT,
+                meta=ToolMeta(description=None, manifest={}),
+            ),
+            # contentMediaType の無い(宣言追加前の)保存 spec を意図的に登録
+            specs=[
+                {
+                    "name": "run_python",
+                    "description": "Python コードを実行する。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"code": {"type": "string"}},
+                        "required": ["code"],
+                    },
+                }
+            ],
+        )
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "mock-model",
+                    "messages": [{"role": "user", "content": "1+1 を計算して"}],
+                    "stream": False,
+                    "tool_ids": ["runpy"],
+                },
+            )
+        assert response.status_code == 200, response.text
+
+        assert len(self.mock_server.received) == 1
+        sent = self.mock_server.received[0]
+        props = sent["tools"][0]["function"]["parameters"]["properties"]
+        assert props["code"]["contentMediaType"] == "text/x-python"
 
 
 ####################################

@@ -195,3 +195,32 @@ def test_apply_render_to_spec_tolerates_missing_property():
         spec, {"args": {"code": {"kind": "code", "language": "python"}}}
     )
     assert spec["parameters"]["properties"] == {}
+
+
+####################################
+# spec ビルダ経由(pydantic + langchain パイプライン)
+####################################
+
+
+def test_get_tool_specs_injects_content_media_type():
+    """Annotated(RenderAs)が include_extras 経由で spec ビルダを通り、
+    保存時 spec に contentMediaType として反映される(#20 ステップ2)。"""
+    from open_webui.utils.tools import get_tool_specs
+
+    class ToolsModule:
+        def run_python(self, code: PythonCode, timeout: int = 30) -> str:
+            """Python コードを実行する。
+            :param code: 実行するコード
+            :param timeout: タイムアウト秒
+            """
+            return "ok"
+
+    specs = get_tool_specs(ToolsModule())
+    assert len(specs) == 1
+    assert specs[0]["name"] == "run_python"
+
+    props = specs[0]["parameters"]["properties"]
+    # 実行時/スキーマ的には素の string のまま、型情報だけが載る
+    assert props["code"]["type"] == "string"
+    assert props["code"]["contentMediaType"] == "text/x-python"
+    assert "contentMediaType" not in props["timeout"]
