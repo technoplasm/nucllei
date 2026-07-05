@@ -1411,25 +1411,10 @@ async def get_app_version():
 
 @app.get("/api/version/updates")
 async def get_app_latest_release_version(user=Depends(get_verified_user)):
-    if OFFLINE_MODE:
-        log.debug(
-            f"Offline mode is enabled, returning current version as latest version"
-        )
-        return {"current": VERSION, "latest": VERSION}
-    try:
-        timeout = aiohttp.ClientTimeout(total=1)
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            async with session.get(
-                "https://api.github.com/repos/open-webui/open-webui/releases/latest"
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                latest_version = data["tag_name"]
-
-                return {"current": VERSION, "latest": latest_version[1:]}
-    except Exception as e:
-        log.debug(e)
-        return {"current": VERSION, "latest": VERSION}
+    # llens: upstream の更新チェック(github.com への外部フェッチ)は air-gapped 前提に
+    # 反し、案内自体も無意味なため機能ごと削除(issue #10、fork.md §6)。
+    # エンドポイントは互換のため残すが常に current==latest を返し、外部通信は一切行わない。
+    return {"current": VERSION, "latest": VERSION}
 
 
 @app.get("/api/changelog")

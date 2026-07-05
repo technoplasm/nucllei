@@ -8,19 +8,15 @@
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { fade } from 'svelte/transition';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import { getFunctions } from '$lib/apis/functions';
-	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
+	import { getModels, getToolServersData } from '$lib/apis';
 	import { getAllTags } from '$lib/apis/chats';
 	import { getPrompts } from '$lib/apis/prompts';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
-
-	import { WEBUI_VERSION } from '$lib/constants';
-	import { compareVersion } from '$lib/utils';
 
 	import {
 		config,
@@ -43,7 +39,6 @@
 	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
-	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -52,8 +47,6 @@
 	let loaded = false;
 	let DB = null;
 	let localDBChats = [];
-
-	let version;
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
@@ -192,7 +185,10 @@
 				}
 			});
 
-			if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+			// llens: What's New(Changelog)自動ポップアップは upstream のリリース案内で
+			// air-gapped 運用では無意味なため既定 OFF(issue #10)。
+			// 戻すには Settings > Interface の "Show Changelog" を有効化(About の手動ボタンは常時可)。
+			if ($user?.role === 'admin' && ($settings?.showChangelog ?? false)) {
 				showChangelog.set($settings?.version !== $config.version);
 			}
 
@@ -206,50 +202,16 @@
 				}
 			}
 
-			// Check for version updates
-			if ($user?.role === 'admin') {
-				// Check if the user has dismissed the update toast in the last 24 hours
-				if (localStorage.dismissedUpdateToast) {
-					const dismissedUpdateToast = new Date(Number(localStorage.dismissedUpdateToast));
-					const now = new Date();
-
-					if (now - dismissedUpdateToast > 24 * 60 * 60 * 1000) {
-						checkForVersionUpdates();
-					}
-				} else {
-					checkForVersionUpdates();
-				}
-			}
+			// llens: upstream 更新チェックの外部フェッチと通知トーストは機能ごと削除した(issue #10)。
 			await tick();
 		}
 
 		loaded = true;
 	});
-
-	const checkForVersionUpdates = async () => {
-		version = await getVersionUpdates(localStorage.token).catch((error) => {
-			return {
-				current: WEBUI_VERSION,
-				latest: WEBUI_VERSION
-			};
-		});
-	};
 </script>
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
-
-{#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
-	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
-		<UpdateInfoToast
-			{version}
-			on:close={() => {
-				localStorage.setItem('dismissedUpdateToast', Date.now().toString());
-				version = null;
-			}}
-		/>
-	</div>
-{/if}
 
 <div class="app relative">
 	<div

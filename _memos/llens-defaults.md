@@ -17,6 +17,18 @@ llens として upstream v0.6.5 の既定値から変更した設定の一覧。
 | `CODE_INTERPRETER_ENGINE` | pyodide | **jupyter** | #11 |
 | `ENABLE_EVALUATION_ARENA_MODELS` | True | **False** | #10 |
 | `ENABLE_COMMUNITY_SHARING` | True | **False**(openwebui.com 導線を断つ) | #10 |
+フロント側の既定変更(env ではなくユーザー設定 `$settings` の未設定時フォールバック):
+
+- `showChangelog`(What's New 自動ポップアップ) : upstream `?? true` → llens `?? false`。
+  `src/routes/(app)/+layout.svelte` と `src/lib/components/chat/Settings/Interface.svelte`。
+  戻すには Settings > Interface の "Show Changelog" を有効化(About の手動 "Whats New" ボタンは常時利用可)。
+
+## 機能削除(既定無効化でなく削除したもの)
+
+- **upstream バージョン更新チェック**(github.com への外部フェッチ + 「新版が出ています」トースト): air-gapped 前提(fork.md §6)に反するため機能ごと削除(#10)。
+  - `/api/version/updates` は外部フェッチを撤去し常に `current==latest` を返す(互換のためエンドポイントは残す)。
+  - フロントの自動チェック呼び出し・`UpdateInfoToast` コンポーネント・トースト表示を削除。
+  - About / 管理設定 General の手動 "check for updates" ボタンは残置(外部通信しないエンドポイントを叩き、常に最新表示になるだけ)。
 
 変更していない(upstream 既定のまま llens 要件に合致):
 

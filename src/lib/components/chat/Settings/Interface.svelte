@@ -56,7 +56,7 @@
 
 	// Admin - Show Update Available Toast
 	let showUpdateToast = true;
-	let showChangelog = true;
+	let showChangelog = false; // llens: What's New 自動表示は既定 OFF(issue #10)
 
 	let showEmojiInCall = false;
 	let voiceInterruption = false;
@@ -273,7 +273,7 @@
 
 		showUsername = $settings.showUsername ?? false;
 		showUpdateToast = $settings.showUpdateToast ?? true;
-		showChangelog = $settings.showChangelog ?? true;
+		showChangelog = $settings.showChangelog ?? false; // llens: What's New 自動表示は既定 OFF(issue #10)
 
 		showEmojiInCall = $settings.showEmojiInCall ?? false;
 		voiceInterruption = $settings.voiceInterruption ?? false;
