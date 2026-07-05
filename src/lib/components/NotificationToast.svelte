@@ -2,7 +2,7 @@
 	import { settings, playingNotificationSound, isLastActiveTab } from '$lib/stores';
 	import DOMPurify from 'dompurify';
 
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import { createEventDispatcher, onMount } from 'svelte';
 
 	const dispatch = createEventDispatcher();
@@ -47,7 +47,7 @@
 		{/if}
 
 		<div class=" line-clamp-2 text-xs self-center dark:text-gray-300 font-normal">
-			{@html DOMPurify.sanitize(marked(content))}
+			{@html DOMPurify.sanitize(render(content))}
 		</div>
 	</div>
 </button>

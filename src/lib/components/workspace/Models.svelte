@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 
 	import { toast } from 'svelte-sonner';
 	import Sortable from 'sortablejs';
@@ -269,7 +269,7 @@
 					>
 						<div class=" flex-1 self-center {model.is_active ? '' : 'text-gray-500'}">
 							<Tooltip
-								content={marked.parse(model?.meta?.description ?? model.id)}
+								content={render(model?.meta?.description ?? model.id)}
 								className=" w-fit"
 								placement="top-start"
 							>

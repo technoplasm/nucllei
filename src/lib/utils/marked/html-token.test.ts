@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { marked } from 'marked';
+import { lex } from '$lib/utils/markdown-it';
 import DOMPurify from 'dompurify';
 import { MARKDOWN_IFRAME_SANITIZE_CONFIG, sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 
@@ -24,10 +24,10 @@ const hasDom =
 	typeof (DOMPurify as unknown as { sanitize?: unknown }).sanitize === 'function' &&
 	(DOMPurify as unknown as { isSupported?: boolean }).isSupported === true;
 
-describe('markdown html-token attack surface (marked tokenisation)', () => {
+describe('markdown html-token attack surface (markdown-it tokenisation)', () => {
 	it('vector 1: a block <iframe> line absorbs an onerror <img> into ONE html token', () => {
 		const src = `<iframe src="/api/v1/files/x"></iframe><img src=x onerror="alert(document.cookie)">`;
-		const tokens = marked.lexer(src);
+		const tokens = lex(src);
 		const htmlToken = tokens.find((t) => t.type === 'html') as { text: string } | undefined;
 
 		// A single html token carries both the legit iframe and the payload...
@@ -38,7 +38,7 @@ describe('markdown html-token attack surface (marked tokenisation)', () => {
 
 	it('vector 2: a block <iframe> line absorbs a <script> / svg onload into ONE html token', () => {
 		const src = `<div><iframe src="/api/v1/files/x"></iframe><svg onload=alert(1)></svg><script>alert(2)</script></div>`;
-		const tokens = marked.lexer(src);
+		const tokens = lex(src);
 		const htmlToken = tokens.find((t) => t.type === 'html') as { text: string } | undefined;
 
 		expect(htmlToken).toBeDefined();

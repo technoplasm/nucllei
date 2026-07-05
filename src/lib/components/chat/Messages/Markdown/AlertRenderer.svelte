@@ -1,5 +1,6 @@
 <script lang="ts" context="module">
-	import { marked, type Token } from 'marked';
+	import { lex } from '$lib/utils/markdown-it';
+	type Token = any;
 
 	type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';
 
@@ -51,7 +52,7 @@
 		if (matches && matches.length) {
 			const alertType = matches[1] as AlertType;
 			const newText = token.text.replace(regExp, '');
-			const newTokens = marked.lexer(newText);
+			const newTokens = lex(newText);
 			return {
 				type: alertType,
 				text: newText,

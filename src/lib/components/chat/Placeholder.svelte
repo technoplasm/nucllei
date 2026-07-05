@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import DOMPurify from 'dompurify';
 
 	import { onMount, getContext, tick, createEventDispatcher } from 'svelte';
@@ -151,7 +151,7 @@
 					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
 						<Tooltip
 							className=" w-fit"
-							content={marked.parse(
+							content={render(
 								sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')
 							)}
 							placement="top"
@@ -162,9 +162,7 @@
 								<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 								     DOMPurify で無害化(javascript: リンク等を除去)。 -->
 								{@html DOMPurify.sanitize(
-									marked.parse(
-										sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
-									)
+									render(sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description))
 								)}
 							</div>
 						</Tooltip>

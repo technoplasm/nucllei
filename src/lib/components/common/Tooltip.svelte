@@ -2,7 +2,6 @@
 	import DOMPurify from 'dompurify';
 
 	import { onDestroy } from 'svelte';
-	import { marked } from 'marked';
 
 	import tippy from 'tippy.js';
 	import { roundArrow } from 'tippy.js';

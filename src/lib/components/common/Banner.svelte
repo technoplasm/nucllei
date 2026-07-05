@@ -3,7 +3,7 @@
 	import { onMount, createEventDispatcher } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import DOMPurify from 'dompurify';
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 
 	const dispatch = createEventDispatcher();
 
@@ -84,9 +84,10 @@
 				</div>
 
 				<div class="flex-1 text-xs text-gray-700 dark:text-white">
-					<!-- llens(GHSA-cqp4-qqvg-3787): サニタイズ順を修正。marked.parse で HTML を生成した
-					     「後」に DOMPurify をかける(旧: 生 markdown を sanitize→parse は marked 生成 HTML を素通し)。 -->
-					{@html DOMPurify.sanitize(marked.parse(banner.content))}
+					<!-- llens(GHSA-cqp4-qqvg-3787): サニタイズ順を修正。markdown を HTML に
+					     render した「後」に DOMPurify をかける(旧: 生 markdown を sanitize→parse は
+					     生成 HTML を素通し)。 -->
+					{@html DOMPurify.sanitize(render(banner.content))}
 				</div>
 			</div>
 

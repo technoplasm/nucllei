@@ -128,9 +128,9 @@ importers:
       kokoro-js:
         specifier: ^1.1.1
         version: 1.2.1
-      marked:
-        specifier: ^9.1.0
-        version: 9.1.6
+      markdown-it:
+        specifier: ^14.1.0
+        version: 14.3.0
       mermaid:
         specifier: ^11.6.0
         version: 11.16.0
@@ -219,6 +219,9 @@ importers:
       '@tailwindcss/typography':
         specifier: ^0.5.13
         version: 0.5.20(tailwindcss@4.3.2)
+      '@types/markdown-it':
+        specifier: ^14.1.2
+        version: 14.1.2
       '@typescript-eslint/eslint-plugin':
         specifier: ^6.17.0
         version: 6.21.0(@typescript-eslint/parser@6.21.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)
@@ -3428,11 +3431,6 @@ packages:
   marked@16.4.2:
     resolution: {integrity: sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==}
     engines: {node: '>= 20'}
-    hasBin: true
-
-  marked@9.1.6:
-    resolution: {integrity: sha512-jcByLnIFkd5gSXZmjNvS1TlmRhCXZjIzHYlaGkPlLIekG55JDR2Z4va9tZwCiP+/RDERiNhMOFu01xd6O5ct1Q==}
-    engines: {node: '>= 16'}
     hasBin: true
 
   matcher-collection@2.0.1:
@@ -8091,8 +8089,6 @@ snapshots:
       uc.micro: 2.1.0
 
   marked@16.4.2: {}
-
-  marked@9.1.6: {}
 
   matcher-collection@2.0.1:
     dependencies:

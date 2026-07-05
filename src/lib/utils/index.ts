@@ -15,9 +15,7 @@ dayjs.extend(localizedFormat);
 import { WEBUI_BASE_URL } from '$lib/constants';
 import { TTS_RESPONSE_SPLIT } from '$lib/types';
 
-import { marked } from 'marked';
-import markedExtension from '$lib/utils/marked/extension';
-import markedKatexExtension from '$lib/utils/marked/katex-extension';
+import { render } from '$lib/utils/markdown-it';
 import hljs from 'highlight.js';
 
 //////////////////////////
@@ -320,17 +318,7 @@ export const formatDate = (inputDate) => {
 
 export const copyToClipboard = async (text, formatted = false) => {
 	if (formatted) {
-		const options = {
-			throwOnError: false,
-			highlight: function (code, lang) {
-				const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-				return hljs.highlight(code, { language }).value;
-			}
-		};
-		marked.use(markedKatexExtension(options));
-		marked.use(markedExtension(options));
-
-		const htmlContent = marked.parse(text);
+		const htmlContent = render(text);
 
 		// Add basic styling to make the content look better when pasted
 		const styledHtml = `

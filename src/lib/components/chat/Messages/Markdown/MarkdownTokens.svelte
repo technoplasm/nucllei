@@ -6,8 +6,8 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import type { Token } from 'marked';
 	import { lex } from '$lib/utils/markdown-it';
+	type Token = any;
 	import { unescapeHtml } from '$lib/utils';
 	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 

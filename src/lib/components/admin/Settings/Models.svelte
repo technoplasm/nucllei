@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
@@ -308,7 +308,7 @@
 
 							<div class=" flex-1 self-center {(model?.is_active ?? true) ? '' : 'text-gray-500'}">
 								<Tooltip
-									content={marked.parse(
+									content={render(
 										!!model?.meta?.description
 											? model?.meta?.description
 											: model?.ollama?.digest

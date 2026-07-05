@@ -316,7 +316,7 @@ function convertTable(tokens: MDToken[], start: number) {
 		} else if (tok.type === 'tbody_open') {
 			inBody = true;
 		} else if (tok.type === 'tr_open') {
-			const row: AnyToken[] = [];
+			const row: any[] = [];
 			i += 1;
 			while (i < tokens.length && tokens[i].type !== 'tr_close') {
 				const cellOpen = tokens[i];
@@ -357,6 +357,11 @@ function convertTable(tokens: MDToken[], start: number) {
 
 katexPlugin(md);
 
+// md.render(HTML 直生成)が katex トークンで落ちないよう、素テキストを出す。
+// KatexRenderer は Svelte 側専用なので、文字列レンダリング経路では数式本文をそのまま出す。
+md.renderer.rules.katex_inline = (tokens, idx) => tokens[idx].content;
+md.renderer.rules.katex_block = (tokens, idx) => tokens[idx].content + '\n';
+
 /**
  * marked.lexer(src) 互換の入口。marked 形のトークン配列を返す。
  * MarkdownTokens.svelte / MarkdownInlineTokens.svelte がそのまま消費できる。
@@ -364,6 +369,14 @@ katexPlugin(md);
 export function lex(src: string): AnyToken[] {
 	const mdTokens = md.parse(src ?? '', {});
 	return convertBlocks(mdTokens).tokens;
+}
+
+/**
+ * marked.parse(src) 互換の入口。HTML 文字列を返す(ツールチップ・説明・バナー等)。
+ * 呼び出し側で必要に応じて DOMPurify する規律は従来どおり。
+ */
+export function render(src: string): string {
+	return md.render(src ?? '');
 }
 
 export default md;

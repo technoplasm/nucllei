@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import Fuse from 'fuse.js';
 
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -583,7 +583,7 @@
 
 								{#if item.model?.info?.meta?.description}
 									<Tooltip
-										content={`${marked.parse(
+										content={`${render(
 											sanitizeResponseContent(item.model?.info?.meta?.description).replaceAll(
 												'\n',
 												'<br>'

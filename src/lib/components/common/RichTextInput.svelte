@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import TurndownService from 'turndown';
 	const turndownService = new TurndownService({
 		codeBlockStyle: 'fenced',
@@ -145,9 +145,7 @@
 			async function tryParse(value, attempts = 3, interval = 100) {
 				try {
 					// Try parsing the value
-					return marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
-						breaks: false
-					});
+					return render(value.replaceAll(`\n<br/>`, `<br/>`));
 				} catch (error) {
 					// If no attempts remain, fallback to plain text
 					if (attempts <= 1) {
@@ -376,11 +374,7 @@
 		} else {
 			preserveBreaks
 				? editor.commands.setContent(value)
-				: editor.commands.setContent(
-						marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
-							breaks: false
-						})
-					); // Update editor content
+				: editor.commands.setContent(render(value.replaceAll(`\n<br/>`, `<br/>`))); // Update editor content
 		}
 
 		selectTemplate();

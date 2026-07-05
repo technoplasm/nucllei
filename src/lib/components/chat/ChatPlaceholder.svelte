@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 	import DOMPurify from 'dompurify';
 
 	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
@@ -46,7 +46,7 @@
 						}}
 					>
 						<Tooltip
-							content={marked.parse(
+							content={render(
 								sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')
 							)}
 							placement="right"
@@ -99,9 +99,7 @@
 							<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 							     DOMPurify で無害化(javascript: リンク等を除去)。 -->
 							{@html DOMPurify.sanitize(
-								marked.parse(
-									sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description)
-								)
+								render(sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description))
 							)}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}

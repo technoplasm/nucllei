@@ -2,7 +2,7 @@
 	import { getContext } from 'svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { marked } from 'marked';
+	import { render } from '$lib/utils/markdown-it';
 
 	const i18n = getContext('i18n');
 
@@ -36,7 +36,7 @@
 				/>
 
 				<div class=" py-0.5 text-sm capitalize">
-					<Tooltip content={marked.parse(helpText[capability])}>
+					<Tooltip content={render(helpText[capability])}>
 						{$i18n.t(capability)}
 					</Tooltip>
 				</div>
