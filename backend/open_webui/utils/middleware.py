@@ -1189,6 +1189,17 @@ async def process_chat_response(
                 return content.strip()
 
             def convert_content_blocks_to_messages(content_blocks):
+                # llens(#18-2): reasoning ブロックはモデルへ再送しない。
+                # serialize_content_blocks(raw=False) は reasoning を UI 用
+                # <details type="reasoning"> マークアップで包むため、そのまま
+                # assistant content に入れると自ターンの思考内容と UI 断片が
+                # 次ターンのプロンプトに漏れる。モデル向け履歴には
+                # 実際に出力された text/tool_calls/結果のみを載せる。
+                def model_facing_content(blocks):
+                    return serialize_content_blocks(
+                        [b for b in blocks if b["type"] != "reasoning"]
+                    )
+
                 messages = []
 
                 temp_blocks = []
@@ -1197,7 +1208,7 @@ async def process_chat_response(
                         messages.append(
                             {
                                 "role": "assistant",
-                                "content": serialize_content_blocks(temp_blocks),
+                                "content": model_facing_content(temp_blocks),
                                 "tool_calls": block.get("content"),
                             }
                         )
@@ -1217,7 +1228,7 @@ async def process_chat_response(
                         temp_blocks.append(block)
 
                 if temp_blocks:
-                    content = serialize_content_blocks(temp_blocks)
+                    content = model_facing_content(temp_blocks)
                     if content:
                         messages.append(
                             {

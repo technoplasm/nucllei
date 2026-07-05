@@ -336,6 +336,139 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
     assert _iteration_limit_errors(events) == []
 
 
+####################################
+# multi-turn 履歴の綴じ込み(フォローアップ request の messages を検査)
+####################################
+
+
+def _assistant_tool_calls_message(followup_form_data):
+    """継続リクエストの messages から tool_calls を持つ assistant メッセージを返す。"""
+    for m in followup_form_data["messages"]:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            return m
+    return None
+
+
+def _tool_messages(followup_form_data):
+    return [m for m in followup_form_data["messages"] if m.get("role") == "tool"]
+
+
+def test_followup_preserves_tool_call_history(monkeypatch):
+    """継続リクエストに assistant(tool_calls)+ 対応する role:tool 結果が綴じ込まれる。
+
+    tool 結果を text へ平坦化せず、tool_call_id で正しくリンクすることを固定する
+    (これが崩れるとモデルが tool 出力を幻覚する)。
+    """
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(monkeypatch, cap=None, followup_responses=["text_basic"])
+    )
+    assert len(completion_calls) == 1
+    msgs = completion_calls[0]["messages"]
+
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert assistant is not None, "assistant(tool_calls) が履歴に無い"
+    tc = assistant["tool_calls"][0]
+    assert tc["id"] == "functions.get_weather:0"
+    assert tc["function"]["name"] == "get_weather"
+    assert tc["function"].get("arguments")
+
+    tool_msgs = _tool_messages(completion_calls[0])
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "functions.get_weather:0"
+    # assistant の直後に対応する tool メッセージが来る(順序)
+    assert msgs.index(tool_msgs[0]) == msgs.index(assistant) + 1
+
+
+def test_followup_preserves_parallel_tool_calls(monkeypatch):
+    """並列 tool call(tool_call_parallel): 1 assistant に 2 要素の tool_calls 配列 +
+    id 対応の tool メッセージ 2 本が綴じ込まれる。"""
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_parallel",
+        )
+    )
+    assert len(completion_calls) == 1
+
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert assistant is not None
+    ids = [tc["id"] for tc in assistant["tool_calls"]]
+    assert ids == ["functions.get_weather:0", "functions.get_weather:1"]
+
+    tool_msgs = _tool_messages(completion_calls[0])
+    assert [m["tool_call_id"] for m in tool_msgs] == [
+        "functions.get_weather:0",
+        "functions.get_weather:1",
+    ]
+    # 2 都市それぞれツールが実行されている
+    assert len(tool_invocations) == 2
+
+
+def test_reasoning_not_leaked_into_followup_content(monkeypatch):
+    """reasoning はモデルへの継続リクエストの assistant content に漏らさない(#18-2)。
+
+    reasoning_then_tool は reasoning + 実応答 text + tool call を含む。継続リクエストの
+    assistant メッセージ content には実応答 text だけが載り、UI 用の
+    <details type="reasoning"> マークアップは含まれないこと。ただし UI への emit
+    (chat:completion content イベント)には reasoning が残っていること。
+    """
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="reasoning_then_tool",
+        )
+    )
+    assert len(completion_calls) == 1
+
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert assistant is not None
+    # モデル向け履歴に reasoning の UI マークアップが漏れていない
+    assert '<details type="reasoning"' not in (assistant.get("content") or "")
+
+    # UI への emit には reasoning が残っている(表示は維持)
+    emitted = "".join(
+        e.get("data", {}).get("content", "")
+        for e in events
+        if e.get("type") == "chat:completion"
+        and isinstance(e.get("data", {}).get("content"), str)
+    )
+    assert '<details type="reasoning"' in emitted
+
+
+def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
+    """reasoning が閉じないケース(tool_call_no_args: content デルタが来ず reasoning
+    が done=false のまま)でも、継続リクエストの assistant content に漏れない。"""
+
+    async def get_current_time(**kwargs):
+        return "12:00"
+
+    clock_spec = {
+        "name": "get_current_time",
+        "description": "現在時刻を返す。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }
+    extra = {"get_current_time": {"spec": clock_spec, "callable": get_current_time}}
+
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="tool_call_no_args",
+            extra_tools=extra,
+        )
+    )
+    assert len(completion_calls) == 1
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert assistant is not None
+    content = assistant.get("content") or ""
+    assert '<details type="reasoning"' not in content
+
+
 def test_tool_call_iteration_cap_emits_chat_error(monkeypatch):
     """上限到達時に黙って止まらず chat:completion エラーを emit する。"""
     events, completion_calls, tool_invocations = asyncio.run(
