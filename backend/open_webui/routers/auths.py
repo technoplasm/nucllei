@@ -263,19 +263,14 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
             user = Users.get_user_by_email(email)
             if not user:
                 try:
-                    user_count = Users.get_num_users()
-
-                    role = (
-                        "admin"
-                        if user_count == 0
-                        else request.app.state.config.DEFAULT_USER_ROLE
-                    )
-
+                    # llens(GHSA-h3ww): 初回ユーザーの admin 昇格は insert 内でアトミックに決める。
+                    # role は既定ロールを渡し、count==0 の昇格は promote フラグ側に委ねる。
                     user = Auths.insert_new_auth(
                         email=email,
                         password=str(uuid.uuid4()),
                         name=cn,
-                        role=role,
+                        role=request.app.state.config.DEFAULT_USER_ROLE,
+                        promote_first_user_to_admin=True,
                     )
 
                     if not user:
@@ -456,10 +451,6 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
     try:
-        role = (
-            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-        )
-
         if user_count == 0:
             # Disable signup after the first user is created
             request.app.state.config.ENABLE_SIGNUP = False
@@ -472,12 +463,15 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             )
 
         hashed = get_password_hash(form_data.password)
+        # llens(GHSA-h3ww): 初回ユーザーの admin 昇格は insert 内でアトミックに確定させる。
+        # ここでは既定ロールを渡し、count==0 判定と挿入の競合を排除する。
         user = Auths.insert_new_auth(
             form_data.email.lower(),
             hashed,
             form_data.name,
             form_data.profile_image_url,
-            role,
+            request.app.state.config.DEFAULT_USER_ROLE,
+            promote_first_user_to_admin=True,
         )
 
         if user:

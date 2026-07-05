@@ -1,16 +1,25 @@
 import logging
+import time
 import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_db
-from open_webui.models.users import UserModel, Users
+from open_webui.models.users import User, UserModel, Users
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel
-from sqlalchemy import Boolean, Column, String, Text
+from sqlalchemy import Boolean, Column, String, Text, text
 from open_webui.utils.auth import verify_password
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
+
+# llens(GHSA-7rw5-9f7q-xj36): ユーザー不在時でも bcrypt 検証相当の時間を消費するための
+# 固定ダミーハッシュ。応答時間差によるアカウント列挙を防ぐ(タイミング一定化)。
+# 実在ユーザーのパスワードとは無関係な使い捨て値。
+_TIMING_EQUALIZER_HASH = "$2b$12$.AKkThJsParPhHKIn7aQK.QAbGS6Z.uqlBiDYJrwpl.z1UY.0jHgW"
+
+# llens(GHSA-h3ww-q6xx-w7x3): 初回ユーザーの admin 昇格を直列化する Postgres advisory lock キー。
+_FIRST_USER_ADVISORY_LOCK_KEY = 0x11E5_0001
 
 ####################
 # DB MODEL
@@ -103,9 +112,24 @@ class AuthsTable:
         profile_image_url: str = "/user.png",
         role: str = "pending",
         oauth_sub: Optional[str] = None,
+        promote_first_user_to_admin: bool = False,
     ) -> Optional[UserModel]:
+        # llens(GHSA-h3ww-q6xx-w7x3): auth と user を単一トランザクションで作成する
+        # (従来は Users.insert_new_user が別セッションで先行コミットしていた)。
+        # promote_first_user_to_admin=True の初回ログイン経路(signup/LDAP/OAuth)では、
+        # 「user 数 0 → admin」の判定と挿入を同一トランザクション + advisory lock で直列化し、
+        # 並行初回ログインで複数 admin が生じる競合を排除する。role はここで確定させるのが要点。
         with get_db() as db:
             log.info("insert_new_auth")
+
+            if promote_first_user_to_admin:
+                if db.bind.dialect.name == "postgresql":
+                    db.execute(
+                        text("SELECT pg_advisory_xact_lock(:k)"),
+                        {"k": _FIRST_USER_ADVISORY_LOCK_KEY},
+                    )
+                if db.query(User).count() == 0:
+                    role = "admin"
 
             id = str(uuid.uuid4())
 
@@ -115,15 +139,29 @@ class AuthsTable:
             result = Auth(**auth.model_dump())
             db.add(result)
 
-            user = Users.insert_new_user(
-                id, name, email, profile_image_url, role, oauth_sub
+            now = int(time.time())
+            user = UserModel(
+                **{
+                    "id": id,
+                    "name": name,
+                    "email": email,
+                    "role": role,
+                    "profile_image_url": profile_image_url,
+                    "last_active_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                    "oauth_sub": oauth_sub,
+                }
             )
+            user_result = User(**user.model_dump())
+            db.add(user_result)
 
             db.commit()
             db.refresh(result)
+            db.refresh(user_result)
 
-            if result and user:
-                return user
+            if result and user_result:
+                return UserModel.model_validate(user_result)
             else:
                 return None
 
@@ -139,6 +177,9 @@ class AuthsTable:
                     else:
                         return None
                 else:
+                    # llens(GHSA-7rw5-9f7q-xj36): ユーザー不在でも bcrypt 検証相当の時間を
+                    # 消費し、応答時間差によるアカウント列挙を防ぐ(タイミング一定化)。
+                    verify_password(password, _TIMING_EQUALIZER_HASH)
                     return None
         except Exception:
             return None

@@ -84,10 +84,9 @@ class OAuthManager:
             # If the user is the only user, assign the role "admin" - actually repairs role for single user on login
             log.debug("Assigning the only user the admin role")
             return "admin"
-        if not user and Users.get_num_users() == 0:
-            # If there are no users, assign the role "admin", as the first user will be an admin
-            log.debug("Assigning the first user the admin role")
-            return "admin"
+        # llens(GHSA-h3ww): 「新規ユーザー & user 数 0 → admin」の count ベース判定はここで行わない。
+        # 並行初回ログインで複数 admin が生じる競合の原因になるため、初回 admin 昇格は
+        # insert_new_auth(promote_first_user_to_admin=True) 側でアトミックに確定させる。
 
         if auth_manager_config.ENABLE_OAUTH_ROLE_MANAGEMENT:
             log.debug("Running OAUTH Role management")
@@ -385,6 +384,8 @@ class OAuthManager:
                     profile_image_url=picture_url,
                     role=role,
                     oauth_sub=provider_sub,
+                    # llens(GHSA-h3ww): 初回ユーザーの admin 昇格をアトミックに確定させる。
+                    promote_first_user_to_admin=True,
                 )
 
                 if auth_manager_config.WEBHOOK_URL:

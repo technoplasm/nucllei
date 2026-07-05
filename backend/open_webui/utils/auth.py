@@ -177,11 +177,16 @@ def get_current_user(
             )
 
         if request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS:
+            # llens(GHSA-57q6-fvp4-pqmm / CVE-2026-45339): 空要素を除外する。
+            # API_KEY_ALLOWED_ENDPOINTS は既定 "" で、素朴に split(",") すると [""] となり
+            # `path.startswith("" + "/")` = 全 path に一致 → 制限が「全許可」に無効化される
+            # (末尾カンマ等の空要素でも同様)。空リストなら下の any() は False となり全拒否。
             allowed_paths = [
                 path.strip()
                 for path in str(
                     request.app.state.config.API_KEY_ALLOWED_ENDPOINTS
                 ).split(",")
+                if path.strip()
             ]
 
             # Check if the request path matches any allowed endpoint.

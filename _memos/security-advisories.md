@@ -33,6 +33,19 @@
 | GHSA-vrhc-3fr6-pc3c / CVE-2026-54010 | HIGH | 同上(read/削除面) | (本コミット) | #40 |
 | GHSA-r472-mw7m-967f / CVE-2026-45402 | HIGH | KB Attach / process で file_id 未検証 | (本コミット) | #40 |
 | GHSA-4g37-7p2c-38r9 / CVE-2026-45398 | HIGH | Retrieval API の KB/collection ACL バイパス(IDOR) | (本コミット) | #40 |
+| GHSA-h3ww-q6xx-w7x3 / CVE-2026-45675 | HIGH | LDAP/OAuth 初回ユーザ競合→複数 admin | (本コミット) | #38 |
+| GHSA-57q6-fvp4-pqmm / CVE-2026-45339 | HIGH | API キーの制限エンドポイント回避(空 allowlist で全許可) | (本コミット) | #38 |
+| GHSA-7rw5-9f7q-xj36 | HIGH | ログインタイミングによるアカウント列挙 | (本コミット) | #38 |
+
+**#38 残の修正範囲(2026-07-05)**: 認証系 3 件(CRITICAL の LDAP 空 PW は 03e9a9783 で出荷済み)。
+- **h3ww(複数 admin)**: `Auths.insert_new_auth` に `promote_first_user_to_admin` を追加し、
+  「user 数 0 → admin」判定と auth+user 挿入を**単一トランザクション + Postgres advisory lock**で直列化。
+  role 決定の権威を呼び出し側の事前 count 読取から insert 内へ移動(signup/LDAP/OAuth の 3 経路を一本化)。
+  OAuth は `get_user_role` の count ベース admin 分岐を除去(claims/既定ロール判定は保持)。
+- **57q6(API キー制限回避)**: `utils/auth.py` の allowed_endpoints 解析で**空要素を除外**。
+  既定 `""` や末尾カンマだと `[""]` → `startswith("/")` で全 path 一致し制限が全許可に無効化されていた。空リスト=全拒否に。
+- **7rw5(タイミング列挙)**: `authenticate_user` がユーザー不在時も**固定ダミーハッシュで bcrypt 検証**を実行し応答時間を一定化。
+- 回帰テスト: `test/apps/webui/routers/test_auths.py`(6 ケース。旧コードで落ちる: 空 allowlist=200、不在時 verify 未実行 等)。
 
 **#40 の修正範囲(2026-07-05)**: file_id / collection 参照の読取権限突合を一元化。
 - `utils/access_control.py` に `has_read_access_to_file` / `has_read_access_to_collection` を新設
@@ -54,8 +67,7 @@
   ③ SGLang 単一接続で「制限されたベース計算資源」も無い → ユーザーは restricted なベースに到達不能。
   派生タスク: 生モデルをチャットピッカーから全員向けに隠す(UX、フロント/#6 で対応)。
 
-**未着手(フロント/mixed、フロントバッチ)**: #36(GHSA-9f4f レンダリング XSS = 0.6.5 ちょうど)、
-#38 残(h3ww/57q6/7rw5 の認証系)。
+**未着手(フロント/mixed、フロントバッチ)**: #36(GHSA-9f4f レンダリング XSS = 0.6.5 ちょうど)。
 **継続監視**: v0.10.x の未公開 access-control 修正(下記 embargo 節)。
 
 ## 最重要 TOP 3(id と一言理由)
