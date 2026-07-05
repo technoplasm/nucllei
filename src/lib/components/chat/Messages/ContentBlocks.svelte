@@ -94,10 +94,12 @@
 			/>
 		{:else if block.type === 'tool_calls'}
 			{#each block.calls ?? [] as call (call.id)}
+				<!-- expandDetails ON なら実行中から展開され、引数(コード)が
+				     伸びていく様子が見える(#20 ステップ5。reasoning と同じ設定に従う) -->
 				<Collapsible
 					id={`${id}-block-${blockIdx}-${call.id}`}
 					title=""
-					open={false}
+					open={$settings?.expandDetails ?? false}
 					attributes={toolCallAttributes(call, block.results)}
 					className="w-full space-y-1 mb-1.5 text-sm"
 				/>

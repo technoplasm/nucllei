@@ -43,7 +43,7 @@
 		classifyToolResult,
 		formatJSONString,
 		parseJSONString,
-		parseToolArguments
+		parseToolArgumentsStreaming
 	} from '$lib/utils/tool-render';
 
 	export let open = false;
@@ -222,8 +222,9 @@
 						<!-- 引数/結果は構造データ。バックエンドが型宣言から同梱した
 						     ディスクリプタ(attributes.render、#20)の通りに引数単位で描画する。
 						     宣言なしは型に忠実(scalar は key: value、object は JSON)。
-						     JSON が壊れているときだけ従来の一枚岩表示にフォールバック。 -->
-						{@const argDisplays = parseToolArguments(args, attributes?.render?.args)}
+						     ストリーミング中の未閉鎖 JSON は寛容パーサで部分値を逐次描画
+						     (#20 ステップ5)。object 以外の壊れ方のみ一枚岩フォールバック。 -->
+						{@const argDisplays = parseToolArgumentsStreaming(args, attributes?.render?.args)}
 						{#if argDisplays === null || argDisplays.length > 0}
 							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5">Arguments</div>
 						{/if}
