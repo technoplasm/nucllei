@@ -107,6 +107,20 @@ def has_permission(
     return get_permission(default_permissions, permission_hierarchy)
 
 
+def _matches_group_terms(
+    user_group_ids: List[str], group_terms: List[List[str]]
+) -> bool:
+    """llens 拡張: 交差(AND)条件の判定。
+
+    group_terms は DNF(選言標準形)。項(term)内の group id は AND、
+    項同士は OR で評価する。例:「(内科 AND 部長) OR (外科 AND 部長)」は
+    [[dept_naika, rank_bucho], [dept_geka, rank_bucho]]。
+    空の term は誤って全許可にならないよう不成立として扱う。
+    """
+    user_group_set = set(user_group_ids)
+    return any(term and user_group_set.issuperset(term) for term in group_terms)
+
+
 def has_access(
     user_id: str,
     type: str = "write",
@@ -120,9 +134,13 @@ def has_access(
     permission_access = access_control.get(type, {})
     permitted_group_ids = permission_access.get("group_ids", [])
     permitted_user_ids = permission_access.get("user_ids", [])
+    # llens 拡張(_memos/group-intersection-design.md): 診療科×職位の交差条件
+    permitted_group_terms = permission_access.get("group_terms", [])
 
-    return user_id in permitted_user_ids or any(
-        group_id in permitted_group_ids for group_id in user_group_ids
+    return (
+        user_id in permitted_user_ids
+        or any(group_id in permitted_group_ids for group_id in user_group_ids)
+        or _matches_group_terms(user_group_ids, permitted_group_terms)
     )
 
 
@@ -136,6 +154,7 @@ def get_users_with_access(
     permission_access = access_control.get(type, {})
     permitted_group_ids = permission_access.get("group_ids", [])
     permitted_user_ids = permission_access.get("user_ids", [])
+    permitted_group_terms = permission_access.get("group_terms", [])
 
     user_ids_with_access = set(permitted_user_ids)
 
@@ -143,5 +162,16 @@ def get_users_with_access(
         group_user_ids = Groups.get_group_user_ids_by_id(group_id)
         if group_user_ids:
             user_ids_with_access.update(group_user_ids)
+
+    # llens 拡張: 交差条件は「term 内の全 group に所属するユーザー」の積集合
+    for term in permitted_group_terms:
+        if not term:
+            continue
+        member_sets = []
+        for group_id in term:
+            group_user_ids = Groups.get_group_user_ids_by_id(group_id)
+            member_sets.append(set(group_user_ids or []))
+        if member_sets:
+            user_ids_with_access.update(set.intersection(*member_sets))
 
     return Users.get_users_by_user_ids(list(user_ids_with_access))
