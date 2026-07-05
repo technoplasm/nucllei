@@ -62,12 +62,12 @@
 | `WHISPER_MODEL` | `/models/whisper/faster-whisper-large-v3-turbo-ct2`(ホストマウント・オフライン) |
 | `WHISPER_COMPUTE_TYPE` | `int8`(0.6.5: なし) |
 | `WHISPER_LANGUAGE` | `ja`(0.6.5: なし — 0.6.5 の内蔵 whisper は言語固定不可) |
-| `WHISPER_VAD_FILTER` | `true`(0.6.5: なし) |
+| `WHISPER_VAD_FILTER` | `true`(0.6.5 に既存・既定 false) |
 | `WHISPER_MODEL_AUTO_UPDATE` | `false` |
 
-**キャッチアップ課題**: v0.6.5 の faster-whisper 経路には WHISPER_LANGUAGE /
-COMPUTE_TYPE / VAD_FILTER が無い。STT を 0.6.5 系へ寄せる際は外形仕様ベースで
-これらを自前実装する必要がある(日本語固定は実運用上重要)。
+**対応済み**(2026-07-05 更新): WHISPER_LANGUAGE / WHISPER_COMPUTE_TYPE は
+4244b534c で fork に実装済み(config.py)。WHISPER_VAD_FILTER は v0.6.5 に既存
+(初版の「0.6.5: なし」は誤記)。日本語固定(`WHISPER_LANGUAGE=ja`)が実運用上重要。
 
 ## 機能 OFF(閉域運用)
 

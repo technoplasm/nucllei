@@ -48,7 +48,7 @@ LICENSE 変更履歴(ollama-webui 期):
 
 ## 未了(後続)
 
-- [ ] 依存スキャンの CI 化(GPL/AGPL/SSPL/NC を検出したら fail するチェック)
+- [x] 依存スキャンの CI 化(GPL/AGPL/SSPL/NC を検出したら fail するチェック)— f7f27943d で `test-backend.yaml` に追加済み
 
 ## 再実行手順
 
