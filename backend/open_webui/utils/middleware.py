@@ -55,6 +55,7 @@ from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.task import (
     get_task_model_id,
     rag_template,
+    prompt_template,
 )
 from open_webui.utils.misc import (
     deep_update,
@@ -62,10 +63,13 @@ from open_webui.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
     get_last_user_message,
+    get_last_user_message_item,
     get_last_assistant_message,
     prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
+from open_webui.models.skills import Skills
+from open_webui.utils.access_control import has_access
 from open_webui.utils.tools import get_tools
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
@@ -487,10 +491,82 @@ def apply_params_to_form_data(form_data, model):
     return form_data
 
 
+# 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
+SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
+
+
+def apply_skill_command(form_data, user):
+    """ユーザーメッセージ先頭の `/command` を skill の content で置換する(issue #35)。
+
+    - 最後の user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
+      read 可視な skill を lookup する。
+    - ヒット: `/command` トークンを展開済み content で置換(後続テキストはそのまま残す)。
+      変数展開は task.py の prompt_template(サーバー既知変数のみ)を流用する。
+    - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
+
+    tool_ids の遅延評価はここでは扱わない(#35 step2)。
+    """
+    message = get_last_user_message_item(form_data.get("messages", []))
+    if message is None:
+        return form_data
+
+    # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
+    content = message.get("content")
+    text_item = None
+    if isinstance(content, list):
+        for item in content:
+            if item.get("type") == "text":
+                text_item = item
+                break
+        text = text_item.get("text", "") if text_item else None
+    else:
+        text = content
+
+    if not isinstance(text, str):
+        return form_data
+
+    match = SKILL_COMMAND_PATTERN.match(text)
+    if not match:
+        return form_data
+
+    command = match.group(1)
+    skill = Skills.get_skill_by_command(command)
+    if skill is None:
+        # ミス: 素通し(エラーにしない)。
+        return form_data
+
+    # read 可視性チェック(access_control read。作成者は常に可視)。
+    if not (
+        skill.user_id == user.id or has_access(user.id, "read", skill.access_control)
+    ):
+        return form_data
+
+    # サーバー既知変数のみ展開({{USER_NAME}} / {{CURRENT_DATE}} 等。ブラウザ専用変数は無し)。
+    expanded = prompt_template(skill.content, user_name=user.name)
+
+    # `/command` トークンを展開済み content で置換。後続テキストは残す。
+    new_text = expanded + text[match.end() :]
+
+    # TODO(#35 step2): tool_ids 遅延評価のフック。
+    # skill.tool_ids が非空なら get_tools() でロードし、この先のモデル呼び出しの
+    # tools 配列へ追加する(発火時の遅延評価)。step1 では未実装。
+
+    if text_item is not None:
+        text_item["text"] = new_text
+    else:
+        message["content"] = new_text
+
+    return form_data
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
 
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
+
+    # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
+    # 生のユーザーメッセージ先頭の `/command` を skill content へ展開する。
+    form_data = apply_skill_command(form_data, user)
 
     event_emitter = get_event_emitter(metadata)
     event_call = get_event_call(metadata)

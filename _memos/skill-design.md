@@ -86,11 +86,38 @@
 
 ### step1 — skill 一本化(サーバーサイド実行化)
 
-1. `skill` テーブル + Alembic 移行(prompt データ・権限キー rename 含む)
-2. skills router(CRUD、admin ゲート、access_control)+ 旧 prompts router 廃止
-3. middleware inlet: `/` パース → activate(まず tool なしで。変数展開は `task.py` 流用)
-4. フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換
-5. 回帰テスト: CRUD / 権限(admin ゲート・group_terms)/ `/` パース→注入(fixture リプレイ)
+1. [x] **(backend done)** `skill` テーブル + Alembic 移行
+   - モデル: `backend/open_webui/models/skills.py`(`Skill` / `SkillModel` / `SkillForm` /
+     `SkillUserResponse` / `SkillsTable`)。
+   - 移行: `backend/open_webui/migrations/versions/f8a4d0e2c1b7_add_skill_table.py`
+     (head `3781e22d8b01` から連結)。prompt 全行を skill へ複写(`/` strip、timestamp→
+     created/updated、id=uuid、description=null、tool_ids=[])。複写ロジックは
+     `copy_prompts_to_skills(conn)` に分離してテストから直接駆動。
+   - **prompt テーブル・権限キーの rename は未実施**(移行方針の変更、下記参照)。
+2. [x] **(backend done)** skills router `backend/open_webui/routers/skills.py`(`/api/v1/skills`)。
+   CRUD / admin ゲート(tool_ids 非空は admin 専用) / access_control。
+   **旧 prompts router は残す**(移行方針の変更、下記参照)。
+   権限キー `workspace.skills` / `sharing.public_skills` を `config.py` に追加(prompts は据置)。
+3. [x] **(backend done)** middleware inlet: `/` パース → activate(tool なし。変数展開は
+   `task.py` の `prompt_template` 流用)。実体は
+   `backend/open_webui/utils/middleware.py::apply_skill_command`
+   (呼び出しは `process_chat_payload` 冒頭)。tool_ids 遅延評価の seam は同ファイルの
+   `# TODO(#35 step2): tool_ids 遅延評価のフック` コメント位置。
+4. [ ] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換 — **frontend batch へ延期**。
+5. [x] **(backend done)** 回帰テスト: `backend/open_webui/test/apps/webui/test_skills.py`
+   (CRUD / command 一意性 / `/` 正規化 / admin ゲート / group_terms read フィルタ /
+   移行複写 / `/` パース→注入)。
+
+#### 移行期の判断(2026-07-05、step1 backend 実装時)
+
+- **prompt テーブル・prompts router・prompts 権限キーは移行期間中そのまま残す**
+  (旧フロントが prompts API に依存しており、両立させないと develop が壊れるため)。
+  当初案の「router 削除・権限キー rename・group/user permissions の rename」は
+  **frontend batch(picker/workspace の skills 置換)と同時に実施**する。
+- **picker 補完化と prompts 退役は frontend batch へ延期**(本 step は backend のみ)。
+- **`tool_ids` カラムは新設済みだが runtime では未消費**。遅延評価(step2)の seam は
+  `middleware.py::apply_skill_command` 内の `# TODO(#35 step2): tool_ids 遅延評価のフック`
+  一箇所に集約。作成/更新 API では tool_ids 非空を admin 専用ゲートで受けるところまで実装済み。
 
 ### step2 — Tool 遅延評価
 
