@@ -1,0 +1,49 @@
+{
+ "id": "72767e02b32b4f05adaf980399ed8af5",
+ "object": "chat.completion",
+ "created": 1783217398,
+ "model": "kimi-k2.6",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "札幌と福岡の天気を並列で調べます。",
+    "reasoning_content": "ユーザーは札幌と福岡の天気を同時に調べてほしいと言っています。そして「必ず 2 都市分のツール呼び出しを並列で発行して」と指示しています。\n\nget_weather 関数は city パラメータが必須で、detail はオプションです。2つの都市について並列で関数呼び出しを行う必要があります。\n\n並列で呼び出すため、2つの get_weather 呼び出しを同時に定義します。",
+    "tool_calls": [
+     {
+      "id": "functions.get_weather:0",
+      "index": 0,
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"札幌\"}"
+      }
+     },
+     {
+      "id": "functions.get_weather:1",
+      "index": 1,
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"福岡\"}"
+      }
+     }
+    ]
+   },
+   "logprobs": null,
+   "finish_reason": "tool_calls",
+   "matched_stop": null
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 122,
+  "total_tokens": 298,
+  "completion_tokens": 176,
+  "prompt_tokens_details": null,
+  "reasoning_tokens": 125
+ },
+ "metadata": {
+  "weight_version": "default"
+ }
+}

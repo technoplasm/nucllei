@@ -1,0 +1,172 @@
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ユーザー"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"札"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"幌"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と福岡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"の天気を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"同時に調"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"べてほ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"しい"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と言"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"っ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ています。そ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"して"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"「"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"必ず 2"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" 都市分の"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ツール呼び"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"出しを並"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"列で発行"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"して」と"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"指示"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"してい"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ます。\n\nget"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"_weather "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"関数"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は city"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" パ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ラ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"メ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ータ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"が必"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"須"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"で"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"detail は"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"オ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"プ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ション"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"です。2"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"つの"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"都市"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"（"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"札幌と福"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"）について"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217398,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"並"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"列で"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"関数"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"呼び出"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"しを行"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"う"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"必要"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"があります"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"。\n\n並"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"列で呼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"び出"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"す"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ためには"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、2つの function"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" call を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"同"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"じ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ブ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ロック"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"で送信"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"します"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"。"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"札","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"幌","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"と福岡","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"の天気を","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"並","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"列で","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"調","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"べます","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":"。","reasoning_content":null,"tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":"functions.get_weather:0","index":0,"type":"function","function":{"name":"get_weather","arguments":""}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":null,"index":0,"type":"function","function":{"name":null,"arguments":"{\"city\": \"札幌"}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":null,"index":0,"type":"function","function":{"name":null,"arguments":"\"}"}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":"functions.get_weather:1","index":1,"type":"function","function":{"name":"get_weather","arguments":""}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":null,"index":1,"type":"function","function":{"name":null,"arguments":"{\"city\": \"福岡"}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":[{"id":null,"index":1,"type":"function","function":{"name":null,"arguments":"\"}"}}]},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":null}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null},"logprobs":null,"finish_reason":"tool_calls","matched_stop":163586}]}
+
+data: {"id":"3134854952e24483a8b1efbc824cdf36","object":"chat.completion.chunk","created":1783217399,"model":"kimi-k2.6","choices":[],"usage":{"prompt_tokens":122,"total_tokens":301,"completion_tokens":179,"prompt_tokens_details":null,"reasoning_tokens":128}}
+
+data: [DONE]
+

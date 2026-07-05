@@ -1,0 +1,408 @@
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ユーザー"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"古典"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"的"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"な"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"「農夫と"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と山羊とキャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"」の"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"川"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"渡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"り"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"パ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ズルの最短"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"手順を求"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"め"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"てい"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ます"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"。簡潔に"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"手"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"順だけ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"答える"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"必要"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"があります"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"。\n\n問題"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"の制"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"約"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：\n- "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217384,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"農夫"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"山羊、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"キャベツを"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"川"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"の"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"向"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"こ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"う"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"に運"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ぶ必要"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"がある"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"\n- 舟"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"農夫しか"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"漕"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"げ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ず"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、農夫が"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"乗"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"っ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ていない"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と動"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"か"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ない\n- "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"舟には"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"農夫以外"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"に"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"1つ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"だけ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"乗"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"せ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"られる"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"- 狼と"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"山羊を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"残"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"す"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"と、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"が山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を食べ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"る\n- "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"山羊とキャベ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を残すと"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、山羊がキャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツを食"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"べる\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"- 狼と"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"キャベツな"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ら"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"安全"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217385,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"\n\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"最短手順"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"（"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"7手"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"）：\n\n1."},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" 農夫"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"が山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を運"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ぶ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"（左岸："},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"狼、キャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツ /"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" 右岸："},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"）\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"2. "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"農夫だけ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"戻"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"る（左"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸：農夫、狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、キャベツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：山羊）\n3"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"夫が狼を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"運"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ぶ（左岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：キャベツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：農夫、狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、山羊）\n4"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"夫が山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を連"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"れ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"て戻る（左"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸：農夫、山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、キャベツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：狼）\n5"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"夫がキャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツを運"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ぶ（左岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸：農夫、狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、キャベツ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"）\n6. "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"農夫だけ戻る（左"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217386,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸：農夫、山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：狼、キャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツ）\n7"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"夫が山羊を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"運ぶ（左"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"岸：な"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"し"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":" / 右岸"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"：農夫、狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"、山羊、キャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ベツ）\n\nまたは"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"狼"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"とキャベ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ツの順"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"序"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を入"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"れ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"替"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"えても"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"同"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"じ手"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"数。\n\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"簡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"潔に手"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"順だけ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"列"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"挙"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"します。"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"1"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":". "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"農夫、"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"山羊"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"を渡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"す"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"2. "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"農夫だけ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"戻る\n3"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"夫、狼を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"渡す\n4"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"夫、山羊を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"連"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"れ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"て戻る"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"\n5. "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"農夫、キャ"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"ベツを渡"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"す\n6."},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":" "},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"農夫だけ戻る\n7"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217387,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":". 農"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"夫、山羊を"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"渡す\n\n"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"（狼と"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"キャベツの"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"順"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"序を入"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"れ替"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"えても可"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"）"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null},"logprobs":null,"finish_reason":"stop","matched_stop":163586}]}
+
+data: {"id":"beaf4bc05351402081dec195da53440c","object":"chat.completion.chunk","created":1783217388,"model":"kimi-k2.6","choices":[],"usage":{"prompt_tokens":51,"total_tokens":594,"completion_tokens":543,"prompt_tokens_details":null,"reasoning_tokens":436}}
+
+data: [DONE]
+

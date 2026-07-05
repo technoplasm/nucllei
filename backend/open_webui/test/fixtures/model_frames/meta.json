@@ -1,0 +1,175 @@
+{
+ "captured_at": "2026-07-05T02:09:39.580040+00:00",
+ "base_url": "http://prism-llens:8000/v1",
+ "model": "kimi-k2.6",
+ "server": {
+  "id": "kimi-k2.6",
+  "object": "model",
+  "created": 1783217379,
+  "owned_by": "sglang",
+  "root": "kimi-k2.6",
+  "parent": null,
+  "max_model_len": 262144
+ },
+ "scenarios": {
+  "text_basic": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "1+1 はいくつ?数字だけ答えて。"
+    }
+   ]
+  },
+  "reasoning": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "農夫が川を渡る。狼と山羊とキャベツを運ぶ古典パズルの最短手順を考えて、手順だけ簡潔に答えて。"
+    }
+   ]
+  },
+  "tool_call": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "札幌の天気を調べて。detail 引数には、知りたい観点(気温・湿度・降雪・風速・週間予報など)を日本語で 200 字程度で具体的に書いて。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "指定した都市の現在の天気を取得する",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string",
+         "description": "都市名"
+        },
+        "detail": {
+         "type": "string",
+         "description": "知りたい内容の詳細説明(長文可)"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "tool_call_parallel": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "札幌と福岡の天気を同時に調べて。必ず 2 都市分のツール呼び出しを並列で発行して。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "指定した都市の現在の天気を取得する",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string",
+         "description": "都市名"
+        },
+        "detail": {
+         "type": "string",
+         "description": "知りたい内容の詳細説明(長文可)"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "tool_call_long_code": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "FizzBuzz を class ベースで実装し、docstring・型ヒント・pytest テスト 3 本まで含めた 60 行程度の Python コードを run_python で実行して。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "run_python",
+      "description": "Python コードをサンドボックスで実行する",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "実行する Python コード"
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "reasoning_then_tool": {
+   "model": "kimi-k2.6",
+   "temperature": 0.0,
+   "messages": [
+    {
+     "role": "user",
+     "content": "旭川と那覇、今の時期に雪が降っている可能性が高いのはどちらかをまず論理的に考えてから、その都市の天気をツールで調べて。"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "指定した都市の現在の天気を取得する",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string",
+         "description": "都市名"
+        },
+        "detail": {
+         "type": "string",
+         "description": "知りたい内容の詳細説明(長文可)"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "aborted_client_cut": {
+   "note": "reasoning シナリオを 5 frame 受信後にクライアント側から切断"
+  }
+ }
+}

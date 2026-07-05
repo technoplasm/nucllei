@@ -1,0 +1,40 @@
+{
+ "id": "3ee4d1479c544978926b451df3daed92",
+ "object": "chat.completion",
+ "created": 1783217390,
+ "model": "kimi-k2.6",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "札幌の現在の天気を調べます。",
+    "reasoning_content": "ユーザーは札幌の天気を調べてほしいと依頼しています。detail引数には、知りたい観点（気温・湿度・降雪・風速・週間予報など）を日本語で200字程度で具体的に書く必要があります。\n\n札幌は北海道の都市で、現在の季節（12月頃）を考えると、気温、降雪、風速などが特に重要な情報になります。detail引数に以下のような内容を含めます：\n- 現在の気温と体感温度\n- 湿度\n- 降雪の有無や積雪状況\n- 風速と風向\n- 週間予報（今後の気温推移や降雪の予想）\n- 服装や外出時の注意点\n\n200字程度にまとめます。",
+    "tool_calls": [
+     {
+      "id": "functions.get_weather:0",
+      "index": 0,
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"札幌\", \"detail\": \"現在の気温と体感温度、湿度、降雪の有無と積雪状況、風速と風向、週間予報（今後の気温推移と降雪の予想）、服装や外出時の注意点について詳しく知りたいです。特に冬の寒さ対策に必要な情報をお願いします。\"}"
+      }
+     }
+    ]
+   },
+   "logprobs": null,
+   "finish_reason": "tool_calls",
+   "matched_stop": null
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 141,
+  "total_tokens": 459,
+  "completion_tokens": 318,
+  "prompt_tokens_details": null,
+  "reasoning_tokens": 199
+ },
+ "metadata": {
+  "weight_version": "default"
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "id": "33e971e7b063434f9f96ec407c2a715e",
+ "object": "chat.completion",
+ "created": 1783217380,
+ "model": "kimi-k2.6",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "2",
+    "reasoning_content": "The user is asking \"1+1 はいくつ?数字だけ答えて。\" which translates to \"What is 1+1? Answer with only numbers.\"\n\nThe user explicitly requested to answer with only numbers (数字だけ答えて).\n\n1+1 = 2\n\nI should output just \"2\" without any additional text, explanations, or punctuation, since the user asked for numbers only.",
+    "tool_calls": null
+   },
+   "logprobs": null,
+   "finish_reason": "stop",
+   "matched_stop": 163586
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 22,
+  "total_tokens": 108,
+  "completion_tokens": 86,
+  "prompt_tokens_details": null,
+  "reasoning_tokens": 84
+ },
+ "metadata": {
+  "weight_version": "default"
+ }
+}

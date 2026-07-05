@@ -1,0 +1,10 @@
+data: {"id":"a550c9ff4dbb44968f95eb39db22d388","object":"chat.completion.chunk","created":1783217434,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"a550c9ff4dbb44968f95eb39db22d388","object":"chat.completion.chunk","created":1783217434,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"ユーザー"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"a550c9ff4dbb44968f95eb39db22d388","object":"chat.completion.chunk","created":1783217434,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"は"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"a550c9ff4dbb44968f95eb39db22d388","object":"chat.completion.chunk","created":1783217434,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"古典"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+
+data: {"id":"a550c9ff4dbb44968f95eb39db22d388","object":"chat.completion.chunk","created":1783217434,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"reasoning_content":"的"},"logprobs":null,"finish_reason":null,"matched_stop":null}]}
+

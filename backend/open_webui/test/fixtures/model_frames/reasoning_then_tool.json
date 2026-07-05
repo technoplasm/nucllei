@@ -1,0 +1,49 @@
+{
+ "id": "097cf7d955d444aeb56b9ed8cefc4857",
+ "object": "chat.completion",
+ "created": 1783217428,
+ "model": "kimi-k2.6",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "まず論理的に考えます。\n\n**旭川**は北海道の内陸部に位置し、日本有数の豪雪地帯として知られています。冬場（11月〜3月頃）は気温が氷点下を下回り、雪が降るのが一般的です。\n\n一方、**那覇**は沖縄本島に位置し、亜熱帯性気候に属します。年間を通して温暖で、最低気温が氷点下になることはほぼなく、雪が降ることは極めて稀（過去の観測史上もほとんど記録がありません）です。\n\nしたがって、論理的に考えて**旭川**の方が、今の時期に雪が降っている可能性が圧倒的に高いです。\n\nでは、実際の天気を確認してみましょう。",
+    "reasoning_content": "ユーザーは「旭川」と「那覇」について、今の時期に雪が降っている可能性が高いのはどちらかを、まず論理的に考えてから、その都市の天気をツールで調べるよう求めています。\n\nまず論理的な考察を行います：\n1. 旭川：北海道に位置し、日本の中でも最も寒い地域の一つ。11月から3月頃まで雪が降ることが一般的で、特に12月から2月は豪雪地帯となる。\n2. 那覇：沖縄県に位置し、亜熱帯気候。年間を通して温暖で、雪が降ることは極めて稀（基本的に降らない）。気温が氷点下になることはほとんどない。\n\nしたがって、論理的に考えて「旭川」の方が雪が降っている可能性が圧倒的に高いです。\n\n次に、ツールを使って両都市の天気を調べます。get_weather関数を使用して、両方の都市の天気を取得します。detailには雪に関する情報を含めるよう指定します。",
+    "tool_calls": [
+     {
+      "id": "functions.get_weather:0",
+      "index": 0,
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\":\"旭川\",\"detail\":\"現在の気温、天気、および雪が降っているかどうか（積雪状況も含めて）を教えてください。\"}"
+      }
+     },
+     {
+      "id": "functions.get_weather:1",
+      "index": 1,
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\":\"那覇\",\"detail\":\"現在の気温、天気、および雪が降っているかどうかを教えてください。\"}"
+      }
+     }
+    ]
+   },
+   "logprobs": null,
+   "finish_reason": "tool_calls",
+   "matched_stop": null
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 133,
+  "total_tokens": 717,
+  "completion_tokens": 584,
+  "prompt_tokens_details": null,
+  "reasoning_tokens": 276
+ },
+ "metadata": {
+  "weight_version": "default"
+ }
+}
