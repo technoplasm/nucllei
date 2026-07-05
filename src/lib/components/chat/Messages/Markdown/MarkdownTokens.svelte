@@ -8,6 +8,7 @@
 
 	import { marked, type Token } from 'marked';
 	import { unescapeHtml } from '$lib/utils';
+	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -271,7 +272,7 @@
 		{#if html && html.includes('<video')}
 			{@html html}
 		{:else if token.text.includes(`<iframe src="${WEBUI_BASE_URL}/api/v1/files/`)}
-			{@html `${token.text}`}
+			{@html sanitizeIframeHtml(token.text)}
 		{:else if token.text.includes(`<source_id`)}
 			<Source {id} {token} onClick={onSourceClick} />
 		{:else}

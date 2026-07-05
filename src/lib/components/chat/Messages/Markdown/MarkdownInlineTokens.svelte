@@ -9,6 +9,7 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
+	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 
 	import Image from '$lib/components/common/Image.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
@@ -27,7 +28,7 @@
 		{#if html && html.includes('<video')}
 			{@html html}
 		{:else if token.text.includes(`<iframe src="${WEBUI_BASE_URL}/api/v1/files/`)}
-			{@html `${token.text}`}
+			{@html sanitizeIframeHtml(token.text)}
 		{:else if token.text.includes(`<source_id`)}
 			<Source {id} {token} onClick={onSourceClick} />
 		{:else}
