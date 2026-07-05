@@ -311,9 +311,23 @@ async def delete_tools_by_id(
 
 
 @router.get("/id/{id}/valves", response_model=Optional[dict])
-async def get_tools_valves_by_id(id: str, user=Depends(get_verified_user)):
+async def get_tools_valves_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
     tools = Tools.get_tool_by_id(id)
     if tools:
+        # llens(GHSA-7429-hxcv-268m / CVE-2026-34222): 管理者 valve は秘密(API キー等)を
+        # 含みうる。読み取りにも update と同じアクセス制御(owner/write/admin)を適用し、
+        # 任意ユーザーへの秘密露出を防ぐ。
+        if (
+            tools.user_id != user.id
+            and not has_access(user.id, "write", tools.access_control)
+            and user.role != "admin"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.UNAUTHORIZED,
+            )
         try:
             valves = Tools.get_tool_valves_by_id(id)
             return valves
@@ -340,6 +354,16 @@ async def get_tools_valves_spec_by_id(
 ):
     tools = Tools.get_tool_by_id(id)
     if tools:
+        # llens(GHSA-7429-hxcv-268m): valve 設定面(admin valve)は owner/write/admin のみ。
+        if (
+            tools.user_id != user.id
+            and not has_access(user.id, "write", tools.access_control)
+            and user.role != "admin"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.UNAUTHORIZED,
+            )
         if id in request.app.state.TOOLS:
             tools_module = request.app.state.TOOLS[id]
         else:

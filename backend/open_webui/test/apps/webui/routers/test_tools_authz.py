@@ -90,6 +90,36 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             )
         assert r.status_code == 200
 
+    def test_valves_read_requires_access(self):
+        """GHSA-7429: 管理者 valve(秘密を含みうる)の読み取りに access 制御を適用。
+
+        private tool の /valves を非 owner 非 admin が読むと 401、owner は 200。
+        """
+        self._insert_tool()  # owner=user "1" だが access_control=AC(user "2" に write 付与)
+        from open_webui.models.tools import ToolForm, ToolMeta
+
+        # owner のみ(access_control={})の別 tool を用意して純粋な拒否を確認
+        self.Tools.insert_new_tool(
+            "1",
+            ToolForm(
+                id="valve_probe",
+                name="vp",
+                content=TOOL_CONTENT,
+                meta=ToolMeta(description="d", manifest={}),
+                access_control={},
+            ),
+            [],
+        )
+        with mock_webui_user(id="2", role="user"):
+            denied = self.fast_api_client.get(self.create_url("/id/valve_probe/valves"))
+        assert denied.status_code == 401
+
+        with mock_webui_user(id="1", role="user"):
+            allowed = self.fast_api_client.get(
+                self.create_url("/id/valve_probe/valves")
+            )
+        assert allowed.status_code == 200
+
     def test_get_tools_skips_inaccessible_tool(self):
         """GHSA-4pcg: リクエスト由来の tool_id でも read 権限が無ければ get_tools が無視する。
 
