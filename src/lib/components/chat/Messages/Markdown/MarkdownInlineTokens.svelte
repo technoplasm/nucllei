@@ -71,7 +71,10 @@
 			title={token.fileId}
 			width="100%"
 			frameborder="0"
-			onload="this.style.height=(this.contentWindow.document.body.scrollHeight+20)+'px';"
+			on:load={(e) => {
+				const el = e.currentTarget;
+				el.style.height = el.contentWindow.document.body.scrollHeight + 20 + 'px';
+			}}
 		></iframe>
 	{:else if token.type === 'text'}
 		{token.raw}

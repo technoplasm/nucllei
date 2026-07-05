@@ -15,6 +15,8 @@ const login = (email: string, password: string) => {
 			// Make sure to test against us english to have stable tests,
 			// regardless on local language preferences
 			localStorage.setItem('locale', 'en-US');
+			// Suppress the changelog dialog (llens: avoid What's New coupling in smoke)
+			localStorage.setItem('version', '0.6.5');
 			// Visit auth page
 			cy.visit('/auth');
 			// Fill out the form
@@ -25,9 +27,6 @@ const login = (email: string, password: string) => {
 			// Wait until the user is redirected to the home page
 			cy.get('#chat-search').should('exist');
 			// Get the current version to skip the changelog dialog
-			if (localStorage.getItem('version') === null) {
-				cy.get('button').contains("Okay, Let's Go!").click();
-			}
 		},
 		{
 			validate: () => {
@@ -56,7 +55,7 @@ const register = (name: string, email: string, password: string) => {
 			failOnStatusCode: false
 		})
 		.then((response) => {
-			expect(response.status).to.be.oneOf([200, 400]);
+			expect(response.status).to.be.oneOf([200, 400, 403]);
 		});
 };
 

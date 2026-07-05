@@ -851,7 +851,7 @@
 			messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
 		}
 	};
-	const chatCompletedHandler = async (chatId, modelId, responseMessageId, messages) => {
+	const chatCompletedHandler = async (targetChatId, modelId, responseMessageId, messages) => {
 		const res = await chatCompleted(localStorage.token, {
 			model: modelId,
 			messages: messages.map((m) => ({
@@ -864,7 +864,7 @@
 				...(m.sources ? { sources: m.sources } : {})
 			})),
 			model_item: $models.find((m) => m.id === modelId),
-			chat_id: chatId,
+			chat_id: targetChatId,
 			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
@@ -892,9 +892,9 @@
 
 		await tick();
 
-		if ($chatId == chatId) {
+		if ($chatId == targetChatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
+				chat = await updateChatById(localStorage.token, targetChatId, {
 					models: selectedModels,
 					messages: messages,
 					history: history,
@@ -910,7 +910,13 @@
 		taskIds = null;
 	};
 
-	const chatActionHandler = async (chatId, actionId, modelId, responseMessageId, event = null) => {
+	const chatActionHandler = async (
+		targetChatId,
+		actionId,
+		modelId,
+		responseMessageId,
+		event = null
+	) => {
 		const messages = createMessagesList(history, responseMessageId);
 
 		const res = await chatAction(localStorage.token, actionId, {
@@ -925,7 +931,7 @@
 			})),
 			...(event ? { event: event } : {}),
 			model_item: $models.find((m) => m.id === modelId),
-			chat_id: chatId,
+			chat_id: targetChatId,
 			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
@@ -947,9 +953,9 @@
 			}
 		}
 
-		if ($chatId == chatId) {
+		if ($chatId == targetChatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
+				chat = await updateChatById(localStorage.token, targetChatId, {
 					models: selectedModels,
 					messages: messages,
 					history: history,
