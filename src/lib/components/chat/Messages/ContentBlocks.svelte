@@ -21,6 +21,12 @@
 		onSelect = (detail: any) => {}
 	} = $props();
 
+	// 実行中(結果未着)の tool call を自動展開し、引数(コード)が伸びていく
+	// 様子を見せる(#20 ステップ5)。結果が返ると畳まれ、ヘッダが
+	// 「View Result from …」になる。設定 UI は増やさない — 挙動を変えたい
+	// ときはこの定数を編集する(false = 常に閉じて開始、旧挙動)。
+	const AUTO_EXPAND_EXECUTING_TOOL_CALLS = true;
+
 	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま渡す
 	// (旧 details 経路の「JSON.stringify → 属性文字列 → decode → 再パース」往復を廃止)。
 	// call.function.arguments はモデル由来の JSON 文字列、result.content は文字列、
@@ -94,12 +100,13 @@
 			/>
 		{:else if block.type === 'tool_calls'}
 			{#each block.calls ?? [] as call (call.id)}
-				<!-- expandDetails ON なら実行中から展開され、引数(コード)が
-				     伸びていく様子が見える(#20 ステップ5。reasoning と同じ設定に従う) -->
+				<!-- open は「結果未着かどうか」で流れる: 実行中 true → 結果到着で
+				     false に変わり自動で畳まれる。手動開閉は値が変わるまで優先される -->
 				<Collapsible
 					id={`${id}-block-${blockIdx}-${call.id}`}
 					title=""
-					open={$settings?.expandDetails ?? false}
+					open={AUTO_EXPAND_EXECUTING_TOOL_CALLS &&
+						!(block.results ?? []).find((r) => r.tool_call_id === call.id)}
 					attributes={toolCallAttributes(call, block.results)}
 					className="w-full space-y-1 mb-1.5 text-sm"
 				/>
