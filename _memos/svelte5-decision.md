@@ -33,3 +33,13 @@ svelte 5.56.4 / @sveltejs/vite-plugin-svelte 4.x / svelte-check 4.x に上げて
 - eslint-plugin-svelte 2.x / prettier-plugin-svelte 3.x は Svelte 5 対応版が存在するが、lint 再有効化(#25)まで保留
 - 深い挙動差(untrack 相当のタイミング、束縛の伝播)はレンダリング刷新の新規コンポーネント側で顕在化しうる。
   L0〜L3 は fixture リプレイテスト(#29 の成果)で挙動固定する前提なので、そこで検出する
+
+## 発見済みの互換モード regression(2026-07-05)
+
+- **初期化時の `$: dispatch(...)` が親の `on:change` に届く**(Svelte 4 では届かず無害だった)。
+  実害例: `common/Switch.svelte` 経由で workspace モデル一覧を開くだけに全モデルへ
+  `/api/v1/models/model/toggle` が発火し、is_active が訪問ごとに反転していた
+  (コミット 1a7e722b0 で Switch / Collapsible に「値が実変化したときだけ発火」ガードを導入)。
+- 同型の芽: `createEventDispatcher` + `$:` の組み合わせは初期化発火を疑うこと。
+  現存は Switch / Collapsible の 2 箇所のみ(`grep -rlF '$: dispatch(' src/`)。
+  新規コンポーネントは runes で書くため対象外だが、upstream 由来コードを触るときは再 grep する。

@@ -41,3 +41,11 @@
 - `pnpm check`(svelte-check)は v0.6.5 ベースラインで **5056 errors / 67 warnings / 226 files**。
   upstream も green にしていない領域のため CI には入れていない(lint 再有効化は issue #25 の残タスク)。
 - `pnpm build`(vite build)と `pnpm test:frontend`(vitest)は green。CI 必須化済み。
+
+## 起動時の static 上書き(2026-07-05)
+
+- `config.py` は import のたびに `FRONTEND_BUILD_DIR/static/**`(既定 `build/static`)を
+  `backend/open_webui/static/` へ**無条件上書きコピー**する。古い `build/` が残っている
+  マシンでは、uvicorn --reload の再起動のたびに favicon 等が旧アセットへ巻き戻る。
+  ブランド画像を差し替えたら `static/static/**`(ソース)と、ローカルの `build/static/**`
+  も同期すること(favicon 差し替え時に一度これで巻き戻りが発生 → amend で修復済み)。
