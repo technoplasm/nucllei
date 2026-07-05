@@ -16,6 +16,33 @@
 - **v0.6.5 に影響しうる: 約 81 件**(コードが存在。ただし多くは RAG/web検索/channels/OAuth/Ollama など既定オフ機能で条件付き)
 - **v0.10.2 で「意図的に未列挙・一時的に伏せられた」修正の存在が明記** → 現時点で **非公開(embargo)相当のアドバイザリが不定数存在**(下記「embargo」節)
 
+## 実施状況(2026-07-05 バックポート、master に出荷済み)
+
+バックエンド分を Opus セッションで消化(いずれも脆弱性を実コードで確認 → 修正 → **修正前に落ちる**回帰テスト付き):
+
+| GHSA / CVE | 深刻度 | 内容 | commit | issue |
+|---|---|---|---|---|
+| GHSA-2r4p-jpmg-48f4 / CVE-2026-44551 | CRITICAL | LDAP 空パスワード認証バイパス | 03e9a9783 | #38 |
+| GHSA-482j-2pq6-q5w4 / CVE-2026-45672 | HIGH | code/execute の ENABLE_CODE_EXECUTION 未適用 | 03e9a9783 | #39 |
+| GHSA-m8f9-9whg-f4xr / CVE-2026-45315 | HIGH | audio transcription 拡張子詐称 XSS + /cache 配信 | b582c862e | #39 |
+| GHSA-p4fx-23fq-jfg6 / CVE-2026-45395 | HIGH | tool 更新のソース書換 authz(RCE 面) | 593f35c27 | #37 |
+| GHSA-4pcg-253r-rf9w / CVE-2026-45350 | HIGH | リクエスト由来 tool_ids のアクセス検証 | be49c0bef | #37 |
+| GHSA-7429-hxcv-268m / CVE-2026-34222 | HIGH | 管理者 valve 読み取り authz | 7e419395d | #37 |
+| GHSA-gfm2-xm6c-37qc / CVE-2026-45349 | HIGH | chat completion の chat_id 所有者検証 | d60d13724 | #37 |
+
+**非該当と確認(捏造回避)**:
+- **GHSA-j2c8-v969-8r5c**(/cache sibling-prefix traversal): Starlette 1.3.1 が `lookup_path` で
+  `os.path.commonpath` による包含チェックを行っており脱出不可(実コードで確認)。
+- **GHSA-9vvh-qmjx-p4q8**(base_model_id チェーン ACL バイパス): llens 非該当。
+  ① 生モデル(workspace 行なし)は `check_model_access` が role=user に対し "Model not found" で既に遮断、
+  ② preset 作成(`base_model_id` 指定)は `workspace.models` 権限=既定 admin のみ、
+  ③ SGLang 単一接続で「制限されたベース計算資源」も無い → ユーザーは restricted なベースに到達不能。
+  派生タスク: 生モデルをチャットピッカーから全員向けに隠す(UX、フロント/#6 で対応)。
+
+**未着手(フロント/mixed、フロントバッチ)**: #36(GHSA-9f4f レンダリング XSS = 0.6.5 ちょうど)、
+#40(file/KB IDOR 群)、#38 残(h3ww/57q6/7rw5 の認証系)。
+**継続監視**: v0.10.x の未公開 access-control 修正(下記 embargo 節)。
+
 ## 最重要 TOP 3(id と一言理由)
 
 1. **GHSA-9f4f-jv96-8766 / CVE-2025-46719**(HIGH, 範囲 = **0.6.5 ちょうど**, patched 0.6.6)
