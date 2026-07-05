@@ -15,7 +15,8 @@
 
 	let config = null;
 
-	let engines = ['pyodide', 'jupyter'];
+	// llens: Pyodide は廃止。実行は外部 Jupyter 互換(nsjail + IPython)のみ(issue #11)
+	let engines = ['jupyter'];
 
 	const submitHandler = async () => {
 		const res = await setCodeExecutionConfig(localStorage.token, config);

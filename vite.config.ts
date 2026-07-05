@@ -39,5 +39,10 @@ export default defineConfig({
 	},
 	worker: {
 		format: 'es'
+	},
+	test: {
+		// _links/ はマシン固有 symlink(現行 llens 等)。辿ると symlink ループや
+		// 巨大ツリーの走査で OOM するため探索対象から外す
+		exclude: ['**/node_modules/**', '**/dist/**', '**/cypress/**', '**/_links/**']
 	}
 });

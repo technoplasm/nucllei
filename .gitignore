@@ -17,8 +17,6 @@ __pycache__/
 *.so
 
 # Pyodide distribution
-static/pyodide/*
-!static/pyodide/pyodide-lock.json
 
 # Distribution / packaging
 .Python
@@ -312,3 +310,4 @@ cypress/screenshots
 _links/
 !.claude/
 .claude/settings.local.json
+/llens
