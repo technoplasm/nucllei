@@ -4,6 +4,8 @@
 // フロントは dumb — 引数名・値の長さからの推測はしない。
 // フォールバックは「型に忠実」(素の str は scalar、object/array は json)。
 
+import { parsePartialArguments } from './partial';
+
 export type RenderDescriptor = {
 	kind: string;
 	language?: string;
@@ -20,6 +22,8 @@ export type ArgDisplay = {
 	language?: string;
 	// code/scalar は生の値(JSON.parse がアンエスケープ済み)、json は整形済み文字列
 	value: string;
+	// ストリーミング途中(値がまだ伸びる可能性がある)。確定済みは undefined
+	streaming?: boolean;
 };
 
 // モデル由来の arguments(JSON 文字列)をディスクリプタ駆動の表示リストに変換する。
@@ -59,6 +63,58 @@ export const parseToolArguments = (
 			};
 		}
 		return { name, kind: 'json' as const, value: JSON.stringify(value, null, 2) };
+	});
+};
+
+// ストリーミング対応版: 完全な JSON はこれまで通り(型に忠実な確定表示)、
+// 未閉鎖なら寛容パーサ(partial.ts)で部分値を表示する。object 以外を吐く
+// 壊れ方のときだけ null(呼び出し側が一枚岩表示にフォールバック)。
+export const parseToolArgumentsStreaming = (
+	argsJson: string,
+	render?: Record<string, RenderDescriptor>
+): ArgDisplay[] | null => {
+	const complete = parseToolArguments(argsJson, render);
+	if (complete !== null) {
+		return complete;
+	}
+
+	const partial = parsePartialArguments(argsJson);
+	if (partial === null) {
+		return null;
+	}
+
+	return partial.entries.map((entry) => {
+		const descriptor = render?.[entry.name];
+		const streaming = entry.complete ? {} : { streaming: true };
+		if (entry.isString) {
+			if (descriptor?.kind === 'code') {
+				return {
+					name: entry.name,
+					kind: 'code' as const,
+					language: descriptor.language || 'plaintext',
+					value: entry.value,
+					...streaming
+				};
+			}
+			return { name: entry.name, kind: 'scalar' as const, value: entry.value, ...streaming };
+		}
+		// 非文字列: 確定していれば型に忠実に(scalar/json)、途中なら生断片を json 扱いで
+		if (entry.complete) {
+			try {
+				const value = JSON.parse(entry.value);
+				if (value !== null && typeof value === 'object') {
+					return {
+						name: entry.name,
+						kind: 'json' as const,
+						value: JSON.stringify(value, null, 2)
+					};
+				}
+				return { name: entry.name, kind: 'scalar' as const, value: entry.value };
+			} catch (e) {
+				return { name: entry.name, kind: 'json' as const, value: entry.value };
+			}
+		}
+		return { name: entry.name, kind: 'json' as const, value: entry.value, ...streaming };
 	});
 };
 

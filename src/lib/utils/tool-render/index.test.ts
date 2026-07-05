@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { classifyToolResult, formatJSONString, parseToolArguments } from './index';
+import {
+	classifyToolResult,
+	formatJSONString,
+	parseToolArguments,
+	parseToolArgumentsStreaming
+} from './index';
 
 // tool_call_long_code 実キャプチャ相当: エスケープ済み JSON 文字列の code 引数
 const LONG_CODE_ARGS = JSON.stringify({
@@ -72,6 +77,52 @@ describe('parseToolArguments', () => {
 		expect(parseToolArguments('"just a string"', undefined)).toBeNull();
 		expect(parseToolArguments('[1, 2]', undefined)).toBeNull();
 		expect(parseToolArguments('null', undefined)).toBeNull();
+	});
+});
+
+describe('parseToolArgumentsStreaming', () => {
+	const RENDER = { code: { kind: 'code', language: 'python' } };
+
+	it('完全な JSON は parseToolArguments と同一(streaming フラグなし)', () => {
+		const args = JSON.stringify({ code: 'print(1)', timeout: 30 });
+		expect(parseToolArgumentsStreaming(args, RENDER)).toEqual(parseToolArguments(args, RENDER));
+	});
+
+	it('未閉鎖 JSON: code 宣言の部分値が streaming 付き code 表示になる', () => {
+		const displays = parseToolArgumentsStreaming('{"code":"def f():\\n    pa', RENDER);
+		expect(displays).toEqual([
+			{
+				name: 'code',
+				kind: 'code',
+				language: 'python',
+				value: 'def f():\n    pa',
+				streaming: true
+			}
+		]);
+	});
+
+	it('確定した引数と伸びている引数が共存する', () => {
+		const displays = parseToolArgumentsStreaming('{"code":"print(1)","note":"実行し', RENDER);
+		expect(displays).toEqual([
+			{ name: 'code', kind: 'code', language: 'python', value: 'print(1)' },
+			{ name: 'note', kind: 'scalar', value: '実行し', streaming: true }
+		]);
+	});
+
+	it('伸びている非文字列値は生断片の json 表示(streaming)', () => {
+		const displays = parseToolArgumentsStreaming('{"filters":{"city":"札', undefined);
+		expect(displays).toEqual([
+			{ name: 'filters', kind: 'json', value: '{"city":"札', streaming: true }
+		]);
+	});
+
+	it('まだ何も届いていない("" / 途中のキー)は空リスト', () => {
+		expect(parseToolArgumentsStreaming('', RENDER)).toEqual([]);
+		expect(parseToolArgumentsStreaming('{"co', RENDER)).toEqual([]);
+	});
+
+	it('object 以外の壊れ方は null(一枚岩フォールバック)', () => {
+		expect(parseToolArgumentsStreaming('[1,2', undefined)).toBeNull();
 	});
 });
 
