@@ -6,8 +6,9 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 
 ## ツールチェーン
 
-- **node**: `.node-version` = 24.18.0(nodebrew 管理)。**v24.4.0 は V8 バグで
-  `pnpm install` が OOM クラッシュする(invalid array length)ので使わない**。
+- **node**: `.node-version` = 24.18.0(マネージャは環境依存 — nodebrew や mise。
+  mise なら `mise install` が `.node-version` を拾い、`mise exec node@24.18.0 -- <cmd>` で実行)。
+  **v24.4.0 は V8 バグで `pnpm install` が OOM クラッシュする(invalid array length)ので使わない**。
 - **frontend**: pnpm(`pnpm install`)。テストは `npx vitest run`。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
@@ -25,10 +26,11 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 ## dev サーバ
 
 ```sh
-# backend(リポジトリルートで)
-.venv/bin/uvicorn open_webui.main:app --port 8080 --host 0.0.0.0 --forwarded-allow-ips '*' --reload
+# backend(リポジトリルートで。PYTHONPATH=backend 必須 — tool.uv package=false のため
+# open_webui は venv にインストールされない)
+PYTHONPATH=backend .venv/bin/uvicorn open_webui.main:app --port 8080 --host 0.0.0.0 --forwarded-allow-ips '*' --reload
 # frontend
-npm run dev   # vite :5173。dev 時は WEBUI_BASE_URL が localhost:8080 に向く(src/lib/constants.ts)
+npm run dev   # vite :5173(使用中なら 5174 等へ自動退避)。dev 時は WEBUI_BASE_URL が localhost:8080 に向く(src/lib/constants.ts)
 ```
 
 - 8080 が埋まっていたら upstream の docker(`docker stop open-webui`)をまず疑う。
@@ -69,6 +71,12 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    - このほか dev DB に `get_weather` tool(fixture の call 先)を手で作って toolIds に足しておくと
      モデルフレーム fixture と同じシナリオを UI で再現できる(spec は
      `test_native_tool_calling.py` の weather_spec 参照)。
+6. **skill fixture(#35 検証用)**: skill `kansai`(関西弁指示)/ skill `vault`
+   (tool_ids=["secret_password"])/ tool `secret_password`(私有)を作り、preset の
+   `meta.skillIds` に紐づける。手順と実機チェックは `dev/e2e/README.md`。
+   **注意**: preset の meta を API で書き換えたら `GET /api/models` を叩いて
+   `app.state.MODELS` キャッシュを再構築しないと manifest に反映されない
+   (UI 経由なら自然に起きる)。
 
 ## モデルフレーム fixture(SGLang × Kimi 実キャプチャ)
 

@@ -173,7 +173,8 @@ tool result = 展開済み content の全シーケンス。
 2. native ループ内で activate: tool result = 展開済み content を返すだけ(tools 動的追加はしない)。
    native ループに既にある tool 実行の 1 ケースに過ぎないので C を待たずに出荷できる
 3. `/` 側の展開ロジックと**同一の `activate_skill(skill, user)` を経由**
-   (seam は middleware.py の既存 TODO 位置。将来の tool_ids 消費はこの関数内 1 箇所に足す)
+   (tool_ids 消費は step2b で実装済み — `/` 側は payload 合流、load_skill 側は
+   `load_tools` フック。下記 step2b 参照)
 4. 教訓(現行 llens `scripts/owui/sync.py` より): manifest に id と name の両方を出すと
    モデルが name を渡して not found になる(現行は name=id 強制で回避)。
    llens の manifest 識別子は **command 一本**にする
