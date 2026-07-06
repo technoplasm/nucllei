@@ -282,7 +282,10 @@ input[type='number'] {
 
 /* llens(issue #35): 有効な /command トークンの控えめなハイライト(入力欄・送信済みメッセージ共通) */
 .skill-command-token {
-	@apply rounded-md bg-blue-500/10 px-1 py-0.5 font-medium text-blue-600 dark:bg-blue-400/10 dark:text-blue-300;
+	/* font-medium(font-weight:500)は使わない: コピー時にインラインスタイルとして
+	   clipboard に乗り、ペーストで TipTap の Bold に <strong> と解釈されて
+	   `**\/command**` になり、行頭一致が壊れてサーバ発火しなくなる(実測 2026-07-06)。 */
+	@apply rounded-md bg-blue-500/10 px-1 py-0.5 text-blue-600 dark:bg-blue-400/10 dark:text-blue-300;
 }
 
 .svelte-flow {
