@@ -581,7 +581,23 @@ def activate_skill(skill, user) -> str:
     return prompt_template(skill.content, user_name=user.name)
 
 
-def apply_skill_command(form_data, user):
+def is_skills_feature_enabled(model) -> bool:
+    """モデル(preset)の機能「スキル」が有効か(issue #42)。
+
+    meta.features.skills に持つ(既定 ON — キー不在は有効)。OFF のモデルでは
+    manifest(load_skill)も `/command` 発火も止まり、スキル機構が丸ごと消える。
+    グローバルフラグは作らない(制御面はモデル設定に一元化 — _memos/builtin-tools.md 1a/1b)。
+    """
+    meta = (model or {}).get("info", {}).get("meta", {}) or {}
+    features = meta.get("features") or {}
+    return features.get("skills", True) is not False
+
+
+def get_model_skill_ids(model) -> list[str]:
+    return (model or {}).get("info", {}).get("meta", {}).get("skillIds", []) or []
+
+
+def apply_skill_command(form_data, user, model):
     """user メッセージ先頭の `/command` を「load_skill を呼んだことにして」発火する(issue #35)。
 
     ヒットした user メッセージは**生のまま**残し、直後に合成の
@@ -595,12 +611,19 @@ def apply_skill_command(form_data, user):
     - 各 user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
       read 可視な skill を lookup する。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
+    - 発火条件は AND(issue #42): 機能「スキル」がモデルで有効 ∧ その skill がモデルに
+      紐づく(meta.skillIds)∧ ユーザーに read 可視。モデル設定を唯一の制御面にする
+      (従来の「可視ならどのモデルでも発火」から変更 — _memos/builtin-tools.md 1b)。
 
     戻り値は (form_data, 発火リスト)。発火リストの要素は
     {call_id, command, title, content(展開済み), current(最後の user メッセージでの発火か)}。
     current な発火は UI 表示用に応答先頭の tool_calls ブロック(synthetic)にも seed される。
     """
     activations = []
+
+    if not is_skills_feature_enabled(model):
+        return form_data, activations
+    model_skill_ids = set(get_model_skill_ids(model))
 
     messages = form_data.get("messages", [])
     last_user_idx = None
@@ -637,7 +660,11 @@ def apply_skill_command(form_data, user):
             continue
 
         skill = Skills.get_skill_by_command(match.group(1))
-        if skill is None or not is_skill_visible(skill, user):
+        if (
+            skill is None
+            or skill.id not in model_skill_ids
+            or not is_skill_visible(skill, user)
+        ):
             continue
 
         expanded = activate_skill(skill, user)
@@ -704,7 +731,9 @@ def build_load_skill_tool(model, user, load_tools=None):
     skill.tool_ids が非空なら content を返す前に await され、呼び出し側
     (process_chat_payload)が tools_dict / form_data["tools"] に注入する。
     """
-    skill_ids = (model.get("info", {}).get("meta", {}) or {}).get("skillIds", [])
+    if not is_skills_feature_enabled(model):
+        return None
+    skill_ids = get_model_skill_ids(model)
     if not skill_ids:
         return None
 
@@ -776,7 +805,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 合成の load_skill tool exchange(call + 展開済み content の result)を
     # ヒットした user メッセージの直後へ注入する。
-    form_data, skill_activations = apply_skill_command(form_data, user)
+    form_data, skill_activations = apply_skill_command(form_data, user, model)
 
     # 今回のターンの発火は UI 表示用に応答先頭の tool_calls ブロックとして seed する
     # (process_chat_response 側。synthetic マーカ付きでモデル履歴へは再送しない —

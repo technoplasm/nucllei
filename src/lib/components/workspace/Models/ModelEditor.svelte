@@ -10,6 +10,7 @@
 	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
 	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import { getModels } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
@@ -89,6 +90,10 @@
 	let filterIds = [];
 	let actionIds = [];
 
+	// llens(#42): 機能「スキル」(meta.features.skills、既定 ON)。OFF でこのモデルの
+	// manifest(load_skill)と /command 発火が両方止まる。
+	let featureSkills = true;
+
 	let accessControl = {};
 
 	// llens: チャットのモデルピッカー(/api/models = $models)は preset のみを返すよう
@@ -153,6 +158,16 @@
 		} else {
 			if (info.meta.skillIds) {
 				delete info.meta.skillIds;
+			}
+		}
+
+		// 既定(ON)のときはキーを残さない(meta を汚さない)
+		if (!featureSkills) {
+			info.meta.features = { ...(info.meta.features ?? {}), skills: false };
+		} else if (info.meta.features?.skills !== undefined) {
+			delete info.meta.features.skills;
+			if (Object.keys(info.meta.features).length === 0) {
+				delete info.meta.features;
 			}
 		}
 
@@ -233,6 +248,7 @@
 
 			toolIds = model?.meta?.toolIds ?? [];
 			skillIds = model?.meta?.skillIds ?? [];
+			featureSkills = (model?.meta?.features?.skills ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			knowledge = (model?.meta?.knowledge ?? []).map((item) => {
@@ -720,11 +736,36 @@
 					</div>
 
 					<div class="my-2">
-						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
+						<div class="flex w-full justify-between mb-1">
+							<div class=" self-center text-sm font-semibold">{$i18n.t('Features')}</div>
+						</div>
+
+						<div class="flex items-center gap-2 mr-3">
+							<Checkbox
+								state={featureSkills ? 'checked' : 'unchecked'}
+								on:change={(e) => {
+									featureSkills = e.detail === 'checked';
+								}}
+							/>
+							<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
+								<span class="font-medium">{$i18n.t('Skills')}</span>
+								<span class="text-xs text-gray-500"
+									>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
+								>
+							</div>
+						</div>
+
+						<div class="mt-2">
+							<SkillsSelector
+								bind:selectedSkillIds={skillIds}
+								skills={$skills ?? []}
+								disabled={!featureSkills}
+							/>
+						</div>
 					</div>
 
 					<div class="my-2">
-						<SkillsSelector bind:selectedSkillIds={skillIds} skills={$skills ?? []} />
+						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
 					</div>
 
 					<div class="my-2">

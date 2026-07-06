@@ -71,6 +71,14 @@
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
+	// llens(#42): `/command` 補完は「選択モデルに紐づき、かつ機能スキルが有効」な skill だけ。
+	// 複数モデル選択時は和集合(どれかで発火し得るものを出す)。
+	let allowedSkillIds = [];
+	$: allowedSkillIds = selectedModelIds
+		.map((id) => $models.find((m) => m.id === id))
+		.filter((m) => m && (m?.info?.meta?.features?.skills ?? true) !== false)
+		.flatMap((m) => m?.info?.meta?.skillIds ?? []);
+
 	export let history;
 	export let taskIds = null;
 
@@ -436,6 +444,7 @@
 						bind:this={commandsElement}
 						bind:prompt
 						bind:files
+						{allowedSkillIds}
 						on:upload={(e) => {
 							dispatch('upload', e.detail);
 						}}
@@ -614,7 +623,9 @@
 												bind:value={prompt}
 												id="chat-input"
 												messageInput={true}
-												validCommands={$skills ? $skills.map((s) => s.command) : []}
+												validCommands={($skills ?? [])
+													.filter((s) => allowedSkillIds.includes(s.id))
+													.map((s) => s.command)}
 												shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
 													(!$mobile ||
 														!(

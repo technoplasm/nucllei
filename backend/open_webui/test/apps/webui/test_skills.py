@@ -19,6 +19,14 @@ from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
 
 
+def _model_with_skills(*skill_ids, features=None):
+    """preset モデルの最小 fixture(#42: `/command` はモデル紐づけ skill のみ発火)。"""
+    meta = {"skillIds": list(skill_ids)}
+    if features is not None:
+        meta["features"] = features
+    return {"info": {"meta": meta}}
+
+
 class TestSkills(AbstractPostgresTest):
     BASE_PATH = "/api/v1/skills"
 
@@ -217,7 +225,7 @@ class TestSkills(AbstractPostgresTest):
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
-        Skills.insert_new_skill(
+        skill = Skills.insert_new_skill(
             "1",
             SkillForm(
                 command="mycmd",
@@ -228,10 +236,11 @@ class TestSkills(AbstractPostgresTest):
         )
 
         user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(skill.id)
 
         # ヒット: user メッセージは生のまま、直後に合成 load_skill exchange を注入
         form_data = {"messages": [{"role": "user", "content": "/mycmd 追加テキスト"}]}
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user, model)
         msgs = result["messages"]
         assert len(msgs) == 3
         assert msgs[0]["content"] == "/mycmd 追加テキスト"  # 生のまま
@@ -252,14 +261,14 @@ class TestSkills(AbstractPostgresTest):
 
         # 未知 command は素通し(注入なし)
         form_data = {"messages": [{"role": "user", "content": "/nope そのまま"}]}
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user, model)
         assert len(result["messages"]) == 1
         assert result["messages"][0]["content"] == "/nope そのまま"
         assert activations == []
 
         # 行頭以外(先頭が `/` でない)は無反応
         form_data = {"messages": [{"role": "user", "content": "前置き /mycmd"}]}
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user, model)
         assert len(result["messages"]) == 1
         assert activations == []
 
@@ -268,13 +277,13 @@ class TestSkills(AbstractPostgresTest):
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
-        Skills.insert_new_skill(
+        s_a = Skills.insert_new_skill(
             "1",
             SkillForm(
                 command="multia", title="t", content="指示A", access_control=None
             ),
         )
-        Skills.insert_new_skill(
+        s_b = Skills.insert_new_skill(
             "1",
             SkillForm(
                 command="multib", title="t", content="指示B", access_control=None
@@ -282,6 +291,7 @@ class TestSkills(AbstractPostgresTest):
         )
 
         user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(s_a.id, s_b.id)
 
         form_data = {
             "messages": [
@@ -291,7 +301,7 @@ class TestSkills(AbstractPostgresTest):
                 {"role": "user", "content": "/multib 追加で"},
             ]
         }
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user, model)
         msgs = result["messages"]
         # 各ヒットの直後に合成 exchange が入る(1 ターン目も毎リクエスト再注入 = 揮発しない)
         roles = [m["role"] for m in msgs]
@@ -321,18 +331,87 @@ class TestSkills(AbstractPostgresTest):
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
-        Skills.insert_new_skill(
+        skill = Skills.insert_new_skill(
             "owner",
             SkillForm(
                 command="secretcmd", title="t", content="秘匿", access_control={}
             ),
         )
 
+        # モデルには紐づいている(不可視性だけで弾かれることの確認)
         user = types.SimpleNamespace(id="someone-else", name="X")
         form_data = {"messages": [{"role": "user", "content": "/secretcmd hi"}]}
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(
+            form_data, user, _model_with_skills(skill.id)
+        )
         assert len(result["messages"]) == 1  # 注入なし
         assert result["messages"][0]["content"] == "/secretcmd hi"
+        assert activations == []
+
+    def test_skill_feature_disabled_gates_both_entrances(self):
+        """機能「スキル」OFF(meta.features.skills=False)で両入口が止まる(#42 T3)。
+
+        `/command` は平文素通し(発火しない)、load_skill manifest は非搭載。
+        キー不在は既定 ON。
+        """
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import (
+            apply_skill_command,
+            build_load_skill_tool,
+        )
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="gatedcmd",
+                title="t",
+                description="説明あり",
+                content="指示",
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+
+        model_off = _model_with_skills(skill.id, features={"skills": False})
+        form_data = {"messages": [{"role": "user", "content": "/gatedcmd hi"}]}
+        result, activations = apply_skill_command(form_data, user, model_off)
+        assert len(result["messages"]) == 1  # 素通し
+        assert activations == []
+        assert build_load_skill_tool(model_off, user) is None
+
+        # キー不在 = 既定 ON(従来挙動)
+        model_default = _model_with_skills(skill.id)
+        _, activations = apply_skill_command(
+            {"messages": [{"role": "user", "content": "/gatedcmd hi"}]},
+            user,
+            model_default,
+        )
+        assert [a["command"] for a in activations] == ["gatedcmd"]
+        assert build_load_skill_tool(model_default, user) is not None
+
+    def test_slash_command_requires_model_attachment(self):
+        """`/command` はモデルに紐づく skill のみ発火(#42 T4 — 挙動変更)。
+
+        可視でも skillIds に無い skill は素通し。従来の「可視ならどのモデルでも発火」
+        からの変更(モデル設定を唯一の制御面に一元化)。
+        """
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import apply_skill_command
+
+        Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="unattached", title="t", content="指示", access_control=None
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+
+        form_data = {"messages": [{"role": "user", "content": "/unattached hi"}]}
+        result, activations = apply_skill_command(
+            form_data, user, _model_with_skills()  # skillIds 空
+        )
+        assert len(result["messages"]) == 1
+        assert result["messages"][0]["content"] == "/unattached hi"
         assert activations == []
 
     def test_build_load_skill_tool(self):
@@ -416,13 +495,14 @@ class TestSkills(AbstractPostgresTest):
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
-        Skills.insert_new_skill(
+        skill = Skills.insert_new_skill(
             "1",
             SkillForm(
                 command="histcmd", title="t", content="指示", access_control=None
             ),
         )
         user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(skill.id)
         form_data = {
             "messages": [
                 {"role": "user", "content": "/histcmd 開始"},
@@ -442,7 +522,7 @@ class TestSkills(AbstractPostgresTest):
                 {"role": "user", "content": "続き"},
             ]
         }
-        result, activations = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user, model)
         roles = [m["role"] for m in result["messages"]]
         assert roles == [
             "user",  # /histcmd(生のまま)
@@ -464,7 +544,7 @@ class TestSkills(AbstractPostgresTest):
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
-        Skills.insert_new_skill(
+        skill = Skills.insert_new_skill(
             "1",
             SkillForm(
                 command="vaultcmd",
@@ -477,7 +557,9 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="1", name="Taro")
         form_data = {"messages": [{"role": "user", "content": "/vaultcmd 教えて"}]}
-        _, activations = apply_skill_command(form_data, user)
+        _, activations = apply_skill_command(
+            form_data, user, _model_with_skills(skill.id)
+        )
         assert activations[0]["tool_ids"] == ["secret-password"]
 
     def test_load_skill_calls_load_tools_hook(self):

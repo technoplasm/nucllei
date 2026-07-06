@@ -17,6 +17,8 @@
 
 	export let prompt = '';
 	export let files = [];
+	// llens(#42): 選択モデルに紐づく skill id(補完のスコープ)。null は無制限(後方互換)
+	export let allowedSkillIds = null;
 
 	let loading = false;
 	let commandElement = null;
@@ -63,7 +65,7 @@
 {#if show}
 	{#if !loading}
 		{#if showSkills}
-			<Skills bind:this={commandElement} bind:prompt command={prompt} />
+			<Skills bind:this={commandElement} bind:prompt command={prompt} {allowedSkillIds} />
 		{:else if (command?.charAt(0) === '#' && command.startsWith('#') && !command.includes('# ')) || ('\\#' === command.slice(0, 2) && command.startsWith('#') && !command.includes('# '))}
 			<Knowledge
 				bind:this={commandElement}

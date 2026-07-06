@@ -6,12 +6,16 @@
 	// 一切持ち込まず、部分トークン(`/par` など)を `/command ` トークンに置き換えるだけ。
 	export let prompt = '';
 	export let command = ''; // `/` を含む先頭トークン(Commands.svelte から入力全体を渡す)
+	// llens(#42): 選択モデルに紐づく skill のみ補完(null = 無制限)。サーバ側の発火条件
+	//(モデルで機能有効 ∧ skillIds 紐づけ ∧ read 可視)と一致させる
+	export let allowedSkillIds = null;
 
 	let selectedIdx = 0;
 	let filteredSkills = [];
 
 	// command の `/` を除いた部分で command 前方(部分)一致フィルタ。
 	$: filteredSkills = ($skills ?? [])
+		.filter((s) => allowedSkillIds === null || allowedSkillIds.includes(s.id))
 		.filter((s) => s.command.toLowerCase().includes(command.slice(1).toLowerCase()))
 		.sort((a, b) => a.title.localeCompare(b.title));
 
