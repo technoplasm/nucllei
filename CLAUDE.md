@@ -35,3 +35,5 @@
 - 推論エンジンは **SGLang**(`:8000`、OpenAI 互換)。接続モデルは Kimi K2.6 で reasoning 出力あり(`reasoning_content` / `<think>` タグ)。
 - モデル接続は OpenAI 互換一本(`base_url` 設定だけで動く状態を最小構成として保証)。
 - バックエンドテストは `backend/open_webui/test/` 配下(pytest)。
+- **開発環境のセットアップ(dev サーバ・dev アカウント・dev ツール・テスト/Playwright の罠)は
+  `_memos/dev-environment.md`** — 新しい環境で開発を始めるときはまずここを読む。
