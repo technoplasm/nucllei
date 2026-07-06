@@ -544,5 +544,5 @@
 				: 'light'
 			: 'light'}
 	richColors
-	position="top-right"
+	position="bottom-right"
 />
