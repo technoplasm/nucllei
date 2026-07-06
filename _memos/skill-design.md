@@ -127,14 +127,15 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
    `backend/open_webui/utils/middleware.py::apply_skill_command`
    (呼び出しは `process_chat_payload` 冒頭)。tool_ids 遅延評価の seam は同ファイルの
    `# TODO(#35 step2): tool_ids 遅延評価のフック` コメント位置。
-4. [ ] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換、
-   **有効 command のハイライト**(入力欄 + 送信済みメッセージ。サーバと同一述語)— **frontend batch へ延期**。
+4. [x] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換、
+   **有効 command のハイライト**(入力欄 + 送信済みメッセージ。サーバと同一述語)— 出荷 74f0e5161。
+   prompts は同コミットで全退役(router/model/UI/権限キー削除、prompt テーブル drop = c2d9a7b41e05。
+   データ移行なし — ユーザー決定 2026-07-06)。
 5. [x] **(backend done)** 回帰テスト: `backend/open_webui/test/apps/webui/test_skills.py`
    (CRUD / command 一意性 / `/` 正規化 / admin ゲート / group_terms read フィルタ /
    移行複写 / `/` パース→注入)。
-6. [ ] inlet の**全 user メッセージ走査化**(会話持続 — 2026-07-06 改訂。現行実装は
-   最後の user メッセージのみパースしており、2 ターン目以降モデルに `/command` が
-   生テキストで見える。回帰テストも複数ターン分を追加)。
+6. [x] inlet の**全 user メッセージ走査化**(会話持続 — 2026-07-06 改訂)— 出荷 0d82c77e8
+   (activate_skill 切り出し・複数ターン回帰テスト込み)。**step1 完了**。
 
 #### 移行期の判断(2026-07-05、step1 backend 実装時)
 
@@ -147,10 +148,16 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
   `middleware.py::apply_skill_command` 内の `# TODO(#35 step2): tool_ids 遅延評価のフック`
   一箇所に集約。作成/更新 API では tool_ids 非空を admin 専用ゲートで受けるところまで実装済み。
 
-### step2a — load_skill(content 返却のみ。C トラック非依存で先行可)
+### step2a — load_skill(content 返却のみ。C トラック非依存で先行可)— **出荷済み 0d82c77e8**
 
 tool 遅延取り込み(tools 配列の動的変異 + async ロード)だけが実装コストの重い部分なので、
 step2 を軽い前半(2a)と重い後半(2b)に分割する(2026-07-06 決定)。
+実機検証済み(2026-07-06、SGLang × Kimi 実機 + Playwright): `/command` 発火・変数展開・
+会話持続(履歴再展開)・picker 補完・ハイライト・load_skill 自律起動(厳密 JSON 引数)・
+tool result = 展開済み content の全シーケンス。
+**注意(dev 知見)**: preset の `meta.skillIds` を API で書き換えた場合、`app.state.MODELS`
+キャッシュが古いままだと manifest に反映されない。`GET /api/models` を叩くと再構築される
+(UI 経由なら自然に発生する既存挙動)。
 
 1. `load_skill` 擬似 tool の合成(preset skillIds ∩ 可視。description に「command: description」一覧)
 2. native ループ内で activate: tool result = 展開済み content を返すだけ(tools 動的追加はしない)。
