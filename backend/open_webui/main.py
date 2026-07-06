@@ -45,6 +45,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response, StreamingResponse
 
 
+from open_webui.builtin_tools import sync_builtin_tools
 from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.logger import start_logger
@@ -450,6 +451,9 @@ async def lifespan(app: FastAPI):
 
     if LICENSE_KEY:
         get_license_data(app, LICENSE_KEY)
+
+    # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
+    await asyncio.to_thread(sync_builtin_tools)
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     yield

@@ -221,6 +221,14 @@
 										TOOL
 									</div>
 
+									{#if tool?.meta?.builtin}
+										<div
+											class="text-xs font-bold px-1 rounded-sm line-clamp-1 bg-blue-500/20 text-blue-700 dark:text-blue-200"
+										>
+											{$i18n.t('組み込み')}
+										</div>
+									{/if}
+
 									{#if tool?.meta?.manifest?.version}
 										<div
 											class="text-xs font-bold px-1 rounded-sm line-clamp-1 bg-gray-500/20 text-gray-700 dark:text-gray-200"

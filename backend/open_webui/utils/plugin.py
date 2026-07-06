@@ -69,6 +69,12 @@ def replace_imports(content):
 
 
 def load_tool_module_by_id(tool_id, content=None):
+    # llens(#42): 組み込みツールは repo モジュールから返す(DB content は使わない)。
+    # 循環 import 回避のため遅延 import
+    from open_webui.builtin_tools import is_builtin_tool_id, load_builtin_tool
+
+    if is_builtin_tool_id(tool_id):
+        return load_builtin_tool(tool_id)
 
     if content is None:
         tool = Tools.get_tool_by_id(tool_id)

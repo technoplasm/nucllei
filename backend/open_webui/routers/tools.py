@@ -10,6 +10,7 @@ from open_webui.models.tools import (
     ToolUserResponse,
     Tools,
 )
+from open_webui.builtin_tools import is_builtin_tool_id
 from open_webui.utils.plugin import load_tool_module_by_id, replace_imports
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
@@ -133,6 +134,13 @@ async def create_new_tools(
 
     form_data.id = form_data.id.lower()
 
+    # llens(#42): 組み込みツールの id は予約(ユーザー作成 tool で shadow させない)
+    if is_builtin_tool_id(form_data.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reserved id for a builtin tool",
+        )
+
     tools = Tools.get_tool_by_id(form_data.id)
     if tools is None:
         try:
@@ -237,6 +245,11 @@ async def update_tools_by_id(
                 detail=ERROR_MESSAGES.UNAUTHORIZED,
             )
 
+    # llens(#42): 組み込みツールの定義(content/name/meta/specs)の真実源は repo。
+    # 更新できるのは access_control のみ(admin 到達前提 — 上の authz を通過済み)。
+    if is_builtin_tool_id(id):
+        return Tools.update_tool_by_id(id, {"access_control": form_data.access_control})
+
     try:
         form_data.content = replace_imports(form_data.content)
         tool_module, frontmatter = load_tool_module_by_id(id, content=form_data.content)
@@ -294,6 +307,13 @@ async def delete_tools_by_id(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
+    # llens(#42): 組み込みツールは削除不可(repo と一緒に出荷される定義)
+    if is_builtin_tool_id(id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Builtin tools cannot be deleted",
         )
 
     result = Tools.delete_tool_by_id(id)

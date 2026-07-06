@@ -113,7 +113,15 @@ toolIds はフロントが payload で送る設計(4pcg ガードで read 検証
 
 ### R1. 組み込みツール機構 + モデル設定の再編
 
-上記 1a〜1c の実装。第一弾の組み込みツールは**履歴管理**:
+上記 1a〜1c の実装。**出荷済み(2026-07-06)**: 機能「スキル」ゲート + `/command` の
+モデル紐づけスコープ化(ba01a0f1f)、組み込みツール機構(builtin 行 sync)。
+実装の決定: レジストリ = `backend/open_webui/builtin_tools/`(id は `builtin_` prefix で
+予約・create で横取り不可)、行の所有者は固定値 "system"、判別は meta.builtin
+(表示専用 — ロード分岐と更新保護はレジストリ id が真実源)、更新は access_control のみ・
+削除拒否・specs は起動ごとに repo から再生成。
+
+第一弾の組み込みツールは**履歴管理 — 現在はスタブ(TODO 返し)で機構の検証台**。
+本実装は必須でないため後回し(ユーザー判断 2026-07-06):
 
 - `list_history` / `read_history` / `grep_history`(関数名は snake_case — `/xxx` は
   skill command の記法なので混ぜない)
