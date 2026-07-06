@@ -646,6 +646,11 @@ def apply_skill_command(form_data, user):
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
         call_id = f"skill:{skill.command}:{idx}"
         arguments = json.dumps({"skill_command": skill.command}, ensure_ascii=False)
+        # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
+        # 後段(process_chat_payload の skill tools ロード)で書き足される。
+        result_content = json.dumps(
+            {"result": expanded, "tools": []}, ensure_ascii=False
+        )
 
         new_messages.append(
             {
@@ -660,9 +665,12 @@ def apply_skill_command(form_data, user):
                 ],
             }
         )
-        new_messages.append(
-            {"role": "tool", "tool_call_id": call_id, "content": expanded}
-        )
+        result_message = {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": result_content,
+        }
+        new_messages.append(result_message)
 
         activations.append(
             {
@@ -670,6 +678,9 @@ def apply_skill_command(form_data, user):
                 "command": skill.command,
                 "title": skill.title,
                 "content": expanded,
+                "result": result_content,
+                # 導入 tool 名を後段で書き戻すための参照(dict は共有される)
+                "result_message": result_message,
                 "tool_ids": skill.tool_ids or [],
                 "current": idx == last_user_idx,
             }
@@ -739,11 +750,23 @@ def build_load_skill_tool(model, user, load_tools=None):
         skill = manifest.get(normalize_command(skill_command))
         if skill is None:
             return f"skill not found: {skill_command}"
+        loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
-            load_tools(skill)
-        return activate_skill(skill, user)
+            loaded_tool_names = load_tools(skill) or []
+        # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
+        # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
+        return json.dumps(
+            {"result": activate_skill(skill, user), "tools": loaded_tool_names},
+            ensure_ascii=False,
+        )
 
-    return {"spec": spec, "callable": load_skill}
+    # render.result = skill(#20 のディスクリプタ駆動): フロントは {result, tools} を
+    # パースし、result を markdown ハイライト + tools を一覧で描画する。
+    return {
+        "spec": spec,
+        "callable": load_skill,
+        "render": {"result": {"kind": "skill"}},
+    }
 
 
 async def process_chat_payload(request, form_data, user, metadata, model):
@@ -758,14 +781,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # 今回のターンの発火は UI 表示用に応答先頭の tool_calls ブロックとして seed する
     # (process_chat_response 側。synthetic マーカ付きでモデル履歴へは再送しない —
-    # 実体は上で form_data["messages"] に注入済み)。
-    current_skill_activations = [
-        {"call_id": a["call_id"], "command": a["command"], "content": a["content"]}
-        for a in skill_activations
-        if a["current"]
-    ]
-    if current_skill_activations:
-        metadata["skill_activations"] = current_skill_activations
+    # 実体は上で form_data["messages"] に注入済み)。result は tool ロード後に
+    # 確定するため、metadata への搭載は後段(tools 合流の後)で行う。
 
     # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
     # 後段で追加される web_search 等のサーバー生成項目より前に絞ることで、被害者ファイル
@@ -948,17 +965,42 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if tool_id not in skill_tool_ids:
                 skill_tool_ids.append(tool_id)
     if skill_tool_ids:
-        for name, tool in get_tools(
+        skill_tools = get_tools(
             request,
             skill_tool_ids,
             user,
             tools_extra_params,
             enforce_access_control=False,
-        ).items():
+        )
+        for name, tool in skill_tools.items():
             if name in tools_dict:
                 log.warning(f"skill tool '{name}' collides with an existing tool")
                 continue
             tools_dict[name] = tool
+
+        # 合成 exchange の result に「導入された tool 名」を書き戻す
+        # (result_message は form_data["messages"] 内の同一 dict)。
+        for a in skill_activations:
+            if not a["tool_ids"]:
+                continue
+            names = [
+                name
+                for name, tool in skill_tools.items()
+                if tool.get("tool_id") in a["tool_ids"]
+            ]
+            a["result"] = json.dumps(
+                {"result": a["content"], "tools": names}, ensure_ascii=False
+            )
+            a["result_message"]["content"] = a["result"]
+
+    # 今回のターンの発火を UI seed 用に metadata へ(result 確定後)。
+    current_skill_activations = [
+        {"call_id": a["call_id"], "command": a["command"], "result": a["result"]}
+        for a in skill_activations
+        if a["current"]
+    ]
+    if current_skill_activations:
+        metadata["skill_activations"] = current_skill_activations
 
     if tool_servers:
         for tool_server in tool_servers:
@@ -980,6 +1022,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # 毎イテレーション参照する同一オブジェクトなので、ここで足せば次の
     # イテレーションからモデルに見える。
     def inject_skill_tools(skill):
+        loaded = []
         for name, tool in get_tools(
             request,
             skill.tool_ids,
@@ -994,6 +1037,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data["tools"].append(
                     {"type": "function", "function": tool.get("spec", {})}
                 )
+            loaded.append(name)
+        return loaded
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
@@ -1727,11 +1772,13 @@ async def process_chat_response(
                                         ensure_ascii=False,
                                     ),
                                 },
+                                # {result, tools} を skill 表示で描画(#20/#35)
+                                "render": {"result": {"kind": "skill"}},
                             }
                             for a in metadata["skill_activations"]
                         ],
                         "results": [
-                            {"tool_call_id": a["call_id"], "content": a["content"]}
+                            {"tool_call_id": a["call_id"], "content": a["result"]}
                             for a in metadata["skill_activations"]
                         ],
                     }

@@ -122,7 +122,9 @@ export type ResultDisplay =
 	| { kind: 'text'; value: string }
 	| { kind: 'code'; language: string; value: string }
 	| { kind: 'json'; value: string }
-	| { kind: 'table'; columns: string[]; rows: string[][] };
+	| { kind: 'table'; columns: string[]; rows: string[][] }
+	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
+	| { kind: 'skill'; value: string; tools: string[] };
 
 // 文字列化された JSON を再帰的に剥がして整形する(旧 Collapsible 実装と同じ挙動。
 // tool 結果は dict/list が json.dumps 済み文字列で届くため)。
@@ -186,6 +188,23 @@ export const classifyToolResult = (
 	content: string,
 	descriptor?: RenderDescriptor
 ): ResultDisplay => {
+	if (descriptor?.kind === 'skill') {
+		// load_skill の {result, tools}(#35)。形が合わなければ json フォールバック
+		// (推測して壊れた表示を作らない — 他 kind と同じ規律)。
+		try {
+			const parsed = JSON.parse(content);
+			if (
+				parsed &&
+				typeof parsed.result === 'string' &&
+				Array.isArray(parsed.tools) &&
+				parsed.tools.every((t: unknown) => typeof t === 'string')
+			) {
+				return { kind: 'skill', value: parsed.result, tools: parsed.tools };
+			}
+		} catch (e) {
+			// fall through
+		}
+	}
 	if (descriptor?.kind === 'text') {
 		return { kind: 'text', value: content };
 	}

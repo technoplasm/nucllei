@@ -164,6 +164,27 @@ describe('classifyToolResult', () => {
 		expect(classifyToolResult('[1, 2, 3]', { kind: 'table' }).kind).toBe('json');
 		expect(classifyToolResult('not json', { kind: 'table' }).kind).toBe('json');
 	});
+
+	it('skill 宣言: {result, tools} を分解する(#35)', () => {
+		const content = JSON.stringify({
+			result: '# 指示\n以降は関西弁で。',
+			tools: ['secret_password']
+		});
+		expect(classifyToolResult(content, { kind: 'skill' })).toEqual({
+			kind: 'skill',
+			value: '# 指示\n以降は関西弁で。',
+			tools: ['secret_password']
+		});
+	});
+
+	it('skill 宣言でも形が合わない実値は json に落とす', () => {
+		// result が無い / tools が配列でない / JSON でない → json フォールバック
+		expect(classifyToolResult('{"message": "boom"}', { kind: 'skill' }).kind).toBe('json');
+		expect(
+			classifyToolResult(JSON.stringify({ result: 'x', tools: 'nope' }), { kind: 'skill' }).kind
+		).toBe('json');
+		expect(classifyToolResult('skill not found: nope', { kind: 'skill' }).kind).toBe('json');
+	});
 });
 
 describe('formatJSONString', () => {

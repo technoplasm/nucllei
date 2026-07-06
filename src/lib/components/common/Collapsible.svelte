@@ -251,7 +251,23 @@
 						{#if attributes?.done === 'true'}
 							{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
 							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">Result</div>
-							{#if resultDisplay.kind === 'text'}
+							{#if resultDisplay.kind === 'skill'}
+								<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
+								<HljsCode lang="markdown" code={resultDisplay.value} />
+								{#if resultDisplay.tools.length > 0}
+									<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">
+										{$i18n.t('Tools loaded')}
+									</div>
+									<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
+										{#each resultDisplay.tools as toolName}
+											<span
+												class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
+												>{toolName}</span
+											>
+										{/each}
+									</div>
+								{/if}
+							{:else if resultDisplay.kind === 'text'}
 								<div class="text-xs font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
 									{resultDisplay.value}
 								</div>

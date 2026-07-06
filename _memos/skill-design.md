@@ -199,8 +199,13 @@ tool result = 展開済み content の全シーケンス。
    履歴に残った tool call が現在の tools 配列に無い tool を指すケースの graceful 処理
    (skill 削除・権限剥奪・分岐で起きうる — #18-2)/
    実挙動 fixture キャプチャ(#29 基盤)/ nsjail 自前ツール E2E(#18-3)
-5. 検討中(ユーザー提案 2026-07-06): load_skill の戻り値を string でなく
-   {result, tools: [導入 tool 一覧]} に構造化し、何が入ったかをモデル/UI に見せる
+5. [x] load_skill の戻り値を構造化(ユーザー提案 → 出荷 2026-07-06):
+   両入口とも tool result = JSON `{"result": <展開済み content>, "tools": [<導入された
+   tool 関数名>]}`。render ディスクリプタに新 kind `skill` を追加(#20 の枠組みのまま)し、
+   UI は result を **markdown ハイライト**(HljsCode)+ tools を chip 一覧で描画。
+   形が合わない実値は json フォールバック(他 kind と同じ規律)。
+   `/command` 側は inlet 注入時に tools:[] で置き、payload の skill tools ロード後に
+   実際の関数名を書き戻す(result_message は messages 内の同一 dict 参照)
 
 ### 前提・並行作業(実装順の根拠は #16 コメント参照)
 

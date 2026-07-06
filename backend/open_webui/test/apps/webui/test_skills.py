@@ -241,11 +241,13 @@ class TestSkills(AbstractPostgresTest):
         assert json.loads(call["function"]["arguments"]) == {"skill_command": "mycmd"}
         assert msgs[2]["role"] == "tool"
         assert msgs[2]["tool_call_id"] == call["id"]
-        assert msgs[2]["content"] == "展開: Taro"  # 変数展開済み content が result
+        # result は構造化 JSON {result, tools}(tools は後段のロードで書き足される)
+        assert json.loads(msgs[2]["content"]) == {"result": "展開: Taro", "tools": []}
         # UI seed 用の発火情報
         assert activations[0]["call_id"] == call["id"]
         assert activations[0]["command"] == "mycmd"
         assert activations[0]["content"] == "展開: Taro"
+        assert activations[0]["result_message"] is msgs[2]  # 書き戻し用の同一参照
         assert activations[0]["current"] is True
 
         # 未知 command は素通し(注入なし)
@@ -299,9 +301,11 @@ class TestSkills(AbstractPostgresTest):
             "assistant",
             "tool",
         ]
+        import json
+
         assert msgs[0]["content"] == "/multia 最初の依頼"
-        assert msgs[2]["content"] == "指示A"
-        assert msgs[7]["content"] == "指示B"
+        assert json.loads(msgs[2]["content"])["result"] == "指示A"
+        assert json.loads(msgs[7]["content"])["result"] == "指示B"
         # current は最後の user メッセージでの発火のみ(UI 表示は当該ターンだけ)
         assert [(a["command"], a["current"]) for a in activations] == [
             ("multia", False),
@@ -368,13 +372,18 @@ class TestSkills(AbstractPostgresTest):
         assert spec["parameters"]["properties"]["skill_command"]["enum"] == ["scales"]
         assert "- scales: 臨床評価スケールの参照" in spec["description"]
 
-        # 発火: tool result = 展開済み content(activate_skill 経由)
-        result = asyncio.run(tool["callable"](skill_command="scales"))
-        assert result == "スケール表: Hanako 用"
+        # 発火: tool result = 構造化 JSON {result: 展開済み content, tools: []}
+        import json
+
+        result = json.loads(asyncio.run(tool["callable"](skill_command="scales")))
+        assert result == {"result": "スケール表: Hanako 用", "tools": []}
 
         # 未知 command はモデル向けエラーメッセージ(例外にしない)
         result = asyncio.run(tool["callable"](skill_command="nope"))
         assert "not found" in result
+
+        # render ディスクリプタ(#20): result を skill 表示で描画
+        assert tool["render"] == {"result": {"kind": "skill"}}
 
     def test_build_load_skill_tool_none_when_empty(self):
         """対象 skill が無ければ load_skill 自体を載せない(None)。"""
@@ -442,16 +451,25 @@ class TestSkills(AbstractPostgresTest):
             ),
         )
 
+        import json
+
         user = types.SimpleNamespace(id="1", name="Taro")
         model = {"info": {"meta": {"skillIds": [with_tools.id, without_tools.id]}}}
 
         loaded = []
-        tool = build_load_skill_tool(model, user, load_tools=lambda s: loaded.append(s.command))
 
-        result = asyncio.run(tool["callable"](skill_command="hooked"))
-        assert result == "c"
+        def fake_load_tools(skill):
+            loaded.append(skill.command)
+            return ["fake_tool_fn"]
+
+        tool = build_load_skill_tool(model, user, load_tools=fake_load_tools)
+
+        # 導入された tool 名が戻り値の tools に載る
+        result = json.loads(asyncio.run(tool["callable"](skill_command="hooked")))
+        assert result == {"result": "c", "tools": ["fake_tool_fn"]}
         assert loaded == ["hooked"]
 
-        # tool_ids 空ならフックは呼ばれない
-        asyncio.run(tool["callable"](skill_command="plain"))
+        # tool_ids 空ならフックは呼ばれず tools は空
+        result = json.loads(asyncio.run(tool["callable"](skill_command="plain")))
+        assert result == {"result": "c", "tools": []}
         assert loaded == ["hooked"]
