@@ -14,9 +14,13 @@
 4. 変数: ブラウザ専用変数({{CLIPBOARD}} 等)廃止。依存宣言リストも設けない。
    サーバーが自力で解決できる変数({{USER_NAME}} / {{CURRENT_DATE}} 等)を注入時に無条件展開するだけ
 5. 引数機構は初期実装なし(将来 optional で {{PARAM}} = frontmatter 定義の呼び出し時パラメータ)
-6. グローバル有効化トグルなし。**「有効化」という独立状態を持たず、可視性 = access_control に一本化**:
-   - `/` で呼べる範囲 = ユーザーが read 可視な skill 全部(group_terms 交差を含む)
-   - モデル manifest 露出 = model preset の `meta.skillIds` ∩ ユーザー可視
+6. グローバル有効化トグルなし。制御面は**モデル(preset)設定に一元化**(#42 改訂):
+   - モデル capability「スキル」(`meta.features.skills`、既定 ON)。OFF で manifest も
+     `/command` 発火も全停止(CoT 無しモデル等)
+   - `/` で発火する範囲 = **機能 ON ∧ preset `meta.skillIds` 紐づけ ∧ ユーザー read 可視**(AND)。
+     旧「read 可視な skill 全部(どのモデルでも)」から #42 で変更 — モデルを唯一の制御面に
+   - モデル manifest 露出 = 同じ 3 条件の AND
+   - group_terms 交差は read 可視の判定に含む(従来どおり)
 7. **native function calling 限定**。非 native(prompt-based)tool 経路は llens から削除(#18)
 8. 作成権限: **tool 紐づき skill は admin のみ**。一般ユーザーはテンプレート skill(content のみ)を作成可
 
@@ -99,6 +103,8 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
 
 - 有効 skill の導出則(両入口で対称): チェーン内の `/command` ヒット ∪ `load_skill` 呼び出し。
   どちらも履歴からステートレスに再導出できる
+- #42 改訂: `/command` の発火は「機能 ON ∧ モデル紐づけ ∧ read 可視」の AND が前提
+  (機能 OFF / 未紐づけの skill は生テキストで素通し)。詳細 `_memos/builtin-tools.md`
 - 複数 skill は**和集合**。同一 skill の再発火は冪等
 - 変数({{CURRENT_DATE}} 等)は**毎リクエスト再展開**(「発火時点」への固定は状態が要るので採らない。
   数ターンのドリフトは許容)

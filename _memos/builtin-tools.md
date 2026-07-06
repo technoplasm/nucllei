@@ -160,19 +160,19 @@ Kimi の tool call は厳密 JSON で現行パーサ一次経路が成立(#15 �
 
 ### pytest(backend、sandbox は HTTP モック — CI で実コンテナに依存しない)
 
-組み込みツール機構 + モデル設定(R1):
-- T1: builtin id 解決 — builtin 行の tool が tools_dict に spec/callable 付きで載る
-  (toolIds 経由・skill tool_ids 経由の両方)
-- T2: builtin 行の保護 — content 更新 API は拒否、削除も拒否(または起動時 sync で復元)。
-  一覧 API に builtin フラグ付きで出る
-- T3: 機能スキル OFF のモデル — manifest 非搭載 + `/command` は平文素通し(発火しない)。
-  ON のモデルでは両方効く
-- T4: `/command` の範囲 — モデルに接続していない skill は可視でも発火しない。
-  接続済み + 可視で発火(既存の可視性テストは維持)
-- T5: access_control — read 権限の無いユーザーのリクエスト由来 id は無視(4pcg 同型、
-  builtin 行にも適用)
-- T6: 履歴ツールの owner-only — 他ユーザーの chat_id を read_history に渡しても見えない。
-  list/grep が本人の chat しか返さない
+組み込みツール機構 + モデル設定(R1)。**T1〜T5 出荷済み(2026-07-06)**、T6 は本実装待ち:
+- [x] T1: builtin id 解決 — builtin 行の tool が tools_dict に spec/callable 付きで載る
+  (`test_builtin_tools.py::test_sync_creates_builtin_row_and_get_tools_loads_module`)
+- [x] T2: builtin 行の保護 — content 更新・削除・create 横取りを拒否、access_control のみ更新可、
+  起動時 sync で repo から復元(`test_update_allows_only_access_control` ほか)
+- [x] T3: 機能スキル OFF のモデル — manifest 非搭載 + `/command` 素通し。ON で両方効く
+  (`test_skills.py::test_skill_feature_disabled_gates_both_entrances`)。実機は E7
+- [x] T4: `/command` の範囲 — モデルに接続していない skill は可視でも発火しない
+  (`test_slash_command_requires_model_attachment`)
+- [x] T5: access_control — read 権限の無いユーザーのリクエスト由来 id は無視(4pcg 同型、
+  builtin 行にも適用。`test_access_control_guards_builtin_row`)
+- [ ] T6: 履歴ツールの owner-only — 他ユーザーの chat_id を read_history に渡しても見えない。
+  list/grep が本人の chat しか返さない ← 履歴ツール本実装時(#11)
 
 sandbox ツール(R2、respx 等で sandbox API をモック):
 - T7: run_python — /exec_cell へ user_id=呼出ユーザー, chat_id=会話 id が渡る。
@@ -188,25 +188,25 @@ sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の
 として配布)のため fork 側 CI には載せない — fork 側の担保は基盤回帰(上記 3 件)+ E2E。
 組み込みツール(R1)を実装する際に同型の単体を fork 側に持つ。
 
-### E2E(dev/e2e/check_sandbox_tools.py — 実 Kimi × 実 sandbox、CI 外)
+### E2E(実 Kimi × 実 sandbox / 実モデル、CI 外)
 
-**2026-07-06 実施: E1〜E6 全 PASS(8 チェック)**。stateful(x=42→84)・timeout 後の
-変数保持・outputs 自動添付(result.csv)・import_chat_file の実読み出しを実機で確認。
+- **`check_sandbox_tools.py`(#18-3)— E1〜E6 全 PASS(8 チェック、2026-07-06)**:
+  stateful(x=42→84)・timeout 後の変数保持・outputs 自動添付(result.csv)・
+  import_chat_file の実読み出し。
+- **`check_skill_feature_gate.py`(#42 E7)— 2/2 PASS(2026-07-06)**:
+  機能スキル OFF で `/kansai` 非発火(load_skill 呼ばれない)、ON で発火。終了時に既定へ戻す。
 
 答え合わせ方式(check_lazy_tools.py と同パターン):
-- E1 計算: 「run_python で 2**10 を計算して」→ 応答に 1024
-- E2 stateful: 同一チャット turn1 で `x=42` 定義 → turn2 で「x を 2 倍して」→ 84
-- E3 outputs: 「CSV を outputs/ に保存して」→ チャットにファイル添付が付く(API で files 確認)
-- E4 timeout: sleep(10) を timeout_s=2 で → 中断文言、続くセルで変数生存
-- E5 shell: run_shell で `echo` + `jq` → 出力一致
-- E6 添付取り込み: ファイル添付 → import_chat_file → run_python で内容を読んで正答
-- E7 モデル設定: 機能スキル OFF のモデル → `/kansai` が平文素通し・manifest 非搭載。
-  ツール未接続モデル → 同じ依頼で tools 非搭載(bare API で確認)
+- E1 計算 / E2 stateful / E3 outputs 自動添付 / E4 timeout(変数保持)/ E5 shell /
+  E6 添付取り込み / E7 機能スキルトグル
 
 ## 4. 進め方
 
-1. **R2 = #18-3 を先行** — **完了(2026-07-06)**: 適合版 sandbox.py(dev/tools/)を
-   dev DB に登録、基盤バグ 3 件を修正、E2E 8/8 PASS。#18 close・#15 結論記載は
-   /sync-docs で issue へ反映
-2. R1 モデル設定再編 + 組み込み機構 + 履歴ツール(T1〜T6 + E7)← 次
-3. リリースタグ候補点(D 完了)
+1. **R2 = #18-3** — **完了(2026-07-06、394b08701)**: sandbox.py 適合版を dev DB に登録、
+   基盤バグ 3 件修正、E2E 8/8 PASS。#18 close・#15 結論記載済み
+2. **R1 モデル設定再編 + 組み込み機構** — **完了(2026-07-06、ba01a0f1f/40728a2b7/4f8b5e77d)**:
+   機能スキルゲート・`/command` スコープ化・builtin 行 sync・T1〜T5 + E7。#42 にロールアップ
+3. **履歴ツールの本実装(T6、#11)** — 唯一の残。**他と完全に独立した終端タスク**(組み込み機構は
+   完成済みで、スタブの中身を Chats 参照に差し替えるだけ・owner-only)。いつでも着手可・優先度低
+   (ユーザー判断 2026-07-06)。着手時は E2E に E8(list/read/grep の owner-only)を足す
+4. リリースタグ候補点(D 完了)
