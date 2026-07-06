@@ -702,8 +702,8 @@ def build_load_skill_tool(model, user, load_tools=None):
 
     戻り値は native ループ互換の tool エントリ {"spec", "callable"}。
     tool result = activate_skill の展開済み content。
-    load_tools(skill) は tool 遅延取り込みのフック(#35 step2b):
-    skill.tool_ids が非空なら content を返す前に呼ばれ、呼び出し側
+    load_tools(skill) は tool 遅延取り込みの **async** フック(#35 step2b / #28):
+    skill.tool_ids が非空なら content を返す前に await され、呼び出し側
     (process_chat_payload)が tools_dict / form_data["tools"] に注入する。
     """
     skill_ids = (model.get("info", {}).get("meta", {}) or {}).get("skillIds", [])
@@ -752,7 +752,8 @@ def build_load_skill_tool(model, user, load_tools=None):
             return f"skill not found: {skill_command}"
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
-            loaded_tool_names = load_tools(skill) or []
+            # load_tools は async フック(#28: 中で get_tools をワーカースレッド実行)
+            loaded_tool_names = await load_tools(skill) or []
         # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
         # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
         return json.dumps(
@@ -952,8 +953,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         "__files__": metadata.get("files", []),
     }
 
+    # llens(#28): get_tools はモジュール exec + DB read の同期処理。イベントループを
+    # 塞がないようワーカースレッドで実行する(以下 3 箇所とも)。
     if tool_ids:
-        tools_dict = get_tools(request, tool_ids, user, tools_extra_params)
+        tools_dict = await asyncio.to_thread(
+            get_tools, request, tool_ids, user, tools_extra_params
+        )
 
     # llens(#35 step2b): 発火済み skill の tool_ids を遅延ロードして tools に加える
     # (`/command` 入口。会話持続 = 毎リクエスト再導出なので以降のターンでも載り続ける)。
@@ -965,7 +970,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if tool_id not in skill_tool_ids:
                 skill_tool_ids.append(tool_id)
     if skill_tool_ids:
-        skill_tools = get_tools(
+        skill_tools = await asyncio.to_thread(
+            get_tools,
             request,
             skill_tool_ids,
             user,
@@ -1021,15 +1027,17 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # tools_dict(= metadata["tools"])と form_data["tools"] は native ループが
     # 毎イテレーション参照する同一オブジェクトなので、ここで足せば次の
     # イテレーションからモデルに見える。
-    def inject_skill_tools(skill):
+    async def inject_skill_tools(skill):
         loaded = []
-        for name, tool in get_tools(
+        skill_tools = await asyncio.to_thread(
+            get_tools,
             request,
             skill.tool_ids,
             user,
             tools_extra_params,
             enforce_access_control=False,
-        ).items():
+        )
+        for name, tool in skill_tools.items():
             if name in tools_dict:
                 continue
             tools_dict[name] = tool

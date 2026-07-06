@@ -342,6 +342,44 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
     assert _iteration_limit_errors(events) == []
 
 
+def test_sync_tool_does_not_block_event_loop():
+    """sync の tool 関数はワーカースレッドで実行される(#28 前半)。
+
+    従来はイベントループ上で直接呼んでおり、ブロッキングする tool の間
+    サーバ全体のストリーミングが止まっていた。sync tool の実行中に
+    イベントループ上の別タスクが進めることを固定する。
+    """
+    import time as time_mod
+
+    from open_webui.utils.tools import get_async_tool_function_and_apply_extra_params
+
+    def slow_sync_tool():
+        time_mod.sleep(0.3)
+        return "done"
+
+    wrapped = get_async_tool_function_and_apply_extra_params(slow_sync_tool, {})
+
+    async def run():
+        ticks = []
+
+        async def ticker():
+            # sync tool の 0.3 秒の間にループが回っていれば tick が積もる
+            for _ in range(10):
+                ticks.append(time_mod.monotonic())
+                await asyncio.sleep(0.02)
+
+        result, _ = await asyncio.gather(wrapped(), ticker())
+        return result, ticks
+
+    result, ticks = asyncio.run(run())
+    assert result == "done"
+    # ループがブロックされていれば tick はほぼ同時刻に潰れる。
+    # 0.3 秒のブロッキング中に 5 回以上刻めていること(= 並行に進んでいた)。
+    spread = ticks[-1] - ticks[0]
+    assert len(ticks) == 10
+    assert spread > 0.1, f"event loop was blocked (tick spread {spread:.3f}s)"
+
+
 def _sse_response_from_frames(frames: list[str]) -> StreamingResponse:
     """インライン組み立ての SSE(実キャプチャでは作れない異常系用)。"""
 

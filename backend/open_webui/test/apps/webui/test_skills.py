@@ -506,7 +506,7 @@ class TestSkills(AbstractPostgresTest):
 
         loaded = []
 
-        def fake_load_tools(skill):
+        async def fake_load_tools(skill):  # #28: フックは async 契約
             loaded.append(skill.command)
             return ["fake_tool_fn"]
 

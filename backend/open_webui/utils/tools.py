@@ -60,9 +60,11 @@ def get_async_tool_function_and_apply_extra_params(
         update_wrapper(partial_func, function)
         return partial_func
     else:
-        # Make it a coroutine function
+        # llens(#28): sync の tool 関数はワーカースレッドで実行する。
+        # イベントループ上で直接呼ぶと、ブロッキングする tool(sleep / requests /
+        # 重い計算)の間サーバ全体のストリーミングが止まる。
         async def new_function(*args, **kwargs):
-            return partial_func(*args, **kwargs)
+            return await asyncio.to_thread(partial_func, *args, **kwargs)
 
         update_wrapper(new_function, function)
         return new_function
