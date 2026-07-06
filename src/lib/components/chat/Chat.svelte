@@ -51,6 +51,7 @@
 		getPromptVariables,
 		processDetails
 	} from '$lib/utils';
+	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -1553,11 +1554,14 @@
 		].filter((message) => message);
 
 		messages = messages
-			.map((message, idx, arr) => ({
-				role: message.role,
-				...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
-				message.role === 'user'
-					? {
+			.flatMap((message, idx, arr) => {
+				if (
+					message.role === 'user' &&
+					(message.files?.filter((file) => file.type === 'image').length > 0 ?? false)
+				) {
+					return [
+						{
+							role: 'user',
 							content: [
 								{
 									type: 'text',
@@ -1573,11 +1577,25 @@
 									}))
 							]
 						}
-					: {
-							content: message?.merged?.content ?? message.content
-						})
-			}))
-			.filter((message) => message?.role === 'user' || message?.content?.trim());
+					];
+				}
+				if (message.role === 'assistant') {
+					// 過去ターンの tool 往復を wire 形に復元(#18-2)。
+					// tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
+					return expandAssistantToolHistory(
+						message?.merged?.content ?? message.content,
+						message?.content_blocks
+					);
+				}
+				return [{ role: message.role, content: message?.merged?.content ?? message.content }];
+			})
+			.filter(
+				(message) =>
+					message?.role === 'user' ||
+					message?.role === 'tool' ||
+					(message?.tool_calls?.length ?? 0) > 0 ||
+					message?.content?.trim()
+			);
 
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,

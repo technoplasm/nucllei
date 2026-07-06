@@ -401,6 +401,54 @@ class TestSkills(AbstractPostgresTest):
     # `/command` 発火は合成 load_skill exchange として履歴に見えるため、
     # モデルは「ロード済み」を自然に知り、除外ルール自体が不要になった。
 
+    def test_scan_passes_through_structured_tool_history(self):
+        """フロントが復元した tool 往復(#18-2)を含む履歴でも走査・注入が壊れない。
+
+        assistant.tool_calls / role:tool のメッセージは素通しし、合成 exchange は
+        `/command` の user メッセージ直後に入る(実 tool 往復より前)。
+        """
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import apply_skill_command
+
+        Skills.insert_new_skill(
+            "1",
+            SkillForm(command="histcmd", title="t", content="指示", access_control=None),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "/histcmd 開始"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "functions.f:0",
+                            "type": "function",
+                            "function": {"name": "f", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "functions.f:0", "content": "r"},
+                {"role": "assistant", "content": "done"},
+                {"role": "user", "content": "続き"},
+            ]
+        }
+        result, activations = apply_skill_command(form_data, user)
+        roles = [m["role"] for m in result["messages"]]
+        assert roles == [
+            "user",  # /histcmd(生のまま)
+            "assistant",  # 合成 load_skill call
+            "tool",  # 合成 result
+            "assistant",  # 実 tool call(素通し)
+            "tool",  # 実 result(素通し)
+            "assistant",  # done
+            "user",  # 続き
+        ]
+        assert result["messages"][1]["tool_calls"][0]["function"]["name"] == "load_skill"
+        assert result["messages"][4]["tool_call_id"] == "functions.f:0"
+        assert [a["command"] for a in activations] == ["histcmd"]
+
     def test_activation_carries_tool_ids(self):
         """`/command` 発火の activation は skill.tool_ids を運ぶ(#35 step2b、入口 1)。"""
         from open_webui.models.skills import SkillForm, Skills

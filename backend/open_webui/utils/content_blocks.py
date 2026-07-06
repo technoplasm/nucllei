@@ -52,13 +52,17 @@ def snapshot_content_blocks(content_blocks: list) -> list:
             # deepcopy: ストリーム中(#20 ステップ5)は middleware が calls を
             # 累積更新し続けるため、参照共有だと emit 済みスナップショットが
             # 遡って書き換わる。スナップショットは不変の wire 形として切り離す。
-            blocks.append(
-                {
-                    "type": "tool_calls",
-                    "calls": copy.deepcopy(block.get("content", [])),
-                    "results": copy.deepcopy(block.get("results", [])),
-                }
-            )
+            snapshot = {
+                "type": "tool_calls",
+                "calls": copy.deepcopy(block.get("content", [])),
+                "results": copy.deepcopy(block.get("results", [])),
+            }
+            if block.get("synthetic"):
+                # `/command` 発火の合成 exchange(#35)。フロントの履歴再構成(#18-2)が
+                # このマーカでスキップする(実体は inlet が毎リクエスト再注入するため、
+                # 再送すると二重になる)。
+                snapshot["synthetic"] = True
+            blocks.append(snapshot)
 
         elif block_type == "code_interpreter":
             snapshot = {
