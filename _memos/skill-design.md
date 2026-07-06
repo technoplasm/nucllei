@@ -180,15 +180,27 @@ tool result = 展開済み content の全シーケンス。
 5. 移行ノート: 現行 llens の skill md(`owui/skills/*.md`)は description に
    「必ず view_skill で本文をロード」と書いてある — フォーク移行時に load_skill へ文言書き換えが必要
 
-### step2b — Tool 遅延評価(C トラック後)
+### step2b — Tool 遅延評価(基本形 出荷済み 2026-07-06)
 
-1. activate 内で tool_ids ロード → tools 配列へ追加(`/` 側は inlet で、load_skill 側は
-   次イテレーションの tools 配列へ = 遅延評価)。動的 tools 変異と async ロードが重く、
-   これが C(#18-2/#28)を先行させる理由
-2. SGLang × Kimi K2.6 実挙動キャプチャ(#29 基盤): load_skill 発火 → tool 追加 → 呼び出しのシーケンス
-3. 自前ツール(nsjail+IPython / de-id)が skill 経由で動く E2E
-4. 履歴に残った tool call が現在の tools 配列に無い tool を指すケースの graceful 処理
-   (会話持続でも起きうる: skill 削除・権限剥奪・分岐)は #18-2 に含める
+当初「C トラック後」としていたが、基本形は軽く実装できたため前倒しで出荷:
+
+1. [x] `/command` 入口: payload 構築時に発火済み skill の tool_ids を集約し
+   `get_tools(..., enforce_access_control=False)` でロードして tools に合流。
+   会話持続 = 毎リクエスト再導出なので以降のターンでも載り続ける。
+   **認可は skill の read 可視性が単位**(tool 紐づき skill は admin のみ作成可のため、
+   per-tool の read 検証はスキップ。リクエスト由来 tool_ids の 4pcg ガードは従来どおり)
+2. [x] load_skill 入口: `load_tools` フックで tools_dict(= metadata["tools"])と
+   form_data["tools"] にループ内注入。両者は native ループが毎イテレーション参照する
+   同一オブジェクトなので、**次のイテレーションからモデルに見える**
+3. [x] 実機検証(SGLang × Kimi、秘密パスワード tool + /vault skill):
+   手動 `/vault` → secret_password 呼び出し → 正答 / 自然文 → load_skill →
+   注入された tool を次イテレーションで呼ぶ → 正答、の両方 PASS
+4. 残(C トラック側): get_tools 同期ロードの async 化(#28)/
+   履歴に残った tool call が現在の tools 配列に無い tool を指すケースの graceful 処理
+   (skill 削除・権限剥奪・分岐で起きうる — #18-2)/
+   実挙動 fixture キャプチャ(#29 基盤)/ nsjail 自前ツール E2E(#18-3)
+5. 検討中(ユーザー提案 2026-07-06): load_skill の戻り値を string でなく
+   {result, tools: [導入 tool 一覧]} に構造化し、何が入ったかをモデル/UI に見せる
 
 ### 前提・並行作業(実装順の根拠は #16 コメント参照)
 

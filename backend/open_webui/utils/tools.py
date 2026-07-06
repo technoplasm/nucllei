@@ -69,8 +69,18 @@ def get_async_tool_function_and_apply_extra_params(
 
 
 def get_tools(
-    request: Request, tool_ids: list[str], user: UserModel, extra_params: dict
+    request: Request,
+    tool_ids: list[str],
+    user: UserModel,
+    extra_params: dict,
+    enforce_access_control: bool = True,
 ) -> dict[str, dict]:
+    """tool_ids → {name: {tool_id, callable, spec, ...}}。
+
+    enforce_access_control=False はサーバー由来の id 専用(#35 step2b: skill の
+    tool_ids。skill の read 可視性 + 「tool 紐づき skill は admin のみ作成可」が
+    認可の単位)。リクエスト由来の id では必ず True のまま使うこと(GHSA-4pcg)。
+    """
     tools_dict = {}
 
     for tool_id in tool_ids:
@@ -150,7 +160,8 @@ def get_tools(
             # (frontend が model の toolIds も含めて送る)。ユーザーが read 権限を
             # 持たない tool_id を渡してツール制限を回避できるため、ここでアクセスを
             # 検証し、権限の無い tool は読み込まず無視する(admin / 所有者はバイパス)。
-            if not (
+            # skill 由来の id は enforce_access_control=False で呼ばれる(#35 step2b)。
+            if enforce_access_control and not (
                 user.role == "admin"
                 or tool.user_id == user.id
                 or has_access(user.id, "read", tool.access_control)

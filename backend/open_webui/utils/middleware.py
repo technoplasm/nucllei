@@ -575,8 +575,10 @@ def activate_skill(skill, user) -> str:
     変数はサーバー既知のもののみ({{USER_NAME}} / {{CURRENT_DATE}} 等。ブラウザ専用変数は無し)、
     毎リクエスト再展開(発火時点への固定はしない — _memos/skill-design.md「発火の有効範囲」)。
 
-    TODO(#35 step2b): tool_ids 遅延評価のフック。skill.tool_ids が非空なら get_tools() で
-    ロードし、その先のモデル呼び出しの tools 配列へ追加する。C トラック(#18-2/#28)後。
+    tool_ids の遅延取り込み(#35 step2b)は呼び出し側が担う:
+    `/command` は process_chat_payload の skill_tool_ids 集約、load_skill は
+    build_load_skill_tool の load_tools フック(どちらも get_tools を
+    enforce_access_control=False で呼ぶ — skill の read 可視性が認可の単位)。
     """
     return prompt_template(skill.content, user_name=user.name)
 
@@ -668,6 +670,7 @@ def apply_skill_command(form_data, user):
                 "command": skill.command,
                 "title": skill.title,
                 "content": expanded,
+                "tool_ids": skill.tool_ids or [],
                 "current": idx == last_user_idx,
             }
         )
@@ -676,7 +679,7 @@ def apply_skill_command(form_data, user):
     return form_data, activations
 
 
-def build_load_skill_tool(model, user):
+def build_load_skill_tool(model, user, load_tools=None):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
     - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
@@ -687,7 +690,10 @@ def build_load_skill_tool(model, user):
     - 対象が 1 つも無ければ None(load_skill 自体を載せない)。
 
     戻り値は native ループ互換の tool エントリ {"spec", "callable"}。
-    tool result = activate_skill の展開済み content(tools 動的追加は step2b)。
+    tool result = activate_skill の展開済み content。
+    load_tools(skill) は tool 遅延取り込みのフック(#35 step2b):
+    skill.tool_ids が非空なら content を返す前に呼ばれ、呼び出し側
+    (process_chat_payload)が tools_dict / form_data["tools"] に注入する。
     """
     skill_ids = (model.get("info", {}).get("meta", {}) or {}).get("skillIds", [])
     if not skill_ids:
@@ -733,6 +739,8 @@ def build_load_skill_tool(model, user):
         skill = manifest.get(normalize_command(skill_command))
         if skill is None:
             return f"skill not found: {skill_command}"
+        if load_tools is not None and skill.tool_ids:
+            load_tools(skill)
         return activate_skill(skill, user)
 
     return {"spec": spec, "callable": load_skill}
@@ -920,18 +928,37 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     tools_dict = {}
 
+    tools_extra_params = {
+        **extra_params,
+        "__model__": models[task_model_id],
+        "__messages__": form_data["messages"],
+        "__files__": metadata.get("files", []),
+    }
+
     if tool_ids:
-        tools_dict = get_tools(
+        tools_dict = get_tools(request, tool_ids, user, tools_extra_params)
+
+    # llens(#35 step2b): 発火済み skill の tool_ids を遅延ロードして tools に加える
+    # (`/command` 入口。会話持続 = 毎リクエスト再導出なので以降のターンでも載り続ける)。
+    # id は skill 行(tool 紐づき skill は admin のみ作成可)由来なので per-tool の
+    # アクセス検証はスキップ — skill の read 可視性が認可の単位。
+    skill_tool_ids = []
+    for a in skill_activations:
+        for tool_id in a["tool_ids"]:
+            if tool_id not in skill_tool_ids:
+                skill_tool_ids.append(tool_id)
+    if skill_tool_ids:
+        for name, tool in get_tools(
             request,
-            tool_ids,
+            skill_tool_ids,
             user,
-            {
-                **extra_params,
-                "__model__": models[task_model_id],
-                "__messages__": form_data["messages"],
-                "__files__": metadata.get("files", []),
-            },
-        )
+            tools_extra_params,
+            enforce_access_control=False,
+        ).items():
+            if name in tools_dict:
+                log.warning(f"skill tool '{name}' collides with an existing tool")
+                continue
+            tools_dict[name] = tool
 
     if tool_servers:
         for tool_server in tool_servers:
@@ -948,9 +975,31 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 if render:
                     tools_dict[tool["name"]]["render"] = render
 
+    # llens(#35 step2b): load_skill 発火時の tool 遅延取り込み(入口 2)。
+    # tools_dict(= metadata["tools"])と form_data["tools"] は native ループが
+    # 毎イテレーション参照する同一オブジェクトなので、ここで足せば次の
+    # イテレーションからモデルに見える。
+    def inject_skill_tools(skill):
+        for name, tool in get_tools(
+            request,
+            skill.tool_ids,
+            user,
+            tools_extra_params,
+            enforce_access_control=False,
+        ).items():
+            if name in tools_dict:
+                continue
+            tools_dict[name] = tool
+            if "tools" in form_data:
+                form_data["tools"].append(
+                    {"type": "function", "function": tool.get("spec", {})}
+                )
+
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
-    load_skill_tool = build_load_skill_tool(model, user)
+    load_skill_tool = build_load_skill_tool(
+        model, user, load_tools=inject_skill_tools
+    )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
             log.warning(

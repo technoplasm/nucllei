@@ -391,3 +391,67 @@ class TestSkills(AbstractPostgresTest):
     # NOTE: 発火済み skill の manifest 除外テストは撤廃(2026-07-06)。
     # `/command` 発火は合成 load_skill exchange として履歴に見えるため、
     # モデルは「ロード済み」を自然に知り、除外ルール自体が不要になった。
+
+    def test_activation_carries_tool_ids(self):
+        """`/command` 発火の activation は skill.tool_ids を運ぶ(#35 step2b、入口 1)。"""
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import apply_skill_command
+
+        Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="vaultcmd",
+                title="金庫番",
+                content="secret_password を呼べ",
+                tool_ids=["secret-password"],
+                access_control=None,
+            ),
+        )
+
+        user = types.SimpleNamespace(id="1", name="Taro")
+        form_data = {"messages": [{"role": "user", "content": "/vaultcmd 教えて"}]}
+        _, activations = apply_skill_command(form_data, user)
+        assert activations[0]["tool_ids"] == ["secret-password"]
+
+    def test_load_skill_calls_load_tools_hook(self):
+        """load_skill 発火時、tool_ids 非空なら load_tools フックが呼ばれる(入口 2)。"""
+        import asyncio
+
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import build_load_skill_tool
+
+        with_tools = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="hooked",
+                title="t",
+                description="tool 付き",
+                content="c",
+                tool_ids=["some-tool"],
+                access_control=None,
+            ),
+        )
+        without_tools = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="plain",
+                title="t",
+                description="tool なし",
+                content="c",
+                access_control=None,
+            ),
+        )
+
+        user = types.SimpleNamespace(id="1", name="Taro")
+        model = {"info": {"meta": {"skillIds": [with_tools.id, without_tools.id]}}}
+
+        loaded = []
+        tool = build_load_skill_tool(model, user, load_tools=lambda s: loaded.append(s.command))
+
+        result = asyncio.run(tool["callable"](skill_command="hooked"))
+        assert result == "c"
+        assert loaded == ["hooked"]
+
+        # tool_ids 空ならフックは呼ばれない
+        asyncio.run(tool["callable"](skill_command="plain"))
+        assert loaded == ["hooked"]
