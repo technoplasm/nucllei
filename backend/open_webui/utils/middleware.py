@@ -63,12 +63,11 @@ from open_webui.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
     get_last_user_message,
-    get_last_user_message_item,
     get_last_assistant_message,
     prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
-from open_webui.models.skills import Skills
+from open_webui.models.skills import Skills, normalize_command
 from open_webui.utils.access_control import (
     has_access,
     has_read_access_to_file,
@@ -562,68 +561,134 @@ def apply_params_to_form_data(form_data, model):
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 
 
-def apply_skill_command(form_data, user):
-    """ユーザーメッセージ先頭の `/command` を skill の content で置換する(issue #35)。
+def is_skill_visible(skill, user) -> bool:
+    """read 可視性(access_control read。作成者は常に可視)。"""
+    return skill.user_id == user.id or has_access(
+        user.id, "read", skill.access_control
+    )
 
-    - 最後の user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
+
+def activate_skill(skill, user) -> str:
+    """skill 発火の単一パス(issue #35): content を展開して返す。
+
+    `/command` 起動(apply_skill_command)と load_skill 起動の両方がここを通る。
+    変数はサーバー既知のもののみ({{USER_NAME}} / {{CURRENT_DATE}} 等。ブラウザ専用変数は無し)、
+    毎リクエスト再展開(発火時点への固定はしない — _memos/skill-design.md「発火の有効範囲」)。
+
+    TODO(#35 step2b): tool_ids 遅延評価のフック。skill.tool_ids が非空なら get_tools() で
+    ロードし、その先のモデル呼び出しの tools 配列へ追加する。C トラック(#18-2/#28)後。
+    """
+    return prompt_template(skill.content, user_name=user.name)
+
+
+def apply_skill_command(form_data, user):
+    """user メッセージ先頭の `/command` を skill の content で置換する(issue #35)。
+
+    ペイロード内の**全 user メッセージ**を毎リクエスト走査する。発火はその会話
+    (現在のメッセージチェーン)で持続し、会話そのものが唯一の状態
+    (2026-07-06 改訂 — 揮発させると 2 ターン目以降モデルに `/command` が
+    生テキストで見える不整合も生む)。
+
+    - 各 user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
       read 可視な skill を lookup する。
     - ヒット: `/command` トークンを展開済み content で置換(後続テキストはそのまま残す)。
-      変数展開は task.py の prompt_template(サーバー既知変数のみ)を流用する。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
-
-    tool_ids の遅延評価はここでは扱わない(#35 step2)。
     """
-    message = get_last_user_message_item(form_data.get("messages", []))
-    if message is None:
-        return form_data
+    for message in form_data.get("messages", []):
+        if message.get("role") != "user":
+            continue
 
-    # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
-    content = message.get("content")
-    text_item = None
-    if isinstance(content, list):
-        for item in content:
-            if item.get("type") == "text":
-                text_item = item
-                break
-        text = text_item.get("text", "") if text_item else None
-    else:
-        text = content
+        # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
+        content = message.get("content")
+        text_item = None
+        if isinstance(content, list):
+            for item in content:
+                if item.get("type") == "text":
+                    text_item = item
+                    break
+            text = text_item.get("text", "") if text_item else None
+        else:
+            text = content
 
-    if not isinstance(text, str):
-        return form_data
+        if not isinstance(text, str):
+            continue
 
-    match = SKILL_COMMAND_PATTERN.match(text)
-    if not match:
-        return form_data
+        match = SKILL_COMMAND_PATTERN.match(text)
+        if not match:
+            continue
 
-    command = match.group(1)
-    skill = Skills.get_skill_by_command(command)
-    if skill is None:
-        # ミス: 素通し(エラーにしない)。
-        return form_data
+        skill = Skills.get_skill_by_command(match.group(1))
+        if skill is None or not is_skill_visible(skill, user):
+            continue
 
-    # read 可視性チェック(access_control read。作成者は常に可視)。
-    if not (
-        skill.user_id == user.id or has_access(user.id, "read", skill.access_control)
-    ):
-        return form_data
+        new_text = activate_skill(skill, user) + text[match.end() :]
 
-    # サーバー既知変数のみ展開({{USER_NAME}} / {{CURRENT_DATE}} 等。ブラウザ専用変数は無し)。
-    expanded = prompt_template(skill.content, user_name=user.name)
-
-    # `/command` トークンを展開済み content で置換。後続テキストは残す。
-    new_text = expanded + text[match.end() :]
-
-    # TODO(#35 step2): tool_ids 遅延評価のフック。
-    # skill.tool_ids が非空なら get_tools() でロードし、この先のモデル呼び出しの
-    # tools 配列へ追加する(発火時の遅延評価)。step1 では未実装。
-
-    if text_item is not None:
-        text_item["text"] = new_text
-    else:
-        message["content"] = new_text
+        if text_item is not None:
+            text_item["text"] = new_text
+        else:
+            message["content"] = new_text
 
     return form_data
+
+
+def build_load_skill_tool(model, user):
+    """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
+
+    - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
+      渡して not found になる罠 — _memos/skill-design.md step2a 教訓)。
+    - description が空の skill はモデルに露出させない(説明の無い skill は選べない)。
+    - 対象が 1 つも無ければ None(load_skill 自体を載せない)。
+
+    戻り値は native ループ互換の tool エントリ {"spec", "callable"}。
+    tool result = activate_skill の展開済み content(tools 動的追加は step2b)。
+    """
+    skill_ids = (model.get("info", {}).get("meta", {}) or {}).get("skillIds", [])
+    if not skill_ids:
+        return None
+
+    manifest = {}
+    for skill_id in skill_ids:
+        skill = Skills.get_skill_by_id(skill_id)
+        if (
+            skill is not None
+            and (skill.description or "").strip()
+            and is_skill_visible(skill, user)
+        ):
+            manifest[skill.command] = skill
+
+    if not manifest:
+        return None
+
+    listing = "\n".join(
+        f"- {command}: {skill.description.strip()}"
+        for command, skill in manifest.items()
+    )
+    spec = {
+        "name": "load_skill",
+        "description": (
+            "Load a skill: returns instructions you must follow to perform "
+            "a specific kind of task. Available skills:\n" + listing
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "skill_command": {
+                    "type": "string",
+                    "description": "Command of the skill to load.",
+                    "enum": list(manifest.keys()),
+                }
+            },
+            "required": ["skill_command"],
+        },
+    }
+
+    async def load_skill(skill_command: str = ""):
+        skill = manifest.get(normalize_command(skill_command))
+        if skill is None:
+            return f"skill not found: {skill_command}"
+        return activate_skill(skill, user)
+
+    return {"spec": spec, "callable": load_skill}
 
 
 async def process_chat_payload(request, form_data, user, metadata, model):
@@ -823,6 +888,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 render = extract_render_from_spec(tool)
                 if render:
                     tools_dict[tool["name"]]["render"] = render
+
+    # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
+    # load_skill として常載する(tool result = 展開済み content)。
+    load_skill_tool = build_load_skill_tool(model, user)
+    if load_skill_tool is not None:
+        if "load_skill" in tools_dict:
+            log.warning(
+                "tool 'load_skill' is shadowed by the skill manifest pseudo-tool"
+            )
+        tools_dict["load_skill"] = load_skill_tool
 
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。

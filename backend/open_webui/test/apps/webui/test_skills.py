@@ -7,6 +7,9 @@
 - has_access による read フィルタ(group_terms 交差を含む)
 - Alembic 移行の prompt→skill 複写(copy_prompts_to_skills を直接駆動)
 - `/command` サーバーサイド発火(apply_skill_command): 展開 + 後続テキスト保持 / 未知 command 素通し
+- 全 user メッセージ走査(会話持続、2026-07-06 改訂)/ 不可視 skill の素通し
+- load_skill 擬似 tool 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有り /
+  manifest 識別子は command 一本 / callable が展開済み content を返す
 """
 
 import types
@@ -267,3 +270,113 @@ class TestSkills(AbstractPostgresTest):
         form_data = {"messages": [{"role": "user", "content": "前置き /mycmd"}]}
         result = apply_skill_command(form_data, user)
         assert result["messages"][-1]["content"] == "前置き /mycmd"
+
+    def test_slash_command_multi_turn_scan(self):
+        """全 user メッセージ走査(会話持続)— 過去ターンの `/command` も毎リクエスト展開される。"""
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import apply_skill_command
+
+        Skills.insert_new_skill(
+            "1",
+            SkillForm(command="multia", title="t", content="指示A", access_control=None),
+        )
+        Skills.insert_new_skill(
+            "1",
+            SkillForm(command="multib", title="t", content="指示B", access_control=None),
+        )
+
+        user = types.SimpleNamespace(id="1", name="Taro")
+
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "/multia 最初の依頼"},
+                {"role": "assistant", "content": "了解"},
+                {"role": "user", "content": "続きをやって"},
+                {"role": "user", "content": "/multib 追加で"},
+            ]
+        }
+        result = apply_skill_command(form_data, user)
+        # 1 ターン目の /command も展開される(揮発しない)
+        assert result["messages"][0]["content"] == "指示A 最初の依頼"
+        # command の無いメッセージはそのまま
+        assert result["messages"][2]["content"] == "続きをやって"
+        # 複数 skill は和集合(それぞれの位置で展開)
+        assert result["messages"][3]["content"] == "指示B 追加で"
+
+    def test_slash_command_invisible_skill_passes_through(self):
+        """他人の私有 skill(access_control={})は発火せず素通し。"""
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import apply_skill_command
+
+        Skills.insert_new_skill(
+            "owner",
+            SkillForm(command="secretcmd", title="t", content="秘匿", access_control={}),
+        )
+
+        user = types.SimpleNamespace(id="someone-else", name="X")
+        form_data = {"messages": [{"role": "user", "content": "/secretcmd hi"}]}
+        result = apply_skill_command(form_data, user)
+        assert result["messages"][0]["content"] == "/secretcmd hi"
+
+    def test_build_load_skill_tool(self):
+        """load_skill 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有りのみ manifest に載る。"""
+        import asyncio
+
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import build_load_skill_tool
+
+        s1 = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="scales",
+                title="評価スケール",
+                description="臨床評価スケールの参照",
+                content="スケール表: {{USER_NAME}} 用",
+                access_control=None,
+            ),
+        )
+        s2 = Skills.insert_new_skill(  # description 無し → モデルに露出しない
+            "1",
+            SkillForm(command="nodesc", title="t", content="c", access_control=None),
+        )
+        s3 = Skills.insert_new_skill(  # 他人の私有 → 不可視
+            "owner",
+            SkillForm(
+                command="hiddencmd",
+                title="t",
+                description="見えない",
+                content="c",
+                access_control={},
+            ),
+        )
+
+        user = types.SimpleNamespace(id="7", name="Hanako")
+        model = {"info": {"meta": {"skillIds": [s1.id, s2.id, s3.id, "no-such-id"]}}}
+
+        tool = build_load_skill_tool(model, user)
+        assert tool is not None
+        spec = tool["spec"]
+        assert spec["name"] == "load_skill"
+        # manifest 識別子は command 一本(id/name は露出させない)
+        assert spec["parameters"]["properties"]["skill_command"]["enum"] == ["scales"]
+        assert "- scales: 臨床評価スケールの参照" in spec["description"]
+
+        # 発火: tool result = 展開済み content(activate_skill 経由)
+        result = asyncio.run(tool["callable"](skill_command="scales"))
+        assert result == "スケール表: Hanako 用"
+
+        # 未知 command はモデル向けエラーメッセージ(例外にしない)
+        result = asyncio.run(tool["callable"](skill_command="nope"))
+        assert "not found" in result
+
+    def test_build_load_skill_tool_none_when_empty(self):
+        """対象 skill が無ければ load_skill 自体を載せない(None)。"""
+        from open_webui.utils.middleware import build_load_skill_tool
+
+        user = types.SimpleNamespace(id="1", name="A")
+        assert build_load_skill_tool({}, user) is None
+        assert build_load_skill_tool({"info": {"meta": {}}}, user) is None
+        assert (
+            build_load_skill_tool({"info": {"meta": {"skillIds": ["missing"]}}}, user)
+            is None
+        )

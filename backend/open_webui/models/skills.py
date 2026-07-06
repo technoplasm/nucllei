@@ -122,6 +122,14 @@ class SkillsTable:
         except Exception:
             return None
 
+    def get_skill_by_id(self, id: str) -> Optional[SkillModel]:
+        try:
+            with get_db() as db:
+                skill = db.get(Skill, id)
+                return SkillModel.model_validate(skill)
+        except Exception:
+            return None
+
     def get_skill_by_command(self, command: str) -> Optional[SkillModel]:
         try:
             with get_db() as db:
