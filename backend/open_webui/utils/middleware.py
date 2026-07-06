@@ -1826,6 +1826,9 @@ async def process_chat_response(
                     nonlocal content_blocks
 
                     response_tool_calls = []
+                    # llens(#18-2): 終端フレームの finish_reason("stop" | "tool_calls")。
+                    # パース結果との整合ガードに使う(ハンドラ末尾)。
+                    finish_reason = None
 
                     async for line in response.body_iterator:
                         line = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -1890,6 +1893,9 @@ async def process_chat_response(
                                                 }
                                             )
                                         continue
+
+                                    if choices[0].get("finish_reason"):
+                                        finish_reason = choices[0]["finish_reason"]
 
                                     delta = choices[0].get("delta", {})
                                     delta_tool_calls = delta.get("tool_calls", None)
@@ -2146,6 +2152,39 @@ async def process_chat_response(
                                             "content": "",
                                         }
                                     )
+
+                    # llens(#18-2): finish_reason とパース結果の整合ガード。
+                    # "tool_calls" 終了なのにデルタから 1 つも組めていなければ、
+                    # チャンク境界などで取りこぼしている(無音で止まる最悪の失敗
+                    # モード)— 黙って通常終了せず、チャット内エラーで可視化する。
+                    if finish_reason == "tool_calls" and not response_tool_calls:
+                        log.error(
+                            "finish_reason=tool_calls but no tool calls were "
+                            "reconstructed from the stream (chunk boundary loss?)"
+                        )
+                        await event_emitter(
+                            {
+                                "type": "chat:completion",
+                                "data": {
+                                    "error": {
+                                        "content": (
+                                            "Model ended with tool_calls but no tool "
+                                            "call could be reconstructed from the "
+                                            "stream. The response may be incomplete."
+                                        )
+                                    },
+                                },
+                            }
+                        )
+                    elif response_tool_calls and finish_reason not in (
+                        "tool_calls",
+                        None,
+                    ):
+                        # 逆方向の不整合は実行を止めるほどではない(実害はモデルの
+                        # 意図解釈のみ)— ログで観測可能にするに留める。
+                        log.warning(
+                            f"tool calls parsed but finish_reason={finish_reason!r}"
+                        )
 
                     if response_tool_calls:
                         tool_calls.append(response_tool_calls)

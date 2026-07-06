@@ -342,6 +342,151 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
     assert _iteration_limit_errors(events) == []
 
 
+def _sse_response_from_frames(frames: list[str]) -> StreamingResponse:
+    """インライン組み立ての SSE(実キャプチャでは作れない異常系用)。"""
+
+    async def gen():
+        for frame in frames:
+            yield frame + "\n"
+        yield "data: [DONE]\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+def test_finish_tool_calls_without_parsed_calls_surfaces_error(monkeypatch):
+    """finish_reason=tool_calls なのに tool call を 1 つも復元できなければエラーを出す(#18-2)。
+
+    チャンク境界などでデルタを取りこぼした場合、従来は黙って通常終了していた
+    (無音の失敗モード)。チャット内エラーとして可視化することを固定する。
+    実キャプチャでは作れない異常系なので、finish フレームだけ実キャプチャと同形の
+    インライン SSE を使う。
+    """
+    from open_webui.utils import middleware
+
+    events = []
+    completion_calls = []
+
+    def fake_get_event_emitter(_metadata):
+        async def emit(event):
+            events.append(event)
+
+        return emit
+
+    async def fake_generate_chat_completion(request, form_data, user):
+        completion_calls.append(form_data)
+        return _sse_response("text_basic")
+
+    monkeypatch.setattr(middleware, "get_event_emitter", fake_get_event_emitter)
+    monkeypatch.setattr(middleware, "get_event_call", fake_get_event_emitter)
+    monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
+    monkeypatch.setattr(
+        middleware, "get_active_status_by_user_id", lambda user_id: "active"
+    )
+    monkeypatch.setattr(
+        middleware, "generate_chat_completion", fake_generate_chat_completion
+    )
+    monkeypatch.setattr(
+        middleware.Chats,
+        "get_message_by_id_and_message_id",
+        lambda chat_id, message_id: None,
+    )
+    monkeypatch.setattr(
+        middleware.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda chat_id, message_id, data: None,
+    )
+    monkeypatch.setattr(
+        middleware.Chats, "get_chat_title_by_id", lambda chat_id: "chat"
+    )
+    monkeypatch.setattr(
+        middleware.Chats, "get_messages_by_chat_id", lambda chat_id: None
+    )
+
+    background = {}
+
+    def fake_create_task(coro, id=None):
+        task = asyncio.get_event_loop().create_task(coro)
+        background["task"] = task
+        return id, task
+
+    monkeypatch.setattr(middleware, "create_task", fake_create_task)
+
+    # content デルタ + finish(tool_calls)のみ — tool_calls デルタが 1 つも無い
+    broken_stream = _sse_response_from_frames(
+        [
+            'data: {"choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":"呼びます"},"finish_reason":null}]}',
+            'data: {"choices":[{"index":0,"delta":{"reasoning_content":null},"finish_reason":"tool_calls","matched_stop":163586}]}',
+        ]
+    )
+
+    metadata = {
+        "chat_id": "chat-1",
+        "message_id": "message-1",
+        "session_id": "session-1",
+        "features": {},
+        "tools": {},
+    }
+    form_data = {
+        "model": "kimi-k2.6",
+        "stream": True,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    user = types.SimpleNamespace(
+        id="1", email="john.doe@openwebui.com", name="John Doe", role="admin"
+    )
+    request = types.SimpleNamespace(
+        app=types.SimpleNamespace(
+            state=types.SimpleNamespace(
+                WEBUI_NAME="llens",
+                config=types.SimpleNamespace(WEBUI_URL="http://localhost"),
+            )
+        )
+    )
+
+    async def run():
+        result = await middleware.process_chat_response(
+            request,
+            broken_stream,
+            form_data,
+            user,
+            metadata,
+            {"id": "kimi-k2.6", "name": "kimi-k2.6"},
+            [],
+            {},
+        )
+        assert result.get("status") is True
+        await background["task"]
+
+    asyncio.run(run())
+
+    error_events = [
+        e["data"]["error"]["content"]
+        for e in events
+        if e.get("data", {}).get("error")
+    ]
+    assert any("no tool call could be reconstructed" in c for c in error_events)
+    # tool call が組めていないのでループは回らない
+    assert completion_calls == []
+
+
+def test_normal_tool_call_stream_has_no_finish_mismatch_error(monkeypatch):
+    """実キャプチャ(finish_reason=tool_calls + 正常デルタ)ではガードが発火しない。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+        )
+    )
+    error_events = [
+        e["data"]["error"]["content"]
+        for e in events
+        if e.get("data", {}).get("error")
+    ]
+    assert error_events == []
+    assert len(completion_calls) == 1
+
+
 def test_unavailable_tool_call_returns_explicit_message(monkeypatch):
     """tools 配列に無い tool の呼び出しは明示メッセージを返す(#18-2)。
 
