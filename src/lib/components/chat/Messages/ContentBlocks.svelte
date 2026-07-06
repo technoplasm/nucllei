@@ -98,6 +98,32 @@
 				on:update={(e) => onUpdate(blockIdx, e.detail)}
 				on:select={(e) => onSelect(e.detail)}
 			/>
+		{:else if block.type === 'skills'}
+			<!-- `/command` 発火の表示(#35)。展開すると注入された指示が見える。
+			     指示はモデル出力ではなく skill 作者の記述だが、reasoning と同じく
+			     テキスト補間で出す({@html} 禁止)。 -->
+			{#each block.skills ?? [] as skill (skill.command)}
+				<Collapsible
+					id={`${id}-block-${blockIdx}-skill-${skill.command}`}
+					title=""
+					open={false}
+					attributes={{
+						type: 'skills',
+						done: 'true',
+						command: skill.command,
+						title: skill.title
+					}}
+					className="w-full space-y-1 mb-1.5 text-sm"
+				>
+					<div
+						class="mb-1.5 text-sm text-gray-500 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3 whitespace-pre-wrap"
+						slot="content"
+						dir="auto"
+					>
+						{skill.content}
+					</div>
+				</Collapsible>
+			{/each}
 		{:else if block.type === 'tool_calls'}
 			{#each block.calls ?? [] as call (call.id)}
 				<!-- open は「結果未着かどうか」で流れる: 実行中 true → 結果到着で

@@ -264,13 +264,18 @@ class TestSkills(AbstractPostgresTest):
                 {"role": "user", "content": "/multib 追加で"},
             ]
         }
-        result, _ = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user)
         # 1 ターン目の /command も展開される(揮発しない)
         assert result["messages"][0]["content"] == "指示A 最初の依頼"
         # command の無いメッセージはそのまま
         assert result["messages"][2]["content"] == "続きをやって"
         # 複数 skill は和集合(それぞれの位置で展開)
         assert result["messages"][3]["content"] == "指示B 追加で"
+        # current は最後の user メッセージでの発火のみ(UI 表示は当該ターンだけ)
+        assert [(a["command"], a["current"]) for a in activations] == [
+            ("multia", False),
+            ("multib", True),
+        ]
 
     def test_slash_command_invisible_skill_passes_through(self):
         """他人の私有 skill(access_control={})は発火せず素通し。"""
@@ -385,11 +390,17 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="1", name="Taro")
         form_data = {"messages": [{"role": "user", "content": "/firedcmd やって"}]}
-        _, activated = apply_skill_command(form_data, user)
-        assert activated == {"firedcmd"}
+        _, activations = apply_skill_command(form_data, user)
+        assert [a["command"] for a in activations] == ["firedcmd"]
+        # UI 表示用のフィールド: 展開済み content と current フラグ
+        assert activations[0]["content"] == "c1"
+        assert activations[0]["title"] == "t"
+        assert activations[0]["current"] is True
 
         model = {"info": {"meta": {"skillIds": [s1.id, s2.id]}}}
-        tool = build_load_skill_tool(model, user, exclude_commands=activated)
+        tool = build_load_skill_tool(
+            model, user, exclude_commands={a["command"] for a in activations}
+        )
         assert tool["spec"]["parameters"]["properties"]["skill_command"]["enum"] == [
             "freshcmd"
         ]

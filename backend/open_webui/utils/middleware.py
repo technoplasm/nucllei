@@ -594,13 +594,21 @@ def apply_skill_command(form_data, user):
     - ヒット: `/command` トークンを展開済み content で置換(後続テキストはそのまま残す)。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
 
-    戻り値は (form_data, 発火済み command の set)。発火済み skill は load_skill の
-    manifest から除外する(展開後のモデルには発火の痕跡が見えず、manifest に同じ
-    skill が載っていると冗長ロードして CoT が混乱するため)。
+    戻り値は (form_data, 発火リスト)。発火リストの要素は
+    {command, title, content(展開済み), current(最後の user メッセージでの発火か)}。
+    - command 集合は load_skill manifest からの除外に使う(展開後のモデルには発火の
+      痕跡が見えず、manifest に同じ skill が載っていると冗長ロードして CoT が混乱する)
+    - current な発火は UI 表示用に応答先頭の content block(type=skills)になる
     """
-    activated_commands = set()
+    activations = []
 
-    for message in form_data.get("messages", []):
+    messages = form_data.get("messages", [])
+    last_user_idx = None
+    for idx, message in enumerate(messages):
+        if message.get("role") == "user":
+            last_user_idx = idx
+
+    for idx, message in enumerate(messages):
         if message.get("role") != "user":
             continue
 
@@ -627,15 +635,23 @@ def apply_skill_command(form_data, user):
         if skill is None or not is_skill_visible(skill, user):
             continue
 
-        new_text = activate_skill(skill, user) + text[match.end() :]
-        activated_commands.add(skill.command)
+        expanded = activate_skill(skill, user)
+        new_text = expanded + text[match.end() :]
+        activations.append(
+            {
+                "command": skill.command,
+                "title": skill.title,
+                "content": expanded,
+                "current": idx == last_user_idx,
+            }
+        )
 
         if text_item is not None:
             text_item["text"] = new_text
         else:
             message["content"] = new_text
 
-    return form_data, activated_commands
+    return form_data, activations
 
 
 def build_load_skill_tool(model, user, exclude_commands=frozenset()):
@@ -709,7 +725,17 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 生のユーザーメッセージ先頭の `/command` を skill content へ展開する。
     # 発火済み command は後段で load_skill manifest から除外する。
-    form_data, activated_skill_commands = apply_skill_command(form_data, user)
+    form_data, skill_activations = apply_skill_command(form_data, user)
+
+    # 今回のターンで発火した skill は応答先頭の content block として表示する
+    # (process_chat_response が type=skills ブロックを seed する)。
+    current_skill_activations = [
+        {"command": a["command"], "title": a["title"], "content": a["content"]}
+        for a in skill_activations
+        if a["current"]
+    ]
+    if current_skill_activations:
+        metadata["skill_activations"] = current_skill_activations
 
     # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
     # 後段で追加される web_search 等のサーバー生成項目より前に絞ることで、被害者ファイル
@@ -903,7 +929,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
     load_skill_tool = build_load_skill_tool(
-        model, user, exclude_commands=activated_skill_commands
+        model, user, exclude_commands={a["command"] for a in skill_activations}
     )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
@@ -1367,8 +1393,10 @@ async def process_chat_response(
                 # 次ターンのプロンプトに漏れる。モデル向け履歴には
                 # 実際に出力された text/tool_calls/結果のみを載せる。
                 def model_facing_content(blocks):
+                    # skills は UI 表示専用(#35): 展開済み content は既に user
+                    # メッセージ側に入っており、モデルへ再送すると二重注入になる。
                     return serialize_content_blocks(
-                        [b for b in blocks if b["type"] != "reasoning"]
+                        [b for b in blocks if b["type"] not in ("reasoning", "skills")]
                     )
 
                 messages = []
@@ -1605,12 +1633,25 @@ async def process_chat_response(
                 else last_assistant_message if last_assistant_message else ""
             )
 
-            content_blocks = [
+            content_blocks = []
+
+            # llens(#35): この turn の `/command` 発火を応答先頭に表示する
+            # (reasoning/tool_calls と同じ流儀の折りたたみ)。モデル向け履歴には
+            # 送らない — 展開済み content は既に user メッセージ側に入っている。
+            if metadata.get("skill_activations"):
+                content_blocks.append(
+                    {
+                        "type": "skills",
+                        "skills": metadata["skill_activations"],
+                    }
+                )
+
+            content_blocks.append(
                 {
                     "type": "text",
                     "content": content,
                 }
-            ]
+            )
 
             # llens(#17): reasoning は SGLang reasoning parser 有効が接続契約で、
             # 常に reasoning_content デルタとして届く。content 中の生 <think> タグ

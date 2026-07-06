@@ -134,6 +134,17 @@
 						{:else}
 							{$i18n.t('Analyzing...')}
 						{/if}
+					{:else if attributes?.type === 'skills'}
+						<!-- `/command` 発火の表示ヘッダ(#35) -->
+						<Markdown
+							id={`${collapsibleId}-skill-${attributes?.command}`}
+							content={attributes?.title && attributes.title !== attributes.command
+								? $i18n.t('Skill **{{NAME}}** — {{TITLE}}', {
+										NAME: `/${attributes.command}`,
+										TITLE: attributes.title
+									})
+								: $i18n.t('Skill **{{NAME}}**', { NAME: `/${attributes.command}` })}
+						/>
 					{:else if attributes?.type === 'tool_calls'}
 						{#if attributes?.done === 'true'}
 							<Markdown
