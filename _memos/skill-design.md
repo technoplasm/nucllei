@@ -1,6 +1,7 @@
 # Skill 設計(issue #35)
 
-- 決定日: 2026-07-05(#35 の議論で確定)
+- 決定日: 2026-07-05(#35 の議論で確定)。改訂: 2026-07-06
+  (発火の会話持続化・load_skill 命名確定・step2 の 2a/2b 分割・ハイライト要件 — 本文反映済み)
 - 位置づけ: upstream キャッチアップ(#18)ではなくその先。upstream に同等機能は無い
   (外形参考: v0.8.0 `$` コマンド / v0.10.0 オンデマンド manifest — `tools-catchup.md` §skills)
 
@@ -50,9 +51,12 @@
 
 ### 入口 1: ユーザー起動(`/`)
 
-1. フロント: picker は補完のみ(`/command` トークンを挿入するだけ)。メッセージは生のまま送信
-2. middleware inlet: ユーザーメッセージ**先頭行の行頭** `/([a-zA-Z0-9_-]+)` を検出
-   → read 可視な skill を command で lookup
+1. フロント: picker は補完のみ(`/command` トークンを挿入するだけ)。メッセージは生のまま送信。
+   **有効な command だけハイライト**する(サーバと同一述語: 先頭行行頭 token ∈ read 可視 skill の
+   command。無効は普通のテキスト表示 = サーバの素通しと見た目が一致)— frontend batch の要件
+2. middleware inlet: ペイロード内の**全 user メッセージ**について先頭行の行頭
+   `/([a-zA-Z0-9_-]+)` を検出 → read 可視な skill を command で lookup
+   (毎リクエスト全走査 = 発火の会話持続。下記「発火の有効範囲」)
 3. ヒット: メッセージ中の `/command` トークンを展開済み content で置換(旧テンプレート挿入と同じ意味論を
    サーバー側で再現。後続テキストはそのまま残る)+ tool_ids ロード → tools 配列へ
 4. ミス: 何もしない(通常テキストとして素通し。エラーにしない)
@@ -64,14 +68,34 @@
    (description に「command: description」一覧を列挙。skill ごとに擬似 tool を並べる案は
    tools 配列が skill 数に比例して肥大するため不採用)
 2. モデルが `load_skill` を呼ぶ → native 実行ループ内で activate:
-   tool result = 展開済み content、tool_ids ロード → **次イテレーションの tools 配列に追加**(= 遅延評価)
-3. ループ継続。モデルは注入された指示と新しい tool を使って続行
+   tool result = 展開済み content(step2a)。tool_ids ロード → **次イテレーションの
+   tools 配列に追加**(= 遅延評価)は step2b(下記の分割参照)
+3. ループ継続。モデルは注入された指示と(step2b 以降)新しい tool を使って続行
 
-### 発火の有効範囲(v1 の割り切り)
+命名は **load_skill 一本**(2026-07-06 確定)。現行 llens/upstream 外形の `view_skill` は採らない。
+将来 tool ロードが加わっても「呼ぶと skill が有効になる」の意味論は不変なので rename も不要。
+view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモデルに説明する羽目になる二重化で不採用。
 
-発火は**当該リクエスト内のみ**有効。次のユーザーターンでは tools 配列は素の状態に戻る
-(会話履歴に load_skill の tool call が残るので、モデルは必要なら再度呼べる)。
-「会話履歴から発火済み skill を再現して tools を維持する」は使用感を見てからの拡張とする。
+### 発火の有効範囲(2026-07-06 改訂: 会話持続)
+
+旧設計の「当該リクエスト内のみ有効(per-request 揮発)」は**撤回**(ユーザー要望に由来しない
+実装都合の割り切りだった)。揮発だと `/command` を毎ターン打ち直す羽目になる上、
+2 ターン目以降モデルに `/command` が生テキストで見える不整合も生む
+(step1 実装の inlet は最後の user メッセージしか見ていない — 要修正、step1 残項目 6)。
+
+発火は**そのメッセージ以降、その会話(現在のメッセージチェーン)で持続**する。実現はステートレス:
+毎リクエスト、inlet が全 user メッセージを走査して発火を履歴から再導出する。会話そのものが唯一の
+状態で、chat への active_skill_ids のような複製状態は持たない。分岐・編集の意味論も自然に正しくなる
+(コマンドより前から分岐した枝では無効、メッセージを消せば失効)。
+
+- 有効 skill の導出則(両入口で対称): チェーン内の `/command` ヒット ∪ `load_skill` 呼び出し。
+  どちらも履歴からステートレスに再導出できる
+- 複数 skill は**和集合**。同一 skill の再発火は冪等
+- 変数({{CURRENT_DATE}} 等)は**毎リクエスト再展開**(「発火時点」への固定は状態が要るので採らない。
+  数ターンのドリフトは許容)
+- skill content の後日編集は `/command` 発火分には**遡って効く**(毎リクエスト再展開のため)。
+  load_skill の結果は履歴に凍結されるので遡らない(モデルが呼び直せば新 content)—
+  既知の非対称として許容・明記
 
 ## 権限まとめ
 
@@ -103,10 +127,14 @@
    `backend/open_webui/utils/middleware.py::apply_skill_command`
    (呼び出しは `process_chat_payload` 冒頭)。tool_ids 遅延評価の seam は同ファイルの
    `# TODO(#35 step2): tool_ids 遅延評価のフック` コメント位置。
-4. [ ] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換 — **frontend batch へ延期**。
+4. [ ] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換、
+   **有効 command のハイライト**(入力欄 + 送信済みメッセージ。サーバと同一述語)— **frontend batch へ延期**。
 5. [x] **(backend done)** 回帰テスト: `backend/open_webui/test/apps/webui/test_skills.py`
    (CRUD / command 一意性 / `/` 正規化 / admin ゲート / group_terms read フィルタ /
    移行複写 / `/` パース→注入)。
+6. [ ] inlet の**全 user メッセージ走査化**(会話持続 — 2026-07-06 改訂。現行実装は
+   最後の user メッセージのみパースしており、2 ターン目以降モデルに `/command` が
+   生テキストで見える。回帰テストも複数ターン分を追加)。
 
 #### 移行期の判断(2026-07-05、step1 backend 実装時)
 
@@ -119,13 +147,31 @@
   `middleware.py::apply_skill_command` 内の `# TODO(#35 step2): tool_ids 遅延評価のフック`
   一箇所に集約。作成/更新 API では tool_ids 非空を admin 専用ゲートで受けるところまで実装済み。
 
-### step2 — Tool 遅延評価
+### step2a — load_skill(content 返却のみ。C トラック非依存で先行可)
 
-1. `load_skill` 擬似 tool の合成(preset skillIds ∩ 可視)
-2. native ループ内 activate: content を tool result で返す + tools 動的追加
-3. `/` 起動側も同じ activate で tools が載ることを確認
-4. SGLang × Kimi K2.6 実挙動キャプチャ(#29 基盤): load_skill 発火 → tool 追加 → 呼び出しのシーケンス
-5. 自前ツール(nsjail+IPython / de-id)が skill 経由で動く E2E
+tool 遅延取り込み(tools 配列の動的変異 + async ロード)だけが実装コストの重い部分なので、
+step2 を軽い前半(2a)と重い後半(2b)に分割する(2026-07-06 決定)。
+
+1. `load_skill` 擬似 tool の合成(preset skillIds ∩ 可視。description に「command: description」一覧)
+2. native ループ内で activate: tool result = 展開済み content を返すだけ(tools 動的追加はしない)。
+   native ループに既にある tool 実行の 1 ケースに過ぎないので C を待たずに出荷できる
+3. `/` 側の展開ロジックと**同一の `activate_skill(skill, user)` を経由**
+   (seam は middleware.py の既存 TODO 位置。将来の tool_ids 消費はこの関数内 1 箇所に足す)
+4. 教訓(現行 llens `scripts/owui/sync.py` より): manifest に id と name の両方を出すと
+   モデルが name を渡して not found になる(現行は name=id 強制で回避)。
+   llens の manifest 識別子は **command 一本**にする
+5. 移行ノート: 現行 llens の skill md(`owui/skills/*.md`)は description に
+   「必ず view_skill で本文をロード」と書いてある — フォーク移行時に load_skill へ文言書き換えが必要
+
+### step2b — Tool 遅延評価(C トラック後)
+
+1. activate 内で tool_ids ロード → tools 配列へ追加(`/` 側は inlet で、load_skill 側は
+   次イテレーションの tools 配列へ = 遅延評価)。動的 tools 変異と async ロードが重く、
+   これが C(#18-2/#28)を先行させる理由
+2. SGLang × Kimi K2.6 実挙動キャプチャ(#29 基盤): load_skill 発火 → tool 追加 → 呼び出しのシーケンス
+3. 自前ツール(nsjail+IPython / de-id)が skill 経由で動く E2E
+4. 履歴に残った tool call が現在の tools 配列に無い tool を指すケースの graceful 処理
+   (会話持続でも起きうる: skill 削除・権限剥奪・分岐)は #18-2 に含める
 
 ### 前提・並行作業(実装順の根拠は #16 コメント参照)
 
