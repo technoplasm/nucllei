@@ -65,12 +65,18 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 5. **dev ツール登録**: `python3 dev/tools/seed.py --token "$TOKEN"` が `render_probe` tool を
    登録し `llens-assistant` の toolIds に追加する(詳細 `dev/tools/README.md`)。
    - `render_probe(kind)`: table/code/math/long/mixed/edge の markdown サンプル
-   - `run_python(code, timeout)`: `Code("python")` + `Text` 戻り(#20 型駆動レンダリング確認用ダミー)
    - `probe_result_table(department)`: `Table` 戻り
    - `probe_args` / `echo`: 宣言なしコントロール
+   - 旧 `run_python` ダミーは撤去済み(#18-3 で本物と同名衝突 — **同名 tool は先勝ちで
+     discard される**ので dev でも名前を被せない)
    - このほか dev DB に `get_weather` tool(fixture の call 先)を手で作って toolIds に足しておくと
      モデルフレーム fixture と同じシナリオを UI で再現できる(spec は
      `test_native_tool_calling.py` の weather_spec 参照)。
+   **sandbox tool(#18-3)**: 実行系は `dev/tools/sandbox.py` を tool id `sandbox` で
+   DB 登録(API 経由。llens 現行 tool の v0.6.5 適合版)。sandbox コンテナ
+   (`llens/sandbox:poc`、`127.0.0.1:3000->8000`)を起こし、valves を
+   `{"sandbox_url": "http://127.0.0.1:3000"}` にして toolIds へ追加。
+   答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
 6. **skill fixture(#35 検証用)**: skill `kansai`(関西弁指示)/ skill `vault`
    (tool_ids=["secret_password"])/ tool `secret_password`(私有)を作り、preset の
    `meta.skillIds` に紐づける。手順と実機チェックは `dev/e2e/README.md`。

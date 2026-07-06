@@ -122,7 +122,8 @@ Open Terminal 統合 / Anthropic Messages proxy / Channels の tool 対応。
 ### C. やらない
 
 - MCP OAuth 2.1 まわり全般(air-gapped・院内 tool server は静的接続で足りる)
-- Open Responses protocol(#15 で要否判断中。現状 SGLang は Chat Completions で足りる)
+- Open Responses protocol(#15 → **不要と結論**(2026-07-06、#18-3): 接続は SGLang の
+  Chat Completions 一本、stateful 性は sandbox 側常駐 kernel が持ちプロトコル状態を要しない)
 - pip 自動インストール(air-gapped で無意味。むしろ既定無効を維持)
 - valve 暗号化・動的 dropdown 等の valve 拡張(必要になってから)
 - built-in tools 全部(上記「対象外」)
@@ -139,4 +140,6 @@ Open Terminal 統合 / Anthropic Messages proxy / Channels の tool 対応。
 2. 選別 → 上記 A〜D 案をレビューして確定(D は判断が要る)
 3. SGLang × Kimi の tool call フレームを #29 の基盤で追加キャプチャ(並列 tool call・不正 JSON・引数なしの実挙動)
 4. A-1/A-2 をテストファーストで実装(fixture リプレイ → middleware/utils/tools.py)
-5. 自前ツール(nsjail+IPython、de-id)が乗ることの確認テスト
+5. ~~自前ツール(nsjail+IPython、de-id)が乗ることの確認テスト~~ → **完了(2026-07-06、
+   394b08701 = #18-3)**: sandbox tool 6 関数を E2E 8/8 PASS。発見・修正した基盤バグ 3 件と
+   組み込みツール構想は `_memos/builtin-tools.md`。de-id は Filter 側(#13)で扱う

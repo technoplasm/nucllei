@@ -202,7 +202,10 @@ tool result = 展開済み content の全シーケンス。
    - クロスターン tool 履歴の復元(#18-2、f62deb49b — `expandAssistantToolHistory`。
      合成 exchange は snapshot の synthetic マーカでスキップし inlet 再注入と棲み分け)
    - finish_reason 整合ガード(#18-2、c81926c5b)
-   残: 実挙動 fixture キャプチャ(#29 基盤)/ nsjail 自前ツール E2E(#18-3)
+   残: 実挙動 fixture キャプチャ(#29 基盤)。
+   ~~nsjail 自前ツール E2E(#18-3)~~ → **完了(2026-07-06、394b08701)**: E2E 8/8 PASS、
+   基盤バグ 3 件(private spec 露出 / Optional anyOf KeyError / __chat_id__ 未注入)を
+   修正。詳細 `_memos/builtin-tools.md`
 5. [x] load_skill の戻り値を構造化(ユーザー提案 → 出荷 2026-07-06):
    両入口とも tool result = JSON `{"result": <展開済み content>, "tools": [<導入された
    tool 関数名>]}`。render ディスクリプタに新 kind `skill` を追加(#20 の枠組みのまま)し、
