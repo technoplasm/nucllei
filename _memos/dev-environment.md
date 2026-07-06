@@ -99,6 +99,12 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 ## その他の運用
 
 - ブランチ・コミット規約・upstream 制約は `CLAUDE.md` と `_memos/upstream-policy.md`(v0.6.6+ のソースを読まない)。
-- リリースタグ: `v0.6.5-llens.N`(初回 `v0.6.5-llens.1` 済み)。
+- リリースタグ(2026-07-06 決定、refs #25): **docker image(ghcr)出荷を始めるまでタグは切らない**
+  (消費者のいないバージョンは無価値。それまで master は常に開発版)。
+  出荷開始後は `prodYYYYMMDD_NN` 形式(technoplasm/app と同形式。prefix は tag 判定の安定化のため。
+  app の `a` サフィックスは CI がマイグレーション有無で貼るもので、llens ではマイグレーションは
+  実装側の仕事なので採らない)。git tag = ghcr image tag を 1:1 対応、その瞬間の head に打つだけ。
+  連番はリポジトリごとに独立(app とのロックステップはしない。組み合わせの同一性は deploy 側が持つ)。
+  ※ 旧 `v0.6.5-llens.N` 方式は廃止、`v0.6.5-llens.1` はローカル・origin とも削除済み。
 - GitHub 操作は `gh` CLI(issue 単位で作業、コミットに `refs #N`)。
 - air-gapped 前提: 外部ネットワーク必須の機能・依存を増やさない。
