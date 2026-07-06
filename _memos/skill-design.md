@@ -196,10 +196,13 @@ tool result = 展開済み content の全シーケンス。
 3. [x] 実機検証(SGLang × Kimi、秘密パスワード tool + /vault skill):
    手動 `/vault` → secret_password 呼び出し → 正答 / 自然文 → load_skill →
    注入された tool を次イテレーションで呼ぶ → 正答、の両方 PASS
-4. 残(C トラック側): get_tools 同期ロードの async 化(#28)/
-   履歴に残った tool call が現在の tools 配列に無い tool を指すケースの graceful 処理
-   (skill 削除・権限剥奪・分岐で起きうる — #18-2)/
-   実挙動 fixture キャプチャ(#29 基盤)/ nsjail 自前ツール E2E(#18-3)
+4. [x] C トラック分も完了(2026-07-06 同日):
+   - get_tools 同期ロードの async 化 + sync tool のワーカースレッド実行(#28 前半、5a3e815a6)
+   - 未知 tool call の graceful 処理(#18-2、df9408ebd)
+   - クロスターン tool 履歴の復元(#18-2、f62deb49b — `expandAssistantToolHistory`。
+     合成 exchange は snapshot の synthetic マーカでスキップし inlet 再注入と棲み分け)
+   - finish_reason 整合ガード(#18-2、c81926c5b)
+   残: 実挙動 fixture キャプチャ(#29 基盤)/ nsjail 自前ツール E2E(#18-3)
 5. [x] load_skill の戻り値を構造化(ユーザー提案 → 出荷 2026-07-06):
    両入口とも tool result = JSON `{"result": <展開済み content>, "tools": [<導入された
    tool 関数名>]}`。render ディスクリプタに新 kind `skill` を追加(#20 の枠組みのまま)し、
