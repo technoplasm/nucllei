@@ -28,6 +28,22 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
 
+
+def validate_tool_metadata(form_data: ToolForm) -> None:
+    """llens(#44): tool の frontmatter 退役に伴い、title(name)/description は
+    DB フィールドが唯一の真実源。どちらかが空なら 400 で保存を拒否する。"""
+    if not (form_data.name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tool name is required",
+        )
+    if not ((form_data.meta.description or "").strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tool description is required",
+        )
+
+
 ############################
 # GetTools
 ############################
@@ -132,6 +148,10 @@ async def create_new_tools(
             detail="Only alphanumeric characters and underscores are allowed in the id",
         )
 
+    # llens(#44): title/description の真実源は DB フィールドのみ(frontmatter 退役)。
+    # 空だと真実源が欠けるので保存を拒否する。
+    validate_tool_metadata(form_data)
+
     form_data.id = form_data.id.lower()
 
     # llens(#42): 組み込みツールの id は予約(ユーザー作成 tool で shadow させない)
@@ -145,10 +165,9 @@ async def create_new_tools(
     if tools is None:
         try:
             form_data.content = replace_imports(form_data.content)
-            tool_module, frontmatter = load_tool_module_by_id(
+            tool_module, _ = load_tool_module_by_id(
                 form_data.id, content=form_data.content
             )
-            form_data.meta.manifest = frontmatter
 
             TOOLS = request.app.state.TOOLS
             TOOLS[form_data.id] = tool_module
@@ -250,10 +269,12 @@ async def update_tools_by_id(
     if is_builtin_tool_id(id):
         return Tools.update_tool_by_id(id, {"access_control": form_data.access_control})
 
+    # llens(#44): frontmatter 退役に伴い title/description は DB フィールドが唯一の真実源。
+    validate_tool_metadata(form_data)
+
     try:
         form_data.content = replace_imports(form_data.content)
-        tool_module, frontmatter = load_tool_module_by_id(id, content=form_data.content)
-        form_data.meta.manifest = frontmatter
+        tool_module, _ = load_tool_module_by_id(id, content=form_data.content)
 
         TOOLS = request.app.state.TOOLS
         TOOLS[id] = tool_module

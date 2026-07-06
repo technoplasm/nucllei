@@ -85,10 +85,9 @@ def load_tool_module_by_id(tool_id, content=None):
 
         content = replace_imports(content)
         Tools.update_tool_by_id(tool_id, {"content": content})
-    else:
-        frontmatter = extract_frontmatter(content)
-        # Install required packages found within the frontmatter
-        install_frontmatter_requirements(frontmatter.get("requirements", ""))
+    # llens(#44): tool の frontmatter は退役。title/description の真実源は DB の
+    # name/meta.description のみとし、requirements による tool ロード時 pip も廃止
+    # (air-gapped、依存は事前導入前提)。frontmatter ヘルパは functions がまだ使う。
 
     module_name = f"tool_{tool_id}"
     module = types.ModuleType(module_name)
@@ -105,12 +104,13 @@ def load_tool_module_by_id(tool_id, content=None):
 
         # Executing the modified content in the created module's namespace
         exec(content, module.__dict__)
-        frontmatter = extract_frontmatter(content)
         log.info(f"Loaded module: {module.__name__}")
 
         # Create and return the object if the class 'Tools' is found in the module
+        # llens(#44): frontmatter は退役。第2要素は builtin と同じく空 dict で維持
+        # (load_function_module_by_id との外形対称を filters 変換まで保つ)。
         if hasattr(module, "Tools"):
-            return module.Tools(), frontmatter
+            return module.Tools(), {}
         else:
             raise Exception("No Tools class found in the module")
     except Exception as e:

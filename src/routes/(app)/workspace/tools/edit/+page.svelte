@@ -4,34 +4,16 @@
 	import { getToolById, getTools, updateToolById } from '$lib/apis/tools';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ToolkitEditor from '$lib/components/workspace/Tools/ToolkitEditor.svelte';
-	import { WEBUI_VERSION } from '$lib/constants';
 	import { tools } from '$lib/stores';
-	import { compareVersion, extractFrontmatter } from '$lib/utils';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
+	// llens(#44): frontmatter 由来の version ゲートは撤去。builtin は直リンクでも編集不可。
 	const i18n = getContext('i18n');
 
 	let tool = null;
 
 	const saveHandler = async (data) => {
-		console.log(data);
-
-		const manifest = extractFrontmatter(data.content);
-		if (compareVersion(manifest?.required_open_webui_version ?? '0.0.0', WEBUI_VERSION)) {
-			console.log('Version is lower than required');
-			toast.error(
-				$i18n.t(
-					'Open WebUI version (v{{OPEN_WEBUI_VERSION}}) is lower than required version (v{{REQUIRED_VERSION}})',
-					{
-						OPEN_WEBUI_VERSION: WEBUI_VERSION,
-						REQUIRED_VERSION: manifest?.required_open_webui_version ?? '0.0.0'
-					}
-				)
-			);
-			return;
-		}
-
 		const res = await updateToolById(localStorage.token, tool.id, {
 			id: data.id,
 			name: data.name,
@@ -52,7 +34,6 @@
 	};
 
 	onMount(async () => {
-		console.log('mounted');
 		const id = $page.url.searchParams.get('id');
 
 		if (id) {
@@ -62,7 +43,12 @@
 				return null;
 			});
 
-			console.log(tool);
+			// llens(#44): builtin は編集不可。直リンクで来ても編集画面に入れない。
+			if (tool?.meta?.builtin) {
+				toast.error($i18n.t('Builtin tools cannot be edited.'));
+				tool = null;
+				await goto('/workspace/tools');
+			}
 		}
 	});
 </script>

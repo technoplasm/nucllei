@@ -4,6 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
+	import Textarea from '$lib/components/common/Textarea.svelte';
 	import { goto } from '$app/navigation';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -20,7 +21,6 @@
 	let showAccessControlModal = false;
 
 	export let edit = false;
-	export let clone = false;
 
 	export let onSave = () => {};
 
@@ -42,7 +42,7 @@
 		_content = content;
 	};
 
-	$: if (name && !edit && !clone) {
+	$: if (name && !edit) {
 		id = name.replace(/\s+/g, '_').toLowerCase();
 	}
 
@@ -206,7 +206,8 @@ class Tools:
 			}}
 		>
 			<div class="flex flex-col flex-1 overflow-auto h-0 rounded-lg">
-				<div class="w-full mb-2 flex flex-col gap-0.5">
+				<!-- llens(#44): 作成/編集画面を skill 型のセクション構成に統一 -->
+				<div class="w-full mb-2 flex flex-col gap-1">
 					<div class="flex w-full items-center">
 						<div class=" shrink-0 mr-2">
 							<Tooltip content={$i18n.t('Back')}>
@@ -223,15 +224,13 @@ class Tools:
 						</div>
 
 						<div class="flex-1">
-							<Tooltip content={$i18n.t('e.g. My Tools')} placement="top-start">
-								<input
-									class="w-full text-2xl font-medium bg-transparent outline-hidden font-primary"
-									type="text"
-									placeholder={$i18n.t('Tool Name')}
-									bind:value={name}
-									required
-								/>
-							</Tooltip>
+							<input
+								class="w-full text-2xl font-semibold bg-transparent outline-hidden font-primary"
+								type="text"
+								placeholder={$i18n.t('Tool Name')}
+								bind:value={name}
+								required
+							/>
 						</div>
 
 						<div class="self-center shrink-0">
@@ -251,40 +250,32 @@ class Tools:
 						</div>
 					</div>
 
-					<div class=" flex gap-2 px-1 items-center">
+					<div class="flex gap-0.5 items-center text-xs text-gray-500 px-1">
 						{#if edit}
-							<div class="text-sm text-gray-500 shrink-0">
-								{id}
-							</div>
+							<div class="shrink-0">{id}</div>
 						{:else}
-							<Tooltip className="w-full" content={$i18n.t('e.g. my_tools')} placement="top-start">
-								<input
-									class="w-full text-sm disabled:text-gray-500 bg-transparent outline-hidden"
-									type="text"
-									placeholder={$i18n.t('Tool ID')}
-									bind:value={id}
-									required
-									disabled={edit}
-								/>
-							</Tooltip>
-						{/if}
-
-						<Tooltip
-							className="w-full self-center items-center flex"
-							content={$i18n.t('e.g. Tools for performing various operations')}
-							placement="top-start"
-						>
 							<input
-								class="w-full text-sm bg-transparent outline-hidden"
+								class="w-full bg-transparent outline-hidden"
 								type="text"
-								placeholder={$i18n.t('Tool Description')}
-								bind:value={meta.description}
+								placeholder={$i18n.t('Tool ID')}
+								bind:value={id}
 								required
 							/>
-						</Tooltip>
+						{/if}
 					</div>
 				</div>
 
+				<div class="my-2">
+					<div class=" self-center text-sm font-semibold mb-1">{$i18n.t('Description')}</div>
+					<Textarea
+						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
+						placeholder={$i18n.t('e.g. Tools for performing various operations')}
+						bind:value={meta.description}
+						rows={2}
+					/>
+				</div>
+
+				<div class=" self-start text-sm font-semibold px-1 mb-1">{$i18n.t('Tool Content')}</div>
 				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
 					<CodeEditor
 						bind:this={codeEditor}
@@ -314,7 +305,7 @@ class Tools:
 					</div>
 
 					<button
-						class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+						class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-lg"
 						type="submit"
 					>
 						{$i18n.t('Save')}
