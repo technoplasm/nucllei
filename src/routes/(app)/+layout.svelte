@@ -13,7 +13,7 @@
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModels, getToolServersData } from '$lib/apis';
 	import { getAllTags } from '$lib/apis/chats';
-	import { getPrompts } from '$lib/apis/prompts';
+	import { getSkills } from '$lib/apis/skills';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
@@ -23,7 +23,7 @@
 		user,
 		settings,
 		models,
-		prompts,
+		skills,
 		knowledge,
 		tools,
 		functions,
@@ -98,6 +98,9 @@
 
 			banners.set(await getBanners(localStorage.token));
 			tools.set(await getTools(localStorage.token));
+			// llens(issue #35): /command ハイライト判定は picker を開く前から必要なため
+			// skill 一覧を初期ロードしておく。
+			skills.set(await getSkills(localStorage.token));
 			toolServers.set(await getToolServersData($i18n, $settings?.toolServers ?? []));
 
 			document.addEventListener('keydown', async function (event) {

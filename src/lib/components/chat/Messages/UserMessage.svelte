@@ -3,9 +3,10 @@
 	import { toast } from 'svelte-sonner';
 	import { tick, getContext, onMount } from 'svelte';
 
-	import { models, settings } from '$lib/stores';
+	import { models, settings, skills } from '$lib/stores';
 	import { user as _user } from '$lib/stores';
 	import { copyToClipboard as _copyToClipboard, formatDate } from '$lib/utils';
+	import { findSkillByCommand } from '$lib/utils/skills';
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
@@ -51,6 +52,11 @@
 			message = JSON.parse(JSON.stringify(history.messages[messageId]));
 		}
 	}
+
+	// llens(issue #35): 有効な /command で始まる送信済みメッセージだけ、先頭トークンを
+	// chip 風に描画する。ヒットしなければ完全に従来どおり(挙動を変えない)。
+	$: skillMatch = findSkillByCommand($skills, message.content);
+	$: skillRest = skillMatch ? message.content.slice(1 + skillMatch.command.length) : '';
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -235,7 +241,12 @@
 									: ' w-full'}"
 							>
 								{#if message.content}
-									<Markdown id={message.id} content={message.content} />
+									{#if skillMatch}
+										<span class="skill-command-token">/{skillMatch.command}</span>
+										<Markdown id={message.id} content={skillRest} />
+									{:else}
+										<Markdown id={message.id} content={message.content} />
+									{/if}
 								{/if}
 							</div>
 						</div>

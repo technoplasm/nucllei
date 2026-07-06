@@ -4,14 +4,15 @@
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import AccessControl from '../common/AccessControl.svelte';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import { user } from '$lib/stores';
+	import { getTools } from '$lib/apis/tools';
 
 	export let onSubmit: Function;
 	export let edit = false;
-	export let prompt = null;
+	export let skill = null;
 
 	const i18n = getContext('i18n');
 
@@ -19,7 +20,14 @@
 
 	let title = '';
 	let command = '';
+	let description = '';
 	let content = '';
+
+	// tool_ids は admin のみ編集可(バックエンドが 401 を返すゲートと整合)。
+	// step2b まで runtime では未消費 — この段階では preset 側の紐づけ情報の保存のみ。
+	let tools = [];
+	let _tools = {};
+	let toolIds = [];
 
 	let accessControl = {};
 
@@ -36,7 +44,10 @@
 			await onSubmit({
 				title,
 				command,
+				// description が空ならモデルには公開されない(バックエンド仕様)。
+				description: description,
 				content,
+				tool_ids: toolIds,
 				access_control: accessControl
 			});
 		} else {
@@ -49,22 +60,35 @@
 	};
 
 	const validateCommandString = (inputString) => {
-		// Regular expression to match only alphanumeric characters and hyphen
+		// 英数字とハイフンのみ許可(PromptEditor 踏襲)
 		const regex = /^[a-zA-Z0-9-]+$/;
 
-		// Test the input string against the regular expression
 		return regex.test(inputString);
 	};
 
 	onMount(async () => {
-		if (prompt) {
-			title = prompt.title;
+		if (skill) {
+			title = skill.title;
 			await tick();
 
-			command = prompt.command.at(0) === '/' ? prompt.command.slice(1) : prompt.command;
-			content = prompt.content;
+			command = skill.command.at(0) === '/' ? skill.command.slice(1) : skill.command;
+			description = skill.description ?? '';
+			content = skill.content;
+			toolIds = skill?.tool_ids ?? [];
 
-			accessControl = prompt?.access_control ?? null;
+			accessControl = skill?.access_control ?? null;
+		}
+
+		// tool 選択肢は admin のときのみ取得・描画(非 admin には出さない)
+		if ($user?.role === 'admin') {
+			tools = (await getTools(localStorage.token).catch(() => [])) ?? [];
+			_tools = tools.reduce((acc, tool) => {
+				acc[tool.id] = {
+					...tool,
+					selected: toolIds.includes(tool.id)
+				};
+				return acc;
+			}, {});
 		}
 	});
 </script>
@@ -73,7 +97,7 @@
 	bind:show={showAccessControlModal}
 	bind:accessControl
 	accessRoles={['read', 'write']}
-	allowPublic={$user?.permissions?.sharing?.public_prompts || $user?.role === 'admin'}
+	allowPublic={$user?.permissions?.sharing?.public_skills || $user?.role === 'admin'}
 />
 
 <div class="w-full max-h-full flex justify-center">
@@ -135,7 +159,22 @@
 
 		<div class="my-2">
 			<div class="flex w-full justify-between">
-				<div class=" self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
+				<div class=" self-center text-sm font-semibold">{$i18n.t('Description (for model)')}</div>
+			</div>
+
+			<div class="mt-2">
+				<Textarea
+					className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
+					placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
+					bind:value={description}
+					rows={2}
+				/>
+			</div>
+		</div>
+
+		<div class="my-2">
+			<div class="flex w-full justify-between">
+				<div class=" self-center text-sm font-semibold">{$i18n.t('Skill Content')}</div>
 			</div>
 
 			<div class="mt-2">
@@ -159,15 +198,44 @@
 					{$i18n.t('and')}
 					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
 				</div>
-
-				<div class="text-xs text-gray-400 dark:text-gray-500">
-					{$i18n.t('Utilize')}<span class=" text-gray-600 dark:text-gray-300 font-medium">
-						{` {{CLIPBOARD}}`}</span
-					>
-					{$i18n.t('variable to have them replaced with clipboard content.')}
-				</div>
 			</div>
 		</div>
+
+		{#if $user?.role === 'admin'}
+			<div class="my-2">
+				<div class="flex w-full justify-between mb-1">
+					<div class=" self-center text-sm font-semibold">{$i18n.t('Tools')}</div>
+				</div>
+
+				<div class=" text-xs dark:text-gray-500">
+					{$i18n.t('tool 紐づき skill の作成/更新は admin のみ可能です。')}
+				</div>
+
+				<div class="flex flex-col">
+					{#if tools.length > 0}
+						<div class=" flex items-center mt-2 flex-wrap">
+							{#each Object.keys(_tools) as tool}
+								<div class=" flex items-center gap-2 mr-3">
+									<div class="self-center flex items-center">
+										<Checkbox
+											state={_tools[tool].selected ? 'checked' : 'unchecked'}
+											on:change={(e) => {
+												_tools[tool].selected = e.detail === 'checked';
+												toolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
+											}}
+										/>
+									</div>
+
+									<div class=" py-0.5 text-sm w-full capitalize font-medium">
+										{_tools[tool].name}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
 
 		<div class="my-4 flex justify-end pb-20">
 			<button

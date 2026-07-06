@@ -53,7 +53,7 @@ export const tags = writable([]);
 
 export const models: Writable<Model[]> = writable([]);
 
-export const prompts: Writable<null | Prompt[]> = writable(null);
+export const skills: Writable<null | Skill[]> = writable(null);
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);
 export const functions = writable(null);
@@ -177,12 +177,17 @@ type TitleSettings = {
 	prompt?: string;
 };
 
-type Prompt = {
+type Skill = {
+	id: string;
 	command: string;
 	user_id: string;
 	title: string;
+	description?: string | null;
 	content: string;
-	timestamp: number;
+	tool_ids: string[];
+	access_control?: null | object;
+	created_at: number;
+	updated_at: number;
 };
 
 type Document = {

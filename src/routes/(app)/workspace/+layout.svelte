@@ -7,7 +7,6 @@
 		user,
 		mobile,
 		models,
-		prompts,
 		knowledge,
 		tools
 	} from '$lib/stores';
@@ -29,10 +28,7 @@
 				!$user?.permissions?.workspace?.knowledge
 			) {
 				goto('/');
-			} else if (
-				$page.url.pathname.includes('/prompts') &&
-				!$user?.permissions?.workspace?.prompts
-			) {
+			} else if ($page.url.pathname.includes('/skills') && !$user?.permissions?.workspace?.skills) {
 				goto('/');
 			} else if ($page.url.pathname.includes('/tools') && !$user?.permissions?.workspace?.tools) {
 				goto('/');
@@ -100,14 +96,14 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts}
+						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
 							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/prompts'
+									'/workspace/skills'
 								)
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/prompts">{$i18n.t('Prompts')}</a
+								href="/workspace/skills">{$i18n.t('Skills')}</a
 							>
 						{/if}
 

@@ -49,13 +49,13 @@
 		workspace: {
 			models: false,
 			knowledge: false,
-			prompts: false,
+			skills: false,
 			tools: false
 		},
 		sharing: {
 			public_models: false,
 			public_knowledge: false,
-			public_prompts: false,
+			public_skills: false,
 			public_tools: false
 		},
 		chat: {

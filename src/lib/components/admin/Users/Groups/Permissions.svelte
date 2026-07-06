@@ -10,13 +10,13 @@
 		workspace: {
 			models: false,
 			knowledge: false,
-			prompts: false,
+			skills: false,
 			tools: false
 		},
 		sharing: {
 			public_models: false,
 			public_knowledge: false,
-			public_prompts: false,
+			public_skills: false,
 			public_tools: false
 		},
 		chat: {
@@ -184,9 +184,9 @@
 
 		<div class="  flex w-full justify-between my-2 pr-2">
 			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Prompts Access')}
+				{$i18n.t('Skills Access')}
 			</div>
-			<Switch bind:state={permissions.workspace.prompts} />
+			<Switch bind:state={permissions.workspace.skills} />
 		</div>
 
 		<div class=" ">
@@ -226,9 +226,9 @@
 
 		<div class="  flex w-full justify-between my-2 pr-2">
 			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Prompts Public Sharing')}
+				{$i18n.t('Skills Public Sharing')}
 			</div>
-			<Switch bind:state={permissions.sharing.public_prompts} />
+			<Switch bind:state={permissions.sharing.public_skills} />
 		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">

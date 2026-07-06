@@ -26,9 +26,14 @@
 	import { all, createLowlight } from 'lowlight';
 
 	import { PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+	import { SKILL_COMMAND_PATTERN } from '$lib/utils/skills';
 
 	export let oncompositionstart = (e) => {};
 	export let oncompositionend = (e) => {};
+
+	// llens(issue #35): 有効な /command トークンをハイライトするための集合。
+	// ハードコードせず MessageInput から $skills 由来の command 配列を受け取る。
+	export let validCommands: string[] = [];
 
 	// create a lowlight instance with all languages loaded
 	const lowlight = createLowlight(all);
@@ -53,6 +58,31 @@
 	const options = {
 		throwOnError: false
 	};
+
+	// llens(issue #35): /command ハイライト用 ProseMirror プラグイン。
+	// 装飾は毎トランザクション(= 打鍵ごと)に再計算される。valid command 集合は
+	// closure(validCommandsRef)経由で常に最新を参照する。
+	const skillCommandPluginKey = new PluginKey('skillCommandHighlight');
+	let validCommandsRef: string[] = validCommands ?? [];
+
+	// doc の「先頭パラグラフの行頭」が /command パターンに一致し、かつ有効 command 集合に
+	// 含まれる場合だけ、そのトークン範囲に inline decoration を付ける。
+	// 先頭ブロックが paragraph 以外(見出し・コードブロック等)なら装飾しない
+	// (= サーバの素通しと一致。生 markdown の先頭が `/` にならないため)。
+	function computeSkillDecorations(doc, commandSet: string[]) {
+		const first = doc.firstChild;
+		if (!first || first.type.name !== 'paragraph') {
+			return DecorationSet.empty;
+		}
+		const match = first.textContent.match(SKILL_COMMAND_PATTERN);
+		if (!match || !commandSet.includes(match[1])) {
+			return DecorationSet.empty;
+		}
+		// 先頭パラグラフの本文は doc 位置 1 から始まる。
+		return DecorationSet.create(doc, [
+			Decoration.inline(1, 1 + match[0].length, { class: 'skill-command-token' })
+		]);
+	}
 
 	// Function to find the next template in the document
 	function findNextTemplate(doc, from = 0) {
@@ -343,6 +373,16 @@
 			}
 		});
 
+		// /command ハイライトのプラグインを登録(issue #35)。
+		editor.registerPlugin(
+			new Plugin({
+				key: skillCommandPluginKey,
+				props: {
+					decorations: (state) => computeSkillDecorations(state.doc, validCommandsRef)
+				}
+			})
+		);
+
 		if (messageInput) {
 			selectTemplate();
 		}
@@ -378,6 +418,19 @@
 		}
 
 		selectTemplate();
+	}
+
+	// valid command 集合が変わったら装飾を再計算(skills の遅延ロードにも追従)。
+	// editor の再代入(onTransaction の `editor = editor`)では発火しないよう、
+	// 集合の内容が変化したときだけ no-op transaction を投げる(無限ループ防止)。
+	let lastValidCommandsKey = '';
+	$: {
+		const key = (validCommands ?? []).join(',');
+		if (editor && key !== lastValidCommandsKey) {
+			lastValidCommandsKey = key;
+			validCommandsRef = validCommands ?? [];
+			editor.view.dispatch(editor.view.state.tr.setMeta(skillCommandPluginKey, true));
+		}
 	}
 </script>
 

@@ -16,6 +16,7 @@
 		config,
 		showCallOverlay,
 		tools,
+		skills,
 		user as _user,
 		showControls,
 		TTSWorker
@@ -613,6 +614,7 @@
 												bind:value={prompt}
 												id="chat-input"
 												messageInput={true}
+												validCommands={$skills ? $skills.map((s) => s.command) : []}
 												shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
 													(!$mobile ||
 														!(

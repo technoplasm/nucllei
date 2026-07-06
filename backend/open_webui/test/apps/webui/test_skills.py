@@ -5,7 +5,6 @@
 - 権限ゲート: workspace.skills 無しの非 admin は作成不可 /
   tool_ids 非空 skill は非 admin(workspace.skills 有りでも)作成不可(admin 専用ゲート)
 - has_access による read フィルタ(group_terms 交差を含む)
-- Alembic 移行の prompt→skill 複写(copy_prompts_to_skills を直接駆動)
 - `/command` サーバーサイド発火(apply_skill_command): 展開 + 後続テキスト保持 / 未知 command 素通し
 - 全 user メッセージ走査(会話持続、2026-07-06 改訂)/ 不可視 skill の素通し
 - load_skill 擬似 tool 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有り /
@@ -206,39 +205,9 @@ class TestSkills(AbstractPostgresTest):
             for s in Skills.get_skills_by_user_id("naika-ippan", "read")
         )
 
-    def test_migration_copy_prompts_to_skills(self):
-        """Alembic 移行の複写ロジックを直接駆動して prompt→skill を検証。"""
-        from open_webui.internal.db import Session
-        from open_webui.models.prompts import PromptForm, Prompts
-        from open_webui.models.skills import Skills
-        from open_webui.migrations.versions.f8a4d0e2c1b7_add_skill_table import (
-            copy_prompts_to_skills,
-        )
-
-        Prompts.insert_new_prompt(
-            "42",
-            PromptForm(
-                command="/legacy",
-                title="Legacy",
-                content="旧テンプレート",
-                access_control=None,
-            ),
-        )
-        seeded = Prompts.get_prompt_by_command("/legacy")
-        assert seeded is not None
-
-        copy_prompts_to_skills(Session.connection())
-        Session.commit()
-
-        skill = Skills.get_skill_by_command("legacy")  # `/` strip 済み
-        assert skill is not None
-        assert skill.title == "Legacy"
-        assert skill.content == "旧テンプレート"
-        assert skill.user_id == "42"
-        assert skill.description is None
-        assert skill.tool_ids == []
-        assert skill.created_at == seeded.timestamp
-        assert skill.updated_at == seeded.timestamp
+    # NOTE: prompt→skill 複写(f8a4d0e2c1b7)のテストは prompts 退役
+    # (prompt テーブル drop = c2d9a7b41e05)に伴い削除した。複写は履歴上の
+    # 一度きりの処理で、head に prompt テーブルが存在しないため駆動できない。
 
     def test_slash_command_injection(self):
         from open_webui.models.skills import SkillForm, Skills

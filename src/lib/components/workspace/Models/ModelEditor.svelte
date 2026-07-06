@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { onMount, getContext, tick } from 'svelte';
-	import { tools, functions, knowledge as knowledgeCollections, user } from '$lib/stores';
+	import { tools, functions, knowledge as knowledgeCollections, skills, user } from '$lib/stores';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
 	import ToolsSelector from '$lib/components/workspace/Models/ToolsSelector.svelte';
+	import SkillsSelector from '$lib/components/workspace/Models/SkillsSelector.svelte';
 	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
 	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import { getModels } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import AccessControl from '../common/AccessControl.svelte';
@@ -83,6 +85,7 @@
 
 	let knowledge = [];
 	let toolIds = [];
+	let skillIds = [];
 	let filterIds = [];
 	let actionIds = [];
 
@@ -145,6 +148,14 @@
 			}
 		}
 
+		if (skillIds.length > 0) {
+			info.meta.skillIds = skillIds;
+		} else {
+			if (info.meta.skillIds) {
+				delete info.meta.skillIds;
+			}
+		}
+
 		if (filterIds.length > 0) {
 			info.meta.filterIds = filterIds;
 		} else {
@@ -181,6 +192,7 @@
 		baseModels = (await getModels(localStorage.token, null, true).catch(() => [])) ?? [];
 
 		await tools.set(await getTools(localStorage.token));
+		await skills.set(await getSkills(localStorage.token));
 		await functions.set(await getFunctions(localStorage.token));
 		await knowledgeCollections.set(await getKnowledgeBases(localStorage.token));
 
@@ -220,6 +232,7 @@
 				: null;
 
 			toolIds = model?.meta?.toolIds ?? [];
+			skillIds = model?.meta?.skillIds ?? [];
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			knowledge = (model?.meta?.knowledge ?? []).map((item) => {
@@ -708,6 +721,10 @@
 
 					<div class="my-2">
 						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
+					</div>
+
+					<div class="my-2">
+						<SkillsSelector bind:selectedSkillIds={skillIds} skills={$skills ?? []} />
 					</div>
 
 					<div class="my-2">

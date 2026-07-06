@@ -4,13 +4,13 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { knowledge, prompts } from '$lib/stores';
+	import { knowledge, skills } from '$lib/stores';
 
 	import { removeLastWordFromString } from '$lib/utils';
-	import { getPrompts } from '$lib/apis/prompts';
+	import { getSkills } from '$lib/apis/skills';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 
-	import Prompts from './Commands/Prompts.svelte';
+	import Skills from './Commands/Skills.svelte';
 	import Knowledge from './Commands/Knowledge.svelte';
 	import Models from './Commands/Models.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -32,8 +32,15 @@
 	let command = '';
 	$: command = prompt?.split('\n').pop()?.split(' ')?.pop() ?? '';
 
+	// llens(issue #35): `/command` はサーバが「入力全体の先頭行の行頭」でしか発火しない。
+	// そのため skill picker は入力全体が最初のトークン(= `/` に続く command)編集中の
+	// ときだけ出す。従来の「最終行の最終単語」判定だとメッセージ途中の `/` でも picker が
+	// 出てしまい、サーバの実挙動と乖離する。#(knowledge)/@(model) は従来判定のまま。
+	let showSkills = false;
+	$: showSkills = /^\/[a-zA-Z0-9_-]*$/.test(prompt ?? '');
+
 	let show = false;
-	$: show = ['/', '#', '@'].includes(command?.charAt(0)) || '\\#' === command.slice(0, 2);
+	$: show = showSkills || ['#', '@'].includes(command?.charAt(0)) || '\\#' === command.slice(0, 2);
 
 	$: if (show) {
 		init();
@@ -43,7 +50,7 @@
 		loading = true;
 		await Promise.all([
 			(async () => {
-				prompts.set(await getPrompts(localStorage.token));
+				skills.set(await getSkills(localStorage.token));
 			})(),
 			(async () => {
 				knowledge.set(await getKnowledgeBases(localStorage.token));
@@ -55,8 +62,8 @@
 
 {#if show}
 	{#if !loading}
-		{#if command?.charAt(0) === '/'}
-			<Prompts bind:this={commandElement} bind:prompt bind:files {command} />
+		{#if showSkills}
+			<Skills bind:this={commandElement} bind:prompt command={prompt} />
 		{:else if (command?.charAt(0) === '#' && command.startsWith('#') && !command.includes('# ')) || ('\\#' === command.slice(0, 2) && command.startsWith('#') && !command.includes('# '))}
 			<Knowledge
 				bind:this={commandElement}
