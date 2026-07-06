@@ -593,7 +593,13 @@ def apply_skill_command(form_data, user):
       read 可視な skill を lookup する。
     - ヒット: `/command` トークンを展開済み content で置換(後続テキストはそのまま残す)。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
+
+    戻り値は (form_data, 発火済み command の set)。発火済み skill は load_skill の
+    manifest から除外する(展開後のモデルには発火の痕跡が見えず、manifest に同じ
+    skill が載っていると冗長ロードして CoT が混乱するため)。
     """
+    activated_commands = set()
+
     for message in form_data.get("messages", []):
         if message.get("role") != "user":
             continue
@@ -622,21 +628,24 @@ def apply_skill_command(form_data, user):
             continue
 
         new_text = activate_skill(skill, user) + text[match.end() :]
+        activated_commands.add(skill.command)
 
         if text_item is not None:
             text_item["text"] = new_text
         else:
             message["content"] = new_text
 
-    return form_data
+    return form_data, activated_commands
 
 
-def build_load_skill_tool(model, user):
+def build_load_skill_tool(model, user, exclude_commands=frozenset()):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
     - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
       渡して not found になる罠 — _memos/skill-design.md step2a 教訓)。
     - description が空の skill はモデルに露出させない(説明の無い skill は選べない)。
+    - `/command` で発火済みの skill(exclude_commands)も除外する — 展開後の
+      モデルには発火の痕跡が見えないため、manifest に残すと冗長ロードを誘発する。
     - 対象が 1 つも無ければ None(load_skill 自体を載せない)。
 
     戻り値は native ループ互換の tool エントリ {"spec", "callable"}。
@@ -651,6 +660,7 @@ def build_load_skill_tool(model, user):
         skill = Skills.get_skill_by_id(skill_id)
         if (
             skill is not None
+            and skill.command not in exclude_commands
             and (skill.description or "").strip()
             and is_skill_visible(skill, user)
         ):
@@ -698,7 +708,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 生のユーザーメッセージ先頭の `/command` を skill content へ展開する。
-    form_data = apply_skill_command(form_data, user)
+    # 発火済み command は後段で load_skill manifest から除外する。
+    form_data, activated_skill_commands = apply_skill_command(form_data, user)
 
     # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
     # 後段で追加される web_search 等のサーバー生成項目より前に絞ることで、被害者ファイル
@@ -891,7 +902,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
-    load_skill_tool = build_load_skill_tool(model, user)
+    load_skill_tool = build_load_skill_tool(
+        model, user, exclude_commands=activated_skill_commands
+    )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
             log.warning(

@@ -63,10 +63,15 @@
 
 ### 入口 2: モデル自律起動(manifest 経由)
 
-1. リクエスト組み立て時、preset `meta.skillIds` ∩ ユーザー可視 の skill 群から
+1. リクエスト組み立て時、preset `meta.skillIds` ∩ ユーザー可視 ∩ description 有り
+   **− `/command` で発火済み** の skill 群から
    **単一の擬似 tool `load_skill(skill_command)`** を合成して tools 配列に常載
    (description に「command: description」一覧を列挙。skill ごとに擬似 tool を並べる案は
-   tools 配列が skill 数に比例して肥大するため不採用)
+   tools 配列が skill 数に比例して肥大するため不採用)。
+   発火済み除外の理由(2026-07-06 追加、実機で確認): 展開後のモデルには発火の痕跡が
+   見えないため、manifest に同じ skill が残っていると「スキルがあるなら使うのが丁寧」と
+   冗長ロードして CoT が混乱する。除外は inlet の走査結果(発火 command set)を
+   そのまま使うステートレス導出
 2. モデルが `load_skill` を呼ぶ → native 実行ループ内で activate:
    tool result = 展開済み content(step2a)。tool_ids ロード → **次イテレーションの
    tools 配列に追加**(= 遅延評価)は step2b(下記の分割参照)

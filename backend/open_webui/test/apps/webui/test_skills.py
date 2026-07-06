@@ -227,17 +227,17 @@ class TestSkills(AbstractPostgresTest):
 
         # ヒット: /command を content で置換し後続テキストは残す
         form_data = {"messages": [{"role": "user", "content": "/mycmd 追加テキスト"}]}
-        result = apply_skill_command(form_data, user)
+        result, _ = apply_skill_command(form_data, user)
         assert result["messages"][-1]["content"] == "展開: Taro 追加テキスト"
 
         # 未知 command は素通し
         form_data = {"messages": [{"role": "user", "content": "/nope そのまま"}]}
-        result = apply_skill_command(form_data, user)
+        result, _ = apply_skill_command(form_data, user)
         assert result["messages"][-1]["content"] == "/nope そのまま"
 
         # 行頭以外(先頭が `/` でない)は無反応
         form_data = {"messages": [{"role": "user", "content": "前置き /mycmd"}]}
-        result = apply_skill_command(form_data, user)
+        result, _ = apply_skill_command(form_data, user)
         assert result["messages"][-1]["content"] == "前置き /mycmd"
 
     def test_slash_command_multi_turn_scan(self):
@@ -264,7 +264,7 @@ class TestSkills(AbstractPostgresTest):
                 {"role": "user", "content": "/multib 追加で"},
             ]
         }
-        result = apply_skill_command(form_data, user)
+        result, _ = apply_skill_command(form_data, user)
         # 1 ターン目の /command も展開される(揮発しない)
         assert result["messages"][0]["content"] == "指示A 最初の依頼"
         # command の無いメッセージはそのまま
@@ -284,7 +284,7 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="someone-else", name="X")
         form_data = {"messages": [{"role": "user", "content": "/secretcmd hi"}]}
-        result = apply_skill_command(form_data, user)
+        result, _ = apply_skill_command(form_data, user)
         assert result["messages"][0]["content"] == "/secretcmd hi"
 
     def test_build_load_skill_tool(self):
@@ -347,5 +347,57 @@ class TestSkills(AbstractPostgresTest):
         assert build_load_skill_tool({"info": {"meta": {}}}, user) is None
         assert (
             build_load_skill_tool({"info": {"meta": {"skillIds": ["missing"]}}}, user)
+            is None
+        )
+
+    def test_load_skill_manifest_excludes_fired_commands(self):
+        """`/command` で発火済みの skill は manifest から除外(冗長ロード防止)。
+
+        展開後のモデルには発火の痕跡が見えないため、manifest に同じ skill が
+        載っていると「スキルがあるなら使うのが丁寧」と冗長ロードしてしまう。
+        """
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import (
+            apply_skill_command,
+            build_load_skill_tool,
+        )
+
+        s1 = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="firedcmd",
+                title="t",
+                description="説明あり",
+                content="c1",
+                access_control=None,
+            ),
+        )
+        s2 = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                command="freshcmd",
+                title="t",
+                description="説明あり2",
+                content="c2",
+                access_control=None,
+            ),
+        )
+
+        user = types.SimpleNamespace(id="1", name="Taro")
+        form_data = {"messages": [{"role": "user", "content": "/firedcmd やって"}]}
+        _, activated = apply_skill_command(form_data, user)
+        assert activated == {"firedcmd"}
+
+        model = {"info": {"meta": {"skillIds": [s1.id, s2.id]}}}
+        tool = build_load_skill_tool(model, user, exclude_commands=activated)
+        assert tool["spec"]["parameters"]["properties"]["skill_command"]["enum"] == [
+            "freshcmd"
+        ]
+
+        # 全部発火済みなら load_skill 自体を載せない
+        assert (
+            build_load_skill_tool(
+                model, user, exclude_commands={"firedcmd", "freshcmd"}
+            )
             is None
         )
