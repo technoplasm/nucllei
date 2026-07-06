@@ -21,7 +21,8 @@
   **`main`** は fork 基点(upstream v0.6.5 分岐点)の凍結ブランチ — コミットを積まない。v0.6.5 タグはローカルに無いので基点参照は `origin/main` を使う。
   ※ 旧 `develop` は master に統合して廃止済み。
 - ロードマップは GitHub issue #16(tracking)。作業は issue 単位で進め、コミットメッセージに `refs #N` を入れる。
-- セッション開始時は `/status` で現在地(ロードマップ進捗・v0.6.5 からの差分・テスト状態)を確認する。
+- セッション開始時は `/catchup` で現在地(前回の区切り・環境ヘルス・次の一手)を確認し、
+  区切りでは `/sync-docs` でドキュメントと issue に同期する。upstream 確認は `/upstream-check`(週次目安)。
 - CORE 領域(Filter パイプライン / group 権限 / OpenAI 互換接続 / 認証)に触れる変更は回帰テストを伴うこと。
 
 ## 現行プロジェクトの参照
