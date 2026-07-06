@@ -2228,7 +2228,20 @@ async def process_chat_response(
 
                         tool_result = None
 
-                        if tool_name in tools:
+                        if tool_name not in tools:
+                            # llens(#18-2): tools 配列に無い tool の呼び出し。
+                            # 履歴に残った過去の tool call を真似るケース
+                            # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
+                            # 起きうる。黙って None を返さず、モデルが軌道修正
+                            # できる明示メッセージを返す(例外にもしない)。
+                            log.warning(
+                                f"model called unavailable tool '{tool_name}'"
+                            )
+                            tool_result = (
+                                f"tool not available: {tool_name}. "
+                                "Use only the tools currently provided."
+                            )
+                        else:
                             tool = tools[tool_name]
                             spec = tool.get("spec", {})
 

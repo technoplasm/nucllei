@@ -104,6 +104,7 @@ async def _drive_tool_call_loop(
     initial_fixture="tool_call",
     extra_tools=None,
     upserts=None,
+    omit_default_tool=False,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する。
 
@@ -189,7 +190,9 @@ async def _drive_tool_call_loop(
         },
     }
 
-    tools = {"get_weather": {"spec": weather_spec, "callable": get_weather}}
+    tools = (
+        {} if omit_default_tool else {"get_weather": {"spec": weather_spec, "callable": get_weather}}
+    )
     if extra_tools:
         tools.update(extra_tools)
     metadata = {
@@ -337,6 +340,35 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
 
     assert len(completion_calls) == 1
     assert _iteration_limit_errors(events) == []
+
+
+def test_unavailable_tool_call_returns_explicit_message(monkeypatch):
+    """tools 配列に無い tool の呼び出しは明示メッセージを返す(#18-2)。
+
+    履歴に残った過去の tool call を真似るケース(skill 削除・権限剥奪・分岐)で
+    起きうる。黙って None を返すとモデルが状況を知れないため、軌道修正できる
+    メッセージを tool result として返す(例外・打ち切りにはしない)。
+    """
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            omit_default_tool=True,  # get_weather を tools から外す
+        )
+    )
+
+    # ツールは実行されず、ループは 1 回の継続で完走する
+    assert tool_invocations == []
+    assert len(completion_calls) == 1
+    assert _iteration_limit_errors(events) == []
+
+    # 継続リクエストの tool result に明示メッセージが載る
+    tool_messages = [
+        m for m in completion_calls[0]["messages"] if m.get("role") == "tool"
+    ]
+    assert len(tool_messages) == 1
+    assert "tool not available: get_weather" in tool_messages[0]["content"]
 
 
 ####################################
