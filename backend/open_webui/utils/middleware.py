@@ -582,23 +582,23 @@ def activate_skill(skill, user) -> str:
 
 
 def apply_skill_command(form_data, user):
-    """user メッセージ先頭の `/command` を skill の content で置換する(issue #35)。
+    """user メッセージ先頭の `/command` を「load_skill を呼んだことにして」発火する(issue #35)。
+
+    ヒットした user メッセージは**生のまま**残し、直後に合成の
+    assistant tool_call(load_skill)+ tool result(展開済み content)を注入する。
+    モデル自律起動(入口 2)と wire 上も完全に対称になり、モデルは「ロード済み」を
+    履歴で知るので冗長ロードも起きない。UI も既存の tool_calls 描画がそのまま使える。
 
     ペイロード内の**全 user メッセージ**を毎リクエスト走査する。発火はその会話
-    (現在のメッセージチェーン)で持続し、会話そのものが唯一の状態
-    (2026-07-06 改訂 — 揮発させると 2 ターン目以降モデルに `/command` が
-    生テキストで見える不整合も生む)。
+    (現在のメッセージチェーン)で持続し、会話そのものが唯一の状態(2026-07-06 改訂)。
 
     - 各 user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
       read 可視な skill を lookup する。
-    - ヒット: `/command` トークンを展開済み content で置換(後続テキストはそのまま残す)。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
 
     戻り値は (form_data, 発火リスト)。発火リストの要素は
-    {command, title, content(展開済み), current(最後の user メッセージでの発火か)}。
-    - command 集合は load_skill manifest からの除外に使う(展開後のモデルには発火の
-      痕跡が見えず、manifest に同じ skill が載っていると冗長ロードして CoT が混乱する)
-    - current な発火は UI 表示用に応答先頭の content block(type=skills)になる
+    {call_id, command, title, content(展開済み), current(最後の user メッセージでの発火か)}。
+    current な発火は UI 表示用に応答先頭の tool_calls ブロック(synthetic)にも seed される。
     """
     activations = []
 
@@ -608,19 +608,24 @@ def apply_skill_command(form_data, user):
         if message.get("role") == "user":
             last_user_idx = idx
 
+    new_messages = []
     for idx, message in enumerate(messages):
+        new_messages.append(message)
+
         if message.get("role") != "user":
             continue
 
         # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
         content = message.get("content")
-        text_item = None
         if isinstance(content, list):
-            for item in content:
-                if item.get("type") == "text":
-                    text_item = item
-                    break
-            text = text_item.get("text", "") if text_item else None
+            text = next(
+                (
+                    item.get("text", "")
+                    for item in content
+                    if item.get("type") == "text"
+                ),
+                None,
+            )
         else:
             text = content
 
@@ -636,9 +641,30 @@ def apply_skill_command(form_data, user):
             continue
 
         expanded = activate_skill(skill, user)
-        new_text = expanded + text[match.end() :]
+        # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
+        call_id = f"skill:{skill.command}:{idx}"
+        arguments = json.dumps({"skill_command": skill.command}, ensure_ascii=False)
+
+        new_messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": "load_skill", "arguments": arguments},
+                    }
+                ],
+            }
+        )
+        new_messages.append(
+            {"role": "tool", "tool_call_id": call_id, "content": expanded}
+        )
+
         activations.append(
             {
+                "call_id": call_id,
                 "command": skill.command,
                 "title": skill.title,
                 "content": expanded,
@@ -646,22 +672,18 @@ def apply_skill_command(form_data, user):
             }
         )
 
-        if text_item is not None:
-            text_item["text"] = new_text
-        else:
-            message["content"] = new_text
-
+    form_data["messages"] = new_messages
     return form_data, activations
 
 
-def build_load_skill_tool(model, user, exclude_commands=frozenset()):
+def build_load_skill_tool(model, user):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
     - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
       渡して not found になる罠 — _memos/skill-design.md step2a 教訓)。
     - description が空の skill はモデルに露出させない(説明の無い skill は選べない)。
-    - `/command` で発火済みの skill(exclude_commands)も除外する — 展開後の
-      モデルには発火の痕跡が見えないため、manifest に残すと冗長ロードを誘発する。
+    - `/command` で発火済みの skill を除外する必要は無い — 発火は合成 tool exchange
+      として履歴に見えるので、モデルは「ロード済み」を自然に知る。
     - 対象が 1 つも無ければ None(load_skill 自体を載せない)。
 
     戻り値は native ループ互換の tool エントリ {"spec", "callable"}。
@@ -676,7 +698,6 @@ def build_load_skill_tool(model, user, exclude_commands=frozenset()):
         skill = Skills.get_skill_by_id(skill_id)
         if (
             skill is not None
-            and skill.command not in exclude_commands
             and (skill.description or "").strip()
             and is_skill_visible(skill, user)
         ):
@@ -723,14 +744,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     log.debug(f"form_data: {form_data}")
 
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
-    # 生のユーザーメッセージ先頭の `/command` を skill content へ展開する。
-    # 発火済み command は後段で load_skill manifest から除外する。
+    # 合成の load_skill tool exchange(call + 展開済み content の result)を
+    # ヒットした user メッセージの直後へ注入する。
     form_data, skill_activations = apply_skill_command(form_data, user)
 
-    # 今回のターンで発火した skill は応答先頭の content block として表示する
-    # (process_chat_response が type=skills ブロックを seed する)。
+    # 今回のターンの発火は UI 表示用に応答先頭の tool_calls ブロックとして seed する
+    # (process_chat_response 側。synthetic マーカ付きでモデル履歴へは再送しない —
+    # 実体は上で form_data["messages"] に注入済み)。
     current_skill_activations = [
-        {"command": a["command"], "title": a["title"], "content": a["content"]}
+        {"call_id": a["call_id"], "command": a["command"], "content": a["content"]}
         for a in skill_activations
         if a["current"]
     ]
@@ -928,9 +950,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
-    load_skill_tool = build_load_skill_tool(
-        model, user, exclude_commands={a["command"] for a in skill_activations}
-    )
+    load_skill_tool = build_load_skill_tool(model, user)
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
             log.warning(
@@ -1393,16 +1413,19 @@ async def process_chat_response(
                 # 次ターンのプロンプトに漏れる。モデル向け履歴には
                 # 実際に出力された text/tool_calls/結果のみを載せる。
                 def model_facing_content(blocks):
-                    # skills は UI 表示専用(#35): 展開済み content は既に user
-                    # メッセージ側に入っており、モデルへ再送すると二重注入になる。
                     return serialize_content_blocks(
-                        [b for b in blocks if b["type"] not in ("reasoning", "skills")]
+                        [b for b in blocks if b["type"] != "reasoning"]
                     )
 
                 messages = []
 
                 temp_blocks = []
                 for idx, block in enumerate(content_blocks):
+                    if block.get("synthetic"):
+                        # `/command` 発火の UI 表示用ブロック(#35)。実体の
+                        # tool exchange は form_data["messages"] に注入済みなので、
+                        # ここで変換すると二重になる。
+                        continue
                     if block["type"] == "tool_calls":
                         messages.append(
                             {
@@ -1635,14 +1658,33 @@ async def process_chat_response(
 
             content_blocks = []
 
-            # llens(#35): この turn の `/command` 発火を応答先頭に表示する
-            # (reasoning/tool_calls と同じ流儀の折りたたみ)。モデル向け履歴には
-            # 送らない — 展開済み content は既に user メッセージ側に入っている。
+            # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
+            # 「View Result from load_skill」として応答先頭に表示する。
+            # synthetic マーカ付き = モデル向け履歴には再送しない
+            # (実体の tool exchange は apply_skill_command が messages に注入済み)。
             if metadata.get("skill_activations"):
                 content_blocks.append(
                     {
-                        "type": "skills",
-                        "skills": metadata["skill_activations"],
+                        "type": "tool_calls",
+                        "synthetic": True,
+                        "content": [
+                            {
+                                "id": a["call_id"],
+                                "type": "function",
+                                "function": {
+                                    "name": "load_skill",
+                                    "arguments": json.dumps(
+                                        {"skill_command": a["command"]},
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            }
+                            for a in metadata["skill_activations"]
+                        ],
+                        "results": [
+                            {"tool_call_id": a["call_id"], "content": a["content"]}
+                            for a in metadata["skill_activations"]
+                        ],
                     }
                 )
 

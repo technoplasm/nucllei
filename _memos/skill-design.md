@@ -57,21 +57,25 @@
 2. middleware inlet: ペイロード内の**全 user メッセージ**について先頭行の行頭
    `/([a-zA-Z0-9_-]+)` を検出 → read 可視な skill を command で lookup
    (毎リクエスト全走査 = 発火の会話持続。下記「発火の有効範囲」)
-3. ヒット: メッセージ中の `/command` トークンを展開済み content で置換(旧テンプレート挿入と同じ意味論を
-   サーバー側で再現。後続テキストはそのまま残る)+ tool_ids ロード → tools 配列へ
+3. ヒット: **load_skill を呼んだことにする**(2026-07-06 改訂 — トークン置換案を撤回)。
+   user メッセージは生のまま残し、直後に合成の assistant tool_call(load_skill)+
+   tool result(展開済み content)を注入して生成を開始する。
+   - モデル自律起動(入口 2)と wire 上も完全対称。モデルは「ロード済み」を履歴で
+     知るので冗長ロードが起きない(manifest からの除外ルールは不要 — 撤廃済み)
+   - UI は既存の tool_calls 描画(View Result from load_skill)がそのまま使える。
+     当該ターンの発火は synthetic マーカ付き tool_calls ブロックとして応答先頭に
+     seed する(モデル向け履歴へは再送しない — 実体は messages 注入済み)
+   - (step2b で)tool_ids ロード → tools 配列へ
 4. ミス: 何もしない(通常テキストとして素通し。エラーにしない)
 
 ### 入口 2: モデル自律起動(manifest 経由)
 
-1. リクエスト組み立て時、preset `meta.skillIds` ∩ ユーザー可視 ∩ description 有り
-   **− `/command` で発火済み** の skill 群から
-   **単一の擬似 tool `load_skill(skill_command)`** を合成して tools 配列に常載
+1. リクエスト組み立て時、preset `meta.skillIds` ∩ ユーザー可視 ∩ description 有り の
+   skill 群から**単一の擬似 tool `load_skill(skill_command)`** を合成して tools 配列に常載
    (description に「command: description」一覧を列挙。skill ごとに擬似 tool を並べる案は
    tools 配列が skill 数に比例して肥大するため不採用)。
-   発火済み除外の理由(2026-07-06 追加、実機で確認): 展開後のモデルには発火の痕跡が
-   見えないため、manifest に同じ skill が残っていると「スキルがあるなら使うのが丁寧」と
-   冗長ロードして CoT が混乱する。除外は inlet の走査結果(発火 command set)を
-   そのまま使うステートレス導出
+   ※ 発火済み skill の manifest 除外ルールは撤廃(2026-07-06): 入口 1 が合成 tool
+   exchange を履歴に注入する方式になり、モデルは「ロード済み」を自然に知るため不要
 2. モデルが `load_skill` を呼ぶ → native 実行ループ内で activate:
    tool result = 展開済み content(step2a)。tool_ids ロード → **次イテレーションの
    tools 配列に追加**(= 遅延評価)は step2b(下記の分割参照)
@@ -98,8 +102,9 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
 - 複数 skill は**和集合**。同一 skill の再発火は冪等
 - 変数({{CURRENT_DATE}} 等)は**毎リクエスト再展開**(「発火時点」への固定は状態が要るので採らない。
   数ターンのドリフトは許容)
-- skill content の後日編集は `/command` 発火分には**遡って効く**(毎リクエスト再展開のため)。
-  load_skill の結果は履歴に凍結されるので遡らない(モデルが呼び直せば新 content)—
+- skill content の後日編集は `/command` 発火分の**モデル向け注入には遡って効く**
+  (合成 exchange を毎リクエスト再導出するため)。一方、UI に永続化された過去ターンの
+  tool_calls ブロック表示と、モデル自律 load_skill の結果(履歴に凍結)は遡らない —
   既知の非対称として許容・明記
 
 ## 権限まとめ

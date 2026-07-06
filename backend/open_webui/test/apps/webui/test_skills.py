@@ -5,7 +5,9 @@
 - 権限ゲート: workspace.skills 無しの非 admin は作成不可 /
   tool_ids 非空 skill は非 admin(workspace.skills 有りでも)作成不可(admin 専用ゲート)
 - has_access による read フィルタ(group_terms 交差を含む)
-- `/command` サーバーサイド発火(apply_skill_command): 展開 + 後続テキスト保持 / 未知 command 素通し
+- `/command` サーバーサイド発火(apply_skill_command): user メッセージは生のまま、
+  直後に合成 load_skill tool exchange(call + 展開済み content の result)を注入 /
+  未知 command 素通し
 - 全 user メッセージ走査(会話持続、2026-07-06 改訂)/ 不可視 skill の素通し
 - load_skill 擬似 tool 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有り /
   manifest 識別子は command 一本 / callable が展開済み content を返す
@@ -210,6 +212,8 @@ class TestSkills(AbstractPostgresTest):
     # 一度きりの処理で、head に prompt テーブルが存在しないため駆動できない。
 
     def test_slash_command_injection(self):
+        import json
+
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.utils.middleware import apply_skill_command
 
@@ -225,20 +229,37 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="1", name="Taro")
 
-        # ヒット: /command を content で置換し後続テキストは残す
+        # ヒット: user メッセージは生のまま、直後に合成 load_skill exchange を注入
         form_data = {"messages": [{"role": "user", "content": "/mycmd 追加テキスト"}]}
-        result, _ = apply_skill_command(form_data, user)
-        assert result["messages"][-1]["content"] == "展開: Taro 追加テキスト"
+        result, activations = apply_skill_command(form_data, user)
+        msgs = result["messages"]
+        assert len(msgs) == 3
+        assert msgs[0]["content"] == "/mycmd 追加テキスト"  # 生のまま
+        assert msgs[1]["role"] == "assistant"
+        call = msgs[1]["tool_calls"][0]
+        assert call["function"]["name"] == "load_skill"
+        assert json.loads(call["function"]["arguments"]) == {"skill_command": "mycmd"}
+        assert msgs[2]["role"] == "tool"
+        assert msgs[2]["tool_call_id"] == call["id"]
+        assert msgs[2]["content"] == "展開: Taro"  # 変数展開済み content が result
+        # UI seed 用の発火情報
+        assert activations[0]["call_id"] == call["id"]
+        assert activations[0]["command"] == "mycmd"
+        assert activations[0]["content"] == "展開: Taro"
+        assert activations[0]["current"] is True
 
-        # 未知 command は素通し
+        # 未知 command は素通し(注入なし)
         form_data = {"messages": [{"role": "user", "content": "/nope そのまま"}]}
-        result, _ = apply_skill_command(form_data, user)
-        assert result["messages"][-1]["content"] == "/nope そのまま"
+        result, activations = apply_skill_command(form_data, user)
+        assert len(result["messages"]) == 1
+        assert result["messages"][0]["content"] == "/nope そのまま"
+        assert activations == []
 
         # 行頭以外(先頭が `/` でない)は無反応
         form_data = {"messages": [{"role": "user", "content": "前置き /mycmd"}]}
-        result, _ = apply_skill_command(form_data, user)
-        assert result["messages"][-1]["content"] == "前置き /mycmd"
+        result, activations = apply_skill_command(form_data, user)
+        assert len(result["messages"]) == 1
+        assert activations == []
 
     def test_slash_command_multi_turn_scan(self):
         """全 user メッセージ走査(会話持続)— 過去ターンの `/command` も毎リクエスト展開される。"""
@@ -265,12 +286,22 @@ class TestSkills(AbstractPostgresTest):
             ]
         }
         result, activations = apply_skill_command(form_data, user)
-        # 1 ターン目の /command も展開される(揮発しない)
-        assert result["messages"][0]["content"] == "指示A 最初の依頼"
-        # command の無いメッセージはそのまま
-        assert result["messages"][2]["content"] == "続きをやって"
-        # 複数 skill は和集合(それぞれの位置で展開)
-        assert result["messages"][3]["content"] == "指示B 追加で"
+        msgs = result["messages"]
+        # 各ヒットの直後に合成 exchange が入る(1 ターン目も毎リクエスト再注入 = 揮発しない)
+        roles = [m["role"] for m in msgs]
+        assert roles == [
+            "user",  # /multia(生のまま)
+            "assistant",  # 合成 call
+            "tool",  # 合成 result
+            "assistant",  # 了解
+            "user",  # 続きをやって(素通し)
+            "user",  # /multib(生のまま)
+            "assistant",
+            "tool",
+        ]
+        assert msgs[0]["content"] == "/multia 最初の依頼"
+        assert msgs[2]["content"] == "指示A"
+        assert msgs[7]["content"] == "指示B"
         # current は最後の user メッセージでの発火のみ(UI 表示は当該ターンだけ)
         assert [(a["command"], a["current"]) for a in activations] == [
             ("multia", False),
@@ -289,8 +320,10 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="someone-else", name="X")
         form_data = {"messages": [{"role": "user", "content": "/secretcmd hi"}]}
-        result, _ = apply_skill_command(form_data, user)
+        result, activations = apply_skill_command(form_data, user)
+        assert len(result["messages"]) == 1  # 注入なし
         assert result["messages"][0]["content"] == "/secretcmd hi"
+        assert activations == []
 
     def test_build_load_skill_tool(self):
         """load_skill 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有りのみ manifest に載る。"""
@@ -355,60 +388,6 @@ class TestSkills(AbstractPostgresTest):
             is None
         )
 
-    def test_load_skill_manifest_excludes_fired_commands(self):
-        """`/command` で発火済みの skill は manifest から除外(冗長ロード防止)。
-
-        展開後のモデルには発火の痕跡が見えないため、manifest に同じ skill が
-        載っていると「スキルがあるなら使うのが丁寧」と冗長ロードしてしまう。
-        """
-        from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import (
-            apply_skill_command,
-            build_load_skill_tool,
-        )
-
-        s1 = Skills.insert_new_skill(
-            "1",
-            SkillForm(
-                command="firedcmd",
-                title="t",
-                description="説明あり",
-                content="c1",
-                access_control=None,
-            ),
-        )
-        s2 = Skills.insert_new_skill(
-            "1",
-            SkillForm(
-                command="freshcmd",
-                title="t",
-                description="説明あり2",
-                content="c2",
-                access_control=None,
-            ),
-        )
-
-        user = types.SimpleNamespace(id="1", name="Taro")
-        form_data = {"messages": [{"role": "user", "content": "/firedcmd やって"}]}
-        _, activations = apply_skill_command(form_data, user)
-        assert [a["command"] for a in activations] == ["firedcmd"]
-        # UI 表示用のフィールド: 展開済み content と current フラグ
-        assert activations[0]["content"] == "c1"
-        assert activations[0]["title"] == "t"
-        assert activations[0]["current"] is True
-
-        model = {"info": {"meta": {"skillIds": [s1.id, s2.id]}}}
-        tool = build_load_skill_tool(
-            model, user, exclude_commands={a["command"] for a in activations}
-        )
-        assert tool["spec"]["parameters"]["properties"]["skill_command"]["enum"] == [
-            "freshcmd"
-        ]
-
-        # 全部発火済みなら load_skill 自体を載せない
-        assert (
-            build_load_skill_tool(
-                model, user, exclude_commands={"firedcmd", "freshcmd"}
-            )
-            is None
-        )
+    # NOTE: 発火済み skill の manifest 除外テストは撤廃(2026-07-06)。
+    # `/command` 発火は合成 load_skill exchange として履歴に見えるため、
+    # モデルは「ロード済み」を自然に知り、除外ルール自体が不要になった。

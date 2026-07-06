@@ -60,16 +60,6 @@ def snapshot_content_blocks(content_blocks: list) -> list:
                 }
             )
 
-        elif block_type == "skills":
-            # `/command` 発火の表示ブロック(#35)。skills = [{command, title, content}]。
-            # content は発火時点の展開済み指示(UI の展開表示用)。
-            blocks.append(
-                {
-                    "type": "skills",
-                    "skills": copy.deepcopy(block.get("skills", [])),
-                }
-            )
-
         elif block_type == "code_interpreter":
             snapshot = {
                 "type": "code_interpreter",
