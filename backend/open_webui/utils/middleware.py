@@ -563,9 +563,7 @@ SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 
 def is_skill_visible(skill, user) -> bool:
     """read 可視性(access_control read。作成者は常に可視)。"""
-    return skill.user_id == user.id or has_access(
-        user.id, "read", skill.access_control
-    )
+    return skill.user_id == user.id or has_access(user.id, "read", skill.access_control)
 
 
 def activate_skill(skill, user) -> str:
@@ -1050,9 +1048,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
-    load_skill_tool = build_load_skill_tool(
-        model, user, load_tools=inject_skill_tools
-    )
+    load_skill_tool = build_load_skill_tool(model, user, load_tools=inject_skill_tools)
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
             log.warning(
@@ -2245,7 +2241,9 @@ async def process_chat_response(
                             "type": "chat:completion",
                             "data": {
                                 "content": serialize_text_blocks(content_blocks),
-                                "content_blocks": snapshot_content_blocks(content_blocks),
+                                "content_blocks": snapshot_content_blocks(
+                                    content_blocks
+                                ),
                             },
                         }
                     )
@@ -2281,9 +2279,7 @@ async def process_chat_response(
                             # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
                             # 起きうる。黙って None を返さず、モデルが軌道修正
                             # できる明示メッセージを返す(例外にもしない)。
-                            log.warning(
-                                f"model called unavailable tool '{tool_name}'"
-                            )
+                            log.warning(f"model called unavailable tool '{tool_name}'")
                             tool_result = (
                                 f"tool not available: {tool_name}. "
                                 "Use only the tools currently provided."
@@ -2369,7 +2365,9 @@ async def process_chat_response(
                             "type": "chat:completion",
                             "data": {
                                 "content": serialize_text_blocks(content_blocks),
-                                "content_blocks": snapshot_content_blocks(content_blocks),
+                                "content_blocks": snapshot_content_blocks(
+                                    content_blocks
+                                ),
                             },
                         }
                     )
@@ -2437,7 +2435,9 @@ async def process_chat_response(
                                 "type": "chat:completion",
                                 "data": {
                                     "content": serialize_text_blocks(content_blocks),
-                                    "content_blocks": snapshot_content_blocks(content_blocks),
+                                    "content_blocks": snapshot_content_blocks(
+                                        content_blocks
+                                    ),
                                 },
                             }
                         )
@@ -2575,7 +2575,9 @@ async def process_chat_response(
                                 "type": "chat:completion",
                                 "data": {
                                     "content": serialize_text_blocks(content_blocks),
-                                    "content_blocks": snapshot_content_blocks(content_blocks),
+                                    "content_blocks": snapshot_content_blocks(
+                                        content_blocks
+                                    ),
                                 },
                             }
                         )

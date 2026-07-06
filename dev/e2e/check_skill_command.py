@@ -59,7 +59,9 @@ with sync_playwright() as p:
     chat_id = page.url.split("/c/")[1].split("?")[0]
     chat = wait_done(chat_id)
 
-    asst = [m for m in chat["history"]["messages"].values() if m["role"] == "assistant"][-1]
+    asst = [
+        m for m in chat["history"]["messages"].values() if m["role"] == "assistant"
+    ][-1]
     blocks = asst.get("content_blocks") or []
     print("block types:", [b.get("type") for b in blocks])
     tc = [b for b in blocks if b.get("type") == "tool_calls"]
@@ -80,7 +82,9 @@ with sync_playwright() as p:
     page.keyboard.press("Enter")
     time.sleep(2)
     chat = wait_done(chat_id)
-    asst2 = [m for m in chat["history"]["messages"].values() if m["role"] == "assistant"][-1]
+    asst2 = [
+        m for m in chat["history"]["messages"].values() if m["role"] == "assistant"
+    ][-1]
     blocks2 = asst2.get("content_blocks") or []
     print("turn2 block types:", [b.get("type") for b in blocks2])
     print("turn2 reply:", (asst2.get("content") or "")[:100])

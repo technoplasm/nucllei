@@ -41,7 +41,9 @@ def test_media_type_to_hljs_table_prefix_and_fallback():
     assert media_type_to_hljs("application/json") == "json"
     assert media_type_to_hljs("text/x-sql") == "sql"  # 慣用プレフィックス素通し
     assert media_type_to_hljs("text/x-sh") == "bash"  # プレフィックス + alias
-    assert media_type_to_hljs("text/X-Python; charset=utf-8") == "python"  # パラメータ除去
+    assert (
+        media_type_to_hljs("text/X-Python; charset=utf-8") == "python"
+    )  # パラメータ除去
     assert media_type_to_hljs("application/octet-stream") == "plaintext"  # 不明
     assert media_type_to_hljs(None) == "plaintext"
 

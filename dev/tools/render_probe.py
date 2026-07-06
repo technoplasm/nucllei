@@ -65,11 +65,20 @@ def _sample_code() -> str:
     sh = (
         "```bash\n"
         "# パイプとリダイレクト\n"
-        'grep -n "エラー" log.txt | awk \'{print $1}\' > out.txt\n'
+        "grep -n \"エラー\" log.txt | awk '{print $1}' > out.txt\n"
         "```"
     )
-    inline = "インラインコード: `printf(\"%d\\n\", x);` と `<div class=\"x\">`。"
-    return "## コードフェンスのレンダリング確認\n\n" + inline + "\n\n" + py + "\n\n" + js + "\n\n" + sh
+    inline = 'インラインコード: `printf("%d\\n", x);` と `<div class="x">`。'
+    return (
+        "## コードフェンスのレンダリング確認\n\n"
+        + inline
+        + "\n\n"
+        + py
+        + "\n\n"
+        + js
+        + "\n\n"
+        + sh
+    )
 
 
 def _sample_math() -> str:
@@ -133,9 +142,7 @@ def _sample_edge() -> str:
         "y = 2\n\n"
         "HTML タグ混入(サニタイズ確認): <script>alert('xss')</script> と <b>bold?</b>。\n\n"
         "reasoning 誤検出確認: <think>これは思考タグ風の文字列であって本物の reasoning ではない</think>\n\n"
-        "絵文字: 🩺💊🧪🚑✅❌ と結合絵文字 👨‍⚕️👩‍⚕️。\n\n"
-        + long_line
-        + "\n\n"
+        "絵文字: 🩺💊🧪🚑✅❌ と結合絵文字 👨‍⚕️👩‍⚕️。\n\n" + long_line + "\n\n"
         "特殊文字: <>&\"'` \\ \t (タブ) と全角空白　です。\n"
     )
 

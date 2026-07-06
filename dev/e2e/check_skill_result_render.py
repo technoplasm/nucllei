@@ -54,7 +54,9 @@ with sync_playwright() as p:
     chat_id = page.url.split("/c/")[1].split("?")[0]
     chat = wait_done(chat_id)
 
-    asst = [m for m in chat["history"]["messages"].values() if m["role"] == "assistant"][-1]
+    asst = [
+        m for m in chat["history"]["messages"].values() if m["role"] == "assistant"
+    ][-1]
     for b in asst.get("content_blocks") or []:
         if b.get("type") == "tool_calls":
             for r_ in b.get("results", []):

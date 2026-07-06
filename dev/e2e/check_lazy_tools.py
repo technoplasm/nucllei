@@ -68,7 +68,9 @@ with sync_playwright() as p:
     page.wait_for_url(re.compile(r"/c/"), timeout=30000)
     chat_id = page.url.split("/c/")[1].split("?")[0]
     chat = wait_done(chat_id)
-    asst = [m for m in chat["history"]["messages"].values() if m["role"] == "assistant"][-1]
+    asst = [
+        m for m in chat["history"]["messages"].values() if m["role"] == "assistant"
+    ][-1]
     calls, reply = describe(asst)
     print("A calls:", calls)
     print("A reply:", reply[:150])
@@ -85,7 +87,9 @@ with sync_playwright() as p:
     page.wait_for_url(re.compile(r"/c/"), timeout=30000)
     chat_id_b = page.url.split("/c/")[1].split("?")[0]
     chat_b = wait_done(chat_id_b)
-    asst_b = [m for m in chat_b["history"]["messages"].values() if m["role"] == "assistant"][-1]
+    asst_b = [
+        m for m in chat_b["history"]["messages"].values() if m["role"] == "assistant"
+    ][-1]
     calls_b, reply_b = describe(asst_b)
     print("B calls:", calls_b)
     print("B reply:", reply_b[:150])

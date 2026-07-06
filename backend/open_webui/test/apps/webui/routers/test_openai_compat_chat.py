@@ -255,9 +255,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             "access_control": access_control,
         }
         with mock_webui_user(id="1", role="admin"):
-            response = self.fast_api_client.post(
-                "/api/v1/models/create", json=payload
-            )
+            response = self.fast_api_client.post("/api/v1/models/create", json=payload)
         assert response.status_code == 200, response.text
 
     def test_models_endpoint_returns_preset_but_not_base(self):
@@ -298,9 +296,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             "access_control": None,
         }
         with mock_webui_user(id="1", role="admin"):
-            response = self.fast_api_client.post(
-                "/api/v1/models/create", json=payload
-            )
+            response = self.fast_api_client.post("/api/v1/models/create", json=payload)
         assert response.status_code == 200, response.text
 
         with mock_webui_user(id="1", role="admin"):

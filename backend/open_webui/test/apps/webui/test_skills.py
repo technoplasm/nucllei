@@ -270,11 +270,15 @@ class TestSkills(AbstractPostgresTest):
 
         Skills.insert_new_skill(
             "1",
-            SkillForm(command="multia", title="t", content="指示A", access_control=None),
+            SkillForm(
+                command="multia", title="t", content="指示A", access_control=None
+            ),
         )
         Skills.insert_new_skill(
             "1",
-            SkillForm(command="multib", title="t", content="指示B", access_control=None),
+            SkillForm(
+                command="multib", title="t", content="指示B", access_control=None
+            ),
         )
 
         user = types.SimpleNamespace(id="1", name="Taro")
@@ -319,7 +323,9 @@ class TestSkills(AbstractPostgresTest):
 
         Skills.insert_new_skill(
             "owner",
-            SkillForm(command="secretcmd", title="t", content="秘匿", access_control={}),
+            SkillForm(
+                command="secretcmd", title="t", content="秘匿", access_control={}
+            ),
         )
 
         user = types.SimpleNamespace(id="someone-else", name="X")
@@ -412,7 +418,9 @@ class TestSkills(AbstractPostgresTest):
 
         Skills.insert_new_skill(
             "1",
-            SkillForm(command="histcmd", title="t", content="指示", access_control=None),
+            SkillForm(
+                command="histcmd", title="t", content="指示", access_control=None
+            ),
         )
         user = types.SimpleNamespace(id="1", name="Taro")
         form_data = {
@@ -445,7 +453,9 @@ class TestSkills(AbstractPostgresTest):
             "assistant",  # done
             "user",  # 続き
         ]
-        assert result["messages"][1]["tool_calls"][0]["function"]["name"] == "load_skill"
+        assert (
+            result["messages"][1]["tool_calls"][0]["function"]["name"] == "load_skill"
+        )
         assert result["messages"][4]["tool_call_id"] == "functions.f:0"
         assert [a["command"] for a in activations] == ["histcmd"]
 

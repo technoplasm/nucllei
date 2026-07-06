@@ -191,7 +191,9 @@ async def _drive_tool_call_loop(
     }
 
     tools = (
-        {} if omit_default_tool else {"get_weather": {"spec": weather_spec, "callable": get_weather}}
+        {}
+        if omit_default_tool
+        else {"get_weather": {"spec": weather_spec, "callable": get_weather}}
     )
     if extra_tools:
         tools.update(extra_tools)
@@ -498,9 +500,7 @@ def test_finish_tool_calls_without_parsed_calls_surfaces_error(monkeypatch):
     asyncio.run(run())
 
     error_events = [
-        e["data"]["error"]["content"]
-        for e in events
-        if e.get("data", {}).get("error")
+        e["data"]["error"]["content"] for e in events if e.get("data", {}).get("error")
     ]
     assert any("no tool call could be reconstructed" in c for c in error_events)
     # tool call が組めていないのでループは回らない
@@ -517,9 +517,7 @@ def test_normal_tool_call_stream_has_no_finish_mismatch_error(monkeypatch):
         )
     )
     error_events = [
-        e["data"]["error"]["content"]
-        for e in events
-        if e.get("data", {}).get("error")
+        e["data"]["error"]["content"] for e in events if e.get("data", {}).get("error")
     ]
     assert error_events == []
     assert len(completion_calls) == 1
