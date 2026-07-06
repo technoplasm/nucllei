@@ -23,7 +23,10 @@ def _req(method, url, token, body=None):
         BASE + url,
         data=data,
         method=method,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
     )
     with urllib.request.urlopen(r, timeout=30) as resp:
         raw = resp.read().decode()
@@ -71,7 +74,9 @@ def wait_done(chat_id, timeout=240):
     while time.time() < deadline:
         chat = get_chat(chat_id)
         assistant = [
-            m for m in chat["history"]["messages"].values() if m.get("role") == "assistant"
+            m
+            for m in chat["history"]["messages"].values()
+            if m.get("role") == "assistant"
         ]
         if assistant and all(m.get("done") for m in assistant):
             return chat
@@ -93,7 +98,9 @@ results = []
 
 def check(label, cond, detail=""):
     results.append((label, bool(cond)))
-    print(f"{label}: {'PASS' if cond else 'FAIL'}" + (f"  ({detail})" if detail else ""))
+    print(
+        f"{label}: {'PASS' if cond else 'FAIL'}" + (f"  ({detail})" if detail else "")
+    )
 
 
 from playwright.sync_api import sync_playwright
