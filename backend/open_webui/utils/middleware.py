@@ -804,6 +804,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         "__metadata__": metadata,
         "__request__": request,
         "__model__": model,
+        # llens(#18-3): 会話スコープの id を直接受け取れるようにする(0.9 系 tool の
+        # 外形互換。__metadata__ 経由でも取れるが、sandbox 等の自前ツールは
+        # __chat_id__/__message_id__ を引数に取る)
+        "__chat_id__": metadata.get("chat_id"),
+        "__message_id__": metadata.get("message_id"),
     }
 
     # Initialize events to store additional event to be sent to the client

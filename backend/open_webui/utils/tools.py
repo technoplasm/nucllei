@@ -191,7 +191,9 @@ def get_tools(
                 # TODO: Fix hack for OpenAI API
                 # Some times breaks OpenAI but others don't. Leaving the comment
                 for val in spec.get("parameters", {}).get("properties", {}).values():
-                    if val["type"] == "str":
+                    # llens(#18-3): Optional 引数の spec は anyOf 形で "type" キーを
+                    # 持たない(sandbox tool の timeout_s で KeyError になった実例)
+                    if val.get("type") == "str":
                         val["type"] = "string"
 
                 # Remove internal reserved parameters (e.g. __id__, __user__)
@@ -353,8 +355,10 @@ def get_functions_from_tool(tool: object) -> list[Callable]:
             getattr(tool, func)
         )  # checks if the attribute is callable (a method or function).
         and not func.startswith(
-            "__"
-        )  # filters out special (dunder) methods like init, str, etc. — these are usually built-in functions of an object that you might not need to use directly.
+            "_"
+        )  # llens(#18-3): `_` 始まりは tool 作者のプライベートヘルパ(dunder 含む)として
+        # モデルに露出させない。v0.6.5 は `__` のみ除外で、メソッド形のヘルパが全部
+        # spec 化されてしまう(sandbox tool の _post/_exec が manifest に並んだ実例)。
         and not inspect.isclass(
             getattr(tool, func)
         )  # ensures that the callable is not a class itself, just a method or function.

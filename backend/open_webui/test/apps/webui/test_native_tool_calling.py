@@ -1012,6 +1012,18 @@ class Tools:
         return "ok"
 '''
 
+OPTIONAL_PARAM_TOOL_CONTENT = '''
+from typing import Optional
+
+class Tools:
+    def run_with_timeout(self, code: str, timeout_s: Optional[int] = None) -> str:
+        """timeout 付きで実行する。
+        :param code: 実行するコード
+        :param timeout_s: wall clock 秒数
+        """
+        return "ok"
+'''
+
 
 class TestToolsAlwaysNative(AbstractPostgresTest):
     BASE_PATH = "/api"
@@ -1143,6 +1155,56 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         sent = self.mock_server.received[0]
         props = sent["tools"][0]["function"]["parameters"]["properties"]
         assert props["code"]["contentMediaType"] == "text/x-python"
+
+    def test_optional_param_spec_without_type_key_loads(self):
+        """Optional 引数の保存 spec は anyOf 形で "type" キーを持たない。
+
+        get_tools のリクエスト時正規化(str→string hack)が val["type"] を直参照して
+        KeyError で全リクエストが落ちていた(#18-3: sandbox tool の timeout_s で顕在化)。
+        """
+        from open_webui.models.tools import ToolForm, ToolMeta, Tools
+
+        Tools.insert_new_tool(
+            user_id="1",
+            form_data=ToolForm(
+                id="optpy",
+                name="optpy",
+                content=OPTIONAL_PARAM_TOOL_CONTENT,
+                meta=ToolMeta(description=None, manifest={}),
+            ),
+            specs=[
+                {
+                    "name": "run_with_timeout",
+                    "description": "timeout 付きで実行する。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "string"},
+                            "timeout_s": {
+                                "anyOf": [{"type": "integer"}, {"type": "null"}]
+                            },
+                        },
+                        "required": ["code"],
+                    },
+                }
+            ],
+        )
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "mock-model",
+                    "messages": [{"role": "user", "content": "実行して"}],
+                    "stream": False,
+                    "tool_ids": ["optpy"],
+                },
+            )
+        assert response.status_code == 200, response.text
+
+        sent = self.mock_server.received[-1]
+        names = [t["function"]["name"] for t in sent["tools"]]
+        assert "run_with_timeout" in names
 
 
 ####################################

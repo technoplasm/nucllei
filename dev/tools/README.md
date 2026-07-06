@@ -16,7 +16,9 @@ python3 dev/tools/seed.py --token "$TOKEN"
 ```
 
 `render_probe(kind)` / `echo(text)` / `probe_args(code, items, count)` /
-`run_python(code, timeout)` / `probe_result_table(department)` が使える。
+`probe_result_table(department)` が使える。
 `kind` は `table` / `code` / `math` / `long` / `mixed` / `edge`。
-`run_python` は `Code("python")` 宣言 + `Text` 戻り、`probe_result_table` は `Table` 戻りで、
-型駆動レンダリング(#20)の表示確認用(probe_args は宣言なしのコントロール)。
+`probe_result_table` は `Table` 戻りで型駆動レンダリング(#20)の表示確認用
+(probe_args は宣言なしのコントロール)。
+旧 `run_python` ダミーは本物の sandbox tool(`dev/tools/sandbox.py`、#18-3)搭載に伴い
+撤去 — 同名衝突で本物が discard されるため。
