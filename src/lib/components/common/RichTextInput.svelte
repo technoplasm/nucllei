@@ -222,9 +222,17 @@
 			],
 			content: content,
 			autofocus: messageInput ? true : false,
-			onTransaction: () => {
+			onTransaction: ({ transaction }) => {
 				// force re-render so `editor.isActive` works as expected
 				editor = editor;
+
+				// doc \u304c\u5909\u308f\u3063\u3066\u3044\u306a\u3044\u30c8\u30e9\u30f3\u30b6\u30af\u30b7\u30e7\u30f3(focus/selection \u7b49)\u3067\u306f value \u3092
+				// \u66f8\u304d\u623b\u3055\u306a\u3044\u3002\u66f8\u304d\u623b\u3059\u3068\u300c\u5916\u304b\u3089 value='' \u304c\u8a2d\u5b9a\u3055\u308c\u305f\u76f4\u5f8c\u30fb\u53cd\u6620\u524d\u300d\u306b
+				// \u53e4\u3044 editor \u5185\u5bb9\u3067 value \u3092\u4e0a\u66f8\u304d\u3057\u8fd4\u3057\u3001\u9001\u4fe1\u5f8c\u306b\u5165\u529b\u6b04\u304c\u30af\u30ea\u30a2\u3055\u308c\u306a\u3044
+				// (\u521d\u56de\u9001\u4fe1\u306e Placeholder\u2192MessageInput \u5207\u66ff\u6642\u306b focus \u7531\u6765\u3067\u9855\u5728\u5316)\u3002
+				if (!transaction.docChanged) {
+					return;
+				}
 
 				if (!raw) {
 					let newValue = turndownService
