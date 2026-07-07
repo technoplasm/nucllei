@@ -240,6 +240,27 @@ describe('segmentMarkdown — 固定ケース', () => {
 		expect(closed.stable).toEqual(['<!-- start\n\nまだコメント内 -->']);
 	});
 
+	it('#48 回帰: <details> は空行を跨ぎ </details> まで 1 ブロック', () => {
+		// reasoning 本文に空行があっても details を分断しない(分断すると閉じ
+		// </details> が孤立ブロックになりリテラル表示される)。
+		const src =
+			'<details type="reasoning" done="true" duration="2">\n<summary>Thought for 2 seconds</summary>\n最初の思考。\n\n二段落目。\n</details>\n\n答えの本文。';
+		const { stable } = segmentMarkdown(src);
+		// details 全体が単一の確定ブロックになる
+		expect(stable[0]).toBe(
+			'<details type="reasoning" done="true" duration="2">\n<summary>Thought for 2 seconds</summary>\n最初の思考。\n\n二段落目。\n</details>'
+		);
+		// 孤立した </details> ブロックが生まれない
+		expect(stable.some((b) => b.trim() === '</details>')).toBe(false);
+	});
+
+	it('#48 回帰: 閉じ未着の <details> は確定しない(空行跨ぎで保留)', () => {
+		const { stable } = segmentMarkdown(
+			'<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n途中\n\nまだ続く\n'
+		);
+		expect(stable).toEqual([]);
+	});
+
 	it('リスト継続: リストは終端が別ブロックで証明されるまで確定しない', () => {
 		// 末尾がリスト → 空行があっても保留(次項目 / インデント継続がありうる)
 		expect(segmentMarkdown('- a\n- b\n\n').stable).toEqual([]);

@@ -113,7 +113,12 @@ const HTML_TYPES: HtmlType[] = [
 	{ start: /^<!--/, end: /-->/ },
 	{ start: /^<\?/, end: /\?>/ },
 	{ start: /^<![A-Za-z]/, end: />/ },
-	{ start: /^<!\[CDATA\[/, end: /\]\]>/ }
+	{ start: /^<!\[CDATA\[/, end: /\]\]>/ },
+	// llens: reasoning / tool_calls の <details ...> は本文に空行を含みうる。
+	// CommonMark 既定(type 6)は空行で閉じるため、そのままだと details が分断され
+	// 閉じ `</details>` が孤立して本文にリテラル表示される(#22 移行以来の潜在バグ)。type 1-5 と
+	// 同じ「終端タグまで空行を跨ぐ」扱いにして details 全体を 1 ブロックに保つ。
+	{ start: /^<details(\s|>|$)/i, end: /<\/details>/i }
 ];
 
 function stripLead(line: string): string {

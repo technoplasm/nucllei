@@ -105,6 +105,35 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(d.attributes.duration).toBe('2');
 	});
 
+	it('#48 回帰: 本文に空行を含む <details> でも </details> が漏れない', () => {
+		// CommonMark 既定では <details> は HTML block type 6(空行で閉じる)なので、
+		// reasoning 本文に空行があると details が分断され末尾 </details> が孤立して
+		// リテラル表示された。details_block ルールで空行を跨ぎ 1 ブロックに保つ。
+		const tokens = lex(
+			'<details type="reasoning" done="true" duration="2">\n<summary>Thought for 2 seconds</summary>\n最初の思考。\n\n二段落目の思考。\n</details>\n\n答えの本文です。'
+		);
+		const d = tokens.find((t) => t.type === 'details');
+		expect(d).toBeDefined();
+		// reasoning 本文は空行込みで details 内に保持される
+		expect(d.text).toContain('最初の思考。');
+		expect(d.text).toContain('二段落目の思考。');
+		// 孤立した </details> の html トークンが本文に残らない
+		const leaked = JSON.stringify(tokens).includes('</details>');
+		expect(leaked).toBe(false);
+		// 回答本文は details の外に段落として存在する
+		expect(tokens.some((t) => t.type === 'paragraph')).toBe(true);
+	});
+
+	it('#48 回帰: 閉じ未着(ストリーミング途中)の <details> も畳める', () => {
+		const tokens = lex(
+			'<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n途中まで考えて\n\nまだ続く'
+		);
+		const d = tokens.find((t) => t.type === 'details');
+		expect(d).toBeDefined();
+		expect(d.attributes.done).toBe('false');
+		expect(JSON.stringify(tokens).includes('<details')).toBe(false);
+	});
+
 	it('render() は HTML を返し、code fence を hljs でハイライトする', () => {
 		const html = render('# 見出し\n\n```json\n{"a": 1}\n```');
 		expect(html).toContain('<h1>');

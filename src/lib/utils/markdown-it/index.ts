@@ -38,6 +38,49 @@ const md = new MarkdownIt({
 // reference = `[foo]: url` の参照リンク定義。どちらもストリーミングで壊れる。
 md.disable(['lheading', 'reference']);
 
+// llens(#22 移行以来の潜在バグ・#48 作業中に発見): `<details ...>` を空行を跨いで `</details>` まで 1 つの html_block
+// として消費する。CommonMark 既定では `<details>` は HTML block type 6 で「空行で閉じる」
+// ため、reasoning 本文(<details type="reasoning">…</details>)に空行があると details が
+// 分断され、末尾の閉じ `</details>` だけが孤立した html_block になる。parseDetails は開始
+// タグを見つけられず {type:'html', text:'</details>'} を生成し、MarkdownTokens の html
+// フォールバックがリテラル文字列として本文に出してしまう。type 1-5 と同じ「終端タグまで
+// 空行を跨ぐ」挙動に寄せ、details 全体を 1 トークンに保つことで parseDetails が正しく畳む。
+md.block.ruler.before(
+	'html_block',
+	'details_block',
+	(state: any, startLine: number, endLine: number, silent: boolean): boolean => {
+		const pos = state.bMarks[startLine] + state.tShift[startLine];
+		const max = state.eMarks[startLine];
+		// インデント 4 以上はコードブロック扱い
+		if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+		if (state.src.charCodeAt(pos) !== 0x3c /* < */) return false;
+		const lineText = state.src.slice(pos, max);
+		if (!/^<details(\s|>|$)/i.test(lineText)) return false;
+		if (silent) return true;
+
+		let nextLine = startLine;
+		let closed = /<\/details>/i.test(lineText);
+		if (!closed) {
+			for (nextLine = startLine + 1; nextLine < endLine; nextLine++) {
+				const lPos = state.bMarks[nextLine] + state.tShift[nextLine];
+				const lMax = state.eMarks[nextLine];
+				if (/<\/details>/i.test(state.src.slice(lPos, lMax))) {
+					closed = true;
+					break;
+				}
+			}
+		}
+		// 閉じ未着(ストリーミング途中)は残り全体を 1 ブロックに。parseDetails は
+		// 閉じタグが無くても開始タグ側で畳めるので、途中経過も collapsible で描画される。
+		const lastLine = closed ? nextLine + 1 : endLine;
+		state.line = lastLine;
+		const token = state.push('html_block', '', 0);
+		token.map = [startLine, lastLine];
+		token.content = state.getLines(startLine, lastLine, state.blkIndent, true);
+		return true;
+	}
+);
+
 interface AnyToken {
 	type: string;
 	[key: string]: any;
