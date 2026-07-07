@@ -7,7 +7,6 @@
 	import { mobile, showControls, showCallOverlay, showOverview, showArtifacts } from '$lib/stores';
 
 	import Modal from '../common/Modal.svelte';
-	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import Drawer from '../common/Drawer.svelte';
 	import Overview from './Overview.svelte';
@@ -177,15 +176,6 @@
 								showControls.set(false);
 							}}
 						/>
-					{:else}
-						<Controls
-							on:close={() => {
-								showControls.set(false);
-							}}
-							{models}
-							bind:chatFiles
-							bind:params
-						/>
 					{/if}
 				</div>
 			</Drawer>
@@ -263,15 +253,6 @@
 								on:close={() => {
 									showControls.set(false);
 								}}
-							/>
-						{:else}
-							<Controls
-								on:close={() => {
-									showControls.set(false);
-								}}
-								{models}
-								bind:chatFiles
-								bind:params
 							/>
 						{/if}
 					</div>

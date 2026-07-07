@@ -197,21 +197,6 @@
 				<div class="flex items-center">{$i18n.t('Settings')}</div>
 			</DropdownMenu.Item> -->
 
-			{#if $mobile}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-					id="chat-controls-button"
-					on:click={async () => {
-						await showControls.set(true);
-						await showOverview.set(false);
-						await showArtifacts.set(false);
-					}}
-				>
-					<AdjustmentsHorizontal className=" size-4" strokeWidth="0.5" />
-					<div class="flex items-center">{$i18n.t('Controls')}</div>
-				</DropdownMenu.Item>
-			{/if}
-
 			{#if !$temporaryChatEnabled}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
