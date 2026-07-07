@@ -43,9 +43,9 @@ jobs:
       - name: Format Frontend
         run: pnpm format
 
-      - name: Run i18next
-        run: pnpm i18n:parse
-
+      # llens: i18n:parse による locale 同期はこのゲートから外す。機能撤去でオーファンキーが
+      # 大量に出るうえ、ja-JP の部分訳を消してしまうため。locale の一括同期・翻訳は end-game
+      # i18n(#34)に集約する。ここでは prettier ドリフトのみを gate する。
       - name: Check for Changes After Format
         run: git diff --exit-code
 
