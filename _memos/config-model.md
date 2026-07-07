@@ -1,70 +1,34 @@
-# llens の設定モデル(config layer)— #30 確定
+# llens の設定モデル(config layer)— #30
 
-2026-07-07 決定。OWUI の `PersistentConfig`(env+DB 二層・seed-once・DB 勝ち)を廃し、
-**env を単一の正の源(single source of truth)**とするモデルに寄せる。真実源は本メモ。
-既定「値」は `llens-defaults.md`、本メモは「どう管理するか」の方。
+OWUI の設定は **env を単一の正の源(single source of truth)**とする。真実源は本メモ。
+既定「値」は `llens-defaults.md`、本メモは「どう管理するか」。
 
-## なぜ変えるか(PersistentConfig の捻れ)
-`PersistentConfig(env_name, config_path, env_value)` の実挙動(`config.py`):
-
-```py
-if self.config_value is not None and ENABLE_PERSISTENT_CONFIG:
-    self.value = self.config_value   # DB に値があれば DB が勝つ
-else:
-    self.value = env_value           # 無ければ env
-```
-
-- 初回起動 or UI 保存で値が DB(`config` テーブル)に入ると、**以後 env は無視される**。
-  → 「env を変えたのに反映されない」事故の温床(#30 の背景)。
-- 概念として2つを混ぜている: ①どこが正の源か(= デプロイ意図。ふつう env)/
-  ②実行中に編集できるか + それを DB に永続するか。OWUI は②の DB を①より優先させた。
-- 名前 "persistent" は DB 永続という実装都合を指し、意図(実行時に調整できる設定)を表していない。
-
-## 決定モデル(env 正・起動時に再強制。DB は稼働中の可変ストア)
+## モデル(env 正・起動時に再強制。DB は稼働中の可変ストア)
 > **env が毎回の起動で必ず勝つ(正の源)。実行中の UI 変更は DB に載って稼働中は有効
 > (複数ワーカーで共有)だが、次の起動で env が再び上書きする。恒久変更の唯一の経路は env/compose。**
 
-**変えたのは優先順位だけ。DB 永続機構(config テーブル / `save` / import・export)は残す。**
-(当初メモは「DB 永続ごと撤去」と書いていたが 2026-07-08 に撤回 — DB は稼働中の可変ストア/
-複数ワーカー共有として残し、起動時に env が勝つようにするのが狙い。)
-
-- **起動時**: 各 config の実効値 = env(あれば)/ 無ければ hardcoded 既定。
-  **env が DB 値より優先**(旧来は「DB に値があれば DB 勝ち」= #30 のバグ。この分岐を撤去して反転)。
-- **実行中**: admin UI からの変更は `app.state.config` に反映 + **DB へ永続**(`.save()`)。
-  稼働中は有効で、Redis 経由で複数ワーカーに共有される(既存機構のまま)。
+- **起動時**: 各 config の実効値 = env(あれば)/ 無ければ hardcoded 既定。**env が DB 値より優先**。
+- **実行中**: admin UI からの変更は `app.state.config` に反映 + **DB へ永続**(`RuntimeConfig.save()`)。
+  稼働中は有効で、Redis 経由で複数ワーカーに共有される。
 - **再起動**: env が実効値を上書きし直す(DB の実行時値は起動時には勝てない)。
-- 帰結: env が silently 無視される挙動が消える / `ENABLE_PERSISTENT_CONFIG` トグルは不要(env が常に正)/
-  `_OVERRIDE` 系・「seed プロファイル」も不要(源が1つ)。**export/import と config テーブルは温存**
-  (撤去はしない)。
+- 帰結: 「env を変えたのに反映されない」が起きない。durable にしたい値は env/compose に置く運用
+  (横展開の環境構築も env/compose ファイルが正)。
 
-## 名称と任意の棚卸し
-- `PersistentConfig` → **`RuntimeConfig`** に改名済み(「実行時に調整できる env 既定の設定」の意)。
-  DB 永続は保持したまま。改名は名前だけ。
-- `ENABLE_PERSISTENT_CONFIG` は撤去済み(env が常に正なので分岐不要)。
-- (任意・後回し)運用固定の項目(接続 URL・認証方式・エンジン種別など、実行時に触らせたくないもの)を
-  素の `os.environ.get(...)` に落として設定オブジェクトから外す棚卸しは、やるなら別途。
-  env 優先が効いている以上、急ぎではない。
+## 背景(#30 で直したバグ)
+OWUI の元実装は「`config` テーブルに値があれば DB が env に勝つ」で、初回起動や UI 保存で
+DB に値が入ると以後 env が無視された(「env を変えたのに反映されない」温床)。
+起動時の優先順位を env 勝ちに反転してこれを解消した。
 
-## UI(観測性)
-- 実行時に変更はできる(稼働中は有効・DB に載る)が「**再起動で env 既定に戻る**」ことが分かる表示にする。
-- Settings 掃除は同バッチで: **version 表示=残す** / update check=除去 / help・外部リンク=削除 /
-  license=除去(feature-triage / #10 の Settings 決定と整合)。
-
-## 実装(完了 = 798a7aa4c、2026-07-08)
-- `RuntimeConfig.__init__` の優先順位を反転(DB 勝ち分岐を撤去 → env が必ず勝つ)+
-  `ENABLE_PERSISTENT_CONFIG` 撤去 + `PersistentConfig`→`RuntimeConfig` 改名。
-  `save()`/`update()` の DB 永続はそのまま維持。CORE(認証/Filter/authz/defaults)回帰 46 passed。
-- **影響(周知)**: 現在 admin UI で保存している設定は再起動で env 既定に戻る。durable にしたい値は
-  compose/env に移す運用へ切替(横展開の環境構築も env/compose ファイルが正、が #30 の狙いに合致)。
-
-## Settings 掃除(完了 = e9f15cf10 / c92c0784f、2026-07-08)
-- admin General・About から update check / What's New / Help・Documentation / Discord・X・GitHub /
-  enterprise License 表示を撤去。version は残す(BSD 著作権・Twemoji 表記は #34 まで温存)。
-- **version は deploy tag(prodYYYYMMDD_NN、#25)を build 時 `APP_VERSION` で焼き込み可能に**
-  (vite.config.ts / env.py / Dockerfile。未設定なら package.json の 0.6.5 にフォールバック)。
-- 「再起動で env に戻る」旨の UI 注記は**不採用**(冗長というユーザー判断)。
+## 実装(完了、2026-07-08)
+- 設定機構 `798a7aa4c`: `RuntimeConfig.__init__` を env 勝ちに(起動時は env が DB 値より優先)。
+  `PersistentConfig`→`RuntimeConfig` 改名。`ENABLE_PERSISTENT_CONFIG` 撤去。
+  `save()`/`update()` の DB 永続は維持。DB 永続機構(`config` テーブル / import・export / Redis 共有)は温存。
+  CORE(認証/Filter/authz/defaults)回帰 46 passed。
+- Settings 掃除 `e9f15cf10`: admin General・About から update check / What's New / Help・外部リンク /
+  License 表示を撤去。version は残す(BSD 著作権・Twemoji は #34 まで温存)。
+- version 焼き込み `c92c0784f`: deploy tag(`prodYYYYMMDD_NN`、#25)を build 時 `APP_VERSION` で
+  焼き込み可能に(vite.config.ts / env.py / Dockerfile)。未設定なら package.json の 0.6.5。
 
 ## 残(任意・後回し)
-- 運用固定項目の `os.environ` 直読み棚卸し(上記「名称と任意の棚卸し」参照。急ぎでない)。
-- 「接続情報を UI 保存で durable に残したい」等の要望が出たら、その数個だけ env-override 型
-  (env set 時は env 勝ち + UI ロック表示)を例外併用する余地は残す(現時点は不要)。
+- 運用固定の項目(接続 URL・認証方式・エンジン種別など、実行時に触らせたくないもの)を素の
+  `os.environ.get(...)` に落として設定オブジェクトから外す棚卸し。env 勝ちが効いているので急ぎではない。
