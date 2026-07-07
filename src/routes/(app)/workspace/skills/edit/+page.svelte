@@ -6,19 +6,47 @@
 
 	const i18n = getContext('i18n');
 
-	import { getSkillById, getSkills, updateSkillById } from '$lib/apis/skills';
+	import {
+		createNewSkill,
+		deleteSkillById,
+		getSkillById,
+		getSkills,
+		updateSkillById
+	} from '$lib/apis/skills';
 	import { page } from '$app/stores';
 
 	import SkillEditor from '$lib/components/workspace/Skills/SkillEditor.svelte';
 
 	let skill = null;
 	const onSubmit = async (_skill) => {
-		const skill = await updateSkillById(localStorage.token, _skill).catch((error) => {
+		const oldId = skill.id;
+
+		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する
+		// (差し替え)。作成が失敗(id 衝突/不正)したら旧 id を消さず中断。参照・valves はちぎれてよい。
+		if (_skill.id !== oldId) {
+			const created = await createNewSkill(localStorage.token, _skill).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+
+			if (!created) return;
+
+			await deleteSkillById(localStorage.token, oldId).catch((error) => {
+				toast.error(`${error}`);
+			});
+
+			toast.success($i18n.t('Skill updated successfully'));
+			await skills.set(await getSkills(localStorage.token));
+			await goto('/workspace/skills');
+			return;
+		}
+
+		const updated = await updateSkillById(localStorage.token, _skill).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
-		if (skill) {
+		if (updated) {
 			toast.success($i18n.t('Skill updated successfully'));
 			await skills.set(await getSkills(localStorage.token));
 			await goto('/workspace/skills');

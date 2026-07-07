@@ -4,6 +4,7 @@
 
 	const i18n = getContext('i18n');
 
+	import { toast } from 'svelte-sonner';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -13,7 +14,8 @@
 
 	let formElement = null;
 	let loading = false;
-	let showConfirm = false;
+	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
+	let showRenameConfirm = false;
 
 	export let onSave = () => {};
 
@@ -27,6 +29,8 @@
 	// llens(#45): 編集時に既存の type をバッジ表示するため受け取る(作成時は未指定)。
 	export let type = '';
 	let _content = '';
+	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
+	let originalId = id;
 
 	$: if (content) {
 		updateContent();
@@ -125,19 +129,30 @@ class Pipe:
 	};
 
 	const submitHandler = async () => {
-		if (codeEditor) {
-			content = _content;
-			await tick();
+		if (!codeEditor) return;
 
-			const res = await codeEditor.formatPythonCodeHandler();
-			await tick();
+		content = _content;
+		await tick();
 
-			content = _content;
-			await tick();
+		const res = await codeEditor.formatPythonCodeHandler();
+		await tick();
 
-			if (res) {
-				saveHandler();
+		content = _content;
+		await tick();
+
+		if (!res) return;
+
+		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
+		if (edit && id !== originalId) {
+			// id 差し替えは create 経由 = description 必須(#43 P1)。空だと create が 400 で
+			// 無言失敗するため、confirm を出す前に明示的に弾く。
+			if ((description ?? '').trim() === '') {
+				toast.error($i18n.t('A description is required to change the ID.'));
+				return;
 			}
+			showRenameConfirm = true;
+		} else {
+			saveHandler();
 		}
 	};
 </script>
@@ -148,11 +163,7 @@ class Pipe:
 			bind:this={formElement}
 			class=" flex flex-col max-h-[100dvh] h-full"
 			on:submit|preventDefault={() => {
-				if (edit) {
-					submitHandler();
-				} else {
-					showConfirm = true;
-				}
+				submitHandler();
 			}}
 		>
 			<div class="flex flex-col flex-1 overflow-auto h-0 rounded-lg">
@@ -202,17 +213,13 @@ class Pipe:
 					</div>
 
 					<div class="flex gap-0.5 items-center text-xs text-gray-500 px-1">
-						{#if edit}
-							<div class="shrink-0">{id}</div>
-						{:else}
-							<input
-								class="w-full bg-transparent outline-hidden"
-								type="text"
-								placeholder={$i18n.t('Function ID')}
-								bind:value={id}
-								required
-							/>
-						{/if}
+						<input
+							class="w-full bg-transparent outline-hidden"
+							type="text"
+							placeholder={$i18n.t('Function ID')}
+							bind:value={id}
+							required
+						/>
 					</div>
 				</div>
 
@@ -246,17 +253,7 @@ class Pipe:
 					{/key}
 				</div>
 
-				<div class="pb-3 flex justify-between">
-					<div class="flex-1 pr-3">
-						<div class="text-xs text-gray-500 line-clamp-2">
-							<span class=" font-semibold dark:text-gray-200">{$i18n.t('Warning:')}</span>
-							{$i18n.t('Functions allow arbitrary code execution')} <br />—
-							<span class=" font-medium dark:text-gray-400"
-								>{$i18n.t(`don't install random functions from sources you don't trust.`)}</span
-							>
-						</div>
-					</div>
-
+				<div class="pb-3 flex justify-start">
 					<button
 						class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-lg"
 						type="submit"
@@ -270,25 +267,21 @@ class Pipe:
 </div>
 
 <ConfirmDialog
-	bind:show={showConfirm}
+	bind:show={showRenameConfirm}
+	title={$i18n.t('Change ID?')}
 	on:confirm={() => {
-		submitHandler();
+		saveHandler();
 	}}
 >
 	<div class="text-sm text-gray-500">
 		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
-			<div>{$i18n.t('Please carefully review the following warnings:')}</div>
-
+			<div>
+				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}
+			</div>
 			<ul class=" mt-1 list-disc pl-4 text-xs">
-				<li>{$i18n.t('Functions allow arbitrary code execution.')}</li>
-				<li>{$i18n.t('Do not install functions from sources you do not fully trust.')}</li>
+				<li>{$i18n.t('Assignments and references from other items will be detached.')}</li>
+				<li>{$i18n.t('Per-item settings such as valves will be reset.')}</li>
 			</ul>
-		</div>
-
-		<div class="my-3">
-			{$i18n.t(
-				'I acknowledge that I have read and I understand the implications of my action. I am aware of the risks associated with executing arbitrary code and I have verified the trustworthiness of the source.'
-			)}
 		</div>
 	</div>
 </ConfirmDialog>

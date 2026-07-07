@@ -2,6 +2,8 @@
 	import { onMount, tick, getContext } from 'svelte';
 
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
@@ -23,6 +25,13 @@
 	let id = '';
 	let description = '';
 	let content = '';
+	// 本文は CodeEditor で編集。value は _content にミラーし、submit 時に content へ確定。
+	let _content = '';
+
+	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
+	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
+	let originalId = '';
+	let showRenameConfirm = false;
 
 	// tool_ids は admin のみ編集可(バックエンドが 401 を返すゲートと整合)。
 	// step2b まで runtime では未消費 — この段階では preset 側の紐づけ情報の保存のみ。
@@ -39,24 +48,40 @@
 	}
 
 	const submitHandler = async () => {
-		loading = true;
+		content = _content;
 
-		if (validateCommandString(id)) {
-			await onSubmit({
-				name,
-				id,
-				// description が空ならモデルには公開されない(バックエンド仕様)。
-				description: description,
-				content,
-				tool_ids: toolIds,
-				access_control: accessControl
-			});
-		} else {
+		if (!validateCommandString(id)) {
 			toast.error(
 				$i18n.t('Only alphanumeric characters and hyphens are allowed in the command string.')
 			);
+			return;
 		}
 
+		if (content.trim() === '') {
+			toast.error($i18n.t('Skill Content is required'));
+			return;
+		}
+
+		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
+		if (edit && id !== originalId) {
+			showRenameConfirm = true;
+			return;
+		}
+
+		await doSubmit();
+	};
+
+	const doSubmit = async () => {
+		loading = true;
+		await onSubmit({
+			name,
+			id,
+			// description が空ならモデルには公開されない(バックエンド仕様)。
+			description: description,
+			content,
+			tool_ids: toolIds,
+			access_control: accessControl
+		});
 		loading = false;
 	};
 
@@ -73,8 +98,10 @@
 			await tick();
 
 			id = skill.id.at(0) === '/' ? skill.id.slice(1) : skill.id;
+			originalId = id;
 			description = skill.description ?? '';
 			content = skill.content;
+			_content = content;
 			toolIds = skill?.tool_ids ?? [];
 
 			accessControl = skill?.access_control ?? null;
@@ -151,7 +178,6 @@
 							placeholder={$i18n.t('Command')}
 							bind:value={id}
 							required
-							disabled={edit}
 						/>
 					</div>
 				</div>
@@ -179,17 +205,21 @@
 			</div>
 
 			<div class="mt-2">
-				<div>
-					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
-						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
-						bind:value={content}
-						rows={6}
-						required
+				<div class="h-96 rounded-lg border border-gray-100 dark:border-gray-850 overflow-auto">
+					<CodeEditor
+						id="skill"
+						lang="markdown"
+						value={content}
+						onChange={(e) => {
+							_content = e;
+						}}
+						onSave={() => {
+							submitHandler();
+						}}
 					/>
 				</div>
 
-				<div class="text-xs text-gray-400 dark:text-gray-500">
+				<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">
 					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
 						class=" text-gray-600 dark:text-gray-300 font-medium"
 						>{'{{'}{$i18n.t('variable')}{'}}'}</span
@@ -238,15 +268,15 @@
 			</div>
 		{/if}
 
-		<div class="my-4 flex justify-end pb-20">
+		<div class="my-4 flex justify-start pb-20">
 			<button
-				class=" text-sm w-full lg:w-fit px-4 py-2 transition rounded-lg {loading
-					? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
-					: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex w-full justify-center"
+				class=" text-sm w-fit px-4 py-2 transition rounded-lg bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black {loading
+					? ' cursor-not-allowed'
+					: ''} flex justify-center"
 				type="submit"
 				disabled={loading}
 			>
-				<div class=" self-center font-medium">{$i18n.t('Save & Create')}</div>
+				<div class=" self-center font-medium">{$i18n.t('Save')}</div>
 
 				{#if loading}
 					<div class="ml-1.5 self-center">
@@ -279,3 +309,23 @@
 		</div>
 	</form>
 </div>
+
+<ConfirmDialog
+	bind:show={showRenameConfirm}
+	title={$i18n.t('Change ID?')}
+	on:confirm={() => {
+		doSubmit();
+	}}
+>
+	<div class="text-sm text-gray-500">
+		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
+			<div>
+				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}
+			</div>
+			<ul class=" mt-1 list-disc pl-4 text-xs">
+				<li>{$i18n.t('Assignments and references from other items will be detached.')}</li>
+				<li>{$i18n.t('Per-item settings such as valves will be reset.')}</li>
+			</ul>
+		</div>
+	</div>
+</ConfirmDialog>
