@@ -1092,44 +1092,14 @@ def process_file(
         hash = calculate_sha256_string(text_content)
         Files.update_file_hash_by_id(file.id, hash)
 
-        if not request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-            try:
-                result = save_docs_to_vector_db(
-                    request,
-                    docs=docs,
-                    collection_name=collection_name,
-                    metadata={
-                        "file_id": file.id,
-                        "name": file.filename,
-                        "hash": hash,
-                    },
-                    add=(True if form_data.collection_name else False),
-                    user=user,
-                )
-
-                if result:
-                    Files.update_file_metadata_by_id(
-                        file.id,
-                        {
-                            "collection_name": collection_name,
-                        },
-                    )
-
-                    return {
-                        "status": True,
-                        "collection_name": collection_name,
-                        "filename": file.filename,
-                        "content": text_content,
-                    }
-            except Exception as e:
-                raise e
-        else:
-            return {
-                "status": True,
-                "collection_name": None,
-                "filename": file.filename,
-                "content": text_content,
-            }
+        # RAG 撤去(#52): ベクタ書き込みは廃止。抽出テキストは data.content に保存済みで、
+        # チャット経路は全文注入する。collection_name は返さない。
+        return {
+            "status": True,
+            "collection_name": None,
+            "filename": file.filename,
+            "content": text_content,
+        }
 
     except Exception as e:
         log.exception(e)
