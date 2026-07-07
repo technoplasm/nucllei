@@ -3,19 +3,22 @@
 	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME, skills as _skills, user } from '$lib/stores';
 
-	import { deleteSkillById, getSkills, getSkillList } from '$lib/apis/skills';
+	import { deleteSkillById, getSkills, getSkillList, updateSkillById } from '$lib/apis/skills';
 
-	import SkillMenu from './Skills/SkillMenu.svelte';
-	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import { capitalizeFirstLetter } from '$lib/utils';
+	import GarbageBin from '../icons/GarbageBin.svelte';
+	import GlobeAlt from '../icons/GlobeAlt.svelte';
+	import LockClosed from '../icons/LockClosed.svelte';
+	import AccessControlModal from './common/AccessControlModal.svelte';
 
 	// air-gapped: openwebui.com/community 連携(share・clone・import/export JSON)は
 	// Prompts からコピーする際に意図的に落とした(issue #35)。機能は一覧/検索/作成/編集/削除のみ。
+	// llens(#47 A1): By 表示・pencil・… メニューを撤去。クリックで編集、削除は trash、
+	// visibility(access_control)は一覧のアイコンから直接編集する。
 	const i18n = getContext('i18n');
 	let loaded = false;
 
@@ -26,8 +29,40 @@
 	let showDeleteConfirm = false;
 	let deleteSkill = null;
 
+	// visibility(access_control)の一覧内編集: アイコン → AccessControlModal、閉じたら保存
+	let showAccessControlModal = false;
+	let acItem = null;
+	let acValue = null;
+
 	let filteredItems = [];
 	$: filteredItems = skills.filter((s) => query === '' || s.id.includes(query));
+
+	const openAccessControl = (skill) => {
+		acItem = skill;
+		acValue = skill?.access_control ?? null;
+		showAccessControlModal = true;
+	};
+
+	// skill の list は content 込み(SkillUserResponse)なのでそのまま round-trip できる。
+	const commitAccessControl = async () => {
+		const item = acItem;
+		const value = acValue;
+		acItem = null;
+		if (!item) return;
+
+		const res = await updateSkillById(localStorage.token, {
+			...item,
+			access_control: value
+		}).catch(() => null);
+
+		if (res) {
+			await init();
+		}
+	};
+
+	$: if (!showAccessControlModal && acItem) {
+		commitAccessControl();
+	}
 
 	const deleteHandler = async (skill) => {
 		const id = skill.id;
@@ -104,72 +139,63 @@
 			<div
 				class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
 			>
-				<div class=" flex flex-1 space-x-4 cursor-pointer w-full">
-					<a href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}>
-						<div class=" flex-1 flex items-center gap-2 self-center">
+				<a
+					class=" flex flex-1 min-w-0 cursor-pointer"
+					href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
+				>
+					<div class=" flex-1 self-center min-w-0">
+						<div class=" flex items-center gap-2 min-w-0">
 							<div class=" font-semibold line-clamp-1 capitalize">{skill.name}</div>
-							<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-								/{skill.id}
-							</div>
+							<div class=" text-xs text-gray-500 line-clamp-1 shrink-0">/{skill.id}</div>
 						</div>
+						<div class="px-0.5 text-xs overflow-hidden text-ellipsis line-clamp-1 mt-0.5">
+							{skill.description}
+						</div>
+					</div>
+				</a>
 
-						<div class=" text-xs px-0.5">
-							<Tooltip
-								content={skill?.user?.email ?? $i18n.t('Deleted User')}
-								className="flex shrink-0"
-								placement="top-start"
-							>
-								<div class="shrink-0 text-gray-500">
-									{$i18n.t('By {{name}}', {
-										name: capitalizeFirstLetter(
-											skill?.user?.name ?? skill?.user?.email ?? $i18n.t('Deleted User')
-										)
-									})}
-								</div>
-							</Tooltip>
-						</div>
-					</a>
-				</div>
 				<div class="flex flex-row gap-0.5 self-center">
-					<a
-						class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-						type="button"
-						href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
-							/>
-						</svg>
-					</a>
-
-					<SkillMenu
-						deleteHandler={async () => {
-							deleteSkill = skill;
-							showDeleteConfirm = true;
-						}}
-						onClose={() => {}}
+					<Tooltip
+						content={(skill.access_control ?? null) === null
+							? $i18n.t('Public')
+							: $i18n.t('Private')}
 					>
 						<button
-							class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 							type="button"
+							on:click={() => openAccessControl(skill)}
 						>
-							<EllipsisHorizontal className="size-5" />
+							{#if (skill.access_control ?? null) === null}
+								<GlobeAlt className="size-4" />
+							{:else}
+								<LockClosed className="size-4" />
+							{/if}
 						</button>
-					</SkillMenu>
+					</Tooltip>
+
+					<Tooltip content={$i18n.t('Delete')}>
+						<button
+							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							on:click={() => {
+								deleteSkill = skill;
+								showDeleteConfirm = true;
+							}}
+						>
+							<GarbageBin />
+						</button>
+					</Tooltip>
 				</div>
 			</div>
 		{/each}
 	</div>
+
+	<AccessControlModal
+		bind:show={showAccessControlModal}
+		bind:accessControl={acValue}
+		accessRoles={['read', 'write']}
+		allowPublic={$user?.permissions?.sharing?.public_skills || $user?.role === 'admin'}
+	/>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">
 		<Spinner />
