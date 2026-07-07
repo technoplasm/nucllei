@@ -94,7 +94,6 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
-		annotation?: { type: string; rating: number };
 	}
 
 	export let chatId = '';
