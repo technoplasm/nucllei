@@ -57,8 +57,14 @@ else:
 - **影響(周知)**: 現在 admin UI で保存している設定は再起動で env 既定に戻る。durable にしたい値は
   compose/env に移す運用へ切替(横展開の環境構築も env/compose ファイルが正、が #30 の狙いに合致)。
 
+## Settings 掃除(完了 = e9f15cf10 / c92c0784f、2026-07-08)
+- admin General・About から update check / What's New / Help・Documentation / Discord・X・GitHub /
+  enterprise License 表示を撤去。version は残す(BSD 著作権・Twemoji 表記は #34 まで温存)。
+- **version は deploy tag(prodYYYYMMDD_NN、#25)を build 時 `APP_VERSION` で焼き込み可能に**
+  (vite.config.ts / env.py / Dockerfile。未設定なら package.json の 0.6.5 にフォールバック)。
+- 「再起動で env に戻る」旨の UI 注記は**不採用**(冗長というユーザー判断)。
+
 ## 残(任意・後回し)
-- Settings UI に「再起動で env に戻る」表示 + Settings 掃除(update check/help/license 除去・version 残す)。
 - 運用固定項目の `os.environ` 直読み棚卸し(上記「名称と任意の棚卸し」参照。急ぎでない)。
 - 「接続情報を UI 保存で durable に残したい」等の要望が出たら、その数個だけ env-override 型
   (env set 時は env 勝ち + UI ロック表示)を例外併用する余地は残す(現時点は不要)。
