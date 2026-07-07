@@ -51,6 +51,11 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
 - Tools.svelte: `meta.builtin` 行は編集リンク(href)と編集/複製/共有/エクスポート/削除メニューを出さない。
   一覧では**バッジ表示のみ**(クリック不可の素の行)。
 - builtin の `access_control` はレジストリ既定で固定(管理 UI は設けない)。
+- **改訂(2026-07-07, #47 A1)**: 一覧体裁の整理で builtin の扱いを更新。
+  - `TOOL`/`組み込み` バッジ表示 → **「組み込み」セクションで上部にまとめる**(バッジ廃止)。
+  - **`access_control` を一覧の globe/lock アイコンから編集可能に**(「管理 UI は設けない」を撤回)。
+    個別に開けない builtin でも visibility を設定できるようにするのが狙い。
+    → routers/tools.py の builtin access_control 分岐(下記「UI 到達不能」)が**この経路で到達・常用される**。
 - バックエンドの「access_control のみ更新」分岐(routers/tools.py:250)は UI から到達不能になるが無害で残置。
 - バックエンドの現行ゲート(create/update/delete 拒否)は変更不要。フロントを実態に合わせるだけ。
 
@@ -69,6 +74,7 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
   (全モデル強制 + 解除禁止)と `is_active`(master switch)を DB カラムごと撤去
   (migration a1c3f9e2d7b4)。詳細は下記「#46: 制御面の一本化」。
 - builtin access_control 分岐の除去(routers/tools.py:250)は UI 到達不能だが無害で残置のまま(未実施)。
+  → **#47 A1(2026-07-07)で到達可能に**: 一覧の visibility アイコン編集が builtin にこの分岐を使う。除去せず**常用**へ。
 
 ## #46: 制御面の一本化(is_global / is_active 撤去、2026-07-07)
 

@@ -49,3 +49,32 @@
   - **タブ切替の暗黙リセット(040ec990c)**: ModelEditor はタブ間で info/params を共有するため、別タブの
     「見えていない編集」も Save で保存される。→ **タブ切替時にロード直後の状態へ暗黙リセット**(名前/ID は常時
     ヘッダなので対象外)。onMount 末 `captureSnapshot()` / `switchTab()` で復元。モーダル確認は未採用(暗黙)。
+
+## 一覧(item)体裁の整理(A1、2026-07-07 出荷)
+
+model / skill / tool / function の各ワークスペース一覧を整理(#47 の残 A1)。
+**共通化(単一 item コンポーネント抽出)はしない**方針 — 各一覧は性格が違うので個別に寄せる。
+
+- **共通**: `By {{name}}`(作成者)表示を全一覧から撤去。
+- **Tools**(`Tools.svelte` + backend `get_tool_list`):
+  - **組み込み / カスタムの 2 セクション化**。組み込みが有るときだけ両方に小見出し(無ければ無ヘッダ)。
+    組み込みは編集/削除不可だが **visibility は一覧のアイコンから編集可**(個別に開かせない)。
+  - 2 段目を description ではなく **tool が公開する関数名(specs)の羅列**に(#49「tool spec 露出」を一覧で回収)。
+  - **visibility(access_control)を globe/lock アイコンでその場編集**: クリック → 既存 `AccessControlModal` →
+    閉じたら list item を round-trip 保存。builtin も同経路(backend が builtin は access_control のみ反映)。
+  - `TOOL` バッジ・name tooltip・By・**Valves**・… メニューを撤去。削除は **trash アイコン**のみ。
+  - **backend(adb7a11e7)**: `get_tool_list` の response_model を `ToolUserResponse` → **`ToolUserModel`**
+    (content/specs 込み)に。visibility の inline 編集で update に必要な content を追加 fetch なしで round-trip
+    でき、specs から関数名も引ける。picker の `/`(get_tools)は `ToolUserResponse` のまま(content/specs 非公開)。
+    **前提**: 「一覧に出る = 詳細を開ける」権限一致。list は write 権限者/admin にしか返らないのでソース露出は広がらない。
+- **Skills**(`Skills.svelte`): 2 段目に **description を表示**。visibility アイコン編集(list は content 込みなので
+  `updateSkillById` で直接 round-trip)。By・pencil・… メニュー撤去、削除は trash、行クリックで編集。
+- **Models**(`Models.svelte`): 指示どおり**そのまま + By 撤去のみ**。By を消すと下段のメニュー/有効スイッチが
+  下にズレたため、item を **flex-col の 2 段組 → 単一行**にして … メニューと有効トグルを名前と縦中央で右寄せに。
+  アバター・… メニュー・有効スイッチ自体は従来どおり維持。
+- **Functions**(admin `Functions.svelte`): 100% 幅の単一列を skill/tool と同じ **grid(横並び)**に。
+  … メニュー(FunctionMenu)を **trash アイコン**に、行クリックで編集。type バッジ(filter/action/pipe)と Valves は維持。
+
+出荷: adb7a11e7(backend)/ 4cdf56616(Tools)/ 0ea09c210(Skills)/ 8dfaedde3(Models)/ f4074705d(Functions)。
+clean な Playwright で 4 画面 end-to-end 検証(visibility は builtin 含め Public↔Private 往復・永続化 PASS)。
+これで **#47 の残は A1 のみだったため #47 close 可**(子 #49 の backend は別 issue で継続)。i18n locale 追従は後回し。
