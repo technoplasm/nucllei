@@ -34,6 +34,17 @@
 > 発火は `get_skill_by_id`、load_skill manifest / wire 引数は `skill_id`(旧 `skill_command`)、
 > activation は `id`/`name`(旧 `command`/`title`)。以下の表は改訂後。migration `c5e7a1b9d2f6`。
 > 旧「id=uuid と command を分離」方針(rename 耐性のため)は撤回 — rename は削除→再作成で扱う(#43)。
+>
+> **追記(2026-07-07、#43 Phase 2b 出荷 3404aae85)**: 可読 id の編集 UI を skill/tool/function の
+> 編集画面に横断追加。編集時も id を input 可にし、id が変わったら ConfirmDialog「Change ID?」を出して
+> **旧 id 削除 → 新 id 作成**で差し替える(PK 不変・既存 create+delete API 再利用で backend 変更なし)。
+> 参照(skillIds/toolIds/filterIds/actionIds)と valves は #46 以降 存在しない id を無視するため
+> **静かにちぎれる=リセット**(誠実仕様)。create が 400(id 衝突/不正)なら旧を消さず中断。
+> tool/function は差し替え=create 経由で description 必須(#43 P1)のため、空 description の rename は
+> confirm 手前で toast 停止(skill は description 任意で対象外)。id/name の空は input native の required 警告。
+> 併せて skill 本文を CodeEditor(markdown)化・Save ボタン左下・tool/function の
+> 「arbitrary code execution」警告文言と作成時の acknowledge ダイアログを撤去(作成は確認なしで即保存)。
+> Model は後回し(clone→再保存で代替可)。新規 i18n キー 5 件は locale 追従が残(sync 時)。
 
 | カラム | 型 | 備考 |
 |---|---|---|

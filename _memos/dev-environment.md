@@ -84,6 +84,10 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
      `id=kansai` / `id=vault` を直接指定する(`/kansai` 発火 = id 一致)。表示名は `name`(旧 title)。
      #43 の migration(`c5e7a1b9d2f6`)を跨いだ既存 DB では旧 skill が id=uuid のまま残り発火しないので
      **kansai/vault は作り直す**(content は旧 uuid 行に残っているので流用可)。
+     - **#43 Phase 2b(2026-07-07)以降**: 作り直しは編集画面で id を uuid→可読 id に**変更して保存**すれば
+       裏で recreate される(content 引き継ぎ)。**kansai は対応済み**(uuid→`id=kansai`)。**vault(金庫番)は
+       まだ uuid** = 同じ手順で `id=vault` にリネームすればよい。tool/function を同様にリネームする場合は
+       description 必須(空だと保存時 toast で弾かれる) — 例: 検証中に `render_probe` へ description を付与済み。
    **注意**: preset の meta を API で書き換えたら `GET /api/models` を叩いて
    `app.state.MODELS` キャッシュを再構築しないと manifest に反映されない
    (UI 経由なら自然に起きる)。
