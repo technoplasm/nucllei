@@ -7,6 +7,7 @@ from open_webui.models.tools import (
     ToolForm,
     ToolModel,
     ToolResponse,
+    ToolUserModel,
     ToolUserResponse,
     Tools,
 )
@@ -103,7 +104,11 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 ############################
 
 
-@router.get("/list", response_model=list[ToolUserResponse])
+# llens(#47 A1): workspace のツール管理一覧は content 込みで返す(ToolUserModel)。
+# 一覧内で visibility(access_control)を編集する際、update に必要な content を
+# 追加 fetch なしで round-trip するため。write 権限者/admin にしか返らない一覧なので
+# ソース露出の拡大にはならない(picker の `/` は ToolUserResponse のまま content を出さない)。
+@router.get("/list", response_model=list[ToolUserModel])
 async def get_tool_list(user=Depends(get_verified_user)):
     if user.role == "admin":
         tools = Tools.get_tools()
