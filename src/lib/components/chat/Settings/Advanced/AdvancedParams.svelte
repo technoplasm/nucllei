@@ -50,12 +50,41 @@
 	<div>
 		<Tooltip
 			content={$i18n.t(
+				'Default mode works with a wider range of models by calling tools once before execution. Native mode leverages the model’s built-in tool-calling capabilities, but requires the model to inherently support this feature.'
+			)}
+			placement="top-start"
+			className="inline-tooltip"
+		>
+			<div class=" py-0.5 flex items-center gap-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Function Calling')}
+				</div>
+				<button
+					class="p-1 px-3 text-xs flex rounded-sm transition"
+					on:click={() => {
+						params.function_calling = (params?.function_calling ?? null) === null ? 'native' : null;
+					}}
+					type="button"
+				>
+					{#if params.function_calling === 'native'}
+						<span class="ml-2 self-center">{$i18n.t('Native')}</span>
+					{:else}
+						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
+					{/if}
+				</button>
+			</div>
+		</Tooltip>
+	</div>
+
+	<div>
+		<Tooltip
+			content={$i18n.t(
 				'When enabled, the model will respond to each chat message in real-time, generating a response as soon as the user sends a message. This mode is useful for live chat applications, but may impact performance on slower hardware.'
 			)}
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class=" py-0.5 flex w-full justify-between">
+			<div class=" py-0.5 flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Stream Chat Response')}
 				</div>
@@ -83,33 +112,47 @@
 		</Tooltip>
 	</div>
 
-	<div>
+	<div class=" py-0.5 w-full justify-between">
 		<Tooltip
 			content={$i18n.t(
-				'Default mode works with a wider range of models by calling tools once before execution. Native mode leverages the model’s built-in tool-calling capabilities, but requires the model to inherently support this feature.'
+				'Constrains effort on reasoning for reasoning models. Only applicable to reasoning models from specific providers that support reasoning effort.'
 			)}
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class=" py-0.5 flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Function Calling')}
+					{$i18n.t('Reasoning Effort')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition"
-					on:click={() => {
-						params.function_calling = (params?.function_calling ?? null) === null ? 'native' : null;
-					}}
+					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
+					on:click={() => {
+						params.reasoning_effort = (params?.reasoning_effort ?? null) === null ? 'medium' : null;
+					}}
 				>
-					{#if params.function_calling === 'native'}
-						<span class="ml-2 self-center">{$i18n.t('Native')}</span>
+					{#if (params?.reasoning_effort ?? null) === null}
+						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
+						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
 					{/if}
 				</button>
 			</div>
 		</Tooltip>
+
+		{#if (params?.reasoning_effort ?? null) !== null}
+			<div class="flex mt-0.5 space-x-2">
+				<div class=" flex-1">
+					<input
+						class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+						type="text"
+						placeholder={$i18n.t('Enter reasoning effort')}
+						bind:value={params.reasoning_effort}
+						autocomplete="off"
+					/>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -120,7 +163,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Seed')}
 				</div>
@@ -165,7 +208,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Stop Sequence')}
 				</div>
@@ -209,7 +252,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Temperature')}
 				</div>
@@ -259,55 +302,12 @@
 	<div class=" py-0.5 w-full justify-between">
 		<Tooltip
 			content={$i18n.t(
-				'Constrains effort on reasoning for reasoning models. Only applicable to reasoning models from specific providers that support reasoning effort.'
-			)}
-			placement="top-start"
-			className="inline-tooltip"
-		>
-			<div class="flex w-full justify-between">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Reasoning Effort')}
-				</div>
-				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
-					type="button"
-					on:click={() => {
-						params.reasoning_effort = (params?.reasoning_effort ?? null) === null ? 'medium' : null;
-					}}
-				>
-					{#if (params?.reasoning_effort ?? null) === null}
-						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
-					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
-					{/if}
-				</button>
-			</div>
-		</Tooltip>
-
-		{#if (params?.reasoning_effort ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-						type="text"
-						placeholder={$i18n.t('Enter reasoning effort')}
-						bind:value={params.reasoning_effort}
-						autocomplete="off"
-					/>
-				</div>
-			</div>
-		{/if}
-	</div>
-
-	<div class=" py-0.5 w-full justify-between">
-		<Tooltip
-			content={$i18n.t(
 				'Boosting or penalizing specific tokens for constrained responses. Bias values will be clamped between -100 and 100 (inclusive). (Default: none)'
 			)}
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Logit Bias')}
 				</div>
@@ -350,7 +350,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Mirostat')}
 				</div>
@@ -405,7 +405,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Mirostat Eta')}
 				</div>
@@ -460,7 +460,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Mirostat Tau')}
 				</div>
@@ -516,7 +516,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Top K')}
 				</div>
@@ -571,7 +571,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Top P')}
 				</div>
@@ -627,7 +627,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Min P')}
 				</div>
@@ -682,7 +682,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Frequency Penalty')}
 				</div>
@@ -738,7 +738,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Presence Penalty')}
 				</div>
@@ -792,7 +792,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Repeat Last N')}
 				</div>
@@ -848,7 +848,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Tfs Z')}
 				</div>
@@ -904,7 +904,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Tokens To Keep On Context Refresh (num_keep)')}
 				</div>
@@ -959,7 +959,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Max Tokens (num_predict)')}
 				</div>
@@ -1014,7 +1014,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Repeat Penalty (Ollama)')}
 				</div>
@@ -1068,7 +1068,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Context Length')}
 					{$i18n.t('(Ollama)')}
@@ -1124,7 +1124,7 @@
 			placement="top-start"
 			className="inline-tooltip"
 		>
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Batch Size (num_batch)')}
 				</div>
@@ -1180,7 +1180,7 @@
 				placement="top-start"
 				className="inline-tooltip"
 			>
-				<div class="flex w-full justify-between">
+				<div class="flex items-center gap-2">
 					<div class=" self-center text-xs font-medium">
 						{$i18n.t('use_mmap (Ollama)')}
 					</div>
@@ -1220,7 +1220,7 @@
 				placement="top-start"
 				className="inline-tooltip"
 			>
-				<div class="flex w-full justify-between">
+				<div class="flex items-center gap-2">
 					<div class=" self-center text-xs font-medium">
 						{$i18n.t('use_mlock (Ollama)')}
 					</div>
@@ -1262,7 +1262,7 @@
 				placement="top-start"
 				className="inline-tooltip"
 			>
-				<div class="flex w-full justify-between">
+				<div class="flex items-center gap-2">
 					<div class=" self-center text-xs font-medium">
 						{$i18n.t('num_thread (Ollama)')}
 					</div>
@@ -1318,7 +1318,7 @@
 				placement="top-start"
 				className="inline-tooltip"
 			>
-				<div class="flex w-full justify-between">
+				<div class="flex items-center gap-2">
 					<div class=" self-center text-xs font-medium">
 						{$i18n.t('num_gpu (Ollama)')}
 					</div>
@@ -1367,7 +1367,7 @@
 		</div>
 
 		<!-- <div class=" py-0.5 w-full justify-between">
-			<div class="flex w-full justify-between">
+			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">{$i18n.t('Template')}</div>
 
 				<button
