@@ -1,13 +1,10 @@
 import os
-import re
-import subprocess
 import sys
-from importlib import util
 import types
 import tempfile
 import logging
 
-from open_webui.env import SRC_LOG_LEVELS, PIP_OPTIONS, PIP_PACKAGE_INDEX_OPTIONS
+from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.functions import Functions
 from open_webui.models.tools import Tools
 
@@ -15,40 +12,10 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
-def extract_frontmatter(content):
-    """
-    Extract frontmatter as a dictionary from the provided content string.
-    """
-    frontmatter = {}
-    frontmatter_started = False
-    frontmatter_ended = False
-    frontmatter_pattern = re.compile(r"^\s*([a-z_]+):\s*(.*)\s*$", re.IGNORECASE)
-
-    try:
-        lines = content.splitlines()
-        if len(lines) < 1 or lines[0].strip() != '"""':
-            # The content doesn't start with triple quotes
-            return {}
-
-        frontmatter_started = True
-
-        for line in lines[1:]:
-            if '"""' in line:
-                if frontmatter_started:
-                    frontmatter_ended = True
-                    break
-
-            if frontmatter_started and not frontmatter_ended:
-                match = frontmatter_pattern.match(line)
-                if match:
-                    key, value = match.groups()
-                    frontmatter[key.strip()] = value.strip()
-
-    except Exception as e:
-        log.exception(f"Failed to extract frontmatter: {e}")
-        return {}
-
-    return frontmatter
+# llens(#44/#45): frontmatter(title/author/version/requirements)機構は tools・functions
+# とも退役。title/description の真実源は DB の name/meta.description のみ、要件は事前導入
+# 前提(air-gapped)で runtime pip も廃止。旧 extract_frontmatter /
+# install_frontmatter_requirements は完全 dead のため削除した(#45 でまとめて掃除)。
 
 
 def replace_imports(content):
@@ -87,7 +54,7 @@ def load_tool_module_by_id(tool_id, content=None):
         Tools.update_tool_by_id(tool_id, {"content": content})
     # llens(#44): tool の frontmatter は退役。title/description の真実源は DB の
     # name/meta.description のみとし、requirements による tool ロード時 pip も廃止
-    # (air-gapped、依存は事前導入前提)。frontmatter ヘルパは functions がまだ使う。
+    # (air-gapped、依存は事前導入前提)。
 
     module_name = f"tool_{tool_id}"
     module = types.ModuleType(module_name)
@@ -108,7 +75,7 @@ def load_tool_module_by_id(tool_id, content=None):
 
         # Create and return the object if the class 'Tools' is found in the module
         # llens(#44): frontmatter は退役。第2要素は builtin と同じく空 dict で維持
-        # (load_function_module_by_id との外形対称を filters 変換まで保つ)。
+        # (load_function_module_by_id との外形対称を保つ)。
         if hasattr(module, "Tools"):
             return module.Tools(), {}
         else:
@@ -130,9 +97,8 @@ def load_function_module_by_id(function_id, content=None):
 
         content = replace_imports(content)
         Functions.update_function_by_id(function_id, {"content": content})
-    else:
-        frontmatter = extract_frontmatter(content)
-        install_frontmatter_requirements(frontmatter.get("requirements", ""))
+    # llens(#45): tool 経路(#44)と同じく frontmatter/pip は退役。requirements の
+    # runtime インストールはしない(air-gapped、依存は事前導入前提)。
 
     module_name = f"function_{function_id}"
     module = types.ModuleType(module_name)
@@ -149,16 +115,16 @@ def load_function_module_by_id(function_id, content=None):
 
         # Execute the modified content in the created module's namespace
         exec(content, module.__dict__)
-        frontmatter = extract_frontmatter(content)
         log.info(f"Loaded module: {module.__name__}")
 
-        # Create appropriate object based on available class type in the module
+        # Create appropriate object based on available class type in the module.
+        # llens(#45): 第3要素(旧 frontmatter)は tool 経路と同じく空 dict で外形対称を保つ。
         if hasattr(module, "Pipe"):
-            return module.Pipe(), "pipe", frontmatter
+            return module.Pipe(), "pipe", {}
         elif hasattr(module, "Filter"):
-            return module.Filter(), "filter", frontmatter
+            return module.Filter(), "filter", {}
         elif hasattr(module, "Action"):
-            return module.Action(), "action", frontmatter
+            return module.Action(), "action", {}
         else:
             raise Exception("No Function class found in the module")
     except Exception as e:
@@ -169,26 +135,3 @@ def load_function_module_by_id(function_id, content=None):
         raise e
     finally:
         os.unlink(temp_file.name)
-
-
-def install_frontmatter_requirements(requirements: str):
-    if requirements:
-        req_list = [req.strip() for req in requirements.split(",")]
-        log.info(f"Installing requirements: {' '.join(req_list)}")
-
-        # uv-created virtualenvs don't ship pip, so `python -m pip install`
-        # fails. Use `uv pip install` targeting the running interpreter's
-        # environment (works for both the dev venv and Docker's --system env).
-        try:
-            subprocess.check_call(
-                ["uv", "pip", "install", "--python", sys.executable]
-                + PIP_OPTIONS
-                + req_list
-                + PIP_PACKAGE_INDEX_OPTIONS
-            )
-        except Exception as e:
-            log.error(f"Error installing packages: {' '.join(req_list)}")
-            raise e
-
-    else:
-        log.info("No requirements found in frontmatter.")

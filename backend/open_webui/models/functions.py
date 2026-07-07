@@ -33,8 +33,8 @@ class Function(Base):
 
 
 class FunctionMeta(BaseModel):
+    # llens(#45): frontmatter 退役に伴い manifest フィールドを撤去。真実源は description のみ。
     description: Optional[str] = None
-    manifest: Optional[dict] = {}
 
 
 class FunctionModel(BaseModel):

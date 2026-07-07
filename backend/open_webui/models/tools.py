@@ -53,7 +53,7 @@ class Tool(Base):
 
 class ToolMeta(BaseModel):
     description: Optional[str] = None
-    manifest: Optional[dict] = {}
+    # llens(#45): frontmatter 退役の掃除で manifest フィールドを撤去(#44 で書き込みは停止済み)。
     # llens(#42): 組み込みツール(repo コード定義・起動時 sync)の判別。UI の
     # セクション分け表示用。ロード分岐と更新保護はレジストリ(builtin_tools)の
     # id が真実源で、このフラグは見た目にしか影響しない

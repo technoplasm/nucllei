@@ -22,6 +22,22 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
 
+
+def validate_function_metadata(form_data: FunctionForm) -> None:
+    """llens(#45): function の frontmatter 退役に伴い、title(name)/description は
+    DB フィールドが唯一の真実源。どちらかが空なら 400 で保存を拒否する(tool 版 #44 と同型)。"""
+    if not (form_data.name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Function name is required",
+        )
+    if not ((form_data.meta.description or "").strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Function description is required",
+        )
+
+
 ############################
 # GetFunctions
 ############################
@@ -57,17 +73,18 @@ async def create_new_function(
             detail="Only alphanumeric characters and underscores are allowed in the id",
         )
 
+    validate_function_metadata(form_data)
+
     form_data.id = form_data.id.lower()
 
     function = Functions.get_function_by_id(form_data.id)
     if function is None:
         try:
             form_data.content = replace_imports(form_data.content)
-            function_module, function_type, frontmatter = load_function_module_by_id(
+            function_module, function_type, _ = load_function_module_by_id(
                 form_data.id,
                 content=form_data.content,
             )
-            form_data.meta.manifest = frontmatter
 
             FUNCTIONS = request.app.state.FUNCTIONS
             FUNCTIONS[form_data.id] = function_module
@@ -178,12 +195,13 @@ async def toggle_global_by_id(id: str, user=Depends(get_admin_user)):
 async def update_function_by_id(
     request: Request, id: str, form_data: FunctionForm, user=Depends(get_admin_user)
 ):
+    validate_function_metadata(form_data)
+
     try:
         form_data.content = replace_imports(form_data.content)
-        function_module, function_type, frontmatter = load_function_module_by_id(
+        function_module, function_type, _ = load_function_module_by_id(
             id, content=form_data.content
         )
-        form_data.meta.manifest = frontmatter
 
         FUNCTIONS = request.app.state.FUNCTIONS
         FUNCTIONS[id] = function_module
@@ -265,7 +283,7 @@ async def get_function_valves_spec_by_id(
         if id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[id]
         else:
-            function_module, function_type, frontmatter = load_function_module_by_id(id)
+            function_module, function_type, _ = load_function_module_by_id(id)
             request.app.state.FUNCTIONS[id] = function_module
 
         if hasattr(function_module, "Valves"):
@@ -293,7 +311,7 @@ async def update_function_valves_by_id(
         if id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[id]
         else:
-            function_module, function_type, frontmatter = load_function_module_by_id(id)
+            function_module, function_type, _ = load_function_module_by_id(id)
             request.app.state.FUNCTIONS[id] = function_module
 
         if hasattr(function_module, "Valves"):
@@ -356,7 +374,7 @@ async def get_function_user_valves_spec_by_id(
         if id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[id]
         else:
-            function_module, function_type, frontmatter = load_function_module_by_id(id)
+            function_module, function_type, _ = load_function_module_by_id(id)
             request.app.state.FUNCTIONS[id] = function_module
 
         if hasattr(function_module, "UserValves"):
@@ -380,7 +398,7 @@ async def update_function_user_valves_by_id(
         if id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[id]
         else:
-            function_module, function_type, frontmatter = load_function_module_by_id(id)
+            function_module, function_type, _ = load_function_module_by_id(id)
             request.app.state.FUNCTIONS[id] = function_module
 
         if hasattr(function_module, "UserValves"):

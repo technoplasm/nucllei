@@ -181,9 +181,9 @@ async def get_all_models(request, user: UserModel = None):
                     "id": f"{function.id}.{action['id']}",
                     "name": action.get("name", f"{function.name} ({action['id']})"),
                     "description": function.meta.description,
-                    "icon_url": action.get(
-                        "icon_url", function.meta.manifest.get("icon_url", None)
-                    ),
+                    # llens(#45): frontmatter(manifest.icon_url)は退役。個別 action が
+                    # 自前で icon_url を持てば使い、無ければ None(旧 frontmatter fallback 廃止)。
+                    "icon_url": action.get("icon_url", None),
                 }
                 for action in actions
             ]
@@ -193,7 +193,8 @@ async def get_all_models(request, user: UserModel = None):
                     "id": function.id,
                     "name": function.name,
                     "description": function.meta.description,
-                    "icon_url": function.meta.manifest.get("icon_url", None),
+                    # llens(#45): frontmatter(manifest.icon_url)退役 → None。
+                    "icon_url": None,
                 }
             ]
 

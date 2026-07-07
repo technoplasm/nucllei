@@ -99,8 +99,9 @@ class TestToolsMetadata(AbstractPostgresTest):
         assert res.status_code == 200
 
         row = self.Tools.get_tool_by_id("fm_probe")
-        # frontmatter は解析されない
-        assert row.meta.manifest == {}
+        # llens(#45): frontmatter 退役の掃除で manifest フィールド自体が撤去された
+        # (#44 では meta.manifest=={} を固定していたが、フィールドごと消えたので存在しない)。
+        assert not hasattr(row.meta, "manifest")
         # 真実源はフォーム値(frontmatter の Frontmatter Title / from frontmatter ではない)
         assert row.name == "Form Name"
         assert row.meta.description == "form description"
