@@ -83,18 +83,8 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.knowledge}
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/knowledge'
-								)
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/knowledge"
-							>
-								{$i18n.t('Knowledge')}
-							</a>
-						{/if}
+						<!-- llens(#48): Knowledge はメニューから撤去(KB は llens 不要 — 添付は file_id で
+						     チャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側)。route/backend は温存。 -->
 
 						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
 							<a
