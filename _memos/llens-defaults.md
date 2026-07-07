@@ -15,7 +15,8 @@ llens として upstream v0.6.5 の既定値から変更した設定の一覧。
 | `CODE_EXECUTION_ENGINE` | pyodide | **jupyter**(有効化時も Pyodide に戻さない) | #11 |
 | `ENABLE_CODE_INTERPRETER` | True | **False** | #11 |
 | `CODE_INTERPRETER_ENGINE` | pyodide | **jupyter** | #11 |
-| `ENABLE_EVALUATION_ARENA_MODELS` | True | **False** | #10 |
+| `ENABLE_EVALUATION_ARENA_MODELS` | True | **config ごと撲滅(#48)** | #10/#48 |
+| `ENABLE_MESSAGE_RATING` | True | **config ごと撲滅(#48)** | #48 |
 | `ENABLE_COMMUNITY_SHARING` | True | **False**(openwebui.com 導線を断つ) | #10 |
 フロント側の既定変更(env ではなくユーザー設定 `$settings` の未設定時フォールバック):
 
