@@ -4,7 +4,7 @@
 
 | 機能 | 判断 | 備考 |
 |---|---|---|
-| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #52(RAG/KB/Documents 保留)で後日) |
+| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #52(ファイルエンティティ設計)で後日) |
 | Documents(文書抽出) | **Docling が使えれば十分** | v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)。それ以上の投資不要 |
 | RAG / retrieval | **一切不使用** | 将来必要になってもツール側で実装する方針 |
 | Web 検索 | **残す(組み込みツールとして提供)** | OWUI 組み込みの RAG/検索経路ではなく、llens の組み込みツール枠で提供(#51)。RAG/Documents/Docling とは完全に別物 |
