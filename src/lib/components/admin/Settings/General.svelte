@@ -428,14 +428,7 @@
 
 					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
 
-					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Enable Community Sharing')}
-						</div>
-
-						<Switch bind:state={adminConfig.ENABLE_COMMUNITY_SHARING} />
-					</div>
-
+					<!-- llens(#10): コミュニティ共有(openwebui.com ストア導線)は機能ごと撤去。 -->
 					<!-- llens(#48): 評価(👍/👎)機能撤去に伴い Message Rating トグルを撤去。 -->
 
 					<div class="mb-2.5 flex w-full items-center justify-between pr-2">

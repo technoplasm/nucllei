@@ -216,7 +216,6 @@ type Config = {
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_admin_chat_access: boolean;
-		enable_community_sharing: boolean;
 		enable_autocomplete_generation: boolean;
 	};
 	oauth: {

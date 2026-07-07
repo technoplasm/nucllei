@@ -1164,14 +1164,7 @@ ENABLE_ADMIN_CHAT_ACCESS = (
     os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
 )
 
-# llens: openwebui.com への共有導線は air-gapped 前提のため既定 OFF
-# (issue #10 ストア導線の除去、fork.md §6)
-ENABLE_COMMUNITY_SHARING = RuntimeConfig(
-    "ENABLE_COMMUNITY_SHARING",
-    "ui.enable_community_sharing",
-    os.environ.get("ENABLE_COMMUNITY_SHARING", "False").lower() == "true",
-)
-
+# llens(#10): openwebui.com コミュニティ共有(ストア導線)は air-gapped 前提のため機能ごと撤去。
 # llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
 
 ENABLE_USER_WEBHOOKS = RuntimeConfig(
