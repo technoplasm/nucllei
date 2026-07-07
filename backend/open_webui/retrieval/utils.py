@@ -400,30 +400,17 @@ def get_embedding_function(
         raise ValueError(f"Unknown embedding engine: {embedding_engine}")
 
 
-def get_sources_from_files(
-    request,
-    files,
-    queries,
-    embedding_function,
-    k,
-    reranking_function,
-    k_reranker,
-    r,
-    hybrid_search,
-    full_context=False,
-):
-    log.debug(
-        f"files: {files} {queries} {embedding_function} {reranking_function} {full_context}"
-    )
+def get_sources_from_files(request, files):
+    # RAG 撤去(#52): ベクタ検索・チャンク・reranking を廃止。添付は data.content を全文注入する。
+    log.debug(f"files: {files}")
 
-    extracted_collections = []
     relevant_contexts = []
 
     for file in files:
 
         context = None
         if file.get("docs"):
-            # BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
+            # BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL(Web 検索の bypass 経路)
             context = {
                 "documents": [[doc.get("content") for doc in file.get("docs")]],
                 "metadatas": [[doc.get("metadata") for doc in file.get("docs")]],
@@ -434,11 +421,8 @@ def get_sources_from_files(
                 "documents": [[file.get("file").get("data", {}).get("content")]],
                 "metadatas": [[{"file_id": file.get("id"), "name": file.get("name")}]],
             }
-        elif (
-            file.get("type") != "web_search"
-            and request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
-        ):
-            # BYPASS_EMBEDDING_AND_RETRIEVAL
+        elif file.get("type") != "web_search":
+            # 全文注入(唯一経路): 添付ファイルの data.content をそのまま積む
             if file.get("type") == "collection":
                 file_ids = file.get("data", {}).get("file_ids", [])
 
@@ -484,66 +468,6 @@ def get_sources_from_files(
                         [file.get("file").get("data", {}).get("metadata", {})]
                     ],
                 }
-        else:
-            collection_names = []
-            if file.get("type") == "collection":
-                if file.get("legacy"):
-                    collection_names = file.get("collection_names", [])
-                else:
-                    collection_names.append(file["id"])
-            elif file.get("collection_name"):
-                collection_names.append(file["collection_name"])
-            elif file.get("id"):
-                if file.get("legacy"):
-                    collection_names.append(f"{file['id']}")
-                else:
-                    collection_names.append(f"file-{file['id']}")
-
-            collection_names = set(collection_names).difference(extracted_collections)
-            if not collection_names:
-                log.debug(f"skipping {file} as it has already been extracted")
-                continue
-
-            if full_context:
-                try:
-                    context = get_all_items_from_collections(collection_names)
-                except Exception as e:
-                    log.exception(e)
-
-            else:
-                try:
-                    context = None
-                    if file.get("type") == "text":
-                        context = file["content"]
-                    else:
-                        if hybrid_search:
-                            try:
-                                context = query_collection_with_hybrid_search(
-                                    collection_names=collection_names,
-                                    queries=queries,
-                                    embedding_function=embedding_function,
-                                    k=k,
-                                    reranking_function=reranking_function,
-                                    k_reranker=k_reranker,
-                                    r=r,
-                                )
-                            except Exception as e:
-                                log.debug(
-                                    "Error when using hybrid search, using"
-                                    " non hybrid search as fallback."
-                                )
-
-                        if (not hybrid_search) or (context is None):
-                            context = query_collection(
-                                collection_names=collection_names,
-                                queries=queries,
-                                embedding_function=embedding_function,
-                                k=k,
-                            )
-                except Exception as e:
-                    log.exception(e)
-
-            extracted_collections.extend(collection_names)
 
         if context:
             if "data" in file:
