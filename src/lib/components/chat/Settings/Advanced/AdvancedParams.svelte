@@ -137,25 +137,32 @@
 					{#if (params?.reasoning_effort ?? null) === null}
 						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.reasoning_effort ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={$i18n.t('Enter reasoning effort')}
+								bind:value={params.reasoning_effort}
+								autocomplete="off"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.reasoning_effort ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-						type="text"
-						placeholder={$i18n.t('Enter reasoning effort')}
-						bind:value={params.reasoning_effort}
-						autocomplete="off"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-4 mb-1">
@@ -183,37 +190,44 @@
 					{#if (params?.temperature ?? null) === null}
 						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.temperature ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="2"
+								step="0.05"
+								bind:value={params.temperature}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.temperature}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="2"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.temperature ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="2"
-						step="0.05"
-						bind:value={params.temperature}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.temperature}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="2"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -238,37 +252,44 @@
 					{#if (params?.top_k ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.top_k ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="1000"
+								step="0.5"
+								bind:value={params.top_k}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.top_k}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="100"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.top_k ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="1000"
-						step="0.5"
-						bind:value={params.top_k}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.top_k}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="100"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -294,37 +315,44 @@
 					{#if (params?.top_p ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.top_p ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="1"
+								step="0.05"
+								bind:value={params.top_p}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.top_p}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="1"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.top_p ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="1"
-						step="0.05"
-						bind:value={params.top_p}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.top_p}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="1"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -349,37 +377,44 @@
 					{#if (params?.min_p ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.min_p ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="1"
+								step="0.05"
+								bind:value={params.min_p}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.min_p}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="1"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.min_p ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="1"
-						step="0.05"
-						bind:value={params.min_p}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.min_p}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="1"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -405,36 +440,43 @@
 					{#if (params?.max_tokens ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.max_tokens ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-2"
+								max="131072"
+								step="1"
+								bind:value={params.max_tokens}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.max_tokens}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-2"
+								step="1"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.max_tokens ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-2"
-						max="131072"
-						step="1"
-						bind:value={params.max_tokens}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.max_tokens}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-2"
-						step="1"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -460,26 +502,33 @@
 					{#if (params?.seed ?? null) === null}
 						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.seed ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="number"
+								placeholder={$i18n.t('Enter Seed')}
+								bind:value={params.seed}
+								autocomplete="off"
+								min="0"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.seed ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-						type="number"
-						placeholder={$i18n.t('Enter Seed')}
-						bind:value={params.seed}
-						autocomplete="off"
-						min="0"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -505,25 +554,32 @@
 					{#if (params?.stop ?? null) === null}
 						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.stop ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={$i18n.t('Enter stop sequence')}
+								bind:value={params.stop}
+								autocomplete="off"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.stop ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-						type="text"
-						placeholder={$i18n.t('Enter stop sequence')}
-						bind:value={params.stop}
-						autocomplete="off"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -549,37 +605,44 @@
 					{#if (params?.frequency_penalty ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.frequency_penalty ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-2"
+								max="2"
+								step="0.05"
+								bind:value={params.frequency_penalty}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.frequency_penalty}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-2"
+								max="2"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.frequency_penalty ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-2"
-						max="2"
-						step="0.05"
-						bind:value={params.frequency_penalty}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.frequency_penalty}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-2"
-						max="2"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -605,37 +668,44 @@
 					{#if (params?.presence_penalty ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.presence_penalty ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-2"
+								max="2"
+								step="0.05"
+								bind:value={params.presence_penalty}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.presence_penalty}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-2"
+								max="2"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.presence_penalty ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-2"
-						max="2"
-						step="0.05"
-						bind:value={params.presence_penalty}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.presence_penalty}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-2"
-						max="2"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -659,37 +729,44 @@
 					{#if (params?.repeat_last_n ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.repeat_last_n ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-1"
+								max="128"
+								step="1"
+								bind:value={params.repeat_last_n}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.repeat_last_n}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-1"
+								max="128"
+								step="1"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.repeat_last_n ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-1"
-						max="128"
-						step="1"
-						bind:value={params.repeat_last_n}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.repeat_last_n}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-1"
-						max="128"
-						step="1"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -715,37 +792,44 @@
 					{#if (params?.repeat_penalty ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.repeat_penalty ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-2"
+								max="2"
+								step="0.05"
+								bind:value={params.repeat_penalty}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.repeat_penalty}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-2"
+								max="2"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.repeat_penalty ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-2"
-						max="2"
-						step="0.05"
-						bind:value={params.repeat_penalty}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.repeat_penalty}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-2"
-						max="2"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -771,37 +855,44 @@
 					{#if (params?.tfs_z ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.tfs_z ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="2"
+								step="0.05"
+								bind:value={params.tfs_z}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.tfs_z}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="2"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.tfs_z ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="2"
-						step="0.05"
-						bind:value={params.tfs_z}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.tfs_z}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="2"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -826,27 +917,34 @@
 					{#if (params?.logit_bias ?? null) === null}
 						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
 					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.logit_bias ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								class="w-full rounded-lg pl-2 py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={$i18n.t(
+									'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
+								)}
+								bind:value={params.logit_bias}
+								autocomplete="off"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.logit_bias ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="w-full rounded-lg pl-2 py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-						type="text"
-						placeholder={$i18n.t(
-							'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
-						)}
-						bind:value={params.logit_bias}
-						autocomplete="off"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-4 mb-1">
@@ -872,37 +970,44 @@
 					{#if (params?.mirostat ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.mirostat ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="2"
+								step="1"
+								bind:value={params.mirostat}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.mirostat}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="2"
+								step="1"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.mirostat ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="2"
-						step="1"
-						bind:value={params.mirostat}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.mirostat}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="2"
-						step="1"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -927,37 +1032,44 @@
 					{#if (params?.mirostat_eta ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.mirostat_eta ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="1"
+								step="0.05"
+								bind:value={params.mirostat_eta}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.mirostat_eta}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="1"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.mirostat_eta ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="1"
-						step="0.05"
-						bind:value={params.mirostat_eta}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.mirostat_eta}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="1"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -983,37 +1095,44 @@
 					{#if (params?.mirostat_tau ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.mirostat_tau ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="0"
+								max="10"
+								step="0.5"
+								bind:value={params.mirostat_tau}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.mirostat_tau}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="0"
+								max="10"
+								step="any"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.mirostat_tau ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="0"
-						max="10"
-						step="0.5"
-						bind:value={params.mirostat_tau}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.mirostat_tau}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="0"
-						max="10"
-						step="any"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-4 mb-1">
@@ -1042,36 +1161,43 @@
 					{#if (params?.num_keep ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.num_keep ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-1"
+								max="10240000"
+								step="1"
+								bind:value={params.num_keep}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div class="">
+							<input
+								bind:value={params.num_keep}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-1"
+								step="1"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.num_keep ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-1"
-						max="10240000"
-						step="1"
-						bind:value={params.num_keep}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div class="">
-					<input
-						bind:value={params.num_keep}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-1"
-						step="1"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -1095,36 +1221,43 @@
 					{#if (params?.num_ctx ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.num_ctx ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="-1"
+								max="10240000"
+								step="1"
+								bind:value={params.num_ctx}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div class="">
+							<input
+								bind:value={params.num_ctx}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="-1"
+								step="1"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.num_ctx ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="-1"
-						max="10240000"
-						step="1"
-						bind:value={params.num_ctx}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div class="">
-					<input
-						bind:value={params.num_ctx}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="-1"
-						step="1"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">
@@ -1150,36 +1283,43 @@
 					{#if (params?.num_batch ?? null) === null}
 						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-4 self-center"
+							><path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/></svg
+						>
 					{/if}
 				</button>
+				{#if (params?.num_batch ?? null) !== null}
+					<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="w-40 shrink-0">
+							<input
+								id="steps-range"
+								type="range"
+								min="256"
+								max="8192"
+								step="256"
+								bind:value={params.num_batch}
+								class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+							/>
+						</div>
+						<div>
+							<input
+								bind:value={params.num_batch}
+								type="number"
+								class=" bg-transparent text-center w-14"
+								min="256"
+								step="256"
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</Tooltip>
-
-		{#if (params?.num_batch ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						id="steps-range"
-						type="range"
-						min="256"
-						max="8192"
-						step="256"
-						bind:value={params.num_batch}
-						class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-					/>
-				</div>
-				<div>
-					<input
-						bind:value={params.num_batch}
-						type="number"
-						class=" bg-transparent text-center w-14"
-						min="256"
-						step="256"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	{#if admin}
@@ -1205,22 +1345,29 @@
 						{#if (params?.use_mmap ?? null) === null}
 							<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="size-4 self-center"
+								><path
+									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+								/></svg
+							>
 						{/if}
 					</button>
+					{#if (params?.use_mmap ?? null) !== null}
+						<div class="flex items-center gap-2 flex-row-reverse">
+							<div class="text-xs text-gray-500">
+								{params.use_mmap ? 'Enabled' : 'Disabled'}
+							</div>
+							<div class=" pr-2">
+								<Switch bind:state={params.use_mmap} />
+							</div>
+						</div>
+					{/if}
 				</div>
 			</Tooltip>
-
-			{#if (params?.use_mmap ?? null) !== null}
-				<div class="flex justify-between items-center mt-1">
-					<div class="text-xs text-gray-500">
-						{params.use_mmap ? 'Enabled' : 'Disabled'}
-					</div>
-					<div class=" pr-2">
-						<Switch bind:state={params.use_mmap} />
-					</div>
-				</div>
-			{/if}
 		</div>
 
 		<div class=" py-0.5 w-full justify-between">
@@ -1246,23 +1393,30 @@
 						{#if (params?.use_mlock ?? null) === null}
 							<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="size-4 self-center"
+								><path
+									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+								/></svg
+							>
 						{/if}
 					</button>
+					{#if (params?.use_mlock ?? null) !== null}
+						<div class="flex items-center gap-2 flex-row-reverse">
+							<div class="text-xs text-gray-500">
+								{params.use_mlock ? 'Enabled' : 'Disabled'}
+							</div>
+
+							<div class=" pr-2">
+								<Switch bind:state={params.use_mlock} />
+							</div>
+						</div>
+					{/if}
 				</div>
 			</Tooltip>
-
-			{#if (params?.use_mlock ?? null) !== null}
-				<div class="flex justify-between items-center mt-1">
-					<div class="text-xs text-gray-500">
-						{params.use_mlock ? 'Enabled' : 'Disabled'}
-					</div>
-
-					<div class=" pr-2">
-						<Switch bind:state={params.use_mlock} />
-					</div>
-				</div>
-			{/if}
 		</div>
 
 		<div class=" py-0.5 w-full justify-between">
@@ -1288,37 +1442,44 @@
 						{#if (params?.num_thread ?? null) === null}
 							<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="size-4 self-center"
+								><path
+									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+								/></svg
+							>
 						{/if}
 					</button>
+					{#if (params?.num_thread ?? null) !== null}
+						<div class="flex items-center gap-2 flex-row-reverse">
+							<div class="w-40 shrink-0">
+								<input
+									id="steps-range"
+									type="range"
+									min="1"
+									max="256"
+									step="1"
+									bind:value={params.num_thread}
+									class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+								/>
+							</div>
+							<div class="">
+								<input
+									bind:value={params.num_thread}
+									type="number"
+									class=" bg-transparent text-center w-14"
+									min="1"
+									max="256"
+									step="1"
+								/>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</Tooltip>
-
-			{#if (params?.num_thread ?? null) !== null}
-				<div class="flex mt-0.5 space-x-2">
-					<div class=" flex-1">
-						<input
-							id="steps-range"
-							type="range"
-							min="1"
-							max="256"
-							step="1"
-							bind:value={params.num_thread}
-							class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-						/>
-					</div>
-					<div class="">
-						<input
-							bind:value={params.num_thread}
-							type="number"
-							class=" bg-transparent text-center w-14"
-							min="1"
-							max="256"
-							step="1"
-						/>
-					</div>
-				</div>
-			{/if}
 		</div>
 
 		<div class=" py-0.5 w-full justify-between">
@@ -1344,37 +1505,44 @@
 						{#if (params?.num_gpu ?? null) === null}
 							<span class="ml-2 self-center">{$i18n.t('Default')}</span>
 						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="size-4 self-center"
+								><path
+									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+								/></svg
+							>
 						{/if}
 					</button>
+					{#if (params?.num_gpu ?? null) !== null}
+						<div class="flex items-center gap-2 flex-row-reverse">
+							<div class="w-40 shrink-0">
+								<input
+									id="steps-range"
+									type="range"
+									min="0"
+									max="256"
+									step="1"
+									bind:value={params.num_gpu}
+									class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
+								/>
+							</div>
+							<div class="">
+								<input
+									bind:value={params.num_gpu}
+									type="number"
+									class=" bg-transparent text-center w-14"
+									min="0"
+									max="256"
+									step="1"
+								/>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</Tooltip>
-
-			{#if (params?.num_gpu ?? null) !== null}
-				<div class="flex mt-0.5 space-x-2">
-					<div class=" flex-1">
-						<input
-							id="steps-range"
-							type="range"
-							min="0"
-							max="256"
-							step="1"
-							bind:value={params.num_gpu}
-							class="w-full h-2 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
-						/>
-					</div>
-					<div class="">
-						<input
-							bind:value={params.num_gpu}
-							type="number"
-							class=" bg-transparent text-center w-14"
-							min="0"
-							max="256"
-							step="1"
-						/>
-					</div>
-				</div>
-			{/if}
 		</div>
 	{/if}
 </div>
