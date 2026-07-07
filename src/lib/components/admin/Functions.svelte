@@ -5,26 +5,21 @@
 	import { onMount, getContext, tick } from 'svelte';
 
 	import { goto } from '$app/navigation';
-	import {
-		deleteFunctionById,
-		getFunctions,
-		toggleFunctionById,
-		toggleGlobalById
-	} from '$lib/apis/functions';
+	import { deleteFunctionById, getFunctions } from '$lib/apis/functions';
 
 	import Tooltip from '../common/Tooltip.svelte';
 	import { getModels } from '$lib/apis';
 	import FunctionMenu from './Functions/FunctionMenu.svelte';
 	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
-	import Switch from '../common/Switch.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
 
-	// llens(#45): share/clone/export/import・openwebui.com community・version/manifest 表示は
-	// 撤去(air-gapped、tool #44 と同型)。残すは 一覧/検索/作成/編集/削除/有効トグル/global トグル。
+	// llens(#45): share/clone/export/import・openwebui.com community・version/manifest 表示を撤去。
+	// llens(#46): is_active / is_global 撤去 → 有効/global トグルも廃止。適用制御はワークスペースの
+	// モデル別 filterIds / actionIds 割り当て一本。残すは 一覧/検索/作成/編集/削除 のみ(skill/tool 同型)。
 	const i18n = getContext('i18n');
 
 	let shiftKey = false;
@@ -54,32 +49,6 @@
 
 		if (res) {
 			toast.success($i18n.t('Function deleted successfully'));
-
-			functions.set(await getFunctions(localStorage.token));
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
-		}
-	};
-
-	const toggleGlobalHandler = async (func) => {
-		const res = await toggleGlobalById(localStorage.token, func.id).catch((error) => {
-			toast.error(`${error}`);
-		});
-
-		if (res) {
-			if (func.is_global) {
-				func.type === 'filter'
-					? toast.success($i18n.t('Filter is now globally enabled'))
-					: toast.success($i18n.t('Function is now globally enabled'));
-			} else {
-				func.type === 'filter'
-					? toast.success($i18n.t('Filter is now globally disabled'))
-					: toast.success($i18n.t('Function is now globally disabled'));
-			}
 
 			functions.set(await getFunctions(localStorage.token));
 			models.set(
@@ -245,11 +214,6 @@
 							selectedFunction = func;
 							showDeleteConfirm = true;
 						}}
-						toggleGlobalHandler={() => {
-							if (['filter', 'action'].includes(func.type)) {
-								toggleGlobalHandler(func);
-							}
-						}}
 						onClose={() => {}}
 					>
 						<button
@@ -260,24 +224,6 @@
 						</button>
 					</FunctionMenu>
 				{/if}
-
-				<div class=" self-center mx-1">
-					<Tooltip content={func.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
-						<Switch
-							bind:state={func.is_active}
-							on:change={async (e) => {
-								toggleFunctionById(localStorage.token, func.id);
-								models.set(
-									await getModels(
-										localStorage.token,
-										$config?.features?.enable_direct_connections &&
-											($settings?.directConnections ?? null)
-									)
-								);
-							}}
-						/>
-					</Tooltip>
-				</div>
 			</div>
 		</div>
 	{/each}

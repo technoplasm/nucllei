@@ -87,7 +87,6 @@ from open_webui.routers.retrieval import (
 
 from open_webui.internal.db import Session, engine
 
-from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
 from open_webui.models.chats import Chats
@@ -385,8 +384,9 @@ from open_webui.utils.redis import get_sentinels_from_env
 
 
 if SAFE_MODE:
+    # llens(#46): function の is_active 撤去に伴い SAFE_MODE の一括無効化は廃止
+    # (function は割り当てられたモデルでのみ動く。無効化したいなら割り当て解除)。
     print("SAFE MODE ENABLED")
-    Functions.deactivate_all_functions()
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)

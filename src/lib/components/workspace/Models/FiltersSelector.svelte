@@ -38,18 +38,12 @@
 				{#each Object.keys(_filters) as filter, filterIdx}
 					<div class=" flex items-center gap-2 mr-3">
 						<div class="self-center flex items-center">
+							<!-- llens(#46): is_global 撤去 → 強制 checked+disabled をやめ、モデル別に自由トグル -->
 							<Checkbox
-								state={_filters[filter].is_global
-									? 'checked'
-									: _filters[filter].selected
-										? 'checked'
-										: 'unchecked'}
-								disabled={_filters[filter].is_global}
+								state={_filters[filter].selected ? 'checked' : 'unchecked'}
 								on:change={(e) => {
-									if (!_filters[filter].is_global) {
-										_filters[filter].selected = e.detail === 'checked';
-										selectedFilterIds = Object.keys(_filters).filter((t) => _filters[t].selected);
-									}
+									_filters[filter].selected = e.detail === 'checked';
+									selectedFilterIds = Object.keys(_filters).filter((t) => _filters[t].selected);
 								}}
 							/>
 						</div>

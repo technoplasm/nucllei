@@ -192,69 +192,8 @@ export const deleteFunctionById = async (token: string, id: string) => {
 	return res;
 };
 
-export const toggleFunctionById = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/toggle`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const toggleGlobalById = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/toggle/global`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
+// llens(#46): toggleFunctionById(/toggle)・toggleGlobalById(/toggle/global)は撤去。
+// function の適用制御はモデルの filterIds / actionIds 割り当て一本。
 
 export const getFunctionValvesById = async (token: string, id: string) => {
 	let error = null;

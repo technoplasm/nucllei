@@ -323,7 +323,8 @@ class TestFilterPipelineDB(AbstractPostgresTest):
 
         cls.functions = Functions
 
-    def _insert_filter(self, fid, priority=0, is_global=False):
+    def _insert_filter(self, fid, priority=0):
+        # llens(#46): is_active / is_global 撤去。filter はモデルの filterIds 割り当てのみで適用。
         from open_webui.models.functions import FunctionForm, FunctionMeta
 
         function = self.functions.insert_new_function(
@@ -333,13 +334,10 @@ class TestFilterPipelineDB(AbstractPostgresTest):
                 id=fid,
                 name=fid,
                 content=FILTER_CONTENT_TEMPLATE.replace("{fid}", fid),
-                meta=FunctionMeta(description=None, manifest={}),
+                meta=FunctionMeta(description="test filter"),
             ),
         )
         assert function is not None
-        self.functions.update_function_by_id(
-            fid, {"is_active": True, "is_global": is_global}
-        )
         if priority:
             self.functions.update_function_valves_by_id(fid, {"priority": priority})
         return function
@@ -347,18 +345,17 @@ class TestFilterPipelineDB(AbstractPostgresTest):
     def test_get_sorted_filter_ids_priority_and_scope(self):
         from open_webui.utils.filter import get_sorted_filter_ids
 
-        # global フィルタ + モデル紐付けフィルタが priority 昇順で並ぶ
-        self._insert_filter("f_global", priority=10, is_global=True)
+        # llens(#46): モデルの filterIds 割り当てのみが priority 昇順で並ぶ。
         self._insert_filter("f_model_a", priority=5)
         self._insert_filter("f_model_b", priority=1)
-        # 非アクティブは除外される
-        self._insert_filter("f_inactive")
-        self.functions.update_function_by_id("f_inactive", {"is_active": False})
+        # 割り当てられていない filter は出ない
+        self._insert_filter("f_unassigned", priority=1)
 
         model = {
-            "info": {"meta": {"filterIds": ["f_model_a", "f_model_b", "f_inactive"]}}
+            # "nonexistent" は実在しないので弾かれる(削除済み ID ガード)
+            "info": {"meta": {"filterIds": ["f_model_a", "f_model_b", "nonexistent"]}}
         }
-        assert get_sorted_filter_ids(model) == ["f_model_b", "f_model_a", "f_global"]
+        assert get_sorted_filter_ids(model) == ["f_model_b", "f_model_a"]
 
     def test_pipeline_inlet_llm_outlet_order(self):
         """inlet → (LLM 相当の応答生成) → outlet の一連の流れを固定する。"""
@@ -367,10 +364,10 @@ class TestFilterPipelineDB(AbstractPostgresTest):
             process_filter_functions,
         )
 
-        self._insert_filter("f_first", priority=1, is_global=True)
-        self._insert_filter("f_second", priority=2, is_global=True)
+        self._insert_filter("f_first", priority=1)
+        self._insert_filter("f_second", priority=2)
 
-        model = {"info": {"meta": {"filterIds": []}}}
+        model = {"info": {"meta": {"filterIds": ["f_first", "f_second"]}}}
         sorted_ids = get_sorted_filter_ids(model)
         assert sorted_ids == ["f_first", "f_second"]
 
@@ -414,7 +411,7 @@ class TestFilterPipelineDB(AbstractPostgresTest):
         """stream フィルタが SSE イベント(delta chunk)を加工できることを固定する。"""
         from open_webui.utils.filter import process_filter_functions
 
-        self._insert_filter("f_stream", is_global=True)
+        self._insert_filter("f_stream")
 
         request = make_request()
         filter_functions = [self.functions.get_function_by_id("f_stream")]
@@ -438,7 +435,7 @@ class TestFilterPipelineDB(AbstractPostgresTest):
         """DB に保存した valves がモジュールインスタンスへ反映される。"""
         from open_webui.utils.filter import process_filter_functions
 
-        self._insert_filter("f_valved", is_global=True)
+        self._insert_filter("f_valved")
         self.functions.update_function_valves_by_id("f_valved", {"priority": 7})
 
         request = make_request()
@@ -458,7 +455,7 @@ class TestFilterPipelineDB(AbstractPostgresTest):
         """一度ロードしたモジュールは app.state.FUNCTIONS から再利用される。"""
         from open_webui.utils.filter import process_filter_functions
 
-        self._insert_filter("f_cache", is_global=True)
+        self._insert_filter("f_cache")
 
         request = make_request()
         filter_functions = [self.functions.get_function_by_id("f_cache")]

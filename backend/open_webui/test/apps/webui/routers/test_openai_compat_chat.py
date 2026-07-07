@@ -181,6 +181,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             Functions,
         )
 
+        # llens(#46): is_active / is_global 撤去。適用はモデルの filterIds 割り当てで行う。
         Functions.insert_new_function(
             user_id="1",
             type="filter",
@@ -188,11 +189,8 @@ class TestOpenAICompatChat(AbstractPostgresTest):
                 id="e2e_filter",
                 name="e2e_filter",
                 content=E2E_FILTER_CONTENT,
-                meta=FunctionMeta(description=None, manifest={}),
+                meta=FunctionMeta(description="e2e filter"),
             ),
-        )
-        Functions.update_function_by_id(
-            "e2e_filter", {"is_active": True, "is_global": True}
         )
 
     def test_chat_completion_with_base_url_only(self):
@@ -240,17 +238,23 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         model_ids = [m["id"] for m in response.json()["data"]]
         assert "mock-model" not in model_ids
 
-    def _create_preset(self, model_id="my-preset", access_control=None):
+    def _create_preset(
+        self, model_id="my-preset", access_control=None, filter_ids=None
+    ):
+        meta = {
+            "profile_image_url": "/static/favicon.png",
+            "description": "preset with system prompt",
+            "capabilities": None,
+            "model_config": {},
+        }
+        # llens(#46): filter は preset のモデル別 filterIds 割り当てのみで適用される。
+        if filter_ids is not None:
+            meta["filterIds"] = filter_ids
         payload = {
             "id": model_id,
             "base_model_id": "mock-model",
             "name": "My Preset",
-            "meta": {
-                "profile_image_url": "/static/favicon.png",
-                "description": "preset with system prompt",
-                "capabilities": None,
-                "model_config": {},
-            },
+            "meta": meta,
             "params": {},
             "access_control": access_control,
         }
@@ -306,14 +310,15 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert "mock-model" in model_ids
 
     def test_inlet_filter_applies_before_llm(self):
-        """global inlet フィルタの加工がモデルへのリクエストに反映される。"""
+        """inlet フィルタの加工がモデルへのリクエストに反映される(preset の filterIds 経由)。"""
         self._register_e2e_filter()
+        self._create_preset(model_id="filtered-preset", filter_ids=["e2e_filter"])
 
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 "/api/chat/completions",
                 json={
-                    "model": "mock-model",
+                    "model": "filtered-preset",
                     "messages": [{"role": "user", "content": "hi"}],
                     "stream": False,
                 },
@@ -351,6 +356,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             Functions,
         )
 
+        # llens(#46): is_active / is_global 撤去。preset の filterIds 割り当てで適用する。
         Functions.insert_new_function(
             user_id="1",
             type="filter",
@@ -358,18 +364,16 @@ class TestOpenAICompatChat(AbstractPostgresTest):
                 id="stream_filter",
                 name="stream_filter",
                 content=STREAM_FILTER_CONTENT,
-                meta=FunctionMeta(description=None, manifest={}),
+                meta=FunctionMeta(description="stream filter"),
             ),
         )
-        Functions.update_function_by_id(
-            "stream_filter", {"is_active": True, "is_global": True}
-        )
+        self._create_preset(model_id="stream-preset", filter_ids=["stream_filter"])
 
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 "/api/chat/completions",
                 json={
-                    "model": "mock-model",
+                    "model": "stream-preset",
                     "messages": [{"role": "user", "content": "hi"}],
                     "stream": True,
                 },
@@ -381,8 +385,9 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert "chunk-1" not in response.text
 
     def test_outlet_filter_applies_on_completed(self):
-        """/api/chat/completed で global outlet フィルタが応答に適用される。"""
+        """/api/chat/completed で outlet フィルタが応答に適用される(preset の filterIds 経由)。"""
         self._register_e2e_filter()
+        self._create_preset(model_id="filtered-preset", filter_ids=["e2e_filter"])
 
         # モデル一覧をキャッシュさせる(chat/completed は app.state.MODELS を参照)
         with mock_webui_user(id="1", role="admin"):
@@ -393,7 +398,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             response = self.fast_api_client.post(
                 "/api/chat/completed",
                 json={
-                    "model": "mock-model",
+                    "model": "filtered-preset",
                     "chat_id": "chat-1",
                     "id": "message-1",
                     "session_id": "session-1",

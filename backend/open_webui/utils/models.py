@@ -102,12 +102,10 @@ async def get_all_models(request, user: UserModel = None):
             ]
         models = models + arena_models
 
-    global_action_ids = [
-        function.id for function in Functions.get_global_action_functions()
-    ]
-    enabled_action_ids = [
-        function.id
-        for function in Functions.get_functions_by_type("action", active_only=True)
+    # llens(#46): global/active 撤去 → action はモデルの actionIds 割り当てのみ。
+    # 実在する action type の function に絞る(削除済み ID を弾く)。
+    action_function_ids = [
+        function.id for function in Functions.get_functions_by_type("action")
     ]
 
     custom_models = Models.get_all_models()
@@ -208,8 +206,8 @@ async def get_all_models(request, user: UserModel = None):
     for model in models:
         action_ids = [
             action_id
-            for action_id in list(set(model.pop("action_ids", []) + global_action_ids))
-            if action_id in enabled_action_ids
+            for action_id in list(set(model.pop("action_ids", [])))
+            if action_id in action_function_ids
         ]
 
         model["actions"] = []

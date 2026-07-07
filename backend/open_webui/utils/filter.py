@@ -17,17 +17,16 @@ def get_sorted_filter_ids(model: dict):
             return valves.get("priority", 0) if valves else 0
         return 0
 
-    filter_ids = [function.id for function in Functions.get_global_filter_functions()]
+    # llens(#46): global/active 撤去 → filter はモデルの filterIds 割り当てのみで適用。
+    filter_ids = []
     if "info" in model and "meta" in model["info"]:
-        filter_ids.extend(model["info"]["meta"].get("filterIds", []))
-        filter_ids = list(set(filter_ids))
+        filter_ids = list(set(model["info"]["meta"].get("filterIds", [])))
 
-    enabled_filter_ids = [
-        function.id
-        for function in Functions.get_functions_by_type("filter", active_only=True)
+    # 実在する filter type の function だけに絞る(削除済み ID を弾く)。
+    filter_function_ids = [
+        function.id for function in Functions.get_functions_by_type("filter")
     ]
-
-    filter_ids = [fid for fid in filter_ids if fid in enabled_filter_ids]
+    filter_ids = [fid for fid in filter_ids if fid in filter_function_ids]
     filter_ids.sort(key=get_priority)
     return filter_ids
 

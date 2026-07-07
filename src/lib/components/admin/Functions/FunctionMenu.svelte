@@ -6,19 +6,13 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Switch from '$lib/components/common/Switch.svelte';
-	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
 	// llens(#45): share/clone/export は撤去(air-gapped、skill / tool と同型)。
-	// Global トグル(filter/action)は function 固有機能なので温存。
+	// llens(#46): global トグルも撤去(適用制御は per-model 割り当て一本)。Edit/Delete のみ。
 	const i18n = getContext('i18n');
-
-	export let func;
 
 	export let editHandler: Function;
 	export let deleteHandler: Function;
-	export let toggleGlobalHandler: Function;
-
 	export let onClose: Function;
 
 	let show = false;
@@ -38,30 +32,12 @@
 
 	<div slot="content">
 		<DropdownMenu.Content
-			class="w-full max-w-[180px] rounded-xl px-1 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+			class="w-full max-w-[160px] rounded-xl px-1 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 			sideOffset={-2}
 			side="bottom"
 			align="start"
 			transition={flyAndScale}
 		>
-			{#if ['filter', 'action'].includes(func.type)}
-				<div
-					class="flex gap-2 justify-between items-center px-3 py-2 text-sm font-medium cursor-pointerrounded-md"
-				>
-					<div class="flex gap-2 items-center">
-						<GlobeAlt />
-
-						<div class="flex items-center">{$i18n.t('Global')}</div>
-					</div>
-
-					<div>
-						<Switch on:change={toggleGlobalHandler} bind:state={func.is_global} />
-					</div>
-				</div>
-
-				<hr class="border-gray-100 dark:border-gray-850 my-1" />
-			{/if}
-
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-2 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-md"
 				on:click={() => {

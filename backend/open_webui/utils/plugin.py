@@ -130,8 +130,8 @@ def load_function_module_by_id(function_id, content=None):
     except Exception as e:
         log.error(f"Error loading module: {function_id}: {e}")
         del sys.modules[module_name]  # Cleanup by removing the module in case of error
-
-        Functions.update_function_by_id(function_id, {"is_active": False})
+        # llens(#46): is_active 撤去に伴い、ロード失敗時の自動無効化はしない
+        # (壊れた function は割り当て解除 or 修正で対処)。
         raise e
     finally:
         os.unlink(temp_file.name)

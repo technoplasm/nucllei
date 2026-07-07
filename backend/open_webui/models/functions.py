@@ -6,7 +6,7 @@ from open_webui.internal.db import Base, JSONField, get_db
 from open_webui.models.users import Users
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Boolean, Column, String, Text
+from sqlalchemy import BigInteger, Column, String, Text
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -26,8 +26,8 @@ class Function(Base):
     content = Column(Text)
     meta = Column(JSONField)
     valves = Column(JSONField)
-    is_active = Column(Boolean)
-    is_global = Column(Boolean)
+    # llens(#46): is_active / is_global は撤去。function の適用制御はモデルの
+    # filterIds / actionIds 割り当て一本(pipe は存在すればモデルとして出る)。
     updated_at = Column(BigInteger)
     created_at = Column(BigInteger)
 
@@ -44,8 +44,6 @@ class FunctionModel(BaseModel):
     type: str
     content: str
     meta: FunctionMeta
-    is_active: bool = False
-    is_global: bool = False
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
 
@@ -63,8 +61,6 @@ class FunctionResponse(BaseModel):
     type: str
     name: str
     meta: FunctionMeta
-    is_active: bool
-    is_global: bool
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
 
@@ -116,52 +112,18 @@ class FunctionsTable:
         except Exception:
             return None
 
-    def get_functions(self, active_only=False) -> list[FunctionModel]:
-        with get_db() as db:
-            if active_only:
-                return [
-                    FunctionModel.model_validate(function)
-                    for function in db.query(Function).filter_by(is_active=True).all()
-                ]
-            else:
-                return [
-                    FunctionModel.model_validate(function)
-                    for function in db.query(Function).all()
-                ]
-
-    def get_functions_by_type(
-        self, type: str, active_only=False
-    ) -> list[FunctionModel]:
-        with get_db() as db:
-            if active_only:
-                return [
-                    FunctionModel.model_validate(function)
-                    for function in db.query(Function)
-                    .filter_by(type=type, is_active=True)
-                    .all()
-                ]
-            else:
-                return [
-                    FunctionModel.model_validate(function)
-                    for function in db.query(Function).filter_by(type=type).all()
-                ]
-
-    def get_global_filter_functions(self) -> list[FunctionModel]:
+    def get_functions(self) -> list[FunctionModel]:
         with get_db() as db:
             return [
                 FunctionModel.model_validate(function)
-                for function in db.query(Function)
-                .filter_by(type="filter", is_active=True, is_global=True)
-                .all()
+                for function in db.query(Function).all()
             ]
 
-    def get_global_action_functions(self) -> list[FunctionModel]:
+    def get_functions_by_type(self, type: str) -> list[FunctionModel]:
         with get_db() as db:
             return [
                 FunctionModel.model_validate(function)
-                for function in db.query(Function)
-                .filter_by(type="action", is_active=True, is_global=True)
-                .all()
+                for function in db.query(Function).filter_by(type=type).all()
             ]
 
     def get_function_valves_by_id(self, id: str) -> Optional[dict]:
@@ -243,20 +205,6 @@ class FunctionsTable:
                 )
                 db.commit()
                 return self.get_function_by_id(id)
-            except Exception:
-                return None
-
-    def deactivate_all_functions(self) -> Optional[bool]:
-        with get_db() as db:
-            try:
-                db.query(Function).update(
-                    {
-                        "is_active": False,
-                        "updated_at": int(time.time()),
-                    }
-                )
-                db.commit()
-                return True
             except Exception:
                 return None
 
