@@ -20,9 +20,11 @@ class TestLlensDefaults(AbstractPostgresTest):
         assert app.state.config.CODE_EXECUTION_ENGINE == "jupyter"
         assert app.state.config.CODE_INTERPRETER_ENGINE == "jupyter"
 
-    def test_arena_and_community_sharing_disabled(self):
+    def test_arena_eradicated_and_community_sharing_disabled(self):
         from open_webui.main import app
 
-        # issue #10: evaluation/arena と openwebui.com 共有導線は既定 OFF
-        assert app.state.config.ENABLE_EVALUATION_ARENA_MODELS is False
+        # llens(#48): evaluation/arena は撲滅(config ごと撤去)。config 属性が存在しないこと。
+        assert not hasattr(app.state.config, "ENABLE_EVALUATION_ARENA_MODELS")
+        assert not hasattr(app.state.config, "EVALUATION_ARENA_MODELS")
+        # issue #10: openwebui.com 共有導線は既定 OFF
         assert app.state.config.ENABLE_COMMUNITY_SHARING is False

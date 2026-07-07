@@ -17,10 +17,6 @@ from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.access_control import has_access
 
 
-from open_webui.config import (
-    DEFAULT_ARENA_MODEL,
-)
-
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 from open_webui.models.users import UserModel
 
@@ -67,40 +63,7 @@ async def get_all_models(request, user: UserModel = None):
     if len(models) == 0:
         return []
 
-    # Add arena models
-    if request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS:
-        arena_models = []
-        if len(request.app.state.config.EVALUATION_ARENA_MODELS) > 0:
-            arena_models = [
-                {
-                    "id": model["id"],
-                    "name": model["name"],
-                    "info": {
-                        "meta": model["meta"],
-                    },
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": "arena",
-                    "arena": True,
-                }
-                for model in request.app.state.config.EVALUATION_ARENA_MODELS
-            ]
-        else:
-            # Add default arena model
-            arena_models = [
-                {
-                    "id": DEFAULT_ARENA_MODEL["id"],
-                    "name": DEFAULT_ARENA_MODEL["name"],
-                    "info": {
-                        "meta": DEFAULT_ARENA_MODEL["meta"],
-                    },
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": "arena",
-                    "arena": True,
-                }
-            ]
-        models = models + arena_models
+    # llens(#48): arena(evaluation)モデルは撲滅済み。モデル一覧への arena 注入を撤去。
 
     # llens(#46): global/active 撤去 → action はモデルの actionIds 割り当てのみ。
     # 実在する action type の function に絞る(削除済み ID を弾く)。
@@ -227,23 +190,12 @@ async def get_all_models(request, user: UserModel = None):
 
 
 def check_model_access(user, model):
-    if model.get("arena"):
-        if not has_access(
-            user.id,
-            type="read",
-            access_control=model.get("info", {})
-            .get("meta", {})
-            .get("access_control", {}),
-        ):
-            raise Exception("Model not found")
-    else:
-        model_info = Models.get_model_by_id(model.get("id"))
-        if not model_info:
-            raise Exception("Model not found")
-        elif not (
-            user.id == model_info.user_id
-            or has_access(
-                user.id, type="read", access_control=model_info.access_control
-            )
-        ):
-            raise Exception("Model not found")
+    # llens(#48): arena モデルは撲滅済み。仮想 arena モデルの分岐を撤去。
+    model_info = Models.get_model_by_id(model.get("id"))
+    if not model_info:
+        raise Exception("Model not found")
+    elif not (
+        user.id == model_info.user_id
+        or has_access(user.id, type="read", access_control=model_info.access_control)
+    ):
+        raise Exception("Model not found")

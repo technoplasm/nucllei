@@ -250,8 +250,6 @@
 				'admincontrols',
 				'adminfeatures',
 				'usercontrol',
-				'arenamodel',
-				'evaluations',
 				'websearch',
 				'database',
 				'pipelines',
