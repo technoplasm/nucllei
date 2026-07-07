@@ -107,6 +107,22 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 5. **③gate は inlet filter**: prism `large_file_gate`(合算予算・大きい順除去・file_id 告知)を Function 移植。PDF→VLM は `pdf_vision_router` 移植(Kimi VLM 有)。
 6. **フロント**: 処理中/failed プレビュー、送信時の未抽出ハンドリング。
 
+## 実装状況(ブランチ `feat/52-file-handling`、2026-07-08)
+
+**済(RAG teardown・バックエンド)**:
+- **段1** chat flow の RAG 分岐撤去(543ed2ed3): `get_sources_from_files` を `(request, files)` に縮約し §④(ベクタ検索/hybrid/rerank/full_context)を削除、web_search 以外は data.content を全文注入する唯一経路に。middleware から retrieval 用 `generate_queries`(クエリ生成)撤去(web_search 用途は温存)。
+- **段2-lite** `process_file` のベクタ書込撤去(7306370ea): 抽出は温存、`save_docs_to_vector_db` 呼び出しを除去し全文保存のみに。
+- **段2** 死んだベクタ検索サブシステム撤去(42cbc39bb): `/query/doc`・`/query/collection` endpoint、`query_doc*`/`query_collection*`/`get_all_items_from_collections`/`merge_*`/`VectorSearchRetriever`/`RerankCompressor`/`get_doc`(相互参照のみ・外部 caller なし)、および専用 import を撤去。
+- いずれも挙動不変(BYPASS 既定 True で従来から死んでいた経路)。回帰 docling/filter/IDOR/native tool/skills 緑。
+
+**未着手(要ユーザー判断・絡みが深い)**:
+- **config キー撤去**(`RAG_TOP_K`/`RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL`/embedding/reranking/chunk/vector)→ **フロント `Documents.svelte` が `/retrieval/config` で docling・FILE_MAX と RAG 設定を同一 endpoint で読む**ため、config endpoint の分割(docling/upload 設定を RAG から分離)が要る。フロント刷新を伴う。
+- **KB(ナレッジベース)撤去** → `models/knowledge.py::Knowledges` が `access_control.has_read_access_to_collection`(#40 CORE セキュリティ)と `test_file_access_idor.py` に結線。router 撤去は可だがモデルは温存 or access_control 改修が要る。
+- **vector connector / embedding(ef/rf)撤去** → **`routers/memories.py`(#8 放置方針)が `VECTOR_DB_CLIENT` + `EMBEDDING_FUNCTION` を共有**。connector 本体撤去は memories の去就決定が前提。
+- **プランB 本体(未着手)**: プロバイダ登録 + `extract()` 内部API / upload フック(新 Function type)/ ③gate filter(large_file_gate 移植)/ ④sandbox tool 移植(owui/tools/sandbox.py)/ フロント処理中プレビュー。
+
+**次の安全な一手の候補**: (a) KB router 撤去(モデル温存・access_control 改修込み)/ (b) config endpoint 分割 → RAG config キー撤去(フロント Documents 刷新込み)。どちらもフロント or CORE セキュリティに触れるため単独判断は避け、着手前に方針確認。
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
   `owui/tools/sandbox.py`・`sandbox/README.md`。
