@@ -1,5 +1,4 @@
 import time
-import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_db
@@ -14,23 +13,25 @@ from open_webui.utils.access_control import has_access
 # Skills DB Schema
 ####################
 #
-# Skill は Prompt の後継(issue #35)。旧 prompt を統合し、サーバーサイドの
-# `/command` 実行と(step2 で)tool 遅延評価の基盤となる。移行方針は
-# `_memos/skill-design.md` を参照。
+# Skill は Prompt の後継(issue #35)。サーバーサイドの `/command` 実行と
+# tool 遅延評価の基盤。移行方針は `_memos/skill-design.md` を参照。
+#
+# llens(#43): id を唯一の可読キー兼発火キーに一本化(旧 command 列は撤去)。
+# 表示名は name(旧 title)。全 workspace エンティティを {id, name, description} に統一。
+# id は作成時に確定(人が付ける `/command` 文字列)、以後不変。改名は削除→再作成。
 
 
 class Skill(Base):
     __tablename__ = "skill"
 
+    # id = `/command` 発火キー兼 PK(先頭 `/` なしで正規化して格納)。作成時確定・不変。
     id = Column(String, primary_key=True)
-    # command は先頭 `/` なしで正規化して格納(旧 prompt は `/` 込みだったため移行時に strip)。
-    command = Column(String, unique=True)
     user_id = Column(String)
-    title = Column(Text)
+    name = Column(Text)
     # description はモデル向け manifest 用(#35 step2)。空ならモデルには露出させない。
     description = Column(Text, nullable=True)
     content = Column(Text)
-    # tool_ids は紐づく tool。カラムは存在するが runtime では未消費(#35 step2 で遅延評価)。
+    # tool_ids は紐づく tool。#35 step2 の遅延評価で消費。
     tool_ids = Column(JSON, nullable=True)
 
     access_control = Column(JSON, nullable=True)  # Controls data access levels.
@@ -56,9 +57,8 @@ class Skill(Base):
 
 class SkillModel(BaseModel):
     id: str
-    command: str
     user_id: str
-    title: str
+    name: str
     description: Optional[str] = None
     content: str
     tool_ids: list[str] = []
@@ -81,8 +81,8 @@ class SkillUserResponse(SkillModel):
 
 
 class SkillForm(BaseModel):
-    command: str
-    title: str
+    id: str
+    name: str
     description: Optional[str] = None
     content: str
     tool_ids: list[str] = []
@@ -90,7 +90,7 @@ class SkillForm(BaseModel):
 
 
 def normalize_command(command: str) -> str:
-    """command を先頭 `/` なしに正規化する。"""
+    """`/command`(= skill id)を先頭 `/` なしに正規化する。"""
     return command.lstrip("/").strip()
 
 
@@ -100,10 +100,9 @@ class SkillsTable:
     ) -> Optional[SkillModel]:
         skill = SkillModel(
             **{
-                "id": str(uuid.uuid4()),
-                "user_id": user_id,
                 **form_data.model_dump(),
-                "command": normalize_command(form_data.command),
+                "id": normalize_command(form_data.id),
+                "user_id": user_id,
                 "created_at": int(time.time()),
                 "updated_at": int(time.time()),
             }
@@ -125,19 +124,7 @@ class SkillsTable:
     def get_skill_by_id(self, id: str) -> Optional[SkillModel]:
         try:
             with get_db() as db:
-                skill = db.get(Skill, id)
-                return SkillModel.model_validate(skill)
-        except Exception:
-            return None
-
-    def get_skill_by_command(self, command: str) -> Optional[SkillModel]:
-        try:
-            with get_db() as db:
-                skill = (
-                    db.query(Skill)
-                    .filter_by(command=normalize_command(command))
-                    .first()
-                )
+                skill = db.get(Skill, normalize_command(id))
                 return SkillModel.model_validate(skill)
         except Exception:
             return None
@@ -171,17 +158,11 @@ class SkillsTable:
             or has_access(user_id, permission, skill.access_control)
         ]
 
-    def update_skill_by_command(
-        self, command: str, form_data: SkillForm
-    ) -> Optional[SkillModel]:
+    def update_skill_by_id(self, id: str, form_data: SkillForm) -> Optional[SkillModel]:
         try:
             with get_db() as db:
-                skill = (
-                    db.query(Skill)
-                    .filter_by(command=normalize_command(command))
-                    .first()
-                )
-                skill.title = form_data.title
+                skill = db.get(Skill, normalize_command(id))
+                skill.name = form_data.name
                 skill.description = form_data.description
                 skill.content = form_data.content
                 skill.tool_ids = form_data.tool_ids
@@ -192,10 +173,10 @@ class SkillsTable:
         except Exception:
             return None
 
-    def delete_skill_by_command(self, command: str) -> bool:
+    def delete_skill_by_id(self, id: str) -> bool:
         try:
             with get_db() as db:
-                db.query(Skill).filter_by(command=normalize_command(command)).delete()
+                db.query(Skill).filter_by(id=normalize_command(id)).delete()
                 db.commit()
 
                 return True

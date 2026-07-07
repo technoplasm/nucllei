@@ -625,7 +625,7 @@
 												messageInput={true}
 												validCommands={($skills ?? [])
 													.filter((s) => allowedSkillIds.includes(s.id))
-													.map((s) => s.command)}
+													.map((s) => s.id)}
 												shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
 													(!$mobile ||
 														!(

@@ -659,7 +659,8 @@ def apply_skill_command(form_data, user, model):
         if not match:
             continue
 
-        skill = Skills.get_skill_by_command(match.group(1))
+        # llens(#43): skill の可読キーは id 一本(旧 command)。/command 一致 = id 一致。
+        skill = Skills.get_skill_by_id(match.group(1))
         if (
             skill is None
             or skill.id not in model_skill_ids
@@ -669,8 +670,8 @@ def apply_skill_command(form_data, user, model):
 
         expanded = activate_skill(skill, user)
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
-        call_id = f"skill:{skill.command}:{idx}"
-        arguments = json.dumps({"skill_command": skill.command}, ensure_ascii=False)
+        call_id = f"skill:{skill.id}:{idx}"
+        arguments = json.dumps({"skill_id": skill.id}, ensure_ascii=False)
         # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
         # 後段(process_chat_payload の skill tools ロード)で書き足される。
         result_content = json.dumps(
@@ -700,8 +701,8 @@ def apply_skill_command(form_data, user, model):
         activations.append(
             {
                 "call_id": call_id,
-                "command": skill.command,
-                "title": skill.title,
+                "id": skill.id,
+                "name": skill.name,
                 "content": expanded,
                 "result": result_content,
                 # 導入 tool 名を後段で書き戻すための参照(dict は共有される)
@@ -745,14 +746,14 @@ def build_load_skill_tool(model, user, load_tools=None):
             and (skill.description or "").strip()
             and is_skill_visible(skill, user)
         ):
-            manifest[skill.command] = skill
+            manifest[skill.id] = skill
 
     if not manifest:
         return None
 
+    # llens(#43): manifest 識別子は id 一本(旧 command)。id/name の二重露出はしない。
     listing = "\n".join(
-        f"- {command}: {skill.description.strip()}"
-        for command, skill in manifest.items()
+        f"- {sid}: {skill.description.strip()}" for sid, skill in manifest.items()
     )
     spec = {
         "name": "load_skill",
@@ -763,20 +764,20 @@ def build_load_skill_tool(model, user, load_tools=None):
         "parameters": {
             "type": "object",
             "properties": {
-                "skill_command": {
+                "skill_id": {
                     "type": "string",
-                    "description": "Command of the skill to load.",
+                    "description": "Id of the skill to load.",
                     "enum": list(manifest.keys()),
                 }
             },
-            "required": ["skill_command"],
+            "required": ["skill_id"],
         },
     }
 
-    async def load_skill(skill_command: str = ""):
-        skill = manifest.get(normalize_command(skill_command))
+    async def load_skill(skill_id: str = ""):
+        skill = manifest.get(normalize_command(skill_id))
         if skill is None:
-            return f"skill not found: {skill_command}"
+            return f"skill not found: {skill_id}"
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
             # load_tools は async フック(#28: 中で get_tools をワーカースレッド実行)
@@ -1806,7 +1807,7 @@ async def process_chat_response(
                                 "function": {
                                     "name": "load_skill",
                                     "arguments": json.dumps(
-                                        {"skill_command": a["command"]},
+                                        {"skill_id": a["id"]},
                                         ensure_ascii=False,
                                     ),
                                 },

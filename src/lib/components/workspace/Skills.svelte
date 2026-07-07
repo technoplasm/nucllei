@@ -3,7 +3,7 @@
 	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME, skills as _skills, user } from '$lib/stores';
 
-	import { deleteSkillByCommand, getSkills, getSkillList } from '$lib/apis/skills';
+	import { deleteSkillById, getSkills, getSkillList } from '$lib/apis/skills';
 
 	import SkillMenu from './Skills/SkillMenu.svelte';
 	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
@@ -27,11 +27,11 @@
 	let deleteSkill = null;
 
 	let filteredItems = [];
-	$: filteredItems = skills.filter((s) => query === '' || s.command.includes(query));
+	$: filteredItems = skills.filter((s) => query === '' || s.id.includes(query));
 
 	const deleteHandler = async (skill) => {
-		const command = skill.command;
-		await deleteSkillByCommand(localStorage.token, command);
+		const id = skill.id;
+		await deleteSkillById(localStorage.token, id);
 		await init();
 	};
 
@@ -61,7 +61,7 @@
 		}}
 	>
 		<div class=" text-sm text-gray-500">
-			{$i18n.t('This will delete')} <span class="  font-semibold">{deleteSkill.command}</span>.
+			{$i18n.t('This will delete')} <span class="  font-semibold">{deleteSkill.id}</span>.
 		</div>
 	</DeleteConfirmDialog>
 
@@ -105,11 +105,11 @@
 				class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
 			>
 				<div class=" flex flex-1 space-x-4 cursor-pointer w-full">
-					<a href={`/workspace/skills/edit?command=${encodeURIComponent(skill.command)}`}>
+					<a href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}>
 						<div class=" flex-1 flex items-center gap-2 self-center">
-							<div class=" font-semibold line-clamp-1 capitalize">{skill.title}</div>
+							<div class=" font-semibold line-clamp-1 capitalize">{skill.name}</div>
 							<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-								/{skill.command}
+								/{skill.id}
 							</div>
 						</div>
 
@@ -134,7 +134,7 @@
 					<a
 						class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 						type="button"
-						href={`/workspace/skills/edit?command=${encodeURIComponent(skill.command)}`}
+						href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"

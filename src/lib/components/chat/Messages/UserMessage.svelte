@@ -56,7 +56,7 @@
 	// llens(issue #35): 有効な /command で始まる送信済みメッセージだけ、先頭トークンを
 	// chip 風に描画する。ヒットしなければ完全に従来どおり(挙動を変えない)。
 	$: skillMatch = findSkillByCommand($skills, message.content);
-	$: skillRest = skillMatch ? message.content.slice(1 + skillMatch.command.length) : '';
+	$: skillRest = skillMatch ? message.content.slice(1 + skillMatch.id.length) : '';
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -242,7 +242,7 @@
 							>
 								{#if message.content}
 									{#if skillMatch}
-										<span class="skill-command-token">/{skillMatch.command}</span>
+										<span class="skill-command-token">/{skillMatch.id}</span>
 										<Markdown id={message.id} content={skillRest} />
 									{:else}
 										<Markdown id={message.id} content={message.content} />

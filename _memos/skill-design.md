@@ -28,13 +28,19 @@
 
 `skill` テーブル(新設。`prompt` から移行):
 
+> **改訂(2026-07-07、#43 Phase 2a)**: 可読キーを **`id` 一本に統合**(旧 `command` 列を撤去)。
+> `id` が `/command` 発火キー兼 PK(先頭 `/` なしで正規化・作成時確定・以後不変。改名は削除→再作成)。
+> `title` → **`name`** にリネーム(全エンティティ {id, name, description} に統一)。
+> 発火は `get_skill_by_id`、load_skill manifest / wire 引数は `skill_id`(旧 `skill_command`)、
+> activation は `id`/`name`(旧 `command`/`title`)。以下の表は改訂後。migration `c5e7a1b9d2f6`。
+> 旧「id=uuid と command を分離」方針(rename 耐性のため)は撤回 — rename は削除→再作成で扱う(#43)。
+
 | カラム | 型 | 備考 |
 |---|---|---|
-| `id` | String PK | uuid。旧 prompt は command が PK だったが rename に耐えるよう分離 |
-| `command` | String, unique | **先頭 `/` なしで正規化**して格納(旧 prompt は `/` 込み — 移行時に strip) |
+| `id` | String PK | `/command` 発火キー(先頭 `/` なしで正規化)。人が付ける・作成時確定・不変 |
 | `user_id` | String | 作成者 |
-| `title` | Text | 表示名 |
-| `description` | Text, nullable | モデル向け manifest 用。空ならモデルには露出させない(title で代用しない — 説明の無い skill をモデルに見せても選べない) |
+| `name` | Text | 表示名(旧 title) |
+| `description` | Text, nullable | モデル向け manifest 用。空ならモデルには露出させない(name で代用しない — 説明の無い skill をモデルに見せても選べない) |
 | `content` | Text | 指示本文。サーバー既知変数の展開対象 |
 | `tool_ids` | JSON, default [] | 紐づく tool。非空の作成/更新は admin 必須 |
 | `access_control` | JSON, nullable | 既存規約どおり(None=公開 read / {}=私有 / group_ids・user_ids・group_terms) |

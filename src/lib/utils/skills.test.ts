@@ -41,8 +41,8 @@ describe('matchSkillCommand: 不一致', () => {
 
 describe('findSkillByCommand', () => {
 	const skills = [
-		{ command: 'summarize', title: 'Summarize' },
-		{ command: 'translate', title: 'Translate' }
+		{ id: 'summarize', name: 'Summarize' },
+		{ id: 'translate', name: 'Translate' }
 	];
 
 	it('有効な command はその skill を返す', () => {

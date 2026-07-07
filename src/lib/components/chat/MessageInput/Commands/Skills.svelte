@@ -16,8 +16,8 @@
 	// command の `/` を除いた部分で command 前方(部分)一致フィルタ。
 	$: filteredSkills = ($skills ?? [])
 		.filter((s) => allowedSkillIds === null || allowedSkillIds.includes(s.id))
-		.filter((s) => s.command.toLowerCase().includes(command.slice(1).toLowerCase()))
-		.sort((a, b) => a.title.localeCompare(b.title));
+		.filter((s) => s.id.toLowerCase().includes(command.slice(1).toLowerCase()))
+		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: if (command) {
 		selectedIdx = 0;
@@ -34,7 +34,7 @@
 	const confirmSkill = async (skill) => {
 		// 先頭行の行頭トークンだけを `/command ` に置換(サーバの発火位置と一致)。
 		// テンプレート全文挿入はしない(置換されるのは `/par` のような入力中の部分トークンのみ)。
-		const token = `/${skill.command} `;
+		const token = `/${skill.id} `;
 
 		const lines = prompt.split('\n');
 		const firstLine = lines.shift() ?? '';
@@ -82,11 +82,11 @@
 							on:focus={() => {}}
 						>
 							<div class=" font-medium text-black dark:text-gray-100">
-								/{skill.command}
+								/{skill.id}
 							</div>
 
 							<div class=" text-xs text-gray-600 dark:text-gray-100">
-								{skill.title}
+								{skill.name}
 							</div>
 
 							{#if skill.description}

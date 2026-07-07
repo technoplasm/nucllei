@@ -73,7 +73,15 @@ async def create_new_skill(
 ):
     _check_write_permission(request, form_data, user)
 
-    skill = Skills.get_skill_by_command(form_data.command)
+    # llens(#43): id が唯一の可読キー兼発火キー(旧 command)。正規化して衝突判定。
+    form_data.id = normalize_command(form_data.id)
+    if not form_data.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Skill id is required"),
+        )
+
+    skill = Skills.get_skill_by_id(form_data.id)
     if skill is None:
         skill = Skills.insert_new_skill(user.id, form_data)
 
@@ -85,18 +93,18 @@ async def create_new_skill(
         )
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=ERROR_MESSAGES.COMMAND_TAKEN,
+        detail=ERROR_MESSAGES.ID_TAKEN,
     )
 
 
 ############################
-# GetSkillByCommand
+# GetSkillById
 ############################
 
 
-@router.get("/command/{command}", response_model=Optional[SkillModel])
-async def get_skill_by_command(command: str, user=Depends(get_verified_user)):
-    skill = Skills.get_skill_by_command(command)
+@router.get("/id/{id}", response_model=Optional[SkillModel])
+async def get_skill_by_id(id: str, user=Depends(get_verified_user)):
+    skill = Skills.get_skill_by_id(id)
 
     if skill:
         if (
@@ -113,18 +121,18 @@ async def get_skill_by_command(command: str, user=Depends(get_verified_user)):
 
 
 ############################
-# UpdateSkillByCommand
+# UpdateSkillById
 ############################
 
 
-@router.post("/command/{command}/update", response_model=Optional[SkillModel])
-async def update_skill_by_command(
+@router.post("/id/{id}/update", response_model=Optional[SkillModel])
+async def update_skill_by_id(
     request: Request,
-    command: str,
+    id: str,
     form_data: SkillForm,
     user=Depends(get_verified_user),
 ):
-    skill = Skills.get_skill_by_command(command)
+    skill = Skills.get_skill_by_id(id)
     if not skill:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -145,7 +153,8 @@ async def update_skill_by_command(
     # tool 紐づき skill(tool_ids 非空)への更新は admin のみ(新設ゲート)。
     _check_write_permission(request, form_data, user)
 
-    skill = Skills.update_skill_by_command(command, form_data)
+    # llens(#43): id は不変(可読 id の変更はフロントで削除→再作成)。ここでは中身のみ更新。
+    skill = Skills.update_skill_by_id(id, form_data)
     if skill:
         return skill
     else:
@@ -156,13 +165,13 @@ async def update_skill_by_command(
 
 
 ############################
-# DeleteSkillByCommand
+# DeleteSkillById
 ############################
 
 
-@router.delete("/command/{command}/delete", response_model=bool)
-async def delete_skill_by_command(command: str, user=Depends(get_verified_user)):
-    skill = Skills.get_skill_by_command(command)
+@router.delete("/id/{id}/delete", response_model=bool)
+async def delete_skill_by_id(id: str, user=Depends(get_verified_user)):
+    skill = Skills.get_skill_by_id(id)
     if not skill:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -179,5 +188,5 @@ async def delete_skill_by_command(command: str, user=Depends(get_verified_user))
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    result = Skills.delete_skill_by_command(command)
+    result = Skills.delete_skill_by_id(id)
     return result

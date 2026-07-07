@@ -1,10 +1,10 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-// Skill は Prompt の後継(issue #35)。command はバックエンドで先頭 `/` なしに
-// 正規化されるため、prompts クライアントのような `/` 前置は行わない。
+// Skill は Prompt の後継(issue #35)。llens(#43): 可読キーは id 一本(旧 command)。
+// id が /command 発火キー兼 PK でバックエンドが先頭 `/` なしに正規化する。表示名は name(旧 title)。
 export type SkillItem = {
-	command: string;
-	title: string;
+	id: string;
+	name: string;
 	description?: string | null;
 	content: string;
 	tool_ids?: string[];
@@ -96,10 +96,10 @@ export const getSkillList = async (token: string = '') => {
 	return res;
 };
 
-export const getSkillByCommand = async (token: string, command: string) => {
+export const getSkillById = async (token: string, id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/command/${command}`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -124,10 +124,10 @@ export const getSkillByCommand = async (token: string, command: string) => {
 	return res;
 };
 
-export const updateSkillByCommand = async (token: string, skill: SkillItem) => {
+export const updateSkillById = async (token: string, skill: SkillItem) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/command/${skill.command}/update`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${skill.id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -153,12 +153,12 @@ export const updateSkillByCommand = async (token: string, skill: SkillItem) => {
 	return res;
 };
 
-export const deleteSkillByCommand = async (token: string, command: string) => {
+export const deleteSkillById = async (token: string, id: string) => {
 	let error = null;
 
-	command = command.charAt(0) === '/' ? command.slice(1) : command;
+	id = id.charAt(0) === '/' ? id.slice(1) : id;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/command/${command}/delete`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',

@@ -6,14 +6,14 @@
 
 	const i18n = getContext('i18n');
 
-	import { getSkillByCommand, getSkills, updateSkillByCommand } from '$lib/apis/skills';
+	import { getSkillById, getSkills, updateSkillById } from '$lib/apis/skills';
 	import { page } from '$app/stores';
 
 	import SkillEditor from '$lib/components/workspace/Skills/SkillEditor.svelte';
 
 	let skill = null;
 	const onSubmit = async (_skill) => {
-		const skill = await updateSkillByCommand(localStorage.token, _skill).catch((error) => {
+		const skill = await updateSkillById(localStorage.token, _skill).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -26,9 +26,9 @@
 	};
 
 	onMount(async () => {
-		const command = $page.url.searchParams.get('command');
-		if (command) {
-			const _skill = await getSkillByCommand(localStorage.token, command.replace(/\//g, '')).catch(
+		const id = $page.url.searchParams.get('id');
+		if (id) {
+			const _skill = await getSkillById(localStorage.token, id.replace(/\//g, '')).catch(
 				(error) => {
 					toast.error(`${error}`);
 					return null;
@@ -37,8 +37,8 @@
 
 			if (_skill) {
 				skill = {
-					command: _skill.command,
-					title: _skill.title,
+					id: _skill.id,
+					name: _skill.name,
 					description: _skill.description ?? '',
 					content: _skill.content,
 					tool_ids: _skill?.tool_ids ?? [],

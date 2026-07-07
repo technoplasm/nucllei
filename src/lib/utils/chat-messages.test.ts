@@ -58,7 +58,7 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 				calls: [
 					{
 						id: 'skill:vault:0',
-						function: { name: 'load_skill', arguments: '{"skill_command": "vault"}' }
+						function: { name: 'load_skill', arguments: '{"skill_id": "vault"}' }
 					}
 				],
 				results: [{ tool_call_id: 'skill:vault:0', content: '{"result": "指示", "tools": []}' }]

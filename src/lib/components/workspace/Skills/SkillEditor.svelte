@@ -18,8 +18,9 @@
 
 	let loading = false;
 
-	let title = '';
-	let command = '';
+	// llens(#43): 可読キーは id 一本(旧 command)、表示名は name(旧 title)。
+	let name = '';
+	let id = '';
 	let description = '';
 	let content = '';
 
@@ -34,16 +35,16 @@
 	let showAccessControlModal = false;
 
 	$: if (!edit) {
-		command = title !== '' ? `${title.replace(/\s+/g, '-').toLowerCase()}` : '';
+		id = name !== '' ? `${name.replace(/\s+/g, '-').toLowerCase()}` : '';
 	}
 
 	const submitHandler = async () => {
 		loading = true;
 
-		if (validateCommandString(command)) {
+		if (validateCommandString(id)) {
 			await onSubmit({
-				title,
-				command,
+				name,
+				id,
 				// description が空ならモデルには公開されない(バックエンド仕様)。
 				description: description,
 				content,
@@ -68,10 +69,10 @@
 
 	onMount(async () => {
 		if (skill) {
-			title = skill.title;
+			name = skill.name;
 			await tick();
 
-			command = skill.command.at(0) === '/' ? skill.command.slice(1) : skill.command;
+			id = skill.id.at(0) === '/' ? skill.id.slice(1) : skill.id;
 			description = skill.description ?? '';
 			content = skill.content;
 			toolIds = skill?.tool_ids ?? [];
@@ -112,7 +113,7 @@
 				content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${$i18n.t(
 					'Activate this command by typing "/{{COMMAND}}" to chat input.',
 					{
-						COMMAND: command
+						COMMAND: id
 					}
 				)}`}
 				placement="bottom-start"
@@ -122,7 +123,7 @@
 						<input
 							class="text-2xl font-semibold w-full bg-transparent outline-hidden"
 							placeholder={$i18n.t('Title')}
-							bind:value={title}
+							bind:value={name}
 							required
 						/>
 
@@ -148,7 +149,7 @@
 						<input
 							class=" w-full bg-transparent outline-hidden"
 							placeholder={$i18n.t('Command')}
-							bind:value={command}
+							bind:value={id}
 							required
 							disabled={edit}
 						/>

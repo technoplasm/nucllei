@@ -10,7 +10,7 @@
   未知 command 素通し
 - 全 user メッセージ走査(会話持続、2026-07-06 改訂)/ 不可視 skill の素通し
 - load_skill 擬似 tool 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有り /
-  manifest 識別子は command 一本 / callable が展開済み content を返す
+  manifest 識別子は id 一本 / callable が展開済み content を返す
 """
 
 import types
@@ -42,14 +42,14 @@ class TestSkills(AbstractPostgresTest):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
                 json={
-                    "command": "/mycmd",
-                    "title": "My Skill",
+                    "id": "/mycmd",
+                    "name": "My Skill",
                     "content": "本文",
                 },
             )
         assert response.status_code == 200
         data = response.json()
-        assert data["command"] == "mycmd"  # `/` strip 済み
+        assert data["id"] == "mycmd"  # `/` strip 済み
         assert data["tool_ids"] == []
         assert data["description"] is None
         assert data["created_at"] == data["updated_at"]
@@ -58,30 +58,30 @@ class TestSkills(AbstractPostgresTest):
         with mock_webui_user(id="2", role="admin"):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
-                json={"command": "mycmd", "title": "dup", "content": "x"},
+                json={"id": "mycmd", "name": "dup", "content": "x"},
             )
         assert response.status_code == 400
 
         # get by command(`/` 無しのパスで引ける)
         with mock_webui_user(id="2", role="admin"):
-            response = self.fast_api_client.get(self.create_url("/command/mycmd"))
+            response = self.fast_api_client.get(self.create_url("/id/mycmd"))
         assert response.status_code == 200
-        assert response.json()["title"] == "My Skill"
+        assert response.json()["name"] == "My Skill"
 
         # 更新
         with mock_webui_user(id="2", role="admin"):
             response = self.fast_api_client.post(
-                self.create_url("/command/mycmd/update"),
+                self.create_url("/id/mycmd/update"),
                 json={
-                    "command": "ignored",
-                    "title": "Updated",
+                    "id": "ignored",
+                    "name": "Updated",
                     "content": "新本文",
                     "description": "モデル向け説明",
                 },
             )
         assert response.status_code == 200
         data = response.json()
-        assert data["title"] == "Updated"
+        assert data["name"] == "Updated"
         assert data["content"] == "新本文"
         assert data["description"] == "モデル向け説明"
 
@@ -93,9 +93,7 @@ class TestSkills(AbstractPostgresTest):
 
         # 削除
         with mock_webui_user(id="2", role="admin"):
-            response = self.fast_api_client.delete(
-                self.create_url("/command/mycmd/delete")
-            )
+            response = self.fast_api_client.delete(self.create_url("/id/mycmd/delete"))
         assert response.status_code == 200
         with mock_webui_user(id="2", role="admin"):
             response = self.fast_api_client.get(self.create_url("/"))
@@ -106,7 +104,7 @@ class TestSkills(AbstractPostgresTest):
         with mock_webui_user(id="9", role="user"):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
-                json={"command": "nope", "title": "t", "content": "c"},
+                json={"id": "nope", "name": "t", "content": "c"},
             )
         assert response.status_code == 401
 
@@ -136,7 +134,7 @@ class TestSkills(AbstractPostgresTest):
         with mock_webui_user(id="7", role="user"):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
-                json={"command": "tmpl", "title": "t", "content": "c"},
+                json={"id": "tmpl", "name": "t", "content": "c"},
             )
         assert response.status_code == 200
 
@@ -145,8 +143,8 @@ class TestSkills(AbstractPostgresTest):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
                 json={
-                    "command": "tooly",
-                    "title": "t",
+                    "id": "tooly",
+                    "name": "t",
                     "content": "c",
                     "tool_ids": ["some-tool"],
                 },
@@ -158,8 +156,8 @@ class TestSkills(AbstractPostgresTest):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
                 json={
-                    "command": "tooly",
-                    "title": "t",
+                    "id": "tooly",
+                    "name": "t",
                     "content": "c",
                     "tool_ids": ["some-tool"],
                 },
@@ -198,8 +196,8 @@ class TestSkills(AbstractPostgresTest):
         Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="secret",
-                title="secret",
+                id="secret",
+                name="secret",
                 content="秘匿",
                 access_control={"read": {"group_terms": [[dept_naika, rank_bucho]]}},
             ),
@@ -207,11 +205,11 @@ class TestSkills(AbstractPostgresTest):
 
         # 内科部長は見える、内科一般は見えない
         assert any(
-            s.command == "secret"
+            s.id == "secret"
             for s in Skills.get_skills_by_user_id("naika-bucho", "read")
         )
         assert not any(
-            s.command == "secret"
+            s.id == "secret"
             for s in Skills.get_skills_by_user_id("naika-ippan", "read")
         )
 
@@ -228,8 +226,8 @@ class TestSkills(AbstractPostgresTest):
         skill = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="mycmd",
-                title="t",
+                id="mycmd",
+                name="t",
                 content="展開: {{USER_NAME}}",
                 access_control=None,  # public read
             ),
@@ -247,14 +245,14 @@ class TestSkills(AbstractPostgresTest):
         assert msgs[1]["role"] == "assistant"
         call = msgs[1]["tool_calls"][0]
         assert call["function"]["name"] == "load_skill"
-        assert json.loads(call["function"]["arguments"]) == {"skill_command": "mycmd"}
+        assert json.loads(call["function"]["arguments"]) == {"skill_id": "mycmd"}
         assert msgs[2]["role"] == "tool"
         assert msgs[2]["tool_call_id"] == call["id"]
         # result は構造化 JSON {result, tools}(tools は後段のロードで書き足される)
         assert json.loads(msgs[2]["content"]) == {"result": "展開: Taro", "tools": []}
         # UI seed 用の発火情報
         assert activations[0]["call_id"] == call["id"]
-        assert activations[0]["command"] == "mycmd"
+        assert activations[0]["id"] == "mycmd"
         assert activations[0]["content"] == "展開: Taro"
         assert activations[0]["result_message"] is msgs[2]  # 書き戻し用の同一参照
         assert activations[0]["current"] is True
@@ -279,15 +277,11 @@ class TestSkills(AbstractPostgresTest):
 
         s_a = Skills.insert_new_skill(
             "1",
-            SkillForm(
-                command="multia", title="t", content="指示A", access_control=None
-            ),
+            SkillForm(id="multia", name="t", content="指示A", access_control=None),
         )
         s_b = Skills.insert_new_skill(
             "1",
-            SkillForm(
-                command="multib", title="t", content="指示B", access_control=None
-            ),
+            SkillForm(id="multib", name="t", content="指示B", access_control=None),
         )
 
         user = types.SimpleNamespace(id="1", name="Taro")
@@ -321,7 +315,7 @@ class TestSkills(AbstractPostgresTest):
         assert json.loads(msgs[2]["content"])["result"] == "指示A"
         assert json.loads(msgs[7]["content"])["result"] == "指示B"
         # current は最後の user メッセージでの発火のみ(UI 表示は当該ターンだけ)
-        assert [(a["command"], a["current"]) for a in activations] == [
+        assert [(a["id"], a["current"]) for a in activations] == [
             ("multia", False),
             ("multib", True),
         ]
@@ -333,9 +327,7 @@ class TestSkills(AbstractPostgresTest):
 
         skill = Skills.insert_new_skill(
             "owner",
-            SkillForm(
-                command="secretcmd", title="t", content="秘匿", access_control={}
-            ),
+            SkillForm(id="secretcmd", name="t", content="秘匿", access_control={}),
         )
 
         # モデルには紐づいている(不可視性だけで弾かれることの確認)
@@ -363,8 +355,8 @@ class TestSkills(AbstractPostgresTest):
         skill = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="gatedcmd",
-                title="t",
+                id="gatedcmd",
+                name="t",
                 description="説明あり",
                 content="指示",
                 access_control=None,
@@ -386,7 +378,7 @@ class TestSkills(AbstractPostgresTest):
             user,
             model_default,
         )
-        assert [a["command"] for a in activations] == ["gatedcmd"]
+        assert [a["id"] for a in activations] == ["gatedcmd"]
         assert build_load_skill_tool(model_default, user) is not None
 
     def test_slash_command_requires_model_attachment(self):
@@ -400,9 +392,7 @@ class TestSkills(AbstractPostgresTest):
 
         Skills.insert_new_skill(
             "1",
-            SkillForm(
-                command="unattached", title="t", content="指示", access_control=None
-            ),
+            SkillForm(id="unattached", name="t", content="指示", access_control=None),
         )
         user = types.SimpleNamespace(id="1", name="Taro")
 
@@ -424,8 +414,8 @@ class TestSkills(AbstractPostgresTest):
         s1 = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="scales",
-                title="評価スケール",
+                id="scales",
+                name="評価スケール",
                 description="臨床評価スケールの参照",
                 content="スケール表: {{USER_NAME}} 用",
                 access_control=None,
@@ -433,13 +423,13 @@ class TestSkills(AbstractPostgresTest):
         )
         s2 = Skills.insert_new_skill(  # description 無し → モデルに露出しない
             "1",
-            SkillForm(command="nodesc", title="t", content="c", access_control=None),
+            SkillForm(id="nodesc", name="t", content="c", access_control=None),
         )
         s3 = Skills.insert_new_skill(  # 他人の私有 → 不可視
             "owner",
             SkillForm(
-                command="hiddencmd",
-                title="t",
+                id="hiddencmd",
+                name="t",
                 description="見えない",
                 content="c",
                 access_control={},
@@ -453,18 +443,18 @@ class TestSkills(AbstractPostgresTest):
         assert tool is not None
         spec = tool["spec"]
         assert spec["name"] == "load_skill"
-        # manifest 識別子は command 一本(id/name は露出させない)
-        assert spec["parameters"]["properties"]["skill_command"]["enum"] == ["scales"]
+        # manifest 識別子は id 一本(id/name は露出させない)
+        assert spec["parameters"]["properties"]["skill_id"]["enum"] == ["scales"]
         assert "- scales: 臨床評価スケールの参照" in spec["description"]
 
         # 発火: tool result = 構造化 JSON {result: 展開済み content, tools: []}
         import json
 
-        result = json.loads(asyncio.run(tool["callable"](skill_command="scales")))
+        result = json.loads(asyncio.run(tool["callable"](skill_id="scales")))
         assert result == {"result": "スケール表: Hanako 用", "tools": []}
 
         # 未知 command はモデル向けエラーメッセージ(例外にしない)
-        result = asyncio.run(tool["callable"](skill_command="nope"))
+        result = asyncio.run(tool["callable"](skill_id="nope"))
         assert "not found" in result
 
         # render ディスクリプタ(#20): result を skill 表示で描画
@@ -497,9 +487,7 @@ class TestSkills(AbstractPostgresTest):
 
         skill = Skills.insert_new_skill(
             "1",
-            SkillForm(
-                command="histcmd", title="t", content="指示", access_control=None
-            ),
+            SkillForm(id="histcmd", name="t", content="指示", access_control=None),
         )
         user = types.SimpleNamespace(id="1", name="Taro")
         model = _model_with_skills(skill.id)
@@ -537,7 +525,7 @@ class TestSkills(AbstractPostgresTest):
             result["messages"][1]["tool_calls"][0]["function"]["name"] == "load_skill"
         )
         assert result["messages"][4]["tool_call_id"] == "functions.f:0"
-        assert [a["command"] for a in activations] == ["histcmd"]
+        assert [a["id"] for a in activations] == ["histcmd"]
 
     def test_activation_carries_tool_ids(self):
         """`/command` 発火の activation は skill.tool_ids を運ぶ(#35 step2b、入口 1)。"""
@@ -547,8 +535,8 @@ class TestSkills(AbstractPostgresTest):
         skill = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="vaultcmd",
-                title="金庫番",
+                id="vaultcmd",
+                name="金庫番",
                 content="secret_password を呼べ",
                 tool_ids=["secret-password"],
                 access_control=None,
@@ -557,9 +545,7 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="1", name="Taro")
         form_data = {"messages": [{"role": "user", "content": "/vaultcmd 教えて"}]}
-        _, activations = apply_skill_command(
-            form_data, user, _model_with_skills(skill.id)
-        )
+        _, activations = apply_skill_command(form_data, user, _model_with_skills(skill.id))
         assert activations[0]["tool_ids"] == ["secret-password"]
 
     def test_load_skill_calls_load_tools_hook(self):
@@ -572,8 +558,8 @@ class TestSkills(AbstractPostgresTest):
         with_tools = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="hooked",
-                title="t",
+                id="hooked",
+                name="t",
                 description="tool 付き",
                 content="c",
                 tool_ids=["some-tool"],
@@ -583,8 +569,8 @@ class TestSkills(AbstractPostgresTest):
         without_tools = Skills.insert_new_skill(
             "1",
             SkillForm(
-                command="plain",
-                title="t",
+                id="plain",
+                name="t",
                 description="tool なし",
                 content="c",
                 access_control=None,
@@ -599,17 +585,17 @@ class TestSkills(AbstractPostgresTest):
         loaded = []
 
         async def fake_load_tools(skill):  # #28: フックは async 契約
-            loaded.append(skill.command)
+            loaded.append(skill.id)
             return ["fake_tool_fn"]
 
         tool = build_load_skill_tool(model, user, load_tools=fake_load_tools)
 
         # 導入された tool 名が戻り値の tools に載る
-        result = json.loads(asyncio.run(tool["callable"](skill_command="hooked")))
+        result = json.loads(asyncio.run(tool["callable"](skill_id="hooked")))
         assert result == {"result": "c", "tools": ["fake_tool_fn"]}
         assert loaded == ["hooked"]
 
         # tool_ids 空ならフックは呼ばれず tools は空
-        result = json.loads(asyncio.run(tool["callable"](skill_command="plain")))
+        result = json.loads(asyncio.run(tool["callable"](skill_id="plain")))
         assert result == {"result": "c", "tools": []}
         assert loaded == ["hooked"]

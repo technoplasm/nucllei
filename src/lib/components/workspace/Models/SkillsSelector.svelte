@@ -59,8 +59,8 @@
 						</div>
 
 						<div class=" py-0.5 text-sm w-full font-medium flex items-center gap-1.5">
-							<span class="text-gray-500">/{_skills[skillId].command}</span>
-							<span>— {_skills[skillId].title}</span>
+							<span class="text-gray-500">/{_skills[skillId].id}</span>
+							<span>— {_skills[skillId].name}</span>
 
 							{#if !(_skills[skillId].description ?? '').trim()}
 								<Tooltip
