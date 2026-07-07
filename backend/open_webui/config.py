@@ -1195,11 +1195,7 @@ ENABLE_COMMUNITY_SHARING = PersistentConfig(
     os.environ.get("ENABLE_COMMUNITY_SHARING", "False").lower() == "true",
 )
 
-ENABLE_MESSAGE_RATING = PersistentConfig(
-    "ENABLE_MESSAGE_RATING",
-    "ui.enable_message_rating",
-    os.environ.get("ENABLE_MESSAGE_RATING", "True").lower() == "true",
-)
+# llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
 
 ENABLE_USER_WEBHOOKS = PersistentConfig(
     "ENABLE_USER_WEBHOOKS",

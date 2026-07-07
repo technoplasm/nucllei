@@ -105,14 +105,7 @@
 						</div>
 					</div>
 
-					<!-- <div class="mb-2.5 flex w-full justify-between">
-						<div class=" text-xs font-medium">{$i18n.t('Arena Models')}</div>
-
-						<Tooltip content={$i18n.t(`Message rating should be enabled to use this feature`)}>
-							<Switch bind:state={evaluationConfig.ENABLE_EVALUATION_ARENA_MODELS} />
-						</Tooltip>
-					</div> -->
-				</div>
+					</div>
 			</div>
 		{:else}
 			<div class="flex h-full justify-center">

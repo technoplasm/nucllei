@@ -595,11 +595,7 @@
 						<Switch bind:state={adminConfig.ENABLE_COMMUNITY_SHARING} />
 					</div>
 
-					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Enable Message Rating')}</div>
-
-						<Switch bind:state={adminConfig.ENABLE_MESSAGE_RATING} />
-					</div>
+					<!-- llens(#48): 評価(👍/👎)機能撤去に伴い Message Rating トグルを撤去。 -->
 
 					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
 						<div class=" self-center text-xs font-medium">

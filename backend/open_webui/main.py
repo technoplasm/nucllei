@@ -73,7 +73,6 @@ from open_webui.routers import (
     models,
     knowledge,
     skills,
-    evaluations,
     tools,
     users,
     utils,
@@ -263,7 +262,6 @@ from open_webui.config import (
     API_KEY_ALLOWED_ENDPOINTS,
     ENABLE_CHANNELS,
     ENABLE_COMMUNITY_SHARING,
-    ENABLE_MESSAGE_RATING,
     ENABLE_USER_WEBHOOKS,
     ENABLE_EVALUATION_ARENA_MODELS,
     USER_PERMISSIONS,
@@ -567,7 +565,6 @@ app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
 
 app.state.config.ENABLE_CHANNELS = ENABLE_CHANNELS
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
-app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
@@ -996,9 +993,6 @@ app.include_router(folders.router, prefix="/api/v1/folders", tags=["folders"])
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
-app.include_router(
-    evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
-)
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 
@@ -1332,7 +1326,6 @@ async def get_app_config(request: Request):
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
-                    "enable_message_rating": app.state.config.ENABLE_MESSAGE_RATING,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
