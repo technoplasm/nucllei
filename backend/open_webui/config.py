@@ -190,7 +190,7 @@ def save_config(config):
         save_to_db(config)
         CONFIG_DATA = config
 
-        # Trigger updates on all registered PersistentConfig entries
+        # Trigger updates on all registered RuntimeConfig entries
         for config_item in PERSISTENT_CONFIG_REGISTRY:
             config_item.update()
     except Exception as e:
@@ -201,22 +201,18 @@ def save_config(config):
 
 T = TypeVar("T")
 
-ENABLE_PERSISTENT_CONFIG = (
-    os.environ.get("ENABLE_PERSISTENT_CONFIG", "True").lower() == "true"
-)
 
-
-class PersistentConfig(Generic[T]):
+class RuntimeConfig(Generic[T]):
     def __init__(self, env_name: str, config_path: str, env_value: T):
         self.env_name = env_name
         self.config_path = config_path
         self.env_value = env_value
         self.config_value = get_config_value(config_path)
-        if self.config_value is not None and ENABLE_PERSISTENT_CONFIG:
-            log.info(f"'{env_name}' loaded from the latest database entry")
-            self.value = self.config_value
-        else:
-            self.value = env_value
+        # llens #30: env を単一の正の源とする。起動時は env が必ず DB(config テーブル)より
+        # 優先される(旧来は DB 値があれば DB 勝ち=「env を変えたのに反映されない」#30 の温床)。
+        # 実行中の UI 変更は DB へ永続し稼働中は有効(複数ワーカーで共有)だが、次の起動で
+        # env が再び上書きする。恒久変更の唯一の経路は env/compose。
+        self.value = env_value
 
         PERSISTENT_CONFIG_REGISTRY.append(self)
 
@@ -226,13 +222,13 @@ class PersistentConfig(Generic[T]):
     @property
     def __dict__(self):
         raise TypeError(
-            "PersistentConfig object cannot be converted to dict, use config_get or .value instead."
+            "RuntimeConfig object cannot be converted to dict, use config_get or .value instead."
         )
 
     def __getattribute__(self, item):
         if item == "__dict__":
             raise TypeError(
-                "PersistentConfig object cannot be converted to dict, use config_get or .value instead."
+                "RuntimeConfig object cannot be converted to dict, use config_get or .value instead."
             )
         return super().__getattribute__(item)
 
@@ -243,6 +239,7 @@ class PersistentConfig(Generic[T]):
             log.info(f"Updated {self.env_name} to new value {self.value}")
 
     def save(self):
+        # llens #30: 実行中の変更を DB へ永続(稼働中のみ有効・再起動で env が再強制)。
         log.info(f"Saving '{self.env_name}' to the database")
         path_parts = self.config_path.split(".")
         sub_config = CONFIG_DATA
@@ -256,7 +253,7 @@ class PersistentConfig(Generic[T]):
 
 
 class AppConfig:
-    _state: dict[str, PersistentConfig]
+    _state: dict[str, RuntimeConfig]
     _redis: Optional[redis.Redis] = None
 
     def __init__(
@@ -270,7 +267,7 @@ class AppConfig:
             )
 
     def __setattr__(self, key, value):
-        if isinstance(value, PersistentConfig):
+        if isinstance(value, RuntimeConfig):
             self._state[key] = value
         else:
             self._state[key].value = value
@@ -308,26 +305,26 @@ class AppConfig:
 # WEBUI_AUTH (Required for security)
 ####################################
 
-ENABLE_API_KEY = PersistentConfig(
+ENABLE_API_KEY = RuntimeConfig(
     "ENABLE_API_KEY",
     "auth.api_key.enable",
     os.environ.get("ENABLE_API_KEY", "True").lower() == "true",
 )
 
-ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = PersistentConfig(
+ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = RuntimeConfig(
     "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS",
     "auth.api_key.endpoint_restrictions",
     os.environ.get("ENABLE_API_KEY_ENDPOINT_RESTRICTIONS", "False").lower() == "true",
 )
 
-API_KEY_ALLOWED_ENDPOINTS = PersistentConfig(
+API_KEY_ALLOWED_ENDPOINTS = RuntimeConfig(
     "API_KEY_ALLOWED_ENDPOINTS",
     "auth.api_key.allowed_endpoints",
     os.environ.get("API_KEY_ALLOWED_ENDPOINTS", ""),
 )
 
 
-JWT_EXPIRES_IN = PersistentConfig(
+JWT_EXPIRES_IN = RuntimeConfig(
     "JWT_EXPIRES_IN", "auth.jwt_expiry", os.environ.get("JWT_EXPIRES_IN", "-1")
 )
 
@@ -336,14 +333,14 @@ JWT_EXPIRES_IN = PersistentConfig(
 ####################################
 
 
-ENABLE_OAUTH_SIGNUP = PersistentConfig(
+ENABLE_OAUTH_SIGNUP = RuntimeConfig(
     "ENABLE_OAUTH_SIGNUP",
     "oauth.enable_signup",
     os.environ.get("ENABLE_OAUTH_SIGNUP", "False").lower() == "true",
 )
 
 
-OAUTH_MERGE_ACCOUNTS_BY_EMAIL = PersistentConfig(
+OAUTH_MERGE_ACCOUNTS_BY_EMAIL = RuntimeConfig(
     "OAUTH_MERGE_ACCOUNTS_BY_EMAIL",
     "oauth.merge_accounts_by_email",
     os.environ.get("OAUTH_MERGE_ACCOUNTS_BY_EMAIL", "False").lower() == "true",
@@ -351,171 +348,171 @@ OAUTH_MERGE_ACCOUNTS_BY_EMAIL = PersistentConfig(
 
 OAUTH_PROVIDERS = {}
 
-GOOGLE_CLIENT_ID = PersistentConfig(
+GOOGLE_CLIENT_ID = RuntimeConfig(
     "GOOGLE_CLIENT_ID",
     "oauth.google.client_id",
     os.environ.get("GOOGLE_CLIENT_ID", ""),
 )
 
-GOOGLE_CLIENT_SECRET = PersistentConfig(
+GOOGLE_CLIENT_SECRET = RuntimeConfig(
     "GOOGLE_CLIENT_SECRET",
     "oauth.google.client_secret",
     os.environ.get("GOOGLE_CLIENT_SECRET", ""),
 )
 
 
-GOOGLE_OAUTH_SCOPE = PersistentConfig(
+GOOGLE_OAUTH_SCOPE = RuntimeConfig(
     "GOOGLE_OAUTH_SCOPE",
     "oauth.google.scope",
     os.environ.get("GOOGLE_OAUTH_SCOPE", "openid email profile"),
 )
 
-GOOGLE_REDIRECT_URI = PersistentConfig(
+GOOGLE_REDIRECT_URI = RuntimeConfig(
     "GOOGLE_REDIRECT_URI",
     "oauth.google.redirect_uri",
     os.environ.get("GOOGLE_REDIRECT_URI", ""),
 )
 
-MICROSOFT_CLIENT_ID = PersistentConfig(
+MICROSOFT_CLIENT_ID = RuntimeConfig(
     "MICROSOFT_CLIENT_ID",
     "oauth.microsoft.client_id",
     os.environ.get("MICROSOFT_CLIENT_ID", ""),
 )
 
-MICROSOFT_CLIENT_SECRET = PersistentConfig(
+MICROSOFT_CLIENT_SECRET = RuntimeConfig(
     "MICROSOFT_CLIENT_SECRET",
     "oauth.microsoft.client_secret",
     os.environ.get("MICROSOFT_CLIENT_SECRET", ""),
 )
 
-MICROSOFT_CLIENT_TENANT_ID = PersistentConfig(
+MICROSOFT_CLIENT_TENANT_ID = RuntimeConfig(
     "MICROSOFT_CLIENT_TENANT_ID",
     "oauth.microsoft.tenant_id",
     os.environ.get("MICROSOFT_CLIENT_TENANT_ID", ""),
 )
 
-MICROSOFT_OAUTH_SCOPE = PersistentConfig(
+MICROSOFT_OAUTH_SCOPE = RuntimeConfig(
     "MICROSOFT_OAUTH_SCOPE",
     "oauth.microsoft.scope",
     os.environ.get("MICROSOFT_OAUTH_SCOPE", "openid email profile"),
 )
 
-MICROSOFT_REDIRECT_URI = PersistentConfig(
+MICROSOFT_REDIRECT_URI = RuntimeConfig(
     "MICROSOFT_REDIRECT_URI",
     "oauth.microsoft.redirect_uri",
     os.environ.get("MICROSOFT_REDIRECT_URI", ""),
 )
 
-GITHUB_CLIENT_ID = PersistentConfig(
+GITHUB_CLIENT_ID = RuntimeConfig(
     "GITHUB_CLIENT_ID",
     "oauth.github.client_id",
     os.environ.get("GITHUB_CLIENT_ID", ""),
 )
 
-GITHUB_CLIENT_SECRET = PersistentConfig(
+GITHUB_CLIENT_SECRET = RuntimeConfig(
     "GITHUB_CLIENT_SECRET",
     "oauth.github.client_secret",
     os.environ.get("GITHUB_CLIENT_SECRET", ""),
 )
 
-GITHUB_CLIENT_SCOPE = PersistentConfig(
+GITHUB_CLIENT_SCOPE = RuntimeConfig(
     "GITHUB_CLIENT_SCOPE",
     "oauth.github.scope",
     os.environ.get("GITHUB_CLIENT_SCOPE", "user:email"),
 )
 
-GITHUB_CLIENT_REDIRECT_URI = PersistentConfig(
+GITHUB_CLIENT_REDIRECT_URI = RuntimeConfig(
     "GITHUB_CLIENT_REDIRECT_URI",
     "oauth.github.redirect_uri",
     os.environ.get("GITHUB_CLIENT_REDIRECT_URI", ""),
 )
 
-OAUTH_CLIENT_ID = PersistentConfig(
+OAUTH_CLIENT_ID = RuntimeConfig(
     "OAUTH_CLIENT_ID",
     "oauth.oidc.client_id",
     os.environ.get("OAUTH_CLIENT_ID", ""),
 )
 
-OAUTH_CLIENT_SECRET = PersistentConfig(
+OAUTH_CLIENT_SECRET = RuntimeConfig(
     "OAUTH_CLIENT_SECRET",
     "oauth.oidc.client_secret",
     os.environ.get("OAUTH_CLIENT_SECRET", ""),
 )
 
-OPENID_PROVIDER_URL = PersistentConfig(
+OPENID_PROVIDER_URL = RuntimeConfig(
     "OPENID_PROVIDER_URL",
     "oauth.oidc.provider_url",
     os.environ.get("OPENID_PROVIDER_URL", ""),
 )
 
-OPENID_REDIRECT_URI = PersistentConfig(
+OPENID_REDIRECT_URI = RuntimeConfig(
     "OPENID_REDIRECT_URI",
     "oauth.oidc.redirect_uri",
     os.environ.get("OPENID_REDIRECT_URI", ""),
 )
 
-OAUTH_SCOPES = PersistentConfig(
+OAUTH_SCOPES = RuntimeConfig(
     "OAUTH_SCOPES",
     "oauth.oidc.scopes",
     os.environ.get("OAUTH_SCOPES", "openid email profile"),
 )
 
-OAUTH_CODE_CHALLENGE_METHOD = PersistentConfig(
+OAUTH_CODE_CHALLENGE_METHOD = RuntimeConfig(
     "OAUTH_CODE_CHALLENGE_METHOD",
     "oauth.oidc.code_challenge_method",
     os.environ.get("OAUTH_CODE_CHALLENGE_METHOD", None),
 )
 
-OAUTH_PROVIDER_NAME = PersistentConfig(
+OAUTH_PROVIDER_NAME = RuntimeConfig(
     "OAUTH_PROVIDER_NAME",
     "oauth.oidc.provider_name",
     os.environ.get("OAUTH_PROVIDER_NAME", "SSO"),
 )
 
-OAUTH_USERNAME_CLAIM = PersistentConfig(
+OAUTH_USERNAME_CLAIM = RuntimeConfig(
     "OAUTH_USERNAME_CLAIM",
     "oauth.oidc.username_claim",
     os.environ.get("OAUTH_USERNAME_CLAIM", "name"),
 )
 
 
-OAUTH_PICTURE_CLAIM = PersistentConfig(
+OAUTH_PICTURE_CLAIM = RuntimeConfig(
     "OAUTH_PICTURE_CLAIM",
     "oauth.oidc.avatar_claim",
     os.environ.get("OAUTH_PICTURE_CLAIM", "picture"),
 )
 
-OAUTH_EMAIL_CLAIM = PersistentConfig(
+OAUTH_EMAIL_CLAIM = RuntimeConfig(
     "OAUTH_EMAIL_CLAIM",
     "oauth.oidc.email_claim",
     os.environ.get("OAUTH_EMAIL_CLAIM", "email"),
 )
 
-OAUTH_GROUPS_CLAIM = PersistentConfig(
+OAUTH_GROUPS_CLAIM = RuntimeConfig(
     "OAUTH_GROUPS_CLAIM",
     "oauth.oidc.group_claim",
     os.environ.get("OAUTH_GROUP_CLAIM", "groups"),
 )
 
-ENABLE_OAUTH_ROLE_MANAGEMENT = PersistentConfig(
+ENABLE_OAUTH_ROLE_MANAGEMENT = RuntimeConfig(
     "ENABLE_OAUTH_ROLE_MANAGEMENT",
     "oauth.enable_role_mapping",
     os.environ.get("ENABLE_OAUTH_ROLE_MANAGEMENT", "False").lower() == "true",
 )
 
-ENABLE_OAUTH_GROUP_MANAGEMENT = PersistentConfig(
+ENABLE_OAUTH_GROUP_MANAGEMENT = RuntimeConfig(
     "ENABLE_OAUTH_GROUP_MANAGEMENT",
     "oauth.enable_group_mapping",
     os.environ.get("ENABLE_OAUTH_GROUP_MANAGEMENT", "False").lower() == "true",
 )
 
-OAUTH_ROLES_CLAIM = PersistentConfig(
+OAUTH_ROLES_CLAIM = RuntimeConfig(
     "OAUTH_ROLES_CLAIM",
     "oauth.roles_claim",
     os.environ.get("OAUTH_ROLES_CLAIM", "roles"),
 )
 
-OAUTH_ALLOWED_ROLES = PersistentConfig(
+OAUTH_ALLOWED_ROLES = RuntimeConfig(
     "OAUTH_ALLOWED_ROLES",
     "oauth.allowed_roles",
     [
@@ -524,13 +521,13 @@ OAUTH_ALLOWED_ROLES = PersistentConfig(
     ],
 )
 
-OAUTH_ADMIN_ROLES = PersistentConfig(
+OAUTH_ADMIN_ROLES = RuntimeConfig(
     "OAUTH_ADMIN_ROLES",
     "oauth.admin_roles",
     [role.strip() for role in os.environ.get("OAUTH_ADMIN_ROLES", "admin").split(",")],
 )
 
-OAUTH_ALLOWED_DOMAINS = PersistentConfig(
+OAUTH_ALLOWED_DOMAINS = RuntimeConfig(
     "OAUTH_ALLOWED_DOMAINS",
     "oauth.allowed_domains",
     [
@@ -781,7 +778,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # DIRECT CONNECTIONS
 ####################################
 
-ENABLE_DIRECT_CONNECTIONS = PersistentConfig(
+ENABLE_DIRECT_CONNECTIONS = RuntimeConfig(
     "ENABLE_DIRECT_CONNECTIONS",
     "direct.enable",
     os.environ.get("ENABLE_DIRECT_CONNECTIONS", "True").lower() == "true",
@@ -791,7 +788,7 @@ ENABLE_DIRECT_CONNECTIONS = PersistentConfig(
 # OLLAMA_BASE_URL
 ####################################
 
-ENABLE_OLLAMA_API = PersistentConfig(
+ENABLE_OLLAMA_API = RuntimeConfig(
     "ENABLE_OLLAMA_API",
     "ollama.enable",
     os.environ.get("ENABLE_OLLAMA_API", "True").lower() == "true",
@@ -835,11 +832,11 @@ OLLAMA_BASE_URLS = os.environ.get("OLLAMA_BASE_URLS", "")
 OLLAMA_BASE_URLS = OLLAMA_BASE_URLS if OLLAMA_BASE_URLS != "" else OLLAMA_BASE_URL
 
 OLLAMA_BASE_URLS = [url.strip() for url in OLLAMA_BASE_URLS.split(";")]
-OLLAMA_BASE_URLS = PersistentConfig(
+OLLAMA_BASE_URLS = RuntimeConfig(
     "OLLAMA_BASE_URLS", "ollama.base_urls", OLLAMA_BASE_URLS
 )
 
-OLLAMA_API_CONFIGS = PersistentConfig(
+OLLAMA_API_CONFIGS = RuntimeConfig(
     "OLLAMA_API_CONFIGS",
     "ollama.api_configs",
     {},
@@ -850,7 +847,7 @@ OLLAMA_API_CONFIGS = PersistentConfig(
 ####################################
 
 
-ENABLE_OPENAI_API = PersistentConfig(
+ENABLE_OPENAI_API = RuntimeConfig(
     "ENABLE_OPENAI_API",
     "openai.enable",
     os.environ.get("ENABLE_OPENAI_API", "True").lower() == "true",
@@ -871,7 +868,7 @@ OPENAI_API_KEYS = os.environ.get("OPENAI_API_KEYS", "")
 OPENAI_API_KEYS = OPENAI_API_KEYS if OPENAI_API_KEYS != "" else OPENAI_API_KEY
 
 OPENAI_API_KEYS = [url.strip() for url in OPENAI_API_KEYS.split(";")]
-OPENAI_API_KEYS = PersistentConfig(
+OPENAI_API_KEYS = RuntimeConfig(
     "OPENAI_API_KEYS", "openai.api_keys", OPENAI_API_KEYS
 )
 
@@ -884,11 +881,11 @@ OPENAI_API_BASE_URLS = [
     url.strip() if url != "" else "https://api.openai.com/v1"
     for url in OPENAI_API_BASE_URLS.split(";")
 ]
-OPENAI_API_BASE_URLS = PersistentConfig(
+OPENAI_API_BASE_URLS = RuntimeConfig(
     "OPENAI_API_BASE_URLS", "openai.api_base_urls", OPENAI_API_BASE_URLS
 )
 
-OPENAI_API_CONFIGS = PersistentConfig(
+OPENAI_API_CONFIGS = RuntimeConfig(
     "OPENAI_API_CONFIGS",
     "openai.api_configs",
     {},
@@ -909,7 +906,7 @@ OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 ####################################
 
 
-TOOL_SERVER_CONNECTIONS = PersistentConfig(
+TOOL_SERVER_CONNECTIONS = RuntimeConfig(
     "TOOL_SERVER_CONNECTIONS",
     "tool_server.connections",
     [],
@@ -920,12 +917,12 @@ TOOL_SERVER_CONNECTIONS = PersistentConfig(
 ####################################
 
 
-WEBUI_URL = PersistentConfig(
+WEBUI_URL = RuntimeConfig(
     "WEBUI_URL", "webui.url", os.environ.get("WEBUI_URL", "http://localhost:3000")
 )
 
 
-ENABLE_SIGNUP = PersistentConfig(
+ENABLE_SIGNUP = RuntimeConfig(
     "ENABLE_SIGNUP",
     "ui.enable_signup",
     (
@@ -935,24 +932,24 @@ ENABLE_SIGNUP = PersistentConfig(
     ),
 )
 
-ENABLE_LOGIN_FORM = PersistentConfig(
+ENABLE_LOGIN_FORM = RuntimeConfig(
     "ENABLE_LOGIN_FORM",
     "ui.ENABLE_LOGIN_FORM",
     os.environ.get("ENABLE_LOGIN_FORM", "True").lower() == "true",
 )
 
 
-DEFAULT_LOCALE = PersistentConfig(
+DEFAULT_LOCALE = RuntimeConfig(
     "DEFAULT_LOCALE",
     "ui.default_locale",
     os.environ.get("DEFAULT_LOCALE", ""),
 )
 
-DEFAULT_MODELS = PersistentConfig(
+DEFAULT_MODELS = RuntimeConfig(
     "DEFAULT_MODELS", "ui.default_models", os.environ.get("DEFAULT_MODELS", None)
 )
 
-DEFAULT_PROMPT_SUGGESTIONS = PersistentConfig(
+DEFAULT_PROMPT_SUGGESTIONS = RuntimeConfig(
     "DEFAULT_PROMPT_SUGGESTIONS",
     "ui.prompt_suggestions",
     [
@@ -986,13 +983,13 @@ DEFAULT_PROMPT_SUGGESTIONS = PersistentConfig(
     ],
 )
 
-MODEL_ORDER_LIST = PersistentConfig(
+MODEL_ORDER_LIST = RuntimeConfig(
     "MODEL_ORDER_LIST",
     "ui.model_order_list",
     [],
 )
 
-DEFAULT_USER_ROLE = PersistentConfig(
+DEFAULT_USER_ROLE = RuntimeConfig(
     "DEFAULT_USER_ROLE",
     "ui.default_user_role",
     os.getenv("DEFAULT_USER_ROLE", "pending"),
@@ -1142,13 +1139,13 @@ DEFAULT_USER_PERMISSIONS = {
     },
 }
 
-USER_PERMISSIONS = PersistentConfig(
+USER_PERMISSIONS = RuntimeConfig(
     "USER_PERMISSIONS",
     "user.permissions",
     DEFAULT_USER_PERMISSIONS,
 )
 
-ENABLE_CHANNELS = PersistentConfig(
+ENABLE_CHANNELS = RuntimeConfig(
     "ENABLE_CHANNELS",
     "channels.enable",
     os.environ.get("ENABLE_CHANNELS", "False").lower() == "true",
@@ -1157,7 +1154,7 @@ ENABLE_CHANNELS = PersistentConfig(
 
 # llens(#48): evaluation/arena は撲滅(config・モデル注入・chat 経路・UI を全撤去)。
 
-WEBHOOK_URL = PersistentConfig(
+WEBHOOK_URL = RuntimeConfig(
     "WEBHOOK_URL", "webhook_url", os.environ.get("WEBHOOK_URL", "")
 )
 
@@ -1169,7 +1166,7 @@ ENABLE_ADMIN_CHAT_ACCESS = (
 
 # llens: openwebui.com への共有導線は air-gapped 前提のため既定 OFF
 # (issue #10 ストア導線の除去、fork.md §6)
-ENABLE_COMMUNITY_SHARING = PersistentConfig(
+ENABLE_COMMUNITY_SHARING = RuntimeConfig(
     "ENABLE_COMMUNITY_SHARING",
     "ui.enable_community_sharing",
     os.environ.get("ENABLE_COMMUNITY_SHARING", "False").lower() == "true",
@@ -1177,7 +1174,7 @@ ENABLE_COMMUNITY_SHARING = PersistentConfig(
 
 # llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
 
-ENABLE_USER_WEBHOOKS = PersistentConfig(
+ENABLE_USER_WEBHOOKS = RuntimeConfig(
     "ENABLE_USER_WEBHOOKS",
     "ui.enable_user_webhooks",
     os.environ.get("ENABLE_USER_WEBHOOKS", "True").lower() == "true",
@@ -1235,16 +1232,16 @@ except Exception as e:
     log.exception(f"Error loading WEBUI_BANNERS: {e}")
     banners = []
 
-WEBUI_BANNERS = PersistentConfig("WEBUI_BANNERS", "ui.banners", banners)
+WEBUI_BANNERS = RuntimeConfig("WEBUI_BANNERS", "ui.banners", banners)
 
 
-SHOW_ADMIN_DETAILS = PersistentConfig(
+SHOW_ADMIN_DETAILS = RuntimeConfig(
     "SHOW_ADMIN_DETAILS",
     "auth.admin.show",
     os.environ.get("SHOW_ADMIN_DETAILS", "true").lower() == "true",
 )
 
-ADMIN_EMAIL = PersistentConfig(
+ADMIN_EMAIL = RuntimeConfig(
     "ADMIN_EMAIL",
     "auth.admin.email",
     os.environ.get("ADMIN_EMAIL", None),
@@ -1256,19 +1253,19 @@ ADMIN_EMAIL = PersistentConfig(
 ####################################
 
 
-TASK_MODEL = PersistentConfig(
+TASK_MODEL = RuntimeConfig(
     "TASK_MODEL",
     "task.model.default",
     os.environ.get("TASK_MODEL", ""),
 )
 
-TASK_MODEL_EXTERNAL = PersistentConfig(
+TASK_MODEL_EXTERNAL = RuntimeConfig(
     "TASK_MODEL_EXTERNAL",
     "task.model.external",
     os.environ.get("TASK_MODEL_EXTERNAL", ""),
 )
 
-TITLE_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
+TITLE_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "TITLE_GENERATION_PROMPT_TEMPLATE",
     "task.title.prompt_template",
     os.environ.get("TITLE_GENERATION_PROMPT_TEMPLATE", ""),
@@ -1295,7 +1292,7 @@ JSON format: { "title": "your concise title here" }
 {{MESSAGES:END:2}}
 </chat_history>"""
 
-TAGS_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
+TAGS_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "TAGS_GENERATION_PROMPT_TEMPLATE",
     "task.tags.prompt_template",
     os.environ.get("TAGS_GENERATION_PROMPT_TEMPLATE", ""),
@@ -1319,7 +1316,7 @@ JSON format: { "tags": ["tag1", "tag2", "tag3"] }
 {{MESSAGES:END:6}}
 </chat_history>"""
 
-IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
+IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE",
     "task.image.prompt_template",
     os.environ.get("IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE", ""),
@@ -1345,34 +1342,34 @@ Strictly return in JSON format:
 {{MESSAGES:END:6}}
 </chat_history>"""
 
-ENABLE_TAGS_GENERATION = PersistentConfig(
+ENABLE_TAGS_GENERATION = RuntimeConfig(
     "ENABLE_TAGS_GENERATION",
     "task.tags.enable",
     os.environ.get("ENABLE_TAGS_GENERATION", "True").lower() == "true",
 )
 
-ENABLE_TITLE_GENERATION = PersistentConfig(
+ENABLE_TITLE_GENERATION = RuntimeConfig(
     "ENABLE_TITLE_GENERATION",
     "task.title.enable",
     os.environ.get("ENABLE_TITLE_GENERATION", "True").lower() == "true",
 )
 
 
-ENABLE_SEARCH_QUERY_GENERATION = PersistentConfig(
+ENABLE_SEARCH_QUERY_GENERATION = RuntimeConfig(
     "ENABLE_SEARCH_QUERY_GENERATION",
     "task.query.search.enable",
     os.environ.get("ENABLE_SEARCH_QUERY_GENERATION", "True").lower() == "true",
 )
 
 # llens: RAG は使わないため検索クエリ生成も既定 OFF(issue #9、fork.md §5)
-ENABLE_RETRIEVAL_QUERY_GENERATION = PersistentConfig(
+ENABLE_RETRIEVAL_QUERY_GENERATION = RuntimeConfig(
     "ENABLE_RETRIEVAL_QUERY_GENERATION",
     "task.query.retrieval.enable",
     os.environ.get("ENABLE_RETRIEVAL_QUERY_GENERATION", "False").lower() == "true",
 )
 
 
-QUERY_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
+QUERY_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "QUERY_GENERATION_PROMPT_TEMPLATE",
     "task.query.prompt_template",
     os.environ.get("QUERY_GENERATION_PROMPT_TEMPLATE", ""),
@@ -1402,19 +1399,19 @@ Strictly return in JSON format:
 </chat_history>
 """
 
-ENABLE_AUTOCOMPLETE_GENERATION = PersistentConfig(
+ENABLE_AUTOCOMPLETE_GENERATION = RuntimeConfig(
     "ENABLE_AUTOCOMPLETE_GENERATION",
     "task.autocomplete.enable",
     os.environ.get("ENABLE_AUTOCOMPLETE_GENERATION", "False").lower() == "true",
 )
 
-AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = PersistentConfig(
+AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = RuntimeConfig(
     "AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH",
     "task.autocomplete.input_max_length",
     int(os.environ.get("AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH", "-1")),
 )
 
-AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
+AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE",
     "task.autocomplete.prompt_template",
     os.environ.get("AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE", ""),
@@ -1486,69 +1483,69 @@ Responses from models: {{responses}}"""
 # コード実行は nsjail + IPython の外部サンドボックス(自前ツール側)で行う。
 # 有効化する場合も Pyodide には戻さず外部 Jupyter 互換接続を前提とする
 # (CLAUDE.md 絶対制約)。コード自体は温存(削除しない)。
-ENABLE_CODE_EXECUTION = PersistentConfig(
+ENABLE_CODE_EXECUTION = RuntimeConfig(
     "ENABLE_CODE_EXECUTION",
     "code_execution.enable",
     os.environ.get("ENABLE_CODE_EXECUTION", "False").lower() == "true",
 )
 
-CODE_EXECUTION_ENGINE = PersistentConfig(
+CODE_EXECUTION_ENGINE = RuntimeConfig(
     "CODE_EXECUTION_ENGINE",
     "code_execution.engine",
     os.environ.get("CODE_EXECUTION_ENGINE", "jupyter"),
 )
 
-CODE_EXECUTION_JUPYTER_URL = PersistentConfig(
+CODE_EXECUTION_JUPYTER_URL = RuntimeConfig(
     "CODE_EXECUTION_JUPYTER_URL",
     "code_execution.jupyter.url",
     os.environ.get("CODE_EXECUTION_JUPYTER_URL", ""),
 )
 
-CODE_EXECUTION_JUPYTER_AUTH = PersistentConfig(
+CODE_EXECUTION_JUPYTER_AUTH = RuntimeConfig(
     "CODE_EXECUTION_JUPYTER_AUTH",
     "code_execution.jupyter.auth",
     os.environ.get("CODE_EXECUTION_JUPYTER_AUTH", ""),
 )
 
-CODE_EXECUTION_JUPYTER_AUTH_TOKEN = PersistentConfig(
+CODE_EXECUTION_JUPYTER_AUTH_TOKEN = RuntimeConfig(
     "CODE_EXECUTION_JUPYTER_AUTH_TOKEN",
     "code_execution.jupyter.auth_token",
     os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_TOKEN", ""),
 )
 
 
-CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = PersistentConfig(
+CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = RuntimeConfig(
     "CODE_EXECUTION_JUPYTER_AUTH_PASSWORD",
     "code_execution.jupyter.auth_password",
     os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_PASSWORD", ""),
 )
 
-CODE_EXECUTION_JUPYTER_TIMEOUT = PersistentConfig(
+CODE_EXECUTION_JUPYTER_TIMEOUT = RuntimeConfig(
     "CODE_EXECUTION_JUPYTER_TIMEOUT",
     "code_execution.jupyter.timeout",
     int(os.environ.get("CODE_EXECUTION_JUPYTER_TIMEOUT", "60")),
 )
 
 # llens: code interpreter も既定 OFF・有効化時は jupyter 前提(issue #11)
-ENABLE_CODE_INTERPRETER = PersistentConfig(
+ENABLE_CODE_INTERPRETER = RuntimeConfig(
     "ENABLE_CODE_INTERPRETER",
     "code_interpreter.enable",
     os.environ.get("ENABLE_CODE_INTERPRETER", "False").lower() == "true",
 )
 
-CODE_INTERPRETER_ENGINE = PersistentConfig(
+CODE_INTERPRETER_ENGINE = RuntimeConfig(
     "CODE_INTERPRETER_ENGINE",
     "code_interpreter.engine",
     os.environ.get("CODE_INTERPRETER_ENGINE", "jupyter"),
 )
 
-CODE_INTERPRETER_PROMPT_TEMPLATE = PersistentConfig(
+CODE_INTERPRETER_PROMPT_TEMPLATE = RuntimeConfig(
     "CODE_INTERPRETER_PROMPT_TEMPLATE",
     "code_interpreter.prompt_template",
     os.environ.get("CODE_INTERPRETER_PROMPT_TEMPLATE", ""),
 )
 
-CODE_INTERPRETER_JUPYTER_URL = PersistentConfig(
+CODE_INTERPRETER_JUPYTER_URL = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_URL",
     "code_interpreter.jupyter.url",
     os.environ.get(
@@ -1556,7 +1553,7 @@ CODE_INTERPRETER_JUPYTER_URL = PersistentConfig(
     ),
 )
 
-CODE_INTERPRETER_JUPYTER_AUTH = PersistentConfig(
+CODE_INTERPRETER_JUPYTER_AUTH = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH",
     "code_interpreter.jupyter.auth",
     os.environ.get(
@@ -1565,7 +1562,7 @@ CODE_INTERPRETER_JUPYTER_AUTH = PersistentConfig(
     ),
 )
 
-CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = PersistentConfig(
+CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH_TOKEN",
     "code_interpreter.jupyter.auth_token",
     os.environ.get(
@@ -1575,7 +1572,7 @@ CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = PersistentConfig(
 )
 
 
-CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = PersistentConfig(
+CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD",
     "code_interpreter.jupyter.auth_password",
     os.environ.get(
@@ -1584,7 +1581,7 @@ CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = PersistentConfig(
     ),
 )
 
-CODE_INTERPRETER_JUPYTER_TIMEOUT = PersistentConfig(
+CODE_INTERPRETER_JUPYTER_TIMEOUT = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_TIMEOUT",
     "code_interpreter.jupyter.timeout",
     int(
@@ -1689,68 +1686,68 @@ PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH = int(
 
 
 # If configured, Google Drive will be available as an upload option.
-ENABLE_GOOGLE_DRIVE_INTEGRATION = PersistentConfig(
+ENABLE_GOOGLE_DRIVE_INTEGRATION = RuntimeConfig(
     "ENABLE_GOOGLE_DRIVE_INTEGRATION",
     "google_drive.enable",
     os.getenv("ENABLE_GOOGLE_DRIVE_INTEGRATION", "False").lower() == "true",
 )
 
-GOOGLE_DRIVE_CLIENT_ID = PersistentConfig(
+GOOGLE_DRIVE_CLIENT_ID = RuntimeConfig(
     "GOOGLE_DRIVE_CLIENT_ID",
     "google_drive.client_id",
     os.environ.get("GOOGLE_DRIVE_CLIENT_ID", ""),
 )
 
-GOOGLE_DRIVE_API_KEY = PersistentConfig(
+GOOGLE_DRIVE_API_KEY = RuntimeConfig(
     "GOOGLE_DRIVE_API_KEY",
     "google_drive.api_key",
     os.environ.get("GOOGLE_DRIVE_API_KEY", ""),
 )
 
-ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
+ENABLE_ONEDRIVE_INTEGRATION = RuntimeConfig(
     "ENABLE_ONEDRIVE_INTEGRATION",
     "onedrive.enable",
     os.getenv("ENABLE_ONEDRIVE_INTEGRATION", "False").lower() == "true",
 )
 
-ONEDRIVE_CLIENT_ID = PersistentConfig(
+ONEDRIVE_CLIENT_ID = RuntimeConfig(
     "ONEDRIVE_CLIENT_ID",
     "onedrive.client_id",
     os.environ.get("ONEDRIVE_CLIENT_ID", ""),
 )
 
 # RAG Content Extraction
-CONTENT_EXTRACTION_ENGINE = PersistentConfig(
+CONTENT_EXTRACTION_ENGINE = RuntimeConfig(
     "CONTENT_EXTRACTION_ENGINE",
     "rag.CONTENT_EXTRACTION_ENGINE",
     os.environ.get("CONTENT_EXTRACTION_ENGINE", "").lower(),
 )
 
-TIKA_SERVER_URL = PersistentConfig(
+TIKA_SERVER_URL = RuntimeConfig(
     "TIKA_SERVER_URL",
     "rag.tika_server_url",
     os.getenv("TIKA_SERVER_URL", "http://tika:9998"),  # Default for sidecar deployment
 )
 
-DOCLING_SERVER_URL = PersistentConfig(
+DOCLING_SERVER_URL = RuntimeConfig(
     "DOCLING_SERVER_URL",
     "rag.docling_server_url",
     os.getenv("DOCLING_SERVER_URL", "http://docling:5001"),
 )
 
-DOCUMENT_INTELLIGENCE_ENDPOINT = PersistentConfig(
+DOCUMENT_INTELLIGENCE_ENDPOINT = RuntimeConfig(
     "DOCUMENT_INTELLIGENCE_ENDPOINT",
     "rag.document_intelligence_endpoint",
     os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT", ""),
 )
 
-DOCUMENT_INTELLIGENCE_KEY = PersistentConfig(
+DOCUMENT_INTELLIGENCE_KEY = RuntimeConfig(
     "DOCUMENT_INTELLIGENCE_KEY",
     "rag.document_intelligence_key",
     os.getenv("DOCUMENT_INTELLIGENCE_KEY", ""),
 )
 
-MISTRAL_OCR_API_KEY = PersistentConfig(
+MISTRAL_OCR_API_KEY = RuntimeConfig(
     "MISTRAL_OCR_API_KEY",
     "rag.mistral_ocr_api_key",
     os.getenv("MISTRAL_OCR_API_KEY", ""),
@@ -1759,40 +1756,40 @@ MISTRAL_OCR_API_KEY = PersistentConfig(
 # llens: 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。
 # Docling 抽出 → data.content 保存の経路はそのまま、vector DB への保存だけを止める。
 # embedding モデルの起動時ロードも main.py 側でこのフラグを見てスキップする。
-BYPASS_EMBEDDING_AND_RETRIEVAL = PersistentConfig(
+BYPASS_EMBEDDING_AND_RETRIEVAL = RuntimeConfig(
     "BYPASS_EMBEDDING_AND_RETRIEVAL",
     "rag.bypass_embedding_and_retrieval",
     os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "True").lower() == "true",
 )
 
 
-RAG_TOP_K = PersistentConfig(
+RAG_TOP_K = RuntimeConfig(
     "RAG_TOP_K", "rag.top_k", int(os.environ.get("RAG_TOP_K", "3"))
 )
-RAG_TOP_K_RERANKER = PersistentConfig(
+RAG_TOP_K_RERANKER = RuntimeConfig(
     "RAG_TOP_K_RERANKER",
     "rag.top_k_reranker",
     int(os.environ.get("RAG_TOP_K_RERANKER", "3")),
 )
-RAG_RELEVANCE_THRESHOLD = PersistentConfig(
+RAG_RELEVANCE_THRESHOLD = RuntimeConfig(
     "RAG_RELEVANCE_THRESHOLD",
     "rag.relevance_threshold",
     float(os.environ.get("RAG_RELEVANCE_THRESHOLD", "0.0")),
 )
 
-ENABLE_RAG_HYBRID_SEARCH = PersistentConfig(
+ENABLE_RAG_HYBRID_SEARCH = RuntimeConfig(
     "ENABLE_RAG_HYBRID_SEARCH",
     "rag.enable_hybrid_search",
     os.environ.get("ENABLE_RAG_HYBRID_SEARCH", "").lower() == "true",
 )
 
-RAG_FULL_CONTEXT = PersistentConfig(
+RAG_FULL_CONTEXT = RuntimeConfig(
     "RAG_FULL_CONTEXT",
     "rag.full_context",
     os.getenv("RAG_FULL_CONTEXT", "False").lower() == "true",
 )
 
-RAG_FILE_MAX_COUNT = PersistentConfig(
+RAG_FILE_MAX_COUNT = RuntimeConfig(
     "RAG_FILE_MAX_COUNT",
     "rag.file.max_count",
     (
@@ -1802,7 +1799,7 @@ RAG_FILE_MAX_COUNT = PersistentConfig(
     ),
 )
 
-RAG_FILE_MAX_SIZE = PersistentConfig(
+RAG_FILE_MAX_SIZE = RuntimeConfig(
     "RAG_FILE_MAX_SIZE",
     "rag.file.max_size",
     (
@@ -1812,19 +1809,19 @@ RAG_FILE_MAX_SIZE = PersistentConfig(
     ),
 )
 
-RAG_EMBEDDING_ENGINE = PersistentConfig(
+RAG_EMBEDDING_ENGINE = RuntimeConfig(
     "RAG_EMBEDDING_ENGINE",
     "rag.embedding_engine",
     os.environ.get("RAG_EMBEDDING_ENGINE", ""),
 )
 
-PDF_EXTRACT_IMAGES = PersistentConfig(
+PDF_EXTRACT_IMAGES = RuntimeConfig(
     "PDF_EXTRACT_IMAGES",
     "rag.pdf_extract_images",
     os.environ.get("PDF_EXTRACT_IMAGES", "False").lower() == "true",
 )
 
-RAG_EMBEDDING_MODEL = PersistentConfig(
+RAG_EMBEDDING_MODEL = RuntimeConfig(
     "RAG_EMBEDDING_MODEL",
     "rag.embedding_model",
     os.environ.get("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
@@ -1840,7 +1837,7 @@ RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = (
     os.environ.get("RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE", "True").lower() == "true"
 )
 
-RAG_EMBEDDING_BATCH_SIZE = PersistentConfig(
+RAG_EMBEDDING_BATCH_SIZE = RuntimeConfig(
     "RAG_EMBEDDING_BATCH_SIZE",
     "rag.embedding_batch_size",
     int(
@@ -1857,7 +1854,7 @@ RAG_EMBEDDING_PREFIX_FIELD_NAME = os.environ.get(
     "RAG_EMBEDDING_PREFIX_FIELD_NAME", None
 )
 
-RAG_RERANKING_MODEL = PersistentConfig(
+RAG_RERANKING_MODEL = RuntimeConfig(
     "RAG_RERANKING_MODEL",
     "rag.reranking_model",
     os.environ.get("RAG_RERANKING_MODEL", ""),
@@ -1875,7 +1872,7 @@ RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = (
 )
 
 
-RAG_TEXT_SPLITTER = PersistentConfig(
+RAG_TEXT_SPLITTER = RuntimeConfig(
     "RAG_TEXT_SPLITTER",
     "rag.text_splitter",
     os.environ.get("RAG_TEXT_SPLITTER", ""),
@@ -1883,17 +1880,17 @@ RAG_TEXT_SPLITTER = PersistentConfig(
 
 
 TIKTOKEN_CACHE_DIR = os.environ.get("TIKTOKEN_CACHE_DIR", f"{CACHE_DIR}/tiktoken")
-TIKTOKEN_ENCODING_NAME = PersistentConfig(
+TIKTOKEN_ENCODING_NAME = RuntimeConfig(
     "TIKTOKEN_ENCODING_NAME",
     "rag.tiktoken_encoding_name",
     os.environ.get("TIKTOKEN_ENCODING_NAME", "cl100k_base"),
 )
 
 
-CHUNK_SIZE = PersistentConfig(
+CHUNK_SIZE = RuntimeConfig(
     "CHUNK_SIZE", "rag.chunk_size", int(os.environ.get("CHUNK_SIZE", "1000"))
 )
-CHUNK_OVERLAP = PersistentConfig(
+CHUNK_OVERLAP = RuntimeConfig(
     "CHUNK_OVERLAP",
     "rag.chunk_overlap",
     int(os.environ.get("CHUNK_OVERLAP", "100")),
@@ -1929,30 +1926,30 @@ Provide a clear and direct response to the user's query, including inline citati
 </user_query>
 """
 
-RAG_TEMPLATE = PersistentConfig(
+RAG_TEMPLATE = RuntimeConfig(
     "RAG_TEMPLATE",
     "rag.template",
     os.environ.get("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE),
 )
 
-RAG_OPENAI_API_BASE_URL = PersistentConfig(
+RAG_OPENAI_API_BASE_URL = RuntimeConfig(
     "RAG_OPENAI_API_BASE_URL",
     "rag.openai_api_base_url",
     os.getenv("RAG_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
 )
-RAG_OPENAI_API_KEY = PersistentConfig(
+RAG_OPENAI_API_KEY = RuntimeConfig(
     "RAG_OPENAI_API_KEY",
     "rag.openai_api_key",
     os.getenv("RAG_OPENAI_API_KEY", OPENAI_API_KEY),
 )
 
-RAG_OLLAMA_BASE_URL = PersistentConfig(
+RAG_OLLAMA_BASE_URL = RuntimeConfig(
     "RAG_OLLAMA_BASE_URL",
     "rag.ollama.url",
     os.getenv("RAG_OLLAMA_BASE_URL", OLLAMA_BASE_URL),
 )
 
-RAG_OLLAMA_API_KEY = PersistentConfig(
+RAG_OLLAMA_API_KEY = RuntimeConfig(
     "RAG_OLLAMA_API_KEY",
     "rag.ollama.key",
     os.getenv("RAG_OLLAMA_API_KEY", ""),
@@ -1963,13 +1960,13 @@ ENABLE_RAG_LOCAL_WEB_FETCH = (
     os.getenv("ENABLE_RAG_LOCAL_WEB_FETCH", "False").lower() == "true"
 )
 
-YOUTUBE_LOADER_LANGUAGE = PersistentConfig(
+YOUTUBE_LOADER_LANGUAGE = RuntimeConfig(
     "YOUTUBE_LOADER_LANGUAGE",
     "rag.youtube_loader_language",
     os.getenv("YOUTUBE_LOADER_LANGUAGE", "en").split(","),
 )
 
-YOUTUBE_LOADER_PROXY_URL = PersistentConfig(
+YOUTUBE_LOADER_PROXY_URL = RuntimeConfig(
     "YOUTUBE_LOADER_PROXY_URL",
     "rag.youtube_loader_proxy_url",
     os.getenv("YOUTUBE_LOADER_PROXY_URL", ""),
@@ -1980,26 +1977,26 @@ YOUTUBE_LOADER_PROXY_URL = PersistentConfig(
 # Web Search (RAG)
 ####################################
 
-ENABLE_WEB_SEARCH = PersistentConfig(
+ENABLE_WEB_SEARCH = RuntimeConfig(
     "ENABLE_WEB_SEARCH",
     "rag.web.search.enable",
     os.getenv("ENABLE_WEB_SEARCH", "False").lower() == "true",
 )
 
-WEB_SEARCH_ENGINE = PersistentConfig(
+WEB_SEARCH_ENGINE = RuntimeConfig(
     "WEB_SEARCH_ENGINE",
     "rag.web.search.engine",
     os.getenv("WEB_SEARCH_ENGINE", ""),
 )
 
-BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = PersistentConfig(
+BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = RuntimeConfig(
     "BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL",
     "rag.web.search.bypass_embedding_and_retrieval",
     os.getenv("BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL", "False").lower() == "true",
 )
 
 
-WEB_SEARCH_RESULT_COUNT = PersistentConfig(
+WEB_SEARCH_RESULT_COUNT = RuntimeConfig(
     "WEB_SEARCH_RESULT_COUNT",
     "rag.web.search.result_count",
     int(os.getenv("WEB_SEARCH_RESULT_COUNT", "3")),
@@ -2008,7 +2005,7 @@ WEB_SEARCH_RESULT_COUNT = PersistentConfig(
 
 # You can provide a list of your own websites to filter after performing a web search.
 # This ensures the highest level of safety and reliability of the information sources.
-WEB_SEARCH_DOMAIN_FILTER_LIST = PersistentConfig(
+WEB_SEARCH_DOMAIN_FILTER_LIST = RuntimeConfig(
     "WEB_SEARCH_DOMAIN_FILTER_LIST",
     "rag.web.search.domain.filter_list",
     [
@@ -2018,128 +2015,128 @@ WEB_SEARCH_DOMAIN_FILTER_LIST = PersistentConfig(
     ],
 )
 
-WEB_SEARCH_CONCURRENT_REQUESTS = PersistentConfig(
+WEB_SEARCH_CONCURRENT_REQUESTS = RuntimeConfig(
     "WEB_SEARCH_CONCURRENT_REQUESTS",
     "rag.web.search.concurrent_requests",
     int(os.getenv("WEB_SEARCH_CONCURRENT_REQUESTS", "10")),
 )
 
-WEB_LOADER_ENGINE = PersistentConfig(
+WEB_LOADER_ENGINE = RuntimeConfig(
     "WEB_LOADER_ENGINE",
     "rag.web.loader.engine",
     os.environ.get("WEB_LOADER_ENGINE", ""),
 )
 
-ENABLE_WEB_LOADER_SSL_VERIFICATION = PersistentConfig(
+ENABLE_WEB_LOADER_SSL_VERIFICATION = RuntimeConfig(
     "ENABLE_WEB_LOADER_SSL_VERIFICATION",
     "rag.web.loader.ssl_verification",
     os.environ.get("ENABLE_WEB_LOADER_SSL_VERIFICATION", "True").lower() == "true",
 )
 
-WEB_SEARCH_TRUST_ENV = PersistentConfig(
+WEB_SEARCH_TRUST_ENV = RuntimeConfig(
     "WEB_SEARCH_TRUST_ENV",
     "rag.web.search.trust_env",
     os.getenv("WEB_SEARCH_TRUST_ENV", "False").lower() == "true",
 )
 
 
-SEARXNG_QUERY_URL = PersistentConfig(
+SEARXNG_QUERY_URL = RuntimeConfig(
     "SEARXNG_QUERY_URL",
     "rag.web.search.searxng_query_url",
     os.getenv("SEARXNG_QUERY_URL", ""),
 )
 
-GOOGLE_PSE_API_KEY = PersistentConfig(
+GOOGLE_PSE_API_KEY = RuntimeConfig(
     "GOOGLE_PSE_API_KEY",
     "rag.web.search.google_pse_api_key",
     os.getenv("GOOGLE_PSE_API_KEY", ""),
 )
 
-GOOGLE_PSE_ENGINE_ID = PersistentConfig(
+GOOGLE_PSE_ENGINE_ID = RuntimeConfig(
     "GOOGLE_PSE_ENGINE_ID",
     "rag.web.search.google_pse_engine_id",
     os.getenv("GOOGLE_PSE_ENGINE_ID", ""),
 )
 
-BRAVE_SEARCH_API_KEY = PersistentConfig(
+BRAVE_SEARCH_API_KEY = RuntimeConfig(
     "BRAVE_SEARCH_API_KEY",
     "rag.web.search.brave_search_api_key",
     os.getenv("BRAVE_SEARCH_API_KEY", ""),
 )
 
-KAGI_SEARCH_API_KEY = PersistentConfig(
+KAGI_SEARCH_API_KEY = RuntimeConfig(
     "KAGI_SEARCH_API_KEY",
     "rag.web.search.kagi_search_api_key",
     os.getenv("KAGI_SEARCH_API_KEY", ""),
 )
 
-MOJEEK_SEARCH_API_KEY = PersistentConfig(
+MOJEEK_SEARCH_API_KEY = RuntimeConfig(
     "MOJEEK_SEARCH_API_KEY",
     "rag.web.search.mojeek_search_api_key",
     os.getenv("MOJEEK_SEARCH_API_KEY", ""),
 )
 
-BOCHA_SEARCH_API_KEY = PersistentConfig(
+BOCHA_SEARCH_API_KEY = RuntimeConfig(
     "BOCHA_SEARCH_API_KEY",
     "rag.web.search.bocha_search_api_key",
     os.getenv("BOCHA_SEARCH_API_KEY", ""),
 )
 
-SERPSTACK_API_KEY = PersistentConfig(
+SERPSTACK_API_KEY = RuntimeConfig(
     "SERPSTACK_API_KEY",
     "rag.web.search.serpstack_api_key",
     os.getenv("SERPSTACK_API_KEY", ""),
 )
 
-SERPSTACK_HTTPS = PersistentConfig(
+SERPSTACK_HTTPS = RuntimeConfig(
     "SERPSTACK_HTTPS",
     "rag.web.search.serpstack_https",
     os.getenv("SERPSTACK_HTTPS", "True").lower() == "true",
 )
 
-SERPER_API_KEY = PersistentConfig(
+SERPER_API_KEY = RuntimeConfig(
     "SERPER_API_KEY",
     "rag.web.search.serper_api_key",
     os.getenv("SERPER_API_KEY", ""),
 )
 
-SERPLY_API_KEY = PersistentConfig(
+SERPLY_API_KEY = RuntimeConfig(
     "SERPLY_API_KEY",
     "rag.web.search.serply_api_key",
     os.getenv("SERPLY_API_KEY", ""),
 )
 
-JINA_API_KEY = PersistentConfig(
+JINA_API_KEY = RuntimeConfig(
     "JINA_API_KEY",
     "rag.web.search.jina_api_key",
     os.getenv("JINA_API_KEY", ""),
 )
 
-SEARCHAPI_API_KEY = PersistentConfig(
+SEARCHAPI_API_KEY = RuntimeConfig(
     "SEARCHAPI_API_KEY",
     "rag.web.search.searchapi_api_key",
     os.getenv("SEARCHAPI_API_KEY", ""),
 )
 
-SEARCHAPI_ENGINE = PersistentConfig(
+SEARCHAPI_ENGINE = RuntimeConfig(
     "SEARCHAPI_ENGINE",
     "rag.web.search.searchapi_engine",
     os.getenv("SEARCHAPI_ENGINE", ""),
 )
 
-SERPAPI_API_KEY = PersistentConfig(
+SERPAPI_API_KEY = RuntimeConfig(
     "SERPAPI_API_KEY",
     "rag.web.search.serpapi_api_key",
     os.getenv("SERPAPI_API_KEY", ""),
 )
 
-SERPAPI_ENGINE = PersistentConfig(
+SERPAPI_ENGINE = RuntimeConfig(
     "SERPAPI_ENGINE",
     "rag.web.search.serpapi_engine",
     os.getenv("SERPAPI_ENGINE", ""),
 )
 
-BING_SEARCH_V7_ENDPOINT = PersistentConfig(
+BING_SEARCH_V7_ENDPOINT = RuntimeConfig(
     "BING_SEARCH_V7_ENDPOINT",
     "rag.web.search.bing_search_v7_endpoint",
     os.environ.get(
@@ -2147,67 +2144,67 @@ BING_SEARCH_V7_ENDPOINT = PersistentConfig(
     ),
 )
 
-BING_SEARCH_V7_SUBSCRIPTION_KEY = PersistentConfig(
+BING_SEARCH_V7_SUBSCRIPTION_KEY = RuntimeConfig(
     "BING_SEARCH_V7_SUBSCRIPTION_KEY",
     "rag.web.search.bing_search_v7_subscription_key",
     os.environ.get("BING_SEARCH_V7_SUBSCRIPTION_KEY", ""),
 )
 
-EXA_API_KEY = PersistentConfig(
+EXA_API_KEY = RuntimeConfig(
     "EXA_API_KEY",
     "rag.web.search.exa_api_key",
     os.getenv("EXA_API_KEY", ""),
 )
 
-PERPLEXITY_API_KEY = PersistentConfig(
+PERPLEXITY_API_KEY = RuntimeConfig(
     "PERPLEXITY_API_KEY",
     "rag.web.search.perplexity_api_key",
     os.getenv("PERPLEXITY_API_KEY", ""),
 )
 
-SOUGOU_API_SID = PersistentConfig(
+SOUGOU_API_SID = RuntimeConfig(
     "SOUGOU_API_SID",
     "rag.web.search.sougou_api_sid",
     os.getenv("SOUGOU_API_SID", ""),
 )
 
-SOUGOU_API_SK = PersistentConfig(
+SOUGOU_API_SK = RuntimeConfig(
     "SOUGOU_API_SK",
     "rag.web.search.sougou_api_sk",
     os.getenv("SOUGOU_API_SK", ""),
 )
 
-TAVILY_API_KEY = PersistentConfig(
+TAVILY_API_KEY = RuntimeConfig(
     "TAVILY_API_KEY",
     "rag.web.search.tavily_api_key",
     os.getenv("TAVILY_API_KEY", ""),
 )
 
-TAVILY_EXTRACT_DEPTH = PersistentConfig(
+TAVILY_EXTRACT_DEPTH = RuntimeConfig(
     "TAVILY_EXTRACT_DEPTH",
     "rag.web.search.tavily_extract_depth",
     os.getenv("TAVILY_EXTRACT_DEPTH", "basic"),
 )
 
-PLAYWRIGHT_WS_URL = PersistentConfig(
+PLAYWRIGHT_WS_URL = RuntimeConfig(
     "PLAYWRIGHT_WS_URL",
     "rag.web.loader.playwright_ws_url",
     os.environ.get("PLAYWRIGHT_WS_URL", ""),
 )
 
-PLAYWRIGHT_TIMEOUT = PersistentConfig(
+PLAYWRIGHT_TIMEOUT = RuntimeConfig(
     "PLAYWRIGHT_TIMEOUT",
     "rag.web.loader.playwright_timeout",
     int(os.environ.get("PLAYWRIGHT_TIMEOUT", "10000")),
 )
 
-FIRECRAWL_API_KEY = PersistentConfig(
+FIRECRAWL_API_KEY = RuntimeConfig(
     "FIRECRAWL_API_KEY",
     "rag.web.loader.firecrawl_api_key",
     os.environ.get("FIRECRAWL_API_KEY", ""),
 )
 
-FIRECRAWL_API_BASE_URL = PersistentConfig(
+FIRECRAWL_API_BASE_URL = RuntimeConfig(
     "FIRECRAWL_API_BASE_URL",
     "rag.web.loader.firecrawl_api_url",
     os.environ.get("FIRECRAWL_API_BASE_URL", "https://api.firecrawl.dev"),
@@ -2218,36 +2215,36 @@ FIRECRAWL_API_BASE_URL = PersistentConfig(
 # Images
 ####################################
 
-IMAGE_GENERATION_ENGINE = PersistentConfig(
+IMAGE_GENERATION_ENGINE = RuntimeConfig(
     "IMAGE_GENERATION_ENGINE",
     "image_generation.engine",
     os.getenv("IMAGE_GENERATION_ENGINE", "openai"),
 )
 
-ENABLE_IMAGE_GENERATION = PersistentConfig(
+ENABLE_IMAGE_GENERATION = RuntimeConfig(
     "ENABLE_IMAGE_GENERATION",
     "image_generation.enable",
     os.environ.get("ENABLE_IMAGE_GENERATION", "").lower() == "true",
 )
 
-ENABLE_IMAGE_PROMPT_GENERATION = PersistentConfig(
+ENABLE_IMAGE_PROMPT_GENERATION = RuntimeConfig(
     "ENABLE_IMAGE_PROMPT_GENERATION",
     "image_generation.prompt.enable",
     os.environ.get("ENABLE_IMAGE_PROMPT_GENERATION", "true").lower() == "true",
 )
 
-AUTOMATIC1111_BASE_URL = PersistentConfig(
+AUTOMATIC1111_BASE_URL = RuntimeConfig(
     "AUTOMATIC1111_BASE_URL",
     "image_generation.automatic1111.base_url",
     os.getenv("AUTOMATIC1111_BASE_URL", ""),
 )
-AUTOMATIC1111_API_AUTH = PersistentConfig(
+AUTOMATIC1111_API_AUTH = RuntimeConfig(
     "AUTOMATIC1111_API_AUTH",
     "image_generation.automatic1111.api_auth",
     os.getenv("AUTOMATIC1111_API_AUTH", ""),
 )
 
-AUTOMATIC1111_CFG_SCALE = PersistentConfig(
+AUTOMATIC1111_CFG_SCALE = RuntimeConfig(
     "AUTOMATIC1111_CFG_SCALE",
     "image_generation.automatic1111.cfg_scale",
     (
@@ -2258,7 +2255,7 @@ AUTOMATIC1111_CFG_SCALE = PersistentConfig(
 )
 
 
-AUTOMATIC1111_SAMPLER = PersistentConfig(
+AUTOMATIC1111_SAMPLER = RuntimeConfig(
     "AUTOMATIC1111_SAMPLER",
     "image_generation.automatic1111.sampler",
     (
@@ -2268,7 +2265,7 @@ AUTOMATIC1111_SAMPLER = PersistentConfig(
     ),
 )
 
-AUTOMATIC1111_SCHEDULER = PersistentConfig(
+AUTOMATIC1111_SCHEDULER = RuntimeConfig(
     "AUTOMATIC1111_SCHEDULER",
     "image_generation.automatic1111.scheduler",
     (
@@ -2278,13 +2275,13 @@ AUTOMATIC1111_SCHEDULER = PersistentConfig(
     ),
 )
 
-COMFYUI_BASE_URL = PersistentConfig(
+COMFYUI_BASE_URL = RuntimeConfig(
     "COMFYUI_BASE_URL",
     "image_generation.comfyui.base_url",
     os.getenv("COMFYUI_BASE_URL", ""),
 )
 
-COMFYUI_API_KEY = PersistentConfig(
+COMFYUI_API_KEY = RuntimeConfig(
     "COMFYUI_API_KEY",
     "image_generation.comfyui.api_key",
     os.getenv("COMFYUI_API_KEY", ""),
@@ -2401,49 +2398,49 @@ COMFYUI_DEFAULT_WORKFLOW = """
 """
 
 
-COMFYUI_WORKFLOW = PersistentConfig(
+COMFYUI_WORKFLOW = RuntimeConfig(
     "COMFYUI_WORKFLOW",
     "image_generation.comfyui.workflow",
     os.getenv("COMFYUI_WORKFLOW", COMFYUI_DEFAULT_WORKFLOW),
 )
 
-COMFYUI_WORKFLOW_NODES = PersistentConfig(
+COMFYUI_WORKFLOW_NODES = RuntimeConfig(
     "COMFYUI_WORKFLOW",
     "image_generation.comfyui.nodes",
     [],
 )
 
-IMAGES_OPENAI_API_BASE_URL = PersistentConfig(
+IMAGES_OPENAI_API_BASE_URL = RuntimeConfig(
     "IMAGES_OPENAI_API_BASE_URL",
     "image_generation.openai.api_base_url",
     os.getenv("IMAGES_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
 )
-IMAGES_OPENAI_API_KEY = PersistentConfig(
+IMAGES_OPENAI_API_KEY = RuntimeConfig(
     "IMAGES_OPENAI_API_KEY",
     "image_generation.openai.api_key",
     os.getenv("IMAGES_OPENAI_API_KEY", OPENAI_API_KEY),
 )
 
-IMAGES_GEMINI_API_BASE_URL = PersistentConfig(
+IMAGES_GEMINI_API_BASE_URL = RuntimeConfig(
     "IMAGES_GEMINI_API_BASE_URL",
     "image_generation.gemini.api_base_url",
     os.getenv("IMAGES_GEMINI_API_BASE_URL", GEMINI_API_BASE_URL),
 )
-IMAGES_GEMINI_API_KEY = PersistentConfig(
+IMAGES_GEMINI_API_KEY = RuntimeConfig(
     "IMAGES_GEMINI_API_KEY",
     "image_generation.gemini.api_key",
     os.getenv("IMAGES_GEMINI_API_KEY", GEMINI_API_KEY),
 )
 
-IMAGE_SIZE = PersistentConfig(
+IMAGE_SIZE = RuntimeConfig(
     "IMAGE_SIZE", "image_generation.size", os.getenv("IMAGE_SIZE", "512x512")
 )
 
-IMAGE_STEPS = PersistentConfig(
+IMAGE_STEPS = RuntimeConfig(
     "IMAGE_STEPS", "image_generation.steps", int(os.getenv("IMAGE_STEPS", 50))
 )
 
-IMAGE_GENERATION_MODEL = PersistentConfig(
+IMAGE_GENERATION_MODEL = RuntimeConfig(
     "IMAGE_GENERATION_MODEL",
     "image_generation.model",
     os.getenv("IMAGE_GENERATION_MODEL", ""),
@@ -2454,7 +2451,7 @@ IMAGE_GENERATION_MODEL = PersistentConfig(
 ####################################
 
 # Transcription
-WHISPER_MODEL = PersistentConfig(
+WHISPER_MODEL = RuntimeConfig(
     "WHISPER_MODEL",
     "audio.stt.whisper_model",
     os.getenv("WHISPER_MODEL", "base"),
@@ -2466,7 +2463,7 @@ WHISPER_MODEL_AUTO_UPDATE = (
     and os.environ.get("WHISPER_MODEL_AUTO_UPDATE", "").lower() == "true"
 )
 
-WHISPER_VAD_FILTER = PersistentConfig(
+WHISPER_VAD_FILTER = RuntimeConfig(
     "WHISPER_VAD_FILTER",
     "audio.stt.whisper_vad_filter",
     os.getenv("WHISPER_VAD_FILTER", "False").lower() == "true",
@@ -2474,14 +2471,14 @@ WHISPER_VAD_FILTER = PersistentConfig(
 
 # llens 追加(issue #12 キャッチアップ、_memos/prod-config-snapshot.md):
 # 認識言語の固定(空 = 自動判定)。北大運用では ja 固定を推奨
-WHISPER_LANGUAGE = PersistentConfig(
+WHISPER_LANGUAGE = RuntimeConfig(
     "WHISPER_LANGUAGE",
     "audio.stt.whisper_language",
     os.getenv("WHISPER_LANGUAGE", ""),
 )
 
 # llens 追加: faster-whisper の compute_type(従来は int8 固定だった)
-WHISPER_COMPUTE_TYPE = PersistentConfig(
+WHISPER_COMPUTE_TYPE = RuntimeConfig(
     "WHISPER_COMPUTE_TYPE",
     "audio.stt.whisper_compute_type",
     os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
@@ -2489,104 +2486,104 @@ WHISPER_COMPUTE_TYPE = PersistentConfig(
 
 
 # Add Deepgram configuration
-DEEPGRAM_API_KEY = PersistentConfig(
+DEEPGRAM_API_KEY = RuntimeConfig(
     "DEEPGRAM_API_KEY",
     "audio.stt.deepgram.api_key",
     os.getenv("DEEPGRAM_API_KEY", ""),
 )
 
 
-AUDIO_STT_OPENAI_API_BASE_URL = PersistentConfig(
+AUDIO_STT_OPENAI_API_BASE_URL = RuntimeConfig(
     "AUDIO_STT_OPENAI_API_BASE_URL",
     "audio.stt.openai.api_base_url",
     os.getenv("AUDIO_STT_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
 )
 
-AUDIO_STT_OPENAI_API_KEY = PersistentConfig(
+AUDIO_STT_OPENAI_API_KEY = RuntimeConfig(
     "AUDIO_STT_OPENAI_API_KEY",
     "audio.stt.openai.api_key",
     os.getenv("AUDIO_STT_OPENAI_API_KEY", OPENAI_API_KEY),
 )
 
-AUDIO_STT_ENGINE = PersistentConfig(
+AUDIO_STT_ENGINE = RuntimeConfig(
     "AUDIO_STT_ENGINE",
     "audio.stt.engine",
     os.getenv("AUDIO_STT_ENGINE", ""),
 )
 
-AUDIO_STT_MODEL = PersistentConfig(
+AUDIO_STT_MODEL = RuntimeConfig(
     "AUDIO_STT_MODEL",
     "audio.stt.model",
     os.getenv("AUDIO_STT_MODEL", ""),
 )
 
-AUDIO_STT_AZURE_API_KEY = PersistentConfig(
+AUDIO_STT_AZURE_API_KEY = RuntimeConfig(
     "AUDIO_STT_AZURE_API_KEY",
     "audio.stt.azure.api_key",
     os.getenv("AUDIO_STT_AZURE_API_KEY", ""),
 )
 
-AUDIO_STT_AZURE_REGION = PersistentConfig(
+AUDIO_STT_AZURE_REGION = RuntimeConfig(
     "AUDIO_STT_AZURE_REGION",
     "audio.stt.azure.region",
     os.getenv("AUDIO_STT_AZURE_REGION", ""),
 )
 
-AUDIO_STT_AZURE_LOCALES = PersistentConfig(
+AUDIO_STT_AZURE_LOCALES = RuntimeConfig(
     "AUDIO_STT_AZURE_LOCALES",
     "audio.stt.azure.locales",
     os.getenv("AUDIO_STT_AZURE_LOCALES", ""),
 )
 
-AUDIO_TTS_OPENAI_API_BASE_URL = PersistentConfig(
+AUDIO_TTS_OPENAI_API_BASE_URL = RuntimeConfig(
     "AUDIO_TTS_OPENAI_API_BASE_URL",
     "audio.tts.openai.api_base_url",
     os.getenv("AUDIO_TTS_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
 )
-AUDIO_TTS_OPENAI_API_KEY = PersistentConfig(
+AUDIO_TTS_OPENAI_API_KEY = RuntimeConfig(
     "AUDIO_TTS_OPENAI_API_KEY",
     "audio.tts.openai.api_key",
     os.getenv("AUDIO_TTS_OPENAI_API_KEY", OPENAI_API_KEY),
 )
 
-AUDIO_TTS_API_KEY = PersistentConfig(
+AUDIO_TTS_API_KEY = RuntimeConfig(
     "AUDIO_TTS_API_KEY",
     "audio.tts.api_key",
     os.getenv("AUDIO_TTS_API_KEY", ""),
 )
 
-AUDIO_TTS_ENGINE = PersistentConfig(
+AUDIO_TTS_ENGINE = RuntimeConfig(
     "AUDIO_TTS_ENGINE",
     "audio.tts.engine",
     os.getenv("AUDIO_TTS_ENGINE", ""),
 )
 
 
-AUDIO_TTS_MODEL = PersistentConfig(
+AUDIO_TTS_MODEL = RuntimeConfig(
     "AUDIO_TTS_MODEL",
     "audio.tts.model",
     os.getenv("AUDIO_TTS_MODEL", "tts-1"),  # OpenAI default model
 )
 
-AUDIO_TTS_VOICE = PersistentConfig(
+AUDIO_TTS_VOICE = RuntimeConfig(
     "AUDIO_TTS_VOICE",
     "audio.tts.voice",
     os.getenv("AUDIO_TTS_VOICE", "alloy"),  # OpenAI default voice
 )
 
-AUDIO_TTS_SPLIT_ON = PersistentConfig(
+AUDIO_TTS_SPLIT_ON = RuntimeConfig(
     "AUDIO_TTS_SPLIT_ON",
     "audio.tts.split_on",
     os.getenv("AUDIO_TTS_SPLIT_ON", "punctuation"),
 )
 
-AUDIO_TTS_AZURE_SPEECH_REGION = PersistentConfig(
+AUDIO_TTS_AZURE_SPEECH_REGION = RuntimeConfig(
     "AUDIO_TTS_AZURE_SPEECH_REGION",
     "audio.tts.azure.speech_region",
     os.getenv("AUDIO_TTS_AZURE_SPEECH_REGION", "eastus"),
 )
 
-AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = PersistentConfig(
+AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = RuntimeConfig(
     "AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT",
     "audio.tts.azure.speech_output_format",
     os.getenv(
@@ -2599,74 +2596,74 @@ AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = PersistentConfig(
 # LDAP
 ####################################
 
-ENABLE_LDAP = PersistentConfig(
+ENABLE_LDAP = RuntimeConfig(
     "ENABLE_LDAP",
     "ldap.enable",
     os.environ.get("ENABLE_LDAP", "false").lower() == "true",
 )
 
-LDAP_SERVER_LABEL = PersistentConfig(
+LDAP_SERVER_LABEL = RuntimeConfig(
     "LDAP_SERVER_LABEL",
     "ldap.server.label",
     os.environ.get("LDAP_SERVER_LABEL", "LDAP Server"),
 )
 
-LDAP_SERVER_HOST = PersistentConfig(
+LDAP_SERVER_HOST = RuntimeConfig(
     "LDAP_SERVER_HOST",
     "ldap.server.host",
     os.environ.get("LDAP_SERVER_HOST", "localhost"),
 )
 
-LDAP_SERVER_PORT = PersistentConfig(
+LDAP_SERVER_PORT = RuntimeConfig(
     "LDAP_SERVER_PORT",
     "ldap.server.port",
     int(os.environ.get("LDAP_SERVER_PORT", "389")),
 )
 
-LDAP_ATTRIBUTE_FOR_MAIL = PersistentConfig(
+LDAP_ATTRIBUTE_FOR_MAIL = RuntimeConfig(
     "LDAP_ATTRIBUTE_FOR_MAIL",
     "ldap.server.attribute_for_mail",
     os.environ.get("LDAP_ATTRIBUTE_FOR_MAIL", "mail"),
 )
 
-LDAP_ATTRIBUTE_FOR_USERNAME = PersistentConfig(
+LDAP_ATTRIBUTE_FOR_USERNAME = RuntimeConfig(
     "LDAP_ATTRIBUTE_FOR_USERNAME",
     "ldap.server.attribute_for_username",
     os.environ.get("LDAP_ATTRIBUTE_FOR_USERNAME", "uid"),
 )
 
-LDAP_APP_DN = PersistentConfig(
+LDAP_APP_DN = RuntimeConfig(
     "LDAP_APP_DN", "ldap.server.app_dn", os.environ.get("LDAP_APP_DN", "")
 )
 
-LDAP_APP_PASSWORD = PersistentConfig(
+LDAP_APP_PASSWORD = RuntimeConfig(
     "LDAP_APP_PASSWORD",
     "ldap.server.app_password",
     os.environ.get("LDAP_APP_PASSWORD", ""),
 )
 
-LDAP_SEARCH_BASE = PersistentConfig(
+LDAP_SEARCH_BASE = RuntimeConfig(
     "LDAP_SEARCH_BASE", "ldap.server.users_dn", os.environ.get("LDAP_SEARCH_BASE", "")
 )
 
-LDAP_SEARCH_FILTERS = PersistentConfig(
+LDAP_SEARCH_FILTERS = RuntimeConfig(
     "LDAP_SEARCH_FILTER",
     "ldap.server.search_filter",
     os.environ.get("LDAP_SEARCH_FILTER", os.environ.get("LDAP_SEARCH_FILTERS", "")),
 )
 
-LDAP_USE_TLS = PersistentConfig(
+LDAP_USE_TLS = RuntimeConfig(
     "LDAP_USE_TLS",
     "ldap.server.use_tls",
     os.environ.get("LDAP_USE_TLS", "True").lower() == "true",
 )
 
-LDAP_CA_CERT_FILE = PersistentConfig(
+LDAP_CA_CERT_FILE = RuntimeConfig(
     "LDAP_CA_CERT_FILE",
     "ldap.server.ca_cert_file",
     os.environ.get("LDAP_CA_CERT_FILE", ""),
 )
 
-LDAP_CIPHERS = PersistentConfig(
+LDAP_CIPHERS = RuntimeConfig(
     "LDAP_CIPHERS", "ldap.server.ciphers", os.environ.get("LDAP_CIPHERS", "ALL")
 )

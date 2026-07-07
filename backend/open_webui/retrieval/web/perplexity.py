@@ -24,7 +24,7 @@ def search_perplexity(
 
     """
 
-    # Handle PersistentConfig object
+    # Handle RuntimeConfig object
     if hasattr(api_key, "__str__"):
         api_key = str(api_key)
 
