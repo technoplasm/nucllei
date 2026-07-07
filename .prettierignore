@@ -318,6 +318,8 @@ cypress/screenshots
 # fork 独自文書・エージェント設定は prettier の対象外(手書きの整形を維持)
 _memos/
 .claude/
+# 現行プロジェクトへの symlink(別リポ)。pnpm format が symlink 先まで整形するのを防ぐ
+_links/
 # vendored な静的アセット(swagger-ui 等)は上流配布物のまま保つ
 backend/open_webui/static/
 static/pyodide/

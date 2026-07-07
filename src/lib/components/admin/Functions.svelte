@@ -55,7 +55,6 @@
 			);
 		}
 	};
-
 </script>
 
 <svelte:head>

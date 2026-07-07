@@ -120,7 +120,7 @@
 					<div class=" self-center truncate">{$i18n.t('Playground')}</div>
 				</a>
 
-<!-- llens(#48): 管理者パネル導線は撤去(Admin を Workspace に統合)。管理面は Sidebar の Workspace リンクから到達。 -->
+				<!-- llens(#48): 管理者パネル導線は撤去(Admin を Workspace に統合)。管理面は Sidebar の Workspace リンクから到達。 -->
 			{/if}
 
 			<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />

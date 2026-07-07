@@ -23,11 +23,7 @@
 		if ($user?.role !== 'admin') {
 			const path = $page.url.pathname;
 			// llens(#48): Functions/Settings/Users は admin 専用(Admin を Workspace に統合)。
-			if (
-				path.includes('/functions') ||
-				path.includes('/settings') ||
-				path.includes('/users')
-			) {
+			if (path.includes('/functions') || path.includes('/settings') || path.includes('/users')) {
 				goto('/');
 			} else if (path.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/');

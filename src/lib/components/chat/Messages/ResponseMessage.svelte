@@ -11,7 +11,6 @@
 
 	const dispatch = createEventDispatcher();
 
-
 	import { config, models, settings, temporaryChatEnabled, TTSWorker, user } from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	import { imageGenerations } from '$lib/apis/images';
@@ -147,7 +146,6 @@
 
 	let loadingSpeech = false;
 	let generatingImage = false;
-
 
 	const copyToClipboard = async (text) => {
 		text = removeAllDetails(text);
@@ -418,7 +416,6 @@
 
 		generatingImage = false;
 	};
-
 
 	const deleteMessageHandler = async () => {
 		deleteMessage(message.id);
@@ -1153,7 +1150,6 @@
 								{/if}
 
 								{#if !readOnly}
-	
 									{#if isLastMessage}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 											<button

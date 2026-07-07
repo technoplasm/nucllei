@@ -51,7 +51,11 @@
 
 	// llens(#47 A1): 一覧の2段目は description ではなく、その tool が公開する関数名を
 	// できるだけ並べる(#49 の tool spec 露出。list は specs 込みの ToolUserModel)。
-	const toolFnNames = (tool) => (tool?.specs ?? []).map((s) => s?.name).filter(Boolean).join(', ');
+	const toolFnNames = (tool) =>
+		(tool?.specs ?? [])
+			.map((s) => s?.name)
+			.filter(Boolean)
+			.join(', ');
 
 	const openAccessControl = (tool) => {
 		acItem = tool;
