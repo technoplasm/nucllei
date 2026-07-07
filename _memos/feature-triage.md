@@ -4,7 +4,7 @@
 
 | 機能 | 判断 | 備考 |
 |---|---|---|
-| ナレッジベース(組み込み) | **不要** | 独自実装が別にあるため。OWUI 側はキャッチアップしない |
+| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #9 相当で後日) |
 | Documents(文書抽出) | **Docling が使えれば十分** | v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)。それ以上の投資不要 |
 | RAG / retrieval | **一切不使用** | 将来必要になってもツール側で実装する方針 |
 | Web 検索(組み込み) | **不要** | |
@@ -19,7 +19,7 @@
 | ツール(Tools) | **完全キャッチアップ** | 外形仕様・公式ドキュメントベースで機能パリティを目指す(コード移植は不可) |
 | スキル(Skills) | **完全キャッチアップ** | 同上。llens の権限モデル(診療科×職位)と統合(issue #5) |
 | ストア(openwebui.com 共有・取得) | **不要** | air-gapped 前提とも整合(issue #10) |
-| 評価 / Arena | **削除してよい** | 邪魔。既定無効化ではなく削除まで可(issue #10) |
+| 評価 / Arena | **撲滅済み(#48)** | 邪魔なので削除。#48 で feedback(👍/👎)UI・frontend/backend API・DB テーブル(migration e3b1c9f4a7d2 で drop)、arena config/モデル注入/chat 経路の dead code、ENABLE_MESSAGE_RATING まで全撤去。admin Evaluations 画面も削除 |
 | 管理画面のチャット分析 | **できれば詳細化** | ユーザー別の利用分析をもう少し詳しく。優先度低 |
 | チャットの「コントロール」サイドバー | **削除** | Files/Valves/System Prompt 上書き/高度なパラメータの per-chat 制御。一般ユーザーが制御する必要がなく、変に触らせたくない(2026-07-07) |
 | 設定 → 一般 の詳細パラメータ | **撤去** | 既定パラメータをユーザーに編集させない。制御はモデル(管理)側に集約 |
@@ -78,3 +78,31 @@ model / skill / tool / function の各ワークスペース一覧を整理(#47 �
 出荷: adb7a11e7(backend)/ 4cdf56616(Tools)/ 0ea09c210(Skills)/ 8dfaedde3(Models)/ f4074705d(Functions)。
 clean な Playwright で 4 画面 end-to-end 検証(visibility は builtin 含め Public↔Private 往復・永続化 PASS)。
 これで **#47 の残は A1 のみだったため #47 close 可**(子 #49 の backend は別 issue で継続)。i18n locale 追従は後回し。
+
+## Admin を Workspace に統合(#48、2026-07-07 出荷・close)
+
+当初 #48 は「Workspace=スキル+KB / Admin=残り」の**分割**案だったが、二領域を覚えるコストを
+避け「薄い管理面」に寄せるため **Admin を Workspace に統合**する方向へ改訂(会話で決定)。
+管理面は 1 つ(`/workspace`)、可視性は **per-tab のゲート**で分ける(個々の model/tool の
+Public/Private=access_control とは別軸)。
+
+- **単一管理面 `/workspace`**、ナビ順 **Models / Skills / Tools / Functions / Settings / Users**。
+  Models/Skills/Tools = `role==admin || permissions.workspace.X`、Functions/Settings/Users = `admin` のみ
+  (Functions は CORE=Filter なので admin 固定)。`/admin/{functions,settings,users}` を `/workspace/*` に
+  物理移動(コンポーネントは `lib/components/admin/*` を再利用)、`/admin` は `/workspace` へリダイレクト、
+  Sidebar UserMenu の「管理者パネル」導線を撤去(入口は Sidebar の Workspace リンク)。
+- **Evaluations / feedback / arena を完全撲滅**(feature-triage「評価 / Arena」行参照):
+  Phase1 で UI(admin Evaluations 画面・チャット 👍/👎)+ frontend API、Phase3a で backend router/model +
+  DB テーブル drop(migration e3b1c9f4a7d2)+ ENABLE_MESSAGE_RATING、Phase3b で arena の dead code
+  (utils/models.py 注入・utils/chat.py 分岐・DEFAULT_ARENA_MODEL・arena config)+ frontend 残骸を撤去。
+- **Knowledge** はナビから撤去(上記テーブル行参照)。
+- 途中発見の**別バグを修正**(2adb489e4): reasoning の `<details>` が空行で分断され `</details>` が
+  リテラル描画される問題(#22 markdown-it 移行以来の潜在バグ)。segmenter/markdown-it で details を
+  単一ブロック化。
+
+出荷: 441fdfa05(P1)/ 27a566cdd(P2)/ 2adb489e4(fix)/ 347a9c38b(P3a)/ 4e07183a7(掃除)/ 94ae78542(P3b)。
+検証: CORE 回帰 36 passed(auth/filter/authz/defaults)/ 6タブ統合ナビ・各ページ・`/admin` リダイレクト /
+`/api/models` に arena 0 件・feedback テーブル drop 済み / 実チャット(SGLang Kimi)で reasoning + 本文正常・
+`</details>` 漏れなし・console エラー 0。**#48 close**。
+残: i18n(新タブ含む未訳 → #34 に集約)/ Knowledge KB backend の掃除(#9 相当)/ #48 で作った
+`feat/48-admin-workspace-merge` ブランチは ff マージ後に削除済み。
