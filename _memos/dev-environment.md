@@ -33,7 +33,10 @@ PYTHONPATH=backend .venv/bin/uvicorn open_webui.main:app --port 8080 --host 0.0.
 npm run dev   # vite :5173(使用中なら 5174 等へ自動退避)。dev 時は WEBUI_BASE_URL が localhost:8080 に向く(src/lib/constants.ts)
 ```
 
-- 8080 が埋まっていたら upstream の docker(`docker stop open-webui`)をまず疑う。
+- 8080 が埋まっていたら upstream の docker(`docker stop open-webui`)をまず疑う
+  (stock `ghcr.io/open-webui/open-webui:main` が squat していることがある。`docker stop` は可逆)。
+- vite は dev 用に **全レスポンス no-store**(`vite.config.ts` の `devNoCache` ミドルウェア, `apply:'serve'`)。
+  HMR/リロードで古いモジュールを掴む反映漏れを防ぐ(#47 で導入)。
 - `config.py` は起動のたび `build/static/**` を backend static へ無条件上書きコピーする。
   favicon 等を差し替えたら `static/static/` と `build/static/` も同期しないと reload で巻き戻る。
 - `backend/data/webui.db` は pytest の残骸で汚染されうる。おかしければ退避して作り直す。
@@ -108,6 +111,11 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 - ストリーミング描画の検証は `pre.hljs code.language-python` の innerText を数百 ms 間隔で
   サンプリングして単調増加を確認する(#20 で実績)。
 - alert/confirm を出す操作は避ける(セッションがブロックされる)。
+- **claude-in-chrome の描画が編集前に張り付く**ことがある(shell の `curl localhost:5173/src/...` は新コードなのに
+  ブラウザだけ古い。no-store でも新規タブ/別オリジンでも直らない場合あり)。原因を「キャッシュ」で流さず、
+  **Playwright(`mcp__playwright__*`)のクリーンブラウザ**で検証する: token 注入 → `page.evaluate` で form class や
+  タブ有無を **live DOM から直接読む**。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
+  **原因を数字で特定**してから直す(#47: タブバーが `overflow-x-auto` で高さ0に潰れる罠を Playwright で確定)。
 
 ## 進め方の知見(セッション運用で確立したもの)
 

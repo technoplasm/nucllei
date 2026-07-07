@@ -23,7 +23,7 @@
 | 管理画面のチャット分析 | **できれば詳細化** | ユーザー別の利用分析をもう少し詳しく。優先度低 |
 | チャットの「コントロール」サイドバー | **削除** | Files/Valves/System Prompt 上書き/高度なパラメータの per-chat 制御。一般ユーザーが制御する必要がなく、変に触らせたくない(2026-07-07) |
 | 設定 → 一般 の詳細パラメータ | **撤去** | 既定パラメータをユーザーに編集させない。制御はモデル(管理)側に集約 |
-| 高度なパラメータ UI(`AdvancedParams`) | **モデル編集のみに残す** | 上記 2 箇所を撤去した結果、実質モデル編集専用に。ここで 2 カラムへ整形(#43 後継) |
+| 高度なパラメータ UI(`AdvancedParams`) | **モデル編集のみに残す・整形済み** | 上記 2 箇所を撤去した結果、実質モデル編集専用に。#47 で整形出荷(d63d08db1/010b19ab2): ラベル隣接化(2カラム固定にはしない)+ Behavior/Sampling/Mirostat/Ollama のセクション分け・(Ollama) 連呼撤去 |
 
 ## 制御面の整理(2026-07-07 決定)
 
@@ -37,4 +37,8 @@
   まるごと撤去。右ペイン枠(`ChatControls`)は Overview/Artifacts/通話と共用なので枠は残し Controls 部分のみ外す。
   トグル(Navbar・Navbar/Menu)と `showControls` 経路も撤去。
 - 設定 → 一般 の `AdvancedParams` ブロックを撤去。
-- 結果 `AdvancedParams` はモデル編集専用に。共有部品のリプレースが不要になったため直接 2 カラム化してよい。
+- 結果 `AdvancedParams` はモデル編集専用に。共有部品のリプレースが不要になったため直接いじれる。
+  - **改訂(2026-07-07, #47)**: 「2 カラム化」ではなく **ラベルと値の隣接化**(各行 `justify-between`→`items-center gap-2`)で
+    「幅が広いとラベルと値が離れて見づらい」を解消(カラム数は問わない要件)。挙動系(Function Calling / Stream /
+    Reasoning Effort)を最上部へ。さらに **Behavior / Sampling / Mirostat / Ollama のセクション分け**と各ラベルの
+    `(Ollama)` suffix 撤去・コメントアウト済み Template ブロック除去(010b19ab2)。
