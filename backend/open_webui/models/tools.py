@@ -25,6 +25,9 @@ class Tool(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String)
     name = Column(Text)
+    # llens(#43): description を top-level 列に昇格(旧 meta.description)。全エンティティ
+    # {id, name, description} に統一。meta は builtin 判別のみを残す。
+    description = Column(Text)
     content = Column(Text)
     specs = Column(JSONField)
     meta = Column(JSONField)
@@ -52,8 +55,7 @@ class Tool(Base):
 
 
 class ToolMeta(BaseModel):
-    description: Optional[str] = None
-    # llens(#45): frontmatter 退役の掃除で manifest フィールドを撤去(#44 で書き込みは停止済み)。
+    # llens(#43): description は top-level 列へ昇格。meta は builtin 判別のみを残す。
     # llens(#42): 組み込みツール(repo コード定義・起動時 sync)の判別。UI の
     # セクション分け表示用。ロード分岐と更新保護はレジストリ(builtin_tools)の
     # id が真実源で、このフラグは見た目にしか影響しない
@@ -64,9 +66,10 @@ class ToolModel(BaseModel):
     id: str
     user_id: str
     name: str
+    description: Optional[str] = None
     content: str
     specs: list[dict]
-    meta: ToolMeta
+    meta: ToolMeta = ToolMeta()
     access_control: Optional[dict] = None
 
     updated_at: int  # timestamp in epoch
@@ -88,7 +91,8 @@ class ToolResponse(BaseModel):
     id: str
     user_id: str
     name: str
-    meta: ToolMeta
+    description: Optional[str] = None
+    meta: ToolMeta = ToolMeta()
     access_control: Optional[dict] = None
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
@@ -101,8 +105,9 @@ class ToolUserResponse(ToolResponse):
 class ToolForm(BaseModel):
     id: str
     name: str
+    description: Optional[str] = None
     content: str
-    meta: ToolMeta
+    meta: ToolMeta = ToolMeta()
     access_control: Optional[dict] = None
 
 

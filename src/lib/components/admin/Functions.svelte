@@ -154,7 +154,7 @@
 							<div class=" text-gray-500 text-xs font-medium shrink-0">{func.id}</div>
 
 							<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-								{func.meta.description}
+								{func.description}
 							</div>
 						</div>
 					</div>

@@ -31,7 +31,7 @@ def validate_function_metadata(form_data: FunctionForm) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Function name is required",
         )
-    if not ((form_data.meta.description or "").strip()):
+    if not ((form_data.description or "").strip()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Function description is required",

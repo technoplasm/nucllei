@@ -16,7 +16,7 @@
 		const res = await createNewTool(localStorage.token, {
 			id: data.id,
 			name: data.name,
-			meta: data.meta,
+			description: data.description,
 			content: data.content,
 			access_control: data.access_control
 		}).catch((error) => {

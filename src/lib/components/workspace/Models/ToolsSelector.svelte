@@ -53,7 +53,7 @@
 							/>
 						</div>
 
-						<Tooltip content={_tools[tool].meta?.description ?? ''} placement="top-start">
+						<Tooltip content={_tools[tool].description ?? ''} placement="top-start">
 							<div class=" py-0.5 text-sm w-full font-medium">
 								{_tools[tool].name}
 							</div>

@@ -59,9 +59,9 @@
 									{tool?.name}
 								</div>
 
-								{#if tool?.meta?.description}
+								{#if tool?.description}
 									<div class="text-xs text-gray-500">
-										{tool?.meta?.description}
+										{tool?.description}
 									</div>
 								{/if}
 							</div>

@@ -37,7 +37,7 @@ def validate_tool_metadata(form_data: ToolForm) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool name is required",
         )
-    if not ((form_data.meta.description or "").strip()):
+    if not ((form_data.description or "").strip()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool description is required",

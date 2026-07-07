@@ -17,7 +17,7 @@
 		const res = await updateToolById(localStorage.token, tool.id, {
 			id: data.id,
 			name: data.name,
-			meta: data.meta,
+			description: data.description,
 			content: data.content,
 			access_control: data.access_control
 		}).catch((error) => {
@@ -58,7 +58,7 @@
 		edit={true}
 		id={tool.id}
 		name={tool.name}
-		meta={tool.meta}
+		description={tool.description}
 		content={tool.content}
 		accessControl={tool.access_control}
 		onSave={(value) => {

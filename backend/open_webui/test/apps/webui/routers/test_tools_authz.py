@@ -39,13 +39,13 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
         cls.Tools = Tools
 
     def _insert_tool(self):
-        from open_webui.models.tools import ToolForm, ToolMeta
+        from open_webui.models.tools import ToolForm
 
         form = ToolForm(
             id="authz_probe",
             name="probe",
+            description="d",
             content=TOOL_CONTENT,
-            meta=ToolMeta(description="d", manifest={}),
             access_control=AC,
         )
         self.Tools.insert_new_tool("1", form, [])
@@ -54,8 +54,8 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
         return {
             "id": "authz_probe",
             "name": name,
+            "description": "d",
             "content": content,
-            "meta": {"description": "d", "manifest": {}},
             "access_control": AC,
         }
 
@@ -96,7 +96,7 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
         private tool の /valves を非 owner 非 admin が読むと 401、owner は 200。
         """
         self._insert_tool()  # owner=user "1" だが access_control=AC(user "2" に write 付与)
-        from open_webui.models.tools import ToolForm, ToolMeta
+        from open_webui.models.tools import ToolForm
 
         # owner のみ(access_control={})の別 tool を用意して純粋な拒否を確認
         self.Tools.insert_new_tool(
@@ -104,8 +104,8 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             ToolForm(
                 id="valve_probe",
                 name="vp",
+                description="d",
                 content=TOOL_CONTENT,
-                meta=ToolMeta(description="d", manifest={}),
                 access_control={},
             ),
             [],
@@ -128,7 +128,7 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
         して、ガードが無ければ result に載る = ガードが効いているときだけ空になる状態にする。
         """
         import types
-        from open_webui.models.tools import ToolForm, ToolMeta
+        from open_webui.models.tools import ToolForm
         from open_webui.utils.tools import get_tools
 
         hello_spec = {
@@ -142,8 +142,8 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             ToolForm(
                 id="secret_tool",
                 name="secret",
+                description="d",
                 content=TOOL_CONTENT,
-                meta=ToolMeta(description="d", manifest={}),
                 access_control={},
             ),
             [hello_spec],

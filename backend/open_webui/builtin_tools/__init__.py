@@ -60,26 +60,23 @@ def sync_builtin_tools() -> None:
                     ToolForm(
                         id=tool_id,
                         name=entry["name"],
+                        description=entry["description"],
                         content="",
-                        meta=ToolMeta(description=entry["description"], builtin=True),
+                        meta=ToolMeta(builtin=True),
                         access_control=None,  # 既定 public read(露出は紐づけで制御)
                     ),
                     specs,
                 )
                 log.info(f"builtin tool registered: {tool_id}")
             else:
-                meta = {
-                    **(existing.meta.model_dump() if existing.meta else {}),
-                    "description": entry["description"],
-                    "builtin": True,
-                }
                 Tools.update_tool_by_id(
                     tool_id,
                     {
                         "name": entry["name"],
+                        "description": entry["description"],
                         "content": "",
                         "specs": specs,
-                        "meta": meta,
+                        "meta": {"builtin": True},
                     },
                 )
         except Exception as e:

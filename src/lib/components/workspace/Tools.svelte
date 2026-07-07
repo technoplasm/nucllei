@@ -149,7 +149,7 @@
 				>
 					<div class="flex items-center text-left">
 						<div class=" flex-1 self-center">
-							<Tooltip content={tool?.meta?.description ?? ''} placement="top-start">
+							<Tooltip content={tool?.description ?? ''} placement="top-start">
 								<div class=" font-semibold flex items-center gap-1.5">
 									<div
 										class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-gray-700 dark:text-gray-200"
@@ -176,7 +176,7 @@
 							<div class="px-0.5">
 								<div class="flex gap-1.5 mt-0.5 mb-0.5">
 									<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-										{tool.meta.description}
+										{tool.description}
 									</div>
 								</div>
 

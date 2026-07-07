@@ -69,8 +69,9 @@ class TestBuiltinTools(AbstractPostgresTest):
         body = {
             "id": "builtin_history",
             "name": "乗っ取り",
+            "description": "hacked",
             "content": "class Tools:\n    def pwn(self):\n        return 'x'",
-            "meta": {"description": "hacked", "builtin": False},
+            "meta": {"builtin": False},
             "access_control": {},
         }
         with mock_webui_user(id="admin1", role="admin"):
@@ -103,8 +104,8 @@ class TestBuiltinTools(AbstractPostgresTest):
                 json={
                     "id": "builtin_history",
                     "name": "偽物",
+                    "description": "d",
                     "content": "class Tools:\n    def fake(self):\n        return 'x'",
-                    "meta": {"description": "d"},
                 },
             )
         assert res.status_code == 400

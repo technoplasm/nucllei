@@ -21,9 +21,8 @@
 
 	export let id = '';
 	export let name = '';
-	export let meta = {
-		description: ''
-	};
+	// llens(#43): description は top-level フィールド(旧 meta.description)。
+	export let description = '';
 	export let content = '';
 	// llens(#45): 編集時に既存の type をバッジ表示するため受け取る(作成時は未指定)。
 	export let type = '';
@@ -120,7 +119,7 @@ class Pipe:
 		onSave({
 			id,
 			name,
-			meta,
+			description,
 			content
 		});
 	};
@@ -222,7 +221,7 @@ class Pipe:
 					<Textarea
 						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
 						placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
-						bind:value={meta.description}
+						bind:value={description}
 						rows={2}
 					/>
 				</div>

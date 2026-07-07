@@ -175,11 +175,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         self.mock_server.received.clear()
 
     def _register_e2e_filter(self):
-        from open_webui.models.functions import (
-            FunctionForm,
-            FunctionMeta,
-            Functions,
-        )
+        from open_webui.models.functions import FunctionForm, Functions
 
         # llens(#46): is_active / is_global 撤去。適用はモデルの filterIds 割り当てで行う。
         Functions.insert_new_function(
@@ -188,8 +184,8 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             form_data=FunctionForm(
                 id="e2e_filter",
                 name="e2e_filter",
+                description="e2e filter",
                 content=E2E_FILTER_CONTENT,
-                meta=FunctionMeta(description="e2e filter"),
             ),
         )
 
@@ -350,11 +346,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
 
     def test_stream_filter_applies_on_sse(self):
         """global stream フィルタが SSE チャンクに適用される(issue #3)。"""
-        from open_webui.models.functions import (
-            FunctionForm,
-            FunctionMeta,
-            Functions,
-        )
+        from open_webui.models.functions import FunctionForm, Functions
 
         # llens(#46): is_active / is_global 撤去。preset の filterIds 割り当てで適用する。
         Functions.insert_new_function(
@@ -363,8 +355,8 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             form_data=FunctionForm(
                 id="stream_filter",
                 name="stream_filter",
+                description="stream filter",
                 content=STREAM_FILTER_CONTENT,
-                meta=FunctionMeta(description="stream filter"),
             ),
         )
         self._create_preset(model_id="stream-preset", filter_ids=["stream_filter"])

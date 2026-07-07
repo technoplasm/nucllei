@@ -23,8 +23,11 @@ class Function(Base):
     user_id = Column(String)
     name = Column(Text)
     type = Column(Text)
+    # llens(#43): description を top-level 列に昇格(旧 meta.description)。全エンティティ
+    # {id, name, description} に統一。#45 で manifest が消え meta は description だけ
+    # だったので meta 列ごと撤去した。
+    description = Column(Text)
     content = Column(Text)
-    meta = Column(JSONField)
     valves = Column(JSONField)
     # llens(#46): is_active / is_global は撤去。function の適用制御はモデルの
     # filterIds / actionIds 割り当て一本(pipe は存在すればモデルとして出る)。
@@ -32,18 +35,13 @@ class Function(Base):
     created_at = Column(BigInteger)
 
 
-class FunctionMeta(BaseModel):
-    # llens(#45): frontmatter 退役に伴い manifest フィールドを撤去。真実源は description のみ。
-    description: Optional[str] = None
-
-
 class FunctionModel(BaseModel):
     id: str
     user_id: str
     name: str
     type: str
+    description: Optional[str] = None
     content: str
-    meta: FunctionMeta
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
 
@@ -60,7 +58,7 @@ class FunctionResponse(BaseModel):
     user_id: str
     type: str
     name: str
-    meta: FunctionMeta
+    description: Optional[str] = None
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
 
@@ -68,8 +66,8 @@ class FunctionResponse(BaseModel):
 class FunctionForm(BaseModel):
     id: str
     name: str
+    description: Optional[str] = None
     content: str
-    meta: FunctionMeta
 
 
 class FunctionValves(BaseModel):

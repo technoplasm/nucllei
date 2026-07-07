@@ -26,9 +26,8 @@
 
 	export let id = '';
 	export let name = '';
-	export let meta = {
-		description: ''
-	};
+	// llens(#43): description は top-level フィールド(旧 meta.description)。
+	export let description = '';
 	export let content = '';
 	export let accessControl = {};
 
@@ -159,7 +158,7 @@ class Tools:
 		onSave({
 			id,
 			name,
-			meta,
+			description,
 			content,
 			access_control: accessControl
 		});
@@ -270,7 +269,7 @@ class Tools:
 					<Textarea
 						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
 						placeholder={$i18n.t('e.g. Tools for performing various operations')}
-						bind:value={meta.description}
+						bind:value={description}
 						rows={2}
 					/>
 				</div>

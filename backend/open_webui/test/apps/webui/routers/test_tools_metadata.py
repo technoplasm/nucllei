@@ -41,11 +41,12 @@ class TestToolsMetadata(AbstractPostgresTest):
         cls.Tools = Tools
 
     def _create_body(self, id, name, description, content=TOOL_CONTENT):
+        # llens(#43): description は top-level 列に昇格(旧 meta.description)。
         return {
             "id": id,
             "name": name,
+            "description": description,
             "content": content,
-            "meta": {"description": description},
         }
 
     def test_create_requires_description(self):
@@ -99,9 +100,9 @@ class TestToolsMetadata(AbstractPostgresTest):
         assert res.status_code == 200
 
         row = self.Tools.get_tool_by_id("fm_probe")
-        # llens(#45): frontmatter 退役の掃除で manifest フィールド自体が撤去された
-        # (#44 では meta.manifest=={} を固定していたが、フィールドごと消えたので存在しない)。
+        # llens(#45): frontmatter 退役の掃除で manifest フィールド自体が撤去された。
         assert not hasattr(row.meta, "manifest")
-        # 真実源はフォーム値(frontmatter の Frontmatter Title / from frontmatter ではない)
+        # 真実源はフォーム値(frontmatter の Frontmatter Title / from frontmatter ではない)。
+        # llens(#43): description は top-level 列。
         assert row.name == "Form Name"
-        assert row.meta.description == "form description"
+        assert row.description == "form description"

@@ -325,7 +325,7 @@ class TestFilterPipelineDB(AbstractPostgresTest):
 
     def _insert_filter(self, fid, priority=0):
         # llens(#46): is_active / is_global 撤去。filter はモデルの filterIds 割り当てのみで適用。
-        from open_webui.models.functions import FunctionForm, FunctionMeta
+        from open_webui.models.functions import FunctionForm
 
         function = self.functions.insert_new_function(
             user_id="1",
@@ -333,8 +333,8 @@ class TestFilterPipelineDB(AbstractPostgresTest):
             form_data=FunctionForm(
                 id=fid,
                 name=fid,
+                description="test filter",
                 content=FILTER_CONTENT_TEMPLATE.replace("{fid}", fid),
-                meta=FunctionMeta(description="test filter"),
             ),
         )
         assert function is not None

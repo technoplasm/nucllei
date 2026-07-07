@@ -1063,7 +1063,7 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         self.mock_server.received.clear()
 
     def _register_clock_tool(self):
-        from open_webui.models.tools import ToolForm, ToolMeta, Tools
+        from open_webui.models.tools import ToolForm, Tools
 
         Tools.insert_new_tool(
             user_id="1",
@@ -1071,7 +1071,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                 id="clock",
                 name="clock",
                 content=CLOCK_TOOL_CONTENT,
-                meta=ToolMeta(description=None, manifest={}),
             ),
             specs=[dict(CLOCK_TOOL_SPEC)],
         )
@@ -1115,7 +1114,7 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
 
         宣言追加前に保存されたツール(stale spec)でも再保存なしで効くことの固定。
         """
-        from open_webui.models.tools import ToolForm, ToolMeta, Tools
+        from open_webui.models.tools import ToolForm, Tools
 
         Tools.insert_new_tool(
             user_id="1",
@@ -1123,7 +1122,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                 id="runpy",
                 name="runpy",
                 content=RUN_PYTHON_TOOL_CONTENT,
-                meta=ToolMeta(description=None, manifest={}),
             ),
             # contentMediaType の無い(宣言追加前の)保存 spec を意図的に登録
             specs=[
@@ -1162,7 +1160,7 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         get_tools のリクエスト時正規化(str→string hack)が val["type"] を直参照して
         KeyError で全リクエストが落ちていた(#18-3: sandbox tool の timeout_s で顕在化)。
         """
-        from open_webui.models.tools import ToolForm, ToolMeta, Tools
+        from open_webui.models.tools import ToolForm, Tools
 
         Tools.insert_new_tool(
             user_id="1",
@@ -1170,7 +1168,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                 id="optpy",
                 name="optpy",
                 content=OPTIONAL_PARAM_TOOL_CONTENT,
-                meta=ToolMeta(description=None, manifest={}),
             ),
             specs=[
                 {

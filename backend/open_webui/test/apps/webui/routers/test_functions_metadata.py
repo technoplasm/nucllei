@@ -66,11 +66,12 @@ class TestFunctionsMetadata(AbstractPostgresTest):
         cls.Functions = Functions
 
     def _create_body(self, id, name, description, content=FILTER_CONTENT):
+        # llens(#43): description は top-level 列に昇格(旧 meta.description)。
         return {
             "id": id,
             "name": name,
+            "description": description,
             "content": content,
-            "meta": {"description": description},
         }
 
     def test_create_requires_description(self):
@@ -125,11 +126,11 @@ class TestFunctionsMetadata(AbstractPostgresTest):
         assert res.status_code == 200
 
         row = self.Functions.get_function_by_id("fm_probe")
-        # manifest フィールドごと撤去(#45 掃除)
-        assert not hasattr(row.meta, "manifest")
-        # 真実源はフォーム値
+        # llens(#43): meta 列ごと撤去(#45 で manifest が消え description だけになったため)。
+        assert not hasattr(row, "meta")
+        # 真実源はフォーム値。description は top-level 列。
         assert row.name == "Form Name"
-        assert row.meta.description == "form description"
+        assert row.description == "form description"
 
     def test_type_detected_from_class(self):
         """type はコード中のクラス名で確定する(filter/action/pipe)。"""

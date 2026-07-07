@@ -20,7 +20,7 @@
 		const res = await updateFunctionById(localStorage.token, func.id, {
 			id: data.id,
 			name: data.name,
-			meta: data.meta,
+			description: data.description,
 			content: data.content
 		}).catch((error) => {
 			toast.error(`${error}`);
@@ -61,7 +61,7 @@
 		id={func.id}
 		name={func.name}
 		type={func.type}
-		meta={func.meta}
+		description={func.description}
 		content={func.content}
 		onSave={(value) => {
 			saveHandler(value);

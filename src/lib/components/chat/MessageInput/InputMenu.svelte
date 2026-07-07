@@ -49,7 +49,7 @@
 		tools = $_tools.reduce((a, tool, i, arr) => {
 			a[tool.id] = {
 				name: tool.name,
-				description: tool.meta.description,
+				description: tool.description,
 				enabled: selectedToolIds.includes(tool.id)
 			};
 			return a;
