@@ -12,6 +12,7 @@
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { getModels } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
@@ -48,6 +49,10 @@
 
 	let id = '';
 	let name = '';
+
+	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
+	let originalId = '';
+	let showRenameConfirm = false;
 
 	let enableDescription = true;
 
@@ -194,8 +199,19 @@
 			}
 		});
 
-		await onSubmit(info);
+		// llens(#43): id が変わったら recreate(旧 id 削除→新 id 作成)。confirm を挟む。
+		if (edit && id !== originalId) {
+			loading = false;
+			showRenameConfirm = true;
+			return;
+		}
 
+		await doSubmit();
+	};
+
+	const doSubmit = async () => {
+		loading = true;
+		await onSubmit(info);
 		loading = false;
 		success = false;
 	};
@@ -222,6 +238,7 @@
 			await tick();
 
 			id = model.id;
+			originalId = id;
 
 			enableDescription = model?.meta?.description !== null;
 
@@ -488,7 +505,6 @@
 									class="text-xs w-full bg-transparent text-gray-500 outline-hidden"
 									placeholder={$i18n.t('Model ID')}
 									bind:value={id}
-									disabled={edit}
 									required
 								/>
 							</div>
@@ -868,3 +884,22 @@
 		{/if}
 	</div>
 {/if}
+
+<ConfirmDialog
+	bind:show={showRenameConfirm}
+	title={$i18n.t('Change ID?')}
+	on:confirm={() => {
+		doSubmit();
+	}}
+>
+	<div class="text-sm text-gray-500">
+		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
+			<div>
+				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}
+			</div>
+			<ul class=" mt-1 list-disc pl-4 text-xs">
+				<li>{$i18n.t('Assignments and references from other items will be detached.')}</li>
+			</ul>
+		</div>
+	</div>
+</ConfirmDialog>
