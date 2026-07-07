@@ -33,7 +33,6 @@
 	import ChevronRight from '../icons/ChevronRight.svelte';
 	import Switch from '../common/Switch.svelte';
 	import Spinner from '../common/Spinner.svelte';
-	import { capitalizeFirstLetter } from '$lib/utils';
 
 	let shiftKey = false;
 
@@ -245,10 +244,10 @@
 	<div class=" my-2 mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3" id="model-list">
 		{#each filteredModels as model}
 			<div
-				class=" flex flex-col cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
+				class=" flex items-center cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
 				id="model-item-{model.id}"
 			>
-				<div class="flex gap-4 mt-0.5 mb-0.5">
+				<div class="flex gap-4 flex-1 min-w-0 mt-0.5 mb-0.5">
 					<div class=" w-[44px]">
 						<div
 							class=" rounded-full object-cover {model.is_active
@@ -264,7 +263,7 @@
 					</div>
 
 					<a
-						class=" flex flex-1 cursor-pointer w-full"
+						class=" flex flex-1 cursor-pointer w-full min-w-0"
 						href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
 					>
 						<div class=" flex-1 self-center {model.is_active ? '' : 'text-gray-500'}">
@@ -289,23 +288,8 @@
 					</a>
 				</div>
 
-				<div class="flex justify-between items-center -mb-0.5 px-0.5">
-					<div class=" text-xs mt-0.5">
-						<Tooltip
-							content={model?.user?.email ?? $i18n.t('Deleted User')}
-							className="flex shrink-0"
-							placement="top-start"
-						>
-							<div class="shrink-0 text-gray-500">
-								{$i18n.t('By {{name}}', {
-									name: capitalizeFirstLetter(
-										model?.user?.name ?? model?.user?.email ?? $i18n.t('Deleted User')
-									)
-								})}
-							</div>
-						</Tooltip>
-					</div>
-
+				<!-- llens(#47 A1): By 撤去。メニュー/有効スイッチは名前と縦中央で右寄せに維持。 -->
+				<div class="flex items-center self-center shrink-0 px-0.5">
 					<div class="flex flex-row gap-0.5 items-center">
 						{#if shiftKey}
 							<Tooltip content={$i18n.t('Delete')}>
