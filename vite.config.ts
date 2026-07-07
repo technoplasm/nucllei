@@ -47,7 +47,9 @@ export default defineConfig({
 		})
 	],
 	define: {
-		APP_VERSION: JSON.stringify(process.env.npm_package_version),
+		// llens(#30/#25): deploy tag(例 prod20260708_01)を APP_VERSION で焼き込む。
+		// 未設定なら package.json の OWUI 基点バージョンにフォールバック。
+		APP_VERSION: JSON.stringify(process.env.APP_VERSION || process.env.npm_package_version),
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	build: {

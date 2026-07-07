@@ -129,7 +129,9 @@ else:
     except Exception:
         PACKAGE_DATA = {"version": "0.0.0"}
 
-VERSION = PACKAGE_DATA["version"]
+# llens(#30/#25): deploy tag(例 prod20260708_01)を APP_VERSION で焼き込めるようにする。
+# 未設定なら package.json の OWUI 基点バージョン(0.6.5)にフォールバック。
+VERSION = os.environ.get("APP_VERSION") or PACKAGE_DATA["version"]
 
 
 # Function to parse each section
