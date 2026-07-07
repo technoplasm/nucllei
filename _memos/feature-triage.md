@@ -4,10 +4,10 @@
 
 | 機能 | 判断 | 備考 |
 |---|---|---|
-| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #9 相当で後日) |
+| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #52(RAG/KB/Documents 保留)で後日) |
 | Documents(文書抽出) | **Docling が使えれば十分** | v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)。それ以上の投資不要 |
 | RAG / retrieval | **一切不使用** | 将来必要になってもツール側で実装する方針 |
-| Web 検索(組み込み) | **不要** | |
+| Web 検索 | **残す(組み込みツールとして提供)** | OWUI 組み込みの RAG/検索経路ではなく、llens の組み込みツール枠で提供(#51)。RAG/Documents/Docling とは完全に別物 |
 | 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで |
 | コード実行(組み込み Pyodide/Jupyter) | **無くてもよい** | nsjail+IPython は自前ツール側で提供。Pyodide には戻さない(fork.md §6) |
 | 会話検索 | **必要・維持** | v0.6.5 に存在(タイトル+本文検索)。デグレさせない |
@@ -18,7 +18,7 @@
 | プロンプト管理(`/` 呼び出し) | あってもよいが**スキルとの棲み分け再設計** | プロンプト内に「スキルを使え」と書く形は不可。`/` はユーザーがスキルを能動発火させる UI に置き換える案(issue #5) |
 | ツール(Tools) | **完全キャッチアップ** | 外形仕様・公式ドキュメントベースで機能パリティを目指す(コード移植は不可) |
 | スキル(Skills) | **完全キャッチアップ** | 同上。llens の権限モデル(診療科×職位)と統合(issue #5) |
-| ストア(openwebui.com 共有・取得) | **不要** | air-gapped 前提とも整合(issue #10) |
+| ストア(openwebui.com 共有・取得) | **撲滅済み(#10)** | air-gapped 前提。community sharing(config / admin トグル / 共有ボタン / モデル discover / 作者リンク)を機能ごと撤去(773c2dead)。tools/functions/skills の共有導線は #45 で撤去済み |
 | 評価 / Arena | **撲滅済み(#48)** | 邪魔なので削除。#48 で feedback(👍/👎)UI・frontend/backend API・DB テーブル(migration e3b1c9f4a7d2 で drop)、arena config/モデル注入/chat 経路の dead code、ENABLE_MESSAGE_RATING まで全撤去。admin Evaluations 画面も削除 |
 | 管理画面のチャット分析 | **できれば詳細化** | ユーザー別の利用分析をもう少し詳しく。優先度低 |
 | チャットの「コントロール」サイドバー | **削除** | Files/Valves/System Prompt 上書き/高度なパラメータの per-chat 制御。一般ユーザーが制御する必要がなく、変に触らせたくない(2026-07-07) |
@@ -104,5 +104,5 @@ Public/Private=access_control とは別軸)。
 検証: CORE 回帰 36 passed(auth/filter/authz/defaults)/ 6タブ統合ナビ・各ページ・`/admin` リダイレクト /
 `/api/models` に arena 0 件・feedback テーブル drop 済み / 実チャット(SGLang Kimi)で reasoning + 本文正常・
 `</details>` 漏れなし・console エラー 0。**#48 close**。
-残: i18n(新タブ含む未訳 → #34 に集約)/ Knowledge KB backend の掃除(#9 相当)/ #48 で作った
+残: i18n(新タブ含む未訳 → #34 に集約)/ Knowledge KB backend の掃除(#52)/ #48 で作った
 `feat/48-admin-workspace-merge` ブランチは ff マージ後に削除済み。
