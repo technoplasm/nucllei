@@ -128,7 +128,7 @@
 					{$i18n.t('Reasoning Effort')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.reasoning_effort = (params?.reasoning_effort ?? null) === null ? 'medium' : null;
@@ -149,10 +149,10 @@
 					{/if}
 				</button>
 				{#if (params?.reasoning_effort ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
-								class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-1 px-1 text-xs dark:text-gray-300 dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={$i18n.t('Enter reasoning effort')}
 								bind:value={params.reasoning_effort}
@@ -181,7 +181,7 @@
 					{$i18n.t('Temperature')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.temperature = (params?.temperature ?? null) === null ? 0.8 : null;
@@ -202,7 +202,7 @@
 					{/if}
 				</button>
 				{#if (params?.temperature ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -218,7 +218,8 @@
 							<input
 								bind:value={params.temperature}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="2"
 								step="any"
@@ -243,7 +244,7 @@
 					{$i18n.t('Top K')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.top_k = (params?.top_k ?? null) === null ? 40 : null;
@@ -264,7 +265,7 @@
 					{/if}
 				</button>
 				{#if (params?.top_k ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -280,7 +281,8 @@
 							<input
 								bind:value={params.top_k}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="100"
 								step="any"
@@ -306,7 +308,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.top_p = (params?.top_p ?? null) === null ? 0.9 : null;
@@ -327,7 +329,7 @@
 					{/if}
 				</button>
 				{#if (params?.top_p ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -343,7 +345,8 @@
 							<input
 								bind:value={params.top_p}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="1"
 								step="any"
@@ -368,7 +371,7 @@
 					{$i18n.t('Min P')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.min_p = (params?.min_p ?? null) === null ? 0.0 : null;
@@ -389,7 +392,7 @@
 					{/if}
 				</button>
 				{#if (params?.min_p ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -405,7 +408,8 @@
 							<input
 								bind:value={params.min_p}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="1"
 								step="any"
@@ -431,7 +435,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.max_tokens = (params?.max_tokens ?? null) === null ? 128 : null;
@@ -452,7 +456,7 @@
 					{/if}
 				</button>
 				{#if (params?.max_tokens ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -468,7 +472,8 @@
 							<input
 								bind:value={params.max_tokens}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-2"
 								step="1"
 							/>
@@ -493,7 +498,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.seed = (params?.seed ?? null) === null ? 0 : null;
@@ -514,10 +519,10 @@
 					{/if}
 				</button>
 				{#if (params?.seed ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-1 px-2 text-xs dark:text-gray-300 dark:bg-gray-850 outline-hidden"
 								type="number"
 								placeholder={$i18n.t('Enter Seed')}
 								bind:value={params.seed}
@@ -545,7 +550,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.stop = (params?.stop ?? null) === null ? '' : null;
@@ -566,10 +571,10 @@
 					{/if}
 				</button>
 				{#if (params?.stop ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
-								class="w-full rounded-lg py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-1 px-1 text-xs dark:text-gray-300 dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={$i18n.t('Enter stop sequence')}
 								bind:value={params.stop}
@@ -596,7 +601,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.frequency_penalty = (params?.frequency_penalty ?? null) === null ? 1.1 : null;
@@ -617,7 +622,7 @@
 					{/if}
 				</button>
 				{#if (params?.frequency_penalty ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -633,7 +638,8 @@
 							<input
 								bind:value={params.frequency_penalty}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-2"
 								max="2"
 								step="any"
@@ -680,7 +686,7 @@
 					{/if}
 				</button>
 				{#if (params?.presence_penalty ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -696,7 +702,8 @@
 							<input
 								bind:value={params.presence_penalty}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-2"
 								max="2"
 								step="any"
@@ -720,7 +727,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.repeat_last_n = (params?.repeat_last_n ?? null) === null ? 64 : null;
@@ -741,7 +748,7 @@
 					{/if}
 				</button>
 				{#if (params?.repeat_last_n ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -757,7 +764,8 @@
 							<input
 								bind:value={params.repeat_last_n}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-1"
 								max="128"
 								step="1"
@@ -804,7 +812,7 @@
 					{/if}
 				</button>
 				{#if (params?.repeat_penalty ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -820,7 +828,8 @@
 							<input
 								bind:value={params.repeat_penalty}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-2"
 								max="2"
 								step="any"
@@ -846,7 +855,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.tfs_z = (params?.tfs_z ?? null) === null ? 1 : null;
@@ -867,7 +876,7 @@
 					{/if}
 				</button>
 				{#if (params?.tfs_z ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -883,7 +892,8 @@
 							<input
 								bind:value={params.tfs_z}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="2"
 								step="any"
@@ -908,7 +918,7 @@
 					{$i18n.t('Logit Bias')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.logit_bias = (params?.logit_bias ?? null) === null ? '' : null;
@@ -929,10 +939,10 @@
 					{/if}
 				</button>
 				{#if (params?.logit_bias ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
-								class="w-full rounded-lg pl-2 py-2 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg pl-2 py-1 px-1 text-xs dark:text-gray-300 dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={$i18n.t(
 									'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
@@ -961,7 +971,7 @@
 					{$i18n.t('Mirostat')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.mirostat = (params?.mirostat ?? null) === null ? 0 : null;
@@ -982,7 +992,7 @@
 					{/if}
 				</button>
 				{#if (params?.mirostat ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -998,7 +1008,8 @@
 							<input
 								bind:value={params.mirostat}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="2"
 								step="1"
@@ -1023,7 +1034,7 @@
 					{$i18n.t('Mirostat Eta')}
 				</div>
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.mirostat_eta = (params?.mirostat_eta ?? null) === null ? 0.1 : null;
@@ -1044,7 +1055,7 @@
 					{/if}
 				</button>
 				{#if (params?.mirostat_eta ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -1060,7 +1071,8 @@
 							<input
 								bind:value={params.mirostat_eta}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="1"
 								step="any"
@@ -1086,7 +1098,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.mirostat_tau = (params?.mirostat_tau ?? null) === null ? 5.0 : null;
@@ -1107,7 +1119,7 @@
 					{/if}
 				</button>
 				{#if (params?.mirostat_tau ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -1123,7 +1135,8 @@
 							<input
 								bind:value={params.mirostat_tau}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="0"
 								max="10"
 								step="any"
@@ -1152,7 +1165,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.num_keep = (params?.num_keep ?? null) === null ? 24 : null;
@@ -1173,7 +1186,7 @@
 					{/if}
 				</button>
 				{#if (params?.num_keep ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -1189,7 +1202,8 @@
 							<input
 								bind:value={params.num_keep}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-1"
 								step="1"
 							/>
@@ -1212,7 +1226,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.num_ctx = (params?.num_ctx ?? null) === null ? 2048 : null;
@@ -1233,7 +1247,7 @@
 					{/if}
 				</button>
 				{#if (params?.num_ctx ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -1249,7 +1263,8 @@
 							<input
 								bind:value={params.num_ctx}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="-1"
 								step="1"
 							/>
@@ -1274,7 +1289,7 @@
 				</div>
 
 				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+					class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 					type="button"
 					on:click={() => {
 						params.num_batch = (params?.num_batch ?? null) === null ? 512 : null;
@@ -1295,7 +1310,7 @@
 					{/if}
 				</button>
 				{#if (params?.num_batch ?? null) !== null}
-					<div class="flex items-center gap-2 flex-row-reverse">
+					<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 						<div class="w-40 shrink-0">
 							<input
 								id="steps-range"
@@ -1311,7 +1326,8 @@
 							<input
 								bind:value={params.num_batch}
 								type="number"
-								class=" bg-transparent text-center w-14"
+								class=" bg-transparent text-right px-0.5"
+								style="field-sizing: content;"
 								min="256"
 								step="256"
 							/>
@@ -1336,7 +1352,7 @@
 						{$i18n.t('use_mmap')}
 					</div>
 					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+						class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 						type="button"
 						on:click={() => {
 							params.use_mmap = (params?.use_mmap ?? null) === null ? true : null;
@@ -1357,7 +1373,7 @@
 						{/if}
 					</button>
 					{#if (params?.use_mmap ?? null) !== null}
-						<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 							<div class="text-xs text-gray-500">
 								{params.use_mmap ? 'Enabled' : 'Disabled'}
 							</div>
@@ -1384,7 +1400,7 @@
 					</div>
 
 					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+						class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 						type="button"
 						on:click={() => {
 							params.use_mlock = (params?.use_mlock ?? null) === null ? true : null;
@@ -1405,7 +1421,7 @@
 						{/if}
 					</button>
 					{#if (params?.use_mlock ?? null) !== null}
-						<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 							<div class="text-xs text-gray-500">
 								{params.use_mlock ? 'Enabled' : 'Disabled'}
 							</div>
@@ -1433,7 +1449,7 @@
 					</div>
 
 					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+						class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 						type="button"
 						on:click={() => {
 							params.num_thread = (params?.num_thread ?? null) === null ? 2 : null;
@@ -1454,7 +1470,7 @@
 						{/if}
 					</button>
 					{#if (params?.num_thread ?? null) !== null}
-						<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 							<div class="w-40 shrink-0">
 								<input
 									id="steps-range"
@@ -1470,7 +1486,8 @@
 								<input
 									bind:value={params.num_thread}
 									type="number"
-									class=" bg-transparent text-center w-14"
+									class=" bg-transparent text-right px-0.5"
+									style="field-sizing: content;"
 									min="1"
 									max="256"
 									step="1"
@@ -1496,7 +1513,7 @@
 					</div>
 
 					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
+						class="p-1 px-1 text-xs flex rounded-sm transition shrink-0 outline-hidden"
 						type="button"
 						on:click={() => {
 							params.num_gpu = (params?.num_gpu ?? null) === null ? 0 : null;
@@ -1517,7 +1534,7 @@
 						{/if}
 					</button>
 					{#if (params?.num_gpu ?? null) !== null}
-						<div class="flex items-center gap-2 flex-row-reverse">
+						<div class="flex items-center gap-1 flex-row-reverse -ml-1">
 							<div class="w-40 shrink-0">
 								<input
 									id="steps-range"
@@ -1533,7 +1550,8 @@
 								<input
 									bind:value={params.num_gpu}
 									type="number"
-									class=" bg-transparent text-center w-14"
+									class=" bg-transparent text-right px-0.5"
+									style="field-sizing: content;"
 									min="0"
 									max="256"
 									step="1"
