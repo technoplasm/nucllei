@@ -103,6 +103,41 @@
 	// admin ゲートのエンドポイントなので admin 前提(workspace.models 既定は False)。
 	let baseModels = [];
 
+	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
+	// 状態へ暗黙リセットする。名前/ID はタブ外の常時ヘッダなので対象外(リセットしない)。
+	let stateSnapshot = null;
+	const captureSnapshot = () => {
+		stateSnapshot = JSON.stringify({
+			info,
+			params,
+			capabilities,
+			knowledge,
+			toolIds,
+			skillIds,
+			filterIds,
+			actionIds,
+			featureSkills,
+			accessControl
+		});
+	};
+	const switchTab = (tab) => {
+		if (tab === selectedTab) return;
+		if (stateSnapshot) {
+			const s = JSON.parse(stateSnapshot);
+			info = s.info;
+			params = s.params;
+			capabilities = s.capabilities;
+			knowledge = s.knowledge;
+			toolIds = s.toolIds;
+			skillIds = s.skillIds;
+			filterIds = s.filterIds;
+			actionIds = s.actionIds;
+			featureSkills = s.featureSkills;
+			accessControl = s.accessControl;
+		}
+		selectedTab = tab;
+	};
+
 	const addUsage = (base_model_id) => {
 		const baseModel = baseModels.find((m) => m.id === base_model_id);
 
@@ -306,6 +341,8 @@
 			console.log(model);
 		}
 
+		// タブ切替の暗黙リセット用に、ロード直後の状態を控える
+		captureSnapshot();
 		loaded = true;
 	});
 </script>
@@ -442,9 +479,7 @@
 							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
 							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
 						type="button"
-						on:click={() => {
-							selectedTab = 'general';
-						}}
+						on:click={() => switchTab('general')}
 					>
 						{$i18n.t('General')}
 					</button>
@@ -454,9 +489,7 @@
 							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
 							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
 						type="button"
-						on:click={() => {
-							selectedTab = 'prompt';
-						}}
+						on:click={() => switchTab('prompt')}
 					>
 						{$i18n.t('Prompt')}
 					</button>
@@ -466,9 +499,7 @@
 							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
 							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
 						type="button"
-						on:click={() => {
-							selectedTab = 'advanced';
-						}}
+						on:click={() => switchTab('advanced')}
 					>
 						{$i18n.t('Advanced Params')}
 					</button>
