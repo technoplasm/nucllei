@@ -42,3 +42,10 @@
     「幅が広いとラベルと値が離れて見づらい」を解消(カラム数は問わない要件)。挙動系(Function Calling / Stream /
     Reasoning Effort)を最上部へ。さらに **Behavior / Sampling / Mirostat / Ollama のセクション分け**と各ラベルの
     `(Ollama)` suffix 撤去・コメントアウト済み Template ブロック除去(010b19ab2)。
+  - **値コントロールの刷新(d78adeced/36115522d)**: 「Custom」テキスト → **✕(times)アイコン**(押すと Default に戻る)。
+    値ありのとき `ラベル ✕ 数字 [幅固定スライダー]` を1行インライン(**100% 展開しない**・数字は左)。
+    スライダー横の数字は **`field-sizing: content`(Chrome 前提)+ padding** で中身幅(固定 width をやめた)。
+    箱型入力は `py-1`/`text-xs` にして **Default(24px)と値ありで行高を一定化**(切替でリストが跳ねない)。
+  - **タブ切替の暗黙リセット(040ec990c)**: ModelEditor はタブ間で info/params を共有するため、別タブの
+    「見えていない編集」も Save で保存される。→ **タブ切替時にロード直後の状態へ暗黙リセット**(名前/ID は常時
+    ヘッダなので対象外)。onMount 末 `captureSnapshot()` / `switchTab()` で復元。モーダル確認は未採用(暗黙)。
