@@ -18,6 +18,7 @@
 	import { getModels } from '$lib/apis';
 
 	// llens(#45): frontmatter/version ゲート(extractFrontmatter/compareVersion)は撤去。
+	// llens(#48): Admin を Workspace に統合し /workspace/functions 配下へ移動。
 	const i18n = getContext('i18n');
 
 	let func = null;
@@ -56,7 +57,7 @@
 
 			toast.success($i18n.t('Function updated successfully'));
 			await refreshStores();
-			await goto('/admin/functions');
+			await goto('/workspace/functions');
 			return;
 		}
 
@@ -72,17 +73,14 @@
 	};
 
 	onMount(async () => {
-		console.log('mounted');
 		const id = $page.url.searchParams.get('id');
 
 		if (id) {
 			func = await getFunctionById(localStorage.token, id).catch((error) => {
 				toast.error(`${error}`);
-				goto('/admin/functions');
+				goto('/workspace/functions');
 				return null;
 			});
-
-			console.log(func);
 		}
 	});
 </script>

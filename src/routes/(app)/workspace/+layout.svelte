@@ -21,16 +21,21 @@
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
-			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
-				goto('/');
-			} else if (
-				$page.url.pathname.includes('/knowledge') &&
-				!$user?.permissions?.workspace?.knowledge
+			const path = $page.url.pathname;
+			// llens(#48): Functions/Settings/Users は admin 専用(Admin を Workspace に統合)。
+			if (
+				path.includes('/functions') ||
+				path.includes('/settings') ||
+				path.includes('/users')
 			) {
 				goto('/');
-			} else if ($page.url.pathname.includes('/skills') && !$user?.permissions?.workspace?.skills) {
+			} else if (path.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/');
-			} else if ($page.url.pathname.includes('/tools') && !$user?.permissions?.workspace?.tools) {
+			} else if (path.includes('/knowledge') && !$user?.permissions?.workspace?.knowledge) {
+				goto('/');
+			} else if (path.includes('/skills') && !$user?.permissions?.workspace?.skills) {
+				goto('/');
+			} else if (path.includes('/tools') && !$user?.permissions?.workspace?.tools) {
 				goto('/');
 			}
 		}
@@ -106,6 +111,34 @@
 							>
 								{$i18n.t('Tools')}
 							</a>
+						{/if}
+
+						<!-- llens(#48): Admin を Workspace に統合。Functions/Settings/Users は admin 専用タブ。 -->
+						{#if $user?.role === 'admin'}
+							<a
+								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
+									'/workspace/functions'
+								)
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/functions">{$i18n.t('Functions')}</a
+							>
+
+							<a
+								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
+									'/workspace/settings'
+								)
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/settings">{$i18n.t('Settings')}</a
+							>
+
+							<a
+								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/users')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/users">{$i18n.t('Users')}</a
+							>
 						{/if}
 					</div>
 				</div>

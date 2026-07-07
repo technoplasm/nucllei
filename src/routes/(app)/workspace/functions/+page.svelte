@@ -1,4 +1,5 @@
 <script>
+	// llens(#48): Admin を Workspace に統合。Functions をワークスペース配下でホスト(admin ゲートは layout 側)。
 	import { onMount } from 'svelte';
 	import { functions } from '$lib/stores';
 
