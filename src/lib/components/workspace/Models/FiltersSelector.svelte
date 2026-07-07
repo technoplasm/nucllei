@@ -27,10 +27,6 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Filters')}</div>
 	</div>
 
-	<div class=" text-xs dark:text-gray-500">
-		{$i18n.t('To select filters here, add them to the "Functions" workspace first.')}
-	</div>
-
 	<!-- TODO: Filer order matters -->
 	<div class="flex flex-col">
 		{#if filters.length > 0}
@@ -56,6 +52,8 @@
 					</div>
 				{/each}
 			</div>
+		{:else}
+			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
 		{/if}
 	</div>
 </div>

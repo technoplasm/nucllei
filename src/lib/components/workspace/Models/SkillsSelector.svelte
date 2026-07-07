@@ -33,10 +33,6 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Skills')}</div>
 	</div>
 
-	<div class=" text-xs dark:text-gray-500">
-		{$i18n.t('To select skills here, add them to the "Skills" workspace first.')}
-	</div>
-
 	{#if disabled}
 		<div class="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
 			{$i18n.t('スキル機能が無効のため、このモデルでは発火しません(紐づけ設定は保持されます)')}
@@ -76,6 +72,8 @@
 					</div>
 				{/each}
 			</div>
+		{:else}
+			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
 		{/if}
 	</div>
 </div>

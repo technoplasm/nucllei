@@ -33,11 +33,11 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Tools')}</div>
 	</div>
 
-	<div class=" text-xs dark:text-gray-500">
-		{$i18n.t('To select toolkits here, add them to the "Tools" workspace first.')}
-	</div>
-
 	<div class="flex flex-col">
+		{#if builtinIds.length === 0 && customIds.length === 0}
+			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
+		{/if}
+
 		{#if builtinIds.length > 0}
 			<div class="text-xs text-gray-500 mt-2">{$i18n.t('組み込み')}</div>
 			<div class=" flex items-center mt-1 flex-wrap">

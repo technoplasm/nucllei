@@ -27,10 +27,6 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Actions')}</div>
 	</div>
 
-	<div class=" text-xs dark:text-gray-500">
-		{$i18n.t('To select actions here, add them to the "Functions" workspace first.')}
-	</div>
-
 	<div class="flex flex-col">
 		{#if actions.length > 0}
 			<div class=" flex items-center mt-2 flex-wrap">
@@ -54,6 +50,8 @@
 					</div>
 				{/each}
 			</div>
+		{:else}
+			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
 		{/if}
 	</div>
 </div>

@@ -14,10 +14,6 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Knowledge')}</div>
 	</div>
 
-	<div class=" text-xs dark:text-gray-500">
-		{$i18n.t('To attach knowledge base here, add them to the "Knowledge" workspace first.')}
-	</div>
-
 	<div class="flex flex-col">
 		{#if selectedKnowledge?.length > 0}
 			<div class=" flex flex-wrap items-center gap-2 mt-2">
