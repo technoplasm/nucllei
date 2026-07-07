@@ -16,6 +16,9 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
 | Filter/Function | Tool と同じ二重 | 有り | 有り | 同上 |
 | Builtin tool | repo 定義が真実源 | 無し | — | 無し |
 
+※ Filter/Function 行は上記が着手前の状態。#45(0f74536a9)/ #46(ce1f12fc1)で Tool と同型に解消済み
+(frontmatter/share/version 全撤去・type ドロップダウン新設・is_global/is_active 撤去)。詳細は §5 と「#46」節。
+
 - Skill だけが理想形。Tool は旧 OWUI のまま二重定義が残る。
 - frontmatter が運ぶ唯一の実機能は `requirements`(tool ロード時 `pip install`)。title/description/
   version/funding_url は表示専用。air-gapped では runtime pip 自体が筋悪。
@@ -51,13 +54,44 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
 - バックエンドの「access_control のみ更新」分岐(routers/tools.py:250)は UI から到達不能になるが無害で残置。
 - バックエンドの現行ゲート(create/update/delete 拒否)は変更不要。フロントを実態に合わせるだけ。
 
-### 5. 範囲外(後続ステップ)
-- filters / functions(admin/functions)への同一変更 = **#45 に分離**(CORE = Filter パイプライン、回帰同伴)。
-  内容は #44 の filter 版(UI 整理 + frontmatter 廃止)。**pipe/action は放置**(DROP せず・type ピッカーも
-  足さず・実行コードも消さない。将来 action を使う可能性があり戻すのが面倒。2026-07-07 決定)。
-- `meta.manifest` カラム掃除・`extract_frontmatter`/`install_frontmatter_requirements` の削除
-  = frontmatter が filters(#45)からも消えた後にまとめて(tools 側は既に未使用)。builtin access_control
-  分岐の除去も同様に後続。
+### 5. 範囲外だった後続ステップ → 出荷済み(#45 / #46)
+
+- **#45 出荷(0f74536a9)**: functions(admin/functions)への同一変更 = #44 の filter 版
+  (UI 整理 + frontmatter 廃止)。回帰同伴(CORE = Filter パイプライン)。
+  - **改訂(2026-07-07)**: 当初の「type ピッカーも足さない」方針を撤回し、**作成画面に
+    filter/action/pipe の type ドロップダウンを新設**した(ユーザー決定)。type の真実源は
+    コード中のクラス名(Filter/Action/Pipe)のままで、ドロップダウンは雛形の差し替えのみ
+    (二重定義しない)。pipe/action は引き続き温存(DROP せず・実行コード残置)。
+  - `meta.manifest` カラム掃除・`extract_frontmatter`/`install_frontmatter_requirements` の削除は
+    #45 でまとめて実施(tools・functions 両方から frontmatter が消えたため)。`FunctionMeta`/`ToolMeta`
+    の manifest フィールドも撤去。`utils/models.py` の pipe/action icon_url フォールバック(旧 manifest)も撤去。
+- **#46 出荷(ce1f12fc1)**: function の適用制御を **per-model 割り当て一本化**。`is_global`
+  (全モデル強制 + 解除禁止)と `is_active`(master switch)を DB カラムごと撤去
+  (migration a1c3f9e2d7b4)。詳細は下記「#46: 制御面の一本化」。
+- builtin access_control 分岐の除去(routers/tools.py:250)は UI 到達不能だが無害で残置のまま(未実施)。
+
+## #46: 制御面の一本化(is_global / is_active 撤去、2026-07-07)
+
+**決定の根拠**: filter/action の適用は 3 概念(is_global / per-model 割り当て / is_active)が
+直交して二重化していた。llens はモデルラインナップが小さく(ユーザーが迷う)、per-model 割り当て
+だけで十分と判断し global / active を撤去(ユーザー決定)。
+
+**新モデル**: filter/action はモデルの `meta.filterIds` / `actionIds` 割り当てのみで適用。
+pipe は「存在すればモデルとして出る」(active ゲート撤去)。admin/functions は 一覧/検索/作成/編集/削除
+だけ(トグル類全廃、skill/tool と同型)。
+
+- `utils/filter.py` `get_sorted_filter_ids` = モデルの filterIds を priority 昇順(global union /
+  active 積集合を廃止。実在 filter type でのみ削除済み ID をガード)。
+- `utils/models.py`: action は per-model actionIds のみ。`get_global_filter_functions` /
+  `get_global_action_functions` / `deactivate_all_functions` 削除、`active_only` 引数撤去。
+- `routers/functions.py`: `/toggle`・`/toggle/global` 削除。`plugin.py`: ロード失敗時 auto-disable 撤去
+  (壊れた function は割り当て解除 or 修正で対処)。`main.py`: SAFE_MODE の一括無効化撤去。
+- frontend: 有効トグル(Functions.svelte)・global メニュー(FunctionMenu.svelte)撤去。
+  `FiltersSelector.svelte` は is_global の強制 checked+disabled を撤去し自由トグルに。
+- **副作用として許容**: 壊れた filter の auto-disable が無くなる / SAFE_MODE で function を一括停止できない
+  (割り当て解除で代替)。
+- 回帰: `test_filter.py` の get_sorted_filter_ids と `test_openai_compat_chat.py` の inlet/stream/outlet
+  e2e を per-model filterIds 経路に書き換え。backend 全 206 passed。
 
 ## 回帰の当たり所
 - 既存 tool(frontmatter 付きコードを貼った場合)を保存 → `manifest` が生えない / description 必須が効く。
