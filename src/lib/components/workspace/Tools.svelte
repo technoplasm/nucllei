@@ -2,35 +2,39 @@
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext } from 'svelte';
-	import { WEBUI_NAME, tools as _tools } from '$lib/stores';
+	import { WEBUI_NAME, tools as _tools, user } from '$lib/stores';
 
-	import { goto } from '$app/navigation';
-	import { deleteToolById, getToolList, getTools } from '$lib/apis/tools';
+	import { deleteToolById, getToolList, getTools, updateToolById } from '$lib/apis/tools';
 	import Tooltip from '../common/Tooltip.svelte';
-	import ToolMenu from './Tools/ToolMenu.svelte';
-	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
-	import ValvesModal from './common/ValvesModal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
 	import Spinner from '../common/Spinner.svelte';
-	import { capitalizeFirstLetter } from '$lib/utils';
+	import GlobeAlt from '../icons/GlobeAlt.svelte';
+	import LockClosed from '../icons/LockClosed.svelte';
+	import AccessControlModal from './common/AccessControlModal.svelte';
 
 	// air-gapped: openwebui.com/community 連携(share)・可搬性導線(clone・import/export JSON)は
 	// skill(#35)の前例どおり撤去した(issue #44)。機能は一覧/検索/作成/編集/削除のみ。
 	// version/funding 等の frontmatter 由来メタ表示も frontmatter 廃止に伴い撤去。
+	// llens(#47 A1): TOOL バッジ・name tooltip・By 表示・Valves・… メニューを撤去。
+	// 組み込みは上部に別セクション。visibility(access_control)は一覧のアイコンから直接編集する
+	// (builtin は access_control のみ更新可 — routers/tools.py)。
 	const i18n = getContext('i18n');
 
-	let shiftKey = false;
 	let loaded = false;
 
 	let query = '';
 
-	let showValvesModal = false;
 	let selectedTool = null;
 
 	let showDeleteConfirm = false;
+
+	// visibility(access_control)の一覧内編集: アイコン → AccessControlModal、閉じたら保存
+	let showAccessControlModal = false;
+	let acItem = null;
+	let acValue = null;
 
 	let tools = [];
 	let filteredItems = [];
@@ -41,6 +45,44 @@
 			t.name.toLowerCase().includes(query.toLowerCase()) ||
 			t.id.toLowerCase().includes(query.toLowerCase())
 	);
+
+	$: builtinItems = filteredItems.filter((t) => t?.meta?.builtin);
+	$: customItems = filteredItems.filter((t) => !t?.meta?.builtin);
+
+	// llens(#47 A1): 一覧の2段目は description ではなく、その tool が公開する関数名を
+	// できるだけ並べる(#49 の tool spec 露出。list は specs 込みの ToolUserModel)。
+	const toolFnNames = (tool) => (tool?.specs ?? []).map((s) => s?.name).filter(Boolean).join(', ');
+
+	const openAccessControl = (tool) => {
+		acItem = tool;
+		acValue = tool?.access_control ?? null;
+		showAccessControlModal = true;
+	};
+
+	// list の item は content 込み(ToolUserModel)なのでそのまま round-trip できる。
+	// builtin も同経路(backend が access_control のみ反映 — routers/tools.py)。
+	const commitAccessControl = async () => {
+		const item = acItem;
+		const value = acValue;
+		acItem = null;
+		if (!item) return;
+
+		const res = await updateToolById(localStorage.token, item.id, {
+			...item,
+			access_control: value
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			await init();
+		}
+	};
+
+	$: if (!showAccessControlModal && acItem) {
+		commitAccessControl();
+	}
 
 	const deleteHandler = async (tool) => {
 		const res = await deleteToolById(localStorage.token, tool.id).catch((error) => {
@@ -62,32 +104,6 @@
 	onMount(async () => {
 		await init();
 		loaded = true;
-
-		const onKeyDown = (event) => {
-			if (event.key === 'Shift') {
-				shiftKey = true;
-			}
-		};
-
-		const onKeyUp = (event) => {
-			if (event.key === 'Shift') {
-				shiftKey = false;
-			}
-		};
-
-		const onBlur = () => {
-			shiftKey = false;
-		};
-
-		window.addEventListener('keydown', onKeyDown);
-		window.addEventListener('keyup', onKeyUp);
-		window.addEventListener('blur-sm', onBlur);
-
-		return () => {
-			window.removeEventListener('keydown', onKeyDown);
-			window.removeEventListener('keyup', onKeyUp);
-			window.removeEventListener('blur-sm', onBlur);
-		};
 	});
 </script>
 
@@ -132,139 +148,119 @@
 		</div>
 	</div>
 
-	<div class="mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
-		{#each filteredItems as tool}
-			<div
-				class=" flex space-x-4 w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition {tool
-					?.meta?.builtin
-					? ''
-					: 'cursor-pointer'}"
-			>
-				<!-- llens(#44): builtin は編集不可。編集リンクにせず素の行として描画する。 -->
-				<a
-					class=" flex flex-1 space-x-3.5 w-full {tool?.meta?.builtin ? '' : 'cursor-pointer'}"
-					href={tool?.meta?.builtin
-						? undefined
-						: `/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
+	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
+	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
+	{#if builtinItems.length}
+		<div class="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5 mt-1 mb-1">
+			{$i18n.t('組み込み')}
+		</div>
+		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+			{#each builtinItems as tool}
+				<div
+					class=" flex space-x-4 w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
 				>
-					<div class="flex items-center text-left">
-						<div class=" flex-1 self-center">
-							<Tooltip content={tool?.description ?? ''} placement="top-start">
-								<div class=" font-semibold flex items-center gap-1.5">
-									<div
-										class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-gray-700 dark:text-gray-200"
-									>
-										TOOL
-									</div>
-
-									{#if tool?.meta?.builtin}
-										<div
-											class="text-xs font-bold px-1 rounded-sm line-clamp-1 bg-blue-500/20 text-blue-700 dark:text-blue-200"
-										>
-											{$i18n.t('組み込み')}
-										</div>
-									{/if}
-
-									<div class="line-clamp-1">
-										{tool.name}
-
-										<span class=" text-gray-500 text-xs font-medium shrink-0">{tool.id}</span>
-									</div>
+					<div class=" flex flex-1 space-x-3.5 w-full min-w-0">
+						<div class="flex items-center text-left min-w-0">
+							<div class=" flex-1 self-center min-w-0">
+								<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
+									{tool.name}
+									<span class=" text-gray-500 text-xs font-medium shrink-0">{tool.id}</span>
 								</div>
-							</Tooltip>
-
-							<div class="px-0.5">
-								<div class="flex gap-1.5 mt-0.5 mb-0.5">
-									<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-										{tool.description}
-									</div>
+								<div
+									class="px-0.5 text-xs text-gray-500 overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
+								>
+									{toolFnNames(tool)}
 								</div>
+							</div>
+						</div>
+					</div>
 
-								<div class="text-xs text-gray-500 shrink-0">
-									<Tooltip
-										content={tool?.user?.email ?? $i18n.t('Deleted User')}
-										className="flex shrink-0"
-										placement="top-start"
-									>
-										{$i18n.t('By {{name}}', {
-											name: capitalizeFirstLetter(
-												tool?.user?.name ?? tool?.user?.email ?? $i18n.t('Deleted User')
-											)
-										})}
-									</Tooltip>
-								</div>
+					<div class="flex flex-row gap-0.5 self-center">
+						<Tooltip
+							content={(tool.access_control ?? null) === null
+								? $i18n.t('Public')
+								: $i18n.t('Private')}
+						>
+							<button
+								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								type="button"
+								on:click={() => openAccessControl(tool)}
+							>
+								{#if (tool.access_control ?? null) === null}
+									<GlobeAlt className="size-4" />
+								{:else}
+									<LockClosed className="size-4" />
+								{/if}
+							</button>
+						</Tooltip>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
+	{#if builtinItems.length}
+		<div class="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5 mt-1 mb-1">
+			{$i18n.t('カスタム')}
+		</div>
+	{/if}
+	<div class="mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+		{#each customItems as tool}
+			<div
+				class=" flex space-x-4 w-full px-3 py-2 cursor-pointer dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
+			>
+				<a
+					class=" flex flex-1 space-x-3.5 w-full min-w-0 cursor-pointer"
+					href={`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
+				>
+					<div class="flex items-center text-left min-w-0">
+						<div class=" flex-1 self-center min-w-0">
+							<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
+								{tool.name}
+								<span class=" text-gray-500 text-xs font-medium shrink-0">{tool.id}</span>
+							</div>
+							<div
+								class="px-0.5 text-xs text-gray-500 overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
+							>
+								{toolFnNames(tool)}
 							</div>
 						</div>
 					</div>
 				</a>
 
-				<!-- llens(#44): builtin は編集/複製/共有/エクスポート/削除・Valves を出さない(バッジのみ)。 -->
-				{#if !tool?.meta?.builtin}
-					<div class="flex flex-row gap-0.5 self-center">
-						{#if shiftKey}
-							<Tooltip content={$i18n.t('Delete')}>
-								<button
-									class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-									type="button"
-									on:click={() => {
-										deleteHandler(tool);
-									}}
-								>
-									<GarbageBin />
-								</button>
-							</Tooltip>
-						{:else}
-							<Tooltip content={$i18n.t('Valves')}>
-								<button
-									class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-									type="button"
-									on:click={() => {
-										selectedTool = tool;
-										showValvesModal = true;
-									}}
-								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="1.5"
-										stroke="currentColor"
-										class="size-4"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-										/>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
-										/>
-									</svg>
-								</button>
-							</Tooltip>
+				<div class="flex flex-row gap-0.5 self-center">
+					<Tooltip
+						content={(tool.access_control ?? null) === null
+							? $i18n.t('Public')
+							: $i18n.t('Private')}
+					>
+						<button
+							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							on:click={() => openAccessControl(tool)}
+						>
+							{#if (tool.access_control ?? null) === null}
+								<GlobeAlt className="size-4" />
+							{:else}
+								<LockClosed className="size-4" />
+							{/if}
+						</button>
+					</Tooltip>
 
-							<ToolMenu
-								editHandler={() => {
-									goto(`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`);
-								}}
-								deleteHandler={async () => {
-									selectedTool = tool;
-									showDeleteConfirm = true;
-								}}
-								onClose={() => {}}
-							>
-								<button
-									class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-									type="button"
-								>
-									<EllipsisHorizontal className="size-5" />
-								</button>
-							</ToolMenu>
-						{/if}
-					</div>
-				{/if}
+					<Tooltip content={$i18n.t('Delete')}>
+						<button
+							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							on:click={() => {
+								selectedTool = tool;
+								showDeleteConfirm = true;
+							}}
+						>
+							<GarbageBin />
+						</button>
+					</Tooltip>
+				</div>
 			</div>
 		{/each}
 	</div>
@@ -281,7 +277,12 @@
 		</div>
 	</DeleteConfirmDialog>
 
-	<ValvesModal bind:show={showValvesModal} type="tool" id={selectedTool?.id ?? null} />
+	<AccessControlModal
+		bind:show={showAccessControlModal}
+		bind:accessControl={acValue}
+		accessRoles={['read', 'write']}
+		allowPublic={$user?.permissions?.sharing?.public_tools || $user?.role === 'admin'}
+	/>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">
 		<Spinner />
