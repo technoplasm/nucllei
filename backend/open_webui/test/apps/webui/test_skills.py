@@ -545,7 +545,9 @@ class TestSkills(AbstractPostgresTest):
 
         user = types.SimpleNamespace(id="1", name="Taro")
         form_data = {"messages": [{"role": "user", "content": "/vaultcmd 教えて"}]}
-        _, activations = apply_skill_command(form_data, user, _model_with_skills(skill.id))
+        _, activations = apply_skill_command(
+            form_data, user, _model_with_skills(skill.id)
+        )
         assert activations[0]["tool_ids"] == ["secret-password"]
 
     def test_load_skill_calls_load_tools_hook(self):
