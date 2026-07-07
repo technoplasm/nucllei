@@ -93,6 +93,17 @@ pipe は「存在すればモデルとして出る」(active ゲート撤去)。
 - 回帰: `test_filter.py` の get_sorted_filter_ids と `test_openai_compat_chat.py` の inlet/stream/outlet
   e2e を per-model filterIds 経路に書き換え。backend 全 206 passed。
 
+## #43: description を列へ昇格 / エンティティ命名一貫化(2026-07-07)
+
+§1 の「真実源 = name/id/**meta.description**」は #43 Phase 1(9c3fcfa0c)で改訂:
+- **Tool/Function の description を top-level `description` 列に昇格**(旧 meta.description)。
+  ToolMeta は `builtin` 判別のみ、FunctionMeta は空になり撤去(function.meta 列も drop)。
+  真実源は `id` / `name` / `description`(列)。migration `b2d4e8f1a9c3`。
+- 全 workspace エンティティを **`{id, name, description}`** に統一(#43)。Skill は Phase 2a
+  (b0a8284f2)で `command`→`id` / `title`→`name`(詳細 `_memos/skill-design.md`)。Model は
+  name 済・description は meta.description 据え置き(wire 最小化)。
+- 残(Phase 2b): 可読 id の編集(編集画面で id 変更 → 削除→再作成)を 4 エンティティ横断で追加。
+
 ## 回帰の当たり所
 - 既存 tool(frontmatter 付きコードを貼った場合)を保存 → `manifest` が生えない / description 必須が効く。
 - builtin 行に編集導線が出ない。skill の `/command` 発火・tool ロードが退行しない(#42 の E2E)。

@@ -80,6 +80,10 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 6. **skill fixture(#35 検証用)**: skill `kansai`(関西弁指示)/ skill `vault`
    (tool_ids=["secret_password"])/ tool `secret_password`(私有)を作り、preset の
    `meta.skillIds` に紐づける。手順と実機チェックは `dev/e2e/README.md`。
+   - **#43(2026-07-07)以降**: skill の可読キーは `id` 一本(旧 command は撤去)。作成時に
+     `id=kansai` / `id=vault` を直接指定する(`/kansai` 発火 = id 一致)。表示名は `name`(旧 title)。
+     #43 の migration(`c5e7a1b9d2f6`)を跨いだ既存 DB では旧 skill が id=uuid のまま残り発火しないので
+     **kansai/vault は作り直す**(content は旧 uuid 行に残っているので流用可)。
    **注意**: preset の meta を API で書き換えたら `GET /api/models` を叩いて
    `app.state.MODELS` キャッシュを再構築しないと manifest に反映されない
    (UI 経由なら自然に起きる)。
