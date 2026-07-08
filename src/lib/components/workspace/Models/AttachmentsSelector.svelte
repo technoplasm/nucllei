@@ -28,11 +28,6 @@
 	</div>
 
 	<div class="flex items-center gap-4 flex-wrap mt-1">
-		<label class="flex items-center gap-1.5 text-sm cursor-pointer">
-			<input type="radio" bind:group={selected} value="" on:change={apply} />
-			<span>None</span>
-		</label>
-
 		{#each attachments as attachment}
 			<label class="flex items-center gap-1.5 text-sm cursor-pointer">
 				<input type="radio" bind:group={selected} value={attachment.id} on:change={apply} />
@@ -41,5 +36,10 @@
 				</Tooltip>
 			</label>
 		{/each}
+
+		<label class="flex items-center gap-1.5 text-sm cursor-pointer">
+			<input type="radio" bind:group={selected} value="" on:change={apply} />
+			<span>None</span>
+		</label>
 	</div>
 </div>
