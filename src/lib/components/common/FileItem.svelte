@@ -48,7 +48,8 @@
 		: 'rounded-2xl'} text-left"
 	type="button"
 	on:click={async () => {
-		if (item?.file?.data?.content) {
+		if (item?.file?.data) {
+			// llens(#52): content が無くても(未抽出/失敗)状態を見せるためモーダルを開く。
 			showModal = !showModal;
 		} else {
 			if (url) {
