@@ -211,7 +211,6 @@
 			<Suggestions
 				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
 					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-					$config?.default_prompt_suggestions ??
 					[]}
 				inputValue={prompt}
 				on:select={(e) => {

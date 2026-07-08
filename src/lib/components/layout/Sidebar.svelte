@@ -677,7 +677,7 @@
 			{/if}
 
 			<Folder
-				collapsible={!search}
+				collapsible={false}
 				className="px-2 mt-0.5"
 				name={$i18n.t('Chats')}
 				onAdd={() => {
