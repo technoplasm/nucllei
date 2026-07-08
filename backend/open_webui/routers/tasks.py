@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 
 from pydantic import BaseModel
 from typing import Optional
@@ -19,10 +19,6 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.constants import TASKS
 
 from open_webui.routers.pipelines import process_pipeline_inlet_filter
-from open_webui.utils.filter import (
-    get_sorted_filter_ids,
-    process_filter_functions,
-)
 from open_webui.utils.task import get_task_model_id
 
 from open_webui.config import (

@@ -1,21 +1,10 @@
-import json
 import logging
-import mimetypes
-import os
-import shutil
 
-import uuid
-from datetime import datetime
-from pathlib import Path
-from typing import Iterator, List, Optional, Sequence, Union
+from typing import List, Optional
 
 from fastapi import (
     Depends,
-    FastAPI,
-    File,
-    Form,
     HTTPException,
-    UploadFile,
     Request,
     status,
     APIRouter,
@@ -51,11 +40,7 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import (
     DEFAULT_LOCALE,
 )
-from open_webui.env import (
-    SRC_LOG_LEVELS,
-    DEVICE_TYPE,
-    DOCKER,
-)
+from open_webui.env import SRC_LOG_LEVELS
 from open_webui.constants import ERROR_MESSAGES
 
 log = logging.getLogger(__name__)
