@@ -9,7 +9,8 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 - **node**: `.node-version` = 24.18.0(マネージャは環境依存 — nodebrew や mise。
   mise なら `mise install` が `.node-version` を拾い、`mise exec node@24.18.0 -- <cmd>` で実行)。
   **v24.4.0 は V8 バグで `pnpm install` が OOM クラッシュする(invalid array length)ので使わない**。
-- **frontend**: pnpm(`pnpm install`)。テストは `npx vitest run`。フォーマットは prettier
+- **frontend**: pnpm(`pnpm install` / `pnpm add`)。**npm は使わない**(peer 依存で ERESOLVE 失敗。
+  例: @fontsource をバンドルするフォント追加は `pnpm add`)。テストは `npx vitest run`。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
@@ -50,12 +51,14 @@ npm run dev   # vite :5173(使用中なら 5174 等へ自動退避)。dev 時は
 
 DB(`backend/data/webui.db`)は clone に含まれないので、新環境では作り直す:
 
-1. **admin 作成**: 新規 DB で最初に `POST /api/v1/auths/signup` した人が admin。
-   慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
+1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。CLI で作成する:
    ```sh
-   curl -s -X POST http://localhost:8080/api/v1/auths/signup -H 'Content-Type: application/json' \
-     -d '{"name":"Ken","email":"ken@llens.local","password":"llens-dev"}'
+   PYTHONPATH=backend .venv/bin/open-webui create-admin \
+     --email ken@llens.local --name Ken --password llens-dev
    ```
+   慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
+   ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
+   フロントの初回 signup 導線は無い(CLI が正)。
 2. **トークン取得**:
    ```sh
    TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auths/signin -H 'Content-Type: application/json' \
