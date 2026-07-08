@@ -5,14 +5,11 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { resetVectorDB, getRAGConfig, updateRAGConfig } from '$lib/apis/retrieval';
+	import { getRAGConfig, updateRAGConfig } from '$lib/apis/retrieval';
 
-	import { reindexKnowledgeFiles } from '$lib/apis/knowledge';
 	import { deleteAllFiles } from '$lib/apis/files';
 
 	import ResetUploadDirConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import ResetVectorDBConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import ReindexKnowledgeFilesConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -20,9 +17,7 @@
 
 	const i18n = getContext('i18n');
 
-	let showResetConfirm = false;
 	let showResetUploadDirConfirm = false;
-	let showReindexConfirm = false;
 
 	let RAGConfig = null;
 
@@ -49,34 +44,6 @@
 	bind:show={showResetUploadDirConfirm}
 	on:confirm={async () => {
 		const res = await deleteAllFiles(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t('Success'));
-		}
-	}}
-/>
-
-<ResetVectorDBConfirmDialog
-	bind:show={showResetConfirm}
-	on:confirm={() => {
-		const res = resetVectorDB(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t('Success'));
-		}
-	}}
-/>
-
-<ReindexKnowledgeFilesConfirmDialog
-	bind:show={showReindexConfirm}
-	on:confirm={async () => {
-		const res = await reindexKnowledgeFiles(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -223,37 +190,6 @@
 								}}
 							>
 								{$i18n.t('Reset')}
-							</button>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Reset Vector Storage/Knowledge')}
-						</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								on:click={() => {
-									showResetConfirm = true;
-								}}
-							>
-								{$i18n.t('Reset')}
-							</button>
-						</div>
-					</div>
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Reindex Knowledge Base Vectors')}
-						</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								on:click={() => {
-									showReindexConfirm = true;
-								}}
-							>
-								{$i18n.t('Reindex')}
 							</button>
 						</div>
 					</div>
