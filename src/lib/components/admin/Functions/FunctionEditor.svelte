@@ -122,11 +122,15 @@ class Attachment:
     def __init__(self):
         self.valves = self.Valves()
 
-    def process(self, file, __request__, __user__: Optional[dict] = None):
+    def process(self, file, __request__, __user__: Optional[dict] = None) -> str:
         # Fired on upload when this Attachment is assigned to the model.
-        # Route by file.meta["content_type"] and turn the file into text,
-        # storing it in file.data.content (delegate to internal extractors).
-        return file
+        # Route by file.meta["content_type"], extract text (markdown) and
+        # RETURN it. The system stores it as the file content (status=success).
+        # To fail, raise with a message — the system records it as the content
+        # and marks the file extraction=failed (shown to the model as-is).
+        from open_webui.retrieval.extract import extract_file_text
+
+        return extract_file_text(__request__, file)
 `;
 
 	// 作成時に選択中の type(雛形の切り替えに使う)。編集時は既存 content をそのまま出す。

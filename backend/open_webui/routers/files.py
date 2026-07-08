@@ -80,7 +80,7 @@ def has_access_to_file(
 
 
 @router.post("/", response_model=FileModelResponse)
-def upload_file(
+async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
@@ -127,7 +127,9 @@ def upload_file(
                         assigned_ids = (model.meta.model_dump() or {}).get(
                             "attachmentIds"
                         )
-                process_attachment_functions(request, file_item, user, assigned_ids)
+                await process_attachment_functions(
+                    request, file_item, user, assigned_ids
+                )
                 file_item = Files.get_file_by_id(id=id)
             except Exception as e:
                 log.exception(e)

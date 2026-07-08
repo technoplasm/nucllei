@@ -101,12 +101,15 @@ def get_sources_from_files(request, files):
                     file_object = Files.get_file_by_id(file_id)
 
                     if file_object:
-                        documents.append(file_object.data.get("content", ""))
+                        data = file_object.data or {}
+                        documents.append(data.get("content", ""))
                         metadatas.append(
                             {
                                 "file_id": file_id,
                                 "name": file_object.filename,
                                 "source": file_object.filename,
+                                # llens(#52): 抽出状態(attachment が制御)を注入側へ渡す
+                                "extraction_status": data.get("status"),
                             }
                         )
 
@@ -118,14 +121,17 @@ def get_sources_from_files(request, files):
             elif file.get("id"):
                 file_object = Files.get_file_by_id(file.get("id"))
                 if file_object:
+                    data = file_object.data or {}
                     context = {
-                        "documents": [[file_object.data.get("content", "")]],
+                        "documents": [[data.get("content", "")]],
                         "metadatas": [
                             [
                                 {
                                     "file_id": file.get("id"),
                                     "name": file_object.filename,
                                     "source": file_object.filename,
+                                    # llens(#52): 抽出状態を注入側へ渡す(成功/失敗/未抽出)
+                                    "extraction_status": data.get("status"),
                                 }
                             ]
                         ],

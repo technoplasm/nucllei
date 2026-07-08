@@ -1074,7 +1074,21 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     file_id = doc_meta.get("file_id")
                     if file_id not in citated_file_idx:
                         citated_file_idx[file_id] = len(citated_file_idx) + 1
-                    context_string += f'<source id="{citated_file_idx[file_id]}">{doc_context}</source>\n'
+                    # llens(#52): file_id と抽出状態(成功/失敗/未抽出)をタグに載せ、モデルが
+                    # 状態を理解し file_id を tool で扱えるようにする。
+                    status = doc_meta.get("extraction_status")
+                    attrs = f'id="{citated_file_idx[file_id]}"'
+                    if file_id:
+                        attrs += f' file_id="{file_id}"'
+                    if status == "failed":
+                        attrs += ' extraction="failed"'
+                        body = doc_context or ""
+                    elif not (doc_context or "").strip() and status != "success":
+                        attrs += ' extraction="none"'
+                        body = "(このファイルはテキスト抽出されていません。file_id を使って tool で読めます)"
+                    else:
+                        body = doc_context
+                    context_string += f"<source {attrs}>{body}</source>\n"
 
         context_string = context_string.strip()
         prompt = get_last_user_message(form_data["messages"])
