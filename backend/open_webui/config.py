@@ -1749,24 +1749,38 @@ MISTRAL_OCR_API_KEY = RuntimeConfig(
 # embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(air-gapped)。
 # vector connector と EMBEDDING_FUNCTION は memories(#8 放置)のため温存。
 
-RAG_FILE_MAX_COUNT = RuntimeConfig(
-    "RAG_FILE_MAX_COUNT",
-    "rag.file.max_count",
+# llens(#52): 添付ファイルの受け入れゲート(upload の入口=Attachment 前で server-side 強制)。
+ATTACHMENT_MAX_COUNT = RuntimeConfig(
+    "ATTACHMENT_MAX_COUNT",
+    "attachment.max_count",
     (
-        int(os.environ.get("RAG_FILE_MAX_COUNT"))
-        if os.environ.get("RAG_FILE_MAX_COUNT")
+        int(os.environ.get("ATTACHMENT_MAX_COUNT"))
+        if os.environ.get("ATTACHMENT_MAX_COUNT")
         else None
     ),
 )
 
-RAG_FILE_MAX_SIZE = RuntimeConfig(
-    "RAG_FILE_MAX_SIZE",
-    "rag.file.max_size",
+# 受け入れ上限(MB)。既定 25MB。sandbox の SANDBOX_FILE_LIMIT_BYTES(既定 25MB)とは別 config
+# だが、原本をサンドボックスへ渡す運用では同値に揃えるのが筋。
+ATTACHMENT_MAX_SIZE = RuntimeConfig(
+    "ATTACHMENT_MAX_SIZE",
+    "attachment.max_size",
     (
-        int(os.environ.get("RAG_FILE_MAX_SIZE"))
-        if os.environ.get("RAG_FILE_MAX_SIZE")
-        else None
+        int(os.environ.get("ATTACHMENT_MAX_SIZE"))
+        if os.environ.get("ATTACHMENT_MAX_SIZE")
+        else 25
     ),
+)
+
+# 受け入れ拡張子の whitelist(小文字・ドット無し、カンマ区切り env)。空 = 全許可(非破壊の既定)。
+ATTACHMENT_ALLOWED_EXTENSIONS = RuntimeConfig(
+    "ATTACHMENT_ALLOWED_EXTENSIONS",
+    "attachment.allowed_extensions",
+    [
+        ext.strip().lower().lstrip(".")
+        for ext in os.environ.get("ATTACHMENT_ALLOWED_EXTENSIONS", "").split(",")
+        if ext.strip()
+    ],
 )
 
 RAG_EMBEDDING_ENGINE = RuntimeConfig(

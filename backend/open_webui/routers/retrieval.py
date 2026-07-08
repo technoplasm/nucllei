@@ -364,9 +364,10 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
         "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
         "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
-        # File upload settings
-        "FILE_MAX_SIZE": request.app.state.config.FILE_MAX_SIZE,
-        "FILE_MAX_COUNT": request.app.state.config.FILE_MAX_COUNT,
+        # 添付ファイルの受け入れゲート(#52)
+        "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
+        "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
+        "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
         # Integration settings
         "ENABLE_GOOGLE_DRIVE_INTEGRATION": request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
         "ENABLE_ONEDRIVE_INTEGRATION": request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
@@ -477,9 +478,10 @@ class ConfigForm(BaseModel):
     CHUNK_SIZE: Optional[int] = None
     CHUNK_OVERLAP: Optional[int] = None
 
-    # File upload settings
-    FILE_MAX_SIZE: Optional[int] = None
-    FILE_MAX_COUNT: Optional[int] = None
+    # 添付ファイルの受け入れゲート(#52)
+    ATTACHMENT_MAX_SIZE: Optional[int] = None
+    ATTACHMENT_MAX_COUNT: Optional[int] = None
+    ATTACHMENT_ALLOWED_EXTENSIONS: Optional[list] = None
 
     # Integration settings
     ENABLE_GOOGLE_DRIVE_INTEGRATION: Optional[bool] = None
@@ -554,16 +556,21 @@ async def update_rag_config(
         else request.app.state.config.CHUNK_OVERLAP
     )
 
-    # File upload settings
-    request.app.state.config.FILE_MAX_SIZE = (
-        form_data.FILE_MAX_SIZE
-        if form_data.FILE_MAX_SIZE is not None
-        else request.app.state.config.FILE_MAX_SIZE
+    # 添付ファイルの受け入れゲート(#52)
+    request.app.state.config.ATTACHMENT_MAX_SIZE = (
+        form_data.ATTACHMENT_MAX_SIZE
+        if form_data.ATTACHMENT_MAX_SIZE is not None
+        else request.app.state.config.ATTACHMENT_MAX_SIZE
     )
-    request.app.state.config.FILE_MAX_COUNT = (
-        form_data.FILE_MAX_COUNT
-        if form_data.FILE_MAX_COUNT is not None
-        else request.app.state.config.FILE_MAX_COUNT
+    request.app.state.config.ATTACHMENT_MAX_COUNT = (
+        form_data.ATTACHMENT_MAX_COUNT
+        if form_data.ATTACHMENT_MAX_COUNT is not None
+        else request.app.state.config.ATTACHMENT_MAX_COUNT
+    )
+    request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = (
+        form_data.ATTACHMENT_ALLOWED_EXTENSIONS
+        if form_data.ATTACHMENT_ALLOWED_EXTENSIONS is not None
+        else request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS
     )
 
     # Integration settings
@@ -673,9 +680,10 @@ async def update_rag_config(
         "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
         "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
         "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
-        # File upload settings
-        "FILE_MAX_SIZE": request.app.state.config.FILE_MAX_SIZE,
-        "FILE_MAX_COUNT": request.app.state.config.FILE_MAX_COUNT,
+        # 添付ファイルの受け入れゲート(#52)
+        "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
+        "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
+        "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
         # Integration settings
         "ENABLE_GOOGLE_DRIVE_INTEGRATION": request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
         "ENABLE_ONEDRIVE_INTEGRATION": request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION,

@@ -97,6 +97,23 @@ async def upload_file(
         id = str(uuid.uuid4())
         name = filename
         filename = f"{id}_{filename}"
+
+        # llens(#52): 受け入れゲート(Attachment 前=保存前に server-side 強制)。
+        # 拡張子 whitelist(空=全許可)と上限サイズ(MB)を突き合わせて拒否する。
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        allowed_exts = request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS
+        if allowed_exts and ext not in allowed_exts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"許可されていないファイル形式です(.{ext or '拡張子なし'})。",
+            )
+        max_size = request.app.state.config.ATTACHMENT_MAX_SIZE  # MB
+        if max_size and file.size and file.size > max_size * 1024 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"ファイルサイズが上限({max_size}MB)を超えています。",
+            )
+
         contents, file_path = Storage.upload_file(file.file, filename)
 
         file_item = Files.insert_new_file(
@@ -149,6 +166,9 @@ async def upload_file(
                 detail=ERROR_MESSAGES.DEFAULT("Error uploading file"),
             )
 
+    except HTTPException:
+        # 受け入れゲート等の明示的な HTTPException は detail を保って伝播させる。
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(

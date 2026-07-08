@@ -51,6 +51,9 @@
 
 	let RAGConfig = null;
 
+	// llens(#52): 受け入れ拡張子 whitelist。UI はカンマ区切り文字列、config は配列。
+	let allowedExtensions = '';
+
 	const embeddingModelUpdateHandler = async () => {
 		if (embeddingEngine === '' && embeddingModel.split('/').length - 1 > 1) {
 			toast.error(
@@ -170,6 +173,11 @@
 			return;
 		}
 
+		RAGConfig.ATTACHMENT_ALLOWED_EXTENSIONS = allowedExtensions
+			.split(',')
+			.map((s) => s.trim().toLowerCase().replace(/^\.+/, ''))
+			.filter(Boolean);
+
 		const res = await updateRAGConfig(localStorage.token, RAGConfig);
 		dispatch('save');
 	};
@@ -203,6 +211,7 @@
 		await setRerankingConfig();
 
 		RAGConfig = await getRAGConfig(localStorage.token);
+		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');
 	});
 </script>
 
@@ -599,7 +608,7 @@
 									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
-									bind:value={RAGConfig.FILE_MAX_SIZE}
+									bind:value={RAGConfig.ATTACHMENT_MAX_SIZE}
 									autocomplete="off"
 									min="0"
 								/>
@@ -620,9 +629,29 @@
 									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
-									bind:value={RAGConfig.FILE_MAX_COUNT}
+									bind:value={RAGConfig.ATTACHMENT_MAX_COUNT}
 									autocomplete="off"
 									min="0"
+								/>
+							</Tooltip>
+						</div>
+					</div>
+
+					<div class="  mb-2.5 flex w-full justify-between">
+						<div class=" self-center text-xs font-medium">{$i18n.t('Allowed File Extensions')}</div>
+						<div class="flex items-center relative">
+							<Tooltip
+								content={$i18n.t(
+									'Comma-separated list of allowed extensions (e.g. pdf, docx, xlsx). Leave empty to allow all.'
+								)}
+								placement="top-start"
+							>
+								<input
+									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
+									type="text"
+									placeholder={$i18n.t('Leave empty to allow all')}
+									bind:value={allowedExtensions}
+									autocomplete="off"
 								/>
 							</Tooltip>
 						</div>

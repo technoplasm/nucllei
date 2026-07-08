@@ -182,8 +182,9 @@ from open_webui.config import (
     RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
     RAG_EMBEDDING_ENGINE,
     RAG_EMBEDDING_BATCH_SIZE,
-    RAG_FILE_MAX_COUNT,
-    RAG_FILE_MAX_SIZE,
+    ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_MAX_SIZE,
+    ATTACHMENT_ALLOWED_EXTENSIONS,
     RAG_OPENAI_API_BASE_URL,
     RAG_OPENAI_API_KEY,
     RAG_OLLAMA_BASE_URL,
@@ -595,8 +596,9 @@ app.state.FUNCTIONS = {}
 ########################################
 
 
-app.state.config.FILE_MAX_SIZE = RAG_FILE_MAX_SIZE
-app.state.config.FILE_MAX_COUNT = RAG_FILE_MAX_COUNT
+app.state.config.ATTACHMENT_MAX_SIZE = ATTACHMENT_MAX_SIZE
+app.state.config.ATTACHMENT_MAX_COUNT = ATTACHMENT_MAX_COUNT
+app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
 
 
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
@@ -1304,8 +1306,10 @@ async def get_app_config(request: Request):
                     },
                 },
                 "file": {
-                    "max_size": app.state.config.FILE_MAX_SIZE,
-                    "max_count": app.state.config.FILE_MAX_COUNT,
+                    # wire は互換のため `file` キー維持(フロント enforcement)。値は attachment 設定。
+                    "max_size": app.state.config.ATTACHMENT_MAX_SIZE,
+                    "max_count": app.state.config.ATTACHMENT_MAX_COUNT,
+                    "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
                 },
                 "permissions": {**app.state.config.USER_PERMISSIONS},
                 "google_drive": {
