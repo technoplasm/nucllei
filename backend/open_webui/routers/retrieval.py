@@ -621,5 +621,3 @@ async def process_web_search(
 # Vector DB operations
 #
 ####################################
-
-

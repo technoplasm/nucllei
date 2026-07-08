@@ -1346,7 +1346,6 @@ ENABLE_TITLE_GENERATION = RuntimeConfig(
 )
 
 
-
 ENABLE_AUTOCOMPLETE_GENERATION = RuntimeConfig(
     "ENABLE_AUTOCOMPLETE_GENERATION",
     "task.autocomplete.enable",
@@ -1557,7 +1556,6 @@ DEFAULT_CODE_INTERPRETER_PROMPT = """
 Ensure that the tools are effectively utilized to achieve the highest-quality analysis for the user."""
 
 
-
 ####################################
 # Information Retrieval (RAG)
 ####################################
@@ -1647,8 +1645,6 @@ TIKTOKEN_ENCODING_NAME = RuntimeConfig(
     "rag.tiktoken_encoding_name",
     os.environ.get("TIKTOKEN_ENCODING_NAME", "cl100k_base"),
 )
-
-
 
 
 # llens(#52): web 検索 loader の SSRF ガード。既定 False で localhost/内部 IP への

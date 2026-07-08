@@ -69,9 +69,7 @@ async def query_memory(
     memories = Memories.get_memories_by_user_id(user.id)
     return {
         "documents": [[memory.content for memory in memories]],
-        "metadatas": [
-            [{"created_at": memory.created_at} for memory in memories]
-        ],
+        "metadatas": [[{"created_at": memory.created_at} for memory in memories]],
     }
 
 

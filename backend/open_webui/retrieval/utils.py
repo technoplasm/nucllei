@@ -100,5 +100,3 @@ def get_sources_from_files(request, files):
             log.exception(e)
 
     return sources
-
-
