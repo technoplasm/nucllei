@@ -6,13 +6,9 @@
 	const dispatch = createEventDispatcher();
 
 	import {
-		getQuerySettings,
-		updateQuerySettings,
 		resetVectorDB,
 		getEmbeddingConfig,
 		updateEmbeddingConfig,
-		getRerankingConfig,
-		updateRerankingConfig,
 		getRAGConfig,
 		updateRAGConfig
 	} from '$lib/apis/retrieval';
@@ -32,7 +28,6 @@
 	const i18n = getContext('i18n');
 
 	let updateEmbeddingModelLoading = false;
-	let updateRerankingModelLoading = false;
 
 	let showResetConfirm = false;
 	let showResetUploadDirConfirm = false;
@@ -41,7 +36,6 @@
 	let embeddingEngine = '';
 	let embeddingModel = '';
 	let embeddingBatchSize = 1;
-	let rerankingModel = '';
 
 	let OpenAIUrl = '';
 	let OpenAIKey = '';
@@ -118,35 +112,6 @@
 		}
 	};
 
-	const rerankingModelUpdateHandler = async () => {
-		console.log('Update reranking model attempt:', rerankingModel);
-
-		updateRerankingModelLoading = true;
-		const res = await updateRerankingConfig(localStorage.token, {
-			reranking_model: rerankingModel
-		}).catch(async (error) => {
-			toast.error(`${error}`);
-			await setRerankingConfig();
-			return null;
-		});
-		updateRerankingModelLoading = false;
-
-		if (res) {
-			console.log('rerankingModelUpdateHandler:', res);
-			if (res.status === true) {
-				if (rerankingModel === '') {
-					toast.success($i18n.t('Reranking model disabled', res), {
-						duration: 1000 * 10
-					});
-				} else {
-					toast.success($i18n.t('Reranking model set to "{{reranking_model}}"', res), {
-						duration: 1000 * 10
-					});
-				}
-			}
-		}
-	};
-
 	const submitHandler = async () => {
 		if (RAGConfig.CONTENT_EXTRACTION_ENGINE === 'tika' && RAGConfig.TIKA_SERVER_URL === '') {
 			toast.error($i18n.t('Tika Server URL required.'));
@@ -198,17 +163,8 @@
 		}
 	};
 
-	const setRerankingConfig = async () => {
-		const rerankingConfig = await getRerankingConfig(localStorage.token);
-
-		if (rerankingConfig) {
-			rerankingModel = rerankingConfig.reranking_model;
-		}
-	};
-
 	onMount(async () => {
 		await setEmbeddingConfig();
-		await setRerankingConfig();
 
 		RAGConfig = await getRAGConfig(localStorage.token);
 		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');

@@ -84,12 +84,6 @@ def get_sources_from_files(request, files):
                 "documents": [[doc.get("content") for doc in file.get("docs")]],
                 "metadatas": [[doc.get("metadata") for doc in file.get("docs")]],
             }
-        elif file.get("context") == "full":
-            # Manual Full Mode Toggle
-            context = {
-                "documents": [[file.get("file").get("data", {}).get("content")]],
-                "metadatas": [[{"file_id": file.get("id"), "name": file.get("name")}]],
-            }
         elif file.get("type") != "web_search":
             # 全文注入(唯一経路): 添付ファイルの data.content をそのまま積む
             if file.get("type") == "collection":
