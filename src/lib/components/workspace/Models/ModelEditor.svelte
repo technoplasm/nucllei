@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { onMount, getContext, tick } from 'svelte';
-	import { tools, functions, knowledge as knowledgeCollections, skills, user } from '$lib/stores';
+	import { tools, functions, skills, user } from '$lib/stores';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
 	import ToolsSelector from '$lib/components/workspace/Models/ToolsSelector.svelte';
 	import SkillsSelector from '$lib/components/workspace/Models/SkillsSelector.svelte';
 	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
@@ -18,7 +17,6 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import AccessControl from '../common/AccessControl.svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -87,7 +85,6 @@
 		citations: true
 	};
 
-	let knowledge = [];
 	let toolIds = [];
 	let skillIds = [];
 	let filterIds = [];
@@ -113,7 +110,6 @@
 			info,
 			params,
 			capabilities,
-			knowledge,
 			toolIds,
 			skillIds,
 			filterIds,
@@ -130,7 +126,6 @@
 			info = s.info;
 			params = s.params;
 			capabilities = s.capabilities;
-			knowledge = s.knowledge;
 			toolIds = s.toolIds;
 			skillIds = s.skillIds;
 			filterIds = s.filterIds;
@@ -174,14 +169,6 @@
 
 		info.meta.description =
 			(info.meta.description ?? '').trim() === '' ? null : info.meta.description;
-
-		if (knowledge.length > 0) {
-			info.meta.knowledge = knowledge;
-		} else {
-			if (info.meta.knowledge) {
-				delete info.meta.knowledge;
-			}
-		}
 
 		if (toolIds.length > 0) {
 			info.meta.toolIds = toolIds;
@@ -266,7 +253,6 @@
 		await tools.set(await getTools(localStorage.token));
 		await skills.set(await getSkills(localStorage.token));
 		await functions.set(await getFunctions(localStorage.token));
-		await knowledgeCollections.set(await getKnowledgeBases(localStorage.token));
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');
@@ -308,24 +294,6 @@
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			attachmentIds = model?.meta?.attachmentIds ?? [];
-			knowledge = (model?.meta?.knowledge ?? []).map((item) => {
-				if (item?.collection_name) {
-					return {
-						id: item.collection_name,
-						name: item.name,
-						legacy: true
-					};
-				} else if (item?.collection_names) {
-					return {
-						name: item.name,
-						type: 'collection',
-						collection_names: item.collection_names,
-						legacy: true
-					};
-				} else {
-					return item;
-				}
-			});
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 
 			if ('access_control' in model) {
@@ -690,10 +658,6 @@
 							bind:selectedAttachmentIds={attachmentIds}
 							attachments={$functions.filter((func) => func.type === 'attachment')}
 						/>
-					</div>
-
-					<div class="my-2">
-						<Knowledge bind:selectedKnowledge={knowledge} collections={$knowledgeCollections} />
 					</div>
 
 					<div class="my-2">
