@@ -9,6 +9,7 @@
 	import SkillsSelector from '$lib/components/workspace/Models/SkillsSelector.svelte';
 	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
 	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
+	import AttachmentsSelector from '$lib/components/workspace/Models/AttachmentsSelector.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -91,6 +92,7 @@
 	let skillIds = [];
 	let filterIds = [];
 	let actionIds = [];
+	let attachmentIds = [];
 
 	// llens(#42): 機能「スキル」(meta.features.skills、既定 ON)。OFF でこのモデルの
 	// manifest(load_skill)と /command 発火が両方止まる。
@@ -116,6 +118,7 @@
 			skillIds,
 			filterIds,
 			actionIds,
+			attachmentIds,
 			featureSkills,
 			accessControl
 		});
@@ -132,6 +135,7 @@
 			skillIds = s.skillIds;
 			filterIds = s.filterIds;
 			actionIds = s.actionIds;
+			attachmentIds = s.attachmentIds;
 			featureSkills = s.featureSkills;
 			accessControl = s.accessControl;
 		}
@@ -221,6 +225,14 @@
 			}
 		}
 
+		if (attachmentIds.length > 0) {
+			info.meta.attachmentIds = attachmentIds;
+		} else {
+			if (info.meta.attachmentIds) {
+				delete info.meta.attachmentIds;
+			}
+		}
+
 		info.params.stop = params.stop ? params.stop.split(',').filter((s) => s.trim()) : null;
 		Object.keys(info.params).forEach((key) => {
 			if (info.params[key] === '' || info.params[key] === null) {
@@ -295,6 +307,7 @@
 			featureSkills = (model?.meta?.features?.skills ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
+			attachmentIds = model?.meta?.attachmentIds ?? [];
 			knowledge = (model?.meta?.knowledge ?? []).map((item) => {
 				if (item?.collection_name) {
 					return {
@@ -669,6 +682,13 @@
 						<ActionsSelector
 							bind:selectedActionIds={actionIds}
 							actions={$functions.filter((func) => func.type === 'action')}
+						/>
+					</div>
+
+					<div class="my-2">
+						<AttachmentsSelector
+							bind:selectedAttachmentIds={attachmentIds}
+							attachments={$functions.filter((func) => func.type === 'attachment')}
 						/>
 					</div>
 

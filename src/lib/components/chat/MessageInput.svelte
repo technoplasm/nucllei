@@ -200,7 +200,13 @@
 
 		try {
 			// During the file upload, file content is automatically extracted.
-			const uploadedFile = await uploadFile(localStorage.token, file);
+			// llens(#52): 現在のモデル(複数選択時は先頭)を渡し、そのモデルに割り当てられた
+			// Attachment だけを発火させる(完全 opt-in)。
+			const uploadedFile = await uploadFile(
+				localStorage.token,
+				file,
+				selectedModelIds?.[0] ?? null
+			);
 
 			if (uploadedFile) {
 				console.log('File upload completed:', {

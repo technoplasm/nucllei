@@ -1,11 +1,14 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const uploadFile = async (token: string, file: File) => {
+export const uploadFile = async (token: string, file: File, modelId: string | null = null) => {
 	const data = new FormData();
 	data.append('file', file);
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	// llens(#52): 現在のモデルを渡し、そのモデルに割り当てられた Attachment だけを発火させる。
+	const query = modelId ? `?model_id=${encodeURIComponent(modelId)}` : '';
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${query}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
