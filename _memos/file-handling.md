@@ -134,7 +134,9 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
    Function をそのまま使う。**fork 本体には移植しない**(重複回避)。④ sandbox tool も同様に prism 層。
 6. **フロント**: 処理中/failed プレビュー、送信時の未抽出ハンドリング。
 
-## 実装状況(ブランチ `feat/52-file-handling`、2026-07-08)
+## 実装状況(master 統合済み、2026-07-08)
+
+> feat/52-file-handling は master に FF マージ・push 済み(branch は削除)。以下は主要フェーズの記録。
 
 **済(RAG teardown・バックエンド)**:
 - **段1** chat flow の RAG 分岐撤去(543ed2ed3): `get_sources_from_files` を `(request, files)` に縮約し §④(ベクタ検索/hybrid/rerank/full_context)を削除、web_search 以外は data.content を全文注入する唯一経路に。middleware から retrieval 用 `generate_queries`(クエリ生成)撤去(web_search 用途は温存)。
@@ -174,18 +176,35 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   content を生成するルータなので複数は上書き衝突。入力欄での per-chat トグルは持たない。builtin が無いので
   候補は prism authored のみ(fork 単体では None だけ)。
 
-**プランB 本体 残り**:
-- **フェーズ3 残り(fork 側)**: 非同期実行+処理中プレビュー(file に extracting→done)/
-  STT・TTS 内部関数(後回し可)。gate・PDF→VLM・sandbox tool(`import_chat_file`)は **prism 層**の仕事。
+**済(フェーズ3 = 非同期 + 抽出状態 + プレビュー)**:
+- **非同期化 + 契約確定**(6ce87c02b): Attachment 契約 = `process(file, ...) -> str`(成功=抽出テキスト
+  md を返す / 失敗=raise、core が `content=str(e)` `status=failed` を差し込む)。content/status の永続化は
+  core が行い attachment は DB を触らない純関数。upload_file/dispatch を async に(docling 等の同期ハンドラは
+  run_in_threadpool にオフロード、event loop を塞がない)。
+- **抽出状態3種をモデルへ注入**: `file.data.status`(success/failed/未設定=未抽出)を get_sources_from_files
+  → middleware の `<source>` タグに file_id + `extraction="failed"/"none"` として載せる(未抽出は file_id 告知)。
+- **フロント**: FileItemModal を刷新(add9b32a0)— 選択的検索トグル撤去、コンテンツ=md コード/プレビュー=
+  md レンダリング、ヘッダ文言、状態3種表示。Function 作成 UI の type 選択に Attachment 追加(da5877b67)。
 
-**未着手(要ユーザー判断・絡みが深い / teardown 残り)**:
-- **config キー撤去**(`RAG_TOP_K`/`RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL`/embedding/reranking/chunk/vector)→ **フロント `Documents.svelte` が `/retrieval/config` で docling・FILE_MAX と RAG 設定を同一 endpoint で読む**ため、config endpoint の分割(docling/upload 設定を RAG から分離)が要る。フロント刷新を伴う。
-- **KB(ナレッジベース)撤去** → `models/knowledge.py::Knowledges` が `access_control.has_read_access_to_collection`(#40 CORE セキュリティ)と `test_file_access_idor.py` に結線。router 撤去は可だがモデルは温存 or access_control 改修が要る。
-- **vector connector / embedding(ef/rf)撤去** → **`routers/memories.py`(#8 放置方針)が `VECTOR_DB_CLIENT` + `EMBEDDING_FUNCTION` を共有**。connector 本体撤去は memories の去就決定が前提。
-- **プランB 本体(fork 側の残り)**: フェーズ2(per-model トグル・フロント)/ 非同期+処理中プレビュー /
-  STT・TTS 内部関数(後回し可)。③gate・PDF→VLM・④sandbox tool は **prism 層**(fork 本体では作らない)。
+**済(RAG config teardown + 受け入れゲート)**:
+- **RAG 固有 config 撤去**(e802e3c5a + Documents 779075938): `RAG_TOP_K`/`TOP_K_RERANKER`/
+  `RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL` を
+  config・main 配線・/retrieval/config・middleware・Documents UI から一掃。BYPASS の起動時 embedding/reranking
+  ロードスキップは無条件化(air-gapped)。**温存**: RAG_TEMPLATE / embedding・vector・EMBEDDING_FUNCTION
+  (memories #8)/ CHUNK・docling・tika / PDF_EXTRACT_IMAGES。強制全文(context=="full")分岐も撤去。
+- **① 受け入れゲート**(c0654415d): upload 入口(Attachment 前)で server-side に拡張子 whitelist +
+  サイズ上限を強制。config を **`ATTACHMENT_MAX_SIZE`(既定 25MB)/ `ATTACHMENT_MAX_COUNT` /
+  `ATTACHMENT_ALLOWED_EXTENSIONS`(空=全許可)** に統一(旧 RAG_FILE_MAX_* を廃止、`attachment.*` 永続キー)。
+  SANDBOX_FILE_LIMIT_BYTES とは別 config だが 25MB で揃える運用。
+- **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。
 
-**次の安全な一手の候補**: (a) KB router 撤去(モデル温存・access_control 改修込み)/ (b) config endpoint 分割 → RAG config キー撤去(フロント Documents 刷新込み)。どちらもフロント or CORE セキュリティに触れるため単独判断は避け、着手前に方針確認。
+**残り**:
+- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)/ FileItemModal の実機ビジュアル確認(ブラウザ自動化の
+  ファイル添付制約で保留)/ backend `/retrieval/reranking` endpoint + `RAG_RERANKING_MODEL` は無害 dead で据え置き。
+- **prism 層(fork の仕事でない)**: ③gate(`large_file_gate`)/ PDF→VLM(`pdf_vision_router`)/
+  ④sandbox tool(`import_chat_file`)。
+- **KB 撤去**: 根が深く #52 への関与薄いので**据え置き**(access_control #40 / IDOR test 結線)。
+- **§未確定**: ③ で画像・音声を予算に数えるか(prism gate)。① 上限は 25MB で確定・全文強制トグルは撤去確定。
 
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
