@@ -115,6 +115,10 @@
 					<div class="text-green-500 dark:text-green-400 shrink-0">
 						<CheckCircle className="size-4" strokeWidth="2" />
 					</div>
+				{:else if attributes?.type === 'reasoning' && attributes?.done === 'true'}
+					<div class="text-blue-500 dark:text-blue-400 shrink-0">
+						<CheckCircle className="size-4" strokeWidth="2" />
+					</div>
 				{/if}
 
 				<div class="">
@@ -232,7 +236,12 @@
 						     (#20 ステップ5)。object 以外の壊れ方のみ一枚岩フォールバック。 -->
 						{@const argDisplays = parseToolArgumentsStreaming(args, attributes?.render?.args)}
 						{#if argDisplays === null || argDisplays.length > 0}
-							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5">Arguments</div>
+							<div class="mt-1.5 mb-1">
+								<span
+									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+									>Arguments</span
+								>
+							</div>
 						{/if}
 						{#if argDisplays === null}
 							<HljsCode lang="json" code={formatJSONString(args)} />
@@ -256,13 +265,22 @@
 						{/if}
 						{#if attributes?.done === 'true'}
 							{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
-							<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">Result</div>
+							<div class="mt-1.5 mb-1">
+								<span
+									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+									>Result</span
+								>
+							</div>
 							{#if resultDisplay.kind === 'skill'}
 								<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
 								<HljsCode lang="markdown" code={resultDisplay.value} />
 								{#if resultDisplay.tools.length > 0}
-									<div class="text-gray-500 dark:text-gray-400 text-xs mt-1.5 mb-0.5">
-										{$i18n.t('Tools loaded')}
+									<div class="mt-1.5 mb-1">
+										<span
+											class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+										>
+											{$i18n.t('Tools loaded')}
+										</span>
 									</div>
 									<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
 										{#each resultDisplay.tools as toolName}

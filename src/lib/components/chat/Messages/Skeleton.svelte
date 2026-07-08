@@ -1,45 +1,20 @@
 <script lang="ts">
-	export let size = 'md';
+	import { getContext } from 'svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+
+	const i18n = getContext('i18n');
 </script>
 
-<div class="w-full mt-2 mb-2">
-	<div class="animate-pulse flex w-full">
-		<div class="{size === 'md' ? 'space-y-2' : 'space-y-1.5'} w-full">
-			<div
-				class="{size === 'md' ? 'h-2' : 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm mr-14"
-			/>
-
-			<div class="grid grid-cols-3 gap-4">
-				<div
-					class="{size === 'md'
-						? 'h-2'
-						: 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm col-span-2"
-				/>
-				<div
-					class="{size === 'md'
-						? 'h-2'
-						: 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm col-span-1"
-				/>
-			</div>
-			<div class="grid grid-cols-4 gap-4">
-				<div
-					class="{size === 'md'
-						? 'h-2'
-						: 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm col-span-1"
-				/>
-				<div
-					class="{size === 'md'
-						? 'h-2'
-						: 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm col-span-2"
-				/>
-				<div
-					class="{size === 'md'
-						? 'h-2'
-						: 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm col-span-1 mr-4"
-				/>
-			</div>
-
-			<div class="{size === 'md' ? 'h-2' : 'h-1.5'} bg-gray-200 dark:bg-gray-600 rounded-sm" />
-		</div>
+<!--
+	応答生成中(内容未着)のプレースホルダ。旧スケルトン(animate-pulse のグレーバー)を廃止。
+	reasoning の「[Spinner] Thinking...」ヘッダと *完全に同寸*(text-sm / font-medium / gap-2 /
+	size-4 spinner / shimmer / mb-1.5)にして、Preparing → Thinking の差し替えでガタつかせない。
+	寸法を変える場合は ContentBlocks.svelte の reasoning Collapsible と Collapsible.svelte の
+	ヘッダ(shimmer 行)も併せて揃えること。
+-->
+<div class="w-full space-y-1 mb-1.5 text-sm">
+	<div class="w-fit font-medium flex items-center gap-2 text-gray-500 shimmer">
+		<Spinner className="size-4" />
+		<span>{$i18n.t('Preparing...')}</span>
 	</div>
 </div>
