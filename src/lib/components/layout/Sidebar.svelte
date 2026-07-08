@@ -4,8 +4,10 @@
 
 	import { goto } from '$app/navigation';
 	import {
+		WEBUI_NAME,
 		user,
 		chats,
+		models,
 		settings,
 		showSettings,
 		chatId,
@@ -47,7 +49,6 @@
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import AddFilesPlaceholder from '../AddFilesPlaceholder.svelte';
-	import SearchInput from './Sidebar/SearchInput.svelte';
 	import Folder from '../common/Folder.svelte';
 	import Plus from '../icons/Plus.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -62,6 +63,24 @@
 
 	let navElement;
 	let search = '';
+
+	// サイドバー「モデル」欄: 有効(非 hidden)なモデルのみ。$models と連動して自動反映。
+	$: enabledModels = ($models ?? []).filter(
+		(m) => m?.id && (m?.info?.meta?.hidden ?? false) !== true
+	);
+
+	// モデル行クリック: そのモデルを選択した状態で新規チャットを開く(?models= を initNewChat が解釈)。
+	const modelChatHandler = async (modelId) => {
+		selectedChatId = null;
+		await goto(`/?models=${encodeURIComponent(modelId)}`);
+		const newChatButton = document.getElementById('new-chat-button');
+		setTimeout(() => {
+			newChatButton?.click();
+			if ($mobile) {
+				showSidebar.set(false);
+			}
+		}, 0);
+	};
 
 	let shiftKey = false;
 
@@ -201,32 +220,6 @@
 		await chats.set([...($chats ? $chats : []), ...newChatList]);
 
 		chatListLoading = false;
-	};
-
-	let searchDebounceTimeout;
-
-	const searchDebounceHandler = async () => {
-		console.log('search', search);
-		chats.set(null);
-
-		if (searchDebounceTimeout) {
-			clearTimeout(searchDebounceTimeout);
-		}
-
-		if (search === '') {
-			await initChatList();
-			return;
-		} else {
-			searchDebounceTimeout = setTimeout(async () => {
-				allChatsLoaded = false;
-				currentChatPage.set(1);
-				await chats.set(await getChatListBySearchText(localStorage.token, search));
-
-				if ($chats.length === 0) {
-					tags.set(await getAllTags(localStorage.token));
-				}
-			}, 1000);
-		}
 	};
 
 	const importChatHandler = async (items, pinned = false, folderId = null) => {
@@ -481,12 +474,36 @@
 			? ''
 			: 'invisible'}"
 	>
-		<div class="px-1.5 flex justify-between space-x-1 text-gray-600 dark:text-gray-400">
+		<div class="px-1.5 flex justify-between items-center space-x-1 text-gray-600 dark:text-gray-400">
+			<a
+				class="flex items-center gap-1.5 min-w-0 flex-1 rounded-lg px-1 py-1 hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
+				href="/"
+				draggable="false"
+				on:click={() => {
+					if ($mobile) {
+						showSidebar.set(false);
+					}
+				}}
+			>
+				<img
+					crossorigin="anonymous"
+					src="/static/favicon.png"
+					class="size-6 rounded-full shrink-0"
+					alt="logo"
+				/>
+				<div
+					class="self-center font-medium text-sm text-gray-850 dark:text-white font-primary truncate"
+				>
+					{$WEBUI_NAME}
+				</div>
+			</a>
+
 			<button
-				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition shrink-0"
 				on:click={() => {
 					showSidebar.set(!$showSidebar);
 				}}
+				aria-label="Toggle Sidebar"
 			>
 				<div class=" m-auto self-center">
 					<svg
@@ -505,10 +522,12 @@
 					</svg>
 				</div>
 			</button>
+		</div>
 
+		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200 mt-1">
 			<a
 				id="sidebar-new-chat-button"
-				class="flex justify-between items-center flex-1 rounded-lg px-2 py-1 h-full text-right hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
+				class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
 				href="/"
 				draggable="false"
 				on:click={async () => {
@@ -523,22 +542,11 @@
 					}, 0);
 				}}
 			>
-				<div class="flex items-center">
-					<div class="self-center mx-1.5">
-						<img
-							crossorigin="anonymous"
-							src="/static/favicon.png"
-							class=" size-5 -translate-x-1.5 rounded-full"
-							alt="logo"
-						/>
-					</div>
-					<div class=" self-center font-medium text-sm text-gray-850 dark:text-white font-primary">
-						{$i18n.t('New Chat')}
-					</div>
+				<div class="self-center">
+					<PencilSquare className="size-[1.1rem]" strokeWidth="2" />
 				</div>
-
-				<div>
-					<PencilSquare className=" size-5" strokeWidth="2" />
+				<div class="flex self-center translate-y-[0.5px]">
+					<div class=" self-center font-medium text-sm font-primary">{$i18n.t('New Chat')}</div>
 				</div>
 			</a>
 		</div>
@@ -608,18 +616,33 @@
 			</div>
 		{/if}
 
-		<div class="relative {$temporaryChatEnabled ? 'opacity-20' : ''}">
-			{#if $temporaryChatEnabled}
-				<div class="absolute z-40 w-full h-full flex justify-center"></div>
-			{/if}
-
-			<SearchInput
-				bind:value={search}
-				on:input={searchDebounceHandler}
-				placeholder={$i18n.t('Search')}
-				showClearButton={true}
-			/>
-		</div>
+		{#if enabledModels.length > 0}
+			<div class="px-1.5 mt-2 {$temporaryChatEnabled ? 'opacity-20' : ''}">
+				<div
+					class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-medium pb-1.5"
+				>
+					{$i18n.t('Models')}
+				</div>
+				<div class="flex flex-col">
+					{#each enabledModels as model (model.id)}
+						<button
+							class="flex items-center gap-2 w-full rounded-lg px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition text-gray-800 dark:text-gray-200"
+							on:click={() => modelChatHandler(model.id)}
+						>
+							<img
+								src={model?.info?.meta?.profile_image_url ?? '/static/favicon.png'}
+								class="size-5 rounded-full shrink-0"
+								alt={model.name}
+								draggable="false"
+							/>
+							<div class="self-center font-medium text-sm font-primary truncate">
+								{model.name}
+							</div>
+						</button>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<div
 			class="relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled
