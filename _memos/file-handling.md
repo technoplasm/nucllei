@@ -85,6 +85,11 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 ## プランB(採用)— upload フック + プロバイダ登録
 
+> **Function 新 type 名 = `Attachment`(type トークン `attachment`)確定**。Filter/Action/Pipe が
+> 「どこにフックするか=役割」を1語で表すのに倣い、添付ファイルのライフサイクルにフックする種別を
+> ドメイン語 Attachment で命名。`upload` はタイミング命名で不整合かつチャット途中の添付追加でも走るため
+> 不採用。以下「upload フック」は Attachment Function の口語表記。
+
 **構図**: プロバイダ(実行機構)= core 登録、ルーティング(振り分け)= ユーザー定義 Function。B(ユーザー定義)と C(登録機構)の合体。
 - **プロバイダは種別ごとに別々の内部API(入口を無理に揃えない)**。単一 `extract()` に一本化しない ← 種別で入出力も追加オプションも違うので統一する意味がない。hook 内で処理するので入口が同じである必要がない。
   - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明。設定に付随した共通オプションがあれば渡せる)。既存 `Loader`/`CONTENT_EXTRACTION_ENGINE` を流用。
@@ -92,7 +97,7 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   - **TTS**: `テキスト → 音声`(必要なら。既存 audio TTS)。
   - 「単一 file→text モデル」も **文書抽出種別の一エンジン**として登録(engine=model 接続)。engine URL か model 接続かは各種別の内部で吸収、種別をまたいでは吸収しない。
   - **入口は「設定で登録したエンジン」に対応してあればいい**(STT の入口に音声を渡せば登録済み STT エンジンが反応する、という素直な対応)。
-- **upload フック(Function・新 type)= ルータ**。content_type / 拡張子で種別を判定し、対応する内部APIを**呼び分ける**。filter/action/pipe と同じ Function infra(ロード/実行/valves)を流用。core は一様化も自動実行もしない。
+- **Attachment フック(Function・新 type=`attachment`)= ルータ**。content_type / 拡張子で種別を判定し、対応する内部APIを**呼び分ける**。filter/action/pipe と同じ Function infra(ロード/実行/valves)を流用。core は一様化も自動実行もしない。
 - **③gate は inlet filter のまま**(per-model、prism `large_file_gate` 昇格)。data.content を読むだけ。
 
 **B 固有の設計要素**:
@@ -106,8 +111,8 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 ## #52 core 作業リスト
 
 1. **自動を剥がす**: upload 時 auto `process_file` / middleware auto inject / RAG 分岐(§④・vector・KB・needle・ef/rf)を撤去。
-2. **種別ごとの内部API露出**(入口を揃えない): 文書抽出=`file_id → 文字列`(冪等・キャッシュ=data.content、`Loader` ラップ)/ STT=`音声 → 文字列` / TTS=`テキスト → 音声`。各種別は設定で登録したエンジンに対応。**これらは内部関数として提示され、hook/filter から呼べるだけでなく builtin tool(#18)としてモデルにも露出**(モデルがオンデマンドで文書読取/STT/TTS を呼べる)。
-3. **upload フック(新 Function type)**: upload router に呼び出し口。非同期実行 + フック内タイムアウト制御。失敗は content にメッセージ。
+2. **種別ごとの内部API露出**(入口を揃えない): 文書抽出=`file_id → 文字列`(冪等・キャッシュ=data.content、`Loader` ラップ)/ STT=`音声 → 文字列` / TTS=`テキスト → 音声`。各種別は設定で登録したエンジンに対応。**これらは内部関数で、hook/filter から呼べるほか builtin tool(#18)の実装からも呼べる**。tool として直接モデルに露出するのではなく、**tool のコードが内部関数を叩く**向き(モデルは tool 経由で間接的に文書読取/STT/TTS を使う)。
+3. **Attachment フック(新 Function type=`attachment`)**: upload router に呼び出し口。非同期実行 + フック内タイムアウト制御。失敗は content にメッセージ。
 4. **① 薄い受け入れゲート**だけ core(size / ext、upload は filter 前なので拒否はここだけ)。
 5. **③gate は inlet filter**: prism `large_file_gate`(合算予算・大きい順除去・file_id 告知)を Function 移植。PDF→VLM は `pdf_vision_router` 移植(Kimi VLM 有)。
 6. **フロント**: 処理中/failed プレビュー、送信時の未抽出ハンドリング。
@@ -136,7 +141,7 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - 関連: #18(builtin tool)/ #46(per-model filter)/ #13(Filter ミドルウェア化)/ #40(file IDOR)/ #41(clone・別軸)。
 
 ## 確定(2026-07-08 追記)
-- **プロバイダの実体**: 単一 `extract()` に一本化しない。**種別ごとに素直な内部API を1本ずつ**(文書抽出=file→文字列 / STT=音声→文字列 / TTS=テキスト→音声)。入出力も追加オプションも種別で違うので揃えない。engine URL か model 接続かは各種別の内部で吸収(種別をまたいでは吸収しない)。入口は「設定で登録したエンジン」に対応。**内部関数として提示 → hook/filter から呼べる + builtin tool(#18)でモデルにも露出**。呼び分けは hook がルータとして担う。
+- **プロバイダの実体**: 単一 `extract()` に一本化しない。**種別ごとに素直な内部API を1本ずつ**(文書抽出=file→文字列 / STT=音声→文字列 / TTS=テキスト→音声)。入出力も追加オプションも種別で違うので揃えない。engine URL か model 接続かは各種別の内部で吸収(種別をまたいでは吸収しない)。入口は「設定で登録したエンジン」に対応。**内部関数として提示 → hook/filter から呼べる + builtin tool(#18)の実装からも呼べる**(tool として直接露出ではなく tool のコードが叩く=モデルは tool 経由で使う)。呼び分けは hook がルータとして担う。
 
 ## 未確定
 - **未抽出時の送信挙動**: extracting 中に送信されたら待たせるか、即 raw 扱いで ④ に倒すか。
