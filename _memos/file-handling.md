@@ -85,6 +85,19 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 ## プランB(採用)— upload フック + プロバイダ登録
 
+> **Attachment 未登録時の core 挙動 = (c) builtin Attachment を同梱(確定 2026-07-08)**。
+> core の upload endpoint(`routers/files.py POST /files/`)から content_type 分岐の自動処理
+> (audio→transcribe+process_file / 画像以外→process_file)を剥がし、**docling 抽出する既定の
+> builtin Attachment Function を1本出荷**して常に通す。**拡張子/content_type 判定は core の
+> ハードコードから builtin Attachment の valves に格下げ**(設定可能化)。出荷/登録の仕組みは
+> **builtin tool(#18)の見せ方を参考**にする(自動登録・ユーザー authored と区別)。
+>
+> **builtin 判別 = id 接頭辞 `builtin_` 一本(確定 2026-07-08)**。Function テーブルは #45/#43 で
+> `meta` 列ごと撤去済み → tool の `meta.builtin` フラグは使えない。meta を復元する案も出たが、
+> builtin 判別だけなら id 接頭辞で足り、フラグを meta に持たせるのは冗長(tool 側も然り)なので
+> **復元しない**。`BUILTIN_FUNCTIONS` dict(ロードの真実源)+ id `builtin_*` で判別、フロントの
+> セクション分けも id 接頭辞で行う。
+
 > **Function 新 type 名 = `Attachment`(type トークン `attachment`)確定**。Filter/Action/Pipe が
 > 「どこにフックするか=役割」を1語で表すのに倣い、添付ファイルのライフサイクルにフックする種別を
 > ドメイン語 Attachment で命名。`upload` はタイミング命名で不整合かつチャット途中の添付追加でも走るため
@@ -102,7 +115,8 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
-2. **admin scope(filter と同レベル)**: Function は元来 admin 権限で authored。upload フックも admin-global で filter と同じレベル。upload 時点でモデル未確定なので **per-model 割り当て(#46)はしない**(全 upload で発火)。抽出はモデル非依存なので問題なし。
+2. **on/off は per-model(ワークスペースのモデル設定でトグル)**: 使う/使わないは tool と同じく **ワークスペースのモデル設定**で切り替え(builtin Attachment もそこに現れる)。→ 以前の「upload 時点でモデル未確定なので per-model はしない/全 upload 発火」を**上書き**。
+   - **含意**: 抽出自体はモデル非依存だが、有効/無効の解決に**モデル文脈が要る** → upload endpoint は「今のチャットの選択モデル」を受け取り、そのモデルで有効な Attachment だけ発火させる(フロントが upload 時に model id を渡す)。authoring は元来 admin 権限。
 3. **発火はファイル1個につき1回**: その1回の中で複数プロバイダを使うのは自由(docling + STT、rasterize+VLM+docling など、フックのコードが組み合わせる)。「1プロバイダに限る」制約ではない。
 4. **失敗は content にメッセージを書くだけ**: プロバイダ失敗時は `data.content` にエラーメッセージを入れる。以降は content を一様に扱い、**システムプロンプトで「このファイルは抽出失敗:<msg>」と突き合わせる**。専用 failed 状態や分岐は不要。content は常に「テキスト or 失敗メッセージ」で埋まる。
 

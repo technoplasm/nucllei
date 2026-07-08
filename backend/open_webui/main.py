@@ -46,6 +46,7 @@ from starlette.responses import Response, StreamingResponse
 
 
 from open_webui.builtin_tools import sync_builtin_tools
+from open_webui.builtin_functions import sync_builtin_functions
 from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.logger import start_logger
@@ -448,6 +449,9 @@ async def lifespan(app: FastAPI):
 
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
+
+    # llens(#52): 組み込み Function(既定 Attachment 等)を Function テーブルへ upsert
+    await asyncio.to_thread(sync_builtin_functions)
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     yield

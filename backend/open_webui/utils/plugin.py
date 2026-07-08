@@ -125,6 +125,9 @@ def load_function_module_by_id(function_id, content=None):
             return module.Filter(), "filter", {}
         elif hasattr(module, "Action"):
             return module.Action(), "action", {}
+        elif hasattr(module, "Attachment"):
+            # llens(#52): アップロード時に発火する Attachment 種別。
+            return module.Attachment(), "attachment", {}
         else:
             raise Exception("No Function class found in the module")
     except Exception as e:
