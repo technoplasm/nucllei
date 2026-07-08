@@ -3,6 +3,7 @@ import logging
 
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.models.functions import Functions
+from open_webui.builtin_functions import is_builtin_function_id, load_builtin_function
 from open_webui.env import SRC_LOG_LEVELS
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,12 @@ async def process_filter_functions(
         if filter_id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[filter_id]
         else:
-            function_module, _, _ = load_function_module_by_id(filter_id)
+            # llens(#52): builtin(id 接頭辞 builtin_)は content が repo モジュール由来なので
+            # load_builtin_function で得る。ユーザー authored は従来どおり DB content を exec。
+            if is_builtin_function_id(filter_id):
+                function_module, _, _ = load_builtin_function(filter_id)
+            else:
+                function_module, _, _ = load_function_module_by_id(filter_id)
             request.app.state.FUNCTIONS[filter_id] = function_module
 
         # Prepare handler function

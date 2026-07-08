@@ -12,7 +12,7 @@ Function テーブルは #45/#43 で `meta` 列ごと撤去済み → tool の `
 
 import logging
 
-from open_webui.builtin_functions import attachment
+from open_webui.builtin_functions import attachment, large_file_gate
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,17 @@ BUILTIN_FUNCTIONS = {
             "アップロードされたファイルをテキスト化する既定フック。"
             "content_type で STT / docling 抽出 / 素通しを振り分ける"
             "(判定リストは valves で設定可能)。"
+        ),
+    },
+    "builtin_large_file_gate": {
+        "module": large_file_gate,
+        "class_name": "Filter",
+        "type": "filter",
+        "name": "注入 gate(大容量ファイル)",
+        "description": (
+            "添付の抽出テキストを実測し、合算 context 予算を超える分を大きい順に "
+            "context から除去して file_id を告知する inlet filter。"
+            "モデルへの割り当て(filterIds)で適用。"
         ),
     },
 }
