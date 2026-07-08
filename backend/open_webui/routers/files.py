@@ -29,8 +29,8 @@ from open_webui.models.knowledge import Knowledges
 
 from open_webui.routers.knowledge import get_knowledge, get_knowledge_list
 from open_webui.routers.retrieval import ProcessFileForm, process_file
-from open_webui.routers.audio import transcribe
 from open_webui.storage.provider import Storage
+from open_webui.utils.attachment import process_attachment_functions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 
@@ -115,23 +115,10 @@ def upload_file(
         )
         if process:
             try:
-                if file.content_type in [
-                    "audio/mpeg",
-                    "audio/wav",
-                    "audio/ogg",
-                    "audio/x-m4a",
-                ]:
-                    file_path = Storage.get_file(file_path)
-                    result = transcribe(request, file_path)
-
-                    process_file(
-                        request,
-                        ProcessFileForm(file_id=id, content=result.get("text", "")),
-                        user=user,
-                    )
-                elif file.content_type not in ["image/png", "image/jpeg", "image/gif"]:
-                    process_file(request, ProcessFileForm(file_id=id), user=user)
-
+                # llens(#52): テキスト化は Attachment Function に委譲。従来ここにあった
+                # content_type 分岐(audio→STT / 非画像→docling / 画像→skip)は既定の
+                # builtin_attachment に relocate 済み。フックが file.data.content を埋める。
+                process_attachment_functions(request, file_item, user)
                 file_item = Files.get_file_by_id(id=id)
             except Exception as e:
                 log.exception(e)
