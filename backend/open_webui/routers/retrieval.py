@@ -31,13 +31,12 @@ from langchain_core.documents import Document
 
 from open_webui.models.files import FileModel, Files
 from open_webui.models.knowledge import Knowledges
-from open_webui.storage.provider import Storage
 
 
 from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
 
 # Document loaders
-from open_webui.retrieval.loaders.main import Loader
+from open_webui.retrieval.extract import extract_file_text
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
 # Web search engines
@@ -1035,49 +1034,15 @@ def process_file(
         else:
             # Process the file and save the content
             # Usage: /files/
-            file_path = file.path
-            if file_path:
-                file_path = Storage.get_file(file_path)
-                loader = Loader(
-                    engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                    TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                    DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                    PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                    DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                    DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                    MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                )
-                docs = loader.load(
-                    file.filename, file.meta.get("content_type"), file_path
-                )
-
-                docs = [
-                    Document(
-                        page_content=doc.page_content,
-                        metadata={
-                            **doc.metadata,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                    for doc in docs
-                ]
-            else:
-                docs = [
-                    Document(
-                        page_content=file.data.get("content", ""),
-                        metadata={
-                            **file.meta,
-                            "name": file.filename,
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            "source": file.filename,
-                        },
-                    )
-                ]
-            text_content = " ".join([doc.page_content for doc in docs])
+            # 文書抽出は冪等な内部関数(#52 プランB)へ委譲。抽出・data.content 保存・
+            # hash 更新まで内部で行うので、下段の共有保存ブロックは通さず早期 return する。
+            text_content = extract_file_text(request, file)
+            return {
+                "status": True,
+                "collection_name": None,
+                "filename": file.filename,
+                "content": text_content,
+            }
 
         log.debug(f"text_content: {text_content}")
         Files.update_file_data_by_id(

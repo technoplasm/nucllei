@@ -86,8 +86,13 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 ## プランB(採用)— upload フック + プロバイダ登録
 
 **構図**: プロバイダ(実行機構)= core 登録、ルーティング(振り分け)= ユーザー定義 Function。B(ユーザー定義)と C(登録機構)の合体。
-- **プロバイダ** = docling エンジン / STT モデル / 単一 file→text モデル を「ドキュメント」「STT」等として**登録**し、`extract(file_id, provider) → text` の**内部APIで一様に露出**。個々は engine URL だったり model 接続だったりを裏で吸収。
-- **upload フック(Function・新 type)= ルータ**。content_type や独自ルールでプロバイダを選び内部APIを叩く。filter/action/pipe と同じ Function infra(ロード/実行/valves)を流用。
+- **プロバイダは種別ごとに別々の内部API(入口を無理に揃えない)**。単一 `extract()` に一本化しない ← 種別で入出力も追加オプションも違うので統一する意味がない。hook 内で処理するので入口が同じである必要がない。
+  - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明。設定に付随した共通オプションがあれば渡せる)。既存 `Loader`/`CONTENT_EXTRACTION_ENGINE` を流用。
+  - **STT**: `音声 → 文字列(+情報)`。既存 `audio.transcribe`/`AUDIO_STT_ENGINE` を流用。
+  - **TTS**: `テキスト → 音声`(必要なら。既存 audio TTS)。
+  - 「単一 file→text モデル」も **文書抽出種別の一エンジン**として登録(engine=model 接続)。engine URL か model 接続かは各種別の内部で吸収、種別をまたいでは吸収しない。
+  - **入口は「設定で登録したエンジン」に対応してあればいい**(STT の入口に音声を渡せば登録済み STT エンジンが反応する、という素直な対応)。
+- **upload フック(Function・新 type)= ルータ**。content_type / 拡張子で種別を判定し、対応する内部APIを**呼び分ける**。filter/action/pipe と同じ Function infra(ロード/実行/valves)を流用。core は一様化も自動実行もしない。
 - **③gate は inlet filter のまま**(per-model、prism `large_file_gate` 昇格)。data.content を読むだけ。
 
 **B 固有の設計要素**:
@@ -96,12 +101,12 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 3. **発火はファイル1個につき1回**: その1回の中で複数プロバイダを使うのは自由(docling + STT、rasterize+VLM+docling など、フックのコードが組み合わせる)。「1プロバイダに限る」制約ではない。
 4. **失敗は content にメッセージを書くだけ**: プロバイダ失敗時は `data.content` にエラーメッセージを入れる。以降は content を一様に扱い、**システムプロンプトで「このファイルは抽出失敗:<msg>」と突き合わせる**。専用 failed 状態や分岐は不要。content は常に「テキスト or 失敗メッセージ」で埋まる。
 
-**新規なのは**: upload router のフック呼び出し口 / プロバイダ内部API(`extract`)/ 非同期実行+プレビューの処理中表示 / Function の新 type(#45 の type 系に1つ追加)。Function 実行基盤・タイムアウト機構は既存流用。
+**新規なのは**: upload router のフック呼び出し口 / 種別ごとの内部API(文書抽出=`Loader` を file_id 冪等ラップ、STT/TTS は既存 audio を薄くラップ)/ 非同期実行+プレビューの処理中表示 / Function の新 type(#45 の type 系に1つ追加)。Function 実行基盤・タイムアウト機構・各エンジン実体は既存流用。
 
 ## #52 core 作業リスト
 
 1. **自動を剥がす**: upload 時 auto `process_file` / middleware auto inject / RAG 分岐(§④・vector・KB・needle・ef/rf)を撤去。
-2. **プロバイダ登録 + 内部API露出**: `extract(file_id, provider)` 冪等・キャッシュ(data.content)。docling/STT/file→text モデルを登録機構で吸収。
+2. **種別ごとの内部API露出**(入口を揃えない): 文書抽出=`file_id → 文字列`(冪等・キャッシュ=data.content、`Loader` ラップ)/ STT=`音声 → 文字列` / TTS=`テキスト → 音声`。各種別は設定で登録したエンジンに対応。**これらは内部関数として提示され、hook/filter から呼べるだけでなく builtin tool(#18)としてモデルにも露出**(モデルがオンデマンドで文書読取/STT/TTS を呼べる)。
 3. **upload フック(新 Function type)**: upload router に呼び出し口。非同期実行 + フック内タイムアウト制御。失敗は content にメッセージ。
 4. **① 薄い受け入れゲート**だけ core(size / ext、upload は filter 前なので拒否はここだけ)。
 5. **③gate は inlet filter**: prism `large_file_gate`(合算予算・大きい順除去・file_id 告知)を Function 移植。PDF→VLM は `pdf_vision_router` 移植(Kimi VLM 有)。
@@ -130,8 +135,10 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   注入=`utils/middleware.py::chat_completion_files_handler` + `retrieval/utils.py::get_sources_from_files`。
 - 関連: #18(builtin tool)/ #46(per-model filter)/ #13(Filter ミドルウェア化)/ #40(file IDOR)/ #41(clone・別軸)。
 
+## 確定(2026-07-08 追記)
+- **プロバイダの実体**: 単一 `extract()` に一本化しない。**種別ごとに素直な内部API を1本ずつ**(文書抽出=file→文字列 / STT=音声→文字列 / TTS=テキスト→音声)。入出力も追加オプションも種別で違うので揃えない。engine URL か model 接続かは各種別の内部で吸収(種別をまたいでは吸収しない)。入口は「設定で登録したエンジン」に対応。**内部関数として提示 → hook/filter から呼べる + builtin tool(#18)でモデルにも露出**。呼び分けは hook がルータとして担う。
+
 ## 未確定
-- **プロバイダの実体**: engine 設定(docling URL)と model 接続(STT / file→text)を `extract()` の裏でどう一様に扱うか。登録 UI は既存のどれに寄せるか。
 - **未抽出時の送信挙動**: extracting 中に送信されたら待たせるか、即 raw 扱いで ④ に倒すか。
 - ① 受け入れ上限サイズの確定値(`SANDBOX_FILE_LIMIT_BYTES` 準拠案)。
 - ③ で画像/音声のトークンを注入予算に数えるか(v1 はテキスト産出分のみ gate 対象で可)。
