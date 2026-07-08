@@ -75,27 +75,17 @@ class TestDoclingExtraction(AbstractPostgresTest):
         assert app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION is False
         assert app.state.config.ENABLE_WEB_SEARCH is False
 
-    def test_upload_extracts_via_docling_without_vector_db(self):
-        """アップロード → Docling 抽出 → 全文が data.content に入る。
+    def test_docling_extraction_without_vector_db(self):
+        """Docling 抽出 → 全文が data.content に入る(ベクタ DB へは保存されない)。
 
-        #52: 抽出は完全 opt-in の Attachment 経由。既定 builtin_attachment を割り当てた
-        モデルを用意し、upload に model_id を渡して発火させる。
+        #52: upload 時のテキスト化は Attachment(案件層 prism のポリシー)に移り、fork 本体は
+        builtin Attachment を持たない。ここでは docling 抽出の能力そのものを、抽出の入口である
+        `/retrieval/process/file`(extract_file_text 経由)で固定する(issue #9 の回帰)。
         """
-        from open_webui.models.models import Models, ModelForm, ModelMeta, ModelParams
-
-        Models.insert_new_model(
-            ModelForm(
-                id="m-docling",
-                name="docling",
-                meta=ModelMeta(**{"attachmentIds": ["builtin_attachment"]}),
-                params=ModelParams(),
-            ),
-            "1",
-        )
-
+        # 1) まずファイルをアップロード(model 無=Attachment 未発火なので raw 保存のみ)
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
-                self.create_url("/?model_id=m-docling"),
+                self.create_url("/"),
                 files={
                     "file": (
                         "report.pdf",
@@ -105,19 +95,28 @@ class TestDoclingExtraction(AbstractPostgresTest):
                 },
             )
         assert response.status_code == 200, response.text
+        file_id = response.json()["id"]
+
+        # この時点では抽出は走っていない(Attachment 未割り当て)
+        assert len(self.mock_server.received) == 0
+
+        # 2) 抽出の入口 process/file を叩く → docling 抽出 → data.content 保存
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/v1/retrieval/process/file",
+                json={"file_id": file_id},
+            )
+        assert response.status_code == 200, response.text
         data = response.json()
-        file_id = data["id"]
 
         # Docling モックに変換リクエストが届いている
         assert len(self.mock_server.received) == 1
 
-        # 抽出結果が全文注入用の data.content に保存されている
-        assert data["data"]["content"] == EXTRACTED_MARKDOWN
+        # 抽出結果が全文注入用の content に入り、ベクタ DB(collection)へは保存されない
+        assert data["content"] == EXTRACTED_MARKDOWN
+        assert data["collection_name"] is None
 
-        # BYPASS_EMBEDDING_AND_RETRIEVAL によりベクタ DB へは保存されない
-        assert "collection_name" not in (data.get("meta") or {})
-
-        # 保存済みコンテンツを API から取得できる
+        # 保存済みコンテンツを Files API から取得できる
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.get(
                 self.create_url(f"/{file_id}/data/content")

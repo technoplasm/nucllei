@@ -2,14 +2,14 @@
 
 アップロード直後に発火する。`utils/filter.py` の filter ディスパッチと同じ流儀
 (型で絞る → priority ソート → valves 注入 → 署名インスペクションで引数注入)。
-違いは (1) upload は sync 経路なので同期呼び出し、(2) builtin(id 接頭辞 `builtin_`)は
-DB に content を持たないので `load_builtin_function` でモジュールを得ること。
+違いは upload が sync 経路なので同期呼び出しであること。
 
-フック本体はルータで、抽出の実体は内部関数(`retrieval.extract` / audio)に委譲する。
+**fork は仕組みだけ**: Attachment の実体(docling ルータ等のポリシー)は案件層(prism)の
+authored Function として登録される。fork 本体は builtin Attachment を持たない。
 
 **適用は完全 opt-in(tool/filter と同一)**: モデルの `meta.attachmentIds` に割り当てられた
 attachment function だけが発火する。model 文脈の無い upload(API/KB など)や未割り当ての
-モデルでは何も走らない。builtin Attachment も割り当てが要る(初期/参照実装)。
+モデルでは何も走らない。フック本体はルータで、抽出の実体は内部関数(`retrieval.extract`)へ委譲。
 """
 
 import asyncio
@@ -18,11 +18,6 @@ import logging
 
 from open_webui.models.functions import Functions
 from open_webui.utils.plugin import load_function_module_by_id
-from open_webui.builtin_functions import (
-    BUILTIN_FUNCTIONS,
-    is_builtin_function_id,
-    load_builtin_function,
-)
 from open_webui.env import SRC_LOG_LEVELS
 
 log = logging.getLogger(__name__)
@@ -33,9 +28,8 @@ def get_attachment_function_ids(assigned_ids) -> list[str]:
     """発火する attachment function の id 列(priority 昇順)。
 
     `assigned_ids` = モデルの `meta.attachmentIds`(完全 opt-in)。そのうち **実在する
-    attachment function** だけに絞る(削除済み ID を弾く)。実在集合 = builtin(コードが
-    真実源なので `BUILTIN_FUNCTIONS` から直接)+ DB の type=attachment。`get_sorted_filter_ids`
-    と同型。valves は DB 行があればそこから priority を引く(builtin は行が無ければ 0)。
+    type=attachment の Function** だけに絞る(削除済み ID を弾く)。`get_sorted_filter_ids`
+    と同型。
     """
     if not assigned_ids:
         return []
@@ -44,13 +38,7 @@ def get_attachment_function_ids(assigned_ids) -> list[str]:
         valves = Functions.get_function_valves_by_id(function_id)
         return valves.get("priority", 0) if valves else 0
 
-    valid = {
-        function_id
-        for function_id, entry in BUILTIN_FUNCTIONS.items()
-        if entry.get("type") == "attachment"
-    }
-    valid |= {f.id for f in Functions.get_functions_by_type("attachment")}
-
+    valid = {f.id for f in Functions.get_functions_by_type("attachment")}
     attachment_ids = [fid for fid in dict.fromkeys(assigned_ids) if fid in valid]
     attachment_ids.sort(key=get_priority)
     return attachment_ids
@@ -59,10 +47,7 @@ def get_attachment_function_ids(assigned_ids) -> list[str]:
 def _load_module(request, function_id):
     if function_id in request.app.state.FUNCTIONS:
         return request.app.state.FUNCTIONS[function_id]
-    if is_builtin_function_id(function_id):
-        module, _, _ = load_builtin_function(function_id)
-    else:
-        module, _, _ = load_function_module_by_id(function_id)
+    module, _, _ = load_function_module_by_id(function_id)
     request.app.state.FUNCTIONS[function_id] = module
     return module
 

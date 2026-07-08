@@ -85,18 +85,15 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 ## プランB(採用)— upload フック + プロバイダ登録
 
-> **Attachment 未登録時の core 挙動 = (c) builtin Attachment を同梱(確定 2026-07-08)**。
+> **最終方針: fork は builtin Attachment を持たない(確定 2026-07-08)**。
 > core の upload endpoint(`routers/files.py POST /files/`)から content_type 分岐の自動処理
-> (audio→transcribe+process_file / 画像以外→process_file)を剥がし、**docling 抽出する既定の
-> builtin Attachment Function を1本出荷**して常に通す。**拡張子/content_type 判定は core の
-> ハードコードから builtin Attachment の valves に格下げ**(設定可能化)。出荷/登録の仕組みは
-> **builtin tool(#18)の見せ方を参考**にする(自動登録・ユーザー authored と区別)。
->
-> **builtin 判別 = id 接頭辞 `builtin_` 一本(確定 2026-07-08)**。Function テーブルは #45/#43 で
-> `meta` 列ごと撤去済み → tool の `meta.builtin` フラグは使えない。meta を復元する案も出たが、
-> builtin 判別だけなら id 接頭辞で足り、フラグを meta に持たせるのは冗長(tool 側も然り)なので
-> **復元しない**。`BUILTIN_FUNCTIONS` dict(ロードの真実源)+ id `builtin_*` で判別、フロントの
-> セクション分けも id 接頭辞で行う。
+> (audio→transcribe+process_file / 画像以外→process_file)は剥がした。テキスト化ポリシーの実体
+> (docling ルータ等)は **すべて案件層(prism)の authored Attachment Function**。fork 本体は
+> Attachment 種別の仕組みと内部関数だけを提供し、Attachment の実体は同梱しない。
+> ※ 検討経緯: 一時「既定処理を builtin Attachment で同梱((c)案)」→「初期/参照実装として1本だけ
+> builtin」と揺れたが、**builtin は邪魔(UI に既定として現れる・重複)**なので撤去に決着。
+> よって `builtin_functions/` 機構ごと不要(唯一の中身が Attachment だった)→ 撤去。
+> fork 単体では Attachment 未割り当て=upload で抽出は走らない(prism が Attachment を積んで運用)。
 
 > **Function 新 type 名 = `Attachment`(type トークン `attachment`)確定**。Filter/Action/Pipe が
 > 「どこにフックするか=役割」を1語で表すのに倣い、添付ファイルのライフサイクルにフックする種別を
@@ -116,9 +113,12 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
-2. **on/off は per-model(ワークスペースのモデル設定でトグル)**: 使う/使わないは tool と同じく **ワークスペースのモデル設定**で切り替え(builtin Attachment もそこに現れる)。→ 以前の「upload 時点でモデル未確定なので per-model はしない/全 upload 発火」を**上書き**。
+2. **on/off は per-model(ワークスペースのモデル設定でトグル)**: 使う/使わないは tool と同じく **ワークスペースのモデル設定**で切り替え(`attachmentIds`、完全 opt-in・単一選択)。→ 以前の「upload 時点でモデル未確定なので per-model はしない/全 upload 発火」を**上書き**。入力欄での per-chat トグルは持たない。
    - **含意**: 抽出自体はモデル非依存だが、有効/無効の解決に**モデル文脈が要る** → upload endpoint は「今のチャットの選択モデル」を受け取り、そのモデルで有効な Attachment だけ発火させる(フロントが upload 時に model id を渡す)。authoring は元来 admin 権限。
-3. **発火はファイル1個につき1回**: その1回の中で複数プロバイダを使うのは自由(docling + STT、rasterize+VLM+docling など、フックのコードが組み合わせる)。「1プロバイダに限る」制約ではない。
+3. **発火はファイル1個につき1回・1モデルにつき Attachment は単一選択**: Attachment は
+   `data.content` を生成するルータなので、per-model 割り当ては **1つだけ**(UI も単一選択)。
+   複数走ると content を上書き衝突する。その1つの中で複数プロバイダを使うのは自由(docling + STT、
+   rasterize+VLM+docling など、フックのコードが組み合わせる)。「1プロバイダに限る」制約ではない。
 4. **失敗は content にメッセージを書くだけ**: プロバイダ失敗時は `data.content` にエラーメッセージを入れる。以降は content を一様に扱い、**システムプロンプトで「このファイルは抽出失敗:<msg>」と突き合わせる**。専用 failed 状態や分岐は不要。content は常に「テキスト or 失敗メッセージ」で埋まる。
 
 **新規なのは**: upload router のフック呼び出し口 / 種別ごとの内部API(文書抽出=`Loader` を file_id 冪等ラップ、STT/TTS は既存 audio を薄くラップ)/ 非同期実行+プレビューの処理中表示 / Function の新 type(#45 の type 系に1つ追加)。Function 実行基盤・タイムアウト機構・各エンジン実体は既存流用。
@@ -145,13 +145,11 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 **済(プランB 本体・フェーズ1 = backend 中核・挙動保存)**:
 - **文書抽出の内部関数化**(22dd591bd): `retrieval/extract.py::extract_file_text(request, file, *, force=False)`。
   `process_file` の Loader→data.content ロジックを冪等・キャッシュ付きで切り出し、process_file は委譲。
-- **Attachment Function 種別 + 既定 builtin**(a421ae4d8): plugin loader に `Attachment` class 判定
-  (type `attachment`)。`builtin_functions/`(builtin_tools の Function 版)新設、builtin 判別は
-  id 接頭辞 `builtin_` 一本(Function は meta 列なし)。既定 `builtin_attachment` = 従来 files.py の
-  content_type 分岐を忠実 relocate・判定は valves 化。起動時 `sync_builtin_functions` で upsert。
+- **Attachment Function 種別**(a421ae4d8): plugin loader に `Attachment` class 判定(type
+  `attachment`)を追加。※同コミットで入れた builtin_functions/ + 既定 builtin Attachment は
+  後に撤去(下記)。plugin loader の type 判定だけが残る。
 - **upload を dispatch に配線**(e79a1c955): `utils/attachment.py::process_attachment_functions`
-  (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。builtin id は
-  `BUILTIN_FUNCTIONS` から直接引く(コードが真実源・sync 前でも発火)。**全 206 passed・挙動不変**。
+  (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。
 
 **方針の確定(2026-07-08)— fork 本体 vs 案件層(prism)の線引き**:
 - prism-llens の filter/tool(gate = `owui/filters/large_file_gate.py`、sandbox tool =
@@ -159,13 +157,24 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **fork 本体が持つのは「仕組み」だけ**: Attachment という新 Function type(plugin loader の
   type 判定 + dispatch + files.py 配線)、内部関数 `extract_file_text`、既存の filter/tool 機構、
   Files API。**③gate も ④sandbox tool も fork には作らない**(prism 層のポリシー)。
-- **例外 = builtin Attachment**: Attachment は新種で既存実装が無く「何も無いと使いづらい」ので、
-  初期/参照実装を1本だけ builtin 同梱(prism は自前を積むので本番では未使用でよい)。
-- ※ 一度 fork 本体に builtin filter として入れた gate(旧 46fd2ccd4)は上記方針に反するため撤去した。
+- **builtin Attachment も持たない**: 一時「初期/参照実装として1本だけ builtin」としたが、
+  UI に既定として現れて邪魔・重複なので撤去。`builtin_functions/` 機構ごと不要になり削除。
+  fork 単体では Attachment 未割り当て=upload で抽出は走らない(prism が積む)。
+- ※ 一度 fork 本体に入れた builtin gate(旧 46fd2ccd4)・builtin Attachment(旧 a421ae4d8)は
+  上記方針に反するため撤去した。
+
+**済(フェーズ2 = per-model トグル・完全 opt-in)**:
+- **backend**(83f849407 + builtin 撤去コミット): `get_attachment_function_ids(assigned_ids)` を
+  model.meta.attachmentIds ベースに(get_sorted_filter_ids と同型・DB の type=attachment で実在チェック)。
+  None/空=何もしない(完全 opt-in)。`files.py` upload に `model_id` Query 追加 → `Models.get_model_by_id`
+  で attachmentIds を引き dispatch へ。docling 回帰は抽出能力を `/retrieval/process/file` で直接固定する形に更新。
+- **frontend**(7a2f0a7da + selector 改修): `AttachmentsSelector.svelte`(ModelEditor に挿入、
+  model.meta.attachmentIds 読み書き)/ `uploadFile(token,file,modelId)` / MessageInput が
+  selectedModelIds[0] を渡す。**単一選択(None + attachment 一覧の radio、横並び・英語ラベル)**:
+  content を生成するルータなので複数は上書き衝突。入力欄での per-chat トグルは持たない。builtin が無いので
+  候補は prism authored のみ(fork 単体では None だけ)。
 
 **プランB 本体 残り**:
-- **フェーズ2(per-model トグル)**: `model.meta.attachmentIds` 解決 + upload が model 文脈を受け取る
-  + フロント Selector(ワークスペースのモデル設定)。builtin の content 更新/削除拒否(routers/functions.py)も。
 - **フェーズ3 残り(fork 側)**: 非同期実行+処理中プレビュー(file に extracting→done)/
   STT・TTS 内部関数(後回し可)。gate・PDF→VLM・sandbox tool(`import_chat_file`)は **prism 層**の仕事。
 
