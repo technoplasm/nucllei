@@ -1243,7 +1243,9 @@ async def get_app_config(request: Request):
                 {
                     "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,
                     "enable_channels": app.state.config.ENABLE_CHANNELS,
-                    "enable_web_search": app.state.config.ENABLE_WEB_SEARCH,
+                    # llens(#52): built-in web 検索(RAG 自動注入)は撤去。検索は tool→
+                    # 内部検索 API(retrieval /process/web/search)経由に移行するため、
+                    # チャットの feature フラグとしては露出しない(フロントのトグルも隠れる)。
                     "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,

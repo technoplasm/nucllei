@@ -29,12 +29,10 @@ from open_webui.socket.main import (
     get_active_status_by_user_id,
 )
 from open_webui.routers.tasks import (
-    generate_queries,
     generate_title,
     generate_image_prompt,
     generate_chat_tags,
 )
-from open_webui.routers.retrieval import process_web_search, SearchForm
 from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.routers.pipelines import (
     process_pipeline_inlet_filter,
@@ -105,187 +103,6 @@ from open_webui.constants import TASKS
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
-
-
-async def chat_web_search_handler(
-    request: Request, form_data: dict, extra_params: dict, user
-):
-    event_emitter = extra_params["__event_emitter__"]
-    await event_emitter(
-        {
-            "type": "status",
-            "data": {
-                "action": "web_search",
-                "description": "Generating search query",
-                "done": False,
-            },
-        }
-    )
-
-    messages = form_data["messages"]
-    user_message = get_last_user_message(messages)
-
-    queries = []
-    try:
-        res = await generate_queries(
-            request,
-            {
-                "model": form_data["model"],
-                "messages": messages,
-                "prompt": user_message,
-                "type": "web_search",
-            },
-            user,
-        )
-
-        response = res["choices"][0]["message"]["content"]
-
-        try:
-            bracket_start = response.find("{")
-            bracket_end = response.rfind("}") + 1
-
-            if bracket_start == -1 or bracket_end == -1:
-                raise Exception("No JSON object found in the response")
-
-            response = response[bracket_start:bracket_end]
-            queries = json.loads(response)
-            queries = queries.get("queries", [])
-        except Exception as e:
-            queries = [response]
-
-    except Exception as e:
-        log.exception(e)
-        queries = [user_message]
-
-    if len(queries) == 0:
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "web_search",
-                    "description": "No search query generated",
-                    "done": True,
-                },
-            }
-        )
-        return form_data
-
-    all_results = []
-
-    for searchQuery in queries:
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "web_search",
-                    "description": 'Searching "{{searchQuery}}"',
-                    "query": searchQuery,
-                    "done": False,
-                },
-            }
-        )
-
-        try:
-            results = await process_web_search(
-                request,
-                SearchForm(
-                    **{
-                        "query": searchQuery,
-                    }
-                ),
-                user=user,
-            )
-
-            if results:
-                all_results.append(results)
-                files = form_data.get("files", [])
-
-                if results.get("collection_names"):
-                    for col_idx, collection_name in enumerate(
-                        results.get("collection_names")
-                    ):
-                        files.append(
-                            {
-                                "collection_name": collection_name,
-                                "name": searchQuery,
-                                "type": "web_search",
-                                "urls": [results["filenames"][col_idx]],
-                            }
-                        )
-                elif results.get("docs"):
-                    # Invoked when bypass embedding and retrieval is set to True
-                    docs = results["docs"]
-
-                    if len(docs) == len(results["filenames"]):
-                        # the number of docs and filenames (urls) should be the same
-                        for doc_idx, doc in enumerate(docs):
-                            files.append(
-                                {
-                                    "docs": [doc],
-                                    "name": searchQuery,
-                                    "type": "web_search",
-                                    "urls": [results["filenames"][doc_idx]],
-                                }
-                            )
-                    else:
-                        # edge case when the number of docs and filenames (urls) are not the same
-                        # this should not happen, but if it does, we will just append the docs
-                        files.append(
-                            {
-                                "docs": results.get("docs", []),
-                                "name": searchQuery,
-                                "type": "web_search",
-                                "urls": results["filenames"],
-                            }
-                        )
-
-                form_data["files"] = files
-        except Exception as e:
-            log.exception(e)
-            await event_emitter(
-                {
-                    "type": "status",
-                    "data": {
-                        "action": "web_search",
-                        "description": 'Error searching "{{searchQuery}}"',
-                        "query": searchQuery,
-                        "done": True,
-                        "error": True,
-                    },
-                }
-            )
-
-    if all_results:
-        urls = []
-        for results in all_results:
-            if "filenames" in results:
-                urls.extend(results["filenames"])
-
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "web_search",
-                    "description": "Searched {{count}} sites",
-                    "urls": urls,
-                    "done": True,
-                },
-            }
-        )
-    else:
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "web_search",
-                    "description": "No search results found",
-                    "done": True,
-                    "error": True,
-                },
-            }
-        )
-
-    return form_data
 
 
 async def chat_image_generation_handler(
@@ -891,11 +708,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     features = form_data.pop("features", None)
     if features:
-        if "web_search" in features and features["web_search"]:
-            form_data = await chat_web_search_handler(
-                request, form_data, extra_params, user
-            )
-
         if "image_generation" in features and features["image_generation"]:
             form_data = await chat_image_generation_handler(
                 request, form_data, extra_params, user
