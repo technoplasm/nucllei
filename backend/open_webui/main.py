@@ -77,7 +77,6 @@ from open_webui.routers import (
     utils,
 )
 
-from open_webui.retrieval.utils import get_embedding_function
 
 from open_webui.internal.db import Session, engine
 
@@ -169,18 +168,9 @@ from open_webui.config import (
     # Retrieval
     RAG_TEMPLATE,
     DEFAULT_RAG_TEMPLATE,
-    RAG_EMBEDDING_MODEL,
-    RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-    RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-    RAG_EMBEDDING_ENGINE,
-    RAG_EMBEDDING_BATCH_SIZE,
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_MAX_SIZE,
     ATTACHMENT_ALLOWED_EXTENSIONS,
-    RAG_OPENAI_API_BASE_URL,
-    RAG_OPENAI_API_KEY,
-    RAG_OLLAMA_BASE_URL,
-    RAG_OLLAMA_API_KEY,
     TIKTOKEN_ENCODING_NAME,
     YOUTUBE_LOADER_LANGUAGE,
     YOUTUBE_LOADER_PROXY_URL,
@@ -587,16 +577,7 @@ app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERI
 
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
-app.state.config.RAG_EMBEDDING_ENGINE = RAG_EMBEDDING_ENGINE
-app.state.config.RAG_EMBEDDING_MODEL = RAG_EMBEDDING_MODEL
-app.state.config.RAG_EMBEDDING_BATCH_SIZE = RAG_EMBEDDING_BATCH_SIZE
 app.state.config.RAG_TEMPLATE = RAG_TEMPLATE
-
-app.state.config.RAG_OPENAI_API_BASE_URL = RAG_OPENAI_API_BASE_URL
-app.state.config.RAG_OPENAI_API_KEY = RAG_OPENAI_API_KEY
-
-app.state.config.RAG_OLLAMA_BASE_URL = RAG_OLLAMA_BASE_URL
-app.state.config.RAG_OLLAMA_API_KEY = RAG_OLLAMA_API_KEY
 
 app.state.config.YOUTUBE_LOADER_LANGUAGE = YOUTUBE_LOADER_LANGUAGE
 app.state.config.YOUTUBE_LOADER_PROXY_URL = YOUTUBE_LOADER_PROXY_URL
@@ -647,31 +628,13 @@ app.state.config.FIRECRAWL_API_KEY = FIRECRAWL_API_KEY
 app.state.config.TAVILY_EXTRACT_DEPTH = TAVILY_EXTRACT_DEPTH
 
 app.state.EMBEDDING_FUNCTION = None
-app.state.ef = None
 
 app.state.YOUTUBE_LOADER_TRANSLATION = None
 
 
-# llens(#52): 全文注入運用では embedding/reranking モデルを使わないため、起動時ロード
-# (モデルダウンロードを伴う)を**無条件でスキップ**する(air-gapped、issue #9、fork.md §6)。
-# ef/rf は None のまま。必要時は管理画面の /retrieval embedding・reranking 更新で再ロードされる。
-# EMBEDDING_FUNCTION は memories(#8 放置)のため生成は継続(ef=None でも engine 次第で動く)。
-app.state.EMBEDDING_FUNCTION = get_embedding_function(
-    app.state.config.RAG_EMBEDDING_ENGINE,
-    app.state.config.RAG_EMBEDDING_MODEL,
-    app.state.ef,
-    (
-        app.state.config.RAG_OPENAI_API_BASE_URL
-        if app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-        else app.state.config.RAG_OLLAMA_BASE_URL
-    ),
-    (
-        app.state.config.RAG_OPENAI_API_KEY
-        if app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-        else app.state.config.RAG_OLLAMA_API_KEY
-    ),
-    app.state.config.RAG_EMBEDDING_BATCH_SIZE,
-)
+# llens(#52): memory を SQL の素ストアに降格したことで embedding/vector 基盤の消費者が
+# 消滅。埋め込みモデルの起動時ロードも VECTOR_DB も撤去。EMBEDDING_FUNCTION は None のまま
+# (防御的に残置。fork には消費者なし)。
 
 ########################################
 #
