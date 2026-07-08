@@ -16,10 +16,9 @@ class TestRAGDefaults(AbstractPostgresTest):
         """RAG 系フラグの llens 既定値(fresh DB)を固定する。
 
         #52: RAG 検索 config(TOP_K/hybrid/relevance/full_context/bypass)+ 取り込み
-        経路(process/query/knowledge)は撤去済み。残る RAG 系フラグ
-        (query generation / web search)の既定 off を固定する。
+        経路(process/query/knowledge)+ query generation は撤去済み。web 検索は
+        tool 用に温存(built-in 経路は撤去)、既定 off を固定する。
         """
         from open_webui.main import app
 
-        assert app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION is False
         assert app.state.config.ENABLE_WEB_SEARCH is False

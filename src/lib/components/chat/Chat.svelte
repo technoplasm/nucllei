@@ -72,7 +72,6 @@
 	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
 	import {
 		chatCompleted,
-		generateQueries,
 		chatAction,
 		generateMoACompletion,
 		stopTask,

@@ -1346,49 +1346,6 @@ ENABLE_TITLE_GENERATION = RuntimeConfig(
 )
 
 
-ENABLE_SEARCH_QUERY_GENERATION = RuntimeConfig(
-    "ENABLE_SEARCH_QUERY_GENERATION",
-    "task.query.search.enable",
-    os.environ.get("ENABLE_SEARCH_QUERY_GENERATION", "True").lower() == "true",
-)
-
-# llens: RAG は使わないため検索クエリ生成も既定 OFF(issue #9、fork.md §5)
-ENABLE_RETRIEVAL_QUERY_GENERATION = RuntimeConfig(
-    "ENABLE_RETRIEVAL_QUERY_GENERATION",
-    "task.query.retrieval.enable",
-    os.environ.get("ENABLE_RETRIEVAL_QUERY_GENERATION", "False").lower() == "true",
-)
-
-
-QUERY_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
-    "QUERY_GENERATION_PROMPT_TEMPLATE",
-    "task.query.prompt_template",
-    os.environ.get("QUERY_GENERATION_PROMPT_TEMPLATE", ""),
-)
-
-DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE = """### Task:
-Analyze the chat history to determine the necessity of generating search queries, in the given language. By default, **prioritize generating 1-3 broad and relevant search queries** unless it is absolutely certain that no additional information is required. The aim is to retrieve comprehensive, updated, and valuable information even with minimal uncertainty. If no search is unequivocally needed, return an empty list.
-
-### Guidelines:
-- Respond **EXCLUSIVELY** with a JSON object. Any form of extra commentary, explanation, or additional text is strictly prohibited.
-- When generating search queries, respond in the format: { "queries": ["query1", "query2"] }, ensuring each query is distinct, concise, and relevant to the topic.
-- If and only if it is entirely certain that no useful results can be retrieved by a search, return: { "queries": [] }.
-- Err on the side of suggesting search queries if there is **any chance** they might provide useful or updated information.
-- Be concise and focused on composing high-quality search queries, avoiding unnecessary elaboration, commentary, or assumptions.
-- Today's date is: {{CURRENT_DATE}}.
-- Always prioritize providing actionable and broad queries that maximize informational coverage.
-
-### Output:
-Strictly return in JSON format: 
-{
-  "queries": ["query1", "query2"]
-}
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>
-"""
 
 ENABLE_AUTOCOMPLETE_GENERATION = RuntimeConfig(
     "ENABLE_AUTOCOMPLETE_GENERATION",
