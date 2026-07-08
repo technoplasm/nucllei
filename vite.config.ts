@@ -56,6 +56,9 @@ export default defineConfig({
 		sourcemap: true
 	},
 	server: {
+		// llens(dev): LAN 上のホスト名(enda-personal 等)からの dev アクセスを許可する。
+		// dev サーバ限定なので全ホスト許可でよい(0.0.0.0 listen と合わせて実機確認用)。
+		allowedHosts: true,
 		watch: {
 			// _links/ 配下の symlink ループ(llens ⇄ cage)を watcher が辿ると
 			// ELOOP / OOM で dev サーバが落ちる
