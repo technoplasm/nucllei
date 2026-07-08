@@ -80,7 +80,6 @@ class SearchForm(BaseModel):
 async def get_status(request: Request):
     return {
         "status": True,
-        "template": request.app.state.config.RAG_TEMPLATE,
     }
 
 
@@ -88,8 +87,6 @@ async def get_status(request: Request):
 async def get_rag_config(request: Request, user=Depends(get_admin_user)):
     return {
         "status": True,
-        # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
-        "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
         # 添付ファイルの受け入れゲート(#52)
         "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
@@ -181,9 +178,6 @@ class WebConfig(BaseModel):
 
 
 class ConfigForm(BaseModel):
-    # RAG template(全文注入の system prompt)
-    RAG_TEMPLATE: Optional[str] = None
-
     # 添付ファイルの受け入れゲート(#52)
     ATTACHMENT_MAX_SIZE: Optional[int] = None
     ATTACHMENT_MAX_COUNT: Optional[int] = None
@@ -201,13 +195,6 @@ class ConfigForm(BaseModel):
 async def update_rag_config(
     request: Request, form_data: ConfigForm, user=Depends(get_admin_user)
 ):
-    # RAG settings
-    request.app.state.config.RAG_TEMPLATE = (
-        form_data.RAG_TEMPLATE
-        if form_data.RAG_TEMPLATE is not None
-        else request.app.state.config.RAG_TEMPLATE
-    )
-
     # 添付ファイルの受け入れゲート(#52)
     request.app.state.config.ATTACHMENT_MAX_SIZE = (
         form_data.ATTACHMENT_MAX_SIZE
@@ -309,8 +296,6 @@ async def update_rag_config(
 
     return {
         "status": True,
-        # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
-        "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
         # 添付ファイルの受け入れゲート(#52)
         "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,

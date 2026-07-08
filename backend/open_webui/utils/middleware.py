@@ -52,7 +52,6 @@ from open_webui.retrieval.utils import get_sources_from_files
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.task import (
     get_task_model_id,
-    rag_template,
     prompt_template,
 )
 from open_webui.utils.misc import (
@@ -908,20 +907,18 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if prompt is None:
             raise Exception("No user message found")
 
+        # llens(#52): RAG_TEMPLATE の「包む機構」は廃止。抽出内容(<source> タグ)は
+        # Attachment が完全に制御するため、指示スキャフォールドで包まず context_string を
+        # そのまま注入する。参照の扱い(引用ルール等)が要れば preset system prompt(prism)が持つ。
         # Workaround for Ollama 2.0+ system prompt issue
-        # TODO: replace with add_or_update_system_message
         if model.get("owned_by") == "ollama":
             form_data["messages"] = prepend_to_first_user_message_content(
-                rag_template(
-                    request.app.state.config.RAG_TEMPLATE, context_string, prompt
-                ),
+                context_string,
                 form_data["messages"],
             )
         else:
             form_data["messages"] = add_or_update_system_message(
-                rag_template(
-                    request.app.state.config.RAG_TEMPLATE, context_string, prompt
-                ),
+                context_string,
                 form_data["messages"],
             )
 

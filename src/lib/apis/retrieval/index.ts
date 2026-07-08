@@ -30,7 +30,6 @@ export const getRAGConfig = async (token: string) => {
 type RAGConfigForm = {
 	ENABLE_GOOGLE_DRIVE_INTEGRATION?: boolean;
 	ENABLE_ONEDRIVE_INTEGRATION?: boolean;
-	RAG_TEMPLATE?: string;
 	ATTACHMENT_MAX_SIZE?: number | null;
 	ATTACHMENT_MAX_COUNT?: number | null;
 	ATTACHMENT_ALLOWED_EXTENSIONS?: string[];

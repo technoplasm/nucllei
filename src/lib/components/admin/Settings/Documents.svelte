@@ -12,7 +12,6 @@
 	import ResetUploadDirConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
@@ -63,30 +62,6 @@
 	{#if RAGConfig}
 		<div class=" space-y-2.5 overflow-y-scroll scrollbar-hidden h-full pr-1.5">
 			<div class="">
-				<div class="mb-3">
-					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Retrieval')}</div>
-
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
-
-					<div class="  mb-2.5 flex flex-col w-full justify-between">
-						<div class=" mb-1 text-xs font-medium">{$i18n.t('RAG Template')}</div>
-						<div class="flex w-full items-center relative">
-							<Tooltip
-								content={$i18n.t('Leave empty to use the default prompt, or enter a custom prompt')}
-								placement="top-start"
-								className="w-full"
-							>
-								<Textarea
-									bind:value={RAGConfig.RAG_TEMPLATE}
-									placeholder={$i18n.t(
-										'Leave empty to use the default prompt, or enter a custom prompt'
-									)}
-								/>
-							</Tooltip>
-						</div>
-					</div>
-				</div>
-
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Files')}</div>
 
