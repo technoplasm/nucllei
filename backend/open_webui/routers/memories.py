@@ -4,7 +4,6 @@ import logging
 from typing import Optional
 
 from open_webui.models.memories import Memories, MemoryModel
-from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
 from open_webui.utils.auth import get_verified_user
 from open_webui.env import SRC_LOG_LEVELS
 
@@ -12,12 +11,11 @@ from open_webui.env import SRC_LOG_LEVELS
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
+# llens(#52): memory は SQL(Memory テーブル)の素の文字列ストアに降格。ベクタ化・
+# 埋め込み検索は撤去し、query は全件を自然言語でそのまま返す(Claude 方式)。fork から
+# embedding/vector 基盤を一掃するための最後の切り離し。
+
 router = APIRouter()
-
-
-@router.get("/ef")
-async def get_embeddings(request: Request):
-    return {"result": request.app.state.EMBEDDING_FUNCTION("hello world")}
 
 
 ############################
@@ -49,23 +47,7 @@ async def add_memory(
     form_data: AddMemoryForm,
     user=Depends(get_verified_user),
 ):
-    memory = Memories.insert_new_memory(user.id, form_data.content)
-
-    VECTOR_DB_CLIENT.upsert(
-        collection_name=f"user-memory-{user.id}",
-        items=[
-            {
-                "id": memory.id,
-                "text": memory.content,
-                "vector": request.app.state.EMBEDDING_FUNCTION(
-                    memory.content, user=user
-                ),
-                "metadata": {"created_at": memory.created_at},
-            }
-        ],
-    )
-
-    return memory
+    return Memories.insert_new_memory(user.id, form_data.content)
 
 
 ############################
@@ -82,43 +64,23 @@ class QueryMemoryForm(BaseModel):
 async def query_memory(
     request: Request, form_data: QueryMemoryForm, user=Depends(get_verified_user)
 ):
-    results = VECTOR_DB_CLIENT.search(
-        collection_name=f"user-memory-{user.id}",
-        vectors=[request.app.state.EMBEDDING_FUNCTION(form_data.content, user=user)],
-        limit=form_data.k,
-    )
-
-    return results
+    # llens(#52): ベクタ検索を廃止し、ユーザーの全 memory を自然言語でそのまま返す。
+    # 返却 shape はフロント互換(documents[0] / metadatas[0])を維持。
+    memories = Memories.get_memories_by_user_id(user.id)
+    return {
+        "documents": [[memory.content for memory in memories]],
+        "metadatas": [
+            [{"created_at": memory.created_at} for memory in memories]
+        ],
+    }
 
 
 ############################
-# ResetMemoryFromVectorDB
+# ResetMemory
 ############################
 @router.post("/reset", response_model=bool)
-async def reset_memory_from_vector_db(
-    request: Request, user=Depends(get_verified_user)
-):
-    VECTOR_DB_CLIENT.delete_collection(f"user-memory-{user.id}")
-
-    memories = Memories.get_memories_by_user_id(user.id)
-    VECTOR_DB_CLIENT.upsert(
-        collection_name=f"user-memory-{user.id}",
-        items=[
-            {
-                "id": memory.id,
-                "text": memory.content,
-                "vector": request.app.state.EMBEDDING_FUNCTION(
-                    memory.content, user=user
-                ),
-                "metadata": {
-                    "created_at": memory.created_at,
-                    "updated_at": memory.updated_at,
-                },
-            }
-            for memory in memories
-        ],
-    )
-
+async def reset_memory(request: Request, user=Depends(get_verified_user)):
+    # llens(#52): ベクタ索引の再構築は撤去。SQL の memory は真実源なので no-op。
     return True
 
 
@@ -129,16 +91,7 @@ async def reset_memory_from_vector_db(
 
 @router.delete("/delete/user", response_model=bool)
 async def delete_memory_by_user_id(user=Depends(get_verified_user)):
-    result = Memories.delete_memories_by_user_id(user.id)
-
-    if result:
-        try:
-            VECTOR_DB_CLIENT.delete_collection(f"user-memory-{user.id}")
-        except Exception as e:
-            log.error(e)
-        return True
-
-    return False
+    return Memories.delete_memories_by_user_id(user.id)
 
 
 ############################
@@ -158,25 +111,6 @@ async def update_memory_by_id(
     )
     if memory is None:
         raise HTTPException(status_code=404, detail="Memory not found")
-
-    if form_data.content is not None:
-        VECTOR_DB_CLIENT.upsert(
-            collection_name=f"user-memory-{user.id}",
-            items=[
-                {
-                    "id": memory.id,
-                    "text": memory.content,
-                    "vector": request.app.state.EMBEDDING_FUNCTION(
-                        memory.content, user=user
-                    ),
-                    "metadata": {
-                        "created_at": memory.created_at,
-                        "updated_at": memory.updated_at,
-                    },
-                }
-            ],
-        )
-
     return memory
 
 
@@ -187,12 +121,4 @@ async def update_memory_by_id(
 
 @router.delete("/{memory_id}", response_model=bool)
 async def delete_memory_by_id(memory_id: str, user=Depends(get_verified_user)):
-    result = Memories.delete_memory_by_id_and_user_id(memory_id, user.id)
-
-    if result:
-        VECTOR_DB_CLIENT.delete(
-            collection_name=f"user-memory-{user.id}", ids=[memory_id]
-        )
-        return True
-
-    return False
+    return Memories.delete_memory_by_id_and_user_id(memory_id, user.id)
