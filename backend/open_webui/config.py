@@ -1600,76 +1600,6 @@ DEFAULT_CODE_INTERPRETER_PROMPT = """
 Ensure that the tools are effectively utilized to achieve the highest-quality analysis for the user."""
 
 
-####################################
-# Vector Database
-####################################
-
-VECTOR_DB = os.environ.get("VECTOR_DB", "chroma")
-
-# Chroma
-CHROMA_DATA_PATH = f"{DATA_DIR}/vector_db"
-
-if VECTOR_DB == "chroma":
-    import chromadb
-
-    CHROMA_TENANT = os.environ.get("CHROMA_TENANT", chromadb.DEFAULT_TENANT)
-    CHROMA_DATABASE = os.environ.get("CHROMA_DATABASE", chromadb.DEFAULT_DATABASE)
-    CHROMA_HTTP_HOST = os.environ.get("CHROMA_HTTP_HOST", "")
-    CHROMA_HTTP_PORT = int(os.environ.get("CHROMA_HTTP_PORT", "8000"))
-    CHROMA_CLIENT_AUTH_PROVIDER = os.environ.get("CHROMA_CLIENT_AUTH_PROVIDER", "")
-    CHROMA_CLIENT_AUTH_CREDENTIALS = os.environ.get(
-        "CHROMA_CLIENT_AUTH_CREDENTIALS", ""
-    )
-    # Comma-separated list of header=value pairs
-    CHROMA_HTTP_HEADERS = os.environ.get("CHROMA_HTTP_HEADERS", "")
-    if CHROMA_HTTP_HEADERS:
-        CHROMA_HTTP_HEADERS = dict(
-            [pair.split("=") for pair in CHROMA_HTTP_HEADERS.split(",")]
-        )
-    else:
-        CHROMA_HTTP_HEADERS = None
-    CHROMA_HTTP_SSL = os.environ.get("CHROMA_HTTP_SSL", "false").lower() == "true"
-# this uses the model defined in the Dockerfile ENV variable. If you dont use docker or docker based deployments such as k8s, the default embedding model will be used (sentence-transformers/all-MiniLM-L6-v2)
-
-# Milvus
-
-MILVUS_URI = os.environ.get("MILVUS_URI", f"{DATA_DIR}/vector_db/milvus.db")
-MILVUS_DB = os.environ.get("MILVUS_DB", "default")
-MILVUS_TOKEN = os.environ.get("MILVUS_TOKEN", None)
-
-# Qdrant
-QDRANT_URI = os.environ.get("QDRANT_URI", None)
-QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", None)
-
-# OpenSearch
-OPENSEARCH_URI = os.environ.get("OPENSEARCH_URI", "https://localhost:9200")
-OPENSEARCH_SSL = os.environ.get("OPENSEARCH_SSL", "true").lower() == "true"
-OPENSEARCH_CERT_VERIFY = (
-    os.environ.get("OPENSEARCH_CERT_VERIFY", "false").lower() == "true"
-)
-OPENSEARCH_USERNAME = os.environ.get("OPENSEARCH_USERNAME", None)
-OPENSEARCH_PASSWORD = os.environ.get("OPENSEARCH_PASSWORD", None)
-
-# ElasticSearch
-ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "https://localhost:9200")
-ELASTICSEARCH_CA_CERTS = os.environ.get("ELASTICSEARCH_CA_CERTS", None)
-ELASTICSEARCH_API_KEY = os.environ.get("ELASTICSEARCH_API_KEY", None)
-ELASTICSEARCH_USERNAME = os.environ.get("ELASTICSEARCH_USERNAME", None)
-ELASTICSEARCH_PASSWORD = os.environ.get("ELASTICSEARCH_PASSWORD", None)
-ELASTICSEARCH_CLOUD_ID = os.environ.get("ELASTICSEARCH_CLOUD_ID", None)
-SSL_ASSERT_FINGERPRINT = os.environ.get("SSL_ASSERT_FINGERPRINT", None)
-ELASTICSEARCH_INDEX_PREFIX = os.environ.get(
-    "ELASTICSEARCH_INDEX_PREFIX", "open_webui_collections"
-)
-# Pgvector
-PGVECTOR_DB_URL = os.environ.get("PGVECTOR_DB_URL", DATABASE_URL)
-if VECTOR_DB == "pgvector" and not PGVECTOR_DB_URL.startswith("postgres"):
-    raise ValueError(
-        "Pgvector requires setting PGVECTOR_DB_URL or using Postgres with vector extension as the primary database."
-    )
-PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH = int(
-    os.environ.get("PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH", "1536")
-)
 
 ####################################
 # Information Retrieval (RAG)
@@ -1749,44 +1679,6 @@ ATTACHMENT_ALLOWED_EXTENSIONS = RuntimeConfig(
     ],
 )
 
-RAG_EMBEDDING_ENGINE = RuntimeConfig(
-    "RAG_EMBEDDING_ENGINE",
-    "rag.embedding_engine",
-    os.environ.get("RAG_EMBEDDING_ENGINE", ""),
-)
-
-RAG_EMBEDDING_MODEL = RuntimeConfig(
-    "RAG_EMBEDDING_MODEL",
-    "rag.embedding_model",
-    os.environ.get("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-)
-log.info(f"Embedding model set: {RAG_EMBEDDING_MODEL.value}")
-
-RAG_EMBEDDING_MODEL_AUTO_UPDATE = (
-    not OFFLINE_MODE
-    and os.environ.get("RAG_EMBEDDING_MODEL_AUTO_UPDATE", "True").lower() == "true"
-)
-
-RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = (
-    os.environ.get("RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE", "True").lower() == "true"
-)
-
-RAG_EMBEDDING_BATCH_SIZE = RuntimeConfig(
-    "RAG_EMBEDDING_BATCH_SIZE",
-    "rag.embedding_batch_size",
-    int(
-        os.environ.get("RAG_EMBEDDING_BATCH_SIZE")
-        or os.environ.get("RAG_EMBEDDING_OPENAI_BATCH_SIZE", "1")
-    ),
-)
-
-RAG_EMBEDDING_QUERY_PREFIX = os.environ.get("RAG_EMBEDDING_QUERY_PREFIX", None)
-
-RAG_EMBEDDING_CONTENT_PREFIX = os.environ.get("RAG_EMBEDDING_CONTENT_PREFIX", None)
-
-RAG_EMBEDDING_PREFIX_FIELD_NAME = os.environ.get(
-    "RAG_EMBEDDING_PREFIX_FIELD_NAME", None
-)
 
 # llens(#52): reranking(ベクタ検索の再ランキング)は RAG 撤去に伴い廃止。config・
 # 起動時ロード(rf)ともに撤去済み。
@@ -1836,28 +1728,6 @@ RAG_TEMPLATE = RuntimeConfig(
     os.environ.get("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE),
 )
 
-RAG_OPENAI_API_BASE_URL = RuntimeConfig(
-    "RAG_OPENAI_API_BASE_URL",
-    "rag.openai_api_base_url",
-    os.getenv("RAG_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
-)
-RAG_OPENAI_API_KEY = RuntimeConfig(
-    "RAG_OPENAI_API_KEY",
-    "rag.openai_api_key",
-    os.getenv("RAG_OPENAI_API_KEY", OPENAI_API_KEY),
-)
-
-RAG_OLLAMA_BASE_URL = RuntimeConfig(
-    "RAG_OLLAMA_BASE_URL",
-    "rag.ollama.url",
-    os.getenv("RAG_OLLAMA_BASE_URL", OLLAMA_BASE_URL),
-)
-
-RAG_OLLAMA_API_KEY = RuntimeConfig(
-    "RAG_OLLAMA_API_KEY",
-    "rag.ollama.key",
-    os.getenv("RAG_OLLAMA_API_KEY", ""),
-)
 
 
 ENABLE_RAG_LOCAL_WEB_FETCH = (
