@@ -393,3 +393,55 @@ class TestAuths(AbstractPostgresTest):
                 config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
                 config.API_KEY_ALLOWED_ENDPOINTS,
             ) = saved
+
+    def test_create_admin_cli(self):
+        """llens: 公開オンボーディングの代わりの CLI 管理者作成(open-webui create-admin)。
+
+        role=admin で作成され、email は小文字化。重複メール・短いパスワード・
+        不正な email 形式は非ゼロ終了で拒否する。
+        """
+        from typer.testing import CliRunner
+        from open_webui import app as cli_app
+
+        runner = CliRunner()
+
+        # 正常系: admin を作成(email は小文字化される)
+        result = runner.invoke(
+            cli_app,
+            [
+                "create-admin",
+                "--email",
+                "Ops@Llens.Local",
+                "--name",
+                "Ops",
+                "--password",
+                "supersecret1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        admin = self.users.get_user_by_email("ops@llens.local")
+        assert admin is not None
+        assert admin.role == "admin"
+        assert admin.name == "Ops"
+
+        # 重複メールは拒否
+        dup = runner.invoke(
+            cli_app,
+            ["create-admin", "--email", "ops@llens.local", "--password", "supersecret1"],
+        )
+        assert dup.exit_code == 1
+
+        # 短いパスワードは拒否(作成されない)
+        short = runner.invoke(
+            cli_app,
+            ["create-admin", "--email", "new@llens.local", "--password", "short"],
+        )
+        assert short.exit_code == 1
+        assert self.users.get_user_by_email("new@llens.local") is None
+
+        # 不正な email 形式は拒否
+        bad = runner.invoke(
+            cli_app,
+            ["create-admin", "--email", "notanemail", "--password", "supersecret1"],
+        )
+        assert bad.exit_code == 1

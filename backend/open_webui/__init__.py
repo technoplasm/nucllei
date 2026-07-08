@@ -99,5 +99,68 @@ def dev(
     )
 
 
+@app.command(name="create-admin")
+def create_admin(
+    email: Annotated[str, typer.Option(..., help="Administrator email address.")],
+    name: Annotated[str, typer.Option(help="Display name.")] = "Admin",
+    password: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Password. Omit to be prompted (hidden input, not stored in shell history).",
+        ),
+    ] = None,
+):
+    """Create an administrator account from the server (air-gapped provisioning).
+
+    llens: 公開オンボーディング画面の代わりに、運用者がサーバ上でこのコマンドを
+    実行して最初の管理者を作成する。既存 DB でも新規 DB でも動く(import 時に
+    マイグレーションが走る)。
+    """
+    if password is None:
+        password = typer.prompt(
+            "Password", hide_input=True, confirmation_prompt=True
+        )
+
+    # import 時に alembic(config.run_migrations)+ peewee(internal.db)マイグレーションが走り、
+    # 新規 DB でもスキーマが用意される。重い import は関数内に閉じる(serve と同じ流儀)。
+    import open_webui.config  # noqa: F401
+    from open_webui.models.auths import Auths
+    from open_webui.models.users import Users
+    from open_webui.utils.auth import get_password_hash
+    from open_webui.utils.misc import validate_email_format
+
+    email = email.lower().strip()
+
+    if not validate_email_format(email):
+        typer.echo(f"Invalid email format: {email}", err=True)
+        raise typer.Exit(code=1)
+
+    if len(password) < 8:
+        typer.echo("Password must be at least 8 characters.", err=True)
+        raise typer.Exit(code=1)
+
+    # bcrypt は 72 バイト超を切り詰めるため、signup と同じく上限を弾く。
+    if len(password.encode("utf-8")) > 72:
+        typer.echo("Password must be at most 72 bytes.", err=True)
+        raise typer.Exit(code=1)
+
+    if Users.get_user_by_email(email):
+        typer.echo(f"A user with email '{email}' already exists.", err=True)
+        raise typer.Exit(code=1)
+
+    user = Auths.insert_new_auth(
+        email,
+        get_password_hash(password),
+        name,
+        role="admin",
+    )
+
+    if not user:
+        typer.echo("Failed to create the administrator account.", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Created administrator account: {user.email} (id={user.id})")
+
+
 if __name__ == "__main__":
     app()
