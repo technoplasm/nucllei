@@ -58,6 +58,7 @@
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
 	import Home from '../icons/Home.svelte';
+	import Cog6 from '../icons/Cog6.svelte';
 
 	const BREAKPOINT = 768;
 
@@ -615,6 +616,25 @@
 				</a>
 			</div>
 		{/if}
+
+		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
+			<button
+				class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+				on:click={async () => {
+					await showSettings.set(true);
+					if ($mobile) {
+						showSidebar.set(false);
+					}
+				}}
+			>
+				<div class="self-center">
+					<Cog6 className="size-[1.1rem]" strokeWidth="2" />
+				</div>
+				<div class="flex self-center translate-y-[0.5px]">
+					<div class=" self-center font-medium text-sm font-primary">{$i18n.t('Settings')}</div>
+				</div>
+			</button>
+		</div>
 
 		{#if enabledModels.length > 0}
 			<div class="px-1.5 mt-2 {$temporaryChatEnabled ? 'opacity-20' : ''}">
