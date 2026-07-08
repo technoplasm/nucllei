@@ -180,18 +180,18 @@ def get_config_value(config_path: str):
     return cur_config
 
 
-PERSISTENT_CONFIG_REGISTRY = []
+RUNTIME_CONFIG_REGISTRY = []
 
 
 def save_config(config):
     global CONFIG_DATA
-    global PERSISTENT_CONFIG_REGISTRY
+    global RUNTIME_CONFIG_REGISTRY
     try:
         save_to_db(config)
         CONFIG_DATA = config
 
         # Trigger updates on all registered RuntimeConfig entries
-        for config_item in PERSISTENT_CONFIG_REGISTRY:
+        for config_item in RUNTIME_CONFIG_REGISTRY:
             config_item.update()
     except Exception as e:
         log.exception(e)
@@ -208,13 +208,21 @@ class RuntimeConfig(Generic[T]):
         self.config_path = config_path
         self.env_value = env_value
         self.config_value = get_config_value(config_path)
-        # llens #30: env を単一の正の源とする。起動時は env が必ず DB(config テーブル)より
-        # 優先される(旧来は DB 値があれば DB 勝ち=「env を変えたのに反映されない」#30 の温床)。
-        # 実行中の UI 変更は DB へ永続し稼働中は有効(複数ワーカーで共有)だが、次の起動で
-        # env が再び上書きする。恒久変更の唯一の経路は env/compose。
-        self.value = env_value
+        # llens #30: 起動時の優先順位 = 明示 env > DB(UI 保存)> 既定。
+        # - env(env_name)が非空 = 明示設定 → env が正。実効値に採用し、起動時に DB へ
+        #   書き込む(config-as-code の権威シード。env を変えれば必ず効く)。
+        # - env が空 → DB の保存値(実行中の UI 変更)を採用(= 再起動後も残る永続設定)。
+        # - DB も無ければ既定(env 空時の env_value は既定合成済み)。
+        if os.environ.get(env_name, "") != "":
+            self.value = env_value
+            if self.value != self.config_value:
+                self.save()
+        elif self.config_value is not None:
+            self.value = self.config_value
+        else:
+            self.value = env_value
 
-        PERSISTENT_CONFIG_REGISTRY.append(self)
+        RUNTIME_CONFIG_REGISTRY.append(self)
 
     def __str__(self):
         return str(self.value)

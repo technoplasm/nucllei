@@ -1,29 +1,37 @@
 # llens の設定モデル(config layer)— #30
 
-OWUI の設定は **env を単一の正の源(single source of truth)**とする。真実源は本メモ。
+設定の優先順位は **明示 env > DB(UI 保存)> 既定** の3段階。真実源は本メモ。
 既定「値」は `llens-defaults.md`、本メモは「どう管理するか」。
 
-## モデル(env 正・起動時に再強制。DB は稼働中の可変ストア)
-> **env が毎回の起動で必ず勝つ(正の源)。実行中の UI 変更は DB に載って稼働中は有効
-> (複数ワーカーで共有)だが、次の起動で env が再び上書きする。恒久変更の唯一の経路は env/compose。**
+## モデル(明示 env > DB > 既定)
+> **env が非空(明示設定)なら env が正 — 起動時にその値を DB へ書き込む(config-as-code の
+> 権威シード。env を変えれば必ず効く)。env が空なら DB の保存値(UI 変更)を採用し、再起動後も
+> 残る。DB も無ければ既定値。**
 
-- **起動時**: 各 config の実効値 = env(あれば)/ 無ければ hardcoded 既定。**env が DB 値より優先**。
-- **実行中**: admin UI からの変更は `app.state.config` に反映 + **DB へ永続**(`RuntimeConfig.save()`)。
-  稼働中は有効で、Redis 経由で複数ワーカーに共有される。
-- **再起動**: env が実効値を上書きし直す(DB の実行時値は起動時には勝てない)。
-- 帰結: 「env を変えたのに反映されない」が起きない。durable にしたい値は env/compose に置く運用
-  (横展開の環境構築も env/compose ファイルが正)。
+- **起動時**(`RuntimeConfig.__init__`)の実効値:
+  1. `env_name` が **非空** → env 値を採用し、DB(config テーブル)へ書き込む(env が DB を上書き)。
+  2. env が空 → **DB の保存値**(あれば)を採用(= UI 変更が永続)。
+  3. DB も無ければ **hardcoded 既定**。
+- **実行中**: admin UI からの変更は `app.state.config` に反映 + DB へ永続(`RuntimeConfig.save()`)。
+  Redis 経由で複数ワーカーに共有。
+- **再起動**: env が設定されている項目はその env 値で再確定(+DB 同期)。env 未設定の項目は
+  DB の保存値がそのまま残る。
+- 帰結:「env を変えたのに反映されない」は起きない(env が常に勝つ)。かつ **env を置いていない
+  項目は UI 設定が永続する**(例: 特定接続を UI で足す運用)。恒久固定したい値は env/compose に置く。
 
-## 背景(#30 で直したバグ)
-OWUI の元実装は「`config` テーブルに値があれば DB が env に勝つ」で、初回起動や UI 保存で
-DB に値が入ると以後 env が無視された(「env を変えたのに反映されない」温床)。
-起動時の優先順位を env 勝ちに反転してこれを解消した。
+## 背景(#30 の経緯)
+- OWUI 元実装は「DB に値があれば DB が env に勝つ」→「env を変えても反映されない」温床。
+- `798a7aa4c`(2026-07-08)でこれを「env が常に勝つ・DB は見ない」に反転したが、**env 未設定項目の
+  UI 保存値が再起動で必ず既定に戻る**副作用が発生(config の DB 永続経路を叩くテストが無く、すり抜け)。
+- 2026-07-09、上記3段階に是正(明示 env > DB > 既定)。TDD(`test_runtime_config.py`)で固定。
 
-## 実装(完了、2026-07-08)
-- 設定機構 `798a7aa4c`: `RuntimeConfig.__init__` を env 勝ちに(起動時は env が DB 値より優先)。
-  `PersistentConfig`→`RuntimeConfig` 改名。`ENABLE_PERSISTENT_CONFIG` 撤去。
-  `save()`/`update()` の DB 永続は維持。DB 永続機構(`config` テーブル / import・export / Redis 共有)は温存。
-  CORE(認証/Filter/authz/defaults)回帰 46 passed。
+## 実装
+- **3段階是正(2026-07-09)**: `RuntimeConfig.__init__` を「明示 env > DB > 既定」に。env 非空時は
+  DB へ書き込む(シード)。TDD `test_runtime_config.py`(env明示→DB反映 / env空→DB採用 / env空+DB無→既定)。
+  レジストリ名を `PERSISTENT_CONFIG_REGISTRY`→`RUNTIME_CONFIG_REGISTRY` に掃除。CORE 回帰 91 passed。
+- 設定機構 `798a7aa4c`(2026-07-08, 上記で是正済み): `PersistentConfig`→`RuntimeConfig` 改名。
+  `ENABLE_PERSISTENT_CONFIG` 撤去。`save()`/`update()` と DB 永続機構(`config` テーブル / import・export /
+  Redis 共有)は温存。
 - Settings 掃除 `e9f15cf10`: admin General・About から update check / What's New / Help・外部リンク /
   License 表示を撤去。version は残す(BSD 著作権・Twemoji は #34 まで温存)。
 - version 焼き込み `c92c0784f`: deploy tag(`prodYYYYMMDD_NN`、#25)を build 時 `APP_VERSION` で
