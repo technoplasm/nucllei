@@ -9,7 +9,6 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModels, getToolServersData } from '$lib/apis';
 	import { getAllTags } from '$lib/apis/chats';
@@ -24,7 +23,6 @@
 		settings,
 		models,
 		skills,
-		knowledge,
 		tools,
 		functions,
 		tags,

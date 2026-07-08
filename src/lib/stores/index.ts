@@ -54,7 +54,6 @@ export const tags = writable([]);
 export const models: Writable<Model[]> = writable([]);
 
 export const skills: Writable<null | Skill[]> = writable(null);
-export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);
 export const functions = writable(null);
 
@@ -188,13 +187,6 @@ type Skill = {
 	access_control?: null | object;
 	created_at: number;
 	updated_at: number;
-};
-
-type Document = {
-	collection_name: string;
-	filename: string;
-	name: string;
-	title: string;
 };
 
 type Config = {
