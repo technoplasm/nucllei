@@ -1,18 +1,14 @@
 <script lang="ts">
-	import { SvelteFlowProvider } from '@xyflow/svelte';
 	import { slide } from 'svelte/transition';
 	import { Pane, PaneResizer } from 'paneforge';
 
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { mobile, showControls, showCallOverlay, showOverview, showArtifacts } from '$lib/stores';
+	import { mobile, showControls, showCallOverlay } from '$lib/stores';
 
 	import Modal from '../common/Modal.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import Drawer from '../common/Drawer.svelte';
-	import Overview from './Overview.svelte';
 	import EllipsisVertical from '../icons/EllipsisVertical.svelte';
-	import Artifacts from './Artifacts.svelte';
-	import { min } from '@floating-ui/utils';
 
 	export let history;
 	export let models = [];
@@ -121,8 +117,6 @@
 
 	const closeHandler = () => {
 		showControls.set(false);
-		showOverview.set(false);
-		showArtifacts.set(false);
 
 		if ($showCallOverlay) {
 			showCallOverlay.set(false);
@@ -134,53 +128,36 @@
 	}
 </script>
 
-<SvelteFlowProvider>
-	{#if !largeScreen}
-		{#if $showControls}
-			<Drawer
-				show={$showControls}
-				on:close={() => {
-					showControls.set(false);
-				}}
-			>
-				<div
-					class=" {$showCallOverlay || $showOverview || $showArtifacts
-						? ' h-screen  w-full'
-						: 'px-6 py-4'} h-full"
-				>
-					{#if $showCallOverlay}
-						<div
-							class=" h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
-						>
-							<CallOverlay
-								bind:files
-								{submitPrompt}
-								{stopResponse}
-								{modelId}
-								{chatId}
-								{eventTarget}
-								on:close={() => {
-									showControls.set(false);
-								}}
-							/>
-						</div>
-					{:else if $showArtifacts}
-						<Artifacts {history} />
-					{:else if $showOverview}
-						<Overview
-							{history}
-							on:nodeclick={(e) => {
-								showMessage(e.detail.node.data.message);
-							}}
+{#if !largeScreen}
+	{#if $showControls}
+		<Drawer
+			show={$showControls}
+			on:close={() => {
+				showControls.set(false);
+			}}
+		>
+			<div class=" {$showCallOverlay ? ' h-screen  w-full' : 'px-6 py-4'} h-full">
+				{#if $showCallOverlay}
+					<div
+						class=" h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
+					>
+						<CallOverlay
+							bind:files
+							{submitPrompt}
+							{stopResponse}
+							{modelId}
+							{chatId}
+							{eventTarget}
 							on:close={() => {
 								showControls.set(false);
 							}}
 						/>
-					{/if}
-				</div>
-			</Drawer>
-		{/if}
-	{:else}
+					</div>
+				{/if}
+			</div>
+		</Drawer>
+	{/if}
+{:else}
 		<!-- if $showControls -->
 
 		{#if $showControls}
@@ -218,9 +195,7 @@
 			{#if $showControls}
 				<div class="flex max-h-full min-h-full">
 					<div
-						class="w-full {($showOverview || $showArtifacts) && !$showCallOverlay
-							? ' '
-							: 'px-4 py-4 bg-white dark:shadow-lg dark:bg-gray-850  border border-gray-100 dark:border-gray-850'} z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
+						class="w-full px-4 py-4 bg-white dark:shadow-lg dark:bg-gray-850  border border-gray-100 dark:border-gray-850 z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
 					>
 						{#if $showCallOverlay}
 							<div class="w-full h-full flex justify-center">
@@ -236,28 +211,10 @@
 									}}
 								/>
 							</div>
-						{:else if $showArtifacts}
-							<Artifacts {history} overlay={dragged} />
-						{:else if $showOverview}
-							<Overview
-								{history}
-								on:nodeclick={(e) => {
-									if (e.detail.node.data.message.favorite) {
-										history.messages[e.detail.node.data.message.id].favorite = true;
-									} else {
-										history.messages[e.detail.node.data.message.id].favorite = null;
-									}
-
-									showMessage(e.detail.node.data.message);
-								}}
-								on:close={() => {
-									showControls.set(false);
-								}}
-							/>
 						{/if}
 					</div>
 				</div>
 			{/if}
 		</Pane>
 	{/if}
-</SvelteFlowProvider>
+

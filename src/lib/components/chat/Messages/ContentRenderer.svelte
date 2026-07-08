@@ -4,7 +4,7 @@
 	const dispatch = createEventDispatcher();
 
 	import Markdown from './Markdown.svelte';
-	import { chatId, mobile, settings, showArtifacts, showControls, showOverview } from '$lib/stores';
+	import { mobile } from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList } from '$lib/utils';
 
@@ -156,19 +156,6 @@
 		{onTaskClick}
 		on:update={(e) => {
 			dispatch('update', e.detail);
-		}}
-		on:code={(e) => {
-			const { lang, code } = e.detail;
-
-			if (
-				($settings?.detectArtifacts ?? true) &&
-				(['html', 'svg'].includes(lang) || (lang === 'xml' && code.includes('svg'))) &&
-				!$mobile &&
-				$chatId
-			) {
-				showArtifacts.set(true);
-				showControls.set(true);
-			}
 		}}
 	/>
 </div>

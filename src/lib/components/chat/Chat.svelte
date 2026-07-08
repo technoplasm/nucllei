@@ -32,9 +32,7 @@
 		currentChatPage,
 		temporaryChatEnabled,
 		mobile,
-		showOverview,
 		chatTitle,
-		showArtifacts,
 		tools,
 		toolServers
 	} from '$lib/stores';
@@ -446,8 +444,6 @@
 
 			if (!value) {
 				showCallOverlay.set(false);
-				showOverview.set(false);
-				showArtifacts.set(false);
 			}
 		});
 
@@ -635,8 +631,6 @@
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
-		await showOverview.set(false);
-		await showArtifacts.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
