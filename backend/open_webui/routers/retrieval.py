@@ -20,24 +20,9 @@ from fastapi import (
     status,
     APIRouter,
 )
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-import tiktoken
 
-
-from langchain.text_splitter import RecursiveCharacterTextSplitter, TokenTextSplitter
 from langchain_core.documents import Document
-
-from open_webui.models.files import FileModel, Files
-from open_webui.models.knowledge import Knowledges
-
-
-from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
-
-# Document loaders
-from open_webui.retrieval.extract import extract_file_text
-from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
 # Web search engines
 from open_webui.retrieval.web.main import SearchResult
@@ -61,18 +46,7 @@ from open_webui.retrieval.web.exa import search_exa
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.sougou import search_sougou
 
-from open_webui.retrieval.utils import (
-    get_embedding_function,
-    get_model_path,
-)
-from open_webui.utils.misc import (
-    calculate_sha256_string,
-)
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import (
-    has_read_access_to_collection,
-    has_read_access_to_file,
-)
 
 from open_webui.config import (
     ENV,
@@ -114,13 +88,7 @@ class SearchForm(BaseModel):
 async def get_status(request: Request):
     return {
         "status": True,
-        "chunk_size": request.app.state.config.CHUNK_SIZE,
-        "chunk_overlap": request.app.state.config.CHUNK_OVERLAP,
         "template": request.app.state.config.RAG_TEMPLATE,
-        "embedding_engine": request.app.state.config.RAG_EMBEDDING_ENGINE,
-        "embedding_model": request.app.state.config.RAG_EMBEDDING_MODEL,
-        "reranking_model": request.app.state.config.RAG_RERANKING_MODEL,
-        "embedding_batch_size": request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
     }
 
 
@@ -130,18 +98,6 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         "status": True,
         # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
         "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
-        # Content extraction settings
-        "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-        "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,
-        "TIKA_SERVER_URL": request.app.state.config.TIKA_SERVER_URL,
-        "DOCLING_SERVER_URL": request.app.state.config.DOCLING_SERVER_URL,
-        "DOCUMENT_INTELLIGENCE_ENDPOINT": request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        "DOCUMENT_INTELLIGENCE_KEY": request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-        "MISTRAL_OCR_API_KEY": request.app.state.config.MISTRAL_OCR_API_KEY,
-        # Chunking settings
-        "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
-        "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
-        "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
         # 添付ファイルの受け入れゲート(#52)
         "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
@@ -242,20 +198,6 @@ class ConfigForm(BaseModel):
     # RAG template(全文注入の system prompt)
     RAG_TEMPLATE: Optional[str] = None
 
-    # Content extraction settings
-    CONTENT_EXTRACTION_ENGINE: Optional[str] = None
-    PDF_EXTRACT_IMAGES: Optional[bool] = None
-    TIKA_SERVER_URL: Optional[str] = None
-    DOCLING_SERVER_URL: Optional[str] = None
-    DOCUMENT_INTELLIGENCE_ENDPOINT: Optional[str] = None
-    DOCUMENT_INTELLIGENCE_KEY: Optional[str] = None
-    MISTRAL_OCR_API_KEY: Optional[str] = None
-
-    # Chunking settings
-    TEXT_SPLITTER: Optional[str] = None
-    CHUNK_SIZE: Optional[int] = None
-    CHUNK_OVERLAP: Optional[int] = None
-
     # 添付ファイルの受け入れゲート(#52)
     ATTACHMENT_MAX_SIZE: Optional[int] = None
     ATTACHMENT_MAX_COUNT: Optional[int] = None
@@ -278,60 +220,6 @@ async def update_rag_config(
         form_data.RAG_TEMPLATE
         if form_data.RAG_TEMPLATE is not None
         else request.app.state.config.RAG_TEMPLATE
-    )
-
-    # Content extraction settings
-    request.app.state.config.CONTENT_EXTRACTION_ENGINE = (
-        form_data.CONTENT_EXTRACTION_ENGINE
-        if form_data.CONTENT_EXTRACTION_ENGINE is not None
-        else request.app.state.config.CONTENT_EXTRACTION_ENGINE
-    )
-    request.app.state.config.PDF_EXTRACT_IMAGES = (
-        form_data.PDF_EXTRACT_IMAGES
-        if form_data.PDF_EXTRACT_IMAGES is not None
-        else request.app.state.config.PDF_EXTRACT_IMAGES
-    )
-    request.app.state.config.TIKA_SERVER_URL = (
-        form_data.TIKA_SERVER_URL
-        if form_data.TIKA_SERVER_URL is not None
-        else request.app.state.config.TIKA_SERVER_URL
-    )
-    request.app.state.config.DOCLING_SERVER_URL = (
-        form_data.DOCLING_SERVER_URL
-        if form_data.DOCLING_SERVER_URL is not None
-        else request.app.state.config.DOCLING_SERVER_URL
-    )
-    request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT = (
-        form_data.DOCUMENT_INTELLIGENCE_ENDPOINT
-        if form_data.DOCUMENT_INTELLIGENCE_ENDPOINT is not None
-        else request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT
-    )
-    request.app.state.config.DOCUMENT_INTELLIGENCE_KEY = (
-        form_data.DOCUMENT_INTELLIGENCE_KEY
-        if form_data.DOCUMENT_INTELLIGENCE_KEY is not None
-        else request.app.state.config.DOCUMENT_INTELLIGENCE_KEY
-    )
-    request.app.state.config.MISTRAL_OCR_API_KEY = (
-        form_data.MISTRAL_OCR_API_KEY
-        if form_data.MISTRAL_OCR_API_KEY is not None
-        else request.app.state.config.MISTRAL_OCR_API_KEY
-    )
-
-    # Chunking settings
-    request.app.state.config.TEXT_SPLITTER = (
-        form_data.TEXT_SPLITTER
-        if form_data.TEXT_SPLITTER is not None
-        else request.app.state.config.TEXT_SPLITTER
-    )
-    request.app.state.config.CHUNK_SIZE = (
-        form_data.CHUNK_SIZE
-        if form_data.CHUNK_SIZE is not None
-        else request.app.state.config.CHUNK_SIZE
-    )
-    request.app.state.config.CHUNK_OVERLAP = (
-        form_data.CHUNK_OVERLAP
-        if form_data.CHUNK_OVERLAP is not None
-        else request.app.state.config.CHUNK_OVERLAP
     )
 
     # 添付ファイルの受け入れゲート(#52)
@@ -446,18 +334,6 @@ async def update_rag_config(
         "status": True,
         # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
         "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
-        # Content extraction settings
-        "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-        "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,
-        "TIKA_SERVER_URL": request.app.state.config.TIKA_SERVER_URL,
-        "DOCLING_SERVER_URL": request.app.state.config.DOCLING_SERVER_URL,
-        "DOCUMENT_INTELLIGENCE_ENDPOINT": request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        "DOCUMENT_INTELLIGENCE_KEY": request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-        "MISTRAL_OCR_API_KEY": request.app.state.config.MISTRAL_OCR_API_KEY,
-        # Chunking settings
-        "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
-        "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
-        "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
         # 添付ファイルの受け入れゲート(#52)
         "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,

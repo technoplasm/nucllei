@@ -1707,42 +1707,8 @@ ONEDRIVE_CLIENT_ID = RuntimeConfig(
     os.environ.get("ONEDRIVE_CLIENT_ID", ""),
 )
 
-# RAG Content Extraction
-CONTENT_EXTRACTION_ENGINE = RuntimeConfig(
-    "CONTENT_EXTRACTION_ENGINE",
-    "rag.CONTENT_EXTRACTION_ENGINE",
-    os.environ.get("CONTENT_EXTRACTION_ENGINE", "").lower(),
-)
-
-TIKA_SERVER_URL = RuntimeConfig(
-    "TIKA_SERVER_URL",
-    "rag.tika_server_url",
-    os.getenv("TIKA_SERVER_URL", "http://tika:9998"),  # Default for sidecar deployment
-)
-
-DOCLING_SERVER_URL = RuntimeConfig(
-    "DOCLING_SERVER_URL",
-    "rag.docling_server_url",
-    os.getenv("DOCLING_SERVER_URL", "http://docling:5001"),
-)
-
-DOCUMENT_INTELLIGENCE_ENDPOINT = RuntimeConfig(
-    "DOCUMENT_INTELLIGENCE_ENDPOINT",
-    "rag.document_intelligence_endpoint",
-    os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT", ""),
-)
-
-DOCUMENT_INTELLIGENCE_KEY = RuntimeConfig(
-    "DOCUMENT_INTELLIGENCE_KEY",
-    "rag.document_intelligence_key",
-    os.getenv("DOCUMENT_INTELLIGENCE_KEY", ""),
-)
-
-MISTRAL_OCR_API_KEY = RuntimeConfig(
-    "MISTRAL_OCR_API_KEY",
-    "rag.mistral_ocr_api_key",
-    os.getenv("MISTRAL_OCR_API_KEY", ""),
-)
+# llens(#52): 文書抽出(docling/tika/document_intelligence/mistral_ocr)は案件層(prism)の
+# Attachment Function が直接担うため、fork 本体の抽出エンジン config は撤去した。
 
 # llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
 # config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。
@@ -1787,12 +1753,6 @@ RAG_EMBEDDING_ENGINE = RuntimeConfig(
     "RAG_EMBEDDING_ENGINE",
     "rag.embedding_engine",
     os.environ.get("RAG_EMBEDDING_ENGINE", ""),
-)
-
-PDF_EXTRACT_IMAGES = RuntimeConfig(
-    "PDF_EXTRACT_IMAGES",
-    "rag.pdf_extract_images",
-    os.environ.get("PDF_EXTRACT_IMAGES", "False").lower() == "true",
 )
 
 RAG_EMBEDDING_MODEL = RuntimeConfig(
@@ -1846,13 +1806,6 @@ RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = (
 )
 
 
-RAG_TEXT_SPLITTER = RuntimeConfig(
-    "RAG_TEXT_SPLITTER",
-    "rag.text_splitter",
-    os.environ.get("RAG_TEXT_SPLITTER", ""),
-)
-
-
 TIKTOKEN_CACHE_DIR = os.environ.get("TIKTOKEN_CACHE_DIR", f"{CACHE_DIR}/tiktoken")
 TIKTOKEN_ENCODING_NAME = RuntimeConfig(
     "TIKTOKEN_ENCODING_NAME",
@@ -1860,15 +1813,6 @@ TIKTOKEN_ENCODING_NAME = RuntimeConfig(
     os.environ.get("TIKTOKEN_ENCODING_NAME", "cl100k_base"),
 )
 
-
-CHUNK_SIZE = RuntimeConfig(
-    "CHUNK_SIZE", "rag.chunk_size", int(os.environ.get("CHUNK_SIZE", "1000"))
-)
-CHUNK_OVERLAP = RuntimeConfig(
-    "CHUNK_OVERLAP",
-    "rag.chunk_overlap",
-    int(os.environ.get("CHUNK_OVERLAP", "100")),
-)
 
 DEFAULT_RAG_TEMPLATE = """### Task:
 Respond to the user query using the provided context, incorporating inline citations in the format [id] **only when the <source> tag includes an explicit id attribute** (e.g., <source id="1">).
