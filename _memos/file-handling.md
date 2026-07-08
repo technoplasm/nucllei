@@ -199,8 +199,12 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。
 
 **残り**:
-- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)/ FileItemModal の実機ビジュアル確認(ブラウザ自動化の
-  ファイル添付制約で保留)/ backend `/retrieval/reranking` endpoint + `RAG_RERANKING_MODEL` は無害 dead で据え置き。
+- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)/ backend `/retrieval/reranking` endpoint +
+  `RAG_RERANKING_MODEL` は無害 dead で据え置き。
+- **FileItemModal の実機確認(次回最優先)**: クリック→モーダルが出ない件で、FileItem の発火条件を
+  `data.content` 依存から `data` 有りに修正済み(98652bebe、未抽出/失敗も開くように)。ただし content 有りでも
+  出ないなら Markdown 描画等の runtime 問題の可能性 → **実機描画を目視確認**(ブラウザ自動化のファイル添付
+  制約で自動取得は保留、dev は 0.0.0.0 + `enda-personal` で実機アクセス可)。
 - **prism 層(fork の仕事でない)**: ③gate(`large_file_gate`)/ PDF→VLM(`pdf_vision_router`)/
   ④sandbox tool(`import_chat_file`)。
 - **KB 撤去**: 根が深く #52 への関与薄いので**据え置き**(access_control #40 / IDOR test 結線)。
