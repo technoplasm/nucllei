@@ -220,6 +220,19 @@
 			}
 		}
 
+		// プロンプト候補: title と prompt(content)は両方必須(空文字は不可)。空配列は null 化して meta を汚さない。
+		if (Array.isArray(info?.meta?.suggestion_prompts)) {
+			const prompts = info.meta.suggestion_prompts;
+			if (prompts.some((p) => (p?.title ?? '').trim() === '' || (p?.content ?? '').trim() === '')) {
+				toast.error($i18n.t('Prompt suggestions require both a title and a prompt.'));
+				loading = false;
+				return;
+			}
+			if (prompts.length === 0) {
+				info.meta.suggestion_prompts = null;
+			}
+		}
+
 		info.params.stop = params.stop ? params.stop.split(',').filter((s) => s.trim()) : null;
 		Object.keys(info.params).forEach((key) => {
 			if (info.params[key] === '' || info.params[key] === null) {
@@ -678,97 +691,82 @@
 
 					<div class="my-2">
 						<div class="flex w-full justify-between items-center">
-							<div class="flex w-full justify-between items-center">
-								<div class=" self-center text-sm font-semibold">
-									{$i18n.t('Prompt suggestions')}
-								</div>
-
-								<button
-									class="p-1 text-xs flex rounded-sm transition"
-									type="button"
-									on:click={() => {
-										if ((info?.meta?.suggestion_prompts ?? null) === null) {
-											info.meta.suggestion_prompts = [{ content: '' }];
-										} else {
-											info.meta.suggestion_prompts = null;
-										}
-									}}
-								>
-									{#if (info?.meta?.suggestion_prompts ?? null) === null}
-										<span class="ml-2 self-center">{$i18n.t('Default')}</span>
-									{:else}
-										<span class="ml-2 self-center">{$i18n.t('Custom')}</span>
-									{/if}
-								</button>
+							<div class=" self-center text-sm font-semibold">
+								{$i18n.t('Prompt suggestions')}
 							</div>
 
-							{#if (info?.meta?.suggestion_prompts ?? null) !== null}
-								<button
-									class="p-1 px-2 text-xs flex rounded-sm transition"
-									type="button"
-									on:click={() => {
-										if (
-											info.meta.suggestion_prompts.length === 0 ||
-											info.meta.suggestion_prompts.at(-1).content !== ''
-										) {
-											info.meta.suggestion_prompts = [
-												...info.meta.suggestion_prompts,
-												{ content: '' }
-											];
-										}
-									}}
+							<button
+								class="p-1 px-2 text-xs flex rounded-sm transition"
+								type="button"
+								on:click={() => {
+									const prompts = info.meta.suggestion_prompts ?? [];
+									if (
+										prompts.length === 0 ||
+										(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
+									) {
+										info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
+									}
+								}}
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									class="w-4 h-4"
 								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 20 20"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
-										/>
-									</svg>
-								</button>
-							{/if}
+									<path
+										d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
+									/>
+								</svg>
+							</button>
 						</div>
 
-						{#if info?.meta?.suggestion_prompts}
-							<div class="flex flex-col space-y-1 mt-1 mb-3">
-								{#if info.meta.suggestion_prompts.length > 0}
-									{#each info.meta.suggestion_prompts as prompt, promptIdx}
-										<div class=" flex rounded-lg">
+						<div class="flex flex-col space-y-1.5 mt-1 mb-3">
+							{#if (info.meta.suggestion_prompts ?? []).length > 0}
+								{#each info.meta.suggestion_prompts as prompt, promptIdx}
+									<div class=" flex border border-gray-100 dark:border-gray-850 rounded-lg">
+										<div class="flex flex-col flex-1">
 											<input
-												class=" text-sm w-full bg-transparent outline-hidden border-r border-gray-100 dark:border-gray-850"
-												placeholder={$i18n.t('Write a prompt suggestion (e.g. Who are you?)')}
-												bind:value={prompt.content}
+												class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-gray-100 dark:border-gray-850"
+												placeholder={$i18n.t('Title (e.g. Greeting)')}
+												bind:value={prompt.title}
+												required
 											/>
-
-											<button
-												class="px-2"
-												type="button"
-												on:click={() => {
-													info.meta.suggestion_prompts.splice(promptIdx, 1);
-													info.meta.suggestion_prompts = info.meta.suggestion_prompts;
-												}}
-											>
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													viewBox="0 0 20 20"
-													fill="currentColor"
-													class="w-4 h-4"
-												>
-													<path
-														d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-													/>
-												</svg>
-											</button>
+											<input
+												class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
+												placeholder={$i18n.t('Prompt (e.g. Who are you? Show me a quick demo.)')}
+												bind:value={prompt.content}
+												required
+											/>
 										</div>
-									{/each}
-								{:else}
-									<div class="text-xs text-center">No suggestion prompts</div>
-								{/if}
-							</div>
-						{/if}
+
+										<button
+											class="px-2"
+											type="button"
+											on:click={() => {
+												info.meta.suggestion_prompts.splice(promptIdx, 1);
+												info.meta.suggestion_prompts = info.meta.suggestion_prompts;
+											}}
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 20 20"
+												fill="currentColor"
+												class="w-4 h-4"
+											>
+												<path
+													d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+												/>
+											</svg>
+										</button>
+									</div>
+								{/each}
+							{:else}
+								<div class="text-xs text-center text-gray-500 py-2">
+									{$i18n.t('No prompt suggestions')}
+								</div>
+							{/if}
+						</div>
 					</div>
 				{:else if selectedTab === 'advanced'}
 					<div class="my-2">

@@ -90,22 +90,21 @@
 				on:click={() => dispatch('select', prompt.content)}
 			>
 				<div class="flex flex-col text-left">
-					{#if prompt.title && prompt.title[0] !== ''}
+					{#if prompt.title}
 						<div
 							class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-1"
 						>
-							{prompt.title[0]}
+							{prompt.title}
 						</div>
-						<div class="text-xs text-gray-500 font-normal line-clamp-1">
-							{prompt.title[1]}
+						<div class="text-xs text-gray-500 font-normal line-clamp-2">
+							{prompt.content}
 						</div>
 					{:else}
 						<div
-							class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-1"
+							class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-2"
 						>
 							{prompt.content}
 						</div>
-						<div class="text-xs text-gray-500 font-normal line-clamp-1">{$i18n.t('Prompt')}</div>
 					{/if}
 				</div>
 			</button>
