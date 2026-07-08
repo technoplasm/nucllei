@@ -4,14 +4,12 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { knowledge, skills } from '$lib/stores';
+	import { skills } from '$lib/stores';
 
 	import { removeLastWordFromString } from '$lib/utils';
 	import { getSkills } from '$lib/apis/skills';
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
 
 	import Skills from './Commands/Skills.svelte';
-	import Knowledge from './Commands/Knowledge.svelte';
 	import Models from './Commands/Models.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -37,12 +35,13 @@
 	// llens(issue #35): `/command` はサーバが「入力全体の先頭行の行頭」でしか発火しない。
 	// そのため skill picker は入力全体が最初のトークン(= `/` に続く command)編集中の
 	// ときだけ出す。従来の「最終行の最終単語」判定だとメッセージ途中の `/` でも picker が
-	// 出てしまい、サーバの実挙動と乖離する。#(knowledge)/@(model) は従来判定のまま。
+	// 出てしまい、サーバの実挙動と乖離する。@(model) は従来判定のまま。
+	// llens(#52): #(knowledge) picker は RAG 撤去に伴い廃止。
 	let showSkills = false;
 	$: showSkills = /^\/[a-zA-Z0-9_-]*$/.test(prompt ?? '');
 
 	let show = false;
-	$: show = showSkills || ['#', '@'].includes(command?.charAt(0)) || '\\#' === command.slice(0, 2);
+	$: show = showSkills || command?.charAt(0) === '@';
 
 	$: if (show) {
 		init();
@@ -50,14 +49,7 @@
 
 	const init = async () => {
 		loading = true;
-		await Promise.all([
-			(async () => {
-				skills.set(await getSkills(localStorage.token));
-			})(),
-			(async () => {
-				knowledge.set(await getKnowledgeBases(localStorage.token));
-			})()
-		]);
+		skills.set(await getSkills(localStorage.token));
 		loading = false;
 	};
 </script>
@@ -66,42 +58,6 @@
 	{#if !loading}
 		{#if showSkills}
 			<Skills bind:this={commandElement} bind:prompt command={prompt} {allowedSkillIds} />
-		{:else if (command?.charAt(0) === '#' && command.startsWith('#') && !command.includes('# ')) || ('\\#' === command.slice(0, 2) && command.startsWith('#') && !command.includes('# '))}
-			<Knowledge
-				bind:this={commandElement}
-				bind:prompt
-				command={command.includes('\\#') ? command.slice(2) : command}
-				on:youtube={(e) => {
-					console.log(e);
-					dispatch('upload', {
-						type: 'youtube',
-						data: e.detail
-					});
-				}}
-				on:url={(e) => {
-					console.log(e);
-					dispatch('upload', {
-						type: 'web',
-						data: e.detail
-					});
-				}}
-				on:select={(e) => {
-					console.log(e);
-					if (files.find((f) => f.id === e.detail.id)) {
-						return;
-					}
-
-					files = [
-						...files,
-						{
-							...e.detail,
-							status: 'processed'
-						}
-					];
-
-					dispatch('select');
-				}}
-			/>
 		{:else if command?.charAt(0) === '@'}
 			<Models
 				bind:this={commandElement}
