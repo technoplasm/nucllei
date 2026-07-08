@@ -4,14 +4,14 @@
 
 | 機能 | 判断 | 備考 |
 |---|---|---|
-| ナレッジベース(組み込み) | **不要・ナビ撤去済み(#48)** | 独自実装が別にあるため。OWUI 側はキャッチアップしない。#48 で Workspace ナビから Knowledge タブを撤去(添付は file_id でチャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側。route/backend は温存、KB backend の掃除は #52(ファイルエンティティ設計)で後日) |
-| Documents(文書抽出) | **Docling が使えれば十分** | v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)。それ以上の投資不要 |
-| RAG / retrieval | **一切不使用** | 将来必要になってもツール側で実装する方針 |
+| ナレッジベース(組み込み) | **不要・撤去済み(#48 ナビ / #52 で完全撤去)** | 独自実装が別にあるため。#48 で Workspace ナビから撤去。**改訂(2026-07-08 #52 第2セッション): route/backend も完全撤去**(workspace KB 画面・チャット `#` ピッカー・モデル KB 割当・knowledge store・knowledge router 全 endpoint)。温存は `models/knowledge.py`(Knowledges)のみ(access_control #40 / IDOR test 結線) |
+| Documents(文書抽出) | **Docling が使えれば十分(実体は prism)** | ~~v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)~~ → **改訂(2026-07-08 #52): fork の抽出 preset(extract_file_text/Loader/CONTENT_EXTRACTION_ENGINE 等)は撤去。docling 抽出は案件層(prism)の Attachment Function が直接叩く(`owui/attachments/docling_extract.py`)。fork は「仕組み」だけ** |
+| RAG / retrieval | **一切不使用・撤去済み(#52)** | 将来必要になってもツール側で実装。**2026-07-08: embedding/vector/reranking/chunk/RAG_TEMPLATE を config から完全排除** |
 | Web 検索 | **残す(組み込みツールとして提供)** | OWUI 組み込みの RAG/検索経路ではなく、llens の組み込みツール枠で提供(#51)。RAG/Documents/Docling とは完全に別物 |
 | 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで |
 | コード実行(組み込み Pyodide/Jupyter) | **無くてもよい** | nsjail+IPython は自前ツール側で提供。Pyodide には戻さない(fork.md §6) |
 | 会話検索 | **必要・維持** | v0.6.5 に存在(タイトル+本文検索)。デグレさせない |
-| メモリー | **放置** | 使っていないが消すほどでもない。無効化も削除も投資もしない(issue #8 は close) |
+| メモリー | **素の SQL ストアに降格(#52)** | ~~放置・無効化も削除も投資もしない~~ → **改訂(2026-07-08 #52): embedding/vector 基盤撤去の一環で、memory を Claude 方式の「完全自然言語」ストアに降格**(`routers/memories.py` から VECTOR_DB/EMBEDDING_FUNCTION を除去、`/query` は全 memory を素で返す。テーブル/content/UI は温存)。これが embedding/vector の最後の消費者だった(issue #8 は close) |
 | ノート | 無いままでよい | v0.6.5 に存在しない。追加しない |
 | タスク / オートメーション / カレンダー | 無いままでよい | v0.6.5 に存在しない。追加しない |
 | 画像生成 | **機能として維持** | 厳密なキャッチアップは不要。動く状態を保つ(KEEP-MINIMAL 扱い) |
@@ -120,5 +120,5 @@ Public/Private=access_control とは別軸)。
 検証: CORE 回帰 36 passed(auth/filter/authz/defaults)/ 6タブ統合ナビ・各ページ・`/admin` リダイレクト /
 `/api/models` に arena 0 件・feedback テーブル drop 済み / 実チャット(SGLang Kimi)で reasoning + 本文正常・
 `</details>` 漏れなし・console エラー 0。**#48 close**。
-残: i18n(新タブ含む未訳 → #34 に集約)/ Knowledge KB backend の掃除(#52)/ #48 で作った
-`feat/48-admin-workspace-merge` ブランチは ff マージ後に削除済み。
+残: i18n(新タブ含む未訳 → #34 に集約)。~~Knowledge KB backend の掃除(#52)~~ → 完了(2026-07-08)。
+#48 で作った `feat/48-admin-workspace-merge` ブランチは ff マージ後に削除済み。

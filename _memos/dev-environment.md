@@ -14,6 +14,11 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
   テストは `cd backend && ../.venv/bin/pytest open_webui/test -q`(または repo ルートで `uv run pytest`)。
+  **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
+  black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black open_webui/`**
+  (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。
+- `.git/index.lock` が時々出るのは shell prompt の `gitstatusd` が握るため — stale なら `rm -f .git/index.lock`
+  して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
 - open_webui は **import 時に DATABASE_URL などの env が確定**する(migration も import 時)。

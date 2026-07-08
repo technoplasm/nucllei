@@ -190,8 +190,9 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **RAG 固有 config 撤去**(e802e3c5a + Documents 779075938): `RAG_TOP_K`/`TOP_K_RERANKER`/
   `RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL` を
   config・main 配線・/retrieval/config・middleware・Documents UI から一掃。BYPASS の起動時 embedding/reranking
-  ロードスキップは無条件化(air-gapped)。**温存**: RAG_TEMPLATE / embedding・vector・EMBEDDING_FUNCTION
-  (memories #8)/ CHUNK・docling・tika / PDF_EXTRACT_IMAGES。強制全文(context=="full")分岐も撤去。
+  ロードスキップは無条件化(air-gapped)。~~**温存**: RAG_TEMPLATE / embedding・vector・EMBEDDING_FUNCTION
+  (memories #8)/ CHUNK・docling・tika / PDF_EXTRACT_IMAGES~~ → **改訂(2026-07-08 第2セッション)で全撤去**
+  (下記「## RAG/KB 完全撤去」参照)。強制全文(context=="full")分岐も撤去。
 - **① 受け入れゲート**(c0654415d): upload 入口(Attachment 前)で server-side に拡張子 whitelist +
   サイズ上限を強制。config を **`ATTACHMENT_MAX_SIZE`(既定 25MB)/ `ATTACHMENT_MAX_COUNT` /
   `ATTACHMENT_ALLOWED_EXTENSIONS`(空=全許可)** に統一(旧 RAG_FILE_MAX_* を廃止、`attachment.*` 永続キー)。
@@ -199,22 +200,62 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。
 
 **残り**:
-- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)/ backend `/retrieval/reranking` endpoint +
-  `RAG_RERANKING_MODEL` は無害 dead で据え置き。
+- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)。~~`/retrieval/reranking`/`RAG_RERANKING_MODEL`~~
+  → 撤去済み(掃除8a)。
 - **FileItemModal の実機確認(次回最優先)**: クリック→モーダルが出ない件で、FileItem の発火条件を
   `data.content` 依存から `data` 有りに修正済み(98652bebe、未抽出/失敗も開くように)。ただし content 有りでも
   出ないなら Markdown 描画等の runtime 問題の可能性 → **実機描画を目視確認**(ブラウザ自動化のファイル添付
   制約で自動取得は保留、dev は 0.0.0.0 + `enda-personal` で実機アクセス可)。
 - **prism 層(fork の仕事でない)**: ③gate(`large_file_gate`)/ PDF→VLM(`pdf_vision_router`)/
   ④sandbox tool(`import_chat_file`)。
-- **KB 撤去**: 根が深く #52 への関与薄いので**据え置き**(access_control #40 / IDOR test 結線)。
+- ~~**KB 撤去**: 根が深く据え置き~~ → **完了(2026-07-08 第2セッション、下記参照)**。
 - **§未確定**: ③ で画像・音声を予算に数えるか(prism gate)。① 上限は 25MB で確定・全文強制トグルは撤去確定。
+
+## RAG/KB 完全撤去(2026-07-08 第2セッション、`aeed2aad4`〜`5b8cf563f`)
+
+前セッションで「温存/据え置き」にした RAG/KB 一式を**外側(フロント)→内側(config)へ層別に完全撤去**。
+目標は「Attachment(docling 直叩き)が動く薄いチャット基盤」。設計判断:
+
+- **docling 抽出は fork から出す**: `retrieval/extract.py::extract_file_text` と `loaders/main.py`
+  (Loader/DoclingLoader/TikaLoader)を撤去。抽出は**案件層(prism)の Attachment Function が docling を
+  直接叩く**方式に一本化(prism 実体: `owui/attachments/docling_extract.py`。`Storage.get_file` +
+  `POST /v1/convert/file`、do_ocr=false 等は Valves)。→ **`CONTENT_EXTRACTION_ENGINE`/`DOCLING_SERVER_URL`/
+  `TIKA`/`DOCUMENT_INTELLIGENCE`/`MISTRAL_OCR`/`PDF_EXTRACT_IMAGES`/`CHUNK_*`/`TEXT_SPLITTER` を config から撤去**。
+- **Attachment 契約に第3の帰結 `None=skip`**(`7f974a54b`): 対象外(拡張子 whitelist 外)は raise でなく
+  None を返し「未抽出(none)= Attachment 未割り当てと同じ」扱い。dispatch は None で何も永続化せず次へ continue。
+- **KB 完全撤去**(Layer1-4): workspace KB 画面/route・チャット `#` ピッカー・モデル KB 割当・`knowledge`
+  store・web/youtube 取り込み・apis/knowledge・**knowledge router(HTTP endpoint 12個)**を撤去。
+  **温存境界(#40 CORE)**: `models/knowledge.py`(Knowledges)は `has_read_access_to_collection` + IDOR test が
+  使うため残す。`middleware.filter_files_by_user_access` も温存。
+- **embedding/vector 基盤撤去**(掃除8): **memory を素の SQL ストアに降格**(`routers/memories.py` から
+  VECTOR_DB_CLIENT/EMBEDDING_FUNCTION を除去、`/query` は全 memory を自然言語で返す=Claude 方式。テーブル/
+  content/UI は温存)。これで基盤の最後の消費者が消え、`retrieval/vector/` パッケージ丸ごと・
+  `EMBEDDING_FUNCTION` 起動時生成・`RAG_EMBEDDING_*`/`VECTOR_DB`/接続キー を撤去(air-gapped で
+  SentenceTransformers ロードも消滅)。
+- **RAG_TEMPLATE(包む機構)撤去**(掃除11): middleware で `<source>` context を `rag_template()` で包まず
+  **そのまま注入**。指示(引用ルール等)が要れば preset system prompt(prism)が持つ。→ **config.py の RAG_ 系ゼロ**。
+- **web 検索は tool 用に温存、RAG 結合のみ解除**(`08ecc904c`): middleware の `chat_web_search_handler`
+  (自動検索→RAG 注入)と `/api/config` の `enable_web_search` feature を撤去(フロント built-in トグルは
+  gate で自動的に隠れる)。検索 API(`/process/web/search`・`search_web`・エンジン・`WEB_SEARCH_*` config)は
+  残し、将来 prism の検索 tool が内部検索 API として叩く。query-generation は撤去(掃除9)。
+- **`ENABLE_RAG_LOCAL_WEB_FETCH` → `WEB_LOADER_ALLOW_LOCAL_FETCH` 改名**(`c51fb15a7`): 実体は web loader の
+  SSRF ガード(localhost/内部 IP fetch を既定拒否)で RAG 無関係。config から "RAG" の名前も一掃。
+- **検証**: app 起動 OK / バックエンド全 **214 passed**(#40 IDOR・attachment・gate 含む)/ CI 緑 /
+  **添付 chat 注入 E2E**(docling 抽出→生 `<source>` 注入→モデルが marker 正答)+ memory 素ストア 実機確認。
+
+### 残り(第2セッション後)
+- **フロントの inert web 検索 UI**: `webSearchEnabled` トグル / `processWebSearch` import / `WebSearchResults` /
+  Interface `toggleWebSearch` — `enable_web_search` gate で非表示だがコード残存(Chat/MessageInput/Placeholder/
+  ResponseMessage)。絡みが深いチャット UI なので未着手。
+- **prism 層**: web 検索 tool(内部検索 API を叩く)/ ③gate / PDF→VLM / ④sandbox tool。
 
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
   `owui/tools/sandbox.py`・`sandbox/README.md`。
-- 現状 fork のフロー: upload=`routers/files.py` / 抽出=`routers/retrieval.py::process_file` /
-  注入=`utils/middleware.py::chat_completion_files_handler` + `retrieval/utils.py::get_sources_from_files`。
+- 現状 fork のフロー(2026-07-08 第2セッション後): upload=`routers/files.py` → `utils/attachment.py`
+  (Attachment dispatch) / 抽出=**prism の Attachment Function が docling 直叩き**(fork の
+  `process_file`/`extract_file_text` は撤去済み) / 注入=`utils/middleware.py::chat_completion_files_handler`
+  + `retrieval/utils.py::get_sources_from_files`(`<source>` タグを RAG_TEMPLATE で包まず直注入)。
 - 関連: #18(builtin tool)/ #46(per-model filter)/ #13(Filter ミドルウェア化)/ #40(file IDOR)/ #41(clone・別軸)。
 
 ## 確定(2026-07-08 追記)
