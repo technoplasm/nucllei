@@ -1,18 +1,22 @@
 """組み込み Function(#52 プランB)。
 
-リポジトリのコードで定義され、Function テーブルに builtin 行として起動時 sync される。
-カスタム Function と同列(型ごとの割り当て・valves・ロード機構がそのまま効く)で、
-違いは content が DB でなく repo モジュールから来ること。builtin tool(#18,
-`builtin_tools/`)の Function 版。
+**方針**: fork 本体は「Attachment という新 Function type の仕組み」を持つ。実際のファイル処理
+ポリシー(振り分けの本体)は案件層(prism-llens `owui/`)の Function として authored される。
+ただし Attachment は新種で既存実装が無く「何も無いと使いづらい」ので、**初期/参照実装の
+既定 Attachment を1本だけ builtin で同梱**する(prism は自前の Attachment を積むので本番では
+使わなくてよい)。gate(large_file_gate)や sandbox tool のような既存ポリシーは prism にあり、
+本体に重複させない — ここには入れない。
 
-Function テーブルは #45/#43 で `meta` 列ごと撤去済み → tool の `meta.builtin` フラグは
-使えない。**builtin 判別は id 接頭辞 `builtin_` 一本**(この BUILTIN_FUNCTIONS dict が
-ロードの真実源)。content 更新・削除は将来 routers 側で拒否する(定義の真実源は常に repo)。
+builtin は repo のコードで定義され、Function テーブルに builtin 行として起動時 sync される。
+カスタム Function と同列(型ごとの割り当て・valves・ロード機構がそのまま効く)で、違いは
+content が DB でなく repo モジュールから来ること。Function テーブルは #45/#43 で `meta` 列ごと
+撤去済み → tool の `meta.builtin` フラグは使えず、**builtin 判別は id 接頭辞 `builtin_` 一本**
+(この BUILTIN_FUNCTIONS dict がロードの真実源)。content 更新・削除は将来 routers 側で拒否する。
 """
 
 import logging
 
-from open_webui.builtin_functions import attachment, large_file_gate
+from open_webui.builtin_functions import attachment
 
 log = logging.getLogger(__name__)
 
@@ -28,17 +32,6 @@ BUILTIN_FUNCTIONS = {
             "アップロードされたファイルをテキスト化する既定フック。"
             "content_type で STT / docling 抽出 / 素通しを振り分ける"
             "(判定リストは valves で設定可能)。"
-        ),
-    },
-    "builtin_large_file_gate": {
-        "module": large_file_gate,
-        "class_name": "Filter",
-        "type": "filter",
-        "name": "注入 gate(大容量ファイル)",
-        "description": (
-            "添付の抽出テキストを実測し、合算 context 予算を超える分を大きい順に "
-            "context から除去して file_id を告知する inlet filter。"
-            "モデルへの割り当て(filterIds)で適用。"
         ),
     },
 }

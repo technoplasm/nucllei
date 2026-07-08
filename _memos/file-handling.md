@@ -111,7 +111,8 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   - 「単一 file→text モデル」も **文書抽出種別の一エンジン**として登録(engine=model 接続)。engine URL か model 接続かは各種別の内部で吸収、種別をまたいでは吸収しない。
   - **入口は「設定で登録したエンジン」に対応してあればいい**(STT の入口に音声を渡せば登録済み STT エンジンが反応する、という素直な対応)。
 - **Attachment フック(Function・新 type=`attachment`)= ルータ**。content_type / 拡張子で種別を判定し、対応する内部APIを**呼び分ける**。filter/action/pipe と同じ Function infra(ロード/実行/valves)を流用。core は一様化も自動実行もしない。
-- **③gate は inlet filter のまま**(per-model、prism `large_file_gate` 昇格)。data.content を読むだけ。
+- **③gate は inlet filter のまま**(per-model)。実体は prism `large_file_gate`(案件層)。fork は
+  filter 機構を提供するだけで本体には持たない。data.content を読むだけ。
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
@@ -128,7 +129,9 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 2. **種別ごとの内部API露出**(入口を揃えない): 文書抽出=`file_id → 文字列`(冪等・キャッシュ=data.content、`Loader` ラップ)/ STT=`音声 → 文字列` / TTS=`テキスト → 音声`。各種別は設定で登録したエンジンに対応。**これらは内部関数で、hook/filter から呼べるほか builtin tool(#18)の実装からも呼べる**。tool として直接モデルに露出するのではなく、**tool のコードが内部関数を叩く**向き(モデルは tool 経由で間接的に文書読取/STT/TTS を使う)。
 3. **Attachment フック(新 Function type=`attachment`)**: upload router に呼び出し口。非同期実行 + フック内タイムアウト制御。失敗は content にメッセージ。
 4. **① 薄い受け入れゲート**だけ core(size / ext、upload は filter 前なので拒否はここだけ)。
-5. **③gate は inlet filter**: prism `large_file_gate`(合算予算・大きい順除去・file_id 告知)を Function 移植。PDF→VLM は `pdf_vision_router` 移植(Kimi VLM 有)。
+5. **③gate は inlet filter(案件層=prism)**: fork は inlet filter 機構を提供するだけ。実体
+   (prism `large_file_gate`=合算予算・大きい順除去・file_id 告知、`pdf_vision_router`)は prism の
+   Function をそのまま使う。**fork 本体には移植しない**(重複回避)。④ sandbox tool も同様に prism 層。
 6. **フロント**: 処理中/failed プレビュー、送信時の未抽出ハンドリング。
 
 ## 実装状況(ブランチ `feat/52-file-handling`、2026-07-08)
@@ -150,26 +153,28 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。builtin id は
   `BUILTIN_FUNCTIONS` から直接引く(コードが真実源・sync 前でも発火)。**全 206 passed・挙動不変**。
 
-**済(プランB 本体・フェーズ3 の一部 = ③gate)**:
-- **注入 gate を builtin filter として移植**(46fd2ccd4): `builtin_functions/large_file_gate.py`
-  (`builtin_large_file_gate`, type filter)。inlet で抽出テキストを tiktoken 実測し **合算予算
-  超過分を大きい順に除去**(prism 固定閾値ではなく昇格版)+ file_id 告知 system 指示。failed(抽出空+
-  raw 大)は告知するが body に残す。fail-open。fork 適応: get_file_by_id は sync / skill mention
-  ローダ無しで撤去 / vision 除外は pdf_vision_router 未移植で一旦省略。`utils/filter.py`(CORE)を
-  builtin 対応に(id 接頭辞 → load_builtin_function)。per-model の filterIds 割り当てで適用。
-  テスト 9 件追加(gate アルゴリズム / builtin sync / filter dispatch の builtin ロード)。全 215 passed。
+**方針の確定(2026-07-08)— fork 本体 vs 案件層(prism)の線引き**:
+- prism-llens の filter/tool(gate = `owui/filters/large_file_gate.py`、sandbox tool =
+  `owui/tools/sandbox.py` 等)は**そのまま使う**。同じものを fork 本体に重複させない。
+- **fork 本体が持つのは「仕組み」だけ**: Attachment という新 Function type(plugin loader の
+  type 判定 + dispatch + files.py 配線)、内部関数 `extract_file_text`、既存の filter/tool 機構、
+  Files API。**③gate も ④sandbox tool も fork には作らない**(prism 層のポリシー)。
+- **例外 = builtin Attachment**: Attachment は新種で既存実装が無く「何も無いと使いづらい」ので、
+  初期/参照実装を1本だけ builtin 同梱(prism は自前を積むので本番では未使用でよい)。
+- ※ 一度 fork 本体に builtin filter として入れた gate(旧 46fd2ccd4)は上記方針に反するため撤去した。
 
 **プランB 本体 残り**:
 - **フェーズ2(per-model トグル)**: `model.meta.attachmentIds` 解決 + upload が model 文脈を受け取る
   + フロント Selector(ワークスペースのモデル設定)。builtin の content 更新/削除拒否(routers/functions.py)も。
-- **フェーズ3 残り**: 非同期実行+処理中プレビュー(file に extracting→done)/ STT・TTS 内部関数(後回し可)/
-  PDF→VLM(`pdf_vision_router` 移植・gate の vision 除外も戻す)/ ④sandbox tool 移植(`import_chat_file`)。
+- **フェーズ3 残り(fork 側)**: 非同期実行+処理中プレビュー(file に extracting→done)/
+  STT・TTS 内部関数(後回し可)。gate・PDF→VLM・sandbox tool(`import_chat_file`)は **prism 層**の仕事。
 
 **未着手(要ユーザー判断・絡みが深い / teardown 残り)**:
 - **config キー撤去**(`RAG_TOP_K`/`RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL`/embedding/reranking/chunk/vector)→ **フロント `Documents.svelte` が `/retrieval/config` で docling・FILE_MAX と RAG 設定を同一 endpoint で読む**ため、config endpoint の分割(docling/upload 設定を RAG から分離)が要る。フロント刷新を伴う。
 - **KB(ナレッジベース)撤去** → `models/knowledge.py::Knowledges` が `access_control.has_read_access_to_collection`(#40 CORE セキュリティ)と `test_file_access_idor.py` に結線。router 撤去は可だがモデルは温存 or access_control 改修が要る。
 - **vector connector / embedding(ef/rf)撤去** → **`routers/memories.py`(#8 放置方針)が `VECTOR_DB_CLIENT` + `EMBEDDING_FUNCTION` を共有**。connector 本体撤去は memories の去就決定が前提。
-- **プランB 本体(未着手)**: プロバイダ登録 + `extract()` 内部API / upload フック(新 Function type)/ ③gate filter(large_file_gate 移植)/ ④sandbox tool 移植(owui/tools/sandbox.py)/ フロント処理中プレビュー。
+- **プランB 本体(fork 側の残り)**: フェーズ2(per-model トグル・フロント)/ 非同期+処理中プレビュー /
+  STT・TTS 内部関数(後回し可)。③gate・PDF→VLM・④sandbox tool は **prism 層**(fork 本体では作らない)。
 
 **次の安全な一手の候補**: (a) KB router 撤去(モデル温存・access_control 改修込み)/ (b) config endpoint 分割 → RAG config キー撤去(フロント Documents 刷新込み)。どちらもフロント or CORE セキュリティに触れるため単独判断は避け、着手前に方針確認。
 
