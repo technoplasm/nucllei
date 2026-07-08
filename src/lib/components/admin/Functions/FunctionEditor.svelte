@@ -109,6 +109,26 @@ class Pipe:
         return "Hello from your pipe."
 `;
 
+	// llens(#52): Attachment はアップロード時に発火し、ファイルをテキスト化するルータ。
+	// このモデルに割り当てられた時だけ走り、file.data.content を埋める(単一選択)。
+	const attachmentBoilerplate = `from pydantic import BaseModel, Field
+from typing import Optional
+
+
+class Attachment:
+    class Valves(BaseModel):
+        pass
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    def process(self, file, __request__, __user__: Optional[dict] = None):
+        # Fired on upload when this Attachment is assigned to the model.
+        # Route by file.meta["content_type"] and turn the file into text,
+        # storing it in file.data.content (delegate to internal extractors).
+        return file
+`;
+
 	// 作成時に選択中の type(雛形の切り替えに使う)。編集時は既存 content をそのまま出す。
 	let selectedType = 'filter';
 	$: boilerplate =
@@ -116,7 +136,9 @@ class Pipe:
 			? actionBoilerplate
 			: selectedType === 'pipe'
 				? pipeBoilerplate
-				: filterBoilerplate;
+				: selectedType === 'attachment'
+					? attachmentBoilerplate
+					: filterBoilerplate;
 
 	const saveHandler = async () => {
 		loading = true;
@@ -205,6 +227,7 @@ class Pipe:
 									aria-label={$i18n.t('Function Type')}
 								>
 									<option value="filter">{$i18n.t('Filter')}</option>
+									<option value="attachment">{$i18n.t('Attachment')}</option>
 									<option value="action">{$i18n.t('Action')}</option>
 									<option value="pipe">{$i18n.t('Pipe')}</option>
 								</select>
