@@ -1788,22 +1788,8 @@ RAG_EMBEDDING_PREFIX_FIELD_NAME = os.environ.get(
     "RAG_EMBEDDING_PREFIX_FIELD_NAME", None
 )
 
-RAG_RERANKING_MODEL = RuntimeConfig(
-    "RAG_RERANKING_MODEL",
-    "rag.reranking_model",
-    os.environ.get("RAG_RERANKING_MODEL", ""),
-)
-if RAG_RERANKING_MODEL.value != "":
-    log.info(f"Reranking model set: {RAG_RERANKING_MODEL.value}")
-
-RAG_RERANKING_MODEL_AUTO_UPDATE = (
-    not OFFLINE_MODE
-    and os.environ.get("RAG_RERANKING_MODEL_AUTO_UPDATE", "True").lower() == "true"
-)
-
-RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = (
-    os.environ.get("RAG_RERANKING_MODEL_TRUST_REMOTE_CODE", "True").lower() == "true"
-)
+# llens(#52): reranking(ベクタ検索の再ランキング)は RAG 撤去に伴い廃止。config・
+# 起動時ロード(rf)ともに撤去済み。
 
 
 TIKTOKEN_CACHE_DIR = os.environ.get("TIKTOKEN_CACHE_DIR", f"{CACHE_DIR}/tiktoken")
