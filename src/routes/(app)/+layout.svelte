@@ -29,7 +29,6 @@
 		banners,
 		showSettings,
 		showChangelog,
-		temporaryChatEnabled,
 		toolServers
 	} from '$lib/stores';
 
@@ -169,21 +168,6 @@
 					document.getElementById('show-shortcuts-button')?.click();
 				}
 
-				// Check if Ctrl + Shift + ' is pressed
-				if (
-					isCtrlPressed &&
-					isShiftPressed &&
-					(event.key.toLowerCase() === `'` || event.key.toLowerCase() === `"`)
-				) {
-					event.preventDefault();
-					console.log('temporaryChat');
-					temporaryChatEnabled.set(!$temporaryChatEnabled);
-					await goto('/');
-					const newChatButton = document.getElementById('new-chat-button');
-					setTimeout(() => {
-						newChatButton?.click();
-					}, 0);
-				}
 			});
 
 			// llens: What's New(Changelog)自動ポップアップは upstream のリリース案内で
@@ -191,16 +175,6 @@
 			// 戻すには Settings > Interface の "Show Changelog" を有効化(About の手動ボタンは常時可)。
 			if ($user?.role === 'admin' && ($settings?.showChangelog ?? false)) {
 				showChangelog.set($settings?.version !== $config.version);
-			}
-
-			if ($user?.permissions?.chat?.temporary ?? true) {
-				if ($page.url.searchParams.get('temporary-chat') === 'true') {
-					temporaryChatEnabled.set(true);
-				}
-
-				if ($user?.permissions?.chat?.temporary_enforced) {
-					temporaryChatEnabled.set(true);
-				}
 			}
 
 			// llens: upstream 更新チェックの外部フェッチと通知トーストは機能ごと削除した(issue #10)。

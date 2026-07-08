@@ -3,7 +3,7 @@
 	import { render } from '$lib/utils/markdown-it';
 	import DOMPurify from 'dompurify';
 
-	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
+	import { config, user, models as _models } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
 	import { blur, fade } from 'svelte/transition';
@@ -11,7 +11,6 @@
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -67,17 +66,6 @@
 			</div>
 		</div>
 
-		{#if $temporaryChatEnabled}
-			<Tooltip
-				content={$i18n.t('This chat won’t appear in history and your messages will not be saved.')}
-				className="w-full flex justify-center mb-0.5"
-				placement="top"
-			>
-				<div class="flex items-center gap-2 text-gray-500 font-medium text-lg my-2 w-fit">
-					<EyeSlash strokeWidth="2.5" className="size-5" />{$i18n.t('Temporary Chat')}
-				</div>
-			</Tooltip>
-		{/if}
 
 		<div
 			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 font-medium text-left flex items-center gap-4 font-primary"
