@@ -8,10 +8,14 @@ threadpool にオフロードする。
 **fork は仕組みだけ**: Attachment の実体(docling ルータ等のポリシー)は案件層(prism)の
 authored Function として登録される。fork 本体は builtin Attachment を持たない。
 
-**契約**: `process(file, ...) -> str` の純関数。**成功=抽出テキスト(md)を返す** /
-**失敗=raise**(システムが catch し `content=メッセージ` `status=failed` を差し込む)。
+**契約**: `process(file, ...) -> str | None` の純関数。3 帰結:
+- **成功=抽出テキスト(md)を返す** → `content=<str>` `status="success"`。
+- **失敗=raise** → `content=str(e)` `status="failed"`(システムが catch)。
+- **skip=None を返す** → **何も永続化しない**(この関数はこのファイルを扱わない)。
+  = **Attachment 未割り当てと同じ挙動**(未抽出/none)。次の attachment へ continue。
+  拡張子 whitelist 外など「自分の対象外」を、失敗と区別して素通しするための帰結。
 `content`/`status` の**永続化は core が return 値/例外から行う**(attachment は DB を触らない)。
-未抽出(none)= そもそも Attachment 未割り当て(この関数が走らない)。
+未抽出(none)= そもそも Attachment 未割り当て、または全 attachment が None(skip)。
 
 **適用は完全 opt-in(tool/filter と同一)**: モデルの `meta.attachmentIds` に割り当てられた
 attachment function だけが発火する。model 文脈の無い upload(API/KB など)や未割り当ての
@@ -69,7 +73,9 @@ async def process_attachment_functions(request, file, user, assigned_ids=None):
       - 成功(str 返却) → `{content: <str>, status: "success"}`
       - 失敗(raise)   → `{content: str(e), status: "failed"}`(例外メッセージをそのまま content に。
         カスタム失敗メッセージは `raise Exception("…")` で入れる。失敗の印は status/注入タグが担う)
-    未割り当て(none)は何も書かない。coroutine は await、同期ハンドラは threadpool にオフロード。
+      - skip(None 返却) → **何も書かない**(この file は未抽出/none のまま)。対象外拡張子など
+        「自分は扱わない」を失敗と区別して素通しする帰結。未割り当てと同じ挙動。
+    未割り当て(none)も何も書かない。coroutine は await、同期ハンドラは threadpool にオフロード。
     戻り値は最終 file(再取得済み)。
     """
     for function_id in get_attachment_function_ids(assigned_ids):
@@ -102,6 +108,10 @@ async def process_attachment_functions(request, file, user, assigned_ids=None):
             else:
                 # 同期ハンドラ(blocking docling 等)は threadpool で回し loop を空ける
                 text = await run_in_threadpool(lambda: handler(**params))
+            if text is None:
+                # skip: この関数はこの file を扱わない。何も永続化せず次の attachment へ。
+                # 未抽出(none)のまま = Attachment 未割り当てと同じ挙動。
+                continue
             data = {
                 "content": text if isinstance(text, str) else "",
                 "status": "success",

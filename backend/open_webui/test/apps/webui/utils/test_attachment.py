@@ -24,6 +24,13 @@ class Attachment:
         raise Exception("unsupported:{fid}")
 """
 
+# None を返す(=skip)。この file は扱わない → core は何も永続化しない(未抽出/none)。
+SKIP_ATTACHMENT = """
+class Attachment:
+    def process(self, file, __request__=None, __user__=None):
+        return None
+"""
+
 
 def _make_request():
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(FUNCTIONS={})))
@@ -102,6 +109,38 @@ class TestAttachmentDispatch(AbstractPostgresTest):
         saved = self.files.get_file_by_id("file_fail")
         # 例外メッセージがそのまま content に(接頭辞なし)、status=failed
         assert saved.data == {"content": "unsupported:att_fail", "status": "failed"}
+
+    def test_skip_returns_none_leaves_file_untouched(self):
+        from open_webui.utils.attachment import process_attachment_functions
+
+        # 割り当て済みだが None(skip) を返す → 未割り当てと同じく data は空のまま。
+        self._insert_attachment("att_skip", template=SKIP_ATTACHMENT)
+        f = self._insert_file("file_skip")
+        asyncio.run(
+            process_attachment_functions(
+                _make_request(), f, user={"id": "1"}, assigned_ids=["att_skip"]
+            )
+        )
+        saved = self.files.get_file_by_id("file_skip")
+        assert saved.data == {}
+
+    def test_skip_does_not_block_later_attachment(self):
+        from open_webui.utils.attachment import process_attachment_functions
+
+        # skip(None) は次の attachment へ continue する。後続の成功は永続化される。
+        self._insert_attachment("att_skip2", template=SKIP_ATTACHMENT)
+        self._insert_attachment("att_ok2")
+        f = self._insert_file("file_chain")
+        asyncio.run(
+            process_attachment_functions(
+                _make_request(),
+                f,
+                user={"id": "1"},
+                assigned_ids=["att_skip2", "att_ok2"],
+            )
+        )
+        saved = self.files.get_file_by_id("file_chain")
+        assert saved.data == {"content": "EXTRACTED:att_ok2", "status": "success"}
 
     def test_unassigned_attachment_does_not_run(self):
         from open_webui.utils.attachment import process_attachment_functions
