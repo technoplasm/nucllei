@@ -333,7 +333,6 @@ async def update_reranking_config(
             )
         except Exception as e:
             log.error(f"Error loading reranking model: {e}")
-            request.app.state.config.ENABLE_RAG_HYBRID_SEARCH = False
 
         return {
             "status": True,
@@ -351,15 +350,8 @@ async def update_reranking_config(
 async def get_rag_config(request: Request, user=Depends(get_admin_user)):
     return {
         "status": True,
-        # RAG settings
+        # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
         "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
-        "TOP_K": request.app.state.config.TOP_K,
-        "BYPASS_EMBEDDING_AND_RETRIEVAL": request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL,
-        "RAG_FULL_CONTEXT": request.app.state.config.RAG_FULL_CONTEXT,
-        # Hybrid search settings
-        "ENABLE_RAG_HYBRID_SEARCH": request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
-        "TOP_K_RERANKER": request.app.state.config.TOP_K_RERANKER,
-        "RELEVANCE_THRESHOLD": request.app.state.config.RELEVANCE_THRESHOLD,
         # Content extraction settings
         "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
         "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,
@@ -468,16 +460,8 @@ class WebConfig(BaseModel):
 
 
 class ConfigForm(BaseModel):
-    # RAG settings
+    # RAG template(全文注入の system prompt)
     RAG_TEMPLATE: Optional[str] = None
-    TOP_K: Optional[int] = None
-    BYPASS_EMBEDDING_AND_RETRIEVAL: Optional[bool] = None
-    RAG_FULL_CONTEXT: Optional[bool] = None
-
-    # Hybrid search settings
-    ENABLE_RAG_HYBRID_SEARCH: Optional[bool] = None
-    TOP_K_RERANKER: Optional[int] = None
-    RELEVANCE_THRESHOLD: Optional[float] = None
 
     # Content extraction settings
     CONTENT_EXTRACTION_ENGINE: Optional[str] = None
@@ -514,42 +498,6 @@ async def update_rag_config(
         form_data.RAG_TEMPLATE
         if form_data.RAG_TEMPLATE is not None
         else request.app.state.config.RAG_TEMPLATE
-    )
-    request.app.state.config.TOP_K = (
-        form_data.TOP_K
-        if form_data.TOP_K is not None
-        else request.app.state.config.TOP_K
-    )
-    request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = (
-        form_data.BYPASS_EMBEDDING_AND_RETRIEVAL
-        if form_data.BYPASS_EMBEDDING_AND_RETRIEVAL is not None
-        else request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
-    )
-    request.app.state.config.RAG_FULL_CONTEXT = (
-        form_data.RAG_FULL_CONTEXT
-        if form_data.RAG_FULL_CONTEXT is not None
-        else request.app.state.config.RAG_FULL_CONTEXT
-    )
-
-    # Hybrid search settings
-    request.app.state.config.ENABLE_RAG_HYBRID_SEARCH = (
-        form_data.ENABLE_RAG_HYBRID_SEARCH
-        if form_data.ENABLE_RAG_HYBRID_SEARCH is not None
-        else request.app.state.config.ENABLE_RAG_HYBRID_SEARCH
-    )
-    # Free up memory if hybrid search is disabled
-    if not request.app.state.config.ENABLE_RAG_HYBRID_SEARCH:
-        request.app.state.rf = None
-
-    request.app.state.config.TOP_K_RERANKER = (
-        form_data.TOP_K_RERANKER
-        if form_data.TOP_K_RERANKER is not None
-        else request.app.state.config.TOP_K_RERANKER
-    )
-    request.app.state.config.RELEVANCE_THRESHOLD = (
-        form_data.RELEVANCE_THRESHOLD
-        if form_data.RELEVANCE_THRESHOLD is not None
-        else request.app.state.config.RELEVANCE_THRESHOLD
     )
 
     # Content extraction settings
@@ -711,15 +659,8 @@ async def update_rag_config(
 
     return {
         "status": True,
-        # RAG settings
+        # RAG template(全文注入の system prompt。llens は RAG 検索を撤去し全文注入のみ)
         "RAG_TEMPLATE": request.app.state.config.RAG_TEMPLATE,
-        "TOP_K": request.app.state.config.TOP_K,
-        "BYPASS_EMBEDDING_AND_RETRIEVAL": request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL,
-        "RAG_FULL_CONTEXT": request.app.state.config.RAG_FULL_CONTEXT,
-        # Hybrid search settings
-        "ENABLE_RAG_HYBRID_SEARCH": request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
-        "TOP_K_RERANKER": request.app.state.config.TOP_K_RERANKER,
-        "RELEVANCE_THRESHOLD": request.app.state.config.RELEVANCE_THRESHOLD,
         # Content extraction settings
         "CONTENT_EXTRACTION_ENGINE": request.app.state.config.CONTENT_EXTRACTION_ENGINE,
         "PDF_EXTRACT_IMAGES": request.app.state.config.PDF_EXTRACT_IMAGES,

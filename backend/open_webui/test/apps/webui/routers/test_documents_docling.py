@@ -68,10 +68,13 @@ class TestDoclingExtraction(AbstractPostgresTest):
         super().teardown_class()
 
     def test_llens_rag_defaults(self):
-        """RAG 系フラグの llens 既定値(fresh DB)を固定する。"""
+        """RAG 系フラグの llens 既定値(fresh DB)を固定する。
+
+        #52: RAG 検索 config(TOP_K/hybrid/relevance/full_context/bypass)は撤去済み。
+        残る RAG 系フラグ(query generation / web search)の既定 off を固定する。
+        """
         from open_webui.main import app
 
-        assert app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL is True
         assert app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION is False
         assert app.state.config.ENABLE_WEB_SEARCH is False
 

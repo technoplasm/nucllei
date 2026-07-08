@@ -174,8 +174,6 @@ from open_webui.config import (
     # Retrieval
     RAG_TEMPLATE,
     DEFAULT_RAG_TEMPLATE,
-    RAG_FULL_CONTEXT,
-    BYPASS_EMBEDDING_AND_RETRIEVAL,
     RAG_EMBEDDING_MODEL,
     RAG_EMBEDDING_MODEL_AUTO_UPDATE,
     RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
@@ -184,7 +182,6 @@ from open_webui.config import (
     RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
     RAG_EMBEDDING_ENGINE,
     RAG_EMBEDDING_BATCH_SIZE,
-    RAG_RELEVANCE_THRESHOLD,
     RAG_FILE_MAX_COUNT,
     RAG_FILE_MAX_SIZE,
     RAG_OPENAI_API_BASE_URL,
@@ -199,8 +196,6 @@ from open_webui.config import (
     DOCUMENT_INTELLIGENCE_ENDPOINT,
     DOCUMENT_INTELLIGENCE_KEY,
     MISTRAL_OCR_API_KEY,
-    RAG_TOP_K,
-    RAG_TOP_K_RERANKER,
     RAG_TEXT_SPLITTER,
     TIKTOKEN_ENCODING_NAME,
     PDF_EXTRACT_IMAGES,
@@ -241,7 +236,6 @@ from open_webui.config import (
     GOOGLE_DRIVE_CLIENT_ID,
     GOOGLE_DRIVE_API_KEY,
     ONEDRIVE_CLIENT_ID,
-    ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_LOCAL_WEB_FETCH,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
     ENABLE_GOOGLE_DRIVE_INTEGRATION,
@@ -601,16 +595,10 @@ app.state.FUNCTIONS = {}
 ########################################
 
 
-app.state.config.TOP_K = RAG_TOP_K
-app.state.config.TOP_K_RERANKER = RAG_TOP_K_RERANKER
-app.state.config.RELEVANCE_THRESHOLD = RAG_RELEVANCE_THRESHOLD
 app.state.config.FILE_MAX_SIZE = RAG_FILE_MAX_SIZE
 app.state.config.FILE_MAX_COUNT = RAG_FILE_MAX_COUNT
 
 
-app.state.config.RAG_FULL_CONTEXT = RAG_FULL_CONTEXT
-app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = BYPASS_EMBEDDING_AND_RETRIEVAL
-app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
 app.state.config.CONTENT_EXTRACTION_ENGINE = CONTENT_EXTRACTION_ENGINE
@@ -695,30 +683,10 @@ app.state.rf = None
 app.state.YOUTUBE_LOADER_TRANSLATION = None
 
 
-if app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-    # llens: 全文注入運用では embedding/reranking モデルを使わないため
-    # 起動時ロード(モデルダウンロードを伴う)をスキップする。
-    # air-gapped 環境での起動を軽くする(issue #9、fork.md §6)。
-    # 管理画面から bypass を無効化した場合は /retrieval の embedding 更新
-    # エンドポイント経由で再ロードされる。
-    log.info("BYPASS_EMBEDDING_AND_RETRIEVAL: embedding モデルの起動時ロードをスキップ")
-else:
-    try:
-        app.state.ef = get_ef(
-            app.state.config.RAG_EMBEDDING_ENGINE,
-            app.state.config.RAG_EMBEDDING_MODEL,
-            RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-        )
-
-        app.state.rf = get_rf(
-            app.state.config.RAG_RERANKING_MODEL,
-            RAG_RERANKING_MODEL_AUTO_UPDATE,
-        )
-    except Exception as e:
-        log.error(f"Error updating models: {e}")
-        pass
-
-
+# llens(#52): 全文注入運用では embedding/reranking モデルを使わないため、起動時ロード
+# (モデルダウンロードを伴う)を**無条件でスキップ**する(air-gapped、issue #9、fork.md §6)。
+# ef/rf は None のまま。必要時は管理画面の /retrieval embedding・reranking 更新で再ロードされる。
+# EMBEDDING_FUNCTION は memories(#8 放置)のため生成は継続(ef=None でも engine 次第で動く)。
 app.state.EMBEDDING_FUNCTION = get_embedding_function(
     app.state.config.RAG_EMBEDDING_ENGINE,
     app.state.config.RAG_EMBEDDING_MODEL,

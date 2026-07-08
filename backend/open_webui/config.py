@@ -1744,41 +1744,10 @@ MISTRAL_OCR_API_KEY = RuntimeConfig(
     os.getenv("MISTRAL_OCR_API_KEY", ""),
 )
 
-# llens: 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。
-# Docling 抽出 → data.content 保存の経路はそのまま、vector DB への保存だけを止める。
-# embedding モデルの起動時ロードも main.py 側でこのフラグを見てスキップする。
-BYPASS_EMBEDDING_AND_RETRIEVAL = RuntimeConfig(
-    "BYPASS_EMBEDDING_AND_RETRIEVAL",
-    "rag.bypass_embedding_and_retrieval",
-    os.environ.get("BYPASS_EMBEDDING_AND_RETRIEVAL", "True").lower() == "true",
-)
-
-
-RAG_TOP_K = RuntimeConfig(
-    "RAG_TOP_K", "rag.top_k", int(os.environ.get("RAG_TOP_K", "3"))
-)
-RAG_TOP_K_RERANKER = RuntimeConfig(
-    "RAG_TOP_K_RERANKER",
-    "rag.top_k_reranker",
-    int(os.environ.get("RAG_TOP_K_RERANKER", "3")),
-)
-RAG_RELEVANCE_THRESHOLD = RuntimeConfig(
-    "RAG_RELEVANCE_THRESHOLD",
-    "rag.relevance_threshold",
-    float(os.environ.get("RAG_RELEVANCE_THRESHOLD", "0.0")),
-)
-
-ENABLE_RAG_HYBRID_SEARCH = RuntimeConfig(
-    "ENABLE_RAG_HYBRID_SEARCH",
-    "rag.enable_hybrid_search",
-    os.environ.get("ENABLE_RAG_HYBRID_SEARCH", "").lower() == "true",
-)
-
-RAG_FULL_CONTEXT = RuntimeConfig(
-    "RAG_FULL_CONTEXT",
-    "rag.full_context",
-    os.getenv("RAG_FULL_CONTEXT", "False").lower() == "true",
-)
+# llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
+# config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。
+# embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(air-gapped)。
+# vector connector と EMBEDDING_FUNCTION は memories(#8 放置)のため温存。
 
 RAG_FILE_MAX_COUNT = RuntimeConfig(
     "RAG_FILE_MAX_COUNT",
