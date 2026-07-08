@@ -122,7 +122,6 @@ export type ResultDisplay =
 	| { kind: 'text'; value: string }
 	| { kind: 'code'; language: string; value: string }
 	| { kind: 'json'; value: string }
-	| { kind: 'table'; columns: string[]; rows: string[][] }
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
 	| { kind: 'skill'; value: string; tools: string[] };
 
@@ -145,45 +144,9 @@ export const formatJSONString = (str: unknown): string => {
 	return `${JSON.stringify(String(parsed))}`;
 };
 
-// 表として描けるか: 非空の「プレーン object の配列」のみ。列は出現順の和集合。
-const tryParseTable = (content: string): { columns: string[]; rows: string[][] } | null => {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(content);
-	} catch (e) {
-		return null;
-	}
-	if (
-		!Array.isArray(parsed) ||
-		parsed.length === 0 ||
-		!parsed.every((row) => row !== null && typeof row === 'object' && !Array.isArray(row))
-	) {
-		return null;
-	}
-
-	const columns: string[] = [];
-	for (const row of parsed as Record<string, unknown>[]) {
-		for (const key of Object.keys(row)) {
-			if (!columns.includes(key)) {
-				columns.push(key);
-			}
-		}
-	}
-	const rows = (parsed as Record<string, unknown>[]).map((row) =>
-		columns.map((column) => {
-			const value = row[column];
-			if (value === undefined || value === null) {
-				return '';
-			}
-			return typeof value === 'object' ? JSON.stringify(value) : String(value);
-		})
-	);
-	return { columns, rows };
-};
-
-// tool 結果(文字列)を戻り型ディスクリプタで出し分ける。宣言が無ければ従来
-// どおり「JSON なら整形、そうでなければそのまま」の json 表示。table 宣言でも
-// 実値が表形でなければ json に落とす(推測して壊れた表を作らない)。
+// tool 結果(文字列)を戻り型ディスクリプタで出し分ける。宣言が無ければ「JSON なら整形、
+// そうでなければそのまま」の json 表示。tool の結果は「値を見る」ものでありデザイン対象では
+// ないため、table 描画経路は持たない(table 宣言でも json に落とす)。
 export const classifyToolResult = (
 	content: string,
 	descriptor?: RenderDescriptor
@@ -210,12 +173,6 @@ export const classifyToolResult = (
 	}
 	if (descriptor?.kind === 'code') {
 		return { kind: 'code', language: descriptor.language || 'plaintext', value: content };
-	}
-	if (descriptor?.kind === 'table') {
-		const table = tryParseTable(content);
-		if (table) {
-			return { kind: 'table', ...table };
-		}
 	}
 	return { kind: 'json', value: formatJSONString(content) };
 };

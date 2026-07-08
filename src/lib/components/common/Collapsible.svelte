@@ -147,7 +147,7 @@
 						{#if attributes?.done === 'true'}
 							<Markdown
 								id={`${collapsibleId}-tool-calls-${attributes?.id}`}
-								content={$i18n.t('View Result from **{{NAME}}**', {
+								content={$i18n.t('Tool used **{{NAME}}**', {
 									NAME: attributes.name
 								})}
 							/>
@@ -238,94 +238,72 @@
 						{#if argDisplays === null || argDisplays.length > 0}
 							<div class="mt-1.5 mb-1">
 								<span
-									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
 									>Arguments</span
 								>
 							</div>
 						{/if}
-						{#if argDisplays === null}
-							<HljsCode lang="json" code={formatJSONString(args)} />
-						{:else}
-							{#each argDisplays as arg (arg.name)}
-								{#if arg.kind === 'scalar'}
-									<div class="text-xs font-mono my-0.5 px-0.5" dir="ltr">
-										<span class="text-gray-500 dark:text-gray-400">{arg.name}:</span>
-										<span class="whitespace-pre-wrap">{arg.value}</span>
-									</div>
-								{:else}
-									<div class="text-gray-500 dark:text-gray-400 text-xs mt-1 mb-0.5 font-mono">
-										{arg.name}
-									</div>
-									<HljsCode
-										lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
-										code={arg.value}
-									/>
-								{/if}
-							{/each}
-						{/if}
+						<div class="ps-2">
+							{#if argDisplays === null}
+								<HljsCode lang="json" code={formatJSONString(args)} />
+							{:else}
+								{#each argDisplays as arg (arg.name)}
+									{#if arg.kind === 'scalar'}
+										<div class="text-s font-mono my-0.5 px-0.5" dir="ltr">
+											<span class="text-gray-500 dark:text-gray-400">{arg.name}:</span>
+											<span class="whitespace-pre-wrap">{arg.value}</span>
+										</div>
+									{:else}
+										<div class="text-gray-500 dark:text-gray-400 text-s mt-1 mb-0.5 font-mono">
+											{arg.name}
+										</div>
+										<HljsCode
+											lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
+											code={arg.value}
+										/>
+									{/if}
+								{/each}
+							{/if}
+						</div>
 						{#if attributes?.done === 'true'}
 							{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
-							<div class="mt-1.5 mb-1">
+							<div class="mt-3 mb-1">
 								<span
-									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+									class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
 									>Result</span
 								>
 							</div>
-							{#if resultDisplay.kind === 'skill'}
-								<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
-								<HljsCode lang="markdown" code={resultDisplay.value} />
-								{#if resultDisplay.tools.length > 0}
-									<div class="mt-1.5 mb-1">
-										<span
-											class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
-										>
-											{$i18n.t('Tools loaded')}
-										</span>
-									</div>
-									<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
-										{#each resultDisplay.tools as toolName}
+							<div class="ps-2">
+								{#if resultDisplay.kind === 'skill'}
+									<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
+									<HljsCode lang="markdown" code={resultDisplay.value} />
+									{#if resultDisplay.tools.length > 0}
+										<div class="mt-1.5 mb-1">
 											<span
-												class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
-												>{toolName}</span
+												class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
 											>
-										{/each}
-									</div>
-								{/if}
-							{:else if resultDisplay.kind === 'text'}
-								<div class="text-xs font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
-									{resultDisplay.value}
-								</div>
-							{:else if resultDisplay.kind === 'code'}
-								<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
-							{:else if resultDisplay.kind === 'table'}
-								<div class="overflow-x-auto my-1">
-									<table class="text-xs border-collapse" dir="ltr">
-										<thead>
-											<tr>
-												{#each resultDisplay.columns as column}
-													<th
-														class="border border-gray-200 dark:border-gray-700 px-2 py-1 text-left font-medium"
-														>{column}</th
-													>
-												{/each}
-											</tr>
-										</thead>
-										<tbody>
-											{#each resultDisplay.rows as row}
-												<tr>
-													{#each row as cell}
-														<td class="border border-gray-200 dark:border-gray-700 px-2 py-1"
-															>{cell}</td
-														>
-													{/each}
-												</tr>
+												{$i18n.t('Tools loaded')}
+											</span>
+										</div>
+										<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
+											{#each resultDisplay.tools as toolName}
+												<span
+													class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
+													>{toolName}</span
+												>
 											{/each}
-										</tbody>
-									</table>
-								</div>
-							{:else}
-								<HljsCode lang="json" code={resultDisplay.value} />
-							{/if}
+										</div>
+									{/if}
+								{:else if resultDisplay.kind === 'text'}
+									<div class="text-s font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
+										{resultDisplay.value}
+									</div>
+								{:else if resultDisplay.kind === 'code'}
+									<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
+								{:else}
+									<HljsCode lang="json" code={resultDisplay.value} />
+								{/if}
+							</div>
 						{/if}
 					{:else}
 						<slot name="content" />

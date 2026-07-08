@@ -142,25 +142,14 @@ describe('classifyToolResult', () => {
 		expect(display).toEqual({ kind: 'code', language: 'python', value: 'print(1)' });
 	});
 
-	it('table 宣言: object 配列は列の和集合で表になる', () => {
-		const content = JSON.stringify([
+	it('table 宣言は廃止: 常に json に落ちる(tool 結果はデザイン対象でない)', () => {
+		// かつて列の和集合で表化していた object 配列も、今は json 表示。
+		const rows = JSON.stringify([
 			{ name: '内科', count: 12 },
 			{ name: '外科', count: 8, note: '增' }
 		]);
-		const display = classifyToolResult(content, { kind: 'table' });
-		expect(display).toEqual({
-			kind: 'table',
-			columns: ['name', 'count', 'note'],
-			rows: [
-				['内科', '12', ''],
-				['外科', '8', '增']
-			]
-		});
-	});
-
-	it('table 宣言でも表形でない実値は json に落とす(壊れた表を作らない)', () => {
+		expect(classifyToolResult(rows, { kind: 'table' }).kind).toBe('json');
 		expect(classifyToolResult('{"error": "boom"}', { kind: 'table' }).kind).toBe('json');
-		expect(classifyToolResult('[]', { kind: 'table' }).kind).toBe('json');
 		expect(classifyToolResult('[1, 2, 3]', { kind: 'table' }).kind).toBe('json');
 		expect(classifyToolResult('not json', { kind: 'table' }).kind).toBe('json');
 	});

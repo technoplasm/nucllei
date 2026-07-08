@@ -2,8 +2,8 @@
 	// highlight.js 公式テーマ(github=light / github-dark=dark)を **そのまま** 使う。
 	// 配色は手書きしない。tailwind darkMode:'class' に合わせ、公式 CSS の `.hljs`
 	// 系セレクタをテーマ別にスコープして 1 回だけ注入する。
-	import githubLight from 'highlight.js/styles/github.css?inline';
-	import githubDark from 'highlight.js/styles/github-dark.css?inline';
+	import githubLight from 'highlight.js/styles/docco.css?inline';
+	import githubDark from 'highlight.js/styles/lioshi.css?inline';
 
 	let injected = false;
 	function injectHljsTheme() {
