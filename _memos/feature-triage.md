@@ -50,6 +50,22 @@
     「見えていない編集」も Save で保存される。→ **タブ切替時にロード直後の状態へ暗黙リセット**(名前/ID は常時
     ヘッダなので対象外)。onMount 末 `captureSnapshot()` / `switchTab()` で復元。モーダル確認は未採用(暗黙)。
 
+## Function type と tool 制御面(2026-07-08 決定)
+
+**tool のチャット単位切替を撤去(DROP、#54)**: 入力欄の tool ピッカー(`selectedToolIds`)を撤去し、
+tool はモデルの割り当て(`meta.toolIds`)一本化。誠実エージェント方針(tool はモデルが持つ・
+ユーザーが選ばない)+ #46 の per-model 一本化の tool 版。制御面の掃除(上節)の続き。
+skill 由来 tool_ids(#35)は温存。
+
+**Function type(Pipe / Filter / Action)の扱い**:
+- **Filter** = 中核。自作するのはここが圧倒的(de-id / TTS 注入 / ログ #13、#52 の注入 gate・PDF ルーティング)。
+- **Pipe** = 残置。固有価値=「セレクタに出る自作モデル」=モデルルーティング/複数モデル束ね/agent-as-model。
+  llens では SGLang が OpenAI 互換で当面不要だが、将来の科別ルータ等の余地があり削除しない。
+  ※ thinking effort / CoT の自動調整は Pipe ではなく Filter(inlet でパラメータ書換)の仕事。
+- **Action** = 残置(既定で作らない)。固有価値は「**人間が主語の後付けトリガ = 応答に貼る永続ボタン**」のみ。
+  モーダルや成果物生成は tool でも可能(tool にも `__event_call__` が渡る)なので、Action を選ぶ唯一の理由は
+  「あえて人間をトリガにしたい」時。誠実エージェント方針ではほぼ vestigial・用途は未知数。機構は害がないので残す。
+
 ## 一覧(item)体裁の整理(A1、2026-07-07 出荷)
 
 model / skill / tool / function の各ワークスペース一覧を整理(#47 の残 A1)。
