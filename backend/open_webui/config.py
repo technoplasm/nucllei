@@ -1691,18 +1691,6 @@ ENABLE_RAG_LOCAL_WEB_FETCH = (
     os.getenv("ENABLE_RAG_LOCAL_WEB_FETCH", "False").lower() == "true"
 )
 
-YOUTUBE_LOADER_LANGUAGE = RuntimeConfig(
-    "YOUTUBE_LOADER_LANGUAGE",
-    "rag.youtube_loader_language",
-    os.getenv("YOUTUBE_LOADER_LANGUAGE", "en").split(","),
-)
-
-YOUTUBE_LOADER_PROXY_URL = RuntimeConfig(
-    "YOUTUBE_LOADER_PROXY_URL",
-    "rag.youtube_loader_proxy_url",
-    os.getenv("YOUTUBE_LOADER_PROXY_URL", ""),
-)
-
 
 ####################################
 # Web Search (RAG)

@@ -46,21 +46,11 @@
 			webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST = [];
 		}
 
-		// Convert Youtube loader language string to array before sending
-		if (webConfig.YOUTUBE_LOADER_LANGUAGE) {
-			webConfig.YOUTUBE_LOADER_LANGUAGE = webConfig.YOUTUBE_LOADER_LANGUAGE.split(',')
-				.map((lang) => lang.trim())
-				.filter((lang) => lang.length > 0);
-		} else {
-			webConfig.YOUTUBE_LOADER_LANGUAGE = [];
-		}
-
 		const res = await updateRAGConfig(localStorage.token, {
 			web: webConfig
 		});
 
 		webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST = webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST.join(',');
-		webConfig.YOUTUBE_LOADER_LANGUAGE = webConfig.YOUTUBE_LOADER_LANGUAGE.join(',');
 	};
 
 	onMount(async () => {
@@ -73,8 +63,6 @@
 			if (webConfig?.WEB_SEARCH_DOMAIN_FILTER_LIST) {
 				webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST = webConfig.WEB_SEARCH_DOMAIN_FILTER_LIST.join(',');
 			}
-
-			webConfig.YOUTUBE_LOADER_LANGUAGE = webConfig.YOUTUBE_LOADER_LANGUAGE.join(',');
 		}
 	});
 </script>
@@ -653,36 +641,6 @@
 							{/if}
 						</div>
 					{/if}
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Youtube Language')}
-						</div>
-						<div class="flex items-center relative">
-							<input
-								class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
-								type="text"
-								placeholder={$i18n.t('Enter language codes')}
-								bind:value={webConfig.YOUTUBE_LOADER_LANGUAGE}
-								autocomplete="off"
-							/>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex flex-col w-full justify-between">
-						<div class=" mb-1 text-xs font-medium">
-							{$i18n.t('Youtube Proxy URL')}
-						</div>
-						<div class="flex items-center relative">
-							<input
-								class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
-								type="text"
-								placeholder={$i18n.t('Enter proxy URL (e.g. https://user:password@host:port)')}
-								bind:value={webConfig.YOUTUBE_LOADER_PROXY_URL}
-								autocomplete="off"
-							/>
-						</div>
-					</div>
 				</div>
 			</div>
 		{/if}
