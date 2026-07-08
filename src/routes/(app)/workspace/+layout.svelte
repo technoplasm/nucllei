@@ -7,7 +7,6 @@
 		user,
 		mobile,
 		models,
-		knowledge,
 		tools
 	} from '$lib/stores';
 	import { page } from '$app/stores';
@@ -26,8 +25,6 @@
 			if (path.includes('/functions') || path.includes('/settings') || path.includes('/users')) {
 				goto('/');
 			} else if (path.includes('/models') && !$user?.permissions?.workspace?.models) {
-				goto('/');
-			} else if (path.includes('/knowledge') && !$user?.permissions?.workspace?.knowledge) {
 				goto('/');
 			} else if (path.includes('/skills') && !$user?.permissions?.workspace?.skills) {
 				goto('/');

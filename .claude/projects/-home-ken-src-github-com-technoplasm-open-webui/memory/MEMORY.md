@@ -1,0 +1,2 @@
+- [一本化=dedup であって異種の統合ではない](unify-means-dedup-not-merge-types.md) — 種別ごとに内部API を1本ずつ、呼び分けは上位へ
+- [llens リポで git 操作をしない](no-git-ops-on-llens.md) — prism-hu/llens は編集まで、commit/push/rebase 禁止
