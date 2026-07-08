@@ -6,7 +6,10 @@
 DB に content を持たないので `load_builtin_function` でモジュールを得ること。
 
 フック本体はルータで、抽出の実体は内部関数(`retrieval.extract` / audio)に委譲する。
-per-model トグル(model.meta)は後続フェーズ。今は builtin を全 upload で発火させる。
+
+**適用は完全 opt-in(tool/filter と同一)**: モデルの `meta.attachmentIds` に割り当てられた
+attachment function だけが発火する。model 文脈の無い upload(API/KB など)や未割り当ての
+モデルでは何も走らない。builtin Attachment も割り当てが要る(初期/参照実装)。
 """
 
 import asyncio
@@ -26,24 +29,29 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
-def get_attachment_function_ids() -> list[str]:
+def get_attachment_function_ids(assigned_ids) -> list[str]:
     """発火する attachment function の id 列(priority 昇順)。
 
-    フェーズ1: builtin(id 接頭辞 `builtin_`)のみ全 upload で発火。builtin は **コードが
-    真実源**なので DB(起動時 sync 行)ではなく `BUILTIN_FUNCTIONS` から直接引く
-    (テストや sync 前でも確実に走る)。valves は DB 行があればそこから、無ければ既定値。
-    ユーザー authored の per-model 割り当て(model.meta.attachmentIds)は後続フェーズで足す。
+    `assigned_ids` = モデルの `meta.attachmentIds`(完全 opt-in)。そのうち **実在する
+    attachment function** だけに絞る(削除済み ID を弾く)。実在集合 = builtin(コードが
+    真実源なので `BUILTIN_FUNCTIONS` から直接)+ DB の type=attachment。`get_sorted_filter_ids`
+    と同型。valves は DB 行があればそこから priority を引く(builtin は行が無ければ 0)。
     """
+    if not assigned_ids:
+        return []
 
     def get_priority(function_id):
         valves = Functions.get_function_valves_by_id(function_id)
         return valves.get("priority", 0) if valves else 0
 
-    attachment_ids = [
+    valid = {
         function_id
         for function_id, entry in BUILTIN_FUNCTIONS.items()
         if entry.get("type") == "attachment"
-    ]
+    }
+    valid |= {f.id for f in Functions.get_functions_by_type("attachment")}
+
+    attachment_ids = [fid for fid in dict.fromkeys(assigned_ids) if fid in valid]
     attachment_ids.sort(key=get_priority)
     return attachment_ids
 
@@ -59,14 +67,15 @@ def _load_module(request, function_id):
     return module
 
 
-def process_attachment_functions(request, file, user):
-    """アップロードされた 1 file を、登録済み attachment function で順に処理する。
+def process_attachment_functions(request, file, user, assigned_ids=None):
+    """アップロードされた 1 file を、モデルに割り当てられた attachment function で順に処理する。
 
+    `assigned_ids` = そのモデルの `meta.attachmentIds`(None/空なら何もしない=opt-in)。
     各フックが file.data.content を埋める(実体は内部関数へ委譲)。upload endpoint は
     sync 経路なので同期実行。coroutine ハンドラは threadpool 内で asyncio.run で回す
     (非同期実行+プレビューは後続フェーズ)。戻り値は最終的な file。
     """
-    for function_id in get_attachment_function_ids():
+    for function_id in get_attachment_function_ids(assigned_ids):
         module = _load_module(request, function_id)
 
         handler = getattr(module, "process", None)

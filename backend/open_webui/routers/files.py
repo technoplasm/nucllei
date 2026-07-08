@@ -26,6 +26,7 @@ from open_webui.models.files import (
     Files,
 )
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.models import Models
 
 from open_webui.routers.knowledge import get_knowledge, get_knowledge_list
 from open_webui.routers.retrieval import ProcessFileForm, process_file
@@ -85,6 +86,7 @@ def upload_file(
     user=Depends(get_verified_user),
     file_metadata: dict = {},
     process: bool = Query(True),
+    model_id: Optional[str] = Query(None),
 ):
     log.info(f"file.content_type: {file.content_type}")
     try:
@@ -115,10 +117,17 @@ def upload_file(
         )
         if process:
             try:
-                # llens(#52): テキスト化は Attachment Function に委譲。従来ここにあった
-                # content_type 分岐(audio→STT / 非画像→docling / 画像→skip)は既定の
-                # builtin_attachment に relocate 済み。フックが file.data.content を埋める。
-                process_attachment_functions(request, file_item, user)
+                # llens(#52): テキスト化は Attachment Function に委譲(完全 opt-in)。
+                # 現在のチャットのモデル(model_id)の meta.attachmentIds に割り当てられた
+                # フックだけが発火し、file.data.content を埋める。model 無/未割り当ては何もしない。
+                assigned_ids = None
+                if model_id:
+                    model = Models.get_model_by_id(model_id)
+                    if model and model.meta:
+                        assigned_ids = (model.meta.model_dump() or {}).get(
+                            "attachmentIds"
+                        )
+                process_attachment_functions(request, file_item, user, assigned_ids)
                 file_item = Files.get_file_by_id(id=id)
             except Exception as e:
                 log.exception(e)

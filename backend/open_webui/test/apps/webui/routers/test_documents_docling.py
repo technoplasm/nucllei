@@ -76,10 +76,26 @@ class TestDoclingExtraction(AbstractPostgresTest):
         assert app.state.config.ENABLE_WEB_SEARCH is False
 
     def test_upload_extracts_via_docling_without_vector_db(self):
-        """アップロード → Docling 抽出 → 全文が data.content に入る。"""
+        """アップロード → Docling 抽出 → 全文が data.content に入る。
+
+        #52: 抽出は完全 opt-in の Attachment 経由。既定 builtin_attachment を割り当てた
+        モデルを用意し、upload に model_id を渡して発火させる。
+        """
+        from open_webui.models.models import Models, ModelForm, ModelMeta, ModelParams
+
+        Models.insert_new_model(
+            ModelForm(
+                id="m-docling",
+                name="docling",
+                meta=ModelMeta(**{"attachmentIds": ["builtin_attachment"]}),
+                params=ModelParams(),
+            ),
+            "1",
+        )
+
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
-                self.create_url("/"),
+                self.create_url("/?model_id=m-docling"),
                 files={
                     "file": (
                         "report.pdf",

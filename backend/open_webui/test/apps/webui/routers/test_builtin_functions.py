@@ -49,3 +49,18 @@ class TestBuiltinFunctions(AbstractPostgresTest):
         assert typ == "attachment"
         assert type(inst).__name__ == "Attachment"
         assert hasattr(inst, "process")
+
+    def test_attachment_ids_are_opt_in_and_validated(self):
+        """発火は割り当て(attachmentIds)に完全 opt-in。未割り当て=空、
+        実在しない id は弾く。"""
+        from open_webui.utils.attachment import get_attachment_function_ids
+
+        assert get_attachment_function_ids(None) == []
+        assert get_attachment_function_ids([]) == []
+        assert get_attachment_function_ids(["builtin_attachment"]) == [
+            "builtin_attachment"
+        ]
+        assert get_attachment_function_ids(["does_not_exist"]) == []
+        assert get_attachment_function_ids(
+            ["builtin_attachment", "does_not_exist"]
+        ) == ["builtin_attachment"]
