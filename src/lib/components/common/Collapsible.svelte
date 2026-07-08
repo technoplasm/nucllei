@@ -33,6 +33,7 @@
 
 	import ChevronUp from '../icons/ChevronUp.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
+	import CheckCircle from '../icons/CheckCircle.svelte';
 	import Spinner from './Spinner.svelte';
 	import CodeBlock from '../chat/Messages/CodeBlock.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
@@ -109,6 +110,10 @@
 				{#if attributes?.done && attributes?.done !== 'true'}
 					<div>
 						<Spinner className="size-4" />
+					</div>
+				{:else if attributes?.type === 'tool_calls' && attributes?.done === 'true'}
+					<div class="text-green-500 dark:text-green-400 shrink-0">
+						<CheckCircle className="size-4" strokeWidth="2" />
 					</div>
 				{/if}
 
@@ -218,8 +223,9 @@
 		{#if !grow}
 			{#if open && !hide}
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-					{#if attributes?.type === 'tool_calls'}
-						<!-- 引数/結果は構造データ。バックエンドが型宣言から同梱した
+					<div class="border-s-2 border-gray-200 dark:border-gray-800 ps-3">
+						{#if attributes?.type === 'tool_calls'}
+							<!-- 引数/結果は構造データ。バックエンドが型宣言から同梱した
 						     ディスクリプタ(attributes.render、#20)の通りに引数単位で描画する。
 						     宣言なしは型に忠実(scalar は key: value、object は JSON)。
 						     ストリーミング中の未閉鎖 JSON は寛容パーサで部分値を逐次描画
@@ -306,6 +312,7 @@
 					{:else}
 						<slot name="content" />
 					{/if}
+					</div>
 
 					{#if showBottomCollapse}
 						<!-- svelte-ignore a11y-no-static-element-interactions -->

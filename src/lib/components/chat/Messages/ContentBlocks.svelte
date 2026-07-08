@@ -4,6 +4,7 @@
 	// スキーマ: _memos/rendering-design.md §3「L0 の確定スキーマ」
 	import ContentRenderer from './ContentRenderer.svelte';
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
+	import Markdown from './Markdown.svelte';
 	import { settings } from '$lib/stores';
 
 	let {
@@ -70,17 +71,17 @@
 				className="w-full space-y-1 mb-1.5 text-sm"
 			>
 				<!--
-					reasoning は markdown として解釈しない(#17 決定)。
-					XSS 不変条件: reasoning は必ず Svelte のテキスト補間({block.content})で
-					出すこと。{@html} に変えてはならない(9f4f 監査 2026-07-06: 生 <think>
-					内容はモデル出力でありサニタイズ対象。テキスト補間なら構造的に無害)。
+					reasoning は本文と同じ Markdown コンポーネントで描画する。
+					XSS 不変条件: 生 <think> 内容はモデル出力なのでサニタイズが必須。
+					Markdown は MarkdownTokens/InlineTokens 内で DOMPurify.sanitize を通してから
+					{@html} するため本文と同じ信頼モデルで安全。ここで直接 {@html} を書いてはならない。
 				-->
 				<div
-					class="mb-1.5 text-sm text-gray-500 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3 whitespace-pre-wrap"
+					class="mb-1.5 text-sm text-gray-500 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3"
 					slot="content"
 					dir="auto"
 				>
-					{block.content}
+					<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content} />
 				</div>
 			</Collapsible>
 		{:else if block.type === 'text'}
