@@ -49,14 +49,6 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 router = APIRouter()
 
 
-class CollectionNameForm(BaseModel):
-    collection_name: Optional[str] = None
-
-
-class ProcessUrlForm(CollectionNameForm):
-    url: str
-
-
 class SearchForm(BaseModel):
     query: str
 
