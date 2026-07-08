@@ -27,7 +27,7 @@ from langchain_core.documents import Document
 from open_webui.retrieval.loaders.tavily import TavilyLoader
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.config import (
-    ENABLE_RAG_LOCAL_WEB_FETCH,
+    WEB_LOADER_ALLOW_LOCAL_FETCH,
     PLAYWRIGHT_WS_URL,
     PLAYWRIGHT_TIMEOUT,
     WEB_LOADER_ENGINE,
@@ -46,7 +46,7 @@ def validate_url(url: Union[str, Sequence[str]]):
     if isinstance(url, str):
         if isinstance(validators.url(url), validators.ValidationError):
             raise ValueError(ERROR_MESSAGES.INVALID_URL)
-        if not ENABLE_RAG_LOCAL_WEB_FETCH:
+        if not WEB_LOADER_ALLOW_LOCAL_FETCH:
             # Local web fetch is disabled, filter out any URLs that resolve to private IP addresses
             parsed_url = urllib.parse.urlparse(url)
             # Get IPv4 and IPv6 addresses

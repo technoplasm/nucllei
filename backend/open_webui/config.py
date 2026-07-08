@@ -1651,8 +1651,10 @@ TIKTOKEN_ENCODING_NAME = RuntimeConfig(
 
 
 
-ENABLE_RAG_LOCAL_WEB_FETCH = (
-    os.getenv("ENABLE_RAG_LOCAL_WEB_FETCH", "False").lower() == "true"
+# llens(#52): web 検索 loader の SSRF ガード。既定 False で localhost/内部 IP への
+# fetch を拒否する(旧名 ENABLE_RAG_LOCAL_WEB_FETCH。RAG とは無関係の web loader 設定)。
+WEB_LOADER_ALLOW_LOCAL_FETCH = (
+    os.getenv("WEB_LOADER_ALLOW_LOCAL_FETCH", "False").lower() == "true"
 )
 
 
