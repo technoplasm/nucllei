@@ -77,11 +77,7 @@ from open_webui.routers import (
     utils,
 )
 
-from open_webui.routers.retrieval import (
-    get_embedding_function,
-    get_ef,
-    get_rf,
-)
+from open_webui.retrieval.utils import get_embedding_function
 
 from open_webui.internal.db import Session, engine
 

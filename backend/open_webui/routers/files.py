@@ -28,7 +28,6 @@ from open_webui.models.files import (
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 
-from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.storage.provider import Storage
 from open_webui.utils.attachment import process_attachment_functions
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -345,15 +344,12 @@ async def update_file_data_content_by_id(
         or has_access_to_file(id, "write", user)
     ):
         try:
-            process_file(
-                request,
-                ProcessFileForm(file_id=id, content=form_data.content),
-                user=user,
-            )
+            # llens(#52): RAG/vector 撤去に伴い、内容更新は data.content の直接書き込みのみ。
+            Files.update_file_data_by_id(id, {"content": form_data.content})
             file = Files.get_file_by_id(id=id)
         except Exception as e:
             log.exception(e)
-            log.error(f"Error processing file: {file.id}")
+            log.error(f"Error updating file content: {file.id}")
 
         return {"content": file.data.get("content", "")}
     else:
