@@ -9,7 +9,6 @@ from typing import Optional
 
 from open_webui.utils.tool_render import (
     Code,
-    Table,
     Text,
     apply_render_to_spec,
     extract_render_from_function,
@@ -71,12 +70,14 @@ def test_extract_from_function_code_argument():
 
 
 def test_extract_from_function_return_annotation():
-    def run_sql(query: Code("sql")) -> Table:
-        return []
+    # 戻り型注釈(RenderAs)が result ディスクリプタに抽出されること。
+    # ※ table 型は廃止済み(2026-07-09)なので code 戻り型で検証する。
+    def run_sql(query: Code("sql")) -> Code("sql"):
+        return ""
 
     render = extract_render_from_function(run_sql)
     assert render["args"] == {"query": {"kind": "code", "language": "sql"}}
-    assert render["result"] == {"kind": "table"}
+    assert render["result"] == {"kind": "code", "language": "sql"}
 
 
 def test_extract_from_function_text_result():

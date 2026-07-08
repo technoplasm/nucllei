@@ -22,17 +22,21 @@
 
 ## 描画種別(kind)
 
-入力と結果で集合が違う(結果は image/table が活きる。入力に table は不要 — LLM は表を JSON 配列/CSV で渡す)。
+入力と結果で集合が違う(結果は image が活きる。入力に table は不要 — LLM は表を JSON 配列/CSV で渡す)。
 
 | | 種別 |
 |---|---|
 | **引数(入力)** | `code(language)` / `scalar`(str/num/bool を `key: value`)/ `json`(object/array ツリー) |
-| **結果(出力)** | `text` / `code(language)` / `json` / `table` / `image` / `file` |
+| **結果(出力)** | `text` / `code(language)` / `json`(既定) / `image` / `file` |
 
 - 入力で専用ウィジェットを要求する宣言型は **`code(language)` のみ**。他は JSON 値の構造から自動。
-- 結果は **tool が「きれいに見せる(table 等)/ モデルが読めればいい(text/json)」を戻り型で選べる**。
-  モデルへの見え方(直列化テキスト)は不変、ユーザーへの見え方だけ親切になる非対称が狙い。
-- 増やすのは容易(`Markdown` 型で長文段落、等)。v1 は上記で始める。
+- 結果は戻り型で `text`(素の値)/ `code` / `json`(既定)を選べる。モデルへの見え方(直列化テキスト)は不変。
+- **改訂(2026-07-09、`ada5904e8`): `table` 描画を廃止**。tool 結果は「値を見る」ものであり
+  デザイン対象ではない、という判断。`table` 宣言でも json 表示に落とす(`classifyToolResult` から
+  table 分類・`tryParseTable` を撤去、`ResultDisplay` の `table` 型も削除)。
+- 表示の体裁(2026-07-09): 展開時の `Arguments` / `Result` はグレーの pill バッジ、その中身は軽く
+  字下げ(ps-2)。ヘッダは done=緑チェック(tool)/ 青チェック(reasoning)、実行中は Spinner。
+  応答生成中は `[Spinner] Preparing...`(reasoning の `Thinking...` と同寸で自然に遷移)。
 
 ## 宣言メカニズム
 
@@ -64,7 +68,7 @@ def run_python(code: PythonCode) -> Stdout: ...   # LLM/実行時は str、描�
 // content_blocks の tool_calls ブロック / tool_call イベントに同梱
 calls[i].render = {
   args: { "<paramName>": { kind: "code", language: "python" }, ... },  // 宣言のある引数のみ
-  result: { kind: "table" }                                            // 戻り型があれば
+  result: { kind: "text" }                                             // 戻り型があれば(table は廃止)
 }
 ```
 

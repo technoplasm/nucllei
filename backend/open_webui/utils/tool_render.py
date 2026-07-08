@@ -31,9 +31,10 @@ def Code(language: str, base: type = str):
     return Annotated[base, RenderAs(kind="code", language=language)]
 
 
-# 戻り型用の糖衣。モデルへの見え方(直列化テキスト)は変えず、ユーザー表示だけ変える
+# 戻り型用の糖衣。モデルへの見え方(直列化テキスト)は変えず、ユーザー表示だけ変える。
+# `Table`(kind="table")は廃止(2026-07-09): tool 結果は「値を見る」ものでデザイン対象では
+# ないため、フロントの table 描画経路ごと撤去した(`ada5904e8`)。
 Text = Annotated[str, RenderAs(kind="text")]
-Table = Annotated[list, RenderAs(kind="table")]
 
 
 ####################################
