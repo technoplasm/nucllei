@@ -28,7 +28,6 @@ from open_webui.models.files import (
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 
-from open_webui.routers.knowledge import get_knowledge, get_knowledge_list
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.storage.provider import Storage
 from open_webui.utils.attachment import process_attachment_functions
