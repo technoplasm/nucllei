@@ -150,11 +150,20 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。builtin id は
   `BUILTIN_FUNCTIONS` から直接引く(コードが真実源・sync 前でも発火)。**全 206 passed・挙動不変**。
 
+**済(プランB 本体・フェーズ3 の一部 = ③gate)**:
+- **注入 gate を builtin filter として移植**(46fd2ccd4): `builtin_functions/large_file_gate.py`
+  (`builtin_large_file_gate`, type filter)。inlet で抽出テキストを tiktoken 実測し **合算予算
+  超過分を大きい順に除去**(prism 固定閾値ではなく昇格版)+ file_id 告知 system 指示。failed(抽出空+
+  raw 大)は告知するが body に残す。fail-open。fork 適応: get_file_by_id は sync / skill mention
+  ローダ無しで撤去 / vision 除外は pdf_vision_router 未移植で一旦省略。`utils/filter.py`(CORE)を
+  builtin 対応に(id 接頭辞 → load_builtin_function)。per-model の filterIds 割り当てで適用。
+  テスト 9 件追加(gate アルゴリズム / builtin sync / filter dispatch の builtin ロード)。全 215 passed。
+
 **プランB 本体 残り**:
 - **フェーズ2(per-model トグル)**: `model.meta.attachmentIds` 解決 + upload が model 文脈を受け取る
   + フロント Selector(ワークスペースのモデル設定)。builtin の content 更新/削除拒否(routers/functions.py)も。
-- **フェーズ3**: 非同期実行+処理中プレビュー(file に extracting→done)/ STT・TTS 内部関数(後回し可)/
-  ③gate filter(`large_file_gate` 移植)/ PDF→VLM(`pdf_vision_router`)/ ④sandbox tool 移植。
+- **フェーズ3 残り**: 非同期実行+処理中プレビュー(file に extracting→done)/ STT・TTS 内部関数(後回し可)/
+  PDF→VLM(`pdf_vision_router` 移植・gate の vision 除外も戻す)/ ④sandbox tool 移植(`import_chat_file`)。
 
 **未着手(要ユーザー判断・絡みが深い / teardown 残り)**:
 - **config キー撤去**(`RAG_TOP_K`/`RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL`/embedding/reranking/chunk/vector)→ **フロント `Documents.svelte` が `/retrieval/config` で docling・FILE_MAX と RAG 設定を同一 endpoint で読む**ため、config endpoint の分割(docling/upload 設定を RAG から分離)が要る。フロント刷新を伴う。
