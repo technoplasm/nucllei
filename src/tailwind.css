@@ -21,12 +21,19 @@
 }
 
 @layer base {
-	html,
-	pre {
+	html {
 		font-family:
-			-apple-system, BlinkMacSystemFont, 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto,
-			Ubuntu, Cantarell, 'Noto Sans', sans-serif, 'Helvetica Neue', Arial, 'Apple Color Emoji',
-			'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+			'Inter Variable', 'Noto Sans JP Variable', -apple-system, BlinkMacSystemFont, ui-sans-serif,
+			system-ui, 'Segoe UI', Roboto, Ubuntu, Cantarell, sans-serif, 'Helvetica Neue', Arial,
+			'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+	}
+
+	code,
+	kbd,
+	samp,
+	pre,
+	.hljs {
+		font-family: 'JetBrains Mono Variable', 'M PLUS 1 Code Variable', ui-monospace, monospace;
 	}
 
 	pre {

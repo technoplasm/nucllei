@@ -1,4 +1,11 @@
 <script>
+	// フォントはビルド時にバンドル(air-gapped 前提で CDN 不使用)。
+	// sans = Inter + Noto Sans JP / mono = JetBrains Mono + M PLUS 1 Code(等幅日本語)。
+	import '@fontsource-variable/inter';
+	import '@fontsource-variable/noto-sans-jp';
+	import '@fontsource-variable/jetbrains-mono';
+	import '@fontsource-variable/m-plus-1-code';
+
 	import { io } from 'socket.io-client';
 	import { spring } from 'svelte/motion';
 
