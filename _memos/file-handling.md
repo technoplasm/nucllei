@@ -139,7 +139,24 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **段2** 死んだベクタ検索サブシステム撤去(42cbc39bb): `/query/doc`・`/query/collection` endpoint、`query_doc*`/`query_collection*`/`get_all_items_from_collections`/`merge_*`/`VectorSearchRetriever`/`RerankCompressor`/`get_doc`(相互参照のみ・外部 caller なし)、および専用 import を撤去。
 - いずれも挙動不変(BYPASS 既定 True で従来から死んでいた経路)。回帰 docling/filter/IDOR/native tool/skills 緑。
 
-**未着手(要ユーザー判断・絡みが深い)**:
+**済(プランB 本体・フェーズ1 = backend 中核・挙動保存)**:
+- **文書抽出の内部関数化**(22dd591bd): `retrieval/extract.py::extract_file_text(request, file, *, force=False)`。
+  `process_file` の Loader→data.content ロジックを冪等・キャッシュ付きで切り出し、process_file は委譲。
+- **Attachment Function 種別 + 既定 builtin**(a421ae4d8): plugin loader に `Attachment` class 判定
+  (type `attachment`)。`builtin_functions/`(builtin_tools の Function 版)新設、builtin 判別は
+  id 接頭辞 `builtin_` 一本(Function は meta 列なし)。既定 `builtin_attachment` = 従来 files.py の
+  content_type 分岐を忠実 relocate・判定は valves 化。起動時 `sync_builtin_functions` で upsert。
+- **upload を dispatch に配線**(e79a1c955): `utils/attachment.py::process_attachment_functions`
+  (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。builtin id は
+  `BUILTIN_FUNCTIONS` から直接引く(コードが真実源・sync 前でも発火)。**全 206 passed・挙動不変**。
+
+**プランB 本体 残り**:
+- **フェーズ2(per-model トグル)**: `model.meta.attachmentIds` 解決 + upload が model 文脈を受け取る
+  + フロント Selector(ワークスペースのモデル設定)。builtin の content 更新/削除拒否(routers/functions.py)も。
+- **フェーズ3**: 非同期実行+処理中プレビュー(file に extracting→done)/ STT・TTS 内部関数(後回し可)/
+  ③gate filter(`large_file_gate` 移植)/ PDF→VLM(`pdf_vision_router`)/ ④sandbox tool 移植。
+
+**未着手(要ユーザー判断・絡みが深い / teardown 残り)**:
 - **config キー撤去**(`RAG_TOP_K`/`RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL`/embedding/reranking/chunk/vector)→ **フロント `Documents.svelte` が `/retrieval/config` で docling・FILE_MAX と RAG 設定を同一 endpoint で読む**ため、config endpoint の分割(docling/upload 設定を RAG から分離)が要る。フロント刷新を伴う。
 - **KB(ナレッジベース)撤去** → `models/knowledge.py::Knowledges` が `access_control.has_read_access_to_collection`(#40 CORE セキュリティ)と `test_file_access_idor.py` に結線。router 撤去は可だがモデルは温存 or access_control 改修が要る。
 - **vector connector / embedding(ef/rf)撤去** → **`routers/memories.py`(#8 放置方針)が `VECTOR_DB_CLIENT` + `EMBEDDING_FUNCTION` を共有**。connector 本体撤去は memories の去就決定が前提。
