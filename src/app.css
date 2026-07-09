@@ -244,11 +244,13 @@ input[type='number'] {
 }
 
 .codespan {
-	color: #eb5757;
+	/* color: #eb5757; */
 	border-width: 0px;
 	padding: 3px 8px;
-	font-size: 0.8em;
+	font-size: 0.75em;
 	font-weight: 600;
+	/* 小さい inline code をベースラインでなく本文の中心に揃える */
+	vertical-align: middle;
 	@apply rounded-md dark:bg-gray-800 bg-gray-100 mx-0.5;
 }
 

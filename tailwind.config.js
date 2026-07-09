@@ -43,7 +43,9 @@ export default {
 				sidebar: {
 					hover: 'var(--sidebar-hover, #ececec)',
 					selected: 'var(--sidebar-selected, #e3e3e3)'
-				}
+				},
+				// 罫線・区切り線の共通色(テーブル/hr など)。実値は src/tailwind.css。border-line で使う
+				line: 'var(--line, #dcdcdc)'
 			},
 			typography: {
 				DEFAULT: {
