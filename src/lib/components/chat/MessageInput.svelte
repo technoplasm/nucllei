@@ -90,8 +90,6 @@
 	export let prompt = '';
 	export let files = [];
 
-	export let toolServers = [];
-
 	export let selectedToolIds = [];
 
 	export let imageGenerationEnabled = false;
@@ -1126,10 +1124,10 @@
 										</InputMenu>
 
 										<div class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1">
-											{#if toolServers.length + selectedToolIds.length > 0}
+											{#if selectedToolIds.length > 0}
 												<Tooltip
 													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: toolServers.length + selectedToolIds.length
+														COUNT: selectedToolIds.length
 													})}
 												>
 													<button
@@ -1143,7 +1141,7 @@
 														<Wrench className="size-4" strokeWidth="1.75" />
 
 														<span class="text-sm font-medium text-gray-600 dark:text-gray-300">
-															{toolServers.length + selectedToolIds.length}
+															{selectedToolIds.length}
 														</span>
 													</button>
 												</Tooltip>

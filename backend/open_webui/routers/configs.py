@@ -39,36 +39,6 @@ async def export_config(user=Depends(get_admin_user)):
 
 
 ############################
-# Direct Connections Config
-############################
-
-
-class DirectConnectionsConfigForm(BaseModel):
-    ENABLE_DIRECT_CONNECTIONS: bool
-
-
-@router.get("/direct_connections", response_model=DirectConnectionsConfigForm)
-async def get_direct_connections_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        "ENABLE_DIRECT_CONNECTIONS": request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
-    }
-
-
-@router.post("/direct_connections", response_model=DirectConnectionsConfigForm)
-async def set_direct_connections_config(
-    request: Request,
-    form_data: DirectConnectionsConfigForm,
-    user=Depends(get_admin_user),
-):
-    request.app.state.config.ENABLE_DIRECT_CONNECTIONS = (
-        form_data.ENABLE_DIRECT_CONNECTIONS
-    )
-    return {
-        "ENABLE_DIRECT_CONNECTIONS": request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
-    }
-
-
-############################
 # ToolServers Config
 ############################
 

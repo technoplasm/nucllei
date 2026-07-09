@@ -96,8 +96,6 @@ from open_webui.config import (
     OPENAI_API_BASE_URLS,
     OPENAI_API_KEYS,
     OPENAI_API_CONFIGS,
-    # Direct Connections
-    ENABLE_DIRECT_CONNECTIONS,
     # Tool Server Configs
     TOOL_SERVER_CONNECTIONS,
     # Code Execution
@@ -477,14 +475,6 @@ app.state.OPENAI_MODELS = {}
 
 app.state.config.TOOL_SERVER_CONNECTIONS = TOOL_SERVER_CONNECTIONS
 app.state.TOOL_SERVERS = []
-
-########################################
-#
-# DIRECT CONNECTIONS
-#
-########################################
-
-app.state.config.ENABLE_DIRECT_CONNECTIONS = ENABLE_DIRECT_CONNECTIONS
 
 ########################################
 #
@@ -1014,7 +1004,6 @@ async def chat_completion(
             "message_id": form_data.pop("id", None),
             "session_id": form_data.pop("session_id", None),
             "tool_ids": form_data.get("tool_ids", None),
-            "tool_servers": form_data.pop("tool_servers", None),
             "files": form_data.get("files", None),
             "features": form_data.get("features", None),
             "variables": form_data.get("variables", None),
@@ -1181,7 +1170,6 @@ async def get_app_config(request: Request):
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {
-                    "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,
                     "enable_channels": app.state.config.ENABLE_CHANNELS,
                     # llens(#52): built-in web 検索(RAG 自動注入)は撤去。検索は tool→
                     # 内部検索 API(retrieval /process/web/search)経由に移行するため、

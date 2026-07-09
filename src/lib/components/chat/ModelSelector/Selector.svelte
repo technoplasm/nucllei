@@ -13,14 +13,7 @@
 
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
 
-	import {
-		user,
-		MODEL_DOWNLOAD_POOL,
-		models,
-		mobile,
-		settings,
-		config
-	} from '$lib/stores';
+	import { user, MODEL_DOWNLOAD_POOL, models, mobile, settings, config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
@@ -99,8 +92,6 @@
 							return item.model?.owned_by === 'ollama';
 						} else if (selectedConnectionType === 'openai') {
 							return item.model?.owned_by === 'openai';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
 						}
 					})
 			: items
@@ -117,8 +108,6 @@
 							return item.model?.owned_by === 'ollama';
 						} else if (selectedConnectionType === 'openai') {
 							return item.model?.owned_by === 'openai';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
 						}
 					})
 	).filter((item) => !(item.model?.info?.meta?.hidden ?? false));
@@ -257,12 +246,7 @@
 					})
 				);
 
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token));
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -388,7 +372,7 @@
 							class="flex gap-1 w-fit text-center text-sm font-medium rounded-full bg-transparent px-1.5 pb-0.5"
 							bind:this={tagsContainerElement}
 						>
-							{#if (items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai')) || items.find((item) => item.model?.direct) || tags.length > 0}
+							{#if (items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai')) || tags.length > 0}
 								<button
 									class="min-w-fit outline-none p-1.5 {selectedTag === '' &&
 									selectedConnectionType === ''
@@ -425,20 +409,6 @@
 									}}
 								>
 									{$i18n.t('External')}
-								</button>
-							{/if}
-
-							{#if items.find((item) => item.model?.direct)}
-								<button
-									class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'direct'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'direct';
-									}}
-								>
-									{$i18n.t('Direct')}
 								</button>
 							{/if}
 
@@ -535,24 +505,7 @@
 
 								<!-- {JSON.stringify(item.info)} -->
 
-								{#if item.model?.direct}
-									<Tooltip content={`${'Direct'}`}>
-										<div class="translate-y-[1px]">
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-3"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M2 2.75A.75.75 0 0 1 2.75 2C8.963 2 14 7.037 14 13.25a.75.75 0 0 1-1.5 0c0-5.385-4.365-9.75-9.75-9.75A.75.75 0 0 1 2 2.75Zm0 4.5a.75.75 0 0 1 .75-.75 6.75 6.75 0 0 1 6.75 6.75.75.75 0 0 1-1.5 0C8 10.35 5.65 8 2.75 8A.75.75 0 0 1 2 7.25ZM3.5 11a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</div>
-									</Tooltip>
-								{:else if item.model.owned_by === 'openai'}
+								{#if item.model.owned_by === 'openai'}
 									<Tooltip content={`${'External'}`}>
 										<div class="translate-y-[1px]">
 											<svg

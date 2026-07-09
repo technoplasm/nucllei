@@ -54,10 +54,7 @@
 		if (TTS_ENGINE === '') {
 			models = [];
 		} else {
-			const res = await _getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			).catch((e) => {
+			const res = await _getModels(localStorage.token).catch((e) => {
 				toast.error(`${e}`);
 			});
 

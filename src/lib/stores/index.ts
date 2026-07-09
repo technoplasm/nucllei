@@ -57,8 +57,6 @@ export const skills: Writable<null | Skill[]> = writable(null);
 export const tools = writable(null);
 export const functions = writable(null);
 
-export const toolServers = writable([]);
-
 export const banners: Writable<Banner[]> = writable([]);
 
 export const settings: Writable<Settings> = writable({});

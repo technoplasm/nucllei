@@ -16,12 +16,7 @@
 	let model = null;
 
 	const refreshModels = async () => {
-		await models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		await models.set(await getModels(localStorage.token));
 	};
 
 	onMount(async () => {

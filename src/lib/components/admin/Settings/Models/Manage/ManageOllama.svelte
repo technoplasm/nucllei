@@ -235,12 +235,7 @@
 					})
 				);
 
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token));
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -399,12 +394,7 @@
 		modelTransferring = false;
 		uploadProgress = null;
 
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token));
 	};
 
 	const deleteModelHandler = async () => {
@@ -417,12 +407,7 @@
 		}
 
 		deleteModelTag = '';
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token));
 	};
 
 	const cancelModelPullHandler = async (model: string) => {
@@ -521,12 +506,7 @@
 			}
 		}
 
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token));
 
 		createModelLoading = false;
 

@@ -10,7 +10,7 @@
 	import { page } from '$app/stores';
 
 	import { getFunctions } from '$lib/apis/functions';
-	import { getModels, getToolServersData } from '$lib/apis';
+	import { getModels } from '$lib/apis';
 	import { getAllTags } from '$lib/apis/chats';
 	import { getSkills } from '$lib/apis/skills';
 	import { getTools } from '$lib/apis/tools';
@@ -28,8 +28,7 @@
 		tags,
 		banners,
 		showSettings,
-		showChangelog,
-		toolServers
+		showChangelog
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
@@ -86,19 +85,13 @@
 				settings.set(localStorageSettings);
 			}
 
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token));
 
 			banners.set(await getBanners(localStorage.token));
 			tools.set(await getTools(localStorage.token));
 			// llens(issue #35): /command ハイライト判定は picker を開く前から必要なため
 			// skill 一覧を初期ロードしておく。
 			skills.set(await getSkills(localStorage.token));
-			toolServers.set(await getToolServersData($i18n, $settings?.toolServers ?? []));
 
 			document.addEventListener('keydown', async function (event) {
 				const isCtrlPressed = event.ctrlKey || event.metaKey; // metaKey is for Cmd key on Mac
@@ -167,7 +160,6 @@
 					console.log('showShortcuts');
 					document.getElementById('show-shortcuts-button')?.click();
 				}
-
 			});
 
 			// llens: What's New(Changelog)自動ポップアップは upstream のリリース案内で

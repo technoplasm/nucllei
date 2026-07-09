@@ -47,12 +47,7 @@
 			toast.success($i18n.t('Function deleted successfully'));
 
 			functions.set(await getFunctions(localStorage.token));
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token));
 		}
 	};
 </script>
@@ -195,11 +190,6 @@
 	id={selectedFunction?.id ?? null}
 	on:save={async () => {
 		await tick();
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token));
 	}}
 />

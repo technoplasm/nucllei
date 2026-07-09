@@ -33,8 +33,7 @@
 		temporaryChatEnabled,
 		mobile,
 		chatTitle,
-		tools,
-		toolServers
+		tools
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
@@ -66,7 +65,6 @@
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWebSearch } from '$lib/apis/retrieval';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
-	import { queryMemory } from '$lib/apis/memories';
 	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
 	import {
 		chatCompleted,
@@ -1375,28 +1373,9 @@
 						responseMessageIds[`${modelId}-${modelIdx ? modelIdx : _modelIdx}`];
 					let responseMessage = _history.messages[responseMessageId];
 
+					// llens(#63): 個人化(Memory)は機能ごと廃止(テーブルは温存)。
+					// userContext 注入は行わない。
 					let userContext = null;
-					if ($settings?.memory ?? false) {
-						if (userContext === null) {
-							const res = await queryMemory(localStorage.token, prompt).catch((error) => {
-								toast.error(`${error}`);
-								return null;
-							});
-							if (res) {
-								if (res.documents[0].length > 0) {
-									userContext = res.documents[0].reduce((acc, doc, index) => {
-										const createdAtTimestamp = res.metadatas[0][index].created_at;
-										const createdAtDate = new Date(createdAtTimestamp * 1000)
-											.toISOString()
-											.split('T')[0];
-										return `${acc}${index + 1}. [${createdAtDate}]. ${doc}\n`;
-									}, '');
-								}
-
-								console.log(userContext);
-							}
-						}
-					}
 					responseMessage.userContext = userContext;
 
 					const chatEventEmitter = await getChatEventEmitter(model.id, _chatId);
@@ -1447,11 +1426,11 @@
 			true;
 
 		let messages = [
-			params?.system || $settings.system || (responseMessage?.userContext ?? null)
+			params?.system
 				? {
 						role: 'system',
-						content: `${promptTemplate(
-							params?.system ?? $settings?.system ?? '',
+						content: promptTemplate(
+							params?.system ?? '',
 							$user?.name,
 							$settings?.userLocation
 								? await getAndUpdateUserLocation(localStorage.token).catch((err) => {
@@ -1459,11 +1438,7 @@
 										return undefined;
 									})
 								: undefined
-						)}${
-							(responseMessage?.userContext ?? null)
-								? `\n\nUser Context:\n${responseMessage?.userContext ?? ''}`
-								: ''
-						}`
+						)
 					}
 				: undefined,
 			...createMessagesList(_history, responseMessageId).map((message) => ({
@@ -1538,7 +1513,6 @@
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 				tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
-				tool_servers: $toolServers,
 
 				features: {
 					image_generation:
@@ -1824,7 +1798,7 @@
 				id: _chatId,
 				title: $i18n.t('New Chat'),
 				models: selectedModels,
-				system: $settings.system ?? undefined,
+				system: undefined,
 				params: params,
 				history: history,
 				messages: createMessagesList(history, history.currentId),
@@ -1923,7 +1897,7 @@
 						chat: {
 							title: $chatTitle,
 							models: selectedModels,
-							system: $settings.system ?? undefined,
+							system: undefined,
 							params: params,
 							history: history,
 							timestamp: Date.now()
@@ -1982,7 +1956,6 @@
 								bind:codeInterpreterEnabled
 								bind:webSearchEnabled
 								bind:atSelectedModel
-								toolServers={$toolServers}
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
 								{createMessagePair}
@@ -2032,7 +2005,6 @@
 								bind:webSearchEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
-								toolServers={$toolServers}
 								{stopResponse}
 								{createMessagePair}
 								on:submit={async (e) => {

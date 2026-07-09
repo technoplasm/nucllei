@@ -262,7 +262,7 @@
 		// 生モデル(接続由来のベースモデル)一覧。/api/models/base は admin ゲート。
 		// 既定では preset 作成/編集は admin のみ(workspace.models 既定 False)。
 		// 非 admin では 403 を投げるため、空配列にフォールバックしてエディタを壊さない。
-		baseModels = (await getModels(localStorage.token, null, true).catch(() => [])) ?? [];
+		baseModels = (await getModels(localStorage.token, true).catch(() => [])) ?? [];
 
 		await tools.set(await getTools(localStorage.token));
 		await skills.set(await getSkills(localStorage.token));

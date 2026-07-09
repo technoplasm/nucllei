@@ -26,14 +26,13 @@
 		temporaryChatEnabled,
 		isLastActiveTab,
 		isApp,
-		appInfo,
-		toolServers
+		appInfo
 	} from '$lib/stores';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { Toaster, toast } from 'svelte-sonner';
 
-	import { executeToolServer, getBackendConfig } from '$lib/apis';
+	import { getBackendConfig } from '$lib/apis';
 	import { getSessionUser } from '$lib/apis/auths';
 
 	import '../tailwind.css';
@@ -47,7 +46,6 @@
 	import { getAllTags, getChatList } from '$lib/apis/chats';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
-	import { chatCompletion } from '$lib/apis/openai';
 
 	setContext('i18n', i18n);
 
@@ -102,39 +100,6 @@
 			console.log('usage', data);
 			USAGE_POOL.set(data['models']);
 		});
-	};
-
-	const executeTool = async (data, cb) => {
-		const toolServer = $settings?.toolServers?.find((server) => server.url === data.server?.url);
-		const toolServerData = $toolServers?.find((server) => server.url === data.server?.url);
-
-		console.log('executeTool', data, toolServer);
-
-		if (toolServer) {
-			console.log(toolServer);
-			const res = await executeToolServer(
-				(toolServer?.auth_type ?? 'bearer') === 'bearer' ? toolServer?.key : localStorage.token,
-				toolServer.url,
-				data?.name,
-				data?.params,
-				toolServerData
-			);
-
-			console.log('executeToolServer', res);
-			if (cb) {
-				cb(JSON.parse(JSON.stringify(res)));
-			}
-		} else {
-			if (cb) {
-				cb(
-					JSON.parse(
-						JSON.stringify({
-							error: 'Tool Server Not Found'
-						})
-					)
-				);
-			}
-		}
 	};
 
 	const chatEventHandler = async (event, cb) => {
@@ -196,94 +161,6 @@
 						stdout: null,
 						stderr: 'Python execution in the browser (Pyodide) is disabled.',
 						result: null
-					});
-				}
-			} else if (type === 'execute:tool') {
-				console.log('execute:tool', data);
-				executeTool(data, cb);
-			} else if (type === 'request:chat:completion') {
-				console.log(data, $socket.id);
-				const { session_id, channel, form_data, model } = data;
-
-				try {
-					const directConnections = $settings?.directConnections ?? {};
-
-					if (directConnections) {
-						const urlIdx = model?.urlIdx;
-
-						const OPENAI_API_URL = directConnections.OPENAI_API_BASE_URLS[urlIdx];
-						const OPENAI_API_KEY = directConnections.OPENAI_API_KEYS[urlIdx];
-						const API_CONFIG = directConnections.OPENAI_API_CONFIGS[urlIdx];
-
-						try {
-							if (API_CONFIG?.prefix_id) {
-								const prefixId = API_CONFIG.prefix_id;
-								form_data['model'] = form_data['model'].replace(`${prefixId}.`, ``);
-							}
-
-							const [res, controller] = await chatCompletion(
-								OPENAI_API_KEY,
-								form_data,
-								OPENAI_API_URL
-							);
-
-							if (res) {
-								// raise if the response is not ok
-								if (!res.ok) {
-									throw await res.json();
-								}
-
-								if (form_data?.stream ?? false) {
-									cb({
-										status: true
-									});
-									console.log({ status: true });
-
-									// res will either be SSE or JSON
-									const reader = res.body.getReader();
-									const decoder = new TextDecoder();
-
-									const processStream = async () => {
-										while (true) {
-											// Read data chunks from the response stream
-											const { done, value } = await reader.read();
-											if (done) {
-												break;
-											}
-
-											// Decode the received chunk
-											const chunk = decoder.decode(value, { stream: true });
-
-											// Process lines within the chunk
-											const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-											for (const line of lines) {
-												console.log(line);
-												$socket?.emit(channel, line);
-											}
-										}
-									};
-
-									// Process the stream in the background
-									await processStream();
-								} else {
-									const data = await res.json();
-									cb(data);
-								}
-							} else {
-								throw new Error('An error occurred while fetching the completion');
-							}
-						} catch (error) {
-							console.error('chatCompletion', error);
-							cb(error);
-						}
-					}
-				} catch (error) {
-					console.error('chatCompletion', error);
-					cb(error);
-				} finally {
-					$socket.emit(channel, {
-						done: true
 					});
 				}
 			} else {

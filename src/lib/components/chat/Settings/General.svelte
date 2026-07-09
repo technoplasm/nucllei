@@ -1,18 +1,14 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher, onMount, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { getLanguages, changeLanguage } from '$lib/i18n';
-	const dispatch = createEventDispatcher();
 
-	import { models, settings, user } from '$lib/stores';
+	import { settings } from '$lib/stores';
 	import { themeChangeHandler } from '$lib/utils/theme';
 
 	const i18n = getContext('i18n');
 
-	import Textarea from '$lib/components/common/Textarea.svelte';
-
 	export let saveSettings: Function;
-	export let getModels: Function;
 
 	// General
 	let selectedTheme = 'system';
@@ -20,7 +16,6 @@
 	let languages: Awaited<ReturnType<typeof getLanguages>> = [];
 	let lang = $i18n.language;
 	let notificationEnabled = false;
-	let system = '';
 
 	const toggleNotification = async () => {
 		const permission = await Notification.requestPermission();
@@ -37,127 +32,13 @@
 		}
 	};
 
-	// Advanced
-	let requestFormat = null;
-	let keepAlive: string | null = null;
-
-	let params = {
-		// Advanced
-		stream_response: null,
-		function_calling: null,
-		seed: null,
-		temperature: null,
-		reasoning_effort: null,
-		logit_bias: null,
-		frequency_penalty: null,
-		presence_penalty: null,
-		repeat_penalty: null,
-		repeat_last_n: null,
-		mirostat: null,
-		mirostat_eta: null,
-		mirostat_tau: null,
-		top_k: null,
-		top_p: null,
-		min_p: null,
-		stop: null,
-		tfs_z: null,
-		num_ctx: null,
-		num_batch: null,
-		num_keep: null,
-		max_tokens: null,
-		num_gpu: null
-	};
-
-	const validateJSON = (json) => {
-		try {
-			const obj = JSON.parse(json);
-
-			if (obj && typeof obj === 'object') {
-				return true;
-			}
-		} catch (e) {}
-		return false;
-	};
-
-	const toggleRequestFormat = async () => {
-		if (requestFormat === null) {
-			requestFormat = 'json';
-		} else {
-			requestFormat = null;
-		}
-
-		saveSettings({ requestFormat: requestFormat !== null ? requestFormat : undefined });
-	};
-
-	const saveHandler = async () => {
-		if (requestFormat !== null && requestFormat !== 'json') {
-			if (validateJSON(requestFormat) === false) {
-				toast.error($i18n.t('Invalid JSON schema'));
-				return;
-			} else {
-				requestFormat = JSON.parse(requestFormat);
-			}
-		}
-
-		saveSettings({
-			system: system !== '' ? system : undefined,
-			params: {
-				stream_response: params.stream_response !== null ? params.stream_response : undefined,
-				function_calling: params.function_calling !== null ? params.function_calling : undefined,
-				seed: (params.seed !== null ? params.seed : undefined) ?? undefined,
-				stop: params.stop ? params.stop.split(',').filter((e) => e) : undefined,
-				temperature: params.temperature !== null ? params.temperature : undefined,
-				reasoning_effort: params.reasoning_effort !== null ? params.reasoning_effort : undefined,
-				logit_bias: params.logit_bias !== null ? params.logit_bias : undefined,
-				frequency_penalty: params.frequency_penalty !== null ? params.frequency_penalty : undefined,
-				presence_penalty: params.frequency_penalty !== null ? params.frequency_penalty : undefined,
-				repeat_penalty: params.frequency_penalty !== null ? params.frequency_penalty : undefined,
-				repeat_last_n: params.repeat_last_n !== null ? params.repeat_last_n : undefined,
-				mirostat: params.mirostat !== null ? params.mirostat : undefined,
-				mirostat_eta: params.mirostat_eta !== null ? params.mirostat_eta : undefined,
-				mirostat_tau: params.mirostat_tau !== null ? params.mirostat_tau : undefined,
-				top_k: params.top_k !== null ? params.top_k : undefined,
-				top_p: params.top_p !== null ? params.top_p : undefined,
-				min_p: params.min_p !== null ? params.min_p : undefined,
-				tfs_z: params.tfs_z !== null ? params.tfs_z : undefined,
-				num_ctx: params.num_ctx !== null ? params.num_ctx : undefined,
-				num_batch: params.num_batch !== null ? params.num_batch : undefined,
-				num_keep: params.num_keep !== null ? params.num_keep : undefined,
-				max_tokens: params.max_tokens !== null ? params.max_tokens : undefined,
-				use_mmap: params.use_mmap !== null ? params.use_mmap : undefined,
-				use_mlock: params.use_mlock !== null ? params.use_mlock : undefined,
-				num_thread: params.num_thread !== null ? params.num_thread : undefined,
-				num_gpu: params.num_gpu !== null ? params.num_gpu : undefined
-			},
-			keepAlive: keepAlive ? (isNaN(keepAlive) ? keepAlive : parseInt(keepAlive)) : undefined,
-			requestFormat: requestFormat !== null ? requestFormat : undefined
-		});
-		dispatch('save');
-
-		requestFormat =
-			typeof requestFormat === 'object' ? JSON.stringify(requestFormat, null, 2) : requestFormat;
-	};
-
 	onMount(async () => {
 		selectedTheme = localStorage.theme ?? 'system';
 
 		languages = await getLanguages();
 
 		notificationEnabled = $settings.notificationEnabled ?? false;
-		system = $settings.system ?? '';
-
-		requestFormat = $settings.requestFormat ?? null;
-		if (requestFormat !== null && requestFormat !== 'json') {
-			requestFormat =
-				typeof requestFormat === 'object' ? JSON.stringify(requestFormat, null, 2) : requestFormat;
-		}
-
-		keepAlive = $settings.keepAlive ?? null;
-
-		params = { ...params, ...$settings.params };
-		params.stop = $settings?.params?.stop ? ($settings?.params?.stop ?? []).join(',') : null;
 	});
-
 </script>
 
 <div class="flex flex-col h-full justify-between text-sm">
@@ -231,30 +112,5 @@
 				</div>
 			</div>
 		</div>
-
-		{#if $user?.role === 'admin' || $user?.permissions.chat?.controls}
-			<hr class="border-gray-50 dark:border-gray-850 my-3" />
-
-			<div>
-				<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
-				<Textarea
-					bind:value={system}
-					className="w-full text-sm bg-white dark:text-gray-300 dark:bg-gray-900 outline-hidden resize-none"
-					rows="4"
-					placeholder={$i18n.t('Enter system prompt here')}
-				/>
-			</div>
-		{/if}
-	</div>
-
-	<div class="flex justify-end pt-3 text-sm font-medium">
-		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			on:click={() => {
-				saveHandler();
-			}}
-		>
-			{$i18n.t('Save')}
-		</button>
 	</div>
 </div>

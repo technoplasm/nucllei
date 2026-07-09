@@ -32,7 +32,6 @@
 			temporary_enforced: false
 		},
 		features: {
-			direct_tool_servers: false,
 			web_search: true,
 			image_generation: true,
 			code_interpreter: true
@@ -330,14 +329,6 @@
 
 	<div>
 		<div class=" mb-2 text-sm font-medium">{$i18n.t('Features Permissions')}</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Direct Tool Servers')}
-			</div>
-
-			<Switch bind:state={permissions.features.direct_tool_servers} />
-		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">
 			<div class=" self-center text-xs font-medium">

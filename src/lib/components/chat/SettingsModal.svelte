@@ -1,23 +1,17 @@
 <script lang="ts">
 	import { getContext, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { config, models, settings, user } from '$lib/stores';
+	import { models, settings } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getModels as _getModels } from '$lib/apis';
-	import { goto } from '$app/navigation';
 
 	import Modal from '../common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
 	import About from './Settings/About.svelte';
 	import General from './Settings/General.svelte';
 	import Interface from './Settings/Interface.svelte';
-	import Audio from './Settings/Audio.svelte';
 	import Chats from './Settings/Chats.svelte';
-	import User from '../icons/User.svelte';
-	import Personalization from './Settings/Personalization.svelte';
 	import Search from '../icons/Search.svelte';
-	import Connections from './Settings/Connections.svelte';
-	import Tools from './Settings/Tools.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -38,159 +32,42 @@
 				'theme',
 				'language',
 				'notifications',
-				'system',
-				'systemprompt',
-				'prompt',
-				'advanced',
 				'settings',
-				'defaultsettings',
 				'configuration',
-				'systemsettings',
-				'notificationsettings',
-				'systempromptconfig',
 				'languageoptions',
-				'defaultparameters',
-				'systemparameters'
+				'notificationsettings'
 			]
 		},
 		{
 			id: 'interface',
 			title: 'Interface',
 			keywords: [
-				'defaultmodel',
-				'selectmodel',
 				'ui',
 				'userinterface',
 				'display',
 				'layout',
 				'design',
 				'landingpage',
-				'landingpagemode',
-				'default',
 				'chat',
 				'chatbubble',
 				'chatui',
 				'username',
-				'showusername',
-				'displayusername',
 				'widescreen',
-				'widescreenmode',
-				'fullscreen',
-				'expandmode',
 				'chatdirection',
-				'lefttoright',
-				'ltr',
-				'righttoleft',
-				'rtl',
-				'notifications',
 				'toast',
-				'toastnotifications',
-				'largechunks',
-				'streamlargechunks',
 				'scroll',
-				'scrollonbranchchange',
-				'scrollbehavior',
 				'richtext',
-				'richtextinput',
 				'background',
 				'chatbackground',
-				'chatbackgroundimage',
-				'backgroundimage',
-				'uploadbackground',
-				'resetbackground',
 				'titleautogen',
-				'titleautogeneration',
 				'autotitle',
 				'chattags',
-				'autochattags',
 				'responseautocopy',
 				'clipboard',
 				'location',
-				'userlocation',
-				'userlocationaccess',
-				'haptic',
-				'hapticfeedback',
-				'vibration',
-				'voice',
-				'voicecontrol',
-				'voiceinterruption',
-				'call',
 				'emojis',
-				'displayemoji',
-				'save',
 				'interfaceoptions',
-				'interfacecustomization',
-				'alwaysonwebsearch'
-			]
-		},
-		{
-			id: 'connections',
-			title: 'Connections',
-			keywords: []
-		},
-		{
-			id: 'tools',
-			title: 'Tools',
-			keywords: []
-		},
-		{
-			id: 'personalization',
-			title: 'Personalization',
-			keywords: [
-				'personalization',
-				'memory',
-				'personalize',
-				'preferences',
-				'profile',
-				'personalsettings',
-				'customsettings',
-				'userpreferences',
-				'accountpreferences'
-			]
-		},
-		{
-			id: 'audio',
-			title: 'Audio',
-			keywords: [
-				'audio',
-				'sound',
-				'soundsettings',
-				'audiocontrol',
-				'volume',
-				'speech',
-				'speechrecognition',
-				'stt',
-				'speechtotext',
-				'tts',
-				'texttospeech',
-				'playback',
-				'playbackspeed',
-				'voiceplayback',
-				'speechplayback',
-				'audiooutput',
-				'speechengine',
-				'voicecontrol',
-				'audioplayback',
-				'transcription',
-				'autotranscribe',
-				'autosend',
-				'speechsettings',
-				'audiovoice',
-				'voiceoptions',
-				'setvoice',
-				'nonlocalvoices',
-				'savesettings',
-				'audioconfig',
-				'speechconfig',
-				'voicerecognition',
-				'speechsynthesis',
-				'speechmode',
-				'voicespeed',
-				'speechrate',
-				'speechspeed',
-				'audioinput',
-				'audiofeatures',
-				'voicemodes'
+				'interfacecustomization'
 			]
 		},
 		{
@@ -235,59 +112,20 @@
 			]
 		},
 		{
-			id: 'admin',
-			title: 'Admin',
-			keywords: [
-				'admin',
-				'administrator',
-				'adminsettings',
-				'adminpanel',
-				'systemadmin',
-				'administratoraccess',
-				'systemcontrol',
-				'manage',
-				'management',
-				'admincontrols',
-				'adminfeatures',
-				'usercontrol',
-				'websearch',
-				'database',
-				'pipelines',
-				'images',
-				'audio',
-				'documents',
-				'rag',
-				'models',
-				'ollama',
-				'openai',
-				'users'
-			]
-		},
-		{
 			id: 'about',
-			title: 'About',
+			title: 'License',
 			keywords: [
+				'license',
 				'about',
 				'info',
 				'information',
 				'version',
-				'documentation',
-				'help',
-				'support',
-				'details',
-				'aboutus',
-				'softwareinfo',
-				'timothyjaeryangbaek',
 				'openwebui',
-				'release',
-				'updates',
-				'updateinfo',
-				'versioninfo',
-				'aboutapp',
-				'terms',
-				'termsandconditions',
-				'contact',
-				'aboutpage'
+				'fork',
+				'bsd',
+				'proprietary',
+				'copyright',
+				'versioninfo'
 			]
 		}
 	];
@@ -325,10 +163,7 @@
 	};
 
 	const getModels = async () => {
-		return await _getModels(
-			localStorage.token,
-			$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-		);
+		return await _getModels(localStorage.token);
 	};
 
 	let selectedTab = 'general';
@@ -459,102 +294,6 @@
 								</div>
 								<div class=" self-center">{$i18n.t('Interface')}</div>
 							</button>
-						{:else if tabId === 'connections'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
-								<button
-									class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-									'connections'
-										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-									on:click={() => {
-										selectedTab = 'connections';
-									}}
-								>
-									<div class=" self-center mr-2">
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												d="M1 9.5A3.5 3.5 0 0 0 4.5 13H12a3 3 0 0 0 .917-5.857 2.503 2.503 0 0 0-3.198-3.019 3.5 3.5 0 0 0-6.628 2.171A3.5 3.5 0 0 0 1 9.5Z"
-											/>
-										</svg>
-									</div>
-									<div class=" self-center">{$i18n.t('Connections')}</div>
-								</button>
-							{/if}
-						{:else if tabId === 'tools'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)}
-								<button
-									class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-									'tools'
-										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-									on:click={() => {
-										selectedTab = 'tools';
-									}}
-								>
-									<div class=" self-center mr-2">
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 24 24"
-											fill="currentColor"
-											class="size-4"
-										>
-											<path
-												fill-rule="evenodd"
-												d="M12 6.75a5.25 5.25 0 0 1 6.775-5.025.75.75 0 0 1 .313 1.248l-3.32 3.319c.063.475.276.934.641 1.299.365.365.824.578 1.3.64l3.318-3.319a.75.75 0 0 1 1.248.313 5.25 5.25 0 0 1-5.472 6.756c-1.018-.086-1.87.1-2.309.634L7.344 21.3A3.298 3.298 0 1 1 2.7 16.657l8.684-7.151c.533-.44.72-1.291.634-2.309A5.342 5.342 0 0 1 12 6.75ZM4.117 19.125a.75.75 0 0 1 .75-.75h.008a.75.75 0 0 1 .75.75v.008a.75.75 0 0 1-.75.75h-.008a.75.75 0 0 1-.75-.75v-.008Z"
-												clip-rule="evenodd"
-											/>
-										</svg>
-									</div>
-									<div class=" self-center">{$i18n.t('Tools')}</div>
-								</button>
-							{/if}
-						{:else if tabId === 'personalization'}
-							<button
-								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-								'personalization'
-									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-								on:click={() => {
-									selectedTab = 'personalization';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<User />
-								</div>
-								<div class=" self-center">{$i18n.t('Personalization')}</div>
-							</button>
-						{:else if tabId === 'audio'}
-							<button
-								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-								'audio'
-									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-								on:click={() => {
-									selectedTab = 'audio';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 16 16"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											d="M7.557 2.066A.75.75 0 0 1 8 2.75v10.5a.75.75 0 0 1-1.248.56L3.59 11H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.59l3.162-2.81a.75.75 0 0 1 .805-.124ZM12.95 3.05a.75.75 0 1 0-1.06 1.06 5.5 5.5 0 0 1 0 7.78.75.75 0 1 0 1.06 1.06 7 7 0 0 0 0-9.9Z"
-										/>
-										<path
-											d="M10.828 5.172a.75.75 0 1 0-1.06 1.06 2.5 2.5 0 0 1 0 3.536.75.75 0 1 0 1.06 1.06 4 4 0 0 0 0-5.656Z"
-										/>
-									</svg>
-								</div>
-								<div class=" self-center">{$i18n.t('Audio')}</div>
-							</button>
 						{:else if tabId === 'chats'}
 							<button
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
@@ -631,37 +370,8 @@
 										/>
 									</svg>
 								</div>
-								<div class=" self-center">{$i18n.t('About')}</div>
+								<div class=" self-center">{$i18n.t('License')}</div>
 							</button>
-						{:else if tabId === 'admin'}
-							{#if $user?.role === 'admin'}
-								<button
-									class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-									'admin'
-										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-									on:click={async () => {
-										await goto('/workspace/settings');
-										show = false;
-									}}
-								>
-									<div class=" self-center mr-2">
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 24 24"
-											fill="currentColor"
-											class="size-4"
-										>
-											<path
-												fill-rule="evenodd"
-												d="M4.5 3.75a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h15a3 3 0 0 0 3-3V6.75a3 3 0 0 0-3-3h-15Zm4.125 3a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5Zm-3.873 8.703a4.126 4.126 0 0 1 7.746 0 .75.75 0 0 1-.351.92 7.47 7.47 0 0 1-3.522.877 7.47 7.47 0 0 1-3.522-.877.75.75 0 0 1-.351-.92ZM15 8.25a.75.75 0 0 0 0 1.5h3.75a.75.75 0 0 0 0-1.5H15ZM14.25 12a.75.75 0 0 1 .75-.75h3.75a.75.75 0 0 1 0 1.5H15a.75.75 0 0 1-.75-.75Zm.75 2.25a.75.75 0 0 0 0 1.5h3.75a.75.75 0 0 0 0-1.5H15Z"
-												clip-rule="evenodd"
-											/>
-										</svg>
-									</div>
-									<div class=" self-center">{$i18n.t('Admin Settings')}</div>
-								</button>
-							{/if}
 						{/if}
 					{/each}
 				{:else}
@@ -672,48 +382,9 @@
 			</div>
 			<div class="flex-1 md:min-h-[32rem] max-h-[32rem]">
 				{#if selectedTab === 'general'}
-					<General
-						{getModels}
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
+					<General {saveSettings} />
 				{:else if selectedTab === 'interface'}
-					<Interface
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'connections'}
-					<Connections
-						saveSettings={async (updated) => {
-							await saveSettings(updated);
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'tools'}
-					<Tools
-						saveSettings={async (updated) => {
-							await saveSettings(updated);
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'personalization'}
-					<Personalization
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'audio'}
-					<Audio
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
+					<Interface {saveSettings} />
 				{:else if selectedTab === 'chats'}
 					<Chats {saveSettings} />
 				{:else if selectedTab === 'account'}

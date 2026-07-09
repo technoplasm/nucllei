@@ -71,7 +71,6 @@ from open_webui.utils.access_control import (
     has_read_access_to_collection,
 )
 from open_webui.utils.tools import get_tools
-from open_webui.utils.tool_render import extract_render_from_spec
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
     get_sorted_filter_ids,
@@ -738,11 +737,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # Server side tools
     tool_ids = metadata.get("tool_ids", None)
-    # Client side tools
-    tool_servers = metadata.get("tool_servers", None)
 
     log.debug(f"{tool_ids=}")
-    log.debug(f"{tool_servers=}")
 
     tools_dict = {}
 
@@ -807,21 +803,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     ]
     if current_skill_activations:
         metadata["skill_activations"] = current_skill_activations
-
-    if tool_servers:
-        for tool_server in tool_servers:
-            tool_specs = tool_server.pop("specs", [])
-
-            for tool in tool_specs:
-                tools_dict[tool["name"]] = {
-                    "spec": tool,
-                    "direct": True,
-                    "server": tool_server,
-                }
-                # llens(#20): contentMediaType → 表示ディスクリプタ
-                render = extract_render_from_spec(tool)
-                if render:
-                    tools_dict[tool["name"]]["render"] = render
 
     # llens(#35 step2b): load_skill 発火時の tool 遅延取り込み(入口 2)。
     # tools_dict(= metadata["tools"])と form_data["tools"] は native ループが

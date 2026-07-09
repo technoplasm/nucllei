@@ -52,7 +52,6 @@
 			temporary: true
 		},
 		features: {
-			direct_tool_servers: false,
 			web_search: true,
 			image_generation: true,
 			code_interpreter: true

@@ -783,16 +783,6 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 ####################################
-# DIRECT CONNECTIONS
-####################################
-
-ENABLE_DIRECT_CONNECTIONS = RuntimeConfig(
-    "ENABLE_DIRECT_CONNECTIONS",
-    "direct.enable",
-    os.environ.get("ENABLE_DIRECT_CONNECTIONS", "True").lower() == "true",
-)
-
-####################################
 # OLLAMA_BASE_URL
 ####################################
 
@@ -1092,11 +1082,6 @@ USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED = (
 )
 
 
-USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS = (
-    os.environ.get("USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS", "False").lower()
-    == "true"
-)
-
 USER_PERMISSIONS_FEATURES_WEB_SEARCH = (
     os.environ.get("USER_PERMISSIONS_FEATURES_WEB_SEARCH", "True").lower() == "true"
 )
@@ -1138,7 +1123,6 @@ DEFAULT_USER_PERMISSIONS = {
         "temporary_enforced": USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED,
     },
     "features": {
-        "direct_tool_servers": USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         "web_search": USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         "image_generation": USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
         "code_interpreter": USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,

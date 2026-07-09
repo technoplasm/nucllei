@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { getBackendConfig } from '$lib/apis';
 	import { config, models, settings, user } from '$lib/stores';
-	import { createEventDispatcher, onMount, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { updateUserInfo } from '$lib/apis/users';
 	import { getUserPosition } from '$lib/utils';
-	const dispatch = createEventDispatcher();
 
 	const i18n = getContext('i18n');
 
@@ -27,7 +26,6 @@
 	let userLocation = false;
 
 	// Interface
-	let defaultModelId = '';
 	let showUsername = false;
 	let notificationSound = true;
 
@@ -234,13 +232,6 @@
 		saveSettings({ ctrlEnterToSend });
 	};
 
-	const updateInterfaceHandler = async () => {
-		saveSettings({
-			models: [defaultModelId],
-			imageCompressionSize: imageCompressionSize
-		});
-	};
-
 	const toggleWebSearch = async () => {
 		webSearch = webSearch === null ? 'always' : null;
 		saveSettings({ webSearch: webSearch });
@@ -293,23 +284,12 @@
 		imageCompression = $settings.imageCompression ?? false;
 		imageCompressionSize = $settings.imageCompressionSize ?? { width: '', height: '' };
 
-		defaultModelId = $settings?.models?.at(0) ?? '';
-		if ($config?.default_models) {
-			defaultModelId = $config.default_models.split(',')[0];
-		}
-
 		backgroundImageUrl = $settings.backgroundImageUrl ?? null;
 		webSearch = $settings.webSearch ?? null;
 	});
 </script>
 
-<form
-	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={() => {
-		updateInterfaceHandler();
-		dispatch('save');
-	}}
->
+<div class="flex flex-col h-full justify-between space-y-3 text-sm">
 	<input
 		bind:this={filesInputElement}
 		bind:files={inputFiles}
@@ -555,7 +535,6 @@
 					</button>
 				</div>
 			</div>
-
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
@@ -976,6 +955,7 @@
 						<div>
 							<input
 								bind:value={imageCompressionSize.width}
+								on:change={() => saveSettings({ imageCompressionSize })}
 								type="number"
 								class="w-20 bg-transparent outline-hidden text-center"
 								min="0"
@@ -983,6 +963,7 @@
 							/>x
 							<input
 								bind:value={imageCompressionSize.height}
+								on:change={() => saveSettings({ imageCompressionSize })}
 								type="number"
 								class="w-20 bg-transparent outline-hidden text-center"
 								min="0"
@@ -994,13 +975,4 @@
 			{/if}
 		</div>
 	</div>
-
-	<div class="flex justify-end text-sm font-medium">
-		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			type="submit"
-		>
-			{$i18n.t('Save')}
-		</button>
-	</div>
-</form>
+</div>

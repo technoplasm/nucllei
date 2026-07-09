@@ -63,12 +63,7 @@
 			if (res) {
 				toast.success($i18n.t('Valves updated successfully'));
 				setPipelines();
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token));
 				saveHandler();
 			}
 		} else {
@@ -130,12 +125,7 @@
 		if (res) {
 			toast.success($i18n.t('Pipeline downloaded successfully'));
 			setPipelines();
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token));
 		}
 
 		downloading = false;
@@ -160,12 +150,7 @@
 			if (res) {
 				toast.success($i18n.t('Pipeline downloaded successfully'));
 				setPipelines();
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token));
 			}
 		} else {
 			toast.error($i18n.t('No file selected'));
@@ -194,12 +179,7 @@
 		if (res) {
 			toast.success($i18n.t('Pipeline deleted successfully'));
 			setPipelines();
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token));
 		}
 	};
 

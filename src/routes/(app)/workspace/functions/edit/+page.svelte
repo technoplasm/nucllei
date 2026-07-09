@@ -25,12 +25,7 @@
 
 	const refreshStores = async () => {
 		functions.set(await getFunctions(localStorage.token));
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token));
 	};
 
 	const saveHandler = async (data) => {
