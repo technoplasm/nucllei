@@ -35,7 +35,8 @@ class ModelParams(BaseModel):
 
 # ModelMeta is a model for the data stored in the meta field of the Model table
 class ModelMeta(BaseModel):
-    profile_image_url: Optional[str] = "/static/favicon.png"
+    # 既定は None(= カスタムアイコン未設定)。表示側の gray fallback に委ねる。
+    profile_image_url: Optional[str] = None
 
     description: Optional[str] = None
     """

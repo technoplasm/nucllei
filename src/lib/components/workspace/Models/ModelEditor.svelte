@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext, tick } from 'svelte';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { tools, functions, skills, user } from '$lib/stores';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
@@ -66,7 +67,7 @@
 		base_model_id: null,
 		name: '',
 		meta: {
-			profile_image_url: '/static/favicon.png',
+			profile_image_url: null,
 			description: '',
 			suggestion_prompts: null,
 			tags: []
@@ -504,8 +505,7 @@
 						<div class="shrink-0">
 							<div class="self-center">
 								<button
-									class="rounded-xl flex shrink-0 items-center {info.meta.profile_image_url !==
-									'/static/favicon.png'
+									class="rounded-xl flex shrink-0 items-center {info.meta.profile_image_url
 										? 'bg-transparent'
 										: 'bg-white'} shadow-xl group relative"
 									type="button"
@@ -521,7 +521,7 @@
 										/>
 									{:else}
 										<img
-											src="/static/favicon.png"
+											src={DEFAULT_MODEL_IMAGE_URL}
 											alt="model profile"
 											class=" rounded-xl size-72 md:size-60 object-cover shrink-0"
 										/>
@@ -557,7 +557,7 @@
 									<button
 										class="px-2 py-1 text-gray-500 rounded-lg text-xs"
 										on:click={() => {
-											info.meta.profile_image_url = '/static/favicon.png';
+											info.meta.profile_image_url = null;
 										}}
 										type="button"
 									>

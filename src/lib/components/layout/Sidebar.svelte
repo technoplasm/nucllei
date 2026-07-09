@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { v4 as uuidv4 } from 'uuid';
 
 	import { goto } from '$app/navigation';
@@ -466,8 +467,7 @@
 		? 'md:relative w-[260px] max-w-[260px]'
 		: '-translate-x-[260px] w-[0px]'} {$isApp
 		? `ml-[4.5rem] md:ml-0 `
-		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-200 text-sm fixed z-50 top-0 left-0 overflow-x-hidden
-        "
+		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-200 text-sm fixed z-50 top-0 left-0 overflow-x-hidden"
 	data-state={$showSidebar}
 >
 	<div
@@ -650,7 +650,7 @@
 							on:click={() => modelChatHandler(model.id)}
 						>
 							<img
-								src={model?.info?.meta?.profile_image_url ?? '/static/favicon.png'}
+								src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
 								class="size-5 rounded-full shrink-0"
 								alt={model.name}
 								draggable="false"

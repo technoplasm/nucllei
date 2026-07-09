@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { render } from '$lib/utils/markdown-it';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
 	import { toast } from 'svelte-sonner';
 	import Sortable from 'sortablejs';
@@ -236,7 +237,7 @@
 								: 'opacity-50 dark:opacity-50'} "
 						>
 							<img
-								src={model?.meta?.profile_image_url ?? '/static/favicon.png'}
+								src={model?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
 								alt="modelfile profile"
 								class=" rounded-full w-full h-auto object-cover"
 							/>

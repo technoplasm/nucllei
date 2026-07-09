@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { render } from '$lib/utils/markdown-it';
 	import Fuse from 'fuse.js';
 
@@ -495,7 +496,7 @@
 												placement="top-start"
 											>
 												<img
-													src={item.model?.info?.meta?.profile_image_url ?? '/static/favicon.png'}
+													src={item.model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
 													alt="Model"
 													class="rounded-full size-5 flex items-center mr-2"
 												/>
