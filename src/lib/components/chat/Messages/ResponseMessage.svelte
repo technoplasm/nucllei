@@ -649,7 +649,7 @@
 								</div>
 							</div>
 						{:else}
-							<div class="w-full flex flex-col relative" id="response-content-container">
+							<div class="w-full flex flex-col relative py-1.5" id="response-content-container">
 								{#if (message?.content_blocks ?? []).length > 0 && message.error !== true}
 									<!-- #17 L0: content_blocks があればブロックから直接描画(details 擬似 HTML を経由しない) -->
 									<ContentBlocks

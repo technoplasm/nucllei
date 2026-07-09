@@ -56,7 +56,7 @@
 	};
 </script>
 
-<div class="w-full flex flex-col">
+<div class="w-full flex flex-col space-y-1.5">
 	{#each blocks as block, blockIdx (blockIdx)}
 		{#if block.type === 'reasoning'}
 			<Collapsible
@@ -68,7 +68,7 @@
 					done: block.done ? 'true' : 'false',
 					duration: block.duration
 				}}
-				className="w-full space-y-1 mb-1.5 text-sm"
+				className="w-full space-y-1 text-sm"
 			>
 				<!--
 					reasoning は本文と同じ Markdown コンポーネントで描画する。
@@ -109,7 +109,7 @@
 					open={AUTO_EXPAND_EXECUTING_TOOL_CALLS &&
 						!(block.results ?? []).find((r) => r.tool_call_id === call.id)}
 					attributes={toolCallAttributes(call, block.results)}
-					className="w-full space-y-1 mb-1.5 text-sm"
+					className="w-full space-y-1 text-sm"
 				/>
 			{/each}
 		{:else if block.type === 'code_interpreter'}
