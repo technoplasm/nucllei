@@ -30,6 +30,19 @@ export default {
 					850: 'var(--color-gray-850, #262626)',
 					900: 'var(--color-gray-900, #171717)',
 					950: 'var(--color-gray-950, #0d0d0d)'
+				},
+				// アプリの2大サーフェス(メイン背景 / サイドバー背景)。
+				// light/dark の実値は src/tailwind.css の :root / html.dark で一括調整する。
+				surface: {
+					DEFAULT: 'var(--surface, #f9f9f9)',
+					sidebar: 'var(--surface-sidebar, #ececec)',
+					// 背景から1段持ち上げる面(チャット入力欄などのカード)。サーフェス基準で馴染む。
+					raised: 'var(--surface-raised, #ffffff)'
+				},
+				// サイドバー行のインタラクション色(hover / 選択中)。実値は src/tailwind.css。
+				sidebar: {
+					hover: 'var(--sidebar-hover, #ececec)',
+					selected: 'var(--sidebar-selected, #e3e3e3)'
 				}
 			},
 			typography: {

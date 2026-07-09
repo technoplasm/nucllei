@@ -19,7 +19,6 @@
 		pinnedChats,
 		scrollPaginationEnabled,
 		currentChatPage,
-		temporaryChatEnabled,
 		channels,
 		socket,
 		config,
@@ -58,6 +57,7 @@
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
+	import Pencil from '../icons/Pencil.svelte';
 	import Home from '../icons/Home.svelte';
 	import Cog6 from '../icons/Cog6.svelte';
 
@@ -464,20 +464,20 @@
 	bind:this={navElement}
 	id="sidebar"
 	class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
-		? 'md:relative w-[260px] max-w-[260px]'
-		: '-translate-x-[260px] w-[0px]'} {$isApp
+		? 'md:relative w-[300px] max-w-[300px]'
+		: '-translate-x-[300px] w-[0px]'} {$isApp
 		? `ml-[4.5rem] md:ml-0 `
-		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-200 text-sm fixed z-50 top-0 left-0 overflow-x-hidden"
+		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-surface-sidebar text-gray-900 dark:text-gray-200 fixed z-50 top-0 left-0 overflow-x-hidden"
 	data-state={$showSidebar}
 >
 	<div
-		class="py-2 my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[260px] overflow-x-hidden z-50 {$showSidebar
+		class="py-1 my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[300px] overflow-x-hidden z-50 {$showSidebar
 			? ''
 			: 'invisible'}"
 	>
 		<div class="px-1.5 flex justify-between items-center space-x-1 text-gray-600 dark:text-gray-400">
 			<a
-				class="flex items-center gap-1.5 min-w-0 flex-1 rounded-lg px-1 py-1 hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
+				class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
 				href="/"
 				draggable="false"
 				on:click={() => {
@@ -493,14 +493,14 @@
 					alt="logo"
 				/>
 				<div
-					class="self-center font-medium text-sm text-gray-850 dark:text-white font-primary truncate"
+					class="self-center font-medium text-md text-gray-850 dark:text-white font-primary truncate"
 				>
 					{$WEBUI_NAME}
 				</div>
 			</a>
 
 			<button
-				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition shrink-0"
+				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-sidebar-hover transition shrink-0"
 				on:click={() => {
 					showSidebar.set(!$showSidebar);
 				}}
@@ -525,10 +525,10 @@
 			</button>
 		</div>
 
-		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200 mt-1">
+		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200 mt-0.5">
 			<a
 				id="sidebar-new-chat-button"
-				class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
+				class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition no-drag-region"
 				href="/"
 				draggable="false"
 				on:click={async () => {
@@ -552,36 +552,10 @@
 			</a>
 		</div>
 
-		<!-- {#if $user?.role === 'admin'}
+		{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.skills || $user?.permissions?.workspace?.tools}
 			<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
 				<a
-					class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-					href="/home"
-					on:click={() => {
-						selectedChatId = null;
-						chatId.set('');
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-					draggable="false"
-				>
-					<div class="self-center">
-						<Home strokeWidth="2" className="size-[1.1rem]" />
-					</div>
-
-					<div class="flex self-center translate-y-[0.5px]">
-						<div class=" self-center font-medium text-sm font-primary">{$i18n.t('Home')}</div>
-					</div>
-				</a>
-			</div>
-		{/if} -->
-
-		{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.skills || $user?.permissions?.workspace?.tools}
-			<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
-				<a
-					class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+					class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition"
 					href="/workspace"
 					on:click={() => {
 						selectedChatId = null;
@@ -619,7 +593,7 @@
 
 		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
 			<button
-				class="grow flex items-center space-x-3 rounded-lg px-2 py-[7px] hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg  hover:bg-sidebar-hover transition"
 				on:click={async () => {
 					await showSettings.set(true);
 					if ($mobile) {
@@ -637,126 +611,55 @@
 		</div>
 
 		{#if enabledModels.length > 0}
-			<div class="px-1.5 mt-2 {$temporaryChatEnabled ? 'opacity-20' : ''}">
+			<div class="px-1.5 mt-3">
 				<div
-					class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-medium pb-1.5"
+					class="px-1 w-full text-xs text-gray-500 dark:text-gray-500 font-medium pb-1.5"
 				>
 					{$i18n.t('Models')}
 				</div>
 				<div class="flex flex-col">
 					{#each enabledModels as model (model.id)}
-						<button
-							class="flex items-center gap-2 w-full rounded-lg px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition text-gray-800 dark:text-gray-200"
-							on:click={() => modelChatHandler(model.id)}
+						<div
+							class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover transition text-gray-800 dark:text-gray-200"
 						>
-							<img
-								src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
-								class="size-5 rounded-full shrink-0"
-								alt={model.name}
+							<button
+								class="pl-2 py-1.5 flex items-center gap-2 flex-1 min-w-0"
+								on:click={() => modelChatHandler(model.id)}
+							>
+								<img
+									src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+									class="size-5 rounded-full shrink-0"
+									alt={model.name}
+									draggable="false"
+								/>
+								<div class="self-center font-medium text-sm font-primary truncate">
+									{model.name}
+								</div>
+							</button>
+
+							<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
+							<a
+								class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-sidebar-selected transition"
+								href="/workspace/models/edit?id={model.id}"
 								draggable="false"
-							/>
-							<div class="self-center font-medium text-sm font-primary truncate">
-								{model.name}
-							</div>
-						</button>
+								aria-label={$i18n.t('Edit')}
+								on:click={() => {
+									if ($mobile) {
+										showSidebar.set(false);
+									}
+								}}
+							>
+								<Pencil className="size-4" strokeWidth="2" />
+							</a>
+						</div>
 					{/each}
 				</div>
 			</div>
 		{/if}
 
 		<div
-			class="relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled
-				? 'opacity-20'
-				: ''}"
+			class="relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden mt-3 space-y-3"
 		>
-			{#if $config?.features?.enable_channels && ($user?.role === 'admin' || $channels.length > 0) && !search}
-				<Folder
-					className="px-2 mt-0.5"
-					name={$i18n.t('Channels')}
-					dragAndDrop={false}
-					onAdd={async () => {
-						if ($user?.role === 'admin') {
-							await tick();
-
-							setTimeout(() => {
-								showCreateChannel = true;
-							}, 0);
-						}
-					}}
-					onAddLabel={$i18n.t('Create Channel')}
-				>
-					{#each $channels as channel}
-						<ChannelItem
-							{channel}
-							onUpdate={async () => {
-								await initChannels();
-							}}
-						/>
-					{/each}
-				</Folder>
-			{/if}
-
-			<Folder
-				collapsible={false}
-				className="px-2 mt-0.5"
-				name={$i18n.t('Chats')}
-				onAdd={() => {
-					createFolder();
-				}}
-				onAddLabel={$i18n.t('New Folder')}
-				on:import={(e) => {
-					importChatHandler(e.detail);
-				}}
-				on:drop={async (e) => {
-					const { type, id, item } = e.detail;
-
-					if (type === 'chat') {
-						let chat = await getChatById(localStorage.token, id).catch((error) => {
-							return null;
-						});
-						if (!chat && item) {
-							chat = await importChat(localStorage.token, item.chat, item?.meta ?? {});
-						}
-
-						if (chat) {
-							console.log(chat);
-							if (chat.folder_id) {
-								const res = await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
-									(error) => {
-										toast.error(`${error}`);
-										return null;
-									}
-								);
-							}
-
-							if (chat.pinned) {
-								const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
-							}
-
-							initChatList();
-						}
-					} else if (type === 'folder') {
-						if (folders[id].parent_id === null) {
-							return;
-						}
-
-						const res = await updateFolderParentIdById(localStorage.token, id, null).catch(
-							(error) => {
-								toast.error(`${error}`);
-								return null;
-							}
-						);
-
-						if (res) {
-							await initFolders();
-						}
-					}
-				}}
-			>
-				{#if $temporaryChatEnabled}
-					<div class="absolute z-40 w-full h-full flex justify-center"></div>
-				{/if}
-
 				{#if !search && $pinnedChats.length > 0}
 					<div class="flex flex-col space-y-1 rounded-xl">
 						<Folder
@@ -808,8 +711,8 @@
 							>
 								{#each $pinnedChats as chat, idx}
 									<ChatItem
-										className=""
 										id={chat.id}
+										className="text-sm"
 										title={chat.title}
 										{shiftKey}
 										selected={selectedChatId === chat.id}
@@ -849,41 +752,38 @@
 					/>
 				{/if}
 
-				<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
-					<div class="pt-1.5">
+				<div class="px-1.5 flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
 						{#if $chats}
 							{#each $chats as chat, idx}
 								{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 									<div
-										class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-medium {idx ===
-										0
-											? ''
-											: 'pt-5'} pb-1.5"
+										class="px-1 py-1.5 w-full text-xs text-gray-500 dark:text-gray-500 font-medium
+										{idx > 0 ? 'mt-1.5' : ''}"
 									>
 										{$i18n.t(chat.time_range)}
 										<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
-							{$i18n.t('Today')}
-							{$i18n.t('Yesterday')}
-							{$i18n.t('Previous 7 days')}
-							{$i18n.t('Previous 30 days')}
-							{$i18n.t('January')}
-							{$i18n.t('February')}
-							{$i18n.t('March')}
-							{$i18n.t('April')}
-							{$i18n.t('May')}
-							{$i18n.t('June')}
-							{$i18n.t('July')}
-							{$i18n.t('August')}
-							{$i18n.t('September')}
-							{$i18n.t('October')}
-							{$i18n.t('November')}
-							{$i18n.t('December')}
-							-->
+											{$i18n.t('Today')}
+											{$i18n.t('Yesterday')}
+											{$i18n.t('Previous 7 days')}
+											{$i18n.t('Previous 30 days')}
+											{$i18n.t('January')}
+											{$i18n.t('February')}
+											{$i18n.t('March')}
+											{$i18n.t('April')}
+											{$i18n.t('May')}
+											{$i18n.t('June')}
+											{$i18n.t('July')}
+											{$i18n.t('August')}
+											{$i18n.t('September')}
+											{$i18n.t('October')}
+											{$i18n.t('November')}
+											{$i18n.t('December')}
+											-->
 									</div>
 								{/if}
 
 								<ChatItem
-									className=""
+									className="text-sm"
 									id={chat.id}
 									title={chat.title}
 									{shiftKey}
@@ -926,9 +826,7 @@
 								<div class=" ">Loading...</div>
 							</div>
 						{/if}
-					</div>
 				</div>
-			</Folder>
 		</div>
 
 		<div class="px-2">
@@ -943,7 +841,7 @@
 						}}
 					>
 						<button
-							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover transition"
 							on:click={() => {
 								showDropdown = !showDropdown;
 							}}

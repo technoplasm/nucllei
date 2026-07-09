@@ -249,12 +249,12 @@
 >
 	{#if confirmEdit}
 		<div
-			class=" w-full flex justify-between rounded-lg px-[11px] py-[6px] {id === $chatId ||
-			confirmEdit
-				? 'bg-gray-200 dark:bg-gray-900'
+			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {
+			id === $chatId || confirmEdit
+				? 'bg-sidebar-selected'
 				: selected
-					? 'bg-gray-100 dark:bg-gray-950'
-					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
+					? 'bg-sidebar-selected'
+					: 'group-hover:bg-sidebar-hover'}  whitespace-nowrap text-ellipsis"
 		>
 			<input
 				use:focusEdit
@@ -266,12 +266,12 @@
 		</div>
 	{:else}
 		<a
-			class=" w-full flex justify-between rounded-lg px-[11px] py-[6px] {id === $chatId ||
-			confirmEdit
-				? 'bg-gray-200 dark:bg-gray-900'
+			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {
+			id === $chatId || confirmEdit
+				? 'bg-sidebar-selected'
 				: selected
-					? 'bg-gray-100 dark:bg-gray-950'
-					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
+					? 'bg-sidebar-selected'
+					: ' group-hover:bg-sidebar-hover'}  whitespace-nowrap text-ellipsis"
 			href="/c/{id}"
 			on:click={() => {
 				dispatch('select');
@@ -304,16 +304,17 @@
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		class="
-        {id === $chatId || confirmEdit
-			? 'from-gray-200 dark:from-gray-900'
-			: selected
-				? 'from-gray-100 dark:from-gray-950'
-				: 'invisible group-hover:visible from-gray-100 dark:from-gray-950'}
-            absolute {className === 'pr-2'
-			? 'right-[8px]'
-			: 'right-0'}  top-[4px] py-1 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80%
-
-              to-transparent"
+			absolute top-[4px] py-1 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80% to-transparent
+			{id === $chatId || confirmEdit
+				? 'from-sidebar-selected'
+				: selected
+					? 'from-sidebar-selected'
+					: 'invisible group-hover:visible from-sidebar-hover'
+			}
+			{className === 'pr-2'
+				? 'right-[8px]'
+				: 'right-0'
+			}"
 		on:mouseenter={(e) => {
 			mouseOver = true;
 		}}
@@ -377,7 +378,7 @@
 				</Tooltip>
 			</div>
 		{:else}
-			<div class="flex self-center space-x-1 z-10">
+			<div class="flex self-center gap-1 z-10">
 				<ChatMenu
 					chatId={id}
 					cloneChatHandler={() => {

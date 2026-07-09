@@ -151,7 +151,7 @@
 		{#if showClearButton && value}
 			<div class="self-center pr-2 pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">
 				<button
-					class="p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+					class="p-0.5 rounded-full hover:bg-sidebar-hover transition"
 					on:click={clearSearchInput}
 				>
 					<XMark className="size-3" strokeWidth="2" />
