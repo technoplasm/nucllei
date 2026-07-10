@@ -52,7 +52,7 @@
 	import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
-	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
+	import { getUserSettings } from '$lib/apis/users';
 	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 
@@ -1394,16 +1394,7 @@
 			params?.system
 				? {
 						role: 'system',
-						content: promptTemplate(
-							params?.system ?? '',
-							$user?.name,
-							$settings?.userLocation
-								? await getAndUpdateUserLocation(localStorage.token).catch((err) => {
-										console.error(err);
-										return undefined;
-									})
-								: undefined
-						)
+						content: promptTemplate(params?.system ?? '', $user?.name, undefined)
 					}
 				: undefined,
 			...createMessagesList(_history, responseMessageId).map((message) => ({
@@ -1497,15 +1488,7 @@
 							: false
 				},
 				variables: {
-					...getPromptVariables(
-						$user?.name,
-						$settings?.userLocation
-							? await getAndUpdateUserLocation(localStorage.token).catch((err) => {
-									console.error(err);
-									return undefined;
-								})
-							: undefined
-					)
+					...getPromptVariables($user?.name, undefined)
 				},
 				model_item: $models.find((m) => m.id === model.id),
 

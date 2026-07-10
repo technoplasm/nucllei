@@ -18,7 +18,7 @@ from open_webui.models.auths import (
     UpdateProfileForm,
     UserResponse,
 )
-from open_webui.models.users import Users
+from open_webui.models.users import Users, merge_additional_user_meta
 
 from open_webui.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from open_webui.env import (
@@ -575,7 +575,9 @@ async def signout(request: Request, response: Response):
 
 
 @router.post("/add", response_model=SigninResponse)
-async def add_user(form_data: AddUserForm, user=Depends(get_admin_user)):
+async def add_user(
+    request: Request, form_data: AddUserForm, user=Depends(get_admin_user)
+):
     if not validate_email_format(form_data.email.lower()):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT
@@ -595,6 +597,19 @@ async def add_user(form_data: AddUserForm, user=Depends(get_admin_user)):
         )
 
         if user:
+            # llens(#55): 作成時に追加 meta(宣言キーのみ)を焼く
+            if form_data.info:
+                Users.update_user_by_id(
+                    user.id,
+                    {
+                        "info": merge_additional_user_meta(
+                            request.app.state.config.ADDITIONAL_USER_META,
+                            None,
+                            form_data.info,
+                        )
+                    },
+                )
+
             token = create_token(data={"id": user.id})
             return {
                 "token": token,

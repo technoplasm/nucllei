@@ -39,7 +39,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | API key | 本人 | 本人(ENABLE_API_KEY 時) | − | − | 本人 | endpoint allowlist は 57q6 対策済み |
 | valves(tool/function 全体設定) | − | − | admin | − | − | 7429 対策済み(read も制限) |
 | UserValves(per-user) | 本人 | 本人 | 本人 | − | 本人 | |
-| User.info(#55 予定) | tool へ露出(read) | − | **admin のみ**(予定) | − | admin | **現状は本人が merge 上書き可 = G3**。#55 実装時に admin 専有へ |
+| User.info(#55 実装済み) | tool へ露出(`__user__.info`) | − | **admin のみ** | − | admin | 宣言キーは `ADDITIONAL_USER_META`(env)。本人書き込み endpoint は撤去済み(G3 解消・2026-07-10) |
 | group | − | admin | admin | − | admin | 複数所属可。権限は OR 合成 |
 
 ## permission フラグ(サーバー側 enforcement 必須)
@@ -61,8 +61,8 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
   audio/images endpoint はサーバー側未チェック → **#66 スコープに追加済み**
 - **G2(中)**: task endpoints(generate_title 等)が model_id 存在チェックのみで
   check_model_access 無し → **#66 スコープに追加済み**
-- **G3**: User.info を本人が `{**user.info, **form_data}` で自由に上書き可(users.py)。
-  #55(authz マーカー)実装の前提として **admin 専有化が必須** → #55 に記録
+- ~~**G3**: User.info を本人が自由に上書き可~~ → **解消(2026-07-10、#55 実装)**:
+  本人向け `/user/info`・`/user/info/update` を撤去し admin 専有化(geolocation 機能ごと撤去)
 
 ## 検証方針
 

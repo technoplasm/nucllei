@@ -12,24 +12,21 @@
 
 	import { toast } from 'svelte-sonner';
 
-	import { updateUserRole, getUsers, deleteUserById } from '$lib/apis/users';
+	import { updateUserRole, getUsers, deleteUserById, getUserMetaFields } from '$lib/apis/users';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
-	import EditUserModal from '$lib/components/admin/Users/UserList/EditUserModal.svelte';
+	import UserModal from '$lib/components/admin/Users/UserList/UserModal.svelte';
 	import UserChatsModal from '$lib/components/admin/Users/UserList/UserChatsModal.svelte';
-	import AddUserModal from '$lib/components/admin/Users/UserList/AddUserModal.svelte';
 
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import About from '$lib/components/chat/Settings/About.svelte';
 	import Banner from '$lib/components/common/Banner.svelte';
-	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -38,13 +35,22 @@
 	let search = '';
 	let selectedUser = null;
 
+	// llens(#55): 宣言済みの追加 meta キー(ADDITIONAL_USER_META)。一覧の列と
+	// 編集モーダルの入力欄が自動で生える。
+	let metaFields = [];
+
+	onMount(async () => {
+		metaFields = (await getUserMetaFields(localStorage.token).catch(() => null)) ?? [];
+	});
+
 	let page = 1;
 
 	let showDeleteConfirmDialog = false;
-	let showAddUserModal = false;
-
 	let showUserChatsModal = false;
-	let showEditUserModal = false;
+
+	// llens(#55): 作成/編集は単一モーダル(UserModal)。editTarget=null で作成モード
+	let showUserModal = false;
+	let editTarget = null;
 
 	const updateRoleHandler = async (id, role) => {
 		const res = await updateUserRole(localStorage.token, id, role).catch((error) => {
@@ -107,19 +113,11 @@
 	}}
 />
 
-{#key selectedUser}
-	<EditUserModal
-		bind:show={showEditUserModal}
-		{selectedUser}
-		sessionUser={$user}
-		on:save={async () => {
-			users = await getUsers(localStorage.token);
-		}}
-	/>
-{/key}
-
-<AddUserModal
-	bind:show={showAddUserModal}
+<UserModal
+	bind:show={showUserModal}
+	selectedUser={editTarget}
+	{metaFields}
+	sessionUser={$user}
 	on:save={async () => {
 		users = await getUsers(localStorage.token);
 	}}
@@ -194,7 +192,8 @@
 					<button
 						class=" p-2 rounded-xl hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition font-medium text-sm flex items-center space-x-1"
 						on:click={() => {
-							showAddUserModal = !showAddUserModal;
+							editTarget = null;
+							showUserModal = true;
 						}}
 					>
 						<Plus className="size-3.5" />
@@ -331,29 +330,13 @@
 					</div>
 				</th>
 
-				<th
-					scope="col"
-					class="px-3 py-1.5 cursor-pointer select-none"
-					on:click={() => setSortKey('oauth_sub')}
-				>
-					<div class="flex gap-1.5 items-center">
-						{$i18n.t('OAuth ID')}
-
-						{#if sortKey === 'oauth_sub'}
-							<span class="font-normal"
-								>{#if sortOrder === 'asc'}
-									<ChevronUp className="size-2" />
-								{:else}
-									<ChevronDown className="size-2" />
-								{/if}
-							</span>
-						{:else}
-							<span class="invisible">
-								<ChevronUp className="size-2" />
-							</span>
-						{/if}
-					</div>
-				</th>
+				{#each metaFields as field (field.key)}
+					<th scope="col" class="px-3 py-1.5 select-none">
+						<div class="flex gap-1.5 items-center">
+							{field.label}
+						</div>
+					</th>
+				{/each}
 
 				<th scope="col" class="px-3 py-2 text-right" />
 			</tr>
@@ -405,7 +388,9 @@
 						{dayjs(user.created_at * 1000).format('LL')}
 					</td>
 
-					<td class=" px-3 py-1"> {user.oauth_sub ?? ''} </td>
+					{#each metaFields as field (field.key)}
+						<td class=" px-3 py-1"> {user.info?.[field.key] ?? ''} </td>
+					{/each}
 
 					<td class="px-3 py-1 text-right">
 						<div class="flex justify-end w-full">
@@ -427,8 +412,8 @@
 								<button
 									class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 									on:click={async () => {
-										showEditUserModal = !showEditUserModal;
-										selectedUser = user;
+										editTarget = user;
+										showUserModal = true;
 									}}
 								>
 									<svg
@@ -487,27 +472,3 @@
 </div>
 
 <Pagination bind:page count={users.length} />
-
-{#if !$config?.license_metadata}
-	{#if users.length > 50}
-		<div class="text-sm">
-			<Markdown
-				content={`
-> [!NOTE]
-> # **Hey there! 👋**
->
-> It looks like you have over 50 users — that usually falls under organizational usage.
-> 
-> Open WebUI is proudly open source and completely free, with no hidden limits — and we'd love to keep it that way. 🌱  
->
-> By supporting the project through sponsorship or an enterprise license, you’re not only helping us stay independent, you’re also helping us ship new features faster, improve stability, and grow the project for the long haul. With an *enterprise license*, you also get additional perks like dedicated support, customization options, and more — all at a fraction of what it would cost to build and maintain internally.  
-> 
-> Your support helps us stay independent and continue building great tools for everyone. 💛
-> 
-> - 👉 **[Click here to learn more about enterprise licensing](https://docs.openwebui.com/enterprise)**
-> - 👉 *[Click here to sponsor the project on GitHub](https://github.com/sponsors/tjbck)*
-`}
-			/>
-		</div>
-	{/if}
-{/if}

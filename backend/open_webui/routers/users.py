@@ -10,6 +10,7 @@ from open_webui.models.users import (
     Users,
     UserSettings,
     UserUpdateForm,
+    merge_additional_user_meta,
 )
 
 
@@ -69,18 +70,21 @@ async def get_user_permissisions(request: Request, user=Depends(get_verified_use
 ############################
 # User Default Permissions
 ############################
+# llens: 実際の USER_PERMISSIONS 構造(config.DEFAULT_USER_PERMISSIONS)と同期を保つこと。
+# ここが古いと保存(POST)時に pydantic がキーを落とし、admin の既定権限編集が壊れる
+# (旧 prompts 残骸で workspace.skills が消えていた)。
 class WorkspacePermissions(BaseModel):
     models: bool = False
     knowledge: bool = False
-    prompts: bool = False
+    skills: bool = False
     tools: bool = False
 
 
 class SharingPermissions(BaseModel):
-    public_models: bool = True
-    public_knowledge: bool = True
-    public_prompts: bool = True
-    public_tools: bool = True
+    public_models: bool = False
+    public_knowledge: bool = False
+    public_skills: bool = False
+    public_tools: bool = False
 
 
 class ChatPermissions(BaseModel):
@@ -88,12 +92,12 @@ class ChatPermissions(BaseModel):
     file_upload: bool = True
     delete: bool = True
     edit: bool = True
+    share: bool = True
+    clone: bool = False
     stt: bool = True
     tts: bool = True
     call: bool = True
     multiple_models: bool = True
-    temporary: bool = True
-    temporary_enforced: bool = False
 
 
 class FeaturesPermissions(BaseModel):
@@ -187,50 +191,22 @@ async def update_user_settings_by_session_user(
         )
 
 
-############################
-# GetUserInfoBySessionUser
-############################
-
-
-@router.get("/user/info", response_model=Optional[dict])
-async def get_user_info_by_session_user(user=Depends(get_verified_user)):
-    user = Users.get_user_by_id(user.id)
-    if user:
-        return user.info
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+# llens(#55): 本人による info の読み書き endpoint(/user/info, /user/info/update)は撤去。
+# info は外部システムへの参照権限マーカー(integrity 必須)のため編集は admin 専有
+# (permissions.md G3)。唯一の消費者だった Settings の geolocation 保存も機能ごと撤去。
 
 
 ############################
-# UpdateUserInfoBySessionUser
+# AdditionalUserMetaFields
 ############################
 
 
-@router.post("/user/info/update", response_model=Optional[dict])
-async def update_user_info_by_session_user(
-    form_data: dict, user=Depends(get_verified_user)
+@router.get("/meta/fields")
+async def get_additional_user_meta_fields(
+    request: Request, user=Depends(get_admin_user)
 ):
-    user = Users.get_user_by_id(user.id)
-    if user:
-        if user.info is None:
-            user.info = {}
-
-        user = Users.update_user_by_id(user.id, {"info": {**user.info, **form_data}})
-        if user:
-            return user.info
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.USER_NOT_FOUND,
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    """llens(#55): 宣言済みの追加 meta キー(仮想カラム)定義を admin UI へ配る。"""
+    return request.app.state.config.ADDITIONAL_USER_META
 
 
 ############################
@@ -283,6 +259,7 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
 
 @router.post("/{user_id}/update", response_model=Optional[UserModel])
 async def update_user_by_id(
+    request: Request,
     user_id: str,
     form_data: UserUpdateForm,
     session_user=Depends(get_admin_user),
@@ -303,15 +280,22 @@ async def update_user_by_id(
             log.debug(f"hashed: {hashed}")
             Auths.update_user_password_by_id(user_id, hashed)
 
+        update_payload = {
+            "name": form_data.name,
+            "email": form_data.email.lower(),
+            "profile_image_url": form_data.profile_image_url,
+        }
+
+        # llens(#55): 追加 meta は宣言済みキーのみ受理(詳細は merge_additional_user_meta)
+        if form_data.info is not None:
+            update_payload["info"] = merge_additional_user_meta(
+                request.app.state.config.ADDITIONAL_USER_META,
+                user.info,
+                form_data.info,
+            )
+
         Auths.update_email_by_id(user_id, form_data.email.lower())
-        updated_user = Users.update_user_by_id(
-            user_id,
-            {
-                "name": form_data.name,
-                "email": form_data.email.lower(),
-                "profile_image_url": form_data.profile_image_url,
-            },
-        )
+        updated_user = Users.update_user_by_id(user_id, update_payload)
 
         if updated_user:
             return updated_user

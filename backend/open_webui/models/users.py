@@ -92,6 +92,26 @@ class UserUpdateForm(BaseModel):
     email: str
     profile_image_url: str
     password: Optional[str] = None
+    # llens(#55): 追加 meta(宣言キーのみ受理・空 = キー削除)
+    info: Optional[dict] = None
+
+
+def merge_additional_user_meta(
+    declared_fields: list, current_info: Optional[dict], incoming: dict
+) -> dict:
+    """llens(#55): 追加 meta の取り込み。ADDITIONAL_USER_META で宣言したキーのみ
+    受け付け、値は文字列・空 = キー削除(マーカー無し = 外部側で未認可と解釈)。
+    未宣言キーは opaque に温存する(OWUI は info を解釈しない)。
+    """
+    declared_keys = {field["key"] for field in declared_fields}
+    info = dict(current_info or {})
+    for key in declared_keys & set(incoming.keys()):
+        value = str(incoming[key] or "").strip()
+        if value:
+            info[key] = value
+        else:
+            info.pop(key, None)
+    return info
 
 
 class UsersTable:

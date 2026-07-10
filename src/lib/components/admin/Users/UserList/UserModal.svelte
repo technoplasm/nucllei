@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { createEventDispatcher } from 'svelte';
-	import { onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	import { addUser } from '$lib/apis/auths';
+	import { updateUserById, updateUserRole } from '$lib/apis/users';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -12,6 +13,11 @@
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
+	// llens(#55): selectedUser があれば編集モード、null なら作成モード(単一モーダル)
+	export let selectedUser = null;
+	export let sessionUser = null;
+	// 宣言済みの追加 meta キー([{key, label}])。入力欄と保存経路が自動で生える
+	export let metaFields = [];
 
 	let loading = false;
 	let tab = '';
@@ -21,17 +27,57 @@
 		name: '',
 		email: '',
 		password: '',
-		role: 'user'
+		role: 'user',
+		info: {}
 	};
 
-	$: if (show) {
-		_user = {
-			name: '',
-			email: '',
-			password: '',
-			role: 'user'
-		};
+	$: edit = selectedUser !== null;
+
+	// llens: 開くたびに selectedUser から編集バッファを作り直す。
+	// 素の `$: if (show) { _user = ... }`(旧 AddUserModal のパターン)は Svelte 5 の
+	// legacy 互換でキーストローク(bind:value の _user 書き込み)ごとに再実行され
+	// 入力が巻き戻るため、show の変化検知でガードする。
+	let lastShow = false;
+	$: if (show !== lastShow) {
+		lastShow = show;
+		if (show) {
+			tab = '';
+			_user = {
+				name: selectedUser?.name ?? '',
+				email: selectedUser?.email ?? '',
+				password: '',
+				role: selectedUser?.role ?? 'user',
+				info: Object.fromEntries(
+					metaFields.map((field) => [field.key, selectedUser?.info?.[field.key] ?? ''])
+				)
+			};
+		}
 	}
+
+	const editHandler = async () => {
+		if (_user.role !== selectedUser.role) {
+			const roleRes = await updateUserRole(localStorage.token, selectedUser.id, _user.role).catch(
+				(error) => {
+					toast.error(`${error}`);
+					return null;
+				}
+			);
+			if (!roleRes) {
+				return null;
+			}
+		}
+
+		return await updateUserById(localStorage.token, selectedUser.id, {
+			name: _user.name,
+			email: _user.email,
+			password: _user.password,
+			profile_image_url: selectedUser.profile_image_url,
+			info: _user.info
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+	};
 
 	const submitHandler = async () => {
 		const stopLoading = () => {
@@ -42,15 +88,18 @@
 		if (tab === '') {
 			loading = true;
 
-			const res = await addUser(
-				localStorage.token,
-				_user.name,
-				_user.email,
-				_user.password,
-				_user.role
-			).catch((error) => {
-				toast.error(`${error}`);
-			});
+			const res = edit
+				? await editHandler()
+				: await addUser(
+						localStorage.token,
+						_user.name,
+						_user.email,
+						_user.password,
+						_user.role,
+						_user.info
+					).catch((error) => {
+						toast.error(`${error}`);
+					});
 
 			if (res) {
 				stopLoading();
@@ -122,7 +171,9 @@
 <Modal size="sm" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-2">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Add User')}</div>
+			<div class=" text-lg font-medium self-center">
+				{edit ? $i18n.t('Edit User') : $i18n.t('Add User')}
+			</div>
 			<button
 				class="self-center"
 				on:click={() => {
@@ -150,29 +201,31 @@
 						submitHandler();
 					}}
 				>
-					<div
-						class="flex -mt-2 mb-1.5 gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent dark:text-gray-200"
-					>
-						<button
-							class="min-w-fit rounded-full p-1.5 {tab === ''
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							type="button"
-							on:click={() => {
-								tab = '';
-							}}>{$i18n.t('Form')}</button
+					{#if !edit}
+						<div
+							class="flex -mt-2 mb-1.5 gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent dark:text-gray-200"
 						>
+							<button
+								class="min-w-fit rounded-full p-1.5 {tab === ''
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								type="button"
+								on:click={() => {
+									tab = '';
+								}}>{$i18n.t('Form')}</button
+							>
 
-						<button
-							class="min-w-fit rounded-full p-1.5 {tab === 'import'
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							type="button"
-							on:click={() => {
-								tab = 'import';
-							}}>{$i18n.t('CSV Import')}</button
-						>
-					</div>
+							<button
+								class="min-w-fit rounded-full p-1.5 {tab === 'import'
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								type="button"
+								on:click={() => {
+									tab = 'import';
+								}}>{$i18n.t('CSV Import')}</button
+							>
+						</div>
+					{/if}
 
 					<div class="px-1">
 						{#if tab === ''}
@@ -181,9 +234,10 @@
 
 								<div class="flex-1">
 									<select
-										class="w-full capitalize rounded-lg text-sm bg-transparent dark:disabled:text-gray-500 outline-hidden"
+										class="w-full capitalize rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 										bind:value={_user.role}
 										placeholder={$i18n.t('Enter Your Role')}
+										disabled={edit && selectedUser?.id === sessionUser?.id}
 										required
 									>
 										<option value="pending"> {$i18n.t('pending')} </option>
@@ -198,7 +252,7 @@
 
 								<div class="flex-1">
 									<input
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 										type="text"
 										bind:value={_user.name}
 										placeholder={$i18n.t('Enter Your Full Name')}
@@ -215,28 +269,50 @@
 
 								<div class="flex-1">
 									<input
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 										type="email"
 										bind:value={_user.email}
 										placeholder={$i18n.t('Enter Your Email')}
+										disabled={edit && selectedUser?.id === sessionUser?.id}
 										required
 									/>
 								</div>
 							</div>
 
 							<div class="flex flex-col w-full mt-1">
-								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Password')}</div>
+								<div class=" mb-1 text-xs text-gray-500">
+									{edit ? $i18n.t('New Password') : $i18n.t('Password')}
+								</div>
 
 								<div class="flex-1">
 									<input
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 										type="password"
 										bind:value={_user.password}
 										placeholder={$i18n.t('Enter Your Password')}
-										autocomplete="off"
+										autocomplete="new-password"
 									/>
 								</div>
 							</div>
+
+							{#if metaFields.length > 0}
+								<hr class=" border-gray-100 dark:border-gray-850 my-2.5 w-full" />
+
+								{#each metaFields as field (field.key)}
+									<div class="flex flex-col w-full mt-1">
+										<div class=" mb-1 text-xs text-gray-500">{field.label}</div>
+
+										<div class="flex-1">
+											<input
+												class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+												type="text"
+												bind:value={_user.info[field.key]}
+												autocomplete="off"
+											/>
+										</div>
+									</div>
+								{/each}
+							{/if}
 						{:else if tab === 'import'}
 							<div>
 								<div class="mb-3 w-full">

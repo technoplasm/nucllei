@@ -1,5 +1,4 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
-import { getUserPosition } from '$lib/utils';
 
 export const getUserGroups = async (token: string) => {
 	let error = null;
@@ -226,9 +225,11 @@ export const getUserById = async (token: string, userId: string) => {
 	return res;
 };
 
-export const getUserInfo = async (token: string) => {
+// llens(#55): 本人による info 読み書き(getUserInfo/updateUserInfo)と geolocation
+// (getAndUpdateUserLocation)は撤去。info は admin 専有(updateUserById の info で編集)。
+export const getUserMetaFields = async (token: string) => {
 	let error = null;
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/info`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/meta/fields`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
@@ -250,51 +251,6 @@ export const getUserInfo = async (token: string) => {
 	}
 
 	return res;
-};
-
-export const updateUserInfo = async (token: string, info: object) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/info/update`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({
-			...info
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.log(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getAndUpdateUserLocation = async (token: string) => {
-	const location = await getUserPosition().catch((err) => {
-		console.log(err);
-		return null;
-	});
-
-	if (location) {
-		await updateUserInfo(token, { location: location });
-		return location;
-	} else {
-		console.log('Failed to get user location');
-		return null;
-	}
 };
 
 export const deleteUserById = async (token: string, userId: string) => {
@@ -329,6 +285,8 @@ type UserUpdateForm = {
 	email: string;
 	name: string;
 	password: string;
+	// llens(#55): 追加 meta(宣言キーのみサーバーが受理)
+	info?: object;
 };
 
 export const updateUserById = async (token: string, userId: string, user: UserUpdateForm) => {
@@ -344,7 +302,9 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 			profile_image_url: user.profile_image_url,
 			email: user.email,
 			name: user.name,
-			password: user.password !== '' ? user.password : undefined
+			password: user.password !== '' ? user.password : undefined,
+			// llens(#55): 追加 meta(宣言キーのみサーバーが受理)
+			info: user.info
 		})
 	})
 		.then(async (res) => {

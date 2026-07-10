@@ -43,21 +43,30 @@
 		mounted = true;
 	});
 
+	// llens: Svelte 5 では {#if} ブロックの teardown が先に DOM を外すことがあり、
+	// 無条件 removeChild は NotFoundError で effect を中断させる(EditUserModal が
+	// 空欄になる実害)。親子関係を確認してから外す。
+	const removeModalFromBody = () => {
+		if (modalElement && modalElement.parentNode === document.body) {
+			document.body.removeChild(modalElement);
+		}
+	};
+
 	$: if (show && modalElement) {
 		document.body.appendChild(modalElement);
 		window.addEventListener('keydown', handleKeyDown);
 		document.body.style.overflow = 'hidden';
 	} else if (modalElement) {
 		window.removeEventListener('keydown', handleKeyDown);
-		document.body.removeChild(modalElement);
+		removeModalFromBody();
 		document.body.style.overflow = 'unset';
 	}
 
 	onDestroy(() => {
 		show = false;
-		if (modalElement) {
-			document.body.removeChild(modalElement);
-		}
+		window.removeEventListener('keydown', handleKeyDown);
+		removeModalFromBody();
+		document.body.style.overflow = 'unset';
 	});
 </script>
 

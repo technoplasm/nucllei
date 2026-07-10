@@ -156,6 +156,8 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
+            "info": getattr(user, "info", None) or {},
         },
         "__metadata__": metadata,
         "__request__": request,
@@ -257,6 +259,8 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
                     "email": user.email,
                     "name": user.name,
                     "role": user.role,
+                    # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
+                    "info": getattr(user, "info", None) or {},
                 }
 
                 try:

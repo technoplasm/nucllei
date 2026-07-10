@@ -99,25 +99,8 @@ class TestUsers(AbstractPostgresTest):
             "model_config": {"attr3": "value3", "attr4": "value4"},
         }
 
-        # Get (empty) user info
-        with mock_webui_user(id="1"):
-            response = self.fast_api_client.get(self.create_url("/user/info"))
-        assert response.status_code == 200
-        assert response.json() is None
-
-        # Update user info
-        with mock_webui_user(id="1"):
-            response = self.fast_api_client.post(
-                self.create_url("/user/info/update"),
-                json={"attr1": "value1", "attr2": "value2"},
-            )
-        assert response.status_code == 200
-
-        # Get user info
-        with mock_webui_user(id="1"):
-            response = self.fast_api_client.get(self.create_url("/user/info"))
-        assert response.status_code == 200
-        assert response.json() == {"attr1": "value1", "attr2": "value2"}
+        # llens(#55): 本人による /user/info 読み書きは撤去(admin 専有 —
+        # test_user_meta.py が撤去とネガティブケースを固定する)
 
         # Get user by id
         with mock_webui_user(id="1"):

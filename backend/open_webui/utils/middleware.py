@@ -617,6 +617,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
+            "info": getattr(user, "info", None) or {},
         },
         "__metadata__": metadata,
         "__request__": request,
@@ -1125,6 +1127,8 @@ async def process_chat_response(
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
+            "info": getattr(user, "info", None) or {},
         },
         "__metadata__": metadata,
         "__request__": request,

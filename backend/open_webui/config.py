@@ -1130,6 +1130,26 @@ USER_PERMISSIONS = RuntimeConfig(
     DEFAULT_USER_PERMISSIONS,
 )
 
+# llens(#55): ユーザー追加 meta(仮想カラム)の宣言。外部システムへの参照権限マーカー
+# (カルテ利用者ID 等)を User.info に載せるためのキー定義。値は文字列のみ・OWUI は解釈しない。
+# 例: ADDITIONAL_USER_META='[{"key": "carte_user_id", "label": "カルテ利用者ID"}]'
+# 宣言したキーだけが admin のユーザー編集モーダル/一覧に現れる。label 省略時は key を表示。
+try:
+    additional_user_meta = [
+        {"key": str(field["key"]), "label": str(field.get("label") or field["key"])}
+        for field in json.loads(os.environ.get("ADDITIONAL_USER_META", "[]"))
+        if isinstance(field, dict) and field.get("key")
+    ]
+except Exception as e:
+    log.exception(f"Error loading ADDITIONAL_USER_META: {e}")
+    additional_user_meta = []
+
+ADDITIONAL_USER_META = RuntimeConfig(
+    "ADDITIONAL_USER_META",
+    "user.additional_meta",
+    additional_user_meta,
+)
+
 # llens(#48): evaluation/arena は撲滅(config・モデル注入・chat 経路・UI を全撤去)。
 
 WEBHOOK_URL = RuntimeConfig(

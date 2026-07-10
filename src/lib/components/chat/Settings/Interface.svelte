@@ -4,8 +4,6 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { updateUserInfo } from '$lib/apis/users';
-	import { getUserPosition } from '$lib/utils';
 
 	const i18n = getContext('i18n');
 
@@ -22,7 +20,6 @@
 	let widescreenMode = false;
 	let splitLargeChunks = false;
 	let scrollOnBranchChange = true;
-	let userLocation = false;
 
 	// Interface
 	let showUsername = false;
@@ -129,26 +126,6 @@
 		saveSettings({ hapticFeedback: hapticFeedback });
 	};
 
-	const toggleUserLocation = async () => {
-		userLocation = !userLocation;
-
-		if (userLocation) {
-			const position = await getUserPosition().catch((error) => {
-				toast.error(error.message);
-				return null;
-			});
-
-			if (position) {
-				await updateUserInfo(localStorage.token, { location: position });
-				toast.success($i18n.t('User location successfully retrieved.'));
-			} else {
-				userLocation = false;
-			}
-		}
-
-		saveSettings({ userLocation });
-	};
-
 	const toggleTitleAutoGenerate = async () => {
 		titleAutoGenerate = !titleAutoGenerate;
 		saveSettings({
@@ -253,7 +230,6 @@
 		splitLargeChunks = $settings.splitLargeChunks ?? false;
 		scrollOnBranchChange = $settings.scrollOnBranchChange ?? true;
 		chatDirection = $settings.chatDirection ?? 'auto';
-		userLocation = $settings.userLocation ?? false;
 
 		notificationSound = $settings.notificationSound ?? true;
 
@@ -645,26 +621,6 @@
 							<span class="ml-2 self-center">{$i18n.t('Reset')}</span>
 						{:else}
 							<span class="ml-2 self-center">{$i18n.t('Upload')}</span>
-						{/if}
-					</button>
-				</div>
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs">{$i18n.t('Allow User Location')}</div>
-
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							toggleUserLocation();
-						}}
-						type="button"
-					>
-						{#if userLocation === true}
-							<span class="ml-2 self-center">{$i18n.t('On')}</span>
-						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
 						{/if}
 					</button>
 				</div>

@@ -101,6 +101,8 @@ class SignupForm(BaseModel):
 
 class AddUserForm(SignupForm):
     role: Optional[str] = "pending"
+    # llens(#55): 作成時の追加 meta(宣言キーのみ受理 — merge_additional_user_meta)
+    info: Optional[dict] = None
 
 
 class AuthsTable:
