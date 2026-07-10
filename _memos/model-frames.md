@@ -40,6 +40,12 @@ role フレーム → reasoning_content* → content* → (tool_calls*) → fini
 5. **usage フレーム**: `choices: []` + `usage`。
    **`usage.reasoning_tokens`(SGLang 拡張)** が载る。
    `stream_options.include_usage` を付けてキャプチャ。
+   **注意(#57、2026-07-10 実測)**: usage フレームは `stream_options.include_usage`
+   を付けた時**だけ**送られる(素の streaming リクエストでは一切来ない)。
+   fixture に usage があるのはキャプチャスクリプトが明示注入していたため。
+   OWUI 本体は `ec15b4552` から全チャット経路(payload 組み立て + tool ループ
+   継続呼び出し)で注入し、実測 usage を Chat.meta["usage"] / message.usage に
+   永続化する(context_size = base モデルの max_model_len 込み)。
 6. `data: [DONE]`
 
 ## tool_calls の形状(重要)
