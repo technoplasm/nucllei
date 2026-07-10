@@ -960,7 +960,7 @@ async def chat_completion(
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
 
-    model_item = form_data.pop("model_item", {})
+    form_data.pop("model_item", None)
     tasks = form_data.pop("background_tasks", None)
 
     metadata = {}
@@ -979,24 +979,15 @@ async def chat_completion(
             )
 
     try:
-        if not model_item.get("direct", False):
-            model_id = form_data.get("model", None)
-            if model_id not in request.app.state.MODELS:
-                raise Exception("Model not found")
+        model_id = form_data.get("model", None)
+        if model_id not in request.app.state.MODELS:
+            raise Exception("Model not found")
 
-            model = request.app.state.MODELS[model_id]
+        model = request.app.state.MODELS[model_id]
 
-            # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
-                try:
-                    check_model_access(user, model)
-                except Exception as e:
-                    raise e
-        else:
-            model = model_item
-
-            request.state.direct = True
-            request.state.model = model
+        # Check if user has access to the model
+        if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
+            check_model_access(user, model)
 
         metadata = {
             "user_id": user.id,
@@ -1008,7 +999,6 @@ async def chat_completion(
             "features": form_data.get("features", None),
             "variables": form_data.get("variables", None),
             "model": model,
-            "direct": model_item.get("direct", False),
             # llens: native function calling のみサポート(issue #18)。
             # params.function_calling は参照しない(常に native 経路)。
         }
@@ -1060,11 +1050,7 @@ async def chat_completed(
     request: Request, form_data: dict, user=Depends(get_verified_user)
 ):
     try:
-        model_item = form_data.pop("model_item", {})
-
-        if model_item.get("direct", False):
-            request.state.direct = True
-            request.state.model = model_item
+        form_data.pop("model_item", None)
 
         return await chat_completed_handler(request, form_data, user)
     except Exception as e:
@@ -1079,11 +1065,7 @@ async def chat_action(
     request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)
 ):
     try:
-        model_item = form_data.pop("model_item", {})
-
-        if model_item.get("direct", False):
-            request.state.direct = True
-            request.state.model = model_item
+        form_data.pop("model_item", None)
 
         return await chat_action_handler(request, action_id, form_data, user)
     except Exception as e:

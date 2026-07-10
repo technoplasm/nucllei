@@ -614,12 +614,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # Initialize events to store additional event to be sent to the client
     # Initialize contexts and citation
-    if getattr(request.state, "direct", False) and hasattr(request.state, "model"):
-        models = {
-            request.state.model["id"]: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     task_model_id = get_task_model_id(
         form_data["model"],
@@ -667,12 +662,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 )
             else:
                 knowledge_files.append(item)
-
-        # llens(#40, GHSA-vjqm): direct モードでは model 全体がクライアント供給のため、
-        # model.meta.knowledge も偽装され得る。この経路の knowledge 参照は読取権限で絞る。
-        # 非 direct(DB 由来の管理者設定モデル)は model アクセス検証済みで信頼するため素通し。
-        if metadata.get("direct"):
-            knowledge_files = filter_files_by_user_access(knowledge_files, user)
 
         files = form_data.get("files", [])
         files.extend(knowledge_files)
@@ -2089,27 +2078,8 @@ async def process_chat_response(
                                     if k in allowed_params
                                 }
 
-                                if tool.get("direct", False):
-                                    tool_result = await event_caller(
-                                        {
-                                            "type": "execute:tool",
-                                            "data": {
-                                                "id": str(uuid4()),
-                                                "name": tool_name,
-                                                "params": tool_function_params,
-                                                "server": tool.get("server", {}),
-                                                "session_id": metadata.get(
-                                                    "session_id", None
-                                                ),
-                                            },
-                                        }
-                                    )
-
-                                else:
-                                    tool_function = tool["callable"]
-                                    tool_result = await tool_function(
-                                        **tool_function_params
-                                    )
+                                tool_function = tool["callable"]
+                                tool_result = await tool_function(**tool_function_params)
 
                             except Exception as e:
                                 tool_result = str(e)
