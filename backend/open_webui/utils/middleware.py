@@ -962,11 +962,14 @@ async def process_chat_response(
 
                         if res and isinstance(res, dict):
                             if len(res.get("choices", [])) == 1:
+                                # llens(#68): content は reasoning がトークン予算を
+                                # 使い切ると null になる(.get の既定値は「キーが無い」
+                                # 時しか効かない)。None はここで空文字に落とす。
                                 title_string = (
                                     res.get("choices", [])[0]
                                     .get("message", {})
-                                    .get("content", message.get("content", "New Chat"))
-                                )
+                                    .get("content")
+                                ) or ""
                             else:
                                 title_string = ""
 

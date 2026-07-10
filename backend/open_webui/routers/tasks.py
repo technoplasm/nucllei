@@ -144,11 +144,14 @@ async def generate_title(
         "model": task_model_id,
         "messages": [{"role": "user", "content": content}],
         "stream": False,
+        # llens(#68): Kimi は reasoning が常時出て title 1 つに 1000 トークン超を
+        # 消費し得る(実測 reasoning_tokens=1002 で finish_reason=length →
+        # content=null → 全チャット "New Chat" になっていた)。予算を 4000 に拡大。
         **(
-            {"max_tokens": 1000}
+            {"max_tokens": 4000}
             if models[task_model_id].get("owned_by") == "ollama"
             else {
-                "max_completion_tokens": 1000,
+                "max_completion_tokens": 4000,
             }
         ),
         "metadata": {
