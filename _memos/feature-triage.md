@@ -128,6 +128,12 @@ Public/Private=access_control とは別軸)。
 権限仕様の整理(#66 / `_memos/permissions.md`)の副産物として全 router・機能を棚卸しし、
 KEEP/DROP を確定した。DROP バッチの実装 issue = #67、タイトル生成の修理 = #68。
 
+**#67 は同日中に全 10 項目を出荷して close**(7 コミット a0a135ff2〜776aebf99)。
+撤去台帳(何をいつ消したか)= #67 最終コメント。tag / memory / channel / message /
+message_reaction の 5 テーブル drop、backend 228 passed、実機スモーク PASS。
+道中の発見: retrieval /config は Attachment ゲート設定(#52)の保存先を兼ねていたため
+**/configs/attachment へ移設**してから router を撤去(Documents タブの保存先も切替済み)。
+
 ### DROP(10 件 → #67)
 
 | 機能 | 理由・スコープ |
