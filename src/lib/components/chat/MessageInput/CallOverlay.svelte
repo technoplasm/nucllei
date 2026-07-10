@@ -6,7 +6,6 @@
 	const dispatch = createEventDispatcher();
 
 	import { blobToFile } from '$lib/utils';
-	import { generateEmoji } from '$lib/apis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 
 	import { toast } from 'svelte-sonner';
@@ -33,7 +32,6 @@
 	let interrupted = false;
 	let assistantSpeaking = false;
 
-	let emoji = null;
 	let camera = false;
 	let cameraStream = null;
 
@@ -185,7 +183,6 @@
 
 			if (confirmed) {
 				loading = true;
-				emoji = null;
 
 				if (cameraStream) {
 					const imageUrl = takeScreenshot();
@@ -450,19 +447,10 @@
 
 	// Audio cache map where key is the content and value is the Audio object.
 	const audioCache = new Map();
-	const emojiCache = new Map();
 
 	const fetchAudio = async (content) => {
 		if (!audioCache.has(content)) {
 			try {
-				// Set the emoji for the content if needed
-				if ($settings?.showEmojiInCall ?? false) {
-					const emoji = await generateEmoji(localStorage.token, modelId, content, chatId);
-					if (emoji) {
-						emojiCache.set(content, emoji);
-					}
-				}
-
 				if ($settings.audio?.tts?.engine === 'browser-kokoro') {
 					const blob = await $TTSWorker
 						.generate({
@@ -515,13 +503,6 @@
 
 				if (audioCache.has(content)) {
 					// If content is available in the cache, play it
-
-					// Set the emoji for the content if available
-					if (($settings?.showEmojiInCall ?? false) && emojiCache.has(content)) {
-						emoji = emojiCache.get(content);
-					} else {
-						emoji = null;
-					}
 
 					if ($config.audio.tts.engine !== '') {
 						try {
@@ -698,20 +679,7 @@
 					}
 				}}
 			>
-				{#if emoji}
-					<div
-						class="  transition-all rounded-full"
-						style="font-size:{rmsLevel * 100 > 4
-							? '4.5'
-							: rmsLevel * 100 > 2
-								? '4.25'
-								: rmsLevel * 100 > 1
-									? '3.75'
-									: '3.5'}rem;width: 100%; text-align:center;"
-					>
-						{emoji}
-					</div>
-				{:else if loading || assistantSpeaking}
+				{#if loading || assistantSpeaking}
 					<svg
 						class="size-12 text-gray-900 dark:text-gray-400"
 						viewBox="0 0 24 24"
@@ -780,20 +748,7 @@
 						}
 					}}
 				>
-					{#if emoji}
-						<div
-							class="  transition-all rounded-full"
-							style="font-size:{rmsLevel * 100 > 4
-								? '13'
-								: rmsLevel * 100 > 2
-									? '12'
-									: rmsLevel * 100 > 1
-										? '11.5'
-										: '11'}rem;width:100%;text-align:center;"
-						>
-							{emoji}
-						</div>
-					{:else if loading || assistantSpeaking}
+					{#if loading || assistantSpeaking}
 						<svg
 							class="size-44 text-gray-900 dark:text-gray-400"
 							viewBox="0 0 24 24"

@@ -5,13 +5,11 @@
 
 	import { mobile, settings } from '$lib/stores';
 
-	import { generateMoACompletion } from '$lib/apis';
 	import { updateChatById } from '$lib/apis/chats';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 
 	import ResponseMessage from './ResponseMessage.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Merge from '$lib/components/icons/Merge.svelte';
 
 	import Markdown from './Markdown.svelte';
 	import Name from './Name.svelte';
@@ -38,7 +36,6 @@
 
 	export let continueResponse: Function;
 	export let regenerateResponse: Function;
-	export let mergeResponses: Function;
 
 	export let addMessages: Function;
 
@@ -186,16 +183,6 @@
 		await tick();
 	};
 
-	const mergeResponsesHandler = async () => {
-		const responses = Object.keys(groupedMessageIds).map((modelIdx) => {
-			const { messageIds } = groupedMessageIds[modelIdx];
-			const messageId = messageIds[groupedMessageIdsIdx[modelIdx]];
-
-			return history.messages[messageId].content;
-		});
-		mergeResponses(messageId, responses, chatId);
-	};
-
 	onMount(async () => {
 		await initHandler();
 		await tick();
@@ -314,25 +301,6 @@
 							</div>
 						{/if}
 					</div>
-
-					{#if isLastMessage}
-						<div class=" shrink-0 text-gray-600 dark:text-gray-500 mt-1">
-							<Tooltip content={$i18n.t('Merge Responses')} placement="bottom">
-								<button
-									type="button"
-									id="merge-response-button"
-									class="{true
-										? 'visible'
-										: 'invisible group-hover:visible'} p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
-									on:click={() => {
-										mergeResponsesHandler();
-									}}
-								>
-									<Merge className=" size-5 " />
-								</button>
-							</Tooltip>
-						</div>
-					{/if}
 				</div>
 			{/if}
 		{/if}

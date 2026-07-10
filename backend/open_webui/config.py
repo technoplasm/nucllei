@@ -1332,80 +1332,9 @@ ENABLE_TITLE_GENERATION = RuntimeConfig(
 )
 
 
-ENABLE_AUTOCOMPLETE_GENERATION = RuntimeConfig(
-    "ENABLE_AUTOCOMPLETE_GENERATION",
-    "task.autocomplete.enable",
-    os.environ.get("ENABLE_AUTOCOMPLETE_GENERATION", "False").lower() == "true",
-)
-
-AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = RuntimeConfig(
-    "AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH",
-    "task.autocomplete.input_max_length",
-    int(os.environ.get("AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH", "-1")),
-)
-
-AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
-    "AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE",
-    "task.autocomplete.prompt_template",
-    os.environ.get("AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE", ""),
-)
-
-
-DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = """### Task:
-You are an autocompletion system. Continue the text in `<text>` based on the **completion type** in `<type>` and the given language.  
-
-### **Instructions**:
-1. Analyze `<text>` for context and meaning.  
-2. Use `<type>` to guide your output:  
-   - **General**: Provide a natural, concise continuation.  
-   - **Search Query**: Complete as if generating a realistic search query.  
-3. Start as if you are directly continuing `<text>`. Do **not** repeat, paraphrase, or respond as a model. Simply complete the text.  
-4. Ensure the continuation:
-   - Flows naturally from `<text>`.  
-   - Avoids repetition, overexplaining, or unrelated ideas.  
-5. If unsure, return: `{ "text": "" }`.  
-
-### **Output Rules**:
-- Respond only in JSON format: `{ "text": "<your_completion>" }`.
-
-### **Examples**:
-#### Example 1:  
-Input:  
-<type>General</type>  
-<text>The sun was setting over the horizon, painting the sky</text>  
-Output:  
-{ "text": "with vibrant shades of orange and pink." }
-
-#### Example 2:  
-Input:  
-<type>Search Query</type>  
-<text>Top-rated restaurants in</text>  
-Output:  
-{ "text": "New York City for Italian cuisine." }  
-
----
-### Context:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>
-<type>{{TYPE}}</type>  
-<text>{{PROMPT}}</text>  
-#### Output:
-"""
-
 # llens: 非 native(プロンプトベース)tool calling 経路は削除済み(issue #18)。
 # TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE / DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE も撤去。
-
-
-DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE = """Your task is to reflect the speaker's likely facial expression through a fitting emoji. Interpret emotions from the message and reflect their facial expression using fitting, diverse emojis (e.g., 😊, 😢, 😡, 😱).
-
-Message: ```{{prompt}}```"""
-
-DEFAULT_MOA_GENERATION_PROMPT_TEMPLATE = """You have been provided with a set of responses from various models to the latest user query: "{{prompt}}"
-
-Your task is to synthesize these responses into a single, high-quality response. It is crucial to critically evaluate the information provided in these responses, recognizing that some of it may be biased or incorrect. Your response should not simply replicate the given answers but should offer a refined, accurate, and comprehensive reply to the instruction. Ensure your response is well-structured, coherent, and adheres to the highest standards of accuracy and reliability.
-
-Responses from models: {{responses}}"""
+# llens(#67): autocomplete(入力補完)/ emoji / moa の生成機能は endpoint・config ごと撤去。
 
 
 ####################################

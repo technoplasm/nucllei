@@ -39,7 +39,6 @@
 	export let sendPrompt: Function;
 	export let continueResponse: Function;
 	export let regenerateResponse: Function;
-	export let mergeResponses: Function;
 
 	export let chatActionHandler: Function;
 	export let showMessage: Function = () => {};
@@ -448,7 +447,6 @@
 							{submitMessage}
 							{regenerateResponse}
 							{continueResponse}
-							{mergeResponses}
 							{addMessages}
 							{triggerScroll}
 							{readOnly}

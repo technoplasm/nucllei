@@ -22,15 +22,9 @@
 		TTSWorker
 	} from '$lib/stores';
 
-	import {
-		blobToFile,
-		compressImage,
-		createMessagesList,
-		extractCurlyBraceWords
-	} from '$lib/utils';
+	import { blobToFile, compressImage, extractCurlyBraceWords } from '$lib/utils';
 	import { transcribeAudio } from '$lib/apis/audio';
 	import { uploadFile } from '$lib/apis/files';
-	import { generateAutoCompletion } from '$lib/apis';
 	import { deleteFileById } from '$lib/apis/files';
 
 	import {
@@ -642,29 +636,6 @@
 														))}
 												placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 												largeTextAsFile={$settings?.largeTextAsFile ?? false}
-												autocomplete={$config?.features?.enable_autocomplete_generation &&
-													($settings?.promptAutocomplete ?? false)}
-												generateAutoCompletion={async (text) => {
-													if (selectedModelIds.length === 0 || !selectedModelIds.at(0)) {
-														toast.error($i18n.t('Please select a model first.'));
-													}
-
-													const res = await generateAutoCompletion(
-														localStorage.token,
-														selectedModelIds.at(0),
-														text,
-														history?.currentId
-															? createMessagesList(history, history.currentId)
-															: null
-													).catch((error) => {
-														console.log(error);
-
-														return null;
-													});
-
-													console.log(res);
-													return res;
-												}}
 												oncompositionstart={() => (isComposing = true)}
 												oncompositionend={() => (isComposing = false)}
 												on:keydown={async (e) => {

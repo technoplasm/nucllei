@@ -66,13 +66,7 @@
 	import { processWebSearch } from '$lib/apis/retrieval';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
-	import {
-		chatCompleted,
-		chatAction,
-		generateMoACompletion,
-		stopTask,
-		getTaskIdsByChatId
-	} from '$lib/apis';
+	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 
 	import Banner from '../common/Banner.svelte';
@@ -1743,53 +1737,6 @@
 		}
 	};
 
-	const mergeResponses = async (messageId, responses, _chatId) => {
-		console.log('mergeResponses', messageId, responses);
-		const message = history.messages[messageId];
-		const mergedResponse = {
-			status: true,
-			content: ''
-		};
-		message.merged = mergedResponse;
-		history.messages[messageId] = message;
-
-		try {
-			const [res, controller] = await generateMoACompletion(
-				localStorage.token,
-				message.model,
-				history.messages[message.parentId].content,
-				responses
-			);
-
-			if (res && res.ok && res.body) {
-				const textStream = await createOpenAITextStream(res.body, $settings.splitLargeChunks);
-				for await (const update of textStream) {
-					const { value, done, sources, error, usage } = update;
-					if (error || done) {
-						break;
-					}
-
-					if (mergedResponse.content == '' && value == '\n') {
-						continue;
-					} else {
-						mergedResponse.content += value;
-						history.messages[messageId] = message;
-					}
-
-					if (autoScroll) {
-						scrollToBottom();
-					}
-				}
-
-				await saveChatHandler(_chatId, history);
-			} else {
-				console.error(res);
-			}
-		} catch (e) {
-			console.error(e);
-		}
-	};
-
 	const initChatHandler = async (history) => {
 		let _chatId = $chatId;
 
@@ -1935,7 +1882,6 @@
 									{submitMessage}
 									{continueResponse}
 									{regenerateResponse}
-									{mergeResponses}
 									{chatActionHandler}
 									{addMessages}
 									bottomPadding={files.length > 0}

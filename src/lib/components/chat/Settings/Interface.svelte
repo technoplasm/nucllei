@@ -30,7 +30,6 @@
 	let notificationSound = true;
 
 	let richTextInput = true;
-	let promptAutocomplete = false;
 
 	let largeTextAsFile = false;
 
@@ -53,7 +52,6 @@
 	let showUpdateToast = true;
 	let showChangelog = false; // llens: What's New 自動表示は既定 OFF(issue #10)
 
-	let showEmojiInCall = false;
 	let voiceInterruption = false;
 	let hapticFeedback = false;
 
@@ -75,11 +73,6 @@
 	const toggleSplitLargeChunks = async () => {
 		splitLargeChunks = !splitLargeChunks;
 		saveSettings({ splitLargeChunks: splitLargeChunks });
-	};
-
-	const togglePromptAutocomplete = async () => {
-		promptAutocomplete = !promptAutocomplete;
-		saveSettings({ promptAutocomplete: promptAutocomplete });
 	};
 
 	const togglesScrollOnBranchChange = async () => {
@@ -120,11 +113,6 @@
 	const toggleShowUsername = async () => {
 		showUsername = !showUsername;
 		saveSettings({ showUsername: showUsername });
-	};
-
-	const toggleEmojiInCall = async () => {
-		showEmojiInCall = !showEmojiInCall;
-		saveSettings({ showEmojiInCall: showEmojiInCall });
 	};
 
 	const toggleVoiceInterruption = async () => {
@@ -257,11 +245,9 @@
 		showUpdateToast = $settings.showUpdateToast ?? true;
 		showChangelog = $settings.showChangelog ?? false; // llens: What's New 自動表示は既定 OFF(issue #10)
 
-		showEmojiInCall = $settings.showEmojiInCall ?? false;
 		voiceInterruption = $settings.voiceInterruption ?? false;
 
 		richTextInput = $settings.richTextInput ?? true;
-		promptAutocomplete = $settings.promptAutocomplete ?? false;
 		largeTextAsFile = $settings.largeTextAsFile ?? false;
 		copyFormatted = $settings.copyFormatted ?? false;
 
@@ -580,30 +566,6 @@
 				</div>
 			</div>
 
-			{#if $config?.features?.enable_autocomplete_generation && richTextInput}
-				<div>
-					<div class=" py-0.5 flex w-full justify-between">
-						<div class=" self-center text-xs">
-							{$i18n.t('Prompt Autocompletion')}
-						</div>
-
-						<button
-							class="p-1 px-3 text-xs flex rounded-sm transition"
-							on:click={() => {
-								togglePromptAutocomplete();
-							}}
-							type="button"
-						>
-							{#if promptAutocomplete === true}
-								<span class="ml-2 self-center">{$i18n.t('On')}</span>
-							{:else}
-								<span class="ml-2 self-center">{$i18n.t('Off')}</span>
-							{/if}
-						</button>
-					</div>
-				</div>
-			{/if}
-
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs">
@@ -897,26 +859,6 @@
 						type="button"
 					>
 						{#if voiceInterruption === true}
-							<span class="ml-2 self-center">{$i18n.t('On')}</span>
-						{:else}
-							<span class="ml-2 self-center">{$i18n.t('Off')}</span>
-						{/if}
-					</button>
-				</div>
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs">{$i18n.t('Display Emoji in Call')}</div>
-
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							toggleEmojiInCall();
-						}}
-						type="button"
-					>
-						{#if showEmojiInCall === true}
 							<span class="ml-2 self-center">{$i18n.t('On')}</span>
 						{:else}
 							<span class="ml-2 self-center">{$i18n.t('Off')}</span>

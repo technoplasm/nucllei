@@ -16,8 +16,6 @@
 
 	import { Editor } from '@tiptap/core';
 
-	import { AIAutocompletion } from './RichTextInput/AutoCompletion.js';
-
 	import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 	import Placeholder from '@tiptap/extension-placeholder';
 	import Highlight from '@tiptap/extension-highlight';
@@ -46,8 +44,6 @@
 	export let raw = false;
 
 	export let preserveBreaks = false;
-	export let generateAutoCompletion: Function = async () => null;
-	export let autocomplete = false;
 	export let messageInput = false;
 	export let shiftEnter = false;
 	export let largeTextAsFile = false;
@@ -200,25 +196,7 @@
 				}),
 				Highlight,
 				Typography,
-				Placeholder.configure({ placeholder }),
-				...(autocomplete
-					? [
-							AIAutocompletion.configure({
-								generateCompletion: async (text) => {
-									if (text.trim().length === 0) {
-										return null;
-									}
-
-									const suggestion = await generateAutoCompletion(text).catch(() => null);
-									if (!suggestion || suggestion.trim().length === 0) {
-										return null;
-									}
-
-									return suggestion;
-								}
-							})
-						]
-					: [])
+				Placeholder.configure({ placeholder })
 			],
 			content: content,
 			autofocus: messageInput ? true : false,
