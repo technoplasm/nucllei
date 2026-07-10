@@ -147,9 +147,9 @@ def has_access(
 def has_read_access_to_file(file_id: str, user: "UserModel") -> bool:
     """
     llens(#40, GHSA-vjqm/vrhc/4g37): file_id 単位の読取権限突合。
-    要求ユーザーが 所有 / 管理者 / file 自身の access_control(read)/ 所属 KB の read 権限の
-    いずれかを満たす場合のみ True。存在しない file は False(非公開扱い)。
-    循環 import 回避のため Files/Knowledges は関数内で遅延 import する。
+    要求ユーザーが 所有 / 管理者 / 共有 public マーカー(#41)/ file 自身の
+    access_control(read)のいずれかを満たす場合のみ True。存在しない file は
+    False(非公開扱い)。循環 import 回避のため Files は関数内で遅延 import する。
     """
     if not file_id:
         return False
@@ -176,18 +176,14 @@ def has_read_access_to_file(file_id: str, user: "UserModel") -> bool:
         user.id, "read", file.access_control
     ):
         return True
-
-    knowledge_base_id = file.meta.get("collection_name") if file.meta else None
-    if knowledge_base_id:
-        return has_read_access_to_collection(knowledge_base_id, user)
     return False
 
 
 def has_read_access_to_collection(collection_name: str, user: "UserModel") -> bool:
     """
-    llens(#40): collection(KB)単位の読取権限突合。
-    `file-<id>` 形式のコレクションは対応する file の権限へ委譲、それ以外は KB レコードの
-    所有 / access_control(read)を突合する。未知のコレクションは False(非公開扱い)。
+    llens(#40): collection 参照の読取権限突合。
+    `file-<id>` 形式のコレクションは対応する file の権限へ委譲する。KB は #52 で撤去済み
+    (テーブルも #41 で drop)のため、それ以外のコレクションは常に False(非公開扱い)。
     """
     if not collection_name:
         return False
@@ -197,14 +193,7 @@ def has_read_access_to_collection(collection_name: str, user: "UserModel") -> bo
     if collection_name.startswith("file-"):
         return has_read_access_to_file(collection_name[len("file-") :], user)
 
-    from open_webui.models.knowledge import Knowledges
-
-    knowledge = Knowledges.get_knowledge_by_id(collection_name)
-    if not knowledge:
-        return False
-    if knowledge.user_id == user.id:
-        return True
-    return has_access(user.id, "read", knowledge.access_control)
+    return False
 
 
 # Get all users with access to a resource

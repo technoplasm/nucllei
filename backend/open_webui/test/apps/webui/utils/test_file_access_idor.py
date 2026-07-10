@@ -98,29 +98,10 @@ class TestFileAccessIDOR(AbstractPostgresTest):
         assert has_read_access_to_collection("file-f-alice", self.bob) is False
 
     def test_unknown_collection_denied(self):
+        # KB は撤去済み(#52/#41)— file- 形式以外のコレクションは常に非公開扱い
         from open_webui.utils.access_control import has_read_access_to_collection
 
         assert has_read_access_to_collection("kb-nonexistent", self.bob) is False
-
-    def test_knowledge_owner_and_share(self):
-        from open_webui.models.knowledge import Knowledges, KnowledgeForm
-        from open_webui.utils.access_control import has_read_access_to_collection
-
-        Knowledges.insert_new_knowledge(
-            "alice",
-            KnowledgeForm(
-                name="kb1",
-                description="",
-                access_control={"read": {"user_ids": ["bob"], "group_ids": []}},
-            ),
-        )
-        kb = Knowledges.get_knowledge_bases()[0]
-        assert has_read_access_to_collection(kb.id, self.alice) is True  # 所有者
-        assert has_read_access_to_collection(kb.id, self.bob) is True  # read 共有
-        carol = self.Users.insert_new_user(
-            id="carol", name="carol", email="carol@h.example", role="user"
-        )
-        assert has_read_access_to_collection(kb.id, carol) is False
 
     # ---- filter_files_by_user_access(チャット files 配列) ----
 
