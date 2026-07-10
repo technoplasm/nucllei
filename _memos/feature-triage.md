@@ -122,3 +122,42 @@ Public/Private=access_control とは別軸)。
 `</details>` 漏れなし・console エラー 0。**#48 close**。
 残: i18n(新タブ含む未訳 → #34 に集約)。~~Knowledge KB backend の掃除(#52)~~ → 完了(2026-07-08)。
 #48 で作った `feat/48-admin-workspace-merge` ブランチは ff マージ後に削除済み。
+
+## 全エンティティ/機能の棚卸し(2026-07-10 決定)
+
+権限仕様の整理(#66 / `_memos/permissions.md`)の副産物として全 router・機能を棚卸しし、
+KEEP/DROP を確定した。DROP バッチの実装 issue = #67、タイトル生成の修理 = #68。
+
+### DROP(10 件 → #67)
+
+| 機能 | 理由・スコープ |
+|---|---|
+| channel(グループチャット) | 誰も使わない・表面積大(backend 1,127 行 + フロント一式 + socket room + テーブル) |
+| temporary chat(サーバー側) | フロントは非表示済み。サーバー経路 + `chat.temporary*` フラグごと撤去。監査(#31)とも相性が悪い |
+| chat tag + タグ自動生成 | 不要。tag エンティティ・API・UI・generate_chat_tags を一括 |
+| 入力中補完(generate_autocompletion) | 不要(トークン消費) |
+| 絵文字生成(generate_emoji) | call 画面の飾り。不要 |
+| モデル合議(generate_moa_response) | 単一モデル運用で無意味 |
+| /utils/gravatar | 外部ネットワーク(air-gapped 違反)。横展開でオンラインに出す場合でも不要と判断 |
+| /utils/code/execute | 組み込みコード実行の残骸(#11 の保留分)。実行系は外部 sandbox 一本 |
+| retrieval router | RAG config 残骸ごと全削除。web search は #51 の builtin tool 枠で別途 |
+| memory API | UI 撤去済み(#63)の残骸。router・モデル・テーブルごと |
+
+### KEEP(明示判断)
+
+| 機能 | 判断 |
+|---|---|
+| chat import/export | 不要だが邪魔でもない — 残す |
+| webhook(ユーザー通知 + signup) | **別システムへの横展開で使う可能性があるため残す**(air-gapped 単体では無用でも) |
+| 画像生成まわり | そのまま(`features.image_generation` フラグ維持 + サーバー側 enforcement を #66 で追加) |
+| STT / TTS | 全員使用可・設定は admin・tool から呼ぶ内部 API 提供(#53)。`chat.stt/tts/call` フラグは廃止(#66) |
+| /utils/pdf | 画面印刷の可能性があるため残す |
+| /utils/code/format | tool/functions 開発用として残す |
+| /utils/db/download | 残す(admin 専有を維持)。持ち出し統制は #31 の監査で扱う |
+| pipelines router | 今後サポートの可能性があるため温存 |
+| ollama router | dev fallback として温存 |
+
+### 別タスク
+
+- generate_title がかなり壊れている(全チャット "New Chat"、`title_string=None` の
+  AttributeError を 2026-07-10 に実測)→ #68 で修理

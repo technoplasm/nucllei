@@ -31,10 +31,10 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | tool | read ACL(チャット実行時に per-tool 判定) | admin | admin | admin | admin | 実行時チェックは GHSA-4pcg の enforce_access_control |
 | function(filter/action/pipe) | −(model 割り当てで発動、ACL 無し) | admin | admin | − | admin | |
 | skill | read ACL(発火 = read ∩ model.skillIds) | editor | **editor(全 skill)** | **editor** | editor | tool_ids 付きは全操作 admin。新規の初期 ACL=None(全員使用可) |
-| channel | read ACL(閲覧・投稿・自メッセージ削除) | admin | admin | admin | admin | 現状実装が既にこの形 |
+| ~~channel~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — 機能ごと撤去(#67) |
 | chat | owner のみ | 本人 | owner | − | owner + `chat.delete` | share_id 発行=owner、共有閲覧=認証ユーザー全員(匿名不可)。clone/file 参照は #41 |
 | folder | owner のみ | 本人 | owner | − | owner + `chat.delete` | |
-| memory | owner のみ | 本人 | owner | − | owner | #52 で素の SQL ストアに降格済み |
+| ~~memory~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — API ごと撤去(#67) |
 | file | #40 の access_control ヘルパー(owner / 参照可視) | 本人 | − | − | owner | `chat.file_upload` フラグ |
 | API key | 本人 | 本人(ENABLE_API_KEY 時) | − | − | 本人 | endpoint allowlist は 57q6 対策済み |
 | valves(tool/function 全体設定) | − | − | admin | − | − | 7429 対策済み(read も制限) |
@@ -47,11 +47,12 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | フラグ | 意味 | enforcement 地点(あるべき) |
 |---|---|---|
 | `workspace.skills` | skill editor ロール | routers/skills.py 全 CRUD |
-| `chat.delete` / `chat.edit` / `chat.file_upload` / `chat.temporary*` | チャット操作 | routers/chats.py・files.py(実装済み) |
-| `chat.stt` / `chat.tts` / `chat.call` | 音声機能 | **routers/audio.py(未実装 = G1)** |
-| `features.image_generation` | 画像生成 | **routers/images.py(未実装 = G1)** |
+| `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(実装済み) |
+| `features.image_generation` | 画像生成 | **routers/images.py(未実装 = G1 残り)** — フラグは維持し enforcement を #66 で追加 |
 | `features.web_search` / `code_interpreter` | 機能 | 対応機能の endpoint(#51 / sandbox 整備時に) |
 | 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | #66 で撤去 |
+| 廃止: `chat.stt` / `chat.tts` / `chat.call` | **STT/TTS は全員使用可**(2026-07-10 決定)。設定は admin、tool から呼ぶ内部 API を提供(#53) | フラグごと撤去(#66) |
+| 廃止: `chat.temporary` / `chat.temporary_enforced` | temporary chat は機能ごと撤去(フロントは非表示済み、サーバー側も撤去 #67) | フラグごと撤去 |
 
 ## 既知のギャップ(2026-07-10 監査、→ 対応 issue)
 
