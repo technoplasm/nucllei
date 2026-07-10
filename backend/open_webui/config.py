@@ -1431,7 +1431,7 @@ ONEDRIVE_CLIENT_ID = RuntimeConfig(
 # llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
 # config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。
 # embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(air-gapped)。
-# vector connector と EMBEDDING_FUNCTION は memories(#8 放置)のため温存。
+# llens(#67): memories も撤去したため vector/embedding の残置理由は消滅(EMBEDDING_FUNCTION は None のみ)。
 
 # llens(#52): 添付ファイルの受け入れゲート(upload の入口=Attachment 前で server-side 強制)。
 ATTACHMENT_MAX_COUNT = RuntimeConfig(
