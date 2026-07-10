@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import logging
 
@@ -45,7 +46,10 @@ async def process_filter_functions(
         if filter_id in request.app.state.FUNCTIONS:
             function_module = request.app.state.FUNCTIONS[filter_id]
         else:
-            function_module, _, _ = load_function_module_by_id(filter_id)
+            # llens(#28): 初回ロードは exec + DB 書き込みを伴うため to_thread でループ外へ
+            function_module, _, _ = await asyncio.to_thread(
+                load_function_module_by_id, filter_id
+            )
             request.app.state.FUNCTIONS[filter_id] = function_module
 
         # Prepare handler function
@@ -94,10 +98,12 @@ async def process_filter_functions(
                         log.exception(f"Failed to get user values: {e}")
 
             # Execute handler
+            # llens(#28): sync handler はワーカースレッドで実行(sync tool と同じ扱い)。
+            # 遅い Filter がイベントループ(全ユーザーのストリーミング)を止めないように。
             if inspect.iscoroutinefunction(handler):
                 form_data = await handler(**params)
             else:
-                form_data = handler(**params)
+                form_data = await asyncio.to_thread(handler, **params)
 
         except Exception as e:
             log.debug(f"Error in {filter_type} handler {filter_id}: {e}")

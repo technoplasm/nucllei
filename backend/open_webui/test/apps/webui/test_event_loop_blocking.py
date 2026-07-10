@@ -179,3 +179,34 @@ class TestEventLoopBlocking:
             f"post_webhook がイベントループを {stall:.3f}s 停止させた"
             f"(チャット経路 background_tasks_handler から同期で呼ばれる)"
         )
+
+    def test_sync_filter_handler_does_not_stall_loop(self):
+        """CORE: 遅い sync Filter(de-id 等)が全ユーザーのストリーミングを
+        止めないこと(sync handler は to_thread でワーカースレッド実行)。"""
+        from open_webui.utils.filter import process_filter_functions
+
+        def slow_inlet(body):
+            time.sleep(DELAY)  # 遅い同期 Filter を模擬(重い正規表現・外部呼び出し等)
+            return body
+
+        filter_module = SimpleNamespace(inlet=slow_inlet)
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(FUNCTIONS={"bench": filter_module})
+            )
+        )
+        filter_functions = [SimpleNamespace(id="bench")]
+
+        async def scenario():
+            return await _measure_stall(
+                process_filter_functions(
+                    request, filter_functions, "inlet", {"messages": []}, {}
+                )
+            )
+
+        stall = _run(scenario)
+        print(f"\n[bench] sync filter inlet max loop stall: {stall*1000:.0f}ms")
+        assert stall < MAX_ALLOWED_STALL, (
+            f"sync Filter handler がイベントループを {stall:.3f}s 停止させた"
+            f"(CORE: Filter パイプラインはチャット経路)"
+        )
