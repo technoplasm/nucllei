@@ -19,6 +19,13 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black open_webui/`**
   (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。frontend にも同型の
   prettier ゲート("Frontend Build / Format & Build")があり、こちらは `pnpm format`。
+- **Svelte 5(互換モード)の 2 大モーダル罠**(#55 で実害・修理済みだが新規コードで再発しやすい):
+  (1) `$: if (show) { _user = {...} }` の編集バッファ初期化は **bind:value の書き込みごとに
+  再実行され入力が巻き戻る** — `let lastShow` の変化検知ガードで包む(UserModal.svelte が実例)。
+  (2) portal(body へ appendChild)する component の無条件 `document.body.removeChild` は
+  `{#if}` teardown と衝突して NotFoundError → **effect が中断され画面が中途半端に壊れる**
+  (症状: モーダルが空欄)。`parentNode === document.body` を確認してから外す(common/Modal.svelte
+  は修理済み — 新しい portal を書くときは同じガードを)。
 - **vitest は import 破壊を検知しない**: store やコンポーネントを削除する撤去作業では、
   カバレッジ外のファイルに残った orphan import を vitest がすり抜ける(#67 で
   common/Tags/TagInput の削除済み store import が CI の build 段階まで到達)。
@@ -32,6 +39,10 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
+- **権限のネガティブテストは `mock_webui_user_strict` を使う**(test/util/mock_user.py、#55 で追加):
+  従来の `mock_webui_user` は `get_admin_user` ごと差し替えるため **role="user" でも admin endpoint を
+  素通りする**(401 を期待するテストが書けない)。strict 版は `get_current_user` だけを差し替えて
+  role ゲートを実物で通す。#66(権限3層化)の回帰はこちらで書くこと。
 - open_webui は **import 時に DATABASE_URL などの env が確定**する(migration も import 時)。
   import 時確定 env のテストはサブプロセス起動 + `cwd`=backend + `PYTHONPATH`=backend を明示
   (`test_native_tool_calling.py` の `_parse_iterations_env` が実例。ローカル green を過信しない)。

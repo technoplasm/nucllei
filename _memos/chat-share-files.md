@@ -61,11 +61,16 @@
   → **`models/knowledge.py` を温存する最後の理由が消滅**(IDOR テスト書き換えとセットで撤去可)。
 - permissions.md の chat / file 行・フラグ表を本仕様に合わせて改訂(実施済み)。
 
-## 実装スコープ(#41)
+## 実装スコープ(#41)— **全項目出荷済み(2026-07-10)**
 
-1. share/再共有時の file public 化 + read ゲート改訂(endpoint + middleware filter)
-2. clone の file 実体コピー(admin 経路含む)
-3. `chat.share` / `chat.clone` フラグ + enforcement + UI ミラー
-4. 回帰テスト: 共有 read の正/負、**解除後も read 可**(原則 1 の固定)、clone 後の独立性
-   (元削除・共有解除に耐える)、フラグ off の負テスト
-5. KB ヘルパー置換 + `models/knowledge.py` 撤去(別コミットで可)
+1. [x] share/再共有時の file public 化 + read ゲート改訂(endpoint + middleware filter)— `7be6155c1`
+2. [x] clone の file 実体コピー(admin 経路含む)— `7be6155c1`
+3. [x] `chat.share` / `chat.clone` フラグ + enforcement + UI ミラー — `7be6155c1`
+4. [x] 回帰テスト 11 件(`test_chat_share_files.py`): 共有 read の正/負、**解除後も read 可**
+   (原則 1 の固定)、clone 後の独立性(元削除・共有解除に耐える)、フラグ off の負テスト
+5. [x] KB ヘルパー置換 + `models/knowledge.py` 撤去(migration `a7c9e2f4b8d1` で
+   knowledge テーブル drop)— `f6dc1e2e0`
+
+検証: backend 全 238 passed(当時)+ 実機 E2E(share → `{"read":{"public":true}}` 焼き込み、
+unshare 後も維持)。関連修正: `/default/permissions` の pydantic モデルに share/clone が
+欠落していた件は #55 のコミット(`f7f607b12`)で是正。
