@@ -15,7 +15,6 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Tags from '$lib/components/chat/Tags.svelte';
 	import Share from '$lib/components/icons/Share.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
@@ -292,34 +291,6 @@
 				<GarbageBin strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
-
-			<hr class="border-gray-100 dark:border-gray-850 my-0.5" />
-
-			<div class="flex p-1">
-				<Tags
-					{chatId}
-					on:add={(e) => {
-						dispatch('tag', {
-							type: 'add',
-							name: e.detail.name
-						});
-
-						show = false;
-					}}
-					on:delete={(e) => {
-						dispatch('tag', {
-							type: 'delete',
-							name: e.detail.name
-						});
-
-						show = false;
-					}}
-					on:close={() => {
-						show = false;
-						onClose();
-					}}
-				/>
-			</div>
 		</DropdownMenu.Content>
 	</div>
 </Dropdown>

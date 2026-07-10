@@ -5,7 +5,6 @@ import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_db
-from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.env import SRC_LOG_LEVELS
 
 from pydantic import BaseModel, ConfigDict
@@ -182,26 +181,6 @@ class ChatTable:
         chat["title"] = title
 
         return self.update_chat_by_id(id, chat)
-
-    def update_chat_tags_by_id(
-        self, id: str, tags: list[str], user
-    ) -> Optional[ChatModel]:
-        chat = self.get_chat_by_id(id)
-        if chat is None:
-            return None
-
-        self.delete_all_tags_by_id_and_user_id(id, user.id)
-
-        for tag in chat.meta.get("tags", []):
-            if self.count_chats_by_tag_name_and_user_id(tag, user.id) == 0:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
-
-        for tag_name in tags:
-            if tag_name.lower() == "none":
-                continue
-
-            self.add_chat_tag_by_id_and_user_id_and_tag_name(id, user.id, tag_name)
-        return self.get_chat_by_id(id)
 
     def get_chat_title_by_id(self, id: str) -> Optional[str]:
         chat = self.get_chat_by_id(id)
@@ -613,21 +592,6 @@ class ChatTable:
         if not search_text:
             return self.get_chat_list_by_user_id(user_id, include_archived, skip, limit)
 
-        search_text_words = search_text.split(" ")
-
-        # search_text might contain 'tag:tag_name' format so we need to extract the tag_name, split the search_text and remove the tags
-        tag_ids = [
-            word.replace("tag:", "").replace(" ", "_").lower()
-            for word in search_text_words
-            if word.startswith("tag:")
-        ]
-
-        search_text_words = [
-            word for word in search_text_words if not word.startswith("tag:")
-        ]
-
-        search_text = " ".join(search_text_words)
-
         with get_db() as db:
             query = db.query(Chat).filter(Chat.user_id == user_id)
 
@@ -657,36 +621,6 @@ class ChatTable:
                     ).params(search_text=search_text)
                 )
 
-                # Check if there are any tags to filter, it should have all the tags
-                if "none" in tag_ids:
-                    query = query.filter(
-                        text(
-                            """
-                            NOT EXISTS (
-                                SELECT 1
-                                FROM json_each(Chat.meta, '$.tags') AS tag
-                            )
-                            """
-                        )
-                    )
-                elif tag_ids:
-                    query = query.filter(
-                        and_(
-                            *[
-                                text(
-                                    f"""
-                                    EXISTS (
-                                        SELECT 1
-                                        FROM json_each(Chat.meta, '$.tags') AS tag
-                                        WHERE tag.value = :tag_id_{tag_idx}
-                                    )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
-                                for tag_idx, tag_id in enumerate(tag_ids)
-                            ]
-                        )
-                    )
-
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
@@ -705,36 +639,6 @@ class ChatTable:
                         )
                     ).params(search_text=search_text)
                 )
-
-                # Check if there are any tags to filter, it should have all the tags
-                if "none" in tag_ids:
-                    query = query.filter(
-                        text(
-                            """
-                            NOT EXISTS (
-                                SELECT 1
-                                FROM json_array_elements_text(Chat.meta->'tags') AS tag
-                            )
-                            """
-                        )
-                    )
-                elif tag_ids:
-                    query = query.filter(
-                        and_(
-                            *[
-                                text(
-                                    f"""
-                                    EXISTS (
-                                        SELECT 1
-                                        FROM json_array_elements_text(Chat.meta->'tags') AS tag
-                                        WHERE tag = :tag_id_{tag_idx}
-                                    )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
-                                for tag_idx, tag_id in enumerate(tag_ids)
-                            ]
-                        )
-                    )
             else:
                 raise NotImplementedError(
                     f"Unsupported dialect: {db.bind.dialect.name}"
@@ -790,135 +694,6 @@ class ChatTable:
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
-
-    def get_chat_tags_by_id_and_user_id(self, id: str, user_id: str) -> list[TagModel]:
-        with get_db() as db:
-            chat = db.get(Chat, id)
-            tags = chat.meta.get("tags", [])
-            return [Tags.get_tag_by_name_and_user_id(tag, user_id) for tag in tags]
-
-    def get_chat_list_by_user_id_and_tag_name(
-        self, user_id: str, tag_name: str, skip: int = 0, limit: int = 50
-    ) -> list[ChatModel]:
-        with get_db() as db:
-            query = db.query(Chat).filter_by(user_id=user_id)
-            tag_id = tag_name.replace(" ", "_").lower()
-
-            log.info(f"DB dialect name: {db.bind.dialect.name}")
-            if db.bind.dialect.name == "sqlite":
-                # SQLite JSON1 querying for tags within the meta JSON field
-                query = query.filter(
-                    text(
-                        f"EXISTS (SELECT 1 FROM json_each(Chat.meta, '$.tags') WHERE json_each.value = :tag_id)"
-                    )
-                ).params(tag_id=tag_id)
-            elif db.bind.dialect.name == "postgresql":
-                # PostgreSQL JSON query for tags within the meta JSON field (for `json` type)
-                query = query.filter(
-                    text(
-                        "EXISTS (SELECT 1 FROM json_array_elements_text(Chat.meta->'tags') elem WHERE elem = :tag_id)"
-                    )
-                ).params(tag_id=tag_id)
-            else:
-                raise NotImplementedError(
-                    f"Unsupported dialect: {db.bind.dialect.name}"
-                )
-
-            all_chats = query.all()
-            log.debug(f"all_chats: {all_chats}")
-            return [ChatModel.model_validate(chat) for chat in all_chats]
-
-    def add_chat_tag_by_id_and_user_id_and_tag_name(
-        self, id: str, user_id: str, tag_name: str
-    ) -> Optional[ChatModel]:
-        tag = Tags.get_tag_by_name_and_user_id(tag_name, user_id)
-        if tag is None:
-            tag = Tags.insert_new_tag(tag_name, user_id)
-        try:
-            with get_db() as db:
-                chat = db.get(Chat, id)
-
-                tag_id = tag.id
-                if tag_id not in chat.meta.get("tags", []):
-                    chat.meta = {
-                        **chat.meta,
-                        "tags": list(set(chat.meta.get("tags", []) + [tag_id])),
-                    }
-
-                db.commit()
-                db.refresh(chat)
-                return ChatModel.model_validate(chat)
-        except Exception:
-            return None
-
-    def count_chats_by_tag_name_and_user_id(self, tag_name: str, user_id: str) -> int:
-        with get_db() as db:  # Assuming `get_db()` returns a session object
-            query = db.query(Chat).filter_by(user_id=user_id, archived=False)
-
-            # Normalize the tag_name for consistency
-            tag_id = tag_name.replace(" ", "_").lower()
-
-            if db.bind.dialect.name == "sqlite":
-                # SQLite JSON1 support for querying the tags inside the `meta` JSON field
-                query = query.filter(
-                    text(
-                        f"EXISTS (SELECT 1 FROM json_each(Chat.meta, '$.tags') WHERE json_each.value = :tag_id)"
-                    )
-                ).params(tag_id=tag_id)
-
-            elif db.bind.dialect.name == "postgresql":
-                # PostgreSQL JSONB support for querying the tags inside the `meta` JSON field
-                query = query.filter(
-                    text(
-                        "EXISTS (SELECT 1 FROM json_array_elements_text(Chat.meta->'tags') elem WHERE elem = :tag_id)"
-                    )
-                ).params(tag_id=tag_id)
-
-            else:
-                raise NotImplementedError(
-                    f"Unsupported dialect: {db.bind.dialect.name}"
-                )
-
-            # Get the count of matching records
-            count = query.count()
-
-            # Debugging output for inspection
-            log.info(f"Count of chats for tag '{tag_name}': {count}")
-
-            return count
-
-    def delete_tag_by_id_and_user_id_and_tag_name(
-        self, id: str, user_id: str, tag_name: str
-    ) -> bool:
-        try:
-            with get_db() as db:
-                chat = db.get(Chat, id)
-                tags = chat.meta.get("tags", [])
-                tag_id = tag_name.replace(" ", "_").lower()
-
-                tags = [tag for tag in tags if tag != tag_id]
-                chat.meta = {
-                    **chat.meta,
-                    "tags": list(set(tags)),
-                }
-                db.commit()
-                return True
-        except Exception:
-            return False
-
-    def delete_all_tags_by_id_and_user_id(self, id: str, user_id: str) -> bool:
-        try:
-            with get_db() as db:
-                chat = db.get(Chat, id)
-                chat.meta = {
-                    **chat.meta,
-                    "tags": [],
-                }
-                db.commit()
-
-                return True
-        except Exception:
-            return False
 
     def delete_chat_by_id(self, id: str) -> bool:
         try:

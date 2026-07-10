@@ -12,7 +12,6 @@
 		settings,
 		showSettings,
 		chatId,
-		tags,
 		showSidebar,
 		mobile,
 		showArchivedChats,
@@ -31,7 +30,6 @@
 	import {
 		deleteChatById,
 		getChatList,
-		getAllTags,
 		getChatListBySearchText,
 		createNewChat,
 		getPinnedChatList,
@@ -187,7 +185,6 @@
 
 	const initChatList = async () => {
 		// Reset pagination variables
-		tags.set(await getAllTags(localStorage.token));
 		pinnedChats.set(await getPinnedChatList(localStorage.token));
 		initFolders();
 
@@ -253,15 +250,6 @@
 			};
 
 			reader.readAsText(file);
-		}
-	};
-
-	const tagEventHandler = async (type, tagName, chatId) => {
-		console.log(type, tagName, chatId);
-		if (type === 'delete') {
-			initChatList();
-		} else if (type === 'add') {
-			initChatList();
 		}
 	};
 
@@ -723,10 +711,6 @@
 									on:change={async () => {
 										initChatList();
 									}}
-									on:tag={(e) => {
-										const { type, name } = e.detail;
-										tagEventHandler(type, name, chat.id);
-									}}
 								/>
 							{/each}
 						</div>
@@ -794,10 +778,6 @@
 							}}
 							on:change={async () => {
 								initChatList();
-							}}
-							on:tag={(e) => {
-								const { type, name } = e.detail;
-								tagEventHandler(type, name, chat.id);
 							}}
 						/>
 					{/each}

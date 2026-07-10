@@ -20,7 +20,6 @@
 		config,
 		type Model,
 		models,
-		tags as allTags,
 		settings,
 		showSidebar,
 		WEBUI_NAME,
@@ -51,17 +50,7 @@
 	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
-	import {
-		addTagById,
-		createNewChat,
-		deleteTagById,
-		deleteTagsById,
-		getAllTags,
-		getChatById,
-		getChatList,
-		getTagsById,
-		updateChatById
-	} from '$lib/apis/chats';
+	import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWebSearch } from '$lib/apis/retrieval';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
@@ -114,7 +103,6 @@
 	let codeInterpreterEnabled = false;
 
 	let chat = null;
-	let tags = [];
 
 	let history = {
 		messages: {},
@@ -264,9 +252,6 @@
 					chatTitle.set(data);
 					currentChatPage.set(1);
 					await chats.set(await getChatList(localStorage.token, $currentChatPage));
-				} else if (type === 'chat:tags') {
-					chat = await getChatById(localStorage.token, $chatId);
-					allTags.set(await getAllTags(localStorage.token));
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
 						// Code execution; update existing code execution by ID, or add new one.
@@ -701,10 +686,6 @@
 		});
 
 		if (chat) {
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				return [];
-			});
-
 			const chatContent = chat.chat;
 
 			if (chatContent) {
@@ -1550,8 +1531,7 @@
 				(selectedModels[0] === model.id || atSelectedModel !== undefined)
 					? {
 							background_tasks: {
-								title_generation: $settings?.title?.auto ?? true,
-								tags_generation: $settings?.autoTags ?? true
+								title_generation: $settings?.title?.auto ?? true
 							}
 						}
 					: {}),
@@ -1749,7 +1729,6 @@
 				params: params,
 				history: history,
 				messages: createMessagesList(history, history.currentId),
-				tags: [],
 				timestamp: Date.now()
 			});
 

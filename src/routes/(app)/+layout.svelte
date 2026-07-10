@@ -11,7 +11,6 @@
 
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModels } from '$lib/apis';
-	import { getAllTags } from '$lib/apis/chats';
 	import { getSkills } from '$lib/apis/skills';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
@@ -25,7 +24,6 @@
 		skills,
 		tools,
 		functions,
-		tags,
 		banners,
 		showSettings,
 		showChangelog

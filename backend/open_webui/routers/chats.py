@@ -11,7 +11,6 @@ from open_webui.models.chats import (
     Chats,
     ChatTitleIdResponse,
 )
-from open_webui.models.tags import TagModel, Tags
 from open_webui.models.folders import Folders
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
@@ -116,17 +115,6 @@ async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
 async def import_chat(form_data: ChatImportForm, user=Depends(get_verified_user)):
     try:
         chat = Chats.import_chat(user.id, form_data)
-        if chat:
-            tags = chat.meta.get("tags", [])
-            for tag_id in tags:
-                tag_id = tag_id.replace(" ", "_").lower()
-                tag_name = " ".join([word.capitalize() for word in tag_id.split("_")])
-                if (
-                    tag_id != "none"
-                    and Tags.get_tag_by_name_and_user_id(tag_name, user.id) is None
-                ):
-                    Tags.insert_new_tag(tag_name, user.id)
-
         return ChatResponse(**chat.model_dump())
     except Exception as e:
         log.exception(e)
@@ -156,15 +144,6 @@ async def search_user_chats(
             user.id, text, skip=skip, limit=limit
         )
     ]
-
-    # Delete tag if no chat is found
-    words = text.strip().split(" ")
-    if page == 1 and len(words) == 1 and words[0].startswith("tag:"):
-        tag_id = words[0].replace("tag:", "")
-        if len(chat_list) == 0:
-            if Tags.get_tag_by_name_and_user_id(tag_id, user.id):
-                log.debug(f"deleting tag: {tag_id}")
-                Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
 
     return chat_list
 
@@ -229,20 +208,42 @@ async def get_user_archived_chats(user=Depends(get_verified_user)):
 
 
 ############################
-# GetAllTags
+# GetPinnedChats
 ############################
 
 
-@router.get("/all/tags", response_model=list[TagModel])
-async def get_all_user_tags(user=Depends(get_verified_user)):
-    try:
-        tags = Tags.get_tags_by_user_id(user.id)
-        return tags
-    except Exception as e:
-        log.exception(e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT()
-        )
+@router.get("/pinned", response_model=list[ChatResponse])
+async def get_user_pinned_chats(user=Depends(get_verified_user)):
+    return [
+        ChatResponse(**chat.model_dump())
+        for chat in Chats.get_pinned_chats_by_user_id(user.id)
+    ]
+
+
+############################
+# GetChats
+############################
+
+
+@router.get("/all", response_model=list[ChatResponse])
+async def get_user_chats(user=Depends(get_verified_user)):
+    return [
+        ChatResponse(**chat.model_dump())
+        for chat in Chats.get_chats_by_user_id(user.id)
+    ]
+
+
+############################
+# GetArchivedChats
+############################
+
+
+@router.get("/all/archived", response_model=list[ChatResponse])
+async def get_user_archived_chats(user=Depends(get_verified_user)):
+    return [
+        ChatResponse(**chat.model_dump())
+        for chat in Chats.get_archived_chats_by_user_id(user.id)
+    ]
 
 
 ############################
@@ -306,33 +307,6 @@ async def get_shared_chat_by_id(share_id: str, user=Depends(get_verified_user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
-
-
-############################
-# GetChatsByTags
-############################
-
-
-class TagForm(BaseModel):
-    name: str
-
-
-class TagFilterForm(TagForm):
-    skip: Optional[int] = 0
-    limit: Optional[int] = 50
-
-
-@router.post("/tags", response_model=list[ChatTitleIdResponse])
-async def get_user_chat_list_by_tag_name(
-    form_data: TagFilterForm, user=Depends(get_verified_user)
-):
-    chats = Chats.get_chat_list_by_user_id_and_tag_name(
-        user.id, form_data.name, form_data.skip, form_data.limit
-    )
-    if len(chats) == 0:
-        Tags.delete_tag_by_name_and_user_id(form_data.name, user.id)
-
-    return chats
 
 
 ############################
@@ -483,11 +457,6 @@ async def send_chat_message_event_by_id(
 @router.delete("/{id}", response_model=bool)
 async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
     if user.role == "admin":
-        chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
-
         result = Chats.delete_chat_by_id(id)
 
         return result
@@ -499,11 +468,6 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
-
-        chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
 
         result = Chats.delete_chat_by_id_and_user_id(id, user.id)
         return result
@@ -611,20 +575,6 @@ async def archive_chat_by_id(id: str, user=Depends(get_verified_user)):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         chat = Chats.toggle_chat_archive_by_id(id)
-
-        # Delete tags if chat is archived
-        if chat.archived:
-            for tag_id in chat.meta.get("tags", []):
-                if Chats.count_chats_by_tag_name_and_user_id(tag_id, user.id) == 0:
-                    log.debug(f"deleting tag: {tag_id}")
-                    Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
-        else:
-            for tag_id in chat.meta.get("tags", []):
-                tag = Tags.get_tag_by_name_and_user_id(tag_id, user.id)
-                if tag is None:
-                    log.debug(f"inserting tag: {tag_id}")
-                    tag = Tags.insert_new_tag(tag_id, user.id)
-
         return ChatResponse(**chat.model_dump())
     else:
         raise HTTPException(
@@ -705,102 +655,4 @@ async def update_chat_folder_id_by_id(
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT()
-        )
-
-
-############################
-# GetChatTagsById
-############################
-
-
-@router.get("/{id}/tags", response_model=list[TagModel])
-async def get_chat_tags_by_id(id: str, user=Depends(get_verified_user)):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        tags = chat.meta.get("tags", [])
-        return Tags.get_tags_by_ids_and_user_id(tags, user.id)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
-        )
-
-
-############################
-# AddChatTagById
-############################
-
-
-@router.post("/{id}/tags", response_model=list[TagModel])
-async def add_tag_by_id_and_tag_name(
-    id: str, form_data: TagForm, user=Depends(get_verified_user)
-):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        tags = chat.meta.get("tags", [])
-        tag_id = form_data.name.replace(" ", "_").lower()
-
-        if tag_id == "none":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Tag name cannot be 'None'"),
-            )
-
-        if tag_id not in tags:
-            Chats.add_chat_tag_by_id_and_user_id_and_tag_name(
-                id, user.id, form_data.name
-            )
-
-        chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-        tags = chat.meta.get("tags", [])
-        return Tags.get_tags_by_ids_and_user_id(tags, user.id)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT()
-        )
-
-
-############################
-# DeleteChatTagById
-############################
-
-
-@router.delete("/{id}/tags", response_model=list[TagModel])
-async def delete_tag_by_id_and_tag_name(
-    id: str, form_data: TagForm, user=Depends(get_verified_user)
-):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        Chats.delete_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name)
-
-        if Chats.count_chats_by_tag_name_and_user_id(form_data.name, user.id) == 0:
-            Tags.delete_tag_by_name_and_user_id(form_data.name, user.id)
-
-        chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-        tags = chat.meta.get("tags", [])
-        return Tags.get_tags_by_ids_and_user_id(tags, user.id)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
-        )
-
-
-############################
-# DeleteAllTagsById
-############################
-
-
-@router.delete("/{id}/tags/all", response_model=Optional[bool])
-async def delete_all_tags_by_id(id: str, user=Depends(get_verified_user)):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        Chats.delete_all_tags_by_id_and_user_id(id, user.id)
-
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 0:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
-
-        return True
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )

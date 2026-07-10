@@ -1269,30 +1269,6 @@ JSON format: { "title": "your concise title here" }
 {{MESSAGES:END:2}}
 </chat_history>"""
 
-TAGS_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
-    "TAGS_GENERATION_PROMPT_TEMPLATE",
-    "task.tags.prompt_template",
-    os.environ.get("TAGS_GENERATION_PROMPT_TEMPLATE", ""),
-)
-
-DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE = """### Task:
-Generate 1-3 broad tags categorizing the main themes of the chat history, along with 1-3 more specific subtopic tags.
-
-### Guidelines:
-- Start with high-level domains (e.g. Science, Technology, Philosophy, Arts, Politics, Business, Health, Sports, Entertainment, Education)
-- Consider including relevant subfields/subdomains if they are strongly represented throughout the conversation
-- If content is too short (less than 3 messages) or too diverse, use only ["General"]
-- Use the chat's primary language; default to English if multilingual
-- Prioritize accuracy over specificity
-
-### Output:
-JSON format: { "tags": ["tag1", "tag2", "tag3"] }
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>"""
-
 IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
     "IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE",
     "task.image.prompt_template",
@@ -1319,11 +1295,7 @@ Strictly return in JSON format:
 {{MESSAGES:END:6}}
 </chat_history>"""
 
-ENABLE_TAGS_GENERATION = RuntimeConfig(
-    "ENABLE_TAGS_GENERATION",
-    "task.tags.enable",
-    os.environ.get("ENABLE_TAGS_GENERATION", "True").lower() == "true",
-)
+# llens(#67): chat tag は機能ごと撤去(TAGS_GENERATION 系 config も削除)
 
 ENABLE_TITLE_GENERATION = RuntimeConfig(
     "ENABLE_TITLE_GENERATION",

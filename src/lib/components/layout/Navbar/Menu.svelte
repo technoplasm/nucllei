@@ -16,7 +16,6 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import Tags from '$lib/components/chat/Tags.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import { getChatById } from '$lib/apis/chats';
@@ -26,8 +25,6 @@
 	export let shareEnabled: boolean = false;
 	export let shareHandler: Function;
 	export let downloadHandler: Function;
-
-	// export let tagHandler: Function;
 
 	export let chat;
 	export let onClose: Function = () => {};
@@ -282,14 +279,6 @@
 				<Clipboard className=" size-4" strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Copy')}</div>
 			</DropdownMenu.Item>
-
-			{#if !$temporaryChatEnabled}
-				<hr class="border-gray-100 dark:border-gray-850 my-0.5" />
-
-				<div class="flex p-1">
-					<Tags chatId={chat.id} />
-				</div>
-			{/if}
 		</DropdownMenu.Content>
 	</div>
 </Dropdown>
