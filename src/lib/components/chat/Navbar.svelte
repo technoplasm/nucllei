@@ -38,8 +38,7 @@
 	// 'system' は matchMedia で解決、それ以外は名前に 'dark' を含むかで判定
 	$: isDark =
 		$theme === 'system'
-			? typeof window !== 'undefined' &&
-				window.matchMedia('(prefers-color-scheme: dark)').matches
+			? typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
 			: ($theme ?? '').includes('dark');
 
 	const toggleTheme = () => {

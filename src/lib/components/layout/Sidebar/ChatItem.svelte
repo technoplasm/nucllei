@@ -249,8 +249,7 @@
 >
 	{#if confirmEdit}
 		<div
-			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {
-			id === $chatId || confirmEdit
+			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {id === $chatId || confirmEdit
 				? 'bg-sidebar-selected'
 				: selected
 					? 'bg-sidebar-selected'
@@ -266,8 +265,7 @@
 		</div>
 	{:else}
 		<a
-			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {
-			id === $chatId || confirmEdit
+			class=" w-full flex justify-between rounded-lg px-2 py-1.5 {id === $chatId || confirmEdit
 				? 'bg-sidebar-selected'
 				: selected
 					? 'bg-sidebar-selected'
@@ -306,15 +304,11 @@
 		class="
 			absolute top-[4px] py-1 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80% to-transparent
 			{id === $chatId || confirmEdit
+			? 'from-sidebar-selected'
+			: selected
 				? 'from-sidebar-selected'
-				: selected
-					? 'from-sidebar-selected'
-					: 'invisible group-hover:visible from-sidebar-hover'
-			}
-			{className === 'pr-2'
-				? 'right-[8px]'
-				: 'right-0'
-			}"
+				: 'invisible group-hover:visible from-sidebar-hover'}
+			{className === 'pr-2' ? 'right-[8px]' : 'right-0'}"
 		on:mouseenter={(e) => {
 			mouseOver = true;
 		}}

@@ -43,8 +43,8 @@
 
 <div
 	bind:this={itemElement}
-	class=" w-full {className} rounded-lg flex relative group hover:bg-sidebar-hover {$page
-		.url.pathname === `/channels/${channel.id}`
+	class=" w-full {className} rounded-lg flex relative group hover:bg-sidebar-hover {$page.url
+		.pathname === `/channels/${channel.id}`
 		? 'bg-sidebar-selected'
 		: ''} px-2.5 py-1"
 >

@@ -64,7 +64,6 @@
 			</div>
 		</div>
 
-
 		<div
 			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 font-medium text-left flex items-center gap-4 font-primary"
 		>

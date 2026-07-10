@@ -51,9 +51,23 @@
 @layer base {
 	html {
 		font-family:
-			'Inter Variable', 'Noto Sans JP Variable', -apple-system, BlinkMacSystemFont, ui-sans-serif,
-			system-ui, 'Segoe UI', Roboto, Ubuntu, Cantarell, sans-serif, 'Helvetica Neue', Arial,
-			'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+			'Inter Variable',
+			'Noto Sans JP Variable',
+			-apple-system,
+			BlinkMacSystemFont,
+			ui-sans-serif,
+			system-ui,
+			'Segoe UI',
+			Roboto,
+			Ubuntu,
+			Cantarell,
+			sans-serif,
+			'Helvetica Neue',
+			Arial,
+			'Apple Color Emoji',
+			'Segoe UI Emoji',
+			'Segoe UI Symbol',
+			'Noto Color Emoji';
 	}
 
 	code,

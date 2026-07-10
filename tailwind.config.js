@@ -8,13 +8,14 @@ export default {
 	theme: {
 		extend: {
 			fontFamily: {
-				sans: ['Inter Variable', 'Noto Sans JP Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-				mono: [
-					'JetBrains Mono Variable',
-					'M PLUS 1 Code Variable',
-					'ui-monospace',
-					'monospace'
-				]
+				sans: [
+					'Inter Variable',
+					'Noto Sans JP Variable',
+					'ui-sans-serif',
+					'system-ui',
+					'sans-serif'
+				],
+				mono: ['JetBrains Mono Variable', 'M PLUS 1 Code Variable', 'ui-monospace', 'monospace']
 			},
 			colors: {
 				gray: {

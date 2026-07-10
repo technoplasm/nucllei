@@ -427,7 +427,13 @@ class TestAuths(AbstractPostgresTest):
         # 重複メールは拒否
         dup = runner.invoke(
             cli_app,
-            ["create-admin", "--email", "ops@llens.local", "--password", "supersecret1"],
+            [
+                "create-admin",
+                "--email",
+                "ops@llens.local",
+                "--password",
+                "supersecret1",
+            ],
         )
         assert dup.exit_code == 1
 
