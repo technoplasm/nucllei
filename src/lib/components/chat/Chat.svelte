@@ -51,7 +51,6 @@
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
-	import { processWebSearch } from '$lib/apis/retrieval';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
 	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';

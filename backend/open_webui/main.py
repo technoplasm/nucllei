@@ -58,7 +58,6 @@ from open_webui.routers import (
     images,
     ollama,
     openai,
-    retrieval,
     pipelines,
     tasks,
     auths,
@@ -802,7 +801,6 @@ app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
 
 app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
-app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
 
 app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
 
@@ -1118,9 +1116,9 @@ async def get_app_config(request: Request):
             **(
                 {
                     "enable_channels": app.state.config.ENABLE_CHANNELS,
-                    # llens(#52): built-in web 検索(RAG 自動注入)は撤去。検索は tool→
-                    # 内部検索 API(retrieval /process/web/search)経由に移行するため、
-                    # チャットの feature フラグとしては露出しない(フロントのトグルも隠れる)。
+                    # llens(#52/#67): built-in web 検索(RAG 自動注入)と retrieval router は
+                    # 撤去済み。検索は #51 で builtin tool として再建する(WEB_SEARCH_* config と
+                    # retrieval/web providers は素材として温存)。
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,

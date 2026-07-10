@@ -14,6 +14,54 @@ router = APIRouter()
 
 
 ############################
+# AttachmentConfig
+# llens(#67): 添付ファイル受け入れゲート(#52)の設定 API。retrieval router
+# 撤去に伴い /retrieval/config から移設。
+############################
+
+
+class AttachmentConfigForm(BaseModel):
+    ATTACHMENT_MAX_SIZE: Optional[int]
+    ATTACHMENT_MAX_COUNT: Optional[int]
+    ATTACHMENT_ALLOWED_EXTENSIONS: list[str]
+    ENABLE_GOOGLE_DRIVE_INTEGRATION: bool
+    ENABLE_ONEDRIVE_INTEGRATION: bool
+
+
+def _attachment_config(request: Request):
+    return {
+        "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
+        "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
+        "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
+        "ENABLE_GOOGLE_DRIVE_INTEGRATION": request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+        "ENABLE_ONEDRIVE_INTEGRATION": request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
+    }
+
+
+@router.get("/attachment", response_model=AttachmentConfigForm)
+async def get_attachment_config(request: Request, user=Depends(get_admin_user)):
+    return _attachment_config(request)
+
+
+@router.post("/attachment", response_model=AttachmentConfigForm)
+async def set_attachment_config(
+    request: Request, form_data: AttachmentConfigForm, user=Depends(get_admin_user)
+):
+    request.app.state.config.ATTACHMENT_MAX_SIZE = form_data.ATTACHMENT_MAX_SIZE
+    request.app.state.config.ATTACHMENT_MAX_COUNT = form_data.ATTACHMENT_MAX_COUNT
+    request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = (
+        form_data.ATTACHMENT_ALLOWED_EXTENSIONS
+    )
+    request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = (
+        form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
+    )
+    request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION = (
+        form_data.ENABLE_ONEDRIVE_INTEGRATION
+    )
+    return _attachment_config(request)
+
+
+############################
 # ImportConfig
 ############################
 

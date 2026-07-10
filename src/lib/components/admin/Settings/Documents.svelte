@@ -5,7 +5,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { getRAGConfig, updateRAGConfig } from '$lib/apis/retrieval';
+	import { getAttachmentConfig, setAttachmentConfig } from '$lib/apis/configs';
 
 	import { deleteAllFiles } from '$lib/apis/files';
 
@@ -29,12 +29,12 @@
 			.map((s) => s.trim().toLowerCase().replace(/^\.+/, ''))
 			.filter(Boolean);
 
-		const res = await updateRAGConfig(localStorage.token, RAGConfig);
+		await setAttachmentConfig(localStorage.token, RAGConfig);
 		dispatch('save');
 	};
 
 	onMount(async () => {
-		RAGConfig = await getRAGConfig(localStorage.token);
+		RAGConfig = await getAttachmentConfig(localStorage.token);
 		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');
 	});
 </script>
