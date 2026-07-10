@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext } from 'svelte';
-	import { tags } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	const dispatch = createEventDispatcher();
 
@@ -29,19 +28,12 @@
 				bind:value={tagName}
 				class=" px-2 cursor-pointer self-center text-xs h-fit bg-transparent outline-hidden line-clamp-1 w-[6.5rem]"
 				placeholder={$i18n.t('Add a tag')}
-				list="tagOptions"
 				on:keydown={(event) => {
 					if (event.key === 'Enter') {
 						addTagHandler();
 					}
 				}}
 			/>
-			<datalist id="tagOptions">
-				{#each $tags as tag}
-					<option value={tag.name} />
-				{/each}
-			</datalist>
-
 			<button type="button" aria-label={$i18n.t('Save Tag')} on:click={addTagHandler}>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
