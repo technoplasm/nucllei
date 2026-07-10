@@ -11,6 +11,7 @@ from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
 from sqlalchemy import or_, func, select, and_, text
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import exists
 
 ####################
@@ -247,6 +248,74 @@ class ChatTable:
 
         chat["history"] = history
         return self.update_chat_by_id(id, chat)
+
+    def record_usage_by_id_and_message_id(
+        self,
+        id: str,
+        message_id: str,
+        usage: dict,
+        context_size: Optional[int] = None,
+    ) -> Optional[ChatModel]:
+        """llens(#57): モデル応答の実測 usage(OpenAI 互換)を永続化する。
+
+        tiktoken 等の推定ではなく、モデルサーバー(SGLang)が返す本物の
+        usage を記録する。真のコンテキスト量 = 最新の prompt_tokens
+        (system・ファイル注入・filter 加工後の、実際にモデルへ入った量)。
+
+        - message.usage: このターンの実測。native tool ループはターン内に
+          複数回モデルを呼ぶため completion_tokens は加算、prompt_tokens は
+          最新値で上書き(最後の呼び出しの入力 = ターン終了時点の会話全体)。
+        - meta["usage"]: チャット単位。prompt_tokens は最新、completion_tokens
+          は累積(再生成・分岐込みでこの会話が生成した総量)。model の
+          context_size(max_model_len)も添えて閲覧側(#19)が使用率を出せる。
+        """
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        if prompt_tokens is None and completion_tokens is None:
+            return None
+
+        def merge(target: dict) -> dict:
+            merged = {**target}
+            if prompt_tokens is not None:
+                merged["prompt_tokens"] = prompt_tokens
+            if completion_tokens is not None:
+                merged["completion_tokens"] = (
+                    merged.get("completion_tokens", 0) + completion_tokens
+                )
+            merged["total_tokens"] = merged.get("prompt_tokens", 0) + merged.get(
+                "completion_tokens", 0
+            )
+            if context_size is not None:
+                merged["context_size"] = context_size
+            return merged
+
+        try:
+            with get_db() as db:
+                chat_item = db.get(Chat, id)
+                if chat_item is None:
+                    return None
+
+                # message 単位(存在しない message は作らない — usage だけの
+                # 骸骨 message で history を汚さない)
+                history = chat_item.chat.get("history", {})
+                message = history.get("messages", {}).get(message_id)
+                if message is not None:
+                    message["usage"] = merge(message.get("usage") or {})
+                    flag_modified(chat_item, "chat")
+
+                # チャット単位(meta)
+                meta = chat_item.meta or {}
+                meta["usage"] = merge(meta.get("usage") or {})
+                chat_item.meta = meta
+                flag_modified(chat_item, "meta")
+
+                chat_item.updated_at = int(time.time())
+                db.commit()
+                db.refresh(chat_item)
+                return ChatModel.model_validate(chat_item)
+        except Exception:
+            log.exception(f"Failed to record usage for chat {id}")
+            return None
 
     def add_message_status_to_chat_by_id_and_message_id(
         self, id: str, message_id: str, status: dict

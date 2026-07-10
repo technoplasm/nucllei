@@ -1056,6 +1056,17 @@ async def process_chat_response(
                     },
                 )
 
+            # llens(#57): 非 stream 応答の実測 usage も永続化
+            usage = response.get("usage", {})
+            if usage and metadata.get("chat_id") and metadata.get("message_id"):
+                await asyncio.to_thread(
+                    Chats.record_usage_by_id_and_message_id,
+                    metadata["chat_id"],
+                    metadata["message_id"],
+                    usage,
+                    context_size=(model.get("openai") or {}).get("max_model_len"),
+                )
+
             choices = response.get("choices", [])
             if choices and choices[0].get("message", {}).get("content"):
                 content = response["choices"][0]["message"]["content"]
@@ -1665,6 +1676,21 @@ async def process_chat_response(
                                             )
                                         usage = data.get("usage", {})
                                         if usage:
+                                            # llens(#57): 実測 usage(真のコンテキスト量)を
+                                            # ターン/チャット単位で永続化。tool ループの
+                                            # 各呼び出しがここを通る(completion は加算)。
+                                            if metadata.get("chat_id") and metadata.get(
+                                                "message_id"
+                                            ):
+                                                await asyncio.to_thread(
+                                                    Chats.record_usage_by_id_and_message_id,
+                                                    metadata["chat_id"],
+                                                    metadata["message_id"],
+                                                    usage,
+                                                    context_size=(
+                                                        model.get("openai") or {}
+                                                    ).get("max_model_len"),
+                                                )
                                             await event_emitter(
                                                 {
                                                     "type": "chat:completion",
