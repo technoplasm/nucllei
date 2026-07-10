@@ -4,13 +4,10 @@
 	import { onMount } from 'svelte';
 
 	onMount(() => {
+		// llens(#66): 非 admin は skill editor(workspace.skills)だけが Skills タブに入れる。
 		if ($user?.role !== 'admin') {
-			if ($user?.permissions?.workspace?.models) {
-				goto('/workspace/models');
-			} else if ($user?.permissions?.workspace?.skills) {
+			if ($user?.permissions?.workspace?.skills) {
 				goto('/workspace/skills');
-			} else if ($user?.permissions?.workspace?.tools) {
-				goto('/workspace/tools');
 			} else {
 				goto('/');
 			}

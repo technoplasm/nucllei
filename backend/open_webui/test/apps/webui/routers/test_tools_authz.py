@@ -1,12 +1,12 @@
 """GHSA-p4fx-23fq-jfg6(tool 更新エンドポイントの権限欠落 → ソース書換 RCE)の回帰。
 
-作成は workspace.tools 権限を要求するのに、更新は write アクセスだけで通り、
-write 共有された非 admin(workspace.tools 権限なし)が tool の Python ソースを
-差し替えてコード実行に至れた。content 書換には作成と同じ権限を要求する。
+元は「write 共有だけの非 admin がソースを差し替えられる」穴だった。
+#66 の3層化で tool の定義変更・valves は admin 専有になり、境界はさらに単純化
+(write ACL 自体が廃止)。非 admin は content どころか更新自体ができない。
 """
 
 from test.util.abstract_integration_test import AbstractPostgresTest
-from test.util.mock_user import mock_webui_user
+from test.util.mock_user import mock_webui_user, mock_webui_user_strict
 
 TOOL_CONTENT = '''
 class Tools:
@@ -22,10 +22,10 @@ class Tools:
         return "hi2"
 '''
 
-# owner=user "1"、write/read を非 owner 非 admin の user "2" に付与。
+# owner=user "1"、read(使用権限)を非 owner 非 admin の user "2" に付与。
+# (#66: ACL は read 一本。write 側は廃止済み)
 AC = {
     "read": {"group_ids": [], "user_ids": ["2"]},
-    "write": {"group_ids": [], "user_ids": ["2"]},
 }
 
 
@@ -59,26 +59,22 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             "access_control": AC,
         }
 
-    def test_write_grantee_cannot_change_source(self):
-        """write 共有だけの非 admin(workspace.tools なし)は content を書き換えられない。"""
+    def test_non_admin_cannot_update_at_all(self):
+        """#66: 非 admin は content どころか更新エンドポイント自体に到達できない。"""
         self._insert_tool()
-        with mock_webui_user(id="2", role="user"):
+        with mock_webui_user_strict(id="2", role="user"):
             r = self.fast_api_client.post(
                 self.create_url("/id/authz_probe/update"),
                 json=self._update_body("probe", TOOL_CONTENT_V2),
             )
-        assert r.status_code == 401
+            assert r.status_code == 401
 
-    def test_write_grantee_can_edit_metadata(self):
-        """content 不変(メタデータのみ)の更新は write アクセスで許可。"""
-        self._insert_tool()
-        with mock_webui_user(id="2", role="user"):
+            # メタデータのみ(content 不変)でも同様に 401
             r = self.fast_api_client.post(
                 self.create_url("/id/authz_probe/update"),
                 json=self._update_body("probe RENAMED", TOOL_CONTENT),
             )
-        assert r.status_code == 200
-        assert r.json()["name"] == "probe RENAMED"
+            assert r.status_code == 401
 
     def test_admin_can_change_source(self):
         """admin は content を書き換えられる。"""
@@ -90,15 +86,13 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             )
         assert r.status_code == 200
 
-    def test_valves_read_requires_access(self):
-        """GHSA-7429: 管理者 valve(秘密を含みうる)の読み取りに access 制御を適用。
+    def test_valves_read_is_admin_only(self):
+        """GHSA-7429 / #66: 管理者 valve(秘密を含みうる)の読み取りは admin 専有。
 
-        private tool の /valves を非 owner 非 admin が読むと 401、owner は 200。
+        #66 で owner 概念ごと廃止 — owner(user "1")でも非 admin なら 401。
         """
-        self._insert_tool()  # owner=user "1" だが access_control=AC(user "2" に write 付与)
         from open_webui.models.tools import ToolForm
 
-        # owner のみ(access_control={})の別 tool を用意して純粋な拒否を確認
         self.Tools.insert_new_tool(
             "1",
             ToolForm(
@@ -110,11 +104,14 @@ class TestToolsUpdateAuthz(AbstractPostgresTest):
             ),
             [],
         )
-        with mock_webui_user(id="2", role="user"):
-            denied = self.fast_api_client.get(self.create_url("/id/valve_probe/valves"))
-        assert denied.status_code == 401
+        for uid in ("2", "1"):  # 非 owner も owner も同じく拒否
+            with mock_webui_user_strict(id=uid, role="user"):
+                denied = self.fast_api_client.get(
+                    self.create_url("/id/valve_probe/valves")
+                )
+            assert denied.status_code == 401
 
-        with mock_webui_user(id="1", role="user"):
+        with mock_webui_user(id="9", role="admin"):
             allowed = self.fast_api_client.get(
                 self.create_url("/id/valve_probe/valves")
             )

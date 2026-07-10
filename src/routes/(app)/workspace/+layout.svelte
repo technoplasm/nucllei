@@ -13,14 +13,17 @@
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
 			const path = $page.url.pathname;
-			// llens(#48): Functions/Settings/Users は admin 専用(Admin を Workspace に統合)。
-			if (path.includes('/functions') || path.includes('/settings') || path.includes('/users')) {
-				goto('/');
-			} else if (path.includes('/models') && !$user?.permissions?.workspace?.models) {
+			// llens(#66): 3層化 — Models/Tools/Functions/Settings/Users は admin 専用。
+			// Skills だけ skill editor(workspace.skills)に開く。
+			if (
+				path.includes('/functions') ||
+				path.includes('/settings') ||
+				path.includes('/users') ||
+				path.includes('/models') ||
+				path.includes('/tools')
+			) {
 				goto('/');
 			} else if (path.includes('/skills') && !$user?.permissions?.workspace?.skills) {
-				goto('/');
-			} else if (path.includes('/tools') && !$user?.permissions?.workspace?.tools) {
 				goto('/');
 			}
 		}
@@ -62,7 +65,7 @@
 					<div
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models}
+						{#if $user?.role === 'admin'}
 							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
 									'/workspace/models'
@@ -87,7 +90,7 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.tools}
+						{#if $user?.role === 'admin'}
 							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/tools')
 									? ''

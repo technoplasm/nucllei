@@ -1,8 +1,8 @@
 """access control(group 権限)の回帰テスト。
 
 - v0.6.5 既存挙動(OR ベースの group_ids / user_ids)の固定
-- llens 拡張: group_terms による交差(診療科 × 職位)の検証(issue #4、
-  設計: _memos/group-intersection-design.md)
+- llens(#66): ACL は read 一本・OR 合成のみ。旧 group_terms(AND 交差)は撤去済み —
+  レガシーデータに残っていても無視される(権限を与えない)ことを固定する。
 """
 
 import time
@@ -79,8 +79,26 @@ class TestAccessControl(AbstractPostgresTest):
         assert has_access("naika-ippan", "read", None) is True
         assert has_access("naika-ippan", "write", None) is False
 
-    def test_group_terms_intersection(self):
-        """交差: 「内科 かつ 部長」だけに read を許可(fork.md §3.3)。"""
+    def test_or_across_multiple_groups(self):
+        """複数 group 所属は OR 合成 — どれか一つの所属 group が許可されていれば可。"""
+        from open_webui.utils.access_control import has_access
+
+        access_control = {"read": {"group_ids": [self.rank_bucho], "user_ids": []}}
+        # naika-bucho は dept:内科 と rank:部長 の両方に所属。rank 側だけの許可で read 可
+        assert has_access("naika-bucho", "read", access_control) is True
+        assert has_access("geka-bucho", "read", access_control) is True
+        assert has_access("naika-ippan", "read", access_control) is False
+
+    def test_user_ids_grant(self):
+        """user_ids の直接指定でも許可される(group と OR)。"""
+        from open_webui.utils.access_control import has_access
+
+        access_control = {"read": {"group_ids": [], "user_ids": ["naika-ippan"]}}
+        assert has_access("naika-ippan", "read", access_control) is True
+        assert has_access("naika-bucho", "read", access_control) is False
+
+    def test_legacy_group_terms_data_is_ignored(self):
+        """#66: 撤去済み group_terms がレガシーデータに残っていても権限を与えない。"""
         from open_webui.utils.access_control import has_access
 
         access_control = {
@@ -90,54 +108,14 @@ class TestAccessControl(AbstractPostgresTest):
                 "group_terms": [[self.dept_naika, self.rank_bucho]],
             }
         }
-        assert has_access("naika-bucho", "read", access_control) is True
-        # 内科でも一般はダメ、部長でも外科はダメ
-        assert has_access("naika-ippan", "read", access_control) is False
-        assert has_access("geka-bucho", "read", access_control) is False
-
-    def test_group_terms_dnf_or_of_ands(self):
-        """(内科∧部長) OR (外科∧部長) — 項間は OR。"""
-        from open_webui.utils.access_control import has_access
-
-        access_control = {
-            "read": {
-                "group_terms": [
-                    [self.dept_naika, self.rank_bucho],
-                    [self.dept_geka, self.rank_bucho],
-                ]
-            }
-        }
-        assert has_access("naika-bucho", "read", access_control) is True
-        assert has_access("geka-bucho", "read", access_control) is True
-        assert has_access("naika-ippan", "read", access_control) is False
-
-    def test_group_terms_combines_with_legacy_or(self):
-        """group_ids(OR)と group_terms(AND)は併用できる。"""
-        from open_webui.utils.access_control import has_access
-
-        access_control = {
-            "read": {
-                "group_ids": [self.rank_ippan],
-                "group_terms": [[self.dept_naika, self.rank_bucho]],
-            }
-        }
-        # 一般(OR 側)も内科部長(AND 側)も許可
-        assert has_access("naika-ippan", "read", access_control) is True
-        assert has_access("naika-bucho", "read", access_control) is True
-        # 外科部長はどちらにも該当しない
-        assert has_access("geka-bucho", "read", access_control) is False
-
-    def test_empty_term_denies(self):
-        """空 term は全開放にならない(安全側)。"""
-        from open_webui.utils.access_control import has_access
-
-        access_control = {"read": {"group_terms": [[]]}}
         assert has_access("naika-bucho", "read", access_control) is False
 
-    def test_get_users_with_access_intersection(self):
-        """term は「全所属者の積集合」に展開される。"""
+    def test_get_users_with_access_or_composition(self):
+        """get_users_with_access は user_ids と group 所属者の和集合。"""
         from open_webui.utils.access_control import get_users_with_access
 
-        access_control = {"read": {"group_terms": [[self.dept_naika, self.rank_bucho]]}}
+        access_control = {
+            "read": {"group_ids": [self.dept_naika], "user_ids": ["geka-bucho"]}
+        }
         users = get_users_with_access("read", access_control)
-        assert {u.id for u in users} == {"naika-bucho"}
+        assert {u.id for u in users} == {"naika-bucho", "naika-ippan", "geka-bucho"}

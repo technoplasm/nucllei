@@ -193,8 +193,7 @@
 	<AccessControlModal
 		bind:show={showAccessControlModal}
 		bind:accessControl={acValue}
-		accessRoles={['read', 'write']}
-		allowPublic={$user?.permissions?.sharing?.public_skills || $user?.role === 'admin'}
+		allowPublic={true}
 	/>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">

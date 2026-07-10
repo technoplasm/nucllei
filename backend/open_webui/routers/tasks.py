@@ -23,13 +23,36 @@ from open_webui.config import (
     DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
 )
-from open_webui.env import SRC_LOG_LEVELS
+from open_webui.env import SRC_LOG_LEVELS, BYPASS_MODEL_ACCESS_CONTROL
+from open_webui.utils.models import check_model_access
 
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 router = APIRouter()
+
+
+def _check_task_model_access(user, models: dict, model_id: str) -> None:
+    """llens(#66 G2): task endpoint も model の read ACL を検証する。
+
+    従来は存在チェックのみで、picker に出ないモデル(read ACL 外)を task 経由で
+    叩けた。チャット本線(main.py chat_completion)と同じ判定に合わせる。
+    """
+    if model_id not in models:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Model not found",
+        )
+    if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
+        try:
+            check_model_access(user, models[model_id])
+        except Exception:
+            # 存在は明かさない(ACL 外 = 見えないモデルとして 404)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Model not found",
+            )
 
 
 ##################################
@@ -96,11 +119,7 @@ async def generate_title(
     models = request.app.state.MODELS
 
     model_id = form_data["model"]
-    if model_id not in models:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Model not found",
-        )
+    _check_task_model_access(user, models, model_id)
 
     # Check if the user has a custom task model
     # If the user has a custom task model, use that model
@@ -185,11 +204,7 @@ async def generate_image_prompt(
     models = request.app.state.MODELS
 
     model_id = form_data["model"]
-    if model_id not in models:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Model not found",
-        )
+    _check_task_model_access(user, models, model_id)
 
     # Check if the user has a custom task model
     # If the user has a custom task model, use that model

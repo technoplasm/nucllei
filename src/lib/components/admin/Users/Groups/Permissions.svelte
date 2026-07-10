@@ -5,19 +5,11 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
-	// Default values for permissions
+	// llens(#66): 権限3層化 — workspace は skills(= skill editor ロール)のみ。
+	// 旧 workspace.models/tools/knowledge・sharing.*・chat.stt/tts/call は廃止。
 	const defaultPermissions = {
 		workspace: {
-			models: false,
-			knowledge: false,
-			skills: false,
-			tools: false
-		},
-		sharing: {
-			public_models: false,
-			public_knowledge: false,
-			public_skills: false,
-			public_tools: false
+			skills: false
 		},
 		chat: {
 			controls: true,
@@ -26,9 +18,6 @@
 			edit: true,
 			share: true,
 			clone: false,
-			stt: true,
-			tts: true,
-			call: true,
 			multiple_models: true
 		},
 		features: {
@@ -46,14 +35,18 @@
 	}
 
 	function fillMissingProperties(obj: any, defaults: any) {
+		// 廃止済みキーが保存値に残っていても拾わない(defaults の形に射影する)
 		return {
-			...defaults,
-			...obj,
-			workspace: { ...defaults.workspace, ...obj.workspace },
-			sharing: { ...defaults.sharing, ...obj.sharing },
-			chat: { ...defaults.chat, ...obj.chat },
-			features: { ...defaults.features, ...obj.features }
+			workspace: { ...defaultPermissions.workspace, skills: obj?.workspace?.skills ?? false },
+			chat: { ...defaults.chat, ...pick(obj.chat, Object.keys(defaults.chat)) },
+			features: { ...defaults.features, ...pick(obj.features, Object.keys(defaults.features)) }
 		};
+	}
+
+	function pick(obj: any, keys: string[]) {
+		return Object.fromEntries(
+			Object.entries(obj ?? {}).filter(([key]) => keys.includes(key))
+		);
 	}
 
 	onMount(() => {
@@ -167,74 +160,19 @@
 	<div>
 		<div class=" mb-2 text-sm font-medium">{$i18n.t('Workspace Permissions')}</div>
 
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Models Access')}
-			</div>
-			<Switch bind:state={permissions.workspace.models} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Knowledge Access')}
-			</div>
-			<Switch bind:state={permissions.workspace.knowledge} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Skills Access')}
-			</div>
-			<Switch bind:state={permissions.workspace.skills} />
-		</div>
-
 		<div class=" ">
 			<Tooltip
 				className=" flex w-full justify-between my-2 pr-2"
 				content={$i18n.t(
-					'Warning: Enabling this will allow users to upload arbitrary code on the server.'
+					'Skill editors can create and edit all skills, including who can use them.'
 				)}
 				placement="top-start"
 			>
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Tools Access')}
+					{$i18n.t('Skill Editor')}
 				</div>
-				<Switch bind:state={permissions.workspace.tools} />
+				<Switch bind:state={permissions.workspace.skills} />
 			</Tooltip>
-		</div>
-	</div>
-
-	<hr class=" border-gray-100 dark:border-gray-850 my-2" />
-
-	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Sharing Permissions')}</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Models Public Sharing')}
-			</div>
-			<Switch bind:state={permissions.sharing.public_models} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Knowledge Public Sharing')}
-			</div>
-			<Switch bind:state={permissions.sharing.public_knowledge} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Skills Public Sharing')}
-			</div>
-			<Switch bind:state={permissions.sharing.public_skills} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Tools Public Sharing')}
-			</div>
-			<Switch bind:state={permissions.sharing.public_tools} />
 		</div>
 	</div>
 
@@ -289,29 +227,6 @@
 			</div>
 
 			<Switch bind:state={permissions.chat.clone} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Speech to Text')}
-			</div>
-
-			<Switch bind:state={permissions.chat.stt} />
-		</div>
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Text to Speech')}
-			</div>
-
-			<Switch bind:state={permissions.chat.tts} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Call')}
-			</div>
-
-			<Switch bind:state={permissions.chat.call} />
 		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">

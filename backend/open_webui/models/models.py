@@ -83,14 +83,9 @@ class Model(Base):
     # Defines access control rules for this entry.
     # - `None`: Public access, available to all users with the "user" role.
     # - `{}`: Private access, restricted exclusively to the owner.
-    # - Custom permissions: Specific access control for reading and writing;
-    #   Can specify group or user-level restrictions:
+    # - Custom permissions (llens #66: ACL は read = 「使える範囲」一本):
     #   {
     #      "read": {
-    #          "group_ids": ["group_id1", "group_id2"],
-    #          "user_ids":  ["user_id1", "user_id2"]
-    #      },
-    #      "write": {
     #          "group_ids": ["group_id1", "group_id2"],
     #          "user_ids":  ["user_id1", "user_id2"]
     #      }
@@ -197,7 +192,7 @@ class ModelsTable:
             ]
 
     def get_models_by_user_id(
-        self, user_id: str, permission: str = "write"
+        self, user_id: str, permission: str = "read"
     ) -> list[ModelUserResponse]:
         models = self.get_models()
         return [

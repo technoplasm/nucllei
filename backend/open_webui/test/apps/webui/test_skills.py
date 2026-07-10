@@ -4,7 +4,7 @@
 - skills CRUD(API 経由)/ command 一意性 / `/` 正規化
 - 権限ゲート: workspace.skills 無しの非 admin は作成不可 /
   tool_ids 非空 skill は非 admin(workspace.skills 有りでも)作成不可(admin 専用ゲート)
-- has_access による read フィルタ(group_terms 交差を含む)
+- has_access による read フィルタ(group 所属の OR 合成)
 - `/command` サーバーサイド発火(apply_skill_command): user メッセージは生のまま、
   直後に合成 load_skill tool exchange(call + 展開済み content の result)を注入 /
   未知 command 素通し
@@ -165,8 +165,8 @@ class TestSkills(AbstractPostgresTest):
         assert response.status_code == 200
         assert response.json()["tool_ids"] == ["some-tool"]
 
-    def test_read_visibility_with_group_terms(self):
-        """read フィルタ: group_terms(診療科×職位の交差)で可視性が決まる。"""
+    def test_read_visibility_by_group(self):
+        """read フィルタ: 所属 group の OR 合成で可視性が決まる(#66)。"""
         from open_webui.models.groups import GroupForm, GroupUpdateForm, Groups
         from open_webui.models.skills import SkillForm, Skills
         from open_webui.models.users import Users
@@ -174,7 +174,6 @@ class TestSkills(AbstractPostgresTest):
         def make_group(name):
             return Groups.insert_new_group("1", GroupForm(name=name, description="")).id
 
-        dept_naika = make_group("dept:内科")
         rank_bucho = make_group("rank:部長")
 
         for uid in ("naika-bucho", "naika-ippan"):
@@ -189,21 +188,20 @@ class TestSkills(AbstractPostgresTest):
                 GroupUpdateForm(name=g.name, description=g.description, user_ids=uids),
             )
 
-        set_members(dept_naika, ["naika-bucho", "naika-ippan"])
         set_members(rank_bucho, ["naika-bucho"])
 
-        # 「内科 かつ 部長」のみ read 可視な skill を admin が作成
+        # 部長 group のみ read 可視な skill を admin が作成
         Skills.insert_new_skill(
             "1",
             SkillForm(
                 id="secret",
                 name="secret",
                 content="秘匿",
-                access_control={"read": {"group_terms": [[dept_naika, rank_bucho]]}},
+                access_control={"read": {"group_ids": [rank_bucho], "user_ids": []}},
             ),
         )
 
-        # 内科部長は見える、内科一般は見えない
+        # 部長は見える、一般は見えない
         assert any(
             s.id == "secret"
             for s in Skills.get_skills_by_user_id("naika-bucho", "read")

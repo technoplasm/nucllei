@@ -4,15 +4,13 @@
 	const i18n = getContext('i18n');
 
 	import { getGroups } from '$lib/apis/groups';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Plus from '$lib/components/icons/Plus.svelte';
 	import UserCircleSolid from '$lib/components/icons/UserCircleSolid.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import Badge from '$lib/components/common/Badge.svelte';
 
 	export let onChange: Function = () => {};
 
-	export let accessRoles = ['read'];
+	// llens(#66): ACL は read(使える範囲)一本。write 側の UI・データは廃止
+	// (定義編集の権限はロールで決まる — model/tool=admin、skill=editor)。
 	export let accessControl = {};
 
 	export let allowPublic = true;
@@ -23,10 +21,6 @@
 	$: if (!allowPublic && accessControl === null) {
 		accessControl = {
 			read: {
-				group_ids: [],
-				user_ids: []
-			},
-			write: {
 				group_ids: [],
 				user_ids: []
 			}
@@ -45,10 +39,6 @@
 					read: {
 						group_ids: [],
 						user_ids: []
-					},
-					write: {
-						group_ids: [],
-						user_ids: []
 					}
 				};
 				onChange(accessControl);
@@ -58,10 +48,6 @@
 				read: {
 					group_ids: accessControl?.read?.group_ids ?? [],
 					user_ids: accessControl?.read?.user_ids ?? []
-				},
-				write: {
-					group_ids: accessControl?.write?.group_ids ?? [],
-					user_ids: accessControl?.write?.user_ids ?? []
 				}
 			};
 		}
@@ -136,10 +122,6 @@
 								read: {
 									group_ids: [],
 									user_ids: []
-								},
-								write: {
-									group_ids: [],
-									user_ids: []
 								}
 							};
 						}
@@ -191,17 +173,6 @@
 									{/each}
 								</select>
 							</div>
-							<!-- <div>
-								<Tooltip content={$i18n.t('Add Group')}>
-									<button
-										class=" p-1 rounded-xl bg-transparent dark:hover:bg-white/5 hover:bg-black/5 transition font-medium text-sm flex items-center space-x-1"
-										type="button"
-										on:click={() => {}}
-									>
-										<Plus className="size-3.5" />
-									</button>
-								</Tooltip>
-							</div> -->
 						</div>
 					</div>
 				</div>
@@ -223,31 +194,6 @@
 								</div>
 
 								<div class="w-full flex justify-end items-center gap-0.5">
-									<button
-										class=""
-										type="button"
-										on:click={() => {
-											if (accessRoles.includes('write')) {
-												if (accessControl.write.group_ids.includes(group.id)) {
-													accessControl.write.group_ids = accessControl.write.group_ids.filter(
-														(group_id) => group_id !== group.id
-													);
-												} else {
-													accessControl.write.group_ids = [
-														...accessControl.write.group_ids,
-														group.id
-													];
-												}
-											}
-										}}
-									>
-										{#if accessControl.write.group_ids.includes(group.id)}
-											<Badge type={'success'} content={$i18n.t('Write')} />
-										{:else}
-											<Badge type={'info'} content={$i18n.t('Read')} />
-										{/if}
-									</button>
-
 									<button
 										class=" rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 										type="button"

@@ -45,27 +45,16 @@
 	});
 
 	let search = '';
+	// llens(#66): 権限3層化 — workspace.skills = skill editor ロールのみ。
 	let defaultPermissions = {
 		workspace: {
-			models: false,
-			knowledge: false,
-			skills: false,
-			tools: false
-		},
-		sharing: {
-			public_models: false,
-			public_knowledge: false,
-			public_skills: false,
-			public_tools: false
+			skills: false
 		},
 		chat: {
 			controls: true,
 			file_upload: true,
 			delete: true,
 			edit: true,
-			stt: true,
-			tts: true,
-			call: true,
 			multiple_models: true
 		},
 		features: {

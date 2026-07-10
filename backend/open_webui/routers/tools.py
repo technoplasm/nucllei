@@ -18,7 +18,7 @@ from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.tools import get_tool_specs
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.access_control import has_access
 from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.utils.tools import get_tool_servers_data
@@ -88,12 +88,11 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             )
         )
 
+    # llens(#66): tool の read ACL = 「このユーザーは使える」。picker 表示もこれで絞る
+    # (実行時の enforce_access_control と同じ意味論 — utils/tools.py)。
     if user.role != "admin":
         tools = [
-            tool
-            for tool in tools
-            if tool.user_id == user.id
-            or has_access(user.id, "read", tool.access_control)
+            tool for tool in tools if has_access(user.id, "read", tool.access_control)
         ]
 
     return tools
@@ -106,15 +105,11 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 
 # llens(#47 A1): workspace のツール管理一覧は content 込みで返す(ToolUserModel)。
 # 一覧内で visibility(access_control)を編集する際、update に必要な content を
-# 追加 fetch なしで round-trip するため。write 権限者/admin にしか返らない一覧なので
-# ソース露出の拡大にはならない(picker の `/` は ToolUserResponse のまま content を出さない)。
+# 追加 fetch なしで round-trip するため。
+# llens(#66): tool 管理は admin 専有(write ACL は廃止)。
 @router.get("/list", response_model=list[ToolUserModel])
-async def get_tool_list(user=Depends(get_verified_user)):
-    if user.role == "admin":
-        tools = Tools.get_tools()
-    else:
-        tools = Tools.get_tools_by_user_id(user.id, "write")
-    return tools
+async def get_tool_list(user=Depends(get_admin_user)):
+    return Tools.get_tools()
 
 
 ############################
@@ -133,20 +128,15 @@ async def export_tools(user=Depends(get_admin_user)):
 ############################
 
 
+# llens(#66): tool 定義の作成・変更・削除は admin 専有(workspace.tools 権限は廃止)。
+# tool は Python コード実行の権力を運ぶため、3 層モデルで最も強い境界に置く
+# (GHSA-p4fx のソース書換対策も admin 専有化で単純化)。
 @router.post("/create", response_model=Optional[ToolResponse])
 async def create_new_tools(
     request: Request,
     form_data: ToolForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
 ):
-    if user.role != "admin" and not has_permission(
-        user.id, "workspace.tools", request.app.state.config.USER_PERMISSIONS
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     if not form_data.id.isidentifier():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -208,17 +198,14 @@ async def create_new_tools(
 ############################
 
 
+# llens(#66): ToolModel は Python ソース(content)を含む編集用形。編集は admin 専有
+# なので取得も admin に限定する(使用側は content を含まない GET / を使う)。
 @router.get("/id/{id}", response_model=Optional[ToolModel])
-async def get_tools_by_id(id: str, user=Depends(get_verified_user)):
+async def get_tools_by_id(id: str, user=Depends(get_admin_user)):
     tools = Tools.get_tool_by_id(id)
 
     if tools:
-        if (
-            user.role == "admin"
-            or tools.user_id == user.id
-            or has_access(user.id, "read", tools.access_control)
-        ):
-            return tools
+        return tools
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -236,7 +223,7 @@ async def update_tools_by_id(
     request: Request,
     id: str,
     form_data: ToolForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
 ):
     tools = Tools.get_tool_by_id(id)
     if not tools:
@@ -245,32 +232,8 @@ async def update_tools_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # Is the user the original creator, in a group with write access, or an admin
-    if (
-        tools.user_id != user.id
-        and not has_access(user.id, "write", tools.access_control)
-        and user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
-    # llens(GHSA-p4fx-23fq-jfg6 / CVE-2026-45395): tool の Python ソース(content)を
-    # 書き換える更新は、作成と同じ workspace.tools 権限(または admin)を要求する。
-    # write 共有だけのユーザーがソースを差し替えてコード実行に至るのを防ぐ。
-    # メタデータのみの更新(content 不変)は従来どおり write アクセスで許可。
-    if form_data.content != tools.content:
-        if user.role != "admin" and not has_permission(
-            user.id, "workspace.tools", request.app.state.config.USER_PERMISSIONS
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.UNAUTHORIZED,
-            )
-
     # llens(#42): 組み込みツールの定義(content/name/meta/specs)の真実源は repo。
-    # 更新できるのは access_control のみ(admin 到達前提 — 上の authz を通過済み)。
+    # 更新できるのは access_control のみ(admin 専有 — #66)。
     if is_builtin_tool_id(id):
         return Tools.update_tool_by_id(id, {"access_control": form_data.access_control})
 
@@ -315,24 +278,12 @@ async def update_tools_by_id(
 
 
 @router.delete("/id/{id}/delete", response_model=bool)
-async def delete_tools_by_id(
-    request: Request, id: str, user=Depends(get_verified_user)
-):
+async def delete_tools_by_id(request: Request, id: str, user=Depends(get_admin_user)):
     tools = Tools.get_tool_by_id(id)
     if not tools:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if (
-        tools.user_id != user.id
-        and not has_access(user.id, "write", tools.access_control)
-        and user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
     # llens(#42): 組み込みツールは削除不可(repo と一緒に出荷される定義)
@@ -356,24 +307,14 @@ async def delete_tools_by_id(
 ############################
 
 
+# llens(GHSA-7429 / #66): 管理者 valve は秘密(API キー等)を含みうる。
+# 読み書きとも admin 専有(3 層化で owner/write 判定は廃止)。
 @router.get("/id/{id}/valves", response_model=Optional[dict])
 async def get_tools_valves_by_id(
-    request: Request, id: str, user=Depends(get_verified_user)
+    request: Request, id: str, user=Depends(get_admin_user)
 ):
     tools = Tools.get_tool_by_id(id)
     if tools:
-        # llens(GHSA-7429-hxcv-268m / CVE-2026-34222): 管理者 valve は秘密(API キー等)を
-        # 含みうる。読み取りにも update と同じアクセス制御(owner/write/admin)を適用し、
-        # 任意ユーザーへの秘密露出を防ぐ。
-        if (
-            tools.user_id != user.id
-            and not has_access(user.id, "write", tools.access_control)
-            and user.role != "admin"
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.UNAUTHORIZED,
-            )
         try:
             valves = Tools.get_tool_valves_by_id(id)
             return valves
@@ -396,20 +337,10 @@ async def get_tools_valves_by_id(
 
 @router.get("/id/{id}/valves/spec", response_model=Optional[dict])
 async def get_tools_valves_spec_by_id(
-    request: Request, id: str, user=Depends(get_verified_user)
+    request: Request, id: str, user=Depends(get_admin_user)
 ):
     tools = Tools.get_tool_by_id(id)
     if tools:
-        # llens(GHSA-7429-hxcv-268m): valve 設定面(admin valve)は owner/write/admin のみ。
-        if (
-            tools.user_id != user.id
-            and not has_access(user.id, "write", tools.access_control)
-            and user.role != "admin"
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.UNAUTHORIZED,
-            )
         if id in request.app.state.TOOLS:
             tools_module = request.app.state.TOOLS[id]
         else:
@@ -434,23 +365,13 @@ async def get_tools_valves_spec_by_id(
 
 @router.post("/id/{id}/valves/update", response_model=Optional[dict])
 async def update_tools_valves_by_id(
-    request: Request, id: str, form_data: dict, user=Depends(get_verified_user)
+    request: Request, id: str, form_data: dict, user=Depends(get_admin_user)
 ):
     tools = Tools.get_tool_by_id(id)
     if not tools:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if (
-        tools.user_id != user.id
-        and not has_access(user.id, "write", tools.access_control)
-        and user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
     if id in request.app.state.TOOLS:

@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_FORWARD_USER_INFO_HEADERS, SRC_LOG_LEVELS
 from open_webui.routers.files import upload_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.images.comfyui import (
     ComfyUIGenerateImageForm,
     ComfyUIWorkflow,
@@ -474,6 +475,16 @@ async def image_generations(
     form_data: GenerateImageForm,
     user=Depends(get_verified_user),
 ):
+    # llens(#66 G1): features.image_generation はフロントの UI 隠しだけでサーバー側
+    # 未チェックだった(permissions.md 原則 1 違反)。ここが enforcement point。
+    if user.role != "admin" and not has_permission(
+        user.id, "features.image_generation", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
     width, height = tuple(map(int, request.app.state.config.IMAGE_SIZE.split("x")))
 
     r = None

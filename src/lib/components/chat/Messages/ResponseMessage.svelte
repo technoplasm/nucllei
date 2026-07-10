@@ -963,7 +963,8 @@
 									</button>
 								</Tooltip>
 
-								{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+								<!-- llens(#66): chat.tts フラグ廃止 — TTS は全員使用可 -->
+								{#if true}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											id="speak-button-{message.id}"

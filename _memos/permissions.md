@@ -1,8 +1,11 @@
 # 権限モデル仕様(真実源)
 
-2026-07-10 制定(issue #66)。#4(group 交差)は前提誤りで close — ユーザーは複数 group に
-所属でき(`group.user_ids`)、権限は全所属 group の OR 合成で足りる。
-実装状況は issue #66 を参照。本メモは「あるべき仕様」を書く(現状との差分は末尾のギャップ表)。
+2026-07-10 制定・同日実装完了(issue #66)。#4(group 交差)は前提誤りで close — ユーザーは
+複数 group に所属でき(`group.user_ids`)、権限は全所属 group の OR 合成で足りる。
+llens 拡張 `group_terms`(AND 交差)もコード・データとも撤去済み
+(migration e8b3d6a1c5f7 が既存 ACL を read-only 形へ正規化)。
+本メモの仕様と実装は一致している。回帰は `test_permissions_3tier.py` /
+`test_access_control.py` / `test_skills.py` / `test_tools_authz.py`。
 
 ## 原則
 
@@ -49,18 +52,19 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | `workspace.skills` | skill editor ロール | routers/skills.py 全 CRUD |
 | `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(実装済み) |
 | `chat.share` / `chat.clone` | チャット共有・共有チャットの clone | routers/chats.py の share / clone endpoint(#41 で新設。既定 share=on / clone=off)|
-| `features.image_generation` | 画像生成 | **routers/images.py(未実装 = G1 残り)** — フラグは維持し enforcement を #66 で追加 |
+| `features.image_generation` | 画像生成 | routers/images.py `/generations`(#66 で実装済み) |
 | `features.web_search` / `code_interpreter` | 機能 | 対応機能の endpoint(#51 / sandbox 整備時に) |
-| 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | #66 で撤去 |
-| 廃止: `chat.stt` / `chat.tts` / `chat.call` | **STT/TTS は全員使用可**(2026-07-10 決定)。設定は admin、tool から呼ぶ内部 API を提供(#53) | フラグごと撤去(#66) |
+| 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | 撤去済み(#66、2026-07-10) |
+| 廃止: `chat.stt` / `chat.tts` / `chat.call` | **STT/TTS は全員使用可**(2026-07-10 決定)。設定は admin、tool から呼ぶ内部 API を提供(#53) | フラグごと撤去済み(#66) |
 | 廃止: `chat.temporary` / `chat.temporary_enforced` | temporary chat は機能ごと撤去(フロントは非表示済み、サーバー側も撤去 #67) | フラグごと撤去 |
 
-## 既知のギャップ(2026-07-10 監査、→ 対応 issue)
+## 既知のギャップ(2026-07-10 監査 → 全件解消)
 
-- **G1(高)**: `chat.stt`/`chat.tts`/`features.image_generation` がフロントの UI 隠しのみで、
-  audio/images endpoint はサーバー側未チェック → **#66 スコープに追加済み**
-- **G2(中)**: task endpoints(generate_title 等)が model_id 存在チェックのみで
-  check_model_access 無し → **#66 スコープに追加済み**
+- ~~**G1(高)**: `chat.stt`/`chat.tts`/`features.image_generation` がフロントの UI 隠しのみ~~
+  → **解消(2026-07-10、#66 実装)**: stt/tts/call はフラグごと撤去(全員使用可)、
+  image_generation は `/images/generations` に has_permission を追加
+- ~~**G2(中)**: task endpoints が model_id 存在チェックのみ~~ → **解消(2026-07-10、#66 実装)**:
+  `_check_task_model_access`(routers/tasks.py)で read ACL を検証(ACL 外は存在を明かさず 404)
 - ~~**G3**: User.info を本人が自由に上書き可~~ → **解消(2026-07-10、#55 実装)**:
   本人向け `/user/info`・`/user/info/update` を撤去し admin 専有化(geolocation 機能ごと撤去)
 

@@ -985,51 +985,12 @@ DEFAULT_USER_ROLE = RuntimeConfig(
     os.getenv("DEFAULT_USER_ROLE", "pending"),
 )
 
-USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS = (
-    os.environ.get("USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS", "False").lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS = (
-    os.environ.get("USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS", "False").lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS = (
-    os.environ.get("USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS", "False").lower() == "true"
-)
-
-# Skill は Prompt の後継(issue #35。prompts は退役済み)。
+# llens(#66): 権限は3層(admin / skill editor / user)。
+# workspace.skills = skill editor ロール(全 skill の CRUD + use-ACL 編集)。
+# 旧 workspace.models / workspace.tools / workspace.knowledge と sharing.* は撤去済み
+# (model/tool/function の定義変更は admin 専有 — _memos/permissions.md)。
 USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS = (
     os.environ.get("USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS", "False").lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING = (
-    os.environ.get(
-        "USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING", "False"
-    ).lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING = (
-    os.environ.get(
-        "USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING", "False"
-    ).lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING = (
-    os.environ.get(
-        "USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING", "False"
-    ).lower()
-    == "true"
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING = (
-    os.environ.get(
-        "USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING", "False"
-    ).lower()
     == "true"
 )
 
@@ -1060,17 +1021,8 @@ USER_PERMISSIONS_CHAT_CLONE = (
     os.environ.get("USER_PERMISSIONS_CHAT_CLONE", "False").lower() == "true"
 )
 
-USER_PERMISSIONS_CHAT_STT = (
-    os.environ.get("USER_PERMISSIONS_CHAT_STT", "True").lower() == "true"
-)
-
-USER_PERMISSIONS_CHAT_TTS = (
-    os.environ.get("USER_PERMISSIONS_CHAT_TTS", "True").lower() == "true"
-)
-
-USER_PERMISSIONS_CHAT_CALL = (
-    os.environ.get("USER_PERMISSIONS_CHAT_CALL", "True").lower() == "true"
-)
+# llens(#66): chat.stt / chat.tts / chat.call フラグは廃止(STT/TTS は全員使用可 —
+# 設定は admin、tool から呼ぶ内部 API は #53)。
 
 USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = (
     os.environ.get("USER_PERMISSIONS_CHAT_MULTIPLE_MODELS", "True").lower() == "true"
@@ -1094,16 +1046,7 @@ USER_PERMISSIONS_FEATURES_CODE_INTERPRETER = (
 
 DEFAULT_USER_PERMISSIONS = {
     "workspace": {
-        "models": USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS,
-        "knowledge": USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS,
         "skills": USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS,
-        "tools": USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS,
-    },
-    "sharing": {
-        "public_models": USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING,
-        "public_knowledge": USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING,
-        "public_skills": USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
-        "public_tools": USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING,
     },
     "chat": {
         "controls": USER_PERMISSIONS_CHAT_CONTROLS,
@@ -1112,9 +1055,6 @@ DEFAULT_USER_PERMISSIONS = {
         "edit": USER_PERMISSIONS_CHAT_EDIT,
         "share": USER_PERMISSIONS_CHAT_SHARE,
         "clone": USER_PERMISSIONS_CHAT_CLONE,
-        "stt": USER_PERMISSIONS_CHAT_STT,
-        "tts": USER_PERMISSIONS_CHAT_TTS,
-        "call": USER_PERMISSIONS_CHAT_CALL,
         "multiple_models": USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
     },
     "features": {

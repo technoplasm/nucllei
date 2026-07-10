@@ -74,17 +74,9 @@ async def get_user_permissisions(request: Request, user=Depends(get_verified_use
 # ここが古いと保存(POST)時に pydantic がキーを落とし、admin の既定権限編集が壊れる
 # (旧 prompts 残骸で workspace.skills が消えていた)。
 class WorkspacePermissions(BaseModel):
-    models: bool = False
-    knowledge: bool = False
+    # llens(#66): workspace.skills = skill editor ロール。models/tools/knowledge と
+    # sharing.* は 3 層化で廃止(model/tool/function の定義変更は admin 専有)。
     skills: bool = False
-    tools: bool = False
-
-
-class SharingPermissions(BaseModel):
-    public_models: bool = False
-    public_knowledge: bool = False
-    public_skills: bool = False
-    public_tools: bool = False
 
 
 class ChatPermissions(BaseModel):
@@ -94,9 +86,6 @@ class ChatPermissions(BaseModel):
     edit: bool = True
     share: bool = True
     clone: bool = False
-    stt: bool = True
-    tts: bool = True
-    call: bool = True
     multiple_models: bool = True
 
 
@@ -108,7 +97,6 @@ class FeaturesPermissions(BaseModel):
 
 class UserPermissions(BaseModel):
     workspace: WorkspacePermissions
-    sharing: SharingPermissions
     chat: ChatPermissions
     features: FeaturesPermissions
 
@@ -118,9 +106,6 @@ async def get_default_user_permissions(request: Request, user=Depends(get_admin_
     return {
         "workspace": WorkspacePermissions(
             **request.app.state.config.USER_PERMISSIONS.get("workspace", {})
-        ),
-        "sharing": SharingPermissions(
-            **request.app.state.config.USER_PERMISSIONS.get("sharing", {})
         ),
         "chat": ChatPermissions(
             **request.app.state.config.USER_PERMISSIONS.get("chat", {})

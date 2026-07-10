@@ -1180,7 +1180,8 @@
 									</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
-										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
+										<!-- llens(#66): chat.stt フラグ廃止 — STT は全員使用可 -->
+										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 											<Tooltip content={$i18n.t('Record voice')}>
 												<button
 													id="voice-input-button"
@@ -1253,7 +1254,7 @@
 													</button>
 												</Tooltip>
 											</div>
-										{:else if prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{:else if prompt === '' && files.length === 0}
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Call')}>
 													<button
