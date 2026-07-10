@@ -1285,7 +1285,9 @@ async def oauth_callback(provider: str, request: Request, response: Response):
 @app.get("/manifest.json")
 async def get_manifest_json():
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
-        return requests.get(app.state.EXTERNAL_PWA_MANIFEST_URL).json()
+        # llens(#28): 同期 requests は to_thread でループ外へ
+        r = await asyncio.to_thread(requests.get, app.state.EXTERNAL_PWA_MANIFEST_URL)
+        return r.json()
     else:
         return {
             "name": app.state.WEBUI_NAME,
