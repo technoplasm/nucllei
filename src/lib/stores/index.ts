@@ -68,7 +68,6 @@ export const showChangelog = writable(false);
 export const showControls = writable(false);
 export const showCallOverlay = writable(false);
 
-export const temporaryChatEnabled = writable(false);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 

@@ -27,9 +27,7 @@
 			stt: true,
 			tts: true,
 			call: true,
-			multiple_models: true,
-			temporary: true,
-			temporary_enforced: false
+			multiple_models: true
 		},
 		features: {
 			web_search: true,
@@ -305,24 +303,6 @@
 
 			<Switch bind:state={permissions.chat.multiple_models} />
 		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Temporary Chat')}
-			</div>
-
-			<Switch bind:state={permissions.chat.temporary} />
-		</div>
-
-		{#if permissions.chat.temporary}
-			<div class="  flex w-full justify-between my-2 pr-2">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Enforce Temporary Chat')}
-				</div>
-
-				<Switch bind:state={permissions.chat.temporary_enforced} />
-			</div>
-		{/if}
 	</div>
 
 	<hr class=" border-gray-100 dark:border-gray-850 my-2" />

@@ -1066,15 +1066,6 @@ USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = (
     os.environ.get("USER_PERMISSIONS_CHAT_MULTIPLE_MODELS", "True").lower() == "true"
 )
 
-USER_PERMISSIONS_CHAT_TEMPORARY = (
-    os.environ.get("USER_PERMISSIONS_CHAT_TEMPORARY", "True").lower() == "true"
-)
-
-USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED = (
-    os.environ.get("USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED", "False").lower()
-    == "true"
-)
-
 
 USER_PERMISSIONS_FEATURES_WEB_SEARCH = (
     os.environ.get("USER_PERMISSIONS_FEATURES_WEB_SEARCH", "True").lower() == "true"
@@ -1113,8 +1104,6 @@ DEFAULT_USER_PERMISSIONS = {
         "tts": USER_PERMISSIONS_CHAT_TTS,
         "call": USER_PERMISSIONS_CHAT_CALL,
         "multiple_models": USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
-        "temporary": USER_PERMISSIONS_CHAT_TEMPORARY,
-        "temporary_enforced": USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED,
     },
     "features": {
         "web_search": USER_PERMISSIONS_FEATURES_WEB_SEARCH,

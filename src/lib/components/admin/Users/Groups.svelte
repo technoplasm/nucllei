@@ -66,9 +66,7 @@
 			stt: true,
 			tts: true,
 			call: true,
-			multiple_models: true,
-			temporary: true,
-			temporary_enforced: false
+			multiple_models: true
 		},
 		features: {
 			web_search: true,

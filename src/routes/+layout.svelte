@@ -22,7 +22,6 @@
 		chatId,
 		chats,
 		currentChatPage,
-		temporaryChatEnabled,
 		isLastActiveTab,
 		isApp,
 		appInfo
@@ -118,7 +117,7 @@
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
 
-		if ((event.chat_id !== $chatId && !$temporaryChatEnabled) || isFocused) {
+		if (event.chat_id !== $chatId || isFocused) {
 			if (type === 'chat:completion') {
 				const { done, content, title } = data;
 
