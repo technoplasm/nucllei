@@ -193,9 +193,11 @@ def get_automatic1111_api_auth(request: Request):
 
 @router.get("/config/url/verify")
 async def verify_url(request: Request, user=Depends(get_admin_user)):
+    # llens(#28): 同期 requests は to_thread でループ外へ
     if request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111":
         try:
-            r = requests.get(
+            r = await asyncio.to_thread(
+                requests.get,
                 url=f"{request.app.state.config.AUTOMATIC1111_BASE_URL}/sdapi/v1/options",
                 headers={"authorization": get_automatic1111_api_auth(request)},
             )
@@ -213,7 +215,8 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
             }
 
         try:
-            r = requests.get(
+            r = await asyncio.to_thread(
+                requests.get,
                 url=f"{request.app.state.config.COMFYUI_BASE_URL}/object_info",
                 headers=headers,
             )
@@ -300,7 +303,8 @@ async def get_image_config(request: Request, user=Depends(get_admin_user)):
 async def update_image_config(
     request: Request, form_data: ImageConfigForm, user=Depends(get_admin_user)
 ):
-    set_image_model(request, form_data.MODEL)
+    # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+    await asyncio.to_thread(set_image_model, request, form_data.MODEL)
 
     pattern = r"^\d+x\d+$"
     if re.match(pattern, form_data.IMAGE_SIZE):
@@ -518,7 +522,10 @@ async def image_generations(
 
             for image in res["data"]:
                 if image_url := image.get("url", None):
-                    image_data, content_type = load_url_image_data(image_url, headers)
+                    # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+                    image_data, content_type = await asyncio.to_thread(
+                        load_url_image_data, image_url, headers
+                    )
                 else:
                     image_data, content_type = load_b64_image_data(image["b64_json"])
 
@@ -531,7 +538,8 @@ async def image_generations(
             headers["Content-Type"] = "application/json"
             headers["x-goog-api-key"] = request.app.state.config.IMAGES_GEMINI_API_KEY
 
-            model = get_image_model(request)
+            # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+            model = await asyncio.to_thread(get_image_model, request)
             data = {
                 "instances": {"prompt": form_data.prompt},
                 "parameters": {
@@ -604,7 +612,10 @@ async def image_generations(
                         "Authorization": f"Bearer {request.app.state.config.COMFYUI_API_KEY}"
                     }
 
-                image_data, content_type = load_url_image_data(image["url"], headers)
+                # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+                image_data, content_type = await asyncio.to_thread(
+                    load_url_image_data, image["url"], headers
+                )
                 url = upload_image(
                     request,
                     form_data.model_dump(exclude_none=True),
@@ -619,7 +630,9 @@ async def image_generations(
             or request.app.state.config.IMAGE_GENERATION_ENGINE == ""
         ):
             if form_data.model:
-                set_image_model(form_data.model)
+                # llens(#28): to_thread 化 + request 引数欠落の既存バグを修正
+                # (set_image_model(request, model) が正しいシグネチャ)
+                await asyncio.to_thread(set_image_model, request, form_data.model)
 
             data = {
                 "prompt": form_data.prompt,

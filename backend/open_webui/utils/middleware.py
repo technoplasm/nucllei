@@ -1095,7 +1095,7 @@ async def process_chat_response(
                     if get_active_status_by_user_id(user.id) is None:
                         webhook_url = Users.get_user_webhook_url_by_id(user.id)
                         if webhook_url:
-                            post_webhook(
+                            await post_webhook(
                                 request.app.state.WEBUI_NAME,
                                 webhook_url,
                                 f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
@@ -2079,7 +2079,9 @@ async def process_chat_response(
                                 }
 
                                 tool_function = tool["callable"]
-                                tool_result = await tool_function(**tool_function_params)
+                                tool_result = await tool_function(
+                                    **tool_function_params
+                                )
 
                             except Exception as e:
                                 tool_result = str(e)
@@ -2390,7 +2392,7 @@ async def process_chat_response(
                 if get_active_status_by_user_id(user.id) is None:
                     webhook_url = Users.get_user_webhook_url_by_id(user.id)
                     if webhook_url:
-                        post_webhook(
+                        await post_webhook(
                             request.app.state.WEBUI_NAME,
                             webhook_url,
                             f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",

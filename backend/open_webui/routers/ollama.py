@@ -416,7 +416,8 @@ async def get_ollama_tags(
 
         r = None
         try:
-            r = requests.request(
+            r = await asyncio.to_thread(
+                requests.request,
                 method="GET",
                 url=f"{url}/api/tags",
                 headers={
@@ -508,7 +509,9 @@ async def get_ollama_versions(request: Request, url_idx: Optional[int] = None):
 
             r = None
             try:
-                r = requests.request(method="GET", url=f"{url}/api/version")
+                r = await asyncio.to_thread(
+                    requests.request, method="GET", url=f"{url}/api/version"
+                )
                 r.raise_for_status()
 
                 return r.json()
@@ -677,7 +680,8 @@ async def copy_model(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
-        r = requests.request(
+        r = await asyncio.to_thread(
+            requests.request,
             method="POST",
             url=f"{url}/api/copy",
             headers={
@@ -742,7 +746,8 @@ async def delete_model(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
-        r = requests.request(
+        r = await asyncio.to_thread(
+            requests.request,
             method="DELETE",
             url=f"{url}/api/delete",
             data=form_data.model_dump_json(exclude_none=True).encode(),
@@ -802,7 +807,8 @@ async def show_model_info(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
-        r = requests.request(
+        r = await asyncio.to_thread(
+            requests.request,
             method="POST",
             url=f"{url}/api/show",
             headers={
@@ -881,7 +887,8 @@ async def embed(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
-        r = requests.request(
+        r = await asyncio.to_thread(
+            requests.request,
             method="POST",
             url=f"{url}/api/embed",
             headers={
@@ -960,7 +967,8 @@ async def embeddings(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
-        r = requests.request(
+        r = await asyncio.to_thread(
+            requests.request,
             method="POST",
             url=f"{url}/api/embeddings",
             headers={
@@ -1395,7 +1403,9 @@ async def get_openai_models(
     else:
         url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
         try:
-            r = requests.request(method="GET", url=f"{url}/api/tags")
+            r = await asyncio.to_thread(
+                requests.request, method="GET", url=f"{url}/api/tags"
+            )
             r.raise_for_status()
 
             model_list = r.json()
@@ -1501,7 +1511,7 @@ async def download_file_stream(
                     file.seek(0)
 
                     url = f"{ollama_url}/api/blobs/sha256:{hashed}"
-                    response = requests.post(url, data=file)
+                    response = await asyncio.to_thread(requests.post, url, data=file)
 
                     if response.ok:
                         res = {
@@ -1598,7 +1608,7 @@ async def upload_model(
             # --- P3: Upload to ollama /api/blobs ---
             with open(file_path, "rb") as f:
                 url = f"{ollama_url}/api/blobs/sha256:{file_hash}"
-                response = requests.post(url, data=f)
+                response = await asyncio.to_thread(requests.post, url, data=f)
 
             if response.ok:
                 log.info(f"Uploaded to /api/blobs")  # DEBUG
@@ -1618,7 +1628,8 @@ async def upload_model(
 
                 # Call ollama /api/create
                 # https://github.com/ollama/ollama/blob/main/docs/api.md#create-a-model
-                create_resp = requests.post(
+                create_resp = await asyncio.to_thread(
+                    requests.post,
                     url=f"{ollama_url}/api/create",
                     headers={"Content-Type": "application/json"},
                     data=json.dumps(create_payload),

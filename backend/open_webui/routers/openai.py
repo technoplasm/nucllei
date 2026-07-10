@@ -208,43 +208,49 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
         r = None
         try:
-            r = requests.post(
-                url=f"{url}/audio/speech",
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {request.app.state.config.OPENAI_API_KEYS[idx]}",
-                    **(
-                        {
-                            "HTTP-Referer": "https://openwebui.com/",
-                            "X-Title": "Open WebUI",
-                        }
-                        if "openrouter.ai" in url
-                        else {}
-                    ),
-                    **(
-                        {
-                            "X-OpenWebUI-User-Name": user.name,
-                            "X-OpenWebUI-User-Id": user.id,
-                            "X-OpenWebUI-User-Email": user.email,
-                            "X-OpenWebUI-User-Role": user.role,
-                        }
-                        if ENABLE_FORWARD_USER_INFO_HEADERS
-                        else {}
-                    ),
-                },
-                stream=True,
-            )
+            # llens(#28): 同期 requests(stream 受信 + ファイル書き込み)は
+            # まとめて to_thread でループ外へ
+            def _fetch_and_cache():
+                nonlocal r
+                r = requests.post(
+                    url=f"{url}/audio/speech",
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {request.app.state.config.OPENAI_API_KEYS[idx]}",
+                        **(
+                            {
+                                "HTTP-Referer": "https://openwebui.com/",
+                                "X-Title": "Open WebUI",
+                            }
+                            if "openrouter.ai" in url
+                            else {}
+                        ),
+                        **(
+                            {
+                                "X-OpenWebUI-User-Name": user.name,
+                                "X-OpenWebUI-User-Id": user.id,
+                                "X-OpenWebUI-User-Email": user.email,
+                                "X-OpenWebUI-User-Role": user.role,
+                            }
+                            if ENABLE_FORWARD_USER_INFO_HEADERS
+                            else {}
+                        ),
+                    },
+                    stream=True,
+                )
 
-            r.raise_for_status()
+                r.raise_for_status()
 
-            # Save the streaming content to a file
-            with open(file_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                # Save the streaming content to a file
+                with open(file_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
 
-            with open(file_body_path, "w") as f:
-                json.dump(json.loads(body.decode("utf-8")), f)
+                with open(file_body_path, "w") as f:
+                    json.dump(json.loads(body.decode("utf-8")), f)
+
+            await asyncio.to_thread(_fetch_and_cache)
 
             # Return the saved file
             return FileResponse(file_path)

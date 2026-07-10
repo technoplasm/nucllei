@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -341,7 +342,8 @@ async def speech(request: Request, user=Depends(get_verified_user)):
     elif request.app.state.config.TTS_ENGINE == "elevenlabs":
         voice_id = payload.get("voice", "")
 
-        if voice_id not in get_available_voices(request):
+        # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+        if voice_id not in await asyncio.to_thread(get_available_voices, request):
             raise HTTPException(
                 status_code=400,
                 detail="Invalid voice id",
@@ -885,7 +887,8 @@ def get_available_models(request: Request) -> list[dict]:
 
 @router.get("/models")
 async def get_models(request: Request, user=Depends(get_verified_user)):
-    return {"models": get_available_models(request)}
+    # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+    return {"models": await asyncio.to_thread(get_available_models, request)}
 
 
 def get_available_voices(request) -> dict:
@@ -988,8 +991,6 @@ def get_elevenlabs_voices(api_key: str) -> dict:
 
 @router.get("/voices")
 async def get_voices(request: Request, user=Depends(get_verified_user)):
-    return {
-        "voices": [
-            {"id": k, "name": v} for k, v in get_available_voices(request).items()
-        ]
-    }
+    # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
+    available_voices = await asyncio.to_thread(get_available_voices, request)
+    return {"voices": [{"id": k, "name": v} for k, v in available_voices.items()]}
