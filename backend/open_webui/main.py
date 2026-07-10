@@ -85,7 +85,6 @@ from open_webui.models.users import UserModel, Users
 from open_webui.models.chats import Chats
 
 from open_webui.config import (
-    LICENSE_KEY,
     # Ollama
     ENABLE_OLLAMA_API,
     OLLAMA_BASE_URLS,
@@ -316,7 +315,6 @@ from open_webui.utils.middleware import process_chat_payload, process_chat_respo
 from open_webui.utils.access_control import has_access
 
 from open_webui.utils.auth import (
-    get_license_data,
     get_http_authorization_cred,
     decode_token,
     get_admin_user,
@@ -400,8 +398,8 @@ async def lifespan(app: FastAPI):
     if RESET_CONFIG_ON_START:
         reset_config()
 
-    if LICENSE_KEY:
-        get_license_data(app, LICENSE_KEY)
+    # llens(#28): LICENSE_KEY / get_license_data(api.openwebui.com への起動時照会)は
+    # air-gapped 前提に反するため撤去
 
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
