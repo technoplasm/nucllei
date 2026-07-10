@@ -19,6 +19,8 @@
 	// Prompts からコピーする際に意図的に落とした(issue #35)。機能は一覧/検索/作成/編集/削除のみ。
 	// llens(#47 A1): By 表示・pencil・… メニューを撤去。クリックで編集、削除は trash、
 	// visibility(access_control)は一覧のアイコンから直接編集する。
+	// llens(#66): editor は全 skill を閲覧できるが、ACL 編集は admin のみ・削除は自分の
+	// skill のみ(サーバー側ゲートのミラー)。
 	const i18n = getContext('i18n');
 	let loaded = false;
 
@@ -160,31 +162,44 @@
 							? $i18n.t('Public')
 							: $i18n.t('Private')}
 					>
-						<button
-							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-							type="button"
-							on:click={() => openAccessControl(skill)}
-						>
-							{#if (skill.access_control ?? null) === null}
-								<GlobeAlt className="size-4" />
-							{:else}
-								<LockClosed className="size-4" />
-							{/if}
-						</button>
+						{#if $user?.role === 'admin'}
+							<button
+								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								type="button"
+								on:click={() => openAccessControl(skill)}
+							>
+								{#if (skill.access_control ?? null) === null}
+									<GlobeAlt className="size-4" />
+								{:else}
+									<LockClosed className="size-4" />
+								{/if}
+							</button>
+						{:else}
+							<!-- 公開範囲の変更は admin のみ — 表示だけ -->
+							<div class="self-center w-fit text-sm px-2 py-2 text-gray-400 dark:text-gray-600">
+								{#if (skill.access_control ?? null) === null}
+									<GlobeAlt className="size-4" />
+								{:else}
+									<LockClosed className="size-4" />
+								{/if}
+							</div>
+						{/if}
 					</Tooltip>
 
-					<Tooltip content={$i18n.t('Delete')}>
-						<button
-							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-							type="button"
-							on:click={() => {
-								deleteSkill = skill;
-								showDeleteConfirm = true;
-							}}
-						>
-							<GarbageBin />
-						</button>
-					</Tooltip>
+					{#if $user?.role === 'admin' || skill.user_id === $user?.id}
+						<Tooltip content={$i18n.t('Delete')}>
+							<button
+								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								type="button"
+								on:click={() => {
+									deleteSkill = skill;
+									showDeleteConfirm = true;
+								}}
+							>
+								<GarbageBin />
+							</button>
+						</Tooltip>
+					{/if}
 				</div>
 			</div>
 		{/each}

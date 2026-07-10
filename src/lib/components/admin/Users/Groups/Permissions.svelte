@@ -164,7 +164,7 @@
 			<Tooltip
 				className=" flex w-full justify-between my-2 pr-2"
 				content={$i18n.t(
-					'Skill editors can create and edit all skills, including who can use them.'
+					'Skill editors can view all skills and create private ones; they can edit only their own. Sharing is admin-only.'
 				)}
 				placement="top-start"
 			>

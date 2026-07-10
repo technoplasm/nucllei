@@ -193,8 +193,8 @@ class TestToolAdminOnly(AbstractPostgresTest):
 class TestSkillEditor(AbstractPostgresTest):
     BASE_PATH = "/api/v1/skills"
 
-    def test_editor_edits_any_skill_including_acl(self):
-        """editor は他人の skill を編集・ACL 変更・削除できる(共有レシピ帳)。"""
+    def test_editor_views_all_but_edits_only_own(self):
+        """editor は全 skill を閲覧できるが、編集・削除は自分の skill だけ。"""
         from open_webui.models.skills import SkillForm, Skills
 
         _make_editor("ed")
@@ -205,35 +205,80 @@ class TestSkillEditor(AbstractPostgresTest):
         )
 
         with mock_webui_user_strict(id="ed", role="user"):
-            # 管理一覧に全 skill が見える
+            # 管理一覧に全 skill が見える(中身込み)
             response = self.fast_api_client.get(self.create_url("/list"))
             assert response.status_code == 200
             assert {s["id"] for s in response.json()} == {"team"}
 
-            # 中身 + use-ACL(read)を編集できる
-            response = self.fast_api_client.post(
-                self.create_url("/id/team/update"),
-                json={
-                    "id": "team",
-                    "name": "renamed",
-                    "content": "new",
-                    "access_control": {"read": {"user_ids": ["someone"], "group_ids": []}},
-                },
-            )
-            assert response.status_code == 200
-            assert response.json()["name"] == "renamed"
-
-            # 編集用の単体取得も可(read ACL 外でも editor なら開ける)
+            # 閲覧用の単体取得も可(read ACL 外でも editor なら開ける)
             assert (
                 self.fast_api_client.get(self.create_url("/id/team")).status_code
                 == 200
             )
 
-            # 削除も可
+            # 他人の skill は編集不可
+            response = self.fast_api_client.post(
+                self.create_url("/id/team/update"),
+                json={"id": "team", "name": "renamed", "content": "new"},
+            )
+            assert response.status_code == 401
+
+            # 削除も不可
             assert (
                 self.fast_api_client.delete(
                     self.create_url("/id/team/delete")
-                ).json()
+                ).status_code
+                == 401
+            )
+
+    def test_editor_created_skill_is_forced_private(self):
+        """editor の新規 skill は public を要求しても必ず私有(access_control={})になる。"""
+        from open_webui.models.skills import Skills
+
+        _make_editor("edp")
+        with mock_webui_user_strict(id="edp", role="user"):
+            response = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={
+                    "id": "mine",
+                    "name": "t",
+                    "content": "c",
+                    "access_control": None,  # public を要求しても…
+                },
+            )
+        assert response.status_code == 200
+        assert Skills.get_skill_by_id("mine").access_control == {}  # …私有に固定
+
+    def test_editor_cannot_change_own_acl(self):
+        """自分の skill でも ACL は変更できない(admin が広げた共有範囲も温存)。"""
+        from open_webui.models.skills import SkillForm, Skills
+
+        _make_editor("eda")
+        shared_acl = {"read": {"user_ids": ["someone"], "group_ids": []}}
+        # admin が共有範囲を広げた editor 名義の skill
+        Skills.insert_new_skill(
+            "eda",
+            SkillForm(id="own", name="t", content="c", access_control=shared_acl),
+        )
+
+        with mock_webui_user_strict(id="eda", role="user"):
+            response = self.fast_api_client.post(
+                self.create_url("/id/own/update"),
+                json={
+                    "id": "own",
+                    "name": "renamed",
+                    "content": "new",
+                    "access_control": None,  # public 化を試みても…
+                },
+            )
+        assert response.status_code == 200
+        assert response.json()["name"] == "renamed"  # 中身の編集は通る
+        assert Skills.get_skill_by_id("own").access_control == shared_acl  # ACL は温存
+
+        # 自分の skill の削除はできる
+        with mock_webui_user_strict(id="eda", role="user"):
+            assert (
+                self.fast_api_client.delete(self.create_url("/id/own/delete")).json()
                 is True
             )
 

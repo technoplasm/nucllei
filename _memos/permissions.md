@@ -18,8 +18,11 @@ llens 拡張 `group_terms`(AND 交差)もコード・データとも撤去済み
    ACL の形は `{"read": {"user_ids": [], "group_ids": []}}` のみ
    (`write` 側と `group_terms` は廃止)。`None` = 全員使用可、`{}` = 誰も使えない(admin 除く)。
 4. **定義(作成・編集・削除)の権限はロールで決まる**: model / tool / function / channel = admin、
-   skill = skill editor(共有レシピ帳: editor は全 skill を編集でき、use-ACL も編集できる)。
-   例外は「tool_ids 付き skill = admin 専有」だけ(権力を運ぶのは tool。GHSA-4pcg 境界)。
+   skill = skill editor(**私有ノート + 全体閲覧** — 2026-07-10 改訂: 当初の「共有レシピ帳
+   (editor が全 skill + use-ACL を編集)」案は、editor が勝手に public skill を作れてしまう
+   ため撤回)。editor は全 skill を中身まで閲覧できるが、作成は必ず私有(ACL={} 固定)、
+   編集・削除は自分の skill のみ、**ACL(公開・共有範囲)を触れるのは admin だけ**。
+   tool_ids 付き skill は全操作 admin 専有(権力を運ぶのは tool。GHSA-4pcg 境界)。
 5. **permission フラグ(`chat.*` / `features.*`)は必ずサーバー側 endpoint でチェックする**。
    フラグを新設したら enforcement(endpoint 側 has_permission)と UI ミラーを同時に入れ、
    マトリクスと回帰テストに行を足す。
@@ -33,7 +36,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | model(preset) | read ACL(picker 表示) | admin | admin | admin | admin | |
 | tool | read ACL(チャット実行時に per-tool 判定) | admin | admin | admin | admin | 実行時チェックは GHSA-4pcg の enforce_access_control |
 | function(filter/action/pipe) | −(model 割り当てで発動、ACL 無し) | admin | admin | − | admin | |
-| skill | read ACL(発火 = read ∩ model.skillIds) | editor | **editor(全 skill)** | **editor** | editor | tool_ids 付きは全操作 admin。新規の初期 ACL=None(全員使用可) |
+| skill | read ACL(発火 = read ∩ model.skillIds)。**管理一覧の閲覧(中身込み)は editor 全件** | editor(**必ず私有 = ACL={} 固定**) | **owner のみ**(editor でも他人のは不可) | **admin のみ**(editor の保存では温存) | owner のみ | tool_ids 付きは全操作 admin。公開・共有は admin の後続操作でだけ広がる |
 | ~~channel~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — 機能ごと撤去(#67) |
 | chat | owner のみ | 本人 | owner | − | owner + `chat.delete` | share_id 発行=owner + `chat.share`、共有閲覧=認証ユーザー全員(匿名不可)、clone=`chat.clone`。file 連動は `chat-share-files.md`(#41 で確定) |
 | folder | owner のみ | 本人 | owner | − | owner + `chat.delete` | |

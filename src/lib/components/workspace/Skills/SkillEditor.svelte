@@ -43,6 +43,10 @@
 
 	let showAccessControlModal = false;
 
+	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。
+	// ACL(公開範囲)を触れるのは admin のみ — editor の保存では server 側でも温存される。
+	$: canEdit = !edit || $user?.role === 'admin' || skill?.user_id === $user?.id;
+
 	$: if (!edit) {
 		id = name !== '' ? `${name.replace(/\s+/g, '-').toLowerCase()}` : '';
 	}
@@ -153,21 +157,23 @@
 							required
 						/>
 
-						<div class="self-center shrink-0">
-							<button
-								class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-								type="button"
-								on:click={() => {
-									showAccessControlModal = true;
-								}}
-							>
-								<LockClosed strokeWidth="2.5" className="size-3.5" />
+						{#if $user?.role === 'admin'}
+							<div class="self-center shrink-0">
+								<button
+									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
+									type="button"
+									on:click={() => {
+										showAccessControlModal = true;
+									}}
+								>
+									<LockClosed strokeWidth="2.5" className="size-3.5" />
 
-								<div class="text-sm font-medium shrink-0">
-									{$i18n.t('Access')}
-								</div>
-							</button>
-						</div>
+									<div class="text-sm font-medium shrink-0">
+										{$i18n.t('Access')}
+									</div>
+								</button>
+							</div>
+						{/if}
 					</div>
 
 					<div class="flex gap-0.5 items-center text-xs text-gray-500">
@@ -267,13 +273,19 @@
 			</div>
 		{/if}
 
-		<div class="my-4 flex justify-start pb-20">
+		<div class="my-4 flex justify-start items-center gap-3 pb-20">
+			{#if !canEdit}
+				<div class="text-sm text-gray-500">
+					{$i18n.t('閲覧のみ(編集できるのは自分のスキルだけです)')}
+				</div>
+			{/if}
 			<button
-				class=" text-sm w-fit px-4 py-2 transition rounded-lg bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black {loading
-					? ' cursor-not-allowed'
+				class=" text-sm w-fit px-4 py-2 transition rounded-lg bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black {loading ||
+				!canEdit
+					? ' cursor-not-allowed opacity-50'
 					: ''} flex justify-center"
 				type="submit"
-				disabled={loading}
+				disabled={loading || !canEdit}
 			>
 				<div class=" self-center font-medium">{$i18n.t('Save')}</div>
 
