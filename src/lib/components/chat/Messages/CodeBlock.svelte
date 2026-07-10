@@ -3,17 +3,13 @@
 
 	import { v4 as uuidv4 } from 'uuid';
 
-	import { getContext, onMount, tick, onDestroy } from 'svelte';
+	import { getContext, onMount, onDestroy } from 'svelte';
 	import { copyToClipboard } from '$lib/utils';
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import SvgPanZoom from '$lib/components/common/SVGPanZoom.svelte';
-	import { config } from '$lib/stores';
-	import { executeCode } from '$lib/apis/utils';
-	import { toast } from 'svelte-sonner';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronUpDown from '$lib/components/icons/ChevronUpDown.svelte';
-	import CommandLine from '$lib/components/icons/CommandLine.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -23,7 +19,6 @@
 	export let onCode = (e) => {};
 
 	export let save = false;
-	export let run = true;
 	export let collapsed = false;
 
 	export let token;
@@ -48,12 +43,11 @@
 
 	let mermaidHtml = null;
 
-	let executing = false;
-
+	// llens(#67): UI からのコード実行(Run ボタン)は撤去。stdout/stderr/result は
+	// code_interpreter の実行結果(attributes.output)表示用に残る。
 	let stdout = null;
 	let stderr = null;
 	let result = null;
-	let files = null;
 
 	let copied = false;
 	let saved = false;
@@ -80,125 +74,6 @@
 		setTimeout(() => {
 			copied = false;
 		}, 1000);
-	};
-
-	const checkPythonCode = (str) => {
-		// Check if the string contains typical Python syntax characters
-		const pythonSyntax = [
-			'def ',
-			'else:',
-			'elif ',
-			'try:',
-			'except:',
-			'finally:',
-			'yield ',
-			'lambda ',
-			'assert ',
-			'nonlocal ',
-			'del ',
-			'True',
-			'False',
-			'None',
-			' and ',
-			' or ',
-			' not ',
-			' in ',
-			' is ',
-			' with '
-		];
-
-		for (let syntax of pythonSyntax) {
-			if (str.includes(syntax)) {
-				return true;
-			}
-		}
-
-		// If none of the above conditions met, it's probably not Python code
-		return false;
-	};
-
-	const executePython = async (code) => {
-		result = null;
-		stdout = null;
-		stderr = null;
-
-		executing = true;
-
-		if ($config?.code?.engine === 'jupyter') {
-			const output = await executeCode(localStorage.token, code).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
-
-			if (output) {
-				if (output['stdout']) {
-					stdout = output['stdout'];
-					const stdoutLines = stdout.split('\n');
-
-					for (const [idx, line] of stdoutLines.entries()) {
-						if (line.startsWith('data:image/png;base64')) {
-							if (files) {
-								files.push({
-									type: 'image/png',
-									data: line
-								});
-							} else {
-								files = [
-									{
-										type: 'image/png',
-										data: line
-									}
-								];
-							}
-
-							if (stdout.startsWith(`${line}\n`)) {
-								stdout = stdout.replace(`${line}\n`, ``);
-							} else if (stdout.startsWith(`${line}`)) {
-								stdout = stdout.replace(`${line}`, ``);
-							}
-						}
-					}
-				}
-
-				if (output['result']) {
-					result = output['result'];
-					const resultLines = result.split('\n');
-
-					for (const [idx, line] of resultLines.entries()) {
-						if (line.startsWith('data:image/png;base64')) {
-							if (files) {
-								files.push({
-									type: 'image/png',
-									data: line
-								});
-							} else {
-								files = [
-									{
-										type: 'image/png',
-										data: line
-									}
-								];
-							}
-
-							if (result.startsWith(`${line}\n`)) {
-								result = result.replace(`${line}\n`, ``);
-							} else if (result.startsWith(`${line}`)) {
-								result = result.replace(`${line}`, ``);
-							}
-						}
-					}
-				}
-
-				output['stderr'] && (stderr = output['stderr']);
-			}
-
-			executing = false;
-		} else {
-			// llens: Pyodide 実行は廃止。コード実行は外部サンドボックス
-			// (nsjail + IPython、jupyter エンジン)に一本化(issue #11)
-			toast.error($i18n.t('Code execution engine is not configured. Contact your administrator.'));
-			executing = false;
-		}
 	};
 
 	let debounceTimeout;
@@ -323,31 +198,6 @@
 						</div>
 					</button>
 
-					{#if ($config?.features?.enable_code_execution ?? true) && (lang.toLowerCase() === 'python' || lang.toLowerCase() === 'py' || (lang === '' && checkPythonCode(code)))}
-						{#if executing}
-							<div class="run-code-button bg-none border-none p-1 cursor-not-allowed">
-								{$i18n.t('Running')}
-							</div>
-						{:else if run}
-							<button
-								class="flex gap-1 items-center run-code-button bg-none border-none bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5"
-								on:click={async () => {
-									code = _code;
-									await tick();
-									executePython(code);
-								}}
-							>
-								<div>
-									<CommandLine className="size-3" />
-								</div>
-
-								<div>
-									{$i18n.t('Run')}
-								</div>
-							</button>
-						{/if}
-					{/if}
-
 					{#if save}
 						<button
 							class="save-code-button bg-none border-none bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5"
@@ -367,7 +217,7 @@
 			<div
 				class="language-{lang} rounded-t-lg -mt-8 {editorClassName
 					? editorClassName
-					: executing || stdout || stderr || result
+					: stdout || stderr || result
 						? ''
 						: 'rounded-b-lg'} overflow-hidden"
 			>
@@ -404,45 +254,27 @@
 					class="bg-gray-50 dark:bg-[#202123] dark:text-white max-w-full overflow-x-auto scrollbar-hidden"
 				/>
 
-				{#if executing || stdout || stderr || result || files}
+				{#if stdout || stderr || result}
 					<div
 						class="bg-gray-50 dark:bg-[#202123] dark:text-white rounded-b-lg! py-4 px-4 flex flex-col gap-2"
 					>
-						{#if executing}
+						{#if stdout || stderr}
 							<div class=" ">
 								<div class=" text-gray-500 text-xs mb-1">STDOUT/STDERR</div>
-								<div class="text-sm">Running...</div>
+								<div
+									class="text-sm {stdout?.split('\n')?.length > 100
+										? `max-h-96`
+										: ''}  overflow-y-auto"
+								>
+									{stdout || stderr}
+								</div>
 							</div>
-						{:else}
-							{#if stdout || stderr}
-								<div class=" ">
-									<div class=" text-gray-500 text-xs mb-1">STDOUT/STDERR</div>
-									<div
-										class="text-sm {stdout?.split('\n')?.length > 100
-											? `max-h-96`
-											: ''}  overflow-y-auto"
-									>
-										{stdout || stderr}
-									</div>
-								</div>
-							{/if}
-							{#if result || files}
-								<div class=" ">
-									<div class=" text-gray-500 text-xs mb-1">RESULT</div>
-									{#if result}
-										<div class="text-sm">{`${JSON.stringify(result)}`}</div>
-									{/if}
-									{#if files}
-										<div class="flex flex-col gap-2">
-											{#each files as file}
-												{#if file.type.startsWith('image')}
-													<img src={file.data} alt="Output" class=" w-full max-w-[36rem]" />
-												{/if}
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/if}
+						{/if}
+						{#if result}
+							<div class=" ">
+								<div class=" text-gray-500 text-xs mb-1">RESULT</div>
+								<div class="text-sm">{`${JSON.stringify(result)}`}</div>
+							</div>
 						{/if}
 					</div>
 				{/if}

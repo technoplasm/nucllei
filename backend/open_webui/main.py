@@ -98,13 +98,6 @@ from open_webui.config import (
     # Tool Server Configs
     TOOL_SERVER_CONNECTIONS,
     # Code Execution
-    ENABLE_CODE_EXECUTION,
-    CODE_EXECUTION_ENGINE,
-    CODE_EXECUTION_JUPYTER_URL,
-    CODE_EXECUTION_JUPYTER_AUTH,
-    CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-    CODE_EXECUTION_JUPYTER_TIMEOUT,
     ENABLE_CODE_INTERPRETER,
     CODE_INTERPRETER_ENGINE,
     CODE_INTERPRETER_PROMPT_TEMPLATE,
@@ -615,15 +608,6 @@ app.state.EMBEDDING_FUNCTION = None
 #
 ########################################
 
-app.state.config.ENABLE_CODE_EXECUTION = ENABLE_CODE_EXECUTION
-app.state.config.CODE_EXECUTION_ENGINE = CODE_EXECUTION_ENGINE
-app.state.config.CODE_EXECUTION_JUPYTER_URL = CODE_EXECUTION_JUPYTER_URL
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH = CODE_EXECUTION_JUPYTER_AUTH
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN = CODE_EXECUTION_JUPYTER_AUTH_TOKEN
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = (
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
-)
-app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT = CODE_EXECUTION_JUPYTER_TIMEOUT
 
 app.state.config.ENABLE_CODE_INTERPRETER = ENABLE_CODE_INTERPRETER
 app.state.config.CODE_INTERPRETER_ENGINE = CODE_INTERPRETER_ENGINE
@@ -1154,7 +1138,6 @@ async def get_app_config(request: Request):
                     # llens(#52): built-in web 検索(RAG 自動注入)は撤去。検索は tool→
                     # 内部検索 API(retrieval /process/web/search)経由に移行するため、
                     # チャットの feature フラグとしては露出しない(フロントのトグルも隠れる)。
-                    "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
@@ -1173,9 +1156,6 @@ async def get_app_config(request: Request):
                 "default_models": app.state.config.DEFAULT_MODELS,
                 "default_prompt_suggestions": app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
                 "user_count": user_count,
-                "code": {
-                    "engine": app.state.config.CODE_EXECUTION_ENGINE,
-                },
                 "audio": {
                     "tts": {
                         "engine": app.state.config.TTS_ENGINE,

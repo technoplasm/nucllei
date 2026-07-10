@@ -1,31 +1,27 @@
 import black
 import logging
-import markdown
 
 from open_webui.models.chats import ChatTitleMessagesForm
-from open_webui.config import DATA_DIR, ENABLE_ADMIN_EXPORT
+from open_webui.config import ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 
-from open_webui.utils.misc import get_gravatar_url
 from open_webui.utils.pdf_generator import PDFGenerator
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.env import SRC_LOG_LEVELS
 
+# llens(#67): /gravatar(外部ネットワーク)・/code/execute(組み込みコード実行の
+# 残骸 — 実行系は外部 sandbox tool 一本)・/markdown(呼び出し元なし)・
+# /litellm/config(upstream 残骸)を撤去。残すのは code/format(tool/function
+# 開発用)・pdf(印刷用)・db/download(admin)のみ。
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
-
-
-@router.get("/gravatar")
-async def get_gravatar(email: str, user=Depends(get_verified_user)):
-    return get_gravatar_url(email)
 
 
 class CodeForm(BaseModel):
@@ -41,60 +37,6 @@ async def format_code(form_data: CodeForm, user=Depends(get_verified_user)):
         return {"code": form_data.code}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/code/execute")
-async def execute_code(
-    request: Request, form_data: CodeForm, user=Depends(get_verified_user)
-):
-    # llens(GHSA-482j-2pq6-q5w4 / CVE-2026-45672): このエンドポイントは
-    # ENABLE_CODE_EXECUTION を無視して実行しており、フラグを false にしても
-    # コード実行が可能だった。実行前に管理者トグルを強制する。
-    if not request.app.state.config.ENABLE_CODE_EXECUTION:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Code execution is disabled",
-        )
-
-    if request.app.state.config.CODE_EXECUTION_ENGINE == "jupyter":
-        output = await execute_code_jupyter(
-            request.app.state.config.CODE_EXECUTION_JUPYTER_URL,
-            form_data.code,
-            (
-                request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN
-                if request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH == "token"
-                else None
-            ),
-            (
-                request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
-                if request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH == "password"
-                else None
-            ),
-            request.app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT,
-        )
-
-        return output
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Code execution engine not supported",
-        )
-
-
-class MarkdownForm(BaseModel):
-    md: str
-
-
-@router.post("/markdown")
-async def get_html_from_markdown(
-    form_data: MarkdownForm, user=Depends(get_verified_user)
-):
-    return {"html": markdown.markdown(form_data.md)}
-
-
-class ChatForm(BaseModel):
-    title: str
-    messages: list[dict]
 
 
 @router.post("/pdf")
@@ -132,13 +74,4 @@ async def download_db(user=Depends(get_admin_user)):
         engine.url.database,
         media_type="application/octet-stream",
         filename="webui.db",
-    )
-
-
-@router.get("/litellm/config")
-async def download_litellm_config_yaml(user=Depends(get_admin_user)):
-    return FileResponse(
-        f"{DATA_DIR}/litellm/config.yaml",
-        media_type="application/octet-stream",
-        filename="config.yaml",
     )

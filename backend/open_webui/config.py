@@ -1412,54 +1412,11 @@ Responses from models: {{responses}}"""
 # Code Interpreter
 ####################################
 
-# llens: 組み込みコード実行は既定 OFF(issue #11)。
-# コード実行は nsjail + IPython の外部サンドボックス(自前ツール側)で行う。
-# 有効化する場合も Pyodide には戻さず外部 Jupyter 互換接続を前提とする
-# (CLAUDE.md 絶対制約)。コード自体は温存(削除しない)。
-ENABLE_CODE_EXECUTION = RuntimeConfig(
-    "ENABLE_CODE_EXECUTION",
-    "code_execution.enable",
-    os.environ.get("ENABLE_CODE_EXECUTION", "False").lower() == "true",
-)
+# llens(#67): CODE_EXECUTION_*(UI の Run ボタン → /utils/code/execute)は
+# 機能ごと撤去。コード実行は nsjail + IPython の外部サンドボックス
+# (自前ツール側)一本(issue #11 の保留分を完全削除)。
 
-CODE_EXECUTION_ENGINE = RuntimeConfig(
-    "CODE_EXECUTION_ENGINE",
-    "code_execution.engine",
-    os.environ.get("CODE_EXECUTION_ENGINE", "jupyter"),
-)
-
-CODE_EXECUTION_JUPYTER_URL = RuntimeConfig(
-    "CODE_EXECUTION_JUPYTER_URL",
-    "code_execution.jupyter.url",
-    os.environ.get("CODE_EXECUTION_JUPYTER_URL", ""),
-)
-
-CODE_EXECUTION_JUPYTER_AUTH = RuntimeConfig(
-    "CODE_EXECUTION_JUPYTER_AUTH",
-    "code_execution.jupyter.auth",
-    os.environ.get("CODE_EXECUTION_JUPYTER_AUTH", ""),
-)
-
-CODE_EXECUTION_JUPYTER_AUTH_TOKEN = RuntimeConfig(
-    "CODE_EXECUTION_JUPYTER_AUTH_TOKEN",
-    "code_execution.jupyter.auth_token",
-    os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_TOKEN", ""),
-)
-
-
-CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = RuntimeConfig(
-    "CODE_EXECUTION_JUPYTER_AUTH_PASSWORD",
-    "code_execution.jupyter.auth_password",
-    os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_PASSWORD", ""),
-)
-
-CODE_EXECUTION_JUPYTER_TIMEOUT = RuntimeConfig(
-    "CODE_EXECUTION_JUPYTER_TIMEOUT",
-    "code_execution.jupyter.timeout",
-    int(os.environ.get("CODE_EXECUTION_JUPYTER_TIMEOUT", "60")),
-)
-
-# llens: code interpreter も既定 OFF・有効化時は jupyter 前提(issue #11)
+# llens: code interpreter は既定 OFF・有効化時は jupyter 前提(issue #11)
 ENABLE_CODE_INTERPRETER = RuntimeConfig(
     "ENABLE_CODE_INTERPRETER",
     "code_interpreter.enable",

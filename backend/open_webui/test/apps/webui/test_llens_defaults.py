@@ -13,11 +13,12 @@ class TestLlensDefaults(AbstractPostgresTest):
     def test_code_execution_disabled_and_jupyter_engine(self):
         from open_webui.main import app
 
-        # issue #11: 組み込みコード実行は既定 OFF。実行は nsjail 外部サンドボックス側
-        assert app.state.config.ENABLE_CODE_EXECUTION is False
+        # issue #67: 組み込みコード実行(CODE_EXECUTION_*)は config ごと撤去。
+        # 実行系は nsjail 外部サンドボックスのツール経路一本
+        assert not hasattr(app.state.config, "ENABLE_CODE_EXECUTION")
+        assert not hasattr(app.state.config, "CODE_EXECUTION_ENGINE")
+        # interpreter は既定 OFF・有効化時も Pyodide には戻さない(CLAUDE.md 絶対制約)
         assert app.state.config.ENABLE_CODE_INTERPRETER is False
-        # 有効化する場合も Pyodide には戻さない(CLAUDE.md 絶対制約)
-        assert app.state.config.CODE_EXECUTION_ENGINE == "jupyter"
         assert app.state.config.CODE_INTERPRETER_ENGINE == "jupyter"
 
     def test_arena_and_community_sharing_eradicated(self):
