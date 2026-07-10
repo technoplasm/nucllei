@@ -66,6 +66,8 @@
 			if (_skill) {
 				skill = {
 					id: _skill.id,
+					// llens(#66): owner 判定(編集は自分の skill だけ)に使う
+					user_id: _skill.user_id,
 					name: _skill.name,
 					description: _skill.description ?? '',
 					content: _skill.content,
