@@ -24,6 +24,8 @@
 			file_upload: true,
 			delete: true,
 			edit: true,
+			share: true,
+			clone: false,
 			stt: true,
 			tts: true,
 			call: true,
@@ -271,6 +273,22 @@
 			</div>
 
 			<Switch bind:state={permissions.chat.edit} />
+		</div>
+
+		<div class="  flex w-full justify-between my-2 pr-2">
+			<div class=" self-center text-xs font-medium">
+				{$i18n.t('Allow Chat Share')}
+			</div>
+
+			<Switch bind:state={permissions.chat.share} />
+		</div>
+
+		<div class="  flex w-full justify-between my-2 pr-2">
+			<div class=" self-center text-xs font-medium">
+				{$i18n.t('Allow Shared Chat Clone')}
+			</div>
+
+			<Switch bind:state={permissions.chat.clone} />
 		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">

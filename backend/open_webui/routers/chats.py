@@ -1,5 +1,7 @@
+import copy
 import json
 import logging
+import uuid
 from typing import Optional
 
 
@@ -11,22 +13,124 @@ from open_webui.models.chats import (
     Chats,
     ChatTitleIdResponse,
 )
+from open_webui.models.files import FileForm, Files
 from open_webui.models.folders import Folders
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.storage.provider import Storage
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import has_permission, has_read_access_to_file
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 router = APIRouter()
+
+
+def get_file_ids_from_chat(chat_json: dict) -> list[str]:
+    """llens(#41): chat JSON(トップレベル files + 各 message.files)から添付 file_id を集める。"""
+    entries = list(chat_json.get("files") or [])
+    for message in ((chat_json.get("history") or {}).get("messages") or {}).values():
+        entries.extend(message.get("files") or [])
+
+    ids = []
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("type") == "file":
+            file_id = entry.get("id") or (entry.get("file") or {}).get("id")
+            if file_id:
+                ids.append(file_id)
+    return list(dict.fromkeys(ids))
+
+
+def publish_chat_files(chat_json: dict, user) -> None:
+    """llens(#41): 共有 = 参照 file の read を認証ユーザー全員へ拡大(public マーカー)。
+
+    chat JSON はクライアント制御のため、共有者自身が所有する file のみ public 化する
+    (他人の file_id を紛れ込ませた共有による権限拡大を防ぐ)。共有解除では戻さない —
+    狭める操作はファイル管理機構(#69)の明示操作のみ(_memos/chat-share-files.md)。
+    """
+    for file_id in get_file_ids_from_chat(chat_json):
+        file = Files.get_file_by_id(file_id)
+        if not file or file.user_id != user.id:
+            continue
+        access_control = file.access_control or {}
+        read = access_control.get("read") or {}
+        if read.get("public") is True:
+            continue
+        read["public"] = True
+        access_control["read"] = read
+        Files.update_file_access_control_by_id(file_id, access_control)
+
+
+def copy_chat_files_for_user(chat_json: dict, user) -> dict:
+    """llens(#41): clone = 参照 file の実体コピー(cloner 所有・private)。
+
+    コピーした瞬間から元 file の生死・共有状態と無縁になる。読めない・消えた file は
+    差し替えずに残す(送信時に middleware の filter_files_by_user_access が drop する
+    従来挙動に落ちる)。chat_json を破壊的に書き換えるため deepcopy を渡すこと。
+    """
+    id_map = {}
+    for file_id in get_file_ids_from_chat(chat_json):
+        if not has_read_access_to_file(file_id, user):
+            continue
+        src = Files.get_file_by_id(file_id)
+        if not src:
+            continue
+
+        new_id = str(uuid.uuid4())
+        new_path = src.path
+        if src.path:
+            try:
+                with open(Storage.get_file(src.path), "rb") as f:
+                    _, new_path = Storage.upload_file(f, f"{new_id}_{src.filename}")
+            except Exception:
+                log.exception(f"clone: storage copy failed (file_id={file_id})")
+                continue
+
+        copied = Files.insert_new_file(
+            user.id,
+            FileForm(
+                id=new_id,
+                hash=src.hash,
+                filename=src.filename,
+                path=new_path or "",
+                data=src.data or {},
+                meta=src.meta or {},
+                access_control=None,
+            ),
+        )
+        if copied:
+            id_map[file_id] = new_id
+
+    if not id_map:
+        return chat_json
+
+    def rewrite(entries):
+        for entry in entries or []:
+            if not (isinstance(entry, dict) and entry.get("type") == "file"):
+                continue
+            old_id = entry.get("id") or (entry.get("file") or {}).get("id")
+            new_id = id_map.get(old_id)
+            if not new_id:
+                continue
+            if entry.get("id"):
+                entry["id"] = new_id
+            if entry.get("url"):
+                entry["url"] = f"/api/v1/files/{new_id}"
+            if isinstance(entry.get("file"), dict) and entry["file"].get("id"):
+                entry["file"]["id"] = new_id
+
+    rewrite(chat_json.get("files"))
+    for message in ((chat_json.get("history") or {}).get("messages") or {}).values():
+        rewrite(message.get("files"))
+    return chat_json
+
 
 ############################
 # GetChatList
@@ -542,7 +646,17 @@ async def clone_chat_by_id(
 
 
 @router.post("/{id}/clone/shared", response_model=Optional[ChatResponse])
-async def clone_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
+async def clone_shared_chat_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
+    # llens(#41): 共有チャットの clone は chat.clone フラグでゲート(既定 off)
+    if user.role == "user" and not has_permission(
+        user.id, "chat.clone", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
 
     if user.role == "admin":
         chat = Chats.get_chat_by_id(id)
@@ -550,12 +664,16 @@ async def clone_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
         chat = Chats.get_chat_by_share_id(id)
 
     if chat:
-        updated_chat = {
-            **chat.chat,
-            "originalChatId": chat.id,
-            "branchPointMessageId": chat.chat["history"]["currentId"],
-            "title": f"Clone of {chat.title}",
-        }
+        updated_chat = copy.deepcopy(
+            {
+                **chat.chat,
+                "originalChatId": chat.id,
+                "branchPointMessageId": chat.chat["history"]["currentId"],
+                "title": f"Clone of {chat.title}",
+            }
+        )
+        # llens(#41): 参照 file を実体コピー(cloner 所有・private)し file_id を差し替える
+        updated_chat = copy_chat_files_for_user(updated_chat, user)
 
         chat = Chats.insert_new_chat(user.id, ChatForm(**{"chat": updated_chat}))
         return ChatResponse(**chat.model_dump())
@@ -588,19 +706,32 @@ async def archive_chat_by_id(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/{id}/share", response_model=Optional[ChatResponse])
-async def share_chat_by_id(id: str, user=Depends(get_verified_user)):
+async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
+    # llens(#41): 共有は chat.share フラグでゲート(解除 DELETE は狭める操作なので常時可)
+    if user.role == "user" and not has_permission(
+        user.id, "chat.share", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         if chat.share_id:
             shared_chat = Chats.update_shared_chat_by_chat_id(chat.id)
-            return ChatResponse(**shared_chat.model_dump())
+        else:
+            shared_chat = Chats.insert_shared_chat_by_chat_id(chat.id)
 
-        shared_chat = Chats.insert_shared_chat_by_chat_id(chat.id)
         if not shared_chat:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=ERROR_MESSAGES.DEFAULT(),
             )
+
+        # llens(#41): スナップショットが参照する file を public 化(再共有時は新規添付分も)
+        publish_chat_files(shared_chat.chat, user)
+
         return ChatResponse(**shared_chat.model_dump())
 
     else:

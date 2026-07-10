@@ -201,6 +201,19 @@ class FilesTable:
 
                 return None
 
+    def update_file_access_control_by_id(
+        self, id: str, access_control: Optional[dict]
+    ) -> Optional[FileModel]:
+        with get_db() as db:
+            try:
+                file = db.query(File).filter_by(id=id).first()
+                file.access_control = access_control
+                file.updated_at = int(time.time())
+                db.commit()
+                return FileModel.model_validate(file)
+            except Exception:
+                return None
+
     def update_file_metadata_by_id(self, id: str, meta: dict) -> Optional[FileModel]:
         with get_db() as db:
             try:

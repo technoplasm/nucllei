@@ -163,6 +163,12 @@ def has_read_access_to_file(file_id: str, user: "UserModel") -> bool:
         return False
     if file.user_id == user.id:
         return True
+    # llens(#41): 共有チャットの public マーカー。チャット share 時に
+    # {"read": {"public": true}} が焼かれ、認証ユーザー全員が read 可になる。
+    # 共有解除では戻さない — 狭める操作はファイル管理機構(#69)の明示操作のみ
+    # (_memos/chat-share-files.md)。
+    if ((file.access_control or {}).get("read") or {}).get("public") is True:
+        return True
     # 注意: file の access_control=None は「所有者のみ(非公開)」を意味する。
     # has_access は None を public-read として扱うため、明示設定時のみ委譲する
     # (アップロード既定は None = 非公開。共有は明示的に user/group を列挙したときだけ)。

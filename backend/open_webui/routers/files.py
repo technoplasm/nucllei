@@ -25,10 +25,10 @@ from open_webui.models.files import (
     FileModelResponse,
     Files,
 )
-from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 
 from open_webui.storage.provider import Storage
+from open_webui.utils.access_control import has_read_access_to_file
 from open_webui.utils.attachment import process_attachment_functions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
@@ -41,7 +41,7 @@ router = APIRouter()
 
 
 ############################
-# Check if the current user has access to a file through any knowledge bases the user may be in.
+# Check if the current user has access to a file.
 ############################
 
 
@@ -57,19 +57,11 @@ def has_access_to_file(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    has_access = False
-    knowledge_base_id = file.meta.get("collection_name") if file.meta else None
-
-    if knowledge_base_id:
-        knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(
-            user.id, access_type
-        )
-        for knowledge_base in knowledge_bases:
-            if knowledge_base.id == knowledge_base_id:
-                has_access = True
-                break
-
-    return has_access
+    # llens(#41): read は中央ヘルパー(owner / admin / 共有 public マーカー / KB 委譲)に
+    # 一本化。write は owner/admin 以外の経路を持たない(呼び出し側が先に判定している)。
+    if access_type == "read":
+        return has_read_access_to_file(file_id, user)
+    return False
 
 
 ############################

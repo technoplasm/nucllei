@@ -1050,6 +1050,16 @@ USER_PERMISSIONS_CHAT_EDIT = (
     os.environ.get("USER_PERMISSIONS_CHAT_EDIT", "True").lower() == "true"
 )
 
+# llens(#41): チャット共有と共有チャットの clone(_memos/chat-share-files.md)。
+# 院内運用は share 中心のため clone は既定 off。
+USER_PERMISSIONS_CHAT_SHARE = (
+    os.environ.get("USER_PERMISSIONS_CHAT_SHARE", "True").lower() == "true"
+)
+
+USER_PERMISSIONS_CHAT_CLONE = (
+    os.environ.get("USER_PERMISSIONS_CHAT_CLONE", "False").lower() == "true"
+)
+
 USER_PERMISSIONS_CHAT_STT = (
     os.environ.get("USER_PERMISSIONS_CHAT_STT", "True").lower() == "true"
 )
@@ -1100,6 +1110,8 @@ DEFAULT_USER_PERMISSIONS = {
         "file_upload": USER_PERMISSIONS_CHAT_FILE_UPLOAD,
         "delete": USER_PERMISSIONS_CHAT_DELETE,
         "edit": USER_PERMISSIONS_CHAT_EDIT,
+        "share": USER_PERMISSIONS_CHAT_SHARE,
+        "clone": USER_PERMISSIONS_CHAT_CLONE,
         "stt": USER_PERMISSIONS_CHAT_STT,
         "tts": USER_PERMISSIONS_CHAT_TTS,
         "call": USER_PERMISSIONS_CHAT_CALL,

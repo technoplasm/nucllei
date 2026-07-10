@@ -32,10 +32,10 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | function(filter/action/pipe) | −(model 割り当てで発動、ACL 無し) | admin | admin | − | admin | |
 | skill | read ACL(発火 = read ∩ model.skillIds) | editor | **editor(全 skill)** | **editor** | editor | tool_ids 付きは全操作 admin。新規の初期 ACL=None(全員使用可) |
 | ~~channel~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — 機能ごと撤去(#67) |
-| chat | owner のみ | 本人 | owner | − | owner + `chat.delete` | share_id 発行=owner、共有閲覧=認証ユーザー全員(匿名不可)。clone/file 参照は #41 |
+| chat | owner のみ | 本人 | owner | − | owner + `chat.delete` | share_id 発行=owner + `chat.share`、共有閲覧=認証ユーザー全員(匿名不可)、clone=`chat.clone`。file 連動は `chat-share-files.md`(#41 で確定) |
 | folder | owner のみ | 本人 | owner | − | owner + `chat.delete` | |
 | ~~memory~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — API ごと撤去(#67) |
-| file | #40 の access_control ヘルパー(owner / 参照可視) | 本人 | − | − | owner | `chat.file_upload` フラグ |
+| file | owner / admin / 共有 public マーカー | 本人 | − | − | owner | `chat.file_upload` フラグ。share 時に `access_control.read.public=true`(共有解除でも自動では戻さない — 狭める操作はファイル管理機構で明示的に)。詳細 `chat-share-files.md` |
 | API key | 本人 | 本人(ENABLE_API_KEY 時) | − | − | 本人 | endpoint allowlist は 57q6 対策済み |
 | valves(tool/function 全体設定) | − | − | admin | − | − | 7429 対策済み(read も制限) |
 | UserValves(per-user) | 本人 | 本人 | 本人 | − | 本人 | |
@@ -48,6 +48,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 |---|---|---|
 | `workspace.skills` | skill editor ロール | routers/skills.py 全 CRUD |
 | `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(実装済み) |
+| `chat.share` / `chat.clone` | チャット共有・共有チャットの clone | routers/chats.py の share / clone endpoint(#41 で新設。既定 share=on / clone=off)|
 | `features.image_generation` | 画像生成 | **routers/images.py(未実装 = G1 残り)** — フラグは維持し enforcement を #66 で追加 |
 | `features.web_search` / `code_interpreter` | 機能 | 対応機能の endpoint(#51 / sandbox 整備時に) |
 | 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | #66 で撤去 |
