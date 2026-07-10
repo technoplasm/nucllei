@@ -14,6 +14,7 @@ import re
 import ast
 
 from uuid import uuid4
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -234,6 +235,22 @@ def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
 
     # id/collection を持たない(サーバー生成のインライン)項目は許可。
     return True
+
+
+def get_model_context_size(request, model: dict) -> Optional[int]:
+    """llens(#57): モデルの context 長(max_model_len)を解決する。
+
+    SGLang の /v1/models が返す max_model_len は raw model
+    (app.state.MODELS[id]["openai"])に保持されている。preset モデル
+    (base_model_id 持ち)は raw を持たないため base モデルを辿る。
+    """
+    ctx = (model.get("openai") or {}).get("max_model_len")
+    if ctx is None:
+        base_id = (model.get("info") or {}).get("base_model_id")
+        if base_id:
+            base = request.app.state.MODELS.get(base_id) or {}
+            ctx = (base.get("openai") or {}).get("max_model_len")
+    return ctx
 
 
 def filter_files_by_user_access(files: list, user: UserModel) -> list:
@@ -892,6 +909,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data["messages"],
             )
 
+    # llens(#57): streaming でも実測 usage を受け取る。OpenAI 互換サーバーは
+    # stream_options.include_usage が無いと usage チャンクを送らない(SGLang 実測済み)。
+    if form_data.get("stream"):
+        stream_options = form_data.get("stream_options") or {}
+        stream_options["include_usage"] = True
+        form_data["stream_options"] = stream_options
+
     # If there are citations, add them to the data_items
     sources = [source for source in sources if source.get("source", {}).get("name", "")]
 
@@ -1064,7 +1088,7 @@ async def process_chat_response(
                     metadata["chat_id"],
                     metadata["message_id"],
                     usage,
-                    context_size=(model.get("openai") or {}).get("max_model_len"),
+                    context_size=get_model_context_size(request, model),
                 )
 
             choices = response.get("choices", [])
@@ -1687,9 +1711,9 @@ async def process_chat_response(
                                                     metadata["chat_id"],
                                                     metadata["message_id"],
                                                     usage,
-                                                    context_size=(
-                                                        model.get("openai") or {}
-                                                    ).get("max_model_len"),
+                                                    context_size=get_model_context_size(
+                                                        request, model
+                                                    ),
                                                 )
                                             await event_emitter(
                                                 {
@@ -2164,6 +2188,8 @@ async def process_chat_response(
                             {
                                 "model": model_id,
                                 "stream": True,
+                                # llens(#57): tool ループの各呼び出しでも usage を受け取る
+                                "stream_options": {"include_usage": True},
                                 "tools": form_data["tools"],
                                 "messages": [
                                     *form_data["messages"],
@@ -2374,6 +2400,8 @@ async def process_chat_response(
                                 {
                                     "model": model_id,
                                     "stream": True,
+                                    # llens(#57): 継続呼び出しでも usage を受け取る
+                                    "stream_options": {"include_usage": True},
                                     "messages": [
                                         *form_data["messages"],
                                         {
