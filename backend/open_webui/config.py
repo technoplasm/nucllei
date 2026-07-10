@@ -1118,13 +1118,6 @@ USER_PERMISSIONS = RuntimeConfig(
     DEFAULT_USER_PERMISSIONS,
 )
 
-ENABLE_CHANNELS = RuntimeConfig(
-    "ENABLE_CHANNELS",
-    "channels.enable",
-    os.environ.get("ENABLE_CHANNELS", "False").lower() == "true",
-)
-
-
 # llens(#48): evaluation/arena は撲滅(config・モデル注入・chat 経路・UI を全撤去)。
 
 WEBHOOK_URL = RuntimeConfig(

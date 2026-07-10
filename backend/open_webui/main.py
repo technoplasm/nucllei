@@ -61,7 +61,6 @@ from open_webui.routers import (
     pipelines,
     tasks,
     auths,
-    channels,
     chats,
     folders,
     configs,
@@ -210,7 +209,6 @@ from open_webui.config import (
     ENABLE_API_KEY,
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
     API_KEY_ALLOWED_ENDPOINTS,
-    ENABLE_CHANNELS,
     ENABLE_USER_WEBHOOKS,
     USER_PERMISSIONS,
     DEFAULT_USER_ROLE,
@@ -492,7 +490,6 @@ app.state.config.BANNERS = WEBUI_BANNERS
 app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
 
 
-app.state.config.ENABLE_CHANNELS = ENABLE_CHANNELS
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
 
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
@@ -808,7 +805,6 @@ app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 
 
-app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
 app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
@@ -1115,7 +1111,6 @@ async def get_app_config(request: Request):
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {
-                    "enable_channels": app.state.config.ENABLE_CHANNELS,
                     # llens(#52/#67): built-in web 検索(RAG 自動注入)と retrieval router は
                     # 撤去済み。検索は #51 で builtin tool として再建する(WEB_SEARCH_* config と
                     # retrieval/web providers は素材として温存)。

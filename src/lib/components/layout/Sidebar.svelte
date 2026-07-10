@@ -18,7 +18,6 @@
 		pinnedChats,
 		scrollPaginationEnabled,
 		currentChatPage,
-		channels,
 		socket,
 		config,
 		isApp
@@ -51,9 +50,6 @@
 	import Plus from '../icons/Plus.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
-	import { getChannels, createNewChannel } from '$lib/apis/channels';
-	import ChannelModal from './Sidebar/ChannelModal.svelte';
-	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
 	import Pencil from '../icons/Pencil.svelte';
 	import Home from '../icons/Home.svelte';
@@ -87,8 +83,6 @@
 	let selectedChatId = null;
 	let showDropdown = false;
 	let showPinnedChat = true;
-
-	let showCreateChannel = false;
 
 	// Pagination variables
 	let chatListLoading = false;
@@ -177,10 +171,6 @@
 			newFolderId = res.id;
 			await initFolders();
 		}
-	};
-
-	const initChannels = async () => {
-		await channels.set(await getChannels(localStorage.token));
 	};
 
 	const initChatList = async () => {
@@ -372,7 +362,6 @@
 			}
 		});
 
-		await initChannels();
 		await initChatList();
 
 		window.addEventListener('keydown', onKeyDown);
@@ -413,25 +402,6 @@
 	bind:show={$showArchivedChats}
 	on:change={async () => {
 		await initChatList();
-	}}
-/>
-
-<ChannelModal
-	bind:show={showCreateChannel}
-	onSubmit={async ({ name, access_control }) => {
-		const res = await createNewChannel(localStorage.token, {
-			name: name,
-			access_control: access_control
-		}).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			$socket.emit('join-channels', { auth: { token: $user?.token } });
-			await initChannels();
-			showCreateChannel = false;
-		}
 	}}
 />
 

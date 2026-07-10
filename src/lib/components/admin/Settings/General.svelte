@@ -170,7 +170,7 @@
 								<input
 									class="w-full mt-1 rounded-lg text-sm dark:text-gray-300 bg-transparent outline-hidden"
 									type="text"
-									placeholder={`e.g.) /api/v1/messages, /api/v1/channels`}
+									placeholder={`e.g.) /api/v1/chats, /api/v1/models`}
 									bind:value={adminConfig.API_KEY_ALLOWED_ENDPOINTS}
 								/>
 
@@ -430,14 +430,7 @@
 
 					<!-- llens(#10): コミュニティ共有(openwebui.com ストア導線)は機能ごと撤去。 -->
 					<!-- llens(#48): 評価(👍/👎)機能撤去に伴い Message Rating トグルを撤去。 -->
-
-					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Channels')} ({$i18n.t('Beta')})
-						</div>
-
-						<Switch bind:state={adminConfig.ENABLE_CHANNELS} />
-					</div>
+					<!-- llens(#67): channel(グループチャット)は機能ごと撤去。 -->
 
 					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
 						<div class=" self-center text-xs font-medium">
