@@ -17,7 +17,13 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   テストは `cd backend && ../.venv/bin/pytest open_webui/test -q`(または repo ルートで `uv run pytest`)。
   **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
   black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black open_webui/`**
-  (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。
+  (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。frontend にも同型の
+  prettier ゲート("Frontend Build / Format & Build")があり、こちらは `pnpm format`。
+- **pre-push hook(2026-07-10 導入)**: 上記 2 ゲートを push 前に手元で再現する
+  `dev/hooks/pre-push`(push 差分のファイルだけチェックするので数秒)。hook 本体は
+  リポジトリに入っているが、**有効化は clone ごとに 1 回 `git config core.hooksPath dev/hooks`
+  が必要**(git はセキュリティ上 hook を自動有効化しない — 新環境セットアップ時に忘れずに)。
+  引っかかると push が中断される。緊急回避は `git push --no-verify`。
 - `.git/index.lock` が時々出るのは shell prompt の `gitstatusd` が握るため — stale なら `rm -f .git/index.lock`
   して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。

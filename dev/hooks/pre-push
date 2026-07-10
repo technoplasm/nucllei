@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# llens pre-push hook: CI のフォーマットゲート(black / prettier)を push 前に手元で再現する。
+# push しようとしている差分ファイルだけをチェックするので数秒で終わる。
+#
+# 有効化(clone ごとに 1 回): git config core.hooksPath dev/hooks
+# 緊急回避: git push --no-verify
+#
+# CI 側の真実源:
+#   .github/workflows/format-backend.yaml        → black . && git diff --exit-code
+#   .github/workflows/format-build-frontend.yaml → pnpm format && git diff --exit-code
+
+set -u
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+ZERO=0000000000000000000000000000000000000000
+changed_files=""
+
+# pre-push は stdin で "<local_ref> <local_sha> <remote_ref> <remote_sha>" を受け取る
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ "$local_sha" = "$ZERO" ] && continue # ブランチ削除 push はチェック不要
+    if [ "$remote_sha" = "$ZERO" ]; then
+        # リモートに無い新ブランチ: origin/master 起点で差分を取る(無ければ全ファイルは見ない)
+        base=$(git merge-base "$local_sha" origin/master 2>/dev/null) || continue
+    else
+        base="$remote_sha"
+    fi
+    files=$(git diff --name-only --diff-filter=ACMR "$base" "$local_sha" 2>/dev/null)
+    changed_files="$changed_files
+$files"
+done
+
+# 実在するファイルに絞る(push 対象コミット以降に消したものを除外)
+py_files=()
+fe_files=()
+while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    case "$f" in
+    backend/*.py) py_files+=("$f") ;;
+    *.js | *.ts | *.svelte | *.css | *.md | *.html | *.json) fe_files+=("$f") ;;
+    esac
+done <<<"$(printf '%s\n' "$changed_files" | sort -u)"
+
+fail=0
+
+# --- black(CI: black==25.1.0)---
+if [ ${#py_files[@]} -gt 0 ]; then
+    BLACK="$REPO_ROOT/.venv/bin/black"
+    [ -x "$BLACK" ] || BLACK=$(command -v black || true)
+    if [ -n "$BLACK" ]; then
+        if ! "$BLACK" --check --quiet "${py_files[@]}" 2>/dev/null; then
+            echo "✗ black 未整形の Python ファイルがあります。整形してコミットし直してください:" >&2
+            echo "    cd backend && ../.venv/bin/black open_webui/" >&2
+            fail=1
+        fi
+    else
+        echo "⚠ black が見つからないため backend フォーマットチェックをスキップ(CI では走ります)" >&2
+    fi
+fi
+
+# --- prettier(CI: pnpm format)---
+if [ ${#fe_files[@]} -gt 0 ]; then
+    if [ -x node_modules/.bin/prettier ]; then
+        # .prettierignore は明示パス指定でも尊重される。対象外拡張は --ignore-unknown で流す
+        if ! node_modules/.bin/prettier --check --ignore-unknown "${fe_files[@]}" >/dev/null 2>&1; then
+            echo "✗ prettier 未整形のファイルがあります。整形してコミットし直してください:" >&2
+            echo "    pnpm format" >&2
+            fail=1
+        fi
+    else
+        echo "⚠ node_modules/.bin/prettier が無いため frontend フォーマットチェックをスキップ(pnpm install 後に有効。CI では走ります)" >&2
+    fi
+fi
+
+if [ $fail -ne 0 ]; then
+    echo "" >&2
+    echo "push を中断しました(CI の Format ゲートで落ちる内容です)。緊急回避: git push --no-verify" >&2
+    exit 1
+fi
+
+exit 0
