@@ -62,6 +62,10 @@ npm run dev   # vite :5173(使用中なら 5174 等へ自動退避)。dev 時は
 
 - 8080 が埋まっていたら upstream の docker(`docker stop open-webui`)をまず疑う
   (stock `ghcr.io/open-webui/open-webui:main` が squat していることがある。`docker stop` は可逆)。
+- **uvicorn の二重起動に注意**(#66 検証時に実害): `ps aux | grep uvicorn` で 8080 に
+  2 プロセス(--reload 有無で別個体)ぶら下がっていることがある。ポートを握っているのが
+  旧コードのプロセスだと「直したのに挙動が変わらない」罠になる — 検証前に全部 kill して
+  1 本で起動し直すのが確実。
 - vite は dev 用に **全レスポンス no-store**(`vite.config.ts` の `devNoCache` ミドルウェア, `apply:'serve'`)。
   HMR/リロードで古いモジュールを掴む反映漏れを防ぐ(#47 で導入)。
 - `config.py` は起動のたび `build/static/**` を backend static へ無条件上書きコピーする。
@@ -80,6 +84,10 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
+   **権限検証用の非 admin アカウント(#66 で作成、パスワードは同じ llens-dev)**:
+   `editor@llens.local`(group `skill-editors` 所属 = `workspace.skills` 持ち)と
+   `plainuser@llens.local`(無所属)。admin の `POST /api/v1/auths/add` で作る。
+   3層権限(admin / skill editor / user)の実機確認はこの 3 アカウントで一巡できる。
 2. **トークン取得**:
    ```sh
    TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auths/signin -H 'Content-Type: application/json' \
@@ -149,8 +157,12 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 - alert/confirm を出す操作は避ける(セッションがブロックされる)。
 - **claude-in-chrome の描画が編集前に張り付く**ことがある(shell の `curl localhost:5173/src/...` は新コードなのに
   ブラウザだけ古い。no-store でも新規タブ/別オリジンでも直らない場合あり)。原因を「キャッシュ」で流さず、
-  **Playwright(`mcp__playwright__*`)のクリーンブラウザ**で検証する: token 注入 → `page.evaluate` で form class や
-  タブ有無を **live DOM から直接読む**。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
+  **Playwright のクリーンブラウザ**で検証する(MCP が無いセッションでも `.venv` に
+  python-playwright + `~/.cache/ms-playwright` の chromium が入っており、
+  `.venv/bin/python` から `sync_playwright` で直接叩ける — #66 の UI 検証で実績):
+  token 注入 → `page.evaluate` で form class やタブ有無を **live DOM から直接読む**。
+  SvelteKit の `goto` は SPA 遷移なので `wait_for_url` が 'load' 待ちで空振りすることがある —
+  遷移確認は `wait_for_timeout` 後に `page.url` を直接読むほうが確実。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
   **原因を数字で特定**してから直す(#47: タブバーが `overflow-x-auto` で高さ0に潰れる罠を Playwright で確定)。
 
 ## 進め方の知見(セッション運用で確立したもの)

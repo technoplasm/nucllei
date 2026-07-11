@@ -20,9 +20,12 @@
    - `/` で発火する範囲 = **機能 ON ∧ preset `meta.skillIds` 紐づけ ∧ ユーザー read 可視**(AND)。
      旧「read 可視な skill 全部(どのモデルでも)」から #42 で変更 — モデルを唯一の制御面に
    - モデル manifest 露出 = 同じ 3 条件の AND
-   - group_terms 交差は read 可視の判定に含む(従来どおり)
+   - ~~group_terms 交差は read 可視の判定に含む~~ → **改訂(2026-07-10、#66)**: group_terms は
+     撤去(複数 group 所属 + OR 合成で足りる)。read 可視 = user_ids / group_ids の OR のみ
 7. **native function calling 限定**。非 native(prompt-based)tool 経路は llens から削除(#18)
 8. 作成権限: **tool 紐づき skill は admin のみ**。一般ユーザーはテンプレート skill(content のみ)を作成可
+   → **改訂(2026-07-10、#66)**: 作成できるのは skill editor(`workspace.skills`)のみで、
+   **必ず私有**。詳細は下の「権限まとめ」と `permissions.md`
 
 ## データモデル
 
@@ -58,7 +61,7 @@
 | `description` | Text, nullable | モデル向け manifest 用。空ならモデルには露出させない(name で代用しない — 説明の無い skill をモデルに見せても選べない) |
 | `content` | Text | 指示本文。サーバー既知変数の展開対象 |
 | `tool_ids` | JSON, default [] | 紐づく tool。非空の作成/更新は admin 必須 |
-| `access_control` | JSON, nullable | 既存規約どおり(None=公開 read / {}=私有 / group_ids・user_ids・group_terms) |
+| `access_control` | JSON, nullable | None=公開 read / {}=私有 / read.group_ids・user_ids のみ(**#66 で write 側と group_terms を撤去** — 真実源 `permissions.md`) |
 | `created_at` / `updated_at` | BigInteger | prompt の単一 timestamp から正規化 |
 
 移行(Alembic):
@@ -136,12 +139,18 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
 
 ## 権限まとめ
 
+**改訂(2026-07-10、#66 権限3層化 — 真実源は `permissions.md`)**: skill editor は
+「私有ノート + 全体閲覧」モデル(editor が勝手に public skill を作れないこと)。
+
 | 操作 | ゲート |
 |---|---|
-| テンプレート skill 作成/更新 | `workspace.skills`(admin バイパス) |
-| tool 紐づき skill 作成/更新(tool_ids 非空) | **admin のみ**(新設ゲート。既存に admin 専用作成パスは無いので注意) |
-| `/` 起動・モデル露出 | access_control read(group_terms 交差対応) |
-| 公開共有 | `sharing.public_skills` |
+| skill 作成 | `workspace.skills`(= skill editor)。**必ず私有(ACL={} をサーバー強制)** |
+| skill 編集・削除 | **owner のみ**(editor でも他人のは不可)。admin は全部 |
+| ACL(公開・共有範囲)の編集 | **admin のみ**(editor の保存では既存 ACL を温存) |
+| tool 紐づき skill(tool_ids 非空) | 全操作 **admin のみ**(付与・剥奪・削除とも) |
+| 管理一覧の閲覧(中身込み) | editor は全件(`/skills/list`) |
+| `/` 起動・モデル露出 | access_control read(user_ids / group_ids の OR。group_terms は撤去) |
+| ~~公開共有(`sharing.public_skills`)~~ | 廃止(#66 で sharing.* ごと撤去) |
 
 ## 実装ステップ
 
