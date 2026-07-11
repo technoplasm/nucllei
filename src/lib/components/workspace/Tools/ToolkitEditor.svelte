@@ -197,11 +197,7 @@ class Tools:
 	};
 </script>
 
-<AccessControlModal
-	bind:show={showAccessControlModal}
-	bind:accessControl
-	allowPublic={true}
-/>
+<AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
 
 <div class=" flex flex-col justify-between w-full overflow-y-auto h-full">
 	<div class="mx-auto w-full md:px-0 h-full">

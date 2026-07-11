@@ -125,11 +125,7 @@
 	});
 </script>
 
-<AccessControlModal
-	bind:show={showAccessControlModal}
-	bind:accessControl
-	allowPublic={true}
-/>
+<AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
 
 <div class="w-full max-h-full flex justify-center">
 	<form

@@ -1,10 +1,11 @@
 """権限3層化(issue #66、真実源 _memos/permissions.md)の回帰テスト。
 
 3層 = admin(model/tool/function の定義変更)> skill editor(workspace.skills、
-全 skill CRUD + use-ACL 編集)> user(read ACL の範囲で使うだけ)。
+私有ノート + 全体閲覧)> user(read ACL の範囲で使うだけ)。
 
 - admin 専有境界: model/tool の定義 CRUD・admin valves を user が叩くと 401
-- skill editor: 他人の skill も編集・削除・ACL 変更できる / 非 editor は管理系 401
+- skill editor: 全 skill を閲覧できるが、作成は必ず私有・編集/削除は自分のだけ・
+  ACL は変更不可(admin 専有・保存では温存)/ 非 editor は管理系 401
 - tool_ids 付き skill は editor でも触れない(admin 専有 — GHSA-4pcg 境界)
 - G1: features.image_generation のサーバー側 enforcement
 - G2: task endpoint の model read ACL 検証(picker 外モデルの裏口を塞ぐ)
@@ -127,20 +128,30 @@ class TestToolAdminOnly(AbstractPostgresTest):
     def test_user_cannot_manage_tools(self):
         with mock_webui_user_strict(id="9", role="user"):
             # 管理一覧(content 込み)・CRUD・admin valves すべて 401
-            assert (
-                self.fast_api_client.get(self.create_url("/list")).status_code == 401
-            )
+            assert self.fast_api_client.get(self.create_url("/list")).status_code == 401
             assert (
                 self.fast_api_client.post(
                     self.create_url("/create"),
-                    json={"id": "t1", "name": "t", "description": "d", "content": "x", "meta": {}},
+                    json={
+                        "id": "t1",
+                        "name": "t",
+                        "description": "d",
+                        "content": "x",
+                        "meta": {},
+                    },
                 ).status_code
                 == 401
             )
             assert (
                 self.fast_api_client.post(
                     self.create_url("/id/t1/update"),
-                    json={"id": "t1", "name": "t", "description": "d", "content": "x", "meta": {}},
+                    json={
+                        "id": "t1",
+                        "name": "t",
+                        "description": "d",
+                        "content": "x",
+                        "meta": {},
+                    },
                 ).status_code
                 == 401
             )
@@ -212,8 +223,7 @@ class TestSkillEditor(AbstractPostgresTest):
 
             # 閲覧用の単体取得も可(read ACL 外でも editor なら開ける)
             assert (
-                self.fast_api_client.get(self.create_url("/id/team")).status_code
-                == 200
+                self.fast_api_client.get(self.create_url("/id/team")).status_code == 200
             )
 
             # 他人の skill は編集不可
@@ -318,9 +328,7 @@ class TestSkillEditor(AbstractPostgresTest):
 
         Users.insert_new_user(id="pl", name="pl", email="pl@h.example", role="user")
         with mock_webui_user_strict(id="pl", role="user"):
-            assert (
-                self.fast_api_client.get(self.create_url("/list")).status_code == 401
-            )
+            assert self.fast_api_client.get(self.create_url("/list")).status_code == 401
             assert (
                 self.fast_api_client.post(
                     self.create_url("/create"),
@@ -339,9 +347,7 @@ class TestImageGenerationGate(AbstractPostgresTest):
         from open_webui.main import app
 
         original = app.state.config.USER_PERMISSIONS
-        app.state.config.USER_PERMISSIONS = {
-            "features": {"image_generation": False}
-        }
+        app.state.config.USER_PERMISSIONS = {"features": {"image_generation": False}}
         try:
             with mock_webui_user(id="9", role="user"):
                 response = self.fast_api_client.post(
