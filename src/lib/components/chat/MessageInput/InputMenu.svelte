@@ -17,12 +17,16 @@
 	import CameraSolid from '$lib/components/icons/CameraSolid.svelte';
 	import PhotoSolid from '$lib/components/icons/PhotoSolid.svelte';
 	import CommandLineSolid from '$lib/components/icons/CommandLineSolid.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let screenCaptureHandler: Function;
 	export let uploadFilesHandler: Function;
 	export let inputFilesHandler: Function;
+
+	// llens(#69): 保存済みファイル(/files に保存済みの file)の再添付 picker を開く
+	export let openLibraryHandler: Function = () => {};
 
 	export let uploadGoogleDriveHandler: Function;
 	export let uploadOneDriveHandler: Function;
@@ -188,6 +192,25 @@
 				>
 					<DocumentArrowUpSolid />
 					<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
+				</DropdownMenu.Item>
+			</Tooltip>
+
+			<Tooltip
+				content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
+				className="w-full"
+			>
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+						? 'opacity-50'
+						: ''}"
+					on:click={() => {
+						if (fileUploadEnabled) {
+							openLibraryHandler();
+						}
+					}}
+				>
+					<FolderOpen className="size-4" strokeWidth="2" />
+					<div class="line-clamp-1">{$i18n.t('Saved Files')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>
 

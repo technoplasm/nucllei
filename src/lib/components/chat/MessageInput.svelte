@@ -24,8 +24,7 @@
 
 	import { blobToFile, compressImage, extractCurlyBraceWords } from '$lib/utils';
 	import { transcribeAudio } from '$lib/apis/audio';
-	import { uploadFile } from '$lib/apis/files';
-	import { deleteFileById } from '$lib/apis/files';
+	import { uploadFile, deleteFileById, processFileById } from '$lib/apis/files';
 
 	import {
 		WEBUI_BASE_URL,
@@ -38,11 +37,13 @@
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
+	import FileLibraryModal from './MessageInput/FileLibraryModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
+	import Spinner from '../common/Spinner.svelte';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -155,10 +156,12 @@
 			// bring back focus to this current tab, so that the user can see the screen capture
 			window.focus();
 
-			// Convert the canvas to a Base64 image URL
-			const imageUrl = canvas.toDataURL('image/png');
-			// Add the captured image to the files array to render it
-			files = [...files, { type: 'image', url: imageUrl }];
+			// llens(#69): base64 直入れをやめ、他の画像と同じアップロード経路(file 化)に統一する。
+			const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+			if (blob) {
+				const file = blobToFile(blob, `Screen-Capture-${Date.now()}.png`);
+				inputFilesHandler([file]);
+			}
 			// Clean memory: Clear video srcObject
 			video.srcObject = null;
 		} catch (error) {
@@ -229,6 +232,163 @@
 		}
 	};
 
+	// llens(#69): 画像も file として backend に保存する(base64 直入れを廃止)。
+	// chat JSON には正準形 "/api/v1/files/{id}/content" の相対 URL を保存する
+	// (送信 payload 中のこの形式だけ backend が base64 化する)。
+	// アップロード中はローカル objectURL でプレビュー(status:'uploading')。
+	const uploadImageHandler = async (file) => {
+		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
+			toast.error($i18n.t('You do not have permission to upload files.'));
+			return null;
+		}
+
+		if (file.size == 0) {
+			toast.error($i18n.t('You cannot upload an empty file.'));
+			return null;
+		}
+
+		const tempItemId = uuidv4();
+		const previewUrl = URL.createObjectURL(file);
+		const fileItem = {
+			type: 'image',
+			file: '',
+			id: null,
+			url: previewUrl,
+			name: file.name,
+			status: 'uploading',
+			size: file.size,
+			error: '',
+			itemId: tempItemId
+		};
+
+		files = [...files, fileItem];
+
+		try {
+			// 圧縮設定(既存挙動を維持)は dataURL 経由で適用し、file に戻してからアップロード
+			let uploadTarget = file;
+
+			if ($settings?.imageCompression ?? false) {
+				const width = $settings?.imageCompressionSize?.width ?? null;
+				const height = $settings?.imageCompressionSize?.height ?? null;
+
+				if (width || height) {
+					const dataUrl = await new Promise((resolve, reject) => {
+						const reader = new FileReader();
+						reader.onload = () => resolve(reader.result);
+						reader.onerror = reject;
+						reader.readAsDataURL(file);
+					});
+
+					const compressedUrl = await compressImage(dataUrl, width, height);
+					if (compressedUrl !== dataUrl) {
+						const compressedBlob = await (await fetch(compressedUrl)).blob();
+						uploadTarget = blobToFile(compressedBlob, file.name);
+					}
+				}
+			}
+
+			const uploadedFile = await uploadFile(localStorage.token, uploadTarget);
+
+			if (uploadedFile) {
+				if (uploadedFile.error) {
+					console.warn('File upload warning:', uploadedFile.error);
+					toast.warning(uploadedFile.error);
+				}
+
+				fileItem.status = 'uploaded';
+				fileItem.file = uploadedFile;
+				fileItem.id = uploadedFile.id;
+				fileItem.name = uploadedFile?.meta?.name ?? file.name;
+				fileItem.size = uploadedFile?.meta?.size ?? file.size;
+				fileItem.url = `/api/v1/files/${uploadedFile.id}/content`;
+
+				files = files;
+			} else {
+				files = files.filter((item) => item?.itemId !== tempItemId);
+			}
+		} catch (e) {
+			toast.error(`${e}`);
+			files = files.filter((item) => item?.itemId !== tempItemId);
+		} finally {
+			URL.revokeObjectURL(previewUrl);
+		}
+	};
+
+	// llens(#69): 保存済みファイルの再添付。processFileById で Attachment フックを再発火し
+	// (発火は owner/admin のみサーバー側で制御)、戻りの FileModel から files エントリを組む。
+	// origin:'library' — dismiss 時に実体削除しない(添付解除のみ)。
+	const libraryFilesHandler = async (selected) => {
+		for (const item of selected ?? []) {
+			if (files.some((f) => f?.id === item.id)) {
+				continue;
+			}
+
+			const isImage = (item?.meta?.content_type ?? '').startsWith('image/');
+			if (isImage && visionCapableModels.length === 0) {
+				toast.error($i18n.t('Selected model(s) do not support image inputs'));
+				continue;
+			}
+
+			try {
+				const file = (await processFileById(localStorage.token, item.id)) ?? item;
+
+				if (isImage) {
+					files = [
+						...files,
+						{
+							type: 'image',
+							id: file.id,
+							url: `/api/v1/files/${file.id}/content`,
+							name: file?.meta?.name ?? file?.filename,
+							size: file?.meta?.size,
+							status: 'uploaded',
+							itemId: uuidv4(),
+							origin: 'library'
+						}
+					];
+				} else {
+					files = [
+						...files,
+						{
+							type: 'file',
+							file: file,
+							id: file.id,
+							url: `${WEBUI_API_BASE_URL}/files/${file.id}`,
+							name: file?.meta?.name ?? file?.filename,
+							collection_name: file?.meta?.collection_name ?? file?.collection_name ?? '',
+							status: 'uploaded',
+							size: file?.meta?.size,
+							error: '',
+							itemId: uuidv4(),
+							origin: 'library'
+						}
+					];
+				}
+			} catch (e) {
+				toast.error(`${e}`);
+			}
+		}
+	};
+
+	// llens(#69): dismiss の意味論 — 新規アップロード分は実体削除、
+	// library 再添付分(origin:'library')は添付解除のみ。
+	const dismissFileHandler = async (fileIdx) => {
+		const file = files[fileIdx];
+
+		if (file?.type !== 'collection' && !file?.collection && file?.origin !== 'library') {
+			if (file?.id) {
+				// This will handle both file deletion and Chroma cleanup
+				await deleteFileById(localStorage.token, file.id);
+			}
+		}
+
+		// Remove from UI state
+		files.splice(fileIdx, 1);
+		files = files;
+	};
+
+	let showFileLibraryModal = false;
+
 	const inputFilesHandler = async (inputFiles) => {
 		console.log('Input files handler called with:', inputFiles);
 		inputFiles.forEach((file) => {
@@ -262,28 +422,7 @@
 					toast.error($i18n.t('Selected model(s) do not support image inputs'));
 					return;
 				}
-				let reader = new FileReader();
-				reader.onload = async (event) => {
-					let imageUrl = event.target.result;
-
-					if ($settings?.imageCompression ?? false) {
-						const width = $settings?.imageCompressionSize?.width ?? null;
-						const height = $settings?.imageCompressionSize?.height ?? null;
-
-						if (width || height) {
-							imageUrl = await compressImage(imageUrl, width, height);
-						}
-					}
-
-					files = [
-						...files,
-						{
-							type: 'image',
-							url: `${imageUrl}`
-						}
-					];
-				};
-				reader.readAsDataURL(file);
+				uploadImageHandler(file);
 			} else {
 				uploadFileHandler(file);
 			}
@@ -363,6 +502,8 @@
 <FilesOverlay show={dragged} />
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
+
+<FileLibraryModal bind:show={showFileLibraryModal} onSelect={libraryFilesHandler} />
 
 {#if loaded}
 	<div class="w-full font-primary">
@@ -530,6 +671,13 @@
 															alt="input"
 															imageClassName=" size-14 rounded-xl object-cover"
 														/>
+														{#if file.status === 'uploading'}
+															<div
+																class="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl pointer-events-none"
+															>
+																<Spinner className="size-4" />
+															</div>
+														{/if}
 														{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
 															<Tooltip
 																className=" absolute top-1 left-1"
@@ -560,9 +708,8 @@
 														<button
 															class=" bg-white text-black border border-white rounded-full group-hover:visible invisible transition"
 															type="button"
-															on:click={() => {
-																files.splice(fileIdx, 1);
-																files = files;
+															on:click={async () => {
+																await dismissFileHandler(fileIdx);
 															}}
 														>
 															<svg
@@ -588,16 +735,7 @@
 													dismissible={true}
 													edit={true}
 													on:dismiss={async () => {
-														if (file.type !== 'collection' && !file?.collection) {
-															if (file.id) {
-																// This will handle both file deletion and Chroma cleanup
-																await deleteFileById(localStorage.token, file.id);
-															}
-														}
-
-														// Remove from UI state
-														files.splice(fileIdx, 1);
-														files = files;
+														await dismissFileHandler(fileIdx);
 													}}
 													on:click={() => {
 														console.log(file);
@@ -771,20 +909,13 @@
 													if (clipboardData && clipboardData.items) {
 														for (const item of clipboardData.items) {
 															if (item.type.indexOf('image') !== -1) {
+																// llens(#69): paste 画像も他の画像と同じアップロード経路に統一
 																const blob = item.getAsFile();
-																const reader = new FileReader();
-
-																reader.onload = function (e) {
-																	files = [
-																		...files,
-																		{
-																			type: 'image',
-																			url: `${e.target.result}`
-																		}
-																	];
-																};
-
-																reader.readAsDataURL(blob);
+																if (blob) {
+																	inputFilesHandler([
+																		blobToFile(blob, `Pasted-Image-${Date.now()}.png`)
+																	]);
+																}
 															} else if (item.type === 'text/plain') {
 																if ($settings?.largeTextAsFile ?? false) {
 																	const text = clipboardData.getData('text/plain');
@@ -984,20 +1115,13 @@
 												if (clipboardData && clipboardData.items) {
 													for (const item of clipboardData.items) {
 														if (item.type.indexOf('image') !== -1) {
+															// llens(#69): paste 画像も他の画像と同じアップロード経路に統一
 															const blob = item.getAsFile();
-															const reader = new FileReader();
-
-															reader.onload = function (e) {
-																files = [
-																	...files,
-																	{
-																		type: 'image',
-																		url: `${e.target.result}`
-																	}
-																];
-															};
-
-															reader.readAsDataURL(blob);
+															if (blob) {
+																inputFilesHandler([
+																	blobToFile(blob, `Pasted-Image-${Date.now()}.png`)
+																]);
+															}
 														} else if (item.type === 'text/plain') {
 															if ($settings?.largeTextAsFile ?? false) {
 																const text = clipboardData.getData('text/plain');
@@ -1028,6 +1152,9 @@
 											{inputFilesHandler}
 											uploadFilesHandler={() => {
 												filesInputElement.click();
+											}}
+											openLibraryHandler={() => {
+												showFileLibraryModal = true;
 											}}
 											uploadGoogleDriveHandler={async () => {
 												try {

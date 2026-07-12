@@ -1170,10 +1170,8 @@
 			toast.error($i18n.t(`Oops! There was an error in the previous response.`));
 			return;
 		}
-		if (
-			files.length > 0 &&
-			files.filter((file) => file.type !== 'image' && file.status === 'uploading').length > 0
-		) {
+		// llens(#69): 画像も file 化しアップロード経路に乗ったため、type を問わず uploading を待つ
+		if (files.length > 0 && files.filter((file) => file.status === 'uploading').length > 0) {
 			toast.error(
 				$i18n.t(`Oops! There are files still uploading. Please wait for the upload to complete.`)
 			);
@@ -1417,6 +1415,8 @@
 									type: 'text',
 									text: message?.merged?.content ?? message.content
 								},
+								// llens(#69): url は正準形 "/api/v1/files/{id}/content"(backend が base64 化)
+								// または旧チャットの data: URL — どちらもそのまま通す(分岐不要)。
 								...message.files
 									.filter((file) => file.type === 'image')
 									.map((file) => ({

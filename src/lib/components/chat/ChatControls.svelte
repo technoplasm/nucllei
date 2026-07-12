@@ -7,6 +7,7 @@
 
 	import Modal from '../common/Modal.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
+	import ChatFiles from './ChatFiles.svelte';
 	import Drawer from '../common/Drawer.svelte';
 	import EllipsisVertical from '../icons/EllipsisVertical.svelte';
 
@@ -153,6 +154,9 @@
 							}}
 						/>
 					</div>
+				{:else}
+					<!-- llens(#69): CallOverlay 以外はこのチャットのファイル一覧 -->
+					<ChatFiles {history} {chatFiles} />
 				{/if}
 			</div>
 		</Drawer>
@@ -211,6 +215,9 @@
 								}}
 							/>
 						</div>
+					{:else}
+						<!-- llens(#69): CallOverlay 以外はこのチャットのファイル一覧 -->
+						<ChatFiles {history} {chatFiles} />
 					{/if}
 				</div>
 			</div>

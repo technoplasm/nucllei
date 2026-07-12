@@ -10,6 +10,7 @@
 		mobile,
 		settings,
 		showArchivedChats,
+		showControls,
 		showSidebar,
 		theme,
 		user
@@ -25,7 +26,7 @@
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
 	import MenuLines from '../icons/MenuLines.svelte';
-	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 
 	import PencilSquare from '../icons/PencilSquare.svelte';
 	import Banner from '../common/Banner.svelte';
@@ -131,6 +132,25 @@
 								</div>
 							</button>
 						</Menu>
+					{/if}
+
+					<!-- llens(#69): 右ペイン(このチャットのファイル)のトグル。
+					     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
+					{#if $chatId}
+						<Tooltip content={$i18n.t('Files in this chat')}>
+							<button
+								id="chat-files-button"
+								class="flex cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+								on:click={() => {
+									showControls.set(!$showControls);
+								}}
+								aria-label="Toggle Chat Files"
+							>
+								<div class=" m-auto self-center">
+									<FolderOpen className=" size-5" strokeWidth="1.5" />
+								</div>
+							</button>
+						</Tooltip>
 					{/if}
 
 					<Tooltip content={$i18n.t('New Chat')}>
