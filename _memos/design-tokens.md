@@ -16,6 +16,17 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |
 
 - 変数がテーマで切り替わるので利用側に `dark:` 変種は不要。
+
+## レイアウトトークン(2026-07-12 追加)
+
+| トークン | 用途 | 現行値 |
+|---|---|---|
+| `--sidebar-width` | サイドバー実幅。Sidebar 本体と、その幅を差し引く各レイアウト(workspace/home/playground・Chat.svelte・FilesOverlay)の両方が参照 | `300px` |
+
+- 経緯: upstream v0.6.5 は Sidebar 実幅 300px に対し各レイアウトが `calc(100%-260px)` しか
+  確保しておらず、root layout の `justify-end` で溢れた 40px 分**サイドバー左端が画面外に
+  切れていた**(幅 ~1300px 以下で発現)。#19 セッションで変数に一元化して解消(8492ac032)。
+- 値の食い違いはこのバグの再発になるので、px 直書きを増やさず必ずこの変数を参照する。
 - サイドバー行の active と selected は同一トークン(`sidebar-selected`)に統一。
 - ヘッダー(chat/layout/channel Navbar)のグラデ背景は `from-surface`(dark が背景より
   暗すぎる問題を解消)。チャット入力欄は `bg-surface-raised` + 柔らかい影(`shadow-lg` 廃止)。

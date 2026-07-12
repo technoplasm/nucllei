@@ -110,6 +110,8 @@ clean な Playwright で 4 画面 end-to-end 検証(visibility は builtin 含�
 Public/Private=access_control とは別軸)。
 
 - **単一管理面 `/workspace`**、ナビ順 **Models / Skills / Tools / Functions / Settings / Users**。
+  ※改訂(2026-07-12): 現行ナビは **Models / Files / Skills / Tools / Functions / Users / Chats / Settings**
+  — #69 で Files(全ログインユーザー)、#19 で Chats(admin 専用のチャット閲覧ビュー)が追加。
   Models/Skills/Tools = `role==admin || permissions.workspace.X`、Functions/Settings/Users = `admin` のみ
   (Functions は CORE=Filter なので admin 固定)。`/admin/{functions,settings,users}` を `/workspace/*` に
   物理移動(コンポーネントは `lib/components/admin/*` を再利用)、`/admin` は `/workspace` へリダイレクト、
