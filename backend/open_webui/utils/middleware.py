@@ -209,8 +209,6 @@ def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
     file_type = file.get("type")
 
     # サーバー生成・インライン内容(この 1 リクエスト内で完結し DB 横断解決を伴わない)は許可。
-    if file_type in ("web_search", "text"):
-        return True
     if file.get("docs") is not None:
         return True
 
@@ -602,8 +600,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # 確定するため、metadata への搭載は後段(tools 合流の後)で行う。
 
     # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
-    # 後段で追加される web_search 等のサーバー生成項目より前に絞ることで、被害者ファイル
-    # を指す偽装 file_id / collection がソース解決に到達しないようにする。
+    # 後段で追加されるサーバー生成項目より前に絞ることで、被害者ファイルを指す
+    # 偽装 file_id / collection がソース解決に到達しないようにする。
     if form_data.get("files"):
         form_data["files"] = filter_files_by_user_access(form_data["files"], user)
 

@@ -21,7 +21,6 @@
 			multiple_models: true
 		},
 		features: {
-			web_search: true,
 			image_generation: true,
 			code_interpreter: true
 		}
@@ -240,14 +239,6 @@
 
 	<div>
 		<div class=" mb-2 text-sm font-medium">{$i18n.t('Features Permissions')}</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Web Search')}
-			</div>
-
-			<Switch bind:state={permissions.features.web_search} />
-		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">
 			<div class=" self-center text-xs font-medium">

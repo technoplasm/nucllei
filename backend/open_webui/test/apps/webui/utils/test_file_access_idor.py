@@ -131,10 +131,12 @@ class TestFileAccessIDOR(AbstractPostgresTest):
     def test_filter_server_generated_entries_kept(self):
         from open_webui.utils.middleware import filter_files_by_user_access
 
-        # web_search / docs はこのリクエスト内でサーバー生成(DB 横断解決なし)→ 通す
+        # docs 等のインライン内容(id/collection を持たずこのリクエスト内で完結)は
+        # DB 横断解決を伴わないので通す(#40 の IDOR フィルタは file_id/collection の
+        # 所有権だけを見る)。
         files = [
-            {"type": "web_search", "name": "q", "urls": ["http://x"]},
             {"docs": [{"content": "c", "metadata": {}}], "name": "q"},
+            {"name": "inline", "content": "c"},
         ]
         assert filter_files_by_user_access(files, self.bob) == files
 

@@ -17,12 +17,12 @@ def get_sources_from_files(request, files):
 
         context = None
         if file.get("docs"):
-            # BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL(Web 検索の bypass 経路)
+            # インライン docs(サーバー生成の content 配列をそのまま渡す経路)
             context = {
                 "documents": [[doc.get("content") for doc in file.get("docs")]],
                 "metadatas": [[doc.get("metadata") for doc in file.get("docs")]],
             }
-        elif file.get("type") != "web_search":
+        else:
             # 全文注入(唯一経路): 添付ファイルの data.content をそのまま積む
             if file.get("type") == "collection":
                 file_ids = file.get("data", {}).get("file_ids", [])
