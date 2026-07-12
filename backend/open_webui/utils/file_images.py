@@ -6,12 +6,17 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 (process_chat_payload 末尾)に、要求ユーザーが読める file だけを Storage から
 読み出して data URL に変換する。
 
-読めない・存在しない file は警告 log のみで該当パーツをそのまま残す
-(payload に 404 等の判定情報を混ぜない — file の存在有無をモデル経由で
-漏らさないため、アクセス不可と不存在を区別しない)。
-data URL・外部 URL・文字列 content のメッセージは触らない。
+変換できない内部 file URL(アクセス不可・削除済み・storage 欠落)は、相対 URL の
+まま残すとモデル側がリクエストごと落とし該当チャットが恒久的に失敗するため、
+text パーツ "(image unavailable)" に置換する。3 経路とも同一の置換にすることで、
+payload からアクセス不可と不存在を区別できない(file の存在有無をモデル経由で
+漏らさない)。data URL・外部 URL・文字列 content のメッセージは触らない。
+
+読み出し + base64 エンコードは blocking I/O なので thread にオフロードする
+(attachment dispatch と同じ方針 — event loop を塞がない)。
 """
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -30,6 +35,8 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 INTERNAL_FILE_URL_PATTERN = re.compile(
     r"^(?:https?://[^/]+)?/api/v1/files/([^/?#]+)/content(?:\?[^#]*)?$"
 )
+
+UNAVAILABLE_IMAGE_TEXT = "(image unavailable)"
 
 
 def _load_file_as_data_url(file_id: str, user) -> str | None:
@@ -61,11 +68,22 @@ def _load_file_as_data_url(file_id: str, user) -> str | None:
     return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
-def inline_internal_image_urls(messages: list, user) -> list:
+async def inline_internal_image_urls(messages: list, user) -> list:
     """messages(OpenAI 形式)内の内部 file URL の image_url パーツを data URL に置換する。
 
-    messages を破壊的に書き換えて同じ list を返す。変換できないパーツは無変更。
+    messages を破壊的に書き換えて同じ list を返す。変換できない内部 file URL パーツは
+    text "(image unavailable)" に置換(冒頭 docstring 参照)。内部 URL 以外は無変更。
     """
+    # 同一ターン内で同じ file を複数回参照しても読み出しは 1 回(結果 None もキャッシュ)。
+    cache: dict[str, str | None] = {}
+
+    async def load(file_id: str) -> str | None:
+        if file_id not in cache:
+            cache[file_id] = await asyncio.to_thread(
+                _load_file_as_data_url, file_id, user
+            )
+        return cache[file_id]
+
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, list):
@@ -84,8 +102,11 @@ def inline_internal_image_urls(messages: list, user) -> list:
             if not match:
                 continue
 
-            data_url = _load_file_as_data_url(match.group(1), user)
+            data_url = await load(match.group(1))
             if data_url is None:
+                part.clear()
+                part["type"] = "text"
+                part["text"] = UNAVAILABLE_IMAGE_TEXT
                 continue
 
             if isinstance(image_url, dict):

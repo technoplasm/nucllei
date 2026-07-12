@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_FORWARD_USER_INFO_HEADERS, SRC_LOG_LEVELS
-from open_webui.routers.files import upload_file
+from open_webui.routers.files import store_uploaded_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.images.comfyui import (
@@ -455,7 +455,10 @@ def load_url_image_data(url, headers=None):
         return None
 
 
-def upload_image(request, image_metadata, image_data, content_type, user):
+async def upload_image(request, image_metadata, image_data, content_type, user):
+    # llens(#69): 旧実装は async の upload_file を await せず coroutine の .id 参照で
+    # 必ず AttributeError になっていた(生成画像保存の既存欠陥)。内部保存経路
+    # store_uploaded_file(chat.file_upload の enforcement を通らない)を await する。
     image_format = mimetypes.guess_extension(content_type)
     file = UploadFile(
         file=io.BytesIO(image_data),
@@ -464,7 +467,9 @@ def upload_image(request, image_metadata, image_data, content_type, user):
             "content-type": content_type,
         },
     )
-    file_item = upload_file(request, file, user, file_metadata=image_metadata)
+    file_item = await store_uploaded_file(
+        request, file, user, file_metadata=image_metadata
+    )
     url = request.app.url_path_for("get_file_content_by_id", id=file_item.id)
     return url
 
@@ -540,7 +545,7 @@ async def image_generations(
                 else:
                     image_data, content_type = load_b64_image_data(image["b64_json"])
 
-                url = upload_image(request, data, image_data, content_type, user)
+                url = await upload_image(request, data, image_data, content_type, user)
                 images.append({"url": url})
             return images
 
@@ -575,7 +580,7 @@ async def image_generations(
                 image_data, content_type = load_b64_image_data(
                     image["bytesBase64Encoded"]
                 )
-                url = upload_image(request, data, image_data, content_type, user)
+                url = await upload_image(request, data, image_data, content_type, user)
                 images.append({"url": url})
 
             return images
@@ -627,7 +632,7 @@ async def image_generations(
                 image_data, content_type = await asyncio.to_thread(
                     load_url_image_data, image["url"], headers
                 )
-                url = upload_image(
+                url = await upload_image(
                     request,
                     form_data.model_dump(exclude_none=True),
                     image_data,
@@ -682,7 +687,7 @@ async def image_generations(
 
             for image in res["images"]:
                 image_data, content_type = load_b64_image_data(image)
-                url = upload_image(
+                url = await upload_image(
                     request,
                     {**data, "info": res["info"]},
                     image_data,

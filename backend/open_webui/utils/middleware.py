@@ -915,7 +915,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # の image_url は air-gapped のためモデル側から fetch できない — モデルへ出る直前の
     # ここで base64 data URL に変換する。native tool ループの再送(process_chat_response)も
     # form_data["messages"] を再利用するため、変換はこの 1 箇所で足りる。
-    form_data["messages"] = inline_internal_image_urls(form_data["messages"], user)
+    form_data["messages"] = await inline_internal_image_urls(
+        form_data["messages"], user
+    )
 
     # llens(#57): streaming でも実測 usage を受け取る。OpenAI 互換サーバーは
     # stream_options.include_usage が無いと usage チャンクを送らない(SGLang 実測済み)。

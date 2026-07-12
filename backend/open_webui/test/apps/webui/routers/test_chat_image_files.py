@@ -168,6 +168,8 @@ class TestChatImageFiles(AbstractPostgresTest):
             assert f.read() == PNG_BYTES
 
         # コピー先はモデル送信時にインライン化できる(clone → 再送の end-to-end)
+        import asyncio
+
         from open_webui.utils.file_images import inline_internal_image_urls
 
         messages = [
@@ -176,7 +178,7 @@ class TestChatImageFiles(AbstractPostgresTest):
                 "content": [{"type": "image_url", "image_url": {"url": entry["url"]}}],
             }
         ]
-        inline_internal_image_urls(messages, self.bob)
+        asyncio.run(inline_internal_image_urls(messages, self.bob))
         assert messages[0]["content"][0]["image_url"]["url"].startswith(
             "data:image/png;base64,"
         )

@@ -99,6 +99,39 @@ class TestAttachmentGlobal(AbstractPostgresTest):
         saved = self.files.get_file_by_id(r.json()["id"])
         assert saved.data == {}
 
+    # ---- chat.file_upload の enforcement(#69、permissions.md 原則 1/5)----
+
+    def _set_file_upload_permission(self, value):
+        from open_webui.main import app
+
+        permissions = app.state.config.USER_PERMISSIONS
+        permissions["chat"] = {**permissions.get("chat", {}), "file_upload": value}
+        app.state.config.USER_PERMISSIONS = permissions
+
+    def test_upload_forbidden_when_file_upload_permission_off(self):
+        self._set_file_upload_permission(False)
+        try:
+            with mock_webui_user(id="1"):  # 既定 role="user"
+                r = self.fast_api_client.post(
+                    self.create_url("/"),
+                    files={"file": ("doc.txt", b"hello", "text/plain")},
+                )
+            assert r.status_code == 401, r.text
+        finally:
+            self._set_file_upload_permission(True)
+
+    def test_upload_allowed_for_admin_even_when_permission_off(self):
+        self._set_file_upload_permission(False)
+        try:
+            with mock_webui_user(id="1", role="admin"):
+                r = self.fast_api_client.post(
+                    self.create_url("/"),
+                    files={"file": ("doc.txt", b"hello", "text/plain")},
+                )
+            assert r.status_code == 200, r.text
+        finally:
+            self._set_file_upload_permission(True)
+
     # ---- POST /files/{id}/process(再添付フック)----
 
     def test_process_owner_dispatches_with_attach_event(self):

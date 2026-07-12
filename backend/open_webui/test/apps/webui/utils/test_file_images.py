@@ -5,11 +5,14 @@
 URL を fetch できず、モデルへ出る直前に inline_internal_image_urls が
 data URL へ変換する(utils/file_images.py、process_chat_payload 末尾で発火)。
 
-- 読取権限のある file だけ変換する(非公開 file は他人のリクエストでは無変換)
-- 読めない・不在・storage 欠落はパーツをそのまま残す(404 情報を payload に混ぜない)
+- 読取権限のある file だけ変換する(非公開 file は他人のリクエストでは変換されない)
+- 読めない・不在・storage 欠落の内部 URL は text "(image unavailable)" に置換
+  (相対 URL のまま残すとモデル側でリクエストごと落ちる。3 経路同一置換なので
+  payload からアクセス不可と不存在を区別できない)
 - data URL・外部 URL・文字列 content は触らない
 """
 
+import asyncio
 import base64
 import os
 
@@ -17,6 +20,8 @@ from test.util.abstract_integration_test import AbstractPostgresTest
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
+
+UNAVAILABLE = {"type": "text", "text": "(image unavailable)"}
 
 
 class TestFileImagesInline(AbstractPostgresTest):
@@ -72,7 +77,7 @@ class TestFileImagesInline(AbstractPostgresTest):
     def _convert(self, messages, user):
         from open_webui.utils.file_images import inline_internal_image_urls
 
-        return inline_internal_image_urls(messages, user)
+        return asyncio.run(inline_internal_image_urls(messages, user))
 
     # ---- 変換される ----
 
@@ -155,37 +160,39 @@ class TestFileImagesInline(AbstractPostgresTest):
 
         return UPLOAD_DIR
 
-    # ---- 変換されない(スキップして payload そのまま) ----
+    # ---- 変換できない内部 URL は "(image unavailable)" の text パーツに置換 ----
 
-    def test_unreadable_file_left_as_is(self):
-        # 非公開 file は他人のリクエストでは変換されない(URL がそのまま残る)
+    def test_unreadable_file_replaced_with_placeholder(self):
+        # 非公開 file は他人のリクエストでは data URL 化されない。相対 URL のまま
+        # 残すとモデル側でリクエストごと落ちるため text プレースホルダに置換される。
         messages = self._convert(
             self._messages("/api/v1/files/f-img/content"), self.bob
         )
-        assert (
-            messages[0]["content"][1]["image_url"]["url"]
-            == "/api/v1/files/f-img/content"
-        )
+        assert messages[0]["content"][1] == UNAVAILABLE
 
-    def test_missing_file_left_as_is(self):
+    def test_missing_file_replaced_with_placeholder(self):
+        # 不在 file もアクセス不可と同一の置換(存在有無を payload から区別できない)
         messages = self._convert(
             self._messages("/api/v1/files/no-such/content"), self.alice
         )
-        assert (
-            messages[0]["content"][1]["image_url"]["url"]
-            == "/api/v1/files/no-such/content"
-        )
+        assert messages[0]["content"][1] == UNAVAILABLE
 
-    def test_storage_missing_left_as_is(self):
-        # DB 行はあるが storage 実体が消えている場合もスキップ(例外にしない)
+    def test_storage_missing_replaced_with_placeholder(self):
+        # DB 行はあるが storage 実体が消えている場合も同一の置換(例外にしない)
         os.remove(self.img_path)
         messages = self._convert(
             self._messages("/api/v1/files/f-img/content"), self.alice
         )
-        assert (
-            messages[0]["content"][1]["image_url"]["url"]
-            == "/api/v1/files/f-img/content"
+        assert messages[0]["content"][1] == UNAVAILABLE
+
+    def test_deleted_file_replaced_after_owner_delete(self):
+        # 再現シナリオ固定: 添付済み画像を /files ページで削除 → 以後のターンで
+        # 履歴中の内部 URL がプレースホルダになり、チャット自体は失敗しない。
+        self.Files.delete_file_by_id("f-img")
+        messages = self._convert(
+            self._messages("/api/v1/files/f-img/content"), self.alice
         )
+        assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_data_url_untouched(self):
         data_url = f"data:image/png;base64,{PNG_B64}"

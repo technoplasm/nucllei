@@ -27,7 +27,7 @@ from open_webui.models.files import (
 )
 
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import has_read_access_to_file
+from open_webui.utils.access_control import has_permission, has_read_access_to_file
 from open_webui.utils.attachment import process_attachment_functions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
@@ -68,14 +68,19 @@ def has_access_to_file(
 ############################
 
 
-@router.post("/", response_model=FileModelResponse)
-async def upload_file(
+async def store_uploaded_file(
     request: Request,
-    file: UploadFile = File(...),
-    user=Depends(get_verified_user),
+    file: UploadFile,
+    user,
     file_metadata: dict = {},
-    process: bool = Query(True),
+    process: bool = True,
 ):
+    """upload の実体(受け入れゲート → Storage 保存 → Attachment dispatch)。
+
+    llens(#69): endpoint の `chat.file_upload` enforcement を通らない内部保存経路
+    (生成画像 = routers/images.py)と共用するため endpoint 本体から分離。
+    HTTP パラメータを持たないので、query 経由で権限チェックを迂回される余地がない。
+    """
     log.info(f"file.content_type: {file.content_type}")
     try:
         unsanitized_filename = file.filename
@@ -156,6 +161,26 @@ async def upload_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e),
         )
+
+
+@router.post("/", response_model=FileModelResponse)
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    user=Depends(get_verified_user),
+    process: bool = Query(True),
+):
+    # llens(#69): chat.file_upload はフロントの UI 隠しだけでサーバー側未チェックだった
+    # (permissions.md 原則 1 違反)。ここが enforcement point。
+    if user.role == "user" and not has_permission(
+        user.id, "chat.file_upload", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    return await store_uploaded_file(request, file, user, process=process)
 
 
 ############################
