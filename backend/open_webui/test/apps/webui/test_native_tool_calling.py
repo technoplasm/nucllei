@@ -1075,13 +1075,31 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
             specs=[dict(CLOCK_TOOL_SPEC)],
         )
 
-    def test_tool_ids_flow_to_model_as_native_tools(self):
-        """function_calling 指定なしでも tools がモデルへの payload に載る。
+    def _bind_tools_to_model(self, tool_ids):
+        """llens(#54): tool はモデル割り当て(meta.toolIds)からサーバー側解決。
+        mock-model に custom model 行を重ねて toolIds を持たせる。"""
+        from open_webui.models.models import ModelForm, Models
+
+        Models.insert_new_model(
+            ModelForm(
+                id="mock-model",
+                name="mock-model",
+                meta={"toolIds": tool_ids},
+                params={},
+                access_control=None,
+            ),
+            "1",
+        )
+
+    def test_model_assigned_tools_flow_to_model_as_native_tools(self):
+        """モデル割り当て(meta.toolIds)の tool が native 形式で payload に載る。
 
         旧実装の既定(非 native)ではタスクモデルへの function_calling
         プロンプト呼び出しが挟まり、payload に tools は載らなかった。
+        #54 以降、tool_ids はサーバー側解決(クライアント申告は廃止)。
         """
         self._register_clock_tool()
+        self._bind_tools_to_model(["clock"])
 
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
@@ -1090,7 +1108,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                     "model": "mock-model",
                     "messages": [{"role": "user", "content": "何時?"}],
                     "stream": False,
-                    "tool_ids": ["clock"],
                 },
             )
         assert response.status_code == 200, response.text
@@ -1107,6 +1124,30 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
         # 旧経路のプロンプト注入("Available Tools:")が消えている
         for message in sent["messages"]:
             assert "Available Tools:" not in (message.get("content") or "")
+
+    def test_client_supplied_tool_ids_are_ignored(self):
+        """llens(#54): payload の tool_ids は無視される(チャット単位切り替えの撤去)。
+
+        tool は実在し read 可能でも、モデルに割り当てられていなければ載らない —
+        tool の有効範囲を決めるのはモデル設定のみ。
+        """
+        self._register_clock_tool()
+        # モデルへの割り当ては行わない
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "mock-model",
+                    "messages": [{"role": "user", "content": "何時?"}],
+                    "stream": False,
+                    "tool_ids": ["clock"],
+                },
+            )
+        assert response.status_code == 200, response.text
+
+        sent = self.mock_server.received[-1]
+        assert "tools" not in sent, sent.get("tools")
 
     def test_render_declaration_reaches_model_payload_at_runtime(self):
         """Annotated(Code)宣言が DB 保存 spec に無くても、get_tools が生きた関数
@@ -1137,6 +1178,8 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
             ],
         )
 
+        self._bind_tools_to_model(["runpy"])
+
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 "/api/chat/completions",
@@ -1144,7 +1187,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                     "model": "mock-model",
                     "messages": [{"role": "user", "content": "1+1 を計算して"}],
                     "stream": False,
-                    "tool_ids": ["runpy"],
                 },
             )
         assert response.status_code == 200, response.text
@@ -1187,6 +1229,8 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
             ],
         )
 
+        self._bind_tools_to_model(["optpy"])
+
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 "/api/chat/completions",
@@ -1194,7 +1238,6 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
                     "model": "mock-model",
                     "messages": [{"role": "user", "content": "実行して"}],
                     "stream": False,
-                    "tool_ids": ["optpy"],
                 },
             )
         assert response.status_code == 200, response.text

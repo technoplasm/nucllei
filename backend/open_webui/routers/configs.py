@@ -27,8 +27,6 @@ class AttachmentConfigForm(BaseModel):
     ATTACHMENT_MAX_COUNT: Optional[int]
     ATTACHMENT_ALLOWED_EXTENSIONS: list[str]
     ATTACHMENT_FUNCTION_ID: str = ""
-    ENABLE_GOOGLE_DRIVE_INTEGRATION: bool
-    ENABLE_ONEDRIVE_INTEGRATION: bool
 
 
 def _attachment_config(request: Request):
@@ -37,8 +35,6 @@ def _attachment_config(request: Request):
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
         "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
         "ATTACHMENT_FUNCTION_ID": request.app.state.config.ATTACHMENT_FUNCTION_ID,
-        "ENABLE_GOOGLE_DRIVE_INTEGRATION": request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-        "ENABLE_ONEDRIVE_INTEGRATION": request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
     }
 
 
@@ -68,12 +64,6 @@ async def set_attachment_config(
         form_data.ATTACHMENT_ALLOWED_EXTENSIONS
     )
     request.app.state.config.ATTACHMENT_FUNCTION_ID = function_id
-    request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = (
-        form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
-    )
-    request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION = (
-        form_data.ENABLE_ONEDRIVE_INTEGRATION
-    )
     return _attachment_config(request)
 
 

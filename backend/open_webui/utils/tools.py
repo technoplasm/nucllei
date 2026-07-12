@@ -158,10 +158,10 @@ def get_tools(
             else:
                 continue
         else:
-            # llens(GHSA-4pcg-253r-rf9w / CVE-2026-45350): tool_ids はリクエスト由来
-            # (frontend が model の toolIds も含めて送る)。ユーザーが read 権限を
-            # 持たない tool_id を渡してツール制限を回避できるため、ここでアクセスを
-            # 検証し、権限の無い tool は読み込まず無視する(admin / 所有者はバイパス)。
+            # llens(GHSA-4pcg-253r-rf9w / CVE-2026-45350 → #54 で強化): tool_ids は
+            # チャット経路ではサーバー側解決(model.meta.toolIds — クライアント申告は
+            # 廃止)。ここでの read ACL 検証は per-user のゲート(#66)として維持し、
+            # 権限の無い tool は読み込まず無視する(admin / 所有者はバイパス)。
             # skill 由来の id は enforce_access_control=False で呼ばれる(#35 step2b)。
             if enforce_access_control and not (
                 user.role == "admin"

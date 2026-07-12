@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFile } from '$lib/utils/onedrive-file-picker';
 
 	import { onMount, tick, getContext, createEventDispatcher, onDestroy } from 'svelte';
 	const dispatch = createEventDispatcher();
@@ -15,7 +13,6 @@
 		models,
 		config,
 		showCallOverlay,
-		tools,
 		skills,
 		user as _user,
 		showControls,
@@ -47,12 +44,9 @@
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
-	import PhotoSolid from '../icons/PhotoSolid.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
-	import ToolServersModal from './ToolServersModal.svelte';
-	import Wrench from '../icons/Wrench.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -84,19 +78,14 @@
 	export let prompt = '';
 	export let files = [];
 
-	export let selectedToolIds = [];
-
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 
 	$: onChange({
 		prompt,
 		files,
-		selectedToolIds,
 		imageGenerationEnabled
 	});
-
-	let showTools = false;
 
 	let loaded = false;
 	let recording = false;
@@ -126,45 +115,6 @@
 			top: element.scrollHeight,
 			behavior: 'smooth'
 		});
-	};
-
-	const screenCaptureHandler = async () => {
-		try {
-			// Request screen media
-			const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-				video: { cursor: 'never' },
-				audio: false
-			});
-			// Once the user selects a screen, temporarily create a video element
-			const video = document.createElement('video');
-			video.srcObject = mediaStream;
-			// Ensure the video loads without affecting user experience or tab switching
-			await video.play();
-			// Set up the canvas to match the video dimensions
-			const canvas = document.createElement('canvas');
-			canvas.width = video.videoWidth;
-			canvas.height = video.videoHeight;
-			// Grab a single frame from the video stream using the canvas
-			const context = canvas.getContext('2d');
-			context.drawImage(video, 0, 0, canvas.width, canvas.height);
-			// Stop all video tracks (stop screen sharing) after capturing the image
-			mediaStream.getTracks().forEach((track) => track.stop());
-
-			// bring back focus to this current tab, so that the user can see the screen capture
-			window.focus();
-
-			// llens(#69): base64 直入れをやめ、他の画像と同じアップロード経路(file 化)に統一する。
-			const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-			if (blob) {
-				const file = blobToFile(blob, `Screen-Capture-${Date.now()}.png`);
-				inputFilesHandler([file]);
-			}
-			// Clean memory: Clear video srcObject
-			video.srcObject = null;
-		} catch (error) {
-			// Handle any errors (e.g., user cancels screen sharing)
-			console.error('Error capturing screen:', error);
-		}
 	};
 
 	const uploadFileHandler = async (file, fullContext: boolean = false) => {
@@ -510,8 +460,6 @@
 
 <FilesOverlay show={dragged} />
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
-
 <FileLibraryModal bind:show={showFileLibraryModal} onSelect={libraryFilesHandler} />
 
 {#if loaded}
@@ -552,7 +500,7 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || imageGenerationEnabled || codeInterpreterEnabled}
+					{#if atSelectedModel !== undefined || imageGenerationEnabled || codeInterpreterEnabled}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-surface z-10"
 						>
@@ -591,9 +539,6 @@
 						bind:prompt
 						bind:files
 						{allowedSkillIds}
-						on:upload={(e) => {
-							dispatch('upload', e.detail);
-						}}
 						on:select={(e) => {
 							const data = e.detail;
 
@@ -904,7 +849,6 @@
 													if (e.key === 'Escape') {
 														console.log('Escape');
 														atSelectedModel = undefined;
-														selectedToolIds = [];
 														imageGenerationEnabled = false;
 													}
 												}}
@@ -1103,7 +1047,6 @@
 												if (e.key === 'Escape') {
 													console.log('Escape');
 													atSelectedModel = undefined;
-													selectedToolIds = [];
 													imageGenerationEnabled = false;
 												}
 											}}
@@ -1154,49 +1097,11 @@
 								<div class=" flex justify-between mt-1 mb-2.5 mx-0.5 max-w-full" dir="ltr">
 									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-0.5">
 										<InputMenu
-											bind:selectedToolIds
-											{screenCaptureHandler}
-											{inputFilesHandler}
 											uploadFilesHandler={() => {
 												filesInputElement.click();
 											}}
 											openLibraryHandler={() => {
 												showFileLibraryModal = true;
-											}}
-											uploadGoogleDriveHandler={async () => {
-												try {
-													const fileData = await createPicker();
-													if (fileData) {
-														const file = new File([fileData.blob], fileData.name, {
-															type: fileData.blob.type
-														});
-														await uploadFileHandler(file);
-													} else {
-														console.log('No file was selected from Google Drive');
-													}
-												} catch (error) {
-													console.error('Google Drive Error:', error);
-													toast.error(
-														$i18n.t('Error accessing Google Drive: {{error}}', {
-															error: error.message
-														})
-													);
-												}
-											}}
-											uploadOneDriveHandler={async () => {
-												try {
-													const fileData = await pickAndDownloadFile();
-													if (fileData) {
-														const file = new File([fileData.blob], fileData.name, {
-															type: fileData.blob.type || 'application/octet-stream'
-														});
-														await uploadFileHandler(file);
-													} else {
-														console.log('No file was selected from OneDrive');
-													}
-												} catch (error) {
-													console.error('OneDrive Error:', error);
-												}
 											}}
 											onClose={async () => {
 												await tick();
@@ -1224,29 +1129,6 @@
 										</InputMenu>
 
 										<div class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1">
-											{#if selectedToolIds.length > 0}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: selectedToolIds.length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg p-1 self-center transition"
-														aria-label="Available Tools"
-														type="button"
-														on:click={() => {
-															showTools = !showTools;
-														}}
-													>
-														<Wrench className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm font-medium text-gray-600 dark:text-gray-300">
-															{selectedToolIds.length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
-
 											{#if $_user}
 												{#if $config?.features?.enable_image_generation && ($_user.role === 'admin' || $_user?.permissions?.features?.image_generation)}
 													<Tooltip content={$i18n.t('Generate an image')} placement="top">

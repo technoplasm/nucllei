@@ -1354,36 +1354,8 @@ Ensure that the tools are effectively utilized to achieve the highest-quality an
 ####################################
 
 
-# If configured, Google Drive will be available as an upload option.
-ENABLE_GOOGLE_DRIVE_INTEGRATION = RuntimeConfig(
-    "ENABLE_GOOGLE_DRIVE_INTEGRATION",
-    "google_drive.enable",
-    os.getenv("ENABLE_GOOGLE_DRIVE_INTEGRATION", "False").lower() == "true",
-)
-
-GOOGLE_DRIVE_CLIENT_ID = RuntimeConfig(
-    "GOOGLE_DRIVE_CLIENT_ID",
-    "google_drive.client_id",
-    os.environ.get("GOOGLE_DRIVE_CLIENT_ID", ""),
-)
-
-GOOGLE_DRIVE_API_KEY = RuntimeConfig(
-    "GOOGLE_DRIVE_API_KEY",
-    "google_drive.api_key",
-    os.environ.get("GOOGLE_DRIVE_API_KEY", ""),
-)
-
-ENABLE_ONEDRIVE_INTEGRATION = RuntimeConfig(
-    "ENABLE_ONEDRIVE_INTEGRATION",
-    "onedrive.enable",
-    os.getenv("ENABLE_ONEDRIVE_INTEGRATION", "False").lower() == "true",
-)
-
-ONEDRIVE_CLIENT_ID = RuntimeConfig(
-    "ONEDRIVE_CLIENT_ID",
-    "onedrive.client_id",
-    os.environ.get("ONEDRIVE_CLIENT_ID", ""),
-)
+# llens(#54): Google Drive / OneDrive 統合(外部クラウドからの添付取り込み)は
+# 機能ごと撤去した(薄い業務基盤に不要)。
 
 # llens(#52): 文書抽出(docling/tika/document_intelligence/mistral_ocr)は案件層(prism)の
 # Attachment Function が直接担うため、fork 本体の抽出エンジン config は撤去した。

@@ -88,7 +88,6 @@ from open_webui.config import (
     OLLAMA_API_CONFIGS,
     # OpenAI
     ENABLE_OPENAI_API,
-    ONEDRIVE_CLIENT_ID,
     OPENAI_API_BASE_URLS,
     OPENAI_API_KEYS,
     OPENAI_API_CONFIGS,
@@ -190,12 +189,7 @@ from open_webui.config import (
     BOCHA_SEARCH_API_KEY,
     GOOGLE_PSE_API_KEY,
     GOOGLE_PSE_ENGINE_ID,
-    GOOGLE_DRIVE_CLIENT_ID,
-    GOOGLE_DRIVE_API_KEY,
-    ONEDRIVE_CLIENT_ID,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
-    ENABLE_GOOGLE_DRIVE_INTEGRATION,
-    ENABLE_ONEDRIVE_INTEGRATION,
     UPLOAD_DIR,
     # WebUI
     WEBUI_AUTH,
@@ -556,8 +550,6 @@ app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = (
     BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
 )
 
-app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
-app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.GOOGLE_PSE_API_KEY = GOOGLE_PSE_API_KEY
 app.state.config.GOOGLE_PSE_ENGINE_ID = GOOGLE_PSE_ENGINE_ID
@@ -957,7 +949,6 @@ async def chat_completion(
             "chat_id": form_data.pop("chat_id", None),
             "message_id": form_data.pop("id", None),
             "session_id": form_data.pop("session_id", None),
-            "tool_ids": form_data.get("tool_ids", None),
             "files": form_data.get("files", None),
             "features": form_data.get("features", None),
             "variables": form_data.get("variables", None),
@@ -1123,8 +1114,6 @@ async def get_app_config(request: Request):
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
-                    "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-                    "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                 }
                 if user is not None
                 else {}
@@ -1152,11 +1141,6 @@ async def get_app_config(request: Request):
                     "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
                 },
                 "permissions": {**app.state.config.USER_PERMISSIONS},
-                "google_drive": {
-                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-                    "api_key": GOOGLE_DRIVE_API_KEY.value,
-                },
-                "onedrive": {"client_id": ONEDRIVE_CLIENT_ID.value},
                 "license_metadata": app.state.LICENSE_METADATA,
                 **(
                     {

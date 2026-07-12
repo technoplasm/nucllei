@@ -201,8 +201,6 @@ class TestAttachmentConfigFunctionId(AbstractPostgresTest):
             "ATTACHMENT_MAX_COUNT": None,
             "ATTACHMENT_ALLOWED_EXTENSIONS": [],
             "ATTACHMENT_FUNCTION_ID": function_id,
-            "ENABLE_GOOGLE_DRIVE_INTEGRATION": False,
-            "ENABLE_ONEDRIVE_INTEGRATION": False,
         }
 
     def test_save_valid_function_id(self):

@@ -30,8 +30,7 @@
 		showCallOverlay,
 		currentChatPage,
 		mobile,
-		chatTitle,
-		tools
+		chatTitle
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
@@ -54,7 +53,6 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getUserSettings } from '$lib/apis/users';
 	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';
-	import { getTools } from '$lib/apis/tools';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -95,7 +93,6 @@
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
-	let selectedToolIds = [];
 	let imageGenerationEnabled = false;
 	let codeInterpreterEnabled = false;
 
@@ -121,7 +118,6 @@
 
 			prompt = '';
 			files = [];
-			selectedToolIds = [];
 			imageGenerationEnabled = false;
 
 			if (chatIdProp && (await loadChat())) {
@@ -134,7 +130,6 @@
 
 						prompt = input.prompt;
 						files = input.files;
-						selectedToolIds = input.selectedToolIds;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 					} catch (e) {}
 				}
@@ -158,31 +153,6 @@
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
 		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
-	};
-
-	$: if (selectedModels) {
-		setToolIds();
-	}
-
-	$: if (atSelectedModel || selectedModels) {
-		setToolIds();
-	}
-
-	const setToolIds = async () => {
-		if (!$tools) {
-			tools.set(await getTools(localStorage.token));
-		}
-
-		if (selectedModels.length !== 1 && !atSelectedModel) {
-			return;
-		}
-
-		const model = atSelectedModel ?? $models.find((m) => m.id === selectedModels[0]);
-		if (model) {
-			selectedToolIds = (model?.info?.meta?.toolIds ?? []).filter((id) =>
-				$tools.find((t) => t.id === id)
-			);
-		}
 	};
 
 	const showMessage = async (message) => {
@@ -385,12 +355,10 @@
 				const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
 				prompt = input.prompt;
 				files = input.files;
-				selectedToolIds = input.selectedToolIds;
 				imageGenerationEnabled = input.imageGenerationEnabled;
 			} catch (e) {
 				prompt = '';
 				files = [];
-				selectedToolIds = [];
 				imageGenerationEnabled = false;
 			}
 		}
@@ -424,122 +392,6 @@
 		window.removeEventListener('message', onMessageHandler);
 		$socket?.off('chat-events', chatEventHandler);
 	});
-
-	// File upload functions
-
-	const uploadGoogleDriveFile = async (fileData) => {
-		console.log('Starting uploadGoogleDriveFile with:', {
-			id: fileData.id,
-			name: fileData.name,
-			url: fileData.url,
-			headers: {
-				Authorization: `Bearer ${token}`
-			}
-		});
-
-		// Validate input
-		if (!fileData?.id || !fileData?.name || !fileData?.url || !fileData?.headers?.Authorization) {
-			throw new Error('Invalid file data provided');
-		}
-
-		const tempItemId = uuidv4();
-		const fileItem = {
-			type: 'file',
-			file: '',
-			id: null,
-			url: fileData.url,
-			name: fileData.name,
-			collection_name: '',
-			status: 'uploading',
-			error: '',
-			itemId: tempItemId,
-			size: 0
-		};
-
-		try {
-			files = [...files, fileItem];
-			console.log('Processing web file with URL:', fileData.url);
-
-			// Configure fetch options with proper headers
-			const fetchOptions = {
-				headers: {
-					Authorization: fileData.headers.Authorization,
-					Accept: '*/*'
-				},
-				method: 'GET'
-			};
-
-			// Attempt to fetch the file
-			console.log('Fetching file content from Google Drive...');
-			const fileResponse = await fetch(fileData.url, fetchOptions);
-
-			if (!fileResponse.ok) {
-				const errorText = await fileResponse.text();
-				throw new Error(`Failed to fetch file (${fileResponse.status}): ${errorText}`);
-			}
-
-			// Get content type from response
-			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			console.log('Response received with content-type:', contentType);
-
-			// Convert response to blob
-			console.log('Converting response to blob...');
-			const fileBlob = await fileResponse.blob();
-
-			if (fileBlob.size === 0) {
-				throw new Error('Retrieved file is empty');
-			}
-
-			console.log('Blob created:', {
-				size: fileBlob.size,
-				type: fileBlob.type || contentType
-			});
-
-			// Create File object with proper MIME type
-			const file = new File([fileBlob], fileData.name, {
-				type: fileBlob.type || contentType
-			});
-
-			console.log('File object created:', {
-				name: file.name,
-				size: file.size,
-				type: file.type
-			});
-
-			if (file.size === 0) {
-				throw new Error('Created file is empty');
-			}
-
-			// Upload file to server
-			console.log('Uploading file to server...');
-			const uploadedFile = await uploadFile(localStorage.token, file);
-
-			if (!uploadedFile) {
-				throw new Error('Server returned null response for file upload');
-			}
-
-			console.log('File uploaded successfully:', uploadedFile);
-
-			// Update file item with upload results
-			fileItem.status = 'uploaded';
-			fileItem.file = uploadedFile;
-			fileItem.id = uploadedFile.id;
-			fileItem.size = file.size;
-			fileItem.collection_name = uploadedFile?.meta?.collection_name;
-			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
-
-			files = files;
-			toast.success($i18n.t('File uploaded successfully'));
-		} catch (e) {
-			console.error('Error uploading file:', e);
-			files = files.filter((f) => f.itemId !== tempItemId);
-			toast.error(
-				$i18n.t('Error uploading file: {{error}}', {
-					error: e.message || 'Unknown error'
-				})
-			);
-		}
-	};
 
 	//////////////////////////
 	// Web functions
@@ -617,20 +469,6 @@
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
 			imageGenerationEnabled = true;
-		}
-
-		if ($page.url.searchParams.get('tools')) {
-			selectedToolIds = $page.url.searchParams
-				.get('tools')
-				?.split(',')
-				.map((id) => id.trim())
-				.filter((id) => id);
-		} else if ($page.url.searchParams.get('tool-ids')) {
-			selectedToolIds = $page.url.searchParams
-				.get('tool-ids')
-				?.split(',')
-				.map((id) => id.trim())
-				.filter((id) => id);
 		}
 
 		if ($page.url.searchParams.get('call') === 'true') {
@@ -1460,7 +1298,7 @@
 				},
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
-				tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+				// llens(#54): tool はモデル割り当て一本 — tool_ids はサーバー側解決に移行し送らない
 
 				features: {
 					image_generation:
@@ -1828,7 +1666,6 @@
 								bind:files
 								bind:prompt
 								bind:autoScroll
-								bind:selectedToolIds
 								bind:imageGenerationEnabled
 								bind:codeInterpreterEnabled
 								bind:atSelectedModel
@@ -1840,13 +1677,6 @@
 										localStorage.setItem(`chat-input-${$chatId}`, JSON.stringify(input));
 									} else {
 										localStorage.removeItem(`chat-input-${$chatId}`);
-									}
-								}}
-								on:upload={async (e) => {
-									const { type, data } = e.detail;
-
-									if (type === 'google-drive') {
-										await uploadGoogleDriveFile(data);
 									}
 								}}
 								on:submit={async (e) => {
@@ -1875,7 +1705,6 @@
 								bind:files
 								bind:prompt
 								bind:autoScroll
-								bind:selectedToolIds
 								bind:imageGenerationEnabled
 								bind:codeInterpreterEnabled
 								bind:atSelectedModel

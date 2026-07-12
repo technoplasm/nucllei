@@ -33,7 +33,6 @@
 	export let prompt = '';
 	export let files = [];
 
-	export let selectedToolIds = [];
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 
@@ -168,7 +167,6 @@
 					bind:files
 					bind:prompt
 					bind:autoScroll
-					bind:selectedToolIds
 					bind:imageGenerationEnabled
 					bind:codeInterpreterEnabled
 					bind:atSelectedModel
@@ -176,9 +174,6 @@
 					{stopResponse}
 					{createMessagePair}
 					placeholder={$i18n.t('How can I help you today?')}
-					on:upload={(e) => {
-						dispatch('upload', e.detail);
-					}}
 					on:submit={(e) => {
 						dispatch('submit', e.detail);
 					}}

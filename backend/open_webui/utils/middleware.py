@@ -383,6 +383,11 @@ def get_model_skill_ids(model) -> list[str]:
     return (model or {}).get("info", {}).get("meta", {}).get("skillIds", []) or []
 
 
+def get_model_tool_ids(model) -> list[str]:
+    """llens(#54): tool はモデル割り当て(meta.toolIds)一本 — サーバー側で解決する。"""
+    return (model or {}).get("info", {}).get("meta", {}).get("toolIds", []) or []
+
+
 def apply_skill_command(form_data, user, model):
     """user メッセージ先頭の `/command` を「load_skill を呼んだことにして」発火する(issue #35)。
 
@@ -727,7 +732,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data["messages"],
             )
 
-    tool_ids = form_data.pop("tool_ids", None)
+    # llens(#54): チャット単位の tool 切り替えは撤去 — tool はモデル割り当て
+    # (meta.toolIds)一本。クライアント申告の tool_ids は読まずに捨て、
+    # サーバー側で解決する(per-user の read ACL は get_tools が enforce)。
+    form_data.pop("tool_ids", None)
+    tool_ids = get_model_tool_ids(model)
     files = form_data.pop("files", None)
 
     # Remove files duplicates
