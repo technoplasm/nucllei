@@ -1,8 +1,9 @@
-"""Attachment ディスパッチ(#52 プランB)の回帰。
+"""Attachment ディスパッチ(#52 プランB / #69 グローバル化)の回帰。
 
 fork 本体は Attachment の「仕組み」だけを持ち、実体は案件層(prism)の authored Function。
 契約: `process(file, ...) -> str`(成功=抽出テキスト)/ 失敗=raise(core が
-`content=str(e)` `status=failed` を差し込む)。適用はモデルの attachmentIds への完全 opt-in。
+`content=str(e)` `status=failed` を差し込む)/ skip=None(何も永続化しない)。
+適用は admin がグローバル config(ATTACHMENT_FUNCTION_ID)に選んだ単一フック(#69)。
 """
 
 import asyncio
@@ -31,9 +32,23 @@ class Attachment:
         return None
 """
 
+# __event__ を宣言する(=発火文脈 upload/attach が注入される)。
+EVENT_ATTACHMENT = """
+class Attachment:
+    def process(self, file, __event__=None):
+        return "EVENT:" + str(__event__)
+"""
 
-def _make_request():
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(FUNCTIONS={})))
+
+def _make_request(function_id=""):
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                FUNCTIONS={},
+                config=SimpleNamespace(ATTACHMENT_FUNCTION_ID=function_id),
+            )
+        )
+    )
 
 
 class TestAttachmentDispatch(AbstractPostgresTest):
@@ -47,12 +62,12 @@ class TestAttachmentDispatch(AbstractPostgresTest):
         cls.functions = Functions
         cls.files = Files
 
-    def _insert_attachment(self, fid, template=OK_ATTACHMENT):
+    def _insert_attachment(self, fid, template=OK_ATTACHMENT, type="attachment"):
         from open_webui.models.functions import FunctionForm
 
         function = self.functions.insert_new_function(
             user_id="1",
-            type="attachment",
+            type=type,
             form_data=FunctionForm(
                 id=fid,
                 name=fid,
@@ -71,17 +86,17 @@ class TestAttachmentDispatch(AbstractPostgresTest):
             FileForm(id=fid, filename=f"{fid}.txt", path=f"/tmp/{fid}.txt"),
         )
 
-    def test_get_attachment_function_ids_opt_in_and_scope(self):
-        from open_webui.utils.attachment import get_attachment_function_ids
+    def test_get_attachment_function_id_resolution(self):
+        from open_webui.utils.attachment import get_attachment_function_id
 
         self._insert_attachment("att_x")
+        self._insert_attachment("flt_x", type="filter")
 
-        # 完全 opt-in: 割り当てられた実在 id だけ。未割り当て/未知は空。
-        assert get_attachment_function_ids(None) == []
-        assert get_attachment_function_ids([]) == []
-        assert get_attachment_function_ids(["att_x"]) == ["att_x"]
-        assert get_attachment_function_ids(["nonexistent"]) == []
-        assert get_attachment_function_ids(["att_x", "nonexistent"]) == ["att_x"]
+        # 未設定("")/実在しない id/type 違いは None(何も発火しない)
+        assert get_attachment_function_id(_make_request("")) is None
+        assert get_attachment_function_id(_make_request("nonexistent")) is None
+        assert get_attachment_function_id(_make_request("flt_x")) is None
+        assert get_attachment_function_id(_make_request("att_x")) == "att_x"
 
     def test_success_persists_content_and_status(self):
         from open_webui.utils.attachment import process_attachment_functions
@@ -89,9 +104,7 @@ class TestAttachmentDispatch(AbstractPostgresTest):
         self._insert_attachment("att_ok")
         f = self._insert_file("file_ok")
         asyncio.run(
-            process_attachment_functions(
-                _make_request(), f, user={"id": "1"}, assigned_ids=["att_ok"]
-            )
+            process_attachment_functions(_make_request("att_ok"), f, user={"id": "1"})
         )
         saved = self.files.get_file_by_id("file_ok")
         assert saved.data == {"content": "EXTRACTED:att_ok", "status": "success"}
@@ -102,9 +115,7 @@ class TestAttachmentDispatch(AbstractPostgresTest):
         self._insert_attachment("att_fail", template=FAIL_ATTACHMENT)
         f = self._insert_file("file_fail")
         asyncio.run(
-            process_attachment_functions(
-                _make_request(), f, user={"id": "1"}, assigned_ids=["att_fail"]
-            )
+            process_attachment_functions(_make_request("att_fail"), f, user={"id": "1"})
         )
         saved = self.files.get_file_by_id("file_fail")
         # 例外メッセージがそのまま content に(接頭辞なし)、status=failed
@@ -113,45 +124,59 @@ class TestAttachmentDispatch(AbstractPostgresTest):
     def test_skip_returns_none_leaves_file_untouched(self):
         from open_webui.utils.attachment import process_attachment_functions
 
-        # 割り当て済みだが None(skip) を返す → 未割り当てと同じく data は空のまま。
+        # 設定済みだが None(skip) を返す → 未設定と同じく data は空のまま。
         self._insert_attachment("att_skip", template=SKIP_ATTACHMENT)
         f = self._insert_file("file_skip")
         asyncio.run(
-            process_attachment_functions(
-                _make_request(), f, user={"id": "1"}, assigned_ids=["att_skip"]
-            )
+            process_attachment_functions(_make_request("att_skip"), f, user={"id": "1"})
         )
         saved = self.files.get_file_by_id("file_skip")
         assert saved.data == {}
 
-    def test_skip_does_not_block_later_attachment(self):
-        from open_webui.utils.attachment import process_attachment_functions
-
-        # skip(None) は次の attachment へ continue する。後続の成功は永続化される。
-        self._insert_attachment("att_skip2", template=SKIP_ATTACHMENT)
-        self._insert_attachment("att_ok2")
-        f = self._insert_file("file_chain")
-        asyncio.run(
-            process_attachment_functions(
-                _make_request(),
-                f,
-                user={"id": "1"},
-                assigned_ids=["att_skip2", "att_ok2"],
-            )
-        )
-        saved = self.files.get_file_by_id("file_chain")
-        assert saved.data == {"content": "EXTRACTED:att_ok2", "status": "success"}
-
-    def test_unassigned_attachment_does_not_run(self):
+    def test_unconfigured_attachment_does_not_run(self):
         from open_webui.utils.attachment import process_attachment_functions
 
         self._insert_attachment("att_off")
         f = self._insert_file("file_off")
         asyncio.run(
-            process_attachment_functions(
-                _make_request(), f, user={"id": "1"}, assigned_ids=None
-            )
+            process_attachment_functions(_make_request(""), f, user={"id": "1"})
         )
         saved = self.files.get_file_by_id("file_off")
-        # opt-in: 未割り当ては何も走らず data は空のまま
+        # グローバル config 未設定なら何も走らず data は空のまま
         assert saved.data == {}
+
+    def test_event_injected_when_declared(self):
+        from open_webui.utils.attachment import process_attachment_functions
+
+        # __event__ を宣言したフックには発火文脈(upload/attach)が注入される
+        self._insert_attachment("att_ev", template=EVENT_ATTACHMENT)
+
+        f = self._insert_file("file_ev_up")
+        asyncio.run(
+            process_attachment_functions(
+                _make_request("att_ev"), f, user={"id": "1"}, event="upload"
+            )
+        )
+        assert self.files.get_file_by_id("file_ev_up").data["content"] == "EVENT:upload"
+
+        f = self._insert_file("file_ev_at")
+        asyncio.run(
+            process_attachment_functions(
+                _make_request("att_ev"), f, user={"id": "1"}, event="attach"
+            )
+        )
+        assert self.files.get_file_by_id("file_ev_at").data["content"] == "EVENT:attach"
+
+    def test_event_not_required_by_legacy_hooks(self):
+        from open_webui.utils.attachment import process_attachment_functions
+
+        # __event__ 未宣言の既存フックは attach でも従来どおり動く
+        self._insert_attachment("att_legacy")
+        f = self._insert_file("file_legacy")
+        asyncio.run(
+            process_attachment_functions(
+                _make_request("att_legacy"), f, user={"id": "1"}, event="attach"
+            )
+        )
+        saved = self.files.get_file_by_id("file_legacy")
+        assert saved.data == {"content": "EXTRACTED:att_legacy", "status": "success"}

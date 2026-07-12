@@ -1432,6 +1432,15 @@ ATTACHMENT_ALLOWED_EXTENSIONS = RuntimeConfig(
     ],
 )
 
+# llens(#69): グローバル Attachment Function(admin が 1 つ選ぶ)。per-model の
+# meta.attachmentIds 割り当ては廃止(複数同時有効は content 上書き衝突のため単一 id)。
+# 空文字 = 未設定(何も発火しない)。
+ATTACHMENT_FUNCTION_ID = RuntimeConfig(
+    "ATTACHMENT_FUNCTION_ID",
+    "attachment.function_id",
+    os.environ.get("ATTACHMENT_FUNCTION_ID", ""),
+)
+
 
 # llens(#52): reranking(ベクタ検索の再ランキング)は RAG 撤去に伴い廃止。config・
 # 起動時ロード(rf)ともに撤去済み。

@@ -1,9 +1,10 @@
-"""Attachment Function 種別のディスパッチ(#52 プランB)。
+"""Attachment Function 種別のディスパッチ(#52 プランB / #69 グローバル化)。
 
-アップロード直後に発火する。`utils/filter.py` の filter ディスパッチと同じ流儀
-(型で絞る → valves 注入 → 署名インスペクションで引数注入)。**非同期**: docling 等の遅い
-抽出をフック内で待っても event loop をブロックしないよう、coroutine は await、同期ハンドラは
-threadpool にオフロードする。
+アップロード直後(`__event__="upload"`)と、既存ファイルのチャット再添付時
+(`__event__="attach"`、`POST /files/{id}/process`)に発火する。`utils/filter.py` の
+filter ディスパッチと同じ流儀(型で絞る → valves 注入 → 署名インスペクションで引数注入)。
+**非同期**: docling 等の遅い抽出をフック内で待っても event loop をブロックしないよう、
+coroutine は await、同期ハンドラは threadpool にオフロードする。
 
 **fork は仕組みだけ**: Attachment の実体(docling ルータ等のポリシー)は案件層(prism)の
 authored Function として登録される。fork 本体は builtin Attachment を持たない。
@@ -12,14 +13,15 @@ authored Function として登録される。fork 本体は builtin Attachment �
 - **成功=抽出テキスト(md)を返す** → `content=<str>` `status="success"`。
 - **失敗=raise** → `content=str(e)` `status="failed"`(システムが catch)。
 - **skip=None を返す** → **何も永続化しない**(この関数はこのファイルを扱わない)。
-  = **Attachment 未割り当てと同じ挙動**(未抽出/none)。次の attachment へ continue。
-  拡張子 whitelist 外など「自分の対象外」を、失敗と区別して素通しするための帰結。
+  = **Attachment 未設定と同じ挙動**(未抽出/none)。拡張子 whitelist 外など「自分の対象外」を
+  失敗と区別して素通しするための帰結。再添付(`__event__="attach"`)では「抽出済みなので
+  再抽出しない」判断にも使える(None を返せば既存の `data.content` はそのまま残る)。
 `content`/`status` の**永続化は core が return 値/例外から行う**(attachment は DB を触らない)。
-未抽出(none)= そもそも Attachment 未割り当て、または全 attachment が None(skip)。
+未抽出(none)= Attachment 未設定、または skip(None)。
 
-**適用は完全 opt-in(tool/filter と同一)**: モデルの `meta.attachmentIds` に割り当てられた
-attachment function だけが発火する。model 文脈の無い upload(API/KB など)や未割り当ての
-モデルでは何も走らない。抽出の実体は内部関数(`retrieval.extract`)へ委譲。
+**適用はグローバル config(#69)**: admin が `ATTACHMENT_FUNCTION_ID` に 1 つ選んだ
+attachment function だけが発火する(複数同時有効は content 上書き衝突のため不可)。
+per-model の `meta.attachmentIds` 割り当ては廃止した。未設定なら何も走らない。
 """
 
 import inspect
@@ -36,24 +38,20 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
-def get_attachment_function_ids(assigned_ids) -> list[str]:
-    """発火する attachment function の id 列(priority 昇順)。
+def get_attachment_function_id(request) -> str | None:
+    """発火する attachment function の id(グローバル config、#69)。
 
-    `assigned_ids` = モデルの `meta.attachmentIds`(完全 opt-in)。そのうち **実在する
-    type=attachment の Function** だけに絞る(削除済み ID を弾く)。`get_sorted_filter_ids`
-    と同型。
+    `ATTACHMENT_FUNCTION_ID` が空(未設定)、実在しない、または type が attachment
+    でない場合は None(何も発火しない)。削除済み id が config に残っても黙って不発に
+    なるだけで壊れない(保存時検証は routers/configs.py が担う)。
     """
-    if not assigned_ids:
-        return []
-
-    def get_priority(function_id):
-        valves = Functions.get_function_valves_by_id(function_id)
-        return valves.get("priority", 0) if valves else 0
-
-    valid = {f.id for f in Functions.get_functions_by_type("attachment")}
-    attachment_ids = [fid for fid in dict.fromkeys(assigned_ids) if fid in valid]
-    attachment_ids.sort(key=get_priority)
-    return attachment_ids
+    function_id = request.app.state.config.ATTACHMENT_FUNCTION_ID
+    if not function_id:
+        return None
+    function = Functions.get_function_by_id(function_id)
+    if not function or function.type != "attachment":
+        return None
+    return function_id
 
 
 def _load_module(request, function_id):
@@ -64,65 +62,71 @@ def _load_module(request, function_id):
     return module
 
 
-async def process_attachment_functions(request, file, user, assigned_ids=None):
-    """アップロードされた 1 file を、モデルに割り当てられた attachment function で処理する。
+async def process_attachment_functions(request, file, user, event="upload"):
+    """1 file をグローバル設定の attachment function で処理する(#69)。
 
-    `assigned_ids` = そのモデルの `meta.attachmentIds`(None/空なら何もしない=opt-in)。
-    各フックは `process(file, ...) -> str`(抽出テキスト)を返すか raise する。core が結果を
+    `ATTACHMENT_FUNCTION_ID` 未設定なら何もしない。`event` は署名に `__event__` を宣言した
+    フックにだけ注入される発火文脈:
+      - `"upload"` = 新規アップロード直後
+      - `"attach"` = 既存ファイルのチャット再添付(`POST /files/{id}/process`)。
+        再抽出するか否かはフック側が判断できる(不要なら None を返せば data は不変)。
+    `__event__` 未宣言の既存フックは従来どおり全 event で動く。
+
+    フックは `process(file, ...) -> str`(抽出テキスト)を返すか raise する。core が結果を
     `file.data` に永続化する:
       - 成功(str 返却) → `{content: <str>, status: "success"}`
       - 失敗(raise)   → `{content: str(e), status: "failed"}`(例外メッセージをそのまま content に。
         カスタム失敗メッセージは `raise Exception("…")` で入れる。失敗の印は status/注入タグが担う)
-      - skip(None 返却) → **何も書かない**(この file は未抽出/none のまま)。対象外拡張子など
-        「自分は扱わない」を失敗と区別して素通しする帰結。未割り当てと同じ挙動。
-    未割り当て(none)も何も書かない。coroutine は await、同期ハンドラは threadpool にオフロード。
-    戻り値は最終 file(再取得済み)。
+      - skip(None 返却) → **何も書かない**(この file は未抽出/none のまま、既存 data も不変)。
+    coroutine は await、同期ハンドラは threadpool にオフロード。戻り値は最終 file(再取得済み)。
     """
-    for function_id in get_attachment_function_ids(assigned_ids):
-        module = _load_module(request, function_id)
+    function_id = get_attachment_function_id(request)
+    if not function_id:
+        return file
 
-        handler = getattr(module, "process", None)
-        if not handler:
-            continue
+    module = _load_module(request, function_id)
 
-        # valves 注入(filter と同型)
-        if hasattr(module, "valves") and hasattr(module, "Valves"):
-            valves = Functions.get_function_valves_by_id(function_id)
-            module.valves = module.Valves(**(valves if valves else {}))
+    handler = getattr(module, "process", None)
+    if not handler:
+        return file
 
-        sig = inspect.signature(handler)
-        params = {"file": file}
-        params = params | {
-            k: v
-            for k, v in {
-                "__request__": request,
-                "__user__": user,
-                "__id__": function_id,
-            }.items()
-            if k in sig.parameters
+    # valves 注入(filter と同型)
+    if hasattr(module, "valves") and hasattr(module, "Valves"):
+        valves = Functions.get_function_valves_by_id(function_id)
+        module.valves = module.Valves(**(valves if valves else {}))
+
+    sig = inspect.signature(handler)
+    params = {"file": file}
+    params = params | {
+        k: v
+        for k, v in {
+            "__request__": request,
+            "__user__": user,
+            "__id__": function_id,
+            "__event__": event,
+        }.items()
+        if k in sig.parameters
+    }
+
+    try:
+        if inspect.iscoroutinefunction(handler):
+            text = await handler(**params)
+        else:
+            # 同期ハンドラ(blocking docling 等)は threadpool で回し loop を空ける
+            text = await run_in_threadpool(lambda: handler(**params))
+        if text is None:
+            # skip: この関数はこの file を扱わない(attach では「再抽出しない」判断)。
+            # 何も永続化しない = 既存の data.content も不変。
+            return file
+        data = {
+            "content": text if isinstance(text, str) else "",
+            "status": "success",
         }
+    except Exception as e:
+        log.exception(f"Error in attachment handler {function_id}: {e}")
+        # 関数の失敗 = 例外メッセージをそのまま content に(モデル/UI にそのまま伝わる)。
+        # カスタム失敗メッセージは attachment 側で raise Exception("…") すればよい。
+        data = {"content": str(e), "status": "failed"}
 
-        try:
-            if inspect.iscoroutinefunction(handler):
-                text = await handler(**params)
-            else:
-                # 同期ハンドラ(blocking docling 等)は threadpool で回し loop を空ける
-                text = await run_in_threadpool(lambda: handler(**params))
-            if text is None:
-                # skip: この関数はこの file を扱わない。何も永続化せず次の attachment へ。
-                # 未抽出(none)のまま = Attachment 未割り当てと同じ挙動。
-                continue
-            data = {
-                "content": text if isinstance(text, str) else "",
-                "status": "success",
-            }
-        except Exception as e:
-            log.exception(f"Error in attachment handler {function_id}: {e}")
-            # 関数の失敗 = 例外メッセージをそのまま content に(モデル/UI にそのまま伝わる)。
-            # カスタム失敗メッセージは attachment 側で raise Exception("…") すればよい。
-            data = {"content": str(e), "status": "failed"}
-
-        Files.update_file_data_by_id(file.id, data)
-        file = Files.get_file_by_id(file.id) or file
-
-    return file
+    Files.update_file_data_by_id(file.id, data)
+    return Files.get_file_by_id(file.id) or file

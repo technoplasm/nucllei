@@ -25,7 +25,6 @@ from open_webui.models.files import (
     FileModelResponse,
     Files,
 )
-from open_webui.models.models import Models
 
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_read_access_to_file
@@ -76,7 +75,6 @@ async def upload_file(
     user=Depends(get_verified_user),
     file_metadata: dict = {},
     process: bool = Query(True),
-    model_id: Optional[str] = Query(None),
 ):
     log.info(f"file.content_type: {file.content_type}")
     try:
@@ -124,18 +122,11 @@ async def upload_file(
         )
         if process:
             try:
-                # llens(#52): テキスト化は Attachment Function に委譲(完全 opt-in)。
-                # 現在のチャットのモデル(model_id)の meta.attachmentIds に割り当てられた
-                # フックだけが発火し、file.data.content を埋める。model 無/未割り当ては何もしない。
-                assigned_ids = None
-                if model_id:
-                    model = Models.get_model_by_id(model_id)
-                    if model and model.meta:
-                        assigned_ids = (model.meta.model_dump() or {}).get(
-                            "attachmentIds"
-                        )
+                # llens(#52/#69): テキスト化は Attachment Function に委譲。admin がグローバル
+                # config(ATTACHMENT_FUNCTION_ID)に選んだフックだけが発火し、file.data.content
+                # を埋める。未設定なら何もしない(per-model 割り当ては #69 で廃止)。
                 await process_attachment_functions(
-                    request, file_item, user, assigned_ids
+                    request, file_item, user, event="upload"
                 )
                 file_item = Files.get_file_by_id(id=id)
             except Exception as e:
@@ -165,6 +156,43 @@ async def upload_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e),
         )
+
+
+############################
+# Process File By Id
+############################
+
+
+@router.post("/{id}/process", response_model=Optional[FileModel])
+async def process_file_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
+    """チャット再添付時の再抽出フック発火(#69)。
+
+    既存ファイルをチャットに再添付したとき、Attachment Function を `__event__="attach"`
+    で再度走らせる。再抽出するか否か(抽出済みなら None を返して据え置く等)はフック側の
+    判断。dispatch は **owner または admin のときだけ** — 非 owner(read 可)は他人の
+    file の data.content を書き換えさせないため、現状の file をそのまま返す。
+    read 不可は 404。戻り値は最新の file。
+    """
+    file = Files.get_file_by_id(id)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if not has_read_access_to_file(id, user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.user_id == user.id or user.role == "admin":
+        file = await process_attachment_functions(request, file, user, event="attach")
+
+    return file
 
 
 ############################

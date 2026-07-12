@@ -6,6 +6,7 @@ from typing import Optional
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
+from open_webui.models.functions import Functions
 
 from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
 
@@ -17,6 +18,7 @@ router = APIRouter()
 # AttachmentConfig
 # llens(#67): 添付ファイル受け入れゲート(#52)の設定 API。retrieval router
 # 撤去に伴い /retrieval/config から移設。
+# llens(#69): グローバル Attachment Function(FUNCTION_ID)を追加。
 ############################
 
 
@@ -24,6 +26,7 @@ class AttachmentConfigForm(BaseModel):
     ATTACHMENT_MAX_SIZE: Optional[int]
     ATTACHMENT_MAX_COUNT: Optional[int]
     ATTACHMENT_ALLOWED_EXTENSIONS: list[str]
+    ATTACHMENT_FUNCTION_ID: str = ""
     ENABLE_GOOGLE_DRIVE_INTEGRATION: bool
     ENABLE_ONEDRIVE_INTEGRATION: bool
 
@@ -33,6 +36,7 @@ def _attachment_config(request: Request):
         "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
         "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
+        "ATTACHMENT_FUNCTION_ID": request.app.state.config.ATTACHMENT_FUNCTION_ID,
         "ENABLE_GOOGLE_DRIVE_INTEGRATION": request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
         "ENABLE_ONEDRIVE_INTEGRATION": request.app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
     }
@@ -47,11 +51,23 @@ async def get_attachment_config(request: Request, user=Depends(get_admin_user)):
 async def set_attachment_config(
     request: Request, form_data: AttachmentConfigForm, user=Depends(get_admin_user)
 ):
+    # llens(#69): function_id は保存時に実在検証(空 = 未設定は常に可)。
+    # 実在しない/type 違いの id を DB に焼くと dispatch 側で黙って不発になるため 400 で弾く。
+    function_id = form_data.ATTACHMENT_FUNCTION_ID.strip()
+    if function_id:
+        function = Functions.get_function_by_id(function_id)
+        if not function or function.type != "attachment":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Attachment function not found: {function_id}",
+            )
+
     request.app.state.config.ATTACHMENT_MAX_SIZE = form_data.ATTACHMENT_MAX_SIZE
     request.app.state.config.ATTACHMENT_MAX_COUNT = form_data.ATTACHMENT_MAX_COUNT
     request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = (
         form_data.ATTACHMENT_ALLOWED_EXTENSIONS
     )
+    request.app.state.config.ATTACHMENT_FUNCTION_ID = function_id
     request.app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = (
         form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
     )
