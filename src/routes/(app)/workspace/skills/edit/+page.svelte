@@ -24,31 +24,31 @@
 		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する
 		// (差し替え)。作成が失敗(id 衝突/不正)したら旧 id を消さず中断。参照・valves はちぎれてよい。
 		if (_skill.id !== oldId) {
-			const created = await createNewSkill(localStorage.token, _skill).catch((error) => {
+			const created = await createNewSkill(_skill).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
 			if (!created) return;
 
-			await deleteSkillById(localStorage.token, oldId).catch((error) => {
+			await deleteSkillById(oldId).catch((error) => {
 				toast.error(`${error}`);
 			});
 
 			toast.success($i18n.t('Skill updated successfully'));
-			await skills.set(await getSkills(localStorage.token));
+			await skills.set(await getSkills());
 			await goto('/workspace/skills');
 			return;
 		}
 
-		const updated = await updateSkillById(localStorage.token, _skill).catch((error) => {
+		const updated = await updateSkillById(_skill).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
 		if (updated) {
 			toast.success($i18n.t('Skill updated successfully'));
-			await skills.set(await getSkills(localStorage.token));
+			await skills.set(await getSkills());
 			await goto('/workspace/skills');
 		}
 	};
@@ -56,12 +56,10 @@
 	onMount(async () => {
 		const id = $page.url.searchParams.get('id');
 		if (id) {
-			const _skill = await getSkillById(localStorage.token, id.replace(/\//g, '')).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const _skill = await getSkillById(id.replace(/\//g, '')).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
 			if (_skill) {
 				skill = {

@@ -113,7 +113,7 @@
 
 		// tool 選択肢は admin のときのみ取得・描画(非 admin には出さない)
 		if ($user?.role === 'admin') {
-			tools = (await getTools(localStorage.token).catch(() => [])) ?? [];
+			tools = (await getTools().catch(() => [])) ?? [];
 			_tools = tools.reduce((acc, tool) => {
 				acc[tool.id] = {
 					...tool,

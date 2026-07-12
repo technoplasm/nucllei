@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const createNewFolder = async (token: string, name: string) => {
+export const createNewFolder = async (name: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			name: name
@@ -30,15 +29,14 @@ export const createNewFolder = async (token: string, name: string) => {
 	return res;
 };
 
-export const getFolders = async (token: string = '') => {
+export const getFolders = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -61,15 +59,14 @@ export const getFolders = async (token: string = '') => {
 	return res;
 };
 
-export const updateFolderNameById = async (token: string, id: string, name: string) => {
+export const updateFolderNameById = async (id: string, name: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			name: name
@@ -95,19 +92,14 @@ export const updateFolderNameById = async (token: string, id: string, name: stri
 	return res;
 };
 
-export const updateFolderIsExpandedById = async (
-	token: string,
-	id: string,
-	isExpanded: boolean
-) => {
+export const updateFolderIsExpandedById = async (id: string, isExpanded: boolean) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/expanded`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			is_expanded: isExpanded
@@ -133,15 +125,14 @@ export const updateFolderIsExpandedById = async (
 	return res;
 };
 
-export const updateFolderParentIdById = async (token: string, id: string, parentId?: string) => {
+export const updateFolderParentIdById = async (id: string, parentId?: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/parent`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			parent_id: parentId
@@ -172,15 +163,14 @@ type FolderItems = {
 	file_ids: string[];
 };
 
-export const deleteFolderById = async (token: string, id: string) => {
+export const deleteFolderById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

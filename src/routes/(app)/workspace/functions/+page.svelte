@@ -9,7 +9,7 @@
 	onMount(async () => {
 		await Promise.all([
 			(async () => {
-				functions.set(await getFunctions(localStorage.token));
+				functions.set(await getFunctions());
 			})()
 		]);
 	});

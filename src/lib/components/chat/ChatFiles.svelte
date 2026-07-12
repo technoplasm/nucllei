@@ -59,7 +59,7 @@
 	let selectedItem = null;
 
 	const openFile = async (item) => {
-		const res = await getFileById(localStorage.token, item.id).catch((err) => {
+		const res = await getFileById(item.id).catch((err) => {
 			toast.error(`${err}`);
 			return null;
 		});

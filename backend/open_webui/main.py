@@ -744,9 +744,16 @@ async def commit_session_after_request(request: Request, call_next):
 @app.middleware("http")
 async def check_url(request: Request, call_next):
     start_time = int(time.time())
+    # llens(#70 B1): セッションは httpOnly cookie に一本化 — Authorization ヘッダ不在なら
+    # cookie の token を採用する(tool server の session 転送など state.token 消費者のため。
+    # API key / 外部クライアントは従来どおりヘッダ)。
     request.state.token = get_http_authorization_cred(
         request.headers.get("Authorization")
     )
+    if request.state.token is None and "token" in request.cookies:
+        request.state.token = get_http_authorization_cred(
+            f"Bearer {request.cookies.get('token')}"
+        )
 
     request.state.enable_api_key = app.state.config.ENABLE_API_KEY
     response = await call_next(request)

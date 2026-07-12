@@ -65,7 +65,7 @@
 	const fetchFiles = async (append = false) => {
 		loading = true;
 
-		const res = await getFileList(localStorage.token, {
+		const res = await getFileList({
 			limit,
 			offset: append ? files.length : 0,
 			order_by: orderBy,
@@ -170,7 +170,7 @@
 		uploading = true;
 
 		for (const file of fileList) {
-			await uploadFile(localStorage.token, file).catch((err) => {
+			await uploadFile(file).catch((err) => {
 				toast.error(`${file.name}: ${err}`);
 				return null;
 			});
@@ -197,12 +197,10 @@
 		acItem = null;
 		if (!item) return;
 
-		const res = await updateFileAccessControlById(localStorage.token, item.id, value).catch(
-			(err) => {
-				toast.error(`${err}`);
-				return null;
-			}
-		);
+		const res = await updateFileAccessControlById(item.id, value).catch((err) => {
+			toast.error(`${err}`);
+			return null;
+		});
 
 		if (res) {
 			files = files.map((f) =>
@@ -227,7 +225,7 @@
 	let selectedItem = null;
 
 	const openFile = async (file) => {
-		const res = await getFileById(localStorage.token, file.id).catch((err) => {
+		const res = await getFileById(file.id).catch((err) => {
 			toast.error(`${err}`);
 			return null;
 		});
@@ -247,7 +245,7 @@
 	let deleteTarget = null;
 
 	const deleteHandler = async (file) => {
-		const res = await deleteFileById(localStorage.token, file.id).catch((err) => {
+		const res = await deleteFileById(file.id).catch((err) => {
 			toast.error(`${err}`);
 			return null;
 		});
@@ -265,7 +263,7 @@
 		}
 
 		if (isAdmin) {
-			uploaders = (await getFileUploaders(localStorage.token).catch(() => null)) ?? [];
+			uploaders = (await getFileUploaders().catch(() => null)) ?? [];
 		}
 
 		await fetchFiles(false);

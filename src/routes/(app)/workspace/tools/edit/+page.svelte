@@ -31,31 +31,31 @@
 		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する
 		// (差し替え)。作成が失敗(id 衝突/不正)したら旧 id を消さず中断。参照・valves はちぎれてよい。
 		if (data.id !== tool.id) {
-			const created = await createNewTool(localStorage.token, payload).catch((error) => {
+			const created = await createNewTool(payload).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
 			if (!created) return;
 
-			await deleteToolById(localStorage.token, tool.id).catch((error) => {
+			await deleteToolById(tool.id).catch((error) => {
 				toast.error(`${error}`);
 			});
 
 			toast.success($i18n.t('Tool updated successfully'));
-			tools.set(await getTools(localStorage.token));
+			tools.set(await getTools());
 			await goto('/workspace/tools');
 			return;
 		}
 
-		const res = await updateToolById(localStorage.token, tool.id, payload).catch((error) => {
+		const res = await updateToolById(tool.id, payload).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
 		if (res) {
 			toast.success($i18n.t('Tool updated successfully'));
-			tools.set(await getTools(localStorage.token));
+			tools.set(await getTools());
 
 			// await goto('/workspace/tools');
 		}
@@ -65,7 +65,7 @@
 		const id = $page.url.searchParams.get('id');
 
 		if (id) {
-			tool = await getToolById(localStorage.token, id).catch((error) => {
+			tool = await getToolById(id).catch((error) => {
 				toast.error(`${error}`);
 				goto('/workspace/tools');
 				return null;

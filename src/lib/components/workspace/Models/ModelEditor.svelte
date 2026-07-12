@@ -256,11 +256,11 @@
 		// 生モデル(接続由来のベースモデル)一覧。/api/models/base は admin ゲート。
 		// 既定では preset 作成/編集は admin のみ(workspace.models 既定 False)。
 		// 非 admin では 403 を投げるため、空配列にフォールバックしてエディタを壊さない。
-		baseModels = (await getModels(localStorage.token, true).catch(() => [])) ?? [];
+		baseModels = (await getModels(true).catch(() => [])) ?? [];
 
-		await tools.set(await getTools(localStorage.token));
-		await skills.set(await getSkills(localStorage.token));
-		await functions.set(await getFunctions(localStorage.token));
+		await tools.set(await getTools());
+		await skills.set(await getSkills());
+		await functions.set(await getFunctions());
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');

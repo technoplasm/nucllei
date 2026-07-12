@@ -71,7 +71,7 @@
 		acItem = null;
 		if (!item) return;
 
-		const res = await updateToolById(localStorage.token, item.id, {
+		const res = await updateToolById(item.id, {
 			...item,
 			access_control: value
 		}).catch((error) => {
@@ -89,7 +89,7 @@
 	}
 
 	const deleteHandler = async (tool) => {
-		const res = await deleteToolById(localStorage.token, tool.id).catch((error) => {
+		const res = await deleteToolById(tool.id).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -101,8 +101,8 @@
 	};
 
 	const init = async () => {
-		tools = await getToolList(localStorage.token);
-		_tools.set(await getTools(localStorage.token));
+		tools = await getToolList();
+		_tools.set(await getTools());
 	};
 
 	onMount(async () => {

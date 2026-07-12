@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const createNewGroup = async (token: string, group: object) => {
+export const createNewGroup = async (group: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...group
@@ -31,15 +30,14 @@ export const createNewGroup = async (token: string, group: object) => {
 	return res;
 };
 
-export const getGroups = async (token: string = '') => {
+export const getGroups = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -62,15 +60,14 @@ export const getGroups = async (token: string = '') => {
 	return res;
 };
 
-export const updateGroupById = async (token: string, id: string, group: object) => {
+export const updateGroupById = async (id: string, group: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...group
@@ -97,15 +94,14 @@ export const updateGroupById = async (token: string, id: string, group: object) 
 	return res;
 };
 
-export const deleteGroupById = async (token: string, id: string) => {
+export const deleteGroupById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const getModels = async (token: string = '') => {
+export const getModels = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/models/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -31,15 +30,14 @@ export const getModels = async (token: string = '') => {
 	return res;
 };
 
-export const getBaseModels = async (token: string = '') => {
+export const getBaseModels = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/models/base`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -62,15 +60,14 @@ export const getBaseModels = async (token: string = '') => {
 	return res;
 };
 
-export const createNewModel = async (token: string, model: object) => {
+export const createNewModel = async (model: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/models/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(model)
 	})
@@ -91,7 +88,7 @@ export const createNewModel = async (token: string, model: object) => {
 	return res;
 };
 
-export const getModelById = async (token: string, id: string) => {
+export const getModelById = async (id: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -101,8 +98,7 @@ export const getModelById = async (token: string, id: string) => {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -126,7 +122,7 @@ export const getModelById = async (token: string, id: string) => {
 	return res;
 };
 
-export const toggleModelById = async (token: string, id: string) => {
+export const toggleModelById = async (id: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -136,8 +132,7 @@ export const toggleModelById = async (token: string, id: string) => {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -161,7 +156,7 @@ export const toggleModelById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateModelById = async (token: string, id: string, model: object) => {
+export const updateModelById = async (id: string, model: object) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -171,8 +166,7 @@ export const updateModelById = async (token: string, id: string, model: object) 
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(model)
 	})
@@ -197,7 +191,7 @@ export const updateModelById = async (token: string, id: string, model: object) 
 	return res;
 };
 
-export const deleteModelById = async (token: string, id: string) => {
+export const deleteModelById = async (id: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -207,8 +201,7 @@ export const deleteModelById = async (token: string, id: string) => {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -232,15 +225,14 @@ export const deleteModelById = async (token: string, id: string) => {
 	return res;
 };
 
-export const deleteAllModels = async (token: string) => {
+export const deleteAllModels = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/models/delete/all`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

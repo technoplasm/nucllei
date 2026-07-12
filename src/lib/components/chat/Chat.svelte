@@ -216,7 +216,7 @@
 				} else if (type === 'chat:title') {
 					chatTitle.set(data);
 					currentChatPage.set(1);
-					await chats.set(await getChatList(localStorage.token, $currentChatPage));
+					await chats.set(await getChatList($currentChatPage));
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
 						// Code execution; update existing code execution by ID, or add new one.
@@ -489,7 +489,7 @@
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
 
-		const userSettings = await getUserSettings(localStorage.token);
+		const userSettings = await getUserSettings();
 
 		if (userSettings) {
 			settings.set(userSettings.ui);
@@ -503,7 +503,7 @@
 
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
-		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
+		chat = await getChatById($chatId).catch(async (error) => {
 			await goto('/');
 			return null;
 		});
@@ -525,7 +525,7 @@
 
 				chatTitle.set(chatContent.title);
 
-				const userSettings = await getUserSettings(localStorage.token);
+				const userSettings = await getUserSettings();
 
 				if (userSettings) {
 					await settings.set(userSettings.ui);
@@ -547,7 +547,7 @@
 					}
 				}
 
-				const taskRes = await getTaskIdsByChatId(localStorage.token, $chatId).catch((error) => {
+				const taskRes = await getTaskIdsByChatId($chatId).catch((error) => {
 					return null;
 				});
 
@@ -571,7 +571,7 @@
 		}
 	};
 	const chatCompletedHandler = async (targetChatId, modelId, responseMessageId, messages) => {
-		const res = await chatCompleted(localStorage.token, {
+		const res = await chatCompleted({
 			model: modelId,
 			messages: messages.map((m) => ({
 				id: m.id,
@@ -612,7 +612,7 @@
 		await tick();
 
 		if ($chatId == targetChatId) {
-			chat = await updateChatById(localStorage.token, targetChatId, {
+			chat = await updateChatById(targetChatId, {
 				models: selectedModels,
 				messages: messages,
 				history: history,
@@ -621,7 +621,7 @@
 			});
 
 			currentChatPage.set(1);
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+			await chats.set(await getChatList($currentChatPage));
 		}
 
 		taskIds = null;
@@ -636,7 +636,7 @@
 	) => {
 		const messages = createMessagesList(history, responseMessageId);
 
-		const res = await chatAction(localStorage.token, actionId, {
+		const res = await chatAction(actionId, {
 			model: modelId,
 			messages: messages.map((m) => ({
 				id: m.id,
@@ -671,7 +671,7 @@
 		}
 
 		if ($chatId == targetChatId) {
-			chat = await updateChatById(localStorage.token, targetChatId, {
+			chat = await updateChatById(targetChatId, {
 				models: selectedModels,
 				messages: messages,
 				history: history,
@@ -680,7 +680,7 @@
 			});
 
 			currentChatPage.set(1);
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+			await chats.set(await getChatList($currentChatPage));
 		}
 	};
 
@@ -1187,7 +1187,7 @@
 		);
 
 		currentChatPage.set(1);
-		chats.set(await getChatList(localStorage.token, $currentChatPage));
+		chats.set(await getChatList($currentChatPage));
 	};
 
 	const sendPromptSocket = async (_history, model, responseMessageId, _chatId) => {
@@ -1278,7 +1278,6 @@
 			);
 
 		const res = await generateOpenAIChatCompletion(
-			localStorage.token,
 			{
 				stream: stream,
 				model: model.id,
@@ -1416,7 +1415,7 @@
 	const stopResponse = async () => {
 		if (taskIds) {
 			for (const taskId of taskIds) {
-				const res = await stopTask(localStorage.token, taskId).catch((error) => {
+				const res = await stopTask(taskId).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
@@ -1517,7 +1516,7 @@
 	const initChatHandler = async (history) => {
 		let _chatId = $chatId;
 
-		chat = await createNewChat(localStorage.token, {
+		chat = await createNewChat({
 			id: _chatId,
 			title: $i18n.t('New Chat'),
 			models: selectedModels,
@@ -1531,7 +1530,7 @@
 		_chatId = chat.id;
 		await chatId.set(_chatId);
 
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
+		await chats.set(await getChatList($currentChatPage));
 		currentChatPage.set(1);
 
 		window.history.replaceState(history.state, '', `/c/${_chatId}`);
@@ -1542,7 +1541,7 @@
 
 	const saveChatHandler = async (_chatId, history) => {
 		if ($chatId == _chatId) {
-			chat = await updateChatById(localStorage.token, _chatId, {
+			chat = await updateChatById(_chatId, {
 				models: selectedModels,
 				history: history,
 				messages: createMessagesList(history, history.currentId),
@@ -1550,7 +1549,7 @@
 				files: chatFiles
 			});
 			currentChatPage.set(1);
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+			await chats.set(await getChatList($currentChatPage));
 		}
 	};
 </script>

@@ -11,15 +11,14 @@ export type SkillItem = {
 	access_control?: null | object;
 };
 
-export const createNewSkill = async (token: string, skill: SkillItem) => {
+export const createNewSkill = async (skill: SkillItem) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(skill)
 	})
@@ -40,15 +39,14 @@ export const createNewSkill = async (token: string, skill: SkillItem) => {
 	return res;
 };
 
-export const getSkills = async (token: string = '') => {
+export const getSkills = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -68,15 +66,14 @@ export const getSkills = async (token: string = '') => {
 	return res;
 };
 
-export const getSkillList = async (token: string = '') => {
+export const getSkillList = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -96,15 +93,14 @@ export const getSkillList = async (token: string = '') => {
 	return res;
 };
 
-export const getSkillById = async (token: string, id: string) => {
+export const getSkillById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -124,15 +120,14 @@ export const getSkillById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateSkillById = async (token: string, skill: SkillItem) => {
+export const updateSkillById = async (skill: SkillItem) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${skill.id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(skill)
 	})
@@ -153,7 +148,7 @@ export const updateSkillById = async (token: string, skill: SkillItem) => {
 	return res;
 };
 
-export const deleteSkillById = async (token: string, id: string) => {
+export const deleteSkillById = async (id: string) => {
 	let error = null;
 
 	id = id.charAt(0) === '/' ? id.slice(1) : id;
@@ -162,8 +157,7 @@ export const deleteSkillById = async (token: string, id: string) => {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

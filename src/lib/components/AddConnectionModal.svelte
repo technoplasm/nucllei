@@ -40,7 +40,7 @@
 	let loading = false;
 
 	const verifyOllamaHandler = async () => {
-		const res = await verifyOllamaConnection(localStorage.token, url, key).catch((error) => {
+		const res = await verifyOllamaConnection(url, key).catch((error) => {
 			toast.error(`${error}`);
 		});
 
@@ -50,11 +50,9 @@
 	};
 
 	const verifyOpenAIHandler = async () => {
-		const res = await verifyOpenAIConnection(localStorage.token, url, key, direct).catch(
-			(error) => {
-				toast.error(`${error}`);
-			}
-		);
+		const res = await verifyOpenAIConnection(url, key, direct).catch((error) => {
+			toast.error(`${error}`);
+		});
 
 		if (res) {
 			toast.success($i18n.t('Server connection verified'));

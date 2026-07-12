@@ -58,7 +58,7 @@
 	let searchValue = '';
 
 	const deleteModelHandler = async (model) => {
-		const res = await deleteModelById(localStorage.token, model.id).catch((e) => {
+		const res = await deleteModelById(model.id).catch((e) => {
 			toast.error(`${e}`);
 			return null;
 		});
@@ -67,8 +67,8 @@
 			toast.success($i18n.t(`Deleted {{name}}`, { name: model.id }));
 		}
 
-		await _models.set(await getModels(localStorage.token));
-		models = await getWorkspaceModels(localStorage.token);
+		await _models.set(await getModels());
+		models = await getWorkspaceModels();
 	};
 
 	const cloneModelHandler = async (model) => {
@@ -101,7 +101,7 @@
 
 		console.log(info);
 
-		const res = await updateModelById(localStorage.token, info.id, info);
+		const res = await updateModelById(info.id, info);
 
 		if (res) {
 			toast.success(
@@ -112,8 +112,8 @@
 			);
 		}
 
-		await _models.set(await getModels(localStorage.token));
-		models = await getWorkspaceModels(localStorage.token);
+		await _models.set(await getModels());
+		models = await getWorkspaceModels();
 	};
 
 	const downloadModels = async (models) => {
@@ -131,8 +131,8 @@
 	};
 
 	onMount(async () => {
-		models = await getWorkspaceModels(localStorage.token);
-		let groups = await getGroups(localStorage.token);
+		models = await getWorkspaceModels();
+		let groups = await getGroups();
 		group_ids = groups.map((group) => group.id);
 
 		loaded = true;
@@ -307,8 +307,8 @@
 									<Switch
 										bind:state={model.is_active}
 										on:change={async (e) => {
-											toggleModelById(localStorage.token, model.id);
-											_models.set(await getModels(localStorage.token));
+											toggleModelById(model.id);
+											_models.set(await getModels());
 										}}
 									/>
 								</Tooltip>
@@ -341,27 +341,25 @@
 							for (const model of savedModels) {
 								if (model?.info ?? false) {
 									if ($_models.find((m) => m.id === model.id)) {
-										await updateModelById(localStorage.token, model.id, model.info).catch(
-											(error) => {
-												return null;
-											}
-										);
+										await updateModelById(model.id, model.info).catch((error) => {
+											return null;
+										});
 									} else {
-										await createNewModel(localStorage.token, model.info).catch((error) => {
+										await createNewModel(model.info).catch((error) => {
 											return null;
 										});
 									}
 								} else {
 									if (model?.id && model?.name) {
-										await createNewModel(localStorage.token, model).catch((error) => {
+										await createNewModel(model).catch((error) => {
 											return null;
 										});
 									}
 								}
 							}
 
-							await _models.set(await getModels(localStorage.token));
-							models = await getWorkspaceModels(localStorage.token);
+							await _models.set(await getModels());
+							models = await getWorkspaceModels();
 						};
 
 						reader.readAsText(importFiles[0]);

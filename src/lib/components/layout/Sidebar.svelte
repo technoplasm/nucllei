@@ -92,7 +92,7 @@
 	let newFolderId = null;
 
 	const initFolders = async () => {
-		const folderList = await getFolders(localStorage.token).catch((error) => {
+		const folderList = await getFolders().catch((error) => {
 			toast.error(`${error}`);
 			return [];
 		});
@@ -162,7 +162,7 @@
 			}
 		};
 
-		const res = await createNewFolder(localStorage.token, name).catch((error) => {
+		const res = await createNewFolder(name).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -175,16 +175,16 @@
 
 	const initChatList = async () => {
 		// Reset pagination variables
-		pinnedChats.set(await getPinnedChatList(localStorage.token));
+		pinnedChats.set(await getPinnedChatList());
 		initFolders();
 
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
 		if (search) {
-			await chats.set(await getChatListBySearchText(localStorage.token, search, $currentChatPage));
+			await chats.set(await getChatListBySearchText(search, $currentChatPage));
 		} else {
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+			await chats.set(await getChatList($currentChatPage));
 		}
 
 		// Enable pagination
@@ -199,9 +199,9 @@
 		let newChatList = [];
 
 		if (search) {
-			newChatList = await getChatListBySearchText(localStorage.token, search, $currentChatPage);
+			newChatList = await getChatListBySearchText(search, $currentChatPage);
 		} else {
-			newChatList = await getChatList(localStorage.token, $currentChatPage);
+			newChatList = await getChatList($currentChatPage);
 		}
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
@@ -216,7 +216,7 @@
 		for (const item of items) {
 			console.log(item);
 			if (item.chat) {
-				await importChat(localStorage.token, item.chat, item?.meta ?? {}, pinned, folderId);
+				await importChat(item.chat, item?.meta ?? {}, pinned, folderId);
 			}
 		}
 
@@ -632,28 +632,24 @@
 							const { type, id, item } = e.detail;
 
 							if (type === 'chat') {
-								let chat = await getChatById(localStorage.token, id).catch((error) => {
+								let chat = await getChatById(id).catch((error) => {
 									return null;
 								});
 								if (!chat && item) {
-									chat = await importChat(localStorage.token, item.chat, item?.meta ?? {});
+									chat = await importChat(item.chat, item?.meta ?? {});
 								}
 
 								if (chat) {
 									console.log(chat);
 									if (chat.folder_id) {
-										const res = await updateChatFolderIdById(
-											localStorage.token,
-											chat.id,
-											null
-										).catch((error) => {
+										const res = await updateChatFolderIdById(chat.id, null).catch((error) => {
 											toast.error(`${error}`);
 											return null;
 										});
 									}
 
 									if (!chat.pinned) {
-										const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
+										const res = await toggleChatPinnedStatusById(chat.id);
 									}
 
 									initChatList();

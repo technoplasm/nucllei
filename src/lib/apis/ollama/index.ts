@@ -1,17 +1,12 @@
 import { OLLAMA_API_BASE_URL } from '$lib/constants';
 
-export const verifyOllamaConnection = async (
-	token: string = '',
-	url: string = '',
-	key: string = ''
-) => {
+export const verifyOllamaConnection = async (url: string = '', key: string = '') => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/verify`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
@@ -35,15 +30,14 @@ export const verifyOllamaConnection = async (
 	return res;
 };
 
-export const getOllamaConfig = async (token: string = '') => {
+export const getOllamaConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -73,15 +67,14 @@ type OllamaConfig = {
 	OLLAMA_API_CONFIGS: object;
 };
 
-export const updateOllamaConfig = async (token: string = '', config: OllamaConfig) => {
+export const updateOllamaConfig = async (config: OllamaConfig) => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...config
@@ -108,15 +101,14 @@ export const updateOllamaConfig = async (token: string = '', config: OllamaConfi
 	return res;
 };
 
-export const getOllamaUrls = async (token: string = '') => {
+export const getOllamaUrls = async () => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/urls`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -140,15 +132,14 @@ export const getOllamaUrls = async (token: string = '') => {
 	return res.OLLAMA_BASE_URLS;
 };
 
-export const getOllamaVersion = async (token: string, urlIdx?: number) => {
+export const getOllamaVersion = async (urlIdx?: number) => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/api/version${urlIdx ? `/${urlIdx}` : ''}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -172,15 +163,14 @@ export const getOllamaVersion = async (token: string, urlIdx?: number) => {
 	return res?.version ?? false;
 };
 
-export const getOllamaModels = async (token: string = '', urlIdx: null | number = null) => {
+export const getOllamaModels = async (urlIdx: null | number = null) => {
 	let error = null;
 
 	const res = await fetch(`${OLLAMA_API_BASE_URL}/api/tags${urlIdx !== null ? `/${urlIdx}` : ''}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -208,7 +198,7 @@ export const getOllamaModels = async (token: string = '', urlIdx: null | number 
 		});
 };
 
-export const generateChatCompletion = async (token: string = '', body: object) => {
+export const generateChatCompletion = async (body: object) => {
 	let controller = new AbortController();
 	let error = null;
 
@@ -217,8 +207,7 @@ export const generateChatCompletion = async (token: string = '', body: object) =
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
 	}).catch((err) => {
@@ -233,7 +222,7 @@ export const generateChatCompletion = async (token: string = '', body: object) =
 	return [res, controller];
 };
 
-export const createModel = async (token: string, payload: object, urlIdx: string | null = null) => {
+export const createModel = async (payload: object, urlIdx: string | null = null) => {
 	let error = null;
 
 	const res = await fetch(
@@ -242,8 +231,7 @@ export const createModel = async (token: string, payload: object, urlIdx: string
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${token}`
+				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify(payload)
 		}
@@ -259,7 +247,7 @@ export const createModel = async (token: string, payload: object, urlIdx: string
 	return res;
 };
 
-export const deleteModel = async (token: string, tagName: string, urlIdx: string | null = null) => {
+export const deleteModel = async (tagName: string, urlIdx: string | null = null) => {
 	let error = null;
 
 	const res = await fetch(
@@ -268,8 +256,7 @@ export const deleteModel = async (token: string, tagName: string, urlIdx: string
 			method: 'DELETE',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${token}`
+				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify({
 				name: tagName
@@ -302,7 +289,7 @@ export const deleteModel = async (token: string, tagName: string, urlIdx: string
 	return res;
 };
 
-export const pullModel = async (token: string, tagName: string, urlIdx: number | null = null) => {
+export const pullModel = async (tagName: string, urlIdx: number | null = null) => {
 	let error = null;
 	const controller = new AbortController();
 
@@ -311,8 +298,7 @@ export const pullModel = async (token: string, tagName: string, urlIdx: number |
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			name: tagName
@@ -333,11 +319,7 @@ export const pullModel = async (token: string, tagName: string, urlIdx: number |
 	return [res, controller];
 };
 
-export const downloadModel = async (
-	token: string,
-	download_url: string,
-	urlIdx: string | null = null
-) => {
+export const downloadModel = async (download_url: string, urlIdx: string | null = null) => {
 	let error = null;
 
 	const res = await fetch(
@@ -346,8 +328,7 @@ export const downloadModel = async (
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${token}`
+				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify({
 				url: download_url
@@ -369,7 +350,7 @@ export const downloadModel = async (
 	return res;
 };
 
-export const uploadModel = async (token: string, file: File, urlIdx: string | null = null) => {
+export const uploadModel = async (file: File, urlIdx: string | null = null) => {
 	let error = null;
 
 	const formData = new FormData();
@@ -379,9 +360,7 @@ export const uploadModel = async (token: string, file: File, urlIdx: string | nu
 		`${OLLAMA_API_BASE_URL}/models/upload${urlIdx !== null ? `/${urlIdx}` : ''}`,
 		{
 			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${token}`
-			},
+			headers: {},
 			body: formData
 		}
 	).catch((err) => {
@@ -400,7 +379,7 @@ export const uploadModel = async (token: string, file: File, urlIdx: string | nu
 	return res;
 };
 
-// export const pullModel = async (token: string, tagName: string) => {
+// export const pullModel = async (tagName: string) => {
 // 	return await fetch(`${OLLAMA_API_BASE_URL}/pull`, {
 // 		method: 'POST',
 // 		headers: {

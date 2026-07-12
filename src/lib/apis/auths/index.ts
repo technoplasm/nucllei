@@ -1,13 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const getAdminDetails = async (token: string) => {
+export const getAdminDetails = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/details`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -27,14 +26,13 @@ export const getAdminDetails = async (token: string) => {
 	return res;
 };
 
-export const getAdminConfig = async (token: string) => {
+export const getAdminConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -54,14 +52,13 @@ export const getAdminConfig = async (token: string) => {
 	return res;
 };
 
-export const updateAdminConfig = async (token: string, body: object) => {
+export const updateAdminConfig = async (body: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
 	})
@@ -82,14 +79,13 @@ export const updateAdminConfig = async (token: string, body: object) => {
 	return res;
 };
 
-export const getSessionUser = async (token: string) => {
+export const getSessionUser = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		credentials: 'include'
 	})
@@ -142,14 +138,13 @@ export const ldapUserSignIn = async (user: string, password: string) => {
 	return res;
 };
 
-export const getLdapConfig = async (token: string = '') => {
+export const getLdapConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -169,14 +164,13 @@ export const getLdapConfig = async (token: string = '') => {
 	return res;
 };
 
-export const updateLdapConfig = async (token: string = '', enable_ldap: boolean) => {
+export const updateLdapConfig = async (enable_ldap: boolean) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			enable_ldap: enable_ldap
@@ -199,14 +193,13 @@ export const updateLdapConfig = async (token: string = '', enable_ldap: boolean)
 	return res;
 };
 
-export const getLdapServer = async (token: string = '') => {
+export const getLdapServer = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -226,14 +219,13 @@ export const getLdapServer = async (token: string = '') => {
 	return res;
 };
 
-export const updateLdapServer = async (token: string = '', body: object) => {
+export const updateLdapServer = async (body: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
 	})
@@ -350,7 +342,6 @@ export const userSignOut = async () => {
 };
 
 export const addUser = async (
-	token: string,
 	name: string,
 	email: string,
 	password: string,
@@ -362,8 +353,7 @@ export const addUser = async (
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/add`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			name: name,
@@ -390,14 +380,13 @@ export const addUser = async (
 	return res;
 };
 
-export const updateUserProfile = async (token: string, name: string, profileImageUrl: string) => {
+export const updateUserProfile = async (name: string, profileImageUrl: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/update/profile`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			name: name,
@@ -421,14 +410,13 @@ export const updateUserProfile = async (token: string, name: string, profileImag
 	return res;
 };
 
-export const updateUserPassword = async (token: string, password: string, newPassword: string) => {
+export const updateUserPassword = async (password: string, newPassword: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/update/password`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			password: password,
@@ -452,14 +440,13 @@ export const updateUserPassword = async (token: string, password: string, newPas
 	return res;
 };
 
-export const createAPIKey = async (token: string) => {
+export const createAPIKey = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -477,14 +464,13 @@ export const createAPIKey = async (token: string) => {
 	return res.api_key;
 };
 
-export const getAPIKey = async (token: string) => {
+export const getAPIKey = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

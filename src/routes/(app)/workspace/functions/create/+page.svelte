@@ -16,7 +16,7 @@
 	let mounted = false;
 
 	const saveHandler = async (data) => {
-		const res = await createNewFunction(localStorage.token, {
+		const res = await createNewFunction({
 			id: data.id,
 			name: data.name,
 			description: data.description,
@@ -28,8 +28,8 @@
 
 		if (res) {
 			toast.success($i18n.t('Function created successfully'));
-			functions.set(await getFunctions(localStorage.token));
-			models.set(await getModels(localStorage.token));
+			functions.set(await getFunctions());
+			models.set(await getModels());
 
 			await goto('/workspace/functions');
 		}

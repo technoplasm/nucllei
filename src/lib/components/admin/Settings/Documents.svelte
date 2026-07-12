@@ -33,7 +33,7 @@
 			.filter(Boolean);
 
 		// llens(#69): 不正な ATTACHMENT_FUNCTION_ID は backend が 400 で弾く — toast で通知。
-		const res = await setAttachmentConfig(localStorage.token, RAGConfig).catch((error) => {
+		const res = await setAttachmentConfig(RAGConfig).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -44,11 +44,11 @@
 	};
 
 	onMount(async () => {
-		attachmentFunctions = ((await getFunctions(localStorage.token).catch(() => [])) ?? []).filter(
+		attachmentFunctions = ((await getFunctions().catch(() => [])) ?? []).filter(
 			(func) => func.type === 'attachment'
 		);
 
-		RAGConfig = await getAttachmentConfig(localStorage.token);
+		RAGConfig = await getAttachmentConfig();
 		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');
 	});
 </script>
@@ -56,7 +56,7 @@
 <ResetUploadDirConfirmDialog
 	bind:show={showResetUploadDirConfirm}
 	on:confirm={async () => {
-		const res = await deleteAllFiles(localStorage.token).catch((error) => {
+		const res = await deleteAllFiles().catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});

@@ -4,14 +4,13 @@ import { convertOpenApiToToolPayload } from '$lib/utils';
 import { parse } from 'yaml';
 import { toast } from 'svelte-sonner';
 
-export const getModels = async (token: string = '', base: boolean = false) => {
+export const getModels = async (base: boolean = false) => {
 	let error = null;
 	const res = await fetch(`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -38,15 +37,14 @@ type ChatCompletedForm = {
 	session_id: string;
 };
 
-export const chatCompleted = async (token: string, body: ChatCompletedForm) => {
+export const chatCompleted = async (body: ChatCompletedForm) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/completed`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
 	})
@@ -77,15 +75,14 @@ type ChatActionForm = {
 	chat_id: string;
 };
 
-export const chatAction = async (token: string, action_id: string, body: ChatActionForm) => {
+export const chatAction = async (action_id: string, body: ChatActionForm) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/actions/${action_id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
 	})
@@ -110,15 +107,14 @@ export const chatAction = async (token: string, action_id: string, body: ChatAct
 	return res;
 };
 
-export const stopTask = async (token: string, id: string) => {
+export const stopTask = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/tasks/stop/${id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -142,15 +138,14 @@ export const stopTask = async (token: string, id: string) => {
 	return res;
 };
 
-export const getTaskIdsByChatId = async (token: string, chat_id: string) => {
+export const getTaskIdsByChatId = async (chat_id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/tasks/chat/${chat_id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -174,6 +169,8 @@ export const getTaskIdsByChatId = async (token: string, chat_id: string) => {
 	return res;
 };
 
+// 注: この token は llens セッションではなく「外部 tool server の資格情報」(bearer key)。
+// cookie 認証化(#70 B1)の対象外(session 型 = セッション JWT 転送は cookie 化で不成立のため廃止)。
 export const getToolServerData = async (token: string, url: string) => {
 	let error = null;
 
@@ -220,152 +217,14 @@ export const getToolServerData = async (token: string, url: string) => {
 	return data;
 };
 
-export const getToolServersData = async (i18n, servers: object[]) => {
-	return (
-		await Promise.all(
-			servers
-				.filter((server) => server?.config?.enable)
-				.map(async (server) => {
-					const data = await getToolServerData(
-						(server?.auth_type ?? 'bearer') === 'bearer' ? server?.key : localStorage.token,
-						server?.url + '/' + (server?.path ?? 'openapi.json')
-					).catch((err) => {
-						toast.error(
-							i18n.t(`Failed to connect to {{URL}} OpenAPI tool server`, {
-								URL: server?.url + '/' + (server?.path ?? 'openapi.json')
-							})
-						);
-						return null;
-					});
-
-					if (data) {
-						const { openapi, info, specs } = data;
-						return {
-							url: server?.url,
-							openapi: openapi,
-							info: info,
-							specs: specs
-						};
-					}
-				})
-		)
-	).filter((server) => server);
-};
-
-export const executeToolServer = async (
-	token: string,
-	url: string,
-	name: string,
-	params: Record<string, any>,
-	serverData: { openapi: any; info: any; specs: any }
-) => {
-	let error = null;
-
-	try {
-		// Find the matching operationId in the OpenAPI spec
-		const matchingRoute = Object.entries(serverData.openapi.paths).find(([_, methods]) =>
-			Object.entries(methods as any).some(([__, operation]: any) => operation.operationId === name)
-		);
-
-		if (!matchingRoute) {
-			throw new Error(`No matching route found for operationId: ${name}`);
-		}
-
-		const [routePath, methods] = matchingRoute;
-
-		const methodEntry = Object.entries(methods as any).find(
-			([_, operation]: any) => operation.operationId === name
-		);
-
-		if (!methodEntry) {
-			throw new Error(`No matching method found for operationId: ${name}`);
-		}
-
-		const [httpMethod, operation]: [string, any] = methodEntry;
-
-		// Split parameters by type
-		const pathParams: Record<string, any> = {};
-		const queryParams: Record<string, any> = {};
-		let bodyParams: any = {};
-
-		if (operation.parameters) {
-			operation.parameters.forEach((param: any) => {
-				const paramName = param.name;
-				const paramIn = param.in;
-				if (params.hasOwnProperty(paramName)) {
-					if (paramIn === 'path') {
-						pathParams[paramName] = params[paramName];
-					} else if (paramIn === 'query') {
-						queryParams[paramName] = params[paramName];
-					}
-				}
-			});
-		}
-
-		let finalUrl = `${url}${routePath}`;
-
-		// Replace path parameters (`{param}`)
-		Object.entries(pathParams).forEach(([key, value]) => {
-			finalUrl = finalUrl.replace(new RegExp(`{${key}}`, 'g'), encodeURIComponent(value));
-		});
-
-		// Append query parameters to URL if any
-		if (Object.keys(queryParams).length > 0) {
-			const queryString = new URLSearchParams(
-				Object.entries(queryParams).map(([k, v]) => [k, String(v)])
-			).toString();
-			finalUrl += `?${queryString}`;
-		}
-
-		// Handle requestBody composite
-		if (operation.requestBody && operation.requestBody.content) {
-			const contentType = Object.keys(operation.requestBody.content)[0];
-			if (params !== undefined) {
-				bodyParams = params;
-			} else {
-				// Optional: Fallback or explicit error if body is expected but not provided
-				throw new Error(`Request body expected for operation '${name}' but none found.`);
-			}
-		}
-
-		// Prepare headers and request options
-		const headers: Record<string, string> = {
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		};
-
-		let requestOptions: RequestInit = {
-			method: httpMethod.toUpperCase(),
-			headers
-		};
-
-		if (['post', 'put', 'patch'].includes(httpMethod.toLowerCase()) && operation.requestBody) {
-			requestOptions.body = JSON.stringify(bodyParams);
-		}
-
-		const res = await fetch(finalUrl, requestOptions);
-		if (!res.ok) {
-			const resText = await res.text();
-			throw new Error(`HTTP error! Status: ${res.status}. Message: ${resText}`);
-		}
-
-		return await res.json();
-	} catch (err: any) {
-		error = err.message;
-		console.error('API Request Error:', error);
-		return { error };
-	}
-};
-
-export const getTaskConfig = async (token: string = '') => {
+export const getTaskConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -385,15 +244,14 @@ export const getTaskConfig = async (token: string = '') => {
 	return res;
 };
 
-export const updateTaskConfig = async (token: string, config: object) => {
+export const updateTaskConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(config)
 	})
@@ -418,20 +276,14 @@ export const updateTaskConfig = async (token: string, config: object) => {
 	return res;
 };
 
-export const generateTitle = async (
-	token: string = '',
-	model: string,
-	messages: string[],
-	chat_id?: string
-) => {
+export const generateTitle = async (model: string, messages: string[], chat_id?: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/title/completions`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			model: model,
@@ -458,15 +310,14 @@ export const generateTitle = async (
 	return res?.choices[0]?.message?.content.replace(/["']/g, '') ?? 'New Chat';
 };
 
-export const getPipelinesList = async (token: string = '') => {
+export const getPipelinesList = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -487,7 +338,7 @@ export const getPipelinesList = async (token: string = '') => {
 	return pipelines;
 };
 
-export const uploadPipeline = async (token: string, file: File, urlIdx: string) => {
+export const uploadPipeline = async (file: File, urlIdx: string) => {
 	let error = null;
 
 	// Create a new FormData object to handle the file upload
@@ -498,7 +349,6 @@ export const uploadPipeline = async (token: string, file: File, urlIdx: string) 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/upload`, {
 		method: 'POST',
 		headers: {
-			...(token && { authorization: `Bearer ${token}` })
 			// 'Content-Type': 'multipart/form-data' is not needed as Fetch API will set it automatically
 		},
 		body: formData
@@ -524,15 +374,14 @@ export const uploadPipeline = async (token: string, file: File, urlIdx: string) 
 	return res;
 };
 
-export const downloadPipeline = async (token: string, url: string, urlIdx: string) => {
+export const downloadPipeline = async (url: string, urlIdx: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/add`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			url: url,
@@ -560,15 +409,14 @@ export const downloadPipeline = async (token: string, url: string, urlIdx: strin
 	return res;
 };
 
-export const deletePipeline = async (token: string, id: string, urlIdx: string) => {
+export const deletePipeline = async (id: string, urlIdx: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			id: id,
@@ -596,7 +444,7 @@ export const deletePipeline = async (token: string, id: string, urlIdx: string) 
 	return res;
 };
 
-export const getPipelines = async (token: string, urlIdx?: string) => {
+export const getPipelines = async (urlIdx?: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -608,8 +456,7 @@ export const getPipelines = async (token: string, urlIdx?: string) => {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -630,7 +477,7 @@ export const getPipelines = async (token: string, urlIdx?: string) => {
 	return pipelines;
 };
 
-export const getPipelineValves = async (token: string, pipeline_id: string, urlIdx: string) => {
+export const getPipelineValves = async (pipeline_id: string, urlIdx: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -644,8 +491,7 @@ export const getPipelineValves = async (token: string, pipeline_id: string, urlI
 			method: 'GET',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				...(token && { authorization: `Bearer ${token}` })
+				'Content-Type': 'application/json'
 			}
 		}
 	)
@@ -666,7 +512,7 @@ export const getPipelineValves = async (token: string, pipeline_id: string, urlI
 	return res;
 };
 
-export const getPipelineValvesSpec = async (token: string, pipeline_id: string, urlIdx: string) => {
+export const getPipelineValvesSpec = async (pipeline_id: string, urlIdx: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -680,8 +526,7 @@ export const getPipelineValvesSpec = async (token: string, pipeline_id: string, 
 			method: 'GET',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				...(token && { authorization: `Bearer ${token}` })
+				'Content-Type': 'application/json'
 			}
 		}
 	)
@@ -702,12 +547,7 @@ export const getPipelineValvesSpec = async (token: string, pipeline_id: string, 
 	return res;
 };
 
-export const updatePipelineValves = async (
-	token: string = '',
-	pipeline_id: string,
-	valves: object,
-	urlIdx: string
-) => {
+export const updatePipelineValves = async (pipeline_id: string, valves: object, urlIdx: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -721,8 +561,7 @@ export const updatePipelineValves = async (
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				...(token && { authorization: `Bearer ${token}` })
+				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify(valves)
 		}
@@ -802,14 +641,13 @@ export const getChangelog = async () => {
 	return res;
 };
 
-export const getVersionUpdates = async (token: string) => {
+export const getVersionUpdates = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/version/updates`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -829,14 +667,13 @@ export const getVersionUpdates = async (token: string) => {
 	return res;
 };
 
-export const getModelFilterConfig = async (token: string) => {
+export const getModelFilterConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -856,18 +693,13 @@ export const getModelFilterConfig = async (token: string) => {
 	return res;
 };
 
-export const updateModelFilterConfig = async (
-	token: string,
-	enabled: boolean,
-	models: string[]
-) => {
+export const updateModelFilterConfig = async (enabled: boolean, models: string[]) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			enabled: enabled,
@@ -891,14 +723,13 @@ export const updateModelFilterConfig = async (
 	return res;
 };
 
-export const getWebhookUrl = async (token: string) => {
+export const getWebhookUrl = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -918,14 +749,13 @@ export const getWebhookUrl = async (token: string) => {
 	return res.url;
 };
 
-export const updateWebhookUrl = async (token: string, url: string) => {
+export const updateWebhookUrl = async (url: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			url: url
@@ -948,14 +778,13 @@ export const updateWebhookUrl = async (token: string, url: string) => {
 	return res.url;
 };
 
-export const getCommunitySharingEnabledStatus = async (token: string) => {
+export const getCommunitySharingEnabledStatus = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/community_sharing`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -975,14 +804,13 @@ export const getCommunitySharingEnabledStatus = async (token: string) => {
 	return res;
 };
 
-export const toggleCommunitySharingEnabledStatus = async (token: string) => {
+export const toggleCommunitySharingEnabledStatus = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/community_sharing/toggle`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -1002,14 +830,13 @@ export const toggleCommunitySharingEnabledStatus = async (token: string) => {
 	return res;
 };
 
-export const getModelConfig = async (token: string): Promise<GlobalModelConfig> => {
+export const getModelConfig = async (): Promise<GlobalModelConfig> => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/config/models`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -1047,14 +874,13 @@ export interface ModelParams {}
 
 export type GlobalModelConfig = ModelConfig[];
 
-export const updateModelConfig = async (token: string, config: GlobalModelConfig) => {
+export const updateModelConfig = async (config: GlobalModelConfig) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/config/models`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			models: config

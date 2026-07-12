@@ -47,7 +47,7 @@
 		floatingInputValue = '';
 
 		responseContent = '';
-		const [res, controller] = await chatCompletion(localStorage.token, {
+		const [res, controller] = await chatCompletion({
 			model: model,
 			messages: [
 				...messages,
@@ -124,7 +124,7 @@
 		prompt = `${explainText}\n\n\`\`\`\n${selectedText}\n\`\`\``;
 
 		responseContent = '';
-		const [res, controller] = await chatCompletion(localStorage.token, {
+		const [res, controller] = await chatCompletion({
 			model: model,
 			messages: [
 				...messages,

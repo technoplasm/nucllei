@@ -51,7 +51,7 @@
 	const fetchFiles = async (append = false) => {
 		loading = true;
 
-		const res = await getFileList(localStorage.token, {
+		const res = await getFileList({
 			limit,
 			offset: append ? files.length : 0,
 			order_by: 'created_at',

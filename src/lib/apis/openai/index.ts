@@ -1,14 +1,13 @@
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
-export const getOpenAIConfig = async (token: string = '') => {
+export const getOpenAIConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${OPENAI_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -39,15 +38,14 @@ type OpenAIConfig = {
 	OPENAI_API_CONFIGS: object;
 };
 
-export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfig) => {
+export const updateOpenAIConfig = async (config: OpenAIConfig) => {
 	let error = null;
 
 	const res = await fetch(`${OPENAI_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...config
@@ -74,7 +72,7 @@ export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfi
 	return res;
 };
 
-export const getOpenAIModels = async (token: string, urlIdx?: number) => {
+export const getOpenAIModels = async (urlIdx?: number) => {
 	let error = null;
 
 	const res = await fetch(
@@ -83,8 +81,7 @@ export const getOpenAIModels = async (token: string, urlIdx?: number) => {
 			method: 'GET',
 			headers: {
 				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				...(token && { authorization: `Bearer ${token}` })
+				'Content-Type': 'application/json'
 			}
 		}
 	)
@@ -105,7 +102,6 @@ export const getOpenAIModels = async (token: string, urlIdx?: number) => {
 };
 
 export const verifyOpenAIConnection = async (
-	token: string = '',
 	url: string = 'https://api.openai.com/v1',
 	key: string = '',
 	direct: boolean = false
@@ -143,7 +139,6 @@ export const verifyOpenAIConnection = async (
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
-				Authorization: `Bearer ${token}`,
 				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify({
@@ -169,7 +164,6 @@ export const verifyOpenAIConnection = async (
 };
 
 export const chatCompletion = async (
-	token: string = '',
 	body: object,
 	url: string = `${WEBUI_BASE_URL}/api`
 ): Promise<[Response | null, AbortController]> => {
@@ -180,7 +174,6 @@ export const chatCompletion = async (
 		signal: controller.signal,
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
@@ -198,7 +191,6 @@ export const chatCompletion = async (
 };
 
 export const generateOpenAIChatCompletion = async (
-	token: string = '',
 	body: object,
 	url: string = `${WEBUI_BASE_URL}/api`
 ) => {
@@ -207,7 +199,6 @@ export const generateOpenAIChatCompletion = async (
 	const res = await fetch(`${url}/chat/completions`, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(body)
@@ -229,7 +220,6 @@ export const generateOpenAIChatCompletion = async (
 };
 
 export const synthesizeOpenAISpeech = async (
-	token: string = '',
 	speaker: string = 'alloy',
 	text: string = '',
 	model: string = 'tts-1'
@@ -239,7 +229,6 @@ export const synthesizeOpenAISpeech = async (
 	const res = await fetch(`${OPENAI_API_BASE_URL}/audio/speech`, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({

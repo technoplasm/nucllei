@@ -129,7 +129,7 @@
 			if (chat.id === 'local') {
 				chatObj = chat;
 			} else {
-				chatObj = await getChatById(localStorage.token, chat.id);
+				chatObj = await getChatById(chat.id);
 			}
 
 			let blob = new Blob([JSON.stringify([chatObj])], {

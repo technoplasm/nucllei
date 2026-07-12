@@ -52,7 +52,7 @@
 		acItem = null;
 		if (!item) return;
 
-		const res = await updateSkillById(localStorage.token, {
+		const res = await updateSkillById({
 			...item,
 			access_control: value
 		}).catch(() => null);
@@ -68,13 +68,13 @@
 
 	const deleteHandler = async (skill) => {
 		const id = skill.id;
-		await deleteSkillById(localStorage.token, id);
+		await deleteSkillById(id);
 		await init();
 	};
 
 	const init = async () => {
-		skills = await getSkillList(localStorage.token);
-		await _skills.set(await getSkills(localStorage.token));
+		skills = await getSkillList();
+		await _skills.set(await getSkills());
 	};
 
 	onMount(async () => {

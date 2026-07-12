@@ -20,6 +20,8 @@ from open_webui.env import (
     WEBSOCKET_SENTINEL_PORT,
     WEBSOCKET_SENTINEL_HOSTS,
 )
+from http.cookies import SimpleCookie
+
 from open_webui.utils.auth import decode_token
 from open_webui.socket.utils import RedisDict, RedisLock
 
@@ -172,11 +174,32 @@ async def usage(sid, data):
     await sio.emit("usage", {"models": get_models_in_use()})
 
 
+def _token_from_environ(environ) -> str | None:
+    """llens(#70 B1): handshake の Cookie ヘッダから httpOnly セッション cookie を読む。
+
+    フロントは localStorage token を持たなくなったため、socket 認証は
+    auth payload(後方互換)→ cookie の順で解決する。
+    """
+    cookie_header = (environ or {}).get("HTTP_COOKIE")
+    if not cookie_header:
+        return None
+    cookie = SimpleCookie()
+    cookie.load(cookie_header)
+    morsel = cookie.get("token")
+    return morsel.value if morsel else None
+
+
 @sio.event
 async def connect(sid, environ, auth):
     user = None
+    token = None
     if auth and "token" in auth:
-        data = decode_token(auth["token"])
+        token = auth["token"]
+    if token is None:
+        token = _token_from_environ(environ)
+
+    if token:
+        data = decode_token(token)
 
         if data is not None and "id" in data:
             user = Users.get_user_by_id(data["id"])
@@ -197,10 +220,14 @@ async def connect(sid, environ, auth):
 async def user_join(sid, data):
 
     auth = data["auth"] if "auth" in data else None
-    if not auth or "token" not in auth:
+    token = auth.get("token") if auth else None
+    if token is None:
+        # llens(#70 B1): ログイン直後の user-join も handshake cookie で解決できる
+        token = _token_from_environ(sio.get_environ(sid))
+    if not token:
         return
 
-    data = decode_token(auth["token"])
+    data = decode_token(token)
     if data is None or "id" not in data:
         return
 

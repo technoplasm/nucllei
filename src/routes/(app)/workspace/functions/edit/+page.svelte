@@ -24,8 +24,8 @@
 	let func = null;
 
 	const refreshStores = async () => {
-		functions.set(await getFunctions(localStorage.token));
-		models.set(await getModels(localStorage.token));
+		functions.set(await getFunctions());
+		models.set(await getModels());
 	};
 
 	const saveHandler = async (data) => {
@@ -39,14 +39,14 @@
 		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する
 		// (差し替え)。作成が失敗(id 衝突/不正)したら旧 id を消さず中断。参照・valves はちぎれてよい。
 		if (data.id !== func.id) {
-			const created = await createNewFunction(localStorage.token, payload).catch((error) => {
+			const created = await createNewFunction(payload).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
 			if (!created) return;
 
-			await deleteFunctionById(localStorage.token, func.id).catch((error) => {
+			await deleteFunctionById(func.id).catch((error) => {
 				toast.error(`${error}`);
 			});
 
@@ -56,7 +56,7 @@
 			return;
 		}
 
-		const res = await updateFunctionById(localStorage.token, func.id, payload).catch((error) => {
+		const res = await updateFunctionById(func.id, payload).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -71,7 +71,7 @@
 		const id = $page.url.searchParams.get('id');
 
 		if (id) {
-			func = await getFunctionById(localStorage.token, id).catch((error) => {
+			func = await getFunctionById(id).catch((error) => {
 				toast.error(`${error}`);
 				goto('/workspace/functions');
 				return null;

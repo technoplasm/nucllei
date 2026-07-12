@@ -38,7 +38,7 @@
 		.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
 
 	const deleteHandler = async (func) => {
-		const res = await deleteFunctionById(localStorage.token, func.id).catch((error) => {
+		const res = await deleteFunctionById(func.id).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -46,8 +46,8 @@
 		if (res) {
 			toast.success($i18n.t('Function deleted successfully'));
 
-			functions.set(await getFunctions(localStorage.token));
-			models.set(await getModels(localStorage.token));
+			functions.set(await getFunctions());
+			models.set(await getModels());
 		}
 	};
 </script>
@@ -190,6 +190,6 @@
 	id={selectedFunction?.id ?? null}
 	on:save={async () => {
 		await tick();
-		models.set(await getModels(localStorage.token));
+		models.set(await getModels());
 	}}
 />

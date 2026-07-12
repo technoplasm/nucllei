@@ -301,7 +301,6 @@
 			} else {
 				for (const [idx, sentence] of messageContentParts.entries()) {
 					const res = await synthesizeOpenAISpeech(
-						localStorage.token,
 						$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
 							? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
 							: $config?.audio?.tts?.voice,
@@ -396,7 +395,7 @@
 
 	const generateImage = async (message: MessageType) => {
 		generatingImage = true;
-		const res = await imageGenerations(localStorage.token, message.content).catch((error) => {
+		const res = await imageGenerations(message.content).catch((error) => {
 			toast.error(`${error}`);
 		});
 		console.log(res);

@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 // llens(#69): model_id クエリは撤去(per-model Attachment 廃止)。
 // グローバル Attachment(ATTACHMENT_FUNCTION_ID)は upload 時にサーバー側で発火する。
-export const uploadFile = async (token: string, file: File) => {
+export const uploadFile = async (file: File) => {
 	const data = new FormData();
 	data.append('file', file);
 	let error = null;
@@ -10,8 +10,7 @@ export const uploadFile = async (token: string, file: File) => {
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
 		method: 'POST',
 		headers: {
-			Accept: 'application/json',
-			authorization: `Bearer ${token}`
+			Accept: 'application/json'
 		},
 		body: data
 	})
@@ -44,7 +43,7 @@ type FileListOptions = {
 	filename?: string;
 };
 
-export const getFileList = async (token: string, options: FileListOptions = {}) => {
+export const getFileList = async (options: FileListOptions = {}) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
@@ -72,8 +71,7 @@ export const getFileList = async (token: string, options: FileListOptions = {}) 
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -94,15 +92,14 @@ export const getFileList = async (token: string, options: FileListOptions = {}) 
 };
 
 // llens(#69): file を 1 件以上持つユーザーの一覧(admin 専用)。[{id, name, email, file_count}]
-export const getFileUploaders = async (token: string) => {
+export const getFileUploaders = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/uploaders`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -123,15 +120,14 @@ export const getFileUploaders = async (token: string) => {
 };
 
 // llens(#69): 再添付 — Attachment フックを再発火する(owner/admin のみサーバー側で発火)。
-export const processFileById = async (token: string, id: string) => {
+export const processFileById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/process`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -153,19 +149,14 @@ export const processFileById = async (token: string, id: string) => {
 
 // llens(#69): file の ACL 更新(owner/admin のみ)。file の ACL 意味論は他エンティティと逆:
 // null=非公開(owner のみ)/ {read:{public:true}}=全体公開 / {read:{group_ids,user_ids}}=列挙先に公開。
-export const updateFileAccessControlById = async (
-	token: string,
-	id: string,
-	accessControl: null | object
-) => {
+export const updateFileAccessControlById = async (id: string, accessControl: null | object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/access_control/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			access_control: accessControl
@@ -188,15 +179,14 @@ export const updateFileAccessControlById = async (
 	return res;
 };
 
-export const getFileById = async (token: string, id: string) => {
+export const getFileById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -219,15 +209,14 @@ export const getFileById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateFileDataContentById = async (token: string, id: string, content: string) => {
+export const updateFileDataContentById = async (id: string, content: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/data/content/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			content: content
@@ -253,15 +242,14 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 	return res;
 };
 
-export const deleteFileById = async (token: string, id: string) => {
+export const deleteFileById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -284,15 +272,14 @@ export const deleteFileById = async (token: string, id: string) => {
 	return res;
 };
 
-export const deleteAllFiles = async (token: string) => {
+export const deleteAllFiles = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/all`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

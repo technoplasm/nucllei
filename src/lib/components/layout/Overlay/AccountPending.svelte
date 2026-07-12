@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getAdminDetails } from '$lib/apis/auths';
+	import { getAdminDetails, userSignOut } from '$lib/apis/auths';
 	import { onMount, tick, getContext } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -7,7 +7,7 @@
 	let adminDetails = null;
 
 	onMount(async () => {
-		adminDetails = await getAdminDetails(localStorage.token).catch((err) => {
+		adminDetails = await getAdminDetails().catch((err) => {
 			console.error(err);
 			return null;
 		});
@@ -51,6 +51,8 @@
 					<button
 						class="text-xs text-center w-full mt-2 text-gray-400 underline"
 						on:click={async () => {
+							// llens(#70 B1): cookie セッションの破棄は backend の signout が行う
+							await userSignOut().catch(() => {});
 							localStorage.removeItem('token');
 							location.href = '/auth';
 						}}>{$i18n.t('Sign Out')}</button

@@ -84,7 +84,6 @@
 		}
 
 		const [res, controller] = await chatCompletion(
-			localStorage.token,
 			{
 				model: model.id,
 				stream: true,

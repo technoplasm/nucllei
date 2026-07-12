@@ -22,7 +22,7 @@
 	const i18n = getContext('i18n');
 
 	const getModels = async () => {
-		const models = await _getModels(localStorage.token);
+		const models = await _getModels();
 		return models;
 	};
 
@@ -62,7 +62,7 @@
 				}
 			}
 
-			const res = await updateOpenAIConfig(localStorage.token, {
+			const res = await updateOpenAIConfig({
 				ENABLE_OPENAI_API: ENABLE_OPENAI_API,
 				OPENAI_API_BASE_URLS: OPENAI_API_BASE_URLS,
 				OPENAI_API_KEYS: OPENAI_API_KEYS,
@@ -83,7 +83,7 @@
 			// Remove trailing slashes
 			OLLAMA_BASE_URLS = OLLAMA_BASE_URLS.map((url) => url.replace(/\/$/, ''));
 
-			const res = await updateOllamaConfig(localStorage.token, {
+			const res = await updateOllamaConfig({
 				ENABLE_OLLAMA_API: ENABLE_OLLAMA_API,
 				OLLAMA_BASE_URLS: OLLAMA_BASE_URLS,
 				OLLAMA_API_CONFIGS: OLLAMA_API_CONFIGS
@@ -123,10 +123,10 @@
 
 			await Promise.all([
 				(async () => {
-					ollamaConfig = await getOllamaConfig(localStorage.token);
+					ollamaConfig = await getOllamaConfig();
 				})(),
 				(async () => {
-					openaiConfig = await getOpenAIConfig(localStorage.token);
+					openaiConfig = await getOpenAIConfig();
 				})()
 			]);
 
@@ -154,7 +154,7 @@
 					if (!(OPENAI_API_CONFIGS[idx]?.enable ?? true)) {
 						return;
 					}
-					const res = await getOpenAIModels(localStorage.token, idx);
+					const res = await getOpenAIModels(idx);
 					if (res.pipelines) {
 						pipelineUrls[url] = true;
 					}

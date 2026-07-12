@@ -60,8 +60,8 @@
 			reconnectionDelayMax: 5000,
 			randomizationFactor: 0.5,
 			path: '/ws/socket.io',
-			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket'],
-			auth: { token: localStorage.token }
+			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket']
+			// llens(#70 B1): 認証は httpOnly cookie(handshake の Cookie ヘッダを backend が読む)
 		});
 
 		await socket.set(_socket);
@@ -145,7 +145,7 @@
 				}
 			} else if (type === 'chat:title') {
 				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
+				await chats.set(await getChatList($currentChatPage));
 			}
 		} else if (data?.session_id === $socket.id) {
 			if (type === 'execute:python') {
@@ -266,27 +266,19 @@
 				const currentUrl = `${window.location.pathname}${window.location.search}`;
 				const encodedUrl = encodeURIComponent(currentUrl);
 
-				if (localStorage.token) {
-					// Get Session User Info
-					const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
-						toast.error(`${error}`);
-						return null;
-					});
+				// llens(#70 B1): セッションは httpOnly cookie に一本化 — token の有無を JS から
+				// 判定できないので、常に /auths/(me)を叩いて cookie セッションの生死で分岐する
+				const sessionUser = await getSessionUser().catch(() => null);
 
-					if (sessionUser) {
-						// Save Session User to Store
-						$socket.emit('user-join', { auth: { token: sessionUser.token } });
+				if (sessionUser) {
+					// Save Session User to Store
+					$socket.emit('user-join', { auth: { token: sessionUser.token } });
 
-						await user.set(sessionUser);
-						await config.set(await getBackendConfig());
-					} else {
-						// Redirect Invalid Session User to /auth Page
-						localStorage.removeItem('token');
-						await goto(`/auth?redirect=${encodedUrl}`);
-					}
+					await user.set(sessionUser);
+					await config.set(await getBackendConfig());
 				} else {
-					// Don't redirect if we're already on the auth page
-					// Needed because we pass in tokens from OAuth logins via URL fragments
+					// 未ログイン or セッション失効。旧 localStorage token は移行残骸として掃除
+					localStorage.removeItem('token');
 					if ($page.url.pathname !== '/auth') {
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}

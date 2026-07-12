@@ -49,7 +49,7 @@
 
 	const init = async () => {
 		loading = true;
-		skills.set(await getSkills(localStorage.token));
+		skills.set(await getSkills());
 		loading = false;
 	};
 </script>

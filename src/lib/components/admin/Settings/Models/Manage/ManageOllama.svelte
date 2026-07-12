@@ -69,12 +69,10 @@
 			console.log(model);
 
 			updateModelId = model.id;
-			const [res, controller] = await pullModel(localStorage.token, model.id, urlIdx).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const [res, controller] = await pullModel(model.id, urlIdx).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
 			if (res) {
 				const reader = res.body
@@ -143,12 +141,10 @@
 			return;
 		}
 
-		const [res, controller] = await pullModel(localStorage.token, sanitizedModelTag, urlIdx).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		const [res, controller] = await pullModel(sanitizedModelTag, urlIdx).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		if (res) {
 			const reader = res.body
@@ -235,7 +231,7 @@
 					})
 				);
 
-				models.set(await getModels(localStorage.token));
+				models.set(await getModels());
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -264,19 +260,17 @@
 			if (file) {
 				uploadMessage = 'Uploading...';
 
-				fileResponse = await uploadModel(localStorage.token, file, urlIdx).catch((error) => {
+				fileResponse = await uploadModel(file, urlIdx).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
 			}
 		} else {
 			uploadProgress = 0;
-			fileResponse = await downloadModel(localStorage.token, modelFileUrl, urlIdx).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			fileResponse = await downloadModel(modelFileUrl, urlIdx).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 		}
 
 		if (fileResponse && fileResponse.ok) {
@@ -325,7 +319,6 @@
 
 		if (uploaded) {
 			const res = await createModel(
-				localStorage.token,
 				`${name}:latest`,
 				`FROM @${modelFileDigest}\n${modelFileContent}`
 			);
@@ -394,11 +387,11 @@
 		modelTransferring = false;
 		uploadProgress = null;
 
-		models.set(await getModels(localStorage.token));
+		models.set(await getModels());
 	};
 
 	const deleteModelHandler = async () => {
-		const res = await deleteModel(localStorage.token, deleteModelTag, urlIdx).catch((error) => {
+		const res = await deleteModel(deleteModelTag, urlIdx).catch((error) => {
 			toast.error(`${error}`);
 		});
 
@@ -407,7 +400,7 @@
 		}
 
 		deleteModelTag = '';
-		models.set(await getModels(localStorage.token));
+		models.set(await getModels());
 	};
 
 	const cancelModelPullHandler = async (model: string) => {
@@ -421,7 +414,7 @@
 			MODEL_DOWNLOAD_POOL.set({
 				...$MODEL_DOWNLOAD_POOL
 			});
-			await deleteModel(localStorage.token, model);
+			await deleteModel(model);
 			toast.success(`${model} download has been canceled`);
 		}
 	};
@@ -440,7 +433,6 @@
 		}
 
 		const res = await createModel(
-			localStorage.token,
 			{
 				model: createModelName,
 				...modelObject
@@ -506,7 +498,7 @@
 			}
 		}
 
-		models.set(await getModels(localStorage.token));
+		models.set(await getModels());
 
 		createModelLoading = false;
 
@@ -518,7 +510,7 @@
 
 	const init = async () => {
 		loading = true;
-		ollamaModels = await getOllamaModels(localStorage.token, urlIdx).catch((error) => {
+		ollamaModels = await getOllamaModels(urlIdx).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});

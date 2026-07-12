@@ -1,13 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const getUserDefaultPermissions = async (token: string) => {
+export const getUserDefaultPermissions = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -27,14 +26,13 @@ export const getUserDefaultPermissions = async (token: string) => {
 	return res;
 };
 
-export const updateUserDefaultPermissions = async (token: string, permissions: object) => {
+export const updateUserDefaultPermissions = async (permissions: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...permissions
@@ -57,14 +55,13 @@ export const updateUserDefaultPermissions = async (token: string, permissions: o
 	return res;
 };
 
-export const updateUserRole = async (token: string, id: string, role: string) => {
+export const updateUserRole = async (id: string, role: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/update/role`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			id: id,
@@ -88,14 +85,13 @@ export const updateUserRole = async (token: string, id: string, role: string) =>
 	return res;
 };
 
-export const getUsers = async (token: string) => {
+export const getUsers = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -115,13 +111,12 @@ export const getUsers = async (token: string) => {
 	return res ? res : [];
 };
 
-export const getUserSettings = async (token: string) => {
+export const getUserSettings = async () => {
 	let error = null;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/settings`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -141,14 +136,13 @@ export const getUserSettings = async (token: string) => {
 	return res;
 };
 
-export const updateUserSettings = async (token: string, settings: object) => {
+export const updateUserSettings = async (settings: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/settings/update`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...settings
@@ -171,14 +165,13 @@ export const updateUserSettings = async (token: string, settings: object) => {
 	return res;
 };
 
-export const getUserById = async (token: string, userId: string) => {
+export const getUserById = async (userId: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -200,13 +193,12 @@ export const getUserById = async (token: string, userId: string) => {
 
 // llens(#55): 本人による info 読み書き(getUserInfo/updateUserInfo)と geolocation
 // (getAndUpdateUserLocation)は撤去。info は admin 専有(updateUserById の info で編集)。
-export const getUserMetaFields = async (token: string) => {
+export const getUserMetaFields = async () => {
 	let error = null;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/meta/fields`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -226,14 +218,13 @@ export const getUserMetaFields = async (token: string) => {
 	return res;
 };
 
-export const deleteUserById = async (token: string, userId: string) => {
+export const deleteUserById = async (userId: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
 		method: 'DELETE',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -262,14 +253,13 @@ type UserUpdateForm = {
 	info?: object;
 };
 
-export const updateUserById = async (token: string, userId: string, user: UserUpdateForm) => {
+export const updateUserById = async (userId: string, user: UserUpdateForm) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}/update`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			profile_image_url: user.profile_image_url,

@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { Banner } from '$lib/types';
 
-export const importConfig = async (token: string, config) => {
+export const importConfig = async (config) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/import`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			config: config
@@ -31,14 +30,13 @@ export const importConfig = async (token: string, config) => {
 	return res;
 };
 
-export const exportConfig = async (token: string) => {
+export const exportConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/export`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -58,14 +56,13 @@ export const exportConfig = async (token: string) => {
 	return res;
 };
 
-export const getToolServerConnections = async (token: string) => {
+export const getToolServerConnections = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -85,14 +82,13 @@ export const getToolServerConnections = async (token: string) => {
 	return res;
 };
 
-export const setToolServerConnections = async (token: string, connections: object) => {
+export const setToolServerConnections = async (connections: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...connections
@@ -115,14 +111,13 @@ export const setToolServerConnections = async (token: string, connections: objec
 	return res;
 };
 
-export const verifyToolServerConnection = async (token: string, connection: object) => {
+export const verifyToolServerConnection = async (connection: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers/verify`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...connection
@@ -146,14 +141,13 @@ export const verifyToolServerConnection = async (token: string, connection: obje
 };
 
 // llens(#67): 添付ゲート設定(retrieval router 撤去に伴い /configs/attachment へ移設)
-export const getAttachmentConfig = async (token: string) => {
+export const getAttachmentConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -173,14 +167,13 @@ export const getAttachmentConfig = async (token: string) => {
 	return res;
 };
 
-export const setAttachmentConfig = async (token: string, config: object) => {
+export const setAttachmentConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify(config)
 	})
@@ -201,14 +194,13 @@ export const setAttachmentConfig = async (token: string, config: object) => {
 	return res;
 };
 
-export const getCodeInterpreterConfig = async (token: string) => {
+export const getCodeInterpreterConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -228,14 +220,13 @@ export const getCodeInterpreterConfig = async (token: string) => {
 	return res;
 };
 
-export const setCodeInterpreterConfig = async (token: string, config: object) => {
+export const setCodeInterpreterConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...config
@@ -258,14 +249,13 @@ export const setCodeInterpreterConfig = async (token: string, config: object) =>
 	return res;
 };
 
-export const getModelsConfig = async (token: string) => {
+export const getModelsConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -285,14 +275,13 @@ export const getModelsConfig = async (token: string) => {
 	return res;
 };
 
-export const setModelsConfig = async (token: string, config: object) => {
+export const setModelsConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...config
@@ -315,14 +304,13 @@ export const setModelsConfig = async (token: string, config: object) => {
 	return res;
 };
 
-export const getBanners = async (token: string): Promise<Banner[]> => {
+export const getBanners = async (): Promise<Banner[]> => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -342,14 +330,13 @@ export const getBanners = async (token: string): Promise<Banner[]> => {
 	return res;
 };
 
-export const setBanners = async (token: string, banners: Banner[]) => {
+export const setBanners = async (banners: Banner[]) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			banners: banners

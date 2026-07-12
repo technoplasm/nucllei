@@ -3,14 +3,13 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 // llens(#67): getGravatarUrl / executeCode / getHTMLFromMarkdown / downloadLiteLLMConfig を
 // endpoint ごと撤去(gravatar=外部ネット、code/execute=組み込み実行の残骸、他=orphan)
 
-export const formatPythonCode = async (token: string, code: string) => {
+export const formatPythonCode = async (code: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/code/format`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			code: code
@@ -37,14 +36,13 @@ export const formatPythonCode = async (token: string, code: string) => {
 	return res;
 };
 
-export const downloadChatAsPDF = async (token: string, title: string, messages: object[]) => {
+export const downloadChatAsPDF = async (title: string, messages: object[]) => {
 	let error = null;
 
 	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/pdf`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			title: title,
@@ -64,14 +62,13 @@ export const downloadChatAsPDF = async (token: string, title: string, messages: 
 	return blob;
 };
 
-export const downloadDatabase = async (token: string) => {
+export const downloadDatabase = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/db/download`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (response) => {

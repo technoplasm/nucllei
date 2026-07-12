@@ -155,12 +155,10 @@
 			return;
 		}
 
-		const [res, controller] = await pullModel(localStorage.token, sanitizedModelTag, '0').catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		const [res, controller] = await pullModel(sanitizedModelTag, '0').catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		if (res) {
 			const reader = res.body
@@ -246,7 +244,7 @@
 					})
 				);
 
-				models.set(await getModels(localStorage.token));
+				models.set(await getModels());
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -260,7 +258,7 @@
 	};
 
 	onMount(async () => {
-		ollamaVersion = await getOllamaVersion(localStorage.token).catch((error) => false);
+		ollamaVersion = await getOllamaVersion().catch((error) => false);
 
 		if (items) {
 			tags = items
@@ -284,7 +282,7 @@
 			MODEL_DOWNLOAD_POOL.set({
 				...$MODEL_DOWNLOAD_POOL
 			});
-			await deleteModel(localStorage.token, model);
+			await deleteModel(model);
 			toast.success(`${model} download has been canceled`);
 		}
 	};

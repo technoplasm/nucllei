@@ -56,18 +56,16 @@
 
 	const editHandler = async () => {
 		if (_user.role !== selectedUser.role) {
-			const roleRes = await updateUserRole(localStorage.token, selectedUser.id, _user.role).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const roleRes = await updateUserRole(selectedUser.id, _user.role).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 			if (!roleRes) {
 				return null;
 			}
 		}
 
-		return await updateUserById(localStorage.token, selectedUser.id, {
+		return await updateUserById(selectedUser.id, {
 			name: _user.name,
 			email: _user.email,
 			password: _user.password,
@@ -90,16 +88,11 @@
 
 			const res = edit
 				? await editHandler()
-				: await addUser(
-						localStorage.token,
-						_user.name,
-						_user.email,
-						_user.password,
-						_user.role,
-						_user.info
-					).catch((error) => {
-						toast.error(`${error}`);
-					});
+				: await addUser(_user.name, _user.email, _user.password, _user.role, _user.info).catch(
+						(error) => {
+							toast.error(`${error}`);
+						}
+					);
 
 			if (res) {
 				stopLoading();
@@ -128,7 +121,6 @@
 								['admin', 'user', 'pending'].includes(columns[3].toLowerCase())
 							) {
 								const res = await addUser(
-									localStorage.token,
 									columns[0],
 									columns[1],
 									columns[2],

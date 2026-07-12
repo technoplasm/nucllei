@@ -1,13 +1,12 @@
 import { AUDIO_API_BASE_URL } from '$lib/constants';
 
-export const getAudioConfig = async (token: string) => {
+export const getAudioConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${AUDIO_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -34,14 +33,13 @@ type OpenAIConfigForm = {
 	speaker: string;
 };
 
-export const updateAudioConfig = async (token: string, payload: OpenAIConfigForm) => {
+export const updateAudioConfig = async (payload: OpenAIConfigForm) => {
 	let error = null;
 
 	const res = await fetch(`${AUDIO_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...payload
@@ -64,7 +62,7 @@ export const updateAudioConfig = async (token: string, payload: OpenAIConfigForm
 	return res;
 };
 
-export const transcribeAudio = async (token: string, file: File) => {
+export const transcribeAudio = async (file: File) => {
 	const data = new FormData();
 	data.append('file', file);
 
@@ -72,8 +70,7 @@ export const transcribeAudio = async (token: string, file: File) => {
 	const res = await fetch(`${AUDIO_API_BASE_URL}/transcriptions`, {
 		method: 'POST',
 		headers: {
-			Accept: 'application/json',
-			authorization: `Bearer ${token}`
+			Accept: 'application/json'
 		},
 		body: data
 	})
@@ -95,7 +92,6 @@ export const transcribeAudio = async (token: string, file: File) => {
 };
 
 export const synthesizeOpenAISpeech = async (
-	token: string = '',
 	speaker: string = 'alloy',
 	text: string = '',
 	model?: string
@@ -105,7 +101,6 @@ export const synthesizeOpenAISpeech = async (
 	const res = await fetch(`${AUDIO_API_BASE_URL}/speech`, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
@@ -136,14 +131,13 @@ interface AvailableModelsResponse {
 	models: { name: string; id: string }[] | { id: string }[];
 }
 
-export const getModels = async (token: string = ''): Promise<AvailableModelsResponse> => {
+export const getModels = async (): Promise<AvailableModelsResponse> => {
 	let error = null;
 
 	const res = await fetch(`${AUDIO_API_BASE_URL}/models`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -164,14 +158,13 @@ export const getModels = async (token: string = ''): Promise<AvailableModelsResp
 	return res;
 };
 
-export const getVoices = async (token: string = '') => {
+export const getVoices = async () => {
 	let error = null;
 
 	const res = await fetch(`${AUDIO_API_BASE_URL}/voices`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {

@@ -61,7 +61,7 @@
 	//////////////////////////
 
 	const loadSharedChat = async () => {
-		const userSettings = await getUserSettings(localStorage.token).catch((error) => {
+		const userSettings = await getUserSettings().catch((error) => {
 			console.error(error);
 			return null;
 		});
@@ -80,15 +80,15 @@
 			settings.set(localStorageSettings);
 		}
 
-		await models.set(await getModels(localStorage.token));
+		await models.set(await getModels());
 		await chatId.set($page.params.id);
-		chat = await getChatByShareId(localStorage.token, $chatId).catch(async (error) => {
+		chat = await getChatByShareId($chatId).catch(async (error) => {
 			await goto('/');
 			return null;
 		});
 
 		if (chat) {
-			user = await getUserById(localStorage.token, chat.user_id).catch((error) => {
+			user = await getUserById(chat.user_id).catch((error) => {
 				console.error(error);
 				return null;
 			});
@@ -126,7 +126,7 @@
 	const cloneSharedChat = async () => {
 		if (!chat) return;
 
-		const res = await cloneSharedChatById(localStorage.token, chat.id).catch((error) => {
+		const res = await cloneSharedChatById(chat.id).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});

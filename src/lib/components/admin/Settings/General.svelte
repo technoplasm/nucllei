@@ -41,7 +41,7 @@
 
 	const updateLdapServerHandler = async () => {
 		if (!ENABLE_LDAP) return;
-		const res = await updateLdapServer(localStorage.token, LDAP_SERVER).catch((error) => {
+		const res = await updateLdapServer(LDAP_SERVER).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -51,8 +51,8 @@
 	};
 
 	const updateHandler = async () => {
-		webhookUrl = await updateWebhookUrl(localStorage.token, webhookUrl);
-		const res = await updateAdminConfig(localStorage.token, adminConfig);
+		webhookUrl = await updateWebhookUrl(webhookUrl);
+		const res = await updateAdminConfig(adminConfig);
 		await updateLdapServerHandler();
 
 		if (res) {
@@ -65,18 +65,18 @@
 	onMount(async () => {
 		await Promise.all([
 			(async () => {
-				adminConfig = await getAdminConfig(localStorage.token);
+				adminConfig = await getAdminConfig();
 			})(),
 
 			(async () => {
-				webhookUrl = await getWebhookUrl(localStorage.token);
+				webhookUrl = await getWebhookUrl();
 			})(),
 			(async () => {
-				LDAP_SERVER = await getLdapServer(localStorage.token);
+				LDAP_SERVER = await getLdapServer();
 			})()
 		]);
 
-		const ldapConfig = await getLdapConfig(localStorage.token);
+		const ldapConfig = await getLdapConfig();
 		ENABLE_LDAP = ldapConfig.ENABLE_LDAP;
 	});
 </script>
@@ -219,7 +219,7 @@
 									<Switch
 										bind:state={ENABLE_LDAP}
 										on:change={async () => {
-											updateLdapConfig(localStorage.token, ENABLE_LDAP);
+											updateLdapConfig(ENABLE_LDAP);
 										}}
 									/>
 								</div>

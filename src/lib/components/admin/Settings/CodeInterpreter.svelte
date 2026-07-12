@@ -19,11 +19,11 @@
 	let engines = ['jupyter'];
 
 	const submitHandler = async () => {
-		await setCodeInterpreterConfig(localStorage.token, config);
+		await setCodeInterpreterConfig(config);
 	};
 
 	onMount(async () => {
-		const res = await getCodeInterpreterConfig(localStorage.token);
+		const res = await getCodeInterpreterConfig();
 
 		if (res) {
 			config = res;

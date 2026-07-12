@@ -33,7 +33,7 @@
 	let banners: Banner[] = [];
 
 	const updateInterfaceHandler = async () => {
-		taskConfig = await updateTaskConfig(localStorage.token, taskConfig);
+		taskConfig = await updateTaskConfig(taskConfig);
 
 		await updateBanners();
 
@@ -41,13 +41,13 @@
 	};
 
 	onMount(async () => {
-		taskConfig = await getTaskConfig(localStorage.token);
+		taskConfig = await getTaskConfig();
 
-		banners = await getBanners(localStorage.token);
+		banners = await getBanners();
 	});
 
 	const updateBanners = async () => {
-		_banners.set(await setBanners(localStorage.token, banners));
+		_banners.set(await setBanners(banners));
 	};
 </script>
 

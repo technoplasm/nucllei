@@ -13,7 +13,7 @@
 	// 一切持ち込まない(issue #35)。作成は空フォームからのみ。
 	let skill = null;
 	const onSubmit = async (_skill) => {
-		const skill = await createNewSkill(localStorage.token, _skill).catch((error) => {
+		const skill = await createNewSkill(_skill).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -21,7 +21,7 @@
 		if (skill) {
 			toast.success($i18n.t('Skill created successfully'));
 
-			await skills.set(await getSkills(localStorage.token));
+			await skills.set(await getSkills());
 			await goto('/workspace/skills');
 		}
 	};

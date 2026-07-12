@@ -53,8 +53,10 @@
 		}
 
 		if (direct) {
+			// llens(#70 B1): session 型はサーバ側実行時に backend が資格情報を転送する。
+			// フロントの疎通テストは cookie(httpOnly)を読めないため無認証で叩く。
 			const res = await getToolServerData(
-				auth_type === 'bearer' ? key : localStorage.token,
+				auth_type === 'bearer' ? key : '',
 				`${url}/${path}`
 			).catch((err) => {
 				toast.error($i18n.t('Connection failed'));
@@ -65,7 +67,7 @@
 				console.debug('Connection successful', res);
 			}
 		} else {
-			const res = await verifyToolServerConnection(localStorage.token, {
+			const res = await verifyToolServerConnection({
 				url,
 				path,
 				auth_type,

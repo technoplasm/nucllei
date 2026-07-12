@@ -52,7 +52,7 @@
 		const seq = ++fetchSeq;
 		loading = true;
 
-		const res = await getAdminChatList(localStorage.token, {
+		const res = await getAdminChatList({
 			limit,
 			offset: append ? chats.length : 0,
 			order_by: orderBy,
@@ -133,8 +133,8 @@
 
 	onMount(async () => {
 		const [ownersRes, modelsRes] = await Promise.all([
-			getAdminChatUsers(localStorage.token).catch(() => null),
-			getAdminChatModels(localStorage.token).catch(() => null)
+			getAdminChatUsers().catch(() => null),
+			getAdminChatModels().catch(() => null)
 		]);
 		owners = ownersRes ?? [];
 		models = modelsRes ?? [];

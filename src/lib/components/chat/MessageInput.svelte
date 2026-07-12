@@ -148,12 +148,12 @@
 		try {
 			// During the file upload, file content is automatically extracted.
 			// llens(#69): グローバル Attachment(ATTACHMENT_FUNCTION_ID)はサーバー側で発火する。
-			const uploadedFile = await uploadFile(localStorage.token, file);
+			const uploadedFile = await uploadFile(file);
 
 			if (uploadedFile) {
 				// アップロード中に X で外された場合はサーバーに orphan を残さない
 				if (!files.some((item) => item?.itemId === tempItemId)) {
-					deleteFileById(localStorage.token, uploadedFile.id).catch(() => {});
+					deleteFileById(uploadedFile.id).catch(() => {});
 					return null;
 				}
 
@@ -240,12 +240,12 @@
 				}
 			}
 
-			const uploadedFile = await uploadFile(localStorage.token, uploadTarget);
+			const uploadedFile = await uploadFile(uploadTarget);
 
 			if (uploadedFile) {
 				// アップロード中に X で外された場合はサーバーに orphan を残さない
 				if (!files.some((item) => item?.itemId === tempItemId)) {
-					deleteFileById(localStorage.token, uploadedFile.id).catch(() => {});
+					deleteFileById(uploadedFile.id).catch(() => {});
 					return null;
 				}
 
@@ -289,7 +289,7 @@
 			}
 
 			try {
-				const file = (await processFileById(localStorage.token, item.id)) ?? item;
+				const file = (await processFileById(item.id)) ?? item;
 
 				if (isImage) {
 					files = [
@@ -337,7 +337,7 @@
 		if (file?.type !== 'collection' && !file?.collection && file?.origin !== 'library') {
 			if (file?.id) {
 				// This will handle both file deletion and Chroma cleanup
-				await deleteFileById(localStorage.token, file.id);
+				await deleteFileById(file.id);
 			}
 		}
 

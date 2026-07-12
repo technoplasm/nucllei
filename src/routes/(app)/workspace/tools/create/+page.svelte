@@ -13,7 +13,7 @@
 	let mounted = false;
 
 	const saveHandler = async (data) => {
-		const res = await createNewTool(localStorage.token, {
+		const res = await createNewTool({
 			id: data.id,
 			name: data.name,
 			description: data.description,
@@ -26,7 +26,7 @@
 
 		if (res) {
 			toast.success($i18n.t('Tool created successfully'));
-			tools.set(await getTools(localStorage.token));
+			tools.set(await getTools());
 
 			await goto('/workspace/tools');
 		}

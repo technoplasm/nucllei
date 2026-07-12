@@ -37,10 +37,9 @@
 		if (sessionUser) {
 			console.log(sessionUser);
 			toast.success($i18n.t(`You're now logged in.`));
-			if (sessionUser.token) {
-				localStorage.token = sessionUser.token;
-			}
-
+			// llens(#70 B1): セッションは httpOnly cookie(signin レスポンスで設定済み)に一本化。
+			// localStorage への永続化は廃止。socket の user-join のみレスポンス中の token を
+			// 一時的に使う(cookie は handshake 時参照 — 既接続ソケットの再認証用)。
 			$socket.emit('user-join', { auth: { token: sessionUser.token } });
 			await user.set(sessionUser);
 			await config.set(await getBackendConfig());
@@ -101,14 +100,14 @@
 		if (!token) {
 			return;
 		}
-		const sessionUser = await getSessionUser(token).catch((error) => {
+		// llens(#70 B1): OAuth callback もサーバが cookie を設定済み — cookie でセッション取得する
+		const sessionUser = await getSessionUser().catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 		if (!sessionUser) {
 			return;
 		}
-		localStorage.token = token;
 		await setSessionUser(sessionUser);
 	};
 

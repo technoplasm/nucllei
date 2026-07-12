@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const createNewTool = async (token: string, tool: object) => {
+export const createNewTool = async (tool: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...tool
@@ -31,15 +30,14 @@ export const createNewTool = async (token: string, tool: object) => {
 	return res;
 };
 
-export const getTools = async (token: string = '') => {
+export const getTools = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -62,15 +60,14 @@ export const getTools = async (token: string = '') => {
 	return res;
 };
 
-export const getToolList = async (token: string = '') => {
+export const getToolList = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -93,15 +90,14 @@ export const getToolList = async (token: string = '') => {
 	return res;
 };
 
-export const getToolById = async (token: string, id: string) => {
+export const getToolById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -125,15 +121,14 @@ export const getToolById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateToolById = async (token: string, id: string, tool: object) => {
+export const updateToolById = async (id: string, tool: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...tool
@@ -160,15 +155,14 @@ export const updateToolById = async (token: string, id: string, tool: object) =>
 	return res;
 };
 
-export const deleteToolById = async (token: string, id: string) => {
+export const deleteToolById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -192,15 +186,14 @@ export const deleteToolById = async (token: string, id: string) => {
 	return res;
 };
 
-export const getToolValvesById = async (token: string, id: string) => {
+export const getToolValvesById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -224,15 +217,14 @@ export const getToolValvesById = async (token: string, id: string) => {
 	return res;
 };
 
-export const getToolValvesSpecById = async (token: string, id: string) => {
+export const getToolValvesSpecById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/spec`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -256,15 +248,14 @@ export const getToolValvesSpecById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateToolValvesById = async (token: string, id: string, valves: object) => {
+export const updateToolValvesById = async (id: string, valves: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...valves

@@ -16,13 +16,13 @@
 	let model = null;
 
 	const refreshModels = async () => {
-		await models.set(await getModels(localStorage.token));
+		await models.set(await getModels());
 	};
 
 	onMount(async () => {
 		const _id = $page.url.searchParams.get('id');
 		if (_id) {
-			model = await getModelById(localStorage.token, _id).catch((e) => {
+			model = await getModelById(_id).catch((e) => {
 				return null;
 			});
 
@@ -38,14 +38,14 @@
 		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する
 		// (差し替え)。作成が失敗(id 衝突/不正)したら旧 id を消さず中断。既存チャットの参照はちぎれてよい。
 		if (modelInfo.id !== model.id) {
-			const created = await createNewModel(localStorage.token, modelInfo).catch((error) => {
+			const created = await createNewModel(modelInfo).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
 			if (!created) return;
 
-			await deleteModelById(localStorage.token, model.id).catch((error) => {
+			await deleteModelById(model.id).catch((error) => {
 				toast.error(`${error}`);
 			});
 
@@ -55,7 +55,7 @@
 			return;
 		}
 
-		const res = await updateModelById(localStorage.token, modelInfo.id, modelInfo);
+		const res = await updateModelById(modelInfo.id, modelInfo);
 
 		if (res) {
 			await refreshModels();

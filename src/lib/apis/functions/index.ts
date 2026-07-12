@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const createNewFunction = async (token: string, func: object) => {
+export const createNewFunction = async (func: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...func
@@ -31,15 +30,14 @@ export const createNewFunction = async (token: string, func: object) => {
 	return res;
 };
 
-export const getFunctions = async (token: string = '') => {
+export const getFunctions = async () => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -62,15 +60,14 @@ export const getFunctions = async (token: string = '') => {
 	return res;
 };
 
-export const getFunctionById = async (token: string, id: string) => {
+export const getFunctionById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -94,15 +91,14 @@ export const getFunctionById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateFunctionById = async (token: string, id: string, func: object) => {
+export const updateFunctionById = async (id: string, func: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...func
@@ -129,15 +125,14 @@ export const updateFunctionById = async (token: string, id: string, func: object
 	return res;
 };
 
-export const deleteFunctionById = async (token: string, id: string) => {
+export const deleteFunctionById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -164,15 +159,14 @@ export const deleteFunctionById = async (token: string, id: string) => {
 // llens(#46): toggleFunctionById(/toggle)・toggleGlobalById(/toggle/global)は撤去。
 // function の適用制御はモデルの filterIds / actionIds 割り当て一本。
 
-export const getFunctionValvesById = async (token: string, id: string) => {
+export const getFunctionValvesById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/valves`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -196,15 +190,14 @@ export const getFunctionValvesById = async (token: string, id: string) => {
 	return res;
 };
 
-export const getFunctionValvesSpecById = async (token: string, id: string) => {
+export const getFunctionValvesSpecById = async (id: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/valves/spec`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -228,15 +221,14 @@ export const getFunctionValvesSpecById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateFunctionValvesById = async (token: string, id: string, valves: object) => {
+export const updateFunctionValvesById = async (id: string, valves: object) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/functions/id/${id}/valves/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...valves

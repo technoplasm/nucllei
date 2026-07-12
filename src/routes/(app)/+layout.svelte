@@ -64,7 +64,7 @@
 				// IndexedDB Not Found
 			}
 
-			const userSettings = await getUserSettings(localStorage.token).catch((error) => {
+			const userSettings = await getUserSettings().catch((error) => {
 				console.error(error);
 				return null;
 			});
@@ -83,13 +83,13 @@
 				settings.set(localStorageSettings);
 			}
 
-			models.set(await getModels(localStorage.token));
+			models.set(await getModels());
 
-			banners.set(await getBanners(localStorage.token));
-			tools.set(await getTools(localStorage.token));
+			banners.set(await getBanners());
+			tools.set(await getTools());
 			// llens(issue #35): /command ハイライト判定は picker を開く前から必要なため
 			// skill 一覧を初期ロードしておく。
-			skills.set(await getSkills(localStorage.token));
+			skills.set(await getSkills());
 
 			document.addEventListener('keydown', async function (event) {
 				const isCtrlPressed = event.ctrlKey || event.metaKey; // metaKey is for Cmd key on Mac

@@ -1,14 +1,13 @@
 import { IMAGES_API_BASE_URL } from '$lib/constants';
 
-export const getConfig = async (token: string = '') => {
+export const getConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -32,15 +31,14 @@ export const getConfig = async (token: string = '') => {
 	return res;
 };
 
-export const updateConfig = async (token: string = '', config: object) => {
+export const updateConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			...config
@@ -67,15 +65,14 @@ export const updateConfig = async (token: string = '', config: object) => {
 	return res;
 };
 
-export const verifyConfigUrl = async (token: string = '') => {
+export const verifyConfigUrl = async () => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/config/url/verify`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -99,15 +96,14 @@ export const verifyConfigUrl = async (token: string = '') => {
 	return res;
 };
 
-export const getImageGenerationConfig = async (token: string = '') => {
+export const getImageGenerationConfig = async () => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -131,15 +127,14 @@ export const getImageGenerationConfig = async (token: string = '') => {
 	return res;
 };
 
-export const updateImageGenerationConfig = async (token: string = '', config: object) => {
+export const updateImageGenerationConfig = async (config: object) => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({ ...config })
 	})
@@ -164,15 +159,14 @@ export const updateImageGenerationConfig = async (token: string = '', config: ob
 	return res;
 };
 
-export const getImageGenerationModels = async (token: string = '') => {
+export const getImageGenerationModels = async () => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/models`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		}
 	})
 		.then(async (res) => {
@@ -196,15 +190,14 @@ export const getImageGenerationModels = async (token: string = '') => {
 	return res;
 };
 
-export const imageGenerations = async (token: string = '', prompt: string) => {
+export const imageGenerations = async (prompt: string) => {
 	let error = null;
 
 	const res = await fetch(`${IMAGES_API_BASE_URL}/generations`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			prompt: prompt

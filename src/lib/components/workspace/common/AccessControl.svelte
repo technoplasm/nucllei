@@ -57,7 +57,7 @@
 	}
 
 	onMount(async () => {
-		groups = await getGroups(localStorage.token);
+		groups = await getGroups();
 
 		if (variant === 'file') {
 			// 意味論は変えず shape だけ正規化(グループ共有時に read.group_ids を保証)
