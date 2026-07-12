@@ -168,8 +168,10 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 
 ## Playwright での UI 確認
 
-- ログインはフォームでなく token 注入が速い: signin API で token を取り
-  `localStorage.setItem('token', ...)` → `location.href='/'`。
+- ログイン(改訂 2026-07-13): #70 B1(a4b52beed)でセッションが **httpOnly cookie に一本化**され、
+  旧「signin API → `localStorage.setItem('token', ...)` 注入」は**効かなくなった**(API が 403 →
+  /auth へ飛ばされる)。`/auth` の実フォームに fill → Enter でログインする(cookie がコンテキストに乗る)。
+  UI を介さず API を直接叩く検証は従来どおり signin のレスポンス token を `Authorization: Bearer` で使える。
 - 応答完了待ちは「View Result from」等のテキスト待ち、または `GET /api/v1/chats/{id}` ポーリング。
 - ストリーミング描画の検証は `pre.hljs code.language-python` の innerText を数百 ms 間隔で
   サンプリングして単調増加を確認する(#20 で実績)。
@@ -179,7 +181,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
   **Playwright のクリーンブラウザ**で検証する(MCP が無いセッションでも `.venv` に
   python-playwright + `~/.cache/ms-playwright` の chromium が入っており、
   `.venv/bin/python` から `sync_playwright` で直接叩ける — #66 の UI 検証で実績):
-  token 注入 → `page.evaluate` で form class やタブ有無を **live DOM から直接読む**。
+  フォームログイン → `page.evaluate` で form class やタブ有無を **live DOM から直接読む**。
   SvelteKit の `goto` は SPA 遷移なので `wait_for_url` が 'load' 待ちで空振りすることがある —
   遷移確認は `wait_for_timeout` 後に `page.url` を直接読むほうが確実。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
   **原因を数字で特定**してから直す(#47: タブバーが `overflow-x-auto` で高さ0に潰れる罠を Playwright で確定)。
