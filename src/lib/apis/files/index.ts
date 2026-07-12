@@ -1,14 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const uploadFile = async (token: string, file: File, modelId: string | null = null) => {
+// llens(#69): model_id クエリは撤去(per-model Attachment 廃止)。
+// グローバル Attachment(ATTACHMENT_FUNCTION_ID)は upload 時にサーバー側で発火する。
+export const uploadFile = async (token: string, file: File) => {
 	const data = new FormData();
 	data.append('file', file);
 	let error = null;
 
-	// llens(#52): 現在のモデルを渡し、そのモデルに割り当てられた Attachment だけを発火させる。
-	const query = modelId ? `?model_id=${encodeURIComponent(modelId)}` : '';
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${query}`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

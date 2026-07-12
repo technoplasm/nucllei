@@ -6,6 +6,7 @@
 	const dispatch = createEventDispatcher();
 
 	import { getAttachmentConfig, setAttachmentConfig } from '$lib/apis/configs';
+	import { getFunctions } from '$lib/apis/functions';
 
 	import { deleteAllFiles } from '$lib/apis/files';
 
@@ -23,17 +24,31 @@
 	// llens(#52): 受け入れ拡張子 whitelist。UI はカンマ区切り文字列、config は配列。
 	let allowedExtensions = '';
 
+	// llens(#69): グローバル Attachment Function(type=attachment の Function から単一選択、'' = None)。
+	let attachmentFunctions = [];
+
 	const submitHandler = async () => {
 		RAGConfig.ATTACHMENT_ALLOWED_EXTENSIONS = allowedExtensions
 			.split(',')
 			.map((s) => s.trim().toLowerCase().replace(/^\.+/, ''))
 			.filter(Boolean);
 
-		await setAttachmentConfig(localStorage.token, RAGConfig);
-		dispatch('save');
+		// llens(#69): 不正な ATTACHMENT_FUNCTION_ID は backend が 400 で弾く — toast で通知。
+		const res = await setAttachmentConfig(localStorage.token, RAGConfig).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			dispatch('save');
+		}
 	};
 
 	onMount(async () => {
+		attachmentFunctions = ((await getFunctions(localStorage.token).catch(() => [])) ?? []).filter(
+			(func) => func.type === 'attachment'
+		);
+
 		RAGConfig = await getAttachmentConfig(localStorage.token);
 		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');
 	});
@@ -125,6 +140,34 @@
 									bind:value={allowedExtensions}
 									autocomplete="off"
 								/>
+							</Tooltip>
+						</div>
+					</div>
+
+					<div class="  mb-2.5 flex w-full justify-between">
+						<div class=" self-center text-xs font-medium">{$i18n.t('Attachment Function')}</div>
+						<div class="flex items-center relative">
+							<Tooltip
+								content={$i18n.t(
+									'The attachment function to run on every file upload. Select None to disable.'
+								)}
+								placement="top-start"
+							>
+								<select
+									class="dark:bg-gray-900 cursor-pointer w-fit pr-8 rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
+									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
+								>
+									<option value="">{$i18n.t('None')}</option>
+									{#each attachmentFunctions as func}
+										<option value={func.id}>{func.name}</option>
+									{/each}
+									{#if RAGConfig.ATTACHMENT_FUNCTION_ID && !attachmentFunctions.some((func) => func.id === RAGConfig.ATTACHMENT_FUNCTION_ID)}
+										<!-- llens(#69): 設定済み id の function が消えている場合も現在値を可視化する(保存時は 400 で弾かれる) -->
+										<option value={RAGConfig.ATTACHMENT_FUNCTION_ID}
+											>{RAGConfig.ATTACHMENT_FUNCTION_ID}</option
+										>
+									{/if}
+								</select>
 							</Tooltip>
 						</div>
 					</div>
