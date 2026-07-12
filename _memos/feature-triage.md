@@ -56,6 +56,13 @@
 tool はモデルの割り当て(`meta.toolIds`)一本化。誠実エージェント方針(tool はモデルが持つ・
 ユーザーが選ばない)+ #46 の per-model 一本化の tool 版。制御面の掃除(上節)の続き。
 skill 由来 tool_ids(#35)は温存。
+**実施済み(2026-07-12)**: フロント(トグル UI / `selectedToolIds` 配管 / `ToolServersModal` /
+`?tools=` URL param)撤去 + **backend を `model.meta.toolIds` のサーバー側解決に変更**
+(payload `tool_ids` は無視 — クライアント申告経路の廃止はセキュリティ強化でもある。4pcg の
+read ACL 検証は #66 ゲートとして維持)。同時に **Capture(画面キャプチャ/カメラ)**
+(secure context 必須で HTTP 配備では壊れており、Ctrl+V 画像ペーストで代替可)と
+**Google Drive / OneDrive 統合**(config・picker utils・admin 設定とも端到端)も撤去。
+撤去理由は「薄い業務基盤に不要」が一次根拠(air-gapped は補助 — 横展開先は非 air-gapped もあり得る)。
 
 **Function type(Pipe / Filter / Action)の扱い**:
 - **Filter** = 中核。自作するのはここが圧倒的(de-id / TTS 注入 / ログ #13、#52 の注入 gate・PDF ルーティング)。

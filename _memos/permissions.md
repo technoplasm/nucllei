@@ -34,7 +34,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | entity | 使う(read) | 作成 | 内容編集 | ACL 編集 | 削除 | 備考 |
 |---|---|---|---|---|---|---|
 | model(preset) | read ACL(picker 表示) | admin | admin | admin | admin | |
-| tool | read ACL(チャット実行時に per-tool 判定) | admin | admin | admin | admin | 実行時チェックは GHSA-4pcg の enforce_access_control |
+| tool | read ACL(チャット実行時に per-tool 判定) | admin | admin | admin | admin | 実行時チェックは GHSA-4pcg の enforce_access_control。**tool_ids は #54(2026-07-12)でサーバー側解決**(`model.meta.toolIds` から導出、payload 申告は無視) |
 | function(filter/action/pipe) | −(model 割り当てで発動、ACL 無し) | admin | admin | − | admin | |
 | skill | read ACL(発火 = read ∩ model.skillIds)。**管理一覧の閲覧(中身込み)は editor 全件** | editor(**必ず私有 = ACL={} 固定**) | **owner のみ**(editor でも他人のは不可) | **admin のみ**(editor の保存では温存) | owner のみ | tool_ids 付きは全操作 admin。公開・共有は admin の後続操作でだけ広がる |
 | ~~channel~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — 機能ごと撤去(#67) |

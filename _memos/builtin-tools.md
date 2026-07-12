@@ -31,8 +31,11 @@
 | render_probe(公開) | toolIds 直載せ(UI が tool_ids 送信) | PASS(echo 実行・返り値一致) |
 | get_weather | 未登録(optional fixture) | pytest のフレームリプレイで代替済み |
 
-副産物の知見: **素の API 呼び出し(tool_ids なし)では load_skill しか載らない**。
-toolIds はフロントが payload で送る設計(4pcg ガードで read 検証)。また非ストリーミング
+副産物の知見: **素の API 呼び出し(モデル未割り当て)では load_skill しか載らない**。
+~~toolIds はフロントが payload で送る設計(4pcg ガードで read 検証)~~ → **#54(2026-07-12)で
+サーバー側解決に変更**: middleware が `model.info.meta.toolIds` から導出し、payload の
+`tool_ids` は無視(クライアント申告経路を廃止)。per-user の read ACL 検証(4pcg 由来の
+enforce_access_control)は #66 のゲートとして維持。また非ストリーミング
 `/api/chat/completions` は native ループを回さず finish_reason=tool_calls で返る(UI 経路が本線)。
 
 ### #18-3 実測で見つけた基盤バグ(2026-07-06、すべて修正・回帰テスト付き)
