@@ -26,6 +26,10 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   `{#if}` teardown と衝突して NotFoundError → **effect が中断され画面が中途半端に壊れる**
   (症状: モーダルが空欄)。`parentNode === document.body` を確認してから外す(common/Modal.svelte
   は修理済み — 新しい portal を書くときは同じガードを)。
+  (3) **svelte-sonner の Toaster は onMount で reset()(全 toast 消去)する** — ページの
+  onMount 中に撃った toast は Toaster マウントの後始末で闇に消える(#70 B2 で実害)。
+  初期ロード直後に出す toast は root layout onMount 末尾 + setTimeout 遅延で発火する
+  (失効通知の実例が `src/routes/+layout.svelte`)。
 - **vitest は import 破壊を検知しない**: store やコンポーネントを削除する撤去作業では、
   カバレッジ外のファイルに残った orphan import を vitest がすり抜ける(#67 で
   common/Tags/TagInput の削除済み store import が CI の build 段階まで到達)。
