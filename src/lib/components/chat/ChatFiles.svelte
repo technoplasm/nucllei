@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { showControls } from '$lib/stores';
 	import { formatFileSize } from '$lib/utils';
 	import { getFileById } from '$lib/apis/files';
 
@@ -80,8 +81,20 @@
 {/if}
 
 <div class="flex flex-col w-full">
-	<div class="text-sm font-medium dark:text-gray-100 mb-1.5">
-		{$i18n.t('Files in this chat')}
+	<div class="flex items-center justify-between mb-1.5">
+		<div class="text-sm font-medium dark:text-gray-100">
+			{$i18n.t('Files in this chat')}
+		</div>
+		<button
+			class="flex p-1 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 transition"
+			type="button"
+			aria-label={$i18n.t('Close')}
+			on:click={() => {
+				showControls.set(false);
+			}}
+		>
+			<span class="i-lucide-x size-4"></span>
+		</button>
 	</div>
 
 	{#if items.length === 0}
