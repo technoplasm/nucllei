@@ -1,10 +1,14 @@
-import { browser, dev } from '$app/environment';
+import { browser } from '$app/environment';
 // import { version } from '../../package.json';
 
 export const APP_NAME = 'Open WebUI';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
-export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;
+// llens(dev): dev も本番(docker = 単一オリジンで BE が SPA と API を両方配信)と同じく
+// 相対 URL で叩く。vite proxy(vite.config.ts)が /api・/openai・/ollama・/ws・/oauth を
+// BE(:3000)へ流すので、フロントは同一オリジンのまま。画像等の cookie 認証もこれで通る
+// (旧: dev だけ http://host:8080 へクロスオリジン直叩き → 画像が cookie 不達で出ない罠)。
+export const WEBUI_HOSTNAME = browser ? location.hostname : '';
+export const WEBUI_BASE_URL = ``;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 
 export const OLLAMA_API_BASE_URL = `${WEBUI_BASE_URL}/ollama`;

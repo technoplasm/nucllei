@@ -52,17 +52,29 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 
 ## dev サーバ
 
+**2026-07-12 改訂: 本番(docker)と同じ「単一オリジン」構成に統一した。** BE は :3000、
+フロントは相対 URL で叩き、vite が `/api`・`/openai`・`/ollama`・`/ws`・`/oauth` を BE:3000 へ
+proxy する(`vite.config.ts` の `server.proxy`)。旧構成(dev だけ `WEBUI_BASE_URL=http://host:8080`
+へクロスオリジン直叩き)は廃止 — 画像等の cookie 認証が dev で不達だった罠(#69 で顕在化)も解消。
+
 ```sh
-# backend(リポジトリルートで。PYTHONPATH=backend 必須 — tool.uv package=false のため
-# open_webui は venv にインストールされない)
-PYTHONPATH=backend .venv/bin/uvicorn open_webui.main:app --port 8080 --host 0.0.0.0 --forwarded-allow-ips '*' --reload
-# frontend
-npm run dev   # vite :5173(使用中なら 5174 等へ自動退避)。dev 時は WEBUI_BASE_URL が localhost:8080 に向く(src/lib/constants.ts)
+# backend(:3000、hot reload)。uv が .venv と PYTHONPATH(--app-dir backend)を面倒みるので
+# 長い PYTHONPATH=backend .venv/bin/uvicorn … は不要になった。
+uv run task dev
+# frontend(vite :5173、proxy 込み)。これ単体で BE:3000 に繋がる。
+pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- 8080 が埋まっていたら upstream の docker(`docker stop open-webui`)をまず疑う
-  (stock `ghcr.io/open-webui/open-webui:main` が squat していることがある。`docker stop` は可逆)。
-- **uvicorn の二重起動に注意**(#66 検証時に実害): `ps aux | grep uvicorn` で 8080 に
+- **BE origin の上書き**: `BACKEND_ORIGIN=http://別ホスト:3000 pnpm dev` で dev フロントを
+  別マシンの BE に向けられる(既定 `http://localhost:3000`。`vite.config.ts`)。
+- **tailscale 越し**: `pnpm dev` は `--host` で 0.0.0.0 listen。`{frontend-host}:5173/api` が
+  proxy 経由で BE:3000 に流れるので、フロントのホスト名 1 つ叩けば API も socket も通る
+  (本番 docker の単一パス集約と同じ形)。
+- **:3000 が埋まっていたら**: llens-sandbox コンテナ(`127.0.0.1:3000->8000`、#18-3 の tool 検証用)が
+  squat していることがある。`docker stop llens-sandbox` で空ける(可逆)。sandbox と BE を同時に
+  使うなら sandbox 側を別ポートへ退避するか BACKEND_ORIGIN で BE を逃がす。upstream stock docker
+  (`ghcr.io/open-webui/open-webui:main`)が squat する場合は `docker stop open-webui`。
+- **uvicorn の二重起動に注意**(#66 検証時に実害): `ps aux | grep uvicorn` で :3000 に
   2 プロセス(--reload 有無で別個体)ぶら下がっていることがある。ポートを握っているのが
   旧コードのプロセスだと「直したのに挙動が変わらない」罠になる — 検証前に全部 kill して
   1 本で起動し直すのが確実。
@@ -90,12 +102,12 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    3層権限(admin / skill editor / user)の実機確認はこの 3 アカウントで一巡できる。
 2. **トークン取得**:
    ```sh
-   TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auths/signin -H 'Content-Type: application/json' \
+   TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin -H 'Content-Type: application/json' \
      -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
    ```
 3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:8000/v1`、モデル `kimi-k2.6`、認証不要):
    ```sh
-   curl -s -X POST http://localhost:8080/openai/config/update -H "Authorization: Bearer $TOKEN" \
+   curl -s -X POST http://localhost:3000/openai/config/update -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' \
      -d '{"ENABLE_OPENAI_API":true,"OPENAI_API_BASE_URLS":["http://prism-llens:8000/v1"],"OPENAI_API_KEYS":["sk-dummy"],"OPENAI_API_CONFIGS":{}}'
    ```
@@ -114,9 +126,11 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
      `test_native_tool_calling.py` の weather_spec 参照)。
    **sandbox tool(#18-3)**: 実行系は `dev/tools/sandbox.py` を tool id `sandbox` で
    DB 登録(API 経由。llens 現行 tool の v0.6.5 適合版)。sandbox コンテナ
-   (`llens/sandbox:poc`、`127.0.0.1:3000->8000`)を起こし、valves を
-   `{"sandbox_url": "http://127.0.0.1:3000"}` にして toolIds へ追加。
-   答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
+   (`llens/sandbox:poc`、従来 `127.0.0.1:3000->8000`)を起こし、valves の `sandbox_url` を
+   そのポートにして toolIds へ追加。答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
+   - **⚠ 2026-07-12 以降 :3000 は BE dev サーバが使う**。sandbox は別ホストポート
+     (例 `127.0.0.1:3001->8000` + valves `{"sandbox_url":"http://127.0.0.1:3001"}`)へ退避すること
+     (両方 :3000 だと bind 衝突)。または BE を `BACKEND_ORIGIN` で逃がす。
 6. **skill fixture(#35 検証用)**: skill `kansai`(関西弁指示)/ skill `vault`
    (tool_ids=["secret_password"])/ tool `secret_password`(私有)を作り、preset の
    `meta.skillIds` に紐づける。手順と実機チェックは `dev/e2e/README.md`。

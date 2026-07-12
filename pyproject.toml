@@ -175,9 +175,12 @@ testpaths = ["backend/open_webui/test"]
 pythonpath = ["backend", "backend/open_webui"]
 
 [tool.taskipy.tasks]
-# Backend dev server (hot reload). `open_webui` lives under backend/, so we add
-# it to the import path with --app-dir instead of cd-ing there.
-dev = "uvicorn open_webui.main:app --host 0.0.0.0 --port 8080 --reload --app-dir backend"
+# Backend dev server (hot reload) on :3000 — matches the docker single-origin
+# layout (the frontend is served same-origin and Vite proxies /api etc. here;
+# see vite.config.ts). `open_webui` lives under backend/, so we add it to the
+# import path with --app-dir instead of cd-ing there. `--forwarded-allow-ips '*'`
+# trusts the local Vite proxy for X-Forwarded-* (correct redirect URLs).
+dev = "uvicorn open_webui.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
 # Frontend dev server (Vite). Convenience alias for `pnpm dev`.
 dev-web = "pnpm dev"
 
