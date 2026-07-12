@@ -1,10 +1,11 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { Banner } from '$lib/types';
 
 export const importConfig = async (config) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/import`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/import`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -33,7 +34,7 @@ export const importConfig = async (config) => {
 export const exportConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/export`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/export`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -59,7 +60,7 @@ export const exportConfig = async () => {
 export const getToolServerConnections = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -85,7 +86,7 @@ export const getToolServerConnections = async () => {
 export const setToolServerConnections = async (connections: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/tool_servers`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -114,7 +115,7 @@ export const setToolServerConnections = async (connections: object) => {
 export const verifyToolServerConnection = async (connection: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/tool_servers/verify`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/tool_servers/verify`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -144,7 +145,7 @@ export const verifyToolServerConnection = async (connection: object) => {
 export const getAttachmentConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -170,7 +171,7 @@ export const getAttachmentConfig = async () => {
 export const setAttachmentConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/attachment`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -197,7 +198,7 @@ export const setAttachmentConfig = async (config: object) => {
 export const getCodeInterpreterConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -223,7 +224,7 @@ export const getCodeInterpreterConfig = async () => {
 export const setCodeInterpreterConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/code_interpreter`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -252,7 +253,7 @@ export const setCodeInterpreterConfig = async (config: object) => {
 export const getModelsConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/models`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -278,7 +279,7 @@ export const getModelsConfig = async () => {
 export const setModelsConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/models`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -307,7 +308,7 @@ export const setModelsConfig = async (config: object) => {
 export const getBanners = async (): Promise<Banner[]> => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -333,7 +334,7 @@ export const getBanners = async (): Promise<Banner[]> => {
 export const setBanners = async (banners: Banner[]) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/banners`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'

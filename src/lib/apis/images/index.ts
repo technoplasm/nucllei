@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { IMAGES_API_BASE_URL } from '$lib/constants';
 
 export const getConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/config`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -34,7 +35,7 @@ export const getConfig = async () => {
 export const updateConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/config/update`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -68,7 +69,7 @@ export const updateConfig = async (config: object) => {
 export const verifyConfigUrl = async () => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/config/url/verify`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/config/url/verify`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -99,7 +100,7 @@ export const verifyConfigUrl = async () => {
 export const getImageGenerationConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/image/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -130,7 +131,7 @@ export const getImageGenerationConfig = async () => {
 export const updateImageGenerationConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/image/config/update`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/image/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -162,7 +163,7 @@ export const updateImageGenerationConfig = async (config: object) => {
 export const getImageGenerationModels = async () => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/models`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/models`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -193,7 +194,7 @@ export const getImageGenerationModels = async () => {
 export const imageGenerations = async (prompt: string) => {
 	let error = null;
 
-	const res = await fetch(`${IMAGES_API_BASE_URL}/generations`, {
+	const res = await apiFetch(`${IMAGES_API_BASE_URL}/generations`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

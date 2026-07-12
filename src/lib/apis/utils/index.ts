@@ -1,3 +1,4 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 // llens(#67): getGravatarUrl / executeCode / getHTMLFromMarkdown / downloadLiteLLMConfig を
@@ -6,7 +7,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 export const formatPythonCode = async (code: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/code/format`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/utils/code/format`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -39,7 +40,7 @@ export const formatPythonCode = async (code: string) => {
 export const downloadChatAsPDF = async (title: string, messages: object[]) => {
 	let error = null;
 
-	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/pdf`, {
+	const blob = await apiFetch(`${WEBUI_API_BASE_URL}/utils/pdf`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -65,7 +66,7 @@ export const downloadChatAsPDF = async (title: string, messages: object[]) => {
 export const downloadDatabase = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/utils/db/download`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/utils/db/download`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'

@@ -57,6 +57,10 @@ export const currentChatPage = writable(1);
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
 
+// llens(#70 B3): バックエンド不達(network error / 502-504)の可視化。
+// $lib/apis/fetch.ts の apiFetch が設定し、root layout がバナー表示する。
+export const backendUnreachable = writable(false);
+
 export type Model = OpenAIModel | OllamaModel;
 
 type BaseModel = {

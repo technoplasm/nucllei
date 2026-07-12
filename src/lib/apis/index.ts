@@ -1,3 +1,4 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
 
@@ -6,7 +7,7 @@ import { toast } from 'svelte-sonner';
 
 export const getModels = async (base: boolean = false) => {
 	let error = null;
-	const res = await fetch(`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -40,7 +41,7 @@ type ChatCompletedForm = {
 export const chatCompleted = async (body: ChatCompletedForm) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/completed`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/chat/completed`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -78,7 +79,7 @@ type ChatActionForm = {
 export const chatAction = async (action_id: string, body: ChatActionForm) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/actions/${action_id}`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/chat/actions/${action_id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -110,7 +111,7 @@ export const chatAction = async (action_id: string, body: ChatActionForm) => {
 export const stopTask = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/tasks/stop/${id}`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/tasks/stop/${id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -141,7 +142,7 @@ export const stopTask = async (id: string) => {
 export const getTaskIdsByChatId = async (chat_id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/tasks/chat/${chat_id}`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/tasks/chat/${chat_id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -220,7 +221,7 @@ export const getToolServerData = async (token: string, url: string) => {
 export const getTaskConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/config`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/tasks/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -247,7 +248,7 @@ export const getTaskConfig = async () => {
 export const updateTaskConfig = async (config: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/config/update`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/tasks/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -279,7 +280,7 @@ export const updateTaskConfig = async (config: object) => {
 export const generateTitle = async (model: string, messages: string[], chat_id?: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/title/completions`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/tasks/title/completions`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -313,7 +314,7 @@ export const generateTitle = async (model: string, messages: string[], chat_id?:
 export const getPipelinesList = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/list`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/pipelines/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -346,7 +347,7 @@ export const uploadPipeline = async (file: File, urlIdx: string) => {
 	formData.append('file', file);
 	formData.append('urlIdx', urlIdx);
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/upload`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/pipelines/upload`, {
 		method: 'POST',
 		headers: {
 			// 'Content-Type': 'multipart/form-data' is not needed as Fetch API will set it automatically
@@ -377,7 +378,7 @@ export const uploadPipeline = async (file: File, urlIdx: string) => {
 export const downloadPipeline = async (url: string, urlIdx: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/add`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/pipelines/add`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -412,7 +413,7 @@ export const downloadPipeline = async (url: string, urlIdx: string) => {
 export const deletePipeline = async (id: string, urlIdx: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/delete`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/pipelines/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -452,7 +453,7 @@ export const getPipelines = async (urlIdx?: string) => {
 		searchParams.append('urlIdx', urlIdx);
 	}
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/pipelines/?${searchParams.toString()}`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/pipelines/?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -485,7 +486,7 @@ export const getPipelineValves = async (pipeline_id: string, urlIdx: string) => 
 		searchParams.append('urlIdx', urlIdx);
 	}
 
-	const res = await fetch(
+	const res = await apiFetch(
 		`${WEBUI_BASE_URL}/api/v1/pipelines/${pipeline_id}/valves?${searchParams.toString()}`,
 		{
 			method: 'GET',
@@ -520,7 +521,7 @@ export const getPipelineValvesSpec = async (pipeline_id: string, urlIdx: string)
 		searchParams.append('urlIdx', urlIdx);
 	}
 
-	const res = await fetch(
+	const res = await apiFetch(
 		`${WEBUI_BASE_URL}/api/v1/pipelines/${pipeline_id}/valves/spec?${searchParams.toString()}`,
 		{
 			method: 'GET',
@@ -555,7 +556,7 @@ export const updatePipelineValves = async (pipeline_id: string, valves: object, 
 		searchParams.append('urlIdx', urlIdx);
 	}
 
-	const res = await fetch(
+	const res = await apiFetch(
 		`${WEBUI_BASE_URL}/api/v1/pipelines/${pipeline_id}/valves/update?${searchParams.toString()}`,
 		{
 			method: 'POST',
@@ -591,7 +592,7 @@ export const updatePipelineValves = async (pipeline_id: string, valves: object, 
 export const getBackendConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/config`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/config`, {
 		method: 'GET',
 		credentials: 'include',
 		headers: {
@@ -618,7 +619,7 @@ export const getBackendConfig = async () => {
 export const getChangelog = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/changelog`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/changelog`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -644,7 +645,7 @@ export const getChangelog = async () => {
 export const getVersionUpdates = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/version/updates`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/version/updates`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -670,7 +671,7 @@ export const getVersionUpdates = async () => {
 export const getModelFilterConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -696,7 +697,7 @@ export const getModelFilterConfig = async () => {
 export const updateModelFilterConfig = async (enabled: boolean, models: string[]) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/config/model/filter`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -726,7 +727,7 @@ export const updateModelFilterConfig = async (enabled: boolean, models: string[]
 export const getWebhookUrl = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/webhook`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -752,7 +753,7 @@ export const getWebhookUrl = async () => {
 export const updateWebhookUrl = async (url: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/webhook`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -781,7 +782,7 @@ export const updateWebhookUrl = async (url: string) => {
 export const getCommunitySharingEnabledStatus = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/community_sharing`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/community_sharing`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -807,7 +808,7 @@ export const getCommunitySharingEnabledStatus = async () => {
 export const toggleCommunitySharingEnabledStatus = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/community_sharing/toggle`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/community_sharing/toggle`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -833,7 +834,7 @@ export const toggleCommunitySharingEnabledStatus = async () => {
 export const getModelConfig = async (): Promise<GlobalModelConfig> => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/config/models`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/config/models`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -877,7 +878,7 @@ export type GlobalModelConfig = ModelConfig[];
 export const updateModelConfig = async (config: GlobalModelConfig) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/config/models`, {
+	const res = await apiFetch(`${WEBUI_BASE_URL}/api/config/models`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'

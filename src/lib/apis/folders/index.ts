@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createNewFolder = async (name: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -32,7 +33,7 @@ export const createNewFolder = async (name: string) => {
 export const getFolders = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -62,7 +63,7 @@ export const getFolders = async () => {
 export const updateFolderNameById = async (id: string, name: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -95,7 +96,7 @@ export const updateFolderNameById = async (id: string, name: string) => {
 export const updateFolderIsExpandedById = async (id: string, isExpanded: boolean) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/expanded`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/expanded`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -128,7 +129,7 @@ export const updateFolderIsExpandedById = async (id: string, isExpanded: boolean
 export const updateFolderParentIdById = async (id: string, parentId?: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/parent`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/parent`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -166,7 +167,7 @@ type FolderItems = {
 export const deleteFolderById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/folders/${id}`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',

@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { AUDIO_API_BASE_URL } from '$lib/constants';
 
 export const getAudioConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${AUDIO_API_BASE_URL}/config`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -36,7 +37,7 @@ type OpenAIConfigForm = {
 export const updateAudioConfig = async (payload: OpenAIConfigForm) => {
 	let error = null;
 
-	const res = await fetch(`${AUDIO_API_BASE_URL}/config/update`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -67,7 +68,7 @@ export const transcribeAudio = async (file: File) => {
 	data.append('file', file);
 
 	let error = null;
-	const res = await fetch(`${AUDIO_API_BASE_URL}/transcriptions`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/transcriptions`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json'
@@ -98,7 +99,7 @@ export const synthesizeOpenAISpeech = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${AUDIO_API_BASE_URL}/speech`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/speech`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -134,7 +135,7 @@ interface AvailableModelsResponse {
 export const getModels = async (): Promise<AvailableModelsResponse> => {
 	let error = null;
 
-	const res = await fetch(`${AUDIO_API_BASE_URL}/models`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/models`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -161,7 +162,7 @@ export const getModels = async (): Promise<AvailableModelsResponse> => {
 export const getVoices = async () => {
 	let error = null;
 
-	const res = await fetch(`${AUDIO_API_BASE_URL}/voices`, {
+	const res = await apiFetch(`${AUDIO_API_BASE_URL}/voices`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'

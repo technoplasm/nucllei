@@ -1,10 +1,11 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
 
 export const createNewChat = async (chat: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/new`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/new`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -39,7 +40,7 @@ export const importChat = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/import`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/import`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -77,7 +78,7 @@ export const getChatList = async (page: number | null = null) => {
 		searchParams.append('page', `${page}`);
 	}
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/?${searchParams.toString()}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -110,7 +111,7 @@ export const getChatList = async (page: number | null = null) => {
 export const getChatListByUserId = async (userId: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/list/user/${userId}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/list/user/${userId}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -185,7 +186,7 @@ export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
 		searchParams.append('updated_to', `${options.updated_to}`);
 	}
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -212,7 +213,7 @@ export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
 export const getAdminChatUsers = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/users`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/admin/users`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -239,7 +240,7 @@ export const getAdminChatUsers = async () => {
 export const getAdminChatModels = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/models`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/admin/models`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -266,7 +267,7 @@ export const getAdminChatModels = async () => {
 export const getArchivedChatList = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/archived`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/archived`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -296,7 +297,7 @@ export const getArchivedChatList = async () => {
 export const getAllChats = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/all`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/all`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -330,7 +331,7 @@ export const getChatListBySearchText = async (text: string, page: number = 1) =>
 	searchParams.append('text', text);
 	searchParams.append('page', `${page}`);
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/search?${searchParams.toString()}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/search?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -363,7 +364,7 @@ export const getChatListBySearchText = async (text: string, page: number = 1) =>
 export const getChatsByFolderId = async (folderId: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/folder/${folderId}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/folder/${folderId}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -393,7 +394,7 @@ export const getChatsByFolderId = async (folderId: string) => {
 export const getAllArchivedChats = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/all/archived`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/all/archived`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -423,7 +424,7 @@ export const getAllArchivedChats = async () => {
 export const getAllUserChats = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/all/db`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/all/db`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -453,7 +454,7 @@ export const getAllUserChats = async () => {
 export const getPinnedChatList = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/pinned`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/pinned`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -486,7 +487,7 @@ export const getPinnedChatList = async () => {
 export const getChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -517,7 +518,7 @@ export const getChatById = async (id: string) => {
 export const getChatByShareId = async (share_id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/share/${share_id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/share/${share_id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -548,7 +549,7 @@ export const getChatByShareId = async (share_id: string) => {
 export const getChatPinnedStatusById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/pinned`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/pinned`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -585,7 +586,7 @@ export const getChatPinnedStatusById = async (id: string) => {
 export const toggleChatPinnedStatusById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/pin`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/pin`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -622,7 +623,7 @@ export const toggleChatPinnedStatusById = async (id: string) => {
 export const cloneChatById = async (id: string, title?: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/clone`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/clone`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -662,7 +663,7 @@ export const cloneChatById = async (id: string, title?: string) => {
 export const cloneSharedChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/clone/shared`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/clone/shared`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -699,7 +700,7 @@ export const cloneSharedChatById = async (id: string) => {
 export const shareChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -730,7 +731,7 @@ export const shareChatById = async (id: string) => {
 export const updateChatFolderIdById = async (id: string, folderId?: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/folder`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/folder`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -764,7 +765,7 @@ export const updateChatFolderIdById = async (id: string, folderId?: string) => {
 export const archiveChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/archive`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/archive`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -795,7 +796,7 @@ export const archiveChatById = async (id: string) => {
 export const deleteSharedChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -826,7 +827,7 @@ export const deleteSharedChatById = async (id: string) => {
 export const updateChatById = async (id: string, chat: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -860,7 +861,7 @@ export const updateChatById = async (id: string, chat: object) => {
 export const deleteChatById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -891,7 +892,7 @@ export const deleteChatById = async (id: string) => {
 export const deleteAllChats = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -922,7 +923,7 @@ export const deleteAllChats = async () => {
 export const archiveAllChats = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/archive/all`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/archive/all`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const getUserDefaultPermissions = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -29,7 +30,7 @@ export const getUserDefaultPermissions = async () => {
 export const updateUserDefaultPermissions = async (permissions: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/default/permissions`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -58,7 +59,7 @@ export const updateUserDefaultPermissions = async (permissions: object) => {
 export const updateUserRole = async (id: string, role: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/update/role`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/update/role`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -88,7 +89,7 @@ export const updateUserRole = async (id: string, role: string) => {
 export const getUsers = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -113,7 +114,7 @@ export const getUsers = async () => {
 
 export const getUserSettings = async () => {
 	let error = null;
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/settings`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/user/settings`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -139,7 +140,7 @@ export const getUserSettings = async () => {
 export const updateUserSettings = async (settings: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/settings/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/user/settings/update`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -168,7 +169,7 @@ export const updateUserSettings = async (settings: object) => {
 export const getUserById = async (userId: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -195,7 +196,7 @@ export const getUserById = async (userId: string) => {
 // (getAndUpdateUserLocation)は撤去。info は admin 専有(updateUserById の info で編集)。
 export const getUserMetaFields = async () => {
 	let error = null;
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/meta/fields`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/meta/fields`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -221,7 +222,7 @@ export const getUserMetaFields = async () => {
 export const deleteUserById = async (userId: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
 		method: 'DELETE',
 		headers: {
 			'Content-Type': 'application/json'
@@ -256,7 +257,7 @@ type UserUpdateForm = {
 export const updateUserById = async (userId: string, user: UserUpdateForm) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/${userId}/update`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'

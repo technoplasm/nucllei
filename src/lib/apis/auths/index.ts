@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const getAdminDetails = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/details`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/details`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -29,7 +30,7 @@ export const getAdminDetails = async () => {
 export const getAdminConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -55,7 +56,7 @@ export const getAdminConfig = async () => {
 export const updateAdminConfig = async (body: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -82,7 +83,7 @@ export const updateAdminConfig = async (body: object) => {
 export const getSessionUser = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -109,7 +110,7 @@ export const getSessionUser = async () => {
 export const ldapUserSignIn = async (user: string, password: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/ldap`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/ldap`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -141,7 +142,7 @@ export const ldapUserSignIn = async (user: string, password: string) => {
 export const getLdapConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -167,7 +168,7 @@ export const getLdapConfig = async () => {
 export const updateLdapConfig = async (enable_ldap: boolean) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -196,7 +197,7 @@ export const updateLdapConfig = async (enable_ldap: boolean) => {
 export const getLdapServer = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -222,7 +223,7 @@ export const getLdapServer = async () => {
 export const updateLdapServer = async (body: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/config/ldap/server`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -249,7 +250,7 @@ export const updateLdapServer = async (body: object) => {
 export const userSignIn = async (email: string, password: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signin`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/signin`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -286,7 +287,7 @@ export const userSignUp = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signup`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/signup`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -319,7 +320,7 @@ export const userSignUp = async (
 export const userSignOut = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
@@ -350,7 +351,7 @@ export const addUser = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/add`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/add`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -383,7 +384,7 @@ export const addUser = async (
 export const updateUserProfile = async (name: string, profileImageUrl: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/update/profile`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/update/profile`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -413,7 +414,7 @@ export const updateUserProfile = async (name: string, profileImageUrl: string) =
 export const updateUserPassword = async (password: string, newPassword: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/update/password`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/update/password`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -443,7 +444,7 @@ export const updateUserPassword = async (password: string, newPassword: string) 
 export const createAPIKey = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -467,7 +468,7 @@ export const createAPIKey = async () => {
 export const getAPIKey = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/api_key`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'

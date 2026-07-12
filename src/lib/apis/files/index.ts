@@ -1,3 +1,4 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 // llens(#69): model_id クエリは撤去(per-model Attachment 廃止)。
@@ -7,7 +8,7 @@ export const uploadFile = async (file: File) => {
 	data.append('file', file);
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json'
@@ -67,7 +68,7 @@ export const getFileList = async (options: FileListOptions = {}) => {
 		searchParams.append('filename', options.filename);
 	}
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/list?${searchParams.toString()}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/list?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -95,7 +96,7 @@ export const getFileList = async (options: FileListOptions = {}) => {
 export const getFileUploaders = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/uploaders`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/uploaders`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -123,7 +124,7 @@ export const getFileUploaders = async () => {
 export const processFileById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/process`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/process`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -152,7 +153,7 @@ export const processFileById = async (id: string) => {
 export const updateFileAccessControlById = async (id: string, accessControl: null | object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/access_control/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/access_control/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -182,7 +183,7 @@ export const updateFileAccessControlById = async (id: string, accessControl: nul
 export const getFileById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -212,7 +213,7 @@ export const getFileById = async (id: string) => {
 export const updateFileDataContentById = async (id: string, content: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/data/content/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/data/content/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -245,7 +246,7 @@ export const updateFileDataContentById = async (id: string, content: string) => 
 export const deleteFileById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -275,7 +276,7 @@ export const deleteFileById = async (id: string) => {
 export const deleteAllFiles = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/all`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/all`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',

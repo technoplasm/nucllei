@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 export const getOpenAIConfig = async () => {
 	let error = null;
 
-	const res = await fetch(`${OPENAI_API_BASE_URL}/config`, {
+	const res = await apiFetch(`${OPENAI_API_BASE_URL}/config`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -41,7 +42,7 @@ type OpenAIConfig = {
 export const updateOpenAIConfig = async (config: OpenAIConfig) => {
 	let error = null;
 
-	const res = await fetch(`${OPENAI_API_BASE_URL}/config/update`, {
+	const res = await apiFetch(`${OPENAI_API_BASE_URL}/config/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -75,7 +76,7 @@ export const updateOpenAIConfig = async (config: OpenAIConfig) => {
 export const getOpenAIModels = async (urlIdx?: number) => {
 	let error = null;
 
-	const res = await fetch(
+	const res = await apiFetch(
 		`${OPENAI_API_BASE_URL}/models${typeof urlIdx === 'number' ? `/${urlIdx}` : ''}`,
 		{
 			method: 'GET',
@@ -135,7 +136,7 @@ export const verifyOpenAIConnection = async (
 			throw error;
 		}
 	} else {
-		res = await fetch(`${OPENAI_API_BASE_URL}/verify`, {
+		res = await apiFetch(`${OPENAI_API_BASE_URL}/verify`, {
 			method: 'POST',
 			headers: {
 				Accept: 'application/json',
@@ -170,7 +171,7 @@ export const chatCompletion = async (
 	const controller = new AbortController();
 	let error = null;
 
-	const res = await fetch(`${url}/chat/completions`, {
+	const res = await apiFetch(`${url}/chat/completions`, {
 		signal: controller.signal,
 		method: 'POST',
 		headers: {
@@ -196,7 +197,7 @@ export const generateOpenAIChatCompletion = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${url}/chat/completions`, {
+	const res = await apiFetch(`${url}/chat/completions`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -226,7 +227,7 @@ export const synthesizeOpenAISpeech = async (
 ) => {
 	let error = null;
 
-	const res = await fetch(`${OPENAI_API_BASE_URL}/audio/speech`, {
+	const res = await apiFetch(`${OPENAI_API_BASE_URL}/audio/speech`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'

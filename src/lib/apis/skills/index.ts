@@ -1,3 +1,4 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 // Skill は Prompt の後継(issue #35)。llens(#43): 可読キーは id 一本(旧 command)。
@@ -14,7 +15,7 @@ export type SkillItem = {
 export const createNewSkill = async (skill: SkillItem) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/create`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -42,7 +43,7 @@ export const createNewSkill = async (skill: SkillItem) => {
 export const getSkills = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -69,7 +70,7 @@ export const getSkills = async () => {
 export const getSkillList = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/list`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -96,7 +97,7 @@ export const getSkillList = async () => {
 export const getSkillById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -123,7 +124,7 @@ export const getSkillById = async (id: string) => {
 export const updateSkillById = async (skill: SkillItem) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${skill.id}/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/id/${skill.id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -153,7 +154,7 @@ export const deleteSkillById = async (id: string) => {
 
 	id = id.charAt(0) === '/' ? id.slice(1) : id;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/delete`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',

@@ -24,13 +24,15 @@
 		currentChatPage,
 		isLastActiveTab,
 		isApp,
-		appInfo
+		appInfo,
+		backendUnreachable
 	} from '$lib/stores';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { Toaster, toast } from 'svelte-sonner';
 
 	import { getBackendConfig } from '$lib/apis';
+	import { SESSION_EXPIRED_FLAG } from '$lib/apis/fetch';
 	import { getSessionUser } from '$lib/apis/auths';
 
 	import '../tailwind.css';
@@ -294,6 +296,19 @@
 		document.getElementById('splash-screen')?.remove();
 		loaded = true;
 
+		// llens(#70 B2): apiFetch がセッション失効を検知してハード遷移してきた場合の通知。
+		// 子ページの onMount 中に toast を撃つと Toaster マウント前後の競合で落ちるため、
+		// 最後に走る root layout の onMount 末尾(loaded 確定後)で発火する。
+		if (sessionStorage.getItem(SESSION_EXPIRED_FLAG)) {
+			sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+			// Toaster のマウント時 reset() を跨がないよう一拍置く。見逃しやすい通知なので長め(8s)
+			setTimeout(() => {
+				toast.info($i18n.t('Your session has expired. Please sign in again.'), {
+					duration: 8000
+				});
+			}, 500);
+		}
+
 		return () => {
 			window.removeEventListener('resize', onResize);
 		};
@@ -309,6 +324,16 @@
 	<!-- <link rel="stylesheet" type="text/css" href="/themes/rosepine.css" />
 	<link rel="stylesheet" type="text/css" href="/themes/rosepine-dawn.css" /> -->
 </svelte:head>
+
+{#if $backendUnreachable}
+	<!-- llens(#70 B3): バックエンド不達バナー。apiFetch が検知し /health ポーリングで自動復帰 -->
+	<div
+		class="fixed top-0 inset-x-0 z-9999 bg-red-600 text-white text-xs text-center py-1.5 font-medium"
+		role="alert"
+	>
+		{$i18n.t('Cannot connect to the server. Retrying...')}
+	</div>
+{/if}
 
 {#if loaded}
 	{#if $isApp}

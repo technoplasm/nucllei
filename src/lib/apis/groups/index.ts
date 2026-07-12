@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createNewGroup = async (group: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/create`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/groups/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -33,7 +34,7 @@ export const createNewGroup = async (group: object) => {
 export const getGroups = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/groups/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -63,7 +64,7 @@ export const getGroups = async () => {
 export const updateGroupById = async (id: string, group: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -97,7 +98,7 @@ export const updateGroupById = async (id: string, group: object) => {
 export const deleteGroupById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/delete`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',

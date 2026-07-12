@@ -1,9 +1,10 @@
+import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createNewTool = async (tool: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/create`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/create`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -33,7 +34,7 @@ export const createNewTool = async (tool: object) => {
 export const getTools = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -63,7 +64,7 @@ export const getTools = async () => {
 export const getToolList = async () => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/list`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/list`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -93,7 +94,7 @@ export const getToolList = async () => {
 export const getToolById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -124,7 +125,7 @@ export const getToolById = async (id: string) => {
 export const updateToolById = async (id: string, tool: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -158,7 +159,7 @@ export const updateToolById = async (id: string, tool: object) => {
 export const deleteToolById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/delete`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			Accept: 'application/json',
@@ -189,7 +190,7 @@ export const deleteToolById = async (id: string) => {
 export const getToolValvesById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -220,7 +221,7 @@ export const getToolValvesById = async (id: string) => {
 export const getToolValvesSpecById = async (id: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/spec`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/spec`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -251,7 +252,7 @@ export const getToolValvesSpecById = async (id: string) => {
 export const updateToolValvesById = async (id: string, valves: object) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/update`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/tools/id/${id}/valves/update`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

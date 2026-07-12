@@ -6,7 +6,22 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 // llens(dev): dev フロントが叩く BE の origin。既定はローカル BE(:3000)。
 // BACKEND_ORIGIN で上書きすれば別ホストの BE を指せる。
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || 'http://localhost:3000';
-const BACKEND_PROXY = { target: BACKEND_ORIGIN, changeOrigin: true };
+const BACKEND_PROXY = {
+	target: BACKEND_ORIGIN,
+	changeOrigin: true,
+	// llens(#70 B3): BE 不達時は vite 既定の 500 ではなく 502 を返し、本番リバプロ
+	// (Caddy)と挙動を揃える — フロントの apiFetch が 502-504 を「不達」と判定する。
+	configure: (proxy: any) => {
+		proxy.on('error', (_err: unknown, _req: unknown, res: any) => {
+			if (res && !res.headersSent && res.writeHead) {
+				res.writeHead(502, { 'Content-Type': 'application/json' });
+			}
+			if (res && res.end) {
+				res.end(JSON.stringify({ detail: 'Bad Gateway (backend unreachable)' }));
+			}
+		});
+	}
+};
 
 // llens(dev): 開発中のキャッシュを完全無効化する。ブラウザ/中間プロキシが
 // 古いモジュールを掴んで HMR/リロードが反映されない事故を防ぐ(dev サーバ限定)。
@@ -73,6 +88,8 @@ export default defineConfig({
 			'/openai': BACKEND_PROXY,
 			'/ollama': BACKEND_PROXY,
 			'/oauth': BACKEND_PROXY,
+			// llens(#70 B3): 不達復帰ポーリング(apiFetch)が叩く BE の health endpoint
+			'/health': BACKEND_PROXY,
 			// socket.io(path /ws/socket.io)は websocket アップグレードが要る
 			'/ws': { ...BACKEND_PROXY, ws: true }
 		},
