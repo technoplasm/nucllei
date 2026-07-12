@@ -32,63 +32,6 @@ export const uploadFile = async (token: string, file: File) => {
 	return res;
 };
 
-export const uploadDir = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/upload/dir`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getFiles = async (token: string = '') => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 // llens(#69): ファイル管理ページ用のページング一覧。
 // 返却は {"items": [FileModel(data は status のみ・content 無し)], "total": n}。
 // user_ids は admin 専用フィルタ(非 admin が渡すと 403)。
@@ -300,34 +243,6 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 		.catch((err) => {
 			error = err.detail;
 			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getFileContentById = async (id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/content`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json'
-		},
-		credentials: 'include'
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return await res.blob();
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-
 			return null;
 		});
 

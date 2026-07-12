@@ -4,8 +4,6 @@ import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 
-import emojiShortCodes from '$lib/emoji-shortcodes.json';
-
 // Backend
 export const WEBUI_NAME = writable(APP_NAME);
 export const config: Writable<Config | undefined> = writable(undefined);
@@ -26,20 +24,6 @@ export const activeUserIds: Writable<null | string[]> = writable(null);
 export const USAGE_POOL: Writable<null | string[]> = writable(null);
 
 export const theme = writable('system');
-
-export const shortCodesToEmojis = writable(
-	Object.entries(emojiShortCodes).reduce((acc, [key, value]) => {
-		if (typeof value === 'string') {
-			acc[value] = key;
-		} else {
-			for (const v of value) {
-				acc[v] = key;
-			}
-		}
-
-		return acc;
-	}, {})
-);
 
 export const TTSWorker = writable(null);
 
@@ -160,6 +144,20 @@ type AudioSettings = {
 	speaker?: string;
 	model?: string;
 	nonLocalVoices?: boolean;
+	// llens(#70): 実際に使われている形(Settings > Audio が保存する nested 形)を型に反映
+	stt?: {
+		engine?: string;
+	};
+	tts?: {
+		engine?: string;
+		voice?: string;
+		defaultVoice?: string;
+		playbackRate?: number;
+		nonLocalVoices?: boolean;
+		engineConfig?: {
+			dtype?: string;
+		};
+	};
 };
 
 type TitleSettings = {
@@ -182,6 +180,20 @@ type Skill = {
 	updated_at: number;
 };
 
+// llens(#66/#70): backend USER_PERMISSIONS(3層権限)の形。グループ内は boolean フラグの束
+type UserPermissions = {
+	workspace?: {
+		skills?: boolean;
+		[key: string]: boolean | undefined;
+	};
+	chat?: {
+		[key: string]: boolean | undefined;
+	};
+	features?: {
+		[key: string]: boolean | undefined;
+	};
+};
+
 type Config = {
 	status: boolean;
 	name: string;
@@ -198,12 +210,34 @@ type Config = {
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_admin_chat_access: boolean;
+		enable_code_interpreter?: boolean;
+		enable_user_webhooks?: boolean;
 	};
 	oauth: {
 		providers: {
 			[key: string]: string;
 		};
 	};
+	// llens(#70): /api/config が user 認証時に返す追加フィールド(main.py 参照)を型に反映
+	audio?: {
+		tts: {
+			engine: string;
+			voice: string;
+			split_on?: string;
+		};
+		stt: {
+			engine: string;
+		};
+	};
+	file?: {
+		max_size?: number | null;
+		max_count?: number | null;
+		allowed_extensions?: string[];
+	};
+	permissions?: UserPermissions;
+	license_metadata?: Record<string, unknown> | null;
+	user_count?: number;
+	active_entries?: number;
 };
 
 type PromptSuggestion = {
@@ -217,4 +251,9 @@ type SessionUser = {
 	name: string;
 	role: string;
 	profile_image_url: string;
+	// llens(#66/#70): get_session_user が返す実効権限(admin は enforcement 側でバイパス)
+	permissions?: UserPermissions;
+	token?: string;
+	token_type?: string;
+	expires_at?: number | null;
 };

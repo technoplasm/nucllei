@@ -61,37 +61,6 @@ export const getFolders = async (token: string = '') => {
 	return res;
 };
 
-export const getFolderById = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 export const updateFolderNameById = async (token: string, id: string, name: string) => {
 	let error = null;
 
@@ -201,40 +170,6 @@ export const updateFolderParentIdById = async (token: string, id: string, parent
 type FolderItems = {
 	chat_ids: string[];
 	file_ids: string[];
-};
-
-export const updateFolderItemsById = async (token: string, id: string, items: FolderItems) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/update/items`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({
-			items: items
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
 };
 
 export const deleteFolderById = async (token: string, id: string) => {
