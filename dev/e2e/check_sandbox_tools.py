@@ -16,7 +16,7 @@ import urllib.request
 
 import requests
 
-BASE = "http://localhost:8080"
+BASE = "http://localhost:3000"
 FRONT = "http://localhost:5174"
 SECRET = "himitsu-ingredient-7742"
 

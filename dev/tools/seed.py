@@ -94,7 +94,7 @@ def attach_to_model(base, token):
 
 def main():
     ap = argparse.ArgumentParser(description="render_probe を dev DB に登録する")
-    ap.add_argument("--base", default="http://localhost:8080", help="ベースURL")
+    ap.add_argument("--base", default="http://localhost:3000", help="ベースURL")
     ap.add_argument("--token", required=True, help="admin の Bearer トークン")
     args = ap.parse_args()
 

@@ -10,7 +10,7 @@ import re
 import time
 import urllib.request
 
-BASE = "http://localhost:8080"
+BASE = "http://localhost:3000"
 FRONT = "http://localhost:5174"
 
 req = urllib.request.Request(

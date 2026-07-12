@@ -7,7 +7,7 @@
 
 ```sh
 # 1) admin トークン取得
-TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auths/signin \
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin \
   -H 'Content-Type: application/json' \
   -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 
