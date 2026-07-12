@@ -97,7 +97,6 @@
 
 	let selectedToolIds = [];
 	let imageGenerationEnabled = false;
-	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
 
 	let chat = null;
@@ -123,7 +122,6 @@
 			prompt = '';
 			files = [];
 			selectedToolIds = [];
-			webSearchEnabled = false;
 			imageGenerationEnabled = false;
 
 			if (chatIdProp && (await loadChat())) {
@@ -137,7 +135,6 @@
 						prompt = input.prompt;
 						files = input.files;
 						selectedToolIds = input.selectedToolIds;
-						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 					} catch (e) {}
 				}
@@ -389,13 +386,11 @@
 				prompt = input.prompt;
 				files = input.files;
 				selectedToolIds = input.selectedToolIds;
-				webSearchEnabled = input.webSearchEnabled;
 				imageGenerationEnabled = input.imageGenerationEnabled;
 			} catch (e) {
 				prompt = '';
 				files = [];
 				selectedToolIds = [];
-				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 			}
 		}
@@ -619,10 +614,6 @@
 
 		chatFiles = [];
 		params = {};
-
-		if ($page.url.searchParams.get('web-search') === 'true') {
-			webSearchEnabled = true;
-		}
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
 			imageGenerationEnabled = true;
@@ -1366,10 +1357,7 @@
 		const userMessage = _history.messages[responseMessage.parentId];
 
 		let files = JSON.parse(JSON.stringify(chatFiles));
-		files.push(
-			...(userMessage?.files ?? []).filter((item) => ['file'].includes(item.type)),
-			...(responseMessage?.files ?? []).filter((item) => ['web_search_results'].includes(item.type))
-		);
+		files.push(...(userMessage?.files ?? []).filter((item) => ['file'].includes(item.type)));
 		// Remove duplicates
 		files = files.filter(
 			(item, index, array) =>
@@ -1484,11 +1472,6 @@
 						$config?.features?.enable_code_interpreter &&
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 							? codeInterpreterEnabled
-							: false,
-					web_search:
-						$config?.features?.enable_web_search &&
-						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
-							? webSearchEnabled || ($settings?.webSearch ?? false) === 'always'
 							: false
 				},
 				variables: {
@@ -1848,7 +1831,6 @@
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
 								bind:codeInterpreterEnabled
-								bind:webSearchEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
@@ -1896,7 +1878,6 @@
 								bind:selectedToolIds
 								bind:imageGenerationEnabled
 								bind:codeInterpreterEnabled
-								bind:webSearchEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}

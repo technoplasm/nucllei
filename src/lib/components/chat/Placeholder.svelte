@@ -36,7 +36,6 @@
 	export let selectedToolIds = [];
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
-	export let webSearchEnabled = false;
 
 	let models = [];
 
@@ -172,7 +171,6 @@
 					bind:selectedToolIds
 					bind:imageGenerationEnabled
 					bind:codeInterpreterEnabled
-					bind:webSearchEnabled
 					bind:atSelectedModel
 					{transparentBackground}
 					{stopResponse}

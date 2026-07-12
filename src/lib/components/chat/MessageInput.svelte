@@ -47,7 +47,6 @@
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
-	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import PhotoSolid from '../icons/PhotoSolid.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
@@ -88,15 +87,13 @@
 	export let selectedToolIds = [];
 
 	export let imageGenerationEnabled = false;
-	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 
 	$: onChange({
 		prompt,
 		files,
 		selectedToolIds,
-		imageGenerationEnabled,
-		webSearchEnabled
+		imageGenerationEnabled
 	});
 
 	let showTools = false;
@@ -555,7 +552,7 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || webSearchEnabled || ($settings?.webSearch ?? false) === 'always' || imageGenerationEnabled || codeInterpreterEnabled}
+					{#if atSelectedModel !== undefined || selectedToolIds.length > 0 || imageGenerationEnabled || codeInterpreterEnabled}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-surface z-10"
 						>
@@ -908,7 +905,6 @@
 														console.log('Escape');
 														atSelectedModel = undefined;
 														selectedToolIds = [];
-														webSearchEnabled = false;
 														imageGenerationEnabled = false;
 													}
 												}}
@@ -1108,7 +1104,6 @@
 													console.log('Escape');
 													atSelectedModel = undefined;
 													selectedToolIds = [];
-													webSearchEnabled = false;
 													imageGenerationEnabled = false;
 												}
 											}}
@@ -1253,25 +1248,6 @@
 											{/if}
 
 											{#if $_user}
-												{#if $config?.features?.enable_web_search && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search)}
-													<Tooltip content={$i18n.t('Search the internet')} placement="top">
-														<button
-															on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-															type="button"
-															class="px-1.5 @xl:px-2.5 py-1.5 flex gap-1.5 items-center text-sm rounded-full font-medium transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden border {webSearchEnabled ||
-															($settings?.webSearch ?? false) === 'always'
-																? 'bg-blue-100 dark:bg-blue-500/20 border-blue-400/20 text-blue-500 dark:text-blue-400'
-																: 'bg-transparent border-transparent text-gray-600 dark:text-gray-300 border-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-														>
-															<GlobeAlt className="size-5" strokeWidth="1.75" />
-															<span
-																class="hidden @xl:block whitespace-nowrap overflow-hidden text-ellipsis translate-y-[0.5px]"
-																>{$i18n.t('Web Search')}</span
-															>
-														</button>
-													</Tooltip>
-												{/if}
-
 												{#if $config?.features?.enable_image_generation && ($_user.role === 'admin' || $_user?.permissions?.features?.image_generation)}
 													<Tooltip content={$i18n.t('Generate an image')} placement="top">
 														<button
