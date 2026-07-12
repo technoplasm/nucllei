@@ -9,6 +9,9 @@
 	export let accessControl = {};
 	export let allowPublic = true;
 
+	// llens(#69): file 用 variant('default' | 'file')。AccessControl へパススルー。
+	export let variant = 'default';
+
 	export let onChange = () => {};
 </script>
 
@@ -38,7 +41,7 @@
 		</div>
 
 		<div class="w-full px-5 pb-4 dark:text-white">
-			<AccessControl bind:accessControl {onChange} {allowPublic} />
+			<AccessControl bind:accessControl {onChange} {allowPublic} {variant} />
 		</div>
 	</div>
 </Modal>

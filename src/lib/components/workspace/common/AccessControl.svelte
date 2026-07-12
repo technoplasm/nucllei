@@ -5,6 +5,7 @@
 
 	import { getGroups } from '$lib/apis/groups';
 	import UserCircleSolid from '$lib/components/icons/UserCircleSolid.svelte';
+	import UsersSolid from '$lib/components/icons/UsersSolid.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	export let onChange: Function = () => {};
@@ -15,10 +16,37 @@
 
 	export let allowPublic = true;
 
+	// llens(#69): file 用 variant。file の ACL 意味論は他エンティティと逆:
+	//   null = 非公開(owner のみ・既定)
+	//   {read:{group_ids,user_ids}} = 列挙先に公開(グループ共有)
+	//   {read:{public:true}} = 全体公開
+	// variant='file' では 3 値セレクタで受け渡しも file 意味論のまま行う
+	// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
+	export let variant: 'default' | 'file' = 'default';
+
 	let selectedGroupId = '';
 	let groups = [];
 
-	$: if (!allowPublic && accessControl === null) {
+	// file variant の現在モード(accessControl から導出 — 二重 state を持たない)
+	$: fileMode =
+		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'groups';
+
+	const setFileMode = (mode) => {
+		if (mode === 'private') {
+			accessControl = null;
+		} else if (mode === 'public') {
+			accessControl = { read: { public: true } };
+		} else {
+			accessControl = {
+				read: {
+					group_ids: accessControl?.read?.group_ids ?? [],
+					user_ids: accessControl?.read?.user_ids ?? []
+				}
+			};
+		}
+	};
+
+	$: if (variant === 'default' && !allowPublic && accessControl === null) {
 		accessControl = {
 			read: {
 				group_ids: [],
@@ -30,6 +58,19 @@
 
 	onMount(async () => {
 		groups = await getGroups(localStorage.token);
+
+		if (variant === 'file') {
+			// 意味論は変えず shape だけ正規化(グループ共有時に read.group_ids を保証)
+			if (accessControl !== null && !accessControl?.read?.public) {
+				accessControl = {
+					read: {
+						group_ids: accessControl?.read?.group_ids ?? [],
+						user_ids: accessControl?.read?.user_ids ?? []
+					}
+				};
+			}
+			return;
+		}
 
 		if (accessControl === null) {
 			if (allowPublic) {
@@ -55,6 +96,9 @@
 
 	$: onChange(accessControl);
 
+	// グループ選択 UI を出す条件(default: private 選択時 / file: グループ共有選択時)
+	$: showGroups = variant === 'file' ? fileMode === 'groups' : accessControl !== null;
+
 	$: if (selectedGroupId) {
 		onSelectGroup();
 	}
@@ -75,7 +119,9 @@
 		<div class="flex gap-2.5 items-center mb-1">
 			<div>
 				<div class=" p-2 bg-black/5 dark:bg-white/5 rounded-full">
-					{#if accessControl !== null}
+					{#if variant === 'file' && fileMode === 'groups'}
+						<UsersSolid className="w-5 h-5" />
+					{:else if variant === 'file' ? fileMode === 'private' : accessControl !== null}
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							fill="none"
@@ -110,42 +156,67 @@
 			</div>
 
 			<div>
-				<select
-					id="models"
-					class="outline-hidden bg-transparent text-sm font-medium rounded-lg block w-fit pr-10 max-w-full placeholder-gray-400"
-					value={accessControl !== null ? 'private' : 'public'}
-					on:change={(e) => {
-						if (e.target.value === 'public') {
-							accessControl = null;
-						} else {
-							accessControl = {
-								read: {
-									group_ids: [],
-									user_ids: []
-								}
-							};
-						}
-					}}
-				>
-					<option class=" text-gray-700" value="private" selected>{$i18n.t('Private')}</option>
-					{#if allowPublic}
-						<option class=" text-gray-700" value="public" selected>{$i18n.t('Public')}</option>
-					{/if}
-				</select>
+				{#if variant === 'file'}
+					<select
+						id="models"
+						class="outline-hidden bg-transparent text-sm font-medium rounded-lg block w-fit pr-10 max-w-full placeholder-gray-400"
+						value={fileMode}
+						on:change={(e) => {
+							setFileMode(e.target.value);
+						}}
+					>
+						<option class=" text-gray-700" value="private" selected>{$i18n.t('Private')}</option>
+						<option class=" text-gray-700" value="groups">{$i18n.t('Shared')}</option>
+						<option class=" text-gray-700" value="public">{$i18n.t('Public')}</option>
+					</select>
 
-				<div class=" text-xs text-gray-400 font-medium">
-					{#if accessControl !== null}
-						{$i18n.t('Only select users and groups with permission can access')}
-					{:else}
-						{$i18n.t('Accessible to all users')}
-					{/if}
-				</div>
+					<div class=" text-xs text-gray-400 font-medium">
+						{#if fileMode === 'private'}
+							{$i18n.t('Only you can access')}
+						{:else if fileMode === 'groups'}
+							{$i18n.t('Only select users and groups with permission can access')}
+						{:else}
+							{$i18n.t('Accessible to all users')}
+						{/if}
+					</div>
+				{:else}
+					<select
+						id="models"
+						class="outline-hidden bg-transparent text-sm font-medium rounded-lg block w-fit pr-10 max-w-full placeholder-gray-400"
+						value={accessControl !== null ? 'private' : 'public'}
+						on:change={(e) => {
+							if (e.target.value === 'public') {
+								accessControl = null;
+							} else {
+								accessControl = {
+									read: {
+										group_ids: [],
+										user_ids: []
+									}
+								};
+							}
+						}}
+					>
+						<option class=" text-gray-700" value="private" selected>{$i18n.t('Private')}</option>
+						{#if allowPublic}
+							<option class=" text-gray-700" value="public" selected>{$i18n.t('Public')}</option>
+						{/if}
+					</select>
+
+					<div class=" text-xs text-gray-400 font-medium">
+						{#if accessControl !== null}
+							{$i18n.t('Only select users and groups with permission can access')}
+						{:else}
+							{$i18n.t('Accessible to all users')}
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
-	{#if accessControl !== null}
+	{#if showGroups}
 		{@const accessGroups = groups.filter((group) =>
-			accessControl.read.group_ids.includes(group.id)
+			(accessControl?.read?.group_ids ?? []).includes(group.id)
 		)}
 		<div>
 			<div class="">
@@ -168,7 +239,7 @@
 									<option class=" text-gray-700" value="" disabled selected
 										>{$i18n.t('Select a group')}</option
 									>
-									{#each groups.filter((group) => !accessControl.read.group_ids.includes(group.id)) as group}
+									{#each groups.filter((group) => !(accessControl?.read?.group_ids ?? []).includes(group.id)) as group}
 										<option class=" text-gray-700" value={group.id}>{group.name}</option>
 									{/each}
 								</select>
