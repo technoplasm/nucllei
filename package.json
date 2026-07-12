@@ -21,6 +21,8 @@
 		"test:frontend": "vitest --passWithNoTests"
 	},
 	"devDependencies": {
+		"@egoist/tailwindcss-icons": "^1.9.2",
+		"@iconify-json/lucide": "^1.2.116",
 		"@sveltejs/adapter-auto": "3.2.2",
 		"@sveltejs/adapter-static": "^3.0.2",
 		"@sveltejs/kit": "^2.5.20",

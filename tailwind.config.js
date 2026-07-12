@@ -1,5 +1,6 @@
 import typography from '@tailwindcss/typography';
 import containerQuries from '@tailwindcss/container-queries';
+import { iconsPlugin, getIconCollections } from '@egoist/tailwindcss-icons';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -64,5 +65,11 @@ export default {
 			}
 		}
 	},
-	plugins: [typography, containerQuries]
+	plugins: [
+		typography,
+		containerQuries,
+		// llens(#70): class ベースアイコン(i-lucide-*)。CSS mask で currentColor 継承、
+		// 使ったクラスだけ emit(ビルド時生成 = air-gapped 対応)。動的なクラス名合成は禁止。
+		iconsPlugin({ collections: getIconCollections(['lucide']) })
+	]
 };
