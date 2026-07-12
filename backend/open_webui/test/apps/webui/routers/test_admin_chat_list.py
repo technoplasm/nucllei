@@ -165,6 +165,25 @@ class TestAdminChatList(AbstractPostgresTest):
             )
             assert {i["title"] for i in r.json()["items"]} == {"both"}
 
+    def test_list_updated_range_filter(self):
+        for title, ts in (("c_100", 100), ("c_200", 200), ("c_300", 300)):
+            self._insert_chat(title=title, updated_at=ts)
+        with mock_webui_user(id="1", role="admin"):
+            # 両端含む
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"updated_from": 100, "updated_to": 200})
+            )
+            assert {i["title"] for i in r.json()["items"]} == {"c_100", "c_200"}
+            # 片側だけでも効く
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"updated_from": 201})
+            )
+            assert {i["title"] for i in r.json()["items"]} == {"c_300"}
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"updated_to": 199})
+            )
+            assert {i["title"] for i in r.json()["items"]} == {"c_100"}
+
     # ---- 軽量行の導出列 ----
 
     def test_item_derived_fields(self):

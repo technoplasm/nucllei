@@ -453,6 +453,8 @@ async def get_admin_chat_list(
     user_id: Optional[str] = Query(None),
     title: Optional[str] = Query(None),
     model: Optional[str] = Query(None),
+    updated_from: Optional[int] = Query(None, ge=0),
+    updated_to: Optional[int] = Query(None, ge=0),
     user=Depends(get_admin_user),
 ):
     """admin チャット閲覧ビュー(#19)用のページング一覧。
@@ -477,6 +479,8 @@ async def get_admin_chat_list(
         user_id=user_id,
         title=title,
         model=model,
+        updated_from=updated_from,
+        updated_to=updated_to,
         order_by=order_by,
         direction=direction,
         limit=limit,

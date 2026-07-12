@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
 	import dayjs from 'dayjs';
@@ -19,6 +20,7 @@
 	// 一覧はサーバーページング(GET /chats/admin/list)。導出列(snippet・ターン数・
 	// 添付数)はページ分だけサーバーで chat JSON をパースした軽量行で返る。
 	// token は #57 が Chat.meta["usage"] に記録した保存値の表示(無い旧チャットは「-」)。
+	// 行クリックは /s/{id}(admin は ENABLE_ADMIN_CHAT_ACCESS 経由で chat id を共有ビューで開ける)。
 	const i18n = getContext('i18n');
 
 	let loaded = false;
@@ -34,13 +36,20 @@
 	let direction: 'desc' | 'asc' = 'desc';
 	let limit = 60;
 
-	// フィルタ: ユーザーは単一選択(空 = 全ユーザー)、モデルも単一選択(空 = 全モデル)
+	// フィルタ: ユーザーは単一選択(空 = 全ユーザー)、モデルも単一選択(空 = 全モデル)。
+	// 期間は updated_at の日付範囲(両端含む・ローカルタイムの日単位)
 	let owners = [];
 	let selectedUserId = '';
 	let models = [];
 	let selectedModel = '';
+	let dateFrom = '';
+	let dateTo = '';
+
+	// フィルタ連打時のフェッチ競合ガード(古い応答が後着で最新結果を上書きするのを防ぐ)
+	let fetchSeq = 0;
 
 	const fetchChats = async (append = false) => {
+		const seq = ++fetchSeq;
 		loading = true;
 
 		const res = await getAdminChatList(localStorage.token, {
@@ -50,11 +59,17 @@
 			direction,
 			user_id: selectedUserId !== '' ? selectedUserId : undefined,
 			model: selectedModel !== '' ? selectedModel : undefined,
-			title: query !== '' ? query : undefined
+			title: query !== '' ? query : undefined,
+			updated_from: dateFrom !== '' ? dayjs(dateFrom).startOf('day').unix() : undefined,
+			updated_to: dateTo !== '' ? dayjs(dateTo).endOf('day').unix() : undefined
 		}).catch((err) => {
 			toast.error(`${err}`);
 			return null;
 		});
+
+		if (seq !== fetchSeq) {
+			return;
+		}
 
 		if (res) {
 			// append 中にサーバー側の並びが変わりうる(更新日時ソート中の新着等)。
@@ -78,15 +93,15 @@
 		}, 300);
 	};
 
-	// ソート(テーブルヘッダ)。キー変更時は desc から
-	const setSortKey = (key: 'created_at' | 'updated_at') => {
-		if (orderBy === key) {
-			direction = direction === 'desc' ? 'asc' : 'desc';
-		} else {
-			orderBy = key;
-			direction = 'desc';
-		}
+	// ソート(最終更新ヘッダのみ)
+	const toggleUpdatedSort = () => {
+		direction = direction === 'desc' ? 'asc' : 'desc';
 		fetchChats(false);
+	};
+
+	// admin は ENABLE_ADMIN_CHAT_ACCESS 経由で chat id を共有ビュー(/s/{id})で開ける
+	const openChat = (chat) => {
+		goto(`/s/${chat.id}`);
 	};
 
 	const formatTimestamp = (ts) => dayjs((ts ?? 0) * 1000).format('YYYY-MM-DD HH:mm');
@@ -159,7 +174,7 @@
 			</div>
 		</div>
 
-		<!-- フィルタ: ユーザー(単一選択・空 = 全員)/ モデル / 読み込み数 -->
+		<!-- フィルタ: ユーザー(単一選択・空 = 全員)/ モデル / 更新日時範囲 / 読み込み数 -->
 		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-xs text-gray-500">
 			<div class="flex items-center gap-0.5">
 				<select
@@ -199,6 +214,26 @@
 				</select>
 			</div>
 
+			<div class="flex items-center gap-1">
+				<input
+					type="date"
+					class="dark:bg-gray-900 w-fit rounded-sm text-xs bg-transparent outline-hidden"
+					bind:value={dateFrom}
+					on:change={() => {
+						fetchChats(false);
+					}}
+				/>
+				<span>–</span>
+				<input
+					type="date"
+					class="dark:bg-gray-900 w-fit rounded-sm text-xs bg-transparent outline-hidden"
+					bind:value={dateTo}
+					on:change={() => {
+						fetchChats(false);
+					}}
+				/>
+			</div>
+
 			<div class="flex items-center gap-0.5">
 				<select
 					class="dark:bg-gray-900 w-fit pr-6 rounded-sm text-xs bg-transparent outline-hidden"
@@ -231,8 +266,8 @@
 					class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-850 dark:text-gray-400 -translate-y-0.5"
 				>
 					<tr class="">
-						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('User')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Title')}</th>
+						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('User')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Model')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none text-right">{$i18n.t('Turns')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none text-right">{$i18n.t('Files')}</th>
@@ -240,65 +275,57 @@
 						<th
 							scope="col"
 							class="px-3 py-1.5 cursor-pointer select-none"
-							on:click={() => setSortKey('updated_at')}
+							on:click={toggleUpdatedSort}
 						>
 							<div class="flex gap-1.5 items-center">
 								{$i18n.t('Updated at')}
-								{#if orderBy === 'updated_at'}
-									<span class="font-normal">
-										{#if direction === 'asc'}
-											<ChevronUp className="size-2" />
-										{:else}
-											<ChevronDown className="size-2" />
-										{/if}
-									</span>
-								{:else}
-									<span class="invisible">
+								<span class="font-normal">
+									{#if direction === 'asc'}
 										<ChevronUp className="size-2" />
-									</span>
-								{/if}
+									{:else}
+										<ChevronDown className="size-2" />
+									{/if}
+								</span>
 							</div>
 						</th>
-						<th
-							scope="col"
-							class="px-3 py-1.5 cursor-pointer select-none"
-							on:click={() => setSortKey('created_at')}
-						>
-							<div class="flex gap-1.5 items-center">
-								{$i18n.t('Created at')}
-								{#if orderBy === 'created_at'}
-									<span class="font-normal">
-										{#if direction === 'asc'}
-											<ChevronUp className="size-2" />
-										{:else}
-											<ChevronDown className="size-2" />
-										{/if}
-									</span>
-								{:else}
-									<span class="invisible">
-										<ChevronUp className="size-2" />
-									</span>
-								{/if}
-							</div>
-						</th>
-						<th scope="col" class="px-3 py-1.5 select-none" />
 					</tr>
 				</thead>
 				<tbody class="">
 					{#each chats as chat (chat.id)}
 						<tr
-							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs hover:bg-black/5 dark:hover:bg-white/5 transition"
+							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+							on:click={() => openChat(chat)}
 						>
-							<td class="px-3 py-1">
-								<div class="max-w-32 truncate">{chat.user_name ?? chat.user_id}</div>
-							</td>
 							<td class="px-3 py-1 font-medium text-gray-900 dark:text-white">
 								<div class="max-w-80">
-									<div class="font-medium truncate">{chat.title}</div>
+									<div class="flex items-center gap-1.5">
+										<div class="font-medium truncate">{chat.title}</div>
+										{#if chat.share_id}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												>{$i18n.t('Shared')}</span
+											>
+										{/if}
+										{#if chat.archived}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												>{$i18n.t('Archived')}</span
+											>
+										{/if}
+										{#if chat.pinned}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												>{$i18n.t('Pinned')}</span
+											>
+										{/if}
+									</div>
 									{#if chat.snippet}
 										<div class="font-normal text-gray-500 truncate mt-0.5">{chat.snippet}</div>
 									{/if}
 								</div>
+							</td>
+							<td class="px-3 py-1">
+								<div class="max-w-32 truncate">{chat.user_name ?? chat.user_id}</div>
 							</td>
 							<td class="px-3 py-1">
 								<div class="max-w-40 truncate">{chat.models.join(', ') || '-'}</div>
@@ -315,29 +342,6 @@
 								{/if}
 							</td>
 							<td class="px-3 py-1">{formatTimestamp(chat.updated_at)}</td>
-							<td class="px-3 py-1">{formatTimestamp(chat.created_at)}</td>
-							<td class="px-3 py-1">
-								<div class="flex gap-1">
-									{#if chat.share_id}
-										<span
-											class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px]"
-											>{$i18n.t('Shared')}</span
-										>
-									{/if}
-									{#if chat.archived}
-										<span
-											class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px]"
-											>{$i18n.t('Archived')}</span
-										>
-									{/if}
-									{#if chat.pinned}
-										<span
-											class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px]"
-											>{$i18n.t('Pinned')}</span
-										>
-									{/if}
-								</div>
-							</td>
 						</tr>
 					{/each}
 				</tbody>

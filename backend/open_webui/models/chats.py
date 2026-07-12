@@ -657,6 +657,8 @@ class ChatTable:
         user_id: Optional[str] = None,
         title: Optional[str] = None,
         model: Optional[str] = None,
+        updated_from: Optional[int] = None,
+        updated_to: Optional[int] = None,
         order_by: str = "updated_at",
         direction: str = "desc",
         limit: int = 60,
@@ -667,6 +669,7 @@ class ChatTable:
         order/limit/offset は SQL 側で効かせる(全件ロードして python で切らない)。
         user_id=None は全ユーザー。model は chat JSON トップレベルの models 配列への
         メンバーシップ(dialect 別 JSON クエリ — search_text と同じ流儀)。
+        updated_from/updated_to は updated_at の範囲(epoch 秒・両端含む)。
         戻り値は (items, total)。total は filter 適用後・ページング前の件数。
         """
         with get_db() as db:
@@ -675,6 +678,10 @@ class ChatTable:
                 query = query.filter(Chat.user_id == user_id)
             if title:
                 query = query.filter(Chat.title.ilike(f"%{title}%"))
+            if updated_from is not None:
+                query = query.filter(Chat.updated_at >= updated_from)
+            if updated_to is not None:
+                query = query.filter(Chat.updated_at <= updated_to)
             if model:
                 dialect_name = db.bind.dialect.name
                 if dialect_name == "sqlite":

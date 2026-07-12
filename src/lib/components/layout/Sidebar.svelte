@@ -422,14 +422,14 @@
 	bind:this={navElement}
 	id="sidebar"
 	class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
-		? 'md:relative w-[300px] max-w-[300px]'
-		: '-translate-x-[300px] w-[0px]'} {$isApp
+		? 'md:relative w-[var(--sidebar-width)] max-w-[var(--sidebar-width)]'
+		: '-translate-x-[var(--sidebar-width)] w-[0px]'} {$isApp
 		? `ml-[4.5rem] md:ml-0 `
 		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-surface-sidebar text-gray-900 dark:text-gray-200 fixed z-50 top-0 left-0 overflow-x-hidden"
 	data-state={$showSidebar}
 >
 	<div
-		class="py-1 my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[300px] overflow-x-hidden z-50 {$showSidebar
+		class="py-1 my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden z-50 {$showSidebar
 			? ''
 			: 'invisible'}"
 	>

@@ -12,6 +12,10 @@
 */
 @layer base {
 	:root {
+		/* サイドバー実幅の一元管理(Sidebar 本体と、その幅を差し引く各レイアウトの両方が参照する。
+		   値の食い違いは「合計幅が溢れて justify-end で左端=サイドバーが切れる」バグになる) */
+		--sidebar-width: 300px;
+
 		--surface: #f6f6f6; /* light メイン背景(gray-50 相当) */
 		--surface-raised: #ffffff; /* light 入力欄など(背景より少し明るい) */
 		--surface-sidebar: #eeeeee; /* light サイドバー(gray-100 相当・1段濃い) */

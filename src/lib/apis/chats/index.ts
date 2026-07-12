@@ -154,6 +154,8 @@ type AdminChatListOptions = {
 	user_id?: string;
 	title?: string;
 	model?: string;
+	updated_from?: number;
+	updated_to?: number;
 };
 
 export const getAdminChatList = async (token: string, options: AdminChatListOptions = {}) => {
@@ -180,6 +182,12 @@ export const getAdminChatList = async (token: string, options: AdminChatListOpti
 	}
 	if (options.model) {
 		searchParams.append('model', options.model);
+	}
+	if (options.updated_from != null) {
+		searchParams.append('updated_from', `${options.updated_from}`);
+	}
+	if (options.updated_to != null) {
+		searchParams.append('updated_to', `${options.updated_to}`);
 	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {
