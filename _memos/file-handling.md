@@ -243,9 +243,14 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   **添付 chat 注入 E2E**(docling 抽出→生 `<source>` 注入→モデルが marker 正答)+ memory 素ストア 実機確認。
 
 ### 残り(第2セッション後)
-- **フロントの inert web 検索 UI**: `webSearchEnabled` トグル / `processWebSearch` import / `WebSearchResults` /
-  Interface `toggleWebSearch` — `enable_web_search` gate で非表示だがコード残存(Chat/MessageInput/Placeholder/
-  ResponseMessage)。絡みが深いチャット UI なので未着手。
+- ~~**フロントの inert web 検索 UI**~~ → **撤去済み(2026-07-12、`c75711212`)**: `webSearchEnabled` 状態/binding・
+  Web Search トグルボタン・`WebSearchResults.svelte`・Interface `toggleWebSearch`・chat payload の
+  `features.web_search`・`web_search_results` ファイル収集・Config 型 `enable_web_search` を Chat/MessageInput/
+  Placeholder/ResponseMessage/Interface/stores から削除。**温存**: `features.web_search` 権限フラグ(admin Groups UI +
+  backend config)は permissions.md が #51 用に予約(`features.code_interpreter` と同じ予約済みパターン)。検索 API 本体も温存。
+  - 残(軽微・後続): backend `middleware.py` の `get_sources_from_files` に `file_type in ("web_search","text")` の
+    死に分岐が残る(web_search 型 file はもう生成されないので無害。sources 注入=CORE 隣接なので単独で触らない)。
+    orphan i18n キー("Web Search" 等)は end-game i18n(#34)で一括 prune。
 - **prism 層**: web 検索 tool(内部検索 API を叩く)/ ③gate / PDF→VLM / ④sandbox tool。
 
 ## 改訂(2026-07-12、#69 ファイル管理機構)
