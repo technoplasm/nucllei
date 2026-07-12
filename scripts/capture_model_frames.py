@@ -2,7 +2,7 @@
 """SGLang × Kimi K2.6 の実出力フレームをキャプチャして fixture 化する(issue #29)。
 
 使い方:
-    uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:8000/v1]
+    uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:13300/v1]
 
 出力先: backend/open_webui/test/fixtures/model_frames/
 - <scenario>.sse   : ストリーミングの生バイト列(SSE をそのまま保存。改変しない)
@@ -209,7 +209,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("LLENS_OPENAI_BASE_URL", "http://prism-llens:8000/v1"),
+        default=os.environ.get("LLENS_OPENAI_BASE_URL", "http://prism-llens:13300/v1"),
     )
     parser.add_argument(
         "--api-key", default=os.environ.get("LLENS_OPENAI_API_KEY", "EMPTY")

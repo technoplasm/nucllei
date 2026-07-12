@@ -29,7 +29,7 @@ git rev-list --count origin/master..master 2>/dev/null    # 未 push 数(origin/
 ```bash
 curl -sf -m 2 http://localhost:3000/health                # backend
 ss -tlnp | grep -E ':(517[0-9])\b'                        # vite(5173 が他プロジェクトで埋まっていれば 5174 等)
-curl -s -m 2 http://prism-llens:8000/v1/models | head -c 80   # SGLang(不達なら ollama gpt-oss:20b が代替)
+curl -s -m 2 http://prism-llens:13300/v1/models | head -c 80   # SGLang(不達なら ollama gpt-oss:20b が代替)
 ```
 
 - 起動手順・dev アカウント・fixture は `_memos/dev-environment.md`(backend は

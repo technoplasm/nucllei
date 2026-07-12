@@ -8,7 +8,7 @@ fixture: `backend/open_webui/test/fixtures/model_frames/`(生 SSE + 非ストリ
 ## 再キャプチャ手順
 
 ```bash
-uv run python scripts/capture_model_frames.py   # 既定 http://prism-llens:8000/v1
+uv run python scripts/capture_model_frames.py   # 既定 http://prism-llens:13300/v1
 uv run pytest backend/open_webui/test/apps/webui/test_model_frame_fixtures.py
 git diff backend/open_webui/test/fixtures/model_frames/   # 差分 = フレーム仕様の変化
 ```

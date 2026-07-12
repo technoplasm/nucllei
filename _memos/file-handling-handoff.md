@@ -54,7 +54,7 @@ cd backend && ../.venv/bin/pytest open_webui/test -q
 #   壊れたら: docker rm -f postgres-test-container-will-get-deleted
 # 整形: リポジトリ直下で .venv/bin/black <files> / フロントは prettier
 ```
-dev サーバ・dev アカウント・Playwright 検証手順は `_memos/dev-environment.md`(backend は `PYTHONPATH=backend` 必須、SGLang は `prism-llens:8000` の kimi-k2.6)。
+dev サーバ・dev アカウント・Playwright 検証手順は `_memos/dev-environment.md`(backend は `PYTHONPATH=backend` 必須、SGLang は `prism-llens:13300` の kimi-k2.6)。
 
 **注意**: 前セッションで git の `.git/index.lock` が断続的に出た(バックグラウンド watcher らしい)。commit はリトライ + `rm -f .git/index.lock` で通した。
 

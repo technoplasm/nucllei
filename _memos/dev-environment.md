@@ -105,11 +105,11 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin -H 'Content-Type: application/json' \
      -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
    ```
-3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:8000/v1`、モデル `kimi-k2.6`、認証不要):
+3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:13300/v1`、モデル `kimi-k2.6`、認証不要):
    ```sh
    curl -s -X POST http://localhost:3000/openai/config/update -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' \
-     -d '{"ENABLE_OPENAI_API":true,"OPENAI_API_BASE_URLS":["http://prism-llens:8000/v1"],"OPENAI_API_KEYS":["sk-dummy"],"OPENAI_API_CONFIGS":{}}'
+     -d '{"ENABLE_OPENAI_API":true,"OPENAI_API_BASE_URLS":["http://prism-llens:13300/v1"],"OPENAI_API_KEYS":["sk-dummy"],"OPENAI_API_CONFIGS":{}}'
    ```
    ローカル ollama に `gpt-oss:20b` もある(SGLang 不達時の代替)。
 4. **preset モデル**: 生モデルはピッカーに出ない仕様(535da68e9)。workspace で
@@ -159,7 +159,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
   観察された仕様は `_memos/model-frames.md`。
 - Kimi の tool call id は `functions.<name>:<index>` 形式(OpenAI の call_xxx ではない)。
   引数は厳密 JSON(空引数は `"{}"`)。reasoning は常時出る(`reasoning_content`)。
-- 再キャプチャ: `uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:8000/v1]`。
+- 再キャプチャ: `uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:13300/v1]`。
 
 ## Playwright での UI 確認
 
