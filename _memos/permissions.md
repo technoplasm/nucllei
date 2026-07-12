@@ -41,7 +41,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | chat | owner のみ | 本人 | owner | − | owner + `chat.delete` | share_id 発行=owner + `chat.share`、共有閲覧=認証ユーザー全員(匿名不可)、clone=`chat.clone`。file 連動は `chat-share-files.md`(#41 で確定) |
 | folder | owner のみ | 本人 | owner | − | owner + `chat.delete` | |
 | ~~memory~~ | − | − | − | − | − | **DROP 決定(2026-07-10)** — API ごと撤去(#67) |
-| file | owner / admin / 共有 public マーカー | 本人 | − | − | owner | `chat.file_upload` フラグ。share 時に `access_control.read.public=true`(共有解除でも自動では戻さない — 狭める操作はファイル管理機構で明示的に)。詳細 `chat-share-files.md` |
+| file | owner / admin / 共有 public マーカー / 明示 read ACL | 本人 | − | **owner + admin**(#69) | owner | `chat.file_upload` フラグ。share 時に `access_control.read.public=true`(共有解除でも自動では戻さない)。**#69(2026-07-12)でファイル管理機構が owner に ACL フル編集を開放**(非公開/グループ/全体公開 — 広げる操作も owner 可。エンドポイントは `POST /files/{id}/access_control/update`、非 owner・非 admin は 403)。file の ACL 意味論は他エンティティと逆: `None`=非公開(owner のみ)。詳細 `chat-share-files.md` |
 | API key | 本人 | 本人(ENABLE_API_KEY 時) | − | − | 本人 | endpoint allowlist は 57q6 対策済み |
 | valves(tool/function 全体設定) | − | − | admin | − | − | 7429 対策済み(read も制限) |
 | UserValves(per-user) | 本人 | 本人 | 本人 | − | 本人 | |
@@ -53,7 +53,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | フラグ | 意味 | enforcement 地点(あるべき) |
 |---|---|---|
 | `workspace.skills` | skill editor ロール | routers/skills.py 全 CRUD |
-| `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(実装済み) |
+| `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(file_upload は #69 で実装 — それまで UI ミラーのみで原則 1 違反だった。生成画像の内部保存 `store_uploaded_file` はゲート対象外) |
 | `chat.share` / `chat.clone` | チャット共有・共有チャットの clone | routers/chats.py の share / clone endpoint(#41 で新設。既定 share=on / clone=off)|
 | `features.image_generation` | 画像生成 | routers/images.py `/generations`(#66 で実装済み) |
 | `features.web_search` / `code_interpreter` | 機能 | 対応機能の endpoint(#51 / sandbox 整備時に) |

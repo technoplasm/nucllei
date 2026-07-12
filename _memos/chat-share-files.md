@@ -48,12 +48,23 @@
   サーバー側チェック + UI ミラー + マトリクス行 + ネガティブテスト をセットで)。
 - 既定: **share=on / clone=off**(院内運用は share 中心、clone は稀)。
 
-## ファイル管理機構(別トラック・#41 は非依存)
+## ファイル管理機構(#69 — 2026-07-12 実装)
 
-- owner が自分の file を **一覧・内容閲覧・削除・公開状態の確認と解除(public → private)** できる管理面。
-  **公開を狭める唯一の場所**(原則 1 の受け皿)。
-- #41 本体はこれに依存しない(管理機構が無い間は「広げっぱなし + file 削除で取り消し」で運用可能)。
-- **issue #69**(起票済み・詳細設計はあとで)。#16 実行順への掲載は /sync-docs で。
+- owner が自分の file を **一覧・内容閲覧・削除・共有状態のフル編集** できる管理面(`/files` ページ)。
+  **公開を狭める唯一の場所**(原則 1 の受け皿)であることは変わらないが、2026-07-12 の仕様確定で
+  **owner による ACL フル編集(非公開 / グループ共有 / 全体公開 — 広げる方向も可)** に拡張した。
+  チャット共有による自動 public 化(広がる方向)は従来どおり併存する。
+- ACL 編集エンドポイント: `POST /files/{id}/access_control/update`(owner / admin のみ、他は 403)。
+  受理形: `null`(非公開)/ `{"read": {"public": bool, "group_ids": [], "user_ids": []}}`。
+- 併せて確定した関連仕様(詳細は `file-handling.md` と issue #69):
+  - Attachment フックの per-model 割り当て(`attachmentIds`)は**廃止** → グローバル config
+    `attachment.function_id` に一本化。
+  - 既存ファイルのチャット**再添付**で Attachment フックが `__event__="attach"` で再発火
+    (再抽出するかはフック内で判断。None 返却=既存 content 温存)。
+  - **画像も files テーブル経由に統一**(base64 直入れ廃止)。chat JSON の正準形は
+    `{"type":"image","id":...,"url":"/api/v1/files/{id}/content"}`。送信直前に middleware が
+    内部 URL を base64 化(`utils/file_images.py`)。share/clone の file 連動も image に適用。
+- `accessed_at` カラム新設(migration `d9f1c3b7a2e8`)。content 取得系 + `/process` でタッチ。
 
 ## 副産物・掃除
 

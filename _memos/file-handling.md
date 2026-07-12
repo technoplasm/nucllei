@@ -113,8 +113,7 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
-2. **on/off は per-model(ワークスペースのモデル設定でトグル)**: 使う/使わないは tool と同じく **ワークスペースのモデル設定**で切り替え(`attachmentIds`、完全 opt-in・単一選択)。→ 以前の「upload 時点でモデル未確定なので per-model はしない/全 upload 発火」を**上書き**。入力欄での per-chat トグルは持たない。
-   - **含意**: 抽出自体はモデル非依存だが、有効/無効の解決に**モデル文脈が要る** → upload endpoint は「今のチャットの選択モデル」を受け取り、そのモデルで有効な Attachment だけ発火させる(フロントが upload 時に model id を渡す)。authoring は元来 admin 権限。
+2. ~~**on/off は per-model(ワークスペースのモデル設定でトグル)**~~ → **改訂(2026-07-12、#69): グローバル config に一本化**(「## 改訂(#69)」節参照)。モデル単位で Attachment を大きく変える運用は無い、かつファイル管理ページ(チャット外)からのアップロードにはモデル文脈が無いため、per-model 割り当て(`attachmentIds`)は廃止し admin がグローバルに 1 つ選ぶ形へ戻した(「全 upload 発火」への再回帰だが、発火する実体は config で選んだ 1 本)。
 3. **発火はファイル1個につき1回・1モデルにつき Attachment は単一選択**: Attachment は
    `data.content` を生成するルータなので、per-model 割り当ては **1つだけ**(UI も単一選択)。
    複数走ると content を上書き衝突する。その1つの中で複数プロバイダを使うのは自由(docling + STT、
@@ -248,6 +247,28 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   Interface `toggleWebSearch` — `enable_web_search` gate で非表示だがコード残存(Chat/MessageInput/Placeholder/
   ResponseMessage)。絡みが深いチャット UI なので未着手。
 - **prism 層**: web 検索 tool(内部検索 API を叩く)/ ③gate / PDF→VLM / ④sandbox tool。
+
+## 改訂(2026-07-12、#69 ファイル管理機構)
+
+#69 実装に伴う本メモ設計からの変更点(真実源はコード + `chat-share-files.md` の #69 節):
+
+1. **per-model attachmentIds 廃止 → グローバル config `attachment.function_id`**(`ATTACHMENT_FUNCTION_ID`、
+   RuntimeConfig)。admin が `/configs/attachment` で type=attachment の Function を 1 つ選ぶ(""=未設定で
+   発火なし)。upload endpoint の `model_id` Query・ModelEditor の AttachmentsSelector は撤去。
+   model.meta 内の残留 `attachmentIds` は誰も読まない(migration なし・無害)。
+2. **フック契約に `__event__` 注入を追加**: `"upload"`(新規アップロード)| `"attach"`(既存ファイルの
+   チャット再添付 = `POST /files/{id}/process`)。attach で None を返せば既存 data.content 温存
+   (再抽出しない判断はフック側)。未宣言の既存フックは従来どおり。
+3. **画像も files 経由に統一**(base64 直入れ廃止): 送信 payload の内部 URL
+   `/api/v1/files/{id}/content` を `utils/file_images.py::inline_internal_image_urls` が
+   process_chat_payload 末尾で base64 化(air-gapped のためモデルから URL fetch 不可)。
+4. ファイル管理面(`/files` ページ・共有フル編集・accessed_at)は `chat-share-files.md` #69 節を参照。
+5. **運用注意**: 画像がアップロード経路(#52 受け入れゲート)に乗ったため、
+   `ATTACHMENT_ALLOWED_EXTENSIONS` を文書系だけの whitelist で運用している環境では
+   **画像拡張子(png/jpg/jpeg/gif/webp/avif)を whitelist に足さないと画像添付が全滅する**
+   (既定は空 = 全許可なので影響なし)。prism 側の設定確認を #69 出荷時に行うこと。
+6. `chat.file_upload` のサーバー側 enforcement は #69 のレビューで upload endpoint に実装
+   (それまで UI ミラーのみ)。生成画像の内部保存(`store_uploaded_file`)はこのゲートを通らない。
 
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
