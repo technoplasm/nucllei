@@ -77,6 +77,7 @@ from open_webui.utils.filter import (
     process_filter_functions,
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
+from open_webui.utils.file_images import inline_internal_image_urls
 from open_webui.utils.content_blocks import (
     serialize_text_blocks,
     snapshot_content_blocks,
@@ -909,6 +910,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 context_string,
                 form_data["messages"],
             )
+
+    # llens(#69): 画像添付は files 経由に統一。内部 file URL("/api/v1/files/{id}/content")
+    # の image_url は air-gapped のためモデル側から fetch できない — モデルへ出る直前の
+    # ここで base64 data URL に変換する。native tool ループの再送(process_chat_response)も
+    # form_data["messages"] を再利用するため、変換はこの 1 箇所で足りる。
+    form_data["messages"] = inline_internal_image_urls(form_data["messages"], user)
 
     # llens(#57): streaming でも実測 usage を受け取る。OpenAI 互換サーバーは
     # stream_options.include_usage が無いと usage チャンクを送らない(SGLang 実測済み)。

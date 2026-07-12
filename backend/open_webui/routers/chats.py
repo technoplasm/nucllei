@@ -34,14 +34,18 @@ router = APIRouter()
 
 
 def get_file_ids_from_chat(chat_json: dict) -> list[str]:
-    """llens(#41): chat JSON(トップレベル files + 各 message.files)から添付 file_id を集める。"""
+    """llens(#41): chat JSON(トップレベル files + 各 message.files)から添付 file_id を集める。
+
+    #69 で画像も files テーブル経由に統一したため type=="image" も対象。
+    base64 直入れ時代の旧 image エントリは id を持たないので自然にスキップされる。
+    """
     entries = list(chat_json.get("files") or [])
     for message in ((chat_json.get("history") or {}).get("messages") or {}).values():
         entries.extend(message.get("files") or [])
 
     ids = []
     for entry in entries:
-        if isinstance(entry, dict) and entry.get("type") == "file":
+        if isinstance(entry, dict) and entry.get("type") in ("file", "image"):
             file_id = entry.get("id") or (entry.get("file") or {}).get("id")
             if file_id:
                 ids.append(file_id)
@@ -113,7 +117,7 @@ def copy_chat_files_for_user(chat_json: dict, user) -> dict:
 
     def rewrite(entries):
         for entry in entries or []:
-            if not (isinstance(entry, dict) and entry.get("type") == "file"):
+            if not (isinstance(entry, dict) and entry.get("type") in ("file", "image")):
                 continue
             old_id = entry.get("id") or (entry.get("file") or {}).get("id")
             new_id = id_map.get(old_id)
@@ -122,7 +126,12 @@ def copy_chat_files_for_user(chat_json: dict, user) -> dict:
             if entry.get("id"):
                 entry["id"] = new_id
             if entry.get("url"):
-                entry["url"] = f"/api/v1/files/{new_id}"
+                # image エントリの url は表示用の content URL 形式(#69)
+                entry["url"] = (
+                    f"/api/v1/files/{new_id}/content"
+                    if entry.get("type") == "image"
+                    else f"/api/v1/files/{new_id}"
+                )
             if isinstance(entry.get("file"), dict) and entry["file"].get("id"):
                 entry["file"]["id"] = new_id
 
