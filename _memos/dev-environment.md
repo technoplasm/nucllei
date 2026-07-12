@@ -70,10 +70,14 @@ pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自�
 - **tailscale 越し**: `pnpm dev` は `--host` で 0.0.0.0 listen。`{frontend-host}:5173/api` が
   proxy 経由で BE:3000 に流れるので、フロントのホスト名 1 つ叩けば API も socket も通る
   (本番 docker の単一パス集約と同じ形)。
-- **:3000 が埋まっていたら**: llens-sandbox コンテナ(`127.0.0.1:3000->8000`、#18-3 の tool 検証用)が
-  squat していることがある。`docker stop llens-sandbox` で空ける(可逆)。sandbox と BE を同時に
-  使うなら sandbox 側を別ポートへ退避するか BACKEND_ORIGIN で BE を逃がす。upstream stock docker
-  (`ghcr.io/open-webui/open-webui:main`)が squat する場合は `docker stop open-webui`。
+- **llens ポート帯(133xx)**: llens が使うポートは `133xx` 予約帯に統一
+  (**正典 = prism-hu/llens `DEPLOYMENT.md` のサービス表**。2026-07-13 に旧 :8000/:3000 帯から移行)。
+  ローカル dev のコンテナも同じ採番に揃える:
+  SGLang `prism-llens:13300` / OWUI 本番 `:13301` / **sandbox `127.0.0.1:13302`** /
+  cage `:13303` / **Docling `127.0.0.1:13304`** / AivisSpeech `:13305`。
+  BE dev サーバ(:3000)や他プロセスと衝突しない。
+- **:3000 が埋まっていたら**: upstream stock docker(`ghcr.io/open-webui/open-webui:main`)が
+  squat する場合は `docker stop open-webui`。(旧 llens-sandbox の :3000 squat は 133xx 移行で解消)
 - **uvicorn の二重起動に注意**(#66 検証時に実害): `ps aux | grep uvicorn` で :3000 に
   2 プロセス(--reload 有無で別個体)ぶら下がっていることがある。ポートを握っているのが
   旧コードのプロセスだと「直したのに挙動が変わらない」罠になる — 検証前に全部 kill して
@@ -126,11 +130,12 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
      `test_native_tool_calling.py` の weather_spec 参照)。
    **sandbox tool(#18-3)**: 実行系は `dev/tools/sandbox.py` を tool id `sandbox` で
    DB 登録(API 経由。llens 現行 tool の v0.6.5 適合版)。sandbox コンテナ
-   (`llens/sandbox:poc`、従来 `127.0.0.1:3000->8000`)を起こし、valves の `sandbox_url` を
-   そのポートにして toolIds へ追加。答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
-   - **⚠ 2026-07-12 以降 :3000 は BE dev サーバが使う**。sandbox は別ホストポート
-     (例 `127.0.0.1:3001->8000` + valves `{"sandbox_url":"http://127.0.0.1:3001"}`)へ退避すること
-     (両方 :3000 だと bind 衝突)。または BE を `BACKEND_ORIGIN` で逃がす。
+   (`llens/sandbox:poc`)を **`127.0.0.1:13302->8000`**(133xx 帯の正典採番)で起こし、
+   valves は `{"sandbox_url":"http://127.0.0.1:13302"}`(2026-07-13 設定済み)。
+   答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
+   **docling コンテナ**(`llens-docling` = docling-serve v1.17.0)は
+   **`127.0.0.1:13304->5001`**、`docling_extract` の valves は `http://localhost:13304`
+   (function content は `_links/llens/owui/attachments/docling_extract.py` から同期)。
 6. **skill fixture(#35 検証用)**: skill `kansai`(関西弁指示)/ skill `vault`
    (tool_ids=["secret_password"])/ tool `secret_password`(私有)を作り、preset の
    `meta.skillIds` に紐づける。手順と実機チェックは `dev/e2e/README.md`。

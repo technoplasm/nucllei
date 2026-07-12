@@ -1,6 +1,7 @@
 # 現行 llens(prism-hu/llens、北大稼働中)構成スナップショット
 
-取得日: 2026-07-05。出典: `~/src/github.com/prism-hu/llens/docker-compose.yml`
+取得日: 2026-07-05(**ポート表記を 2026-07-13 の 133xx 帯移行に追従** — 正典は
+prism-hu/llens `DEPLOYMENT.md` のサービス表)。出典: `~/src/github.com/prism-hu/llens/docker-compose.yml`
 (OWUI v0.9.5 ベースの本番構成)。issue #12「今動いている構成の記録」に対応する
 **デグレ検知の基準**。本 fork(v0.6.5 基点)で同等機能を検証する際はこの表に照らす。
 
@@ -9,10 +10,12 @@
 
 ## 構成トポロジ
 
-- `open-webui`(:8080)→ SGLang(host:8000、OpenAI 互換)
-- `docling`(docling-serve v1.17.0 CPU、:5001)← 文書抽出
-- `tts-bridge`(voicevox-openai-tts f169f7a、:8000 内部)→ `aivisspeech-engine`
-  (VOICEVOX 互換 API、:10101、CPU 版)
+- `open-webui`(host `127.0.0.1:13301` → コンテナ :8080)→ SGLang(host `:13300`、OpenAI 互換)
+- `docling`(docling-serve v1.17.0 CPU、docker 内部 :5001。host debug 公開 `127.0.0.1:13304`)← 文書抽出
+- `tts-bridge`(voicevox-openai-tts f169f7a、docker 内部 :8000)→ `aivisspeech-engine`
+  (VOICEVOX 互換 API、docker 内部 :10101。host debug 公開 `127.0.0.1:13305`、CPU 版)
+- `sandbox`(コード実行 API、docker 内部 :8000。host 公開 `127.0.0.1:13302` = fork OWUI dev 用)
+- `cage`(ナレッジツリー API、host `:13303`)
 - STT はコンテナ内蔵 faster-whisper(モデルはホストマウント、オフライン)
 - 監視: dcgm-exporter → Prometheus/Grafana(issue #32 関連)
 
@@ -20,7 +23,7 @@
 
 | env | 値 |
 |---|---|
-| `OPENAI_API_BASE_URL` | `http://host.docker.internal:8000/v1`(SGLang) |
+| `OPENAI_API_BASE_URL` | `http://host.docker.internal:13300/v1`(SGLang) |
 | `OPENAI_API_KEY` | `EMPTY` |
 | `ENABLE_OLLAMA_API` | `false` |
 
