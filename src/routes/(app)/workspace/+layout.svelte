@@ -15,6 +15,7 @@
 			const path = $page.url.pathname;
 			// llens(#66): 3層化 — Models/Tools/Functions/Settings/Users は admin 専用。
 			// Skills だけ skill editor(workspace.skills)に開く。
+			// Files(#69 → workspace 移設)は全ログインユーザーに開く。
 			if (
 				path.includes('/functions') ||
 				path.includes('/settings') ||
@@ -79,6 +80,14 @@
 						<!-- llens(#48): Knowledge はメニューから撤去(KB は llens 不要 — 添付は file_id で
 						     チャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側)。route/backend は温存。 -->
 
+						<!-- llens(#69): ファイル管理は全ログインユーザー(自分の file は誰でも管理できる) -->
+						<a
+							class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/files')
+								? ''
+								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							href="/workspace/files">{$i18n.t('Files')}</a
+						>
+
 						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
 							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
@@ -113,19 +122,19 @@
 							>
 
 							<a
+								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/users')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/users">{$i18n.t('Users')}</a
+							>
+
+							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
 									'/workspace/settings'
 								)
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 								href="/workspace/settings">{$i18n.t('Settings')}</a
-							>
-
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/users')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/users">{$i18n.t('Users')}</a
 							>
 						{/if}
 					</div>

@@ -4,15 +4,12 @@
 	import { onMount } from 'svelte';
 
 	onMount(() => {
-		// llens(#66): 非 admin は skill editor(workspace.skills)だけが Skills タブに入れる。
-		if ($user?.role !== 'admin') {
-			if ($user?.permissions?.workspace?.skills) {
-				goto('/workspace/skills');
-			} else {
-				goto('/');
-			}
-		} else {
+		// llens: モデルアクセス(= admin。Models タブと同じゲート)があればモデル、
+		// 無ければファイル(全ログインユーザーに開く)を初期表示する。
+		if ($user?.role === 'admin') {
 			goto('/workspace/models');
+		} else {
+			goto('/workspace/files');
 		}
 	});
 </script>
