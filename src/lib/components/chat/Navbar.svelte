@@ -10,7 +10,6 @@
 		mobile,
 		settings,
 		showArchivedChats,
-		showControls,
 		showSidebar,
 		theme,
 		user
@@ -26,7 +25,6 @@
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
 	import MenuLines from '../icons/MenuLines.svelte';
-	import FolderOpen from '../icons/FolderOpen.svelte';
 
 	import PencilSquare from '../icons/PencilSquare.svelte';
 	import Banner from '../common/Banner.svelte';
@@ -115,43 +113,14 @@
 								id="chat-context-menu-button"
 							>
 								<div class=" m-auto self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="1.5"
-										stroke="currentColor"
-										class="size-5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"
-										/>
-									</svg>
+									<span class="i-lucide-ellipsis size-5 block"></span>
 								</div>
 							</button>
 						</Menu>
 					{/if}
 
-					<!-- llens(#69): 右ペイン(このチャットのファイル)のトグル。
-					     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
-					{#if $chatId}
-						<Tooltip content={$i18n.t('Files in this chat')}>
-							<button
-								id="chat-files-button"
-								class="flex cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								on:click={() => {
-									showControls.set(!$showControls);
-								}}
-								aria-label="Toggle Chat Files"
-							>
-								<div class=" m-auto self-center">
-									<FolderOpen className=" size-5" strokeWidth="1.5" />
-								</div>
-							</button>
-						</Tooltip>
-					{/if}
+					<!-- llens(#69→#19): 右ペイン(このチャットのファイル)のトグルは Navbar 直置きを
+					     やめ「…」メニュー内へ移設(Menu.svelte)。 -->
 
 					<Tooltip content={$i18n.t('New Chat')}>
 						<button
