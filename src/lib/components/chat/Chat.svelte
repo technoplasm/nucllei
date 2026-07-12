@@ -1204,9 +1204,13 @@
 		const _files = JSON.parse(JSON.stringify(files));
 		chatFiles.push(..._files.filter((item) => ['file'].includes(item.type)));
 		chatFiles = chatFiles.filter(
-			// Remove duplicates
+			// Remove duplicates — id を持つエントリは file.id で一意化(#69: 再添付は
+			// メタ差分で JSON 全体比較をすり抜け、全文 context が二重注入される)。
+			// id なし(旧形式)は従来の JSON 比較にフォールバック。
 			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+				array.findIndex((i) =>
+					item.id ? i.id === item.id : JSON.stringify(i) === JSON.stringify(item)
+				) === index
 		);
 
 		files = [];

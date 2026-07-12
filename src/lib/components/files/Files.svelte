@@ -82,7 +82,11 @@
 		});
 
 		if (res) {
-			files = append ? [...files, ...res.items] : res.items;
+			// append 中にサーバー側の並びが変わりうる(accessed_at ソート中のプレビュー等)。
+			// 同一 id の重複は keyed each を壊すので除外する。
+			files = append
+				? [...files, ...res.items.filter((item) => !files.some((f) => f.id === item.id))]
+				: res.items;
 			total = res.total;
 		}
 

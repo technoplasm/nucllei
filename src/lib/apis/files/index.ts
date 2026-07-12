@@ -117,8 +117,9 @@ export const getFileList = async (token: string, options: FileListOptions = {}) 
 	if (options.direction) {
 		searchParams.append('direction', options.direction);
 	}
-	if ((options.user_ids ?? []).length > 0) {
-		searchParams.append('user_ids', options.user_ids.join(','));
+	const userIds = options.user_ids ?? [];
+	if (userIds.length > 0) {
+		searchParams.append('user_ids', userIds.join(','));
 	}
 	if (options.filename) {
 		searchParams.append('filename', options.filename);

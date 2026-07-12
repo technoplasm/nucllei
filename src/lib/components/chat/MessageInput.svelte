@@ -204,6 +204,12 @@
 			const uploadedFile = await uploadFile(localStorage.token, file);
 
 			if (uploadedFile) {
+				// アップロード中に X で外された場合はサーバーに orphan を残さない
+				if (!files.some((item) => item?.itemId === tempItemId)) {
+					deleteFileById(localStorage.token, uploadedFile.id).catch(() => {});
+					return null;
+				}
+
 				console.log('File upload completed:', {
 					id: uploadedFile.id,
 					name: fileItem.name,
@@ -290,6 +296,12 @@
 			const uploadedFile = await uploadFile(localStorage.token, uploadTarget);
 
 			if (uploadedFile) {
+				// アップロード中に X で外された場合はサーバーに orphan を残さない
+				if (!files.some((item) => item?.itemId === tempItemId)) {
+					deleteFileById(localStorage.token, uploadedFile.id).catch(() => {});
+					return null;
+				}
+
 				if (uploadedFile.error) {
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
