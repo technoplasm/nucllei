@@ -192,6 +192,95 @@ async def process_file_by_id(
     if file.user_id == user.id or user.role == "admin":
         file = await process_attachment_functions(request, file, user, event="attach")
 
+    Files.touch_file_accessed_at(id)
+    return file
+
+
+############################
+# Update File Access Control By Id
+############################
+
+
+class FileAccessControlForm(BaseModel):
+    access_control: Optional[dict] = None
+
+
+def _validate_file_access_control(access_control: Optional[dict]) -> None:
+    """file ACL の受理形を検証する(#69)。
+
+    file の ACL 意味論は他エンティティと逆(None=非公開 / {"read":{"public":true}}=
+    全体公開マーカー / group_ids・user_ids 列挙=その範囲に公開 —
+    utils/access_control.py::has_read_access_to_file)。受理するのは
+    null / {"read": {...}} のみで、read 内は public(bool)・group_ids(list[str])・
+    user_ids(list[str])に限る。想定外のキーを黙って保存すると判定側と
+    齟齬が出るため 400 で弾く。
+    """
+    if access_control is None:
+        return
+    if set(access_control.keys()) != {"read"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="access_control must be null or contain only a 'read' key",
+        )
+    read = access_control["read"]
+    if not isinstance(read, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="access_control.read must be an object",
+        )
+    allowed_keys = {"public", "group_ids", "user_ids"}
+    if not set(read.keys()) <= allowed_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="access_control.read allows only: public, group_ids, user_ids",
+        )
+    if "public" in read and not isinstance(read["public"], bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="access_control.read.public must be a boolean",
+        )
+    for key in ("group_ids", "user_ids"):
+        if key in read and (
+            not isinstance(read[key], list)
+            or not all(isinstance(v, str) for v in read[key])
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"access_control.read.{key} must be a list of strings",
+            )
+
+
+@router.post("/{id}/access_control/update", response_model=Optional[FileModel])
+async def update_file_access_control_by_id(
+    id: str, form_data: FileAccessControlForm, user=Depends(get_verified_user)
+):
+    """ファイル管理ページからの共有状態フル編集(#69)。
+
+    owner または admin のみ。read 可能な共有 file でも非 owner には ACL を
+    触らせない — 存在は読めているので 404 でなく 403 を返す。
+    """
+    file = Files.get_file_by_id(id)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.user_id != user.id and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    _validate_file_access_control(form_data.access_control)
+
+    file = Files.update_file_access_control_by_id(id, form_data.access_control)
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Error updating file access control"),
+        )
     return file
 
 
@@ -209,9 +298,88 @@ async def list_files(user=Depends(get_verified_user), content: bool = Query(True
 
     if not content:
         for file in files:
-            del file.data["content"]
+            # data=None / content 無しの file が混ざっても落ちないように
+            if file.data:
+                file.data.pop("content", None)
 
     return files
+
+
+############################
+# List Files (paged, for file manager)
+############################
+
+
+@router.get("/list")
+async def list_files_page(
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    order_by: str = Query("created_at"),
+    direction: str = Query("desc"),
+    user_ids: Optional[str] = Query(None),
+    filename: Optional[str] = Query(None),
+    user=Depends(get_verified_user),
+):
+    """ファイル管理ページ用のページング一覧(#69)。
+
+    非 admin は常に自分の file のみ。`user_ids`(カンマ区切り)は admin 専用の
+    フィルタで、非 admin が指定したら 403。items は data.content を除いた軽量形
+    (data は status のみ残す。meta は残す)。返却は {"items": [...], "total": n}。
+    """
+    if order_by not in ("created_at", "accessed_at"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_by must be one of: created_at, accessed_at",
+        )
+    if direction not in ("desc", "asc"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be one of: desc, asc",
+        )
+
+    if user.role == "admin":
+        scope = None
+        if user_ids is not None:
+            ids = [uid for uid in user_ids.split(",") if uid.strip()]
+            if ids:
+                scope = ids
+    else:
+        if user_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+        scope = [user.id]
+
+    files, total = Files.get_files_page(
+        user_ids=scope,
+        filename=filename,
+        order_by=order_by,
+        direction=direction,
+        limit=limit,
+        offset=offset,
+    )
+
+    items = []
+    for file in files:
+        item = file.model_dump()
+        data = item.get("data") or {}
+        # 一覧では抽出テキスト(data.content)を返さない — ペイロード肥大を防ぐ
+        item["data"] = {"status": data["status"]} if "status" in data else {}
+        items.append(item)
+
+    return {"items": items, "total": total}
+
+
+############################
+# List Uploaders (admin)
+############################
+
+
+@router.get("/uploaders")
+async def list_file_uploaders(user=Depends(get_admin_user)):
+    """file を 1 件以上持つユーザーの一覧(#69、admin のフィルタ UI 用)。"""
+    return Files.get_uploaders()
 
 
 ############################
@@ -250,7 +418,8 @@ async def search_files(
 
     if not content:
         for file in matching_files:
-            del file.data["content"]
+            if file.data:
+                file.data.pop("content", None)
 
     return matching_files
 
@@ -329,7 +498,8 @@ async def get_file_data_content_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
-        return {"content": file.data.get("content", "")}
+        Files.touch_file_accessed_at(id)
+        return {"content": file.data.get("content", "") if file.data else ""}
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -401,6 +571,7 @@ async def get_file_content_by_id(
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
+        Files.touch_file_accessed_at(id)
         try:
             file_path = Storage.get_file(file.path)
             file_path = Path(file_path)
@@ -469,6 +640,7 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
+        Files.touch_file_accessed_at(id)
         try:
             file_path = Storage.get_file(file.path)
             file_path = Path(file_path)
@@ -522,6 +694,7 @@ async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
+        Files.touch_file_accessed_at(id)
         file_path = file.path
 
         # Handle Unicode filenames

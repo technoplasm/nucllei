@@ -5,7 +5,7 @@ from typing import Optional
 from open_webui.internal.db import Base, JSONField, get_db
 from open_webui.env import SRC_LOG_LEVELS
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Text, JSON, func
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -31,6 +31,8 @@ class File(Base):
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+    # llens(#69): 最終利用時刻。content 取得・再添付フックでタッチ、一覧では更新しない。
+    accessed_at = Column(BigInteger, nullable=True)
 
 
 class FileModel(BaseModel):
@@ -50,6 +52,7 @@ class FileModel(BaseModel):
 
     created_at: Optional[int]  # timestamp in epoch
     updated_at: Optional[int]  # timestamp in epoch
+    accessed_at: Optional[int] = None  # timestamp in epoch
 
 
 ####################
@@ -100,12 +103,14 @@ class FileForm(BaseModel):
 class FilesTable:
     def insert_new_file(self, user_id: str, form_data: FileForm) -> Optional[FileModel]:
         with get_db() as db:
+            now = int(time.time())
             file = FileModel(
                 **{
                     **form_data.model_dump(),
                     "user_id": user_id,
-                    "created_at": int(time.time()),
-                    "updated_at": int(time.time()),
+                    "created_at": now,
+                    "updated_at": now,
+                    "accessed_at": now,
                 }
             )
 
@@ -178,6 +183,82 @@ class FilesTable:
                 FileModel.model_validate(file)
                 for file in db.query(File).filter_by(user_id=user_id).all()
             ]
+
+    def get_files_page(
+        self,
+        user_ids: Optional[list[str]] = None,
+        filename: Optional[str] = None,
+        order_by: str = "created_at",
+        direction: str = "desc",
+        limit: int = 60,
+        offset: int = 0,
+    ) -> tuple[list[FileModel], int]:
+        """llens(#69): ファイル管理ページ用のページング一覧。
+
+        order/limit/offset は SQL 側で効かせる(全件ロードして python で切らない)。
+        user_ids=None は全ユーザー(admin 用)、指定時はそのユーザー群に絞る。
+        戻り値は (items, total)。total は filter 適用後・ページング前の件数。
+        """
+        with get_db() as db:
+            query = db.query(File)
+            if user_ids is not None:
+                query = query.filter(File.user_id.in_(user_ids))
+            if filename:
+                query = query.filter(File.filename.ilike(f"%{filename}%"))
+
+            total = query.count()
+
+            order_column = (
+                File.accessed_at if order_by == "accessed_at" else File.created_at
+            )
+            query = query.order_by(
+                order_column.asc() if direction == "asc" else order_column.desc()
+            )
+            files = query.offset(offset).limit(limit).all()
+            return [FileModel.model_validate(file) for file in files], total
+
+    def get_uploaders(self) -> list[dict]:
+        """llens(#69): file を 1 件以上持つユーザーの一覧(admin のフィルタ UI 用)。"""
+        # 循環 import 回避のため遅延 import(access_control.py と同じ流儀)
+        from open_webui.models.users import User
+
+        with get_db() as db:
+            rows = (
+                db.query(
+                    User.id,
+                    User.name,
+                    User.email,
+                    func.count(File.id).label("file_count"),
+                )
+                .join(File, File.user_id == User.id)
+                .group_by(User.id, User.name, User.email)
+                .order_by(func.count(File.id).desc())
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "email": row.email,
+                    "file_count": row.file_count,
+                }
+                for row in rows
+            ]
+
+    def touch_file_accessed_at(self, id: str) -> None:
+        """llens(#69): accessed_at を現在時刻に更新する。
+
+        利用時刻の記録は本処理(content 配信等)の副作用でしかないため、
+        失敗しても例外を伝播させない(本処理を止めない)。
+        """
+        try:
+            with get_db() as db:
+                db.query(File).filter_by(id=id).update(
+                    {"accessed_at": int(time.time())}
+                )
+                db.commit()
+        except Exception as e:
+            log.debug(f"Error touching accessed_at for file {id}: {e}")
 
     def update_file_hash_by_id(self, id: str, hash: str) -> Optional[FileModel]:
         with get_db() as db:
