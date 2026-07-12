@@ -20,6 +20,7 @@
 				path.includes('/functions') ||
 				path.includes('/settings') ||
 				path.includes('/users') ||
+				path.includes('/chats') ||
 				path.includes('/models') ||
 				path.includes('/tools')
 			) {
@@ -126,6 +127,14 @@
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 								href="/workspace/users">{$i18n.t('Users')}</a
+							>
+
+							<!-- llens(#19): admin チャット閲覧ビュー(全ユーザーのチャット一覧) -->
+							<a
+								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/chats')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/chats">{$i18n.t('Chats')}</a
 							>
 
 							<a

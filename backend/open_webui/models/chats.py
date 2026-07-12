@@ -652,6 +652,130 @@ class ChatTable:
             # Validate and return chats
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
+    def get_chats_page_admin(
+        self,
+        user_id: Optional[str] = None,
+        title: Optional[str] = None,
+        model: Optional[str] = None,
+        order_by: str = "updated_at",
+        direction: str = "desc",
+        limit: int = 60,
+        offset: int = 0,
+    ) -> tuple[list[ChatModel], int]:
+        """llens(#19): admin チャット閲覧ビュー用のページング一覧。
+
+        order/limit/offset は SQL 側で効かせる(全件ロードして python で切らない)。
+        user_id=None は全ユーザー。model は chat JSON トップレベルの models 配列への
+        メンバーシップ(dialect 別 JSON クエリ — search_text と同じ流儀)。
+        戻り値は (items, total)。total は filter 適用後・ページング前の件数。
+        """
+        with get_db() as db:
+            query = db.query(Chat)
+            if user_id is not None:
+                query = query.filter(Chat.user_id == user_id)
+            if title:
+                query = query.filter(Chat.title.ilike(f"%{title}%"))
+            if model:
+                dialect_name = db.bind.dialect.name
+                if dialect_name == "sqlite":
+                    query = query.filter(
+                        text(
+                            """
+                            EXISTS (
+                                SELECT 1
+                                FROM json_each(Chat.chat, '$.models') AS m
+                                WHERE m.value = :model
+                            )
+                            """
+                        ).params(model=model)
+                    )
+                elif dialect_name == "postgresql":
+                    query = query.filter(
+                        text(
+                            """
+                            EXISTS (
+                                SELECT 1
+                                FROM json_array_elements_text(Chat.chat->'models') AS m(value)
+                                WHERE m.value = :model
+                            )
+                            """
+                        ).params(model=model)
+                    )
+                else:
+                    raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
+
+            total = query.count()
+
+            order_column = (
+                Chat.created_at if order_by == "created_at" else Chat.updated_at
+            )
+            query = query.order_by(
+                order_column.asc() if direction == "asc" else order_column.desc()
+            )
+            chats = query.offset(offset).limit(limit).all()
+            return [ChatModel.model_validate(chat) for chat in chats], total
+
+    def get_chat_owners(self) -> list[dict]:
+        """llens(#19): チャットを 1 件以上持つユーザーの一覧(admin のフィルタ UI 用)。"""
+        # 循環 import 回避のため遅延 import(files.get_uploaders と同じ流儀)
+        from open_webui.models.users import User
+
+        with get_db() as db:
+            rows = (
+                db.query(
+                    User.id,
+                    User.name,
+                    User.email,
+                    func.count(Chat.id).label("chat_count"),
+                )
+                .join(Chat, Chat.user_id == User.id)
+                .group_by(User.id, User.name, User.email)
+                .order_by(func.count(Chat.id).desc())
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "email": row.email,
+                    "chat_count": row.chat_count,
+                }
+                for row in rows
+            ]
+
+    def get_chat_models(self) -> list[dict]:
+        """llens(#19): チャットで使われている model id と件数(admin のフィルタ UI 用)。
+
+        chat JSON トップレベルの models 配列を dialect 別 JSON クエリで展開して集計。
+        """
+        with get_db() as db:
+            dialect_name = db.bind.dialect.name
+            if dialect_name == "sqlite":
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT m.value AS model, COUNT(*) AS chat_count
+                        FROM chat, json_each(chat.chat, '$.models') AS m
+                        GROUP BY m.value
+                        ORDER BY chat_count DESC, model ASC
+                        """
+                    )
+                ).all()
+            elif dialect_name == "postgresql":
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT m.value AS model, COUNT(*) AS chat_count
+                        FROM chat, json_array_elements_text(chat.chat->'models') AS m(value)
+                        GROUP BY m.value
+                        ORDER BY chat_count DESC, model ASC
+                        """
+                    )
+                ).all()
+            else:
+                raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
+            return [{"model": row.model, "chat_count": row.chat_count} for row in rows]
+
     def get_chats_by_folder_id_and_user_id(
         self, folder_id: str, user_id: str
     ) -> list[ChatModel]:

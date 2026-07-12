@@ -15,12 +15,13 @@ from open_webui.models.chats import (
 )
 from open_webui.models.files import FileForm, Files
 from open_webui.models.folders import Folders
+from open_webui.models.users import Users
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.storage.provider import Storage
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 
@@ -372,6 +373,140 @@ async def get_all_user_chats_in_db(user=Depends(get_admin_user)):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return [ChatResponse(**chat.model_dump()) for chat in Chats.get_chats()]
+
+
+############################
+# Admin Chat List (#19)
+############################
+
+
+ADMIN_CHAT_SNIPPET_LENGTH = 160
+
+
+def _get_linear_messages(chat_json: dict) -> list[dict]:
+    """現行ブランチの線形 messages。無ければ history 全ノードを timestamp 順で代用。"""
+    messages = chat_json.get("messages") or []
+    if messages:
+        return messages
+    history_messages = ((chat_json.get("history") or {}).get("messages") or {}).values()
+    return sorted(history_messages, key=lambda m: m.get("timestamp") or 0)
+
+
+def _to_admin_chat_list_item(chat, user_name: Optional[str]) -> dict:
+    """llens(#19): 一覧用の軽量行。chat JSON はここで集約し、行には含めない。
+
+    - snippet: 最初の user メッセージ冒頭(タイトルだけでは内容が判別しづらいため)
+    - turn_count: 現行ブランチの user メッセージ数 / message_count: 同ブランチ全メッセージ数
+    - file_count: 分岐込みの添付 file_id ユニーク数(get_file_ids_from_chat と同じ集合)
+    - usage: #57 が meta["usage"] に記録した保存値をそのまま返す(無い旧チャットは None)
+    """
+    chat_json = chat.chat or {}
+    messages = _get_linear_messages(chat_json)
+
+    snippet = ""
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            # content blocks 形式(text パート連結)
+            content = " ".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        snippet = " ".join(str(content or "").split())
+        break
+
+    return {
+        "id": chat.id,
+        "user_id": chat.user_id,
+        "user_name": user_name,
+        "title": chat.title,
+        "snippet": snippet[:ADMIN_CHAT_SNIPPET_LENGTH],
+        "models": chat_json.get("models") or [],
+        "message_count": len(messages),
+        "turn_count": sum(1 for m in messages if m.get("role") == "user"),
+        "file_count": len(get_file_ids_from_chat(chat_json)),
+        "usage": (chat.meta or {}).get("usage"),
+        "created_at": chat.created_at,
+        "updated_at": chat.updated_at,
+        "archived": chat.archived,
+        "pinned": chat.pinned,
+        "share_id": chat.share_id,
+        "folder_id": chat.folder_id,
+    }
+
+
+def _ensure_admin_chat_access():
+    if not ENABLE_ADMIN_CHAT_ACCESS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+
+@router.get("/admin/list")
+async def get_admin_chat_list(
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    order_by: str = Query("updated_at"),
+    direction: str = Query("desc"),
+    user_id: Optional[str] = Query(None),
+    title: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    user=Depends(get_admin_user),
+):
+    """admin チャット閲覧ビュー(#19)用のページング一覧。
+
+    行は chat JSON を含まない軽量形(導出列はページ分だけサーバーでパース)。
+    返却は {"items": [...], "total": n}。
+    """
+    _ensure_admin_chat_access()
+
+    if order_by not in ("created_at", "updated_at"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_by must be one of: created_at, updated_at",
+        )
+    if direction not in ("desc", "asc"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be one of: desc, asc",
+        )
+
+    chats, total = Chats.get_chats_page_admin(
+        user_id=user_id,
+        title=title,
+        model=model,
+        order_by=order_by,
+        direction=direction,
+        limit=limit,
+        offset=offset,
+    )
+
+    users = Users.get_users_by_user_ids(list({chat.user_id for chat in chats}))
+    user_names = {u.id: u.name for u in users}
+
+    return {
+        "items": [
+            _to_admin_chat_list_item(chat, user_names.get(chat.user_id))
+            for chat in chats
+        ],
+        "total": total,
+    }
+
+
+@router.get("/admin/users")
+async def get_admin_chat_users(user=Depends(get_admin_user)):
+    """チャットを 1 件以上持つユーザーの一覧(#19、admin のフィルタ UI 用)。"""
+    _ensure_admin_chat_access()
+    return Chats.get_chat_owners()
+
+
+@router.get("/admin/models")
+async def get_admin_chat_models(user=Depends(get_admin_user)):
+    """チャットで使われている model id の一覧(#19、admin のフィルタ UI 用)。"""
+    _ensure_admin_chat_access()
+    return Chats.get_chat_models()
 
 
 ############################

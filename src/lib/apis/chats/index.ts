@@ -145,6 +145,124 @@ export const getChatListByUserId = async (token: string = '', userId: string) =>
 	}));
 };
 
+// llens(#19): admin チャット閲覧ビュー。一覧はサーバーページング(GET /chats/admin/list)。
+type AdminChatListOptions = {
+	limit?: number;
+	offset?: number;
+	order_by?: 'created_at' | 'updated_at';
+	direction?: 'desc' | 'asc';
+	user_id?: string;
+	title?: string;
+	model?: string;
+};
+
+export const getAdminChatList = async (token: string, options: AdminChatListOptions = {}) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	if (options.limit != null) {
+		searchParams.append('limit', `${options.limit}`);
+	}
+	if (options.offset != null) {
+		searchParams.append('offset', `${options.offset}`);
+	}
+	if (options.order_by) {
+		searchParams.append('order_by', options.order_by);
+	}
+	if (options.direction) {
+		searchParams.append('direction', options.direction);
+	}
+	if (options.user_id) {
+		searchParams.append('user_id', options.user_id);
+	}
+	if (options.title) {
+		searchParams.append('title', options.title);
+	}
+	if (options.model) {
+		searchParams.append('model', options.model);
+	}
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getAdminChatUsers = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/users`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getAdminChatModels = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/admin/models`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getArchivedChatList = async (token: string = '') => {
 	let error = null;
 
