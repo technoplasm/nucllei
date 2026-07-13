@@ -175,10 +175,10 @@
 		</div>
 
 		<!-- フィルタ: ユーザー(単一選択・空 = 全員)/ モデル / 更新日時範囲 / 読み込み数 -->
-		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-xs text-gray-500">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-sm text-gray-500">
 			<div class="flex items-center gap-0.5">
 				<select
-					class="dark:bg-gray-900 w-fit pr-6 rounded-sm text-xs bg-transparent outline-hidden {selectedUserId
+					class="dark:bg-gray-900 w-fit pr-6 rounded-sm bg-transparent outline-hidden {selectedUserId
 						? ''
 						: 'text-gray-500'}"
 					bind:value={selectedUserId}
@@ -197,7 +197,7 @@
 
 			<div class="flex items-center gap-0.5">
 				<select
-					class="dark:bg-gray-900 w-fit pr-6 rounded-sm text-xs bg-transparent outline-hidden {selectedModel
+					class="dark:bg-gray-900 w-fit pr-6 rounded-sm bg-transparent outline-hidden {selectedModel
 						? ''
 						: 'text-gray-500'}"
 					bind:value={selectedModel}
@@ -217,7 +217,7 @@
 			<div class="flex items-center gap-1">
 				<input
 					type="date"
-					class="dark:bg-gray-900 w-fit rounded-sm text-xs bg-transparent outline-hidden"
+					class="dark:bg-gray-900 w-fit rounded-sm bg-transparent outline-hidden"
 					bind:value={dateFrom}
 					on:change={() => {
 						fetchChats(false);
@@ -226,7 +226,7 @@
 				<span>–</span>
 				<input
 					type="date"
-					class="dark:bg-gray-900 w-fit rounded-sm text-xs bg-transparent outline-hidden"
+					class="dark:bg-gray-900 w-fit rounded-sm bg-transparent outline-hidden"
 					bind:value={dateTo}
 					on:change={() => {
 						fetchChats(false);
@@ -236,7 +236,7 @@
 
 			<div class="flex items-center gap-0.5">
 				<select
-					class="dark:bg-gray-900 w-fit pr-6 rounded-sm text-xs bg-transparent outline-hidden"
+					class="dark:bg-gray-900 w-fit pr-6 rounded-sm bg-transparent outline-hidden"
 					value={`${limit}`}
 					on:change={(e) => {
 						limit = parseInt(e.target.value);
@@ -252,12 +252,12 @@
 	</div>
 
 	{#if chats.length === 0}
-		<div class="w-full flex justify-center items-center py-16 text-sm text-gray-500">
+		<div class="mt-4 w-full flex justify-center items-center py-16 text-sm text-gray-500">
 			{$i18n.t('No chats found')}
 		</div>
 	{:else}
 		<div
-			class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
+			class="mt-4 scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
 			<table
 				class="w-full text-sm text-left text-gray-500 dark:text-gray-400 table-auto max-w-full rounded-sm"
