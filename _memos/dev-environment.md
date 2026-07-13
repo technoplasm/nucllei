@@ -69,6 +69,9 @@ uv run task dev
 pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自動退避
 ```
 
+- **BE のログ所在**: cc セッションがバックグラウンド起動した場合は
+  `/tmp/llens-backend-dev.log` にリダイレクトされている慣例(`ps aux | grep uvicorn` で
+  リダイレクト先が見える)。500 の一次調査はまずここの traceback を読む。
 - **BE origin の上書き**: `BACKEND_ORIGIN=http://別ホスト:3000 pnpm dev` で dev フロントを
   別マシンの BE に向けられる(既定 `http://localhost:3000`。`vite.config.ts`)。
 - **tailscale 越し**: `pnpm dev` は `--host` で 0.0.0.0 listen。`{frontend-host}:5173/api` が
