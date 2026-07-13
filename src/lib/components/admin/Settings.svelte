@@ -16,8 +16,8 @@
 	import Documents from './Settings/Documents.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
-	import CodeInterpreter from './Settings/CodeInterpreter.svelte';
-	import Tools from './Settings/Tools.svelte';
+	// llens: Code Interpreter 設定は撤去(nsjail+IPython 外部サンドボックス固定、意味を持たない — #11)。
+	// ツールサーバー接続は独立タブ/コンポーネントをやめ、General.svelte の一般設定に完全統合(保存も共通)。
 
 	const i18n = getContext('i18n');
 
@@ -37,6 +37,8 @@
 	});
 </script>
 
+<!-- llens(#34): 左サブメニュー + 右コンテンツ。横幅は workspace/+layout.svelte 側で一元管理
+     (5xl 中央寄せ)するのでここでは持たない。lg 未満は flex-col で submenu が上に逃げる。 -->
 <div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 	<div
 		id="admin-settings-tabs-container"
@@ -120,32 +122,6 @@
 
 		<button
 			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-			'tools'
-				? ''
-				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-			on:click={() => {
-				selectedTab = 'tools';
-			}}
-		>
-			<div class=" self-center mr-2">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="currentColor"
-					class="size-4"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M12 6.75a5.25 5.25 0 0 1 6.775-5.025.75.75 0 0 1 .313 1.248l-3.32 3.319c.063.475.276.934.641 1.299.365.365.824.578 1.3.64l3.318-3.319a.75.75 0 0 1 1.248.313 5.25 5.25 0 0 1-5.472 6.756c-1.018-.086-1.87.1-2.309.634L7.344 21.3A3.298 3.298 0 1 1 2.7 16.657l8.684-7.151c.533-.44.72-1.291.634-2.309A5.342 5.342 0 0 1 12 6.75ZM4.117 19.125a.75.75 0 0 1 .75-.75h.008a.75.75 0 0 1 .75.75v.008a.75.75 0 0 1-.75.75h-.008a.75.75 0 0 1-.75-.75v-.008Z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</div>
-			<div class=" self-center">{$i18n.t('Tools')}</div>
-		</button>
-
-		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'documents'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
@@ -172,32 +148,6 @@
 				</svg>
 			</div>
 			<div class=" self-center">{$i18n.t('Documents')}</div>
-		</button>
-
-		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-			'code-interpreter'
-				? ''
-				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-			on:click={() => {
-				selectedTab = 'code-interpreter';
-			}}
-		>
-			<div class=" self-center mr-2">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 16 16"
-					fill="currentColor"
-					class="size-4"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm2.22 1.97a.75.75 0 0 0 0 1.06l.97.97-.97.97a.75.75 0 1 0 1.06 1.06l1.5-1.5a.75.75 0 0 0 0-1.06l-1.5-1.5a.75.75 0 0 0-1.06 0ZM8.75 8.5a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</div>
-			<div class=" self-center">{$i18n.t('Code Interpreter')}</div>
 		</button>
 
 		<button
@@ -339,8 +289,8 @@
 	</div>
 
 	<div class="flex-1 mt-3 lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
-		<!-- llens(#34): 設定内容は max-w で読める幅に収めて中央寄せ(ワイド画面で全幅に間延びさせない) -->
-		<div class="max-w-3xl mx-auto">
+		<!-- 横幅は workspace/+layout.svelte 側で一元管理。ここは flex-1 列を満たす。 -->
+		<div>
 			{#if selectedTab === 'general'}
 				<General
 					saveHandler={async () => {
@@ -358,20 +308,9 @@
 				/>
 			{:else if selectedTab === 'models'}
 				<Models />
-			{:else if selectedTab === 'tools'}
-				<Tools />
 			{:else if selectedTab === 'documents'}
 				<Documents
 					on:save={async () => {
-						toast.success($i18n.t('Settings saved successfully!'));
-
-						await tick();
-						await config.set(await getBackendConfig());
-					}}
-				/>
-			{:else if selectedTab === 'code-interpreter'}
-				<CodeInterpreter
-					saveHandler={async () => {
 						toast.success($i18n.t('Settings saved successfully!'));
 
 						await tick();

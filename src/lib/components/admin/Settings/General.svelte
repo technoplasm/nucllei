@@ -11,6 +11,9 @@
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Connection from './Tools/Connection.svelte';
+	import AddServerModal from '$lib/components/AddServerModal.svelte';
+	import { getToolServerConnections, setToolServerConnections } from '$lib/apis/configs';
 	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -21,6 +24,13 @@
 
 	let adminConfig = null;
 	let webhookUrl = '';
+
+	// llens: ツールサーバー接続は独立タブ/独立保存をやめ、この一般設定に完全統合(保存も共通)。
+	let toolServers: any[] | null = null;
+	let showToolServerModal = false;
+	const addToolServerHandler = (server: any) => {
+		toolServers = [...(toolServers ?? []), server];
+	};
 
 	// LDAP
 	let ENABLE_LDAP = false;
@@ -55,6 +65,10 @@
 		const res = await updateAdminConfig(adminConfig);
 		await updateLdapServerHandler();
 
+		if (toolServers !== null) {
+			await setToolServerConnections({ TOOL_SERVER_CONNECTIONS: toolServers });
+		}
+
 		if (res) {
 			saveHandler();
 		} else {
@@ -73,6 +87,10 @@
 			})(),
 			(async () => {
 				LDAP_SERVER = await getLdapServer();
+			})(),
+			(async () => {
+				const res = await getToolServerConnections();
+				toolServers = res.TOOL_SERVER_CONNECTIONS;
 			})()
 		]);
 
@@ -80,6 +98,8 @@
 		ENABLE_LDAP = ldapConfig.ENABLE_LDAP;
 	});
 </script>
+
+<AddServerModal bind:show={showToolServerModal} onSubmit={addToolServerHandler} />
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
@@ -473,6 +493,52 @@
 								placeholder={`https://example.com/webhook`}
 								bind:value={webhookUrl}
 							/>
+						</div>
+					</div>
+				</div>
+
+				<!-- llens: ツールサーバー(OpenAPI 互換外部ツール)接続。旧・独立タブを一般に完全統合し、
+				     この画面下部の共通「保存」でまとめて永続化する。 -->
+				<div class="mb-3">
+					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Tools')}</div>
+
+					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+
+					<div class="mb-2.5 flex flex-col w-full justify-between">
+						<div class="flex justify-between items-center mb-0.5">
+							<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
+
+							<Tooltip content={$i18n.t('Add Connection')}>
+								<button
+									class="px-1"
+									type="button"
+									on:click={() => {
+										showToolServerModal = true;
+									}}
+								>
+									<span class="i-lucide-plus size-4 block"></span>
+								</button>
+							</Tooltip>
+						</div>
+
+						{#if toolServers !== null}
+							<div class="flex flex-col gap-1.5">
+								{#each toolServers as server, idx}
+									<Connection
+										bind:connection={server}
+										onSubmit={() => {}}
+										onDelete={() => {
+											toolServers = (toolServers ?? []).filter((_, i) => i !== idx);
+										}}
+									/>
+								{/each}
+							</div>
+						{/if}
+
+						<div class="my-1.5">
+							<div class="text-xs text-gray-500">
+								{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+							</div>
 						</div>
 					</div>
 				</div>
