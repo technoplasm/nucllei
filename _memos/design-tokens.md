@@ -31,6 +31,21 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 - ヘッダー(chat/layout/channel Navbar)のグラデ背景は `from-surface`(dark が背景より
   暗すぎる問題を解消)。チャット入力欄は `bg-surface-raised` + 柔らかい影(`shadow-lg` 廃止)。
 
+### 設定系画面の共通レイアウト(2026-07-13 追加)
+
+管理設定(`admin/Settings.svelte`)とモデル編集(`workspace/Models/ModelEditor.svelte`)は
+**同じ様式に統一**(ワイド画面で全幅に間延びさせない):
+
+- **左サブメニュー**(縦タブ、`lg:w-40`)+ 右コンテンツ。サブメニューのボタンは
+  アクティブ=既定文字色(pill なし)/ 非アクティブ=`text-gray-300 dark:text-gray-600`、
+  先頭に class アイコン(`i-lucide-*`)。真実源の様式は `admin/Settings.svelte` のタブ。
+- **コンテンツは `flex-1` 列 + 内側 `max-w-3xl mx-auto`**(768px・中央寄せ)。
+  `max-w` を列そのものに付けると左寄せになるので必ず内側ラッパに `mx-auto`。
+- モデル編集の名前/ID は全タブ共通ヘッダとしてコンテンツ内(`max-w` ラッパの中)に置く。
+- 保留: 設定行のラベル-左/コントロール-右で目が滑る件(`justify-between`)。カラム化は
+  イマイチで却下、別アプローチを検討(#34 コメント / TaskList)。高度なパラメータの
+  1-2 col 化はユーザー作業。
+
 ## テーマ
 
 - 選択肢は **System / Dark / Light の3つのみ**(`oled-dark` と `her` = 映画 Her イースターエッグ
