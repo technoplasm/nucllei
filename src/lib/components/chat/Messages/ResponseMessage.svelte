@@ -935,8 +935,9 @@
 									</button>
 								</Tooltip>
 
-								<!-- llens(#66): chat.tts フラグ廃止 — TTS は全員使用可 -->
-								{#if true}
+								<!-- llens(#66/#53): per-user フラグは廃止(全員使用可)。
+								     配備レベルの enable(audio.tts.enable)でアイコンごと制御 -->
+								{#if $config?.audio?.tts?.enable ?? true}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											id="speak-button-{message.id}"

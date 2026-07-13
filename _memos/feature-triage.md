@@ -165,7 +165,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | chat import/export | 不要だが邪魔でもない — 残す |
 | webhook(ユーザー通知 + signup) | **別システムへの横展開で使う可能性があるため残す**(air-gapped 単体では無用でも) |
 | 画像生成まわり | そのまま(`features.image_generation` フラグ維持 + サーバー側 enforcement を #66 で追加) |
-| STT / TTS | 全員使用可・設定は admin・tool から呼ぶ内部 API 提供(#53)。`chat.stt/tts/call` フラグは廃止(#66) |
+| STT / TTS | 全員使用可・設定は admin・tool から呼ぶ内部 API 提供(#53)。`chat.stt/tts/call` の per-user フラグは廃止(#66)。**配備レベル**の `ENABLE_AUDIO_STT/TTS`(audio.stt/tts.enable、既定 on)でアイコン表示 + API(403)を一括制御(2026-07-13) |
 | /utils/pdf | 画面印刷の可能性があるため残す |
 | /utils/code/format | tool/functions 開発用として残す |
 | /utils/db/download | 残す(admin 専有を維持)。持ち出し統制は #31 の監査で扱う |

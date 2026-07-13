@@ -144,6 +144,8 @@ from open_webui.config import (
     FIRECRAWL_API_BASE_URL,
     FIRECRAWL_API_KEY,
     WEB_LOADER_ENGINE,
+    ENABLE_AUDIO_STT,
+    ENABLE_AUDIO_TTS,
     WHISPER_MODEL,
     WHISPER_VAD_FILTER,
     WHISPER_LANGUAGE,
@@ -649,6 +651,9 @@ app.state.config.IMAGE_STEPS = IMAGE_STEPS
 #
 ########################################
 
+app.state.config.ENABLE_AUDIO_STT = ENABLE_AUDIO_STT
+app.state.config.ENABLE_AUDIO_TTS = ENABLE_AUDIO_TTS
+
 app.state.config.STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
 app.state.config.STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
 app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
@@ -1137,11 +1142,14 @@ async def get_app_config(request: Request):
                 "user_count": user_count,
                 "audio": {
                     "tts": {
+                        # llens(#53 フォロー): enable=False で FE がアイコンごと非表示
+                        "enable": app.state.config.ENABLE_AUDIO_TTS,
                         "engine": app.state.config.TTS_ENGINE,
                         "voice": app.state.config.TTS_VOICE,
                         "split_on": app.state.config.TTS_SPLIT_ON,
                     },
                     "stt": {
+                        "enable": app.state.config.ENABLE_AUDIO_STT,
                         "engine": app.state.config.STT_ENGINE,
                     },
                 },

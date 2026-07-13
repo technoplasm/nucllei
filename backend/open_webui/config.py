@@ -1905,6 +1905,21 @@ IMAGE_GENERATION_MODEL = RuntimeConfig(
 # Audio
 ####################################
 
+# llens(#53 フォロー): 配備レベルの機能フラグ。#66 で廃止した per-user 権限フラグ
+# (誰に使わせるか)とは別物で、「この配備に STT/TTS 機能があるか」を表す。
+# False でアイコン非表示(FE)+ /transcriptions・/speech を 403(サーバー側 enforcement)。
+ENABLE_AUDIO_STT = RuntimeConfig(
+    "ENABLE_AUDIO_STT",
+    "audio.stt.enable",
+    os.getenv("ENABLE_AUDIO_STT", "True").lower() == "true",
+)
+
+ENABLE_AUDIO_TTS = RuntimeConfig(
+    "ENABLE_AUDIO_TTS",
+    "audio.tts.enable",
+    os.getenv("ENABLE_AUDIO_TTS", "True").lower() == "true",
+)
+
 # Transcription
 WHISPER_MODEL = RuntimeConfig(
     "WHISPER_MODEL",

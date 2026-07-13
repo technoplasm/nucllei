@@ -135,6 +135,7 @@ def set_faster_whisper_model(
 
 
 class TTSConfigForm(BaseModel):
+    ENABLE: bool
     OPENAI_API_BASE_URL: str
     OPENAI_API_KEY: str
     API_KEY: str
@@ -147,6 +148,7 @@ class TTSConfigForm(BaseModel):
 
 
 class STTConfigForm(BaseModel):
+    ENABLE: bool
     OPENAI_API_BASE_URL: str
     OPENAI_API_KEY: str
     ENGINE: str
@@ -165,8 +167,13 @@ class AudioConfigUpdateForm(BaseModel):
 
 @router.get("/config")
 async def get_audio_config(request: Request, user=Depends(get_admin_user)):
+    return _audio_config_response(request)
+
+
+def _audio_config_response(request: Request):
     return {
         "tts": {
+            "ENABLE": request.app.state.config.ENABLE_AUDIO_TTS,
             "OPENAI_API_BASE_URL": request.app.state.config.TTS_OPENAI_API_BASE_URL,
             "OPENAI_API_KEY": request.app.state.config.TTS_OPENAI_API_KEY,
             "API_KEY": request.app.state.config.TTS_API_KEY,
@@ -178,6 +185,7 @@ async def get_audio_config(request: Request, user=Depends(get_admin_user)):
             "AZURE_SPEECH_OUTPUT_FORMAT": request.app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT,
         },
         "stt": {
+            "ENABLE": request.app.state.config.ENABLE_AUDIO_STT,
             "OPENAI_API_BASE_URL": request.app.state.config.STT_OPENAI_API_BASE_URL,
             "OPENAI_API_KEY": request.app.state.config.STT_OPENAI_API_KEY,
             "ENGINE": request.app.state.config.STT_ENGINE,
@@ -195,6 +203,7 @@ async def get_audio_config(request: Request, user=Depends(get_admin_user)):
 async def update_audio_config(
     request: Request, form_data: AudioConfigUpdateForm, user=Depends(get_admin_user)
 ):
+    request.app.state.config.ENABLE_AUDIO_TTS = form_data.tts.ENABLE
     request.app.state.config.TTS_OPENAI_API_BASE_URL = form_data.tts.OPENAI_API_BASE_URL
     request.app.state.config.TTS_OPENAI_API_KEY = form_data.tts.OPENAI_API_KEY
     request.app.state.config.TTS_API_KEY = form_data.tts.API_KEY
@@ -207,6 +216,7 @@ async def update_audio_config(
         form_data.tts.AZURE_SPEECH_OUTPUT_FORMAT
     )
 
+    request.app.state.config.ENABLE_AUDIO_STT = form_data.stt.ENABLE
     request.app.state.config.STT_OPENAI_API_BASE_URL = form_data.stt.OPENAI_API_BASE_URL
     request.app.state.config.STT_OPENAI_API_KEY = form_data.stt.OPENAI_API_KEY
     request.app.state.config.STT_ENGINE = form_data.stt.ENGINE
@@ -226,30 +236,7 @@ async def update_audio_config(
             num_workers=request.app.state.config.WHISPER_NUM_WORKERS,
         )
 
-    return {
-        "tts": {
-            "OPENAI_API_BASE_URL": request.app.state.config.TTS_OPENAI_API_BASE_URL,
-            "OPENAI_API_KEY": request.app.state.config.TTS_OPENAI_API_KEY,
-            "API_KEY": request.app.state.config.TTS_API_KEY,
-            "ENGINE": request.app.state.config.TTS_ENGINE,
-            "MODEL": request.app.state.config.TTS_MODEL,
-            "VOICE": request.app.state.config.TTS_VOICE,
-            "SPLIT_ON": request.app.state.config.TTS_SPLIT_ON,
-            "AZURE_SPEECH_REGION": request.app.state.config.TTS_AZURE_SPEECH_REGION,
-            "AZURE_SPEECH_OUTPUT_FORMAT": request.app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT,
-        },
-        "stt": {
-            "OPENAI_API_BASE_URL": request.app.state.config.STT_OPENAI_API_BASE_URL,
-            "OPENAI_API_KEY": request.app.state.config.STT_OPENAI_API_KEY,
-            "ENGINE": request.app.state.config.STT_ENGINE,
-            "MODEL": request.app.state.config.STT_MODEL,
-            "WHISPER_MODEL": request.app.state.config.WHISPER_MODEL,
-            "DEEPGRAM_API_KEY": request.app.state.config.DEEPGRAM_API_KEY,
-            "AZURE_API_KEY": request.app.state.config.AUDIO_STT_AZURE_API_KEY,
-            "AZURE_REGION": request.app.state.config.AUDIO_STT_AZURE_REGION,
-            "AZURE_LOCALES": request.app.state.config.AUDIO_STT_AZURE_LOCALES,
-        },
-    }
+    return _audio_config_response(request)
 
 
 def load_speech_pipeline(request):
@@ -269,6 +256,10 @@ def load_speech_pipeline(request):
 
 @router.post("/speech")
 async def speech(request: Request, user=Depends(get_verified_user)):
+    # llens(#53 フォロー): 配備レベルの機能フラグ(FE のアイコン制御と対のサーバー側 enforcement)
+    if not request.app.state.config.ENABLE_AUDIO_TTS:
+        raise HTTPException(status_code=403, detail="Text-to-Speech is disabled")
+
     body = await request.body()
 
     payload = None
@@ -760,6 +751,10 @@ def transcription(
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
 ):
+    # llens(#53 フォロー): 配備レベルの機能フラグ(FE のアイコン制御と対のサーバー側 enforcement)
+    if not request.app.state.config.ENABLE_AUDIO_STT:
+        raise HTTPException(status_code=403, detail="Speech-to-Text is disabled")
+
     log.info(f"file.content_type: {file.content_type}")
 
     supported_filetypes = ("audio/mpeg", "audio/wav", "audio/ogg", "audio/x-m4a")

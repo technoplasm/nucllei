@@ -4,6 +4,15 @@ STT/TTS の fork 側実装と、性能・ハード(強い CPU / 将来 GPU)方�
 llens 現行の実機構成は `_links/llens` の `stt/README.md` / `tts/README.md`。
 内部関数の設計経緯は #53、ファイル処理との関係は `file-handling.md`。
 
+## 有効/無効(配備レベルの機能フラグ)
+
+`ENABLE_AUDIO_STT` / `ENABLE_AUDIO_TTS`(persist: `audio.stt.enable` / `audio.tts.enable`、既定 on、
+admin Settings > Audio にトグルあり)。off にすると **FE のアイコン(マイク / 読み上げ / Call)非表示 +
+`/transcriptions`・`/speech` が 403**(サーバー側 enforcement)。#66 で廃止した per-user 権限フラグ
+(誰に使わせるか)とは別物 — こちらは「この配備に機能があるか」。Call は STT+TTS 両方を使うので
+どちらか off で非表示。内部関数(`utils/audio.py`)はこのフラグを見ない(caller = admin 作の tool/filter
+の責務。エンジン未設定なら既に ValueError)。
+
 ## 構成(2026-07-13 現在)
 
 - **STT**: `AUDIO_STT_ENGINE=""` = 内蔵 faster-whisper(**fork プロセス内**で CTranslate2 推論)/

@@ -13,6 +13,7 @@
 	import { config, settings } from '$lib/stores';
 
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 
 	import { TTS_RESPONSE_SPLIT } from '$lib/types';
 
@@ -24,6 +25,10 @@
 	export let saveHandler: () => void;
 
 	// Audio
+	// llens(#53): 配備レベルの機能フラグ(false でチャットのアイコン非表示 + API 403)
+	let TTS_ENABLE = true;
+	let STT_ENABLE = true;
+
 	let TTS_OPENAI_API_BASE_URL = '';
 	let TTS_OPENAI_API_KEY = '';
 	let TTS_API_KEY = '';
@@ -92,6 +97,7 @@
 	const updateConfigHandler = async () => {
 		const res = await updateAudioConfig({
 			tts: {
+				ENABLE: TTS_ENABLE,
 				OPENAI_API_BASE_URL: TTS_OPENAI_API_BASE_URL,
 				OPENAI_API_KEY: TTS_OPENAI_API_KEY,
 				API_KEY: TTS_API_KEY,
@@ -103,6 +109,7 @@
 				AZURE_SPEECH_OUTPUT_FORMAT: TTS_AZURE_SPEECH_OUTPUT_FORMAT
 			},
 			stt: {
+				ENABLE: STT_ENABLE,
 				OPENAI_API_BASE_URL: STT_OPENAI_API_BASE_URL,
 				OPENAI_API_KEY: STT_OPENAI_API_KEY,
 				ENGINE: STT_ENGINE,
@@ -132,6 +139,9 @@
 
 		if (res) {
 			console.log(res);
+			TTS_ENABLE = res.tts.ENABLE;
+			STT_ENABLE = res.stt.ENABLE;
+
 			TTS_OPENAI_API_BASE_URL = res.tts.OPENAI_API_BASE_URL;
 			TTS_OPENAI_API_KEY = res.tts.OPENAI_API_KEY;
 			TTS_API_KEY = res.tts.API_KEY;
@@ -173,6 +183,13 @@
 		<div class="flex flex-col gap-3">
 			<div>
 				<div class=" mb-1 text-sm font-medium">{$i18n.t('STT Settings')}</div>
+
+				<div class=" py-0.5 flex w-full justify-between">
+					<div class=" self-center text-xs font-medium">{$i18n.t('Enable Speech-to-Text')}</div>
+					<div class="flex items-center relative">
+						<Switch bind:state={STT_ENABLE} />
+					</div>
+				</div>
 
 				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs font-medium">{$i18n.t('Speech-to-Text Engine')}</div>
@@ -375,6 +392,13 @@
 
 			<div>
 				<div class=" mb-1 text-sm font-medium">{$i18n.t('TTS Settings')}</div>
+
+				<div class=" py-0.5 flex w-full justify-between">
+					<div class=" self-center text-xs font-medium">{$i18n.t('Enable Text-to-Speech')}</div>
+					<div class="flex items-center relative">
+						<Switch bind:state={TTS_ENABLE} />
+					</div>
+				</div>
 
 				<div class=" py-0.5 flex w-full justify-between">
 					<div class=" self-center text-xs font-medium">{$i18n.t('Text-to-Speech Engine')}</div>

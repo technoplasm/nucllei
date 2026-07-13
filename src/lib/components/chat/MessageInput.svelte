@@ -1172,8 +1172,9 @@
 									</div>
 
 									<div class="self-end flex space-x-1 mr-1 shrink-0">
-										<!-- llens(#66): chat.stt フラグ廃止 — STT は全員使用可 -->
-										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
+										<!-- llens(#66/#53): per-user フラグは廃止(全員使用可)。
+										     配備レベルの enable(audio.stt.enable)でアイコンごと制御 -->
+										{#if ($config?.audio?.stt?.enable ?? true) && (!history?.currentId || history.messages[history.currentId]?.done == true)}
 											<Tooltip content={$i18n.t('Record voice')}>
 												<button
 													id="voice-input-button"
@@ -1246,7 +1247,8 @@
 													</button>
 												</Tooltip>
 											</div>
-										{:else if prompt === '' && files.length === 0}
+										{:else if prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
+											<!-- llens(#53): Call は STT+TTS 両方を使うので、どちらかが無効なら出さない(送信ボタンへフォールスルー) -->
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Call')}>
 													<button

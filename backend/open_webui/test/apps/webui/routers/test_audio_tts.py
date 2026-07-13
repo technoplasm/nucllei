@@ -131,6 +131,22 @@ class TestOpenAICompatTTS(AbstractPostgresTest):
             assert response.content == MOCK_AUDIO
         assert len(self.mock_server.received) == 1
 
+    def test_speech_403_when_tts_disabled(self):
+        """ENABLE_AUDIO_TTS=False で /speech は 403(FE アイコン制御と対の enforcement)。"""
+        from open_webui.main import app
+
+        app.state.config.ENABLE_AUDIO_TTS = False
+        try:
+            with mock_webui_user(id="1"):
+                response = self.fast_api_client.post(
+                    self.create_url("/speech"),
+                    json={"input": "無効時", "voice": "metan"},
+                )
+            assert response.status_code == 403
+        finally:
+            app.state.config.ENABLE_AUDIO_TTS = True
+        assert len(self.mock_server.received) == 0
+
     def test_voices_listed_from_custom_endpoint(self):
         """カスタムエンドポイントの /audio/voices が UI の音声一覧に反映される。"""
         with mock_webui_user(id="1"):
@@ -394,6 +410,10 @@ class TestOpenAICompatSTT(AbstractPostgresTest):
         cls.mock_server.server_close()
         super().teardown_class()
 
+    def setup_method(self):
+        super().setup_method()
+        self.mock_server.received.clear()
+
     def test_transcription(self):
         """/audio/transcriptions が互換 API へ中継されテキストが返る。"""
         wav = make_silent_wav()
@@ -410,3 +430,19 @@ class TestOpenAICompatSTT(AbstractPostgresTest):
         # 音声ファイルが multipart で互換 API に届いている
         assert len(self.mock_server.received) == 1
         assert self.mock_server.received[0]["transcription_bytes"] > len(wav)
+
+    def test_transcription_403_when_stt_disabled(self):
+        """ENABLE_AUDIO_STT=False で /transcriptions は 403。"""
+        from open_webui.main import app
+
+        app.state.config.ENABLE_AUDIO_STT = False
+        try:
+            with mock_webui_user(id="1"):
+                response = self.fast_api_client.post(
+                    self.create_url("/transcriptions"),
+                    files={"file": ("voice.wav", make_silent_wav(), "audio/wav")},
+                )
+            assert response.status_code == 403
+        finally:
+            app.state.config.ENABLE_AUDIO_STT = True
+        assert len(self.mock_server.received) == 0
