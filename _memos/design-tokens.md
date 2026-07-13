@@ -31,20 +31,31 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 - ヘッダー(chat/layout/channel Navbar)のグラデ背景は `from-surface`(dark が背景より
   暗すぎる問題を解消)。チャット入力欄は `bg-surface-raised` + 柔らかい影(`shadow-lg` 廃止)。
 
-### 設定系画面の共通レイアウト(2026-07-13 追加)
+### 設定系画面の共通レイアウト(2026-07-13 / 改訂 2026-07-14)
 
-管理設定(`admin/Settings.svelte`)とモデル編集(`workspace/Models/ModelEditor.svelte`)は
+管理設定(`admin/Settings.svelte`)・モデル編集(`ModelEditor.svelte`)・ワークスペース各ページを
 **同じ様式に統一**(ワイド画面で全幅に間延びさせない):
 
-- **左サブメニュー**(縦タブ、`lg:w-40`)+ 右コンテンツ。サブメニューのボタンは
-  アクティブ=既定文字色(pill なし)/ 非アクティブ=`text-gray-300 dark:text-gray-600`、
-  先頭に class アイコン(`i-lucide-*`)。真実源の様式は `admin/Settings.svelte` のタブ。
-- **コンテンツは `flex-1` 列 + 内側 `max-w-3xl mx-auto`**(768px・中央寄せ)。
-  `max-w` を列そのものに付けると左寄せになるので必ず内側ラッパに `mx-auto`。
-- モデル編集の名前/ID は全タブ共通ヘッダとしてコンテンツ内(`max-w` ラッパの中)に置く。
-- 保留: 設定行のラベル-左/コントロール-右で目が滑る件(`justify-between`)。カラム化は
-  イマイチで却下、別アプローチを検討(#34 コメント / TaskList)。高度なパラメータの
-  1-2 col 化はユーザー作業。
+- **横幅は workspace layout(`routes/(app)/workspace/+layout.svelte`)で一元管理**。
+  改訂 2026-07-14(cc76b1d91): 各画面が個別に `max-w-3xl` を持つと画面ごとに幅がばらつくため、
+  `#workspace-container` 内の `max-w-5xl mx-auto w-full` ラッパに集約。個々のページ/エディタは
+  自前 max-w を持たず継承する(4a71ddc94/dbb2556d3 で Settings/ModelEditor の自前 max-w 撤去)。
+  上部メニューも同じ 5xl に揃える。値は 3xl(768)→ **5xl(1024)**(submenu 分を足した)。
+- **左サブメニュー**(`lg` 以上で `lg:flex-col lg:w-40` の縦タブ、未満は横スクロール行)+ 右コンテンツ `flex-1`。
+  ボタンは アクティブ=既定文字色(pill なし)/ 非アクティブ=`text-gray-300 dark:text-gray-600`、
+  先頭に class アイコン(`i-lucide-*`)。真実源は `admin/Settings.svelte` のタブ。
+  - 少数タブ(モデル編集は 3 個)は `flex-1` だと狭幅で全幅に間延びするため **`flex-none`**(左詰め)に
+    (dbb2556d3)。settings は `flex-1 md:flex-none`。
+- **上部メニューは宣言配列 `WORKSPACE_TABS`(label/path/show)で定義**し、マークアップは {#each} 一箇所(cc76b1d91)。
+- **高度なパラメータ(AdvancedParams)**: 改訂 2026-07-14(7e16e5cdd)。旧「カラム化却下・justify-between 保留」を
+  **撤回し採用**。全項目を宣言配列化しマークアップ一箇所、grid 自動カラム(`minmax(260px,1fr)` —
+  max を固定 px にすると auto-fill が本数を数え違えて 1col に潰れる)、キー-左/値-右 `justify-between`、
+  ラベルは `whitespace-nowrap` で折り返さず slider が残り幅を吸収。ラベルは i18n せず実キー名を表示。
+  値変更デグレ(Svelte legacy の untrack)の罠は `dev-environment.md` 参照。
+- **設定タブの整理**(4a71ddc94): ツールサーバー設定は独立タブをやめ General に完全統合(保存共通)。
+  Code Interpreter タブは撤去(nsjail+IPython 固定で無意味 — #11)。
+- モデル画像は狭いほど小さく(`size-40 sm:size-52 md:size-60`。旧 `size-72 md:size-60` は狭い方が大きい逆転だった)。
+- モデル編集の名前/ID は全タブ共通ヘッダとしてコンテンツ内に置く。
 
 ## テーマ
 

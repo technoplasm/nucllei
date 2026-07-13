@@ -30,6 +30,15 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   onMount 中に撃った toast は Toaster マウントの後始末で闇に消える(#70 B2 で実害)。
   初期ロード直後に出す toast は root layout onMount 末尾 + setTimeout 遅延で発火する
   (失効通知の実例が `src/routes/+layout.svelte`)。
+- **Svelte 5(互換モード)テンプレート式は「マークアップに直接書かれた変数」しか追跡しない**
+  (#34 AdvancedParams で実害・修理済み)。`{#if isSet(item)}` のように reactive な `params` 読み取りを
+  ヘルパ関数に隠すと、コンパイラがその呼び出しを **`$.untrack()` で包み再描画が起きない**(症状:
+  スライダー/トグルを操作しても値が反映されない。警告も出ない)。→ テンプレートでは `params[item.key]` を
+  **直接参照**し、現在値は引数で渡す(`cycleLabel(item, params[item.key])`)。
+  併せて **動的キーの `bind:value={obj[key]}` は片方向にしか展開されない**(書き戻し無し)。書き込みは
+  インスタンス関数内の **新 object 再代入**(`params = {...params, [key]: v}`)に統一すると bindable
+  プロップの set として確実に伝播する(in-place `obj[key]=v` の mutate は追跡が不安定)。切り分けは
+  `svelte/compiler` で client 生成し `untrack(...)` / 書き戻し代入(`params(params()[...]=...)`)の有無を grep。
 - **vitest は import 破壊を検知しない**: store やコンポーネントを削除する撤去作業では、
   カバレッジ外のファイルに残った orphan import を vitest がすり抜ける(#67 で
   common/Tags/TagInput の削除済み store import が CI の build 段階まで到達)。
@@ -99,12 +108,15 @@ pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自�
 
 DB(`backend/data/webui.db`)は clone に含まれないので、新環境では作り直す:
 
-1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。CLI で作成する:
+1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。taskipy タスクで作成する:
    ```sh
-   PYTHONPATH=backend .venv/bin/open-webui create-admin \
-     --email ken@llens.local --name Ken --password llens-dev
+   uv run task create-admin        # 慣例 dev admin(ken@llens.local / llens-dev)を一発で作る
+   # 任意アカウントは汎用 cli で: uv run task cli create-admin --email a@llens.local --name A --password llens-dev
    ```
    慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
+   ※ 旧手順の `.venv/bin/open-webui` は **使えない**(`package = false` でコンソールスクリプト未生成)。
+   タスクは `PYTHONPATH=backend python -c 'from open_webui import app; app()'` で typer app を直接呼ぶ。
+   `uv run task cli --help` で全サブコマンド確認可。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
    **権限検証用の非 admin アカウント(#66 で作成、パスワードは同じ llens-dev)**:
