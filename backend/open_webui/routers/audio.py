@@ -103,7 +103,16 @@ def set_faster_whisper_model(
 ):
     whisper_model = None
     if model:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError:
+            # llens: faster-whisper は local-ml extra。未導入環境(dev 等)で
+            # audio config の保存(update_audio_config)を 500 にしない —
+            # 内蔵 STT を実際に使う時点(transcribe)で明確に失敗させる
+            log.warning(
+                "faster-whisper is not installed (local-ml extra); built-in STT is unavailable"
+            )
+            return None
 
         faster_whisper_kwargs = {
             "model_size_or_path": model,
@@ -483,6 +492,13 @@ def transcribe(request: Request, file_path):
             )
 
         model = request.app.state.faster_whisper_model
+        if model is None:
+            # set_faster_whisper_model が import 失敗で None を返した場合の明確なエラー
+            # (transcription() が catch して 400 + メッセージにする)
+            raise Exception(
+                "Built-in STT requires faster-whisper (install the local-ml extra), "
+                "or configure an OpenAI-compatible STT engine"
+            )
         segments, info = model.transcribe(
             file_path,
             beam_size=5,

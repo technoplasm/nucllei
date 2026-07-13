@@ -431,6 +431,62 @@ class TestOpenAICompatSTT(AbstractPostgresTest):
         assert len(self.mock_server.received) == 1
         assert self.mock_server.received[0]["transcription_bytes"] > len(wav)
 
+    def test_config_update_survives_missing_faster_whisper(self):
+        """STT_ENGINE=""(内蔵 whisper)の config 保存が faster-whisper 未導入でも 500 にならない。
+
+        実バグ(2026-07-13): update_audio_config が engine="" で無条件に
+        set_faster_whisper_model → import faster_whisper して ModuleNotFoundError → 500。
+        テスト環境は local-ml extra なし = 実環境の再現そのもの。
+        """
+        from open_webui.main import app
+
+        payload = {
+            "tts": {
+                "ENABLE": True,
+                "OPENAI_API_BASE_URL": self.base_url,
+                "OPENAI_API_KEY": "sk-dummy",
+                "API_KEY": "",
+                "ENGINE": "openai",
+                "MODEL": "voicevox-tts",
+                "VOICE": "metan",
+                "SPLIT_ON": "punctuation",
+                "AZURE_SPEECH_REGION": "",
+                "AZURE_SPEECH_OUTPUT_FORMAT": "",
+            },
+            "stt": {
+                "ENABLE": True,
+                "OPENAI_API_BASE_URL": self.base_url,
+                "OPENAI_API_KEY": "sk-dummy",
+                "ENGINE": "",
+                "MODEL": "",
+                "WHISPER_MODEL": "base",
+                "DEEPGRAM_API_KEY": "",
+                "AZURE_API_KEY": "",
+                "AZURE_REGION": "",
+                "AZURE_LOCALES": "",
+            },
+        }
+        try:
+            with mock_webui_user(id="1"):
+                response = self.fast_api_client.post(
+                    self.create_url("/config/update"), json=payload
+                )
+            assert response.status_code == 200, response.text
+            assert response.json()["stt"]["ENGINE"] == ""
+
+            # 内蔵 STT を実際に使うと 400 + 明確なメッセージ(500 ではない)
+            with mock_webui_user(id="1"):
+                response = self.fast_api_client.post(
+                    self.create_url("/transcriptions"),
+                    files={"file": ("voice.wav", make_silent_wav(), "audio/wav")},
+                )
+            assert response.status_code == 400
+            assert "faster-whisper" in response.json()["detail"]
+        finally:
+            # クラス既定(openai 互換経路)へ戻す
+            app.state.config.STT_ENGINE = "openai"
+            app.state.faster_whisper_model = None
+
     def test_transcription_403_when_stt_disabled(self):
         """ENABLE_AUDIO_STT=False で /transcriptions は 403。"""
         from open_webui.main import app
