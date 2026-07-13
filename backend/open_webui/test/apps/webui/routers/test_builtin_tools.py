@@ -134,3 +134,101 @@ class TestBuiltinTools(AbstractPostgresTest):
             {"__user__": {"id": "a1"}},
         )
         assert "list_history" in granted
+
+
+class TestBuiltinHistoryTool(AbstractPostgresTest):
+    """履歴管理ツール(builtin_history)の挙動(#42 本実装)。owner-only を固定する。"""
+
+    BASE_PATH = "/api/v1/tools"
+
+    def setup_class(cls):
+        super().setup_class()
+        from open_webui.models.chats import Chats
+
+        cls.Chats = Chats
+
+    def _new_chat(self, user_id, title, messages):
+        """実 OWUI 形の chat を 1 件作る。
+
+        本物のチャットは flat な `messages` リスト(DB の全文検索が走査する)と
+        分岐用 `history.messages` マップ(read_history のスレッド復元が使う)の両方を持つ。
+        """
+        from open_webui.models.chats import ChatForm
+
+        flat = []
+        msg_map = {}
+        prev = None
+        for i, (role, content) in enumerate(messages):
+            mid = f"{title}-{i}"
+            msg = {
+                "id": mid,
+                "parentId": prev,
+                "childrenIds": [],
+                "role": role,
+                "content": content,
+            }
+            flat.append(msg)
+            msg_map[mid] = dict(msg)
+            if prev:
+                msg_map[prev]["childrenIds"] = [mid]
+            prev = mid
+
+        return self.Chats.insert_new_chat(
+            user_id,
+            ChatForm(
+                chat={
+                    "title": title,
+                    "messages": flat,
+                    "history": {"messages": msg_map, "currentId": prev},
+                }
+            ),
+        )
+
+    def test_list_history_returns_only_own_chats(self):
+        from open_webui.builtin_tools.history import Tools
+
+        self._new_chat("owner", "私のチャット", [("user", "こんにちは")])
+        self._new_chat("other", "他人のチャット", [("user", "hi")])
+
+        out = Tools().list_history(__user__={"id": "owner"})
+        assert "私のチャット" in out
+        assert "他人のチャット" not in out
+
+    def test_read_history_renders_thread(self):
+        from open_webui.builtin_tools.history import Tools
+
+        chat = self._new_chat(
+            "owner",
+            "会話",
+            [("user", "天気は?"), ("assistant", "晴れです")],
+        )
+        out = Tools().read_history(chat.id, __user__={"id": "owner"})
+        assert "USER: 天気は?" in out
+        assert "ASSISTANT: 晴れです" in out
+
+    def test_read_history_is_owner_only(self):
+        from open_webui.builtin_tools.history import Tools
+
+        chat = self._new_chat("owner", "秘密", [("user", "内緒")])
+        # 他人が chat_id を知っていても「見つからない」扱い(所有者検証を漏らさない)
+        out = Tools().read_history(chat.id, __user__={"id": "intruder"})
+        assert "見つかりません" in out
+        assert "内緒" not in out
+
+    def test_grep_history_matches_content(self):
+        from open_webui.builtin_tools.history import Tools
+
+        self._new_chat("owner", "旅行の計画", [("user", "京都に行きたい")])
+        self._new_chat("owner", "買い物", [("user", "牛乳を買う")])
+
+        out = Tools().grep_history("京都", __user__={"id": "owner"})
+        assert "旅行の計画" in out
+        assert "買い物" not in out
+
+    def test_history_requires_user_context(self):
+        import pytest
+
+        from open_webui.builtin_tools.history import Tools
+
+        with pytest.raises(ValueError):
+            Tools().list_history(__user__=None)

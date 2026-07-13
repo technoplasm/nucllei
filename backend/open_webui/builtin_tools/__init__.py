@@ -23,8 +23,7 @@ BUILTIN_TOOLS = {
         "name": "履歴管理",
         "description": (
             "自分のチャット履歴の一覧・読み出し・検索"
-            "(list_history / read_history / grep_history)。"
-            "※現在はスタブ(#42、本実装は後続)"
+            "(list_history / read_history / grep_history)。owner-only"
         ),
     },
 }
