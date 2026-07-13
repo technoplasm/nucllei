@@ -230,10 +230,10 @@ class Attachment:
 									bind:value={selectedType}
 									aria-label={$i18n.t('Function Type')}
 								>
-									<option value="filter">{$i18n.t('Filter')}</option>
-									<option value="attachment">{$i18n.t('Attachment')}</option>
-									<option value="action">{$i18n.t('Action')}</option>
-									<option value="pipe">{$i18n.t('Pipe')}</option>
+									<option value="filter">Filter</option>
+									<option value="attachment">Attachment</option>
+									<option value="action">Action</option>
+									<option value="pipe">Pipe</option>
 								</select>
 							{/if}
 						</div>

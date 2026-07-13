@@ -35,7 +35,27 @@
 				f.name.toLowerCase().includes(query.toLowerCase()) ||
 				f.id.toLowerCase().includes(query.toLowerCase())
 		)
-		.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	// llens: badge をやめ、種別(Attachment / Filter / Action / Pipe)ごとにセクション分割して表示する
+	// (ツール一覧の 組み込み/カスタム 分割と同じ様式)。未知の type は末尾に Other としてまとめる。
+	const FUNCTION_TYPES = [
+		{ type: 'attachment', label: 'Attachment' },
+		{ type: 'filter', label: 'Filter' },
+		{ type: 'action', label: 'Action' },
+		{ type: 'pipe', label: 'Pipe' }
+	];
+	let groupedItems: any[] = [];
+	$: {
+		const known = new Set(FUNCTION_TYPES.map((t) => t.type));
+		const groups = FUNCTION_TYPES.map((t) => ({
+			label: t.label,
+			items: filteredItems.filter((f: any) => f.type === t.type)
+		}));
+		const others = filteredItems.filter((f: any) => !known.has(f.type));
+		if (others.length) groups.push({ label: 'Other', items: others });
+		groupedItems = groups.filter((g) => g.items.length);
+	}
 
 	const deleteHandler = async (func) => {
 		const res = await deleteFunctionById(func.id).catch((error) => {
@@ -90,41 +110,37 @@
 	</div>
 </div>
 
-<div class="mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
-	{#each filteredItems as func (func.id)}
-		<div
-			class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl"
-		>
-			<a
-				class=" flex flex-1 space-x-3.5 cursor-pointer w-full min-w-0"
-				href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
+{#each groupedItems as group (group.label)}
+	<div class="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5 mt-1 mb-1">
+		{group.label}
+	</div>
+	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+		{#each group.items as func (func.id)}
+			<div
+				class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl"
 			>
-				<div class="flex items-center text-left min-w-0">
-					<div class=" flex-1 self-center pl-1 min-w-0">
-						<div class=" font-semibold flex items-center gap-1.5">
-							<div
-								class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-gray-700 dark:text-gray-200"
-							>
-								{func.type}
-							</div>
-
-							<div class=" line-clamp-1">
+				<a
+					class=" flex flex-1 space-x-3.5 cursor-pointer w-full min-w-0"
+					href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
+				>
+					<div class="flex items-center text-left min-w-0">
+						<div class=" flex-1 self-center pl-1 min-w-0">
+							<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
 								{func.name}
 							</div>
-						</div>
 
-						<div class="flex gap-1.5 px-1">
-							<div class=" text-gray-500 text-xs font-medium shrink-0">{func.id}</div>
+							<div class="flex gap-1.5 px-1">
+								<div class=" text-gray-500 text-xs font-medium shrink-0">{func.id}</div>
 
-							<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-								{func.description}
+								<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
+									{func.description}
+								</div>
 							</div>
 						</div>
 					</div>
-				</div>
-			</a>
-			<div class="flex flex-row gap-0.5 self-center">
-				<Tooltip content={$i18n.t('Valves')}>
+				</a>
+				<div class="flex flex-row gap-0.5 self-center">
+					<Tooltip content={$i18n.t('Valves')}>
 					<button
 						class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 						type="button"
@@ -171,6 +187,7 @@
 		</div>
 	{/each}
 </div>
+{/each}
 
 <DeleteConfirmDialog
 	bind:show={showDeleteConfirm}
