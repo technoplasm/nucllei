@@ -191,8 +191,17 @@ pythonpath = ["backend", "backend/open_webui"]
 # import path with --app-dir instead of cd-ing there. `--forwarded-allow-ips '*'`
 # trusts the local Vite proxy for X-Forwarded-* (correct redirect URLs).
 dev = "uvicorn open_webui.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
-# Frontend dev server (Vite). Convenience alias for `pnpm dev`.
-dev-web = "pnpm dev"
+
+# open-webui CLI(typer app: `open_webui:app`)への汎用エントリ。任意のサブコマンドを
+# 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
+# typer app を直接呼ぶ。`open_webui` を import パスに載せるため PYTHONPATH=backend が
+# 要る(pytest の pythonpath は taskipy には効かない)。
+#   uv run task cli --help
+#   uv run task cli create-admin --email a@llens.local --name A --password llens-dev
+#   uv run task cli generate-secret-key
+cli = "env PYTHONPATH=backend python -c 'from open_webui import app; app()'"
+# 慣例の dev admin(ken@llens.local / llens-dev)を一発で作る cli の薄いエイリアス。
+create-admin = "env PYTHONPATH=backend python -c 'from open_webui import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
 
 [build-system]
 requires = ["hatchling"]
