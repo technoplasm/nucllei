@@ -27,20 +27,23 @@
 	</div>
 	<div class="flex">
 		{#each Object.keys(capabilities) as capability}
-			<div class=" flex items-center gap-2 mr-3">
-				<Checkbox
-					state={capabilities[capability] ? 'checked' : 'unchecked'}
-					on:change={(e) => {
-						capabilities[capability] = e.detail === 'checked';
-					}}
-				/>
+			<!-- llens(#49): label で行クリックトグル -->
+			<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+				<span class="flex items-center">
+					<Checkbox
+						state={capabilities[capability] ? 'checked' : 'unchecked'}
+						on:change={(e) => {
+							capabilities[capability] = e.detail === 'checked';
+						}}
+					/>
+				</span>
 
 				<div class=" py-0.5 text-sm capitalize">
 					<Tooltip content={render(helpText[capability])}>
 						{$i18n.t(capability)}
 					</Tooltip>
 				</div>
-			</div>
+			</label>
 		{/each}
 	</div>
 </div>

@@ -38,54 +38,45 @@
 			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
 		{/if}
 
-		{#if builtinIds.length > 0}
-			<div class="text-xs text-gray-500 mt-2">{$i18n.t('組み込み')}</div>
-			<div class=" flex items-center mt-1 flex-wrap">
-				{#each builtinIds as tool}
-					<div class=" flex items-center gap-2 mr-3">
-						<div class="self-center flex items-center">
-							<Checkbox
-								state={_tools[tool].selected ? 'checked' : 'unchecked'}
-								on:change={(e) => {
-									_tools[tool].selected = e.detail === 'checked';
-									selectedToolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
-								}}
-							/>
-						</div>
+		{#each [{ label: $i18n.t('組み込み'), ids: builtinIds }, { label: $i18n.t('カスタムツール'), ids: customIds }] as section}
+			{#if section.ids.length > 0}
+				{#if builtinIds.length > 0 && customIds.length > 0}
+					<div class="text-xs text-gray-500 mt-2">{section.label}</div>
+				{/if}
+				<div class="flex flex-col mt-1">
+					{#each section.ids as tool}
+						<!-- llens(#49): skill 表示に倣い、行全体をラベルにして中の関数(specs)まで見せる。
+						     label で包むと中の Checkbox(button)クリックが行全体に効く -->
+						<label class="flex items-start gap-2 mr-3 py-0.5 cursor-pointer">
+							<span class="mt-0.5 shrink-0">
+								<Checkbox
+									state={_tools[tool].selected ? 'checked' : 'unchecked'}
+									on:change={(e) => {
+										_tools[tool].selected = e.detail === 'checked';
+										selectedToolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
+									}}
+								/>
+							</span>
 
-						<Tooltip content={_tools[tool].description ?? ''} placement="top-start">
-							<div class=" py-0.5 text-sm w-full font-medium">
-								{_tools[tool].name}
+							<div class="flex flex-col min-w-0">
+								<Tooltip content={_tools[tool].description ?? ''} placement="top-start">
+									<span class="text-sm font-medium">{_tools[tool].name}</span>
+								</Tooltip>
+
+								{#if (_tools[tool].specs ?? []).length > 0}
+									<div class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500 mt-0.5">
+										{#each _tools[tool].specs as spec}
+											<Tooltip content={spec.description ?? ''} placement="top-start">
+												<span class="font-mono">{spec.name}</span>
+											</Tooltip>
+										{/each}
+									</div>
+								{/if}
 							</div>
-						</Tooltip>
-					</div>
-				{/each}
-			</div>
-		{/if}
-
-		{#if customIds.length > 0}
-			{#if builtinIds.length > 0}
-				<div class="text-xs text-gray-500 mt-2">{$i18n.t('カスタムツール')}</div>
+						</label>
+					{/each}
+				</div>
 			{/if}
-			<div class=" flex items-center mt-1 flex-wrap">
-				{#each customIds as tool}
-					<div class=" flex items-center gap-2 mr-3">
-						<div class="self-center flex items-center">
-							<Checkbox
-								state={_tools[tool].selected ? 'checked' : 'unchecked'}
-								on:change={(e) => {
-									_tools[tool].selected = e.detail === 'checked';
-									selectedToolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
-								}}
-							/>
-						</div>
-
-						<div class=" py-0.5 text-sm w-full capitalize font-medium">
-							{_tools[tool].name}
-						</div>
-					</div>
-				{/each}
-			</div>
-		{/if}
+		{/each}
 	</div>
 </div>

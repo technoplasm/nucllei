@@ -43,16 +43,18 @@
 		{#if skills.length > 0}
 			<div class=" flex flex-col mt-2">
 				{#each Object.keys(_skills) as skillId}
-					<div class=" flex items-center gap-2 mr-3">
-						<div class="self-center flex items-center">
+					<!-- llens(#49): label で包み、行全体クリックでトグル(disabled 時は Checkbox 側が握り潰す) -->
+					<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+						<span class="self-center flex items-center">
 							<Checkbox
+								{disabled}
 								state={_skills[skillId].selected ? 'checked' : 'unchecked'}
 								on:change={(e) => {
 									_skills[skillId].selected = e.detail === 'checked';
 									selectedSkillIds = Object.keys(_skills).filter((id) => _skills[id].selected);
 								}}
 							/>
-						</div>
+						</span>
 
 						<div class=" py-0.5 text-sm w-full font-medium flex items-center gap-1.5">
 							<span class="text-gray-500">/{_skills[skillId].id}</span>
@@ -69,7 +71,7 @@
 								</Tooltip>
 							{/if}
 						</div>
-					</div>
+					</label>
 				{/each}
 			</div>
 		{:else}

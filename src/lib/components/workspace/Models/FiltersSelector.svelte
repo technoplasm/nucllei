@@ -31,10 +31,10 @@
 	<div class="flex flex-col">
 		{#if filters.length > 0}
 			<div class=" flex items-center mt-2 flex-wrap">
-				{#each Object.keys(_filters) as filter, filterIdx}
-					<div class=" flex items-center gap-2 mr-3">
-						<div class="self-center flex items-center">
-							<!-- llens(#46): is_global 撤去 → 強制 checked+disabled をやめ、モデル別に自由トグル -->
+				{#each Object.keys(_filters) as filter}
+					<!-- llens(#46): is_global 撤去 → モデル別に自由トグル。#49: label で行クリックトグル -->
+					<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+						<span class="self-center flex items-center">
 							<Checkbox
 								state={_filters[filter].selected ? 'checked' : 'unchecked'}
 								on:change={(e) => {
@@ -42,14 +42,14 @@
 									selectedFilterIds = Object.keys(_filters).filter((t) => _filters[t].selected);
 								}}
 							/>
-						</div>
+						</span>
 
 						<div class=" py-0.5 text-sm w-full capitalize font-medium">
 							<Tooltip content={_filters[filter].description}>
 								{_filters[filter].name}
 							</Tooltip>
 						</div>
-					</div>
+					</label>
 				{/each}
 			</div>
 		{:else}

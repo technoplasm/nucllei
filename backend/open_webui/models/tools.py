@@ -95,6 +95,9 @@ class ToolResponse(BaseModel):
 
 class ToolUserResponse(ToolResponse):
     user: Optional[UserResponse] = None
+    # llens(#49): tool の関数一覧(specs)を picker で見せるため露出。
+    # content は含めない(定義そのものは admin の /list・/id で扱う)
+    specs: list[dict] = []
 
 
 class ToolForm(BaseModel):

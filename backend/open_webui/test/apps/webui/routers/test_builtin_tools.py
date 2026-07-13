@@ -135,6 +135,16 @@ class TestBuiltinTools(AbstractPostgresTest):
         )
         assert "list_history" in granted
 
+    def test_tools_list_endpoint_exposes_specs(self):
+        """llens(#49): GET /tools/ が specs(関数一覧)を返す — picker が中身を表示するため。"""
+        self._sync()
+        with mock_webui_user(id="admin1", role="admin"):
+            res = self.fast_api_client.get(self.create_url("/"))
+        assert res.status_code == 200
+        row = next(t for t in res.json() if t["id"] == "builtin_history")
+        spec_names = {s["name"] for s in row["specs"]}
+        assert spec_names == {"list_history", "read_history", "grep_history"}
+
 
 class TestBuiltinHistoryTool(AbstractPostgresTest):
     """履歴管理ツール(builtin_history)の挙動(#42 本実装)。owner-only を固定する。"""

@@ -612,20 +612,23 @@
 							<div class=" self-center text-sm font-semibold">{$i18n.t('Features')}</div>
 						</div>
 
-						<div class="flex items-center gap-2 mr-3">
-							<Checkbox
-								state={featureSkills ? 'checked' : 'unchecked'}
-								on:change={(e) => {
-									featureSkills = e.detail === 'checked';
-								}}
-							/>
+						<!-- llens(#49): label で行クリックトグル -->
+						<label class="flex items-center gap-2 mr-3 cursor-pointer">
+							<span class="flex items-center">
+								<Checkbox
+									state={featureSkills ? 'checked' : 'unchecked'}
+									on:change={(e) => {
+										featureSkills = e.detail === 'checked';
+									}}
+								/>
+							</span>
 							<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
 								<span class="font-medium">{$i18n.t('Skills')}</span>
 								<span class="text-xs text-gray-500"
 									>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
 								>
 							</div>
-						</div>
+						</label>
 
 						<div class="mt-2">
 							<SkillsSelector
