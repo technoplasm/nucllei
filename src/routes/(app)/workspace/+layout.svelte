@@ -10,6 +10,25 @@
 
 	let loaded = false;
 
+	// llens: workspace 上部メニューは宣言的に定義する。並び・ラベル・表示条件(show)はこの配列だけで
+	// 管理し、マークアップは下の {#each} 一箇所。ラベルは $i18n.t(label) で翻訳する。
+	// (#48 Knowledge はメニュー撤去 / #69 Files は全ユーザー / #19 Chats は admin のチャット閲覧)
+	const WORKSPACE_TABS = [
+		{ label: 'Models', path: 'models', show: (u: any) => u?.role === 'admin' },
+		{ label: 'Files', path: 'files', show: (_u: any) => true },
+		{
+			label: 'Skills',
+			path: 'skills',
+			show: (u: any) => u?.role === 'admin' || u?.permissions?.workspace?.skills
+		},
+		{ label: 'Tools', path: 'tools', show: (u: any) => u?.role === 'admin' },
+		{ label: 'Functions', path: 'functions', show: (u: any) => u?.role === 'admin' },
+		{ label: 'Users', path: 'users', show: (u: any) => u?.role === 'admin' },
+		{ label: 'Chats', path: 'chats', show: (u: any) => u?.role === 'admin' },
+		{ label: 'Settings', path: 'settings', show: (u: any) => u?.role === 'admin' }
+	];
+	$: visibleWorkspaceTabs = WORKSPACE_TABS.filter((t) => t.show($user));
+
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
 			const path = $page.url.pathname;
@@ -47,8 +66,9 @@
 			: ''} max-w-full"
 	>
 		<nav class="   px-2.5 pt-1 backdrop-blur-xl drag-region">
-			<div class=" flex items-center gap-1">
-				<div class="{$showSidebar ? 'md:hidden' : ''} self-center flex flex-none items-center">
+			<!-- llens(#34): 上部メニューも本文と同じ max-w-5xl 中央寄せに揃える -->
+			<div class=" flex items-center gap-1 max-w-5xl mx-auto w-full">
+				<div class="{$showSidebar ? 'md:hidden' : ''} self-center flex flex-none items-center px-1.5">
 					<button
 						id="sidebar-toggle-button"
 						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"
@@ -67,85 +87,17 @@
 					<div
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
-						{#if $user?.role === 'admin'}
+						<!-- タブは WORKSPACE_TABS(script)で宣言的に定義。見た目はこの 1 ブロックだけで変えられる -->
+						{#each visibleWorkspaceTabs as tab (tab.path)}
 							<a
 								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/models'
+									`/workspace/${tab.path}`
 								)
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/models">{$i18n.t('Models')}</a
+								href={`/workspace/${tab.path}`}>{$i18n.t(tab.label)}</a
 							>
-						{/if}
-
-						<!-- llens(#48): Knowledge はメニューから撤去(KB は llens 不要 — 添付は file_id で
-						     チャット内スコープ、恒久ファイル/RAG は組み込みツール基盤側)。route/backend は温存。 -->
-
-						<!-- llens(#69): ファイル管理は全ログインユーザー(自分の file は誰でも管理できる) -->
-						<a
-							class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/files')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/workspace/files">{$i18n.t('Files')}</a
-						>
-
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/skills'
-								)
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/skills">{$i18n.t('Skills')}</a
-							>
-						{/if}
-
-						{#if $user?.role === 'admin'}
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/tools')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/tools"
-							>
-								{$i18n.t('Tools')}
-							</a>
-						{/if}
-
-						<!-- llens(#48): Admin を Workspace に統合。Functions/Settings/Users は admin 専用タブ。 -->
-						{#if $user?.role === 'admin'}
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/functions'
-								)
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/functions">{$i18n.t('Functions')}</a
-							>
-
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/users')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/users">{$i18n.t('Users')}</a
-							>
-
-							<!-- llens(#19): admin チャット閲覧ビュー(全ユーザーのチャット一覧) -->
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/workspace/chats')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/chats">{$i18n.t('Chats')}</a
-							>
-
-							<a
-								class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes(
-									'/workspace/settings'
-								)
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/settings">{$i18n.t('Settings')}</a
-							>
-						{/if}
+						{/each}
 					</div>
 				</div>
 
@@ -153,8 +105,12 @@
 			</div>
 		</nav>
 
-		<div class="  pb-1 px-[18px] flex-1 max-h-full overflow-y-auto" id="workspace-container">
-			<slot />
+		<div class="pb-1 px-[18px] flex-1 max-h-full overflow-y-auto" id="workspace-container">
+			<!-- llens(#34): workspace 全ページの横幅をここで一元管理(ページごとに max-w がばらつくのを防ぐ)。
+			     個々のページ/エディタは自前で max-w を持たず、この 5xl 中央寄せを継承する。 -->
+			<div class="max-w-5xl mx-auto w-full px-1.5">
+				<slot />
+			</div>
 		</div>
 	</div>
 {/if}
