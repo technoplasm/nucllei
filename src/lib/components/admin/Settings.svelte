@@ -339,8 +339,8 @@
 	</div>
 
 	<div class="flex-1 mt-3 lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
-		<!-- llens(#34): 設定内容は max-w で読める幅に収める(ワイド画面で全幅に間延びさせない) -->
-		<div class="max-w-3xl">
+		<!-- llens(#34): 設定内容は max-w で読める幅に収めて中央寄せ(ワイド画面で全幅に間延びさせない) -->
+		<div class="max-w-3xl mx-auto">
 			{#if selectedTab === 'general'}
 				<General
 					saveHandler={async () => {
