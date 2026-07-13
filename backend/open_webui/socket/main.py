@@ -3,9 +3,8 @@ import socketio
 import logging
 import sys
 import time
-from redis import asyncio as aioredis
 
-from open_webui.models.users import Users, UserNameResponse
+from open_webui.models.users import Users
 from open_webui.models.chats import Chats
 from open_webui.utils.redis import (
     get_sentinels_from_env,
@@ -113,7 +112,7 @@ async def periodic_usage_pool_cleanup():
     try:
         while True:
             if not renew_func():
-                log.error(f"Unable to renew cleanup lock. Exiting usage pool cleanup.")
+                log.error("Unable to renew cleanup lock. Exiting usage pool cleanup.")
                 raise Exception("Unable to renew usage pool cleanup lock.")
 
             now = int(time.time())

@@ -5,8 +5,6 @@
   レガシーデータに残っていても無視される(権限を与えない)ことを固定する。
 """
 
-import time
-
 from test.util.abstract_integration_test import AbstractPostgresTest
 
 
@@ -15,7 +13,7 @@ class TestAccessControl(AbstractPostgresTest):
 
     def setup_method(self):
         super().setup_method()
-        from open_webui.models.groups import GroupForm, Groups
+        from open_webui.models.groups import Groups
         from open_webui.models.users import Users
 
         self.groups = Groups

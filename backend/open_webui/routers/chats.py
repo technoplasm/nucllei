@@ -1,5 +1,4 @@
 import copy
-import json
 import logging
 import uuid
 from typing import Optional
@@ -279,45 +278,6 @@ async def get_chats_by_folder_id(folder_id: str, user=Depends(get_verified_user)
     return [
         ChatResponse(**chat.model_dump())
         for chat in Chats.get_chats_by_folder_ids_and_user_id(folder_ids, user.id)
-    ]
-
-
-############################
-# GetPinnedChats
-############################
-
-
-@router.get("/pinned", response_model=list[ChatResponse])
-async def get_user_pinned_chats(user=Depends(get_verified_user)):
-    return [
-        ChatResponse(**chat.model_dump())
-        for chat in Chats.get_pinned_chats_by_user_id(user.id)
-    ]
-
-
-############################
-# GetChats
-############################
-
-
-@router.get("/all", response_model=list[ChatResponse])
-async def get_user_chats(user=Depends(get_verified_user)):
-    return [
-        ChatResponse(**chat.model_dump())
-        for chat in Chats.get_chats_by_user_id(user.id)
-    ]
-
-
-############################
-# GetArchivedChats
-############################
-
-
-@router.get("/all/archived", response_model=list[ChatResponse])
-async def get_user_archived_chats(user=Depends(get_verified_user)):
-    return [
-        ChatResponse(**chat.model_dump())
-        for chat in Chats.get_archived_chats_by_user_id(user.id)
     ]
 
 

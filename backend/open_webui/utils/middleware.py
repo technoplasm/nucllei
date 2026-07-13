@@ -5,11 +5,8 @@ import os
 import base64
 
 import asyncio
-from aiocache import cached
-import random
 import json
 import html
-import inspect
 import re
 import ast
 
@@ -18,8 +15,8 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 
-from fastapi import Request, HTTPException
-from starlette.responses import Response, StreamingResponse
+from fastapi import Request
+from starlette.responses import StreamingResponse
 
 
 from open_webui.models.chats import Chats
@@ -36,7 +33,6 @@ from open_webui.routers.tasks import (
 from open_webui.routers.images import image_generations, GenerateImageForm
 from open_webui.routers.pipelines import (
     process_pipeline_inlet_filter,
-    process_pipeline_outlet_filter,
 )
 
 from open_webui.utils.webhook import post_webhook
@@ -44,7 +40,6 @@ from open_webui.utils.webhook import post_webhook
 
 from open_webui.models.users import UserModel
 from open_webui.models.functions import Functions
-from open_webui.models.models import Models
 
 from open_webui.retrieval.utils import get_sources_from_files
 
@@ -55,7 +50,6 @@ from open_webui.utils.task import (
     prompt_template,
 )
 from open_webui.utils.misc import (
-    deep_update,
     get_message_list,
     add_or_update_system_message,
     add_or_update_user_message,
@@ -71,7 +65,6 @@ from open_webui.utils.access_control import (
     has_read_access_to_collection,
 )
 from open_webui.utils.tools import get_tools
-from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
@@ -92,7 +85,6 @@ from open_webui.config import (
 from open_webui.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
-    BYPASS_MODEL_ACCESS_CONTROL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     ENABLE_REALTIME_CHAT_SAVE,
 )
@@ -119,7 +111,6 @@ async def chat_image_generation_handler(
     user_message = get_last_user_message(messages)
 
     prompt = user_message
-    negative_prompt = ""
 
     if request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
         try:
@@ -144,7 +135,7 @@ async def chat_image_generation_handler(
                 response = response[bracket_start:bracket_end]
                 response = json.loads(response)
                 prompt = response.get("prompt", [])
-            except Exception as e:
+            except Exception:
                 prompt = user_message
 
         except Exception as e:
@@ -189,7 +180,7 @@ async def chat_image_generation_handler(
             {
                 "type": "status",
                 "data": {
-                    "description": f"An error occurred while generating an image",
+                    "description": "An error occurred while generating an image",
                     "done": True,
                 },
             }
@@ -689,7 +680,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         files.extend(knowledge_files)
         form_data["files"] = files
 
-    variables = form_data.pop("variables", None)
+    # 送信された variables は本経路では使わないが、payload からは除く
+    form_data.pop("variables", None)
 
     # Process the form_data through the pipeline
     try:
@@ -999,7 +991,7 @@ async def process_chat_response(
                                 title = json.loads(title_string).get(
                                     "title", "New Chat"
                                 )
-                            except Exception as e:
+                            except Exception:
                                 title = ""
 
                             if not title:
@@ -1539,7 +1531,7 @@ async def process_chat_response(
                     last_assistant_message = get_last_assistant_message(
                         form_data["messages"]
                     )
-            except Exception as e:
+            except Exception:
                 pass
 
             content = (

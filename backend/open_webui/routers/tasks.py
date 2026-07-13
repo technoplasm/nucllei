@@ -189,7 +189,7 @@ async def generate_title(
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)
-    except Exception as e:
+    except Exception:
         log.error("Exception occurred", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,7 +252,7 @@ async def generate_image_prompt(
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)
-    except Exception as e:
+    except Exception:
         log.error("Exception occurred", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,

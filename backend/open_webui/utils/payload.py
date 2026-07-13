@@ -75,7 +75,7 @@ def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
     }
 
     for key, value in name_differences.items():
-        if (param := params.get(key, None)) is not None:
+        if params.get(key, None) is not None:
             # Copy the parameter to new name then delete it, to prevent Ollama warning of invalid option provided
             params[value] = params[key]
             del params[key]

@@ -45,7 +45,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.access_control import get_permissions
 
-from typing import Optional, List
+from typing import Optional
 
 from ssl import CERT_REQUIRED, PROTOCOL_TLS
 
@@ -166,7 +166,6 @@ async def update_password(
 @router.post("/ldap", response_model=SessionUserResponse)
 async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
     ENABLE_LDAP = request.app.state.config.ENABLE_LDAP
-    LDAP_SERVER_LABEL = request.app.state.config.LDAP_SERVER_LABEL
     LDAP_SERVER_HOST = request.app.state.config.LDAP_SERVER_HOST
     LDAP_SERVER_PORT = request.app.state.config.LDAP_SERVER_PORT
     LDAP_ATTRIBUTE_FOR_MAIL = request.app.state.config.LDAP_ATTRIBUTE_FOR_MAIL

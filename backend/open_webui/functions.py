@@ -7,16 +7,9 @@ import asyncio
 from pydantic import BaseModel
 from typing import AsyncGenerator, Generator, Iterator
 from fastapi import (
-    Depends,
-    FastAPI,
-    File,
-    Form,
-    HTTPException,
     Request,
-    UploadFile,
-    status,
 )
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import StreamingResponse
 
 
 from open_webui.socket.main import (
@@ -30,14 +23,10 @@ from open_webui.models.models import Models
 
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.tools import get_tools
-from open_webui.utils.access_control import has_access
 
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 
 from open_webui.utils.misc import (
-    add_or_update_system_message,
-    get_last_user_message,
-    prepend_to_first_user_message_content,
     openai_chat_chunk_message_template,
     openai_chat_completion_message_template,
 )

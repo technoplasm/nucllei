@@ -3,7 +3,6 @@ import math
 import re
 from datetime import datetime
 from typing import Optional
-import uuid
 
 
 from open_webui.utils.misc import get_last_user_message, get_messages_content

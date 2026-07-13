@@ -149,6 +149,7 @@ open-webui = "open_webui:app"
 dev = [
     "black==25.1.0",
     "playwright==1.49.1",
+    "ruff==0.14.4",
     "docker~=7.1.0",
     "pytest~=8.3.2",
     "pytest-docker~=3.1.1",
@@ -156,6 +157,18 @@ dev = [
     "gcp-storage-emulator>=2024.8.3",
     "taskipy>=1.14.1",
 ]
+
+[tool.ruff]
+# llens(#25): lint は「正しさ系のみ・green 維持」。整形は black が担う。
+# マイグレーション(peewee_migrate / alembic)は歴史的資産 — lint しない。
+extend-exclude = [
+    "backend/open_webui/internal/migrations",
+    "backend/open_webui/migrations",
+]
+
+[tool.ruff.lint]
+# E9 = 構文/実行時エラー級、F = pyflakes(未定義名・未使用 import 等)
+select = ["E9", "F"]
 
 [tool.uv]
 # Treat this as a virtual project: `uv sync` installs dependencies into .venv

@@ -13,7 +13,7 @@
 		"lint": "pnpm lint:frontend ; pnpm lint:types ; pnpm lint:backend",
 		"lint:frontend": "eslint . --fix",
 		"lint:types": "pnpm check",
-		"lint:backend": "pylint backend/",
+		"lint:backend": "uv run ruff check backend/open_webui",
 		"format": "prettier --plugin-search-dir --write \"**/*.{js,ts,svelte,css,md,html,json}\"",
 		"format:backend": "black . --exclude \".venv/|/venv/\"",
 		"i18n:parse": "i18next --config i18next-parser.config.ts && prettier --write \"src/lib/i18n/**/*.{js,json}\"",

@@ -11,3 +11,8 @@ node_modules
 pnpm-lock.yaml
 package-lock.json
 yarn.lock
+
+# llens: マシン固有 symlink(他リポジトリ)と vendored バンドルは lint 対象外
+_links
+backend/open_webui/static
+static

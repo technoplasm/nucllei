@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import shutil
-import base64
 import redis
 
 from datetime import datetime
@@ -16,11 +15,7 @@ from sqlalchemy import JSON, Column, DateTime, Integer, func
 
 from open_webui.env import (
     DATA_DIR,
-    DATABASE_URL,
     ENV,
-    REDIS_URL,
-    REDIS_SENTINEL_HOSTS,
-    REDIS_SENTINEL_PORT,
     FRONTEND_BUILD_DIR,
     OFFLINE_MODE,
     OPEN_WEBUI_DIR,

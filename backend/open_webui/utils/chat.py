@@ -1,16 +1,12 @@
-import time
 import logging
 import sys
 
-from aiocache import cached
-from typing import Any, Optional
+from typing import Any
 import inspect
 
-from fastapi import Request, status
-from starlette.responses import Response, StreamingResponse, JSONResponse
+from fastapi import Request
+from starlette.responses import StreamingResponse
 
-
-from open_webui.models.users import UserModel
 
 from open_webui.socket.main import (
     get_event_call,
@@ -27,12 +23,10 @@ from open_webui.routers.ollama import (
 )
 
 from open_webui.routers.pipelines import (
-    process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
 )
 
 from open_webui.models.functions import Functions
-from open_webui.models.models import Models
 
 
 from open_webui.utils.plugin import load_function_module_by_id

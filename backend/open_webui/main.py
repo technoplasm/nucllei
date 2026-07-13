@@ -1,36 +1,26 @@
 import asyncio
-import inspect
 import json
 import logging
 import mimetypes
 import os
-import shutil
 import sys
 import time
-import random
 
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode, parse_qs, urlparse
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from typing import Optional
-from aiocache import cached
-import aiohttp
 import requests
 
 
 from fastapi import (
     Depends,
     FastAPI,
-    File,
-    Form,
     HTTPException,
     Request,
-    UploadFile,
     status,
     applications,
-    BackgroundTasks,
 )
 
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -42,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import Response
 
 
 from open_webui.builtin_tools import sync_builtin_tools
@@ -78,7 +68,7 @@ from open_webui.routers import (
 from open_webui.internal.db import Session, engine
 
 from open_webui.models.models import Models
-from open_webui.models.users import UserModel, Users
+from open_webui.models.users import Users
 from open_webui.models.chats import Chats
 
 from open_webui.config import (
@@ -148,17 +138,12 @@ from open_webui.config import (
     WHISPER_CPU_THREADS,
     WHISPER_NUM_WORKERS,
     DEEPGRAM_API_KEY,
-    WHISPER_MODEL_AUTO_UPDATE,
-    WHISPER_MODEL_DIR,
-    # Attachment(#52 / #69)
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_MAX_SIZE,
     ATTACHMENT_ALLOWED_EXTENSIONS,
     ATTACHMENT_FUNCTION_ID,
     TIKTOKEN_ENCODING_NAME,
     # Retrieval (Web Search)
-    UPLOAD_DIR,
-    # WebUI
     WEBUI_AUTH,
     WEBUI_NAME,
     WEBUI_BANNERS,
@@ -242,7 +227,6 @@ from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
     BYPASS_MODEL_ACCESS_CONTROL,
     RESET_CONFIG_ON_START,
-    OFFLINE_MODE,
     ENABLE_OTEL,
     EXTERNAL_PWA_MANIFEST_URL,
 )

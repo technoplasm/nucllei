@@ -1,5 +1,4 @@
 import logging
-import json
 import time
 import uuid
 from typing import Optional
@@ -9,9 +8,8 @@ from open_webui.env import SRC_LOG_LEVELS
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
-from sqlalchemy import or_, func, select, and_, text
+from sqlalchemy import or_, func, text
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy.sql import exists
 
 ####################
 # Chat DB Schema

@@ -315,8 +315,6 @@ class OAuthManager:
                 Users.update_user_role_by_id(user.id, determined_role)
 
         if not user:
-            user_count = Users.get_num_users()
-
             # If the user does not exist, check if signups are enabled
             if auth_manager_config.ENABLE_OAUTH_SIGNUP:
                 # Check if an existing user with the same email already exists

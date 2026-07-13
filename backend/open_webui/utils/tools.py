@@ -1,32 +1,25 @@
 import inspect
 import logging
 import re
-import inspect
 import aiohttp
 import asyncio
 import yaml
 
 from pydantic import BaseModel
-from pydantic.fields import FieldInfo
 from typing import (
     Any,
     Awaitable,
     Callable,
     get_type_hints,
-    get_args,
-    get_origin,
     Dict,
     List,
-    Tuple,
-    Union,
     Optional,
-    Type,
 )
 from functools import update_wrapper, partial
 
 
 from fastapi import Request
-from pydantic import BaseModel, Field, create_model
+from pydantic import Field, create_model
 
 from langchain_core.utils.function_calling import (
     convert_to_openai_function as convert_pydantic_model_to_openai_function_spec,

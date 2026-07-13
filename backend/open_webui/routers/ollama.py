@@ -22,14 +22,12 @@ from open_webui.env import (
 
 from fastapi import (
     Depends,
-    FastAPI,
     File,
     HTTPException,
     Request,
     UploadFile,
     APIRouter,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, validator
 from starlette.background import BackgroundTask
@@ -52,7 +50,6 @@ from open_webui.config import (
     UPLOAD_DIR,
 )
 from open_webui.env import (
-    ENV,
     SRC_LOG_LEVELS,
     AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
@@ -1611,7 +1608,7 @@ async def upload_model(
                 response = await asyncio.to_thread(requests.post, url, data=f)
 
             if response.ok:
-                log.info(f"Uploaded to /api/blobs")  # DEBUG
+                log.info("Uploaded to /api/blobs")  # DEBUG
                 # Remove local file
                 os.remove(file_path)
 
@@ -1636,7 +1633,7 @@ async def upload_model(
                 )
 
                 if create_resp.ok:
-                    log.info(f"API SUCCESS!")  # DEBUG
+                    log.info("API SUCCESS!")  # DEBUG
                     done_msg = {
                         "done": True,
                         "blob": f"sha256:{file_hash}",

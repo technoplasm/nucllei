@@ -317,7 +317,7 @@ class TestAuths(AbstractPostgresTest):
         import open_webui.models.auths as auths_mod
         from open_webui.utils.auth import get_password_hash
 
-        created = self.auths.insert_new_auth(
+        self.auths.insert_new_auth(
             email="real@openwebui.com",
             password=get_password_hash("correct-horse"),
             name="Real",

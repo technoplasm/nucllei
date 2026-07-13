@@ -2,7 +2,12 @@ import logging
 from contextvars import ContextVar
 
 from open_webui.env import SRC_LOG_LEVELS
-from peewee import *
+
+# llens(#25): `from peewee import *` を明示 import 化(lint F403)。
+# reconnect_errors の OperationalError/InterfaceError は元コメントで psycopg2 と
+# されていたが、star import 下で実際に束縛されていたのは peewee のクラス —
+# 挙動保存のため peewee から明示 import する。
+from peewee import InterfaceError, OperationalError, SqliteDatabase
 from peewee import InterfaceError as PeeWeeInterfaceError
 from peewee import PostgresqlDatabase
 from playhouse.db_url import connect, parse

@@ -10,8 +10,6 @@ from open_webui.models.users import Users, UserResponse
 
 from pydantic import BaseModel, ConfigDict
 
-from sqlalchemy import or_, and_, func
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy import BigInteger, Column, Text, JSON, Boolean
 
 
@@ -231,10 +229,8 @@ class ModelsTable:
         try:
             with get_db() as db:
                 # update only the fields that are present in the model
-                result = (
-                    db.query(Model)
-                    .filter_by(id=id)
-                    .update(model.model_dump(exclude={"id"}))
+                db.query(Model).filter_by(id=id).update(
+                    model.model_dump(exclude={"id"})
                 )
                 db.commit()
 

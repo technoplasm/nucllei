@@ -1,6 +1,4 @@
-import socketio
 import redis
-from redis import asyncio as aioredis
 from urllib.parse import urlparse
 
 
