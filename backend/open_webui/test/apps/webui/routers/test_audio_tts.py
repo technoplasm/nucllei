@@ -149,6 +149,41 @@ class TestOpenAICompatTTS(AbstractPostgresTest):
         assert "voicevox-tts" in model_ids
 
 
+def test_set_faster_whisper_model_passes_thread_knobs(monkeypatch):
+    """WHISPER_CPU_THREADS / WHISPER_NUM_WORKERS が WhisperModel まで届く(#53 フォロー)。
+
+    faster-whisper は local-ml extra のため、fake モジュールを注入して kwargs だけ固定する。
+    """
+    import sys
+    import types
+
+    captured = {}
+
+    class FakeWhisperModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+
+    from open_webui.routers.audio import set_faster_whisper_model
+
+    model = set_faster_whisper_model(
+        "large-v3-turbo", compute_type="int8", cpu_threads=16, num_workers=2
+    )
+    assert isinstance(model, FakeWhisperModel)
+    assert captured["cpu_threads"] == 16
+    assert captured["num_workers"] == 2
+    assert captured["compute_type"] == "int8"
+
+    # 既定値(未指定)はライブラリ既定と同じ 0 / 1
+    captured.clear()
+    set_faster_whisper_model("large-v3-turbo")
+    assert captured["cpu_threads"] == 0
+    assert captured["num_workers"] == 1
+
+
 def make_silent_wav(seconds=0.2, rate=8000):
     import io
     import wave

@@ -1939,6 +1939,23 @@ WHISPER_COMPUTE_TYPE = RuntimeConfig(
     os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
 )
 
+# llens 追加(#53 フォロー): faster-whisper のスレッド系つまみ(強い CPU 向け)。
+# CPU_THREADS = 1 本の文字起こしの計算スレッド数(0 = CTranslate2 の既定。
+#   既定は環境依存で強い CPU を使い切る保証がないため、本気運用では明示指定)
+# NUM_WORKERS = 同時に走れる文字起こしの本数(既定 1 = 並列リクエストは
+#   モデル内で直列化される。CTranslate2 は推論中 GIL を解放するので >1 で真の並列)
+WHISPER_CPU_THREADS = RuntimeConfig(
+    "WHISPER_CPU_THREADS",
+    "audio.stt.whisper_cpu_threads",
+    int(os.getenv("WHISPER_CPU_THREADS", "0")),
+)
+
+WHISPER_NUM_WORKERS = RuntimeConfig(
+    "WHISPER_NUM_WORKERS",
+    "audio.stt.whisper_num_workers",
+    int(os.getenv("WHISPER_NUM_WORKERS", "1")),
+)
+
 
 # Add Deepgram configuration
 DEEPGRAM_API_KEY = RuntimeConfig(

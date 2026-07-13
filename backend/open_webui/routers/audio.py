@@ -95,7 +95,11 @@ def convert_audio_to_wav(file_path, output_path, conversion_type):
 
 
 def set_faster_whisper_model(
-    model: str, auto_update: bool = False, compute_type: str = "int8"
+    model: str,
+    auto_update: bool = False,
+    compute_type: str = "int8",
+    cpu_threads: int = 0,
+    num_workers: int = 1,
 ):
     whisper_model = None
     if model:
@@ -105,6 +109,9 @@ def set_faster_whisper_model(
             "model_size_or_path": model,
             "device": DEVICE_TYPE if DEVICE_TYPE and DEVICE_TYPE == "cuda" else "cpu",
             "compute_type": compute_type,
+            # llens(#53 フォロー): 強い CPU 向けのスレッド系つまみ(config.py 参照)
+            "cpu_threads": cpu_threads,
+            "num_workers": num_workers,
             "download_root": WHISPER_MODEL_DIR,
             "local_files_only": not auto_update,
         }
@@ -215,6 +222,8 @@ async def update_audio_config(
             form_data.stt.WHISPER_MODEL,
             WHISPER_MODEL_AUTO_UPDATE,
             compute_type=request.app.state.config.WHISPER_COMPUTE_TYPE,
+            cpu_threads=request.app.state.config.WHISPER_CPU_THREADS,
+            num_workers=request.app.state.config.WHISPER_NUM_WORKERS,
         )
 
     return {
@@ -478,6 +487,8 @@ def transcribe(request: Request, file_path):
             request.app.state.faster_whisper_model = set_faster_whisper_model(
                 request.app.state.config.WHISPER_MODEL,
                 compute_type=request.app.state.config.WHISPER_COMPUTE_TYPE,
+                cpu_threads=request.app.state.config.WHISPER_CPU_THREADS,
+                num_workers=request.app.state.config.WHISPER_NUM_WORKERS,
             )
 
         model = request.app.state.faster_whisper_model
