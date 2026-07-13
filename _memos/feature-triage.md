@@ -7,7 +7,7 @@
 | ナレッジベース(組み込み) | **不要・撤去済み(#48 ナビ / #52 で完全撤去)** | 独自実装が別にあるため。#48 で Workspace ナビから撤去。**改訂(2026-07-08 #52 第2セッション): route/backend も完全撤去**(workspace KB 画面・チャット `#` ピッカー・モデル KB 割当・knowledge store・knowledge router 全 endpoint)。温存は `models/knowledge.py`(Knowledges)のみ(access_control #40 / IDOR test 結線) |
 | Documents(文書抽出) | **Docling が使えれば十分(実体は prism)** | ~~v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)~~ → **改訂(2026-07-08 #52): fork の抽出 preset(extract_file_text/Loader/CONTENT_EXTRACTION_ENGINE 等)は撤去。docling 抽出は案件層(prism)の Attachment Function が直接叩く(`owui/attachments/docling_extract.py`)。fork は「仕組み」だけ** |
 | RAG / retrieval | **一切不使用・撤去済み(#52)** | 将来必要になってもツール側で実装。**2026-07-08: embedding/vector/reranking/chunk/RAG_TEMPLATE を config から完全排除** |
-| Web 検索 | **残す(組み込みツールとして提供)** | OWUI 組み込みの RAG/検索経路ではなく、llens の組み込みツール枠で提供(#51)。RAG/Documents/Docling とは完全に別物 |
+| Web 検索 | **残す(prism tool → 外部検索システム直叩き)** | 改訂(2026-07-13、#51 close): 当初の「fork 組み込みツール」案を撤回 — docling と同じ線引きで **fork は何も持たず**、prism の tool が SearXNG 等を Valves 設定で直接叩く。fork の WEB_SEARCH_* config・providers・管理画面は全撤去(`eae47a4bd`)。閉域本体では成立しない機能(メタ検索も外向き通信必須)= 非閉域の横展開先向け |
 | 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで |
 | コード実行(組み込み Pyodide/Jupyter) | **無くてもよい** | nsjail+IPython は自前ツール側で提供。Pyodide には戻さない(fork.md §6) |
 | 会話検索 | **必要・維持** | v0.6.5 に存在(タイトル+本文検索)。デグレさせない |

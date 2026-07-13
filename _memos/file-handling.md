@@ -261,7 +261,7 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
     併せて `middleware.py::_file_entry_is_readable` の `file_type in ("web_search","text")` 死に分岐も撤去
     (末尾 `return True` の fallthrough と冗長・両型とも生成されない)。IDOR テストの web_search 例は汎用インライン項目へ。
   - 残(軽微・後続): orphan i18n キー("Web Search" 等)は end-game i18n(#34)で一括 prune。
-- **prism 層**: web 検索 tool(内部検索 API を叩く)/ ③gate / PDF→VLM / ④sandbox tool。
+- **prism 層**: web 検索 tool(**改訂 2026-07-13、#51**: fork の内部検索 API 案は撤回 — SearXNG 等の外部検索システムを Valves 設定で直叩き。fork の WEB_SEARCH_* config / retrieval/web providers は全撤去 `eae47a4bd`)/ ③gate / PDF→VLM / ④sandbox tool。
 
 ## 改訂(2026-07-12、#69 ファイル管理機構)
 

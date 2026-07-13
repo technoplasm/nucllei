@@ -33,7 +33,7 @@ llens として upstream v0.6.5 の既定値から変更した設定の一覧。
 
 変更していない(upstream 既定のまま llens 要件に合致):
 
-- `ENABLE_WEB_SEARCH=False`、`ENABLE_LDAP=False`、`ENABLE_OAUTH_SIGNUP=False`
+- ~~`ENABLE_WEB_SEARCH=False`~~(config ごと撤去 2026-07-13、#51 — 検索は prism tool 直叩き)、`ENABLE_LDAP=False`、`ENABLE_OAUTH_SIGNUP=False`
 - 認証まわりは `_memos/auth-profile.md` 参照(signup 初回後自動 OFF 等)
 - TTS/STT は `_memos/dev-env.md`・issue #12 参照
 
