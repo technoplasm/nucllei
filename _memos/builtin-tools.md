@@ -123,8 +123,10 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
 (表示専用 — ロード分岐と更新保護はレジストリ id が真実源)、更新は access_control のみ・
 削除拒否・specs は起動ごとに repo から再生成。
 
-第一弾の組み込みツールは**履歴管理 — 現在はスタブ(TODO 返し)で機構の検証台**。
-本実装は必須でないため後回し(ユーザー判断 2026-07-06):
+第一弾の組み込みツールは**履歴管理 — 本実装済み(2026-07-13、`c0b8a14ce`)**。
+当初はスタブ(TODO 返し)で機構の検証台だったが、**「履歴ツールは OWUI の Chats に
+べったり密結合するので組み込みで提供する」で確定**(ユーザー判断 2026-07-13。#51 で
+web 検索を prism へ出したのと対照 — あちらは外部システム、こちらは fork 内部概念):
 
 - `list_history` / `read_history` / `grep_history`(関数名は snake_case — `/xxx` は
   skill command の記法なので混ぜない)
@@ -163,7 +165,7 @@ Kimi の tool call は厳密 JSON で現行パーサ一次経路が成立(#15 �
 
 ### pytest(backend、sandbox は HTTP モック — CI で実コンテナに依存しない)
 
-組み込みツール機構 + モデル設定(R1)。**T1〜T5 出荷済み(2026-07-06)**、T6 は本実装待ち:
+組み込みツール機構 + モデル設定(R1)。**T1〜T6 出荷済み**(T1〜T5=2026-07-06 / T6=2026-07-13):
 - [x] T1: builtin id 解決 — builtin 行の tool が tools_dict に spec/callable 付きで載る
   (`test_builtin_tools.py::test_sync_creates_builtin_row_and_get_tools_loads_module`)
 - [x] T2: builtin 行の保護 — content 更新・削除・create 横取りを拒否、access_control のみ更新可、
@@ -174,8 +176,8 @@ Kimi の tool call は厳密 JSON で現行パーサ一次経路が成立(#15 �
   (`test_slash_command_requires_model_attachment`)
 - [x] T5: access_control — read 権限の無いユーザーのリクエスト由来 id は無視(4pcg 同型、
   builtin 行にも適用。`test_access_control_guards_builtin_row`)
-- [ ] T6: 履歴ツールの owner-only — 他ユーザーの chat_id を read_history に渡しても見えない。
-  list/grep が本人の chat しか返さない ← 履歴ツール本実装時(#11)
+- [x] T6: 履歴ツールの owner-only — 他ユーザーの chat_id を read_history に渡しても見えない。
+  list/grep が本人の chat しか返さない(2026-07-13、`c0b8a14ce`。テスト5件)
 
 sandbox ツール(R2、respx 等で sandbox API をモック):
 - T7: run_python — /exec_cell へ user_id=呼出ユーザー, chat_id=会話 id が渡る。
@@ -209,7 +211,8 @@ sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の
    基盤バグ 3 件修正、E2E 8/8 PASS。#18 close・#15 結論記載済み
 2. **R1 モデル設定再編 + 組み込み機構** — **完了(2026-07-06、ba01a0f1f/40728a2b7/4f8b5e77d)**:
    機能スキルゲート・`/command` スコープ化・builtin 行 sync・T1〜T5 + E7。#42 にロールアップ
-3. **履歴ツールの本実装(T6、#11)** — 唯一の残。**他と完全に独立した終端タスク**(組み込み機構は
-   完成済みで、スタブの中身を Chats 参照に差し替えるだけ・owner-only)。いつでも着手可・優先度低
+3. ~~**履歴ツールの本実装(T6、#11)**~~ → **完了(2026-07-13、`c0b8a14ce`)**。
+   スタブの中身を Chats 参照(get_chat_list/get_chat_by_id_and_user_id/検索)に差し替え、
+   read_history は get_message_list でスレッド復元。owner-only 固定。builtin-tool 帯に残タスク無し
    (ユーザー判断 2026-07-06)。着手時は E2E に E8(list/read/grep の owner-only)を足す
 4. リリースタグ候補点(D 完了)
