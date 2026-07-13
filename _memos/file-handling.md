@@ -199,8 +199,15 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。
 
 **残り**:
-- **fork 側**: STT・TTS 内部関数(→ **#53**、後回し)。~~`/retrieval/reranking`/`RAG_RERANKING_MODEL`~~
-  → 撤去済み(掃除8a)。
+- **fork 側**: ~~STT・TTS 内部関数(→ **#53**、後回し)~~ → **完了(2026-07-13、`ef116ef6e`)**:
+  `utils/audio.py::transcribe_audio / synthesize_speech`。sync 提供(主 caller = sync tool、
+  async からは to_thread — #28 パターン)。TTS は config 既定 + 引数 voice/model 上書き
+  (en/ja→voice の対応表は caller=prism 層 tool の責務、fork にプリセット config は持たない)、
+  キャッシュキーに voice を含む形へ是正し `/audio/speech` openai 分岐も同関数へ載せ替え。
+  STT は file_id 入力を `data.content` に冪等キャッシュ(attachment core と同型・
+  engine を変えても再文字起こししない割り切り)、path 入力は都度実行(#56 のチャンク呼び対応)。
+  tool 合成音声のチャット上の再生 UI はスコープ外(必要になったら別 issue)。
+  ~~`/retrieval/reranking`/`RAG_RERANKING_MODEL`~~ → 撤去済み(掃除8a)。
 - **FileItemModal の実機確認(次回最優先)**: クリック→モーダルが出ない件で、FileItem の発火条件を
   `data.content` 依存から `data` 有りに修正済み(98652bebe、未抽出/失敗も開くように)。ただし content 有りでも
   出ないなら Markdown 描画等の runtime 問題の可能性 → **実機描画を目視確認**(ブラウザ自動化のファイル添付
