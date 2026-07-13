@@ -431,8 +431,9 @@
 		/>
 
 		{#if !edit || (edit && model)}
+			<!-- llens(#34): 設定と同様に max-w で読める幅に収める(親が justify-center で中央寄せ) -->
 			<form
-				class="flex flex-col w-full"
+				class="flex flex-col w-full max-w-3xl"
 				on:submit|preventDefault={() => {
 					submitHandler();
 				}}
