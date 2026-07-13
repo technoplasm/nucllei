@@ -431,7 +431,9 @@
 		/>
 
 		{#if !edit || (edit && model)}
-			<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ(max-w、親 justify-center で中央寄せ) -->
+			<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ。
+			     横幅は workspace/+layout.svelte 側で一元管理(5xl 中央寄せ)するのでここでは持たない。
+			     lg 未満は flex-col で submenu が上に逃げる。 -->
 			<form
 				class="flex flex-col lg:flex-row w-full gap-3 lg:gap-4"
 				on:submit|preventDefault={() => {
@@ -443,7 +445,7 @@
 					class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
 				>
 					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'general'
 							? ''
 							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
@@ -457,7 +459,7 @@
 					</button>
 
 					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'prompt'
 							? ''
 							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
@@ -471,7 +473,7 @@
 					</button>
 
 					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'advanced'
 							? ''
 							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
@@ -485,9 +487,9 @@
 					</button>
 				</div>
 
-				<!-- 右コンテンツ。名前/ID は全タブ共通ヘッダとしてここに置く -->
+				<!-- 右コンテンツ。名前/ID は全タブ共通ヘッダとしてここに置く。横幅は layout 側で管理。 -->
 				<div class="flex-1 min-w-0">
-					<div class="max-w-3xl mx-auto">
+					<div>
 						<div class="mb-3 flex flex-col">
 							<input
 								class="text-3xl font-semibold w-full bg-transparent outline-hidden"
@@ -520,13 +522,13 @@
 												<img
 													src={info.meta.profile_image_url}
 													alt="model profile"
-													class="rounded-xl size-72 md:size-60 object-cover shrink-0"
+													class="rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
 												/>
 											{:else}
 												<img
 													src={DEFAULT_MODEL_IMAGE_URL}
 													alt="model profile"
-													class=" rounded-xl size-72 md:size-60 object-cover shrink-0"
+													class=" rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
 												/>
 											{/if}
 
