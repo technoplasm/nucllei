@@ -42,8 +42,8 @@ from open_webui.env import (
     ENV,
     SRC_LOG_LEVELS,
     DEVICE_TYPE,
-    ENABLE_FORWARD_USER_INFO_HEADERS,
 )
+from open_webui.utils.audio import SPEECH_CACHE_DIR, synthesize_speech
 
 
 router = APIRouter()
@@ -56,10 +56,6 @@ AZURE_MAX_FILE_SIZE = AZURE_MAX_FILE_SIZE_MB * 1024 * 1024  # Convert MB to byte
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["AUDIO"])
-
-SPEECH_CACHE_DIR = CACHE_DIR / "audio" / "speech"
-SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
 
 ##########################################
 #
@@ -265,6 +261,48 @@ def load_speech_pipeline(request):
 @router.post("/speech")
 async def speech(request: Request, user=Depends(get_verified_user)):
     body = await request.body()
+
+    payload = None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    if request.app.state.config.TTS_ENGINE == "openai":
+        # llens(#53): 内部関数 synthesize_speech へ委譲(キャッシュキーに voice を
+        # 含む形へ是正)。model は従来どおり config を常用し FE 申告は使わない。
+        # sync + requests のため to_thread でループ外へ(#28 のパターン)。
+        try:
+            cache_path = await asyncio.to_thread(
+                synthesize_speech,
+                request,
+                payload.get("input", ""),
+                voice=payload.get("voice"),
+            )
+            return FileResponse(cache_path)
+        except requests.HTTPError as e:
+            r = e.response
+            detail = None
+            try:
+                res = r.json()
+                if "error" in res:
+                    detail = f"External: {res['error'].get('message', '')}"
+            except Exception:
+                detail = f"External: {e}"
+
+            raise HTTPException(
+                status_code=r.status_code if r is not None else 500,
+                detail=detail if detail else "Open WebUI: Server Connection Error",
+            )
+        except Exception as e:
+            log.exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail="Open WebUI: Server Connection Error",
+            )
+
+    # 以降のエンジンは従来どおり body ハッシュのキャッシュ
     name = hashlib.sha256(
         body
         + str(request.app.state.config.TTS_ENGINE).encode("utf-8")
@@ -278,68 +316,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
     if file_path.is_file():
         return FileResponse(file_path)
 
-    payload = None
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except Exception as e:
-        log.exception(e)
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    if request.app.state.config.TTS_ENGINE == "openai":
-        payload["model"] = request.app.state.config.TTS_MODEL
-
-        try:
-            timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
-            async with aiohttp.ClientSession(
-                timeout=timeout, trust_env=True
-            ) as session:
-                async with session.post(
-                    url=f"{request.app.state.config.TTS_OPENAI_API_BASE_URL}/audio/speech",
-                    json=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {request.app.state.config.TTS_OPENAI_API_KEY}",
-                        **(
-                            {
-                                "X-OpenWebUI-User-Name": user.name,
-                                "X-OpenWebUI-User-Id": user.id,
-                                "X-OpenWebUI-User-Email": user.email,
-                                "X-OpenWebUI-User-Role": user.role,
-                            }
-                            if ENABLE_FORWARD_USER_INFO_HEADERS
-                            else {}
-                        ),
-                    },
-                ) as r:
-                    r.raise_for_status()
-
-                    async with aiofiles.open(file_path, "wb") as f:
-                        await f.write(await r.read())
-
-                    async with aiofiles.open(file_body_path, "w") as f:
-                        await f.write(json.dumps(payload))
-
-            return FileResponse(file_path)
-
-        except Exception as e:
-            log.exception(e)
-            detail = None
-
-            try:
-                if r.status != 200:
-                    res = await r.json()
-
-                    if "error" in res:
-                        detail = f"External: {res['error'].get('message', '')}"
-            except Exception:
-                detail = f"External: {e}"
-
-            raise HTTPException(
-                status_code=getattr(r, "status", 500) if r else 500,
-                detail=detail if detail else "Open WebUI: Server Connection Error",
-            )
-
-    elif request.app.state.config.TTS_ENGINE == "elevenlabs":
+    if request.app.state.config.TTS_ENGINE == "elevenlabs":
         voice_id = payload.get("voice", "")
 
         # llens(#28): 同期 requests を含む helper は to_thread でループ外へ
