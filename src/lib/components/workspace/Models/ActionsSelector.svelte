@@ -52,7 +52,7 @@
 				{/each}
 			</div>
 		{:else}
-			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
+			<div class="text-xs text-content-subtle mt-1">{$i18n.t('None')}</div>
 		{/if}
 	</div>
 </div>

@@ -97,7 +97,7 @@
 			deleteHandler(deleteSkill);
 		}}
 	>
-		<div class=" text-sm text-gray-500">
+		<div class=" text-sm text-content-muted">
 			{$i18n.t('This will delete')} <span class="  font-semibold">{deleteSkill.id}</span>.
 		</div>
 	</DeleteConfirmDialog>
@@ -107,7 +107,7 @@
 			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
 				{$i18n.t('Skills')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300"
+				<span class="text-lg font-medium text-content-muted"
 					>{filteredItems.length}</span
 				>
 			</div>
@@ -127,7 +127,7 @@
 
 			<div>
 				<a
-					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
+					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 dark:text-content dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
 					href="/workspace/skills/create"
 				>
 					<Plus className="size-3.5" />
@@ -148,7 +148,7 @@
 					<div class=" flex-1 self-center min-w-0">
 						<div class=" flex items-center gap-2 min-w-0">
 							<div class=" font-semibold line-clamp-1 capitalize">{skill.name}</div>
-							<div class=" text-xs text-gray-500 line-clamp-1 shrink-0">/{skill.id}</div>
+							<div class=" text-xs text-content-muted line-clamp-1 shrink-0">/{skill.id}</div>
 						</div>
 						<div class="px-0.5 text-xs overflow-hidden text-ellipsis line-clamp-1 mt-0.5">
 							{skill.description}
@@ -164,7 +164,7 @@
 					>
 						{#if $user?.role === 'admin'}
 							<button
-								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								class="self-center w-fit text-sm px-2 py-2 dark:text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 								type="button"
 								on:click={() => openAccessControl(skill)}
 							>
@@ -176,7 +176,7 @@
 							</button>
 						{:else}
 							<!-- 公開範囲の変更は admin のみ — 表示だけ -->
-							<div class="self-center w-fit text-sm px-2 py-2 text-gray-400 dark:text-gray-600">
+							<div class="self-center w-fit text-sm px-2 py-2 text-content-subtle">
 								{#if (skill.access_control ?? null) === null}
 									<GlobeAlt className="size-4" />
 								{:else}
@@ -189,7 +189,7 @@
 					{#if $user?.role === 'admin' || skill.user_id === $user?.id}
 						<Tooltip content={$i18n.t('Delete')}>
 							<button
-								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								class="self-center w-fit text-sm px-2 py-2 dark:text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 								type="button"
 								on:click={() => {
 									deleteSkill = skill;

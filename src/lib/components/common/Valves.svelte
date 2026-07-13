@@ -17,7 +17,7 @@
 					{valvesSpec.properties[property].title}
 
 					{#if (valvesSpec?.required ?? []).includes(property)}
-						<span class=" text-gray-500">*required</span>
+						<span class=" text-content-muted">*required</span>
 					{/if}
 				</div>
 
@@ -53,7 +53,7 @@
 					<div class=" flex-1">
 						{#if valvesSpec.properties[property]?.enum ?? null}
 							<select
-								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
 								bind:value={valves[property]}
 								on:change={() => {
 									dispatch('change');
@@ -67,7 +67,7 @@
 							</select>
 						{:else if (valvesSpec.properties[property]?.type ?? null) === 'boolean'}
 							<div class="flex justify-between items-center">
-								<div class="text-xs text-gray-500">
+								<div class="text-xs text-content-muted">
 									{valves[property] ? 'Enabled' : 'Disabled'}
 								</div>
 
@@ -82,7 +82,7 @@
 							</div>
 						{:else if (valvesSpec.properties[property]?.type ?? null) !== 'string'}
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
 								type="text"
 								placeholder={valvesSpec.properties[property].title}
 								bind:value={valves[property]}
@@ -94,7 +94,7 @@
 							/>
 						{:else}
 							<textarea
-								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
 								placeholder={valvesSpec.properties[property].title}
 								bind:value={valves[property]}
 								autocomplete="off"
@@ -109,7 +109,7 @@
 			{/if}
 
 			{#if (valvesSpec.properties[property]?.description ?? null) !== null}
-				<div class="text-xs text-gray-500">
+				<div class="text-xs text-content-muted">
 					{valvesSpec.properties[property].description}
 				</div>
 			{/if}

@@ -22,6 +22,13 @@
 		--sidebar-hover: #e7e7e7; /* light サイドバー行 hover(gray-100 相当) */
 		--sidebar-selected: #dddddd; /* light サイドバー行 選択中(gray-200 相当・hover より濃い) */
 		--line: #d3d3d3; /* light 罫線・区切り線(白背景でなくなった分やや濃いめ) */
+
+		/* テキスト(前景)の意味トークン。実値は raw hex(--surface と同流儀)。
+		   ※ var(--color-gray-*) は @config 構成では :root に出力されず空になるので使わない。
+		   利用側は text-content / text-content-muted / text-content-subtle */
+		--content: #333333; /* light 本文(gray-800 相当) */
+		--content-muted: #9b9b9b; /* light 2次・ラベル(gray-500 相当) */
+		--content-subtle: #b4b4b4; /* light placeholder・disabled(gray-400 相当) */
 	}
 
 	html.dark {
@@ -31,6 +38,9 @@
 		--sidebar-hover: #292929; /* dark サイドバー行 hover(gray-825 相当) */
 		--sidebar-selected: #313131; /* dark サイドバー行 選択中(gray-850) */
 		--line: #404040; /* dark 罫線・区切り線 */
+		--content: #ececec; /* dark 本文(gray-100 相当) */
+		--content-muted: #b4b4b4; /* dark 2次・ラベル(gray-400 相当) */
+		--content-subtle: #9b9b9b; /* dark placeholder・disabled(gray-500 相当) */
 	}
 }
 

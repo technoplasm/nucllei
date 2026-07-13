@@ -165,12 +165,12 @@
 							setFileMode(e.target.value);
 						}}
 					>
-						<option class=" text-gray-700" value="private" selected>{$i18n.t('Private')}</option>
-						<option class=" text-gray-700" value="groups">{$i18n.t('Shared')}</option>
-						<option class=" text-gray-700" value="public">{$i18n.t('Public')}</option>
+						<option class=" text-content" value="private" selected>{$i18n.t('Private')}</option>
+						<option class=" text-content" value="groups">{$i18n.t('Shared')}</option>
+						<option class=" text-content" value="public">{$i18n.t('Public')}</option>
 					</select>
 
-					<div class=" text-xs text-gray-400 font-medium">
+					<div class=" text-xs text-content-muted font-medium">
 						{#if fileMode === 'private'}
 							{$i18n.t('Only you can access')}
 						{:else if fileMode === 'groups'}
@@ -197,13 +197,13 @@
 							}
 						}}
 					>
-						<option class=" text-gray-700" value="private" selected>{$i18n.t('Private')}</option>
+						<option class=" text-content" value="private" selected>{$i18n.t('Private')}</option>
 						{#if allowPublic}
-							<option class=" text-gray-700" value="public" selected>{$i18n.t('Public')}</option>
+							<option class=" text-content" value="public" selected>{$i18n.t('Public')}</option>
 						{/if}
 					</select>
 
-					<div class=" text-xs text-gray-400 font-medium">
+					<div class=" text-xs text-content-muted font-medium">
 						{#if accessControl !== null}
 							{$i18n.t('Only select users and groups with permission can access')}
 						{:else}
@@ -232,15 +232,15 @@
 							<div class="w-full px-0.5">
 								<select
 									class="outline-hidden bg-transparent text-sm rounded-lg block w-full pr-10 max-w-full
-									{selectedGroupId ? '' : 'text-gray-500'}
+									{selectedGroupId ? '' : 'text-content-subtle'}
 									dark:placeholder-gray-500"
 									bind:value={selectedGroupId}
 								>
-									<option class=" text-gray-700" value="" disabled selected
+									<option class=" text-content" value="" disabled selected
 										>{$i18n.t('Select a group')}</option
 									>
 									{#each groups.filter((group) => !(accessControl?.read?.group_ids ?? []).includes(group.id)) as group}
-										<option class=" text-gray-700" value={group.id}>{group.name}</option>
+										<option class=" text-content" value={group.id}>{group.name}</option>
 									{/each}
 								</select>
 							</div>
@@ -281,7 +281,7 @@
 						{/each}
 					{:else}
 						<div class="flex items-center justify-center">
-							<div class="text-gray-500 text-xs text-center py-2 px-10">
+							<div class="text-content-subtle text-xs text-center py-2 px-10">
 								{$i18n.t('No groups with access, add a group to grant access')}
 							</div>
 						</div>

@@ -199,7 +199,7 @@ class Attachment:
 						<div class=" shrink-0 mr-2">
 							<Tooltip content={$i18n.t('Back')}>
 								<button
-									class="w-full text-left text-sm py-1.5 px-1 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
+									class="w-full text-left text-sm py-1.5 px-1 rounded-lg text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
 									on:click={() => {
 										goto('/workspace/functions');
 									}}
@@ -239,7 +239,7 @@ class Attachment:
 						</div>
 					</div>
 
-					<div class="flex gap-0.5 items-center text-xs text-gray-500 px-1">
+					<div class="flex gap-0.5 items-center text-xs text-content-muted px-1">
 						<input
 							class="w-full bg-transparent outline-hidden"
 							type="text"
@@ -300,7 +300,7 @@ class Attachment:
 		saveHandler();
 	}}
 >
-	<div class="text-sm text-gray-500">
+	<div class="text-sm text-content-muted">
 		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
 			<div>
 				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}

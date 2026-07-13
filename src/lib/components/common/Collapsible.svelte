@@ -59,7 +59,7 @@
 
 	export let className = '';
 	export let buttonClassName =
-		'w-fit text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition';
+		'w-fit text-content-muted hover:text-content transition';
 
 	export let id = '';
 	export let title = null;
@@ -238,7 +238,7 @@
 							{#if argDisplays === null || argDisplays.length > 0}
 								<div class="mt-1.5 mb-1">
 									<span
-										class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
+										class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
 										>Arguments</span
 									>
 								</div>
@@ -250,11 +250,11 @@
 									{#each argDisplays as arg (arg.name)}
 										{#if arg.kind === 'scalar'}
 											<div class="text-s font-mono my-0.5 px-0.5" dir="ltr">
-												<span class="text-gray-500 dark:text-gray-400">{arg.name}:</span>
+												<span class="text-content-muted">{arg.name}:</span>
 												<span class="whitespace-pre-wrap">{arg.value}</span>
 											</div>
 										{:else}
-											<div class="text-gray-500 dark:text-gray-400 text-s mt-1 mb-0.5 font-mono">
+											<div class="text-content-muted text-s mt-1 mb-0.5 font-mono">
 												{arg.name}
 											</div>
 											<HljsCode
@@ -269,7 +269,7 @@
 								{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
 								<div class="mt-3 mb-1">
 									<span
-										class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
+										class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
 										>Result</span
 									>
 								</div>
@@ -280,7 +280,7 @@
 										{#if resultDisplay.tools.length > 0}
 											<div class="mt-1.5 mb-1">
 												<span
-													class="inline-block text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+													class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
 												>
 													{$i18n.t('Tools loaded')}
 												</span>

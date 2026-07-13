@@ -198,7 +198,7 @@
 					<div class="flex gap-2">
 						<div class="flex-1">
 							<select
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 								bind:value={selectedPipelinesUrlIdx}
 								placeholder={$i18n.t('Select a pipeline url')}
 								on:change={async () => {
@@ -249,7 +249,7 @@
 							</button>
 						</div>
 						<button
-							class="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
+							class="px-2.5 bg-gray-100 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
 							on:click={() => {
 								uploadPipelineHandler();
 							}}
@@ -312,13 +312,13 @@
 					<div class="flex w-full">
 						<div class="flex-1 mr-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 								placeholder={$i18n.t('Enter Github Raw URL')}
 								bind:value={pipelineDownloadUrl}
 							/>
 						</div>
 						<button
-							class="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
+							class="px-2.5 bg-gray-100 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
 							on:click={() => {
 								addPipelineHandler();
 							}}
@@ -373,10 +373,10 @@
 						</button>
 					</div>
 
-					<div class="mt-2 text-xs text-gray-500">
-						<span class=" font-semibold dark:text-gray-200">Warning:</span> Pipelines are a plugin
+					<div class="mt-2 text-xs text-content-muted">
+						<span class=" font-semibold text-content">Warning:</span> Pipelines are a plugin
 						system with arbitrary code execution —
-						<span class=" font-medium dark:text-gray-400"
+						<span class=" font-medium text-content-muted"
 							>don't fetch random pipelines from sources you don't trust.</span
 						>
 					</div>
@@ -396,7 +396,7 @@
 								<div class="flex gap-2">
 									<div class="flex-1">
 										<select
-											class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+											class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 											bind:value={selectedPipelineIdx}
 											placeholder={$i18n.t('Select a pipeline')}
 											on:change={async () => {
@@ -413,7 +413,7 @@
 									</div>
 
 									<button
-										class="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
+										class="px-2.5 bg-gray-100 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
 										on:click={() => {
 											deletePipelineHandler();
 										}}
@@ -466,7 +466,7 @@
 														<div class=" flex-1">
 															{#if valves_spec.properties[property]?.enum ?? null}
 																<select
-																	class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+																	class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 																	bind:value={valves[property]}
 																>
 																	{#each valves_spec.properties[property].enum as option}
@@ -477,7 +477,7 @@
 																</select>
 															{:else if (valves_spec.properties[property]?.type ?? null) === 'boolean'}
 																<div class="flex justify-between items-center">
-																	<div class="text-xs text-gray-500">
+																	<div class="text-xs text-content-muted">
 																		{valves[property] ? 'Enabled' : 'Disabled'}
 																	</div>
 
@@ -487,7 +487,7 @@
 																</div>
 															{:else}
 																<input
-																	class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+																	class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 																	type="text"
 																	placeholder={valves_spec.properties[property].title}
 																	bind:value={valves[property]}

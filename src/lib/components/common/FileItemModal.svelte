@@ -53,10 +53,10 @@
 </script>
 
 <Modal bind:show size="lg">
-	<div class="font-primary px-6 py-5 w-full flex flex-col justify-center dark:text-gray-400">
+	<div class="font-primary px-6 py-5 w-full flex flex-col justify-center text-content-muted">
 		<div class="pb-2">
 			<div class="flex items-start justify-between">
-				<div class="font-medium text-lg dark:text-gray-100 line-clamp-1">
+				<div class="font-medium text-lg text-content line-clamp-1">
 					{item?.name ?? 'File'}
 				</div>
 				<button on:click={() => (show = false)}>
@@ -64,7 +64,7 @@
 				</button>
 			</div>
 
-			<div class="flex flex-wrap items-center text-sm gap-1.5 text-gray-500 mt-0.5">
+			<div class="flex flex-wrap items-center text-sm gap-1.5 text-content-muted mt-0.5">
 				{#if item?.size}
 					<span class="shrink-0">{formatFileSize(item.size)}</span>
 					<span>•</span>
@@ -81,7 +81,7 @@
 					{#if state === 'failed'}
 						<span class="shrink-0 text-red-500 font-medium">・{$i18n.t('Extraction failed')}</span>
 					{:else if state === 'none'}
-						<span class="shrink-0 text-gray-400 font-medium">・{$i18n.t('Not extracted')}</span>
+						<span class="shrink-0 text-content-subtle font-medium">・{$i18n.t('Not extracted')}</span>
 					{/if}
 				{/if}
 			</div>
@@ -92,7 +92,7 @@
 				>
 					<button
 						class="pb-1 -mb-px border-b-2 {selectedTab === 'content'
-							? 'border-gray-800 dark:border-gray-100 text-gray-800 dark:text-gray-100 font-medium'
+							? 'border-gray-800 dark:border-gray-100 text-content font-medium'
 							: 'border-transparent'}"
 						on:click={() => (selectedTab = 'content')}
 					>
@@ -100,7 +100,7 @@
 					</button>
 					<button
 						class="pb-1 -mb-px border-b-2 {selectedTab === 'preview'
-							? 'border-gray-800 dark:border-gray-100 text-gray-800 dark:text-gray-100 font-medium'
+							? 'border-gray-800 dark:border-gray-100 text-content font-medium'
 							: 'border-transparent'}"
 						on:click={() => (selectedTab = 'preview')}
 					>
@@ -128,7 +128,7 @@
 					{content}
 				</div>
 			{:else if state === 'none'}
-				<div class="text-sm text-gray-400 dark:text-gray-500">
+				<div class="text-sm text-content-subtle">
 					{$i18n.t('This file has not been extracted to text yet.')}
 				</div>
 			{:else if selectedTab === 'content'}
@@ -148,7 +148,7 @@
 				{#if onShare}
 					<Tooltip content={$i18n.t('Access Control')}>
 						<button
-							class="flex items-center gap-1.5 px-3 py-1.5 text-sm dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
+							class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 							type="button"
 							on:click={() => onShare()}
 						>
@@ -166,7 +166,7 @@
 
 				{#if download && fileId}
 					<a
-						class="flex items-center gap-1.5 px-3 py-1.5 text-sm dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
+						class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 						href={`${WEBUI_API_BASE_URL}/files/${fileId}/content?attachment=true`}
 					>
 						<ArrowDownTray className="size-4" />
@@ -176,7 +176,7 @@
 
 				{#if onDelete}
 					<button
-						class="flex items-center gap-1.5 px-3 py-1.5 text-sm dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
+						class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 						type="button"
 						on:click={() => onDelete()}
 					>

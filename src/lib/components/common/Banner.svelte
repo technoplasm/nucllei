@@ -42,7 +42,7 @@
 {#if !dismissed}
 	{#if mounted}
 		<div
-			class="{className} top-0 left-0 right-0 p-2 px-3 flex justify-center items-center relative rounded-xl border border-gray-100 dark:border-gray-850 text-gray-800 dark:text-gary-100 bg-white dark:bg-gray-900 backdrop-blur-xl z-30"
+			class="{className} top-0 left-0 right-0 p-2 px-3 flex justify-center items-center relative rounded-xl border border-gray-100 dark:border-gray-850 text-content bg-white dark:bg-gray-900 backdrop-blur-xl z-30"
 			transition:fade={{ delay: 100, duration: 300 }}
 		>
 			<div class=" flex flex-col md:flex-row md:items-center flex-1 text-sm w-fit gap-1.5">
@@ -57,13 +57,13 @@
 					{#if banner.url}
 						<div class="flex md:hidden group w-fit md:items-center">
 							<a
-								class="text-gray-700 dark:text-white text-xs font-semibold underline"
+								class="text-content text-xs font-semibold underline"
 								href="/assets/files/whitepaper.pdf"
 								target="_blank">Learn More</a
 							>
 
 							<div
-								class=" ml-1 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-white"
+								class=" ml-1 text-content-subtle group-hover:text-content-muted dark:group-hover:text-white"
 							>
 								<!--  -->
 								<svg
@@ -83,7 +83,7 @@
 					{/if}
 				</div>
 
-				<div class="flex-1 text-xs text-gray-700 dark:text-white">
+				<div class="flex-1 text-xs text-content">
 					<!-- llens(GHSA-cqp4-qqvg-3787): サニタイズ順を修正。markdown を HTML に
 					     render した「後」に DOMPurify をかける(旧: 生 markdown を sanitize→parse は
 					     生成 HTML を素通し)。 -->
@@ -94,12 +94,12 @@
 			{#if banner.url}
 				<div class="hidden md:flex group w-fit md:items-center">
 					<a
-						class="text-gray-700 dark:text-white text-xs font-semibold underline"
+						class="text-content text-xs font-semibold underline"
 						href="/"
 						target="_blank">Learn More</a
 					>
 
-					<div class=" ml-1 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-white">
+					<div class=" ml-1 text-content-subtle group-hover:text-content-muted dark:group-hover:text-white">
 						<!--  -->
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -122,7 +122,7 @@
 						on:click={() => {
 							dismiss(banner.id);
 						}}
-						class="  -mt-1 -mb-2 -translate-y-[1px] ml-1.5 mr-1 text-gray-400 dark:hover:text-white"
+						class="  -mt-1 -mb-2 -translate-y-[1px] ml-1.5 mr-1 text-content-subtle dark:hover:text-white"
 						>&times;</button
 					>
 				{/if}

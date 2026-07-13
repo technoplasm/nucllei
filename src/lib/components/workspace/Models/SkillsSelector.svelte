@@ -57,7 +57,7 @@
 						</span>
 
 						<div class=" py-0.5 text-sm w-full font-medium flex items-center gap-1.5">
-							<span class="text-gray-500">/{_skills[skillId].id}</span>
+							<span class="text-content-muted">/{_skills[skillId].id}</span>
 							<span>— {_skills[skillId].name}</span>
 
 							{#if !(_skills[skillId].description ?? '').trim()}
@@ -75,7 +75,7 @@
 				{/each}
 			</div>
 		{:else}
-			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
+			<div class="text-xs text-content-subtle mt-1">{$i18n.t('None')}</div>
 		{/if}
 	</div>
 </div>

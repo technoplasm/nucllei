@@ -162,7 +162,7 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-2">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
 			<div class=" text-lg font-medium self-center">
 				{edit ? $i18n.t('Edit User') : $i18n.t('Add User')}
 			</div>
@@ -185,7 +185,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-4 pb-3 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-4 pb-3 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
@@ -195,12 +195,12 @@
 				>
 					{#if !edit}
 						<div
-							class="flex -mt-2 mb-1.5 gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent dark:text-gray-200"
+							class="flex -mt-2 mb-1.5 gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent text-content"
 						>
 							<button
 								class="min-w-fit rounded-full p-1.5 {tab === ''
 									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+									: 'text-content-subtle hover:text-content'} transition"
 								type="button"
 								on:click={() => {
 									tab = '';
@@ -210,7 +210,7 @@
 							<button
 								class="min-w-fit rounded-full p-1.5 {tab === 'import'
 									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+									: 'text-content-subtle hover:text-content'} transition"
 								type="button"
 								on:click={() => {
 									tab = 'import';
@@ -222,11 +222,11 @@
 					<div class="px-1">
 						{#if tab === ''}
 							<div class="flex flex-col w-full mb-3">
-								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Role')}</div>
+								<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Role')}</div>
 
 								<div class="flex-1">
 									<select
-										class="w-full capitalize rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full capitalize rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 										bind:value={_user.role}
 										placeholder={$i18n.t('Enter Your Role')}
 										disabled={edit && selectedUser?.id === sessionUser?.id}
@@ -240,11 +240,11 @@
 							</div>
 
 							<div class="flex flex-col w-full mt-1">
-								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
+								<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Name')}</div>
 
 								<div class="flex-1">
 									<input
-										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 										type="text"
 										bind:value={_user.name}
 										placeholder={$i18n.t('Enter Your Full Name')}
@@ -257,11 +257,11 @@
 							<hr class=" border-gray-100 dark:border-gray-850 my-2.5 w-full" />
 
 							<div class="flex flex-col w-full">
-								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Email')}</div>
+								<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Email')}</div>
 
 								<div class="flex-1">
 									<input
-										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 										type="email"
 										bind:value={_user.email}
 										placeholder={$i18n.t('Enter Your Email')}
@@ -272,13 +272,13 @@
 							</div>
 
 							<div class="flex flex-col w-full mt-1">
-								<div class=" mb-1 text-xs text-gray-500">
+								<div class=" mb-1 text-xs text-content-muted">
 									{edit ? $i18n.t('New Password') : $i18n.t('Password')}
 								</div>
 
 								<div class="flex-1">
 									<input
-										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 										type="password"
 										bind:value={_user.password}
 										placeholder={$i18n.t('Enter Your Password')}
@@ -292,11 +292,11 @@
 
 								{#each metaFields as field (field.key)}
 									<div class="flex flex-col w-full mt-1">
-										<div class=" mb-1 text-xs text-gray-500">{field.label}</div>
+										<div class=" mb-1 text-xs text-content-muted">{field.label}</div>
 
 										<div class="flex-1">
 											<input
-												class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+												class="w-full rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 												type="text"
 												bind:value={_user.info[field.key]}
 												autocomplete="off"
@@ -331,12 +331,12 @@
 									</button>
 								</div>
 
-								<div class=" text-xs text-gray-500">
+								<div class=" text-xs text-content-muted">
 									ⓘ {$i18n.t(
 										'Ensure your CSV file includes 4 columns in this order: Name, Email, Password, Role.'
 									)}
 									<a
-										class="underline dark:text-gray-200"
+										class="underline text-content"
 										href="{WEBUI_BASE_URL}/static/user-import.csv"
 									>
 										{$i18n.t('Click here to download user import template file.')}

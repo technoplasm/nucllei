@@ -121,7 +121,7 @@
 								{$i18n.t('Version')}
 							</div>
 						</div>
-						<div class="flex flex-col text-xs text-gray-700 dark:text-gray-200">
+						<div class="flex flex-col text-xs text-content">
 							<Tooltip content={WEBUI_BUILD_HASH}>
 								{WEBUI_VERSION}
 							</Tooltip>
@@ -188,18 +188,18 @@
 								</div>
 
 								<input
-									class="w-full mt-1 rounded-lg text-sm dark:text-gray-300 bg-transparent outline-hidden"
+									class="w-full mt-1 rounded-lg text-sm text-content bg-transparent outline-hidden"
 									type="text"
 									placeholder={`e.g.) /api/v1/chats, /api/v1/models`}
 									bind:value={adminConfig.API_KEY_ALLOWED_ENDPOINTS}
 								/>
 
-								<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+								<div class="mt-2 text-xs text-content-subtle">
 									<!-- https://docs.openwebui.com/getting-started/advanced-topics/api-endpoints -->
 									<a
 										href="https://docs.openwebui.com/getting-started/api-endpoints"
 										target="_blank"
-										class=" text-gray-300 font-medium underline"
+										class=" text-content font-medium underline"
 									>
 										{$i18n.t('To learn more about available endpoints, visit our documentation.')}
 									</a>
@@ -215,16 +215,16 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={`e.g.) "30m","1h", "10d". `}
 								bind:value={adminConfig.JWT_EXPIRES_IN}
 							/>
 						</div>
 
-						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-2 text-xs text-content-subtle">
 							{$i18n.t('Valid time units:')}
-							<span class=" text-gray-300 font-medium"
+							<span class=" text-content font-medium"
 								>{$i18n.t("'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.")}</span
 							>
 						</div>
@@ -390,9 +390,9 @@
 											/>
 										</div>
 									</div>
-									<div class="text-xs text-gray-400 dark:text-gray-500">
+									<div class="text-xs text-content-subtle">
 										<a
-											class=" text-gray-300 font-medium underline"
+											class=" text-content font-medium underline"
 											href="https://ldap.com/ldap-filters/"
 											target="_blank"
 										>
@@ -467,14 +467,14 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={`e.g.) "http://localhost:3000"`}
 								bind:value={adminConfig.WEBUI_URL}
 							/>
 						</div>
 
-						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-2 text-xs text-content-subtle">
 							{$i18n.t(
 								'Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.'
 							)}
@@ -488,7 +488,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={`https://example.com/webhook`}
 								bind:value={webhookUrl}

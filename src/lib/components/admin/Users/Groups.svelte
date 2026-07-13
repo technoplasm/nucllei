@@ -114,7 +114,7 @@
 			{$i18n.t('Groups')}
 			<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
 
-			<span class="text-lg font-medium text-gray-500 dark:text-gray-300">{groups.length}</span>
+			<span class="text-lg font-medium text-content-muted">{groups.length}</span>
 		</div>
 
 		<div class="flex gap-1">
@@ -164,7 +164,7 @@
 					{$i18n.t('Organize your users')}
 				</div>
 
-				<div class="mt-1 text-sm dark:text-gray-300">
+				<div class="mt-1 text-sm text-content-muted">
 					{$i18n.t('Use groups to group your users and assign permissions.')}
 				</div>
 

@@ -167,7 +167,7 @@
 							<div
 								class="absolute flex justify-center rounded-full bottom-0 left-0 right-0 top-0 h-full w-full overflow-hidden bg-gray-700 bg-fixed opacity-0 transition duration-300 ease-in-out hover:opacity-50"
 							>
-								<div class="my-auto text-gray-100">
+								<div class="my-auto text-content">
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
 										viewBox="0 0 20 20"
@@ -189,7 +189,7 @@
 
 					<div>
 						<button
-							class=" text-xs text-center text-gray-800 dark:text-gray-400 rounded-full px-4 py-0.5 bg-gray-100 dark:bg-gray-850"
+							class=" text-xs text-center text-content-muted rounded-full px-4 py-0.5 bg-gray-100 dark:bg-gray-850"
 							on:click={async () => {
 								if (canvasPixelTest()) {
 									profileImageUrl = generateInitialsImage(name);
@@ -207,7 +207,7 @@
 						>
 
 						<button
-							class=" text-xs text-center text-gray-800 dark:text-gray-400 rounded-lg px-2 py-1"
+							class=" text-xs text-center text-content-muted rounded-lg px-2 py-1"
 							on:click={async () => {
 								profileImageUrl = '/user.png';
 							}}>{$i18n.t('Remove')}</button
@@ -222,7 +222,7 @@
 
 					<div class="flex-1">
 						<input
-							class="w-full text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							class="w-full text-sm text-content dark:bg-gray-850 outline-hidden"
 							type="text"
 							bind:value={name}
 							required
@@ -239,7 +239,7 @@
 
 						<div class="flex-1">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden"
 								type="url"
 								placeholder={$i18n.t('Enter your webhook URL')}
 								bind:value={webhookUrl}
@@ -260,7 +260,7 @@
 		<div class="flex justify-between items-center text-sm">
 			<div class="  font-medium">{$i18n.t('API keys')}</div>
 			<button
-				class=" text-xs font-medium text-gray-500"
+				class=" text-xs font-medium text-content-muted"
 				type="button"
 				on:click={() => {
 					showAPIKeys = !showAPIKeys;

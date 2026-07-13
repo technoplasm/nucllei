@@ -124,7 +124,7 @@
 				<Name>
 					{#if message.user}
 						{$i18n.t('You')}
-						<span class=" text-gray-500 text-sm font-medium">{message?.user ?? ''}</span>
+						<span class=" text-content-muted text-sm font-medium">{message?.user ?? ''}</span>
 					{:else if $settings.showUsername || $_user.name !== user.name}
 						{user.name}
 					{:else}
@@ -133,7 +133,7 @@
 
 					{#if message.timestamp}
 						<div
-							class=" self-center text-xs invisible group-hover:visible text-gray-400 font-medium first-letter:capitalize ml-0.5 translate-y-[1px]"
+							class=" self-center text-xs invisible group-hover:visible text-content-subtle font-medium first-letter:capitalize ml-0.5 translate-y-[1px]"
 						>
 							<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
 								<span class="line-clamp-1">{formatDate(message.timestamp * 1000)}</span>
@@ -198,7 +198,7 @@
 							<div>
 								<button
 									id="save-edit-message-button"
-									class=" px-4 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl"
+									class=" px-4 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-content transition rounded-3xl"
 									on:click={() => {
 										editMessageConfirmHandler(false);
 									}}
@@ -210,7 +210,7 @@
 							<div class="flex space-x-1.5">
 								<button
 									id="close-edit-message-button"
-									class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 text-gray-800 dark:text-gray-100 transition rounded-3xl"
+									class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 text-content transition rounded-3xl"
 									on:click={() => {
 										cancelEditMessage();
 									}}
@@ -220,7 +220,7 @@
 
 								<button
 									id="confirm-edit-message-button"
-									class=" px-4 py-2 bg-gray-900 dark:bg-white hover:bg-gray-850 text-gray-100 dark:text-gray-800 transition rounded-3xl"
+									class=" px-4 py-2 bg-gray-900 dark:bg-white hover:bg-gray-850 text-content transition rounded-3xl"
 									on:click={() => {
 										editMessageConfirmHandler();
 									}}
@@ -254,7 +254,7 @@
 						<div
 							class=" flex {($settings?.chatBubble ?? true)
 								? 'justify-end'
-								: ''}  text-gray-600 dark:text-gray-500"
+								: ''}  text-content-muted"
 						>
 							{#if !($settings?.chatBubble ?? true)}
 								{#if siblings.length > 1}
@@ -283,7 +283,7 @@
 
 										{#if messageIndexEdit}
 											<div
-												class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+												class="text-sm flex justify-center font-semibold self-center text-content min-w-fit"
 											>
 												<input
 													id="message-index-input-{message.id}"
@@ -304,13 +304,13 @@
 															messageIndexEdit = false;
 														}
 													}}
-													class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+													class="bg-transparent font-semibold self-center text-content min-w-fit outline-hidden"
 												/>/{siblings.length}
 											</div>
 										{:else}
 											<!-- svelte-ignore a11y-no-static-element-interactions -->
 											<div
-												class="text-sm tracking-widest font-semibold self-center dark:text-gray-100 min-w-fit"
+												class="text-sm tracking-widest font-semibold self-center text-content min-w-fit"
 												on:dblclick={async () => {
 													messageIndexEdit = true;
 
@@ -455,7 +455,7 @@
 
 										{#if messageIndexEdit}
 											<div
-												class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+												class="text-sm flex justify-center font-semibold self-center text-content min-w-fit"
 											>
 												<input
 													id="message-index-input-{message.id}"
@@ -476,13 +476,13 @@
 															messageIndexEdit = false;
 														}
 													}}
-													class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+													class="bg-transparent font-semibold self-center text-content min-w-fit outline-hidden"
 												/>/{siblings.length}
 											</div>
 										{:else}
 											<!-- svelte-ignore a11y-no-static-element-interactions -->
 											<div
-												class="text-sm tracking-widest font-semibold self-center dark:text-gray-100 min-w-fit"
+												class="text-sm tracking-widest font-semibold self-center text-content min-w-fit"
 												on:dblclick={async () => {
 													messageIndexEdit = true;
 

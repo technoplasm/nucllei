@@ -64,7 +64,7 @@
 	>
 		<div class="flex w-full rounded-xl border border-gray-100 dark:border-gray-850">
 			<div
-				class="max-h-60 flex flex-col w-full rounded-xl bg-white dark:bg-gray-900 dark:text-gray-100"
+				class="max-h-60 flex flex-col w-full rounded-xl bg-white dark:bg-gray-900 text-content"
 			>
 				<div class="m-1 overflow-y-auto p-1 space-y-0.5 scrollbar-hidden">
 					{#each filteredSkills as skill, idx}
@@ -81,16 +81,16 @@
 							}}
 							on:focus={() => {}}
 						>
-							<div class=" font-medium text-black dark:text-gray-100">
+							<div class=" font-medium text-black text-content">
 								/{skill.id}
 							</div>
 
-							<div class=" text-xs text-gray-600 dark:text-gray-100">
+							<div class=" text-xs text-content-muted">
 								{skill.name}
 							</div>
 
 							{#if skill.description}
-								<div class=" text-xs text-gray-400 dark:text-gray-500 line-clamp-1">
+								<div class=" text-xs text-content-subtle line-clamp-1">
 									{skill.description}
 								</div>
 							{/if}

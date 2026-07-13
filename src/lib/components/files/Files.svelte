@@ -285,7 +285,7 @@
 			deleteHandler(deleteTarget);
 		}}
 	>
-		<div class=" text-sm text-gray-500">
+		<div class=" text-sm text-content-muted">
 			{$i18n.t('This will delete')}
 			<span class="  font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
 		</div>
@@ -326,7 +326,7 @@
 			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
 				{$i18n.t('Files')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300">{total}</span>
+				<span class="text-lg font-medium text-content-muted">{total}</span>
 			</div>
 		</div>
 
@@ -346,7 +346,7 @@
 			<div>
 				<Tooltip content={$i18n.t('Upload Files')}>
 					<button
-						class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
+						class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 text-content-muted hover:text-content transition font-medium text-sm flex items-center space-x-1"
 						type="button"
 						disabled={uploading}
 						on:click={() => {
@@ -364,12 +364,12 @@
 		</div>
 
 		<!-- 表示コントロール: 表示形式 / ソート / 期間グルーピング / 読み込み数 -->
-		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-xs text-gray-500">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-xs text-content-muted">
 			<div class="flex items-center gap-0.5">
 				<Tooltip content={$i18n.t('Card View')}>
 					<button
 						class="p-1.5 rounded-lg transition {viewMode === 'grid'
-							? 'bg-gray-100 dark:bg-gray-850 text-gray-800 dark:text-gray-100'
+							? 'bg-gray-100 dark:bg-gray-850 text-content'
 							: 'hover:bg-black/5 dark:hover:bg-white/5'}"
 						type="button"
 						on:click={() => setViewMode('grid')}
@@ -380,7 +380,7 @@
 				<Tooltip content={$i18n.t('Table View')}>
 					<button
 						class="p-1.5 rounded-lg transition {viewMode === 'table'
-							? 'bg-gray-100 dark:bg-gray-850 text-gray-800 dark:text-gray-100'
+							? 'bg-gray-100 dark:bg-gray-850 text-content'
 							: 'hover:bg-black/5 dark:hover:bg-white/5'}"
 						type="button"
 						on:click={() => setViewMode('table')}
@@ -450,7 +450,7 @@
 					<select
 						class="dark:bg-gray-900 w-fit pr-6 rounded-sm text-xs bg-transparent outline-hidden {selectedUploaderId
 							? ''
-							: 'text-gray-500'}"
+							: 'text-content-subtle'}"
 						bind:value={selectedUploaderId}
 						on:change={() => {
 							if (selectedUploaderId !== '') {
@@ -460,11 +460,11 @@
 							}
 						}}
 					>
-						<option class=" text-gray-700" value="" disabled selected
+						<option class=" text-content" value="" disabled selected
 							>{$i18n.t('Filter by uploader')}</option
 						>
 						{#each uploaders.filter((u) => !selectedUploaderIds.includes(u.id)) as uploader}
-							<option class=" text-gray-700" value={uploader.id}
+							<option class=" text-content" value={uploader.id}
 								>{uploader.name} ({uploader.file_count})</option
 							>
 						{/each}
@@ -494,14 +494,14 @@
 	</div>
 
 	{#if files.length === 0}
-		<div class="w-full flex justify-center items-center py-16 text-sm text-gray-500">
+		<div class="w-full flex justify-center items-center py-16 text-sm text-content-subtle">
 			{$i18n.t('No files found')}
 		</div>
 	{:else if viewMode === 'grid'}
 		<div class="mb-5">
 			{#each sections as section, sectionIdx (section.label)}
 				<div
-					class="px-1 py-1.5 w-full text-xs text-gray-500 dark:text-gray-500 font-medium {sectionIdx >
+					class="px-1 py-1.5 w-full text-xs text-content-muted font-medium {sectionIdx >
 					0
 						? 'mt-1.5'
 						: ''}"
@@ -527,7 +527,7 @@
 									/>
 								{:else}
 									<div
-										class="size-12 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-gray-500"
+										class="size-12 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
 									>
 										<Document className="size-5" />
 									</div>
@@ -535,7 +535,7 @@
 
 								<div class=" flex-1 self-center min-w-0">
 									<div class=" font-medium line-clamp-1">{file?.meta?.name ?? file.filename}</div>
-									<div class=" text-xs text-gray-500 line-clamp-1 mt-0.5">
+									<div class=" text-xs text-content-muted line-clamp-1 mt-0.5">
 										{#if file?.meta?.size}
 											{formatFileSize(file.meta.size)} •
 										{/if}
@@ -547,7 +547,7 @@
 							<div class="flex flex-row gap-0.5 self-center">
 								<Tooltip content={visibilityLabel(file)}>
 									<button
-										class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										class="self-center w-fit text-sm px-2 py-2 text-content-muted hover:text-content hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 										type="button"
 										on:click={() => openAccessControl(file)}
 									>
@@ -557,7 +557,7 @@
 
 								<Tooltip content={$i18n.t('Delete')}>
 									<button
-										class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										class="self-center w-fit text-sm px-2 py-2 text-content-muted hover:text-content hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 										type="button"
 										on:click={() => {
 											deleteTarget = file;
@@ -578,10 +578,10 @@
 			class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
 			<table
-				class="w-full text-sm text-left text-gray-500 dark:text-gray-400 table-auto max-w-full rounded-sm"
+				class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
 			>
 				<thead
-					class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-850 dark:text-gray-400 -translate-y-0.5"
+					class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 				>
 					<tr class="">
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Name')}</th>
@@ -640,7 +640,7 @@
 						<tr>
 							<td
 								colspan="7"
-								class="px-3 pt-2 pb-1 text-xs font-medium text-gray-500 dark:text-gray-500"
+								class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted"
 							>
 								{section.label}
 							</td>
@@ -650,7 +650,7 @@
 								class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
 								on:click={() => openFile(file)}
 							>
-								<td class="px-3 py-1 font-medium text-gray-900 dark:text-white">
+								<td class="px-3 py-1 font-medium text-content">
 									<div class="flex items-center gap-2 max-w-72">
 										{#if isImage(file)}
 											<img
@@ -672,7 +672,7 @@
 								<td class="px-3 py-1">
 									<Tooltip content={visibilityLabel(file)}>
 										<button
-											class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+											class="self-center w-fit text-sm px-2 py-2 text-content-muted hover:text-content hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 											type="button"
 											on:click|stopPropagation={() => openAccessControl(file)}
 										>
@@ -707,7 +707,7 @@
 	{#if files.length < total}
 		<div class="w-full flex justify-center pb-6 -mt-2">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 dark:text-gray-300 dark:hover:text-white transition flex items-center gap-2"
+				class="px-3.5 py-1.5 text-sm font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-content-muted hover:text-content transition flex items-center gap-2"
 				type="button"
 				disabled={loading}
 				on:click={() => fetchFiles(true)}

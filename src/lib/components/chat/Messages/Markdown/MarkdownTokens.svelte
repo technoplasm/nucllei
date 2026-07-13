@@ -113,9 +113,9 @@
 		<div class="relative w-full group">
 			<div class="scrollbar-hidden relative overflow-x-auto max-w-full rounded-lg">
 				<table
-					class=" w-full text-sm text-left text-gray-500 dark:text-gray-400 max-w-full border-collapse"
+					class=" w-full text-sm text-left text-content-muted max-w-full border-collapse"
 				>
-					<thead class="text-xs text-gray-700 uppercase dark:text-gray-400">
+					<thead class="text-xs text-content uppercase">
 						<tr class="">
 							{#each token.header as header, headerIdx}
 								<th
@@ -141,7 +141,7 @@
 							<tr class="border-b border-line! text-xs">
 								{#each row ?? [] as cell, cellIdx}
 									<td
-										class="px-3! py-1.5! text-gray-900 dark:text-white w-max"
+										class="px-3! py-1.5! text-content dark:text-white w-max"
 										style={token.align[cellIdx] ? '' : `text-align: ${token.align[cellIdx]}`}
 									>
 										<div class="break-normal">

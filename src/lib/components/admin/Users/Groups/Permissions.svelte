@@ -68,7 +68,7 @@
 				<div class=" space-y-1.5">
 					<div class="flex flex-col w-full">
 						<div class="mb-1 flex justify-between">
-							<div class="text-xs text-gray-500">{$i18n.t('Model IDs')}</div>
+							<div class="text-xs text-content-muted">{$i18n.t('Model IDs')}</div>
 						</div>
 
 						{#if model_ids.length > 0}
@@ -92,7 +92,7 @@
 								{/each}
 							</div>
 						{:else}
-							<div class="text-gray-500 text-xs text-center py-2 px-10">
+							<div class="text-content-subtle text-xs text-center py-2 px-10">
 								{$i18n.t('No model IDs')}
 							</div>
 						{/if}
@@ -104,7 +104,7 @@
 					<select
 						class="w-full py-1 text-sm rounded-lg bg-transparent {selectedModelId
 							? ''
-							: 'text-gray-500'} placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
+							: 'text-content-subtle'} placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
 						bind:value={selectedModelId}
 					>
 						<option value="">{$i18n.t('Select a model')}</option>

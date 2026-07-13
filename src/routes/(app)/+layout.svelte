@@ -180,7 +180,7 @@
 
 <div class="app relative">
 	<div
-		class=" text-gray-700 dark:text-gray-100 bg-surface h-screen max-h-[100dvh] overflow-auto flex flex-row justify-end"
+		class=" text-content bg-surface h-screen max-h-[100dvh] overflow-auto flex flex-row justify-end"
 	>
 		{#if !['user', 'admin'].includes($user?.role)}
 			<AccountPending />
@@ -195,7 +195,7 @@
 								Important Update<br /> Action Required for Chat Log Storage
 							</div>
 
-							<div class=" mt-4 text-center text-sm dark:text-gray-200 w-full">
+							<div class=" mt-4 text-center text-sm text-content w-full">
 								{$i18n.t(
 									"Saving chat logs directly to your browser's storage is no longer supported. Please take a moment to download and delete your chat logs by clicking the button below. Don't worry, you can easily re-import your chat logs to the backend through"
 								)}
@@ -226,7 +226,7 @@
 								</button>
 
 								<button
-									class="text-xs text-center w-full mt-2 text-gray-400 underline"
+									class="text-xs text-center w-full mt-2 text-content-subtle underline"
 									on:click={async () => {
 										localDBChats = [];
 									}}>{$i18n.t('Close')}</button

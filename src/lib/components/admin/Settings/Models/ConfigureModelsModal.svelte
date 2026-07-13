@@ -119,7 +119,7 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
 			<div class=" text-lg font-medium self-center font-primary">
 				{$i18n.t('Settings')}
 			</div>
@@ -142,7 +142,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-5 pb-4 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-5 pb-4 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				{#if config}
 					<form
@@ -176,7 +176,7 @@
 											});
 									}}
 								>
-									<div class="text-xs text-gray-500">{$i18n.t('Reorder Models')}</div>
+									<div class="text-xs text-content-muted">{$i18n.t('Reorder Models')}</div>
 
 									{#if sortKey === 'model'}
 										<span class="font-normal self-center">
@@ -202,14 +202,14 @@
 						<div>
 							<div class="flex flex-col w-full">
 								<div class="mb-1 flex justify-between">
-									<div class="text-xs text-gray-500">{$i18n.t('Default Models')}</div>
+									<div class="text-xs text-content-muted">{$i18n.t('Default Models')}</div>
 								</div>
 
 								<div class="flex items-center -mr-1">
 									<select
 										class="w-full py-1 text-sm rounded-lg bg-transparent {selectedModelId
 											? ''
-											: 'text-gray-500'} placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
+											: 'text-content-subtle'} placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
 										bind:value={selectedModelId}
 									>
 										<option value="">{$i18n.t('Select a model')}</option>
@@ -246,7 +246,7 @@
 										{/each}
 									</div>
 								{:else}
-									<div class="text-gray-500 text-xs text-center py-2">
+									<div class="text-content-muted text-xs text-center py-2">
 										{$i18n.t('No models selected')}
 									</div>
 								{/if}

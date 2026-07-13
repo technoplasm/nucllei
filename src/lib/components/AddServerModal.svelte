@@ -142,7 +142,7 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
 			<div class=" text-lg font-medium self-center font-primary">
 				{#if edit}
 					{$i18n.t('Edit Connection')}
@@ -169,7 +169,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
@@ -182,7 +182,7 @@
 						<div class="flex gap-2">
 							<div class="flex flex-col w-full">
 								<div class="flex justify-between mb-0.5">
-									<div class=" text-xs text-gray-500">{$i18n.t('URL')}</div>
+									<div class=" text-xs text-content-muted">{$i18n.t('URL')}</div>
 								</div>
 
 								<div class="flex flex-1 items-center">
@@ -240,7 +240,7 @@
 							</div>
 						</div>
 
-						<div class="text-xs text-gray-500 mt-1">
+						<div class="text-xs text-content-muted mt-1">
 							{$i18n.t(`WebUI will make requests to "{{url}}"`, {
 								url: `${url}/${path}`
 							})}
@@ -248,7 +248,7 @@
 
 						<div class="flex gap-2 mt-2">
 							<div class="flex flex-col w-full">
-								<div class="  text-xs text-gray-500">{$i18n.t('Auth')}</div>
+								<div class="  text-xs text-content-muted">{$i18n.t('Auth')}</div>
 
 								<div class="flex gap-2">
 									<div class="flex-shrink-0 self-start">
@@ -270,7 +270,7 @@
 												required={false}
 											/>
 										{:else if auth_type === 'session'}
-											<div class="text-xs text-gray-500 self-center translate-y-[1px]">
+											<div class="text-xs text-content-muted self-center translate-y-[1px]">
 												{$i18n.t('Forwards system user session credentials to authenticate')}
 											</div>
 										{/if}

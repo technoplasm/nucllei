@@ -123,7 +123,7 @@
 			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
 				{$i18n.t('Tools')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300"
+				<span class="text-lg font-medium text-content-muted"
 					>{filteredItems.length}</span
 				>
 			</div>
@@ -143,7 +143,7 @@
 
 			<div>
 				<a
-					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
+					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
 					href="/workspace/tools/create"
 				>
 					<Plus className="size-3.5" />
@@ -155,7 +155,7 @@
 	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
 	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
-		<div class="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5 mt-1 mb-1">
+		<div class="text-xs font-medium text-content-muted px-0.5 mt-1 mb-1">
 			{$i18n.t('組み込み')}
 		</div>
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
@@ -168,10 +168,10 @@
 							<div class=" flex-1 self-center min-w-0">
 								<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
 									{tool.name}
-									<span class=" text-gray-500 text-xs font-medium shrink-0">{tool.id}</span>
+									<span class=" text-content-muted text-xs font-medium shrink-0">{tool.id}</span>
 								</div>
 								<div
-									class="px-0.5 text-xs text-gray-500 overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
+									class="px-0.5 text-xs text-content-muted overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
 								>
 									{toolFnNames(tool)}
 								</div>
@@ -186,7 +186,7 @@
 								: $i18n.t('Private')}
 						>
 							<button
-								class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 								type="button"
 								on:click={() => openAccessControl(tool)}
 							>
@@ -205,7 +205,7 @@
 
 	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
 	{#if builtinItems.length}
-		<div class="text-xs font-medium text-gray-500 dark:text-gray-400 px-0.5 mt-1 mb-1">
+		<div class="text-xs font-medium text-content-muted px-0.5 mt-1 mb-1">
 			{$i18n.t('カスタム')}
 		</div>
 	{/if}
@@ -222,10 +222,10 @@
 						<div class=" flex-1 self-center min-w-0">
 							<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
 								{tool.name}
-								<span class=" text-gray-500 text-xs font-medium shrink-0">{tool.id}</span>
+								<span class=" text-content-muted text-xs font-medium shrink-0">{tool.id}</span>
 							</div>
 							<div
-								class="px-0.5 text-xs text-gray-500 overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
+								class="px-0.5 text-xs text-content-muted overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
 							>
 								{toolFnNames(tool)}
 							</div>
@@ -240,7 +240,7 @@
 							: $i18n.t('Private')}
 					>
 						<button
-							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 							type="button"
 							on:click={() => openAccessControl(tool)}
 						>
@@ -254,7 +254,7 @@
 
 					<Tooltip content={$i18n.t('Delete')}>
 						<button
-							class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 							type="button"
 							on:click={() => {
 								selectedTool = tool;
@@ -276,7 +276,7 @@
 			deleteHandler(selectedTool);
 		}}
 	>
-		<div class=" text-sm text-gray-500">
+		<div class=" text-sm text-content-muted">
 			{$i18n.t('This will delete')} <span class="  font-semibold">{selectedTool.name}</span>.
 		</div>
 	</DeleteConfirmDialog>

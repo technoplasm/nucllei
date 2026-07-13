@@ -82,11 +82,11 @@
 
 <div class="flex flex-col w-full">
 	<div class="flex items-center justify-between mb-1.5">
-		<div class="text-sm font-medium dark:text-gray-100">
+		<div class="text-sm font-medium text-content">
 			{$i18n.t('Files in this chat')}
 		</div>
 		<button
-			class="flex p-1 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 transition"
+			class="flex p-1 rounded-lg text-content-muted hover:text-content hover:bg-black/5 dark:hover:bg-white/5 transition"
 			type="button"
 			aria-label={$i18n.t('Close')}
 			on:click={() => {
@@ -98,7 +98,7 @@
 	</div>
 
 	{#if items.length === 0}
-		<div class="text-xs text-gray-500 py-4 text-center">
+		<div class="text-xs text-content-subtle py-4 text-center">
 			{$i18n.t('No files in this chat')}
 		</div>
 	{:else}
@@ -118,16 +118,16 @@
 						/>
 					{:else}
 						<div
-							class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-gray-500"
+							class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
 						>
 							<Document className="size-4" />
 						</div>
 					{/if}
 
 					<div class="flex-1 min-w-0 self-center">
-						<div class="text-sm font-medium line-clamp-1 dark:text-gray-100">{item.name}</div>
+						<div class="text-sm font-medium line-clamp-1 text-content">{item.name}</div>
 						{#if item.size}
-							<div class="text-xs text-gray-500 line-clamp-1 mt-0.5">
+							<div class="text-xs text-content-muted line-clamp-1 mt-0.5">
 								{formatFileSize(item.size)}
 							</div>
 						{/if}

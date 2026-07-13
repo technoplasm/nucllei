@@ -239,7 +239,7 @@
 					<div
 						class="bg-gray-50 dark:bg-black dark:text-white rounded-b-lg! pt-2 pb-2 px-4 flex flex-col gap-2 text-xs"
 					>
-						<span class="text-gray-500 italic">
+						<span class="text-content-muted italic">
 							{$i18n.t('{{COUNT}} hidden lines', {
 								COUNT: code.split('\n').length
 							})}
@@ -260,7 +260,7 @@
 					>
 						{#if stdout || stderr}
 							<div class=" ">
-								<div class=" text-gray-500 text-xs mb-1">STDOUT/STDERR</div>
+								<div class=" text-content-muted text-xs mb-1">STDOUT/STDERR</div>
 								<div
 									class="text-sm {stdout?.split('\n')?.length > 100
 										? `max-h-96`
@@ -272,7 +272,7 @@
 						{/if}
 						{#if result}
 							<div class=" ">
-								<div class=" text-gray-500 text-xs mb-1">RESULT</div>
+								<div class=" text-content-muted text-xs mb-1">RESULT</div>
 								<div class="text-sm">{`${JSON.stringify(result)}`}</div>
 							</div>
 						{/if}

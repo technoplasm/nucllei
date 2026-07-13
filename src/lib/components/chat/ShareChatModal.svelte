@@ -54,7 +54,7 @@
 
 <Modal bind:show size="md">
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-0.5">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-0.5">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Share Chat')}</div>
 			<button
 				class="self-center"
@@ -77,7 +77,7 @@
 
 		{#if chat}
 			<div class="px-5 pt-4 pb-5 w-full flex flex-col justify-center">
-				<div class=" text-sm dark:text-gray-300 mb-1">
+				<div class=" text-sm text-content mb-1">
 					{#if chat.share_id}
 						<a href="/s/{chat.share_id}" target="_blank"
 							>{$i18n.t('You have shared this chat')}

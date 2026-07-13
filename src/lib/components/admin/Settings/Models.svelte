@@ -220,7 +220,7 @@
 				<div class="flex items-center md:self-center text-xl font-medium px-0.5">
 					{$i18n.t('Models')}
 					<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-					<span class="text-lg font-medium text-gray-500 dark:text-gray-300"
+					<span class="text-lg font-medium text-content-muted"
 						>{filteredModels.length}</span
 					>
 				</div>
@@ -297,7 +297,7 @@
 								</div>
 							</div>
 
-							<div class=" flex-1 self-center {(model?.is_active ?? true) ? '' : 'text-gray-500'}">
+							<div class=" flex-1 self-center {(model?.is_active ?? true) ? '' : 'text-content-subtle'}">
 								<Tooltip
 									content={render(
 										!!model?.meta?.description
@@ -311,7 +311,7 @@
 								>
 									<div class="  font-semibold line-clamp-1">{model.name}</div>
 								</Tooltip>
-								<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1 text-gray-500">
+								<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1 text-content-muted">
 									<span class=" line-clamp-1">
 										{!!model?.meta?.description
 											? model?.meta?.description
@@ -326,7 +326,7 @@
 							{#if shiftKey}
 								<Tooltip content={model?.meta?.hidden ? $i18n.t('Show') : $i18n.t('Hide')}>
 									<button
-										class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 										type="button"
 										on:click={() => {
 											hideModelHandler(model);
@@ -341,7 +341,7 @@
 								</Tooltip>
 							{:else}
 								<button
-									class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+									class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 									type="button"
 									on:click={() => {
 										selectedModelId = model.id;
@@ -375,7 +375,7 @@
 									onClose={() => {}}
 								>
 									<button
-										class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										class="self-center w-fit text-sm p-1.5 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 										type="button"
 									>
 										<EllipsisHorizontal className="size-5" />
@@ -400,7 +400,7 @@
 				{/each}
 			{:else}
 				<div class="flex flex-col items-center justify-center w-full h-20">
-					<div class="text-gray-500 dark:text-gray-400 text-xs">
+					<div class="text-content-subtle text-xs">
 						{$i18n.t('No models found')}
 					</div>
 				</div>
@@ -448,7 +448,7 @@
 					/>
 
 					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 transition"
+						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-content transition"
 						on:click={() => {
 							modelsImportInputElement.click();
 						}}
@@ -474,7 +474,7 @@
 					</button>
 
 					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 transition"
+						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-content transition"
 						on:click={async () => {
 							downloadModels(models);
 						}}

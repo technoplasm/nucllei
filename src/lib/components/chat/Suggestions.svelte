@@ -64,7 +64,7 @@
 	}
 </script>
 
-<div class="mb-1 flex gap-1 text-xs font-medium items-center text-gray-400 dark:text-gray-600">
+<div class="mb-1 flex gap-1 text-xs font-medium items-center text-content-muted">
 	{#if filteredPrompts.length > 0}
 		<Bolt />
 		{$i18n.t('Suggested')}
@@ -72,7 +72,7 @@
 		<!-- Keine Vorschläge -->
 
 		<div
-			class="flex w-full text-center items-center justify-center self-start text-gray-400 dark:text-gray-600"
+			class="flex w-full text-center items-center justify-center self-start text-content-subtle"
 		>
 			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
 		</div>
@@ -92,16 +92,16 @@
 				<div class="flex flex-col text-left">
 					{#if prompt.title}
 						<div
-							class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-1"
+							class="font-medium text-content group-hover:text-content transition line-clamp-1"
 						>
 							{prompt.title}
 						</div>
-						<div class="text-xs text-gray-500 font-normal line-clamp-2">
+						<div class="text-xs text-content-muted font-normal line-clamp-2">
 							{prompt.content}
 						</div>
 					{:else}
 						<div
-							class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-2"
+							class="font-medium text-content group-hover:text-content transition line-clamp-2"
 						>
 							{prompt.content}
 						</div>

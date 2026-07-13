@@ -12,7 +12,7 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
 			<div
 				class="flex w-full justify-between items-center text-lg font-medium self-center font-primary"
 			>
@@ -39,7 +39,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-5 pb-4 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-5 pb-4 md:space-x-4 text-content">
 			<ManageOllama {urlIdx} />
 		</div>
 	</div>

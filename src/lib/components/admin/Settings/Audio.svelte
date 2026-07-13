@@ -230,7 +230,7 @@
 							<div class="flex-1">
 								<input
 									list="model-list"
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 									bind:value={STT_MODEL}
 									placeholder="Select a model"
 								/>
@@ -255,16 +255,16 @@
 						<div class="flex w-full">
 							<div class="flex-1">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 									bind:value={STT_MODEL}
 									placeholder="Select a model (optional)"
 								/>
 							</div>
 						</div>
-						<div class="mt-2 mb-1 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-2 mb-1 text-xs text-content-subtle">
 							{$i18n.t('Leave model field empty to use the default model.')}
 							<a
-								class=" hover:underline dark:text-gray-200 text-gray-800"
+								class=" hover:underline text-content"
 								href="https://developers.deepgram.com/docs/models"
 								target="_blank"
 							>
@@ -281,7 +281,7 @@
 								required
 							/>
 							<input
-								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								placeholder={$i18n.t('Azure Region')}
 								bind:value={STT_AZURE_REGION}
 								required
@@ -295,7 +295,7 @@
 							<div class="flex w-full">
 								<div class="flex-1">
 									<input
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={STT_AZURE_LOCALES}
 										placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')}
 									/>
@@ -310,14 +310,14 @@
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 									placeholder={$i18n.t('Set whisper model')}
 									bind:value={STT_WHISPER_MODEL}
 								/>
 							</div>
 
 							<button
-								class="px-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
+								class="px-2.5 bg-gray-50 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
 								on:click={() => {
 									sttModelUpdateHandler();
 								}}
@@ -371,11 +371,11 @@
 							</button>
 						</div>
 
-						<div class="mt-2 mb-1 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-2 mb-1 text-xs text-content-subtle">
 							{$i18n.t(`Open WebUI uses faster-whisper internally.`)}
 
 							<a
-								class=" hover:underline dark:text-gray-200 text-gray-800"
+								class=" hover:underline text-content"
 								href="https://github.com/SYSTRAN/faster-whisper"
 								target="_blank"
 							>
@@ -447,7 +447,7 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={TTS_API_KEY}
 								required
@@ -458,13 +458,13 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={TTS_API_KEY}
 								required
 							/>
 							<input
-								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								class="flex-1 w-full rounded-lg py-2 pl-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 								placeholder={$i18n.t('Azure Region')}
 								bind:value={TTS_AZURE_SPEECH_REGION}
 								required
@@ -481,7 +481,7 @@
 						<div class="flex w-full">
 							<div class="flex-1">
 								<select
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 									bind:value={TTS_VOICE}
 								>
 									<option value="" selected={TTS_VOICE !== ''}>{$i18n.t('Default')}</option>
@@ -503,7 +503,7 @@
 							<div class="flex-1">
 								<input
 									list="model-list"
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 									bind:value={TTS_MODEL}
 									placeholder="CMU ARCTIC speaker embedding name"
 								/>
@@ -513,13 +513,13 @@
 								</datalist>
 							</div>
 						</div>
-						<div class="mt-2 mb-1 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-2 mb-1 text-xs text-content-subtle">
 							{$i18n.t(`Open WebUI uses SpeechT5 and CMU Arctic speaker embeddings.`)}
 
 							To learn more about SpeechT5,
 
 							<a
-								class=" hover:underline dark:text-gray-200 text-gray-800"
+								class=" hover:underline text-content"
 								href="https://github.com/microsoft/SpeechT5"
 								target="_blank"
 							>
@@ -529,7 +529,7 @@
 							</a>
 							To see the available CMU Arctic speaker embeddings,
 							<a
-								class=" hover:underline dark:text-gray-200 text-gray-800"
+								class=" hover:underline text-content"
 								href="https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors"
 								target="_blank"
 							>
@@ -545,7 +545,7 @@
 								<div class="flex-1">
 									<input
 										list="voice-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_VOICE}
 										placeholder="Select a voice"
 									/>
@@ -564,7 +564,7 @@
 								<div class="flex-1">
 									<input
 										list="tts-model-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_MODEL}
 										placeholder="Select a model"
 									/>
@@ -586,7 +586,7 @@
 								<div class="flex-1">
 									<input
 										list="voice-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_VOICE}
 										placeholder="Select a voice"
 									/>
@@ -605,7 +605,7 @@
 								<div class="flex-1">
 									<input
 										list="tts-model-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_MODEL}
 										placeholder="Select a model"
 									/>
@@ -627,7 +627,7 @@
 								<div class="flex-1">
 									<input
 										list="voice-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_VOICE}
 										placeholder="Select a voice"
 									/>
@@ -654,7 +654,7 @@
 								<div class="flex-1">
 									<input
 										list="tts-model-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
 										bind:value={TTS_AZURE_SPEECH_OUTPUT_FORMAT}
 										placeholder="Select a output format"
 									/>
@@ -682,7 +682,7 @@
 						</select>
 					</div>
 				</div>
-				<div class="mt-2 mb-1 text-xs text-gray-400 dark:text-gray-500">
+				<div class="mt-2 mb-1 text-xs text-content-subtle">
 					{$i18n.t(
 						"Control how message text is split for TTS requests. 'Punctuation' splits into sentences, 'paragraphs' splits into paragraphs, and 'none' keeps the message as a single string."
 					)}

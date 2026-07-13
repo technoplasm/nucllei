@@ -442,13 +442,13 @@
 			>
 				<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
 				<div
-					class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+					class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
 				>
 					<button
 						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'general'
 							? ''
-							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+							: ' text-content-subtle hover:text-content'}"
 						type="button"
 						on:click={() => switchTab('general')}
 					>
@@ -462,7 +462,7 @@
 						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'prompt'
 							? ''
-							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+							: ' text-content-subtle hover:text-content'}"
 						type="button"
 						on:click={() => switchTab('prompt')}
 					>
@@ -476,7 +476,7 @@
 						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
 						'advanced'
 							? ''
-							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+							: ' text-content-subtle hover:text-content'}"
 						type="button"
 						on:click={() => switchTab('advanced')}
 					>
@@ -498,7 +498,7 @@
 								required
 							/>
 							<input
-								class="text-xs w-full bg-transparent text-gray-500 outline-hidden"
+								class="text-xs w-full bg-transparent text-content-muted outline-hidden"
 								placeholder={$i18n.t('Model ID')}
 								bind:value={id}
 								required
@@ -560,7 +560,7 @@
 
 										<div class="flex w-full mt-1 justify-end">
 											<button
-												class="px-2 py-1 text-gray-500 rounded-lg text-xs"
+												class="px-2 py-1 text-content-muted rounded-lg text-xs"
 												on:click={() => {
 													info.meta.profile_image_url = null;
 												}}
@@ -586,11 +586,11 @@
 													}}
 													required
 												>
-													<option value={null} class=" text-gray-900"
+													<option value={null} class=" text-content"
 														>{$i18n.t('Select a base model')}</option
 													>
 													{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as model}
-														<option value={model.id} class=" text-gray-900">{model.name}</option>
+														<option value={model.id} class=" text-content">{model.name}</option>
 													{/each}
 												</select>
 											</div>
@@ -636,7 +636,7 @@
 									</span>
 									<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
 										<span class="font-medium">{$i18n.t('Skills')}</span>
-										<span class="text-xs text-gray-500"
+										<span class="text-xs text-content-muted"
 											>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
 										>
 									</div>
@@ -760,7 +760,7 @@
 											</div>
 										{/each}
 									{:else}
-										<div class="text-xs text-center text-gray-500 py-2">
+										<div class="text-xs text-center text-content-subtle py-2">
 											{$i18n.t('No prompt suggestions')}
 										</div>
 									{/if}
@@ -837,7 +837,7 @@
 		doSubmit();
 	}}
 >
-	<div class="text-sm text-gray-500">
+	<div class="text-sm text-content-muted">
 		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
 			<div>
 				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}

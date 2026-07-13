@@ -202,8 +202,8 @@
 
 <!-- llens(#34): ユーザー設定モーダルは細めに(xl=896px → md=672px) -->
 <Modal size="md" bind:show>
-	<div class="text-gray-700 dark:text-gray-100">
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
+	<div class="text-content">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-1">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Settings')}</div>
 			<button
 				class="self-center"
@@ -227,14 +227,14 @@
 		<div class="flex flex-col md:flex-row w-full px-4 pt-1 pb-4 md:space-x-4">
 			<div
 				id="settings-tabs-container"
-				class="tabs flex flex-row overflow-x-auto gap-2.5 md:gap-1 md:flex-col flex-1 md:flex-none md:w-40 dark:text-gray-200 text-sm font-medium text-left mb-1 md:mb-0 -translate-y-1"
+				class="tabs flex flex-row overflow-x-auto gap-2.5 md:gap-1 md:flex-col flex-1 md:flex-none md:w-40 text-content text-sm font-medium text-left mb-1 md:mb-0 -translate-y-1"
 			>
 				<div class="hidden md:flex w-full rounded-xl -mb-1 px-0.5 gap-2" id="settings-search">
 					<div class="self-center rounded-l-xl bg-transparent">
 						<Search className="size-3.5" />
 					</div>
 					<input
-						class="w-full py-1.5 text-sm bg-transparent dark:text-gray-300 outline-hidden"
+						class="w-full py-1.5 text-sm bg-transparent text-content outline-hidden"
 						bind:value={search}
 						on:input={searchDebounceHandler}
 						placeholder={$i18n.t('Search')}
@@ -248,7 +248,7 @@
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 								'general'
 									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' text-content-subtle hover:text-content dark:hover:text-white'}"
 								on:click={() => {
 									selectedTab = 'general';
 								}}
@@ -274,7 +274,7 @@
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 								'interface'
 									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' text-content-subtle hover:text-content dark:hover:text-white'}"
 								on:click={() => {
 									selectedTab = 'interface';
 								}}
@@ -300,7 +300,7 @@
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 								'chats'
 									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' text-content-subtle hover:text-content dark:hover:text-white'}"
 								on:click={() => {
 									selectedTab = 'chats';
 								}}
@@ -326,7 +326,7 @@
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 								'account'
 									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' text-content-subtle hover:text-content dark:hover:text-white'}"
 								on:click={() => {
 									selectedTab = 'account';
 								}}
@@ -352,7 +352,7 @@
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 								'about'
 									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' text-content-subtle hover:text-content dark:hover:text-white'}"
 								on:click={() => {
 									selectedTab = 'about';
 								}}
@@ -376,7 +376,7 @@
 						{/if}
 					{/each}
 				{:else}
-					<div class="text-center text-gray-500 mt-4">
+					<div class="text-center text-content-muted mt-4">
 						{$i18n.t('No results found')}
 					</div>
 				{/if}

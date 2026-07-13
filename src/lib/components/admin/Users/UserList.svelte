@@ -153,13 +153,13 @@
 					<span class="text-sm font-normal">available users</span></span
 				>
 			{:else}
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300"
+				<span class="text-lg font-medium text-content"
 					>{users.length} of {$config?.license_metadata?.seats}
 					<span class="text-sm font-normal">available users</span></span
 				>
 			{/if}
 		{:else}
-			<span class="text-lg font-medium text-gray-500 dark:text-gray-300">{users.length}</span>
+			<span class="text-lg font-medium text-content">{users.length}</span>
 		{/if}
 	</div>
 
@@ -208,10 +208,10 @@
 	class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
 >
 	<table
-		class="w-full text-sm text-left text-gray-500 dark:text-gray-400 table-auto max-w-full rounded-sm"
+		class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
 	>
 		<thead
-			class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-850 dark:text-gray-400 -translate-y-0.5"
+			class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 		>
 			<tr class="">
 				<th
@@ -363,7 +363,7 @@
 							/>
 						</button>
 					</td>
-					<td class="px-3 py-1 font-medium text-gray-900 dark:text-white w-max">
+					<td class="px-3 py-1 font-medium text-content w-max">
 						<div class="flex flex-row w-max">
 							<img
 								class=" rounded-full w-6 h-6 object-cover mr-2.5"
@@ -467,7 +467,7 @@
 	</table>
 </div>
 
-<div class=" text-gray-500 text-xs mt-1.5 text-right">
+<div class=" text-content-muted text-xs mt-1.5 text-right">
 	ⓘ {$i18n.t("Click on the user role button to change a user's role.")}
 </div>
 

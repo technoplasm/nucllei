@@ -111,7 +111,7 @@
 				{#each citations as citation, idx}
 					<button
 						id={`source-${id}-${idx + 1}`}
-						class="no-toggle outline-hidden flex dark:text-gray-300 p-1 bg-white dark:bg-gray-900 rounded-xl max-w-96"
+						class="no-toggle outline-hidden flex text-content p-1 bg-white dark:bg-gray-900 rounded-xl max-w-96"
 						on:click={() => {
 							showCitationModal = true;
 							selectedCitation = citation;
@@ -138,7 +138,7 @@
 				buttonClassName="w-fit max-w-full"
 			>
 				<div
-					class="flex w-full overflow-auto items-center gap-2 text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition cursor-pointer"
+					class="flex w-full overflow-auto items-center gap-2 text-content-muted hover:text-content transition cursor-pointer"
 				>
 					<div
 						class="flex-1 flex items-center gap-1 overflow-auto scrollbar-none w-full max-w-full"
@@ -150,7 +150,7 @@
 							<div class="flex text-xs font-medium items-center">
 								{#each citations.slice(0, 2) as citation, idx}
 									<button
-										class="no-toggle outline-hidden flex dark:text-gray-300 p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
+										class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
 										on:click={() => {
 											showCitationModal = true;
 											selectedCitation = citation;
@@ -190,7 +190,7 @@
 						{#each citations as citation, idx}
 							<button
 								id={`source-${id}-${idx + 1}`}
-								class="no-toggle outline-hidden flex dark:text-gray-300 p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
+								class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
 								on:click={() => {
 									showCitationModal = true;
 									selectedCitation = citation;

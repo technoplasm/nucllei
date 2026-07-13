@@ -20,7 +20,7 @@
 
 	<Tooltip content={$i18n.t('Keyboard shortcuts')} placement="left">
 		<button
-			class="text-gray-600 dark:text-gray-300 bg-gray-300/20 size-4 flex items-center justify-center text-[0.7rem] rounded-full"
+			class="text-content bg-gray-300/20 size-4 flex items-center justify-center text-[0.7rem] rounded-full"
 			aria-label={$i18n.t('Keyboard shortcuts')}
 			on:click={() => {
 				showShortcuts = !showShortcuts;

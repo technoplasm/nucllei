@@ -375,7 +375,7 @@
 									class="min-w-fit outline-none p-1.5 {selectedTag === '' &&
 									selectedConnectionType === ''
 										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+										: 'text-content-subtle hover:text-content'} transition capitalize"
 									on:click={() => {
 										selectedConnectionType = '';
 										selectedTag = '';
@@ -389,7 +389,7 @@
 								<button
 									class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'ollama'
 										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+										: 'text-content-subtle hover:text-content'} transition capitalize"
 									on:click={() => {
 										selectedTag = '';
 										selectedConnectionType = 'ollama';
@@ -400,7 +400,7 @@
 								<button
 									class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'openai'
 										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+										: 'text-content-subtle hover:text-content'} transition capitalize"
 									on:click={() => {
 										selectedTag = '';
 										selectedConnectionType = 'openai';
@@ -414,7 +414,7 @@
 								<button
 									class="min-w-fit outline-none p-1.5 {selectedTag === tag
 										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+										: 'text-content-subtle hover:text-content'} transition capitalize"
 									on:click={() => {
 										selectedConnectionType = '';
 										selectedTag = tag;
@@ -430,7 +430,7 @@
 				{#each filteredItems as item, index}
 					<button
 						aria-label="model-item"
-						class="flex w-full text-left font-medium line-clamp-1 select-none items-center rounded-button py-2 pl-3 pr-1.5 text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer data-highlighted:bg-muted {index ===
+						class="flex w-full text-left font-medium line-clamp-1 select-none items-center rounded-button py-2 pl-3 pr-1.5 text-sm text-content outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer data-highlighted:bg-muted {index ===
 						selectedModelIdx
 							? 'bg-gray-100 dark:bg-gray-800 group-hover:bg-transparent'
 							: ''}"
@@ -448,7 +448,7 @@
 								<div class="flex gap-0.5 self-start h-full mb-1.5 -translate-x-1">
 									{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
 										<div
-											class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-gray-700 dark:text-gray-200"
+											class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-content"
 										>
 											{tag.name}
 										</div>
@@ -489,7 +489,7 @@
 																className="self-end"
 															>
 																<span
-																	class=" text-xs font-medium text-gray-600 dark:text-gray-400 line-clamp-1"
+																	class=" text-xs font-medium text-content-muted line-clamp-1"
 																	>{item.model.ollama?.details?.parameter_size ?? ''}</span
 																>
 															</Tooltip>
@@ -562,7 +562,7 @@
 										{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
 											<Tooltip content={tag.name} className="flex-shrink-0">
 												<div
-													class=" text-xs font-bold px-1 rounded-sm uppercase bg-gray-500/20 text-gray-700 dark:text-gray-200"
+													class=" text-xs font-bold px-1 rounded-sm uppercase bg-gray-500/20 text-content"
 												>
 													{tag.name}
 												</div>
@@ -581,7 +581,7 @@
 					</button>
 				{:else}
 					<div class="">
-						<div class="block px-3 py-2 text-sm text-gray-700 dark:text-gray-100">
+						<div class="block px-3 py-2 text-sm text-content">
 							{$i18n.t('No results found')}
 						</div>
 					</div>
@@ -595,7 +595,7 @@
 						placement="top-start"
 					>
 						<button
-							class="flex w-full font-medium line-clamp-1 select-none items-center rounded-button py-2 pl-3 pr-1.5 text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer data-highlighted:bg-muted"
+							class="flex w-full font-medium line-clamp-1 select-none items-center rounded-button py-2 pl-3 pr-1.5 text-sm text-content outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer data-highlighted:bg-muted"
 							on:click={() => {
 								pullModelHandler();
 							}}
@@ -609,7 +609,7 @@
 
 				{#each Object.keys($MODEL_DOWNLOAD_POOL) as model}
 					<div
-						class="flex w-full justify-between font-medium select-none rounded-button py-2 pl-3 pr-1.5 text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 rounded-lg cursor-pointer data-highlighted:bg-muted"
+						class="flex w-full justify-between font-medium select-none rounded-button py-2 pl-3 pr-1.5 text-sm text-content outline-hidden transition-all duration-75 rounded-lg cursor-pointer data-highlighted:bg-muted"
 					>
 						<div class="flex">
 							<div class="-ml-2 mr-2.5 translate-y-0.5">
@@ -652,7 +652,7 @@
 								</div>
 
 								{#if 'digest' in $MODEL_DOWNLOAD_POOL[model] && $MODEL_DOWNLOAD_POOL[model].digest}
-									<div class="-mt-1 h-fit text-[0.7rem] dark:text-gray-500 line-clamp-1">
+									<div class="-mt-1 h-fit text-[0.7rem] text-content-subtle line-clamp-1">
 										{$MODEL_DOWNLOAD_POOL[model].digest}
 									</div>
 								{/if}
@@ -662,13 +662,13 @@
 						<div class="mr-2 ml-1 translate-y-0.5">
 							<Tooltip content={$i18n.t('Cancel')}>
 								<button
-									class="text-gray-800 dark:text-gray-100"
+									class="text-content"
 									on:click={() => {
 										cancelModelPullHandler(model);
 									}}
 								>
 									<svg
-										class="w-4 h-4 text-gray-800 dark:text-white"
+										class="w-4 h-4 text-content"
 										aria-hidden="true"
 										xmlns="http://www.w3.org/2000/svg"
 										width="24"

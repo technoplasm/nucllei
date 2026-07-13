@@ -79,7 +79,7 @@
 
 <Modal size="lg" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-1">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Archived Chats')}</div>
 			<button
 				class="self-center"
@@ -102,7 +102,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col w-full px-5 pb-4 dark:text-gray-200">
+		<div class="flex flex-col w-full px-5 pb-4 text-content">
 			<div class=" flex w-full mt-2 space-x-2">
 				<div class="flex flex-1">
 					<div class=" self-center ml-1 mr-3">
@@ -132,9 +132,9 @@
 					<div class="w-full">
 						<div class="text-left text-sm w-full mb-3 max-h-[22rem] overflow-y-scroll">
 							<div class="relative overflow-x-auto">
-								<table class="w-full text-sm text-left text-gray-600 dark:text-gray-400 table-auto">
+								<table class="w-full text-sm text-left text-content-muted table-auto">
 									<thead
-										class="text-xs text-gray-700 uppercase bg-transparent dark:text-gray-200 border-b-2 border-gray-50 dark:border-gray-850"
+										class="text-xs text-content uppercase bg-transparent border-b-2 border-gray-50 dark:border-gray-850"
 									>
 										<tr>
 											<th scope="col" class="px-3 py-2"> {$i18n.t('Name')} </th>

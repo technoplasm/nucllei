@@ -65,7 +65,7 @@
 		</div>
 
 		<div
-			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 font-medium text-left flex items-center gap-4 font-primary"
+			class=" mt-2 mb-4 text-3xl text-content font-medium text-left flex items-center gap-4 font-primary"
 		>
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
@@ -79,7 +79,7 @@
 				<div in:fade={{ duration: 200, delay: 200 }}>
 					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
 						<div
-							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
+							class="mt-0.5 text-base font-normal text-content-muted line-clamp-3 markdown"
 						>
 							<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 							     DOMPurify で無害化(javascript: リンク等を除去)。 -->
@@ -88,7 +88,7 @@
 							)}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}
-							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
+							<div class="mt-0.5 text-sm font-normal text-content-subtle">
 								By
 								{models[selectedModelIdx]?.info?.meta?.user.name
 									? models[selectedModelIdx]?.info?.meta?.user.name
@@ -96,7 +96,7 @@
 							</div>
 						{/if}
 					{:else}
-						<div class=" font-medium text-gray-400 dark:text-gray-500 line-clamp-1 font-p">
+						<div class=" font-medium text-content-subtle line-clamp-1 font-p">
 							{$i18n.t('How can I help you today?')}
 						</div>
 					{/if}

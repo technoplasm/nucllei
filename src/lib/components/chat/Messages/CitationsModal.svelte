@@ -57,7 +57,7 @@
 
 <Modal size="lg" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-2">
+		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
 			<div class=" text-lg font-medium self-center capitalize">
 				{$i18n.t('Citation')}
 			</div>
@@ -82,11 +82,11 @@
 
 		<div class="flex flex-col md:flex-row w-full px-6 pb-5 md:space-x-4">
 			<div
-				class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-hidden"
+				class="flex flex-col w-full text-content overflow-y-scroll max-h-[22rem] scrollbar-hidden"
 			>
 				{#each mergedDocuments as document, documentIdx}
 					<div class="flex flex-col w-full">
-						<div class="text-sm font-medium dark:text-gray-300">
+						<div class="text-sm font-medium text-content">
 							{$i18n.t('Source')}
 						</div>
 
@@ -97,9 +97,9 @@
 								placement="top-start"
 								tippyOptions={{ duration: [500, 0] }}
 							>
-								<div class="text-sm dark:text-gray-400 flex items-center gap-2 w-fit">
+								<div class="text-sm text-content-muted flex items-center gap-2 w-fit">
 									<a
-										class="hover:text-gray-500 dark:hover:text-gray-100 underline grow"
+										class="hover:text-content underline grow"
 										href={document?.metadata?.file_id
 											? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
 											: document.source?.url?.includes('http')
@@ -110,7 +110,7 @@
 										{decodeString(document?.metadata?.name ?? document.source.name)}
 									</a>
 									{#if document?.metadata?.page}
-										<span class="text-xs text-gray-500 dark:text-gray-400">
+										<span class="text-xs text-content-muted">
 											({$i18n.t('page')}
 											{document.metadata.page + 1})
 										</span>
@@ -118,7 +118,7 @@
 								</div>
 							</Tooltip>
 							{#if showRelevance}
-								<div class="text-sm font-medium dark:text-gray-300 mt-2">
+								<div class="text-sm font-medium text-content mt-2">
 									{$i18n.t('Relevance')}
 								</div>
 								{#if document.distance !== undefined}
@@ -128,7 +128,7 @@
 										placement="top-start"
 										tippyOptions={{ duration: [500, 0] }}
 									>
-										<div class="text-sm my-1 dark:text-gray-400 flex items-center gap-2 w-fit">
+										<div class="text-sm my-1 text-content-muted flex items-center gap-2 w-fit">
 											{#if showPercentage}
 												{@const percentage = calculatePercentage(document.distance)}
 
@@ -139,30 +139,30 @@
 														{percentage.toFixed(2)}%
 													</span>
 												{/if}
-												<span class="text-gray-500 dark:text-gray-500">
+												<span class="text-content-muted">
 													({(document?.distance ?? 0).toFixed(4)})
 												</span>
 											{:else}
-												<span class="text-gray-500 dark:text-gray-500">
+												<span class="text-content-muted">
 													{(document?.distance ?? 0).toFixed(4)}
 												</span>
 											{/if}
 										</div>
 									</Tooltip>
 								{:else}
-									<div class="text-sm dark:text-gray-400">
+									<div class="text-sm text-content-muted">
 										{$i18n.t('No distance available')}
 									</div>
 								{/if}
 							{/if}
 						{:else}
-							<div class="text-sm dark:text-gray-400">
+							<div class="text-sm text-content-muted">
 								{$i18n.t('No source available')}
 							</div>
 						{/if}
 					</div>
 					<div class="flex flex-col w-full">
-						<div class=" text-sm font-medium dark:text-gray-300 mt-2">
+						<div class=" text-sm font-medium text-content mt-2">
 							{$i18n.t('Content')}
 						</div>
 						{#if document.metadata?.html}
@@ -173,7 +173,7 @@
 								title={$i18n.t('Content')}
 							></iframe>
 						{:else}
-							<pre class="text-sm dark:text-gray-400 whitespace-pre-line">
+							<pre class="text-sm text-content-muted whitespace-pre-line">
                 {document.document}
               </pre>
 						{/if}

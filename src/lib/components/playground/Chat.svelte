@@ -260,7 +260,7 @@
 						</div>
 
 						{#if !showSystem}
-							<div class=" flex-1 text-gray-500 line-clamp-1">
+							<div class=" flex-1 text-content-muted line-clamp-1">
 								{system}
 							</div>
 						{/if}
@@ -317,7 +317,7 @@
 			</div>
 
 			<div class="pb-3">
-				<div class="text-xs font-medium text-gray-500 px-2 py-1">
+				<div class="text-xs font-medium text-content-muted px-2 py-1">
 					{selectedModelId}
 				</div>
 				<div class="border border-gray-100 dark:border-gray-850 w-full px-3 py-2.5 rounded-xl">
@@ -345,7 +345,7 @@
 					<div class="flex justify-between">
 						<div>
 							<button
-								class="px-3.5 py-1.5 text-sm font-medium bg-gray-50 hover:bg-gray-100 text-gray-900 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition rounded-lg"
+								class="px-3.5 py-1.5 text-sm font-medium bg-gray-50 hover:bg-gray-100 text-content dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg"
 								on:click={() => {
 									role = role === 'user' ? 'assistant' : 'user';
 								}}
@@ -362,7 +362,7 @@
 							{#if !loading}
 								<button
 									disabled={message === ''}
-									class="px-3.5 py-1.5 text-sm font-medium disabled:bg-gray-50 dark:disabled:hover:bg-gray-850 disabled:cursor-not-allowed bg-gray-50 hover:bg-gray-100 text-gray-900 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition rounded-lg"
+									class="px-3.5 py-1.5 text-sm font-medium disabled:bg-gray-50 dark:disabled:hover:bg-gray-850 disabled:cursor-not-allowed bg-gray-50 hover:bg-gray-100 text-content dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg"
 									on:click={() => {
 										addHandler();
 										role = role === 'user' ? 'assistant' : 'user';

@@ -47,7 +47,17 @@ export default {
 					selected: 'var(--sidebar-selected, #e3e3e3)'
 				},
 				// 罫線・区切り線の共通色(テーブル/hr など)。実値は src/tailwind.css。border-line で使う
-				line: 'var(--line, #dcdcdc)'
+				line: 'var(--line, #dcdcdc)',
+				// テキスト(前景)の意味トークン。surface と対(surface=背景 / content=前景)。
+				// light/dark の実値は src/tailwind.css で gray スケールに乗せて一括管理(dark: 変種は不要)。
+				//   content        … 本文(既定のテキスト色)
+				//   content-muted  … 2次情報・ラベル・キャプション
+				//   content-subtle … placeholder・disabled・3次(最も控えめ)
+				content: {
+					DEFAULT: 'var(--content, #333333)',
+					muted: 'var(--content-muted, #9b9b9b)',
+					subtle: 'var(--content-subtle, #b4b4b4)'
+				}
 			},
 			typography: {
 				DEFAULT: {

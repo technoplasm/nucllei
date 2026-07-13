@@ -12,7 +12,7 @@
 
 <div class="flex gap-2">
 	<div class="flex flex-col w-full">
-		<div class=" mb-0.5 text-xs text-gray-500">{$i18n.t('Name')}</div>
+		<div class=" mb-0.5 text-xs text-content-muted">{$i18n.t('Name')}</div>
 
 		<div class="flex-1">
 			<input
@@ -48,7 +48,7 @@
 </div> -->
 
 <div class="flex flex-col w-full mt-2">
-	<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
+	<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Description')}</div>
 
 	<div class="flex-1">
 		<Textarea

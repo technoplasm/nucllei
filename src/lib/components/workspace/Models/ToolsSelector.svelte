@@ -35,13 +35,13 @@
 
 	<div class="flex flex-col">
 		{#if builtinIds.length === 0 && customIds.length === 0}
-			<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">{$i18n.t('None')}</div>
+			<div class="text-xs text-content-subtle mt-1">{$i18n.t('None')}</div>
 		{/if}
 
 		{#each [{ label: $i18n.t('組み込み'), ids: builtinIds }, { label: $i18n.t('カスタムツール'), ids: customIds }] as section}
 			{#if section.ids.length > 0}
 				{#if builtinIds.length > 0 && customIds.length > 0}
-					<div class="text-xs text-gray-500 mt-2">{section.label}</div>
+					<div class="text-xs text-content-muted mt-2">{section.label}</div>
 				{/if}
 				<div class="flex flex-col mt-1">
 					{#each section.ids as tool}
@@ -64,7 +64,7 @@
 								</Tooltip>
 
 								{#if (_tools[tool].specs ?? []).length > 0}
-									<div class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500 mt-0.5">
+									<div class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-content-muted mt-0.5">
 										{#each _tools[tool].specs as spec}
 											<Tooltip content={spec.description ?? ''} placement="top-start">
 												<span class="font-mono">{spec.name}</span>

@@ -147,7 +147,7 @@
 
 {#if loaded}
 	<div
-		class="h-screen max-h-[100dvh] w-full flex flex-col text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-900"
+		class="h-screen max-h-[100dvh] w-full flex flex-col text-content bg-white dark:bg-gray-900"
 	>
 		<div class="flex flex-col flex-auto justify-center relative">
 			<div class=" flex flex-col w-full flex-auto overflow-auto h-0" id="messages-container">
@@ -162,7 +162,7 @@
 						</div>
 
 						<div class="flex text-sm justify-between items-center mt-1">
-							<div class="text-gray-400">
+							<div class="text-content-muted">
 								{dayjs(chat.chat.timestamp).format('LLL')}
 							</div>
 						</div>

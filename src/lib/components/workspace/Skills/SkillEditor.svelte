@@ -172,7 +172,7 @@
 						{/if}
 					</div>
 
-					<div class="flex gap-0.5 items-center text-xs text-gray-500">
+					<div class="flex gap-0.5 items-center text-xs text-content-muted">
 						<div class="">/</div>
 						<input
 							class=" w-full bg-transparent outline-hidden"
@@ -220,15 +220,15 @@
 					/>
 				</div>
 
-				<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+				<div class="text-xs text-content-subtle mt-1">
 					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
-						class=" text-gray-600 dark:text-gray-300 font-medium"
+						class=" text-content font-medium"
 						>{'{{'}{$i18n.t('variable')}{'}}'}</span
 					>.
 					{$i18n.t('Make sure to enclose them with')}
-					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'{{'}</span>
+					<span class=" text-content font-medium">{'{{'}</span>
 					{$i18n.t('and')}
-					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
+					<span class=" text-content font-medium">{'}}'}</span>.
 				</div>
 			</div>
 		</div>
@@ -239,7 +239,7 @@
 					<div class=" self-center text-sm font-semibold">{$i18n.t('Tools')}</div>
 				</div>
 
-				<div class=" text-xs dark:text-gray-500">
+				<div class=" text-xs text-content-muted">
 					{$i18n.t('tool 紐づき skill の作成/更新は admin のみ可能です。')}
 				</div>
 
@@ -271,7 +271,7 @@
 
 		<div class="my-4 flex justify-start items-center gap-3 pb-20">
 			{#if !canEdit}
-				<div class="text-sm text-gray-500">
+				<div class="text-sm text-content-muted">
 					{$i18n.t('閲覧のみ(編集できるのは自分のスキルだけです)')}
 				</div>
 			{/if}
@@ -324,7 +324,7 @@
 		doSubmit();
 	}}
 >
-	<div class="text-sm text-gray-500">
+	<div class="text-sm text-content-muted">
 		<div class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3">
 			<div>
 				{$i18n.t('The ID will be changed by deleting the old one and creating a new one.')}

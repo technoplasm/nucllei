@@ -77,7 +77,7 @@
 					{@html} するため本文と同じ信頼モデルで安全。ここで直接 {@html} を書いてはならない。
 				-->
 				<div
-					class="mb-1.5 text-sm text-gray-500 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3"
+					class="mb-1.5 text-sm text-content-muted border-s-2 border-gray-200 dark:border-gray-800 ps-3"
 					slot="content"
 					dir="auto"
 				>

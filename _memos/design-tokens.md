@@ -14,8 +14,33 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e9e9e9` / `#212121` |
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#e3e3e3` / `#262626` |
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |
+| `--content` | 本文(既定テキスト色) | `text-content` | gray-800 / gray-100 |
+| `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | gray-500 / gray-400 |
+| `--content-subtle` | placeholder・disabled・3次 | `text-content-subtle` | gray-400 / gray-500 |
 
 - 変数がテーマで切り替わるので利用側に `dark:` 変種は不要。
+- テキストトークンの実値は **raw hex**(`--surface`/`--line` と同流儀で `:root`/`html.dark` に直書き)。
+  ※ `var(--color-gray-*)` は `@config` 構成では `:root` に出力されず**空**になる罠があるので使わない
+  (使うと dark で `text-content` が fallback `#333` に落ち、暗背景に暗文字で不可視になる)。
+
+### テキスト色トークンの移行ルール(2026-07-14 追加・gray ハードコード抽象化)
+
+`text-gray-*` は 11 shade がバラバラに散在(実測: 300×244 / 500×225 / 700×115 / 600×111 /
+400×100 / 100×82 …、text 系だけで ~1000 箇所 + `dark:text-gray-*` ~455)。**shade は役割と
+1:1 対応していない**(同じキャプションが 400 だったり 500 だったり)ので、**shade 単位の一括置換は
+不整合をトークンに固めるだけ**。役割(role)を文脈から判断して置換する:
+
+| 役割 | 判定の目安 | → トークン |
+|---|---|---|
+| 本文・見出し・ボタン文言・active な選択肢 | 既定の可読テキスト。light 700–900 / dark 100–300 が多い | `text-content` |
+| ラベル・キャプション・補助説明・2次メタ | `text-xs`/`text-sm` の説明文、フォームのラベル、控えめな注記。light 500–600 / dark 400 | `text-content-muted` |
+| placeholder・disabled・空状態・最も控えめ | 未選択 select、プレースホルダ、`opacity` 相当の淡いテキスト。light 400 / dark 500–600 | `text-content-subtle` |
+
+- **明暗ペアは1トークンに畳む**: `text-gray-700 dark:text-gray-300` → `text-content`(dark: 変種を消す)。
+- **`dark:` 欠落は潜在バグ**: `text-gray-700` 単独(dark 指定なし)は dark モードで暗背景に暗文字。
+  トークン化で自動的に解消する(移行の副次効果)。
+- **対象は text 前景のみ**。`bg-gray-*`/`border-gray-*` は surface/line/sidebar 軸(別トークン)なので触らない。
+- 迷ったら **muted に寄せる**(subtle は明確に placeholder/disabled/空状態のときだけ)。
 
 ## レイアウトトークン(2026-07-12 追加)
 

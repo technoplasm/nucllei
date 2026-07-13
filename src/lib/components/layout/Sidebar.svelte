@@ -425,7 +425,7 @@
 		? 'md:relative w-[var(--sidebar-width)] max-w-[var(--sidebar-width)]'
 		: '-translate-x-[var(--sidebar-width)] w-[0px]'} {$isApp
 		? `ml-[4.5rem] md:ml-0 `
-		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-surface-sidebar text-gray-900 dark:text-gray-200 fixed z-50 top-0 left-0 overflow-x-hidden"
+		: 'transition-width duration-200 ease-in-out'}  shrink-0 bg-surface-sidebar text-content fixed z-50 top-0 left-0 overflow-x-hidden"
 	data-state={$showSidebar}
 >
 	<div
@@ -434,7 +434,7 @@
 			: 'invisible'}"
 	>
 		<div
-			class="px-1.5 flex justify-between items-center space-x-1 text-gray-600 dark:text-gray-400"
+			class="px-1.5 flex justify-between items-center space-x-1 text-content-muted"
 		>
 			<a
 				class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
@@ -453,7 +453,7 @@
 					alt="logo"
 				/>
 				<div
-					class="self-center font-medium text-md text-gray-850 dark:text-white font-primary truncate"
+					class="self-center font-medium text-md text-content font-primary truncate"
 				>
 					{$WEBUI_NAME}
 				</div>
@@ -485,7 +485,7 @@
 			</button>
 		</div>
 
-		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200 mt-0.5">
+		<div class="px-1.5 flex justify-center text-content mt-0.5">
 			<a
 				id="sidebar-new-chat-button"
 				class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition no-drag-region"
@@ -514,7 +514,7 @@
 
 		<!-- llens: ワークスペースは全ログインユーザーに表示(#69 のファイル管理を
 		     /workspace/files へ移設 — 非 admin もファイルタブに入れる) -->
-		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
+		<div class="px-1.5 flex justify-center text-content">
 			<a
 				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition"
 				href="/workspace"
@@ -551,7 +551,7 @@
 			</a>
 		</div>
 
-		<div class="px-1.5 flex justify-center text-gray-800 dark:text-gray-200">
+		<div class="px-1.5 flex justify-center text-content">
 			<button
 				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition"
 				on:click={async () => {
@@ -572,13 +572,13 @@
 
 		{#if enabledModels.length > 0}
 			<div class="px-1.5 mt-3">
-				<div class="px-1 w-full text-xs text-gray-500 dark:text-gray-500 font-medium pb-1.5">
+				<div class="px-1 w-full text-xs text-content-muted font-medium pb-1.5">
 					{$i18n.t('Models')}
 				</div>
 				<div class="flex flex-col">
 					{#each enabledModels as model (model.id)}
 						<div
-							class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover transition text-gray-800 dark:text-gray-200"
+							class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover transition text-content"
 						>
 							<button
 								class="pl-2 py-1.5 flex items-center gap-2 flex-1 min-w-0"
@@ -597,7 +597,7 @@
 
 							<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
 							<a
-								class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-sidebar-selected transition"
+								class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected transition"
 								href="/workspace/models/edit?id={model.id}"
 								draggable="false"
 								aria-label={$i18n.t('Edit')}
@@ -705,7 +705,7 @@
 					{#each $chats as chat, idx}
 						{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 							<div
-								class="px-1 py-1.5 w-full text-xs text-gray-500 dark:text-gray-500 font-medium
+								class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
 										{idx > 0 ? 'mt-1.5' : ''}"
 							>
 								{$i18n.t(chat.time_range)}

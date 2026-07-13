@@ -506,7 +506,7 @@
 						>
 							{#if atSelectedModel !== undefined}
 								<div class="flex items-center justify-between w-full">
-									<div class="pl-[1px] flex items-center gap-2 text-sm dark:text-gray-500">
+									<div class="pl-[1px] flex items-center gap-2 text-sm text-content-muted">
 										<img
 											crossorigin="anonymous"
 											alt="model profile"
@@ -521,7 +521,7 @@
 									</div>
 									<div>
 										<button
-											class="flex items-center dark:text-gray-500"
+											class="flex items-center text-content-muted"
 											on:click={() => {
 												atSelectedModel = undefined;
 											}}
@@ -611,7 +611,7 @@
 							}}
 						>
 							<div
-								class="flex-1 flex flex-col relative w-full shadow-[0_2px_12px_-4px_rgba(0,0,0,0.12)] rounded-3xl border border-gray-100 dark:border-gray-850 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-800 focus-within:dark:border-gray-800 transition px-1 bg-surface-raised dark:text-gray-100"
+								class="flex-1 flex flex-col relative w-full shadow-[0_2px_12px_-4px_rgba(0,0,0,0.12)] rounded-3xl border border-gray-100 dark:border-gray-850 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-800 focus-within:dark:border-gray-800 transition px-1 bg-surface-raised text-content"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#if files.length > 0}
@@ -703,7 +703,7 @@
 								<div class="px-2.5">
 									{#if $settings?.richTextInput ?? true}
 										<div
-											class="scrollbar-hidden text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-80 overflow-auto"
+											class="scrollbar-hidden text-left bg-transparent text-content outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-80 overflow-auto"
 											id="chat-input-container"
 										>
 											<RichTextInput
@@ -893,7 +893,7 @@
 											id="chat-input"
 											dir="auto"
 											bind:this={chatInputElement}
-											class="scrollbar-hidden bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none"
+											class="scrollbar-hidden bg-transparent text-content outline-hidden w-full pt-3 px-1 resize-none"
 											placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 											bind:value={prompt}
 											on:compositionstart={() => (isComposing = true)}
@@ -1111,7 +1111,7 @@
 											}}
 										>
 											<button
-												class="bg-transparent hover:bg-gray-100 text-gray-800 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5 outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-gray-100 text-content dark:hover:bg-gray-800 transition rounded-full p-1.5 outline-hidden focus:outline-hidden"
 												type="button"
 												aria-label="More"
 											>
@@ -1137,8 +1137,8 @@
 																(imageGenerationEnabled = !imageGenerationEnabled)}
 															type="button"
 															class="px-1.5 @xl:px-2.5 py-1.5 flex gap-1.5 items-center text-sm rounded-full font-medium transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden border {imageGenerationEnabled
-																? 'bg-gray-50 dark:bg-gray-400/10 border-gray-100 dark:border-gray-700 text-gray-600 dark:text-gray-400'
-																: 'bg-transparent border-transparent text-gray-600 dark:text-gray-300  hover:bg-gray-100 dark:hover:bg-gray-800 '}"
+																? 'bg-gray-50 dark:bg-gray-400/10 border-gray-100 dark:border-gray-700 text-content-muted'
+																: 'bg-transparent border-transparent text-content-muted  hover:bg-gray-100 dark:hover:bg-gray-800 '}"
 														>
 															<Photo className="size-5" strokeWidth="1.75" />
 															<span
@@ -1156,8 +1156,8 @@
 																(codeInterpreterEnabled = !codeInterpreterEnabled)}
 															type="button"
 															class="px-1.5 @xl:px-2.5 py-1.5 flex gap-1.5 items-center text-sm rounded-full font-medium transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden border {codeInterpreterEnabled
-																? 'bg-gray-50 dark:bg-gray-400/10 border-gray-100  dark:border-gray-700 text-gray-600 dark:text-gray-400  '
-																: 'bg-transparent border-transparent text-gray-600 dark:text-gray-300  hover:bg-gray-100 dark:hover:bg-gray-800 '}"
+																? 'bg-gray-50 dark:bg-gray-400/10 border-gray-100  dark:border-gray-700 text-content-muted  '
+																: 'bg-transparent border-transparent text-content-muted  hover:bg-gray-100 dark:hover:bg-gray-800 '}"
 														>
 															<CommandLine className="size-5" strokeWidth="1.75" />
 															<span
@@ -1178,7 +1178,7 @@
 											<Tooltip content={$i18n.t('Record voice')}>
 												<button
 													id="voice-input-button"
-													class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 mr-0.5 self-center"
+													class=" text-content-muted hover:text-content transition rounded-full p-1.5 mr-0.5 self-center"
 													type="button"
 													on:click={async () => {
 														try {
@@ -1227,7 +1227,7 @@
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Stop')}>
 													<button
-														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
+														class="bg-white hover:bg-gray-100 text-content dark:bg-gray-700 dark:hover:bg-gray-800 transition rounded-full p-1.5"
 														on:click={() => {
 															stopResponse();
 														}}
@@ -1317,7 +1317,7 @@
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0)
 															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
+															: 'text-white bg-gray-200 text-content dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
 														type="submit"
 														disabled={prompt === '' && files.length === 0}
 													>

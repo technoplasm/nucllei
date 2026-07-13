@@ -56,7 +56,7 @@
 			</svg>
 		{:else if indeterminate}
 			<svg
-				class="w-3 h-3.5 text-gray-800 dark:text-white"
+				class="w-3 h-3.5 text-content"
 				aria-hidden="true"
 				xmlns="http://www.w3.org/2000/svg"
 				fill="none"

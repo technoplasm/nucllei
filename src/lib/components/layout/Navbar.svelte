@@ -52,7 +52,7 @@
 			<div
 				class="{$showSidebar
 					? 'md:hidden'
-					: ''} mr-1 self-start flex flex-none items-center text-gray-600 dark:text-gray-400"
+					: ''} mr-1 self-start flex flex-none items-center text-content-muted"
 			>
 				<button
 					id="sidebar-toggle-button"
@@ -78,7 +78,7 @@
 				{/if}
 			</div>
 
-			<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
+			<div class="self-start flex flex-none items-center text-content-muted">
 				<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 				{#if shareEnabled && chat && chat.id}
 					<Menu
@@ -120,7 +120,7 @@
 						id="new-chat-button"
 						class=" flex {$showSidebar
 							? 'md:hidden'
-							: ''} cursor-pointer px-2 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+							: ''} cursor-pointer px-2 py-2 rounded-xl text-content-muted hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 						on:click={() => {
 							initNewChat();
 						}}

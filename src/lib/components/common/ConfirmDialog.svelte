@@ -79,7 +79,7 @@
 			}}
 		>
 			<div class="px-[1.75rem] py-6 flex flex-col">
-				<div class=" text-lg font-semibold dark:text-gray-200 mb-2.5">
+				<div class=" text-lg font-semibold text-content mb-2.5">
 					{#if title !== ''}
 						{title}
 					{:else}
@@ -88,7 +88,7 @@
 				</div>
 
 				<slot>
-					<div class=" text-sm text-gray-500 flex-1">
+					<div class=" text-sm text-content-muted flex-1">
 						{#if message !== ''}
 							{message}
 						{:else}
@@ -99,7 +99,7 @@
 							<textarea
 								bind:value={inputValue}
 								placeholder={inputPlaceholder ? inputPlaceholder : $i18n.t('Enter your message')}
-								class="w-full mt-2 rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 outline-hidden resize-none"
+								class="w-full mt-2 rounded-lg px-4 py-2 text-sm text-content dark:bg-gray-900 outline-hidden resize-none"
 								rows="3"
 								required
 							/>
@@ -109,7 +109,7 @@
 
 				<div class="mt-6 flex justify-between gap-1.5">
 					<button
-						class="bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2.5 rounded-lg transition"
+						class="bg-gray-100 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2.5 rounded-lg transition"
 						on:click={() => {
 							show = false;
 							dispatch('cancel');
@@ -119,7 +119,7 @@
 						{cancelLabel}
 					</button>
 					<button
-						class="bg-gray-900 hover:bg-gray-850 text-gray-100 dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium w-full py-2.5 rounded-lg transition"
+						class="bg-gray-900 hover:bg-gray-850 text-content dark:bg-gray-100 dark:hover:bg-white font-medium w-full py-2.5 rounded-lg transition"
 						on:click={() => {
 							confirmHandler();
 						}}

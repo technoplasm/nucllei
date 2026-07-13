@@ -104,7 +104,7 @@
 </script>
 
 <Modal size="md" bind:show>
-	<div class="font-primary px-5 py-4 dark:text-gray-300 text-gray-700 flex flex-col max-h-[80vh]">
+	<div class="font-primary px-5 py-4 text-content flex flex-col max-h-[80vh]">
 		<div class="flex justify-between items-center pb-2">
 			<div class="text-lg font-medium self-center">{$i18n.t('Saved Files')}</div>
 			<button class="self-center" type="button" on:click={() => (show = false)}>
@@ -126,7 +126,7 @@
 
 		<div class="flex-1 overflow-y-auto min-h-40 -mx-1 px-1">
 			{#if files.length === 0}
-				<div class="w-full flex justify-center items-center py-10 text-sm text-gray-500">
+				<div class="w-full flex justify-center items-center py-10 text-sm text-content-subtle">
 					{#if loading}
 						<Spinner className="size-4" />
 					{:else}
@@ -154,7 +154,7 @@
 								/>
 							{:else}
 								<div
-									class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-gray-500"
+									class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
 								>
 									<Document className="size-4" />
 								</div>
@@ -164,7 +164,7 @@
 								<div class="text-sm font-medium line-clamp-1">
 									{file?.meta?.name ?? file.filename}
 								</div>
-								<div class="text-xs text-gray-500 line-clamp-1 mt-0.5">
+								<div class="text-xs text-content-muted line-clamp-1 mt-0.5">
 									{#if file?.meta?.size}
 										{formatFileSize(file.meta.size)} •
 									{/if}
@@ -182,7 +182,7 @@
 				{#if files.length < total}
 					<div class="w-full flex justify-center py-1.5">
 						<button
-							class="px-3.5 py-1 text-xs font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 dark:text-gray-300 dark:hover:text-white transition flex items-center gap-2"
+							class="px-3.5 py-1 text-xs font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-content dark:hover:text-white transition flex items-center gap-2"
 							type="button"
 							disabled={loading}
 							on:click={() => fetchFiles(true)}
@@ -199,7 +199,7 @@
 
 		<div class="flex justify-end pt-3 text-sm font-medium gap-1.5">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-transparent hover:bg-gray-100 text-gray-700 dark:text-gray-300 dark:hover:bg-gray-850 transition rounded-full"
+				class="px-3.5 py-1.5 text-sm font-medium bg-transparent hover:bg-gray-100 text-content dark:hover:bg-gray-850 transition rounded-full"
 				type="button"
 				on:click={() => (show = false)}
 			>

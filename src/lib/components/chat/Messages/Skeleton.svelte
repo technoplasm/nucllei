@@ -13,7 +13,7 @@
 	ヘッダ(shimmer 行)も併せて揃えること。
 -->
 <div class="w-full space-y-1 mb-1.5 text-sm">
-	<div class="w-fit font-medium flex items-center gap-2 text-gray-500 shimmer">
+	<div class="w-fit font-medium flex items-center gap-2 text-content-muted shimmer">
 		<Spinner className="size-4" />
 		<span>{$i18n.t('Preparing...')}</span>
 	</div>

@@ -14,11 +14,11 @@
 			<div class="flex items-baseline gap-2">
 				<span class="text-base font-medium">{$WEBUI_NAME}</span>
 				<Tooltip content={WEBUI_BUILD_HASH}>
-					<span class="text-xs text-gray-500 dark:text-gray-400">v{WEBUI_VERSION}</span>
+					<span class="text-xs text-content-muted">v{WEBUI_VERSION}</span>
 				</Tooltip>
 			</div>
 
-			<div class="mt-1 text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
+			<div class="mt-1 text-xs text-content-subtle leading-relaxed">
 				{$i18n.t('Fork of Open WebUI v0.6.5 (BSD-3-Clause).')}
 				{$i18n.t('Code added in this fork is proprietary.')}
 			</div>
@@ -26,14 +26,14 @@
 
 		<hr class=" border-gray-100 dark:border-gray-850" />
 
-		<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+		<div class="mt-2 text-xs text-content-subtle">
 			Emoji graphics provided by
 			<a href="https://github.com/jdecked/twemoji" target="_blank">Twemoji</a>, licensed under
 			<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY 4.0</a>.
 		</div>
 
 		<div>
-			<pre class="text-xs text-gray-400 dark:text-gray-500">Copyright (c) 2023 <a
+			<pre class="text-xs text-content-subtle">Copyright (c) 2023 <a
 					href="https://openwebui.com"
 					target="_blank"
 					class="underline">Open WebUI (Timothy Jaeryang Baek)</a

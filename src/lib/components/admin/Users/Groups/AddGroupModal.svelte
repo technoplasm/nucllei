@@ -39,7 +39,7 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 mb-1.5">
+		<div class=" flex justify-between text-content px-5 pt-4 mb-1.5">
 			<div class=" text-lg font-medium self-center font-primary">
 				{$i18n.t('Add User Group')}
 			</div>
@@ -62,7 +62,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
@@ -74,7 +74,7 @@
 					<div class="px-1 flex flex-col w-full">
 						<div class="flex gap-2">
 							<div class="flex flex-col w-full">
-								<div class=" mb-0.5 text-xs text-gray-500">{$i18n.t('Name')}</div>
+								<div class=" mb-0.5 text-xs text-content-muted">{$i18n.t('Name')}</div>
 
 								<div class="flex-1">
 									<input
@@ -90,7 +90,7 @@
 						</div>
 
 						<div class="flex flex-col w-full mt-2">
-							<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
+							<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Description')}</div>
 
 							<div class="flex-1">
 								<Textarea

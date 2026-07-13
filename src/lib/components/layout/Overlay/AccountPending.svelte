@@ -25,7 +25,7 @@
 					{$i18n.t('Contact Admin for WebUI Access')}
 				</div>
 
-				<div class=" mt-4 text-center text-sm dark:text-gray-200 w-full">
+				<div class=" mt-4 text-center text-sm text-content w-full">
 					{$i18n.t('Your account status is currently pending activation.')}<br />
 					{$i18n.t(
 						'To access the WebUI, please reach out to the administrator. Admins can manage user statuses from the Admin Panel.'
@@ -40,7 +40,7 @@
 
 				<div class=" mt-6 mx-auto relative group w-fit">
 					<button
-						class="relative z-20 flex px-5 py-2 rounded-full bg-white border border-gray-100 dark:border-none hover:bg-gray-100 text-gray-700 transition font-medium text-sm"
+						class="relative z-20 flex px-5 py-2 rounded-full bg-white border border-gray-100 dark:border-none hover:bg-gray-100 text-content transition font-medium text-sm"
 						on:click={async () => {
 							location.href = '/';
 						}}
@@ -49,7 +49,7 @@
 					</button>
 
 					<button
-						class="text-xs text-center w-full mt-2 text-gray-400 underline"
+						class="text-xs text-center w-full mt-2 text-content-muted underline"
 						on:click={async () => {
 							// llens(#70 B1): cookie セッションの破棄は backend の signout が行う
 							await userSignOut().catch(() => {});

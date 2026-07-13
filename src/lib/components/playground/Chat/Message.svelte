@@ -52,7 +52,7 @@
 
 	<div class=" pt-1">
 		<button
-			class=" group-hover:text-gray-500 dark:text-gray-900 dark:hover:text-gray-300 transition"
+			class=" group-hover:text-content-muted dark:text-content-subtle dark:hover:text-content transition"
 			on:click={() => {
 				onDelete();
 			}}

@@ -227,7 +227,7 @@
 	{#if responseContent === null}
 		{#if !floatingInput}
 			<div
-				class="flex flex-row gap-0.5 shrink-0 p-1 bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-lg shadow-xl"
+				class="flex flex-row gap-0.5 shrink-0 p-1 bg-white dark:bg-gray-850 text-content text-medium rounded-lg shadow-xl"
 			>
 				<button
 					class="px-1 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-sm flex items-center gap-1 min-w-fit"
@@ -262,7 +262,7 @@
 			</div>
 		{:else}
 			<div
-				class="py-1 flex dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-850 w-72 rounded-full shadow-xl"
+				class="py-1 flex text-content bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-850 w-72 rounded-full shadow-xl"
 			>
 				<input
 					type="text"
@@ -281,7 +281,7 @@
 					<button
 						class="{floatingInputValue !== ''
 							? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-							: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 m-0.5 self-center"
+							: 'text-white bg-gray-200 dark:text-content-subtle dark:bg-gray-700 disabled'} transition rounded-full p-1.5 m-0.5 self-center"
 						on:click={() => {
 							askHandler();
 						}}
@@ -303,9 +303,9 @@
 			</div>
 		{/if}
 	{:else}
-		<div class="bg-white dark:bg-gray-850 dark:text-gray-100 rounded-xl shadow-xl w-80 max-w-full">
+		<div class="bg-white dark:bg-gray-850 text-content rounded-xl shadow-xl w-80 max-w-full">
 			<div
-				class="bg-gray-50/50 dark:bg-gray-800 dark:text-gray-100 text-medium rounded-xl px-3.5 py-3 w-full"
+				class="bg-gray-50/50 dark:bg-gray-800 text-content text-medium rounded-xl px-3.5 py-3 w-full"
 			>
 				<div class="font-medium">
 					<Markdown id={`${id}-float-prompt`} content={prompt} />
@@ -313,7 +313,7 @@
 			</div>
 
 			<div
-				class="bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-xl px-3.5 py-3 w-full"
+				class="bg-white dark:bg-gray-850 text-content text-medium rounded-xl px-3.5 py-3 w-full"
 			>
 				<div class=" max-h-80 overflow-y-auto w-full markdown-prose-xs" id="response-container">
 					{#if responseContent.trim() === ''}

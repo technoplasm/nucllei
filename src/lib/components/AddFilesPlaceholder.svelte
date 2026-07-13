@@ -17,7 +17,7 @@
 	</div>
 
 	<slot
-		><div class="px-2 mt-2 text-center text-sm dark:text-gray-200 w-full">
+		><div class="px-2 mt-2 text-center text-sm text-content-muted w-full">
 			{#if content}
 				{content}
 			{:else}

@@ -37,7 +37,7 @@
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true)}
 				{#if selectedModelIdx === 0}
 					<div
-						class="  self-center mx-1 disabled:text-gray-600 disabled:hover:text-gray-600 -translate-y-[0.5px]"
+						class="  self-center mx-1 disabled:text-content-subtle disabled:hover:text-content-subtle -translate-y-[0.5px]"
 					>
 						<Tooltip content={$i18n.t('Add Model')}>
 							<button
@@ -63,7 +63,7 @@
 					</div>
 				{:else}
 					<div
-						class="  self-center mx-1 disabled:text-gray-600 disabled:hover:text-gray-600 -translate-y-[0.5px]"
+						class="  self-center mx-1 disabled:text-content-subtle disabled:hover:text-content-subtle -translate-y-[0.5px]"
 					>
 						<Tooltip content={$i18n.t('Remove Model')}>
 							<button

@@ -97,7 +97,7 @@
 
 <Modal size="md" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 mb-1.5">
+		<div class=" flex justify-between text-content px-5 pt-4 mb-1.5">
 			<div class=" text-lg font-medium self-center font-primary">
 				{#if custom}
 					{#if edit}
@@ -128,7 +128,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200">
+		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
@@ -140,14 +140,14 @@
 					<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 						<div
 							id="admin-settings-tabs-container"
-							class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+							class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
 						>
 							{#if tabs.includes('general')}
 								<button
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'general'
 										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+										: ' text-content-subtle hover:text-content'}"
 									on:click={() => {
 										selectedTab = 'general';
 									}}
@@ -176,7 +176,7 @@
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'permissions'
 										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+										: ' text-content-subtle hover:text-content'}"
 									on:click={() => {
 										selectedTab = 'permissions';
 									}}
@@ -194,7 +194,7 @@
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'users'
 										? ''
-										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+										: ' text-content-subtle hover:text-content'}"
 									on:click={() => {
 										selectedTab = 'users';
 									}}
@@ -229,7 +229,7 @@
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'display'
 									? ' dark:border-white'
-									: 'border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: 'border-transparent text-content-subtle hover:text-content'}"
 								on:click={() => {
 									selectedTab = 'display';
 								}}
@@ -244,7 +244,7 @@
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'permissions'
 									? '  dark:border-white'
-									: 'border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: 'border-transparent text-content-subtle hover:text-content'}"
 								on:click={() => {
 									selectedTab = 'permissions';
 								}}
@@ -259,7 +259,7 @@
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'users'
 									? ' dark:border-white'
-									: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									: ' border-transparent text-content-subtle hover:text-content'}"
 								on:click={() => {
 									selectedTab = 'users';
 								}}

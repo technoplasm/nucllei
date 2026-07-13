@@ -333,7 +333,7 @@
 		deleteHandler();
 	}}
 >
-	<div class=" text-sm text-gray-700 dark:text-gray-300 flex-1 line-clamp-3">
+	<div class=" text-sm text-content flex-1 line-clamp-3">
 		{@html DOMPurify.sanitize(
 			$i18n.t('This will delete <strong>{{NAME}}</strong> and <strong>all its contents</strong>.', {
 				NAME: folders[folderId].name
@@ -376,12 +376,12 @@
 		<div class="w-full group">
 			<button
 				id="folder-{folderId}-button"
-				class="relative w-full py-1.5 px-2 rounded-md flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-500 font-medium hover:bg-sidebar-hover transition"
+				class="relative w-full py-1.5 px-2 rounded-md flex items-center gap-1.5 text-xs text-content-muted font-medium hover:bg-sidebar-hover transition"
 				on:dblclick={() => {
 					editHandler();
 				}}
 			>
-				<div class="text-gray-300 dark:text-gray-600">
+				<div class="text-content-subtle">
 					{#if open}
 						<ChevronDown className=" size-3" strokeWidth="2.5" />
 					{:else}
@@ -416,7 +416,7 @@
 									edit = false;
 								}
 							}}
-							class="w-full h-full bg-transparent text-gray-500 dark:text-gray-500 outline-hidden"
+							class="w-full h-full bg-transparent text-content-muted outline-hidden"
 						/>
 					{:else}
 						{folders[folderId].name}
@@ -424,7 +424,7 @@
 				</div>
 
 				<div
-					class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+					class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center text-content"
 					on:pointerup={(e) => {
 						e.stopPropagation();
 					}}

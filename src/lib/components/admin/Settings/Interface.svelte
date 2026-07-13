@@ -93,7 +93,7 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('Local Models')}</div>
 						<select
-							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 							bind:value={taskConfig.TASK_MODEL}
 							placeholder={$i18n.t('Select a model')}
 						>
@@ -109,7 +109,7 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('External Models')}</div>
 						<select
-							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
 							bind:value={taskConfig.TASK_MODEL_EXTERNAL}
 							placeholder={$i18n.t('Select a model')}
 						>
@@ -263,14 +263,14 @@
 										required
 									>
 										{#if banner.type == ''}
-											<option value="" selected disabled class="text-gray-900"
+											<option value="" selected disabled class="text-content"
 												>{$i18n.t('Type')}</option
 											>
 										{/if}
-										<option value="info" class="text-gray-900">{$i18n.t('Info')}</option>
-										<option value="warning" class="text-gray-900">{$i18n.t('Warning')}</option>
-										<option value="error" class="text-gray-900">{$i18n.t('Error')}</option>
-										<option value="success" class="text-gray-900">{$i18n.t('Success')}</option>
+										<option value="info" class="text-content">{$i18n.t('Info')}</option>
+										<option value="warning" class="text-content">{$i18n.t('Warning')}</option>
+										<option value="error" class="text-content">{$i18n.t('Error')}</option>
+										<option value="success" class="text-content">{$i18n.t('Success')}</option>
 									</select>
 
 									<input

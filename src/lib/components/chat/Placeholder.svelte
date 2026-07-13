@@ -86,7 +86,7 @@
 
 <div class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 py-24 text-center">
 	<div
-		class="w-full text-3xl text-gray-800 dark:text-gray-100 text-center flex items-center gap-4 font-primary"
+		class="w-full text-3xl text-content text-center flex items-center gap-4 font-primary"
 	>
 		<div class="w-full flex flex-col justify-center items-center">
 			<div class="flex flex-row justify-center gap-3 @sm:gap-3.5 w-fit px-5">
@@ -138,7 +138,7 @@
 							placement="top"
 						>
 							<div
-								class="mt-0.5 px-2 text-sm font-normal text-gray-500 dark:text-gray-400 line-clamp-2 max-w-xl markdown"
+								class="mt-0.5 px-2 text-sm font-normal text-content-muted line-clamp-2 max-w-xl markdown"
 							>
 								<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 								     DOMPurify で無害化(javascript: リンク等を除去)。 -->
@@ -149,7 +149,7 @@
 						</Tooltip>
 
 						{#if models[selectedModelIdx]?.info?.meta?.user}
-							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
+							<div class="mt-0.5 text-sm font-normal text-content-subtle">
 								By
 								{models[selectedModelIdx]?.info?.meta?.user.name
 									? models[selectedModelIdx]?.info?.meta?.user.name
