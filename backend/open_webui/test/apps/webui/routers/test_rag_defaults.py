@@ -1,9 +1,9 @@
-"""RAG 系フラグの llens 既定値スモーク(issue #9 / #52)。
+"""RAG / web 検索系 config の撤去を固定するスモーク(issue #9 / #52 / #51)。
 
 llens プロファイルは RAG(ベクタ化・埋め込み検索)を使わない薄いチャット基盤。
-文書抽出は案件層(prism)の Attachment Function が docling を直接叩く方式に移行済み
-(fork 本体は builtin 抽出経路 / retrieval の process・query endpoint を持たない)。
-ここでは残る RAG 系フラグの既定 off を固定する。
+文書抽出は案件層(prism)の Attachment Function が docling を直接叩く方式(#52)、
+web 検索も同じ線引きで prism の tool が外部検索システム(SearXNG 等)を直接叩く
+(#51、2026-07-13 確定)。fork は検索の config・providers・管理画面を一切持たない。
 """
 
 from test.util.abstract_integration_test import AbstractPostgresTest
@@ -12,13 +12,14 @@ from test.util.abstract_integration_test import AbstractPostgresTest
 class TestRAGDefaults(AbstractPostgresTest):
     BASE_PATH = "/api/v1/retrieval"
 
-    def test_llens_rag_defaults(self):
-        """RAG 系フラグの llens 既定値(fresh DB)を固定する。
-
-        #52: RAG 検索 config(TOP_K/hybrid/relevance/full_context/bypass)+ 取り込み
-        経路(process/query/knowledge)+ query generation は撤去済み。web 検索は
-        tool 用に温存(built-in 経路は撤去)、既定 off を固定する。
-        """
+    def test_web_search_config_is_gone(self):
+        """web 検索系 config が fork に再導入されていないことを固定する(#51)。"""
         from open_webui.main import app
 
-        assert app.state.config.ENABLE_WEB_SEARCH is False
+        for name in (
+            "ENABLE_WEB_SEARCH",
+            "WEB_SEARCH_ENGINE",
+            "SEARXNG_QUERY_URL",
+            "WEB_LOADER_ENGINE",
+        ):
+            assert not hasattr(app.state.config, name), name

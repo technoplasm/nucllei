@@ -139,11 +139,6 @@ from open_webui.config import (
     AUDIO_TTS_VOICE,
     AUDIO_TTS_AZURE_SPEECH_REGION,
     AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
-    PLAYWRIGHT_WS_URL,
-    PLAYWRIGHT_TIMEOUT,
-    FIRECRAWL_API_BASE_URL,
-    FIRECRAWL_API_KEY,
-    WEB_LOADER_ENGINE,
     ENABLE_AUDIO_STT,
     ENABLE_AUDIO_TTS,
     WHISPER_MODEL,
@@ -162,38 +157,6 @@ from open_webui.config import (
     ATTACHMENT_FUNCTION_ID,
     TIKTOKEN_ENCODING_NAME,
     # Retrieval (Web Search)
-    ENABLE_WEB_SEARCH,
-    WEB_SEARCH_ENGINE,
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-    WEB_SEARCH_RESULT_COUNT,
-    WEB_SEARCH_CONCURRENT_REQUESTS,
-    WEB_SEARCH_TRUST_ENV,
-    WEB_SEARCH_DOMAIN_FILTER_LIST,
-    JINA_API_KEY,
-    SEARCHAPI_API_KEY,
-    SEARCHAPI_ENGINE,
-    SERPAPI_API_KEY,
-    SERPAPI_ENGINE,
-    SEARXNG_QUERY_URL,
-    SERPER_API_KEY,
-    SERPLY_API_KEY,
-    SERPSTACK_API_KEY,
-    SERPSTACK_HTTPS,
-    TAVILY_API_KEY,
-    TAVILY_EXTRACT_DEPTH,
-    BING_SEARCH_V7_ENDPOINT,
-    BING_SEARCH_V7_SUBSCRIPTION_KEY,
-    BRAVE_SEARCH_API_KEY,
-    EXA_API_KEY,
-    PERPLEXITY_API_KEY,
-    SOUGOU_API_SID,
-    SOUGOU_API_SK,
-    KAGI_SEARCH_API_KEY,
-    MOJEEK_SEARCH_API_KEY,
-    BOCHA_SEARCH_API_KEY,
-    GOOGLE_PSE_API_KEY,
-    GOOGLE_PSE_ENGINE_ID,
-    ENABLE_WEB_LOADER_SSL_VERIFICATION,
     UPLOAD_DIR,
     # WebUI
     WEBUI_AUTH,
@@ -538,52 +501,8 @@ app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
 app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
 
 
-app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
-
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
-
-app.state.config.ENABLE_WEB_SEARCH = ENABLE_WEB_SEARCH
-app.state.config.WEB_SEARCH_ENGINE = WEB_SEARCH_ENGINE
-app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST = WEB_SEARCH_DOMAIN_FILTER_LIST
-app.state.config.WEB_SEARCH_RESULT_COUNT = WEB_SEARCH_RESULT_COUNT
-app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS = WEB_SEARCH_CONCURRENT_REQUESTS
-app.state.config.WEB_LOADER_ENGINE = WEB_LOADER_ENGINE
-app.state.config.WEB_SEARCH_TRUST_ENV = WEB_SEARCH_TRUST_ENV
-app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = (
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
-)
-
-app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
-app.state.config.GOOGLE_PSE_API_KEY = GOOGLE_PSE_API_KEY
-app.state.config.GOOGLE_PSE_ENGINE_ID = GOOGLE_PSE_ENGINE_ID
-app.state.config.BRAVE_SEARCH_API_KEY = BRAVE_SEARCH_API_KEY
-app.state.config.KAGI_SEARCH_API_KEY = KAGI_SEARCH_API_KEY
-app.state.config.MOJEEK_SEARCH_API_KEY = MOJEEK_SEARCH_API_KEY
-app.state.config.BOCHA_SEARCH_API_KEY = BOCHA_SEARCH_API_KEY
-app.state.config.SERPSTACK_API_KEY = SERPSTACK_API_KEY
-app.state.config.SERPSTACK_HTTPS = SERPSTACK_HTTPS
-app.state.config.SERPER_API_KEY = SERPER_API_KEY
-app.state.config.SERPLY_API_KEY = SERPLY_API_KEY
-app.state.config.TAVILY_API_KEY = TAVILY_API_KEY
-app.state.config.SEARCHAPI_API_KEY = SEARCHAPI_API_KEY
-app.state.config.SEARCHAPI_ENGINE = SEARCHAPI_ENGINE
-app.state.config.SERPAPI_API_KEY = SERPAPI_API_KEY
-app.state.config.SERPAPI_ENGINE = SERPAPI_ENGINE
-app.state.config.JINA_API_KEY = JINA_API_KEY
-app.state.config.BING_SEARCH_V7_ENDPOINT = BING_SEARCH_V7_ENDPOINT
-app.state.config.BING_SEARCH_V7_SUBSCRIPTION_KEY = BING_SEARCH_V7_SUBSCRIPTION_KEY
-app.state.config.EXA_API_KEY = EXA_API_KEY
-app.state.config.PERPLEXITY_API_KEY = PERPLEXITY_API_KEY
-app.state.config.SOUGOU_API_SID = SOUGOU_API_SID
-app.state.config.SOUGOU_API_SK = SOUGOU_API_SK
-
-
-app.state.config.PLAYWRIGHT_WS_URL = PLAYWRIGHT_WS_URL
-app.state.config.PLAYWRIGHT_TIMEOUT = PLAYWRIGHT_TIMEOUT
-app.state.config.FIRECRAWL_API_BASE_URL = FIRECRAWL_API_BASE_URL
-app.state.config.FIRECRAWL_API_KEY = FIRECRAWL_API_KEY
-app.state.config.TAVILY_EXTRACT_DEPTH = TAVILY_EXTRACT_DEPTH
 
 app.state.EMBEDDING_FUNCTION = None
 
@@ -1122,9 +1041,9 @@ async def get_app_config(request: Request):
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {
-                    # llens(#52/#67): built-in web 検索(RAG 自動注入)と retrieval router は
-                    # 撤去済み。検索は #51 で builtin tool として再建する(WEB_SEARCH_* config と
-                    # retrieval/web providers は素材として温存)。
+                    # llens(#52/#67/#51): built-in web 検索・retrieval router・WEB_SEARCH_*
+                    # config・retrieval/web providers はすべて撤去済み。検索は案件層(prism)の
+                    # tool が外部検索システム(SearXNG 等)を直接叩く(docling と同じ線引き)。
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
