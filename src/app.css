@@ -246,7 +246,7 @@ input[type='number'] {
 .codespan {
 	/* color: #eb5757; */
 	border-width: 0px;
-	padding: 3px 8px;
+	padding: 1.5px 4px;
 	font-size: 0.75em;
 	font-weight: 600;
 	/* 小さい inline code をベースラインでなく本文の中心に揃える */
