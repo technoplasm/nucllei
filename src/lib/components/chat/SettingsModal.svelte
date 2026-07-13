@@ -200,7 +200,8 @@
 	}
 </script>
 
-<Modal size="xl" bind:show>
+<!-- llens(#34): ユーザー設定モーダルは細めに(xl=896px → md=672px) -->
+<Modal size="md" bind:show>
 	<div class="text-gray-700 dark:text-gray-100">
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Settings')}</div>
