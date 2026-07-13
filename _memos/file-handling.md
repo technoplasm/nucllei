@@ -255,9 +255,11 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
   `features.web_search`・`web_search_results` ファイル収集・Config 型 `enable_web_search` を Chat/MessageInput/
   Placeholder/ResponseMessage/Interface/stores から削除。**温存**: `features.web_search` 権限フラグ(admin Groups UI +
   backend config)。検索 API 本体(`ENABLE_WEB_SEARCH`・エンジン config)は #51 用に温存。
-  - **追撃(2026-07-12)**: `features.web_search` **権限フラグも撤去**(#51 が web 検索を組み込みツール化する以上、
-    ゲートは tool の read ACL が担うので専用フラグは冗長)。`config.py` の env/DEFAULT_USER_PERMISSIONS・
+  - **追撃(2026-07-12)**: `features.web_search` **権限フラグも撤去**(web 検索は tool が担い、
+    ゲートは tool の read ACL で足りるので専用フラグは冗長)。`config.py` の env/DEFAULT_USER_PERMISSIONS・
     `users.py` の `FeaturesPermissions`・admin Groups UI(Permissions/Groups/EditGroupModal)から削除。
+    ※ **#51 は最終的に「fork 組み込みツール」案を撤回し prism tool 直叩きに確定**(2026-07-13、`eae47a4bd`)。
+    fork の検索素材(WEB_SEARCH_* config・`retrieval/web/` providers)も全撤去済み。
     併せて `middleware.py::_file_entry_is_readable` の `file_type in ("web_search","text")` 死に分岐も撤去
     (末尾 `return True` の fallthrough と冗長・両型とも生成されない)。IDOR テストの web_search 例は汎用インライン項目へ。
   - 残(軽微・後続): orphan i18n キー("Web Search" 等)は end-game i18n(#34)で一括 prune。

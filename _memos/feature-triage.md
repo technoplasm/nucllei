@@ -155,7 +155,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | モデル合議(generate_moa_response) | 単一モデル運用で無意味 |
 | /utils/gravatar | 外部ネットワーク(air-gapped 違反)。横展開でオンラインに出す場合でも不要と判断 |
 | /utils/code/execute | 組み込みコード実行の残骸(#11 の保留分)。実行系は外部 sandbox 一本 |
-| retrieval router | RAG config 残骸ごと全削除。web search は #51 の builtin tool 枠で別途 |
+| retrieval router | RAG config 残骸ごと全削除。web search は prism 層の tool(外部検索システム直叩き)へ移管、fork の検索素材も撤去済み(#51 close 2026-07-13、`eae47a4bd`) |
 | memory API | UI 撤去済み(#63)の残骸。router・モデル・テーブルごと |
 
 ### KEEP(明示判断)

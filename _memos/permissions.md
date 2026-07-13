@@ -57,7 +57,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | `chat.share` / `chat.clone` | チャット共有・共有チャットの clone | routers/chats.py の share / clone endpoint(#41 で新設。既定 share=on / clone=off)|
 | `features.image_generation` | 画像生成 | routers/images.py `/generations`(#66 で実装済み) |
 | `features.code_interpreter` | コード実行機能 | 対応機能の endpoint(sandbox 整備時に) |
-| 廃止: `features.web_search` | web 検索は #51 で**組み込みツール化**する方針に決定。ゲートは tool の read ACL が担うため専用フラグは冗長 | フラグごと撤去(2026-07-12、refs #52/#51。フロント UI・backend config・admin Groups UI とも) |
+| 廃止: `features.web_search` | web 検索は prism 層の tool が担う方針に決定(→ **#51 close 2026-07-13**: 当初「fork 組み込みツール化」案は撤回、外部検索システム直叩きに確定)。ゲートは tool の read ACL が担うため専用フラグは冗長 | フラグごと撤去(2026-07-12、refs #52/#51。フロント UI・backend config・admin Groups UI とも) |
 | 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | 撤去済み(#66、2026-07-10) |
 | 廃止: `chat.stt` / `chat.tts` / `chat.call` | **STT/TTS は全員使用可**(2026-07-10 決定)。設定は admin、tool から呼ぶ内部 API を提供(#53) | フラグごと撤去済み(#66) |
 | 廃止: `chat.temporary` / `chat.temporary_enforced` | temporary chat は機能ごと撤去(フロントは非表示済み、サーバー側も撤去 #67) | フラグごと撤去 |
