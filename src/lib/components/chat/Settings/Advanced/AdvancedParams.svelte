@@ -1161,7 +1161,7 @@
 		>
 			<div class="flex items-center gap-2">
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Tokens To Keep On Context Refresh (num_keep)')}
+					{$i18n.t('num_keep')}
 				</div>
 
 				<button

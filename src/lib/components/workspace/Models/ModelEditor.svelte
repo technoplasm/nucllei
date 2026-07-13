@@ -431,27 +431,70 @@
 		/>
 
 		{#if !edit || (edit && model)}
-			<!-- llens(#34): 設定と同様に max-w で読める幅に収める(親が justify-center で中央寄せ) -->
+			<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ(max-w、親 justify-center で中央寄せ) -->
 			<form
-				class="flex flex-col w-full max-w-3xl"
+				class="flex flex-col lg:flex-row w-full gap-3 lg:gap-4"
 				on:submit|preventDefault={() => {
 					submitHandler();
 				}}
 			>
-				<div class="mt-2 my-2 flex flex-col">
-					<div class="flex-1">
-						<div>
+				<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
+				<div
+					class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+				>
+					<button
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						'general'
+							? ''
+							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+						type="button"
+						on:click={() => switchTab('general')}
+					>
+						<div class=" self-center mr-2">
+							<span class="i-lucide-settings size-4 block"></span>
+						</div>
+						<div class=" self-center">{$i18n.t('General')}</div>
+					</button>
+
+					<button
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						'prompt'
+							? ''
+							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+						type="button"
+						on:click={() => switchTab('prompt')}
+					>
+						<div class=" self-center mr-2">
+							<span class="i-lucide-file-text size-4 block"></span>
+						</div>
+						<div class=" self-center">{$i18n.t('Prompt')}</div>
+					</button>
+
+					<button
+						class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+						'advanced'
+							? ''
+							: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+						type="button"
+						on:click={() => switchTab('advanced')}
+					>
+						<div class=" self-center mr-2">
+							<span class="i-lucide-sliders-horizontal size-4 block"></span>
+						</div>
+						<div class=" self-center">{$i18n.t('Advanced Params')}</div>
+					</button>
+				</div>
+
+				<!-- 右コンテンツ。名前/ID は全タブ共通ヘッダとしてここに置く -->
+				<div class="flex-1 min-w-0">
+					<div class="max-w-3xl mx-auto">
+						<div class="mb-3 flex flex-col">
 							<input
 								class="text-3xl font-semibold w-full bg-transparent outline-hidden"
 								placeholder={$i18n.t('Model Name')}
 								bind:value={name}
 								required
 							/>
-						</div>
-					</div>
-
-					<div class="flex-1">
-						<div>
 							<input
 								class="text-xs w-full bg-transparent text-gray-500 outline-hidden"
 								placeholder={$i18n.t('Model ID')}
@@ -459,356 +502,326 @@
 								required
 							/>
 						</div>
-					</div>
-				</div>
 
-				<div class="flex flex-row items-center gap-1 mb-4 text-sm font-medium">
-					<button
-						class="px-3 py-1.5 min-w-fit rounded-lg transition {selectedTab === 'general'
-							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
-							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
-						type="button"
-						on:click={() => switchTab('general')}
-					>
-						{$i18n.t('General')}
-					</button>
+						{#if selectedTab === 'general'}
+							<div class="flex flex-col sm:flex-row gap-4 my-2">
+								<div class="shrink-0">
+									<div class="self-center">
+										<button
+											class="rounded-xl flex shrink-0 items-center {info.meta.profile_image_url
+												? 'bg-transparent'
+												: 'bg-white'} shadow-xl group relative"
+											type="button"
+											on:click={() => {
+												filesInputElement.click();
+											}}
+										>
+											{#if info.meta.profile_image_url}
+												<img
+													src={info.meta.profile_image_url}
+													alt="model profile"
+													class="rounded-xl size-72 md:size-60 object-cover shrink-0"
+												/>
+											{:else}
+												<img
+													src={DEFAULT_MODEL_IMAGE_URL}
+													alt="model profile"
+													class=" rounded-xl size-72 md:size-60 object-cover shrink-0"
+												/>
+											{/if}
 
-					<button
-						class="px-3 py-1.5 min-w-fit rounded-lg transition {selectedTab === 'prompt'
-							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
-							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
-						type="button"
-						on:click={() => switchTab('prompt')}
-					>
-						{$i18n.t('Prompt')}
-					</button>
-
-					<button
-						class="px-3 py-1.5 min-w-fit rounded-lg transition {selectedTab === 'advanced'
-							? 'bg-gray-100 dark:bg-gray-850 text-gray-900 dark:text-white'
-							: 'text-gray-400 hover:text-gray-700 dark:hover:text-white'}"
-						type="button"
-						on:click={() => switchTab('advanced')}
-					>
-						{$i18n.t('Advanced Params')}
-					</button>
-				</div>
-
-				{#if selectedTab === 'general'}
-					<div class="flex flex-col sm:flex-row gap-4 my-2">
-						<div class="shrink-0">
-							<div class="self-center">
-								<button
-									class="rounded-xl flex shrink-0 items-center {info.meta.profile_image_url
-										? 'bg-transparent'
-										: 'bg-white'} shadow-xl group relative"
-									type="button"
-									on:click={() => {
-										filesInputElement.click();
-									}}
-								>
-									{#if info.meta.profile_image_url}
-										<img
-											src={info.meta.profile_image_url}
-											alt="model profile"
-											class="rounded-xl size-72 md:size-60 object-cover shrink-0"
-										/>
-									{:else}
-										<img
-											src={DEFAULT_MODEL_IMAGE_URL}
-											alt="model profile"
-											class=" rounded-xl size-72 md:size-60 object-cover shrink-0"
-										/>
-									{/if}
-
-									<div class="absolute bottom-0 right-0 z-10">
-										<div class="m-1.5">
-											<div
-												class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
-											>
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													viewBox="0 0 16 16"
-													fill="currentColor"
-													class="size-5"
-												>
-													<path
-														fill-rule="evenodd"
-														d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-1-1a.5.5 0 0 0-.708 0L9.354 9.646a.5.5 0 0 1-.708 0L6.354 7.354a.5.5 0 0 0-.708 0l-2 2a.5.5 0 0 0-.146.353V12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V9.707ZM12 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
-														clip-rule="evenodd"
-													/>
-												</svg>
+											<div class="absolute bottom-0 right-0 z-10">
+												<div class="m-1.5">
+													<div
+														class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
+													>
+														<svg
+															xmlns="http://www.w3.org/2000/svg"
+															viewBox="0 0 16 16"
+															fill="currentColor"
+															class="size-5"
+														>
+															<path
+																fill-rule="evenodd"
+																d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-1-1a.5.5 0 0 0-.708 0L9.354 9.646a.5.5 0 0 1-.708 0L6.354 7.354a.5.5 0 0 0-.708 0l-2 2a.5.5 0 0 0-.146.353V12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V9.707ZM12 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
+																clip-rule="evenodd"
+															/>
+														</svg>
+													</div>
+												</div>
 											</div>
+
+											<div
+												class="absolute top-0 bottom-0 left-0 right-0 bg-white dark:bg-black rounded-lg opacity-0 group-hover:opacity-20 transition"
+											></div>
+										</button>
+
+										<div class="flex w-full mt-1 justify-end">
+											<button
+												class="px-2 py-1 text-gray-500 rounded-lg text-xs"
+												on:click={() => {
+													info.meta.profile_image_url = null;
+												}}
+												type="button"
+											>
+												Reset Image</button
+											>
 										</div>
 									</div>
-
-									<div
-										class="absolute top-0 bottom-0 left-0 right-0 bg-white dark:bg-black rounded-lg opacity-0 group-hover:opacity-20 transition"
-									></div>
-								</button>
-
-								<div class="flex w-full mt-1 justify-end">
-									<button
-										class="px-2 py-1 text-gray-500 rounded-lg text-xs"
-										on:click={() => {
-											info.meta.profile_image_url = null;
-										}}
-										type="button"
-									>
-										Reset Image</button
-									>
 								</div>
-							</div>
-						</div>
-						<div class="flex-1 min-w-0">
-							{#if preset}
-								<div class="my-1">
-									<div class=" text-sm font-semibold mb-1">{$i18n.t('Base Model (From)')}</div>
+								<div class="flex-1 min-w-0">
+									{#if preset}
+										<div class="my-1">
+											<div class=" text-sm font-semibold mb-1">{$i18n.t('Base Model (From)')}</div>
 
-									<div>
-										<select
-											class="text-sm w-full bg-transparent outline-hidden"
-											placeholder="Select a base model (e.g. llama3, gpt-4o)"
-											bind:value={info.base_model_id}
-											on:change={(e) => {
-												addUsage(e.target.value);
-											}}
-											required
-										>
-											<option value={null} class=" text-gray-900"
-												>{$i18n.t('Select a base model')}</option
-											>
-											{#each baseModels.filter((m) => (model ? m.id !== model.id : true)) as model}
-												<option value={model.id} class=" text-gray-900">{model.name}</option>
-											{/each}
-										</select>
+											<div>
+												<select
+													class="text-sm w-full bg-transparent outline-hidden"
+													placeholder="Select a base model (e.g. llama3, gpt-4o)"
+													bind:value={info.base_model_id}
+													on:change={(e) => {
+														addUsage(e.target.value);
+													}}
+													required
+												>
+													<option value={null} class=" text-gray-900"
+														>{$i18n.t('Select a base model')}</option
+													>
+													{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as model}
+														<option value={model.id} class=" text-gray-900">{model.name}</option>
+													{/each}
+												</select>
+											</div>
+										</div>
+									{/if}
+
+									<div class="my-1">
+										<div class="mb-1 flex w-full justify-between items-center">
+											<div class=" self-center text-sm font-semibold">{$i18n.t('Description')}</div>
+										</div>
+
+										<Textarea
+											className=" text-sm w-full bg-transparent outline-hidden resize-none overflow-y-hidden "
+											placeholder={$i18n.t('Add a short description about what this model does')}
+											bind:value={info.meta.description}
+										/>
+									</div>
+
+									<div class="my-2">
+										<div class="px-3 py-2 bg-gray-50 dark:bg-gray-950 rounded-lg">
+											<AccessControl bind:accessControl allowPublic={true} />
+										</div>
 									</div>
 								</div>
-							{/if}
+							</div>
 
-							<div class="my-1">
-								<div class="mb-1 flex w-full justify-between items-center">
-									<div class=" self-center text-sm font-semibold">{$i18n.t('Description')}</div>
+							<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
+
+							<div class="my-2">
+								<div class="flex w-full justify-between mb-1">
+									<div class=" self-center text-sm font-semibold">{$i18n.t('Features')}</div>
 								</div>
 
-								<Textarea
-									className=" text-sm w-full bg-transparent outline-hidden resize-none overflow-y-hidden "
-									placeholder={$i18n.t('Add a short description about what this model does')}
-									bind:value={info.meta.description}
+								<!-- llens(#49): label で行クリックトグル -->
+								<label class="flex items-center gap-2 mr-3 cursor-pointer">
+									<span class="flex items-center">
+										<Checkbox
+											state={featureSkills ? 'checked' : 'unchecked'}
+											on:change={(e) => {
+												featureSkills = e.detail === 'checked';
+											}}
+										/>
+									</span>
+									<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
+										<span class="font-medium">{$i18n.t('Skills')}</span>
+										<span class="text-xs text-gray-500"
+											>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
+										>
+									</div>
+								</label>
+
+								<div class="mt-2">
+									<SkillsSelector
+										bind:selectedSkillIds={skillIds}
+										skills={$skills ?? []}
+										disabled={!featureSkills}
+									/>
+								</div>
+							</div>
+
+							<div class="my-2">
+								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
+							</div>
+
+							<div class="my-2">
+								<FiltersSelector
+									bind:selectedFilterIds={filterIds}
+									filters={$functions.filter((func) => func.type === 'filter')}
 								/>
 							</div>
 
 							<div class="my-2">
-								<div class="px-3 py-2 bg-gray-50 dark:bg-gray-950 rounded-lg">
-									<AccessControl bind:accessControl allowPublic={true} />
+								<ActionsSelector
+									bind:selectedActionIds={actionIds}
+									actions={$functions.filter((func) => func.type === 'action')}
+								/>
+							</div>
+
+							<div class="my-2">
+								<Capabilities bind:capabilities />
+							</div>
+						{:else if selectedTab === 'prompt'}
+							<div class="my-2">
+								<div class=" text-sm font-semibold mb-2">{$i18n.t('System Prompt')}</div>
+								<div class="rounded-lg border border-gray-100 dark:border-gray-850 overflow-hidden">
+									<CodeEditor
+										value={info.params.system ?? ''}
+										onChange={(value) => {
+											info.params.system = value;
+										}}
+									/>
 								</div>
 							</div>
-						</div>
-					</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
+							<div class="my-2">
+								<div class="flex w-full justify-between items-center">
+									<div class=" self-center text-sm font-semibold">
+										{$i18n.t('Prompt suggestions')}
+									</div>
 
-					<div class="my-2">
-						<div class="flex w-full justify-between mb-1">
-							<div class=" self-center text-sm font-semibold">{$i18n.t('Features')}</div>
-						</div>
+									<button
+										class="p-1 px-2 text-xs flex rounded-sm transition"
+										type="button"
+										on:click={() => {
+											const prompts = info.meta.suggestion_prompts ?? [];
+											if (
+												prompts.length === 0 ||
+												(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
+											) {
+												info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
+											}
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 20 20"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
+											/>
+										</svg>
+									</button>
+								</div>
 
-						<!-- llens(#49): label で行クリックトグル -->
-						<label class="flex items-center gap-2 mr-3 cursor-pointer">
-							<span class="flex items-center">
-								<Checkbox
-									state={featureSkills ? 'checked' : 'unchecked'}
+								<div class="flex flex-col space-y-1.5 mt-1 mb-3">
+									{#if (info.meta.suggestion_prompts ?? []).length > 0}
+										{#each info.meta.suggestion_prompts as prompt, promptIdx}
+											<div class=" flex border border-gray-100 dark:border-gray-850 rounded-lg">
+												<div class="flex flex-col flex-1">
+													<input
+														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-gray-100 dark:border-gray-850"
+														placeholder={$i18n.t('Title (e.g. Greeting)')}
+														bind:value={prompt.title}
+														required
+													/>
+													<input
+														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
+														placeholder={$i18n.t(
+															'Prompt (e.g. Who are you? Show me a quick demo.)'
+														)}
+														bind:value={prompt.content}
+														required
+													/>
+												</div>
+
+												<button
+													class="px-2"
+													type="button"
+													on:click={() => {
+														info.meta.suggestion_prompts.splice(promptIdx, 1);
+														info.meta.suggestion_prompts = info.meta.suggestion_prompts;
+													}}
+												>
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														viewBox="0 0 20 20"
+														fill="currentColor"
+														class="w-4 h-4"
+													>
+														<path
+															d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+														/>
+													</svg>
+												</button>
+											</div>
+										{/each}
+									{:else}
+										<div class="text-xs text-center text-gray-500 py-2">
+											{$i18n.t('No prompt suggestions')}
+										</div>
+									{/if}
+								</div>
+							</div>
+						{:else if selectedTab === 'advanced'}
+							<div class="my-2">
+								<AdvancedParams
+									admin={true}
+									bind:params
 									on:change={(e) => {
-										featureSkills = e.detail === 'checked';
+										info.params = { ...info.params, ...params };
 									}}
 								/>
-							</span>
-							<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
-								<span class="font-medium">{$i18n.t('Skills')}</span>
-								<span class="text-xs text-gray-500"
-									>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
-								>
-							</div>
-						</label>
-
-						<div class="mt-2">
-							<SkillsSelector
-								bind:selectedSkillIds={skillIds}
-								skills={$skills ?? []}
-								disabled={!featureSkills}
-							/>
-						</div>
-					</div>
-
-					<div class="my-2">
-						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
-					</div>
-
-					<div class="my-2">
-						<FiltersSelector
-							bind:selectedFilterIds={filterIds}
-							filters={$functions.filter((func) => func.type === 'filter')}
-						/>
-					</div>
-
-					<div class="my-2">
-						<ActionsSelector
-							bind:selectedActionIds={actionIds}
-							actions={$functions.filter((func) => func.type === 'action')}
-						/>
-					</div>
-
-					<div class="my-2">
-						<Capabilities bind:capabilities />
-					</div>
-				{:else if selectedTab === 'prompt'}
-					<div class="my-2">
-						<div class=" text-sm font-semibold mb-2">{$i18n.t('System Prompt')}</div>
-						<div class="rounded-lg border border-gray-100 dark:border-gray-850 overflow-hidden">
-							<CodeEditor
-								value={info.params.system ?? ''}
-								onChange={(value) => {
-									info.params.system = value;
-								}}
-							/>
-						</div>
-					</div>
-
-					<div class="my-2">
-						<div class="flex w-full justify-between items-center">
-							<div class=" self-center text-sm font-semibold">
-								{$i18n.t('Prompt suggestions')}
-							</div>
-
-							<button
-								class="p-1 px-2 text-xs flex rounded-sm transition"
-								type="button"
-								on:click={() => {
-									const prompts = info.meta.suggestion_prompts ?? [];
-									if (
-										prompts.length === 0 ||
-										(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
-									) {
-										info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
-									}
-								}}
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
-									/>
-								</svg>
-							</button>
-						</div>
-
-						<div class="flex flex-col space-y-1.5 mt-1 mb-3">
-							{#if (info.meta.suggestion_prompts ?? []).length > 0}
-								{#each info.meta.suggestion_prompts as prompt, promptIdx}
-									<div class=" flex border border-gray-100 dark:border-gray-850 rounded-lg">
-										<div class="flex flex-col flex-1">
-											<input
-												class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-gray-100 dark:border-gray-850"
-												placeholder={$i18n.t('Title (e.g. Greeting)')}
-												bind:value={prompt.title}
-												required
-											/>
-											<input
-												class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
-												placeholder={$i18n.t('Prompt (e.g. Who are you? Show me a quick demo.)')}
-												bind:value={prompt.content}
-												required
-											/>
-										</div>
-
-										<button
-											class="px-2"
-											type="button"
-											on:click={() => {
-												info.meta.suggestion_prompts.splice(promptIdx, 1);
-												info.meta.suggestion_prompts = info.meta.suggestion_prompts;
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												class="w-4 h-4"
-											>
-												<path
-													d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-												/>
-											</svg>
-										</button>
-									</div>
-								{/each}
-							{:else}
-								<div class="text-xs text-center text-gray-500 py-2">
-									{$i18n.t('No prompt suggestions')}
-								</div>
-							{/if}
-						</div>
-					</div>
-				{:else if selectedTab === 'advanced'}
-					<div class="my-2">
-						<AdvancedParams
-							admin={true}
-							bind:params
-							on:change={(e) => {
-								info.params = { ...info.params, ...params };
-							}}
-						/>
-					</div>
-				{/if}
-
-				<div class="my-4 flex justify-start pb-20">
-					<button
-						class=" text-sm px-3 py-2 transition rounded-lg {loading
-							? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
-							: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex justify-center"
-						type="submit"
-						disabled={loading}
-					>
-						<div class=" self-center font-medium">
-							{#if edit}
-								{$i18n.t('Save & Update')}
-							{:else}
-								{$i18n.t('Save & Create')}
-							{/if}
-						</div>
-
-						{#if loading}
-							<div class="ml-1.5 self-center">
-								<svg
-									class=" w-4 h-4"
-									viewBox="0 0 24 24"
-									fill="currentColor"
-									xmlns="http://www.w3.org/2000/svg"
-									><style>
-										.spinner_ajPY {
-											transform-origin: center;
-											animation: spinner_AtaB 0.75s infinite linear;
-										}
-										@keyframes spinner_AtaB {
-											100% {
-												transform: rotate(360deg);
-											}
-										}
-									</style><path
-										d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-										opacity=".25"
-									/><path
-										d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-										class="spinner_ajPY"
-									/></svg
-								>
 							</div>
 						{/if}
-					</button>
+
+						<div class="my-4 flex justify-start pb-20">
+							<button
+								class=" text-sm px-3 py-2 transition rounded-lg {loading
+									? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
+									: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex justify-center"
+								type="submit"
+								disabled={loading}
+							>
+								<div class=" self-center font-medium">
+									{#if edit}
+										{$i18n.t('Save & Update')}
+									{:else}
+										{$i18n.t('Save & Create')}
+									{/if}
+								</div>
+
+								{#if loading}
+									<div class="ml-1.5 self-center">
+										<svg
+											class=" w-4 h-4"
+											viewBox="0 0 24 24"
+											fill="currentColor"
+											xmlns="http://www.w3.org/2000/svg"
+											><style>
+												.spinner_ajPY {
+													transform-origin: center;
+													animation: spinner_AtaB 0.75s infinite linear;
+												}
+												@keyframes spinner_AtaB {
+													100% {
+														transform: rotate(360deg);
+													}
+												}
+											</style><path
+												d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
+												opacity=".25"
+											/><path
+												d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
+												class="spinner_ajPY"
+											/></svg
+										>
+									</div>
+								{/if}
+							</button>
+						</div>
+					</div>
 				</div>
 			</form>
 		{/if}

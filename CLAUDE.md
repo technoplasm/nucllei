@@ -25,6 +25,14 @@
   区切りでは `/sync-docs` でドキュメントと issue に同期する。upstream 確認は `/upstream-check`(週次目安)。
 - CORE 領域(Filter パイプライン / group 権限 / OpenAI 互換接続 / 認証)に触れる変更は回帰テストを伴うこと。
 
+## フロントエンド実装規約
+
+- **アイコンは class ベース(`i-lucide-*`)で書く。インライン `<svg>` は禁止**
+  (#70 A1 で確立、`tailwind.config.js` の `@egoist/tailwindcss-icons` + lucide)。
+  例: `<span class="i-lucide-settings size-4 block"></span>`。CSS mask で currentColor を継承する。
+  既存のインライン SVG に触れるときは class icon へ置換する(新規は最初から class icon)。
+- 既存のインライン SVG が残る画面もある(A1 は段階移行)。**新規・改修分だけでも必ず class icon** にする。
+
 ## 現行プロジェクトの参照
 
 - `_links/llens` → prism-hu/llens(北大で稼働中の現行 OWUI ベース構成。マシン固有 symlink のため gitignore 済み)。
