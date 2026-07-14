@@ -207,9 +207,7 @@
 <div
 	class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
 >
-	<table
-		class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
-	>
+	<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 		<thead
 			class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 		>

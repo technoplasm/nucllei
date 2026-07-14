@@ -501,8 +501,7 @@
 		<div class="mb-5">
 			{#each sections as section, sectionIdx (section.label)}
 				<div
-					class="px-1 py-1.5 w-full text-xs text-content-muted font-medium {sectionIdx >
-					0
+					class="px-1 py-1.5 w-full text-xs text-content-muted font-medium {sectionIdx > 0
 						? 'mt-1.5'
 						: ''}"
 				>
@@ -577,9 +576,7 @@
 		<div
 			class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
-			<table
-				class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
-			>
+			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 				<thead
 					class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 				>
@@ -638,10 +635,7 @@
 				<tbody class="">
 					{#each sections as section (section.label)}
 						<tr>
-							<td
-								colspan="7"
-								class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted"
-							>
+							<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
 								{section.label}
 							</td>
 						</tr>

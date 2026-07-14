@@ -297,8 +297,7 @@
 							<div class="inline-flex items-center justify-center w-full">
 								<hr class="w-32 h-px my-4 border-0 dark:bg-gray-100/10 bg-gray-700/10" />
 								{#if $config?.features.enable_login_form || $config?.features.enable_ldap}
-									<span
-										class="px-3 text-sm font-medium text-content bg-transparent"
+									<span class="px-3 text-sm font-medium text-content bg-transparent"
 										>{$i18n.t('or')}</span
 									>
 								{/if}

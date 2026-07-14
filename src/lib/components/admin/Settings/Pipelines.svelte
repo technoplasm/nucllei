@@ -374,8 +374,8 @@
 					</div>
 
 					<div class="mt-2 text-xs text-content-muted">
-						<span class=" font-semibold text-content">Warning:</span> Pipelines are a plugin
-						system with arbitrary code execution —
+						<span class=" font-semibold text-content">Warning:</span> Pipelines are a plugin system
+						with arbitrary code execution —
 						<span class=" font-medium text-content-muted"
 							>don't fetch random pipelines from sources you don't trust.</span
 						>

@@ -81,7 +81,9 @@
 					{#if state === 'failed'}
 						<span class="shrink-0 text-red-500 font-medium">・{$i18n.t('Extraction failed')}</span>
 					{:else if state === 'none'}
-						<span class="shrink-0 text-content-subtle font-medium">・{$i18n.t('Not extracted')}</span>
+						<span class="shrink-0 text-content-subtle font-medium"
+							>・{$i18n.t('Not extracted')}</span
+						>
 					{/if}
 				{/if}
 			</div>

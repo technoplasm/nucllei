@@ -123,9 +123,7 @@
 			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
 				{$i18n.t('Tools')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-content-muted"
-					>{filteredItems.length}</span
-				>
+				<span class="text-lg font-medium text-content-muted">{filteredItems.length}</span>
 			</div>
 		</div>
 

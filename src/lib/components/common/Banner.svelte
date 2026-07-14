@@ -93,13 +93,13 @@
 
 			{#if banner.url}
 				<div class="hidden md:flex group w-fit md:items-center">
-					<a
-						class="text-content text-xs font-semibold underline"
-						href="/"
-						target="_blank">Learn More</a
+					<a class="text-content text-xs font-semibold underline" href="/" target="_blank"
+						>Learn More</a
 					>
 
-					<div class=" ml-1 text-content-subtle group-hover:text-content-muted dark:group-hover:text-white">
+					<div
+						class=" ml-1 text-content-subtle group-hover:text-content-muted dark:group-hover:text-white"
+					>
 						<!--  -->
 						<svg
 							xmlns="http://www.w3.org/2000/svg"

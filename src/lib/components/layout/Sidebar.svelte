@@ -433,9 +433,7 @@
 			? ''
 			: 'invisible'}"
 	>
-		<div
-			class="px-1.5 flex justify-between items-center space-x-1 text-content-muted"
-		>
+		<div class="px-1.5 flex justify-between items-center space-x-1 text-content-muted">
 			<a
 				class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
 				href="/"
@@ -452,9 +450,7 @@
 					class="size-6 rounded-full shrink-0"
 					alt="logo"
 				/>
-				<div
-					class="self-center font-medium text-md text-content font-primary truncate"
-				>
+				<div class="self-center font-medium text-md text-content font-primary truncate">
 					{$WEBUI_NAME}
 				</div>
 			</a>

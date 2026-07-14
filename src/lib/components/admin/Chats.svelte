@@ -188,8 +188,7 @@
 				>
 					<option class=" text-content" value="">{$i18n.t('All Users')}</option>
 					{#each owners as owner}
-						<option class=" text-content" value={owner.id}
-							>{owner.name} ({owner.chat_count})</option
+						<option class=" text-content" value={owner.id}>{owner.name} ({owner.chat_count})</option
 						>
 					{/each}
 				</select>
@@ -259,9 +258,7 @@
 		<div
 			class="mt-4 scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
-			<table
-				class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
-			>
+			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 				<thead
 					class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 				>

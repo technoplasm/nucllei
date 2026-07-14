@@ -222,8 +222,7 @@
 
 				<div class="text-xs text-content-subtle mt-1">
 					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
-						class=" text-content font-medium"
-						>{'{{'}{$i18n.t('variable')}{'}}'}</span
+						class=" text-content font-medium">{'{{'}{$i18n.t('variable')}{'}}'}</span
 					>.
 					{$i18n.t('Make sure to enclose them with')}
 					<span class=" text-content font-medium">{'{{'}</span>

@@ -170,7 +170,8 @@
 					type: 'input',
 					def: '',
 					inputType: 'text',
-					placeholder: 'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
+					placeholder:
+						'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
 				}
 			]
 		},

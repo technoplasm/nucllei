@@ -146,9 +146,7 @@
 </svelte:head>
 
 {#if loaded}
-	<div
-		class="h-screen max-h-[100dvh] w-full flex flex-col text-content bg-white dark:bg-gray-900"
-	>
+	<div class="h-screen max-h-[100dvh] w-full flex flex-col text-content bg-white dark:bg-gray-900">
 		<div class="flex flex-col flex-auto justify-center relative">
 			<div class=" flex flex-col w-full flex-auto overflow-auto h-0" id="messages-container">
 				<div

@@ -220,9 +220,7 @@
 				<div class="flex items-center md:self-center text-xl font-medium px-0.5">
 					{$i18n.t('Models')}
 					<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-					<span class="text-lg font-medium text-content-muted"
-						>{filteredModels.length}</span
-					>
+					<span class="text-lg font-medium text-content-muted">{filteredModels.length}</span>
 				</div>
 
 				<div class="flex items-center gap-1.5">
@@ -297,7 +295,11 @@
 								</div>
 							</div>
 
-							<div class=" flex-1 self-center {(model?.is_active ?? true) ? '' : 'text-content-subtle'}">
+							<div
+								class=" flex-1 self-center {(model?.is_active ?? true)
+									? ''
+									: 'text-content-subtle'}"
+							>
 								<Tooltip
 									content={render(
 										!!model?.meta?.description

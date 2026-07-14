@@ -312,9 +312,7 @@
 				</div>
 			</div>
 
-			<div
-				class="bg-white dark:bg-gray-850 text-content text-medium rounded-xl px-3.5 py-3 w-full"
-			>
+			<div class="bg-white dark:bg-gray-850 text-content text-medium rounded-xl px-3.5 py-3 w-full">
 				<div class=" max-h-80 overflow-y-auto w-full markdown-prose-xs" id="response-container">
 					{#if responseContent.trim() === ''}
 						<Skeleton size="sm" />

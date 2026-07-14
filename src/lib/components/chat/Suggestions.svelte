@@ -71,9 +71,7 @@
 	{:else}
 		<!-- Keine Vorschläge -->
 
-		<div
-			class="flex w-full text-center items-center justify-center self-start text-content-subtle"
-		>
+		<div class="flex w-full text-center items-center justify-center self-start text-content-subtle">
 			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
 		</div>
 	{/if}
@@ -91,18 +89,14 @@
 			>
 				<div class="flex flex-col text-left">
 					{#if prompt.title}
-						<div
-							class="font-medium text-content group-hover:text-content transition line-clamp-1"
-						>
+						<div class="font-medium text-content group-hover:text-content transition line-clamp-1">
 							{prompt.title}
 						</div>
 						<div class="text-xs text-content-muted font-normal line-clamp-2">
 							{prompt.content}
 						</div>
 					{:else}
-						<div
-							class="font-medium text-content group-hover:text-content transition line-clamp-2"
-						>
+						<div class="font-medium text-content group-hover:text-content transition line-clamp-2">
 							{prompt.content}
 						</div>
 					{/if}

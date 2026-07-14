@@ -72,9 +72,7 @@
 		class="px-2 mb-2 text-left w-full absolute bottom-0 left-0 right-0 z-10"
 	>
 		<div class="flex w-full rounded-xl border border-gray-100 dark:border-gray-850">
-			<div
-				class="max-h-60 flex flex-col w-full rounded-xl bg-white dark:bg-gray-900 text-content"
-			>
+			<div class="max-h-60 flex flex-col w-full rounded-xl bg-white dark:bg-gray-900 text-content">
 				<div class="m-1 overflow-y-auto p-1 rounded-r-lg space-y-0.5 scrollbar-hidden">
 					{#each filteredItems as model, modelIdx}
 						<button

@@ -78,9 +78,7 @@
 
 				<div in:fade={{ duration: 200, delay: 200 }}>
 					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
-						<div
-							class="mt-0.5 text-base font-normal text-content-muted line-clamp-3 markdown"
-						>
+						<div class="mt-0.5 text-base font-normal text-content-muted line-clamp-3 markdown">
 							<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 							     DOMPurify で無害化(javascript: リンク等を除去)。 -->
 							{@html DOMPurify.sanitize(

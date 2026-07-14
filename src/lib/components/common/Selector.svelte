@@ -84,9 +84,7 @@
 					</Select.Item>
 				{:else}
 					<div>
-						<div class="block px-5 py-2 text-sm text-content-subtle">
-							No results found
-						</div>
+						<div class="block px-5 py-2 text-sm text-content-subtle">No results found</div>
 					</div>
 				{/each}
 			</div>

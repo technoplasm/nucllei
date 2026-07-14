@@ -68,7 +68,9 @@
 		<nav class="   px-2.5 pt-1 backdrop-blur-xl drag-region">
 			<!-- llens(#34): 上部メニューも本文と同じ max-w-5xl 中央寄せに揃える -->
 			<div class=" flex items-center gap-1 max-w-5xl mx-auto w-full">
-				<div class="{$showSidebar ? 'md:hidden' : ''} self-center flex flex-none items-center px-1.5">
+				<div
+					class="{$showSidebar ? 'md:hidden' : ''} self-center flex flex-none items-center px-1.5"
+				>
 					<button
 						id="sidebar-toggle-button"
 						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"

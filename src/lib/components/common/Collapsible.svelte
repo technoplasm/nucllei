@@ -58,8 +58,7 @@
 	}
 
 	export let className = '';
-	export let buttonClassName =
-		'w-fit text-content-muted hover:text-content transition';
+	export let buttonClassName = 'w-fit text-content-muted hover:text-content transition';
 
 	export let id = '';
 	export let title = null;

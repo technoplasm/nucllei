@@ -85,9 +85,7 @@
 </script>
 
 <div class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 py-24 text-center">
-	<div
-		class="w-full text-3xl text-content text-center flex items-center gap-4 font-primary"
-	>
+	<div class="w-full text-3xl text-content text-center flex items-center gap-4 font-primary">
 		<div class="w-full flex flex-col justify-center items-center">
 			<div class="flex flex-row justify-center gap-3 @sm:gap-3.5 w-fit px-5">
 				<div class="flex shrink-0 justify-center">

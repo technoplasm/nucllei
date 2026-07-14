@@ -335,10 +335,7 @@
 									ⓘ {$i18n.t(
 										'Ensure your CSV file includes 4 columns in this order: Name, Email, Password, Role.'
 									)}
-									<a
-										class="underline text-content"
-										href="{WEBUI_BASE_URL}/static/user-import.csv"
-									>
+									<a class="underline text-content" href="{WEBUI_BASE_URL}/static/user-import.csv">
 										{$i18n.t('Click here to download user import template file.')}
 									</a>
 								</div>
