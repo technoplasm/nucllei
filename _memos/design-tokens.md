@@ -91,6 +91,12 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ## ⚠️ Tailwind v4 の gray が青寄り(ハマりどころ)
 
+> **改訂(2026-07-14):** 罫線問題の**根因は「v4 gray が青い」ことではなく、md(prose)マークアップの
+> セレクタ強さ(specificity)制御**だった(下の prose 注入の項)。青みは実在するが**別件の純粋な見た目**の話で、
+> **仮に gray を完全中立化しても `border-gray-*` は prose に勝てない**(= 後述 B案は罫線問題を解かない)。
+> `border-line!` の `!` は「青対策」ではなく **specificity で prose に勝つため**。→ 生産的な方向は
+> **ボーダー色のトークン化**(`--line` 系の拡張・prose 領域は specificity 制御込み)であって、パレット中立化ではない。
+
 v4 の既定 `gray` パレットは **クール(青寄り)の oklch**(例 `gray-700` =
 `oklch(0.373 0.034 259.733)`)。本プロジェクトは config で `gray.N = var(--color-gray-N, #hex)`
 と中立 hex をフォールバック指定しているが、**v4 が同名 `--color-gray-N` を既定で先に定義**するため
@@ -102,9 +108,11 @@ v4 の既定 `gray` パレットは **クール(青寄り)の oklch**(例 `gray-
 - さらに **Tailwind Typography(`prose`)が `tbody tr` に `--tw-prose-td-borders`(= 青い gray-700)
   を注入**するため、`border-gray-*` を当てても勝てない(`prose` の方が勝つ)。
 
-対処(現行): 罫線は **`--line` トークン + `border-line!`**(`!` = important、`px-3!` と同流儀)で
-prose の注入色を打ち消す。根本対処(未実施・B案)は `:root` で `--color-gray-50〜950` の中立
-フルパレットを定義して v4 既定を潰すこと。`bg-gray-100` 等の微妙な青みが問題化したら実施する。
+対処(現行・本対処): 罫線は **`--line` トークン + `border-line!`**(`!` = important、`px-3!` と同流儀)で
+prose の注入色を **specificity で打ち消す**。これが罫線問題の本質的対処。
+**B案(`:root` で `--color-gray-50〜950` の中立フルパレット定義)は罫線問題には無関係** — prose の勝ちは
+specificity なので中立化では解けない。B案は `bg-gray-100` 等の**微妙な青み=純粋な見た目**が気になった
+場合の任意対応にすぎず、優先度は低い。生産的な次の一手は**ボーダー色のトークン化**(`border-gray-*` を `--line` 系トークンへ、text 移行と同型・次セッション候補)。
 
 ## ブランド / アイコン
 
