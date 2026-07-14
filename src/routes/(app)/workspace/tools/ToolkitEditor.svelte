@@ -1,56 +1,60 @@
-<script>
-	import { getContext, onMount, tick } from 'svelte';
+<script lang="ts">
+	import { getContext, tick } from 'svelte';
+	import { goto } from '$app/navigation';
+
+	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
+	import Textarea from '$lib/components/common/Textarea.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 
 	const i18n = getContext('i18n');
 
-	import { toast } from 'svelte-sonner';
-	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
-	import { goto } from '$app/navigation';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import Badge from '$lib/components/common/Badge.svelte';
-	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import LockClosed from '$lib/components/icons/LockClosed.svelte';
-	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import { user } from '$lib/stores';
+	let {
+		edit = false,
+		onSave = () => {},
+		id = $bindable(''),
+		name = $bindable(''),
+		// llens(#43): description は top-level フィールド(旧 meta.description)。空でも可(specs の docstring が真実源)。
+		description = $bindable(''),
+		content = $bindable(''),
+		accessControl = $bindable({})
+	}: {
+		edit?: boolean;
+		onSave?: (data: any) => void;
+		id?: string;
+		name?: string;
+		description?: string;
+		content?: string;
+		accessControl?: any;
+	} = $props();
 
-	let formElement = null;
-	let loading = false;
+	let formElement = $state<HTMLFormElement | null>(null);
+	let codeEditor = $state<any>(null);
+	let loading = $state(false);
 
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
-	let showRenameConfirm = false;
-	let showAccessControlModal = false;
-
-	export let edit = false;
-
-	export let onSave = () => {};
-
-	export let id = '';
-	export let name = '';
-	// llens(#43): description は top-level フィールド(旧 meta.description)。
-	export let description = '';
-	export let content = '';
-	export let accessControl = {};
-
-	let _content = '';
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
 	let originalId = id;
+	let showRenameConfirm = $state(false);
+	let showAccessControlModal = $state(false);
 
-	$: if (content) {
-		updateContent();
-	}
+	let _content = $state('');
 
-	const updateContent = () => {
-		_content = content;
-	};
+	$effect(() => {
+		if (content) {
+			_content = content;
+		}
+	});
 
-	$: if (name && !edit) {
-		id = name.replace(/\s+/g, '_').toLowerCase();
-	}
+	// 作成時は表示名から id を自動生成する
+	$effect(() => {
+		if (name && !edit) {
+			id = name.replace(/\s+/g, '_').toLowerCase();
+		}
+	});
 
-	let codeEditor;
-	let boilerplate = `import os
+	const boilerplate = `import os
 import requests
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -60,7 +64,7 @@ class Tools:
         pass
 
     # Add your custom tools using pure Python code here, make sure to add type hints and descriptions
-	
+
     def get_user_name_and_email_and_id(self, __user__: dict = {}) -> str:
         """
         Get the user name, Email and ID from the user object.
@@ -184,12 +188,6 @@ class Tools:
 
 		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
 		if (edit && id !== originalId) {
-			// id 差し替えは create 経由 = description 必須(#43 P1)。空だと create が 400 で
-			// 無言失敗するため、confirm を出す前に明示的に弾く。
-			if ((description ?? '').trim() === '') {
-				toast.error($i18n.t('A description is required to change the ID.'));
-				return;
-			}
 			showRenameConfirm = true;
 		} else {
 			saveHandler();
@@ -204,7 +202,8 @@ class Tools:
 		<form
 			bind:this={formElement}
 			class=" flex flex-col max-h-[100dvh] h-full"
-			on:submit|preventDefault={() => {
+			onsubmit={(e) => {
+				e.preventDefault();
 				submitHandler();
 			}}
 		>
@@ -216,12 +215,13 @@ class Tools:
 							<Tooltip content={$i18n.t('Back')}>
 								<button
 									class="w-full text-left text-sm py-1.5 px-1 rounded-lg text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-									on:click={() => {
+									type="button"
+									aria-label={$i18n.t('Back')}
+									onclick={() => {
 										goto('/workspace/tools');
 									}}
-									type="button"
 								>
-									<ChevronLeft strokeWidth="2.5" />
+									<span class="i-lucide-chevron-left size-4 block"></span>
 								</button>
 							</Tooltip>
 						</div>
@@ -240,11 +240,11 @@ class Tools:
 							<button
 								class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
 								type="button"
-								on:click={() => {
+								onclick={() => {
 									showAccessControlModal = true;
 								}}
 							>
-								<LockClosed strokeWidth="2.5" className="size-3.5" />
+								<span class="i-lucide-lock size-3.5 block"></span>
 
 								<div class="text-sm font-medium shrink-0">
 									{$i18n.t('Access')}

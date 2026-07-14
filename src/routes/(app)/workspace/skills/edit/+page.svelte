@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { skills } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
+	import { page } from '$app/stores';
 
-	const i18n = getContext('i18n');
-
+	import { skills } from '$lib/stores';
 	import {
 		createNewSkill,
 		deleteSkillById,
@@ -13,12 +12,14 @@
 		getSkills,
 		updateSkillById
 	} from '$lib/apis/skills';
-	import { page } from '$app/stores';
 
-	import SkillEditor from '$lib/components/workspace/Skills/SkillEditor.svelte';
+	import SkillEditor from '../SkillEditor.svelte';
 
-	let skill = null;
-	const onSubmit = async (_skill) => {
+	const i18n = getContext('i18n');
+
+	let skill = $state<any>(null);
+
+	const onSubmit = async (_skill: any) => {
 		const oldId = skill.id;
 
 		// llens(#43 Phase2b): id が変わったら PK は変えられないので、新 id で作成してから旧 id を削除する

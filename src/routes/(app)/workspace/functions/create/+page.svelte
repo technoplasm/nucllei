@@ -1,21 +1,21 @@
-<script>
+<script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { config, functions, models, settings } from '$lib/stores';
+	import { functions, models } from '$lib/stores';
 	import { createNewFunction, getFunctions } from '$lib/apis/functions';
-	import FunctionEditor from '$lib/components/workspace/Functions/FunctionEditor.svelte';
 	import { getModels } from '$lib/apis';
+	import FunctionEditor from '../FunctionEditor.svelte';
+
+	const i18n = getContext('i18n');
 
 	// llens(#45): frontmatter/version ゲートと openwebui.com community 連携(share 受け側の
 	// postMessage)・clone(sessionStorage 経由)は撤去。素の作成フローのみ。
 	// llens(#48): Admin を Workspace に統合し /workspace/functions 配下へ移動。
-	const i18n = getContext('i18n');
+	let mounted = $state(false);
 
-	let mounted = false;
-
-	const saveHandler = async (data) => {
+	const saveHandler = async (data: any) => {
 		const res = await createNewFunction({
 			id: data.id,
 			name: data.name,
@@ -41,9 +41,5 @@
 </script>
 
 {#if mounted}
-	<FunctionEditor
-		onSave={(value) => {
-			saveHandler(value);
-		}}
-	/>
+	<FunctionEditor onSave={saveHandler} />
 {/if}

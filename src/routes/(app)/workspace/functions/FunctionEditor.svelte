@@ -1,50 +1,58 @@
-<script>
+<script lang="ts">
 	import { getContext, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	const i18n = getContext('i18n');
-
-	import { toast } from 'svelte-sonner';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 
-	let formElement = null;
-	let loading = false;
+	const i18n = getContext('i18n');
+
+	let {
+		edit = false,
+		onSave = () => {},
+		id = $bindable(''),
+		name = $bindable(''),
+		// llens(#43): description は top-level フィールド(旧 meta.description)。空でも可(UI メタデータ)。
+		description = $bindable(''),
+		content = $bindable(''),
+		// llens(#45): 編集時に既存の type をバッジ表示するため受け取る(作成時は未指定)。
+		type = ''
+	}: {
+		edit?: boolean;
+		onSave?: (data: any) => void;
+		id?: string;
+		name?: string;
+		description?: string;
+		content?: string;
+		type?: string;
+	} = $props();
+
+	let formElement = $state<HTMLFormElement | null>(null);
+	let codeEditor = $state<any>(null);
+	let loading = $state(false);
+
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
-	let showRenameConfirm = false;
-
-	export let onSave = () => {};
-
-	export let edit = false;
-
-	export let id = '';
-	export let name = '';
-	// llens(#43): description は top-level フィールド(旧 meta.description)。
-	export let description = '';
-	export let content = '';
-	// llens(#45): 編集時に既存の type をバッジ表示するため受け取る(作成時は未指定)。
-	export let type = '';
-	let _content = '';
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
 	let originalId = id;
+	let showRenameConfirm = $state(false);
 
-	$: if (content) {
-		updateContent();
-	}
+	let _content = $state('');
 
-	const updateContent = () => {
-		_content = content;
-	};
+	$effect(() => {
+		if (content) {
+			_content = content;
+		}
+	});
 
-	$: if (name && !edit) {
-		id = name.replace(/\s+/g, '_').toLowerCase();
-	}
-
-	let codeEditor;
+	// 作成時は表示名から id を自動生成する
+	$effect(() => {
+		if (name && !edit) {
+			id = name.replace(/\s+/g, '_').toLowerCase();
+		}
+	});
 
 	// llens(#45): frontmatter(title/author/version)は退役。type はコード中のクラス名
 	// (Filter/Action/Pipe)で確定するため、作成時のドロップダウンは「どの雛形を差し込むか」を
@@ -134,15 +142,16 @@ class Attachment:
 `;
 
 	// 作成時に選択中の type(雛形の切り替えに使う)。編集時は既存 content をそのまま出す。
-	let selectedType = 'filter';
-	$: boilerplate =
+	let selectedType = $state('filter');
+	const boilerplate = $derived(
 		selectedType === 'action'
 			? actionBoilerplate
 			: selectedType === 'pipe'
 				? pipeBoilerplate
 				: selectedType === 'attachment'
 					? attachmentBoilerplate
-					: filterBoilerplate;
+					: filterBoilerplate
+	);
 
 	const saveHandler = async () => {
 		loading = true;
@@ -170,12 +179,6 @@ class Attachment:
 
 		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
 		if (edit && id !== originalId) {
-			// id 差し替えは create 経由 = description 必須(#43 P1)。空だと create が 400 で
-			// 無言失敗するため、confirm を出す前に明示的に弾く。
-			if ((description ?? '').trim() === '') {
-				toast.error($i18n.t('A description is required to change the ID.'));
-				return;
-			}
 			showRenameConfirm = true;
 		} else {
 			saveHandler();
@@ -188,7 +191,8 @@ class Attachment:
 		<form
 			bind:this={formElement}
 			class=" flex flex-col max-h-[100dvh] h-full"
-			on:submit|preventDefault={() => {
+			onsubmit={(e) => {
+				e.preventDefault();
 				submitHandler();
 			}}
 		>
@@ -200,12 +204,13 @@ class Attachment:
 							<Tooltip content={$i18n.t('Back')}>
 								<button
 									class="w-full text-left text-sm py-1.5 px-1 rounded-lg text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-									on:click={() => {
+									type="button"
+									aria-label={$i18n.t('Back')}
+									onclick={() => {
 										goto('/workspace/functions');
 									}}
-									type="button"
 								>
-									<ChevronLeft strokeWidth="2.5" />
+									<span class="i-lucide-chevron-left size-4 block"></span>
 								</button>
 							</Tooltip>
 						</div>

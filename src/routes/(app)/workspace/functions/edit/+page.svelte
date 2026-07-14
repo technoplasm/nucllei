@@ -1,10 +1,10 @@
-<script>
+<script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
-
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { config, functions, models, settings } from '$lib/stores';
+
+	import { functions, models } from '$lib/stores';
 	import {
 		createNewFunction,
 		deleteFunctionById,
@@ -12,23 +12,23 @@
 		getFunctions,
 		getFunctionById
 	} from '$lib/apis/functions';
-
-	import FunctionEditor from '$lib/components/workspace/Functions/FunctionEditor.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getModels } from '$lib/apis';
+
+	import FunctionEditor from '../FunctionEditor.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	// llens(#45): frontmatter/version ゲート(extractFrontmatter/compareVersion)は撤去。
 	// llens(#48): Admin を Workspace に統合し /workspace/functions 配下へ移動。
 	const i18n = getContext('i18n');
 
-	let func = null;
+	let func = $state<any>(null);
 
 	const refreshStores = async () => {
 		functions.set(await getFunctions());
 		models.set(await getModels());
 	};
 
-	const saveHandler = async (data) => {
+	const saveHandler = async (data: any) => {
 		const payload = {
 			id: data.id,
 			name: data.name,
@@ -88,9 +88,7 @@
 		type={func.type}
 		description={func.description}
 		content={func.content}
-		onSave={(value) => {
-			saveHandler(value);
-		}}
+		onSave={saveHandler}
 	/>
 {:else}
 	<div class="flex items-center justify-center h-full">

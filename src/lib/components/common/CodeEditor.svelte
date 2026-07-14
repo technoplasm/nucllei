@@ -22,8 +22,8 @@
 	export let boilerplate = '';
 	export let value = '';
 
-	export let onSave = () => {};
-	export let onChange = () => {};
+	export let onSave: () => void = () => {};
+	export let onChange: (value: string) => void = () => {};
 
 	let _value = '';
 

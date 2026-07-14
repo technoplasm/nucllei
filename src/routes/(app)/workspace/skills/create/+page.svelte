@@ -1,18 +1,17 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
+	import { getContext } from 'svelte';
+
 	import { skills } from '$lib/stores';
-	import { onMount, getContext } from 'svelte';
+	import { createNewSkill, getSkills } from '$lib/apis/skills';
+	import SkillEditor from '../SkillEditor.svelte';
 
 	const i18n = getContext('i18n');
 
-	import { createNewSkill, getSkills } from '$lib/apis/skills';
-	import SkillEditor from '$lib/components/workspace/Skills/SkillEditor.svelte';
-
 	// air-gapped: openwebui.com/community 連携(postMessage インポート・sessionStorage clone)は
 	// 一切持ち込まない(issue #35)。作成は空フォームからのみ。
-	let skill = null;
-	const onSubmit = async (_skill) => {
+	const onSubmit = async (_skill: any) => {
 		const skill = await createNewSkill(_skill).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -27,6 +26,4 @@
 	};
 </script>
 
-{#key skill}
-	<SkillEditor {skill} {onSubmit} />
-{/key}
+<SkillEditor {onSubmit} />

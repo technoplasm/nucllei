@@ -1,6 +1,10 @@
-<script>
+<script lang="ts">
+	import { toast } from 'svelte-sonner';
+	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+
+	import { tools } from '$lib/stores';
 	import {
 		createNewTool,
 		deleteToolById,
@@ -9,17 +13,14 @@
 		updateToolById
 	} from '$lib/apis/tools';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import ToolkitEditor from '$lib/components/workspace/Tools/ToolkitEditor.svelte';
-	import { tools } from '$lib/stores';
-	import { onMount, getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
+	import ToolkitEditor from '../ToolkitEditor.svelte';
 
 	// llens(#44): frontmatter 由来の version ゲートは撤去。builtin は直リンクでも編集不可。
 	const i18n = getContext('i18n');
 
-	let tool = null;
+	let tool = $state<any>(null);
 
-	const saveHandler = async (data) => {
+	const saveHandler = async (data: any) => {
 		const payload = {
 			id: data.id,
 			name: data.name,
@@ -56,8 +57,6 @@
 		if (res) {
 			toast.success($i18n.t('Tool updated successfully'));
 			tools.set(await getTools());
-
-			// await goto('/workspace/tools');
 		}
 	};
 
@@ -89,9 +88,7 @@
 		description={tool.description}
 		content={tool.content}
 		accessControl={tool.access_control}
-		onSave={(value) => {
-			saveHandler(value);
-		}}
+		onSave={saveHandler}
 	/>
 {:else}
 	<div class="flex items-center justify-center h-full">
