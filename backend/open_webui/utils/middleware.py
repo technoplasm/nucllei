@@ -694,76 +694,425 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     return form_data, metadata, events
 
 
+
+def blocks_event_data(content_blocks) -> dict:
+    """content_blocks の現在形を chat:completion イベント / 永続化ペイロードにする。"""
+    return {
+        "content": serialize_text_blocks(content_blocks),
+        "content_blocks": snapshot_content_blocks(content_blocks),
+    }
+
+
+async def run_response_background_tasks(request, user, metadata, tasks, event_emitter):
+    """応答確定後のバックグラウンドタスク(現状はタイトル生成のみ)。"""
+    message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
+    message = message_map.get(metadata["message_id"]) if message_map else None
+
+    if not message:
+        return
+
+    messages = get_message_list(message_map, message.get("id"))
+
+    if not (tasks and messages):
+        return
+
+    if TASKS.TITLE_GENERATION in tasks:
+        if tasks[TASKS.TITLE_GENERATION]:
+            res = await generate_title(
+                request,
+                {
+                    "model": message["model"],
+                    "messages": messages,
+                    "chat_id": metadata["chat_id"],
+                },
+                user,
+            )
+
+            if res and isinstance(res, dict):
+                if len(res.get("choices", [])) == 1:
+                    # llens(#68): content は reasoning がトークン予算を
+                    # 使い切ると null になる(.get の既定値は「キーが無い」
+                    # 時しか効かない)。None はここで空文字に落とす。
+                    title_string = (
+                        res.get("choices", [])[0].get("message", {}).get("content")
+                    ) or ""
+                else:
+                    title_string = ""
+
+                title_string = title_string[
+                    title_string.find("{") : title_string.rfind("}") + 1
+                ]
+
+                try:
+                    title = json.loads(title_string).get("title", "New Chat")
+                except Exception:
+                    title = ""
+
+                if not title:
+                    title = messages[0].get("content", "New Chat")
+
+                Chats.update_chat_title_by_id(metadata["chat_id"], title)
+
+                await event_emitter(
+                    {
+                        "type": "chat:title",
+                        "data": title,
+                    }
+                )
+        elif len(messages) == 2:
+            title = messages[0].get("content", "New Chat")
+
+            Chats.update_chat_title_by_id(metadata["chat_id"], title)
+
+            await event_emitter(
+                {
+                    "type": "chat:title",
+                    "data": message.get("content", "New Chat"),
+                }
+            )
+
+
+async def handle_non_streaming_response(
+    request, response, user, metadata, model, tasks, event_emitter
+):
+    """非ストリーム応答の永続化・イベント払い出し・後処理。"""
+    if "error" in response:
+        error = response["error"].get("detail", response["error"])
+        Chats.upsert_message_to_chat_by_id_and_message_id(
+            metadata["chat_id"],
+            metadata["message_id"],
+            {
+                "error": {"content": error},
+            },
+        )
+
+    if "selected_model_id" in response:
+        Chats.upsert_message_to_chat_by_id_and_message_id(
+            metadata["chat_id"],
+            metadata["message_id"],
+            {
+                "selectedModelId": response["selected_model_id"],
+            },
+        )
+
+    # llens(#57): 非 stream 応答の実測 usage も永続化
+    usage = response.get("usage", {})
+    if usage and metadata.get("chat_id") and metadata.get("message_id"):
+        await asyncio.to_thread(
+            Chats.record_usage_by_id_and_message_id,
+            metadata["chat_id"],
+            metadata["message_id"],
+            usage,
+            context_size=get_model_context_size(request, model),
+        )
+
+    choices = response.get("choices", [])
+    if choices and choices[0].get("message", {}).get("content"):
+        content = response["choices"][0]["message"]["content"]
+
+        if content:
+            await event_emitter(
+                {
+                    "type": "chat:completion",
+                    "data": response,
+                }
+            )
+
+            title = Chats.get_chat_title_by_id(metadata["chat_id"])
+
+            await event_emitter(
+                {
+                    "type": "chat:completion",
+                    "data": {
+                        "done": True,
+                        "content": content,
+                        "title": title,
+                    },
+                }
+            )
+
+            # Save message in the database
+            Chats.upsert_message_to_chat_by_id_and_message_id(
+                metadata["chat_id"],
+                metadata["message_id"],
+                {
+                    "content": content,
+                },
+            )
+
+            # Send a webhook notification if the user is not active
+            if get_active_status_by_user_id(user.id) is None:
+                webhook_url = Users.get_user_webhook_url_by_id(user.id)
+                if webhook_url:
+                    await post_webhook(
+                        request.app.state.WEBUI_NAME,
+                        webhook_url,
+                        f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
+                        {
+                            "action": "chat",
+                            "message": content,
+                            "title": title,
+                            "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
+                        },
+                    )
+
+            await run_response_background_tasks(
+                request, user, metadata, tasks, event_emitter
+            )
+
+    return response
+
+
+async def consume_model_stream(
+    request,
+    response,
+    assembler,
+    *,
+    model,
+    metadata,
+    filter_functions,
+    extra_params,
+    event_emitter,
+):
+    """モデル応答 SSE を読み切り assembler へ畳み込む。組めた tool calls を返す。
+
+    行パース → stream filter → assembler(デルタ畳み込み)→ emit / 永続化。
+    ストリーム終端で reasoning の閉じ規律③と finish_reason 整合ガード
+    (llens #18-2)を適用する。
+    """
+    assembler.start_stream()
+
+    async for line in response.body_iterator:
+        line = line.decode("utf-8") if isinstance(line, bytes) else line
+        data = line
+
+        # Skip empty lines
+        if not data.strip():
+            continue
+
+        # "data:" is the prefix for each event
+        if not data.startswith("data:"):
+            continue
+
+        # Remove the prefix
+        data = data[len("data:") :].strip()
+
+        try:
+            data = json.loads(data)
+
+            data, _ = await process_filter_functions(
+                request=request,
+                filter_functions=filter_functions,
+                filter_type="stream",
+                form_data=data,
+                extra_params=extra_params,
+            )
+
+            if data:
+                if "event" in data:
+                    await event_emitter(data.get("event", {}))
+
+                if "selected_model_id" in data:
+                    Chats.upsert_message_to_chat_by_id_and_message_id(
+                        metadata["chat_id"],
+                        metadata["message_id"],
+                        {
+                            "selectedModelId": data["selected_model_id"],
+                        },
+                    )
+                else:
+                    choices = data.get("choices", [])
+                    if not choices:
+                        error = data.get("error", {})
+                        if error:
+                            await event_emitter(
+                                {
+                                    "type": "chat:completion",
+                                    "data": {
+                                        "error": error,
+                                    },
+                                }
+                            )
+                        usage = data.get("usage", {})
+                        if usage:
+                            # llens(#57): 実測 usage(真のコンテキスト量)を
+                            # ターン/チャット単位で永続化。tool ループの
+                            # 各呼び出しがここを通る(completion は加算)。
+                            if metadata.get("chat_id") and metadata.get("message_id"):
+                                await asyncio.to_thread(
+                                    Chats.record_usage_by_id_and_message_id,
+                                    metadata["chat_id"],
+                                    metadata["message_id"],
+                                    usage,
+                                    context_size=get_model_context_size(
+                                        request, model
+                                    ),
+                                )
+                            await event_emitter(
+                                {
+                                    "type": "chat:completion",
+                                    "data": {
+                                        "usage": usage,
+                                    },
+                                }
+                            )
+                        continue
+
+                    assembler.note_finish_reason(choices[0].get("finish_reason"))
+
+                    changed = assembler.handle_delta(choices[0].get("delta", {}))
+
+                    if changed:
+                        snapshot = blocks_event_data(assembler.content_blocks)
+
+                        # tool_calls / reasoning の変更は常に snapshot を emit する。
+                        # text は ENABLE_REALTIME_CHAT_SAVE 時のみ DB 直書き
+                        # (イベントはフレーム素通し)— v0.6.5 の挙動踏襲。
+                        if changed - {CHANGED_TEXT}:
+                            data = snapshot
+                        if CHANGED_TEXT in changed:
+                            if ENABLE_REALTIME_CHAT_SAVE:
+                                Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    metadata["chat_id"],
+                                    metadata["message_id"],
+                                    snapshot,
+                                )
+                            else:
+                                data = snapshot
+
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": data,
+                    }
+                )
+        except Exception as e:
+            done = "data: [DONE]" in line
+            if done:
+                pass
+            else:
+                log.debug("Error: ", e)
+                continue
+
+    response_tool_calls, mismatch = assembler.finish_stream()
+
+    if mismatch == MISMATCH_MISSING_TOOL_CALLS:
+        # llens(#18-2): "tool_calls" 終了なのにデルタから 1 つも組めていない
+        # (チャンク境界などの取りこぼし = 無音で止まる最悪の失敗モード)—
+        # 黙って通常終了せず、チャット内エラーで可視化する。
+        log.error(
+            "finish_reason=tool_calls but no tool calls were "
+            "reconstructed from the stream (chunk boundary loss?)"
+        )
+        await event_emitter(
+            {
+                "type": "chat:completion",
+                "data": {
+                    "error": {
+                        "content": (
+                            "Model ended with tool_calls but no tool "
+                            "call could be reconstructed from the "
+                            "stream. The response may be incomplete."
+                        )
+                    },
+                },
+            }
+        )
+    elif mismatch == MISMATCH_UNEXPECTED_FINISH:
+        # 逆方向の不整合は実行を止めるほどではない(実害はモデルの
+        # 意図解釈のみ)— ログで観測可能にするに留める。
+        log.warning(f"tool calls parsed but finish_reason={assembler.finish_reason!r}")
+
+    if response.background:
+        await response.background()
+
+    return response_tool_calls
+
+
+async def execute_tool_calls(response_tool_calls, tools):
+    """tool call 群を順に実行し、tool result のリストを返す。"""
+    results = []
+    for tool_call in response_tool_calls:
+        tool_call_id = tool_call.get("id", "")
+        tool_name = tool_call.get("function", {}).get("name", "")
+
+        tool_function_params = {}
+        try:
+            # json.loads cannot be used because some models do not produce valid JSON
+            tool_function_params = ast.literal_eval(
+                tool_call.get("function", {}).get("arguments", "{}")
+            )
+        except Exception as e:
+            log.debug(e)
+            # Fallback to JSON parsing
+            try:
+                tool_function_params = json.loads(
+                    tool_call.get("function", {}).get("arguments", "{}")
+                )
+            except Exception as e:
+                log.debug(
+                    f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
+                )
+
+        tool_result = None
+
+        if tool_name not in tools:
+            # llens(#18-2): tools 配列に無い tool の呼び出し。
+            # 履歴に残った過去の tool call を真似るケース
+            # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
+            # 起きうる。黙って None を返さず、モデルが軌道修正
+            # できる明示メッセージを返す(例外にもしない)。
+            log.warning(f"model called unavailable tool '{tool_name}'")
+            tool_result = (
+                f"tool not available: {tool_name}. "
+                "Use only the tools currently provided."
+            )
+        else:
+            tool = tools[tool_name]
+            spec = tool.get("spec", {})
+
+            try:
+                allowed_params = (
+                    spec.get("parameters", {}).get("properties", {}).keys()
+                )
+
+                tool_function_params = {
+                    k: v
+                    for k, v in tool_function_params.items()
+                    if k in allowed_params
+                }
+
+                tool_function = tool["callable"]
+                tool_result = await tool_function(**tool_function_params)
+
+            except Exception as e:
+                tool_result = str(e)
+
+        tool_result_files = []
+        if isinstance(tool_result, list):
+            for item in tool_result:
+                # check if string
+                if isinstance(item, str) and item.startswith("data:"):
+                    tool_result_files.append(item)
+                    tool_result.remove(item)
+
+        if isinstance(tool_result, dict) or isinstance(tool_result, list):
+            tool_result = json.dumps(tool_result, indent=2)
+
+        results.append(
+            {
+                "tool_call_id": tool_call_id,
+                "content": tool_result,
+                **({"files": tool_result_files} if tool_result_files else {}),
+            }
+        )
+
+    return results
+
+
 async def process_chat_response(
     request, response, form_data, user, metadata, model, events, tasks
 ):
-    async def background_tasks_handler():
-        message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
-        message = message_map.get(metadata["message_id"]) if message_map else None
-
-        if message:
-            messages = get_message_list(message_map, message.get("id"))
-
-            if tasks and messages:
-                if TASKS.TITLE_GENERATION in tasks:
-                    if tasks[TASKS.TITLE_GENERATION]:
-                        res = await generate_title(
-                            request,
-                            {
-                                "model": message["model"],
-                                "messages": messages,
-                                "chat_id": metadata["chat_id"],
-                            },
-                            user,
-                        )
-
-                        if res and isinstance(res, dict):
-                            if len(res.get("choices", [])) == 1:
-                                # llens(#68): content は reasoning がトークン予算を
-                                # 使い切ると null になる(.get の既定値は「キーが無い」
-                                # 時しか効かない)。None はここで空文字に落とす。
-                                title_string = (
-                                    res.get("choices", [])[0]
-                                    .get("message", {})
-                                    .get("content")
-                                ) or ""
-                            else:
-                                title_string = ""
-
-                            title_string = title_string[
-                                title_string.find("{") : title_string.rfind("}") + 1
-                            ]
-
-                            try:
-                                title = json.loads(title_string).get(
-                                    "title", "New Chat"
-                                )
-                            except Exception:
-                                title = ""
-
-                            if not title:
-                                title = messages[0].get("content", "New Chat")
-
-                            Chats.update_chat_title_by_id(metadata["chat_id"], title)
-
-                            await event_emitter(
-                                {
-                                    "type": "chat:title",
-                                    "data": title,
-                                }
-                            )
-                    elif len(messages) == 2:
-                        title = messages[0].get("content", "New Chat")
-
-                        Chats.update_chat_title_by_id(metadata["chat_id"], title)
-
-                        await event_emitter(
-                            {
-                                "type": "chat:title",
-                                "data": message.get("content", "New Chat"),
-                            }
-                        )
-
     event_emitter = None
     event_caller = None
     if (
@@ -780,90 +1129,9 @@ async def process_chat_response(
     # Non-streaming response
     if not isinstance(response, StreamingResponse):
         if event_emitter:
-            if "error" in response:
-                error = response["error"].get("detail", response["error"])
-                Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata["chat_id"],
-                    metadata["message_id"],
-                    {
-                        "error": {"content": error},
-                    },
-                )
-
-            if "selected_model_id" in response:
-                Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata["chat_id"],
-                    metadata["message_id"],
-                    {
-                        "selectedModelId": response["selected_model_id"],
-                    },
-                )
-
-            # llens(#57): 非 stream 応答の実測 usage も永続化
-            usage = response.get("usage", {})
-            if usage and metadata.get("chat_id") and metadata.get("message_id"):
-                await asyncio.to_thread(
-                    Chats.record_usage_by_id_and_message_id,
-                    metadata["chat_id"],
-                    metadata["message_id"],
-                    usage,
-                    context_size=get_model_context_size(request, model),
-                )
-
-            choices = response.get("choices", [])
-            if choices and choices[0].get("message", {}).get("content"):
-                content = response["choices"][0]["message"]["content"]
-
-                if content:
-
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": response,
-                        }
-                    )
-
-                    title = Chats.get_chat_title_by_id(metadata["chat_id"])
-
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": {
-                                "done": True,
-                                "content": content,
-                                "title": title,
-                            },
-                        }
-                    )
-
-                    # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        {
-                            "content": content,
-                        },
-                    )
-
-                    # Send a webhook notification if the user is not active
-                    if get_active_status_by_user_id(user.id) is None:
-                        webhook_url = Users.get_user_webhook_url_by_id(user.id)
-                        if webhook_url:
-                            await post_webhook(
-                                request.app.state.WEBUI_NAME,
-                                webhook_url,
-                                f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
-                                {
-                                    "action": "chat",
-                                    "message": content,
-                                    "title": title,
-                                    "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
-                                },
-                            )
-
-                    await background_tasks_handler()
-
-            return response
+            return await handle_non_streaming_response(
+                request, response, user, metadata, model, tasks, event_emitter
+            )
         else:
             return response
 
@@ -964,175 +1232,19 @@ async def process_chat_response(
                         },
                     )
 
-                async def stream_body_handler(response):
-                    assembler.start_stream()
+                stream_kwargs = {
+                    "model": model,
+                    "metadata": metadata,
+                    "filter_functions": filter_functions,
+                    "extra_params": extra_params,
+                    "event_emitter": event_emitter,
+                }
 
-                    async for line in response.body_iterator:
-                        line = line.decode("utf-8") if isinstance(line, bytes) else line
-                        data = line
-
-                        # Skip empty lines
-                        if not data.strip():
-                            continue
-
-                        # "data:" is the prefix for each event
-                        if not data.startswith("data:"):
-                            continue
-
-                        # Remove the prefix
-                        data = data[len("data:") :].strip()
-
-                        try:
-                            data = json.loads(data)
-
-                            data, _ = await process_filter_functions(
-                                request=request,
-                                filter_functions=filter_functions,
-                                filter_type="stream",
-                                form_data=data,
-                                extra_params=extra_params,
-                            )
-
-                            if data:
-                                if "event" in data:
-                                    await event_emitter(data.get("event", {}))
-
-                                if "selected_model_id" in data:
-                                    model_id = data["selected_model_id"]
-                                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                                        metadata["chat_id"],
-                                        metadata["message_id"],
-                                        {
-                                            "selectedModelId": model_id,
-                                        },
-                                    )
-                                else:
-                                    choices = data.get("choices", [])
-                                    if not choices:
-                                        error = data.get("error", {})
-                                        if error:
-                                            await event_emitter(
-                                                {
-                                                    "type": "chat:completion",
-                                                    "data": {
-                                                        "error": error,
-                                                    },
-                                                }
-                                            )
-                                        usage = data.get("usage", {})
-                                        if usage:
-                                            # llens(#57): 実測 usage(真のコンテキスト量)を
-                                            # ターン/チャット単位で永続化。tool ループの
-                                            # 各呼び出しがここを通る(completion は加算)。
-                                            if metadata.get("chat_id") and metadata.get(
-                                                "message_id"
-                                            ):
-                                                await asyncio.to_thread(
-                                                    Chats.record_usage_by_id_and_message_id,
-                                                    metadata["chat_id"],
-                                                    metadata["message_id"],
-                                                    usage,
-                                                    context_size=get_model_context_size(
-                                                        request, model
-                                                    ),
-                                                )
-                                            await event_emitter(
-                                                {
-                                                    "type": "chat:completion",
-                                                    "data": {
-                                                        "usage": usage,
-                                                    },
-                                                }
-                                            )
-                                        continue
-
-                                    assembler.note_finish_reason(
-                                        choices[0].get("finish_reason")
-                                    )
-
-                                    changed = assembler.handle_delta(
-                                        choices[0].get("delta", {})
-                                    )
-
-                                    if changed:
-                                        snapshot = {
-                                            "content": serialize_text_blocks(
-                                                assembler.content_blocks
-                                            ),
-                                            "content_blocks": snapshot_content_blocks(
-                                                assembler.content_blocks
-                                            ),
-                                        }
-
-                                        # tool_calls / reasoning の変更は常に snapshot を
-                                        # emit する。text は ENABLE_REALTIME_CHAT_SAVE 時
-                                        # のみ DB 直書き(イベントはフレーム素通し)—
-                                        # v0.6.5 の挙動踏襲。
-                                        if changed - {CHANGED_TEXT}:
-                                            data = snapshot
-                                        if CHANGED_TEXT in changed:
-                                            if ENABLE_REALTIME_CHAT_SAVE:
-                                                Chats.upsert_message_to_chat_by_id_and_message_id(
-                                                    metadata["chat_id"],
-                                                    metadata["message_id"],
-                                                    snapshot,
-                                                )
-                                            else:
-                                                data = snapshot
-
-                                await event_emitter(
-                                    {
-                                        "type": "chat:completion",
-                                        "data": data,
-                                    }
-                                )
-                        except Exception as e:
-                            done = "data: [DONE]" in line
-                            if done:
-                                pass
-                            else:
-                                log.debug("Error: ", e)
-                                continue
-
-                    response_tool_calls, mismatch = assembler.finish_stream()
-
-                    if mismatch == MISMATCH_MISSING_TOOL_CALLS:
-                        # llens(#18-2): "tool_calls" 終了なのにデルタから 1 つも
-                        # 組めていない(チャンク境界などの取りこぼし = 無音で
-                        # 止まる最悪の失敗モード)— 黙って通常終了せず、
-                        # チャット内エラーで可視化する。
-                        log.error(
-                            "finish_reason=tool_calls but no tool calls were "
-                            "reconstructed from the stream (chunk boundary loss?)"
-                        )
-                        await event_emitter(
-                            {
-                                "type": "chat:completion",
-                                "data": {
-                                    "error": {
-                                        "content": (
-                                            "Model ended with tool_calls but no tool "
-                                            "call could be reconstructed from the "
-                                            "stream. The response may be incomplete."
-                                        )
-                                    },
-                                },
-                            }
-                        )
-                    elif mismatch == MISMATCH_UNEXPECTED_FINISH:
-                        # 逆方向の不整合は実行を止めるほどではない(実害はモデルの
-                        # 意図解釈のみ)— ログで観測可能にするに留める。
-                        log.warning(
-                            f"tool calls parsed but finish_reason={assembler.finish_reason!r}"
-                        )
-
-                    if response_tool_calls:
-                        tool_calls.append(response_tool_calls)
-
-                    if response.background:
-                        await response.background()
-
-                await stream_body_handler(response)
+                response_tool_calls = await consume_model_stream(
+                    request, response, assembler, **stream_kwargs
+                )
+                if response_tool_calls:
+                    tool_calls.append(response_tool_calls)
 
                 # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
                 max_tool_call_iterations = CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
@@ -1156,116 +1268,20 @@ async def process_chat_response(
                     await event_emitter(
                         {
                             "type": "chat:completion",
-                            "data": {
-                                "content": serialize_text_blocks(
-                                    assembler.content_blocks
-                                ),
-                                "content_blocks": snapshot_content_blocks(
-                                    assembler.content_blocks
-                                ),
-                            },
+                            "data": blocks_event_data(assembler.content_blocks),
                         }
                     )
 
-                    results = []
-                    for tool_call in response_tool_calls:
-                        tool_call_id = tool_call.get("id", "")
-                        tool_name = tool_call.get("function", {}).get("name", "")
-
-                        tool_function_params = {}
-                        try:
-                            # json.loads cannot be used because some models do not produce valid JSON
-                            tool_function_params = ast.literal_eval(
-                                tool_call.get("function", {}).get("arguments", "{}")
-                            )
-                        except Exception as e:
-                            log.debug(e)
-                            # Fallback to JSON parsing
-                            try:
-                                tool_function_params = json.loads(
-                                    tool_call.get("function", {}).get("arguments", "{}")
-                                )
-                            except Exception as e:
-                                log.debug(
-                                    f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
-                                )
-
-                        tool_result = None
-
-                        if tool_name not in tools:
-                            # llens(#18-2): tools 配列に無い tool の呼び出し。
-                            # 履歴に残った過去の tool call を真似るケース
-                            # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
-                            # 起きうる。黙って None を返さず、モデルが軌道修正
-                            # できる明示メッセージを返す(例外にもしない)。
-                            log.warning(f"model called unavailable tool '{tool_name}'")
-                            tool_result = (
-                                f"tool not available: {tool_name}. "
-                                "Use only the tools currently provided."
-                            )
-                        else:
-                            tool = tools[tool_name]
-                            spec = tool.get("spec", {})
-
-                            try:
-                                allowed_params = (
-                                    spec.get("parameters", {})
-                                    .get("properties", {})
-                                    .keys()
-                                )
-
-                                tool_function_params = {
-                                    k: v
-                                    for k, v in tool_function_params.items()
-                                    if k in allowed_params
-                                }
-
-                                tool_function = tool["callable"]
-                                tool_result = await tool_function(
-                                    **tool_function_params
-                                )
-
-                            except Exception as e:
-                                tool_result = str(e)
-
-                        tool_result_files = []
-                        if isinstance(tool_result, list):
-                            for item in tool_result:
-                                # check if string
-                                if isinstance(item, str) and item.startswith("data:"):
-                                    tool_result_files.append(item)
-                                    tool_result.remove(item)
-
-                        if isinstance(tool_result, dict) or isinstance(
-                            tool_result, list
-                        ):
-                            tool_result = json.dumps(tool_result, indent=2)
-
-                        results.append(
-                            {
-                                "tool_call_id": tool_call_id,
-                                "content": tool_result,
-                                **(
-                                    {"files": tool_result_files}
-                                    if tool_result_files
-                                    else {}
-                                ),
-                            }
-                        )
+                    results = await execute_tool_calls(
+                        response_tool_calls, tools
+                    )
 
                     assembler.set_tool_results(results)
 
                     await event_emitter(
                         {
                             "type": "chat:completion",
-                            "data": {
-                                "content": serialize_text_blocks(
-                                    assembler.content_blocks
-                                ),
-                                "content_blocks": snapshot_content_blocks(
-                                    assembler.content_blocks
-                                ),
-                            },
+                            "data": blocks_event_data(assembler.content_blocks),
                         }
                     )
 
@@ -1289,7 +1305,11 @@ async def process_chat_response(
                         )
 
                         if isinstance(res, StreamingResponse):
-                            await stream_body_handler(res)
+                            followup_tool_calls = await consume_model_stream(
+                                request, res, assembler, **stream_kwargs
+                            )
+                            if followup_tool_calls:
+                                tool_calls.append(followup_tool_calls)
                         else:
                             break
                     except Exception as e:
@@ -1326,10 +1346,7 @@ async def process_chat_response(
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 data = {
                     "done": True,
-                    "content": serialize_text_blocks(assembler.content_blocks),
-                    "content_blocks": snapshot_content_blocks(
-                        assembler.content_blocks
-                    ),
+                    **blocks_event_data(assembler.content_blocks),
                     "title": title,
                 }
 
@@ -1338,12 +1355,7 @@ async def process_chat_response(
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"],
                         metadata["message_id"],
-                        {
-                            "content": serialize_text_blocks(assembler.content_blocks),
-                            "content_blocks": snapshot_content_blocks(
-                                assembler.content_blocks
-                            ),
-                        },
+                        blocks_event_data(assembler.content_blocks),
                     )
 
                 # Send a webhook notification if the user is not active
@@ -1369,7 +1381,9 @@ async def process_chat_response(
                     }
                 )
 
-                await background_tasks_handler()
+                await run_response_background_tasks(
+                    request, user, metadata, tasks, event_emitter
+                )
             except asyncio.CancelledError:
                 log.warning("Task was cancelled!")
                 await event_emitter({"type": "task-cancelled"})
@@ -1379,12 +1393,7 @@ async def process_chat_response(
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"],
                         metadata["message_id"],
-                        {
-                            "content": serialize_text_blocks(assembler.content_blocks),
-                            "content_blocks": snapshot_content_blocks(
-                                assembler.content_blocks
-                            ),
-                        },
+                        blocks_event_data(assembler.content_blocks),
                     )
 
             if response.background is not None:
