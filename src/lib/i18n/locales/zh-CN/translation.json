@@ -199,7 +199,6 @@
 	"Code execution engine is not configured. Contact your administrator.": "",
 	"Code Execution Timeout": "代码执行超时时间",
 	"Code formatted successfully": "代码格式化成功",
-	"Code Interpreter": "代码解释器",
 	"Code Interpreter Engine": "代码解释引擎",
 	"Code Interpreter Prompt Template": "代码解释器提示词模板",
 	"Collapse": "折叠",
