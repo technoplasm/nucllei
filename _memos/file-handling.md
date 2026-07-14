@@ -119,6 +119,36 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **③gate は inlet filter のまま**(per-model)。実体は prism `large_file_gate`(案件層)。fork は
   filter 機構を提供するだけで本体には持たない。data.content を読むだけ。
 
+### 既定抽出(utils/extraction.py)のローダ別挙動(2026-07-14 実測)
+
+フローは「①拡張子/mime でローダ選択 → ②ローダが `Document` のリストを返す → ③各 `page_content` を
+`ftfy.fix_text` 正規化し `\n\n` で結合」。**1ファイル→何個の Document になるか・中身の形はローダで違う**:
+
+| 型 | ローダ | Document 数 | page_content の形・癖 |
+|---|---|---|---|
+| pdf | PyPDFLoader | **1ページ=1** | 各ページのテキスト。**OCR なし**(スキャン/画像 PDF は空〜欠落)。pypdf 純 Python で速い |
+| txt / md / ソースコード拡張子 / `text/*` | TextLoader(autodetect_encoding) | 1 | 生テキストそのまま。エンコーディング自動判定(charset-normalizer) |
+| csv | CSVLoader | **1行=1**(ヘッダ除く) | `col: val\ncol: val` 形式。1000行なら 1000 Document → 冗長だが構造は保つ |
+| htm/html | BSHTMLLoader | 1 | 可視テキスト(`get_text`)。**要素間の区切りが入らず連結**(見出しと本文がくっつく)・metadata に title |
+| docx | Docx2txtLoader | 1 | 段落テキスト。表はタブ区切りに落ちる・画像/書式は落ちる。速い |
+| xls/xlsx | UnstructuredExcelLoader | 1 | **セルが平坦連結**(`name age Alice 30 …`、行列区切りなし)。表構造は metadata の `text_as_html` 側のみ |
+| ppt/pptx | UnstructuredPowerPointLoader | 1 | 全スライドのテキスト連結 |
+| rst | UnstructuredRSTLoader(elements) | 複数(要素ごと) | 要素分割 |
+| xml | UnstructuredXMLLoader | 1 | テキストノードを抽出 |
+| epub | UnstructuredEPubLoader | 1 | 本文テキスト |
+
+**フォールバック/未対応**: `KNOWN_SOURCE_EXT`(ソースコード拡張子)∪ `text/*` mime は TextLoader(平文扱い)。
+それ以外で whitelist(`SUPPORTED_EXTENSIONS`/`SUPPORTED_CONTENT_TYPES`)にも当たらないバイナリは
+**`UnsupportedFileError` を送出**(upstream の「未知も TextLoader で読む」寛容フォールバックは不採用 —
+バイナリ文字化けを content に残さないため)。呼び出し側は `is_supported()` で事前に skip(None)を選べる。
+
+**⚠ 依存の注意**: unstructured 系(xls/pptx/rst/xml/epub)は (1) **`networkx`** を要求する
+(素は torch=local-ml 経由の推移供給のみで base sync に入らないため直接依存へ昇格済み)、
+(2) **nltk トークナイザデータ(punkt_tab / averaged_perceptron_tagger_eng)を実行時に参照**する。
+後者は **air-gapped 配備では nltk_data を事前同梱**しないと初回にダウンロードを試みて失敗する
+(docker イメージへの焼き込み or `NLTK_DATA` 事前配置が要る = 配備タスク)。pdf/txt/csv/docx/html は
+networkx/nltk 非依存で素直に動く。
+
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
 2. ~~**on/off は per-model(ワークスペースのモデル設定でトグル)**~~ → **改訂(2026-07-12、#69): グローバル config に一本化**(「## 改訂(#69)」節参照)。モデル単位で Attachment を大きく変える運用は無い、かつファイル管理ページ(チャット外)からのアップロードにはモデル文脈が無いため、per-model 割り当て(`attachmentIds`)は廃止し admin がグローバルに 1 つ選ぶ形へ戻した(「全 upload 発火」への再回帰だが、発火する実体は config で選んだ 1 本)。

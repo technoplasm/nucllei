@@ -62,6 +62,21 @@ def test_text_mime_without_known_ext_is_supported(tmp_path):
     assert "plain content" in extract_text("weird.qqq", path, "text/plain")
 
 
+def test_xlsx_unstructured(tmp_path):
+    # unstructured 系(xlsx/pptx/rst/xml/epub)は networkx を要求する。networkx が base に
+    # 入っていないと ModuleNotFoundError で落ちる回帰を踏むため、実ファイルで守る。
+    openpyxl = pytest.importorskip("openpyxl")
+    path = tmp_path / "sheet.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in (["name", "age"], ["Alice", 30], ["Bob", 25]):
+        ws.append(row)
+    wb.save(path)
+    out = extract_text("sheet.xlsx", str(path))
+    # セルは平坦連結される(表構造は失われる — text_as_html は metadata 側)
+    assert "Alice" in out and "Bob" in out
+
+
 def test_is_supported():
     assert is_supported("a.pdf")
     assert is_supported("a.py")

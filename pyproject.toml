@@ -77,6 +77,9 @@ dependencies = [
 
     # llens(#52): 既定(非 docling)文書抽出 utils/extraction.py の langchain ローダ依存群。
     # ftfy/pypdf/docx2txt/python-pptx/unstructured/openpyxl は live(死に依存ではない)。
+    # networkx は unstructured の xlsx/pptx/rst/xml/epub パーティションが要求するが、素は
+    # torch(local-ml extra)経由の推移供給のみで base sync に入らず実行時に落ちるため直接依存へ昇格。
+    "networkx",
     "ftfy==6.2.3",
     "pypdf==4.3.1",
     "fpdf2==2.8.2",

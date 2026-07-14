@@ -56,6 +56,9 @@ transformers
 accelerate
 
 
+# llens(#52): networkx は unstructured の xlsx/pptx/rst/xml/epub パーティションが要求。
+# 素は torch(local-ml)経由の推移供給のみで base に入らないため直接宣言。
+networkx
 ftfy==6.2.3
 pypdf==4.3.1
 fpdf2==2.8.2
