@@ -192,6 +192,22 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
   引数は厳密 JSON(空引数は `"{}"`)。reasoning は常時出る(`reasoning_content`)。
 - 再キャプチャ: `uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:13300/v1]`。
 
+## STT(内蔵 faster-whisper)の実機スモーク(issue #12)
+
+通常スイートでは skip される opt-in テスト(モデル DL を伴うため):
+
+```bash
+uv sync --extra local-ml    # faster-whisper + torch 系(dev グループは維持される)
+LLENS_STT_SMOKE=1 PYTHONPATH=backend uv run pytest \
+    backend/open_webui/test/apps/webui/routers/test_audio_stt_builtin.py -v
+```
+
+- モデルは既定 `tiny`(初回 ~75MB を `WHISPER_MODEL_DIR` へ自動 DL、以後オフライン可)。
+- prod 同等(large-v3-turbo CT2)で試すときは `LLENS_WHISPER_MODEL` にローカル CT2
+  ディレクトリを指定。prod のモデル取得手順は prism 側 `stt/fetch-model.sh` / `stt/README.md`。
+- prod 構成の真実源は `_memos/prod-config-snapshot.md`(int8 / ja 固定 / VAD)。
+  テストは同構成をモデルサイズだけ落として踏襲する。
+
 ## Playwright での UI 確認
 
 - ログイン(改訂 2026-07-13): #70 B1(a4b52beed)でセッションが **httpOnly cookie に一本化**され、

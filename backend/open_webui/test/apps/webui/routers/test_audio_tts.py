@@ -9,6 +9,7 @@ import json
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
@@ -436,8 +437,12 @@ class TestOpenAICompatSTT(AbstractPostgresTest):
 
         実バグ(2026-07-13): update_audio_config が engine="" で無条件に
         set_faster_whisper_model → import faster_whisper して ModuleNotFoundError → 500。
-        テスト環境は local-ml extra なし = 実環境の再現そのもの。
+        local-ml extra の有無に依らず「未導入」を再現するため、sys.modules を
+        パッチして import を強制失敗させる(#12: dev 環境に extra を入れても
+        この回帰が意味を保つように環境非依存化)。
         """
+        import sys
+
         from open_webui.main import app
 
         payload = {
@@ -467,21 +472,25 @@ class TestOpenAICompatSTT(AbstractPostgresTest):
             },
         }
         try:
-            with mock_webui_user(id="1"):
-                response = self.fast_api_client.post(
-                    self.create_url("/config/update"), json=payload
-                )
-            assert response.status_code == 200, response.text
-            assert response.json()["stt"]["ENGINE"] == ""
+            # sys.modules に None を置くと import faster_whisper が ImportError になる
+            with patch.dict(sys.modules, {"faster_whisper": None}):
+                app.state.faster_whisper_model = None
 
-            # 内蔵 STT を実際に使うと 400 + 明確なメッセージ(500 ではない)
-            with mock_webui_user(id="1"):
-                response = self.fast_api_client.post(
-                    self.create_url("/transcriptions"),
-                    files={"file": ("voice.wav", make_silent_wav(), "audio/wav")},
-                )
-            assert response.status_code == 400
-            assert "faster-whisper" in response.json()["detail"]
+                with mock_webui_user(id="1"):
+                    response = self.fast_api_client.post(
+                        self.create_url("/config/update"), json=payload
+                    )
+                assert response.status_code == 200, response.text
+                assert response.json()["stt"]["ENGINE"] == ""
+
+                # 内蔵 STT を実際に使うと 400 + 明確なメッセージ(500 ではない)
+                with mock_webui_user(id="1"):
+                    response = self.fast_api_client.post(
+                        self.create_url("/transcriptions"),
+                        files={"file": ("voice.wav", make_silent_wav(), "audio/wav")},
+                    )
+                assert response.status_code == 400
+                assert "faster-whisper" in response.json()["detail"]
         finally:
             # クラス既定(openai 互換経路)へ戻す
             app.state.config.STT_ENGINE = "openai"
