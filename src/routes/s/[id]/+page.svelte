@@ -12,6 +12,7 @@
 
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/layout/Navbar.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import { getUserById, getUserSettings } from '$lib/apis/users';
 	import { getModels } from '$lib/apis';
@@ -61,10 +62,20 @@
 	//////////////////////////
 
 	const loadSharedChat = async () => {
-		const userSettings = await getUserSettings().catch((error) => {
-			console.error(error);
-			return null;
-		});
+		await chatId.set($page.params.id);
+
+		// 依存のない 3 フェッチは並列に(直列だと空白時間 = 3 往復分になる)
+		const [userSettings, modelList, _chat] = await Promise.all([
+			getUserSettings().catch((error) => {
+				console.error(error);
+				return null;
+			}),
+			getModels(),
+			getChatByShareId($chatId).catch(async () => {
+				await goto('/');
+				return null;
+			})
+		]);
 
 		if (userSettings) {
 			settings.set(userSettings.ui);
@@ -80,12 +91,8 @@
 			settings.set(localStorageSettings);
 		}
 
-		await models.set(await getModels());
-		await chatId.set($page.params.id);
-		chat = await getChatByShareId($chatId).catch(async (error) => {
-			await goto('/');
-			return null;
-		});
+		await models.set(modelList);
+		chat = _chat;
 
 		if (chat) {
 			user = await getUserById(chat.user_id).catch((error) => {
@@ -203,5 +210,12 @@
 				</div>
 			{/if}
 		</div>
+	</div>
+{:else}
+	<!-- (app) レイアウト外なので遷移直後は全体が空になる — データ到着までスピナーで埋める -->
+	<div
+		class="h-screen max-h-[100dvh] w-full flex items-center justify-center text-content bg-white dark:bg-gray-900"
+	>
+		<Spinner />
 	</div>
 {/if}

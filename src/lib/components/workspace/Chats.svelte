@@ -5,7 +5,7 @@
 
 	import dayjs from 'dayjs';
 
-	import { WEBUI_NAME } from '$lib/stores';
+	import { WEBUI_NAME, user } from '$lib/stores';
 
 	import { getAdminChatList, getAdminChatUsers, getAdminChatModels } from '$lib/apis/chats';
 
@@ -99,9 +99,10 @@
 		fetchChats(false);
 	};
 
-	// admin は ENABLE_ADMIN_CHAT_ACCESS 経由で chat id を共有ビュー(/s/{id})で開ける
+	// 自分のチャットは通常ビュー(/c — サイドバー維持・編集可)で開く。
+	// 他人のは共有ビュー(/s — admin は ENABLE_ADMIN_CHAT_ACCESS 経由で閲覧のみ)。
 	const openChat = (chat) => {
-		goto(`/s/${chat.id}`);
+		goto(chat.user_id === $user?.id ? `/c/${chat.id}` : `/s/${chat.id}`);
 	};
 
 	const formatTimestamp = (ts) => dayjs((ts ?? 0) * 1000).format('YYYY-MM-DD HH:mm');
