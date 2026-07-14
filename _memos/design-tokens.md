@@ -14,9 +14,9 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e9e9e9` / `#212121` |
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#e3e3e3` / `#262626` |
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |
-| `--content` | 本文(既定テキスト色) | `text-content` | gray-800 / gray-100 |
-| `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | gray-500 / gray-400 |
-| `--content-subtle` | placeholder・disabled・3次 | `text-content-subtle` | gray-400 / gray-500 |
+| `--content` | 本文(既定テキスト色) | `text-content` | `#333333` / `#ececec`(gray-800 / gray-100 相当) |
+| `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | `#9b9b9b` / `#b4b4b4`(gray-500 / gray-400 相当) |
+| `--content-subtle` | placeholder・disabled・3次 | `text-content-subtle` | `#b4b4b4` / `#9b9b9b`(gray-400 / gray-500 相当) |
 
 - 変数がテーマで切り替わるので利用側に `dark:` 変種は不要。
 - テキストトークンの実値は **raw hex**(`--surface`/`--line` と同流儀で `:root`/`html.dark` に直書き)。
