@@ -41,8 +41,9 @@ anthropic
 google-generativeai==0.8.4
 tiktoken
 
-langchain>=0.3.19
-langchain-community>=0.3.18
+# llens(#52): langchain-core は tools.py の function-calling スキーマ変換で使用(CORE tool 基盤)。
+# langchain / langchain-community は文書抽出ローダ専用だったため撤去し、core だけ直接宣言へ昇格。
+langchain-core==0.3.86
 
 fake-useragent==2.1.0
 # llens(#52): chromadb 撤去。typer(CLI)・websocket-client(comfyui)は chromadb の
@@ -56,17 +57,13 @@ transformers
 accelerate
 
 
-# llens(#52): networkx は unstructured の xlsx/pptx/rst/xml/epub パーティションが要求。
-# 素は torch(local-ml)経由の推移供給のみで base に入らないため直接宣言。
-networkx
-ftfy==6.2.3
-pypdf==4.3.1
+# llens(#52): 文書抽出は fork にコードを持たず、prism の Attachment が markitdown を直接呼ぶ。
+# fork は markitdown を同梱するだけ(extra は絞らない)。langchain ローダ群
+# (unstructured/networkx/docx2txt/pypdf/ftfy/nltk)は撤去。
+markitdown[all]
 fpdf2==2.8.2
 pymdown-extensions==10.14.2
-docx2txt==0.8
 python-pptx==1.0.0
-unstructured==0.16.17
-nltk==3.9.1
 Markdown==3.7
 pypandoc==1.15
 pandas==2.2.3

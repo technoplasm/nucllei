@@ -1336,10 +1336,9 @@ Ensure that the tools are effectively utilized to achieve the highest-quality an
 # llens(#54): Google Drive / OneDrive 統合(外部クラウドからの添付取り込み)は
 # 機能ごと撤去した(薄い業務基盤に不要)。
 
-# llens(#52): 文書抽出の外部エンジン(docling/tika/document_intelligence/mistral_ocr)は
-# 案件層(prism)の Attachment Function が直接担うため、fork 本体の抽出エンジン config は撤去した。
-# ただし docling ではない「素の」既定抽出は fork の内部 API として復元済み(utils/extraction.py、
-# v0.6.5 Default 経路)。config は持たず、prism の Attachment が任意で呼ぶ関数として提供する。
+# llens(#52): 文書抽出は fork 本体にコードを持たない。docling 等の外部エンジンも、docling で
+# ない「素の」md 化(markitdown)も、prism の Attachment Function が直接担う。fork は抽出用の
+# config を持たず、markitdown を同梱するだけ(prism が import して使う)。
 
 # llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
 # config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。

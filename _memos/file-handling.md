@@ -102,15 +102,17 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 **構図**: プロバイダ(実行機構)= core 登録、ルーティング(振り分け)= ユーザー定義 Function。B(ユーザー定義)と C(登録機構)の合体。
 - **プロバイダは種別ごとに別々の内部API(入口を無理に揃えない)**。単一 `extract()` に一本化しない ← 種別で入出力も追加オプションも違うので統一する意味がない。hook 内で処理するので入口が同じである必要がない。
-  - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明。設定に付随した共通オプションがあれば渡せる)。
-    **実装 = `utils/extraction.py`(2026-07-14 復元・#52)**: v0.6.5 の Default 抽出経路(`retrieval/loaders` の
-    `Loader` engine="")を内部 API として復元したもの。`extract_text(filename, file_path, content_type)`(storage
-    非依存の純関数)と `extract_text_from_file(file)`(FileModel → `Storage` 解決の薄いラッパ)の 2 段。拡張子/mime を
-    `langchain_community` の既定ローダ(PyPDF/Docx2txt/UnstructuredExcel/PowerPoint/CSV/BSHTML/Text…)へ振り分け、
-    `ftfy` 正規化して結合。**確定仕様**: whitelist 方式で未対応は `UnsupportedFileError`(寛容フォールバックなし・
-    `SUPPORTED_EXTENSIONS`/`is_supported()` 公開)/ **docling・tika・document_intelligence・mistral は含めない**
-    (prism 担当)/ **`.msg` 除外**(extract_msg=GPL 連鎖・#2)/ **OCR 含めない**(テキスト PDF のみ)。prism の
-    Attachment `process(file)` が任意で呼ぶ(docling を選ぶ型はそちらへ、それ以外はこの既定へ、と振り分けられる)。
+  - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明)。
+    **fork は抽出コードを持たず、`markitdown` を同梱するだけ**(確定 2026-07-14・#52)。docling でない「素の」
+    md 化は、prism の Attachment が `from markitdown import MarkItDown` → `.convert(path).text_content` で
+    **直接呼ぶ**。fork にラッパ関数(旧 `utils/extraction.py`)は置かない — 実質 1 行で prism から呼べるため。
+    ※ 経緯: 一度 v0.6.5 の langchain ローダ版を `utils/extraction.py` に復元したが、これは markitdown の
+    劣化再実装(拡張子→ローダの手振り分け)だったため撤回。markitdown は docx=mammoth・xlsx=pandas・
+    pptx=python-pptx・pdf=pdfminer と、まさに同じ「軽い md 化・OCR なし」を担う。`.msg` も markitdown は
+    `olefile`(BSD)で読み、#2 で除外した extract-msg(GPL)は引かない(`markitdown[all]` でも安全と lock で確認)。
+    - **xlsx→シート別 CSV** 等の型別ポリシーは **prism が手前で処理**(`process` 内で拡張子を見て自前 CSV 化 →
+      残りは markitdown に委譲)。fork はカスタムコンバータを持たない。
+    - docling が要るのはスキャン PDF の OCR/レイアウト保持など重い用途だけ。型で prism が振り分ける。
   - **STT**: `音声 → 文字列(+情報)`。既存 `audio.transcribe`/`AUDIO_STT_ENGINE` を流用。
   - **TTS**: `テキスト → 音声`(必要なら。既存 audio TTS)。
   - 「単一 file→text モデル」も **文書抽出種別の一エンジン**として登録(engine=model 接続)。engine URL か model 接続かは各種別の内部で吸収、種別をまたいでは吸収しない。
@@ -119,35 +121,20 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 - **③gate は inlet filter のまま**(per-model)。実体は prism `large_file_gate`(案件層)。fork は
   filter 機構を提供するだけで本体には持たない。data.content を読むだけ。
 
-### 既定抽出(utils/extraction.py)のローダ別挙動(2026-07-14 実測)
+### 既定 md 化 = markitdown(fork 同梱・prism が直接呼ぶ)
 
-フローは「①拡張子/mime でローダ選択 → ②ローダが `Document` のリストを返す → ③各 `page_content` を
-`ftfy.fix_text` 正規化し `\n\n` で結合」。**1ファイル→何個の Document になるか・中身の形はローダで違う**:
+fork は抽出コードを持たず、`markitdown[all]` を同梱するだけ。prism の Attachment が
+`MarkItDown().convert(path).text_content` で md 文字列を得る。型別の中身は markitdown の各コンバータ
+(docx=**mammoth** で見出し/リスト/表を md 化・pdf=**pdfminer**(OCR なし)・pptx=**python-pptx**・
+xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(画像キャプションは任意で LLM を渡した時だけ)。
 
-| 型 | ローダ | Document 数 | page_content の形・癖 |
-|---|---|---|---|
-| pdf | PyPDFLoader | **1ページ=1** | 各ページのテキスト。**OCR なし**(スキャン/画像 PDF は空〜欠落)。pypdf 純 Python で速い |
-| txt / md / ソースコード拡張子 / `text/*` | TextLoader(autodetect_encoding) | 1 | 生テキストそのまま。エンコーディング自動判定(charset-normalizer) |
-| csv | CSVLoader | **1行=1**(ヘッダ除く) | `col: val\ncol: val` 形式。1000行なら 1000 Document → 冗長だが構造は保つ |
-| htm/html | BSHTMLLoader | 1 | 可視テキスト(`get_text`)。**要素間の区切りが入らず連結**(見出しと本文がくっつく)・metadata に title |
-| docx | Docx2txtLoader | 1 | 段落テキスト。表はタブ区切りに落ちる・画像/書式は落ちる。速い |
-| xls/xlsx | UnstructuredExcelLoader | 1 | **セルが平坦連結**(`name age Alice 30 …`、行列区切りなし)。表構造は metadata の `text_as_html` 側のみ |
-| ppt/pptx | UnstructuredPowerPointLoader | 1 | 全スライドのテキスト連結 |
-| rst | UnstructuredRSTLoader(elements) | 複数(要素ごと) | 要素分割 |
-| xml | UnstructuredXMLLoader | 1 | テキストノードを抽出 |
-| epub | UnstructuredEPubLoader | 1 | 本文テキスト |
-
-**フォールバック/未対応**: `KNOWN_SOURCE_EXT`(ソースコード拡張子)∪ `text/*` mime は TextLoader(平文扱い)。
-それ以外で whitelist(`SUPPORTED_EXTENSIONS`/`SUPPORTED_CONTENT_TYPES`)にも当たらないバイナリは
-**`UnsupportedFileError` を送出**(upstream の「未知も TextLoader で読む」寛容フォールバックは不採用 —
-バイナリ文字化けを content に残さないため)。呼び出し側は `is_supported()` で事前に skip(None)を選べる。
-
-**⚠ 依存の注意**: unstructured 系(xls/pptx/rst/xml/epub)は (1) **`networkx`** を要求する
-(素は torch=local-ml 経由の推移供給のみで base sync に入らないため直接依存へ昇格済み)、
-(2) **nltk トークナイザデータ(punkt_tab / averaged_perceptron_tagger_eng)を実行時に参照**する。
-後者は **air-gapped 配備では nltk_data を事前同梱**しないと初回にダウンロードを試みて失敗する
-(docker イメージへの焼き込み or `NLTK_DATA` 事前配置が要る = 配備タスク)。pdf/txt/csv/docx/html は
-networkx/nltk 非依存で素直に動く。
+- **xlsx はトークン節約のため prism が手前で「シート別 CSV」に自前処理**(`pandas.read_excel(sheet_name=None)`
+  → 各シート `to_csv()` を `---` 区切り)。markitdown の既定(md テーブル)は使わず、prism が xlsx だけ先に食う。
+- **pdf/pptx は文字ベストエフォート**(OCR/レイアウトは prism が VLM 並列で別に取るので markitdown 側は頑張らない)。
+- **`.msg`**: markitdown は `olefile`(BSD)で読む。#2 で除外した extract-msg(GPL)は `[all]` でも引かない(lock 確認済み)。
+- 旧 `utils/extraction.py`(v0.6.5 langchain ローダ版)は markitdown の劣化再実装だったため撤回・削除。
+  併せて langchain-community / unstructured / networkx / nltk / pypdf / docx2txt / ftfy を撤去
+  (unstructured の nltk データ air-gapped 問題からも解放)。langchain-core だけは tools.py が使うので直接依存に残す。
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
