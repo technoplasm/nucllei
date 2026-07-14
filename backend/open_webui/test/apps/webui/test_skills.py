@@ -268,6 +268,46 @@ class TestSkills(AbstractPostgresTest):
         assert len(result["messages"]) == 1
         assert activations == []
 
+    def test_slash_command_activation_seed_keys(self):
+        """UI seed(metadata["skill_activations"])のキー整合(#43 rename 回帰)。
+
+        process_chat_response の synthetic tool_calls ブロックは
+        call_id / id / result の 3 キーを読む。#43 の command→id 改名時に
+        seed 側だけ旧キー a["command"] が残り、`/command` 発火のたびに
+        KeyError で払い出しが落ちていた。
+        """
+        import json
+
+        from open_webui.models.skills import SkillForm, Skills
+        from open_webui.utils.middleware import (
+            apply_skill_command,
+            current_skill_activation_seeds,
+        )
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(id="seedcmd", name="t", content="指示", access_control=None),
+        )
+
+        user = types.SimpleNamespace(id="1", name="Taro")
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "/seedcmd 過去ターン"},
+                {"role": "assistant", "content": "了解"},
+                {"role": "user", "content": "/seedcmd 今ターン"},
+            ]
+        }
+        _, activations = apply_skill_command(
+            form_data, user, _model_with_skills(skill.id)
+        )
+
+        seeds = current_skill_activation_seeds(activations)
+        # current(最後の user メッセージ)の発火だけが seed される
+        assert len(seeds) == 1
+        assert set(seeds[0].keys()) == {"call_id", "id", "result"}
+        assert seeds[0]["id"] == "seedcmd"
+        assert json.loads(seeds[0]["result"])["result"] == "指示"
+
     def test_slash_command_multi_turn_scan(self):
         """全 user メッセージ走査(会話持続)— 過去ターンの `/command` も毎リクエスト展開される。"""
         from open_webui.models.skills import SkillForm, Skills

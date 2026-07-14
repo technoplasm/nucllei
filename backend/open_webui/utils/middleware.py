@@ -498,6 +498,20 @@ def apply_skill_command(form_data, user, model):
     return form_data, activations
 
 
+def current_skill_activation_seeds(skill_activations) -> list:
+    """今回のターンの `/command` 発火を UI seed 用 metadata に載せる形へ絞る。
+
+    受け側は process_chat_response(応答先頭の synthetic tool_calls ブロック)で、
+    call_id / id / result の 3 キーを読む。#43 で skill の可読キーを command→id に
+    改名した際、ここだけ旧キー参照が残り KeyError になっていた(回帰テストあり)。
+    """
+    return [
+        {"call_id": a["call_id"], "id": a["id"], "result": a["result"]}
+        for a in skill_activations
+        if a["current"]
+    ]
+
+
 def build_load_skill_tool(model, user, load_tools=None):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
@@ -803,11 +817,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             a["result_message"]["content"] = a["result"]
 
     # 今回のターンの発火を UI seed 用に metadata へ(result 確定後)。
-    current_skill_activations = [
-        {"call_id": a["call_id"], "command": a["command"], "result": a["result"]}
-        for a in skill_activations
-        if a["current"]
-    ]
+    current_skill_activations = current_skill_activation_seeds(skill_activations)
     if current_skill_activations:
         metadata["skill_activations"] = current_skill_activations
 
