@@ -47,7 +47,7 @@
 						)
 							? ''
 							: 'text-content-subtle hover:text-content'} transition"
-						href="/playground">{$i18n.t('Chat')}</
+						href="/playground">{$i18n.t('Chat')}</a
 					>
 
 					<!-- <a
@@ -63,7 +63,7 @@
 						)
 							? ''
 							: 'text-content-subtle hover:text-content'} transition"
-						href="/playground/completions">{$i18n.t('Completions')}</
+						href="/playground/completions">{$i18n.t('Completions')}</a
 					>
 				</div>
 			</div>
