@@ -1,44 +1,50 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher } from 'svelte';
 	import { getContext } from 'svelte';
+
 	import { addUser } from '$lib/apis/auths';
 	import { updateUserById, updateUserRole } from '$lib/apis/users';
-
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
-	export let show = false;
-	// llens(#55): selectedUser があれば編集モード、null なら作成モード(単一モーダル)
-	export let selectedUser = null;
-	export let sessionUser = null;
-	// 宣言済みの追加 meta キー([{key, label}])。入力欄と保存経路が自動で生える
-	export let metaFields = [];
+	let {
+		show = $bindable(false),
+		// llens(#55): selectedUser があれば編集モード、null なら作成モード(単一モーダル)
+		selectedUser = null,
+		sessionUser = null,
+		// 宣言済みの追加 meta キー([{key, label}])。入力欄と保存経路が自動で生える
+		metaFields = [],
+		onSave = () => {}
+	}: {
+		show?: boolean;
+		selectedUser?: any;
+		sessionUser?: any;
+		metaFields?: { key: string; label: string }[];
+		onSave?: () => void;
+	} = $props();
 
-	let loading = false;
-	let tab = '';
-	let inputFiles;
+	let loading = $state(false);
+	let tab = $state('');
+	let inputFiles = $state<FileList | null>(null);
 
-	let _user = {
+	let _user = $state({
 		name: '',
 		email: '',
 		password: '',
 		role: 'user',
-		info: {}
-	};
+		info: {} as Record<string, string>
+	});
 
-	$: edit = selectedUser !== null;
+	const edit = $derived(selectedUser !== null);
 
-	// llens: 開くたびに selectedUser から編集バッファを作り直す。
-	// 素の `$: if (show) { _user = ... }`(旧 AddUserModal のパターン)は Svelte 5 の
-	// legacy 互換でキーストローク(bind:value の _user 書き込み)ごとに再実行され
-	// 入力が巻き戻るため、show の変化検知でガードする。
+	// llens: 開くたびに selectedUser から編集バッファを作り直す(show の変化検知でガード —
+	// 素の「show が真なら再構築」はキーストロークごとに再実行され入力が巻き戻る)。
 	let lastShow = false;
-	$: if (show !== lastShow) {
+	$effect(() => {
+		if (show === lastShow) return;
 		lastShow = show;
 		if (show) {
 			tab = '';
@@ -52,7 +58,7 @@
 				)
 			};
 		}
-	}
+	});
 
 	const editHandler = async () => {
 		if (_user.role !== selectedUser.role) {
@@ -79,7 +85,7 @@
 
 	const submitHandler = async () => {
 		const stopLoading = () => {
-			dispatch('save');
+			onSave();
 			loading = false;
 		};
 
@@ -106,14 +112,13 @@
 				const reader = new FileReader();
 
 				reader.onload = async (e) => {
-					const csv = e.target.result;
+					const csv = (e.target?.result ?? '') as string;
 					const rows = csv.split('\n');
 
 					let userCount = 0;
 
 					for (const [idx, row] of rows.entries()) {
 						const columns = row.split(',').map((col) => col.trim());
-						console.log(idx, columns);
 
 						if (idx > 0) {
 							if (
@@ -141,10 +146,12 @@
 
 					toast.success(`Successfully imported ${userCount} users.`);
 					inputFiles = null;
-					const uploadInputElement = document.getElementById('upload-user-csv-input');
+					const uploadInputElement = document.getElementById(
+						'upload-user-csv-input'
+					) as HTMLInputElement | null;
 
 					if (uploadInputElement) {
-						uploadInputElement.value = null;
+						uploadInputElement.value = '';
 					}
 
 					stopLoading();
@@ -168,20 +175,12 @@
 			</div>
 			<button
 				class="self-center"
-				on:click={() => {
+				aria-label={$i18n.t('Close')}
+				onclick={() => {
 					show = false;
 				}}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-					/>
-				</svg>
+				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>
 
@@ -189,7 +188,8 @@
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
-					on:submit|preventDefault={() => {
+					onsubmit={(e) => {
+						e.preventDefault();
 						submitHandler();
 					}}
 				>
@@ -202,7 +202,7 @@
 									? ''
 									: 'text-content-subtle hover:text-content'} transition"
 								type="button"
-								on:click={() => {
+								onclick={() => {
 									tab = '';
 								}}>{$i18n.t('Form')}</button
 							>
@@ -212,7 +212,7 @@
 									? ''
 									: 'text-content-subtle hover:text-content'} transition"
 								type="button"
-								on:click={() => {
+								onclick={() => {
 									tab = 'import';
 								}}>{$i18n.t('CSV Import')}</button
 							>
@@ -228,7 +228,6 @@
 									<select
 										class="w-full capitalize rounded-lg py-2 px-3 text-sm bg-gray-50 dark:bg-gray-850 disabled:text-content-subtle outline-hidden"
 										bind:value={_user.role}
-										placeholder={$i18n.t('Enter Your Role')}
 										disabled={edit && selectedUser?.id === sessionUser?.id}
 										required
 									>
@@ -254,7 +253,7 @@
 								</div>
 							</div>
 
-							<hr class=" border-gray-100 dark:border-gray-850 my-2.5 w-full" />
+							<hr class=" border-line my-2.5 w-full" />
 
 							<div class="flex flex-col w-full">
 								<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Email')}</div>
@@ -288,7 +287,7 @@
 							</div>
 
 							{#if metaFields.length > 0}
-								<hr class=" border-gray-100 dark:border-gray-850 my-2.5 w-full" />
+								<hr class=" border-line my-2.5 w-full" />
 
 								{#each metaFields as field (field.key)}
 									<div class="flex flex-col w-full mt-1">
@@ -319,7 +318,7 @@
 									<button
 										class="w-full text-sm font-medium py-3 bg-transparent hover:bg-gray-100 border border-dashed dark:border-gray-850 dark:hover:bg-gray-850 text-center rounded-xl"
 										type="button"
-										on:click={() => {
+										onclick={() => {
 											document.getElementById('upload-user-csv-input')?.click();
 										}}
 									>
@@ -354,31 +353,8 @@
 							{$i18n.t('Save')}
 
 							{#if loading}
-								<div class="ml-2 self-center">
-									<svg
-										class=" w-4 h-4"
-										viewBox="0 0 24 24"
-										fill="currentColor"
-										xmlns="http://www.w3.org/2000/svg"
-										><style>
-											.spinner_ajPY {
-												transform-origin: center;
-												animation: spinner_AtaB 0.75s infinite linear;
-											}
-											@keyframes spinner_AtaB {
-												100% {
-													transform: rotate(360deg);
-												}
-											}
-										</style><path
-											d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-											opacity=".25"
-										/><path
-											d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-											class="spinner_ajPY"
-										/></svg
-									>
-								</div>
+								<span class="i-lucide-loader-circle size-4 block animate-spin ml-2 self-center"
+								></span>
 							{/if}
 						</button>
 					</div>
@@ -387,25 +363,3 @@
 		</div>
 	</div>
 </Modal>
-
-<style>
-	input::-webkit-outer-spin-button,
-	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
-		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
-	}
-
-	.tabs::-webkit-scrollbar {
-		display: none; /* for Chrome, Safari and Opera */
-	}
-
-	.tabs {
-		-ms-overflow-style: none; /* IE and Edge */
-		scrollbar-width: none; /* Firefox */
-	}
-
-	input[type='number'] {
-		-moz-appearance: textfield; /* Firefox */
-	}
-</style>

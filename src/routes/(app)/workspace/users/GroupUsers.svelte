@@ -1,67 +1,51 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
 
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Plus from '$lib/components/icons/Plus.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 
-	export let users = [];
-	export let userIds = [];
+	const i18n = getContext('i18n');
 
-	let filteredUsers = [];
+	let { users = [], userIds = $bindable([]) }: { users?: any[]; userIds?: string[] } = $props();
 
-	$: filteredUsers = users
-		.filter((user) => {
-			if (user?.role === 'admin') {
-				return false;
-			}
+	let query = $state('');
 
-			if (query === '') {
-				return true;
-			}
+	const filteredUsers = $derived(
+		users
+			.filter((user) => {
+				if (user?.role === 'admin') {
+					return false;
+				}
 
-			return (
-				user.name.toLowerCase().includes(query.toLowerCase()) ||
-				user.email.toLowerCase().includes(query.toLowerCase())
-			);
-		})
-		.sort((a, b) => {
-			const aUserIndex = userIds.indexOf(a.id);
-			const bUserIndex = userIds.indexOf(b.id);
+				if (query === '') {
+					return true;
+				}
 
-			// Compare based on userIds or fall back to alphabetical order
-			if (aUserIndex !== -1 && bUserIndex === -1) return -1; // 'a' has valid userId -> prioritize
-			if (bUserIndex !== -1 && aUserIndex === -1) return 1; // 'b' has valid userId -> prioritize
+				return (
+					user.name.toLowerCase().includes(query.toLowerCase()) ||
+					user.email.toLowerCase().includes(query.toLowerCase())
+				);
+			})
+			.sort((a, b) => {
+				const aUserIndex = userIds.indexOf(a.id);
+				const bUserIndex = userIds.indexOf(b.id);
 
-			// Both a and b are either in the userIds array or not, so we'll sort them by their indices
-			if (aUserIndex !== -1 && bUserIndex !== -1) return aUserIndex - bUserIndex;
-
-			// If both are not in the userIds, fallback to alphabetical sorting by name
-			return a.name.localeCompare(b.name);
-		});
-
-	let query = '';
+				// メンバーを先頭に、メンバー同士は userIds 順、非メンバー同士は名前順
+				if (aUserIndex !== -1 && bUserIndex === -1) return -1;
+				if (bUserIndex !== -1 && aUserIndex === -1) return 1;
+				if (aUserIndex !== -1 && bUserIndex !== -1) return aUserIndex - bUserIndex;
+				return a.name.localeCompare(b.name);
+			})
+	);
 </script>
 
 <div>
 	<div class="flex w-full">
 		<div class="flex flex-1">
 			<div class=" self-center mr-3">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-4 h-4"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-						clip-rule="evenodd"
-					/>
-				</svg>
+				<span class="i-lucide-search size-4 block"></span>
 			</div>
 			<input
 				class=" w-full text-sm pr-4 rounded-r-xl outline-hidden bg-transparent"
@@ -74,7 +58,7 @@
 	<div class="mt-3 max-h-[22rem] overflow-y-auto scrollbar-hidden">
 		<div class="flex flex-col gap-2.5">
 			{#if filteredUsers.length > 0}
-				{#each filteredUsers as user, userIdx (user.id)}
+				{#each filteredUsers as user (user.id)}
 					<div class="flex flex-row items-center gap-3 w-full text-sm">
 						<div class="flex items-center">
 							<Checkbox
@@ -107,7 +91,7 @@
 							</Tooltip>
 
 							{#if userIds.includes(user.id)}
-								<Badge type="success" content="member" />
+								<Badge type="success" content={$i18n.t('member')} />
 							{/if}
 						</div>
 					</div>
