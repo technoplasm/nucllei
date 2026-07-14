@@ -210,7 +210,7 @@ class Attachment:
 			</label>
 			<input
 				id="function-name"
-				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised rounded-lg outline-hidden font-primary"
 				type="text"
 				placeholder={$i18n.t('Function Name')}
 				bind:value={name}
@@ -240,7 +240,7 @@ class Attachment:
 			</label>
 			<input
 				id="function-id"
-				class="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised outline-hidden"
+				class="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-lg outline-hidden"
 				type="text"
 				placeholder={$i18n.t('Function ID')}
 				bind:value={id}
@@ -254,7 +254,7 @@ class Attachment:
 			</label>
 			<Textarea
 				id="function-description"
-				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-lg outline-hidden overflow-y-hidden resize-none"
 				placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
 				bind:value={description}
 				rows={2}

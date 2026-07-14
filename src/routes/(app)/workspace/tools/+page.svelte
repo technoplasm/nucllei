@@ -149,13 +149,20 @@
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
 				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised rounded-xl">
-					<div class="flex-1 min-w-0">
-						<div class="font-semibold line-clamp-1">{tool.name}</div>
-						<div class="flex gap-1.5 text-xs">
-							<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
-							<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
+					<!-- 組み込みは編集不可 — tooltip とカーソルで明示(visibility だけ右のアイコンで編集可) -->
+					<Tooltip
+						className="flex-1 min-w-0"
+						content={$i18n.t('Builtin tools cannot be edited.')}
+						placement="top-start"
+					>
+						<div class="cursor-not-allowed">
+							<div class="font-semibold line-clamp-1">{tool.name}</div>
+							<div class="flex gap-1.5 text-xs">
+								<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
+								<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
+							</div>
 						</div>
-					</div>
+					</Tooltip>
 
 					<Tooltip
 						content={(tool.access_control ?? null) === null
