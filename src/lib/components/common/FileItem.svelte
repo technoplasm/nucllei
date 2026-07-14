@@ -3,7 +3,6 @@
 	import { formatFileSize } from '$lib/utils';
 
 	import FileItemModal from './FileItemModal.svelte';
-	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Spinner from './Spinner.svelte';
 	import Tooltip from './Tooltip.svelte';
 
@@ -145,15 +144,6 @@
 					/>
 				</svg>
 			</button>
-
-			<!-- <button
-				class=" p-1 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full group-hover:visible invisible transition"
-				type="button"
-				on:click={() => {
-				}}
-			>
-				<GarbageBin />
-			</button> -->
 		</div>
 	{/if}
 </button>
