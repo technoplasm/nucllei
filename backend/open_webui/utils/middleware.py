@@ -4,7 +4,6 @@ import sys
 
 import asyncio
 import json
-import html
 import re
 import ast
 
@@ -68,6 +67,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.file_images import inline_internal_image_urls
 from open_webui.utils.content_blocks import (
+    convert_content_blocks_to_messages,
     serialize_text_blocks,
     snapshot_content_blocks,
 )
@@ -1162,146 +1162,6 @@ async def process_chat_response(
 
         # Handle as a background task
         async def post_response_handler(response, events):
-            def serialize_content_blocks(content_blocks):
-                content = ""
-
-                for block in content_blocks:
-                    if block["type"] == "text":
-                        content = f"{content}{block['content'].strip()}\n"
-                    elif block["type"] == "tool_calls":
-                        attributes = block.get("attributes", {})
-
-                        tool_calls = block.get("content", [])
-                        results = block.get("results", [])
-
-                        if results:
-
-                            tool_calls_display_content = ""
-                            for tool_call in tool_calls:
-
-                                tool_call_id = tool_call.get("id", "")
-                                tool_name = tool_call.get("function", {}).get(
-                                    "name", ""
-                                )
-                                tool_arguments = tool_call.get("function", {}).get(
-                                    "arguments", ""
-                                )
-
-                                tool_result = None
-                                tool_result_files = None
-                                for result in results:
-                                    if tool_call_id == result.get("tool_call_id", ""):
-                                        tool_result = result.get("content", None)
-                                        tool_result_files = result.get("files", None)
-                                        break
-
-                                if tool_result:
-                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="true" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}" result="{html.escape(json.dumps(tool_result))}" files="{html.escape(json.dumps(tool_result_files)) if tool_result_files else ""}">\n<summary>Tool Executed</summary>\n</details>\n'
-                                else:
-                                    tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
-
-                            content = f"{content}\n{tool_calls_display_content}\n\n"
-                        else:
-                            tool_calls_display_content = ""
-
-                            for tool_call in tool_calls:
-                                tool_call_id = tool_call.get("id", "")
-                                tool_name = tool_call.get("function", {}).get(
-                                    "name", ""
-                                )
-                                tool_arguments = tool_call.get("function", {}).get(
-                                    "arguments", ""
-                                )
-
-                                tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
-
-                            content = f"{content}\n{tool_calls_display_content}\n\n"
-
-                    elif block["type"] == "reasoning":
-                        reasoning_display_content = "\n".join(
-                            (f"> {line}" if not line.startswith(">") else line)
-                            for line in block["content"].splitlines()
-                        )
-
-                        reasoning_duration = block.get("duration", None)
-
-                        if reasoning_duration is not None:
-                            content = f'{content}\n<details type="reasoning" done="true" duration="{reasoning_duration}">\n<summary>Thought for {reasoning_duration} seconds</summary>\n{reasoning_display_content}\n</details>\n'
-                        else:
-                            content = f'{content}\n<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{reasoning_display_content}\n</details>\n'
-
-                    else:
-                        block_content = str(block["content"]).strip()
-                        content = f"{content}{block['type']}: {block_content}\n"
-
-                return content.strip()
-
-            def convert_content_blocks_to_messages(content_blocks):
-                # llens(#18-2): reasoning ブロックはモデルへ再送しない。
-                # serialize_content_blocks(raw=False) は reasoning を UI 用
-                # <details type="reasoning"> マークアップで包むため、そのまま
-                # assistant content に入れると自ターンの思考内容と UI 断片が
-                # 次ターンのプロンプトに漏れる。モデル向け履歴には
-                # 実際に出力された text/tool_calls/結果のみを載せる。
-                def model_facing_content(blocks):
-                    return serialize_content_blocks(
-                        [b for b in blocks if b["type"] != "reasoning"]
-                    )
-
-                messages = []
-
-                temp_blocks = []
-                for idx, block in enumerate(content_blocks):
-                    if block.get("synthetic"):
-                        # `/command` 発火の UI 表示用ブロック(#35)。実体の
-                        # tool exchange は form_data["messages"] に注入済みなので、
-                        # ここで変換すると二重になる。
-                        continue
-                    if block["type"] == "tool_calls":
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": model_facing_content(temp_blocks),
-                                # llens(#20): render(表示ディスクリプタ)・index 等の
-                                # 内部キーをモデル向け履歴に漏らさず、OpenAI 形の
-                                # {id, type, function} だけを綴じ込む
-                                "tool_calls": [
-                                    {
-                                        "id": call.get("id"),
-                                        "type": call.get("type", "function"),
-                                        "function": call.get("function", {}),
-                                    }
-                                    for call in block.get("content", [])
-                                ],
-                            }
-                        )
-
-                        results = block.get("results", [])
-
-                        for result in results:
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": result["tool_call_id"],
-                                    "content": result["content"],
-                                }
-                            )
-                        temp_blocks = []
-                    else:
-                        temp_blocks.append(block)
-
-                if temp_blocks:
-                    content = model_facing_content(temp_blocks)
-                    if content:
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": content,
-                            }
-                        )
-
-                return messages
-
             message = Chats.get_message_by_id_and_message_id(
                 metadata["chat_id"], metadata["message_id"]
             )
