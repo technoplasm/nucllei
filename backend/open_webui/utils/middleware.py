@@ -71,6 +71,12 @@ from open_webui.utils.content_blocks import (
     serialize_text_blocks,
     snapshot_content_blocks,
 )
+from open_webui.utils.response_assembler import (
+    CHANGED_TEXT,
+    MISMATCH_MISSING_TOOL_CALLS,
+    MISMATCH_UNEXPECTED_FINISH,
+    ContentBlocksAssembler,
+)
 
 from open_webui.tasks import create_task
 
@@ -1296,23 +1302,6 @@ async def process_chat_response(
 
                 return messages
 
-            def close_open_reasoning_block(content_blocks):
-                # llens: reasoning の終了は content 到着だけでなく「次の非 reasoning
-                # シグナル(tool_calls / ストリーム終端)」でも確定させる。Kimi は
-                # content デルタ無しで tool_calls や切断に直行することがあり
-                # (fixture: tool_call_no_args / aborted_client_cut)、閉じ損ねると
-                # done=false の「Thinking…」が永続化される。
-                if (
-                    content_blocks
-                    and content_blocks[-1]["type"] == "reasoning"
-                    and "ended_at" not in content_blocks[-1]
-                ):
-                    block = content_blocks[-1]
-                    block["ended_at"] = time.time()
-                    block["duration"] = int(block["ended_at"] - block["started_at"])
-                    return True
-                return False
-
             message = Chats.get_message_by_id_and_message_id(
                 metadata["chat_id"], metadata["message_id"]
             )
@@ -1328,20 +1317,13 @@ async def process_chat_response(
             except Exception:
                 pass
 
-            content = (
-                message.get("content", "")
-                if message
-                else last_assistant_message if last_assistant_message else ""
-            )
-
-            content_blocks = []
-
             # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
             # 「View Result from load_skill」として応答先頭に表示する。
             # synthetic マーカ付き = モデル向け履歴には再送しない
             # (実体の tool exchange は apply_skill_command が messages に注入済み)。
+            seed_blocks = []
             if metadata.get("skill_activations"):
-                content_blocks.append(
+                seed_blocks.append(
                     {
                         "type": "tool_calls",
                         "synthetic": True,
@@ -1368,18 +1350,19 @@ async def process_chat_response(
                     }
                 )
 
-            content_blocks.append(
-                {
-                    "type": "text",
-                    "content": content,
-                }
+            # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
+            # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
+            # parser 有効が接続契約で、常に reasoning_content デルタとして届く
+            # (content 中のタグ検出経路は撤去済み — _memos/rendering-design.md §3)。
+            assembler = ContentBlocksAssembler(
+                initial_content=(
+                    message.get("content", "")
+                    if message
+                    else last_assistant_message if last_assistant_message else ""
+                ),
+                seed_blocks=seed_blocks,
+                tools=metadata.get("tools", {}),
             )
-
-            # llens(#17): reasoning は SGLang reasoning parser 有効が接続契約で、
-            # 常に reasoning_content デルタとして届く。content 中の生 <think> タグ
-            # 検出(旧 DETECT_REASONING)は契約外につき削除(_memos/rendering-design.md §3)。
-            # llens(#23): code_interpreter / |begin_of_solution| のタグ検出も撤去
-            # (前者はコード実行 tool 一本化、後者は接続契約外の upstream 残骸)。
 
             try:
                 for event in events:
@@ -1400,13 +1383,7 @@ async def process_chat_response(
                     )
 
                 async def stream_body_handler(response):
-                    nonlocal content
-                    nonlocal content_blocks
-
-                    response_tool_calls = []
-                    # llens(#18-2): 終端フレームの finish_reason("stop" | "tool_calls")。
-                    # パース結果との整合ガードに使う(ハンドラ末尾)。
-                    finish_reason = None
+                    assembler.start_stream()
 
                     async for line in response.body_iterator:
                         line = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -1487,207 +1464,39 @@ async def process_chat_response(
                                             )
                                         continue
 
-                                    if choices[0].get("finish_reason"):
-                                        finish_reason = choices[0]["finish_reason"]
+                                    assembler.note_finish_reason(
+                                        choices[0].get("finish_reason")
+                                    )
 
-                                    delta = choices[0].get("delta", {})
-                                    delta_tool_calls = delta.get("tool_calls", None)
+                                    changed = assembler.handle_delta(
+                                        choices[0].get("delta", {})
+                                    )
 
-                                    if delta_tool_calls:
-                                        close_open_reasoning_block(content_blocks)
-
-                                        for delta_tool_call in delta_tool_calls:
-                                            tool_call_index = delta_tool_call.get(
-                                                "index"
-                                            )
-
-                                            if tool_call_index is not None:
-                                                # Check if the tool call already exists
-                                                current_response_tool_call = None
-                                                for (
-                                                    response_tool_call
-                                                ) in response_tool_calls:
-                                                    if (
-                                                        response_tool_call.get("index")
-                                                        == tool_call_index
-                                                    ):
-                                                        current_response_tool_call = (
-                                                            response_tool_call
-                                                        )
-                                                        break
-
-                                                if current_response_tool_call is None:
-                                                    # Add the new tool call
-                                                    response_tool_calls.append(
-                                                        delta_tool_call
-                                                    )
-                                                else:
-                                                    # Update the existing tool call
-                                                    delta_name = delta_tool_call.get(
-                                                        "function", {}
-                                                    ).get("name")
-                                                    delta_arguments = (
-                                                        delta_tool_call.get(
-                                                            "function", {}
-                                                        ).get("arguments")
-                                                    )
-
-                                                    if delta_name:
-                                                        current_response_tool_call[
-                                                            "function"
-                                                        ]["name"] += delta_name
-
-                                                    if delta_arguments:
-                                                        current_response_tool_call[
-                                                            "function"
-                                                        ][
-                                                            "arguments"
-                                                        ] += delta_arguments
-
-                                        # llens(#20 ステップ5): 蓄積中の tool_calls を
-                                        # open ブロックとして content_blocks に載せ、部分
-                                        # arguments 込みの snapshot を毎フレーム emit する
-                                        # (フロントは寛容パーサで逐次描画)。ブロックの
-                                        # content は response_tool_calls と同一オブジェクト
-                                        # なので、以後の累積は自動で snapshot に反映される。
-                                        if not (
-                                            content_blocks
-                                            and content_blocks[-1]["type"]
-                                            == "tool_calls"
-                                            and content_blocks[-1]["content"]
-                                            is response_tool_calls
-                                        ):
-                                            content_blocks.append(
-                                                {
-                                                    "type": "tool_calls",
-                                                    "content": response_tool_calls,
-                                                }
-                                            )
-
-                                        # 表示ディスクリプタは name が届いた時点で付与
-                                        # (Kimi は初回フレームで id/name が確定する)
-                                        tools = metadata.get("tools", {})
-                                        for tool_call in response_tool_calls:
-                                            if "render" in tool_call:
-                                                continue
-                                            tool_name = tool_call.get(
-                                                "function", {}
-                                            ).get("name", "")
-                                            tool_render = (
-                                                tools.get(tool_name) or {}
-                                            ).get("render")
-                                            if tool_render:
-                                                tool_call["render"] = tool_render
-
-                                        data = {
+                                    if changed:
+                                        snapshot = {
                                             "content": serialize_text_blocks(
-                                                content_blocks
+                                                assembler.content_blocks
                                             ),
                                             "content_blocks": snapshot_content_blocks(
-                                                content_blocks
+                                                assembler.content_blocks
                                             ),
                                         }
 
-                                    value = delta.get("content")
-
-                                    reasoning_content = delta.get(
-                                        "reasoning_content"
-                                    ) or delta.get("reasoning")
-                                    if reasoning_content:
-                                        if (
-                                            not content_blocks
-                                            or content_blocks[-1]["type"] != "reasoning"
-                                        ):
-                                            reasoning_block = {
-                                                "type": "reasoning",
-                                                "start_tag": "think",
-                                                "end_tag": "/think",
-                                                "attributes": {
-                                                    "type": "reasoning_content"
-                                                },
-                                                "content": "",
-                                                "started_at": time.time(),
-                                            }
-                                            content_blocks.append(reasoning_block)
-                                        else:
-                                            reasoning_block = content_blocks[-1]
-
-                                        reasoning_block["content"] += reasoning_content
-
-                                        data = {
-                                            "content": serialize_text_blocks(
-                                                content_blocks
-                                            ),
-                                            "content_blocks": snapshot_content_blocks(
-                                                content_blocks
-                                            ),
-                                        }
-
-                                    if value:
-                                        if (
-                                            content_blocks
-                                            and content_blocks[-1]["type"]
-                                            == "reasoning"
-                                            and content_blocks[-1]
-                                            .get("attributes", {})
-                                            .get("type")
-                                            == "reasoning_content"
-                                        ):
-                                            reasoning_block = content_blocks[-1]
-                                            reasoning_block["ended_at"] = time.time()
-                                            reasoning_block["duration"] = int(
-                                                reasoning_block["ended_at"]
-                                                - reasoning_block["started_at"]
-                                            )
-
-                                            content_blocks.append(
-                                                {
-                                                    "type": "text",
-                                                    "content": "",
-                                                }
-                                            )
-
-                                        content = f"{content}{value}"
-                                        # llens(#20 ステップ5): tool_calls ブロックが
-                                        # ストリーム中から存在するため、直後に content
-                                        # デルタが来たら新しい text ブロックを開く
-                                        if not content_blocks or content_blocks[-1][
-                                            "type"
-                                        ] not in ("text", "reasoning"):
-                                            content_blocks.append(
-                                                {
-                                                    "type": "text",
-                                                    "content": "",
-                                                }
-                                            )
-
-                                        content_blocks[-1]["content"] = (
-                                            content_blocks[-1]["content"] + value
-                                        )
-
-                                        if ENABLE_REALTIME_CHAT_SAVE:
-                                            # Save message in the database
-                                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                                metadata["chat_id"],
-                                                metadata["message_id"],
-                                                {
-                                                    "content": serialize_text_blocks(
-                                                        content_blocks
-                                                    ),
-                                                    "content_blocks": snapshot_content_blocks(
-                                                        content_blocks
-                                                    ),
-                                                },
-                                            )
-                                        else:
-                                            data = {
-                                                "content": serialize_text_blocks(
-                                                    content_blocks
-                                                ),
-                                                "content_blocks": snapshot_content_blocks(
-                                                    content_blocks
-                                                ),
-                                            }
+                                        # tool_calls / reasoning の変更は常に snapshot を
+                                        # emit する。text は ENABLE_REALTIME_CHAT_SAVE 時
+                                        # のみ DB 直書き(イベントはフレーム素通し)—
+                                        # v0.6.5 の挙動踏襲。
+                                        if changed - {CHANGED_TEXT}:
+                                            data = snapshot
+                                        if CHANGED_TEXT in changed:
+                                            if ENABLE_REALTIME_CHAT_SAVE:
+                                                Chats.upsert_message_to_chat_by_id_and_message_id(
+                                                    metadata["chat_id"],
+                                                    metadata["message_id"],
+                                                    snapshot,
+                                                )
+                                            else:
+                                                data = snapshot
 
                                 await event_emitter(
                                     {
@@ -1703,31 +1512,13 @@ async def process_chat_response(
                                 log.debug("Error: ", e)
                                 continue
 
-                    close_open_reasoning_block(content_blocks)
+                    response_tool_calls, mismatch = assembler.finish_stream()
 
-                    if content_blocks:
-                        # Clean up the last text block
-                        if content_blocks[-1]["type"] == "text":
-                            content_blocks[-1]["content"] = content_blocks[-1][
-                                "content"
-                            ].strip()
-
-                            if not content_blocks[-1]["content"]:
-                                content_blocks.pop()
-
-                                if not content_blocks:
-                                    content_blocks.append(
-                                        {
-                                            "type": "text",
-                                            "content": "",
-                                        }
-                                    )
-
-                    # llens(#18-2): finish_reason とパース結果の整合ガード。
-                    # "tool_calls" 終了なのにデルタから 1 つも組めていなければ、
-                    # チャンク境界などで取りこぼしている(無音で止まる最悪の失敗
-                    # モード)— 黙って通常終了せず、チャット内エラーで可視化する。
-                    if finish_reason == "tool_calls" and not response_tool_calls:
+                    if mismatch == MISMATCH_MISSING_TOOL_CALLS:
+                        # llens(#18-2): "tool_calls" 終了なのにデルタから 1 つも
+                        # 組めていない(チャンク境界などの取りこぼし = 無音で
+                        # 止まる最悪の失敗モード)— 黙って通常終了せず、
+                        # チャット内エラーで可視化する。
                         log.error(
                             "finish_reason=tool_calls but no tool calls were "
                             "reconstructed from the stream (chunk boundary loss?)"
@@ -1746,14 +1537,11 @@ async def process_chat_response(
                                 },
                             }
                         )
-                    elif response_tool_calls and finish_reason not in (
-                        "tool_calls",
-                        None,
-                    ):
+                    elif mismatch == MISMATCH_UNEXPECTED_FINISH:
                         # 逆方向の不整合は実行を止めるほどではない(実害はモデルの
                         # 意図解釈のみ)— ログで観測可能にするに留める。
                         log.warning(
-                            f"tool calls parsed but finish_reason={finish_reason!r}"
+                            f"tool calls parsed but finish_reason={assembler.finish_reason!r}"
                         )
 
                     if response_tool_calls:
@@ -1778,37 +1566,20 @@ async def process_chat_response(
 
                     tools = metadata.get("tools", {})
 
-                    # llens(#20): 型駆動の表示ディスクリプタを call に同梱する。
-                    # snapshot_content_blocks は calls をそのまま通すので、ここで
-                    # 付ければイベント・永続化(リロード)双方に render が乗る。
-                    # (通常はストリーム中に付与済み。冪等な保険)
-                    for tool_call in response_tool_calls:
-                        tool_name = tool_call.get("function", {}).get("name", "")
-                        tool_render = (tools.get(tool_name) or {}).get("render")
-                        if tool_render:
-                            tool_call["render"] = tool_render
-
-                    # llens(#20 ステップ5): ストリーム中に open ブロックとして
-                    # 追加済み(content が同一オブジェクト)なら再追加しない
-                    if not (
-                        content_blocks
-                        and content_blocks[-1]["type"] == "tool_calls"
-                        and content_blocks[-1]["content"] is response_tool_calls
-                    ):
-                        content_blocks.append(
-                            {
-                                "type": "tool_calls",
-                                "content": response_tool_calls,
-                            }
-                        )
+                    # llens(#20): render(表示ディスクリプタ)付与と open ブロックの
+                    # 再追加ガードは assembler が冪等に行う(通常はストリーム中に
+                    # 付与・追加済み。ここは保険)。
+                    assembler.ensure_tool_calls_block(response_tool_calls)
 
                     await event_emitter(
                         {
                             "type": "chat:completion",
                             "data": {
-                                "content": serialize_text_blocks(content_blocks),
+                                "content": serialize_text_blocks(
+                                    assembler.content_blocks
+                                ),
                                 "content_blocks": snapshot_content_blocks(
-                                    content_blocks
+                                    assembler.content_blocks
                                 ),
                             },
                         }
@@ -1900,22 +1671,17 @@ async def process_chat_response(
                             }
                         )
 
-                    content_blocks[-1]["results"] = results
-
-                    content_blocks.append(
-                        {
-                            "type": "text",
-                            "content": "",
-                        }
-                    )
+                    assembler.set_tool_results(results)
 
                     await event_emitter(
                         {
                             "type": "chat:completion",
                             "data": {
-                                "content": serialize_text_blocks(content_blocks),
+                                "content": serialize_text_blocks(
+                                    assembler.content_blocks
+                                ),
                                 "content_blocks": snapshot_content_blocks(
-                                    content_blocks
+                                    assembler.content_blocks
                                 ),
                             },
                         }
@@ -1932,7 +1698,9 @@ async def process_chat_response(
                                 "tools": form_data["tools"],
                                 "messages": [
                                     *form_data["messages"],
-                                    *convert_content_blocks_to_messages(content_blocks),
+                                    *convert_content_blocks_to_messages(
+                                        assembler.content_blocks
+                                    ),
                                 ],
                             },
                             user,
@@ -1976,8 +1744,10 @@ async def process_chat_response(
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 data = {
                     "done": True,
-                    "content": serialize_text_blocks(content_blocks),
-                    "content_blocks": snapshot_content_blocks(content_blocks),
+                    "content": serialize_text_blocks(assembler.content_blocks),
+                    "content_blocks": snapshot_content_blocks(
+                        assembler.content_blocks
+                    ),
                     "title": title,
                 }
 
@@ -1987,8 +1757,10 @@ async def process_chat_response(
                         metadata["chat_id"],
                         metadata["message_id"],
                         {
-                            "content": serialize_text_blocks(content_blocks),
-                            "content_blocks": snapshot_content_blocks(content_blocks),
+                            "content": serialize_text_blocks(assembler.content_blocks),
+                            "content_blocks": snapshot_content_blocks(
+                                assembler.content_blocks
+                            ),
                         },
                     )
 
@@ -1999,10 +1771,10 @@ async def process_chat_response(
                         await post_webhook(
                             request.app.state.WEBUI_NAME,
                             webhook_url,
-                            f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
+                            f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{assembler.content}",
                             {
                                 "action": "chat",
-                                "message": content,
+                                "message": assembler.content,
                                 "title": title,
                                 "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
                             },
@@ -2026,8 +1798,10 @@ async def process_chat_response(
                         metadata["chat_id"],
                         metadata["message_id"],
                         {
-                            "content": serialize_text_blocks(content_blocks),
-                            "content_blocks": snapshot_content_blocks(content_blocks),
+                            "content": serialize_text_blocks(assembler.content_blocks),
+                            "content_blocks": snapshot_content_blocks(
+                                assembler.content_blocks
+                            ),
                         },
                     )
 
