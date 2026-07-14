@@ -32,12 +32,10 @@ class ERROR_MESSAGES(str, Enum):
         "Uh-oh! This username is already registered. Please choose another username."
     )
     PASSWORD_TOO_LONG = "Uh-oh! The password you entered is too long. Please make sure your password is less than 72 bytes long."
-    COMMAND_TAKEN = "Uh-oh! This command is already registered. Please choose another command string."
     FILE_EXISTS = "Uh-oh! This file is already registered. Please choose another file."
 
     ID_TAKEN = "Uh-oh! This id is already registered. Please choose another id string."
     MODEL_ID_TAKEN = "Uh-oh! This model id is already registered. Please choose another model id string."
-    NAME_TAG_TAKEN = "Uh-oh! This name tag is already registered. Please choose another name tag string."
 
     INVALID_TOKEN = (
         "Your session has expired or the token is invalid. Please sign in again."
@@ -85,10 +83,6 @@ class ERROR_MESSAGES(str, Enum):
 
     INVALID_URL = (
         "Oops! The URL you provided is invalid. Please double-check and try again."
-    )
-
-    WEB_SEARCH_ERROR = (
-        lambda err="": f"{err if err else 'Oops! Something went wrong while searching the web.'}"
     )
 
     OLLAMA_API_DISABLED = (
