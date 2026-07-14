@@ -87,9 +87,7 @@ describe('markdown-it lexer (#22 L2)', () => {
 	it('details 擬似 HTML は互換処理せず html トークンとして素通しする(旧データ互換なし)', () => {
 		// 旧フォーマットの読み取りフォールバックは持たない(CLAUDE.md 絶対制約)。
 		// <details> は他の生 HTML と同じく html トークン → 描画側 DOMPurify に任せる。
-		const tokens = lex(
-			'<details type="reasoning" done="true"><summary>x</summary>思考</details>'
-		);
+		const tokens = lex('<details type="reasoning" done="true"><summary>x</summary>思考</details>');
 		expect(tokens.some((t) => t.type === 'details')).toBe(false);
 		expect(tokens.some((t) => t.type === 'html')).toBe(true);
 	});

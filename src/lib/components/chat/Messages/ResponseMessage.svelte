@@ -20,7 +20,7 @@
 		getMessageContentParts,
 		sanitizeResponseContent,
 		createMessagesList,
-		formatDate,
+		formatDate
 	} from '$lib/utils';
 	import { WEBUI_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 

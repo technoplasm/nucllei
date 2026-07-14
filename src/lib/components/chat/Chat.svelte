@@ -41,7 +41,7 @@
 		promptTemplate,
 		splitStream,
 		sleep,
-		getPromptVariables,
+		getPromptVariables
 	} from '$lib/utils';
 	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
 
