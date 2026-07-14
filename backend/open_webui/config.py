@@ -1283,48 +1283,32 @@ CODE_INTERPRETER_PROMPT_TEMPLATE = RuntimeConfig(
 CODE_INTERPRETER_JUPYTER_URL = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_URL",
     "code_interpreter.jupyter.url",
-    os.environ.get(
-        "CODE_INTERPRETER_JUPYTER_URL", os.environ.get("CODE_EXECUTION_JUPYTER_URL", "")
-    ),
+    os.environ.get("CODE_INTERPRETER_JUPYTER_URL", ""),
 )
 
 CODE_INTERPRETER_JUPYTER_AUTH = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH",
     "code_interpreter.jupyter.auth",
-    os.environ.get(
-        "CODE_INTERPRETER_JUPYTER_AUTH",
-        os.environ.get("CODE_EXECUTION_JUPYTER_AUTH", ""),
-    ),
+    os.environ.get("CODE_INTERPRETER_JUPYTER_AUTH", ""),
 )
 
 CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH_TOKEN",
     "code_interpreter.jupyter.auth_token",
-    os.environ.get(
-        "CODE_INTERPRETER_JUPYTER_AUTH_TOKEN",
-        os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_TOKEN", ""),
-    ),
+    os.environ.get("CODE_INTERPRETER_JUPYTER_AUTH_TOKEN", ""),
 )
 
 
 CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD",
     "code_interpreter.jupyter.auth_password",
-    os.environ.get(
-        "CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD",
-        os.environ.get("CODE_EXECUTION_JUPYTER_AUTH_PASSWORD", ""),
-    ),
+    os.environ.get("CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD", ""),
 )
 
 CODE_INTERPRETER_JUPYTER_TIMEOUT = RuntimeConfig(
     "CODE_INTERPRETER_JUPYTER_TIMEOUT",
     "code_interpreter.jupyter.timeout",
-    int(
-        os.environ.get(
-            "CODE_INTERPRETER_JUPYTER_TIMEOUT",
-            os.environ.get("CODE_EXECUTION_JUPYTER_TIMEOUT", "60"),
-        )
-    ),
+    int(os.environ.get("CODE_INTERPRETER_JUPYTER_TIMEOUT", "60")),
 )
 
 
@@ -1358,7 +1342,8 @@ Ensure that the tools are effectively utilized to achieve the highest-quality an
 # llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
 # config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。
 # embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(air-gapped)。
-# llens(#67): memories も撤去したため vector/embedding の残置理由は消滅(EMBEDDING_FUNCTION は None のみ)。
+# llens(#67): memories も撤去し vector/embedding 基盤の消費者が全滅したため、
+# 防御的に残していた app.state.EMBEDDING_FUNCTION も撤去済み。
 
 # llens(#52): 添付ファイルの受け入れゲート(upload の入口=Attachment 前で server-side 強制)。
 ATTACHMENT_MAX_COUNT = RuntimeConfig(

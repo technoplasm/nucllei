@@ -488,13 +488,6 @@ app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
 
-app.state.EMBEDDING_FUNCTION = None
-
-
-# llens(#52): memory を SQL の素ストアに降格したことで embedding/vector 基盤の消費者が
-# 消滅。埋め込みモデルの起動時ロードも VECTOR_DB も撤去。EMBEDDING_FUNCTION は None のまま
-# (防御的に残置。fork には消費者なし)。
-
 ########################################
 #
 # CODE EXECUTION
