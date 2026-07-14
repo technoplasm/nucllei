@@ -5,7 +5,7 @@
 
 	import { config, functions, models, settings } from '$lib/stores';
 	import { createNewFunction, getFunctions } from '$lib/apis/functions';
-	import FunctionEditor from '$lib/components/admin/Functions/FunctionEditor.svelte';
+	import FunctionEditor from '$lib/components/workspace/Functions/FunctionEditor.svelte';
 	import { getModels } from '$lib/apis';
 
 	// llens(#45): frontmatter/version ゲートと openwebui.com community 連携(share 受け側の

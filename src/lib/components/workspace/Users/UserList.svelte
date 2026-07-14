@@ -18,8 +18,8 @@
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
-	import UserModal from '$lib/components/admin/Users/UserList/UserModal.svelte';
-	import UserChatsModal from '$lib/components/admin/Users/UserList/UserChatsModal.svelte';
+	import UserModal from '$lib/components/workspace/Users/UserList/UserModal.svelte';
+	import UserChatsModal from '$lib/components/workspace/Users/UserList/UserChatsModal.svelte';
 
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';

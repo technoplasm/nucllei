@@ -13,7 +13,7 @@
 		getFunctionById
 	} from '$lib/apis/functions';
 
-	import FunctionEditor from '$lib/components/admin/Functions/FunctionEditor.svelte';
+	import FunctionEditor from '$lib/components/workspace/Functions/FunctionEditor.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getModels } from '$lib/apis';
 
