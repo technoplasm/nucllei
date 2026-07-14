@@ -156,7 +156,7 @@
 			</label>
 			<input
 				id="skill-name"
-				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised outline-hidden font-primary"
 				placeholder={$i18n.t('Title')}
 				bind:value={name}
 				required
@@ -194,7 +194,7 @@
 					<span class="text-content-muted">/</span>
 					<input
 						id="skill-id"
-						class="w-full min-w-0 px-1 py-1 text-md bg-transparent outline-hidden"
+						class="w-full min-w-0 px-1 py-1 text-sm bg-transparent outline-hidden"
 						placeholder={$i18n.t('Command')}
 						bind:value={id}
 						required
@@ -209,7 +209,7 @@
 			</label>
 			<Textarea
 				id="skill-description"
-				className="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised outline-hidden overflow-y-hidden resize-none"
 				placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
 				bind:value={description}
 				rows={2}
@@ -223,7 +223,9 @@
 					{#if tools.length > 0}
 						<div class="flex items-center flex-wrap gap-x-3 gap-y-1">
 							{#each Object.keys(_tools) as tool (tool)}
-								<div class="flex items-center gap-2">
+								<!-- label 包みで名前クリックでも toggle(#49 と同じ流儀。Checkbox の
+								     button は labelable なので for/id 不要でクリックが転送される) -->
+								<label class="flex items-center gap-2 cursor-pointer">
 									<Checkbox
 										state={_tools[tool].selected ? 'checked' : 'unchecked'}
 										on:change={(e) => {
@@ -231,10 +233,10 @@
 											toolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
 										}}
 									/>
-									<div class="py-0.5 text-sm capitalize font-medium">
+									<span class="py-0.5 text-sm capitalize font-medium select-none">
 										{_tools[tool].name}
-									</div>
-								</div>
+									</span>
+								</label>
 							{/each}
 						</div>
 					{/if}

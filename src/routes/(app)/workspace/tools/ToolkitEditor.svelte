@@ -219,7 +219,7 @@ class Tools:
 			</label>
 			<input
 				id="tool-name"
-				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised outline-hidden font-primary"
 				type="text"
 				placeholder={$i18n.t('Tool Name')}
 				bind:value={name}
@@ -244,7 +244,7 @@ class Tools:
 			</label>
 			<input
 				id="tool-id"
-				class="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden"
+				class="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised outline-hidden"
 				type="text"
 				placeholder={$i18n.t('Tool ID')}
 				bind:value={id}
@@ -258,7 +258,7 @@ class Tools:
 			</label>
 			<Textarea
 				id="tool-description"
-				className="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised outline-hidden overflow-y-hidden resize-none"
 				placeholder={$i18n.t('e.g. Tools for performing various operations')}
 				bind:value={description}
 				rows={2}

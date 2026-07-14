@@ -11,11 +11,12 @@
 	$: _state = state;
 </script>
 
+<!-- 透明背景だと置かれた面と同化するので、箱は raised + line 縁で固定。
+     checked は primary トークン(light=黒箱白チェック / dark=白箱黒チェック) -->
 <button
-	class=" outline -outline-offset-1 outline-[1.5px] outline-gray-200 dark:outline-gray-600 {state !==
-	'unchecked'
-		? 'bg-black outline-black '
-		: 'hover:outline-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800'} text-white transition-all rounded-sm inline-block w-3.5 h-3.5 relative {disabled
+	class=" outline -outline-offset-1 outline-[1.5px] {state !== 'unchecked'
+		? 'bg-primary outline-primary text-primary-content'
+		: 'bg-surface-raised outline-line hover:outline-content-subtle'} transition-all rounded-sm inline-block w-3.5 h-3.5 relative {disabled
 		? 'opacity-50 cursor-not-allowed'
 		: ''}"
 	on:click={() => {
