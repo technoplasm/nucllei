@@ -186,117 +186,111 @@ class Attachment:
 	};
 </script>
 
-<div class=" flex flex-col justify-between w-full overflow-y-auto h-full">
-	<div class="mx-auto w-full md:px-0 h-full">
-		<form
-			bind:this={formElement}
-			class=" flex flex-col max-h-[100dvh] h-full"
-			onsubmit={(e) => {
-				e.preventDefault();
-				submitHandler();
-			}}
+<!-- 高さは workspace layout(.max-w-5xl の h-full)から一段で貼る。
+     col 連打(h-0 / max-h-[100dvh] の入れ子)はやめ、flex-col は form の一段だけ。
+     エディタ枠が flex-1 + min-h-0 で残り全高を吸収する。 -->
+<form
+	bind:this={formElement}
+	class="flex flex-col h-full"
+	onsubmit={(e) => {
+		e.preventDefault();
+		submitHandler();
+	}}
+>
+	<div>
+		<!-- llens(#45): 作成/編集画面を skill / tool 型のセクション構成に統一。
+		     ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
+		<a
+			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			href="/workspace/functions"
 		>
-			<div class="flex flex-col flex-1 overflow-auto h-0 rounded-lg">
-				<!-- llens(#45): 作成/編集画面を skill / tool 型のセクション構成に統一 -->
-				<div class="w-full mb-2 flex flex-col gap-1">
-					<div class="flex w-full items-center">
-						<div class=" shrink-0 mr-2">
-							<Tooltip content={$i18n.t('Back')}>
-								<button
-									class="w-full text-left text-sm py-1.5 px-1 rounded-lg text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-									type="button"
-									aria-label={$i18n.t('Back')}
-									onclick={() => {
-										goto('/workspace/functions');
-									}}
-								>
-									<span class="i-lucide-chevron-left size-4 block"></span>
-								</button>
-							</Tooltip>
-						</div>
+			<span class="i-lucide-chevron-left size-4 block"></span>
+			{$i18n.t('Back to list')}
+		</a>
 
-						<div class="flex-1">
-							<input
-								class="w-full text-2xl font-semibold bg-transparent outline-hidden font-primary"
-								type="text"
-								placeholder={$i18n.t('Function Name')}
-								bind:value={name}
-								required
-							/>
-						</div>
+		<div class="flex items-center gap-2 my-2">
+			<div class="w-24 shrink-0 text-sm font-semibold">{$i18n.t('Name')}</div>
+			<input
+				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				type="text"
+				placeholder={$i18n.t('Function Name')}
+				bind:value={name}
+				required
+			/>
 
-						<div class="self-center shrink-0">
-							{#if edit}
-								<Badge type="muted" content={type || $i18n.t('Function')} />
-							{:else}
-								<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
-								<select
-									class="capitalize rounded-lg text-sm bg-gray-50 dark:bg-gray-850 dark:text-white outline-hidden px-3 py-1.5"
-									bind:value={selectedType}
-									aria-label={$i18n.t('Function Type')}
-								>
-									<option value="filter">Filter</option>
-									<option value="attachment">Attachment</option>
-									<option value="action">Action</option>
-									<option value="pipe">Pipe</option>
-								</select>
-							{/if}
-						</div>
-					</div>
-
-					<div class="flex gap-0.5 items-center text-xs text-content-muted px-1">
-						<input
-							class="w-full bg-transparent outline-hidden"
-							type="text"
-							placeholder={$i18n.t('Function ID')}
-							bind:value={id}
-							required
-						/>
-					</div>
-				</div>
-
-				<div class="my-2">
-					<div class=" self-center text-sm font-semibold mb-1">{$i18n.t('Description')}</div>
-					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
-						placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
-						bind:value={description}
-						rows={2}
-					/>
-				</div>
-
-				<div class=" self-start text-sm font-semibold px-1 mb-1">{$i18n.t('Function Content')}</div>
-				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
-					{#key edit ? 'edit' : selectedType}
-						<CodeEditor
-							bind:this={codeEditor}
-							value={content}
-							lang="python"
-							{boilerplate}
-							onChange={(e) => {
-								_content = e;
-							}}
-							onSave={async () => {
-								if (formElement) {
-									formElement.requestSubmit();
-								}
-							}}
-						/>
-					{/key}
-				</div>
-
-				<div class="pb-3 flex justify-start">
-					<button
-						class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-lg"
-						type="submit"
+			<div class="shrink-0">
+				{#if edit}
+					<Badge type="muted" content={type || $i18n.t('Function')} />
+				{:else}
+					<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
+					<select
+						class="capitalize rounded-lg text-sm bg-surface-raised text-content outline-hidden px-3 py-1.5"
+						bind:value={selectedType}
+						aria-label={$i18n.t('Function Type')}
 					>
-						{$i18n.t('Save')}
-					</button>
-				</div>
+						<option value="filter">Filter</option>
+						<option value="attachment">Attachment</option>
+						<option value="action">Action</option>
+						<option value="pipe">Pipe</option>
+					</select>
+				{/if}
 			</div>
-		</form>
+		</div>
+
+		<div class="flex items-center gap-2 my-2">
+			<div class="w-24 shrink-0 text-sm font-semibold">{$i18n.t('ID')}</div>
+			<input
+				class="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden"
+				type="text"
+				placeholder={$i18n.t('Function ID')}
+				bind:value={id}
+				required
+			/>
+		</div>
+
+		<div class="flex items-start gap-2 my-2">
+			<div class="w-24 shrink-0 text-sm font-semibold pt-1">{$i18n.t('Description')}</div>
+			<div class="flex-1 min-w-0">
+				<Textarea
+					className="w-full px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+					placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
+					bind:value={description}
+					rows={2}
+				/>
+			</div>
+		</div>
+
+		<div class=" self-start text-sm font-semibold px-1 mb-1">{$i18n.t('Function Content')}</div>
 	</div>
-</div>
+
+	<div class="flex-1 min-h-0 mb-2 rounded-lg overflow-auto bg-white">
+		{#key edit ? 'edit' : selectedType}
+			<CodeEditor
+				bind:this={codeEditor}
+				value={content}
+				lang="python"
+				{boilerplate}
+				onChange={(e) => {
+					_content = e;
+				}}
+				onSave={async () => {
+					if (formElement) {
+						formElement.requestSubmit();
+					}
+				}}
+			/>
+		{/key}
+	</div>
+
+	<div class="pb-3 flex justify-start">
+		<button
+			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg"
+			type="submit"
+		>
+			{$i18n.t('Save')}
+		</button>
+	</div>
+</form>
 
 <ConfirmDialog
 	bind:show={showRenameConfirm}

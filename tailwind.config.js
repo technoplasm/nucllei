@@ -40,16 +40,32 @@ export default {
 					sidebar: 'var(--surface-sidebar, #ececec)',
 					// 背景から1段持ち上げる面(チャット入力欄などのカード)。サーフェス基準で馴染む。
 					raised: 'var(--surface-raised, #ffffff)',
+					// hover
+					hover: 'var(--surface-hover, #fafafa)',
 					// 控えめな帯(table の thead など)。raised の上に置いて区別が付く濃さ。
-					muted: 'var(--surface-muted, #f0f0f0)'
+					muted: 'var(--surface-muted, #f0f0f0)',
 				},
 				// サイドバー行のインタラクション色(hover / 選択中)。実値は src/tailwind.css。
 				sidebar: {
 					hover: 'var(--sidebar-hover, #ececec)',
-					selected: 'var(--sidebar-selected, #e3e3e3)'
+					selected: 'var(--sidebar-selected, #e3e3e3)',
 				},
 				// 罫線・区切り線の共通色(テーブル/hr など)。実値は src/tailwind.css。border-line で使う
 				line: 'var(--line, #dcdcdc)',
+				// 主ボタン(Save/Create 等)。現行は黒/白反転のモノクロ —
+				// ブランディング確定(#58)時は src/tailwind.css の値だけ変えればよい。
+				// 使い方: bg-primary hover:bg-primary-hover text-primary-content(dark: 変種不要)
+				primary: {
+					DEFAULT: 'var(--primary, #171717)',
+					hover: 'var(--primary-hover, #333333)',
+					content: 'var(--primary-content, #ffffff)'
+				},
+				// 副ボタン(戻る/キャンセル等)。raised(入力面)とは役割を分ける
+				secondary: {
+					DEFAULT: 'var(--secondary, #e9e9e9)',
+					hover: 'var(--secondary-hover, #dddddd)',
+					content: 'var(--secondary-content, #333333)'
+				},
 				// テキスト(前景)の意味トークン。surface と対(surface=背景 / content=前景)。
 				// light/dark の実値は src/tailwind.css で gray スケールに乗せて一括管理(dark: 変種は不要)。
 				//   content        … 本文(既定のテキスト色)

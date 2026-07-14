@@ -12,6 +12,19 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--surface-sidebar` | サイドバー背景 | `bg-surface-sidebar` | `#f0f0f0` / `#1b1b1b` |
 | `--surface-raised` | 入力欄など持ち上げ面 | `bg-surface-raised` | `#ffffff` / `#262626` |
 | `--surface-muted` | 控えめな帯(table thead 等) | `bg-surface-muted` | `#f0f0f0` / `#2d2d2d` |
+| `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#161616` |
+| `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(#58 で差し替え予定) |
+| `--secondary(-hover/-content)` | 副ボタン(戻る/キャンセル) | `bg-secondary hover:bg-secondary-hover text-secondary-content` | `#e9e9e9` / `#333333` 地 |
+
+### ボタン/コントロールの使い分け(2026-07-14 確立、functions で先行適用)
+
+- **コントロール(input/select/textarea)= `bg-surface-raised`**(チャット入力欄と同じ「surface 上の持ち上げ面」)。
+  ただし **raised は surface の直上でだけ** — raised 相当の面(モーダル等)の中のコントロールは
+  `bg-surface-muted` を使う 2 段ルール。
+- **主ボタン = primary / 副ボタン(戻る等)= secondary**。ボタンに raised を使わない(入力面と顔が被る)。
+- エディタ系ページの全高: workspace layout の `.max-w-5xl` が `h-full` を持つので、
+  ページ側は「form 一段の flex-col h-full + エディタ枠 `flex-1 min-h-0`」で貼る(col 連打・`h-0` hack は廃止)。
+- フォームのラベルは固定幅(`w-24 shrink-0`)でコントロールと同一行(縦を稼ぐ。真実源 = FunctionEditor)。
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e9e9e9` / `#212121` |
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#e3e3e3` / `#262626` |
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |
