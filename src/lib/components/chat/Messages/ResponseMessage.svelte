@@ -618,7 +618,7 @@
 							</div>
 						{:else}
 							<div class="w-full flex flex-col relative py-1.5" id="response-content-container">
-								{#if (message?.content_blocks ?? []).length > 0 && message.error !== true}
+								{#if (message?.content_blocks ?? []).length > 0}
 									<!-- #17 L0: content_blocks があればブロックから直接描画(details 擬似 HTML を経由しない) -->
 									<ContentBlocks
 										id={message.id}
@@ -690,9 +690,9 @@
 									/>
 								{:else if message.content === '' && !message.error}
 									<Skeleton />
-								{:else if message.content && message.error !== true}
-									<!-- always show message contents even if there's an error -->
-									<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
+								{:else if message.content}
+									<!-- エラーがあっても本文は常に表示する(error は {content} オブジェクト形のみ —
+									     旧 error === true 形式の互換は撤去済み) -->
 									<ContentRenderer
 										id={message.id}
 										{history}

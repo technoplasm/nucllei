@@ -245,8 +245,8 @@ def get_model_context_size(request, model: dict) -> Optional[int]:
 def filter_files_by_user_access(files: list, user: UserModel) -> list:
     """
     llens(#40, GHSA-vjqm/vrhc): チャットリクエストの file/collection 参照は
-    クライアント制御(direct モードの model.meta.knowledge も含む)。要求ユーザーが
-    読取権限を持たない項目をここで除外し、他ユーザーのファイル横断読取(IDOR)を防ぐ。
+    クライアント制御。要求ユーザーが読取権限を持たない項目をここで除外し、
+    他ユーザーのファイル横断読取(IDOR)を防ぐ。
     """
     if not files:
         return files
@@ -398,46 +398,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     events = []
     sources = []
 
-    user_message = get_last_user_message(form_data["messages"])
-    model_knowledge = model.get("info", {}).get("meta", {}).get("knowledge", False)
-
-    if model_knowledge:
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "knowledge_search",
-                    "query": user_message,
-                    "done": False,
-                },
-            }
-        )
-
-        knowledge_files = []
-        for item in model_knowledge:
-            if item.get("collection_name"):
-                knowledge_files.append(
-                    {
-                        "id": item.get("collection_name"),
-                        "name": item.get("name"),
-                        "legacy": True,
-                    }
-                )
-            elif item.get("collection_names"):
-                knowledge_files.append(
-                    {
-                        "name": item.get("name"),
-                        "type": "collection",
-                        "collection_names": item.get("collection_names"),
-                        "legacy": True,
-                    }
-                )
-            else:
-                knowledge_files.append(item)
-
-        files = form_data.get("files", [])
-        files.extend(knowledge_files)
-        form_data["files"] = files
+    # llens(#23): model.meta.knowledge の展開は撤去 — knowledge 機能は #52 で
+    # route/backend ごと撤去済みで、fresh DB では meta.knowledge を作る面が無い
+    # (旧データ互換を持たない — CLAUDE.md 絶対制約)。
 
     # 送信された variables は本経路では使わないが、payload からは除く
     form_data.pop("variables", None)
@@ -677,19 +640,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     if len(sources) > 0:
         events.append({"sources": sources})
-
-    if model_knowledge:
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {
-                    "action": "knowledge_search",
-                    "query": user_message,
-                    "done": True,
-                    "hidden": True,
-                },
-            }
-        )
 
     return form_data, metadata, events
 
