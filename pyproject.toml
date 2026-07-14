@@ -128,16 +128,14 @@ classifiers = [
 
 [project.optional-dependencies]
 # On-device ML stack (pulls in torch, ~GBs). Only needed for LOCAL inference:
-# local RAG embeddings / reranking (SentenceTransformers, CrossEncoder, ColBERT),
-# local Whisper STT, and OCR. Not required to boot the app or to use external
-# providers (OpenAI/Ollama embeddings, external STT). Install with:
+# the transformers audio pipeline, local Whisper STT, and OCR. Not required to
+# boot the app or to use external providers (external STT). Install with:
 #   uv sync --extra local-ml
+# llens(#52): RAG embeddings / reranking (sentence-transformers / colbert-ai /
+# einops) removed with the RAG/knowledge stack — no longer part of this fork.
 local-ml = [
     "transformers",
-    "sentence-transformers==3.3.1",
     "accelerate",
-    "colbert-ai==0.2.21",
-    "einops==0.8.1",
     "faster-whisper==1.1.1",
     "rapidocr-onnxruntime==1.3.24",
 ]
