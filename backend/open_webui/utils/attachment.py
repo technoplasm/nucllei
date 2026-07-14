@@ -8,6 +8,9 @@ coroutine は await、同期ハンドラは threadpool にオフロードする�
 
 **fork は仕組みだけ**: Attachment の実体(docling ルータ等のポリシー)は案件層(prism)の
 authored Function として登録される。fork 本体は builtin Attachment を持たない。
+ただし docling ではない「素の」既定抽出は内部 API として提供する(`utils/extraction.py` の
+`extract_text_from_file(file)` / `extract_text(...)`、v0.6.5 Default 経路の復元)。prism の
+`process(file)` はこれを任意で呼べる(docling を選ぶ型はそちらへ、それ以外は既定へ振り分け可能)。
 
 **契約**: `process(file, ...) -> str | None` の純関数。3 帰結:
 - **成功=抽出テキスト(md)を返す** → `content=<str>` `status="success"`。

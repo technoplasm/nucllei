@@ -75,6 +75,8 @@ dependencies = [
     "opentelemetry-instrumentation-httpx==0.52b1",
     "opentelemetry-instrumentation-aiohttp-client==0.52b1",
 
+    # llens(#52): 既定(非 docling)文書抽出 utils/extraction.py の langchain ローダ依存群。
+    # ftfy/pypdf/docx2txt/python-pptx/unstructured/openpyxl は live(死に依存ではない)。
     "ftfy==6.2.3",
     "pypdf==4.3.1",
     "fpdf2==2.8.2",

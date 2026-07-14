@@ -102,7 +102,15 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 **構図**: プロバイダ(実行機構)= core 登録、ルーティング(振り分け)= ユーザー定義 Function。B(ユーザー定義)と C(登録機構)の合体。
 - **プロバイダは種別ごとに別々の内部API(入口を無理に揃えない)**。単一 `extract()` に一本化しない ← 種別で入出力も追加オプションも違うので統一する意味がない。hook 内で処理するので入口が同じである必要がない。
-  - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明。設定に付随した共通オプションがあれば渡せる)。既存 `Loader`/`CONTENT_EXTRACTION_ENGINE` を流用。
+  - **文書抽出**: `ファイル → 文字列`(OCR してるか等は呼ぶ側に不透明。設定に付随した共通オプションがあれば渡せる)。
+    **実装 = `utils/extraction.py`(2026-07-14 復元・#52)**: v0.6.5 の Default 抽出経路(`retrieval/loaders` の
+    `Loader` engine="")を内部 API として復元したもの。`extract_text(filename, file_path, content_type)`(storage
+    非依存の純関数)と `extract_text_from_file(file)`(FileModel → `Storage` 解決の薄いラッパ)の 2 段。拡張子/mime を
+    `langchain_community` の既定ローダ(PyPDF/Docx2txt/UnstructuredExcel/PowerPoint/CSV/BSHTML/Text…)へ振り分け、
+    `ftfy` 正規化して結合。**確定仕様**: whitelist 方式で未対応は `UnsupportedFileError`(寛容フォールバックなし・
+    `SUPPORTED_EXTENSIONS`/`is_supported()` 公開)/ **docling・tika・document_intelligence・mistral は含めない**
+    (prism 担当)/ **`.msg` 除外**(extract_msg=GPL 連鎖・#2)/ **OCR 含めない**(テキスト PDF のみ)。prism の
+    Attachment `process(file)` が任意で呼ぶ(docling を選ぶ型はそちらへ、それ以外はこの既定へ、と振り分けられる)。
   - **STT**: `音声 → 文字列(+情報)`。既存 `audio.transcribe`/`AUDIO_STT_ENGINE` を流用。
   - **TTS**: `テキスト → 音声`(必要なら。既存 audio TTS)。
   - 「単一 file→text モデル」も **文書抽出種別の一エンジン**として登録(engine=model 接続)。engine URL か model 接続かは各種別の内部で吸収、種別をまたいでは吸収しない。
