@@ -219,7 +219,7 @@ class TestSkills(AbstractPostgresTest):
         import json
 
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         skill = Skills.insert_new_skill(
             "1",
@@ -279,7 +279,7 @@ class TestSkills(AbstractPostgresTest):
         import json
 
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import (
+        from open_webui.utils.skills import (
             apply_skill_command,
             current_skill_activation_seeds,
         )
@@ -311,7 +311,7 @@ class TestSkills(AbstractPostgresTest):
     def test_slash_command_multi_turn_scan(self):
         """全 user メッセージ走査(会話持続)— 過去ターンの `/command` も毎リクエスト展開される。"""
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         s_a = Skills.insert_new_skill(
             "1",
@@ -361,7 +361,7 @@ class TestSkills(AbstractPostgresTest):
     def test_slash_command_invisible_skill_passes_through(self):
         """他人の私有 skill(access_control={})は発火せず素通し。"""
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         skill = Skills.insert_new_skill(
             "owner",
@@ -385,7 +385,7 @@ class TestSkills(AbstractPostgresTest):
         キー不在は既定 ON。
         """
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import (
+        from open_webui.utils.skills import (
             apply_skill_command,
             build_load_skill_tool,
         )
@@ -426,7 +426,7 @@ class TestSkills(AbstractPostgresTest):
         からの変更(モデル設定を唯一の制御面に一元化)。
         """
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         Skills.insert_new_skill(
             "1",
@@ -447,7 +447,7 @@ class TestSkills(AbstractPostgresTest):
         import asyncio
 
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import build_load_skill_tool
+        from open_webui.utils.skills import build_load_skill_tool
 
         s1 = Skills.insert_new_skill(
             "1",
@@ -500,7 +500,7 @@ class TestSkills(AbstractPostgresTest):
 
     def test_build_load_skill_tool_none_when_empty(self):
         """対象 skill が無ければ load_skill 自体を載せない(None)。"""
-        from open_webui.utils.middleware import build_load_skill_tool
+        from open_webui.utils.skills import build_load_skill_tool
 
         user = types.SimpleNamespace(id="1", name="A")
         assert build_load_skill_tool({}, user) is None
@@ -521,7 +521,7 @@ class TestSkills(AbstractPostgresTest):
         `/command` の user メッセージ直後に入る(実 tool 往復より前)。
         """
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         skill = Skills.insert_new_skill(
             "1",
@@ -568,7 +568,7 @@ class TestSkills(AbstractPostgresTest):
     def test_activation_carries_tool_ids(self):
         """`/command` 発火の activation は skill.tool_ids を運ぶ(#35 step2b、入口 1)。"""
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import apply_skill_command
+        from open_webui.utils.skills import apply_skill_command
 
         skill = Skills.insert_new_skill(
             "1",
@@ -593,7 +593,7 @@ class TestSkills(AbstractPostgresTest):
         import asyncio
 
         from open_webui.models.skills import SkillForm, Skills
-        from open_webui.utils.middleware import build_load_skill_tool
+        from open_webui.utils.skills import build_load_skill_tool
 
         with_tools = Skills.insert_new_skill(
             "1",
