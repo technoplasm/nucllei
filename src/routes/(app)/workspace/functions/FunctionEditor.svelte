@@ -1,12 +1,10 @@
 <script lang="ts">
 	import { getContext, tick } from 'svelte';
-	import { goto } from '$app/navigation';
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -32,7 +30,6 @@
 
 	let formElement = $state<HTMLFormElement | null>(null);
 	let codeEditor = $state<any>(null);
-	let loading = $state(false);
 
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
@@ -154,7 +151,6 @@ class Attachment:
 	);
 
 	const saveHandler = async () => {
-		loading = true;
 		onSave({
 			id,
 			name,
@@ -209,8 +205,11 @@ class Attachment:
 		</a>
 
 		<div class="flex items-center gap-2 my-2">
-			<div class="w-24 shrink-0 text-sm font-semibold">{$i18n.t('Name')}</div>
+			<label class="w-24 shrink-0 text-sm font-semibold" for="function-name">
+				{$i18n.t('Name')}
+			</label>
 			<input
+				id="function-name"
 				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
 				type="text"
 				placeholder={$i18n.t('Function Name')}
@@ -218,28 +217,29 @@ class Attachment:
 				required
 			/>
 
-			<div class="shrink-0">
-				{#if edit}
-					<Badge type="muted" content={type || $i18n.t('Function')} />
-				{:else}
-					<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
-					<select
-						class="capitalize rounded-lg text-sm bg-surface-raised text-content outline-hidden px-3 py-1.5"
-						bind:value={selectedType}
-						aria-label={$i18n.t('Function Type')}
-					>
-						<option value="filter">Filter</option>
-						<option value="attachment">Attachment</option>
-						<option value="action">Action</option>
-						<option value="pipe">Pipe</option>
-					</select>
-				{/if}
-			</div>
+			{#if edit}
+				<Badge type="muted" content={type || $i18n.t('Function')} />
+			{:else}
+				<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
+				<select
+					class="shrink-0 capitalize rounded-lg text-sm bg-surface-raised text-content outline-hidden px-3 py-1.5"
+					bind:value={selectedType}
+					aria-label={$i18n.t('Function Type')}
+				>
+					<option value="filter">Filter</option>
+					<option value="attachment">Attachment</option>
+					<option value="action">Action</option>
+					<option value="pipe">Pipe</option>
+				</select>
+			{/if}
 		</div>
 
 		<div class="flex items-center gap-2 my-2">
-			<div class="w-24 shrink-0 text-sm font-semibold">{$i18n.t('ID')}</div>
+			<label class="w-24 shrink-0 text-sm font-semibold" for="function-id">
+				{$i18n.t('ID')}
+			</label>
 			<input
+				id="function-id"
 				class="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden"
 				type="text"
 				placeholder={$i18n.t('Function ID')}
@@ -249,18 +249,19 @@ class Attachment:
 		</div>
 
 		<div class="flex items-start gap-2 my-2">
-			<div class="w-24 shrink-0 text-sm font-semibold pt-1">{$i18n.t('Description')}</div>
-			<div class="flex-1 min-w-0">
-				<Textarea
-					className="w-full px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
-					placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
-					bind:value={description}
-					rows={2}
-				/>
-			</div>
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="function-description">
+				{$i18n.t('Description')}
+			</label>
+			<Textarea
+				id="function-description"
+				className="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
+				bind:value={description}
+				rows={2}
+			/>
 		</div>
 
-		<div class=" self-start text-sm font-semibold px-1 mb-1">{$i18n.t('Function Content')}</div>
+		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Function Content')}</div>
 	</div>
 
 	<div class="flex-1 min-h-0 mb-2 rounded-lg overflow-auto bg-white">

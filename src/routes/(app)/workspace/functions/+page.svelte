@@ -82,31 +82,25 @@
 
 {#if $functions !== null}
 	<div class="flex flex-col gap-1 mt-1.5 mb-2">
-		<div class="flex justify-between items-center">
-			<div class="flex md:self-center text-xl items-center font-medium px-0.5">
-				{$i18n.t('Functions')}
-				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-				<span class="text-base font-lg text-content-muted">{filteredItems.length}</span>
-			</div>
+		<div class="flex items-center text-xl font-medium px-0.5">
+			{$i18n.t('Functions')}
+			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class=" flex w-full space-x-4">
-			<div>
-				<a
-					class=" px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm flex items-center"
-					href="/workspace/functions/create"
-				>
-					<span class="i-lucide-plus size-3.5 block mr-1"></span>
-					{$i18n.t('Create Function')}
-				</a>
-			</div>
+		<div class="flex gap-4">
+			<a
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				href="/workspace/functions/create"
+			>
+				<span class="i-lucide-plus size-3.5 block mr-1"></span>
+				{$i18n.t('Create Function')}
+			</a>
 
-			<div class="flex bg-surface-raised">
-				<div class=" self-center ml-1 mr-3">
-					<span class="i-lucide-search size-3.5 block"></span>
-				</div>
+			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
-					class="w-48 text-sm pr-4 py-1 rounded-r-xl outline-hidden"
+					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
 					bind:value={query}
 					placeholder={$i18n.t('Search Functions')}
 				/>
@@ -120,58 +114,45 @@
 		</div>
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each group.items as func (func.id)}
-				<div
-					class=" flex space-x-4 cursor-pointer w-full px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl"
-				>
+				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
 					<a
-						class=" flex flex-1 space-x-3.5 cursor-pointer w-full min-w-0"
+						class="flex-1 min-w-0 cursor-pointer"
 						href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
 					>
-						<div class="flex items-center text-left min-w-0">
-							<div class=" flex-1 self-center pl-1 min-w-0">
-								<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
-									{func.name}
-								</div>
-
-								<div class="flex gap-1.5 px-1">
-									<div class=" text-content-muted text-xs font-medium shrink-0">{func.id}</div>
-
-									<div class=" text-xs overflow-hidden text-ellipsis line-clamp-1">
-										{func.description}
-									</div>
-								</div>
-							</div>
+						<div class="font-semibold line-clamp-1">{func.name}</div>
+						<div class="flex gap-1.5 text-xs">
+							<span class="text-content-muted font-medium shrink-0">{func.id}</span>
+							<span class="line-clamp-1">{func.description}</span>
 						</div>
 					</a>
-					<div class="flex flex-row gap-0.5 self-center">
-						<Tooltip content={$i18n.t('Valves')}>
-							<button
-								class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-								type="button"
-								aria-label={$i18n.t('Valves')}
-								onclick={() => {
-									selectedFunction = func;
-									showValvesModal = true;
-								}}
-							>
-								<span class="i-lucide-settings size-4 block"></span>
-							</button>
-						</Tooltip>
 
-						<Tooltip content={$i18n.t('Delete')}>
-							<button
-								class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-								type="button"
-								aria-label={$i18n.t('Delete')}
-								onclick={() => {
-									selectedFunction = func;
-									showDeleteConfirm = true;
-								}}
-							>
-								<span class="i-lucide-trash-2 size-4 block"></span>
-							</button>
-						</Tooltip>
-					</div>
+					<Tooltip content={$i18n.t('Valves')}>
+						<button
+							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							aria-label={$i18n.t('Valves')}
+							onclick={() => {
+								selectedFunction = func;
+								showValvesModal = true;
+							}}
+						>
+							<span class="i-lucide-settings size-4 block"></span>
+						</button>
+					</Tooltip>
+
+					<Tooltip content={$i18n.t('Delete')}>
+						<button
+							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							aria-label={$i18n.t('Delete')}
+							onclick={() => {
+								selectedFunction = func;
+								showDeleteConfirm = true;
+							}}
+						>
+							<span class="i-lucide-trash-2 size-4 block"></span>
+						</button>
+					</Tooltip>
 				</div>
 			{/each}
 		</div>
