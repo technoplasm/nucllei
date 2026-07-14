@@ -238,9 +238,6 @@ type Config = {
 		allowed_extensions?: string[];
 	};
 	permissions?: UserPermissions;
-	license_metadata?: Record<string, unknown> | null;
-	user_count?: number;
-	active_entries?: number;
 };
 
 type PromptSuggestion = {

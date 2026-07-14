@@ -346,7 +346,6 @@ app.state.config = AppConfig(
 )
 
 app.state.WEBUI_NAME = WEBUI_NAME
-app.state.LICENSE_METADATA = None
 
 
 ########################################
@@ -459,7 +458,6 @@ app.state.AUTH_TRUSTED_EMAIL_HEADER = WEBUI_AUTH_TRUSTED_EMAIL_HEADER
 app.state.AUTH_TRUSTED_NAME_HEADER = WEBUI_AUTH_TRUSTED_NAME_HEADER
 app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
 
-app.state.USER_COUNT = None
 app.state.TOOLS = {}
 app.state.FUNCTIONS = {}
 
@@ -1005,7 +1003,6 @@ async def get_app_config(request: Request):
             {
                 "default_models": app.state.config.DEFAULT_MODELS,
                 "default_prompt_suggestions": app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
-                "user_count": user_count,
                 "audio": {
                     "tts": {
                         # llens(#53 フォロー): enable=False で FE がアイコンごと非表示
@@ -1026,14 +1023,6 @@ async def get_app_config(request: Request):
                     "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
                 },
                 "permissions": {**app.state.config.USER_PERMISSIONS},
-                "license_metadata": app.state.LICENSE_METADATA,
-                **(
-                    {
-                        "active_entries": app.state.USER_COUNT,
-                    }
-                    if user.role == "admin"
-                    else {}
-                ),
             }
             if user is not None
             else {}
