@@ -121,12 +121,22 @@ text join へ切替。
 { "type": "code_interpreter", ... }        // 現行踏襲・薄く(自前ツール移行で消える面)
 ```
 
-**middleware の扱い(#23 同梱判断)**: L0 では物理分割しない。内部の
-content_blocks 状態機械は v0.6.5 実装をそのまま核とし、wire 変換
-`snapshot_content_blocks()` を追加するだけに留める(リプレイテストは
-`process_chat_response` 境界で書けており分割は前提でない)。#23 の分割は
-「ブロック組み立て(assembler)を独立モジュール化 → filter / tool ループ /
-永続化をオーケストレーション層に残す」方向で、L0 安定後に着手。
+**middleware の扱い(#23 同梱判断 → 2026-07-14 実施済み)**: L0 時点では
+物理分割しない判断だったが、L0 / #18 / #20 安定後に #23 として実施した。
+現在の構成:
+
+- `utils/response_assembler.py` — **assembler**(デルタ→content_blocks の
+  状態機械 + reasoning の閉じ規律①②③)。I/O レスで単体テスト
+  (`test_response_assembler.py`)で固定
+- `utils/content_blocks.py` — wire / 永続化変換 + モデル向け履歴変換
+  (`convert_content_blocks_to_messages`)。details 擬似 HTML を生成する
+  コードは backend から消滅(旧 serialize_content_blocks は text join に
+  縮退して吸収)
+- `utils/skills.py` — skill 発火(`/command` + load_skill)一式
+- `utils/middleware.py` — オーケストレーションのみ(inlet 準備 /
+  `consume_model_stream`(SSE + filter + emit)/ tool 実行ループ / 永続化・
+  タイトル生成)。code_interpreter・solution 等のタグ検出実行系は全撤去
+  (コード実行は tool 一本 — tool 外実行の裏道を残さない)
 
 ## 4. 教訓(cage メモより)
 
