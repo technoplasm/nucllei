@@ -24,7 +24,6 @@
 	export let token;
 	export let lang = '';
 	export let code = '';
-	export let attributes = {};
 
 	export let className = 'my-2';
 	export let editorClassName = '';
@@ -43,12 +42,9 @@
 
 	let mermaidHtml = null;
 
-	// llens(#67): UI からのコード実行(Run ボタン)は撤去。stdout/stderr/result は
-	// code_interpreter の実行結果(attributes.output)表示用に残る。
-	let stdout = null;
-	let stderr = null;
-	let result = null;
-
+	// llens(#67/#23): UI からのコード実行(Run ボタン)も code_interpreter の
+	// 実行結果表示(attributes.output)も撤去 — コード実行は tool 一本で、
+	// 結果は tool_calls ブロック側に表示される。
 	let copied = false;
 	let saved = false;
 
@@ -108,36 +104,6 @@
 	}
 
 	$: onCode({ lang, code });
-
-	$: if (attributes) {
-		onAttributesUpdate();
-	}
-
-	const onAttributesUpdate = () => {
-		if (attributes?.output) {
-			// Create a helper function to unescape HTML entities
-			const unescapeHtml = (html) => {
-				const textArea = document.createElement('textarea');
-				textArea.innerHTML = html;
-				return textArea.value;
-			};
-
-			try {
-				// Unescape the HTML-encoded string
-				const unescapedOutput = unescapeHtml(attributes.output);
-
-				// Parse the unescaped string into JSON
-				const output = JSON.parse(unescapedOutput);
-
-				// Assign the parsed values to variables
-				stdout = output.stdout;
-				stderr = output.stderr;
-				result = output.result;
-			} catch (error) {
-				console.error('Error:', error);
-			}
-		}
-	};
 
 	onMount(async () => {
 		console.log('codeblock', lang, code);
@@ -217,9 +183,7 @@
 			<div
 				class="language-{lang} rounded-t-lg -mt-8 {editorClassName
 					? editorClassName
-					: stdout || stderr || result
-						? ''
-						: 'rounded-b-lg'} overflow-hidden"
+					: 'rounded-b-lg'} overflow-hidden"
 			>
 				<div class=" pt-7 bg-gray-50 dark:bg-gray-850"></div>
 
@@ -253,31 +217,6 @@
 					id="plt-canvas-{id}"
 					class="bg-gray-50 dark:bg-[#202123] dark:text-white max-w-full overflow-x-auto scrollbar-hidden"
 				/>
-
-				{#if stdout || stderr || result}
-					<div
-						class="bg-gray-50 dark:bg-[#202123] dark:text-white rounded-b-lg! py-4 px-4 flex flex-col gap-2"
-					>
-						{#if stdout || stderr}
-							<div class=" ">
-								<div class=" text-content-muted text-xs mb-1">STDOUT/STDERR</div>
-								<div
-									class="text-sm {stdout?.split('\n')?.length > 100
-										? `max-h-96`
-										: ''}  overflow-y-auto"
-								>
-									{stdout || stderr}
-								</div>
-							</div>
-						{/if}
-						{#if result}
-							<div class=" ">
-								<div class=" text-content-muted text-xs mb-1">RESULT</div>
-								<div class="text-sm">{`${JSON.stringify(result)}`}</div>
-							</div>
-						{/if}
-					</div>
-				{/if}
 			{/if}
 		{/if}
 	</div>

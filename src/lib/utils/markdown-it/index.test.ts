@@ -9,17 +9,6 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(tokens.some((t) => t.type === 'hr')).toBe(true);
 	});
 
-	it('setext join 境界: </details> 直後の --- が heading を飲み込まない(#14 受け入れ基準)', () => {
-		// 旧 prod の実害(serialize が </details> の直後に裸の --- を並べ、marked の
-		// lheading が直前段落まで h2 に飲み込む)を再現。L0 で details 直列化は廃止済み
-		// だが、レガシー本文に details が残るケースでも lheading 無効で heading 化しない。
-		const src =
-			'<details type="reasoning" done="true"><summary>x</summary>思考</details>\n\n本文段落\n---\n次の段落';
-		const tokens = lex(src);
-		expect(tokens.some((t) => t.type === 'heading')).toBe(false);
-		expect(tokens.some((t) => t.type === 'hr')).toBe(true);
-	});
-
 	it('ATX 見出しは heading になる', () => {
 		const [h] = lex('## 見出し');
 		expect(h.type).toBe('heading');
@@ -95,43 +84,14 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(html).toBeTruthy();
 	});
 
-	it('レガシー <details> を details トークンへ復元', () => {
-		const [d] = lex(
-			'<details type="reasoning" done="true" duration="2">\n<summary>Thought for 2 seconds</summary>\n本文\n</details>'
-		);
-		expect(d.type).toBe('details');
-		expect(d.summary).toBe('Thought for 2 seconds');
-		expect(d.attributes.type).toBe('reasoning');
-		expect(d.attributes.duration).toBe('2');
-	});
-
-	it('#48 回帰: 本文に空行を含む <details> でも </details> が漏れない', () => {
-		// CommonMark 既定では <details> は HTML block type 6(空行で閉じる)なので、
-		// reasoning 本文に空行があると details が分断され末尾 </details> が孤立して
-		// リテラル表示された。details_block ルールで空行を跨ぎ 1 ブロックに保つ。
+	it('details 擬似 HTML は互換処理せず html トークンとして素通しする(旧データ互換なし)', () => {
+		// 旧フォーマットの読み取りフォールバックは持たない(CLAUDE.md 絶対制約)。
+		// <details> は他の生 HTML と同じく html トークン → 描画側 DOMPurify に任せる。
 		const tokens = lex(
-			'<details type="reasoning" done="true" duration="2">\n<summary>Thought for 2 seconds</summary>\n最初の思考。\n\n二段落目の思考。\n</details>\n\n答えの本文です。'
+			'<details type="reasoning" done="true"><summary>x</summary>思考</details>'
 		);
-		const d = tokens.find((t) => t.type === 'details');
-		expect(d).toBeDefined();
-		// reasoning 本文は空行込みで details 内に保持される
-		expect(d.text).toContain('最初の思考。');
-		expect(d.text).toContain('二段落目の思考。');
-		// 孤立した </details> の html トークンが本文に残らない
-		const leaked = JSON.stringify(tokens).includes('</details>');
-		expect(leaked).toBe(false);
-		// 回答本文は details の外に段落として存在する
-		expect(tokens.some((t) => t.type === 'paragraph')).toBe(true);
-	});
-
-	it('#48 回帰: 閉じ未着(ストリーミング途中)の <details> も畳める', () => {
-		const tokens = lex(
-			'<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n途中まで考えて\n\nまだ続く'
-		);
-		const d = tokens.find((t) => t.type === 'details');
-		expect(d).toBeDefined();
-		expect(d.attributes.done).toBe('false');
-		expect(JSON.stringify(tokens).includes('<details')).toBe(false);
+		expect(tokens.some((t) => t.type === 'details')).toBe(false);
+		expect(tokens.some((t) => t.type === 'html')).toBe(true);
 	});
 
 	it('render() は HTML を返し、code fence を hljs でハイライトする', () => {

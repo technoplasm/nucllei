@@ -6,7 +6,6 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { lex } from '$lib/utils/markdown-it';
 	type Token = any;
 	import { unescapeHtml } from '$lib/utils';
 	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
@@ -17,7 +16,6 @@
 	import MarkdownInlineTokens from '$lib/components/chat/Messages/Markdown/MarkdownInlineTokens.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
 	import AlertRenderer, { alertComponent } from './AlertRenderer.svelte';
-	import Collapsible from '$lib/components/common/Collapsible.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 
@@ -29,7 +27,6 @@
 	export let id: string;
 	export let tokens: Token[];
 	export let top = true;
-	export let attributes = {};
 
 	export let save = false;
 
@@ -93,7 +90,6 @@
 				{token}
 				lang={token?.lang ?? ''}
 				code={token?.text ?? ''}
-				{attributes}
 				{save}
 				onCode={(value) => {
 					dispatch('code', value);
@@ -246,24 +242,6 @@
 				{/each}
 			</ul>
 		{/if}
-	{:else if token.type === 'details'}
-		<Collapsible
-			title={token.summary}
-			open={$settings?.expandDetails ?? false}
-			attributes={token?.attributes}
-			className="w-full space-y-1"
-			dir="auto"
-		>
-			<div class=" mb-1.5" slot="content">
-				<svelte:self
-					id={`${id}-${tokenIdx}-d`}
-					tokens={lex(token.text)}
-					attributes={token?.attributes}
-					{onTaskClick}
-					{onSourceClick}
-				/>
-			</div>
-		</Collapsible>
 	{:else if token.type === 'html'}
 		{@const html = DOMPurify.sanitize(token.text)}
 		{#if html && html.includes('<video')}

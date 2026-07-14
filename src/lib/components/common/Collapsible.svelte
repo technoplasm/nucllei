@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { decode } from 'html-entities';
 	import { v4 as uuidv4 } from 'uuid';
 
 	import { getContext, createEventDispatcher, onMount } from 'svelte';
@@ -43,7 +42,6 @@
 	import {
 		classifyToolResult,
 		formatJSONString,
-		parseJSONString,
 		parseToolArgumentsStreaming
 	} from '$lib/utils/tool-render';
 
@@ -75,9 +73,7 @@
 	// llens(#17): reasoning / tool 結果を下端からも閉じられるようにする
 	// (開閉ボタンがヘッダにしか無いと、長い展開の末尾から先頭へ戻る必要がある)
 	let rootElement: HTMLElement | null = null;
-	$: showBottomCollapse = ['reasoning', 'tool_calls', 'code_interpreter'].includes(
-		attributes?.type
-	);
+	$: showBottomCollapse = ['reasoning', 'tool_calls'].includes(attributes?.type);
 
 	const collapseFromBottom = () => {
 		open = false;
@@ -135,12 +131,6 @@
 							{/if}
 						{:else}
 							{$i18n.t('Thinking...')}
-						{/if}
-					{:else if attributes?.type === 'code_interpreter'}
-						{#if attributes?.done === 'true'}
-							{$i18n.t('Analyzed')}
-						{:else}
-							{$i18n.t('Analyzing...')}
 						{/if}
 					{:else if attributes?.type === 'tool_calls'}
 						{#if attributes?.done === 'true'}
@@ -215,13 +205,11 @@
 	{/if}
 
 	{#if attributes?.type === 'tool_calls'}
-		<!-- decode は旧 details 経路(entity エンコード文字列)の正規化点。content_blocks
-		     経路は生の文字列/配列を渡すため decode は実質 no-op。files は配列で来る -->
-		{@const args = decode(attributes?.arguments ?? '')}
-		{@const result = decode(attributes?.result ?? '')}
-		{@const files = Array.isArray(attributes?.files)
-			? attributes.files
-			: parseJSONString(decode(attributes?.files ?? ''))}
+		<!-- content_blocks 経路(#17 L0)は生の文字列/配列がそのまま来る
+		     (旧 details 経路の entity decode は撤去 — 旧データ互換なし)。 -->
+		{@const args = attributes?.arguments ?? ''}
+		{@const result = attributes?.result ?? ''}
+		{@const files = Array.isArray(attributes?.files) ? attributes.files : []}
 
 		{#if !grow}
 			{#if open && !hide}

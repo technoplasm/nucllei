@@ -102,8 +102,13 @@ reasoning ブロックの終了は**タグ対(`</think>`)や content 到着で�
 **永続化(#27)**: chat テーブルの JSON blob 続投。message オブジェクトに
 `content_blocks` を追加する(正規化テーブルは #19/監査要件の具体化まで見送り)。
 `content` は移行完了後「text ブロックの join」の派生値になる(会話検索・
-タイトル生成・API 互換用)。旧メッセージ(details 擬似 HTML 埋め込み)は
-`content_blocks` 不在 → フロントが旧パスで表示する読み取りフォールバック。
+タイトル生成・API 互換用)。~~旧メッセージ(details 擬似 HTML 埋め込み)は
+`content_blocks` 不在 → フロントが旧パスで表示する読み取りフォールバック。~~
+→ **改訂(2026-07-14): 読み取りフォールバックは撤去した**。fresh DB で
+新規稼働するため旧データ互換を持たない(CLAUDE.md 絶対制約)。details
+擬似 HTML の再パース(parseDetails / details トークン / removeDetails 系)は
+フロントからも消滅。`content_blocks` 不在の content は素の markdown として
+描画される(非 stream 応答・エラー表示用のパスであり互換機構ではない)。
 
 **イベント**: `chat:completion` の data に `content_blocks`(累積スナップショット、
 差分ではない)を追加。既存 `content` 文字列は移行期間中並走させ、フロント切替後に

@@ -38,48 +38,10 @@ const md = new MarkdownIt({
 // reference = `[foo]: url` の参照リンク定義。どちらもストリーミングで壊れる。
 md.disable(['lheading', 'reference']);
 
-// llens(#22 移行以来の潜在バグ・#48 作業中に発見): `<details ...>` を空行を跨いで `</details>` まで 1 つの html_block
-// として消費する。CommonMark 既定では `<details>` は HTML block type 6 で「空行で閉じる」
-// ため、reasoning 本文(<details type="reasoning">…</details>)に空行があると details が
-// 分断され、末尾の閉じ `</details>` だけが孤立した html_block になる。parseDetails は開始
-// タグを見つけられず {type:'html', text:'</details>'} を生成し、MarkdownTokens の html
-// フォールバックがリテラル文字列として本文に出してしまう。type 1-5 と同じ「終端タグまで
-// 空行を跨ぐ」挙動に寄せ、details 全体を 1 トークンに保つことで parseDetails が正しく畳む。
-md.block.ruler.before(
-	'html_block',
-	'details_block',
-	(state: any, startLine: number, endLine: number, silent: boolean): boolean => {
-		const pos = state.bMarks[startLine] + state.tShift[startLine];
-		const max = state.eMarks[startLine];
-		// インデント 4 以上はコードブロック扱い
-		if (state.sCount[startLine] - state.blkIndent >= 4) return false;
-		if (state.src.charCodeAt(pos) !== 0x3c /* < */) return false;
-		const lineText = state.src.slice(pos, max);
-		if (!/^<details(\s|>|$)/i.test(lineText)) return false;
-		if (silent) return true;
-
-		let nextLine = startLine;
-		let closed = /<\/details>/i.test(lineText);
-		if (!closed) {
-			for (nextLine = startLine + 1; nextLine < endLine; nextLine++) {
-				const lPos = state.bMarks[nextLine] + state.tShift[nextLine];
-				const lMax = state.eMarks[nextLine];
-				if (/<\/details>/i.test(state.src.slice(lPos, lMax))) {
-					closed = true;
-					break;
-				}
-			}
-		}
-		// 閉じ未着(ストリーミング途中)は残り全体を 1 ブロックに。parseDetails は
-		// 閉じタグが無くても開始タグ側で畳めるので、途中経過も collapsible で描画される。
-		const lastLine = closed ? nextLine + 1 : endLine;
-		state.line = lastLine;
-		const token = state.push('html_block', '', 0);
-		token.map = [startLine, lastLine];
-		token.content = state.getLines(startLine, lastLine, state.blkIndent, true);
-		return true;
-	}
-);
+// 旧 details 擬似 HTML(<details type="reasoning"> 等)の互換処理
+// (details_block ルーラ + parseDetails)は撤去済み — 旧データ互換を
+// 持たない方針(CLAUDE.md 絶対制約、2026-07-14)。reasoning / tool_calls は
+// content_blocks(#17 L0)で構造のまま届き、本文に details 擬似 HTML は現れない。
 
 interface AnyToken {
 	type: string;
@@ -177,24 +139,6 @@ function convertInline(children: MDToken[] | null): AnyToken[] {
 	return out;
 }
 
-// `<details ...>` の html ブロックを details トークンに変換(レガシー互換)。
-function parseDetails(html: string): AnyToken | null {
-	const openMatch = html.match(/^<details([^>]*)>/i);
-	if (!openMatch) return null;
-	const attributes: Record<string, string> = {};
-	for (const m of openMatch[1].matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) {
-		attributes[m[1]] = m[2];
-	}
-	const inner = html
-		.replace(/^<details[^>]*>/i, '')
-		.replace(/<\/details>\s*$/i, '')
-		.trim();
-	const summaryMatch = inner.match(/^<summary>([\s\S]*?)<\/summary>/i);
-	const summary = summaryMatch ? summaryMatch[1].trim() : '';
-	const text = summaryMatch ? inner.slice(summaryMatch[0].length).trim() : inner;
-	return { type: 'details', summary, text, attributes };
-}
-
 // markdown-it のブロックトークン列(フラット)を marked 互換ツリーへ。
 // cursor を進めながら *_open ... *_close を再帰的に畳む。
 function convertBlocks(tokens: MDToken[], start = 0, stopType: string | null = null) {
@@ -249,8 +193,7 @@ function convertBlocks(tokens: MDToken[], start = 0, stopType: string | null = n
 				i += 1;
 				break;
 			case 'html_block': {
-				const details = parseDetails(tok.content.trim());
-				out.push(details ?? { type: 'html', text: tok.content, raw: tok.content });
+				out.push({ type: 'html', text: tok.content, raw: tok.content });
 				i += 1;
 				break;
 			}

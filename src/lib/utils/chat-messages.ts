@@ -76,7 +76,7 @@ export const expandAssistantToolHistory = (
 				});
 			}
 		}
-		// reasoning / code_interpreter は再送しない
+		// reasoning は再送しない
 	}
 
 	const trailing = textBuffer.join('\n\n');

@@ -41,9 +41,7 @@
 		promptTemplate,
 		splitStream,
 		sleep,
-		removeDetails,
 		getPromptVariables,
-		processDetails
 	} from '$lib/utils';
 	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
 
@@ -1224,10 +1222,7 @@
 						content: promptTemplate(params?.system ?? '', $user?.name, undefined)
 					}
 				: undefined,
-			...createMessagesList(_history, responseMessageId).map((message) => ({
-				...message,
-				content: processDetails(message.content)
-			}))
+			...createMessagesList(_history, responseMessageId)
 		].filter((message) => message);
 
 		messages = messages

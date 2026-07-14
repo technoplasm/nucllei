@@ -21,8 +21,6 @@
 		sanitizeResponseContent,
 		createMessagesList,
 		formatDate,
-		removeDetails,
-		removeAllDetails
 	} from '$lib/utils';
 	import { WEBUI_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
@@ -147,8 +145,6 @@
 	let generatingImage = false;
 
 	const copyToClipboard = async (text) => {
-		text = removeAllDetails(text);
-
 		const res = await _copyToClipboard(text, $settings?.copyFormatted ?? false);
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
