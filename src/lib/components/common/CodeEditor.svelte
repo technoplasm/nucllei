@@ -19,6 +19,18 @@
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
+	// light テーマ: 公式パッケージは one-dark しかないため、light は背景まわりだけ
+	// デザイントークンに固定する薄い自前テーマを当てる(syntax 色は default highlight のまま。
+	// 未指定だと透明背景になり、置かれた面と同化してしまう)。
+	const lightTheme = EditorView.theme({
+		'&': { backgroundColor: 'var(--surface-raised)' },
+		'.cm-gutters': {
+			backgroundColor: 'var(--surface-muted)',
+			color: 'var(--content-subtle)',
+			border: 'none'
+		}
+	});
+
 	export let boilerplate = '';
 	export let value = '';
 
@@ -167,7 +179,6 @@
 	};
 
 	onMount(() => {
-		console.log(value);
 		if (value === '') {
 			value = boilerplate;
 		}
@@ -186,11 +197,9 @@
 			parent: document.getElementById(`code-textarea-${id}`)
 		});
 
-		if (isDarkMode) {
-			codeEditor.dispatch({
-				effects: editorTheme.reconfigure(oneDark)
-			});
-		}
+		codeEditor.dispatch({
+			effects: editorTheme.reconfigure(isDarkMode ? oneDark : lightTheme)
+		});
 
 		// listen to html class changes this should fire only when dark mode is toggled
 		const observer = new MutationObserver((mutations) => {
@@ -200,15 +209,9 @@
 
 					if (_isDarkMode !== isDarkMode) {
 						isDarkMode = _isDarkMode;
-						if (_isDarkMode) {
-							codeEditor.dispatch({
-								effects: editorTheme.reconfigure(oneDark)
-							});
-						} else {
-							codeEditor.dispatch({
-								effects: editorTheme.reconfigure()
-							});
-						}
+						codeEditor.dispatch({
+							effects: editorTheme.reconfigure(_isDarkMode ? oneDark : lightTheme)
+						});
 					}
 				}
 			});
