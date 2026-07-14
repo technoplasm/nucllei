@@ -94,7 +94,7 @@
 									`/workspace/${tab.path}`
 								)
 									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+									: 'text-content-subtle hover:text-content'} transition"
 								href={`/workspace/${tab.path}`}>{$i18n.t(tab.label)}</a
 							>
 						{/each}

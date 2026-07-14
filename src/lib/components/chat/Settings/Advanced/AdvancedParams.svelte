@@ -298,7 +298,7 @@
 <div class=" space-y-1 text-sm pb-safe-bottom">
 	{#each sections as section, sectionIndex}
 		<div
-			class="text-md font-semibold text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800 pb-1 mb-2 {sectionIndex >
+			class="text-md font-semibold text-content-muted border-b border-gray-100 dark:border-gray-800 pb-1 mb-2 {sectionIndex >
 			0
 				? 'mt-4'
 				: ''}"
@@ -373,13 +373,13 @@
 												value={params[item.key]}
 												on:input={(e) =>
 													item.inputType === 'number' ? setNumber(item, e) : setText(item, e)}
-												class="w-full rounded-lg py-1 px-1 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+												class="w-full rounded-lg py-1 px-1 text-sm text-content dark:bg-gray-850 outline-hidden"
 												autocomplete="off"
 												min={item.min}
 											/>
 										</div>
 									{:else if item.type === 'switch'}
-										<div class="text-sm text-gray-500">
+										<div class="text-sm text-content-muted">
 											{params[item.key] ? 'Enabled' : 'Disabled'}
 										</div>
 										<div class=" pr-2">

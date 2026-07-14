@@ -156,7 +156,7 @@
 			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
 				{$i18n.t('Chats')}
 				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300">{total}</span>
+				<span class="text-lg font-medium text-content-muted">{total}</span>
 			</div>
 		</div>
 
@@ -175,20 +175,20 @@
 		</div>
 
 		<!-- フィルタ: ユーザー(単一選択・空 = 全員)/ モデル / 更新日時範囲 / 読み込み数 -->
-		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-sm text-gray-500">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-sm text-content-muted">
 			<div class="flex items-center gap-0.5">
 				<select
 					class="dark:bg-gray-900 w-fit pr-6 rounded-sm bg-transparent outline-hidden {selectedUserId
 						? ''
-						: 'text-gray-500'}"
+						: 'text-content-subtle'}"
 					bind:value={selectedUserId}
 					on:change={() => {
 						fetchChats(false);
 					}}
 				>
-					<option class=" text-gray-700" value="">{$i18n.t('All Users')}</option>
+					<option class=" text-content" value="">{$i18n.t('All Users')}</option>
 					{#each owners as owner}
-						<option class=" text-gray-700" value={owner.id}
+						<option class=" text-content" value={owner.id}
 							>{owner.name} ({owner.chat_count})</option
 						>
 					{/each}
@@ -199,15 +199,15 @@
 				<select
 					class="dark:bg-gray-900 w-fit pr-6 rounded-sm bg-transparent outline-hidden {selectedModel
 						? ''
-						: 'text-gray-500'}"
+						: 'text-content-subtle'}"
 					bind:value={selectedModel}
 					on:change={() => {
 						fetchChats(false);
 					}}
 				>
-					<option class=" text-gray-700" value="">{$i18n.t('All Models')}</option>
+					<option class=" text-content" value="">{$i18n.t('All Models')}</option>
 					{#each models as model}
-						<option class=" text-gray-700" value={model.model}
+						<option class=" text-content" value={model.model}
 							>{model.model} ({model.chat_count})</option
 						>
 					{/each}
@@ -252,7 +252,7 @@
 	</div>
 
 	{#if chats.length === 0}
-		<div class="mt-4 w-full flex justify-center items-center py-16 text-sm text-gray-500">
+		<div class="mt-4 w-full flex justify-center items-center py-16 text-sm text-content-muted">
 			{$i18n.t('No chats found')}
 		</div>
 	{:else}
@@ -260,10 +260,10 @@
 			class="mt-4 scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
 			<table
-				class="w-full text-sm text-left text-gray-500 dark:text-gray-400 table-auto max-w-full rounded-sm"
+				class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm"
 			>
 				<thead
-					class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-850 dark:text-gray-400 -translate-y-0.5"
+					class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
 				>
 					<tr class="">
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Title')}</th>
@@ -296,31 +296,31 @@
 							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
 							on:click={() => openChat(chat)}
 						>
-							<td class="px-3 py-1 font-medium text-gray-900 dark:text-white">
+							<td class="px-3 py-1 font-medium text-content">
 								<div class="max-w-80">
 									<div class="flex items-center gap-1.5">
 										<div class="font-medium truncate">{chat.title}</div>
 										{#if chat.share_id}
 											<span
-												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-content-muted shrink-0"
 												>{$i18n.t('Shared')}</span
 											>
 										{/if}
 										{#if chat.archived}
 											<span
-												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-content-muted shrink-0"
 												>{$i18n.t('Archived')}</span
 											>
 										{/if}
 										{#if chat.pinned}
 											<span
-												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-gray-500 shrink-0"
+												class="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-850 text-[10px] font-normal text-content-muted shrink-0"
 												>{$i18n.t('Pinned')}</span
 											>
 										{/if}
 									</div>
 									{#if chat.snippet}
-										<div class="font-normal text-gray-500 truncate mt-0.5">{chat.snippet}</div>
+										<div class="font-normal text-content-muted truncate mt-0.5">{chat.snippet}</div>
 									{/if}
 								</div>
 							</td>
@@ -352,7 +352,7 @@
 	{#if chats.length < total}
 		<div class="w-full flex justify-center pb-6 -mt-2">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 dark:text-gray-300 dark:hover:text-white transition flex items-center gap-2"
+				class="px-3.5 py-1.5 text-sm font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-content dark:hover:text-white transition flex items-center gap-2"
 				type="button"
 				disabled={loading}
 				on:click={() => fetchChats(true)}

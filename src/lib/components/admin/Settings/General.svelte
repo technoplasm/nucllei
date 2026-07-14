@@ -536,7 +536,7 @@
 						{/if}
 
 						<div class="my-1.5">
-							<div class="text-xs text-gray-500">
+							<div class="text-xs text-content-muted">
 								{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
 							</div>
 						</div>

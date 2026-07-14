@@ -67,7 +67,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   自前 max-w を持たず継承する(4a71ddc94/dbb2556d3 で Settings/ModelEditor の自前 max-w 撤去)。
   上部メニューも同じ 5xl に揃える。値は 3xl(768)→ **5xl(1024)**(submenu 分を足した)。
 - **左サブメニュー**(`lg` 以上で `lg:flex-col lg:w-40` の縦タブ、未満は横スクロール行)+ 右コンテンツ `flex-1`。
-  ボタンは アクティブ=既定文字色(pill なし)/ 非アクティブ=`text-gray-300 dark:text-gray-600`、
+  ボタンは アクティブ=既定文字色(pill なし)/ 非アクティブ=`text-content-subtle`(hover で `text-content`)、
   先頭に class アイコン(`i-lucide-*`)。真実源は `admin/Settings.svelte` のタブ。
   - 少数タブ(モデル編集は 3 個)は `flex-1` だと狭幅で全幅に間延びするため **`flex-none`**(左詰め)に
     (dbb2556d3)。settings は `flex-1 md:flex-none`。
