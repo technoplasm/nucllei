@@ -119,14 +119,20 @@ class TestToolCallAccumulation:
         a.handle_delta(
             {
                 "tool_calls": [
-                    {"index": 0, "id": "c0", "function": {"name": "f0", "arguments": ""}},
-                    {"index": 1, "id": "c1", "function": {"name": "f1", "arguments": ""}},
+                    {
+                        "index": 0,
+                        "id": "c0",
+                        "function": {"name": "f0", "arguments": ""},
+                    },
+                    {
+                        "index": 1,
+                        "id": "c1",
+                        "function": {"name": "f1", "arguments": ""},
+                    },
                 ]
             }
         )
-        a.handle_delta(
-            {"tool_calls": [{"index": 1, "function": {"arguments": "{}"}}]}
-        )
+        a.handle_delta({"tool_calls": [{"index": 1, "function": {"arguments": "{}"}}]})
 
         calls, _ = a.finish_stream()
         assert [c["id"] for c in calls] == ["c0", "c1"]

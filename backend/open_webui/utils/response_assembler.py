@@ -115,7 +115,10 @@ class ContentBlocksAssembler:
 
         reasoning_content = delta.get("reasoning_content") or delta.get("reasoning")
         if reasoning_content:
-            if not self.content_blocks or self.content_blocks[-1]["type"] != "reasoning":
+            if (
+                not self.content_blocks
+                or self.content_blocks[-1]["type"] != "reasoning"
+            ):
                 reasoning_block = {
                     "type": "reasoning",
                     "start_tag": "think",

@@ -694,7 +694,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     return form_data, metadata, events
 
 
-
 def blocks_event_data(content_blocks) -> dict:
     """content_blocks の現在形を chat:completion イベント / 永続化ペイロードにする。"""
     return {
@@ -944,9 +943,7 @@ async def consume_model_stream(
                                     metadata["chat_id"],
                                     metadata["message_id"],
                                     usage,
-                                    context_size=get_model_context_size(
-                                        request, model
-                                    ),
+                                    context_size=get_model_context_size(request, model),
                                 )
                             await event_emitter(
                                 {
@@ -1072,14 +1069,10 @@ async def execute_tool_calls(response_tool_calls, tools):
             spec = tool.get("spec", {})
 
             try:
-                allowed_params = (
-                    spec.get("parameters", {}).get("properties", {}).keys()
-                )
+                allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
 
                 tool_function_params = {
-                    k: v
-                    for k, v in tool_function_params.items()
-                    if k in allowed_params
+                    k: v for k, v in tool_function_params.items() if k in allowed_params
                 }
 
                 tool_function = tool["callable"]
@@ -1272,9 +1265,7 @@ async def process_chat_response(
                         }
                     )
 
-                    results = await execute_tool_calls(
-                        response_tool_calls, tools
-                    )
+                    results = await execute_tool_calls(response_tool_calls, tools)
 
                     assembler.set_tool_results(results)
 

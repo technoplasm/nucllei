@@ -74,9 +74,7 @@ def _model_facing_text(blocks: list) -> str:
     改行区切り)を踏襲。reasoning はここに来る前に除外されている。
     """
     return "".join(
-        f"{block['content'].strip()}\n"
-        for block in blocks
-        if block["type"] == "text"
+        f"{block['content'].strip()}\n" for block in blocks if block["type"] == "text"
     ).strip()
 
 
