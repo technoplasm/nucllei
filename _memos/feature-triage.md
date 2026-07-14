@@ -170,6 +170,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | /utils/code/format | tool/functions 開発用として残す |
 | /utils/db/download | 残す(admin 専有を維持)。持ち出し統制は #31 の監査で扱う |
 | pipelines router | 今後サポートの可能性があるため温存 |
+| OTEL トレーシング(`utils/telemetry/` + opentelemetry 依存 8 本) | **残す(2026-07-14 判断)**。閉域でも Grafana 等で SGLang 監視をしており、OTLP collector に繋いで遅延内訳(DB / SGLang / 添付)を追う可能性がある。既定 OFF(`ENABLE_OTEL`、env 直読み)のまま投資はしない |
 | ollama router | dev fallback として温存 |
 
 ### 別タスク
