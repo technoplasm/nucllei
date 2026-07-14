@@ -193,7 +193,6 @@
 	"Click here to select a py file.": "Pythonスクリプトファイルを選択するにはここをクリックしてください。",
 	"Click here to upload a workflow.json file.": "workflow.jsonファイルをアップロードするにはここをクリックしてください。",
 	"click here.": "ここをクリックしてください。",
-	"Click on the user role button to change a user's role.": "ユーザーの役割を変更するには、ユーザー役割ボタンをクリックしてください。",
 	"Clipboard write permission denied. Please check your browser settings to grant the necessary access.": "クリップボードへの書き込み許可がありません。ブラウザ設定を確認し許可してください。",
 	"Clone": "クローン",
 	"Clone Chat": "",

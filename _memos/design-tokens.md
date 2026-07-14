@@ -11,6 +11,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--surface` | メイン背景 | `bg-surface` | `#f6f6f6` / `#202020` |
 | `--surface-sidebar` | サイドバー背景 | `bg-surface-sidebar` | `#f0f0f0` / `#1b1b1b` |
 | `--surface-raised` | 入力欄など持ち上げ面 | `bg-surface-raised` | `#ffffff` / `#262626` |
+| `--surface-muted` | 控えめな帯(table thead 等) | `bg-surface-muted` | `#f0f0f0` / `#2d2d2d` |
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e9e9e9` / `#212121` |
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#e3e3e3` / `#262626` |
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |

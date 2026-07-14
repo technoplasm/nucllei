@@ -259,9 +259,7 @@
 			class="mt-4 scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5 mb-5"
 		>
 			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
-				<thead
-					class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
-				>
+				<thead class="text-xs text-content-muted uppercase bg-surface-muted">
 					<tr class="">
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Title')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('User')}</th>
@@ -290,7 +288,7 @@
 				<tbody class="">
 					{#each chats as chat (chat.id)}
 						<tr
-							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+							class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
 							on:click={() => openChat(chat)}
 						>
 							<td class="px-3 py-1 font-medium text-content">

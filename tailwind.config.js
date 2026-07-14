@@ -39,7 +39,9 @@ export default {
 					DEFAULT: 'var(--surface, #f9f9f9)',
 					sidebar: 'var(--surface-sidebar, #ececec)',
 					// 背景から1段持ち上げる面(チャット入力欄などのカード)。サーフェス基準で馴染む。
-					raised: 'var(--surface-raised, #ffffff)'
+					raised: 'var(--surface-raised, #ffffff)',
+					// 控えめな帯(table の thead など)。raised の上に置いて区別が付く濃さ。
+					muted: 'var(--surface-muted, #f0f0f0)'
 				},
 				// サイドバー行のインタラクション色(hover / 選択中)。実値は src/tailwind.css。
 				sidebar: {

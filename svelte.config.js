@@ -26,7 +26,15 @@ const config = {
 	},
 	onwarn: (warning, handler) => {
 		const { code } = warning;
-		if (code === 'css-unused-selector') return;
+		if (code === 'css-unused-selector' || code === 'css_unused_selector') return;
+		// llens(#70 A2): 行クリック等のポインタ補助に対する a11y 警告はミュート
+		// (キーボード経路は aria-label 付きの明示ボタンが担保する方針)。
+		// svelte-check 側は package.json の --compiler-warnings に同じ設定がある。
+		if (
+			code === 'a11y_no_noninteractive_element_interactions' ||
+			code === 'a11y_click_events_have_key_events'
+		)
+			return;
 
 		handler(warning);
 	}

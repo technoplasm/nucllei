@@ -52,6 +52,13 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
+  - **podman 環境(2026-07-14 確認)**: usermod や root は不要。rootless の user socket を立てて
+    docker-py に `DOCKER_HOST` で教えるだけ:
+    ```sh
+    systemctl --user enable --now podman.socket   # 一度だけ(enable で永続)
+    DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock PYTHONPATH=backend uv run pytest backend/open_webui/test -q
+    ```
+    conftest の `docker.from_env()` も pytest_docker の `get_docker_ip()` もこれでそのまま動く(338 passed 実証済み)。
 - **権限のネガティブテストは `mock_webui_user_strict` を使う**(test/util/mock_user.py、#55 で追加):
   従来の `mock_webui_user` は `get_admin_user` ごと差し替えるため **role="user" でも admin endpoint を
   素通りする**(401 を期待するテストが書けない)。strict 版は `get_current_user` だけを差し替えて

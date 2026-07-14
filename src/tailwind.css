@@ -16,8 +16,9 @@
 		   値の食い違いは「合計幅が溢れて justify-end で左端=サイドバーが切れる」バグになる) */
 		--sidebar-width: 300px;
 
-		--surface: #f6f6f6; /* light メイン背景(gray-50 相当) */
+		--surface: #f8f8f8; /* light メイン背景(gray-50 相当) */
 		--surface-raised: #ffffff; /* light 入力欄など(背景より少し明るい) */
+		--surface-muted: #f0f0f0; /* light 控えめな帯(table thead 等。raised より1段濃い) */
 		--surface-sidebar: #eeeeee; /* light サイドバー(gray-100 相当・1段濃い) */
 		--sidebar-hover: #e7e7e7; /* light サイドバー行 hover(gray-100 相当) */
 		--sidebar-selected: #dddddd; /* light サイドバー行 選択中(gray-200 相当・hover より濃い) */
@@ -27,13 +28,14 @@
 		   ※ var(--color-gray-*) は @config 構成では :root に出力されず空になるので使わない。
 		   利用側は text-content / text-content-muted / text-content-subtle */
 		--content: #333333; /* light 本文(gray-800 相当) */
-		--content-muted: #9b9b9b; /* light 2次・ラベル(gray-500 相当) */
-		--content-subtle: #b4b4b4; /* light placeholder・disabled(gray-400 相当) */
+		--content-muted: #909090; /* light 2次・ラベル(gray-500 相当) */
+		--content-subtle: #a0a0a0; /* light placeholder・disabled(gray-400 相当) */
 	}
 
 	html.dark {
 		--surface: #1a1a1a; /* dark メイン背景(gray-900) */
 		--surface-raised: #262626; /* dark 入力欄など(背景より少し明るい) */
+		--surface-muted: #2d2d2d; /* dark 控えめな帯(table thead 等。raised より1段明るい) */
 		--surface-sidebar: #212121; /* dark サイドバー(gray-950・1段濃い) */
 		--sidebar-hover: #292929; /* dark サイドバー行 hover(gray-825 相当) */
 		--sidebar-selected: #313131; /* dark サイドバー行 選択中(gray-850) */

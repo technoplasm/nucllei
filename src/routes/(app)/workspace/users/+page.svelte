@@ -3,7 +3,7 @@
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import dayjs from 'dayjs';
+	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	dayjs.extend(relativeTime);
@@ -11,12 +11,7 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { config, user as sessionUser } from '$lib/stores';
-	import {
-		deleteUserById,
-		getUserMetaFields,
-		getUsers,
-		updateUserRole
-	} from '$lib/apis/users';
+	import { deleteUserById, getUserMetaFields, getUsers } from '$lib/apis/users';
 
 	import Badge from '$lib/components/common/Badge.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -56,12 +51,24 @@
 	let sortOrder = $state('asc');
 
 	const SORTABLE_COLUMNS = [
-		{ key: 'role', label: 'Role' },
 		{ key: 'name', label: 'Name' },
+		{ key: 'role', label: 'Role' },
 		{ key: 'email', label: 'Email' },
 		{ key: 'last_active_at', label: 'Last Active' },
 		{ key: 'created_at', label: 'Created at' }
 	];
+
+	// 日付表示(fromNow / LL)を UI 言語に追従させる。dayjs.locale はグローバル設定
+	// ($lib/dayjs で全ロケール登録済み。ja-JP → ja のように登録名へ丸める。
+	// locale() は未登録名だと現在値を返すので、適用できた時点で打ち切る)
+	$effect(() => {
+		const lower = ($i18n.language ?? 'en').toLowerCase();
+		for (const candidate of [lower, lower.split('-')[0], 'en']) {
+			if (dayjs.locale(candidate) === candidate) {
+				break;
+			}
+		}
+	});
 
 	function setSortKey(key: string) {
 		if (sortKey === key) {
@@ -98,17 +105,6 @@
 		void selectedTab;
 		refreshUsers();
 	});
-
-	const updateRoleHandler = async (id: string, role: string) => {
-		const res = await updateUserRole(id, role).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			await refreshUsers();
-		}
-	};
 
 	const deleteUserHandler = async (id: string) => {
 		const res = await deleteUserById(id).catch((error) => {
@@ -217,9 +213,7 @@
 				class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
 			>
 				<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
-					<thead
-						class="text-xs text-content-muted uppercase bg-gray-50 dark:bg-gray-850 -translate-y-0.5"
-					>
+					<thead class="text-xs text-content-muted uppercase bg-surface-muted">
 						<tr>
 							{#each SORTABLE_COLUMNS as column (column.key)}
 								<th scope="col" class="px-3 py-1.5 select-none">
@@ -259,30 +253,14 @@
 					</thead>
 					<tbody>
 						{#each filteredUsers as user (user.id)}
-							<tr class="bg-white dark:bg-gray-900 text-xs">
-								<td class="px-3 py-1 min-w-[7rem] w-28">
-									<button
-										class=" translate-y-0.5"
-										onclick={() => {
-											if (user.role === 'user') {
-												updateRoleHandler(user.id, 'admin');
-											} else if (user.role === 'pending') {
-												updateRoleHandler(user.id, 'user');
-											} else {
-												updateRoleHandler(user.id, 'pending');
-											}
-										}}
-									>
-										<Badge
-											type={user.role === 'admin'
-												? 'info'
-												: user.role === 'user'
-													? 'success'
-													: 'muted'}
-											content={$i18n.t(user.role)}
-										/>
-									</button>
-								</td>
+							<!-- 行クリック=編集モーダル。キーボード操作は行末の編集ボタン(aria-label 付き)が担う -->
+							<tr
+								class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+								onclick={() => {
+									editTarget = user;
+									showUserModal = true;
+								}}
+							>
 								<td class="px-3 py-1 font-medium text-content w-max">
 									<div class="flex flex-row w-max">
 										<img
@@ -297,6 +275,16 @@
 
 										<div class=" font-medium self-center">{user.name}</div>
 									</div>
+								</td>
+								<td class="px-3 py-1 min-w-[7rem] w-28">
+									<Badge
+										type={user.role === 'admin'
+											? 'info'
+											: user.role === 'user'
+												? 'success'
+												: 'muted'}
+										content={$i18n.t(user.role)}
+									/>
 								</td>
 								<td class=" px-3 py-1"> {user.email} </td>
 
@@ -319,7 +307,8 @@
 												<button
 													class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 													aria-label={$i18n.t('Chats')}
-													onclick={() => {
+													onclick={(e) => {
+														e.stopPropagation();
 														showUserChatsModal = !showUserChatsModal;
 														selectedUser = user;
 													}}
@@ -333,7 +322,8 @@
 											<button
 												class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 												aria-label={$i18n.t('Edit User')}
-												onclick={() => {
+												onclick={(e) => {
+													e.stopPropagation();
 													editTarget = user;
 													showUserModal = true;
 												}}
@@ -347,7 +337,8 @@
 												<button
 													class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 													aria-label={$i18n.t('Delete User')}
-													onclick={() => {
+													onclick={(e) => {
+														e.stopPropagation();
 														showDeleteConfirmDialog = true;
 														selectedUser = user;
 													}}
@@ -362,10 +353,6 @@
 						{/each}
 					</tbody>
 				</table>
-			</div>
-
-			<div class=" text-content-muted text-xs mt-1.5 text-right">
-				ⓘ {$i18n.t("Click on the user role button to change a user's role.")}
 			</div>
 
 			<Pagination bind:page count={users.length} />

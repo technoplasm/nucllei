@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import dayjs from 'dayjs';
+	import dayjs from '$lib/dayjs';
 	import { getContext } from 'svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	dayjs.extend(localizedFormat);
