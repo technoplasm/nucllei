@@ -55,9 +55,25 @@ dependencies = [
     "langchain-community>=0.3.18",
 
     "fake-useragent==2.1.0",
-    # llens(#52): chromadb は OTEL FastAPI instrumentor(utils/telemetry)専用で存置。
-    # RAG ベクタ DB(pymilvus/qdrant/opensearch/elasticsearch)は RAG 撤去で全滅・撤去。
-    "chromadb==0.6.3",
+
+    # llens(#52): RAG ベクタ DB(chromadb/pymilvus/qdrant/opensearch/elasticsearch)は
+    # RAG 撤去で全滅・撤去。ただし chromadb は (1) OTEL instrumentor が同梱ヘルパ経由で使い、
+    # (2) typer(CLI)・opentelemetry stack・websocket-client(comfyui 画像生成)を推移的に
+    # 供給していたため、それらを直接依存へ昇格し、instrumentors.py を素の FastAPIInstrumentor
+    # 直呼びに置換して chromadb ごと撤去。
+    "typer==0.15.1",
+    "websocket-client==1.8.0",
+    "opentelemetry-api==1.31.1",
+    "opentelemetry-sdk==1.31.1",
+    "opentelemetry-exporter-otlp==1.31.1",
+    "opentelemetry-instrumentation==0.52b1",
+    "opentelemetry-instrumentation-fastapi==0.52b1",
+    "opentelemetry-instrumentation-sqlalchemy==0.52b1",
+    "opentelemetry-instrumentation-redis==0.52b1",
+    "opentelemetry-instrumentation-requests==0.52b1",
+    "opentelemetry-instrumentation-logging==0.52b1",
+    "opentelemetry-instrumentation-httpx==0.52b1",
+    "opentelemetry-instrumentation-aiohttp-client==0.52b1",
 
     "ftfy==6.2.3",
     "pypdf==4.3.1",

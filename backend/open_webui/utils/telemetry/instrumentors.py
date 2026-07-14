@@ -7,8 +7,8 @@ from aiohttp import (
     TraceRequestEndParams,
     TraceRequestExceptionParams,
 )
-from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import (
     HTTPXClientInstrumentor,
     RequestInfo,
@@ -177,7 +177,9 @@ class Instrumentor(BaseInstrumentor):
         return []
 
     def _instrument(self, **kwargs):
-        instrument_fastapi(app=self.app)
+        # llens(#52): chromadb 撤去。同梱の instrument_fastapi は素の
+        # FastAPIInstrumentor.instrument_app の薄いラッパにすぎないため直接呼ぶ。
+        FastAPIInstrumentor.instrument_app(self.app)
         SQLAlchemyInstrumentor().instrument(engine=self.db_engine)
         RedisInstrumentor().instrument(request_hook=redis_request_hook)
         RequestsInstrumentor().instrument(
