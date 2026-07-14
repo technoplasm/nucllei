@@ -74,15 +74,16 @@ class TestFunctionsMetadata(AbstractPostgresTest):
             "content": content,
         }
 
-    def test_create_requires_description(self):
-        """description(真実源)が空だと create は 400。"""
+    def test_create_allows_empty_description(self):
+        """description は任意 — 実行対象は per-model 割り当てで決まり、
+        description は UI メタデータにすぎないため、空でも create は 200。"""
         with mock_webui_user(id="admin1", role="admin"):
             res = self.fast_api_client.post(
                 self.create_url("/create"),
                 json=self._create_body("no_desc", "No Desc", ""),
             )
-        assert res.status_code == 400
-        assert self.Functions.get_function_by_id("no_desc") is None
+        assert res.status_code == 200
+        assert self.Functions.get_function_by_id("no_desc") is not None
 
     def test_create_requires_name(self):
         """name(真実源)が空だと create は 400。"""
@@ -94,8 +95,8 @@ class TestFunctionsMetadata(AbstractPostgresTest):
         assert res.status_code == 400
         assert self.Functions.get_function_by_id("no_name") is None
 
-    def test_update_requires_description(self):
-        """既存 function を description 空で更新すると 400。"""
+    def test_update_allows_empty_description(self):
+        """既存 function を description 空で更新しても 200(description は任意)。"""
         with mock_webui_user(id="admin1", role="admin"):
             created = self.fast_api_client.post(
                 self.create_url("/create"),
@@ -108,7 +109,8 @@ class TestFunctionsMetadata(AbstractPostgresTest):
             res = self.fast_api_client.post(
                 self.create_url("/id/upd_probe/update"), json=body
             )
-        assert res.status_code == 400
+        assert res.status_code == 200
+        assert self.Functions.get_function_by_id("upd_probe").description == ""
 
     def test_frontmatter_is_not_parsed_and_manifest_removed(self):
         """content の frontmatter は退役 — manifest フィールドは meta から撤去され、

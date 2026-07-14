@@ -23,16 +23,13 @@ router = APIRouter()
 
 def validate_function_metadata(form_data: FunctionForm) -> None:
     """llens(#45): function の frontmatter 退役に伴い、title(name)/description は
-    DB フィールドが唯一の真実源。どちらかが空なら 400 で保存を拒否する(tool 版 #44 と同型)。"""
+    DB フィールドが唯一の真実源。name が空なら 400 で保存を拒否する(tool 版 #44 と同型)。
+    description は任意 — 実行対象の選択は per-model 割り当てで決まり、
+    description は一覧 UI 用メタデータにすぎない。"""
     if not (form_data.name or "").strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Function name is required",
-        )
-    if not ((form_data.description or "").strip()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Function description is required",
         )
 
 

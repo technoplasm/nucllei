@@ -49,15 +49,16 @@ class TestToolsMetadata(AbstractPostgresTest):
             "content": content,
         }
 
-    def test_create_requires_description(self):
-        """description(真実源)が空だと create は 400。"""
+    def test_create_allows_empty_description(self):
+        """description は任意 — モデルの使用判断は docstring 由来の specs が担うため、
+        空でも create は 200(UI メタデータにすぎない)。"""
         with mock_webui_user(id="admin1", role="admin"):
             res = self.fast_api_client.post(
                 self.create_url("/create"),
                 json=self._create_body("no_desc", "No Desc", ""),
             )
-        assert res.status_code == 400
-        assert self.Tools.get_tool_by_id("no_desc") is None
+        assert res.status_code == 200
+        assert self.Tools.get_tool_by_id("no_desc") is not None
 
     def test_create_requires_name(self):
         """name(真実源)が空だと create は 400。"""
@@ -69,8 +70,8 @@ class TestToolsMetadata(AbstractPostgresTest):
         assert res.status_code == 400
         assert self.Tools.get_tool_by_id("no_name") is None
 
-    def test_update_requires_description(self):
-        """既存 tool を description 空で更新すると 400。"""
+    def test_update_allows_empty_description(self):
+        """既存 tool を description 空で更新しても 200(description は任意)。"""
         with mock_webui_user(id="admin1", role="admin"):
             created = self.fast_api_client.post(
                 self.create_url("/create"),
@@ -83,7 +84,8 @@ class TestToolsMetadata(AbstractPostgresTest):
             res = self.fast_api_client.post(
                 self.create_url("/id/upd_probe/update"), json=body
             )
-        assert res.status_code == 400
+        assert res.status_code == 200
+        assert self.Tools.get_tool_by_id("upd_probe").description == ""
 
     def test_frontmatter_is_not_parsed_into_manifest(self):
         """content の frontmatter は退役 — manifest に載らず、表示名/説明も上書きされない。"""

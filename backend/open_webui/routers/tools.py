@@ -31,16 +31,13 @@ router = APIRouter()
 
 def validate_tool_metadata(form_data: ToolForm) -> None:
     """llens(#44): tool の frontmatter 退役に伴い、title(name)/description は
-    DB フィールドが唯一の真実源。どちらかが空なら 400 で保存を拒否する。"""
+    DB フィールドが唯一の真実源。name が空なら 400 で保存を拒否する。
+    description は任意 — モデルの使用判断は関数 docstring 由来の specs が担い、
+    top-level description は一覧 UI 用メタデータにすぎない(skill とは逆の線引き)。"""
     if not (form_data.name or "").strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool name is required",
-        )
-    if not ((form_data.description or "").strip()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tool description is required",
         )
 
 
