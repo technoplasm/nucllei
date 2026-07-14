@@ -81,7 +81,7 @@
 </svelte:head>
 
 {#if $functions !== null}
-	<div class="flex flex-col gap-1 mt-1.5 mb-2">
+	<div class="flex flex-col gap-1 mt-1.5 mb-4">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Functions')}
 			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
@@ -109,7 +109,7 @@
 	</div>
 
 	{#each groupedItems as group (group.label)}
-		<div class="text-md font-medium text-content-muted px-0.5 mt-1 mb-1">
+		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
 			{group.label}
 		</div>
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">

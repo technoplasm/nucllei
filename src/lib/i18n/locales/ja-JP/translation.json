@@ -314,7 +314,6 @@
 	"Deleted {{name}}": "{{name}}を削除しました",
 	"Describe your knowledge base and objectives": "",
 	"Description": "説明",
-	"Description (for model)": "",
 	"description が無いためモデルには公開されません": "",
 	"Detect Artifacts Automatically": "",
 	"Didn't fully follow instructions": "説明に沿って操作していませんでした",

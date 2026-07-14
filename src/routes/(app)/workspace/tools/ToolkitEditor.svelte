@@ -1,11 +1,9 @@
 <script lang="ts">
 	import { getContext, tick } from 'svelte';
-	import { goto } from '$app/navigation';
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 
 	const i18n = getContext('i18n');
@@ -31,7 +29,6 @@
 
 	let formElement = $state<HTMLFormElement | null>(null);
 	let codeEditor = $state<any>(null);
-	let loading = $state(false);
 
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
@@ -162,7 +159,6 @@ class Tools:
 `;
 
 	const saveHandler = async () => {
-		loading = true;
 		onSave({
 			id,
 			name,
@@ -197,113 +193,107 @@ class Tools:
 
 <AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
 
-<div class=" flex flex-col justify-between w-full overflow-y-auto h-full">
-	<div class="mx-auto w-full md:px-0 h-full">
-		<form
-			bind:this={formElement}
-			class=" flex flex-col max-h-[100dvh] h-full"
-			onsubmit={(e) => {
-				e.preventDefault();
-				submitHandler();
-			}}
+<!-- 高さは workspace layout(.max-w-5xl の h-full)から一段で貼る(FunctionEditor と同型)。 -->
+<form
+	bind:this={formElement}
+	class="flex flex-col h-full"
+	onsubmit={(e) => {
+		e.preventDefault();
+		submitHandler();
+	}}
+>
+	<div>
+		<!-- llens(#44): 作成/編集画面を function 型のセクション構成に統一。
+		     ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
+		<a
+			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			href="/workspace/tools"
 		>
-			<div class="flex flex-col flex-1 overflow-auto h-0 rounded-lg">
-				<!-- llens(#44): 作成/編集画面を skill 型のセクション構成に統一 -->
-				<div class="w-full mb-2 flex flex-col gap-1">
-					<div class="flex w-full items-center">
-						<div class=" shrink-0 mr-2">
-							<Tooltip content={$i18n.t('Back')}>
-								<button
-									class="w-full text-left text-sm py-1.5 px-1 rounded-lg text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-									type="button"
-									aria-label={$i18n.t('Back')}
-									onclick={() => {
-										goto('/workspace/tools');
-									}}
-								>
-									<span class="i-lucide-chevron-left size-4 block"></span>
-								</button>
-							</Tooltip>
-						</div>
+			<span class="i-lucide-chevron-left size-4 block"></span>
+			{$i18n.t('Back to list')}
+		</a>
 
-						<div class="flex-1">
-							<input
-								class="w-full text-2xl font-semibold bg-transparent outline-hidden font-primary"
-								type="text"
-								placeholder={$i18n.t('Tool Name')}
-								bind:value={name}
-								required
-							/>
-						</div>
+		<div class="flex items-center gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold" for="tool-name">
+				{$i18n.t('Name')}
+			</label>
+			<input
+				id="tool-name"
+				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				type="text"
+				placeholder={$i18n.t('Tool Name')}
+				bind:value={name}
+				required
+			/>
 
-						<div class="self-center shrink-0">
-							<button
-								class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-								type="button"
-								onclick={() => {
-									showAccessControlModal = true;
-								}}
-							>
-								<span class="i-lucide-lock size-3.5 block"></span>
+			<button
+				class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content transition text-sm font-medium"
+				type="button"
+				onclick={() => {
+					showAccessControlModal = true;
+				}}
+			>
+				<span class="i-lucide-lock size-3.5 block"></span>
+				{$i18n.t('Access')}
+			</button>
+		</div>
 
-								<div class="text-sm font-medium shrink-0">
-									{$i18n.t('Access')}
-								</div>
-							</button>
-						</div>
-					</div>
+		<div class="flex items-center gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold" for="tool-id">
+				{$i18n.t('ID')}
+			</label>
+			<input
+				id="tool-id"
+				class="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden"
+				type="text"
+				placeholder={$i18n.t('Tool ID')}
+				bind:value={id}
+				required
+			/>
+		</div>
 
-					<div class="flex gap-0.5 items-center text-xs text-content-muted px-1">
-						<input
-							class="w-full bg-transparent outline-hidden"
-							type="text"
-							placeholder={$i18n.t('Tool ID')}
-							bind:value={id}
-							required
-						/>
-					</div>
-				</div>
+		<div class="flex items-start gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="tool-description">
+				{$i18n.t('Description')}
+			</label>
+			<Textarea
+				id="tool-description"
+				className="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				placeholder={$i18n.t('e.g. Tools for performing various operations')}
+				bind:value={description}
+				rows={2}
+			/>
+		</div>
 
-				<div class="my-2">
-					<div class=" self-center text-sm font-semibold mb-1">{$i18n.t('Description')}</div>
-					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
-						placeholder={$i18n.t('e.g. Tools for performing various operations')}
-						bind:value={description}
-						rows={2}
-					/>
-				</div>
-
-				<div class=" self-start text-sm font-semibold px-1 mb-1">{$i18n.t('Tool Content')}</div>
-				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
-					<CodeEditor
-						bind:this={codeEditor}
-						value={content}
-						lang="python"
-						{boilerplate}
-						onChange={(e) => {
-							_content = e;
-						}}
-						onSave={async () => {
-							if (formElement) {
-								formElement.requestSubmit();
-							}
-						}}
-					/>
-				</div>
-
-				<div class="pb-3 flex justify-start">
-					<button
-						class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-lg"
-						type="submit"
-					>
-						{$i18n.t('Save')}
-					</button>
-				</div>
-			</div>
-		</form>
+		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Tool Content')}</div>
 	</div>
-</div>
+
+	<div class="flex-1 min-h-0 mb-2 rounded-lg overflow-auto">
+		<CodeEditor
+			bind:this={codeEditor}
+			value={content}
+			lang="python"
+			{boilerplate}
+			onChange={(e) => {
+				_content = e;
+			}}
+			onSave={async () => {
+				if (formElement) {
+					formElement.requestSubmit();
+				}
+			}}
+		/>
+	</div>
+
+	<div class="pb-3 flex justify-start">
+		<button
+			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg"
+			type="submit"
+		>
+			{$i18n.t('Save')}
+		</button>
+	</div>
+</form>
 
 <ConfirmDialog
 	bind:show={showRenameConfirm}

@@ -113,35 +113,29 @@
 </svelte:head>
 
 {#if loaded}
-	<div class="flex flex-col gap-1 my-1.5">
-		<div class="flex justify-between items-center">
-			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
-				{$i18n.t('Tools')}
-				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-				<span class="text-lg font-medium text-content-muted">{filteredItems.length}</span>
-			</div>
+	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+		<div class="flex items-center text-xl font-medium px-0.5">
+			{$i18n.t('Tools')}
+			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class=" flex w-full space-x-2">
-			<div class="flex flex-1">
-				<div class=" self-center ml-1 mr-3">
-					<span class="i-lucide-search size-3.5 block"></span>
-				</div>
+		<div class="flex gap-4">
+			<a
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				href="/workspace/tools/create"
+			>
+				<span class="i-lucide-plus size-3.5 block mr-1"></span>
+				{$i18n.t('Create Tool')}
+			</a>
+
+			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
-					class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
 					bind:value={query}
 					placeholder={$i18n.t('Search Tools')}
 				/>
-			</div>
-
-			<div>
-				<a
-					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
-					href="/workspace/tools/create"
-					aria-label={$i18n.t('Create Tool')}
-				>
-					<span class="i-lucide-plus size-3.5 block"></span>
-				</a>
 			</div>
 		</div>
 	</div>
@@ -149,95 +143,27 @@
 	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
 	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
-		<div class="text-xs font-medium text-content-muted px-0.5 mt-1 mb-1">
+		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
 			{$i18n.t('組み込み')}
 		</div>
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
-				<div
-					class=" flex space-x-4 w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
-				>
-					<div class=" flex flex-1 space-x-3.5 w-full min-w-0">
-						<div class="flex items-center text-left min-w-0">
-							<div class=" flex-1 self-center min-w-0">
-								<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
-									{tool.name}
-									<span class=" text-content-muted text-xs font-medium shrink-0">{tool.id}</span>
-								</div>
-								<div
-									class="px-0.5 text-xs text-content-muted overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
-								>
-									{toolFnNames(tool)}
-								</div>
-							</div>
+				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised rounded-xl">
+					<div class="flex-1 min-w-0">
+						<div class="font-semibold line-clamp-1">{tool.name}</div>
+						<div class="flex gap-1.5 text-xs">
+							<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
+							<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
 						</div>
 					</div>
 
-					<div class="flex flex-row gap-0.5 self-center">
-						<Tooltip
-							content={(tool.access_control ?? null) === null
-								? $i18n.t('Public')
-								: $i18n.t('Private')}
-						>
-							<button
-								class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-								type="button"
-								aria-label={(tool.access_control ?? null) === null
-									? $i18n.t('Public')
-									: $i18n.t('Private')}
-								onclick={() => openAccessControl(tool)}
-							>
-								{#if (tool.access_control ?? null) === null}
-									<span class="i-lucide-globe size-4 block"></span>
-								{:else}
-									<span class="i-lucide-lock size-4 block"></span>
-								{/if}
-							</button>
-						</Tooltip>
-					</div>
-				</div>
-			{/each}
-		</div>
-	{/if}
-
-	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
-	{#if builtinItems.length}
-		<div class="text-xs font-medium text-content-muted px-0.5 mt-1 mb-1">
-			{$i18n.t('カスタム')}
-		</div>
-	{/if}
-	<div class="mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
-		{#each customItems as tool (tool.id)}
-			<div
-				class=" flex space-x-4 w-full px-3 py-2 cursor-pointer dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
-			>
-				<a
-					class=" flex flex-1 space-x-3.5 w-full min-w-0 cursor-pointer"
-					href={`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
-				>
-					<div class="flex items-center text-left min-w-0">
-						<div class=" flex-1 self-center min-w-0">
-							<div class=" font-semibold flex items-center gap-1.5 line-clamp-1">
-								{tool.name}
-								<span class=" text-content-muted text-xs font-medium shrink-0">{tool.id}</span>
-							</div>
-							<div
-								class="px-0.5 text-xs text-content-muted overflow-hidden text-ellipsis line-clamp-1 mt-0.5"
-							>
-								{toolFnNames(tool)}
-							</div>
-						</div>
-					</div>
-				</a>
-
-				<div class="flex flex-row gap-0.5 self-center">
 					<Tooltip
 						content={(tool.access_control ?? null) === null
 							? $i18n.t('Public')
 							: $i18n.t('Private')}
 					>
 						<button
-							class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 							type="button"
 							aria-label={(tool.access_control ?? null) === null
 								? $i18n.t('Public')
@@ -251,21 +177,63 @@
 							{/if}
 						</button>
 					</Tooltip>
-
-					<Tooltip content={$i18n.t('Delete')}>
-						<button
-							class="self-center w-fit text-sm px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-							type="button"
-							aria-label={$i18n.t('Delete')}
-							onclick={() => {
-								selectedTool = tool;
-								showDeleteConfirm = true;
-							}}
-						>
-							<span class="i-lucide-trash-2 size-4 block"></span>
-						</button>
-					</Tooltip>
 				</div>
+			{/each}
+		</div>
+	{/if}
+
+	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
+	{#if builtinItems.length}
+		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
+			{$i18n.t('カスタム')}
+		</div>
+	{/if}
+	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+		{#each customItems as tool (tool.id)}
+			<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
+				<a
+					class="flex-1 min-w-0 cursor-pointer"
+					href={`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
+				>
+					<div class="font-semibold line-clamp-1">{tool.name}</div>
+					<div class="flex gap-1.5 text-xs">
+						<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
+						<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
+					</div>
+				</a>
+
+				<Tooltip
+					content={(tool.access_control ?? null) === null ? $i18n.t('Public') : $i18n.t('Private')}
+				>
+					<button
+						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						type="button"
+						aria-label={(tool.access_control ?? null) === null
+							? $i18n.t('Public')
+							: $i18n.t('Private')}
+						onclick={() => openAccessControl(tool)}
+					>
+						{#if (tool.access_control ?? null) === null}
+							<span class="i-lucide-globe size-4 block"></span>
+						{:else}
+							<span class="i-lucide-lock size-4 block"></span>
+						{/if}
+					</button>
+				</Tooltip>
+
+				<Tooltip content={$i18n.t('Delete')}>
+					<button
+						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						type="button"
+						aria-label={$i18n.t('Delete')}
+						onclick={() => {
+							selectedTool = tool;
+							showDeleteConfirm = true;
+						}}
+					>
+						<span class="i-lucide-trash-2 size-4 block"></span>
+					</button>
+				</Tooltip>
 			</div>
 		{/each}
 	</div>

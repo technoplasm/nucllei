@@ -132,16 +132,56 @@
 
 <AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
 
-<div class="w-full max-h-full flex justify-center">
-	<form
-		class="flex flex-col w-full mb-10"
-		onsubmit={(e) => {
-			e.preventDefault();
-			submitHandler();
-		}}
-	>
-		<div class="my-2">
+<!-- 高さは workspace layout(.max-w-5xl の h-full)から一段で貼る(FunctionEditor と同型)。 -->
+<form
+	class="flex flex-col h-full"
+	onsubmit={(e) => {
+		e.preventDefault();
+		submitHandler();
+	}}
+>
+	<div>
+		<!-- ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
+		<a
+			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			href="/workspace/skills"
+		>
+			<span class="i-lucide-chevron-left size-4 block"></span>
+			{$i18n.t('Back to list')}
+		</a>
+
+		<div class="flex items-center gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold" for="skill-name">
+				{$i18n.t('Name')}
+			</label>
+			<input
+				id="skill-name"
+				class="flex-1 min-w-0 text-md py-1 px-2 bg-surface-raised outline-hidden font-primary"
+				placeholder={$i18n.t('Title')}
+				bind:value={name}
+				required
+			/>
+
+			{#if $user?.role === 'admin'}
+				<button
+					class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content transition text-sm font-medium"
+					type="button"
+					onclick={() => {
+						showAccessControlModal = true;
+					}}
+				>
+					<span class="i-lucide-lock size-3.5 block"></span>
+					{$i18n.t('Access')}
+				</button>
+			{/if}
+		</div>
+
+		<div class="flex items-center gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold" for="skill-id">
+				{$i18n.t('ID')}
+			</label>
 			<Tooltip
+				className="flex-1 min-w-0"
 				content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${$i18n.t(
 					'Activate this command by typing "/{{COMMAND}}" to chat input.',
 					{
@@ -150,153 +190,111 @@
 				)}`}
 				placement="bottom-start"
 			>
-				<div class="flex flex-col w-full">
-					<div class="flex items-center">
-						<input
-							class="text-2xl font-semibold w-full bg-transparent outline-hidden"
-							placeholder={$i18n.t('Title')}
-							bind:value={name}
-							required
-						/>
-
-						{#if $user?.role === 'admin'}
-							<div class="self-center shrink-0">
-								<button
-									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-									type="button"
-									onclick={() => {
-										showAccessControlModal = true;
-									}}
-								>
-									<span class="i-lucide-lock size-3.5 block"></span>
-
-									<div class="text-sm font-medium shrink-0">
-										{$i18n.t('Access')}
-									</div>
-								</button>
-							</div>
-						{/if}
-					</div>
-
-					<div class="flex gap-0.5 items-center text-xs text-content-muted">
-						<div class="">/</div>
-						<input
-							class=" w-full bg-transparent outline-hidden"
-							placeholder={$i18n.t('Command')}
-							bind:value={id}
-							required
-						/>
-					</div>
+				<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+					<span class="text-content-muted">/</span>
+					<input
+						id="skill-id"
+						class="w-full min-w-0 px-1 py-1 text-md bg-transparent outline-hidden"
+						placeholder={$i18n.t('Command')}
+						bind:value={id}
+						required
+					/>
 				</div>
 			</Tooltip>
 		</div>
 
-		<div class="my-2">
-			<div class="flex w-full justify-between">
-				<div class=" self-center text-sm font-semibold">{$i18n.t('Description (for model)')}</div>
-			</div>
-
-			<div class="mt-2">
-				<Textarea
-					className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
-					placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
-					bind:value={description}
-					rows={2}
-				/>
-			</div>
-		</div>
-
-		<div class="my-2">
-			<div class="flex w-full justify-between">
-				<div class=" self-center text-sm font-semibold">{$i18n.t('Skill Content')}</div>
-			</div>
-
-			<div class="mt-2">
-				<div class="h-96 rounded-lg border border-line overflow-auto">
-					<CodeEditor
-						id="skill"
-						lang="markdown"
-						value={content}
-						onChange={(e) => {
-							_content = e;
-						}}
-						onSave={() => {
-							submitHandler();
-						}}
-					/>
-				</div>
-
-				<div class="text-xs text-content-subtle mt-1">
-					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
-						class=" text-content font-medium">{'{{'}{$i18n.t('variable')}{'}}'}</span
-					>.
-					{$i18n.t('Make sure to enclose them with')}
-					<span class=" text-content font-medium">{'{{'}</span>
-					{$i18n.t('and')}
-					<span class=" text-content font-medium">{'}}'}</span>.
-				</div>
-			</div>
+		<div class="flex items-start gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-description">
+				{$i18n.t('Description')}
+			</label>
+			<Textarea
+				id="skill-description"
+				className="flex-1 min-w-0 px-2 py-1 text-md bg-surface-raised outline-hidden overflow-y-hidden resize-none"
+				placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
+				bind:value={description}
+				rows={2}
+			/>
 		</div>
 
 		{#if $user?.role === 'admin'}
-			<div class="my-2">
-				<div class="flex w-full justify-between mb-1">
-					<div class=" self-center text-sm font-semibold">{$i18n.t('Tools')}</div>
-				</div>
-
-				<div class=" text-xs text-content-muted">
-					{$i18n.t('tool 紐づき skill の作成/更新は admin のみ可能です。')}
-				</div>
-
-				<div class="flex flex-col">
+			<div class="flex items-start gap-2 my-2">
+				<div class="w-24 shrink-0 text-sm font-semibold pt-0.5">{$i18n.t('Tools')}</div>
+				<div class="flex-1 min-w-0">
 					{#if tools.length > 0}
-						<div class=" flex items-center mt-2 flex-wrap">
+						<div class="flex items-center flex-wrap gap-x-3 gap-y-1">
 							{#each Object.keys(_tools) as tool (tool)}
-								<div class=" flex items-center gap-2 mr-3">
-									<div class="self-center flex items-center">
-										<Checkbox
-											state={_tools[tool].selected ? 'checked' : 'unchecked'}
-											on:change={(e) => {
-												_tools[tool].selected = e.detail === 'checked';
-												toolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
-											}}
-										/>
-									</div>
-
-									<div class=" py-0.5 text-sm w-full capitalize font-medium">
+								<div class="flex items-center gap-2">
+									<Checkbox
+										state={_tools[tool].selected ? 'checked' : 'unchecked'}
+										on:change={(e) => {
+											_tools[tool].selected = e.detail === 'checked';
+											toolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
+										}}
+									/>
+									<div class="py-0.5 text-sm capitalize font-medium">
 										{_tools[tool].name}
 									</div>
 								</div>
 							{/each}
 						</div>
 					{/if}
+					<div class="text-xs text-content-muted mt-0.5">
+						{$i18n.t('tool 紐づき skill の作成/更新は admin のみ可能です。')}
+					</div>
 				</div>
 			</div>
 		{/if}
 
-		<div class="my-4 flex justify-start items-center gap-3 pb-20">
-			{#if !canEdit}
-				<div class="text-sm text-content-muted">
-					{$i18n.t('閲覧のみ(編集できるのは自分のスキルだけです)')}
-				</div>
-			{/if}
-			<button
-				class=" text-sm w-fit px-4 py-2 transition rounded-lg bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black {loading ||
-				!canEdit
-					? ' cursor-not-allowed opacity-50'
-					: ''} flex justify-center"
-				type="submit"
-				disabled={loading || !canEdit}
-			>
-				<div class=" self-center font-medium">{$i18n.t('Save')}</div>
+		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Skill Content')}</div>
+	</div>
 
-				{#if loading}
-					<span class="i-lucide-loader-circle size-4 block animate-spin ml-1.5 self-center"></span>
-				{/if}
-			</button>
-		</div>
-	</form>
-</div>
+	<div class="flex-1 min-h-0 rounded-lg border border-line overflow-auto">
+		<CodeEditor
+			id="skill"
+			lang="markdown"
+			value={content}
+			onChange={(e) => {
+				_content = e;
+			}}
+			onSave={() => {
+				submitHandler();
+			}}
+		/>
+	</div>
+
+	<div class="text-xs text-content-subtle mt-1 mb-1">
+		ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
+			class=" text-content font-medium">{'{{'}{$i18n.t('variable')}{'}}'}</span
+		>.
+		{$i18n.t('Make sure to enclose them with')}
+		<span class=" text-content font-medium">{'{{'}</span>
+		{$i18n.t('and')}
+		<span class=" text-content font-medium">{'}}'}</span>.
+	</div>
+
+	<div class="pb-3 flex justify-start items-center gap-3">
+		<button
+			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading ||
+			!canEdit
+				? ' cursor-not-allowed opacity-50'
+				: ''} flex items-center"
+			type="submit"
+			disabled={loading || !canEdit}
+		>
+			{$i18n.t('Save')}
+
+			{#if loading}
+				<span class="i-lucide-loader-circle size-4 block animate-spin ml-1.5"></span>
+			{/if}
+		</button>
+
+		{#if !canEdit}
+			<div class="text-sm text-content-muted">
+				{$i18n.t('閲覧のみ(編集できるのは自分のスキルだけです)')}
+			</div>
+		{/if}
+	</div>
+</form>
 
 <ConfirmDialog
 	bind:show={showRenameConfirm}

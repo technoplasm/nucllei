@@ -95,108 +95,92 @@
 		</div>
 	</DeleteConfirmDialog>
 
-	<div class="flex flex-col gap-1 my-1.5">
-		<div class="flex justify-between items-center">
-			<div class="flex md:self-center text-xl font-medium px-0.5 items-center">
-				{$i18n.t('Skills')}
-				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-				<span class="text-lg font-medium text-content-muted">{filteredItems.length}</span>
-			</div>
+	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+		<div class="flex items-center text-xl font-medium px-0.5">
+			{$i18n.t('Skills')}
+			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class=" flex w-full space-x-2">
-			<div class="flex flex-1">
-				<div class=" self-center ml-1 mr-3">
-					<span class="i-lucide-search size-3.5 block"></span>
-				</div>
+		<div class="flex gap-4">
+			<a
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				href="/workspace/skills/create"
+			>
+				<span class="i-lucide-plus size-3.5 block mr-1"></span>
+				{$i18n.t('Create Skill')}
+			</a>
+
+			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
-					class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
 					bind:value={query}
 					placeholder={$i18n.t('Search Skills')}
 				/>
 			</div>
-
-			<div>
-				<a
-					class=" px-2 py-2 rounded-xl hover:bg-gray-700/10 dark:hover:bg-gray-100/10 dark:text-content dark:hover:text-white transition font-medium text-sm flex items-center space-x-1"
-					href="/workspace/skills/create"
-					aria-label={$i18n.t('Create Skill')}
-				>
-					<span class="i-lucide-plus size-3.5 block"></span>
-				</a>
-			</div>
 		</div>
 	</div>
 
-	<div class="mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as skill (skill.id)}
-			<div
-				class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
-			>
+			<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
 				<a
-					class=" flex flex-1 min-w-0 cursor-pointer"
+					class="flex-1 min-w-0 cursor-pointer"
 					href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 				>
-					<div class=" flex-1 self-center min-w-0">
-						<div class=" flex items-center gap-2 min-w-0">
-							<div class=" font-semibold line-clamp-1 capitalize">{skill.name}</div>
-							<div class=" text-xs text-content-muted line-clamp-1 shrink-0">/{skill.id}</div>
-						</div>
-						<div class="px-0.5 text-xs overflow-hidden text-ellipsis line-clamp-1 mt-0.5">
-							{skill.description}
-						</div>
+					<div class="font-semibold line-clamp-1 capitalize">{skill.name}</div>
+					<div class="flex gap-1.5 text-xs">
+						<span class="text-content-muted font-medium shrink-0">/{skill.id}</span>
+						<span class="line-clamp-1">{skill.description}</span>
 					</div>
 				</a>
 
-				<div class="flex flex-row gap-0.5 self-center">
-					<Tooltip
-						content={(skill.access_control ?? null) === null
-							? $i18n.t('Public')
-							: $i18n.t('Private')}
-					>
-						{#if $user?.role === 'admin'}
-							<button
-								class="self-center w-fit text-sm px-2 py-2 dark:text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-								type="button"
-								aria-label={(skill.access_control ?? null) === null
-									? $i18n.t('Public')
-									: $i18n.t('Private')}
-								onclick={() => openAccessControl(skill)}
-							>
-								{#if (skill.access_control ?? null) === null}
-									<span class="i-lucide-globe size-4 block"></span>
-								{:else}
-									<span class="i-lucide-lock size-4 block"></span>
-								{/if}
-							</button>
-						{:else}
-							<!-- 公開範囲の変更は admin のみ — 表示だけ -->
-							<div class="self-center w-fit text-sm px-2 py-2 text-content-subtle">
-								{#if (skill.access_control ?? null) === null}
-									<span class="i-lucide-globe size-4 block"></span>
-								{:else}
-									<span class="i-lucide-lock size-4 block"></span>
-								{/if}
-							</div>
-						{/if}
-					</Tooltip>
-
-					{#if $user?.role === 'admin' || skill.user_id === $user?.id}
-						<Tooltip content={$i18n.t('Delete')}>
-							<button
-								class="self-center w-fit text-sm px-2 py-2 dark:text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-								type="button"
-								aria-label={$i18n.t('Delete')}
-								onclick={() => {
-									deleteSkill = skill;
-									showDeleteConfirm = true;
-								}}
-							>
-								<span class="i-lucide-trash-2 size-4 block"></span>
-							</button>
-						</Tooltip>
+				<Tooltip
+					content={(skill.access_control ?? null) === null ? $i18n.t('Public') : $i18n.t('Private')}
+				>
+					{#if $user?.role === 'admin'}
+						<button
+							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							aria-label={(skill.access_control ?? null) === null
+								? $i18n.t('Public')
+								: $i18n.t('Private')}
+							onclick={() => openAccessControl(skill)}
+						>
+							{#if (skill.access_control ?? null) === null}
+								<span class="i-lucide-globe size-4 block"></span>
+							{:else}
+								<span class="i-lucide-lock size-4 block"></span>
+							{/if}
+						</button>
+					{:else}
+						<!-- 公開範囲の変更は admin のみ — 表示だけ -->
+						<div class="px-2 py-2 text-content-subtle">
+							{#if (skill.access_control ?? null) === null}
+								<span class="i-lucide-globe size-4 block"></span>
+							{:else}
+								<span class="i-lucide-lock size-4 block"></span>
+							{/if}
+						</div>
 					{/if}
-				</div>
+				</Tooltip>
+
+				{#if $user?.role === 'admin' || skill.user_id === $user?.id}
+					<Tooltip content={$i18n.t('Delete')}>
+						<button
+							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							type="button"
+							aria-label={$i18n.t('Delete')}
+							onclick={() => {
+								deleteSkill = skill;
+								showDeleteConfirm = true;
+							}}
+						>
+							<span class="i-lucide-trash-2 size-4 block"></span>
+						</button>
+					</Tooltip>
+				{/if}
 			</div>
 		{/each}
 	</div>
