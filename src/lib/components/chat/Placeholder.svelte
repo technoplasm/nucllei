@@ -34,7 +34,6 @@
 	export let files = [];
 
 	export let imageGenerationEnabled = false;
-	export let codeInterpreterEnabled = false;
 
 	let models = [];
 
@@ -166,7 +165,6 @@
 					bind:prompt
 					bind:autoScroll
 					bind:imageGenerationEnabled
-					bind:codeInterpreterEnabled
 					bind:atSelectedModel
 					{transparentBackground}
 					{stopResponse}

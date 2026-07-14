@@ -58,8 +58,7 @@
 			multiple_models: true
 		},
 		features: {
-			image_generation: true,
-			code_interpreter: true
+			image_generation: true
 		}
 	};
 

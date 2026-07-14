@@ -94,7 +94,6 @@
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
 	let imageGenerationEnabled = false;
-	let codeInterpreterEnabled = false;
 
 	let chat = null;
 
@@ -1304,11 +1303,6 @@
 						$config?.features?.enable_image_generation &&
 						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 							? imageGenerationEnabled
-							: false,
-					code_interpreter:
-						$config?.features?.enable_code_interpreter &&
-						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
-							? codeInterpreterEnabled
 							: false
 				},
 				variables: {
@@ -1666,7 +1660,6 @@
 								bind:prompt
 								bind:autoScroll
 								bind:imageGenerationEnabled
-								bind:codeInterpreterEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
@@ -1705,7 +1698,6 @@
 								bind:prompt
 								bind:autoScroll
 								bind:imageGenerationEnabled
-								bind:codeInterpreterEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}

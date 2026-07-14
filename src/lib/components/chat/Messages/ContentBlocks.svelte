@@ -112,16 +112,6 @@
 					className="w-full space-y-1 text-sm"
 				/>
 			{/each}
-		{:else if block.type === 'code_interpreter'}
-			<!-- llens 既定では無効の面(#11)。最低限の表示のみ -->
-			<ContentRenderer
-				id={`${id}-block-${blockIdx}`}
-				{history}
-				content={`\`\`\`python\n${block.content}\n\`\`\``}
-				{model}
-				floatingButtons={false}
-				save={false}
-			/>
 		{/if}
 	{/each}
 </div>

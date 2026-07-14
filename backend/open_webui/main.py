@@ -83,15 +83,6 @@ from open_webui.config import (
     OPENAI_API_CONFIGS,
     # Tool Server Configs
     TOOL_SERVER_CONNECTIONS,
-    # Code Execution
-    ENABLE_CODE_INTERPRETER,
-    CODE_INTERPRETER_ENGINE,
-    CODE_INTERPRETER_PROMPT_TEMPLATE,
-    CODE_INTERPRETER_JUPYTER_URL,
-    CODE_INTERPRETER_JUPYTER_AUTH,
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-    CODE_INTERPRETER_JUPYTER_TIMEOUT,
     # Image
     AUTOMATIC1111_API_AUTH,
     AUTOMATIC1111_BASE_URL,
@@ -487,27 +478,6 @@ app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
 
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
-
-########################################
-#
-# CODE EXECUTION
-#
-########################################
-
-
-app.state.config.ENABLE_CODE_INTERPRETER = ENABLE_CODE_INTERPRETER
-app.state.config.CODE_INTERPRETER_ENGINE = CODE_INTERPRETER_ENGINE
-app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE = CODE_INTERPRETER_PROMPT_TEMPLATE
-
-app.state.config.CODE_INTERPRETER_JUPYTER_URL = CODE_INTERPRETER_JUPYTER_URL
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH = CODE_INTERPRETER_JUPYTER_AUTH
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = (
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
-)
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = (
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
-)
-app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
 
 ########################################
 #
@@ -1021,7 +991,7 @@ async def get_app_config(request: Request):
                     # llens(#52/#67/#51): built-in web 検索・retrieval router・WEB_SEARCH_*
                     # config・retrieval/web providers はすべて撤去済み。検索は案件層(prism)の
                     # tool が外部検索システム(SearXNG 等)を直接叩く(docling と同じ線引き)。
-                    "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
+                    # llens(#23): code_interpreter(タグ検出実行)も機能ごと撤去。
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,

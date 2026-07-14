@@ -64,14 +64,4 @@ def snapshot_content_blocks(content_blocks: list) -> list:
                 snapshot["synthetic"] = True
             blocks.append(snapshot)
 
-        elif block_type == "code_interpreter":
-            snapshot = {
-                "type": "code_interpreter",
-                "content": block.get("content", ""),
-                "attributes": block.get("attributes", {}),
-            }
-            if block.get("output") is not None:
-                snapshot["output"] = block["output"]
-            blocks.append(snapshot)
-
     return blocks

@@ -21,8 +21,7 @@
 			multiple_models: true
 		},
 		features: {
-			image_generation: true,
-			code_interpreter: true
+			image_generation: true
 		}
 	};
 
@@ -246,14 +245,6 @@
 			</div>
 
 			<Switch bind:state={permissions.features.image_generation} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Code Interpreter')}
-			</div>
-
-			<Switch bind:state={permissions.features.code_interpreter} />
 		</div>
 	</div>
 </div>

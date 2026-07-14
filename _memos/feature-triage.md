@@ -9,7 +9,7 @@
 | RAG / retrieval | **一切不使用・撤去済み(#52)** | 将来必要になってもツール側で実装。**2026-07-08: embedding/vector/reranking/chunk/RAG_TEMPLATE を config から完全排除** |
 | Web 検索 | **残す(prism tool → 外部検索システム直叩き)** | 改訂(2026-07-13、#51 close): 当初の「fork 組み込みツール」案を撤回 — docling と同じ線引きで **fork は何も持たず**、prism の tool が SearXNG 等を Valves 設定で直接叩く。fork の WEB_SEARCH_* config・providers・管理画面は全撤去(`eae47a4bd`)。閉域本体では成立しない機能(メタ検索も外向き通信必須)= 非閉域の横展開先向け |
 | 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで |
-| コード実行(組み込み Pyodide/Jupyter) | **無くてもよい** | nsjail+IPython は自前ツール側で提供。Pyodide には戻さない(fork.md §6) |
+| コード実行(組み込み Pyodide/Jupyter) | **撤去済み(#23)** | 改訂(2026-07-14、#23): code_interpreter(タグ検出による tool 外コード実行)を機能ごと撤去 — config・permission・UI トグル・実行ループすべて。コード実行は nsjail+IPython の自前 tool 一本で、tool 経路以外の実行裏道は残さない。Pyodide には戻さない(fork.md §6) |
 | 会話検索 | **必要・維持** | v0.6.5 に存在(タイトル+本文検索)。デグレさせない |
 | メモリー | **素の SQL ストアに降格(#52)** | ~~放置・無効化も削除も投資もしない~~ → **改訂(2026-07-08 #52): embedding/vector 基盤撤去の一環で、memory を Claude 方式の「完全自然言語」ストアに降格**(`routers/memories.py` から VECTOR_DB/EMBEDDING_FUNCTION を除去、`/query` は全 memory を素で返す。テーブル/content/UI は温存)。これが embedding/vector の最後の消費者だった(issue #8 は close) |
 | ノート | 無いままでよい | v0.6.5 に存在しない。追加しない |

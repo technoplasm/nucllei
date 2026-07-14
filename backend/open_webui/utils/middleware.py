@@ -1,8 +1,6 @@
 import time
 import logging
 import sys
-import os
-import base64
 
 import asyncio
 import json
@@ -52,7 +50,6 @@ from open_webui.utils.task import (
 from open_webui.utils.misc import (
     get_message_list,
     add_or_update_system_message,
-    add_or_update_user_message,
     get_last_user_message,
     get_last_assistant_message,
     prepend_to_first_user_message_content,
@@ -69,7 +66,6 @@ from open_webui.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
 )
-from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.file_images import inline_internal_image_urls
 from open_webui.utils.content_blocks import (
     serialize_text_blocks,
@@ -78,10 +74,6 @@ from open_webui.utils.content_blocks import (
 
 from open_webui.tasks import create_task
 
-from open_webui.config import (
-    CACHE_DIR,
-    DEFAULT_CODE_INTERPRETER_PROMPT,
-)
 from open_webui.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
@@ -721,21 +713,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     except Exception as e:
         raise Exception(f"Error: {e}")
 
+    # llens(#23): code_interpreter 機能は撤去 — コード実行は tool(外部 sandbox)一本。
+    # タグ検出による tool 外実行の裏道は残さない。
     features = form_data.pop("features", None)
     if features:
         if "image_generation" in features and features["image_generation"]:
             form_data = await chat_image_generation_handler(
                 request, form_data, extra_params, user
-            )
-
-        if "code_interpreter" in features and features["code_interpreter"]:
-            form_data["messages"] = add_or_update_user_message(
-                (
-                    request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
-                    if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ""
-                    else DEFAULT_CODE_INTERPRETER_PROMPT
-                ),
-                form_data["messages"],
             )
 
     # llens(#54): チャット単位の tool 切り替えは撤去 — tool はモデル割り当て
@@ -1170,23 +1154,9 @@ async def process_chat_response(
             },
         )
 
-        def split_content_and_whitespace(content):
-            content_stripped = content.rstrip()
-            original_whitespace = (
-                content[len(content_stripped) :]
-                if len(content) > len(content_stripped)
-                else ""
-            )
-            return content_stripped, original_whitespace
-
-        def is_opening_code_block(content):
-            backtick_segments = content.split("```")
-            # Even number of segments means the last backticks are opening a new block
-            return len(backtick_segments) > 1 and len(backtick_segments) % 2 == 0
-
         # Handle as a background task
         async def post_response_handler(response, events):
-            def serialize_content_blocks(content_blocks, raw=False):
+            def serialize_content_blocks(content_blocks):
                 content = ""
 
                 for block in content_blocks:
@@ -1224,8 +1194,7 @@ async def process_chat_response(
                                 else:
                                     tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
 
-                            if not raw:
-                                content = f"{content}\n{tool_calls_display_content}\n\n"
+                            content = f"{content}\n{tool_calls_display_content}\n\n"
                         else:
                             tool_calls_display_content = ""
 
@@ -1240,8 +1209,7 @@ async def process_chat_response(
 
                                 tool_calls_display_content = f'{tool_calls_display_content}\n<details type="tool_calls" done="false" id="{tool_call_id}" name="{tool_name}" arguments="{html.escape(json.dumps(tool_arguments))}">\n<summary>Executing...</summary>\n</details>'
 
-                            if not raw:
-                                content = f"{content}\n{tool_calls_display_content}\n\n"
+                            content = f"{content}\n{tool_calls_display_content}\n\n"
 
                     elif block["type"] == "reasoning":
                         reasoning_display_content = "\n".join(
@@ -1252,46 +1220,9 @@ async def process_chat_response(
                         reasoning_duration = block.get("duration", None)
 
                         if reasoning_duration is not None:
-                            if raw:
-                                content = f'{content}\n<{block["start_tag"]}>{block["content"]}<{block["end_tag"]}>\n'
-                            else:
-                                content = f'{content}\n<details type="reasoning" done="true" duration="{reasoning_duration}">\n<summary>Thought for {reasoning_duration} seconds</summary>\n{reasoning_display_content}\n</details>\n'
+                            content = f'{content}\n<details type="reasoning" done="true" duration="{reasoning_duration}">\n<summary>Thought for {reasoning_duration} seconds</summary>\n{reasoning_display_content}\n</details>\n'
                         else:
-                            if raw:
-                                content = f'{content}\n<{block["start_tag"]}>{block["content"]}<{block["end_tag"]}>\n'
-                            else:
-                                content = f'{content}\n<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{reasoning_display_content}\n</details>\n'
-
-                    elif block["type"] == "code_interpreter":
-                        attributes = block.get("attributes", {})
-                        output = block.get("output", None)
-                        lang = attributes.get("lang", "")
-
-                        content_stripped, original_whitespace = (
-                            split_content_and_whitespace(content)
-                        )
-                        if is_opening_code_block(content_stripped):
-                            # Remove trailing backticks that would open a new block
-                            content = (
-                                content_stripped.rstrip("`").rstrip()
-                                + original_whitespace
-                            )
-                        else:
-                            # Keep content as is - either closing backticks or no backticks
-                            content = content_stripped + original_whitespace
-
-                        if output:
-                            output = html.escape(json.dumps(output))
-
-                            if raw:
-                                content = f'{content}\n<code_interpreter type="code" lang="{lang}">\n{block["content"]}\n</code_interpreter>\n```output\n{output}\n```\n'
-                            else:
-                                content = f'{content}\n<details type="code_interpreter" done="true" output="{output}">\n<summary>Analyzed</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
-                        else:
-                            if raw:
-                                content = f'{content}\n<code_interpreter type="code" lang="{lang}">\n{block["content"]}\n</code_interpreter>\n'
-                            else:
-                                content = f'{content}\n<details type="code_interpreter" done="false">\n<summary>Analyzing...</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
+                            content = f'{content}\n<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{reasoning_display_content}\n</details>\n'
 
                     else:
                         block_content = str(block["content"]).strip()
@@ -1594,12 +1525,8 @@ async def process_chat_response(
             # llens(#17): reasoning は SGLang reasoning parser 有効が接続契約で、
             # 常に reasoning_content デルタとして届く。content 中の生 <think> タグ
             # 検出(旧 DETECT_REASONING)は契約外につき削除(_memos/rendering-design.md §3)。
+            # llens(#23): code_interpreter タグ検出も撤去 — コード実行は tool 一本。
             DETECT_SOLUTION = True
-            DETECT_CODE_INTERPRETER = metadata.get("features", {}).get(
-                "code_interpreter", False
-            )
-
-            code_interpreter_tags = [("code_interpreter", "/code_interpreter")]
 
             solution_tags = [("|begin_of_solution|", "|end_of_solution|")]
 
@@ -1886,19 +1813,6 @@ async def process_chat_response(
                                         content_blocks[-1]["content"] = (
                                             content_blocks[-1]["content"] + value
                                         )
-
-                                        if DETECT_CODE_INTERPRETER:
-                                            content, content_blocks, end = (
-                                                tag_content_handler(
-                                                    "code_interpreter",
-                                                    code_interpreter_tags,
-                                                    content,
-                                                    content_blocks,
-                                                )
-                                            )
-
-                                            if end:
-                                                break
 
                                         if DETECT_SOLUTION:
                                             content, content_blocks, _ = (
@@ -2217,195 +2131,6 @@ async def process_chat_response(
                             },
                         }
                     )
-
-                if DETECT_CODE_INTERPRETER:
-                    MAX_RETRIES = 5
-                    retries = 0
-
-                    while (
-                        content_blocks[-1]["type"] == "code_interpreter"
-                        and retries < MAX_RETRIES
-                    ):
-                        await event_emitter(
-                            {
-                                "type": "chat:completion",
-                                "data": {
-                                    "content": serialize_text_blocks(content_blocks),
-                                    "content_blocks": snapshot_content_blocks(
-                                        content_blocks
-                                    ),
-                                },
-                            }
-                        )
-
-                        retries += 1
-                        log.debug(f"Attempt count: {retries}")
-
-                        output = ""
-                        try:
-                            if content_blocks[-1]["attributes"].get("type") == "code":
-                                code = content_blocks[-1]["content"]
-
-                                if (
-                                    request.app.state.config.CODE_INTERPRETER_ENGINE
-                                    == "pyodide"
-                                ):
-                                    output = await event_caller(
-                                        {
-                                            "type": "execute:python",
-                                            "data": {
-                                                "id": str(uuid4()),
-                                                "code": code,
-                                                "session_id": metadata.get(
-                                                    "session_id", None
-                                                ),
-                                            },
-                                        }
-                                    )
-                                elif (
-                                    request.app.state.config.CODE_INTERPRETER_ENGINE
-                                    == "jupyter"
-                                ):
-                                    output = await execute_code_jupyter(
-                                        request.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
-                                        code,
-                                        (
-                                            request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
-                                            if request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH
-                                            == "token"
-                                            else None
-                                        ),
-                                        (
-                                            request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
-                                            if request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH
-                                            == "password"
-                                            else None
-                                        ),
-                                        request.app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT,
-                                    )
-                                else:
-                                    output = {
-                                        "stdout": "Code interpreter engine not configured."
-                                    }
-
-                                log.debug(f"Code interpreter output: {output}")
-
-                                if isinstance(output, dict):
-                                    stdout = output.get("stdout", "")
-
-                                    if isinstance(stdout, str):
-                                        stdoutLines = stdout.split("\n")
-                                        for idx, line in enumerate(stdoutLines):
-                                            if "data:image/png;base64" in line:
-                                                id = str(uuid4())
-
-                                                # ensure the path exists
-                                                os.makedirs(
-                                                    os.path.join(CACHE_DIR, "images"),
-                                                    exist_ok=True,
-                                                )
-
-                                                image_path = os.path.join(
-                                                    CACHE_DIR,
-                                                    f"images/{id}.png",
-                                                )
-
-                                                with open(image_path, "wb") as f:
-                                                    f.write(
-                                                        base64.b64decode(
-                                                            line.split(",")[1]
-                                                        )
-                                                    )
-
-                                                stdoutLines[idx] = (
-                                                    f"![Output Image {idx}](/cache/images/{id}.png)"
-                                                )
-
-                                        output["stdout"] = "\n".join(stdoutLines)
-
-                                    result = output.get("result", "")
-
-                                    if isinstance(result, str):
-                                        resultLines = result.split("\n")
-                                        for idx, line in enumerate(resultLines):
-                                            if "data:image/png;base64" in line:
-                                                id = str(uuid4())
-
-                                                # ensure the path exists
-                                                os.makedirs(
-                                                    os.path.join(CACHE_DIR, "images"),
-                                                    exist_ok=True,
-                                                )
-
-                                                image_path = os.path.join(
-                                                    CACHE_DIR,
-                                                    f"images/{id}.png",
-                                                )
-
-                                                with open(image_path, "wb") as f:
-                                                    f.write(
-                                                        base64.b64decode(
-                                                            line.split(",")[1]
-                                                        )
-                                                    )
-
-                                                resultLines[idx] = (
-                                                    f"![Output Image {idx}](/cache/images/{id}.png)"
-                                                )
-
-                                        output["result"] = "\n".join(resultLines)
-                        except Exception as e:
-                            output = str(e)
-
-                        content_blocks[-1]["output"] = output
-
-                        content_blocks.append(
-                            {
-                                "type": "text",
-                                "content": "",
-                            }
-                        )
-
-                        await event_emitter(
-                            {
-                                "type": "chat:completion",
-                                "data": {
-                                    "content": serialize_text_blocks(content_blocks),
-                                    "content_blocks": snapshot_content_blocks(
-                                        content_blocks
-                                    ),
-                                },
-                            }
-                        )
-
-                        try:
-                            res = await generate_chat_completion(
-                                request,
-                                {
-                                    "model": model_id,
-                                    "stream": True,
-                                    # llens(#57): 継続呼び出しでも usage を受け取る
-                                    "stream_options": {"include_usage": True},
-                                    "messages": [
-                                        *form_data["messages"],
-                                        {
-                                            "role": "assistant",
-                                            "content": serialize_content_blocks(
-                                                content_blocks, raw=True
-                                            ),
-                                        },
-                                    ],
-                                },
-                                user,
-                            )
-
-                            if isinstance(res, StreamingResponse):
-                                await stream_body_handler(res)
-                            else:
-                                break
-                        except Exception as e:
-                            log.debug(e)
-                            break
 
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 data = {

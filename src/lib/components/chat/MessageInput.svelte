@@ -45,7 +45,6 @@
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
 	import Photo from '../icons/Photo.svelte';
-	import CommandLine from '../icons/CommandLine.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const i18n = getContext('i18n');
@@ -79,7 +78,6 @@
 	export let files = [];
 
 	export let imageGenerationEnabled = false;
-	export let codeInterpreterEnabled = false;
 
 	$: onChange({
 		prompt,
@@ -500,7 +498,7 @@
 				</div>
 
 				<div class="w-full relative">
-					{#if atSelectedModel !== undefined || imageGenerationEnabled || codeInterpreterEnabled}
+					{#if atSelectedModel !== undefined || imageGenerationEnabled}
 						<div
 							class="px-3 pb-0.5 pt-1.5 text-left w-full flex flex-col absolute bottom-0 left-0 right-0 bg-linear-to-t from-surface z-10"
 						>
@@ -1144,25 +1142,6 @@
 															<span
 																class="hidden @xl:block whitespace-nowrap overflow-hidden text-ellipsis translate-y-[0.5px]"
 																>{$i18n.t('Image')}</span
-															>
-														</button>
-													</Tooltip>
-												{/if}
-
-												{#if $config?.features?.enable_code_interpreter && ($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter)}
-													<Tooltip content={$i18n.t('Execute code for analysis')} placement="top">
-														<button
-															on:click|preventDefault={() =>
-																(codeInterpreterEnabled = !codeInterpreterEnabled)}
-															type="button"
-															class="px-1.5 @xl:px-2.5 py-1.5 flex gap-1.5 items-center text-sm rounded-full font-medium transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden border {codeInterpreterEnabled
-																? 'bg-gray-50 dark:bg-gray-400/10 border-gray-100  dark:border-gray-700 text-content-muted  '
-																: 'bg-transparent border-transparent text-content-muted  hover:bg-gray-100 dark:hover:bg-gray-800 '}"
-														>
-															<CommandLine className="size-5" strokeWidth="1.75" />
-															<span
-																class="hidden @xl:block whitespace-nowrap overflow-hidden text-ellipsis translate-y-[0.5px]"
-																>{$i18n.t('Code Interpreter')}</span
 															>
 														</button>
 													</Tooltip>
