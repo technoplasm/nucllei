@@ -27,8 +27,10 @@
 
 	let config = $state<any>(null);
 
-	let selectedModelId = $state('');
-	let defaultModelIds = $state<string[]>([]);
+	// llens(#70): UI で選べる既定モデルは 1 個(未設定なら表示順の先頭が使われる)。
+	// config の DEFAULT_MODELS 自体は upstream のままカンマ区切り文字列 — 先頭だけ読む。
+	// ユーザー個人の既定($settings.models — picker の bookmark)がこれより優先。
+	let defaultModelId = $state('');
 	let modelIds = $state<string[]>([]);
 
 	let sortDirection = $state<'' | 'asc' | 'desc'>('');
@@ -39,7 +41,7 @@
 	const init = async () => {
 		config = await getModelsConfig();
 
-		defaultModelIds = (config?.DEFAULT_MODELS ?? '').split(',').filter((id: string) => id);
+		defaultModelId = (config?.DEFAULT_MODELS ?? '').split(',').filter((id: string) => id)[0] ?? '';
 
 		const modelOrderList = config.MODEL_ORDER_LIST || [];
 		const allModelIds = ($models ?? []).map((model) => model.id);
@@ -69,18 +71,11 @@
 		);
 	};
 
-	const addDefaultModel = (id: string) => {
-		if (id && !defaultModelIds.includes(id)) {
-			defaultModelIds = [...defaultModelIds, id];
-		}
-		selectedModelId = '';
-	};
-
 	const submitHandler = async () => {
 		loading = true;
 
 		const res = await setModelsConfig({
-			DEFAULT_MODELS: defaultModelIds.join(','),
+			DEFAULT_MODELS: defaultModelId,
 			MODEL_ORDER_LIST: modelIds
 		}).catch(() => null);
 
@@ -159,48 +154,19 @@
 					<hr class=" border-line my-2.5 w-full" />
 
 					<div class="flex flex-col w-full">
-						<div class="mb-1 text-xs text-content-muted">{$i18n.t('Default Models')}</div>
+						<div class="mb-1 text-xs text-content-muted">{$i18n.t('Default Model')}</div>
 
 						<select
-							class="w-full px-2 py-1 text-sm rounded-lg bg-surface-muted {selectedModelId
+							class="w-full px-2 py-1 text-sm rounded-lg bg-surface-muted {defaultModelId
 								? ''
 								: 'text-content-subtle'} outline-hidden"
-							bind:value={selectedModelId}
-							onchange={(e) => {
-								addDefaultModel(e.currentTarget.value);
-							}}
+							bind:value={defaultModelId}
 						>
-							<option value="">{$i18n.t('Select a model')}</option>
-							{#each ($models ?? []).filter((m) => !defaultModelIds.includes(m.id)) as model (model.id)}
+							<option value="">{$i18n.t('未設定(表示順の先頭)')}</option>
+							{#each $models ?? [] as model (model.id)}
 								<option value={model.id} class="text-content">{model.name}</option>
 							{/each}
 						</select>
-
-						{#if defaultModelIds.length > 0}
-							<div class="flex flex-col mt-1">
-								{#each defaultModelIds as modelId, modelIdx (modelId)}
-									<div class=" flex gap-2 w-full justify-between items-center">
-										<div class=" text-sm flex-1 py-1 rounded-lg">
-											{($models ?? []).find((model) => model.id === modelId)?.name ?? modelId}
-										</div>
-										<button
-											class="shrink-0 text-content-muted hover:text-content"
-											type="button"
-											aria-label={$i18n.t('Remove')}
-											onclick={() => {
-												defaultModelIds = defaultModelIds.filter((_, idx) => idx !== modelIdx);
-											}}
-										>
-											<span class="i-lucide-minus size-3.5 block"></span>
-										</button>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<div class="text-content-muted text-xs text-center py-2">
-								{$i18n.t('No models selected')}
-							</div>
-						{/if}
 					</div>
 
 					<div class="flex justify-between pt-3 text-sm font-medium gap-1.5">

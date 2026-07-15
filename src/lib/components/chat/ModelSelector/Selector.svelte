@@ -8,10 +8,10 @@
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import Check from '$lib/components/icons/Check.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import { user, MODEL_DOWNLOAD_POOL, models, mobile, settings, config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
@@ -22,6 +22,23 @@
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
+
+	// llens(#70): ユーザー既定モデル(新規チャットの初期選択)。$settings.models は
+	// Chat.svelte の initNewChat が admin 既定(config.default_models)より先に読む
+	// 既存経路 — 書く UI をここ(picker の bookmark)に置く。単一なので [id] 固定。
+	// radio と checkbox の中間: 他を選ぶと付け替え、既定をもう一度押すと解除。
+	$: userDefaultModelId = ($settings?.models ?? [])[0] ?? null;
+
+	const toggleDefaultModel = async (modelId: string) => {
+		const s = { ...($settings ?? {}) };
+		if ((s.models ?? [])[0] === modelId) {
+			delete s.models;
+		} else {
+			s.models = [modelId];
+		}
+		settings.set(s);
+		await updateUserSettings({ ui: $settings });
+	};
 
 	export let id = '';
 	export let value = '';
@@ -572,11 +589,31 @@
 							</div>
 						</div>
 
-						{#if value === item.value}
-							<div class="ml-auto pl-2 pr-2 md:pr-0">
-								<Check />
-							</div>
-						{/if}
+						<!-- llens(#70): ユーザー既定モデル(新規チャットの初期選択)の bookmark。
+						     行クリック(モデル選択)とは独立に効かせる(stopPropagation)。
+						     既定 = bookmark-check を実色、それ以外は薄い bookmark。
+						     選択中の ✓ は撤去(トリガーに選択中モデル名が出ており冗長)。
+						     Tooltip(tippy)は root div に aria-label を複製するのでここでは使わず native title。 -->
+						<span
+							class="ml-auto block p-0.5 mr-2 md:mr-0 rounded-sm {userDefaultModelId === item.value
+								? 'text-content'
+								: 'text-content-subtle/50 hover:text-content-muted'}"
+							role="button"
+							tabindex="-1"
+							title={userDefaultModelId === item.value
+								? $i18n.t('既定のモデルを解除')
+								: $i18n.t('既定のモデルにする')}
+							aria-label={$i18n.t('既定のモデルにする')}
+							on:click|stopPropagation={() => {
+								toggleDefaultModel(item.value);
+							}}
+						>
+							{#if userDefaultModelId === item.value}
+								<span class="i-lucide-bookmark-check size-4 block"></span>
+							{:else}
+								<span class="i-lucide-bookmark size-4 block"></span>
+							{/if}
+						</span>
 					</button>
 				{:else}
 					<div class="">
