@@ -256,7 +256,7 @@
 					<tbody>
 						{#each filteredGroups as group (group.id)}
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+								class="bg-surface-raised text-xs cursor-pointer hover:bg-surface-hover transition"
 								onclick={() => {
 									selectedGroup = group;
 									showEditGroupModal = true;

@@ -23,7 +23,7 @@
 	const i18n = getContext('i18n');
 
 	const TABS = [
-		{ id: 'overview', label: 'Overview', icon: 'i-lucide-users' },
+		{ id: 'overview', label: 'Users', icon: 'i-lucide-users' },
 		{ id: 'groups', label: 'Groups', icon: 'i-lucide-users-round' }
 	];
 
@@ -222,7 +222,7 @@
 							     削除導線は持たない: user 削除は hard delete(チャットも物理削除・file は孤児化)
 							     なので FE から出さず、無効化は編集で role=pending に落とす運用 -->
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover transition"
 								onclick={() => {
 									editTarget = user;
 									showUserModal = true;
@@ -274,7 +274,7 @@
 										{#if $config?.features?.enable_admin_chat_access}
 											<Tooltip content={$i18n.t('Chats')}>
 												<button
-													class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+													class="self-center w-fit text-sm px-2 py-2 hover:bg-surface-hover rounded-xl"
 													aria-label={$i18n.t('Chats')}
 													onclick={(e) => {
 														e.stopPropagation();
