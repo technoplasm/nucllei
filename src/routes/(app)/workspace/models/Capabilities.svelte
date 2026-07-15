@@ -9,7 +9,7 @@
 	const helpText: Record<string, string> = {
 		vision: $i18n.t('Model accepts image inputs'),
 		usage: $i18n.t(
-			'実測 usage(トークン消費)を要求する(stream_options.include_usage)。これを未知パラメータとして弾く OpenAI 互換 API に繋ぐ場合だけ OFF にする'
+			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'
 		),
 		citations: $i18n.t('Displays citations in the response')
 	};
@@ -43,7 +43,7 @@
 			</span>
 
 			<div class=" py-0.5 text-sm capitalize">
-				<Tooltip content={$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}>
+				<Tooltip content={$i18n.t('Expose the skill list to the model (load_skill) + /command activation')}>
 					{$i18n.t('Skills')}
 				</Tooltip>
 			</div>

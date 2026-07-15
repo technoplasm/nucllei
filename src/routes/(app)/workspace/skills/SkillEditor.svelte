@@ -210,7 +210,7 @@
 			<Textarea
 				id="skill-description"
 				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-xs outline-hidden overflow-y-hidden resize-none"
-				placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
+				placeholder={$i18n.t('Description the model uses to pick this skill. If empty, it is not exposed to the model')}
 				bind:value={description}
 				rows={2}
 			/>
@@ -241,7 +241,7 @@
 						</div>
 					{/if}
 					<div class="text-xs text-content-muted mt-0.5">
-						{$i18n.t('tool 紐づき skill の作成/更新は admin のみ可能です。')}
+						{$i18n.t('Only admins can create or update skills with tools attached.')}
 					</div>
 				</div>
 			</div>
@@ -292,7 +292,7 @@
 
 		{#if !canEdit}
 			<div class="text-sm text-content-muted">
-				{$i18n.t('閲覧のみ(編集できるのは自分のスキルだけです)')}
+				{$i18n.t('Read-only (you can only edit your own skills)')}
 			</div>
 		{/if}
 	</div>

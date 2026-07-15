@@ -40,7 +40,7 @@
 
 	{#if disabled}
 		<div class="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
-			{$i18n.t('スキル機能が無効のため、このモデルでは発火しません(紐づけ設定は保持されます)')}
+			{$i18n.t('Skills are disabled for this model, so they will not activate (assignments are preserved)')}
 		</div>
 	{/if}
 
@@ -67,7 +67,7 @@
 
 							{#if !(_skills[skillId].description ?? '').trim()}
 								<Tooltip
-									content={$i18n.t('description が無いためモデルには公開されません')}
+									content={$i18n.t('Not exposed to the model because it has no description')}
 									placement="top-start"
 								>
 									<span class="text-xs text-yellow-600 dark:text-yellow-500"
