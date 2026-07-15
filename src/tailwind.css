@@ -12,6 +12,12 @@
 */
 @layer base {
 	:root {
+		/* ネイティブウィジェット(select のポップアップ・スクロールバー・date picker 等)を
+		   テーマに追従させる。未宣言だと dark でも light 描画になり、透明背景の select は
+		   「light ポップアップ + 白文字」で破綻する(不透明 dark 背景の select だけ
+		   Chromium のヒューリスティックで偶然暗転していた — 2026-07-15)。 */
+		color-scheme: light;
+
 		/* サイドバー実幅の一元管理(Sidebar 本体と、その幅を差し引く各レイアウトの両方が参照する。
 		   値の食い違いは「合計幅が溢れて justify-end で左端=サイドバーが切れる」バグになる) */
 		--sidebar-width: 300px;
@@ -45,6 +51,8 @@
 	}
 
 	html.dark {
+		color-scheme: dark;
+
 		--surface: #1a1a1a; /* dark メイン背景(gray-900) */
 		--surface-raised: #262626; /* dark 入力欄など(背景より少し明るい) */
 		--surface-hover: #161616;

@@ -115,6 +115,10 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ## テーマ
 
+- **`color-scheme` を :root(light)/ html.dark(dark)で宣言している**(2026-07-15、`src/tailwind.css`)。
+  未宣言だとネイティブウィジェット(select のポップアップ・スクロールバー・date picker)が dark でも
+  light 描画になり、透明背景の select が「light ポップアップ + 白文字」で破綻する
+  (不透明 dark 背景の select だけ Chromium のヒューリスティックで偶然暗転する罠)。
 - 選択肢は **System / Dark / Light の3つのみ**(`oled-dark` と `her` = 映画 Her イースターエッグ
   は撤去)。適用ロジックは `src/lib/utils/theme.ts`、起動時スクリプトは `src/app.html`。
 - gray パレット(`--color-gray-*`)は dark 時に `theme.ts` が **800/850/900/950 のみ**を
