@@ -59,11 +59,10 @@
 			<div class="text-xs text-content-subtle mt-1">{$i18n.t('None')}</div>
 		{/if}
 
+		<!-- 空のセクション(type)は見出しごと出さない。項目があれば小見出しは常時表示 -->
 		{#each [{ label: 'Filter', ids: filterIds }, { label: 'Action', ids: actionIds }] as section (section.label)}
 			{#if section.ids.length > 0}
-				{#if filterIds.length > 0 && actionIds.length > 0}
-					<div class="text-xs text-content-muted mt-2">{section.label}</div>
-				{/if}
+				<div class="text-xs text-content-muted mt-2">{section.label}</div>
 				<div class="flex items-center mt-1 flex-wrap">
 					{#each section.ids as funcId (funcId)}
 						<!-- llens(#49): label で行クリックトグル -->
