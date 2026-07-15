@@ -1,7 +1,6 @@
 <script lang="ts">
 	// llens(#48): Admin を Workspace に統合。admin ゲートは workspace layout 側。
 	import { getContext, onMount } from 'svelte';
-	import { toast } from 'svelte-sonner';
 
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -11,10 +10,9 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { config, user as sessionUser } from '$lib/stores';
-	import { deleteUserById, getUserMetaFields, getUsers } from '$lib/apis/users';
+	import { getUserMetaFields, getUsers } from '$lib/apis/users';
 
 	import Badge from '$lib/components/common/Badge.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -40,7 +38,6 @@
 	let metaFields = $state<{ key: string; label: string }[]>([]);
 
 	let selectedUser = $state<any>(null);
-	let showDeleteConfirmDialog = $state(false);
 	let showUserChatsModal = $state(false);
 
 	// llens(#55): 作成/編集は単一モーダル(UserModal)。editTarget=null で作成モード
@@ -106,28 +103,10 @@
 		refreshUsers();
 	});
 
-	const deleteUserHandler = async (id: string) => {
-		const res = await deleteUserById(id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			await refreshUsers();
-		}
-	};
-
 	onMount(async () => {
 		metaFields = (await getUserMetaFields().catch(() => null)) ?? [];
 	});
 </script>
-
-<ConfirmDialog
-	bind:show={showDeleteConfirmDialog}
-	on:confirm={() => {
-		deleteUserHandler(selectedUser.id);
-	}}
-/>
 
 <UserModal
 	bind:show={showUserModal}
@@ -253,7 +232,9 @@
 					</thead>
 					<tbody>
 						{#each filteredUsers as user (user.id)}
-							<!-- 行クリック=編集モーダル。キーボード操作は行末の編集ボタン(aria-label 付き)が担う -->
+							<!-- 行クリック=編集モーダル(行末アイコンはチャットのみ — 2026-07-16)。
+							     削除導線は持たない: user 削除は hard delete(チャットも物理削除・file は孤児化)
+							     なので FE から出さず、無効化は編集で role=pending に落とす運用 -->
 							<tr
 								class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
 								onclick={() => {
@@ -320,35 +301,6 @@
 											</Tooltip>
 										{/if}
 
-										<Tooltip content={$i18n.t('Edit User')}>
-											<button
-												class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-												aria-label={$i18n.t('Edit User')}
-												onclick={(e) => {
-													e.stopPropagation();
-													editTarget = user;
-													showUserModal = true;
-												}}
-											>
-												<span class="i-lucide-pencil size-4 block"></span>
-											</button>
-										</Tooltip>
-
-										{#if user.role !== 'admin'}
-											<Tooltip content={$i18n.t('Delete User')}>
-												<button
-													class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-													aria-label={$i18n.t('Delete User')}
-													onclick={(e) => {
-														e.stopPropagation();
-														showDeleteConfirmDialog = true;
-														selectedUser = user;
-													}}
-												>
-													<span class="i-lucide-trash-2 size-4 block"></span>
-												</button>
-											</Tooltip>
-										{/if}
 									</div>
 								</td>
 							</tr>

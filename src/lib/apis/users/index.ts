@@ -219,31 +219,8 @@ export const getUserMetaFields = async () => {
 	return res;
 };
 
-export const deleteUserById = async (userId: string) => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
-		method: 'DELETE',
-		headers: {
-			'Content-Type': 'application/json'
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.log(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
+// llens(#69): deleteUserById は撤去 — user 削除は hard delete(チャット物理削除・file 孤児化)
+// なので FE から導線を出さない。無効化は role=pending で行う。
 
 type UserUpdateForm = {
 	profile_image_url: string;
