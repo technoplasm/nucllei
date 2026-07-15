@@ -144,7 +144,7 @@
 	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
 		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
-			{$i18n.t('組み込み')}
+			{$i18n.t('Builtin')}
 		</div>
 		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
@@ -192,7 +192,7 @@
 	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
 	{#if builtinItems.length}
 		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
-			{$i18n.t('カスタム')}
+			{$i18n.t('Custom')}
 		</div>
 	{/if}
 	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">

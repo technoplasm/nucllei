@@ -42,7 +42,7 @@
 			<div class="text-xs text-content-subtle mt-1">{$i18n.t('None')}</div>
 		{/if}
 
-		{#each [{ label: $i18n.t('組み込み'), ids: builtinIds }, { label: $i18n.t('カスタムツール'), ids: customIds }] as section}
+		{#each [{ label: $i18n.t('Builtin'), ids: builtinIds }, { label: $i18n.t('Custom'), ids: customIds }] as section}
 			{#if section.ids.length > 0}
 				{#if builtinIds.length > 0 && customIds.length > 0}
 					<div class="text-xs text-content-muted mt-2">{section.label}</div>
