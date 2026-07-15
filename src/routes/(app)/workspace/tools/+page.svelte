@@ -148,7 +148,7 @@
 		</div>
 		<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
-				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised rounded-xl">
+				<div class="flex items-center gap-0.5 px-4 py-3 bg-surface-raised rounded-xl">
 					<!-- 組み込みは編集不可 — tooltip とカーソルで明示(visibility だけ右のアイコンで編集可) -->
 					<Tooltip
 						className="flex-1 min-w-0"
@@ -198,7 +198,7 @@
 	<div class="{builtinItems.length ? '' : 'mt-6 '}mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each customItems as tool (tool.id)}
 			<div
-				class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
+				class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
 			>
 				<a
 					class="flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"

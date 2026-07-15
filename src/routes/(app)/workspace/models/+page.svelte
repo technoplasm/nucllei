@@ -158,10 +158,10 @@
 		{#each filteredItems as model (model.id)}
 			<!-- カード全体がクリック=編集(a の after オーバーレイ)。右のボタン類は relative で上に載せる -->
 			<div
-				class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
+				class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
 			>
 				<a
-					class="flex items-center flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
+					class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
 					href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
 				>
 					<img

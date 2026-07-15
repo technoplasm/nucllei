@@ -116,7 +116,7 @@
 			<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 				{#each group.items as func (func.id)}
 					<div
-						class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
+						class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
 					>
 						<a
 							class="flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
