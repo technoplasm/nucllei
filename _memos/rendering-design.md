@@ -96,6 +96,14 @@ reasoning ブロックの終了は**タグ対(`</think>`)や content 到着で�
 - 生 `<think>` タグ混り content(SGLang reasoning parser 無効)は接続契約外
   (_memos/model-frames.md)。タグ検出経路は #17 で廃止予定であり堅牢化しない。
   ただし上記③の終端 close はタグ経路の未閉じブロックにも効く。
+- **追補(2026-07-15、53d91647e)**: ③の「切断」には **task 中断(CancelledError)と
+  途中失敗(exception)も含める**。middleware の両 except 経路で
+  `close_open_reasoning_block` → 保存 → emit してから抜ける。閉じずに保存すると
+  done=false の「Thinking…」がリロード後も回り続ける(実害で確認)。
+  加えてフロント側の保険として、message.done のとき ContentBlocks が
+  block.done=false でもスピナーを止める(BE が finalize できずに死んだ孤児対策)。
+  スピナーの規律は「**task が生きている間だけ回す**」— ロード時に生きた task が
+  無ければ FE が未完メッセージを done 化し、本文ゼロなら中断メッセージを表示する。
 
 ### L0 の確定スキーマ(2026-07-06 決定 — #17 / #27 同時決定)
 
@@ -137,6 +145,13 @@ text join へ切替。
   (`convert_content_blocks_to_messages`)。details 擬似 HTML を生成する
   コードは backend から消滅(旧 serialize_content_blocks は text join に
   縮退して吸収)
+  - **中断で途切れた tool_calls の履歴再送規律(2026-07-15、53d91647e)**:
+    フロント対応物 `expandAssistantToolHistory`(`src/lib/utils/chat-messages.ts`)は
+    ① arguments が壊れ JSON の call を履歴から落とす(SGLang は履歴中の
+    tool_calls.arguments をパースし "unexpected end of data" の 400 で拒否 — 実測)、
+    ② 完全な call で result 未着のものには合成 result
+    `[interrupted: …]` を対にする(tool 応答の無い tool_calls も不正)。
+    backend 側 convert は現ターンの完結ブロックしか通らないため対象外。
 - `utils/skills.py` — skill 発火(`/command` + load_skill)一式
 - `utils/middleware.py` — オーケストレーションのみ(inlet 準備 /
   `consume_model_stream`(SSE + filter + emit)/ tool 実行ループ / 永続化・
