@@ -197,10 +197,10 @@ class Attachment:
 		<!-- llens(#45): 作成/編集画面を skill / tool 型のセクション構成に統一。
 		     ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
 		<a
-			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			class="inline-flex items-center text-sm py-0.5 text-content-subtle hover:text-content font-medium"
 			href="/workspace/functions"
 		>
-			<span class="i-lucide-chevron-left size-4 block"></span>
+			<span class="i-lucide-arrow-left size-4 mr-2"></span>
 			{$i18n.t('Back to list')}
 		</a>
 

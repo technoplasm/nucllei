@@ -144,7 +144,7 @@
 				>
 					{#if $user?.role === 'admin'}
 						<button
-							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 							type="button"
 							aria-label={(skill.access_control ?? null) === null
 								? $i18n.t('Public')
@@ -172,7 +172,7 @@
 				{#if $user?.role === 'admin' || skill.user_id === $user?.id}
 					<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 						<button
-							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 							type="button"
 							aria-label={$i18n.t('Delete')}
 							onclick={() => {

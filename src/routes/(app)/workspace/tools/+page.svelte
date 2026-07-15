@@ -170,7 +170,7 @@
 							: $i18n.t('Private')}
 					>
 						<button
-							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+							class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 							type="button"
 							aria-label={(tool.access_control ?? null) === null
 								? $i18n.t('Public')
@@ -216,7 +216,7 @@
 					content={(tool.access_control ?? null) === null ? $i18n.t('Public') : $i18n.t('Private')}
 				>
 					<button
-						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={(tool.access_control ?? null) === null
 							? $i18n.t('Public')
@@ -233,7 +233,7 @@
 
 				<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 					<button
-						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={$i18n.t('Delete')}
 						onclick={() => {

@@ -55,7 +55,7 @@
 
 		--surface: #1a1a1a; /* dark メイン背景(gray-900) */
 		--surface-raised: #262626; /* dark 入力欄など(背景より少し明るい) */
-		--surface-hover: #161616;
+		--surface-hover: #313131;
 		--surface-muted: #2d2d2d; /* dark 控えめな帯(table thead 等。raised より1段明るい) */
 
 		--surface-sidebar: #212121; /* dark サイドバー(gray-950・1段濃い) */

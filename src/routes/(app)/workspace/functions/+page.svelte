@@ -131,7 +131,7 @@
 
 						<Tooltip className="relative flex" content={$i18n.t('Valves')}>
 							<button
-								class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 								type="button"
 								aria-label={$i18n.t('Valves')}
 								onclick={() => {
@@ -145,7 +145,7 @@
 
 						<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 							<button
-								class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 								type="button"
 								aria-label={$i18n.t('Delete')}
 								onclick={() => {

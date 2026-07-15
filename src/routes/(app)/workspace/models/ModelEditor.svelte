@@ -311,22 +311,22 @@
 	<div class="flex flex-col h-full">
 		{#if onBack}
 			<button
-				class="self-start inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+				class="self-start inline-flex items-center text-sm py-0.5 mb-2 text-content-subtle hover:text-content font-medium"
 				type="button"
 				onclick={() => {
 					onBack();
 				}}
 			>
-				<span class="i-lucide-chevron-left size-4 block"></span>
+				<span class="i-lucide-arrow-left size-4 mr-2"></span>
 				{$i18n.t('Back')}
 			</button>
 		{:else}
 			<!-- workspace/models からの利用(create/edit ページ)— 一覧へ戻る(SkillEditor 同型) -->
 			<a
-				class="self-start inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+				class="self-start inline-flex items-center text-sm py-0.5 mb-2 text-content-subtle hover:text-content font-medium"
 				href="/workspace/models"
 			>
-				<span class="i-lucide-chevron-left size-4 block"></span>
+				<span class="i-lucide-arrow-left size-4 mr-2"></span>
 				{$i18n.t('Back to list')}
 			</a>
 		{/if}

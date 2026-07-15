@@ -161,7 +161,7 @@
 				class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
 			>
 				<a
-					class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
+					class="flex items-center flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
 					href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
 				>
 					<img
@@ -190,7 +190,7 @@
 
 				<Tooltip className="relative flex" content={$i18n.t('Clone')}>
 					<button
-						class="px-2 py-2 text-content bg-surface-raised hover:bg-surface-hover rounded-xl"
+						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={$i18n.t('Clone')}
 						onclick={() => {
@@ -203,7 +203,7 @@
 
 				<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 					<button
-						class="px-2 py-2 text-content bg-surface-raised hover:bg-surface-hover rounded-xl"
+						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={$i18n.t('Delete')}
 						onclick={() => {
