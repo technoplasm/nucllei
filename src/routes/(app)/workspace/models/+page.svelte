@@ -139,7 +139,7 @@
 				className="order-2 ml-auto self-stretch flex sm:order-3 sm:ml-0"
 			>
 				<button
-					class="h-full flex items-center px-2 py-1 bg-surface-raised hover:bg-surface-hover rounded-xs"
+					class="h-full flex items-center px-2 py-1 bg-surface-raised hover:bg-surface-hover rounded-lg"
 					type="button"
 					aria-label={$i18n.t('Configure Models')}
 					onclick={() => {
