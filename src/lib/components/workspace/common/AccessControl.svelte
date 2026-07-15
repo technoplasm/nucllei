@@ -159,7 +159,7 @@
 				{#if variant === 'file'}
 					<select
 						id="models"
-						class="outline-hidden bg-transparent text-sm font-medium rounded-lg block w-fit pr-10 max-w-full placeholder-gray-400"
+						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-lg block w-fit pr-8 max-w-full"
 						value={fileMode}
 						on:change={(e) => {
 							setFileMode(e.target.value);
@@ -182,7 +182,7 @@
 				{:else}
 					<select
 						id="models"
-						class="outline-hidden bg-transparent text-sm font-medium rounded-lg block w-fit pr-10 max-w-full placeholder-gray-400"
+						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-lg block w-fit pr-8 max-w-full"
 						value={accessControl !== null ? 'private' : 'public'}
 						on:change={(e) => {
 							if (e.target.value === 'public') {
