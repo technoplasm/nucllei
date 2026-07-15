@@ -105,18 +105,17 @@
 		</div>
 	</DeleteConfirmDialog>
 
+	<!-- ヘッダ様式: 見出しで 1 行(count なし)/ 2 行目に Create pill + 検索 + 並び替え。
+	     狭幅は「Create ←端寄せ→ [↑↓] / 検索(全幅)」の 2 行に折り返す
+	     (DOM は 1 セットのまま flex の order + wrap で並べ替える)。 -->
 	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Models')}
-			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<!-- 狭幅は「Create ←端寄せ→ [↑↓] / 検索(全幅)」の 2 行に折り返す。
-		 DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
-				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
+				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/models/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>

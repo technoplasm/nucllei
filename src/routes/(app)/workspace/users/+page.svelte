@@ -147,13 +147,15 @@
 
 	<div class="flex-1 mt-1 lg:mt-0 overflow-y-scroll">
 		{#if selectedTab === 'overview'}
-			<!-- ヘッダ: 見出し + Add pill(primary)/ 右に raised 検索(Groups と同型・count なし) -->
-			<div class="mt-0.5 mb-2 gap-x-4 gap-y-2 flex flex-wrap items-center justify-between">
-				<div class="flex items-center gap-4 px-0.5">
-					<div class="text-lg font-medium">{$i18n.t('Users')}</div>
+			<!-- ヘッダ様式: 見出しで 1 行(count なし)/ 2 行目に Add pill + 検索 -->
+			<div class="flex flex-col gap-1 mt-0.5 mb-2">
+				<div class="flex items-center text-lg font-medium px-0.5">
+					{$i18n.t('Users')}
+				</div>
 
+				<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 					<button
-						class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
+						class="shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 						onclick={() => {
 							editTarget = null;
 							showUserModal = true;
@@ -162,15 +164,15 @@
 						<span class="i-lucide-plus size-3.5 block mr-1"></span>
 						{$i18n.t('Add User')}
 					</button>
-				</div>
 
-				<div class="flex items-center px-2 bg-surface-raised rounded-xs">
-					<span class="i-lucide-search size-3.5 block shrink-0"></span>
-					<input
-						class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
-						bind:value={search}
-						placeholder={$i18n.t('Search')}
-					/>
+					<div class="flex items-center px-2 bg-surface-raised rounded-xs">
+						<span class="i-lucide-search size-3.5 block shrink-0"></span>
+						<input
+							class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
+							bind:value={search}
+							placeholder={$i18n.t('Search')}
+						/>
+					</div>
 				</div>
 			</div>
 

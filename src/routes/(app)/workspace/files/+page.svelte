@@ -359,15 +359,13 @@
 	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Files')}
-			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-			<span class="text-base text-content-muted">{total}</span>
 		</div>
 
 		<!-- 狭幅は models 同型の 2 行折り返し(Upload ←端寄せ→ 表示コントロール / 検索は全幅)。
 		 DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<button
-				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
+				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				type="button"
 				disabled={uploading}
 				onclick={() => {

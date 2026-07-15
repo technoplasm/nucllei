@@ -81,16 +81,15 @@
 </svelte:head>
 
 {#if $functions !== null}
+	<!-- ヘッダ様式: 見出しで 1 行(count なし)/ 2 行目に Create pill + 検索 -->
 	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Functions')}
-			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
-			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class="mt-2 flex gap-4">
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
-				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
+				class="shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/functions/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>
@@ -100,7 +99,7 @@
 			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
-					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
+					class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
 					bind:value={query}
 					placeholder={$i18n.t('Search Functions')}
 				/>
