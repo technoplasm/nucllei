@@ -5,13 +5,18 @@
 
 	const i18n = getContext('i18n');
 
-	export let filters = [];
-	export let selectedFilterIds = [];
+	let {
+		filters = [],
+		selectedFilterIds = $bindable([])
+	}: {
+		filters?: any[];
+		selectedFilterIds?: string[];
+	} = $props();
 
-	let _filters = {};
+	let _filters = $state<Record<string, any>>({});
 
 	onMount(() => {
-		_filters = filters.reduce((acc, filter) => {
+		_filters = filters.reduce((acc: Record<string, any>, filter) => {
 			acc[filter.id] = {
 				...filter,
 				selected: selectedFilterIds.includes(filter.id)

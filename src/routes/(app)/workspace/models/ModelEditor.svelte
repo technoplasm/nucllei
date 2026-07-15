@@ -1,67 +1,71 @@
 <script lang="ts">
+	// llens: workspace/models(preset 編集)のほか workspace/Settings/Models(生モデル編集、
+	// preset=false + onBack)からも使う。models 専用素材として route 配下へコロケート(#70 A2)。
 	import { onMount, getContext, tick } from 'svelte';
-	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
-	import { tools, functions, skills, user } from '$lib/stores';
+	import { toast } from 'svelte-sonner';
 
-	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
-	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import ToolsSelector from '$lib/components/workspace/Models/ToolsSelector.svelte';
-	import SkillsSelector from '$lib/components/workspace/Models/SkillsSelector.svelte';
-	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
-	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
-	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
+	import { tools, functions, skills } from '$lib/stores';
 	import { getModels } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
-	import AccessControl from '../common/AccessControl.svelte';
-	import { toast } from 'svelte-sonner';
+
+	import AdvancedParams from './AdvancedParams.svelte';
+	import ToolsSelector from './ToolsSelector.svelte';
+	import SkillsSelector from './SkillsSelector.svelte';
+	import FiltersSelector from './FiltersSelector.svelte';
+	import ActionsSelector from './ActionsSelector.svelte';
+	import Capabilities from './Capabilities.svelte';
+	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
+	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
+	import Textarea from '$lib/components/common/Textarea.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
 
+	let {
+		onSubmit,
+		onBack = null,
+		model = null,
+		edit = false,
+		preset = true
+	}: {
+		onSubmit: (info: any) => void | Promise<void>;
+		onBack?: null | (() => void);
+		model?: any;
+		edit?: boolean;
+		preset?: boolean;
+	} = $props();
+
 	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
-	let selectedTab = 'general';
+	let selectedTab = $state('general');
 
-	export let onSubmit: Function;
-	export let onBack: null | Function = null;
+	let loading = $state(false);
+	let loaded = $state(false);
 
-	export let model = null;
-	export let edit = false;
+	let filesInputElement = $state<HTMLInputElement>();
+	let inputFiles = $state<FileList | null>(null);
 
-	export let preset = true;
-
-	let loading = false;
-	let success = false;
-
-	let filesInputElement;
-	let inputFiles;
-
-	let loaded = false;
-
-	// ///////////
-	// model
-	// ///////////
-
-	let id = '';
-	let name = '';
+	let id = $state('');
+	let name = $state('');
 
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
 	let originalId = '';
-	let showRenameConfirm = false;
+	let showRenameConfirm = $state(false);
 
-	$: if (!edit) {
-		if (name) {
+	// 作成時は表示名から id を自動生成する
+	$effect(() => {
+		if (!edit && name) {
 			id = name
 				.replace(/\s+/g, '-')
 				.replace(/[^a-zA-Z0-9-]/g, '')
 				.toLowerCase();
 		}
-	}
+	});
 
-	let info = {
+	let info = $state<any>({
 		id: '',
 		base_model_id: null,
 		name: '',
@@ -74,36 +78,36 @@
 		params: {
 			system: ''
 		}
-	};
+	});
 
-	let params = {
+	let params = $state<Record<string, any>>({
 		system: ''
-	};
-	let capabilities = {
+	});
+	let capabilities = $state<Record<string, boolean | undefined>>({
 		vision: true,
 		usage: undefined,
 		citations: true
-	};
+	});
 
-	let toolIds = [];
-	let skillIds = [];
-	let filterIds = [];
-	let actionIds = [];
+	let toolIds = $state<string[]>([]);
+	let skillIds = $state<string[]>([]);
+	let filterIds = $state<string[]>([]);
+	let actionIds = $state<string[]>([]);
 
 	// llens(#42): 機能「スキル」(meta.features.skills、既定 ON)。OFF でこのモデルの
 	// manifest(load_skill)と /command 発火が両方止まる。
-	let featureSkills = true;
+	let featureSkills = $state(true);
 
-	let accessControl = {};
+	let accessControl = $state<any>({});
 
 	// llens: チャットのモデルピッカー(/api/models = $models)は preset のみを返すよう
 	// になったため、preset のベースモデル選択には生モデルを含む /api/models/base を使う。
 	// admin ゲートのエンドポイントなので admin 前提(workspace.models 既定は False)。
-	let baseModels = [];
+	let baseModels = $state<any[]>([]);
 
 	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
 	// 状態へ暗黙リセットする。名前/ID はタブ外の常時ヘッダなので対象外(リセットしない)。
-	let stateSnapshot = null;
+	let stateSnapshot: string | null = null;
 	const captureSnapshot = () => {
 		stateSnapshot = JSON.stringify({
 			info,
@@ -117,7 +121,7 @@
 			accessControl
 		});
 	};
-	const switchTab = (tab) => {
+	const switchTab = (tab: string) => {
 		if (tab === selectedTab) return;
 		if (stateSnapshot) {
 			const s = JSON.parse(stateSnapshot);
@@ -134,7 +138,7 @@
 		selectedTab = tab;
 	};
 
-	const addUsage = (base_model_id) => {
+	const addUsage = (base_model_id: string) => {
 		const baseModel = baseModels.find((m) => m.id === base_model_id);
 
 		if (baseModel) {
@@ -143,23 +147,24 @@
 			} else {
 				delete capabilities.usage;
 			}
-			capabilities = capabilities;
 		}
 	};
 
 	const submitHandler = async () => {
+		if (id === '') {
+			toast.error($i18n.t('Model ID is required.'));
+			return;
+		}
+
+		if (name === '') {
+			toast.error($i18n.t('Model Name is required.'));
+			return;
+		}
+
 		loading = true;
 
 		info.id = id;
 		info.name = name;
-
-		if (id === '') {
-			toast.error('Model ID is required.');
-		}
-
-		if (name === '') {
-			toast.error('Model Name is required.');
-		}
 
 		info.access_control = accessControl;
 		info.meta.capabilities = capabilities;
@@ -218,7 +223,9 @@
 		// プロンプト候補: title と prompt(content)は両方必須(空文字は不可)。空配列は null 化して meta を汚さない。
 		if (Array.isArray(info?.meta?.suggestion_prompts)) {
 			const prompts = info.meta.suggestion_prompts;
-			if (prompts.some((p) => (p?.title ?? '').trim() === '' || (p?.content ?? '').trim() === '')) {
+			if (
+				prompts.some((p: any) => (p?.title ?? '').trim() === '' || (p?.content ?? '').trim() === '')
+			) {
 				toast.error($i18n.t('Prompt suggestions require both a title and a prompt.'));
 				loading = false;
 				return;
@@ -228,7 +235,7 @@
 			}
 		}
 
-		info.params.stop = params.stop ? params.stop.split(',').filter((s) => s.trim()) : null;
+		info.params.stop = params.stop ? params.stop.split(',').filter((s: string) => s.trim()) : null;
 		Object.keys(info.params).forEach((key) => {
 			if (info.params[key] === '' || info.params[key] === null) {
 				delete info.params[key];
@@ -247,9 +254,8 @@
 
 	const doSubmit = async () => {
 		loading = true;
-		await onSubmit(info);
+		await onSubmit($state.snapshot(info));
 		loading = false;
-		success = false;
 	};
 
 	onMount(async () => {
@@ -280,13 +286,7 @@
 					[model.base_model_id, `${model.base_model_id}:latest`].includes(m.id)
 				);
 
-				console.log('base_model', base_model);
-
-				if (base_model) {
-					model.base_model_id = base_model.id;
-				} else {
-					model.base_model_id = null;
-				}
+				model.base_model_id = base_model ? base_model.id : null;
 			}
 
 			params = { ...params, ...model?.params };
@@ -303,30 +303,12 @@
 			actionIds = model?.meta?.actionIds ?? [];
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 
-			if ('access_control' in model) {
-				accessControl = model.access_control;
-			} else {
-				accessControl = {};
-			}
-
-			console.log(model?.access_control);
-			console.log(accessControl);
+			accessControl = 'access_control' in model ? model.access_control : {};
 
 			info = {
 				...info,
-				...JSON.parse(
-					JSON.stringify(
-						model
-							? model
-							: {
-									id: model.id,
-									name: model.name
-								}
-					)
-				)
+				...JSON.parse(JSON.stringify(model))
 			};
-
-			console.log(model);
 		}
 
 		// タブ切替の暗黙リセット用に、ロード直後の状態を控える
@@ -338,26 +320,14 @@
 {#if loaded}
 	{#if onBack}
 		<button
-			class="flex space-x-1"
-			on:click={() => {
+			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			type="button"
+			onclick={() => {
 				onBack();
 			}}
 		>
-			<div class=" self-center">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="h-4 w-4"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</div>
-			<div class=" self-center text-sm font-medium">{'Back'}</div>
+			<span class="i-lucide-chevron-left size-4 block"></span>
+			{$i18n.t('Back')}
 		</button>
 	{/if}
 
@@ -368,10 +338,10 @@
 			type="file"
 			hidden
 			accept="image/*"
-			on:change={() => {
+			onchange={() => {
 				let reader = new FileReader();
 				reader.onload = (event) => {
-					let originalImageUrl = `${event.target.result}`;
+					let originalImageUrl = `${event.target?.result}`;
 
 					const img = new Image();
 					img.src = originalImageUrl;
@@ -379,6 +349,7 @@
 					img.onload = function () {
 						const canvas = document.createElement('canvas');
 						const ctx = canvas.getContext('2d');
+						if (!ctx) return;
 
 						// Calculate the aspect ratio of the image
 						const aspectRatio = img.width / img.height;
@@ -411,7 +382,9 @@
 						info.meta.profile_image_url = compressedSrc;
 
 						inputFiles = null;
-						filesInputElement.value = '';
+						if (filesInputElement) {
+							filesInputElement.value = '';
+						}
 					};
 				};
 
@@ -424,7 +397,6 @@
 				) {
 					reader.readAsDataURL(inputFiles[0]);
 				} else {
-					console.log(`Unsupported File Type '${inputFiles[0]['type']}'.`);
 					inputFiles = null;
 				}
 			}}
@@ -436,7 +408,8 @@
 			     lg 未満は flex-col で submenu が上に逃げる。 -->
 			<form
 				class="flex flex-col lg:flex-row w-full gap-3 lg:gap-4"
-				on:submit|preventDefault={() => {
+				onsubmit={(e) => {
+					e.preventDefault();
 					submitHandler();
 				}}
 			>
@@ -450,7 +423,7 @@
 							? ''
 							: ' text-content-subtle hover:text-content'}"
 						type="button"
-						on:click={() => switchTab('general')}
+						onclick={() => switchTab('general')}
 					>
 						<div class=" self-center mr-2">
 							<span class="i-lucide-settings size-4 block"></span>
@@ -464,7 +437,7 @@
 							? ''
 							: ' text-content-subtle hover:text-content'}"
 						type="button"
-						on:click={() => switchTab('prompt')}
+						onclick={() => switchTab('prompt')}
 					>
 						<div class=" self-center mr-2">
 							<span class="i-lucide-file-text size-4 block"></span>
@@ -478,7 +451,7 @@
 							? ''
 							: ' text-content-subtle hover:text-content'}"
 						type="button"
-						on:click={() => switchTab('advanced')}
+						onclick={() => switchTab('advanced')}
 					>
 						<div class=" self-center mr-2">
 							<span class="i-lucide-sliders-horizontal size-4 block"></span>
@@ -514,41 +487,23 @@
 												? 'bg-transparent'
 												: 'bg-white'} shadow-xl group relative"
 											type="button"
-											on:click={() => {
-												filesInputElement.click();
+											aria-label={$i18n.t('Change image')}
+											onclick={() => {
+												filesInputElement?.click();
 											}}
 										>
-											{#if info.meta.profile_image_url}
-												<img
-													src={info.meta.profile_image_url}
-													alt="model profile"
-													class="rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
-												/>
-											{:else}
-												<img
-													src={DEFAULT_MODEL_IMAGE_URL}
-													alt="model profile"
-													class=" rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
-												/>
-											{/if}
+											<img
+												src={info.meta.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+												alt="model profile"
+												class="rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
+											/>
 
 											<div class="absolute bottom-0 right-0 z-10">
 												<div class="m-1.5">
 													<div
 														class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
 													>
-														<svg
-															xmlns="http://www.w3.org/2000/svg"
-															viewBox="0 0 16 16"
-															fill="currentColor"
-															class="size-5"
-														>
-															<path
-																fill-rule="evenodd"
-																d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-1-1a.5.5 0 0 0-.708 0L9.354 9.646a.5.5 0 0 1-.708 0L6.354 7.354a.5.5 0 0 0-.708 0l-2 2a.5.5 0 0 0-.146.353V12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V9.707ZM12 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
-																clip-rule="evenodd"
-															/>
-														</svg>
+														<span class="i-lucide-camera size-5 block"></span>
 													</div>
 												</div>
 											</div>
@@ -560,64 +515,67 @@
 
 										<div class="flex w-full mt-1 justify-end">
 											<button
-												class="px-2 py-1 text-content-muted rounded-lg text-xs"
-												on:click={() => {
+												class="px-2 py-1 text-content-muted hover:text-content rounded-lg text-xs"
+												onclick={() => {
 													info.meta.profile_image_url = null;
 												}}
 												type="button"
 											>
-												Reset Image</button
-											>
+												{$i18n.t('Reset Image')}
+											</button>
 										</div>
 									</div>
 								</div>
 								<div class="flex-1 min-w-0">
 									{#if preset}
 										<div class="my-1">
-											<div class=" text-sm font-semibold mb-1">{$i18n.t('Base Model (From)')}</div>
+											<label class="block text-sm font-semibold mb-1" for="model-base-model">
+												{$i18n.t('Base Model (From)')}
+											</label>
 
-											<div>
-												<select
-													class="text-sm w-full bg-transparent outline-hidden"
-													placeholder="Select a base model (e.g. llama3, gpt-4o)"
-													bind:value={info.base_model_id}
-													on:change={(e) => {
-														addUsage(e.target.value);
-													}}
-													required
+											<select
+												id="model-base-model"
+												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												bind:value={info.base_model_id}
+												onchange={(e) => {
+													addUsage(e.currentTarget.value);
+												}}
+												required
+											>
+												<option value={null} class=" text-content"
+													>{$i18n.t('Select a base model')}</option
 												>
-													<option value={null} class=" text-content"
-														>{$i18n.t('Select a base model')}</option
+												{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as baseModel (baseModel.id)}
+													<option value={baseModel.id} class=" text-content"
+														>{baseModel.name}</option
 													>
-													{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as model}
-														<option value={model.id} class=" text-content">{model.name}</option>
-													{/each}
-												</select>
-											</div>
+												{/each}
+											</select>
 										</div>
 									{/if}
 
 									<div class="my-1">
-										<div class="mb-1 flex w-full justify-between items-center">
-											<div class=" self-center text-sm font-semibold">{$i18n.t('Description')}</div>
-										</div>
+										<label class="block text-sm font-semibold mb-1" for="model-description">
+											{$i18n.t('Description')}
+										</label>
 
 										<Textarea
-											className=" text-sm w-full bg-transparent outline-hidden resize-none overflow-y-hidden "
+											id="model-description"
+											className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
 											placeholder={$i18n.t('Add a short description about what this model does')}
 											bind:value={info.meta.description}
 										/>
 									</div>
 
 									<div class="my-2">
-										<div class="px-3 py-2 bg-gray-50 dark:bg-gray-950 rounded-lg">
+										<div class="px-3 py-2 bg-surface-raised rounded-lg">
 											<AccessControl bind:accessControl allowPublic={true} />
 										</div>
 									</div>
 								</div>
 							</div>
 
-							<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
+							<hr class=" border-line my-1.5" />
 
 							<div class="my-2">
 								<div class="flex w-full justify-between mb-1">
@@ -652,20 +610,20 @@
 							</div>
 
 							<div class="my-2">
-								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools} />
+								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
 							</div>
 
 							<div class="my-2">
 								<FiltersSelector
 									bind:selectedFilterIds={filterIds}
-									filters={$functions.filter((func) => func.type === 'filter')}
+									filters={($functions ?? []).filter((func: any) => func.type === 'filter')}
 								/>
 							</div>
 
 							<div class="my-2">
 								<ActionsSelector
 									bind:selectedActionIds={actionIds}
-									actions={$functions.filter((func) => func.type === 'action')}
+									actions={($functions ?? []).filter((func: any) => func.type === 'action')}
 								/>
 							</div>
 
@@ -675,10 +633,10 @@
 						{:else if selectedTab === 'prompt'}
 							<div class="my-2">
 								<div class=" text-sm font-semibold mb-2">{$i18n.t('System Prompt')}</div>
-								<div class="rounded-lg border border-gray-100 dark:border-gray-850 overflow-hidden">
+								<div class="rounded-lg border border-line overflow-hidden">
 									<CodeEditor
 										value={info.params.system ?? ''}
-										onChange={(value) => {
+										onChange={(value: string) => {
 											info.params.system = value;
 										}}
 									/>
@@ -692,9 +650,10 @@
 									</div>
 
 									<button
-										class="p-1 px-2 text-xs flex rounded-sm transition"
+										class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content transition"
 										type="button"
-										on:click={() => {
+										aria-label={$i18n.t('Add prompt suggestion')}
+										onclick={() => {
 											const prompts = info.meta.suggestion_prompts ?? [];
 											if (
 												prompts.length === 0 ||
@@ -704,26 +663,17 @@
 											}
 										}}
 									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 20 20"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
-											/>
-										</svg>
+										<span class="i-lucide-plus size-4 block"></span>
 									</button>
 								</div>
 
 								<div class="flex flex-col space-y-1.5 mt-1 mb-3">
 									{#if (info.meta.suggestion_prompts ?? []).length > 0}
 										{#each info.meta.suggestion_prompts as prompt, promptIdx}
-											<div class=" flex border border-gray-100 dark:border-gray-850 rounded-lg">
+											<div class=" flex border border-line rounded-lg">
 												<div class="flex flex-col flex-1">
 													<input
-														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-gray-100 dark:border-gray-850"
+														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-line"
 														placeholder={$i18n.t('Title (e.g. Greeting)')}
 														bind:value={prompt.title}
 														required
@@ -739,23 +689,14 @@
 												</div>
 
 												<button
-													class="px-2"
+													class="px-2 text-content-muted hover:text-content"
 													type="button"
-													on:click={() => {
+													aria-label={$i18n.t('Delete')}
+													onclick={() => {
 														info.meta.suggestion_prompts.splice(promptIdx, 1);
-														info.meta.suggestion_prompts = info.meta.suggestion_prompts;
 													}}
 												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 20 20"
-														fill="currentColor"
-														class="w-4 h-4"
-													>
-														<path
-															d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-														/>
-													</svg>
+													<span class="i-lucide-x size-4 block"></span>
 												</button>
 											</div>
 										{/each}
@@ -771,7 +712,7 @@
 								<AdvancedParams
 									admin={true}
 									bind:params
-									on:change={(e) => {
+									on:change={() => {
 										info.params = { ...info.params, ...params };
 									}}
 								/>
@@ -780,46 +721,20 @@
 
 						<div class="my-4 flex justify-start pb-20">
 							<button
-								class=" text-sm px-3 py-2 transition rounded-lg {loading
-									? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
-									: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex justify-center"
+								class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading
+									? ' cursor-not-allowed opacity-50'
+									: ''} flex items-center"
 								type="submit"
 								disabled={loading}
 							>
-								<div class=" self-center font-medium">
-									{#if edit}
-										{$i18n.t('Save & Update')}
-									{:else}
-										{$i18n.t('Save & Create')}
-									{/if}
-								</div>
+								{#if edit}
+									{$i18n.t('Save & Update')}
+								{:else}
+									{$i18n.t('Save & Create')}
+								{/if}
 
 								{#if loading}
-									<div class="ml-1.5 self-center">
-										<svg
-											class=" w-4 h-4"
-											viewBox="0 0 24 24"
-											fill="currentColor"
-											xmlns="http://www.w3.org/2000/svg"
-											><style>
-												.spinner_ajPY {
-													transform-origin: center;
-													animation: spinner_AtaB 0.75s infinite linear;
-												}
-												@keyframes spinner_AtaB {
-													100% {
-														transform: rotate(360deg);
-													}
-												}
-											</style><path
-												d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-												opacity=".25"
-											/><path
-												d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-												class="spinner_ajPY"
-											/></svg
-										>
-									</div>
+									<span class="i-lucide-loader-circle size-4 block animate-spin ml-1.5"></span>
 								{/if}
 							</button>
 						</div>

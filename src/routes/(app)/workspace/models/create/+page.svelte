@@ -1,86 +1,63 @@
-<script>
-	import { v4 as uuidv4 } from 'uuid';
+<script lang="ts">
+	// llens(#70 A2): openwebui.com community からの postMessage 受け入れ(外部 origin の
+	// モデル取り込み導線)は #10 のストア導線撤去と同じ線で削除。作成の seed は
+	// 一覧の Clone(sessionStorage.model)のみ。
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { config, models, settings } from '$lib/stores';
+	import { onMount, getContext } from 'svelte';
 
-	import { onMount, tick, getContext } from 'svelte';
-	import { createNewModel, getModelById } from '$lib/apis/models';
+	import { models } from '$lib/stores';
+	import { createNewModel } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
 
-	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
+	import ModelEditor from '../ModelEditor.svelte';
 
 	const i18n = getContext('i18n');
 
-	const onSubmit = async (modelInfo) => {
+	let model = $state<any>(null);
+	let loaded = $state(false);
+
+	const onSubmit = async (modelInfo: any) => {
 		if ($models.find((m) => m.id === modelInfo.id)) {
 			toast.error(
-				`Error: A model with the ID '${modelInfo.id}' already exists. Please select a different ID to proceed.`
+				$i18n.t(`Error: A model with the ID '{{modelId}}' already exists.`, {
+					modelId: modelInfo.id
+				})
 			);
 			return;
 		}
 
-		if (modelInfo.id === '') {
-			toast.error('Error: Model ID cannot be empty. Please enter a valid ID to proceed.');
-			return;
-		}
+		const res = await createNewModel({
+			...modelInfo,
+			meta: {
+				...modelInfo.meta,
+				profile_image_url: modelInfo.meta.profile_image_url ?? null,
+				suggestion_prompts: modelInfo.meta.suggestion_prompts
+					? modelInfo.meta.suggestion_prompts.filter((prompt: any) => prompt.content !== '')
+					: null
+			},
+			params: { ...modelInfo.params }
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
-		if (modelInfo) {
-			const res = await createNewModel({
-				...modelInfo,
-				meta: {
-					...modelInfo.meta,
-					profile_image_url: modelInfo.meta.profile_image_url ?? null,
-					suggestion_prompts: modelInfo.meta.suggestion_prompts
-						? modelInfo.meta.suggestion_prompts.filter((prompt) => prompt.content !== '')
-						: null
-				},
-				params: { ...modelInfo.params }
-			}).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
-
-			if (res) {
-				await models.set(await getModels());
-				toast.success($i18n.t('Model created successfully!'));
-				await goto('/workspace/models');
-			}
+		if (res) {
+			await models.set(await getModels());
+			toast.success($i18n.t('Model created successfully!'));
+			await goto('/workspace/models');
 		}
 	};
 
-	let model = null;
-
-	onMount(async () => {
-		window.addEventListener('message', async (event) => {
-			if (
-				!['https://openwebui.com', 'https://www.openwebui.com', 'http://localhost:5173'].includes(
-					event.origin
-				)
-			) {
-				return;
-			}
-
-			let data = JSON.parse(event.data);
-
-			if (data?.info) {
-				data = data.info;
-			}
-
-			model = data;
-		});
-
-		if (window.opener ?? false) {
-			window.opener.postMessage('loaded', '*');
-		}
-
+	onMount(() => {
 		if (sessionStorage.model) {
 			model = JSON.parse(sessionStorage.model);
 			sessionStorage.removeItem('model');
 		}
+		loaded = true;
 	});
 </script>
 
-{#key model}
+{#if loaded}
 	<ModelEditor {model} {onSubmit} />
-{/key}
+{/if}

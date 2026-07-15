@@ -3,21 +3,26 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { getContext, onMount } from 'svelte';
 
-	export let skills = [];
-
-	let _skills = {};
-
-	export let selectedSkillIds = [];
-	// llens(#42): 機能「スキル」OFF のとき。紐づけ設定は隠さず、発火しない旨だけ示す
-	export let disabled = false;
-
 	const i18n = getContext('i18n');
+
+	let {
+		skills = [],
+		selectedSkillIds = $bindable([]),
+		// llens(#42): 機能「スキル」OFF のとき。紐づけ設定は隠さず、発火しない旨だけ示す
+		disabled = false
+	}: {
+		skills?: any[];
+		selectedSkillIds?: string[];
+		disabled?: boolean;
+	} = $props();
+
+	let _skills = $state<Record<string, any>>({});
 
 	onMount(() => {
 		// キーは skill.id(meta.skillIds はサーバが Skills.get_skill_by_id で引く)。
 		// 旧実装は command をキーにしており、保存された id と突き合わず
 		// 「チェックが復元されない・保存すると command が入る」バグだった(#42 で修正)
-		_skills = skills.reduce((acc, skill) => {
+		_skills = skills.reduce((acc: Record<string, any>, skill) => {
 			acc[skill.id] = {
 				...skill,
 				selected: selectedSkillIds.includes(skill.id)

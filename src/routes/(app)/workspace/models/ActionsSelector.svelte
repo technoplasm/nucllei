@@ -5,13 +5,18 @@
 
 	const i18n = getContext('i18n');
 
-	export let actions = [];
-	export let selectedActionIds = [];
+	let {
+		actions = [],
+		selectedActionIds = $bindable([])
+	}: {
+		actions?: any[];
+		selectedActionIds?: string[];
+	} = $props();
 
-	let _actions = {};
+	let _actions = $state<Record<string, any>>({});
 
 	onMount(() => {
-		_actions = actions.reduce((acc, action) => {
+		_actions = actions.reduce((acc: Record<string, any>, action) => {
 			acc[action.id] = {
 				...action,
 				selected: selectedActionIds.includes(action.id)

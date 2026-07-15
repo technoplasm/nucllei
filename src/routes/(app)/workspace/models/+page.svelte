@@ -1,18 +1,200 @@
-<script>
-	import { onMount } from 'svelte';
-	import { config, models, settings } from '$lib/stores';
+<script lang="ts">
+	// llens(#47 A1): By 撤去。#70 A2: … メニューを廃止し Clone/Delete を行内アイコンに
+	// (skills/tools 同型)。可搬性導線のうち Import/Export JSON は skills(#35)/tools(#44)の
+	// 前例どおり撤去、Clone(プリセット複製 = 編集の起点)のみ残す(2026-07-15 決定)。
+	// shiftKey 即時削除(確認なし)も廃止 — 削除は常に confirm を挟む。
+	import { toast } from 'svelte-sonner';
+	import { onMount, getContext } from 'svelte';
+	import { goto } from '$app/navigation';
+
+	import { render } from '$lib/utils/markdown-it';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
+	import { WEBUI_NAME, models as _models } from '$lib/stores';
+	import {
+		deleteModelById,
+		getModels as getWorkspaceModels,
+		toggleModelById
+	} from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
-	import Models from '$lib/components/workspace/Models.svelte';
+
+	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+
+	const i18n = getContext('i18n');
+
+	let loaded = $state(false);
+	let query = $state('');
+	let models = $state<any[]>([]);
+
+	let showDeleteConfirm = $state(false);
+	let deleteModel = $state<any>(null);
+
+	const filteredItems = $derived(
+		models.filter(
+			(m) =>
+				query === '' ||
+				m.name.toLowerCase().includes(query.toLowerCase()) ||
+				m.id.toLowerCase().includes(query.toLowerCase())
+		)
+	);
+
+	const deleteHandler = async (model: any) => {
+		const res = await deleteModelById(model.id).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t(`Deleted {{name}}`, { name: model.id }));
+		}
+
+		await init();
+	};
+
+	const cloneHandler = (model: any) => {
+		sessionStorage.model = JSON.stringify({
+			...model,
+			id: `${model.id}-clone`,
+			name: `${model.name} (Clone)`
+		});
+		goto('/workspace/models/create');
+	};
+
+	const init = async () => {
+		models = await getWorkspaceModels();
+		await _models.set(await getModels());
+	};
 
 	onMount(async () => {
-		await Promise.all([
-			(async () => {
-				models.set(await getModels());
-			})()
-		]);
+		await init();
+		loaded = true;
 	});
 </script>
 
-{#if $models !== null}
-	<Models />
+<svelte:head>
+	<title>
+		{$i18n.t('Models')} | {$WEBUI_NAME}
+	</title>
+</svelte:head>
+
+{#if loaded}
+	<DeleteConfirmDialog
+		bind:show={showDeleteConfirm}
+		title={$i18n.t('Delete model?')}
+		on:confirm={() => {
+			deleteHandler(deleteModel);
+		}}
+	>
+		<div class=" text-sm text-content-muted">
+			{$i18n.t('This will delete')} <span class="  font-semibold">{deleteModel.id}</span>.
+		</div>
+	</DeleteConfirmDialog>
+
+	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+		<div class="flex items-center text-xl font-medium px-0.5">
+			{$i18n.t('Models')}
+			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+			<span class="text-base text-content-muted">{filteredItems.length}</span>
+		</div>
+
+		<div class="flex gap-4">
+			<a
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				href="/workspace/models/create"
+			>
+				<span class="i-lucide-plus size-3.5 block mr-1"></span>
+				{$i18n.t('Create Model')}
+			</a>
+
+			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+				<span class="i-lucide-search size-3.5 block shrink-0"></span>
+				<input
+					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
+					bind:value={query}
+					placeholder={$i18n.t('Search Models')}
+				/>
+			</div>
+		</div>
+	</div>
+
+	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+		{#each filteredItems as model (model.id)}
+			<div
+				class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl"
+			>
+				<a
+					class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+					href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
+				>
+					<img
+						src={model?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+						alt={model.name}
+						class="rounded-full size-9 object-cover shrink-0 {model.is_active ? '' : 'opacity-50'}"
+					/>
+
+					<div class="flex-1 min-w-0 {model.is_active ? '' : 'text-content-muted'}">
+						<Tooltip
+							content={render(model?.meta?.description ?? model.id)}
+							className=" w-fit"
+							placement="top-start"
+						>
+							<div class="font-semibold line-clamp-1">{model.name}</div>
+						</Tooltip>
+						<div class="text-xs line-clamp-1">
+							{#if (model?.meta?.description ?? '').trim()}
+								{model?.meta?.description}
+							{:else}
+								{model.id}
+							{/if}
+						</div>
+					</div>
+				</a>
+
+				<Tooltip content={$i18n.t('Clone')}>
+					<button
+						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						type="button"
+						aria-label={$i18n.t('Clone')}
+						onclick={() => {
+							cloneHandler(model);
+						}}
+					>
+						<span class="i-lucide-copy size-4 block"></span>
+					</button>
+				</Tooltip>
+
+				<Tooltip content={$i18n.t('Delete')}>
+					<button
+						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						type="button"
+						aria-label={$i18n.t('Delete')}
+						onclick={() => {
+							deleteModel = model;
+							showDeleteConfirm = true;
+						}}
+					>
+						<span class="i-lucide-trash-2 size-4 block"></span>
+					</button>
+				</Tooltip>
+
+				<div class="ml-1">
+					<Tooltip content={model.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
+						<Switch
+							bind:state={model.is_active}
+							on:change={async () => {
+								await toggleModelById(model.id);
+								await _models.set(await getModels());
+							}}
+						/>
+					</Tooltip>
+				</div>
+			</div>
+		{/each}
+	</div>
+{:else}
+	<div class="w-full h-full flex justify-center items-center">
+		<Spinner />
+	</div>
 {/if}

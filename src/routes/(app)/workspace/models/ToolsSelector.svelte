@@ -3,21 +3,25 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { getContext, onMount } from 'svelte';
 
-	export let tools = [];
-
-	let _tools = {};
-
-	export let selectedToolIds = [];
-
 	const i18n = getContext('i18n');
+
+	let {
+		tools = [],
+		selectedToolIds = $bindable([])
+	}: {
+		tools?: any[];
+		selectedToolIds?: string[];
+	} = $props();
+
+	let _tools = $state<Record<string, any>>({});
 
 	// llens(#42): 組み込み(repo 定義・起動時 sync)とカスタム(DB 定義)を分けて見せる。
 	// 仕組みは同列(どちらも toolIds に入るだけ)で、表示だけの区分
-	$: builtinIds = Object.keys(_tools).filter((id) => _tools[id].meta?.builtin);
-	$: customIds = Object.keys(_tools).filter((id) => !_tools[id].meta?.builtin);
+	const builtinIds = $derived(Object.keys(_tools).filter((id) => _tools[id].meta?.builtin));
+	const customIds = $derived(Object.keys(_tools).filter((id) => !_tools[id].meta?.builtin));
 
 	onMount(() => {
-		_tools = tools.reduce((acc, tool) => {
+		_tools = tools.reduce((acc: Record<string, any>, tool) => {
 			acc[tool.id] = {
 				...tool,
 				selected: selectedToolIds.includes(tool.id)

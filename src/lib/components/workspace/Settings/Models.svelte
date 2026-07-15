@@ -22,7 +22,9 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
+	// llens(#70 A2): ModelEditor は models route 配下へコロケート済み。この画面(Settings > Models)
+	// 自体の正常化は Settings バッチで行う — それまで route パスを直接参照する。
+	import ModelEditor from '../../../../routes/(app)/workspace/models/ModelEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
