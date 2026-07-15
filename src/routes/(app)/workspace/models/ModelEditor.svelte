@@ -307,426 +307,432 @@
 </script>
 
 {#if loaded}
-	{#if onBack}
-		<button
-			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
-			type="button"
-			onclick={() => {
-				onBack();
-			}}
-		>
-			<span class="i-lucide-chevron-left size-4 block"></span>
-			{$i18n.t('Back')}
-		</button>
-	{:else}
-		<!-- workspace/models からの利用(create/edit ページ)— 一覧へ戻る(SkillEditor 同型) -->
-		<a
-			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
-			href="/workspace/models"
-		>
-			<span class="i-lucide-chevron-left size-4 block"></span>
-			{$i18n.t('Back to list')}
-		</a>
-	{/if}
-
-	<!-- max-h-full を持たせない: layout の h-full と組むと form が画面高に頭打ちされ、
-	     flex-col 縮小が overflow-x-auto の tabs(min-height 0 扱い)へ集中して高さ 0 に潰れる(#47 の罠)。
-	     このページは workspace-container 側でスクロールする。 -->
-	<div class="w-full flex justify-center">
-		<input
-			bind:this={filesInputElement}
-			bind:files={inputFiles}
-			type="file"
-			hidden
-			accept="image/*"
-			onchange={() => {
-				let reader = new FileReader();
-				reader.onload = (event) => {
-					let originalImageUrl = `${event.target?.result}`;
-
-					const img = new Image();
-					img.src = originalImageUrl;
-
-					img.onload = function () {
-						const canvas = document.createElement('canvas');
-						const ctx = canvas.getContext('2d');
-						if (!ctx) return;
-
-						// Calculate the aspect ratio of the image
-						const aspectRatio = img.width / img.height;
-
-						// Calculate the new width and height to fit within 100x100
-						let newWidth, newHeight;
-						if (aspectRatio > 1) {
-							newWidth = 250 * aspectRatio;
-							newHeight = 250;
-						} else {
-							newWidth = 250;
-							newHeight = 250 / aspectRatio;
-						}
-
-						// Set the canvas size
-						canvas.width = 250;
-						canvas.height = 250;
-
-						// Calculate the position to center the image
-						const offsetX = (250 - newWidth) / 2;
-						const offsetY = (250 - newHeight) / 2;
-
-						// Draw the image on the canvas
-						ctx.drawImage(img, offsetX, offsetY, newWidth, newHeight);
-
-						// Get the base64 representation of the compressed image
-						const compressedSrc = canvas.toDataURL();
-
-						// Display the compressed image
-						info.meta.profile_image_url = compressedSrc;
-
-						inputFiles = null;
-						if (filesInputElement) {
-							filesInputElement.value = '';
-						}
-					};
-				};
-
-				if (
-					inputFiles &&
-					inputFiles.length > 0 &&
-					['image/gif', 'image/webp', 'image/jpeg', 'image/png', 'image/svg+xml'].includes(
-						inputFiles[0]['type']
-					)
-				) {
-					reader.readAsDataURL(inputFiles[0]);
-				} else {
-					inputFiles = null;
-				}
-			}}
-		/>
-
-		{#if !edit || (edit && model)}
-			<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ。
-			     横幅は workspace/+layout.svelte 側で一元管理(5xl 中央寄せ)するのでここでは持たない。
-			     lg 未満は flex-col で submenu が上に逃げる。 -->
-			<form
-				class="flex flex-col lg:flex-row w-full gap-3 lg:gap-4"
-				onsubmit={(e) => {
-					e.preventDefault();
-					submitHandler();
+	<!-- 全高を戻るリンク + エディタ本体で分ける(SkillEditor 系の h-full 貼りの前提) -->
+	<div class="flex flex-col h-full">
+		{#if onBack}
+			<button
+				class="self-start inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+				type="button"
+				onclick={() => {
+					onBack();
 				}}
 			>
-				<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
-				<div
-					class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
+				<span class="i-lucide-chevron-left size-4 block"></span>
+				{$i18n.t('Back')}
+			</button>
+		{:else}
+			<!-- workspace/models からの利用(create/edit ページ)— 一覧へ戻る(SkillEditor 同型) -->
+			<a
+				class="self-start inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+				href="/workspace/models"
+			>
+				<span class="i-lucide-chevron-left size-4 block"></span>
+				{$i18n.t('Back to list')}
+			</a>
+		{/if}
+
+		<!-- 高さは settings と同型: 全体を h-full で貼り、スクロールは右コンテンツ列の内部で行う
+	     (Prompt タブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
+	     素の overflow-x-auto は min-height 0 扱いで高さ 0 に潰れる(#47 の罠)。 -->
+		<div class="w-full flex-1 min-h-0 flex justify-center">
+			<input
+				bind:this={filesInputElement}
+				bind:files={inputFiles}
+				type="file"
+				hidden
+				accept="image/*"
+				onchange={() => {
+					let reader = new FileReader();
+					reader.onload = (event) => {
+						let originalImageUrl = `${event.target?.result}`;
+
+						const img = new Image();
+						img.src = originalImageUrl;
+
+						img.onload = function () {
+							const canvas = document.createElement('canvas');
+							const ctx = canvas.getContext('2d');
+							if (!ctx) return;
+
+							// Calculate the aspect ratio of the image
+							const aspectRatio = img.width / img.height;
+
+							// Calculate the new width and height to fit within 100x100
+							let newWidth, newHeight;
+							if (aspectRatio > 1) {
+								newWidth = 250 * aspectRatio;
+								newHeight = 250;
+							} else {
+								newWidth = 250;
+								newHeight = 250 / aspectRatio;
+							}
+
+							// Set the canvas size
+							canvas.width = 250;
+							canvas.height = 250;
+
+							// Calculate the position to center the image
+							const offsetX = (250 - newWidth) / 2;
+							const offsetY = (250 - newHeight) / 2;
+
+							// Draw the image on the canvas
+							ctx.drawImage(img, offsetX, offsetY, newWidth, newHeight);
+
+							// Get the base64 representation of the compressed image
+							const compressedSrc = canvas.toDataURL();
+
+							// Display the compressed image
+							info.meta.profile_image_url = compressedSrc;
+
+							inputFiles = null;
+							if (filesInputElement) {
+								filesInputElement.value = '';
+							}
+						};
+					};
+
+					if (
+						inputFiles &&
+						inputFiles.length > 0 &&
+						['image/gif', 'image/webp', 'image/jpeg', 'image/png', 'image/svg+xml'].includes(
+							inputFiles[0]['type']
+						)
+					) {
+						reader.readAsDataURL(inputFiles[0]);
+					} else {
+						inputFiles = null;
+					}
+				}}
+			/>
+
+			{#if !edit || (edit && model)}
+				<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ。
+			     横幅は workspace/+layout.svelte 側で一元管理(5xl 中央寄せ)するのでここでは持たない。
+			     lg 未満は flex-col で submenu が上に逃げる。 -->
+				<form
+					class="flex flex-col lg:flex-row w-full h-full gap-3 lg:gap-4"
+					onsubmit={(e) => {
+						e.preventDefault();
+						submitHandler();
+					}}
 				>
-					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
-						'general'
-							? ''
-							: ' text-content-subtle hover:text-content'}"
-						type="button"
-						onclick={() => switchTab('general')}
+					<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
+					<div
+						class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
 					>
-						<div class=" self-center mr-2">
-							<span class="i-lucide-settings size-4 block"></span>
-						</div>
-						<div class=" self-center">{$i18n.t('General')}</div>
-					</button>
+						<button
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							'general'
+								? ''
+								: ' text-content-subtle hover:text-content'}"
+							type="button"
+							onclick={() => switchTab('general')}
+						>
+							<div class=" self-center mr-2">
+								<span class="i-lucide-settings size-4 block"></span>
+							</div>
+							<div class=" self-center">{$i18n.t('General')}</div>
+						</button>
 
-					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
-						'prompt'
-							? ''
-							: ' text-content-subtle hover:text-content'}"
-						type="button"
-						onclick={() => switchTab('prompt')}
-					>
-						<div class=" self-center mr-2">
-							<span class="i-lucide-file-text size-4 block"></span>
-						</div>
-						<div class=" self-center">{$i18n.t('Prompt')}</div>
-					</button>
+						<button
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							'prompt'
+								? ''
+								: ' text-content-subtle hover:text-content'}"
+							type="button"
+							onclick={() => switchTab('prompt')}
+						>
+							<div class=" self-center mr-2">
+								<span class="i-lucide-file-text size-4 block"></span>
+							</div>
+							<div class=" self-center">{$i18n.t('Prompt')}</div>
+						</button>
 
-					<button
-						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
-						'advanced'
-							? ''
-							: ' text-content-subtle hover:text-content'}"
-						type="button"
-						onclick={() => switchTab('advanced')}
-					>
-						<div class=" self-center mr-2">
-							<span class="i-lucide-sliders-horizontal size-4 block"></span>
-						</div>
-						<div class=" self-center">{$i18n.t('Advanced Params')}</div>
-					</button>
-				</div>
+						<button
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							'advanced'
+								? ''
+								: ' text-content-subtle hover:text-content'}"
+							type="button"
+							onclick={() => switchTab('advanced')}
+						>
+							<div class=" self-center mr-2">
+								<span class="i-lucide-sliders-horizontal size-4 block"></span>
+							</div>
+							<div class=" self-center">{$i18n.t('Advanced Params')}</div>
+						</button>
+					</div>
 
-				<!-- 右コンテンツ。横幅は layout 側で管理。 -->
-				<div class="flex-1 min-w-0">
-					<div>
-						{#if selectedTab === 'general'}
-							<!-- llens(#70): 名前/ID/Base Model を左カラムに、モデル画像は右端へ。
+					<!-- 右コンテンツ。横幅は layout 側で管理。縦は内部スクロール(settings 同型)。 -->
+					<div class="flex-1 min-w-0 overflow-y-auto pr-1 scrollbar-hidden">
+						<!-- Prompt タブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
+						<div class={selectedTab === 'prompt' ? 'h-full flex flex-col' : ''}>
+							{#if selectedTab === 'general'}
+								<!-- llens(#70): 名前/ID/Base Model を左カラムに、モデル画像は右端へ。
 							     画像は行ブロックの高さに合わせた正方形(max-h-40 キャップ)。absolute で
 							     行高に寄与させず、左カラムの mr-44(= 最大画像幅 + 余白)で幅を予約する。 -->
-							<div class="relative my-2">
-								<div class="mr-44 flex flex-col gap-2">
-									<div>
-										<label class="block text-sm font-semibold mb-1" for="model-name">
-											{$i18n.t('Name')}
-										</label>
-										<input
-											id="model-name"
-											class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
-											placeholder={$i18n.t('Model Name')}
-											bind:value={name}
-											required
-										/>
-									</div>
-
-									<div>
-										<label class="block text-sm font-semibold mb-1" for="model-id">
-											{$i18n.t('ID')}
-										</label>
-										<input
-											id="model-id"
-											class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
-											placeholder={$i18n.t('Model ID')}
-											bind:value={id}
-											required
-										/>
-									</div>
-
-									{#if preset}
+								<div class="relative my-2">
+									<div class="mr-44 flex flex-col gap-2">
 										<div>
-											<label class="block text-sm font-semibold mb-1" for="model-base-model">
-												{$i18n.t('Base Model (From)')}
+											<label class="block text-sm font-semibold mb-1" for="model-name">
+												{$i18n.t('Name')}
 											</label>
-
-											<select
-												id="model-base-model"
-												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
-												bind:value={info.base_model_id}
+											<input
+												id="model-name"
+												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												placeholder={$i18n.t('Model Name')}
+												bind:value={name}
 												required
-											>
-												<option value={null} class=" text-content"
-													>{$i18n.t('Select a base model')}</option
+											/>
+										</div>
+
+										<div>
+											<label class="block text-sm font-semibold mb-1" for="model-id">
+												{$i18n.t('ID')}
+											</label>
+											<input
+												id="model-id"
+												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												placeholder={$i18n.t('Model ID')}
+												bind:value={id}
+												required
+											/>
+										</div>
+
+										{#if preset}
+											<div>
+												<label class="block text-sm font-semibold mb-1" for="model-base-model">
+													{$i18n.t('Base Model (From)')}
+												</label>
+
+												<select
+													id="model-base-model"
+													class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+													bind:value={info.base_model_id}
+													required
 												>
-												{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as baseModel (baseModel.id)}
-													<option value={baseModel.id} class=" text-content"
-														>{baseModel.name}</option
+													<option value={null} class=" text-content"
+														>{$i18n.t('Select a base model')}</option
 													>
-												{/each}
-											</select>
-										</div>
-									{/if}
-								</div>
-
-								<div class="absolute inset-y-0 right-0 flex flex-col items-end">
-									<button
-										class="relative group flex-1 min-h-0 max-h-40 aspect-square rounded-xl overflow-hidden shadow-lg {info
-											.meta.profile_image_url
-											? 'bg-transparent'
-											: 'bg-white'}"
-										type="button"
-										aria-label={$i18n.t('Change image')}
-										onclick={() => {
-											filesInputElement?.click();
-										}}
-									>
-										<!-- img は absolute にして行の高さへ寄与させない(高さは左カラム由来のみ) -->
-										<img
-											src={info.meta.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
-											alt="model profile"
-											class="absolute inset-0 size-full object-cover"
-										/>
-
-										<div class="absolute bottom-0 right-0 z-10 m-1">
-											<div
-												class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
-											>
-												<span class="i-lucide-camera size-4 block"></span>
+													{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as baseModel (baseModel.id)}
+														<option value={baseModel.id} class=" text-content"
+															>{baseModel.name}</option
+														>
+													{/each}
+												</select>
 											</div>
+										{/if}
+									</div>
+
+									<div class="absolute inset-y-0 right-0 flex flex-col items-end">
+										<button
+											class="relative group flex-1 min-h-0 max-h-40 aspect-square rounded-xl overflow-hidden shadow-lg {info
+												.meta.profile_image_url
+												? 'bg-transparent'
+												: 'bg-white'}"
+											type="button"
+											aria-label={$i18n.t('Change image')}
+											onclick={() => {
+												filesInputElement?.click();
+											}}
+										>
+											<!-- img は absolute にして行の高さへ寄与させない(高さは左カラム由来のみ) -->
+											<img
+												src={info.meta.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+												alt="model profile"
+												class="absolute inset-0 size-full object-cover"
+											/>
+
+											<div class="absolute bottom-0 right-0 z-10 m-1">
+												<div
+													class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
+												>
+													<span class="i-lucide-camera size-4 block"></span>
+												</div>
+											</div>
+
+											<div
+												class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 transition"
+											></div>
+										</button>
+
+										<button
+											class="px-2 py-1 text-content-muted hover:text-content rounded-lg text-xs"
+											onclick={() => {
+												info.meta.profile_image_url = null;
+											}}
+											type="button"
+										>
+											{$i18n.t('Reset Image')}
+										</button>
+									</div>
+								</div>
+
+								<div class="my-2">
+									<label class="block text-sm font-semibold mb-1" for="model-description">
+										{$i18n.t('Description')}
+									</label>
+
+									<Textarea
+										id="model-description"
+										className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
+										placeholder={$i18n.t('Add a short description about what this model does')}
+										bind:value={info.meta.description}
+									/>
+								</div>
+
+								<div class="my-2">
+									<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-xs">
+										<AccessControl bind:accessControl allowPublic={true} />
+									</div>
+								</div>
+
+								<div class="my-2">
+									<Capabilities bind:capabilities bind:featureSkills />
+								</div>
+
+								<hr class=" border-line my-1.5" />
+
+								<div class="mt-2">
+									<SkillsSelector
+										bind:selectedSkillIds={skillIds}
+										skills={$skills ?? []}
+										disabled={!featureSkills}
+									/>
+								</div>
+
+								<hr class=" border-line my-1.5" />
+
+								<div class="my-2">
+									<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+								</div>
+
+								<hr class=" border-line my-3" />
+
+								<div class="my-2">
+									<FunctionsSelector
+										bind:selectedFilterIds={filterIds}
+										bind:selectedActionIds={actionIds}
+										functions={($functions ?? []).filter((func: any) =>
+											['filter', 'action'].includes(func.type)
+										)}
+									/>
+								</div>
+							{:else if selectedTab === 'prompt'}
+								<!-- 上に suggestions・下に System Prompt(残り全高、tool/skill エディタ同型) -->
+								<div class="my-2">
+									<div class="flex w-full justify-between items-center">
+										<div class=" self-center text-sm font-semibold">
+											{$i18n.t('Prompt suggestions')}
 										</div>
 
-										<div
-											class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 transition"
-										></div>
-									</button>
+										<button
+											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content transition"
+											type="button"
+											aria-label={$i18n.t('Add prompt suggestion')}
+											onclick={() => {
+												const prompts = info.meta.suggestion_prompts ?? [];
+												if (
+													prompts.length === 0 ||
+													(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
+												) {
+													info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
+												}
+											}}
+										>
+											<span class="i-lucide-plus size-4 block"></span>
+										</button>
+									</div>
 
-									<button
-										class="px-2 py-1 text-content-muted hover:text-content rounded-lg text-xs"
-										onclick={() => {
-											info.meta.profile_image_url = null;
-										}}
-										type="button"
-									>
-										{$i18n.t('Reset Image')}
-									</button>
+									<div class="flex flex-col space-y-1.5 mt-1 mb-3">
+										{#if (info.meta.suggestion_prompts ?? []).length > 0}
+											{#each info.meta.suggestion_prompts as prompt, promptIdx}
+												<div class=" flex border border-line rounded-lg">
+													<div class="flex flex-col flex-1">
+														<input
+															class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-line"
+															placeholder={$i18n.t('Title (e.g. Greeting)')}
+															bind:value={prompt.title}
+															required
+														/>
+														<input
+															class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
+															placeholder={$i18n.t(
+																'Prompt (e.g. Who are you? Show me a quick demo.)'
+															)}
+															bind:value={prompt.content}
+															required
+														/>
+													</div>
+
+													<button
+														class="px-2 text-content-muted hover:text-content"
+														type="button"
+														aria-label={$i18n.t('Delete')}
+														onclick={() => {
+															info.meta.suggestion_prompts.splice(promptIdx, 1);
+														}}
+													>
+														<span class="i-lucide-x size-4 block"></span>
+													</button>
+												</div>
+											{/each}
+										{:else}
+											<div class="text-xs text-center text-content-subtle py-2">
+												{$i18n.t('No prompt suggestions')}
+											</div>
+										{/if}
+									</div>
 								</div>
-							</div>
 
-							<div class="my-2">
-								<label class="block text-sm font-semibold mb-1" for="model-description">
-									{$i18n.t('Description')}
-								</label>
-
-								<Textarea
-									id="model-description"
-									className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
-									placeholder={$i18n.t('Add a short description about what this model does')}
-									bind:value={info.meta.description}
-								/>
-							</div>
-
-							<div class="my-2">
-								<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-xs">
-									<AccessControl bind:accessControl allowPublic={true} />
-								</div>
-							</div>
-
-							<div class="my-2">
-								<Capabilities bind:capabilities bind:featureSkills />
-							</div>
-
-							<hr class=" border-line my-1.5" />
-
-							<div class="mt-2">
-								<SkillsSelector
-									bind:selectedSkillIds={skillIds}
-									skills={$skills ?? []}
-									disabled={!featureSkills}
-								/>
-							</div>
-
-							<hr class=" border-line my-1.5" />
-
-							<div class="my-2">
-								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-							</div>
-
-							<hr class=" border-line my-3" />
-
-							<div class="my-2">
-								<FunctionsSelector
-									bind:selectedFilterIds={filterIds}
-									bind:selectedActionIds={actionIds}
-									functions={($functions ?? []).filter((func: any) =>
-										['filter', 'action'].includes(func.type)
-									)}
-								/>
-							</div>
-						{:else if selectedTab === 'prompt'}
-							<div class="my-2">
-								<div class=" text-sm font-semibold mb-2">{$i18n.t('System Prompt')}</div>
-								<div class="rounded-lg border border-line overflow-hidden">
+								<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('System Prompt')}</div>
+								<div class="flex-1 min-h-0 rounded-lg border border-line overflow-auto">
 									<CodeEditor
 										value={info.params.system ?? ''}
 										onChange={(value: string) => {
 											info.params.system = value;
 										}}
+										onSave={() => {
+											submitHandler();
+										}}
 									/>
 								</div>
-							</div>
-
-							<div class="my-2">
-								<div class="flex w-full justify-between items-center">
-									<div class=" self-center text-sm font-semibold">
-										{$i18n.t('Prompt suggestions')}
-									</div>
-
-									<button
-										class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content transition"
-										type="button"
-										aria-label={$i18n.t('Add prompt suggestion')}
-										onclick={() => {
-											const prompts = info.meta.suggestion_prompts ?? [];
-											if (
-												prompts.length === 0 ||
-												(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
-											) {
-												info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
-											}
+							{:else if selectedTab === 'advanced'}
+								<div class="my-2">
+									<AdvancedParams
+										admin={true}
+										bind:params
+										on:change={() => {
+											info.params = { ...info.params, ...params };
 										}}
-									>
-										<span class="i-lucide-plus size-4 block"></span>
-									</button>
+									/>
 								</div>
+							{/if}
 
-								<div class="flex flex-col space-y-1.5 mt-1 mb-3">
-									{#if (info.meta.suggestion_prompts ?? []).length > 0}
-										{#each info.meta.suggestion_prompts as prompt, promptIdx}
-											<div class=" flex border border-line rounded-lg">
-												<div class="flex flex-col flex-1">
-													<input
-														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-line"
-														placeholder={$i18n.t('Title (e.g. Greeting)')}
-														bind:value={prompt.title}
-														required
-													/>
-													<input
-														class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
-														placeholder={$i18n.t(
-															'Prompt (e.g. Who are you? Show me a quick demo.)'
-														)}
-														bind:value={prompt.content}
-														required
-													/>
-												</div>
-
-												<button
-													class="px-2 text-content-muted hover:text-content"
-													type="button"
-													aria-label={$i18n.t('Delete')}
-													onclick={() => {
-														info.meta.suggestion_prompts.splice(promptIdx, 1);
-													}}
-												>
-													<span class="i-lucide-x size-4 block"></span>
-												</button>
-											</div>
-										{/each}
+							<div class="flex justify-start {selectedTab === 'prompt' ? 'my-3' : 'my-4 pb-20'}">
+								<button
+									class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading
+										? ' cursor-not-allowed opacity-50'
+										: ''} flex items-center"
+									type="submit"
+									disabled={loading}
+								>
+									{#if edit}
+										{$i18n.t('Save & Update')}
 									{:else}
-										<div class="text-xs text-center text-content-subtle py-2">
-											{$i18n.t('No prompt suggestions')}
-										</div>
+										{$i18n.t('Save & Create')}
 									{/if}
-								</div>
-							</div>
-						{:else if selectedTab === 'advanced'}
-							<div class="my-2">
-								<AdvancedParams
-									admin={true}
-									bind:params
-									on:change={() => {
-										info.params = { ...info.params, ...params };
-									}}
-								/>
-							</div>
-						{/if}
 
-						<div class="my-4 flex justify-start pb-20">
-							<button
-								class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading
-									? ' cursor-not-allowed opacity-50'
-									: ''} flex items-center"
-								type="submit"
-								disabled={loading}
-							>
-								{#if edit}
-									{$i18n.t('Save & Update')}
-								{:else}
-									{$i18n.t('Save & Create')}
-								{/if}
-
-								{#if loading}
-									<span class="i-lucide-loader-circle size-4 block animate-spin ml-1.5"></span>
-								{/if}
-							</button>
+									{#if loading}
+										<span class="i-lucide-loader-circle size-4 block animate-spin ml-1.5"></span>
+									{/if}
+								</button>
+							</div>
 						</div>
 					</div>
-				</div>
-			</form>
-		{/if}
+				</form>
+			{/if}
+		</div>
 	</div>
 {/if}
 
