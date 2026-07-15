@@ -221,9 +221,11 @@
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
 				} else if (type === 'task-cancelled') {
-					// llens: 中断された応答を done 化してスピナーを止める(backend は
-					// 中断時に open ブロックを閉じた content_blocks を直前に emit 済み)
+					// llens: 中断された応答を done 化してスピナーを止める。interrupted は
+					// 直後に届く done イベント → completed(outlet filter)経路で成否として
+					// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
 					message.done = true;
+					message.interrupted = true;
 				} else if (type === 'chat:message:delta' || type === 'message') {
 					message.content += data.content;
 				} else if (type === 'chat:message' || type === 'replace') {
@@ -601,7 +603,11 @@
 				info: m.info ? m.info : undefined,
 				timestamp: m.timestamp,
 				...(m.usage ? { usage: m.usage } : {}),
-				...(m.sources ? { sources: m.sources } : {})
+				...(m.sources ? { sources: m.sources } : {}),
+				// llens: outlet filter が turn の成否を判別できるようにする
+				// (error = 失敗、interrupted = ユーザー中断。どちらも無ければ成功)
+				...(m.error ? { error: m.error } : {}),
+				...(m.interrupted ? { interrupted: true } : {})
 			})),
 			model_item: $models.find((m) => m.id === modelId),
 			chat_id: targetChatId,
@@ -1372,6 +1378,18 @@
 					taskIds = [res.task_id];
 				}
 			}
+		}
+
+		if (!res || res.error) {
+			// llens: task 生成前の失敗(接続エラー等)は done イベントが来ないため、
+			// ここから completed(outlet filter)を通す — error 付き message が
+			// outlet に渡り、turn の失敗として記録できる
+			await chatCompletedHandler(
+				_chatId,
+				model.id,
+				responseMessageId,
+				createMessagesList(history, responseMessageId)
+			);
 		}
 
 		await tick();

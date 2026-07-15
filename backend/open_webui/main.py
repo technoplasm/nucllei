@@ -930,8 +930,6 @@ async def list_tasks_by_chat_id_endpoint(chat_id: str, user=Depends(get_verified
         return {"task_ids": []}
 
     task_ids = list_task_ids_by_chat_id(chat_id)
-
-    print(f"Task IDs for chat {chat_id}: {task_ids}")
     return {"task_ids": task_ids}
 
 

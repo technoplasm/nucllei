@@ -86,6 +86,7 @@ from open_webui.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
+    CHAT_TOOL_EXECUTION_TIMEOUT,
     ENABLE_REALTIME_CHAT_SAVE,
 )
 from open_webui.constants import TASKS
@@ -329,7 +330,7 @@ def apply_params_to_form_data(form_data, model):
                     convert_logit_bias_input_to_json(params["logit_bias"])
                 )
             except Exception as e:
-                print(f"Error parsing logit_bias: {e}")
+                log.warning(f"Error parsing logit_bias: {e}")
 
     return form_data
 
@@ -1075,8 +1076,28 @@ async def execute_tool_calls(response_tool_calls, tools):
                 }
 
                 tool_function = tool["callable"]
-                tool_result = await tool_function(**tool_function_params)
+                # llens: システム側の権威的タイムアウト(sandbox 等の実行側は
+                # 自前上限を持たなくてよい)。sync tool はワーカースレッド実行
+                # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
+                # 走り切ってから回収される(有界リーク — turn の進行を優先)。
+                if CHAT_TOOL_EXECUTION_TIMEOUT > 0:
+                    tool_result = await asyncio.wait_for(
+                        tool_function(**tool_function_params),
+                        timeout=CHAT_TOOL_EXECUTION_TIMEOUT,
+                    )
+                else:
+                    tool_result = await tool_function(**tool_function_params)
 
+            except asyncio.TimeoutError:
+                log.warning(
+                    f"tool execution timed out: {tool_name} "
+                    f"(> {CHAT_TOOL_EXECUTION_TIMEOUT}s)"
+                )
+                # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
+                tool_result = (
+                    f"ツール {tool_name} の実行が {CHAT_TOOL_EXECUTION_TIMEOUT} 秒で"
+                    "タイムアウトしました(システム側上限)。"
+                )
             except Exception as e:
                 tool_result = str(e)
 
@@ -1308,7 +1329,26 @@ async def process_chat_response(
                         else:
                             break
                     except Exception as e:
-                        log.debug(e)
+                        # llens: 追撃呼び出しの失敗を黙って正常終了にしない
+                        # (tool 実行後に続きが来ないまま done になる無言死)。
+                        # エラーをチャット内に出し、message にも永続化する。
+                        log.exception("follow-up model call failed in tool loop")
+                        error_data = {
+                            "error": {
+                                "content": (
+                                    "Follow-up model call after tool execution "
+                                    f"failed: {e}"
+                                )
+                            },
+                        }
+                        await event_emitter(
+                            {"type": "chat:completion", "data": error_data}
+                        )
+                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata["chat_id"],
+                            metadata["message_id"],
+                            error_data,
+                        )
                         break
 
                 if len(tool_calls) > 0:
@@ -1382,14 +1422,18 @@ async def process_chat_response(
             except asyncio.CancelledError:
                 # llens: 中断でも open な reasoning を閉じてから保存・emit する。
                 # done=false のブロックが DB に残ると「Thinking…」スピナーが
-                # リロード後も回り続ける。task-cancelled はフロントが message.done
-                # 化に使う(chatEventHandler)。
+                # リロード後も回り続ける。順序が要件: 先に task-cancelled で
+                # フロントに interrupted マークを立てさせ、その後の done イベントで
+                # completed 経路(outlet filter)が interrupted 込みで走る。
                 log.warning("Task was cancelled!")
                 assembler.close_open_reasoning_block()
-                data = blocks_event_data(assembler.content_blocks)
+                data = {
+                    "done": True,
+                    **blocks_event_data(assembler.content_blocks),
+                }
 
-                await event_emitter({"type": "chat:completion", "data": data})
                 await event_emitter({"type": "task-cancelled"})
+                await event_emitter({"type": "chat:completion", "data": data})
 
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     # Save message in the database
@@ -1409,8 +1453,11 @@ async def process_chat_response(
                 # message にも永続化し、リロード後もエラーとして見えるようにする。
                 log.exception("Chat response task failed mid-stream")
                 assembler.close_open_reasoning_block()
+                # done も同時に立てる: フロントの done 経路(completed → outlet
+                # filter)を通し、outlet が message.error で成否を判別できるようにする
                 data = {
                     "error": {"content": f"Connection to the model was lost: {e}"},
+                    "done": True,
                     **blocks_event_data(assembler.content_blocks),
                 }
 

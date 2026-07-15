@@ -330,6 +330,15 @@ try:
 except ValueError:
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = 30
 
+# llens: tool 実行 1 回のシステム側タイムアウト(秒、-1 で無効)。
+# ここが権威的な上限なので sandbox 等の実行側は自前の上限を持たなくてよい。
+# タイムアウトは例外にせず tool result として モデルに返す(軌道修正を委ねる)。
+CHAT_TOOL_EXECUTION_TIMEOUT = os.environ.get("CHAT_TOOL_EXECUTION_TIMEOUT", "300")
+try:
+    CHAT_TOOL_EXECUTION_TIMEOUT = int(CHAT_TOOL_EXECUTION_TIMEOUT)
+except ValueError:
+    CHAT_TOOL_EXECUTION_TIMEOUT = 300
+
 ####################################
 # REDIS
 ####################################
