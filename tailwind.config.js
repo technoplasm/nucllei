@@ -43,12 +43,12 @@ export default {
 					// hover
 					hover: 'var(--surface-hover, #fafafa)',
 					// 控えめな帯(table の thead など)。raised の上に置いて区別が付く濃さ。
-					muted: 'var(--surface-muted, #f0f0f0)',
+					muted: 'var(--surface-muted, #f0f0f0)'
 				},
 				// サイドバー行のインタラクション色(hover / 選択中)。実値は src/tailwind.css。
 				sidebar: {
 					hover: 'var(--sidebar-hover, #ececec)',
-					selected: 'var(--sidebar-selected, #e3e3e3)',
+					selected: 'var(--sidebar-selected, #e3e3e3)'
 				},
 				// 罫線・区切り線の共通色(テーブル/hr など)。実値は src/tailwind.css。border-line で使う
 				line: 'var(--line, #dcdcdc)',

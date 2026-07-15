@@ -2,12 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { getContext, onMount } from 'svelte';
 
-	import {
-		createNewGroup,
-		deleteGroupById,
-		getGroups,
-		updateGroupById
-	} from '$lib/apis/groups';
+	import { createNewGroup, deleteGroupById, getGroups, updateGroupById } from '$lib/apis/groups';
 	import { getUserDefaultPermissions, updateUserDefaultPermissions } from '$lib/apis/users';
 
 	import Modal from '$lib/components/common/Modal.svelte';

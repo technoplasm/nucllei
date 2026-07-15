@@ -129,8 +129,7 @@
 	>
 		{#each TABS as tab (tab.id)}
 			<button
-				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right {selectedTab ===
-				tab.id
+				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right {selectedTab === tab.id
 					? ''
 					: ' text-content-subtle hover:text-content'}"
 				onclick={() => {
@@ -288,7 +287,6 @@
 												</button>
 											</Tooltip>
 										{/if}
-
 									</div>
 								</td>
 							</tr>

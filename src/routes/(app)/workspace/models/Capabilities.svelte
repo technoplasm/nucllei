@@ -43,7 +43,9 @@
 			</span>
 
 			<div class=" py-0.5 text-sm capitalize">
-				<Tooltip content={$i18n.t('Expose the skill list to the model (load_skill) + /command activation')}>
+				<Tooltip
+					content={$i18n.t('Expose the skill list to the model (load_skill) + /command activation')}
+				>
 					{$i18n.t('Skills')}
 				</Tooltip>
 			</div>

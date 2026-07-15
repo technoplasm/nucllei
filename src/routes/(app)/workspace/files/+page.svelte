@@ -420,7 +420,7 @@
 				</Tooltip>
 				<Tooltip content={directionLabel}>
 					<button
-						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover "
+						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
 						type="button"
 						aria-label={directionLabel}
 						onclick={() => {
@@ -497,12 +497,10 @@
 
 					{#each selectedUploaderIds as uploaderId}
 						{@const uploader = uploaders.find((u) => u.id === uploaderId)}
-						<div
-							class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-raised text-xs"
-						>
+						<div class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-raised text-xs">
 							<span>{uploader?.name ?? uploaderId}</span>
 							<button
-								class="rounded-full hover:bg-surface-hover "
+								class="rounded-full hover:bg-surface-hover"
 								type="button"
 								aria-label={$i18n.t('Delete')}
 								onclick={() => {

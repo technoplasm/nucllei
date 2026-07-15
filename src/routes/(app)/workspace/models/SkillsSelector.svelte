@@ -40,7 +40,9 @@
 
 	{#if disabled}
 		<div class="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
-			{$i18n.t('Skills are disabled for this model, so they will not activate (assignments are preserved)')}
+			{$i18n.t(
+				'Skills are disabled for this model, so they will not activate (assignments are preserved)'
+			)}
 		</div>
 	{/if}
 

@@ -56,9 +56,7 @@
 		})
 	);
 
-	const ownerColumn = $derived(
-		showOwner ?? (chats ?? []).some((c) => c.user_id !== $user?.id)
-	);
+	const ownerColumn = $derived(showOwner ?? (chats ?? []).some((c) => c.user_id !== $user?.id));
 </script>
 
 <Modal size="lg" bind:show>

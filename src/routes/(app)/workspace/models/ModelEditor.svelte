@@ -552,7 +552,7 @@
 											</div>
 
 											<div
-												class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 "
+												class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20"
 											></div>
 										</button>
 
@@ -627,7 +627,7 @@
 										</div>
 
 										<button
-											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content "
+											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content"
 											type="button"
 											aria-label={$i18n.t('Add prompt suggestion')}
 											onclick={() => {

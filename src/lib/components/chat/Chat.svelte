@@ -1384,9 +1384,7 @@
 			return null;
 		});
 
-		completionAbortControllers = completionAbortControllers.filter(
-			(c) => c !== abortController
-		);
+		completionAbortControllers = completionAbortControllers.filter((c) => c !== abortController);
 
 		if (res) {
 			if (res.error) {

@@ -210,7 +210,9 @@
 			<Textarea
 				id="skill-description"
 				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-xs outline-hidden overflow-y-hidden resize-none"
-				placeholder={$i18n.t('Description the model uses to pick this skill. If empty, it is not exposed to the model')}
+				placeholder={$i18n.t(
+					'Description the model uses to pick this skill. If empty, it is not exposed to the model'
+				)}
 				bind:value={description}
 				rows={2}
 			/>
