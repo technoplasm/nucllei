@@ -223,10 +223,13 @@ export const generateChatCompletion = async (body: object) => {
 		throw error;
 	}
 
-	return [res, controller];
+	return [res, controller] as [Response | null, AbortController];
 };
 
-export const createModel = async (payload: object, urlIdx: string | null = null) => {
+export const createModel = async (
+	payload: object | string,
+	urlIdx: string | number | null = null
+) => {
 	let error = null;
 
 	const res = await apiFetch(
@@ -251,7 +254,7 @@ export const createModel = async (payload: object, urlIdx: string | null = null)
 	return res;
 };
 
-export const deleteModel = async (tagName: string, urlIdx: string | null = null) => {
+export const deleteModel = async (tagName: string, urlIdx: string | number | null = null) => {
 	let error = null;
 
 	const res = await apiFetch(
@@ -323,10 +326,13 @@ export const pullModel = async (tagName: string, urlIdx: number | null = null) =
 	if (error) {
 		throw error;
 	}
-	return [res, controller];
+	return [res, controller] as [Response | null, AbortController];
 };
 
-export const downloadModel = async (download_url: string, urlIdx: string | null = null) => {
+export const downloadModel = async (
+	download_url: string,
+	urlIdx: string | number | null = null
+) => {
 	let error = null;
 
 	const res = await apiFetch(
@@ -357,7 +363,7 @@ export const downloadModel = async (download_url: string, urlIdx: string | null 
 	return res;
 };
 
-export const uploadModel = async (file: File, urlIdx: string | null = null) => {
+export const uploadModel = async (file: File, urlIdx: string | number | null = null) => {
 	let error = null;
 
 	const formData = new FormData();

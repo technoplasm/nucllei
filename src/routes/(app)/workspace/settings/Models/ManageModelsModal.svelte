@@ -1,30 +1,22 @@
-<script>
-	import { toast } from 'svelte-sonner';
-
-	import { createEventDispatcher, getContext, onMount } from 'svelte';
+<script lang="ts">
+	import { getContext, onMount } from 'svelte';
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
 	import { user } from '$lib/stores';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import ManageOllama from './Manage/ManageOllama.svelte';
 	import { getOllamaConfig } from '$lib/apis/ollama';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ManageMultipleOllama from './Manage/ManageMultipleOllama.svelte';
 
-	export let show = false;
+	let { show = $bindable(false) }: { show?: boolean } = $props();
 
-	let selected = null;
-	let ollamaConfig = null;
+	let selected = $state<string | null>(null);
+	let ollamaConfig = $state<any>(null);
 
 	onMount(async () => {
 		if ($user?.role === 'admin') {
-			await Promise.all([
-				(async () => {
-					ollamaConfig = await getOllamaConfig();
-				})()
-			]);
+			ollamaConfig = await getOllamaConfig();
 
 			if (ollamaConfig) {
 				selected = 'ollama';
@@ -44,20 +36,12 @@
 			</div>
 			<button
 				class="self-center"
-				on:click={() => {
+				aria-label={$i18n.t('Close')}
+				onclick={() => {
 					show = false;
 				}}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-					/>
-				</svg>
+				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>
 
@@ -77,20 +61,11 @@
 							<button
 								class="min-w-fit rounded-full p-1.5 {selected === 'ollama'
 									? ''
-									: 'text-content-subtle hover:text-content'} transition"
-								on:click={() => {
+									: 'text-content-subtle hover:text-content'}"
+								onclick={() => {
 									selected = 'ollama';
 								}}>{$i18n.t('Ollama')}</button
 							>
-
-							<!-- <button
-								class="min-w-fit rounded-full p-1.5 {selected === 'llamacpp'
-									? ''
-									: 'text-content-subtle hover:text-content'} transition"
-								on:click={() => {
-									selected = 'llamacpp';
-								}}>{$i18n.t('Llama.cpp')}</button
-							> -->
 						</div>
 
 						<div class=" px-1.5 py-1">

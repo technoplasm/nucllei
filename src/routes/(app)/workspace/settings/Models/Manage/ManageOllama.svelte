@@ -1,82 +1,78 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, models, MODEL_DOWNLOAD_POOL, user, config, settings } from '$lib/stores';
+	import { models, MODEL_DOWNLOAD_POOL } from '$lib/stores';
 	import { splitStream } from '$lib/utils';
 
 	import {
 		createModel,
 		deleteModel,
 		downloadModel,
-		getOllamaUrls,
-		getOllamaVersion,
 		pullModel,
 		uploadModel,
-		getOllamaConfig,
 		getOllamaModels
 	} from '$lib/apis/ollama';
 	import { getModels } from '$lib/apis';
 
-	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ModelDeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	let modelUploadInputElement: HTMLInputElement;
-	let showModelDeleteConfirm = false;
+	let { urlIdx = null }: { urlIdx?: number | null } = $props();
 
-	let loading = true;
+	let modelUploadInputElement = $state<HTMLInputElement | null>(null);
+	let showModelDeleteConfirm = $state(false);
 
-	// Models
-	export let urlIdx: number | null = null;
+	let loading = $state(true);
 
-	let ollamaModels = [];
+	let ollamaModels = $state<any[] | null>([]);
 
-	let updateModelId = null;
-	let updateProgress = null;
-	let showExperimentalOllama = false;
+	let updateModelId = $state<string | null>(null);
+	let updateProgress = $state<number | null>(null);
+	let showExperimentalOllama = $state(false);
 
 	const MAX_PARALLEL_DOWNLOADS = 3;
 
-	let modelTransferring = false;
-	let modelTag = '';
+	let modelTransferring = $state(false);
+	let modelTag = $state('');
 
-	let createModelLoading = false;
-	let createModelName = '';
-	let createModelObject = '';
+	let createModelLoading = $state(false);
+	let createModelName = $state('');
+	let createModelObject = $state('');
 
-	let createModelDigest = '';
-	let createModelPullProgress = null;
+	let createModelDigest = $state('');
+	let createModelPullProgress = $state<number | null>(null);
 
-	let digest = '';
-	let pullProgress = null;
+	let digest = $state('');
+	let pullProgress = $state<number | null>(null);
 
-	let modelUploadMode = 'file';
-	let modelInputFile: File[] | null = null;
-	let modelFileUrl = '';
-	let modelFileContent = `TEMPLATE """{{ .System }}\nUSER: {{ .Prompt }}\nASSISTANT: """\nPARAMETER num_ctx 4096\nPARAMETER stop "</s>"\nPARAMETER stop "USER:"\nPARAMETER stop "ASSISTANT:"`;
-	let modelFileDigest = '';
+	let modelUploadMode = $state('file');
+	let modelInputFile = $state<FileList | null>(null);
+	let modelFileUrl = $state('');
+	let modelFileContent = $state(
+		`TEMPLATE """{{ .System }}\nUSER: {{ .Prompt }}\nASSISTANT: """\nPARAMETER num_ctx 4096\nPARAMETER stop "</s>"\nPARAMETER stop "USER:"\nPARAMETER stop "ASSISTANT:"`
+	);
+	let modelFileDigest = $state('');
 
-	let uploadProgress = null;
-	let uploadMessage = '';
+	let uploadProgress = $state<number | null>(null);
+	let uploadMessage = $state('');
 
-	let deleteModelTag = '';
+	let deleteModelTag = $state('');
 
 	const updateModelsHandler = async () => {
-		for (const model of ollamaModels) {
-			console.log(model);
-
+		for (const model of ollamaModels ?? []) {
 			updateModelId = model.id;
-			const [res, controller] = await pullModel(model.id, urlIdx).catch((error) => {
+			const [res] = await pullModel(model.id, urlIdx).catch((error) => {
 				toast.error(`${error}`);
-				return null;
+				// 旧コードは null を返していて分割代入で落ちていた
+				return [null, null];
 			});
 
 			if (res) {
-				const reader = res.body
-					.pipeThrough(new TextDecoderStream())
+				const reader = res
+					.body!.pipeThrough(new TextDecoderStream())
 					.pipeThrough(splitStream('\n'))
 					.getReader();
 
@@ -91,7 +87,6 @@
 							if (line !== '') {
 								let data = JSON.parse(line);
 
-								console.log(data);
 								if (data.error) {
 									throw data.error;
 								}
@@ -112,8 +107,8 @@
 								}
 							}
 						}
-					} catch (error) {
-						console.log(error);
+					} catch {
+						// ストリーム途中の断片・パース失敗は無視して読み続ける
 					}
 				}
 			}
@@ -125,7 +120,6 @@
 
 	const pullModelHandler = async () => {
 		const sanitizedModelTag = modelTag.trim().replace(/^ollama\s+(run|pull)\s+/, '');
-		console.log($MODEL_DOWNLOAD_POOL);
 		if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag]) {
 			toast.error(
 				$i18n.t(`Model '{{modelTag}}' is already in queue for downloading.`, {
@@ -143,12 +137,12 @@
 
 		const [res, controller] = await pullModel(sanitizedModelTag, urlIdx).catch((error) => {
 			toast.error(`${error}`);
-			return null;
+			return [null, null];
 		});
 
 		if (res) {
-			const reader = res.body
-				.pipeThrough(new TextDecoderStream())
+			const reader = res
+				.body!.pipeThrough(new TextDecoderStream())
 				.pipeThrough(splitStream('\n'))
 				.getReader();
 
@@ -172,7 +166,6 @@
 					for (const line of lines) {
 						if (line !== '') {
 							let data = JSON.parse(line);
-							console.log(data);
 							if (data.error) {
 								throw data.error;
 							}
@@ -211,18 +204,14 @@
 							}
 						}
 					}
-				} catch (error) {
-					console.log(error);
+				} catch (error: any) {
 					if (typeof error !== 'string') {
 						error = error.message;
 					}
 
 					toast.error(`${error}`);
-					// opts.callback({ success: false, error, modelName: opts.modelName });
 				}
 			}
-
-			console.log($MODEL_DOWNLOAD_POOL[sanitizedModelTag]);
 
 			if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag].done) {
 				toast.success(
@@ -274,8 +263,8 @@
 		}
 
 		if (fileResponse && fileResponse.ok) {
-			const reader = fileResponse.body
-				.pipeThrough(new TextDecoderStream())
+			const reader = fileResponse
+				.body!.pipeThrough(new TextDecoderStream())
 				.pipeThrough(splitStream('\n'))
 				.getReader();
 
@@ -308,8 +297,8 @@
 							}
 						}
 					}
-				} catch (error) {
-					console.log(error);
+				} catch {
+					// ストリーム途中の断片・パース失敗は無視して読み続ける
 				}
 			}
 		} else {
@@ -324,8 +313,8 @@
 			);
 
 			if (res && res.ok) {
-				const reader = res.body
-					.pipeThrough(new TextDecoderStream())
+				const reader = res
+					.body!.pipeThrough(new TextDecoderStream())
 					.pipeThrough(splitStream('\n'))
 					.getReader();
 
@@ -338,9 +327,7 @@
 
 						for (const line of lines) {
 							if (line !== '') {
-								console.log(line);
 								let data = JSON.parse(line);
-								console.log(data);
 
 								if (data.error) {
 									throw data.error;
@@ -371,7 +358,6 @@
 							}
 						}
 					} catch (error) {
-						console.log(error);
 						toast.error(`${error}`);
 					}
 				}
@@ -444,8 +430,8 @@
 		});
 
 		if (res && res.ok) {
-			const reader = res.body
-				.pipeThrough(new TextDecoderStream())
+			const reader = res
+				.body!.pipeThrough(new TextDecoderStream())
 				.pipeThrough(splitStream('\n'))
 				.getReader();
 
@@ -458,9 +444,7 @@
 
 					for (const line of lines) {
 						if (line !== '') {
-							console.log(line);
 							let data = JSON.parse(line);
-							console.log(data);
 
 							if (data.error) {
 								throw data.error;
@@ -492,7 +476,6 @@
 						}
 					}
 				} catch (error) {
-					console.log(error);
 					toast.error(`${error}`);
 				}
 			}
@@ -520,9 +503,11 @@
 		}
 	};
 
-	$: if (urlIdx !== null) {
-		init();
-	}
+	$effect(() => {
+		if (urlIdx !== null) {
+			init();
+		}
+	});
 </script>
 
 <ModelDeleteConfirmDialog
@@ -545,24 +530,13 @@
 						<div>
 							<Tooltip content="Update All Models" placement="top">
 								<button
-									class="flex gap-2 items-center bg-transparent rounded-lg transition"
-									on:click={() => {
+									class="flex gap-2 items-center bg-transparent rounded-lg"
+									aria-label="Update All Models"
+									onclick={() => {
 										updateModelsHandler();
 									}}
 								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 16 16"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											d="M7 1a.75.75 0 0 1 .75.75V6h-1.5V1.75A.75.75 0 0 1 7 1ZM6.25 6v2.94L5.03 7.72a.75.75 0 0 0-1.06 1.06l2.5 2.5a.75.75 0 0 0 1.06 0l2.5-2.5a.75.75 0 1 0-1.06-1.06L7.75 8.94V6H10a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.25Z"
-										/>
-										<path
-											d="M4.268 14A2 2 0 0 0 6 15h6a2 2 0 0 0 2-2v-3a2 2 0 0 0-1-1.732V11a3 3 0 0 1-3 3H4.268Z"
-										/>
-									</svg>
+									<span class="i-lucide-refresh-cw size-4 block"></span>
 								</button>
 							</Tooltip>
 						</div>
@@ -570,7 +544,7 @@
 					<div class="flex w-full">
 						<div class="flex-1 mr-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden"
 								placeholder={$i18n.t('Enter model tag (e.g. {{modelTag}})', {
 									modelTag: 'mistral:7b'
 								})}
@@ -578,56 +552,17 @@
 							/>
 						</div>
 						<button
-							class="px-2.5 bg-gray-50 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
-							on:click={() => {
+							class="px-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg"
+							aria-label={$i18n.t('Download')}
+							onclick={() => {
 								pullModelHandler();
 							}}
 							disabled={modelTransferring}
 						>
 							{#if modelTransferring}
-								<div class="self-center">
-									<svg
-										class=" w-4 h-4"
-										viewBox="0 0 24 24"
-										fill="currentColor"
-										xmlns="http://www.w3.org/2000/svg"
-									>
-										<style>
-											.spinner_ajPY {
-												transform-origin: center;
-												animation: spinner_AtaB 0.75s infinite linear;
-											}
-
-											@keyframes spinner_AtaB {
-												100% {
-													transform: rotate(360deg);
-												}
-											}
-										</style>
-										<path
-											d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-											opacity=".25"
-										/>
-										<path
-											d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-											class="spinner_ajPY"
-										/>
-									</svg>
-								</div>
+								<Spinner className="size-4" />
 							{:else}
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 16 16"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
-									/>
-									<path
-										d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
-									/>
-								</svg>
+								<span class="i-lucide-download size-4 block"></span>
 							{/if}
 						</button>
 					</div>
@@ -656,7 +591,7 @@
 										<div class="flex flex-row justify-between space-x-4 pr-2">
 											<div class=" flex-1">
 												<div
-													class="dark:bg-gray-600 bg-gray-500 text-xs font-medium text-content text-center p-0.5 leading-none rounded-full"
+													class="bg-primary text-primary-content text-xs font-medium text-center p-0.5 leading-none rounded-full"
 													style="width: {Math.max(
 														15,
 														$MODEL_DOWNLOAD_POOL[model].pullProgress ?? 0
@@ -669,27 +604,12 @@
 											<Tooltip content={$i18n.t('Cancel')}>
 												<button
 													class="text-content"
-													on:click={() => {
+													aria-label={$i18n.t('Cancel')}
+													onclick={() => {
 														cancelModelPullHandler(model);
 													}}
 												>
-													<svg
-														class="w-4 h-4 text-content dark:text-white"
-														aria-hidden="true"
-														xmlns="http://www.w3.org/2000/svg"
-														width="24"
-														height="24"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-													>
-														<path
-															stroke="currentColor"
-															stroke-linecap="round"
-															stroke-linejoin="round"
-															stroke-width="2"
-															d="M6 18 17.94 6M18 18 6.06 6"
-														/>
-													</svg>
+													<span class="i-lucide-x size-4 block"></span>
 												</button>
 											</Tooltip>
 										</div>
@@ -708,7 +628,7 @@
 				<div>
 					<div class=" mb-2 text-sm font-medium">{$i18n.t('Delete a model')}</div>
 					<div class="flex w-full">
-						<div class="flex-1 mr-2 pr-1.5 rounded-lg bg-gray-50 text-content dark:bg-gray-850">
+						<div class="flex-1 mr-2 pr-1.5 rounded-xs bg-surface-muted text-content">
 							<select
 								class="w-full py-2 px-4 text-sm outline-hidden bg-transparent"
 								bind:value={deleteModelTag}
@@ -717,31 +637,21 @@
 								{#if !deleteModelTag}
 									<option value="" disabled selected>{$i18n.t('Select a model')}</option>
 								{/if}
-								{#each ollamaModels as model}
-									<option value={model.id} class="bg-gray-50 dark:bg-gray-700"
+								{#each ollamaModels ?? [] as model}
+									<option value={model.id}
 										>{model.name + ' (' + (model.size / 1024 ** 3).toFixed(1) + ' GB)'}</option
 									>
 								{/each}
 							</select>
 						</div>
 						<button
-							class="px-2.5 bg-gray-50 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
-							on:click={() => {
+							class="px-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg"
+							aria-label={$i18n.t('Delete')}
+							onclick={() => {
 								showModelDeleteConfirm = true;
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
+							<span class="i-lucide-trash-2 size-4 block"></span>
 						</button>
 					</div>
 				</div>
@@ -751,7 +661,7 @@
 					<div class="flex w-full">
 						<div class="flex-1 mr-2 flex flex-col gap-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+								class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden"
 								placeholder={$i18n.t('Enter model tag (e.g. {{modelTag}})', {
 									modelTag: 'my-modelfile'
 								})}
@@ -761,46 +671,35 @@
 
 							<textarea
 								bind:value={createModelObject}
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden resize-none scrollbar-hidden"
+								class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden resize-none scrollbar-hidden"
 								rows="6"
 								placeholder={`e.g. {"model": "my-modelfile", "from": "ollama:7b"})`}
 								disabled={createModelLoading}
-							/>
+							></textarea>
 						</div>
 
 						<div class="flex self-start">
 							<button
-								class="px-2.5 py-2.5 bg-gray-50 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition disabled:cursor-not-allowed"
-								on:click={() => {
+								class="px-2.5 py-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg disabled:cursor-not-allowed"
+								aria-label={$i18n.t('Create')}
+								onclick={() => {
 									createModelHandler();
 								}}
 								disabled={createModelLoading}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 16 16"
-									fill="currentColor"
-									class="size-4"
-								>
-									<path
-										d="M7.25 10.25a.75.75 0 0 0 1.5 0V4.56l2.22 2.22a.75.75 0 1 0 1.06-1.06l-3.5-3.5a.75.75 0 0 0-1.06 0l-3.5 3.5a.75.75 0 0 0 1.06 1.06l2.22-2.22v5.69Z"
-									/>
-									<path
-										d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
-									/>
-								</svg>
+								<span class="i-lucide-upload size-4 block"></span>
 							</button>
 						</div>
 					</div>
 
 					{#if createModelDigest !== ''}
 						<div class="flex flex-col mt-1">
-							<div class="font-medium mb-1">{createModelTag}</div>
+							<div class="font-medium mb-1">{createModelName}</div>
 							<div class="">
 								<div class="flex flex-row justify-between space-x-4 pr-2">
 									<div class=" flex-1">
 										<div
-											class="dark:bg-gray-600 bg-gray-500 text-xs font-medium text-content text-center p-0.5 leading-none rounded-full"
+											class="bg-primary text-primary-content text-xs font-medium text-center p-0.5 leading-none rounded-full"
 											style="width: {Math.max(15, createModelPullProgress ?? 0)}%"
 										>
 											{createModelPullProgress ?? 0}%
@@ -823,7 +722,7 @@
 						<button
 							class=" text-xs font-medium text-content-muted"
 							type="button"
-							on:click={() => {
+							onclick={() => {
 								showExperimentalOllama = !showExperimentalOllama;
 							}}>{showExperimentalOllama ? $i18n.t('Hide') : $i18n.t('Show')}</button
 						>
@@ -832,7 +731,8 @@
 
 				{#if showExperimentalOllama}
 					<form
-						on:submit|preventDefault={() => {
+						onsubmit={(e) => {
+							e.preventDefault();
 							uploadModelHandler();
 						}}
 					>
@@ -840,8 +740,8 @@
 							<div class="  text-sm font-medium">{$i18n.t('Upload a GGUF model')}</div>
 
 							<button
-								class="p-1 px-3 text-xs flex rounded-sm transition"
-								on:click={() => {
+								class="p-1 px-3 text-xs flex rounded-sm"
+								onclick={() => {
 									if (modelUploadMode === 'file') {
 										modelUploadMode = 'url';
 									} else {
@@ -867,9 +767,6 @@
 											bind:this={modelUploadInputElement}
 											type="file"
 											bind:files={modelInputFile}
-											on:change={() => {
-												console.log(modelInputFile);
-											}}
 											accept=".gguf,.safetensors"
 											required
 											hidden
@@ -877,9 +774,9 @@
 
 										<button
 											type="button"
-											class="w-full rounded-lg text-left py-2 px-4 bg-gray-50 text-content dark:bg-gray-850"
-											on:click={() => {
-												modelUploadInputElement.click();
+											class="w-full rounded-xs text-left py-2 px-4 bg-surface-muted text-content"
+											onclick={() => {
+												modelUploadInputElement?.click();
 											}}
 										>
 											{#if modelInputFile && modelInputFile.length > 0}
@@ -892,7 +789,7 @@
 								{:else}
 									<div class="flex-1 {modelFileUrl !== '' ? 'mr-2' : ''}">
 										<input
-											class="w-full rounded-lg text-left py-2 px-4 bg-gray-50 text-content dark:bg-gray-850 outline-hidden {modelFileUrl !==
+											class="w-full rounded-xs text-left py-2 px-4 bg-surface-muted text-content outline-hidden {modelFileUrl !==
 											''
 												? 'mr-2'
 												: ''}"
@@ -907,54 +804,15 @@
 
 							{#if (modelUploadMode === 'file' && modelInputFile && modelInputFile.length > 0) || (modelUploadMode === 'url' && modelFileUrl !== '')}
 								<button
-									class="px-2.5 bg-gray-50 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg disabled:cursor-not-allowed transition"
+									class="px-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg disabled:cursor-not-allowed"
+									aria-label={$i18n.t('Upload')}
 									type="submit"
 									disabled={modelTransferring}
 								>
 									{#if modelTransferring}
-										<div class="self-center">
-											<svg
-												class=" w-4 h-4"
-												viewBox="0 0 24 24"
-												fill="currentColor"
-												xmlns="http://www.w3.org/2000/svg"
-											>
-												<style>
-													.spinner_ajPY {
-														transform-origin: center;
-														animation: spinner_AtaB 0.75s infinite linear;
-													}
-
-													@keyframes spinner_AtaB {
-														100% {
-															transform: rotate(360deg);
-														}
-													}
-												</style>
-												<path
-													d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-													opacity=".25"
-												/>
-												<path
-													d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-													class="spinner_ajPY"
-												/>
-											</svg>
-										</div>
+										<Spinner className="size-4" />
 									{:else}
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												d="M7.25 10.25a.75.75 0 0 0 1.5 0V4.56l2.22 2.22a.75.75 0 1 0 1.06-1.06l-3.5-3.5a.75.75 0 0 0-1.06 0l-3.5 3.5a.75.75 0 0 0 1.06 1.06l2.22-2.22v5.69Z"
-											/>
-											<path
-												d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
-											/>
-										</svg>
+										<span class="i-lucide-upload size-4 block"></span>
 									{/if}
 								</button>
 							{/if}
@@ -968,9 +826,9 @@
 									</div>
 									<textarea
 										bind:value={modelFileContent}
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden resize-none"
+										class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden resize-none"
 										rows="6"
-									/>
+									></textarea>
 								</div>
 							</div>
 						{/if}
@@ -987,9 +845,9 @@
 							<div class="mt-2">
 								<div class=" mb-2 text-xs">{$i18n.t('Upload Progress')}</div>
 
-								<div class="w-full rounded-full dark:bg-gray-800">
+								<div class="w-full rounded-full bg-surface-muted">
 									<div
-										class="dark:bg-gray-600 bg-gray-500 text-xs font-medium text-content text-center p-0.5 leading-none rounded-full"
+										class="bg-primary text-primary-content text-xs font-medium text-center p-0.5 leading-none rounded-full"
 										style="width: 100%"
 									>
 										{uploadMessage}
@@ -1003,9 +861,9 @@
 							<div class="mt-2">
 								<div class=" mb-2 text-xs">{$i18n.t('Upload Progress')}</div>
 
-								<div class="w-full rounded-full dark:bg-gray-800">
+								<div class="w-full rounded-full bg-surface-muted">
 									<div
-										class="dark:bg-gray-600 bg-gray-500 text-xs font-medium text-content text-center p-0.5 leading-none rounded-full"
+										class="bg-primary text-primary-content text-xs font-medium text-center p-0.5 leading-none rounded-full"
 										style="width: {Math.max(15, uploadProgress ?? 0)}%"
 									>
 										{uploadProgress ?? 0}%
