@@ -34,8 +34,8 @@
 </script>
 
 <div>
-	<div class="flex w-full justify-between mb-1">
-		<div class=" self-center text-sm font-semibold">{$i18n.t('Skills')}</div>
+	<div class="flex w-full justify-between">
+		<div class=" self-center text-md font-semibold">{$i18n.t('Skills')}</div>
 	</div>
 
 	{#if disabled}
@@ -44,9 +44,9 @@
 		</div>
 	{/if}
 
-	<div class="flex flex-col" class:opacity-50={disabled}>
+	<div class="flex flex-col mt-1" class:opacity-50={disabled}>
 		{#if skills.length > 0}
-			<div class=" flex flex-col mt-2">
+			<div class=" flex flex-col">
 				{#each Object.keys(_skills) as skillId}
 					<!-- llens(#49): label で包み、行全体クリックでトグル(disabled 時は Checkbox 側が握り潰す) -->
 					<label class=" flex items-center gap-2 mr-3 cursor-pointer">

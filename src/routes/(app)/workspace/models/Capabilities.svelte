@@ -14,11 +14,15 @@
 		citations: $i18n.t('Displays citations in the response')
 	};
 
-	// キーは vision / usage / citations(usage はベースモデル依存でキーごと消える)
+	// キーは vision / usage / citations(usage はベースモデル依存でキーごと消える)。
+	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
+	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	let {
-		capabilities = $bindable({})
+		capabilities = $bindable({}),
+		featureSkills = $bindable(true)
 	}: {
 		capabilities?: Record<string, boolean | undefined>;
+		featureSkills?: boolean;
 	} = $props();
 </script>
 
@@ -27,6 +31,24 @@
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Capabilities')}</div>
 	</div>
 	<div class="flex">
+		<!-- llens(#49): label で行クリックトグル -->
+		<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+			<span class="flex items-center">
+				<Checkbox
+					state={featureSkills ? 'checked' : 'unchecked'}
+					on:change={(e) => {
+						featureSkills = e.detail === 'checked';
+					}}
+				/>
+			</span>
+
+			<div class=" py-0.5 text-sm capitalize">
+				<Tooltip content={$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}>
+					{$i18n.t('Skills')}
+				</Tooltip>
+			</div>
+		</label>
+
 		{#each Object.keys(capabilities) as capability}
 			<!-- llens(#49): label で行クリックトグル -->
 			<label class=" flex items-center gap-2 mr-3 cursor-pointer">

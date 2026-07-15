@@ -14,12 +14,10 @@
 	import AdvancedParams from './AdvancedParams.svelte';
 	import ToolsSelector from './ToolsSelector.svelte';
 	import SkillsSelector from './SkillsSelector.svelte';
-	import FiltersSelector from './FiltersSelector.svelte';
-	import ActionsSelector from './ActionsSelector.svelte';
+	import FunctionsSelector from './FunctionsSelector.svelte';
 	import Capabilities from './Capabilities.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
@@ -503,7 +501,7 @@
 
 											<select
 												id="model-base-model"
-												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
 												bind:value={info.base_model_id}
 												onchange={(e) => {
 													addUsage(e.currentTarget.value);
@@ -581,65 +579,41 @@
 							</div>
 
 							<div class="my-2">
-								<div class="px-3 py-2 bg-surface-raised rounded-lg">
+								<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-lg">
 									<AccessControl bind:accessControl allowPublic={true} />
 								</div>
+							</div>
+
+							<div class="my-2">
+								<Capabilities bind:capabilities bind:featureSkills />
+							</div>
+
+							<hr class=" border-line my-1.5" />
+
+							<div class="mt-2">
+								<SkillsSelector
+									bind:selectedSkillIds={skillIds}
+									skills={$skills ?? []}
+									disabled={!featureSkills}
+								/>
 							</div>
 
 							<hr class=" border-line my-1.5" />
 
 							<div class="my-2">
-								<div class="flex w-full justify-between mb-1">
-									<div class=" self-center text-sm font-semibold">{$i18n.t('Features')}</div>
-								</div>
-
-								<!-- llens(#49): label で行クリックトグル -->
-								<label class="flex items-center gap-2 mr-3 cursor-pointer">
-									<span class="flex items-center">
-										<Checkbox
-											state={featureSkills ? 'checked' : 'unchecked'}
-											on:change={(e) => {
-												featureSkills = e.detail === 'checked';
-											}}
-										/>
-									</span>
-									<div class=" py-0.5 text-sm w-full flex items-center gap-1.5">
-										<span class="font-medium">{$i18n.t('Skills')}</span>
-										<span class="text-xs text-content-muted"
-											>{$i18n.t('スキル一覧をモデルに提示(load_skill)+ /command 発火')}</span
-										>
-									</div>
-								</label>
-
-								<div class="mt-2">
-									<SkillsSelector
-										bind:selectedSkillIds={skillIds}
-										skills={$skills ?? []}
-										disabled={!featureSkills}
-									/>
-								</div>
-							</div>
-
-							<div class="my-2">
 								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
 							</div>
 
+							<hr class=" border-line my-3" />
+
 							<div class="my-2">
-								<FiltersSelector
+								<FunctionsSelector
 									bind:selectedFilterIds={filterIds}
-									filters={($functions ?? []).filter((func: any) => func.type === 'filter')}
-								/>
-							</div>
-
-							<div class="my-2">
-								<ActionsSelector
 									bind:selectedActionIds={actionIds}
-									actions={($functions ?? []).filter((func: any) => func.type === 'action')}
+									functions={($functions ?? []).filter((func: any) =>
+										['filter', 'action'].includes(func.type)
+									)}
 								/>
-							</div>
-
-							<div class="my-2">
-								<Capabilities bind:capabilities />
 							</div>
 						{:else if selectedTab === 'prompt'}
 							<div class="my-2">
