@@ -13,11 +13,6 @@
 		edit = false,
 		users = [],
 		group = null,
-		// custom=false は「既定権限の編集」モード(group エンティティを持たない)
-		custom = true,
-		// llens(2026-07-16): General タブは廃止 — 名前はヘッダでインライン編集、
-		// 説明は FE から撤去(値は保持してパススルー)。開いた直後 = Permissions
-		tabs = ['permissions', 'users'],
 		// llens(#66): 権限3層化 — workspace.skills = skill editor ロールのみ。
 		permissions = $bindable({
 			workspace: {
@@ -41,12 +36,14 @@
 		edit?: boolean;
 		users?: any[];
 		group?: any;
-		custom?: boolean;
-		tabs?: string[];
 		permissions?: any;
 		onSubmit?: (group: any) => void | Promise<void>;
 		onDelete?: () => void;
 	} = $props();
+
+	// llens(2026-07-16): General タブは廃止 — 名前はヘッダでインライン編集、
+	// 説明は FE から撤去(値は保持してパススルー)。開いた直後 = Permissions
+	const tabs = ['permissions', 'users'];
 
 	const TAB_ICONS: Record<string, string> = {
 		permissions: 'i-lucide-wrench',
@@ -119,29 +116,23 @@
 		}}
 	>
 		<div class=" flex justify-between gap-3 text-content px-5 pt-4 mb-1.5">
-			{#if custom}
-				<!-- 名前はタイトル位置でラベル付きインライン編集(General タブ廃止に伴い)。
-				     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール)。
-				     ラベルは FunctionEditor 同型(単一行なので固定幅 w-24 は取らない) -->
-				<div class="flex items-center gap-2 w-full min-w-0">
-					<label class="shrink-0 text-sm font-semibold" for="group-name">
-						{$i18n.t('Name')}
-					</label>
-					<input
-						id="group-name"
-						class="flex-1 min-w-0 text-lg font-medium self-center font-primary bg-surface-muted rounded-xs px-2 py-0.5 placeholder:text-content-subtle outline-hidden"
-						type="text"
-						bind:value={name}
-						placeholder={$i18n.t('Group Name')}
-						autocomplete="off"
-						required
-					/>
-				</div>
-			{:else}
-				<div class=" text-lg font-medium self-center font-primary">
-					{$i18n.t('Edit Default Permissions')}
-				</div>
-			{/if}
+			<!-- 名前はタイトル位置でラベル付きインライン編集(General タブ廃止に伴い)。
+			     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール)。
+			     ラベルは FunctionEditor 同型(単一行なので固定幅 w-24 は取らない) -->
+			<div class="flex items-center gap-2 w-full min-w-0">
+				<label class="shrink-0 text-sm font-semibold" for="group-name">
+					{$i18n.t('Name')}
+				</label>
+				<input
+					id="group-name"
+					class="flex-1 min-w-0 text-lg font-medium self-center font-primary bg-surface-muted rounded-xs px-2 py-0.5 placeholder:text-content-subtle outline-hidden"
+					type="text"
+					bind:value={name}
+					placeholder={$i18n.t('Group Name')}
+					autocomplete="off"
+					required
+				/>
+			</div>
 			<button
 				class="self-center"
 				type="button"

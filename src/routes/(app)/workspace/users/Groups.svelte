@@ -13,6 +13,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EditGroupModal from './EditGroupModal.svelte';
+	import GroupPermissions from './GroupPermissions.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -48,7 +49,7 @@
 		}
 	});
 
-	let showDefaultPermissionsModal = $state(false);
+	let savingDefaultPermissions = $state(false);
 
 	// グループ編集(1 モーダルを選択中グループで使い回す)
 	let selectedGroup = $state<any>(null);
@@ -107,11 +108,13 @@
 		}
 	};
 
-	const updateDefaultPermissionsHandler = async (group: any) => {
-		const res = await updateUserDefaultPermissions(group.permissions).catch((error) => {
+	const saveDefaultPermissionsHandler = async () => {
+		savingDefaultPermissions = true;
+		const res = await updateUserDefaultPermissions(defaultPermissions).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
+		savingDefaultPermissions = false;
 
 		if (res) {
 			toast.success($i18n.t('Default permissions updated successfully'));
@@ -192,27 +195,11 @@
 	</Modal>
 
 	<div class="mt-0.5 mb-2 gap-x-4 gap-y-1 flex flex-col md:flex-row justify-between">
-		<div class="flex items-center gap-4">
-			<div class="flex md:self-center text-lg font-medium px-0.5">
-				{$i18n.t('Groups')}
-				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+		<div class="flex md:self-center text-lg font-medium px-0.5">
+			{$i18n.t('Groups')}
+			<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
 
-				<span class="text-lg font-medium text-content-muted">{groups.length}</span>
-			</div>
-
-			<!-- 既定権限: グループより先に読む「ベース」なのでヘッダ行に置く(2026-07-16。
-			     説明文はツールチップに退避) -->
-			<Tooltip content={$i18n.t('applies to all users with the "user" role')}>
-				<button
-					class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
-					onclick={() => {
-						showDefaultPermissionsModal = true;
-					}}
-				>
-					<span class="i-lucide-users size-3.5 block mr-1"></span>
-					{$i18n.t('Default permissions')}
-				</button>
-			</Tooltip>
+			<span class="text-lg font-medium text-content-muted">{groups.length}</span>
 		</div>
 
 		<div class="flex gap-1">
@@ -246,14 +233,6 @@
 	</div>
 
 	<div>
-		<EditGroupModal
-			bind:show={showDefaultPermissionsModal}
-			tabs={['permissions']}
-			bind:permissions={defaultPermissions}
-			custom={false}
-			onSubmit={updateDefaultPermissionsHandler}
-		/>
-
 		{#if filteredGroups.length === 0}
 			<div class="flex flex-col items-center justify-center h-40">
 				<div class=" text-xl font-medium">
@@ -311,5 +290,32 @@
 				</table>
 			</div>
 		{/if}
+
+		<!-- 既定権限: モーダルに畳まず常時表示(2026-07-16)。user ロール全員のベースなので
+		     グループと同じ画面で一望できるほうが権限の全体像を追いやすい -->
+		<hr class="my-4 border-line" />
+
+		<div class="flex items-center gap-2.5 px-0.5 mb-2">
+			<div class="text-lg font-medium">{$i18n.t('Default permissions')}</div>
+			<div class="text-xs text-content-muted">
+				{$i18n.t('applies to all users with the "user" role')}
+			</div>
+		</div>
+
+		<GroupPermissions bind:permissions={defaultPermissions} />
+
+		<div class="flex justify-end pt-3 pb-4">
+			<button
+				class="px-3.5 py-1.5 text-sm font-medium rounded-full bg-primary hover:bg-primary-hover text-primary-content transition flex items-center gap-2"
+				type="button"
+				disabled={savingDefaultPermissions}
+				onclick={saveDefaultPermissionsHandler}
+			>
+				{$i18n.t('Save')}
+				{#if savingDefaultPermissions}
+					<span class="i-lucide-loader-circle size-4 block animate-spin"></span>
+				{/if}
+			</button>
+		</div>
 	</div>
 {/if}
