@@ -162,7 +162,7 @@
 								: 'text-content-subtle'} outline-hidden"
 							bind:value={defaultModelId}
 						>
-							<option value="">{$i18n.t('未設定(表示順の先頭)')}</option>
+							<option value="">{$i18n.t('None (top of the display order)')}</option>
 							{#each $models ?? [] as model (model.id)}
 								<option value={model.id} class="text-content">{model.name}</option>
 							{/each}

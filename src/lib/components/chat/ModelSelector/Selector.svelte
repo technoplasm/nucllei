@@ -592,28 +592,30 @@
 						<!-- llens(#70): ユーザー既定モデル(新規チャットの初期選択)の bookmark。
 						     行クリック(モデル選択)とは独立に効かせる(stopPropagation)。
 						     既定 = bookmark-check を実色、それ以外は薄い bookmark。
-						     選択中の ✓ は撤去(トリガーに選択中モデル名が出ており冗長)。
-						     Tooltip(tippy)は root div に aria-label を複製するのでここでは使わず native title。 -->
-						<span
-							class="ml-auto block p-0.5 mr-2 md:mr-0 rounded-sm {userDefaultModelId === item.value
-								? 'text-content'
-								: 'text-content-subtle/50 hover:text-content-muted'}"
-							role="button"
-							tabindex="-1"
-							title={userDefaultModelId === item.value
-								? $i18n.t('既定のモデルを解除')
-								: $i18n.t('既定のモデルにする')}
-							aria-label={$i18n.t('既定のモデルにする')}
-							on:click|stopPropagation={() => {
-								toggleDefaultModel(item.value);
-							}}
+						     選択中の ✓ は撤去(トリガーに選択中モデル名が出ており冗長)。 -->
+						<Tooltip
+							className="ml-auto mr-2 md:mr-0 flex"
+							content={userDefaultModelId === item.value
+								? $i18n.t('Unset default model')
+								: $i18n.t('Set as default')}
 						>
-							{#if userDefaultModelId === item.value}
-								<span class="i-lucide-bookmark-check size-4 block"></span>
-							{:else}
-								<span class="i-lucide-bookmark size-4 block"></span>
-							{/if}
-						</span>
+							<span
+								class="block p-0.5 rounded-sm {userDefaultModelId === item.value
+									? 'text-content'
+									: 'text-content-subtle/50 hover:text-content-muted'}"
+								role="button"
+								tabindex="-1"
+								on:click|stopPropagation={() => {
+									toggleDefaultModel(item.value);
+								}}
+							>
+								{#if userDefaultModelId === item.value}
+									<span class="i-lucide-bookmark-check size-4 block"></span>
+								{:else}
+									<span class="i-lucide-bookmark size-4 block"></span>
+								{/if}
+							</span>
+						</Tooltip>
 					</button>
 				{:else}
 					<div class="">

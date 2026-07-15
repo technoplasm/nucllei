@@ -135,7 +135,7 @@
 			</div>
 
 			<Tooltip
-				content={$i18n.t('表示順・既定モデル')}
+				content={$i18n.t('Display order and default model')}
 				className="order-2 ml-auto self-stretch flex sm:order-3 sm:ml-0"
 			>
 				<button
