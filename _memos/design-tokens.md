@@ -14,7 +14,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--surface-sidebar` | サイドバー背景 | `bg-surface-sidebar` | `#eeeeee` / `#212121` |
 | `--surface-raised` | 入力欄・カードなど持ち上げ面 | `bg-surface-raised` | `#ffffff` / `#262626` |
 | `--surface-muted` | 控えめな帯(table thead 等) | `bg-surface-muted` | `#f0f0f0` / `#2d2d2d` |
-| `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#161616` |
+| `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#313131`(dark は raised より**明るく**する方向 — 2026-07-15 改訂) |
 | `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(#58 で差し替え予定) |
 | `--secondary(-hover/-content)` | 副ボタン(戻る/キャンセル) | `bg-secondary hover:bg-secondary-hover text-secondary-content` | `#e9e9e9` / `#333333` 地 |
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e7e7e7` / `#292929` |
@@ -32,8 +32,10 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   (チャット入力欄と同じ「surface 上の持ち上げ面」)。ただし **raised は surface の直上でだけ** —
   raised 相当の面(モーダル = bg-white dark:bg-gray-900 等)の中のコントロールは
   `bg-surface-muted` を使う 2 段ルール。
-- **主ボタン = primary(Create/Save)/ 副ボタン(戻る/キャンセル/Access)= secondary**。
+- **主ボタン = primary(Create/Save)/ 副ボタン(キャンセル/Access)= secondary**。
   ボタンに raised を使わない(入力面と顔が被る)。
+  **「一覧に戻る」は secondary をやめ subtle テキストリンク**(2026-07-15):
+  `text-content-subtle hover:text-content font-medium` + `i-lucide-arrow-left size-4 mr-2`(真実源 = ModelEditor)。
 - **Checkbox** はトークン化済み: 箱 = `bg-surface-raised` + `outline-line`(透明だと面と同化)、
   checked = primary。名前クリックで toggle させる場合は素の `<label>` で包む(button は labelable)。
 - **CodeEditor** の light テーマは自前 `EditorView.theme`(本体 = raised / gutter = muted。
@@ -44,10 +46,13 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   (縦を稼ぐ + クリックでフォーカス。真実源 = FunctionEditor)。
 - **一覧ページの様式**(真実源 = models/+page.svelte、2026-07-15 改訂): ヘッダ `mt-1.5`(+ ボタン行 `mt-2`)+
   primary Create pill + raised 検索ボックス(`rounded-xs`)/ grid は `mt-6 gap-3` / カード =
-  `relative bg-surface-raised rounded-xl` + **カード全体がクリック=編集**(stretched-link:
-  `a` に `after:absolute after:inset-0`、右のボタン/Switch は `relative` でオーバーレイの上に載せる)。
+  `relative bg-surface-raised rounded-xl px-4 py-3` + **カード全体がクリック=編集**(stretched-link:
+  `a` に `after:absolute after:inset-0`、右のボタン/Switch は `relative` でオーバーレイの上に載せる。
+  a の中に button を入れるのは HTML 違反なのでこれが定石 — Bootstrap の stretched-link と同じ)。
   hover はカード全体だが、**内側 button の hover 中は `[&:hover:not(:has(button:hover))]:bg-surface-hover`
-  で親の hover を抑制**(hover 面とクリック先が常に一致)/ セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
+  で親の hover を抑制**(hover 面とクリック先が常に一致)。カード内アイコンボタンは
+  `bg-transparent hover:bg-surface-hover`(hover 色をカードと統一。旧 `hover:bg-black/5` は廃止)/
+  セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
 - **テーブル**(users/chats): thead = `bg-surface-muted`、tbody 行 = `bg-surface-raised`。
   共通コンポーネント化は 3 例目が出るまで見送り。
 
