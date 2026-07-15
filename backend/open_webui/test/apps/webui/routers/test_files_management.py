@@ -83,7 +83,11 @@ class TestFilesManagement(AbstractPostgresTest):
 
     def test_list_sort_by_filename(self):
         # 大文字小文字を無視した名前順
-        for fid, name in (("f_1", "banana.txt"), ("f_2", "Apple.txt"), ("f_3", "cherry.txt")):
+        for fid, name in (
+            ("f_1", "banana.txt"),
+            ("f_2", "Apple.txt"),
+            ("f_3", "cherry.txt"),
+        ):
             self._insert_file(fid, filename=name)
         with mock_webui_user(id="1", role="admin"):
             r = self.fast_api_client.get(

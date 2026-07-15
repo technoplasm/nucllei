@@ -20,7 +20,9 @@ def _tool(callable_, name="probe"):
 
 
 def _call(name="probe"):
-    return [{"id": f"functions.{name}:0", "function": {"name": name, "arguments": "{}"}}]
+    return [
+        {"id": f"functions.{name}:0", "function": {"name": name, "arguments": "{}"}}
+    ]
 
 
 def test_slow_tool_times_out_as_result(monkeypatch):
