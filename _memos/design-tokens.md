@@ -26,7 +26,9 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ### ボタン/コントロールの使い分け(2026-07-14 確立、users/skills/tools/functions に適用済み)
 
-- **コントロール(input/select/textarea)= `bg-surface-raised` + `rounded-lg` + `text-sm`**
+- **コントロール(input/select/textarea)= `bg-surface-raised` + `rounded-xs` + `text-sm`**
+  (丸みの使い分け・2026-07-15 改訂: **入力するもの(input/select/textarea)= `rounded-xs`** /
+  **そのまま押せるもの(ボタン・タブ)= `rounded-lg`** / pill(Create 等)= `rounded-full`)
   (チャット入力欄と同じ「surface 上の持ち上げ面」)。ただし **raised は surface の直上でだけ** —
   raised 相当の面(モーダル = bg-white dark:bg-gray-900 等)の中のコントロールは
   `bg-surface-muted` を使う 2 段ルール。
@@ -40,9 +42,11 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   ページ側は「form 一段の flex-col h-full + エディタ枠 `flex-1 min-h-0`」で貼る(col 連打・`h-0` hack は廃止)。
 - フォームのラベルは固定幅(`w-24 shrink-0`)の `<label for>` でコントロール(`id` 付き)と同一行
   (縦を稼ぐ + クリックでフォーカス。真実源 = FunctionEditor)。
-- **一覧ページの様式**(真実源 = functions/+page.svelte): ヘッダ `mt-1.5 mb-4` + primary Create pill +
-  raised 検索ボックス / カード = `bg-surface-raised hover:bg-surface-hover rounded-xl` の平坦マークアップ
-  (`a.flex-1` + 直下にアイコンボタン)/ セクション見出し `text-md text-content-muted mt-2 mb-1`。
+- **一覧ページの様式**(真実源 = models/+page.svelte、2026-07-15 改訂): ヘッダ `mt-1.5`(+ ボタン行 `mt-2`)+
+  primary Create pill + raised 検索ボックス(`rounded-xs`)/ grid は `mt-6 gap-3` / カード =
+  `bg-surface-raised rounded-xl overflow-hidden` で、**hover はクリックできる範囲だけ** —
+  編集リンク `a.flex-1 self-stretch px-3 py-2 hover:bg-surface-hover`(カード全体 hover は
+  click 範囲とズレるので廃止。アイコンボタンは各自の hover)/ セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
 - **テーブル**(users/chats): thead = `bg-surface-muted`、tbody 行 = `bg-surface-raised`。
   共通コンポーネント化は 3 例目が出るまで見送り。
 

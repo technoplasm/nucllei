@@ -113,14 +113,14 @@
 </svelte:head>
 
 {#if loaded}
-	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Tools')}
 			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
 			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class="flex gap-4">
+		<div class="mt-2 flex gap-4">
 			<a
 				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
 				href="/workspace/tools/create"
@@ -129,7 +129,7 @@
 				{$i18n.t('Create Tool')}
 			</a>
 
-			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
@@ -143,10 +143,10 @@
 	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
 	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
-		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
+		<div class="text-md font-medium text-content-muted px-0.5 mt-6 mb-1">
 			{$i18n.t('Builtin')}
 		</div>
-		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+		<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
 				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised rounded-xl">
 					<!-- 組み込みは編集不可 — tooltip とカーソルで明示(visibility だけ右のアイコンで編集可) -->
@@ -191,15 +191,15 @@
 
 	<!-- 組み込みヘッダを出すときは、対称にカスタム側にもヘッダを付ける(組み込みが無ければ無ヘッダ) -->
 	{#if builtinItems.length}
-		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
+		<div class="text-md font-medium text-content-muted px-0.5 mt-3 mb-1">
 			{$i18n.t('Custom')}
 		</div>
 	{/if}
-	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+	<div class="{builtinItems.length ? '' : 'mt-6 '}mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each customItems as tool (tool.id)}
-			<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
+			<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
 				<a
-					class="flex-1 min-w-0 cursor-pointer"
+					class="flex-1 min-w-0 self-stretch flex flex-col justify-center px-3 py-2 cursor-pointer hover:bg-surface-hover"
 					href={`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
 				>
 					<div class="font-semibold line-clamp-1">{tool.name}</div>

@@ -159,7 +159,7 @@
 				{#if variant === 'file'}
 					<select
 						id="models"
-						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-lg block w-fit pr-8 max-w-full"
+						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={fileMode}
 						on:change={(e) => {
 							setFileMode(e.target.value);
@@ -182,7 +182,7 @@
 				{:else}
 					<select
 						id="models"
-						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-lg block w-fit pr-8 max-w-full"
+						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={accessControl !== null ? 'private' : 'public'}
 						on:change={(e) => {
 							if (e.target.value === 'public') {
@@ -231,7 +231,7 @@
 						<div class="flex flex-1 items-center">
 							<div class="w-full px-0.5">
 								<select
-									class="outline-hidden bg-surface-muted px-2 py-1 text-sm rounded-lg block w-full pr-8 max-w-full
+									class="outline-hidden bg-surface-muted px-2 py-1 text-sm rounded-xs block w-full pr-8 max-w-full
 									{selectedGroupId ? '' : 'text-content-subtle'}"
 									bind:value={selectedGroupId}
 								>

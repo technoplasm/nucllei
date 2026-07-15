@@ -81,14 +81,14 @@
 </svelte:head>
 
 {#if $functions !== null}
-	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Functions')}
 			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
 			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class="flex gap-4">
+		<div class="mt-2 flex gap-4">
 			<a
 				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
 				href="/workspace/functions/create"
@@ -97,7 +97,7 @@
 				{$i18n.t('Create Function')}
 			</a>
 
-			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
@@ -108,55 +108,57 @@
 		</div>
 	</div>
 
-	{#each groupedItems as group (group.label)}
-		<div class="text-md font-medium text-content-muted px-0.5 mt-2 mb-1">
-			{group.label}
-		</div>
-		<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
-			{#each group.items as func (func.id)}
-				<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
-					<a
-						class="flex-1 min-w-0 cursor-pointer"
-						href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
-					>
-						<div class="font-semibold line-clamp-1">{func.name}</div>
-						<div class="flex gap-1.5 text-xs">
-							<span class="text-content-muted font-medium shrink-0">{func.id}</span>
-							<span class="line-clamp-1">{func.description}</span>
-						</div>
-					</a>
-
-					<Tooltip content={$i18n.t('Valves')}>
-						<button
-							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-							type="button"
-							aria-label={$i18n.t('Valves')}
-							onclick={() => {
-								selectedFunction = func;
-								showValvesModal = true;
-							}}
+	<div class="mt-6">
+		{#each groupedItems as group (group.label)}
+			<div class="text-md font-medium text-content-muted px-0.5 mt-3 first:mt-0 mb-1">
+				{group.label}
+			</div>
+			<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
+				{#each group.items as func (func.id)}
+					<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
+						<a
+							class="flex-1 min-w-0 self-stretch flex flex-col justify-center px-3 py-2 cursor-pointer hover:bg-surface-hover"
+							href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
 						>
-							<span class="i-lucide-settings size-4 block"></span>
-						</button>
-					</Tooltip>
+							<div class="font-semibold line-clamp-1">{func.name}</div>
+							<div class="flex gap-1.5 text-xs">
+								<span class="text-content-muted font-medium shrink-0">{func.id}</span>
+								<span class="line-clamp-1">{func.description}</span>
+							</div>
+						</a>
 
-					<Tooltip content={$i18n.t('Delete')}>
-						<button
-							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-							type="button"
-							aria-label={$i18n.t('Delete')}
-							onclick={() => {
-								selectedFunction = func;
-								showDeleteConfirm = true;
-							}}
-						>
-							<span class="i-lucide-trash-2 size-4 block"></span>
-						</button>
-					</Tooltip>
-				</div>
-			{/each}
-		</div>
-	{/each}
+						<Tooltip content={$i18n.t('Valves')}>
+							<button
+								class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								type="button"
+								aria-label={$i18n.t('Valves')}
+								onclick={() => {
+									selectedFunction = func;
+									showValvesModal = true;
+								}}
+							>
+								<span class="i-lucide-settings size-4 block"></span>
+							</button>
+						</Tooltip>
+
+						<Tooltip content={$i18n.t('Delete')}>
+							<button
+								class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+								type="button"
+								aria-label={$i18n.t('Delete')}
+								onclick={() => {
+									selectedFunction = func;
+									showDeleteConfirm = true;
+								}}
+							>
+								<span class="i-lucide-trash-2 size-4 block"></span>
+							</button>
+						</Tooltip>
+					</div>
+				{/each}
+			</div>
+		{/each}
+	</div>
 
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}

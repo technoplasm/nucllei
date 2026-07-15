@@ -479,7 +479,7 @@
 											</label>
 											<input
 												id="model-name"
-												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 												placeholder={$i18n.t('Model Name')}
 												bind:value={name}
 												required
@@ -492,7 +492,7 @@
 											</label>
 											<input
 												id="model-id"
-												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 												placeholder={$i18n.t('Model ID')}
 												bind:value={id}
 												required
@@ -507,7 +507,7 @@
 
 												<select
 													id="model-base-model"
-													class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+													class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													bind:value={info.base_model_id}
 													required
 												>
@@ -575,7 +575,7 @@
 
 									<Textarea
 										id="model-description"
-										className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
+										className="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden resize-none overflow-y-hidden"
 										placeholder={$i18n.t('Add a short description about what this model does')}
 										bind:value={info.meta.description}
 									/>
@@ -686,7 +686,7 @@
 								</div>
 
 								<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('System Prompt')}</div>
-								<div class="flex-1 min-h-0 rounded-lg border border-line overflow-auto">
+								<div class="flex-1 min-h-0 rounded-xs border border-line overflow-auto">
 									<CodeEditor
 										value={info.params.system ?? ''}
 										onChange={(value: string) => {

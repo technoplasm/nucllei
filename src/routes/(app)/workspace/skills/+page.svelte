@@ -95,14 +95,14 @@
 		</div>
 	</DeleteConfirmDialog>
 
-	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Skills')}
 			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
 			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class="flex gap-4">
+		<div class="mt-2 flex gap-4">
 			<a
 				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
 				href="/workspace/skills/create"
@@ -111,7 +111,7 @@
 				{$i18n.t('Create Skill')}
 			</a>
 
-			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
@@ -122,11 +122,11 @@
 		</div>
 	</div>
 
-	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+	<div class="mt-6 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as skill (skill.id)}
-			<div class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl">
+			<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
 				<a
-					class="flex-1 min-w-0 cursor-pointer"
+					class="flex-1 min-w-0 self-stretch flex flex-col justify-center px-3 py-2 cursor-pointer hover:bg-surface-hover"
 					href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 				>
 					<div class="font-semibold line-clamp-1 capitalize">{skill.name}</div>

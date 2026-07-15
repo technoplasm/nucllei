@@ -156,7 +156,7 @@
 			</label>
 			<input
 				id="skill-name"
-				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised rounded-lg outline-hidden font-primary"
+				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised rounded-xs outline-hidden font-primary"
 				placeholder={$i18n.t('Title')}
 				bind:value={name}
 				required
@@ -190,7 +190,7 @@
 				)}`}
 				placement="bottom-start"
 			>
-				<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+				<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 					<span class="text-content-muted">/</span>
 					<input
 						id="skill-id"
@@ -209,7 +209,7 @@
 			</label>
 			<Textarea
 				id="skill-description"
-				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-lg outline-hidden overflow-y-hidden resize-none"
+				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-xs outline-hidden overflow-y-hidden resize-none"
 				placeholder={$i18n.t('モデルが skill を選ぶ説明。空ならモデルには公開されない')}
 				bind:value={description}
 				rows={2}

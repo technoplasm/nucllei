@@ -105,7 +105,7 @@
 		</div>
 	</DeleteConfirmDialog>
 
-	<div class="flex flex-col gap-1 mt-1.5 mb-4">
+	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
 			{$i18n.t('Models')}
 			<div class="w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
@@ -114,7 +114,7 @@
 
 		<!-- 狭幅は「Create ←端寄せ→ [↑↓] / 検索(全幅)」の 2 行に折り返す。
 		     DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
 				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
 				href="/workspace/models/create"
@@ -154,13 +154,12 @@
 
 	<ConfigureModelsModal bind:show={showConfigModal} onSave={init} />
 
-	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
+	<div class="mt-6 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as model (model.id)}
-			<div
-				class="flex items-center gap-0.5 px-3 py-2 bg-surface-raised hover:bg-surface-hover rounded-xl"
-			>
+			<!-- hover は実際にクリックできる範囲(編集リンク)だけに付ける — アイコン類は各自の hover -->
+			<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
 				<a
-					class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+					class="flex items-center gap-3 flex-1 min-w-0 self-stretch px-3 py-2 cursor-pointer hover:bg-surface-hover"
 					href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
 				>
 					<img

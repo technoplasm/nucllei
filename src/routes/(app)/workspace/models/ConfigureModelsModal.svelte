@@ -157,7 +157,7 @@
 						<div class="mb-1 text-xs text-content-muted">{$i18n.t('Default Model')}</div>
 
 						<select
-							class="w-full px-2 py-1 text-sm rounded-lg bg-surface-muted {defaultModelId
+							class="w-full px-2 py-1 text-sm rounded-xs bg-surface-muted {defaultModelId
 								? ''
 								: 'text-content-subtle'} outline-hidden"
 							bind:value={defaultModelId}
