@@ -339,7 +339,10 @@
 		</a>
 	{/if}
 
-	<div class="w-full max-h-full flex justify-center">
+	<!-- max-h-full を持たせない: layout の h-full と組むと form が画面高に頭打ちされ、
+	     flex-col 縮小が overflow-x-auto の tabs(min-height 0 扱い)へ集中して高さ 0 に潰れる(#47 の罠)。
+	     このページは workspace-container 側でスクロールする。 -->
+	<div class="w-full flex justify-center">
 		<input
 			bind:this={filesInputElement}
 			bind:files={inputFiles}
@@ -423,7 +426,7 @@
 			>
 				<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
 				<div
-					class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
+					class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
 				>
 					<button
 						class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
