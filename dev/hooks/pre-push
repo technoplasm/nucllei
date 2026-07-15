@@ -8,6 +8,7 @@
 # CI 側の真実源:
 #   .github/workflows/format-backend.yaml        → black . && git diff --exit-code
 #   .github/workflows/format-build-frontend.yaml → pnpm format && git diff --exit-code
+#   .github/workflows/lint-backend.yaml          → ruff check backend/open_webui(select = E9,F)
 
 set -u
 
@@ -56,6 +57,21 @@ if [ ${#py_files[@]} -gt 0 ]; then
         fi
     else
         echo "⚠ black が見つからないため backend フォーマットチェックをスキップ(CI では走ります)" >&2
+    fi
+fi
+
+# --- ruff(CI: Lint Backend。2026-07-16 追加 — 未使用 import で赤くなったのを受けて)---
+if [ ${#py_files[@]} -gt 0 ]; then
+    RUFF="$REPO_ROOT/.venv/bin/ruff"
+    [ -x "$RUFF" ] || RUFF=$(command -v ruff || true)
+    if [ -n "$RUFF" ]; then
+        if ! "$RUFF" check --quiet "${py_files[@]}" >/dev/null 2>&1; then
+            echo "✗ ruff lint エラーがあります:" >&2
+            "$RUFF" check "${py_files[@]}" 2>/dev/null >&2 || true
+            fail=1
+        fi
+    else
+        echo "⚠ ruff が見つからないため backend lint チェックをスキップ(CI では走ります)" >&2
     fi
 fi
 
