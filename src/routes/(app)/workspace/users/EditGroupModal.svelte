@@ -120,9 +120,10 @@
 	>
 		<div class=" flex justify-between gap-3 text-content px-5 pt-4 mb-1.5">
 			{#if custom}
-				<!-- 名前はタイトル位置でインライン編集(General タブ廃止に伴い) -->
+				<!-- 名前はタイトル位置でインライン編集(General タブ廃止に伴い)。
+				     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール) -->
 				<input
-					class="w-full text-lg font-medium self-center font-primary bg-transparent placeholder:text-content-subtle outline-hidden"
+					class="w-full text-lg font-medium self-center font-primary bg-surface-muted rounded-xs px-2 py-0.5 placeholder:text-content-subtle outline-hidden"
 					type="text"
 					bind:value={name}
 					placeholder={$i18n.t('Group Name')}
