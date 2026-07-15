@@ -92,7 +92,10 @@ export const apiFetch: typeof fetch = async (input, init) => {
 	try {
 		res = await fetch(input, init);
 	} catch (e) {
-		markUnreachable();
+		// AbortError(呼び出し側の意図的中断)は backend 不達扱いにしない
+		if (!(e instanceof DOMException && e.name === 'AbortError')) {
+			markUnreachable();
+		}
 		throw e;
 	}
 

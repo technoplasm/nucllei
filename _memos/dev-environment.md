@@ -109,7 +109,7 @@ pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自�
   リクエストが閉じるまで graceful shutdown を待つ。上流(ollama 等)への接続が
   ハングしたまま backend のコードを編集すると「Reloading... のまま :3000 が無応答」に
   見える — C-c で殺して起動し直すのが早い。53d91647e で completion 経路に
-  sock_read 上限(既定 600 秒)が入ったので永久には塞がらないが、最長 10 分は待つ。
+  sock_read 上限(既定 300 秒)が入ったので永久には塞がらないが、最長 5 分は待つ。
   なお ollama が全モデルでロードハングする時は `nvidia-smi` の
   「Driver/library version mismatch」(ドライバ更新後の再起動待ち)をまず疑う。
 - vite は dev 用に **全レスポンス no-store**(`vite.config.ts` の `devNoCache` ミドルウェア, `apply:'serve'`)。

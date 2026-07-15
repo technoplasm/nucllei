@@ -193,7 +193,8 @@ export const chatCompletion = async (
 
 export const generateOpenAIChatCompletion = async (
 	body: object,
-	url: string = `${WEBUI_BASE_URL}/api`
+	url: string = `${WEBUI_BASE_URL}/api`,
+	signal: AbortSignal | null = null
 ) => {
 	let error = null;
 
@@ -202,7 +203,9 @@ export const generateOpenAIChatCompletion = async (
 		headers: {
 			'Content-Type': 'application/json'
 		},
-		body: JSON.stringify(body)
+		body: JSON.stringify(body),
+		// llens: stop ボタンで task 生成前(モデル接続待ち)の fetch も中断できるようにする
+		...(signal ? { signal } : {})
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();

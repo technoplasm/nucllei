@@ -75,6 +75,11 @@
 	let processing = '';
 	let messagesContainerElement: HTMLDivElement;
 
+	// llens: task 生成前(モデル接続待ち)の completion fetch を stop で中断するための
+	// AbortController 群(複数モデル並列送信に対応して配列)。task 生成後の中断は
+	// stopTask(サーバ側 cancel)が担う。
+	let completionAbortControllers: AbortController[] = [];
+
 	// 追従中はコンテンツの高さ変化そのものに張り付く(use: アクション)。
 	// デルタ受信時の scrollToBottom だけだと、その後に非同期で高さが伸びる要素
 	// (tool 結果の画像・チャート、コードハイライト等)の分が取り残される。
@@ -1301,6 +1306,9 @@
 					message?.content?.trim()
 			);
 
+		const abortController = new AbortController();
+		completionAbortControllers.push(abortController);
+
 		const res = await generateOpenAIChatCompletion(
 			{
 				stream: stream,
@@ -1354,19 +1362,31 @@
 				// (middleware の is_usage_requested — 既定 ON・capabilities.usage=False で opt-out)
 				// に一元化。クライアント側の条件付き付与は撤去した。
 			},
-			`${WEBUI_BASE_URL}/api`
+			`${WEBUI_BASE_URL}/api`,
+			abortController.signal
 		).catch(async (error) => {
-			toast.error(`${error}`);
+			if (abortController.signal.aborted) {
+				// stop によるユーザー中断 — エラーにしない(task-cancelled と同じ扱い)。
+				// completed(outlet)へは下の !res 分岐から interrupted 付きで流れる
+				responseMessage.done = true;
+				responseMessage.interrupted = true;
+			} else {
+				toast.error(`${error}`);
 
-			responseMessage.error = {
-				content: error
-			};
-			responseMessage.done = true;
+				responseMessage.error = {
+					content: error
+				};
+				responseMessage.done = true;
+			}
 
 			history.messages[responseMessageId] = responseMessage;
 			history.currentId = responseMessageId;
 			return null;
 		});
+
+		completionAbortControllers = completionAbortControllers.filter(
+			(c) => c !== abortController
+		);
 
 		if (res) {
 			if (res.error) {
@@ -1439,6 +1459,14 @@
 	};
 
 	const stopResponse = async () => {
+		// llens: task 生成前(モデル接続待ち)の fetch を先に落とす。これが無いと
+		// stop 後に上流が応答した時点で task が生まれ、「中断済み」のはずのチャットへ
+		// 応答が流れ込む
+		for (const controller of completionAbortControllers) {
+			controller.abort();
+		}
+		completionAbortControllers = [];
+
 		if (taskIds) {
 			for (const taskId of taskIds) {
 				const res = await stopTask(taskId).catch((error) => {
