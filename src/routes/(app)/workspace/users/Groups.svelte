@@ -191,12 +191,28 @@
 		</div>
 	</Modal>
 
-	<div class="mt-0.5 mb-2 gap-1 flex flex-col md:flex-row justify-between">
-		<div class="flex md:self-center text-lg font-medium px-0.5">
-			{$i18n.t('Groups')}
-			<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+	<div class="mt-0.5 mb-2 gap-x-4 gap-y-1 flex flex-col md:flex-row justify-between">
+		<div class="flex items-center gap-4">
+			<div class="flex md:self-center text-lg font-medium px-0.5">
+				{$i18n.t('Groups')}
+				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
 
-			<span class="text-lg font-medium text-content-muted">{groups.length}</span>
+				<span class="text-lg font-medium text-content-muted">{groups.length}</span>
+			</div>
+
+			<!-- 既定権限: グループより先に読む「ベース」なのでヘッダ行に置く(2026-07-16。
+			     説明文はツールチップに退避) -->
+			<Tooltip content={$i18n.t('applies to all users with the "user" role')}>
+				<button
+					class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+					onclick={() => {
+						showDefaultPermissionsModal = true;
+					}}
+				>
+					<span class="i-lucide-users size-3.5 block mr-1"></span>
+					{$i18n.t('Default permissions')}
+				</button>
+			</Tooltip>
 		</div>
 
 		<div class="flex gap-1">
@@ -230,7 +246,6 @@
 	</div>
 
 	<div>
-		<!-- 既定権限: グループより先に読む「ベース」なので一覧の上に置く(2026-07-16) -->
 		<EditGroupModal
 			bind:show={showDefaultPermissionsModal}
 			tabs={['permissions']}
@@ -238,27 +253,6 @@
 			custom={false}
 			onSubmit={updateDefaultPermissionsHandler}
 		/>
-
-		<button
-			class="w-full flex items-center justify-between gap-3 px-4 py-3 mb-4 bg-surface-raised hover:bg-surface-hover rounded-xl text-left transition"
-			onclick={() => {
-				showDefaultPermissionsModal = true;
-			}}
-		>
-			<div class="flex items-center gap-2.5">
-				<span class="i-lucide-users size-4 block"></span>
-
-				<div>
-					<div class=" text-sm font-medium">{$i18n.t('Default permissions')}</div>
-
-					<div class="text-xs text-content-muted mt-0.5">
-						{$i18n.t('applies to all users with the "user" role')}
-					</div>
-				</div>
-			</div>
-
-			<span class="i-lucide-chevron-right size-4 block text-content-muted"></span>
-		</button>
 
 		{#if filteredGroups.length === 0}
 			<div class="flex flex-col items-center justify-center h-40">
