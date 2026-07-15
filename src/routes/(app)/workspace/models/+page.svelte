@@ -112,27 +112,34 @@
 			<span class="text-base text-content-muted">{filteredItems.length}</span>
 		</div>
 
-		<div class="flex gap-4">
+		<!-- 狭幅は「Create ←端寄せ→ [↑↓] / 検索(全幅)」の 2 行に折り返す。
+		     DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
-				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
 				href="/workspace/models/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>
 				{$i18n.t('Create Model')}
 			</a>
 
-			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
+			<div
+				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-raised rounded-xs"
+			>
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
-					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
+					class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
 					bind:value={query}
 					placeholder={$i18n.t('Search Models')}
 				/>
 			</div>
 
-			<Tooltip content={$i18n.t('表示順・既定モデル')}>
+			<Tooltip
+				content={$i18n.t('表示順・既定モデル')}
+				className="order-2 ml-auto self-stretch flex sm:order-3 sm:ml-0"
+			>
 				<button
-					class="h-full flex items-center px-2 bg-surface-raised hover:bg-surface-hover rounded-xs"
+					class="h-full flex items-center px-2 py-1 bg-surface-raised hover:bg-surface-hover rounded-xs"
 					type="button"
 					aria-label={$i18n.t('Configure Models')}
 					onclick={() => {
