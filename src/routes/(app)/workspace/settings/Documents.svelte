@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 
-	import { onMount, getContext, createEventDispatcher } from 'svelte';
-
-	const dispatch = createEventDispatcher();
+	import { onMount, getContext } from 'svelte';
 
 	import { getAttachmentConfig, setAttachmentConfig } from '$lib/apis/configs';
 	import { getFunctions } from '$lib/apis/functions';
@@ -16,15 +14,17 @@
 
 	const i18n = getContext('i18n');
 
-	let showResetUploadDirConfirm = false;
+	let { onSave = () => {} }: { onSave?: () => void } = $props();
 
-	let RAGConfig = null;
+	let showResetUploadDirConfirm = $state(false);
+
+	let RAGConfig = $state<any>(null);
 
 	// llens(#52): 受け入れ拡張子 whitelist。UI はカンマ区切り文字列、config は配列。
-	let allowedExtensions = '';
+	let allowedExtensions = $state('');
 
 	// llens(#69): グローバル Attachment Function(type=attachment の Function から単一選択、'' = None)。
-	let attachmentFunctions = [];
+	let attachmentFunctions = $state<any[]>([]);
 
 	const submitHandler = async () => {
 		RAGConfig.ATTACHMENT_ALLOWED_EXTENSIONS = allowedExtensions
@@ -39,13 +39,13 @@
 		});
 
 		if (res) {
-			dispatch('save');
+			onSave();
 		}
 	};
 
 	onMount(async () => {
 		attachmentFunctions = ((await getFunctions().catch(() => [])) ?? []).filter(
-			(func) => func.type === 'attachment'
+			(func: any) => func.type === 'attachment'
 		);
 
 		RAGConfig = await getAttachmentConfig();
@@ -69,7 +69,8 @@
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={() => {
+	onsubmit={(e) => {
+		e.preventDefault();
 		submitHandler();
 	}}
 >
@@ -79,7 +80,7 @@
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Files')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Max Upload Size')}</div>
@@ -91,7 +92,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
 									bind:value={RAGConfig.ATTACHMENT_MAX_SIZE}
@@ -112,7 +113,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
 									bind:value={RAGConfig.ATTACHMENT_MAX_COUNT}
@@ -133,7 +134,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full rounded-lg text-sm bg-transparent outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									type="text"
 									placeholder={$i18n.t('Leave empty to allow all')}
 									bind:value={allowedExtensions}
@@ -153,7 +154,7 @@
 								placement="top-start"
 							>
 								<select
-									class="dark:bg-gray-900 cursor-pointer w-fit pr-8 rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
+									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
 								>
 									<option value="">{$i18n.t('None')}</option>
@@ -175,14 +176,15 @@
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Danger Zone')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Reset Upload Directory')}</div>
 						<div class="flex items-center relative">
 							<button
 								class="text-xs"
-								on:click={() => {
+								type="button"
+								onclick={() => {
 									showResetUploadDirConfirm = true;
 								}}
 							>
@@ -195,7 +197,7 @@
 		</div>
 		<div class="flex justify-end pt-3 text-sm font-medium">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
 				type="submit"
 			>
 				{$i18n.t('Save')}

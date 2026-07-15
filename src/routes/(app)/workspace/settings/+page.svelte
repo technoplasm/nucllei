@@ -82,9 +82,9 @@
 		{:else if selectedTab === 'models'}
 			<Models />
 		{:else if selectedTab === 'documents'}
-			<Documents on:save={savedWithConfigRefresh} />
+			<Documents onSave={savedWithConfigRefresh} />
 		{:else if selectedTab === 'interface'}
-			<Interface on:save={savedToast} />
+			<Interface onSave={savedToast} />
 		{:else if selectedTab === 'audio'}
 			<Audio saveHandler={savedToast} />
 		{:else if selectedTab === 'images'}
@@ -92,7 +92,7 @@
 		{:else if selectedTab === 'pipelines'}
 			<Pipelines saveHandler={savedToast} />
 		{:else if selectedTab === 'db'}
-			<Database saveHandler={savedToast} />
+			<Database />
 		{/if}
 	</div>
 </div>

@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
-	import { toast } from 'svelte-sonner';
 
 	import { getBackendConfig, getTaskConfig, updateTaskConfig } from '$lib/apis';
-	import { config, models, settings, user } from '$lib/stores';
-	import { createEventDispatcher, onMount, getContext } from 'svelte';
+	import { config, models } from '$lib/stores';
+	import { onMount, getContext } from 'svelte';
 
 	import { banners as _banners } from '$lib/stores';
 	import type { Banner } from '$lib/types';
@@ -15,11 +14,11 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 
-	const dispatch = createEventDispatcher();
-
 	const i18n = getContext('i18n');
 
-	let taskConfig = {
+	let { onSave = () => {} }: { onSave?: () => void } = $props();
+
+	let taskConfig = $state<any>({
 		TASK_MODEL: '',
 		TASK_MODEL_EXTERNAL: '',
 		ENABLE_TITLE_GENERATION: true,
@@ -28,9 +27,9 @@
 		TAGS_GENERATION_PROMPT_TEMPLATE: '',
 		ENABLE_TAGS_GENERATION: true,
 		TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: ''
-	};
+	});
 
-	let banners: Banner[] = [];
+	let banners = $state<Banner[]>([]);
 
 	const updateInterfaceHandler = async () => {
 		taskConfig = await updateTaskConfig(taskConfig);
@@ -54,16 +53,17 @@
 {#if taskConfig}
 	<form
 		class="flex flex-col h-full justify-between space-y-3 text-sm"
-		on:submit|preventDefault={() => {
+		onsubmit={(e) => {
+			e.preventDefault();
 			updateInterfaceHandler();
-			dispatch('save');
+			onSave();
 		}}
 	>
 		<div class="  overflow-y-scroll scrollbar-hidden h-full pr-1.5">
 			<div class="mb-3.5">
 				<div class=" mb-2.5 text-base font-medium">{$i18n.t('Tasks')}</div>
 
-				<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+				<hr class=" border-line my-2" />
 
 				<div class=" mb-1 font-medium flex items-center">
 					<div class=" text-xs mr-1">{$i18n.t('Set Task Model')}</div>
@@ -72,20 +72,7 @@
 							'A task model is used when performing tasks such as generating titles for chats and web search queries'
 						)}
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="size-3.5"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-							/>
-						</svg>
+						<span class="i-lucide-info size-3.5 block"></span>
 					</Tooltip>
 				</div>
 
@@ -93,13 +80,13 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('Local Models')}</div>
 						<select
-							class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
+							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
 							bind:value={taskConfig.TASK_MODEL}
 							placeholder={$i18n.t('Select a model')}
 						>
 							<option value="" selected>{$i18n.t('Current Model')}</option>
 							{#each $models.filter((m) => m.owned_by === 'ollama') as model}
-								<option value={model.id} class="bg-gray-100 dark:bg-gray-700">
+								<option value={model.id}>
 									{model.name}
 								</option>
 							{/each}
@@ -109,13 +96,13 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('External Models')}</div>
 						<select
-							class="w-full rounded-lg py-2 px-4 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden"
+							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
 							bind:value={taskConfig.TASK_MODEL_EXTERNAL}
 							placeholder={$i18n.t('Select a model')}
 						>
 							<option value="" selected>{$i18n.t('Current Model')}</option>
 							{#each $models as model}
-								<option value={model.id} class="bg-gray-100 dark:bg-gray-700">
+								<option value={model.id}>
 									{model.name}
 								</option>
 							{/each}
@@ -211,7 +198,7 @@
 			<div class="mb-3.5">
 				<div class=" mb-2.5 text-base font-medium">{$i18n.t('UI')}</div>
 
-				<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+				<hr class=" border-line my-2" />
 
 				<div class="  {banners.length > 0 ? ' mb-3' : ''}">
 					<div class="mb-2.5 flex w-full justify-between">
@@ -220,10 +207,11 @@
 						</div>
 
 						<button
-							class="p-1 px-3 text-xs flex rounded-sm transition"
+							class="p-1 px-3 text-xs flex rounded-sm"
 							type="button"
-							on:click={() => {
-								if (banners.length === 0 || banners.at(-1).content !== '') {
+							aria-label={$i18n.t('Add')}
+							onclick={() => {
+								if (banners.length === 0 || banners.at(-1)?.content !== '') {
 									banners = [
 										...banners,
 										{
@@ -238,25 +226,14 @@
 								}
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"
-								/>
-							</svg>
+							<span class="i-lucide-plus size-4 block"></span>
 						</button>
 					</div>
 
 					<div class=" flex flex-col space-y-1">
-						{#each banners as banner, bannerIdx}
+						{#each banners as banner, bannerIdx (banner.id)}
 							<div class=" flex justify-between">
-								<div
-									class="flex flex-row flex-1 border rounded-xl border-gray-100 dark:border-gray-850"
-								>
+								<div class="flex flex-row flex-1 border rounded-xl border-line">
 									<select
 										class="w-fit capitalize rounded-xl py-2 px-4 text-xs bg-transparent outline-hidden"
 										bind:value={banner.type}
@@ -289,21 +266,12 @@
 								<button
 									class="px-2"
 									type="button"
-									on:click={() => {
+									aria-label={$i18n.t('Delete')}
+									onclick={() => {
 										banners.splice(bannerIdx, 1);
-										banners = banners;
 									}}
 								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 20 20"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-										/>
-									</svg>
+									<span class="i-lucide-x size-4 block"></span>
 								</button>
 							</div>
 						{/each}
@@ -314,7 +282,7 @@
 
 		<div class="flex justify-end text-sm font-medium">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
 				type="submit"
 			>
 				{$i18n.t('Save')}
