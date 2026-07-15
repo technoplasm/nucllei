@@ -51,7 +51,7 @@
      コンテナ幅で列数が決まるので同一コンポーネントのまま両置き場に効く) -->
 <div>
 	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Chat Permissions')}</div>
+		<div class="mb-1 text-sm font-medium text-content-muted">{$i18n.t('Chat Permissions')}</div>
 
 		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6">
 			<div class=" flex w-full justify-between my-2 pr-2">
@@ -112,11 +112,9 @@
 		</div>
 	</div>
 
-	<hr class=" border-line my-2" />
-
 	<!-- チャット基本操作の外側にある能力(skill editor ロール・画像生成)を Features に集約 -->
-	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Features')}</div>
+	<div class="mt-2">
+		<div class="mb-1 text-sm font-medium text-content-muted">{$i18n.t('Features')}</div>
 
 		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6">
 			<Tooltip

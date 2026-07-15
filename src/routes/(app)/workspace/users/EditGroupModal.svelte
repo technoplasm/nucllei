@@ -43,14 +43,14 @@
 
 	// llens(2026-07-16): General タブは廃止 — 名前はヘッダでインライン編集、
 	// 説明は FE から撤去(値は保持してパススルー)。開いた直後 = Permissions
-	const tabs = ['permissions', 'users'];
+	const tabs = ['users', 'permissions'];
 
 	const TAB_ICONS: Record<string, string> = {
 		permissions: 'i-lucide-wrench',
 		users: 'i-lucide-user-plus'
 	};
 
-	let selectedTab = $state('permissions');
+	let selectedTab = $state('users');
 	let loading = $state(false);
 	let showDeleteConfirmDialog = $state(false);
 
