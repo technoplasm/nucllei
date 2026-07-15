@@ -147,44 +147,30 @@
 
 	<div class="flex-1 mt-1 lg:mt-0 overflow-y-scroll">
 		{#if selectedTab === 'overview'}
-			<div class="mt-0.5 mb-2 gap-1 flex flex-col md:flex-row justify-between">
-				<div class="flex md:self-center text-lg font-medium px-0.5">
-					<div class="flex-shrink-0">
-						{$i18n.t('Users')}
-					</div>
-					<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850"></div>
+			<!-- ヘッダ: 見出し + Add pill(primary)/ 右に raised 検索(Groups と同型・count なし) -->
+			<div class="mt-0.5 mb-2 gap-x-4 gap-y-2 flex flex-wrap items-center justify-between">
+				<div class="flex items-center gap-4 px-0.5">
+					<div class="text-lg font-medium">{$i18n.t('Users')}</div>
 
-					<span class="text-lg font-medium text-content">{users.length}</span>
+					<button
+						class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+						onclick={() => {
+							editTarget = null;
+							showUserModal = true;
+						}}
+					>
+						<span class="i-lucide-plus size-3.5 block mr-1"></span>
+						{$i18n.t('Add User')}
+					</button>
 				</div>
 
-				<div class="flex gap-1">
-					<div class=" flex w-full space-x-2">
-						<div class="flex flex-1">
-							<div class=" self-center ml-1 mr-3">
-								<span class="i-lucide-search size-4 block"></span>
-							</div>
-							<input
-								class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-								bind:value={search}
-								placeholder={$i18n.t('Search')}
-							/>
-						</div>
-
-						<div>
-							<Tooltip content={$i18n.t('Add User')}>
-								<button
-									class=" p-2 rounded-xl hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition font-medium text-sm flex items-center space-x-1"
-									aria-label={$i18n.t('Add User')}
-									onclick={() => {
-										editTarget = null;
-										showUserModal = true;
-									}}
-								>
-									<span class="i-lucide-plus size-3.5 block"></span>
-								</button>
-							</Tooltip>
-						</div>
-					</div>
+				<div class="flex items-center px-2 bg-surface-raised rounded-xs">
+					<span class="i-lucide-search size-3.5 block shrink-0"></span>
+					<input
+						class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
+						bind:value={search}
+						placeholder={$i18n.t('Search')}
+					/>
 				</div>
 			</div>
 
