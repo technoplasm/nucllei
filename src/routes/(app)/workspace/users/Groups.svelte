@@ -11,7 +11,6 @@
 	import { getUserDefaultPermissions, updateUserDefaultPermissions } from '$lib/apis/users';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EditGroupModal from './EditGroupModal.svelte';
 
@@ -55,10 +54,10 @@
 	let selectedGroup = $state<any>(null);
 	let showEditGroupModal = $state(false);
 
-	// グループ作成
+	// グループ作成(説明は FE から撤去 — 2026-07-16。名前で自明、消費者がいない。
+	// BE の description フィールドは必須 str のままなので '' を渡す)
 	let showCreateGroupModal = $state(false);
 	let newName = $state('');
-	let newDescription = $state('');
 	let creating = $state(false);
 
 	const setGroups = async () => {
@@ -69,12 +68,10 @@
 		e.preventDefault();
 		creating = true;
 
-		const res = await createNewGroup({ name: newName, description: newDescription }).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		const res = await createNewGroup({ name: newName, description: '' }).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		creating = false;
 
@@ -82,7 +79,6 @@
 			toast.success($i18n.t('Group created successfully'));
 			showCreateGroupModal = false;
 			newName = '';
-			newDescription = '';
 			await setGroups();
 		}
 	};
@@ -172,17 +168,6 @@
 								required
 							/>
 						</div>
-
-						<div class="flex flex-col w-full mt-2">
-							<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Description')}</div>
-
-							<Textarea
-								className="w-full text-sm bg-transparent placeholder:text-content-subtle outline-hidden resize-none"
-								rows={2}
-								bind:value={newDescription}
-								placeholder={$i18n.t('Group Description')}
-							/>
-						</div>
 					</div>
 
 					<div class="flex justify-end pt-3 text-sm font-medium gap-1.5">
@@ -245,6 +230,36 @@
 	</div>
 
 	<div>
+		<!-- 既定権限: グループより先に読む「ベース」なので一覧の上に置く(2026-07-16) -->
+		<EditGroupModal
+			bind:show={showDefaultPermissionsModal}
+			tabs={['permissions']}
+			bind:permissions={defaultPermissions}
+			custom={false}
+			onSubmit={updateDefaultPermissionsHandler}
+		/>
+
+		<button
+			class="w-full flex items-center justify-between gap-3 px-4 py-3 mb-4 bg-surface-raised hover:bg-surface-hover rounded-xl text-left transition"
+			onclick={() => {
+				showDefaultPermissionsModal = true;
+			}}
+		>
+			<div class="flex items-center gap-2.5">
+				<span class="i-lucide-users size-4 block"></span>
+
+				<div>
+					<div class=" text-sm font-medium">{$i18n.t('Default permissions')}</div>
+
+					<div class="text-xs text-content-muted mt-0.5">
+						{$i18n.t('applies to all users with the "user" role')}
+					</div>
+				</div>
+			</div>
+
+			<span class="i-lucide-chevron-right size-4 block text-content-muted"></span>
+		</button>
+
 		{#if filteredGroups.length === 0}
 			<div class="flex flex-col items-center justify-center h-40">
 				<div class=" text-xl font-medium">
@@ -267,81 +282,40 @@
 				</div>
 			</div>
 		{:else}
-			<div>
-				<div class=" flex items-center gap-3 justify-between text-xs uppercase px-1 font-bold">
-					<div class="w-full">{$i18n.t('Group')}</div>
-
-					<div class="w-full">{$i18n.t('Users')}</div>
-
-					<div class="w-full"></div>
-				</div>
-
-				<hr class="mt-1.5 border-line" />
-
-				{#each filteredGroups as group (group.id)}
-					<div class="my-2">
-						<button
-							class="flex items-center gap-3 justify-between px-1 text-xs w-full transition"
-							onclick={() => {
-								selectedGroup = group;
-								showEditGroupModal = true;
-							}}
-						>
-							<div class="flex items-center gap-1.5 w-full font-medium">
-								<span class="i-lucide-circle-user-round size-4 block"></span>
-								{group.name}
-							</div>
-
-							<div class="flex items-center gap-1.5 w-full font-medium">
-								{group.user_ids.length}
-
-								<span class="i-lucide-user size-3.5 block"></span>
-							</div>
-
-							<div class="w-full flex justify-end">
-								<div class=" rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition">
-									<span class="i-lucide-pencil size-3.5 block"></span>
-								</div>
-							</div>
-						</button>
-					</div>
-				{/each}
+			<!-- users タブと同型のテーブル(行クリック=編集、行末アイコンなし) -->
+			<div
+				class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
+			>
+				<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
+					<thead class="text-xs text-content-muted uppercase bg-surface-muted">
+						<tr>
+							<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Name')}</th>
+							<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Users')}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each filteredGroups as group (group.id)}
+							<tr
+								class="bg-surface-raised text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition"
+								onclick={() => {
+									selectedGroup = group;
+									showEditGroupModal = true;
+								}}
+							>
+								<td class="px-3 py-2 font-medium text-content">
+									<div class="flex items-center gap-2">
+										<span class="i-lucide-circle-user-round size-4 block"></span>
+										{group.name}
+									</div>
+								</td>
+								<td class="px-3 py-2">
+									{group.user_ids.length}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
 		{/if}
-
-		<hr class="mb-2 border-line" />
-
-		<EditGroupModal
-			bind:show={showDefaultPermissionsModal}
-			tabs={['permissions']}
-			bind:permissions={defaultPermissions}
-			custom={false}
-			onSubmit={updateDefaultPermissionsHandler}
-		/>
-
-		<button
-			class="flex items-center justify-between rounded-lg w-full transition pt-1"
-			onclick={() => {
-				showDefaultPermissionsModal = true;
-			}}
-		>
-			<div class="flex items-center gap-2.5">
-				<div class="p-1.5 bg-black/5 dark:bg-white/10 rounded-full">
-					<span class="i-lucide-users size-4 block"></span>
-				</div>
-
-				<div class="text-left">
-					<div class=" text-sm font-medium">{$i18n.t('Default permissions')}</div>
-
-					<div class="flex text-xs mt-0.5">
-						{$i18n.t('applies to all users with the "user" role')}
-					</div>
-				</div>
-			</div>
-
-			<div>
-				<span class="i-lucide-chevron-right size-4 block"></span>
-			</div>
-		</button>
 	</div>
 {/if}

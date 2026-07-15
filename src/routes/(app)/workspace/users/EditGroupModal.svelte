@@ -2,7 +2,6 @@
 	import { getContext, onMount } from 'svelte';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import GroupPermissions from './GroupPermissions.svelte';
 	import GroupUsers from './GroupUsers.svelte';
@@ -16,7 +15,9 @@
 		group = null,
 		// custom=false は「既定権限の編集」モード(group エンティティを持たない)
 		custom = true,
-		tabs = ['general', 'permissions', 'users'],
+		// llens(2026-07-16): General タブは廃止 — 名前はヘッダでインライン編集、
+		// 説明は FE から撤去(値は保持してパススルー)。開いた直後 = Permissions
+		tabs = ['permissions', 'users'],
 		// llens(#66): 権限3層化 — workspace.skills = skill editor ロールのみ。
 		permissions = $bindable({
 			workspace: {
@@ -48,12 +49,11 @@
 	} = $props();
 
 	const TAB_ICONS: Record<string, string> = {
-		general: 'i-lucide-settings',
 		permissions: 'i-lucide-wrench',
 		users: 'i-lucide-user-plus'
 	};
 
-	let selectedTab = $state('general');
+	let selectedTab = $state('permissions');
 	let loading = $state(false);
 	let showDeleteConfirmDialog = $state(false);
 
@@ -76,9 +76,11 @@
 	};
 
 	const init = () => {
+		selectedTab = tabs[0];
 		if (group) {
 			name = group.name;
-			description = group.description;
+			// 説明は FE から撤去済みだが BE では必須 str — 既存値を保持してパススルー
+			description = group.description ?? '';
 			permissions = group?.permissions ?? {};
 			userIds = group?.user_ids ?? [];
 		}
@@ -96,7 +98,6 @@
 	});
 
 	onMount(() => {
-		selectedTab = tabs[0];
 		init();
 	});
 </script>
@@ -110,21 +111,32 @@
 />
 
 <Modal size="md" bind:show>
-	<div>
-		<div class=" flex justify-between text-content px-5 pt-4 mb-1.5">
-			<div class=" text-lg font-medium self-center font-primary">
-				{#if custom}
-					{#if edit}
-						{$i18n.t('Edit User Group')}
-					{:else}
-						{$i18n.t('Add User Group')}
-					{/if}
-				{:else}
+	<form
+		class="flex flex-col w-full"
+		onsubmit={(e) => {
+			e.preventDefault();
+			submitHandler();
+		}}
+	>
+		<div class=" flex justify-between gap-3 text-content px-5 pt-4 mb-1.5">
+			{#if custom}
+				<!-- 名前はタイトル位置でインライン編集(General タブ廃止に伴い) -->
+				<input
+					class="w-full text-lg font-medium self-center font-primary bg-transparent placeholder:text-content-subtle outline-hidden"
+					type="text"
+					bind:value={name}
+					placeholder={$i18n.t('Group Name')}
+					autocomplete="off"
+					required
+				/>
+			{:else}
+				<div class=" text-lg font-medium self-center font-primary">
 					{$i18n.t('Edit Default Permissions')}
-				{/if}
-			</div>
+				</div>
+			{/if}
 			<button
 				class="self-center"
+				type="button"
 				aria-label={$i18n.t('Close')}
 				onclick={() => {
 					show = false;
@@ -136,13 +148,7 @@
 
 		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 text-content">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				<form
-					class="flex flex-col w-full"
-					onsubmit={(e) => {
-						e.preventDefault();
-						submitHandler();
-					}}
-				>
+				<div class="flex flex-col w-full">
 					<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 						<div
 							class="flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
@@ -162,9 +168,7 @@
 										<span class="{TAB_ICONS[tab]} size-4 block"></span>
 									</div>
 									<div class=" self-center">
-										{#if tab === 'general'}
-											{$i18n.t('General')}
-										{:else if tab === 'permissions'}
+										{#if tab === 'permissions'}
 											{$i18n.t('Permissions')}
 										{:else if tab === 'users'}
 											{$i18n.t('Users')} ({userIds.length})
@@ -177,37 +181,7 @@
 						<div
 							class="flex-1 mt-1 lg:mt-1 lg:h-[22rem] lg:max-h-[22rem] overflow-y-auto scrollbar-hidden"
 						>
-							{#if selectedTab === 'general'}
-								<div class="flex gap-2">
-									<div class="flex flex-col w-full">
-										<div class=" mb-0.5 text-xs text-content-muted">{$i18n.t('Name')}</div>
-
-										<div class="flex-1">
-											<input
-												class="w-full text-sm bg-transparent placeholder:text-content-subtle outline-hidden"
-												type="text"
-												bind:value={name}
-												placeholder={$i18n.t('Group Name')}
-												autocomplete="off"
-												required
-											/>
-										</div>
-									</div>
-								</div>
-
-								<div class="flex flex-col w-full mt-2">
-									<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Description')}</div>
-
-									<div class="flex-1">
-										<Textarea
-											className="w-full text-sm bg-transparent placeholder:text-content-subtle outline-hidden resize-none"
-											rows={4}
-											bind:value={description}
-											placeholder={$i18n.t('Group Description')}
-										/>
-									</div>
-								</div>
-							{:else if selectedTab === 'permissions'}
+							{#if selectedTab === 'permissions'}
 								<GroupPermissions bind:permissions />
 							{:else if selectedTab === 'users'}
 								<GroupUsers bind:userIds {users} />
@@ -245,8 +219,8 @@
 							{/if}
 						</button>
 					</div>
-				</form>
+				</div>
 			</div>
 		</div>
-	</div>
+	</form>
 </Modal>
