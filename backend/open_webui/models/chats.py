@@ -102,6 +102,19 @@ class ChatTitleIdResponse(BaseModel):
     created_at: int
 
 
+def _chat_snippet(chat_json: Optional[dict], limit: int = 120) -> str:
+    """llens(#69): チャットプレビュー用に冒頭のユーザー発話を切り出す
+    (タイトルだけで判別できない一覧の 2 行目)。"""
+    if not chat_json:
+        return ""
+    for message in chat_json.get("messages") or []:
+        if message.get("role") == "user" and isinstance(message.get("content"), str):
+            content = " ".join(message["content"].split())
+            if content:
+                return content[:limit]
+    return ""
+
+
 class ChatTable:
     def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
         with get_db() as db:
@@ -650,31 +663,47 @@ class ChatTable:
             # Validate and return chats
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
-    def get_chats_referencing_file_id(
-        self, file_id: str, user_id: Optional[str] = None
+    def get_chat_previews(
+        self,
+        user_id: Optional[str] = None,
+        file_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
     ) -> list[dict]:
-        """llens(#69): file id を参照するチャットの軽量一覧(ファイル管理ページのチャット導線)。
+        """llens(#69): チャットの軽量プレビュー一覧
+        (id / user_id / user_name / title / snippet / updated_at)。
 
-        参照検出は chat JSON 全文への LIKE。file id は UUID なので本文との誤爆は実質なく、
-        message.files / chat.files のどちらの持ち方でも拾える(構造依存の JSON クエリを避ける)。
-        user_id=None は全ユーザー(admin 用 — 他人のチャットは /s/{id} で開く)。
-        user_id は呼び出し側が /c/ と /s/ を振り分けるために返す。
+        ファイル管理の「関連チャット」と admin のユーザーチャット一覧が同じ形を消費する
+        (見た目の共通部品 = ChatsListModal)。user_id はそのユーザーに限定(None = 全ユーザー
+        — admin 用。他人のチャットは /s/{id} で開くため user_id を見て FE が振り分ける)。
+        file_id は chat JSON 全文への LIKE で参照検出 — id は UUID なので本文との誤爆は
+        実質なく、message.files / chat.files / 本文中の生成物 URL のどの持ち方でも拾える。
         """
+        # 循環 import 回避のため遅延 import(access_control.py と同じ流儀)
+        from open_webui.models.users import User
+
         with get_db() as db:
-            query = db.query(Chat.id, Chat.user_id, Chat.title, Chat.updated_at).filter(
-                cast(Chat.chat, Text).like(f"%{file_id}%")
+            query = db.query(Chat, User.name.label("user_name")).outerjoin(
+                User, User.id == Chat.user_id
             )
             if user_id is not None:
                 query = query.filter(Chat.user_id == user_id)
-            rows = query.order_by(Chat.updated_at.desc()).limit(50).all()
+            if file_id is not None:
+                query = query.filter(cast(Chat.chat, Text).like(f"%{file_id}%"))
+            rows = (
+                query.order_by(Chat.updated_at.desc()).offset(skip).limit(limit).all()
+            )
             return [
                 {
-                    "id": row.id,
-                    "user_id": row.user_id,
-                    "title": row.title,
-                    "updated_at": row.updated_at,
+                    "id": chat.id,
+                    "user_id": chat.user_id,
+                    "user_name": user_name,
+                    "title": chat.title,
+                    "snippet": _chat_snippet(chat.chat),
+                    "created_at": chat.created_at,
+                    "updated_at": chat.updated_at,
                 }
-                for row in rows
+                for chat, user_name in rows
             ]
 
     def get_chats_page_admin(

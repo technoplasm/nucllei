@@ -434,8 +434,8 @@ async def get_file_chats_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
-        return Chats.get_chats_referencing_file_id(
-            id, user_id=None if user.role == "admin" else user.id
+        return Chats.get_chat_previews(
+            user_id=None if user.role == "admin" else user.id, file_id=id
         )
     else:
         raise HTTPException(

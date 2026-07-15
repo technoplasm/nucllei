@@ -185,21 +185,21 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
 ############################
 
 
-@router.get("/list/user/{user_id}", response_model=list[ChatTitleIdResponse])
+@router.get("/list/user/{user_id}")
 async def get_user_chat_list_by_user_id(
     user_id: str,
     user=Depends(get_admin_user),
     skip: int = 0,
     limit: int = 50,
 ):
+    # llens(#69): admin のユーザーチャット一覧(UserChatsModal)。ファイル管理の
+    # 「関連チャット」と同じプレビュー形(snippet 込み)に統一 — 消費側は ChatsListModal。
     if not ENABLE_ADMIN_CHAT_ACCESS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
-    return Chats.get_chat_list_by_user_id(
-        user_id, include_archived=True, skip=skip, limit=limit
-    )
+    return Chats.get_chat_previews(user_id=user_id, skip=skip, limit=limit)
 
 
 ############################

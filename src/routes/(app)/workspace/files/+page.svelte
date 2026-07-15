@@ -15,6 +15,7 @@
 		getFileList,
 		getFileUploaders,
 		getFileById,
+		getFileChats,
 		uploadFile,
 		deleteFileById,
 		updateFileAccessControlById
@@ -25,8 +26,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
-
-	import FileChatsMenu from './FileChatsMenu.svelte';
+	import ChatsListModal from '$lib/components/workspace/common/ChatsListModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -254,6 +254,25 @@
 			file: res
 		};
 		showFileModal = true;
+	};
+
+	// 関連チャット(この file を参照しているチャットの一覧モーダル。開くたびに取得)
+	let showChatsModal = $state(false);
+	let chatsFile = $state<any>(null);
+	let fileChats = $state<any[] | null>(null);
+
+	const openFileChats = (file: any) => {
+		chatsFile = file;
+		fileChats = null;
+		showChatsModal = true;
+		getFileChats(file.id)
+			.then((res) => {
+				fileChats = res ?? [];
+			})
+			.catch((err) => {
+				toast.error(`${err}`);
+				fileChats = [];
+			});
 	};
 
 	// 削除
@@ -553,12 +572,16 @@
 								</div>
 							</button>
 
-							<div class="relative flex">
-								<FileChatsMenu
-									fileId={file.id}
-									buttonClass="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl cursor-pointer"
-								/>
-							</div>
+							<Tooltip className="relative flex" content={$i18n.t('Related chats')}>
+								<button
+									class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+									type="button"
+									aria-label={$i18n.t('Related chats')}
+									onclick={() => openFileChats(file)}
+								>
+									<span class="i-lucide-message-square size-4 block"></span>
+								</button>
+							</Tooltip>
 
 							<Tooltip className="relative flex" content={vis.label}>
 								<button
@@ -646,7 +669,6 @@
 								></span>
 							</div>
 						</th>
-						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Visibility')}</th>
 						<th scope="col" class="px-3 py-2 text-right"></th>
 					</tr>
 				</thead>
@@ -654,7 +676,7 @@
 					{#each sections as section (section.label)}
 						{#if section.label}
 							<tr>
-								<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
+								<td colspan="6" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
 									{section.label}
 								</td>
 							</tr>
@@ -684,34 +706,36 @@
 								<td class="px-3 py-1">{file?.meta?.content_type ?? '-'}</td>
 								<td class="px-3 py-1">{formatTimestamp(file?.created_at)}</td>
 								<td class="px-3 py-1">{formatTimestamp(file?.accessed_at)}</td>
-								<td class="px-3 py-1">
-									<Tooltip content={vis.label}>
-										<button
-											class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-											type="button"
-											aria-label={vis.label}
-											onclick={(e) => {
-												e.stopPropagation();
-												openAccessControl(file);
-											}}
-										>
-											<span class="{vis.icon} size-4 block"></span>
-										</button>
-									</Tooltip>
-								</td>
 								<td class="px-3 py-1 text-right">
+									<!-- カードと同構成の 1 セル(関連チャット / 共有状態 / 削除) -->
 									<div class="flex justify-end w-full">
-										<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-										<span
-											onclick={(e) => {
-												e.stopPropagation();
-											}}
-										>
-											<FileChatsMenu
-												fileId={file.id}
-												buttonClass="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl cursor-pointer"
-											/>
-										</span>
+										<Tooltip content={$i18n.t('Related chats')}>
+											<button
+												class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+												type="button"
+												aria-label={$i18n.t('Related chats')}
+												onclick={(e) => {
+													e.stopPropagation();
+													openFileChats(file);
+												}}
+											>
+												<span class="i-lucide-message-square size-4 block"></span>
+											</button>
+										</Tooltip>
+
+										<Tooltip content={vis.label}>
+											<button
+												class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+												type="button"
+												aria-label={vis.label}
+												onclick={(e) => {
+													e.stopPropagation();
+													openAccessControl(file);
+												}}
+											>
+												<span class="{vis.icon} size-4 block"></span>
+											</button>
+										</Tooltip>
 
 										<Tooltip content={$i18n.t('Delete')}>
 											<button
@@ -757,6 +781,13 @@
 		bind:show={showAccessControlModal}
 		bind:accessControl={acValue}
 		variant="file"
+	/>
+
+	<ChatsListModal
+		bind:show={showChatsModal}
+		title={$i18n.t('Related chats')}
+		subtitle={chatsFile?.meta?.name ?? chatsFile?.filename ?? ''}
+		chats={fileChats}
 	/>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">

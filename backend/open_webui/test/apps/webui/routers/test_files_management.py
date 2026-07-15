@@ -293,7 +293,7 @@ class TestFilesManagement(AbstractPostgresTest):
 
     # ---- GET /{id}/chats(file を参照するチャット導線) ----
 
-    def _insert_chat(self, user_id, title, file_id=None):
+    def _insert_chat(self, user_id, title, file_id=None, messages=None):
         from open_webui.models.chats import ChatForm, Chats
 
         chat = Chats.insert_new_chat(
@@ -301,6 +301,7 @@ class TestFilesManagement(AbstractPostgresTest):
             ChatForm(
                 chat={
                     "title": title,
+                    "messages": messages or [],
                     "history": {"currentId": "m1", "messages": {}},
                     # 実際の添付は message.files / chat.files 双方にあり得る —
                     # 検出は JSON 全文 LIKE なのでトップレベル files で代表させる
@@ -313,7 +314,15 @@ class TestFilesManagement(AbstractPostgresTest):
 
     def test_file_chats_lists_own_referencing_chats(self):
         self._insert_file("f_ref-0000-uuid", user_id="1")
-        c1 = self._insert_chat("1", "uses file", file_id="f_ref-0000-uuid")
+        c1 = self._insert_chat(
+            "1",
+            "uses file",
+            file_id="f_ref-0000-uuid",
+            messages=[
+                {"role": "user", "content": "  この ファイルを\n要約して  "},
+                {"role": "assistant", "content": "はい"},
+            ],
+        )
         self._insert_chat("1", "unrelated chat")
         with mock_webui_user(id="1", role="user"):
             r = self.fast_api_client.get(self.create_url("/f_ref-0000-uuid/chats"))
@@ -322,6 +331,9 @@ class TestFilesManagement(AbstractPostgresTest):
         assert [c["id"] for c in body] == [c1.id]
         assert body[0]["title"] == "uses file"
         assert body[0]["user_id"] == "1"
+        assert "user_name" in body[0]  # user 行が無ければ None(outerjoin)
+        # snippet = 冒頭のユーザー発話(空白は畳む)
+        assert body[0]["snippet"] == "この ファイルを 要約して"
         assert "updated_at" in body[0]
 
     def test_file_chats_non_admin_sees_only_own_chats(self):
