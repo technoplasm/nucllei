@@ -231,9 +231,8 @@
 						<div class="flex flex-1 items-center">
 							<div class="w-full px-0.5">
 								<select
-									class="outline-hidden bg-transparent text-sm rounded-lg block w-full pr-10 max-w-full
-									{selectedGroupId ? '' : 'text-content-subtle'}
-									dark:placeholder-gray-500"
+									class="outline-hidden bg-surface-muted px-2 py-1 text-sm rounded-lg block w-full pr-8 max-w-full
+									{selectedGroupId ? '' : 'text-content-subtle'}"
 									bind:value={selectedGroupId}
 								>
 									<option class=" text-content" value="" disabled selected
