@@ -27,14 +27,14 @@ export const getAudioConfig = async () => {
 	return res;
 };
 
-type OpenAIConfigForm = {
-	url: string;
-	key: string;
-	model: string;
-	speaker: string;
+// 実際の payload は routers/audio の AudioConfigUpdateForm(tts/stt の 2 ブロック)。
+// 旧 OpenAIConfigForm(url/key/model/speaker)は実装と乖離した化石だった。
+type AudioConfigForm = {
+	tts: Record<string, any>;
+	stt: Record<string, any>;
 };
 
-export const updateAudioConfig = async (payload: OpenAIConfigForm) => {
+export const updateAudioConfig = async (payload: AudioConfigForm) => {
 	let error = null;
 
 	const res = await apiFetch(`${AUDIO_API_BASE_URL}/config/update`, {
