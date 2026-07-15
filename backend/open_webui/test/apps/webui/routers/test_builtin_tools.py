@@ -83,7 +83,7 @@ class TestBuiltinTools(AbstractPostgresTest):
         row = self.Tools.get_tool_by_id("builtin_history")
         # 定義は repo が真実源のまま
         assert row.content == ""
-        assert row.name == "履歴管理"
+        assert row.name == "History management"
         assert row.meta.builtin is True
         # access_control だけ反映される
         assert row.access_control == {}

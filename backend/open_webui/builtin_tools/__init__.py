@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 BUILTIN_TOOLS = {
     "builtin_history": {
         "module": history,
-        "name": "履歴管理",
+        "name": "History management",
         "description": (
             "自分のチャット履歴の一覧・読み出し・検索"
             "(list_history / read_history / grep_history)。owner-only"
