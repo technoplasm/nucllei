@@ -339,6 +339,20 @@ def get_model_tool_ids(model) -> list[str]:
     return (model or {}).get("info", {}).get("meta", {}).get("toolIds", []) or []
 
 
+def is_usage_requested(model) -> bool:
+    """実測 usage(stream_options.include_usage)を要求するか(issue #57 / #70)。
+
+    既定 ON(キー不在は有効)。stream_options を未知パラメータとして弾く
+    OpenAI 互換実装に繋ぐ配備向けの opt-out として、モデルの
+    capabilities.usage=False のときだけ要求しない(2026-07-15 決定)。
+    横展開先は SGLang/閉域とは限らない — 「うちでは通る」を理由にこの
+    escape hatch を消さないこと。
+    """
+    meta = (model or {}).get("info", {}).get("meta", {}) or {}
+    capabilities = meta.get("capabilities") or {}
+    return capabilities.get("usage", True) is not False
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
 
     form_data = apply_params_to_form_data(form_data, model)
@@ -630,7 +644,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # llens(#57): streaming でも実測 usage を受け取る。OpenAI 互換サーバーは
     # stream_options.include_usage が無いと usage チャンクを送らない(SGLang 実測済み)。
-    if form_data.get("stream"):
+    # capabilities.usage=False のモデルは要求しない(弾く互換 API 向けの opt-out — 2026-07-15)。
+    if form_data.get("stream") and is_usage_requested(model):
         stream_options = form_data.get("stream_options") or {}
         stream_options["include_usage"] = True
         form_data["stream_options"] = stream_options
@@ -1233,7 +1248,12 @@ async def process_chat_response(
                                 "model": model_id,
                                 "stream": True,
                                 # llens(#57): tool ループの各呼び出しでも usage を受け取る
-                                "stream_options": {"include_usage": True},
+                                # (capabilities.usage=False のモデルは opt-out)
+                                **(
+                                    {"stream_options": {"include_usage": True}}
+                                    if is_usage_requested(model)
+                                    else {}
+                                ),
                                 "tools": form_data["tools"],
                                 "messages": [
                                     *form_data["messages"],

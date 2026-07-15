@@ -81,10 +81,12 @@
 	let params = $state<Record<string, any>>({
 		system: ''
 	});
-	// llens(#70): vision は既定 OFF(2026-07-15。画像入力は明示的に有効化したモデルだけ)
+	// llens(#70): vision は既定 OFF(2026-07-15。画像入力は明示的に有効化したモデルだけ)。
+	// usage は既定 ON — stream_options を弾く互換 API 向けの opt-out(backend の
+	// is_usage_requested と対。旧 addUsage の owned_by 分岐は廃止)。
 	let capabilities = $state<Record<string, boolean | undefined>>({
 		vision: false,
-		usage: undefined,
+		usage: true,
 		citations: true
 	});
 
@@ -135,18 +137,6 @@
 			accessControl = s.accessControl;
 		}
 		selectedTab = tab;
-	};
-
-	const addUsage = (base_model_id: string) => {
-		const baseModel = baseModels.find((m) => m.id === base_model_id);
-
-		if (baseModel) {
-			if (baseModel.owned_by === 'openai') {
-				capabilities.usage = baseModel?.meta?.capabilities?.usage ?? false;
-			} else {
-				delete capabilities.usage;
-			}
-		}
 	};
 
 	const submitHandler = async () => {
@@ -516,9 +506,6 @@
 												id="model-base-model"
 												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
 												bind:value={info.base_model_id}
-												onchange={(e) => {
-													addUsage(e.currentTarget.value);
-												}}
 												required
 											>
 												<option value={null} class=" text-content"

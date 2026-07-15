@@ -1319,15 +1319,10 @@
 								title_generation: $settings?.title?.auto ?? true
 							}
 						}
-					: {}),
-
-				...(stream && (model.info?.meta?.capabilities?.usage ?? false)
-					? {
-							stream_options: {
-								include_usage: true
-							}
-						}
 					: {})
+				// llens(#57/#70): stream_options.include_usage の注入は backend
+				// (middleware の is_usage_requested — 既定 ON・capabilities.usage=False で opt-out)
+				// に一元化。クライアント側の条件付き付与は撤去した。
 			},
 			`${WEBUI_BASE_URL}/api`
 		).catch(async (error) => {
