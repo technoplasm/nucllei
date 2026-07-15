@@ -22,8 +22,8 @@ BUILTIN_TOOLS = {
         "module": history,
         "name": "History Management",
         "description": (
-            "自分のチャット履歴の一覧・読み出し・検索"
-            "(list_history / read_history / grep_history)。owner-only"
+            "List, read and search your own chat history "
+            "(list_history / read_history / grep_history). Owner-only"
         ),
     },
 }
