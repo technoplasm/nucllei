@@ -103,7 +103,7 @@
 
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
-				class="shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pr-3 pl-2 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
+				class="shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/skills/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>

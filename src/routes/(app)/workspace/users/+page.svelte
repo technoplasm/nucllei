@@ -149,7 +149,7 @@
 		{#if selectedTab === 'overview'}
 			<!-- ヘッダ様式: 見出しで 1 行(count なし)/ 2 行目に Add pill + 検索 -->
 			<div class="flex flex-col gap-1 mt-0.5 mb-2">
-				<div class="flex items-center text-lg font-medium px-0.5">
+				<div class="flex items-center text-xl font-medium px-0.5">
 					{$i18n.t('Users')}
 				</div>
 
