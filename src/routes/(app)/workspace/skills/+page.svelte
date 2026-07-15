@@ -124,9 +124,11 @@
 
 	<div class="mt-6 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as skill (skill.id)}
-			<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
+			<div
+				class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
+			>
 				<a
-					class="flex-1 min-w-0 self-stretch flex flex-col justify-center px-3 py-2 cursor-pointer hover:bg-surface-hover"
+					class="flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
 					href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 				>
 					<div class="font-semibold line-clamp-1 capitalize">{skill.name}</div>
@@ -137,6 +139,7 @@
 				</a>
 
 				<Tooltip
+					className="relative flex"
 					content={(skill.access_control ?? null) === null ? $i18n.t('Public') : $i18n.t('Private')}
 				>
 					{#if $user?.role === 'admin'}
@@ -167,7 +170,7 @@
 				</Tooltip>
 
 				{#if $user?.role === 'admin' || skill.user_id === $user?.id}
-					<Tooltip content={$i18n.t('Delete')}>
+					<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 						<button
 							class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 							type="button"

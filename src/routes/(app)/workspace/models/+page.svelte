@@ -156,10 +156,12 @@
 
 	<div class="mt-6 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as model (model.id)}
-			<!-- hover は実際にクリックできる範囲(編集リンク)だけに付ける — アイコン類は各自の hover -->
-			<div class="flex items-center gap-0.5 pr-3 bg-surface-raised rounded-xl overflow-hidden">
+			<!-- カード全体がクリック=編集(a の after オーバーレイ)。右のボタン類は relative で上に載せる -->
+			<div
+				class="relative flex items-center gap-0.5 px-3 py-2 bg-surface-raised [&:hover:not(:has(button:hover))]:bg-surface-hover rounded-xl"
+			>
 				<a
-					class="flex items-center gap-3 flex-1 min-w-0 self-stretch px-3 py-2 cursor-pointer hover:bg-surface-hover"
+					class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer after:absolute after:inset-0 after:content-['']"
 					href={`/workspace/models/edit?id=${encodeURIComponent(model.id)}`}
 				>
 					<img
@@ -186,7 +188,7 @@
 					</div>
 				</a>
 
-				<Tooltip content={$i18n.t('Clone')}>
+				<Tooltip className="relative flex" content={$i18n.t('Clone')}>
 					<button
 						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 						type="button"
@@ -199,7 +201,7 @@
 					</button>
 				</Tooltip>
 
-				<Tooltip content={$i18n.t('Delete')}>
+				<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 					<button
 						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 						type="button"
@@ -213,7 +215,7 @@
 					</button>
 				</Tooltip>
 
-				<div class="ml-1">
+				<div class="relative ml-1">
 					<Tooltip content={model.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
 						<Switch
 							bind:state={model.is_active}

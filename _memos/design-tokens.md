@@ -44,9 +44,10 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   (縦を稼ぐ + クリックでフォーカス。真実源 = FunctionEditor)。
 - **一覧ページの様式**(真実源 = models/+page.svelte、2026-07-15 改訂): ヘッダ `mt-1.5`(+ ボタン行 `mt-2`)+
   primary Create pill + raised 検索ボックス(`rounded-xs`)/ grid は `mt-6 gap-3` / カード =
-  `bg-surface-raised rounded-xl overflow-hidden` で、**hover はクリックできる範囲だけ** —
-  編集リンク `a.flex-1 self-stretch px-3 py-2 hover:bg-surface-hover`(カード全体 hover は
-  click 範囲とズレるので廃止。アイコンボタンは各自の hover)/ セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
+  `relative bg-surface-raised rounded-xl` + **カード全体がクリック=編集**(stretched-link:
+  `a` に `after:absolute after:inset-0`、右のボタン/Switch は `relative` でオーバーレイの上に載せる)。
+  hover はカード全体だが、**内側 button の hover 中は `[&:hover:not(:has(button:hover))]:bg-surface-hover`
+  で親の hover を抑制**(hover 面とクリック先が常に一致)/ セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
 - **テーブル**(users/chats): thead = `bg-surface-muted`、tbody 行 = `bg-surface-raised`。
   共通コンポーネント化は 3 例目が出るまで見送り。
 
