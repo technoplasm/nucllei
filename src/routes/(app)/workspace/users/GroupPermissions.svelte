@@ -46,11 +46,79 @@
 	};
 </script>
 
+<!-- 行を全幅 justify-between で並べるとラベルとトグルの目線が離れるので、
+     ~200px セルの auto-fill grid に畳む(実測: インライン 836px → 3 列 / モーダル 464px → 2 列。
+     コンテナ幅で列数が決まるので同一コンポーネントのまま両置き場に効く) -->
 <div>
 	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Workspace Permissions')}</div>
+		<div class=" mb-2 text-sm font-medium">{$i18n.t('Chat Permissions')}</div>
 
-		<div class=" ">
+		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6">
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow File Upload')}
+				</div>
+
+				<Switch bind:state={permissions.chat.file_upload} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Chat Controls')}
+				</div>
+
+				<Switch bind:state={permissions.chat.controls} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Chat Delete')}
+				</div>
+
+				<Switch bind:state={permissions.chat.delete} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Chat Edit')}
+				</div>
+
+				<Switch bind:state={permissions.chat.edit} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Chat Share')}
+				</div>
+
+				<Switch bind:state={permissions.chat.share} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Shared Chat Clone')}
+				</div>
+
+				<Switch bind:state={permissions.chat.clone} />
+			</div>
+
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Multiple Models in Chat')}
+				</div>
+
+				<Switch bind:state={permissions.chat.multiple_models} />
+			</div>
+		</div>
+	</div>
+
+	<hr class=" border-line my-2" />
+
+	<!-- チャット基本操作の外側にある能力(skill editor ロール・画像生成)を Features に集約 -->
+	<div>
+		<div class=" mb-2 text-sm font-medium">{$i18n.t('Features')}</div>
+
+		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6">
 			<Tooltip
 				className=" flex w-full justify-between my-2 pr-2"
 				content={$i18n.t(
@@ -63,82 +131,14 @@
 				</div>
 				<Switch bind:state={permissions.workspace.skills} />
 			</Tooltip>
-		</div>
-	</div>
 
-	<hr class=" border-line my-2" />
+			<div class="  flex w-full justify-between my-2 pr-2">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Image Generation')}
+				</div>
 
-	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Chat Permissions')}</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow File Upload')}
+				<Switch bind:state={permissions.features.image_generation} />
 			</div>
-
-			<Switch bind:state={permissions.chat.file_upload} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Chat Controls')}
-			</div>
-
-			<Switch bind:state={permissions.chat.controls} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Chat Delete')}
-			</div>
-
-			<Switch bind:state={permissions.chat.delete} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Chat Edit')}
-			</div>
-
-			<Switch bind:state={permissions.chat.edit} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Chat Share')}
-			</div>
-
-			<Switch bind:state={permissions.chat.share} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Shared Chat Clone')}
-			</div>
-
-			<Switch bind:state={permissions.chat.clone} />
-		</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Allow Multiple Models in Chat')}
-			</div>
-
-			<Switch bind:state={permissions.chat.multiple_models} />
-		</div>
-	</div>
-
-	<hr class=" border-line my-2" />
-
-	<div>
-		<div class=" mb-2 text-sm font-medium">{$i18n.t('Features Permissions')}</div>
-
-		<div class="  flex w-full justify-between my-2 pr-2">
-			<div class=" self-center text-xs font-medium">
-				{$i18n.t('Image Generation')}
-			</div>
-
-			<Switch bind:state={permissions.features.image_generation} />
 		</div>
 	</div>
 </div>
