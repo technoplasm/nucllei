@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getBackendConfig, getWebhookUrl, updateWebhookUrl } from '$lib/apis';
+	import { getWebhookUrl, updateWebhookUrl } from '$lib/apis';
 	import {
 		getAdminConfig,
 		getLdapConfig,
@@ -20,21 +20,21 @@
 
 	const i18n = getContext('i18n');
 
-	export let saveHandler: Function;
+	let { saveHandler }: { saveHandler: () => void | Promise<void> } = $props();
 
-	let adminConfig = null;
-	let webhookUrl = '';
+	let adminConfig = $state<any>(null);
+	let webhookUrl = $state('');
 
 	// llens: ツールサーバー接続は独立タブ/独立保存をやめ、この一般設定に完全統合(保存も共通)。
-	let toolServers: any[] | null = null;
-	let showToolServerModal = false;
+	let toolServers = $state<any[] | null>(null);
+	let showToolServerModal = $state(false);
 	const addToolServerHandler = (server: any) => {
 		toolServers = [...(toolServers ?? []), server];
 	};
 
 	// LDAP
-	let ENABLE_LDAP = false;
-	let LDAP_SERVER = {
+	let ENABLE_LDAP = $state(false);
+	let LDAP_SERVER = $state<any>({
 		label: '',
 		host: '',
 		port: '',
@@ -47,7 +47,7 @@
 		use_tls: false,
 		certificate_path: '',
 		ciphers: ''
-	};
+	});
 
 	const updateLdapServerHandler = async () => {
 		if (!ENABLE_LDAP) return;
@@ -72,7 +72,7 @@
 		if (res) {
 			saveHandler();
 		} else {
-			toast.error(i18n.t('Failed to update settings'));
+			toast.error($i18n.t('Failed to update settings'));
 		}
 	};
 
@@ -103,7 +103,8 @@
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={async () => {
+	onsubmit={(e) => {
+		e.preventDefault();
 		updateHandler();
 	}}
 >
@@ -113,7 +114,7 @@
 				<div class="mb-3.5">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('General')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<div class="mb-2.5">
 						<div class=" mb-1 text-xs font-medium flex space-x-2 items-center">
@@ -135,13 +136,13 @@
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Authentication')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Default User Role')}</div>
 						<div class="flex items-center relative">
 							<select
-								class="dark:bg-gray-900 w-fit pr-8 rounded-sm px-2 text-xs bg-transparent outline-hidden text-right"
+								class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 								bind:value={adminConfig.DEFAULT_USER_ROLE}
 								placeholder="Select a role"
 							>
@@ -188,14 +189,13 @@
 								</div>
 
 								<input
-									class="w-full mt-1 rounded-lg text-sm text-content bg-transparent outline-hidden"
+									class="w-full mt-1 text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									type="text"
 									placeholder={`e.g.) /api/v1/chats, /api/v1/models`}
 									bind:value={adminConfig.API_KEY_ALLOWED_ENDPOINTS}
 								/>
 
 								<div class="mt-2 text-xs text-content-subtle">
-									<!-- https://docs.openwebui.com/getting-started/advanced-topics/api-endpoints -->
 									<a
 										href="https://docs.openwebui.com/getting-started/api-endpoints"
 										target="_blank"
@@ -215,7 +215,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 								type="text"
 								placeholder={`e.g.) "30m","1h", "10d". `}
 								bind:value={adminConfig.JWT_EXPIRES_IN}
@@ -253,7 +253,7 @@
 												{$i18n.t('Label')}
 											</div>
 											<input
-												class="w-full bg-transparent outline-hidden py-0.5"
+												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 												required
 												placeholder={$i18n.t('Enter server label')}
 												bind:value={LDAP_SERVER.label}
@@ -267,7 +267,7 @@
 												{$i18n.t('Host')}
 											</div>
 											<input
-												class="w-full bg-transparent outline-hidden py-0.5"
+												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 												required
 												placeholder={$i18n.t('Enter server host')}
 												bind:value={LDAP_SERVER.host}
@@ -283,7 +283,7 @@
 												className="w-full"
 											>
 												<input
-													class="w-full bg-transparent outline-hidden py-0.5"
+													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													type="number"
 													placeholder={$i18n.t('Enter server port')}
 													bind:value={LDAP_SERVER.port}
@@ -301,7 +301,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full bg-transparent outline-hidden py-0.5"
+													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Enter Application DN')}
 													bind:value={LDAP_SERVER.app_dn}
@@ -314,6 +314,8 @@
 											</div>
 											<SensitiveInput
 												placeholder={$i18n.t('Enter Application DN Password')}
+												outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+												inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 												bind:value={LDAP_SERVER.app_dn_password}
 											/>
 										</div>
@@ -330,7 +332,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full bg-transparent outline-hidden py-0.5"
+													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Example: mail')}
 													bind:value={LDAP_SERVER.attribute_for_mail}
@@ -350,7 +352,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full bg-transparent outline-hidden py-0.5"
+													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t(
 														'Example: sAMAccountName or uid or userPrincipalName'
@@ -370,7 +372,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full bg-transparent outline-hidden py-0.5"
+													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Example: ou=users,dc=foo,dc=example')}
 													bind:value={LDAP_SERVER.search_base}
@@ -384,7 +386,7 @@
 												{$i18n.t('Search Filters')}
 											</div>
 											<input
-												class="w-full bg-transparent outline-hidden py-0.5"
+												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 												placeholder={$i18n.t('Example: (&(objectClass=inetOrgPerson)(uid=%s))')}
 												bind:value={LDAP_SERVER.search_filters}
 											/>
@@ -414,7 +416,7 @@
 														{$i18n.t('Certificate Path')}
 													</div>
 													<input
-														class="w-full bg-transparent outline-hidden py-0.5"
+														class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 														placeholder={$i18n.t('Enter certificate path')}
 														bind:value={LDAP_SERVER.certificate_path}
 													/>
@@ -427,7 +429,7 @@
 													</div>
 													<Tooltip content={$i18n.t('Default to ALL')} placement="top-start">
 														<input
-															class="w-full bg-transparent outline-hidden py-0.5"
+															class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 															placeholder={$i18n.t('Example: ALL')}
 															bind:value={LDAP_SERVER.ciphers}
 														/>
@@ -446,7 +448,7 @@
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Features')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<!-- llens(#10): コミュニティ共有(openwebui.com ストア導線)は機能ごと撤去。 -->
 					<!-- llens(#48): 評価(👍/👎)機能撤去に伴い Message Rating トグルを撤去。 -->
@@ -467,7 +469,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 								type="text"
 								placeholder={`e.g.) "http://localhost:3000"`}
 								bind:value={adminConfig.WEBUI_URL}
@@ -488,7 +490,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 								type="text"
 								placeholder={`https://example.com/webhook`}
 								bind:value={webhookUrl}
@@ -502,7 +504,7 @@
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Tools')}</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<hr class=" border-line my-2" />
 
 					<div class="mb-2.5 flex flex-col w-full justify-between">
 						<div class="flex justify-between items-center mb-0.5">
@@ -512,7 +514,8 @@
 								<button
 									class="px-1"
 									type="button"
-									on:click={() => {
+									aria-label={$i18n.t('Add Connection')}
+									onclick={() => {
 										showToolServerModal = true;
 									}}
 								>
@@ -525,7 +528,7 @@
 							<div class="flex flex-col gap-1.5">
 								{#each toolServers as server, idx}
 									<Connection
-										bind:connection={server}
+										bind:connection={toolServers[idx]}
 										onSubmit={() => {}}
 										onDelete={() => {
 											toolServers = (toolServers ?? []).filter((_, i) => i !== idx);
@@ -548,7 +551,7 @@
 
 	<div class="flex justify-end pt-3 text-sm font-medium">
 		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+			class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
 			type="submit"
 		>
 			{$i18n.t('Save')}
