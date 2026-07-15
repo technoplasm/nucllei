@@ -190,7 +190,7 @@
 
 				<Tooltip className="relative flex" content={$i18n.t('Clone')}>
 					<button
-						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						class="px-2 py-2 text-content bg-surface-raised hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={$i18n.t('Clone')}
 						onclick={() => {
@@ -203,7 +203,7 @@
 
 				<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 					<button
-						class="px-2 py-2 text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+						class="px-2 py-2 text-content bg-surface-raised hover:bg-surface-hover rounded-xl"
 						type="button"
 						aria-label={$i18n.t('Delete')}
 						onclick={() => {
