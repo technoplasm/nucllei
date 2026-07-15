@@ -1,5 +1,5 @@
 <script lang="ts">
-	// llens: workspace/models(preset 編集)のほか workspace/Settings/Models(生モデル編集、
+	// llens: workspace/models(preset 編集)のほか workspace/settings の Models タブ(生モデル編集、
 	// preset=false + onBack)からも使う。models 専用素材として route 配下へコロケート(#70 A2)。
 	import { onMount, getContext, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
