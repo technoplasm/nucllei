@@ -1048,6 +1048,7 @@
 	"The leaderboard is currently in beta, and we may adjust the rating calculations as we refine the algorithm.": "",
 	"The maximum file size in MB. If the file size exceeds this limit, the file will not be uploaded.": "",
 	"The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.": "",
+	"The response was interrupted and no content was received.": "",
 	"The score should be a value between 0.0 (0%) and 1.0 (100%).": "",
 	"The temperature of the model. Increasing the temperature will make the model answer more creatively.": "",
 	"Theme": "",

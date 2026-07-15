@@ -421,6 +421,26 @@ else:
     except Exception:
         AIOHTTP_CLIENT_TIMEOUT = 300
 
+# llens: chat completion 経路の無応答検出。total(上の AIOHTTP_CLIENT_TIMEOUT)は
+# 既定 None のまま長い生成を許容し、connect / sock_read で「死んだ接続」を必ず
+# エラー化する。sock_read は「無音区間」の上限 — トークンが出続ける限り切れない。
+# ollama の初回モデルロード(応答ゼロの時間)を考慮して既定 600 秒と多めに取る。
+AIOHTTP_CLIENT_TIMEOUT_CONNECT = os.environ.get("AIOHTTP_CLIENT_TIMEOUT_CONNECT", "10")
+
+try:
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT = int(AIOHTTP_CLIENT_TIMEOUT_CONNECT)
+except Exception:
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT = 10
+
+AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = os.environ.get(
+    "AIOHTTP_CLIENT_TIMEOUT_SOCK_READ", "600"
+)
+
+try:
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = int(AIOHTTP_CLIENT_TIMEOUT_SOCK_READ)
+except Exception:
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 600
+
 AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST = os.environ.get(
     "AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST",
     os.environ.get("AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST", "10"),

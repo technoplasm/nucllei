@@ -10,6 +10,10 @@
 	let {
 		id,
 		blocks,
+		// メッセージ確定後(中断含む)は block.done が立っていなくてもスピナーを
+		// 止める保険。backend が finalize できずに死んだ場合、done=false のブロックが
+		// DB に残る — ぐるぐるは「task が生きている間だけ」の規律をここで担保する。
+		done = false,
 		history,
 		model = null,
 		sources = null,
@@ -22,11 +26,9 @@
 		onSelect = (detail: any) => {}
 	} = $props();
 
-	// 実行中(結果未着)の tool call を自動展開し、引数(コード)が伸びていく
-	// 様子を見せる(#20 ステップ5)。結果が返ると畳まれ、ヘッダが
-	// 「View Result from …」になる。設定 UI は増やさない — 挙動を変えたい
-	// ときはこの定数を編集する(false = 常に閉じて開始、旧挙動)。
-	const AUTO_EXPAND_EXECUTING_TOOL_CALLS = true;
+	// tool call の自動展開(実行中だけ開く #20 ステップ5)は OFF にした
+	// (2026-07-15): 開閉が実行状態で勝手に動くのをやめ、reasoning と同じく
+	// expandDetails 設定を初期値に、手動の開閉をそのまま維持する。
 
 	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま渡す
 	// (旧 details 経路の「JSON.stringify → 属性文字列 → decode → 再パース」往復を廃止)。
@@ -36,7 +38,7 @@
 		const result = (results ?? []).find((r) => r.tool_call_id === call.id);
 		const attributes: Record<string, any> = {
 			type: 'tool_calls',
-			done: result ? 'true' : 'false',
+			done: result || done ? 'true' : 'false',
 			id: call.id,
 			name: call.function?.name ?? '',
 			arguments: call.function?.arguments ?? ''
@@ -65,7 +67,7 @@
 				open={$settings?.expandDetails ?? false}
 				attributes={{
 					type: 'reasoning',
-					done: block.done ? 'true' : 'false',
+					done: block.done || done ? 'true' : 'false',
 					duration: block.duration
 				}}
 				className="w-full space-y-1 text-sm"
@@ -101,13 +103,10 @@
 			/>
 		{:else if block.type === 'tool_calls'}
 			{#each block.calls ?? [] as call (call.id)}
-				<!-- open は「結果未着かどうか」で流れる: 実行中 true → 結果到着で
-				     false に変わり自動で畳まれる。手動開閉は値が変わるまで優先される -->
 				<Collapsible
 					id={`${id}-block-${blockIdx}-${call.id}`}
 					title=""
-					open={AUTO_EXPAND_EXECUTING_TOOL_CALLS &&
-						!(block.results ?? []).find((r) => r.tool_call_id === call.id)}
+					open={$settings?.expandDetails ?? false}
 					attributes={toolCallAttributes(call, block.results)}
 					className="w-full space-y-1 text-sm"
 				/>

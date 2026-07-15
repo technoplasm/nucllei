@@ -71,8 +71,24 @@
 	let controlPaneComponent;
 
 	let autoScroll = true;
+	let lastScrollTop = 0;
 	let processing = '';
 	let messagesContainerElement: HTMLDivElement;
+
+	// 追従中はコンテンツの高さ変化そのものに張り付く(use: アクション)。
+	// デルタ受信時の scrollToBottom だけだと、その後に非同期で高さが伸びる要素
+	// (tool 結果の画像・チャート、コードハイライト等)の分が取り残される。
+	const pinToBottomOnResize = (node: HTMLElement) => {
+		const observer = new ResizeObserver(() => {
+			if (autoScroll && messagesContainerElement) {
+				messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+			}
+		});
+		observer.observe(node);
+		return {
+			destroy: () => observer.disconnect()
+		};
+	};
 
 	let navbarElement;
 
@@ -204,6 +220,10 @@
 					}
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
+				} else if (type === 'task-cancelled') {
+					// llens: 中断された応答を done 化してスピナーを止める(backend は
+					// 中断時に open ブロックを閉じた content_blocks を直前に emit 済み)
+					message.done = true;
 				} else if (type === 'chat:message:delta' || type === 'message') {
 					message.content += data.content;
 				} else if (type === 'chat:message' || type === 'replace') {
@@ -536,20 +556,24 @@
 				autoScroll = true;
 				await tick();
 
-				if (history.currentId) {
-					for (const message of Object.values(history.messages)) {
-						if (message.role === 'assistant') {
-							message.done = true;
-						}
-					}
-				}
-
 				const taskRes = await getTaskIdsByChatId($chatId).catch((error) => {
 					return null;
 				});
 
 				if (taskRes) {
 					taskIds = taskRes.task_ids;
+				}
+
+				// llens: 生きた task が無ければ、未完の assistant メッセージは「中断された
+				// 応答」として done 化しスピナーを止める(本文ゼロなら ResponseMessage が
+				// 中断メッセージを表示する)。task が生きている場合はストリームが socket
+				// 経由で続いているので触らない — ぐるぐるは「task が生きている間だけ」。
+				if (history.currentId && (taskRes?.task_ids ?? []).length === 0) {
+					for (const message of Object.values(history.messages)) {
+						if (message.role === 'assistant') {
+							message.done = true;
+						}
+					}
 				}
 
 				await tick();
@@ -1616,12 +1640,20 @@
 							id="messages-container"
 							bind:this={messagesContainerElement}
 							on:scroll={(e) => {
-								autoScroll =
-									messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
-									messagesContainerElement.clientHeight + 5;
+								// 追従の on/off は方向ベースで判定する。「最下部±Npx か」の再計算だけだと、
+								// ストリーム中に scrollToBottom → scroll イベント処理前に次のデルタで
+								// 高さが伸びる競合で追従が勝手に切れる(text 出力で追従しない不具合)。
+								// 下端付近に来たら ON / 上方向スクロール(ユーザーの離脱)だけ OFF。
+								const el = messagesContainerElement;
+								if (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) {
+									autoScroll = true;
+								} else if (el.scrollTop < lastScrollTop) {
+									autoScroll = false;
+								}
+								lastScrollTop = el.scrollTop;
 							}}
 						>
-							<div class=" h-full w-full flex flex-col">
+							<div class=" h-full w-full flex flex-col" use:pinToBottomOnResize>
 								<Messages
 									chatId={$chatId}
 									bind:history

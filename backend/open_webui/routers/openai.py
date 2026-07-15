@@ -20,6 +20,8 @@ from open_webui.config import (
 )
 from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT,
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     ENABLE_FORWARD_USER_INFO_HEADERS,
     BYPASS_MODEL_ACCESS_CONTROL,
@@ -697,8 +699,15 @@ async def generate_chat_completion(
     response = None
 
     try:
+        # llens: total は既定 None(長い生成を殺さない)。connect / sock_read で
+        # 無応答接続を検出する(ollama 側 send_post_request と同じ規律)。
         session = aiohttp.ClientSession(
-            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(
+                total=AIOHTTP_CLIENT_TIMEOUT,
+                connect=AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+                sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+            ),
         )
 
         r = await session.request(

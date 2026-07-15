@@ -110,6 +110,70 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 		]);
 	});
 
+	it('結果未着の call(中断)には合成 tool result を対にする — 400 回避', () => {
+		const blocks = [
+			{
+				type: 'tool_calls',
+				calls: [
+					{ id: 'a', function: { name: 'f1', arguments: '{}' } },
+					{ id: 'b', function: { name: 'f2', arguments: '{}' } }
+				],
+				// f1 だけ結果があり f2 は中断で未着
+				results: [{ tool_call_id: 'a', content: 'r1' }]
+			}
+		];
+		const messages = expandAssistantToolHistory('', blocks);
+		expect(messages.map((m) => [m.role, m.content])).toEqual([
+			['assistant', ''],
+			['tool', 'r1'],
+			['tool', '[interrupted: this tool call produced no result]']
+		]);
+		expect(messages[2].tool_call_id).toBe('b');
+	});
+
+	it('arguments が壊れた call(中断で途切れ)は履歴から落とす — SGLang 400 回避', () => {
+		const blocks = [
+			{ type: 'text', content: '並列で呼びます' },
+			{
+				type: 'tool_calls',
+				calls: [
+					{ id: 'a', function: { name: 'echo', arguments: '{"text":"完全"}' } },
+					{ id: 'b', function: { name: 'run_python', arguments: '{"code":"import da' } } // 途中切断
+				],
+				results: []
+			}
+		];
+		const messages = expandAssistantToolHistory('並列で呼びます', blocks);
+		expect(messages).toEqual([
+			{
+				role: 'assistant',
+				content: '並列で呼びます',
+				tool_calls: [
+					{ id: 'a', type: 'function', function: { name: 'echo', arguments: '{"text":"完全"}' } }
+				]
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'a',
+				content: '[interrupted: this tool call produced no result]'
+			}
+		]);
+	});
+
+	it('全 call の arguments が壊れていたらブロックごとスキップし text を合流する', () => {
+		const blocks = [
+			{ type: 'text', content: 'やってみます' },
+			{
+				type: 'tool_calls',
+				calls: [{ id: 'a', function: { name: 'run_python', arguments: '{"code":"imp' } }],
+				results: []
+			}
+		];
+		expect(expandAssistantToolHistory('やってみます', blocks)).toEqual([
+			{ role: 'assistant', content: 'やってみます' }
+		]);
+	});
+
 	it('並列 tool call は 1 つの assistant に複数 tool_calls + 複数 tool result', () => {
 		const blocks = [
 			{

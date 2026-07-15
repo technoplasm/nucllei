@@ -53,12 +53,35 @@ export const expandAssistantToolHistory = (
 			if (block.synthetic) {
 				continue;
 			}
+			// 中断で途切れたブロックの後始末(実測 400: SGLang は履歴の
+			// tool_calls.arguments をパースするため、途中で切れた壊れ JSON を
+			// 再送すると "unexpected end of data" で拒否される):
+			// - arguments が壊れた call は履歴から落とす(実行されていない)
+			// - 完全な call は残し、result 未着なら合成 result を対にする
+			//   (tool_calls に tool 応答が無い履歴も不正になるため)
+			const results = block.results ?? [];
+			const sendableCalls = (block.calls ?? []).filter((call) => {
+				const args = call.function?.arguments ?? '';
+				if (args.trim() === '') {
+					return true;
+				}
+				try {
+					JSON.parse(args);
+					return true;
+				} catch {
+					return false;
+				}
+			});
+			if (sendableCalls.length === 0) {
+				// 全滅(中断直後など)はブロックごとスキップ — text は前後に合流
+				continue;
+			}
 			messages.push({
 				role: 'assistant',
 				content: textBuffer.join('\n\n'),
 				// render/index 等の内部キーをモデルに漏らさず OpenAI 形だけ綴じ込む
 				// (バックエンド convert_content_blocks_to_messages と同じ規律)
-				tool_calls: (block.calls ?? []).map((call) => ({
+				tool_calls: sendableCalls.map((call) => ({
 					id: call.id,
 					type: call.type ?? 'function',
 					function: {
@@ -68,11 +91,14 @@ export const expandAssistantToolHistory = (
 				}))
 			});
 			textBuffer = [];
-			for (const result of block.results ?? []) {
+			for (const call of sendableCalls) {
+				const result = results.find((r) => r.tool_call_id === call.id);
 				messages.push({
 					role: 'tool',
-					tool_call_id: result.tool_call_id,
-					content: result.content ?? ''
+					tool_call_id: call.id,
+					content: result
+						? (result.content ?? '')
+						: '[interrupted: this tool call produced no result]'
 				});
 			}
 		}

@@ -623,6 +623,7 @@
 									<ContentBlocks
 										id={message.id}
 										blocks={message.content_blocks}
+										done={message?.done ?? false}
 										{history}
 										sources={message.sources}
 										floatingButtons={message?.done && !readOnly}
@@ -689,7 +690,15 @@
 										}}
 									/>
 								{:else if message.content === '' && !message.error}
-									<Skeleton />
+									{#if message.done}
+										<!-- llens: 本文ゼロのまま確定した応答(中断・接続断)。
+										     無言のスピナーで固まらせず、途切れたことを明示する -->
+										<div class="mb-1.5 text-sm text-content-subtle italic" dir="auto">
+											{$i18n.t('The response was interrupted and no content was received.')}
+										</div>
+									{:else}
+										<Skeleton />
+									{/if}
 								{:else if message.content}
 									<!-- エラーがあっても本文は常に表示する(error は {content} オブジェクト形のみ —
 									     旧 error === true 形式の互換は撤去済み) -->

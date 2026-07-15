@@ -667,6 +667,40 @@ def blocks_event_data(content_blocks) -> dict:
     }
 
 
+async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
+    """異常終了(中断・エラー)時のフォールバックタイトル。モデルは呼ばない。
+
+    この turn でタイトル生成が予約されていた(= 最初の応答ターン)のに応答が
+    確定しなかった場合、最初のユーザー発話の先頭 50 文字をタイトルにする。
+    LLM を呼ばないのは、エラー経路では呼び先が死んでいる可能性が高く二次ハングの
+    温床になるため(cancel 経路も分岐を増やさず同じ扱い)。同チャットの応答が
+    後で正常完了すれば通常のタイトル生成が上書きする。
+    """
+    if not (tasks and TASKS.TITLE_GENERATION in tasks):
+        return
+
+    message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
+    message = message_map.get(metadata["message_id"]) if message_map else None
+    if not message:
+        return
+
+    messages = get_message_list(message_map, message.get("id"))
+    if not messages:
+        return
+
+    title = " ".join((messages[0].get("content") or "").split())[:50]
+    if not title:
+        return
+
+    Chats.update_chat_title_by_id(metadata["chat_id"], title)
+    await event_emitter(
+        {
+            "type": "chat:title",
+            "data": title,
+        }
+    )
+
+
 async def run_response_background_tasks(request, user, metadata, tasks, event_emitter):
     """応答確定後のバックグラウンドタスク(現状はタイトル生成のみ)。"""
     message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
@@ -1346,7 +1380,15 @@ async def process_chat_response(
                     request, user, metadata, tasks, event_emitter
                 )
             except asyncio.CancelledError:
+                # llens: 中断でも open な reasoning を閉じてから保存・emit する。
+                # done=false のブロックが DB に残ると「Thinking…」スピナーが
+                # リロード後も回り続ける。task-cancelled はフロントが message.done
+                # 化に使う(chatEventHandler)。
                 log.warning("Task was cancelled!")
+                assembler.close_open_reasoning_block()
+                data = blocks_event_data(assembler.content_blocks)
+
+                await event_emitter({"type": "chat:completion", "data": data})
                 await event_emitter({"type": "task-cancelled"})
 
                 if not ENABLE_REALTIME_CHAT_SAVE:
@@ -1354,8 +1396,36 @@ async def process_chat_response(
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"],
                         metadata["message_id"],
-                        blocks_event_data(assembler.content_blocks),
+                        data,
                     )
+
+                await apply_fallback_title_on_abnormal_end(
+                    metadata, tasks, event_emitter
+                )
+            except Exception as e:
+                # llens: 上流タイムアウト(sock_read)等の途中失敗を黙って死なせない。
+                # ここで error を emit しないと task だけが消え、フロントは
+                # 「Preparing…」のまま固まる(ollama 無応答障害で実証)。error は
+                # message にも永続化し、リロード後もエラーとして見えるようにする。
+                log.exception("Chat response task failed mid-stream")
+                assembler.close_open_reasoning_block()
+                data = {
+                    "error": {"content": f"Connection to the model was lost: {e}"},
+                    **blocks_event_data(assembler.content_blocks),
+                }
+
+                await event_emitter({"type": "chat:completion", "data": data})
+
+                if not ENABLE_REALTIME_CHAT_SAVE:
+                    Chats.upsert_message_to_chat_by_id_and_message_id(
+                        metadata["chat_id"],
+                        metadata["message_id"],
+                        data,
+                    )
+
+                await apply_fallback_title_on_abnormal_end(
+                    metadata, tasks, event_emitter
+                )
 
             if response.background is not None:
                 await response.background()

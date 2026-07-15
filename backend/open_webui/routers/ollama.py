@@ -52,6 +52,8 @@ from open_webui.config import (
 from open_webui.env import (
     SRC_LOG_LEVELS,
     AIOHTTP_CLIENT_TIMEOUT,
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     BYPASS_MODEL_ACCESS_CONTROL,
 )
@@ -117,8 +119,16 @@ async def send_post_request(
 
     r = None
     try:
+        # llens: total は既定 None(長い生成を殺さない)。connect / sock_read で
+        # 無応答接続を検出する。sock_read はチャンク間隔の上限なので、モデルロード
+        # 中の無音は許容しつつ、応答ゼロのまま死んだ接続は必ず切れる。
         session = aiohttp.ClientSession(
-            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(
+                total=AIOHTTP_CLIENT_TIMEOUT,
+                connect=AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+                sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+            ),
         )
 
         r = await session.post(
