@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 
-	import { createEventDispatcher, onMount, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { config as backendConfig, user } from '$lib/stores';
 
 	import { getBackendConfig } from '$lib/apis';
@@ -15,19 +15,21 @@
 	} from '$lib/apis/images';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	const dispatch = createEventDispatcher();
 
 	const i18n = getContext('i18n');
 
-	let loading = false;
+	let { onSave = () => {} }: { onSave?: () => void } = $props();
 
-	let config = null;
-	let imageGenerationConfig = null;
+	let loading = $state(false);
 
-	let models = null;
+	let config = $state<any>(null);
+	let imageGenerationConfig = $state<any>(null);
 
-	let samplers = [
+	let models = $state<any[] | null>(null);
+
+	const samplers = [
 		'DPM++ 2M',
 		'DPM++ SDE',
 		'DPM++ 2M SDE',
@@ -49,7 +51,7 @@
 		'UniPC'
 	];
 
-	let schedulers = [
+	const schedulers = [
 		'Automatic',
 		'Uniform',
 		'Karras',
@@ -64,7 +66,7 @@
 		'Beta'
 	];
 
-	let requiredWorkflowNodes = [
+	let requiredWorkflowNodes = $state([
 		{
 			type: 'prompt',
 			key: 'text',
@@ -95,7 +97,7 @@
 			key: 'seed',
 			node_ids: ''
 		}
-	];
+	]);
 
 	const getModels = async () => {
 		models = await getImageGenerationModels().catch((error) => {
@@ -105,15 +107,10 @@
 	};
 
 	const updateConfigHandler = async () => {
-		const res = await updateConfig(config)
-			.catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			})
-			.catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+		const res = await updateConfig(config).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		if (res) {
 			config = res;
@@ -125,14 +122,16 @@
 		}
 	};
 
-	const validateJSON = (json) => {
+	const validateJSON = (json: string) => {
 		try {
 			const obj = JSON.parse(json);
 
 			if (obj && typeof obj === 'object') {
 				return true;
 			}
-		} catch (e) {}
+		} catch {
+			// 不正 JSON は false を返すだけ
+		}
 		return false;
 	};
 
@@ -171,7 +170,7 @@
 		});
 
 		getModels();
-		dispatch('save');
+		onSave();
 		loading = false;
 	};
 
@@ -197,15 +196,14 @@
 						null,
 						2
 					);
-				} catch (e) {
-					console.log(e);
+				} catch {
+					// 整形失敗時は保存値をそのまま見せる
 				}
 			}
 
 			requiredWorkflowNodes = requiredWorkflowNodes.map((node) => {
-				const n = config.comfyui.COMFYUI_WORKFLOW_NODES.find((n) => n.type === node.type) ?? node;
-
-				console.log(n);
+				const n =
+					config.comfyui.COMFYUI_WORKFLOW_NODES.find((n: any) => n.type === node.type) ?? node;
 
 				return {
 					type: n.type,
@@ -228,7 +226,8 @@
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={async () => {
+	onsubmit={(e) => {
+		e.preventDefault();
 		saveHandler();
 	}}
 >
@@ -291,10 +290,10 @@
 					<div class=" self-center text-xs font-medium">{$i18n.t('Image Generation Engine')}</div>
 					<div class="flex items-center relative">
 						<select
-							class=" dark:bg-gray-900 w-fit pr-8 cursor-pointer rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
+							class="bg-surface-raised hover:bg-surface-hover w-fit cursor-pointer px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 							bind:value={config.engine}
 							placeholder={$i18n.t('Select Engine')}
-							on:change={async () => {
+							onchange={async () => {
 								updateConfigHandler();
 							}}
 						>
@@ -306,7 +305,7 @@
 					</div>
 				</div>
 			</div>
-			<hr class=" border-gray-100 dark:border-gray-850" />
+			<hr class=" border-line" />
 
 			<div class="flex flex-col gap-2">
 				{#if (config?.engine ?? 'automatic1111') === 'automatic1111'}
@@ -315,15 +314,16 @@
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
 									bind:value={config.automatic1111.AUTOMATIC1111_BASE_URL}
 								/>
 							</div>
 							<button
-								class="px-2.5 bg-gray-50 hover:bg-gray-100 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
+								class="px-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg"
 								type="button"
-								on:click={async () => {
+								aria-label={$i18n.t('Verify Connection')}
+								onclick={async () => {
 									await updateConfigHandler();
 									const res = await verifyConfigUrl().catch((error) => {
 										toast.error(`${error}`);
@@ -335,18 +335,7 @@
 									}
 								}}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
-										clip-rule="evenodd"
-									/>
-								</svg>
+								<span class="i-lucide-refresh-cw size-4 block"></span>
 							</button>
 						</div>
 
@@ -367,6 +356,8 @@
 							{$i18n.t('AUTOMATIC1111 Api Auth String')}
 						</div>
 						<SensitiveInput
+							outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+							inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 							placeholder={$i18n.t('Enter api auth string (e.g. username:password)')}
 							bind:value={config.automatic1111.AUTOMATIC1111_API_AUTH}
 							required={false}
@@ -394,7 +385,7 @@
 								<Tooltip content={$i18n.t('Enter Sampler (e.g. Euler a)')} placement="top-start">
 									<input
 										list="sampler-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 										placeholder={$i18n.t('Enter Sampler (e.g. Euler a)')}
 										bind:value={config.automatic1111.AUTOMATIC1111_SAMPLER}
 									/>
@@ -416,7 +407,7 @@
 								<Tooltip content={$i18n.t('Enter Scheduler (e.g. Karras)')} placement="top-start">
 									<input
 										list="scheduler-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 										placeholder={$i18n.t('Enter Scheduler (e.g. Karras)')}
 										bind:value={config.automatic1111.AUTOMATIC1111_SCHEDULER}
 									/>
@@ -437,7 +428,7 @@
 							<div class="flex-1 mr-2">
 								<Tooltip content={$i18n.t('Enter CFG Scale (e.g. 7.0)')} placement="top-start">
 									<input
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 										placeholder={$i18n.t('Enter CFG Scale (e.g. 7.0)')}
 										bind:value={config.automatic1111.AUTOMATIC1111_CFG_SCALE}
 									/>
@@ -451,15 +442,16 @@
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
 									bind:value={config.comfyui.COMFYUI_BASE_URL}
 								/>
 							</div>
 							<button
-								class="px-2.5 bg-gray-50 hover:bg-gray-100 text-content dark:bg-gray-850 dark:hover:bg-gray-800 rounded-lg transition"
+								class="px-2.5 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg"
 								type="button"
-								on:click={async () => {
+								aria-label={$i18n.t('Verify Connection')}
+								onclick={async () => {
 									await updateConfigHandler();
 									const res = await verifyConfigUrl().catch((error) => {
 										toast.error(`${error}`);
@@ -471,18 +463,7 @@
 									}
 								}}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
-										clip-rule="evenodd"
-									/>
-								</svg>
+								<span class="i-lucide-refresh-cw size-4 block"></span>
 							</button>
 						</div>
 					</div>
@@ -492,6 +473,8 @@
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<SensitiveInput
+									outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+									inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 									placeholder={$i18n.t('sk-1234')}
 									bind:value={config.comfyui.COMFYUI_API_KEY}
 									required={false}
@@ -505,11 +488,11 @@
 
 						{#if config.comfyui.COMFYUI_WORKFLOW}
 							<textarea
-								class="w-full rounded-lg mb-1 py-2 px-4 text-xs bg-gray-50 text-content dark:bg-gray-850 outline-hidden disabled:text-content-subtle resize-none"
+								class="w-full rounded-xs mb-1 py-2 px-4 text-xs bg-surface-raised text-content outline-hidden disabled:text-content-subtle resize-none"
 								rows="10"
 								bind:value={config.comfyui.COMFYUI_WORKFLOW}
 								required
-							/>
+							></textarea>
 						{/if}
 
 						<div class="flex w-full">
@@ -519,13 +502,17 @@
 									hidden
 									type="file"
 									accept=".json"
-									on:change={(e) => {
-										const file = e.target.files[0];
+									onchange={(e) => {
+										const inputElement = e.currentTarget;
+										const file = inputElement.files?.[0];
+										if (!file) {
+											return;
+										}
 										const reader = new FileReader();
 
-										reader.onload = (e) => {
-											config.comfyui.COMFYUI_WORKFLOW = e.target.result;
-											e.target.value = null;
+										reader.onload = (event) => {
+											config.comfyui.COMFYUI_WORKFLOW = event.target?.result as string;
+											inputElement.value = '';
 										};
 
 										reader.readAsText(file);
@@ -533,9 +520,9 @@
 								/>
 
 								<button
-									class="w-full text-sm font-medium py-2 bg-transparent hover:bg-gray-100 border border-dashed dark:border-gray-850 dark:hover:bg-gray-850 text-center rounded-xl"
+									class="w-full text-sm font-medium py-2 bg-transparent hover:bg-surface-hover border border-dashed border-line text-center rounded-xl"
 									type="button"
-									on:click={() => {
+									onclick={() => {
 										document.getElementById('upload-comfyui-workflow-input')?.click();
 									}}
 								>
@@ -555,7 +542,7 @@
 
 							<div class="text-xs flex flex-col gap-1.5">
 								{#each requiredWorkflowNodes as node}
-									<div class="flex w-full items-center border dark:border-gray-850 rounded-lg">
+									<div class="flex w-full items-center border border-line rounded-lg">
 										<div class="shrink-0">
 											<div
 												class=" capitalize line-clamp-1 font-medium px-3 py-1 w-20 text-center rounded-l-lg bg-green-500/10 text-green-700 dark:text-green-200"
@@ -566,7 +553,7 @@
 										<div class="">
 											<Tooltip content="Input Key (e.g. text, unet_name, steps)">
 												<input
-													class="py-1 px-3 w-24 text-xs text-center bg-transparent outline-hidden border-r dark:border-gray-850"
+													class="py-1 px-3 w-24 text-xs text-center bg-transparent outline-hidden border-r border-line"
 													placeholder="Key"
 													bind:value={node.key}
 													required
@@ -601,13 +588,15 @@
 
 						<div class="flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm bg-transparent outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Base URL')}
 								bind:value={config.openai.OPENAI_API_BASE_URL}
 								required
 							/>
 
 							<SensitiveInput
+								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={config.openai.OPENAI_API_KEY}
 							/>
@@ -619,13 +608,15 @@
 
 						<div class="flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm bg-transparent outline-none"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Base URL')}
 								bind:value={config.gemini.GEMINI_API_BASE_URL}
 								required
 							/>
 
 							<SensitiveInput
+								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={config.gemini.GEMINI_API_KEY}
 							/>
@@ -635,7 +626,7 @@
 			</div>
 
 			{#if config?.enabled}
-				<hr class=" border-gray-100 dark:border-gray-850" />
+				<hr class=" border-line" />
 
 				<div>
 					<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Default Model')}</div>
@@ -646,7 +637,7 @@
 									<Tooltip content={$i18n.t('Enter Model ID')} placement="top-start">
 										<input
 											list="model-list"
-											class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+											class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 											bind:value={imageGenerationConfig.MODEL}
 											placeholder="Select a model"
 											required
@@ -670,7 +661,7 @@
 						<div class="flex-1 mr-2">
 							<Tooltip content={$i18n.t('Enter Image Size (e.g. 512x512)')} placement="top-start">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									placeholder={$i18n.t('Enter Image Size (e.g. 512x512)')}
 									bind:value={imageGenerationConfig.IMAGE_SIZE}
 									required
@@ -686,7 +677,7 @@
 						<div class="flex-1 mr-2">
 							<Tooltip content={$i18n.t('Enter Number of Steps (e.g. 50)')} placement="top-start">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 text-content dark:bg-gray-850 outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 									placeholder={$i18n.t('Enter Number of Steps (e.g. 50)')}
 									bind:value={imageGenerationConfig.IMAGE_STEPS}
 									required
@@ -701,7 +692,7 @@
 
 	<div class="flex justify-end pt-3 text-sm font-medium">
 		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
+			class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full flex flex-row space-x-1 items-center {loading
 				? ' cursor-not-allowed'
 				: ''}"
 			type="submit"
@@ -711,29 +702,7 @@
 
 			{#if loading}
 				<div class="ml-2 self-center">
-					<svg
-						class=" w-4 h-4"
-						viewBox="0 0 24 24"
-						fill="currentColor"
-						xmlns="http://www.w3.org/2000/svg"
-						><style>
-							.spinner_ajPY {
-								transform-origin: center;
-								animation: spinner_AtaB 0.75s infinite linear;
-							}
-							@keyframes spinner_AtaB {
-								100% {
-									transform: rotate(360deg);
-								}
-							}
-						</style><path
-							d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-							opacity=".25"
-						/><path
-							d="M10.14,1.16a11,11,0,0,0-9,8.92A1.59,1.59,0,0,0,2.46,12,1.52,1.52,0,0,0,4.11,10.7a8,8,0,0,1,6.66-6.61A1.42,1.42,0,0,0,12,2.69h0A1.57,1.57,0,0,0,10.14,1.16Z"
-							class="spinner_ajPY"
-						/></svg
-					>
+					<Spinner className="size-4" />
 				</div>
 			{/if}
 		</button>

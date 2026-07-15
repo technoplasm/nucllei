@@ -88,7 +88,7 @@
 		{:else if selectedTab === 'audio'}
 			<Audio saveHandler={savedToast} />
 		{:else if selectedTab === 'images'}
-			<Images on:save={savedToast} />
+			<Images onSave={savedToast} />
 		{:else if selectedTab === 'pipelines'}
 			<Pipelines saveHandler={savedToast} />
 		{:else if selectedTab === 'db'}
