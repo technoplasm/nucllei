@@ -107,8 +107,11 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   値変更デグレ(Svelte legacy の untrack)の罠は `dev-environment.md` 参照。
 - **設定タブの整理**(4a71ddc94): ツールサーバー設定は独立タブをやめ General に完全統合(保存共通)。
   Code Interpreter タブは撤去(nsjail+IPython 固定で無意味 — #11)。
-- モデル画像は狭いほど小さく(`size-40 sm:size-52 md:size-60`。旧 `size-72 md:size-60` は狭い方が大きい逆転だった)。
-- モデル編集の名前/ID は全タブ共通ヘッダとしてコンテンツ内に置く。
+- **モデル編集の General レイアウト**(改訂 2026-07-15、#70 Models バッチ): 旧「名前/ID = 全タブ共通の
+  素のヘッダ input(3xl)+ 画像を左に size-40〜60」を撤回。名前/ID/Base Model はラベル付き raised input の
+  左カラム、**モデル画像は右端に行ブロックの高さへ合わせた正方形**(`max-h-40` キャップ)。画像列は
+  `absolute inset-y-0 right-0`(行高に寄与させない)+ 左カラム `mr-44` で幅を予約 — flex だけだと
+  aspect-square の幅算出が循環して 0 幅列に画像が被る。Description/ACL はその下に全幅。
 
 ## テーマ
 

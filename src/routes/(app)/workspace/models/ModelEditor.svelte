@@ -106,7 +106,7 @@
 	let baseModels = $state<any[]>([]);
 
 	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
-	// 状態へ暗黙リセットする。名前/ID はタブ外の常時ヘッダなので対象外(リセットしない)。
+	// 状態へ暗黙リセットする。名前/ID は対象外(リセットしない — リネームは submit 時の confirm で扱う)。
 	let stateSnapshot: string | null = null;
 	const captureSnapshot = () => {
 		stateSnapshot = JSON.stringify({
@@ -460,75 +460,43 @@
 					</button>
 				</div>
 
-				<!-- 右コンテンツ。名前/ID は全タブ共通ヘッダとしてここに置く。横幅は layout 側で管理。 -->
+				<!-- 右コンテンツ。横幅は layout 側で管理。 -->
 				<div class="flex-1 min-w-0">
 					<div>
-						<div class="mb-3 flex flex-col">
-							<input
-								class="text-3xl font-semibold w-full bg-transparent outline-hidden"
-								placeholder={$i18n.t('Model Name')}
-								bind:value={name}
-								required
-							/>
-							<input
-								class="text-xs w-full bg-transparent text-content-muted outline-hidden"
-								placeholder={$i18n.t('Model ID')}
-								bind:value={id}
-								required
-							/>
-						</div>
-
 						{#if selectedTab === 'general'}
-							<div class="flex flex-col sm:flex-row gap-4 my-2">
-								<div class="shrink-0">
-									<div class="self-center">
-										<button
-											class="rounded-xl flex shrink-0 items-center {info.meta.profile_image_url
-												? 'bg-transparent'
-												: 'bg-white'} shadow-xl group relative"
-											type="button"
-											aria-label={$i18n.t('Change image')}
-											onclick={() => {
-												filesInputElement?.click();
-											}}
-										>
-											<img
-												src={info.meta.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
-												alt="model profile"
-												class="rounded-xl size-40 sm:size-52 md:size-60 object-cover shrink-0"
-											/>
-
-											<div class="absolute bottom-0 right-0 z-10">
-												<div class="m-1.5">
-													<div
-														class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
-													>
-														<span class="i-lucide-camera size-5 block"></span>
-													</div>
-												</div>
-											</div>
-
-											<div
-												class="absolute top-0 bottom-0 left-0 right-0 bg-white dark:bg-black rounded-lg opacity-0 group-hover:opacity-20 transition"
-											></div>
-										</button>
-
-										<div class="flex w-full mt-1 justify-end">
-											<button
-												class="px-2 py-1 text-content-muted hover:text-content rounded-lg text-xs"
-												onclick={() => {
-													info.meta.profile_image_url = null;
-												}}
-												type="button"
-											>
-												{$i18n.t('Reset Image')}
-											</button>
-										</div>
+							<!-- llens(#70): 名前/ID/Base Model を左カラムに、モデル画像は右端へ。
+							     画像は行ブロックの高さに合わせた正方形(max-h-40 キャップ)。absolute で
+							     行高に寄与させず、左カラムの mr-44(= 最大画像幅 + 余白)で幅を予約する。 -->
+							<div class="relative my-2">
+								<div class="mr-44 flex flex-col gap-2">
+									<div>
+										<label class="block text-sm font-semibold mb-1" for="model-name">
+											{$i18n.t('Name')}
+										</label>
+										<input
+											id="model-name"
+											class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+											placeholder={$i18n.t('Model Name')}
+											bind:value={name}
+											required
+										/>
 									</div>
-								</div>
-								<div class="flex-1 min-w-0">
+
+									<div>
+										<label class="block text-sm font-semibold mb-1" for="model-id">
+											{$i18n.t('ID')}
+										</label>
+										<input
+											id="model-id"
+											class="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden"
+											placeholder={$i18n.t('Model ID')}
+											bind:value={id}
+											required
+										/>
+									</div>
+
 									{#if preset}
-										<div class="my-1">
+										<div>
 											<label class="block text-sm font-semibold mb-1" for="model-base-model">
 												{$i18n.t('Base Model (From)')}
 											</label>
@@ -553,25 +521,68 @@
 											</select>
 										</div>
 									{/if}
+								</div>
 
-									<div class="my-1">
-										<label class="block text-sm font-semibold mb-1" for="model-description">
-											{$i18n.t('Description')}
-										</label>
-
-										<Textarea
-											id="model-description"
-											className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
-											placeholder={$i18n.t('Add a short description about what this model does')}
-											bind:value={info.meta.description}
+								<div class="absolute inset-y-0 right-0 flex flex-col items-end">
+									<button
+										class="relative group flex-1 min-h-0 max-h-40 aspect-square rounded-xl overflow-hidden shadow-lg {info
+											.meta.profile_image_url
+											? 'bg-transparent'
+											: 'bg-white'}"
+										type="button"
+										aria-label={$i18n.t('Change image')}
+										onclick={() => {
+											filesInputElement?.click();
+										}}
+									>
+										<!-- img は absolute にして行の高さへ寄与させない(高さは左カラム由来のみ) -->
+										<img
+											src={info.meta.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+											alt="model profile"
+											class="absolute inset-0 size-full object-cover"
 										/>
-									</div>
 
-									<div class="my-2">
-										<div class="px-3 py-2 bg-surface-raised rounded-lg">
-											<AccessControl bind:accessControl allowPublic={true} />
+										<div class="absolute bottom-0 right-0 z-10 m-1">
+											<div
+												class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
+											>
+												<span class="i-lucide-camera size-4 block"></span>
+											</div>
 										</div>
-									</div>
+
+										<div
+											class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 transition"
+										></div>
+									</button>
+
+									<button
+										class="px-2 py-1 text-content-muted hover:text-content rounded-lg text-xs"
+										onclick={() => {
+											info.meta.profile_image_url = null;
+										}}
+										type="button"
+									>
+										{$i18n.t('Reset Image')}
+									</button>
+								</div>
+							</div>
+
+							<div class="my-2">
+								<label class="block text-sm font-semibold mb-1" for="model-description">
+									{$i18n.t('Description')}
+								</label>
+
+								<Textarea
+									id="model-description"
+									className="text-sm w-full px-2 py-1 bg-surface-raised rounded-lg outline-hidden resize-none overflow-y-hidden"
+									placeholder={$i18n.t('Add a short description about what this model does')}
+									bind:value={info.meta.description}
+								/>
+							</div>
+
+							<div class="my-2">
+								<div class="px-3 py-2 bg-surface-raised rounded-lg">
+									<AccessControl bind:accessControl allowPublic={true} />
 								</div>
 							</div>
 
