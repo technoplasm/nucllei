@@ -1,27 +1,30 @@
 <script lang="ts">
-	import { getContext, tick } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import AddConnectionModal from '$lib/components/AddConnectionModal.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
-	import Cog6 from '$lib/components/icons/Cog6.svelte';
-	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import ManageOllamaModal from './ManageOllamaModal.svelte';
-	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 
-	export let onDelete = () => {};
-	export let onSubmit = () => {};
+	let {
+		url = $bindable(''),
+		config = $bindable({}),
+		idx = 0,
+		onSubmit = () => {},
+		onDelete = () => {}
+	}: {
+		url?: string;
+		config?: any;
+		idx?: number;
+		onSubmit?: (connection: any) => void;
+		onDelete?: () => void;
+	} = $props();
 
-	export let url = '';
-	export let idx = 0;
-	export let config = {};
-
-	let showManageModal = false;
-	let showConfigModal = false;
-	let showDeleteConfirmDialog = false;
+	let showManageModal = $state(false);
+	let showConfigModal = $state(false);
+	let showDeleteConfirmDialog = $state(false);
 </script>
 
 <AddConnectionModal
@@ -36,7 +39,7 @@
 	onDelete={() => {
 		showDeleteConfirmDialog = true;
 	}}
-	onSubmit={(connection) => {
+	onSubmit={(connection: any) => {
 		url = connection.url;
 		config = { ...connection.config, key: connection.key };
 		onSubmit(connection);
@@ -62,13 +65,11 @@
 		placement="top-start"
 	>
 		{#if !(config?.enable ?? true)}
-			<div
-				class="absolute top-0 bottom-0 left-0 right-0 opacity-60 bg-white dark:bg-gray-900 z-10"
-			></div>
+			<div class="absolute top-0 bottom-0 left-0 right-0 opacity-60 bg-surface z-10"></div>
 		{/if}
 
 		<input
-			class="w-full text-sm bg-transparent outline-hidden"
+			class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
 			placeholder={$i18n.t('Enter URL (e.g. http://localhost:11434)')}
 			bind:value={url}
 		/>
@@ -77,25 +78,27 @@
 	<div class="flex gap-1">
 		<Tooltip content={$i18n.t('Manage')} className="self-start">
 			<button
-				class="self-center p-1 bg-transparent hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-lg transition"
-				on:click={() => {
+				class="self-center p-1 bg-transparent hover:bg-surface-hover rounded-lg"
+				aria-label={$i18n.t('Manage')}
+				onclick={() => {
 					showManageModal = true;
 				}}
 				type="button"
 			>
-				<ArrowDownTray />
+				<span class="i-lucide-download size-4 block"></span>
 			</button>
 		</Tooltip>
 
 		<Tooltip content={$i18n.t('Configure')} className="self-start">
 			<button
-				class="self-center p-1 bg-transparent hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-lg transition"
-				on:click={() => {
+				class="self-center p-1 bg-transparent hover:bg-surface-hover rounded-lg"
+				aria-label={$i18n.t('Configure')}
+				onclick={() => {
 					showConfigModal = true;
 				}}
 				type="button"
 			>
-				<Cog6 />
+				<span class="i-lucide-settings size-4 block"></span>
 			</button>
 		</Tooltip>
 	</div>

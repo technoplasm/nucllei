@@ -27,7 +27,7 @@
 
 	export let direct = false;
 
-	export let connection = null;
+	export let connection: any = null;
 
 	let url = '';
 	let path = 'openapi.json';

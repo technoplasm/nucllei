@@ -78,7 +78,7 @@
 		{#if selectedTab === 'general'}
 			<General saveHandler={savedWithConfigRefresh} />
 		{:else if selectedTab === 'connections'}
-			<Connections on:save={savedToast} />
+			<Connections onSave={savedToast} />
 		{:else if selectedTab === 'models'}
 			<Models />
 		{:else if selectedTab === 'documents'}
