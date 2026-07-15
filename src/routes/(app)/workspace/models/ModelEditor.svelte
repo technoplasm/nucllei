@@ -81,8 +81,9 @@
 	let params = $state<Record<string, any>>({
 		system: ''
 	});
+	// llens(#70): vision は既定 OFF(2026-07-15。画像入力は明示的に有効化したモデルだけ)
 	let capabilities = $state<Record<string, boolean | undefined>>({
-		vision: true,
+		vision: false,
 		usage: undefined,
 		citations: true
 	});
@@ -327,6 +328,15 @@
 			<span class="i-lucide-chevron-left size-4 block"></span>
 			{$i18n.t('Back')}
 		</button>
+	{:else}
+		<!-- workspace/models からの利用(create/edit ページ)— 一覧へ戻る(SkillEditor 同型) -->
+		<a
+			class="inline-flex items-center gap-1 text-sm py-0.5 pl-2 pr-4 mb-2 bg-secondary hover:bg-secondary-hover text-secondary-content rounded-lg transition"
+			href="/workspace/models"
+		>
+			<span class="i-lucide-chevron-left size-4 block"></span>
+			{$i18n.t('Back to list')}
+		</a>
 	{/if}
 
 	<div class="w-full max-h-full flex justify-center">
@@ -579,7 +589,7 @@
 							</div>
 
 							<div class="my-2">
-								<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-lg">
+								<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-xs">
 									<AccessControl bind:accessControl allowPublic={true} />
 								</div>
 							</div>
