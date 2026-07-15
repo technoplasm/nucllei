@@ -21,6 +21,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ConfigureModelsModal from './ConfigureModelsModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -30,6 +31,8 @@
 
 	let showDeleteConfirm = $state(false);
 	let deleteModel = $state<any>(null);
+
+	let showConfigModal = $state(false);
 
 	const filteredItems = $derived(
 		models.filter(
@@ -63,8 +66,18 @@
 	};
 
 	const init = async () => {
-		models = await getWorkspaceModels();
+		const list = await getWorkspaceModels();
 		await _models.set(await getModels());
+
+		// picker(/api/models — MODEL_ORDER_LIST 適用済み)と同じ順で一覧を並べる。
+		// picker に出ないモデル(無効化中など)は末尾に名前順で。
+		const order = new Map(($_models ?? []).map((m: any, i: number) => [m.id, i]));
+		models = list.sort((a: any, b: any) => {
+			const ai = order.get(a.id) ?? Infinity;
+			const bi = order.get(b.id) ?? Infinity;
+			if (ai !== bi) return ai - bi;
+			return a.name.localeCompare(b.name);
+		});
 	};
 
 	onMount(async () => {
@@ -108,7 +121,7 @@
 				{$i18n.t('Create Model')}
 			</a>
 
-			<div class="flex items-center px-2 bg-surface-raised rounded-lg">
+			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
@@ -116,8 +129,23 @@
 					placeholder={$i18n.t('Search Models')}
 				/>
 			</div>
+
+			<Tooltip content={$i18n.t('表示順・既定モデル')}>
+				<button
+					class="h-full flex items-center px-2 bg-surface-raised hover:bg-surface-hover rounded-xs"
+					type="button"
+					aria-label={$i18n.t('Configure Models')}
+					onclick={() => {
+						showConfigModal = true;
+					}}
+				>
+					<span class="i-lucide-arrow-up-down size-3.5 block"></span>
+				</button>
+			</Tooltip>
 		</div>
 	</div>
+
+	<ConfigureModelsModal bind:show={showConfigModal} onSave={init} />
 
 	<div class="mb-3 gap-2 grid lg:grid-cols-2 xl:grid-cols-3">
 		{#each filteredItems as model (model.id)}

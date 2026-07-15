@@ -27,8 +27,6 @@
 	import ModelEditor from '../../../../routes/(app)/workspace/models/ModelEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import Cog6 from '$lib/components/icons/Cog6.svelte';
-	import ConfigureModelsModal from './Models/ConfigureModelsModal.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
 	import ManageModelsModal from './Models/ManageModelsModal.svelte';
@@ -50,7 +48,6 @@
 	let filteredModels = [];
 	let selectedModelId = null;
 
-	let showConfigModal = false;
 	let showManageModal = false;
 
 	$: if (models) {
@@ -212,7 +209,7 @@
 	});
 </script>
 
-<ConfigureModelsModal bind:show={showConfigModal} initHandler={init} />
+<!-- llens(#70): 表示順・既定モデルの ConfigureModelsModal は workspace/models へ移設 -->
 <ManageModelsModal bind:show={showManageModal} />
 
 {#if models !== null}
@@ -235,18 +232,6 @@
 							}}
 						>
 							<ArrowDownTray />
-						</button>
-					</Tooltip>
-
-					<Tooltip content={$i18n.t('Settings')}>
-						<button
-							class=" p-1 rounded-full flex gap-1 items-center"
-							type="button"
-							on:click={() => {
-								showConfigModal = true;
-							}}
-						>
-							<Cog6 />
 						</button>
 					</Tooltip>
 				</div>
