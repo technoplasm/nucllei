@@ -120,16 +120,23 @@
 	>
 		<div class=" flex justify-between gap-3 text-content px-5 pt-4 mb-1.5">
 			{#if custom}
-				<!-- 名前はタイトル位置でインライン編集(General タブ廃止に伴い)。
-				     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール) -->
-				<input
-					class="w-full text-lg font-medium self-center font-primary bg-surface-muted rounded-xs px-2 py-0.5 placeholder:text-content-subtle outline-hidden"
-					type="text"
-					bind:value={name}
-					placeholder={$i18n.t('Group Name')}
-					autocomplete="off"
-					required
-				/>
+				<!-- 名前はタイトル位置でラベル付きインライン編集(General タブ廃止に伴い)。
+				     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール)。
+				     ラベルは FunctionEditor 同型(単一行なので固定幅 w-24 は取らない) -->
+				<div class="flex items-center gap-2 w-full min-w-0">
+					<label class="shrink-0 text-sm font-semibold" for="group-name">
+						{$i18n.t('Name')}
+					</label>
+					<input
+						id="group-name"
+						class="flex-1 min-w-0 text-lg font-medium self-center font-primary bg-surface-muted rounded-xs px-2 py-0.5 placeholder:text-content-subtle outline-hidden"
+						type="text"
+						bind:value={name}
+						placeholder={$i18n.t('Group Name')}
+						autocomplete="off"
+						required
+					/>
+				</div>
 			{:else}
 				<div class=" text-lg font-medium self-center font-primary">
 					{$i18n.t('Edit Default Permissions')}
