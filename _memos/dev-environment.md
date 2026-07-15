@@ -43,7 +43,8 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   カバレッジ外のファイルに残った orphan import を vitest がすり抜ける(#67 で
   common/Tags/TagInput の削除済み store import が CI の build 段階まで到達)。
   **大きめの撤去をしたら push 前に `pnpm build` を一度回す**(svelte-check でも可だが build が確実)。
-- **pre-push hook(2026-07-10 導入)**: 上記 2 ゲートを push 前に手元で再現する
+- **pre-push hook(2026-07-10 導入、2026-07-16 に ruff 追加)**: フォーマット 2 ゲート
+  (black/prettier)+ **ruff(CI: Lint Backend)** を push 前に手元で再現する
   `dev/hooks/pre-push`(push 差分のファイルだけチェックするので数秒)。hook 本体は
   リポジトリに入っているが、**有効化は clone ごとに 1 回 `git config core.hooksPath dev/hooks`
   が必要**(git はセキュリティ上 hook を自動有効化しない — 新環境セットアップ時に忘れずに)。

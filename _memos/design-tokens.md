@@ -44,8 +44,8 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   ページ側は「form 一段の flex-col h-full + エディタ枠 `flex-1 min-h-0`」で貼る(col 連打・`h-0` hack は廃止)。
 - フォームのラベルは固定幅(`w-24 shrink-0`)の `<label for>` でコントロール(`id` 付き)と同一行
   (縦を稼ぐ + クリックでフォーカス。真実源 = FunctionEditor)。
-- **一覧ページの様式**(真実源 = models/+page.svelte、2026-07-15 改訂): ヘッダ `mt-1.5`(+ ボタン行 `mt-2`)+
-  primary Create pill + raised 検索ボックス(`rounded-xs`)/ grid は `mt-6 gap-3` / カード =
+- **一覧ページの様式**(真実源 = models/+page.svelte、2026-07-15 改訂): ヘッダは下の
+  「一覧ヘッダの確定様式」(2026-07-16)/ grid は `mt-6 gap-3` / カード =
   `relative bg-surface-raised rounded-xl px-4 py-3` + **カード全体がクリック=編集**(stretched-link:
   `a` に `after:absolute after:inset-0`、右のボタン/Switch は `relative` でオーバーレイの上に載せる。
   a の中に button を入れるのは HTML 違反なのでこれが定石 — Bootstrap の stretched-link と同じ)。
@@ -53,8 +53,37 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   で親の hover を抑制**(hover 面とクリック先が常に一致)。カード内アイコンボタンは
   `bg-transparent hover:bg-surface-hover`(hover 色をカードと統一。旧 `hover:bg-black/5` は廃止)/
   セクション見出し `text-md text-content-muted mt-3 mb-1`(先頭は mt-6 相当)。
-- **テーブル**(users/chats): thead = `bg-surface-muted`、tbody 行 = `bg-surface-raised`。
+  全面クリックが `a` でなく `button` のカード(files = モーダル開)では `:has(button:hover)` が
+  常時真になるので、行内アクションに `.card-action` を付けて `:has(.card-action:hover)` で
+  抑制対象を限定する(2026-07-15、214368464)。
+- **一覧ヘッダの確定様式**(2026-07-16 確定 9f9da44e0、models/skills/tools/functions/files/users/groups の
+  7 画面で class 字面まで同一): **見出しで 1 行(`text-xl font-medium px-0.5`、count は出さない)→
+  2 行目 `mt-2 flex flex-wrap items-center gap-x-4 gap-y-2` に Create pill + raised 検索**。
+  - pill = `shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary
+    hover:bg-primary-hover text-primary-content font-medium text-sm` + `i-lucide-plus size-3.5 block mr-1`
+    (**icon 付きは pr 広めが収まり良い**、の決定)。
+  - 検索 = `flex items-center px-2 bg-surface-raised rounded-xs` + input
+    `w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden`。
+  - **罠: 行に `items-center` が無いと flex 既定の stretch で pill が検索ボックスの高さ(28px)に
+    伸びる**(Create Tool だけ背が高かった事件)。pill の自然高は 24px。
+  - 経緯: 「見出しと同じ行に pill」案(c734e0085)を試した後、見出し単独行に確定(1d9918376)。
+- **テーブル**(users/groups/chats/files): thead = `bg-surface-muted`、tbody 行 = `bg-surface-raised` +
+  行クリック=編集なら `cursor-pointer hover:bg-surface-hover`(2026-07-16 改訂 — 旧 `hover:bg-black/5` 廃止。
+  行内に button があるときはカードと同じ `[&:hover:not(:has(button:hover))]:bg-surface-hover`)。
   共通コンポーネント化は 3 例目が出るまで見送り。
+- **transition 規律**(2026-07-16 確立 907c50cd5): **hover・active の色変化は即時 — `transition` を
+  付けない**。transition は transform・レイアウト等の「意図した動き」専用(現存は workspace layout の
+  サイドバー幅 `transition-width duration-200` のみ)。upstream は色 hover に無秩序に付けていた —
+  workspace 配下 19 ファイルから全廃済み。新規コードでも色 hover に transition を書かない。
+- **モーダルヘッダの名前インライン編集**(2026-07-16、真実源 = EditGroupModal): エンティティ名だけの
+  General タブは持たず、**タイトル位置に自然幅 label(`shrink-0 text-sm font-semibold`)+ muted 面の
+  input(`bg-surface-muted rounded-xs px-2 py-0.5 text-lg font-medium`)**。素の透明 input は
+  編集できると気付けないので必ず面を張る(2 段ルールの適用)。form はヘッダごと包む。
+  単一行なのでラベルの固定幅 `w-24` は取らない(固定幅は縦に並ぶフォーム行の整列用)。
+- **トグル群のレイアウト**(2026-07-16、真実源 = GroupPermissions): ラベル+トグルの行を全幅
+  justify-between で並べると目線が離れる。**`grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6`
+  に畳む**(セル内は justify-between)。auto-fill はコンテナ幅で列数が決まるので、同一コンポーネントが
+  インライン(実測 836px → 3 列)とモーダル(464px → 2 列)の両方に効く。
 
 - 変数がテーマで切り替わるので利用側に `dark:` 変種は不要。
 - テキストトークンの実値は **raw hex**(`--surface`/`--line` と同流儀で `:root`/`html.dark` に直書き)。
