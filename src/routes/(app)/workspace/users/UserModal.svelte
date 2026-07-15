@@ -200,7 +200,7 @@
 							<button
 								class="min-w-fit rounded-full p-1.5 {tab === ''
 									? ''
-									: 'text-content-subtle hover:text-content'} transition"
+									: 'text-content-subtle hover:text-content'} "
 								type="button"
 								onclick={() => {
 									tab = '';
@@ -210,7 +210,7 @@
 							<button
 								class="min-w-fit rounded-full p-1.5 {tab === 'import'
 									? ''
-									: 'text-content-subtle hover:text-content'} transition"
+									: 'text-content-subtle hover:text-content'} "
 								type="button"
 								onclick={() => {
 									tab = 'import';
@@ -344,7 +344,7 @@
 
 					<div class="flex justify-end pt-3 text-sm font-medium">
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
+							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full flex flex-row space-x-1 items-center {loading
 								? ' cursor-not-allowed'
 								: ''}"
 							type="submit"

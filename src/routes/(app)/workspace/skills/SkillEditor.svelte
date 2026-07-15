@@ -164,7 +164,7 @@
 
 			{#if $user?.role === 'admin'}
 				<button
-					class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content transition text-sm font-medium"
+					class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content text-sm font-medium"
 					type="button"
 					onclick={() => {
 						showAccessControlModal = true;
@@ -224,7 +224,7 @@
 						<div class="flex items-center flex-wrap gap-x-3 gap-y-1">
 							{#each Object.keys(_tools) as tool (tool)}
 								<!-- label 包みで名前クリックでも toggle(#49 と同じ流儀。Checkbox の
-								     button は labelable なので for/id 不要でクリックが転送される) -->
+								 button は labelable なので for/id 不要でクリックが転送される) -->
 								<label class="flex items-center gap-2 cursor-pointer">
 									<Checkbox
 										state={_tools[tool].selected ? 'checked' : 'unchecked'}
@@ -276,7 +276,7 @@
 
 	<div class="pb-3 flex justify-start items-center gap-3">
 		<button
-			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading ||
+			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg {loading ||
 			!canEdit
 				? ' cursor-not-allowed opacity-50'
 				: ''} flex items-center"

@@ -129,7 +129,7 @@
 	>
 		{#each TABS as tab (tab.id)}
 			<button
-				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right {selectedTab ===
 				tab.id
 					? ''
 					: ' text-content-subtle hover:text-content'}"
@@ -153,7 +153,7 @@
 					<div class="text-lg font-medium">{$i18n.t('Users')}</div>
 
 					<button
-						class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+						class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 						onclick={() => {
 							editTarget = null;
 							showUserModal = true;
@@ -219,10 +219,10 @@
 					<tbody>
 						{#each filteredUsers as user (user.id)}
 							<!-- 行クリック=編集モーダル(行末アイコンはチャットのみ — 2026-07-16)。
-							     削除導線は持たない: user 削除は hard delete(チャットも物理削除・file は孤児化)
+							 削除導線は持たない: user 削除は hard delete(チャットも物理削除・file は孤児化)
 							     なので FE から出さず、無効化は編集で role=pending に落とす運用 -->
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover transition"
+								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover"
 								onclick={() => {
 									editTarget = user;
 									showUserModal = true;
@@ -270,7 +270,7 @@
 								<td class="px-3 py-1 text-right">
 									<div class="flex justify-end w-full">
 										<!-- llens(#69): admin 同士でも閲覧可に(user.role !== 'admin' の除外を撤去。
-										     BE は元々 target の role を見ていない — 隠していたのは FE だけ) -->
+										 BE は元々 target の role を見ていない — 隠していたのは FE だけ) -->
 										{#if $config?.features?.enable_admin_chat_access}
 											<Tooltip content={$i18n.t('Chats')}>
 												<button

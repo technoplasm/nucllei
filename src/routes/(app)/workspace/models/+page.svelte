@@ -101,7 +101,7 @@
 		}}
 	>
 		<div class=" text-sm text-content-muted">
-			{$i18n.t('This will delete')} <span class="  font-semibold">{deleteModel.id}</span>.
+			{$i18n.t('This will delete')} <span class=" font-semibold">{deleteModel.id}</span>.
 		</div>
 	</DeleteConfirmDialog>
 
@@ -113,10 +113,10 @@
 		</div>
 
 		<!-- 狭幅は「Create ←端寄せ→ [↑↓] / 検索(全幅)」の 2 行に折り返す。
-		     DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
+		 DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<a
-				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/models/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>

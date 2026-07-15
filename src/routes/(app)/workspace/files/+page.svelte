@@ -322,7 +322,7 @@
 	>
 		<div class=" text-sm text-content-muted">
 			{$i18n.t('This will delete')}
-			<span class="  font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
+			<span class=" font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
 		</div>
 	</DeleteConfirmDialog>
 
@@ -364,10 +364,10 @@
 		</div>
 
 		<!-- 狭幅は models 同型の 2 行折り返し(Upload ←端寄せ→ 表示コントロール / 検索は全幅)。
-		     DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
+		 DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
 			<button
-				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				type="button"
 				disabled={uploading}
 				onclick={() => {
@@ -398,7 +398,7 @@
 			<div class="order-2 ml-auto sm:order-3 sm:ml-0 flex items-center gap-0.5">
 				<Tooltip content={$i18n.t('Card View')}>
 					<button
-						class="p-1.5 rounded-lg transition {viewMode === 'grid'
+						class="p-1.5 rounded-lg {viewMode === 'grid'
 							? 'bg-surface-raised text-content'
 							: 'text-content-muted hover:bg-surface-hover'}"
 						type="button"
@@ -410,7 +410,7 @@
 				</Tooltip>
 				<Tooltip content={$i18n.t('Table View')}>
 					<button
-						class="p-1.5 rounded-lg transition {viewMode === 'table'
+						class="p-1.5 rounded-lg {viewMode === 'table'
 							? 'bg-surface-raised text-content'
 							: 'text-content-muted hover:bg-surface-hover'}"
 						type="button"
@@ -422,7 +422,7 @@
 				</Tooltip>
 				<Tooltip content={directionLabel}>
 					<button
-						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover transition"
+						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover "
 						type="button"
 						aria-label={directionLabel}
 						onclick={() => {
@@ -504,7 +504,7 @@
 						>
 							<span>{uploader?.name ?? uploaderId}</span>
 							<button
-								class="rounded-full hover:bg-surface-hover transition"
+								class="rounded-full hover:bg-surface-hover "
 								type="button"
 								aria-label={$i18n.t('Delete')}
 								onclick={() => {
@@ -537,7 +537,7 @@
 					{#each section.items as file (file.id)}
 						{@const vis = visibilityOf(file)}
 						<!-- カード全体がクリック=閲覧(button の after オーバーレイ)。右のボタン類は relative で上に載せる。
-						     models と違い全面クリックも button なので、hover 抑制は .card-action に限定する -->
+						 models と違い全面クリックも button なので、hover 抑制は .card-action に限定する -->
 						<div
 							class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(.card-action:hover))]:bg-surface-hover rounded-xl"
 						>
@@ -684,7 +684,7 @@
 						{#each section.items as file (file.id)}
 							{@const vis = visibilityOf(file)}
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover transition"
+								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover"
 								onclick={() => openFile(file)}
 							>
 								<td class="px-3 py-1 font-medium text-content">
@@ -764,7 +764,7 @@
 	{#if files.length < total}
 		<div class="w-full flex justify-center pb-6 -mt-2">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium rounded-lg hover:bg-surface-hover text-content-muted hover:text-content transition flex items-center gap-2"
+				class="px-3.5 py-1.5 text-sm font-medium rounded-lg hover:bg-surface-hover text-content-muted hover:text-content flex items-center gap-2"
 				type="button"
 				disabled={loading}
 				onclick={() => fetchFiles(true)}

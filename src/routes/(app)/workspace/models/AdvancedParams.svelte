@@ -42,7 +42,7 @@
 	// レイアウトはテンプレートを一度いじれば全項目に一括で反映される。
 	//
 	// type:
-	//   'cycle'  … states を巡回するボタン（Default トグルなし）
+	// 'cycle'  … states を巡回するボタン（Default トグルなし）
 	//   'range'  … Default トグル + スライダー + 数値入力
 	//   'input'  … Default トグル + 単一入力（text / number）
 	//   'switch' … Default トグル + Switch
@@ -308,7 +308,7 @@
 		</div>
 
 		<!-- 1col だと横に伸びて視認性が落ちるので自動で列分けする。max は 1fr にすること:
-		     固定 px を max にすると auto-fill がその px 単位で本数を数え、幅が足りず 1col に潰れる。 -->
+		 固定 px を max にすると auto-fill がその px 単位で本数を数え、幅が足りず 1col に潰れる。 -->
 		<div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-6">
 			{#each section.items as item (item.key)}
 				{#if !item.admin || admin}
@@ -322,7 +322,7 @@
 						<div class="flex items-center gap-1 min-w-0">
 							{#if item.type === 'cycle'}
 								<button
-									class="p-1 px-1 text-sm flex rounded-sm transition shrink-0 outline-hidden"
+									class="p-1 px-1 text-sm flex rounded-sm shrink-0 outline-hidden"
 									type="button"
 									on:click={() => cycle(item)}
 								>
@@ -330,7 +330,7 @@
 								</button>
 							{:else}
 								<button
-									class="p-1 px-1 text-sm flex rounded-sm transition shrink-0 outline-hidden"
+									class="p-1 px-1 text-sm flex rounded-sm shrink-0 outline-hidden"
 									type="button"
 									on:click={() => toggleDefault(item)}
 								>

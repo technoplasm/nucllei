@@ -73,7 +73,7 @@
 				>
 					<button
 						id="sidebar-toggle-button"
-						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850"
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
@@ -96,7 +96,7 @@
 									`/workspace/${tab.path}`
 								)
 									? ''
-									: 'text-content-subtle hover:text-content'} transition"
+									: 'text-content-subtle hover:text-content'}"
 								href={`/workspace/${tab.path}`}>{$i18n.t(tab.label)}</a
 							>
 						{/each}

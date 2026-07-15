@@ -122,7 +122,7 @@
 
 		<div class="mt-2 flex gap-4">
 			<a
-				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/tools/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>
@@ -141,7 +141,7 @@
 	</div>
 
 	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
-	     visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
+	 visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
 		<div class="text-md font-medium text-content-muted px-0.5 mt-6 mb-1">
 			{$i18n.t('Builtin')}
@@ -256,7 +256,7 @@
 		}}
 	>
 		<div class=" text-sm text-content-muted">
-			{$i18n.t('This will delete')} <span class="  font-semibold">{selectedTool.name}</span>.
+			{$i18n.t('This will delete')} <span class=" font-semibold">{selectedTool.name}</span>.
 		</div>
 	</DeleteConfirmDialog>
 

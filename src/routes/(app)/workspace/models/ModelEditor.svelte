@@ -332,7 +332,7 @@
 		{/if}
 
 		<!-- 高さは settings と同型: 全体を h-full で貼り、スクロールは右コンテンツ列の内部で行う
-	     (Prompt タブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
+	 (Prompt タブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
 	     素の overflow-x-auto は min-height 0 扱いで高さ 0 に潰れる(#47 の罠)。 -->
 		<div class="w-full flex-1 min-h-0 flex justify-center">
 			<input
@@ -407,7 +407,7 @@
 
 			{#if !edit || (edit && model)}
 				<!-- llens(#34): 設定画面と同型 — 左サブメニュー + 右コンテンツ。
-			     横幅は workspace/+layout.svelte 側で一元管理(5xl 中央寄せ)するのでここでは持たない。
+			 横幅は workspace/+layout.svelte 側で一元管理(5xl 中央寄せ)するのでここでは持たない。
 			     lg 未満は flex-col で submenu が上に逃げる。 -->
 				<form
 					class="flex flex-col lg:flex-row w-full h-full gap-3 lg:gap-4"
@@ -421,7 +421,7 @@
 						class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
 					>
 						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
 							'general'
 								? ''
 								: ' text-content-subtle hover:text-content'}"
@@ -435,7 +435,7 @@
 						</button>
 
 						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
 							'prompt'
 								? ''
 								: ' text-content-subtle hover:text-content'}"
@@ -449,7 +449,7 @@
 						</button>
 
 						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left transition {selectedTab ===
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
 							'advanced'
 								? ''
 								: ' text-content-subtle hover:text-content'}"
@@ -469,7 +469,7 @@
 						<div class={selectedTab === 'prompt' ? 'h-full flex flex-col' : ''}>
 							{#if selectedTab === 'general'}
 								<!-- llens(#70): 名前/ID/Base Model を左カラムに、モデル画像は右端へ。
-							     画像は行ブロックの高さに合わせた正方形(max-h-40 キャップ)。absolute で
+							 画像は行ブロックの高さに合わせた正方形(max-h-40 キャップ)。absolute で
 							     行高に寄与させず、左カラムの mr-44(= 最大画像幅 + 余白)で幅を予約する。 -->
 								<div class="relative my-2">
 									<div class="mr-44 flex flex-col gap-2">
@@ -545,14 +545,14 @@
 
 											<div class="absolute bottom-0 right-0 z-10 m-1">
 												<div
-													class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
+													class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
 												>
 													<span class="i-lucide-camera size-4 block"></span>
 												</div>
 											</div>
 
 											<div
-												class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 transition"
+												class="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-20 "
 											></div>
 										</button>
 
@@ -627,7 +627,7 @@
 										</div>
 
 										<button
-											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content transition"
+											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content "
 											type="button"
 											aria-label={$i18n.t('Add prompt suggestion')}
 											onclick={() => {
@@ -711,7 +711,7 @@
 
 							<div class="flex justify-start {selectedTab === 'prompt' ? 'my-3' : 'my-4 pb-20'}">
 								<button
-									class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg {loading
+									class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg {loading
 										? ' cursor-not-allowed opacity-50'
 										: ''} flex items-center"
 									type="submit"

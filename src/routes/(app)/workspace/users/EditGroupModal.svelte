@@ -117,7 +117,7 @@
 	>
 		<div class=" flex justify-between gap-3 text-content px-5 pt-4 mb-1.5">
 			<!-- 名前はタイトル位置でラベル付きインライン編集(General タブ廃止に伴い)。
-			     編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール)。
+			 編集できると分かるようコントロールの面を張る(モーダル内 = muted の 2 段ルール)。
 			     ラベルは FunctionEditor 同型(単一行なので固定幅 w-24 は取らない) -->
 			<div class="flex items-center gap-2 w-full min-w-0">
 				<label class="shrink-0 text-sm font-semibold" for="group-name">
@@ -154,7 +154,7 @@
 						>
 							{#each tabs as tab (tab)}
 								<button
-									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
+									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right {selectedTab ===
 									tab
 										? ''
 										: ' text-content-subtle hover:text-content'}"
@@ -191,7 +191,7 @@
 					<div class="flex justify-between pt-3 text-sm font-medium gap-1.5">
 						{#if edit}
 							<button
-								class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-900 dark:text-white bg-white text-black hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+								class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-900 dark:text-white bg-white text-black hover:bg-gray-100 rounded-full flex flex-row space-x-1 items-center"
 								type="button"
 								onclick={() => {
 									showDeleteConfirmDialog = true;
@@ -204,7 +204,7 @@
 						{/if}
 
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
+							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full flex flex-row space-x-1 items-center {loading
 								? ' cursor-not-allowed'
 								: ''}"
 							type="submit"

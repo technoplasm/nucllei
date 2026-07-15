@@ -50,7 +50,7 @@
 				<div class="flex flex-col mt-1">
 					{#each section.ids as tool}
 						<!-- llens(#49): skill 表示に倣い、行全体をラベルにして中の関数(specs)まで見せる。
-						     label で包むと中の Checkbox(button)クリックが行全体に効く -->
+						 label で包むと中の Checkbox(button)クリックが行全体に効く -->
 						<label class="flex items-start gap-2 mr-3 py-0.5 cursor-pointer">
 							<span class="mt-0.5 shrink-0">
 								<Checkbox

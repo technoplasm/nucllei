@@ -90,7 +90,7 @@
 
 		<div class="mt-2 flex gap-4">
 			<a
-				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				href="/workspace/functions/create"
 			>
 				<span class="i-lucide-plus size-3.5 block mr-1"></span>
@@ -170,7 +170,7 @@
 		}}
 	>
 		<div class=" text-sm text-content-muted">
-			{$i18n.t('This will delete')} <span class="  font-semibold">{selectedFunction.name}</span>.
+			{$i18n.t('This will delete')} <span class=" font-semibold">{selectedFunction.name}</span>.
 		</div>
 	</DeleteConfirmDialog>
 

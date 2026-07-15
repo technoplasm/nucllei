@@ -59,10 +59,10 @@ from typing import Optional
 
 
 class Filter:
-    class Valves(BaseModel):
+ class Valves(BaseModel):
         priority: int = Field(
             default=0, description="Priority level for the filter operations."
-        )
+ )
 
     def __init__(self):
         self.valves = self.Valves()
@@ -121,7 +121,7 @@ from typing import Optional
 
 
 class Attachment:
-    class Valves(BaseModel):
+ class Valves(BaseModel):
         pass
 
     def __init__(self):
@@ -130,7 +130,7 @@ class Attachment:
     def process(self, file, __request__, __user__: Optional[dict] = None) -> str:
         # Fired on upload when this Attachment is assigned to the model.
         # Route by file.meta["content_type"], extract text (markdown) and
-        # RETURN it. The system stores it as the file content (status=success).
+ # RETURN it. The system stores it as the file content (status=success).
         # To fail, raise with a message — the system records it as the content
         # and marks the file extraction=failed (shown to the model as-is).
         from open_webui.retrieval.extract import extract_file_text
@@ -195,7 +195,7 @@ class Attachment:
 >
 	<div>
 		<!-- llens(#45): 作成/編集画面を skill / tool 型のセクション構成に統一。
-		     ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
+		 ラベルは固定幅(w-24)でコントロールと同一行 — エディタの縦を稼ぐ。 -->
 		<a
 			class="inline-flex items-center text-sm py-0.5 text-content-subtle hover:text-content font-medium"
 			href="/workspace/functions"
@@ -285,7 +285,7 @@ class Attachment:
 
 	<div class="pb-3 flex justify-start">
 		<button
-			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content transition rounded-lg"
+			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg"
 			type="submit"
 		>
 			{$i18n.t('Save')}

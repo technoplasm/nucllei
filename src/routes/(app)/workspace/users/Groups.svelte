@@ -174,7 +174,7 @@
 
 					<div class="flex justify-end pt-3 text-sm font-medium gap-1.5">
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {creating
+							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full flex flex-row space-x-1 items-center {creating
 								? ' cursor-not-allowed'
 								: ''}"
 							type="submit"
@@ -199,7 +199,7 @@
 			<div class="text-lg font-medium">{$i18n.t('Groups')}</div>
 
 			<button
-				class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content transition font-medium text-sm"
+				class="shrink-0 whitespace-nowrap inline-flex items-center px-3 py-1 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
 				onclick={() => {
 					showCreateGroupModal = true;
 				}}
@@ -232,7 +232,7 @@
 
 				<div class="mt-3">
 					<button
-						class=" px-4 py-1.5 text-sm rounded-full bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition font-medium flex items-center space-x-1"
+						class=" px-4 py-1.5 text-sm rounded-full bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 font-medium flex items-center space-x-1"
 						onclick={() => {
 							showCreateGroupModal = true;
 						}}
@@ -256,7 +256,7 @@
 					<tbody>
 						{#each filteredGroups as group (group.id)}
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer hover:bg-surface-hover transition"
+								class="bg-surface-raised text-xs cursor-pointer hover:bg-surface-hover"
 								onclick={() => {
 									selectedGroup = group;
 									showEditGroupModal = true;
@@ -279,7 +279,7 @@
 		{/if}
 
 		<!-- 既定権限: モーダルに畳まず常時表示(2026-07-16)。user ロール全員のベースなので
-		     グループと同じ画面で一望できるほうが権限の全体像を追いやすい -->
+		 グループと同じ画面で一望できるほうが権限の全体像を追いやすい -->
 		<hr class="my-4 border-line" />
 
 		<div class="flex items-center gap-2.5 px-0.5 mb-2">
@@ -293,7 +293,7 @@
 
 		<div class="flex justify-start pt-3 pb-4">
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium rounded-full bg-primary hover:bg-primary-hover text-primary-content transition flex items-center gap-2"
+				class="px-3.5 py-1.5 text-sm font-medium rounded-full bg-primary hover:bg-primary-hover text-primary-content flex items-center gap-2"
 				type="button"
 				disabled={savingDefaultPermissions}
 				onclick={saveDefaultPermissionsHandler}
