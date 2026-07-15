@@ -81,6 +81,23 @@ class TestFilesManagement(AbstractPostgresTest):
         assert r.status_code == 200, r.text
         assert [item["id"] for item in r.json()["items"]] == ["f_x", "f_z", "f_y"]
 
+    def test_list_sort_by_filename(self):
+        # 大文字小文字を無視した名前順
+        for fid, name in (("f_1", "banana.txt"), ("f_2", "Apple.txt"), ("f_3", "cherry.txt")):
+            self._insert_file(fid, filename=name)
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(
+                self.create_url("/list", {"order_by": "filename", "direction": "asc"})
+            )
+        assert r.status_code == 200, r.text
+        assert [item["id"] for item in r.json()["items"]] == ["f_2", "f_1", "f_3"]
+
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(
+                self.create_url("/list", {"order_by": "filename", "direction": "desc"})
+            )
+        assert [item["id"] for item in r.json()["items"]] == ["f_3", "f_1", "f_2"]
+
     def test_list_limit_offset_and_total(self):
         for i in range(5):
             self._insert_file(f"f_{i}")
@@ -273,3 +290,72 @@ class TestFilesManagement(AbstractPostgresTest):
     def test_accessed_at_set_on_insert(self):
         file = self._insert_file("f_new", user_id="1")
         assert file.accessed_at == file.created_at
+
+    # ---- GET /{id}/chats(file を参照するチャット導線) ----
+
+    def _insert_chat(self, user_id, title, file_id=None):
+        from open_webui.models.chats import ChatForm, Chats
+
+        chat = Chats.insert_new_chat(
+            user_id,
+            ChatForm(
+                chat={
+                    "title": title,
+                    "history": {"currentId": "m1", "messages": {}},
+                    # 実際の添付は message.files / chat.files 双方にあり得る —
+                    # 検出は JSON 全文 LIKE なのでトップレベル files で代表させる
+                    "files": [{"id": file_id, "type": "file"}] if file_id else [],
+                }
+            ),
+        )
+        assert chat is not None
+        return chat
+
+    def test_file_chats_lists_own_referencing_chats(self):
+        self._insert_file("f_ref-0000-uuid", user_id="1")
+        c1 = self._insert_chat("1", "uses file", file_id="f_ref-0000-uuid")
+        self._insert_chat("1", "unrelated chat")
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/f_ref-0000-uuid/chats"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert [c["id"] for c in body] == [c1.id]
+        assert body[0]["title"] == "uses file"
+        assert body[0]["user_id"] == "1"
+        assert "updated_at" in body[0]
+
+    def test_file_chats_non_admin_sees_only_own_chats(self):
+        # 全体公開 file は他人も読めるが、返るチャットは本人の分だけ
+        self._insert_file(
+            "f_pub-0000-uuid", user_id="1", access_control={"read": {"public": True}}
+        )
+        self._insert_chat("1", "owner's chat", file_id="f_pub-0000-uuid")
+        mine = self._insert_chat("2", "my chat", file_id="f_pub-0000-uuid")
+        with mock_webui_user(id="2", role="user"):
+            r = self.fast_api_client.get(self.create_url("/f_pub-0000-uuid/chats"))
+        assert r.status_code == 200, r.text
+        assert [c["id"] for c in r.json()] == [mine.id]
+
+    def test_file_chats_admin_sees_all_users_chats(self):
+        # admin は全ユーザー分(他人のチャットは FE が /s/{id} に振り分ける)
+        self._insert_file("f_adm-0000-uuid", user_id="2")
+        theirs = self._insert_chat("2", "their chat", file_id="f_adm-0000-uuid")
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(self.create_url("/f_adm-0000-uuid/chats"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert [c["id"] for c in body] == [theirs.id]
+        assert body[0]["user_id"] == "2"
+
+    def test_file_chats_requires_file_read_access(self):
+        # 非公開 file は他人からは 404(存在も明かさない)
+        self._insert_file("f_prv-0000-uuid", user_id="1")
+        self._insert_chat("2", "my chat", file_id="f_prv-0000-uuid")
+        with mock_webui_user(id="2", role="user"):
+            r = self.fast_api_client.get(self.create_url("/f_prv-0000-uuid/chats"))
+        assert r.status_code == 404, r.text
+
+    def test_file_chats_not_found(self):
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/f_missing/chats"))
+        assert r.status_code == 404, r.text

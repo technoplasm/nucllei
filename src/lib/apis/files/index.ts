@@ -38,7 +38,7 @@ export const uploadFile = async (file: File) => {
 type FileListOptions = {
 	limit?: number;
 	offset?: number;
-	order_by?: 'created_at' | 'accessed_at';
+	order_by?: 'created_at' | 'accessed_at' | 'filename';
 	direction?: 'desc' | 'asc';
 	user_ids?: string[];
 	filename?: string;
@@ -97,6 +97,35 @@ export const getFileUploaders = async () => {
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/uploaders`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+// llens(#69): この file を参照しているチャット。[{id, user_id, title, updated_at}]
+// 非 admin は本人のチャットのみ。admin は全ユーザー(他人の分は /s/{id} で開く)。
+export const getFileChats = async (id: string) => {
+	let error = null;
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/chats`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',

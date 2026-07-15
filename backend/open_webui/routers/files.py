@@ -19,6 +19,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.models.chats import Chats
 from open_webui.models.files import (
     FileForm,
     FileModel,
@@ -351,10 +352,10 @@ async def list_files_page(
     フィルタで、非 admin が指定したら 403。items は data.content を除いた軽量形
     (data は status のみ残す。meta は残す)。返却は {"items": [...], "total": n}。
     """
-    if order_by not in ("created_at", "accessed_at"):
+    if order_by not in ("created_at", "accessed_at", "filename"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="order_by must be one of: created_at, accessed_at",
+            detail="order_by must be one of: created_at, accessed_at, filename",
         )
     if direction not in ("desc", "asc"):
         raise HTTPException(
@@ -405,6 +406,42 @@ async def list_files_page(
 async def list_file_uploaders(user=Depends(get_admin_user)):
     """file を 1 件以上持つユーザーの一覧(#69、admin のフィルタ UI 用)。"""
     return Files.get_uploaders()
+
+
+############################
+# List Chats Referencing File
+############################
+
+
+@router.get("/{id}/chats")
+async def get_file_chats_by_id(id: str, user=Depends(get_verified_user)):
+    """この file を参照しているチャット一覧(#69、ファイル管理ページのチャット導線)。
+
+    非 admin は本人のチャットのみ。admin は全ユーザー(他人のチャットは
+    ENABLE_ADMIN_CHAT_ACCESS 下で /s/{id} から開ける — 振り分けは user_id を見て FE で)。
+    file 自体の閲覧権限(owner / admin / ACL read)は単品取得と同じ。
+    """
+    file = Files.get_file_by_id(id)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        file.user_id == user.id
+        or user.role == "admin"
+        or has_access_to_file(id, "read", user)
+    ):
+        return Chats.get_chats_referencing_file_id(
+            id, user_id=None if user.role == "admin" else user.id
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
 
 
 ############################

@@ -8,7 +8,7 @@ from open_webui.env import SRC_LOG_LEVELS
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
-from sqlalchemy import or_, func, text
+from sqlalchemy import cast, or_, func, text
 from sqlalchemy.orm.attributes import flag_modified
 
 ####################
@@ -649,6 +649,33 @@ class ChatTable:
 
             # Validate and return chats
             return [ChatModel.model_validate(chat) for chat in all_chats]
+
+    def get_chats_referencing_file_id(
+        self, file_id: str, user_id: Optional[str] = None
+    ) -> list[dict]:
+        """llens(#69): file id を参照するチャットの軽量一覧(ファイル管理ページのチャット導線)。
+
+        参照検出は chat JSON 全文への LIKE。file id は UUID なので本文との誤爆は実質なく、
+        message.files / chat.files のどちらの持ち方でも拾える(構造依存の JSON クエリを避ける)。
+        user_id=None は全ユーザー(admin 用 — 他人のチャットは /s/{id} で開く)。
+        user_id は呼び出し側が /c/ と /s/ を振り分けるために返す。
+        """
+        with get_db() as db:
+            query = db.query(Chat.id, Chat.user_id, Chat.title, Chat.updated_at).filter(
+                cast(Chat.chat, Text).like(f"%{file_id}%")
+            )
+            if user_id is not None:
+                query = query.filter(Chat.user_id == user_id)
+            rows = query.order_by(Chat.updated_at.desc()).limit(50).all()
+            return [
+                {
+                    "id": row.id,
+                    "user_id": row.user_id,
+                    "title": row.title,
+                    "updated_at": row.updated_at,
+                }
+                for row in rows
+            ]
 
     def get_chats_page_admin(
         self,

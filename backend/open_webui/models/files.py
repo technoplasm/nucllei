@@ -208,9 +208,13 @@ class FilesTable:
 
             total = query.count()
 
-            order_column = (
-                File.accessed_at if order_by == "accessed_at" else File.created_at
-            )
+            if order_by == "filename":
+                # 名前順は大文字小文字を無視(表示名は meta.name だが実体は filename と同値)
+                order_column = func.lower(File.filename)
+            elif order_by == "accessed_at":
+                order_column = File.accessed_at
+            else:
+                order_column = File.created_at
             query = query.order_by(
                 order_column.asc() if direction == "asc" else order_column.desc()
             )

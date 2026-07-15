@@ -26,6 +26,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 
+	import FileChatsMenu from './FileChatsMenu.svelte';
+
 	const i18n = getContext('i18n');
 
 	const LIMIT = 60;
@@ -40,7 +42,7 @@
 	let queryDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	let viewMode = $state<'grid' | 'table'>('grid');
-	let orderBy = $state<'created_at' | 'accessed_at'>('created_at');
+	let orderBy = $state<'created_at' | 'accessed_at' | 'filename'>('created_at');
 	let direction = $state<'desc' | 'asc'>('desc');
 	let groupBy = $state<'day' | 'month' | 'year'>('day');
 
@@ -99,16 +101,29 @@
 		localStorage.setItem('files-view-mode', mode);
 	};
 
-	// ソート(テーブルヘッダ / セレクタ共通)。キー変更時は desc から
-	const setSortKey = (key: 'created_at' | 'accessed_at') => {
+	// ソート(テーブルヘッダ / セレクタ共通)。キー変更時は自然な向きから(時刻 = 新しい順 / 名前 = A→Z)
+	const defaultDirection = (key: typeof orderBy) => (key === 'filename' ? 'asc' : 'desc');
+
+	const setSortKey = (key: typeof orderBy) => {
 		if (orderBy === key) {
 			direction = direction === 'desc' ? 'asc' : 'desc';
 		} else {
 			orderBy = key;
-			direction = 'desc';
+			direction = defaultDirection(key);
 		}
 		fetchFiles(false);
 	};
+
+	// 逆順ボタンの状態ラベル(名前順は新旧でなく昇降で言う)
+	const directionLabel = $derived(
+		orderBy === 'filename'
+			? direction === 'desc'
+				? $i18n.t('Descending')
+				: $i18n.t('Ascending')
+			: direction === 'desc'
+				? $i18n.t('Newest first')
+				: $i18n.t('Oldest first')
+	);
 
 	// 期間グルーピング(アクティブなソート時刻を基準に境界検出)
 	const computeSections = (files: any[], groupBy: string, orderBy: string) => {
@@ -134,7 +149,12 @@
 		return sections;
 	};
 
-	const sections = $derived(computeSections(files, groupBy, orderBy));
+	// 名前順のときは期間グルーピングが意味を持たないので、見出しなしの単一セクションにする
+	const sections = $derived(
+		orderBy === 'filename'
+			? [{ label: '', items: files }]
+			: computeSections(files, groupBy, orderBy)
+	);
 
 	const isImage = (file: any) => (file?.meta?.content_type ?? '').startsWith('image/');
 
@@ -366,7 +386,7 @@
 						aria-label={$i18n.t('Card View')}
 						onclick={() => setViewMode('grid')}
 					>
-						<span class="i-lucide-layout-grid size-3.5 block"></span>
+						<span class="i-lucide-layout-grid size-4 block"></span>
 					</button>
 				</Tooltip>
 				<Tooltip content={$i18n.t('Table View')}>
@@ -378,14 +398,14 @@
 						aria-label={$i18n.t('Table View')}
 						onclick={() => setViewMode('table')}
 					>
-						<span class="i-lucide-list size-3.5 block"></span>
+						<span class="i-lucide-list size-4 block"></span>
 					</button>
 				</Tooltip>
-				<Tooltip content={direction === 'desc' ? $i18n.t('Newest first') : $i18n.t('Oldest first')}>
+				<Tooltip content={directionLabel}>
 					<button
 						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover transition"
 						type="button"
-						aria-label={direction === 'desc' ? $i18n.t('Newest first') : $i18n.t('Oldest first')}
+						aria-label={directionLabel}
 						onclick={() => {
 							direction = direction === 'desc' ? 'asc' : 'desc';
 							fetchFiles(false);
@@ -394,7 +414,7 @@
 						<span
 							class="{direction === 'desc'
 								? 'i-lucide-arrow-down-wide-narrow'
-								: 'i-lucide-arrow-up-narrow-wide'} size-3.5 block"
+								: 'i-lucide-arrow-up-narrow-wide'} size-4 block"
 						></span>
 					</button>
 				</Tooltip>
@@ -402,35 +422,41 @@
 		</div>
 
 		<!-- 並び替え・期間グルーピング・(admin)アップロード者フィルタ -->
-		<div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 px-0.5 text-xs text-content-muted">
+		<div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-2 px-0.5 text-xs text-content-muted">
 			<label class="flex items-center gap-1.5">
 				{$i18n.t('Sort by')}
 				<select
-					class="bg-surface-raised hover:bg-surface-hover w-fit pr-6 rounded-xs text-sm outline-hidden"
+					class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
 					bind:value={orderBy}
-					onchange={() => fetchFiles(false)}
+					onchange={() => {
+						direction = defaultDirection(orderBy);
+						fetchFiles(false);
+					}}
 				>
 					<option value="created_at">{$i18n.t('Created at')}</option>
 					<option value="accessed_at">{$i18n.t('Last Accessed')}</option>
+					<option value="filename">{$i18n.t('Name')}</option>
 				</select>
 			</label>
 
-			<label class="flex items-center gap-1.5">
-				{$i18n.t('Group by')}
-				<select
-					class="bg-surface-raised hover:bg-surface-hover w-fit pr-6 rounded-xs text-sm outline-hidden"
-					bind:value={groupBy}
-				>
-					<option value="day">{$i18n.t('Day')}</option>
-					<option value="month">{$i18n.t('Month')}</option>
-					<option value="year">{$i18n.t('Year')}</option>
-				</select>
-			</label>
+			{#if orderBy !== 'filename'}
+				<label class="flex items-center gap-1.5">
+					{$i18n.t('Group by')}
+					<select
+						class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
+						bind:value={groupBy}
+					>
+						<option value="day">{$i18n.t('Day')}</option>
+						<option value="month">{$i18n.t('Month')}</option>
+						<option value="year">{$i18n.t('Year')}</option>
+					</select>
+				</label>
+			{/if}
 
 			{#if isAdmin}
 				<div class="flex flex-wrap items-center gap-1">
 					<select
-						class="bg-surface-raised hover:bg-surface-hover w-fit pr-6 rounded-xs text-sm outline-hidden {selectedUploaderId
+						class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUploaderId
 							? ''
 							: 'text-content-subtle'}"
 						bind:value={selectedUploaderId}
@@ -483,10 +509,12 @@
 	{:else if viewMode === 'grid'}
 		<div class="mb-5">
 			{#each sections as section, sectionIdx (section.label)}
-				<div class="text-md text-content-muted {sectionIdx > 0 ? 'mt-3' : 'mt-6'} mb-1">
-					{section.label}
-				</div>
-				<div class="gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
+				{#if section.label}
+					<div class="text-md text-content-muted {sectionIdx > 0 ? 'mt-3' : 'mt-6'} mb-1">
+						{section.label}
+					</div>
+				{/if}
+				<div class="gap-3 grid lg:grid-cols-2 xl:grid-cols-3 {section.label ? '' : 'mt-6'}">
 					{#each section.items as file (file.id)}
 						{@const vis = visibilityOf(file)}
 						<!-- カード全体がクリック=閲覧(button の after オーバーレイ)。右のボタン類は relative で上に載せる。
@@ -520,10 +548,17 @@
 										{#if file?.meta?.size}
 											{formatFileSize(file.meta.size)} •
 										{/if}
-										{formatTimestamp(file?.[orderBy])}
+										{formatTimestamp(orderBy === 'filename' ? file?.created_at : file?.[orderBy])}
 									</div>
 								</div>
 							</button>
+
+							<div class="relative flex">
+								<FileChatsMenu
+									fileId={file.id}
+									buttonClass="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl cursor-pointer"
+								/>
+							</div>
 
 							<Tooltip className="relative flex" content={vis.label}>
 								<button
@@ -561,7 +596,22 @@
 			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 				<thead class="text-xs text-content-muted uppercase bg-surface-muted">
 					<tr>
-						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Name')}</th>
+						<th
+							scope="col"
+							class="px-3 py-1.5 cursor-pointer select-none"
+							onclick={() => setSortKey('filename')}
+						>
+							<div class="flex gap-1.5 items-center">
+								{$i18n.t('Name')}
+								<span
+									class="size-2.5 block {orderBy === 'filename'
+										? direction === 'asc'
+											? 'i-lucide-chevron-up'
+											: 'i-lucide-chevron-down'
+										: 'i-lucide-chevron-up invisible'}"
+								></span>
+							</div>
+						</th>
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Size')}</th>
 						<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Type')}</th>
 						<th
@@ -602,11 +652,13 @@
 				</thead>
 				<tbody>
 					{#each sections as section (section.label)}
-						<tr>
-							<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
-								{section.label}
-							</td>
-						</tr>
+						{#if section.label}
+							<tr>
+								<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
+									{section.label}
+								</td>
+							</tr>
+						{/if}
 						{#each section.items as file (file.id)}
 							{@const vis = visibilityOf(file)}
 							<tr
@@ -649,6 +701,18 @@
 								</td>
 								<td class="px-3 py-1 text-right">
 									<div class="flex justify-end w-full">
+										<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+										<span
+											onclick={(e) => {
+												e.stopPropagation();
+											}}
+										>
+											<FileChatsMenu
+												fileId={file.id}
+												buttonClass="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl cursor-pointer"
+											/>
+										</span>
+
 										<Tooltip content={$i18n.t('Delete')}>
 											<button
 												class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
