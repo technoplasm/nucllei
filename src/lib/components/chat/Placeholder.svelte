@@ -90,27 +90,20 @@
 				<div class="flex shrink-0 justify-center">
 					<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
 						{#each models as model, modelIdx}
-							<Tooltip
-								content={(models[modelIdx]?.info?.meta?.tags ?? [])
-									.map((tag) => tag.name.toUpperCase())
-									.join(', ')}
-								placement="top"
+							<button
+								on:click={() => {
+									selectedModelIdx = modelIdx;
+								}}
 							>
-								<button
-									on:click={() => {
-										selectedModelIdx = modelIdx;
-									}}
-								>
-									<img
-										crossorigin="anonymous"
-										src={model?.info?.meta?.profile_image_url ??
-											($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
-										class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
-										alt="logo"
-										draggable="false"
-									/>
-								</button>
-							</Tooltip>
+								<img
+									crossorigin="anonymous"
+									src={model?.info?.meta?.profile_image_url ??
+										($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
+									class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
+									alt="logo"
+									draggable="false"
+								/>
+							</button>
 						{/each}
 					</div>
 				</div>

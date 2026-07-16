@@ -23,13 +23,12 @@
 				const _item = {
 					...model,
 					modelName: model?.name,
-					tags: model?.info?.meta?.tags?.map((tag) => tag.name).join(' '),
 					desc: model?.info?.meta?.description
 				};
 				return _item;
 			}),
 		{
-			keys: ['value', 'tags', 'modelName'],
+			keys: ['value', 'modelName'],
 			threshold: 0.3
 		}
 	);

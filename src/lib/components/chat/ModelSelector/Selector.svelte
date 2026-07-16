@@ -57,17 +57,13 @@
 	export let className = 'w-[32rem]';
 	export let triggerClassName = 'text-lg';
 
-	let tagsContainerElement;
-
 	let show = false;
-	let tags = [];
 
 	let selectedModel = '';
 	$: selectedModel = items.find((item) => item.value === value) ?? '';
 
 	let searchValue = '';
 
-	let selectedTag = '';
 	let selectedConnectionType = '';
 
 	let ollamaVersion = null;
@@ -78,62 +74,36 @@
 			const _item = {
 				...item,
 				modelName: item.model?.name,
-				tags: (item.model?.tags ?? []).map((tag) => tag.name).join(' '),
 				desc: item.model?.info?.meta?.description
 			};
 			return _item;
 		}),
 		{
-			keys: ['value', 'tags', 'modelName'],
+			keys: ['value', 'modelName'],
 			threshold: 0.4
 		}
 	);
 
 	$: filteredItems = (
 		searchValue
-			? fuse
-					.search(searchValue)
-					.map((e) => {
-						return e.item;
-					})
-					.filter((item) => {
-						if (selectedTag === '') {
-							return true;
-						}
-						return (item.model?.tags ?? []).map((tag) => tag.name).includes(selectedTag);
-					})
-					.filter((item) => {
-						if (selectedConnectionType === '') {
-							return true;
-						} else if (selectedConnectionType === 'ollama') {
-							return item.model?.owned_by === 'ollama';
-						} else if (selectedConnectionType === 'openai') {
-							return item.model?.owned_by === 'openai';
-						}
-					})
+			? fuse.search(searchValue).map((e) => {
+					return e.item;
+				})
 			: items
-					.filter((item) => {
-						if (selectedTag === '') {
-							return true;
-						}
-						return (item.model?.tags ?? []).map((tag) => tag.name).includes(selectedTag);
-					})
-					.filter((item) => {
-						if (selectedConnectionType === '') {
-							return true;
-						} else if (selectedConnectionType === 'ollama') {
-							return item.model?.owned_by === 'ollama';
-						} else if (selectedConnectionType === 'openai') {
-							return item.model?.owned_by === 'openai';
-						}
-					})
-	).filter((item) => !(item.model?.info?.meta?.hidden ?? false));
+	)
+		.filter((item) => {
+			if (selectedConnectionType === '') {
+				return true;
+			} else if (selectedConnectionType === 'ollama') {
+				return item.model?.owned_by === 'ollama';
+			} else if (selectedConnectionType === 'openai') {
+				return item.model?.owned_by === 'openai';
+			}
+		})
+		.filter((item) => !(item.model?.info?.meta?.hidden ?? false));
 
-	$: if (selectedTag || selectedConnectionType) {
-		resetView();
-	} else {
-		resetView();
-	}
+	// フィルタ(Local/External)変更時に選択位置を追従させる
+	$: (selectedConnectionType, resetView());
 
 	const resetView = async () => {
 		await tick();
@@ -276,16 +246,6 @@
 
 	onMount(async () => {
 		ollamaVersion = await getOllamaVersion().catch((error) => false);
-
-		if (items) {
-			tags = items
-				.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
-				.flatMap((item) => item.model?.tags ?? [])
-				.map((tag) => tag.name);
-
-			// Remove duplicates and sort
-			tags = Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
-		}
 	});
 
 	const cancelModelPullHandler = async (model: string) => {
@@ -373,7 +333,7 @@
 			{/if}
 
 			<div class="px-3 max-h-64 overflow-y-auto scrollbar-hidden group relative">
-				{#if tags && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
+				{#if items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai') && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
 					<div
 						class=" flex w-full sticky top-0 z-10 bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none"
 						on:wheel={(e) => {
@@ -385,61 +345,38 @@
 					>
 						<div
 							class="flex gap-1 w-fit text-center text-sm font-medium rounded-full bg-transparent px-1.5 pb-0.5"
-							bind:this={tagsContainerElement}
 						>
-							{#if (items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai')) || tags.length > 0}
-								<button
-									class="min-w-fit outline-none p-1.5 {selectedTag === '' &&
-									selectedConnectionType === ''
-										? ''
-										: 'text-content-subtle hover:text-content'} transition capitalize"
-									on:click={() => {
-										selectedConnectionType = '';
-										selectedTag = '';
-									}}
-								>
-									{$i18n.t('All')}
-								</button>
-							{/if}
+							<button
+								class="min-w-fit outline-none p-1.5 {selectedConnectionType === ''
+									? ''
+									: 'text-content-subtle hover:text-content'} transition capitalize"
+								on:click={() => {
+									selectedConnectionType = '';
+								}}
+							>
+								{$i18n.t('All')}
+							</button>
 
-							{#if items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai')}
-								<button
-									class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'ollama'
-										? ''
-										: 'text-content-subtle hover:text-content'} transition capitalize"
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'ollama';
-									}}
-								>
-									{$i18n.t('Local')}
-								</button>
-								<button
-									class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'openai'
-										? ''
-										: 'text-content-subtle hover:text-content'} transition capitalize"
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'openai';
-									}}
-								>
-									{$i18n.t('External')}
-								</button>
-							{/if}
-
-							{#each tags as tag}
-								<button
-									class="min-w-fit outline-none p-1.5 {selectedTag === tag
-										? ''
-										: 'text-content-subtle hover:text-content'} transition capitalize"
-									on:click={() => {
-										selectedConnectionType = '';
-										selectedTag = tag;
-									}}
-								>
-									{tag}
-								</button>
-							{/each}
+							<button
+								class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'ollama'
+									? ''
+									: 'text-content-subtle hover:text-content'} transition capitalize"
+								on:click={() => {
+									selectedConnectionType = 'ollama';
+								}}
+							>
+								{$i18n.t('Local')}
+							</button>
+							<button
+								class="min-w-fit outline-none p-1.5 {selectedConnectionType === 'openai'
+									? ''
+									: 'text-content-subtle hover:text-content'} transition capitalize"
+								on:click={() => {
+									selectedConnectionType = 'openai';
+								}}
+							>
+								{$i18n.t('External')}
+							</button>
 						</div>
 					</div>
 				{/if}
@@ -461,17 +398,6 @@
 						}}
 					>
 						<div class="flex flex-col">
-							{#if $mobile && (item?.model?.tags ?? []).length > 0}
-								<div class="flex gap-0.5 self-start h-full mb-1.5 -translate-x-1">
-									{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
-										<div
-											class=" text-xs font-bold px-1 rounded-sm uppercase line-clamp-1 bg-gray-500/20 text-content"
-										>
-											{tag.name}
-										</div>
-									{/each}
-								</div>
-							{/if}
 							<div class="flex items-center gap-2">
 								<div class="flex items-center min-w-fit">
 									<div class="line-clamp-1">
@@ -569,22 +495,6 @@
 											</svg>
 										</div>
 									</Tooltip>
-								{/if}
-
-								{#if !$mobile && (item?.model?.tags ?? []).length > 0}
-									<div
-										class="flex gap-0.5 self-center items-center h-full translate-y-[0.5px] overflow-x-auto scrollbar-none"
-									>
-										{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
-											<Tooltip content={tag.name} className="flex-shrink-0">
-												<div
-													class=" text-xs font-bold px-1 rounded-sm uppercase bg-gray-500/20 text-content"
-												>
-													{tag.name}
-												</div>
-											</Tooltip>
-										{/each}
-									</div>
 								{/if}
 							</div>
 						</div>

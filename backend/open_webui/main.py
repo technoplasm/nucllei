@@ -746,20 +746,6 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         if not Models.get_model_by_id(model["id"]):
             continue
 
-        try:
-            model_tags = [
-                tag.get("name")
-                for tag in model.get("info", {}).get("meta", {}).get("tags", [])
-            ]
-            tags = [tag.get("name") for tag in model.get("tags", [])]
-
-            tags = list(set(model_tags + tags))
-            model["tags"] = [{"name": tag} for tag in tags]
-        except Exception as e:
-            log.debug(f"Error processing model tags: {e}")
-            model["tags"] = []
-            pass
-
         models.append(model)
 
     model_order_list = request.app.state.config.MODEL_ORDER_LIST

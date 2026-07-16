@@ -70,8 +70,7 @@
 		meta: {
 			profile_image_url: null,
 			description: '',
-			suggestion_prompts: null,
-			tags: []
+			suggestion_prompts: null
 		},
 		params: {
 			system: ''
@@ -739,7 +738,7 @@
 <ConfirmDialog
 	bind:show={showRenameConfirm}
 	title={$i18n.t('Change ID?')}
-	on:confirm={() => {
+	onConfirm={() => {
 		doSubmit();
 	}}
 >
