@@ -17,8 +17,6 @@ on:
       - 'uv.lock'
 
 env:
-  # CI では cypress を実行しないためバイナリダウンロードをスキップする
-  CYPRESS_INSTALL_BINARY: '0'
 
 jobs:
   build:
