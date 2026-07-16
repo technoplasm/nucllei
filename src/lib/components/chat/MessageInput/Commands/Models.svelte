@@ -2,19 +2,19 @@
 	import Fuse from 'fuse.js';
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
-	import { createEventDispatcher, onMount } from 'svelte';
-	import { tick, getContext } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
 	import { models } from '$lib/stores';
 
-	const i18n = getContext('i18n');
+	let {
+		command = '',
+		onSelect = () => {}
+	}: {
+		command?: string;
+		onSelect?: (model: any) => void;
+	} = $props();
 
-	const dispatch = createEventDispatcher();
-
-	export let command = '';
-
-	let selectedIdx = 0;
-	let filteredItems = [];
+	let selectedIdx = $state(0);
 
 	let fuse = new Fuse(
 		$models
@@ -33,15 +33,19 @@
 		}
 	);
 
-	$: filteredItems = command.slice(1)
-		? fuse.search(command).map((e) => {
-				return e.item;
-			})
-		: $models.filter((model) => !model?.info?.meta?.hidden);
+	const filteredItems = $derived(
+		command.slice(1)
+			? fuse.search(command).map((e) => {
+					return e.item;
+				})
+			: $models.filter((model) => !model?.info?.meta?.hidden)
+	);
 
-	$: if (command) {
-		selectedIdx = 0;
-	}
+	$effect(() => {
+		if (command) {
+			selectedIdx = 0;
+		}
+	});
 
 	export const selectUp = () => {
 		selectedIdx = Math.max(0, selectedIdx - 1);
@@ -52,8 +56,7 @@
 	};
 
 	const confirmSelect = async (model) => {
-		command = '';
-		dispatch('select', model);
+		onSelect(model);
 	};
 
 	onMount(async () => {
@@ -79,13 +82,13 @@
 								? 'bg-gray-50 dark:bg-gray-850 selected-command-option-button'
 								: ''}"
 							type="button"
-							on:click={() => {
+							onclick={() => {
 								confirmSelect(model);
 							}}
-							on:mousemove={() => {
+							onmousemove={() => {
 								selectedIdx = modelIdx;
 							}}
-							on:focus={() => {}}
+							onfocus={() => {}}
 						>
 							<div class="flex font-medium text-content line-clamp-1">
 								<img

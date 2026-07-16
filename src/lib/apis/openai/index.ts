@@ -191,13 +191,17 @@ export const chatCompletion = async (
 	return [res, controller];
 };
 
+/**
+ * chat completion(chat_id/id 付きの UI 経路)。llens(wire v2): 応答は SSE
+ * (イベント封筒のストリーム)なので Response をそのまま返す — body の消費は
+ * $lib/utils/completion-streams の consumeCompletionStream が担う。
+ * HTTP エラー(payload 処理失敗 = 400 等)は応答 JSON(FastAPI 形)を throw する。
+ */
 export const generateOpenAIChatCompletion = async (
 	body: object,
 	url: string = `${WEBUI_BASE_URL}/api`,
 	signal: AbortSignal | null = null
-) => {
-	let error = null;
-
+): Promise<Response> => {
 	const res = await apiFetch(`${url}/chat/completions`, {
 		method: 'POST',
 		headers: {
@@ -206,18 +210,10 @@ export const generateOpenAIChatCompletion = async (
 		body: JSON.stringify(body),
 		// llens: stop ボタンで task 生成前(モデル接続待ち)の fetch も中断できるようにする
 		...(signal ? { signal } : {})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			error = `${err?.detail ?? err}`;
-			return null;
-		});
+	});
 
-	if (error) {
-		throw error;
+	if (!res.ok) {
+		throw await res.json().catch(() => `${res.status} ${res.statusText}`);
 	}
 
 	return res;

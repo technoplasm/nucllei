@@ -3,14 +3,12 @@
 	import { render } from '$lib/utils/markdown-it';
 	import DOMPurify from 'dompurify';
 
-	import { onMount, getContext, tick, createEventDispatcher } from 'svelte';
-	import { blur, fade } from 'svelte/transition';
+	import { getContext, tick } from 'svelte';
+	import { fade } from 'svelte/transition';
 
-	const dispatch = createEventDispatcher();
-
-	import { config, user, models as _models } from '$lib/stores';
-	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
-	import { WEBUI_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
+	import { user, models as _models, type Model } from '$lib/stores';
+	import { sanitizeResponseContent } from '$lib/utils';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -18,24 +16,39 @@
 
 	const i18n = getContext('i18n');
 
-	export let transparentBackground = false;
+	let {
+		transparentBackground = false,
+		createMessagePair,
+		stopResponse,
+		onSubmit = () => {},
+		autoScroll = $bindable(false),
+		atSelectedModel = $bindable(undefined),
+		selectedModels,
+		history,
+		prompt = $bindable(''),
+		files = $bindable([])
+	}: {
+		transparentBackground?: boolean;
+		createMessagePair: Function;
+		stopResponse: Function;
+		onSubmit?: (prompt: string) => void;
+		autoScroll?: boolean;
+		atSelectedModel?: Model | undefined;
+		selectedModels: string[];
+		history: any;
+		prompt?: string;
+		files?: any[];
+	} = $props();
 
-	export let createMessagePair: Function;
-	export let stopResponse: Function;
+	const models = $derived(selectedModels.map((id) => $_models.find((m) => m.id === id)));
 
-	export let autoScroll = false;
+	let selectedModelIdx = $state(0);
 
-	export let atSelectedModel: Model | undefined;
-	export let selectedModels: [''];
-
-	export let history;
-
-	export let prompt = '';
-	export let files = [];
-
-	export let imageGenerationEnabled = false;
-
-	let models = [];
+	$effect(() => {
+		if (selectedModels.length > 0) {
+			selectedModelIdx = models.length - 1;
+		}
+	});
 
 	const selectSuggestionPrompt = async (p) => {
 		let text = p;
@@ -71,16 +84,6 @@
 
 		await tick();
 	};
-
-	let selectedModelIdx = 0;
-
-	$: if (selectedModels.length > 0) {
-		selectedModelIdx = models.length - 1;
-	}
-
-	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
-
-	onMount(() => {});
 </script>
 
 <div class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 py-24 text-center">
@@ -91,7 +94,7 @@
 					<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
 						{#each models as model, modelIdx}
 							<button
-								on:click={() => {
+								onclick={() => {
 									selectedModelIdx = modelIdx;
 								}}
 							>
@@ -157,15 +160,12 @@
 					bind:files
 					bind:prompt
 					bind:autoScroll
-					bind:imageGenerationEnabled
 					bind:atSelectedModel
 					{transparentBackground}
 					{stopResponse}
 					{createMessagePair}
 					placeholder={$i18n.t('How can I help you today?')}
-					on:submit={(e) => {
-						dispatch('submit', e.detail);
-					}}
+					{onSubmit}
 				/>
 			</div>
 		</div>
@@ -177,8 +177,8 @@
 					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
 					[]}
 				inputValue={prompt}
-				on:select={(e) => {
-					selectSuggestionPrompt(e.detail);
+				onSelect={(content) => {
+					selectSuggestionPrompt(content);
 				}}
 			/>
 		</div>

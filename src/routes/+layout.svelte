@@ -6,8 +6,6 @@
 	import '@fontsource-variable/jetbrains-mono';
 	import '@fontsource-variable/m-plus-1-code';
 
-	import { io } from 'socket.io-client';
-
 	import { onMount, tick, setContext } from 'svelte';
 	import {
 		config,
@@ -16,10 +14,6 @@
 		theme,
 		WEBUI_NAME,
 		mobile,
-		socket,
-		activeUserIds,
-		USAGE_POOL,
-		chatId,
 		chats,
 		currentChatPage,
 		isLastActiveTab,
@@ -34,6 +28,7 @@
 	import { getBackendConfig } from '$lib/apis';
 	import { SESSION_EXPIRED_FLAG } from '$lib/apis/fetch';
 	import { getSessionUser } from '$lib/apis/auths';
+	import { setFallbackHandler } from '$lib/utils/completion-streams';
 
 	import '../tailwind.css';
 	import '../app.css';
@@ -55,117 +50,45 @@
 
 	const BREAKPOINT = 768;
 
-	const setupSocket = async (enableWebsocket) => {
-		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
-			reconnection: true,
-			reconnectionDelay: 1000,
-			reconnectionDelayMax: 5000,
-			randomizationFactor: 0.5,
-			path: '/ws/socket.io',
-			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket']
-			// llens(#70 B1): 認証は httpOnly cookie(handshake の Cookie ヘッダを backend が読む)
-		});
+	// llens(wire v2): 表示中でないチャット(Chat コンポーネントがハンドラ未登録)の
+	// completion イベント既定処理。done の通知トーストとチャット一覧の追従だけ担う。
+	/** @param {import('$lib/utils/completion-streams').CompletionEnvelope} envelope */
+	const fallbackChatEventHandler = async (envelope) => {
+		const type = envelope?.data?.type ?? null;
+		const data = envelope?.data?.data ?? null;
 
-		await socket.set(_socket);
+		if (type === 'chat:completion') {
+			const { done, content, title } = data ?? {};
 
-		_socket.on('connect_error', (err) => {
-			console.log('connect_error', err);
-		});
-
-		_socket.on('connect', () => {
-			console.log('connected', _socket.id);
-		});
-
-		_socket.on('reconnect_attempt', (attempt) => {
-			console.log('reconnect_attempt', attempt);
-		});
-
-		_socket.on('reconnect_failed', () => {
-			console.log('reconnect_failed');
-		});
-
-		_socket.on('disconnect', (reason, details) => {
-			console.log(`Socket ${_socket.id} disconnected due to ${reason}`);
-			if (details) {
-				console.log('Additional details:', details);
-			}
-		});
-
-		_socket.on('user-list', (data) => {
-			console.log('user-list', data);
-			activeUserIds.set(data.user_ids);
-		});
-
-		_socket.on('usage', (data) => {
-			console.log('usage', data);
-			USAGE_POOL.set(data['models']);
-		});
-	};
-
-	const chatEventHandler = async (event, cb) => {
-		const chat = $page.url.pathname.includes(`/c/${event.chat_id}`);
-
-		let isFocused = document.visibilityState !== 'visible';
-		if (window.electronAPI) {
-			const res = await window.electronAPI.send({
-				type: 'window:isFocused'
-			});
-			if (res) {
-				isFocused = res.isFocused;
-			}
-		}
-
-		await tick();
-		const type = event?.data?.type ?? null;
-		const data = event?.data?.data ?? null;
-
-		if (event.chat_id !== $chatId || isFocused) {
-			if (type === 'chat:completion') {
-				const { done, content, title } = data;
-
-				if (done) {
-					if ($isLastActiveTab) {
-						if ($settings?.notificationEnabled ?? false) {
-							new Notification(`${title} | ${$WEBUI_NAME}`, {
-								body: content,
-								icon: `${WEBUI_BASE_URL}/static/favicon.png`
-							});
-						}
+			if (done) {
+				if ($isLastActiveTab) {
+					if ($settings?.notificationEnabled ?? false) {
+						new Notification(`${title} | ${$WEBUI_NAME}`, {
+							body: content,
+							icon: `${WEBUI_BASE_URL}/static/favicon.png`
+						});
 					}
+				}
 
-					toast.custom(NotificationToast, {
-						componentProps: {
-							onClick: () => {
-								goto(`/c/${event.chat_id}`);
-							},
-							content: content,
-							title: title
+				toast.custom(NotificationToast, {
+					componentProps: {
+						onClick: () => {
+							goto(`/c/${envelope.chat_id}`);
 						},
-						duration: 15000,
-						unstyled: true
-					});
-				}
-			} else if (type === 'chat:title') {
-				currentChatPage.set(1);
-				await chats.set(await getChatList($currentChatPage));
+						content: content,
+						title: title
+					},
+					duration: 15000,
+					unstyled: true
+				});
 			}
-		} else if (data?.session_id === $socket.id) {
-			if (type === 'execute:python') {
-				// llens: Pyodide 実行は廃止(issue #11)。コード実行は外部サンドボックス
-				// (nsjail + IPython)を使う自前 Tool 側に一本化する
-				console.log('execute:python (disabled)', data);
-				if (cb) {
-					cb({
-						stdout: null,
-						stderr: 'Python execution in the browser (Pyodide) is disabled.',
-						result: null
-					});
-				}
-			} else {
-				console.log('chatEventHandler', event);
-			}
+		} else if (type === 'chat:title') {
+			currentChatPage.set(1);
+			await chats.set(await getChatList($currentChatPage));
 		}
 	};
+
+	setFallbackHandler(fallbackChatEventHandler);
 
 	onMount(async () => {
 		if (typeof window !== 'undefined' && window.applyTheme) {
@@ -225,16 +148,6 @@
 		};
 		window.addEventListener('resize', onResize);
 
-		user.subscribe((value) => {
-			if (value) {
-				$socket?.off('chat-events', chatEventHandler);
-
-				$socket?.on('chat-events', chatEventHandler);
-			} else {
-				$socket?.off('chat-events', chatEventHandler);
-			}
-		});
-
 		let backendConfig = null;
 		try {
 			backendConfig = await getBackendConfig();
@@ -263,8 +176,6 @@
 			await WEBUI_NAME.set(backendConfig.name);
 
 			if ($config) {
-				await setupSocket($config.features?.enable_websocket ?? true);
-
 				const currentUrl = `${window.location.pathname}${window.location.search}`;
 				const encodedUrl = encodeURIComponent(currentUrl);
 
@@ -274,8 +185,6 @@
 
 				if (sessionUser) {
 					// Save Session User to Store
-					$socket.emit('user-join', { auth: { token: sessionUser.token } });
-
 					await user.set(sessionUser);
 					await config.set(await getBackendConfig());
 				} else {

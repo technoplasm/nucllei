@@ -18,7 +18,6 @@
 		pinnedChats,
 		scrollPaginationEnabled,
 		currentChatPage,
-		socket,
 		config,
 		isApp
 	} from '$lib/stores';
@@ -770,7 +769,6 @@
 			<div class="flex flex-col font-primary">
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
-						role={$user?.role}
 						on:show={(e) => {
 							if (e.detail === 'archived-chat') {
 								showArchivedChats.set(true);

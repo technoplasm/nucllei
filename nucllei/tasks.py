@@ -74,8 +74,8 @@ async def stop_task(task_id: str):
     try:
         await task  # Wait for the task to handle the cancellation
     except asyncio.CancelledError:
-        # Task successfully canceled
-        tasks.pop(task_id, None)  # Remove it from the dictionary
-        return {"status": True, "message": f"Task {task_id} successfully stopped."}
-
-    return {"status": False, "message": f"Failed to stop task {task_id}."}
+        pass
+    # llens: 応答生成タスクは CancelledError を内部で処理して正常終了する
+    # (中断時の保存・イベント順序が仕事のうち)ため、「cancel 後に完走した」も成功。
+    tasks.pop(task_id, None)
+    return {"status": True, "message": f"Task {task_id} successfully stopped."}

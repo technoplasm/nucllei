@@ -5,15 +5,13 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { goto } from '$app/navigation';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
-	import { showSettings, activeUserIds, USAGE_POOL, mobile, showSidebar, user } from '$lib/stores';
+	import { showSettings, mobile, showSidebar, user } from '$lib/stores';
 	import { fade, slide } from 'svelte/transition';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { userSignOut } from '$lib/apis/auths';
 
 	const i18n = getContext('i18n');
 
 	export let show = false;
-	export let role = '';
 	export let className = 'max-w-[240px]';
 
 	const dispatch = createEventDispatcher();
@@ -89,39 +87,8 @@
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 			</button>
 
-			{#if role === 'admin'}
-				<a
-					class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-					href="/playground"
-					on:click={() => {
-						show = false;
-
-						if ($mobile) {
-							showSidebar.set(false);
-						}
-					}}
-				>
-					<div class=" self-center mr-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="size-5"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M14.25 9.75 16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12A2.25 2.25 0 0 0 6 20.25Z"
-							/>
-						</svg>
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Playground')}</div>
-				</a>
-
-				<!-- llens(#48): 管理者パネル導線は撤去(Admin を Workspace に統合)。管理面は Sidebar の Workspace リンクから到達。 -->
-			{/if}
+			<!-- llens(#48): 管理者パネル導線は撤去(Admin を Workspace に統合)。管理面は Sidebar の Workspace リンクから到達。 -->
+			<!-- llens(wire v2): Playground は機能ごと撤去(独自ストリーム消費者・薄い基盤に不要) -->
 
 			<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />
 
@@ -158,36 +125,6 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 			</button>
-
-			{#if $activeUserIds?.length > 0}
-				<hr class=" border-gray-100 dark:border-gray-850 my-1 p-0" />
-
-				<Tooltip
-					content={$USAGE_POOL && $USAGE_POOL.length > 0
-						? `${$i18n.t('Running')}: ${$USAGE_POOL.join(', ')} ✨`
-						: ''}
-				>
-					<div class="flex rounded-md py-1.5 px-3 text-xs gap-2.5 items-center">
-						<div class=" flex items-center">
-							<span class="relative flex size-2">
-								<span
-									class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
-								></span>
-								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
-							</span>
-						</div>
-
-						<div class=" ">
-							<span class="">
-								{$i18n.t('Active Users')}:
-							</span>
-							<span class=" font-semibold">
-								{$activeUserIds?.length}
-							</span>
-						</div>
-					</div>
-				</Tooltip>
-			{/if}
 
 			<!-- <DropdownMenu.Item class="flex items-center px-3 py-2 text-sm ">
 				<div class="flex items-center">Profile</div>

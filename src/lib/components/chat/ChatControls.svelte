@@ -145,7 +145,7 @@
 							{stopResponse}
 							{modelId}
 							{eventTarget}
-							on:close={() => {
+							onClose={() => {
 								showControls.set(false);
 							}}
 						/>
@@ -205,7 +205,7 @@
 								{stopResponse}
 								{modelId}
 								{eventTarget}
-								on:close={() => {
+								onClose={() => {
 									showControls.set(false);
 								}}
 							/>

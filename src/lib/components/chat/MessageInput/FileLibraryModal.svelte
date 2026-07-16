@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import dayjs from 'dayjs';
@@ -11,42 +11,48 @@
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import Search from '$lib/components/icons/Search.svelte';
-	import Document from '$lib/components/icons/Document.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
-	import Check from '$lib/components/icons/Check.svelte';
 
 	// llens(#69): チャット入力からの「保存済みファイル」picker。
 	// 自分の file を新しい順に一覧し(検索付き・複数選択)、onSelect(FileModel[]) を返す。
 	// processFileById(再添付フック発火)は呼び出し側(MessageInput)の責務。
 	const i18n = getContext('i18n');
 
-	export let show = false;
-	export let onSelect: Function = () => {};
+	let {
+		show = $bindable(false),
+		onSelect = () => {}
+	}: {
+		show?: boolean;
+		onSelect?: Function;
+	} = $props();
 
 	const limit = 30;
 
-	let files = [];
-	let total = 0;
-	let loading = false;
+	let files = $state<any[]>([]);
+	let total = $state(0);
+	let loading = $state(false);
 
-	let query = '';
+	let query = $state('');
 	let queryDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	let selectedIds = [];
+	let selectedIds = $state<string[]>([]);
 
-	// Svelte 5 互換モードの罠(#55): show 依存の初期化は変化検知ガードで包む
+	// show 依存の初期化(#55 の変化検知ガードを踏襲)。fetchFiles 内の状態読みで
+	// effect が再発火しないよう untrack で包む。
 	let lastShow = false;
-	$: if (show !== lastShow) {
-		lastShow = show;
-		if (show) {
-			query = '';
-			selectedIds = [];
-			files = [];
-			total = 0;
-			fetchFiles(false);
+	$effect(() => {
+		if (show !== lastShow) {
+			lastShow = show;
+			if (show) {
+				untrack(() => {
+					query = '';
+					selectedIds = [];
+					files = [];
+					total = 0;
+					fetchFiles(false);
+				});
+			}
 		}
-	}
+	});
 
 	const fetchFiles = async (append = false) => {
 		loading = true;
@@ -107,19 +113,19 @@
 	<div class="font-primary px-5 py-4 text-content flex flex-col max-h-[80vh]">
 		<div class="flex justify-between items-center pb-2">
 			<div class="text-lg font-medium self-center">{$i18n.t('Saved Files')}</div>
-			<button class="self-center" type="button" on:click={() => (show = false)}>
-				<XMark className="size-5" />
+			<button class="self-center" type="button" onclick={() => (show = false)}>
+				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>
 
 		<div class="flex w-full mt-0.5 mb-2">
 			<div class="self-center ml-1 mr-3">
-				<Search className="size-3.5" />
+				<span class="i-lucide-search size-3.5 block"></span>
 			</div>
 			<input
 				class="w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 				bind:value={query}
-				on:input={onQueryInput}
+				oninput={onQueryInput}
 				placeholder={$i18n.t('Search Files')}
 			/>
 		</div>
@@ -143,7 +149,7 @@
 								? 'bg-gray-100 dark:bg-gray-850'
 								: 'hover:bg-black/5 dark:hover:bg-white/5'}"
 							type="button"
-							on:click={() => toggle(file.id)}
+							onclick={() => toggle(file.id)}
 						>
 							{#if isImage(file)}
 								<img
@@ -156,7 +162,7 @@
 								<div
 									class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
 								>
-									<Document className="size-4" />
+									<span class="i-lucide-file-text size-4 block"></span>
 								</div>
 							{/if}
 
@@ -173,7 +179,7 @@
 							</div>
 
 							<div class="shrink-0 self-center {selectedIds.includes(file.id) ? '' : 'invisible'}">
-								<Check className="size-4" />
+								<span class="i-lucide-check size-4 block"></span>
 							</div>
 						</button>
 					{/each}
@@ -185,7 +191,7 @@
 							class="px-3.5 py-1 text-xs font-medium rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-content dark:hover:text-white transition flex items-center gap-2"
 							type="button"
 							disabled={loading}
-							on:click={() => fetchFiles(true)}
+							onclick={() => fetchFiles(true)}
 						>
 							{#if loading}
 								<Spinner className="size-3" />
@@ -201,7 +207,7 @@
 			<button
 				class="px-3.5 py-1.5 text-sm font-medium bg-transparent hover:bg-gray-100 text-content dark:hover:bg-gray-850 transition rounded-full"
 				type="button"
-				on:click={() => (show = false)}
+				onclick={() => (show = false)}
 			>
 				{$i18n.t('Cancel')}
 			</button>
@@ -209,7 +215,7 @@
 				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
 				type="button"
 				disabled={selectedIds.length === 0}
-				on:click={submitHandler}
+				onclick={submitHandler}
 			>
 				{$i18n.t('Attach')}{selectedIds.length > 0 ? ` (${selectedIds.length})` : ''}
 			</button>

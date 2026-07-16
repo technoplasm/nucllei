@@ -19,9 +19,6 @@
 			share: true,
 			clone: false,
 			multiple_models: true
-		},
-		features: {
-			image_generation: true
 		}
 	};
 
@@ -37,10 +34,6 @@
 		chat: {
 			...defaultPermissions.chat,
 			...pick(permissions?.chat, Object.keys(defaultPermissions.chat))
-		},
-		features: {
-			...defaultPermissions.features,
-			...pick(permissions?.features, Object.keys(defaultPermissions.features))
 		}
 	};
 </script>
@@ -103,7 +96,7 @@
 		</div>
 	</div>
 
-	<!-- チャット基本操作の外側にある能力(skill editor ロール・画像生成)を Features に集約 -->
+	<!-- チャット基本操作の外側にある能力(skill editor ロール)を Features に集約 -->
 	<div class="mt-2">
 		<div class="mb-1 text-sm font-medium text-content-muted">{$i18n.t('Features')}</div>
 
@@ -120,14 +113,6 @@
 				</div>
 				<Switch bind:state={permissions.workspace.skills} />
 			</Tooltip>
-
-			<div class=" flex w-full justify-between my-2 pr-2">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Image Generation')}
-				</div>
-
-				<Switch bind:state={permissions.features.image_generation} />
-			</div>
 		</div>
 	</div>
 </div>

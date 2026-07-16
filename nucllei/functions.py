@@ -12,9 +12,10 @@ from fastapi import (
 from starlette.responses import StreamingResponse
 
 
-from nucllei.socket.main import (
-    get_event_call,
-    get_event_emitter,
+from nucllei.utils.completion_events import (
+    get_stream_for_message,
+    make_event_call,
+    make_event_emitter,
 )
 
 
@@ -204,17 +205,23 @@ async def generate_function_chat_completion(
     __task_body__ = None
 
     if metadata:
-        if all(k in metadata for k in ("session_id", "chat_id", "message_id")):
-            __event_emitter__ = get_event_emitter(metadata)
-            __event_call__ = get_event_call(metadata)
+        # llens(wire v2): pipe は completion タスク内で走るため、chat_id/message_id で
+        # ライブなイベントバスを逆引きする(metadata に task_id は載っていない)。
+        # 見つからなければ従来どおり emitter/caller 無し(None)で実行する。
+        stream = get_stream_for_message(
+            metadata.get("chat_id"), metadata.get("message_id")
+        )
+        if stream is not None:
+            __event_emitter__ = make_event_emitter(stream, metadata)
+            __event_call__ = make_event_call(stream)
         __task__ = metadata.get("task", None)
         __task_body__ = metadata.get("task_body", None)
 
     extra_params = {
         "__event_emitter__": __event_emitter__,
         "__event_call__": __event_call__,
+        # llens(wire v2): __session_id__ は socket セッションと共に廃止(middleware も撤去済み)。
         "__chat_id__": metadata.get("chat_id", None),
-        "__session_id__": metadata.get("session_id", None),
         "__message_id__": metadata.get("message_id", None),
         "__task__": __task__,
         "__task_body__": __task_body__,

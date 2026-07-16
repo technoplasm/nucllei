@@ -5,7 +5,6 @@ import asyncio
 import json
 import ast
 
-from uuid import uuid4
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -16,16 +15,16 @@ from starlette.responses import StreamingResponse
 
 from nucllei.models.chats import Chats
 from nucllei.models.users import Users
-from nucllei.socket.main import (
-    get_event_call,
-    get_event_emitter,
-    get_active_status_by_user_id,
+from nucllei.utils.completion_events import (
+    make_event_call,
+    make_event_emitter,
+    register_stream,
+    release_stream,
+    sse_event_generator,
 )
 from nucllei.routers.tasks import (
     generate_title,
-    generate_image_prompt,
 )
-from nucllei.routers.images import image_generations, GenerateImageForm
 from nucllei.routers.pipelines import (
     process_pipeline_inlet_filter,
 )
@@ -73,7 +72,6 @@ from nucllei.utils.content_blocks import (
     snapshot_content_blocks,
 )
 from nucllei.utils.response_assembler import (
-    CHANGED_TEXT,
     MISMATCH_MISSING_TOOL_CALLS,
     MISMATCH_UNEXPECTED_FINISH,
     ContentBlocksAssembler,
@@ -86,7 +84,6 @@ from nucllei.env import (
     GLOBAL_LOG_LEVEL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_TOOL_EXECUTION_TIMEOUT,
-    ENABLE_REALTIME_CHAT_SAVE,
 )
 from nucllei.constants import TASKS
 
@@ -95,105 +92,10 @@ logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
-
-async def chat_image_generation_handler(
-    request: Request, form_data: dict, extra_params: dict, user
-):
-    __event_emitter__ = extra_params["__event_emitter__"]
-    await __event_emitter__(
-        {
-            "type": "status",
-            "data": {"description": "Generating an image", "done": False},
-        }
-    )
-
-    messages = form_data["messages"]
-    user_message = get_last_user_message(messages)
-
-    prompt = user_message
-
-    if request.app.state.config.ENABLE_IMAGE_PROMPT_GENERATION:
-        try:
-            res = await generate_image_prompt(
-                request,
-                {
-                    "model": form_data["model"],
-                    "messages": messages,
-                },
-                user,
-            )
-
-            response = res["choices"][0]["message"]["content"]
-
-            try:
-                bracket_start = response.find("{")
-                bracket_end = response.rfind("}") + 1
-
-                if bracket_start == -1 or bracket_end == -1:
-                    raise Exception("No JSON object found in the response")
-
-                response = response[bracket_start:bracket_end]
-                response = json.loads(response)
-                prompt = response.get("prompt", [])
-            except Exception:
-                prompt = user_message
-
-        except Exception as e:
-            log.exception(e)
-            prompt = user_message
-
-    system_message_content = ""
-
-    try:
-        images = await image_generations(
-            request=request,
-            form_data=GenerateImageForm(**{"prompt": prompt}),
-            user=user,
-        )
-
-        await __event_emitter__(
-            {
-                "type": "status",
-                "data": {"description": "Generated an image", "done": True},
-            }
-        )
-
-        await __event_emitter__(
-            {
-                "type": "files",
-                "data": {
-                    "files": [
-                        {
-                            "type": "image",
-                            "url": image["url"],
-                        }
-                        for image in images
-                    ]
-                },
-            }
-        )
-
-        system_message_content = "<context>User is shown the generated image, tell the user that the image has been generated</context>"
-    except Exception as e:
-        log.exception(e)
-        await __event_emitter__(
-            {
-                "type": "status",
-                "data": {
-                    "description": "An error occurred while generating an image",
-                    "done": True,
-                },
-            }
-        )
-
-        system_message_content = "<context>Unable to generate an image, tell the user that an error occurred</context>"
-
-    if system_message_content:
-        form_data["messages"] = add_or_update_system_message(
-            system_message_content, form_data["messages"]
-        )
-
-    return form_data
+# テキスト連続中のスナップショット emit + DB 永続化の間引き間隔(秒)。
+# 純追記はデルタイベントで流れるため、これは途中参加(リロード再アタッチ)の
+# 収束と障害時の取りこぼし上限を決めるだけの値。
+SNAPSHOT_INTERVAL = 2.0
 
 
 def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
@@ -353,7 +255,9 @@ def is_usage_requested(model) -> bool:
     return capabilities.get("usage", True) is not False
 
 
-async def process_chat_payload(request, form_data, user, metadata, model):
+async def process_chat_payload(
+    request, form_data, user, metadata, model, events_stream
+):
 
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
@@ -374,8 +278,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     if form_data.get("files"):
         form_data["files"] = filter_files_by_user_access(form_data["files"], user)
 
-    event_emitter = get_event_emitter(metadata)
-    event_call = get_event_call(metadata)
+    event_emitter = make_event_emitter(events_stream, metadata)
+    event_call = make_event_call(events_stream)
 
     extra_params = {
         "__event_emitter__": event_emitter,
@@ -443,14 +347,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     except Exception as e:
         raise Exception(f"Error: {e}")
 
-    # llens(#23): code_interpreter 機能は撤去 — コード実行は tool(外部 sandbox)一本。
-    # タグ検出による tool 外実行の裏道は残さない。
-    features = form_data.pop("features", None)
-    if features:
-        if "image_generation" in features and features["image_generation"]:
-            form_data = await chat_image_generation_handler(
-                request, form_data, extra_params, user
-            )
+    # llens(#23/#76): code_interpreter・ネイティブ画像生成は機能ごと撤去済み —
+    # コード実行も画像生成も tool(外部)一本。features はもう解釈しない
+    # (外部 API クライアントが送ってきても上流モデルに漏らさないよう剥がすだけ)。
+    form_data.pop("features", None)
 
     # llens(#54): チャット単位の tool 切り替えは撤去 — tool はモデル割り当て
     # (meta.toolIds)一本。クライアント申告の tool_ids は読まずに捨て、
@@ -770,32 +670,19 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
             )
 
 
-async def handle_non_streaming_response(
-    request, response, user, metadata, model, tasks, event_emitter
-):
-    """非ストリーム応答の永続化・イベント払い出し・後処理。"""
-    if "error" in response:
-        error = response["error"].get("detail", response["error"])
-        Chats.upsert_message_to_chat_by_id_and_message_id(
+async def _persist_message_snapshot(metadata, snapshot):
+    if metadata.get("chat_id") and metadata.get("message_id"):
+        await asyncio.to_thread(
+            Chats.upsert_message_to_chat_by_id_and_message_id,
             metadata["chat_id"],
             metadata["message_id"],
-            {
-                "error": {"content": error},
-            },
+            snapshot,
         )
 
-    if "selected_model_id" in response:
-        Chats.upsert_message_to_chat_by_id_and_message_id(
-            metadata["chat_id"],
-            metadata["message_id"],
-            {
-                "selectedModelId": response["selected_model_id"],
-            },
-        )
 
-    # llens(#57): 非 stream 応答の実測 usage も永続化
-    usage = response.get("usage", {})
-    if usage and metadata.get("chat_id") and metadata.get("message_id"):
+async def _record_usage(request, model, metadata, usage, event_emitter):
+    """実測 usage(llens #57)の永続化 + イベント。tool ループの各呼び出しで加算。"""
+    if metadata.get("chat_id") and metadata.get("message_id"):
         await asyncio.to_thread(
             Chats.record_usage_by_id_and_message_id,
             metadata["chat_id"],
@@ -803,62 +690,12 @@ async def handle_non_streaming_response(
             usage,
             context_size=get_model_context_size(request, model),
         )
-
-    choices = response.get("choices", [])
-    if choices and choices[0].get("message", {}).get("content"):
-        content = response["choices"][0]["message"]["content"]
-
-        if content:
-            await event_emitter(
-                {
-                    "type": "chat:completion",
-                    "data": response,
-                }
-            )
-
-            title = Chats.get_chat_title_by_id(metadata["chat_id"])
-
-            await event_emitter(
-                {
-                    "type": "chat:completion",
-                    "data": {
-                        "done": True,
-                        "content": content,
-                        "title": title,
-                    },
-                }
-            )
-
-            # Save message in the database
-            Chats.upsert_message_to_chat_by_id_and_message_id(
-                metadata["chat_id"],
-                metadata["message_id"],
-                {
-                    "content": content,
-                },
-            )
-
-            # Send a webhook notification if the user is not active
-            if get_active_status_by_user_id(user.id) is None:
-                webhook_url = Users.get_user_webhook_url_by_id(user.id)
-                if webhook_url:
-                    await post_webhook(
-                        request.app.state.WEBUI_NAME,
-                        webhook_url,
-                        f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
-                        {
-                            "action": "chat",
-                            "message": content,
-                            "title": title,
-                            "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
-                        },
-                    )
-
-            await run_response_background_tasks(
-                request, user, metadata, tasks, event_emitter
-            )
-
-    return response
+    await event_emitter(
+        {
+            "type": "chat:completion",
+            "data": {"usage": usage},
+        }
+    )
 
 
 async def consume_model_stream(
@@ -875,10 +712,37 @@ async def consume_model_stream(
     """モデル応答 SSE を読み切り assembler へ畳み込む。組めた tool calls を返す。
 
     行パース → stream filter → assembler(デルタ畳み込み)→ emit / 永続化。
+
+    wire v2 の emit 規約:
+    - ストリーム開始時に無条件で初回スナップショット(seed blocks の表示と
+      フロントの「追記先」を保証する)
+    - 純追記フレームは {"delta": {"block", "content"}} の小粒イベント
+    - 構造変化(ブロック開閉・tool_calls)はスナップショット + DB 永続化
+    - テキスト連続中も SNAPSHOT_INTERVAL ごとにスナップショット + 永続化
+      (途中参加の収束と障害時の取りこぼし上限)
+
     ストリーム終端で reasoning の閉じ規律③と finish_reason 整合ガード
     (llens #18-2)を適用する。
     """
     assembler.start_stream()
+
+    loop = asyncio.get_running_loop()
+    last_snapshot_at = loop.time()
+
+    async def emit_snapshot(persist):
+        nonlocal last_snapshot_at
+        snapshot = blocks_event_data(assembler.content_blocks)
+        await event_emitter(
+            {
+                "type": "chat:completion",
+                "data": snapshot,
+            }
+        )
+        if persist:
+            await _persist_message_snapshot(metadata, snapshot)
+        last_snapshot_at = loop.time()
+
+    await emit_snapshot(persist=False)
 
     async for line in response.body_iterator:
         line = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -906,82 +770,48 @@ async def consume_model_stream(
                 extra_params=extra_params,
             )
 
-            if data:
-                if "event" in data:
-                    await event_emitter(data.get("event", {}))
+            if not data:
+                continue
 
-                if "selected_model_id" in data:
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
+            if "event" in data:
+                await event_emitter(data.get("event", {}))
+
+            choices = data.get("choices", [])
+            if not choices:
+                error = data.get("error", {})
+                if error:
+                    # エラー形の一元化: {"error": {"content": str}}
+                    if not isinstance(error, dict) or "content" not in error:
+                        error = {"content": str(error)}
+                    await event_emitter(
                         {
-                            "selectedModelId": data["selected_model_id"],
-                        },
+                            "type": "chat:completion",
+                            "data": {"error": error},
+                        }
                     )
+                usage = data.get("usage", {})
+                if usage:
+                    await _record_usage(request, model, metadata, usage, event_emitter)
+                continue
+
+            assembler.note_finish_reason(choices[0].get("finish_reason"))
+
+            changed = assembler.handle_delta(choices[0].get("delta", {}))
+
+            if changed:
+                frame = assembler.last_frame
+                if frame["structural"]:
+                    await emit_snapshot(persist=True)
+                elif loop.time() - last_snapshot_at >= SNAPSHOT_INTERVAL:
+                    await emit_snapshot(persist=True)
                 else:
-                    choices = data.get("choices", [])
-                    if not choices:
-                        error = data.get("error", {})
-                        if error:
-                            await event_emitter(
-                                {
-                                    "type": "chat:completion",
-                                    "data": {
-                                        "error": error,
-                                    },
-                                }
-                            )
-                        usage = data.get("usage", {})
-                        if usage:
-                            # llens(#57): 実測 usage(真のコンテキスト量)を
-                            # ターン/チャット単位で永続化。tool ループの
-                            # 各呼び出しがここを通る(completion は加算)。
-                            if metadata.get("chat_id") and metadata.get("message_id"):
-                                await asyncio.to_thread(
-                                    Chats.record_usage_by_id_and_message_id,
-                                    metadata["chat_id"],
-                                    metadata["message_id"],
-                                    usage,
-                                    context_size=get_model_context_size(request, model),
-                                )
-                            await event_emitter(
-                                {
-                                    "type": "chat:completion",
-                                    "data": {
-                                        "usage": usage,
-                                    },
-                                }
-                            )
-                        continue
-
-                    assembler.note_finish_reason(choices[0].get("finish_reason"))
-
-                    changed = assembler.handle_delta(choices[0].get("delta", {}))
-
-                    if changed:
-                        snapshot = blocks_event_data(assembler.content_blocks)
-
-                        # tool_calls / reasoning の変更は常に snapshot を emit する。
-                        # text は ENABLE_REALTIME_CHAT_SAVE 時のみ DB 直書き
-                        # (イベントはフレーム素通し)— v0.6.5 の挙動踏襲。
-                        if changed - {CHANGED_TEXT}:
-                            data = snapshot
-                        if CHANGED_TEXT in changed:
-                            if ENABLE_REALTIME_CHAT_SAVE:
-                                Chats.upsert_message_to_chat_by_id_and_message_id(
-                                    metadata["chat_id"],
-                                    metadata["message_id"],
-                                    snapshot,
-                                )
-                            else:
-                                data = snapshot
-
-                await event_emitter(
-                    {
-                        "type": "chat:completion",
-                        "data": data,
-                    }
-                )
+                    for append in frame["appends"]:
+                        await event_emitter(
+                            {
+                                "type": "chat:completion",
+                                "data": {"delta": append},
+                            }
+                        )
         except Exception as e:
             done = "data: [DONE]" in line
             if done:
@@ -1025,6 +855,68 @@ async def consume_model_stream(
     return response_tool_calls
 
 
+async def ingest_model_response_json(
+    request,
+    response,
+    assembler,
+    *,
+    model,
+    metadata,
+    event_emitter,
+):
+    """非ストリーム JSON 応答を合成 1 フレームとして assembler へ畳み込む。
+
+    stream=False(stream_response param での opt-out)でもクライアント契約
+    (task + SSE イベント)を同一に保つための正規化。tool_calls も畳み込む
+    ため、非ストリームモデルでも tool ループが機能する。
+    """
+    assembler.start_stream()
+
+    if "error" in response:
+        error = response["error"]
+        if isinstance(error, dict):
+            error = error.get("detail") or error.get("content") or str(error)
+        await event_emitter(
+            {
+                "type": "chat:completion",
+                "data": {"error": {"content": str(error)}},
+            }
+        )
+
+    choices = response.get("choices", [])
+    message = (choices[0].get("message") or {}) if choices else {}
+
+    delta = {}
+    if message.get("content"):
+        delta["content"] = message["content"]
+    if message.get("reasoning_content"):
+        delta["reasoning_content"] = message["reasoning_content"]
+    if message.get("tool_calls"):
+        # 非ストリーム形の tool_calls は完成形で index を持たない — 合成する
+        delta["tool_calls"] = [
+            {**call, "index": call.get("index", i)}
+            for i, call in enumerate(message["tool_calls"])
+        ]
+
+    if delta:
+        assembler.handle_delta(delta)
+    if choices:
+        assembler.note_finish_reason(choices[0].get("finish_reason"))
+
+    snapshot = blocks_event_data(assembler.content_blocks)
+    await event_emitter({"type": "chat:completion", "data": snapshot})
+    await _persist_message_snapshot(metadata, snapshot)
+
+    usage = response.get("usage", {})
+    if usage:
+        await _record_usage(request, model, metadata, usage, event_emitter)
+
+    response_tool_calls, mismatch = assembler.finish_stream()
+    if mismatch == MISMATCH_MISSING_TOOL_CALLS:
+        log.error("finish_reason=tool_calls but response carried no tool calls")
+    return response_tool_calls
+
+
 async def execute_tool_calls(response_tool_calls, tools):
     """tool call 群を順に実行し、tool result のリストを返す。"""
     results = []
@@ -1034,18 +926,19 @@ async def execute_tool_calls(response_tool_calls, tools):
 
         tool_function_params = {}
         try:
-            # json.loads cannot be used because some models do not produce valid JSON
-            tool_function_params = ast.literal_eval(
+            # 一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
+            # _memos/model-frames.md)。Python リテラル風を出すモデル向けの
+            # フォールバックとして ast.literal_eval を残す(モデル多様性)。
+            tool_function_params = json.loads(
                 tool_call.get("function", {}).get("arguments", "{}")
             )
         except Exception as e:
             log.debug(e)
-            # Fallback to JSON parsing
             try:
-                tool_function_params = json.loads(
+                tool_function_params = ast.literal_eval(
                     tool_call.get("function", {}).get("arguments", "{}")
                 )
-            except Exception as e:
+            except Exception:
                 log.debug(
                     f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
                 )
@@ -1102,11 +995,17 @@ async def execute_tool_calls(response_tool_calls, tools):
 
         tool_result_files = []
         if isinstance(tool_result, list):
-            for item in tool_result:
-                # check if string
-                if isinstance(item, str) and item.startswith("data:"):
-                    tool_result_files.append(item)
-                    tool_result.remove(item)
+            # data URL(生成ファイル)を結果から抜き出す。
+            # 旧実装はイテレーション中に list.remove しており要素を取りこぼしていた。
+            tool_result_files = [
+                item
+                for item in tool_result
+                if isinstance(item, str) and item.startswith("data:")
+            ]
+            if tool_result_files:
+                tool_result = [
+                    item for item in tool_result if item not in tool_result_files
+                ]
 
         if isinstance(tool_result, dict) or isinstance(tool_result, list):
             tool_result = json.dumps(tool_result, indent=2)
@@ -1123,367 +1022,51 @@ async def execute_tool_calls(response_tool_calls, tools):
 
 
 async def process_chat_response(
-    request, response, form_data, user, metadata, model, events, tasks
+    request,
+    response,
+    form_data,
+    user,
+    metadata,
+    model,
+    events,
+    tasks,
+    events_stream=None,
+    queue=None,
 ):
-    event_emitter = None
-    event_caller = None
-    if (
-        "session_id" in metadata
-        and metadata["session_id"]
-        and "chat_id" in metadata
-        and metadata["chat_id"]
-        and "message_id" in metadata
-        and metadata["message_id"]
-    ):
-        event_emitter = get_event_emitter(metadata)
-        event_caller = get_event_call(metadata)
+    """モデル応答をクライアント契約へ変換する(wire v2)。
 
-    # Non-streaming response
-    if not isinstance(response, StreamingResponse):
-        if event_emitter:
-            return await handle_non_streaming_response(
-                request, response, user, metadata, model, tasks, event_emitter
-            )
-        else:
-            return response
-
-    # Non standard response
-    if not any(
-        content_type in response.headers["Content-Type"]
-        for content_type in ["text/event-stream", "application/x-ndjson"]
-    ):
-        return response
-
-    extra_params = {
-        "__event_emitter__": event_emitter,
-        "__event_call__": event_caller,
-        "__user__": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
-            "info": getattr(user, "info", None) or {},
-        },
-        "__metadata__": metadata,
-        "__request__": request,
-        "__model__": model,
-    }
+    - chat メタデータあり(events_stream 供給): バックグラウンドタスクが応答を
+      消費・組み立て・永続化し、POST 応答はそのタスクのイベントバスを購読する
+      SSE になる。クライアント切断はタスクに影響しない(再アタッチは
+      GET /api/tasks/{task_id}/events)。stream/非 stream ともこの契約に統一。
+    - chat メタデータなし(headless API): 現行どおり OpenAI 互換フレームを
+      素通しする(stream filter だけ適用)。
+    """
     filter_functions = [
         Functions.get_function_by_id(filter_id)
         for filter_id in get_sorted_filter_ids(model)
     ]
 
-    # Streaming response
-    if event_emitter and event_caller:
-        task_id = str(uuid4())  # Create a unique task ID.
-        model_id = form_data.get("model", "")
+    # --- headless(chat メタデータ無し)経路: 素通し -----------------------
+    if events_stream is None:
+        if not isinstance(response, StreamingResponse):
+            return response
 
-        Chats.upsert_message_to_chat_by_id_and_message_id(
-            metadata["chat_id"],
-            metadata["message_id"],
-            {
-                "model": model_id,
+        extra_params = {
+            "__event_emitter__": None,
+            "__event_call__": None,
+            "__user__": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "role": user.role,
+                "info": getattr(user, "info", None) or {},
             },
-        )
+            "__metadata__": metadata,
+            "__request__": request,
+            "__model__": model,
+        }
 
-        # Handle as a background task
-        async def post_response_handler(response, events):
-            message = Chats.get_message_by_id_and_message_id(
-                metadata["chat_id"], metadata["message_id"]
-            )
-
-            tool_calls = []
-
-            last_assistant_message = None
-            try:
-                if form_data["messages"][-1]["role"] == "assistant":
-                    last_assistant_message = get_last_assistant_message(
-                        form_data["messages"]
-                    )
-            except Exception:
-                pass
-
-            # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
-            # 「View Result from load_skill」として応答先頭に表示する。
-            seed_blocks = []
-            if metadata.get("skill_activations"):
-                seed_blocks.append(
-                    skill_activation_seed_block(metadata["skill_activations"])
-                )
-
-            # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
-            # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
-            # parser 有効が接続契約で、常に reasoning_content デルタとして届く
-            # (content 中のタグ検出経路は撤去済み — _memos/rendering-design.md §3)。
-            assembler = ContentBlocksAssembler(
-                initial_content=(
-                    message.get("content", "")
-                    if message
-                    else last_assistant_message if last_assistant_message else ""
-                ),
-                seed_blocks=seed_blocks,
-                tools=metadata.get("tools", {}),
-            )
-
-            try:
-                for event in events:
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": event,
-                        }
-                    )
-
-                    # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        {
-                            **event,
-                        },
-                    )
-
-                stream_kwargs = {
-                    "model": model,
-                    "metadata": metadata,
-                    "filter_functions": filter_functions,
-                    "extra_params": extra_params,
-                    "event_emitter": event_emitter,
-                }
-
-                response_tool_calls = await consume_model_stream(
-                    request, response, assembler, **stream_kwargs
-                )
-                if response_tool_calls:
-                    tool_calls.append(response_tool_calls)
-
-                # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
-                max_tool_call_iterations = CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
-                tool_call_iterations = 0
-
-                while len(tool_calls) > 0 and (
-                    max_tool_call_iterations < 0
-                    or tool_call_iterations < max_tool_call_iterations
-                ):
-                    tool_call_iterations += 1
-
-                    response_tool_calls = tool_calls.pop(0)
-
-                    tools = metadata.get("tools", {})
-
-                    # llens(#20): render(表示ディスクリプタ)付与と open ブロックの
-                    # 再追加ガードは assembler が冪等に行う(通常はストリーム中に
-                    # 付与・追加済み。ここは保険)。
-                    assembler.ensure_tool_calls_block(response_tool_calls)
-
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": blocks_event_data(assembler.content_blocks),
-                        }
-                    )
-
-                    results = await execute_tool_calls(response_tool_calls, tools)
-
-                    assembler.set_tool_results(results)
-
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": blocks_event_data(assembler.content_blocks),
-                        }
-                    )
-
-                    try:
-                        res = await generate_chat_completion(
-                            request,
-                            {
-                                "model": model_id,
-                                "stream": True,
-                                # llens(#57): tool ループの各呼び出しでも usage を受け取る
-                                # (capabilities.usage=False のモデルは opt-out)
-                                **(
-                                    {"stream_options": {"include_usage": True}}
-                                    if is_usage_requested(model)
-                                    else {}
-                                ),
-                                "tools": form_data["tools"],
-                                "messages": [
-                                    *form_data["messages"],
-                                    *convert_content_blocks_to_messages(
-                                        assembler.content_blocks
-                                    ),
-                                ],
-                            },
-                            user,
-                        )
-
-                        if isinstance(res, StreamingResponse):
-                            followup_tool_calls = await consume_model_stream(
-                                request, res, assembler, **stream_kwargs
-                            )
-                            if followup_tool_calls:
-                                tool_calls.append(followup_tool_calls)
-                        else:
-                            break
-                    except Exception as e:
-                        # llens: 追撃呼び出しの失敗を黙って正常終了にしない
-                        # (tool 実行後に続きが来ないまま done になる無言死)。
-                        # エラーをチャット内に出し、message にも永続化する。
-                        log.exception("follow-up model call failed in tool loop")
-                        error_data = {
-                            "error": {
-                                "content": (
-                                    "Follow-up model call after tool execution "
-                                    f"failed: {e}"
-                                )
-                            },
-                        }
-                        await event_emitter(
-                            {"type": "chat:completion", "data": error_data}
-                        )
-                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
-                            error_data,
-                        )
-                        break
-
-                if len(tool_calls) > 0:
-                    # llens: 反復上限に到達(issue #18)。黙って打ち切らず
-                    # チャット内にエラーを表示する。ループ内 break は現ターンの
-                    # tool_calls を pop 済み・新 group 未ストリームで空になるため、
-                    # ここに来るのは上限到達時のみ。
-                    log.warning(
-                        "Tool call iteration limit reached: "
-                        f"{max_tool_call_iterations} "
-                        "(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)"
-                    )
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": {
-                                "error": {
-                                    "content": (
-                                        "Tool call iteration limit reached "
-                                        f"({max_tool_call_iterations}). "
-                                        "Response stopped. Increase "
-                                        "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS "
-                                        "to allow more tool calls."
-                                    )
-                                },
-                            },
-                        }
-                    )
-
-                title = Chats.get_chat_title_by_id(metadata["chat_id"])
-                data = {
-                    "done": True,
-                    **blocks_event_data(assembler.content_blocks),
-                    "title": title,
-                }
-
-                if not ENABLE_REALTIME_CHAT_SAVE:
-                    # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        blocks_event_data(assembler.content_blocks),
-                    )
-
-                # Send a webhook notification if the user is not active
-                if get_active_status_by_user_id(user.id) is None:
-                    webhook_url = Users.get_user_webhook_url_by_id(user.id)
-                    if webhook_url:
-                        await post_webhook(
-                            request.app.state.WEBUI_NAME,
-                            webhook_url,
-                            f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{assembler.content}",
-                            {
-                                "action": "chat",
-                                "message": assembler.content,
-                                "title": title,
-                                "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
-                            },
-                        )
-
-                await event_emitter(
-                    {
-                        "type": "chat:completion",
-                        "data": data,
-                    }
-                )
-
-                await run_response_background_tasks(
-                    request, user, metadata, tasks, event_emitter
-                )
-            except asyncio.CancelledError:
-                # llens: 中断でも open な reasoning を閉じてから保存・emit する。
-                # done=false のブロックが DB に残ると「Thinking…」スピナーが
-                # リロード後も回り続ける。順序が要件: 先に task-cancelled で
-                # フロントに interrupted マークを立てさせ、その後の done イベントで
-                # completed 経路(outlet filter)が interrupted 込みで走る。
-                log.warning("Task was cancelled!")
-                assembler.close_open_reasoning_block()
-                data = {
-                    "done": True,
-                    **blocks_event_data(assembler.content_blocks),
-                }
-
-                await event_emitter({"type": "task-cancelled"})
-                await event_emitter({"type": "chat:completion", "data": data})
-
-                if not ENABLE_REALTIME_CHAT_SAVE:
-                    # Save message in the database
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        data,
-                    )
-
-                await apply_fallback_title_on_abnormal_end(
-                    metadata, tasks, event_emitter
-                )
-            except Exception as e:
-                # llens: 上流タイムアウト(sock_read)等の途中失敗を黙って死なせない。
-                # ここで error を emit しないと task だけが消え、フロントは
-                # 「Preparing…」のまま固まる(ollama 無応答障害で実証)。error は
-                # message にも永続化し、リロード後もエラーとして見えるようにする。
-                log.exception("Chat response task failed mid-stream")
-                assembler.close_open_reasoning_block()
-                # done も同時に立てる: フロントの done 経路(completed → outlet
-                # filter)を通し、outlet が message.error で成否を判別できるようにする
-                data = {
-                    "error": {"content": f"Connection to the model was lost: {e}"},
-                    "done": True,
-                    **blocks_event_data(assembler.content_blocks),
-                }
-
-                await event_emitter({"type": "chat:completion", "data": data})
-
-                if not ENABLE_REALTIME_CHAT_SAVE:
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        data,
-                    )
-
-                await apply_fallback_title_on_abnormal_end(
-                    metadata, tasks, event_emitter
-                )
-
-            if response.background is not None:
-                await response.background()
-
-        # background_tasks.add_task(post_response_handler, response, events)
-        task_id, _ = create_task(
-            post_response_handler(response, events), id=metadata["chat_id"]
-        )
-        return {"status": True, "task_id": task_id}
-
-    else:
-        # Fallback to the original response
         async def stream_wrapper(original_generator, events):
             def wrap_item(item):
                 return f"data: {item}\n\n"
@@ -1517,3 +1100,331 @@ async def process_chat_response(
             headers=dict(response.headers),
             background=response.background,
         )
+
+    # --- chat 経路: タスク + SSE 購読 --------------------------------------
+    event_emitter = make_event_emitter(events_stream, metadata)
+    event_caller = make_event_call(events_stream)
+
+    extra_params = {
+        "__event_emitter__": event_emitter,
+        "__event_call__": event_caller,
+        "__user__": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
+            "info": getattr(user, "info", None) or {},
+        },
+        "__metadata__": metadata,
+        "__request__": request,
+        "__model__": model,
+    }
+
+    model_id = form_data.get("model", "")
+
+    await _persist_message_snapshot(metadata, {"model": model_id})
+
+    async def post_response_handler(response, events):
+        message = await asyncio.to_thread(
+            Chats.get_message_by_id_and_message_id,
+            metadata["chat_id"],
+            metadata["message_id"],
+        )
+
+        tool_calls = []
+
+        last_assistant_message = None
+        try:
+            if form_data["messages"][-1]["role"] == "assistant":
+                last_assistant_message = get_last_assistant_message(
+                    form_data["messages"]
+                )
+        except Exception:
+            pass
+
+        # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
+        # 「View Result from load_skill」として応答先頭に表示する。
+        seed_blocks = []
+        if metadata.get("skill_activations"):
+            seed_blocks.append(
+                skill_activation_seed_block(metadata["skill_activations"])
+            )
+
+        # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
+        # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
+        # parser 有効が接続契約で、常に reasoning_content デルタとして届く
+        # (content 中のタグ検出経路は撤去済み — _memos/rendering-design.md §3)。
+        assembler = ContentBlocksAssembler(
+            initial_content=(
+                message.get("content", "")
+                if message
+                else last_assistant_message if last_assistant_message else ""
+            ),
+            seed_blocks=seed_blocks,
+            tools=metadata.get("tools", {}),
+        )
+
+        try:
+            for event in events:
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": event,
+                    }
+                )
+                await _persist_message_snapshot(metadata, {**event})
+
+            stream_kwargs = {
+                "model": model,
+                "metadata": metadata,
+                "filter_functions": filter_functions,
+                "extra_params": extra_params,
+                "event_emitter": event_emitter,
+            }
+            ingest_kwargs = {
+                "model": model,
+                "metadata": metadata,
+                "event_emitter": event_emitter,
+            }
+
+            if isinstance(response, StreamingResponse):
+                response_tool_calls = await consume_model_stream(
+                    request, response, assembler, **stream_kwargs
+                )
+            else:
+                response_tool_calls = await ingest_model_response_json(
+                    request, response, assembler, **ingest_kwargs
+                )
+            if response_tool_calls:
+                tool_calls.append(response_tool_calls)
+
+            # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
+            max_tool_call_iterations = CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
+            tool_call_iterations = 0
+
+            while len(tool_calls) > 0 and (
+                max_tool_call_iterations < 0
+                or tool_call_iterations < max_tool_call_iterations
+            ):
+                tool_call_iterations += 1
+
+                response_tool_calls = tool_calls.pop(0)
+
+                tools = metadata.get("tools", {})
+
+                # llens(#20): render(表示ディスクリプタ)付与と open ブロックの
+                # 再追加ガードは assembler が冪等に行う(通常はストリーム中に
+                # 付与・追加済み。ここは保険)。
+                assembler.ensure_tool_calls_block(response_tool_calls)
+
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": blocks_event_data(assembler.content_blocks),
+                    }
+                )
+
+                results = await execute_tool_calls(response_tool_calls, tools)
+
+                assembler.set_tool_results(results)
+
+                snapshot = blocks_event_data(assembler.content_blocks)
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": snapshot,
+                    }
+                )
+                await _persist_message_snapshot(metadata, snapshot)
+
+                try:
+                    res = await generate_chat_completion(
+                        request,
+                        {
+                            "model": model_id,
+                            # 追撃呼び出しは元リクエストの stream 指定を尊重する
+                            # (stream 非対応モデル向けの opt-out を殺さない)
+                            "stream": form_data.get("stream", True),
+                            # llens(#57): tool ループの各呼び出しでも usage を受け取る
+                            # (capabilities.usage=False のモデルは opt-out)
+                            **(
+                                {"stream_options": {"include_usage": True}}
+                                if form_data.get("stream", True)
+                                and is_usage_requested(model)
+                                else {}
+                            ),
+                            "tools": form_data["tools"],
+                            "messages": [
+                                *form_data["messages"],
+                                *convert_content_blocks_to_messages(
+                                    assembler.content_blocks
+                                ),
+                            ],
+                        },
+                        user,
+                    )
+
+                    if isinstance(res, StreamingResponse):
+                        followup_tool_calls = await consume_model_stream(
+                            request, res, assembler, **stream_kwargs
+                        )
+                    else:
+                        followup_tool_calls = await ingest_model_response_json(
+                            request, res, assembler, **ingest_kwargs
+                        )
+                    if followup_tool_calls:
+                        tool_calls.append(followup_tool_calls)
+                except Exception as e:
+                    # llens: 追撃呼び出しの失敗を黙って正常終了にしない
+                    # (tool 実行後に続きが来ないまま done になる無言死)。
+                    # エラーをチャット内に出し、message にも永続化する。
+                    log.exception("follow-up model call failed in tool loop")
+                    error_data = {
+                        "error": {
+                            "content": (
+                                "Follow-up model call after tool execution "
+                                f"failed: {e}"
+                            )
+                        },
+                    }
+                    await event_emitter({"type": "chat:completion", "data": error_data})
+                    await _persist_message_snapshot(metadata, error_data)
+                    break
+
+            if len(tool_calls) > 0:
+                # llens: 反復上限に到達(issue #18)。黙って打ち切らず
+                # チャット内にエラーを表示する。ループ内 break は現ターンの
+                # tool_calls を pop 済み・新 group 未ストリームで空になるため、
+                # ここに来るのは上限到達時のみ。
+                log.warning(
+                    "Tool call iteration limit reached: "
+                    f"{max_tool_call_iterations} "
+                    "(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)"
+                )
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": {
+                            "error": {
+                                "content": (
+                                    "Tool call iteration limit reached "
+                                    f"({max_tool_call_iterations}). "
+                                    "Response stopped. Increase "
+                                    "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS "
+                                    "to allow more tool calls."
+                                )
+                            },
+                        },
+                    }
+                )
+
+            title = await asyncio.to_thread(
+                Chats.get_chat_title_by_id, metadata["chat_id"]
+            )
+            final_snapshot = blocks_event_data(assembler.content_blocks)
+            data = {
+                "done": True,
+                **final_snapshot,
+                "title": title,
+            }
+
+            await _persist_message_snapshot(metadata, final_snapshot)
+
+            # webhook(triage KEEP): 「この応答を誰も見ていなかった」場合に通知。
+            # 旧実装のプレゼンス(USER_POOL)でなく、完了時点のイベント購読者の
+            # 有無で判定する(意味的により正確)。
+            if not events_stream.has_subscribers:
+                webhook_url = await asyncio.to_thread(
+                    Users.get_user_webhook_url_by_id, user.id
+                )
+                if webhook_url:
+                    await post_webhook(
+                        request.app.state.WEBUI_NAME,
+                        webhook_url,
+                        f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{assembler.content}",
+                        {
+                            "action": "chat",
+                            "message": assembler.content,
+                            "title": title,
+                            "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
+                        },
+                    )
+
+            await event_emitter(
+                {
+                    "type": "chat:completion",
+                    "data": data,
+                }
+            )
+
+            await run_response_background_tasks(
+                request, user, metadata, tasks, event_emitter
+            )
+        except asyncio.CancelledError:
+            # llens: 中断でも open な reasoning を閉じてから保存・emit する。
+            # done=false のブロックが DB に残ると「Thinking…」スピナーが
+            # リロード後も回り続ける。順序が要件: 先に task-cancelled で
+            # フロントに interrupted マークを立てさせ、その後の done イベントで
+            # completed 経路(outlet filter)が interrupted 込みで走る。
+            log.warning("Task was cancelled!")
+            assembler.close_open_reasoning_block()
+            data = {
+                "done": True,
+                **blocks_event_data(assembler.content_blocks),
+            }
+
+            await event_emitter({"type": "task-cancelled"})
+            await event_emitter({"type": "chat:completion", "data": data})
+            await _persist_message_snapshot(metadata, data)
+
+            await apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter)
+        except Exception as e:
+            # llens: 上流タイムアウト(sock_read)等の途中失敗を黙って死なせない。
+            # ここで error を emit しないと task だけが消え、フロントは
+            # 「Preparing…」のまま固まる(ollama 無応答障害で実証)。error は
+            # message にも永続化し、リロード後もエラーとして見えるようにする。
+            log.exception("Chat response task failed mid-stream")
+            assembler.close_open_reasoning_block()
+            # done も同時に立てる: フロントの done 経路(completed → outlet
+            # filter)を通し、outlet が message.error で成否を判別できるようにする
+            data = {
+                "error": {"content": f"Connection to the model was lost: {e}"},
+                "done": True,
+                **blocks_event_data(assembler.content_blocks),
+            }
+
+            await event_emitter({"type": "chat:completion", "data": data})
+            await _persist_message_snapshot(metadata, data)
+
+            await apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter)
+
+        if isinstance(response, StreamingResponse) and response.background is not None:
+            await response.background()
+
+    task_id, task = create_task(
+        post_response_handler(response, events), id=metadata["chat_id"]
+    )
+    register_stream(task_id, events_stream)
+    # タスク終端(title 生成まで含む)でバスを閉じ、全購読 SSE を EOF させる。
+    # クライアントは done ではなく EOF を終端として扱う(wire v2 規約)。
+    task.add_done_callback(lambda t: release_stream(task_id))
+
+    first_events = [
+        {
+            "chat_id": metadata.get("chat_id"),
+            "message_id": metadata.get("message_id"),
+            "data": {"type": "task", "data": {"task_id": task_id}},
+        }
+    ]
+
+    return StreamingResponse(
+        sse_event_generator(events_stream, queue, first_events=first_events),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # nginx 等のリバースプロキシでの応答バッファリングを抑止
+            "X-Accel-Buffering": "no",
+        },
+    )

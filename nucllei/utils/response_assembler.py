@@ -17,8 +17,7 @@ wire / 永続化形への変換は utils/content_blocks.py が担う。
 
 import time
 
-# handle_delta が返す変更種別。emit / realtime save の扱いが呼び出し側で
-# 種別ごとに異なる(text のみ ENABLE_REALTIME_CHAT_SAVE の分岐がある)。
+# handle_delta が返す変更種別。emit の扱いが呼び出し側で種別ごとに異なる。
 CHANGED_TOOL_CALLS = "tool_calls"
 CHANGED_REASONING = "reasoning"
 CHANGED_TEXT = "text"
@@ -44,6 +43,7 @@ class ContentBlocksAssembler:
         self._tools = tools if tools is not None else {}
         self._response_tool_calls = []
         self._finish_reason = None
+        self.last_frame = {"structural": False, "appends": []}
 
     # --- ストリーム境界 -------------------------------------------------
 
@@ -51,6 +51,7 @@ class ContentBlocksAssembler:
         """ストリーム(モデル呼び出し 1 回)スコープの状態をリセットする。"""
         self._response_tool_calls = []
         self._finish_reason = None
+        self.last_frame = {"structural": False, "appends": []}
 
     def note_finish_reason(self, finish_reason):
         if finish_reason:
@@ -97,8 +98,16 @@ class ContentBlocksAssembler:
     # --- デルタ処理 -----------------------------------------------------
 
     def handle_delta(self, delta) -> set:
-        """1 フレーム分の delta を畳み込み、変更種別の集合を返す(空 = 変更なし)。"""
+        """1 フレーム分の delta を畳み込み、変更種別の集合を返す(空 = 変更なし)。
+
+        同時に last_frame へこのフレームの詳細を残す(wire v2):
+        - structural: ブロックの開閉・tool_calls 累積を伴った(= スナップショット必須)
+        - appends: 既存の末尾ブロックへの純追記 [{"block": "text"|"reasoning", "content": str}]
+          (structural=False のとき、呼び出し側はこれをデルタイベントとして emit できる)
+        """
         changed = set()
+        structural = False
+        appends = []
 
         delta_tool_calls = delta.get("tool_calls", None)
         if delta_tool_calls:
@@ -112,6 +121,8 @@ class ContentBlocksAssembler:
             # _response_tool_calls と同一オブジェクトなので以後の累積は自動反映。
             self.ensure_tool_calls_block(self._response_tool_calls)
             changed.add(CHANGED_TOOL_CALLS)
+            # tool_calls は部分 arguments の突き合わせが要るためスナップショット一択
+            structural = True
 
         reasoning_content = delta.get("reasoning_content") or delta.get("reasoning")
         if reasoning_content:
@@ -128,8 +139,10 @@ class ContentBlocksAssembler:
                     "started_at": time.time(),
                 }
                 self.content_blocks.append(reasoning_block)
+                structural = True
             else:
                 reasoning_block = self.content_blocks[-1]
+                appends.append({"block": "reasoning", "content": reasoning_content})
 
             reasoning_block["content"] += reasoning_content
             changed.add(CHANGED_REASONING)
@@ -150,6 +163,7 @@ class ContentBlocksAssembler:
                 )
 
                 self.content_blocks.append({"type": "text", "content": ""})
+                structural = True
 
             self.content = f"{self.content}{value}"
             # llens(#20 ステップ5): tool_calls ブロックがストリーム中から存在する
@@ -159,12 +173,17 @@ class ContentBlocksAssembler:
                 "reasoning",
             ):
                 self.content_blocks.append({"type": "text", "content": ""})
+                structural = True
+
+            if not structural:
+                appends.append({"block": "text", "content": value})
 
             self.content_blocks[-1]["content"] = (
                 self.content_blocks[-1]["content"] + value
             )
             changed.add(CHANGED_TEXT)
 
+        self.last_frame = {"structural": structural, "appends": appends}
         return changed
 
     # --- tool ループ側の操作 ---------------------------------------------

@@ -799,10 +799,6 @@ ENABLE_OPENAI_API = RuntimeConfig(
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_API_BASE_URL = os.environ.get("OPENAI_API_BASE_URL", "")
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_API_BASE_URL = os.environ.get("GEMINI_API_BASE_URL", "")
-
-
 if OPENAI_API_BASE_URL == "":
     OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 
@@ -978,11 +974,6 @@ USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = (
 )
 
 
-USER_PERMISSIONS_FEATURES_IMAGE_GENERATION = (
-    os.environ.get("USER_PERMISSIONS_FEATURES_IMAGE_GENERATION", "True").lower()
-    == "true"
-)
-
 DEFAULT_USER_PERMISSIONS = {
     "workspace": {
         "skills": USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS,
@@ -994,9 +985,6 @@ DEFAULT_USER_PERMISSIONS = {
         "share": USER_PERMISSIONS_CHAT_SHARE,
         "clone": USER_PERMISSIONS_CHAT_CLONE,
         "multiple_models": USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
-    },
-    "features": {
-        "image_generation": USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
     },
 }
 
@@ -1159,32 +1147,6 @@ JSON format: { "title": "your concise title here" }
 {{MESSAGES:END:2}}
 </chat_history>"""
 
-IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = RuntimeConfig(
-    "IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE",
-    "task.image.prompt_template",
-    os.environ.get("IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE", ""),
-)
-
-DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = """### Task:
-Generate a detailed prompt for am image generation task based on the given language and context. Describe the image as if you were explaining it to someone who cannot see it. Include relevant details, colors, shapes, and any other important elements.
-
-### Guidelines:
-- Be descriptive and detailed, focusing on the most important aspects of the image.
-- Avoid making assumptions or adding information not present in the image.
-- Use the chat's primary language; default to English if multilingual.
-- If the image is too complex, focus on the most prominent elements.
-
-### Output:
-Strictly return in JSON format:
-{
-    "prompt": "Your detailed description here."
-}
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>"""
-
 # llens(#67): chat tag は機能ごと撤去(TAGS_GENERATION 系 config も削除)
 
 ENABLE_TITLE_GENERATION = RuntimeConfig(
@@ -1284,241 +1246,6 @@ TIKTOKEN_ENCODING_NAME = RuntimeConfig(
     os.environ.get("TIKTOKEN_ENCODING_NAME", "cl100k_base"),
 )
 
-
-####################################
-# Images
-####################################
-
-IMAGE_GENERATION_ENGINE = RuntimeConfig(
-    "IMAGE_GENERATION_ENGINE",
-    "image_generation.engine",
-    os.getenv("IMAGE_GENERATION_ENGINE", "openai"),
-)
-
-ENABLE_IMAGE_GENERATION = RuntimeConfig(
-    "ENABLE_IMAGE_GENERATION",
-    "image_generation.enable",
-    os.environ.get("ENABLE_IMAGE_GENERATION", "").lower() == "true",
-)
-
-ENABLE_IMAGE_PROMPT_GENERATION = RuntimeConfig(
-    "ENABLE_IMAGE_PROMPT_GENERATION",
-    "image_generation.prompt.enable",
-    os.environ.get("ENABLE_IMAGE_PROMPT_GENERATION", "true").lower() == "true",
-)
-
-AUTOMATIC1111_BASE_URL = RuntimeConfig(
-    "AUTOMATIC1111_BASE_URL",
-    "image_generation.automatic1111.base_url",
-    os.getenv("AUTOMATIC1111_BASE_URL", ""),
-)
-AUTOMATIC1111_API_AUTH = RuntimeConfig(
-    "AUTOMATIC1111_API_AUTH",
-    "image_generation.automatic1111.api_auth",
-    os.getenv("AUTOMATIC1111_API_AUTH", ""),
-)
-
-AUTOMATIC1111_CFG_SCALE = RuntimeConfig(
-    "AUTOMATIC1111_CFG_SCALE",
-    "image_generation.automatic1111.cfg_scale",
-    (
-        float(os.environ.get("AUTOMATIC1111_CFG_SCALE"))
-        if os.environ.get("AUTOMATIC1111_CFG_SCALE")
-        else None
-    ),
-)
-
-
-AUTOMATIC1111_SAMPLER = RuntimeConfig(
-    "AUTOMATIC1111_SAMPLER",
-    "image_generation.automatic1111.sampler",
-    (
-        os.environ.get("AUTOMATIC1111_SAMPLER")
-        if os.environ.get("AUTOMATIC1111_SAMPLER")
-        else None
-    ),
-)
-
-AUTOMATIC1111_SCHEDULER = RuntimeConfig(
-    "AUTOMATIC1111_SCHEDULER",
-    "image_generation.automatic1111.scheduler",
-    (
-        os.environ.get("AUTOMATIC1111_SCHEDULER")
-        if os.environ.get("AUTOMATIC1111_SCHEDULER")
-        else None
-    ),
-)
-
-COMFYUI_BASE_URL = RuntimeConfig(
-    "COMFYUI_BASE_URL",
-    "image_generation.comfyui.base_url",
-    os.getenv("COMFYUI_BASE_URL", ""),
-)
-
-COMFYUI_API_KEY = RuntimeConfig(
-    "COMFYUI_API_KEY",
-    "image_generation.comfyui.api_key",
-    os.getenv("COMFYUI_API_KEY", ""),
-)
-
-COMFYUI_DEFAULT_WORKFLOW = """
-{
-  "3": {
-    "inputs": {
-      "seed": 0,
-      "steps": 20,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "4",
-        0
-      ],
-      "positive": [
-        "6",
-        0
-      ],
-      "negative": [
-        "7",
-        0
-      ],
-      "latent_image": [
-        "5",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "4": {
-    "inputs": {
-      "ckpt_name": "model.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "Load Checkpoint"
-    }
-  },
-  "5": {
-    "inputs": {
-      "width": 512,
-      "height": 512,
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "6": {
-    "inputs": {
-      "text": "Prompt",
-      "clip": [
-        "4",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
-    }
-  },
-  "7": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "4",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
-    }
-  },
-  "8": {
-    "inputs": {
-      "samples": [
-        "3",
-        0
-      ],
-      "vae": [
-        "4",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "9": {
-    "inputs": {
-      "filename_prefix": "ComfyUI",
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  }
-}
-"""
-
-
-COMFYUI_WORKFLOW = RuntimeConfig(
-    "COMFYUI_WORKFLOW",
-    "image_generation.comfyui.workflow",
-    os.getenv("COMFYUI_WORKFLOW", COMFYUI_DEFAULT_WORKFLOW),
-)
-
-COMFYUI_WORKFLOW_NODES = RuntimeConfig(
-    "COMFYUI_WORKFLOW",
-    "image_generation.comfyui.nodes",
-    [],
-)
-
-IMAGES_OPENAI_API_BASE_URL = RuntimeConfig(
-    "IMAGES_OPENAI_API_BASE_URL",
-    "image_generation.openai.api_base_url",
-    os.getenv("IMAGES_OPENAI_API_BASE_URL", OPENAI_API_BASE_URL),
-)
-IMAGES_OPENAI_API_KEY = RuntimeConfig(
-    "IMAGES_OPENAI_API_KEY",
-    "image_generation.openai.api_key",
-    os.getenv("IMAGES_OPENAI_API_KEY", OPENAI_API_KEY),
-)
-
-IMAGES_GEMINI_API_BASE_URL = RuntimeConfig(
-    "IMAGES_GEMINI_API_BASE_URL",
-    "image_generation.gemini.api_base_url",
-    os.getenv("IMAGES_GEMINI_API_BASE_URL", GEMINI_API_BASE_URL),
-)
-IMAGES_GEMINI_API_KEY = RuntimeConfig(
-    "IMAGES_GEMINI_API_KEY",
-    "image_generation.gemini.api_key",
-    os.getenv("IMAGES_GEMINI_API_KEY", GEMINI_API_KEY),
-)
-
-IMAGE_SIZE = RuntimeConfig(
-    "IMAGE_SIZE", "image_generation.size", os.getenv("IMAGE_SIZE", "512x512")
-)
-
-IMAGE_STEPS = RuntimeConfig(
-    "IMAGE_STEPS", "image_generation.steps", int(os.getenv("IMAGE_STEPS", 50))
-)
-
-IMAGE_GENERATION_MODEL = RuntimeConfig(
-    "IMAGE_GENERATION_MODEL",
-    "image_generation.model",
-    os.getenv("IMAGE_GENERATION_MODEL", ""),
-)
 
 ####################################
 # Audio

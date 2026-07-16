@@ -91,9 +91,7 @@ export default defineConfig({
 			'/ollama': BACKEND_PROXY,
 			'/oauth': BACKEND_PROXY,
 			// llens(#70 B3): 不達復帰ポーリング(apiFetch)が叩く BE の health endpoint
-			'/health': BACKEND_PROXY,
-			// socket.io(path /ws/socket.io)は websocket アップグレードが要る
-			'/ws': { ...BACKEND_PROXY, ws: true }
+			'/health': BACKEND_PROXY
 		},
 		watch: {
 			// _links/ 配下の symlink ループ(llens ⇄ cage)を watcher が辿ると

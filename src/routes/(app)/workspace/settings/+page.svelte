@@ -15,7 +15,6 @@
 	import Documents from './Documents.svelte';
 	import Interface from './Interface.svelte';
 	import Audio from './Audio.svelte';
-	import Images from './Images.svelte';
 	import Pipelines from './Pipelines.svelte';
 	import Database from './Database.svelte';
 
@@ -28,7 +27,6 @@
 		{ id: 'documents', label: 'Documents', icon: 'i-lucide-file-search' },
 		{ id: 'interface', label: 'Interface', icon: 'i-lucide-monitor' },
 		{ id: 'audio', label: 'Audio', icon: 'i-lucide-volume-2' },
-		{ id: 'images', label: 'Images', icon: 'i-lucide-image' },
 		{ id: 'pipelines', label: 'Pipelines', icon: 'i-lucide-layers' },
 		{ id: 'db', label: 'Database', icon: 'i-lucide-database' }
 	];
@@ -89,8 +87,6 @@
 			<Interface onSave={savedToast} />
 		{:else if selectedTab === 'audio'}
 			<Audio saveHandler={savedToast} />
-		{:else if selectedTab === 'images'}
-			<Images onSave={savedToast} />
 		{:else if selectedTab === 'pipelines'}
 			<Pipelines saveHandler={savedToast} />
 		{:else if selectedTab === 'db'}

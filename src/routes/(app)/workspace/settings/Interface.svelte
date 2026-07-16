@@ -23,7 +23,6 @@
 		TASK_MODEL_EXTERNAL: '',
 		ENABLE_TITLE_GENERATION: true,
 		TITLE_GENERATION_PROMPT_TEMPLATE: '',
-		IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE: '',
 		TAGS_GENERATION_PROMPT_TEMPLATE: '',
 		ENABLE_TAGS_GENERATION: true,
 		TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: ''
@@ -161,22 +160,6 @@
 						</Tooltip>
 					</div>
 				{/if}
-
-				<div class="mb-2.5">
-					<div class=" mb-1 text-xs font-medium">{$i18n.t('Image Prompt Generation Prompt')}</div>
-
-					<Tooltip
-						content={$i18n.t('Leave empty to use the default prompt, or enter a custom prompt')}
-						placement="top-start"
-					>
-						<Textarea
-							bind:value={taskConfig.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE}
-							placeholder={$i18n.t(
-								'Leave empty to use the default prompt, or enter a custom prompt'
-							)}
-						/>
-					</Tooltip>
-				</div>
 
 				<div class="mb-2.5">
 					<div class=" mb-1 text-xs font-medium">{$i18n.t('Tools Function Calling Prompt')}</div>

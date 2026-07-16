@@ -2,16 +2,25 @@
 	import { showSidebar } from '$lib/stores';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 
-	export let show = false;
-	let overlayElement = null;
+	let { show = false }: { show?: boolean } = $props();
 
-	$: if (show && overlayElement) {
-		document.body.appendChild(overlayElement);
-		document.body.style.overflow = 'hidden';
-	} else if (overlayElement) {
-		document.body.removeChild(overlayElement);
-		document.body.style.overflow = 'unset';
-	}
+	let overlayElement = $state<HTMLDivElement | null>(null);
+
+	// body へ portal する。teardown({#if} の破棄)と removeChild が衝突すると
+	// NotFoundError で effect が中断するため、親が body のときだけ外す(common/Modal.svelte と同じガード)。
+	$effect(() => {
+		if (show && overlayElement) {
+			document.body.appendChild(overlayElement);
+			document.body.style.overflow = 'hidden';
+
+			return () => {
+				if (overlayElement?.parentNode === document.body) {
+					document.body.removeChild(overlayElement);
+				}
+				document.body.style.overflow = 'unset';
+			};
+		}
+	});
 </script>
 
 {#if show}

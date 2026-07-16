@@ -70,10 +70,8 @@ if "cuda_error" in locals():
 
 log_sources = [
     "AUDIO",
-    "COMFYUI",
     "CONFIG",
     "DB",
-    "IMAGES",
     "MAIN",
     "MODELS",
     "OLLAMA",
@@ -250,10 +248,6 @@ RESET_CONFIG_ON_START = (
     os.environ.get("RESET_CONFIG_ON_START", "False").lower() == "true"
 )
 
-ENABLE_REALTIME_CHAT_SAVE = (
-    os.environ.get("ENABLE_REALTIME_CHAT_SAVE", "False").lower() == "true"
-)
-
 # llens: native function calling のツール呼び出し反復上限(issue #18)。
 # -1 で無制限。上限到達時はチャット内にエラーを表示する。
 CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = os.environ.get(
@@ -340,19 +334,6 @@ WEBUI_AUTH_COOKIE_SECURE = (
 
 if WEBUI_AUTH and WEBUI_SECRET_KEY == "":
     raise ValueError(ERROR_MESSAGES.ENV_VAR_NOT_FOUND)
-
-ENABLE_WEBSOCKET_SUPPORT = (
-    os.environ.get("ENABLE_WEBSOCKET_SUPPORT", "True").lower() == "true"
-)
-
-WEBSOCKET_MANAGER = os.environ.get("WEBSOCKET_MANAGER", "")
-
-WEBSOCKET_REDIS_URL = os.environ.get("WEBSOCKET_REDIS_URL", REDIS_URL)
-WEBSOCKET_REDIS_LOCK_TIMEOUT = os.environ.get("WEBSOCKET_REDIS_LOCK_TIMEOUT", 60)
-
-WEBSOCKET_SENTINEL_HOSTS = os.environ.get("WEBSOCKET_SENTINEL_HOSTS", "")
-
-WEBSOCKET_SENTINEL_PORT = os.environ.get("WEBSOCKET_SENTINEL_PORT", "26379")
 
 AIOHTTP_CLIENT_TIMEOUT = os.environ.get("AIOHTTP_CLIENT_TIMEOUT", "")
 

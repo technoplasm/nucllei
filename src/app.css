@@ -254,66 +254,14 @@ input[type='number'] {
 	@apply rounded-md dark:bg-gray-800 bg-gray-100 mx-0.5;
 }
 
-/* llens(issue #35): 有効な /command トークンの控えめなハイライト(入力欄・送信済みメッセージ共通) */
+/* llens(issue #35): 有効な /command トークンの控えめなハイライト(送信済みメッセージの表示。
+   入力欄側のハイライトは RichTextInput 撤去(#70)と共に廃止 — 入力はプレーン textarea) */
 .skill-command-token {
-	/* font-medium(font-weight:500)は使わない: コピー時にインラインスタイルとして
-	   clipboard に乗り、ペーストで TipTap の Bold に <strong> と解釈されて
-	   `**\/command**` になり、行頭一致が壊れてサーバ発火しなくなる(実測 2026-07-06)。 */
 	@apply rounded-md bg-blue-500/10 px-1 py-0.5 text-blue-600 dark:bg-blue-400/10 dark:text-blue-300;
 }
 
 .bg-gray-950-90 {
 	background-color: rgba(var(--color-gray-950, #0d0d0d), 0.9);
-}
-
-.ProseMirror {
-	@apply h-full min-h-fit max-h-full whitespace-pre-wrap;
-}
-
-.ProseMirror:focus {
-	outline: none;
-}
-
-.ProseMirror p.is-editor-empty:first-child::before {
-	content: attr(data-placeholder);
-	float: left;
-	color: #adb5bd;
-	pointer-events: none;
-
-	@apply line-clamp-1 absolute;
-}
-
-.ai-autocompletion::after {
-	color: #a0a0a0;
-
-	content: attr(data-suggestion);
-	pointer-events: none;
-}
-
-.tiptap > pre > code {
-	border-radius: 0.4rem;
-	font-size: 0.85rem;
-	padding: 0.25em 0.3em;
-
-	@apply dark:bg-gray-800 bg-gray-100;
-}
-
-.tiptap > pre {
-	border-radius: 0.5rem;
-	font-family: 'JetBrains Mono Variable', 'M PLUS 1 Code Variable', monospace;
-	margin: 1.5rem 0;
-	padding: 0.75rem 1rem;
-
-	@apply dark:bg-gray-800 bg-gray-100;
-}
-
-.tiptap p code {
-	color: #eb5757;
-	border-width: 0px;
-	padding: 3px 8px;
-	font-size: 0.8em;
-	font-weight: 600;
-	@apply rounded-md dark:bg-gray-800 bg-gray-100 mx-0.5;
 }
 
 /* Code styling */

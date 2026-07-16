@@ -1,16 +1,16 @@
 <script lang="ts">
 	import Fuse from 'fuse.js';
 	import Bolt from '$lib/components/icons/Bolt.svelte';
-	import { onMount, getContext, createEventDispatcher } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME } from '$lib/stores';
 	import { APP_VERSION } from '$lib/constants';
 
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
 	export let suggestionPrompts = [];
 	export let className = '';
 	export let inputValue = '';
+	export let onSelect = (content: string) => {};
 
 	let sortedPrompts = [];
 
@@ -85,7 +85,7 @@
 				       px-3 py-2 rounded-xl bg-transparent hover:bg-black/5
 				       dark:hover:bg-white/5 transition group"
 				style="animation-delay: {idx * 60}ms"
-				on:click={() => dispatch('select', prompt.content)}
+				on:click={() => onSelect(prompt.content)}
 			>
 				<div class="flex flex-col text-left">
 					{#if prompt.title}

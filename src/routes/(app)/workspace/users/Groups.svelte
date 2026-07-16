@@ -37,9 +37,6 @@
 			delete: true,
 			edit: true,
 			multiple_models: true
-		},
-		features: {
-			image_generation: true
 		}
 	});
 

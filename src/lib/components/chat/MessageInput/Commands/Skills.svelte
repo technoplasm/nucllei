@@ -1,27 +1,36 @@
 <script lang="ts">
-	import { skills, settings } from '$lib/stores';
+	import { skills } from '$lib/stores';
 	import { tick } from 'svelte';
 
 	// picker は補完のみ(issue #35)。Prompts.svelte の変数展開・CLIPBOARD・{{}}選択ジャンプは
 	// 一切持ち込まず、部分トークン(`/par` など)を `/command ` トークンに置き換えるだけ。
-	export let prompt = '';
-	export let command = ''; // `/` を含む先頭トークン(Commands.svelte から入力全体を渡す)
-	// llens(#42): 選択モデルに紐づく skill のみ補完(null = 無制限)。サーバ側の発火条件
-	//(モデルで機能有効 ∧ skillIds 紐づけ ∧ read 可視)と一致させる
-	export let allowedSkillIds = null;
+	let {
+		prompt = $bindable(''),
+		command = '', // `/` を含む先頭トークン(Commands.svelte から入力全体を渡す)
+		// llens(#42): 選択モデルに紐づく skill のみ補完(null = 無制限)。サーバ側の発火条件
+		//(モデルで機能有効 ∧ skillIds 紐づけ ∧ read 可視)と一致させる
+		allowedSkillIds = null
+	}: {
+		prompt?: string;
+		command?: string;
+		allowedSkillIds?: string[] | null;
+	} = $props();
 
-	let selectedIdx = 0;
-	let filteredSkills = [];
+	let selectedIdx = $state(0);
 
 	// command の `/` を除いた部分で command 前方(部分)一致フィルタ。
-	$: filteredSkills = ($skills ?? [])
-		.filter((s) => allowedSkillIds === null || allowedSkillIds.includes(s.id))
-		.filter((s) => s.id.toLowerCase().includes(command.slice(1).toLowerCase()))
-		.sort((a, b) => a.name.localeCompare(b.name));
+	const filteredSkills = $derived(
+		($skills ?? [])
+			.filter((s) => allowedSkillIds === null || allowedSkillIds.includes(s.id))
+			.filter((s) => s.id.toLowerCase().includes(command.slice(1).toLowerCase()))
+			.sort((a, b) => a.name.localeCompare(b.name))
+	);
 
-	$: if (command) {
-		selectedIdx = 0;
-	}
+	$effect(() => {
+		if (command) {
+			selectedIdx = 0;
+		}
+	});
 
 	export const selectUp = () => {
 		selectedIdx = Math.max(0, selectedIdx - 1);
@@ -40,12 +49,7 @@
 		const firstLine = lines.shift() ?? '';
 		const replacedFirst = firstLine.replace(/^\/[a-zA-Z0-9_-]*/, token);
 
-		// richTextInput(既定)は改行を <br/> で保持する。プレーン textarea は生改行。
-		if ($settings?.richTextInput ?? true) {
-			prompt = [replacedFirst, ...lines].join('<br/>');
-		} else {
-			prompt = [replacedFirst, ...lines].join('\n');
-		}
+		prompt = [replacedFirst, ...lines].join('\n');
 
 		const chatInputElement = document.getElementById('chat-input');
 
@@ -71,13 +75,13 @@
 								? '  bg-gray-50 dark:bg-gray-850 selected-command-option-button'
 								: ''}"
 							type="button"
-							on:click={() => {
+							onclick={() => {
 								confirmSkill(skill);
 							}}
-							on:mousemove={() => {
+							onmousemove={() => {
 								selectedIdx = idx;
 							}}
-							on:focus={() => {}}
+							onfocus={() => {}}
 						>
 							<div class=" font-medium text-black text-content">
 								/{skill.id}

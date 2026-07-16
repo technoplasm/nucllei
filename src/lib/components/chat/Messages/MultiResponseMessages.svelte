@@ -1,22 +1,9 @@
 <script lang="ts">
-	import dayjs from 'dayjs';
-	import { onMount, tick, getContext } from 'svelte';
-	import { createEventDispatcher } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
-	import { mobile, settings } from '$lib/stores';
-
-	import { updateChatById } from '$lib/apis/chats';
-	import { createOpenAITextStream } from '$lib/apis/streaming';
+	import { mobile } from '$lib/stores';
 
 	import ResponseMessage from './ResponseMessage.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-
-	import Markdown from './Markdown.svelte';
-	import Name from './Name.svelte';
-	import Skeleton from './Skeleton.svelte';
-	import localizedFormat from 'dayjs/plugin/localizedFormat';
-	const i18n = getContext('i18n');
-	dayjs.extend(localizedFormat);
 
 	export let chatId;
 	export let history;
@@ -38,8 +25,6 @@
 	export let addMessages: Function;
 
 	export let triggerScroll: Function;
-
-	const dispatch = createEventDispatcher();
 
 	let currentMessageId;
 	let parentMessage;
@@ -272,43 +257,5 @@
 				{/if}
 			{/each}
 		</div>
-
-		{#if !readOnly}
-			{#if !Object.keys(groupedMessageIds).find((modelIdx) => {
-				const { messageIds } = groupedMessageIds[modelIdx];
-				const _messageId = messageIds[groupedMessageIdsIdx[modelIdx]];
-				return !history.messages[_messageId]?.done ?? false;
-			})}
-				<div class="flex justify-end">
-					<div class="w-full">
-						{#if history.messages[messageId]?.merged?.status}
-							{@const message = history.messages[messageId]?.merged}
-
-							<div class="w-full rounded-xl pl-5 pr-2 py-2">
-								<Name>
-									Merged Response
-
-									{#if message.timestamp}
-										<span
-											class=" self-center invisible group-hover:visible text-content-muted text-xs font-medium uppercase ml-0.5 -mt-0.5"
-										>
-											{dayjs(message.timestamp * 1000).format('LT')}
-										</span>
-									{/if}
-								</Name>
-
-								<div class="mt-1 markdown-prose w-full min-w-full">
-									{#if (message?.content ?? '') === ''}
-										<Skeleton />
-									{:else}
-										<Markdown id={`merged`} content={message.content ?? ''} />
-									{/if}
-								</div>
-							</div>
-						{/if}
-					</div>
-				</div>
-			{/if}
-		{/if}
 	</div>
 {/if}

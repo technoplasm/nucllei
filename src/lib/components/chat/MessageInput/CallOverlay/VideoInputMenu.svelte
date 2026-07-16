@@ -1,17 +1,22 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
-	import { getContext, createEventDispatcher } from 'svelte';
-
-	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
-	export let onClose: Function = () => {};
-	export let devices: any;
+	let {
+		onClose = () => {},
+		onChange = () => {},
+		devices,
+		children
+	}: {
+		onClose?: Function;
+		onChange?: (deviceId: string) => void;
+		devices: any;
+		children?: any;
+	} = $props();
 
-	let show = false;
+	let show = $state(false);
 </script>
 
 <Dropdown
@@ -22,7 +27,7 @@
 		}
 	}}
 >
-	<slot />
+	{@render children?.()}
 
 	{#snippet content()}
 		<DropdownMenu.Content
@@ -36,7 +41,7 @@
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 					on:click={() => {
-						dispatch('change', device.deviceId);
+						onChange(device.deviceId);
 					}}
 				>
 					<div class="flex items-center">

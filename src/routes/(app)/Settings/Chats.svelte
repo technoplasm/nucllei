@@ -71,12 +71,6 @@
 					}
 				},
 				{
-					key: 'richTextInput',
-					label: 'Rich Text Input for Chat',
-					type: 'switch',
-					init: () => $settings.richTextInput ?? true
-				},
-				{
 					key: 'largeTextAsFile',
 					label: 'Paste Large Text as File',
 					type: 'switch',

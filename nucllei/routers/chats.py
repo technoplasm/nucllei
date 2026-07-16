@@ -4,7 +4,6 @@ import uuid
 from typing import Optional
 
 
-from nucllei.socket.main import get_event_emitter
 from nucllei.models.chats import (
     ChatForm,
     ChatImportForm,
@@ -593,72 +592,13 @@ async def update_chat_message_by_id(
         },
     )
 
-    event_emitter = get_event_emitter(
-        {
-            "user_id": user.id,
-            "chat_id": id,
-            "message_id": message_id,
-        },
-        False,
-    )
-
-    if event_emitter:
-        await event_emitter(
-            {
-                "type": "chat:message",
-                "data": {
-                    "chat_id": id,
-                    "message_id": message_id,
-                    "content": form_data.content,
-                },
-            }
-        )
-
+    # llens(wire v2): socket 前提のマルチタブ同期 emit(chat:message)は廃止。
+    # 編集の永続化は上の upsert で完結する。
     return ChatResponse(**chat.model_dump())
 
 
-############################
-# SendChatMessageEventById
-############################
-class EventForm(BaseModel):
-    type: str
-    data: dict
-
-
-@router.post("/{id}/messages/{message_id}/event", response_model=Optional[bool])
-async def send_chat_message_event_by_id(
-    id: str, message_id: str, form_data: EventForm, user=Depends(get_verified_user)
-):
-    chat = Chats.get_chat_by_id(id)
-
-    if not chat:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    if chat.user_id != user.id and user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    event_emitter = get_event_emitter(
-        {
-            "user_id": user.id,
-            "chat_id": id,
-            "message_id": message_id,
-        }
-    )
-
-    try:
-        if event_emitter:
-            await event_emitter(form_data.model_dump())
-        else:
-            return False
-        return True
-    except:
-        return False
+# llens(wire v2): POST /{id}/messages/{message_id}/event(任意イベント注入 API)は
+# エンドポイントごと撤去(FE・現行 llens とも消費ゼロ、socket 基盤と共に廃止)。
 
 
 ############################

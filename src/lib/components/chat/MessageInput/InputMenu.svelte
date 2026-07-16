@@ -7,22 +7,27 @@
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentArrowUpSolid from '$lib/components/icons/DocumentArrowUpSolid.svelte';
-	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let uploadFilesHandler: Function;
+	let {
+		uploadFilesHandler,
+		// llens(#69): 保存済みファイル(/files に保存済みの file)の再添付 picker を開く
+		openLibraryHandler = () => {},
+		onClose,
+		children
+	}: {
+		uploadFilesHandler: Function;
+		openLibraryHandler?: Function;
+		onClose: Function;
+		children?: any;
+	} = $props();
 
-	// llens(#69): 保存済みファイル(/files に保存済みの file)の再添付 picker を開く
-	export let openLibraryHandler: Function = () => {};
+	let show = $state(false);
 
-	export let onClose: Function;
-
-	let show = false;
-
-	let fileUploadEnabled = true;
-	$: fileUploadEnabled = $user?.role === 'admin' || $user?.permissions?.chat?.file_upload;
+	const fileUploadEnabled = $derived(
+		$user?.role === 'admin' || $user?.permissions?.chat?.file_upload
+	);
 </script>
 
 <Dropdown
@@ -34,7 +39,7 @@
 	}}
 >
 	<Tooltip content={$i18n.t('More')}>
-		<slot />
+		{@render children?.()}
 	</Tooltip>
 
 	{#snippet content()}
@@ -60,7 +65,7 @@
 						}
 					}}
 				>
-					<DocumentArrowUpSolid />
+					<span class="i-lucide-file-up size-4 block"></span>
 					<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>
@@ -79,7 +84,7 @@
 						}
 					}}
 				>
-					<FolderOpen className="size-4" strokeWidth="2" />
+					<span class="i-lucide-folder-open size-4 block"></span>
 					<div class="line-clamp-1">{$i18n.t('Saved Files')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>

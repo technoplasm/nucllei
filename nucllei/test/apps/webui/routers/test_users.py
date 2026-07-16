@@ -107,9 +107,8 @@ class TestUsers(AbstractPostgresTest):
             response = self.fast_api_client.get(self.create_url("/2"))
         assert response.status_code == 200
         data = response.json()
-        # active(WebSocket 接続状態)も返るため基本項目のみ検証する
-        assert data["name"] == "user 2"
-        assert data["profile_image_url"] == "/user2.png"
+        # llens(wire v2): プレゼンス由来の active は socket 基盤と共に撤去済み
+        assert data == {"name": "user 2", "profile_image_url": "/user2.png"}
 
         # Update user by id
         with mock_webui_user(id="1"):

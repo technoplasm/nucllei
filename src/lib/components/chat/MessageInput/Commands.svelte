@@ -1,9 +1,4 @@
-<script>
-	import { createEventDispatcher, onMount } from 'svelte';
-	import { toast } from 'svelte-sonner';
-
-	const dispatch = createEventDispatcher();
-
+<script lang="ts">
 	import { skills } from '$lib/stores';
 
 	import { removeLastWordFromString } from '$lib/utils';
@@ -13,12 +8,19 @@
 	import Models from './Commands/Models.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	export let prompt = '';
-	// llens(#42): 選択モデルに紐づく skill id(補完のスコープ)。null は無制限(後方互換)
-	export let allowedSkillIds = null;
+	let {
+		prompt = $bindable(''),
+		// llens(#42): 選択モデルに紐づく skill id(補完のスコープ)。null は無制限(後方互換)
+		allowedSkillIds = null,
+		onSelect = () => {}
+	}: {
+		prompt?: string;
+		allowedSkillIds?: string[] | null;
+		onSelect?: (data: { type: string; data: any }) => void;
+	} = $props();
 
-	let loading = false;
-	let commandElement = null;
+	let loading = $state(false);
+	let commandElement = $state<any>(null);
 
 	export const selectUp = () => {
 		commandElement?.selectUp();
@@ -28,23 +30,22 @@
 		commandElement?.selectDown();
 	};
 
-	let command = '';
-	$: command = prompt?.split('\n').pop()?.split(' ')?.pop() ?? '';
+	const command = $derived(prompt?.split('\n').pop()?.split(' ')?.pop() ?? '');
 
 	// llens(issue #35): `/command` はサーバが「入力全体の先頭行の行頭」でしか発火しない。
 	// そのため skill picker は入力全体が最初のトークン(= `/` に続く command)編集中の
 	// ときだけ出す。従来の「最終行の最終単語」判定だとメッセージ途中の `/` でも picker が
 	// 出てしまい、サーバの実挙動と乖離する。@(model) は従来判定のまま。
 	// llens(#52): #(knowledge) picker は RAG 撤去に伴い廃止。
-	let showSkills = false;
-	$: showSkills = /^\/[a-zA-Z0-9_-]*$/.test(prompt ?? '');
+	const showSkills = $derived(/^\/[a-zA-Z0-9_-]*$/.test(prompt ?? ''));
 
-	let show = false;
-	$: show = showSkills || command?.charAt(0) === '@';
+	const show = $derived(showSkills || command?.charAt(0) === '@');
 
-	$: if (show) {
-		init();
-	}
+	$effect(() => {
+		if (show) {
+			init();
+		}
+	});
 
 	const init = async () => {
 		loading = true;
@@ -61,12 +62,12 @@
 			<Models
 				bind:this={commandElement}
 				{command}
-				on:select={(e) => {
+				onSelect={(model) => {
 					prompt = removeLastWordFromString(prompt, command);
 
-					dispatch('select', {
+					onSelect({
 						type: 'model',
-						data: e.detail
+						data: model
 					});
 				}}
 			/>

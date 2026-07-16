@@ -26,10 +26,11 @@ from fastapi import (
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
@@ -39,13 +40,13 @@ from nucllei.builtin_tools import sync_builtin_tools
 from nucllei.utils import logger
 from nucllei.utils.audit import AuditLevel, AuditLoggingMiddleware
 from nucllei.utils.logger import start_logger
-from nucllei.socket.main import (
-    app as socket_app,
-    periodic_usage_pool_cleanup,
+from nucllei.utils.completion_events import (
+    CompletionEventStream,
+    get_stream,
+    sse_event_generator,
 )
 from nucllei.routers import (
     audio,
-    images,
     ollama,
     openai,
     pipelines,
@@ -83,26 +84,6 @@ from nucllei.config import (
     OPENAI_API_CONFIGS,
     # Tool Server Configs
     TOOL_SERVER_CONNECTIONS,
-    # Image
-    AUTOMATIC1111_API_AUTH,
-    AUTOMATIC1111_BASE_URL,
-    AUTOMATIC1111_CFG_SCALE,
-    AUTOMATIC1111_SAMPLER,
-    AUTOMATIC1111_SCHEDULER,
-    COMFYUI_BASE_URL,
-    COMFYUI_API_KEY,
-    COMFYUI_WORKFLOW,
-    COMFYUI_WORKFLOW_NODES,
-    ENABLE_IMAGE_GENERATION,
-    ENABLE_IMAGE_PROMPT_GENERATION,
-    IMAGE_GENERATION_ENGINE,
-    IMAGE_GENERATION_MODEL,
-    IMAGE_SIZE,
-    IMAGE_STEPS,
-    IMAGES_OPENAI_API_BASE_URL,
-    IMAGES_OPENAI_API_KEY,
-    IMAGES_GEMINI_API_BASE_URL,
-    IMAGES_GEMINI_API_KEY,
     # Audio
     AUDIO_STT_ENGINE,
     AUDIO_STT_MODEL,
@@ -192,7 +173,6 @@ from nucllei.config import (
     TASK_MODEL_EXTERNAL,
     ENABLE_TITLE_GENERATION,
     TITLE_GENERATION_PROMPT_TEMPLATE,
-    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
     AppConfig,
     reset_config,
 )
@@ -215,7 +195,6 @@ from nucllei.env import (
     WEBUI_SESSION_COOKIE_SECURE,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
-    ENABLE_WEBSOCKET_SUPPORT,
     BYPASS_MODEL_ACCESS_CONTROL,
     RESET_CONFIG_ON_START,
     ENABLE_OTEL,
@@ -248,7 +227,6 @@ from nucllei.utils.security_headers import SecurityHeadersMiddleware
 from nucllei.tasks import (
     list_task_ids_by_chat_id,
     stop_task,
-    list_tasks,
 )  # Import from tasks.py
 
 from nucllei.utils.redis import get_sentinels_from_env
@@ -325,7 +303,6 @@ async def lifespan(app: FastAPI):
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
 
-    asyncio.create_task(periodic_usage_pool_cleanup())
     yield
 
 
@@ -478,38 +455,6 @@ app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
 ########################################
 #
-# IMAGES
-#
-########################################
-
-app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
-app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
-app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
-
-app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
-app.state.config.IMAGES_OPENAI_API_KEY = IMAGES_OPENAI_API_KEY
-
-app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
-app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
-
-app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
-
-app.state.config.AUTOMATIC1111_BASE_URL = AUTOMATIC1111_BASE_URL
-app.state.config.AUTOMATIC1111_API_AUTH = AUTOMATIC1111_API_AUTH
-app.state.config.AUTOMATIC1111_CFG_SCALE = AUTOMATIC1111_CFG_SCALE
-app.state.config.AUTOMATIC1111_SAMPLER = AUTOMATIC1111_SAMPLER
-app.state.config.AUTOMATIC1111_SCHEDULER = AUTOMATIC1111_SCHEDULER
-app.state.config.COMFYUI_BASE_URL = COMFYUI_BASE_URL
-app.state.config.COMFYUI_API_KEY = COMFYUI_API_KEY
-app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
-app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
-
-app.state.config.IMAGE_SIZE = IMAGE_SIZE
-app.state.config.IMAGE_STEPS = IMAGE_STEPS
-
-
-########################################
-#
 # AUDIO
 #
 ########################################
@@ -567,9 +512,6 @@ app.state.config.ENABLE_TITLE_GENERATION = ENABLE_TITLE_GENERATION
 
 
 app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE = TITLE_GENERATION_PROMPT_TEMPLATE
-app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = (
-    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
-)
 
 
 ########################################
@@ -634,24 +576,6 @@ async def check_url(request: Request, call_next):
     return response
 
 
-@app.middleware("http")
-async def inspect_websocket(request: Request, call_next):
-    if (
-        "/ws/socket.io" in request.url.path
-        and request.query_params.get("transport") == "websocket"
-    ):
-        upgrade = (request.headers.get("Upgrade") or "").lower()
-        connection = (request.headers.get("Connection") or "").lower().split(",")
-        # Check that there's the correct headers for an upgrade, else reject the connection
-        # This is to work around this upstream issue: https://github.com/miguelgrinberg/python-engineio/issues/367
-        if upgrade != "websocket" or "upgrade" not in connection:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Invalid WebSocket upgrade request"},
-            )
-    return await call_next(request)
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGIN,
@@ -661,16 +585,12 @@ app.add_middleware(
 )
 
 
-app.mount("/ws", socket_app)
-
-
 app.include_router(ollama.router, prefix="/ollama", tags=["ollama"])
 app.include_router(openai.router, prefix="/openai", tags=["openai"])
 
 
 app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"])
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
-app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
 
 app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 
@@ -798,6 +718,9 @@ async def chat_completion(
                 detail="You do not have access to this chat.",
             )
 
+    events_stream = None
+    queue = None
+
     try:
         model_id = form_data.get("model", None)
         if model_id not in request.app.state.MODELS:
@@ -813,20 +736,28 @@ async def chat_completion(
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),
             "message_id": form_data.pop("id", None),
-            "session_id": form_data.pop("session_id", None),
             "files": form_data.get("files", None),
-            "features": form_data.get("features", None),
             "variables": form_data.get("variables", None),
             "model": model,
             # llens: native function calling のみサポート(issue #18)。
             # params.function_calling は参照しない(常に native 経路)。
         }
 
+        # llens(wire v2): chat メタデータありの UI 経路はイベントバスを介した
+        # SSE 契約。バスと購読は payload 処理より先に確立する(inlet filter の
+        # __event_emitter__ が撃つイベントも取りこぼさずキューに積むため)。
+        if metadata.get("chat_id") and metadata.get("message_id"):
+            events_stream = CompletionEventStream(
+                chat_id=metadata["chat_id"],
+                message_id=metadata["message_id"],
+            )
+            queue = events_stream.subscribe()
+
         request.state.metadata = metadata
         form_data["metadata"] = metadata
 
         form_data, metadata, events = await process_chat_payload(
-            request, form_data, user, metadata, model
+            request, form_data, user, metadata, model, events_stream
         )
 
     except Exception as e:
@@ -850,7 +781,16 @@ async def chat_completion(
         response = await chat_completion_handler(request, form_data, user)
 
         return await process_chat_response(
-            request, response, form_data, user, metadata, model, events, tasks
+            request,
+            response,
+            form_data,
+            user,
+            metadata,
+            model,
+            events,
+            tasks,
+            events_stream=events_stream,
+            queue=queue,
         )
     except Exception as e:
         raise HTTPException(
@@ -894,8 +834,25 @@ async def chat_action(
         )
 
 
+def _get_owned_stream(task_id: str, user):
+    """task_id からイベントバスを引き、chat 所有者を検証する(IDOR 防止)。"""
+    stream = get_stream(task_id)
+    if stream is None or not stream.chat_id:
+        return None
+    chat = Chats.get_chat_by_id(stream.chat_id)
+    if chat is None or chat.user_id != user.id:
+        return None
+    return stream
+
+
 @app.post("/api/tasks/stop/{task_id}")
 async def stop_task_endpoint(task_id: str, user=Depends(get_verified_user)):
+    # llens(wire v2): 所有者検証を追加(旧実装は verified user なら誰の task でも
+    # 止められた)。stream 登録の無い task id は存在しない扱い。
+    if _get_owned_stream(task_id, user) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     try:
         result = await stop_task(task_id)
         return result
@@ -903,9 +860,63 @@ async def stop_task_endpoint(task_id: str, user=Depends(get_verified_user)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@app.get("/api/tasks")
-async def list_tasks_endpoint(user=Depends(get_verified_user)):
-    return {"tasks": list_tasks()}
+@app.get("/api/tasks/{task_id}/events")
+async def task_events_endpoint(task_id: str, user=Depends(get_verified_user)):
+    """走行中 completion タスクへの再アタッチ(SSE)。
+
+    最新スナップショットを 1 発送ってから以降のライブイベントを流す
+    (スナップショット先行なのでバックログ再生は不要 — wire v2)。
+    """
+    stream = _get_owned_stream(task_id, user)
+    if stream is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    queue = stream.subscribe()
+
+    first_events = [
+        {
+            "chat_id": stream.chat_id,
+            "message_id": stream.message_id,
+            "data": {"type": "task", "data": {"task_id": task_id}},
+        }
+    ]
+    if stream.latest_snapshot is not None:
+        first_events.append(
+            {
+                "chat_id": stream.chat_id,
+                "message_id": stream.message_id,
+                "data": {"type": "chat:completion", "data": stream.latest_snapshot},
+            }
+        )
+
+    return StreamingResponse(
+        sse_event_generator(stream, queue, first_events=first_events),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/tasks/{task_id}/calls/{call_id}")
+async def task_call_reply_endpoint(
+    task_id: str, call_id: str, form_data: dict, user=Depends(get_verified_user)
+):
+    """__event_call__(tool → UI の confirmation/input)への応答。"""
+    stream = _get_owned_stream(task_id, user)
+    if stream is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+    if not stream.resolve_call(call_id, form_data.get("result")):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Call not found"
+        )
+    return {"status": True}
 
 
 @app.get("/api/tasks/chat/{chat_id}")
@@ -969,14 +980,12 @@ async def get_app_config(request: Request):
             "enable_api_key": app.state.config.ENABLE_API_KEY,
             "enable_signup": app.state.config.ENABLE_SIGNUP,
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
-            "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {
                     # llens(#52/#67/#51): built-in web 検索・retrieval router・WEB_SEARCH_*
                     # config・retrieval/web providers はすべて撤去済み。検索は案件層(prism)の
                     # tool が外部検索システム(SearXNG 等)を直接叩く(docling と同じ線引き)。
                     # llens(#23): code_interpreter(タグ検出実行)も機能ごと撤去。
-                    "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,

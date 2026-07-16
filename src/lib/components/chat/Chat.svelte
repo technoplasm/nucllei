@@ -10,7 +10,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { get, type Unsubscriber, type Writable } from 'svelte/store';
+	import { type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -24,7 +24,6 @@
 		showSidebar,
 		WEBUI_NAME,
 		user,
-		socket,
 		showControls,
 		showCallOverlay,
 		currentChatPage,
@@ -36,18 +35,23 @@
 		copyToClipboard,
 		getMessageContentParts,
 		createMessagesList,
-		extractSentencesForAudio,
 		promptTemplate,
-		splitStream,
-		sleep,
 		getPromptVariables
 	} from '$lib/utils';
 	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
+	import { applyCompletionData } from '$lib/utils/chat-events';
+	import {
+		consumeCompletionStream,
+		attachToTask,
+		registerChatHandler,
+		unregisterChatHandler,
+		getActiveTaskIds,
+		type CompletionEnvelope,
+		type StreamContext
+	} from '$lib/utils/completion-streams';
 
-	import { generateChatCompletion } from '$lib/apis/ollama';
 	import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
-	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getUserSettings } from '$lib/apis/users';
 	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';
 
@@ -110,8 +114,6 @@
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
-	let imageGenerationEnabled = false;
-
 	let chat = null;
 
 	let history = {
@@ -120,6 +122,8 @@
 	};
 
 	let taskIds = null;
+	// wire v2: 再アタッチ済み(fetch 未解決含む)task の二重アタッチ防止
+	const attachedTaskIds = new Set<string>();
 
 	// Chat Input
 	let prompt = '';
@@ -134,7 +138,6 @@
 
 			prompt = '';
 			files = [];
-			imageGenerationEnabled = false;
 
 			if (chatIdProp && (await loadChat())) {
 				await tick();
@@ -146,7 +149,6 @@
 
 						prompt = input.prompt;
 						files = input.files;
-						imageGenerationEnabled = input.imageGenerationEnabled;
 					} catch (e) {}
 				}
 
@@ -172,8 +174,8 @@
 	};
 
 	const showMessage = async (message) => {
-		const _chatId = JSON.parse(JSON.stringify($chatId));
-		let _messageId = JSON.parse(JSON.stringify(message.id));
+		const _chatId = $chatId;
+		let _messageId = message.id;
 
 		let messageChildrenIds = [];
 		if (_messageId === null) {
@@ -204,118 +206,154 @@
 		saveChatHandler(_chatId, history);
 	};
 
-	const chatEventHandler = async (event, cb) => {
-		console.log(event);
+	// wire v2: completion-streams(SSE)から届くイベント封筒を message へ適用する。
+	// 表示中チャットのハンドラとして registerChatHandler で登録される。
+	const chatEventHandler = async (envelope: CompletionEnvelope, context: StreamContext) => {
+		const messageId = envelope.message_id;
+		if (envelope.chat_id !== $chatId || !messageId) {
+			return;
+		}
 
-		if (event.chat_id === $chatId) {
-			await tick();
-			let message = history.messages[event.message_id];
+		await tick();
+		const message = history.messages[messageId];
+		if (!message) {
+			return;
+		}
 
-			if (message) {
-				const type = event?.data?.type ?? null;
-				const data = event?.data?.data ?? null;
+		const type = envelope?.data?.type ?? null;
+		const data = envelope?.data?.data ?? null;
+		// __event_call__(confirmation/input)への応答は call_id 付き封筒に対する
+		// POST /api/tasks/{task_id}/calls/{call_id}(context.reply)で返す
+		const callId = envelope.call_id;
+		const reply = callId ? (result: unknown) => context.reply(callId, result) : null;
 
-				if (type === 'status') {
-					if (message?.statusHistory) {
-						message.statusHistory.push(data);
-					} else {
-						message.statusHistory = [data];
-					}
-				} else if (type === 'chat:completion') {
-					chatCompletionEventHandler(data, message, event.chat_id);
-				} else if (type === 'task-cancelled') {
-					// llens: 中断された応答を done 化してスピナーを止める。interrupted は
-					// 直後に届く done イベント → completed(outlet filter)経路で成否として
-					// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
-					message.done = true;
-					message.interrupted = true;
-				} else if (type === 'chat:message:delta' || type === 'message') {
-					message.content += data.content;
-				} else if (type === 'chat:message' || type === 'replace') {
-					message.content = data.content;
-				} else if (type === 'chat:message:files' || type === 'files') {
-					message.files = data.files;
-				} else if (type === 'chat:title') {
-					chatTitle.set(data);
-					currentChatPage.set(1);
-					await chats.set(await getChatList($currentChatPage));
-				} else if (type === 'source' || type === 'citation') {
-					if (data?.type === 'code_execution') {
-						// Code execution; update existing code execution by ID, or add new one.
-						if (!message?.code_executions) {
-							message.code_executions = [];
-						}
+		await applyMessageEvent(type, data, message, envelope.chat_id, reply);
+		history.messages[messageId] = message;
+	};
 
-						const existingCodeExecutionIndex = message.code_executions.findIndex(
-							(execution) => execution.id === data.id
-						);
+	// completed / actions の応答 JSON に同梱される events(outlet filter / action の
+	// emit — 封筒なしの {type, data} 形)も SSE と同じ適用関数を通す。
+	const applyBufferedEvents = async (
+		events: { type?: string; data?: any }[] | undefined,
+		messageId: string,
+		targetChatId: string
+	) => {
+		const message = history.messages[messageId];
+		if (!message || !((events?.length ?? 0) > 0)) {
+			return;
+		}
 
-						if (existingCodeExecutionIndex !== -1) {
-							message.code_executions[existingCodeExecutionIndex] = data;
-						} else {
-							message.code_executions.push(data);
-						}
+		for (const event of events ?? []) {
+			// バッファ応答経路に __event_call__ は無い(reply 不可)
+			await applyMessageEvent(
+				event?.type ?? null,
+				event?.data ?? null,
+				message,
+				targetChatId,
+				null
+			);
+		}
+		history.messages[messageId] = message;
+	};
 
-						message.code_executions = message.code_executions;
-					} else {
-						// Regular source.
-						if (message?.sources) {
-							message.sources.push(data);
-						} else {
-							message.sources = [data];
-						}
-					}
-				} else if (type === 'notification') {
-					const toastType = data?.type ?? 'info';
-					const toastContent = data?.content ?? '';
-
-					if (toastType === 'success') {
-						toast.success(toastContent);
-					} else if (toastType === 'error') {
-						toast.error(toastContent);
-					} else if (toastType === 'warning') {
-						toast.warning(toastContent);
-					} else {
-						toast.info(toastContent);
-					}
-				} else if (type === 'confirmation') {
-					eventCallback = cb;
-
-					eventConfirmationInput = false;
-					showEventConfirmation = true;
-
-					eventConfirmationTitle = data.title;
-					eventConfirmationMessage = data.message;
-				} else if (type === 'execute') {
-					eventCallback = cb;
-
-					try {
-						// Use Function constructor to evaluate code in a safer way
-						const asyncFunction = new Function(`return (async () => { ${data.code} })()`);
-						const result = await asyncFunction(); // Await the result of the async function
-
-						if (cb) {
-							cb(result);
-						}
-					} catch (error) {
-						console.error('Error executing code:', error);
-					}
-				} else if (type === 'input') {
-					eventCallback = cb;
-
-					eventConfirmationInput = true;
-					showEventConfirmation = true;
-
-					eventConfirmationTitle = data.title;
-					eventConfirmationMessage = data.message;
-					eventConfirmationInputPlaceholder = data.placeholder;
-					eventConfirmationInputValue = data?.value ?? '';
-				} else {
-					console.log('Unknown message type', data);
+	const applyMessageEvent = async (
+		type: string | null,
+		data: any,
+		message: any,
+		targetChatId: string,
+		reply: ((result: unknown) => Promise<void>) | null
+	) => {
+		if (type === 'status') {
+			if (message?.statusHistory) {
+				message.statusHistory.push(data);
+			} else {
+				message.statusHistory = [data];
+			}
+		} else if (type === 'chat:completion') {
+			await chatCompletionEventHandler(data, message, targetChatId);
+		} else if (type === 'task-cancelled') {
+			// llens: 中断された応答を done 化してスピナーを止める。interrupted は
+			// 直後に届く done イベント → completed(outlet filter)経路で成否として
+			// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
+			message.done = true;
+			message.interrupted = true;
+		} else if (type === 'chat:message:delta' || type === 'message') {
+			message.content += data.content;
+		} else if (type === 'chat:message' || type === 'replace') {
+			message.content = data.content;
+		} else if (type === 'chat:message:files' || type === 'files') {
+			message.files = data.files;
+		} else if (type === 'chat:title') {
+			chatTitle.set(data);
+			currentChatPage.set(1);
+			await chats.set(await getChatList($currentChatPage));
+		} else if (type === 'source' || type === 'citation') {
+			if (data?.type === 'code_execution') {
+				// Code execution; update existing code execution by ID, or add new one.
+				if (!message?.code_executions) {
+					message.code_executions = [];
 				}
 
-				history.messages[event.message_id] = message;
+				const existingCodeExecutionIndex = message.code_executions.findIndex(
+					(execution) => execution.id === data.id
+				);
+
+				if (existingCodeExecutionIndex !== -1) {
+					message.code_executions[existingCodeExecutionIndex] = data;
+				} else {
+					message.code_executions.push(data);
+				}
+
+				message.code_executions = message.code_executions;
+			} else {
+				// Regular source.
+				if (message?.sources) {
+					message.sources.push(data);
+				} else {
+					message.sources = [data];
+				}
 			}
+		} else if (type === 'notification') {
+			const toastType = data?.type ?? 'info';
+			const toastContent = data?.content ?? '';
+
+			if (toastType === 'success') {
+				toast.success(toastContent);
+			} else if (toastType === 'error') {
+				toast.error(toastContent);
+			} else if (toastType === 'warning') {
+				toast.warning(toastContent);
+			} else {
+				toast.info(toastContent);
+			}
+		} else if (type === 'confirmation') {
+			if (!reply) {
+				console.warn('confirmation event without reply channel', data);
+				return;
+			}
+			eventCallback = reply;
+
+			eventConfirmationInput = false;
+			showEventConfirmation = true;
+
+			eventConfirmationTitle = data.title;
+			eventConfirmationMessage = data.message;
+		} else if (type === 'input') {
+			if (!reply) {
+				console.warn('input event without reply channel', data);
+				return;
+			}
+			eventCallback = reply;
+
+			eventConfirmationInput = true;
+			showEventConfirmation = true;
+
+			eventConfirmationTitle = data.title;
+			eventConfirmationMessage = data.message;
+			eventConfirmationInputPlaceholder = data.placeholder;
+			eventConfirmationInputValue = data?.value ?? '';
+		} else {
+			console.log('Unknown event type', type, data);
 		}
 	};
 
@@ -358,10 +396,33 @@
 		}
 	};
 
+	// wire v2: 表示中チャットのイベントハンドラ登録($chatId 追従)。
+	// 新規チャットは initChatHandler が chatId を確定させた時点で登録される
+	// (consumeCompletionStream は登録ハンドラ、なければ +layout の fallback に配る)。
+	let registeredChatId: string | null = null;
+	const syncChatHandlerRegistration = (id: string) => {
+		if (registeredChatId === id) {
+			return;
+		}
+		if (registeredChatId) {
+			unregisterChatHandler(registeredChatId, chatEventHandler);
+			registeredChatId = null;
+		}
+		if (id) {
+			registerChatHandler(id, chatEventHandler);
+			registeredChatId = id;
+		}
+	};
+
+	// コンポーネント初期化時点で購読を確立する(loadChat / 再アタッチは
+	// onMount より先($: chatIdProp)に走り得るため)。解除は onDestroy。
+	const handlerChatIdUnsubscriber: Unsubscriber = chatId.subscribe((value) => {
+		syncChatHandlerRegistration(value);
+	});
+
 	onMount(async () => {
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
-		$socket?.on('chat-events', chatEventHandler);
 
 		if (!$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
@@ -377,11 +438,9 @@
 				const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
 				prompt = input.prompt;
 				files = input.files;
-				imageGenerationEnabled = input.imageGenerationEnabled;
 			} catch (e) {
 				prompt = '';
 				files = [];
-				imageGenerationEnabled = false;
 			}
 		}
 
@@ -411,8 +470,12 @@
 
 	onDestroy(() => {
 		chatIdUnsubscriber?.();
+		handlerChatIdUnsubscriber();
 		window.removeEventListener('message', onMessageHandler);
-		$socket?.off('chat-events', chatEventHandler);
+		if (registeredChatId) {
+			unregisterChatHandler(registeredChatId, chatEventHandler);
+			registeredChatId = null;
+		}
 	});
 
 	//////////////////////////
@@ -489,10 +552,6 @@
 		chatFiles = [];
 		params = {};
 
-		if ($page.url.searchParams.get('image-generation') === 'true') {
-			imageGenerationEnabled = true;
-		}
-
 		if ($page.url.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
 			showControls.set(true);
@@ -567,11 +626,25 @@
 
 				if (taskRes) {
 					taskIds = taskRes.task_ids;
+
+					// wire v2: 走行中タスクへ再アタッチ(SSE)。このモジュールが元 POST の
+					// ストリームを消費中(ページ内遷移で戻ってきた等)なら重複購読しない。
+					// attachedTaskIds は「アタッチ fetch が未解決の間」の二重発火ガード
+					// (getActiveTaskIds は接続確立後にしか現れない)。
+					const activeTaskIds = getActiveTaskIds($chatId);
+					for (const taskId of taskIds ?? []) {
+						if (!activeTaskIds.includes(taskId) && !attachedTaskIds.has(taskId)) {
+							attachedTaskIds.add(taskId);
+							attachToTask($chatId, taskId).catch((error) => {
+								console.error('task reattach failed', taskId, error);
+							});
+						}
+					}
 				}
 
 				// llens: 生きた task が無ければ、未完の assistant メッセージは「中断された
 				// 応答」として done 化しスピナーを止める(本文ゼロなら ResponseMessage が
-				// 中断メッセージを表示する)。task が生きている場合はストリームが socket
+				// 中断メッセージを表示する)。task が生きている場合はストリームが SSE
 				// 経由で続いているので触らない — ぐるぐるは「task が生きている間だけ」。
 				if (history.currentId && (taskRes?.task_ids ?? []).length === 0) {
 					for (const message of Object.values(history.messages)) {
@@ -614,7 +687,6 @@
 			})),
 			model_item: $models.find((m) => m.id === modelId),
 			chat_id: targetChatId,
-			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
 			toast.error(`${error}`);
@@ -637,6 +709,12 @@
 					};
 				}
 			}
+		}
+
+		// wire v2: outlet filter が emit したイベント(status 等)は応答 JSON の
+		// events に同梱される — SSE と同じ適用関数で処理する
+		if (res !== null) {
+			await applyBufferedEvents(res.events, responseMessageId, targetChatId);
 		}
 
 		await tick();
@@ -679,7 +757,6 @@
 			...(event ? { event: event } : {}),
 			model_item: $models.find((m) => m.id === modelId),
 			chat_id: targetChatId,
-			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
 			toast.error(`${error}`);
@@ -700,6 +777,11 @@
 			}
 		}
 
+		// wire v2: action / outlet filter の emit は応答 JSON の events に同梱される
+		if (res !== null) {
+			await applyBufferedEvents(res.events, responseMessageId, targetChatId);
+		}
+
 		if ($chatId == targetChatId) {
 			chat = await updateChatById(targetChatId, {
 				models: selectedModels,
@@ -712,16 +794,6 @@
 			currentChatPage.set(1);
 			await chats.set(await getChatList($currentChatPage));
 		}
-	};
-
-	const getChatEventEmitter = async (modelId: string, chatId: string = '') => {
-		return setInterval(() => {
-			$socket?.emit('usage', {
-				action: 'chat',
-				model: modelId,
-				chat_id: chatId
-			});
-		}, 1000);
 	};
 
 	const createMessagePair = async (userPrompt) => {
@@ -847,69 +919,18 @@
 		}
 	};
 
+	// wire v2: chat:completion の data(スナップショット / delta / done / error / usage /
+	// sources)の message への適用は純関数 applyCompletionData に一元化。ここは
+	// 戻りフラグで副作用(TTS・haptic・自動スクロール・done 時の completed 経路)を駆動する。
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, content_blocks, sources, selected_model_id, error, usage } =
-			data;
+		const { contentChanged, done, error } = applyCompletionData(message, data);
 
 		if (error) {
-			await handleOpenAIError(error, message);
+			// {error: {content}} の一形 — message.error は適用済み。ここでは通知のみ
+			toast.error(message.error?.content ?? '');
 		}
 
-		if (sources) {
-			message.sources = sources;
-		}
-
-		if (content_blocks) {
-			// #17 L0: ブロック構造の累積スナップショット(表示はこちらを優先)
-			message.content_blocks = content_blocks;
-		}
-
-		if (choices) {
-			if (choices[0]?.message?.content) {
-				// Non-stream response
-				message.content += choices[0]?.message?.content;
-			} else {
-				// Stream response
-				let value = choices[0]?.delta?.content ?? '';
-				if (message.content == '' && value == '\n') {
-					console.log('Empty response');
-				} else {
-					message.content += value;
-
-					if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
-						navigator.vibrate(5);
-					}
-
-					// Emit chat event for TTS
-					const messageContentParts = getMessageContentParts(
-						message.content,
-						$config?.audio?.tts?.split_on ?? 'punctuation'
-					);
-					messageContentParts.pop();
-
-					// dispatch only last sentence and make sure it hasn't been dispatched before
-					if (
-						messageContentParts.length > 0 &&
-						messageContentParts[messageContentParts.length - 1] !== message.lastSentence
-					) {
-						message.lastSentence = messageContentParts[messageContentParts.length - 1];
-						eventTarget.dispatchEvent(
-							new CustomEvent('chat', {
-								detail: {
-									id: message.id,
-									content: messageContentParts[messageContentParts.length - 1]
-								}
-							})
-						);
-					}
-				}
-			}
-		}
-
-		if (content) {
-			// REALTIME_CHAT_SAVE is disabled
-			message.content = content;
-
+		if (contentChanged) {
 			if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
 				navigator.vibrate(5);
 			}
@@ -922,35 +943,22 @@
 			messageContentParts.pop();
 
 			// dispatch only last sentence and make sure it hasn't been dispatched before
-			if (
-				messageContentParts.length > 0 &&
-				messageContentParts[messageContentParts.length - 1] !== message.lastSentence
-			) {
-				message.lastSentence = messageContentParts[messageContentParts.length - 1];
+			if (messageContentParts.length > 0 && messageContentParts.at(-1) !== message.lastSentence) {
+				message.lastSentence = messageContentParts.at(-1);
 				eventTarget.dispatchEvent(
 					new CustomEvent('chat', {
 						detail: {
 							id: message.id,
-							content: messageContentParts[messageContentParts.length - 1]
+							content: messageContentParts.at(-1)
 						}
 					})
 				);
 			}
 		}
 
-		if (selected_model_id) {
-			message.selectedModelId = selected_model_id;
-		}
-
-		if (usage) {
-			message.usage = usage;
-		}
-
 		history.messages[message.id] = message;
 
 		if (done) {
-			message.done = true;
-
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);
 			}
@@ -961,7 +969,7 @@
 			}
 
 			// Emit chat event for TTS
-			let lastMessageContentPart =
+			const lastMessageContentPart =
 				getMessageContentParts(message.content, $config?.audio?.tts?.split_on ?? 'punctuation')?.at(
 					-1
 				) ?? '';
@@ -990,7 +998,6 @@
 			);
 		}
 
-		console.log(data);
 		if (autoScroll) {
 			scrollToBottom();
 		}
@@ -1051,13 +1058,11 @@
 		prompt = '';
 
 		// Reset chat input textarea
-		if (!($settings?.richTextInput ?? true)) {
-			const chatInputElement = document.getElementById('chat-input');
+		const chatInputElement = document.getElementById('chat-input');
 
-			if (chatInputElement) {
-				await tick();
-				chatInputElement.style.height = '';
-			}
+		if (chatInputElement) {
+			await tick();
+			chatInputElement.style.height = '';
 		}
 
 		const _files = JSON.parse(JSON.stringify(files));
@@ -1116,7 +1121,7 @@
 			scrollToBottom();
 		}
 
-		let _chatId = JSON.parse(JSON.stringify($chatId));
+		let _chatId = $chatId;
 		_history = JSON.parse(JSON.stringify(_history));
 
 		const responseMessageIds: Record<PropertyKey, string> = {};
@@ -1204,12 +1209,8 @@
 					let userContext = null;
 					responseMessage.userContext = userContext;
 
-					const chatEventEmitter = await getChatEventEmitter(model.id, _chatId);
-
 					scrollToBottom();
-					await sendPromptSocket(_history, model, responseMessageId, _chatId);
-
-					if (chatEventEmitter) clearInterval(chatEventEmitter);
+					await sendChatCompletionRequest(_history, model, responseMessageId, _chatId);
 				} else {
 					toast.error($i18n.t(`Model {{modelId}} not found`, { modelId }));
 				}
@@ -1220,7 +1221,9 @@
 		chats.set(await getChatList($currentChatPage));
 	};
 
-	const sendPromptSocket = async (_history, model, responseMessageId, _chatId) => {
+	// wire v2: POST /api/chat/completions の応答は SSE。ここでは送信と消費開始までを
+	// 担い、イベントの適用は registerChatHandler 済みの chatEventHandler が行う。
+	const sendChatCompletionRequest = async (_history, model, responseMessageId, _chatId) => {
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -1270,7 +1273,7 @@
 							content: [
 								{
 									type: 'text',
-									text: message?.merged?.content ?? message.content
+									text: message.content
 								},
 								// llens(#69): url は正準形 "/api/v1/files/{id}/content"(backend が base64 化)
 								// または旧チャットの data: URL — どちらもそのまま通す(分岐不要)。
@@ -1289,12 +1292,9 @@
 				if (message.role === 'assistant') {
 					// 過去ターンの tool 往復を wire 形に復元(#18-2)。
 					// tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
-					return expandAssistantToolHistory(
-						message?.merged?.content ?? message.content,
-						message?.content_blocks
-					);
+					return expandAssistantToolHistory(message.content, message?.content_blocks);
 				}
-				return [{ role: message.role, content: message?.merged?.content ?? message.content }];
+				return [{ role: message.role, content: message.content }];
 			})
 			.filter(
 				(message) =>
@@ -1328,20 +1328,13 @@
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 				// llens(#54): tool はモデル割り当て一本 — tool_ids はサーバー側解決に移行し送らない
+				// llens(#70): features(image_generation)はネイティブ画像生成の BE 撤去に伴い送らない
 
-				features: {
-					image_generation:
-						$config?.features?.enable_image_generation &&
-						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
-							? imageGenerationEnabled
-							: false
-				},
 				variables: {
 					...getPromptVariables($user?.name, undefined)
 				},
 				model_item: $models.find((m) => m.id === model.id),
 
-				session_id: $socket?.id,
 				chat_id: $chatId,
 				id: responseMessageId,
 
@@ -1369,12 +1362,8 @@
 				responseMessage.done = true;
 				responseMessage.interrupted = true;
 			} else {
-				toast.error(`${error}`);
-
-				responseMessage.error = {
-					content: error
-				};
-				responseMessage.done = true;
+				// HTTP 応答エラー(payload 処理失敗 = 400 等)/ 接続エラー
+				handleCompletionRequestError(error, responseMessage);
 			}
 
 			history.messages[responseMessageId] = responseMessage;
@@ -1384,19 +1373,21 @@
 
 		completionAbortControllers = completionAbortControllers.filter((c) => c !== abortController);
 
-		if (res) {
-			if (res.error) {
-				await handleOpenAIError(res.error, responseMessage);
-			} else {
-				if (taskIds) {
-					taskIds.push(res.task_id);
-				} else {
-					taskIds = [res.task_id];
+		if (res && res.body) {
+			// wire v2: SSE を EOF まで消費する(await しない — fire-and-consume)。
+			// イベントの適用は登録ハンドラ(Chat が unmount 済みなら +layout の
+			// fallback)が担う。EOF がタスク終端(done の後にも chat:title が来る)。
+			consumeCompletionStream(_chatId, res.body, {
+				onTask: (taskId) => {
+					taskIds = [...(taskIds ?? []), taskId];
 				}
-			}
-		}
-
-		if (!res || res.error) {
+			}).catch((error) => {
+				// 消費中の接続断。タスクはサーバー側で継続する(リロード/再訪で再アタッチ)
+				console.error('completion stream disconnected', error);
+				responseMessage.error = { content: `${error}` };
+				history.messages[responseMessageId] = responseMessage;
+			});
+		} else {
 			// llens: task 生成前の失敗(接続エラー等)は done イベントが来ないため、
 			// ここから completed(outlet filter)を通す — error 付き message が
 			// outlet に渡り、turn の失敗として記録できる
@@ -1412,44 +1403,17 @@
 		scrollToBottom();
 	};
 
-	const handleOpenAIError = async (error, responseMessage) => {
-		let errorMessage = '';
-		let innerError;
-
-		if (error) {
-			innerError = error;
-		}
-
-		console.error(innerError);
-		if ('detail' in innerError) {
-			// FastAPI error
-			toast.error(innerError.detail);
-			errorMessage = innerError.detail;
-		} else if ('error' in innerError) {
-			// OpenAI error
-			if ('message' in innerError.error) {
-				toast.error(innerError.error.message);
-				errorMessage = innerError.error.message;
-			} else {
-				toast.error(innerError.error);
-				errorMessage = innerError.error;
-			}
-		} else if ('message' in innerError) {
-			// OpenAI error
-			toast.error(innerError.message);
-			errorMessage = innerError.message;
-		}
+	// HTTP 応答エラー用(fetch catch / res.json 形)。イベント内エラーは
+	// {error: {content}} の一形で chatCompletionEventHandler 側が処理する。
+	const handleCompletionRequestError = (error: any, responseMessage: any) => {
+		console.error(error);
+		const errorMessage = error?.detail ?? error?.error?.message ?? error?.message ?? `${error}`;
+		toast.error(errorMessage);
 
 		responseMessage.error = {
 			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
 		};
 		responseMessage.done = true;
-
-		if (responseMessage.statusHistory) {
-			responseMessage.statusHistory = responseMessage.statusHistory.filter(
-				(status) => status.action !== 'knowledge_search'
-			);
-		}
 
 		history.messages[responseMessage.id] = responseMessage;
 	};
@@ -1463,9 +1427,13 @@
 		}
 		completionAbortControllers = [];
 
-		if (taskIds) {
-			for (const taskId of taskIds) {
-				const res = await stopTask(taskId).catch((error) => {
+		// wire v2: 消費中ストリームの task も含めて止める(サーバー側 cancel)。
+		// SSE 自体は task-cancelled → done → EOF の順で自然に閉じる
+		const stopTaskIds = [...new Set([...(taskIds ?? []), ...getActiveTaskIds($chatId)])];
+
+		if (stopTaskIds.length > 0) {
+			for (const taskId of stopTaskIds) {
+				await stopTask(taskId).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
@@ -1546,7 +1514,7 @@
 
 	const continueResponse = async () => {
 		console.log('continueResponse');
-		const _chatId = JSON.parse(JSON.stringify($chatId));
+		const _chatId = $chatId;
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
 			const responseMessage = history.messages[history.currentId];
@@ -1558,7 +1526,7 @@
 				.at(0);
 
 			if (model) {
-				await sendPromptSocket(history, model, responseMessage.id, _chatId);
+				await sendChatCompletionRequest(history, model, responseMessage.id, _chatId);
 			}
 		}
 	};
@@ -1722,7 +1690,6 @@
 								bind:files
 								bind:prompt
 								bind:autoScroll
-								bind:imageGenerationEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
@@ -1734,14 +1701,10 @@
 										localStorage.removeItem(`chat-input-${$chatId}`);
 									}
 								}}
-								on:submit={async (e) => {
-									if (e.detail || files.length > 0) {
+								onSubmit={async (userPrompt) => {
+									if (userPrompt || files.length > 0) {
 										await tick();
-										submitPrompt(
-											($settings?.richTextInput ?? true)
-												? e.detail.replaceAll('\n\n', '\n')
-												: e.detail
-										);
+										submitPrompt(userPrompt);
 									}
 								}}
 							/>
@@ -1760,19 +1723,14 @@
 								bind:files
 								bind:prompt
 								bind:autoScroll
-								bind:imageGenerationEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
 								{createMessagePair}
-								on:submit={async (e) => {
-									if (e.detail || files.length > 0) {
+								onSubmit={async (userPrompt) => {
+									if (userPrompt || files.length > 0) {
 										await tick();
-										submitPrompt(
-											($settings?.richTextInput ?? true)
-												? e.detail.replaceAll('\n\n', '\n')
-												: e.detail
-										);
+										submitPrompt(userPrompt);
 									}
 								}}
 							/>

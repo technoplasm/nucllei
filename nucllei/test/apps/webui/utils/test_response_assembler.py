@@ -272,3 +272,65 @@ class TestSeedBlocks:
         a = make_assembler(seed_blocks=seed)
         assert a.content_blocks[0]["synthetic"] is True
         assert a.content_blocks[1] == {"type": "text", "content": ""}
+
+
+class TestLastFrame:
+    """wire v2(SSE 一本化)のフレーム分類: 純追記はデルタ、開閉・tool_calls はスナップショット。"""
+
+    def test_pure_text_append_is_not_structural(self):
+        a = make_assembler()
+        a.handle_delta({"content": "こん"})
+        # 初期 text ブロックへの追記(ブロックは __init__ で存在済み)
+        assert a.last_frame == {
+            "structural": False,
+            "appends": [{"block": "text", "content": "こん"}],
+        }
+        a.handle_delta({"content": "にちは"})
+        assert a.last_frame["appends"] == [{"block": "text", "content": "にちは"}]
+
+    def test_reasoning_open_is_structural(self):
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "うーん"})
+        assert a.last_frame["structural"] is True
+        assert a.last_frame["appends"] == []
+
+    def test_reasoning_append_is_delta(self):
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "うーん"})
+        a.handle_delta({"reasoning_content": "そうか"})
+        assert a.last_frame == {
+            "structural": False,
+            "appends": [{"block": "reasoning", "content": "そうか"}],
+        }
+
+    def test_reasoning_close_by_content_is_structural(self):
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "考え中"})
+        a.handle_delta({"content": "答え"})
+        assert a.last_frame["structural"] is True
+
+    def test_tool_calls_delta_is_structural(self):
+        a = make_assembler()
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{"))
+        assert a.last_frame["structural"] is True
+        a.handle_delta(tool_call_delta(arguments='"x": 1}'))
+        # 引数の続きも部分 JSON 突き合わせが要るためスナップショット一択
+        assert a.last_frame["structural"] is True
+
+    def test_text_after_tool_results_opens_block_structurally(self):
+        a = make_assembler()
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        a.set_tool_results([{"tool_call_id": "c1", "content": "ok"}])
+        a.start_stream()
+        # set_tool_results が空 text ブロックを開いた直後の追記は既存末尾への追記
+        a.handle_delta({"content": "続き"})
+        assert a.last_frame == {
+            "structural": False,
+            "appends": [{"block": "text", "content": "続き"}],
+        }
+
+    def test_no_change_frame_resets_last_frame(self):
+        a = make_assembler()
+        a.handle_delta({"content": "x"})
+        a.handle_delta({})
+        assert a.last_frame == {"structural": False, "appends": []}

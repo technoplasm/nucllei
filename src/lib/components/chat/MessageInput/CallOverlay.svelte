@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { config, models, settings, showCallOverlay, TTSWorker } from '$lib/stores';
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
-	import { onMount, tick, getContext, onDestroy, createEventDispatcher } from 'svelte';
-
-	const dispatch = createEventDispatcher();
+	import { onMount, tick, getContext, onDestroy } from 'svelte';
 
 	import { blobToFile } from '$lib/utils';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
@@ -12,36 +10,44 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const i18n = getContext('i18n');
 
-	export let eventTarget: EventTarget;
-	export let submitPrompt: Function;
-	export let stopResponse: Function;
-	export let files;
-	export let modelId;
+	let {
+		eventTarget,
+		submitPrompt,
+		stopResponse,
+		files = $bindable(),
+		modelId,
+		onClose = () => {}
+	}: {
+		eventTarget: EventTarget;
+		submitPrompt: Function;
+		stopResponse: Function;
+		files?: any[];
+		modelId: string | null;
+		onClose?: () => void;
+	} = $props();
 
 	let wakeLock = null;
 
-	let model = null;
+	let model = $state<any>(null);
 
-	let loading = false;
+	let loading = $state(false);
 	let confirmed = false;
-	let interrupted = false;
-	let assistantSpeaking = false;
+	let assistantSpeaking = $state(false);
 
-	let camera = false;
-	let cameraStream = null;
+	let camera = $state(false);
+	let cameraStream = $state<MediaStream | null>(null);
 
 	let chatStreaming = false;
-	let rmsLevel = 0;
+	let rmsLevel = $state(0);
 	let hasStartedSpeaking = false;
 	let mediaRecorder;
 	let audioStream = null;
 	let audioChunks = [];
 
-	let videoInputDevices = [];
+	let videoInputDevices = $state<any[]>([]);
 	let selectedVideoInputDeviceId = null;
 
 	const getVideoInputDevices = async () => {
@@ -423,7 +429,6 @@
 
 	const stopAllAudio = async () => {
 		assistantSpeaking = false;
-		interrupted = true;
 
 		if (chatStreaming) {
 			stopResponse();
@@ -671,49 +676,14 @@
 			<button
 				type="button"
 				class="flex justify-center items-center w-full h-20 min-h-20"
-				on:click={() => {
+				onclick={() => {
 					if (assistantSpeaking) {
 						stopAllAudio();
 					}
 				}}
 			>
 				{#if loading || assistantSpeaking}
-					<svg
-						class="size-12 text-content"
-						viewBox="0 0 24 24"
-						fill="currentColor"
-						xmlns="http://www.w3.org/2000/svg"
-						><style>
-							.spinner_qM83 {
-								animation: spinner_8HQG 1.05s infinite;
-							}
-							.spinner_oXPr {
-								animation-delay: 0.1s;
-							}
-							.spinner_ZTLf {
-								animation-delay: 0.2s;
-							}
-							@keyframes spinner_8HQG {
-								0%,
-								57.14% {
-									animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-									transform: translate(0);
-								}
-								28.57% {
-									animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-									transform: translateY(-6px);
-								}
-								100% {
-									transform: translate(0);
-								}
-							}
-						</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
-							class="spinner_qM83 spinner_oXPr"
-							cx="12"
-							cy="12"
-							r="3"
-						/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
-					>
+					<span class="i-lucide-ellipsis size-12 block text-content animate-pulse"></span>
 				{:else}
 					<div
 						class=" {rmsLevel * 100 > 4
@@ -740,49 +710,14 @@
 			{#if !camera}
 				<button
 					type="button"
-					on:click={() => {
+					onclick={() => {
 						if (assistantSpeaking) {
 							stopAllAudio();
 						}
 					}}
 				>
 					{#if loading || assistantSpeaking}
-						<svg
-							class="size-44 text-content"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							xmlns="http://www.w3.org/2000/svg"
-							><style>
-								.spinner_qM83 {
-									animation: spinner_8HQG 1.05s infinite;
-								}
-								.spinner_oXPr {
-									animation-delay: 0.1s;
-								}
-								.spinner_ZTLf {
-									animation-delay: 0.2s;
-								}
-								@keyframes spinner_8HQG {
-									0%,
-									57.14% {
-										animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-										transform: translate(0);
-									}
-									28.57% {
-										animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-										transform: translateY(-6px);
-									}
-									100% {
-										transform: translate(0);
-									}
-								}
-							</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
-								class="spinner_qM83 spinner_oXPr"
-								cx="12"
-								cy="12"
-								r="3"
-							/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
-						>
+						<span class="i-lucide-ellipsis size-44 block text-content animate-pulse"></span>
 					{:else}
 						<div
 							class=" {rmsLevel * 100 > 4
@@ -818,20 +753,11 @@
 							type="button"
 							class="p-1.5 text-white cursor-pointer backdrop-blur-xl bg-black/10 rounded-full"
 							aria-label={$i18n.t('Stop camera')}
-							on:click={() => {
+							onclick={() => {
 								stopCamera();
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="size-6"
-							>
-								<path
-									d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z"
-								/>
-							</svg>
+							<span class="i-lucide-x size-6 block"></span>
 						</button>
 					</div>
 				</div>
@@ -843,9 +769,9 @@
 				{#if camera}
 					<VideoInputMenu
 						devices={videoInputDevices}
-						on:change={async (e) => {
-							console.log(e.detail);
-							selectedVideoInputDeviceId = e.detail;
+						onChange={async (deviceId) => {
+							console.log(deviceId);
+							selectedVideoInputDeviceId = deviceId;
 							await stopVideoStream();
 							await startVideoStream();
 						}}
@@ -855,18 +781,7 @@
 							type="button"
 							aria-label={$i18n.t('Switch Camera')}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="size-5"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
+							<span class="i-lucide-switch-camera size-5 block"></span>
 						</button>
 					</VideoInputMenu>
 				{:else}
@@ -875,30 +790,12 @@
 							class=" p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 							type="button"
 							aria-label={$i18n.t('Camera')}
-							on:click={async () => {
+							onclick={async () => {
 								await navigator.mediaDevices.getUserMedia({ video: true });
 								startCamera();
 							}}
 						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="size-5"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"
-								/>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z"
-								/>
-							</svg>
+							<span class="i-lucide-camera size-5 block"></span>
 						</button>
 					</Tooltip>
 				{/if}
@@ -907,7 +804,7 @@
 			<div>
 				<button
 					type="button"
-					on:click={() => {
+					onclick={() => {
 						if (assistantSpeaking) {
 							stopAllAudio();
 						}
@@ -929,7 +826,7 @@
 				<button
 					class=" p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 					aria-label={$i18n.t('Close')}
-					on:click={async () => {
+					onclick={async () => {
 						await stopAudioStream();
 						await stopVideoStream();
 
@@ -937,20 +834,11 @@
 						console.log(cameraStream);
 
 						showCallOverlay.set(false);
-						dispatch('close');
+						onClose();
 					}}
 					type="button"
 				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 20 20"
-						fill="currentColor"
-						class="size-5"
-					>
-						<path
-							d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"
-						/>
-					</svg>
+					<span class="i-lucide-x size-5 block"></span>
 				</button>
 			</div>
 		</div>

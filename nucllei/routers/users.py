@@ -14,7 +14,6 @@ from nucllei.models.users import (
 )
 
 
-from nucllei.socket.main import get_active_status_by_user_id
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import SRC_LOG_LEVELS
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -89,14 +88,9 @@ class ChatPermissions(BaseModel):
     multiple_models: bool = True
 
 
-class FeaturesPermissions(BaseModel):
-    image_generation: bool = True
-
-
 class UserPermissions(BaseModel):
     workspace: WorkspacePermissions
     chat: ChatPermissions
-    features: FeaturesPermissions
 
 
 @router.get("/default/permissions", response_model=UserPermissions)
@@ -107,9 +101,6 @@ async def get_default_user_permissions(request: Request, user=Depends(get_admin_
         ),
         "chat": ChatPermissions(
             **request.app.state.config.USER_PERMISSIONS.get("chat", {})
-        ),
-        "features": FeaturesPermissions(
-            **request.app.state.config.USER_PERMISSIONS.get("features", {})
         ),
     }
 
@@ -197,10 +188,10 @@ async def get_additional_user_meta_fields(
 ############################
 
 
+# llens(wire v2): USER_POOL プレゼンス由来の active フィールドは socket 基盤と共に撤去。
 class UserResponse(BaseModel):
     name: str
     profile_image_url: str
-    active: Optional[bool] = None
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -225,7 +216,6 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
             **{
                 "name": user.name,
                 "profile_image_url": user.profile_image_url,
-                "active": get_active_status_by_user_id(user_id),
             }
         )
     else:

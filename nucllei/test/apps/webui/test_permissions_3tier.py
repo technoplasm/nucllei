@@ -7,7 +7,6 @@
 - skill editor: 全 skill を閲覧できるが、作成は必ず私有・編集/削除は自分のだけ・
   ACL は変更不可(admin 専有・保存では温存)/ 非 editor は管理系 401
 - tool_ids 付き skill は editor でも触れない(admin 専有 — GHSA-4pcg 境界)
-- G1: features.image_generation のサーバー側 enforcement
 - G2: task endpoint の model read ACL 検証(picker 外モデルの裏口を塞ぐ)
 """
 
@@ -336,27 +335,6 @@ class TestSkillEditor(AbstractPostgresTest):
                 ).status_code
                 == 401
             )
-
-
-class TestImageGenerationGate(AbstractPostgresTest):
-    """G1: features.image_generation のサーバー側 enforcement。"""
-
-    BASE_PATH = "/api/v1/images"
-
-    def test_user_without_permission_gets_401(self):
-        from nucllei.main import app
-
-        original = app.state.config.USER_PERMISSIONS
-        app.state.config.USER_PERMISSIONS = {"features": {"image_generation": False}}
-        try:
-            with mock_webui_user(id="9", role="user"):
-                response = self.fast_api_client.post(
-                    self.create_url("/generations"),
-                    json={"prompt": "a cat"},
-                )
-            assert response.status_code == 401
-        finally:
-            app.state.config.USER_PERMISSIONS = original
 
 
 class TestTaskModelAccess(AbstractPostgresTest):

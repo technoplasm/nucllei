@@ -1,7 +1,6 @@
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
-import type { Socket } from 'socket.io-client';
 
 // Backend
 // 配備層のブランド名。/api/config の name(WEBUI_NAME env、既定 Nucllei)で上書きされる
@@ -18,10 +17,6 @@ export const appData = writable(null);
 export const MODEL_DOWNLOAD_POOL = writable<Record<string, any>>({});
 
 export const mobile = writable(false);
-
-export const socket: Writable<null | Socket> = writable(null);
-export const activeUserIds: Writable<null | string[]> = writable(null);
-export const USAGE_POOL: Writable<null | string[]> = writable(null);
 
 export const theme = writable('system');
 
@@ -131,7 +126,6 @@ type Settings = {
 	splitLargeChunks?: boolean;
 	scrollOnBranchChange?: boolean;
 	notificationSound?: boolean;
-	richTextInput?: boolean;
 	largeTextAsFile?: boolean;
 	landingPageMode?: string;
 	chatBubble?: boolean;
@@ -216,9 +210,6 @@ type UserPermissions = {
 	chat?: {
 		[key: string]: boolean | undefined;
 	};
-	features?: {
-		[key: string]: boolean | undefined;
-	};
 };
 
 type Config = {
@@ -237,7 +228,6 @@ type Config = {
 		enable_api_key: boolean;
 		enable_signup: boolean;
 		enable_login_form: boolean;
-		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_user_webhooks?: boolean;

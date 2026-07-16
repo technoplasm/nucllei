@@ -8,10 +8,6 @@ from fastapi import Request
 from starlette.responses import StreamingResponse
 
 
-from nucllei.socket.main import (
-    get_event_call,
-    get_event_emitter,
-)
 from nucllei.functions import generate_function_chat_completion
 
 from nucllei.routers.openai import (
@@ -117,6 +113,33 @@ async def generate_chat_completion(
 chat_completion = generate_chat_completion
 
 
+def _make_buffered_event_handlers():
+    """completed / actions 経路用のイベントバッファ(llens(wire v2))。
+
+    これらのハンドラは completion タスク終了後の別 POST 内で走るため、
+    ライブなイベントバス(completion_events)は存在しない。__event_emitter__ は
+    ローカルの events リストへ積むだけとし、呼び出し側が応答 JSON の "events" に
+    同梱して返す(FE が応答から適用する)。
+
+    completed/actions 経路では __event_call__ は使えない(バッファ応答のため、
+    クライアントとの双方向往復が成立しない)— 呼ばれたら warning を出して
+    None を返す no-op stub を渡す。
+    """
+    events: list = []
+
+    async def __event_emitter__(event_data):
+        events.append(event_data)
+
+    async def __event_call__(event_data):
+        log.warning(
+            "__event_call__ は completed/actions 経路では使えない(バッファ応答のため)。"
+            "None を返す。"
+        )
+        return None
+
+    return events, __event_emitter__, __event_call__
+
+
 async def chat_completed(request: Request, form_data: dict, user: Any):
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
@@ -138,13 +161,14 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
     metadata = {
         "chat_id": data["chat_id"],
         "message_id": data["id"],
-        "session_id": data["session_id"],
         "user_id": user.id,
     }
 
+    events, __event_emitter__, __event_call__ = _make_buffered_event_handlers()
+
     extra_params = {
-        "__event_emitter__": get_event_emitter(metadata),
-        "__event_call__": get_event_call(metadata),
+        "__event_emitter__": __event_emitter__,
+        "__event_call__": __event_call__,
         "__user__": {
             "id": user.id,
             "email": user.email,
@@ -171,6 +195,8 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
             form_data=data,
             extra_params=extra_params,
         )
+        if isinstance(result, dict):
+            result = {**result, "events": events}
         return result
     except Exception as e:
         return Exception(f"Error: {e}")
@@ -198,22 +224,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         raise Exception("Model not found")
     model = models[model_id]
 
-    __event_emitter__ = get_event_emitter(
-        {
-            "chat_id": data["chat_id"],
-            "message_id": data["id"],
-            "session_id": data["session_id"],
-            "user_id": user.id,
-        }
-    )
-    __event_call__ = get_event_call(
-        {
-            "chat_id": data["chat_id"],
-            "message_id": data["id"],
-            "session_id": data["session_id"],
-            "user_id": user.id,
-        }
-    )
+    events, __event_emitter__, __event_call__ = _make_buffered_event_handlers()
 
     if action_id in request.app.state.FUNCTIONS:
         function_module = request.app.state.FUNCTIONS[action_id]
@@ -277,4 +288,10 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         except Exception as e:
             return Exception(f"Error: {e}")
 
+    # llens(wire v2): バッファしたイベントを応答 JSON に同梱(FE が適用する)。
+    # action が None を返す(emit だけして戻り値なし)場合もイベントは届ける。
+    if isinstance(data, dict):
+        return {**data, "events": events}
+    if data is None:
+        return {"events": events}
     return data

@@ -97,6 +97,22 @@ def _sse_response(name: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+async def _read_sse_events(response):
+    """POST 応答 SSE を読み切り、封筒({"chat_id","message_id","data"})の data を集める。
+
+    wire v2 ではバックグラウンドタスクの終端でイベントバスが close され
+    SSE が EOF するため、読み切り = タスクの完走待ちになる。
+    先頭は task 封筒({"type":"task","data":{"task_id":...}})。
+    """
+    events = []
+    async for line in response.body_iterator:
+        line = line.decode("utf-8") if isinstance(line, bytes) else line
+        for part in line.split("\n"):
+            if part.startswith("data: "):
+                events.append(json.loads(part[len("data: ") :])["data"])
+    return events
+
+
 async def _drive_tool_call_loop(
     monkeypatch,
     cap,
@@ -105,27 +121,27 @@ async def _drive_tool_call_loop(
     extra_tools=None,
     upserts=None,
     omit_default_tool=False,
+    initial_response=None,
 ):
-    """process_chat_response をツール呼び出し SSE で駆動する。
+    """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
+
+    実物の CompletionEventStream を購読して process_chat_response へ渡し、
+    返る SSE(StreamingResponse)を読み切ることでタスク完走を待つ。
 
     followup_responses: ツール実行後の継続リクエストへの応答(fixture 名)の列。
     尽きた後は常に tool_call を返す(上限テスト用)。
     initial_fixture: 初回応答に使う fixture 名(引数なし/特殊文字引数の検証で差し替える)。
+    initial_response: 初回応答そのもの(StreamingResponse または非 stream dict)。
+    指定時は initial_fixture より優先(異常系 SSE・非 stream 応答の駆動用)。
     extra_tools: metadata["tools"] に追加登録するツール(get_current_time など)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from nucllei.utils import middleware
+    from nucllei.utils.completion_events import CompletionEventStream
 
-    events = []
     completion_calls = []
     tool_invocations = []
     followups = list(followup_responses)
-
-    def fake_get_event_emitter(_metadata):
-        async def emit(event):
-            events.append(event)
-
-        return emit
 
     async def fake_generate_chat_completion(request, form_data, user):
         completion_calls.append(form_data)
@@ -134,17 +150,13 @@ async def _drive_tool_call_loop(
 
     if cap is not None:
         monkeypatch.setattr(middleware, "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS", cap)
-    monkeypatch.setattr(middleware, "get_event_emitter", fake_get_event_emitter)
-    monkeypatch.setattr(middleware, "get_event_call", fake_get_event_emitter)
     monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
-    monkeypatch.setattr(
-        middleware, "get_active_status_by_user_id", lambda user_id: "active"
-    )
     monkeypatch.setattr(
         middleware, "generate_chat_completion", fake_generate_chat_completion
     )
 
-    # DB 非依存にする(チャット保存はこのテストの対象外)
+    # DB 非依存にする(チャット保存はこのテストの対象外。実装内の DB 呼び出しは
+    # asyncio.to_thread 経由になったが、クラス属性の monkeypatch はそのまま効く)
     monkeypatch.setattr(
         middleware.Chats,
         "get_message_by_id_and_message_id",
@@ -163,15 +175,11 @@ async def _drive_tool_call_loop(
     monkeypatch.setattr(
         middleware.Chats, "get_messages_by_chat_id", lambda chat_id: None
     )
-
-    background = {}
-
-    def fake_create_task(coro, id=None):
-        task = asyncio.get_event_loop().create_task(coro)
-        background["task"] = task
-        return id, task
-
-    monkeypatch.setattr(middleware, "create_task", fake_create_task)
+    monkeypatch.setattr(
+        middleware.Chats,
+        "record_usage_by_id_and_message_id",
+        lambda chat_id, message_id, usage, context_size=None: None,
+    )
 
     async def get_weather(**kwargs):
         tool_invocations.append(kwargs)
@@ -200,8 +208,6 @@ async def _drive_tool_call_loop(
     metadata = {
         "chat_id": "chat-1",
         "message_id": "message-1",
-        "session_id": "session-1",
-        "features": {},
         "tools": tools,
     }
     form_data = {
@@ -223,18 +229,28 @@ async def _drive_tool_call_loop(
     )
     model = {"id": "kimi-k2.6", "name": "kimi-k2.6"}
 
-    result = await middleware.process_chat_response(
+    events_stream = CompletionEventStream(chat_id="chat-1", message_id="message-1")
+    queue = events_stream.subscribe()
+
+    response = await middleware.process_chat_response(
         request,
-        _sse_response(initial_fixture),
+        (
+            initial_response
+            if initial_response is not None
+            else _sse_response(initial_fixture)
+        ),
         form_data,
         user,
         metadata,
         model,
         [],
         {},
+        events_stream=events_stream,
+        queue=queue,
     )
-    assert result.get("status") is True
-    await background["task"]
+    assert isinstance(response, StreamingResponse)
+    # SSE 読み切り = タスク完走待ち(タスク終端で stream close → EOF)
+    events = await asyncio.wait_for(_read_sse_events(response), timeout=30)
     return events, completion_calls, tool_invocations
 
 
@@ -317,9 +333,8 @@ def test_native_tool_loop_parses_unicode_args_call(monkeypatch):
 
     実キャプチャでは Kimi は arguments を厳密 JSON(引用符 \\"、改行 \\n、
     バックスラッシュ \\\\ を正しくエスケープ、絵文字/日本語は生 UTF-8)で流す。
-    middleware は ast.literal_eval を先に試すが、これらのエスケープは Python の
-    文字列リテラル構文でも有効なため literal_eval で成功し、json.loads
-    フォールバックには落ちない。ここではパース結果の中身を固定する。
+    middleware は json.loads を一次に試す(ast.literal_eval は Python リテラル風を
+    出すモデル向けのフォールバック)。ここではパース結果の中身を固定する。
     """
     events, completion_calls, tool_invocations = asyncio.run(
         _drive_tool_call_loop(
@@ -401,56 +416,6 @@ def test_finish_tool_calls_without_parsed_calls_surfaces_error(monkeypatch):
     実キャプチャでは作れない異常系なので、finish フレームだけ実キャプチャと同形の
     インライン SSE を使う。
     """
-    from nucllei.utils import middleware
-
-    events = []
-    completion_calls = []
-
-    def fake_get_event_emitter(_metadata):
-        async def emit(event):
-            events.append(event)
-
-        return emit
-
-    async def fake_generate_chat_completion(request, form_data, user):
-        completion_calls.append(form_data)
-        return _sse_response("text_basic")
-
-    monkeypatch.setattr(middleware, "get_event_emitter", fake_get_event_emitter)
-    monkeypatch.setattr(middleware, "get_event_call", fake_get_event_emitter)
-    monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
-    monkeypatch.setattr(
-        middleware, "get_active_status_by_user_id", lambda user_id: "active"
-    )
-    monkeypatch.setattr(
-        middleware, "generate_chat_completion", fake_generate_chat_completion
-    )
-    monkeypatch.setattr(
-        middleware.Chats,
-        "get_message_by_id_and_message_id",
-        lambda chat_id, message_id: None,
-    )
-    monkeypatch.setattr(
-        middleware.Chats,
-        "upsert_message_to_chat_by_id_and_message_id",
-        lambda chat_id, message_id, data: None,
-    )
-    monkeypatch.setattr(
-        middleware.Chats, "get_chat_title_by_id", lambda chat_id: "chat"
-    )
-    monkeypatch.setattr(
-        middleware.Chats, "get_messages_by_chat_id", lambda chat_id: None
-    )
-
-    background = {}
-
-    def fake_create_task(coro, id=None):
-        task = asyncio.get_event_loop().create_task(coro)
-        background["task"] = task
-        return id, task
-
-    monkeypatch.setattr(middleware, "create_task", fake_create_task)
-
     # content デルタ + finish(tool_calls)のみ — tool_calls デルタが 1 つも無い
     broken_stream = _sse_response_from_frames(
         [
@@ -459,45 +424,15 @@ def test_finish_tool_calls_without_parsed_calls_surfaces_error(monkeypatch):
         ]
     )
 
-    metadata = {
-        "chat_id": "chat-1",
-        "message_id": "message-1",
-        "session_id": "session-1",
-        "features": {},
-        "tools": {},
-    }
-    form_data = {
-        "model": "kimi-k2.6",
-        "stream": True,
-        "messages": [{"role": "user", "content": "hi"}],
-    }
-    user = types.SimpleNamespace(
-        id="1", email="john.doe@nucllei.local", name="John Doe", role="admin"
-    )
-    request = types.SimpleNamespace(
-        app=types.SimpleNamespace(
-            state=types.SimpleNamespace(
-                WEBUI_NAME="llens",
-                config=types.SimpleNamespace(WEBUI_URL="http://localhost"),
-            )
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_response=broken_stream,
+            omit_default_tool=True,
         )
     )
-
-    async def run():
-        result = await middleware.process_chat_response(
-            request,
-            broken_stream,
-            form_data,
-            user,
-            metadata,
-            {"id": "kimi-k2.6", "name": "kimi-k2.6"},
-            [],
-            {},
-        )
-        assert result.get("status") is True
-        await background["task"]
-
-    asyncio.run(run())
 
     error_events = [
         e["data"]["error"]["content"] for e in events if e.get("data", {}).get("error")
@@ -1364,3 +1299,202 @@ def test_content_blocks_persisted_with_message(monkeypatch):
     persisted = [u for u in upserts if "content_blocks" in u]
     assert persisted, "content_blocks が永続化されていない"
     assert persisted[-1]["content_blocks"] == _final_done_data(events)["content_blocks"]
+
+
+####################################
+# wire v2 の emit 規約(初回スナップショット + delta イベント + 構造スナップショット)
+####################################
+
+
+def _completion_datas(events):
+    """chat:completion イベントの data 列。"""
+    return [e["data"] for e in events if e.get("type") == "chat:completion"]
+
+
+def _snapshot_datas(events):
+    """content_blocks を含むスナップショットイベントの data 列。"""
+    return [d for d in _completion_datas(events) if "content_blocks" in d]
+
+
+def _delta_datas(events):
+    """純追記の delta イベントのペイロード列。"""
+    return [d["delta"] for d in _completion_datas(events) if "delta" in d]
+
+
+def _patch_snapshot_interval(monkeypatch, value):
+    from nucllei.utils import middleware
+
+    monkeypatch.setattr(middleware, "SNAPSHOT_INTERVAL", value)
+
+
+def test_wire_v2_pure_append_flows_as_delta_events(monkeypatch):
+    """純追記はスナップショットではなく delta イベントで流れる(O(n²) 解消の回帰)。
+
+    text_basic(reasoning 多数フレーム + text 1 フレーム)で、content_blocks
+    スナップショットは構造変化点(初回・reasoning 開始・text 開始・done)の
+    4 つだけになり、間の追記はすべて {"delta": {...}} で届く。
+    """
+    # スロットルスナップショットを無効化して構造点だけにする(遅マシン耐性)
+    _patch_snapshot_interval(monkeypatch, 10**9)
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch, cap=None, followup_responses=[], initial_fixture="text_basic"
+        )
+    )
+    assert completion_calls == []
+
+    # 最初の chat:completion はストリーム開始時の無条件スナップショット
+    completions = _completion_datas(events)
+    assert "content_blocks" in completions[0]
+
+    snapshots = _snapshot_datas(events)
+    assert len(snapshots) == 4  # 初回 + reasoning 開始 + text 開始 + done
+    assert snapshots[-1].get("done") is True
+
+    # 追記の主流は delta イベント(reasoning 開始フレームの中身は構造
+    # スナップショット側に載るため、delta は残り全フレーム分)
+    frames = mf.load_frames("text_basic")
+    reasoning_frames = [
+        d.get("reasoning_content")
+        for d, _ in mf.iter_deltas(frames)
+        if d.get("reasoning_content")
+    ]
+    deltas = _delta_datas(events)
+    assert [d["block"] for d in deltas] == ["reasoning"] * (len(reasoning_frames) - 1)
+
+    # 構造スナップショットの内容 + delta の結合 = fixture のデルタ結合(取りこぼしなし)
+    open_reasoning = snapshots[1]["content_blocks"][-1]
+    assert open_reasoning["type"] == "reasoning"
+    joined = open_reasoning["content"] + "".join(d["content"] for d in deltas)
+    assert joined == _joined_deltas("text_basic", "reasoning_content")
+
+    # text は 1 フレーム(text ブロック開き = 構造スナップショット)なので delta 無し
+    final = _final_done_data(events)
+    assert final["content"] == _joined_deltas("text_basic", "content").strip()
+
+
+def test_wire_v2_reasoning_boundaries_are_structural_snapshots(monkeypatch):
+    """reasoning の開始/終了は構造スナップショット、間は delta(block=reasoning)。
+
+    列: 初回スナップショット → reasoning 開始(done=false スナップショット)→
+    reasoning delta × N → text 開始(reasoning done=true スナップショット)→
+    text delta × M → done。
+    """
+    _patch_snapshot_interval(monkeypatch, 10**9)
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch, cap=None, followup_responses=[], initial_fixture="reasoning"
+        )
+    )
+
+    # usage イベントは順序検査の対象外
+    seq = [d for d in _completion_datas(events) if "usage" not in d]
+
+    assert "content_blocks" in seq[0]  # 初回スナップショット
+
+    # reasoning 開始 = 構造スナップショット(open reasoning)
+    assert "content_blocks" in seq[1]
+    opened = seq[1]["content_blocks"][-1]
+    assert opened["type"] == "reasoning" and opened["done"] is False
+
+    # 間は reasoning delta のみ
+    i = 2
+    while "delta" in seq[i]:
+        assert seq[i]["delta"]["block"] == "reasoning"
+        i += 1
+    assert i > 2, "reasoning delta イベントが無い"
+
+    # text 開始 = reasoning を閉じた構造スナップショット
+    blocks = seq[i]["content_blocks"]
+    assert [b["type"] for b in blocks] == ["reasoning", "text"]
+    assert blocks[0]["done"] is True
+
+    # 以降 done まで text delta のみ
+    i += 1
+    while "delta" in seq[i]:
+        assert seq[i]["delta"]["block"] == "text"
+        i += 1
+    assert seq[i].get("done") is True
+    assert i == len(seq) - 1
+
+
+def test_wire_v2_snapshot_interval_zero_snapshots_every_delta(monkeypatch):
+    """SNAPSHOT_INTERVAL=0 では毎デルタがスナップショット + DB 永続化になる
+    (スロットルの下限動作 = 途中参加収束・取りこぼし上限の保証)。"""
+    _patch_snapshot_interval(monkeypatch, 0)
+    upserts = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            upserts=upserts,
+        )
+    )
+
+    # delta イベントは 1 つも出ない(全て snapshot に置き換わる)
+    assert _delta_datas(events) == []
+
+    frames = mf.load_frames("text_basic")
+    changed = [
+        d
+        for d, _ in mf.iter_deltas(frames)
+        if d.get("reasoning_content") or d.get("content")
+    ]
+    # 初回(persist なし)+ 変更フレームごと + done で snapshot が並ぶ
+    assert len(_snapshot_datas(events)) == len(changed) + 2
+    # 変更フレームごとに永続化される(+ 終端の最終スナップショット)
+    persisted = [u for u in upserts if "content_blocks" in u]
+    assert len(persisted) == len(changed) + 1
+
+
+####################################
+# 非 stream 応答の正規化(ingest_model_response_json)
+####################################
+
+
+def test_non_streaming_response_ingested_as_done_snapshot(monkeypatch):
+    """非 stream JSON 応答(実キャプチャ text_basic.json)が ingest 経由で
+    合成 1 フレーム化され、スナップショット + done で届く(契約は stream と同一)。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_response=mf.load_response("text_basic"),
+        )
+    )
+    assert completion_calls == []
+    assert _delta_datas(events) == []
+
+    response = mf.load_response("text_basic")
+    message = response["choices"][0]["message"]
+
+    final = _final_done_data(events)
+    assert [b["type"] for b in final["content_blocks"]] == ["reasoning", "text"]
+    reasoning, text = final["content_blocks"]
+    assert reasoning["done"] is True
+    assert reasoning["content"] == message["reasoning_content"]
+    assert text["content"] == message["content"].strip()
+    assert final["content"] == message["content"].strip()
+
+
+def test_non_streaming_tool_call_response_drives_tool_loop(monkeypatch):
+    """非 stream 応答の tool_calls(tool_call.json)でも tool ループが機能する
+    (index 無し完成形 tool_calls の合成 index 込み)。"""
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_response=mf.load_response("tool_call"),
+        )
+    )
+
+    # 実キャプチャの引数がパースされてツールに渡り、継続 1 回で完走する
+    assert len(tool_invocations) == 1
+    assert tool_invocations[0]["city"] == "札幌"
+    assert len(completion_calls) == 1
+    assert _iteration_limit_errors(events) == []
+    assert _final_done_data(events)
