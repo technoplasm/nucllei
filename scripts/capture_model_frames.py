@@ -4,7 +4,7 @@
 使い方:
     uv run python scripts/capture_model_frames.py [--base-url http://prism-llens:13300/v1]
 
-出力先: backend/open_webui/test/fixtures/model_frames/
+出力先: backend/nucllei/test/fixtures/model_frames/
 - <scenario>.sse   : ストリーミングの生バイト列(SSE をそのまま保存。改変しない)
 - <scenario>.json  : 非ストリーミング応答(scenario によっては省略)
 - meta.json        : モデル ID・キャプチャ日時・リクエスト payload の記録
@@ -24,7 +24,7 @@ from pathlib import Path
 import httpx
 
 FIXTURE_DIR = (
-    Path(__file__).parent.parent / "backend/open_webui/test/fixtures/model_frames"
+    Path(__file__).parent.parent / "backend/nucllei/test/fixtures/model_frames"
 )
 
 WEATHER_TOOL = {

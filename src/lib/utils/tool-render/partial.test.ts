@@ -147,7 +147,7 @@ describe('parsePartialArguments: 実キャプチャ全プレフィックス(漸�
 	const loadArgDeltas = (name: string): string[] => {
 		const sse = readFileSync(
 			new URL(
-				`../../../../backend/open_webui/test/fixtures/model_frames/${name}.sse`,
+				`../../../../backend/nucllei/test/fixtures/model_frames/${name}.sse`,
 				import.meta.url
 			),
 			'utf-8'

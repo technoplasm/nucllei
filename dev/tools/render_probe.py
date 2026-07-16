@@ -9,7 +9,7 @@ requirements:
 import json
 from typing import List
 
-from open_webui.utils.tool_render import Table
+from nucllei.utils.tool_render import Table
 
 
 # =========================================================================

@@ -1,8 +1,8 @@
 [project]
-name = "open-webui"
-description = "Open WebUI"
+name = "nucllei"
+description = "Nucllei"
 authors = [
-    { name = "Timothy Jaeryang Baek", email = "tim@openwebui.com" }
+    { name = "Technoplasm, Inc." }
 ]
 license = { file = "LICENSE" }
 dependencies = [
@@ -164,8 +164,8 @@ dev = [
 # llens(#25): lint は「正しさ系のみ・green 維持」。整形は black が担う。
 # マイグレーション(peewee_migrate / alembic)は歴史的資産 — lint しない。
 extend-exclude = [
-    "backend/open_webui/internal/migrations",
-    "backend/open_webui/migrations",
+    "backend/nucllei/internal/migrations",
+    "backend/nucllei/migrations",
 ]
 
 [tool.ruff.lint]
@@ -174,36 +174,36 @@ select = ["E9", "F"]
 
 [tool.uv]
 # Treat this as a virtual project: `uv sync` installs dependencies into .venv
-# but does NOT build/install open-webui itself. This skips the hatch custom
+# but does NOT build/install nucllei itself. This skips the hatch custom
 # build hook (npm/pnpm frontend build) so backend-only sync stays fast.
 # Run the backend from the repo root with `uv run task dev`.
 package = false
 
 [tool.pytest.ini_options]
-# テストは `from test.util ...` / `from open_webui ...` の両方を import するため、
-# backend(open_webui パッケージ)と backend/open_webui(test パッケージ)を
+# テストは `from test.util ...` / `from nucllei ...` の両方を import するため、
+# backend(nucllei パッケージ)と backend/nucllei(test パッケージ)を
 # sys.path に載せる。リポジトリルートから `uv run pytest` で実行する。
-testpaths = ["backend/open_webui/test"]
-pythonpath = ["backend", "backend/open_webui"]
+testpaths = ["backend/nucllei/test"]
+pythonpath = ["backend", "backend/nucllei"]
 
 [tool.taskipy.tasks]
 # Backend dev server (hot reload) on :3000 — matches the docker single-origin
 # layout (the frontend is served same-origin and Vite proxies /api etc. here;
-# see vite.config.ts). `open_webui` lives under backend/, so we add it to the
+# see vite.config.ts). `nucllei` lives under backend/, so we add it to the
 # import path with --app-dir instead of cd-ing there. `--forwarded-allow-ips '*'`
 # trusts the local Vite proxy for X-Forwarded-* (correct redirect URLs).
-dev = "uvicorn open_webui.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
+dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
 # 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
 licenses = "python scripts/generate_licenses.py"
 
-# open-webui CLI(typer app: `open_webui:app`)への汎用エントリ。任意のサブコマンドを
+# nucllei CLI(typer app: `nucllei:app`)への汎用エントリ。任意のサブコマンドを
 # 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
-# typer app を直接呼ぶ。`open_webui` を import パスに載せるため PYTHONPATH=backend が
+# typer app を直接呼ぶ。`nucllei` を import パスに載せるため PYTHONPATH=backend が
 # 要る(pytest の pythonpath は taskipy には効かない)。
 #   uv run task cli --help
 #   uv run task cli create-admin --email a@llens.local --name A --password llens-dev
 #   uv run task cli generate-secret-key
-cli = "env PYTHONPATH=backend python -c 'from open_webui import app; app()'"
+cli = "env PYTHONPATH=backend python -c 'from nucllei import app; app()'"
 # 慣例の dev admin(ken@llens.local / llens-dev)を一発で作る cli の薄いエイリアス。
-create-admin = "env PYTHONPATH=backend python -c 'from open_webui import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
+create-admin = "env PYTHONPATH=backend python -c 'from nucllei import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
 

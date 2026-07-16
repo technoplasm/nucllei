@@ -342,7 +342,7 @@
 						</div>
 
 						<div class="mt-2 mb-1 text-xs text-content-subtle">
-							{$i18n.t(`Open WebUI uses faster-whisper internally.`)}
+							{$i18n.t(`Nucllei uses faster-whisper internally.`)}
 
 							<a
 								class=" hover:underline text-content"
@@ -487,7 +487,7 @@
 							</div>
 						</div>
 						<div class="mt-2 mb-1 text-xs text-content-subtle">
-							{$i18n.t(`Open WebUI uses SpeechT5 and CMU Arctic speaker embeddings.`)}
+							{$i18n.t(`Nucllei uses SpeechT5 and CMU Arctic speaker embeddings.`)}
 
 							To learn more about SpeechT5,
 

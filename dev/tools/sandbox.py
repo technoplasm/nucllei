@@ -3,7 +3,6 @@ title: Sandbox
 description: サーバーサイドの隔離環境 (nsjail) で Python / shell を実行する。
 author: Ken Enda
 version: 0.3.1
-required_open_webui_version: 0.6.5
 
 changelog:
   0.3.1: llens fork (v0.6.5 基点) への適合 (#18-3)。0.9 ベースとの API 差分を吸収:
@@ -38,15 +37,15 @@ import aiohttp
 from pydantic import BaseModel, Field
 
 # 型駆動レンダリング(#20): code 引数はハイライト付き、戻り値は pre-wrap の text 表示
-from open_webui.utils.tool_render import Code, Text
+from nucllei.utils.tool_render import Code, Text
 
 logger = logging.getLogger(__name__)
 
-# --- Open WebUI 内部 API（ランタイムで解決される） ---------------------------
+# --- Nucllei 内部 API（ランタイムで解決される） ---------------------------
 try:
-    from open_webui.models.chats import Chats
-    from open_webui.models.files import Files, FileForm
-    from open_webui.storage.provider import Storage
+    from nucllei.models.chats import Chats
+    from nucllei.models.files import Files, FileForm
+    from nucllei.storage.provider import Storage
 except Exception:  # ローカルでの静的解析用フォールバック
     Chats = None
     Files = None
@@ -488,7 +487,7 @@ class Tools:
             外れた添付も、この file_id 指定なら直接取得できる (添付一覧に無くてもよい)。
         """
         if Files is None:
-            return "ERROR: open_webui の内部 API を解決できません。"
+            return "ERROR: nucllei の内部 API を解決できません。"
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
 
@@ -580,7 +579,7 @@ class Tools:
         :param path: 対象ファイル (workspace 相対、例: inputs/converted.xlsx)
         """
         if Files is None:
-            return "ERROR: open_webui の内部 API を解決できません。"
+            return "ERROR: nucllei の内部 API を解決できません。"
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         try:

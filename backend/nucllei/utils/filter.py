@@ -1,0 +1,117 @@
+import asyncio
+import inspect
+import logging
+
+from nucllei.utils.plugin import load_function_module_by_id
+from nucllei.models.functions import Functions
+from nucllei.env import SRC_LOG_LEVELS
+
+log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
+
+
+def get_sorted_filter_ids(model: dict):
+    def get_priority(function_id):
+        function = Functions.get_function_by_id(function_id)
+        if function is not None:
+            valves = Functions.get_function_valves_by_id(function_id)
+            return valves.get("priority", 0) if valves else 0
+        return 0
+
+    # llens(#46): global/active 撤去 → filter はモデルの filterIds 割り当てのみで適用。
+    filter_ids = []
+    if "info" in model and "meta" in model["info"]:
+        filter_ids = list(set(model["info"]["meta"].get("filterIds", [])))
+
+    # 実在する filter type の function だけに絞る(削除済み ID を弾く)。
+    filter_function_ids = [
+        function.id for function in Functions.get_functions_by_type("filter")
+    ]
+    filter_ids = [fid for fid in filter_ids if fid in filter_function_ids]
+    filter_ids.sort(key=get_priority)
+    return filter_ids
+
+
+async def process_filter_functions(
+    request, filter_functions, filter_type, form_data, extra_params
+):
+    skip_files = None
+
+    for function in filter_functions:
+        filter = function
+        filter_id = function.id
+        if not filter:
+            continue
+
+        if filter_id in request.app.state.FUNCTIONS:
+            function_module = request.app.state.FUNCTIONS[filter_id]
+        else:
+            # llens(#28): 初回ロードは exec + DB 書き込みを伴うため to_thread でループ外へ
+            function_module, _, _ = await asyncio.to_thread(
+                load_function_module_by_id, filter_id
+            )
+            request.app.state.FUNCTIONS[filter_id] = function_module
+
+        # Prepare handler function
+        handler = getattr(function_module, filter_type, None)
+        if not handler:
+            continue
+
+        # Check if the function has a file_handler variable
+        if filter_type == "inlet" and hasattr(function_module, "file_handler"):
+            skip_files = function_module.file_handler
+
+        # Apply valves to the function
+        if hasattr(function_module, "valves") and hasattr(function_module, "Valves"):
+            valves = Functions.get_function_valves_by_id(filter_id)
+            function_module.valves = function_module.Valves(
+                **(valves if valves else {})
+            )
+
+        try:
+            # Prepare parameters
+            sig = inspect.signature(handler)
+
+            params = {"body": form_data}
+            if filter_type == "stream":
+                params = {"event": form_data}
+
+            params = params | {
+                k: v
+                for k, v in {
+                    **extra_params,
+                    "__id__": filter_id,
+                }.items()
+                if k in sig.parameters
+            }
+
+            # Handle user parameters
+            if "__user__" in sig.parameters:
+                if hasattr(function_module, "UserValves"):
+                    try:
+                        params["__user__"]["valves"] = function_module.UserValves(
+                            **Functions.get_user_valves_by_id_and_user_id(
+                                filter_id, params["__user__"]["id"]
+                            )
+                        )
+                    except Exception as e:
+                        log.exception(f"Failed to get user values: {e}")
+
+            # Execute handler
+            # llens(#28): sync handler はワーカースレッドで実行(sync tool と同じ扱い)。
+            # 遅い Filter がイベントループ(全ユーザーのストリーミング)を止めないように。
+            if inspect.iscoroutinefunction(handler):
+                form_data = await handler(**params)
+            else:
+                form_data = await asyncio.to_thread(handler, **params)
+
+        except Exception as e:
+            log.debug(f"Error in {filter_type} handler {filter_id}: {e}")
+            raise e
+
+    # Handle file cleanup for inlet
+    if skip_files and "files" in form_data.get("metadata", {}):
+        del form_data["files"]
+        del form_data["metadata"]["files"]
+
+    return form_data, {}

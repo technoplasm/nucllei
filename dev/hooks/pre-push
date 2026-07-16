@@ -8,7 +8,7 @@
 # CI 側の真実源:
 #   .github/workflows/format-backend.yaml        → black . && git diff --exit-code
 #   .github/workflows/format-build-frontend.yaml → pnpm format && git diff --exit-code
-#   .github/workflows/lint-backend.yaml          → ruff check backend/open_webui(select = E9,F)
+#   .github/workflows/lint-backend.yaml          → ruff check backend/nucllei(select = E9,F)
 
 set -u
 
@@ -52,7 +52,7 @@ if [ ${#py_files[@]} -gt 0 ]; then
     if [ -n "$BLACK" ]; then
         if ! "$BLACK" --check --quiet "${py_files[@]}" 2>/dev/null; then
             echo "✗ black 未整形の Python ファイルがあります。整形してコミットし直してください:" >&2
-            echo "    cd backend && ../.venv/bin/black open_webui/" >&2
+            echo "    cd backend && ../.venv/bin/black nucllei/" >&2
             fail=1
         fi
     else

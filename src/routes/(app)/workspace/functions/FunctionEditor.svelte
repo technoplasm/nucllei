@@ -133,7 +133,7 @@ class Attachment:
  # RETURN it. The system stores it as the file content (status=success).
         # To fail, raise with a message — the system records it as the content
         # and marks the file extraction=failed (shown to the model as-is).
-        from open_webui.retrieval.extract import extract_file_text
+        from nucllei.retrieval.extract import extract_file_text
 
         return extract_file_text(__request__, file)
 `;

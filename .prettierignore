@@ -321,7 +321,7 @@ _memos/
 # 現行プロジェクトへの symlink(別リポ)。pnpm format が symlink 先まで整形するのを防ぐ
 _links/
 # vendored な静的アセット(swagger-ui 等)は上流配布物のまま保つ
-backend/open_webui/static/
+backend/nucllei/static/
 static/pyodide/
 # モデル出力の実キャプチャ fixture はバイト列を保存したものなので整形しない
-backend/open_webui/test/fixtures/
+backend/nucllei/test/fixtures/

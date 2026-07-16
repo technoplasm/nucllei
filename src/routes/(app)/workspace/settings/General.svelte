@@ -192,16 +192,6 @@
 									placeholder={`e.g.) /api/v1/chats, /api/v1/models`}
 									bind:value={adminConfig.API_KEY_ALLOWED_ENDPOINTS}
 								/>
-
-								<div class="mt-2 text-xs text-content-subtle">
-									<a
-										href="https://docs.openwebui.com/getting-started/api-endpoints"
-										target="_blank"
-										class=" text-content font-medium underline"
-									>
-										{$i18n.t('To learn more about available endpoints, visit our documentation.')}
-									</a>
-								</div>
 							</div>
 						{/if}
 					{/if}

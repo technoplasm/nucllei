@@ -158,7 +158,7 @@ ${SAMPLE_TABLE}
 ${SAMPLE_CODE}
 `;
 
-// backend/open_webui/test/fixtures/model_frames/reasoning.json の content(実キャプチャ)
+// backend/nucllei/test/fixtures/model_frames/reasoning.json の content(実キャプチャ)
 const FIXTURE_REASONING_CONTENT = `1. 農夫、山羊を運ぶ
 2. 農夫、戻る
 3. 農夫、狼を運ぶ
@@ -169,7 +169,7 @@ const FIXTURE_REASONING_CONTENT = `1. 農夫、山羊を運ぶ
 
 （狼とキャベツの順序を入れ替えても可）`;
 
-// backend/open_webui/test/fixtures/model_frames/reasoning.json の reasoning_content 抜粋
+// backend/nucllei/test/fixtures/model_frames/reasoning.json の reasoning_content 抜粋
 const FIXTURE_REASONING_THINK = `ユーザーは古典的な「農夫と狼と山羊とキャベツ」の川渡りパズルの最短手順を求めています。簡潔に手順だけを答える必要があります。
 
 このパズルの制約：

@@ -24,7 +24,7 @@ class Filter:
     async def outlet(self, body, __metadata__=None, __event_emitter__=None):
         # outlet はターン完了後に呼ばれる = このターンの usage は #57 で永続化済み。
         # OWUI が記録した値を読むだけ(捕捉も累積も context_size valve も不要)。
-        from open_webui.models.chats import Chats
+        from nucllei.models.chats import Chats
 
         chat_id = (__metadata__ or {}).get("chat_id")
         if not (chat_id and __event_emitter__):

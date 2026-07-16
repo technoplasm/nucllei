@@ -1,0 +1,1159 @@
+import asyncio
+import json
+import logging
+import mimetypes
+import os
+import sys
+import time
+
+from contextlib import asynccontextmanager
+from urllib.parse import urlencode, parse_qs, urlparse
+from pydantic import BaseModel
+from sqlalchemy import text
+
+import requests
+
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    status,
+    applications,
+)
+
+from fastapi.openapi.docs import get_swagger_ui_html
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
+
+
+from nucllei.builtin_tools import sync_builtin_tools
+from nucllei.utils import logger
+from nucllei.utils.audit import AuditLevel, AuditLoggingMiddleware
+from nucllei.utils.logger import start_logger
+from nucllei.socket.main import (
+    app as socket_app,
+    periodic_usage_pool_cleanup,
+)
+from nucllei.routers import (
+    audio,
+    images,
+    ollama,
+    openai,
+    pipelines,
+    tasks,
+    auths,
+    chats,
+    folders,
+    configs,
+    groups,
+    files,
+    functions,
+    models,
+    skills,
+    tools,
+    users,
+    utils,
+)
+
+
+from nucllei.internal.db import Session, engine
+
+from nucllei.models.models import Models
+from nucllei.models.users import Users
+from nucllei.models.chats import Chats
+
+from nucllei.config import (
+    # Ollama
+    ENABLE_OLLAMA_API,
+    OLLAMA_BASE_URLS,
+    OLLAMA_API_CONFIGS,
+    # OpenAI
+    ENABLE_OPENAI_API,
+    OPENAI_API_BASE_URLS,
+    OPENAI_API_KEYS,
+    OPENAI_API_CONFIGS,
+    # Tool Server Configs
+    TOOL_SERVER_CONNECTIONS,
+    # Image
+    AUTOMATIC1111_API_AUTH,
+    AUTOMATIC1111_BASE_URL,
+    AUTOMATIC1111_CFG_SCALE,
+    AUTOMATIC1111_SAMPLER,
+    AUTOMATIC1111_SCHEDULER,
+    COMFYUI_BASE_URL,
+    COMFYUI_API_KEY,
+    COMFYUI_WORKFLOW,
+    COMFYUI_WORKFLOW_NODES,
+    ENABLE_IMAGE_GENERATION,
+    ENABLE_IMAGE_PROMPT_GENERATION,
+    IMAGE_GENERATION_ENGINE,
+    IMAGE_GENERATION_MODEL,
+    IMAGE_SIZE,
+    IMAGE_STEPS,
+    IMAGES_OPENAI_API_BASE_URL,
+    IMAGES_OPENAI_API_KEY,
+    IMAGES_GEMINI_API_BASE_URL,
+    IMAGES_GEMINI_API_KEY,
+    # Audio
+    AUDIO_STT_ENGINE,
+    AUDIO_STT_MODEL,
+    AUDIO_STT_OPENAI_API_BASE_URL,
+    AUDIO_STT_OPENAI_API_KEY,
+    AUDIO_STT_AZURE_API_KEY,
+    AUDIO_STT_AZURE_REGION,
+    AUDIO_STT_AZURE_LOCALES,
+    AUDIO_TTS_API_KEY,
+    AUDIO_TTS_ENGINE,
+    AUDIO_TTS_MODEL,
+    AUDIO_TTS_OPENAI_API_BASE_URL,
+    AUDIO_TTS_OPENAI_API_KEY,
+    AUDIO_TTS_SPLIT_ON,
+    AUDIO_TTS_VOICE,
+    AUDIO_TTS_AZURE_SPEECH_REGION,
+    AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
+    ENABLE_AUDIO_STT,
+    ENABLE_AUDIO_TTS,
+    WHISPER_MODEL,
+    WHISPER_VAD_FILTER,
+    WHISPER_LANGUAGE,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_CPU_THREADS,
+    WHISPER_NUM_WORKERS,
+    DEEPGRAM_API_KEY,
+    ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_MAX_SIZE,
+    ATTACHMENT_ALLOWED_EXTENSIONS,
+    ATTACHMENT_FUNCTION_ID,
+    TIKTOKEN_ENCODING_NAME,
+    # Retrieval (Web Search)
+    WEBUI_AUTH,
+    WEBUI_BANNERS,
+    WEBHOOK_URL,
+    ADMIN_EMAIL,
+    SHOW_ADMIN_DETAILS,
+    JWT_EXPIRES_IN,
+    ENABLE_SIGNUP,
+    ENABLE_LOGIN_FORM,
+    ENABLE_API_KEY,
+    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
+    API_KEY_ALLOWED_ENDPOINTS,
+    ENABLE_USER_WEBHOOKS,
+    USER_PERMISSIONS,
+    ADDITIONAL_USER_META,
+    DEFAULT_USER_ROLE,
+    DEFAULT_PROMPT_SUGGESTIONS,
+    DEFAULT_MODELS,
+    MODEL_ORDER_LIST,
+    # WebUI (OAuth)
+    ENABLE_OAUTH_ROLE_MANAGEMENT,
+    OAUTH_ROLES_CLAIM,
+    OAUTH_EMAIL_CLAIM,
+    OAUTH_PICTURE_CLAIM,
+    OAUTH_USERNAME_CLAIM,
+    OAUTH_ALLOWED_ROLES,
+    OAUTH_ADMIN_ROLES,
+    # WebUI (LDAP)
+    ENABLE_LDAP,
+    LDAP_SERVER_LABEL,
+    LDAP_SERVER_HOST,
+    LDAP_SERVER_PORT,
+    LDAP_ATTRIBUTE_FOR_MAIL,
+    LDAP_ATTRIBUTE_FOR_USERNAME,
+    LDAP_SEARCH_FILTERS,
+    LDAP_SEARCH_BASE,
+    LDAP_APP_DN,
+    LDAP_APP_PASSWORD,
+    LDAP_USE_TLS,
+    LDAP_CA_CERT_FILE,
+    LDAP_CIPHERS,
+    # Misc
+    ENV,
+    CACHE_DIR,
+    STATIC_DIR,
+    FRONTEND_BUILD_DIR,
+    CORS_ALLOW_ORIGIN,
+    DEFAULT_LOCALE,
+    OAUTH_PROVIDERS,
+    WEBUI_URL,
+    # Admin
+    ENABLE_ADMIN_CHAT_ACCESS,
+    ENABLE_ADMIN_EXPORT,
+    # Tasks
+    TASK_MODEL,
+    TASK_MODEL_EXTERNAL,
+    ENABLE_TITLE_GENERATION,
+    TITLE_GENERATION_PROMPT_TEMPLATE,
+    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
+    AppConfig,
+    reset_config,
+)
+from nucllei.env import (
+    AUDIT_EXCLUDED_PATHS,
+    AUDIT_LOG_LEVEL,
+    REDIS_URL,
+    REDIS_SENTINEL_HOSTS,
+    REDIS_SENTINEL_PORT,
+    GLOBAL_LOG_LEVEL,
+    MAX_BODY_LOG_SIZE,
+    SAFE_MODE,
+    SRC_LOG_LEVELS,
+    VERSION,
+    WEBUI_NAME,
+    WEBUI_COPYRIGHT,
+    WEBUI_VERSION,
+    WEBUI_SECRET_KEY,
+    WEBUI_SESSION_COOKIE_SAME_SITE,
+    WEBUI_SESSION_COOKIE_SECURE,
+    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
+    WEBUI_AUTH_TRUSTED_NAME_HEADER,
+    ENABLE_WEBSOCKET_SUPPORT,
+    BYPASS_MODEL_ACCESS_CONTROL,
+    RESET_CONFIG_ON_START,
+    ENABLE_OTEL,
+    EXTERNAL_PWA_MANIFEST_URL,
+)
+
+
+from nucllei.utils.models import (
+    get_all_models,
+    get_all_base_models,
+    check_model_access,
+)
+from nucllei.utils.chat import (
+    generate_chat_completion as chat_completion_handler,
+    chat_completed as chat_completed_handler,
+    chat_action as chat_action_handler,
+)
+from nucllei.utils.middleware import process_chat_payload, process_chat_response
+from nucllei.utils.access_control import has_access
+
+from nucllei.utils.auth import (
+    get_http_authorization_cred,
+    decode_token,
+    get_admin_user,
+    get_verified_user,
+)
+from nucllei.utils.oauth import OAuthManager
+from nucllei.utils.security_headers import SecurityHeadersMiddleware
+
+from nucllei.tasks import (
+    list_task_ids_by_chat_id,
+    stop_task,
+    list_tasks,
+)  # Import from tasks.py
+
+from nucllei.utils.redis import get_sentinels_from_env
+
+
+if SAFE_MODE:
+    # llens(#46): function の is_active 撤去に伴い SAFE_MODE の一括無効化は廃止
+    # (function は割り当てられたモデルでのみ動く。無効化したいなら割り当て解除)。
+    print("SAFE MODE ENABLED")
+
+logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
+log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
+
+
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except (HTTPException, StarletteHTTPException) as ex:
+            if ex.status_code == 404:
+                if path.endswith(".js"):
+                    # Return 404 for javascript files
+                    raise ex
+                else:
+                    return await super().get_response("index.html", scope)
+            else:
+                raise ex
+
+
+class CacheStaticFiles(StaticFiles):
+    # llens(GHSA-m8f9-9whg-f4xr): /cache は無認証で公開配信される。万一アクティブ型の
+    # ファイル(HTML/SVG/JS)が置かれてもブラウザで実行されないよう、危険な content-type
+    # は添付ダウンロード扱いにし、MIME スニッフィングも無効化する。音声・画像等の
+    # メディアは inline のまま(Content-Disposition を付けない)。
+    ACTIVE_TYPES = ("text/html", "application/xhtml+xml", "image/svg+xml")
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        content_type = (
+            response.headers.get("content-type", "").split(";")[0].strip().lower()
+        )
+        if content_type in self.ACTIVE_TYPES or "javascript" in content_type:
+            response.headers["Content-Disposition"] = "attachment"
+        return response
+
+
+print(
+    rf"""
+███╗   ██╗██╗   ██╗ ██████╗██╗     ██╗     ███████╗██╗
+████╗  ██║██║   ██║██╔════╝██║     ██║     ██╔════╝██║
+██╔██╗ ██║██║   ██║██║     ██║     ██║     █████╗  ██║
+██║╚██╗██║██║   ██║██║     ██║     ██║     ██╔══╝  ██║
+██║ ╚████║╚██████╔╝╚██████╗███████╗███████╗███████╗██║
+╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚══════╝╚══════╝╚═╝
+
+
+Nucllei v{VERSION}
+Forked from Open WebUI v0.6.5 (https://github.com/open-webui/open-webui)
+"""
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_logger()
+    if RESET_CONFIG_ON_START:
+        reset_config()
+
+    # llens(#28): LICENSE_KEY / get_license_data(api.openwebui.com への起動時照会)は
+    # air-gapped 前提に反するため撤去
+
+    # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
+    await asyncio.to_thread(sync_builtin_tools)
+
+    asyncio.create_task(periodic_usage_pool_cleanup())
+    yield
+
+
+app = FastAPI(
+    title="Nucllei",
+    docs_url="/docs" if ENV == "dev" else None,
+    openapi_url="/openapi.json" if ENV == "dev" else None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
+
+oauth_manager = OAuthManager(app)
+
+app.state.config = AppConfig(
+    redis_url=REDIS_URL,
+    redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
+)
+
+app.state.WEBUI_NAME = WEBUI_NAME
+
+
+########################################
+#
+# OPENTELEMETRY
+#
+########################################
+
+if ENABLE_OTEL:
+    from nucllei.utils.telemetry.setup import setup as setup_opentelemetry
+
+    setup_opentelemetry(app=app, db_engine=engine)
+
+
+########################################
+#
+# OLLAMA
+#
+########################################
+
+
+app.state.config.ENABLE_OLLAMA_API = ENABLE_OLLAMA_API
+app.state.config.OLLAMA_BASE_URLS = OLLAMA_BASE_URLS
+app.state.config.OLLAMA_API_CONFIGS = OLLAMA_API_CONFIGS
+
+app.state.OLLAMA_MODELS = {}
+
+########################################
+#
+# OPENAI
+#
+########################################
+
+app.state.config.ENABLE_OPENAI_API = ENABLE_OPENAI_API
+app.state.config.OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
+app.state.config.OPENAI_API_KEYS = OPENAI_API_KEYS
+app.state.config.OPENAI_API_CONFIGS = OPENAI_API_CONFIGS
+
+app.state.OPENAI_MODELS = {}
+
+########################################
+#
+# TOOL SERVERS
+#
+########################################
+
+app.state.config.TOOL_SERVER_CONNECTIONS = TOOL_SERVER_CONNECTIONS
+app.state.TOOL_SERVERS = []
+
+########################################
+#
+# WEBUI
+#
+########################################
+
+app.state.config.WEBUI_URL = WEBUI_URL
+app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
+app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
+
+app.state.config.ENABLE_API_KEY = ENABLE_API_KEY
+app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
+    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS
+)
+app.state.config.API_KEY_ALLOWED_ENDPOINTS = API_KEY_ALLOWED_ENDPOINTS
+
+app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
+
+app.state.config.SHOW_ADMIN_DETAILS = SHOW_ADMIN_DETAILS
+app.state.config.ADMIN_EMAIL = ADMIN_EMAIL
+
+
+app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
+app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
+app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
+
+app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
+app.state.config.ADDITIONAL_USER_META = ADDITIONAL_USER_META
+app.state.config.WEBHOOK_URL = WEBHOOK_URL
+app.state.config.BANNERS = WEBUI_BANNERS
+app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
+
+
+app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
+
+app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
+app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
+app.state.config.OAUTH_EMAIL_CLAIM = OAUTH_EMAIL_CLAIM
+
+app.state.config.ENABLE_OAUTH_ROLE_MANAGEMENT = ENABLE_OAUTH_ROLE_MANAGEMENT
+app.state.config.OAUTH_ROLES_CLAIM = OAUTH_ROLES_CLAIM
+app.state.config.OAUTH_ALLOWED_ROLES = OAUTH_ALLOWED_ROLES
+app.state.config.OAUTH_ADMIN_ROLES = OAUTH_ADMIN_ROLES
+
+app.state.config.ENABLE_LDAP = ENABLE_LDAP
+app.state.config.LDAP_SERVER_LABEL = LDAP_SERVER_LABEL
+app.state.config.LDAP_SERVER_HOST = LDAP_SERVER_HOST
+app.state.config.LDAP_SERVER_PORT = LDAP_SERVER_PORT
+app.state.config.LDAP_ATTRIBUTE_FOR_MAIL = LDAP_ATTRIBUTE_FOR_MAIL
+app.state.config.LDAP_ATTRIBUTE_FOR_USERNAME = LDAP_ATTRIBUTE_FOR_USERNAME
+app.state.config.LDAP_APP_DN = LDAP_APP_DN
+app.state.config.LDAP_APP_PASSWORD = LDAP_APP_PASSWORD
+app.state.config.LDAP_SEARCH_BASE = LDAP_SEARCH_BASE
+app.state.config.LDAP_SEARCH_FILTERS = LDAP_SEARCH_FILTERS
+app.state.config.LDAP_USE_TLS = LDAP_USE_TLS
+app.state.config.LDAP_CA_CERT_FILE = LDAP_CA_CERT_FILE
+app.state.config.LDAP_CIPHERS = LDAP_CIPHERS
+
+
+app.state.AUTH_TRUSTED_EMAIL_HEADER = WEBUI_AUTH_TRUSTED_EMAIL_HEADER
+app.state.AUTH_TRUSTED_NAME_HEADER = WEBUI_AUTH_TRUSTED_NAME_HEADER
+app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
+
+app.state.TOOLS = {}
+app.state.FUNCTIONS = {}
+
+########################################
+#
+# RETRIEVAL
+#
+########################################
+
+
+app.state.config.ATTACHMENT_MAX_SIZE = ATTACHMENT_MAX_SIZE
+app.state.config.ATTACHMENT_MAX_COUNT = ATTACHMENT_MAX_COUNT
+app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
+app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
+
+
+app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
+
+
+########################################
+#
+# IMAGES
+#
+########################################
+
+app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
+app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
+app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
+
+app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
+app.state.config.IMAGES_OPENAI_API_KEY = IMAGES_OPENAI_API_KEY
+
+app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
+app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
+
+app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
+
+app.state.config.AUTOMATIC1111_BASE_URL = AUTOMATIC1111_BASE_URL
+app.state.config.AUTOMATIC1111_API_AUTH = AUTOMATIC1111_API_AUTH
+app.state.config.AUTOMATIC1111_CFG_SCALE = AUTOMATIC1111_CFG_SCALE
+app.state.config.AUTOMATIC1111_SAMPLER = AUTOMATIC1111_SAMPLER
+app.state.config.AUTOMATIC1111_SCHEDULER = AUTOMATIC1111_SCHEDULER
+app.state.config.COMFYUI_BASE_URL = COMFYUI_BASE_URL
+app.state.config.COMFYUI_API_KEY = COMFYUI_API_KEY
+app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
+app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
+
+app.state.config.IMAGE_SIZE = IMAGE_SIZE
+app.state.config.IMAGE_STEPS = IMAGE_STEPS
+
+
+########################################
+#
+# AUDIO
+#
+########################################
+
+app.state.config.ENABLE_AUDIO_STT = ENABLE_AUDIO_STT
+app.state.config.ENABLE_AUDIO_TTS = ENABLE_AUDIO_TTS
+
+app.state.config.STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
+app.state.config.STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
+app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
+app.state.config.STT_MODEL = AUDIO_STT_MODEL
+
+app.state.config.WHISPER_MODEL = WHISPER_MODEL
+app.state.config.WHISPER_VAD_FILTER = WHISPER_VAD_FILTER
+app.state.config.WHISPER_LANGUAGE = WHISPER_LANGUAGE
+app.state.config.WHISPER_COMPUTE_TYPE = WHISPER_COMPUTE_TYPE
+app.state.config.WHISPER_CPU_THREADS = WHISPER_CPU_THREADS
+app.state.config.WHISPER_NUM_WORKERS = WHISPER_NUM_WORKERS
+app.state.config.DEEPGRAM_API_KEY = DEEPGRAM_API_KEY
+
+app.state.config.AUDIO_STT_AZURE_API_KEY = AUDIO_STT_AZURE_API_KEY
+app.state.config.AUDIO_STT_AZURE_REGION = AUDIO_STT_AZURE_REGION
+app.state.config.AUDIO_STT_AZURE_LOCALES = AUDIO_STT_AZURE_LOCALES
+
+app.state.config.TTS_OPENAI_API_BASE_URL = AUDIO_TTS_OPENAI_API_BASE_URL
+app.state.config.TTS_OPENAI_API_KEY = AUDIO_TTS_OPENAI_API_KEY
+app.state.config.TTS_ENGINE = AUDIO_TTS_ENGINE
+app.state.config.TTS_MODEL = AUDIO_TTS_MODEL
+app.state.config.TTS_VOICE = AUDIO_TTS_VOICE
+app.state.config.TTS_API_KEY = AUDIO_TTS_API_KEY
+app.state.config.TTS_SPLIT_ON = AUDIO_TTS_SPLIT_ON
+
+
+app.state.config.TTS_AZURE_SPEECH_REGION = AUDIO_TTS_AZURE_SPEECH_REGION
+app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT = AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT
+
+
+app.state.faster_whisper_model = None
+app.state.speech_synthesiser = None
+app.state.speech_speaker_embeddings_dataset = None
+
+
+########################################
+#
+# TASKS
+#
+########################################
+
+
+app.state.config.TASK_MODEL = TASK_MODEL
+app.state.config.TASK_MODEL_EXTERNAL = TASK_MODEL_EXTERNAL
+
+
+app.state.config.ENABLE_TITLE_GENERATION = ENABLE_TITLE_GENERATION
+
+
+app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE = TITLE_GENERATION_PROMPT_TEMPLATE
+app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = (
+    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
+)
+
+
+########################################
+#
+# WEBUI
+#
+########################################
+
+app.state.MODELS = {}
+
+
+class RedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Check if the request is a GET request
+        if request.method == "GET":
+            path = request.url.path
+            query_params = dict(parse_qs(urlparse(str(request.url)).query))
+
+            # Check for the specific watch path and the presence of 'v' parameter
+            if path.endswith("/watch") and "v" in query_params:
+                video_id = query_params["v"][0]  # Extract the first 'v' parameter
+                encoded_video_id = urlencode({"youtube": video_id})
+                redirect_url = f"/?{encoded_video_id}"
+                return RedirectResponse(url=redirect_url)
+
+        # Proceed with the normal flow of other requests
+        response = await call_next(request)
+        return response
+
+
+# Add the middleware to the app
+app.add_middleware(RedirectMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+@app.middleware("http")
+async def commit_session_after_request(request: Request, call_next):
+    response = await call_next(request)
+    # log.debug("Commit session after request")
+    Session.commit()
+    return response
+
+
+@app.middleware("http")
+async def check_url(request: Request, call_next):
+    start_time = int(time.time())
+    # llens(#70 B1): セッションは httpOnly cookie に一本化 — Authorization ヘッダ不在なら
+    # cookie の token を採用する(tool server の session 転送など state.token 消費者のため。
+    # API key / 外部クライアントは従来どおりヘッダ)。
+    request.state.token = get_http_authorization_cred(
+        request.headers.get("Authorization")
+    )
+    if request.state.token is None and "token" in request.cookies:
+        request.state.token = get_http_authorization_cred(
+            f"Bearer {request.cookies.get('token')}"
+        )
+
+    request.state.enable_api_key = app.state.config.ENABLE_API_KEY
+    response = await call_next(request)
+    process_time = int(time.time()) - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+
+@app.middleware("http")
+async def inspect_websocket(request: Request, call_next):
+    if (
+        "/ws/socket.io" in request.url.path
+        and request.query_params.get("transport") == "websocket"
+    ):
+        upgrade = (request.headers.get("Upgrade") or "").lower()
+        connection = (request.headers.get("Connection") or "").lower().split(",")
+        # Check that there's the correct headers for an upgrade, else reject the connection
+        # This is to work around this upstream issue: https://github.com/miguelgrinberg/python-engineio/issues/367
+        if upgrade != "websocket" or "upgrade" not in connection:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Invalid WebSocket upgrade request"},
+            )
+    return await call_next(request)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOW_ORIGIN,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+app.mount("/ws", socket_app)
+
+
+app.include_router(ollama.router, prefix="/ollama", tags=["ollama"])
+app.include_router(openai.router, prefix="/openai", tags=["openai"])
+
+
+app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"])
+app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
+app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
+
+app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
+
+app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+
+app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+
+
+app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
+
+app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
+app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
+app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
+
+app.include_router(folders.router, prefix="/api/v1/folders", tags=["folders"])
+app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
+app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
+app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
+app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+
+
+try:
+    audit_level = AuditLevel(AUDIT_LOG_LEVEL)
+except ValueError as e:
+    logger.error(f"Invalid audit level: {AUDIT_LOG_LEVEL}. Error: {e}")
+    audit_level = AuditLevel.NONE
+
+if audit_level != AuditLevel.NONE:
+    app.add_middleware(
+        AuditLoggingMiddleware,
+        audit_level=audit_level,
+        excluded_paths=AUDIT_EXCLUDED_PATHS,
+        max_body_size=MAX_BODY_LOG_SIZE,
+    )
+##################################
+#
+# Chat Endpoints
+#
+##################################
+
+
+@app.get("/api/models")
+async def get_models(request: Request, user=Depends(get_verified_user)):
+    def get_filtered_models(models, user):
+        filtered_models = []
+        for model in models:
+            # llens(#48): arena モデルは撲滅済み(仮想 arena モデルの分岐を撤去)。
+            model_info = Models.get_model_by_id(model["id"])
+            if model_info:
+                if user.id == model_info.user_id or has_access(
+                    user.id, type="read", access_control=model_info.access_control
+                ):
+                    filtered_models.append(model)
+
+        return filtered_models
+
+    all_models = await get_all_models(request, user=user)
+
+    models = []
+    for model in all_models:
+        # Filter out filter pipelines
+        if "pipeline" in model and model["pipeline"].get("type", None) == "filter":
+            continue
+
+        # llens(GHSA-9vvh UX 対応): workspace(Models テーブル)行を持たない
+        # 生モデル(接続由来のベースモデル)は、チャットのモデルピッカーから
+        # 全員(admin 含む)に対して隠す。preset や、admin が直接メタデータを
+        # 編集して Models 行を作ったベースモデルのみ残す。ベースモデル選択・
+        # admin のモデル管理は /api/models/base を使うためここでは隠してよい。
+        # 行を持たない arena 等の仮想モデルもここで併せて除外される。
+        if not Models.get_model_by_id(model["id"]):
+            continue
+
+        models.append(model)
+
+    model_order_list = request.app.state.config.MODEL_ORDER_LIST
+    if model_order_list:
+        model_order_dict = {model_id: i for i, model_id in enumerate(model_order_list)}
+        # Sort models by order list priority, with fallback for those not in the list
+        models.sort(
+            key=lambda x: (model_order_dict.get(x["id"], float("inf")), x["name"])
+        )
+
+    # Filter out models that the user does not have access to
+    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
+        models = get_filtered_models(models, user)
+
+    log.debug(
+        f"/api/models returned filtered models accessible to the user: {json.dumps([model['id'] for model in models])}"
+    )
+    return {"data": models}
+
+
+@app.get("/api/models/base")
+async def get_base_models(request: Request, user=Depends(get_admin_user)):
+    models = await get_all_base_models(request, user=user)
+    return {"data": models}
+
+
+@app.post("/api/chat/completions")
+async def chat_completion(
+    request: Request,
+    form_data: dict,
+    user=Depends(get_verified_user),
+):
+    if not request.app.state.MODELS:
+        await get_all_models(request, user=user)
+
+    form_data.pop("model_item", None)
+    tasks = form_data.pop("background_tasks", None)
+
+    metadata = {}
+
+    # llens(GHSA-gfm2-xm6c-37qc / CVE-2026-45349): chat_id の所有者を検証する。
+    # 既存チャットが要求ユーザーの所有でなければ拒否し、他人のチャットへの
+    # 読み書き(クロスユーザー継続)を防ぐ。try の外で行うことで、下の except が
+    # この 403 を被害者チャットへ書き込む(かつ 400 にラップする)のを避ける。
+    _chat_id = form_data.get("chat_id")
+    if _chat_id:
+        _existing_chat = Chats.get_chat_by_id(_chat_id)
+        if _existing_chat is not None and _existing_chat.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this chat.",
+            )
+
+    try:
+        model_id = form_data.get("model", None)
+        if model_id not in request.app.state.MODELS:
+            raise Exception("Model not found")
+
+        model = request.app.state.MODELS[model_id]
+
+        # Check if user has access to the model
+        if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
+            check_model_access(user, model)
+
+        metadata = {
+            "user_id": user.id,
+            "chat_id": form_data.pop("chat_id", None),
+            "message_id": form_data.pop("id", None),
+            "session_id": form_data.pop("session_id", None),
+            "files": form_data.get("files", None),
+            "features": form_data.get("features", None),
+            "variables": form_data.get("variables", None),
+            "model": model,
+            # llens: native function calling のみサポート(issue #18)。
+            # params.function_calling は参照しない(常に native 経路)。
+        }
+
+        request.state.metadata = metadata
+        form_data["metadata"] = metadata
+
+        form_data, metadata, events = await process_chat_payload(
+            request, form_data, user, metadata, model
+        )
+
+    except Exception as e:
+        log.debug(f"Error processing chat payload: {e}")
+        if metadata.get("chat_id") and metadata.get("message_id"):
+            # Update the chat message with the error
+            Chats.upsert_message_to_chat_by_id_and_message_id(
+                metadata["chat_id"],
+                metadata["message_id"],
+                {
+                    "error": {"content": str(e)},
+                },
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    try:
+        response = await chat_completion_handler(request, form_data, user)
+
+        return await process_chat_response(
+            request, response, form_data, user, metadata, model, events, tasks
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+# Alias for chat_completion (Legacy)
+generate_chat_completions = chat_completion
+generate_chat_completion = chat_completion
+
+
+@app.post("/api/chat/completed")
+async def chat_completed(
+    request: Request, form_data: dict, user=Depends(get_verified_user)
+):
+    try:
+        form_data.pop("model_item", None)
+
+        return await chat_completed_handler(request, form_data, user)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@app.post("/api/chat/actions/{action_id}")
+async def chat_action(
+    request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)
+):
+    try:
+        form_data.pop("model_item", None)
+
+        return await chat_action_handler(request, action_id, form_data, user)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@app.post("/api/tasks/stop/{task_id}")
+async def stop_task_endpoint(task_id: str, user=Depends(get_verified_user)):
+    try:
+        result = await stop_task(task_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@app.get("/api/tasks")
+async def list_tasks_endpoint(user=Depends(get_verified_user)):
+    return {"tasks": list_tasks()}
+
+
+@app.get("/api/tasks/chat/{chat_id}")
+async def list_tasks_by_chat_id_endpoint(chat_id: str, user=Depends(get_verified_user)):
+    chat = Chats.get_chat_by_id(chat_id)
+    if chat is None or chat.user_id != user.id:
+        return {"task_ids": []}
+
+    task_ids = list_task_ids_by_chat_id(chat_id)
+    return {"task_ids": task_ids}
+
+
+##################################
+#
+# Config Endpoints
+#
+##################################
+
+
+@app.get("/api/config")
+async def get_app_config(request: Request):
+    user = None
+    if "token" in request.cookies:
+        token = request.cookies.get("token")
+        try:
+            data = decode_token(token)
+        except Exception as e:
+            log.debug(e)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+        if data is not None and "id" in data:
+            user = Users.get_user_by_id(data["id"])
+
+    user_count = Users.get_num_users()
+    onboarding = False
+
+    if user is None:
+        onboarding = user_count == 0
+
+    return {
+        **({"onboarding": True} if onboarding else {}),
+        "status": True,
+        "name": app.state.WEBUI_NAME,
+        # 配備層(WEBUI_*)— version キーは本体(Nucllei)なので別名で返す
+        "webui_version": WEBUI_VERSION,
+        "copyright": WEBUI_COPYRIGHT,
+        "version": VERSION,
+        "default_locale": str(DEFAULT_LOCALE),
+        "oauth": {
+            "providers": {
+                name: config.get("name", name)
+                for name, config in OAUTH_PROVIDERS.items()
+            }
+        },
+        "features": {
+            "auth": WEBUI_AUTH,
+            "auth_trusted_header": bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
+            "enable_ldap": app.state.config.ENABLE_LDAP,
+            "enable_api_key": app.state.config.ENABLE_API_KEY,
+            "enable_signup": app.state.config.ENABLE_SIGNUP,
+            "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
+            "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
+            **(
+                {
+                    # llens(#52/#67/#51): built-in web 検索・retrieval router・WEB_SEARCH_*
+                    # config・retrieval/web providers はすべて撤去済み。検索は案件層(prism)の
+                    # tool が外部検索システム(SearXNG 等)を直接叩く(docling と同じ線引き)。
+                    # llens(#23): code_interpreter(タグ検出実行)も機能ごと撤去。
+                    "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
+                    "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
+                    "enable_admin_export": ENABLE_ADMIN_EXPORT,
+                    "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
+                }
+                if user is not None
+                else {}
+            ),
+        },
+        **(
+            {
+                "default_models": app.state.config.DEFAULT_MODELS,
+                "default_prompt_suggestions": app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
+                "audio": {
+                    "tts": {
+                        # llens(#53 フォロー): enable=False で FE がアイコンごと非表示
+                        "enable": app.state.config.ENABLE_AUDIO_TTS,
+                        "engine": app.state.config.TTS_ENGINE,
+                        "voice": app.state.config.TTS_VOICE,
+                        "split_on": app.state.config.TTS_SPLIT_ON,
+                    },
+                    "stt": {
+                        "enable": app.state.config.ENABLE_AUDIO_STT,
+                        "engine": app.state.config.STT_ENGINE,
+                    },
+                },
+                "file": {
+                    # wire は互換のため `file` キー維持(フロント enforcement)。値は attachment 設定。
+                    "max_size": app.state.config.ATTACHMENT_MAX_SIZE,
+                    "max_count": app.state.config.ATTACHMENT_MAX_COUNT,
+                    "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
+                },
+                "permissions": {**app.state.config.USER_PERMISSIONS},
+            }
+            if user is not None
+            else {}
+        ),
+    }
+
+
+class UrlForm(BaseModel):
+    url: str
+
+
+@app.get("/api/webhook")
+async def get_webhook_url(user=Depends(get_admin_user)):
+    return {
+        "url": app.state.config.WEBHOOK_URL,
+    }
+
+
+@app.post("/api/webhook")
+async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
+    app.state.config.WEBHOOK_URL = form_data.url
+    app.state.WEBHOOK_URL = app.state.config.WEBHOOK_URL
+    return {"url": app.state.config.WEBHOOK_URL}
+
+
+@app.get("/api/version")
+async def get_app_version():
+    return {
+        "version": VERSION,
+    }
+
+
+############################
+# OAuth Login & Callback
+############################
+
+# SessionMiddleware is used by authlib for oauth
+if len(OAUTH_PROVIDERS) > 0:
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=WEBUI_SECRET_KEY,
+        session_cookie="oui-session",
+        same_site=WEBUI_SESSION_COOKIE_SAME_SITE,
+        https_only=WEBUI_SESSION_COOKIE_SECURE,
+    )
+
+
+@app.get("/oauth/{provider}/login")
+async def oauth_login(provider: str, request: Request):
+    return await oauth_manager.handle_login(request, provider)
+
+
+# OAuth login logic is as follows:
+# 1. Attempt to find a user with matching subject ID, tied to the provider
+# 2. If OAUTH_MERGE_ACCOUNTS_BY_EMAIL is true, find a user with the email address provided via OAuth
+#    - This is considered insecure in general, as OAuth providers do not always verify email addresses
+# 3. If there is no user, and ENABLE_OAUTH_SIGNUP is true, create a user
+#    - Email addresses are considered unique, so we fail registration if the email address is already taken
+@app.get("/oauth/{provider}/callback")
+async def oauth_callback(provider: str, request: Request, response: Response):
+    return await oauth_manager.handle_callback(request, provider, response)
+
+
+@app.get("/manifest.json")
+async def get_manifest_json():
+    if app.state.EXTERNAL_PWA_MANIFEST_URL:
+        # llens(#28): 同期 requests は to_thread でループ外へ
+        r = await asyncio.to_thread(requests.get, app.state.EXTERNAL_PWA_MANIFEST_URL)
+        return r.json()
+    else:
+        return {
+            "name": app.state.WEBUI_NAME,
+            "short_name": app.state.WEBUI_NAME,
+            "description": "Nucllei is a thin, self-hosted LLM chat platform.",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#343541",
+            "orientation": "natural",
+            "icons": [
+                {
+                    "src": "/static/logo.png",
+                    "type": "image/png",
+                    "sizes": "500x500",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/static/logo.png",
+                    "type": "image/png",
+                    "sizes": "500x500",
+                    "purpose": "maskable",
+                },
+            ],
+        }
+
+
+@app.get("/opensearch.xml")
+async def get_opensearch_xml():
+    xml_content = rf"""
+    <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/" xmlns:moz="http://www.mozilla.org/2006/browser/search/">
+    <ShortName>{app.state.WEBUI_NAME}</ShortName>
+    <Description>Search {app.state.WEBUI_NAME}</Description>
+    <InputEncoding>UTF-8</InputEncoding>
+    <Image width="16" height="16" type="image/x-icon">{app.state.config.WEBUI_URL}/static/favicon.png</Image>
+    <Url type="text/html" method="get" template="{app.state.config.WEBUI_URL}/?q={"{searchTerms}"}"/>
+    <moz:SearchForm>{app.state.config.WEBUI_URL}</moz:SearchForm>
+    </OpenSearchDescription>
+    """
+    return Response(content=xml_content, media_type="application/xml")
+
+
+@app.get("/health")
+async def healthcheck():
+    return {"status": True}
+
+
+@app.get("/health/db")
+async def healthcheck_with_db():
+    Session.execute(text("SELECT 1;")).all()
+    return {"status": True}
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/cache", CacheStaticFiles(directory=CACHE_DIR), name="cache")
+
+
+def swagger_ui_html(*args, **kwargs):
+    return get_swagger_ui_html(
+        *args,
+        **kwargs,
+        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui/swagger-ui.css",
+        swagger_favicon_url="/static/swagger-ui/favicon.png",
+    )
+
+
+applications.get_swagger_ui_html = swagger_ui_html
+
+if os.path.exists(FRONTEND_BUILD_DIR):
+    mimetypes.add_type("text/javascript", ".js")
+    app.mount(
+        "/",
+        SPAStaticFiles(directory=FRONTEND_BUILD_DIR, html=True),
+        name="spa-static-files",
+    )
+else:
+    log.warning(
+        f"Frontend build directory not found at '{FRONTEND_BUILD_DIR}'. Serving API only."
+    )
