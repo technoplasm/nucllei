@@ -1,12 +1,18 @@
-<script>
-	import { onMount, getContext, createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
+<script lang="ts">
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import Switch from './Switch.svelte';
 
-	export let valvesSpec = null;
-	export let valves = {};
+	let {
+		valvesSpec = null,
+		valves = $bindable({}),
+		onChange = undefined
+	}: {
+		valvesSpec?: any;
+		valves?: Record<string, any>;
+		onChange?: () => void;
+	} = $props();
 </script>
 
 {#if valvesSpec && Object.keys(valvesSpec?.properties ?? {}).length}
@@ -24,13 +30,13 @@
 				<button
 					class="p-1 px-3 text-xs flex rounded-sm transition"
 					type="button"
-					on:click={() => {
+					onclick={() => {
 						valves[property] =
 							(valves[property] ?? null) === null
 								? (valvesSpec.properties[property]?.default ?? '')
 								: null;
 
-						dispatch('change');
+						onChange?.();
 					}}
 				>
 					{#if (valves[property] ?? null) === null}
@@ -55,8 +61,8 @@
 							<select
 								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden border border-gray-100 dark:border-gray-850"
 								bind:value={valves[property]}
-								on:change={() => {
-									dispatch('change');
+								onchange={() => {
+									onChange?.();
 								}}
 							>
 								{#each valvesSpec.properties[property].enum as option}
@@ -74,8 +80,8 @@
 								<div class=" pr-2">
 									<Switch
 										bind:state={valves[property]}
-										on:change={() => {
-											dispatch('change');
+										onChange={() => {
+											onChange?.();
 										}}
 									/>
 								</div>
@@ -88,8 +94,8 @@
 								bind:value={valves[property]}
 								autocomplete="off"
 								required
-								on:change={() => {
-									dispatch('change');
+								onchange={() => {
+									onChange?.();
 								}}
 							/>
 						{:else}
@@ -99,10 +105,10 @@
 								bind:value={valves[property]}
 								autocomplete="off"
 								required
-								on:change={() => {
-									dispatch('change');
+								onchange={() => {
+									onChange?.();
 								}}
-							/>
+							></textarea>
 						{/if}
 					</div>
 				</div>

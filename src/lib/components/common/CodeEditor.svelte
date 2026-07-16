@@ -11,12 +11,11 @@
 
 	import { oneDark } from '@codemirror/theme-one-dark';
 
-	import { onMount, createEventDispatcher, getContext, tick } from 'svelte';
+	import { onMount, getContext, tick } from 'svelte';
 
 	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
 
-	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
 	// light テーマ: 公式パッケージは one-dark しかないため、light は背景まわりだけ
@@ -31,17 +30,32 @@
 		}
 	});
 
-	export let boilerplate = '';
-	export let value = '';
+	let {
+		id = '',
+		lang = '',
+		boilerplate = '',
+		value = $bindable(''),
+		onSave = () => {},
+		onChange = () => {}
+	}: {
+		id?: string;
+		lang?: string;
+		boilerplate?: string;
+		value?: string;
+		onSave?: () => void;
+		onChange?: (value: string) => void;
+	} = $props();
 
-	export let onSave: () => void = () => {};
-	export let onChange: (value: string) => void = () => {};
-
+	// _value / codeEditor / isDarkMode はテンプレートに出ない CodeMirror 側の状態。
+	// 意図的に非リアクティブのまま($effect が updateValue 内の _value 変更で
+	// 再実行されて editor 内容を巻き戻さないように、依存は value / lang だけにする)。
 	let _value = '';
 
-	$: if (value) {
-		updateValue();
-	}
+	$effect(() => {
+		if (value) {
+			updateValue();
+		}
+	});
 
 	const updateValue = () => {
 		if (_value !== value) {
@@ -57,8 +71,8 @@
 	/**
 	 * Finds multiple diffs in two strings and generates minimal change edits.
 	 */
-	function findChanges(oldStr, newStr) {
-		let changes = [];
+	function findChanges(oldStr: string, newStr: string) {
+		let changes: { from: number; to: number; insert: string }[] = [];
 		let oldIndex = 0,
 			newIndex = 0;
 
@@ -88,13 +102,10 @@
 		return changes;
 	}
 
-	export let id = '';
-	export let lang = '';
-
-	let codeEditor;
+	let codeEditor: EditorView | undefined;
 
 	export const focus = () => {
-		codeEditor.focus();
+		codeEditor?.focus();
 	};
 
 	let isDarkMode = false;
@@ -165,9 +176,11 @@
 		editorLanguage.of([])
 	];
 
-	$: if (lang) {
-		setLanguage();
-	}
+	$effect(() => {
+		if (lang) {
+			setLanguage();
+		}
+	});
 
 	const setLanguage = async () => {
 		const language = await getLang();
@@ -194,7 +207,7 @@
 				doc: _value,
 				extensions: extensions
 			}),
-			parent: document.getElementById(`code-textarea-${id}`)
+			parent: document.getElementById(`code-textarea-${id}`) ?? undefined
 		});
 
 		codeEditor.dispatch({
@@ -209,7 +222,7 @@
 
 					if (_isDarkMode !== isDarkMode) {
 						isDarkMode = _isDarkMode;
-						codeEditor.dispatch({
+						codeEditor?.dispatch({
 							effects: editorTheme.reconfigure(_isDarkMode ? oneDark : lightTheme)
 						});
 					}
@@ -222,7 +235,7 @@
 			attributeFilter: ['class']
 		});
 
-		const keydownHandler = async (e) => {
+		const keydownHandler = async (e: KeyboardEvent) => {
 			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 				e.preventDefault();
 
@@ -245,4 +258,4 @@
 	});
 </script>
 
-<div id="code-textarea-{id}" class="h-full w-full text-sm" />
+<div id="code-textarea-{id}" class="h-full w-full text-sm"></div>

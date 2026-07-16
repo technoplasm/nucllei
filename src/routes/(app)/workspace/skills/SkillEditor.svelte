@@ -230,8 +230,8 @@
 								<label class="flex items-center gap-2 cursor-pointer">
 									<Checkbox
 										state={_tools[tool].selected ? 'checked' : 'unchecked'}
-										on:change={(e) => {
-											_tools[tool].selected = e.detail === 'checked';
+										onChange={(state) => {
+											_tools[tool].selected = state === 'checked';
 											toolIds = Object.keys(_tools).filter((t) => _tools[t].selected);
 										}}
 									/>

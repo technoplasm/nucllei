@@ -56,8 +56,8 @@
 							<Checkbox
 								{disabled}
 								state={_skills[skillId].selected ? 'checked' : 'unchecked'}
-								on:change={(e) => {
-									_skills[skillId].selected = e.detail === 'checked';
+								onChange={(state) => {
+									_skills[skillId].selected = state === 'checked';
 									selectedSkillIds = Object.keys(_skills).filter((id) => _skills[id].selected);
 								}}
 							/>

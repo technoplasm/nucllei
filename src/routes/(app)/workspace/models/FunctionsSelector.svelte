@@ -70,8 +70,8 @@
 							<span class="self-center flex items-center">
 								<Checkbox
 									state={_functions[funcId].selected ? 'checked' : 'unchecked'}
-									on:change={(e) => {
-										_functions[funcId].selected = e.detail === 'checked';
+									onChange={(state) => {
+										_functions[funcId].selected = state === 'checked';
 										commit();
 									}}
 								/>

@@ -36,8 +36,8 @@
 			<span class="flex items-center">
 				<Checkbox
 					state={featureSkills ? 'checked' : 'unchecked'}
-					on:change={(e) => {
-						featureSkills = e.detail === 'checked';
+					onChange={(state) => {
+						featureSkills = state === 'checked';
 					}}
 				/>
 			</span>
@@ -57,8 +57,8 @@
 				<span class="flex items-center">
 					<Checkbox
 						state={capabilities[capability] ? 'checked' : 'unchecked'}
-						on:change={(e) => {
-							capabilities[capability] = e.detail === 'checked';
+						onChange={(state) => {
+							capabilities[capability] = state === 'checked';
 						}}
 					/>
 				</span>

@@ -63,8 +63,8 @@
 						<div class="flex items-center">
 							<Checkbox
 								state={userIds.includes(user.id) ? 'checked' : 'unchecked'}
-								on:change={(e) => {
-									if (e.detail === 'checked') {
+								onChange={(state) => {
+									if (state === 'checked') {
 										userIds = [...userIds, user.id];
 									} else {
 										userIds = userIds.filter((id) => id !== user.id);

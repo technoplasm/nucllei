@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { Pagination } from 'bits-ui';
-	import { createEventDispatcher } from 'svelte';
 
 	import ChevronLeft from '../icons/ChevronLeft.svelte';
 	import ChevronRight from '../icons/ChevronRight.svelte';
 
-	export let page = 0;
-	export let count = 0;
-	export let perPage = 20;
+	let {
+		page = $bindable(0),
+		count = 0,
+		perPage = 20
+	}: {
+		page?: number;
+		count?: number;
+		perPage?: number;
+	} = $props();
 </script>
 
 <div class="flex justify-center">
