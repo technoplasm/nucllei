@@ -518,6 +518,13 @@
 								on:click|stopPropagation={() => {
 									toggleDefaultModel(item.value);
 								}}
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										e.stopPropagation();
+										toggleDefaultModel(item.value);
+									}
+								}}
 							>
 								{#if userDefaultModelId === item.value}
 									<span class="i-lucide-bookmark-check size-4 block"></span>
@@ -611,6 +618,7 @@
 							<Tooltip content={$i18n.t('Cancel')}>
 								<button
 									class="text-content"
+									aria-label={$i18n.t('Cancel')}
 									on:click={() => {
 										cancelModelPullHandler(model);
 									}}
@@ -643,8 +651,8 @@
 				<div class="mb-3"></div>
 			{/if}
 
-			<div class="hidden w-[42rem]" />
-			<div class="hidden w-[32rem]" />
+			<div class="hidden w-[42rem]"></div>
+			<div class="hidden w-[32rem]"></div>
 		</slot>
 	</DropdownMenu.Content>
 </DropdownMenu.Root>

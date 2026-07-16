@@ -28,7 +28,6 @@
 	export let editMessage;
 	export let saveMessage;
 	export let deleteMessage;
-	export let rateMessage;
 	export let actionMessage;
 	export let submitMessage;
 
@@ -67,7 +66,6 @@
 			/>
 		{:else if (history.messages[history.messages[messageId].parentId]?.models?.length ?? 1) === 1}
 			<ResponseMessage
-				{chatId}
 				{history}
 				{messageId}
 				isLastMessage={messageId === history.currentId}
@@ -78,7 +76,6 @@
 				{updateChat}
 				{editMessage}
 				{saveMessage}
-				{rateMessage}
 				{actionMessage}
 				{submitMessage}
 				{deleteMessage}
@@ -96,7 +93,6 @@
 				{updateChat}
 				{editMessage}
 				{saveMessage}
-				{rateMessage}
 				{actionMessage}
 				{submitMessage}
 				{deleteMessage}

@@ -12,17 +12,14 @@
 	import EllipsisVertical from '../icons/EllipsisVertical.svelte';
 
 	export let history;
-	export let models = [];
 
 	export let chatId = null;
 
 	export let chatFiles = [];
-	export let params = {};
 
 	export let eventTarget: EventTarget;
 	export let submitPrompt: Function;
 	export let stopResponse: Function;
-	export let showMessage: Function;
 	export let files;
 	export let modelId;
 

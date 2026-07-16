@@ -92,7 +92,6 @@
 		};
 	}
 
-	export let chatId = '';
 	export let history;
 	export let messageId;
 
@@ -112,7 +111,6 @@
 	export let updateChat: Function;
 	export let editMessage: Function;
 	export let saveMessage: Function;
-	export let rateMessage: Function;
 	export let actionMessage: Function;
 	export let deleteMessage: Function;
 
@@ -578,7 +576,7 @@
 											document.getElementById('confirm-edit-message-button')?.click();
 										}
 									}}
-								/>
+								></textarea>
 
 								<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
 									<div>
@@ -794,6 +792,7 @@
 								<div class="flex self-center min-w-fit" dir="ltr">
 									<button
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+										aria-label={$i18n.t('Previous message')}
 										on:click={() => {
 											showPreviousMessage(message);
 										}}
@@ -861,6 +860,7 @@
 
 									<button
 										class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+										aria-label={$i18n.t('Next message')}
 										on:click={() => {
 											showNextMessage(message);
 										}}
@@ -891,6 +891,7 @@
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+												aria-label={$i18n.t('Edit')}
 												on:click={() => {
 													editMessageHandler();
 												}}
@@ -919,6 +920,7 @@
 										class="{isLastMessage
 											? 'visible'
 											: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition copy-response-button"
+										aria-label={$i18n.t('Copy')}
 										on:click={() => {
 											copyToClipboard(message.content);
 										}}
@@ -1105,6 +1107,7 @@
 											class=" {isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition whitespace-pre-wrap"
+											aria-label={$i18n.t('Generation Info')}
 											on:click={() => {
 												console.log(message);
 											}}
@@ -1137,6 +1140,7 @@
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+												aria-label={$i18n.t('Continue Response')}
 												on:click={() => {
 													continueResponse();
 												}}
@@ -1170,6 +1174,7 @@
 											class="{isLastMessage
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+											aria-label={$i18n.t('Regenerate')}
 											on:click={() => {
 												regenerateResponse(message);
 
@@ -1211,6 +1216,7 @@
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+												aria-label={$i18n.t('Delete')}
 												on:click={() => {
 													showDeleteConfirm = true;
 												}}

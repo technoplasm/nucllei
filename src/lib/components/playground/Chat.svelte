@@ -341,7 +341,7 @@
 								e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
 							}}
 							rows="2"
-						/>
+						></textarea>
 					</div>
 
 					<div class="flex justify-between">

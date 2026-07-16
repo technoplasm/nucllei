@@ -424,6 +424,7 @@
 					<button
 						id="delete-chat-button"
 						class="hidden"
+						aria-label={$i18n.t('Delete Chat')}
 						on:click={() => {
 							showDeleteConfirm = true;
 						}}

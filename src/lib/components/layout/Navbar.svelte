@@ -37,7 +37,6 @@
 	export let showModelSelector = true;
 
 	let showShareChatModal = false;
-	let showDownloadChatModal = false;
 </script>
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
@@ -83,12 +82,8 @@
 				{#if shareEnabled && chat && chat.id}
 					<Menu
 						{chat}
-						{shareEnabled}
 						shareHandler={() => {
 							showShareChatModal = !showShareChatModal;
-						}}
-						downloadHandler={() => {
-							showDownloadChatModal = !showDownloadChatModal;
 						}}
 					>
 						<button

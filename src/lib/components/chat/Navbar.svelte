@@ -3,7 +3,6 @@
 	import { toast } from 'svelte-sonner';
 
 	import {
-		WEBUI_NAME,
 		banners,
 		chatId,
 		config,
@@ -44,7 +43,6 @@
 	};
 
 	export let initNewChat: Function;
-	export let title: string = $WEBUI_NAME;
 	export let shareEnabled: boolean = false;
 
 	export let chat;
@@ -53,7 +51,6 @@
 	export let showModelSelector = true;
 
 	let showShareChatModal = false;
-	let showDownloadChatModal = false;
 </script>
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
@@ -100,17 +97,14 @@
 					{#if shareEnabled && chat && chat.id}
 						<Menu
 							{chat}
-							{shareEnabled}
 							shareHandler={() => {
 								showShareChatModal = !showShareChatModal;
-							}}
-							downloadHandler={() => {
-								showDownloadChatModal = !showDownloadChatModal;
 							}}
 						>
 							<button
 								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 								id="chat-context-menu-button"
+								aria-label={$i18n.t('More')}
 							>
 								<div class=" m-auto self-center">
 									<span class="i-lucide-ellipsis size-5 block"></span>

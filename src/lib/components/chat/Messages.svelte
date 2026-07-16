@@ -235,15 +235,6 @@
 		}
 	};
 
-	const rateMessage = async (messageId, rating) => {
-		history.messages[messageId].annotation = {
-			...history.messages[messageId].annotation,
-			rating: rating
-		};
-
-		await updateChat();
-	};
-
 	const editMessage = async (messageId, content, submit = true) => {
 		if (history.messages[messageId].role === 'user') {
 			if (submit) {
@@ -430,7 +421,6 @@
 							{updateChat}
 							{editMessage}
 							{deleteMessage}
-							{rateMessage}
 							{actionMessage}
 							{saveMessage}
 							{submitMessage}
@@ -442,9 +432,9 @@
 						/>
 					{/each}
 				</div>
-				<div class="pb-12" />
+				<div class="pb-12"></div>
 				{#if bottomPadding}
-					<div class="  pb-6" />
+					<div class="  pb-6"></div>
 				{/if}
 			{/key}
 		</div>

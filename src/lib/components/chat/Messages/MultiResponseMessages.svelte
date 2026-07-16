@@ -28,7 +28,6 @@
 	export let updateChat: Function;
 	export let editMessage: Function;
 	export let saveMessage: Function;
-	export let rateMessage: Function;
 	export let actionMessage: Function;
 
 	export let submitMessage: Function;
@@ -235,7 +234,6 @@
 						{#key history.currentId}
 							{#if message}
 								<ResponseMessage
-									{chatId}
 									{history}
 									messageId={_messageId}
 									isLastMessage={true}
@@ -246,7 +244,6 @@
 									{updateChat}
 									{editMessage}
 									{saveMessage}
-									{rateMessage}
 									{deleteMessage}
 									{actionMessage}
 									{submitMessage}

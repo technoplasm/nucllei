@@ -1612,7 +1612,7 @@
 	</title>
 </svelte:head>
 
-<audio id="audioElement" src="" style="display: none;" />
+<audio id="audioElement" src="" style="display: none;"></audio>
 
 <EventConfirmDialog
 	bind:show={showEventConfirmation}
@@ -1646,11 +1646,11 @@
 					? 'md:max-w-[calc(100%-var(--sidebar-width))] md:translate-x-[var(--sidebar-width)]'
 					: ''} top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
 				style="background-image: url({$settings.backgroundImageUrl})  "
-			/>
+			></div>
 
 			<div
 				class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
-			/>
+			></div>
 		{/if}
 
 		<PaneGroup direction="horizontal" class="w-full h-full">
@@ -1669,7 +1669,6 @@
 						}
 					}}
 					{history}
-					title={$chatTitle}
 					bind:selectedModels
 					shareEnabled={!!history.currentId}
 					{initNewChat}
@@ -1786,21 +1785,12 @@
 				bind:this={controlPaneComponent}
 				bind:history
 				bind:chatFiles
-				bind:params
 				bind:files
 				bind:pane={controlPane}
 				chatId={$chatId}
 				modelId={selectedModelIds?.at(0) ?? null}
-				models={selectedModelIds.reduce((a, e, i, arr) => {
-					const model = $models.find((m) => m.id === e);
-					if (model) {
-						return [...a, model];
-					}
-					return a;
-				}, [])}
 				{submitPrompt}
 				{stopResponse}
-				{showMessage}
 				{eventTarget}
 			/>
 		</PaneGroup>
