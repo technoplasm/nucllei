@@ -317,3 +317,23 @@ _links/
 !/nucllei/data/readme.txt
 *.db
 .webui_secret_key
+
+# 起動時に build/static からコピーされる派生ブランド資産(nucllei/config.py:650)。
+# 真のソースは static/static/(+ _brand/ の master SVG)。デプロイでは pnpm build →
+# build/static → 起動時コピーで nucllei/static が埋まるため追跡しない。
+/nucllei/static/favicon.png
+/nucllei/static/favicon.svg
+/nucllei/static/favicon.ico
+/nucllei/static/favicon-96x96.png
+/nucllei/static/favicon-dark.png
+/nucllei/static/apple-touch-icon.png
+/nucllei/static/logo.png
+/nucllei/static/splash.png
+/nucllei/static/splash-dark.png
+/nucllei/static/web-app-manifest-192x192.png
+/nucllei/static/web-app-manifest-512x512.png
+/nucllei/static/site.webmanifest
+/nucllei/static/loader.js
+
+# 生成物(generate.sh の中間出力)
+/_brand/dist/
