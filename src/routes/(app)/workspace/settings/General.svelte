@@ -14,7 +14,7 @@
 	import Connection from './Tools/Connection.svelte';
 	import AddServerModal from '$lib/components/AddServerModal.svelte';
 	import { getToolServerConnections, setToolServerConnections } from '$lib/apis/configs';
-	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
+	import { APP_VERSION } from '$lib/constants';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -123,9 +123,7 @@
 							</div>
 						</div>
 						<div class="flex flex-col text-xs text-content">
-							<Tooltip content={WEBUI_BUILD_HASH}>
-								{WEBUI_VERSION}
-							</Tooltip>
+							{APP_VERSION}
 						</div>
 					</div>
 

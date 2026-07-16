@@ -110,6 +110,11 @@ log.setLevel(SRC_LOG_LEVELS["CONFIG"])
 # (LLENS 等)で、旧 upstream の「非既定名に " (Open WebUI)" を付加」は撤去。
 WEBUI_NAME = os.environ.get("WEBUI_NAME", "Nucllei")
 
+# 配備側のバージョン(License タブの最上段で WEBUI_NAME に並べて表示。空なら非表示)。
+# 本体(Nucllei)のバージョンは APP_VERSION → VERSION — こちらは配備リポジトリの deploy tag
+# (例: prod20260716_01)を焼き込む用。
+WEBUI_VERSION = os.environ.get("WEBUI_VERSION", "")
+
 # 配備側の権利表記(License タブの最上段に表示。空なら非表示)。例:
 # "The agent harness built on top of Nucllei, including its Tools, Skills, and
 #  Functions, is copyright © PRISM-HU. All rights reserved."
@@ -244,11 +249,6 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
     os.environ.get("ENABLE_FORWARD_USER_INFO_HEADERS", "False").lower() == "true"
 )
 
-####################################
-# WEBUI_BUILD_HASH
-####################################
-
-WEBUI_BUILD_HASH = os.environ.get("WEBUI_BUILD_HASH", "dev-build")
 
 ####################################
 # DATA/FRONTEND BUILD DIR

@@ -3,7 +3,7 @@
 	import Bolt from '$lib/components/icons/Bolt.svelte';
 	import { onMount, getContext, createEventDispatcher } from 'svelte';
 	import { WEBUI_NAME } from '$lib/stores';
-	import { WEBUI_VERSION } from '$lib/constants';
+	import { APP_VERSION } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -72,7 +72,7 @@
 		<!-- Keine Vorschläge -->
 
 		<div class="flex w-full text-center items-center justify-center self-start text-content-subtle">
-			{$WEBUI_NAME} ‧ {WEBUI_VERSION}
+			{$WEBUI_NAME} ‧ {APP_VERSION}
 		</div>
 	{/if}
 </div>

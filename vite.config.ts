@@ -70,10 +70,9 @@ export default defineConfig({
 		// llens(#30/#25): バージョンの真実源は git tag(例 v20260716-01)。
 		// 優先順: APP_VERSION env(docker build が焼き込む)→ git describe(dev / ローカルビルド。
 		// tag を切るだけで次回ビルドから反映)→ package.json の OWUI 基点バージョン。
-		APP_VERSION: JSON.stringify(
+		__APP_VERSION__: JSON.stringify(
 			process.env.APP_VERSION || gitDescribe() || process.env.npm_package_version
-		),
-		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
+		)
 	},
 	build: {
 		sourcemap: true

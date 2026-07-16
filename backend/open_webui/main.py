@@ -209,8 +209,8 @@ from open_webui.env import (
     SAFE_MODE,
     SRC_LOG_LEVELS,
     VERSION,
-    WEBUI_BUILD_HASH,
     WEBUI_COPYRIGHT,
+    WEBUI_VERSION,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
     WEBUI_SESSION_COOKIE_SECURE,
@@ -309,7 +309,6 @@ print(
 
 
 v{VERSION} - building the best open-source AI user interface.
-{f"Commit: {WEBUI_BUILD_HASH}" if WEBUI_BUILD_HASH != "dev-build" else ""}
 https://github.com/open-webui/open-webui
 """
 )
@@ -967,6 +966,8 @@ async def get_app_config(request: Request):
         **({"onboarding": True} if onboarding else {}),
         "status": True,
         "name": app.state.WEBUI_NAME,
+        # 配備層(WEBUI_*)— version キーは本体(Nucllei)なので別名で返す
+        "webui_version": WEBUI_VERSION,
         "copyright": WEBUI_COPYRIGHT,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),

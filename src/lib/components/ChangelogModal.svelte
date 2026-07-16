@@ -4,7 +4,7 @@
 
 	import { WEBUI_NAME, config, settings } from '$lib/stores';
 
-	import { WEBUI_VERSION } from '$lib/constants';
+	import { APP_VERSION } from '$lib/constants';
 	import { getChangelog } from '$lib/apis';
 
 	import Modal from './common/Modal.svelte';
@@ -53,7 +53,7 @@
 			<div class="text-sm text-content-muted">{$i18n.t('Release Notes')}</div>
 			<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-200 dark:bg-gray-700" />
 			<div class="text-sm text-content-muted">
-				{WEBUI_VERSION}
+				{APP_VERSION}
 			</div>
 		</div>
 	</div>

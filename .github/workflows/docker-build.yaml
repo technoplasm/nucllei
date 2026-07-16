@@ -94,7 +94,6 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
           build-args: |
-            BUILD_HASH=${{ github.sha }}
 
       - name: Export digest
         run: |
@@ -193,7 +192,6 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
           build-args: |
-            BUILD_HASH=${{ github.sha }}
             USE_CUDA=true
 
       - name: Export digest
@@ -293,7 +291,6 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
           build-args: |
-            BUILD_HASH=${{ github.sha }}
             USE_OLLAMA=true
 
       - name: Export digest

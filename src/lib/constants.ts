@@ -1,8 +1,6 @@
 import { browser } from '$app/environment';
 // import { version } from '../../package.json';
 
-export const APP_NAME = 'Nucllei';
-
 // llens(dev): dev も本番(docker = 単一オリジンで BE が SPA と API を両方配信)と同じく
 // 相対 URL で叩く。vite proxy(vite.config.ts)が /api・/openai・/ollama・/ws・/oauth を
 // BE(:3000)へ流すので、フロントは同一オリジンのまま。画像等の cookie 認証もこれで通る
@@ -16,8 +14,9 @@ export const OPENAI_API_BASE_URL = `${WEBUI_BASE_URL}/openai`;
 export const AUDIO_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1/audio`;
 export const IMAGES_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1/images`;
 
-export const WEBUI_VERSION = APP_VERSION;
-export const WEBUI_BUILD_HASH = APP_BUILD_HASH;
+// 本体(Nucllei)のバージョン(vite define でビルド時に焼き込み)。
+// 配備層(WEBUI_NAME/WEBUI_VERSION/WEBUI_COPYRIGHT)は /api/config が返す。
+export const APP_VERSION = __APP_VERSION__;
 export const REQUIRED_OLLAMA_VERSION = '0.1.16';
 
 // カスタムアイコン未設定のモデルに使う既定アバター(gray 版プリズム)。

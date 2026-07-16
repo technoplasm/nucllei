@@ -1,9 +1,7 @@
 <script lang="ts">
-	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
+	import { APP_VERSION } from '$lib/constants';
 	import { WEBUI_NAME, config } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
-
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -39,6 +37,9 @@
 			<div>
 				<div class="flex items-baseline gap-2">
 					<span class="text-base font-medium">{$WEBUI_NAME}</span>
+					{#if $config?.webui_version}
+						<span class="text-xs text-content-muted">{$config.webui_version}</span>
+					{/if}
 				</div>
 
 				{#if $config?.copyright}
@@ -53,9 +54,7 @@
 		<div>
 			<div class="flex items-baseline gap-2">
 				<span class="text-base font-medium">Nucllei</span>
-				<Tooltip content={WEBUI_BUILD_HASH}>
-					<span class="text-xs text-content-muted">{WEBUI_VERSION}</span>
-				</Tooltip>
+				<span class="text-xs text-content-muted">{APP_VERSION}</span>
 			</div>
 
 			<div class="mt-1 text-xs text-content-subtle leading-relaxed">

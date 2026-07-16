@@ -15,14 +15,12 @@ ARG USE_RERANKING_MODEL=""
 # Tiktoken encoding name; models to use can be found at https://huggingface.co/models?library=tiktoken
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
-ARG BUILD_HASH=dev-build
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
-ARG BUILD_HASH
 # llens(#30/#25): deploy tag(例 prod20260708_01)を焼き込むための build arg。
 ARG APP_VERSION
 
@@ -34,7 +32,6 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-ENV APP_BUILD_HASH=${BUILD_HASH}
 ENV APP_VERSION=${APP_VERSION}
 RUN pnpm build
 
@@ -174,8 +171,6 @@ HEALTHCHECK CMD curl --silent --fail http://localhost:${PORT:-8080}/health | jq 
 
 USER $UID:$GID
 
-ARG BUILD_HASH
-ENV WEBUI_BUILD_VERSION=${BUILD_HASH}
 # llens(#30/#25): deploy tag を backend の VERSION(banner / /api/version)へ焼き込む。
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}

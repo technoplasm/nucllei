@@ -1,11 +1,11 @@
-import { APP_NAME } from '$lib/constants';
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 
 // Backend
-export const WEBUI_NAME = writable(APP_NAME);
+// 配備層のブランド名。/api/config の name(WEBUI_NAME env、既定 Nucllei)で上書きされる
+export const WEBUI_NAME = writable('Nucllei');
 export const config: Writable<Config | undefined> = writable(undefined);
 export const user: Writable<SessionUser | undefined> = writable(undefined);
 
@@ -121,7 +121,8 @@ type Settings = {
 	notificationEnabled?: boolean;
 	title?: TitleSettings;
 	splitLargeDeltas?: boolean;
-	chatDirection: 'LTR' | 'RTL' | 'auto';
+	// optional: settings store の初期値は {}(消費側は ?? 'auto' で既定化)
+	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 
 	// llens(#70): SettingsModal > Interface が実際に保存しているキーを型に反映
@@ -226,7 +227,8 @@ type UserPermissions = {
 type Config = {
 	status: boolean;
 	name: string;
-	// 配備側の権利表記(WEBUI_COPYRIGHT env。空なら License タブで非表示)
+	// 配備層(WEBUI_VERSION / WEBUI_COPYRIGHT env。空なら License タブで非表示)
+	webui_version?: string;
 	copyright?: string;
 	version: string;
 	default_locale: string;
