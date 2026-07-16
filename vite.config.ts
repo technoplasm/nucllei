@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { execSync } from 'node:child_process';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -37,6 +38,21 @@ const BACKEND_PROXY = {
 // 	}
 // };
 
+// git tag からのバージョン導出(リポジトリ外ビルドや git 不在では null)
+const gitDescribe = () => {
+	try {
+		// バージョンとみなすタグは 2 形式のみ(作業タグ混入防止):
+		// リリース = vYYYYMMDD-NN / プレ = pre-NN
+		return execSync('git describe --tags --always --match "v[0-9]*" --match "pre-*"', {
+			stdio: ['ignore', 'pipe', 'ignore']
+		})
+			.toString()
+			.trim();
+	} catch {
+		return null;
+	}
+};
+
 export default defineConfig({
 	plugins: [
 		sveltekit(),
@@ -51,9 +67,12 @@ export default defineConfig({
 		})
 	],
 	define: {
-		// llens(#30/#25): deploy tag(例 prod20260708_01)を APP_VERSION で焼き込む。
-		// 未設定なら package.json の OWUI 基点バージョンにフォールバック。
-		APP_VERSION: JSON.stringify(process.env.APP_VERSION || process.env.npm_package_version),
+		// llens(#30/#25): バージョンの真実源は git tag(例 v20260716-01)。
+		// 優先順: APP_VERSION env(docker build が焼き込む)→ git describe(dev / ローカルビルド。
+		// tag を切るだけで次回ビルドから反映)→ package.json の OWUI 基点バージョン。
+		APP_VERSION: JSON.stringify(
+			process.env.APP_VERSION || gitDescribe() || process.env.npm_package_version
+		),
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	build: {

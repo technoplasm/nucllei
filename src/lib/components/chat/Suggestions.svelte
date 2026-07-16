@@ -72,7 +72,7 @@
 		<!-- Keine Vorschläge -->
 
 		<div class="flex w-full text-center items-center justify-center self-start text-content-subtle">
-			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
+			{$WEBUI_NAME} ‧ {WEBUI_VERSION}
 		</div>
 	{/if}
 </div>
