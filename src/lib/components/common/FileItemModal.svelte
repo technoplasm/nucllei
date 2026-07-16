@@ -17,7 +17,6 @@
 
 	export let item;
 	export let show = false;
-	export let edit = false;
 
 	// llens(#69): /files 管理ページ用の拡張(すべて省略可 — チャット側の既存利用は不変)。
 	// download=true でダウンロードリンク、onDelete/onShare はフッターのボタンから callback。

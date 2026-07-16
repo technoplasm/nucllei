@@ -144,7 +144,6 @@
 							{submitPrompt}
 							{stopResponse}
 							{modelId}
-							{chatId}
 							{eventTarget}
 							on:close={() => {
 								showControls.set(false);
@@ -205,7 +204,6 @@
 								{submitPrompt}
 								{stopResponse}
 								{modelId}
-								{chatId}
 								{eventTarget}
 								on:close={() => {
 									showControls.set(false);

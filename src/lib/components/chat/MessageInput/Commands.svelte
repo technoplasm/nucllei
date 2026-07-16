@@ -14,7 +14,6 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	export let prompt = '';
-	export let files = [];
 	// llens(#42): 選択モデルに紐づく skill id(補完のスコープ)。null は無制限(後方互換)
 	export let allowedSkillIds = null;
 

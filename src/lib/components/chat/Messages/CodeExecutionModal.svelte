@@ -44,6 +44,7 @@
 			</div>
 			<button
 				class="self-center"
+				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
 					codeExecution = null;

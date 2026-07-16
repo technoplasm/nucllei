@@ -86,6 +86,7 @@
 			<div>
 				<button
 					class=" p-5"
+					aria-label="Close"
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
@@ -111,6 +112,7 @@
 			<div>
 				<button
 					class=" p-5"
+					aria-label="Download"
 					on:pointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();

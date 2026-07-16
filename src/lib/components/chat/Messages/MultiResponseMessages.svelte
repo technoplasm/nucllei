@@ -22,7 +22,6 @@
 	export let history;
 	export let messageId;
 
-	export let isLastMessage;
 	export let readOnly = false;
 
 	export let updateChat: Function;
@@ -81,6 +80,22 @@
 
 		// Trigger scrolling after navigation
 		triggerScroll();
+	};
+
+	const selectResponse = async (_messageId: string) => {
+		if (messageId != _messageId) {
+			let currentMessageId = _messageId;
+			let messageChildrenIds = history.messages[currentMessageId].childrenIds;
+			while (messageChildrenIds.length !== 0) {
+				currentMessageId = messageChildrenIds.at(-1);
+				messageChildrenIds = history.messages[currentMessageId].childrenIds;
+			}
+			history.currentId = currentMessageId;
+
+			await tick();
+			await updateChat();
+			triggerScroll();
+		}
 	};
 
 	const showPreviousMessage = async (modelIdx) => {
@@ -201,8 +216,6 @@
 		>
 			{#each Object.keys(groupedMessageIds) as modelIdx}
 				{#if groupedMessageIdsIdx[modelIdx] !== undefined && groupedMessageIds[modelIdx].messageIds.length > 0}
-					<!-- svelte-ignore a11y-no-static-element-interactions -->
-					<!-- svelte-ignore a11y-click-events-have-key-events -->
 					{@const _messageId =
 						groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
@@ -215,19 +228,15 @@
 							: `border-gray-100 dark:border-gray-850 border-dashed ${
 									$mobile ? 'min-w-full' : 'min-w-80'
 								}`} transition-all p-5 rounded-2xl"
-						on:click={async () => {
-							if (messageId != _messageId) {
-								let currentMessageId = _messageId;
-								let messageChildrenIds = history.messages[currentMessageId].childrenIds;
-								while (messageChildrenIds.length !== 0) {
-									currentMessageId = messageChildrenIds.at(-1);
-									messageChildrenIds = history.messages[currentMessageId].childrenIds;
-								}
-								history.currentId = currentMessageId;
-
-								await tick();
-								await updateChat();
-								triggerScroll();
+						role="button"
+						tabindex="0"
+						on:click={() => {
+							selectResponse(_messageId);
+						}}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								selectResponse(_messageId);
 							}
 						}}
 					>

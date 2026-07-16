@@ -536,7 +536,6 @@
 					<Commands
 						bind:this={commandsElement}
 						bind:prompt
-						bind:files
 						{allowedSkillIds}
 						on:select={(e) => {
 							const data = e.detail;
@@ -687,7 +686,6 @@
 													size={file?.size}
 													loading={file.status === 'uploading'}
 													dismissible={true}
-													edit={true}
 													onDismiss={async () => {
 														await dismissFileHandler(fileIdx);
 													}}

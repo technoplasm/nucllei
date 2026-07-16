@@ -2,15 +2,7 @@
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import {
-		WEBUI_NAME,
-		chatId,
-		mobile,
-		settings,
-		showArchivedChats,
-		showSidebar,
-		user
-	} from '$lib/stores';
+	import { chatId, mobile, settings, showArchivedChats, showSidebar, user } from '$lib/stores';
 
 	import { slide } from 'svelte/transition';
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
@@ -29,7 +21,6 @@
 	const i18n = getContext('i18n');
 
 	export let initNewChat: Function;
-	export let title: string = $WEBUI_NAME;
 	export let shareEnabled: boolean = false;
 
 	export let chat;
@@ -89,6 +80,7 @@
 						<button
 							class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 							id="chat-context-menu-button"
+							aria-label={$i18n.t('More')}
 						>
 							<div class=" m-auto self-center">
 								<svg

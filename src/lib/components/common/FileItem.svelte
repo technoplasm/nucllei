@@ -15,7 +15,6 @@
 		dismissible = false,
 		loading = false,
 		item = $bindable(null),
-		edit = false,
 		small = false,
 		name,
 		type,
@@ -29,7 +28,6 @@
 		dismissible?: boolean;
 		loading?: boolean;
 		item?: any;
-		edit?: boolean;
 		small?: boolean;
 		name: string;
 		type: string;
@@ -50,7 +48,7 @@
 </script>
 
 {#if item}
-	<FileItemModal bind:show={showModal} bind:item {edit} />
+	<FileItemModal bind:show={showModal} bind:item />
 {/if}
 
 <!-- llens: dismiss ボタンを本体 button の兄弟に出すため root は div(button 入れ子は HTML 違反) -->

@@ -47,12 +47,13 @@
 				// e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
 			}}
 			bind:value={message.content}
-		/>
+		></textarea>
 	</div>
 
 	<div class=" pt-1">
 		<button
 			class=" group-hover:text-content-muted dark:text-content-subtle dark:hover:text-content transition"
+			aria-label={$i18n.t('Remove')}
 			on:click={() => {
 				onDelete();
 			}}

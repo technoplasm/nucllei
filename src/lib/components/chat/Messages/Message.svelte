@@ -89,7 +89,6 @@
 				bind:history
 				{chatId}
 				{messageId}
-				isLastMessage={messageId === history?.currentId}
 				{updateChat}
 				{editMessage}
 				{saveMessage}

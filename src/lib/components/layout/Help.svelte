@@ -13,10 +13,11 @@
 	<button
 		id="show-shortcuts-button"
 		class="hidden"
+		aria-label={$i18n.t('Keyboard shortcuts')}
 		on:click={() => {
 			showShortcuts = !showShortcuts;
 		}}
-	/>
+	></button>
 
 	<Tooltip content={$i18n.t('Keyboard shortcuts')} placement="left">
 		<button
