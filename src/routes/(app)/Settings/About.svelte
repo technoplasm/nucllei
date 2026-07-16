@@ -58,8 +58,12 @@
 			</div>
 
 			<div class="mt-1 text-xs text-content-subtle leading-relaxed">
-				Nucllei is a platform for hosting LLM AI agent harnesses, forked from <span class="whitespace-nowrap">Open WebUI</span> v0.6.5.
-				Upstream code is available under the BSD-3-Clause license, and modifications and additions are Copyright © Technoplasm, Inc. <span class="whitespace-nowrap">All rights reserved.</span>
+				Nucllei is a platform for hosting LLM AI agent harnesses, forked from <span
+					class="whitespace-nowrap">Open WebUI</span
+				>
+				v0.6.5. Upstream code is available under the BSD-3-Clause license, and modifications and additions
+				are Copyright © Technoplasm, Inc.
+				<span class="whitespace-nowrap">All rights reserved.</span>
 			</div>
 		</div>
 

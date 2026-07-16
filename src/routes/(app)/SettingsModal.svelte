@@ -5,7 +5,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getModels } from '$lib/apis';
 
-	import Modal from '../common/Modal.svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
 	import About from './Settings/About.svelte';
 	import General from './Settings/General.svelte';
