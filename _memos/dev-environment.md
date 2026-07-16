@@ -245,6 +245,11 @@ LLENS_STT_SMOKE=1 PYTHONPATH=backend uv run pytest \
   SvelteKit の `goto` は SPA 遷移なので `wait_for_url` が 'load' 待ちで空振りすることがある —
   遷移確認は `wait_for_timeout` 後に `page.url` を直接読むほうが確実。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
   **原因を数字で特定**してから直す(#47: タブバーが `overflow-x-auto` で高さ0に潰れる罠を Playwright で確定)。
+- **bits-ui(melt)のメニュートリガーは JS の `element.click()` では開かない**(pointerdown を監視しているため
+  合成 click イベントが素通り)。実マウスイベントを使う — hover 表示で不可視のボタンは
+  `locator.click(force=True)`、要素特定が難しければ座標 `page.mouse.click(x, y)`(#70 共有コンポーネント検証で実績)。
+  同様に `text=...` セレクタは不可視の別インスタンス(隠れた UserMenu 等)に先に当たることがある —
+  `locator('visible=true')` で絞る。
 
 ## 進め方の知見(セッション運用で確立したもの)
 
