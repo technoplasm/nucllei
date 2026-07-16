@@ -368,8 +368,8 @@
 		buttonClassName="w-full"
 		hide={(folders[folderId]?.childrenIds ?? []).length === 0 &&
 			(folders[folderId].items?.chats ?? []).length === 0}
-		on:change={(e) => {
-			dispatch('open', e.detail);
+		onChange={(state) => {
+			dispatch('open', state);
 		}}
 	>
 		<!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -451,52 +451,54 @@
 			</button>
 		</div>
 
-		<div slot="content" class="w-full">
-			{#if (folders[folderId]?.childrenIds ?? []).length > 0 || (folders[folderId].items?.chats ?? []).length > 0}
-				<div
-					class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
-				>
-					{#if folders[folderId]?.childrenIds}
-						{@const children = folders[folderId]?.childrenIds
-							.map((id) => folders[id])
-							.sort((a, b) =>
-								a.name.localeCompare(b.name, undefined, {
-									numeric: true,
-									sensitivity: 'base'
-								})
-							)}
+		{#snippet content()}
+			<div class="w-full">
+				{#if (folders[folderId]?.childrenIds ?? []).length > 0 || (folders[folderId].items?.chats ?? []).length > 0}
+					<div
+						class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
+					>
+						{#if folders[folderId]?.childrenIds}
+							{@const children = folders[folderId]?.childrenIds
+								.map((id) => folders[id])
+								.sort((a, b) =>
+									a.name.localeCompare(b.name, undefined, {
+										numeric: true,
+										sensitivity: 'base'
+									})
+								)}
 
-						{#each children as childFolder (`${folderId}-${childFolder.id}`)}
-							<svelte:self
-								{folders}
-								folderId={childFolder.id}
-								parentDragged={dragged}
-								on:import={(e) => {
-									dispatch('import', e.detail);
-								}}
-								on:update={(e) => {
-									dispatch('update', e.detail);
-								}}
-								on:change={(e) => {
-									dispatch('change', e.detail);
-								}}
-							/>
-						{/each}
-					{/if}
+							{#each children as childFolder (`${folderId}-${childFolder.id}`)}
+								<svelte:self
+									{folders}
+									folderId={childFolder.id}
+									parentDragged={dragged}
+									on:import={(e) => {
+										dispatch('import', e.detail);
+									}}
+									on:update={(e) => {
+										dispatch('update', e.detail);
+									}}
+									on:change={(e) => {
+										dispatch('change', e.detail);
+									}}
+								/>
+							{/each}
+						{/if}
 
-					{#if folders[folderId].items?.chats}
-						{#each folders[folderId].items.chats as chat (chat.id)}
-							<ChatItem
-								id={chat.id}
-								title={chat.title}
-								on:change={(e) => {
-									dispatch('change', e.detail);
-								}}
-							/>
-						{/each}
-					{/if}
-				</div>
-			{/if}
-		</div>
+						{#if folders[folderId].items?.chats}
+							{#each folders[folderId].items.chats as chat (chat.id)}
+								<ChatItem
+									id={chat.id}
+									title={chat.title}
+									on:change={(e) => {
+										dispatch('change', e.detail);
+									}}
+								/>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{/snippet}
 	</Collapsible>
 </div>

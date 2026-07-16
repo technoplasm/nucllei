@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
 
-	import { getContext, createEventDispatcher, onMount } from 'svelte';
+	import { getContext, type Snippet } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import dayjs from '$lib/dayjs';
@@ -23,9 +23,9 @@
 	}
 
 	// Assuming $i18n.languages is an array of language codes
-	$: loadLocale($i18n.languages);
-
-	const dispatch = createEventDispatcher();
+	$effect(() => {
+		loadLocale($i18n.languages);
+	});
 
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
@@ -45,35 +45,52 @@
 		parseToolArgumentsStreaming
 	} from '$lib/utils/tool-render';
 
-	export let open = false;
+	let {
+		open = $bindable(false),
+		className = '',
+		buttonClassName = 'w-fit text-content-muted hover:text-content transition',
+		id = '',
+		title = null,
+		attributes = null,
+		chevron = false,
+		grow = false,
+		disabled = false,
+		hide = false,
+		onChange = undefined,
+		children,
+		content
+	}: {
+		open?: boolean;
+		className?: string;
+		buttonClassName?: string;
+		id?: string;
+		title?: string | null;
+		attributes?: Record<string, any> | null;
+		chevron?: boolean;
+		grow?: boolean;
+		disabled?: boolean;
+		hide?: boolean;
+		onChange?: (open: boolean) => void;
+		children?: Snippet;
+		content?: Snippet;
+	} = $props();
 
-	// Switch.svelte と同じ Svelte 5 互換モード対策: 初期化時の $: dispatch が
-	// 親に届くため、open が実際に変化したときだけ change を発火する。
+	// Switch.svelte と同じガード: 初期値では発火させず、
+	// open が実際に変化したときだけ onChange を呼ぶ。
 	let lastOpen = open;
-	$: if (open !== lastOpen) {
-		lastOpen = open;
-		dispatch('change', open);
-	}
-
-	export let className = '';
-	export let buttonClassName = 'w-fit text-content-muted hover:text-content transition';
-
-	export let id = '';
-	export let title = null;
-	export let attributes = null;
-
-	export let chevron = false;
-	export let grow = false;
-
-	export let disabled = false;
-	export let hide = false;
+	$effect(() => {
+		if (open !== lastOpen) {
+			lastOpen = open;
+			onChange?.(open);
+		}
+	});
 
 	const collapsibleId = uuidv4();
 
 	// llens(#17): reasoning / tool 結果を下端からも閉じられるようにする
 	// (開閉ボタンがヘッダにしか無いと、長い展開の末尾から先頭へ戻る必要がある)
-	let rootElement: HTMLElement | null = null;
-	$: showBottomCollapse = ['reasoning', 'tool_calls'].includes(attributes?.type);
+	let rootElement: HTMLElement | null = $state(null);
+	const showBottomCollapse = $derived(['reasoning', 'tool_calls'].includes(attributes?.type));
 
 	const collapseFromBottom = () => {
 		open = false;
@@ -85,11 +102,11 @@
 
 <div {id} class={className} bind:this={rootElement}>
 	{#if title !== null}
-		<!-- svelte-ignore a11y-no-static-element-interactions -->
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
 			class="{buttonClassName} cursor-pointer"
-			on:pointerup={() => {
+			onpointerup={() => {
 				if (!disabled) {
 					open = !open;
 				}
@@ -163,11 +180,11 @@
 			</div>
 		</div>
 	{:else}
-		<!-- svelte-ignore a11y-no-static-element-interactions -->
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
 			class="{buttonClassName} cursor-pointer"
-			on:pointerup={() => {
+			onpointerup={() => {
 				if (!disabled) {
 					open = !open;
 				}
@@ -175,7 +192,7 @@
 		>
 			<div>
 				<div class="flex items-start justify-between">
-					<slot />
+					{@render children?.()}
 
 					{#if chevron}
 						<div class="flex self-start translate-y-1">
@@ -192,11 +209,11 @@
 					{#if open && !hide}
 						<div
 							transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
-							on:pointerup={(e) => {
+							onpointerup={(e) => {
 								e.stopPropagation();
 							}}
 						>
-							<slot name="content" />
+							{@render content?.()}
 						</div>
 					{/if}
 				{/if}
@@ -293,16 +310,19 @@
 								</div>
 							{/if}
 						{:else}
-							<slot name="content" />
+							{@render content?.()}
 						{/if}
 					</div>
 
 					{#if showBottomCollapse}
-						<!-- svelte-ignore a11y-no-static-element-interactions -->
-						<!-- svelte-ignore a11y-click-events-have-key-events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
 							class="{buttonClassName} font-medium flex items-center gap-2 py-0.5 cursor-pointer"
-							on:pointerup|stopPropagation={collapseFromBottom}
+							onpointerup={(e) => {
+								e.stopPropagation();
+								collapseFromBottom();
+							}}
 						>
 							<ChevronUp strokeWidth="3.5" className="size-3.5" />
 							{$i18n.t('Close')}
@@ -328,14 +348,17 @@
 	{:else if !grow}
 		{#if open && !hide}
 			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-				<slot name="content" />
+				{@render content?.()}
 
 				{#if showBottomCollapse}
-					<!-- svelte-ignore a11y-no-static-element-interactions -->
-					<!-- svelte-ignore a11y-click-events-have-key-events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<div
 						class="{buttonClassName} font-medium flex items-center gap-2 py-0.5 cursor-pointer"
-						on:pointerup|stopPropagation={collapseFromBottom}
+						onpointerup={(e) => {
+							e.stopPropagation();
+							collapseFromBottom();
+						}}
 					>
 						<ChevronUp strokeWidth="3.5" className="size-3.5" />
 						{$i18n.t('Close')}

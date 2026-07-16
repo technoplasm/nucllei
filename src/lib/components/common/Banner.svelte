@@ -1,26 +1,31 @@
 <script lang="ts">
 	import type { Banner } from '$lib/types';
-	import { onMount, createEventDispatcher } from 'svelte';
+	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import DOMPurify from 'dompurify';
 	import { render } from '$lib/utils/markdown-it';
 
-	const dispatch = createEventDispatcher();
+	let {
+		banner = {
+			id: '',
+			type: 'info',
+			title: '',
+			content: '',
+			url: '',
+			dismissable: true,
+			timestamp: Math.floor(Date.now() / 1000)
+		},
+		className = 'mx-4',
+		dismissed = $bindable(false),
+		onDismiss = undefined
+	}: {
+		banner?: Banner;
+		className?: string;
+		dismissed?: boolean;
+		onDismiss?: (id: string) => void;
+	} = $props();
 
-	export let banner: Banner = {
-		id: '',
-		type: 'info',
-		title: '',
-		content: '',
-		url: '',
-		dismissable: true,
-		timestamp: Math.floor(Date.now() / 1000)
-	};
-	export let className = 'mx-4';
-
-	export let dismissed = false;
-
-	let mounted = false;
+	let mounted = $state(false);
 
 	const classNames: Record<string, string> = {
 		info: 'bg-blue-500/20 text-blue-700 dark:text-blue-200 ',
@@ -29,9 +34,9 @@
 		error: 'bg-red-500/20 text-red-700 dark:text-red-200'
 	};
 
-	const dismiss = (id) => {
+	const dismiss = (id: string) => {
 		dismissed = true;
-		dispatch('dismiss', id);
+		onDismiss?.(id);
 	};
 
 	onMount(() => {
@@ -119,7 +124,7 @@
 			<div class="flex self-start">
 				{#if banner.dismissible}
 					<button
-						on:click={() => {
+						onclick={() => {
 							dismiss(banner.id);
 						}}
 						class="  -mt-1 -mb-2 -translate-y-[1px] ml-1.5 mr-1 text-content-subtle dark:hover:text-white"

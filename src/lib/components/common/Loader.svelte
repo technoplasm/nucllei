@@ -1,11 +1,18 @@
 <script lang="ts">
-	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-	const dispatch = createEventDispatcher();
+	import { onDestroy, onMount, type Snippet } from 'svelte';
 
-	let loaderElement: HTMLElement;
+	let {
+		onVisible = undefined,
+		children
+	}: {
+		onVisible?: () => void;
+		children?: Snippet;
+	} = $props();
 
-	let observer;
-	let intervalId;
+	let loaderElement: HTMLElement | null = $state(null);
+
+	let observer: IntersectionObserver;
+	let intervalId: ReturnType<typeof setInterval>;
 
 	onMount(() => {
 		observer = new IntersectionObserver(
@@ -13,10 +20,8 @@
 				entries.forEach((entry) => {
 					if (entry.isIntersecting) {
 						intervalId = setInterval(() => {
-							dispatch('visible');
+							onVisible?.();
 						}, 100);
-						// dispatch('visible');
-						// observer.unobserve(loaderElement); // Stop observing until content is loaded
 					} else {
 						clearInterval(intervalId);
 					}
@@ -29,7 +34,9 @@
 			}
 		);
 
-		observer.observe(loaderElement);
+		if (loaderElement) {
+			observer.observe(loaderElement);
+		}
 	});
 
 	onDestroy(() => {
@@ -42,5 +49,5 @@
 </script>
 
 <div bind:this={loaderElement}>
-	<slot />
+	{@render children?.()}
 </div>

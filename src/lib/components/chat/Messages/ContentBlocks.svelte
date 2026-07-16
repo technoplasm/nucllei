@@ -78,13 +78,14 @@
 					Markdown は MarkdownTokens/InlineTokens 内で DOMPurify.sanitize を通してから
 					{@html} するため本文と同じ信頼モデルで安全。ここで直接 {@html} を書いてはならない。
 				-->
-				<div
-					class="mb-1.5 text-sm text-content-muted border-s-2 border-gray-200 dark:border-gray-800 ps-3"
-					slot="content"
-					dir="auto"
-				>
-					<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content} />
-				</div>
+				{#snippet content()}
+					<div
+						class="mb-1.5 text-sm text-content-muted border-s-2 border-gray-200 dark:border-gray-800 ps-3"
+						dir="auto"
+					>
+						<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content} />
+					</div>
+				{/snippet}
 			</Collapsible>
 		{:else if block.type === 'text'}
 			<ContentRenderer

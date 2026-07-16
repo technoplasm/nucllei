@@ -617,15 +617,14 @@
 					<Folder
 						className=""
 						bind:open={showPinnedChat}
-						on:change={(e) => {
-							localStorage.setItem('showPinnedChat', e.detail);
-							console.log(e.detail);
+						onChange={(open) => {
+							localStorage.setItem('showPinnedChat', String(open));
 						}}
-						on:import={(e) => {
-							importChatHandler(e.detail, true);
+						onImport={(items) => {
+							importChatHandler(items, true);
 						}}
-						on:drop={async (e) => {
-							const { type, id, item } = e.detail;
+						onDrop={async (data) => {
+							const { type, id, item } = data;
 
 							if (type === 'chat') {
 								let chat = await getChatById(id).catch((error) => {
@@ -746,7 +745,7 @@
 
 					{#if $scrollPaginationEnabled && !allChatsLoaded}
 						<Loader
-							on:visible={(e) => {
+							onVisible={() => {
 								if (!chatListLoading) {
 									loadMoreChats();
 								}

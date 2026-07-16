@@ -1,8 +1,5 @@
 <script lang="ts">
-	import { getContext, createEventDispatcher, onMount, onDestroy } from 'svelte';
-
-	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
+	import { onMount, onDestroy, type Snippet } from 'svelte';
 
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import ChevronRight from '../icons/ChevronRight.svelte';
@@ -10,22 +7,35 @@
 	import Tooltip from './Tooltip.svelte';
 	import Plus from '../icons/Plus.svelte';
 
-	export let open = true;
+	let {
+		open = $bindable(true),
+		name = '',
+		collapsible = true,
+		onAddLabel = '',
+		onAdd = null,
+		dragAndDrop = true,
+		className = '',
+		onChange = undefined,
+		onDrop = undefined,
+		onImport = undefined,
+		children
+	}: {
+		open?: boolean;
+		name?: string;
+		collapsible?: boolean;
+		onAddLabel?: string;
+		onAdd?: null | (() => void);
+		dragAndDrop?: boolean;
+		className?: string;
+		onChange?: (open: boolean) => void;
+		onDrop?: (data: any) => void;
+		onImport?: (content: any) => void;
+		children?: Snippet;
+	} = $props();
 
-	export let id = '';
-	export let name = '';
-	export let collapsible = true;
+	let folderElement: HTMLDivElement | null = $state(null);
 
-	export let onAddLabel: string = '';
-	export let onAdd: null | Function = null;
-
-	export let dragAndDrop = true;
-
-	export let className = '';
-
-	let folderElement;
-
-	let draggedOver = false;
+	let draggedOver = $state(false);
 
 	const onDragOver = (e) => {
 		e.preventDefault();
@@ -33,13 +43,11 @@
 		draggedOver = true;
 	};
 
-	const onDrop = (e) => {
+	const dropHandler = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (folderElement.contains(e.target)) {
-			console.log('Dropped on the Button');
-
+		if (folderElement?.contains(e.target)) {
 			if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
 				// Iterate over all items in the DataTransferItemList use functional programming
 				for (const item of Array.from(e.dataTransfer.items)) {
@@ -47,16 +55,13 @@
 					if (item.kind === 'file') {
 						const file = item.getAsFile();
 						if (file && file.type === 'application/json') {
-							console.log('Dropped file is a JSON file!');
-
 							// Read the JSON file with FileReader
 							const reader = new FileReader();
 							reader.onload = async function (event) {
 								try {
 									const fileContent = JSON.parse(event.target.result);
-									console.log('Parsed JSON Content: ', fileContent);
 									open = true;
-									dispatch('import', fileContent);
+									onImport?.(fileContent);
 								} catch (error) {
 									console.error('Error parsing JSON file:', error);
 								}
@@ -73,8 +78,7 @@
 						const dataTransfer = e.dataTransfer.getData('text/plain');
 						const data = JSON.parse(dataTransfer);
 
-						console.log(data);
-						dispatch('drop', data);
+						onDrop?.(data);
 					}
 				}
 			}
@@ -94,18 +98,19 @@
 		if (!dragAndDrop) {
 			return;
 		}
-		folderElement.addEventListener('dragover', onDragOver);
-		folderElement.addEventListener('drop', onDrop);
-		folderElement.addEventListener('dragleave', onDragLeave);
+		folderElement?.addEventListener('dragover', onDragOver);
+		folderElement?.addEventListener('drop', dropHandler);
+		folderElement?.addEventListener('dragleave', onDragLeave);
 	});
 
 	onDestroy(() => {
 		if (!dragAndDrop) {
 			return;
 		}
-		folderElement.addEventListener('dragover', onDragOver);
-		folderElement.removeEventListener('drop', onDrop);
-		folderElement.removeEventListener('dragleave', onDragLeave);
+		// llens: 旧実装は destroy 時に dragover を addEventListener していた(明白なバグ)。remove に修正。
+		folderElement?.removeEventListener('dragover', onDragOver);
+		folderElement?.removeEventListener('drop', dropHandler);
+		folderElement?.removeEventListener('dragleave', onDragLeave);
 	});
 </script>
 
@@ -117,15 +122,8 @@
 	{/if}
 
 	{#if collapsible}
-		<Collapsible
-			bind:open
-			className="w-full "
-			buttonClassName="w-full"
-			on:change={(e) => {
-				dispatch('change', e.detail);
-			}}
-		>
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
+		<Collapsible bind:open className="w-full " buttonClassName="w-full" {onChange}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-content-muted transition"
 			>
@@ -146,19 +144,16 @@
 				{#if onAdd}
 					<button
 						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center text-content"
-						on:pointerup={(e) => {
+						onpointerup={(e) => {
 							e.stopPropagation();
 						}}
-						on:click={(e) => {
+						onclick={(e) => {
 							e.stopPropagation();
-							onAdd();
+							onAdd?.();
 						}}
 					>
 						<Tooltip content={onAddLabel}>
-							<button
-								class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto"
-								on:click={(e) => {}}
-							>
+							<button class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto">
 								<Plus className=" size-3" strokeWidth="2.5" />
 							</button>
 						</Tooltip>
@@ -166,11 +161,13 @@
 				{/if}
 			</div>
 
-			<div slot="content" class="w-full">
-				<slot></slot>
-			</div>
+			{#snippet content()}
+				<div class="w-full">
+					{@render children?.()}
+				</div>
+			{/snippet}
 		</Collapsible>
 	{:else}
-		<slot></slot>
+		{@render children?.()}
 	{/if}
 </div>

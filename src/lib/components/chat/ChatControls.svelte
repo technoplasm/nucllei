@@ -133,7 +133,7 @@
 	{#if $showControls}
 		<Drawer
 			show={$showControls}
-			on:close={() => {
+			onClose={() => {
 				showControls.set(false);
 			}}
 		>

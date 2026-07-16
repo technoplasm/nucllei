@@ -192,9 +192,7 @@
 				{#each $banners.filter( (b) => (b.dismissible ? !JSON.parse(localStorage.getItem('dismissedBannerIds') ?? '[]').includes(b.id) : true) ) as banner}
 					<Banner
 						{banner}
-						on:dismiss={(e) => {
-							const bannerId = e.detail;
-
+						onDismiss={(bannerId) => {
 							localStorage.setItem(
 								'dismissedBannerIds',
 								JSON.stringify(

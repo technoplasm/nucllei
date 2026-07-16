@@ -404,8 +404,7 @@
 				<div class="w-full">
 					{#if messages.at(0)?.parentId !== null}
 						<Loader
-							on:visible={(e) => {
-								console.log('visible');
+							onVisible={() => {
 								if (!messagesLoading) {
 									loadMoreMessages();
 								}

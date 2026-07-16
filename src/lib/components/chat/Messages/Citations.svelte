@@ -185,29 +185,31 @@
 						{/if}
 					</div>
 				</div>
-				<div slot="content">
-					<div class="flex text-xs font-medium flex-wrap">
-						{#each citations as citation, idx}
-							<button
-								id={`source-${id}-${idx + 1}`}
-								class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
-								on:click={() => {
-									showCitationModal = true;
-									selectedCitation = citation;
-								}}
-							>
-								{#if citations.every((c) => c.distances !== undefined)}
-									<div class="bg-gray-50 dark:bg-gray-800 rounded-full size-4">
-										{idx + 1}
+				{#snippet content()}
+					<div>
+						<div class="flex text-xs font-medium flex-wrap">
+							{#each citations as citation, idx}
+								<button
+									id={`source-${id}-${idx + 1}`}
+									class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
+									on:click={() => {
+										showCitationModal = true;
+										selectedCitation = citation;
+									}}
+								>
+									{#if citations.every((c) => c.distances !== undefined)}
+										<div class="bg-gray-50 dark:bg-gray-800 rounded-full size-4">
+											{idx + 1}
+										</div>
+									{/if}
+									<div class="flex-1 mx-1 truncate">
+										{decodeString(citation.source.name)}
 									</div>
-								{/if}
-								<div class="flex-1 mx-1 truncate">
-									{decodeString(citation.source.name)}
-								</div>
-							</button>
-						{/each}
+								</button>
+							{/each}
+						</div>
 					</div>
-				</div>
+				{/snippet}
 			</Collapsible>
 		{/if}
 	</div>
