@@ -139,15 +139,15 @@
 </script>
 
 <Dropdown
-	on:change={(e) => {
-		if (e.detail === false) {
+	onChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
 >
 	<slot />
 
-	<div slot="content">
+	{#snippet content()}
 		<DropdownMenu.Content
 			class="w-full max-w-[200px] rounded-xl px-1 py-1.5  z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 			sideOffset={8}
@@ -240,5 +240,5 @@
 				<div class="flex items-center">{$i18n.t('Copy')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>
-	</div>
+	{/snippet}
 </Dropdown>

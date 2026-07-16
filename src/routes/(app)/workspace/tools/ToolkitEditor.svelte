@@ -298,7 +298,7 @@ class Tools:
 <ConfirmDialog
 	bind:show={showRenameConfirm}
 	title={$i18n.t('Change ID?')}
-	on:confirm={() => {
+	onConfirm={() => {
 		saveHandler();
 	}}
 >

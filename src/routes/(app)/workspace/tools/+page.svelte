@@ -250,7 +250,7 @@
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete tool?')}
-		on:confirm={() => {
+		onConfirm={() => {
 			deleteHandler(selectedTool);
 		}}
 	>

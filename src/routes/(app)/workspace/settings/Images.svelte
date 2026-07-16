@@ -245,9 +245,7 @@
 						<div class="px-1">
 							<Switch
 								bind:state={config.enabled}
-								on:change={(e) => {
-									const enabled = e.detail;
-
+								onChange={(enabled) => {
 									if (enabled) {
 										if (
 											config.engine === 'automatic1111' &&

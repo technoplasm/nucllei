@@ -343,7 +343,7 @@
 									>
 										<Switch
 											bind:state={model.is_active}
-											on:change={async () => {
+											onChange={async () => {
 												toggleModelHandler(model);
 											}}
 										/>

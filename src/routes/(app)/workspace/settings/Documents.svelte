@@ -55,7 +55,7 @@
 
 <ResetUploadDirConfirmDialog
 	bind:show={showResetUploadDirConfirm}
-	on:confirm={async () => {
+	onConfirm={async () => {
 		const res = await deleteAllFiles().catch((error) => {
 			toast.error(`${error}`);
 			return null;

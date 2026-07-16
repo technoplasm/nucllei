@@ -40,7 +40,7 @@
 
 <ConfirmDialog
 	bind:show={showDeleteConfirmDialog}
-	on:confirm={() => {
+	onConfirm={() => {
 		if (chatToDelete) {
 			deleteChatHandler(chatToDelete);
 			chatToDelete = null;

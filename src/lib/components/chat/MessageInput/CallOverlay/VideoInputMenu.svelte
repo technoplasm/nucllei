@@ -16,15 +16,15 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
 >
 	<slot />
 
-	<div slot="content">
+	{#snippet content()}
 		<DropdownMenu.Content
 			class="w-full max-w-[180px] rounded-lg px-1 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-9999 bg-white dark:bg-gray-900 dark:text-white shadow-xs"
 			sideOffset={6}
@@ -47,5 +47,5 @@
 				</DropdownMenu.Item>
 			{/each}
 		</DropdownMenu.Content>
-	</div>
+	{/snippet}
 </Dropdown>

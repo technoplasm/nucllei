@@ -1,18 +1,23 @@
 <script lang="ts">
-	import { createEventDispatcher, tick } from 'svelte';
 	import { Switch } from 'bits-ui';
-	export let state = true;
 
-	const dispatch = createEventDispatcher();
+	let {
+		state = $bindable(true),
+		onChange = undefined
+	}: {
+		state?: boolean;
+		onChange?: (state: boolean) => void;
+	} = $props();
 
-	// Svelte 5(互換モード)では初期化時の $: dispatch が親のリスナーに届いてしまい、
-	// マウントしただけで on:change 側の副作用(API 呼び出し等)が発火する。
-	// 初期値を除き、state が実際に変化したときだけ change を発火する。
+	// 初期値では発火させず、state が実際に変化したときだけ onChange を呼ぶ
+	// (初期化時の反応が親側の副作用(API 保存等)を発火させた前歴があるため)。
 	let lastState = state;
-	$: if (state !== lastState) {
-		lastState = state;
-		dispatch('change', state);
-	}
+	$effect(() => {
+		if (state !== lastState) {
+			lastState = state;
+			onChange?.(state);
+		}
+	});
 </script>
 
 <!-- llens(#34): 一回り小型化(h-5 w-9 → h-4 w-7)。unchecked の dark:bg-transparent は

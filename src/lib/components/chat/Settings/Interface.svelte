@@ -114,7 +114,7 @@
 							<div class=" self-center text-xs">{$i18n.t(row.label)}</div>
 
 							{#if row.type === 'switch'}
-								<Switch bind:state={values[row.key]} on:change={() => saveRow(row)} />
+								<Switch bind:state={values[row.key]} onChange={() => saveRow(row)} />
 							{:else if row.type === 'select'}
 								<select
 									class="bg-surface-muted hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden"

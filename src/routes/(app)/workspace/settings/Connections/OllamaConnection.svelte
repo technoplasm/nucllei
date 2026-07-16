@@ -48,7 +48,7 @@
 
 <ConfirmDialog
 	bind:show={showDeleteConfirmDialog}
-	on:confirm={() => {
+	onConfirm={() => {
 		onDelete();
 		showConfigModal = false;
 	}}

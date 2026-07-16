@@ -512,7 +512,7 @@
 
 <ModelDeleteConfirmDialog
 	bind:show={showModelDeleteConfirm}
-	on:confirm={() => {
+	onConfirm={() => {
 		deleteModelHandler();
 	}}
 />

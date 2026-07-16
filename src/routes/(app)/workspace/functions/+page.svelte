@@ -164,7 +164,7 @@
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete function?')}
-		on:confirm={() => {
+		onConfirm={() => {
 			deleteHandler(selectedFunction);
 		}}
 	>

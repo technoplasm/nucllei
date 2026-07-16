@@ -1,43 +1,56 @@
 <script lang="ts">
 	import DOMPurify from 'dompurify';
 
-	import { onDestroy } from 'svelte';
+	import { onDestroy, type Snippet } from 'svelte';
 
-	import tippy from 'tippy.js';
-	import { roundArrow } from 'tippy.js';
+	import tippy, { type Instance } from 'tippy.js';
 
-	export let placement = 'top';
-	export let content = `I'm a tooltip!`;
-	export let touch = true;
-	export let className = 'flex';
-	export let theme = '';
-	export let offset = [0, 4];
-	export let allowHTML = true;
-	export let tippyOptions = {};
+	let {
+		placement = 'top',
+		content = '',
+		touch = true,
+		className = 'flex',
+		theme = '',
+		offset = [0, 4],
+		allowHTML = true,
+		tippyOptions = {},
+		children
+	}: {
+		placement?: string;
+		content?: string;
+		touch?: boolean;
+		className?: string;
+		theme?: string;
+		offset?: [number, number];
+		allowHTML?: boolean;
+		tippyOptions?: Record<string, unknown>;
+		children?: Snippet;
+	} = $props();
 
-	let tooltipElement;
-	let tooltipInstance;
+	let tooltipElement: HTMLDivElement | undefined = $state();
+	let tooltipInstance: Instance | null = null;
 
-	$: if (tooltipElement && content) {
-		if (tooltipInstance) {
-			tooltipInstance.setContent(DOMPurify.sanitize(content));
-		} else {
-			tooltipInstance = tippy(tooltipElement, {
-				content: DOMPurify.sanitize(content),
-				placement: placement,
-				allowHTML: allowHTML,
-				touch: touch,
-				...(theme !== '' ? { theme } : { theme: 'dark' }),
-				arrow: false,
-				offset: offset,
-				...tippyOptions
-			});
-		}
-	} else if (tooltipInstance && content === '') {
-		if (tooltipInstance) {
+	$effect(() => {
+		if (tooltipElement && content) {
+			if (tooltipInstance) {
+				tooltipInstance.setContent(DOMPurify.sanitize(content));
+			} else {
+				tooltipInstance = tippy(tooltipElement, {
+					content: DOMPurify.sanitize(content),
+					placement: placement,
+					allowHTML: allowHTML,
+					touch: touch,
+					...(theme !== '' ? { theme } : { theme: 'dark' }),
+					arrow: false,
+					offset: offset,
+					...tippyOptions
+				});
+			}
+		} else if (tooltipInstance && content === '') {
 			tooltipInstance.destroy();
+			tooltipInstance = null;
 		}
-	}
+	});
 
 	onDestroy(() => {
 		if (tooltipInstance) {
@@ -47,5 +60,5 @@
 </script>
 
 <div bind:this={tooltipElement} aria-label={DOMPurify.sanitize(content)} class={className}>
-	<slot />
+	{@render children?.()}
 </div>

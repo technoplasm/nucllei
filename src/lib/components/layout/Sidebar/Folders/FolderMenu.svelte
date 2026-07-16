@@ -17,8 +17,8 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onChange={(state) => {
+		if (state === false) {
 			dispatch('close');
 		}
 	}}
@@ -27,7 +27,7 @@
 		<slot />
 	</Tooltip>
 
-	<div slot="content">
+	{#snippet content()}
 		<DropdownMenu.Content
 			class="w-full max-w-[160px] rounded-lg px-1 py-1.5  z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 			sideOffset={-2}
@@ -66,5 +66,5 @@
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>
-	</div>
+	{/snippet}
 </Dropdown>

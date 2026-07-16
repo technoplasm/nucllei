@@ -27,8 +27,8 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
@@ -37,7 +37,7 @@
 		{@render children?.()}
 	</Tooltip>
 
-	<div slot="content">
+	{#snippet content()}
 		<DropdownMenu.Content
 			class="w-full max-w-[160px] rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
 			sideOffset={-2}
@@ -77,5 +77,5 @@
 				<div class="flex items-center">{$i18n.t('Export')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>
-	</div>
+	{/snippet}
 </Dropdown>

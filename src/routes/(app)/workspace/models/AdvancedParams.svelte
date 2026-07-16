@@ -386,7 +386,7 @@
 										<div class=" pr-2">
 											<Switch
 												state={params[item.key]}
-												on:change={(e) => setSwitch(item, e.detail)}
+												onChange={(state) => setSwitch(item, state)}
 											/>
 										</div>
 									{/if}

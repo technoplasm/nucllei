@@ -96,7 +96,7 @@
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete model?')}
-		on:confirm={() => {
+		onConfirm={() => {
 			deleteHandler(deleteModel);
 		}}
 	>
@@ -218,7 +218,7 @@
 					<Tooltip content={model.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
 						<Switch
 							bind:state={model.is_active}
-							on:change={async () => {
+							onChange={async () => {
 								await toggleModelById(model.id);
 								await _models.set(await getModels());
 							}}

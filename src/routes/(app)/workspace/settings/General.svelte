@@ -236,7 +236,7 @@
 								<div class="mt-1">
 									<Switch
 										bind:state={ENABLE_LDAP}
-										on:change={async () => {
+										onChange={async () => {
 											updateLdapConfig(ENABLE_LDAP);
 										}}
 									/>

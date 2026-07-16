@@ -27,8 +27,8 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
@@ -37,7 +37,7 @@
 		<slot />
 	</Tooltip>
 
-	<div slot="content">
+	{#snippet content()}
 		<DropdownMenu.Content
 			class="w-full max-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 			sideOffset={10}
@@ -84,5 +84,5 @@
 				</DropdownMenu.Item>
 			</Tooltip>
 		</DropdownMenu.Content>
-	</div>
+	{/snippet}
 </Dropdown>

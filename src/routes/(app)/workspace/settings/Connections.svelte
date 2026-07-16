@@ -202,7 +202,7 @@
 							<div class="">
 								<Switch
 									bind:state={ENABLE_OPENAI_API}
-									on:change={async () => {
+									onChange={async () => {
 										updateOpenAIHandler();
 									}}
 								/>
@@ -271,7 +271,7 @@
 					<div class="mt-1">
 						<Switch
 							bind:state={ENABLE_OLLAMA_API}
-							on:change={async () => {
+							onChange={async () => {
 								updateOllamaHandler();
 							}}
 						/>

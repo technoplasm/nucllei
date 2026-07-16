@@ -86,7 +86,7 @@
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete skill?')}
-		on:confirm={() => {
+		onConfirm={() => {
 			deleteHandler(deleteSkill);
 		}}
 	>

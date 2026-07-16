@@ -72,7 +72,7 @@
 	bind:show={showUnarchiveAllConfirmDialog}
 	message={$i18n.t('Are you sure you want to unarchive all archived chats?')}
 	confirmLabel={$i18n.t('Unarchive All')}
-	on:confirm={() => {
+	onConfirm={() => {
 		unarchiveAllHandler();
 	}}
 />
