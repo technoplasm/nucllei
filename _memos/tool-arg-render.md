@@ -120,7 +120,7 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
   `Text` / `Table`、media↔hljs 変換(素通し+alias+fallback plaintext)、
   `extract_render_from_function`(Annotated)/ `extract_render_from_spec`(contentMediaType)/
   `apply_render_to_spec`(宣言→spec 反映、既存宣言は上書きしない)。単体テスト
-  `test/apps/webui/utils/test_tool_render.py`。
+  `nucllei/test/apps/webui/utils/test_tool_render.py`。
 - **2. backend 配線**: `get_tool_specs`(保存時)と `get_tools`(実行時。stale な DB spec でも
   生きた関数から反映)が spec に contentMediaType を注入し `tool_dict["render"]` を持つ。
   middleware の tool_call ループが `calls[].render` に同梱 — snapshot 素通しでイベント・永続化
@@ -154,4 +154,4 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 
 ## 関連
 
-[[llens-renderer-track-status]] / `_memos/rendering-design.md`(L0〜L3)/ `_memos/tools-catchup.md`(#18)
+[[llens-renderer-track-status]] / `_memos/rendering-design.md`(L0〜L3)/ 旧 `_memos/tools-catchup.md`(#18 — #34 棚卸しで削除済み)

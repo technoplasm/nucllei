@@ -99,7 +99,7 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
 
 ### 1c. 組み込みツール = Tools テーブルの builtin 行
 
-- **定義**: `nucllei/tools/builtin/` 配下のモジュール。起動時に Tools テーブルへ
+- **定義**: `nucllei/builtin_tools/` 配下のモジュール。起動時に Tools テーブルへ
   type="builtin" 行として sync(content は空、ロード時に repo モジュールへ振り向け)
 - 既存機構がそのまま効く: spec 生成(docstring → schema)・toolIds picker・skill の
   tool_ids・access_control・valves・4pcg ガード。content 更新 API は builtin 行を拒否

@@ -36,6 +36,11 @@
   License 表示を撤去。version は残す(BSD 著作権・Twemoji は #34 まで温存)。
 - version 焼き込み `c92c0784f`: deploy tag(`prodYYYYMMDD_NN`、#25)を build 時 `APP_VERSION` で
   焼き込み可能に(vite.config.ts / env.py / Dockerfile)。未設定なら package.json の 0.6.5。
+  → **2026-07-16 改訂**(f37361283 / 0d69f2da4): バージョンの真実源は git tag
+  (リリース `vYYYYMMDD-NN` / プレ `pre-NN` の 2 形式のみ describe --match で拾う)。
+  優先順 = `APP_VERSION` env(docker build 焼き込み)> git describe(dev)> package.json の 0.6.5。
+  命名は APP_* = 本体 Nucllei / WEBUI_* = 配備層(`WEBUI_VERSION` は配備 tag 用に新設)。
+  `prodYYYYMMDD_NN` 形式は廃止。git hash(BUILD_HASH 系)は全面撤去。
 
 ## 残(任意・後回し)
 - 運用固定の項目(接続 URL・認証方式・エンジン種別など、実行時に触らせたくないもの)を素の

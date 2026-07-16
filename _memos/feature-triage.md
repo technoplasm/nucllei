@@ -4,18 +4,18 @@
 
 | 機能 | 判断 | 備考 |
 |---|---|---|
-| ナレッジベース(組み込み) | **不要・撤去済み(#48 ナビ / #52 で完全撤去)** | 独自実装が別にあるため。#48 で Workspace ナビから撤去。**改訂(2026-07-08 #52 第2セッション): route/backend も完全撤去**(workspace KB 画面・チャット `#` ピッカー・モデル KB 割当・knowledge store・knowledge router 全 endpoint)。温存は `models/knowledge.py`(Knowledges)のみ(access_control #40 / IDOR test 結線) |
+| ナレッジベース(組み込み) | **不要・撤去済み(#48 ナビ / #52 で完全撤去)** | 独自実装が別にあるため。#48 で Workspace ナビから撤去。**改訂(2026-07-08 #52 第2セッション): route/backend も完全撤去**(workspace KB 画面・チャット `#` ピッカー・モデル KB 割当・knowledge store・knowledge router 全 endpoint)。~~温存は `models/knowledge.py`(Knowledges)のみ(access_control #40 / IDOR test 結線)~~ → **再改訂(2026-07-10 #41): `models/knowledge.py` も撤去・knowledge テーブル drop(migration a7c9e2f4b8d1)。KB 残骸ゼロ** |
 | Documents(文書抽出) | **Docling が使えれば十分(実体は prism)+ docling 非依存の素の md 化は markitdown(fork 同梱)** | ~~v0.6.5 で対応済み(`CONTENT_EXTRACTION_ENGINE=docling`)~~ → **改訂(2026-07-08 #52): fork の抽出 preset(`CONTENT_EXTRACTION_ENGINE`/外部エンジン config)は撤去。docling 抽出は案件層(prism)の Attachment Function が直接叩く(`owui/attachments/docling_extract.py`)。fork は「仕組み」だけ** → **再改訂(2026-07-14): docling は遅いので、docling 非依存の軽い md 化に `markitdown[all]` を fork へ同梱。fork は抽出コードを持たず(一度 v0.6.5 langchain ローダ版を `utils/extraction.py` に復元したが markitdown の劣化再実装のため撤回・削除)、prism の Attachment が `from markitdown import MarkItDown` で直接呼ぶ。xlsx→シート別 CSV 等の型別ポリシーも prism が手前で処理。langchain-community/unstructured/networkx/nltk/pypdf/docx2txt/ftfy は撤去(langchain-core のみ tools.py 用に残置)。詳細 `_memos/file-handling.md`** |
 | RAG / retrieval | **一切不使用・撤去済み(#52)** | 将来必要になってもツール側で実装。**2026-07-08: embedding/vector/reranking/chunk/RAG_TEMPLATE を config から完全排除** |
 | Web 検索 | **残す(prism tool → 外部検索システム直叩き)** | 改訂(2026-07-13、#51 close): 当初の「fork 組み込みツール」案を撤回 — docling と同じ線引きで **fork は何も持たず**、prism の tool が SearXNG 等を Valves 設定で直接叩く。fork の WEB_SEARCH_* config・providers・管理画面は全撤去(`eae47a4bd`)。閉域本体では成立しない機能(メタ検索も外向き通信必須)= 非閉域の横展開先向け |
-| 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで |
+| 組み込みツール群(upstream の builtin) | **不要** | 簡単に再現可能。必要なものは自前ツールで。※fork 自前の組み込み tool 機構(`nucllei/builtin_tools/`、制御はモデル設定)は別途導入 — 詳細 `builtin-tools.md`(#18-3) |
 | コード実行(組み込み Pyodide/Jupyter) | **撤去済み(#23)** | 改訂(2026-07-14、#23): code_interpreter(タグ検出による tool 外コード実行)を機能ごと撤去 — config・permission・UI トグル・実行ループすべて。コード実行は nsjail+IPython の自前 tool 一本で、tool 経路以外の実行裏道は残さない。Pyodide には戻さない(fork.md §6) |
 | 会話検索 | **必要・維持** | v0.6.5 に存在(タイトル+本文検索)。デグレさせない |
-| メモリー | **素の SQL ストアに降格(#52)** | ~~放置・無効化も削除も投資もしない~~ → **改訂(2026-07-08 #52): embedding/vector 基盤撤去の一環で、memory を Claude 方式の「完全自然言語」ストアに降格**(`routers/memories.py` から VECTOR_DB/EMBEDDING_FUNCTION を除去、`/query` は全 memory を素で返す。テーブル/content/UI は温存)。これが embedding/vector の最後の消費者だった(issue #8 は close) |
+| メモリー | **撤去済み(#67)** | ~~放置・無効化も削除も投資もしない~~ → 改訂(2026-07-08 #52): embedding/vector 基盤撤去の一環で「完全自然言語」ストアに降格(これが embedding/vector の最後の消費者。issue #8 は close)→ **再改訂(2026-07-10 #67): UI 撤去(#63)の残骸として router・モデル・テーブルごと撤去(migration c4e8a1f6d2b9)** |
 | ノート | 無いままでよい | v0.6.5 に存在しない。追加しない |
 | タスク / オートメーション / カレンダー | 無いままでよい | v0.6.5 に存在しない。追加しない |
 | 画像生成 | **機能として維持** | 厳密なキャッチアップは不要。動く状態を保つ(KEEP-MINIMAL 扱い) |
-| プロンプト管理(`/` 呼び出し) | あってもよいが**スキルとの棲み分け再設計** | プロンプト内に「スキルを使え」と書く形は不可。`/` はユーザーがスキルを能動発火させる UI に置き換える案(issue #5) |
+| プロンプト管理(`/` 呼び出し) | **撤去済み(#35)** | ~~あってもよいがスキルとの棲み分け再設計~~ → **改訂(2026-07-06 #35): 「`/` はスキル能動発火 UI に置き換える」案をそのまま実装 — workspace/picker を Skill に置換し prompts を全退役**(prompt テーブル drop = migration c2d9a7b41e05、74f0e5161) |
 | ツール(Tools) | **完全キャッチアップ** | 外形仕様・公式ドキュメントベースで機能パリティを目指す(コード移植は不可) |
 | スキル(Skills) | **完全キャッチアップ** | 同上。llens の権限モデル(診療科×職位)と統合(issue #5) |
 | ストア(openwebui.com 共有・取得) | **撲滅済み(#10)** | air-gapped 前提。community sharing(config / admin トグル / 共有ボタン / モデル discover / 作者リンク)を機能ごと撤去(773c2dead)。tools/functions/skills の共有導線は #45 で撤去済み |
@@ -177,3 +177,18 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 
 - generate_title がかなり壊れている(全チャット "New Chat"、`title_string=None` の
   AttributeError を 2026-07-10 に実測)→ #68 で修理
+
+## 追加撤去(2026-07-16 前後、#34 ブランディング / #70 正常化の道中)
+
+製品名 Open WebUI → **Nucllei** への改名(#34、repo = technoplasm/nucllei、パッケージ
+`nucllei`、`backend/` 廃止でフラット化)と #70 の画面正常化にともなう機能撤去。
+
+| 機能 | 判断 | 備考 |
+|---|---|---|
+| アップデート確認 / What's New | **撤去済み(#10 #70)** | api.openwebui.com への照会含め機能ごと全撤去(9755e960a) |
+| 接続 tags・model tags | **撤去済み(#70)** | 接続モーダルの tags 機能(8f8c5f67e)+ model tags の死にパス(1915000c8)を FE/BE とも撤去 |
+| CUSTOM_NAME | **撤去済み(#34)** | api.openwebui.com への起動時照会機能ごと撤去(config.py にコメント跡) |
+| K8S_FLAG / kubernetes マニフェスト | **撤去済み(#34)** | k8s サポート全廃 |
+| docker-compose | **撤去済み(#34)** | compose 全廃(ec3898e49)。配布は Docker(単一 Dockerfile)のみ |
+| PyPI 配布(hatch ビルド層) | **撤去済み(#34)** | Python 配布層を撤去(d4b1404f4)。pyproject は uv 依存管理専用 |
+| cypress(upstream E2E) | **撤去済み(#34)** | 一度も動いていない残骸(28ac9a59a)。E2E は Playwright(dev-environment.md) |

@@ -43,3 +43,19 @@ svelte 5.56.4 / @sveltejs/vite-plugin-svelte 4.x / svelte-check 4.x に上げて
 - 同型の芽: `createEventDispatcher` + `$:` の組み合わせは初期化発火を疑うこと。
   現存は Switch / Collapsible の 2 箇所のみ(`grep -rlF '$: dispatch(' src/`)。
   新規コンポーネントは runes で書くため対象外だが、upstream 由来コードを触るときは再 grep する。
+  - **追記(2026-07-17): `$: dispatch(` は 0 件になった**(#70 A2-2 で `common/` の dispatcher を
+    全廃し、Switch / Collapsible は callback prop 化 — lastState ガードパターンは CLAUDE.md に転記済み)。
+    upstream 由来コードを触るときの再 grep 習慣は維持。
+
+## 現況(2026-07-17 追記)
+
+- 移行方針は実運用に昇格して CLAUDE.md 規約になった: **新規は runes + callback prop(`onXxx`)、
+  `createEventDispatcher` 新規使用禁止、named slot も新規は snippet prop**。`common/` の dispatcher は
+  2026-07-16 に全廃。残る dispatcher は 25 ファイル(chat メッセージ樹・サイドバー等)で #70 C トラック
+  (分割・runes 化)で消化する。
+- 実バージョン: svelte 5.56.4 / vite-plugin-svelte 4.0.4 / svelte-check 4.7.1(スパイク時と同じ系列)。
+- legacy ライブラリ凍結は継続(bits-ui 0.19.7 / paneforge 0.0.6 / svelte-sonner 0.3.19 /
+  svelte-confetti 1.4.0)。**@xyflow/svelte と svelte-virtual-list は依存ごと撤去済み**(薄化)。
+- `<svelte:component>` はスパイク時 4 件 → **現存 1 件**(`chat/Messages/Markdown/AlertRenderer.svelte`)。
+- svelte-check は **warnings 全プロジェクト 0**(2026-07-16 達成、以後 warning 新規 0 運用)・
+  **errors 1274**。CI(GitHub Actions)には依然入れていない(#25 の残タスクのまま)。

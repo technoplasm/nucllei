@@ -93,6 +93,8 @@ reasoning ブロックの終了は**タグ対(`</think>`)や content 到着で�
 - 現行 middleware に適用済み(`close_open_reasoning_block`、
   test_native_tool_calling.py で fixture リプレイ固定)。#17 L0 の
   content blocks 化でもこの規律を引き継ぐ(閉じはストリーム構造から導出)。
+  → 実体は #23(2026-07-14)で `utils/response_assembler.py` へ移設
+  (①②は assembler 内、③の except 経路は middleware から呼ぶ)。
 - 生 `<think>` タグ混り content(SGLang reasoning parser 無効)は接続契約外
   (_memos/model-frames.md)。タグ検出経路は #17 で廃止予定であり堅牢化しない。
   ただし上記③の終端 close はタグ経路の未閉じブロックにも効く。
@@ -131,7 +133,7 @@ text join へ切替。
 { "type": "tool_calls", "calls": [/* OpenAI tool_call 形 */],
   "results": [{ "tool_call_id": "...", "content": "...", "files": [] }] }
   // call 単位の done はフロントが results の有無から導出
-{ "type": "code_interpreter", ... }        // 現行踏襲・薄く(自前ツール移行で消える面)
+{ "type": "code_interpreter", ... }        // 現行踏襲・薄く → #23(2026-07-14)で機能ごと撤去済み(この型は消滅)
 ```
 
 **middleware の扱い(#23 同梱判断 → 2026-07-14 実施済み)**: L0 時点では

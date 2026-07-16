@@ -6,7 +6,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ## 色トークン一覧(真実源 = `src/tailwind.css`)
 
-値は調整中につきドリフトする — 正確な現行値は常に `src/tailwind.css` を見る(下表は 2026-07-14 時点)。
+値は調整中につきドリフトする — 正確な現行値は常に `src/tailwind.css` を見る(下表は 2026-07-17 検証で全値一致)。
 
 | トークン | 用途 | Tailwind クラス | light / dark |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--surface-raised` | 入力欄・カードなど持ち上げ面 | `bg-surface-raised` | `#ffffff` / `#262626` |
 | `--surface-muted` | 控えめな帯(table thead 等) | `bg-surface-muted` | `#f0f0f0` / `#2d2d2d` |
 | `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#313131`(dark は raised より**明るく**する方向 — 2026-07-15 改訂) |
-| `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(#58 で差し替え予定) |
+| `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(モノクロ現行。旧「#58 で差し替え予定」の #58 は close 済み — ブランド本デザインは #76) |
 | `--secondary(-hover/-content)` | 副ボタン(戻る/キャンセル) | `bg-secondary hover:bg-secondary-hover text-secondary-content` | `#e9e9e9` / `#333333` 地 |
 | `--sidebar-hover` | サイドバー行 hover | `bg-sidebar-hover` | `#e7e7e7` / `#292929` |
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#dddddd` / `#313131` |
@@ -107,6 +107,10 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ### テキスト色トークンの移行ルール(2026-07-14 追加・gray ハードコード抽象化)
 
+> **移行完了(2026-07-17 実測):** `text-gray-*`(`dark:` 変種込み)は src 内 **0 件**。
+> 残る生 gray は bg 372 / border 95 の計 467 で、扱いは #75 の決着(下の gray セクション)のとおり
+> #70 C トラックで消化。下表は新規コード・bg/border 系を役割で置くときの判断基準として残す。
+
 `text-gray-*` は 11 shade がバラバラに散在(実測: 300×244 / 500×225 / 700×115 / 600×111 /
 400×100 / 100×82 …、text 系だけで ~1000 箇所 + `dark:text-gray-*` ~455)。**shade は役割と
 1:1 対応していない**(同じキャプションが 400 だったり 500 だったり)ので、**shade 単位の一括置換は
@@ -177,34 +181,42 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   は撤去)。適用ロジックは `src/lib/utils/theme.ts`、起動時スクリプトは `src/app.html`。
 - gray パレット(`--color-gray-*`)は dark 時に `theme.ts` が **800/850/900/950 のみ**を
   インライン設定(中立: #333/#262626/#171717/#0d0d0d)。**700 以下は未設定**。
+  ※ この値は `tailwind.config.js` の中立 fallback と同値なので、#75 の決着(下の gray セクション)を
+  踏まえると**冗長**(あってもなくても表示は同じ)— 撤去候補。
 
-## ⚠️ Tailwind v4 の gray が青寄り(ハマりどころ)
+## ⚠️ Tailwind v4 の gray が青寄り(経緯と決着 — #75)
+
+> **決着(2026-07-17、#75 close):** 「v4 の既定クール gray が生の `gray-*` クラスに出る」という
+> 下記の前提が**そもそも崩れていた** — **B案(パレット中立化)は upstream 由来の config で初めから
+> 実質実装済み**。`tailwind.config.js` は gray スケール**全段**を `gray.N = var(--color-gray-N, #中立hex)`
+> で上書きしており、`--color-gray-*` 変数は**どこにも定義されない**(@config 構成では `:root` に
+> 出力されない — 上述のテキストトークンの罠と同件。例外は `theme.ts` が dark で入れる 800/850/900/950
+> だが、値は fallback と同値の中立)ため、**生の `gray-*` クラスは常に中立 fallback に解決される**。
+> 旧記述の「v4 が同名 `--color-gray-N` を既定で先に定義するためフォールバックが効かない」は誤り。
+> v4 のクール gray が画面に出る経路は下記 prose 注入のみで、そこは `border-line!` で打ち消し済み。
+> 残る生 `gray-*`(2026-07-17 実測 467 = bg 372 / border 95、chat・legacy 帯に偏在)の意味トークン化は
+> **色の問題ではなくコード整理** — #70 C トラックの「触った画面はちゃんとやる」規律で消化し、
+> 独立 issue は持たない(#75 close)。「ボーダー色トークン化を独立セッションで」の旧・次の一手も同様に吸収。
 
 > **改訂(2026-07-14):** 罫線問題の**根因は「v4 gray が青い」ことではなく、md(prose)マークアップの
-> セレクタ強さ(specificity)制御**だった(下の prose 注入の項)。青みは実在するが**別件の純粋な見た目**の話で、
-> **仮に gray を完全中立化しても `border-gray-*` は prose に勝てない**(= 後述 B案は罫線問題を解かない)。
-> `border-line!` の `!` は「青対策」ではなく **specificity で prose に勝つため**。→ 生産的な方向は
-> **ボーダー色のトークン化**(`--line` 系の拡張・prose 領域は specificity 制御込み)であって、パレット中立化ではない。
+> セレクタ強さ(specificity)制御**だった(下の prose 注入の項)。
+> **仮に gray を完全中立化しても `border-gray-*` は prose に勝てない**(= B案は罫線問題を解かない)。
+> `border-line!` の `!` は「青対策」ではなく **specificity で prose に勝つため**。
 
 v4 の既定 `gray` パレットは **クール(青寄り)の oklch**(例 `gray-700` =
-`oklch(0.373 0.034 259.733)`)。本プロジェクトは config で `gray.N = var(--color-gray-N, #hex)`
-と中立 hex をフォールバック指定しているが、**v4 が同名 `--color-gray-N` を既定で先に定義**するため
-フォールバックが効かず v4 のクール値が出る。
-
-- **`gray-850` だけ無事**だったのは v4 のパレットに 850 が無く、フォールバック #262626 が効くから。
-- `theme.ts` が dark で 800/900/950 を上書きするので、それらは dark では中立。**light は全滅・
-  50〜700 は全モードでクール**。
-- さらに **Tailwind Typography(`prose`)が `tbody tr` に `--tw-prose-td-borders`(= 青い gray-700)
-  を注入**するため、`border-gray-*` を当てても勝てない(`prose` の方が勝つ)。
+`oklch(0.373 0.034 259.733)`)だが、上記のとおり config の上書きで**ユーティリティ経由では画面に出ない**。
+唯一の残存経路は **Tailwind Typography(`prose`)**: プラグインが `require('tailwindcss/colors')` を
+直 import して `--tw-prose-td-borders` 等に v4 既定値(クール gray)を焼き込むため、config の gray
+上書きを**素通りする**。しかも prose のセレクタが強く、`border-gray-*` を当てても勝てない。
 
 対処(現行・本対処): 罫線は **`--line` トークン + `border-line!`**(`!` = important、`px-3!` と同流儀)で
 prose の注入色を **specificity で打ち消す**。これが罫線問題の本質的対処。
-**B案(`:root` で `--color-gray-50〜950` の中立フルパレット定義)は罫線問題には無関係** — prose の勝ちは
-specificity なので中立化では解けない。B案は `bg-gray-100` 等の**微妙な青み=純粋な見た目**が気になった
-場合の任意対応にすぎず、優先度は低い。生産的な次の一手は**ボーダー色のトークン化**(`border-gray-*` を `--line` 系トークンへ、text 移行と同型・次セッション候補)。
 
 ## ブランド / アイコン
 
+- **ブランド画像は HE 染色モチーフの仮マークに全差し替え済み**(2026-07-17、#72 = d81de15b4。
+  favicon/splash/logo 一式、原版 = `static/static/favicon.svg`)。`splash-dark.png` はファイルごと削除。
+  ロゴの**本デザインは #76**(現行 HE 2 円マークは仮 — 要デザイン)。
 - スプラッシュ & ログインロゴは dark/light とも**カラーの `splash.png`**(gray 版
   `splash-dark.png`/`favicon-dark.png` への差し替えは撤去)。
 - モデルの既定アイコンは **`profile_image_url = null`** とし、表示側で gray へ fallback

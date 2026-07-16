@@ -3,7 +3,8 @@
 - 決定日: 2026-07-05(#35 の議論で確定)。改訂: 2026-07-06
   (発火の会話持続化・load_skill 命名確定・step2 の 2a/2b 分割・ハイライト要件 — 本文反映済み)
 - 位置づけ: upstream キャッチアップ(#18)ではなくその先。upstream に同等機能は無い
-  (外形参考: v0.8.0 `$` コマンド / v0.10.0 オンデマンド manifest — `tools-catchup.md` §skills)
+  (外形参考: v0.8.0 `$` コマンド / v0.10.0 オンデマンド manifest — 旧 `tools-catchup.md` §skills、
+  #34 棚卸しで削除済み)
 
 ## 確定した設計
 
@@ -73,7 +74,7 @@
 
 ## 発火フロー
 
-発火処理は 1 つ(middleware に新設、将来 #23 で module 分離):
+発火処理は 1 つ(middleware に新設 → #23 で `nucllei/utils/skills.py` へ分離済み、2026-07-14):
 **activate(skill, ctx) = content の変数展開 → 会話への注入 + tool_ids があれば `get_tools()` でロードして
 その先のモデル呼び出しの tools 配列へ追加**
 
@@ -173,6 +174,8 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
    `nucllei/utils/middleware.py::apply_skill_command`
    (呼び出しは `process_chat_payload` 冒頭)。tool_ids 遅延評価の seam は同ファイルの
    `# TODO(#35 step2): tool_ids 遅延評価のフック` コメント位置。
+   **→ 現在は #23(2026-07-14)で skill 発火一式(apply_skill_command / activate_skill /
+   build_load_skill_tool)を `nucllei/utils/skills.py` へ分離済み。**
 4. [x] フロント: picker 補完化(skills API 参照)、workspace UI を skills に置換、
    **有効 command のハイライト**(入力欄 + 送信済みメッセージ。サーバと同一述語)— 出荷 74f0e5161。
    prompts は同コミットで全退役(router/model/UI/権限キー削除、prompt テーブル drop = c2d9a7b41e05。

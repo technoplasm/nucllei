@@ -2,6 +2,17 @@
 
 調査日: 2026-07-05 / 対象フォーク: llens (open-webui v0.6.5 固定, air-gapped 北大病院向け)
 
+> **2026-07-17 追記(棚卸し)**: 本文は 2026-07-05 時点のスナップショット(製品は現在 Nucllei に改名、
+> `backend/` → `./nucllei` にフラット化 — 本文中の `test/apps/...` 等のパスは現 `nucllei/test/apps/...`)。
+> その後の機能撤去により、当時「コードが存在」だった以下は**機能ごと消滅し現行ツリーでは非該当**:
+> channels / memories / chat tag / temporary chat / `/utils/code/execute` / `/utils/gravatar`(いずれも #67)、
+> retrieval router・RAG/KB(#52・#41 で knowledge テーブルごと drop)— これにより Tier 3 の
+> RAG/KB 認可群・channels 群、Tier 1 の GHSA-hmjq(memories)等は対象喪失、
+> prompts(#35 → GHSA-4r4w の prompt history 面も喪失)、
+> code_interpreter(#23)、リクエスト由来 tool_ids(#54 でサーバー側解決に変更)、
+> api.openwebui.com 通信(update check / CUSTOM_NAME、#10/#34)。
+> 引き続き存在する面: 認証(LDAP/OAuth コードは off で温存)・audio・files・tool_servers・tasks。
+
 ## クリーンルーム順守メモ
 
 本レポートは GitHub Security Advisory API が返す **アドバイザリ本文・CVE 説明・影響バージョン範囲・修正バージョン・リリースノート** のみを根拠にしている。

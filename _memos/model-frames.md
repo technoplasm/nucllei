@@ -3,7 +3,7 @@
 キャプチャ日: 2026-07-05。サーバ: prism-llens:8000(SGLang、`kimi-k2.6`、
 max_model_len=262144、**reasoning parser 有効**)。
 fixture: `nucllei/test/fixtures/model_frames/`(生 SSE + 非ストリーム JSON +
-チャンク境界 + meta.json)。ローダ: `test/util/model_frames.py`。
+チャンク境界 + meta.json)。ローダ: `nucllei/test/util/model_frames.py`。
 
 ## 再キャプチャ手順
 

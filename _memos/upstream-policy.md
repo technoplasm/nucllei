@@ -54,7 +54,7 @@ Upstream-Commit: <SHA>
 
 ## リモート構成
 
-- `origin`: technoplasm/open-webui(本 fork)
+- `origin`: technoplasm/nucllei(本 fork。2026-07-17 に open-webui から改名)
 - upstream(open-webui/open-webui)は **remote 登録しない**。タグ確認は
   `git ls-remote --tags https://github.com/open-webui/open-webui.git 'v*'`、
   リリースノートは `gh api repos/open-webui/open-webui/releases/tags/<tag>` で行う

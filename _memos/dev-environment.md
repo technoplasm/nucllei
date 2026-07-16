@@ -69,7 +69,7 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   素通りする**(401 を期待するテストが書けない)。strict 版は `get_current_user` だけを差し替えて
   role ゲートを実物で通す。#66(権限3層化)の回帰はこちらで書くこと。
 - nucllei(旧 open_webui)は **import 時に DATABASE_URL などの env が確定**する(migration も import 時)。
-  import 時確定 env のテストはサブプロセス起動 + `cwd`=backend + `PYTHONPATH`=backend を明示
+  import 時確定 env のテストはサブプロセス起動 + `cwd`/`PYTHONPATH` にリポジトリルート(`nucllei` の親)を明示
   (`test_native_tool_calling.py` の `_parse_iterations_env` が実例。ローカル green を過信しない)。
 - **リポジトリ直下に symlink を置かない**(Tailwind/vitest が辿って ELOOP/OOM)。
   マシン固有 symlink は `_links/` 配下(gitignore 済み)。現行 llens 構成の参照は
@@ -78,7 +78,7 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 ## dev サーバ
 
 **2026-07-12 改訂: 本番(docker)と同じ「単一オリジン」構成に統一した。** BE は :3000、
-フロントは相対 URL で叩き、vite が `/api`・`/openai`・`/ollama`・`/ws`・`/oauth` を BE:3000 へ
+フロントは相対 URL で叩き、vite が `/api`・`/openai`・`/ollama`・`/ws`・`/oauth`・`/health` を BE:3000 へ
 proxy する(`vite.config.ts` の `server.proxy`)。旧構成(dev だけ `WEBUI_BASE_URL=http://host:8080`
 へクロスオリジン直叩き)は廃止 — 画像等の cookie 認証が dev で不達だった罠(#69 で顕在化)も解消。
 
@@ -87,7 +87,7 @@ proxy する(`vite.config.ts` の `server.proxy`)。旧構成(dev だけ `WEBUI_
 # 長い PYTHONPATH 指定は不要。
 uv run task dev
 # frontend(vite :5173、proxy 込み)。これ単体で BE:3000 に繋がる。
-pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自動退避
+pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退避
 ```
 
 - **起動場所は tmux(2026-07-16 確定)**: session `owui` = 0:FE(pnpm dev)/ 1:BE(uv run task dev)/
@@ -129,7 +129,7 @@ pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自�
   「Driver/library version mismatch」(ドライバ更新後の再起動待ち)をまず疑う。
 - vite は dev 用に **全レスポンス no-store**(`vite.config.ts` の `devNoCache` ミドルウェア, `apply:'serve'`)。
   HMR/リロードで古いモジュールを掴む反映漏れを防ぐ(#47 で導入)。
-- `config.py` は起動のたび `build/static/**` を backend static へ無条件上書きコピーする。
+- `config.py` は起動のたび `build/static/**` を BE static(`nucllei/static/`)へ無条件上書きコピーする。
   favicon 等を差し替えたら `static/static/` と `build/static/` も同期しないと reload で巻き戻る。
 - `data/webui.db` は pytest の残骸で汚染されうる。おかしければ退避して作り直す。
 
@@ -274,5 +274,8 @@ LLENS_STT_SMOKE=1 uv run pytest \
   実装側の仕事なので採らない)。git tag = ghcr image tag を 1:1 対応、その瞬間の head に打つだけ。
   連番はリポジトリごとに独立(app とのロックステップはしない。組み合わせの同一性は deploy 側が持つ)。
   ※ 旧 `v0.6.5-llens.N` 方式は廃止、`v0.6.5-llens.1` はローカル・origin とも削除済み。
+  ※ 2026-07-16 改訂(0d69f2da4): tag 形式はリリース `vYYYYMMDD-NN` / プレ `pre-NN` に変更
+  (`prodYYYYMMDD_NN` 案は採らない。現行の真実源は上記「dev サーバ」節の**バージョン**項。
+  プレ tag `pre-00` は打鍵済み — 「出荷までタグを切らない」はリリース tag についての方針)。
 - GitHub 操作は `gh` CLI(issue 単位で作業、コミットに `refs #N`)。
 - air-gapped 前提: 外部ネットワーク必須の機能・依存を増やさない。

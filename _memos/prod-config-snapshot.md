@@ -34,7 +34,7 @@ prism-hu/llens `DEPLOYMENT.md` のサービス表)。出典: `~/src/github.com/p
 | `CONTENT_EXTRACTION_ENGINE` | `docling` | |
 | `DOCLING_SERVER_URL` | `http://docling:5001` | |
 | `DOCLING_PARAMS` | `{"do_ocr": false}` | 0.6.5: DOCLING_PARAMS なし(OCR パラメタ不可) |
-| `BYPASS_EMBEDDING_AND_RETRIEVAL` | `true` | fork では既定化済み |
+| `BYPASS_EMBEDDING_AND_RETRIEVAL` | `true` | fork では RAG config ごと撤去(#52)— env 自体が無い(文書は prism 層 Attachment が抽出) |
 | `RAG_ALLOWED_FILE_EXTENSIONS` | pdf,docx,pptx,xlsx,csv,html,htm,md,markdown,txt,asciidoc,adoc,json,xml,vtt,tex | 画像・SVG 除外(OCR しない前提) |
 
 ## 認証・登録(issue #7 と一致)
@@ -74,10 +74,11 @@ prism-hu/llens `DEPLOYMENT.md` のサービス表)。出典: `~/src/github.com/p
 
 ## 機能 OFF(閉域運用)
 
-`ENABLE_COMMUNITY_SHARING=false`(fork 既定化済み)、`ENABLE_MESSAGE_RATING=false`、
-`ENABLE_EVALUATION_ARENA_MODELS=false`(fork 既定化済み)、
-`ENABLE_VERSION_UPDATE_CHECK=false`(0.6.5: なし)、`ENABLE_PERSISTENT_CONFIG=false`
-(**env を唯一の設定源にする運用**)、
+`ENABLE_COMMUNITY_SHARING=false`(fork は config ごと撲滅 #10)、`ENABLE_MESSAGE_RATING=false`
+(fork は config ごと撲滅 #48)、`ENABLE_EVALUATION_ARENA_MODELS=false`(fork は config ごと撲滅 #48)、
+`ENABLE_VERSION_UPDATE_CHECK=false`(0.6.5: なし。fork は更新チェック機能ごと撤去 #10)、
+`ENABLE_PERSISTENT_CONFIG=false`(**env を唯一の設定源にする運用**。fork ではこの env 自体を撤去し
+「明示 env > DB > 既定」の 3 段階に再設計 — #30、`config-model.md`)、
 `ENABLE_FOLDERS/MEMORIES/NOTES/CHANNELS/CALENDAR/AUTOMATIONS/USER_WEBHOOKS=false`
 (多くは v0.9.x フラグ。0.6.5 に存在しないものは UI ごと存在しないか別名)。
 
@@ -85,6 +86,8 @@ prism-hu/llens `DEPLOYMENT.md` のサービス表)。出典: `~/src/github.com/p
 
 1. `ENABLE_PERSISTENT_CONFIG=false` 運用が前提 — 設定レイヤ整理(issue #30)では
    「env 唯一の設定源」プロファイルを一級市民として扱うこと。
+   → **対応済み**(#30): fork は「明示 env が常に勝つ」3 段階モデル(明示 env > DB > 既定)を
+   実装済みで、env-only 運用は env を置くだけで成立する(`config-model.md`)。
 2. PDF→画像変換パッケージを焼き込んだ自前 Docker イメージを使っている
    (docker/open-webui/Dockerfile)。fork のイメージビルド(issue #25/#33)で踏襲。
 3. TTS ブリッジは 1 ブリッジ = 1 エンジン。AivisSpeech は VOICEVOX 互換のため 1 本。
