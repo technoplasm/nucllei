@@ -74,7 +74,9 @@
 		{/each}
 	</div>
 
-	<div class="flex-1 mt-3 lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
+	<!-- 設定フォームは全幅だとラベルとコントロール(justify-between)の目線が離れるので、
+	     中身だけさらに幅を絞る(レイアウトの 5xl はそのまま) -->
+	<div class="flex-1 max-w-2xl mt-3 mx-auto lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
 		{#if selectedTab === 'general'}
 			<General saveHandler={savedWithConfigRefresh} />
 		{:else if selectedTab === 'connections'}

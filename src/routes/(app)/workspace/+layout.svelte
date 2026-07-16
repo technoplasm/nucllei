@@ -65,7 +65,7 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: ''} max-w-full"
 	>
-		<nav class="   px-2.5 pt-1 backdrop-blur-xl drag-region">
+		<nav class="px-4 pt-1 backdrop-blur-xl drag-region">
 			<!-- llens(#34): 上部メニューも本文と同じ max-w-5xl 中央寄せに揃える -->
 			<div class=" flex items-center gap-1 max-w-5xl mx-auto w-full">
 				<div

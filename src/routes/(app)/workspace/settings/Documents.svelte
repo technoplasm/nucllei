@@ -83,6 +83,34 @@
 					<hr class=" border-line my-2" />
 
 					<div class="  mb-2.5 flex w-full justify-between">
+						<div class=" self-center text-xs font-medium">{$i18n.t('Attachment Function')}</div>
+						<div class="flex items-center relative">
+							<Tooltip
+								content={$i18n.t(
+									'The attachment function to run on every file upload. Select None to disable.'
+								)}
+								placement="top-start"
+							>
+								<select
+									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
+									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
+								>
+									<option value="">{$i18n.t('None')}</option>
+									{#each attachmentFunctions as func}
+										<option value={func.id}>{func.name}</option>
+									{/each}
+									{#if RAGConfig.ATTACHMENT_FUNCTION_ID && !attachmentFunctions.some((func) => func.id === RAGConfig.ATTACHMENT_FUNCTION_ID)}
+										<!-- llens(#69): 設定済み id の function が消えている場合も現在値を可視化する(保存時は 400 で弾かれる) -->
+										<option value={RAGConfig.ATTACHMENT_FUNCTION_ID}
+											>{RAGConfig.ATTACHMENT_FUNCTION_ID}</option
+										>
+									{/if}
+								</select>
+							</Tooltip>
+						</div>
+					</div>
+
+					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Max Upload Size')}</div>
 						<div class="flex items-center relative">
 							<Tooltip
@@ -140,34 +168,6 @@
 									bind:value={allowedExtensions}
 									autocomplete="off"
 								/>
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Attachment Function')}</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'The attachment function to run on every file upload. Select None to disable.'
-								)}
-								placement="top-start"
-							>
-								<select
-									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
-									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
-								>
-									<option value="">{$i18n.t('None')}</option>
-									{#each attachmentFunctions as func}
-										<option value={func.id}>{func.name}</option>
-									{/each}
-									{#if RAGConfig.ATTACHMENT_FUNCTION_ID && !attachmentFunctions.some((func) => func.id === RAGConfig.ATTACHMENT_FUNCTION_ID)}
-										<!-- llens(#69): 設定済み id の function が消えている場合も現在値を可視化する(保存時は 400 で弾かれる) -->
-										<option value={RAGConfig.ATTACHMENT_FUNCTION_ID}
-											>{RAGConfig.ATTACHMENT_FUNCTION_ID}</option
-										>
-									{/if}
-								</select>
 							</Tooltip>
 						</div>
 					</div>

@@ -142,7 +142,7 @@
 						<div class=" self-center text-xs font-medium">{$i18n.t('Default User Role')}</div>
 						<div class="flex items-center relative">
 							<select
-								class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
+								class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
 								bind:value={adminConfig.DEFAULT_USER_ROLE}
 								placeholder="Select a role"
 							>
