@@ -1,15 +1,38 @@
 <script lang="ts">
 	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
 	import { WEBUI_NAME } from '$lib/stores';
-	import { getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
+
+	type LicensedPackage = { name: string; version: string; license: string };
+
+	// 依存クレジット(static/licenses.json — `uv run task licenses` で再生成)
+	let licenses = $state<{ frontend: LicensedPackage[]; backend: LicensedPackage[] } | null>(null);
+
+	const groupByLicense = (packages: LicensedPackage[]) => {
+		const groups = new Map<string, LicensedPackage[]>();
+		for (const pkg of packages) {
+			const key = pkg.license || 'Unknown';
+			if (!groups.has(key)) {
+				groups.set(key, []);
+			}
+			groups.get(key)!.push(pkg);
+		}
+		return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+	};
+
+	onMount(async () => {
+		licenses = await fetch('/licenses.json')
+			.then((res) => (res.ok ? res.json() : null))
+			.catch(() => null);
+	});
 </script>
 
 <div class="flex flex-col h-full justify-between space-y-3 text-sm mb-6">
-	<div class=" space-y-3 overflow-y-scroll max-h-[28rem] lg:max-h-full">
+	<div class=" space-y-3 flex-1 min-h-0 overflow-y-auto">
 		<div>
 			<div class="flex items-baseline gap-2">
 				<span class="text-base font-medium">{$WEBUI_NAME}</span>
@@ -24,13 +47,7 @@
 			</div>
 		</div>
 
-		<hr class=" border-gray-100 dark:border-gray-850" />
-
-		<div class="mt-2 text-xs text-content-subtle">
-			Emoji graphics provided by
-			<a href="https://github.com/jdecked/twemoji" target="_blank">Twemoji</a>, licensed under
-			<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY 4.0</a>.
-		</div>
+		<hr class=" border-line" />
 
 		<div>
 			<pre class="text-xs text-content-subtle">Copyright (c) 2023 <a
@@ -66,5 +83,30 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 </pre>
 		</div>
+
+		{#if licenses}
+			<hr class=" border-line" />
+
+			<div>
+				<div class="text-sm font-medium mb-1">{$i18n.t('Third-Party Packages')}</div>
+
+				{#each [{ title: 'Frontend', packages: licenses.frontend }, { title: 'Backend', packages: licenses.backend }] as side (side.title)}
+					<div class="mt-2">
+						<div class="text-xs font-medium text-content-muted">
+							{side.title} ({side.packages.length})
+						</div>
+
+						{#each groupByLicense(side.packages) as [license, packages] (license)}
+							<div class="mt-1.5">
+								<div class="text-xs text-content-muted">{license} ({packages.length})</div>
+								<div class="text-xs text-content-subtle leading-relaxed break-words">
+									{packages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')}
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
 </div>

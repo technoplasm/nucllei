@@ -203,6 +203,8 @@ pythonpath = ["backend", "backend/open_webui"]
 # import path with --app-dir instead of cd-ing there. `--forwarded-allow-ips '*'`
 # trusts the local Vite proxy for X-Forwarded-* (correct redirect URLs).
 dev = "uvicorn open_webui.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
+# 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
+licenses = "python scripts/generate_licenses.py"
 
 # open-webui CLI(typer app: `open_webui:app`)への汎用エントリ。任意のサブコマンドを
 # 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
