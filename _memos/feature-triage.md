@@ -14,7 +14,7 @@
 | メモリー | **撤去済み(#67)** | ~~放置・無効化も削除も投資もしない~~ → 改訂(2026-07-08 #52): embedding/vector 基盤撤去の一環で「完全自然言語」ストアに降格(これが embedding/vector の最後の消費者。issue #8 は close)→ **再改訂(2026-07-10 #67): UI 撤去(#63)の残骸として router・モデル・テーブルごと撤去(migration c4e8a1f6d2b9)** |
 | ノート | 無いままでよい | v0.6.5 に存在しない。追加しない |
 | タスク / オートメーション / カレンダー | 無いままでよい | v0.6.5 に存在しない。追加しない |
-| 画像生成 | **機能として維持** | 厳密なキャッチアップは不要。動く状態を保つ(KEEP-MINIMAL 扱い) |
+| 画像生成 | **全撤去(2026-07-17 反転)** | 旧判定 KEEP-MINIMAL を反転。送信前フック + 外部エンジン設定(A1111/ComfyUI/OpenAI/Gemini)は tool 経路の脇の特別扱いパスで、tool 経由生成で足りる(`2894654da`)。モデル自身の multimodal 画像出力(assistant メッセージ内)は将来 content_blocks の image ブロック型で受ける(_memos/streaming-wire-v2.md) |
 | プロンプト管理(`/` 呼び出し) | **撤去済み(#35)** | ~~あってもよいがスキルとの棲み分け再設計~~ → **改訂(2026-07-06 #35): 「`/` はスキル能動発火 UI に置き換える」案をそのまま実装 — workspace/picker を Skill に置換し prompts を全退役**(prompt テーブル drop = migration c2d9a7b41e05、74f0e5161) |
 | ツール(Tools) | **完全キャッチアップ** | 外形仕様・公式ドキュメントベースで機能パリティを目指す(コード移植は不可) |
 | スキル(Skills) | **完全キャッチアップ** | 同上。llens の権限モデル(診療科×職位)と統合(issue #5) |
@@ -164,7 +164,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 |---|---|
 | chat import/export | 不要だが邪魔でもない — 残す |
 | webhook(ユーザー通知 + signup) | **別システムへの横展開で使う可能性があるため残す**(air-gapped 単体では無用でも) |
-| 画像生成まわり | そのまま(`features.image_generation` フラグ維持 + サーバー側 enforcement を #66 で追加) |
+| 画像生成まわり | ~~そのまま~~ → **全撤去(2026-07-17)**: `features` フラグ・権限 tier ごと撤去(上の行参照) |
 | STT / TTS | 全員使用可・設定は admin・tool から呼ぶ内部 API 提供(#53)。`chat.stt/tts/call` の per-user フラグは廃止(#66)。**配備レベル**の `ENABLE_AUDIO_STT/TTS`(audio.stt/tts.enable、既定 on)でアイコン表示 + API(403)を一括制御(2026-07-13) |
 | /utils/pdf | 画面印刷の可能性があるため残す |
 | /utils/code/format | tool/functions 開発用として残す |

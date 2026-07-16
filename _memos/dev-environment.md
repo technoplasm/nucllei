@@ -279,3 +279,18 @@ LLENS_STT_SMOKE=1 uv run pytest \
   プレ tag `pre-00` は打鍵済み — 「出荷までタグを切らない」はリリース tag についての方針)。
 - GitHub 操作は `gh` CLI(issue 単位で作業、コミットに `refs #N`)。
 - air-gapped 前提: 外部ネットワーク必須の機能・依存を増やさない。
+
+## wire v2 以後の dev 知見(2026-07-17)
+
+- **チャット経路の真実源は `_memos/streaming-wire-v2.md`**(socket.io 撤去・SSE 一本化)。
+  vite の `/ws` プロキシは撤去済み。
+- **dev DB の tool content はリポジトリのリネームに追従しない**: #34 の `open_webui`→`nucllei`
+  リネーム後、DB 登録済み `sandbox` tool のモジュールが `No module named 'open_webui'` で
+  ロード失敗し、チャット全体が 400 になっていた(2026-07-17 に `dev/tools/sandbox.py` の
+  現内容で DB を更新して解消)。**パッケージ構造を動かしたら DB 登録 tool の再同期を忘れない**
+  (`POST /api/v1/tools/id/{id}/update` に repo ファイルの content を流す)。
+- **実機ストリーミング e2e**: `.venv/bin/python dev/e2e/check_streaming_wire_v2.py`
+  (実 SGLang 前提。単調成長・ストリーム中リロード再アタッチ・完走を検証)。
+- **dev アカウント(ken@llens.local)は `ctrlEnterToSend: true`**: 素の Enter では送信されない。
+  Playwright からの送信は `#send-message-button` クリックが設定非依存で確実。
+- リッチテキスト入力は全廃(textarea 一本、`2894654da`)。`#chat-input` は常に textarea。
