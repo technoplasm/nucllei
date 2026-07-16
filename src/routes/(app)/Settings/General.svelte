@@ -97,7 +97,7 @@
 	<div class="  flex-1 min-h-0 overflow-y-auto">
 		{#if loaded}
 			<div class="">
-				<div class=" mb-1.5 text-md font-medium">{$i18n.t('WebUI Settings')}</div>
+				<div class=" mb-1.5 text-md font-medium">{$i18n.t('General')}</div>
 
 				{#each ROWS as row (row.key)}
 					<label class=" py-1 flex w-full justify-between items-center">
