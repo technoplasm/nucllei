@@ -46,6 +46,10 @@ dependencies = [
     "loguru==0.7.2",
     "asgiref==3.8.1",
 
+    # runtime 依存(dev ツールではない): tool/function エディタの整形端点
+    # POST /utils/code/format が black.format_str を呼ぶ。CI の整形ゲートも同じピン。
+    "black==25.1.0",
+
     "openai",
     "anthropic",
     "google-generativeai==0.8.4",
@@ -154,7 +158,6 @@ local-ml = [
 
 [dependency-groups]
 dev = [
-    "black==25.1.0",
     "playwright==1.49.1",
     "ruff==0.14.4",
     "docker~=7.1.0",
