@@ -49,6 +49,10 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   リポジトリに入っているが、**有効化は clone ごとに 1 回 `git config core.hooksPath dev/hooks`
   が必要**(git はセキュリティ上 hook を自動有効化しない — 新環境セットアップ時に忘れずに)。
   引っかかると push が中断される。緊急回避は `git push --no-verify`。
+  **整形は必ず `pnpm format`(または `node_modules/.bin/prettier`)で行う** —
+  `pnpm exec prettier --write` は同バージョン表示でも plugin 解決が食い違い、
+  hook/CI(node_modules 直の prettier)と**別の整形結果**を出すことがある
+  (2026-07-16 に svelte の長行 wrap で実際に発生、--write 済みなのにゲートで NG)。
 - `.git/index.lock` が時々出るのは shell prompt の `gitstatusd` が握るため — stale なら `rm -f .git/index.lock`
   して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。
