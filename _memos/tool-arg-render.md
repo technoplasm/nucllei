@@ -116,7 +116,7 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 
 **ステップ 1〜5 すべて出荷済み**(5 は同日後半に実装 — 下記)。
 
-- **1. 型/抽出**: `backend/open_webui/utils/tool_render.py`。`RenderAs` / `Code(language)` /
+- **1. 型/抽出**: `nucllei/utils/tool_render.py`。`RenderAs` / `Code(language)` /
   `Text` / `Table`、media↔hljs 変換(素通し+alias+fallback plaintext)、
   `extract_render_from_function`(Annotated)/ `extract_render_from_spec`(contentMediaType)/
   `apply_render_to_spec`(宣言→spec 反映、既存宣言は上書きしない)。単体テスト

@@ -99,7 +99,7 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
 
 ### 1c. 組み込みツール = Tools テーブルの builtin 行
 
-- **定義**: `backend/open_webui/tools/builtin/` 配下のモジュール。起動時に Tools テーブルへ
+- **定義**: `nucllei/tools/builtin/` 配下のモジュール。起動時に Tools テーブルへ
   type="builtin" 行として sync(content は空、ロード時に repo モジュールへ振り向け)
 - 既存機構がそのまま効く: spec 生成(docstring → schema)・toolIds picker・skill の
   tool_ids・access_control・valves・4pcg ガード。content 更新 API は builtin 行を拒否
@@ -118,7 +118,7 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
 
 上記 1a〜1c の実装。**出荷済み(2026-07-06)**: 機能「スキル」ゲート + `/command` の
 モデル紐づけスコープ化(ba01a0f1f)、組み込みツール機構(builtin 行 sync)。
-実装の決定: レジストリ = `backend/open_webui/builtin_tools/`(id は `builtin_` prefix で
+実装の決定: レジストリ = `nucllei/builtin_tools/`(id は `builtin_` prefix で
 予約・create で横取り不可)、行の所有者は固定値 "system"、判別は meta.builtin
 (表示専用 — ロード分岐と更新保護はレジストリ id が真実源)、更新は access_control のみ・
 削除拒否・specs は起動ごとに repo から再生成。

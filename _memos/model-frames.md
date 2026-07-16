@@ -2,15 +2,15 @@
 
 キャプチャ日: 2026-07-05。サーバ: prism-llens:8000(SGLang、`kimi-k2.6`、
 max_model_len=262144、**reasoning parser 有効**)。
-fixture: `backend/open_webui/test/fixtures/model_frames/`(生 SSE + 非ストリーム JSON +
+fixture: `nucllei/test/fixtures/model_frames/`(生 SSE + 非ストリーム JSON +
 チャンク境界 + meta.json)。ローダ: `test/util/model_frames.py`。
 
 ## 再キャプチャ手順
 
 ```bash
 uv run python scripts/capture_model_frames.py   # 既定 http://prism-llens:13300/v1
-uv run pytest backend/open_webui/test/apps/webui/test_model_frame_fixtures.py
-git diff backend/open_webui/test/fixtures/model_frames/   # 差分 = フレーム仕様の変化
+uv run pytest nucllei/test/apps/webui/test_model_frame_fixtures.py
+git diff nucllei/test/fixtures/model_frames/   # 差分 = フレーム仕様の変化
 ```
 
 SGLang / モデル更新時は必ず再実行し、差分をこのメモに追記する。

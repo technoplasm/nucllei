@@ -61,7 +61,7 @@ llens 拡張 — `group_terms`(DNF: 項内 AND・項間 OR)を追加:
   - `get_users_with_access()`: term は「全所属者の積集合」で展開
 - 判定はモデル・プロンプト・ツール・ナレッジ等、`has_access` を使う
   全リソースで自動的に有効になる。
-- 回帰テスト: `backend/open_webui/test/apps/webui/utils/test_access_control.py`
+- 回帰テスト: `nucllei/test/apps/webui/utils/test_access_control.py`
 
 ## 後続タスク(このメモの範囲外)
 

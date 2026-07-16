@@ -3,7 +3,7 @@
 fork.md §3.1(自己ホスト・院内完結認証)の既定値を固定する。
 v0.6.5 の素の既定値がほぼそのまま院内完結プロファイルに合致しており、
 **環境変数の追加設定なしで以下の運用になる**ことを回帰テスト
-(`backend/open_webui/test/apps/webui/routers/test_auth_profile.py`)で保護する。
+(`nucllei/test/apps/webui/routers/test_auth_profile.py`)で保護する。
 
 ## 既定値(= llens 標準)
 
