@@ -8,8 +8,6 @@
 	turndownService.escape = (string) => string;
 
 	import { onMount, onDestroy } from 'svelte';
-	import { createEventDispatcher } from 'svelte';
-	const eventDispatch = createEventDispatcher();
 
 	import { EditorState, Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 	import { Decoration, DecorationSet } from 'prosemirror-view';
@@ -28,6 +26,13 @@
 
 	export let oncompositionstart = (e) => {};
 	export let oncompositionend = (e) => {};
+
+	// dispatcher 撤去(#70 A2): ProseMirror の DOM ハンドラから親へ渡すイベントは
+	// oncompositionstart/end と同様の callback prop で受ける。
+	export let onFocus: ((event: FocusEvent) => void) | undefined = undefined;
+	export let onKeyup: ((event: KeyboardEvent) => void) | undefined = undefined;
+	export let onKeydown: ((event: KeyboardEvent) => void) | undefined = undefined;
+	export let onPaste: ((event: ClipboardEvent) => void) | undefined = undefined;
 
 	// llens(issue #35): 有効な /command トークンをハイライトするための集合。
 	// ハードコードせず MessageInput から $skills 由来の command 配列を受け取る。
@@ -154,8 +159,6 @@
 	};
 
 	onMount(async () => {
-		console.log(value);
-
 		if (preserveBreaks) {
 			turndownService.addRule('preserveBreaks', {
 				filter: 'br', // Target <br> elements
@@ -252,11 +255,11 @@
 						return false;
 					},
 					focus: (view, event) => {
-						eventDispatch('focus', { event });
+						onFocus?.(event);
 						return false;
 					},
 					keyup: (view, event) => {
-						eventDispatch('keyup', { event });
+						onKeyup?.(event);
 						return false;
 					},
 					keydown: (view, event) => {
@@ -308,7 +311,7 @@
 								}
 							}
 						}
-						eventDispatch('keydown', { event });
+						onKeydown?.(event);
 						return false;
 					},
 					paste: (view, event) => {
@@ -318,8 +321,8 @@
 							if (plainText) {
 								if (largeTextAsFile) {
 									if (plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
-										// Dispatch paste event to parent component
-										eventDispatch('paste', { event });
+										// Hand the paste event to the parent component
+										onPaste?.(event);
 										event.preventDefault();
 										return true;
 									}
@@ -337,15 +340,15 @@
 								item.type.startsWith('image/')
 							);
 							if (hasImageFile) {
-								// If there's an image, dispatch the event to the parent
-								eventDispatch('paste', { event });
+								// If there's an image, hand the event to the parent
+								onPaste?.(event);
 								event.preventDefault();
 								return true;
 							}
 
 							if (hasImageItem) {
-								// If there's an image item, dispatch the event to the parent
-								eventDispatch('paste', { event });
+								// If there's an image item, hand the event to the parent
+								onPaste?.(event);
 								event.preventDefault();
 								return true;
 							}
@@ -420,4 +423,4 @@
 	}
 </script>
 
-<div bind:this={element} class="relative w-full min-w-full h-full min-h-fit {className}" />
+<div bind:this={element} class="relative w-full min-w-full h-full min-h-fit {className}"></div>

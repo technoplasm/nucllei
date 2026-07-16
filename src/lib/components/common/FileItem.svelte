@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	import { formatFileSize } from '$lib/utils';
 
 	import FileItemModal from './FileItemModal.svelte';
@@ -7,26 +7,38 @@
 	import Tooltip from './Tooltip.svelte';
 
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
-	export let className = 'w-60';
-	export let colorClassName = 'bg-white dark:bg-gray-850 border border-gray-50 dark:border-white/5';
-	export let url: string | null = null;
+	let {
+		className = 'w-60',
+		colorClassName = 'bg-white dark:bg-gray-850 border border-gray-50 dark:border-white/5',
+		url = null,
+		dismissible = false,
+		loading = false,
+		item = $bindable(null),
+		edit = false,
+		small = false,
+		name,
+		type,
+		size,
+		onClick = undefined,
+		onDismiss = undefined
+	}: {
+		className?: string;
+		colorClassName?: string;
+		url?: string | null;
+		dismissible?: boolean;
+		loading?: boolean;
+		item?: any;
+		edit?: boolean;
+		small?: boolean;
+		name: string;
+		type: string;
+		size?: number;
+		onClick?: () => void;
+		onDismiss?: () => void | Promise<void>;
+	} = $props();
 
-	export let dismissible = false;
-	export let loading = false;
-
-	export let item = null;
-	export let edit = false;
-	export let small = false;
-
-	export let name: string;
-	export let type: string;
-	export let size: number;
-
-	import { deleteFileById } from '$lib/apis/files';
-
-	let showModal = false;
+	let showModal = $state(false);
 
 	const decodeString = (str: string) => {
 		try {
@@ -46,7 +58,7 @@
 		? 'rounded-xl'
 		: 'rounded-2xl'} text-left"
 	type="button"
-	on:click={async () => {
+	onclick={async () => {
 		if (item?.file?.data) {
 			// llens(#52): content が無くても(未抽出/失敗)状態を見せるためモーダルを開く。
 			showModal = !showModal;
@@ -60,7 +72,7 @@
 			}
 		}
 
-		dispatch('click');
+		onClick?.();
 	}}
 >
 	{#if !small}
@@ -129,8 +141,9 @@
 			<button
 				class=" bg-white text-black border border-gray-50 rounded-full group-hover:visible invisible transition"
 				type="button"
-				on:click|stopPropagation={() => {
-					dispatch('dismiss');
+				onclick={(e) => {
+					e.stopPropagation();
+					onDismiss?.();
 				}}
 			>
 				<svg

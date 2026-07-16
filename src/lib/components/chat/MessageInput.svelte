@@ -686,11 +686,8 @@
 													loading={file.status === 'uploading'}
 													dismissible={true}
 													edit={true}
-													on:dismiss={async () => {
+													onDismiss={async () => {
 														await dismissFileHandler(fileIdx);
-													}}
-													on:click={() => {
-														console.log(file);
 													}}
 												/>
 											{/if}
@@ -723,9 +720,7 @@
 												largeTextAsFile={$settings?.largeTextAsFile ?? false}
 												oncompositionstart={() => (isComposing = true)}
 												oncompositionend={() => (isComposing = false)}
-												on:keydown={async (e) => {
-													e = e.detail.event;
-
+												onKeydown={async (e) => {
 													const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
 													const commandsContainerElement =
 														document.getElementById('commands-container');
@@ -850,10 +845,7 @@
 														imageGenerationEnabled = false;
 													}
 												}}
-												on:paste={async (e) => {
-													e = e.detail.event;
-													console.log(e);
-
+												onPaste={async (e) => {
 													const clipboardData = e.clipboardData || window.clipboardData;
 
 													if (clipboardData && clipboardData.items) {
