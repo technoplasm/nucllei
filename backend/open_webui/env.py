@@ -110,9 +110,10 @@ log.setLevel(SRC_LOG_LEVELS["CONFIG"])
 # (LLENS 等)で、旧 upstream の「非既定名に " (Open WebUI)" を付加」は撤去。
 WEBUI_NAME = os.environ.get("WEBUI_NAME", "Nucllei")
 
-# 配備側のバージョン(License タブの最上段で WEBUI_NAME に並べて表示。空なら非表示)。
-# 本体(Nucllei)のバージョンは APP_VERSION → VERSION — こちらは配備リポジトリの deploy tag
-# (例: prod20260716_01)を焼き込む用。
+# 配備側(ハーネス/エージェント設計)のバージョン(License タブの最上段で
+# WEBUI_NAME に並べて表示。空なら非表示)。
+# 本体(Nucllei)のバージョンはこちらではなく APP_VERSION → VERSION。
+# 旧 llens 本番が焼いていた prod20260708_01 形式の deploy tag も APP_VERSION の系譜。
 WEBUI_VERSION = os.environ.get("WEBUI_VERSION", "")
 
 # 配備側の権利表記(License タブの最上段に表示。空なら非表示)。例:

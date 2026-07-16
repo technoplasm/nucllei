@@ -86,9 +86,19 @@ uv run task dev
 pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- **BE のログ所在**: cc セッションがバックグラウンド起動した場合は
-  `/tmp/llens-backend-dev.log` にリダイレクトされている慣例(`ps aux | grep uvicorn` で
-  リダイレクト先が見える)。500 の一次調査はまずここの traceback を読む。
+- **起動場所は tmux(2026-07-16 確定)**: session `owui` = 0:FE(pnpm dev)/ 1:BE(uv run task dev)/
+  2:cc1 / 3:nvim / 4:zsh。cc からの BE 再起動は nohup でなく
+  `tmux send-keys -t owui:1 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t owui:1 -p`)。
+  ログはその window に流れる — 500 の一次調査はまずそこの traceback を読む。
+- **`.env`(repo 直下、gitignored)を BE が起動時に読む**(env.py の load_dotenv。
+  `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
+  `WEBUI_NAME` / `WEBUI_VERSION` / `WEBUI_COPYRIGHT` を入れてある。
+- **バージョン**(2026-07-16、0d69f2da4): 真実源は git tag(リリース `vYYYYMMDD-NN` /
+  プレ `pre-NN` の 2 形式だけを describe --match で拾う)。BE は起動時・FE は vite 起動時に解決
+  するので、**tag を切ったら BE 再起動 + vite は自動再起動(反映されなければ `touch vite.config.ts`)**。
+  命名は APP_* = 本体 Nucllei / WEBUI_* = 配備層。git hash(BUILD_HASH 系)は全面撤去済み。
+- **依存ライセンス一覧**: 依存を増減したら `uv run task licenses` で `static/licenses.json` を
+  再生成してコミット(License タブが fetch して表示。pnpm store と .venv から生成、ネット不要)。
 - **BE origin の上書き**: `BACKEND_ORIGIN=http://別ホスト:3000 pnpm dev` で dev フロントを
   別マシンの BE に向けられる(既定 `http://localhost:3000`。`vite.config.ts`)。
 - **tailscale 越し**: `pnpm dev` は `--host` で 0.0.0.0 listen。`{frontend-host}:5173/api` が

@@ -75,6 +75,21 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
   付けない**。transition は transform・レイアウト等の「意図した動き」専用(現存は workspace layout の
   サイドバー幅 `transition-width duration-200` のみ)。upstream は色 hover に無秩序に付けていた —
   workspace 配下 19 ファイルから全廃済み。新規コードでも色 hover に transition を書かない。
+- **設定フォームの幅**(2026-07-16 確定 afc17de30): 全幅ペイン(~830px)の justify-between は
+  ラベルとコントロールの目線が離れる。対処は**中身だけ `max-w-2xl mx-auto` に絞る**
+  (レイアウトの 5xl 一元管理は不変)。ラベル固定幅 w-64 左寄せ案は実装まで行って見た目で撤回。
+  workspace settings は Models 一覧・ModelEditor 込みで 672px で破綻しないことを実測済み。
+- **Switch**(2026-07-16 改訂 04849569c): h-4 w-7(旧 h-5 w-9)・thumb size-3。
+  unchecked track は `bg-line` の実面(旧 dark:bg-transparent + outline は「透明面」で押せるものに
+  見えない)。track の色 transition なし(色は即時)、thumb の transition-transform は維持。
+- **設定モーダルの行様式**(2026-07-16 確立 1c684f3ae、真実源 = chat/Settings/General):
+  行 = `label` 包み(クリックでトグル/フォーカス)+ justify-between、ラベル `text-sm`、
+  On/Off テキストボタンは全廃して Switch、多値は select(`bg-surface-muted` — モーダル内 2 段ルール、
+  `text-right` なし)。**設定行は宣言配列(ROWS/SECTIONS: key/label/type/init/save/show)+
+  {#each} 1 箇所で展開**し、権限ゲート等の特殊行は save 上書きで宣言する。
+- **モーダルの固定高**(2026-07-16、SettingsModal): タブごとに `max-h-[28rem]` を持つと外枠との
+  差が下余白のズレになる。**外枠で `h-[34rem]` 固定 + 各タブは `flex-1 min-h-0 overflow-y-auto`**。
+  罠: 狭幅の縦積み(flex-col)では `flex-1` が高さ方向に効いて固定高を潰すので `md:flex-1` に限定する。
 - **モーダルヘッダの名前インライン編集**(2026-07-16、真実源 = EditGroupModal): エンティティ名だけの
   General タブは持たず、**タイトル位置に自然幅 label(`shrink-0 text-sm font-semibold`)+ muted 面の
   input(`bg-surface-muted rounded-xs px-2 py-0.5 text-lg font-medium`)**。素の透明 input は
