@@ -20,7 +20,7 @@ git rev-list --count origin/master..master 2>/dev/null    # 未 push 数(origin/
 ## 2. 前回の区切りを読む
 
 - 直近コミットの `refs #N` から対象 issue を特定し、**自分の最新コメント(前回の
-  /sync-docs ロールアップ)** を読む: `gh issue view N -R technoplasm/open-webui --comments | tail`
+  /sync-docs ロールアップ)** を読む: `gh issue view N -R technoplasm/nucllei --comments | tail`
 - TaskList で持ち越しタスクを確認
 - 迷ったら `gh issue view 16` で実行順(⓪ → A〜H)の現在地を見る
 

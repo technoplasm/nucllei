@@ -38,7 +38,7 @@ git status --short                                 # 未コミットがあれば
 ## 3. tracking issue #16 の同期
 
 ```bash
-gh issue view 16 -R technoplasm/open-webui --json body --jq .body > /tmp/issue16.md
+gh issue view 16 -R technoplasm/nucllei --json body --jq .body > /tmp/issue16.md
 ```
 
 - 完了したトラック項目を [x] + 一行サマリ + コミット/日付に更新(python で該当ブロックだけ置換し、
