@@ -210,6 +210,7 @@ from open_webui.env import (
     SRC_LOG_LEVELS,
     VERSION,
     WEBUI_BUILD_HASH,
+    WEBUI_COPYRIGHT,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
     WEBUI_SESSION_COOKIE_SECURE,
@@ -966,6 +967,7 @@ async def get_app_config(request: Request):
         **({"onboarding": True} if onboarding else {}),
         "status": True,
         "name": app.state.WEBUI_NAME,
+        "copyright": WEBUI_COPYRIGHT,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
         "oauth": {

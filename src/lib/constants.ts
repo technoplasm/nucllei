@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 // import { version } from '../../package.json';
 
-export const APP_NAME = 'Open WebUI';
+export const APP_NAME = 'Nucllei';
 
 // llens(dev): dev も本番(docker = 単一オリジンで BE が SPA と API を両方配信)と同じく
 // 相対 URL で叩く。vite proxy(vite.config.ts)が /api・/openai・/ollama・/ws・/oauth を

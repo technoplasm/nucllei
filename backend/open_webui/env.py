@@ -2,6 +2,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import subprocess
 import pkgutil
 import sys
 import shutil
@@ -105,9 +106,14 @@ for source in log_sources:
 
 log.setLevel(SRC_LOG_LEVELS["CONFIG"])
 
-WEBUI_NAME = os.environ.get("WEBUI_NAME", "Open WebUI")
-if WEBUI_NAME != "Open WebUI":
-    WEBUI_NAME += " (Open WebUI)"
+# llens: 本体(fork)の製品名は Nucllei。WEBUI_NAME は配備側のブランド名
+# (LLENS 等)で、旧 upstream の「非既定名に " (Open WebUI)" を付加」は撤去。
+WEBUI_NAME = os.environ.get("WEBUI_NAME", "Nucllei")
+
+# 配備側の権利表記(License タブの最上段に表示。空なら非表示)。例:
+# "The agent harness built on top of Nucllei, including its Tools, Skills, and
+#  Functions, is copyright © PRISM-HU. All rights reserved."
+WEBUI_COPYRIGHT = os.environ.get("WEBUI_COPYRIGHT", "")
 
 WEBUI_FAVICON_URL = "https://openwebui.com/favicon.png"
 
@@ -129,9 +135,40 @@ else:
     except Exception:
         PACKAGE_DATA = {"version": "0.0.0"}
 
-# llens(#30/#25): deploy tag(例 prod20260708_01)を APP_VERSION で焼き込めるようにする。
-# 未設定なら package.json の OWUI 基点バージョン(0.6.5)にフォールバック。
-VERSION = os.environ.get("APP_VERSION") or PACKAGE_DATA["version"]
+# llens(#30/#25): バージョンの真実源は git tag(例 v20260716-01)。
+# 優先順: APP_VERSION env(docker build が焼き込む)→ git describe(ソース実行 = dev。
+# tag を切るだけで次回起動から反映される)→ package.json の OWUI 基点バージョン(0.6.5)。
+
+
+def _git_describe():
+    try:
+        return (
+            subprocess.run(
+                # バージョンとみなすタグは 2 形式のみ(作業タグ混入防止):
+                # リリース = vYYYYMMDD-NN / プレ = pre-NN(日付形式に pre は混ぜない —
+                # 日付バージョンは切った時点で本番なので「未来日付の pre」は成立しない)
+                [
+                    "git",
+                    "describe",
+                    "--tags",
+                    "--always",
+                    "--match",
+                    "v[0-9]*",
+                    "--match",
+                    "pre-*",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=BASE_DIR,
+                timeout=3,
+            ).stdout.strip()
+            or None
+        )
+    except Exception:
+        return None
+
+
+VERSION = os.environ.get("APP_VERSION") or _git_describe() or PACKAGE_DATA["version"]
 
 
 # Function to parse each section

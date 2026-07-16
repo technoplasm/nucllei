@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
-	import { WEBUI_NAME } from '$lib/stores';
+	import { WEBUI_NAME, config } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -33,28 +33,54 @@
 
 <div class="flex flex-col h-full justify-between space-y-3 text-sm mb-6">
 	<div class=" space-y-3 flex-1 min-h-0 overflow-y-auto">
+		<!-- 上段: 配備層(WEBUI_NAME でブランドされたハーネス/エージェント設計。
+		     LLENS 等。権利表記は WEBUI_COPYRIGHT env — 無ければ段ごと出さない) -->
+		{#if $WEBUI_NAME !== 'Nucllei' || $config?.copyright}
+			<div>
+				<div class="flex items-baseline gap-2">
+					<span class="text-base font-medium">{$WEBUI_NAME}</span>
+				</div>
+
+				{#if $config?.copyright}
+					<div class="mt-1 text-xs text-content-subtle leading-relaxed">
+						{$config.copyright}
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- 中段: 本体(Nucllei) -->
 		<div>
 			<div class="flex items-baseline gap-2">
-				<span class="text-base font-medium">{$WEBUI_NAME}</span>
+				<span class="text-base font-medium">Nucllei</span>
 				<Tooltip content={WEBUI_BUILD_HASH}>
-					<span class="text-xs text-content-muted">v{WEBUI_VERSION}</span>
+					<span class="text-xs text-content-muted">{WEBUI_VERSION}</span>
 				</Tooltip>
 			</div>
 
 			<div class="mt-1 text-xs text-content-subtle leading-relaxed">
-				{$i18n.t('Fork of Open WebUI v0.6.5 (BSD-3-Clause).')}
-				{$i18n.t('Code added in this fork is proprietary.')}
+				Copyright © Technoplasm, Inc. Nucllei is a fork of Open WebUI v0.6.5; code derived from Open
+				WebUI remains available under the BSD-3-Clause license.
 			</div>
 		</div>
 
 		<hr class=" border-line" />
 
+		<!-- 下段: 関連システムのライセンス -->
 		<div>
-			<pre class="text-xs text-content-subtle">Copyright (c) 2023 <a
-					href="https://openwebui.com"
-					target="_blank"
-					class="underline">Open WebUI (Timothy Jaeryang Baek)</a
-				>
+			<div class="text-sm font-medium">{$i18n.t('Third-Party Licenses')}</div>
+
+			<div class="mt-2">
+				<div class="flex items-baseline gap-2 text-content-muted">
+					<span class="text-sm">Open WebUI v0.6.5</span>
+					<span class="text-xs">(fork base, BSD-3-Clause)</span>
+				</div>
+
+				<pre class="mt-1 text-xs text-content-subtle whitespace-pre-wrap">Copyright (c) 2023 <a
+						href="https://openwebui.com"
+						target="_blank"
+						class="underline">Open WebUI (Timothy Jaeryang Baek)</a
+					>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -82,31 +108,32 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 </pre>
-		</div>
-
-		{#if licenses}
-			<hr class=" border-line" />
-
-			<div>
-				<div class="text-sm font-medium mb-1">{$i18n.t('Third-Party Packages')}</div>
-
-				{#each [{ title: 'Frontend', packages: licenses.frontend }, { title: 'Backend', packages: licenses.backend }] as side (side.title)}
-					<div class="mt-2">
-						<div class="text-xs font-medium text-content-muted">
-							{side.title} ({side.packages.length})
-						</div>
-
-						{#each groupByLicense(side.packages) as [license, packages] (license)}
-							<div class="mt-1.5">
-								<div class="text-xs text-content-muted">{license} ({packages.length})</div>
-								<div class="text-xs text-content-subtle leading-relaxed break-words">
-									{packages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')}
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/each}
 			</div>
-		{/if}
+
+			{#if licenses}
+				<hr class=" border-line my-3" />
+
+				<div>
+					<div class="text-sm font-medium mb-1">{$i18n.t('Third-Party Packages')}</div>
+
+					{#each [{ title: 'Frontend', packages: licenses.frontend }, { title: 'Backend', packages: licenses.backend }] as side (side.title)}
+						<div class="mt-2">
+							<div class="text-xs font-medium text-content-muted">
+								{side.title} ({side.packages.length})
+							</div>
+
+							{#each groupByLicense(side.packages) as [license, packages] (license)}
+								<div class="mt-1.5">
+									<div class="text-xs text-content-muted">{license} ({packages.length})</div>
+									<div class="text-xs text-content-subtle leading-relaxed break-words">
+										{packages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>

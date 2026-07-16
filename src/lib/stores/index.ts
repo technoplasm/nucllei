@@ -226,6 +226,8 @@ type UserPermissions = {
 type Config = {
 	status: boolean;
 	name: string;
+	// 配備側の権利表記(WEBUI_COPYRIGHT env。空なら License タブで非表示)
+	copyright?: string;
 	version: string;
 	default_locale: string;
 	default_models: string;
