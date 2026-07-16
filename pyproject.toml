@@ -167,6 +167,9 @@ extend-exclude = [
     "backend/nucllei/internal/migrations",
     "backend/nucllei/migrations",
 ]
+# pre-push hook のようにファイルを明示指定で渡す呼び出しでも exclude を尊重する
+# (既定ではディレクトリ走査時しか効かず、#34 の全ファイルリネームで hook が migration に噛んだ)
+force-exclude = true
 
 [tool.ruff.lint]
 # E9 = 構文/実行時エラー級、F = pyflakes(未定義名・未使用 import 等)
