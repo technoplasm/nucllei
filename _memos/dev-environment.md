@@ -14,9 +14,9 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
-  テストは `cd backend && ../.venv/bin/pytest open_webui/test -q`(または repo ルートで `uv run pytest`)。
+  テストは `cd backend && ../.venv/bin/pytest nucllei/test -q`(または repo ルートで `uv run pytest`)。
   **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
-  black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black open_webui/`**
+  black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black nucllei/`**
   (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。frontend にも同型の
   prettier ゲート("Frontend Build / Format & Build")があり、こちらは `pnpm format`。
 - **Svelte 5(互換モード)の 2 大モーダル罠**(#55 で実害・修理済みだが新規コードで再発しやすい):
@@ -55,20 +55,20 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (2026-07-16 に svelte の長行 wrap で実際に発生、--write 済みなのにゲートで NG)。
 - `.git/index.lock` が時々出るのは shell prompt の `gitstatusd` が握るため — stale なら `rm -f .git/index.lock`
   して commit を再試行(走っている git プロセスは無い)。
-- **pytest の postgres**: `backend/open_webui/test/conftest.py` が docker で自動起動しセッション共有。
+- **pytest の postgres**: `backend/nucllei/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
   - **podman 環境(2026-07-14 確認)**: usermod や root は不要。rootless の user socket を立てて
     docker-py に `DOCKER_HOST` で教えるだけ:
     ```sh
     systemctl --user enable --now podman.socket   # 一度だけ(enable で永続)
-    DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock PYTHONPATH=backend uv run pytest backend/open_webui/test -q
+    DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock PYTHONPATH=backend uv run pytest backend/nucllei/test -q
     ```
     conftest の `docker.from_env()` も pytest_docker の `get_docker_ip()` もこれでそのまま動く(338 passed 実証済み)。
 - **権限のネガティブテストは `mock_webui_user_strict` を使う**(test/util/mock_user.py、#55 で追加):
   従来の `mock_webui_user` は `get_admin_user` ごと差し替えるため **role="user" でも admin endpoint を
   素通りする**(401 を期待するテストが書けない)。strict 版は `get_current_user` だけを差し替えて
   role ゲートを実物で通す。#66(権限3層化)の回帰はこちらで書くこと。
-- open_webui は **import 時に DATABASE_URL などの env が確定**する(migration も import 時)。
+- nucllei(旧 open_webui)は **import 時に DATABASE_URL などの env が確定**する(migration も import 時)。
   import 時確定 env のテストはサブプロセス起動 + `cwd`=backend + `PYTHONPATH`=backend を明示
   (`test_native_tool_calling.py` の `_parse_iterations_env` が実例。ローカル green を過信しない)。
 - **リポジトリ直下に symlink を置かない**(Tailwind/vitest が辿って ELOOP/OOM)。
@@ -144,7 +144,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    ```
    慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
    ※ 旧手順の `.venv/bin/open-webui` は **使えない**(`package = false` でコンソールスクリプト未生成)。
-   タスクは `PYTHONPATH=backend python -c 'from open_webui import app; app()'` で typer app を直接呼ぶ。
+   タスクは `PYTHONPATH=backend python -c 'from nucllei import app; app()'` で typer app を直接呼ぶ。
    `uv run task cli --help` で全サブコマンド確認可。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
@@ -208,7 +208,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 
 ## モデルフレーム fixture(SGLang × Kimi 実キャプチャ)
 
-- 置き場: `backend/open_webui/test/fixtures/model_frames/`(7 シナリオ + aborted)。
+- 置き場: `backend/nucllei/test/fixtures/model_frames/`(7 シナリオ + aborted)。
   観察された仕様は `_memos/model-frames.md`。
 - Kimi の tool call id は `functions.<name>:<index>` 形式(OpenAI の call_xxx ではない)。
   引数は厳密 JSON(空引数は `"{}"`)。reasoning は常時出る(`reasoning_content`)。
@@ -221,7 +221,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 ```bash
 uv sync --extra local-ml    # faster-whisper + torch 系(dev グループは維持される)
 LLENS_STT_SMOKE=1 PYTHONPATH=backend uv run pytest \
-    backend/open_webui/test/apps/webui/routers/test_audio_stt_builtin.py -v
+    backend/nucllei/test/apps/webui/routers/test_audio_stt_builtin.py -v
 ```
 
 - モデルは既定 `tiny`(初回 ~75MB を `WHISPER_MODEL_DIR` へ自動 DL、以後オフライン可)。
