@@ -46,7 +46,6 @@ export const settings: Writable<Settings> = writable({});
 export const showSidebar = writable(false);
 export const showSettings = writable(false);
 export const showArchivedChats = writable(false);
-export const showChangelog = writable(false);
 
 export const showControls = writable(false);
 export const showCallOverlay = writable(false);
@@ -141,8 +140,6 @@ type Settings = {
 	expandDetails?: boolean;
 	imageCompression?: boolean;
 	imageCompressionSize?: { width: string; height: string };
-	showUpdateToast?: boolean;
-	showChangelog?: boolean;
 	voiceInterruption?: boolean;
 	hapticFeedback?: boolean;
 	iframeSandboxAllowSameOrigin?: boolean;

@@ -65,21 +65,6 @@
 			label: 'Notification Sound',
 			type: 'switch',
 			init: () => $settings.notificationSound ?? true
-		},
-		{
-			key: 'showUpdateToast',
-			label: 'Toast notifications for new updates',
-			type: 'switch',
-			init: () => $settings.showUpdateToast ?? true,
-			show: () => $user?.role === 'admin'
-		},
-		{
-			key: 'showChangelog',
-			label: `Show "What's New" modal on login`,
-			type: 'switch',
-			// llens: What's New 自動表示は既定 OFF(issue #10)
-			init: () => $settings.showChangelog ?? false,
-			show: () => $user?.role === 'admin'
 		}
 	];
 

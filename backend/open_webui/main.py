@@ -200,7 +200,6 @@ from open_webui.config import (
 from open_webui.env import (
     AUDIT_EXCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
-    CHANGELOG,
     REDIS_URL,
     REDIS_SENTINEL_HOSTS,
     REDIS_SENTINEL_PORT,
@@ -1040,19 +1039,6 @@ async def get_app_version():
     return {
         "version": VERSION,
     }
-
-
-@app.get("/api/version/updates")
-async def get_app_latest_release_version(user=Depends(get_verified_user)):
-    # llens: upstream の更新チェック(github.com への外部フェッチ)は air-gapped 前提に
-    # 反し、案内自体も無意味なため機能ごと削除(issue #10、fork.md §6)。
-    # エンドポイントは互換のため残すが常に current==latest を返し、外部通信は一切行わない。
-    return {"current": VERSION, "latest": VERSION}
-
-
-@app.get("/api/changelog")
-async def get_app_changelog():
-    return {key: CHANGELOG[key] for idx, key in enumerate(CHANGELOG) if idx < 5}
 
 
 ############################

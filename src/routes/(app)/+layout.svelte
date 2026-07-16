@@ -25,13 +25,11 @@
 		tools,
 		functions,
 		banners,
-		showSettings,
-		showChangelog
+		showSettings
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from './SettingsModal.svelte';
-	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -160,14 +158,6 @@
 				}
 			});
 
-			// llens: What's New(Changelog)自動ポップアップは upstream のリリース案内で
-			// air-gapped 運用では無意味なため既定 OFF(issue #10)。
-			// 戻すには Settings > Interface の "Show Changelog" を有効化(About の手動ボタンは常時可)。
-			if ($user?.role === 'admin' && ($settings?.showChangelog ?? false)) {
-				showChangelog.set($settings?.version !== $config.version);
-			}
-
-			// llens: upstream 更新チェックの外部フェッチと通知トーストは機能ごと削除した(issue #10)。
 			await tick();
 		}
 
@@ -176,7 +166,6 @@
 </script>
 
 <SettingsModal bind:show={$showSettings} />
-<ChangelogModal bind:show={$showChangelog} />
 
 <div class="app relative">
 	<div
