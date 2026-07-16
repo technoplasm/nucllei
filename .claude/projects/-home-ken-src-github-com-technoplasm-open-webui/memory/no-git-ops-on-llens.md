@@ -9,4 +9,4 @@ metadata:
 
 **Why:** llens は北大で稼働中の現行運用リポで、他者も push する共有リポ。エージェントが勝手にコミット/rebase/push すると運用履歴を汚す。2026-07-08 に docling attachment を llens へ足した際、勝手に commit→（remote 分岐で）rebase→push してしまい注意を受けた。
 
-**How to apply:** llens 配下のファイルは Write/Edit で置くだけに留める。「コミットして」と言われても対象が llens なら確認する。fork(technoplasm/open-webui)側の git 操作は従来通り可（master へ直接 refs #N でコミット）。
+**How to apply:** llens 配下のファイルは Write/Edit で置くだけに留める。「コミットして」と言われても対象が llens なら確認する。fork(technoplasm/nucllei)側の git 操作は従来通り可（master へ直接 refs #N でコミット）。
