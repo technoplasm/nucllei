@@ -945,9 +945,8 @@ USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS = (
 )
 
 
-USER_PERMISSIONS_CHAT_CONTROLS = (
-    os.environ.get("USER_PERMISSIONS_CHAT_CONTROLS", "True").lower() == "true"
-)
+# llens: chat.controls フラグは廃止 — Controls サイドバー(Valves/System Prompt/
+# Advanced Params)は 2c4e63d07 で撤去済みで、ゲート対象が存在しない死にフラグだった。
 
 USER_PERMISSIONS_CHAT_FILE_UPLOAD = (
     os.environ.get("USER_PERMISSIONS_CHAT_FILE_UPLOAD", "True").lower() == "true"
@@ -989,7 +988,6 @@ DEFAULT_USER_PERMISSIONS = {
         "skills": USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS,
     },
     "chat": {
-        "controls": USER_PERMISSIONS_CHAT_CONTROLS,
         "file_upload": USER_PERMISSIONS_CHAT_FILE_UPLOAD,
         "delete": USER_PERMISSIONS_CHAT_DELETE,
         "edit": USER_PERMISSIONS_CHAT_EDIT,

@@ -9,8 +9,6 @@ requirements:
 import json
 from typing import List
 
-from nucllei.utils.tool_render import Table
-
 
 # =========================================================================
 # サンプルビルダ(モジュール関数)
@@ -224,18 +222,4 @@ class Tools:
     # 旧 run_python(Code("python") + Text 戻りの #20 確認用ダミー)は、本物の
     # sandbox tool(dev/tools/sandbox.py)の搭載(#18-3)に伴い撤去 — 同名衝突で
     # 本物を discard してしまうため。宣言は sandbox 側に引き継ぎ済み。
-
-    def probe_result_table(self, department: str = "") -> Table:
-        """object 配列を返す。戻り型 Table の結果テーブル表示(#20)の確認用。
-
-        :param department: 絞り込み用の診療科名(空なら全件)
-        :return: 診療科別の件数リスト
-        """
-        rows = [
-            {"診療科": "内科", "件数": 12, "備考": ""},
-            {"診療科": "外科", "件数": 8, "備考": "前週比 +2"},
-            {"診療科": "小児科", "件数": 5, "備考": ""},
-        ]
-        if department:
-            rows = [r for r in rows if r["診療科"] == department]
-        return rows
+    # 旧 probe_result_table(戻り型 Table)は table 描画の廃止(#60)に伴い撤去。

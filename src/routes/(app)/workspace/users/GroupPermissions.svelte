@@ -13,7 +13,6 @@
 			skills: false
 		},
 		chat: {
-			controls: true,
 			file_upload: true,
 			delete: true,
 			edit: true,
@@ -60,14 +59,6 @@
 				</div>
 
 				<Switch bind:state={permissions.chat.file_upload} />
-			</div>
-
-			<div class=" flex w-full justify-between my-2 pr-2">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Allow Chat Controls')}
-				</div>
-
-				<Switch bind:state={permissions.chat.controls} />
 			</div>
 
 			<div class=" flex w-full justify-between my-2 pr-2">
