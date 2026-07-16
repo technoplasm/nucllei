@@ -37,6 +37,11 @@
   例: `<span class="i-lucide-settings size-4 block"></span>`。CSS mask で currentColor を継承する。
   既存のインライン SVG に触れるときは class icon へ置換する(新規は最初から class icon)。
 - 既存のインライン SVG が残る画面もある(A1 は段階移行)。**新規・改修分だけでも必ず class icon** にする。
+- **コンポーネントイベントは callback prop(`onXxx`)で渡す。`createEventDispatcher` は新規使用禁止**
+  (#70 A2-2 で確立、`common/` は 2026-07-16 に全廃)。named slot も新規は snippet prop
+  (`{#snippet content()}` + `{@render content?.()}`)で。`$:` 由来の通知はマウント時初期発火に注意
+  (`common/Switch.svelte` の lastState ガードパターンを踏襲)。
+  残る dispatcher(chat メッセージ樹・サイドバー等 25 ファイル)は C トラック(分割・runes 化)で消化。
 
 ## 現行プロジェクトの参照
 
