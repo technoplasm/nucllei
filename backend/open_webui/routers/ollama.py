@@ -343,7 +343,6 @@ async def get_all_models(request: Request, user: UserModel = None):
                 )
 
                 prefix_id = api_config.get("prefix_id", None)
-                tags = api_config.get("tags", [])
                 model_ids = api_config.get("model_ids", [])
 
                 if len(model_ids) != 0 and "models" in response:
@@ -357,10 +356,6 @@ async def get_all_models(request: Request, user: UserModel = None):
                 if prefix_id:
                     for model in response.get("models", []):
                         model["model"] = f"{prefix_id}.{model['model']}"
-
-                if tags:
-                    for model in response.get("models", []):
-                        model["tags"] = tags
 
         def merge_models_lists(model_lists):
             merged_models = {}
