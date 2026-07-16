@@ -5,7 +5,7 @@ Tool/Function の description を meta.description(JSON)から top-level 列へ�
 Function は #45 で manifest が消え meta が description だけになっていたので meta 列ごと撤去。
 Tool は builtin 判別のため meta 列を残す。
 
-既存行の meta.description → description 列への backfill はしない(air-gapped・少数・
+既存行の meta.description → description 列への backfill はしない(対象は少数・
 再保存/作り直しで対処。builtin tool は起動時 sync で description が再設定される)。
 SQLite は ALTER 制約が強いので batch mode。
 

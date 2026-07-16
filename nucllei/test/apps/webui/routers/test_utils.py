@@ -9,7 +9,7 @@ class TestUtils(AbstractPostgresTest):
 
         - /code/execute: 組み込みコード実行(GHSA-482j の旧ゲートを撤去固定に置換。
           実行系は自前 sandbox(nsjail+IPython)のツール経路一本)
-        - /gravatar: 外部ネットワーク(air-gapped 違反)
+        - /gravatar: 外部ネットワーク必須(オフライン完結方針に反する)
         - /markdown, /litellm/config: orphan 残骸
         ※ 消した path は SPA フォールバックが受けるため HTTP ステータスでは検証しない。
         """

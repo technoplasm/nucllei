@@ -1,7 +1,7 @@
 # dev/tools
 
 レンダリング/tool call 表示デバッグ用の開発ツール（`render_probe`）とその登録スクリプト。
-アプリ本体には手を入れず、公開 API 経由で dev DB に登録するだけ。air-gapped 前提で localhost のみ。
+アプリ本体には手を入れず、公開 API 経由で dev DB に登録するだけ。localhost のみ。
 
 ## 登録手順
 

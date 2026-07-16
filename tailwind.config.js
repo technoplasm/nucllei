@@ -97,7 +97,7 @@ export default {
 		typography,
 		containerQuries,
 		// llens(#70): class ベースアイコン(i-lucide-*)。CSS mask で currentColor 継承、
-		// 使ったクラスだけ emit(ビルド時生成 = air-gapped 対応)。動的なクラス名合成は禁止。
+		// 使ったクラスだけ emit(ビルド時生成、ランタイム外部依存なし)。動的なクラス名合成は禁止。
 		iconsPlugin({ collections: getIconCollections(['lucide']) })
 	]
 };

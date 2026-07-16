@@ -1,5 +1,5 @@
 <script lang="ts">
-	// air-gapped: openwebui.com/community 連携(share)・可搬性導線(clone・import/export JSON)は
+	// openwebui.com/community 連携(share)・可搬性導線(clone・import/export JSON)は
 	// skill(#35)の前例どおり撤去した(issue #44)。機能は一覧/検索/作成/編集/削除のみ。
 	// llens(#47 A1): TOOL バッジ・name tooltip・By 表示・Valves・… メニューを撤去。
 	// 組み込みは上部に別セクション。visibility(access_control)は一覧のアイコンから直接編集する

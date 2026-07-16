@@ -108,7 +108,7 @@ WEBUI_VERSION = os.environ.get("WEBUI_VERSION", "")
 #  Functions, is copyright © PRISM-HU. All rights reserved."
 WEBUI_COPYRIGHT = os.environ.get("WEBUI_COPYRIGHT", "")
 
-# llens: air-gapped 前提のためローカル static を指す(旧 upstream は openwebui.com の
+# llens: 外部照会を避けるためローカル static を指す(旧 upstream は openwebui.com の
 # 外部 URL だった)。使用箇所は webhook 通知(Teams payload)のアイコンのみ。
 WEBUI_FAVICON_URL = "/static/favicon.png"
 

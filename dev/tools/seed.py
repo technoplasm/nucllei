@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """dev DB へ render_probe tool を登録し、preset モデル llens-assistant に紐付ける開発用スクリプト。
 
-使い方は同ディレクトリの README.md を参照。air-gapped 前提のため localhost の dev サーバにのみ投げる。
+使い方は同ディレクトリの README.md を参照。localhost の dev サーバにのみ投げる。
 アプリのソースには一切触れず、公開 API 経由で DB を更新するだけ。
 """
 

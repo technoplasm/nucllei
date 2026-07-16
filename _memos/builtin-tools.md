@@ -152,7 +152,7 @@ web 検索を prism へ出したのと対照 — あちらは外部システム�
   - 型駆動レンダリング(#20): run_python の code 引数は `Code("python")` 宣言
     (dev ダミー run_python が既にこの形 — 置き換え時に宣言を引き継ぐ)
 - 認可: access_control で group 単位の出し分け(CORE)
-- air-gapped: sandbox_url は docker network 内。外部ネットワーク依存なし
+- オフライン完結: sandbox_url は docker network 内。外部ネットワーク依存なし(閉域配備でも成立)
 
 ### R3. #15 の結論(Responses API 要否)
 

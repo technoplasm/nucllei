@@ -14,7 +14,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 # llens(#44/#45): frontmatter(title/author/version/requirements)機構は tools・functions
 # とも退役。title/description の真実源は DB の name/meta.description のみ、要件は事前導入
-# 前提(air-gapped)で runtime pip も廃止。旧 extract_frontmatter /
+# 前提で runtime pip も廃止(runtime の外部取得はしない)。旧 extract_frontmatter /
 # install_frontmatter_requirements は完全 dead のため削除した(#45 でまとめて掃除)。
 
 
@@ -54,7 +54,7 @@ def load_tool_module_by_id(tool_id, content=None):
         Tools.update_tool_by_id(tool_id, {"content": content})
     # llens(#44): tool の frontmatter は退役。title/description の真実源は DB の
     # name/meta.description のみとし、requirements による tool ロード時 pip も廃止
-    # (air-gapped、依存は事前導入前提)。
+    # (依存は事前導入前提、runtime の外部取得はしない)。
 
     module_name = f"tool_{tool_id}"
     module = types.ModuleType(module_name)
@@ -98,7 +98,7 @@ def load_function_module_by_id(function_id, content=None):
         content = replace_imports(content)
         Functions.update_function_by_id(function_id, {"content": content})
     # llens(#45): tool 経路(#44)と同じく frontmatter/pip は退役。requirements の
-    # runtime インストールはしない(air-gapped、依存は事前導入前提)。
+    # runtime インストールはしない(依存は事前導入前提)。
 
     module_name = f"function_{function_id}"
     module = types.ModuleType(module_name)

@@ -11,7 +11,7 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
 
 | エンティティ | メタの持ち方 | frontmatter(`"""..."""`)| share/clone/export | version 表示 |
 |---|---|---|---|---|
-| Skill | title/command/description/content/tool_ids に構造分離 | 無し | 全廃済み(#35、air-gapped) | 無し |
+| Skill | title/command/description/content/tool_ids に構造分離 | 無し | 全廃済み(#35、openwebui.com 連携撲滅) | 無し |
 | **Tool** | フォーム `name`+`meta.description` **と** frontmatter の `meta.manifest` の**二重** | 有り(`extract_frontmatter`) | 有り(share は openwebui.com を開く) | `manifest.version` バッジ + ManifestModal + funding_url |
 | Filter/Function | Tool と同じ二重 | 有り | 有り | 同上 |
 | Builtin tool | repo 定義が真実源 | 無し | — | 無し |
@@ -21,7 +21,7 @@ builtin は編集不可にする。**今回は tools のみ** — filters/functi
 
 - Skill だけが理想形。Tool は旧 OWUI のまま二重定義が残る。
 - frontmatter が運ぶ唯一の実機能は `requirements`(tool ロード時 `pip install`)。title/description/
-  version/funding_url は表示専用。air-gapped では runtime pip 自体が筋悪。
+  version/funding_url は表示専用。runtime pip は配備を問わず筋悪(閉域配備では成立すらしない)。
 - builtin はバックエンドが content 書換を拒否済み(create=id 予約 / update=access_control のみ /
   delete 拒否)だが、**フロントは編集リンク/メニューをそのまま出している**不整合(Tools.svelte:212)。
 

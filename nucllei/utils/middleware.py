@@ -535,7 +535,7 @@ async def process_chat_payload(
             )
 
     # llens(#69): 画像添付は files 経由に統一。内部 file URL("/api/v1/files/{id}/content")
-    # の image_url は air-gapped のためモデル側から fetch できない — モデルへ出る直前の
+    # の image_url は推論エンジン側から到達・認証できる保証がない — モデルへ出る直前の
     # ここで base64 data URL に変換する。native tool ループの再送(process_chat_response)も
     # form_data["messages"] を再利用するため、変換はこの 1 箇所で足りる。
     form_data["messages"] = await inline_internal_image_urls(

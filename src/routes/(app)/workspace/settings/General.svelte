@@ -128,7 +128,7 @@
 					</div>
 
 					<!-- llens(#30/#10): update check / Help・外部リンク / License 表示は
-					     air-gapped 前提・薄化方針(fork.md §6)に伴い撤去。version は残す。 -->
+					     外部照会の撲滅・薄化方針(fork.md §6)に伴い撤去。version は残す。 -->
 				</div>
 
 				<div class="mb-3">

@@ -1,5 +1,5 @@
 <script>
-	// フォントはビルド時にバンドル(air-gapped 前提で CDN 不使用)。
+	// フォントはビルド時にバンドル(CDN 不使用 — オフライン完結)。
 	// sans = Inter + Noto Sans JP / mono = JetBrains Mono + M PLUS 1 Code(等幅日本語)。
 	import '@fontsource-variable/inter';
 	import '@fontsource-variable/noto-sans-jp';

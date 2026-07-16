@@ -2,7 +2,7 @@
 title: Render Probe
 author: llens dev
 version: 0.1
-description: レンダリング/tool call 表示のデバッグ用。任意の markdown 表示ケースをモデル経由で再現する開発ツール。air-gapped 前提で外部アクセスなしの純粋関数のみ。
+description: レンダリング/tool call 表示のデバッグ用。任意の markdown 表示ケースをモデル経由で再現する開発ツール。外部アクセスなしの純粋関数のみ。
 requirements:
 """
 

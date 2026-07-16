@@ -9,7 +9,7 @@
 
 	const i18n = getContext('i18n');
 
-	// air-gapped: openwebui.com/community 連携(postMessage インポート・sessionStorage clone)は
+	// openwebui.com/community 連携(postMessage インポート・sessionStorage clone)は
 	// 一切持ち込まない(issue #35)。作成は空フォームからのみ。
 	const onSubmit = async (_skill: any) => {
 		const skill = await createNewSkill(_skill).catch((error) => {

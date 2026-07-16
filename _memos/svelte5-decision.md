@@ -24,7 +24,7 @@ svelte 5.56.4 / @sveltejs/vite-plugin-svelte 4.x / svelte-check 4.x に上げて
    既存コンポーネントは **Svelte 4 構文のまま触らない**(触るときに runes 化を検討、義務ではない)
 2. **新規コンポーネント(#14 レンダリング刷新トラック: セグメンタ描画・reasoning 折りたたみ・tool 引数ウィジェット)は runes で書く**。
    fine-grained reactivity は growing string の追記描画(L3)と相性が良い
-3. ライブラリの runes 版メジャー(bits-ui 1.x 等)への追従は**しない**(現バージョンで動作している限り凍結。air-gapped・薄化方針とも整合)
+3. ライブラリの runes 版メジャー(bits-ui 1.x 等)への追従は**しない**(現バージョンで動作している限り凍結。オフライン完結・薄化方針とも整合)
 4. upstream の Svelte 5 移行コードは参照しない(v0.6.6+ 禁止)。根拠は公式マイグレーションガイドのみ
 
 ## 留意点

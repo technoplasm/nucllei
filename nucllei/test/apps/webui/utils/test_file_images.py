@@ -1,8 +1,8 @@
 """内部 file URL 画像の base64 インライン化の回帰テスト(issue #69)。
 
 画像添付は files テーブル経由に統一され、チャット payload の image_url には
-"/api/v1/files/{id}/content" 形式の内部 URL が入る。air-gapped のためモデル側から
-URL を fetch できず、モデルへ出る直前に inline_internal_image_urls が
+"/api/v1/files/{id}/content" 形式の内部 URL が入る。モデル側からこの URL へ
+到達・認証できる保証がなく、モデルへ出る直前に inline_internal_image_urls が
 data URL へ変換する(utils/file_images.py、process_chat_payload 末尾で発火)。
 
 - 読取権限のある file だけ変換する(非公開 file は他人のリクエストでは変換されない)

@@ -298,7 +298,7 @@ async def lifespan(app: FastAPI):
         reset_config()
 
     # llens(#28): LICENSE_KEY / get_license_data(api.openwebui.com への起動時照会)は
-    # air-gapped 前提に反するため撤去
+    # 外部照会(オフラインで成立しない)のため撤去
 
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)

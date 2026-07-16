@@ -684,7 +684,7 @@ if frontend_loader.exists():
 
 
 # llens: 旧 upstream の CUSTOM_NAME(api.openwebui.com への起動時 fetch)は
-# air-gapped 前提に反する外部照会のため機能ごと撤去。WEBUI_NAME は env で指定する。
+# 外部照会(オフラインで成立しない)のため機能ごと撤去。WEBUI_NAME は env で指定する。
 
 ####################################
 # STORAGE PROVIDER
@@ -1026,7 +1026,7 @@ ENABLE_ADMIN_CHAT_ACCESS = (
     os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
 )
 
-# llens(#10): openwebui.com コミュニティ共有(ストア導線)は air-gapped 前提のため機能ごと撤去。
+# llens(#10): openwebui.com コミュニティ共有(ストア導線)は外部サービス前提のため機能ごと撤去。
 # llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
 
 ENABLE_USER_WEBHOOKS = RuntimeConfig(
@@ -1187,7 +1187,7 @@ ENABLE_TITLE_GENERATION = RuntimeConfig(
 
 # llens(#52): 添付ファイルはベクタ検索せず全文注入する(issue #9、fork.md §5)。RAG 検索の
 # config(top_k / reranker / relevance / hybrid / full_context / bypass)は撤去済み。
-# embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(air-gapped)。
+# embedding/reranking モデルの起動時ロードは main.py で無条件にスキップ(起動時のモデル外部 DL を排除)。
 # llens(#67): memories も撤去し vector/embedding 基盤の消費者が全滅したため、
 # 防御的に残していた app.state.EMBEDDING_FUNCTION も撤去済み。
 

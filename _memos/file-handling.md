@@ -134,7 +134,7 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 - **`.msg`**: markitdown は `olefile`(BSD)で読む。#2 で除外した extract-msg(GPL)は `[all]` でも引かない(lock 確認済み)。
 - 旧 `utils/extraction.py`(v0.6.5 langchain ローダ版)は markitdown の劣化再実装だったため撤回・削除。
   併せて langchain-community / unstructured / networkx / nltk / pypdf / docx2txt / ftfy を撤去
-  (unstructured の nltk データ air-gapped 問題からも解放)。langchain-core だけは tools.py が使うので直接依存に残す。
+  (unstructured の nltk データのオフライン取得問題からも解放)。langchain-core だけは tools.py が使うので直接依存に残す。
 
 **B 固有の設計要素**:
 1. **非同期 + フック内で処理制御**: 抽出は遅い(秒〜分)ので upload 同期ブロックはしない。file に `extracting→done` を持たせ非同期実行、プレビューは「処理中…」→完了で表示。加えて **タイムアウト/長すぎる処理の打ち切りもフック内でコントロール**(ユーザー定義なので案件ごとに閾値・中断ポリシーを持てる=B の利点)。チャット途中のファイル追加もこの発火で自然に走る。
@@ -214,7 +214,7 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 - **RAG 固有 config 撤去**(e802e3c5a + Documents 779075938): `RAG_TOP_K`/`TOP_K_RERANKER`/
   `RELEVANCE_THRESHOLD`/`ENABLE_RAG_HYBRID_SEARCH`/`RAG_FULL_CONTEXT`/`BYPASS_EMBEDDING_AND_RETRIEVAL` を
   config・main 配線・/retrieval/config・middleware・Documents UI から一掃。BYPASS の起動時 embedding/reranking
-  ロードスキップは無条件化(air-gapped)。~~**温存**: RAG_TEMPLATE / embedding・vector・EMBEDDING_FUNCTION
+  ロードスキップは無条件化(起動時のモデル外部 DL を排除)。~~**温存**: RAG_TEMPLATE / embedding・vector・EMBEDDING_FUNCTION
   (memories #8)/ CHUNK・docling・tika / PDF_EXTRACT_IMAGES~~ → **改訂(2026-07-08 第2セッション)で全撤去**
   (下記「## RAG/KB 完全撤去」参照)。強制全文(context=="full")分岐も撤去。
 - **① 受け入れゲート**(c0654415d): upload 入口(Attachment 前)で server-side に拡張子 whitelist +
@@ -261,8 +261,8 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 - **embedding/vector 基盤撤去**(掃除8): **memory を素の SQL ストアに降格**(`routers/memories.py` から
   VECTOR_DB_CLIENT/EMBEDDING_FUNCTION を除去、`/query` は全 memory を自然言語で返す=Claude 方式。テーブル/
   content/UI は温存)。これで基盤の最後の消費者が消え、`retrieval/vector/` パッケージ丸ごと・
-  `EMBEDDING_FUNCTION` 起動時生成・`RAG_EMBEDDING_*`/`VECTOR_DB`/接続キー を撤去(air-gapped で
-  SentenceTransformers ロードも消滅)。
+  `EMBEDDING_FUNCTION` 起動時生成・`RAG_EMBEDDING_*`/`VECTOR_DB`/接続キー を撤去(これで
+  SentenceTransformers の起動時ロード・外部 DL も消滅)。
 - **RAG_TEMPLATE(包む機構)撤去**(掃除11): middleware で `<source>` context を `rag_template()` で包まず
   **そのまま注入**。指示(引用ルール等)が要れば preset system prompt(prism)が持つ。→ **config.py の RAG_ 系ゼロ**。
 - **web 検索は tool 用に温存、RAG 結合のみ解除**(`08ecc904c`): middleware の `chat_web_search_handler`
@@ -303,7 +303,7 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
    (再抽出しない判断はフック側)。未宣言の既存フックは従来どおり。
 3. **画像も files 経由に統一**(base64 直入れ廃止): 送信 payload の内部 URL
    `/api/v1/files/{id}/content` を `utils/file_images.py::inline_internal_image_urls` が
-   process_chat_payload 末尾で base64 化(air-gapped のためモデルから URL fetch 不可)。
+   process_chat_payload 末尾で base64 化(推論エンジンから WebUI 内部 URL への到達・認証は保証されないため)。
 4. ファイル管理面(`/files` ページ・共有フル編集・accessed_at)は `chat-share-files.md` #69 節を参照。
 5. **運用注意**: 画像がアップロード経路(#52 受け入れゲート)に乗ったため、
    `ATTACHMENT_ALLOWED_EXTENSIONS` を文書系だけの whitelist で運用している環境では

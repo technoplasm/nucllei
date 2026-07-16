@@ -54,8 +54,8 @@ def verify_signature(payload: str, signature: str) -> bool:
 
 
 # llens(#28): get_license_data / override_static を撤去 — 起動時に
-# api.openwebui.com へ同期 POST する upstream のライセンス照会は air-gapped
-# 前提(CLAUDE.md)に反し、リモート応答で static ファイルを上書きする経路も不要。
+# api.openwebui.com へ同期 POST する upstream のライセンス照会は外部ネットワーク
+# 必須機能を持たない方針(CLAUDE.md)に反し、リモート応答で static ファイルを上書きする経路も不要。
 
 bearer_security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

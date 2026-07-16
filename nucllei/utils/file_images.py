@@ -1,8 +1,8 @@
 """内部 file URL 画像の base64 インライン化(#69 画像の files 化)。
 
 画像添付は base64 直入れをやめ files テーブル経由に統一した。チャット payload の
-image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが、air-gapped
-前提のためモデル(SGLang)側からこの URL を fetch できない — モデルへ出る直前
+image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが、モデル
+(推論エンジン)側からこの URL へ到達・認証できる保証がない — モデルへ出る直前
 (process_chat_payload 末尾)に、要求ユーザーが読める file だけを Storage から
 読み出して data URL に変換する。
 

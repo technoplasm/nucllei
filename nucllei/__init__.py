@@ -88,7 +88,7 @@ def create_admin(
         ),
     ] = None,
 ):
-    """Create an administrator account from the server (air-gapped provisioning).
+    """Create an administrator account from the server (server-side provisioning).
 
     llens: 公開オンボーディング画面の代わりに、運用者がサーバ上でこのコマンドを
     実行して最初の管理者を作成する。既存 DB でも新規 DB でも動く(import 時に

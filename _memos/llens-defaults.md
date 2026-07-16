@@ -24,7 +24,7 @@ env 未設定の項目は既存 DB の保存値(RuntimeConfig、旧 PersistentCo
 
 ## 機能削除(既定無効化でなく削除したもの)
 
-- **upstream バージョン更新チェック**(github.com への外部フェッチ + 「新版が出ています」トースト): air-gapped 前提(fork.md §6)に反するため機能ごと削除(#10)。
+- **upstream バージョン更新チェック**(github.com への外部フェッチ + 「新版が出ています」トースト): 外部ネットワーク必須機能を持たない方針(fork.md §6)に反するため機能ごと削除(#10)。
   - 当初(#10)は `/api/version/updates` を互換スタブとして残し手動ボタンも残置していたが、
     **9755e960a(2026-07-16、#10 #70)で根こそぎ撤去**: BE 端点(/api/changelog / /api/version/updates)、
     FE api(getChangelog / getVersionUpdates)、ChangelogModal、Interface の設定 2 行、CHANGELOG.md 本体まで全削除。

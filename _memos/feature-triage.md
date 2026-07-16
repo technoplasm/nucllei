@@ -18,7 +18,7 @@
 | プロンプト管理(`/` 呼び出し) | **撤去済み(#35)** | ~~あってもよいがスキルとの棲み分け再設計~~ → **改訂(2026-07-06 #35): 「`/` はスキル能動発火 UI に置き換える」案をそのまま実装 — workspace/picker を Skill に置換し prompts を全退役**(prompt テーブル drop = migration c2d9a7b41e05、74f0e5161) |
 | ツール(Tools) | **完全キャッチアップ** | 外形仕様・公式ドキュメントベースで機能パリティを目指す(コード移植は不可) |
 | スキル(Skills) | **完全キャッチアップ** | 同上。llens の権限モデル(診療科×職位)と統合(issue #5) |
-| ストア(openwebui.com 共有・取得) | **撲滅済み(#10)** | air-gapped 前提。community sharing(config / admin トグル / 共有ボタン / モデル discover / 作者リンク)を機能ごと撤去(773c2dead)。tools/functions/skills の共有導線は #45 で撤去済み |
+| ストア(openwebui.com 共有・取得) | **撲滅済み(#10)** | openwebui.com への外部照会が前提の機能。community sharing(config / admin トグル / 共有ボタン / モデル discover / 作者リンク)を機能ごと撤去(773c2dead)。tools/functions/skills の共有導線は #45 で撤去済み |
 | 評価 / Arena | **撲滅済み(#48)** | 邪魔なので削除。#48 で feedback(👍/👎)UI・frontend/backend API・DB テーブル(migration e3b1c9f4a7d2 で drop)、arena config/モデル注入/chat 経路の dead code、ENABLE_MESSAGE_RATING まで全撤去。admin Evaluations 画面も削除 |
 | 管理画面のチャット分析 | **できれば詳細化** | ユーザー別の利用分析をもう少し詳しく。優先度低 |
 | チャットの「コントロール」サイドバー | **削除** | Files/Valves/System Prompt 上書き/高度なパラメータの per-chat 制御。一般ユーザーが制御する必要がなく、変に触らせたくない(2026-07-07) |
@@ -153,7 +153,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | 入力中補完(generate_autocompletion) | 不要(トークン消費) |
 | 絵文字生成(generate_emoji) | call 画面の飾り。不要 |
 | モデル合議(generate_moa_response) | 単一モデル運用で無意味 |
-| /utils/gravatar | 外部ネットワーク(air-gapped 違反)。横展開でオンラインに出す場合でも不要と判断 |
+| /utils/gravatar | 外部ネットワーク必須。オンラインに出られる配備でも不要と判断 |
 | /utils/code/execute | 組み込みコード実行の残骸(#11 の保留分)。実行系は外部 sandbox 一本 |
 | retrieval router | RAG config 残骸ごと全削除。web search は prism 層の tool(外部検索システム直叩き)へ移管、fork の検索素材も撤去済み(#51 close 2026-07-13、`eae47a4bd`) |
 | memory API | UI 撤去済み(#63)の残骸。router・モデル・テーブルごと |
@@ -163,7 +163,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | 機能 | 判断 |
 |---|---|
 | chat import/export | 不要だが邪魔でもない — 残す |
-| webhook(ユーザー通知 + signup) | **別システムへの横展開で使う可能性があるため残す**(air-gapped 単体では無用でも) |
+| webhook(ユーザー通知 + signup) | **別システムへの横展開で使う可能性があるため残す**(閉域配備単体では無用でも) |
 | 画像生成まわり | ~~そのまま~~ → **全撤去(2026-07-17)**: `features` フラグ・権限 tier ごと撤去(上の行参照) |
 | STT / TTS | 全員使用可・設定は admin・tool から呼ぶ内部 API 提供(#53)。`chat.stt/tts/call` の per-user フラグは廃止(#66)。**配備レベル**の `ENABLE_AUDIO_STT/TTS`(audio.stt/tts.enable、既定 on)でアイコン表示 + API(403)を一括制御(2026-07-13) |
 | /utils/pdf | 画面印刷の可能性があるため残す |

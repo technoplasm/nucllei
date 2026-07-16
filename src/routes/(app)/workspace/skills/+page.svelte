@@ -1,5 +1,5 @@
 <script lang="ts">
-	// air-gapped: openwebui.com/community 連携(share・clone・import/export JSON)は
+	// openwebui.com/community 連携(share・clone・import/export JSON)は
 	// Prompts からコピーする際に意図的に落とした(issue #35)。機能は一覧/検索/作成/編集/削除のみ。
 	// llens(#47 A1): By 表示・pencil・… メニューを撤去。クリックで編集、削除は trash、
 	// visibility(access_control)は一覧のアイコンから直接編集する。

@@ -1,6 +1,6 @@
 # Open WebUI セキュリティアドバイザリ棚卸し — v0.6.5 影響判定(issue #24)
 
-調査日: 2026-07-05 / 対象フォーク: llens (open-webui v0.6.5 固定, air-gapped 北大病院向け)
+調査日: 2026-07-05 / 対象フォーク: llens (open-webui v0.6.5 固定, 北大病院オンプレ向け)
 
 > **2026-07-17 追記(棚卸し)**: 本文は 2026-07-05 時点のスナップショット(製品は現在 Nucllei に改名、
 > `backend/` → `./nucllei` にフラット化 — 本文中の `test/apps/...` 等のパスは現 `nucllei/test/apps/...`)。
@@ -85,7 +85,7 @@
   ({@html} での SVG インライン描画は無し)、`<img>` 内の SVG はスクリプトを実行しない。OAuth も data-uri を img 描画。
 - **jwf8 / hcwp(Excel/DOCX プレビュー)= 非該当**: fork に mammoth/xlsx 等のプレビュー実装が無い。
 - **3vv5(postMessage)= 低/非該当**: 受信ハンドラ(Feedbacks/Functions/Prompts/Models/ShareChat)は全て
-  `event.origin !== url` を検証済み。かつ対向は openwebui.com コミュニティ連携(air-gapped では DROP)。
+  `event.origin !== url` を検証済み。かつ対向は openwebui.com コミュニティ連携(fork では機能ごと撲滅済み #10)。
 - **xc8p / vjm7(iframe 埋め込み残)**: 上記 8gh5 の sandbox 化とコアの `sanitizeIframeHtml` でカバー。
 - **9f4f(MarkdownTokens 本体)**: コア済み(DOMPurify)。#17 レンダリング刷新で再検証する。
 - ⇒ **#36 のバックエンド/自己完結面はここで一段落**。残るは #17 刷新に伴う再検証と #12 視覚スモークのみ。
@@ -171,7 +171,7 @@
 
 - 認証系: **GHSA-2r4p-jpmg-48f4(LDAP 空PW, CRITICAL)**, **GHSA-h3ww-q6xx-w7x3(CVE-2026-45675, LDAP/OAuth 初回ユーザ競合→複数管理者)**, **GHSA-57q6-fvp4-pqmm(CVE-2026-45339, x-api-key で制限エンドポイント回避)**, **GHSA-7rw5-9f7q-xj36(ログインタイミングでアカウント列挙)**。
 - SSRF 系(RAG/web-fetch/画像・OAuth 画像取得): GHSA-24c9-2m8q-qhmh, GHSA-226f-f24g-524w, GHSA-rh5x-h6pp-cjj6(CVE-2026-45401), GHSA-8w7q-q5jp-jvgx, GHSA-c6xv-rcvw-v685(CVE-2025-65958), GHSA-82r6-c5jm-f3mw, GHSA-4v7r-f4w8-8972, GHSA-f776-fp4w-266c(※範囲外), GHSA-jgx9-jr5x-mvpv, GHSA-m69w-p7m4-585j。
-  対策共通: `validate_url` にリダイレクト追従時の再検証、内向き IP/メタデータ IP のブロック、`WEB_FETCH_FILTER_LIST` のホスト境界一致。air-gapped でも SSRF は内部横展開に効くので RAG/画像取得を使うなら要対処。
+  対策共通: `validate_url` にリダイレクト追従時の再検証、内向き IP/メタデータ IP のブロック、`WEB_FETCH_FILTER_LIST` のホスト境界一致。閉域配備でも SSRF は内部横展開に効くので RAG/画像取得を使うなら要対処。
 - XSS 系(レンダリング面): GHSA-8gh5-qqh8-hq3x(CVE-2025-46571, HTML アップロード, =0.6.5), GHSA-w7xj-8fx7-wfch(Insert Prompt as Rich Text), GHSA-r29h-37fj-x2w6(SVG レンダラ), GHSA-xc8p-9rr6-97r2 / GHSA-vjm7-m4xh-7wrc(iFrame 埋め込み), GHSA-jwf8-pv5p-vhmc / GHSA-hcwp-82g6-8wxc(Excel/DOCX プレビュー {@html}), GHSA-v8qj-hxv7-mgvv(Mermaid), GHSA-gf5m-wcrh-7928(Model Description), GHSA-8wvc-869r-xfqf(Note PDF※notes 無→非該当), GHSA-cqp4-qqvg-3787(Banner), GHSA-6gh2-q7cp-9qf6(Profile Picture), GHSA-fq3v-xjjx-95rc(Pending User Overlay), GHSA-3vv5-8xxp-4f55(postMessage), GHSA-3wgj-c2hg-vm6q(OAuth picture SVG)。
   対策共通: `{@html}`/`.innerHTML`/SVG/iFrame 描画箇所を洗い出し DOMPurify を一貫適用、SVG・HTML アップロードは配信時に無害化 or attachment 化。
 
