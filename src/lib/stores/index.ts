@@ -124,6 +124,31 @@ type Settings = {
 	chatDirection: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 
+	// llens(#70): SettingsModal > Interface が実際に保存しているキーを型に反映
+	titleAutoGenerate?: boolean;
+	responseAutoCopy?: boolean;
+	widescreenMode?: boolean;
+	splitLargeChunks?: boolean;
+	scrollOnBranchChange?: boolean;
+	notificationSound?: boolean;
+	richTextInput?: boolean;
+	largeTextAsFile?: boolean;
+	landingPageMode?: string;
+	chatBubble?: boolean;
+	copyFormatted?: boolean;
+	collapseCodeBlocks?: boolean;
+	expandDetails?: boolean;
+	imageCompression?: boolean;
+	imageCompressionSize?: { width: string; height: string };
+	showUpdateToast?: boolean;
+	showChangelog?: boolean;
+	voiceInterruption?: boolean;
+	hapticFeedback?: boolean;
+	iframeSandboxAllowSameOrigin?: boolean;
+	iframeSandboxAllowForms?: boolean;
+	backgroundImageUrl?: string | null;
+	notifications?: { webhook_url?: string };
+
 	system?: string;
 	requestFormat?: string;
 	keepAlive?: string;

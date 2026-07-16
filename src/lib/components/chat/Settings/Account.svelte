@@ -8,24 +8,27 @@
 	import UpdatePassword from './Account/UpdatePassword.svelte';
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils';
-	import Plus from '$lib/components/icons/Plus.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let saveHandler: Function;
-	export let saveSettings: Function;
+	let {
+		saveHandler,
+		saveSettings
+	}: {
+		saveHandler: () => void;
+		saveSettings: (updated: any) => void | Promise<void>;
+	} = $props();
 
-	let profileImageUrl = '';
-	let name = '';
+	let profileImageUrl = $state('');
+	let name = $state('');
 
-	let webhookUrl = '';
-	let showAPIKeys = false;
+	let webhookUrl = $state('');
 
-	let APIKey = '';
-	let APIKeyCopied = false;
-	let profileImageInputElement: HTMLInputElement;
+	let APIKey = $state('');
+	let APIKeyCopied = $state(false);
+	let profileImageInputElement = $state<HTMLInputElement | null>(null);
 
 	const submitHandler = async () => {
 		if (name !== $user?.name) {
@@ -70,30 +73,27 @@
 	};
 
 	onMount(async () => {
-		name = $user?.name;
-		profileImageUrl = $user?.profile_image_url;
+		name = $user?.name ?? '';
+		profileImageUrl = $user?.profile_image_url ?? '';
 		webhookUrl = $settings?.notifications?.webhook_url ?? '';
 
-		APIKey = await getAPIKey().catch((error) => {
-			console.log(error);
-			return '';
-		});
+		APIKey = await getAPIKey().catch(() => '');
 	});
 </script>
 
 <div class="flex flex-col h-full justify-between text-sm">
-	<div class=" space-y-3 overflow-y-scroll max-h-[28rem] lg:max-h-full">
+	<div class=" space-y-3 flex-1 min-h-0 overflow-y-auto">
 		<input
 			id="profile-image-input"
 			bind:this={profileImageInputElement}
 			type="file"
 			hidden
 			accept="image/*"
-			on:change={(e) => {
-				const files = profileImageInputElement.files ?? [];
+			onchange={() => {
+				const files = profileImageInputElement?.files ?? [];
 				let reader = new FileReader();
 				reader.onload = (event) => {
-					let originalImageUrl = `${event.target.result}`;
+					let originalImageUrl = `${event.target?.result}`;
 
 					const img = new Image();
 					img.src = originalImageUrl;
@@ -101,6 +101,9 @@
 					img.onload = function () {
 						const canvas = document.createElement('canvas');
 						const ctx = canvas.getContext('2d');
+						if (!ctx) {
+							return;
+						}
 
 						// Calculate the aspect ratio of the image
 						const aspectRatio = img.width / img.height;
@@ -132,7 +135,9 @@
 						// Display the compressed image
 						profileImageUrl = compressedSrc;
 
-						profileImageInputElement.files = null;
+						if (profileImageInputElement) {
+							profileImageInputElement.value = '';
+						}
 					};
 				};
 
@@ -146,16 +151,15 @@
 		/>
 
 		<div class="space-y-1">
-			<!-- <div class=" text-sm font-medium">{$i18n.t('Account')}</div> -->
-
 			<div class="flex space-x-5">
 				<div class="flex flex-col">
 					<div class="self-center mt-2">
 						<button
-							class="relative rounded-full dark:bg-gray-700"
+							class="relative rounded-full"
 							type="button"
-							on:click={() => {
-								profileImageInputElement.click();
+							aria-label={$i18n.t('Profile Image')}
+							onclick={() => {
+								profileImageInputElement?.click();
 							}}
 						>
 							<img
@@ -165,19 +169,10 @@
 							/>
 
 							<div
-								class="absolute flex justify-center rounded-full bottom-0 left-0 right-0 top-0 h-full w-full overflow-hidden bg-gray-700 bg-fixed opacity-0 transition duration-300 ease-in-out hover:opacity-50"
+								class="absolute flex justify-center rounded-full bottom-0 left-0 right-0 top-0 h-full w-full overflow-hidden bg-gray-700 bg-fixed opacity-0 hover:opacity-50"
 							>
-								<div class="my-auto text-content">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 20 20"
-										fill="currentColor"
-										class="w-5 h-5"
-									>
-										<path
-											d="m2.695 14.762-1.262 3.155a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.886L17.5 5.501a2.121 2.121 0 0 0-3-3L3.58 13.419a4 4 0 0 0-.885 1.343Z"
-										/>
-									</svg>
+								<div class="my-auto text-white">
+									<span class="i-lucide-pencil size-5 block"></span>
 								</div>
 							</div>
 						</button>
@@ -189,8 +184,9 @@
 
 					<div>
 						<button
-							class=" text-xs text-center text-content-muted rounded-full px-4 py-0.5 bg-gray-100 dark:bg-gray-850"
-							on:click={async () => {
+							class=" text-xs text-center rounded-full px-4 py-0.5 bg-secondary hover:bg-secondary-hover text-secondary-content"
+							type="button"
+							onclick={async () => {
 								if (canvasPixelTest()) {
 									profileImageUrl = generateInitialsImage(name);
 								} else {
@@ -207,8 +203,9 @@
 						>
 
 						<button
-							class=" text-xs text-center text-content-muted rounded-lg px-2 py-1"
-							on:click={async () => {
+							class=" text-xs text-center text-content-muted hover:text-content rounded-lg px-2 py-1"
+							type="button"
+							onclick={() => {
 								profileImageUrl = '/user.png';
 							}}>{$i18n.t('Remove')}</button
 						>
@@ -217,36 +214,32 @@
 			</div>
 
 			<div class="pt-0.5">
-				<div class="flex flex-col w-full">
+				<label class="flex flex-col w-full">
 					<div class=" mb-1 text-xs font-medium">{$i18n.t('Name')}</div>
 
-					<div class="flex-1">
-						<input
-							class="w-full text-sm text-content dark:bg-gray-850 outline-hidden"
-							type="text"
-							bind:value={name}
-							required
-							placeholder={$i18n.t('Enter your name')}
-						/>
-					</div>
-				</div>
+					<input
+						class="w-full text-sm px-2 py-1 bg-surface-muted rounded-xs outline-hidden"
+						type="text"
+						bind:value={name}
+						required
+						placeholder={$i18n.t('Enter your name')}
+					/>
+				</label>
 			</div>
 
 			{#if $config?.features?.enable_user_webhooks}
 				<div class="pt-2">
-					<div class="flex flex-col w-full">
+					<label class="flex flex-col w-full">
 						<div class=" mb-1 text-xs font-medium">{$i18n.t('Notification Webhook')}</div>
 
-						<div class="flex-1">
-							<input
-								class="w-full rounded-lg py-2 px-4 text-sm text-content dark:bg-gray-850 outline-hidden"
-								type="url"
-								placeholder={$i18n.t('Enter your webhook URL')}
-								bind:value={webhookUrl}
-								required
-							/>
-						</div>
-					</div>
+						<input
+							class="w-full text-sm px-2 py-1 bg-surface-muted rounded-xs outline-hidden"
+							type="url"
+							placeholder={$i18n.t('Enter your webhook URL')}
+							bind:value={webhookUrl}
+							required
+						/>
+					</label>
 				</div>
 			{/if}
 		</div>
@@ -255,122 +248,81 @@
 			<UpdatePassword />
 		</div>
 
-		<hr class="border-gray-50 dark:border-gray-850 my-2" />
+		{#if $config?.features?.enable_api_key ?? true}
+			<hr class="border-line my-2" />
 
-		<div class="flex justify-between items-center text-sm">
-			<div class="  font-medium">{$i18n.t('API keys')}</div>
-			<button
-				class=" text-xs font-medium text-content-muted"
-				type="button"
-				on:click={() => {
-					showAPIKeys = !showAPIKeys;
-				}}>{showAPIKeys ? $i18n.t('Hide') : $i18n.t('Show')}</button
-			>
-		</div>
-
-		{#if showAPIKeys}
-			<div class="flex flex-col gap-4">
+			<div class="justify-between w-full">
+				<div class="flex justify-between w-full">
+					<div class="self-center text-sm font-medium">{$i18n.t('API keys')}</div>
+				</div>
 				<!-- llens(#70 B1): JWT Token の表示/コピーは撤去 — セッションは httpOnly cookie に
-				     一本化され JS から読めない。外部クライアント用の資格情報は API Key を使う -->
-				{#if $config?.features?.enable_api_key ?? true}
-					<div class="justify-between w-full">
-						<div class="flex justify-between w-full">
-							<div class="self-center text-xs font-medium">{$i18n.t('API Key')}</div>
-						</div>
-						<div class="flex mt-2">
-							{#if APIKey}
-								<SensitiveInput value={APIKey} readOnly={true} />
+				     一本化され JS から読めない。外部クライアント用の資格情報は API Key を使う。
+				     鍵は ***** でマスクし目玉アイコンで切替(SensitiveInput) -->
+				<div class="flex mt-2 items-center gap-1.5">
+					{#if APIKey}
+						<SensitiveInput
+							outerClassName="flex flex-1 min-w-0 px-2 bg-surface-muted rounded-xs"
+							inputClassName="w-full text-sm py-1 bg-transparent outline-hidden"
+							value={APIKey}
+							readOnly={true}
+						/>
 
-								<button
-									class="ml-1.5 px-1.5 py-1 dark:hover:bg-gray-850 transition rounded-lg"
-									on:click={() => {
-										copyToClipboard(APIKey);
-										APIKeyCopied = true;
-										setTimeout(() => {
-											APIKeyCopied = false;
-										}, 2000);
-									}}
-								>
-									{#if APIKeyCopied}
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 20 20"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												fill-rule="evenodd"
-												d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-												clip-rule="evenodd"
-											/>
-										</svg>
-									{:else}
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												fill-rule="evenodd"
-												d="M11.986 3H12a2 2 0 0 1 2 2v6a2 2 0 0 1-1.5 1.937V7A2.5 2.5 0 0 0 10 4.5H4.063A2 2 0 0 1 6 3h.014A2.25 2.25 0 0 1 8.25 1h1.5a2.25 2.25 0 0 1 2.236 2ZM10.5 4v-.75a.75.75 0 0 0-.75-.75h-1.5a.75.75 0 0 0-.75.75V4h3Z"
-												clip-rule="evenodd"
-											/>
-											<path
-												fill-rule="evenodd"
-												d="M3 6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H3Zm1.75 2.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5ZM4 11.75a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75Z"
-												clip-rule="evenodd"
-											/>
-										</svg>
-									{/if}
-								</button>
+						<Tooltip content={$i18n.t('Copy')}>
+							<button
+								class="p-1.5 hover:bg-surface-hover rounded-lg"
+								type="button"
+								aria-label={$i18n.t('Copy')}
+								onclick={() => {
+									copyToClipboard(APIKey);
+									APIKeyCopied = true;
+									setTimeout(() => {
+										APIKeyCopied = false;
+									}, 2000);
+								}}
+							>
+								{#if APIKeyCopied}
+									<span class="i-lucide-check size-4 block"></span>
+								{:else}
+									<span class="i-lucide-copy size-4 block"></span>
+								{/if}
+							</button>
+						</Tooltip>
 
-								<Tooltip content={$i18n.t('Create new key')}>
-									<button
-										class=" px-1.5 py-1 dark:hover:bg-gray-850transition rounded-lg"
-										on:click={() => {
-											createAPIKeyHandler();
-										}}
-									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											fill="none"
-											viewBox="0 0 24 24"
-											stroke-width="2"
-											stroke="currentColor"
-											class="size-4"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
-											/>
-										</svg>
-									</button>
-								</Tooltip>
-							{:else}
-								<button
-									class="flex gap-1.5 items-center font-medium px-3.5 py-1.5 rounded-lg bg-gray-100/70 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-850 transition"
-									on:click={() => {
-										createAPIKeyHandler();
-									}}
-								>
-									<Plus strokeWidth="2" className=" size-3.5" />
+						<Tooltip content={$i18n.t('Create new key')}>
+							<button
+								class="p-1.5 hover:bg-surface-hover rounded-lg"
+								type="button"
+								aria-label={$i18n.t('Create new key')}
+								onclick={() => {
+									createAPIKeyHandler();
+								}}
+							>
+								<span class="i-lucide-refresh-cw size-4 block"></span>
+							</button>
+						</Tooltip>
+					{:else}
+						<button
+							class="flex gap-1.5 items-center text-xs font-medium px-3.5 py-1.5 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content"
+							type="button"
+							onclick={() => {
+								createAPIKeyHandler();
+							}}
+						>
+							<span class="i-lucide-plus size-3.5 block"></span>
 
-									{$i18n.t('Create new secret key')}</button
-								>
-							{/if}
-						</div>
-					</div>
-				{/if}
+							{$i18n.t('Create new secret key')}</button
+						>
+					{/if}
+				</div>
 			</div>
 		{/if}
 	</div>
 
 	<div class="flex justify-end pt-3 text-sm font-medium">
 		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			on:click={async () => {
+			class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
+			type="button"
+			onclick={async () => {
 				const res = await submitHandler();
 
 				if (res) {

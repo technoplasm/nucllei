@@ -2,13 +2,13 @@
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { updateUserPassword } from '$lib/apis/auths';
+	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 
 	const i18n = getContext('i18n');
 
-	let show = false;
-	let currentPassword = '';
-	let newPassword = '';
-	let newPasswordConfirm = '';
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let newPasswordConfirm = $state('');
 
 	const updatePasswordHandler = async () => {
 		if (newPassword === newPasswordConfirm) {
@@ -36,75 +36,55 @@
 
 <form
 	class="flex flex-col text-sm"
-	on:submit|preventDefault={() => {
+	onsubmit={(e) => {
+		e.preventDefault();
 		updatePasswordHandler();
 	}}
 >
 	<div class="flex justify-between items-center text-sm">
 		<div class="  font-medium">{$i18n.t('Change Password')}</div>
-		<button
-			class=" text-xs font-medium text-content-muted"
-			type="button"
-			on:click={() => {
-				show = !show;
-			}}>{show ? $i18n.t('Hide') : $i18n.t('Show')}</button
-		>
 	</div>
 
-	{#if show}
-		<div class=" py-2.5 space-y-1.5">
-			<div class="flex flex-col w-full">
-				<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Current Password')}</div>
+	<div class=" py-2.5 space-y-1.5">
+		<label class="flex flex-col w-full">
+			<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Current Password')}</div>
 
-				<div class="flex-1">
-					<input
-						class="w-full bg-transparent text-content outline-hidden placeholder:opacity-30"
-						type="password"
-						bind:value={currentPassword}
-						placeholder={$i18n.t('Enter your current password')}
-						autocomplete="current-password"
-						required
-					/>
-				</div>
-			</div>
+			<SensitiveInput
+				outerClassName="flex w-full px-2 bg-surface-muted rounded-xs"
+				inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
+				bind:value={currentPassword}
+				placeholder={$i18n.t('Enter your current password')}
+			/>
+		</label>
 
-			<div class="flex flex-col w-full">
-				<div class=" mb-1 text-xs text-content-muted">{$i18n.t('New Password')}</div>
+		<label class="flex flex-col w-full">
+			<div class=" mb-1 text-xs text-content-muted">{$i18n.t('New Password')}</div>
 
-				<div class="flex-1">
-					<input
-						class="w-full bg-transparent text-sm text-content outline-hidden placeholder:opacity-30"
-						type="password"
-						bind:value={newPassword}
-						placeholder={$i18n.t('Enter your new password')}
-						autocomplete="new-password"
-						required
-					/>
-				</div>
-			</div>
+			<SensitiveInput
+				outerClassName="flex w-full px-2 bg-surface-muted rounded-xs"
+				inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
+				bind:value={newPassword}
+				placeholder={$i18n.t('Enter your new password')}
+			/>
+		</label>
 
-			<div class="flex flex-col w-full">
-				<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Confirm Password')}</div>
+		<label class="flex flex-col w-full">
+			<div class=" mb-1 text-xs text-content-muted">{$i18n.t('Confirm Password')}</div>
 
-				<div class="flex-1">
-					<input
-						class="w-full bg-transparent text-sm text-content outline-hidden placeholder:opacity-30"
-						type="password"
-						bind:value={newPasswordConfirm}
-						placeholder={$i18n.t('Confirm your new password')}
-						autocomplete="off"
-						required
-					/>
-				</div>
-			</div>
-		</div>
+			<SensitiveInput
+				outerClassName="flex w-full px-2 bg-surface-muted rounded-xs"
+				inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
+				bind:value={newPasswordConfirm}
+				placeholder={$i18n.t('Confirm your new password')}
+			/>
+		</label>
+	</div>
 
-		<div class="mt-3 flex justify-end">
-			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			>
-				{$i18n.t('Update password')}
-			</button>
-		</div>
-	{/if}
+	<div class="mt-3 flex justify-end">
+		<button
+			class="px-3.5 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
+		>
+			{$i18n.t('Update password')}
+		</button>
+	</div>
 </form>
