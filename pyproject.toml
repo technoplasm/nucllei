@@ -129,16 +129,9 @@ dependencies = [
 ]
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-dynamic = ["version"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Communications :: Chat",
-    "Topic :: Multimedia",
-]
+# 配布用メタデータではない(Docker のみで出荷・wheel/PyPI 配布はしない — #34)。
+# バージョンの真実源は git tag(APP_VERSION、#25)。ここは uv が要求するので置くだけ。
+version = "0.0.0"
 
 [project.optional-dependencies]
 # On-device ML stack (pulls in torch, ~GBs). Only needed for LOCAL inference:
@@ -153,9 +146,6 @@ local-ml = [
     "faster-whisper==1.1.1",
     "rapidocr-onnxruntime==1.3.24",
 ]
-
-[project.scripts]
-open-webui = "open_webui:app"
 
 [dependency-groups]
 dev = [
@@ -217,41 +207,3 @@ cli = "env PYTHONPATH=backend python -c 'from open_webui import app; app()'"
 # 慣例の dev admin(ken@llens.local / llens-dev)を一発で作る cli の薄いエイリアス。
 create-admin = "env PYTHONPATH=backend python -c 'from open_webui import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.rye]
-managed = true
-dev-dependencies = []
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.version]
-path = "package.json"
-pattern = '"version":\s*"(?P<version>[^"]+)"'
-
-[tool.hatch.build.hooks.custom]  # keep this for reading hooks from `hatch_build.py`
-
-[tool.hatch.build.targets.wheel]
-sources = ["backend"]
-exclude = [
-    ".dockerignore",
-    ".gitignore",
-    ".webui_secret_key",
-    "dev.sh",
-    "requirements.txt",
-    "start.sh",
-    "start_windows.bat",
-    "webui.db",
-    "chroma.sqlite3",
-]
-force-include = { build = "open_webui/frontend" }
-
-[tool.codespell]
-# Ref: https://github.com/codespell-project/codespell#using-a-config-file
-skip = '.git*,*.svg,package-lock.json,i18n,*.lock,*.css,*-bundle.js,locales,example-doc.txt,emoji-shortcodes.json'
-check-hidden = true
-# ignore-regex = ''
-ignore-words-list = 'ans'

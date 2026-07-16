@@ -2159,6 +2159,7 @@ wheels = [
 
 [[package]]
 name = "open-webui"
+version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiocache" },
