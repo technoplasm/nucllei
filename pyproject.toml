@@ -134,6 +134,11 @@ requires-python = ">=3.11,<3.14"
 version = "0.0.0"
 
 [project.optional-dependencies]
+# 内蔵 STT(faster-whisper)。torch を引かないので軽く、Docker イメージに同梱する
+# (#53: prod は内蔵 faster-whisper STT)。
+stt = [
+    "faster-whisper==1.1.1",
+]
 # On-device ML stack (pulls in torch, ~GBs). Only needed for LOCAL inference:
 # the transformers audio pipeline, local Whisper STT, and OCR. Not required to
 # boot the app or to use external providers (external STT). Install with:
@@ -164,8 +169,8 @@ dev = [
 # llens(#25): lint は「正しさ系のみ・green 維持」。整形は black が担う。
 # マイグレーション(peewee_migrate / alembic)は歴史的資産 — lint しない。
 extend-exclude = [
-    "backend/nucllei/internal/migrations",
-    "backend/nucllei/migrations",
+    "nucllei/internal/migrations",
+    "nucllei/migrations",
 ]
 # pre-push hook のようにファイルを明示指定で渡す呼び出しでも exclude を尊重する
 # (既定ではディレクトリ走査時しか効かず、#34 の全ファイルリネームで hook が migration に噛んだ)
@@ -177,36 +182,33 @@ select = ["E9", "F"]
 
 [tool.uv]
 # Treat this as a virtual project: `uv sync` installs dependencies into .venv
-# but does NOT build/install nucllei itself. This skips the hatch custom
-# build hook (npm/pnpm frontend build) so backend-only sync stays fast.
+# but does NOT build/install nucllei itself.
 # Run the backend from the repo root with `uv run task dev`.
 package = false
 
 [tool.pytest.ini_options]
 # テストは `from test.util ...` / `from nucllei ...` の両方を import するため、
-# backend(nucllei パッケージ)と backend/nucllei(test パッケージ)を
+# リポジトリルート(nucllei パッケージ)と nucllei/(test パッケージ)を
 # sys.path に載せる。リポジトリルートから `uv run pytest` で実行する。
-testpaths = ["backend/nucllei/test"]
-pythonpath = ["backend", "backend/nucllei"]
+testpaths = ["nucllei/test"]
+pythonpath = [".", "nucllei"]
 
 [tool.taskipy.tasks]
 # Backend dev server (hot reload) on :3000 — matches the docker single-origin
 # layout (the frontend is served same-origin and Vite proxies /api etc. here;
-# see vite.config.ts). `nucllei` lives under backend/, so we add it to the
-# import path with --app-dir instead of cd-ing there. `--forwarded-allow-ips '*'`
-# trusts the local Vite proxy for X-Forwarded-* (correct redirect URLs).
-dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --app-dir backend --forwarded-allow-ips '*'"
+# see vite.config.ts). `nucllei` はリポジトリルート直下なので cwd から import できる。
+# `--forwarded-allow-ips '*'` trusts the local Vite proxy for X-Forwarded-*.
+dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --forwarded-allow-ips '*'"
 # 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
 licenses = "python scripts/generate_licenses.py"
 
 # nucllei CLI(typer app: `nucllei:app`)への汎用エントリ。任意のサブコマンドを
 # 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
-# typer app を直接呼ぶ。`nucllei` を import パスに載せるため PYTHONPATH=backend が
-# 要る(pytest の pythonpath は taskipy には効かない)。
+# typer app を直接呼ぶ。Docker の CMD も同じ入口(serve)を使う。
 #   uv run task cli --help
 #   uv run task cli create-admin --email a@llens.local --name A --password llens-dev
 #   uv run task cli generate-secret-key
-cli = "env PYTHONPATH=backend python -c 'from nucllei import app; app()'"
+cli = "python -c 'from nucllei import app; app()'"
 # 慣例の dev admin(ken@llens.local / llens-dev)を一発で作る cli の薄いエイリアス。
-create-admin = "env PYTHONPATH=backend python -c 'from nucllei import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
+create-admin = "python -c 'from nucllei import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
 

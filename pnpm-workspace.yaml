@@ -9,7 +9,6 @@
 allowBuilds:
   '@parcel/watcher': true
   core-js: false
-  cypress: true
   esbuild: true
   onnxruntime-node: false
   protobufjs: true

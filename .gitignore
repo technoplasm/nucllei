@@ -309,3 +309,11 @@ _links/
 .claude/settings.local.json
 /llens
 .playwright-mcp/
+
+# runtime data(旧 backend/.gitignore から統合 — フラット化 #34)
+/data/*
+!/data/readme.txt
+/nucllei/data/*
+!/nucllei/data/readme.txt
+*.db
+.webui_secret_key

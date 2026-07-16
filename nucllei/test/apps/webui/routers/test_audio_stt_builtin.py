@@ -9,7 +9,7 @@ opt-in 実行(モデル DL を伴うため通常スイートでは skip):
 
     uv sync --extra local-ml
     LLENS_STT_SMOKE=1 PYTHONPATH=backend uv run pytest \\
-        backend/nucllei/test/apps/webui/routers/test_audio_stt_builtin.py -v
+        nucllei/test/apps/webui/routers/test_audio_stt_builtin.py -v
 
 モデルは既定 "tiny"(初回 ~75MB を WHISPER_MODEL_DIR へ自動 DL)。
 prod 同等モデルで試すときは LLENS_WHISPER_MODEL にローカル CT2 ディレクトリを指定

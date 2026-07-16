@@ -14,9 +14,9 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
-  テストは `cd backend && ../.venv/bin/pytest nucllei/test -q`(または repo ルートで `uv run pytest`)。
+  テストは `.venv/bin/pytest nucllei/test -q`(または repo ルートで `uv run pytest`)。
   **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
-  black 的に崩れて CI が落ちる。**backend を触ったら push 前に `cd backend && ../.venv/bin/black nucllei/`**
+  black 的に崩れて CI が落ちる。**backend を触ったら push 前に `.venv/bin/black nucllei/`**
   (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。frontend にも同型の
   prettier ゲート("Frontend Build / Format & Build")があり、こちらは `pnpm format`。
 - **Svelte 5(互換モード)の 2 大モーダル罠**(#55 で実害・修理済みだが新規コードで再発しやすい):
@@ -55,13 +55,13 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (2026-07-16 に svelte の長行 wrap で実際に発生、--write 済みなのにゲートで NG)。
 - `.git/index.lock` が時々出るのは shell prompt の `gitstatusd` が握るため — stale なら `rm -f .git/index.lock`
   して commit を再試行(走っている git プロセスは無い)。
-- **pytest の postgres**: `backend/nucllei/test/conftest.py` が docker で自動起動しセッション共有。
+- **pytest の postgres**: `nucllei/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
   - **podman 環境(2026-07-14 確認)**: usermod や root は不要。rootless の user socket を立てて
     docker-py に `DOCKER_HOST` で教えるだけ:
     ```sh
     systemctl --user enable --now podman.socket   # 一度だけ(enable で永続)
-    DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock PYTHONPATH=backend uv run pytest backend/nucllei/test -q
+    DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock uv run pytest nucllei/test -q
     ```
     conftest の `docker.from_env()` も pytest_docker の `get_docker_ip()` もこれでそのまま動く(338 passed 実証済み)。
 - **権限のネガティブテストは `mock_webui_user_strict` を使う**(test/util/mock_user.py、#55 で追加):
@@ -83,8 +83,8 @@ proxy する(`vite.config.ts` の `server.proxy`)。旧構成(dev だけ `WEBUI_
 へクロスオリジン直叩き)は廃止 — 画像等の cookie 認証が dev で不達だった罠(#69 で顕在化)も解消。
 
 ```sh
-# backend(:3000、hot reload)。uv が .venv と PYTHONPATH(--app-dir backend)を面倒みるので
-# 長い PYTHONPATH=backend .venv/bin/uvicorn … は不要になった。
+# backend(:3000、hot reload)。uv が .venv を面倒みるので(nucllei はルート直下で cwd から import 可)
+# 長い PYTHONPATH 指定は不要。
 uv run task dev
 # frontend(vite :5173、proxy 込み)。これ単体で BE:3000 に繋がる。
 pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自動退避
@@ -131,11 +131,11 @@ pnpm dev        # = uv run task dev-web。:5173 使用中なら 5174 等へ自�
   HMR/リロードで古いモジュールを掴む反映漏れを防ぐ(#47 で導入)。
 - `config.py` は起動のたび `build/static/**` を backend static へ無条件上書きコピーする。
   favicon 等を差し替えたら `static/static/` と `build/static/` も同期しないと reload で巻き戻る。
-- `backend/data/webui.db` は pytest の残骸で汚染されうる。おかしければ退避して作り直す。
+- `data/webui.db` は pytest の残骸で汚染されうる。おかしければ退避して作り直す。
 
 ## dev アカウント・モデル接続(新環境での再現手順)
 
-DB(`backend/data/webui.db`)は clone に含まれないので、新環境では作り直す:
+DB(`data/webui.db`)は clone に含まれないので、新環境では作り直す:
 
 1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。taskipy タスクで作成する:
    ```sh
@@ -144,7 +144,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
    ```
    慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
    ※ 旧手順の `.venv/bin/open-webui` は **使えない**(`package = false` でコンソールスクリプト未生成)。
-   タスクは `PYTHONPATH=backend python -c 'from nucllei import app; app()'` で typer app を直接呼ぶ。
+   タスクは `python -c 'from nucllei import app; app()'` で typer app を直接呼ぶ。
    `uv run task cli --help` で全サブコマンド確認可。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
@@ -208,7 +208,7 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 
 ## モデルフレーム fixture(SGLang × Kimi 実キャプチャ)
 
-- 置き場: `backend/nucllei/test/fixtures/model_frames/`(7 シナリオ + aborted)。
+- 置き場: `nucllei/test/fixtures/model_frames/`(7 シナリオ + aborted)。
   観察された仕様は `_memos/model-frames.md`。
 - Kimi の tool call id は `functions.<name>:<index>` 形式(OpenAI の call_xxx ではない)。
   引数は厳密 JSON(空引数は `"{}"`)。reasoning は常時出る(`reasoning_content`)。
@@ -220,8 +220,8 @@ DB(`backend/data/webui.db`)は clone に含まれないので、新環境では�
 
 ```bash
 uv sync --extra local-ml    # faster-whisper + torch 系(dev グループは維持される)
-LLENS_STT_SMOKE=1 PYTHONPATH=backend uv run pytest \
-    backend/nucllei/test/apps/webui/routers/test_audio_stt_builtin.py -v
+LLENS_STT_SMOKE=1 uv run pytest \
+    nucllei/test/apps/webui/routers/test_audio_stt_builtin.py -v
 ```
 
 - モデルは既定 `tiny`(初回 ~75MB を `WHISPER_MODEL_DIR` へ自動 DL、以後オフライン可)。

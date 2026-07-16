@@ -2068,6 +2068,9 @@ local-ml = [
     { name = "rapidocr-onnxruntime" },
     { name = "transformers" },
 ]
+stt = [
+    { name = "faster-whisper" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2103,6 +2106,7 @@ requires-dist = [
     { name = "fake-useragent", specifier = "==2.1.0" },
     { name = "fastapi", specifier = ">=0.115.7" },
     { name = "faster-whisper", marker = "extra == 'local-ml'", specifier = "==1.1.1" },
+    { name = "faster-whisper", marker = "extra == 'stt'", specifier = "==1.1.1" },
     { name = "fpdf2", specifier = "==2.8.2" },
     { name = "google-api-python-client" },
     { name = "google-auth-httplib2" },
@@ -2169,7 +2173,7 @@ requires-dist = [
     { name = "xlrd", specifier = "==2.0.1" },
     { name = "youtube-transcript-api", specifier = "==1.0.3" },
 ]
-provides-extras = ["local-ml"]
+provides-extras = ["stt", "local-ml"]
 
 [package.metadata.requires-dev]
 dev = [

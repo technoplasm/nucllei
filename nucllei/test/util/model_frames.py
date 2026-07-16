@@ -1,6 +1,6 @@
 """実キャプチャ済みモデル出力フレーム(issue #29)のリプレイ用ローダ。
 
-fixture(backend/nucllei/test/fixtures/model_frames/)の生 SSE を
+fixture(nucllei/test/fixtures/model_frames/)の生 SSE を
 フレーム列に展開する。#15/#17/#20/#21 の回帰テストはこれを入力に使う。
 仕様の観察結果: _memos/model-frames.md
 """

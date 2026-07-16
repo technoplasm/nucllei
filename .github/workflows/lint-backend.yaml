@@ -5,14 +5,14 @@ on:
     branches:
       - master
     paths:
-      - 'backend/**'
+      - 'nucllei/**'
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
     branches:
       - master
     paths:
-      - 'backend/**'
+      - 'nucllei/**'
       - 'pyproject.toml'
       - 'uv.lock'
 
@@ -32,4 +32,4 @@ jobs:
       # ruff 設定は pyproject.toml [tool.ruff](llens #25): select = E9,F。
       # 正しさ系(構文/未定義名/未使用 import 等)のみを gate 化し、整形は black が担う。
       - name: Lint backend
-        run: uvx ruff==0.14.4 check backend/nucllei
+        run: uvx ruff==0.14.4 check nucllei

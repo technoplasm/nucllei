@@ -34,7 +34,7 @@ jobs:
       - name: License scan (strong copyleft)
         run: uv run python scripts/check_licenses.py
 
-      # postgres 統合テストのコンテナは backend/nucllei/test/conftest.py が
+      # postgres 統合テストのコンテナは nucllei/test/conftest.py が
       # docker で自前起動する(postgres:16.2 / port 8081)
       - name: Run pytest
         run: uv run pytest -q

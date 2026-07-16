@@ -5,14 +5,14 @@ on:
     branches:
       - master
     paths-ignore:
-      - 'backend/**'
+      - 'nucllei/**'
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
     branches:
       - master
     paths-ignore:
-      - 'backend/**'
+      - 'nucllei/**'
       - 'pyproject.toml'
       - 'uv.lock'
 

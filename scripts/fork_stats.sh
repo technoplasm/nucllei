@@ -19,7 +19,7 @@ git diff --shortstat "$BASE" HEAD
 echo "== 同・実コード =="
 git diff --shortstat "$BASE" HEAD -- . "${EXCLUDES[@]}"
 echo "==   内訳: backend(*.py) =="
-git diff --shortstat "$BASE" HEAD -- 'backend/**/*.py'
+git diff --shortstat "$BASE" HEAD -- 'nucllei/**/*.py'
 echo "==   内訳: frontend(src/、locales 除く) =="
 git diff --shortstat "$BASE" HEAD -- src ':!src/lib/i18n/locales'
 echo

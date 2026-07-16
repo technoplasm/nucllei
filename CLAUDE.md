@@ -52,6 +52,6 @@
 ## 環境の前提
 
 - 推論エンジンは **SGLang**(`prism-llens:13300`、OpenAI 互換 — 2026-07-13 に `:8000` から変更)。接続モデルは Kimi K2.6 で reasoning 出力あり(`reasoning_content` / `<think>` タグ)。
-- バックエンドテストは `backend/nucllei/test/` 配下(pytest)。
+- バックエンドテストは `nucllei/test/` 配下(pytest)。
 - **開発環境のセットアップ(dev サーバ・dev アカウント・dev ツール・テスト/Playwright の罠)は
   `_memos/dev-environment.md`** — 新しい環境で開発を始めるときはまずここを読む。

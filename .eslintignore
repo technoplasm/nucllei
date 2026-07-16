@@ -14,5 +14,5 @@ yarn.lock
 
 # llens: マシン固有 symlink(他リポジトリ)と vendored バンドルは lint 対象外
 _links
-backend/nucllei/static
+nucllei/static
 static

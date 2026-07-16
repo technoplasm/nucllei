@@ -146,10 +146,7 @@ describe('parsePartialArguments: 実キャプチャ全プレフィックス(漸�
 	// fixture の arguments デルタを抽出する(test_model_frame_fixtures.py と同じ規約)
 	const loadArgDeltas = (name: string): string[] => {
 		const sse = readFileSync(
-			new URL(
-				`../../../../backend/nucllei/test/fixtures/model_frames/${name}.sse`,
-				import.meta.url
-			),
+			new URL(`../../../../nucllei/test/fixtures/model_frames/${name}.sse`, import.meta.url),
 			'utf-8'
 		);
 		const deltas: string[] = [];

@@ -3,7 +3,6 @@ import logging
 import os
 import subprocess
 import sys
-import shutil
 from pathlib import Path
 
 from nucllei.constants import ERROR_MESSAGES
@@ -13,13 +12,7 @@ from nucllei.constants import ERROR_MESSAGES
 ####################################
 
 NUCLLEI_DIR = Path(__file__).parent  # the path containing this file
-print(NUCLLEI_DIR)
-
-BACKEND_DIR = NUCLLEI_DIR.parent  # the path containing this file
-BASE_DIR = BACKEND_DIR.parent  # the path containing the backend/
-
-print(BACKEND_DIR)
-print(BASE_DIR)
+BASE_DIR = NUCLLEI_DIR.parent  # the repository / installation root
 
 try:
     from dotenv import find_dotenv, load_dotenv
@@ -129,8 +122,6 @@ TRUSTED_SIGNATURE_KEY = os.environ.get("TRUSTED_SIGNATURE_KEY", "")
 
 ENV = os.environ.get("ENV", "dev")
 
-FROM_INIT_PY = os.environ.get("FROM_INIT_PY", "False").lower() == "true"
-
 # llens: package=false(pip インストールしない)ため importlib.metadata 分岐は
 # 常に失敗する死にコードだった — package.json 読みに一本化(VERSION の挙動は不変)。
 try:
@@ -193,29 +184,9 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 # DATA/FRONTEND BUILD DIR
 ####################################
 
-DATA_DIR = Path(os.getenv("DATA_DIR", BACKEND_DIR / "data")).resolve()
-
-if FROM_INIT_PY:
-    NEW_DATA_DIR = Path(os.getenv("DATA_DIR", NUCLLEI_DIR / "data")).resolve()
-    NEW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Check if the data directory exists in the package directory
-    if DATA_DIR.exists() and DATA_DIR != NEW_DATA_DIR:
-        log.info(f"Moving {DATA_DIR} to {NEW_DATA_DIR}")
-        for item in DATA_DIR.iterdir():
-            dest = NEW_DATA_DIR / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dest)
-
-        # Zip the data directory
-        shutil.make_archive(DATA_DIR.parent / "nucllei_data", "zip", DATA_DIR)
-
-        # Remove the old data directory
-        shutil.rmtree(DATA_DIR)
-
-    DATA_DIR = Path(os.getenv("DATA_DIR", NUCLLEI_DIR / "data"))
+# 既定はリポジトリ/インストールルート直下の data/(Docker では /app/data)
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", NUCLLEI_DIR / "static"))
 
@@ -223,22 +194,9 @@ FONTS_DIR = Path(os.getenv("FONTS_DIR", NUCLLEI_DIR / "static" / "fonts"))
 
 FRONTEND_BUILD_DIR = Path(os.getenv("FRONTEND_BUILD_DIR", BASE_DIR / "build")).resolve()
 
-if FROM_INIT_PY:
-    FRONTEND_BUILD_DIR = Path(
-        os.getenv("FRONTEND_BUILD_DIR", NUCLLEI_DIR / "frontend")
-    ).resolve()
-
 ####################################
 # Database
 ####################################
-
-# Check if the file exists
-if os.path.exists(f"{DATA_DIR}/ollama.db"):
-    # Rename the file
-    os.rename(f"{DATA_DIR}/ollama.db", f"{DATA_DIR}/webui.db")
-    log.info("Database migrated from Ollama-WebUI successfully.")
-else:
-    pass
 
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DATA_DIR}/webui.db")
 
