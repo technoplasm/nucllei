@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
-	import { chats, config, settings, user as _user, mobile, currentChatPage } from '$lib/stores';
-	import { tick, getContext, onMount, createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
+	import { chats, settings, user as _user, currentChatPage } from '$lib/stores';
+	import { tick, getContext } from 'svelte';
 
 	import { toast } from 'svelte-sonner';
 	import { getChatList, updateChatById } from '$lib/apis/chats';
-	import { copyToClipboard, extractCurlyBraceWords } from '$lib/utils';
+	import type { Model } from '$lib/stores';
+	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 	import Message from './Messages/Message.svelte';
 	import Loader from '../common/Loader.svelte';
@@ -16,39 +16,68 @@
 
 	const i18n = getContext('i18n');
 
-	export let className = 'h-full flex pt-8';
+	let {
+		className = 'h-full flex pt-8',
+		chatId = '',
+		user = $_user,
+		prompt = $bindable(),
+		history = $bindable({ messages: {}, currentId: null }),
+		selectedModels,
+		atSelectedModel = undefined,
+		messages = $bindable([]),
+		sendPrompt,
+		continueResponse,
+		regenerateResponse,
+		chatActionHandler = undefined,
+		showMessage = () => {},
+		submitMessage = () => {},
+		addMessages = () => {},
+		readOnly = false,
+		bottomPadding = false,
+		autoScroll = $bindable(false)
+	}: {
+		className?: string;
+		chatId?: string;
+		user?: { name: string; profile_image_url?: string } | undefined;
+		prompt?: string;
+		history?: ChatHistory;
+		selectedModels: string[];
+		atSelectedModel?: Model | undefined;
+		messages?: ChatMessage[];
+		// Chat.svelte 実体は第 4 引数 opts を取るが、ここからは 3 引数でしか呼ばない
+		sendPrompt: (history: ChatHistory, prompt: string, parentId: string) => void | Promise<void>;
+		continueResponse: () => void | Promise<void>;
+		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
+		chatActionHandler?: (
+			chatId: string,
+			actionId: string,
+			modelId: string | undefined,
+			messageId: string,
+			// Chat.svelte 側の実装が event = null と推論されるため any(unknown だと反変で不適合)
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			event?: any
+		) => void | Promise<void>;
+		showMessage?: (message: { id: string | null }) => void | Promise<void>;
+		submitMessage?: (parentId: string, prompt: string) => void | Promise<void>;
+		addMessages?: (data: {
+			modelId: string;
+			parentId: string;
+			messages: { role: string; content: string }[];
+		}) => void | Promise<void>;
+		readOnly?: boolean;
+		bottomPadding?: boolean;
+		autoScroll?: boolean;
+	} = $props();
 
-	export let chatId = '';
-	export let user = $_user;
-
-	export let prompt;
-	export let history = {};
-	export let selectedModels;
-	export let atSelectedModel;
-
-	let messages = [];
-
-	export let sendPrompt: Function;
-	export let continueResponse: Function;
-	export let regenerateResponse: Function;
-
-	export let chatActionHandler: Function;
-	export let showMessage: Function = () => {};
-	export let submitMessage: Function = () => {};
-	export let addMessages: Function = () => {};
-
-	export let readOnly = false;
-
-	export let bottomPadding = false;
-	export let autoScroll;
-
-	let messagesCount = 20;
-	let messagesLoading = false;
+	let messagesCount = $state(20);
+	let messagesLoading = $state(false);
 
 	const loadMoreMessages = async () => {
 		// scroll slightly down to disable continuous loading
 		const element = document.getElementById('messages-container');
-		element.scrollTop = element.scrollTop + 100;
+		if (element) {
+			element.scrollTop = element.scrollTop + 100;
+		}
 
 		messagesLoading = true;
 		messagesCount += 20;
@@ -58,34 +87,47 @@
 		messagesLoading = false;
 	};
 
-	$: if (history.currentId) {
-		let _messages = [];
+	$effect(() => {
+		if (history.currentId) {
+			const _messages: ChatMessage[] = [];
 
-		let message = history.messages[history.currentId];
-		while (message && _messages.length <= messagesCount) {
-			_messages.unshift({ ...message });
-			message = message.parentId !== null ? history.messages[message.parentId] : null;
+			let message: ChatMessage | null | undefined = history.messages[history.currentId];
+			while (message && _messages.length <= messagesCount) {
+				_messages.unshift({ ...message });
+				message = message.parentId !== null ? history.messages[message.parentId] : null;
+			}
+
+			messages = _messages;
+		} else {
+			messages = [];
 		}
+	});
 
-		messages = _messages;
-	} else {
-		messages = [];
-	}
-
-	$: if (autoScroll && bottomPadding) {
-		(async () => {
-			await tick();
-			scrollToBottom();
-		})();
-	}
+	$effect(() => {
+		if (autoScroll && bottomPadding) {
+			(async () => {
+				await tick();
+				scrollToBottom();
+			})();
+		}
+	});
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
-		element.scrollTop = element.scrollHeight;
+		if (element) {
+			element.scrollTop = element.scrollHeight;
+		}
+	};
+
+	// history の深い変異(currentId 付け替え等)を bind:history 経由で親へ伝える。
+	// Chat.svelte($state proxy)には no-op だが、legacy な親(s/[id])には必要。
+	const notifyHistoryChange = () => {
+		// eslint-disable-next-line no-self-assign
+		history = history;
 	};
 
 	const updateChat = async () => {
-		history = history;
+		notifyHistoryChange();
 		await tick();
 		await updateChatById(chatId, {
 			history: history,
@@ -96,153 +138,105 @@
 		await chats.set(await getChatList($currentChatPage));
 	};
 
-	const gotoMessage = async (message, idx) => {
-		// Determine the correct sibling list (either parent's children or root messages)
-		let siblings;
-		if (message.parentId !== null) {
-			siblings = history.messages[message.parentId].childrenIds;
-		} else {
-			siblings = Object.values(history.messages)
-				.filter((msg) => msg.parentId === null)
-				.map((msg) => msg.id);
+	const scrollOnBranchChange = () => {
+		if ($settings?.scrollOnBranchChange ?? true) {
+			const element = document.getElementById('messages-container');
+			if (element) {
+				autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
+			}
+
+			setTimeout(() => {
+				scrollToBottom();
+			}, 100);
 		}
+	};
+
+	// 指定 messageId の枝の最深子まで降りる
+	const deepestChildId = (messageId: string): string => {
+		let currentId = messageId;
+		let childrenIds = history.messages[currentId].childrenIds;
+		while (childrenIds.length !== 0) {
+			currentId = childrenIds.at(-1) as string;
+			childrenIds = history.messages[currentId].childrenIds;
+		}
+		return currentId;
+	};
+
+	const rootMessageIds = () =>
+		Object.values(history.messages)
+			.filter((message) => message.parentId === null)
+			.map((message) => message.id);
+
+	const gotoMessage = async (message: ChatMessage, idx: number) => {
+		// Determine the correct sibling list (either parent's children or root messages)
+		const siblings =
+			message.parentId !== null
+				? history.messages[message.parentId].childrenIds
+				: rootMessageIds();
 
 		// Clamp index to a valid range
 		idx = Math.max(0, Math.min(idx, siblings.length - 1));
 
-		let messageId = siblings[idx];
+		const messageId = siblings[idx];
 
 		// If we're navigating to a different message
 		if (message.id !== messageId) {
 			// Drill down to the deepest child of that branch
-			let messageChildrenIds = history.messages[messageId].childrenIds;
-			while (messageChildrenIds.length !== 0) {
-				messageId = messageChildrenIds.at(-1);
-				messageChildrenIds = history.messages[messageId].childrenIds;
-			}
-
-			history.currentId = messageId;
+			history.currentId = deepestChildId(messageId);
+			notifyHistoryChange();
 		}
 
 		await tick();
 
 		// Optional auto-scroll
-		if ($settings?.scrollOnBranchChange ?? true) {
-			const element = document.getElementById('messages-container');
-			autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
-
-			setTimeout(() => {
-				scrollToBottom();
-			}, 100);
-		}
+		scrollOnBranchChange();
 	};
 
-	const showPreviousMessage = async (message) => {
-		if (message.parentId !== null) {
-			let messageId =
-				history.messages[message.parentId].childrenIds[
-					Math.max(history.messages[message.parentId].childrenIds.indexOf(message.id) - 1, 0)
-				];
+	const showPreviousMessage = async (message: ChatMessage) => {
+		const siblings =
+			message.parentId !== null
+				? history.messages[message.parentId].childrenIds
+				: rootMessageIds();
 
-			if (message.id !== messageId) {
-				let messageChildrenIds = history.messages[messageId].childrenIds;
+		const messageId = siblings[Math.max(siblings.indexOf(message.id) - 1, 0)];
 
-				while (messageChildrenIds.length !== 0) {
-					messageId = messageChildrenIds.at(-1);
-					messageChildrenIds = history.messages[messageId].childrenIds;
-				}
-
-				history.currentId = messageId;
-			}
-		} else {
-			let childrenIds = Object.values(history.messages)
-				.filter((message) => message.parentId === null)
-				.map((message) => message.id);
-			let messageId = childrenIds[Math.max(childrenIds.indexOf(message.id) - 1, 0)];
-
-			if (message.id !== messageId) {
-				let messageChildrenIds = history.messages[messageId].childrenIds;
-
-				while (messageChildrenIds.length !== 0) {
-					messageId = messageChildrenIds.at(-1);
-					messageChildrenIds = history.messages[messageId].childrenIds;
-				}
-
-				history.currentId = messageId;
-			}
+		if (message.id !== messageId) {
+			history.currentId = deepestChildId(messageId);
+			notifyHistoryChange();
 		}
 
 		await tick();
 
-		if ($settings?.scrollOnBranchChange ?? true) {
-			const element = document.getElementById('messages-container');
-			autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
-
-			setTimeout(() => {
-				scrollToBottom();
-			}, 100);
-		}
+		scrollOnBranchChange();
 	};
 
-	const showNextMessage = async (message) => {
-		if (message.parentId !== null) {
-			let messageId =
-				history.messages[message.parentId].childrenIds[
-					Math.min(
-						history.messages[message.parentId].childrenIds.indexOf(message.id) + 1,
-						history.messages[message.parentId].childrenIds.length - 1
-					)
-				];
+	const showNextMessage = async (message: ChatMessage) => {
+		const siblings =
+			message.parentId !== null
+				? history.messages[message.parentId].childrenIds
+				: rootMessageIds();
 
-			if (message.id !== messageId) {
-				let messageChildrenIds = history.messages[messageId].childrenIds;
+		const messageId =
+			siblings[Math.min(siblings.indexOf(message.id) + 1, siblings.length - 1)];
 
-				while (messageChildrenIds.length !== 0) {
-					messageId = messageChildrenIds.at(-1);
-					messageChildrenIds = history.messages[messageId].childrenIds;
-				}
-
-				history.currentId = messageId;
-			}
-		} else {
-			let childrenIds = Object.values(history.messages)
-				.filter((message) => message.parentId === null)
-				.map((message) => message.id);
-			let messageId =
-				childrenIds[Math.min(childrenIds.indexOf(message.id) + 1, childrenIds.length - 1)];
-
-			if (message.id !== messageId) {
-				let messageChildrenIds = history.messages[messageId].childrenIds;
-
-				while (messageChildrenIds.length !== 0) {
-					messageId = messageChildrenIds.at(-1);
-					messageChildrenIds = history.messages[messageId].childrenIds;
-				}
-
-				history.currentId = messageId;
-			}
+		if (message.id !== messageId) {
+			history.currentId = deepestChildId(messageId);
+			notifyHistoryChange();
 		}
 
 		await tick();
 
-		if ($settings?.scrollOnBranchChange ?? true) {
-			const element = document.getElementById('messages-container');
-			autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
-
-			setTimeout(() => {
-				scrollToBottom();
-			}, 100);
-		}
+		scrollOnBranchChange();
 	};
 
-	const editMessage = async (messageId, content, submit = true) => {
+	const editMessage = async (messageId: string, content: string, submit = true) => {
 		if (history.messages[messageId].role === 'user') {
 			if (submit) {
 				// New user message
-				let userPrompt = content;
-				let userMessageId = uuidv4();
+				const userPrompt = content;
+				const userMessageId = uuidv4();
 
-				let userMessage = {
+				const userMessage: ChatMessage = {
 					id: userMessageId,
 					parentId: history.messages[messageId].parentId,
 					childrenIds: [],
@@ -253,7 +247,7 @@
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
-				let messageParentId = history.messages[messageId].parentId;
+				const messageParentId = history.messages[messageId].parentId;
 
 				if (messageParentId !== null) {
 					history.messages[messageParentId].childrenIds = [
@@ -279,7 +273,7 @@
 				const message = history.messages[messageId];
 				const parentId = message.parentId;
 
-				const responseMessage = {
+				const responseMessage: ChatMessage = {
 					...message,
 					id: responseMessageId,
 					parentId: parentId,
@@ -310,16 +304,16 @@
 		}
 	};
 
-	const actionMessage = async (actionId, message, event = null) => {
-		await chatActionHandler(chatId, actionId, message.model, message.id, event);
+	const actionMessage = async (actionId: string, message: ChatMessage, event: unknown = null) => {
+		await chatActionHandler?.(chatId, actionId, message.model, message.id, event);
 	};
 
-	const saveMessage = async (messageId, message) => {
+	const saveMessage = async (messageId: string, message: ChatMessage) => {
 		history.messages[messageId] = message;
 		await updateChat();
 	};
 
-	const deleteMessage = async (messageId) => {
+	const deleteMessage = async (messageId: string) => {
 		const messageToDelete = history.messages[messageId];
 		const parentMessageId = messageToDelete.parentId;
 		const childMessageIds = messageToDelete.childrenIds ?? [];
@@ -360,7 +354,9 @@
 	const triggerScroll = () => {
 		if (autoScroll) {
 			const element = document.getElementById('messages-container');
-			autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
+			if (element) {
+				autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
+			}
 			setTimeout(() => {
 				scrollToBottom();
 			}, 100);
@@ -377,7 +373,7 @@
 				let text = p;
 
 				if (p.includes('{{CLIPBOARD}}')) {
-					const clipboardText = await navigator.clipboard.readText().catch((err) => {
+					const clipboardText = await navigator.clipboard.readText().catch(() => {
 						toast.error($i18n.t('Failed to read clipboard contents'));
 						return '{{CLIPBOARD}}';
 					});
@@ -410,7 +406,6 @@
 
 					{#each messages as message, messageIdx (message.id)}
 						<Message
-							{chatId}
 							bind:history
 							messageId={message.id}
 							idx={messageIdx}

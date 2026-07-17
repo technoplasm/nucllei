@@ -6,6 +6,16 @@
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 	import Markdown from './Markdown.svelte';
 	import { settings } from '$lib/stores';
+	import type { Model } from '$lib/stores';
+	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
+
+	// call.function.arguments はモデル由来の JSON 文字列(chat-events.ts では unknown 扱い)
+	type ToolCall = {
+		id: string;
+		function?: { name?: string; arguments?: string };
+		render?: unknown;
+	};
+	type ToolResult = { tool_call_id: string; content?: string; files?: unknown };
 
 	let {
 		id,
@@ -22,8 +32,27 @@
 		onTaskClick = () => {},
 		onSourceClick = () => {},
 		onAddMessages = () => {},
-		onUpdate = (blockIdx: number, detail: any) => {},
-		onSelect = (detail: any) => {}
+		onUpdate = () => {}
+	}: {
+		id: string;
+		blocks: ContentBlock[];
+		done?: boolean;
+		history: ChatHistory;
+		model?: Model | null;
+		sources?: MessageSource[] | null;
+		floatingButtons?: boolean;
+		save?: boolean;
+		onTaskClick?: (payload: Record<string, unknown>) => void;
+		onSourceClick?: (id: string, idx?: number | string) => void;
+		onAddMessages?: (payload: {
+			modelId: string;
+			parentId: string;
+			messages: { role: string; content: string }[];
+		}) => void;
+		onUpdate?: (
+			blockIdx: number,
+			payload: { raw: string; oldContent: string; newContent: string }
+		) => void;
 	} = $props();
 
 	// tool call の自動展開(実行中だけ開く #20 ステップ5)は OFF にした
@@ -34,9 +63,12 @@
 	// (旧 details 経路の「JSON.stringify → 属性文字列 → decode → 再パース」往復を廃止)。
 	// call.function.arguments はモデル由来の JSON 文字列、result.content は文字列、
 	// files は配列。表示側(Collapsible/HljsCode)がそのまま整形する。
-	const toolCallAttributes = (call: any, results: any[]) => {
-		const result = (results ?? []).find((r) => r.tool_call_id === call.id);
-		const attributes: Record<string, any> = {
+	const toolCalls = (block: ContentBlock): ToolCall[] => (block.calls ?? []) as ToolCall[];
+
+	const toolCallAttributes = (call: ToolCall, block: ContentBlock) => {
+		const results = (block.results ?? []) as ToolResult[];
+		const result = results.find((r) => r.tool_call_id === call.id);
+		const attributes: Record<string, unknown> = {
 			type: 'tool_calls',
 			done: result || done ? 'true' : 'false',
 			id: call.id,
@@ -83,7 +115,7 @@
 						class="mb-1.5 text-sm text-content-muted border-s-2 border-gray-200 dark:border-gray-800 ps-3"
 						dir="auto"
 					>
-						<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content} />
+						<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content ?? ''} />
 					</div>
 				{/snippet}
 			</Collapsible>
@@ -91,7 +123,7 @@
 			<ContentRenderer
 				id={`${id}-block-${blockIdx}`}
 				{history}
-				content={block.content}
+				content={block.content ?? ''}
 				{sources}
 				{floatingButtons}
 				{save}
@@ -99,16 +131,15 @@
 				{onTaskClick}
 				{onSourceClick}
 				{onAddMessages}
-				on:update={(e) => onUpdate(blockIdx, e.detail)}
-				on:select={(e) => onSelect(e.detail)}
+				onUpdate={(payload) => onUpdate(blockIdx, payload)}
 			/>
 		{:else if block.type === 'tool_calls'}
-			{#each block.calls ?? [] as call (call.id)}
+			{#each toolCalls(block) as call (call.id)}
 				<Collapsible
 					id={`${id}-block-${blockIdx}-${call.id}`}
 					title=""
 					open={$settings?.expandDetails ?? false}
-					attributes={toolCallAttributes(call, block.results)}
+					attributes={toolCallAttributes(call, block)}
 					className="w-full space-y-1 text-sm"
 				/>
 			{/each}

@@ -1,17 +1,38 @@
 <script lang="ts">
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext } from 'svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
-	export let show = false;
-	export let citation;
-	export let showPercentage = false;
-	export let showRelevance = true;
+	type CitationMetadata = Record<string, any>;
 
-	let mergedDocuments = [];
+	type Citation = {
+		source?: { name?: string; url?: string };
+		document?: string[];
+		metadata?: (CitationMetadata | undefined)[];
+		distances?: number[];
+	};
+
+	type MergedDocument = {
+		source?: { name?: string; url?: string };
+		document: string;
+		metadata?: CitationMetadata;
+		distance?: number;
+	};
+
+	let {
+		show = $bindable(false),
+		citation = null,
+		showPercentage = false,
+		showRelevance = true
+	}: {
+		show?: boolean;
+		citation?: Citation | null;
+		showPercentage?: boolean;
+		showRelevance?: boolean;
+	} = $props();
 
 	function calculatePercentage(distance: number) {
 		if (typeof distance !== 'number') return null;
@@ -30,21 +51,26 @@
 		return 'bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200';
 	}
 
-	$: if (citation) {
-		mergedDocuments = citation.document?.map((c, i) => {
+	const mergedDocuments: MergedDocument[] = $derived.by(() => {
+		const currentCitation = citation;
+		if (!currentCitation) {
+			return [];
+		}
+
+		const documents = (currentCitation.document ?? []).map((c, i) => {
 			return {
-				source: citation.source,
+				source: currentCitation.source,
 				document: c,
-				metadata: citation.metadata?.[i],
-				distance: citation.distances?.[i]
+				metadata: currentCitation.metadata?.[i],
+				distance: currentCitation.distances?.[i]
 			};
 		});
-		if (mergedDocuments.every((doc) => doc.distance !== undefined)) {
-			mergedDocuments = mergedDocuments.sort(
-				(a, b) => (b.distance ?? Infinity) - (a.distance ?? Infinity)
-			);
+
+		if (documents.every((doc) => doc.distance !== undefined)) {
+			return documents.sort((a, b) => (b.distance ?? Infinity) - (a.distance ?? Infinity));
 		}
-	}
+		return documents;
+	});
 
 	const decodeString = (str: string) => {
 		try {
@@ -64,20 +90,11 @@
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close')}
-				on:click={() => {
+				onclick={() => {
 					show = false;
 				}}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-					/>
-				</svg>
+				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>
 

@@ -1,13 +1,14 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
 	import { lex } from '$lib/utils/markdown-it';
-	type Token = any;
+
+	type Token = { type: string; [key: string]: any };
 
 	type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';
 
 	interface AlertTheme {
 		border: string;
 		text: string;
-		icon: ComponentType;
+		icon: string;
 	}
 
 	export interface AlertData {
@@ -20,27 +21,27 @@
 		NOTE: {
 			border: 'border-sky-500',
 			text: 'text-sky-500',
-			icon: Info
+			icon: 'i-lucide-info'
 		},
 		TIP: {
 			border: 'border-emerald-500',
 			text: 'text-emerald-500',
-			icon: LightBlub
+			icon: 'i-lucide-lightbulb'
 		},
 		IMPORTANT: {
 			border: 'border-purple-500',
 			text: 'text-purple-500',
-			icon: Star
+			icon: 'i-lucide-star'
 		},
 		WARNING: {
 			border: 'border-yellow-500',
 			text: 'text-yellow-500',
-			icon: ArrowRightCircle
+			icon: 'i-lucide-circle-arrow-right'
 		},
 		CAUTION: {
 			border: 'border-rose-500',
 			text: 'text-rose-500',
-			icon: Bolt
+			icon: 'i-lucide-zap'
 		}
 	};
 
@@ -64,19 +65,21 @@
 </script>
 
 <script lang="ts">
-	import Info from '$lib/components/icons/Info.svelte';
-	import Star from '$lib/components/icons/Star.svelte';
-	import LightBlub from '$lib/components/icons/LightBlub.svelte';
-	import Bolt from '$lib/components/icons/Bolt.svelte';
-	import ArrowRightCircle from '$lib/components/icons/ArrowRightCircle.svelte';
 	import MarkdownTokens from './MarkdownTokens.svelte';
-	import type { ComponentType } from 'svelte';
 
-	export let alert: AlertData;
-	export let id = '';
-	export let tokenIdx = 0;
-	export let onTaskClick: ((event: MouseEvent) => void) | undefined = undefined;
-	export let onSourceClick: ((event: MouseEvent) => void) | undefined = undefined;
+	let {
+		alert,
+		id = '',
+		tokenIdx = 0,
+		onTaskClick = undefined,
+		onSourceClick = undefined
+	}: {
+		alert: AlertData;
+		id?: string;
+		tokenIdx?: number;
+		onTaskClick?: (payload: Record<string, any>) => void;
+		onSourceClick?: (id: string, sourceId?: string) => void;
+	} = $props();
 </script>
 
 <!--
@@ -101,7 +104,7 @@ Renders the following Markdown as alerts:
 -->
 <div class={`border-l-4 pl-2.5 ${alertStyles[alert.type].border} my-0.5`}>
 	<div class="{alertStyles[alert.type].text} items-center flex gap-1 py-1.5">
-		<svelte:component this={alertStyles[alert.type].icon} className="inline-block size-4" />
+		<span class="{alertStyles[alert.type].icon} size-4 block"></span>
 		<span class=" font-medium">{alert.type}</span>
 	</div>
 	<div class="pb-2">

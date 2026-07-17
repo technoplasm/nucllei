@@ -2,62 +2,72 @@
 	import { onMount, tick } from 'svelte';
 
 	import { mobile } from '$lib/stores';
+	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 	import ResponseMessage from './ResponseMessage.svelte';
 
-	export let chatId;
-	export let history;
-	export let messageId;
+	let {
+		history = $bindable(),
+		messageId,
+		readOnly = false,
+		updateChat,
+		editMessage,
+		saveMessage,
+		actionMessage,
+		submitMessage,
+		deleteMessage,
+		continueResponse,
+		regenerateResponse,
+		addMessages,
+		triggerScroll
+	}: {
+		history: ChatHistory;
+		messageId: string;
+		readOnly?: boolean;
+		updateChat: () => void | Promise<void>;
+		editMessage: (id: string, content: string, submit?: boolean) => void;
+		saveMessage: (id: string, message: ChatMessage) => void | Promise<void>;
+		actionMessage: (actionId: string, message: ChatMessage, event?: unknown) => void | Promise<void>;
+		submitMessage: (parentId: string, prompt: string) => void | Promise<void>;
+		deleteMessage: (id: string) => void;
+		continueResponse: () => void | Promise<void>;
+		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
+		addMessages: (data: {
+			modelId: string;
+			parentId: string;
+			messages: { role: string; content: string }[];
+		}) => void | Promise<void>;
+		triggerScroll: () => void;
+	} = $props();
 
-	export let readOnly = false;
+	let parentMessage: ChatMessage | null = $state(null);
+	let groupedMessageIds: Record<string, { messageIds: string[] }> = $state({});
+	let groupedMessageIdsIdx: Record<string, number> = $state({});
 
-	export let updateChat: Function;
-	export let editMessage: Function;
-	export let saveMessage: Function;
-	export let actionMessage: Function;
+	const message = $derived(history.messages[messageId] as ChatMessage | undefined);
 
-	export let submitMessage: Function;
-	export let deleteMessage: Function;
-
-	export let continueResponse: Function;
-	export let regenerateResponse: Function;
-
-	export let addMessages: Function;
-
-	export let triggerScroll: Function;
-
-	let currentMessageId;
-	let parentMessage;
-	let groupedMessageIds = {};
-	let groupedMessageIdsIdx = {};
-
-	let message = JSON.parse(JSON.stringify(history.messages[messageId]));
-	$: if (history.messages) {
-		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
-			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+	// 指定 messageId の枝の最深子まで降りる
+	const deepestChildId = (id: string): string => {
+		let currentId = id;
+		let childrenIds = history.messages[currentId].childrenIds;
+		while (childrenIds.length !== 0) {
+			currentId = childrenIds.at(-1) as string;
+			childrenIds = history.messages[currentId].childrenIds;
 		}
-	}
+		return currentId;
+	};
 
-	const gotoMessage = async (modelIdx, messageIdx) => {
+	const gotoMessage = async (modelIdx: string, messageIdx: number) => {
 		// Clamp messageIdx to ensure it's within valid range
 		groupedMessageIdsIdx[modelIdx] = Math.max(
 			0,
 			Math.min(messageIdx, groupedMessageIds[modelIdx].messageIds.length - 1)
 		);
 
-		// Get the messageId at the specified index
-		let messageId = groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]];
-		console.log(messageId);
-
 		// Traverse the branch to find the deepest child message
-		let messageChildrenIds = history.messages[messageId].childrenIds;
-		while (messageChildrenIds.length !== 0) {
-			messageId = messageChildrenIds.at(-1);
-			messageChildrenIds = history.messages[messageId].childrenIds;
-		}
-
-		// Update the current message ID in history
-		history.currentId = messageId;
+		history.currentId = deepestChildId(
+			groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]
+		);
 
 		// Await UI updates
 		await tick();
@@ -69,13 +79,7 @@
 
 	const selectResponse = async (_messageId: string) => {
 		if (messageId != _messageId) {
-			let currentMessageId = _messageId;
-			let messageChildrenIds = history.messages[currentMessageId].childrenIds;
-			while (messageChildrenIds.length !== 0) {
-				currentMessageId = messageChildrenIds.at(-1);
-				messageChildrenIds = history.messages[currentMessageId].childrenIds;
-			}
-			history.currentId = currentMessageId;
+			history.currentId = deepestChildId(_messageId);
 
 			await tick();
 			await updateChat();
@@ -83,43 +87,27 @@
 		}
 	};
 
-	const showPreviousMessage = async (modelIdx) => {
+	const showPreviousMessage = async (modelIdx: string) => {
 		groupedMessageIdsIdx[modelIdx] = Math.max(0, groupedMessageIdsIdx[modelIdx] - 1);
 
-		let messageId = groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]];
-		console.log(messageId);
-
-		let messageChildrenIds = history.messages[messageId].childrenIds;
-
-		while (messageChildrenIds.length !== 0) {
-			messageId = messageChildrenIds.at(-1);
-			messageChildrenIds = history.messages[messageId].childrenIds;
-		}
-
-		history.currentId = messageId;
+		history.currentId = deepestChildId(
+			groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]
+		);
 
 		await tick();
 		await updateChat();
 		triggerScroll();
 	};
 
-	const showNextMessage = async (modelIdx) => {
+	const showNextMessage = async (modelIdx: string) => {
 		groupedMessageIdsIdx[modelIdx] = Math.min(
 			groupedMessageIds[modelIdx].messageIds.length - 1,
 			groupedMessageIdsIdx[modelIdx] + 1
 		);
 
-		let messageId = groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]];
-		console.log(messageId);
-
-		let messageChildrenIds = history.messages[messageId].childrenIds;
-
-		while (messageChildrenIds.length !== 0) {
-			messageId = messageChildrenIds.at(-1);
-			messageChildrenIds = history.messages[messageId].childrenIds;
-		}
-
-		history.currentId = messageId;
+		history.currentId = deepestChildId(
+			groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]
+		);
 
 		await tick();
 		await updateChat();
@@ -127,57 +115,36 @@
 	};
 
 	const initHandler = async () => {
-		console.log('multiresponse:initHandler');
 		await tick();
 
-		currentMessageId = messageId;
-		parentMessage = history.messages[messageId].parentId
-			? history.messages[history.messages[messageId].parentId]
-			: null;
+		const parentId = history.messages[messageId].parentId;
+		parentMessage = parentId ? history.messages[parentId] : null;
 
-		groupedMessageIds = parentMessage?.models.reduce((a, model, modelIdx) => {
-			// Find all messages that are children of the parent message and have the same model
-			let modelMessageIds = parentMessage?.childrenIds
-				.map((id) => history.messages[id])
-				.filter((m) => m?.modelIdx === modelIdx)
-				.map((m) => m.id);
+		const models = parentMessage?.models ?? [];
+		const childMessages = (parentMessage?.childrenIds ?? []).map((id) => history.messages[id]);
 
-			// Legacy support for messages that don't have a modelIdx
-			// Find all messages that are children of the parent message and have the same model
-			if (modelMessageIds.length === 0) {
-				let modelMessages = parentMessage?.childrenIds
-					.map((id) => history.messages[id])
-					.filter((m) => m?.model === model);
+		groupedMessageIds = models.reduce<Record<string, { messageIds: string[] }>>(
+			(a, _model, modelIdx) => {
+				// Find all messages that are children of the parent message and have the same model
+				const modelMessageIds = childMessages
+					.filter((m) => m?.modelIdx === modelIdx)
+					.map((m) => m.id);
 
-				modelMessages.forEach((m) => {
-					m.modelIdx = modelIdx;
-				});
+				return {
+					...a,
+					[modelIdx]: { messageIds: modelMessageIds }
+				};
+			},
+			{}
+		);
 
-				modelMessageIds = modelMessages.map((m) => m.id);
-			}
-
+		groupedMessageIdsIdx = models.reduce<Record<string, number>>((a, _model, modelIdx) => {
+			const idx = groupedMessageIds[modelIdx].messageIds.findIndex((id) => id === messageId);
 			return {
 				...a,
-				[modelIdx]: { messageIds: modelMessageIds }
+				[modelIdx]: idx !== -1 ? idx : groupedMessageIds[modelIdx].messageIds.length - 1
 			};
 		}, {});
-
-		groupedMessageIdsIdx = parentMessage?.models.reduce((a, model, modelIdx) => {
-			const idx = groupedMessageIds[modelIdx].messageIds.findIndex((id) => id === messageId);
-			if (idx !== -1) {
-				return {
-					...a,
-					[modelIdx]: idx
-				};
-			} else {
-				return {
-					...a,
-					[modelIdx]: groupedMessageIds[modelIdx].messageIds.length - 1
-				};
-			}
-		}, {});
-
-		console.log(groupedMessageIds, groupedMessageIdsIdx);
 
 		await tick();
 	};
@@ -195,18 +162,15 @@
 
 {#if parentMessage}
 	<div>
-		<div
-			class="flex snap-x snap-mandatory overflow-x-auto scrollbar-hidden"
-			id="responses-container-{chatId}-{parentMessage.id}"
-		>
+		<div class="flex snap-x snap-mandatory overflow-x-auto scrollbar-hidden">
 			{#each Object.keys(groupedMessageIds) as modelIdx}
 				{#if groupedMessageIdsIdx[modelIdx] !== undefined && groupedMessageIds[modelIdx].messageIds.length > 0}
 					{@const _messageId =
 						groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 					<div
-						class=" snap-center w-full max-w-full m-1 border {history.messages[messageId]
-							?.modelIdx == modelIdx
+						class=" snap-center w-full max-w-full m-1 border {message?.modelIdx ===
+						Number(modelIdx)
 							? `border-gray-100 dark:border-gray-850 border-[1.5px] ${
 									$mobile ? 'min-w-full' : 'min-w-80'
 								}`
@@ -215,10 +179,10 @@
 								}`} transition-all p-5 rounded-2xl"
 						role="button"
 						tabindex="0"
-						on:click={() => {
+						onclick={() => {
 							selectResponse(_messageId);
 						}}
-						on:keydown={(e) => {
+						onkeydown={(e) => {
 							if (e.key === 'Enter' || e.key === ' ') {
 								e.preventDefault();
 								selectResponse(_messageId);
@@ -232,7 +196,8 @@
 									messageId={_messageId}
 									isLastMessage={true}
 									siblings={groupedMessageIds[modelIdx].messageIds}
-									gotoMessage={(message, messageIdx) => gotoMessage(modelIdx, messageIdx)}
+									gotoMessage={(_message: ChatMessage, messageIdx: number) =>
+										gotoMessage(modelIdx, messageIdx)}
 									showPreviousMessage={() => showPreviousMessage(modelIdx)}
 									showNextMessage={() => showNextMessage(modelIdx)}
 									{updateChat}
@@ -242,7 +207,7 @@
 									{actionMessage}
 									{submitMessage}
 									{continueResponse}
-									regenerateResponse={async (message) => {
+									regenerateResponse={async (message: ChatMessage) => {
 										regenerateResponse(message);
 										await tick();
 										groupedMessageIdsIdx[modelIdx] =

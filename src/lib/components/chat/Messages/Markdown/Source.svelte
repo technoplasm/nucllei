@@ -1,9 +1,15 @@
 <script lang="ts">
-	export let id;
-	export let token;
-	export let onClick: Function = () => {};
+	type Token = { type: string; [key: string]: any };
 
-	let attributes: Record<string, string | undefined> = {};
+	let {
+		id,
+		token,
+		onClick = () => {}
+	}: {
+		id: string;
+		token: Token;
+		onClick?: (id: string, sourceId?: string) => void;
+	} = $props();
 
 	function extractAttributes(input: string): Record<string, string> {
 		const regex = /(\w+)="([^"]*)"/g;
@@ -33,13 +39,13 @@
 		return title;
 	}
 
-	$: attributes = extractAttributes(token.text);
+	const attributes = $derived(extractAttributes(token.text));
 </script>
 
 {#if attributes.title !== 'N/A'}
 	<button
-		class="text-xs font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/60 dark:hover:text-white bg-gray-50 text-black/60 hover:text-black transition rounded-lg"
-		on:click={() => {
+		class="text-xs font-medium w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/60 dark:hover:text-white bg-gray-50 text-black/60 hover:text-black rounded-lg"
+		onclick={() => {
 			onClick(id, attributes.data);
 		}}
 	>

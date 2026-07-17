@@ -960,13 +960,12 @@
 																	if ($settings.audio?.tts?.engine === 'browser-kokoro') {
 																		// If the user has not initialized the TTS worker, initialize it
 																		if (!$TTSWorker) {
-																			await TTSWorker.set(
-																				new KokoroWorker({
-																					dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																				})
+																			const worker = new KokoroWorker(
+																				$settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
 																			);
+																			TTSWorker.set(worker);
 
-																			await $TTSWorker.init();
+																			await worker.init();
 																		}
 																	}
 

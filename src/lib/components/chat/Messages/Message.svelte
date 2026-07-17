@@ -1,43 +1,59 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
-
-	import { tick, getContext, onMount, createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
-	const i18n = getContext('i18n');
-
 	import { settings } from '$lib/stores';
-	import { copyToClipboard } from '$lib/utils';
+	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 	import MultiResponseMessages from './MultiResponseMessages.svelte';
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
 
-	export let chatId;
-	export let idx = 0;
+	let {
+		idx = 0,
+		history = $bindable(),
+		messageId,
+		user,
+		gotoMessage,
+		showPreviousMessage,
+		showNextMessage,
+		updateChat,
+		editMessage,
+		saveMessage,
+		deleteMessage,
+		actionMessage,
+		submitMessage,
+		regenerateResponse,
+		continueResponse,
+		addMessages,
+		triggerScroll,
+		readOnly = false
+	}: {
+		idx?: number;
+		history: ChatHistory;
+		messageId: string;
+		user: { name: string; profile_image_url?: string } | undefined;
+		gotoMessage: (message: ChatMessage, index: number) => void;
+		showPreviousMessage: (message: ChatMessage) => void;
+		showNextMessage: (message: ChatMessage) => void;
+		updateChat: () => void | Promise<void>;
+		editMessage: (id: string, content: string, submit?: boolean) => void;
+		saveMessage: (id: string, message: ChatMessage) => void | Promise<void>;
+		deleteMessage: (id: string) => void;
+		actionMessage: (actionId: string, message: ChatMessage, event?: unknown) => void | Promise<void>;
+		submitMessage: (parentId: string, prompt: string) => void | Promise<void>;
+		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
+		continueResponse: () => void | Promise<void>;
+		addMessages: (data: {
+			modelId: string;
+			parentId: string;
+			messages: { role: string; content: string }[];
+		}) => void | Promise<void>;
+		triggerScroll: () => void;
+		readOnly?: boolean;
+	} = $props();
 
-	export let history;
-	export let messageId;
-
-	export let user;
-
-	export let gotoMessage;
-	export let showPreviousMessage;
-	export let showNextMessage;
-	export let updateChat;
-
-	export let editMessage;
-	export let saveMessage;
-	export let deleteMessage;
-	export let actionMessage;
-	export let submitMessage;
-
-	export let regenerateResponse;
-	export let continueResponse;
-	export let mergeResponses;
-
-	export let addMessages;
-	export let triggerScroll;
-	export let readOnly = false;
+	const message = $derived(history.messages[messageId] as ChatMessage | undefined);
+	const parentMessage = $derived(
+		message && message.parentId !== null ? history.messages[message.parentId] : undefined
+	);
 </script>
 
 <div
@@ -45,18 +61,18 @@
 		? 'max-w-full'
 		: 'max-w-5xl'} mx-auto rounded-lg group"
 >
-	{#if history.messages[messageId]}
-		{#if history.messages[messageId].role === 'user'}
+	{#if message}
+		{#if message.role === 'user'}
 			<UserMessage
 				{user}
 				{history}
 				{messageId}
 				isFirstMessage={idx === 0}
-				siblings={history.messages[messageId].parentId !== null
-					? (history.messages[history.messages[messageId].parentId]?.childrenIds ?? [])
-					: (Object.values(history.messages)
-							.filter((message) => message.parentId === null)
-							.map((message) => message.id) ?? [])}
+				siblings={message.parentId !== null
+					? (parentMessage?.childrenIds ?? [])
+					: Object.values(history.messages)
+							.filter((m) => m.parentId === null)
+							.map((m) => m.id)}
 				{gotoMessage}
 				{showPreviousMessage}
 				{showNextMessage}
@@ -64,12 +80,12 @@
 				{deleteMessage}
 				{readOnly}
 			/>
-		{:else if (history.messages[history.messages[messageId].parentId]?.models?.length ?? 1) === 1}
+		{:else if (parentMessage?.models?.length ?? 1) === 1}
 			<ResponseMessage
 				{history}
 				{messageId}
 				isLastMessage={messageId === history.currentId}
-				siblings={history.messages[history.messages[messageId].parentId]?.childrenIds ?? []}
+				siblings={parentMessage?.childrenIds ?? []}
 				{gotoMessage}
 				{showPreviousMessage}
 				{showNextMessage}
@@ -87,7 +103,6 @@
 		{:else}
 			<MultiResponseMessages
 				bind:history
-				{chatId}
 				{messageId}
 				{updateChat}
 				{editMessage}
@@ -97,7 +112,6 @@
 				{deleteMessage}
 				{continueResponse}
 				{regenerateResponse}
-				{mergeResponses}
 				{triggerScroll}
 				{addMessages}
 				{readOnly}

@@ -2,26 +2,40 @@
 	import { getContext } from 'svelte';
 	import CitationsModal from './CitationsModal.svelte';
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let id = '';
-	export let sources = [];
+	type SourceMetadata = {
+		source?: string;
+		name?: string;
+		[key: string]: unknown;
+	};
 
-	let citations = [];
-	let showPercentage = false;
-	let showRelevance = true;
+	type Source = {
+		source?: { id?: string; name?: string; url?: string };
+		document?: string[];
+		metadata?: (SourceMetadata | undefined)[];
+		distances?: number[];
+	};
 
-	let showCitationModal = false;
-	let selectedCitation: any = null;
-	let isCollapsibleOpen = false;
+	type Citation = {
+		id: string;
+		source?: { id?: string; name?: string; url?: string };
+		document: string[];
+		metadata: (SourceMetadata | undefined)[];
+		distances?: number[];
+	};
 
-	function calculateShowRelevance(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
-		const inRange = distances.filter((d) => d !== undefined && d >= -1 && d <= 1).length;
-		const outOfRange = distances.filter((d) => d !== undefined && (d < -1 || d > 1)).length;
+	let { id = '', sources = [] }: { id?: string; sources?: Source[] } = $props();
+
+	let showCitationModal = $state(false);
+	let selectedCitation: Citation | null = $state(null);
+	let isCollapsibleOpen = $state(false);
+
+	function calculateShowRelevance(citations: Citation[]) {
+		const distances = citations.flatMap((citation) => citation.distances ?? []);
+		const inRange = distances.filter((d) => d >= -1 && d <= 1).length;
+		const outOfRange = distances.filter((d) => d < -1 || d > 1).length;
 
 		if (distances.length === 0) {
 			return false;
@@ -37,43 +51,42 @@
 		return true;
 	}
 
-	function shouldShowPercentage(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
-		return distances.every((d) => d !== undefined && d >= -1 && d <= 1);
+	function shouldShowPercentage(citations: Citation[]) {
+		const distances = citations.flatMap((citation) => citation.distances ?? []);
+		return distances.every((d) => d >= -1 && d <= 1);
 	}
 
-	$: {
-		console.log('sources', sources);
-		citations = sources.reduce((acc, source) => {
+	const citations = $derived(
+		sources.reduce<Citation[]>((acc, source) => {
 			if (Object.keys(source).length === 0) {
 				return acc;
 			}
 
-			source.document.forEach((document, index) => {
+			(source.document ?? []).forEach((document, index) => {
 				const metadata = source.metadata?.[index];
 				const distance = source.distances?.[index];
 
 				// Within the same citation there could be multiple documents
-				const id = metadata?.source ?? source?.source?.id ?? 'N/A';
+				const citationId = metadata?.source ?? source?.source?.id ?? 'N/A';
 				let _source = source?.source;
 
 				if (metadata?.name) {
 					_source = { ..._source, name: metadata.name };
 				}
 
-				if (id.startsWith('http://') || id.startsWith('https://')) {
-					_source = { ..._source, name: id, url: id };
+				if (citationId.startsWith('http://') || citationId.startsWith('https://')) {
+					_source = { ..._source, name: citationId, url: citationId };
 				}
 
-				const existingSource = acc.find((item) => item.id === id);
+				const existingSource = acc.find((item) => item.id === citationId);
 
 				if (existingSource) {
 					existingSource.document.push(document);
 					existingSource.metadata.push(metadata);
-					if (distance !== undefined) existingSource.distances.push(distance);
+					if (distance !== undefined) existingSource.distances?.push(distance);
 				} else {
 					acc.push({
-						id: id,
+						id: citationId,
 						source: _source,
 						document: [document],
 						metadata: metadata ? [metadata] : [],
@@ -82,11 +95,11 @@
 				}
 			});
 			return acc;
-		}, []);
+		}, [])
+	);
 
-		showRelevance = calculateShowRelevance(citations);
-		showPercentage = shouldShowPercentage(citations);
-	}
+	const showRelevance = $derived(calculateShowRelevance(citations));
+	const showPercentage = $derived(shouldShowPercentage(citations));
 
 	const decodeString = (str: string) => {
 		try {
@@ -112,7 +125,7 @@
 					<button
 						id={`source-${id}-${idx + 1}`}
 						class="no-toggle outline-hidden flex text-content p-1 bg-white dark:bg-gray-900 rounded-xl max-w-96"
-						on:click={() => {
+						onclick={() => {
 							showCitationModal = true;
 							selectedCitation = citation;
 						}}
@@ -123,9 +136,9 @@
 							</div>
 						{/if}
 						<div
-							class="flex-1 mx-1 truncate text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white transition"
+							class="flex-1 mx-1 truncate text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
 						>
-							{decodeString(citation.source.name)}
+							{decodeString(citation.source?.name ?? '')}
 						</div>
 					</button>
 				{/each}
@@ -138,11 +151,9 @@
 				buttonClassName="w-fit max-w-full"
 			>
 				<div
-					class="flex w-full overflow-auto items-center gap-2 text-content-muted hover:text-content transition cursor-pointer"
+					class="flex w-full overflow-auto items-center gap-2 text-content-muted hover:text-content cursor-pointer"
 				>
-					<div
-						class="flex-1 flex items-center gap-1 overflow-auto scrollbar-none w-full max-w-full"
-					>
+					<div class="flex-1 flex items-center gap-1 overflow-auto scrollbar-none w-full max-w-full">
 						<span class="whitespace-nowrap hidden sm:inline shrink-0"
 							>{$i18n.t('References from')}</span
 						>
@@ -150,12 +161,12 @@
 							<div class="flex text-xs font-medium items-center">
 								{#each citations.slice(0, 2) as citation, idx}
 									<button
-										class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
-										on:click={() => {
+										class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-xl max-w-96"
+										onclick={() => {
 											showCitationModal = true;
 											selectedCitation = citation;
 										}}
-										on:pointerup={(e) => {
+										onpointerup={(e) => {
 											e.stopPropagation();
 										}}
 									>
@@ -165,7 +176,7 @@
 											</div>
 										{/if}
 										<div class="flex-1 mx-1 truncate">
-											{decodeString(citation.source.name)}
+											{decodeString(citation.source?.name ?? '')}
 										</div>
 									</button>
 								{/each}
@@ -179,9 +190,9 @@
 					</div>
 					<div class="shrink-0">
 						{#if isCollapsibleOpen}
-							<ChevronUp strokeWidth="3.5" className="size-3.5" />
+							<span class="i-lucide-chevron-up size-3.5 block"></span>
 						{:else}
-							<ChevronDown strokeWidth="3.5" className="size-3.5" />
+							<span class="i-lucide-chevron-down size-3.5 block"></span>
 						{/if}
 					</div>
 				</div>
@@ -191,8 +202,8 @@
 							{#each citations as citation, idx}
 								<button
 									id={`source-${id}-${idx + 1}`}
-									class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition rounded-xl max-w-96"
-									on:click={() => {
+									class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-xl max-w-96"
+									onclick={() => {
 										showCitationModal = true;
 										selectedCitation = citation;
 									}}
@@ -203,7 +214,7 @@
 										</div>
 									{/if}
 									<div class="flex-1 mx-1 truncate">
-										{decodeString(citation.source.name)}
+										{decodeString(citation.source?.name ?? '')}
 									</div>
 								</button>
 							{/each}

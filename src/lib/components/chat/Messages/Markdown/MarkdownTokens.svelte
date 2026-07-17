@@ -1,12 +1,11 @@
 <script lang="ts">
 	import DOMPurify from 'dompurify';
-	import { createEventDispatcher, onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	type Token = any;
 	import { unescapeHtml } from '$lib/utils';
 	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
 
@@ -17,37 +16,46 @@
 	import KatexRenderer from './KatexRenderer.svelte';
 	import AlertRenderer, { alertComponent } from './AlertRenderer.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
+	import MarkdownTokens from './MarkdownTokens.svelte';
 
 	import Source from './Source.svelte';
 	import { settings } from '$lib/stores';
 
-	const dispatch = createEventDispatcher();
+	type Token = { type: string; [key: string]: any };
 
-	export let id: string;
-	export let tokens: Token[];
-	export let top = true;
-
-	export let save = false;
-
-	export let onTaskClick: Function = () => {};
-	export let onSourceClick: Function = () => {};
+	let {
+		id,
+		tokens,
+		top = true,
+		save = false,
+		onTaskClick = () => {},
+		onSourceClick = () => {},
+		onUpdate = undefined
+	}: {
+		id: string;
+		tokens: Token[];
+		top?: boolean;
+		save?: boolean;
+		onTaskClick?: (payload: Record<string, any>) => void;
+		onSourceClick?: (id: string, sourceId?: string) => void;
+		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
+	} = $props();
 
 	const headerComponent = (depth: number) => {
 		return 'h' + depth;
 	};
 
-	const exportTableToCSVHandler = (token, tokenIdx = 0) => {
-		console.log('Exporting table to CSV');
-
+	const exportTableToCSVHandler = (token: Token, tokenIdx = 0) => {
 		// Extract header row text and escape for CSV.
-		const header = token.header.map((headerCell) => `"${headerCell.text.replace(/"/g, '""')}"`);
+		const header = token.header.map(
+			(headerCell: Token) => `"${headerCell.text.replace(/"/g, '""')}"`
+		);
 
 		// Create an array for rows that will hold the mapped cell text.
-		const rows = token.rows.map((row) =>
-			row.map((cell) => {
+		const rows = token.rows.map((row: Token[]) =>
+			row.map((cell: Token) => {
 				// Map tokens into a single text
-				const cellContent = cell.tokens.map((token) => token.text).join('');
+				const cellContent = cell.tokens.map((cellToken: Token) => cellToken.text).join('');
 				// Escape double quotes and wrap the content in double quotes
 				return `"${cellContent.replace(/"/g, '""')}"`;
 			})
@@ -58,10 +66,6 @@
 
 		// Join the rows using commas (,) as the separator and rows using newline (\n).
 		const csvContent = csvData.map((row) => row.join(',')).join('\n');
-
-		// Log rows and CSV content to ensure everything is correct.
-		console.log(csvData);
-		console.log(csvContent);
 
 		// To handle Unicode characters, you need to prefix the data with a BOM:
 		const bom = '\uFEFF'; // BOM for UTF-8
@@ -74,7 +78,6 @@
 	};
 </script>
 
-<!-- {JSON.stringify(tokens)} -->
 {#each tokens as token, tokenIdx (tokenIdx)}
 	{#if token.type === 'hr'}
 		<hr class=" border-line! my-6!" />
@@ -91,11 +94,8 @@
 				lang={token?.lang ?? ''}
 				code={token?.text ?? ''}
 				{save}
-				onCode={(value) => {
-					dispatch('code', value);
-				}}
 				onSave={(value) => {
-					dispatch('update', {
+					onUpdate?.({
 						raw: token.raw,
 						oldContent: token.text,
 						newContent: value
@@ -115,7 +115,7 @@
 								<th
 									scope="col"
 									class="px-3! py-1.5! cursor-pointer font-bold border-b-2 border-line!"
-									style={token.align[headerIdx] ? '' : `text-align: ${token.align[headerIdx]}`}
+									style={token.align[headerIdx] ? `text-align: ${token.align[headerIdx]}` : ''}
 								>
 									<div class="gap-1.5 text-left">
 										<div class="shrink-0 break-normal">
@@ -136,7 +136,7 @@
 								{#each row ?? [] as cell, cellIdx}
 									<td
 										class="px-3! py-1.5! text-content dark:text-white w-max"
-										style={token.align[cellIdx] ? '' : `text-align: ${token.align[cellIdx]}`}
+										style={token.align[cellIdx] ? `text-align: ${token.align[cellIdx]}` : ''}
 									>
 										<div class="break-normal">
 											<MarkdownInlineTokens
@@ -156,13 +156,14 @@
 			<div class=" absolute top-1 right-1.5 z-20 invisible group-hover:visible">
 				<Tooltip content={$i18n.t('Export to CSV')}>
 					<button
-						class="p-1 rounded-lg bg-transparent transition"
-						on:click={(e) => {
+						class="p-1 rounded-lg bg-transparent"
+						aria-label={$i18n.t('Export to CSV')}
+						onclick={(e) => {
 							e.stopPropagation();
 							exportTableToCSVHandler(token, tokenIdx);
 						}}
 					>
-						<ArrowDownTray className=" size-3.5" strokeWidth="1.5" />
+						<span class="i-lucide-download size-3.5 block"></span>
 					</button>
 				</Tooltip>
 			</div>
@@ -170,10 +171,16 @@
 	{:else if token.type === 'blockquote'}
 		{@const alert = alertComponent(token)}
 		{#if alert}
-			<AlertRenderer {alert} />
+			<AlertRenderer {alert} {id} {tokenIdx} {onTaskClick} {onSourceClick} />
 		{:else}
 			<blockquote dir="auto">
-				<svelte:self id={`${id}-${tokenIdx}`} tokens={token.tokens} {onTaskClick} {onSourceClick} />
+				<MarkdownTokens
+					id={`${id}-${tokenIdx}`}
+					tokens={token.tokens}
+					{onTaskClick}
+					{onSourceClick}
+					{onUpdate}
+				/>
 			</blockquote>
 		{/if}
 	{:else if token.type === 'list'}
@@ -186,25 +193,26 @@
 								class=" translate-y-[1px] -translate-x-1"
 								type="checkbox"
 								checked={item.checked}
-								on:change={(e) => {
+								onchange={(e) => {
 									onTaskClick({
 										id: id,
 										token: token,
 										tokenIdx: tokenIdx,
 										item: item,
 										itemIdx: itemIdx,
-										checked: e.target.checked
+										checked: e.currentTarget.checked
 									});
 								}}
 							/>
 						{/if}
 
-						<svelte:self
+						<MarkdownTokens
 							id={`${id}-${tokenIdx}-${itemIdx}`}
 							tokens={item.tokens}
 							top={token.loose}
 							{onTaskClick}
 							{onSourceClick}
+							{onUpdate}
 						/>
 					</li>
 				{/each}
@@ -218,25 +226,26 @@
 								class=" translate-y-[1px] -translate-x-1"
 								type="checkbox"
 								checked={item.checked}
-								on:change={(e) => {
+								onchange={(e) => {
 									onTaskClick({
 										id: id,
 										token: token,
 										tokenIdx: tokenIdx,
 										item: item,
 										itemIdx: itemIdx,
-										checked: e.target.checked
+										checked: e.currentTarget.checked
 									});
 								}}
 							/>
 						{/if}
 
-						<svelte:self
+						<MarkdownTokens
 							id={`${id}-${tokenIdx}-${itemIdx}`}
 							tokens={item.tokens}
 							top={token.loose}
 							{onTaskClick}
 							{onSourceClick}
+							{onUpdate}
 						/>
 					</li>
 				{/each}
@@ -259,9 +268,12 @@
 			title={token.fileId}
 			width="100%"
 			frameborder="0"
-			on:load={(e) => {
-				const el = e.currentTarget;
-				el.style.height = el.contentWindow.document.body.scrollHeight + 20 + 'px';
+			onload={(e) => {
+				const el = e.currentTarget as HTMLIFrameElement;
+				const body = el.contentWindow?.document?.body;
+				if (body) {
+					el.style.height = body.scrollHeight + 20 + 'px';
+				}
 			}}
 		></iframe>
 	{:else if token.type === 'paragraph'}
@@ -300,7 +312,5 @@
 		{/if}
 	{:else if token.type === 'space'}
 		<div class="my-2"></div>
-	{:else}
-		{console.log('Unknown token', token)}
 	{/if}
 {/each}

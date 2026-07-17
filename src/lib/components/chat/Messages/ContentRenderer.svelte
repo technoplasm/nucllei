@@ -1,36 +1,89 @@
-<script>
-	import { onDestroy, onMount, tick, getContext, createEventDispatcher } from 'svelte';
-	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
+<script lang="ts">
+	// Markdown 本文の描画 + テキスト選択のフローティングボタン(Ask/Explain)。
+	import { onDestroy, onMount, tick } from 'svelte';
+
+	import { mobile } from '$lib/stores';
+	import type { Model } from '$lib/stores';
+	import { createMessagesList } from '$lib/utils';
+	import type { ChatHistory, MessageSource } from '$lib/types/chat';
 
 	import Markdown from './Markdown.svelte';
-	import { mobile } from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
-	import { createMessagesList } from '$lib/utils';
 
-	export let id;
-	export let content;
-	export let history;
-	export let model = null;
-	export let sources = null;
+	let {
+		id,
+		content,
+		history,
+		model = null,
+		sources = null,
+		save = false,
+		floatingButtons = true,
+		onSourceClick = () => {},
+		onTaskClick = () => {},
+		onAddMessages = () => {},
+		onUpdate = () => {}
+	}: {
+		id: string;
+		content: string;
+		history: ChatHistory;
+		model?: Model | null;
+		sources?: MessageSource[] | null;
+		save?: boolean;
+		floatingButtons?: boolean;
+		onSourceClick?: (id: string, idx?: number | string) => void;
+		onTaskClick?: (payload: Record<string, unknown>) => void;
+		onAddMessages?: (payload: {
+			modelId: string;
+			parentId: string;
+			messages: { role: string; content: string }[];
+		}) => void;
+		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
+	} = $props();
 
-	export let save = false;
-	export let floatingButtons = true;
+	let contentContainerElement: HTMLDivElement | null = $state(null);
+	let floatingButtonsElement: { closeHandler: () => void } | null = $state(null);
 
-	export let onSourceClick = () => {};
-	export let onTaskClick = () => {};
+	// citation マーカー [n] → ソース名の解決テーブル(Markdown の sourceIds)
+	const sourceIds = $derived(
+		(sources ?? []).reduce<string[]>((acc, s) => {
+			const citationsEnabled =
+				((model?.info?.meta?.capabilities as { citations?: boolean } | undefined)?.citations ??
+					true) !== false;
 
-	export let onAddMessages = () => {};
+			const ids: string[] = [];
+			(s.document ?? []).forEach((_document, index) => {
+				if (!citationsEnabled) {
+					ids.push('N/A');
+					return;
+				}
 
-	let contentContainerElement;
+				const metadata = s.metadata?.[index];
+				const metadataSource = typeof metadata?.source === 'string' ? metadata.source : 'N/A';
 
-	let floatingButtonsElement;
+				if (typeof metadata?.name === 'string') {
+					ids.push(metadata.name);
+					return;
+				}
 
-	const updateButtonPosition = (event) => {
+				if (metadataSource.startsWith('http://') || metadataSource.startsWith('https://')) {
+					ids.push(metadataSource);
+				} else {
+					ids.push(s?.source?.name ?? metadataSource);
+				}
+			});
+
+			acc = [...acc, ...ids];
+
+			// remove duplicates
+			return acc.filter((item, index) => acc.indexOf(item) === index);
+		}, [])
+	);
+
+	const updateButtonPosition = (event: MouseEvent) => {
 		const buttonsContainerElement = document.getElementById(`floating-buttons-${id}`);
 		if (
-			!contentContainerElement?.contains(event.target) &&
-			!buttonsContainerElement?.contains(event.target)
+			!contentContainerElement?.contains(event.target as Node) &&
+			!buttonsContainerElement?.contains(event.target as Node)
 		) {
 			closeFloatingButtons();
 			return;
@@ -39,11 +92,11 @@
 		setTimeout(async () => {
 			await tick();
 
-			if (!contentContainerElement?.contains(event.target)) return;
+			if (!contentContainerElement?.contains(event.target as Node)) return;
 
-			let selection = window.getSelection();
+			const selection = window.getSelection();
 
-			if (selection.toString().trim().length > 0) {
+			if (selection && selection.toString().trim().length > 0) {
 				const range = selection.getRangeAt(0);
 				const rect = range.getBoundingClientRect();
 
@@ -58,7 +111,7 @@
 
 					// Calculate space available on the right
 					const spaceOnRight = parentRect.width - left;
-					let halfScreenWidth = $mobile ? window.innerWidth / 2 : window.innerWidth / 3;
+					const halfScreenWidth = $mobile ? window.innerWidth / 2 : window.innerWidth / 3;
 
 					if (spaceOnRight < halfScreenWidth) {
 						const right = parentRect.right - rect.right;
@@ -83,17 +136,10 @@
 			buttonsContainerElement.style.display = 'none';
 		}
 
-		if (floatingButtonsElement) {
-			// check if closeHandler is defined
-
-			if (typeof floatingButtonsElement?.closeHandler === 'function') {
-				// call the closeHandler function
-				floatingButtonsElement?.closeHandler();
-			}
-		}
+		floatingButtonsElement?.closeHandler();
 	};
 
-	const keydownHandler = (e) => {
+	const keydownHandler = (e: KeyboardEvent) => {
 		if (e.key === 'Escape') {
 			closeFloatingButtons();
 		}
@@ -122,41 +168,10 @@
 		{content}
 		{model}
 		{save}
-		sourceIds={(sources ?? []).reduce((acc, s) => {
-			let ids = [];
-			s.document.forEach((document, index) => {
-				if (model?.info?.meta?.capabilities?.citations == false) {
-					ids.push('N/A');
-					return ids;
-				}
-
-				const metadata = s.metadata?.[index];
-				const id = metadata?.source ?? 'N/A';
-
-				if (metadata?.name) {
-					ids.push(metadata.name);
-					return ids;
-				}
-
-				if (id.startsWith('http://') || id.startsWith('https://')) {
-					ids.push(id);
-				} else {
-					ids.push(s?.source?.name ?? id);
-				}
-
-				return ids;
-			});
-
-			acc = [...acc, ...ids];
-
-			// remove duplicates
-			return acc.filter((item, index) => acc.indexOf(item) === index);
-		}, [])}
+		{sourceIds}
 		{onSourceClick}
 		{onTaskClick}
-		on:update={(e) => {
-			dispatch('update', e.detail);
-		}}
+		{onUpdate}
 	/>
 </div>
 
@@ -167,7 +182,6 @@
 		model={model?.id}
 		messages={createMessagesList(history, id)}
 		onAdd={({ modelId, parentId, messages }) => {
-			console.log(modelId, parentId, messages);
 			onAddMessages({ modelId, parentId, messages });
 			closeFloatingButtons();
 		}}

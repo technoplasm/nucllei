@@ -34,7 +34,6 @@
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import CheckCircle from '../icons/CheckCircle.svelte';
 	import Spinner from './Spinner.svelte';
-	import CodeBlock from '../chat/Messages/CodeBlock.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import HljsCode from './HljsCode.svelte';
 	import Image from './Image.svelte';

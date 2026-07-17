@@ -2,7 +2,6 @@
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
-	type Token = any;
 	import { getContext } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -14,10 +13,19 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
 	import Source from './Source.svelte';
+	import MarkdownInlineTokens from './MarkdownInlineTokens.svelte';
 
-	export let id: string;
-	export let tokens: Token[];
-	export let onSourceClick: Function = () => {};
+	type Token = { type: string; [key: string]: any };
+
+	let {
+		id,
+		tokens,
+		onSourceClick = () => {}
+	}: {
+		id: string;
+		tokens: Token[];
+		onSourceClick?: (id: string, sourceId?: string) => void;
+	} = $props();
 </script>
 
 {#each tokens as token}
@@ -37,7 +45,7 @@
 	{:else if token.type === 'link'}
 		{#if token.tokens}
 			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>
-				<svelte:self id={`${id}-a`} tokens={token.tokens} {onSourceClick} />
+				<MarkdownInlineTokens id={`${id}-a`} tokens={token.tokens} {onSourceClick} />
 			</a>
 		{:else}
 			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>{token.text}</a>
@@ -45,15 +53,15 @@
 	{:else if token.type === 'image'}
 		<Image src={token.href} alt={token.text} />
 	{:else if token.type === 'strong'}
-		<strong><svelte:self id={`${id}-strong`} tokens={token.tokens} {onSourceClick} /></strong>
+		<strong><MarkdownInlineTokens id={`${id}-strong`} tokens={token.tokens} {onSourceClick} /></strong>
 	{:else if token.type === 'em'}
-		<em><svelte:self id={`${id}-em`} tokens={token.tokens} {onSourceClick} /></em>
+		<em><MarkdownInlineTokens id={`${id}-em`} tokens={token.tokens} {onSourceClick} /></em>
 	{:else if token.type === 'codespan'}
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
-		<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<code
 			class="codespan cursor-pointer"
-			on:click={() => {
+			onclick={() => {
 				copyToClipboard(unescapeHtml(token.text));
 				toast.success($i18n.t('Copied to clipboard'));
 			}}>{unescapeHtml(token.text)}</code
@@ -61,7 +69,7 @@
 	{:else if token.type === 'br'}
 		<br />
 	{:else if token.type === 'del'}
-		<del><svelte:self id={`${id}-del`} tokens={token.tokens} {onSourceClick} /></del>
+		<del><MarkdownInlineTokens id={`${id}-del`} tokens={token.tokens} {onSourceClick} /></del>
 	{:else if token.type === 'inlineKatex'}
 		{#if token.text}
 			<KatexRenderer content={token.text} displayMode={false} />
@@ -72,9 +80,12 @@
 			title={token.fileId}
 			width="100%"
 			frameborder="0"
-			on:load={(e) => {
-				const el = e.currentTarget;
-				el.style.height = el.contentWindow.document.body.scrollHeight + 20 + 'px';
+			onload={(e) => {
+				const el = e.currentTarget as HTMLIFrameElement;
+				const body = el.contentWindow?.document?.body;
+				if (body) {
+					el.style.height = body.scrollHeight + 20 + 'px';
+				}
 			}}
 		></iframe>
 	{:else if token.type === 'text'}

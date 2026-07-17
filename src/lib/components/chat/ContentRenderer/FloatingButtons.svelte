@@ -1,59 +1,73 @@
 <script lang="ts">
+	// テキスト選択のフローティングメニュー(Ask / Explain)。
+	// 位置決めと開閉は親(ContentRenderer)が DOM 経由で制御し、
+	// 閉じるときは bind:this の closeHandler を呼ぶ。
 	import { toast } from 'svelte-sonner';
 
-	import DOMPurify from 'dompurify';
-
 	import { getContext, tick } from 'svelte';
-	const i18n = getContext('i18n');
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 
 	import { chatCompletion } from '$lib/apis/openai';
 
-	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
-	import LightBlub from '$lib/components/icons/LightBlub.svelte';
 	import Markdown from '../Messages/Markdown.svelte';
 	import Skeleton from '../Messages/Skeleton.svelte';
 
-	export let id = '';
-	export let model = null;
-	export let messages = [];
-	export let onAdd = () => {};
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	let floatingInput = false;
+	type SimpleMessage = { role: string; content: string };
 
-	let selectedText = '';
-	let floatingInputValue = '';
+	let {
+		id = '',
+		model = null,
+		messages = [],
+		onAdd = () => {}
+	}: {
+		id?: string;
+		model?: string | null;
+		messages?: SimpleMessage[];
+		onAdd?: (payload: { modelId: string; parentId: string; messages: SimpleMessage[] }) => void;
+	} = $props();
 
-	let prompt = '';
-	let responseContent = null;
-	let responseDone = false;
+	let floatingInput = $state(false);
+
+	let selectedText = $state('');
+	let floatingInputValue = $state('');
+
+	let prompt = $state('');
+	let responseContent: string | null = $state(null);
+	let responseDone = $state(false);
 
 	const autoScroll = async () => {
 		// Scroll to bottom only if the scroll is at the bottom give 50px buffer
 		const responseContainer = document.getElementById('response-container');
 		if (
+			responseContainer &&
 			responseContainer.scrollHeight - responseContainer.clientHeight <=
-			responseContainer.scrollTop + 50
+				responseContainer.scrollTop + 50
 		) {
 			responseContainer.scrollTop = responseContainer.scrollHeight;
 		}
 	};
 
-	const askHandler = async () => {
-		if (!model) {
+	// Ask / Explain 共通のストリーミング本体(元は 2 箇所に丸ごと重複していた)
+	const streamResponse = async (userPrompt: string) => {
+		const modelId = model;
+		if (!modelId) {
 			toast.error('Model not selected');
 			return;
 		}
-		prompt = `${floatingInputValue}\n\`\`\`\n${selectedText}\n\`\`\``;
-		floatingInputValue = '';
 
+		prompt = userPrompt;
 		responseContent = '';
-		const [res, controller] = await chatCompletion({
-			model: model,
+
+		const [res] = await chatCompletion({
+			model: modelId,
 			messages: [
 				...messages,
 				{
 					role: 'user',
-					content: prompt
+					content: userPrompt
 				}
 			].map((message) => ({
 				role: message.role,
@@ -62,152 +76,88 @@
 			stream: true // Enable streaming
 		});
 
-		if (res && res.ok) {
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-
-			const processStream = async () => {
-				while (true) {
-					// Read data chunks from the response stream
-					const { done, value } = await reader.read();
-					if (done) {
-						break;
-					}
-
-					// Decode the received chunk
-					const chunk = decoder.decode(value, { stream: true });
-
-					// Process lines within the chunk
-					const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-					for (const line of lines) {
-						if (line.startsWith('data: ')) {
-							if (line.startsWith('data: [DONE]')) {
-								responseDone = true;
-
-								await tick();
-								autoScroll();
-								continue;
-							} else {
-								// Parse the JSON chunk
-								try {
-									const data = JSON.parse(line.slice(6));
-
-									// Append the `content` field from the "choices" object
-									if (data.choices && data.choices[0]?.delta?.content) {
-										responseContent += data.choices[0].delta.content;
-
-										autoScroll();
-									}
-								} catch (e) {
-									console.error(e);
-								}
-							}
-						}
-					}
-				}
-			};
-
-			// Process the stream in the background
-			await processStream();
-		} else {
+		if (!res?.ok || !res.body) {
 			toast.error('An error occurred while fetching the explanation');
+			return;
 		}
+
+		const reader = res.body.getReader();
+		const decoder = new TextDecoder();
+
+		while (true) {
+			// Read data chunks from the response stream
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+
+			// Decode the received chunk
+			const chunk = decoder.decode(value, { stream: true });
+
+			// Process lines within the chunk
+			const lines = chunk.split('\n').filter((line) => line.trim() !== '');
+
+			for (const line of lines) {
+				if (!line.startsWith('data: ')) {
+					continue;
+				}
+
+				if (line.startsWith('data: [DONE]')) {
+					responseDone = true;
+
+					await tick();
+					autoScroll();
+					continue;
+				}
+
+				// Parse the JSON chunk
+				try {
+					const data = JSON.parse(line.slice(6));
+
+					// Append the `content` field from the "choices" object
+					if (data.choices && data.choices[0]?.delta?.content) {
+						responseContent += data.choices[0].delta.content;
+
+						autoScroll();
+					}
+				} catch (e) {
+					console.error(e);
+				}
+			}
+		}
+	};
+
+	const askHandler = async () => {
+		const input = floatingInputValue;
+		floatingInputValue = '';
+
+		await streamResponse(`${input}\n\`\`\`\n${selectedText}\n\`\`\``);
 	};
 
 	const explainHandler = async () => {
-		if (!model) {
-			toast.error('Model not selected');
-			return;
-		}
 		const explainText = $i18n.t('Explain this section to me in more detail');
-		prompt = `${explainText}\n\n\`\`\`\n${selectedText}\n\`\`\``;
 
-		responseContent = '';
-		const [res, controller] = await chatCompletion({
-			model: model,
-			messages: [
-				...messages,
-				{
-					role: 'user',
-					content: prompt
-				}
-			].map((message) => ({
-				role: message.role,
-				content: message.content
-			})),
-			stream: true // Enable streaming
-		});
-
-		if (res && res.ok) {
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-
-			const processStream = async () => {
-				while (true) {
-					// Read data chunks from the response stream
-					const { done, value } = await reader.read();
-					if (done) {
-						break;
-					}
-
-					// Decode the received chunk
-					const chunk = decoder.decode(value, { stream: true });
-
-					// Process lines within the chunk
-					const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-					for (const line of lines) {
-						if (line.startsWith('data: ')) {
-							if (line.startsWith('data: [DONE]')) {
-								responseDone = true;
-
-								await tick();
-								autoScroll();
-								continue;
-							} else {
-								// Parse the JSON chunk
-								try {
-									const data = JSON.parse(line.slice(6));
-
-									// Append the `content` field from the "choices" object
-									if (data.choices && data.choices[0]?.delta?.content) {
-										responseContent += data.choices[0].delta.content;
-
-										autoScroll();
-									}
-								} catch (e) {
-									console.error(e);
-								}
-							}
-						}
-					}
-				}
-			};
-
-			// Process the stream in the background
-			await processStream();
-		} else {
-			toast.error('An error occurred while fetching the explanation');
-		}
+		await streamResponse(`${explainText}\n\n\`\`\`\n${selectedText}\n\`\`\``);
 	};
 
-	const addHandler = async () => {
-		const messages = [
-			{
-				role: 'user',
-				content: prompt
-			},
-			{
-				role: 'assistant',
-				content: responseContent
-			}
-		];
+	const addHandler = () => {
+		if (!model) {
+			return;
+		}
 
 		onAdd({
 			modelId: model,
 			parentId: id,
-			messages: messages
+			messages: [
+				{
+					role: 'user',
+					content: prompt
+				},
+				{
+					role: 'assistant',
+					content: responseContent ?? ''
+				}
+			]
 		});
 	};
 
@@ -231,31 +181,28 @@
 			>
 				<button
 					class="px-1 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-sm flex items-center gap-1 min-w-fit"
-					on:click={async () => {
-						selectedText = window.getSelection().toString();
+					onclick={async () => {
+						selectedText = window.getSelection()?.toString() ?? '';
 						floatingInput = true;
 
 						await tick();
 						setTimeout(() => {
-							const input = document.getElementById('floating-message-input');
-							if (input) {
-								input.focus();
-							}
+							document.getElementById('floating-message-input')?.focus();
 						}, 0);
 					}}
 				>
-					<ChatBubble className="size-3 shrink-0" />
+					<span class="i-lucide-message-circle size-3 shrink-0 block"></span>
 
 					<div class="shrink-0">{$i18n.t('Ask')}</div>
 				</button>
 				<button
 					class="px-1 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-sm flex items-center gap-1 min-w-fit"
-					on:click={() => {
-						selectedText = window.getSelection().toString();
+					onclick={() => {
+						selectedText = window.getSelection()?.toString() ?? '';
 						explainHandler();
 					}}
 				>
-					<LightBlub className="size-3 shrink-0" />
+					<span class="i-lucide-lightbulb size-3 shrink-0 block"></span>
 
 					<div class="shrink-0">{$i18n.t('Explain')}</div>
 				</button>
@@ -270,7 +217,7 @@
 					class="ml-5 bg-transparent outline-hidden w-full flex-1 text-sm"
 					placeholder={$i18n.t('Ask a question')}
 					bind:value={floatingInputValue}
-					on:keydown={(e) => {
+					onkeydown={(e) => {
 						if (e.key === 'Enter') {
 							askHandler();
 						}
@@ -281,24 +228,13 @@
 					<button
 						class="{floatingInputValue !== ''
 							? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-							: 'text-white bg-gray-200 dark:text-content-subtle dark:bg-gray-700 disabled'} transition rounded-full p-1.5 m-0.5 self-center"
+							: 'text-white bg-gray-200 dark:text-content-subtle dark:bg-gray-700 disabled'} rounded-full p-1.5 m-0.5 self-center"
 						aria-label={$i18n.t('Send message')}
-						on:click={() => {
+						onclick={() => {
 							askHandler();
 						}}
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="size-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M8 14a.75.75 0 0 1-.75-.75V4.56L4.03 7.78a.75.75 0 0 1-1.06-1.06l4.5-4.5a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1-1.06 1.06L8.75 4.56v8.69A.75.75 0 0 1 8 14Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
+						<span class="i-lucide-arrow-up size-4 block"></span>
 					</button>
 				</div>
 			</div>
@@ -316,7 +252,7 @@
 			<div class="bg-white dark:bg-gray-850 text-content text-medium rounded-xl px-3.5 py-3 w-full">
 				<div class=" max-h-80 overflow-y-auto w-full markdown-prose-xs" id="response-container">
 					{#if responseContent.trim() === ''}
-						<Skeleton size="sm" />
+						<Skeleton />
 					{:else}
 						<Markdown id={`${id}-float-response`} content={responseContent} />
 					{/if}
@@ -324,8 +260,8 @@
 					{#if responseDone}
 						<div class="flex justify-end pt-3 text-sm font-medium">
 							<button
-								class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-								on:click={addHandler}
+								class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full"
+								onclick={addHandler}
 							>
 								{$i18n.t('Add')}
 							</button>

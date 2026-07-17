@@ -3,8 +3,13 @@
 	import 'katex/contrib/mhchem';
 	import 'katex/dist/katex.min.css';
 
-	export let content: string;
-	export let displayMode: boolean = false;
+	let {
+		content,
+		displayMode = false
+	}: {
+		content: string;
+		displayMode?: boolean;
+	} = $props();
 </script>
 
 {@html katex.renderToString(content, { displayMode, throwOnError: false })}

@@ -1,6 +1,7 @@
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
+import type { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 // Backend
 // 配備層のブランド名。/api/config の name(WEBUI_NAME env、既定 Nucllei)で上書きされる
@@ -20,7 +21,7 @@ export const mobile = writable(false);
 
 export const theme = writable('system');
 
-export const TTSWorker = writable(null);
+export const TTSWorker: Writable<KokoroWorker | null> = writable(null);
 
 export const chatId = writable('');
 export const chatTitle = writable('');
@@ -235,6 +236,8 @@ type Config = {
 	// llens(#70): /api/config が user 認証時に返す追加フィールド(main.py 参照)を型に反映
 	audio?: {
 		tts: {
+			// 配備レベルの Read Aloud 有効化(ENABLE_AUDIO_TTS — nucllei/main.py)
+			enable?: boolean;
 			engine: string;
 			voice: string;
 			split_on?: string;

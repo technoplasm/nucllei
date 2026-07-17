@@ -457,9 +457,9 @@
 			try {
 				if ($settings.audio?.tts?.engine === 'browser-kokoro') {
 					const blob = await $TTSWorker
-						.generate({
+						?.generate({
 							text: content,
-							voice: $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice
+							voice: $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice ?? ''
 						})
 						.catch((error) => {
 							console.error(error);
