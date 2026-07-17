@@ -150,7 +150,8 @@
 
 			if (uploadedFile) {
 				// アップロード中に X で外された場合はサーバーに orphan を残さない
-				if (!files.some((item) => item?.itemId === tempItemId)) {
+				const idx = files.findIndex((item) => item?.itemId === tempItemId);
+				if (idx === -1) {
 					deleteFileById(uploadedFile.id).catch(() => {});
 					return null;
 				}
@@ -160,14 +161,17 @@
 					toast.warning(uploadedFile.error);
 				}
 
-				fileItem.status = 'uploaded';
-				fileItem.file = uploadedFile;
-				fileItem.id = uploadedFile.id;
-				fileItem.collection_name =
-					uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
-				fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
-
-				files = files;
+				// runes の $state プロキシに乗せた後の closure(生オブジェクト)を書いても
+				// 再描画されない — 必ず files[idx] 経由で置き換える(status が 'uploading' に
+				// 張り付くバグの実害箇所)
+				files[idx] = {
+					...files[idx],
+					status: 'uploaded',
+					file: uploadedFile,
+					id: uploadedFile.id,
+					collection_name: uploadedFile?.meta?.collection_name || uploadedFile?.collection_name,
+					url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`
+				};
 			} else {
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
@@ -235,7 +239,8 @@
 
 			if (uploadedFile) {
 				// アップロード中に X で外された場合はサーバーに orphan を残さない
-				if (!files.some((item) => item?.itemId === tempItemId)) {
+				const idx = files.findIndex((item) => item?.itemId === tempItemId);
+				if (idx === -1) {
 					deleteFileById(uploadedFile.id).catch(() => {});
 					return null;
 				}
@@ -245,14 +250,16 @@
 					toast.warning(uploadedFile.error);
 				}
 
-				fileItem.status = 'uploaded';
-				fileItem.file = uploadedFile;
-				fileItem.id = uploadedFile.id;
-				fileItem.name = uploadedFile?.meta?.name ?? file.name;
-				fileItem.size = uploadedFile?.meta?.size ?? file.size;
-				fileItem.url = `/api/v1/files/${uploadedFile.id}/content`;
-
-				files = files;
+				// uploadFileHandler と同じ理由で files[idx] 経由で置き換える
+				files[idx] = {
+					...files[idx],
+					status: 'uploaded',
+					file: uploadedFile,
+					id: uploadedFile.id,
+					name: uploadedFile?.meta?.name ?? file.name,
+					size: uploadedFile?.meta?.size ?? file.size,
+					url: `/api/v1/files/${uploadedFile.id}/content`
+				};
 			} else {
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}

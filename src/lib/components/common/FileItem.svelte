@@ -14,7 +14,7 @@
 		url = null,
 		dismissible = false,
 		loading = false,
-		item = $bindable(null),
+		item = null,
 		small = false,
 		name,
 		type,
@@ -48,7 +48,7 @@
 </script>
 
 {#if item}
-	<FileItemModal bind:show={showModal} bind:item />
+	<FileItemModal bind:show={showModal} {item} />
 {/if}
 
 <!-- llens: dismiss ボタンを本体 button の兄弟に出すため root は div(button 入れ子は HTML 違反) -->
