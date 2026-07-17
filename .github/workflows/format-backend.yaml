@@ -1,6 +1,8 @@
 name: Python CI
 
 on:
+  # Docker Image (ghcr) が tag push 時に再利用呼び出しする(全 gate green → build)
+  workflow_call:
   push:
     branches:
       - master

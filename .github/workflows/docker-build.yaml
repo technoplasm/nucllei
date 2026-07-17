@@ -15,7 +15,18 @@ env:
   IMAGE: ghcr.io/technoplasm/nucllei
 
 jobs:
+  # 全 CI gate green でなければ image を出さない(master push 時と同じ 4 workflow を再利用呼び出し)
+  format-backend:
+    uses: ./.github/workflows/format-backend.yaml
+  lint-backend:
+    uses: ./.github/workflows/lint-backend.yaml
+  test-backend:
+    uses: ./.github/workflows/test-backend.yaml
+  frontend:
+    uses: ./.github/workflows/format-build-frontend.yaml
+
   build-and-push:
+    needs: [format-backend, lint-backend, test-backend, frontend]
     runs-on: ubuntu-latest
     permissions:
       contents: read
