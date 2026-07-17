@@ -81,11 +81,6 @@
 						lang={codeExecution?.language ?? ''}
 						code={codeExecution?.code ?? ''}
 						className=""
-						editorClassName={codeExecution?.result &&
-						(codeExecution?.result?.error || codeExecution?.result?.output)
-							? 'rounded-b-none'
-							: ''}
-						stickyButtonsClassName="top-0"
 					/>
 				</div>
 

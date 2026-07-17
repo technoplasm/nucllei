@@ -127,9 +127,31 @@ describe('parseToolArgumentsStreaming', () => {
 });
 
 describe('classifyToolResult', () => {
-	it('宣言なしは従来挙動(JSON なら整形して json 表示)', () => {
-		const display = classifyToolResult('{"ok": true}', undefined);
+	it('json ディスクリプタ(backend が dict/list の実型から同梱)は整形して json 表示', () => {
+		const display = classifyToolResult('{"ok": true}', { kind: 'json' });
 		expect(display).toEqual({ kind: 'json', value: JSON.stringify({ ok: true }, null, 2) });
+		expect(classifyToolResult('[1, 2]', { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify([1, 2], null, 2)
+		});
+	});
+
+	it('ディスクリプタなしは text — JSON に見えても中身から動的解釈しない', () => {
+		expect(classifyToolResult('晴れ', undefined)).toEqual({ kind: 'text', value: '晴れ' });
+		expect(classifyToolResult('line 1\nline 2', undefined)).toEqual({
+			kind: 'text',
+			value: 'line 1\nline 2'
+		});
+		// str が JSON 風でも str は str(推測しない)
+		expect(classifyToolResult('{"ok": true}', undefined)).toEqual({
+			kind: 'text',
+			value: '{"ok": true}'
+		});
+		// エラー経路(str(e) / "tool not available: ..." 等)も素で読める
+		expect(classifyToolResult('tool not available: nope', undefined)).toEqual({
+			kind: 'text',
+			value: 'tool not available: nope'
+		});
 	});
 
 	it('text 宣言はそのまま(pre-wrap テキスト)', () => {
@@ -142,16 +164,11 @@ describe('classifyToolResult', () => {
 		expect(display).toEqual({ kind: 'code', language: 'python', value: 'print(1)' });
 	});
 
-	it('table 宣言は廃止: 常に json に落ちる(tool 結果はデザイン対象でない)', () => {
-		// かつて列の和集合で表化していた object 配列も、今は json 表示。
-		const rows = JSON.stringify([
-			{ name: '内科', count: 12 },
-			{ name: '外科', count: 8, note: '增' }
-		]);
-		expect(classifyToolResult(rows, { kind: 'table' }).kind).toBe('json');
-		expect(classifyToolResult('{"error": "boom"}', { kind: 'table' }).kind).toBe('json');
-		expect(classifyToolResult('[1, 2, 3]', { kind: 'table' }).kind).toBe('json');
-		expect(classifyToolResult('not json', { kind: 'table' }).kind).toBe('json');
+	it('未知の kind(旧 table 等)は text に落ちる(解釈しない)', () => {
+		// table 描画は #60 で廃止済み・backend も宣言を出さない。未知 kind の
+		// ディスクリプタが来ても壊れないことだけ担保する。
+		expect(classifyToolResult('{"error": "boom"}', { kind: 'table' }).kind).toBe('text');
+		expect(classifyToolResult('not json', { kind: 'table' }).kind).toBe('text');
 	});
 
 	it('skill 宣言: {result, tools} を分解する(#35)', () => {
@@ -166,13 +183,15 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('skill 宣言でも形が合わない実値は json に落とす', () => {
-		// result が無い / tools が配列でない / JSON でない → json フォールバック
-		expect(classifyToolResult('{"message": "boom"}', { kind: 'skill' }).kind).toBe('json');
+	it('skill 宣言でも形が合わない実値は text に落とす(壊れた表示を作らない・解釈しない)', () => {
+		expect(classifyToolResult('{"message": "boom"}', { kind: 'skill' }).kind).toBe('text');
 		expect(
 			classifyToolResult(JSON.stringify({ result: 'x', tools: 'nope' }), { kind: 'skill' }).kind
-		).toBe('json');
-		expect(classifyToolResult('skill not found: nope', { kind: 'skill' }).kind).toBe('json');
+		).toBe('text');
+		expect(classifyToolResult('skill not found: nope', { kind: 'skill' })).toEqual({
+			kind: 'text',
+			value: 'skill not found: nope'
+		});
 	});
 });
 
@@ -183,7 +202,12 @@ describe('formatJSONString', () => {
 		);
 	});
 
-	it('JSON でない文字列はそのまま引用表現に', () => {
+	it('JSON でない文字列はそのまま引用表現に(引数の一枚岩フォールバック用)', () => {
 		expect(formatJSONString('晴れ')).toBe('"晴れ"');
+	});
+
+	it('スカラー JSON でも無限再帰しない(旧実装はスタックオーバーフロー頼みだった)', () => {
+		expect(formatJSONString('42')).toBe('"42"');
+		expect(formatJSONString('null')).toBe('"null"');
 	});
 });

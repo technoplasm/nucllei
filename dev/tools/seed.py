@@ -14,7 +14,7 @@ from pathlib import Path
 
 TOOL_ID = "render_probe"
 TOOL_NAME = "Render Probe"
-MODEL_ID = "llens-assistant"
+MODEL_ID = "llens-assistant"  # --model で上書き可(dev DB の preset id は変遷している)
 
 SRC = Path(__file__).with_name("render_probe.py")
 
@@ -61,11 +61,11 @@ def register_tool(base, token, content):
     print(f"[tool] OK id={payload.get('id')} name={payload.get('name')}")
 
 
-def attach_to_model(base, token):
+def attach_to_model(base, token, model_id):
     """llens-assistant の meta.toolIds に render_probe を追加(既存 toolIds は保持)。"""
-    status, model = _req("GET", f"{base}/api/v1/models/model?id={MODEL_ID}", token)
+    status, model = _req("GET", f"{base}/api/v1/models/model?id={model_id}", token)
     if status != 200 or not model:
-        print(f"[model] {MODEL_ID} 取得失敗 status={status}: {model}", file=sys.stderr)
+        print(f"[model] {model_id} 取得失敗 status={status}: {model}", file=sys.stderr)
         sys.exit(1)
 
     meta = model.get("meta") or {}
@@ -84,25 +84,26 @@ def attach_to_model(base, token):
         "is_active": model.get("is_active", True),
     }
     status, payload = _req(
-        "POST", f"{base}/api/v1/models/model/update?id={MODEL_ID}", token, form
+        "POST", f"{base}/api/v1/models/model/update?id={model_id}", token, form
     )
     if status != 200:
         print(f"[model] update 失敗 status={status}: {payload}", file=sys.stderr)
         sys.exit(1)
-    print(f"[model] OK {MODEL_ID} toolIds={payload.get('meta', {}).get('toolIds')}")
+    print(f"[model] OK {model_id} toolIds={payload.get('meta', {}).get('toolIds')}")
 
 
 def main():
     ap = argparse.ArgumentParser(description="render_probe を dev DB に登録する")
     ap.add_argument("--base", default="http://localhost:3000", help="ベースURL")
     ap.add_argument("--token", required=True, help="admin の Bearer トークン")
+    ap.add_argument("--model", default=MODEL_ID, help="紐付け先 preset モデル id")
     args = ap.parse_args()
 
     base = args.base.rstrip("/")
     content = SRC.read_text(encoding="utf-8")
 
     register_tool(base, args.token, content)
-    attach_to_model(base, args.token)
+    attach_to_model(base, args.token, args.model)
     print("完了")
 
 

@@ -85,6 +85,12 @@
 			if (result.files) {
 				attributes.files = result.files;
 			}
+			// 結果の表示種別: 戻り型宣言(call.render.result)が無ければ、backend が
+			// 実行時の実型から同梱した result.render(dict/list → json)を使う。
+			// どちらも無ければ表示側の既定 = text(中身からの動的解釈はしない)。
+			if (!attributes.render?.result && result.render) {
+				attributes.render = { ...(attributes.render ?? {}), result: result.render };
+			}
 		}
 		return attributes;
 	};

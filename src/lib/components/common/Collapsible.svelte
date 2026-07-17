@@ -238,74 +238,85 @@
 						     ストリーミング中の未閉鎖 JSON は寛容パーサで部分値を逐次描画
 						     (#20 ステップ5)。object 以外の壊れ方のみ一枚岩フォールバック。 -->
 							{@const argDisplays = parseToolArgumentsStreaming(args, attributes?.render?.args)}
+							<!-- Arguments / Result は tab 型バッジ + 枠線で一体化して区切る
+							     (tool call が連続したときの境界の視認性)。バッジは上側だけ
+							     rounded・下辺なしで枠の上辺に -mb-px で重ね、枠は四隅 rounded。 -->
 							{#if argDisplays === null || argDisplays.length > 0}
-								<div class="mt-1.5 mb-1">
-									<span
-										class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
-										>Arguments</span
-									>
+								<div class="mt-2">
+									<div class="flex ms-2">
+										<span
+											class="relative z-[1] -mb-px inline-flex items-center gap-1 text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 border border-b-0 border-line rounded-t-md px-1.5 py-0.5"
+										>
+											<span class="i-lucide-braces size-3 block text-sky-500"></span>
+											Arguments
+										</span>
+									</div>
+									<div class="border border-line rounded-lg px-2 py-1">
+										{#if argDisplays === null}
+											<HljsCode lang="json" code={formatJSONString(args)} />
+										{:else}
+											{#each argDisplays as arg (arg.name)}
+												{#if arg.kind === 'scalar'}
+													<div class="text-s font-mono my-0.5 px-0.5" dir="ltr">
+														<span class="text-content-muted">{arg.name}:</span>
+														<span class="whitespace-pre-wrap">{arg.value}</span>
+													</div>
+												{:else}
+													<div class="text-content-muted text-s mt-1 mb-0.5 font-mono">
+														{arg.name}
+													</div>
+													<HljsCode
+														lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
+														code={arg.value}
+													/>
+												{/if}
+											{/each}
+										{/if}
+									</div>
 								</div>
 							{/if}
-							<div class="ps-2">
-								{#if argDisplays === null}
-									<HljsCode lang="json" code={formatJSONString(args)} />
-								{:else}
-									{#each argDisplays as arg (arg.name)}
-										{#if arg.kind === 'scalar'}
-											<div class="text-s font-mono my-0.5 px-0.5" dir="ltr">
-												<span class="text-content-muted">{arg.name}:</span>
-												<span class="whitespace-pre-wrap">{arg.value}</span>
-											</div>
-										{:else}
-											<div class="text-content-muted text-s mt-1 mb-0.5 font-mono">
-												{arg.name}
-											</div>
-											<HljsCode
-												lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
-												code={arg.value}
-											/>
-										{/if}
-									{/each}
-								{/if}
-							</div>
 							{#if attributes?.done === 'true'}
 								{@const resultDisplay = classifyToolResult(result, attributes?.render?.result)}
-								<div class="mt-3 mb-1">
-									<span
-										class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-full px-1.5 py-0.5"
-										>Result</span
-									>
-								</div>
-								<div class="ps-2">
-									{#if resultDisplay.kind === 'skill'}
-										<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
-										<HljsCode lang="markdown" code={resultDisplay.value} />
-										{#if resultDisplay.tools.length > 0}
-											<div class="mt-1.5 mb-1">
-												<span
-													class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
-												>
-													{$i18n.t('Tools loaded')}
-												</span>
-											</div>
-											<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
-												{#each resultDisplay.tools as toolName}
+								<div class="mt-2 mb-1">
+									<div class="flex ms-2">
+										<span
+											class="relative z-[1] -mb-px inline-flex items-center gap-1 text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 border border-b-0 border-line rounded-t-md px-1.5 py-0.5"
+										>
+											<span class="i-lucide-corner-down-left size-3 block text-emerald-500"></span>
+											Result
+										</span>
+									</div>
+									<div class="border border-line rounded-lg px-2 py-1">
+										{#if resultDisplay.kind === 'skill'}
+											<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
+											<HljsCode lang="markdown" code={resultDisplay.value} />
+											{#if resultDisplay.tools.length > 0}
+												<div class="mt-1.5 mb-1">
 													<span
-														class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
-														>{toolName}</span
+														class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
 													>
-												{/each}
+														{$i18n.t('Tools loaded')}
+													</span>
+												</div>
+												<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
+													{#each resultDisplay.tools as toolName}
+														<span
+															class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
+															>{toolName}</span
+														>
+													{/each}
+												</div>
+											{/if}
+										{:else if resultDisplay.kind === 'text'}
+											<div class="text-s font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
+												{resultDisplay.value}
 											</div>
+										{:else if resultDisplay.kind === 'code'}
+											<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
+										{:else}
+											<HljsCode lang="json" code={resultDisplay.value} />
 										{/if}
-									{:else if resultDisplay.kind === 'text'}
-										<div class="text-s font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
-											{resultDisplay.value}
-										</div>
-									{:else if resultDisplay.kind === 'code'}
-										<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
-									{:else}
-										<HljsCode lang="json" code={resultDisplay.value} />
-									{/if}
+									</div>
 								</div>
 							{/if}
 						{:else}

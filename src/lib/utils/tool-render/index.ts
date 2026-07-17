@@ -125,11 +125,15 @@ export type ResultDisplay =
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
 	| { kind: 'skill'; value: string; tools: string[] };
 
-// 文字列化された JSON を再帰的に剥がして整形する(旧 Collapsible 実装と同じ挙動。
-// tool 結果は dict/list が json.dumps 済み文字列で届くため)。
+// 文字列化された JSON を再帰的に剥がす(tool 結果は dict/list が json.dumps 済み
+// 文字列で届くため)。剥がすのは文字列層のみ — 旧実装はスカラー到達後も再帰し、
+// スタックオーバーフローを catch して止まっていた。
 export const parseJSONString = (str: unknown): unknown => {
+	if (typeof str !== 'string') {
+		return str;
+	}
 	try {
-		return parseJSONString(JSON.parse(str as string));
+		return parseJSONString(JSON.parse(str));
 	} catch (e) {
 		return str;
 	}
@@ -144,9 +148,13 @@ export const formatJSONString = (str: unknown): string => {
 	return `${JSON.stringify(String(parsed))}`;
 };
 
-// tool 結果(文字列)を戻り型ディスクリプタで出し分ける。宣言が無ければ「JSON なら整形、
-// そうでなければそのまま」の json 表示。tool の結果は「値を見る」ものでありデザイン対象では
-// ないため、table 描画経路は持たない(table 宣言でも json に落とす)。
+// tool 結果(文字列)をディスクリプタで出し分ける。ディスクリプタは
+// ①戻り型宣言(calls[].render.result)または ②backend が実行時の実型から
+// 同梱したもの(dict/list → {kind:"json"})。どちらも無ければ text —
+// 中身を見て JSON かどうかを推測する動的解釈はしない(型に忠実の原則。
+// 2026-07-17 改訂 — 旧実装は非 JSON 文字列をクォート表示、JSON 風文字列を
+// 勝手に整形していた)。tool の結果は「値を見る」ものでありデザイン対象では
+// ないため、table 描画経路は持たない(未知 kind も text に落とす)。
 export const classifyToolResult = (
 	content: string,
 	descriptor?: RenderDescriptor
@@ -174,5 +182,10 @@ export const classifyToolResult = (
 	if (descriptor?.kind === 'code') {
 		return { kind: 'code', language: descriptor.language || 'plaintext', value: content };
 	}
-	return { kind: 'json', value: formatJSONString(content) };
+	if (descriptor?.kind === 'json') {
+		// backend が実型(dict/list)から同梱。content は json.dumps 済み文字列
+		return { kind: 'json', value: formatJSONString(content) };
+	}
+	// ディスクリプタなし・未知 kind: 文字列をそのまま出す(動的解釈しない)
+	return { kind: 'text', value: content };
 };

@@ -19,15 +19,16 @@
 	import MarkdownTokens from './MarkdownTokens.svelte';
 
 	import Source from './Source.svelte';
-	import { settings } from '$lib/stores';
 
 	type Token = { type: string; [key: string]: any };
 
+	// save / onUpdate(コード編集の保存チェーン)は hljs 一本化(編集機能の撤去)で
+	// 消費者がいなくなった。上流(Markdown/ContentRenderer/ContentBlocks)の配管掃除は
+	// Messages 樹の正常化トラックで。
 	let {
 		id,
 		tokens,
 		top = true,
-		save = false,
 		onTaskClick = () => {},
 		onSourceClick = () => {},
 		onUpdate = undefined
@@ -35,7 +36,6 @@
 		id: string;
 		tokens: Token[];
 		top?: boolean;
-		save?: boolean;
 		onTaskClick?: (payload: Record<string, any>) => void;
 		onSourceClick?: (id: string, sourceId?: string) => void;
 		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
@@ -89,18 +89,9 @@
 		{#if token.raw.includes('```')}
 			<CodeBlock
 				id={`${id}-${tokenIdx}`}
-				collapsed={!($settings?.expandCodeBlocks ?? true)}
 				{token}
 				lang={token?.lang ?? ''}
 				code={token?.text ?? ''}
-				{save}
-				onSave={(value) => {
-					onUpdate?.({
-						raw: token.raw,
-						oldContent: token.text,
-						newContent: value
-					});
-				}}
 			/>
 		{:else}
 			{token.text}

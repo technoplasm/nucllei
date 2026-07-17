@@ -1010,13 +1010,24 @@ async def execute_tool_calls(response_tool_calls, tools):
                     item for item in tool_result if item not in tool_result_files
                 ]
 
+        # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
+        # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
+        # dict/list だけ kind=json を明示し、それ以外は省略(フロント既定 = text)。
+        # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
+        result_render = None
         if isinstance(tool_result, dict) or isinstance(tool_result, list):
             tool_result = json.dumps(tool_result, indent=2)
+            result_render = {"kind": "json"}
+        elif not isinstance(tool_result, str):
+            # int/float/bool は str()、None(戻り値なし)は空文字 —
+            # "None" という見かけの出力を作らない。
+            tool_result = "" if tool_result is None else str(tool_result)
 
         results.append(
             {
                 "tool_call_id": tool_call_id,
                 "content": tool_result,
+                **({"render": result_render} if result_render else {}),
                 **({"files": tool_result_files} if tool_result_files else {}),
             }
         )

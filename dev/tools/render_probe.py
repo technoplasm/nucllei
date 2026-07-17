@@ -1,13 +1,16 @@
 """
 title: Render Probe
 author: llens dev
-version: 0.1
-description: レンダリング/tool call 表示のデバッグ用。任意の markdown 表示ケースをモデル経由で再現する開発ツール。外部アクセスなしの純粋関数のみ。
+version: 0.2
+description: レンダリング/tool call 表示のデバッグ用。markdown 本文・引数表示・結果 kind(text/code/json/宣言なし/image/error)をモデル経由で再現する開発ツール。外部アクセスなしの純粋関数のみ。
 requirements:
 """
 
+import base64
 import json
 from typing import List
+
+from nucllei.utils.tool_render import Code, Text
 
 
 # =========================================================================
@@ -218,6 +221,114 @@ class Tools:
         }
         pretty = json.dumps(payload, ensure_ascii=False, indent=2)
         return "受け取った引数:\n\n```json\n" + pretty + "\n```"
+
+    # ---------------------------------------------------------------
+    # 結果 kind の probe 群(#20 型駆動レンダリング)。kind ごとに別メソッドに
+    # してあるので、モデルに「text 戻りの probe を呼んで」と名指しで頼める。
+    # ---------------------------------------------------------------
+
+    def probe_result_text(self) -> Text:
+        """戻り型 Text 宣言の表示確認用。複数行の素テキストを返す。
+        期待表示: pre-wrap の素テキスト(クォート・エスケープ・ハイライトなし)。
+
+        :return: 改行・引用符・JSON 風の行を含む素のテキスト
+        """
+        return (
+            "stdout 1 行目: 引用符 \" と ' はそのまま見えるべき\n"
+            "stdout 2 行目:\tタブと日本語と絵文字 ✅\n"
+            '{"note": "JSON 風の行だが text 宣言なのでパース・整形されないべき"}\n'
+            "最終行(末尾改行なし)"
+        )
+
+    def probe_result_code(self) -> Code("python"):
+        """戻り型 Code("python") 宣言の表示確認用。
+        期待表示: python ハイライトのコードブロック。
+
+        :return: python コード片
+        """
+        return (
+            "def fizzbuzz(n: int) -> str:\n"
+            "    # 日本語コメントと特殊文字 <>&\"'\n"
+            "    if n % 15 == 0:\n"
+            '        return "FizzBuzz"\n'
+            "    return str(n)\n"
+        )
+
+    def probe_result_json(self):
+        """dict 戻り(宣言なし)の表示確認用。backend が json.dumps して届く。
+        期待表示: 整形された JSON(ネスト・配列・日本語込み)。
+
+        :return: ネストした dict
+        """
+        return {
+            "patient": {"name": "テスト 太郎", "age": 42},
+            "labs": [
+                {"item": "pH", "value": 7.35},
+                {"item": "PaCO2", "value": 45, "unit": "mmHg"},
+            ],
+            "ok": True,
+            "note": None,
+        }
+
+    def probe_result_plain(self, variant: str = "plain") -> str:
+        """素の str 戻り・宣言なし(既定フォールバック)の表示確認用。
+        期待表示: variant により text(素の文字列)/ json(JSON 文字列を返した場合)。
+
+        :param variant: 次のいずれか:
+            "plain"(複数行の素テキスト → text 表示)、
+            "scalar"(数字だけの文字列 "42" → text 表示)、
+            "json_string"(JSON object の文字列 → str は str のまま text 表示。
+            動的解釈で json 整形されないことの確認)、
+            "empty"(空文字列 → 空の Result)。
+            未知の値は "plain" 扱い。
+        :return: variant に応じた文字列
+        """
+        variants = {
+            "plain": "宣言なしの素の文字列。\nクォート囲みにならず text 表示になるべき。",
+            "scalar": "42",
+            "json_string": json.dumps({"from": "json_string variant", "値": [1, 2, 3]}),
+            "empty": "",
+        }
+        return variants.get((variant or "").strip().lower(), variants["plain"])
+
+    def probe_result_image(self, label: str = "render probe") -> list:
+        """生成ファイル(data URL)チャンネルの表示確認用。SVG 画像 1 枚と説明文字列を返す。
+        期待表示: Result の下に画像、content 側は残りの説明文字列。
+
+        :param label: 画像内に描くテキスト
+        :return: [説明文字列, data:image/svg+xml;base64,...] のリスト
+        """
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120">'
+            '<rect width="240" height="120" fill="#410d89"/>'
+            '<circle cx="60" cy="60" r="36" fill="#e8869d"/>'
+            f'<text x="120" y="66" fill="#fff" font-size="16">{label}</text>'
+            "</svg>"
+        )
+        data_url = "data:image/svg+xml;base64," + base64.b64encode(
+            svg.encode("utf-8")
+        ).decode("ascii")
+        return [f"画像を 1 枚生成しました(label={label})", data_url]
+
+    def probe_result_error(self, message: str = "意図的なエラー(表示確認用)"):
+        """tool 実行が例外で落ちたときの表示確認用。必ず例外を投げる。
+        期待表示: str(e) が宣言なしフォールバック(text)で表示される。
+
+        :param message: 例外メッセージ
+        :return: 返らない(必ず ValueError)
+        """
+        raise ValueError(message)
+
+    def probe_args_code(self, sql: Code("sql"), note: str = "") -> str:
+        """引数側の Code 宣言(sandbox なしで確認する用)。sql は SQL ハイライト、
+        note は scalar 行で表示されるべき。
+
+        :param sql: 任意の SQL 文字列(複数行可)
+        :param note: 任意の短い文字列
+        :return: 受け取った旨の短い確認文字列
+        """
+        lines = len((sql or "").splitlines())
+        return f"received sql ({lines} lines), note={note!r}"
 
     # 旧 run_python(Code("python") + Text 戻りの #20 確認用ダミー)は、本物の
     # sandbox tool(dev/tools/sandbox.py)の搭載(#18-3)に伴い撤去 — 同名衝突で

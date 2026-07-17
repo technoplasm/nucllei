@@ -81,6 +81,45 @@ def test_list_result_extracts_all_data_urls_into_files():
     assert json.loads(results[0]["content"]) == ["こんにちは"]
 
 
+def test_non_str_scalar_results_are_stringified():
+    """content は常に文字列の wire 契約: int/float/bool は str()、None は空文字
+    ("None" という見かけの出力を作らない)。str/スカラーに render は付かない
+    (フロント既定 = text)。"""
+
+    async def returns_int():
+        return 42
+
+    async def returns_none():
+        return None
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_int)))
+    assert results[0]["content"] == "42"
+    assert "render" not in results[0]
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_none)))
+    assert results[0]["content"] == ""
+    assert "render" not in results[0]
+
+
+def test_dict_result_carries_json_render_kind():
+    """dict/list 戻りは json.dumps + 実型由来の render {kind: json} を同梱する
+    (「JSON に見えるか」の動的解釈をフロントにさせない)。str 戻りには付けない。"""
+
+    async def returns_dict():
+        return {"ok": True}
+
+    async def returns_str():
+        return '{"ok": true}'  # JSON 風の str は str のまま(render なし)
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_dict)))
+    assert json.loads(results[0]["content"]) == {"ok": True}
+    assert results[0]["render"] == {"kind": "json"}
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_str)))
+    assert results[0]["content"] == '{"ok": true}'
+    assert "render" not in results[0]
+
+
 def test_list_result_without_data_urls_has_no_files_key():
     """data URL を含まない list 結果は files キーを持たない(JSON 直列化のみ)。"""
 

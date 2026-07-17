@@ -37,6 +37,25 @@
 - 表示の体裁(2026-07-09): 展開時の `Arguments` / `Result` はグレーの pill バッジ、その中身は軽く
   字下げ(ps-2)。ヘッダは done=緑チェック(tool)/ 青チェック(reasoning)、実行中は Spinner。
   応答生成中は `[Spinner] Preparing...`(reasoning の `Thinking...` と同寸で自然に遷移)。
+- **改訂(2026-07-17): 結果の既定フォールバックを「型に忠実」に修正**。旧実装は宣言なしの
+  非 JSON 文字列を `JSON.stringify(String(...))` でクォート囲み表示し、JSON 風文字列は
+  勝手に整形していた — 原則(素の str は文字列として出す・推測しない)と二重に食い違い。
+  現在は **backend が実行時の実型から表示種別を同梱**する: dict/list は `json.dumps` +
+  `results[i].render = {kind: "json"}`、str/スカラーは render なし。フロントの優先順位は
+  「戻り型宣言(`calls[].render.result`)→ 実型ディスクリプタ(`results[i].render`)→
+  text」で、**中身から JSON かどうかを動的解釈する経路は無い**(`classifyToolResult`)。
+  エラー文字列(str(e) / tool not available 等)も素で読める。あわせて `parseJSONString` の
+  スカラー無限再帰(スタックオーバーフロー頼みの停止)を修正、backend は content を常に
+  文字列に正規化(int/float/bool は str()、None は空文字)。
+  結果 kind の目視確認は dev の `render_probe` tool(`probe_result_*` 群 — `dev/tools/README.md`)。
+- **改訂(2026-07-17): コード表示を HljsCode に一本化**。チャット本文のコードフェンス
+  (旧 CodeMirror ベースの CodeBlock)も tool 引数/結果も、同じ「ヘッダ(言語名 +
+  折りたたみ + コピー)+ hljs 静的ハイライト」で描画する(`common/HljsCode.svelte` が
+  ヘッダごと持つ。展開初期値は `expandCodeBlocks` 設定に統一)。チャット内のコード編集
+  (Save → message content 書き戻し)は機能ごと撤去 — 表示専用で、ここで直したコードを
+  実行する経路はない。CodeMirror(CodeEditor)が残るのは workspace のエディタ画面のみ。
+  ※ save/onUpdate の上流配管(Markdown/ContentRenderer/ContentBlocks/ResponseMessage の
+  applyContentUpdate)は死んでいる — Messages 樹の正常化トラックで掃除する。
 
 ## 宣言メカニズム
 
