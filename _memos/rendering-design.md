@@ -80,6 +80,15 @@ canonical なパースを 1 回で済ませられるが、chat UI では非推�
 
 実装順: #17(L0)→ L1 セグメンタ(#14 の中核)→ #20(L3)。
 
+- **改訂(2026-07-17): L3 の表示コンポーネントを専用化**。reasoning / tool call の表示は
+  汎用 `Collapsible` の attributes 経由レンダリングをやめ、`chat/Messages/ReasoningBlock.svelte` /
+  `ToolCallBlock.svelte` に分離(Collapsible は children/content の素朴な開閉コンテナに縮小)。
+  UI はバッジヘッダ(開くと枠上辺 tab に合体)+ 枠、メッセージ内一括「すべて閉じる」、
+  開閉コントロール hover で開閉単位のボーダー全体を強調(`line-hover` トークン)。
+  コードの静的表示は本文コードフェンス・tool 引数/結果とも `common/HljsCode.svelte`
+  (ヘッダ: 言語名 + Collapse + Copy)に一本化 — チャット内のコード編集(CodeMirror)は撤去。
+  結果 kind の意味論は `tool-arg-render.md` の 2026-07-17 改訂を参照。
+
 ### reasoning の閉じ規律(2026-07-06 決定 — think タグの閉じ問題)
 
 reasoning ブロックの終了は**タグ対(`</think>`)や content 到着ではなく、

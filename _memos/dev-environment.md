@@ -51,6 +51,11 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   インスタンス関数内の **新 object 再代入**(`params = {...params, [key]: v}`)に統一すると bindable
   プロップの set として確実に伝播する(in-place `obj[key]=v` の mutate は追跡が不安定)。切り分けは
   `svelte/compiler` で client 生成し `untrack(...)` / 書き戻し代入(`params(params()[...]=...)`)の有無を grep。
+- **Tailwind v4 の `space-y` は「後続兄弟に margin-top」ではなく `> :not(:last-child) { margin-bottom }`**
+  (2026-07-17 実害): `:last-child` は DOM 構造で判定されるため、`display:none` / `absolute` の
+  補助要素を可視コンテンツの**後ろの兄弟**に置くと、最後の可視要素が :last-child にならず
+  余分な下マージンが残る(FloatingButtons で実害 — ContentRenderer の content div 内へ移動して解消)。
+  devtools で出所不明の margin-bottom を見たらまず親の space-y を疑う。
 - **vitest は import 破壊を検知しない**: store やコンポーネントを削除する撤去作業では、
   カバレッジ外のファイルに残った orphan import を vitest がすり抜ける(#67 で
   common/Tags/TagInput の削除済み store import が CI の build 段階まで到達)。
@@ -102,10 +107,12 @@ uv run task dev
 pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- **起動場所は tmux(2026-07-16 確定、2026-07-17 現況追従)**: session **`nuc`** = 0:BE(uv run task dev)/
-  1:FE(pnpm dev)/ 2:claude / 3:nvim / 4:zsh。cc からの BE 再起動は nohup でなく
-  `tmux send-keys -t nuc:0 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t nuc:0 -p`)。
-  ログはその window に流れる — 500 の一次調査はまずそこの traceback を読む。
+- **起動場所は tmux(2026-07-16 確定、2026-07-17 再改訂)**: session **`owui`** = 0:FE(pnpm dev)/
+  **1:BE(uv run task dev)** / 2〜:claude・nvim・zsh(旧記載の session `nuc`・0:BE は現況と逆なので注意)。
+  cc からの BE 再起動は nohup でなく `tmux send-keys -t owui:1 'uv run task dev' Enter`
+  (状態確認は `tmux capture-pane -t owui:1 -p`)。ログはその window に流れる — 500 の一次調査は
+  まずそこの traceback を読む。**再起動時の罠(2026-07-17 実害)**: `C-c` 後に履歴 `Up` で再実行
+  しない — シェル履歴が vite 等を拾って BE の代わりに別プロセスを起動しうる。コマンドは必ず明示で送る。
 - **`.env`(repo 直下、gitignored)を BE が起動時に読む**(env.py の load_dotenv。
   `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
   `WEBUI_NAME` / `WEBUI_VERSION` / `WEBUI_COPYRIGHT` を入れてある。
