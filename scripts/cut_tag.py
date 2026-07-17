@@ -57,6 +57,36 @@ def next_tag(kind: str) -> str:
     return f"{prefix}{max(nums, default=first) + 1:02d}"
 
 
+def preflight() -> None:
+    """technoplasm-app の `make tag` と同じガード。満たさなければ tag を切らせない。
+
+    tag push は tag の指すコミット以下の objects しか運ばない — branch ref が
+    origin に無いままだと、GitHub 上で「どのブランチにも属さない tag」になり
+    workflow 一覧・履歴の見え方が壊れる。必ず branch を push してから tag。
+    """
+    branch = _run("git", "branch", "--show-current").strip()
+    if not branch:
+        sys.exit("❌ detached HEAD — ブランチ上で実行すること")
+
+    if _run("git", "status", "--porcelain").strip():
+        sys.exit(
+            "❌ 未コミットの変更がある — tag は HEAD のコミットに打たれる。"
+            "commit するか stash してから"
+        )
+
+    try:
+        _run("git", "rev-parse", "--verify", f"origin/{branch}")
+    except subprocess.CalledProcessError:
+        sys.exit(f"❌ origin/{branch} が無い — 先に git push -u origin {branch}")
+
+    unpushed = _run("git", "log", f"origin/{branch}..HEAD", "--oneline").strip()
+    if unpushed:
+        sys.exit(
+            "❌ 未 push のコミットがある — 先に git push してから tag を切る:\n"
+            + "\n".join(f"  {line}" for line in unpushed.splitlines())
+        )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="リリース/プレ tag を切る")
     ap.add_argument("kind", choices=["pre", "release"])
@@ -64,17 +94,11 @@ def main() -> None:
         "--push", action="store_true", help="tag を origin へ push(CI 発火)"
     )
     ap.add_argument(
-        "--dry-run", action="store_true", help="採番の確認だけ(tag を打たない)"
+        "--dry-run", action="store_true", help="採番とガードの確認だけ(tag を打たない)"
     )
     args = ap.parse_args()
 
-    if _run("git", "status", "--porcelain").strip():
-        print(
-            "[warn] working tree が汚れている(tag は HEAD のコミットに打たれる — "
-            "未コミット分は入らない)",
-            file=sys.stderr,
-        )
-
+    preflight()
     tag = next_tag(args.kind)
     head = _run("git", "rev-parse", "--short", "HEAD").strip()
 
