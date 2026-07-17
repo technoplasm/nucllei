@@ -1,23 +1,31 @@
 <script lang="ts">
-	import { models, showSettings, user, mobile, config } from '$lib/stores';
-	import { onMount, tick, getContext } from 'svelte';
+	import { models, user } from '$lib/stores';
+	import { getContext } from 'svelte';
 	import Selector from './ModelSelector/Selector.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let selectedModels = [''];
-	export let disabled = false;
+	let {
+		selectedModels = $bindable(['']),
+		disabled = false
+	}: { selectedModels?: string[]; disabled?: boolean } = $props();
 
-	$: if (selectedModels.length > 0 && $models.length > 0) {
-		selectedModels = selectedModels.map((model) =>
-			$models.map((m) => m.id).includes(model) ? model : ''
-		);
-	}
+	// 存在しないモデル id は '' に落とす(モデル一覧の変化・URL 指定への追従)
+	$effect(() => {
+		if (selectedModels.length > 0 && $models.length > 0) {
+			const next = selectedModels.map((model) =>
+				$models.some((m) => m.id === model) ? model : ''
+			);
+			if (next.some((model, idx) => model !== selectedModels[idx])) {
+				selectedModels = next;
+			}
+		}
+	});
 </script>
 
 <div class="flex flex-col w-full items-start">
-	{#each selectedModels as selectedModel, selectedModelIdx}
+	{#each selectedModels as _, selectedModelIdx (selectedModelIdx)}
 		<div class="flex w-full max-w-fit">
 			<div class="overflow-hidden w-full">
 				<div class="mr-1 max-w-full">
@@ -29,65 +37,41 @@
 							label: model.name,
 							model: model
 						}))}
-						bind:value={selectedModel}
+						bind:value={selectedModels[selectedModelIdx]}
 					/>
 				</div>
 			</div>
 
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true)}
-				{#if selectedModelIdx === 0}
-					<div
-						class="  self-center mx-1 disabled:text-content-subtle disabled:hover:text-content-subtle -translate-y-[0.5px]"
-					>
+				<div class="self-center mx-1 -translate-y-[0.5px]">
+					{#if selectedModelIdx === 0}
 						<Tooltip content={$i18n.t('Add Model')}>
 							<button
-								class=" "
+								class="disabled:text-content-subtle"
 								{disabled}
-								on:click={() => {
+								onclick={() => {
 									selectedModels = [...selectedModels, ''];
 								}}
-								aria-label="Add Model"
+								aria-label={$i18n.t('Add Model')}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke-width="2"
-									stroke="currentColor"
-									class="size-3.5"
-								>
-									<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
-								</svg>
+								<span class="i-lucide-plus size-3.5 block"></span>
 							</button>
 						</Tooltip>
-					</div>
-				{:else}
-					<div
-						class="  self-center mx-1 disabled:text-content-subtle disabled:hover:text-content-subtle -translate-y-[0.5px]"
-					>
+					{:else}
 						<Tooltip content={$i18n.t('Remove Model')}>
 							<button
+								class="disabled:text-content-subtle"
 								{disabled}
-								on:click={() => {
-									selectedModels.splice(selectedModelIdx, 1);
-									selectedModels = selectedModels;
+								onclick={() => {
+									selectedModels = selectedModels.filter((_, idx) => idx !== selectedModelIdx);
 								}}
-								aria-label="Remove Model"
+								aria-label={$i18n.t('Remove Model')}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke-width="2"
-									stroke="currentColor"
-									class="size-3"
-								>
-									<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15" />
-								</svg>
+								<span class="i-lucide-minus size-3 block"></span>
 							</button>
 						</Tooltip>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			{/if}
 		</div>
 	{/each}

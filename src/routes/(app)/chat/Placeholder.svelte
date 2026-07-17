@@ -60,13 +60,10 @@
 			});
 
 			text = p.replaceAll('{{CLIPBOARD}}', clipboardText);
-
-			console.log('Clipboard text:', clipboardText, text);
 		}
 
 		prompt = text;
 
-		console.log(prompt);
 		await tick();
 
 		const chatInputContainerElement = document.getElementById('chat-input-container');
@@ -92,7 +89,7 @@
 			<div class="flex flex-row justify-center gap-3 @sm:gap-3.5 w-fit px-5">
 				<div class="flex shrink-0 justify-center">
 					<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
-						{#each models as model, modelIdx}
+						{#each models as model, modelIdx (modelIdx)}
 							<button
 								onclick={() => {
 									selectedModelIdx = modelIdx;
@@ -100,9 +97,8 @@
 							>
 								<img
 									crossorigin="anonymous"
-									src={model?.info?.meta?.profile_image_url ??
-										($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
-									class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
+									src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+									class=" size-9 @sm:size-10 rounded-full border border-line"
 									alt="logo"
 									draggable="false"
 								/>

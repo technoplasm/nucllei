@@ -1,35 +1,39 @@
 <script lang="ts">
-	import { slide } from 'svelte/transition';
 	import { Pane, PaneResizer } from 'paneforge';
 
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { mobile, showControls, showCallOverlay } from '$lib/stores';
+	import { showControls, showCallOverlay } from '$lib/stores';
 
-	import Modal from '$lib/components/common/Modal.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import ChatFiles from './ChatFiles.svelte';
 	import Drawer from '$lib/components/common/Drawer.svelte';
-	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 
-	export let history;
+	let {
+		history,
+		chatId = null,
+		chatFiles = [],
+		eventTarget,
+		submitPrompt,
+		stopResponse,
+		files = $bindable(),
+		modelId = null,
+		pane = $bindable()
+	}: {
+		history: any;
+		chatId?: string | null;
+		chatFiles?: any[];
+		eventTarget: EventTarget;
+		submitPrompt: Function;
+		stopResponse: Function;
+		files: any[];
+		modelId?: string | null;
+		pane?: any;
+	} = $props();
 
-	export let chatId = null;
+	let mediaQuery: MediaQueryList;
+	let largeScreen = $state(false);
 
-	export let chatFiles = [];
-
-	export let eventTarget: EventTarget;
-	export let submitPrompt: Function;
-	export let stopResponse: Function;
-	export let files;
-	export let modelId;
-
-	export let pane;
-
-	let mediaQuery;
-	let largeScreen = false;
-	let dragged = false;
-
-	let minSize = 0;
+	let minSize = $state(0);
 
 	export const openPane = () => {
 		if (parseInt(localStorage?.chatControlsSize)) {
@@ -39,33 +43,18 @@
 		}
 	};
 
-	const handleMediaQuery = async (e) => {
-		if (e.matches) {
-			largeScreen = true;
-
-			if ($showCallOverlay) {
-				showCallOverlay.set(false);
-				await tick();
-				showCallOverlay.set(true);
-			}
-		} else {
-			largeScreen = false;
-
-			if ($showCallOverlay) {
-				showCallOverlay.set(false);
-				await tick();
-				showCallOverlay.set(true);
-			}
+	const handleMediaQuery = async (e: { matches: boolean }) => {
+		largeScreen = e.matches;
+		if (!e.matches) {
 			pane = null;
 		}
-	};
 
-	const onMouseDown = (event) => {
-		dragged = true;
-	};
-
-	const onMouseUp = (event) => {
-		dragged = false;
+		// 画面区分が変わったら CallOverlay を出し直す(Drawer ⇄ Pane の載せ替え)
+		if ($showCallOverlay) {
+			showCallOverlay.set(false);
+			await tick();
+			showCallOverlay.set(true);
+		}
 	};
 
 	onMount(() => {
@@ -75,17 +64,14 @@
 		mediaQuery.addEventListener('change', handleMediaQuery);
 		handleMediaQuery(mediaQuery);
 
-		// Select the container element you want to observe
 		const container = document.getElementById('chat-container');
 
 		// initialize the minSize based on the container width
 		minSize = Math.floor((350 / container.clientWidth) * 100);
 
-		// Create a new ResizeObserver instance
 		const resizeObserver = new ResizeObserver((entries) => {
 			for (let entry of entries) {
 				const width = entry.contentRect.width;
-				// calculate the percentage of 200px
 				const percentage = (350 / width) * 100;
 				// set the minSize to the percentage, must be an integer
 				minSize = Math.floor(percentage);
@@ -98,19 +84,13 @@
 			}
 		});
 
-		// Start observing the container's size changes
 		resizeObserver.observe(container);
-
-		document.addEventListener('mousedown', onMouseDown);
-		document.addEventListener('mouseup', onMouseUp);
 	});
 
 	onDestroy(() => {
 		showControls.set(false);
 
 		mediaQuery.removeEventListener('change', handleMediaQuery);
-		document.removeEventListener('mousedown', onMouseDown);
-		document.removeEventListener('mouseup', onMouseUp);
 	});
 
 	const closeHandler = () => {
@@ -121,9 +101,11 @@
 		}
 	};
 
-	$: if (!chatId) {
-		closeHandler();
-	}
+	$effect(() => {
+		if (!chatId) {
+			closeHandler();
+		}
+	});
 </script>
 
 {#if !largeScreen}
@@ -158,12 +140,10 @@
 		</Drawer>
 	{/if}
 {:else}
-	<!-- if $showControls -->
-
 	{#if $showControls}
 		<PaneResizer class="relative flex w-2 items-center justify-center bg-background group">
 			<div class="z-10 flex h-7 w-5 items-center justify-center rounded-xs">
-				<EllipsisVertical className="size-4 invisible group-hover:visible" />
+				<span class="i-lucide-ellipsis-vertical size-4 block invisible group-hover:visible"></span>
 			</div>
 		</PaneResizer>
 	{/if}
@@ -172,8 +152,6 @@
 		bind:pane
 		defaultSize={0}
 		onResize={(size) => {
-			console.log('size', size, minSize);
-
 			if ($showControls && pane.isExpanded()) {
 				if (size < minSize) {
 					pane.resize(minSize);
@@ -195,7 +173,7 @@
 		{#if $showControls}
 			<div class="flex max-h-full min-h-full">
 				<div
-					class="w-full px-4 py-4 bg-white dark:shadow-lg dark:bg-gray-850 border border-gray-100 dark:border-gray-850 z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
+					class="w-full px-4 py-4 bg-surface-raised border border-line z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
 				>
 					{#if $showCallOverlay}
 						<div class="w-full h-full flex justify-center">

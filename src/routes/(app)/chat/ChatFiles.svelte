@@ -8,7 +8,6 @@
 	import { getFileById } from '$lib/apis/files';
 
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
-	import Document from '$lib/components/icons/Document.svelte';
 
 	// llens(#69): 右ペイン「このチャットのファイル」。
 	// chatFiles(type 'file')+ history 全メッセージの画像(id 付き = file 化済み)を
@@ -16,8 +15,7 @@
 	// 旧チャットの data: URL 画像は id が無いため対象外(従来どおりメッセージ内でのみ表示)。
 	const i18n = getContext('i18n');
 
-	export let history = null;
-	export let chatFiles = [];
+	let { history = null, chatFiles = [] }: { history?: any; chatFiles?: any[] } = $props();
 
 	const collectFiles = (chatFiles, history) => {
 		const items = [];
@@ -54,10 +52,10 @@
 		return items;
 	};
 
-	$: items = collectFiles(chatFiles, history);
+	const items = $derived(collectFiles(chatFiles, history));
 
-	let showFileModal = false;
-	let selectedItem = null;
+	let showFileModal = $state(false);
+	let selectedItem = $state<any>(null);
 
 	const openFile = async (item) => {
 		const res = await getFileById(item.id).catch((err) => {
@@ -86,14 +84,14 @@
 			{$i18n.t('Files in this chat')}
 		</div>
 		<button
-			class="flex p-1 rounded-lg text-content-muted hover:text-content hover:bg-black/5 dark:hover:bg-white/5 transition"
+			class="flex p-1 rounded-lg text-content-muted hover:text-content hover:bg-surface-hover"
 			type="button"
 			aria-label={$i18n.t('Close')}
-			on:click={() => {
+			onclick={() => {
 				showControls.set(false);
 			}}
 		>
-			<span class="i-lucide-x size-4"></span>
+			<span class="i-lucide-x size-4 block"></span>
 		</button>
 	</div>
 
@@ -105,22 +103,22 @@
 		<div class="flex flex-col gap-0.5">
 			{#each items as item (item.id)}
 				<button
-					class="flex items-center gap-3 w-full px-2 py-1.5 rounded-xl text-left hover:bg-black/5 dark:hover:bg-white/5 transition"
+					class="flex items-center gap-3 w-full px-2 py-1.5 rounded-xl text-left hover:bg-surface-hover"
 					type="button"
-					on:click={() => openFile(item)}
+					onclick={() => openFile(item)}
 				>
 					{#if item.type === 'image'}
 						<img
 							src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 							alt={item.name}
 							loading="lazy"
-							class="size-9 shrink-0 rounded-lg object-cover bg-black/5 dark:bg-white/5"
+							class="size-9 shrink-0 rounded-lg object-cover bg-surface-muted"
 						/>
 					{:else}
 						<div
-							class="size-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
+							class="size-9 shrink-0 rounded-lg bg-surface-muted flex items-center justify-center text-content-muted"
 						>
-							<Document className="size-4" />
+							<span class="i-lucide-file size-4 block"></span>
 						</div>
 					{/if}
 

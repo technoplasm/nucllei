@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { WEBUI_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { render } from '$lib/utils/markdown-it';
 	import DOMPurify from 'dompurify';
 
-	import { config, user, models as _models } from '$lib/stores';
+	import { user, models as _models } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
-	import { blur, fade } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
 
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
@@ -14,20 +14,26 @@
 
 	const i18n = getContext('i18n');
 
-	export let modelIds = [];
-	export let models = [];
-	export let atSelectedModel;
+	let {
+		modelIds = [],
+		atSelectedModel,
+		submitPrompt
+	}: {
+		modelIds?: string[];
+		atSelectedModel?: any;
+		submitPrompt: (prompt: string) => void | Promise<void>;
+	} = $props();
 
-	export let submitPrompt;
+	const models = $derived(modelIds.map((id) => $_models.find((m) => m.id === id)));
 
-	let mounted = false;
-	let selectedModelIdx = 0;
+	let mounted = $state(false);
+	let selectedModelIdx = $state(0);
 
-	$: if (modelIds.length > 0) {
-		selectedModelIdx = models.length - 1;
-	}
-
-	$: models = modelIds.map((id) => $_models.find((m) => m.id === id));
+	$effect(() => {
+		if (modelIds.length > 0) {
+			selectedModelIdx = models.length - 1;
+		}
+	});
 
 	onMount(() => {
 		mounted = true;
@@ -38,9 +44,9 @@
 	<div class="m-auto w-full max-w-6xl px-8 lg:px-20">
 		<div class="flex justify-start">
 			<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 200 }}>
-				{#each models as model, modelIdx}
+				{#each models as model, modelIdx (modelIdx)}
 					<button
-						on:click={() => {
+						onclick={() => {
 							selectedModelIdx = modelIdx;
 						}}
 					>
@@ -52,9 +58,8 @@
 						>
 							<img
 								crossorigin="anonymous"
-								src={model?.info?.meta?.profile_image_url ??
-									($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
-								class=" size-[2.7rem] rounded-full border-[1px] border-gray-100 dark:border-none"
+								src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+								class=" size-[2.7rem] rounded-full border border-line"
 								alt="logo"
 								draggable="false"
 							/>
@@ -103,13 +108,15 @@
 		</div>
 
 		<div class=" w-full font-primary" in:fade={{ duration: 200, delay: 300 }}>
+			<!-- llens(#70): Suggestions は callback prop 化済み — 旧 on:select のままだと
+			     クリックが無反応になる(dispatcher 移行の取り残しバグを修正) -->
 			<Suggestions
 				className="grid grid-cols-2"
 				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
 					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
 					[]}
-				on:select={(e) => {
-					submitPrompt(e.detail);
+				onSelect={(content) => {
+					submitPrompt(content);
 				}}
 			/>
 		</div>

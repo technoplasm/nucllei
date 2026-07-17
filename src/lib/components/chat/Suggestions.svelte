@@ -1,76 +1,46 @@
 <script lang="ts">
 	import Fuse from 'fuse.js';
-	import Bolt from '$lib/components/icons/Bolt.svelte';
-	import { onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	import { WEBUI_NAME } from '$lib/stores';
 	import { APP_VERSION } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
-	export let suggestionPrompts = [];
-	export let className = '';
-	export let inputValue = '';
-	export let onSelect = (content: string) => {};
+	let {
+		suggestionPrompts = [],
+		className = '',
+		inputValue = '',
+		onSelect = () => {}
+	}: {
+		suggestionPrompts?: any[];
+		className?: string;
+		inputValue?: string;
+		onSelect?: (content: string) => void;
+	} = $props();
 
-	let sortedPrompts = [];
+	const sortedPrompts = $derived([...(suggestionPrompts ?? [])].sort(() => Math.random() - 0.5));
 
-	const fuseOptions = {
-		keys: ['content', 'title'],
-		threshold: 0.5
-	};
+	const fuse = $derived(
+		new Fuse(sortedPrompts, {
+			keys: ['content', 'title'],
+			threshold: 0.5
+		})
+	);
 
-	let fuse;
-	let filteredPrompts = [];
-
-	// Initialize Fuse
-	$: fuse = new Fuse(sortedPrompts, fuseOptions);
-
-	// Update the filteredPrompts if inputValue changes
-	// Only increase version if something wirklich geändert hat
-	$: getFilteredPrompts(inputValue);
-
-	// Helper function to check if arrays are the same
-	// (based on unique IDs oder content)
-	function arraysEqual(a, b) {
-		if (a.length !== b.length) return false;
-		for (let i = 0; i < a.length; i++) {
-			if ((a[i].id ?? a[i].content) !== (b[i].id ?? b[i].content)) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	const getFilteredPrompts = (inputValue) => {
-		if (inputValue.length > 500) {
-			filteredPrompts = [];
-		} else {
-			const newFilteredPrompts =
-				inputValue.trim() && fuse
-					? fuse.search(inputValue.trim()).map((result) => result.item)
-					: sortedPrompts;
-
-			// Compare with the oldFilteredPrompts
-			// If there's a difference, update array + version
-			if (!arraysEqual(filteredPrompts, newFilteredPrompts)) {
-				filteredPrompts = newFilteredPrompts;
-			}
-		}
-	};
-
-	$: if (suggestionPrompts) {
-		sortedPrompts = [...(suggestionPrompts ?? [])].sort(() => Math.random() - 0.5);
-		getFilteredPrompts(inputValue);
-	}
+	const filteredPrompts = $derived(
+		inputValue.length > 500
+			? []
+			: inputValue.trim()
+				? fuse.search(inputValue.trim()).map((result) => result.item)
+				: sortedPrompts
+	);
 </script>
 
 <div class="mb-1 flex gap-1 text-xs font-medium items-center text-content-muted">
 	{#if filteredPrompts.length > 0}
-		<Bolt />
+		<span class="i-lucide-zap size-3.5 block"></span>
 		{$i18n.t('Suggested')}
 	{:else}
-		<!-- Keine Vorschläge -->
-
 		<div class="flex w-full text-center items-center justify-center self-start text-content-subtle">
 			{$WEBUI_NAME} ‧ {APP_VERSION}
 		</div>
@@ -82,21 +52,20 @@
 		{#each filteredPrompts as prompt, idx (prompt.id || prompt.content)}
 			<button
 				class="waterfall flex flex-col flex-1 shrink-0 w-full justify-between
-				       px-3 py-2 rounded-xl bg-transparent hover:bg-black/5
-				       dark:hover:bg-white/5 transition group"
+				       px-3 py-2 rounded-xl bg-transparent hover:bg-surface-hover group"
 				style="animation-delay: {idx * 60}ms"
-				on:click={() => onSelect(prompt.content)}
+				onclick={() => onSelect(prompt.content)}
 			>
 				<div class="flex flex-col text-left">
 					{#if prompt.title}
-						<div class="font-medium text-content group-hover:text-content transition line-clamp-1">
+						<div class="font-medium text-content line-clamp-1">
 							{prompt.title}
 						</div>
 						<div class="text-xs text-content-muted font-normal line-clamp-2">
 							{prompt.content}
 						</div>
 					{:else}
-						<div class="font-medium text-content group-hover:text-content transition line-clamp-2">
+						<div class="font-medium text-content line-clamp-2">
 							{prompt.content}
 						</div>
 					{/if}

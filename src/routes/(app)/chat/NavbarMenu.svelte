@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { DropdownMenu } from 'bits-ui';
-	import { getContext } from 'svelte';
+	import { getContext, type Snippet } from 'svelte';
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -9,10 +9,9 @@
 	import jsPDF from 'jspdf';
 	import html2canvas from 'html2canvas-pro';
 
-	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
 
-	import { chatId, mobile, showControls, theme, user } from '$lib/stores';
+	import { chatId, showControls, user } from '$lib/stores';
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -20,15 +19,22 @@
 
 	const i18n = getContext('i18n');
 
-	export let shareHandler: Function;
-
-	export let chat;
-	export let onClose: Function = () => {};
+	let {
+		shareHandler,
+		chat,
+		onClose = () => {},
+		children
+	}: {
+		shareHandler: () => void;
+		chat: any;
+		onClose?: () => void;
+		children?: Snippet;
+	} = $props();
 
 	const getChatAsText = async () => {
 		const history = chat.chat.history;
 		const messages = createMessagesList(history, history.currentId);
-		const chatText = messages.reduce((a, message, i, arr) => {
+		const chatText = messages.reduce((a, message) => {
 			return `${a}### ${message.role.toUpperCase()}\n${message.content}\n\n`;
 		}, '');
 
@@ -51,8 +57,6 @@
 		if (containerElement) {
 			try {
 				const isDarkMode = document.documentElement.classList.contains('dark');
-
-				console.log('isDarkMode', isDarkMode);
 
 				// Define a fixed virtual screen size
 				const virtualWidth = 800; // Fixed width (adjust as needed)
@@ -143,11 +147,11 @@
 		}
 	}}
 >
-	<slot />
+	{@render children?.()}
 
 	{#snippet content()}
 		<DropdownMenu.Content
-			class="w-full max-w-[200px] rounded-xl px-1 py-1.5  z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+			class="w-full max-w-[200px] rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
 			sideOffset={8}
 			side="bottom"
 			align="end"
@@ -157,44 +161,44 @@
 			     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
 			{#if $chatId}
 				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 					id="chat-files-button"
 					on:click={() => {
 						showControls.set(!$showControls);
 					}}
 				>
-					<span class="i-lucide-folder-open size-4"></span>
+					<span class="i-lucide-folder-open size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Files in this chat')}</div>
 				</DropdownMenu.Item>
 			{/if}
 
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.share ?? true)}
 				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 					id="chat-share-button"
 					on:click={() => {
 						shareHandler();
 					}}
 				>
-					<span class="i-lucide-share-2 size-4"></span>
+					<span class="i-lucide-share-2 size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Share')}</div>
 				</DropdownMenu.Item>
 			{/if}
 
 			<DropdownMenu.Sub>
 				<DropdownMenu.SubTrigger
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 				>
-					<span class="i-lucide-download size-4"></span>
+					<span class="i-lucide-download size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
 				<DropdownMenu.SubContent
-					class="w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+					class="w-full rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
 					transition={flyAndScale}
 					sideOffset={8}
 				>
 					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 						on:click={() => {
 							downloadJSONExport();
 						}}
@@ -202,7 +206,7 @@
 						<div class="flex items-center line-clamp-1">{$i18n.t('Export chat (.json)')}</div>
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 						on:click={() => {
 							downloadTxt();
 						}}
@@ -211,7 +215,7 @@
 					</DropdownMenu.Item>
 
 					<DropdownMenu.Item
-						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 						on:click={() => {
 							downloadPdf();
 						}}
@@ -222,7 +226,7 @@
 			</DropdownMenu.Sub>
 
 			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 				id="chat-copy-button"
 				on:click={async () => {
 					const res = await copyToClipboard(await getChatAsText()).catch((e) => {
@@ -234,7 +238,7 @@
 					}
 				}}
 			>
-				<span class="i-lucide-clipboard size-4"></span>
+				<span class="i-lucide-clipboard size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Copy')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>

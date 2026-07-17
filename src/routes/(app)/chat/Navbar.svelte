@@ -1,56 +1,44 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
 
-	import {
-		banners,
-		chatId,
-		config,
-		mobile,
-		settings,
-		showArchivedChats,
-		showSidebar,
-		theme,
-		user
-	} from '$lib/stores';
+	import { banners, chatId, showArchivedChats, showSidebar, theme, user } from '$lib/stores';
 	import { themeChangeHandler } from '$lib/utils/theme';
-
-	import { slide } from 'svelte/transition';
-	import { page } from '$app/stores';
 
 	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
 	import ModelSelector from './ModelSelector.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Menu from './NavbarMenu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
-	import MenuLines from '$lib/components/icons/MenuLines.svelte';
-
-	import PencilSquare from '$lib/components/icons/PencilSquare.svelte';
 	import Banner from '$lib/components/common/Banner.svelte';
-	import Sun from '$lib/components/icons/Sun.svelte';
-	import Moon from '$lib/components/icons/Moon.svelte';
 
 	const i18n = getContext('i18n');
 
+	let {
+		initNewChat,
+		shareEnabled = false,
+		chat,
+		history,
+		selectedModels = $bindable()
+	}: {
+		initNewChat: () => void;
+		shareEnabled?: boolean;
+		chat: any;
+		history: any;
+		selectedModels: string[];
+	} = $props();
+
 	// 'system' は matchMedia で解決、それ以外は名前に 'dark' を含むかで判定
-	$: isDark =
+	const isDark = $derived(
 		$theme === 'system'
 			? typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
-			: ($theme ?? '').includes('dark');
+			: ($theme ?? '').includes('dark')
+	);
 
 	const toggleTheme = () => {
 		themeChangeHandler(isDark ? 'light' : 'dark');
 	};
 
-	export let initNewChat: Function;
-	export let shareEnabled: boolean = false;
-
-	export let chat;
-	export let history;
-	export let selectedModels;
-	export let showModelSelector = true;
-
-	let showShareChatModal = false;
+	let showShareChatModal = $state(false);
 </script>
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
@@ -70,30 +58,21 @@
 				>
 					<button
 						id="sidebar-toggle-button"
-						class="cursor-pointer px-2 py-2 flex rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-						on:click={() => {
+						class="cursor-pointer px-2 py-2 flex rounded-xl hover:bg-surface-hover"
+						onclick={() => {
 							showSidebar.set(!$showSidebar);
 						}}
-						aria-label="Toggle Sidebar"
+						aria-label={$i18n.t('Toggle sidebar')}
 					>
-						<div class=" m-auto self-center">
-							<MenuLines />
-						</div>
+						<span class="i-lucide-menu size-5 block m-auto self-center"></span>
 					</button>
 				</div>
 
-				<div
-					class="flex-1 overflow-hidden max-w-full py-0.5
-			{$showSidebar ? 'ml-1' : ''}
-			"
-				>
-					{#if showModelSelector}
-						<ModelSelector bind:selectedModels />
-					{/if}
+				<div class="flex-1 overflow-hidden max-w-full py-0.5 {$showSidebar ? 'ml-1' : ''}">
+					<ModelSelector bind:selectedModels />
 				</div>
 
 				<div class="self-start flex flex-none items-center text-content-muted">
-					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 					{#if shareEnabled && chat && chat.id}
 						<Menu
 							{chat}
@@ -102,51 +81,45 @@
 							}}
 						>
 							<button
-								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-surface-hover"
 								id="chat-context-menu-button"
 								aria-label={$i18n.t('More')}
 							>
-								<div class=" m-auto self-center">
-									<span class="i-lucide-ellipsis size-5 block"></span>
-								</div>
+								<span class="i-lucide-ellipsis size-5 block m-auto self-center"></span>
 							</button>
 						</Menu>
 					{/if}
 
 					<!-- llens(#69→#19): 右ペイン(このチャットのファイル)のトグルは Navbar 直置きを
-					     やめ「…」メニュー内へ移設(Menu.svelte)。 -->
+					     やめ「…」メニュー内へ移設(NavbarMenu.svelte)。 -->
 
 					<Tooltip content={$i18n.t('New Chat')}>
 						<button
 							id="new-chat-button"
-							class=" flex {$showSidebar
+							class="flex {$showSidebar
 								? 'md:hidden'
-								: ''} cursor-pointer px-2 py-2 rounded-xl text-content-muted hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-							on:click={() => {
+								: ''} cursor-pointer px-2 py-2 rounded-xl text-content-muted hover:bg-surface-hover"
+							onclick={() => {
 								initNewChat();
 							}}
-							aria-label="New Chat"
+							aria-label={$i18n.t('New Chat')}
 						>
-							<div class=" m-auto self-center">
-								<PencilSquare className=" size-5" strokeWidth="2" />
-							</div>
+							<span class="i-lucide-square-pen size-5 block m-auto self-center"></span>
 						</button>
 					</Tooltip>
 
 					<Tooltip content={isDark ? $i18n.t('Light mode') : $i18n.t('Dark mode')}>
 						<button
 							id="theme-toggle-button"
-							class="flex cursor-pointer px-2 py-2 rounded-xl text-content-muted hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-							on:click={toggleTheme}
+							class="flex cursor-pointer px-2 py-2 rounded-xl text-content-muted hover:bg-surface-hover"
+							onclick={toggleTheme}
 							aria-label={isDark ? $i18n.t('Light mode') : $i18n.t('Dark mode')}
 						>
-							<div class=" m-auto self-center">
-								{#if isDark}
-									<Sun className=" size-5" strokeWidth="1.5" />
-								{:else}
-									<Moon className=" size-5" strokeWidth="1.5" />
-								{/if}
-							</div>
+							{#if isDark}
+								<span class="i-lucide-sun size-5 block m-auto self-center"></span>
+							{:else}
+								<span class="i-lucide-moon size-5 block m-auto self-center"></span>
+							{/if}
 						</button>
 					</Tooltip>
 
@@ -160,17 +133,15 @@
 							}}
 						>
 							<button
-								class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								aria-label="User Menu"
+								class="select-none flex rounded-xl p-1.5 w-full hover:bg-surface-hover"
+								aria-label={$i18n.t('User Menu')}
 							>
-								<div class=" self-center">
-									<img
-										src={$user?.profile_image_url}
-										class="size-6 object-cover rounded-full"
-										alt="User profile"
-										draggable="false"
-									/>
-								</div>
+								<img
+									src={$user?.profile_image_url}
+									class="size-6 object-cover rounded-full self-center"
+									alt="User profile"
+									draggable="false"
+								/>
 							</button>
 						</UserMenu>
 					{/if}
@@ -182,7 +153,7 @@
 	{#if !history.currentId && !$chatId && $banners.length > 0}
 		<div class=" w-full z-30 mt-5">
 			<div class=" flex flex-col gap-1 w-full">
-				{#each $banners.filter( (b) => (b.dismissible ? !JSON.parse(localStorage.getItem('dismissedBannerIds') ?? '[]').includes(b.id) : true) ) as banner}
+				{#each $banners.filter( (b) => (b.dismissible ? !JSON.parse(localStorage.getItem('dismissedBannerIds') ?? '[]').includes(b.id) : true) ) as banner (banner.id)}
 					<Banner
 						{banner}
 						onDismiss={(bannerId) => {
