@@ -742,9 +742,24 @@ return `str` → `file.data = {"content": ..., "status": "success"}`;
 **raise** → `status: "failed"` with the exception message as content;
 return `None` → skip (file stays unextracted). All three states are surfaced to
 the model on the injected `<source>` tag (`extraction="failed"/"none"`), so an
-unextracted file can still be handled by a tool via its `file_id`. Slow
-extraction is fine — sync `process` runs in a threadpool. Multiple providers
-should be routed *inside* one function, not via multiple functions.
+unextracted file can still be handled by a tool via its `file_id`. Multiple
+providers should be routed *inside* one function, not via multiple functions.
+
+When it fires — timing facts for clients and hook authors:
+
+- **Upload** (`POST /api/v1/files/`): the hook runs *inline in the upload
+  request*, after the acceptance gate (permission → extension → size) passes and
+  the file row is stored. The upload **response waits for extraction** and
+  already carries `data.content` / `data.status` — no polling needed. Sync
+  `process` runs in a threadpool, so slow extraction doesn't stall the server,
+  but the uploading client does wait; budget client timeouts accordingly (or
+  upload with `?process=false` and call `/process` separately). If the hook
+  machinery itself errors, the upload still returns the file with an `error`
+  field rather than failing.
+- **Re-process** (`POST /api/v1/files/{id}/process`, `__event__="attach"`): the
+  hook is dispatched only when the caller is the file's **owner or an admin** —
+  a non-owner with read access just gets the current file back unchanged (no
+  error); without read access it's a 404.
 
 ### 7.4 Action — human-triggered buttons
 
