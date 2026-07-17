@@ -397,8 +397,8 @@ class TestAuths(AbstractPostgresTest):
     def test_create_admin_cli(self):
         """llens: 公開オンボーディングの代わりの CLI 管理者作成(nucllei create-admin)。
 
-        role=admin で作成され、email は小文字化。重複メール・短いパスワード・
-        不正な email 形式は非ゼロ終了で拒否する。
+        role=admin で作成され、email は小文字化。重複メール・不正な email 形式は
+        非ゼロ終了で拒否する。パスワード長の下限は持たない(#62)。
         """
         from typer.testing import CliRunner
         from nucllei import app as cli_app
@@ -437,13 +437,13 @@ class TestAuths(AbstractPostgresTest):
         )
         assert dup.exit_code == 1
 
-        # 短いパスワードは拒否(作成されない)
+        # 短いパスワードも受理する(#62: 下限制限なし)
         short = runner.invoke(
             cli_app,
             ["create-admin", "--email", "new@llens.local", "--password", "short"],
         )
-        assert short.exit_code == 1
-        assert self.users.get_user_by_email("new@llens.local") is None
+        assert short.exit_code == 0, short.output
+        assert self.users.get_user_by_email("new@llens.local") is not None
 
         # 不正な email 形式は拒否
         bad = runner.invoke(
