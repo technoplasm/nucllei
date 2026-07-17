@@ -4,10 +4,6 @@ from typing import Optional
 from nucllei.internal.db import Base, JSONField, get_db
 
 
-from nucllei.models.chats import Chats
-from nucllei.models.groups import Groups
-
-
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text
 
@@ -309,24 +305,8 @@ class UsersTable:
         except Exception:
             return None
 
-    def delete_user_by_id(self, id: str) -> bool:
-        try:
-            # Remove User from Groups
-            Groups.remove_user_from_all_groups(id)
-
-            # Delete User Chats
-            result = Chats.delete_chats_by_user_id(id)
-            if result:
-                with get_db() as db:
-                    # Delete User
-                    db.query(User).filter_by(id=id).delete()
-                    db.commit()
-
-                return True
-            else:
-                return False
-        except Exception:
-            return False
+    # llens(#31): delete_user_by_id(hard delete)は撤去 — チャットの物理削除(監査証憑の
+    # 破壊)を伴うため。無効化は role=disabled で行い、行は残す。
 
     def update_user_api_key_by_id(self, id: str, api_key: str) -> str:
         try:

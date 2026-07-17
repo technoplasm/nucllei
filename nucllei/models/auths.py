@@ -229,21 +229,8 @@ class AuthsTable:
         except Exception:
             return False
 
-    def delete_auth_by_id(self, id: str) -> bool:
-        try:
-            with get_db() as db:
-                # Delete User
-                result = Users.delete_user_by_id(id)
-
-                if result:
-                    db.query(Auth).filter_by(id=id).delete()
-                    db.commit()
-
-                    return True
-                else:
-                    return False
-        except Exception:
-            return False
+    # llens(#31): delete_auth_by_id(user の hard delete 連鎖)は撤去 — チャット証憑の
+    # 物理削除を伴うため。無効化は role=disabled(routers/users.py の update_user_role)。
 
 
 Auths = AuthsTable()

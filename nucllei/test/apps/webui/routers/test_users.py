@@ -138,15 +138,35 @@ class TestUsers(AbstractPostgresTest):
             profile_image_url="/user2-updated.png",
         )
 
-        # Delete user by id
+        # llens(#31): user の hard delete(DELETE /{user_id})は撤去済み
         with mock_webui_user(id="1"):
             response = self.fast_api_client.delete(self.create_url("/2"))
-        assert response.status_code == 200
+        assert response.status_code in (404, 405)
 
-        # Get all users
+        # llens(#31): 無効化 = role=disabled(行は残る)
+        with mock_webui_user(id="3"):
+            response = self.fast_api_client.post(
+                self.create_url("/update/role"), json={"id": "2", "role": "disabled"}
+            )
+        assert response.status_code == 200
+        _assert_user(
+            [response.json()],
+            "2",
+            role="disabled",
+            name="user 2 updated",
+            email="user2-updated@nucllei.local",
+            profile_image_url="/user2-updated.png",
+        )
+
+        # 未知 role は 400
+        with mock_webui_user(id="3"):
+            response = self.fast_api_client.post(
+                self.create_url("/update/role"), json={"id": "2", "role": "banished"}
+            )
+        assert response.status_code == 400
+
+        # Get all users — 無効化しても行は消えない
         with mock_webui_user(id="3"):
             response = self.fast_api_client.get(self.create_url(""))
         assert response.status_code == 200
-        assert len(response.json()) == 1
-        data = response.json()
-        _assert_user(data, "1")
+        assert len(response.json()) == 2

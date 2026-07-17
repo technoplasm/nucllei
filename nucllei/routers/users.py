@@ -120,6 +120,15 @@ async def update_default_user_permissions(
 
 @router.post("/update/role", response_model=Optional[UserModel])
 async def update_user_role(form_data: UserRoleUpdateForm, user=Depends(get_admin_user)):
+    # llens(#31): disabled = アカウント無効化。get_verified_user が user/admin 以外を
+    # 弾くため API は全遮断され、FE では AccountPending 相当の案内画面に落ちる。
+    # user の hard delete は撤去済み(チャット証憑の保全)— 無効化がその代替。
+    if form_data.role not in ("pending", "user", "admin", "disabled"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role must be one of: pending, user, admin, disabled",
+        )
+
     if user.id != form_data.id and form_data.id != Users.get_first_user().id:
         return Users.update_user_role_by_id(form_data.id, form_data.role)
 
@@ -284,25 +293,6 @@ async def update_user_by_id(
     )
 
 
-############################
-# DeleteUserById
-############################
-
-
-@router.delete("/{user_id}", response_model=bool)
-async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
-    if user.id != user_id:
-        result = Auths.delete_auth_by_id(user_id)
-
-        if result:
-            return True
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DELETE_USER_ERROR,
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
-    )
+# llens(#31): DELETE /{user_id}(user の hard delete)はエンドポイントごと撤去。
+# チャットの物理削除(監査証憑の破壊)・file の孤児化を伴うため、無効化(role=disabled)で
+# 代替する。FE 導線は #69 で撤去済み(暫定運用だった role=pending 落としの置き換え)。
