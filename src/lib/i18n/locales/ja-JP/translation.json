@@ -209,6 +209,7 @@
 	"Download as SVG": "",
 	"Download canceled": "ダウンロードをキャンセルしました",
 	"Download Database": "データベースをダウンロード",
+	"Downloading \"{{modelName}}\"": "\"{{modelName}}\" をダウンロード中",
 	"Drop any files here to add to the conversation": "会話を追加するには、ここにファイルをドロップしてください",
 	"e.g. A filter to remove profanity from text": "",
 	"e.g. Tools for performing various operations": "",

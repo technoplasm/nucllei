@@ -209,6 +209,7 @@
 	"Download as SVG": "下载为 SVG",
 	"Download canceled": "下载已取消",
 	"Download Database": "下载数据库",
+	"Downloading \"{{modelName}}\"": "正在下载 \"{{modelName}}\"",
 	"Drop any files here to add to the conversation": "拖动文件到此处以添加到对话中",
 	"e.g. A filter to remove profanity from text": "例如：一个用于过滤文本中不当内容的过滤器",
 	"e.g. Tools for performing various operations": "例如：用于执行各种操作的工具",
