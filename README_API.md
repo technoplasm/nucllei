@@ -525,6 +525,22 @@ async def run_sql(self, query: Code("sql")) -> Text:
   structures as a tree). Streaming partial-argument rendering is automatic.
 - External OpenAPI tools get the same treatment by declaring
   `"contentMediaType": "text/x-python"` (etc.) on string parameters.
+- Tool sources usually live in your harness repo, where `nucllei` is not
+  importable. Guard the import so the file stays lintable/testable there;
+  annotations degrade to plain `str` and behavior is unchanged:
+
+  ```python
+  try:
+      from nucllei.utils.tool_render import Code
+  except Exception:
+
+      def Code(language: str, base: type = str):
+          return base
+
+  PythonCode = Code("python")   # aliases keep signatures readable
+
+  async def run_python(self, code: PythonCode) -> str: ...
+  ```
 
 ### 5.5 Return values, events, limits
 
