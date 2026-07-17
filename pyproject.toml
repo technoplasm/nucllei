@@ -195,6 +195,8 @@ pythonpath = [".", "nucllei"]
 dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --forwarded-allow-ips '*'"
 # 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
 licenses = "python scripts/generate_licenses.py"
+# リリース/プレ tag を切る(採番自動)。`uv run task tag pre --push` で CI 発火まで一気に。
+tag = "python scripts/cut_tag.py"
 
 # nucllei CLI(typer app: `nucllei:app`)への汎用エントリ。任意のサブコマンドを
 # 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
