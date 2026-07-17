@@ -203,7 +203,7 @@ managed per-group in the DB/UI.
 | `DEFAULT_LOCALE`                                    | `""` (RC)          | UI locale (shipped: `ja`, `en`, `zh-CN`)                                                                                                                                                                    |
 | `DEFAULT_MODELS`                                    | unset (RC)         | default model(s) for new chats                                                                                                                                                                              |
 | `WEBUI_BANNERS`                                     | `[]` (RC)          | JSON banner list `{id,type,title?,content,dismissible,timestamp}`                                                                                                                                           |
-| `WEBHOOK_URL` / `ENABLE_USER_WEBHOOKS`              | `""` / `true` (RC) | server webhook (signup events) / per-user webhooks                                                                                                                                                          |
+| `WEBHOOK_URL` / `ENABLE_USER_WEBHOOKS`              | `""` / `false` (RC) | server webhook (signup events) / per-user webhooks                                                                                                                                                          |
 
 ### 3.5 Model backend (OpenAI-compatible engine)
 

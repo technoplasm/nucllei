@@ -981,10 +981,11 @@ ENABLE_ADMIN_CHAT_ACCESS = (
 # llens(#10): openwebui.com コミュニティ共有(ストア導線)は外部サービス前提のため機能ごと撤去。
 # llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
 
+# llens: 既定 OFF — 通知 webhook は任意の外部連携(必要な配備だけ明示的に有効化する)
 ENABLE_USER_WEBHOOKS = RuntimeConfig(
     "ENABLE_USER_WEBHOOKS",
     "ui.enable_user_webhooks",
-    os.environ.get("ENABLE_USER_WEBHOOKS", "True").lower() == "true",
+    os.environ.get("ENABLE_USER_WEBHOOKS", "False").lower() == "true",
 )
 
 
