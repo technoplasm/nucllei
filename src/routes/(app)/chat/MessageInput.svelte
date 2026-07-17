@@ -342,6 +342,9 @@
 
 	let showFileLibraryModal = $state(false);
 
+	// 送信キー(Enter ⇄ Ctrl+Enter)。切り替え UI は「+」メニュー(InputMenu)にある
+	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
+
 	const inputFilesHandler = async (inputFiles) => {
 		inputFiles.forEach((file) => {
 			if (
@@ -917,72 +920,80 @@
 													</button>
 												</Tooltip>
 											</div>
-										{:else if prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
-											<!-- llens(#53): Call は STT+TTS 両方を使うので、どちらかが無効なら出さない(送信ボタンへフォールスルー) -->
-											<div class=" flex items-center">
-												<Tooltip content={$i18n.t('Call')}>
-													<button
-														class=" bg-primary hover:bg-primary-hover text-primary-content rounded-full p-1.5 self-center"
-														type="button"
-														onclick={async () => {
-															if (selectedModels.length > 1) {
-																toast.error($i18n.t('Select only one model to call'));
-
-																return;
-															}
-
-															if ($config.audio.stt.engine === 'web') {
-																toast.error(
-																	$i18n.t('Call feature is not supported when using Web STT engine')
-																);
-
-																return;
-															}
-															// check if user has access to getUserMedia
-															try {
-																let stream = await navigator.mediaDevices.getUserMedia({
-																	audio: true
-																});
-																// If the user grants the permission, proceed to show the call overlay
-
-																if (stream) {
-																	const tracks = stream.getTracks();
-																	tracks.forEach((track) => track.stop());
-																}
-
-																stream = null;
-
-																if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-																	// If the user has not initialized the TTS worker, initialize it
-																	if (!$TTSWorker) {
-																		await TTSWorker.set(
-																			new KokoroWorker({
-																				dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																			})
-																		);
-
-																		await $TTSWorker.init();
-																	}
-																}
-
-																showCallOverlay.set(true);
-																showControls.set(true);
-															} catch (err) {
-																// If the user denies the permission or an error occurs, show an error message
-																toast.error(
-																	$i18n.t('Permission denied when accessing media devices')
-																);
-															}
-														}}
-														aria-label={$i18n.t('Call')}
-													>
-														<span class="i-lucide-headphones size-5 block"></span>
-													</button>
-												</Tooltip>
-											</div>
 										{:else}
+											{#if prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
+												<!-- llens(#53): Call は STT+TTS 両方が有効なときだけ(片方無効なら出さない) -->
+												<div class=" flex items-center">
+													<Tooltip content={$i18n.t('Call')}>
+														<button
+															class=" bg-primary hover:bg-primary-hover text-primary-content rounded-full p-1.5 self-center"
+															type="button"
+															onclick={async () => {
+																if (selectedModels.length > 1) {
+																	toast.error($i18n.t('Select only one model to call'));
+
+																	return;
+																}
+
+																if ($config.audio.stt.engine === 'web') {
+																	toast.error(
+																		$i18n.t(
+																			'Call feature is not supported when using Web STT engine'
+																		)
+																	);
+
+																	return;
+																}
+																// check if user has access to getUserMedia
+																try {
+																	let stream = await navigator.mediaDevices.getUserMedia({
+																		audio: true
+																	});
+																	// If the user grants the permission, proceed to show the call overlay
+
+																	if (stream) {
+																		const tracks = stream.getTracks();
+																		tracks.forEach((track) => track.stop());
+																	}
+
+																	stream = null;
+
+																	if ($settings.audio?.tts?.engine === 'browser-kokoro') {
+																		// If the user has not initialized the TTS worker, initialize it
+																		if (!$TTSWorker) {
+																			await TTSWorker.set(
+																				new KokoroWorker({
+																					dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
+																				})
+																			);
+
+																			await $TTSWorker.init();
+																		}
+																	}
+
+																	showCallOverlay.set(true);
+																	showControls.set(true);
+																} catch (err) {
+																	// If the user denies the permission or an error occurs, show an error message
+																	toast.error(
+																		$i18n.t('Permission denied when accessing media devices')
+																	);
+																}
+															}}
+															aria-label={$i18n.t('Call')}
+														>
+															<span class="i-lucide-headphones size-5 block"></span>
+														</button>
+													</Tooltip>
+												</div>
+											{/if}
+
 											<div class=" flex items-center">
-												<Tooltip content={$i18n.t('Send message')}>
+												<Tooltip
+													content={ctrlEnterToSend
+														? `${$i18n.t('Ctrl+Enter to Send')}<br>${$i18n.t('Enter for a new line')}`
+														: `${$i18n.t('Enter to Send')}<br>${$i18n.t('Shift+Enter for a new line')}`}
+												>
 													<button
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0)

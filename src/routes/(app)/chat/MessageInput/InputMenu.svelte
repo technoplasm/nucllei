@@ -3,7 +3,8 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext } from 'svelte';
 
-	import { user } from '$lib/stores';
+	import { settings, user } from '$lib/stores';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -28,6 +29,15 @@
 	const fileUploadEnabled = $derived(
 		$user?.role === 'admin' || $user?.permissions?.chat?.file_upload
 	);
+
+	// 送信キー(Enter ⇄ Ctrl+Enter)のその場切り替え。設定 > チャットと同じ値を書く。
+	// 現在の割り当ては送信ボタンのホバー(MessageInput)にも出る
+	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
+
+	const toggleCtrlEnterToSend = async () => {
+		settings.set({ ...$settings, ctrlEnterToSend: !ctrlEnterToSend });
+		await updateUserSettings({ ui: $settings });
+	};
 </script>
 
 <Dropdown
@@ -44,7 +54,7 @@
 
 	{#snippet content()}
 		<DropdownMenu.Content
-			class="w-full max-w-[200px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+			class="w-max min-w-[180px] max-w-[calc(100vw-2rem)] rounded-xl px-1 py-1 border border-line z-50 bg-surface-raised text-content shadow-sm"
 			sideOffset={10}
 			alignOffset={-8}
 			side="top"
@@ -56,7 +66,7 @@
 				className="w-full"
 			>
 				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl {!fileUploadEnabled
 						? 'opacity-50'
 						: ''}"
 					on:click={() => {
@@ -75,7 +85,7 @@
 				className="w-full"
 			>
 				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl {!fileUploadEnabled
 						? 'opacity-50'
 						: ''}"
 					on:click={() => {
@@ -88,6 +98,28 @@
 					<div class="line-clamp-1">{$i18n.t('Saved Files')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>
+
+			<DropdownMenu.Item
+				class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl"
+				on:click={() => {
+					toggleCtrlEnterToSend();
+				}}
+			>
+				<span class="i-lucide-keyboard size-4 block"></span>
+				<div class="line-clamp-1 flex-1">{$i18n.t('Enter Key Behavior')}</div>
+				<!-- バッジは「Enter を押したときの動作」を示す -->
+				<div
+					class="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-surface-muted text-xs text-content-muted"
+				>
+					{#if ctrlEnterToSend}
+						<span class="i-lucide-corner-down-left size-3 block"></span>
+						{$i18n.t('New line')}
+					{:else}
+						<span class="i-lucide-arrow-up size-3 block"></span>
+						{$i18n.t('Send')}
+					{/if}
+				</div>
+			</DropdownMenu.Item>
 		</DropdownMenu.Content>
 	{/snippet}
 </Dropdown>
