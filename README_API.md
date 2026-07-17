@@ -23,7 +23,7 @@ Contents:
 Nucllei is a thin chat platform in front of an OpenAI-compatible inference engine
 (the reference deployment uses SGLang). It deliberately ships **mechanism, not
 policy**: document extraction, de-identification, code execution, department
-routing and similar behavior are all authored at the *deployment layer* as Tools,
+routing and similar behavior are all authored at the _deployment layer_ as Tools,
 Skills and Functions, and pushed into the server via the admin API. Design rules
 that shape everything below:
 
@@ -33,7 +33,7 @@ that shape everything below:
 - **Native function calling only.** Tools are exposed through the OpenAI `tools`
   array and executed in a native tool-call loop. There is no prompt-template
   function calling and no tag-detection code-execution backdoor.
-- **Honest agent.** Tools belong to the *model configuration*, not the chat: there
+- **Honest agent.** Tools belong to the _model configuration_, not the chat: there
   is no per-chat tool picker, and `tool_ids` sent by a client is discarded. If the
   model calls a tool that is not currently available it receives an explicit
   `tool not available: <name>` result instead of a silent drop. Skill activation is
@@ -48,7 +48,7 @@ that shape everything below:
   runtime. Python dependencies used by your Tools/Functions must be pre-installed
   in the image. Name/description live in the DB row, not in the source.
 - **Offline-complete.** Deployments range from air-gapped to internet-connected.
-  No feature may *require* external network; optional external integrations are fine.
+  No feature may _require_ external network; optional external integrations are fine.
 - **Fresh DB only.** There is no backward compatibility with pre-fork / stock
   Open WebUI data or with old wire formats. Anything targeting stock Open WebUI's
   socket.io wire will not work — the wire is SSE only.
@@ -73,7 +73,7 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
     is the git tag (`vYYYYMMDD-NN` releases, `pre-NN` pre-releases). Resolution at
     runtime: `APP_VERSION` env → `git describe` (source runs) → `package.json` fallback.
   - `PRELOAD_WHISPER_MODEL` — if non-empty (e.g. `small`), the faster-whisper STT
-    model is downloaded into the image at *build* time, so air-gapped targets never
+    model is downloaded into the image at _build_ time, so air-gapped targets never
     fetch at first use.
 - **Image facts**: `python:3.11-slim-bookworm` runtime; `ffmpeg` (audio), `pandoc`
   and `markitdown[all]` (available to your Attachment Functions), bundled
@@ -95,12 +95,12 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
 The container CMD is `python -c 'from nucllei import app; app()' serve --port $PORT`.
 Commands:
 
-| Command | Purpose |
-|---|---|
-| `serve --host 0.0.0.0 --port 8080` | production server (uvicorn, `UVICORN_WORKERS` workers) |
-| `dev --reload` | development server, single worker, no secret-key persistence |
+| Command                                            | Purpose                                                                                        |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `serve --host 0.0.0.0 --port 8080`                 | production server (uvicorn, `UVICORN_WORKERS` workers)                                         |
+| `dev --reload`                                     | development server, single worker, no secret-key persistence                                   |
 | `create-admin --email X [--name N] [--password P]` | provision an admin from the server side (prompts for password if omitted; works on a fresh DB) |
-| `main --version` | print version |
+| `main --version`                                   | print version                                                                                  |
 
 The recommended bootstrap is `ENABLE_SIGNUP=false` + `create-admin` (e.g.
 `docker exec -it <ctr> python -c 'from nucllei import app; app()' create-admin --email ...`),
@@ -119,7 +119,7 @@ There are two kinds of settings:
 
 - **[env]** — plain environment variables. Read once at process start, never stored
   in the DB, not editable in the UI.
-- **[RC]** — *runtime config*. Stored in the DB (`config` table) and editable in the
+- **[RC]** — _runtime config_. Stored in the DB (`config` table) and editable in the
   admin UI. The env var is an **explicit override** with this precedence, evaluated
   at startup:
 
@@ -128,7 +128,7 @@ There are two kinds of settings:
   2. env unset/empty → the DB value (last UI save) is used and survives restarts;
   3. no DB value → built-in default.
 
-  Setting an RC env to `""` counts as *unset*. Practical rule: put everything you
+  Setting an RC env to `""` counts as _unset_. Practical rule: put everything you
   want operator-fixed into env/compose; leave everything you want UI-tunable unset.
 
 Multi-worker note: with `UVICORN_WORKERS>1` you must set `REDIS_URL`, otherwise
@@ -137,49 +137,49 @@ runtime config changes don't propagate across workers until restart.
 
 **Naming families**: `APP_*` refers to the Nucllei product itself (`APP_VERSION`);
 `WEBUI_*` is the deployment layer on top — branding and site behavior
-(`WEBUI_NAME`, `WEBUI_VERSION`, `WEBUI_COPYRIGHT` show *your harness's* identity in
+(`WEBUI_NAME`, `WEBUI_VERSION`, `WEBUI_COPYRIGHT` show _your harness's_ identity in
 the UI, next to the Nucllei product version).
 
 ### 3.2 Core / server
 
-| Var | Kind | Default | Effect |
-|---|---|---|---|
-| `ENV` | env | `dev` (`prod` in Docker) | dev exposes Swagger UI at `/docs` |
-| `DATA_DIR` | env | `./data` (`/app/data`) | root of all persistent state |
-| `DATABASE_URL` | env | `sqlite:///$DATA_DIR/webui.db` | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten) |
-| `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env | — / `0` (NullPool) / `0` / `30` / `3600` | Postgres tuning |
-| `REDIS_URL` (+ `REDIS_SENTINEL_HOSTS`, `REDIS_SENTINEL_PORT`) | env | `""` | config sync for multi-worker |
-| `UVICORN_WORKERS` | env | `1` | worker count for `serve` |
-| `WEBUI_URL` | RC | `http://localhost:3000` | public base URL (webhooks, links) |
-| `WEBUI_NAME` | env | `Nucllei` | brand name shown in the UI |
-| `WEBUI_VERSION` / `WEBUI_COPYRIGHT` | env | `""` | deployment-layer version / copyright on the License tab (empty = hidden) |
-| `ENABLE_FORWARD_USER_INFO_HEADERS` | env | `false` | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine |
-| `CORS_ALLOW_ORIGIN` | env | `*` | `;`-separated origins |
-| `EXTERNAL_PWA_MANIFEST_URL` | env | unset | proxy `/manifest.json` from this URL |
-| `OFFLINE_MODE` | env | `false` | forces HF hub offline + disables whisper auto-update |
-| `USE_CUDA_DOCKER` | env | `false` | run local ML (whisper) on CUDA |
-| `RESET_CONFIG_ON_START` | env | `false` | wipe runtime config at startup |
+| Var                                                                                                                         | Kind | Default                                  | Effect                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------- | ------------------------------------------------------------------------ |
+| `ENV`                                                                                                                       | env  | `dev` (`prod` in Docker)                 | dev exposes Swagger UI at `/docs`                                        |
+| `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state                                             |
+| `DATABASE_URL`                                                                                                              | env  | `sqlite:///$DATA_DIR/webui.db`           | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten)        |
+| `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `0` (NullPool) / `0` / `30` / `3600` | Postgres tuning                                                          |
+| `REDIS_URL` (+ `REDIS_SENTINEL_HOSTS`, `REDIS_SENTINEL_PORT`)                                                               | env  | `""`                                     | config sync for multi-worker                                             |
+| `UVICORN_WORKERS`                                                                                                           | env  | `1`                                      | worker count for `serve`                                                 |
+| `WEBUI_URL`                                                                                                                 | RC   | `http://localhost:3000`                  | public base URL (webhooks, links)                                        |
+| `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                | brand name shown in the UI                                               |
+| `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                     | deployment-layer version / copyright on the License tab (empty = hidden) |
+| `ENABLE_FORWARD_USER_INFO_HEADERS`                                                                                          | env  | `false`                                  | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine        |
+| `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                      | `;`-separated origins                                                    |
+| `EXTERNAL_PWA_MANIFEST_URL`                                                                                                 | env  | unset                                    | proxy `/manifest.json` from this URL                                     |
+| `OFFLINE_MODE`                                                                                                              | env  | `false`                                  | forces HF hub offline + disables whisper auto-update                     |
+| `USE_CUDA_DOCKER`                                                                                                           | env  | `false`                                  | run local ML (whisper) on CUDA                                           |
+| `RESET_CONFIG_ON_START`                                                                                                     | env  | `false`                                  | wipe runtime config at startup                                           |
 
 ### 3.3 Auth & security
 
-| Var | Kind | Default | Effect |
-|---|---|---|---|
-| `WEBUI_AUTH` | env | `true` | `false` = single-user, no-auth mode |
-| `WEBUI_SECRET_KEY` | env | auto-generated (see §2) | JWT signing key |
-| `JWT_EXPIRES_IN` | RC | `-1` (no expiry) | session lifetime: `-1` \| `0` \| `<n>(s|m|h|d|w)` |
-| `ENABLE_SIGNUP` | RC | `true` | public signup (auto-disabled after the first user becomes admin; production reference: `false` + `create-admin`) |
-| `ENABLE_LOGIN_FORM` | RC | `true` | email/password form (off for SSO-only) |
-| `DEFAULT_USER_ROLE` | RC | `pending` | role given to new signups |
-| `ENABLE_API_KEY` | RC | `true` | allow user API keys (`sk-...`) |
-| `ENABLE_API_KEY_ENDPOINT_RESTRICTIONS` | RC | `false` | restrict API keys to a path allowlist |
-| `API_KEY_ALLOWED_ENDPOINTS` | RC | `""` | comma-separated path prefixes; **empty list + restrictions on = deny all API-key requests** |
-| `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_SESSION_COOKIE_SECURE` | env | `lax` / `false` | session cookie flags |
-| `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE` | env | = session values | auth (`token`) cookie flags |
-| `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER` | env | unset | header-based SSO behind a trusted proxy |
-| `BYPASS_MODEL_ACCESS_CONTROL` | env | `false` | skip per-model group ACL |
-| `SHOW_ADMIN_DETAILS` / `ADMIN_EMAIL` | RC | `true` / unset | admin contact shown to pending users |
-| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS` | env | `true` / `true` | admin DB export / admin access to user chats |
-| `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env | unset | each sets the corresponding response security header when present |
+| Var                                                                                                                                                                                     | Kind | Default                 | Effect                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `WEBUI_AUTH`                                                                                                                                                                            | env  | `true`                  | `false` = single-user, no-auth mode                                                                              |
+| `WEBUI_SECRET_KEY`                                                                                                                                                                      | env  | auto-generated (see §2) | JWT signing key                                                                                                  |
+| `JWT_EXPIRES_IN`                                                                                                                                                                        | RC   | `-1` (no expiry)        | session lifetime: `-1` \| `0` \| `<n>(s                                                                          | m   | h   | d   | w)` |
+| `ENABLE_SIGNUP`                                                                                                                                                                         | RC   | `true`                  | public signup (auto-disabled after the first user becomes admin; production reference: `false` + `create-admin`) |
+| `ENABLE_LOGIN_FORM`                                                                                                                                                                     | RC   | `true`                  | email/password form (off for SSO-only)                                                                           |
+| `DEFAULT_USER_ROLE`                                                                                                                                                                     | RC   | `pending`               | role given to new signups                                                                                        |
+| `ENABLE_API_KEY`                                                                                                                                                                        | RC   | `true`                  | allow user API keys (`sk-...`)                                                                                   |
+| `ENABLE_API_KEY_ENDPOINT_RESTRICTIONS`                                                                                                                                                  | RC   | `false`                 | restrict API keys to a path allowlist                                                                            |
+| `API_KEY_ALLOWED_ENDPOINTS`                                                                                                                                                             | RC   | `""`                    | comma-separated path prefixes; **empty list + restrictions on = deny all API-key requests**                      |
+| `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_SESSION_COOKIE_SECURE`                                                                                                                        | env  | `lax` / `false`         | session cookie flags                                                                                             |
+| `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE`                                                                                                                              | env  | = session values        | auth (`token`) cookie flags                                                                                      |
+| `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER`                                                                                                                    | env  | unset                   | header-based SSO behind a trusted proxy                                                                          |
+| `BYPASS_MODEL_ACCESS_CONTROL`                                                                                                                                                           | env  | `false`                 | skip per-model group ACL                                                                                         |
+| `SHOW_ADMIN_DETAILS` / `ADMIN_EMAIL`                                                                                                                                                    | RC   | `true` / unset          | admin contact shown to pending users                                                                             |
+| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS`                                                                                                                                      | env  | `true` / `true`         | admin DB export / admin access to user chats                                                                     |
+| `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env  | unset                   | each sets the corresponding response security header when present                                                |
 
 OAuth (Google / Microsoft / GitHub / generic OIDC via `GOOGLE_CLIENT_ID`&`_SECRET`,
 `MICROSOFT_CLIENT_ID`&`_SECRET`&`_TENANT_ID`, `GITHUB_CLIENT_ID`&`_SECRET`,
@@ -193,32 +193,32 @@ attribute mappings, TLS options) are available as RC settings; all default off.
 Env vars here only seed the **default** permission set; actual permissions are
 managed per-group in the DB/UI.
 
-| Var | Default | Effect |
-|---|---|---|
-| `USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS` | `false` | grants the "skill editor" tier (see §6) |
-| `USER_PERMISSIONS_CHAT_FILE_UPLOAD` | `true` | file upload (server-enforced) |
-| `USER_PERMISSIONS_CHAT_DELETE` / `_EDIT` / `_SHARE` | `true` | chat deletion / message editing / share links |
-| `USER_PERMISSIONS_CHAT_CLONE` | `false` | cloning shared chats |
-| `USER_PERMISSIONS_CHAT_MULTIPLE_MODELS` | `true` | multi-model chat |
-| `ADDITIONAL_USER_META` | `[]` (RC) | JSON array `[{"key":"carte_user_id","label":"..."}]` declaring extra string user fields, editable by admins and delivered to tools as `__user__["info"]` — opaque markers for external-system authorization |
-| `DEFAULT_LOCALE` | `""` (RC) | UI locale (shipped: `ja`, `en`, `zh-CN`) |
-| `DEFAULT_MODELS` | unset (RC) | default model(s) for new chats |
-| `WEBUI_BANNERS` | `[]` (RC) | JSON banner list `{id,type,title?,content,dismissible,timestamp}` |
-| `WEBHOOK_URL` / `ENABLE_USER_WEBHOOKS` | `""` / `true` (RC) | server webhook (signup events) / per-user webhooks |
+| Var                                                 | Default            | Effect                                                                                                                                                                                                      |
+| --------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS`          | `false`            | grants the "skill editor" tier (see §6)                                                                                                                                                                     |
+| `USER_PERMISSIONS_CHAT_FILE_UPLOAD`                 | `true`             | file upload (server-enforced)                                                                                                                                                                               |
+| `USER_PERMISSIONS_CHAT_DELETE` / `_EDIT` / `_SHARE` | `true`             | chat deletion / message editing / share links                                                                                                                                                               |
+| `USER_PERMISSIONS_CHAT_CLONE`                       | `false`            | cloning shared chats                                                                                                                                                                                        |
+| `USER_PERMISSIONS_CHAT_MULTIPLE_MODELS`             | `true`             | multi-model chat                                                                                                                                                                                            |
+| `ADDITIONAL_USER_META`                              | `[]` (RC)          | JSON array `[{"key":"carte_user_id","label":"..."}]` declaring extra string user fields, editable by admins and delivered to tools as `__user__["info"]` — opaque markers for external-system authorization |
+| `DEFAULT_LOCALE`                                    | `""` (RC)          | UI locale (shipped: `ja`, `en`, `zh-CN`)                                                                                                                                                                    |
+| `DEFAULT_MODELS`                                    | unset (RC)         | default model(s) for new chats                                                                                                                                                                              |
+| `WEBUI_BANNERS`                                     | `[]` (RC)          | JSON banner list `{id,type,title?,content,dismissible,timestamp}`                                                                                                                                           |
+| `WEBHOOK_URL` / `ENABLE_USER_WEBHOOKS`              | `""` / `true` (RC) | server webhook (signup events) / per-user webhooks                                                                                                                                                          |
 
 ### 3.5 Model backend (OpenAI-compatible engine)
 
-| Var | Kind | Default | Effect |
-|---|---|---|---|
-| `ENABLE_OPENAI_API` | RC | `true` | master switch |
-| `OPENAI_API_BASE_URL` / `OPENAI_API_KEY` | env seed | `https://api.openai.com/v1` / `""` | single-connection convenience; folded into the plural forms |
-| `OPENAI_API_BASE_URLS` / `OPENAI_API_KEYS` | RC | from above | `;`-separated endpoint/key lists, index-matched |
-| `ENABLE_OLLAMA_API` | RC | `true` | ollama backend (reference deployment: `false`) |
-| `OLLAMA_BASE_URL(S)` | env/RC | localhost | ollama endpoints |
-| `AIOHTTP_CLIENT_TIMEOUT` | env | unset (unlimited) | total chat-request timeout — leave unset for long generations |
-| `AIOHTTP_CLIENT_TIMEOUT_CONNECT` | env | `10` | TCP connect timeout (dead-connection detection) |
-| `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` | env | `300` | max silent gap between streamed bytes |
-| `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` / `_TOOL_SERVER_DATA` | env | `10` / `10` | model-list / tool-server fetch timeouts |
+| Var                                                       | Kind     | Default                            | Effect                                                        |
+| --------------------------------------------------------- | -------- | ---------------------------------- | ------------------------------------------------------------- |
+| `ENABLE_OPENAI_API`                                       | RC       | `true`                             | master switch                                                 |
+| `OPENAI_API_BASE_URL` / `OPENAI_API_KEY`                  | env seed | `https://api.openai.com/v1` / `""` | single-connection convenience; folded into the plural forms   |
+| `OPENAI_API_BASE_URLS` / `OPENAI_API_KEYS`                | RC       | from above                         | `;`-separated endpoint/key lists, index-matched               |
+| `ENABLE_OLLAMA_API`                                       | RC       | `true`                             | ollama backend (reference deployment: `false`)                |
+| `OLLAMA_BASE_URL(S)`                                      | env/RC   | localhost                          | ollama endpoints                                              |
+| `AIOHTTP_CLIENT_TIMEOUT`                                  | env      | unset (unlimited)                  | total chat-request timeout — leave unset for long generations |
+| `AIOHTTP_CLIENT_TIMEOUT_CONNECT`                          | env      | `10`                               | TCP connect timeout (dead-connection detection)               |
+| `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`                        | env      | `300`                              | max silent gap between streamed bytes                         |
+| `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` / `_TOOL_SERVER_DATA` | env      | `10` / `10`                        | model-list / tool-server fetch timeouts                       |
 
 Reference wiring for a local engine:
 `OPENAI_API_BASE_URL=http://host.docker.internal:13300/v1`, `OPENAI_API_KEY=EMPTY`,
@@ -228,25 +228,25 @@ separate reasoning block.
 
 ### 3.6 Tool calling & tasks
 
-| Var | Kind | Default | Effect |
-|---|---|---|---|
-| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS` | env | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error |
-| `CHAT_TOOL_EXECUTION_TIMEOUT` | env | `300` s (`-1` off) | authoritative per-tool-call timeout; expiry is returned to the model as a tool result |
-| `TASK_MODEL` / `TASK_MODEL_EXTERNAL` | RC | `""` | model used for background tasks (title generation) |
-| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC | `true` / built-in | auto chat titles |
+| Var                                                            | Kind | Default               | Effect                                                                                |
+| -------------------------------------------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------- |
+| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`                       | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                            |
+| `CHAT_TOOL_EXECUTION_TIMEOUT`                                  | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result |
+| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                    |
+| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                      |
 
 ### 3.7 Attachments / files / storage
 
-| Var | Kind | Default | Effect |
-|---|---|---|---|
-| `ATTACHMENT_MAX_SIZE` | RC | `25` MB | upload size cap (server-enforced) |
-| `ATTACHMENT_MAX_COUNT` | RC | unlimited | max attachments per message |
-| `ATTACHMENT_ALLOWED_EXTENSIONS` | RC | `[]` = allow all | lowercase, dot-less whitelist |
-| `ATTACHMENT_FUNCTION_ID` | RC | `""` = none | id of the single global Attachment Function (§7.3); empty ⇒ uploads store raw bytes, no text extraction |
-| `ATTACHMENT_IMAGE_MAX_DIMENSION` | RC | unset = no resize | client-side downscale of attached images before upload: if the longest edge exceeds this (px), the image is resized to fit, aspect ratio and MIME preserved |
-| `PASTED_TEXT_CHARACTER_LIMIT` | RC | unset = disabled | pasted plain text longer than this (chars) becomes a `.txt` attachment |
-| `STORAGE_PROVIDER` | env | `local` | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
-| `TIKTOKEN_ENCODING_NAME` | RC | `cl100k_base` | tokenizer for token counting |
+| Var                              | Kind | Default           | Effect                                                                                                                                                      |
+| -------------------------------- | ---- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATTACHMENT_MAX_SIZE`            | RC   | `25` MB           | upload size cap (server-enforced)                                                                                                                           |
+| `ATTACHMENT_MAX_COUNT`           | RC   | unlimited         | max attachments per message                                                                                                                                 |
+| `ATTACHMENT_ALLOWED_EXTENSIONS`  | RC   | `[]` = allow all  | lowercase, dot-less whitelist                                                                                                                               |
+| `ATTACHMENT_FUNCTION_ID`         | RC   | `""` = none       | id of the single global Attachment Function (§7.3); empty ⇒ uploads store raw bytes, no text extraction                                                     |
+| `ATTACHMENT_IMAGE_MAX_DIMENSION` | RC   | unset = no resize | client-side downscale of attached images before upload: if the longest edge exceeds this (px), the image is resized to fit, aspect ratio and MIME preserved |
+| `PASTED_TEXT_CHARACTER_LIMIT`    | RC   | unset = disabled  | pasted plain text longer than this (chars) becomes a `.txt` attachment                                                                                      |
+| `STORAGE_PROVIDER`               | env  | `local`           | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
+| `TIKTOKEN_ENCODING_NAME`         | RC   | `cl100k_base`     | tokenizer for token counting                                                                                                                                |
 
 ### 3.8 Audio (STT / TTS)
 
@@ -269,12 +269,12 @@ VOICEVOX/AivisSpeech bridge), plus `AUDIO_TTS_MODEL`, `AUDIO_TTS_VOICE`,
 
 ### 3.9 Logging / audit / telemetry
 
-| Var | Default | Effect |
-|---|---|---|
-| `GLOBAL_LOG_LEVEL` | `INFO` | root level; per-source overrides: `MAIN_LOG_LEVEL`, `MODELS_LOG_LEVEL`, `OPENAI_LOG_LEVEL`, `OLLAMA_LOG_LEVEL`, `AUDIO_LOG_LEVEL`, `CONFIG_LOG_LEVEL`, `DB_LOG_LEVEL`, `WEBHOOK_LOG_LEVEL`, `OAUTH_LOG_LEVEL` |
-| `AUDIT_LOG_LEVEL` | `NONE` | `NONE` \| `METADATA` \| `REQUEST` \| `REQUEST_RESPONSE`; writes `$DATA_DIR/audit.log` |
-| `AUDIT_LOG_FILE_ROTATION_SIZE` / `MAX_BODY_LOG_SIZE` / `AUDIT_EXCLUDED_PATHS` | `10MB` / `2048` / `/chats,/chat,/folders` | audit tuning |
-| `ENABLE_OTEL` + `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` | `false` | OpenTelemetry traces |
+| Var                                                                                                                   | Default                                   | Effect                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GLOBAL_LOG_LEVEL`                                                                                                    | `INFO`                                    | root level; per-source overrides: `MAIN_LOG_LEVEL`, `MODELS_LOG_LEVEL`, `OPENAI_LOG_LEVEL`, `OLLAMA_LOG_LEVEL`, `AUDIO_LOG_LEVEL`, `CONFIG_LOG_LEVEL`, `DB_LOG_LEVEL`, `WEBHOOK_LOG_LEVEL`, `OAUTH_LOG_LEVEL` |
+| `AUDIT_LOG_LEVEL`                                                                                                     | `NONE`                                    | `NONE` \| `METADATA` \| `REQUEST` \| `REQUEST_RESPONSE`; writes `$DATA_DIR/audit.log`                                                                                                                         |
+| `AUDIT_LOG_FILE_ROTATION_SIZE` / `MAX_BODY_LOG_SIZE` / `AUDIT_EXCLUDED_PATHS`                                         | `10MB` / `2048` / `/chats,/chat,/folders` | audit tuning                                                                                                                                                                                                  |
+| `ENABLE_OTEL` + `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` | `false`                                   | OpenTelemetry traces                                                                                                                                                                                          |
 
 Vars you may know from stock Open WebUI that **do not exist here** (removed with
 their features): all `RAG_*` / embedding / web-search / image-generation config,
@@ -315,7 +315,7 @@ Other auth endpoints: `GET /api/v1/auths/` (session info + refreshed token),
 
 ### 4.2 Models
 
-`GET /api/models` — the canonical model list for clients: only *workspace models*
+`GET /api/models` — the canonical model list for clients: only _workspace models_
 (presets and admin-configured base models; raw connection models are not exposed),
 filtered by the caller's group ACL. The `id` field is what you pass as `model` in
 completions. Model CRUD lives under `/api/v1/models/*` (create/update/delete are
@@ -381,14 +381,14 @@ Reverse-proxy note: SSE must not be buffered (the server sends
 
 ### 4.4 Files
 
-| Endpoint | Notes |
-|---|---|
-| `POST /api/v1/files/` | multipart field `file`; optional `?process=false` to skip extraction. Enforces the upload permission, extension whitelist and size cap. Returns `{id, filename, meta{name,content_type,size}, data{content?,status?}}` |
-| `POST /api/v1/files/{id}/process` | re-run the Attachment Function (`__event__="attach"`) |
-| `GET /api/v1/files/{id}` / `/{id}/content` / `/{id}/data/content` | metadata / raw bytes / extracted text |
-| `POST /api/v1/files/{id}/data/content/update` | overwrite extracted text |
-| `POST /api/v1/files/{id}/access_control/update` | `null` (public) or `{"read":{group_ids:[],user_ids:[]}}` |
-| `GET /api/v1/files/` `/list` `/search`, `DELETE /api/v1/files/{id}` | listing / deletion |
+| Endpoint                                                            | Notes                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/v1/files/`                                               | multipart field `file`; optional `?process=false` to skip extraction. Enforces the upload permission, extension whitelist and size cap. Returns `{id, filename, meta{name,content_type,size}, data{content?,status?}}` |
+| `POST /api/v1/files/{id}/process`                                   | re-run the Attachment Function (`__event__="attach"`)                                                                                                                                                                  |
+| `GET /api/v1/files/{id}` / `/{id}/content` / `/{id}/data/content`   | metadata / raw bytes / extracted text                                                                                                                                                                                  |
+| `POST /api/v1/files/{id}/data/content/update`                       | overwrite extracted text                                                                                                                                                                                               |
+| `POST /api/v1/files/{id}/access_control/update`                     | `null` (public) or `{"read":{group_ids:[],user_ids:[]}}`                                                                                                                                                               |
+| `GET /api/v1/files/` `/list` `/search`, `DELETE /api/v1/files/{id}` | listing / deletion                                                                                                                                                                                                     |
 
 To use a file in a completion: pass `{"type":"file","id":...}` in the request
 `files` array (text injection), or reference `/api/v1/files/{id}/content` as an
@@ -405,11 +405,11 @@ model sees the attachment marked as unextracted.
 All extension kinds are DB rows, so a harness repo can push them via API (this is
 the intended workflow — keep sources in your repo, register on deploy):
 
-| Kind | Endpoint | Gate | Form |
-|---|---|---|---|
-| Tool | `POST /api/v1/tools/create`, `POST /api/v1/tools/id/{id}/update` | admin | `{id, name, description?, content, meta?, access_control?}` — `content` is the Python source; the module is imported and spec'd at save time (syntax errors reject the save) |
-| Function | `POST /api/v1/functions/create`, `.../id/{id}/update` | admin | `{id, name, description?, content}` — type (filter/pipe/action/attachment) is auto-detected from the class in `content` |
-| Skill | `POST /api/v1/skills/create`, `.../id/{id}/update` | skill editor+ | `{id, name, description?, content, tool_ids?, access_control?}` (markdown content; `tool_ids` admin-only) |
+| Kind     | Endpoint                                                         | Gate          | Form                                                                                                                                                                         |
+| -------- | ---------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool     | `POST /api/v1/tools/create`, `POST /api/v1/tools/id/{id}/update` | admin         | `{id, name, description?, content, meta?, access_control?}` — `content` is the Python source; the module is imported and spec'd at save time (syntax errors reject the save) |
+| Function | `POST /api/v1/functions/create`, `.../id/{id}/update`            | admin         | `{id, name, description?, content}` — type (filter/pipe/action/attachment) is auto-detected from the class in `content`                                                      |
+| Skill    | `POST /api/v1/skills/create`, `.../id/{id}/update`               | skill editor+ | `{id, name, description?, content, tool_ids?, access_control?}` (markdown content; `tool_ids` admin-only)                                                                    |
 
 `id` for tools/functions must be a valid Python identifier (lowercased on save)
 and is immutable. Valves values: `GET/POST /api/v1/{tools,functions}/id/{id}/valves*`
@@ -492,18 +492,18 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter | Contents |
-|---|---|
-| `__user__` | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization |
-| `__event_emitter__` | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path |
-| `__event_call__` | `async fn(event)` — round-trip to the user (`confirmation` / `input` / `execute`), awaits their reply; `None` headless |
-| `__chat_id__`, `__message_id__` | current chat / message ids |
-| `__id__` | this tool's id |
-| `__files__` | the chat's attachment refs (already ACL-filtered) |
-| `__messages__` | the outbound message list |
-| `__metadata__` | request metadata (chat/message ids, files, skill activations, ...) |
-| `__request__` | the FastAPI `Request` (→ `request.app.state.config` etc.) |
-| `__model__` | a model dict — note: for tools this is the *task* model, not necessarily the chat model |
+| Parameter                       | Contents                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path                                                 |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input` / `execute`), awaits their reply; `None` headless              |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                          |
+| `__id__`                        | this tool's id                                                                                                                      |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                   |
+| `__messages__`                  | the outbound message list                                                                                                           |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                  |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                           |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                             |
 
 ### 5.4 Argument & result rendering
 
@@ -547,7 +547,7 @@ async def run_sql(self, query: Code("sql")) -> Text:
 ### 5.6 Access control & assignment
 
 - Tool CRUD and Valves: **admin only**. Usage ACL per tool: `access_control =
-  null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
+null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 - A tool is live on a model iff it is listed in the model preset's `meta.toolIds`
   (and the calling user passes the tool's read ACL). There is no per-chat toggle
   and no global switch — "off everywhere" = assigned to no model.
@@ -631,7 +631,7 @@ condition passes through as plain text (no error).
 Both paths return the same tool result:
 
 ```json
-{"result": "<expanded skill content>", "tools": ["secret_password"]}
+{ "result": "<expanded skill content>", "tools": ["secret_password"] }
 ```
 
 `result` enters the model history as a `role:"tool"` message (not a system
@@ -650,7 +650,7 @@ A **Function** is admin-authored, in-process Python, one module per DB row. The
 `class Action`, or `class Attachment`. Functions have no usage ACL — they apply
 via model assignment (`meta.filterIds` / `meta.actionIds`), except Attachment,
 which is a single global hook. There is no "global filter" and no enable/disable
-toggle: assignment *is* activation, so a policy filter (e.g. de-identification)
+toggle: assignment _is_ activation, so a policy filter (e.g. de-identification)
 must be assigned to **every** model preset it should govern — forgetting one is
 the classic operational mistake.
 
@@ -692,7 +692,7 @@ class Filter:
 - All three hooks optional. Chain order across filters: ascending
   `valves["priority"]` — expose `priority` as a Valves field so admins can order.
 - **Where hooks run**: `inlet` runs on every `/api/chat/completions` call (UI and
-  headless) *before* tool resolution and built-in file-content injection; `stream`
+  headless) _before_ tool resolution and built-in file-content injection; `stream`
   wraps the model stream on both paths (headless: `__event_emitter__`/`__event_call__`
   are `None` — tolerate that); `outlet` runs when the turn completes on the chat
   wire (the frontend posts `/api/chat/completed`) — headless clients must call
@@ -745,12 +745,12 @@ return `str` → `file.data = {"content": ..., "status": "success"}`;
 return `None` → skip (file stays unextracted). All three states are surfaced to
 the model on the injected `<source>` tag (`extraction="failed"/"none"`), so an
 unextracted file can still be handled by a tool via its `file_id`. Multiple
-providers should be routed *inside* one function, not via multiple functions.
+providers should be routed _inside_ one function, not via multiple functions.
 
 When it fires — timing facts for clients and hook authors:
 
-- **Upload** (`POST /api/v1/files/`): the hook runs *inline in the upload
-  request*, after the acceptance gate (permission → extension → size) passes and
+- **Upload** (`POST /api/v1/files/`): the hook runs _inline in the upload
+  request_, after the acceptance gate (permission → extension → size) passes and
   the file row is stored. The upload **response waits for extraction** and
   already carries `data.content` / `data.status` — no polling needed. Sync
   `process` runs in a threadpool, so slow extraction doesn't stall the server,
@@ -769,7 +769,7 @@ A `class Action` with an `action(self, body, ...)` method adds a button under th
 last assistant message (module-level `actions = [{"id","name","icon_url"?},...]`
 for several). Clicking posts the conversation to your handler; the returned dict
 can update messages, and emitted events are delivered in the response. Actions
-are kept for deliberately *human-initiated* operations — for model-initiated
+are kept for deliberately _human-initiated_ operations — for model-initiated
 interaction, tools with `__event_call__` cover dialogs/modals already.
 
 ### 7.5 Porting notes from stock Open WebUI
