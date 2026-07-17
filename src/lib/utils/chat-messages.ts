@@ -111,3 +111,77 @@ export const expandAssistantToolHistory = (
 	}
 	return messages;
 };
+
+/**
+ * チャット履歴(createMessagesList の出力)+ 任意の system 文を、
+ * OpenAI 互換 wire のメッセージ配列へ組み立てる(Chat.svelte の送信経路)。
+ *
+ * - user メッセージの画像 file は image_url パートに展開する。
+ *   llens(#69): url は正準形 "/api/v1/files/{id}/content"(backend が base64 化)
+ *   または旧チャットの data: URL — どちらもそのまま通す(分岐不要)。
+ * - assistant は過去ターンの tool 往復を wire 形に復元(#18-2)。
+ *   tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
+ * - 空 content のメッセージは落とす(user / tool / tool_calls 持ちは温存)。
+ */
+export const buildWireMessages = (
+	messagesList: any[],
+	systemContent: string | null | undefined
+): any[] => {
+	return [systemContent ? { role: 'system', content: systemContent } : undefined, ...messagesList]
+		.filter((message) => message)
+		.flatMap((message) => {
+			if (
+				message.role === 'user' &&
+				(message.files ?? []).some((file: any) => file.type === 'image')
+			) {
+				return [
+					{
+						role: 'user',
+						content: [
+							{
+								type: 'text',
+								text: message.content
+							},
+							...message.files
+								.filter((file: any) => file.type === 'image')
+								.map((file: any) => ({
+									type: 'image_url',
+									image_url: {
+										url: file.url
+									}
+								}))
+						]
+					}
+				];
+			}
+			if (message.role === 'assistant') {
+				return expandAssistantToolHistory(message.content, message?.content_blocks);
+			}
+			return [{ role: message.role, content: message.content }];
+		})
+		.filter(
+			(message) =>
+				message?.role === 'user' ||
+				message?.role === 'tool' ||
+				(message?.tool_calls?.length ?? 0) > 0 ||
+				(typeof message?.content === 'string' && message.content.trim())
+		);
+};
+
+/**
+ * stop パラメータを wire の string[] へ。chat params はカンマ区切り文字列、
+ * settings 由来は配列のことがある — どちらも受けて、"\n" 等のエスケープ表記を
+ * 実文字へ戻す(upstream 由来の JSON.parse デコード)。
+ *
+ * ※ upstream は params.stop 不在 + settings.params.stop 在で
+ *   `params?.stop.split(',')` が TypeError になる潜在バグがあった — 統一処理で解消。
+ */
+export const parseStopSequences = (
+	stop: string | string[] | null | undefined
+): string[] | undefined => {
+	if (stop === undefined || stop === null || stop === '') {
+		return undefined;
+	}
+	const tokens = typeof stop === 'string' ? stop.split(',').map((token) => token.trim()) : stop;
+	return tokens.map((str) => decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"')));
+};

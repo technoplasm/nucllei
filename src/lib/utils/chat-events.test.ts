@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCompletionData } from './chat-events';
+import { applyCompletionData, applyMessageMutation } from './chat-events';
 
 /**
  * wire v2 の FE 側適用の契約テスト。
@@ -106,5 +106,61 @@ describe('applyCompletionData', () => {
 		applyCompletionData(message, { usage: { total_tokens: 10 }, sources: [{ source: {} }] });
 		expect(message.usage).toEqual({ total_tokens: 10 });
 		expect(message.sources).toHaveLength(1);
+	});
+});
+
+describe('applyMessageMutation', () => {
+	it('status は statusHistory に蓄積する', () => {
+		const message: any = {};
+		expect(applyMessageMutation('status', { description: 'a' }, message)).toBe(true);
+		expect(applyMessageMutation('status', { description: 'b' }, message)).toBe(true);
+		expect(message.statusHistory).toEqual([{ description: 'a' }, { description: 'b' }]);
+	});
+
+	it('task-cancelled は done + interrupted を立てる(cancel 時の順序契約)', () => {
+		const message: any = { done: false };
+		expect(applyMessageMutation('task-cancelled', null, message)).toBe(true);
+		expect(message.done).toBe(true);
+		expect(message.interrupted).toBe(true);
+	});
+
+	it('chat:message:delta / message は content に追記する', () => {
+		const message: any = { content: 'こん' };
+		applyMessageMutation('chat:message:delta', { content: 'にち' }, message);
+		applyMessageMutation('message', { content: 'は' }, message);
+		expect(message.content).toBe('こんにちは');
+	});
+
+	it('chat:message / replace は content を置換する', () => {
+		const message: any = { content: 'old' };
+		applyMessageMutation('replace', { content: 'new' }, message);
+		expect(message.content).toBe('new');
+	});
+
+	it('chat:message:files / files は files を差し替える', () => {
+		const message: any = {};
+		applyMessageMutation('files', { files: [{ id: 'f1' }] }, message);
+		expect(message.files).toEqual([{ id: 'f1' }]);
+	});
+
+	it('source は sources に追記する', () => {
+		const message: any = {};
+		applyMessageMutation('source', { source: { name: 'doc' } }, message);
+		applyMessageMutation('citation', { source: { name: 'doc2' } }, message);
+		expect(message.sources).toHaveLength(2);
+	});
+
+	it('source(code_execution)は id で upsert する', () => {
+		const message: any = {};
+		applyMessageMutation('source', { type: 'code_execution', id: 'x', result: 1 }, message);
+		applyMessageMutation('source', { type: 'code_execution', id: 'x', result: 2 }, message);
+		expect(message.code_executions).toEqual([{ type: 'code_execution', id: 'x', result: 2 }]);
+	});
+
+	it('管轄外イベント(chat:completion / chat:title / notification 等)は false', () => {
+		const message: any = {};
+		for (const type of ['chat:completion', 'chat:title', 'notification', 'confirmation', 'input']) {
+			expect(applyMessageMutation(type, {}, message)).toBe(false);
+		}
 	});
 });

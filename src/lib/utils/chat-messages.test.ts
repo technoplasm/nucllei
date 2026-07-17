@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expandAssistantToolHistory } from './chat-messages';
+import { buildWireMessages, expandAssistantToolHistory, parseStopSequences } from './chat-messages';
 
 describe('expandAssistantToolHistory(#18-2)', () => {
 	it('tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ', () => {
@@ -192,5 +192,121 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 		const messages = expandAssistantToolHistory('両方できました。', blocks);
 		expect(messages[0].tool_calls).toHaveLength(2);
 		expect(messages.map((m) => m.role)).toEqual(['assistant', 'tool', 'tool', 'assistant']);
+	});
+});
+
+describe('buildWireMessages', () => {
+	it('system 文があれば先頭に注入する', () => {
+		const messages = buildWireMessages([{ role: 'user', content: 'こんにちは' }], 'あなたは犬');
+		expect(messages).toEqual([
+			{ role: 'system', content: 'あなたは犬' },
+			{ role: 'user', content: 'こんにちは' }
+		]);
+	});
+
+	it('system 文が無ければ注入しない(null / undefined / 空文字)', () => {
+		for (const system of [null, undefined, '']) {
+			const messages = buildWireMessages([{ role: 'user', content: 'hi' }], system);
+			expect(messages).toEqual([{ role: 'user', content: 'hi' }]);
+		}
+	});
+
+	it('user の画像 file は image_url パートに展開し、url をそのまま通す', () => {
+		const messages = buildWireMessages(
+			[
+				{
+					role: 'user',
+					content: 'これ見て',
+					files: [
+						{ type: 'image', url: '/api/v1/files/abc/content' },
+						{ type: 'file', url: '/api/v1/files/doc' },
+						{ type: 'image', url: 'data:image/png;base64,xyz' }
+					]
+				}
+			],
+			null
+		);
+		expect(messages).toEqual([
+			{
+				role: 'user',
+				content: [
+					{ type: 'text', text: 'これ見て' },
+					{ type: 'image_url', image_url: { url: '/api/v1/files/abc/content' } },
+					{ type: 'image_url', image_url: { url: 'data:image/png;base64,xyz' } }
+				]
+			}
+		]);
+	});
+
+	it('画像なし user はプレーン {role, content} のまま', () => {
+		const messages = buildWireMessages(
+			[{ role: 'user', content: '文書だけ', files: [{ type: 'file', url: '/x' }] }],
+			null
+		);
+		expect(messages).toEqual([{ role: 'user', content: '文書だけ' }]);
+	});
+
+	it('assistant の tool 往復は wire 形(assistant+tool_calls → tool)に復元する', () => {
+		const messages = buildWireMessages(
+			[
+				{ role: 'user', content: '実行して' },
+				{
+					role: 'assistant',
+					content: '結果です',
+					content_blocks: [
+						{
+							type: 'tool_calls',
+							calls: [{ id: 'c1', function: { name: 'run_python', arguments: '{}' } }],
+							results: [{ tool_call_id: 'c1', content: '42' }]
+						},
+						{ type: 'text', content: '結果です' }
+					]
+				}
+			],
+			null
+		);
+		expect(messages).toEqual([
+			{ role: 'user', content: '実行して' },
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [
+					{ id: 'c1', type: 'function', function: { name: 'run_python', arguments: '{}' } }
+				]
+			},
+			{ role: 'tool', tool_call_id: 'c1', content: '42' },
+			{ role: 'assistant', content: '結果です' }
+		]);
+	});
+
+	it('空 content の assistant は落とす・user は空でも残す', () => {
+		const messages = buildWireMessages(
+			[
+				{ role: 'user', content: '' },
+				{ role: 'assistant', content: '   ' }
+			],
+			null
+		);
+		expect(messages).toEqual([{ role: 'user', content: '' }]);
+	});
+});
+
+describe('parseStopSequences', () => {
+	it('未指定(undefined / null / 空文字)は undefined', () => {
+		expect(parseStopSequences(undefined)).toBeUndefined();
+		expect(parseStopSequences(null)).toBeUndefined();
+		expect(parseStopSequences('')).toBeUndefined();
+	});
+
+	it('カンマ区切り文字列を trim して配列化する', () => {
+		expect(parseStopSequences('END, STOP')).toEqual(['END', 'STOP']);
+	});
+
+	it('エスケープ表記("\\n" 等)を実文字へ戻す', () => {
+		expect(parseStopSequences('\\n,###')).toEqual(['\n', '###']);
+	});
+
+	it('配列(settings.params.stop 由来)も受ける — upstream では TypeError だった経路', () => {
+		expect(parseStopSequences(['END', '\\n'])).toEqual(['END', '\n']);
 	});
 });

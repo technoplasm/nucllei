@@ -37,8 +37,8 @@
 		promptTemplate,
 		getPromptVariables
 	} from '$lib/utils';
-	import { expandAssistantToolHistory } from '$lib/utils/chat-messages';
-	import { applyCompletionData } from '$lib/utils/chat-events';
+	import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
+	import { applyCompletionData, applyMessageMutation } from '$lib/utils/chat-events';
 	import {
 		consumeCompletionStream,
 		attachToTask,
@@ -267,56 +267,18 @@
 		targetChatId: string,
 		reply: ((result: unknown) => Promise<void>) | null
 	) => {
-		if (type === 'status') {
-			if (message?.statusHistory) {
-				message.statusHistory.push(data);
-			} else {
-				message.statusHistory = [data];
-			}
-		} else if (type === 'chat:completion') {
+		// message の状態だけを変えるイベント(status / task-cancelled / delta / files /
+		// source 等)は純関数層(chat-events.ts)で適用する
+		if (applyMessageMutation(type, data, message)) {
+			return;
+		}
+
+		if (type === 'chat:completion') {
 			await chatCompletionEventHandler(data, message, targetChatId);
-		} else if (type === 'task-cancelled') {
-			// llens: 中断された応答を done 化してスピナーを止める。interrupted は
-			// 直後に届く done イベント → completed(outlet filter)経路で成否として
-			// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
-			message.done = true;
-			message.interrupted = true;
-		} else if (type === 'chat:message:delta' || type === 'message') {
-			message.content += data.content;
-		} else if (type === 'chat:message' || type === 'replace') {
-			message.content = data.content;
-		} else if (type === 'chat:message:files' || type === 'files') {
-			message.files = data.files;
 		} else if (type === 'chat:title') {
 			chatTitle.set(data);
 			currentChatPage.set(1);
 			await chats.set(await getChatList($currentChatPage));
-		} else if (type === 'source' || type === 'citation') {
-			if (data?.type === 'code_execution') {
-				// Code execution; update existing code execution by ID, or add new one.
-				if (!message?.code_executions) {
-					message.code_executions = [];
-				}
-
-				const existingCodeExecutionIndex = message.code_executions.findIndex(
-					(execution) => execution.id === data.id
-				);
-
-				if (existingCodeExecutionIndex !== -1) {
-					message.code_executions[existingCodeExecutionIndex] = data;
-				} else {
-					message.code_executions.push(data);
-				}
-
-				message.code_executions = message.code_executions;
-			} else {
-				// Regular source.
-				if (message?.sources) {
-					message.sources.push(data);
-				} else {
-					message.sources = [data];
-				}
-			}
 		} else if (type === 'notification') {
 			const toastType = data?.type ?? 'info';
 			const toastContent = data?.content ?? '';
@@ -1245,58 +1207,12 @@
 			params?.stream_response ??
 			true;
 
-		let messages = [
-			params?.system
-				? {
-						role: 'system',
-						content: promptTemplate(params?.system ?? '', $user?.name, undefined)
-					}
-				: undefined,
-			...createMessagesList(_history, responseMessageId)
-		].filter((message) => message);
-
-		messages = messages
-			.flatMap((message, idx, arr) => {
-				if (
-					message.role === 'user' &&
-					(message.files?.filter((file) => file.type === 'image').length > 0 ?? false)
-				) {
-					return [
-						{
-							role: 'user',
-							content: [
-								{
-									type: 'text',
-									text: message.content
-								},
-								// llens(#69): url は正準形 "/api/v1/files/{id}/content"(backend が base64 化)
-								// または旧チャットの data: URL — どちらもそのまま通す(分岐不要)。
-								...message.files
-									.filter((file) => file.type === 'image')
-									.map((file) => ({
-										type: 'image_url',
-										image_url: {
-											url: file.url
-										}
-									}))
-							]
-						}
-					];
-				}
-				if (message.role === 'assistant') {
-					// 過去ターンの tool 往復を wire 形に復元(#18-2)。
-					// tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
-					return expandAssistantToolHistory(message.content, message?.content_blocks);
-				}
-				return [{ role: message.role, content: message.content }];
-			})
-			.filter(
-				(message) =>
-					message?.role === 'user' ||
-					message?.role === 'tool' ||
-					(message?.tool_calls?.length ?? 0) > 0 ||
-					message?.content?.trim()
-			);
+		// wire 形への組み立て(system 注入・画像展開・tool 往復復元)は純関数層
+		// (chat-messages.ts buildWireMessages)— vitest で契約を固定している
+		const messages = buildWireMessages(
+			createMessagesList(_history, responseMessageId),
+			params?.system ? promptTemplate(params?.system ?? '', $user?.name, undefined) : null
+		);
 
 		const abortController = new AbortController();
 		completionAbortControllers.push(abortController);
@@ -1312,12 +1228,7 @@
 
 					format: $settings.requestFormat ?? undefined,
 					keep_alive: $settings.keepAlive ?? undefined,
-					stop:
-						(params?.stop ?? $settings?.params?.stop ?? undefined)
-							? (params?.stop.split(',').map((token) => token.trim()) ?? $settings.params.stop).map(
-									(str) => decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"'))
-								)
-							: undefined
+					stop: parseStopSequences(params?.stop ?? $settings?.params?.stop)
 				},
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,

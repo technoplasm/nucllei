@@ -128,3 +128,76 @@ function applyDelta(message: Record<string, any>, delta: CompletionDelta) {
 	// Svelte のリアクティビティ(再代入検知)のため配列参照を更新する
 	message.content_blocks = blocks;
 }
+
+/**
+ * chat:completion 以外の「message の状態だけを変える」イベントの適用(mutate)。
+ * 適用したら true、ここの管轄外(chat:completion / chat:title / notification /
+ * confirmation / input などの副作用イベント)は false を返し呼び出し側に委ねる。
+ */
+export function applyMessageMutation(
+	type: string | null,
+	data: any,
+	message: Record<string, any>
+): boolean {
+	if (type === 'status') {
+		if (message?.statusHistory) {
+			message.statusHistory.push(data);
+		} else {
+			message.statusHistory = [data];
+		}
+		return true;
+	}
+
+	if (type === 'task-cancelled') {
+		// llens: 中断された応答を done 化してスピナーを止める。interrupted は
+		// 直後に届く done イベント → completed(outlet filter)経路で成否として
+		// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
+		message.done = true;
+		message.interrupted = true;
+		return true;
+	}
+
+	if (type === 'chat:message:delta' || type === 'message') {
+		message.content += data.content;
+		return true;
+	}
+
+	if (type === 'chat:message' || type === 'replace') {
+		message.content = data.content;
+		return true;
+	}
+
+	if (type === 'chat:message:files' || type === 'files') {
+		message.files = data.files;
+		return true;
+	}
+
+	if (type === 'source' || type === 'citation') {
+		if (data?.type === 'code_execution') {
+			// code execution は id で upsert
+			if (!message?.code_executions) {
+				message.code_executions = [];
+			}
+
+			const existingCodeExecutionIndex = message.code_executions.findIndex(
+				(execution: any) => execution.id === data.id
+			);
+
+			if (existingCodeExecutionIndex !== -1) {
+				message.code_executions[existingCodeExecutionIndex] = data;
+			} else {
+				message.code_executions.push(data);
+			}
+		} else {
+			// Regular source.
+			if (message?.sources) {
+				message.sources.push(data);
+			} else {
+				message.sources = [data];
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
