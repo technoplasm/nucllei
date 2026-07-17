@@ -33,11 +33,9 @@
 		model = null,
 		sources = null,
 		floatingButtons = false,
-		save = false,
 		onTaskClick = () => {},
 		onSourceClick = () => {},
-		onAddMessages = () => {},
-		onUpdate = () => {}
+		onAddMessages = () => {}
 	}: {
 		id: string;
 		blocks: ContentBlock[];
@@ -46,7 +44,6 @@
 		model?: Model | null;
 		sources?: MessageSource[] | null;
 		floatingButtons?: boolean;
-		save?: boolean;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
 		onSourceClick?: (id: string, idx?: number | string) => void;
 		onAddMessages?: (payload: {
@@ -54,10 +51,6 @@
 			parentId: string;
 			messages: { role: string; content: string }[];
 		}) => void;
-		onUpdate?: (
-			blockIdx: number,
-			payload: { raw: string; oldContent: string; newContent: string }
-		) => void;
 	} = $props();
 
 	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま
@@ -98,12 +91,10 @@
 				content={block.content ?? ''}
 				{sources}
 				{floatingButtons}
-				{save}
 				{model}
 				{onTaskClick}
 				{onSourceClick}
 				{onAddMessages}
-				onUpdate={(payload) => onUpdate(blockIdx, payload)}
 			/>
 		{:else if block.type === 'tool_calls'}
 			{#each toolCalls(block) as call (call.id)}

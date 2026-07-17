@@ -17,20 +17,16 @@
 		id = '',
 		content,
 		model = null,
-		save = false,
 		sourceIds = [],
 		onSourceClick = () => {},
-		onTaskClick = () => {},
-		onUpdate = undefined
+		onTaskClick = () => {}
 	}: {
 		id?: string;
 		content: string;
 		model?: { name?: string } | null;
-		save?: boolean;
 		sourceIds?: string[];
 		onSourceClick?: (id: string, sourceId?: string) => void;
 		onTaskClick?: (payload: Record<string, any>) => void;
-		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
 	} = $props();
 
 	const processed = $derived(
@@ -69,21 +65,7 @@
 
 {#key id}
 	{#each segments.stableBlocks as block, i (i)}
-		<MarkdownTokens
-			tokens={block.tokens}
-			id={`${id}-s${i}`}
-			{save}
-			{onTaskClick}
-			{onSourceClick}
-			{onUpdate}
-		/>
+		<MarkdownTokens tokens={block.tokens} id={`${id}-s${i}`} {onTaskClick} {onSourceClick} />
 	{/each}
-	<MarkdownTokens
-		tokens={segments.tailTokens}
-		id={`${id}-tail`}
-		{save}
-		{onTaskClick}
-		{onSourceClick}
-		{onUpdate}
-	/>
+	<MarkdownTokens tokens={segments.tailTokens} id={`${id}-tail`} {onTaskClick} {onSourceClick} />
 {/key}

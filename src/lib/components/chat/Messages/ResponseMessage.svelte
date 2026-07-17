@@ -122,40 +122,6 @@
 			sourceButton?.click();
 		}
 	};
-
-	// CodeBlock の Save(onUpdate 経由)を本文へ反映する
-	const applyContentUpdate = (payload: { raw: string; oldContent: string; newContent: string }) => {
-		const { raw, oldContent, newContent } = payload;
-
-		history.messages[message.id].content = history.messages[message.id].content.replace(
-			raw,
-			raw.replace(oldContent, newContent)
-		);
-
-		updateChat();
-	};
-
-	const applyBlockContentUpdate = (
-		blockIdx: number,
-		payload: { raw: string; oldContent: string; newContent: string }
-	) => {
-		const { raw, oldContent, newContent } = payload;
-		const blocks = history.messages[message.id].content_blocks;
-
-		if (blocks?.[blockIdx]) {
-			blocks[blockIdx] = {
-				...blocks[blockIdx],
-				content: (blocks[blockIdx].content ?? '').replace(raw, raw.replace(oldContent, newContent))
-			};
-		}
-
-		history.messages[message.id].content = history.messages[message.id].content.replace(
-			raw,
-			raw.replace(oldContent, newContent)
-		);
-
-		updateChat();
-	};
 </script>
 
 {#key message.id}
@@ -282,11 +248,9 @@
 										{history}
 										sources={message.sources}
 										floatingButtons={(message.done ?? false) && !readOnly}
-										save={!readOnly}
 										{model}
 										onSourceClick={handleSourceClick}
 										onAddMessages={addMessages}
-										onUpdate={applyBlockContentUpdate}
 									/>
 								{:else if message.content === '' && !message.error}
 									{#if message.done}
@@ -307,11 +271,9 @@
 										content={message.content}
 										sources={message.sources}
 										floatingButtons={(message.done ?? false) && !readOnly}
-										save={!readOnly}
 										{model}
 										onSourceClick={handleSourceClick}
 										onAddMessages={addMessages}
-										onUpdate={applyContentUpdate}
 									/>
 								{/if}
 

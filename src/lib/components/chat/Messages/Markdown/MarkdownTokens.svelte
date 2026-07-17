@@ -22,23 +22,18 @@
 
 	type Token = { type: string; [key: string]: any };
 
-	// save / onUpdate(コード編集の保存チェーン)は hljs 一本化(編集機能の撤去)で
-	// 消費者がいなくなった。上流(Markdown/ContentRenderer/ContentBlocks)の配管掃除は
-	// Messages 樹の正常化トラックで。
 	let {
 		id,
 		tokens,
 		top = true,
 		onTaskClick = () => {},
-		onSourceClick = () => {},
-		onUpdate = undefined
+		onSourceClick = () => {}
 	}: {
 		id: string;
 		tokens: Token[];
 		top?: boolean;
 		onTaskClick?: (payload: Record<string, any>) => void;
 		onSourceClick?: (id: string, sourceId?: string) => void;
-		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
 	} = $props();
 
 	const headerComponent = (depth: number) => {
@@ -170,7 +165,6 @@
 					tokens={token.tokens}
 					{onTaskClick}
 					{onSourceClick}
-					{onUpdate}
 				/>
 			</blockquote>
 		{/if}
@@ -203,7 +197,6 @@
 							top={token.loose}
 							{onTaskClick}
 							{onSourceClick}
-							{onUpdate}
 						/>
 					</li>
 				{/each}
@@ -236,7 +229,6 @@
 							top={token.loose}
 							{onTaskClick}
 							{onSourceClick}
-							{onUpdate}
 						/>
 					</li>
 				{/each}

@@ -16,19 +16,16 @@
 		history,
 		model = null,
 		sources = null,
-		save = false,
 		floatingButtons = true,
 		onSourceClick = () => {},
 		onTaskClick = () => {},
-		onAddMessages = () => {},
-		onUpdate = () => {}
+		onAddMessages = () => {}
 	}: {
 		id: string;
 		content: string;
 		history: ChatHistory;
 		model?: Model | null;
 		sources?: MessageSource[] | null;
-		save?: boolean;
 		floatingButtons?: boolean;
 		onSourceClick?: (id: string, idx?: number | string) => void;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
@@ -37,7 +34,6 @@
 			parentId: string;
 			messages: { role: string; content: string }[];
 		}) => void;
-		onUpdate?: (payload: { raw: string; oldContent: string; newContent: string }) => void;
 	} = $props();
 
 	let contentContainerElement: HTMLDivElement | null = $state(null);
@@ -163,7 +159,7 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	<Markdown {id} {content} {model} {save} {sourceIds} {onSourceClick} {onTaskClick} {onUpdate} />
+	<Markdown {id} {content} {model} {sourceIds} {onSourceClick} {onTaskClick} />
 
 	<!-- content div の中に置く(外に置くと space-y の親の下で :last-child 判定を壊し、
 	     最後のブロックにも margin が付く — tailwind v4 の space-y は
