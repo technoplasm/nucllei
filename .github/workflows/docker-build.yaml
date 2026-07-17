@@ -47,11 +47,9 @@ jobs:
             [ "$HEAD_COMMIT" = "$TAG_COMMIT" ] || { echo "HEAD != tag commit"; exit 1; }
 
             echo "app_version=$TAG" >> "$GITHUB_OUTPUT"
-            TAGS="$IMAGE:$TAG"
-            # リリース tag(v*)のみ latest を更新。pre-NN は動かさない
-            case "$TAG" in
-              v*) TAGS="$TAGS,$IMAGE:latest" ;;
-            esac
+            # latest は最新 tag に追従(pre-NN 含む)。参照側 compose の既定が
+            # `:latest` で、v* リリース開始前でも pull 可能にする(2026-07-18 変更)
+            TAGS="$IMAGE:$TAG,$IMAGE:latest"
             echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
           else
             echo "app_version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
