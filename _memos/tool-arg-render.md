@@ -55,7 +55,8 @@
   (Save → message content 書き戻し)は機能ごと撤去 — 表示専用で、ここで直したコードを
   実行する経路はない。CodeMirror(CodeEditor)が残るのは workspace のエディタ画面のみ。
   ※ save/onUpdate の上流配管(Markdown/ContentRenderer/ContentBlocks/ResponseMessage の
-  applyContentUpdate)は死んでいる — Messages 樹の正常化トラックで掃除する。
+  applyContentUpdate)は死んでいた — 全層から撤去済み(2026-07-17、`a16cd8b3f`)。
+  本文編集は MessageEditor 経路のみ。
 
 ## 宣言メカニズム
 
