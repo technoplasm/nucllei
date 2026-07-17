@@ -107,12 +107,15 @@ uv run task dev
 pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- **起動場所は tmux(2026-07-16 確定、2026-07-17 再改訂)**: session **`owui`** = 0:FE(pnpm dev)/
-  **1:BE(uv run task dev)** / 2〜:claude・nvim・zsh(旧記載の session `nuc`・0:BE は現況と逆なので注意)。
-  cc からの BE 再起動は nohup でなく `tmux send-keys -t owui:1 'uv run task dev' Enter`
-  (状態確認は `tmux capture-pane -t owui:1 -p`)。ログはその window に流れる — 500 の一次調査は
-  まずそこの traceback を読む。**再起動時の罠(2026-07-17 実害)**: `C-c` 後に履歴 `Up` で再実行
-  しない — シェル履歴が vite 等を拾って BE の代わりに別プロセスを起動しうる。コマンドは必ず明示で送る。
+- **起動場所は tmux(2026-07-16 確定、2026-07-17 再々改訂)**: window 構成 = 0:FE(pnpm dev)/
+  **1:BE(uv run task dev)** / 2〜:claude・nvim・zsh。**セッション名は固定と思わない**(2026-07-17 夜に
+  実害: 旧記載 `owui` 決め打ちで `can't find session`。現況は無名セッション `0`)。BE ペインは
+  `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_tty} #{pane_current_command}'`
+  で `uv` を探して特定してから send-keys する。再起動は nohup でなく
+  `tmux send-keys -t <pane> 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t <pane> -p`)。
+  ログはその window に流れる — 500 の一次調査はまずそこの traceback を読む。
+  **再起動時の罠(2026-07-17 実害)**: `C-c` 後に履歴 `Up` で再実行しない — シェル履歴が vite 等を
+  拾って BE の代わりに別プロセスを起動しうる。コマンドは必ず明示で送る。
 - **`.env`(repo 直下、gitignored)を BE が起動時に読む**(env.py の load_dotenv。
   `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
   `WEBUI_NAME` / `WEBUI_VERSION` / `WEBUI_COPYRIGHT` を入れてある。
@@ -319,3 +322,17 @@ LLENS_STT_SMOKE=1 uv run pytest \
 - **dev アカウント(ken@llens.local)は `ctrlEnterToSend: true`**: 素の Enter では送信されない。
   Playwright からの送信は `#send-message-button` クリックが設定非依存で確実。
 - リッチテキスト入力は全廃(textarea 一本、`2894654da`)。`#chat-input` は常に textarea。
+
+## i18n の流儀と罠(2026-07-17、1531e574b で実害を踏んで確立)
+
+- **locale JSON(`src/lib/i18n/locales/*/translation.json`)は手で編集して並べ替えない**。
+  キーの増減は必ず `pnpm i18n:parse`(i18next-parser + prettier)に出させる。手動 JSON 再ダンプは
+  parser と collation が違い、diff が数百行の並び替えノイズになる(実害)。訳の投入だけは
+  parse 後のファイルに該当行の値編集で OK。
+- **動的キーは `src/lib/i18n/dynamic-keys.js` に登録**(コメント内 t() ヒント集、2026-07-17 全面棚卸し)。
+  parser は `keepRemoved: false` なので、`t(variable)` 経由のキーは登録しないと**生きた翻訳ごと prune**
+  される(実害: ShortcutsModal 宣言配列化のとき未登録でショートカット 12 キーが消えかけた)。
+  **機能撤去・label の動的化・t() の生表示化をしたら dynamic-keys.js を必ず追従**させ、
+  `pnpm i18n:parse` して diff の追加/削除キーを全数目視する。
+- **parser の input は `src/**/*.{js,svelte}` — `.ts` を含まない**。.ts 内の静的 t('...')
+  (例: tts.svelte.ts)も dynamic-keys.js に載せないと prune される。
