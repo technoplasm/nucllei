@@ -27,7 +27,13 @@
 | | 種別 |
 |---|---|
 | **引数(入力)** | `code(language)` / `scalar`(str/num/bool を `key: value`)/ `json`(object/array ツリー) |
-| **結果(出力)** | `text` / `code(language)` / `json`(既定) / `image` / `file` |
+| **結果(出力)** | `text` / `code(language)` / `markdown` / `json`(既定) / `image` / `file` |
+
+- **追加(2026-07-18): 結果 kind `markdown`(戻り型 `Markdown`)**。md として**レンダリング**して
+  見せる(見出し・表・コードフェンス)。`Code("markdown")` = 「md ソースのハイライト」とは
+  別契約。doc 系 tool(llens の read_doc 等)の戻りに使う。結果表示専用で引数側の集合には
+  含めない。あわせて **load_skill(kind=skill)の指示本文もソース表示から md レンダリングに変更**。
+  目視は `probe_result_markdown`。
 
 - 入力で専用ウィジェットを要求する宣言型は **`code(language)` のみ**。他は JSON 値の構造から自動。
 - 結果は戻り型で `text`(素の値)/ `code` / `json`(既定)を選べる。モデルへの見え方(直列化テキスト)は不変。

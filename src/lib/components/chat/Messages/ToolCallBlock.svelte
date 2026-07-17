@@ -207,8 +207,14 @@
 							: 'border-line'} transition px-3 py-2"
 					>
 						{#if resultDisplay.kind === 'skill'}
-							<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
-							<HljsCode lang="markdown" code={resultDisplay.value} />
+							<!--
+								load_skill の構造化結果(#35): 指示本文(md レンダリング)+ 導入 tool 一覧。
+								XSS 不変条件: tool 結果は外部入力なのでサニタイズ必須 — Markdown は
+								MarkdownTokens/InlineTokens 内で DOMPurify.sanitize を通す(ReasoningBlock と同じ)。
+							-->
+							<div class="text-sm px-0.5" dir="auto">
+								<Markdown id={`${id || call.id}-skill`} content={resultDisplay.value} />
+							</div>
 							{#if resultDisplay.tools.length > 0}
 								<div class="mt-1.5 mb-1">
 									<span
@@ -229,6 +235,11 @@
 						{:else if resultDisplay.kind === 'text'}
 							<div class="text-sm font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
 								{resultDisplay.value}
+							</div>
+						{:else if resultDisplay.kind === 'markdown'}
+							<!-- Markdown 戻り型: md としてレンダリング(サニタイズは skill と同じ経路) -->
+							<div class="text-sm px-0.5" dir="auto">
+								<Markdown id={`${id || call.id}-result`} content={resultDisplay.value} />
 							</div>
 						{:else if resultDisplay.kind === 'code'}
 							<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />

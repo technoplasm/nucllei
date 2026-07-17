@@ -122,6 +122,8 @@ export type ResultDisplay =
 	| { kind: 'text'; value: string }
 	| { kind: 'code'; language: string; value: string }
 	| { kind: 'json'; value: string }
+	// md としてレンダリングして見せる(Code("markdown") = md ソースのハイライトとは別契約)
+	| { kind: 'markdown'; value: string }
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
 	| { kind: 'skill'; value: string; tools: string[] };
 
@@ -178,6 +180,9 @@ export const classifyToolResult = (
 	}
 	if (descriptor?.kind === 'text') {
 		return { kind: 'text', value: content };
+	}
+	if (descriptor?.kind === 'markdown') {
+		return { kind: 'markdown', value: content };
 	}
 	if (descriptor?.kind === 'code') {
 		return { kind: 'code', language: descriptor.language || 'plaintext', value: content };

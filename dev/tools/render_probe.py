@@ -10,7 +10,7 @@ import base64
 import json
 from typing import List
 
-from nucllei.utils.tool_render import Code, Text
+from nucllei.utils.tool_render import Code, Markdown, Text
 
 
 # =========================================================================
@@ -173,14 +173,7 @@ class Tools:
         """指定した種別の markdown サンプルを返す。返ってきた文字列をそのままチャットに表示させ、
         レンダリング結果(表・コード・数式・長文・エッジケース)を目視確認する用途。
 
-        :param kind: サンプル種別。次のいずれか:
-            "table"(大小2種の表)、
-            "code"(複数言語のコードフェンス、日本語コメント・特殊文字入り)、
-            "math"(インライン/ブロックの KaTeX)、
-            "long"(見出し・リスト・引用を含む長文)、
-            "mixed"(上記すべて入り)、
-            "edge"(未クローズのフェンス・HTMLタグ混入・<think>風文字列・絵文字・超長い1行)。
-            未知の値は "mixed" にフォールバックする。
+        :param kind: サンプル種別 = table / code / math / long / mixed / edge のいずれか(spec ビルダは :param の継続行を落とすので 1 行に列挙している。未知の値は mixed にフォールバック)
         :return: 種別に応じた markdown 文字列
         """
         k = (kind or "").strip().lower()
@@ -238,6 +231,25 @@ class Tools:
             "stdout 2 行目:\tタブと日本語と絵文字 ✅\n"
             '{"note": "JSON 風の行だが text 宣言なのでパース・整形されないべき"}\n'
             "最終行(末尾改行なし)"
+        )
+
+    def probe_result_markdown(self) -> Markdown:
+        """戻り型 Markdown 宣言の表示確認用。
+        期待表示: md としてレンダリング(見出し・リスト・表・コードフェンス)。
+        Code("markdown") のソースハイライトとは別契約。
+
+        :return: markdown 文書
+        """
+        return (
+            "# 診療報酬 probe\n\n"
+            "**強調** と `inline code`、[リンク](https://example.com)。\n\n"
+            "- 項目 1\n"
+            "- 項目 2\n\n"
+            "| 区分 | 点数 |\n"
+            "| --- | ---: |\n"
+            "| 初診 | 291 |\n"
+            "| 再診 | 75 |\n\n"
+            "```python\nprint('fenced code は code block で出るべき')\n```\n"
         )
 
     def probe_result_code(self) -> Code("python"):

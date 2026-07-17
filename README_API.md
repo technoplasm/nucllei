@@ -510,9 +510,12 @@ To get IDE-quality rendering of tool calls in the chat UI, annotate types —
 there are no name-based heuristics:
 
 ```python
-from nucllei.utils.tool_render import Code, Text
+from nucllei.utils.tool_render import Code, Markdown, Text
 
 async def run_sql(self, query: Code("sql")) -> Text:
+    ...
+
+async def read_doc(self, path: str) -> Markdown:
     ...
 ```
 
@@ -521,6 +524,9 @@ async def run_sql(self, query: Code("sql")) -> Text:
   reflected into the JSON-schema as `contentMediaType`, which is left visible to
   the model — harmless).
 - `-> Text` renders the return value as pre-wrap text instead of a JSON tree.
+- `-> Markdown` renders the return value as _rendered_ markdown (headings,
+  tables, fenced code). Distinct contract from `Code("markdown")`, which shows
+  highlighted markdown _source_. Use it for doc-reading tools that return md.
 - Un-annotated arguments render by JSON type (scalars as `key: value`,
   structures as a tree). Streaming partial-argument rendering is automatic.
 - External OpenAPI tools get the same treatment by declaring

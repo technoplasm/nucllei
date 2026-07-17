@@ -154,6 +154,13 @@ describe('classifyToolResult', () => {
 		});
 	});
 
+	it('markdown 宣言は md レンダリング表示(Code("markdown") のソース表示とは別契約)', () => {
+		expect(classifyToolResult('# 見出し\n\n- item', { kind: 'markdown' })).toEqual({
+			kind: 'markdown',
+			value: '# 見出し\n\n- item'
+		});
+	});
+
 	it('text 宣言はそのまま(pre-wrap テキスト)', () => {
 		const display = classifyToolResult('stdout line 1\nstdout line 2', { kind: 'text' });
 		expect(display).toEqual({ kind: 'text', value: 'stdout line 1\nstdout line 2' });

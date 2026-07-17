@@ -9,6 +9,7 @@ from typing import Optional
 
 from nucllei.utils.tool_render import (
     Code,
+    Markdown,
     Text,
     apply_render_to_spec,
     extract_render_from_function,
@@ -85,6 +86,14 @@ def test_extract_from_function_text_result():
         return ""
 
     assert extract_render_from_function(run_python)["result"] == {"kind": "text"}
+
+
+def test_extract_from_function_markdown_result():
+    # Markdown 戻り型 = md としてレンダリングして見せる(Code("markdown") とは別契約)
+    def read_doc(path: str) -> Markdown:
+        return ""
+
+    assert extract_render_from_function(read_doc)["result"] == {"kind": "markdown"}
 
 
 def test_extract_from_function_no_declaration_is_empty():

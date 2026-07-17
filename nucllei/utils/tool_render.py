@@ -36,6 +36,11 @@ def Code(language: str, base: type = str):
 # ないため、フロントの table 描画経路ごと撤去した(`ada5904e8`)。
 Text = Annotated[str, RenderAs(kind="text")]
 
+# md として「レンダリングして」見せる戻り型(doc 系 tool の戻り等)。
+# Code("markdown") は「md ソースのハイライト」— 表示契約が違うので別型。
+# 結果表示専用の kind(引数側の描画集合 code/scalar/json には含めない)。
+Markdown = Annotated[str, RenderAs(kind="markdown")]
+
 
 ####################################
 # 言語 id / media type の正規化テーブル
