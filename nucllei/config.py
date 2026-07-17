@@ -491,7 +491,9 @@ OAUTH_EMAIL_CLAIM = RuntimeConfig(
 OAUTH_GROUPS_CLAIM = RuntimeConfig(
     "OAUTH_GROUPS_CLAIM",
     "oauth.oidc.group_claim",
-    os.environ.get("OAUTH_GROUP_CLAIM", "groups"),
+    # 旧 env 名は OAUTH_GROUP_CLAIM(単数)— RuntimeConfig の明示 env 判定(env_name =
+    # OAUTH_GROUPS_CLAIM)と値ソースが食い違っていたため複数形に統一(OAUTH_ROLES_CLAIM と対称)。
+    os.environ.get("OAUTH_GROUPS_CLAIM", "groups"),
 )
 
 ENABLE_OAUTH_ROLE_MANAGEMENT = RuntimeConfig(
