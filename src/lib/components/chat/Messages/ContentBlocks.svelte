@@ -3,19 +3,24 @@
 	// details 擬似 HTML の再パースを経由せず、構造のまま描画する。
 	// スキーマ: _memos/rendering-design.md §3「L0 の確定スキーマ」
 	import ContentRenderer from './ContentRenderer.svelte';
-	import Collapsible from '$lib/components/common/Collapsible.svelte';
-	import Markdown from './Markdown.svelte';
-	import { settings } from '$lib/stores';
+	import ReasoningBlock from './ReasoningBlock.svelte';
+	import ToolCallBlock from './ToolCallBlock.svelte';
 	import type { Model } from '$lib/stores';
 	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
+	import type { ToolCallRender } from '$lib/utils/tool-render';
 
 	// call.function.arguments はモデル由来の JSON 文字列(chat-events.ts では unknown 扱い)
 	type ToolCall = {
 		id: string;
 		function?: { name?: string; arguments?: string };
-		render?: unknown;
+		render?: ToolCallRender;
 	};
-	type ToolResult = { tool_call_id: string; content?: string; files?: unknown };
+	type ToolResult = {
+		tool_call_id: string;
+		content?: string;
+		files?: unknown;
+		render?: { kind: string };
+	};
 
 	let {
 		id,
@@ -55,77 +60,38 @@
 		) => void;
 	} = $props();
 
-	// tool call の自動展開(実行中だけ開く #20 ステップ5)は OFF にした
-	// (2026-07-15): 開閉が実行状態で勝手に動くのをやめ、reasoning と同じく
-	// expandDetails 設定を初期値に、手動の開閉をそのまま維持する。
-
-	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま渡す
-	// (旧 details 経路の「JSON.stringify → 属性文字列 → decode → 再パース」往復を廃止)。
-	// call.function.arguments はモデル由来の JSON 文字列、result.content は文字列、
-	// files は配列。表示側(Collapsible/HljsCode)がそのまま整形する。
+	// content_blocks は既に構造化データ。文字列化して属性に詰め直さず、そのまま
+	// 専用コンポーネント(ReasoningBlock / ToolCallBlock)へ渡す(旧 details 経路の
+	// 「JSON.stringify → 属性文字列 → decode → 再パース」往復も、汎用 Collapsible の
+	// attributes 経由レンダリングも廃止)。
 	const toolCalls = (block: ContentBlock): ToolCall[] => (block.calls ?? []) as ToolCall[];
 
-	const toolCallAttributes = (call: ToolCall, block: ContentBlock) => {
-		const results = (block.results ?? []) as ToolResult[];
-		const result = results.find((r) => r.tool_call_id === call.id);
-		const attributes: Record<string, unknown> = {
-			type: 'tool_calls',
-			done: result || done ? 'true' : 'false',
-			id: call.id,
-			name: call.function?.name ?? '',
-			arguments: call.function?.arguments ?? ''
-		};
-		// 型駆動レンダリングのディスクリプタ(#20)。バックエンドが tool の型宣言
-		// から抽出して call に同梱する。無ければ型に忠実なフォールバック描画。
-		if (call.render) {
-			attributes.render = call.render;
-		}
-		if (result) {
-			attributes.result = result.content ?? '';
-			if (result.files) {
-				attributes.files = result.files;
-			}
-			// 結果の表示種別: 戻り型宣言(call.render.result)が無ければ、backend が
-			// 実行時の実型から同梱した result.render(dict/list → json)を使う。
-			// どちらも無ければ表示側の既定 = text(中身からの動的解釈はしない)。
-			if (!attributes.render?.result && result.render) {
-				attributes.render = { ...(attributes.render ?? {}), result: result.render };
-			}
-		}
-		return attributes;
+	const toolResult = (call: ToolCall, block: ContentBlock): ToolResult | null =>
+		((block.results ?? []) as ToolResult[]).find((r) => r.tool_call_id === call.id) ?? null;
+
+	// メッセージ内の reasoning / tool call ブロックの一括開閉。各ブロックの下辺
+	// 「すべて開く / すべて閉じる」から呼ばれ、seq を進めて全ブロックに追従させる
+	// (各ブロックの open はローカル state のままなので、個別の手動開閉は殺さない)。
+	let expandAll = $state<{ seq: number; open: boolean }>({ seq: 0, open: false });
+	const requestExpandAll = (open: boolean) => {
+		expandAll = { seq: expandAll.seq + 1, open };
 	};
 </script>
 
-<div class="w-full flex flex-col space-y-1.5">
+<div class="w-full flex flex-col space-y-3">
 	{#each blocks as block, blockIdx (blockIdx)}
 		{#if block.type === 'reasoning'}
-			<Collapsible
+			<ReasoningBlock
 				id={`${id}-block-${blockIdx}`}
-				title=""
-				open={$settings?.expandDetails ?? false}
-				attributes={{
-					type: 'reasoning',
-					done: block.done || done ? 'true' : 'false',
-					duration: block.duration
-				}}
-				className="w-full space-y-1 text-sm"
-			>
-				<!--
-					reasoning は本文と同じ Markdown コンポーネントで描画する。
-					XSS 不変条件: 生 <think> 内容はモデル出力なのでサニタイズが必須。
-					Markdown は MarkdownTokens/InlineTokens 内で DOMPurify.sanitize を通してから
-					{@html} するため本文と同じ信頼モデルで安全。ここで直接 {@html} を書いてはならない。
-				-->
-				{#snippet content()}
-					<div
-						class="mb-1.5 text-sm text-content-muted border-s-2 border-gray-200 dark:border-gray-800 ps-3"
-						dir="auto"
-					>
-						<Markdown id={`${id}-block-${blockIdx}-reasoning`} content={block.content ?? ''} />
-					</div>
-				{/snippet}
-			</Collapsible>
-		{:else if block.type === 'text'}
+				content={block.content ?? ''}
+				done={block.done || done}
+				duration={block.duration ?? null}
+				{expandAll}
+				onExpandAll={requestExpandAll}
+			/>
+		{:else if block.type === 'text' && (block.content ?? '').trim() !== ''}
+			<!-- 空の text ブロック(tool 前後の空行だけ等)は描画しない —
+			     space-y が空要素にも効いてブロック間が二重に開くため -->
 			<ContentRenderer
 				id={`${id}-block-${blockIdx}`}
 				{history}
@@ -141,12 +107,13 @@
 			/>
 		{:else if block.type === 'tool_calls'}
 			{#each toolCalls(block) as call (call.id)}
-				<Collapsible
+				<ToolCallBlock
 					id={`${id}-block-${blockIdx}-${call.id}`}
-					title=""
-					open={$settings?.expandDetails ?? false}
-					attributes={toolCallAttributes(call, block)}
-					className="w-full space-y-1 text-sm"
+					{call}
+					result={toolResult(call, block)}
+					{done}
+					{expandAll}
+					onExpandAll={requestExpandAll}
 				/>
 			{/each}
 		{/if}

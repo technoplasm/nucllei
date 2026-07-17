@@ -51,7 +51,11 @@ export default {
 					selected: 'var(--sidebar-selected, #e3e3e3)'
 				},
 				// 罫線・区切り線の共通色(テーブル/hr など)。実値は src/tailwind.css。border-line で使う
-				line: 'var(--line, #dcdcdc)',
+				line: {
+					DEFAULT: 'var(--line, #dcdcdc)',
+					// クリック可能な枠・tab の hover 強調(hover:border-line-hover)
+					hover: 'var(--line-hover, #adadad)'
+				},
 				// 主ボタン(Save/Create 等)。現行は黒/白反転のモノクロ —
 				// ブランディング確定(#58)時は src/tailwind.css の値だけ変えればよい。
 				// 使い方: bg-primary hover:bg-primary-hover text-primary-content(dark: 変種不要)
