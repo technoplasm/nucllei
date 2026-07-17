@@ -113,7 +113,12 @@
 	<div class="font-primary px-5 py-4 text-content flex flex-col max-h-[80vh]">
 		<div class="flex justify-between items-center pb-2">
 			<div class="text-lg font-medium self-center">{$i18n.t('Saved Files')}</div>
-			<button class="self-center" type="button" onclick={() => (show = false)}>
+			<button
+				class="self-center"
+				type="button"
+				aria-label={$i18n.t('Close')}
+				onclick={() => (show = false)}
+			>
 				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>

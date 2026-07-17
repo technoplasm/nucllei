@@ -488,6 +488,7 @@
 								<div>
 									<button
 										class="flex items-center text-content-muted"
+										aria-label={$i18n.t('Close')}
 										onclick={() => {
 											atSelectedModel = undefined;
 										}}
