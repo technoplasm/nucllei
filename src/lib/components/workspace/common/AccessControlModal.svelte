@@ -10,6 +10,7 @@
 	export let allowPublic = true;
 
 	// llens(#69): file 用 variant('default' | 'file')。AccessControl へパススルー。
+	/** @type {'default' | 'file'} */
 	export let variant = 'default';
 
 	export let onChange = () => {};

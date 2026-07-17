@@ -29,7 +29,7 @@
 		onClose?: () => void;
 	} = $props();
 
-	let wakeLock = null;
+	let wakeLock: WakeLockSentinel | null = null;
 
 	let model = $state<any>(null);
 
@@ -43,12 +43,13 @@
 	let chatStreaming = false;
 	let rmsLevel = $state(0);
 	let hasStartedSpeaking = false;
-	let mediaRecorder;
-	let audioStream = null;
-	let audioChunks = [];
+	// false は「録音停止済み」マーカー(stopRecordingCallback が代入する従来挙動を型に反映)
+	let mediaRecorder: MediaRecorder | false | undefined;
+	let audioStream: MediaStream | null = null;
+	let audioChunks: Blob[] = [];
 
 	let videoInputDevices = $state<any[]>([]);
-	let selectedVideoInputDeviceId = null;
+	let selectedVideoInputDeviceId: string | null = null;
 
 	const getVideoInputDevices = async () => {
 		const devices = await navigator.mediaDevices.enumerateDevices();
@@ -85,13 +86,14 @@
 	};
 
 	const startVideoStream = async () => {
-		const video = document.getElementById('camera-feed');
+		const video = document.getElementById('camera-feed') as HTMLVideoElement | null;
 		if (video) {
 			if (selectedVideoInputDeviceId === 'screen') {
 				cameraStream = await navigator.mediaDevices.getDisplayMedia({
+					// 旧仕様の cursor 制約(lib.dom 未収載)— 挙動維持のため型だけ拡張
 					video: {
 						cursor: 'always'
-					},
+					} as MediaTrackConstraints,
 					audio: false
 				});
 			} else {
@@ -120,14 +122,17 @@
 	};
 
 	const takeScreenshot = () => {
-		const video = document.getElementById('camera-feed');
-		const canvas = document.getElementById('camera-canvas');
+		const video = document.getElementById('camera-feed') as HTMLVideoElement | null;
+		const canvas = document.getElementById('camera-canvas') as HTMLCanvasElement | null;
 
-		if (!canvas) {
+		if (!canvas || !video) {
 			return;
 		}
 
 		const context = canvas.getContext('2d');
+		if (!context) {
+			return;
+		}
 
 		// Make the canvas match the video dimensions
 		canvas.width = video.videoWidth;
@@ -151,7 +156,7 @@
 	const MIN_DECIBELS = -55;
 	const VISUALIZER_BUFFER_LENGTH = 300;
 
-	const transcribeHandler = async (audioBlob) => {
+	const transcribeHandler = async (audioBlob: Blob) => {
 		// Create a blob from the audio chunks
 
 		await tick();
@@ -279,7 +284,7 @@
 		return Math.sqrt(sumSquares / data.length);
 	};
 
-	const analyseAudio = (stream) => {
+	const analyseAudio = (stream: MediaStream) => {
 		const audioContext = new AudioContext();
 		const audioStreamSource = audioContext.createMediaStreamSource(stream);
 
@@ -357,14 +362,14 @@
 		detectSound();
 	};
 
-	let finishedMessages = {};
-	let currentMessageId = null;
-	let currentUtterance = null;
+	let finishedMessages: Record<string, boolean> = {};
+	let currentMessageId: string | null = null;
+	let currentUtterance: SpeechSynthesisUtterance | null = null;
 
-	const speakSpeechSynthesisHandler = (content) => {
+	const speakSpeechSynthesisHandler = (content: string) => {
 		if ($showCallOverlay) {
 			return new Promise((resolve) => {
-				let voices = [];
+				let voices: SpeechSynthesisVoice[] = [];
 				const getVoicesLoop = setInterval(async () => {
 					voices = await speechSynthesis.getVoices();
 					if (voices.length > 0) {
@@ -397,7 +402,7 @@
 		}
 	};
 
-	const playAudio = (audio) => {
+	const playAudio = (audio: HTMLAudioElement) => {
 		if ($showCallOverlay) {
 			return new Promise((resolve) => {
 				const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
@@ -439,7 +444,7 @@
 			currentUtterance = null;
 		}
 
-		const audioElement = document.getElementById('audioElement');
+		const audioElement = document.getElementById('audioElement') as HTMLAudioElement | null;
 		if (audioElement) {
 			audioElement.muted = true;
 			audioElement.pause();
@@ -452,7 +457,7 @@
 	// Audio cache map where key is the content and value is the Audio object.
 	const audioCache = new Map();
 
-	const fetchAudio = async (content) => {
+	const fetchAudio = async (content: string) => {
 		if (!audioCache.has(content)) {
 			try {
 				if ($settings.audio?.tts?.engine === 'browser-kokoro') {
@@ -469,9 +474,9 @@
 					if (blob) {
 						audioCache.set(content, new Audio(blob));
 					}
-				} else if ($config.audio.tts.engine !== '') {
+				} else if (($config?.audio?.tts?.engine ?? '') !== '') {
 					const res = await synthesizeOpenAISpeech(
-						$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+						$settings?.audio?.tts?.defaultVoice === $config?.audio?.tts?.voice
 							? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
 							: $config?.audio?.tts?.voice,
 						content
@@ -496,18 +501,19 @@
 		return audioCache.get(content);
 	};
 
-	let messages = {};
+	let messages: Record<string, string[]> = {};
 
-	const monitorAndPlayAudio = async (id, signal) => {
+	const monitorAndPlayAudio = async (id: string, signal: AbortSignal) => {
 		while (!signal.aborted) {
 			if (messages[id] && messages[id].length > 0) {
 				// Retrieve the next content string from the queue
-				const content = messages[id].shift(); // Dequeues the content for playing
+				// (直前で length > 0 を確認済みなので shift は必ず値を返す)
+				const content = messages[id].shift()!; // Dequeues the content for playing
 
 				if (audioCache.has(content)) {
 					// If content is available in the cache, play it
 
-					if ($config.audio.tts.engine !== '') {
+					if (($config?.audio?.tts?.engine ?? '') !== '') {
 						try {
 							console.log(
 								'%c%s',
@@ -543,8 +549,10 @@
 		console.log(`Audio monitoring and playing stopped for message ID ${id}`);
 	};
 
-	const chatStartHandler = async (e) => {
-		const { id } = e.detail;
+	// eventTarget には Chat.svelte が CustomEvent('chat:start'|'chat'|'chat:finish') を
+	// dispatch する(detail: { id, content? })。addEventListener の型に合わせ Event で受けて絞る。
+	const chatStartHandler = async (e: Event) => {
+		const { id } = (e as CustomEvent<{ id: string }>).detail;
 
 		chatStreaming = true;
 
@@ -563,8 +571,8 @@
 		}
 	};
 
-	const chatEventHandler = async (e) => {
-		const { id, content } = e.detail;
+	const chatEventHandler = async (e: Event) => {
+		const { id, content } = (e as CustomEvent<{ id: string; content: string }>).detail;
 		// "id" here is message id
 		// if "id" is not the same as "currentMessageId" then do not process
 		// "content" here is a sentence from the assistant,
@@ -589,8 +597,8 @@
 		}
 	};
 
-	const chatFinishHandler = async (e) => {
-		const { id, content } = e.detail;
+	const chatFinishHandler = async (e: Event) => {
+		const { id } = (e as CustomEvent<{ id: string; content: string }>).detail;
 		// "content" here is the entire message from the assistant
 		finishedMessages[id] = true;
 
@@ -634,23 +642,8 @@
 		eventTarget.addEventListener('chat', chatEventHandler);
 		eventTarget.addEventListener('chat:finish', chatFinishHandler);
 
-		return async () => {
-			await stopAllAudio();
-
-			stopAudioStream();
-
-			eventTarget.removeEventListener('chat:start', chatStartHandler);
-			eventTarget.removeEventListener('chat', chatEventHandler);
-			eventTarget.removeEventListener('chat:finish', chatFinishHandler);
-
-			audioAbortController.abort();
-			await tick();
-
-			await stopAllAudio();
-
-			await stopRecordingCallback(false);
-			await stopCamera();
-		};
+		// 後始末は onDestroy(下)が担う。async onMount の返り値クリーンアップは
+		// Svelte が無視する(同期コールバック限定)ため、ここでは返さない。
 	});
 
 	onDestroy(async () => {

@@ -144,12 +144,19 @@
 			return;
 		}
 
-		const [res, controller] = await pullModel(sanitizedModelTag, '0').catch((error) => {
+		// llens: 旧実装は失敗時に null を分割代入して TypeError で落ちていた — null は早期 return に修正
+		const pullResult = await pullModel(sanitizedModelTag, 0).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
-		if (res) {
+		if (pullResult === null) {
+			return;
+		}
+
+		const [res, controller] = pullResult;
+
+		if (res && res.body) {
 			const reader = res.body
 				.pipeThrough(new TextDecoderStream())
 				.pipeThrough(splitStream('\n'))
@@ -215,11 +222,14 @@
 					}
 				} catch (error) {
 					console.error(error);
-					if (typeof error !== 'string') {
-						error = error.message;
-					}
+					const message =
+						typeof error === 'string'
+							? error
+							: error && typeof error === 'object' && 'message' in error
+								? error.message
+								: undefined;
 
-					toast.error(`${error}`);
+					toast.error(`${message}`);
 					break;
 				}
 			}
@@ -297,7 +307,8 @@
 			? `w-full`
 			: `${className}`} max-w-[calc(100vw-1rem)] justify-start rounded-xl border border-line bg-surface-raised text-content shadow-sm outline-hidden"
 		transition={flyAndScale}
-		side={$mobile ? 'bottom' : 'bottom-start'}
+		side="bottom"
+		align={$mobile ? 'center' : 'start'}
 		sideOffset={3}
 	>
 		{#if searchEnabled}

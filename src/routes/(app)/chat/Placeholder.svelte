@@ -50,7 +50,7 @@
 		}
 	});
 
-	const selectSuggestionPrompt = async (p) => {
+	const selectSuggestionPrompt = async (p: string) => {
 		let text = p;
 
 		if (p.includes('{{CLIPBOARD}}')) {
@@ -132,7 +132,9 @@
 								<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 								     DOMPurify で無害化(javascript: リンク等を除去)。 -->
 								{@html DOMPurify.sanitize(
-									render(sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description))
+									render(
+										sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')
+									)
 								)}
 							</div>
 						</Tooltip>
@@ -140,9 +142,9 @@
 						{#if models[selectedModelIdx]?.info?.meta?.user}
 							<div class="mt-0.5 text-sm font-normal text-content-subtle">
 								By
-								{models[selectedModelIdx]?.info?.meta?.user.name
-									? models[selectedModelIdx]?.info?.meta?.user.name
-									: `@${models[selectedModelIdx]?.info?.meta?.user.username}`}
+								{models[selectedModelIdx]?.info?.meta?.user?.name
+									? models[selectedModelIdx]?.info?.meta?.user?.name
+									: `@${models[selectedModelIdx]?.info?.meta?.user?.username}`}
 							</div>
 						{/if}
 					{/if}

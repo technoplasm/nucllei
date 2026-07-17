@@ -26,7 +26,12 @@ export interface ChatFile {
 	collection_name?: string;
 	context?: string; // fullContext 指定時 'full'
 	origin?: string; // library 取り込みは 'library'
-	file?: unknown; // アップロード API のレスポンス実体
+	/** アップロード API のレスポンス実体(ChatFiles.svelte が meta.name / meta.size / filename を参照)。 */
+	file?: {
+		meta?: { name?: string; size?: number; [key: string]: unknown };
+		filename?: string;
+		[key: string]: unknown;
+	};
 }
 
 /** status イベント(applyMessageMutation type === 'status')の 1 件。 */

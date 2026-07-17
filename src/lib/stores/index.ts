@@ -11,8 +11,9 @@ export const user: Writable<SessionUser | undefined> = writable(undefined);
 
 // Electron App
 export const isApp = writable(false);
-export const appInfo = writable(null);
-export const appData = writable(null);
+// Electron ブリッジ(app:info / app:data)の戻りをそのまま保持する(読み手は現状なし)
+export const appInfo: Writable<unknown> = writable(null);
+export const appData: Writable<unknown> = writable(null);
 
 // Frontend
 export const MODEL_DOWNLOAD_POOL = writable<Record<string, any>>({});
@@ -203,11 +204,12 @@ type TitleSettings = {
 	prompt?: string;
 };
 
-type Skill = {
+// llens(#43): 可読キーは id 一本(旧 command は廃止)・表示名は name(旧 title)。
+// 形は nucllei/models/skills.py SkillModel(getSkills の返却)に一致させる。
+export type Skill = {
 	id: string;
-	command: string;
 	user_id: string;
-	title: string;
+	name: string;
 	description?: string | null;
 	content: string;
 	tool_ids: string[];
@@ -246,6 +248,7 @@ type Config = {
 		enable_admin_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_user_webhooks?: boolean;
+		enable_ldap?: boolean;
 	};
 	oauth: {
 		providers: {
@@ -262,6 +265,8 @@ type Config = {
 			split_on?: string;
 		};
 		stt: {
+			// 配備レベルの音声入力有効化(ENABLE_AUDIO_STT — nucllei/main.py)
+			enable?: boolean;
 			engine: string;
 		};
 	};
@@ -280,7 +285,7 @@ type PromptSuggestion = {
 	title: [string, string];
 };
 
-type SessionUser = {
+export type SessionUser = {
 	id: string;
 	email: string;
 	name: string;

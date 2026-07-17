@@ -19,6 +19,7 @@
 		isLastActiveTab,
 		isApp,
 		appInfo,
+		appData,
 		backendUnreachable
 	} from '$lib/stores';
 	import { goto } from '$app/navigation';
@@ -166,9 +167,7 @@
 		initI18n(localStorage?.locale);
 		if (!localStorage.locale) {
 			const languages = await getLanguages();
-			const browserLanguages = navigator.languages
-				? navigator.languages
-				: [navigator.language || navigator.userLanguage];
+			const browserLanguages = navigator.languages ? navigator.languages : [navigator.language];
 			const lang = backendConfig.default_locale
 				? backendConfig.default_locale
 				: bestMatchingLanguage(languages, browserLanguages, 'en-US');
@@ -223,9 +222,9 @@
 			}, 500);
 		}
 
-		return () => {
-			window.removeEventListener('resize', onResize);
-		};
+		// NOTE: async onMount の戻り値クリーンアップは Svelte が無視する(同期関数限定)。
+		// root layout はアンマウントされないため onResize の解除は不要 — 死にコードだった
+		// return を型付けに合わせて撤去(挙動不変)。
 	});
 </script>
 

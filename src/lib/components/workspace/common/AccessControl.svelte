@@ -9,7 +9,10 @@
 
 	// llens(#66): ACL は read(使える範囲)一本。write 側の UI・データは廃止
 	// (定義編集の権限はロールで決まる — model/tool=admin、skill=editor)。
-	export let accessControl = {};
+	type AccessControlValue = {
+		read?: { public?: boolean; group_ids?: string[]; user_ids?: string[] };
+	};
+	export let accessControl: AccessControlValue | null = {};
 
 	export let allowPublic = true;
 
@@ -22,13 +25,13 @@
 	export let variant: 'default' | 'file' = 'default';
 
 	let selectedGroupId = '';
-	let groups = [];
+	let groups: { id: string; name: string }[] = [];
 
 	// file variant の現在モード(accessControl から導出 — 二重 state を持たない)
 	$: fileMode =
 		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'groups';
 
-	const setFileMode = (mode) => {
+	const setFileMode = (mode: string) => {
 		if (mode === 'private') {
 			accessControl = null;
 		} else if (mode === 'public') {
@@ -101,8 +104,8 @@
 	}
 
 	const onSelectGroup = () => {
-		if (selectedGroupId !== '') {
-			accessControl.read.group_ids = [...accessControl.read.group_ids, selectedGroupId];
+		if (selectedGroupId !== '' && accessControl?.read) {
+			accessControl.read.group_ids = [...(accessControl.read.group_ids ?? []), selectedGroupId];
 
 			selectedGroupId = '';
 		}
@@ -133,7 +136,7 @@
 						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={fileMode}
 						on:change={(e) => {
-							setFileMode(e.target.value);
+							setFileMode(e.currentTarget.value);
 						}}
 					>
 						<option class=" text-content" value="private" selected>{$i18n.t('Private')}</option>
@@ -156,7 +159,7 @@
 						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={accessControl !== null ? 'private' : 'public'}
 						on:change={(e) => {
-							if (e.target.value === 'public') {
+							if (e.currentTarget.value === 'public') {
 								accessControl = null;
 							} else {
 								accessControl = {
@@ -240,9 +243,11 @@
 										type="button"
 										aria-label={$i18n.t('Remove')}
 										on:click={() => {
-											accessControl.read.group_ids = accessControl.read.group_ids.filter(
-												(id) => id !== group.id
-											);
+											if (accessControl?.read) {
+												accessControl.read.group_ids = (accessControl.read.group_ids ?? []).filter(
+													(id) => id !== group.id
+												);
+											}
 										}}
 									>
 										<span class="i-lucide-x size-3.5 block"></span>

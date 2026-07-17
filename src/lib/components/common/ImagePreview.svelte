@@ -8,7 +8,7 @@
 
 	let mounted = false;
 
-	let previewElement = null;
+	let previewElement: HTMLDivElement | null = null;
 
 	let instance: PanZoom;
 
@@ -29,7 +29,7 @@
 		console.log(instance.getTransform());
 	};
 
-	const downloadImage = (url, filename, prefixName = '') => {
+	const downloadImage = (url: string, filename: string, prefixName = '') => {
 		fetch(url)
 			.then((response) => response.blob())
 			.then((blob) => {

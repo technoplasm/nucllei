@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { skills } from '$lib/stores';
+	import { skills, type Skill } from '$lib/stores';
 	import { tick } from 'svelte';
 
 	// picker は補完のみ(issue #35)。Prompts.svelte の変数展開・CLIPBOARD・{{}}選択ジャンプは
@@ -40,7 +40,7 @@
 		selectedIdx = Math.min(selectedIdx + 1, filteredSkills.length - 1);
 	};
 
-	const confirmSkill = async (skill) => {
+	const confirmSkill = async (skill: Skill) => {
 		// 先頭行の行頭トークンだけを `/command ` に置換(サーバの発火位置と一致)。
 		// テンプレート全文挿入はしない(置換されるのは `/par` のような入力中の部分トークンのみ)。
 		const token = `/${skill.id} `;

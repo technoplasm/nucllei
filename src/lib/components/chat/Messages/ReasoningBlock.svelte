@@ -21,7 +21,7 @@
 	const i18n = getContext('i18n');
 
 	// dayjs.humanize() のロケール追従(i18n の言語リストから読めた最初のものを使う)
-	async function loadLocale(locales: string[]) {
+	async function loadLocale(locales: readonly string[]) {
 		for (const locale of locales) {
 			try {
 				dayjs.locale(locale);

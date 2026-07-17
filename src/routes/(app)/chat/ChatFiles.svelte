@@ -6,6 +6,7 @@
 	import { showControls } from '$lib/stores';
 	import { formatFileSize } from '$lib/utils';
 	import { getFileById } from '$lib/apis/files';
+	import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 
@@ -15,10 +16,13 @@
 	// 旧チャットの data: URL 画像は id が無いため対象外(従来どおりメッセージ内でのみ表示)。
 	const i18n = getContext('i18n');
 
-	let { history = null, chatFiles = [] }: { history?: any; chatFiles?: any[] } = $props();
+	let { history = null, chatFiles = [] }: { history?: ChatHistory | null; chatFiles?: ChatFile[] } =
+		$props();
 
-	const collectFiles = (chatFiles, history) => {
-		const items = [];
+	type FileListItem = { id: string; type: 'file' | 'image'; name: string; size: number | null };
+
+	const collectFiles = (chatFiles: ChatFile[] | null, history: ChatHistory | null) => {
+		const items: FileListItem[] = [];
 		const seen = new Set();
 
 		for (const file of chatFiles ?? []) {
@@ -57,7 +61,7 @@
 	let showFileModal = $state(false);
 	let selectedItem = $state<any>(null);
 
-	const openFile = async (item) => {
+	const openFile = async (item: FileListItem) => {
 		const res = await getFileById(item.id).catch((err) => {
 			toast.error(`${err}`);
 			return null;

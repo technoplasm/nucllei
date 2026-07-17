@@ -12,7 +12,7 @@
 			title: '',
 			content: '',
 			url: '',
-			dismissable: true,
+			dismissible: true,
 			timestamp: Math.floor(Date.now() / 1000)
 		},
 		className = 'mx-4',

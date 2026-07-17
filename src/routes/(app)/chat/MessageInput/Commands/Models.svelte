@@ -4,7 +4,7 @@
 
 	import { onMount, tick } from 'svelte';
 
-	import { models } from '$lib/stores';
+	import { models, type Model } from '$lib/stores';
 
 	let {
 		command = '',
@@ -55,7 +55,7 @@
 		selectedIdx = Math.min(selectedIdx + 1, filteredItems.length - 1);
 	};
 
-	const confirmSelect = async (model) => {
+	const confirmSelect = async (model: Model) => {
 		onSelect(model);
 	};
 

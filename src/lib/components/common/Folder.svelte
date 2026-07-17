@@ -34,18 +34,18 @@
 
 	let draggedOver = $state(false);
 
-	const onDragOver = (e) => {
+	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
 		draggedOver = true;
 	};
 
-	const dropHandler = (e) => {
+	const dropHandler = (e: DragEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
 
-		if (folderElement?.contains(e.target)) {
-			if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+		if (e.target instanceof Node && folderElement?.contains(e.target)) {
+			if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
 				// Iterate over all items in the DataTransferItemList use functional programming
 				for (const item of Array.from(e.dataTransfer.items)) {
 					// If dropped items aren't files, reject them
@@ -55,8 +55,13 @@
 							// Read the JSON file with FileReader
 							const reader = new FileReader();
 							reader.onload = async function (event) {
+								// readAsText の結果は常に string(型ガードのみ — 挙動不変)
+								const result = event.target?.result;
+								if (typeof result !== 'string') {
+									return;
+								}
 								try {
-									const fileContent = JSON.parse(event.target.result);
+									const fileContent = JSON.parse(result);
 									open = true;
 									onImport?.(fileContent);
 								} catch (error) {
@@ -84,7 +89,7 @@
 		}
 	};
 
-	const onDragLeave = (e) => {
+	const onDragLeave = (e: DragEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
 

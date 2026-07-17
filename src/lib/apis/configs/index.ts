@@ -2,7 +2,7 @@ import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { Banner } from '$lib/types';
 
-export const importConfig = async (config) => {
+export const importConfig = async (config: Record<string, unknown>) => {
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/configs/import`, {

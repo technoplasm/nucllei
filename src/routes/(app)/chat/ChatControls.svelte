@@ -66,25 +66,27 @@
 
 		const container = document.getElementById('chat-container');
 
-		// initialize the minSize based on the container width
-		minSize = Math.floor((350 / container.clientWidth) * 100);
+		if (container) {
+			// initialize the minSize based on the container width
+			minSize = Math.floor((350 / container.clientWidth) * 100);
 
-		const resizeObserver = new ResizeObserver((entries) => {
-			for (let entry of entries) {
-				const width = entry.contentRect.width;
-				const percentage = (350 / width) * 100;
-				// set the minSize to the percentage, must be an integer
-				minSize = Math.floor(percentage);
+			const resizeObserver = new ResizeObserver((entries) => {
+				for (let entry of entries) {
+					const width = entry.contentRect.width;
+					const percentage = (350 / width) * 100;
+					// set the minSize to the percentage, must be an integer
+					minSize = Math.floor(percentage);
 
-				if ($showControls) {
-					if (pane && pane.isExpanded() && pane.getSize() < minSize) {
-						pane.resize(minSize);
+					if ($showControls) {
+						if (pane && pane.isExpanded() && pane.getSize() < minSize) {
+							pane.resize(minSize);
+						}
 					}
 				}
-			}
-		});
+			});
 
-		resizeObserver.observe(container);
+			resizeObserver.observe(container);
+		}
 	});
 
 	onDestroy(() => {

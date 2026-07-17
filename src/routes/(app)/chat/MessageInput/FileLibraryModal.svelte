@@ -74,7 +74,7 @@
 			// append の合間に自分のアップロードで並びが変わりうる — 同一 id は keyed each を
 			// 壊すので除外(Files.svelte と同じガード)
 			files = append
-				? [...files, ...res.items.filter((item) => !files.some((f) => f.id === item.id))]
+				? [...files, ...res.items.filter((item: { id: string }) => !files.some((f) => f.id === item.id))]
 				: res.items;
 			total = res.total;
 		}
@@ -91,7 +91,7 @@
 		}, 300);
 	};
 
-	const toggle = (id) => {
+	const toggle = (id: string) => {
 		if (selectedIds.includes(id)) {
 			selectedIds = selectedIds.filter((i) => i !== id);
 		} else {
@@ -99,8 +99,10 @@
 		}
 	};
 
-	const isImage = (file) => (file?.meta?.content_type ?? '').startsWith('image/');
-	const formatTimestamp = (ts) => dayjs((ts ?? 0) * 1000).format('YYYY-MM-DD HH:mm');
+	const isImage = (file: { meta?: { content_type?: string } }) =>
+		(file?.meta?.content_type ?? '').startsWith('image/');
+	const formatTimestamp = (ts: number | undefined) =>
+		dayjs((ts ?? 0) * 1000).format('YYYY-MM-DD HH:mm');
 
 	const submitHandler = () => {
 		const selected = files.filter((f) => selectedIds.includes(f.id));

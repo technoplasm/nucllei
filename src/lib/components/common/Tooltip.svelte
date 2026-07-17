@@ -3,7 +3,7 @@
 
 	import { onDestroy, type Snippet } from 'svelte';
 
-	import tippy, { type Instance } from 'tippy.js';
+	import tippy, { type Instance, type Placement } from 'tippy.js';
 
 	let {
 		placement = 'top',
@@ -16,7 +16,7 @@
 		tippyOptions = {},
 		children
 	}: {
-		placement?: string;
+		placement?: Placement;
 		content?: string;
 		touch?: boolean;
 		className?: string;

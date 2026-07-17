@@ -1,6 +1,6 @@
 import CRC32 from 'crc-32';
 
-export const parseFile = async (file) => {
+export const parseFile = async (file: File) => {
 	if (file.type === 'application/json') {
 		return await parseJsonFile(file);
 	} else if (file.type === 'image/png') {
@@ -10,7 +10,7 @@ export const parseFile = async (file) => {
 	}
 };
 
-const parseJsonFile = async (file) => {
+const parseJsonFile = async (file: File) => {
 	const text = await file.text();
 	const json = JSON.parse(text);
 
@@ -24,7 +24,7 @@ const parseJsonFile = async (file) => {
 	};
 };
 
-const parsePngFile = async (file) => {
+const parsePngFile = async (file: File) => {
 	const arrayBuffer = await file.arrayBuffer();
 	const text = parsePngText(arrayBuffer);
 	const json = JSON.parse(text);
@@ -41,7 +41,7 @@ const parsePngFile = async (file) => {
 	};
 };
 
-const parsePngText = (arrayBuffer) => {
+const parsePngText = (arrayBuffer: ArrayBuffer) => {
 	const textChunkKeyword = 'chara';
 	const chunks = readPngChunks(new Uint8Array(arrayBuffer));
 
@@ -57,11 +57,12 @@ const parsePngText = (arrayBuffer) => {
 	try {
 		return new TextDecoder().decode(Uint8Array.from(atob(textChunk.text), (c) => c.charCodeAt(0)));
 	} catch (e) {
-		throw new Error('Unable to parse "chara" field as base64', e);
+		// 第 2 引数は ErrorOptions(旧コードは e を裸で渡していて捨てられていた)
+		throw new Error('Unable to parse "chara" field as base64', { cause: e });
 	}
 };
 
-const readPngChunks = (data) => {
+const readPngChunks = (data: Uint8Array) => {
 	const isValidPng =
 		data[0] === 0x89 &&
 		data[1] === 0x50 &&
@@ -80,7 +81,7 @@ const readPngChunks = (data) => {
 	while (offset < data.length) {
 		let length =
 			(data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3];
-		let type = String.fromCharCode.apply(null, data.slice(offset + 4, offset + 8));
+		let type = String.fromCharCode(...data.slice(offset + 4, offset + 8));
 		let chunkData = data.slice(offset + 8, offset + 8 + length);
 		let crc =
 			(data[offset + 8 + length] << 24) |
@@ -99,7 +100,7 @@ const readPngChunks = (data) => {
 	return chunks;
 };
 
-const decodeTextChunk = (data) => {
+const decodeTextChunk = (data: Uint8Array) => {
 	let i = 0;
 	const keyword = [];
 	const text = [];
@@ -115,8 +116,9 @@ const decodeTextChunk = (data) => {
 	return { keyword: keyword.join(''), text: text.join('') };
 };
 
-const extractCharacter = (json) => {
-	function getTrimmedValue(json, keys) {
+// character card JSON は形式が多様(外部データ)— キー走査は any で受ける
+const extractCharacter = (json: Record<string, any>) => {
+	function getTrimmedValue(json: any, keys: string[]) {
 		return keys
 			.map((key) => {
 				const keyParts = key.split('.');
@@ -154,7 +156,7 @@ const extractCharacter = (json) => {
 	return { name, summary, personality, scenario, greeting, examples };
 };
 
-const detectFormats = (json) => {
+const detectFormats = (json: Record<string, any>) => {
 	const formats = [];
 
 	if (

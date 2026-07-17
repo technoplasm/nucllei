@@ -10,6 +10,7 @@
 	import html2canvas from 'html2canvas-pro';
 
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
+	import type { ChatMessage } from '$lib/types/chat';
 
 	import { chatId, showControls, user } from '$lib/stores';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -34,7 +35,7 @@
 	const getChatAsText = async () => {
 		const history = chat.chat.history;
 		const messages = createMessagesList(history, history.currentId);
-		const chatText = messages.reduce((a, message) => {
+		const chatText = messages.reduce((a: string, message: ChatMessage) => {
 			return `${a}### ${message.role.toUpperCase()}\n${message.content}\n\n`;
 		}, '');
 
@@ -61,7 +62,8 @@
 				// Define a fixed virtual screen size
 				const virtualWidth = 800; // Fixed width (adjust as needed)
 				// Clone the container to avoid layout shifts
-				const clonedElement = containerElement.cloneNode(true);
+				// cloneNode の戻りは Node 型だが、HTMLElement の複製なので実体は HTMLElement
+				const clonedElement = containerElement.cloneNode(true) as HTMLElement;
 				clonedElement.classList.add('text-black');
 				clonedElement.classList.add('dark:text-white');
 				clonedElement.style.width = `${virtualWidth}px`; // Apply fixed width
@@ -229,7 +231,7 @@
 				class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 				id="chat-copy-button"
 				on:click={async () => {
-					const res = await copyToClipboard(await getChatAsText()).catch((e) => {
+					const res = await copyToClipboard(await getChatAsText()).catch((e: unknown) => {
 						console.error(e);
 					});
 

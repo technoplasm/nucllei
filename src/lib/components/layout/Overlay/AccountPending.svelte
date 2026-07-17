@@ -4,7 +4,7 @@
 
 	const i18n = getContext('i18n');
 
-	let adminDetails = null;
+	let adminDetails: { name?: string; email?: string } | null = null;
 
 	onMount(async () => {
 		adminDetails = await getAdminDetails().catch((err) => {

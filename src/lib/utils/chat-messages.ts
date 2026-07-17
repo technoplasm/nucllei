@@ -123,13 +123,21 @@ export const expandAssistantToolHistory = (
  *   tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
  * - 空 content のメッセージは落とす(user / tool / tool_calls 持ちは温存)。
  */
+/** flatMap 各分岐の受け皿(text / image_url パート混在のため content は unknown)。 */
+type OutboundWireMessage = {
+	role: string;
+	content: unknown;
+	tool_calls?: WireMessage['tool_calls'];
+	tool_call_id?: string;
+};
+
 export const buildWireMessages = (
 	messagesList: any[],
 	systemContent: string | null | undefined
 ): any[] => {
 	return [systemContent ? { role: 'system', content: systemContent } : undefined, ...messagesList]
 		.filter((message) => message)
-		.flatMap((message) => {
+		.flatMap((message): OutboundWireMessage[] => {
 			if (
 				message.role === 'user' &&
 				(message.files ?? []).some((file: any) => file.type === 'image')

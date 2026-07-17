@@ -4,15 +4,19 @@
 	export let x;
 	export let y;
 
-	let popupElement = null;
+	let popupElement: HTMLDivElement | null = null;
 
 	onMount(() => {
-		document.body.appendChild(popupElement);
+		if (popupElement) {
+			document.body.appendChild(popupElement);
+		}
 		document.body.style.overflow = 'hidden';
 	});
 
 	onDestroy(() => {
-		document.body.removeChild(popupElement);
+		if (popupElement) {
+			document.body.removeChild(popupElement);
+		}
 		document.body.style.overflow = 'unset';
 	});
 </script>

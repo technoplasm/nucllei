@@ -2,9 +2,11 @@ import { env } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 
 // TODO: Below doesn't work as expected, need to investigate further
-env.backends.onnx.wasm.wasmPaths = '/wasm/';
+if (env.backends.onnx.wasm) {
+	env.backends.onnx.wasm.wasmPaths = '/wasm/';
+}
 
-let tts;
+let tts: KokoroTTS | null = null;
 let isInitialized = false; // Flag to track initialization status
 const DEFAULT_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'; // Default model
 
@@ -20,13 +22,14 @@ self.onmessage = async (event) => {
 		try {
 			tts = await KokoroTTS.from_pretrained(model_id, {
 				dtype,
-				device: !!navigator?.gpu ? 'webgpu' : 'wasm' // Detect WebGPU
+				// WebGPU 検出(lib.dom 未収載の navigator.gpu を型だけ拡張)
+				device: (navigator as Navigator & { gpu?: unknown })?.gpu ? 'webgpu' : 'wasm'
 			});
 			isInitialized = true; // Mark as initialized after successful loading
 			self.postMessage({ status: 'init:complete' });
 		} catch (error) {
 			isInitialized = false; // Ensure it's marked as false on failure
-			self.postMessage({ status: 'init:error', error: error.message });
+			self.postMessage({ status: 'init:error', error: error instanceof Error ? error.message : `${error}` });
 		}
 	}
 
@@ -46,7 +49,10 @@ self.onmessage = async (event) => {
 			const blobUrl = URL.createObjectURL(blob);
 			self.postMessage({ status: 'generate:complete', audioUrl: blobUrl });
 		} catch (error) {
-			self.postMessage({ status: 'generate:error', error: error.message });
+			self.postMessage({
+				status: 'generate:error',
+				error: error instanceof Error ? error.message : `${error}`
+			});
 		}
 	}
 

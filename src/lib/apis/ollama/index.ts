@@ -195,7 +195,8 @@ export const getOllamaModels = async (urlIdx: null | number = null) => {
 		throw error;
 	}
 
-	return (res?.models ?? [])
+	const models: { model: string; name?: string; [key: string]: unknown }[] = res?.models ?? [];
+	return models
 		.map((model) => ({ id: model.model, name: model.name ?? model.model, ...model }))
 		.sort((a, b) => {
 			return a.name.localeCompare(b.name);

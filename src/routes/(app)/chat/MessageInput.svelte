@@ -107,13 +107,15 @@
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
-		element.scrollTo({
-			top: element.scrollHeight,
-			behavior: 'smooth'
-		});
+		if (element) {
+			element.scrollTo({
+				top: element.scrollHeight,
+				behavior: 'smooth'
+			});
+		}
 	};
 
-	const uploadFileHandler = async (file, fullContext: boolean = false) => {
+	const uploadFileHandler = async (file: File, fullContext: boolean = false) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;
@@ -179,7 +181,7 @@
 	// chat JSON には正準形 "/api/v1/files/{id}/content" の相対 URL を保存する
 	// (送信 payload 中のこの形式だけ backend が base64 化する)。
 	// アップロード中はローカル objectURL でプレビュー(status:'uploading')。
-	const uploadImageHandler = async (file) => {
+	const uploadImageHandler = async (file: File) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;
@@ -214,9 +216,10 @@
 
 			const maxDimension = $config?.file?.image_max_dimension ?? null;
 			if (maxDimension) {
-				const dataUrl = await new Promise((resolve, reject) => {
+				const dataUrl = await new Promise<string>((resolve, reject) => {
 					const reader = new FileReader();
-					reader.onload = () => resolve(reader.result);
+					// readAsDataURL の onload では result は常に string
+					reader.onload = () => resolve(reader.result as string);
 					reader.onerror = reject;
 					reader.readAsDataURL(file);
 				});
@@ -264,7 +267,9 @@
 	// llens(#69): 保存済みファイルの再添付。processFileById で Attachment フックを再発火し
 	// (発火は owner/admin のみサーバー側で制御)、戻りの FileModel から files エントリを組む。
 	// origin:'library' — dismiss 時に実体削除しない(添付解除のみ)。
-	const libraryFilesHandler = async (selected) => {
+	const libraryFilesHandler = async (
+		selected: { id: string; meta?: { content_type?: string } }[]
+	) => {
 		for (const item of selected ?? []) {
 			if (files.some((f) => f?.id === item.id)) {
 				continue;
@@ -319,7 +324,7 @@
 
 	// llens(#69): dismiss の意味論 — 新規アップロード分は実体削除、
 	// library 再添付分(origin:'library')は添付解除のみ。
-	const dismissFileHandler = async (fileIdx) => {
+	const dismissFileHandler = async (fileIdx: number) => {
 		const file = files[fileIdx];
 
 		if (file?.type !== 'collection' && !file?.collection && file?.origin !== 'library') {
@@ -339,7 +344,14 @@
 	// 送信キー(Enter ⇄ Ctrl+Enter)。切り替え UI は「+」メニュー(InputMenu)にある
 	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
 
-	const inputFilesHandler = async (inputFiles) => {
+	// 設定値は 'LTR' | 'RTL' | 'auto'(大文字)— dir 属性用に小文字化(UserMessage.svelte と同じ)
+	const chatDirection = $derived(
+		$settings?.chatDirection
+			? ($settings.chatDirection.toLowerCase() as 'ltr' | 'rtl' | 'auto')
+			: 'auto'
+	);
+
+	const inputFilesHandler = async (inputFiles: File[]) => {
 		inputFiles.forEach((file) => {
 			if (
 				($config?.file?.max_size ?? null) !== null &&
@@ -373,7 +385,7 @@
 		}
 	};
 
-	const onDragOver = (e) => {
+	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
 		// Check if a file is being dragged.
@@ -388,7 +400,7 @@
 		dragged = false;
 	};
 
-	const onDrop = async (e) => {
+	const onDrop = async (e: DragEvent) => {
 		e.preventDefault();
 
 		if (e.dataTransfer?.files) {
@@ -475,7 +487,7 @@
 										crossorigin="anonymous"
 										alt="model profile"
 										class="size-3.5 max-w-[28px] object-cover rounded-full"
-										src={$models.find((model) => model.id === atSelectedModel.id)?.info?.meta
+										src={$models.find((model) => model.id === atSelectedModel?.id)?.info?.meta
 											?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
 									/>
 									<div class="translate-y-[0.5px] font-medium">
@@ -535,7 +547,9 @@
 								toast.error($i18n.t(`File not found.`));
 							}
 
-							filesInputElement.value = '';
+							if (filesInputElement) {
+								filesInputElement.value = '';
+							}
 						}}
 					/>
 
@@ -572,7 +586,7 @@
 						>
 							<div
 								class="flex-1 flex flex-col relative w-full shadow-[0_2px_12px_-4px_rgba(0,0,0,0.12)] rounded-3xl border border-line px-1 bg-surface-raised text-content"
-								dir={$settings?.chatDirection ?? 'auto'}
+								dir={chatDirection}
 							>
 								{#if files.length > 0}
 									<div class="mx-2 mt-2.5 -mb-1 flex items-center flex-wrap gap-2">
@@ -664,9 +678,11 @@
 											if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
 												e.preventDefault();
 
-												const regenerateButton = [
-													...document.getElementsByClassName('regenerate-response-button')
-												]?.at(-1);
+												const regenerateButton = (
+													[
+														...document.getElementsByClassName('regenerate-response-button')
+													] as HTMLElement[]
+												)?.at(-1);
 
 												regenerateButton?.click();
 											}
@@ -678,11 +694,13 @@
 													...document.getElementsByClassName('user-message')
 												]?.at(-1);
 
-												const editButton = [
-													...document.getElementsByClassName('edit-user-message-button')
-												]?.at(-1);
+												const editButton = (
+													[
+														...document.getElementsByClassName('edit-user-message-button')
+													] as HTMLElement[]
+												)?.at(-1);
 
-												userMessageElement.scrollIntoView({ block: 'center' });
+												userMessageElement?.scrollIntoView({ block: 'center' });
 												editButton?.click();
 											}
 
@@ -691,28 +709,34 @@
 													e.preventDefault();
 													commandsElement.selectUp();
 
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-													commandOptionButton.scrollIntoView({ block: 'center' });
+													const commandOptionButton = (
+														[
+															...document.getElementsByClassName('selected-command-option-button')
+														] as HTMLElement[]
+													)?.at(-1);
+													commandOptionButton?.scrollIntoView({ block: 'center' });
 												}
 
 												if (commandsContainerElement && e.key === 'ArrowDown') {
 													e.preventDefault();
 													commandsElement.selectDown();
 
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-													commandOptionButton.scrollIntoView({ block: 'center' });
+													const commandOptionButton = (
+														[
+															...document.getElementsByClassName('selected-command-option-button')
+														] as HTMLElement[]
+													)?.at(-1);
+													commandOptionButton?.scrollIntoView({ block: 'center' });
 												}
 
 												if (commandsContainerElement && e.key === 'Enter') {
 													e.preventDefault();
 
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
+													const commandOptionButton = (
+														[
+															...document.getElementsByClassName('selected-command-option-button')
+														] as HTMLElement[]
+													)?.at(-1);
 
 													if (e.shiftKey) {
 														prompt = `${prompt}\n`;
@@ -726,9 +750,11 @@
 												if (commandsContainerElement && e.key === 'Tab') {
 													e.preventDefault();
 
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
+													const commandOptionButton = (
+														[
+															...document.getElementsByClassName('selected-command-option-button')
+														] as HTMLElement[]
+													)?.at(-1);
 
 													commandOptionButton?.click();
 												}
@@ -738,7 +764,9 @@
 													!(
 														'ontouchstart' in window ||
 														navigator.maxTouchPoints > 0 ||
-														navigator.msMaxTouchPoints > 0
+														// IE/旧 Edge の prefixed プロパティ(lib.dom 未収載)— 型だけ拡張
+														((navigator as Navigator & { msMaxTouchPoints?: number })
+															.msMaxTouchPoints ?? 0) > 0
 													)
 												) {
 													if (isComposing) {
@@ -765,24 +793,26 @@
 
 											if (e.key === 'Tab') {
 												const words = extractCurlyBraceWords(prompt);
+												// await 後も参照できるよう e.target を textarea として捕まえる
+												const target = e.target as HTMLTextAreaElement;
 
 												if (words.length > 0) {
-													const word = words.at(0);
+													const word = words[0];
 													const fullPrompt = prompt;
 
-													prompt = prompt.substring(0, word?.endIndex + 1);
+													prompt = prompt.substring(0, word.endIndex + 1);
 													await tick();
 
-													e.target.scrollTop = e.target.scrollHeight;
+													target.scrollTop = target.scrollHeight;
 													prompt = fullPrompt;
 													await tick();
 
 													e.preventDefault();
-													e.target.setSelectionRange(word?.startIndex, word.endIndex + 1);
+													target.setSelectionRange(word.startIndex, word.endIndex + 1);
 												}
 
-												e.target.style.height = '';
-												e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
+												target.style.height = '';
+												target.style.height = Math.min(target.scrollHeight, 320) + 'px';
 											}
 
 											if (e.key === 'Escape') {
@@ -791,15 +821,20 @@
 										}}
 										rows="1"
 										oninput={async (e) => {
-											e.target.style.height = '';
-											e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
+											const target = e.target as HTMLTextAreaElement;
+											target.style.height = '';
+											target.style.height = Math.min(target.scrollHeight, 320) + 'px';
 										}}
 										onfocus={async (e) => {
-											e.target.style.height = '';
-											e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
+											const target = e.target as HTMLTextAreaElement;
+											target.style.height = '';
+											target.style.height = Math.min(target.scrollHeight, 320) + 'px';
 										}}
 										onpaste={async (e) => {
-											const clipboardData = e.clipboardData || window.clipboardData;
+											// IE 由来の window.clipboardData(lib.dom 未収載)— 型だけ拡張
+											const clipboardData =
+												e.clipboardData ||
+												(window as Window & { clipboardData?: DataTransfer }).clipboardData;
 
 											if (clipboardData && clipboardData.items) {
 												for (const item of clipboardData.items) {
@@ -840,7 +875,7 @@
 									<div class="ml-1 self-end flex items-center flex-1 max-w-[80%] gap-0.5">
 										<InputMenu
 											uploadFilesHandler={() => {
-												filesInputElement.click();
+												filesInputElement?.click();
 											}}
 											openLibraryHandler={() => {
 												showFileLibraryModal = true;
@@ -934,7 +969,7 @@
 																	return;
 																}
 
-																if ($config.audio.stt.engine === 'web') {
+																if ($config?.audio?.stt?.engine === 'web') {
 																	toast.error(
 																		$i18n.t(
 																			'Call feature is not supported when using Web STT engine'
@@ -945,9 +980,10 @@
 																}
 																// check if user has access to getUserMedia
 																try {
-																	let stream = await navigator.mediaDevices.getUserMedia({
-																		audio: true
-																	});
+																	let stream: MediaStream | null =
+																		await navigator.mediaDevices.getUserMedia({
+																			audio: true
+																		});
 																	// If the user grants the permission, proceed to show the call overlay
 
 																	if (stream) {

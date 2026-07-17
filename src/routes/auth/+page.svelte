@@ -27,12 +27,14 @@
 
 	let ldapUsername = '';
 
+	/** @param {string} key */
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
 		return urlParams.get(key);
 	};
 
+	/** @param {import('$lib/stores').SessionUser | null} sessionUser */
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
 			console.log(sessionUser);

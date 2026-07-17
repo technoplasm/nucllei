@@ -24,7 +24,7 @@
 	let confirmed = false;
 
 	let durationSeconds = $state(0);
-	let durationCounter = null;
+	let durationCounter: ReturnType<typeof setInterval> | undefined;
 
 	let transcription = '';
 
@@ -49,18 +49,28 @@
 		}
 	});
 
-	const formatSeconds = (seconds) => {
+	const formatSeconds = (seconds: number) => {
 		const minutes = Math.floor(seconds / 60);
 		const remainingSeconds = seconds % 60;
 		const formattedSeconds = remainingSeconds < 10 ? `0${remainingSeconds}` : remainingSeconds;
 		return `${minutes}:${formattedSeconds}`;
 	};
 
-	let stream;
-	let speechRecognition;
+	// Web Speech API は lib.dom に型が無いため、使用箇所に必要な最小限のローカル型を置く
+	type SpeechRecognitionLike = {
+		continuous: boolean;
+		start: () => void;
+		stop: () => void;
+		onresult: ((event: { results: Record<number, { transcript: string }[]> }) => void) | null;
+		onend: (() => void) | null;
+		onerror: ((event: { error: string }) => void) | null;
+	};
 
-	let mediaRecorder;
-	let audioChunks = [];
+	let stream: MediaStream | null = null;
+	let speechRecognition: SpeechRecognitionLike | undefined;
+
+	let mediaRecorder: MediaRecorder | undefined;
+	let audioChunks: Blob[] = [];
 
 	const MIN_DECIBELS = -45;
 	let VISUALIZER_BUFFER_LENGTH = 300;
@@ -77,7 +87,7 @@
 		return Math.sqrt(sumSquares / data.length);
 	};
 
-	const normalizeRMS = (rms) => {
+	const normalizeRMS = (rms: number) => {
 		rms = rms * 10;
 		const exp = 1.5; // Adjust exponent value; values greater than 1 expand larger numbers more and compress smaller numbers more
 		const scaledRMS = Math.pow(rms, exp);
@@ -86,7 +96,7 @@
 		return Math.min(1.0, Math.max(0.01, scaledRMS));
 	};
 
-	const analyseAudio = (stream) => {
+	const analyseAudio = (stream: MediaStream) => {
 		const audioContext = new AudioContext();
 		const audioStreamSource = audioContext.createMediaStreamSource(stream);
 
@@ -129,7 +139,7 @@
 		detectSound();
 	};
 
-	const transcribeHandler = async (audioBlob) => {
+	const transcribeHandler = async (audioBlob: Blob) => {
 		// Create a blob from the audio chunks
 
 		await tick();
@@ -149,26 +159,27 @@
 	const startRecording = async () => {
 		loading = true;
 
-		stream = await navigator.mediaDevices.getUserMedia({
+		const _stream = await navigator.mediaDevices.getUserMedia({
 			audio: {
 				echoCancellation: true,
 				noiseSuppression: true,
 				autoGainControl: true
 			}
 		});
-		mediaRecorder = new MediaRecorder(stream);
+		stream = _stream;
+		mediaRecorder = new MediaRecorder(_stream);
 		mediaRecorder.onstart = () => {
 			console.log('Recording started');
 			loading = false;
 			startDurationCounter();
 
 			audioChunks = [];
-			analyseAudio(stream);
+			analyseAudio(_stream);
 		};
 		mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
 		mediaRecorder.onstop = async () => {
 			console.log('Recording stopped');
-			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			if ($config?.audio?.stt?.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
 				audioChunks = [];
 			} else {
 				if (confirmed) {
@@ -184,10 +195,17 @@
 			}
 		};
 		mediaRecorder.start();
-		if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
-			if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+		if ($config?.audio?.stt?.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			// lib.dom に無い prefixed コンストラクタを型だけ拡張して存在チェック(挙動は従来の in 判定と同じ)
+			const speechWindow = window as typeof window & {
+				SpeechRecognition?: new () => SpeechRecognitionLike;
+				webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+			};
+			const SpeechRecognitionCtor =
+				speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+			if (SpeechRecognitionCtor) {
 				// Create a SpeechRecognition object
-				speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+				speechRecognition = new SpeechRecognitionCtor();
 
 				// Set continuous to true for continuous recognition
 				speechRecognition.continuous = true;
@@ -195,7 +213,7 @@
 				// Set the timeout for turning off the recognition after inactivity (in milliseconds)
 				const inactivityTimeout = 2000; // 3 seconds
 
-				let timeoutId;
+				let timeoutId: ReturnType<typeof setTimeout> | undefined;
 				// Start recognition
 				speechRecognition.start();
 
@@ -216,7 +234,7 @@
 					// Restart the inactivity timeout
 					timeoutId = setTimeout(() => {
 						console.log('Speech recognition turned off due to inactivity.');
-						speechRecognition.stop();
+						speechRecognition?.stop();
 					}, inactivityTimeout);
 				};
 
@@ -280,7 +298,7 @@
 		stream = null;
 	};
 
-	let resizeObserver;
+	let resizeObserver: ResizeObserver | undefined;
 
 	onMount(() => {
 		// listen to width changes
@@ -300,7 +318,7 @@
 
 	onDestroy(() => {
 		// remove resize observer
-		resizeObserver.disconnect();
+		resizeObserver?.disconnect();
 	});
 </script>
 

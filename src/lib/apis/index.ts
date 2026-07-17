@@ -831,6 +831,17 @@ export interface ModelMeta {
 	};
 	profile_image_url?: string;
 	hidden?: boolean;
+	// モデル別の提案プロンプト(ModelEditor が保存。無指定は null)
+	suggestion_prompts?: { content: string; title?: string | [string, string] }[] | null;
+	// モデル作者情報(Placeholder / ChatPlaceholder の「By …」表示が参照)
+	user?: { name?: string; username?: string } | null;
+	// llens(#42): 機能フラグ(features.skills 既定 ON)と skill 紐づけ(ModelEditor が保存、
+	// backend は meta.skillIds ∩ 可視 で発火 — nucllei/utils/skills.py)
+	features?: {
+		skills?: boolean;
+		[key: string]: boolean | undefined;
+	};
+	skillIds?: string[];
 }
 
 // llens(#70 C): FE(Chat.svelte / ModelEditor)が参照するキーのみ型付け。

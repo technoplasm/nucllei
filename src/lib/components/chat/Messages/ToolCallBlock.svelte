@@ -281,7 +281,7 @@
 		<div class="mt-1 space-y-1">
 			{#each files as file, idx}
 				{#if file.startsWith('data:image/')}
-					<Image id={`${id}-result-${idx}`} src={file} alt="Image" />
+					<Image src={file} alt="Image" />
 				{/if}
 			{/each}
 		</div>

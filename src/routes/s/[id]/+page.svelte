@@ -9,6 +9,7 @@
 	import { convertMessagesToHistory, createMessagesList } from '$lib/utils';
 
 	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
+	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -24,20 +25,29 @@
 	let loaded = false;
 
 	let autoScroll = true;
-	let processing = '';
 	let messagesContainerElement: HTMLDivElement;
 
 	// let chatId = $page.params.id;
 	let selectedModels = [''];
 
-	let chat = null;
-	let user = null;
+	let chat: {
+		id: string;
+		user_id: string;
+		chat: {
+			title: string;
+			timestamp?: number;
+			models?: string[];
+			history?: ChatHistory;
+			messages?: ChatMessage[];
+		};
+	} | null = null;
+	let user: { name: string; profile_image_url?: string } | undefined = undefined;
 
 	let title = '';
 	let files = [];
 
-	let messages = [];
-	let history = {
+	let messages: ChatMessage[] = [];
+	let history: ChatHistory = {
 		messages: {},
 		currentId: null
 	};
@@ -60,7 +70,7 @@
 	//////////////////////////
 
 	const loadSharedChat = async () => {
-		await chatId.set($page.params.id);
+		await chatId.set($page.params.id ?? '');
 
 		// 依存のない 3 フェッチは並列に(直列だと空白時間 = 3 往復分になる)
 		const [userSettings, modelList, _chat] = await Promise.all([
@@ -95,7 +105,7 @@
 		if (chat) {
 			user = await getUserById(chat.user_id).catch((error) => {
 				console.error(error);
-				return null;
+				return undefined;
 			});
 
 			const chatContent = chat.chat;
@@ -103,21 +113,16 @@
 			if (chatContent) {
 				console.log(chatContent);
 
-				selectedModels =
-					(chatContent?.models ?? undefined) !== undefined
-						? chatContent.models
-						: [chatContent.models ?? ''];
-				history =
-					(chatContent?.history ?? undefined) !== undefined
-						? chatContent.history
-						: convertMessagesToHistory(chatContent.messages);
+				selectedModels = chatContent.models ?? [''];
+				history = chatContent.history ?? convertMessagesToHistory(chatContent.messages ?? []);
 				title = chatContent.title;
 
 				autoScroll = true;
 				await tick();
 
-				if (messages.length > 0) {
-					history.messages[messages.at(-1).id].done = true;
+				const lastMessage = messages.at(-1);
+				if (lastMessage) {
+					history.messages[lastMessage.id].done = true;
 				}
 				await tick();
 
@@ -166,7 +171,7 @@
 
 						<div class="flex text-sm justify-between items-center mt-1">
 							<div class="text-content-muted">
-								{dayjs(chat.chat.timestamp).format('LLL')}
+								{dayjs(chat?.chat?.timestamp).format('LLL')}
 							</div>
 						</div>
 					</div>
@@ -180,7 +185,6 @@
 							chatId={$chatId}
 							readOnly={true}
 							{selectedModels}
-							{processing}
 							bind:history
 							bind:messages
 							bind:autoScroll
