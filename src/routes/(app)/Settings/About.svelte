@@ -3,6 +3,8 @@
 	import { WEBUI_NAME, config } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
+	import OPEN_WEBUI_LICENSE from '../../../../LICENSE.open-webui?raw';
+
 	const i18n = getContext('i18n');
 
 	type LicensedPackage = { name: string; version: string; license: string };
@@ -10,17 +12,12 @@
 	// 依存クレジット(static/licenses.json — `uv run task licenses` で再生成)
 	let licenses = $state<{ frontend: LicensedPackage[]; backend: LicensedPackage[] } | null>(null);
 
-	const groupByLicense = (packages: LicensedPackage[]) => {
-		const groups = new Map<string, LicensedPackage[]>();
-		for (const pkg of packages) {
-			const key = pkg.license || 'Unknown';
-			if (!groups.has(key)) {
-				groups.set(key, []);
-			}
-			groups.get(key)!.push(pkg);
-		}
-		return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
-	};
+	// llens(2026-07-17 決定): UI で明示するのは「配布物に実体が同梱されるもの」だけ —
+	// フォント(OFL-1.1、表記義務あり)のみ。MIT/BSD/Apache 等はソース同梱の各 LICENSE で
+	// 充足するため全列挙はしない。licenses.json からの自動抽出なのでフォント入れ替えにも追従する。
+	const fontPackages = $derived(
+		(licenses?.frontend ?? []).filter((pkg) => (pkg.license ?? '').startsWith('OFL'))
+	);
 
 	onMount(async () => {
 		licenses = await fetch('/licenses.json')
@@ -28,35 +25,9 @@
 			.catch(() => null);
 	});
 
-	// fork base の BSD-3-Clause 全文。<pre> に直書きすると本文をカラム 0 に
-	// 置く必要がありマークアップのインデントが壊れるため、変数で持って展開する。
-	const OPEN_WEBUI_LICENSE = `Copyright (c) 2023 Open WebUI (Timothy Jaeryang Baek)
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`;
+	// fork base の BSD-3-Clause 全文。文字列リテラルで埋め込むと本文をカラム 0 に
+	// 置く必要がありエディタのインデント検出が壊れるため、リポジトリ直下の
+	// LICENSE.open-webui をビルド時に取り込む(?raw — 真実源はファイル 1 本)。
 </script>
 
 <div class="flex flex-col h-full justify-between space-y-3 text-sm mb-6">
@@ -98,45 +69,36 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`;
 
 		<hr class=" border-line" />
 
-		<!-- 下段: 関連システムのライセンス -->
+		<!-- 下段 1: fork 元(Open WebUI)のライセンス全文 -->
 		<div>
-			<div class="text-sm font-medium">{$i18n.t('Third-Party Licenses')}</div>
+			<div class="text-sm font-medium">Upstream License</div>
 
 			<div class="mt-2">
 				<div class="flex items-baseline gap-2 text-content-muted">
-					<a href="https://openwebui.com" target="_blank" class="text-sm underline">
-						Open WebUI v0.6.5
-					</a>
+					<a href="https://openwebui.com" target="_blank" class="text-sm"> Open WebUI v0.6.5 </a>
 					<span class="text-xs">(fork base, BSD-3-Clause)</span>
 				</div>
 
 				<pre class="mt-1 text-xs text-content-subtle whitespace-pre-wrap">{OPEN_WEBUI_LICENSE}</pre>
 			</div>
-
-			{#if licenses}
-				<hr class=" border-line my-3" />
-
-				<div>
-					<div class="text-sm font-medium mb-1">{$i18n.t('Third-Party Packages')}</div>
-
-					{#each [{ title: 'Frontend', packages: licenses.frontend }, { title: 'Backend', packages: licenses.backend }] as side (side.title)}
-						<div class="mt-2">
-							<div class="text-xs font-medium text-content-muted">
-								{side.title} ({side.packages.length})
-							</div>
-
-							{#each groupByLicense(side.packages) as [license, packages] (license)}
-								<div class="mt-1.5">
-									<div class="text-xs text-content-muted">{license} ({packages.length})</div>
-									<div class="text-xs text-content-subtle leading-relaxed break-words">
-										{packages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')}
-									</div>
-								</div>
-							{/each}
-						</div>
-					{/each}
-				</div>
-			{/if}
 		</div>
+
+		<!-- 下段 2: サードパーティ(配布物に実体が同梱されるもののみ = フォント) -->
+		{#if fontPackages.length > 0}
+			<hr class=" border-line" />
+
+			<div>
+				<div class="text-sm font-medium">Third-Party Licenses</div>
+
+				<div class="mt-2">
+					<div class="text-xs font-medium text-content-muted">Fonts</div>
+
+					<div class="mt-1 text-xs text-content-subtle leading-relaxed break-words">
+						{fontPackages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')} — SIL Open Font License
+						1.1
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 </div>
