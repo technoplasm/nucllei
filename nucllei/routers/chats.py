@@ -556,6 +556,7 @@ def _assert_message_history_preserved(old_chat: dict, new_chat: dict):
     既存メッセージの消失と content の非前方一致な書き換えを拒否する。
     編集は新ブランチとして積む(「編集して送信」の既存挙動)。content の追記
     (ストリーミング終端の保存等)・ブランチ追加・メタ情報(title/tags/params 等)は通す。"""
+
     def _messages_of(chat: dict) -> dict:
         history = chat.get("history")
         messages = history.get("messages") if isinstance(history, dict) else None
