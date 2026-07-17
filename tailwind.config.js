@@ -102,6 +102,8 @@ export default {
 		containerQuries,
 		// llens(#70): class ベースアイコン(i-lucide-*)。CSS mask で currentColor 継承、
 		// 使ったクラスだけ emit(ビルド時生成、ランタイム外部依存なし)。動的なクラス名合成は禁止。
-		iconsPlugin({ collections: getIconCollections(['lucide']) })
+		// logos は多色ブランドロゴ用(auth の Google/Microsoft)— 多色 SVG は mask でなく
+		// background-image で emit されるため色が保たれる。
+		iconsPlugin({ collections: getIconCollections(['lucide', 'logos']) })
 	]
 };

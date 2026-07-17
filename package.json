@@ -21,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@egoist/tailwindcss-icons": "^1.9.2",
+		"@iconify-json/logos": "^1.2.11",
 		"@iconify-json/lucide": "^1.2.116",
 		"@sveltejs/adapter-auto": "3.2.2",
 		"@sveltejs/adapter-static": "^3.0.2",
