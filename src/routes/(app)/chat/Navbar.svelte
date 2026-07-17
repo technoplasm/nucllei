@@ -18,17 +18,17 @@
 	import { slide } from 'svelte/transition';
 	import { page } from '$app/stores';
 
-	import ShareChatModal from '../chat/ShareChatModal.svelte';
-	import ModelSelector from '../chat/ModelSelector.svelte';
-	import Tooltip from '../common/Tooltip.svelte';
-	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
+	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
+	import ModelSelector from './ModelSelector.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Menu from './NavbarMenu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
-	import MenuLines from '../icons/MenuLines.svelte';
+	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 
-	import PencilSquare from '../icons/PencilSquare.svelte';
-	import Banner from '../common/Banner.svelte';
-	import Sun from '../icons/Sun.svelte';
-	import Moon from '../icons/Moon.svelte';
+	import PencilSquare from '$lib/components/icons/PencilSquare.svelte';
+	import Banner from '$lib/components/common/Banner.svelte';
+	import Sun from '$lib/components/icons/Sun.svelte';
+	import Moon from '$lib/components/icons/Moon.svelte';
 
 	const i18n = getContext('i18n');
 

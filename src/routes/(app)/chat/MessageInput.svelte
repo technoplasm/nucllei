@@ -31,10 +31,10 @@
 	import Commands from './MessageInput/Commands.svelte';
 	import FileLibraryModal from './MessageInput/FileLibraryModal.svelte';
 
-	import Tooltip from '../common/Tooltip.svelte';
-	import FileItem from '../common/FileItem.svelte';
-	import Image from '../common/Image.svelte';
-	import Spinner from '../common/Spinner.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import FileItem from '$lib/components/common/FileItem.svelte';
+	import Image from '$lib/components/common/Image.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 

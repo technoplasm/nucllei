@@ -3,8 +3,8 @@
 
 	const i18n = getContext('i18n');
 
-	import ShortcutsModal from '../chat/ShortcutsModal.svelte';
-	import Tooltip from '../common/Tooltip.svelte';
+	import ShortcutsModal from './ShortcutsModal.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	let showShortcuts = false;
 </script>

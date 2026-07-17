@@ -5,11 +5,11 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { mobile, showControls, showCallOverlay } from '$lib/stores';
 
-	import Modal from '../common/Modal.svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import ChatFiles from './ChatFiles.svelte';
-	import Drawer from '../common/Drawer.svelte';
-	import EllipsisVertical from '../icons/EllipsisVertical.svelte';
+	import Drawer from '$lib/components/common/Drawer.svelte';
+	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 
 	export let history;
 

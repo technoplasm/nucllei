@@ -55,14 +55,14 @@
 	import { getUserSettings } from '$lib/apis/users';
 	import { chatCompleted, chatAction, stopTask, getTaskIdsByChatId } from '$lib/apis';
 
-	import MessageInput from '$lib/components/chat/MessageInput.svelte';
+	import MessageInput from './MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
-	import Navbar from '$lib/components/chat/Navbar.svelte';
+	import Navbar from './Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
-	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
+	import EventConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
-	import NotificationToast from '../NotificationToast.svelte';
-	import Spinner from '../common/Spinner.svelte';
+	import NotificationToast from '$lib/components/NotificationToast.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	export let chatIdProp = '';
 

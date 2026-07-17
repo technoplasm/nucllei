@@ -10,7 +10,7 @@
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
-	import Suggestions from './Suggestions.svelte';
+	import Suggestions from '$lib/components/chat/Suggestions.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import MessageInput from './MessageInput.svelte';
 
