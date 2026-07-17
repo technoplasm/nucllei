@@ -244,7 +244,7 @@ separate reasoning block.
 | `ATTACHMENT_ALLOWED_EXTENSIONS` | RC | `[]` = allow all | lowercase, dot-less whitelist |
 | `ATTACHMENT_FUNCTION_ID` | RC | `""` = none | id of the single global Attachment Function (§7.3); empty ⇒ uploads store raw bytes, no text extraction |
 | `ATTACHMENT_IMAGE_MAX_DIMENSION` | RC | unset = no resize | client-side downscale of attached images before upload: if the longest edge exceeds this (px), the image is resized to fit, aspect ratio and MIME preserved |
-| `PASTED_TEXT_CHARACTER_LIMIT` | RC | `1000` chars | pasted plain text longer than this becomes a `.txt` attachment (only when the user enables "Paste Large Text as File") |
+| `PASTED_TEXT_CHARACTER_LIMIT` | RC | unset = disabled | pasted plain text longer than this (chars) becomes a `.txt` attachment |
 | `STORAGE_PROVIDER` | env | `local` | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
 | `TIKTOKEN_ENCODING_NAME` | RC | `cl100k_base` | tokenizer for token counting |
 

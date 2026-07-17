@@ -55,12 +55,6 @@
 					}
 				},
 				{
-					key: 'largeTextAsFile',
-					label: 'Paste Large Text as File',
-					type: 'switch',
-					init: () => $settings.largeTextAsFile ?? false
-				},
-				{
 					key: 'copyFormatted',
 					label: 'Copy Formatted Text',
 					type: 'switch',

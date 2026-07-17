@@ -27,6 +27,8 @@ class AttachmentConfigForm(BaseModel):
     ATTACHMENT_MAX_COUNT: Optional[int]
     ATTACHMENT_ALLOWED_EXTENSIONS: list[str]
     ATTACHMENT_FUNCTION_ID: str = ""
+    ATTACHMENT_IMAGE_MAX_DIMENSION: Optional[int] = None
+    PASTED_TEXT_CHARACTER_LIMIT: Optional[int] = None
 
 
 def _attachment_config(request: Request):
@@ -35,6 +37,8 @@ def _attachment_config(request: Request):
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
         "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
         "ATTACHMENT_FUNCTION_ID": request.app.state.config.ATTACHMENT_FUNCTION_ID,
+        "ATTACHMENT_IMAGE_MAX_DIMENSION": request.app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION,
+        "PASTED_TEXT_CHARACTER_LIMIT": request.app.state.config.PASTED_TEXT_CHARACTER_LIMIT,
     }
 
 
@@ -64,6 +68,13 @@ async def set_attachment_config(
         form_data.ATTACHMENT_ALLOWED_EXTENSIONS
     )
     request.app.state.config.ATTACHMENT_FUNCTION_ID = function_id
+    request.app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION = (
+        form_data.ATTACHMENT_IMAGE_MAX_DIMENSION
+    )
+    # 空(None)= 機能無効
+    request.app.state.config.PASTED_TEXT_CHARACTER_LIMIT = (
+        form_data.PASTED_TEXT_CHARACTER_LIMIT
+    )
     return _attachment_config(request)
 
 

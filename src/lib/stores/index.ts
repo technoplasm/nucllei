@@ -126,7 +126,6 @@ type Settings = {
 	splitLargeChunks?: boolean;
 	scrollOnBranchChange?: boolean;
 	notificationSound?: boolean;
-	largeTextAsFile?: boolean;
 	landingPageMode?: string;
 	chatBubble?: boolean;
 	copyFormatted?: boolean;

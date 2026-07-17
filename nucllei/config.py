@@ -1228,15 +1228,15 @@ ATTACHMENT_IMAGE_MAX_DIMENSION = RuntimeConfig(
     ),
 )
 
-# llens: 長文ペーストの .txt ファイル化閾値(文字数)。ユーザー設定
-# 「Paste Large Text as File」が ON のときだけ効く。
+# llens: 長文ペーストの .txt ファイル化閾値(文字数)。ペーストがこれを超えると
+# .txt 添付に変換される。未設定/0 = 変換しない(配備設定のみ — per-user トグルは廃止)。
 PASTED_TEXT_CHARACTER_LIMIT = RuntimeConfig(
     "PASTED_TEXT_CHARACTER_LIMIT",
     "attachment.pasted_text_character_limit",
     (
         int(os.environ.get("PASTED_TEXT_CHARACTER_LIMIT"))
         if os.environ.get("PASTED_TEXT_CHARACTER_LIMIT")
-        else 1000
+        else None
     ),
 )
 

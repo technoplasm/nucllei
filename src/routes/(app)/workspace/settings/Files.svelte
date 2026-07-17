@@ -171,6 +171,52 @@
 							</Tooltip>
 						</div>
 					</div>
+
+					<div class="  mb-2.5 flex w-full justify-between">
+						<div class=" self-center text-xs font-medium">
+							{$i18n.t('Max Image Dimension (px)')}
+						</div>
+						<div class="flex items-center relative">
+							<Tooltip
+								content={$i18n.t(
+									'Images whose longest edge exceeds this are resized to fit before upload (MIME preserved). Leave empty to disable.'
+								)}
+								placement="top-start"
+							>
+								<input
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									type="number"
+									placeholder={$i18n.t('Leave empty to disable')}
+									bind:value={RAGConfig.ATTACHMENT_IMAGE_MAX_DIMENSION}
+									autocomplete="off"
+									min="0"
+								/>
+							</Tooltip>
+						</div>
+					</div>
+
+					<div class="  mb-2.5 flex w-full justify-between">
+						<div class=" self-center text-xs font-medium">
+							{$i18n.t('Pasted Text Character Limit')}
+						</div>
+						<div class="flex items-center relative">
+							<Tooltip
+								content={$i18n.t(
+									'Pasted text longer than this becomes a .txt attachment. Leave empty to disable.'
+								)}
+								placement="top-start"
+							>
+								<input
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									type="number"
+									placeholder="1000"
+									bind:value={RAGConfig.PASTED_TEXT_CHARACTER_LIMIT}
+									autocomplete="off"
+									min="0"
+								/>
+							</Tooltip>
+						</div>
+					</div>
 				</div>
 
 				<div class="mb-3">

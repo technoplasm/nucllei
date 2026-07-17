@@ -12,7 +12,7 @@
 	import General from './General.svelte';
 	import Connections from './Connections.svelte';
 	import Models from './Models.svelte';
-	import Documents from './Documents.svelte';
+	import Files from './Files.svelte';
 	import Interface from './Interface.svelte';
 	import Audio from './Audio.svelte';
 	import Pipelines from './Pipelines.svelte';
@@ -24,7 +24,7 @@
 		{ id: 'general', label: 'General', icon: 'i-lucide-settings' },
 		{ id: 'connections', label: 'Connections', icon: 'i-lucide-cloud' },
 		{ id: 'models', label: 'Models', icon: 'i-lucide-box' },
-		{ id: 'documents', label: 'Documents', icon: 'i-lucide-file-search' },
+		{ id: 'files', label: 'Files', icon: 'i-lucide-file' },
 		{ id: 'interface', label: 'Interface', icon: 'i-lucide-monitor' },
 		{ id: 'audio', label: 'Audio', icon: 'i-lucide-volume-2' },
 		{ id: 'pipelines', label: 'Pipelines', icon: 'i-lucide-layers' },
@@ -37,7 +37,7 @@
 		toast.success($i18n.t('Settings saved successfully!'));
 	};
 
-	// General/Documents はグローバル config に効く設定を持つので、保存後に再取得して反映する
+	// General/Files はグローバル config に効く設定を持つので、保存後に再取得して反映する
 	const savedWithConfigRefresh = async () => {
 		savedToast();
 		await tick();
@@ -81,8 +81,8 @@
 			<Connections onSave={savedToast} />
 		{:else if selectedTab === 'models'}
 			<Models />
-		{:else if selectedTab === 'documents'}
-			<Documents onSave={savedWithConfigRefresh} />
+		{:else if selectedTab === 'files'}
+			<Files onSave={savedWithConfigRefresh} />
 		{:else if selectedTab === 'interface'}
 			<Interface onSave={savedToast} />
 		{:else if selectedTab === 'audio'}

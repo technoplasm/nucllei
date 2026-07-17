@@ -812,12 +812,14 @@
 															]);
 														}
 													} else if (item.type === 'text/plain') {
-														if ($settings?.largeTextAsFile ?? false) {
+														// llens: 長文ペーストの .txt 化は配備設定(PASTED_TEXT_CHARACTER_LIMIT)
+														// のみで駆動する。未設定 = 無効(per-user トグルは廃止)
+														const pastedTextLimit =
+															$config?.file?.pasted_text_character_limit ?? null;
+														if (pastedTextLimit) {
 															const text = clipboardData.getData('text/plain');
 
-															if (
-																text.length > ($config?.file?.pasted_text_character_limit ?? 1000)
-															) {
+															if (text.length > pastedTextLimit) {
 																e.preventDefault();
 																const blob = new Blob([text], { type: 'text/plain' });
 																const file = new File([blob], `Pasted_Text_${Date.now()}.txt`, {
