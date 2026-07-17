@@ -45,6 +45,11 @@ jobs:
       - name: Check for Changes After Format
         run: git diff --exit-code
 
+      # llens(#70): svelte-check 0 errors 達成(bcde37c38)を維持するゲート。
+      # pre-push hook には足さない(hook は「差分のみ数秒」の設計、check は全量 ~1 分)。
+      - name: Check Frontend (svelte-check)
+        run: pnpm check
+
       - name: Build Frontend
         env:
           # vite build は node 既定の 2GB ヒープでは OOM する

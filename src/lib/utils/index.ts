@@ -121,41 +121,6 @@ export const splitStream = (splitOn: string) => {
 	});
 };
 
-export const convertMessagesToHistory = (
-	messages: Omit<ChatMessage, 'id' | 'parentId' | 'childrenIds'>[]
-): ChatHistory => {
-	const history: ChatHistory = {
-		messages: {},
-		currentId: null
-	};
-
-	let parentMessageId: string | null = null;
-	let messageId: string | null = null;
-
-	for (const message of messages) {
-		messageId = uuidv4();
-
-		if (parentMessageId !== null) {
-			history.messages[parentMessageId].childrenIds = [
-				...history.messages[parentMessageId].childrenIds,
-				messageId
-			];
-		}
-
-		history.messages[messageId] = {
-			...message,
-			id: messageId,
-			parentId: parentMessageId,
-			childrenIds: []
-		};
-
-		parentMessageId = messageId;
-	}
-
-	history.currentId = messageId;
-	return history;
-};
-
 export const canvasPixelTest = () => {
 	// Test a 1x1 pixel to potentially identify browser/plugin fingerprint blocking or spoofing
 	// Inspiration: https://github.com/kkapsner/CanvasBlocker/blob/master/test/detectionTest.js

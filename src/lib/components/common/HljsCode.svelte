@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
 	// highlight.js 公式テーマ(github=light / github-dark=dark)を **そのまま** 使う。
 	// 配色は手書きしない。tailwind darkMode:'class' に合わせ、公式 CSS の `.hljs`
 	// 系セレクタをテーマ別にスコープして 1 回だけ注入する。

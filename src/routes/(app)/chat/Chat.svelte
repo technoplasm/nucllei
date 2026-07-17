@@ -30,7 +30,6 @@
 		chatTitle
 	} from '$lib/stores';
 	import {
-		convertMessagesToHistory,
 		getMessageContentParts,
 		createMessagesList,
 		promptTemplate,
@@ -576,14 +575,8 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				selectedModels =
-					(chatContent?.models ?? undefined) !== undefined
-						? chatContent.models
-						: [chatContent.models ?? ''];
-				history =
-					(chatContent?.history ?? undefined) !== undefined
-						? chatContent.history
-						: convertMessagesToHistory(chatContent.messages);
+				selectedModels = chatContent.models;
+				history = chatContent.history;
 
 				chatTitle.set(chatContent.title);
 

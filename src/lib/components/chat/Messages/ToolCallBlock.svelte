@@ -64,6 +64,8 @@
 	// 開閉コントロール(バッジ/tab)hover 中は開閉単位のボーダー全部を強調する
 	let toggleHover = $state(false);
 
+	// 初期値キャプチャは意図(seq 比較の lastState ガード — 変化時のみ $effect で追従)
+	// svelte-ignore state_referenced_locally
 	let lastExpandSeq = expandAll?.seq ?? 0;
 	$effect(() => {
 		if (expandAll && expandAll.seq !== lastExpandSeq) {

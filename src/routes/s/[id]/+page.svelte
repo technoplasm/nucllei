@@ -6,7 +6,7 @@
 	import dayjs from 'dayjs';
 
 	import { settings, chatId, WEBUI_NAME, models, config, user as sessionUser } from '$lib/stores';
-	import { convertMessagesToHistory, createMessagesList } from '$lib/utils';
+	import { createMessagesList } from '$lib/utils';
 
 	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
 	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
@@ -110,11 +110,9 @@
 
 			const chatContent = chat.chat;
 
-			if (chatContent) {
-				console.log(chatContent);
-
+			if (chatContent?.history) {
 				selectedModels = chatContent.models ?? [''];
-				history = chatContent.history ?? convertMessagesToHistory(chatContent.messages ?? []);
+				history = chatContent.history;
 				title = chatContent.title;
 
 				autoScroll = true;
