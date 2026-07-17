@@ -12,11 +12,7 @@
 
 	import { copyToClipboard } from '$lib/utils';
 
-	import DocumentDuplicate from '../icons/DocumentDuplicate.svelte';
 	import Tooltip from './Tooltip.svelte';
-	import Clipboard from '../icons/Clipboard.svelte';
-	import Reset from '../icons/Reset.svelte';
-	import ArrowDownTray from '../icons/ArrowDownTray.svelte';
 
 	export let className = '';
 	export let svg = '';
@@ -60,34 +56,37 @@
 				<Tooltip content={$i18n.t('Download as SVG')}>
 					<button
 						class="p-1.5 rounded-lg border border-gray-100 dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+						aria-label={$i18n.t('Download as SVG')}
 						on:click={() => {
 							downloadAsSVG();
 						}}
 					>
-						<ArrowDownTray className=" size-4" />
+						<span class="i-lucide-download size-4 block"></span>
 					</button>
 				</Tooltip>
 
 				<Tooltip content={$i18n.t('Reset view')}>
 					<button
 						class="p-1.5 rounded-lg border border-gray-100 dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+						aria-label={$i18n.t('Reset view')}
 						on:click={() => {
 							resetPanZoomViewport();
 						}}
 					>
-						<Reset className=" size-4" />
+						<span class="i-lucide-refresh-cw size-4 block"></span>
 					</button>
 				</Tooltip>
 
 				<Tooltip content={$i18n.t('Copy to clipboard')}>
 					<button
 						class="p-1.5 rounded-lg border border-gray-100 dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+						aria-label={$i18n.t('Copy to clipboard')}
 						on:click={() => {
 							copyToClipboard(content);
 							toast.success($i18n.t('Copied to clipboard'));
 						}}
 					>
-						<Clipboard className=" size-4" strokeWidth="1.5" />
+						<span class="i-lucide-clipboard size-4 block"></span>
 					</button>
 				</Tooltip>
 			</div>

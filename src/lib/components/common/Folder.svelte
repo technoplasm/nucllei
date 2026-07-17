@@ -1,11 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy, type Snippet } from 'svelte';
 
-	import ChevronDown from '../icons/ChevronDown.svelte';
-	import ChevronRight from '../icons/ChevronRight.svelte';
 	import Collapsible from './Collapsible.svelte';
 	import Tooltip from './Tooltip.svelte';
-	import Plus from '../icons/Plus.svelte';
 
 	let {
 		open = $bindable(true),
@@ -130,9 +127,9 @@
 				<button class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium">
 					<div class="text-content-subtle">
 						{#if open}
-							<ChevronDown className=" size-3" strokeWidth="2.5" />
+							<span class="i-lucide-chevron-down size-3 block"></span>
 						{:else}
-							<ChevronRight className=" size-3" strokeWidth="2.5" />
+							<span class="i-lucide-chevron-right size-3 block"></span>
 						{/if}
 					</div>
 
@@ -153,8 +150,8 @@
 						}}
 					>
 						<Tooltip content={onAddLabel}>
-							<button class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto">
-								<Plus className=" size-3" strokeWidth="2.5" />
+							<button class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto" aria-label={onAddLabel}>
+								<span class="i-lucide-plus size-3 block"></span>
 							</button>
 						</Tooltip>
 					</button>

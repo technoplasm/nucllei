@@ -1,9 +1,6 @@
 <script lang="ts">
 	import { Pagination } from 'bits-ui';
 
-	import ChevronLeft from '../icons/ChevronLeft.svelte';
-	import ChevronRight from '../icons/ChevronRight.svelte';
-
 	let {
 		page = $bindable(0),
 		count = 0,
@@ -21,7 +18,7 @@
 			<Pagination.PrevButton
 				class="mr-[25px] inline-flex size-8 items-center justify-center rounded-[9px] bg-transparent hover:bg-gray-50 dark:hover:bg-gray-850 active:scale-98 disabled:cursor-not-allowed disabled:text-content-subtle hover:disabled:bg-transparent dark:hover:disabled:bg-transparent"
 			>
-				<ChevronLeft className="size-4" strokeWidth="2" />
+				<span class="i-lucide-chevron-left size-4 block"></span>
 			</Pagination.PrevButton>
 			<div class="flex items-center gap-2.5">
 				{#each pages as page (page.key)}
@@ -40,7 +37,7 @@
 			<Pagination.NextButton
 				class="ml-[25px]  inline-flex size-8 items-center justify-center rounded-[9px] bg-transparent hover:bg-gray-50 dark:hover:bg-gray-850 active:scale-98 disabled:cursor-not-allowed disabled:text-content-subtle hover:disabled:bg-transparent dark:hover:disabled:bg-transparent"
 			>
-				<ChevronRight className="size-4" strokeWidth="2" />
+				<span class="i-lucide-chevron-right size-4 block"></span>
 			</Pagination.NextButton>
 		</div>
 	</Pagination.Root>

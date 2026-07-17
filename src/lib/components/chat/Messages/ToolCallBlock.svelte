@@ -20,9 +20,6 @@
 		type ToolCallRender
 	} from '$lib/utils/tool-render';
 
-	import CheckCircle from '$lib/components/icons/CheckCircle.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Image from '$lib/components/common/Image.svelte';
@@ -124,7 +121,7 @@
 				</div>
 			{:else}
 				<div class="text-green-500 dark:text-green-400 shrink-0">
-					<CheckCircle className="size-4" strokeWidth="2" />
+					<span class="i-lucide-circle-check size-4 block"></span>
 				</div>
 			{/if}
 
@@ -144,9 +141,9 @@
 
 			<div class="flex self-center translate-y-[1px]">
 				{#if open}
-					<ChevronUp strokeWidth="3.5" className="size-3.5" />
+					<span class="i-lucide-chevron-up size-3.5 block"></span>
 				{:else}
-					<ChevronDown strokeWidth="3.5" className="size-3.5" />
+					<span class="i-lucide-chevron-down size-3.5 block"></span>
 				{/if}
 			</div>
 		</div>
@@ -254,7 +251,7 @@
 						collapseFromBottom();
 					}}
 				>
-					<ChevronUp strokeWidth="3.5" className="size-3" />
+					<span class="i-lucide-chevron-up size-3 block"></span>
 					{$i18n.t('Close')}
 				</div>
 

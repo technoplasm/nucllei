@@ -8,9 +8,6 @@
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
-	import ChevronUp from '../icons/ChevronUp.svelte';
-	import ChevronDown from '../icons/ChevronDown.svelte';
-
 	let {
 		open = $bindable(false),
 		className = '',
@@ -66,9 +63,9 @@
 				{#if chevron}
 					<div class="flex self-start translate-y-1">
 						{#if open}
-							<ChevronUp strokeWidth="3.5" className="size-3.5" />
+							<span class="i-lucide-chevron-up size-3.5 block"></span>
 						{:else}
-							<ChevronDown strokeWidth="3.5" className="size-3.5" />
+							<span class="i-lucide-chevron-down size-3.5 block"></span>
 						{/if}
 					</div>
 				{/if}

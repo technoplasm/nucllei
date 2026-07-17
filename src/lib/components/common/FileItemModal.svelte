@@ -6,14 +6,8 @@
 	const i18n = getContext('i18n');
 
 	import Modal from './Modal.svelte';
-	import XMark from '../icons/XMark.svelte';
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import Tooltip from './Tooltip.svelte';
-	import ArrowDownTray from '../icons/ArrowDownTray.svelte';
-	import GarbageBin from '../icons/GarbageBin.svelte';
-	import LockClosed from '../icons/LockClosed.svelte';
-	import GlobeAlt from '../icons/GlobeAlt.svelte';
-	import UsersSolid from '../icons/UsersSolid.svelte';
 
 	export let item;
 	export let show = false;
@@ -58,8 +52,8 @@
 				<div class="font-medium text-lg text-content line-clamp-1">
 					{item?.name ?? 'File'}
 				</div>
-				<button on:click={() => (show = false)}>
-					<XMark />
+				<button aria-label={$i18n.t('Close')} on:click={() => (show = false)}>
+					<span class="i-lucide-x size-3.5 block"></span>
 				</button>
 			</div>
 
@@ -154,11 +148,11 @@
 							on:click={() => onShare()}
 						>
 							{#if visibility === 'public'}
-								<GlobeAlt className="size-4" />
+								<span class="i-lucide-globe size-4 block"></span>
 							{:else if visibility === 'shared'}
-								<UsersSolid className="size-4" />
+								<span class="i-lucide-users size-4 block"></span>
 							{:else}
-								<LockClosed className="size-4" />
+								<span class="i-lucide-lock size-4 block"></span>
 							{/if}
 							<span>{$i18n.t('Share')}</span>
 						</button>
@@ -170,7 +164,7 @@
 						class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 						href={`${WEBUI_API_BASE_URL}/files/${fileId}/content?attachment=true`}
 					>
-						<ArrowDownTray className="size-4" />
+						<span class="i-lucide-download size-4 block"></span>
 						<span>{$i18n.t('Download')}</span>
 					</a>
 				{/if}
@@ -181,7 +175,7 @@
 						type="button"
 						on:click={() => onDelete()}
 					>
-						<GarbageBin className="size-4" />
+						<span class="i-lucide-trash-2 size-4 block"></span>
 						<span>{$i18n.t('Delete')}</span>
 					</button>
 				{/if}

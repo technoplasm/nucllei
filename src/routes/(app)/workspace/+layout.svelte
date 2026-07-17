@@ -4,8 +4,6 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 
-	import MenuLines from '$lib/components/icons/MenuLines.svelte';
-
 	const i18n = getContext('i18n');
 
 	let loaded = false;
@@ -80,7 +78,7 @@
 						aria-label="Toggle Sidebar"
 					>
 						<div class=" m-auto self-center">
-							<MenuLines />
+							<span class="i-lucide-menu size-5 block"></span>
 						</div>
 					</button>
 				</div>
