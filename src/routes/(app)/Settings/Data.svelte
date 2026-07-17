@@ -104,6 +104,9 @@
 <div class="flex flex-col h-full justify-between space-y-3 text-sm">
 	<div class=" space-y-2 flex-1 min-h-0 overflow-y-auto">
 		<div class="flex flex-col">
+
+			<div class=" mb-1.5 text-md font-medium">{$i18n.t('Data')}</div>
+
 			<input
 				id="chat-import-input"
 				bind:this={chatImportInputElement}
@@ -114,28 +117,28 @@
 				hidden
 			/>
 			<button
-				class=" flex rounded-md py-2 px-3.5 w-full hover:bg-surface-hover"
+				class=" flex rounded-md py-2 px-2 w-full hover:bg-surface-hover"
 				type="button"
 				onclick={() => {
 					chatImportInputElement?.click();
 				}}
 			>
 				<div class=" self-center mr-3">
-					<span class="i-lucide-file-up size-4 block"></span>
+					<span class="i-lucide-file-up size-3 block"></span>
 				</div>
-				<div class=" self-center text-sm font-medium">{$i18n.t('Import Chats')}</div>
+				<div class=" self-center text-xs font-medium">{$i18n.t('Import Chats')}</div>
 			</button>
 			<button
-				class=" flex rounded-md py-2 px-3.5 w-full hover:bg-surface-hover"
+				class=" flex rounded-md py-2 px-2 w-full hover:bg-surface-hover"
 				type="button"
 				onclick={() => {
 					exportChats();
 				}}
 			>
 				<div class=" self-center mr-3">
-					<span class="i-lucide-file-down size-4 block"></span>
+					<span class="i-lucide-file-down size-3 block"></span>
 				</div>
-				<div class=" self-center text-sm font-medium">{$i18n.t('Export Chats')}</div>
+				<div class=" self-center text-xs font-medium">{$i18n.t('Export Chats')}</div>
 			</button>
 		</div>
 
@@ -143,16 +146,16 @@
 
 		<div class="flex flex-col">
 			<button
-				class=" flex rounded-md py-2 px-3.5 w-full hover:bg-surface-hover"
+				class=" flex rounded-md py-1 px-2 w-full hover:bg-surface-hover"
 				type="button"
 				onclick={() => {
 					showArchivedChatsModal = true;
 				}}
 			>
 				<div class=" self-center mr-3">
-					<span class="i-lucide-archive size-4 block"></span>
+					<span class="i-lucide-archive size-3 block"></span>
 				</div>
-				<div class=" self-center text-sm font-medium">{$i18n.t('Archived Chats')}</div>
+				<div class=" self-center text-xs font-medium">{$i18n.t('Archived Chats')}</div>
 			</button>
 
 			{#if showArchiveConfirm}
@@ -195,9 +198,9 @@
 					}}
 				>
 					<div class=" self-center mr-3">
-						<span class="i-lucide-archive size-4 block"></span>
+						<span class="i-lucide-archive size-3 block"></span>
 					</div>
-					<div class=" self-center text-sm font-medium">{$i18n.t('Archive All Chats')}</div>
+					<div class=" self-center text-xs font-medium">{$i18n.t('Archive All Chats')}</div>
 				</button>
 			{/if}
 
@@ -241,9 +244,9 @@
 					}}
 				>
 					<div class=" self-center mr-3">
-						<span class="i-lucide-trash-2 size-4 block"></span>
+						<span class="i-lucide-trash-2 size-3 block"></span>
 					</div>
-					<div class=" self-center text-sm font-medium">{$i18n.t('Delete All Chats')}</div>
+					<div class=" self-center text-xs font-medium">{$i18n.t('Delete All Chats')}</div>
 				</button>
 			{/if}
 		</div>

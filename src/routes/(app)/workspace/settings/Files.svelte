@@ -92,7 +92,7 @@
 								placement="top-start"
 							>
 								<select
-									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
+									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
 									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
 								>
 									<option value="">{$i18n.t('None')}</option>
