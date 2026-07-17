@@ -98,6 +98,8 @@ pipe は「存在すればモデルとして出る」(active ゲート撤去)。
   (割り当て解除で代替)。
 - 回帰: `test_filter.py` の get_sorted_filter_ids と `test_openai_compat_chat.py` の inlet/stream/outlet
   e2e を per-model filterIds 経路に書き換え。backend 全 206 passed。
+- 追記(2026-07-17、#71): no-op で残っていた `SAFE_MODE` env 自体も削除(print のみだった)。
+  死に env 掃除(DOCKER / PIP_OPTIONS 系も同時)は `95c557f88`。
 
 ## #43: description を列へ昇格 / エンティティ命名一貫化(2026-07-07)
 
