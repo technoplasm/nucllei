@@ -111,11 +111,8 @@ def create_admin(
         typer.echo(f"Invalid email format: {email}", err=True)
         raise typer.Exit(code=1)
 
-    if len(password) < 8:
-        typer.echo("Password must be at least 8 characters.", err=True)
-        raise typer.Exit(code=1)
-
-    # bcrypt は 72 バイト超を切り詰めるため、signup と同じく上限を弾く。
+    # 下限・複雑さの制限は掛けない(運用判断 — 院内アカウント発行は管理者の裁量)。
+    # bcrypt は 72 バイト超を黙って切り詰めるため、上限だけ signup と同じく弾く。
     if len(password.encode("utf-8")) > 72:
         typer.echo("Password must be at most 72 bytes.", err=True)
         raise typer.Exit(code=1)
