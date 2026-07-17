@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
-	import mermaid from 'mermaid';
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
@@ -61,21 +60,19 @@
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
-	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	export let chatIdProp = '';
+	let { chatIdProp = '' }: { chatIdProp?: string } = $props();
 
-	let loading = false;
+	let loading = $state(false);
 
 	const eventTarget = new EventTarget();
-	let controlPane;
-	let controlPaneComponent;
+	let controlPane = $state<any>();
+	let controlPaneComponent = $state<any>();
 
-	let autoScroll = true;
+	let autoScroll = $state(true);
 	let lastScrollTop = 0;
-	let processing = '';
-	let messagesContainerElement: HTMLDivElement;
+	let messagesContainerElement = $state<HTMLDivElement>();
 
 	// llens: task 生成前(モデル接続待ち)の completion fetch を stop で中断するための
 	// AbortController 群(複数モデル並列送信に対応して配列)。task 生成後の中断は
@@ -97,44 +94,50 @@
 		};
 	};
 
-	let navbarElement;
-
-	let showEventConfirmation = false;
-	let eventConfirmationTitle = '';
-	let eventConfirmationMessage = '';
-	let eventConfirmationInput = false;
-	let eventConfirmationInputPlaceholder = '';
-	let eventConfirmationInputValue = '';
-	let eventCallback = null;
+	let showEventConfirmation = $state(false);
+	let eventConfirmationTitle = $state('');
+	let eventConfirmationMessage = $state('');
+	let eventConfirmationInput = $state(false);
+	let eventConfirmationInputPlaceholder = $state('');
+	let eventConfirmationInputValue = $state('');
+	let eventCallback: ((result: unknown) => Promise<void> | void) | null = null;
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
-	let selectedModels = [''];
-	let atSelectedModel: Model | undefined;
-	let selectedModelIds = [];
-	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	let selectedModels = $state(['']);
+	let atSelectedModel = $state<Model | undefined>(undefined);
+	const selectedModelIds = $derived(
+		atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels
+	);
 
 	let chat = null;
 
-	let history = {
+	let history = $state<{ messages: Record<string, any>; currentId: string | null }>({
 		messages: {},
 		currentId: null
-	};
+	});
 
-	let taskIds = null;
+	let taskIds = $state<string[] | null>(null);
 	// wire v2: 再アタッチ済み(fetch 未解決含む)task の二重アタッチ防止
 	const attachedTaskIds = new Set<string>();
 
 	// Chat Input
-	let prompt = '';
-	let chatFiles = [];
-	let files = [];
-	let params = {};
+	let prompt = $state('');
+	let chatFiles = $state<any[]>([]);
+	let files = $state<any[]>([]);
+	let params = $state<any>({});
 
-	$: if (chatIdProp) {
+	// chatIdProp の追従。legacy `$:` と同じく初期値は init 時(onMount より先)に処理する
+	// — loadChat 同期先頭の chatId.set() を onMount の !$chatId ガードが前提にしている。
+	let loadedChatIdProp: string | null = null;
+	const handleChatIdProp = () => {
+		if (!chatIdProp || loadedChatIdProp === chatIdProp) {
+			return;
+		}
+		loadedChatIdProp = chatIdProp;
+
 		(async () => {
 			loading = true;
-			console.log(chatIdProp);
 
 			prompt = '';
 			files = [];
@@ -159,18 +162,19 @@
 				await goto('/');
 			}
 		})();
-	}
+	};
 
-	$: if (selectedModels && chatIdProp !== '') {
-		saveSessionSelectedModels();
-	}
+	$effect(() => {
+		if (selectedModels && chatIdProp !== '') {
+			saveSessionSelectedModels();
+		}
+	});
 
 	const saveSessionSelectedModels = () => {
 		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
 			return;
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	const showMessage = async (message) => {
@@ -353,7 +357,7 @@
 			eventConfirmationInputPlaceholder = data.placeholder;
 			eventConfirmationInputValue = data?.value ?? '';
 		} else {
-			console.log('Unknown event type', type, data);
+			console.warn('Unknown event type', type, data);
 		}
 	};
 
@@ -420,8 +424,9 @@
 		syncChatHandlerRegistration(value);
 	});
 
+	let showControlsUnsubscriber: Unsubscriber | undefined;
+
 	onMount(async () => {
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 
 		if (!$chatId) {
@@ -444,7 +449,7 @@
 			}
 		}
 
-		showControls.subscribe(async (value) => {
+		showControlsUnsubscriber = showControls.subscribe(async (value) => {
 			if (controlPane && !$mobile) {
 				try {
 					if (value) {
@@ -464,13 +469,12 @@
 
 		const chatInput = document.getElementById('chat-input');
 		chatInput?.focus();
-
-		chats.subscribe(() => {});
 	});
 
 	onDestroy(() => {
 		chatIdUnsubscriber?.();
 		handlerChatIdUnsubscriber();
+		showControlsUnsubscriber?.();
 		window.removeEventListener('message', onMessageHandler);
 		if (registeredChatId) {
 			unregisterChatHandler(registeredChatId, chatEventHandler);
@@ -517,7 +521,6 @@
 				if ($settings?.models) {
 					selectedModels = $settings?.models;
 				} else if ($config?.default_models) {
-					console.log($config?.default_models.split(',') ?? '');
 					selectedModels = $config?.default_models.split(',');
 				}
 			}
@@ -593,8 +596,6 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1008,8 +1009,6 @@
 	//////////////////////////
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-		console.log('submitPrompt', userPrompt, $chatId);
-
 		const messages = createMessagesList(history, history.currentId);
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
@@ -1126,14 +1125,10 @@
 
 		const responseMessageIds: Record<PropertyKey, string> = {};
 		// If modelId is provided, use it, else use selected model
-		let selectedModelIds = modelId
-			? [modelId]
-			: atSelectedModel !== undefined
-				? [atSelectedModel.id]
-				: selectedModels;
+		const targetModelIds = modelId ? [modelId] : selectedModelIds;
 
 		// Create response messages for each selected model
-		for (const [_modelIdx, modelId] of selectedModelIds.entries()) {
+		for (const [_modelIdx, modelId] of targetModelIds.entries()) {
 			const model = $models.filter((m) => m.id === modelId).at(0);
 
 			if (model) {
@@ -1181,8 +1176,7 @@
 		await saveChatHandler(_chatId, _history);
 
 		await Promise.all(
-			selectedModelIds.map(async (modelId, _modelIdx) => {
-				console.log('modelId', modelId);
+			targetModelIds.map(async (modelId, _modelIdx) => {
 				const model = $models.filter((m) => m.id === modelId).at(0);
 
 				if (model) {
@@ -1488,8 +1482,6 @@
 	};
 
 	const regenerateResponse = async (message) => {
-		console.log('regenerateResponse');
-
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
@@ -1513,7 +1505,6 @@
 	};
 
 	const continueResponse = async () => {
-		console.log('continueResponse');
 		const _chatId = $chatId;
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
@@ -1570,6 +1561,14 @@
 			await chats.set(await getChatList($currentChatPage));
 		}
 	};
+
+	// 初期 chatIdProp は init 時(onMount より先)に処理する。legacy `$:` は全宣言の
+	// 評価後に走っていたため、呼び出しはスクリプト末尾に置く(loadChat の TDZ 回避)。
+	handleChatIdProp();
+	$effect(() => {
+		void chatIdProp;
+		handleChatIdProp();
+	});
 </script>
 
 <svelte:head>
@@ -1624,7 +1623,6 @@
 		<PaneGroup direction="horizontal" class="w-full h-full">
 			<Pane defaultSize={50} class="h-full flex relative max-w-full flex-col">
 				<Navbar
-					bind:this={navbarElement}
 					chat={{
 						id: $chatId,
 						chat: {
@@ -1648,7 +1646,7 @@
 							class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 							id="messages-container"
 							bind:this={messagesContainerElement}
-							on:scroll={(e) => {
+							onscroll={() => {
 								// 追従の on/off は方向ベースで判定する。「最下部±Npx か」の再計算だけだと、
 								// ストリーム中に scrollToBottom → scroll イベント処理前に次のデルタで
 								// 高さが伸びる競合で追従が勝手に切れる(text 出力で追従しない不具合)。
@@ -1752,7 +1750,7 @@
 				{eventTarget}
 			/>
 		</PaneGroup>
-	{:else if loading}
+	{:else}
 		<div class=" flex items-center justify-center h-full w-full">
 			<div class="m-auto">
 				<Spinner />
