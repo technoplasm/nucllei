@@ -87,7 +87,7 @@
 		}}
 	>
 		<div
-			class=" m-auto rounded-2xl max-w-full w-[32rem] mx-2 bg-gray-50 dark:bg-gray-950 max-h-[100dvh] shadow-3xl"
+			class=" m-auto rounded-2xl max-w-full w-[32rem] mx-2 bg-white dark:bg-gray-900 max-h-[100dvh] shadow-3xl"
 			in:flyAndScale
 			onmousedown={(e) => {
 				e.stopPropagation();
@@ -116,7 +116,7 @@
 							<textarea
 								bind:value={inputValue}
 								placeholder={inputPlaceholder ? inputPlaceholder : $i18n.t('Enter your message')}
-								class="w-full mt-2 rounded-lg px-4 py-2 text-sm text-content dark:bg-gray-900 outline-hidden resize-none"
+								class="w-full mt-2 rounded-lg px-4 py-2 text-sm text-content bg-surface-muted outline-hidden resize-none"
 								rows="3"
 								required
 							></textarea>
@@ -126,7 +126,7 @@
 
 				<div class="mt-6 flex justify-between gap-1.5">
 					<button
-						class="bg-gray-100 hover:bg-gray-200 text-content dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2.5 rounded-lg transition"
+						class="bg-secondary hover:bg-secondary-hover text-secondary-content font-medium w-full py-2.5 rounded-lg transition"
 						onclick={() => {
 							show = false;
 							onCancel?.();
@@ -136,7 +136,7 @@
 						{cancelLabel}
 					</button>
 					<button
-						class="bg-gray-900 hover:bg-gray-850 text-content dark:bg-gray-100 dark:hover:bg-white font-medium w-full py-2.5 rounded-lg transition"
+						class="bg-primary hover:bg-primary-hover text-primary-content font-medium w-full py-2.5 rounded-lg transition"
 						onclick={() => {
 							confirmHandler();
 						}}
