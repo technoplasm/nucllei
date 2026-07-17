@@ -130,7 +130,7 @@ type Settings = {
 	landingPageMode?: string;
 	chatBubble?: boolean;
 	copyFormatted?: boolean;
-	collapseCodeBlocks?: boolean;
+	expandCodeBlocks?: boolean;
 	expandDetails?: boolean;
 	imageCompression?: boolean;
 	imageCompressionSize?: { width: string; height: string };

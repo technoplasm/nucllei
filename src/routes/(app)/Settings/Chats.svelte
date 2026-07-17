@@ -67,14 +67,16 @@
 					init: () => $settings.copyFormatted ?? false
 				},
 				{
-					key: 'collapseCodeBlocks',
-					label: 'Always Collapse Code Blocks',
+					// llens: 軸を「展開」に統一(2026-07-17)。既定は互い違い —
+					// 本文コードは読めないと困るので ON、思考・ツール実行は補助情報なので OFF
+					key: 'expandCodeBlocks',
+					label: 'Expand code blocks in responses',
 					type: 'switch',
-					init: () => $settings.collapseCodeBlocks ?? false
+					init: () => $settings.expandCodeBlocks ?? true
 				},
 				{
 					key: 'expandDetails',
-					label: 'Always Expand Details',
+					label: 'Expand reasoning and tool calls',
 					type: 'switch',
 					init: () => $settings.expandDetails ?? false
 				},
