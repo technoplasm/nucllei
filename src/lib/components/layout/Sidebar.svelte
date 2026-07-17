@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
-	import { v4 as uuidv4 } from 'uuid';
 
 	import { goto } from '$app/navigation';
 	import {
@@ -9,7 +8,6 @@
 		user,
 		chats,
 		models,
-		settings,
 		showSettings,
 		chatId,
 		showSidebar,
@@ -18,54 +16,40 @@
 		pinnedChats,
 		scrollPaginationEnabled,
 		currentChatPage,
-		config,
 		isApp
 	} from '$lib/stores';
-	import { onMount, getContext, tick, onDestroy } from 'svelte';
+	import { onMount, getContext, onDestroy } from 'svelte';
 
 	const i18n = getContext('i18n');
 
 	import {
-		deleteChatById,
 		getChatList,
-		getChatListBySearchText,
-		createNewChat,
 		getPinnedChatList,
 		toggleChatPinnedStatusById,
-		getChatPinnedStatusById,
 		getChatById,
 		updateChatFolderIdById,
 		importChat
 	} from '$lib/apis/chats';
-	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
+	import { getFolders } from '$lib/apis/folders';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
-	import AddFilesPlaceholder from '../AddFilesPlaceholder.svelte';
 	import Folder from '../common/Folder.svelte';
-	import Plus from '../icons/Plus.svelte';
-	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
-	import PencilSquare from '../icons/PencilSquare.svelte';
-	import Pencil from '../icons/Pencil.svelte';
-	import Home from '../icons/Home.svelte';
-	import Cog6 from '../icons/Cog6.svelte';
+	import type { SidebarFolder } from './Sidebar/RecursiveFolder.svelte';
 
-	const BREAKPOINT = 768;
-
-	let navElement;
-	let search = '';
+	let navElement: HTMLDivElement | null = $state(null);
 
 	// サイドバー「モデル」欄: 有効(非 hidden)なモデルのみ。$models と連動して自動反映。
-	$: enabledModels = ($models ?? []).filter(
-		(m) => m?.id && (m?.info?.meta?.hidden ?? false) !== true
+	const enabledModels = $derived(
+		($models ?? []).filter((m) => m?.id && (m?.info?.meta?.hidden ?? false) !== true)
 	);
 
 	// モデル行クリック: そのモデルを選択した状態で新規チャットを開く(?models= を initNewChat が解釈)。
-	const modelChatHandler = async (modelId) => {
+	const modelChatHandler = async (modelId: string) => {
 		selectedChatId = null;
 		await goto(`/?models=${encodeURIComponent(modelId)}`);
 		const newChatButton = document.getElementById('new-chat-button');
@@ -77,21 +61,19 @@
 		}, 0);
 	};
 
-	let shiftKey = false;
+	let shiftKey = $state(false);
 
-	let selectedChatId = null;
-	let showDropdown = false;
-	let showPinnedChat = true;
+	let selectedChatId: string | null = $state(null);
+	let showPinnedChat = $state(true);
 
 	// Pagination variables
 	let chatListLoading = false;
-	let allChatsLoaded = false;
+	let allChatsLoaded = $state(false);
 
-	let folders = {};
-	let newFolderId = null;
+	let folders: Record<string, SidebarFolder> = $state({});
 
 	const initFolders = async () => {
-		const folderList = await getFolders().catch((error) => {
+		const folderList: SidebarFolder[] = await getFolders().catch((error) => {
 			toast.error(`${error}`);
 			return [];
 		});
@@ -102,11 +84,6 @@
 		for (const folder of folderList) {
 			// Ensure folder is added to folders with its data
 			folders[folder.id] = { ...(folders[folder.id] || {}), ...folder };
-
-			if (newFolderId && folder.id === newFolderId) {
-				folders[folder.id].new = true;
-				newFolderId = null;
-			}
 		}
 
 		// Second pass: Tie child folders to their parents
@@ -114,61 +91,19 @@
 			if (folder.parent_id) {
 				// Ensure the parent folder is initialized if it doesn't exist
 				if (!folders[folder.parent_id]) {
-					folders[folder.parent_id] = {}; // Create a placeholder if not already present
+					folders[folder.parent_id] = {} as SidebarFolder; // Create a placeholder if not already present
 				}
 
 				// Initialize childrenIds array if it doesn't exist and add the current folder id
 				folders[folder.parent_id].childrenIds = folders[folder.parent_id].childrenIds
-					? [...folders[folder.parent_id].childrenIds, folder.id]
+					? [...(folders[folder.parent_id].childrenIds ?? []), folder.id]
 					: [folder.id];
 
 				// Sort the children by updated_at field
-				folders[folder.parent_id].childrenIds.sort((a, b) => {
+				folders[folder.parent_id].childrenIds?.sort((a, b) => {
 					return folders[b].updated_at - folders[a].updated_at;
 				});
 			}
-		}
-	};
-
-	const createFolder = async (name = 'Untitled') => {
-		if (name === '') {
-			toast.error($i18n.t('Folder name cannot be empty.'));
-			return;
-		}
-
-		const rootFolders = Object.values(folders).filter((folder) => folder.parent_id === null);
-		if (rootFolders.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
-			// If a folder with the same name already exists, append a number to the name
-			let i = 1;
-			while (
-				rootFolders.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
-			) {
-				i++;
-			}
-
-			name = `${name} ${i}`;
-		}
-
-		// Add a dummy folder to the list to show the user that the folder is being created
-		const tempId = uuidv4();
-		folders = {
-			...folders,
-			tempId: {
-				id: tempId,
-				name: name,
-				created_at: Date.now(),
-				updated_at: Date.now()
-			}
-		};
-
-		const res = await createNewFolder(name).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			newFolderId = res.id;
-			await initFolders();
 		}
 	};
 
@@ -180,11 +115,7 @@
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
-		if (search) {
-			await chats.set(await getChatListBySearchText(search, $currentChatPage));
-		} else {
-			await chats.set(await getChatList($currentChatPage));
-		}
+		await chats.set(await getChatList($currentChatPage));
 
 		// Enable pagination
 		scrollPaginationEnabled.set(true);
@@ -195,13 +126,7 @@
 
 		currentChatPage.set($currentChatPage + 1);
 
-		let newChatList = [];
-
-		if (search) {
-			newChatList = await getChatListBySearchText(search, $currentChatPage);
-		} else {
-			newChatList = await getChatList($currentChatPage);
-		}
+		const newChatList = await getChatList($currentChatPage);
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
 		allChatsLoaded = newChatList.length === 0;
@@ -210,10 +135,8 @@
 		chatListLoading = false;
 	};
 
-	const importChatHandler = async (items, pinned = false, folderId = null) => {
-		console.log('importChatHandler', items, pinned, folderId);
+	const importChatHandler = async (items: any[], pinned = false, folderId: string | null = null) => {
 		for (const item of items) {
-			console.log(item);
 			if (item.chat) {
 				await importChat(item.chat, item?.meta ?? {}, pinned, folderId);
 			}
@@ -222,16 +145,14 @@
 		initChatList();
 	};
 
-	const inputFilesHandler = async (files) => {
-		console.log(files);
-
+	const inputFilesHandler = async (files: File[]) => {
 		for (const file of files) {
 			const reader = new FileReader();
 			reader.onload = async (e) => {
-				const content = e.target.result;
+				const content = e.target?.result;
 
 				try {
-					const chatItems = JSON.parse(content);
+					const chatItems = JSON.parse(content as string);
 					importChatHandler(chatItems);
 				} catch {
 					toast.error($i18n.t(`Invalid file format.`));
@@ -242,9 +163,9 @@
 		}
 	};
 
-	let draggedOver = false;
+	let draggedOver = $state(false);
 
-	const onDragOver = (e) => {
+	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
 		// Check if a file is being draggedOver.
@@ -259,16 +180,14 @@
 		draggedOver = false;
 	};
 
-	const onDrop = async (e) => {
+	const onDrop = async (e: DragEvent) => {
 		e.preventDefault();
-		console.log(e); // Log the drop event
 
 		// Perform file drop check and handle it accordingly
 		if (e.dataTransfer?.files) {
-			const inputFiles = Array.from(e.dataTransfer?.files);
+			const inputFiles = Array.from(e.dataTransfer.files);
 
 			if (inputFiles && inputFiles.length > 0) {
-				console.log(inputFiles); // Log the dropped files
 				inputFilesHandler(inputFiles); // Handle the dropped files
 			}
 		}
@@ -276,10 +195,13 @@
 		draggedOver = false; // Reset draggedOver status after drop
 	};
 
-	let touchstart;
-	let touchend;
+	let touchstart: Touch | null = null;
+	let touchend: Touch | null = null;
 
 	function checkDirection() {
+		if (!touchstart || !touchend) {
+			return;
+		}
 		const screenWidth = window.innerWidth;
 		const swipeDistance = Math.abs(touchend.screenX - touchstart.screenX);
 		if (touchstart.clientX < 40 && swipeDistance >= screenWidth / 8) {
@@ -292,29 +214,26 @@
 		}
 	}
 
-	const onTouchStart = (e) => {
+	const onTouchStart = (e: TouchEvent) => {
 		touchstart = e.changedTouches[0];
-		console.log(touchstart.clientX);
 	};
 
-	const onTouchEnd = (e) => {
+	const onTouchEnd = (e: TouchEvent) => {
 		touchend = e.changedTouches[0];
 		checkDirection();
 	};
 
-	const onKeyDown = (e) => {
+	const onKeyDown = (e: KeyboardEvent) => {
 		if (e.key === 'Shift') {
 			shiftKey = true;
 		}
 	};
 
-	const onKeyUp = (e) => {
+	const onKeyUp = (e: KeyboardEvent) => {
 		if (e.key === 'Shift') {
 			shiftKey = false;
 		}
 	};
-
-	const onFocus = () => {};
 
 	const onBlur = () => {
 		shiftKey = false;
@@ -330,9 +249,9 @@
 			}
 
 			if ($showSidebar && !value) {
-				const navElement = document.getElementsByTagName('nav')[0];
-				if (navElement) {
-					navElement.style['-webkit-app-region'] = 'drag';
+				const nav = document.getElementsByTagName('nav')[0];
+				if (nav) {
+					nav.style.setProperty('-webkit-app-region', 'drag');
 				}
 			}
 
@@ -346,17 +265,17 @@
 			localStorage.sidebar = value;
 
 			// nav element is not available on the first render
-			const navElement = document.getElementsByTagName('nav')[0];
+			const nav = document.getElementsByTagName('nav')[0];
 
-			if (navElement) {
+			if (nav) {
 				if ($mobile) {
 					if (!value) {
-						navElement.style['-webkit-app-region'] = 'drag';
+						nav.style.setProperty('-webkit-app-region', 'drag');
 					} else {
-						navElement.style['-webkit-app-region'] = 'no-drag';
+						nav.style.setProperty('-webkit-app-region', 'no-drag');
 					}
 				} else {
-					navElement.style['-webkit-app-region'] = 'drag';
+					nav.style.setProperty('-webkit-app-region', 'drag');
 				}
 			}
 		});
@@ -369,14 +288,11 @@
 		window.addEventListener('touchstart', onTouchStart);
 		window.addEventListener('touchend', onTouchEnd);
 
-		window.addEventListener('focus', onFocus);
-		window.addEventListener('blur-sm', onBlur);
+		window.addEventListener('blur', onBlur);
 
-		const dropZone = document.getElementById('sidebar');
-
-		dropZone?.addEventListener('dragover', onDragOver);
-		dropZone?.addEventListener('drop', onDrop);
-		dropZone?.addEventListener('dragleave', onDragLeave);
+		navElement?.addEventListener('dragover', onDragOver);
+		navElement?.addEventListener('drop', onDrop);
+		navElement?.addEventListener('dragleave', onDragLeave);
 	});
 
 	onDestroy(() => {
@@ -386,32 +302,29 @@
 		window.removeEventListener('touchstart', onTouchStart);
 		window.removeEventListener('touchend', onTouchEnd);
 
-		window.removeEventListener('focus', onFocus);
-		window.removeEventListener('blur-sm', onBlur);
+		window.removeEventListener('blur', onBlur);
 
-		const dropZone = document.getElementById('sidebar');
-
-		dropZone?.removeEventListener('dragover', onDragOver);
-		dropZone?.removeEventListener('drop', onDrop);
-		dropZone?.removeEventListener('dragleave', onDragLeave);
+		navElement?.removeEventListener('dragover', onDragOver);
+		navElement?.removeEventListener('drop', onDrop);
+		navElement?.removeEventListener('dragleave', onDragLeave);
 	});
 </script>
 
 <ArchivedChatsModal
 	bind:show={$showArchivedChats}
-	on:change={async () => {
+	onChange={async () => {
 		await initChatList();
 	}}
 />
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 
 {#if $showSidebar}
 	<div
 		class=" {$isApp
 			? ' ml-[4.5rem] md:ml-0'
 			: ''} fixed md:hidden z-40 top-0 right-0 left-0 bottom-0 bg-black/60 w-full min-h-screen h-screen flex justify-center overflow-hidden overscroll-contain"
-		on:mousedown={() => {
+		onmousedown={() => {
 			showSidebar.set(!$showSidebar);
 		}}
 	></div>
@@ -437,7 +350,7 @@
 				class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
 				href="/"
 				draggable="false"
-				on:click={() => {
+				onclick={() => {
 					if ($mobile) {
 						showSidebar.set(false);
 					}
@@ -455,38 +368,23 @@
 			</a>
 
 			<button
-				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-sidebar-hover transition shrink-0"
-				on:click={() => {
+				class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-sidebar-hover shrink-0"
+				onclick={() => {
 					showSidebar.set(!$showSidebar);
 				}}
 				aria-label="Toggle Sidebar"
 			>
-				<div class=" m-auto self-center">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-						stroke="currentColor"
-						class="size-5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
-						/>
-					</svg>
-				</div>
+				<span class="i-lucide-menu size-5 block m-auto self-center"></span>
 			</button>
 		</div>
 
 		<div class="px-1.5 flex justify-center text-content mt-0.5">
 			<a
 				id="sidebar-new-chat-button"
-				class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition no-drag-region"
+				class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover no-drag-region"
 				href="/"
 				draggable="false"
-				on:click={async () => {
+				onclick={async () => {
 					selectedChatId = null;
 					await goto('/');
 					const newChatButton = document.getElementById('new-chat-button');
@@ -498,9 +396,7 @@
 					}, 0);
 				}}
 			>
-				<div class="self-center">
-					<PencilSquare className="size-[1.1rem]" strokeWidth="2" />
-				</div>
+				<span class="i-lucide-square-pen size-[1.1rem] block self-center"></span>
 				<div class="flex self-center translate-y-[0.5px]">
 					<div class=" self-center font-medium text-sm font-primary">{$i18n.t('New Chat')}</div>
 				</div>
@@ -511,9 +407,9 @@
 		     /workspace/files へ移設 — 非 admin もファイルタブに入れる) -->
 		<div class="px-1.5 flex justify-center text-content">
 			<a
-				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition"
+				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
 				href="/workspace"
-				on:click={() => {
+				onclick={() => {
 					selectedChatId = null;
 					chatId.set('');
 
@@ -523,23 +419,7 @@
 				}}
 				draggable="false"
 			>
-				<div class="self-center">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-						stroke="currentColor"
-						class="size-[1.1rem]"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-						/>
-					</svg>
-				</div>
-
+				<span class="i-lucide-layout-grid size-[1.1rem] block self-center"></span>
 				<div class="flex self-center translate-y-[0.5px]">
 					<div class=" self-center font-medium text-sm font-primary">{$i18n.t('Workspace')}</div>
 				</div>
@@ -548,17 +428,15 @@
 
 		<div class="px-1.5 flex justify-center text-content">
 			<button
-				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover transition"
-				on:click={async () => {
+				class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
+				onclick={async () => {
 					await showSettings.set(true);
 					if ($mobile) {
 						showSidebar.set(false);
 					}
 				}}
 			>
-				<div class="self-center">
-					<Cog6 className="size-[1.1rem]" strokeWidth="2" />
-				</div>
+				<span class="i-lucide-settings size-[1.1rem] block self-center"></span>
 				<div class="flex self-center translate-y-[0.5px]">
 					<div class=" self-center font-medium text-sm font-primary">{$i18n.t('Settings')}</div>
 				</div>
@@ -573,11 +451,11 @@
 				<div class="flex flex-col">
 					{#each enabledModels as model (model.id)}
 						<div
-							class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover transition text-content"
+							class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover text-content"
 						>
 							<button
 								class="pl-2 py-1.5 flex items-center gap-2 flex-1 min-w-0"
-								on:click={() => modelChatHandler(model.id)}
+								onclick={() => modelChatHandler(model.id)}
 							>
 								<img
 									src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
@@ -592,17 +470,17 @@
 
 							<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
 							<a
-								class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected transition"
+								class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected"
 								href="/workspace/models/edit?id={model.id}"
 								draggable="false"
 								aria-label={$i18n.t('Edit')}
-								on:click={() => {
+								onclick={() => {
 									if ($mobile) {
 										showSidebar.set(false);
 									}
 								}}
 							>
-								<Pencil className="size-4" strokeWidth="2" />
+								<span class="i-lucide-pencil size-4 block"></span>
 							</a>
 						</div>
 					{/each}
@@ -611,7 +489,7 @@
 		{/if}
 
 		<div class="relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden mt-3 space-y-3">
-			{#if !search && $pinnedChats.length > 0}
+			{#if $pinnedChats.length > 0}
 				<div class="flex flex-col space-y-1 rounded-xl">
 					<Folder
 						className=""
@@ -626,7 +504,7 @@
 							const { type, id, item } = data;
 
 							if (type === 'chat') {
-								let chat = await getChatById(id).catch((error) => {
+								let chat = await getChatById(id).catch(() => {
 									return null;
 								});
 								if (!chat && item) {
@@ -634,16 +512,15 @@
 								}
 
 								if (chat) {
-									console.log(chat);
 									if (chat.folder_id) {
-										const res = await updateChatFolderIdById(chat.id, null).catch((error) => {
+										await updateChatFolderIdById(chat.id, null).catch((error) => {
 											toast.error(`${error}`);
 											return null;
 										});
 									}
 
 									if (!chat.pinned) {
-										const res = await toggleChatPinnedStatusById(chat.id);
+										await toggleChatPinnedStatusById(chat.id);
 									}
 
 									initChatList();
@@ -655,20 +532,20 @@
 						<div
 							class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
 						>
-							{#each $pinnedChats as chat, idx}
+							{#each $pinnedChats as chat (chat.id)}
 								<ChatItem
 									id={chat.id}
 									className="text-sm"
 									title={chat.title}
 									{shiftKey}
 									selected={selectedChatId === chat.id}
-									on:select={() => {
+									onSelect={() => {
 										selectedChatId = chat.id;
 									}}
-									on:unselect={() => {
+									onUnselect={() => {
 										selectedChatId = null;
 									}}
-									on:change={async () => {
+									onChange={() => {
 										initChatList();
 									}}
 								/>
@@ -678,17 +555,16 @@
 				</div>
 			{/if}
 
-			{#if !search && folders}
+			{#if folders}
 				<Folders
 					{folders}
-					on:import={(e) => {
-						const { folderId, items } = e.detail;
+					onImport={({ folderId, items }) => {
 						importChatHandler(items, false, folderId);
 					}}
-					on:update={async (e) => {
+					onUpdate={() => {
 						initChatList();
 					}}
-					on:change={async () => {
+					onChange={() => {
 						initChatList();
 					}}
 				/>
@@ -696,13 +572,13 @@
 
 			<div class="px-1.5 flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
 				{#if $chats}
-					{#each $chats as chat, idx}
+					{#each $chats as chat, idx (chat.id)}
 						{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 							<div
 								class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
 										{idx > 0 ? 'mt-1.5' : ''}"
 							>
-								{$i18n.t(chat.time_range)}
+								{$i18n.t(chat.time_range ?? '')}
 								<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
 											{$i18n.t('Today')}
 											{$i18n.t('Yesterday')}
@@ -730,13 +606,13 @@
 							title={chat.title}
 							{shiftKey}
 							selected={selectedChatId === chat.id}
-							on:select={() => {
+							onSelect={() => {
 								selectedChatId = chat.id;
 							}}
-							on:unselect={() => {
+							onUnselect={() => {
 								selectedChatId = null;
 							}}
-							on:change={async () => {
+							onChange={() => {
 								initChatList();
 							}}
 						/>
@@ -769,17 +645,14 @@
 			<div class="flex flex-col font-primary">
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
-						on:show={(e) => {
-							if (e.detail === 'archived-chat') {
+						onShow={(payload) => {
+							if (payload === 'archived-chat') {
 								showArchivedChats.set(true);
 							}
 						}}
 					>
 						<button
-							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover transition"
-							on:click={() => {
-								showDropdown = !showDropdown;
-							}}
+							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover"
 						>
 							<div class=" self-center mr-3">
 								<img

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { getContext, type Snippet } from 'svelte';
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -9,54 +9,56 @@
 	import jsPDF from 'jspdf';
 	import html2canvas from 'html2canvas-pro';
 
-	const dispatch = createEventDispatcher();
-
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
-	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Share from '$lib/components/icons/Share.svelte';
-	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
-	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
-	import Bookmark from '$lib/components/icons/Bookmark.svelte';
-	import BookmarkSlash from '$lib/components/icons/BookmarkSlash.svelte';
 	import {
 		getChatById,
 		getChatPinnedStatusById,
 		toggleChatPinnedStatusById
 	} from '$lib/apis/chats';
-	import { chats, theme, user } from '$lib/stores';
+	import { theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
-	import { downloadChatAsPDF } from '$lib/apis/utils';
-	import Download from '$lib/components/icons/Download.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let shareHandler: Function;
-	export let cloneChatHandler: Function;
-	export let archiveChatHandler: Function;
-	export let renameHandler: Function;
-	export let deleteHandler: Function;
-	export let onClose: Function;
+	let {
+		chatId = '',
+		shareHandler,
+		cloneChatHandler,
+		archiveChatHandler,
+		renameHandler,
+		deleteHandler,
+		onClose,
+		onChange = undefined,
+		children
+	}: {
+		chatId?: string;
+		shareHandler: () => void;
+		cloneChatHandler: () => void;
+		archiveChatHandler: () => void;
+		renameHandler: () => void;
+		deleteHandler: () => void;
+		onClose: () => void;
+		onChange?: () => void;
+		children?: Snippet;
+	} = $props();
 
-	export let chatId = '';
-
-	let show = false;
-	let pinned = false;
+	let show = $state(false);
+	let pinned = $state(false);
 
 	const pinHandler = async () => {
 		await toggleChatPinnedStatusById(chatId);
-		dispatch('change');
+		onChange?.();
 	};
 
 	const checkPinned = async () => {
 		pinned = await getChatPinnedStatusById(chatId);
 	};
 
-	const getChatAsText = async (chat) => {
+	const getChatAsText = async (chat: Record<string, any>) => {
 		const history = chat.chat.history;
 		const messages = createMessagesList(history, history.currentId);
-		const chatText = messages.reduce((a, message, i, arr) => {
+		const chatText = messages.reduce((a: string, message: Record<string, any>) => {
 			return `${a}### ${message.role.toUpperCase()}\n${message.content}\n\n`;
 		}, '');
 
@@ -91,7 +93,7 @@
 				const virtualHeight = 1400; // Fixed height (adjust as needed)
 
 				// Clone the container to avoid layout shifts
-				const clonedElement = containerElement.cloneNode(true);
+				const clonedElement = containerElement.cloneNode(true) as HTMLElement;
 				clonedElement.style.width = `${virtualWidth}px`; // Apply fixed width
 				clonedElement.style.height = 'auto'; // Allow content to expand
 
@@ -162,9 +164,11 @@
 		}
 	};
 
-	$: if (show) {
-		checkPinned();
-	}
+	$effect(() => {
+		if (show) {
+			checkPinned();
+		}
+	});
 </script>
 
 <Dropdown
@@ -176,7 +180,7 @@
 	}}
 >
 	<Tooltip content={$i18n.t('More')}>
-		<slot />
+		{@render children?.()}
 	</Tooltip>
 
 	{#snippet content()}
@@ -194,10 +198,10 @@
 				}}
 			>
 				{#if pinned}
-					<BookmarkSlash strokeWidth="2" />
+					<span class="i-lucide-bookmark-x size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Unpin')}</div>
 				{:else}
-					<Bookmark strokeWidth="2" />
+					<span class="i-lucide-bookmark size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Pin')}</div>
 				{/if}
 			</DropdownMenu.Item>
@@ -208,7 +212,7 @@
 					renameHandler();
 				}}
 			>
-				<Pencil strokeWidth="2" />
+				<span class="i-lucide-pencil size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Rename')}</div>
 			</DropdownMenu.Item>
 
@@ -218,7 +222,7 @@
 					cloneChatHandler();
 				}}
 			>
-				<DocumentDuplicate strokeWidth="2" />
+				<span class="i-lucide-copy size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</DropdownMenu.Item>
 
@@ -228,7 +232,7 @@
 					archiveChatHandler();
 				}}
 			>
-				<ArchiveBox strokeWidth="2" />
+				<span class="i-lucide-archive size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</DropdownMenu.Item>
 
@@ -239,7 +243,7 @@
 						shareHandler();
 					}}
 				>
-					<Share />
+					<span class="i-lucide-share-2 size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Share')}</div>
 				</DropdownMenu.Item>
 			{/if}
@@ -248,7 +252,7 @@
 				<DropdownMenu.SubTrigger
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				>
-					<Download strokeWidth="2" />
+					<span class="i-lucide-download size-4 block"></span>
 
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
@@ -290,7 +294,7 @@
 					deleteHandler();
 				}}
 			>
-				<GarbageBin strokeWidth="2" />
+				<span class="i-lucide-trash-2 size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>

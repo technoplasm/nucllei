@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { goto, invalidate, invalidateAll } from '$app/navigation';
-	import { onMount, getContext, createEventDispatcher, tick, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
-
-	const dispatch = createEventDispatcher();
 
 	import {
 		archiveChatById,
@@ -28,29 +26,38 @@
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
-	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import DragGhost from '$lib/components/common/DragGhost.svelte';
-	import Check from '$lib/components/icons/Check.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
-	import Document from '$lib/components/icons/Document.svelte';
 
-	export let className = '';
+	let {
+		className = '',
+		id,
+		title,
+		selected = false,
+		shiftKey = false,
+		onSelect = undefined,
+		onUnselect = undefined,
+		onChange = undefined
+	}: {
+		className?: string;
+		id: string;
+		title: string;
+		selected?: boolean;
+		shiftKey?: boolean;
+		onSelect?: () => void;
+		onUnselect?: () => void;
+		onChange?: () => void;
+	} = $props();
 
-	export let id;
-	export let title;
+	let chat: Record<string, any> | null = $state(null);
 
-	export let selected = false;
-	export let shiftKey = false;
-
-	let chat = null;
-
-	let mouseOver = false;
-	let draggable = false;
-	$: if (mouseOver) {
-		loadChat();
-	}
+	let mouseOver = $state(false);
+	let draggable = $state(false);
+	$effect(() => {
+		if (mouseOver) {
+			loadChat();
+		}
+	});
 
 	const loadChat = async () => {
 		if (!chat) {
@@ -60,12 +67,13 @@
 		}
 	};
 
-	let showShareChatModal = false;
-	let confirmEdit = false;
+	let showShareChatModal = $state(false);
+	let confirmEdit = $state(false);
 
-	let chatTitle = title;
+	// 編集開始時に必ず title を代入するので初期値は空でよい(state_referenced_locally 回避)
+	let chatTitle = $state('');
 
-	const editChatTitle = async (id, title) => {
+	const editChatTitle = async (id: string, title: string) => {
 		if (title === '') {
 			toast.error($i18n.t('Title cannot be an empty string.'));
 		} else {
@@ -81,11 +89,11 @@
 			await chats.set(await getChatList($currentChatPage));
 			await pinnedChats.set(await getPinnedChatList());
 
-			dispatch('change');
+			onChange?.();
 		}
 	};
 
-	const cloneChatHandler = async (id) => {
+	const cloneChatHandler = async (id: string) => {
 		const res = await cloneChatById(
 			id,
 			$i18n.t('Clone of {{TITLE}}', {
@@ -105,7 +113,7 @@
 		}
 	};
 
-	const deleteChatHandler = async (id) => {
+	const deleteChatHandler = async (id: string) => {
 		const res = await deleteChatById(id).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -119,36 +127,36 @@
 				await tick();
 			}
 
-			dispatch('change');
+			onChange?.();
 		}
 	};
 
-	const archiveChatHandler = async (id) => {
+	const archiveChatHandler = async (id: string) => {
 		await archiveChatById(id);
-		dispatch('change');
+		onChange?.();
 	};
 
-	const focusEdit = async (node: HTMLInputElement) => {
+	const focusEdit = (node: HTMLInputElement) => {
 		node.focus();
 	};
 
-	let itemElement;
+	let itemElement: HTMLDivElement | undefined = $state();
 
-	let dragged = false;
-	let x = 0;
-	let y = 0;
+	let dragged = $state(false);
+	let x = $state(0);
+	let y = $state(0);
 
 	const dragImage = new Image();
 	dragImage.src =
 		'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
-	const onDragStart = (event) => {
+	const onDragStart = (event: DragEvent) => {
 		event.stopPropagation();
 
-		event.dataTransfer.setDragImage(dragImage, 0, 0);
+		event.dataTransfer?.setDragImage(dragImage, 0, 0);
 
 		// Set the data to be transferred
-		event.dataTransfer.setData(
+		event.dataTransfer?.setData(
 			'text/plain',
 			JSON.stringify({
 				type: 'chat',
@@ -158,45 +166,30 @@
 		);
 
 		dragged = true;
-		itemElement.style.opacity = '0.5'; // Optional: Visual cue to show it's being dragged
+		if (itemElement) {
+			itemElement.style.opacity = '0.5'; // Optional: Visual cue to show it's being dragged
+		}
 	};
 
-	const onDrag = (event) => {
+	const onDrag = (event: DragEvent) => {
 		event.stopPropagation();
 
 		x = event.clientX;
 		y = event.clientY;
 	};
 
-	const onDragEnd = (event) => {
+	const onDragEnd = (event: DragEvent) => {
 		event.stopPropagation();
 
-		itemElement.style.opacity = '1'; // Reset visual cue after drag
+		if (itemElement) {
+			itemElement.style.opacity = '1'; // Reset visual cue after drag
+		}
 		dragged = false;
 	};
 
-	onMount(() => {
-		if (itemElement) {
-			// Event listener for when dragging starts
-			itemElement.addEventListener('dragstart', onDragStart);
-			// Event listener for when dragging occurs (optional)
-			itemElement.addEventListener('drag', onDrag);
-			// Event listener for when dragging ends
-			itemElement.addEventListener('dragend', onDragEnd);
-		}
-	});
+	let showDeleteConfirm = $state(false);
 
-	onDestroy(() => {
-		if (itemElement) {
-			itemElement.removeEventListener('dragstart', onDragStart);
-			itemElement.removeEventListener('drag', onDrag);
-			itemElement.removeEventListener('dragend', onDragEnd);
-		}
-	});
-
-	let showDeleteConfirm = false;
-
-	const chatTitleInputKeydownHandler = (e) => {
+	const chatTitleInputKeydownHandler = (e: KeyboardEvent) => {
 		if (e.key === 'Enter') {
 			e.preventDefault();
 			editChatTitle(id, chatTitle);
@@ -228,7 +221,7 @@
 	<DragGhost {x} {y}>
 		<div class=" bg-black/80 backdrop-blur-2xl px-2 py-1 rounded-lg w-fit max-w-40">
 			<div class="flex items-center gap-1">
-				<Document className=" size-[18px]" strokeWidth="2" />
+				<span class="i-lucide-file size-[18px] block"></span>
 				<div class=" text-xs text-white line-clamp-1">
 					{title}
 				</div>
@@ -237,10 +230,14 @@
 	</DragGhost>
 {/if}
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={itemElement}
 	class=" w-full {className} relative group"
 	draggable={draggable && !confirmEdit}
+	ondragstart={onDragStart}
+	ondrag={onDrag}
+	ondragend={onDragEnd}
 >
 	{#if confirmEdit}
 		<div
@@ -255,7 +252,7 @@
 				bind:value={chatTitle}
 				id="chat-title-input-{id}"
 				class=" bg-transparent w-full outline-hidden mr-10"
-				on:keydown={chatTitleInputKeydownHandler}
+				onkeydown={chatTitleInputKeydownHandler}
 			/>
 		</div>
 	{:else}
@@ -266,24 +263,23 @@
 					? 'bg-sidebar-selected'
 					: ' group-hover:bg-sidebar-hover'}  whitespace-nowrap text-ellipsis"
 			href="/c/{id}"
-			on:click={() => {
-				dispatch('select');
+			onclick={() => {
+				onSelect?.();
 
 				if ($mobile) {
 					showSidebar.set(false);
 				}
 			}}
-			on:dblclick={() => {
+			ondblclick={() => {
 				chatTitle = title;
 				confirmEdit = true;
 			}}
-			on:mouseenter={(e) => {
+			onmouseenter={() => {
 				mouseOver = true;
 			}}
-			on:mouseleave={(e) => {
+			onmouseleave={() => {
 				mouseOver = false;
 			}}
-			on:focus={(e) => {}}
 			draggable="false"
 		>
 			<div class=" flex self-center flex-1 w-full">
@@ -294,7 +290,7 @@
 		</a>
 	{/if}
 
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="
 			absolute top-[4px] py-1 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80% to-transparent
@@ -304,10 +300,10 @@
 				? 'from-sidebar-selected'
 				: 'invisible group-hover:visible from-sidebar-hover'}
 			{className === 'pr-2' ? 'right-[8px]' : 'right-0'}"
-		on:mouseenter={(e) => {
+		onmouseenter={() => {
 			mouseOver = true;
 		}}
-		on:mouseleave={(e) => {
+		onmouseleave={() => {
 			mouseOver = false;
 		}}
 	>
@@ -317,26 +313,28 @@
 			>
 				<Tooltip content={$i18n.t('Confirm')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
+						class=" self-center dark:hover:text-white"
+						aria-label={$i18n.t('Confirm')}
+						onclick={() => {
 							editChatTitle(id, chatTitle);
 							confirmEdit = false;
 							chatTitle = '';
 						}}
 					>
-						<Check className=" size-3.5" strokeWidth="2.5" />
+						<span class="i-lucide-check size-3.5 block"></span>
 					</button>
 				</Tooltip>
 
 				<Tooltip content={$i18n.t('Cancel')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
+						class=" self-center dark:hover:text-white"
+						aria-label={$i18n.t('Cancel')}
+						onclick={() => {
 							confirmEdit = false;
 							chatTitle = '';
 						}}
 					>
-						<XMark strokeWidth="2.5" />
+						<span class="i-lucide-x size-4 block"></span>
 					</button>
 				</Tooltip>
 			</div>
@@ -344,25 +342,27 @@
 			<div class=" flex items-center self-center space-x-1.5">
 				<Tooltip content={$i18n.t('Archive')} className="flex items-center">
 					<button
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
+						class=" self-center dark:hover:text-white"
+						aria-label={$i18n.t('Archive')}
+						onclick={() => {
 							archiveChatHandler(id);
 						}}
 						type="button"
 					>
-						<ArchiveBox className="size-4  translate-y-[0.5px]" strokeWidth="2" />
+						<span class="i-lucide-archive size-4 block translate-y-[0.5px]"></span>
 					</button>
 				</Tooltip>
 
 				<Tooltip content={$i18n.t('Delete')}>
 					<button
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
+						class=" self-center dark:hover:text-white"
+						aria-label={$i18n.t('Delete')}
+						onclick={() => {
 							deleteChatHandler(id);
 						}}
 						type="button"
 					>
-						<GarbageBin strokeWidth="2" />
+						<span class="i-lucide-trash-2 size-4 block"></span>
 					</button>
 				</Tooltip>
 			</div>
@@ -393,29 +393,20 @@
 						showDeleteConfirm = true;
 					}}
 					onClose={() => {
-						dispatch('unselect');
+						onUnselect?.();
 					}}
-					on:change={async () => {
-						dispatch('change');
+					onChange={() => {
+						onChange?.();
 					}}
 				>
 					<button
 						aria-label="Chat Menu"
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
-							dispatch('select');
+						class=" self-center dark:hover:text-white"
+						onclick={() => {
+							onSelect?.();
 						}}
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								d="M2 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM6.5 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM12.5 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-							/>
-						</svg>
+						<span class="i-lucide-ellipsis size-4 block"></span>
 					</button>
 				</ChatMenu>
 
@@ -425,20 +416,11 @@
 						id="delete-chat-button"
 						class="hidden"
 						aria-label={$i18n.t('Delete Chat')}
-						on:click={() => {
+						onclick={() => {
 							showDeleteConfirm = true;
 						}}
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								d="M2 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM6.5 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM12.5 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-							/>
-						</svg>
+						<span class="i-lucide-trash-2 size-4 block"></span>
 					</button>
 				{/if}
 			</div>

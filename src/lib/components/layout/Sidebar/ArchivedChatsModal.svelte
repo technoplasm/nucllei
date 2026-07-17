@@ -3,12 +3,10 @@
 	const { saveAs } = fileSaver;
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { getContext } from 'svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
 	dayjs.extend(localizedFormat);
-
-	const dispatch = createEventDispatcher();
 
 	import {
 		archiveChatById,
@@ -22,24 +20,36 @@
 	import UnarchiveAllConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	const i18n = getContext('i18n');
 
-	export let show = false;
+	type ArchivedChat = {
+		id: string;
+		title: string;
+		created_at: number;
+	};
 
-	let chats = [];
+	let {
+		show = $bindable(false),
+		onChange = undefined
+	}: {
+		show?: boolean;
+		onChange?: () => void;
+	} = $props();
 
-	let searchValue = '';
-	let showUnarchiveAllConfirmDialog = false;
+	let chats: ArchivedChat[] = $state([]);
 
-	const unarchiveChatHandler = async (chatId) => {
-		const res = await archiveChatById(chatId).catch((error) => {
+	let searchValue = $state('');
+	let showUnarchiveAllConfirmDialog = $state(false);
+
+	const unarchiveChatHandler = async (chatId: string) => {
+		await archiveChatById(chatId).catch((error) => {
 			toast.error(`${error}`);
 		});
 
 		chats = await getArchivedChatList();
-		dispatch('change');
+		onChange?.();
 	};
 
-	const deleteChatHandler = async (chatId) => {
-		const res = await deleteChatById(chatId).catch((error) => {
+	const deleteChatHandler = async (chatId: string) => {
+		await deleteChatById(chatId).catch((error) => {
 			toast.error(`${error}`);
 		});
 
@@ -61,11 +71,13 @@
 		chats = await getArchivedChatList();
 	};
 
-	$: if (show) {
-		(async () => {
-			chats = await getArchivedChatList();
-		})();
-	}
+	$effect(() => {
+		if (show) {
+			(async () => {
+				chats = await getArchivedChatList();
+			})();
+		}
+	});
 </script>
 
 <UnarchiveAllConfirmDialog
@@ -84,22 +96,11 @@
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close')}
-				on:click={() => {
+				onclick={() => {
 					show = false;
 				}}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-						clip-rule="evenodd"
-					/>
-				</svg>
+				<span class="i-lucide-x size-5 block"></span>
 			</button>
 		</div>
 
@@ -107,18 +108,7 @@
 			<div class=" flex w-full mt-2 space-x-2">
 				<div class="flex flex-1">
 					<div class=" self-center ml-1 mr-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-								clip-rule="evenodd"
-							/>
-						</svg>
+						<span class="i-lucide-search size-4 block"></span>
 					</div>
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
@@ -173,24 +163,11 @@
 															<button
 																class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 																aria-label={$i18n.t('Unarchive Chat')}
-																on:click={async () => {
+																onclick={() => {
 																	unarchiveChatHandler(chat.id);
 																}}
 															>
-																<svg
-																	xmlns="http://www.w3.org/2000/svg"
-																	fill="none"
-																	viewBox="0 0 24 24"
-																	stroke-width="1.5"
-																	stroke="currentColor"
-																	class="size-4"
-																>
-																	<path
-																		stroke-linecap="round"
-																		stroke-linejoin="round"
-																		d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15"
-																	/>
-																</svg>
+																<span class="i-lucide-archive-restore size-4 block"></span>
 															</button>
 														</Tooltip>
 
@@ -198,24 +175,11 @@
 															<button
 																class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 																aria-label={$i18n.t('Delete Chat')}
-																on:click={async () => {
+																onclick={() => {
 																	deleteChatHandler(chat.id);
 																}}
 															>
-																<svg
-																	xmlns="http://www.w3.org/2000/svg"
-																	fill="none"
-																	viewBox="0 0 24 24"
-																	stroke-width="1.5"
-																	stroke="currentColor"
-																	class="w-4 h-4"
-																>
-																	<path
-																		stroke-linecap="round"
-																		stroke-linejoin="round"
-																		d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
-																	/>
-																</svg>
+																<span class="i-lucide-trash-2 size-4 block"></span>
 															</button>
 														</Tooltip>
 													</div>
@@ -230,7 +194,7 @@
 						<div class="flex flex-wrap text-sm font-medium gap-1.5 mt-2 m-1 justify-end w-full">
 							<button
 								class=" px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
-								on:click={() => {
+								onclick={() => {
 									showUnarchiveAllConfirmDialog = true;
 								}}
 							>
@@ -239,7 +203,7 @@
 
 							<button
 								class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-300 dark:outline-gray-800 rounded-3xl"
-								on:click={() => {
+								onclick={() => {
 									exportChatsHandler();
 								}}
 							>

@@ -126,8 +126,8 @@
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
 							className="max-w-[200px]"
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
+							onShow={(name) => {
+								if (name === 'archived-chat') {
 									showArchivedChats.set(true);
 								}
 							}}

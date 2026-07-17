@@ -26,8 +26,20 @@ export const TTSWorker: Writable<KokoroWorker | null> = writable(null);
 export const chatId = writable('');
 export const chatTitle = writable('');
 
-export const chats = writable(null);
-export const pinnedChats = writable([]);
+// チャット一覧(サイドバー)の項目。API(/chats/ 系 list)の戻りに
+// フロントで time_range を付与したもの — 一覧表示に使う最小型。
+export type ChatListItem = {
+	id: string;
+	title: string;
+	updated_at: number;
+	created_at: number;
+	time_range?: string;
+	pinned?: boolean;
+	folder_id?: string | null;
+};
+
+export const chats: Writable<ChatListItem[] | null> = writable(null);
+export const pinnedChats: Writable<ChatListItem[]> = writable([]);
 
 export const models: Writable<Model[]> = writable([]);
 

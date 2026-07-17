@@ -728,7 +728,7 @@ export const shareChatById = async (id: string) => {
 	return res;
 };
 
-export const updateChatFolderIdById = async (id: string, folderId?: string) => {
+export const updateChatFolderIdById = async (id: string, folderId?: string | null) => {
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/folder`, {

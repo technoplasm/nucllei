@@ -70,10 +70,15 @@
 					}
 				}
 
-				toast.custom(NotificationToast, {
+				// NotificationToast は dispatcher を持たない(#70 A2-2)。クリック時の
+				// トースト消去は id を捕まえて toast.dismiss で行う。
+				// runes 化した NotificationToast は関数型 Component だが、svelte-sonner 0.3 の
+				// 型は旧 ComponentType を要求する(実行時は svelte:component で動く)。
+				const toastId = toast.custom(/** @type {any} */ (NotificationToast), {
 					componentProps: {
 						onClick: () => {
 							goto(`/c/${envelope.chat_id}`);
+							toast.dismiss(toastId);
 						},
 						content: content,
 						title: title

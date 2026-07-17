@@ -1,30 +1,31 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { getContext, type Snippet } from 'svelte';
 
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
-	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Download from '$lib/components/icons/Download.svelte';
 
-	let show = false;
+	let {
+		onRename = undefined,
+		onExport = undefined,
+		onDelete = undefined,
+		children
+	}: {
+		onRename?: () => void;
+		onExport?: () => void;
+		onDelete?: () => void;
+		children?: Snippet;
+	} = $props();
+
+	let show = $state(false);
 </script>
 
-<Dropdown
-	bind:show
-	onChange={(state) => {
-		if (state === false) {
-			dispatch('close');
-		}
-	}}
->
+<Dropdown bind:show>
 	<Tooltip content={$i18n.t('More')}>
-		<slot />
+		{@render children?.()}
 	</Tooltip>
 
 	{#snippet content()}
@@ -38,20 +39,20 @@
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
-					dispatch('rename');
+					onRename?.();
 				}}
 			>
-				<Pencil strokeWidth="2" />
+				<span class="i-lucide-pencil size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Rename')}</div>
 			</DropdownMenu.Item>
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
-					dispatch('export');
+					onExport?.();
 				}}
 			>
-				<Download strokeWidth="2" />
+				<span class="i-lucide-download size-4 block"></span>
 
 				<div class="flex items-center">{$i18n.t('Export')}</div>
 			</DropdownMenu.Item>
@@ -59,10 +60,10 @@
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
-					dispatch('delete');
+					onDelete?.();
 				}}
 			>
-				<GarbageBin strokeWidth="2" />
+				<span class="i-lucide-trash-2 size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>
