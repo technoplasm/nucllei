@@ -8,6 +8,9 @@ A self-hosted AI agent platform that runs on-premise.
 - Skills with lazy tool loading
 - Attachment Functions for flexible file upload gating
 
+Deploying Nucllei, configuring it, calling its HTTP API, or writing Tools / Skills /
+Functions for it — see **[README_API.md](./README_API.md)**.
+
 ## Requirements
 
 - **Node** — version pinned in `.node-version`, managed with your tool of choice (e.g. mise). Use **pnpm**, not npm.
