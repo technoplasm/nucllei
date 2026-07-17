@@ -44,8 +44,12 @@
 		selectedModels: string[];
 		atSelectedModel?: Model | undefined;
 		messages?: ChatMessage[];
-		// Chat.svelte 実体は第 4 引数 opts を取るが、ここからは 3 引数でしか呼ばない
-		sendPrompt: (history: ChatHistory, prompt: string, parentId: string) => void | Promise<void>;
+		sendPrompt: (
+			history: ChatHistory,
+			prompt: string,
+			parentId: string,
+			opts?: { modelId?: string | null; modelIdx?: number | null; newChat?: boolean }
+		) => void | Promise<void>;
 		continueResponse: () => void | Promise<void>;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
 		chatActionHandler?: (
@@ -53,9 +57,7 @@
 			actionId: string,
 			modelId: string | undefined,
 			messageId: string,
-			// Chat.svelte 側の実装が event = null と推論されるため any(unknown だと反変で不適合)
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			event?: any
+			event?: unknown
 		) => void | Promise<void>;
 		showMessage?: (message: { id: string | null }) => void | Promise<void>;
 		submitMessage?: (parentId: string, prompt: string) => void | Promise<void>;

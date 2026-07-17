@@ -37,7 +37,12 @@
 		getPromptVariables
 	} from '$lib/utils';
 	import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
-	import { applyCompletionData, applyMessageMutation } from '$lib/utils/chat-events';
+	import {
+		applyCompletionData,
+		applyMessageMutation,
+		type CompletionData
+	} from '$lib/utils/chat-events';
+	import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
 	import {
 		consumeCompletionStream,
 		attachToTask,
@@ -111,7 +116,7 @@
 
 	let chat = null;
 
-	let history = $state<{ messages: Record<string, any>; currentId: string | null }>({
+	let history = $state<ChatHistory>({
 		messages: {},
 		currentId: null
 	});
@@ -122,9 +127,17 @@
 
 	// Chat Input
 	let prompt = $state('');
-	let chatFiles = $state<any[]>([]);
-	let files = $state<any[]>([]);
-	let params = $state<any>({});
+	let chatFiles = $state<ChatFile[]>([]);
+	let files = $state<ChatFile[]>([]);
+
+	// chat 単位の params(chatContent.params 由来)。FE が読むキーのみ型付け
+	type ChatParams = {
+		system?: string;
+		stream_response?: boolean;
+		stop?: string | string[];
+		[key: string]: unknown;
+	};
+	let params = $state<ChatParams>({});
 
 	// chatIdProp の追従。legacy `$:` と同じく初期値は init 時(onMount より先)に処理する
 	// — loadChat 同期先頭の chatId.set() を onMount の !$chatId ガードが前提にしている。
@@ -145,9 +158,10 @@
 				await tick();
 				loading = false;
 
-				if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+				const storedInput = localStorage.getItem(`chat-input-${chatIdProp}`);
+				if (storedInput) {
 					try {
-						const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
+						const input = JSON.parse(storedInput);
 
 						prompt = input.prompt;
 						files = input.files;
@@ -176,11 +190,11 @@
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
 	};
 
-	const showMessage = async (message) => {
+	const showMessage = async (message: { id: string | null }) => {
 		const _chatId = $chatId;
 		let _messageId = message.id;
 
-		let messageChildrenIds = [];
+		let messageChildrenIds: string[] = [];
 		if (_messageId === null) {
 			messageChildrenIds = Object.keys(history.messages).filter(
 				(id) => history.messages[id].parentId === null
@@ -190,7 +204,7 @@
 		}
 
 		while (messageChildrenIds.length !== 0) {
-			_messageId = messageChildrenIds.at(-1);
+			_messageId = messageChildrenIds[messageChildrenIds.length - 1];
 			messageChildrenIds = history.messages[_messageId].childrenIds;
 		}
 
@@ -262,7 +276,7 @@
 	const applyMessageEvent = async (
 		type: string | null,
 		data: any,
-		message: any,
+		message: ChatMessage,
 		targetChatId: string,
 		reply: ((result: unknown) => Promise<void>) | null
 	) => {
@@ -399,9 +413,10 @@
 			});
 		}
 
-		if (localStorage.getItem(`chat-input-${chatIdProp}`)) {
+		const storedInput = localStorage.getItem(`chat-input-${chatIdProp}`);
+		if (storedInput) {
 			try {
-				const input = JSON.parse(localStorage.getItem(`chat-input-${chatIdProp}`));
+				const input = JSON.parse(storedInput);
 				prompt = input.prompt;
 				files = input.files;
 			} catch (e) {
@@ -448,10 +463,12 @@
 	//////////////////////////
 
 	const initNewChat = async () => {
-		if ($page.url.searchParams.get('models')) {
-			selectedModels = $page.url.searchParams.get('models')?.split(',');
-		} else if ($page.url.searchParams.get('model')) {
-			const urlModels = $page.url.searchParams.get('model')?.split(',');
+		const modelsParam = $page.url.searchParams.get('models');
+		const modelParam = $page.url.searchParams.get('model');
+		if (modelsParam) {
+			selectedModels = modelsParam.split(',');
+		} else if (modelParam) {
+			const urlModels = modelParam.split(',');
 
 			if (urlModels.length === 1) {
 				const m = $models.find((m) => m.id === urlModels[0]);
@@ -462,7 +479,7 @@
 						await tick();
 
 						const modelSelectorInput = document.getElementById('model-search-input');
-						if (modelSelectorInput) {
+						if (modelSelectorInput instanceof HTMLInputElement) {
 							modelSelectorInput.focus();
 							modelSelectorInput.value = urlModels[0];
 							modelSelectorInput.dispatchEvent(new Event('input'));
@@ -500,7 +517,9 @@
 		await showCallOverlay.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
-			window.history.replaceState(history.state, '', `/`);
+			// upstream 由来: ここの `history` はローカルの chat history(window.history ではない)
+			// を指しており state は常に undefined だった — 挙動を変えず undefined を明示する
+			window.history.replaceState(undefined, '', `/`);
 		}
 
 		autoScroll = true;
@@ -631,7 +650,12 @@
 			messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
 		}
 	};
-	const chatCompletedHandler = async (targetChatId, modelId, responseMessageId, messages) => {
+	const chatCompletedHandler = async (
+		targetChatId: string,
+		modelId: string | undefined,
+		responseMessageId: string,
+		messages: ChatMessage[]
+	) => {
 		const res = await chatCompleted({
 			model: modelId,
 			messages: messages.map((m) => ({
@@ -652,7 +676,10 @@
 			id: responseMessageId
 		}).catch((error) => {
 			toast.error(`${error}`);
-			messages.at(-1).error = { content: error };
+			const lastMessage = messages.at(-1);
+			if (lastMessage) {
+				lastMessage.error = { content: error };
+			}
 
 			return null;
 		});
@@ -698,13 +725,13 @@
 	};
 
 	const chatActionHandler = async (
-		targetChatId,
-		actionId,
-		modelId,
-		responseMessageId,
-		event = null
+		targetChatId: string,
+		actionId: string,
+		modelId: string | undefined,
+		responseMessageId: string,
+		event: unknown = null
 	) => {
-		const messages = createMessagesList(history, responseMessageId);
+		const messages: ChatMessage[] = createMessagesList(history, responseMessageId);
 
 		const res = await chatAction(actionId, {
 			model: modelId,
@@ -722,7 +749,10 @@
 			id: responseMessageId
 		}).catch((error) => {
 			toast.error(`${error}`);
-			messages.at(-1).error = { content: error };
+			const lastMessage = messages.at(-1);
+			if (lastMessage) {
+				lastMessage.error = { content: error };
+			}
 			return null;
 		});
 
@@ -758,7 +788,7 @@
 		}
 	};
 
-	const createMessagePair = async (userPrompt) => {
+	const createMessagePair = async (userPrompt: string) => {
 		prompt = '';
 		if (selectedModels.length === 0) {
 			toast.error($i18n.t('Model not selected'));
@@ -766,7 +796,7 @@
 			const modelId = selectedModels[0];
 			const model = $models.filter((m) => m.id === modelId).at(0);
 
-			const messages = createMessagesList(history, history.currentId);
+			const messages: ChatMessage[] = createMessagesList(history, history.currentId);
 			const parentMessage = messages.length !== 0 ? messages.at(-1) : null;
 
 			const userMessageId = uuidv4();
@@ -790,7 +820,8 @@
 				done: true,
 
 				model: modelId,
-				modelName: model.name ?? model.id,
+				// model は id 一致で引いているため model.id === modelId — fallback は同値
+				modelName: model?.name ?? modelId,
 				modelIdx: 0,
 				timestamp: Math.floor(Date.now() / 1000)
 			};
@@ -818,10 +849,18 @@
 		}
 	};
 
-	const addMessages = async ({ modelId, parentId, messages }) => {
+	const addMessages = async ({
+		modelId,
+		parentId,
+		messages
+	}: {
+		modelId: string;
+		parentId: string;
+		messages: { role: string; content: string }[];
+	}) => {
 		const model = $models.filter((m) => m.id === modelId).at(0);
 
-		let parentMessage = history.messages[parentId];
+		let parentMessage: ChatMessage | undefined = history.messages[parentId];
 		let currentParentId = parentMessage ? parentMessage.id : null;
 		for (const message of messages) {
 			let messageId = uuidv4();
@@ -849,8 +888,9 @@
 					parentId: currentParentId,
 					childrenIds: [],
 					done: true,
-					model: model.id,
-					modelName: model.name ?? model.id,
+					// model は id 一致で引いているため model.id === modelId — fallback は同値
+					model: model?.id ?? modelId,
+					modelName: model?.name ?? modelId,
 					modelIdx: 0,
 					timestamp: Math.floor(Date.now() / 1000),
 					...message
@@ -884,12 +924,16 @@
 	// wire v2: chat:completion の data(スナップショット / delta / done / error / usage /
 	// sources)の message への適用は純関数 applyCompletionData に一元化。ここは
 	// 戻りフラグで副作用(TTS・haptic・自動スクロール・done 時の completed 経路)を駆動する。
-	const chatCompletionEventHandler = async (data, message, chatId) => {
+	const chatCompletionEventHandler = async (
+		data: CompletionData,
+		message: ChatMessage,
+		chatId: string
+	) => {
 		const { contentChanged, done, error } = applyCompletionData(message, data);
 
 		if (error) {
 			// {error: {content}} の一形 — message.error は適用済み。ここでは通知のみ
-			toast.error(message.error?.content ?? '');
+			toast.error(typeof message.error === 'object' ? message.error.content : '');
 		}
 
 		if (contentChanged) {
@@ -965,8 +1009,9 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-		const messages = createMessagesList(history, history.currentId);
+	const submitPrompt = async (userPrompt: string, { _raw = false } = {}) => {
+		const messages: ChatMessage[] = createMessagesList(history, history.currentId);
+		const lastMessage = messages.at(-1);
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -983,11 +1028,11 @@
 			return;
 		}
 
-		if (messages.length != 0 && messages.at(-1).done != true) {
+		if (lastMessage && lastMessage.done != true) {
 			// Response not done
 			return;
 		}
-		if (messages.length != 0 && messages.at(-1).error && !messages.at(-1).content) {
+		if (lastMessage && lastMessage.error && !lastMessage.content) {
 			// Error in response
 			toast.error($i18n.t(`Oops! There was an error in the previous response.`));
 			return;
@@ -999,13 +1044,11 @@
 			);
 			return;
 		}
-		if (
-			($config?.file?.max_count ?? null) !== null &&
-			files.length + chatFiles.length > $config?.file?.max_count
-		) {
+		const maxFileCount = $config?.file?.max_count ?? null;
+		if (maxFileCount !== null && files.length + chatFiles.length > maxFileCount) {
 			toast.error(
 				$i18n.t(`You can only chat with a maximum of {{maxCount}} file(s) at a time.`, {
-					maxCount: $config?.file?.max_count
+					maxCount: maxFileCount
 				})
 			);
 			return;
@@ -1021,7 +1064,7 @@
 			chatInputElement.style.height = '';
 		}
 
-		const _files = JSON.parse(JSON.stringify(files));
+		const _files: ChatFile[] = JSON.parse(JSON.stringify(files));
 		chatFiles.push(..._files.filter((item) => ['file'].includes(item.type)));
 		chatFiles = chatFiles.filter(
 			// Remove duplicates — id を持つエントリは file.id で一意化(#69: 再添付は
@@ -1040,7 +1083,7 @@
 		let userMessageId = uuidv4();
 		let userMessage = {
 			id: userMessageId,
-			parentId: messages.length !== 0 ? messages.at(-1).id : null,
+			parentId: lastMessage ? lastMessage.id : null,
 			childrenIds: [],
 			role: 'user',
 			content: userPrompt,
@@ -1054,8 +1097,8 @@
 		history.currentId = userMessageId;
 
 		// Append messageId to childrenIds of parent message
-		if (messages.length !== 0) {
-			history.messages[messages.at(-1).id].childrenIds.push(userMessageId);
+		if (lastMessage) {
+			history.messages[lastMessage.id].childrenIds.push(userMessageId);
 		}
 
 		// focus on chat input
@@ -1068,10 +1111,14 @@
 	};
 
 	const sendPrompt = async (
-		_history,
+		_history: ChatHistory,
 		prompt: string,
 		parentId: string,
-		{ modelId = null, modelIdx = null, newChat = false } = {}
+		{
+			modelId = null,
+			modelIdx = null,
+			newChat = false
+		}: { modelId?: string | null; modelIdx?: number | null; newChat?: boolean } = {}
 	) => {
 		if (autoScroll) {
 			scrollToBottom();
@@ -1122,7 +1169,11 @@
 		history = history;
 
 		// Create new chat if newChat is true and first user message
-		if (newChat && _history.messages[_history.currentId].parentId === null) {
+		if (
+			newChat &&
+			_history.currentId !== null &&
+			_history.messages[_history.currentId].parentId === null
+		) {
 			_chatId = await initChatHandler(_history);
 		}
 
@@ -1137,7 +1188,7 @@
 				const model = $models.filter((m) => m.id === modelId).at(0);
 
 				if (model) {
-					const messages = createMessagesList(_history, parentId);
+					const messages: ChatMessage[] = createMessagesList(_history, parentId);
 					// If there are image files, check if model is vision capable
 					const hasImages = messages.some((message) =>
 						message.files?.some((file) => file.type === 'image')
@@ -1174,11 +1225,17 @@
 
 	// wire v2: POST /api/chat/completions の応答は SSE。ここでは送信と消費開始までを
 	// 担い、イベントの適用は registerChatHandler 済みの chatEventHandler が行う。
-	const sendChatCompletionRequest = async (_history, model, responseMessageId, _chatId) => {
+	const sendChatCompletionRequest = async (
+		_history: ChatHistory,
+		model: Model,
+		responseMessageId: string,
+		_chatId: string
+	) => {
 		const responseMessage = _history.messages[responseMessageId];
-		const userMessage = _history.messages[responseMessage.parentId];
+		const userMessage =
+			responseMessage.parentId !== null ? _history.messages[responseMessage.parentId] : undefined;
 
-		let files = JSON.parse(JSON.stringify(chatFiles));
+		let files: ChatFile[] = JSON.parse(JSON.stringify(chatFiles));
 		files.push(...(userMessage?.files ?? []).filter((item) => ['file'].includes(item.type)));
 		// Remove duplicates
 		files = files.filter(
@@ -1305,7 +1362,7 @@
 
 	// HTTP 応答エラー用(fetch catch / res.json 形)。イベント内エラーは
 	// {error: {content}} の一形で chatCompletionEventHandler 側が処理する。
-	const handleCompletionRequestError = (error: any, responseMessage: any) => {
+	const handleCompletionRequestError = (error: any, responseMessage: ChatMessage) => {
 		console.error(error);
 		const errorMessage = error?.detail ?? error?.error?.message ?? error?.message ?? `${error}`;
 		toast.error(errorMessage);
@@ -1341,13 +1398,17 @@
 
 			taskIds = null;
 
-			const responseMessage = history.messages[history.currentId];
-			// Set all response messages to done
-			for (const messageId of history.messages[responseMessage.parentId].childrenIds) {
-				history.messages[messageId].done = true;
-			}
+			if (history.currentId !== null) {
+				const responseMessage = history.messages[history.currentId];
+				// Set all response messages to done
+				if (responseMessage.parentId !== null) {
+					for (const messageId of history.messages[responseMessage.parentId].childrenIds) {
+						history.messages[messageId].done = true;
+					}
+				}
 
-			history.messages[history.currentId] = responseMessage;
+				history.messages[history.currentId] = responseMessage;
+			}
 
 			if (autoScroll) {
 				scrollToBottom();
@@ -1355,7 +1416,7 @@
 		}
 	};
 
-	const submitMessage = async (parentId, prompt) => {
+	const submitMessage = async (parentId: string | null, prompt: string) => {
 		let userPrompt = prompt;
 		let userMessageId = uuidv4();
 
@@ -1387,8 +1448,8 @@
 		await sendPrompt(history, userPrompt, userMessageId);
 	};
 
-	const regenerateResponse = async (message) => {
-		if (history.currentId) {
+	const regenerateResponse = async (message: ChatMessage) => {
+		if (history.currentId && message.parentId !== null) {
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
 
@@ -1428,7 +1489,7 @@
 		}
 	};
 
-	const initChatHandler = async (history) => {
+	const initChatHandler = async (history: ChatHistory) => {
 		let _chatId = $chatId;
 
 		chat = await createNewChat({
@@ -1448,13 +1509,15 @@
 		await chats.set(await getChatList($currentChatPage));
 		currentChatPage.set(1);
 
-		window.history.replaceState(history.state, '', `/c/${_chatId}`);
+		// upstream 由来: ここの `history` は引数の chat history(window.history ではない)を
+		// 指しており state は常に undefined だった — 挙動を変えず undefined を明示する
+		window.history.replaceState(undefined, '', `/c/${_chatId}`);
 		await tick();
 
 		return _chatId;
 	};
 
-	const saveChatHandler = async (_chatId, history) => {
+	const saveChatHandler = async (_chatId: string, history: ChatHistory) => {
 		if ($chatId == _chatId) {
 			chat = await updateChatById(_chatId, {
 				models: selectedModels,
@@ -1496,13 +1559,13 @@
 	inputValue={eventConfirmationInputValue}
 	onConfirm={(inputValue) => {
 		if (inputValue) {
-			eventCallback(inputValue);
+			eventCallback?.(inputValue);
 		} else {
-			eventCallback(true);
+			eventCallback?.(true);
 		}
 	}}
 	onCancel={() => {
-		eventCallback(false);
+		eventCallback?.(false);
 	}}
 />
 
@@ -1558,6 +1621,9 @@
 								// 高さが伸びる競合で追従が勝手に切れる(text 出力で追従しない不具合)。
 								// 下端付近に来たら ON / 上方向スクロール(ユーザーの離脱)だけ OFF。
 								const el = messagesContainerElement;
+								if (!el) {
+									return;
+								}
 								if (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) {
 									autoScroll = true;
 								} else if (el.scrollTop < lastScrollTop) {
@@ -1595,7 +1661,7 @@
 								bind:prompt
 								bind:autoScroll
 								bind:atSelectedModel
-								transparentBackground={$settings?.backgroundImageUrl ?? false}
+								transparentBackground={!!$settings?.backgroundImageUrl}
 								{stopResponse}
 								{createMessagePair}
 								onChange={(input) => {
@@ -1628,7 +1694,7 @@
 								bind:prompt
 								bind:autoScroll
 								bind:atSelectedModel
-								transparentBackground={$settings?.backgroundImageUrl ?? false}
+								transparentBackground={!!$settings?.backgroundImageUrl}
 								{stopResponse}
 								{createMessagePair}
 								onSubmit={async (userPrompt) => {

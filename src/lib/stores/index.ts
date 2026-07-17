@@ -149,6 +149,13 @@ type Settings = {
 	backgroundImageUrl?: string | null;
 	notifications?: { webhook_url?: string };
 
+	// llens(#70 C): per-user 既定の chat params(Chat.svelte が chat 側 params とマージして送信)
+	params?: {
+		stream_response?: boolean;
+		stop?: string | string[];
+		[key: string]: unknown;
+	};
+
 	system?: string;
 	requestFormat?: string;
 	keepAlive?: string;

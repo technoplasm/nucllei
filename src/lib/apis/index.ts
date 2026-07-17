@@ -31,10 +31,14 @@ export const getModels = async (base: boolean = false) => {
 	return res?.data ?? [];
 };
 
+// llens(#70 C): 実際の送信形(Chat.svelte chatCompletedHandler)に合わせる。
+// messages は message 形の縮約 object 群、model_item は $models のエントリ素通し。
 type ChatCompletedForm = {
-	model: string;
-	messages: string[];
+	model?: string;
+	messages: Record<string, unknown>[];
+	model_item?: unknown;
 	chat_id: string;
+	id: string;
 };
 
 export const chatCompleted = async (body: ChatCompletedForm) => {
@@ -69,10 +73,14 @@ export const chatCompleted = async (body: ChatCompletedForm) => {
 	return res;
 };
 
+// llens(#70 C): 実際の送信形(Chat.svelte chatActionHandler)に合わせる。
 type ChatActionForm = {
-	model: string;
-	messages: string[];
+	model?: string;
+	messages: Record<string, unknown>[];
+	model_item?: unknown;
+	event?: unknown;
 	chat_id: string;
+	id: string;
 };
 
 export const chatAction = async (action_id: string, body: ChatActionForm) => {
@@ -814,12 +822,25 @@ export interface ModelConfig {
 
 export interface ModelMeta {
 	description?: string;
-	capabilities?: object;
+	// llens(#70 C): FE が参照するフラグを型付け(ModelEditor は任意キーの boolean 束として扱う)
+	capabilities?: {
+		vision?: boolean;
+		usage?: boolean;
+		citations?: boolean;
+		[key: string]: boolean | undefined;
+	};
 	profile_image_url?: string;
 	hidden?: boolean;
 }
 
-export interface ModelParams {}
+// llens(#70 C): FE(Chat.svelte / ModelEditor)が参照するキーのみ型付け。
+// 実体は管理画面の自由記述 params で任意キーを持ち得る。
+export interface ModelParams {
+	system?: string;
+	stop?: string | string[] | null;
+	stream_response?: boolean;
+	[key: string]: unknown;
+}
 
 export type GlobalModelConfig = ModelConfig[];
 

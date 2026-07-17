@@ -9,9 +9,9 @@
 	import Drawer from '$lib/components/common/Drawer.svelte';
 
 	let {
-		history,
+		history = $bindable(),
 		chatId = null,
-		chatFiles = [],
+		chatFiles = $bindable([]),
 		eventTarget,
 		submitPrompt,
 		stopResponse,

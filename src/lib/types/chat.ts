@@ -66,7 +66,8 @@ export interface ChatMessage {
 	childrenIds: string[];
 	role: string; // 'user' | 'assistant'(addMessages 経由は任意文字列があり得る)
 	content: string;
-	timestamp: number; // Unix epoch(秒)
+	/** Unix epoch(秒)。submitMessage(Chat.svelte)経由の user message には無い。 */
+	timestamp?: number;
 
 	/** assistant: ブロック列(#17 L0 — 表示・履歴復元の真実源)。 */
 	content_blocks?: ContentBlock[];
@@ -98,6 +99,9 @@ export interface ChatMessage {
 	sources?: MessageSource[];
 	code_executions?: CodeExecution[];
 	usage?: Record<string, unknown>;
+
+	/** completed(outlet)応答の messages が持ち得る付帯情報。FE は読まず wire へ素通しする。 */
+	info?: unknown;
 
 	/** filter outlet が content を書き換えたときの原文(Chat.svelte)。 */
 	originalContent?: string;
