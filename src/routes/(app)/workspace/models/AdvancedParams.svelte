@@ -291,6 +291,44 @@
 		setVal(item, value);
 	};
 
+	// llens: Custom(custom_params)— whitelist に無い拡張引数(SGLang の
+	// chat_template_kwargs 等)をリクエスト body トップレベルへ素通しする任意 KV。
+	// 値は JSON リテラルとして解釈し、JSON として不正な入力は文字列として扱う
+	// (thinking → "thinking"、true → true、{"a":1} → object)。
+	let customRows: { key: string; text: string }[] = Object.entries(params?.custom_params ?? {}).map(
+		([key, value]) => ({
+			key,
+			text: typeof value === 'string' ? value : JSON.stringify(value)
+		})
+	);
+
+	const parseCustomValue = (text: string) => {
+		try {
+			return JSON.parse(text);
+		} catch {
+			return text;
+		}
+	};
+
+	const syncCustom = () => {
+		const entries = customRows.filter((r) => r.key.trim() !== '');
+		params = {
+			...params,
+			custom_params: entries.length
+				? Object.fromEntries(entries.map((r) => [r.key.trim(), parseCustomValue(r.text)]))
+				: null
+		};
+	};
+
+	const addCustomRow = () => {
+		customRows = [...customRows, { key: '', text: '' }];
+	};
+
+	const removeCustomRow = (index: number) => {
+		customRows = customRows.filter((_, i) => i !== index);
+		syncCustom();
+	};
+
 	$: if (params) {
 		dispatch('change', params);
 	}
@@ -398,4 +436,51 @@
 			{/each}
 		</div>
 	{/each}
+
+	<!-- Custom: 任意 KV(custom_params)。body トップレベルへ素通し(chat_template_kwargs 等) -->
+	<div
+		class="text-md font-semibold text-content-muted border-b border-gray-100 dark:border-gray-800 pb-1 mb-2 mt-4"
+	>
+		Custom
+	</div>
+
+	<div class="space-y-1">
+		{#each customRows as row, index}
+			<div class="flex items-center gap-2">
+				<input
+					type="text"
+					placeholder="chat_template_kwargs"
+					bind:value={row.key}
+					on:input={syncCustom}
+					class="w-56 shrink-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
+					autocomplete="off"
+				/>
+				<input
+					type="text"
+					placeholder={'{"thinking": true}'}
+					bind:value={row.text}
+					on:input={syncCustom}
+					class="flex-1 min-w-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
+					autocomplete="off"
+				/>
+				<button
+					class="p-1 shrink-0 text-content-muted hover:text-content"
+					type="button"
+					aria-label="Remove"
+					on:click={() => removeCustomRow(index)}
+				>
+					<span class="i-lucide-x size-4 block"></span>
+				</button>
+			</div>
+		{/each}
+
+		<button
+			class="flex items-center gap-1 p-1 text-sm text-content-muted hover:text-content"
+			type="button"
+			on:click={addCustomRow}
+		>
+			<span class="i-lucide-plus size-4 block"></span>
+			<span>Add</span>
+		</button>
+	</div>
 </div>

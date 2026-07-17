@@ -65,7 +65,17 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
         "logit_bias": lambda x: x,
         "response_format": dict,
     }
-    return apply_model_params_to_body(params, form_data, mappings)
+    form_data = apply_model_params_to_body(params, form_data, mappings)
+
+    # llens: custom_params(モデル設定の任意 KV)を body トップレベルへ素通しマージする。
+    # SGLang の chat_template_kwargs 等、whitelist(上の mappings)に無い拡張引数の
+    # escape hatch。同名キーは custom 側が勝つ(後勝ち — whitelist 外の top_k 等も
+    # ここから上書きできる)。
+    custom_params = params.get("custom_params")
+    if isinstance(custom_params, dict):
+        form_data.update(custom_params)
+
+    return form_data
 
 
 def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
