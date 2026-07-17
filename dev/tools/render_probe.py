@@ -169,9 +169,11 @@ class Tools:
     def __init__(self) -> None:
         pass
 
-    def render_probe(self, kind: str = "mixed") -> str:
+    def render_probe(self, kind: str = "mixed") -> Markdown:
         """指定した種別の markdown サンプルを返す。返ってきた文字列をそのままチャットに表示させ、
         レンダリング結果(表・コード・数式・長文・エッジケース)を目視確認する用途。
+        戻りは実体どおり Markdown 宣言 — Result 区画でも md レンダリングされる
+        (edge kind の壊れ md はサニタイズ経路の目視も兼ねる)。
 
         :param kind: サンプル種別 = table / code / math / long / mixed / edge のいずれか(spec ビルダは :param の継続行を落とすので 1 行に列挙している。未知の値は mixed にフォールバック)
         :return: 種別に応じた markdown 文字列
