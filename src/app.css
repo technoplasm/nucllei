@@ -285,7 +285,7 @@ input[type='number'] {
 	font-weight: 600;
 	/* 小さい inline code をベースラインでなく本文の中心に揃える */
 	vertical-align: middle;
-	@apply rounded-md dark:bg-gray-800 bg-gray-100 mx-0.5;
+	@apply rounded-sm dark:bg-gray-800 bg-gray-100 mx-0.5;
 }
 
 /* llens(issue #35): 有効な /command トークンの控えめなハイライト(送信済みメッセージの表示。
