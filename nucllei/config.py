@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import shutil
-import redis
 
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +9,6 @@ from typing import Generic, Optional, TypeVar
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
-from sqlalchemy import JSON, Column, DateTime, Integer, func
 
 from nucllei.env import (
     DATA_DIR,
@@ -21,8 +19,8 @@ from nucllei.env import (
     WEBUI_AUTH,
     log,
 )
-from nucllei.internal.db import Base, get_db
-from nucllei.utils.redis import get_redis_connection
+from nucllei.internal.db import get_db
+from nucllei.models.configs import Config
 
 
 class EndpointFilter(logging.Filter):
@@ -59,21 +57,6 @@ def run_migrations():
 run_migrations()
 
 
-class Config(Base):
-    __tablename__ = "config"
-
-    id = Column(Integer, primary_key=True)
-    data = Column(JSON, nullable=False)
-    version = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=True, onupdate=func.now())
-
-
-def load_json_config():
-    with open(f"{DATA_DIR}/config.json", "r") as file:
-        return json.load(file)
-
-
 def save_to_db(data):
     with get_db() as db:
         existing_config = db.query(Config).first()
@@ -92,12 +75,6 @@ def reset_config():
         db.query(Config).delete()
         db.commit()
 
-
-# When initializing, check if config.json exists and migrate it to the database
-if os.path.exists(f"{DATA_DIR}/config.json"):
-    data = load_json_config()
-    save_to_db(data)
-    os.rename(f"{DATA_DIR}/config.json", f"{DATA_DIR}/old_config.json")
 
 DEFAULT_CONFIG = {
     "version": 0,
@@ -253,18 +230,12 @@ class RuntimeConfig(Generic[T]):
 
 
 class AppConfig:
+    # llens(#80): Redis mirror(multi-worker 設定同期)は撤去 — wire v2 のタスク
+    # レジストリが in-process のため multi-worker 自体が非サポート。単一プロセス前提。
     _state: dict[str, RuntimeConfig]
-    _redis: Optional[redis.Redis] = None
 
-    def __init__(
-        self, redis_url: Optional[str] = None, redis_sentinels: Optional[list] = []
-    ):
+    def __init__(self):
         super().__setattr__("_state", {})
-        if redis_url:
-            super().__setattr__(
-                "_redis",
-                get_redis_connection(redis_url, redis_sentinels, decode_responses=True),
-            )
 
     def __setattr__(self, key, value):
         if isinstance(value, RuntimeConfig):
@@ -273,30 +244,9 @@ class AppConfig:
             self._state[key].value = value
             self._state[key].save()
 
-            if self._redis:
-                redis_key = f"nucllei:config:{key}"
-                self._redis.set(redis_key, json.dumps(self._state[key].value))
-
     def __getattr__(self, key):
         if key not in self._state:
             raise AttributeError(f"Config key '{key}' not found")
-
-        # If Redis is available, check for an updated value
-        if self._redis:
-            redis_key = f"nucllei:config:{key}"
-            redis_value = self._redis.get(redis_key)
-
-            if redis_value is not None:
-                try:
-                    decoded_value = json.loads(redis_value)
-
-                    # Update the in-memory value if different
-                    if self._state[key].value != decoded_value:
-                        self._state[key].value = decoded_value
-                        log.info(f"Updated {key} from Redis: {decoded_value}")
-
-                except json.JSONDecodeError:
-                    log.error(f"Invalid JSON format in Redis for {key}: {redis_value}")
 
         return self._state[key].value
 

@@ -131,8 +131,8 @@ There are two kinds of settings:
   Setting an RC env to `""` counts as _unset_. Practical rule: put everything you
   want operator-fixed into env/compose; leave everything you want UI-tunable unset.
 
-Multi-worker note: with `UVICORN_WORKERS>1` you must set `REDIS_URL`, otherwise
-runtime config changes don't propagate across workers until restart.
+Run a **single worker** (the default `UVICORN_WORKERS=1`): runtime config and the
+chat task registry are in-process, so multi-worker deployments are not supported.
 `RESET_CONFIG_ON_START=true` wipes the stored runtime config at boot (env-only mode).
 
 **Naming families**: `APP_*` refers to the Nucllei product itself (`APP_VERSION`);
@@ -148,8 +148,7 @@ the UI, next to the Nucllei product version).
 | `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state                                             |
 | `DATABASE_URL`                                                                                                              | env  | `sqlite:///$DATA_DIR/webui.db`           | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten)        |
 | `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `0` (NullPool) / `0` / `30` / `3600` | Postgres tuning                                                          |
-| `REDIS_URL` (+ `REDIS_SENTINEL_HOSTS`, `REDIS_SENTINEL_PORT`)                                                               | env  | `""`                                     | config sync for multi-worker                                             |
-| `UVICORN_WORKERS`                                                                                                           | env  | `1`                                      | worker count for `serve`                                                 |
+| `UVICORN_WORKERS`                                                                                                           | env  | `1`                                      | worker count for `serve` — keep at 1 (multi-worker unsupported)          |
 | `WEBUI_URL`                                                                                                                 | RC   | `http://localhost:3000`                  | public base URL (webhooks, links)                                        |
 | `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                | brand name shown in the UI                                               |
 | `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                     | deployment-layer version / copyright on the License tab (empty = hidden) |

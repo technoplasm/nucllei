@@ -1,7 +1,23 @@
 from logging.config import fileConfig
 
 from alembic import context
-from nucllei.models.auths import Auth
+
+# llens(#80): autogenerate が全テーブルを見るよう、テーブルを定義する全モジュールを
+# import して Base.metadata を参照する。新テーブルを足したらここにも 1 行足すこと。
+from nucllei.internal.db import Base
+from nucllei.models import (  # noqa: F401
+    auths,
+    chats,
+    configs,
+    files,
+    folders,
+    functions,
+    groups,
+    models,
+    skills,
+    tools,
+    users,
+)
 from nucllei.env import DATABASE_URL
 from sqlalchemy import engine_from_config, pool
 
@@ -14,11 +30,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = Auth.metadata
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

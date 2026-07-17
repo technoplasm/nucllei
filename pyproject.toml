@@ -25,15 +25,9 @@ dependencies = [
 
     "sqlalchemy==2.0.38",
     "alembic==1.14.0",
-    "peewee==3.17.9",
-    "peewee-migrate==1.12.2",
     "psycopg2-binary==2.9.9",
-    "pgvector==0.4.0",
-    "PyMySQL==1.1.1",
     "bcrypt==4.3.0",
 
-    "pymongo",
-    "redis",
     "boto3==1.35.53",
 
     "argon2-cffi==23.1.0",
@@ -73,7 +67,6 @@ dependencies = [
     "opentelemetry-instrumentation==0.52b1",
     "opentelemetry-instrumentation-fastapi==0.52b1",
     "opentelemetry-instrumentation-sqlalchemy==0.52b1",
-    "opentelemetry-instrumentation-redis==0.52b1",
     "opentelemetry-instrumentation-requests==0.52b1",
     "opentelemetry-instrumentation-logging==0.52b1",
     "opentelemetry-instrumentation-httpx==0.52b1",
@@ -169,9 +162,8 @@ dev = [
 
 [tool.ruff]
 # llens(#25): lint は「正しさ系のみ・green 維持」。整形は black が担う。
-# マイグレーション(peewee_migrate / alembic)は歴史的資産 — lint しない。
+# マイグレーション(alembic)は自動生成主体 — lint しない。
 extend-exclude = [
-    "nucllei/internal/migrations",
     "nucllei/migrations",
 ]
 # pre-push hook のようにファイルを明示指定で渡す呼び出しでも exclude を尊重する

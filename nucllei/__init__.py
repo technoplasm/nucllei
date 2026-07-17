@@ -97,7 +97,7 @@ def create_admin(
     if password is None:
         password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
 
-    # import 時に alembic(config.run_migrations)+ peewee(internal.db)マイグレーションが走り、
+    # import 時に alembic(config.run_migrations)マイグレーションが走り、
     # 新規 DB でもスキーマが用意される。重い import は関数内に閉じる(serve と同じ流儀)。
     import nucllei.config  # noqa: F401
     from nucllei.models.auths import Auths

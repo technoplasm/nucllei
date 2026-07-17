@@ -2,8 +2,6 @@ from typing import Optional, List, Dict, Any
 from nucllei.models.users import Users, UserModel
 from nucllei.models.groups import Groups
 
-
-from nucllei.config import DEFAULT_USER_PERMISSIONS
 import json
 
 
@@ -101,6 +99,10 @@ def has_permission(
             return True
 
     # Check default permissions afterward if the group permissions don't allow it
+    # llens(#80): config は遅延 import — 本モジュールは models 群から import されるため、
+    # module level で config を引くと alembic env.py 起点(モデル import が先)で循環する。
+    from nucllei.config import DEFAULT_USER_PERMISSIONS
+
     default_permissions = fill_missing_permissions(
         default_permissions, DEFAULT_USER_PERMISSIONS
     )

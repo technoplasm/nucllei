@@ -181,9 +181,6 @@ from nucllei.config import (
 from nucllei.env import (
     AUDIT_EXCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
-    REDIS_URL,
-    REDIS_SENTINEL_HOSTS,
-    REDIS_SENTINEL_PORT,
     GLOBAL_LOG_LEVEL,
     MAX_BODY_LOG_SIZE,
     SRC_LOG_LEVELS,
@@ -229,8 +226,6 @@ from nucllei.tasks import (
     list_task_ids_by_chat_id,
     stop_task,
 )  # Import from tasks.py
-
-from nucllei.utils.redis import get_sentinels_from_env
 
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -312,10 +307,7 @@ app = FastAPI(
 
 oauth_manager = OAuthManager(app)
 
-app.state.config = AppConfig(
-    redis_url=REDIS_URL,
-    redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
-)
+app.state.config = AppConfig()
 
 app.state.WEBUI_NAME = WEBUI_NAME
 

@@ -1,5 +1,4 @@
 import logging
-import traceback
 from typing import Collection, Union
 
 from aiohttp import (
@@ -16,17 +15,15 @@ from opentelemetry.instrumentation.httpx import (
 )
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.trace import Span, StatusCode
-from redis import Redis
 from requests import PreparedRequest, Response
 from sqlalchemy import Engine
 from fastapi import status
 
-from nucllei.utils.telemetry.constants import SPAN_REDIS_TYPE, SpanAttributes
+from nucllei.utils.telemetry.constants import SpanAttributes
 
 from nucllei.env import SRC_LOG_LEVELS
 
@@ -59,31 +56,6 @@ def response_hook(span: Span, request: PreparedRequest, response: Response):
         }
     )
     span.set_status(StatusCode.ERROR if response.status_code >= 400 else StatusCode.OK)
-
-
-def redis_request_hook(span: Span, instance: Redis, args, kwargs):
-    """
-    Redis Request Hook
-    """
-
-    try:
-        connection_kwargs: dict = instance.connection_pool.connection_kwargs
-        host = connection_kwargs.get("host")
-        port = connection_kwargs.get("port")
-        db = connection_kwargs.get("db")
-        span.set_attributes(
-            {
-                SpanAttributes.DB_INSTANCE: f"{host}/{db}",
-                SpanAttributes.DB_NAME: f"{host}/{db}",
-                SpanAttributes.DB_TYPE: SPAN_REDIS_TYPE,
-                SpanAttributes.DB_PORT: port,
-                SpanAttributes.DB_IP: host,
-                SpanAttributes.DB_STATEMENT: " ".join([str(i) for i in args]),
-                SpanAttributes.DB_OPERATION: str(args[0]),
-            }
-        )
-    except Exception:  # pylint: disable=W0718
-        logger.error(traceback.format_exc())
 
 
 def httpx_request_hook(span: Span, request: RequestInfo):
@@ -181,7 +153,6 @@ class Instrumentor(BaseInstrumentor):
         # FastAPIInstrumentor.instrument_app の薄いラッパにすぎないため直接呼ぶ。
         FastAPIInstrumentor.instrument_app(self.app)
         SQLAlchemyInstrumentor().instrument(engine=self.db_engine)
-        RedisInstrumentor().instrument(request_hook=redis_request_hook)
         RequestsInstrumentor().instrument(
             request_hook=requests_hook, response_hook=response_hook
         )

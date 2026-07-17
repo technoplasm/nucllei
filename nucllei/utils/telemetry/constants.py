@@ -2,7 +2,6 @@ from opentelemetry.semconv.trace import SpanAttributes as _SpanAttributes
 
 # Span Tags
 SPAN_DB_TYPE = "mysql"
-SPAN_REDIS_TYPE = "redis"
 SPAN_DURATION = "duration"
 SPAN_SQL_STR = "sql"
 SPAN_SQL_EXPLAIN = "explain"
