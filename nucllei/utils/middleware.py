@@ -658,6 +658,9 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
                     }
                 )
         elif len(messages) == 2:
+            # タイトル自動生成 OFF: 最初のユーザー発話をタイトルにする(仕様 2026-07-17
+            # 決定 — New Chat が並ぶよりよい)。emit は DB と同じ値を流す
+            # (旧実装は応答本文を流していて表示が食い違った)
             title = messages[0].get("content", "New Chat")
 
             Chats.update_chat_title_by_id(metadata["chat_id"], title)
@@ -665,7 +668,7 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
             await event_emitter(
                 {
                     "type": "chat:title",
-                    "data": message.get("content", "New Chat"),
+                    "data": title,
                 }
             )
 

@@ -921,8 +921,9 @@
 												</Tooltip>
 											</div>
 										{:else}
-											{#if prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
-												<!-- llens(#53): Call は STT+TTS 両方が有効なときだけ(片方無効なら出さない) -->
+											{#if ($settings?.callEnabled ?? false) && prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
+												<!-- llens(#53): Call は STT+TTS 両方が有効なときだけ(片方無効なら出さない)。
+											     ユーザー設定 callEnabled(既定 OFF)で表示自体を切り替える -->
 												<div class=" flex items-center">
 													<Tooltip content={$i18n.t('Call')}>
 														<button

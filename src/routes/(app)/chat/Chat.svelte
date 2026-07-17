@@ -31,7 +31,6 @@
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
-		copyToClipboard,
 		getMessageContentParts,
 		createMessagesList,
 		promptTemplate,
@@ -922,10 +921,6 @@
 		history.messages[message.id] = message;
 
 		if (done) {
-			if ($settings.responseAutoCopy) {
-				copyToClipboard(message.content);
-			}
-
 			if ($settings.responseAutoPlayback && !$showCallOverlay) {
 				await tick();
 				document.getElementById(`speak-button-${message.id}`)?.click();

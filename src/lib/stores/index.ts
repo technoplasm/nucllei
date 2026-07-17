@@ -121,7 +121,7 @@ type Settings = {
 
 	// llens(#70): SettingsModal > Interface が実際に保存しているキーを型に反映
 	titleAutoGenerate?: boolean;
-	responseAutoCopy?: boolean;
+	callEnabled?: boolean;
 	widescreenMode?: boolean;
 	splitLargeChunks?: boolean;
 	scrollOnBranchChange?: boolean;
@@ -136,8 +136,6 @@ type Settings = {
 	imageCompressionSize?: { width: string; height: string };
 	voiceInterruption?: boolean;
 	hapticFeedback?: boolean;
-	iframeSandboxAllowSameOrigin?: boolean;
-	iframeSandboxAllowForms?: boolean;
 	backgroundImageUrl?: string | null;
 	notifications?: { webhook_url?: string };
 

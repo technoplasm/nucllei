@@ -31,6 +31,16 @@
 			title: 'Chat',
 			rows: [
 				{
+					key: 'ctrlEnterToSend',
+					label: 'Enter Key Behavior',
+					type: 'select',
+					options: [
+						{ value: false, label: 'Enter to Send' },
+						{ value: true, label: 'Ctrl+Enter to Send' }
+					],
+					init: () => $settings.ctrlEnterToSend ?? false
+				},
+				{
 					key: 'titleAutoGenerate',
 					label: 'Title Auto-Generation',
 					type: 'switch',
@@ -42,32 +52,6 @@
 								auto: value
 							}
 						});
-					}
-				},
-				{
-					key: 'responseAutoCopy',
-					label: 'Auto-Copy Response to Clipboard',
-					type: 'switch',
-					init: () => $settings.responseAutoCopy ?? false,
-					// 有効化はクリップボード権限を確認してから確定する
-					save: async (value) => {
-						if (value) {
-							const permission = await navigator.clipboard
-								.readText()
-								.then(() => 'granted')
-								.catch(() => '');
-
-							if (permission !== 'granted') {
-								toast.error(
-									$i18n.t(
-										'Clipboard write permission denied. Please check your browser settings to grant the necessary access.'
-									)
-								);
-								values.responseAutoCopy = false;
-								return;
-							}
-						}
-						saveSettings({ responseAutoCopy: value });
 					}
 				},
 				{
@@ -95,16 +79,6 @@
 					init: () => $settings.expandDetails ?? false
 				},
 				{
-					key: 'ctrlEnterToSend',
-					label: 'Enter Key Behavior',
-					type: 'select',
-					options: [
-						{ value: false, label: 'Enter to Send' },
-						{ value: true, label: 'Ctrl+Enter to Send' }
-					],
-					init: () => $settings.ctrlEnterToSend ?? false
-				},
-				{
 					key: 'scrollOnBranchChange',
 					label: 'Scroll to bottom when switching between branches',
 					type: 'switch',
@@ -115,24 +89,19 @@
 					label: 'Haptic Feedback',
 					type: 'switch',
 					init: () => $settings.hapticFeedback ?? false
-				},
-				{
-					key: 'iframeSandboxAllowSameOrigin',
-					label: 'iframe Sandbox Allow Same Origin',
-					type: 'switch',
-					init: () => $settings.iframeSandboxAllowSameOrigin ?? false
-				},
-				{
-					key: 'iframeSandboxAllowForms',
-					label: 'iframe Sandbox Allow Forms',
-					type: 'switch',
-					init: () => $settings.iframeSandboxAllowForms ?? false
 				}
 			]
 		},
 		{
 			title: 'Voice',
 			rows: [
+				{
+					// llens: Call(音声通話)ボタンの表示切り替え(見た目のみ・既定 OFF)
+					key: 'callEnabled',
+					label: 'Enable Call',
+					type: 'switch',
+					init: () => $settings.callEnabled ?? false
+				},
 				{
 					key: 'voiceInterruption',
 					label: 'Allow Voice Interruption in Call',
