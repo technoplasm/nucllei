@@ -184,7 +184,6 @@ from nucllei.env import (
     REDIS_SENTINEL_PORT,
     GLOBAL_LOG_LEVEL,
     MAX_BODY_LOG_SIZE,
-    SAFE_MODE,
     SRC_LOG_LEVELS,
     VERSION,
     WEBUI_NAME,
@@ -231,11 +230,6 @@ from nucllei.tasks import (
 
 from nucllei.utils.redis import get_sentinels_from_env
 
-
-if SAFE_MODE:
-    # llens(#46): function の is_active 撤去に伴い SAFE_MODE の一括無効化は廃止
-    # (function は割り当てられたモデルでのみ動く。無効化したいなら割り当て解除)。
-    print("SAFE MODE ENABLED")
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)

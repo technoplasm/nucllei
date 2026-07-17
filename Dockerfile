@@ -24,7 +24,6 @@ FROM python:3.11-slim-bookworm AS base
 
 ENV ENV=prod \
     PORT=8080 \
-    DOCKER=true \
     DATA_DIR=/app/data \
     WHISPER_MODEL_DIR=/app/data/cache/whisper/models \
     HF_HOME=/app/data/cache/hf

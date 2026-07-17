@@ -21,8 +21,6 @@ try:
 except ImportError:
     print("dotenv not installed, skipping...")
 
-DOCKER = os.environ.get("DOCKER", "False").lower() == "true"
-
 # device type embedding models - "cpu" (default), "cuda" (nvidia gpu required) or "mps" (apple silicon) - choosing this right can lead to better performance
 USE_CUDA = os.environ.get("USE_CUDA_DOCKER", "false")
 
@@ -162,12 +160,6 @@ def _git_describe():
 
 VERSION = os.environ.get("APP_VERSION") or _git_describe() or PACKAGE_DATA["version"]
 
-
-####################################
-# SAFE_MODE
-####################################
-
-SAFE_MODE = os.environ.get("SAFE_MODE", "false").lower() == "true"
 
 ####################################
 # ENABLE_FORWARD_USER_INFO_HEADERS
@@ -438,14 +430,6 @@ OTEL_RESOURCE_ATTRIBUTES = os.environ.get(
 OTEL_TRACES_SAMPLER = os.environ.get(
     "OTEL_TRACES_SAMPLER", "parentbased_always_on"
 ).lower()
-
-####################################
-# TOOLS/FUNCTIONS PIP OPTIONS
-####################################
-
-PIP_OPTIONS = os.getenv("PIP_OPTIONS", "").split()
-PIP_PACKAGE_INDEX_OPTIONS = os.getenv("PIP_PACKAGE_INDEX_OPTIONS", "").split()
-
 
 ####################################
 # PROGRESSIVE WEB APP OPTIONS
