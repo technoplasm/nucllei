@@ -211,3 +211,13 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 
 添付系の配備設定は **workspace settings「ファイル」タブ(旧 Documents — 008f34c60 で改称)** に集約
 (`GET/POST /api/v1/configs/attachment`、RuntimeConfig = env > UI 保存 > 既定)。
+
+**ライセンス画面(設定 > ライセンス)の記載方針(2026-07-17 決定、2098d81f9)**:
+UI に載せるのは「配布物に実体が同梱され、表記義務があるもの」だけ —
+① Upstream License = Open WebUI BSD-3-Clause 全文(`LICENSE.open-webui` を ?raw で取り込み。
+文字列リテラル埋め込みはカラム 0 本文がエディタのインデント検出を壊すため禁止)、
+② Third-Party Licenses = フォント(OFL-1.1)のみ。licenses.json から自動抽出(license が
+OFL で始まる frontend パッケージ)なのでフォント入れ替えに追従する。
+MIT/BSD/Apache 等の全列挙はしない(義務は「配布物へのライセンス文同梱」であり UI 掲示ではない。
+ソース同梱で充足、オンプレ配備は配布が組織内で完結)。見出しは翻訳しない。
+licenses.json の再生成は**素の venv で**(generate_licenses.py の注意書き参照)。
