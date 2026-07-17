@@ -77,6 +77,10 @@ dependencies = [
     # だけ(air-gapped イメージに実体を載せる)。xlsx→シート別 CSV 等の型別ポリシーは prism が手前で処理。
     # extra は絞らない([all])。langchain ローダ群(unstructured/networkx/docx2txt/pypdf/ftfy/nltk)は撤去。
     "markitdown[all]",
+    # 配備層 Function 向けの PDF ラスタライズ(llens pdf_vision 等)。pip のみで完結し
+    # poppler 等の system deps を要らない pdfium バインディング。markitdown と同じ
+    # 「同梱するだけ・fork は画像化コードを持たない」の位置づけ。
+    "pypdfium2==4.30.1",
     "fpdf2==2.8.2",
     "pymdown-extensions==10.14.2",
     "python-pptx==1.0.0",
