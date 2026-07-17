@@ -36,7 +36,12 @@
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
 	import { toast } from 'svelte-sonner';
-	import { getChatById, getChatsByFolderId, importChat, updateChatFolderIdById } from '$lib/apis/chats';
+	import {
+		getChatById,
+		getChatsByFolderId,
+		importChat,
+		updateChatFolderIdById
+	} from '$lib/apis/chats';
 	import RecursiveFolder from './RecursiveFolder.svelte';
 	import ChatItem from './ChatItem.svelte';
 	import FolderMenu from './Folders/FolderMenu.svelte';

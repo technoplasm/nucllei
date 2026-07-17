@@ -74,7 +74,10 @@
 			// append の合間に自分のアップロードで並びが変わりうる — 同一 id は keyed each を
 			// 壊すので除外(Files.svelte と同じガード)
 			files = append
-				? [...files, ...res.items.filter((item: { id: string }) => !files.some((f) => f.id === item.id))]
+				? [
+						...files,
+						...res.items.filter((item: { id: string }) => !files.some((f) => f.id === item.id))
+					]
 				: res.items;
 			total = res.total;
 		}

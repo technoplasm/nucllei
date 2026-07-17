@@ -420,7 +420,6 @@
 					>
 						<span class="i-lucide-menu size-5 block m-auto self-center"></span>
 					</button>
-
 				</div>
 
 				<div class="px-1.5 flex justify-center text-content mt-0.5">

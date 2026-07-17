@@ -29,7 +29,10 @@ self.onmessage = async (event) => {
 			self.postMessage({ status: 'init:complete' });
 		} catch (error) {
 			isInitialized = false; // Ensure it's marked as false on failure
-			self.postMessage({ status: 'init:error', error: error instanceof Error ? error.message : `${error}` });
+			self.postMessage({
+				status: 'init:error',
+				error: error instanceof Error ? error.message : `${error}`
+			});
 		}
 	}
 

@@ -155,7 +155,10 @@
 						}}
 					>
 						<Tooltip content={onAddLabel}>
-							<button class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto" aria-label={onAddLabel}>
+							<button
+								class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto"
+								aria-label={onAddLabel}
+							>
 								<span class="i-lucide-plus size-3 block"></span>
 							</button>
 						</Tooltip>

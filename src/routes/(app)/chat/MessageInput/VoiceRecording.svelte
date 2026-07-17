@@ -179,7 +179,10 @@
 		mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
 		mediaRecorder.onstop = async () => {
 			console.log('Recording stopped');
-			if ($config?.audio?.stt?.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			if (
+				$config?.audio?.stt?.engine === 'web' ||
+				($settings?.audio?.stt?.engine ?? '') === 'web'
+			) {
 				audioChunks = [];
 			} else {
 				if (confirmed) {

@@ -1,7 +1,7 @@
 ---
 name: 大容量ファイル処理
-description: "巨大な添付ファイルを、中身を主コンテキストに展開せずに処理するワークフロー。『large-file-gate』のシステム指示が添付の本文を context に入れていない (または docling 抽出が空) と file_id 付きで告知した時、または巨大な CSV/Excel/PDF/ログ等を全文を会話に出さずに集計・要約・抽出したい時に使う。該当したら作業を始める前に必ず load_skill で本 skill の全文をロードし、その手順に従うこと。"
-tool_ids: ["sandbox", "subagent"]
+description: '巨大な添付ファイルを、中身を主コンテキストに展開せずに処理するワークフロー。『large-file-gate』のシステム指示が添付の本文を context に入れていない (または docling 抽出が空) と file_id 付きで告知した時、または巨大な CSV/Excel/PDF/ログ等を全文を会話に出さずに集計・要約・抽出したい時に使う。該当したら作業を始める前に必ず load_skill で本 skill の全文をロードし、その手順に従うこと。'
+tool_ids: ['sandbox', 'subagent']
 ---
 
 # 大容量ファイル処理 (中身を context に出さずに扱う)
