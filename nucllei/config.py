@@ -1216,6 +1216,30 @@ ATTACHMENT_MAX_SIZE = RuntimeConfig(
     ),
 )
 
+# llens: 添付画像のクライアント側縮小。長辺がこの px を超える画像はアップロード前に
+# アスペクト比維持で収まるよう縮小される(MIME は維持)。未設定/0 = 縮小しない。
+ATTACHMENT_IMAGE_MAX_DIMENSION = RuntimeConfig(
+    "ATTACHMENT_IMAGE_MAX_DIMENSION",
+    "attachment.image_max_dimension",
+    (
+        int(os.environ.get("ATTACHMENT_IMAGE_MAX_DIMENSION"))
+        if os.environ.get("ATTACHMENT_IMAGE_MAX_DIMENSION")
+        else None
+    ),
+)
+
+# llens: 長文ペーストの .txt ファイル化閾値(文字数)。ユーザー設定
+# 「Paste Large Text as File」が ON のときだけ効く。
+PASTED_TEXT_CHARACTER_LIMIT = RuntimeConfig(
+    "PASTED_TEXT_CHARACTER_LIMIT",
+    "attachment.pasted_text_character_limit",
+    (
+        int(os.environ.get("PASTED_TEXT_CHARACTER_LIMIT"))
+        if os.environ.get("PASTED_TEXT_CHARACTER_LIMIT")
+        else 1000
+    ),
+)
+
 # 受け入れ拡張子の whitelist(小文字・ドット無し、カンマ区切り env)。空 = 全許可(非破壊の既定)。
 ATTACHMENT_ALLOWED_EXTENSIONS = RuntimeConfig(
     "ATTACHMENT_ALLOWED_EXTENSIONS",

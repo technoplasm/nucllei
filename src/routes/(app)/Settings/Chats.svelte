@@ -114,14 +114,7 @@
 		},
 		{
 			title: 'File',
-			rows: [
-				{
-					key: 'imageCompression',
-					label: 'Image Compression',
-					type: 'switch',
-					init: () => $settings.imageCompression ?? false
-				}
-			]
+			rows: []
 		}
 	];
 
@@ -136,12 +129,6 @@
 		}
 	};
 
-	// 画像圧縮の上限サイズ(Image Compression 有効時のみ表示)
-	let imageCompressionSize = $state<{ width: string; height: string }>({
-		width: '',
-		height: ''
-	});
-
 	// チャット背景画像(最下部の独立ボタン)
 	let backgroundImageUrl = $state<string | null>(null);
 	let inputFiles = $state<FileList | null>(null);
@@ -154,7 +141,6 @@
 			}
 		}
 
-		imageCompressionSize = $settings.imageCompressionSize ?? { width: '', height: '' };
 		backgroundImageUrl = $settings.backgroundImageUrl ?? null;
 
 		loaded = true;
@@ -215,31 +201,6 @@
 							</label>
 						{/if}
 					{/each}
-
-					{#if section.title === 'File' && values.imageCompression}
-						<div class=" py-1 flex w-full justify-between items-center text-xs">
-							<div class=" self-center text-sm">{$i18n.t('Image Max Compression Size')}</div>
-
-							<div class="flex items-center gap-1">
-								<input
-									bind:value={imageCompressionSize.width}
-									onchange={() => saveSettings({ imageCompressionSize })}
-									type="number"
-									class="w-20 px-2 py-0.5 bg-surface-muted rounded-xs outline-hidden text-center"
-									min="0"
-									placeholder="Width"
-								/>x
-								<input
-									bind:value={imageCompressionSize.height}
-									onchange={() => saveSettings({ imageCompressionSize })}
-									type="number"
-									class="w-20 px-2 py-0.5 bg-surface-muted rounded-xs outline-hidden text-center"
-									min="0"
-									placeholder="Height"
-								/>
-							</div>
-						</div>
-					{/if}
 				</div>
 			{/each}
 

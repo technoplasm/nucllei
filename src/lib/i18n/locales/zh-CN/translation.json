@@ -326,8 +326,6 @@
 	"Host": "主机",
 	"How can I help you today?": "有什么我能帮您的吗？",
 	"ID": "ID",
-	"Image Compression": "图像压缩",
-	"Image Max Compression Size": "图像压缩后最大分辨率",
 	"Images": "图像",
 	"Import Chats": "导入对话记录",
 	"Import Config from JSON File": "导入 JSON 文件中的配置信息",

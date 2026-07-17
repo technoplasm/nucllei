@@ -19,11 +19,7 @@
 	import { blobToFile, compressImage, extractCurlyBraceWords } from '$lib/utils';
 	import { uploadFile, deleteFileById, processFileById } from '$lib/apis/files';
 
-	import {
-		WEBUI_API_BASE_URL,
-		PASTED_TEXT_CHARACTER_LIMIT,
-		DEFAULT_MODEL_IMAGE_URL
-	} from '$lib/constants';
+	import { WEBUI_API_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
@@ -211,26 +207,24 @@
 		files = [...files, fileItem];
 
 		try {
-			// 圧縮設定(既存挙動を維持)は dataURL 経由で適用し、file に戻してからアップロード
+			// llens: 画像縮小は配備設定(ATTACHMENT_IMAGE_MAX_DIMENSION → config.file.
+			// image_max_dimension)。長辺が上限を超える画像だけ dataURL 経由で縮小
+			// (MIME 維持)し、file に戻してからアップロード
 			let uploadTarget = file;
 
-			if ($settings?.imageCompression ?? false) {
-				const width = $settings?.imageCompressionSize?.width ?? null;
-				const height = $settings?.imageCompressionSize?.height ?? null;
+			const maxDimension = $config?.file?.image_max_dimension ?? null;
+			if (maxDimension) {
+				const dataUrl = await new Promise((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => resolve(reader.result);
+					reader.onerror = reject;
+					reader.readAsDataURL(file);
+				});
 
-				if (width || height) {
-					const dataUrl = await new Promise((resolve, reject) => {
-						const reader = new FileReader();
-						reader.onload = () => resolve(reader.result);
-						reader.onerror = reject;
-						reader.readAsDataURL(file);
-					});
-
-					const compressedUrl = await compressImage(dataUrl, width, height);
-					if (compressedUrl !== dataUrl) {
-						const compressedBlob = await (await fetch(compressedUrl)).blob();
-						uploadTarget = blobToFile(compressedBlob, file.name);
-					}
+				const compressedUrl = await compressImage(dataUrl, maxDimension, file.type);
+				if (compressedUrl !== dataUrl) {
+					const compressedBlob = await (await fetch(compressedUrl)).blob();
+					uploadTarget = blobToFile(compressedBlob, file.name);
 				}
 			}
 
@@ -821,7 +815,9 @@
 														if ($settings?.largeTextAsFile ?? false) {
 															const text = clipboardData.getData('text/plain');
 
-															if (text.length > PASTED_TEXT_CHARACTER_LIMIT) {
+															if (
+																text.length > ($config?.file?.pasted_text_character_limit ?? 1000)
+															) {
 																e.preventDefault();
 																const blob = new Blob([text], { type: 'text/plain' });
 																const file = new File([blob], `Pasted_Text_${Date.now()}.txt`, {

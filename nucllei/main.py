@@ -113,6 +113,8 @@ from nucllei.config import (
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_MAX_SIZE,
     ATTACHMENT_ALLOWED_EXTENSIONS,
+    ATTACHMENT_IMAGE_MAX_DIMENSION,
+    PASTED_TEXT_CHARACTER_LIMIT,
     ATTACHMENT_FUNCTION_ID,
     TIKTOKEN_ENCODING_NAME,
     # Retrieval (Web Search)
@@ -279,8 +281,8 @@ print(
 ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚══════╝╚══════╝╚═╝
 
 
-Nucllei v{VERSION}
-Forked from Open WebUI v0.6.5 (https://github.com/open-webui/open-webui)
+Nucllei {VERSION}
+Forked from Open WebUI v0.6.5
 """
 )
 
@@ -442,6 +444,8 @@ app.state.config.ATTACHMENT_MAX_SIZE = ATTACHMENT_MAX_SIZE
 app.state.config.ATTACHMENT_MAX_COUNT = ATTACHMENT_MAX_COUNT
 app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
 app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
+app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION = ATTACHMENT_IMAGE_MAX_DIMENSION
+app.state.config.PASTED_TEXT_CHARACTER_LIMIT = PASTED_TEXT_CHARACTER_LIMIT
 
 
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
@@ -1010,6 +1014,8 @@ async def get_app_config(request: Request):
                     "max_size": app.state.config.ATTACHMENT_MAX_SIZE,
                     "max_count": app.state.config.ATTACHMENT_MAX_COUNT,
                     "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
+                    "image_max_dimension": app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION,
+                    "pasted_text_character_limit": app.state.config.PASTED_TEXT_CHARACTER_LIMIT,
                 },
                 "permissions": {**app.state.config.USER_PERMISSIONS},
             }

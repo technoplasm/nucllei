@@ -206,62 +206,34 @@ export const canvasPixelTest = () => {
 	return true;
 };
 
-export const compressImage = async (imageUrl, maxWidth, maxHeight) => {
+export const compressImage = async (
+	imageUrl: string,
+	maxDimension: number,
+	mimeType: string = 'image/png'
+): Promise<string> => {
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		img.onload = () => {
-			const canvas = document.createElement('canvas');
-			let width = img.width;
-			let height = img.height;
-
-			// Maintain aspect ratio while resizing
-
-			if (maxWidth && maxHeight) {
-				// Resize with both dimensions defined (preserves aspect ratio)
-
-				if (width <= maxWidth && height <= maxHeight) {
-					resolve(imageUrl);
-					return;
-				}
-
-				if (width / height > maxWidth / maxHeight) {
-					height = Math.round((maxWidth * height) / width);
-					width = maxWidth;
-				} else {
-					width = Math.round((maxHeight * width) / height);
-					height = maxHeight;
-				}
-			} else if (maxWidth) {
-				// Only maxWidth defined
-
-				if (width <= maxWidth) {
-					resolve(imageUrl);
-					return;
-				}
-
-				height = Math.round((maxWidth * height) / width);
-				width = maxWidth;
-			} else if (maxHeight) {
-				// Only maxHeight defined
-
-				if (height <= maxHeight) {
-					resolve(imageUrl);
-					return;
-				}
-
-				width = Math.round((maxHeight * width) / height);
-				height = maxHeight;
+			// 長辺が maxDimension に収まっていれば無加工
+			if (Math.max(img.width, img.height) <= maxDimension) {
+				resolve(imageUrl);
+				return;
 			}
 
+			const scale = maxDimension / Math.max(img.width, img.height);
+			const width = Math.round(img.width * scale);
+			const height = Math.round(img.height * scale);
+
+			const canvas = document.createElement('canvas');
 			canvas.width = width;
 			canvas.height = height;
 
 			const context = canvas.getContext('2d');
 			context.drawImage(img, 0, 0, width, height);
 
-			// Get compressed image URL
-			const compressedUrl = canvas.toDataURL();
-			resolve(compressedUrl);
+			// MIME は維持する(旧実装は無引数 toDataURL で常に PNG 化 — JPEG 写真が
+			// 縮小したのに肥大化していた)。ブラウザ未対応の形式は PNG フォールバック。
+			resolve(canvas.toDataURL(mimeType, 0.9));
 		};
 		img.onerror = (error) => reject(error);
 		img.src = imageUrl;

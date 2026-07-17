@@ -132,8 +132,6 @@ type Settings = {
 	copyFormatted?: boolean;
 	expandCodeBlocks?: boolean;
 	expandDetails?: boolean;
-	imageCompression?: boolean;
-	imageCompressionSize?: { width: string; height: string };
 	voiceInterruption?: boolean;
 	hapticFeedback?: boolean;
 	backgroundImageUrl?: string | null;
@@ -250,6 +248,8 @@ type Config = {
 		max_size?: number | null;
 		max_count?: number | null;
 		allowed_extensions?: string[];
+		image_max_dimension?: number | null;
+		pasted_text_character_limit?: number;
 	};
 	permissions?: UserPermissions;
 };
