@@ -197,7 +197,7 @@ dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --forwarded-
 licenses = "python scripts/generate_licenses.py"
 # deploy の入口(technoplasm-app `make tag` の移植): ガード → 採番 → tag → push(既定)
 # → CI が ghcr.io/technoplasm/nucllei:<tag> を出す。`uv run task tag pre` / `tag release`。
-tag = "python scripts/cut_tag.py"
+tag = "python scripts/tag.py"
 
 # nucllei CLI(typer app: `nucllei:app`)への汎用エントリ。任意のサブコマンドを
 # 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
