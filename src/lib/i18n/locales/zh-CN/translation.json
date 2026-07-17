@@ -610,6 +610,7 @@
 	"Tags Generation": "标签生成",
 	"Tags Generation Prompt": "标签生成提示词",
 	"Talk to model": "与模型交谈",
+	"Talking to {{modelName}}": "正在与 {{modelName}} 交谈",
 	"Tap to interrupt": "点击以中断",
 	"Tasks": "任务",
 	"Text-to-Speech Engine": "文本转语音引擎",

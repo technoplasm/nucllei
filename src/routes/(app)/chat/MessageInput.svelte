@@ -157,12 +157,6 @@
 					return null;
 				}
 
-				console.log('File upload completed:', {
-					id: uploadedFile.id,
-					name: fileItem.name,
-					collection: uploadedFile?.meta?.collection_name
-				});
-
 				if (uploadedFile.error) {
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
@@ -349,23 +343,11 @@
 	let showFileLibraryModal = $state(false);
 
 	const inputFilesHandler = async (inputFiles) => {
-		console.log('Input files handler called with:', inputFiles);
 		inputFiles.forEach((file) => {
-			console.log('Processing file:', {
-				name: file.name,
-				type: file.type,
-				size: file.size,
-				extension: file.name.split('.').at(-1)
-			});
-
 			if (
 				($config?.file?.max_size ?? null) !== null &&
 				file.size > ($config?.file?.max_size ?? 0) * 1024 * 1024
 			) {
-				console.log('File exceeds max size limit:', {
-					fileSize: file.size,
-					maxSize: ($config?.file?.max_size ?? 0) * 1024 * 1024
-				});
 				toast.error(
 					$i18n.t(`File size should not exceed {{maxSize}} MB.`, {
 						maxSize: $config?.file?.max_size
@@ -390,7 +372,6 @@
 
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
-			console.log('Escape');
 			dragged = false;
 		}
 	};
@@ -412,12 +393,10 @@
 
 	const onDrop = async (e) => {
 		e.preventDefault();
-		console.log(e);
 
 		if (e.dataTransfer?.files) {
 			const inputFiles = Array.from(e.dataTransfer?.files);
 			if (inputFiles && inputFiles.length > 0) {
-				console.log(inputFiles);
 				inputFilesHandler(inputFiles);
 			}
 		}
@@ -445,7 +424,6 @@
 	});
 
 	onDestroy(() => {
-		console.log('destroy');
 		window.removeEventListener('keydown', handleKeyDown);
 
 		const dropzoneElement = document.getElementById('chat-container');
@@ -476,7 +454,7 @@
 							class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
 						>
 							<button
-								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
+								class=" bg-surface-raised border border-line p-1.5 rounded-full pointer-events-auto"
 								aria-label={$i18n.t('Scroll to bottom')}
 								onclick={() => {
 									autoScroll = true;
@@ -501,11 +479,10 @@
 										alt="model profile"
 										class="size-3.5 max-w-[28px] object-cover rounded-full"
 										src={$models.find((model) => model.id === atSelectedModel.id)?.info?.meta
-											?.profile_image_url ??
-											($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
+											?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
 									/>
-									<div class="translate-y-[0.5px]">
-										Talking to <span class=" font-medium">{atSelectedModel.name}</span>
+									<div class="translate-y-[0.5px] font-medium">
+										{$i18n.t('Talking to {{modelName}}', { modelName: atSelectedModel.name })}
 									</div>
 								</div>
 								<div>
@@ -596,7 +573,7 @@
 							}}
 						>
 							<div
-								class="flex-1 flex flex-col relative w-full shadow-[0_2px_12px_-4px_rgba(0,0,0,0.12)] rounded-3xl border border-gray-100 dark:border-gray-850 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-800 focus-within:dark:border-gray-800 transition px-1 bg-surface-raised text-content"
+								class="flex-1 flex flex-col relative w-full shadow-[0_2px_12px_-4px_rgba(0,0,0,0.12)] rounded-3xl border border-line px-1 bg-surface-raised text-content"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#if files.length > 0}
@@ -620,13 +597,9 @@
 														{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
 															<Tooltip
 																className=" absolute top-1 left-1"
-																content={$i18n.t('{{ models }}', {
-																	models: [
-																		...(atSelectedModel ? [atSelectedModel] : selectedModels)
-																	]
-																		.filter((id) => !visionCapableModels.includes(id))
-																		.join(', ')
-																})}
+																content={[...(atSelectedModel ? [atSelectedModel] : selectedModels)]
+																	.filter((id) => !visionCapableModels.includes(id))
+																	.join(', ')}
 															>
 																<span class="i-lucide-triangle-alert size-4 block text-yellow-300"
 																></span>
@@ -635,7 +608,7 @@
 													</div>
 													<div class=" absolute -top-1 -right-1">
 														<button
-															class=" bg-white text-black border border-white rounded-full group-hover:visible invisible transition"
+															class=" bg-white text-black border border-white rounded-full group-hover:visible invisible"
 															type="button"
 															aria-label={$i18n.t('Remove file')}
 															onclick={async () => {
@@ -692,7 +665,6 @@
 											// Check if Ctrl + R is pressed
 											if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
 												e.preventDefault();
-												console.log('regenerate');
 
 												const regenerateButton = [
 													...document.getElementsByClassName('regenerate-response-button')
@@ -711,8 +683,6 @@
 												const editButton = [
 													...document.getElementsByClassName('edit-user-message-button')
 												]?.at(-1);
-
-												console.log(userMessageElement);
 
 												userMessageElement.scrollIntoView({ block: 'center' });
 												editButton?.click();
@@ -784,8 +754,6 @@
 															? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
 															: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
 
-													console.log('Enter pressed:', enterPressed);
-
 													if (enterPressed) {
 														e.preventDefault();
 													}
@@ -820,7 +788,6 @@
 											}
 
 											if (e.key === 'Escape') {
-												console.log('Escape');
 												atSelectedModel = undefined;
 											}
 										}}
@@ -884,9 +851,9 @@
 											}}
 										>
 											<button
-												class="bg-transparent hover:bg-gray-100 text-content dark:hover:bg-gray-800 transition rounded-full p-1.5 outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-surface-hover text-content rounded-full p-1.5 outline-hidden focus:outline-hidden"
 												type="button"
-												aria-label="More"
+												aria-label={$i18n.t('More')}
 											>
 												<span class="i-lucide-plus size-5 block"></span>
 											</button>
@@ -900,7 +867,7 @@
 											<Tooltip content={$i18n.t('Record voice')}>
 												<button
 													id="voice-input-button"
-													class=" text-content-muted hover:text-content transition rounded-full p-1.5 mr-0.5 self-center"
+													class=" text-content-muted hover:text-content rounded-full p-1.5 mr-0.5 self-center"
 													type="button"
 													onclick={async () => {
 														try {
@@ -928,7 +895,7 @@
 															toast.error($i18n.t('Permission denied when accessing microphone'));
 														}
 													}}
-													aria-label="Voice Input"
+													aria-label={$i18n.t('Record voice')}
 												>
 													<span class="i-lucide-mic size-5 block translate-y-[0.5px]"></span>
 												</button>
@@ -939,7 +906,7 @@
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Stop')}>
 													<button
-														class="bg-white hover:bg-gray-100 text-content dark:bg-gray-700 dark:hover:bg-gray-800 transition rounded-full p-1.5"
+														class="bg-secondary hover:bg-secondary-hover text-secondary-content rounded-full p-1.5"
 														aria-label={$i18n.t('Stop')}
 														onclick={() => {
 															stopResponse();
@@ -954,7 +921,7 @@
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Call')}>
 													<button
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-1.5 self-center"
+														class=" bg-primary hover:bg-primary-hover text-primary-content rounded-full p-1.5 self-center"
 														type="button"
 														onclick={async () => {
 															if (selectedModels.length > 1) {
@@ -1006,7 +973,7 @@
 																);
 															}
 														}}
-														aria-label="Call"
+														aria-label={$i18n.t('Call')}
 													>
 														<span class="i-lucide-headphones size-5 block"></span>
 													</button>
@@ -1018,8 +985,8 @@
 													<button
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0)
-															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 text-content dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
+															? 'bg-primary hover:bg-primary-hover text-primary-content'
+															: 'bg-secondary text-content-subtle'} rounded-full p-1.5 self-center"
 														type="submit"
 														aria-label={$i18n.t('Send message')}
 														disabled={prompt === '' && files.length === 0}
