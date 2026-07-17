@@ -705,6 +705,52 @@ def test_followup_preserves_parallel_tool_calls(monkeypatch):
     assert len(tool_invocations) == 2
 
 
+def test_followup_reinjects_tool_result_images_as_user_message(monkeypatch):
+    """tool 結果の画像(list 戻り値から files へ抽出された data:image/*)は、
+    継続リクエストで role:tool の直後に image_url を持つ user メッセージとして
+    再投入される(role:tool の content は文字列契約で画素を運べない —
+    view_image 等「モデル自身が画像を見る」tool の経路)。非画像 data URL は対象外。"""
+    image_url = "data:image/png;base64,QUJD"
+
+    async def get_weather(**kwargs):
+        return ["天気図を取得した", image_url, "data:application/pdf;base64,QUJD"]
+
+    spec = {
+        "name": "get_weather",
+        "description": "天気を返す",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            extra_tools={"get_weather": {"spec": spec, "callable": get_weather}},
+        )
+    )
+    assert len(completion_calls) == 1
+    msgs = completion_calls[0]["messages"]
+
+    tool_msgs = _tool_messages(completion_calls[0])
+    assert len(tool_msgs) == 1
+    assert json.loads(tool_msgs[0]["content"]) == ["天気図を取得した"]
+    # 画像は data URL ごと content に残さない(files へ抽出済み)
+    assert image_url not in tool_msgs[0]["content"]
+
+    user_msg = msgs[msgs.index(tool_msgs[0]) + 1]
+    assert user_msg["role"] == "user"
+    injected = [
+        p["image_url"]["url"]
+        for p in user_msg["content"]
+        if p.get("type") == "image_url"
+    ]
+    assert injected == [image_url]
+
+
 def test_reasoning_not_leaked_into_followup_content(monkeypatch):
     """reasoning はモデルへの継続リクエストの assistant content に漏らさない(#18-2)。
 

@@ -89,6 +89,10 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       二重になる。
     - tool_calls は OpenAI 形 {id, type, function} だけを綴じ込む(llens #20):
       render(表示ディスクリプタ)・index 等の内部キーを漏らさない。
+    - tool 結果の画像(results[].files の data:image/* — middleware が list 戻り値
+      から抽出)は、tool メッセージ群の直後に image_url を持つ user メッセージとして
+      再投入する: role:tool の content は文字列契約で画素を運べないため。
+      view_image / 画像生成系 tool が「モデル自身が画像を見る」ための経路。
     """
     messages = []
 
@@ -118,6 +122,26 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                         "role": "tool",
                         "tool_call_id": result["tool_call_id"],
                         "content": result["content"],
+                    }
+                )
+
+            result_images = [
+                url
+                for result in block.get("results", [])
+                for url in (result.get("files") or [])
+                if isinstance(url, str) and url.startswith("data:image/")
+            ]
+            if result_images:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "(直前の tool 結果の画像)"},
+                            *(
+                                {"type": "image_url", "image_url": {"url": url}}
+                                for url in result_images
+                            ),
+                        ],
                     }
                 )
             temp_blocks = []
