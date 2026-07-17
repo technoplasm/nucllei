@@ -163,27 +163,22 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	<Markdown
-		{id}
-		{content}
-		{model}
-		{save}
-		{sourceIds}
-		{onSourceClick}
-		{onTaskClick}
-		{onUpdate}
-	/>
-</div>
+	<Markdown {id} {content} {model} {save} {sourceIds} {onSourceClick} {onTaskClick} {onUpdate} />
 
-{#if floatingButtons && model}
-	<FloatingButtons
-		bind:this={floatingButtonsElement}
-		{id}
-		model={model?.id}
-		messages={createMessagesList(history, id)}
-		onAdd={({ modelId, parentId, messages }) => {
-			onAddMessages({ modelId, parentId, messages });
-			closeFloatingButtons();
-		}}
-	/>
-{/if}
+	<!-- content div の中に置く(外に置くと space-y の親の下で :last-child 判定を壊し、
+	     最後のブロックにも margin が付く — tailwind v4 の space-y は
+	     `> :not(:last-child) { margin-bottom }` 実装)。absolute の位置基準は
+	     祖先の relative(#response-content-container)のままなので挙動は不変。 -->
+	{#if floatingButtons && model}
+		<FloatingButtons
+			bind:this={floatingButtonsElement}
+			{id}
+			model={model?.id}
+			messages={createMessagesList(history, id)}
+			onAdd={({ modelId, parentId, messages }) => {
+				onAddMessages({ modelId, parentId, messages });
+				closeFloatingButtons();
+			}}
+		/>
+	{/if}
+</div>

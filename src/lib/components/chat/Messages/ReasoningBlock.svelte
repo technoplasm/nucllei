@@ -79,7 +79,7 @@
 </script>
 
 <!-- 注意: ルートに space-y を置かない — ヘッダ tab は -mb-px で枠上辺に密着させる -->
-<div {id} class="w-full text-sm" bind:this={rootElement}>
+<div {id} class="w-full text-sm -ml-2" bind:this={rootElement}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<div
@@ -141,7 +141,7 @@
 			<div
 				class="border {toggleHover
 					? 'border-line-hover'
-					: 'border-line'} rounded-lg transition px-3 py-1.5 text-content"
+					: 'border-line'} rounded-lg transition px-3 py-2 text-content"
 				dir="auto"
 			>
 				<Markdown id={`${id}-reasoning`} {content} />

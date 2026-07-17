@@ -102,7 +102,7 @@
 </script>
 
 <!-- 注意: ルートに space-y を置かない — ヘッダ tab は -mb-px で枠上辺に密着させる -->
-<div {id} class="w-full text-sm" bind:this={rootElement}>
+<div {id} class="w-full text-sm -ml-2" bind:this={rootElement}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<div
@@ -155,7 +155,7 @@
 	{#if open}
 		<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 			<div class="border {toggleHover ? 'border-line-hover' : 'border-line'} rounded-lg transition">
-				<div class="px-2 py-1">
+				<div class="px-3 py-2">
 					{#if !hasArgs}
 						<div class="text-xs text-content-muted italic my-0.5 px-0.5">
 							{$i18n.t('No arguments')}
@@ -165,13 +165,13 @@
 					{:else}
 						{#each argDisplays as arg (arg.name)}
 							{#if arg.kind === 'scalar'}
-								<div class="text-s font-mono my-0.5 px-0.5" dir="ltr">
+								<div class="text-sm font-mono my-0.5 px-0.5" dir="ltr">
 									<span class="text-content-muted">{arg.name}:</span>
 									<span class="whitespace-pre-wrap">{arg.value}</span>
 								</div>
 							{:else}
-								<div class="text-content-muted text-s mt-1 mb-0.5 font-mono">
-									{arg.name}
+								<div class="text-content-muted text-sm mt-1 mb-0.5 font-mono">
+									{arg.name}:
 								</div>
 								<HljsCode
 									lang={arg.kind === 'code' ? (arg.language ?? 'plaintext') : 'json'}
@@ -205,7 +205,7 @@
 					<div
 						class="border-t {toggleHover
 							? 'border-line-hover'
-							: 'border-line'} transition px-2 py-1"
+							: 'border-line'} transition px-3 py-2"
 					>
 						{#if resultDisplay.kind === 'skill'}
 							<!-- load_skill の構造化結果(#35): 指示本文(markdown ハイライト)+ 導入 tool 一覧 -->
@@ -228,7 +228,7 @@
 								</div>
 							{/if}
 						{:else if resultDisplay.kind === 'text'}
-							<div class="text-s font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
+							<div class="text-sm font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
 								{resultDisplay.value}
 							</div>
 						{:else if resultDisplay.kind === 'code'}
