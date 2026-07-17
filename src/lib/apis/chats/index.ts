@@ -153,6 +153,8 @@ type AdminChatListOptions = {
 	model?: string;
 	updated_from?: number;
 	updated_to?: number;
+	// llens(#31): soft delete 済みチャットの扱い(未指定 = include)
+	deleted?: 'include' | 'exclude' | 'only';
 };
 
 export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
@@ -185,6 +187,9 @@ export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
 	}
 	if (options.updated_to != null) {
 		searchParams.append('updated_to', `${options.updated_to}`);
+	}
+	if (options.deleted) {
+		searchParams.append('deleted', options.deleted);
 	}
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {

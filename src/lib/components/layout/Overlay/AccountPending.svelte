@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { getAdminDetails, userSignOut } from '$lib/apis/auths';
 	import { onMount, tick, getContext } from 'svelte';
+	import { user } from '$lib/stores';
 
 	const i18n = getContext('i18n');
+
+	// llens(#31): pending(承認待ち)と disabled(無効化)で案内文言を分ける。
+	// 案内画面の本仕様は #59 — ここは role 分岐の最小実装。
+	$: isDisabled = $user?.role === 'disabled';
 
 	let adminDetails: { name?: string; email?: string } | null = null;
 
@@ -20,17 +25,29 @@
 	>
 		<div class="m-auto pb-10 flex flex-col justify-center">
 			<div class="max-w-md">
-				<div class="text-center dark:text-white text-2xl font-medium z-50">
-					{$i18n.t('Account Activation Pending')}<br />
-					{$i18n.t('Contact Admin for WebUI Access')}
-				</div>
+				{#if isDisabled}
+					<div class="text-center dark:text-white text-2xl font-medium z-50">
+						{$i18n.t('Account Disabled')}
+					</div>
 
-				<div class=" mt-4 text-center text-sm text-content w-full">
-					{$i18n.t('Your account status is currently pending activation.')}<br />
-					{$i18n.t(
-						'To access the WebUI, please reach out to the administrator. Admins can manage user statuses from the Admin Panel.'
-					)}
-				</div>
+					<div class=" mt-4 text-center text-sm text-content w-full">
+						{$i18n.t(
+							'Your account has been disabled. Please contact the administrator for details.'
+						)}
+					</div>
+				{:else}
+					<div class="text-center dark:text-white text-2xl font-medium z-50">
+						{$i18n.t('Account Activation Pending')}<br />
+						{$i18n.t('Contact Admin for WebUI Access')}
+					</div>
+
+					<div class=" mt-4 text-center text-sm text-content w-full">
+						{$i18n.t('Your account status is currently pending activation.')}<br />
+						{$i18n.t(
+							'To access the WebUI, please reach out to the administrator. Admins can manage user statuses from the Admin Panel.'
+						)}
+					</div>
+				{/if}
 
 				{#if adminDetails}
 					<div class="mt-4 text-sm font-medium text-center">

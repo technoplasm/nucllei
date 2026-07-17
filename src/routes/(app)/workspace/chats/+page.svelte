@@ -42,6 +42,8 @@
 	let selectedModel = $state('');
 	let dateFrom = $state('');
 	let dateTo = $state('');
+	// llens(#31): soft delete 済みチャットの扱い(既定 = 含めて表示、行に「削除済み」バッジ)
+	let deletedFilter = $state<'include' | 'exclude' | 'only'>('include');
 
 	// フィルタ連打時のフェッチ競合ガード(古い応答が後着で最新結果を上書きするのを防ぐ)
 	let fetchSeq = 0;
@@ -59,7 +61,8 @@
 			model: selectedModel !== '' ? selectedModel : undefined,
 			title: query !== '' ? query : undefined,
 			updated_from: dateFrom !== '' ? dayjs(dateFrom).startOf('day').unix() : undefined,
-			updated_to: dateTo !== '' ? dayjs(dateTo).endOf('day').unix() : undefined
+			updated_to: dateTo !== '' ? dayjs(dateTo).endOf('day').unix() : undefined,
+			deleted: deletedFilter !== 'include' ? deletedFilter : undefined
 		}).catch((err) => {
 			toast.error(`${err}`);
 			return null;
@@ -98,9 +101,10 @@
 	};
 
 	// 自分のチャットは通常ビュー(/c — サイドバー維持・編集可)で開く。
-	// 他人のは共有ビュー(/s — admin は ENABLE_ADMIN_CHAT_ACCESS 経由で閲覧のみ)。
+	// 他人のと削除済みは共有ビュー(/s — admin は ENABLE_ADMIN_CHAT_ACCESS 経由で閲覧のみ。
+	// 削除済みは /c だと本人向け取得から除外されて開けないため自分のでも /s で開く — #31)。
 	const openChat = (chat: any) => {
-		goto(chat.user_id === $user?.id ? `/c/${chat.id}` : `/s/${chat.id}`);
+		goto(chat.user_id === $user?.id && !chat.deleted_at ? `/c/${chat.id}` : `/s/${chat.id}`);
 	};
 
 	const formatTimestamp = (ts: number | null | undefined) =>
@@ -202,6 +206,21 @@
 				{/each}
 			</select>
 
+			<select
+				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {deletedFilter !==
+				'include'
+					? ''
+					: 'text-content-subtle'}"
+				bind:value={deletedFilter}
+				onchange={() => {
+					fetchChats(false);
+				}}
+			>
+				<option class=" text-content" value="include">{$i18n.t('Include deleted')}</option>
+				<option class=" text-content" value="exclude">{$i18n.t('Exclude deleted')}</option>
+				<option class=" text-content" value="only">{$i18n.t('Deleted only')}</option>
+			</select>
+
 			<div class="flex items-center gap-1">
 				<input
 					type="date"
@@ -283,6 +302,12 @@
 											<span
 												class="px-1.5 py-0.5 rounded-full bg-surface-muted text-[10px] font-normal text-content-muted shrink-0"
 												>{$i18n.t('Pinned')}</span
+											>
+										{/if}
+										{#if chat.deleted_at}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-red-500/20 text-[10px] font-normal text-red-700 dark:text-red-200 shrink-0"
+												>{$i18n.t('Deleted')}</span
 											>
 										{/if}
 									</div>

@@ -234,6 +234,8 @@
 										<option value="pending"> {$i18n.t('pending')} </option>
 										<option value="user"> {$i18n.t('user')} </option>
 										<option value="admin"> {$i18n.t('admin')} </option>
+										<!-- llens(#31): 無効化 = hard delete の代替(チャット証憑を保全したままアクセス遮断) -->
+										<option value="disabled"> {$i18n.t('disabled')} </option>
 									</select>
 								</div>
 							</div>

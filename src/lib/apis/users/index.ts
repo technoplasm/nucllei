@@ -219,8 +219,8 @@ export const getUserMetaFields = async () => {
 	return res;
 };
 
-// llens(#69): deleteUserById は撤去 — user 削除は hard delete(チャット物理削除・file 孤児化)
-// なので FE から導線を出さない。無効化は role=pending で行う。
+// llens(#69→#31): deleteUserById は撤去済み。user の hard delete は BE エンドポイントごと
+// 撤去された(チャット証憑の保全)。無効化は role=disabled で行う(全 API 遮断 + 案内画面)。
 
 type UserUpdateForm = {
 	profile_image_url: string;

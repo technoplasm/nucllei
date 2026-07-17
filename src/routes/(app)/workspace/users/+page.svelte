@@ -220,8 +220,8 @@
 					<tbody>
 						{#each filteredUsers as user (user.id)}
 							<!-- 行クリック=編集モーダル(行末アイコンはチャットのみ — 2026-07-16)。
-							 削除導線は持たない: user 削除は hard delete(チャットも物理削除・file は孤児化)
-							     なので FE から出さず、無効化は編集で role=pending に落とす運用 -->
+							 削除導線は持たない: user の hard delete は BE ごと撤去済み(#31 — チャット証憑の保全)。
+							     無効化は編集で role=disabled にする(全 API 遮断 + 無効化案内画面) -->
 							<tr
 								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover"
 								onclick={() => {
@@ -250,7 +250,9 @@
 											? 'info'
 											: user.role === 'user'
 												? 'success'
-												: 'muted'}
+												: user.role === 'disabled'
+													? 'error'
+													: 'muted'}
 										content={$i18n.t(user.role)}
 									/>
 								</td>
