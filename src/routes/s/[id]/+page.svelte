@@ -11,7 +11,6 @@
 	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
 
 	import Messages from '$lib/components/chat/Messages.svelte';
-	import Navbar from '$lib/components/layout/Navbar.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import { getUserById, getUserSettings } from '$lib/apis/users';
@@ -29,7 +28,6 @@
 	let messagesContainerElement: HTMLDivElement;
 
 	// let chatId = $page.params.id;
-	let showModelSelector = false;
 	let selectedModels = [''];
 
 	let chat = null;
