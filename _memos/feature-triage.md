@@ -192,3 +192,22 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 | docker-compose | **撤去済み(#34)** | compose 全廃(ec3898e49)。配布は Docker(単一 Dockerfile)のみ |
 | PyPI 配布(hatch ビルド層) | **撤去済み(#34)** | Python 配布層を撤去(d4b1404f4)。pyproject は uv 依存管理専用 |
 | cypress(upstream E2E) | **撤去済み(#34)** | 一度も動いていない残骸(28ac9a59a)。E2E は Playwright(dev-environment.md) |
+
+## ユーザー設定(設定モーダル「チャット」)の棚卸し(2026-07-17 決定、#70)
+
+方針: **ユーザー個人の好みだけを設定モーダルに残し、配備ポリシーは workspace settings(admin)+ env に寄せる**。
+
+| 項目 | 判断 |
+|---|---|
+| Auto-Copy Response to Clipboard | **機能ごと撤去**(fb960aaac)。応答完了のたびクリップボードを上書きする挙動は危険で要らない |
+| iframe Sandbox Allow Same Origin / Forms | **撤去**(同上)。消費者ゼロの死に設定 — upstream の code artifacts 用で実行系は #11/#23 で撤去済み |
+| Haptic Feedback | 残す(モバイルでストリーミング中に振動) |
+| Call(音声通話) | **表示トグルを新設・既定 OFF**(`callEnabled`、見た目のみの制御)。ボイスセクションに配置。STT/TTS の配備レベル enable とは別軸 |
+| タイトル自動生成 OFF の挙動 | **仕様確定: OFF = LLM を呼ばず最初のユーザー発話をタイトルにする**(New Chat が並ぶのは辛い)。フォールバック emit が応答本文を流していた表示不整合は修正(fb960aaac) |
+| Always Collapse Code Blocks / Always Expand Details | **軸を「展開」に統一**(7f7373c3f): `expandCodeBlocks`(既定 ON)/ `expandDetails`(既定 OFF)。既定は互い違いで挙動不変。ラベルは「応答本文のコードブロック」「思考・ツール実行」と中身を明示(tool のコード表示と取り違えた実例より) |
+| Image Compression(per-user) | **廃止 → 配備設定へ**(a24ad3241): `ATTACHMENT_IMAGE_MAX_DIMENSION`(長辺 max px、未設定 = 縮小しない)。compressImage は MIME 維持に修理(旧実装は常に PNG 化で JPEG が肥大化) |
+| Paste Large Text as File(per-user) | **廃止 → 配備設定へ**(008f34c60): `PASTED_TEXT_CHARACTER_LIMIT`(文字数、未設定 = 変換しない)。閾値の単位は文字数を採用 |
+| 送信キー(Enter ⇄ Ctrl+Enter) | per-user のまま。**「+」メニューにその場切り替え + 送信ボタンのホバーに現在の割り当てを表示**(25e41b3cb)。送信ボタンは常時表示化 |
+
+添付系の配備設定は **workspace settings「ファイル」タブ(旧 Documents — 008f34c60 で改称)** に集約
+(`GET/POST /api/v1/configs/attachment`、RuntimeConfig = env > UI 保存 > 既定)。

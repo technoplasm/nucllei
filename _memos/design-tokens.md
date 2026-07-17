@@ -194,7 +194,9 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 > だが、値は fallback と同値の中立)ため、**生の `gray-*` クラスは常に中立 fallback に解決される**。
 > 旧記述の「v4 が同名 `--color-gray-N` を既定で先に定義するためフォールバックが効かない」は誤り。
 > v4 のクール gray が画面に出る経路は下記 prose 注入のみで、そこは `border-line!` で打ち消し済み。
-> 残る生 `gray-*`(2026-07-17 実測 467 = bg 372 / border 95、chat・legacy 帯に偏在)の意味トークン化は
+> 残る生 `gray-*`(2026-07-17 実測 467 = bg 372 / border 95、chat・legacy 帯に偏在 →
+> 同日 #70 A2-3/A2-4 消化後の実測 **347 = bg 277 / border 70**。routes/(app)/chat 配下はゼロ、
+> 残りは Messages 樹・サイドバー・common 帯)の意味トークン化は
 > **色の問題ではなくコード整理** — #70 C トラックの「触った画面はちゃんとやる」規律で消化し、
 > 独立 issue は持たない(#75 close)。「ボーダー色トークン化を独立セッションで」の旧・次の一手も同様に吸収。
 

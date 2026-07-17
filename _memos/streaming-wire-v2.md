@@ -25,6 +25,14 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
 - FE の消費者所有権: ストリーム読取は `completion-streams.ts`(モジュールレベル)が持ち、
   Chat コンポーネントは自 chat_id のハンドラを登録/解除するだけ。非表示チャットの
   イベントは +layout のフォールバック(done トースト・chat:title 反映)が受ける。
+- **改訂(2026-07-17、#70 C1)**: Chat.svelte は `src/routes/(app)/chat/Chat.svelte` へ
+  コロケート移動 + runes 化。純関数層を拡張(いずれも vitest で契約固定):
+  - `chat-events.ts applyMessageMutation` — status / task-cancelled / delta / files /
+    source(code_execution upsert)など「message の状態だけを変える」イベントの適用
+  - `chat-messages.ts buildWireMessages` — system 注入・画像 image_url 展開・tool 往復復元・
+    空 content フィルタの wire 組み立て
+  - `chat-messages.ts parseStopSequences` — stop 正規化(upstream の settings 側 stop で
+    TypeError になる潜在バグも解消)
 
 ## イベント規約(SSE data = 封筒 {chat_id, message_id, call_id?, data:{type, data}})
 

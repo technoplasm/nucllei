@@ -13,6 +13,9 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   例: @fontsource をバンドルするフォント追加は `pnpm add`)。テストは `npx vitest run`。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
+- **RuntimeConfig の追加は 2 点セット**(2026-07-17 に AttributeError で実害): `config.py` で
+  定義するだけでは足りず、`main.py` で import + `app.state.config.X = X` の明示登録が必要
+  (未登録だと参照時に `Config key not found`)。優先順位は env > DB(UI 保存)> 既定。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
   テストは `.venv/bin/pytest nucllei/test -q`(または repo ルートで `uv run pytest`)。
   **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
@@ -28,6 +31,15 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   は修理済み — 新しい portal を書くときは同じガードを)。
   (3) **svelte-sonner の Toaster は onMount で reset()(全 toast 消去)する** — ページの
   onMount 中に撃った toast は Toaster マウントの後始末で闇に消える(#70 B2 で実害)。
+  (4) **legacy → runes 変換の実行順の罠(2026-07-17、Chat.svelte で実害)**: legacy の `$:` は
+  「スクリプト全宣言の評価後・onMount より先」に走る。`$effect` に機械的に置き換えると
+  ①発火が onMount 後にずれて init 順序前提(例: loadChat 同期先頭の chatId.set() を
+  onMount の !$chatId ガードが見る)が壊れる、②初期実行をスクリプト途中の直接呼び出しに
+  すると後方 const の TDZ を踏む。対処 = 初期値はスクリプト**末尾**の直接呼び出しで処理し、
+  以後の変化だけ `$effect`(+ 前回値ガードで初回 effect の二重発火防止)。
+  (5) **`$: fn()` の依存は文中で「読んだ」変数だけ**(書き込みは依存にならない)。
+  `$effect` 化で関数呼び出しの中身まで追跡されて発火過多になるときは、依存を
+  `void x;` で明示し本体は先頭 `await tick()` などで追跡外に置く(Selector.resetView が実例)。
   初期ロード直後に出す toast は root layout onMount 末尾 + setTimeout 遅延で発火する
   (失効通知の実例が `src/routes/+layout.svelte`)。
 - **Svelte 5(互換モード)テンプレート式は「マークアップに直接書かれた変数」しか追跡しない**
