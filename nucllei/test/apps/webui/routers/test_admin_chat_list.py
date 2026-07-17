@@ -140,6 +140,39 @@ class TestAdminChatList(AbstractPostgresTest):
         assert body["total"] == 2
         assert {i["title"] for i in body["items"]} == {"theirs_a", "theirs_b"}
 
+    def test_list_deleted_filter(self):
+        # llens(#31): soft delete 済みは既定で一覧に出る(deleted_at 付き)。exclude/only で絞れる
+        self._insert_chat(title="kept")
+        removed = self._insert_chat(title="removed")
+        assert self.chats.delete_chat_by_id(removed.id)
+
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(self.create_url("/admin/list"))
+            body = r.json()
+            assert body["total"] == 2
+            by_title = {i["title"]: i for i in body["items"]}
+            assert by_title["removed"]["deleted_at"] is not None
+            assert by_title["kept"]["deleted_at"] is None
+
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"deleted": "exclude"})
+            )
+            body = r.json()
+            assert body["total"] == 1
+            assert body["items"][0]["title"] == "kept"
+
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"deleted": "only"})
+            )
+            body = r.json()
+            assert body["total"] == 1
+            assert body["items"][0]["title"] == "removed"
+
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"deleted": "bogus"})
+            )
+            assert r.status_code == 400, r.text
+
     def test_list_title_filter_case_insensitive(self):
         self._insert_chat(title="Weekly Report 2026")
         self._insert_chat(title="memo")

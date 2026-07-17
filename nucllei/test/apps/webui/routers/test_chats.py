@@ -40,10 +40,19 @@ class TestChats(AbstractPostgresTest):
         assert first_chat["updated_at"] is not None
 
     def test_delete_all_user_chats(self):
+        # llens(#31): soft delete — 行は残り(監査証憑)、ユーザー向け一覧からは消える
         with mock_webui_user(id="2"):
             response = self.fast_api_client.delete(self.create_url("/"))
         assert response.status_code == 200
-        assert len(self.chats.get_chats()) == 0
+
+        remaining = self.chats.get_chats()
+        assert len(remaining) == 1
+        assert remaining[0].deleted_at is not None
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url("/"))
+        assert response.status_code == 200
+        assert response.json() == []
 
     def test_get_user_chat_list_by_user_id(self):
         with mock_webui_user(id="3"):
@@ -179,11 +188,37 @@ class TestChats(AbstractPostgresTest):
         assert data["user_id"] == "2"
 
     def test_delete_chat_by_id(self):
+        # llens(#31): soft delete — 行は残り(deleted_at)、本人の取得・一覧からは消える
         chat_id = self.chats.get_chats()[0].id
         with mock_webui_user(id="2"):
             response = self.fast_api_client.delete(self.create_url(f"/{chat_id}"))
         assert response.status_code == 200
         assert response.json() is True
+
+        chat = self.chats.get_chat_by_id(chat_id)
+        assert chat is not None
+        assert chat.deleted_at is not None
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url(f"/{chat_id}"))
+        assert response.status_code == 401
+
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url("/"))
+        assert response.json() == []
+
+    def test_delete_chat_unshares_it(self):
+        # llens(#31): 削除で share_id が外れ、共有コピー行も消える(/s/ が開けなくなる)
+        chat_id = self.chats.get_chats()[0].id
+        share_id = str(uuid.uuid4())
+        self.chats.update_chat_share_id_by_id(chat_id, share_id)
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.delete(self.create_url(f"/{chat_id}"))
+        assert response.status_code == 200
+
+        chat = self.chats.get_chat_by_id(chat_id)
+        assert chat.share_id is None
+        assert self.chats.get_chat_by_share_id(share_id) is None
 
     def test_clone_chat_by_id(self):
         chat_id = self.chats.get_chats()[0].id
@@ -236,3 +271,116 @@ class TestChats(AbstractPostgresTest):
 
         chat = self.chats.get_chat_by_id(chat_id)
         assert chat.share_id is None
+
+
+class TestChatAppendOnlyHistory(AbstractPostgresTest):
+    """llens(#31): メッセージ履歴の append-only ガード。
+
+    監査証憑の保全のため、POST /{id} の全量更新で「既存メッセージの消失」と
+    「content の非前方一致な書き換え」を 400 で拒否する。追記・ブランチ追加・
+    メタ情報(title 等)の変更は通す。
+    """
+
+    BASE_PATH = "/api/v1/chats"
+
+    def setup_method(self):
+        super().setup_method()
+        from nucllei.models.chats import ChatForm, Chats
+
+        self.chats = Chats
+        self.history = {
+            "currentId": "m2",
+            "messages": {
+                "m1": {
+                    "id": "m1",
+                    "parentId": None,
+                    "childrenIds": ["m2"],
+                    "role": "user",
+                    "content": "hello",
+                },
+                "m2": {
+                    "id": "m2",
+                    "parentId": "m1",
+                    "childrenIds": [],
+                    "role": "assistant",
+                    "content": "hi there",
+                },
+            },
+        }
+        chat = self.chats.insert_new_chat(
+            "2", ChatForm(**{"chat": {"title": "t", "history": self.history}})
+        )
+        self.chat_id = chat.id
+
+    def _update(self, history: dict, extra: dict | None = None):
+        with mock_webui_user(id="2"):
+            return self.fast_api_client.post(
+                self.create_url(f"/{self.chat_id}"),
+                json={"chat": {"history": history, **(extra or {})}},
+            )
+
+    def _history(self, mutate) -> dict:
+        import copy
+
+        history = copy.deepcopy(self.history)
+        mutate(history)
+        return history
+
+    def test_removing_message_is_rejected(self):
+        def mutate(h):
+            del h["messages"]["m2"]
+            h["messages"]["m1"]["childrenIds"] = []
+            h["currentId"] = "m1"
+
+        response = self._update(self._history(mutate))
+        assert response.status_code == 400
+        # DB は無傷
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        assert set(chat.chat["history"]["messages"].keys()) == {"m1", "m2"}
+
+    def test_rewriting_content_is_rejected(self):
+        def mutate(h):
+            h["messages"]["m1"]["content"] = "HELLO (rewritten)"
+
+        response = self._update(self._history(mutate))
+        assert response.status_code == 400
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        assert chat.chat["history"]["messages"]["m1"]["content"] == "hello"
+
+    def test_appending_content_is_allowed(self):
+        # ストリーミング終端の保存等: 旧 content が前方一致で保存される追記は通す
+        def mutate(h):
+            h["messages"]["m2"]["content"] = "hi there, how can I help?"
+
+        response = self._update(self._history(mutate))
+        assert response.status_code == 200
+
+    def test_adding_branch_is_allowed(self):
+        # 「編集して送信」= 兄弟ブランチの追加(既存メッセージは無傷)
+        def mutate(h):
+            h["messages"]["m3"] = {
+                "id": "m3",
+                "parentId": "m1",
+                "childrenIds": [],
+                "role": "assistant",
+                "content": "alternative answer",
+            }
+            h["messages"]["m1"]["childrenIds"] = ["m2", "m3"]
+            h["currentId"] = "m3"
+
+        response = self._update(self._history(mutate))
+        assert response.status_code == 200
+
+    def test_metadata_only_update_is_allowed(self):
+        response = self._update(self._history(lambda h: None), {"title": "renamed"})
+        assert response.status_code == 200
+        assert response.json()["chat"]["title"] == "renamed"
+
+    def test_message_overwrite_endpoint_is_removed(self):
+        # llens(#31): POST /{id}/messages/{message_id}(無痕跡上書き API)は撤去済み
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url(f"/{self.chat_id}/messages/m1"),
+                json={"content": "overwritten"},
+            )
+        assert response.status_code in (404, 405)

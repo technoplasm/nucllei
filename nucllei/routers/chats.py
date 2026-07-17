@@ -392,6 +392,7 @@ def _to_admin_chat_list_item(chat, user_name: Optional[str]) -> dict:
         "pinned": chat.pinned,
         "share_id": chat.share_id,
         "folder_id": chat.folder_id,
+        "deleted_at": chat.deleted_at,
     }
 
 
@@ -414,6 +415,7 @@ async def get_admin_chat_list(
     model: Optional[str] = Query(None),
     updated_from: Optional[int] = Query(None, ge=0),
     updated_to: Optional[int] = Query(None, ge=0),
+    deleted: str = Query("include"),
     user=Depends(get_admin_user),
 ):
     """admin チャット閲覧ビュー(#19)用のページング一覧。
@@ -433,6 +435,11 @@ async def get_admin_chat_list(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="direction must be one of: desc, asc",
         )
+    if deleted not in ("include", "exclude", "only"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="deleted must be one of: include, exclude, only",
+        )
 
     chats, total = Chats.get_chats_page_admin(
         user_id=user_id,
@@ -440,6 +447,7 @@ async def get_admin_chat_list(
         model=model,
         updated_from=updated_from,
         updated_to=updated_to,
+        deleted=deleted,
         order_by=order_by,
         direction=direction,
         limit=limit,
@@ -543,6 +551,42 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
 ############################
 
 
+def _assert_message_history_preserved(old_chat: dict, new_chat: dict):
+    """llens(#31): メッセージ履歴は append-only — 監査証憑を FE/API から壊せないよう、
+    既存メッセージの消失と content の非前方一致な書き換えを拒否する。
+    編集は新ブランチとして積む(「編集して送信」の既存挙動)。content の追記
+    (ストリーミング終端の保存等)・ブランチ追加・メタ情報(title/tags/params 等)は通す。"""
+    def _messages_of(chat: dict) -> dict:
+        history = chat.get("history")
+        messages = history.get("messages") if isinstance(history, dict) else None
+        return messages if isinstance(messages, dict) else {}
+
+    old_messages = _messages_of(old_chat)
+    new_messages = _messages_of(new_chat)
+
+    for message_id, old_message in old_messages.items():
+        new_message = new_messages.get(message_id)
+        if new_message is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Chat message history is append-only; messages cannot be removed.",
+            )
+        old_content = old_message.get("content")
+        new_content = new_message.get("content")
+        if old_content == new_content:
+            continue
+        if (
+            isinstance(old_content, str)
+            and isinstance(new_content, str)
+            and new_content.startswith(old_content)
+        ):
+            continue
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat message history is append-only; message content cannot be rewritten.",
+        )
+
+
 @router.post("/{id}", response_model=Optional[ChatResponse])
 async def update_chat_by_id(
     id: str, form_data: ChatForm, user=Depends(get_verified_user)
@@ -550,6 +594,7 @@ async def update_chat_by_id(
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         updated_chat = {**chat.chat, **form_data.chat}
+        _assert_message_history_preserved(chat.chat, updated_chat)
         chat = Chats.update_chat_by_id(id, updated_chat)
         return ChatResponse(**chat.model_dump())
     else:
@@ -559,46 +604,10 @@ async def update_chat_by_id(
         )
 
 
-############################
-# UpdateChatMessageById
-############################
-class MessageForm(BaseModel):
-    content: str
-
-
-@router.post("/{id}/messages/{message_id}", response_model=Optional[ChatResponse])
-async def update_chat_message_by_id(
-    id: str, message_id: str, form_data: MessageForm, user=Depends(get_verified_user)
-):
-    chat = Chats.get_chat_by_id(id)
-
-    if not chat:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    if chat.user_id != user.id and user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    chat = Chats.upsert_message_to_chat_by_id_and_message_id(
-        id,
-        message_id,
-        {
-            "content": form_data.content,
-        },
-    )
-
-    # llens(wire v2): socket 前提のマルチタブ同期 emit(chat:message)は廃止。
-    # 編集の永続化は上の upsert で完結する。
-    return ChatResponse(**chat.model_dump())
-
-
 # llens(wire v2): POST /{id}/messages/{message_id}/event(任意イベント注入 API)は
 # エンドポイントごと撤去(FE・現行 llens とも消費ゼロ、socket 基盤と共に廃止)。
+# llens(#31): POST /{id}/messages/{message_id}(メッセージ content の無痕跡上書き API)も
+# 撤去 — FE・README_API とも消費ゼロで、append-only の監査制約と両立しない。
 
 
 ############################

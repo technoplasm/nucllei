@@ -37,6 +37,10 @@ class Chat(Base):
     meta = Column(JSON, server_default="{}")
     folder_id = Column(Text, nullable=True)
 
+    # llens(#31): soft delete。監査証憑の保全のため行は消さず、削除時刻(epoch 秒)を立てる。
+    # ユーザー向けクエリは deleted_at IS NULL で除外し、admin 一覧(#19)では見える。
+    deleted_at = Column(BigInteger, nullable=True)
+
 
 class ChatModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -55,6 +59,7 @@ class ChatModel(BaseModel):
 
     meta: dict = {}
     folder_id: Optional[str] = None
+    deleted_at: Optional[int] = None
 
 
 ####################
@@ -429,7 +434,9 @@ class ChatTable:
     def archive_all_chats_by_user_id(self, user_id: str) -> bool:
         try:
             with get_db() as db:
-                db.query(Chat).filter_by(user_id=user_id).update({"archived": True})
+                db.query(Chat).filter_by(user_id=user_id).filter(
+                    Chat.deleted_at == None
+                ).update({"archived": True})
                 db.commit()
                 return True
         except Exception:
@@ -442,6 +449,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id, archived=True)
+                .filter(Chat.deleted_at == None)
                 .order_by(Chat.updated_at.desc())
                 # .limit(limit).offset(skip)
                 .all()
@@ -457,6 +465,7 @@ class ChatTable:
     ) -> list[ChatModel]:
         with get_db() as db:
             query = db.query(Chat).filter_by(user_id=user_id)
+            query = query.filter(Chat.deleted_at == None)
             if not include_archived:
                 query = query.filter_by(archived=False)
 
@@ -480,6 +489,7 @@ class ChatTable:
         with get_db() as db:
             query = db.query(Chat).filter_by(user_id=user_id).filter_by(folder_id=None)
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
+            query = query.filter(Chat.deleted_at == None)
 
             if not include_archived:
                 query = query.filter_by(archived=False)
@@ -516,6 +526,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter(Chat.id.in_(chat_ids))
                 .filter_by(archived=False)
+                .filter(Chat.deleted_at == None)
                 .order_by(Chat.updated_at.desc())
                 .all()
             )
@@ -546,7 +557,12 @@ class ChatTable:
     def get_chat_by_id_and_user_id(self, id: str, user_id: str) -> Optional[ChatModel]:
         try:
             with get_db() as db:
-                chat = db.query(Chat).filter_by(id=id, user_id=user_id).first()
+                chat = (
+                    db.query(Chat)
+                    .filter_by(id=id, user_id=user_id)
+                    .filter(Chat.deleted_at == None)
+                    .first()
+                )
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
@@ -565,6 +581,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at == None)
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -574,6 +591,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id, pinned=True, archived=False)
+                .filter(Chat.deleted_at == None)
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -583,6 +601,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id, archived=True)
+                .filter(Chat.deleted_at == None)
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -605,6 +624,7 @@ class ChatTable:
 
         with get_db() as db:
             query = db.query(Chat).filter(Chat.user_id == user_id)
+            query = query.filter(Chat.deleted_at == None)
 
             if not include_archived:
                 query = query.filter(Chat.archived == False)
@@ -702,6 +722,7 @@ class ChatTable:
                     "snippet": _chat_snippet(chat.chat),
                     "created_at": chat.created_at,
                     "updated_at": chat.updated_at,
+                    "deleted_at": chat.deleted_at,
                 }
                 for chat, user_name in rows
             ]
@@ -713,6 +734,7 @@ class ChatTable:
         model: Optional[str] = None,
         updated_from: Optional[int] = None,
         updated_to: Optional[int] = None,
+        deleted: str = "include",
         order_by: str = "updated_at",
         direction: str = "desc",
         limit: int = 60,
@@ -724,12 +746,17 @@ class ChatTable:
         user_id=None は全ユーザー。model は chat JSON トップレベルの models 配列への
         メンバーシップ(dialect 別 JSON クエリ — search_text と同じ流儀)。
         updated_from/updated_to は updated_at の範囲(epoch 秒・両端含む)。
+        deleted は soft delete 済み(#31)の扱い: include(既定)/ exclude / only。
         戻り値は (items, total)。total は filter 適用後・ページング前の件数。
         """
         with get_db() as db:
             query = db.query(Chat)
             if user_id is not None:
                 query = query.filter(Chat.user_id == user_id)
+            if deleted == "exclude":
+                query = query.filter(Chat.deleted_at == None)
+            elif deleted == "only":
+                query = query.filter(Chat.deleted_at != None)
             if title:
                 query = query.filter(Chat.title.ilike(f"%{title}%"))
             if updated_from is not None:
@@ -844,6 +871,7 @@ class ChatTable:
             query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id)
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
+            query = query.filter(Chat.deleted_at == None)
 
             query = query.order_by(Chat.updated_at.desc())
 
@@ -859,6 +887,7 @@ class ChatTable:
             )
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
+            query = query.filter(Chat.deleted_at == None)
 
             query = query.order_by(Chat.updated_at.desc())
 
@@ -880,10 +909,16 @@ class ChatTable:
         except Exception:
             return None
 
+    # llens(#31): 削除系はすべて soft delete(deleted_at を立てて非表示化 + 共有解除)。
+    # 監査証憑の保全のため一次データの行は消さない。share コピー(user_id="shared-*" の
+    # 複製行)は派生データなので従来どおり物理削除する。
+
     def delete_chat_by_id(self, id: str) -> bool:
         try:
             with get_db() as db:
-                db.query(Chat).filter_by(id=id).delete()
+                db.query(Chat).filter_by(id=id).update(
+                    {"deleted_at": int(time.time()), "share_id": None}
+                )
                 db.commit()
 
                 return True and self.delete_shared_chat_by_chat_id(id)
@@ -893,7 +928,9 @@ class ChatTable:
     def delete_chat_by_id_and_user_id(self, id: str, user_id: str) -> bool:
         try:
             with get_db() as db:
-                db.query(Chat).filter_by(id=id, user_id=user_id).delete()
+                db.query(Chat).filter_by(id=id, user_id=user_id).update(
+                    {"deleted_at": int(time.time()), "share_id": None}
+                )
                 db.commit()
 
                 return True and self.delete_shared_chat_by_chat_id(id)
@@ -905,7 +942,9 @@ class ChatTable:
             with get_db() as db:
                 self.delete_shared_chats_by_user_id(user_id)
 
-                db.query(Chat).filter_by(user_id=user_id).delete()
+                db.query(Chat).filter_by(user_id=user_id).update(
+                    {"deleted_at": int(time.time()), "share_id": None}
+                )
                 db.commit()
 
                 return True
@@ -917,7 +956,9 @@ class ChatTable:
     ) -> bool:
         try:
             with get_db() as db:
-                db.query(Chat).filter_by(user_id=user_id, folder_id=folder_id).delete()
+                db.query(Chat).filter_by(user_id=user_id, folder_id=folder_id).update(
+                    {"deleted_at": int(time.time()), "share_id": None}
+                )
                 db.commit()
 
                 return True
