@@ -5,6 +5,10 @@
 - backend: .venv の importlib.metadata(uv sync 済み環境から。ネットワーク不要)
 
 再生成: `uv run task licenses`(依存を増減したリリース前に回して結果をコミットする)
+
+注意: backend は「その時の venv に入っているもの」を数えるため、**素の `uv sync`(extra なし)の
+venv で回すこと**。`--extra local-ml` 等が入った環境で回すと optional 依存
+(torch / nvidia-cuda 系など)が混入する(2026-07-17 に実際に混入していて除去した)。
 """
 
 import json
