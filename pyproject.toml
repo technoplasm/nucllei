@@ -196,7 +196,9 @@ pythonpath = [".", "nucllei"]
 # layout (the frontend is served same-origin and Vite proxies /api etc. here;
 # see vite.config.ts). `nucllei` はリポジトリルート直下なので cwd から import できる。
 # `--forwarded-allow-ips '*'` trusts the local Vite proxy for X-Forwarded-*.
-dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --forwarded-allow-ips '*'"
+# `--reload-exclude _links/*`: マシン固有 symlink(現行 llens 参照)の編集で reload が
+# 発火して in-flight リクエスト待ちのまま固まる事故を防ぐ(2026-07-18 実害 2 回)。
+dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --reload-exclude '_links/*' --forwarded-allow-ips '*'"
 # 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
 licenses = "python scripts/generate_licenses.py"
 # deploy の入口(technoplasm-app `make tag` の移植): ガード → 採番 → tag → push(既定)
