@@ -102,9 +102,9 @@ uv run task dev
 pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- **起動場所は tmux(2026-07-16 確定)**: session `owui` = 0:FE(pnpm dev)/ 1:BE(uv run task dev)/
-  2:cc1 / 3:nvim / 4:zsh。cc からの BE 再起動は nohup でなく
-  `tmux send-keys -t owui:1 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t owui:1 -p`)。
+- **起動場所は tmux(2026-07-16 確定、2026-07-17 現況追従)**: session **`nuc`** = 0:BE(uv run task dev)/
+  1:FE(pnpm dev)/ 2:claude / 3:nvim / 4:zsh。cc からの BE 再起動は nohup でなく
+  `tmux send-keys -t nuc:0 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t nuc:0 -p`)。
   ログはその window に流れる — 500 の一次調査はまずそこの traceback を読む。
 - **`.env`(repo 直下、gitignored)を BE が起動時に読む**(env.py の load_dotenv。
   `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
@@ -113,6 +113,12 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
   プレ `pre-NN` の 2 形式だけを describe --match で拾う)。BE は起動時・FE は vite 起動時に解決
   するので、**tag を切ったら BE 再起動 + vite は自動再起動(反映されなければ `touch vite.config.ts`)**。
   命名は APP_* = 本体 Nucllei / WEBUI_* = 配備層。git hash(BUILD_HASH 系)は全面撤去済み。
+- **migration は出荷前 baseline 1 本(2026-07-17、#80)**: 履歴 replay(peewee 18 + alembic 27)を
+  squash 済み。**squash 以前に作られた既存 dev DB は起動時に
+  `Can't locate revision identified by '...'` を吐く**(起動は続くが以後 migration が当たらない)。
+  復旧は schema 同一なので `cd nucllei && uv run alembic stamp --purge head` で張り替えるだけ
+  (データ温存)。作り直すなら `rm data/webui.db` → 再起動 → `create-admin` + fixture 再投入。
+  新テーブル追加時は `migrations/env.py` のモデル import 一覧にも 1 行足すこと(autogenerate の対象)。
 - **依存ライセンス一覧**: 依存を増減したら `uv run task licenses` で `static/licenses.json` を
   再生成してコミット(License タブが fetch して表示。pnpm store と .venv から生成、ネット不要)。
 - **BE origin の上書き**: `BACKEND_ORIGIN=http://別ホスト:3000 pnpm dev` で dev フロントを

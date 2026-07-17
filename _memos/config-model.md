@@ -13,7 +13,8 @@
   2. env が空 → **DB の保存値**(あれば)を採用(= UI 変更が永続)。
   3. DB も無ければ **hardcoded 既定**。
 - **実行中**: admin UI からの変更は `app.state.config` に反映 + DB へ永続(`RuntimeConfig.save()`)。
-  Redis 経由で複数ワーカーに共有。
+  ※ 改訂(2026-07-17、#80): Redis 経由の複数ワーカー共有は**撤去** — wire v2 のタスクレジストリが
+  in-process のため multi-worker 自体が非サポート(単一プロセス前提)。
 - **再起動**: env が設定されている項目はその env 値で再確定(+DB 同期)。env 未設定の項目は
   DB の保存値がそのまま残る。
 - 帰結:「env を変えたのに反映されない」は起きない(env が常に勝つ)。かつ **env を置いていない
@@ -31,7 +32,8 @@
   レジストリ名を `PERSISTENT_CONFIG_REGISTRY`→`RUNTIME_CONFIG_REGISTRY` に掃除。CORE 回帰 91 passed。
 - 設定機構 `798a7aa4c`(2026-07-08, 上記で是正済み): `PersistentConfig`→`RuntimeConfig` 改名。
   `ENABLE_PERSISTENT_CONFIG` 撤去。`save()`/`update()` と DB 永続機構(`config` テーブル / import・export /
-  Redis 共有)は温存。
+  Redis 共有)は温存。→ Redis 共有は 2026-07-17(#80、`e4b023390`)に撤去(依存 redis ごと。
+  Config モデルは `models/configs.py` へ移設)。
 - Settings 掃除 `e9f15cf10`: admin General・About から update check / What's New / Help・外部リンク /
   License 表示を撤去。version は残す(BSD 著作権・Twemoji は #34 まで温存)。
 - version 焼き込み `c92c0784f`: deploy tag(`prodYYYYMMDD_NN`、#25)を build 時 `APP_VERSION` で
