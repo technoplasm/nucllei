@@ -316,7 +316,11 @@
 								{/if}
 
 								{#if message.error}
-									<Error content={typeof message.error === 'object' ? message.error.content : message.content} />
+									<Error
+										content={typeof message.error === 'object'
+											? message.error.content
+											: message.content}
+									/>
 								{/if}
 
 								{#if message.sources && citationsEnabled}

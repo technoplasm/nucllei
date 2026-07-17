@@ -53,7 +53,9 @@
 	{:else if token.type === 'image'}
 		<Image src={token.href} alt={token.text} />
 	{:else if token.type === 'strong'}
-		<strong><MarkdownInlineTokens id={`${id}-strong`} tokens={token.tokens} {onSourceClick} /></strong>
+		<strong
+			><MarkdownInlineTokens id={`${id}-strong`} tokens={token.tokens} {onSourceClick} /></strong
+		>
 	{:else if token.type === 'em'}
 		<em><MarkdownInlineTokens id={`${id}-em`} tokens={token.tokens} {onSourceClick} /></em>
 	{:else if token.type === 'codespan'}

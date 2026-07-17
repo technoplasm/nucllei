@@ -54,8 +54,7 @@ export class MessageSpeech {
 		try {
 			speechSynthesis.cancel();
 
-			const current =
-				this.#speakingIdx !== undefined ? this.#audioParts[this.#speakingIdx] : null;
+			const current = this.#speakingIdx !== undefined ? this.#audioParts[this.#speakingIdx] : null;
 			if (current) {
 				current.pause();
 				current.currentTime = 0;
@@ -154,9 +153,7 @@ export class MessageSpeech {
 			}
 
 			for (const [idx, sentence] of messageContentParts.entries()) {
-				const blobUrl = await get(TTSWorker)
-					?.generate({ text: sentence, voice })
-					.catch(onError);
+				const blobUrl = await get(TTSWorker)?.generate({ text: sentence, voice }).catch(onError);
 
 				if (blobUrl) {
 					const audio = new Audio(blobUrl);

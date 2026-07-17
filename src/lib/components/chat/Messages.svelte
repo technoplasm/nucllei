@@ -170,9 +170,7 @@
 	const gotoMessage = async (message: ChatMessage, idx: number) => {
 		// Determine the correct sibling list (either parent's children or root messages)
 		const siblings =
-			message.parentId !== null
-				? history.messages[message.parentId].childrenIds
-				: rootMessageIds();
+			message.parentId !== null ? history.messages[message.parentId].childrenIds : rootMessageIds();
 
 		// Clamp index to a valid range
 		idx = Math.max(0, Math.min(idx, siblings.length - 1));
@@ -194,9 +192,7 @@
 
 	const showPreviousMessage = async (message: ChatMessage) => {
 		const siblings =
-			message.parentId !== null
-				? history.messages[message.parentId].childrenIds
-				: rootMessageIds();
+			message.parentId !== null ? history.messages[message.parentId].childrenIds : rootMessageIds();
 
 		const messageId = siblings[Math.max(siblings.indexOf(message.id) - 1, 0)];
 
@@ -212,12 +208,9 @@
 
 	const showNextMessage = async (message: ChatMessage) => {
 		const siblings =
-			message.parentId !== null
-				? history.messages[message.parentId].childrenIds
-				: rootMessageIds();
+			message.parentId !== null ? history.messages[message.parentId].childrenIds : rootMessageIds();
 
-		const messageId =
-			siblings[Math.min(siblings.indexOf(message.id) + 1, siblings.length - 1)];
+		const messageId = siblings[Math.min(siblings.indexOf(message.id) + 1, siblings.length - 1)];
 
 		if (message.id !== messageId) {
 			history.currentId = deepestChildId(messageId);

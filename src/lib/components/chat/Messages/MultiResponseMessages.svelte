@@ -27,7 +27,11 @@
 		updateChat: () => void | Promise<void>;
 		editMessage: (id: string, content: string, submit?: boolean) => void;
 		saveMessage: (id: string, message: ChatMessage) => void | Promise<void>;
-		actionMessage: (actionId: string, message: ChatMessage, event?: unknown) => void | Promise<void>;
+		actionMessage: (
+			actionId: string,
+			message: ChatMessage,
+			event?: unknown
+		) => void | Promise<void>;
 		submitMessage: (parentId: string, prompt: string) => void | Promise<void>;
 		deleteMessage: (id: string) => void;
 		continueResponse: () => void | Promise<void>;
@@ -169,8 +173,7 @@
 						groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 					<div
-						class=" snap-center w-full max-w-full m-1 border {message?.modelIdx ===
-						Number(modelIdx)
+						class=" snap-center w-full max-w-full m-1 border {message?.modelIdx === Number(modelIdx)
 							? `border-gray-100 dark:border-gray-850 border-[1.5px] ${
 									$mobile ? 'min-w-full' : 'min-w-80'
 								}`

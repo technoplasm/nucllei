@@ -153,7 +153,9 @@
 				<div
 					class="flex w-full overflow-auto items-center gap-2 text-content-muted hover:text-content cursor-pointer"
 				>
-					<div class="flex-1 flex items-center gap-1 overflow-auto scrollbar-none w-full max-w-full">
+					<div
+						class="flex-1 flex items-center gap-1 overflow-auto scrollbar-none w-full max-w-full"
+					>
 						<span class="whitespace-nowrap hidden sm:inline shrink-0"
 							>{$i18n.t('References from')}</span
 						>

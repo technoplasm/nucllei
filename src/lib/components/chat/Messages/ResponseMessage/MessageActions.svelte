@@ -115,9 +115,7 @@
 				</button>
 
 				{#if messageIndexEdit}
-					<div
-						class="text-sm flex justify-center font-semibold self-center text-content min-w-fit"
-					>
+					<div class="text-sm flex justify-center font-semibold self-center text-content min-w-fit">
 						<input
 							id="message-index-input-{message.id}"
 							type="number"
@@ -312,9 +310,7 @@
 									<div class="size-4">
 										<img
 											src={action.icon_url}
-											class="w-4 h-4 {action.icon_url.includes('svg')
-												? 'dark:invert-[80%]'
-												: ''}"
+											class="w-4 h-4 {action.icon_url.includes('svg') ? 'dark:invert-[80%]' : ''}"
 											style="fill: currentColor;"
 											alt={action.name}
 										/>
