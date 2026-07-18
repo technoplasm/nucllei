@@ -75,8 +75,11 @@ dependencies = [
     # llens(#52): 文書抽出は fork にコードを持たない。prism の Attachment Function が markitdown を
     # 直接 import して md 化する(docling ではない素の抽出・OCR なし)。fork は markitdown を同梱する
     # だけ(air-gapped イメージに実体を載せる)。xlsx→シート別 CSV 等の型別ポリシーは prism が手前で処理。
-    # extra は絞らない([all])。langchain ローダ群(unstructured/networkx/docx2txt/pypdf/ftfy/nltk)は撤去。
-    "markitdown[all]",
+    # extra は file-format 系に絞る(2026-07-18 改訂: 0.1.x の [all] は azure 系の
+    # プレリリース依存を引いて解決不能。旧 0.0.2 に固定されていた原因も [all])。
+    # magika(0.1.x のコア依存)が py3.13 で numpy>=2.1 を要求し local-ml の rapidocr と
+    # 衝突するため requires-python は <3.13(docker=3.11 / dev=3.12 で実害なし)。
+    "markitdown[pdf,docx,pptx,xlsx,xls,outlook,epub]>=0.1.6",
     # 配備層 Function 向けの PDF ラスタライズ(llens pdf_vision 等)。pip のみで完結し
     # poppler 等の system deps を要らない pdfium バインディング。markitdown と同じ
     # 「同梱するだけ・fork は画像化コードを持たない」の位置づけ。
@@ -128,7 +131,7 @@ dependencies = [
 
 ]
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.13"
 # 配布用メタデータではない(Docker のみで出荷・wheel/PyPI 配布はしない — #34)。
 # バージョンの真実源は git tag(APP_VERSION、#25)。ここは uv が要求するので置くだけ。
 version = "0.0.0"

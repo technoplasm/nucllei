@@ -2443,13 +2443,18 @@
    "license": "BSD-3-Clause"
   },
   {
+   "name": "magika",
+   "version": "0.6.3",
+   "license": "Apache-2.0"
+  },
+  {
    "name": "Mako",
    "version": "1.3.8",
    "license": "MIT"
   },
   {
    "name": "mammoth",
-   "version": "1.12.0",
+   "version": "1.11.0",
    "license": "BSD-2-Clause"
   },
   {
@@ -2469,7 +2474,7 @@
   },
   {
    "name": "markitdown",
-   "version": "0.0.2",
+   "version": "0.1.6",
    "license": "MIT"
   },
   {
@@ -2658,14 +2663,14 @@
    "license": "Mozilla Public License 2.0 (MPL 2.0)"
   },
   {
-   "name": "pathvalidate",
-   "version": "3.3.1",
-   "license": "MIT License"
+   "name": "pdfminer.six",
+   "version": "20251230",
+   "license": "MIT"
   },
   {
-   "name": "pdfminer.six",
-   "version": "20260107",
-   "license": "MIT"
+   "name": "pdfplumber",
+   "version": "0.11.9",
+   "license": "MIT License"
   },
   {
    "name": "pillow",
@@ -2711,11 +2716,6 @@
    "name": "psycopg2-binary",
    "version": "2.9.9",
    "license": "LGPL with exceptions"
-  },
-  {
-   "name": "puremagic",
-   "version": "2.2.0",
-   "license": "MIT"
   },
   {
    "name": "py-partiql-parser",
@@ -2926,11 +2926,6 @@
    "name": "soupsieve",
    "version": "2.6",
    "license": "MIT"
-  },
-  {
-   "name": "SpeechRecognition",
-   "version": "3.17.0",
-   "license": "BSD-3-Clause"
   },
   {
    "name": "SQLAlchemy",
