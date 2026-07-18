@@ -129,6 +129,17 @@
 		font-family: 'JetBrains Mono Variable', 'M PLUS 1 Code Variable', ui-monospace, monospace;
 	}
 
+	/* CJK 桁揃え用 mono(HljsCode の plaintext fence が使う)。既定 mono は
+	   半角=JetBrains Mono(0.60em)+ 全角=M+1 Code(1.00em)の混成で全角/半角比が
+	   1.667 になり、アスキーアート・罫線表の桁が必ずずれる。M PLUS 1 Code 単独なら
+	   0.50/1.00 = ちょうど 2:1、罫線(East Asian Ambiguous)も半角幅に揃う。
+	   言語付きコードは字面優先で既定スタックのまま。 */
+	.font-mono-cjk,
+	.font-mono-cjk code,
+	.font-mono-cjk pre {
+		font-family: 'M PLUS 1 Code Variable', ui-monospace, monospace;
+	}
+
 	pre {
 		white-space: pre-wrap;
 	}

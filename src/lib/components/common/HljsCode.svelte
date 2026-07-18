@@ -61,9 +61,19 @@
 			return div.innerHTML;
 		}
 	});
+
+	// plaintext(言語なし)fence は M PLUS 1 Code 単独(font-mono-cjk)で描画する。
+	// 既定の mono スタックは半角=JetBrains Mono(0.60em)+ 全角=M+1 Code(1.00em)の
+	// 混成で全角/半角比が 1.667 になり、アスキーアート・罫線表の桁が必ずずれる。
+	// M+1 Code 単独なら 0.50/1.00 = ちょうど 2:1 で罫線も半角幅に揃う。
+	// 言語付き(=コード)は字面優先で従来スタックのまま。
+	const isPlaintext = $derived(!lang || !hljs.getLanguage(lang));
 </script>
 
-<div class="hljs rounded-lg text-xs my-1 {className}" dir="ltr">
+<div
+	class="hljs rounded-lg text-xs my-1 {isPlaintext ? 'font-mono-cjk' : ''} {className}"
+	dir="ltr"
+>
 	<div class="flex items-center justify-between px-3 pt-1.5">
 		<div class="font-medium opacity-60">{lang || 'plaintext'}</div>
 
