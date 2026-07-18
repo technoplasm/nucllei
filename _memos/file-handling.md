@@ -123,6 +123,15 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 
 ### 既定 md 化 = markitdown(fork 同梱・prism が直接呼ぶ)
 
+> **改訂(2026-07-18)**: llens(prism)側の Attachment は **markitdown_extract(本命・軽量)と
+> docling_extract(待機側・遅いがレイアウト/表に強い)の 2 本立て**に再編(llens `f53dac6`。
+> 旧 attachment_extract は markitdown_extract にリネーム)。切り替えは compose の
+> `ATTACHMENT_FUNCTION_ID` 張り替えのみ。markitdown は **0.0.2 → 0.1.6 に更新**(nucllei
+> `3df17d7a3`): 旧版固定の原因は `[all]` extra(0.1.x では azure 系プレリリース依存を引いて
+> 解決不能)で、pdf/docx/pptx/xlsx/xls/outlook/epub に絞った。GPL 連鎖なしは lock で再確認。
+> **markitdown の PDF は「ほぼ平文」が仕様**(PdfConverter = pdfminer extract_text 一発、
+> docstring 自ら essentially plain-text と宣言)— 構造が要る PDF は docling、視覚は pdf_vision。
+
 fork は抽出コードを持たず、`markitdown[all]` を同梱するだけ。prism の Attachment が
 `MarkItDown().convert(path).text_content` で md 文字列を得る。型別の中身は markitdown の各コンバータ
 (docx=**mammoth** で見出し/リスト/表を md 化・pdf=**pdfminer**(OCR なし)・pptx=**python-pptx**・

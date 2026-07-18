@@ -37,6 +37,11 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   onMount の !$chatId ガードが見る)が壊れる、②初期実行をスクリプト途中の直接呼び出しに
   すると後方 const の TDZ を踏む。対処 = 初期値はスクリプト**末尾**の直接呼び出しで処理し、
   以後の変化だけ `$effect`(+ 前回値ガードで初回 effect の二重発火防止)。
+  (6) **`$state`/`$bindable` 配列に積んだ後の closure(生オブジェクト)に書いても再描画されない**
+  (2026-07-18、MessageInput アップロードで実害 — status が 'uploading' に張り付く)。
+  `files = [...files, item]` の時点で item は深層プロキシに包まれ、closure の `item.status = ...` は
+  シグナルを通らない。legacy の `files = files` 再代入も runes では同一参照 no-op。
+  **必ず `files[idx] = {...files[idx], ...}` とプロキシ経由で置き換える**(765d86a2b が実例)。
   (5) **`$: fn()` の依存は文中で「読んだ」変数だけ**(書き込みは依存にならない)。
   `$effect` 化で関数呼び出しの中身まで追跡されて発火過多になるときは、依存を
   `void x;` で明示し本体は先頭 `await tick()` などで追跡外に置く(Selector.resetView が実例)。
@@ -123,6 +128,9 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
   プレ `pre-NN` の 2 形式だけを describe --match で拾う)。BE は起動時・FE は vite 起動時に解決
   するので、**tag を切ったら BE 再起動 + vite は自動再起動(反映されなければ `touch vite.config.ts`)**。
   命名は APP_* = 本体 Nucllei / WEBUI_* = 配備層。git hash(BUILD_HASH 系)は全面撤去済み。
+- **migration のファイル名は日時プレフィックス**(2026-07-18): `alembic.ini` の `file_template` を
+  `YYYYMMDDHHMM_<rev>_<slug>` に設定済み — `alembic revision` で自動付与され、`ls` の並び = 適用順。
+  既存分も改名済み(revision id は中身に持つのでファイル名変更は既存 DB に無影響)。
 - **migration は出荷前 baseline 1 本(2026-07-17、#80)**: 履歴 replay(peewee 18 + alembic 27)を
   squash 済み。**squash 以前に作られた既存 dev DB は起動時に
   `Can't locate revision identified by '...'` を吐く**(起動は続くが以後 migration が当たらない)。
@@ -153,6 +161,8 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
   ハングしたまま backend のコードを編集すると「Reloading... のまま :3000 が無応答」に
   見える — C-c で殺して起動し直すのが早い。53d91647e で completion 経路に
   sock_read 上限(既定 300 秒)が入ったので永久には塞がらないが、最長 5 分は待つ。
+  **`_links/` の編集による reload 発火は a457f6bd0(2026-07-18)で根治**(`task dev` に
+  `--reload-exclude '_links/*'` — 現行 llens 側ファイルを編集しても BE は reload しない)。
   なお ollama が全モデルでロードハングする時は `nvidia-smi` の
   「Driver/library version mismatch」(ドライバ更新後の再起動待ち)をまず疑う。
 - vite は dev 用に **全レスポンス no-store**(`vite.config.ts` の `devNoCache` ミドルウェア, `apply:'serve'`)。
@@ -197,6 +207,8 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
 5. **dev ツール登録**: `python3 dev/tools/seed.py --token "$TOKEN"` が `render_probe` tool を
    登録し `llens-assistant` の toolIds に追加する(詳細 `dev/tools/README.md`)。
    - `render_probe(kind)`: table/code/math/long/mixed/edge の markdown サンプル
+     ※ **spec ビルダは docstring `:param` の継続行を落とす**(2026-07-18 実害: kind の選択肢
+     列挙が 2 行目以降にありモデルに見えなかった)。enum 的な選択肢は**必ず 1 行に列挙**する
    - `probe_result_table(department)`: `Table` 戻り
    - `probe_args` / `echo`: 宣言なしコントロール
    - 旧 `run_python` ダミーは撤去済み(#18-3 で本物と同名衝突 — **同名 tool は先勝ちで
