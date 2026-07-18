@@ -71,10 +71,9 @@
 		};
 	});
 
-	// サイドバー「モデル」欄: 有効(非 hidden)なモデルのみ。$models と連動して自動反映。
-	const enabledModels = $derived(
-		($models ?? []).filter((m) => m?.id && (m?.info?.meta?.hidden ?? false) !== true)
-	);
+	// サイドバー「モデル」欄。$models(= preset のみ、#82)と連動して自動反映。
+	// meta.hidden は生モデル管理(旧 Settings > Models)ごと廃止した死に概念 — 参照しない。
+	const enabledModels = $derived(($models ?? []).filter((m) => m?.id));
 
 	// モデル行クリック: そのモデルを選択した状態で新規チャットを開く(?models= を initNewChat が解釈)。
 	const modelChatHandler = async (modelId: string) => {

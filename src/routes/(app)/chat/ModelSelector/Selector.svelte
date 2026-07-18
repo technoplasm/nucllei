@@ -88,16 +88,14 @@
 	);
 
 	const filteredItems = $derived(
-		(searchValue ? fuse.search(searchValue).map((e) => e.item) : items)
-			.filter((item) => {
-				if (selectedConnectionType === 'ollama') {
-					return item.model?.owned_by === 'ollama';
-				} else if (selectedConnectionType === 'openai') {
-					return item.model?.owned_by === 'openai';
-				}
-				return true;
-			})
-			.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
+		(searchValue ? fuse.search(searchValue).map((e) => e.item) : items).filter((item) => {
+			if (selectedConnectionType === 'ollama') {
+				return item.model?.owned_by === 'ollama';
+			} else if (selectedConnectionType === 'openai') {
+				return item.model?.owned_by === 'openai';
+			}
+			return true;
+		})
 	);
 
 	// フィルタ(Local/External)変更時に選択位置を追従させる
@@ -343,7 +341,7 @@
 		{/if}
 
 		<div class="px-3 max-h-64 overflow-y-auto scrollbar-hidden group relative">
-			{#if items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai') && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
+			{#if items.find((item) => item.model?.owned_by === 'ollama') && items.find((item) => item.model?.owned_by === 'openai') && items.length > 0}
 				<div
 					class=" flex w-full sticky top-0 z-10 bg-surface-raised overflow-x-auto scrollbar-none"
 					onwheel={(e) => {

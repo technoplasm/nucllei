@@ -182,13 +182,6 @@ class ModelsTable:
                 )
             return models
 
-    def get_base_models(self) -> list[ModelModel]:
-        with get_db() as db:
-            return [
-                ModelModel.model_validate(model)
-                for model in db.query(Model).filter(Model.base_model_id == None).all()
-            ]
-
     def get_models_by_user_id(
         self, user_id: str, permission: str = "read"
     ) -> list[ModelUserResponse]:

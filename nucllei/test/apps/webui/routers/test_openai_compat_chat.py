@@ -280,8 +280,13 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert "public-preset" in model_ids
         assert "mock-model" not in model_ids
 
-    def test_direct_base_model_id_row_kept(self):
-        """id が接続由来と同じ Models 行(admin がベースを直接編集)は表示に残る。"""
+    def test_base_model_id_required(self):
+        """llens(#82): Models 行は base_model_id 必須(= preset のみ)。
+
+        生モデル(接続由来)の id に base 無し行を作る旧経路は、生モデルを普通の
+        モデルとして露出させるため 400 で拒否する。update で base を null に
+        剥がすのも同様に拒否。
+        """
         payload = {
             "id": "mock-model",
             "base_model_id": None,
@@ -297,13 +302,22 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         }
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post("/api/v1/models/create", json=payload)
-        assert response.status_code == 200, response.text
+        assert response.status_code == 400, response.text
 
+        # 生モデルは露出しないまま
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.get("/api/models")
         assert response.status_code == 200
-        model_ids = [m["id"] for m in response.json()["data"]]
-        assert "mock-model" in model_ids
+        assert "mock-model" not in [m["id"] for m in response.json()["data"]]
+
+        # 正規の preset は作れる → base を null に剥がす update は拒否
+        self._create_preset(model_id="guard-preset")
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/v1/models/model/update?id=guard-preset",
+                json={**payload, "id": "guard-preset", "name": "Guard"},
+            )
+        assert response.status_code == 400, response.text
 
     def test_inlet_filter_applies_before_llm(self):
         """inlet フィルタの加工がモデルへのリクエストに反映される(preset の filterIds 経由)。"""

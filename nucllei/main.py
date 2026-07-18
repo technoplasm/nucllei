@@ -646,11 +646,10 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         if "pipeline" in model and model["pipeline"].get("type", None) == "filter":
             continue
 
-        # llens(GHSA-9vvh UX 対応): workspace(Models テーブル)行を持たない
-        # 生モデル(接続由来のベースモデル)は、チャットのモデルピッカーから
-        # 全員(admin 含む)に対して隠す。preset や、admin が直接メタデータを
-        # 編集して Models 行を作ったベースモデルのみ残す。ベースモデル選択・
-        # admin のモデル管理は /api/models/base を使うためここでは隠してよい。
+        # llens(GHSA-9vvh UX 対応 → #82 で概念確定): Models 行を持たない生モデル
+        # (接続由来のベースモデル)は、チャットのモデルピッカーから全員(admin 含む)に
+        # 対して隠す。Models 行は base_model_id 必須(= preset のみ、routers/models.py)
+        # なので、ここを通るのは常に preset。ベースモデル選択・棚卸しは /api/models/base。
         # 行を持たない arena 等の仮想モデルもここで併せて除外される。
         if not Models.get_model_by_id(model["id"]):
             continue
@@ -677,6 +676,8 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
 
 @app.get("/api/models/base")
 async def get_base_models(request: Request, user=Depends(get_admin_user)):
+    # llens(#82): 接続由来の生モデル一覧(admin 専用 — 棚卸しビューと preset の base 選択用)。
+    # 生モデルは Models 行を持たず、チャットには一切露出しない。
     models = await get_all_base_models(request, user=user)
     return {"data": models}
 

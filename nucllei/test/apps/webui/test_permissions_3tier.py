@@ -42,7 +42,8 @@ class TestModelAdminOnly(AbstractPostgresTest):
     BASE_PATH = "/api/v1/models"
 
     def _model_form(self, id="m1"):
-        return {"id": id, "name": id, "meta": {}, "params": {}}
+        # llens(#82): Models 行は base_model_id 必須(preset のみ)
+        return {"id": id, "name": id, "base_model_id": "base", "meta": {}, "params": {}}
 
     def test_user_cannot_crud_models(self):
         with mock_webui_user_strict(id="9", role="user"):

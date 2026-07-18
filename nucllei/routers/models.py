@@ -32,14 +32,9 @@ async def get_models(id: Optional[str] = None, user=Depends(get_verified_user)):
         return Models.get_models_by_user_id(user.id, "read")
 
 
-###########################
-# GetBaseModels
-###########################
-
-
-@router.get("/base", response_model=list[ModelResponse])
-async def get_base_models(user=Depends(get_admin_user)):
-    return Models.get_base_models()
+# llens(#82): 旧 GET /base(base_model_id が null の Models 行 = 生モデル直接編集の産物)は
+# 概念ごと廃止 — 行は base_model_id 必須になり、この一覧は常に空になるため endpoint も撤去。
+# 接続由来の生モデル一覧(preset の base 選択用)は main.py の GET /api/models/base。
 
 
 ############################
@@ -48,12 +43,24 @@ async def get_base_models(user=Depends(get_admin_user)):
 
 
 # llens(#66): model 定義の作成・変更・削除は admin 専有(workspace.models 権限は廃止)。
+# llens(#82): Models 行は base_model_id 必須(= preset のみ)。生モデル(接続由来)の id に
+# base 無し行を作る旧経路は「生モデルを普通のモデルとして露出させる」ため概念ごと廃止。
+def _require_base_model_id(form_data: ModelForm):
+    if not form_data.base_model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="モデルはベースモデルを指定した preset として作成してください(生モデルの直接登録・編集はできません)。",
+        )
+
+
 @router.post("/create", response_model=Optional[ModelModel])
 async def create_new_model(
     request: Request,
     form_data: ModelForm,
     user=Depends(get_admin_user),
 ):
+    _require_base_model_id(form_data)
+
     model = Models.get_model_by_id(form_data.id)
     if model:
         raise HTTPException(
@@ -127,6 +134,8 @@ async def update_model_by_id(
     form_data: ModelForm,
     user=Depends(get_admin_user),
 ):
+    _require_base_model_id(form_data)
+
     model = Models.get_model_by_id(id)
 
     if not model:

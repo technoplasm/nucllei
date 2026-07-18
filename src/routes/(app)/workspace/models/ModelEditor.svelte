@@ -1,6 +1,6 @@
 <script lang="ts">
-	// llens: workspace/models(preset 編集)のほか workspace/settings の Models タブ(生モデル編集、
-	// preset=false + onBack)からも使う。models 専用素材として route 配下へコロケート(#70 A2)。
+	// llens: workspace/models の preset 編集専用(#82 で生モデル編集経路を撤去 — モデルは
+	// 常に base_model_id を持つ preset)。models 専用素材として route 配下へコロケート(#70 A2)。
 	import { onMount, getContext, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -25,16 +25,12 @@
 
 	let {
 		onSubmit,
-		onBack = null,
 		model = null,
-		edit = false,
-		preset = true
+		edit = false
 	}: {
 		onSubmit: (info: any) => void | Promise<void>;
-		onBack?: null | (() => void);
 		model?: any;
 		edit?: boolean;
-		preset?: boolean;
 	} = $props();
 
 	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
@@ -308,27 +304,14 @@
 {#if loaded}
 	<!-- 全高を戻るリンク + エディタ本体で分ける(SkillEditor 系の h-full 貼りの前提) -->
 	<div class="flex flex-col h-full">
-		{#if onBack}
-			<button
-				class="self-start inline-flex items-center text-sm py-0.5 mb-2 text-content-subtle hover:text-content font-medium"
-				type="button"
-				onclick={() => {
-					onBack();
-				}}
-			>
-				<span class="i-lucide-arrow-left size-4 mr-2"></span>
-				{$i18n.t('Back')}
-			</button>
-		{:else}
-			<!-- workspace/models からの利用(create/edit ページ)— 一覧へ戻る(SkillEditor 同型) -->
-			<a
-				class="self-start inline-flex items-center text-sm py-0.5 mb-2 text-content-subtle hover:text-content font-medium"
-				href="/workspace/models"
-			>
-				<span class="i-lucide-arrow-left size-4 mr-2"></span>
-				{$i18n.t('Back to list')}
-			</a>
-		{/if}
+		<!-- 一覧へ戻る(SkillEditor 同型) -->
+		<a
+			class="self-start inline-flex items-center text-sm py-0.5 mb-2 text-content-subtle hover:text-content font-medium"
+			href="/workspace/models"
+		>
+			<span class="i-lucide-arrow-left size-4 mr-2"></span>
+			{$i18n.t('Back to list')}
+		</a>
 
 		<!-- 高さは settings と同型: 全体を h-full で貼り、スクロールは右コンテンツ列の内部で行う
 	 (Prompt タブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
@@ -498,29 +481,27 @@
 											/>
 										</div>
 
-										{#if preset}
-											<div>
-												<label class="block text-sm font-semibold mb-1" for="model-base-model">
-													{$i18n.t('Base Model (From)')}
-												</label>
+										<div>
+											<label class="block text-sm font-semibold mb-1" for="model-base-model">
+												{$i18n.t('Base Model (From)')}
+											</label>
 
-												<select
-													id="model-base-model"
-													class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
-													bind:value={info.base_model_id}
-													required
+											<select
+												id="model-base-model"
+												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												bind:value={info.base_model_id}
+												required
+											>
+												<option value={null} class=" text-content"
+													>{$i18n.t('Select a base model')}</option
 												>
-													<option value={null} class=" text-content"
-														>{$i18n.t('Select a base model')}</option
+												{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as baseModel (baseModel.id)}
+													<option value={baseModel.id} class=" text-content"
+														>{baseModel.name}</option
 													>
-													{#each baseModels.filter( (m) => (model ? m.id !== model.id : true) ) as baseModel (baseModel.id)}
-														<option value={baseModel.id} class=" text-content"
-															>{baseModel.name}</option
-														>
-													{/each}
-												</select>
-											</div>
-										{/if}
+												{/each}
+											</select>
+										</div>
 									</div>
 
 									<div class="absolute inset-y-0 right-0 flex flex-col items-end">

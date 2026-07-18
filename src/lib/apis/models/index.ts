@@ -31,36 +31,6 @@ export const getModels = async () => {
 	return res;
 };
 
-export const getBaseModels = async () => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/models/base`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err;
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 export const createNewModel = async (model: object) => {
 	let error = null;
 
