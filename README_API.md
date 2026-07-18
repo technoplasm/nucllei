@@ -315,14 +315,24 @@ Other auth endpoints: `GET /api/v1/auths/` (session info + refreshed token),
 ### 4.2 Models
 
 `GET /api/models` — the canonical model list for clients: only _workspace models_
-(presets and admin-configured base models; raw connection models are not exposed),
-filtered by the caller's group ACL. The `id` field is what you pass as `model` in
-completions. Model CRUD lives under `/api/v1/models/*` (create/update/delete are
-admin-only).
+(presets), filtered by the caller's group ACL. The `id` field is what you pass as
+`model` in completions. Model CRUD lives under `/api/v1/models/*` (create/update/
+delete are admin-only). Every model row **must** declare a `base_model_id`
+(pointing at a raw connection model) — raw connection models themselves are never
+exposed as chat models; they only exist as base choices (admin inventory:
+`GET /api/models/base`).
 
 A model preset is where all capability wiring happens (`meta` fields):
 `toolIds` (tools available to the model), `filterIds` / `actionIds` (functions),
 `skillIds` + `features.skills` (skills), plus params and system prompt.
+
+`params.custom_params` (editable in the model editor's Advanced tab, "Custom")
+is a free-form key/value escape hatch merged **top-level** into the outbound
+OpenAI-compatible request body — use it for engine extensions outside the
+whitelisted params, e.g. SGLang's
+`chat_template_kwargs: {"thinking": true, "preserve_thinking": false}`.
+Values are parsed as JSON literals (invalid JSON falls back to a string);
+same-name keys win over whitelisted params (last-write).
 
 ### 4.3 Chat completions
 
