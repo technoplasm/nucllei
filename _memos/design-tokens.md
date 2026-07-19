@@ -13,7 +13,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--surface` | メイン背景 | `bg-surface` | `#f7f7f7` / `#1a1a1a` |
 | `--surface-sidebar` | サイドバー背景 | `bg-surface-sidebar` | `#eeeeee` / `#212121` |
 | `--surface-raised` | 入力欄・カードなど持ち上げ面 | `bg-surface-raised` | `#ffffff` / `#262626` |
-| `--surface-muted` | 控えめな帯(table thead 等) | `bg-surface-muted` | `#f0f0f0` / `#2d2d2d` |
+| `--surface-muted` | 控えめな帯(table thead・select 面・チップ入力面等)。**常に raised より暗い(沈む)** — dark も同順序(2026-07-19 改訂: 旧 `#2d2d2d` は raised より明るく明暗が逆転し、muted 面上に raised を置く構図(セグメント active 等)が dark で潰れていた — #85) | `bg-surface-muted` | `#e9e9e9` / `#202020` |
 | `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#313131`(dark は raised より**明るく**する方向 — 2026-07-15 改訂) |
 | `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(モノクロ現行。旧「#58 で差し替え予定」の #58 は close 済み — ブランド本デザインは #76) |
 | `--secondary(-hover/-content)` | 副ボタン(戻る/キャンセル) | `bg-secondary hover:bg-secondary-hover text-secondary-content` | `#e9e9e9` / `#333333` 地 |

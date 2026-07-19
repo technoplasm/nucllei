@@ -256,13 +256,10 @@
 		>
 			{#each SEGMENTS as segment (segment.mode)}
 				{@const active = mode === segment.mode}
-				<!-- active 面: light は raised+shadow で浮くが、dark は raised(#262626)が
-				     muted(#2d2d2d)より暗く shadow も見えない(明暗逆転)。dark だけ
-				     surface-hover へ持ち上げ + border-line の縁取りで有効状態を示す -->
 				<button
-					class="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md border transition {active
-						? 'bg-surface-raised dark:bg-surface-hover border-transparent dark:border-line text-content shadow-sm'
-						: 'border-transparent text-content-muted hover:text-content'}"
+					class="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md transition {active
+						? 'bg-surface-raised text-content shadow-sm'
+						: 'text-content-muted hover:text-content'}"
 					type="button"
 					aria-pressed={active}
 					onclick={() => setMode(segment.mode)}
