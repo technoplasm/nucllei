@@ -1,41 +1,46 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+
 	import Switch from '$lib/components/common/Switch.svelte';
-	import { createEventDispatcher } from 'svelte';
 
-	const dispatch = createEventDispatcher();
-
-	export let admin = false;
-
-	export let params: Record<string, any> = {
-		// Advanced
-		stream_response: null, // Set stream responses for this model individually
-		function_calling: null,
-		seed: null,
-		stop: null,
-		temperature: null,
-		reasoning_effort: null,
-		logit_bias: null,
-		frequency_penalty: null,
-		presence_penalty: null,
-		repeat_last_n: null,
-		repeat_penalty: null,
-		mirostat: null,
-		mirostat_eta: null,
-		mirostat_tau: null,
-		top_k: null,
-		top_p: null,
-		min_p: null,
-		tfs_z: null,
-		num_ctx: null,
-		num_batch: null,
-		num_keep: null,
-		max_tokens: null,
-		use_mmap: null,
-		use_mlock: null,
-		num_thread: null,
-		num_gpu: null,
-		template: null
-	};
+	let {
+		admin = false,
+		params = $bindable({
+			// Advanced
+			stream_response: null, // Set stream responses for this model individually
+			function_calling: null,
+			seed: null,
+			stop: null,
+			temperature: null,
+			reasoning_effort: null,
+			logit_bias: null,
+			frequency_penalty: null,
+			presence_penalty: null,
+			repeat_last_n: null,
+			repeat_penalty: null,
+			mirostat: null,
+			mirostat_eta: null,
+			mirostat_tau: null,
+			top_k: null,
+			top_p: null,
+			min_p: null,
+			tfs_z: null,
+			num_ctx: null,
+			num_batch: null,
+			num_keep: null,
+			max_tokens: null,
+			use_mmap: null,
+			use_mlock: null,
+			num_thread: null,
+			num_gpu: null,
+			template: null
+		}),
+		onChange = () => {}
+	}: {
+		admin?: boolean;
+		params?: Record<string, any>;
+		onChange?: (params: Record<string, any>) => void;
+	} = $props();
 
 	// すべての項目をここで宣言的に定義する。ラベルは実際にシステムへ渡すキー名(item.key)を
 	// そのまま表示する。マークアップは下の {#each} 一箇所だけなので、ラベルと値の位置・行
@@ -295,11 +300,11 @@
 	// chat_template_kwargs 等)をリクエスト body トップレベルへ素通しする任意 KV。
 	// 値は JSON リテラルとして解釈し、JSON として不正な入力は文字列として扱う
 	// (thinking → "thinking"、true → true、{"a":1} → object)。
-	let customRows: { key: string; text: string }[] = Object.entries(params?.custom_params ?? {}).map(
-		([key, value]) => ({
+	let customRows = $state<{ key: string; text: string }[]>(
+		Object.entries(params?.custom_params ?? {}).map(([key, value]) => ({
 			key,
 			text: typeof value === 'string' ? value : JSON.stringify(value)
-		})
+		}))
 	);
 
 	const parseCustomValue = (text: string) => {
@@ -329,9 +334,19 @@
 		syncCustom();
 	};
 
-	$: if (params) {
-		dispatch('change', params);
-	}
+	// 書き込みは全経路 setVal / syncCustom の「新 object 再代入」なので、params の参照
+	// 追跡だけで変更が漏れなく拾える(深い mutate 経路は無い)。onChange 本体は untrack に
+	// 置く — $effect 内で親コールバックを呼ぶと、親側の読み書き(info.params の spread +
+	// 再代入等)まで依存に取り込まれ「読んだ state を書く」自己ループになる(罠(5)、
+	// legacy の $: dispatch は追跡外だったため顕在化しなかった)。
+	$effect(() => {
+		void params;
+		untrack(() => {
+			if (params) {
+				onChange(params);
+			}
+		});
+	});
 </script>
 
 <div class=" space-y-1 text-sm pb-safe-bottom">
@@ -362,7 +377,7 @@
 								<button
 									class="p-1 px-1 text-sm flex rounded-sm shrink-0 outline-hidden"
 									type="button"
-									on:click={() => cycle(item)}
+									onclick={() => cycle(item)}
 								>
 									<span class="self-center">{cycleLabel(item, params[item.key])}</span>
 								</button>
@@ -370,7 +385,7 @@
 								<button
 									class="p-1 px-1 text-sm flex rounded-sm shrink-0 outline-hidden"
 									type="button"
-									on:click={() => toggleDefault(item)}
+									onclick={() => toggleDefault(item)}
 								>
 									{#if (params[item.key] ?? null) !== null}
 										<span class="i-lucide-x size-4 self-center block"></span>
@@ -389,14 +404,14 @@
 													max={item.range.max}
 													step={item.range.step}
 													value={params[item.key]}
-													on:input={(e) => setNumber(item, e)}
+													oninput={(e) => setNumber(item, e)}
 													class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-100 dark:bg-gray-700"
 												/>
 											</div>
 											<input
 												type="number"
 												value={params[item.key]}
-												on:input={(e) => setNumber(item, e)}
+												oninput={(e) => setNumber(item, e)}
 												class=" bg-transparent text-right px-0.5"
 												style="field-sizing: content;"
 												min={item.num.min}
@@ -410,7 +425,7 @@
 												type={item.inputType}
 												placeholder={item.placeholder}
 												value={params[item.key]}
-												on:input={(e) =>
+												oninput={(e) =>
 													item.inputType === 'number' ? setNumber(item, e) : setText(item, e)}
 												class="w-full rounded-lg py-1 px-1 text-sm text-content dark:bg-gray-850 outline-hidden"
 												autocomplete="off"
@@ -451,7 +466,7 @@
 					type="text"
 					placeholder="chat_template_kwargs"
 					bind:value={row.key}
-					on:input={syncCustom}
+					oninput={syncCustom}
 					class="w-56 shrink-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
 					autocomplete="off"
 				/>
@@ -459,7 +474,7 @@
 					type="text"
 					placeholder={'{"thinking": true}'}
 					bind:value={row.text}
-					on:input={syncCustom}
+					oninput={syncCustom}
 					class="flex-1 min-w-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
 					autocomplete="off"
 				/>
@@ -467,7 +482,7 @@
 					class="p-1 shrink-0 text-content-muted hover:text-content"
 					type="button"
 					aria-label="Remove"
-					on:click={() => removeCustomRow(index)}
+					onclick={() => removeCustomRow(index)}
 				>
 					<span class="i-lucide-x size-4 block"></span>
 				</button>
@@ -477,7 +492,7 @@
 		<button
 			class="flex items-center gap-1 p-1 text-sm text-content-muted hover:text-content"
 			type="button"
-			on:click={addCustomRow}
+			onclick={addCustomRow}
 		>
 			<span class="i-lucide-plus size-4 block"></span>
 			<span>Add</span>

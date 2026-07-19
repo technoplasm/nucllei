@@ -1,19 +1,24 @@
-<script>
+<script lang="ts">
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import AccessControl from './AccessControl.svelte';
 
-	export let show = false;
-	export let accessControl = {};
-	export let allowPublic = true;
-
-	// llens(#69): file 用 variant('default' | 'file')。AccessControl へパススルー。
-	/** @type {'default' | 'file'} */
-	export let variant = 'default';
-
-	export let onChange = () => {};
+	let {
+		show = $bindable(false),
+		accessControl = $bindable({}),
+		allowPublic = true,
+		// llens(#69): file 用 variant('default' | 'file')。AccessControl へパススルー。
+		variant = 'default',
+		onChange = () => {}
+	}: {
+		show?: boolean;
+		accessControl?: Record<string, unknown> | null;
+		allowPublic?: boolean;
+		variant?: 'default' | 'file';
+		onChange?: (accessControl: Record<string, unknown> | null) => void;
+	} = $props();
 </script>
 
 <Modal size="sm" bind:show>
@@ -25,7 +30,7 @@
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close')}
-				on:click={() => {
+				onclick={() => {
 					show = false;
 				}}
 			>

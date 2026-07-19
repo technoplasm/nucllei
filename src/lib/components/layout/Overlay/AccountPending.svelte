@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { getAdminDetails, userSignOut } from '$lib/apis/auths';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { user } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
 	// llens(#31): pending(承認待ち)と disabled(無効化)で案内文言を分ける。
 	// 案内画面の本仕様は #59 — ここは role 分岐の最小実装。
-	$: isDisabled = $user?.role === 'disabled';
+	const isDisabled = $derived($user?.role === 'disabled');
 
-	let adminDetails: { name?: string; email?: string } | null = null;
+	let adminDetails = $state<{ name?: string; email?: string } | null>(null);
 
 	onMount(async () => {
 		adminDetails = await getAdminDetails().catch((err) => {
@@ -58,7 +58,7 @@
 				<div class=" mt-6 mx-auto relative group w-fit">
 					<button
 						class="relative z-20 flex px-5 py-2 rounded-full bg-white border border-gray-100 dark:border-none hover:bg-gray-100 text-content transition font-medium text-sm"
-						on:click={async () => {
+						onclick={async () => {
 							location.href = '/';
 						}}
 					>
@@ -67,7 +67,7 @@
 
 					<button
 						class="text-xs text-center w-full mt-2 text-content-muted underline"
-						on:click={async () => {
+						onclick={async () => {
 							// llens(#70 B1): cookie セッションの破棄は backend の signout が行う
 							await userSignOut().catch(() => {});
 							localStorage.removeItem('token');

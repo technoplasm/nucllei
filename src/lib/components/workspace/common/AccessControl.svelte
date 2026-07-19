@@ -1,35 +1,41 @@
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onMount, untrack } from 'svelte';
 
 	const i18n = getContext('i18n');
 
 	import { getGroups } from '$lib/apis/groups';
-
-	export let onChange: Function = () => {};
 
 	// llens(#66): ACL は read(使える範囲)一本。write 側の UI・データは廃止
 	// (定義編集の権限はロールで決まる — model/tool=admin、skill=editor)。
 	type AccessControlValue = {
 		read?: { public?: boolean; group_ids?: string[]; user_ids?: string[] };
 	};
-	export let accessControl: AccessControlValue | null = {};
 
-	export let allowPublic = true;
+	let {
+		onChange = () => {},
+		accessControl = $bindable({}),
+		allowPublic = true,
+		// llens(#69): file 用 variant。file の ACL 意味論は他エンティティと逆:
+		//   null = 非公開(owner のみ・既定)
+		//   {read:{group_ids,user_ids}} = 列挙先に公開(グループ共有)
+		//   {read:{public:true}} = 全体公開
+		// variant='file' では 3 値セレクタで受け渡しも file 意味論のまま行う
+		// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
+		variant = 'default'
+	}: {
+		onChange?: (accessControl: AccessControlValue | null) => void;
+		accessControl?: AccessControlValue | null;
+		allowPublic?: boolean;
+		variant?: 'default' | 'file';
+	} = $props();
 
-	// llens(#69): file 用 variant。file の ACL 意味論は他エンティティと逆:
-	//   null = 非公開(owner のみ・既定)
-	//   {read:{group_ids,user_ids}} = 列挙先に公開(グループ共有)
-	//   {read:{public:true}} = 全体公開
-	// variant='file' では 3 値セレクタで受け渡しも file 意味論のまま行う
-	// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
-	export let variant: 'default' | 'file' = 'default';
-
-	let selectedGroupId = '';
-	let groups: { id: string; name: string }[] = [];
+	let selectedGroupId = $state('');
+	let groups = $state<{ id: string; name: string }[]>([]);
 
 	// file variant の現在モード(accessControl から導出 — 二重 state を持たない)
-	$: fileMode =
-		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'groups';
+	const fileMode = $derived(
+		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'groups'
+	);
 
 	const setFileMode = (mode: string) => {
 		if (mode === 'private') {
@@ -46,15 +52,17 @@
 		}
 	};
 
-	$: if (variant === 'default' && !allowPublic && accessControl === null) {
-		accessControl = {
-			read: {
-				group_ids: [],
-				user_ids: []
-			}
-		};
-		onChange(accessControl);
-	}
+	$effect(() => {
+		if (variant === 'default' && !allowPublic && accessControl === null) {
+			accessControl = {
+				read: {
+					group_ids: [],
+					user_ids: []
+				}
+			};
+			untrack(() => onChange(accessControl));
+		}
+	});
 
 	onMount(async () => {
 		groups = await getGroups();
@@ -94,18 +102,32 @@
 		}
 	});
 
-	$: onChange(accessControl);
+	// group_ids の増減は新 object 再代入で行う(bindable プロップの set として確実に
+	// 伝播させ、この effect の依存(accessControl 参照)にも掛ける — 深い mutate だと
+	// 参照が変わらず onChange が発火しない)。onChange 本体は untrack に置く — 親
+	// コールバック側の読み書きまで依存に取り込むと自己ループになる(罠(5))。
+	$effect(() => {
+		void accessControl;
+		untrack(() => onChange(accessControl));
+	});
 
 	// グループ選択 UI を出す条件(default: private 選択時 / file: グループ共有選択時)
-	$: showGroups = variant === 'file' ? fileMode === 'groups' : accessControl !== null;
+	const showGroups = $derived(variant === 'file' ? fileMode === 'groups' : accessControl !== null);
 
-	$: if (selectedGroupId) {
-		onSelectGroup();
-	}
+	$effect(() => {
+		if (selectedGroupId) {
+			onSelectGroup();
+		}
+	});
 
 	const onSelectGroup = () => {
 		if (selectedGroupId !== '' && accessControl?.read) {
-			accessControl.read.group_ids = [...(accessControl.read.group_ids ?? []), selectedGroupId];
+			accessControl = {
+				read: {
+					...accessControl.read,
+					group_ids: [...(accessControl.read.group_ids ?? []), selectedGroupId]
+				}
+			};
 
 			selectedGroupId = '';
 		}
@@ -135,7 +157,7 @@
 						id="models"
 						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={fileMode}
-						on:change={(e) => {
+						onchange={(e) => {
 							setFileMode(e.currentTarget.value);
 						}}
 					>
@@ -158,7 +180,7 @@
 						id="models"
 						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
 						value={accessControl !== null ? 'private' : 'public'}
-						on:change={(e) => {
+						onchange={(e) => {
 							if (e.currentTarget.value === 'public') {
 								accessControl = null;
 							} else {
@@ -242,11 +264,16 @@
 										class=" rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 										type="button"
 										aria-label={$i18n.t('Remove')}
-										on:click={() => {
+										onclick={() => {
 											if (accessControl?.read) {
-												accessControl.read.group_ids = (accessControl.read.group_ids ?? []).filter(
-													(id) => id !== group.id
-												);
+												accessControl = {
+													read: {
+														...accessControl.read,
+														group_ids: (accessControl.read.group_ids ?? []).filter(
+															(id) => id !== group.id
+														)
+													}
+												};
 											}
 										}}
 									>

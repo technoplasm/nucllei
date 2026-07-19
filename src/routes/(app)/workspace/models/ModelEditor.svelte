@@ -682,7 +682,7 @@
 									<AdvancedParams
 										admin={true}
 										bind:params
-										on:change={() => {
+										onChange={() => {
 											info.params = { ...info.params, ...params };
 										}}
 									/>
