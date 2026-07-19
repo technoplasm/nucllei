@@ -1,8 +1,12 @@
-"""init — 出荷前 baseline(#80、2026-07-17)
+"""init — 出荷前 baseline(#80、2026-07-17 / 2026-07-20 再squash)
 
 初リリース tag 以前の migration 履歴(upstream OWUI 由来の peewee 18 本 + alembic 27 本)を
 現行モデルからの autogenerate 1 本に squash したもの。旧 OWUI からのデータ移行は行わない
 (fresh DB 方針)。初リリース以降の schema 変更はこの上に revision を積む。
+
+2026-07-20(初リリース直前・デプロイ先もゼロから): baseline 後に積んだ 3 revision
+(chat.deleted_at 追加 / 生モデル行の掃除 = fresh DB では無意味 / folder 撤去)を
+本 baseline へ畳み直し、再び 1 本にした。
 
 Revision ID: c33997f844fc
 Revises:
@@ -46,7 +50,8 @@ def upgrade() -> None:
         sa.Column("archived", sa.Boolean(), nullable=True),
         sa.Column("pinned", sa.Boolean(), nullable=True),
         sa.Column("meta", sa.JSON(), server_default="{}", nullable=True),
-        sa.Column("folder_id", sa.Text(), nullable=True),
+        # llens(#31): soft delete(監査証憑の保全 — 行は消さず削除時刻を立てる)
+        sa.Column("deleted_at", sa.BigInteger(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("share_id"),
     )
@@ -77,19 +82,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.BigInteger(), nullable=True),
         sa.Column("updated_at", sa.BigInteger(), nullable=True),
         sa.Column("accessed_at", sa.BigInteger(), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_table(
-        "folder",
-        sa.Column("id", sa.Text(), nullable=False),
-        sa.Column("parent_id", sa.Text(), nullable=True),
-        sa.Column("user_id", sa.Text(), nullable=True),
-        sa.Column("name", sa.Text(), nullable=True),
-        sa.Column("items", sa.JSON(), nullable=True),
-        sa.Column("meta", sa.JSON(), nullable=True),
-        sa.Column("is_expanded", sa.Boolean(), nullable=True),
-        sa.Column("created_at", sa.BigInteger(), nullable=True),
-        sa.Column("updated_at", sa.BigInteger(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
@@ -191,7 +183,6 @@ def downgrade() -> None:
     op.drop_table("model")
     op.drop_table("group")
     op.drop_table("function")
-    op.drop_table("folder")
     op.drop_table("file")
     op.drop_table("config")
     op.drop_table("chat")
