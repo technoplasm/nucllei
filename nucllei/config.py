@@ -599,11 +599,17 @@ load_oauth_providers()
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", NUCLLEI_DIR / "static")).resolve()
 
-for file_path in (FRONTEND_BUILD_DIR / "static").glob("**/*"):
+# 同梱既定(ブランド派生物)の供給元。ビルド済みなら build/static、無ければ
+# FE ソースの static/static(= build/static の元)へフォールバック — fresh clone や
+# CI の pytest(FE ビルドなし)でも /static の同梱既定 fallback(#84)が成立する。
+# 本番 docker は build があるためこの分岐に入らない。
+_frontend_static_src = FRONTEND_BUILD_DIR / "static"
+if not _frontend_static_src.is_dir():
+    _frontend_static_src = NUCLLEI_DIR.parent / "static" / "static"
+
+for file_path in _frontend_static_src.glob("**/*"):
     if file_path.is_file():
-        target_path = STATIC_DIR / file_path.relative_to(
-            (FRONTEND_BUILD_DIR / "static")
-        )
+        target_path = STATIC_DIR / file_path.relative_to(_frontend_static_src)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.copyfile(file_path, target_path)

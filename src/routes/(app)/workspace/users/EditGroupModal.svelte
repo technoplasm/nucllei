@@ -174,9 +174,7 @@
 							{/each}
 						</div>
 
-						<div
-							class="flex-1 mt-1 lg:mt-1 lg:h-[22rem] lg:max-h-[22rem] overflow-y-auto"
-						>
+						<div class="flex-1 mt-1 lg:mt-1 lg:h-[22rem] lg:max-h-[22rem] overflow-y-auto">
 							{#if selectedTab === 'permissions'}
 								<GroupPermissions bind:permissions />
 							{:else if selectedTab === 'users'}
