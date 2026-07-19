@@ -625,32 +625,32 @@
 					></div>
 				</div>
 			</div>
+		</div>
 
-			<div class="px-2 pb-1 shrink-0">
-				<div class="flex flex-col font-primary">
-					{#if $user !== undefined && $user !== null}
-						<UserMenu
-							onShow={(payload) => {
-								if (payload === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
+		<div class="px-2 pb-1 shrink-0">
+			<div class="flex flex-col font-primary">
+				{#if $user !== undefined && $user !== null}
+					<UserMenu
+						onShow={(payload) => {
+							if (payload === 'archived-chat') {
+								showArchivedChats.set(true);
+							}
+						}}
+					>
+						<button
+							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover"
 						>
-							<button
-								class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover"
-							>
-								<div class=" self-center mr-3">
-									<img
-										src={$user?.profile_image_url}
-										class=" max-w-[30px] object-cover rounded-full"
-										alt="User profile"
-									/>
-								</div>
-								<div class=" self-center font-medium">{$user?.name}</div>
-							</button>
-						</UserMenu>
-					{/if}
-				</div>
+							<div class=" self-center mr-3">
+								<img
+									src={$user?.profile_image_url}
+									class=" max-w-[30px] object-cover rounded-full"
+									alt="User profile"
+								/>
+							</div>
+							<div class=" self-center font-medium">{$user?.name}</div>
+						</button>
+					</UserMenu>
+				{/if}
 			</div>
 		</div>
 	</div>
