@@ -22,6 +22,7 @@ from nucllei.models.users import Users, merge_additional_user_meta
 
 from nucllei.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from nucllei.env import (
+    DATA_DIR,
     WEBUI_AUTH,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
@@ -629,34 +630,23 @@ async def add_user(
 
 
 ############################
-# GetAdminDetails
+# GetPendingMessage
 ############################
 
 
-@router.get("/admin/details")
-async def get_admin_details(request: Request, user=Depends(get_current_user)):
-    if request.app.state.config.SHOW_ADMIN_DETAILS:
-        admin_email = request.app.state.config.ADMIN_EMAIL
-        admin_name = None
+@router.get("/pending_message")
+async def get_pending_message(user=Depends(get_current_user)):
+    """pending(承認待ち)画面の配備先固有メッセージ(#59)。
 
-        log.info(f"Admin details - Email: {admin_email}, Name: {admin_name}")
-
-        if admin_email:
-            admin = Users.get_user_by_email(admin_email)
-            if admin:
-                admin_name = admin.name
-        else:
-            admin = Users.get_first_user()
-            if admin:
-                admin_email = admin.email
-                admin_name = admin.name
-
-        return {
-            "name": admin_name,
-            "email": admin_email,
-        }
-    else:
-        raise HTTPException(400, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+    DATA_DIR/pending.md を都度読む(表示頻度が低く、差し替えを再起動なしで
+    反映するため)。無ければ null — フロントは既定文言(i18n)に落ちる。
+    """
+    path = DATA_DIR / "pending.md"
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return {"content": None}
+    return {"content": content or None}
 
 
 ############################
@@ -667,7 +657,6 @@ async def get_admin_details(request: Request, user=Depends(get_current_user)):
 @router.get("/admin/config")
 async def get_admin_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,
@@ -680,7 +669,6 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
 
 
 class AdminConfig(BaseModel):
-    SHOW_ADMIN_DETAILS: bool
     WEBUI_URL: str
     ENABLE_SIGNUP: bool
     ENABLE_API_KEY: bool
@@ -695,7 +683,6 @@ class AdminConfig(BaseModel):
 async def update_admin_config(
     request: Request, form_data: AdminConfig, user=Depends(get_admin_user)
 ):
-    request.app.state.config.SHOW_ADMIN_DETAILS = form_data.SHOW_ADMIN_DETAILS
     request.app.state.config.WEBUI_URL = form_data.WEBUI_URL
     request.app.state.config.ENABLE_SIGNUP = form_data.ENABLE_SIGNUP
 
@@ -719,7 +706,6 @@ async def update_admin_config(
     request.app.state.config.ENABLE_USER_WEBHOOKS = form_data.ENABLE_USER_WEBHOOKS
 
     return {
-        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
         "WEBUI_URL": request.app.state.config.WEBUI_URL,
         "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
         "ENABLE_API_KEY": request.app.state.config.ENABLE_API_KEY,

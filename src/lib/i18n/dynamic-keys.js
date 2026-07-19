@@ -23,6 +23,9 @@
 // - layout/Sidebar.svelte: t(chat.time_range)(getTimeRange の固定 4 値。月名・年は
 //   toLocaleString 由来のロケール依存ランタイム値なので登録しない)
 // - chat/Messages/ResponseMessage/tts.svelte.ts: 静的 t() だが .ts のため parser が読まない
+// - routes/(app)/chat/Chat/{send,events}.ts / MessageInput/uploads.ts(#70 分割): 同上。
+//   Chat.svelte / MessageInput.svelte から .ts へ移った静的 t() — 分割時に登録漏れで
+//   生きた訳が prune されかけた(2026-07-19 検出)。.svelte → .ts の移動時はここへ追従
 //
 // ※ AdvancedParams.svelte / workspace/functions/+page.svelte のラベルは t() を通さず
 //   生表示のため登録しない。
@@ -56,6 +59,7 @@
 // t('Expand reasoning and tool calls')
 // t('External')
 // t('File')
+// t('File size should not exceed {{maxSize}} MB.')
 // t('Files')
 // t('Filter')
 // t('Focus chat input')
@@ -72,21 +76,29 @@
 // t('Last Active')
 // t('License')
 // t('Local')
+// t('Model {{modelId}} not found')
+// t('Model {{modelName}} is not vision capable')
+// t('Model not selected')
 // t('Models')
 // t('Name')
+// t('New Chat')
 // t('No content to speak')
 // t('None')
 // t('Notification Sound')
 // t('Notifications')
+// t('Oops! There are files still uploading. Please wait for the upload to complete.')
+// t('Oops! There was an error in the previous response.')
 // t('Open new chat')
 // t('Paragraphs')
 // t('Pipelines')
+// t('Please enter a prompt')
 // t('Previous 30 days')
 // t('Previous 7 days')
 // t('Punctuation')
 // t('RTL')
 // t('Role')
 // t('Scroll to bottom when switching between branches')
+// t('Selected model(s) do not support image inputs')
 // t('Settings')
 // t('Show shortcuts')
 // t('Skills')
@@ -98,10 +110,14 @@
 // t('Toggle sidebar')
 // t('Tools')
 // t('Trigger a skill')
+// t('Uh-oh! There was an issue with the response.')
 // t('Users')
 // t('Voice')
 // t('Widescreen Mode')
 // t('Yesterday')
+// t('You can only chat with a maximum of {{maxCount}} file(s) at a time.')
+// t('You cannot upload an empty file.')
+// t('You do not have permission to upload files.')
 // t('admin')
 // t('citations')
 // t('pending')

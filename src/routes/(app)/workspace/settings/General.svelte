@@ -157,14 +157,6 @@
 						<Switch bind:state={adminConfig.ENABLE_SIGNUP} />
 					</div>
 
-					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Show Admin Details in Account Pending Overlay')}
-						</div>
-
-						<Switch bind:state={adminConfig.SHOW_ADMIN_DETAILS} />
-					</div>
-
 					<div class="mb-2.5 flex w-full justify-between pr-2">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Enable API Key')}</div>
 

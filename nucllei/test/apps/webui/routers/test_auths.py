@@ -161,22 +161,32 @@ class TestAuths(AbstractPostgresTest):
         assert data["token"] is not None and len(data["token"]) > 0
         assert data["token_type"] == "Bearer"
 
-    def test_get_admin_details(self):
-        self.auths.insert_new_auth(
-            email="john.doe@nucllei.local",
-            password="password",
-            name="John Doe",
-            profile_image_url="/user.png",
-            role="admin",
-        )
-        with mock_webui_user():
-            response = self.fast_api_client.get(self.create_url("/admin/details"))
+    def test_get_pending_message(self, tmp_path):
+        """#59: DATA_DIR/pending.md を都度読む。無ければ content: null。"""
+        from unittest.mock import patch
 
-        assert response.status_code == 200
-        assert response.json() == {
-            "name": "John Doe",
-            "email": "john.doe@nucllei.local",
-        }
+        with patch("nucllei.routers.auths.DATA_DIR", tmp_path):
+            with mock_webui_user():
+                response = self.fast_api_client.get(self.create_url("/pending_message"))
+            assert response.status_code == 200
+            assert response.json() == {"content": None}
+
+            (tmp_path / "pending.md").write_text(
+                "# 承認待ちです\n\n内線 1234 へご連絡ください。", encoding="utf-8"
+            )
+            with mock_webui_user():
+                response = self.fast_api_client.get(self.create_url("/pending_message"))
+            assert response.status_code == 200
+            assert response.json() == {
+                "content": "# 承認待ちです\n\n内線 1234 へご連絡ください。"
+            }
+
+            # 空ファイルは「無し」と同じ扱い(空文字の md を描画しない)
+            (tmp_path / "pending.md").write_text("   \n", encoding="utf-8")
+            with mock_webui_user():
+                response = self.fast_api_client.get(self.create_url("/pending_message"))
+            assert response.status_code == 200
+            assert response.json() == {"content": None}
 
     def test_create_api_key_(self):
         user = self.auths.insert_new_auth(

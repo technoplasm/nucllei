@@ -176,7 +176,6 @@ the UI, next to the Nucllei product version).
 | `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE`                                                                                                                              | env  | = session values        | auth (`token`) cookie flags                                                                                      |
 | `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER`                                                                                                                    | env  | unset                   | header-based SSO behind a trusted proxy                                                                          |
 | `BYPASS_MODEL_ACCESS_CONTROL`                                                                                                                                                           | env  | `false`                 | skip per-model group ACL                                                                                         |
-| `SHOW_ADMIN_DETAILS` / `ADMIN_EMAIL`                                                                                                                                                    | RC   | `true` / unset          | admin contact shown to pending users                                                                             |
 | `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS`                                                                                                                                      | env  | `true` / `true`         | admin DB export / admin access to user chats                                                                     |
 | `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env  | unset                   | each sets the corresponding response security header when present                                                |
 
@@ -298,6 +297,12 @@ All three are interchangeable on all endpoints (API keys can additionally be
 restricted to a path allowlist — §3.3). Role tiers: `pending` (no access),
 `user`, `admin`.
 
+Pending users land on a dedicated `/pending` page. Its content is customized by
+mounting a markdown file at **`DATA_DIR/pending.md`** (read per request — edits
+apply without a restart; served via `GET /api/v1/auths/pending_message`). When
+the file is absent the page shows a built-in default. There is no env/config
+knob for this message.
+
 ```sh
 # sign in → JWT
 JWT=$(curl -s http://HOST/api/v1/auths/signin -H 'Content-Type: application/json' \
@@ -310,7 +315,8 @@ KEY=$(curl -s -X POST http://HOST/api/v1/auths/api_key \
 
 Other auth endpoints: `GET /api/v1/auths/` (session info + refreshed token),
 `GET /api/v1/auths/signout`, `POST /api/v1/auths/add` (admin: create a user),
-`POST /api/v1/auths/ldap`.
+`POST /api/v1/auths/ldap`, `GET /api/v1/auths/pending_message` (the
+`DATA_DIR/pending.md` content as `{"content": string | null}`).
 
 ### 4.2 Models
 

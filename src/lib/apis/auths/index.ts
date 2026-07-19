@@ -1,10 +1,11 @@
 import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const getAdminDetails = async () => {
+// pending 画面の配備先固有メッセージ(#59)。無ければ { content: null }
+export const getPendingMessage = async (): Promise<{ content: string | null }> => {
 	let error = null;
 
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/admin/details`, {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/pending_message`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'

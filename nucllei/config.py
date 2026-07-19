@@ -1043,19 +1043,6 @@ except Exception as e:
 WEBUI_BANNERS = RuntimeConfig("WEBUI_BANNERS", "ui.banners", banners)
 
 
-SHOW_ADMIN_DETAILS = RuntimeConfig(
-    "SHOW_ADMIN_DETAILS",
-    "auth.admin.show",
-    os.environ.get("SHOW_ADMIN_DETAILS", "true").lower() == "true",
-)
-
-ADMIN_EMAIL = RuntimeConfig(
-    "ADMIN_EMAIL",
-    "auth.admin.email",
-    os.environ.get("ADMIN_EMAIL", None),
-)
-
-
 ####################################
 # TASKS
 ####################################
