@@ -1,8 +1,6 @@
 <script lang="ts">
 	import Fuse from 'fuse.js';
 	import { getContext } from 'svelte';
-	import { WEBUI_NAME } from '$lib/stores';
-	import { APP_VERSION } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
@@ -40,10 +38,6 @@
 	{#if filteredPrompts.length > 0}
 		<span class="i-lucide-zap size-3.5 block"></span>
 		{$i18n.t('Suggested')}
-	{:else}
-		<div class="flex w-full text-center items-center justify-center self-start text-content-subtle">
-			{$WEBUI_NAME} ‧ {APP_VERSION}
-		</div>
 	{/if}
 </div>
 

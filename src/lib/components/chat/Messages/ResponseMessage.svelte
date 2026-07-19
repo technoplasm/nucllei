@@ -120,7 +120,7 @@
 
 {#key message.id}
 	<div class=" flex w-full message-{message.id}" id="message-{message.id}" dir={chatDirection}>
-		<div class={`shrink-0 ltr:mr-3 rtl:ml-3`}>
+		<div class="shrink-0 ltr:mr-3 rtl:ml-3 max-sm:hidden">
 			<ProfileImage
 				src={model?.info?.meta?.profile_image_url ??
 					($i18n.language === 'dg-DG' ? `/doge.png` : DEFAULT_MODEL_IMAGE_URL)}
