@@ -562,9 +562,7 @@
 								</div>
 
 								<div class="my-2">
-									<div class="px-3 py-2 bg-surface-raised rounded-lg max-w-xs">
-										<AccessControl bind:accessControl allowPublic={true} />
-									</div>
+									<AccessControl bind:accessControl allowPublic={true} />
 								</div>
 
 								<div class="my-2">
