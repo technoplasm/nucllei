@@ -264,7 +264,8 @@ class Attachment:
 		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Function Content')}</div>
 	</div>
 
-	<div class="flex-1 min-h-0 mb-2 rounded-lg overflow-auto bg-white">
+	<!-- 縦が狭い画面ではエディタを潰さず(min-h-64)ページスクロールに逃がす -->
+	<div class="flex-1 min-h-64 mb-2 rounded-lg overflow-auto bg-white">
 		{#key edit ? 'edit' : selectedType}
 			<CodeEditor
 				bind:this={codeEditor}
