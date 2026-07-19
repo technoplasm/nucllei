@@ -36,7 +36,6 @@ export type ChatListItem = {
 	created_at: number;
 	time_range?: string;
 	pinned?: boolean;
-	folder_id?: string | null;
 };
 
 export const chats: Writable<ChatListItem[] | null> = writable(null);

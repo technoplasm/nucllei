@@ -13,7 +13,6 @@ from nucllei.models.chats import (
     ChatTitleIdResponse,
 )
 from nucllei.models.files import FileForm, Files
-from nucllei.models.folders import Folders
 from nucllei.models.users import Users
 
 from nucllei.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
@@ -262,26 +261,6 @@ async def search_user_chats(
 
 
 ############################
-# GetChatsByFolderId
-############################
-
-
-@router.get("/folder/{folder_id}", response_model=list[ChatResponse])
-async def get_chats_by_folder_id(folder_id: str, user=Depends(get_verified_user)):
-    folder_ids = [folder_id]
-    children_folders = Folders.get_children_folders_by_id_and_user_id(
-        folder_id, user.id
-    )
-    if children_folders:
-        folder_ids.extend([folder.id for folder in children_folders])
-
-    return [
-        ChatResponse(**chat.model_dump())
-        for chat in Chats.get_chats_by_folder_ids_and_user_id(folder_ids, user.id)
-    ]
-
-
-############################
 # GetPinnedChats
 ############################
 
@@ -392,7 +371,6 @@ def _to_admin_chat_list_item(chat, user_name: Optional[str]) -> dict:
         "archived": chat.archived,
         "pinned": chat.pinned,
         "share_id": chat.share_id,
-        "folder_id": chat.folder_id,
         "deleted_at": chat.deleted_at,
     }
 
@@ -852,26 +830,3 @@ async def delete_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
         )
 
 
-############################
-# UpdateChatFolderIdById
-############################
-
-
-class ChatFolderIdForm(BaseModel):
-    folder_id: Optional[str] = None
-
-
-@router.post("/{id}/folder", response_model=Optional[ChatResponse])
-async def update_chat_folder_id_by_id(
-    id: str, form_data: ChatFolderIdForm, user=Depends(get_verified_user)
-):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        chat = Chats.update_chat_folder_id_by_id_and_user_id(
-            id, user.id, form_data.folder_id
-        )
-        return ChatResponse(**chat.model_dump())
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT()
-        )

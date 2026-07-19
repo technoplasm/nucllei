@@ -33,12 +33,7 @@ export const createNewChat = async (chat: object) => {
 	return res;
 };
 
-export const importChat = async (
-	chat: object,
-	meta: object | null,
-	pinned?: boolean,
-	folderId?: string | null
-) => {
+export const importChat = async (chat: object, meta: object | null, pinned?: boolean) => {
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/import`, {
@@ -50,8 +45,7 @@ export const importChat = async (
 		body: JSON.stringify({
 			chat: chat,
 			meta: meta ?? {},
-			pinned: pinned,
-			folder_id: folderId
+			pinned: pinned
 		})
 	})
 		.then(async (res) => {
@@ -372,36 +366,6 @@ export const getChatListBySearchText = async (text: string, page: number = 1) =>
 	}));
 };
 
-export const getChatsByFolderId = async (folderId: string) => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/folder/${folderId}`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err;
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 export const getAllArchivedChats = async () => {
 	let error = null;
 
@@ -717,40 +681,6 @@ export const shareChatById = async (id: string) => {
 			Accept: 'application/json',
 			'Content-Type': 'application/json'
 		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err;
-
-			console.log(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateChatFolderIdById = async (id: string, folderId?: string | null) => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/folder`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({
-			folder_id: folderId
-		})
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();

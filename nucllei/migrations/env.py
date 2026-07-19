@@ -10,7 +10,6 @@ from nucllei.models import (  # noqa: F401
     chats,
     configs,
     files,
-    folders,
     functions,
     groups,
     models,

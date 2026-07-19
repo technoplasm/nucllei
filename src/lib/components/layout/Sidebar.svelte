@@ -27,10 +27,8 @@
 		getPinnedChatList,
 		toggleChatPinnedStatusById,
 		getChatById,
-		updateChatFolderIdById,
 		importChat
 	} from '$lib/apis/chats';
-	import { getFolders } from '$lib/apis/folders';
 
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -38,8 +36,6 @@
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import Folder from '../common/Folder.svelte';
-	import Folders from './Sidebar/Folders.svelte';
-	import type { SidebarFolder } from './Sidebar/RecursiveFolder.svelte';
 
 	let navElement: HTMLDivElement | null = $state(null);
 
@@ -97,47 +93,9 @@
 	let chatListLoading = false;
 	let allChatsLoaded = $state(false);
 
-	let folders: Record<string, SidebarFolder> = $state({});
-
-	const initFolders = async () => {
-		const folderList: SidebarFolder[] = await getFolders().catch((error) => {
-			toast.error(`${error}`);
-			return [];
-		});
-
-		folders = {};
-
-		// First pass: Initialize all folder entries
-		for (const folder of folderList) {
-			// Ensure folder is added to folders with its data
-			folders[folder.id] = { ...(folders[folder.id] || {}), ...folder };
-		}
-
-		// Second pass: Tie child folders to their parents
-		for (const folder of folderList) {
-			if (folder.parent_id) {
-				// Ensure the parent folder is initialized if it doesn't exist
-				if (!folders[folder.parent_id]) {
-					folders[folder.parent_id] = {} as SidebarFolder; // Create a placeholder if not already present
-				}
-
-				// Initialize childrenIds array if it doesn't exist and add the current folder id
-				folders[folder.parent_id].childrenIds = folders[folder.parent_id].childrenIds
-					? [...(folders[folder.parent_id].childrenIds ?? []), folder.id]
-					: [folder.id];
-
-				// Sort the children by updated_at field
-				folders[folder.parent_id].childrenIds?.sort((a, b) => {
-					return folders[b].updated_at - folders[a].updated_at;
-				});
-			}
-		}
-	};
-
 	const initChatList = async () => {
 		// Reset pagination variables
 		pinnedChats.set(await getPinnedChatList());
-		initFolders();
 
 		currentChatPage.set(1);
 		allChatsLoaded = false;
@@ -162,14 +120,10 @@
 		chatListLoading = false;
 	};
 
-	const importChatHandler = async (
-		items: any[],
-		pinned = false,
-		folderId: string | null = null
-	) => {
+	const importChatHandler = async (items: any[], pinned = false) => {
 		for (const item of items) {
 			if (item.chat) {
-				await importChat(item.chat, item?.meta ?? {}, pinned, folderId);
+				await importChat(item.chat, item?.meta ?? {}, pinned);
 			}
 		}
 
@@ -544,13 +498,6 @@
 										}
 
 										if (chat) {
-											if (chat.folder_id) {
-												await updateChatFolderIdById(chat.id, null).catch((error) => {
-													toast.error(`${error}`);
-													return null;
-												});
-											}
-
 											if (!chat.pinned) {
 												await toggleChatPinnedStatusById(chat.id);
 											}
@@ -585,21 +532,6 @@
 								</div>
 							</Folder>
 						</div>
-					{/if}
-
-					{#if folders}
-						<Folders
-							{folders}
-							onImport={({ folderId, items }) => {
-								importChatHandler(items, false, folderId);
-							}}
-							onUpdate={() => {
-								initChatList();
-							}}
-							onChange={() => {
-								initChatList();
-							}}
-						/>
 					{/if}
 
 					<div class="px-1.5 flex-1 flex flex-col">

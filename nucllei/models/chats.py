@@ -35,7 +35,6 @@ class Chat(Base):
     pinned = Column(Boolean, default=False, nullable=True)
 
     meta = Column(JSON, server_default="{}")
-    folder_id = Column(Text, nullable=True)
 
     # llens(#31): soft delete。監査証憑の保全のため行は消さず、削除時刻(epoch 秒)を立てる。
     # ユーザー向けクエリは deleted_at IS NULL で除外し、admin 一覧(#19)では見える。
@@ -58,7 +57,6 @@ class ChatModel(BaseModel):
     pinned: Optional[bool] = False
 
     meta: dict = {}
-    folder_id: Optional[str] = None
     deleted_at: Optional[int] = None
 
 
@@ -74,7 +72,6 @@ class ChatForm(BaseModel):
 class ChatImportForm(ChatForm):
     meta: Optional[dict] = {}
     pinned: Optional[bool] = False
-    folder_id: Optional[str] = None
 
 
 class ChatTitleMessagesForm(BaseModel):
@@ -97,7 +94,6 @@ class ChatResponse(BaseModel):
     archived: bool
     pinned: Optional[bool] = False
     meta: dict = {}
-    folder_id: Optional[str] = None
     # llens(#19): admin の直参照ビュー(/share/{id} の admin 分岐)が
     # 削除済み(soft delete)を明示表示するため露出する
     deleted_at: Optional[int] = None
@@ -165,7 +161,6 @@ class ChatTable:
                     "chat": form_data.chat,
                     "meta": form_data.meta,
                     "pinned": form_data.pinned,
-                    "folder_id": form_data.folder_id,
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                 }
@@ -490,7 +485,7 @@ class ChatTable:
         limit: Optional[int] = None,
     ) -> list[ChatTitleIdResponse]:
         with get_db() as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter_by(folder_id=None)
+            query = db.query(Chat).filter_by(user_id=user_id)
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter(Chat.deleted_at == None)
 
@@ -873,51 +868,6 @@ class ChatTable:
                 raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
             return [{"model": row.model, "chat_count": row.chat_count} for row in rows]
 
-    def get_chats_by_folder_id_and_user_id(
-        self, folder_id: str, user_id: str
-    ) -> list[ChatModel]:
-        with get_db() as db:
-            query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id)
-            query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
-            query = query.filter_by(archived=False)
-            query = query.filter(Chat.deleted_at == None)
-
-            query = query.order_by(Chat.updated_at.desc())
-
-            all_chats = query.all()
-            return [ChatModel.model_validate(chat) for chat in all_chats]
-
-    def get_chats_by_folder_ids_and_user_id(
-        self, folder_ids: list[str], user_id: str
-    ) -> list[ChatModel]:
-        with get_db() as db:
-            query = db.query(Chat).filter(
-                Chat.folder_id.in_(folder_ids), Chat.user_id == user_id
-            )
-            query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
-            query = query.filter_by(archived=False)
-            query = query.filter(Chat.deleted_at == None)
-
-            query = query.order_by(Chat.updated_at.desc())
-
-            all_chats = query.all()
-            return [ChatModel.model_validate(chat) for chat in all_chats]
-
-    def update_chat_folder_id_by_id_and_user_id(
-        self, id: str, user_id: str, folder_id: str
-    ) -> Optional[ChatModel]:
-        try:
-            with get_db() as db:
-                chat = db.get(Chat, id)
-                chat.folder_id = folder_id
-                chat.updated_at = int(time.time())
-                chat.pinned = False
-                db.commit()
-                db.refresh(chat)
-                return ChatModel.model_validate(chat)
-        except Exception:
-            return None
-
     # llens(#31): 削除系はすべて soft delete(deleted_at を立てて非表示化 + 共有解除)。
     # 監査証憑の保全のため一次データの行は消さない。share コピー(user_id="shared-*" の
     # 複製行)は派生データなので従来どおり物理削除する。
@@ -952,20 +902,6 @@ class ChatTable:
                 self.delete_shared_chats_by_user_id(user_id)
 
                 db.query(Chat).filter_by(user_id=user_id).update(
-                    {"deleted_at": int(time.time()), "share_id": None}
-                )
-                db.commit()
-
-                return True
-        except Exception:
-            return False
-
-    def delete_chats_by_user_id_and_folder_id(
-        self, user_id: str, folder_id: str
-    ) -> bool:
-        try:
-            with get_db() as db:
-                db.query(Chat).filter_by(user_id=user_id, folder_id=folder_id).update(
                     {"deleted_at": int(time.time()), "share_id": None}
                 )
                 db.commit()
