@@ -93,7 +93,7 @@
 		{/if}
 	{:else if token.type === 'table'}
 		<div class="relative w-full group">
-			<div class="scrollbar-hidden relative overflow-x-auto max-w-full rounded-lg">
+			<div class="relative overflow-x-auto max-w-full rounded-lg">
 				<table class=" w-full text-sm text-left text-content-muted max-w-full border-collapse">
 					<thead class="text-xs text-content uppercase">
 						<tr class="">

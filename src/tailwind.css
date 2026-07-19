@@ -36,9 +36,10 @@
 		--line: #d3d3d3; /* light 罫線・区切り線(白背景でなくなった分やや濃いめ) */
 		--line-hover: #adadad; /* light 罫線の hover 強調(hover:border-line-hover) */
 
-		/* スクロールバー thumb(app.css の ::-webkit-scrollbar-thumb が参照)。
+		/* スクロールバー thumb(app.css の ::-webkit-scrollbar-thumb と .os-theme-app が参照)。
 		   どの面色の上でも成立するよう alpha 付き(black/white ベース) */
 		--scrollbar-thumb: rgba(0, 0, 0, 0.25);
+		--scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
 
 		/* 主ボタン(Save/Create 等)。現行は黒/白反転のモノクロ(#58 ブランディングで差し替え予定) */
 		--primary: #171717;
@@ -76,6 +77,7 @@
 		--line-hover: #5e5e5e; /* dark 罫線の hover 強調 */
 
 		--scrollbar-thumb: rgba(255, 255, 255, 0.25);
+		--scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
 
 		/* 主ボタン(dark は白地に黒文字の反転) */
 		--primary: #ffffff;

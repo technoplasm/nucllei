@@ -100,7 +100,7 @@
 
 		<div class="flex flex-col md:flex-row w-full px-6 pb-5 md:space-x-4">
 			<div
-				class="flex flex-col w-full text-content overflow-y-scroll max-h-[22rem] scrollbar-hidden"
+				class="flex flex-col w-full text-content overflow-y-scroll max-h-[22rem]"
 			>
 				{#each mergedDocuments as document, documentIdx}
 					<div class="flex flex-col w-full">

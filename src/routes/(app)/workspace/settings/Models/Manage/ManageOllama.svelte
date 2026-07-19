@@ -656,7 +656,7 @@
 
 							<textarea
 								bind:value={createModelObject}
-								class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden resize-none scrollbar-hidden"
+								class="w-full rounded-xs py-2 px-4 text-sm bg-surface-muted text-content outline-hidden resize-none"
 								rows="6"
 								placeholder={`e.g. {"model": "my-modelfile", "from": "ollama:7b"})`}
 								disabled={createModelLoading}

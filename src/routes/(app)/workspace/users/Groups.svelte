@@ -223,7 +223,7 @@
 		{:else}
 			<!-- users タブと同型のテーブル(行クリック=編集、行末アイコンなし) -->
 			<div
-				class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
+				class="relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm pt-0.5"
 			>
 				<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 					<thead class="text-xs text-content-muted uppercase bg-surface-muted">

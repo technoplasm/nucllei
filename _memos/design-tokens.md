@@ -24,7 +24,7 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--content` | 本文(既定テキスト色) | `text-content` | `#333333` / `#ececec` |
 | `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | `#606060` / `#b4b4b4` |
 | `--content-subtle` | placeholder・disabled・3次 | `text-content-subtle` | `#a0a0a0` / `#9b9b9b` |
-| `--scrollbar-thumb` | スクロールバー thumb(`app.css` の `::-webkit-scrollbar-thumb` が参照 — Tailwind クラスなし。どの面色でも成立するよう alpha 付き。2026-07-19 トークン化: 旧ハードコードは light が薄すぎ dark が背景同化していた) | —(CSS 直参照) | `rgba(0,0,0,0.25)` / `rgba(255,255,255,0.25)` |
+| `--scrollbar-thumb`(`-hover`) | スクロールバー thumb(Tailwind クラスなし)。主要ペイン(サイドバー/チャット/workspace/共有ビュー)= **OverlayScrollbars**(`actions/overlay-scrollbars.ts` + `app.css` の `.os-scrollbar.os-theme-app` が参照、autoHide=leave)/ 残り(モーダル・ドロップダウン等)= native の `::-webkit-scrollbar-thumb`(ホスト :hover 中のみ表示)。どの面色でも成立するよう alpha 付き。2026-07-19 トークン化 → 2026-07-20 OS 導入 | —(CSS 直参照) | `rgba(0,0,0,0.25/.4)` / `rgba(255,255,255,0.25/.4)` |
 
 ### ボタン/コントロールの使い分け(2026-07-14 確立、users/skills/tools/functions に適用済み)
 

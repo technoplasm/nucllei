@@ -14,6 +14,7 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import NotFound from '$lib/components/common/NotFound.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 
 	import { getUserById, getUserSettings } from '$lib/apis/users';
 	import { getModels } from '$lib/apis';
@@ -178,57 +179,63 @@
 {:else if loaded}
 	<div class="h-screen max-h-[100dvh] w-full flex flex-col text-content bg-white dark:bg-gray-900">
 		<div class="flex flex-col flex-auto justify-center relative">
-			<div class=" flex flex-col w-full flex-auto overflow-auto h-0" id="messages-container">
-				<div
-					class="pt-5 px-2 w-full {($settings?.widescreenMode ?? null)
-						? 'max-w-full'
-						: 'max-w-5xl'} mx-auto"
-				>
-					<div class="px-3">
-						<div class=" text-2xl font-semibold line-clamp-1">
-							{title}
-						</div>
-
-						<div class="flex text-sm justify-between items-center mt-1">
-							<div class="text-content-muted">
-								<!-- chat.timestamp(ms)が無いデータでも「今」を出さない(updated_at は秒) -->
-								{dayjs(chat?.chat?.timestamp ?? (chat?.updated_at ?? 0) * 1000).format('LLL')}
+			<!-- OverlayScrollbars: ラッパ=ホスト / 既存スクロール要素=viewport(childViewport) -->
+			<div
+				class="flex flex-col w-full flex-auto h-0"
+				use:overlayScrollbar={{ childViewport: true }}
+			>
+				<div class=" flex flex-col w-full h-full overflow-auto" id="messages-container">
+					<div
+						class="pt-5 px-2 w-full {($settings?.widescreenMode ?? null)
+							? 'max-w-full'
+							: 'max-w-5xl'} mx-auto"
+					>
+						<div class="px-3">
+							<div class=" text-2xl font-semibold line-clamp-1">
+								{title}
 							</div>
-						</div>
 
-						{#if chat?.deleted_at}
-							<!-- admin の直参照(#19)だけが到達する。削除済みを見ていることを誤認させない -->
-							<div
-								class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium"
-							>
-								<span class="i-lucide-trash-2 size-3.5 block"></span>
-								{$i18n.t('This chat has been deleted')}
+							<div class="flex text-sm justify-between items-center mt-1">
+								<div class="text-content-muted">
+									<!-- chat.timestamp(ms)が無いデータでも「今」を出さない(updated_at は秒) -->
+									{dayjs(chat?.chat?.timestamp ?? (chat?.updated_at ?? 0) * 1000).format('LLL')}
+								</div>
 							</div>
-						{/if}
+
+							{#if chat?.deleted_at}
+								<!-- admin の直参照(#19)だけが到達する。削除済みを見ていることを誤認させない -->
+								<div
+									class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium"
+								>
+									<span class="i-lucide-trash-2 size-3.5 block"></span>
+									{$i18n.t('This chat has been deleted')}
+								</div>
+							{/if}
+						</div>
 					</div>
-				</div>
 
-				<div class=" h-full w-full flex flex-col py-2">
-					<div class="w-full">
-						{#if Object.keys(history.messages).length === 0}
-							<div class="w-full flex justify-center py-16 text-sm text-content-subtle">
-								{$i18n.t('No messages')}
-							</div>
-						{/if}
-						<Messages
-							className="h-full flex pt-4 pb-8 "
-							{user}
-							chatId={$chatId}
-							readOnly={true}
-							{selectedModels}
-							bind:history
-							bind:messages
-							bind:autoScroll
-							bottomPadding={files.length > 0}
-							sendPrompt={() => {}}
-							continueResponse={() => {}}
-							regenerateResponse={() => {}}
-						/>
+					<div class=" h-full w-full flex flex-col py-2">
+						<div class="w-full">
+							{#if Object.keys(history.messages).length === 0}
+								<div class="w-full flex justify-center py-16 text-sm text-content-subtle">
+									{$i18n.t('No messages')}
+								</div>
+							{/if}
+							<Messages
+								className="h-full flex pt-4 pb-8 "
+								{user}
+								chatId={$chatId}
+								readOnly={true}
+								{selectedModels}
+								bind:history
+								bind:messages
+								bind:autoScroll
+								bottomPadding={files.length > 0}
+								sendPrompt={() => {}}
+								continueResponse={() => {}}
+								regenerateResponse={() => {}}
+							/>
+						</div>
 					</div>
 				</div>
 			</div>

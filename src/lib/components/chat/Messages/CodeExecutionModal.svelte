@@ -73,7 +73,7 @@
 
 		<div class="flex flex-col md:flex-row w-full px-4 pb-5">
 			<div
-				class="flex flex-col w-full text-content overflow-y-scroll max-h-[22rem] scrollbar-hidden"
+				class="flex flex-col w-full text-content overflow-y-scroll max-h-[22rem]"
 			>
 				<div class="flex flex-col w-full">
 					<CodeBlock

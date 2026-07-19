@@ -558,7 +558,7 @@
 										id="chat-input"
 										dir="auto"
 										bind:this={chatInputElement}
-										class="scrollbar-hidden bg-transparent text-content outline-hidden w-full pt-3 px-1 resize-none"
+										class="bg-transparent text-content outline-hidden w-full pt-3 px-1 resize-none"
 										placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 										bind:value={prompt}
 										oncompositionstart={() => (isComposing = true)}

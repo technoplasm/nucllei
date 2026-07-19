@@ -175,7 +175,7 @@
 		{#if $showControls}
 			<div class="flex max-h-full min-h-full">
 				<div
-					class="w-full px-4 py-4 bg-surface-raised border border-line z-40 pointer-events-auto overflow-y-auto scrollbar-hidden"
+					class="w-full px-4 py-4 bg-surface-raised border border-line z-40 pointer-events-auto overflow-y-auto"
 				>
 					{#if $showCallOverlay}
 						<div class="w-full h-full flex justify-center">

@@ -68,7 +68,7 @@
 	>
 		<div class="flex w-full rounded-xl border border-gray-100 dark:border-gray-850">
 			<div class="max-h-60 flex flex-col w-full rounded-xl bg-white dark:bg-gray-900 text-content">
-				<div class="m-1 overflow-y-auto p-1 space-y-0.5 scrollbar-hidden">
+				<div class="m-1 overflow-y-auto p-1 space-y-0.5">
 					{#each filteredSkills as skill, idx}
 						<button
 							class=" px-3 py-1.5 rounded-xl w-full text-left {idx === selectedIdx

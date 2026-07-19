@@ -446,7 +446,7 @@
 					</div>
 
 					<!-- 右コンテンツ。横幅は layout 側で管理。縦は内部スクロール(settings 同型)。 -->
-					<div class="flex-1 min-w-0 overflow-y-auto pr-1 scrollbar-hidden">
+					<div class="flex-1 min-w-0 overflow-y-auto pr-1">
 						<!-- Prompt タブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
 						<div class={selectedTab === 'prompt' ? 'h-full flex flex-col' : ''}>
 							{#if selectedTab === 'general'}

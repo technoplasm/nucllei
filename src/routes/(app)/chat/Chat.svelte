@@ -44,6 +44,7 @@
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import NotFound from '$lib/components/common/NotFound.svelte';
+	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 	import Placeholder from './Placeholder.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -555,43 +556,50 @@
 
 				<div class="flex flex-col flex-auto z-10 w-full @container">
 					{#if $settings?.landingPageMode === 'chat' || createMessagesList(session.history, session.history.currentId).length > 0}
+						<!-- OverlayScrollbars はラッパをホストに、既存のスクロール要素を viewport として張る
+						 (childViewport)— bind/onscroll/id の scroll ロジックは無改修で生きる -->
 						<div
-							class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
-							id="messages-container"
-							bind:this={messagesContainerElement}
-							onscroll={() => {
-								// 追従の on/off は方向ベースで判定する。「最下部±Npx か」の再計算だけだと、
-								// ストリーム中に scrollToBottom → scroll イベント処理前に次のデルタで
-								// 高さが伸びる競合で追従が勝手に切れる(text 出力で追従しない不具合)。
-								// 下端付近に来たら ON / 上方向スクロール(ユーザーの離脱)だけ OFF。
-								const el = messagesContainerElement;
-								if (!el) {
-									return;
-								}
-								if (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) {
-									session.autoScroll = true;
-								} else if (el.scrollTop < lastScrollTop) {
-									session.autoScroll = false;
-								}
-								lastScrollTop = el.scrollTop;
-							}}
+							class="flex flex-col w-full flex-auto h-0 max-w-full z-10"
+							use:overlayScrollbar={{ childViewport: true }}
 						>
-							<div class=" h-full w-full flex flex-col" use:pinToBottomOnResize>
-								<Messages
-									chatId={$chatId}
-									bind:history={session.history}
-									bind:autoScroll={session.autoScroll}
-									bind:prompt={session.prompt}
-									selectedModels={session.selectedModels}
-									atSelectedModel={session.atSelectedModel}
-									sendPrompt={send.sendPrompt}
-									showMessage={send.showMessage}
-									continueResponse={send.continueResponse}
-									regenerateResponse={send.regenerateResponse}
-									chatActionHandler={events.chatActionHandler}
-									addMessages={send.addMessages}
-									bottomPadding={session.files.length > 0}
-								/>
+							<div
+								class=" pb-2.5 flex flex-col justify-between w-full h-full max-w-full overflow-auto"
+								id="messages-container"
+								bind:this={messagesContainerElement}
+								onscroll={() => {
+									// 追従の on/off は方向ベースで判定する。「最下部±Npx か」の再計算だけだと、
+									// ストリーム中に scrollToBottom → scroll イベント処理前に次のデルタで
+									// 高さが伸びる競合で追従が勝手に切れる(text 出力で追従しない不具合)。
+									// 下端付近に来たら ON / 上方向スクロール(ユーザーの離脱)だけ OFF。
+									const el = messagesContainerElement;
+									if (!el) {
+										return;
+									}
+									if (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) {
+										session.autoScroll = true;
+									} else if (el.scrollTop < lastScrollTop) {
+										session.autoScroll = false;
+									}
+									lastScrollTop = el.scrollTop;
+								}}
+							>
+								<div class=" h-full w-full flex flex-col" use:pinToBottomOnResize>
+									<Messages
+										chatId={$chatId}
+										bind:history={session.history}
+										bind:autoScroll={session.autoScroll}
+										bind:prompt={session.prompt}
+										selectedModels={session.selectedModels}
+										atSelectedModel={session.atSelectedModel}
+										sendPrompt={send.sendPrompt}
+										showMessage={send.showMessage}
+										continueResponse={send.continueResponse}
+										regenerateResponse={send.regenerateResponse}
+										chatActionHandler={events.chatActionHandler}
+										addMessages={send.addMessages}
+										bottomPadding={session.files.length > 0}
+									/>
+								</div>
 							</div>
 						</div>
 

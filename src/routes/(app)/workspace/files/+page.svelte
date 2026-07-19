@@ -735,7 +735,7 @@
 		</div>
 	{:else}
 		<div
-			class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm mt-6 mb-5"
+			class="relative whitespace-nowrap overflow-x-auto max-w-full rounded-sm mt-6 mb-5"
 		>
 			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 				<thead class="text-xs text-content-muted uppercase bg-surface-muted">

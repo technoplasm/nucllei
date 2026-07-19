@@ -20,7 +20,7 @@
 </script>
 
 <div class="flex flex-col h-full justify-between space-y-3 text-sm">
-	<div class=" space-y-3 overflow-y-scroll scrollbar-hidden h-full">
+	<div class=" space-y-3 overflow-y-scroll h-full">
 		<div>
 			<div class=" mb-2 text-sm font-medium">{$i18n.t('Database')}</div>
 

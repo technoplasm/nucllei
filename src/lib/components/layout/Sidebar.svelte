@@ -36,6 +36,7 @@
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import Folder from '../common/Folder.svelte';
+	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 
 	let navElement: HTMLDivElement | null = $state(null);
 
@@ -317,233 +318,240 @@
 			? ''
 			: 'invisible'}"
 	>
-		<div
-			bind:this={scrollContainer}
-			onscroll={updateScrollShadows}
-			class="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden"
-		>
-			<div bind:this={scrollContent} class="min-h-full flex flex-col">
-				<div
-					class="sticky top-0 z-20 shrink-0 pt-1 px-1.5 flex justify-between items-center gap-1 text-content-muted"
-				>
-					<!-- Navbar と同じ方式: ヘッダ自体は透明、背後の縦グラデでスクロール内容をフェードさせる -->
+		<!-- OverlayScrollbars: ラッパ=ホスト / 既存スクロール要素=viewport(childViewport)。
+		 影ロジック(updateScrollShadows)は viewport の scroll のまま無改修で生きる -->
+		<div class="flex-1 min-h-0" use:overlayScrollbar={{ childViewport: true }}>
+			<div
+				bind:this={scrollContainer}
+				onscroll={updateScrollShadows}
+				class="h-full overflow-y-auto overflow-x-hidden"
+			>
+				<div bind:this={scrollContent} class="min-h-full flex flex-col">
 					<div
-						class="bg-linear-to-b via-50% from-surface-sidebar via-surface-sidebar to-transparent pointer-events-none absolute inset-0 -bottom-2 z-[-1]"
-					></div>
-					<a
-						class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
-						href="/"
-						draggable="false"
-						onclick={() => {
-							if ($mobile) {
-								showSidebar.set(false);
-							}
-						}}
+						class="sticky top-0 z-20 shrink-0 pt-1 px-1.5 flex justify-between items-center gap-1 text-content-muted"
 					>
-						<img
-							crossorigin="anonymous"
-							src="/static/favicon.png"
-							class="size-6 rounded-full shrink-0"
-							alt="logo"
-						/>
-						<div class="self-center font-medium text-md text-content font-primary truncate">
-							{$WEBUI_NAME}
-						</div>
-					</a>
-
-					<button
-						class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-sidebar-hover shrink-0"
-						onclick={() => {
-							showSidebar.set(!$showSidebar);
-						}}
-						aria-label="Toggle Sidebar"
-					>
-						<span class="i-lucide-menu size-5 block m-auto self-center"></span>
-					</button>
-				</div>
-
-				<div class="px-1.5 flex justify-center text-content mt-0.5">
-					<a
-						id="sidebar-new-chat-button"
-						class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover no-drag-region"
-						href="/"
-						draggable="false"
-						onclick={async () => {
-							selectedChatId = null;
-							await goto('/');
-							const newChatButton = document.getElementById('new-chat-button');
-							setTimeout(() => {
-								newChatButton?.click();
+						<!-- Navbar と同じ方式: ヘッダ自体は透明、背後の縦グラデでスクロール内容をフェードさせる -->
+						<div
+							class="bg-linear-to-b via-50% from-surface-sidebar via-surface-sidebar to-transparent pointer-events-none absolute inset-0 -bottom-2 z-[-1]"
+						></div>
+						<a
+							class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
+							href="/"
+							draggable="false"
+							onclick={() => {
 								if ($mobile) {
 									showSidebar.set(false);
 								}
-							}, 0);
-						}}
-					>
-						<span class="i-lucide-square-pen size-[1.1rem] block self-center"></span>
-						<div class="flex self-center translate-y-[0.5px]">
-							<div class=" self-center font-medium text-sm font-primary">{$i18n.t('New Chat')}</div>
-						</div>
-					</a>
-				</div>
-
-				<!-- llens: ワークスペースは全ログインユーザーに表示(#69 のファイル管理を
-		     /workspace/files へ移設 — 非 admin もファイルタブに入れる) -->
-				<div class="px-1.5 flex justify-center text-content">
-					<a
-						class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
-						href="/workspace"
-						onclick={() => {
-							selectedChatId = null;
-							chatId.set('');
-
-							if ($mobile) {
-								showSidebar.set(false);
-							}
-						}}
-						draggable="false"
-					>
-						<span class="i-lucide-layout-grid size-[1.1rem] block self-center"></span>
-						<div class="flex self-center translate-y-[0.5px]">
-							<div class=" self-center font-medium text-sm font-primary">
-								{$i18n.t('Workspace')}
+							}}
+						>
+							<img
+								crossorigin="anonymous"
+								src="/static/favicon.png"
+								class="size-6 rounded-full shrink-0"
+								alt="logo"
+							/>
+							<div class="self-center font-medium text-md text-content font-primary truncate">
+								{$WEBUI_NAME}
 							</div>
-						</div>
-					</a>
-				</div>
+						</a>
 
-				<div class="px-1.5 flex justify-center text-content">
-					<button
-						class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
-						onclick={async () => {
-							await showSettings.set(true);
-							if ($mobile) {
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<span class="i-lucide-settings size-[1.1rem] block self-center"></span>
-						<div class="flex self-center translate-y-[0.5px]">
-							<div class=" self-center font-medium text-sm font-primary">{$i18n.t('Settings')}</div>
-						</div>
-					</button>
-				</div>
-
-				{#if enabledModels.length > 0}
-					<div class="px-1.5 mt-3">
-						<div class="px-1 w-full text-xs text-content-muted font-medium pb-1.5">
-							{$i18n.t('Models')}
-						</div>
-						<div class="flex flex-col">
-							{#each enabledModels as model (model.id)}
-								<div
-									class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover text-content"
-								>
-									<button
-										class="pl-2 py-1.5 flex items-center gap-2 flex-1 min-w-0"
-										onclick={() => modelChatHandler(model.id)}
-									>
-										<img
-											src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
-											class="size-5 rounded-full shrink-0"
-											alt={model.name}
-											draggable="false"
-										/>
-										<div class="self-center font-medium text-sm font-primary truncate">
-											{model.name}
-										</div>
-									</button>
-
-									<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
-									<a
-										class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected"
-										href="/workspace/models/edit?id={model.id}"
-										draggable="false"
-										aria-label={$i18n.t('Edit')}
-										onclick={() => {
-											if ($mobile) {
-												showSidebar.set(false);
-											}
-										}}
-									>
-										<span class="i-lucide-pencil size-4 block"></span>
-									</a>
-								</div>
-							{/each}
-						</div>
+						<button
+							class=" cursor-pointer p-[7px] flex rounded-xl hover:bg-sidebar-hover shrink-0"
+							onclick={() => {
+								showSidebar.set(!$showSidebar);
+							}}
+							aria-label="Toggle Sidebar"
+						>
+							<span class="i-lucide-menu size-5 block m-auto self-center"></span>
+						</button>
 					</div>
-				{/if}
 
-				<div class="flex flex-col flex-1 mt-3 space-y-3">
-					{#if $pinnedChats.length > 0}
-						<div class="flex flex-col space-y-1 rounded-xl">
-							<Folder
-								className=""
-								bind:open={showPinnedChat}
-								onChange={(open) => {
-									localStorage.setItem('showPinnedChat', String(open));
-								}}
-								onImport={(items) => {
-									importChatHandler(items, true);
-								}}
-								onDrop={async (data) => {
-									const { type, id, item } = data;
-
-									if (type === 'chat') {
-										let chat = await getChatById(id).catch(() => {
-											return null;
-										});
-										if (!chat && item) {
-											chat = await importChat(item.chat, item?.meta ?? {});
-										}
-
-										if (chat) {
-											if (!chat.pinned) {
-												await toggleChatPinnedStatusById(chat.id);
-											}
-
-											initChatList();
-										}
+					<div class="px-1.5 flex justify-center text-content mt-0.5">
+						<a
+							id="sidebar-new-chat-button"
+							class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover no-drag-region"
+							href="/"
+							draggable="false"
+							onclick={async () => {
+								selectedChatId = null;
+								await goto('/');
+								const newChatButton = document.getElementById('new-chat-button');
+								setTimeout(() => {
+									newChatButton?.click();
+									if ($mobile) {
+										showSidebar.set(false);
 									}
-								}}
-								name={$i18n.t('Pinned')}
-							>
-								<div
-									class="ml-3 pl-1 mt-[1px] flex flex-col border-s border-gray-100 dark:border-gray-900"
-								>
-									{#each $pinnedChats as chat (chat.id)}
-										<ChatItem
-											id={chat.id}
-											className="text-sm"
-											title={chat.title}
-											{shiftKey}
-											selected={selectedChatId === chat.id}
-											onSelect={() => {
-												selectedChatId = chat.id;
-											}}
-											onUnselect={() => {
-												selectedChatId = null;
-											}}
-											onChange={() => {
-												initChatList();
-											}}
-										/>
-									{/each}
+								}, 0);
+							}}
+						>
+							<span class="i-lucide-square-pen size-[1.1rem] block self-center"></span>
+							<div class="flex self-center translate-y-[0.5px]">
+								<div class=" self-center font-medium text-sm font-primary">
+									{$i18n.t('New Chat')}
 								</div>
-							</Folder>
+							</div>
+						</a>
+					</div>
+
+					<!-- llens: ワークスペースは全ログインユーザーに表示(#69 のファイル管理を
+		     /workspace/files へ移設 — 非 admin もファイルタブに入れる) -->
+					<div class="px-1.5 flex justify-center text-content">
+						<a
+							class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
+							href="/workspace"
+							onclick={() => {
+								selectedChatId = null;
+								chatId.set('');
+
+								if ($mobile) {
+									showSidebar.set(false);
+								}
+							}}
+							draggable="false"
+						>
+							<span class="i-lucide-layout-grid size-[1.1rem] block self-center"></span>
+							<div class="flex self-center translate-y-[0.5px]">
+								<div class=" self-center font-medium text-sm font-primary">
+									{$i18n.t('Workspace')}
+								</div>
+							</div>
+						</a>
+					</div>
+
+					<div class="px-1.5 flex justify-center text-content">
+						<button
+							class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
+							onclick={async () => {
+								await showSettings.set(true);
+								if ($mobile) {
+									showSidebar.set(false);
+								}
+							}}
+						>
+							<span class="i-lucide-settings size-[1.1rem] block self-center"></span>
+							<div class="flex self-center translate-y-[0.5px]">
+								<div class=" self-center font-medium text-sm font-primary">
+									{$i18n.t('Settings')}
+								</div>
+							</div>
+						</button>
+					</div>
+
+					{#if enabledModels.length > 0}
+						<div class="px-1.5 mt-3">
+							<div class="px-1 w-full text-xs text-content-muted font-medium pb-1.5">
+								{$i18n.t('Models')}
+							</div>
+							<div class="flex flex-col">
+								{#each enabledModels as model (model.id)}
+									<div
+										class="group flex items-center w-full rounded-lg hover:bg-sidebar-hover text-content"
+									>
+										<button
+											class="pl-2 py-1.5 flex items-center gap-2 flex-1 min-w-0"
+											onclick={() => modelChatHandler(model.id)}
+										>
+											<img
+												src={model?.info?.meta?.profile_image_url ?? DEFAULT_MODEL_IMAGE_URL}
+												class="size-5 rounded-full shrink-0"
+												alt={model.name}
+												draggable="false"
+											/>
+											<div class="self-center font-medium text-sm font-primary truncate">
+												{model.name}
+											</div>
+										</button>
+
+										<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
+										<a
+											class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected"
+											href="/workspace/models/edit?id={model.id}"
+											draggable="false"
+											aria-label={$i18n.t('Edit')}
+											onclick={() => {
+												if ($mobile) {
+													showSidebar.set(false);
+												}
+											}}
+										>
+											<span class="i-lucide-pencil size-4 block"></span>
+										</a>
+									</div>
+								{/each}
+							</div>
 						</div>
 					{/if}
 
-					<div class="px-1.5 flex-1 flex flex-col">
-						{#if $chats}
-							{#each $chats as chat, idx (chat.id)}
-								{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
+					<div class="flex flex-col flex-1 mt-3 space-y-3">
+						{#if $pinnedChats.length > 0}
+							<div class="flex flex-col space-y-1 rounded-xl">
+								<Folder
+									className=""
+									bind:open={showPinnedChat}
+									onChange={(open) => {
+										localStorage.setItem('showPinnedChat', String(open));
+									}}
+									onImport={(items) => {
+										importChatHandler(items, true);
+									}}
+									onDrop={async (data) => {
+										const { type, id, item } = data;
+
+										if (type === 'chat') {
+											let chat = await getChatById(id).catch(() => {
+												return null;
+											});
+											if (!chat && item) {
+												chat = await importChat(item.chat, item?.meta ?? {});
+											}
+
+											if (chat) {
+												if (!chat.pinned) {
+													await toggleChatPinnedStatusById(chat.id);
+												}
+
+												initChatList();
+											}
+										}
+									}}
+									name={$i18n.t('Pinned')}
+								>
 									<div
-										class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
-										{idx > 0 ? 'mt-1.5' : ''}"
+										class="ml-3 pl-1 mt-[1px] flex flex-col border-s border-gray-100 dark:border-gray-900"
 									>
-										{$i18n.t(chat.time_range ?? '')}
-										<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
+										{#each $pinnedChats as chat (chat.id)}
+											<ChatItem
+												id={chat.id}
+												className="text-sm"
+												title={chat.title}
+												{shiftKey}
+												selected={selectedChatId === chat.id}
+												onSelect={() => {
+													selectedChatId = chat.id;
+												}}
+												onUnselect={() => {
+													selectedChatId = null;
+												}}
+												onChange={() => {
+													initChatList();
+												}}
+											/>
+										{/each}
+									</div>
+								</Folder>
+							</div>
+						{/if}
+
+						<div class="px-1.5 flex-1 flex flex-col">
+							{#if $chats}
+								{#each $chats as chat, idx (chat.id)}
+									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
+										<div
+											class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
+										{idx > 0 ? 'mt-1.5' : ''}"
+										>
+											{$i18n.t(chat.time_range ?? '')}
+											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
 											{$i18n.t('Today')}
 											{$i18n.t('Yesterday')}
 											{$i18n.t('Previous 7 days')}
@@ -561,88 +569,89 @@
 											{$i18n.t('November')}
 											{$i18n.t('December')}
 											-->
-									</div>
-								{/if}
+										</div>
+									{/if}
 
-								<ChatItem
-									className="text-sm"
-									id={chat.id}
-									title={chat.title}
-									{shiftKey}
-									selected={selectedChatId === chat.id}
-									onSelect={() => {
-										selectedChatId = chat.id;
-									}}
-									onUnselect={() => {
-										selectedChatId = null;
-									}}
-									onChange={() => {
-										initChatList();
-									}}
-								/>
-							{/each}
+									<ChatItem
+										className="text-sm"
+										id={chat.id}
+										title={chat.title}
+										{shiftKey}
+										selected={selectedChatId === chat.id}
+										onSelect={() => {
+											selectedChatId = chat.id;
+										}}
+										onUnselect={() => {
+											selectedChatId = null;
+										}}
+										onChange={() => {
+											initChatList();
+										}}
+									/>
+								{/each}
 
-							{#if $scrollPaginationEnabled && !allChatsLoaded}
-								<Loader
-									onVisible={() => {
-										if (!chatListLoading) {
-											loadMoreChats();
-										}
-									}}
-								>
-									<div
-										class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+								{#if $scrollPaginationEnabled && !allChatsLoaded}
+									<Loader
+										onVisible={() => {
+											if (!chatListLoading) {
+												loadMoreChats();
+											}
+										}}
 									>
-										<Spinner className=" size-4" />
-										<div class=" ">Loading...</div>
-									</div>
-								</Loader>
+										<div
+											class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+										>
+											<Spinner className=" size-4" />
+											<div class=" ">Loading...</div>
+										</div>
+									</Loader>
+								{/if}
+							{:else}
+								<div
+									class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+								>
+									<Spinner className=" size-4" />
+									<div class=" ">Loading...</div>
+								</div>
 							{/if}
-						{:else}
-							<div class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2">
-								<Spinner className=" size-4" />
-								<div class=" ">Loading...</div>
-							</div>
-						{/if}
+						</div>
 					</div>
+
+					<!-- 下に隠れたコンテンツがあるときだけスクロール領域の下辺に出るフェード -->
+					<div
+						class="pointer-events-none sticky bottom-0 shrink-0 h-6 -mt-6 bg-linear-to-t from-surface-sidebar to-transparent transition-opacity duration-200 {showBottomShadow
+							? 'opacity-100'
+							: 'opacity-0'}"
+					></div>
 				</div>
-
-				<!-- 下に隠れたコンテンツがあるときだけスクロール領域の下辺に出るフェード -->
-				<div
-					class="pointer-events-none sticky bottom-0 shrink-0 h-6 -mt-6 bg-linear-to-t from-surface-sidebar to-transparent transition-opacity duration-200 {showBottomShadow
-						? 'opacity-100'
-						: 'opacity-0'}"
-				></div>
 			</div>
-		</div>
 
-		<div class="px-2 pb-1 shrink-0">
-			<div class="flex flex-col font-primary">
-				{#if $user !== undefined && $user !== null}
-					<UserMenu
-						onShow={(payload) => {
-							if (payload === 'archived-chat') {
-								showArchivedChats.set(true);
-							}
-						}}
-					>
-						<button
-							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover"
+			<div class="px-2 pb-1 shrink-0">
+				<div class="flex flex-col font-primary">
+					{#if $user !== undefined && $user !== null}
+						<UserMenu
+							onShow={(payload) => {
+								if (payload === 'archived-chat') {
+									showArchivedChats.set(true);
+								}
+							}}
 						>
-							<div class=" self-center mr-3">
-								<img
-									src={$user?.profile_image_url}
-									class=" max-w-[30px] object-cover rounded-full"
-									alt="User profile"
-								/>
-							</div>
-							<div class=" self-center font-medium">{$user?.name}</div>
-						</button>
-					</UserMenu>
-				{/if}
+							<button
+								class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-sidebar-hover"
+							>
+								<div class=" self-center mr-3">
+									<img
+										src={$user?.profile_image_url}
+										class=" max-w-[30px] object-cover rounded-full"
+										alt="User profile"
+									/>
+								</div>
+								<div class=" self-center font-medium">{$user?.name}</div>
+							</button>
+						</UserMenu>
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>
 </div>
-
-<!-- scrollbar-hidden の表示制御は app.css のグローバル定義に一本化(scoped 複製は撤去) -->

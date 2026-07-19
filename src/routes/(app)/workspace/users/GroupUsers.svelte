@@ -55,7 +55,7 @@
 		</div>
 	</div>
 
-	<div class="mt-3 max-h-[22rem] overflow-y-auto scrollbar-hidden">
+	<div class="mt-3 max-h-[22rem] overflow-y-auto">
 		<div class="flex flex-col gap-2.5">
 			{#if filteredUsers.length > 0}
 				{#each filteredUsers as user (user.id)}

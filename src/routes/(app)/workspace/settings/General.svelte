@@ -108,7 +108,7 @@
 		updateHandler();
 	}}
 >
-	<div class="mt-0.5 space-y-3 overflow-y-scroll scrollbar-hidden h-full">
+	<div class="mt-0.5 space-y-3 overflow-y-scroll h-full">
 		{#if adminConfig !== null}
 			<div class="">
 				<div class="mb-3.5">

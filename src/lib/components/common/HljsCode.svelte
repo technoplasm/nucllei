@@ -100,7 +100,7 @@
 
 	{#if open}
 		<!-- eslint-disable svelte/no-at-html-tags -- #17 XSS sink 監査済み(hljs 出力) -->
-		<pre class="overflow-x-auto p-3 pt-1.5 scrollbar-hidden"><code class="language-{lang}"
+		<pre class="overflow-x-auto p-3 pt-1.5"><code class="language-{lang}"
 				>{@html highlighted}</code
 			></pre>
 		<!-- eslint-enable svelte/no-at-html-tags -->

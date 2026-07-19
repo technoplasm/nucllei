@@ -162,7 +162,7 @@
 
 {#if parentMessage}
 	<div>
-		<div class="flex snap-x snap-mandatory overflow-x-auto scrollbar-hidden">
+		<div class="flex snap-x snap-mandatory overflow-x-auto">
 			{#each Object.keys(groupedMessageIds) as modelIdx}
 				{#if groupedMessageIdsIdx[modelIdx] !== undefined && groupedMessageIds[modelIdx].messageIds.length > 0}
 					{@const _messageId =

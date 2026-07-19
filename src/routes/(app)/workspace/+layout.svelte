@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME, showSidebar, user } from '$lib/stores';
+	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 
@@ -107,13 +108,16 @@
 			</div>
 		</nav>
 
-		<div class="pb-1 px-[18px] flex-1 max-h-full overflow-y-auto" id="workspace-container">
-			<!-- llens(#34): workspace 全ページの横幅をここで一元管理(ページごとに max-w がばらつくのを防ぐ)。
+		<!-- OverlayScrollbars: ラッパ=ホスト / 既存スクロール要素=viewport(childViewport) -->
+		<div class="flex-1 max-h-full min-h-0" use:overlayScrollbar={{ childViewport: true }}>
+			<div class="pb-1 px-[18px] h-full overflow-y-auto" id="workspace-container">
+				<!-- llens(#34): workspace 全ページの横幅をここで一元管理(ページごとに max-w がばらつくのを防ぐ)。
 			     個々のページ/エディタは自前で max-w を持たず、この 5xl 中央寄せを継承する。
 			     h-full で高さの連鎖も確定させる(エディタ系ページが h-full + flex-1/min-h-0 で
 			     全高を貼れる。一覧ページは h-full を使わないので従来どおり親が縦スクロールを受ける)。 -->
-			<div class="max-w-5xl mx-auto w-full px-1.5 h-full">
-				{@render children?.()}
+				<div class="max-w-5xl mx-auto w-full px-1.5 h-full">
+					{@render children?.()}
+				</div>
 			</div>
 		</div>
 	</div>

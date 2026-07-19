@@ -101,21 +101,38 @@ li p {
 	display: inline;
 }
 
-/* スクロールバーは全域で単一の挙動(2026-07-19 一本化): 平常時は隠し、スクロール中
-   + 停止後 1.5s だけ thumb を出す。.scrolling は root layout のグローバル scroll
-   リスナが実際にスクロールした要素(window スクロールは html)へ付与する。
-   色は --scrollbar-thumb(src/tailwind.css のトークン)で light/dark 一元管理。
-   個別の :hover 制御や scrollbar-hidden クラスによる出し分けはしない。 */
+/* スクロールバー(2026-07-20 確定): 主要ペイン(サイドバー/チャット/workspace/共有ビュー)は
+   OverlayScrollbars(actions/overlay-scrollbars.ts + 下の .os-theme-app)。
+   OS を張らない残り(モーダル・ドロップダウン・テーブル等)は native を同じ意味論
+   「ホストに乗っている間だけ表示」で揃える(:hover は祖先にも立つので window スクロールにも効く)。
+   色は --scrollbar-thumb(src/tailwind.css のトークン)で light/dark 一元管理。 */
 ::-webkit-scrollbar-thumb {
 	background-color: var(--scrollbar-thumb);
 	border-radius: 9999px;
 	visibility: hidden;
 }
 
-.scrolling::-webkit-scrollbar-thumb,
+:hover::-webkit-scrollbar-thumb,
+:active::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:active {
 	visibility: visible;
+}
+
+/* OverlayScrollbars テーマ(色トークン参照・トラック透明・pill) */
+/* base の変数既定(--os-size: 0 等)は .os-scrollbar に載る — import 順に依らず勝てる詳細度にする */
+.os-scrollbar.os-theme-app {
+	--os-size: 10px;
+	--os-padding-perpendicular: 2px;
+	--os-padding-axis: 2px;
+	--os-track-bg: transparent;
+	--os-track-bg-hover: transparent;
+	--os-track-bg-active: transparent;
+	--os-handle-bg: var(--scrollbar-thumb);
+	--os-handle-bg-hover: var(--scrollbar-thumb-hover);
+	--os-handle-bg-active: var(--scrollbar-thumb-hover);
+	--os-handle-border-radius: 9999px;
+	--os-handle-interactive-area-offset: 4px;
 }
 
 ::-webkit-scrollbar {
@@ -126,6 +143,10 @@ li p {
 ::-webkit-scrollbar-track {
 	background-color: transparent;
 	border-radius: 9999px;
+}
+
+::-webkit-scrollbar-corner {
+	display: none;
 }
 
 select {
@@ -190,11 +211,6 @@ select {
 	display: none;
 }
 
-/* scrollbar-hidden は歴史的クラス — thumb の出し分けは上のグローバル定義に統合済み */
-.scrollbar-hidden::-webkit-scrollbar-corner {
-	display: none;
-}
-
 .scrollbar-none::-webkit-scrollbar {
 	display: none; /* for Chrome, Safari and Opera */
 }
@@ -228,17 +244,9 @@ input[type='number'] {
 	width: 0.4rem;
 }
 
-.katex-display::-webkit-scrollbar-corner {
-	display: none;
-}
-
 .cm-editor {
 	height: 100%;
 	width: 100%;
-}
-
-.cm-scroller::-webkit-scrollbar-corner {
-	display: none;
 }
 
 .cm-editor.cm-focused {
