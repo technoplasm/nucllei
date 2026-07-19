@@ -179,10 +179,9 @@ select {
 	display: none;
 }
 
-/* .scrolling は root layout のグローバル scroll リスナが付与(スクロール中は thumb を出す) */
-.scrollbar-hidden:active::-webkit-scrollbar-thumb,
-.scrollbar-hidden:focus::-webkit-scrollbar-thumb,
-.scrollbar-hidden:hover::-webkit-scrollbar-thumb,
+/* .scrolling は root layout のグローバル scroll リスナが付与。表示は「スクロール中だけ」に
+   一本化 — :hover を条件に入れると、画面全体を占めるコンテナ(チャット本文)では
+   カーソルがある限り出っぱなしになる(2026-07-19) */
 .scrollbar-hidden.scrolling::-webkit-scrollbar-thumb {
 	visibility: visible;
 }
