@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { onMount, tick, getContext } from 'svelte';
+	import { tick, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import dayjs from 'dayjs';
 
-	import { settings, chatId, WEBUI_NAME, models, config, user as sessionUser } from '$lib/stores';
+	import { settings, chatId, WEBUI_NAME, models, user as sessionUser } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 
 	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
@@ -22,15 +22,13 @@
 	const i18n = getContext('i18n');
 	dayjs.extend(localizedFormat);
 
-	let loaded = false;
+	let loaded = $state(false);
 
-	let autoScroll = true;
-	let messagesContainerElement: HTMLDivElement;
+	let autoScroll = $state(true);
 
-	// let chatId = $page.params.id;
-	let selectedModels = [''];
+	let selectedModels = $state(['']);
 
-	let chat: {
+	let chat = $state<{
 		id: string;
 		user_id: string;
 		chat: {
@@ -40,30 +38,18 @@
 			history?: ChatHistory;
 			messages?: ChatMessage[];
 		};
-	} | null = null;
-	let user: { name: string; profile_image_url?: string } | undefined = undefined;
+	} | null>(null);
+	let user = $state<{ name: string; profile_image_url?: string } | undefined>(undefined);
 
-	let title = '';
-	let files = [];
+	let title = $state('');
+	const files: unknown[] = [];
 
-	let messages: ChatMessage[] = [];
-	let history: ChatHistory = {
+	// Messages が表示ウィンドウ分を bind で書き戻す受け皿(こちらからは書かない)
+	let messages = $state<ChatMessage[]>([]);
+	let history = $state<ChatHistory>({
 		messages: {},
 		currentId: null
-	};
-
-	$: messages = createMessagesList(history, history.currentId);
-
-	$: if ($page.params.id) {
-		(async () => {
-			if (await loadSharedChat()) {
-				await tick();
-				loaded = true;
-			} else {
-				await goto('/');
-			}
-		})();
-	}
+	});
 
 	//////////////////////////
 	// Web functions
@@ -118,7 +104,8 @@
 				autoScroll = true;
 				await tick();
 
-				const lastMessage = messages.at(-1);
+				// Messages マウント前なのでここで直接末端を引く(旧 $: messages ミラーの代替)
+				const lastMessage = createMessagesList(history, history.currentId).at(-1);
 				if (lastMessage) {
 					history.messages[lastMessage.id].done = true;
 				}
@@ -129,6 +116,26 @@
 				return null;
 			}
 		}
+	};
+
+	// share id の追従。初期値は init 時に処理し、以後の変化だけ $effect で拾う
+	// (Chat.svelte の chatIdProp と同じ実行順パターン)
+	let loadedShareId: string | null = null;
+	const handleShareIdChange = () => {
+		const id = $page.params.id;
+		if (!id || loadedShareId === id) {
+			return;
+		}
+		loadedShareId = id;
+
+		(async () => {
+			if (await loadSharedChat()) {
+				await tick();
+				loaded = true;
+			} else {
+				await goto('/');
+			}
+		})();
 	};
 
 	const cloneSharedChat = async () => {
@@ -143,6 +150,12 @@
 			goto(`/c/${res.id}`);
 		}
 	};
+
+	handleShareIdChange();
+	$effect(() => {
+		void $page.params.id;
+		handleShareIdChange();
+	});
 </script>
 
 <svelte:head>
@@ -202,7 +215,7 @@
 					<div class="pb-5">
 						<button
 							class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-							on:click={cloneSharedChat}
+							onclick={cloneSharedChat}
 						>
 							{$i18n.t('Clone Chat')}
 						</button>

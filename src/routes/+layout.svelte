@@ -47,7 +47,9 @@
 
 	const bc = new BroadcastChannel('active-tab-channel');
 
-	let loaded = false;
+	let { children } = $props();
+
+	let loaded = $state(false);
 
 	const BREAKPOINT = 768;
 
@@ -254,11 +256,11 @@
 			<AppSidebar />
 
 			<div class="w-full flex-1 max-w-[calc(100%-4.5rem)]">
-				<slot />
+				{@render children?.()}
 			</div>
 		</div>
 	{:else}
-		<slot />
+		{@render children?.()}
 	{/if}
 {/if}
 

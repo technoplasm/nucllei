@@ -33,7 +33,9 @@
 
 	const i18n = getContext('i18n');
 
-	let loaded = false;
+	let { children } = $props();
+
+	let loaded = $state(false);
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
@@ -159,7 +161,7 @@
 		<Sidebar />
 
 		{#if loaded}
-			<slot />
+			{@render children?.()}
 		{:else}
 			<div class="w-full flex-1 h-full flex items-center justify-center">
 				<Spinner />

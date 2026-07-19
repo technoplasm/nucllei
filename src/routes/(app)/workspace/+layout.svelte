@@ -6,7 +6,9 @@
 
 	const i18n = getContext('i18n');
 
-	let loaded = false;
+	let { children } = $props();
+
+	let loaded = $state(false);
 
 	// llens: workspace 上部メニューは宣言的に定義する。並び・ラベル・表示条件(show)はこの配列だけで
 	// 管理し、マークアップは下の {#each} 一箇所。ラベルは $i18n.t(label) で翻訳する。
@@ -25,7 +27,7 @@
 		{ label: 'Chats', path: 'chats', show: (u: any) => u?.role === 'admin' },
 		{ label: 'Settings', path: 'settings', show: (u: any) => u?.role === 'admin' }
 	];
-	$: visibleWorkspaceTabs = WORKSPACE_TABS.filter((t) => t.show($user));
+	const visibleWorkspaceTabs = $derived(WORKSPACE_TABS.filter((t) => t.show($user)));
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
@@ -72,7 +74,7 @@
 					<button
 						id="sidebar-toggle-button"
 						class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850"
-						on:click={() => {
+						onclick={() => {
 							showSidebar.set(!$showSidebar);
 						}}
 						aria-label="Toggle Sidebar"
@@ -111,7 +113,7 @@
 			     h-full で高さの連鎖も確定させる(エディタ系ページが h-full + flex-1/min-h-0 で
 			     全高を貼れる。一覧ページは h-full を使わないので従来どおり親が縦スクロールを受ける)。 -->
 			<div class="max-w-5xl mx-auto w-full px-1.5 h-full">
-				<slot />
+				{@render children?.()}
 			</div>
 		</div>
 	</div>
