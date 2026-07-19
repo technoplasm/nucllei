@@ -4,9 +4,12 @@
 	const i18n = getContext('i18n');
 
 	import { getGroups } from '$lib/apis/groups';
+	import { searchUsers } from '$lib/apis/users';
 
 	// llens(#66): ACL は read(使える範囲)一本。write 側の UI・データは廃止
 	// (定義編集の権限はロールで決まる — model/tool=admin、skill=editor)。
+	// llens(#85): UI を刷新 — 公開範囲はセグメント(常時可視・1 クリック)、対象指定は
+	// グループ・ユーザー共通のチップ入力(user_ids がここで初めて編集可能になった)。
 	type AccessControlValue = {
 		read?: { public?: boolean; group_ids?: string[]; user_ids?: string[] };
 	};
@@ -19,7 +22,7 @@
 		//   null = 非公開(owner のみ・既定)
 		//   {read:{group_ids,user_ids}} = 列挙先に公開(グループ共有)
 		//   {read:{public:true}} = 全体公開
-		// variant='file' では 3 値セレクタで受け渡しも file 意味論のまま行う
+		// variant='file' では 3 セグメントで受け渡しも file 意味論のまま行う
 		// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
 		variant = 'default'
 	}: {
@@ -29,18 +32,26 @@
 		variant?: 'default' | 'file';
 	} = $props();
 
-	let selectedGroupId = $state('');
 	let groups = $state<{ id: string; name: string }[]>([]);
+	// 既存 ACL の user_ids と検索候補から解決済みのユーザー表示情報を貯める
+	let knownUsers = $state<Record<string, { name: string; email: string }>>({});
+
+	// ---- モード(セグメント)----
 
 	// file variant の現在モード(accessControl から導出 — 二重 state を持たない)
 	const fileMode = $derived(
 		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'groups'
 	);
+	// default variant: null = 公開 / それ以外 = 限定
+	const mode = $derived(
+		variant === 'file' ? fileMode : accessControl === null ? 'public' : 'limited'
+	);
 
-	const setFileMode = (mode: string) => {
-		if (mode === 'private') {
+	const setMode = (next: string) => {
+		if (variant === 'file' ? next === 'private' : next === 'public') {
 			accessControl = null;
-		} else if (mode === 'public') {
+		} else if (next === 'public') {
+			// file variant の全体公開
 			accessControl = { read: { public: true } };
 		} else {
 			accessControl = {
@@ -51,6 +62,30 @@
 			};
 		}
 	};
+
+	// 公開が先(広い → 狭い、2026-07-19 のユーザー編集の順を踏襲)
+	const SEGMENTS = $derived(
+		variant === 'file'
+			? [
+					{ mode: 'public', icon: 'i-lucide-globe', label: 'Public' },
+					{ mode: 'groups', icon: 'i-lucide-users', label: 'Shared' },
+					{ mode: 'private', icon: 'i-lucide-lock', label: 'Private' }
+				]
+			: [
+					...(allowPublic ? [{ mode: 'public', icon: 'i-lucide-globe', label: 'Public' }] : []),
+					{ mode: 'limited', icon: 'i-lucide-lock', label: 'Private' }
+				]
+	);
+
+	const description = $derived.by(() => {
+		if (variant === 'file' && mode === 'private') {
+			return $i18n.t('Only you can access');
+		}
+		if (mode === 'public') {
+			return $i18n.t('Accessible to all users');
+		}
+		return $i18n.t('Only select users and groups with permission can access');
+	});
 
 	$effect(() => {
 		if (variant === 'default' && !allowPublic && accessControl === null) {
@@ -66,6 +101,16 @@
 
 	onMount(async () => {
 		groups = await getGroups();
+
+		const userIds = accessControl?.read?.user_ids ?? [];
+		if (userIds.length > 0) {
+			// 既存 ACL のユーザーチップ表示用に名前解決(失敗しても id 表示に落ちるだけ)
+			const users = await searchUsers({ ids: userIds }).catch(() => []);
+			knownUsers = {
+				...knownUsers,
+				...Object.fromEntries(users.map((u) => [u.id, { name: u.name, email: u.email }]))
+			};
+		}
 
 		if (variant === 'file') {
 			// 意味論は変えず shape だけ正規化(グループ共有時に read.group_ids を保証)
@@ -102,195 +147,241 @@
 		}
 	});
 
-	// group_ids の増減は新 object 再代入で行う(bindable プロップの set として確実に
-	// 伝播させ、この effect の依存(accessControl 参照)にも掛ける — 深い mutate だと
-	// 参照が変わらず onChange が発火しない)。onChange 本体は untrack に置く — 親
-	// コールバック側の読み書きまで依存に取り込むと自己ループになる(罠(5))。
+	// 増減は新 object 再代入で行う(bindable プロップの set として確実に伝播させ、
+	// この effect の依存(accessControl 参照)にも掛ける — 深い mutate だと参照が
+	// 変わらず onChange が発火しない)。onChange 本体は untrack に置く — 親コールバック
+	// 側の読み書きまで依存に取り込むと自己ループになる(罠(7))。
 	$effect(() => {
 		void accessControl;
 		untrack(() => onChange(accessControl));
 	});
 
-	// グループ選択 UI を出す条件(default: private 選択時 / file: グループ共有選択時)
-	const showGroups = $derived(variant === 'file' ? fileMode === 'groups' : accessControl !== null);
+	// メンバー編集 UI を出す条件(default: 限定時 / file: グループ共有時)
+	const showMembers = $derived(variant === 'file' ? fileMode === 'groups' : accessControl !== null);
 
-	$effect(() => {
-		if (selectedGroupId) {
-			onSelectGroup();
+	// ---- チップ入力(グループ・ユーザー共通)----
+
+	let searchQuery = $state('');
+	let searchInput = $state<HTMLInputElement | null>(null);
+	let suggestOpen = $state(false);
+	let userResults = $state<{ id: string; name: string; email: string }[]>([]);
+	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+	const selectedGroupIds = $derived(accessControl?.read?.group_ids ?? []);
+	const selectedUserIds = $derived(accessControl?.read?.user_ids ?? []);
+
+	const groupSuggestions = $derived(
+		groups.filter(
+			(group) =>
+				!selectedGroupIds.includes(group.id) &&
+				(searchQuery.trim() === '' ||
+					group.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+		)
+	);
+	const userSuggestions = $derived(userResults.filter((u) => !selectedUserIds.includes(u.id)));
+
+	const onSearchInput = () => {
+		if (searchDebounce) {
+			clearTimeout(searchDebounce);
 		}
-	});
-
-	const onSelectGroup = () => {
-		if (selectedGroupId !== '' && accessControl?.read) {
-			accessControl = {
-				read: {
-					...accessControl.read,
-					group_ids: [...(accessControl.read.group_ids ?? []), selectedGroupId]
-				}
+		const q = searchQuery.trim();
+		if (q === '') {
+			userResults = [];
+			return;
+		}
+		searchDebounce = setTimeout(async () => {
+			const users = await searchUsers({ query: q }).catch(() => []);
+			knownUsers = {
+				...knownUsers,
+				...Object.fromEntries(users.map((u) => [u.id, { name: u.name, email: u.email }]))
 			};
+			userResults = users;
+		}, 250);
+	};
 
-			selectedGroupId = '';
+	const patchRead = (patch: Partial<NonNullable<AccessControlValue['read']>>) => {
+		if (accessControl?.read) {
+			accessControl = { read: { ...accessControl.read, ...patch } };
+		}
+	};
+
+	const addGroup = (id: string) => {
+		patchRead({ group_ids: [...selectedGroupIds, id] });
+		searchQuery = '';
+		userResults = [];
+		searchInput?.focus();
+	};
+	const addUser = (id: string) => {
+		patchRead({ user_ids: [...selectedUserIds, id] });
+		searchQuery = '';
+		userResults = [];
+		searchInput?.focus();
+	};
+	const removeGroup = (id: string) => {
+		patchRead({ group_ids: selectedGroupIds.filter((g) => g !== id) });
+	};
+	const removeUser = (id: string) => {
+		patchRead({ user_ids: selectedUserIds.filter((u) => u !== id) });
+	};
+
+	const onSearchKeydown = (e: KeyboardEvent) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			if (groupSuggestions.length > 0) {
+				addGroup(groupSuggestions[0].id);
+			} else if (userSuggestions.length > 0) {
+				addUser(userSuggestions[0].id);
+			}
+		} else if (e.key === 'Escape') {
+			suggestOpen = false;
+		} else if (e.key === 'Backspace' && searchQuery === '') {
+			// 空欄で Backspace = 末尾チップ(ユーザー → グループの順)を除去
+			if (selectedUserIds.length > 0) {
+				removeUser(selectedUserIds[selectedUserIds.length - 1]);
+			} else if (selectedGroupIds.length > 0) {
+				removeGroup(selectedGroupIds[selectedGroupIds.length - 1]);
+			}
 		}
 	};
 </script>
 
-<div class=" rounded-lg flex flex-col gap-2">
-	<div class="">
-		<div class=" text-sm font-semibold mb-1">{$i18n.t('Visibility')}</div>
+<div class="flex flex-col gap-2.5">
+	<div>
+		<div class="text-sm font-semibold mb-1.5">{$i18n.t('Visibility')}</div>
 
-		<div class="flex gap-2.5 items-center mb-1">
-			<div>
-				<div class=" p-2 bg-black/5 dark:bg-white/5 rounded-full">
-					{#if variant === 'file' && fileMode === 'groups'}
-						<span class="i-lucide-users size-5 block"></span>
-					{:else if variant === 'file' ? fileMode === 'private' : accessControl !== null}
-						<span class="i-lucide-lock size-5 block"></span>
-					{:else}
-						<span class="i-lucide-globe size-5 block"></span>
-					{/if}
-				</div>
-			</div>
-
-			<div>
-				{#if variant === 'file'}
-					<select
-						id="models"
-						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
-						value={fileMode}
-						onchange={(e) => {
-							setFileMode(e.currentTarget.value);
-						}}
-					>
-						<option class=" text-content" value="private" selected>{$i18n.t('Private')}</option>
-						<option class=" text-content" value="groups">{$i18n.t('Shared')}</option>
-						<option class=" text-content" value="public">{$i18n.t('Public')}</option>
-					</select>
-
-					<div class=" text-xs text-content-muted font-medium">
-						{#if fileMode === 'private'}
-							{$i18n.t('Only you can access')}
-						{:else if fileMode === 'groups'}
-							{$i18n.t('Only select users and groups with permission can access')}
-						{:else}
-							{$i18n.t('Accessible to all users')}
-						{/if}
-					</div>
-				{:else}
-					<select
-						id="models"
-						class="outline-hidden bg-surface-muted px-2 py-1 text-sm font-medium rounded-xs block w-fit pr-8 max-w-full"
-						value={accessControl !== null ? 'private' : 'public'}
-						onchange={(e) => {
-							if (e.currentTarget.value === 'public') {
-								accessControl = null;
-							} else {
-								accessControl = {
-									read: {
-										group_ids: [],
-										user_ids: []
-									}
-								};
-							}
-						}}
-					>
-						<option class=" text-content" value="private" selected>{$i18n.t('Private')}</option>
-						{#if allowPublic}
-							<option class=" text-content" value="public" selected>{$i18n.t('Public')}</option>
-						{/if}
-					</select>
-
-					<div class=" text-xs text-content-muted font-medium">
-						{#if accessControl !== null}
-							{$i18n.t('Only select users and groups with permission can access')}
-						{:else}
-							{$i18n.t('Accessible to all users')}
-						{/if}
-					</div>
-				{/if}
-			</div>
+		<div
+			class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
+			role="group"
+			aria-label={$i18n.t('Visibility')}
+		>
+			{#each SEGMENTS as segment (segment.mode)}
+				{@const active = mode === segment.mode}
+				<!-- active 面: light は raised+shadow で浮くが、dark は raised(#262626)が
+				     muted(#2d2d2d)より暗く shadow も見えない(明暗逆転)。dark だけ
+				     surface-hover へ持ち上げ + border-line の縁取りで有効状態を示す -->
+				<button
+					class="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md border transition {active
+						? 'bg-surface-raised dark:bg-surface-hover border-transparent dark:border-line text-content shadow-sm'
+						: 'border-transparent text-content-muted hover:text-content'}"
+					type="button"
+					aria-pressed={active}
+					onclick={() => setMode(segment.mode)}
+				>
+					<span class="{segment.icon} size-3.5 block"></span>
+					{$i18n.t(segment.label)}
+				</button>
+			{/each}
 		</div>
+
+		<div class="text-xs text-content-muted mt-1">{description}</div>
 	</div>
-	{#if showGroups}
-		{@const accessGroups = groups.filter((group) =>
-			(accessControl?.read?.group_ids ?? []).includes(group.id)
-		)}
-		<div>
-			<div class="">
-				<div class="flex justify-between mb-1.5">
-					<div class="text-sm font-semibold">
-						{$i18n.t('Groups')}
-					</div>
-				</div>
 
-				<div class="mb-1">
-					<div class="flex w-full">
-						<div class="flex flex-1 items-center">
-							<div class="w-full px-0.5">
-								<select
-									class="outline-hidden bg-surface-muted px-2 py-1 text-sm rounded-xs block w-full pr-8 max-w-full
-									{selectedGroupId ? '' : 'text-content-subtle'}"
-									bind:value={selectedGroupId}
-								>
-									<option class=" text-content" value="" disabled selected
-										>{$i18n.t('Select a group')}</option
-									>
-									{#each groups.filter((group) => !(accessControl?.read?.group_ids ?? []).includes(group.id)) as group}
-										<option class=" text-content" value={group.id}>{group.name}</option>
-									{/each}
-								</select>
-							</div>
+	{#if showMembers}
+		{@const accessGroups = groups.filter((group) => selectedGroupIds.includes(group.id))}
+		<div class="relative">
+			<!-- チップ入力: 選択済みのグループ・ユーザー + 検索入力を 1 面に(入力面 = rounded-xs 規律)。
+			     label なので余白クリックでネイティブに input へフォーカスが移る -->
+			<label
+				class="flex flex-wrap items-center gap-1 px-1.5 py-1 bg-surface-muted rounded-xs cursor-text"
+			>
+				{#each accessGroups as group (group.id)}
+					<span
+						class="inline-flex items-center gap-1 pl-2 pr-0.5 py-0.5 bg-surface-raised border border-line rounded-full text-xs font-medium"
+					>
+						<span class="i-lucide-users size-3 block text-content-muted"></span>
+						{group.name}
+						<button
+							class="p-0.5 rounded-full text-content-subtle hover:text-content hover:bg-surface-muted"
+							type="button"
+							aria-label={$i18n.t('Remove')}
+							onclick={(e) => {
+								e.stopPropagation();
+								removeGroup(group.id);
+							}}
+						>
+							<span class="i-lucide-x size-3 block"></span>
+						</button>
+					</span>
+				{/each}
+				{#each selectedUserIds as userId (userId)}
+					<span
+						class="inline-flex items-center gap-1 pl-2 pr-0.5 py-0.5 bg-surface-raised border border-line rounded-full text-xs font-medium"
+						title={knownUsers[userId]?.email ?? userId}
+					>
+						<span class="i-lucide-circle-user size-3 block text-content-muted"></span>
+						{knownUsers[userId]?.name ?? userId}
+						<button
+							class="p-0.5 rounded-full text-content-subtle hover:text-content hover:bg-surface-muted"
+							type="button"
+							aria-label={$i18n.t('Remove')}
+							onclick={(e) => {
+								e.stopPropagation();
+								removeUser(userId);
+							}}
+						>
+							<span class="i-lucide-x size-3 block"></span>
+						</button>
+					</span>
+				{/each}
+				<input
+					class="flex-1 min-w-32 px-1 py-0.5 text-sm bg-transparent outline-hidden placeholder:text-content-subtle"
+					bind:this={searchInput}
+					bind:value={searchQuery}
+					placeholder={$i18n.t('Add groups or users')}
+					oninput={onSearchInput}
+					onfocus={() => (suggestOpen = true)}
+					onblur={() => setTimeout(() => (suggestOpen = false), 150)}
+					onkeydown={onSearchKeydown}
+				/>
+			</label>
+
+			{#if suggestOpen && (groupSuggestions.length > 0 || userSuggestions.length > 0)}
+				<div
+					class="absolute left-0 right-0 top-full mt-1 z-50 bg-surface-raised border border-line rounded-lg shadow-sm overflow-hidden max-h-56 overflow-y-auto"
+				>
+					{#if groupSuggestions.length > 0}
+						<div
+							class="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold tracking-wider uppercase text-content-subtle"
+						>
+							{$i18n.t('Groups')}
 						</div>
-					</div>
-				</div>
-
-				<hr class=" border-gray-100 dark:border-gray-700/10 mt-1.5 mb-2.5 w-full" />
-
-				<div class="flex flex-col gap-2 mb-1 px-0.5">
-					{#if accessGroups.length > 0}
-						{#each accessGroups as group}
-							<div class="flex items-center gap-3 justify-between text-xs w-full transition">
-								<div class="flex items-center gap-1.5 w-full font-medium">
-									<div>
-										<span class="i-lucide-circle-user size-4 block"></span>
-									</div>
-
-									<div>
-										{group.name}
-									</div>
-								</div>
-
-								<div class="w-full flex justify-end items-center gap-0.5">
-									<button
-										class=" rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-										type="button"
-										aria-label={$i18n.t('Remove')}
-										onclick={() => {
-											if (accessControl?.read) {
-												accessControl = {
-													read: {
-														...accessControl.read,
-														group_ids: (accessControl.read.group_ids ?? []).filter(
-															(id) => id !== group.id
-														)
-													}
-												};
-											}
-										}}
-									>
-										<span class="i-lucide-x size-3.5 block"></span>
-									</button>
-								</div>
-							</div>
+						{#each groupSuggestions as group (group.id)}
+							<button
+								class="flex items-center gap-2 w-full px-2.5 py-1.5 text-sm text-left hover:bg-surface-hover"
+								type="button"
+								onmousedown={(e) => {
+									e.preventDefault();
+									addGroup(group.id);
+								}}
+							>
+								<span class="i-lucide-users size-3.5 block text-content-muted"></span>
+								{group.name}
+							</button>
 						{/each}
-					{:else}
-						<div class="flex items-center justify-center">
-							<div class="text-content-subtle text-xs text-center py-2 px-10">
-								{$i18n.t('No groups with access, add a group to grant access')}
-							</div>
+					{/if}
+					{#if userSuggestions.length > 0}
+						<div
+							class="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold tracking-wider uppercase text-content-subtle"
+						>
+							{$i18n.t('Users')}
 						</div>
+						{#each userSuggestions as suggestUser (suggestUser.id)}
+							<button
+								class="flex items-center gap-2 w-full px-2.5 py-1.5 text-sm text-left hover:bg-surface-hover"
+								type="button"
+								onmousedown={(e) => {
+									e.preventDefault();
+									addUser(suggestUser.id);
+								}}
+							>
+								<span class="i-lucide-circle-user size-3.5 block text-content-muted"></span>
+								{suggestUser.name}
+								<span class="text-xs text-content-subtle truncate">{suggestUser.email}</span>
+							</button>
+						{/each}
 					{/if}
 				</div>
-			</div>
+			{/if}
 		</div>
 	{/if}
 </div>

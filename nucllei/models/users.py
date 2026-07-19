@@ -191,6 +191,24 @@ class UsersTable:
 
             return [UserModel.model_validate(user) for user in users]
 
+    def search_active_users(self, query: str, limit: int = 20) -> list[UserModel]:
+        """llens(#85): ACL のユーザー指定用の名前/メール部分一致検索。
+
+        pending は対象外(まだ利用者でない)。呼び出し側(router)が
+        最小フィールドへ絞る前提の内部検索。
+        """
+        with get_db() as db:
+            pattern = f"%{query}%"
+            users = (
+                db.query(User)
+                .filter(User.role.in_(("user", "admin")))
+                .filter((User.name.ilike(pattern)) | (User.email.ilike(pattern)))
+                .order_by(User.name.asc())
+                .limit(limit)
+                .all()
+            )
+            return [UserModel.model_validate(user) for user in users]
+
     def get_users_by_user_ids(self, user_ids: list[str]) -> list[UserModel]:
         with get_db() as db:
             users = db.query(User).filter(User.id.in_(user_ids)).all()

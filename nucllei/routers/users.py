@@ -16,7 +16,7 @@ from nucllei.models.users import (
 
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import SRC_LOG_LEVELS
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from nucllei.utils.auth import get_admin_user, get_password_hash, get_verified_user
@@ -40,6 +40,34 @@ async def get_users(
     user=Depends(get_admin_user),
 ):
     return Users.get_users(skip, limit)
+
+
+############################
+# User Search(ACL 用)
+############################
+
+
+@router.get("/search")
+async def search_users(
+    query: str = Query("", max_length=100),
+    ids: Optional[str] = Query(None, max_length=2000),
+    user=Depends(get_verified_user),
+):
+    """llens(#85): AccessControl のユーザー指定用ディレクトリ検索(verified 向け)。
+
+    - query: 名前/メールの部分一致(pending は対象外)。空なら []
+    - ids: カンマ区切り id 群の名前解決(既存 ACL の user_ids チップ表示用)
+    返すのは最小フィールド(id / name / email)のみ — 院内ディレクトリとしての
+    開示は許容する判断(2026-07-19)。full な UserModel は admin 専用の / に残す。
+    """
+    if ids is not None:
+        id_list = [i for i in ids.split(",") if i][:100]
+        users = Users.get_users_by_user_ids(id_list)
+    elif query.strip():
+        users = Users.search_active_users(query.strip())
+    else:
+        users = []
+    return [{"id": u.id, "name": u.name, "email": u.email} for u in users]
 
 
 ############################

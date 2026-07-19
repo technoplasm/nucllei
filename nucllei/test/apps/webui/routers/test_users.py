@@ -170,3 +170,73 @@ class TestUsers(AbstractPostgresTest):
             response = self.fast_api_client.get(self.create_url(""))
         assert response.status_code == 200
         assert len(response.json()) == 2
+
+
+class TestUserSearch(AbstractPostgresTest):
+    """llens(#85): ACL 用ユーザー検索(GET /users/search)の認可と応答形。"""
+
+    BASE_PATH = "/api/v1/users"
+
+    def setup_class(cls):
+        super().setup_class()
+        from nucllei.models.users import Users
+
+        cls.users = Users
+
+    def setup_method(self):
+        super().setup_method()
+        self.users.insert_new_user(
+            id="1",
+            name="Alice Tanaka",
+            email="alice@nucllei.local",
+            profile_image_url="/u.png",
+            role="user",
+        )
+        self.users.insert_new_user(
+            id="2",
+            name="Bob Sato",
+            email="bob@nucllei.local",
+            profile_image_url="/u.png",
+            role="admin",
+        )
+        self.users.insert_new_user(
+            id="3",
+            name="Carol Pending",
+            email="carol@nucllei.local",
+            profile_image_url="/u.png",
+            role="pending",
+        )
+
+    def test_search_by_name_and_email(self):
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/search", {"query": "tanaka"}))
+        assert r.status_code == 200, r.text
+        assert [u["id"] for u in r.json()] == ["1"]
+        # 最小フィールドのみ(role / profile_image_url / api_key 等は返さない)
+        assert set(r.json()[0].keys()) == {"id", "name", "email"}
+
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/search", {"query": "bob@"}))
+        assert [u["id"] for u in r.json()] == ["2"]
+
+    def test_search_excludes_pending_and_empty_query(self):
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/search", {"query": "carol"}))
+        assert r.json() == []  # pending は候補に出ない
+
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/search", {"query": "  "}))
+        assert r.json() == []
+
+    def test_resolve_by_ids(self):
+        with mock_webui_user(id="1", role="user"):
+            r = self.fast_api_client.get(self.create_url("/search", {"ids": "2,999"}))
+        assert r.status_code == 200, r.text
+        assert [u["id"] for u in r.json()] == ["2"]  # 不明 id は黙って落ちる
+
+    def test_pending_caller_prohibited(self):
+        from test.util.mock_user import mock_webui_user_strict
+
+        with mock_webui_user_strict(id="3", role="pending"):
+            r = self.fast_api_client.get(self.create_url("/search", {"query": "a"}))
+        assert r.status_code == 401, r.text

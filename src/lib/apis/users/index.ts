@@ -1,6 +1,27 @@
 import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+// llens(#85): AccessControl のユーザー指定用ディレクトリ検索(verified 向け・最小フィールド)。
+// query = 名前/メール部分一致、ids = カンマ区切り id 群の名前解決(既存 ACL のチップ表示用)
+export const searchUsers = async (params: { query?: string; ids?: string[] }) => {
+	const searchParams = new URLSearchParams();
+	if (params.query) {
+		searchParams.append('query', params.query);
+	}
+	if (params.ids?.length) {
+		searchParams.append('ids', params.ids.join(','));
+	}
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/users/search?${searchParams.toString()}`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json'
+		}
+	});
+	if (!res.ok) throw await res.json();
+	return (await res.json()) as { id: string; name: string; email: string }[];
+};
+
 export const getUserDefaultPermissions = async () => {
 	let error = null;
 
