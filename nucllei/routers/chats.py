@@ -828,5 +828,3 @@ async def delete_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
-
-

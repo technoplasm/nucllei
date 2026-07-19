@@ -209,7 +209,9 @@ class TestUserSearch(AbstractPostgresTest):
 
     def test_search_by_name_and_email(self):
         with mock_webui_user(id="1", role="user"):
-            r = self.fast_api_client.get(self.create_url("/search", {"query": "tanaka"}))
+            r = self.fast_api_client.get(
+                self.create_url("/search", {"query": "tanaka"})
+            )
         assert r.status_code == 200, r.text
         assert [u["id"] for u in r.json()] == ["1"]
         # 最小フィールドのみ(role / profile_image_url / api_key 等は返さない)
