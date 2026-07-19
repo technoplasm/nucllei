@@ -1,5 +1,5 @@
 <script lang="ts">
-	import panzoom, { type PanZoom } from 'panzoom';
+	import panzoom from 'panzoom';
 
 	let {
 		show = $bindable(false),
@@ -9,13 +9,11 @@
 
 	let previewElement = $state<HTMLDivElement | null>(null);
 
-	let instance: PanZoom;
-
 	let sceneElement = $state<HTMLElement>();
 
 	$effect(() => {
 		if (sceneElement) {
-			instance = panzoom(sceneElement, {
+			panzoom(sceneElement, {
 				bounds: true,
 				boundsPadding: 0.1,
 

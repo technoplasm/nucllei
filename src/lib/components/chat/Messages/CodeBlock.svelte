@@ -11,7 +11,6 @@
 	type Token = { type: string; [key: string]: any };
 
 	let {
-		id = '',
 		token = null,
 		lang = '',
 		code = '',

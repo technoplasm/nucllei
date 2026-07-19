@@ -45,9 +45,6 @@
 	let createModelDigest = $state('');
 	let createModelPullProgress = $state<number | null>(null);
 
-	let digest = $state('');
-	let pullProgress = $state<number | null>(null);
-
 	let modelUploadMode = $state('file');
 	let modelInputFile = $state<FileList | null>(null);
 	let modelFileUrl = $state('');
@@ -205,11 +202,9 @@
 						}
 					}
 				} catch (error: any) {
-					if (typeof error !== 'string') {
-						error = error.message;
-					}
+					const message = typeof error === 'string' ? error : error.message;
 
-					toast.error(`${error}`);
+					toast.error(`${message}`);
 				}
 			}
 
@@ -343,16 +338,6 @@
 										!data.status.includes('sha256')
 									) {
 										toast.success(data.status);
-									} else {
-										if (data.digest) {
-											digest = data.digest;
-
-											if (data.completed) {
-												pullProgress = Math.round((data.completed / data.total) * 1000) / 10;
-											} else {
-												pullProgress = 100;
-											}
-										}
 									}
 								}
 							}

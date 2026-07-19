@@ -1,5 +1,5 @@
 import { apiFetch } from '$lib/apis/fetch';
-import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { OPENAI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 export const getOpenAIConfig = async () => {
 	let error = null;

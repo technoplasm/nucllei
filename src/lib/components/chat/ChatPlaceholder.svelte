@@ -86,6 +86,7 @@
 						<div class="mt-0.5 text-base font-normal text-content-muted line-clamp-3 markdown">
 							<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 							     DOMPurify で無害化(javascript: リンク等を除去)。 -->
+							<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 							{@html DOMPurify.sanitize(
 								render(
 									sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')

@@ -204,7 +204,7 @@ export const getOllamaModels = async (urlIdx: null | number = null) => {
 };
 
 export const generateChatCompletion = async (body: object) => {
-	let controller = new AbortController();
+	const controller = new AbortController();
 	let error = null;
 
 	const res = await apiFetch(`${OLLAMA_API_BASE_URL}/api/chat`, {

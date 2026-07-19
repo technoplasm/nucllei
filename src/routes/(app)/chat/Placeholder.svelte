@@ -54,7 +54,7 @@
 		let text = p;
 
 		if (p.includes('{{CLIPBOARD}}')) {
-			const clipboardText = await navigator.clipboard.readText().catch((err) => {
+			const clipboardText = await navigator.clipboard.readText().catch(() => {
 				toast.error($i18n.t('Failed to read clipboard contents'));
 				return '{{CLIPBOARD}}';
 			});
@@ -131,6 +131,7 @@
 							>
 								<!-- llens(GHSA-gf5m-wcrh-7928): モデル説明の XSS 対策。marked 生成 HTML を
 								     DOMPurify で無害化(javascript: リンク等を除去)。 -->
+								<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 								{@html DOMPurify.sanitize(
 									render(
 										sanitizeResponseContent(models[selectedModelIdx]?.info?.meta?.description ?? '')

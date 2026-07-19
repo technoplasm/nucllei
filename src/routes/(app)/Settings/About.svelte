@@ -1,11 +1,9 @@
 <script lang="ts">
 	import { APP_VERSION } from '$lib/constants';
 	import { WEBUI_NAME, config } from '$lib/stores';
-	import { onMount, getContext } from 'svelte';
+	import { onMount } from 'svelte';
 
 	import OPEN_WEBUI_LICENSE from '../../../../LICENSE.open-webui?raw';
-
-	const i18n = getContext('i18n');
 
 	type LicensedPackage = { name: string; version: string; license: string };
 

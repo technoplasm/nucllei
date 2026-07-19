@@ -194,22 +194,11 @@
 		}
 	};
 
-	let draggedOver = $state(false);
-
 	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
-
-		// Check if a file is being draggedOver.
-		if (e.dataTransfer?.types?.includes('Files')) {
-			draggedOver = true;
-		} else {
-			draggedOver = false;
-		}
 	};
 
-	const onDragLeave = () => {
-		draggedOver = false;
-	};
+	const onDragLeave = () => {};
 
 	const onDrop = async (e: DragEvent) => {
 		e.preventDefault();
@@ -222,8 +211,6 @@
 				inputFilesHandler(inputFiles); // Handle the dropped files
 			}
 		}
-
-		draggedOver = false; // Reset draggedOver status after drop
 	};
 
 	let touchstart: Touch | null = null;

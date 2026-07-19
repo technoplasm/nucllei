@@ -191,5 +191,5 @@ export const parseStopSequences = (
 		return undefined;
 	}
 	const tokens = typeof stop === 'string' ? stop.split(',').map((token) => token.trim()) : stop;
-	return tokens.map((str) => decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"')));
+	return tokens.map((str) => decodeURIComponent(JSON.parse('"' + str.replace(/"/g, '\\"') + '"')));
 };

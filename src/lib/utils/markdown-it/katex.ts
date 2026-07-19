@@ -15,7 +15,7 @@ const DELIMITER_LIST = [
 ];
 
 function escapeRegex(string: string) {
-	return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+	return string.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
 const inlinePatterns: string[] = [];
@@ -33,8 +33,8 @@ for (const { left, right, display } of DELIMITER_LIST) {
 }
 
 // 先頭アンカー版(現在位置から一致するか)。数式末尾は特殊文字で終われる。
-const inlineRule = new RegExp(`^(${inlinePatterns.join('|')})(?=[\\s?。，!-\/:-@[-\`{-~]|$)`, 'u');
-const blockRule = new RegExp(`^(${blockPatterns.join('|')})(?=[\\s?。，!-\/:-@[-\`{-~]|$)`, 'u');
+const inlineRule = new RegExp(`^(${inlinePatterns.join('|')})(?=[\\s?。，!-/:-@[-\`{-~]|$)`, 'u');
+const blockRule = new RegExp(`^(${blockPatterns.join('|')})(?=[\\s?。，!-/:-@[-\`{-~]|$)`, 'u');
 
 function extractText(match: RegExpMatchArray): string {
 	return (
@@ -52,7 +52,7 @@ export default function katexPlugin(md: MarkdownIt) {
 		// marked 版と同じ「直前が特殊文字 or 行頭」の制約
 		if (start > 0) {
 			const prev = state.src.charAt(start - 1);
-			if (!/[\s?。，!-\/:-@[-`{-~]/.test(prev)) return false;
+			if (!/[\s?。，!-/:-@[-`{-~]/.test(prev)) return false;
 		}
 		const match = state.src.slice(start).match(inlineRule);
 		if (!match) return false;

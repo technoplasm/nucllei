@@ -320,7 +320,7 @@ export const userSignUp = async (
 export const userSignOut = async () => {
 	let error = null;
 
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
+	await apiFetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'

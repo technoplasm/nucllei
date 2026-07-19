@@ -1,0 +1,45 @@
+name: Lint Frontend
+
+on:
+  # Docker Image (ghcr) が tag push 時に再利用呼び出しする(全 gate green → build)
+  workflow_call:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'nucllei/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - 'nucllei/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+jobs:
+  eslint:
+    name: 'ESLint (frontend)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # eslint 設定は .eslintrc.cjs(llens #25): backend ruff(E9,F)と同じ哲学で
+      # 正しさ系(死にコード・未使用・実行時バグの芽)のみを gate 化。
+      # 型の厳しさは svelte-check(format-build-frontend.yaml)、整形は prettier が担う。
+      - name: Lint frontend
+        run: npx eslint . --ext .js,.ts,.svelte --max-warnings 0

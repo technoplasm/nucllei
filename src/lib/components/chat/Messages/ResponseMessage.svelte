@@ -40,12 +40,9 @@
 		gotoMessage = () => {},
 		showPreviousMessage,
 		showNextMessage,
-		updateChat,
 		editMessage,
-		saveMessage = undefined,
 		actionMessage,
 		deleteMessage,
-		submitMessage = undefined,
 		continueResponse,
 		regenerateResponse,
 		addMessages,
@@ -58,14 +55,11 @@
 		gotoMessage?: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		updateChat: () => void;
 		editMessage: (id: string, content: string, submit?: boolean) => void;
 		/** 未使用(親の呼び出し互換のため受け取りだけ維持)。 */
-		saveMessage?: (id: string, message: ChatMessage) => void;
 		actionMessage: (actionId: string, message: ChatMessage) => void;
 		deleteMessage: (id: string) => void;
 		/** 未使用(旧 on:select 死に購読の撤去で不要化。呼び出し互換のため維持)。 */
-		submitMessage?: (parentId: string, prompt: string) => void;
 		continueResponse: () => void;
 		regenerateResponse: (message: ChatMessage) => void;
 		addMessages: (payload: {

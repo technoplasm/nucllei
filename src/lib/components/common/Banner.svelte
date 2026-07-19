@@ -80,6 +80,7 @@
 					<!-- llens(GHSA-cqp4-qqvg-3787): サニタイズ順を修正。markdown を HTML に
 					     render した「後」に DOMPurify をかける(旧: 生 markdown を sanitize→parse は
 					     生成 HTML を素通し)。 -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 					{@html DOMPurify.sanitize(render(banner.content))}
 				</div>
 			</div>

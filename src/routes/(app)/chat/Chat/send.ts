@@ -136,8 +136,8 @@ export class ChatSend {
 		session.prompt = '';
 
 		// Create user message
-		let userMessageId = uuidv4();
-		let userMessage = {
+		const userMessageId = uuidv4();
+		const userMessage = {
 			id: userMessageId,
 			parentId: lastMessage ? lastMessage.id : null,
 			childrenIds: [],
@@ -196,8 +196,8 @@ export class ChatSend {
 				.at(0);
 
 			if (model) {
-				let responseMessageId = uuidv4();
-				let responseMessage = {
+				const responseMessageId = uuidv4();
+				const responseMessage = {
 					parentId: parentId,
 					id: responseMessageId,
 					childrenIds: [],
@@ -263,13 +263,13 @@ export class ChatSend {
 						);
 					}
 
-					let responseMessageId =
+					const responseMessageId =
 						responseMessageIds[`${modelId}-${modelIdx ? modelIdx : _modelIdx}`];
-					let responseMessage = _history.messages[responseMessageId];
+					const responseMessage = _history.messages[responseMessageId];
 
 					// llens(#63): 個人化(Memory)は機能ごと廃止(テーブルは温存)。
 					// userContext 注入は行わない。
-					let userContext = null;
+					const userContext = null;
 					responseMessage.userContext = userContext;
 
 					this.#scrollToBottom();
@@ -487,46 +487,12 @@ export class ChatSend {
 		}
 	};
 
-	submitMessage = async (parentId: string | null, prompt: string) => {
-		const session = this.#session;
-
-		let userPrompt = prompt;
-		let userMessageId = uuidv4();
-
-		let userMessage = {
-			id: userMessageId,
-			parentId: parentId,
-			childrenIds: [],
-			role: 'user',
-			content: userPrompt,
-			models: session.selectedModels
-		};
-
-		if (parentId !== null) {
-			session.history.messages[parentId].childrenIds = [
-				...session.history.messages[parentId].childrenIds,
-				userMessageId
-			];
-		}
-
-		session.history.messages[userMessageId] = userMessage;
-		session.history.currentId = userMessageId;
-
-		await tick();
-
-		if (session.autoScroll) {
-			this.#scrollToBottom();
-		}
-
-		await this.sendPrompt(session.history, userPrompt, userMessageId);
-	};
-
 	regenerateResponse = async (message: ChatMessage) => {
 		const session = this.#session;
 
 		if (session.history.currentId && message.parentId !== null) {
-			let userMessage = session.history.messages[message.parentId];
-			let userPrompt = userMessage.content;
+			const userMessage = session.history.messages[message.parentId];
+			const userPrompt = userMessage.content;
 
 			if (session.autoScroll) {
 				this.#scrollToBottom();
@@ -653,7 +619,7 @@ export class ChatSend {
 		let parentMessage: ChatMessage | undefined = session.history.messages[parentId];
 		let currentParentId = parentMessage ? parentMessage.id : null;
 		for (const message of messages) {
-			let messageId = uuidv4();
+			const messageId = uuidv4();
 
 			if (message.role === 'user') {
 				const userMessage = {

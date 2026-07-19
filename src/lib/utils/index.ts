@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
-
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import isToday from 'dayjs/plugin/isToday';
@@ -237,7 +235,6 @@ export const generateInitialsImage = (name: string | undefined) => {
 
 export const formatDate = (inputDate: string | number | Date) => {
 	const date = dayjs(inputDate);
-	const now = dayjs();
 
 	if (date.isToday()) {
 		return `Today at ${date.format('LT')}`;
@@ -611,6 +608,7 @@ export const extractSentences = (text: string) => {
 	// Restore code blocks and process sentences
 	sentences = sentences.map((sentence) => {
 		// Check if the sentence includes a placeholder for a code block
+		// eslint-disable-next-line no-control-regex -- \u0000 はコードブロック退避の意図的プレースホルダ
 		return sentence.replace(/\u0000(\d+)\u0000/g, (_, idx) => codeBlocks[idx]);
 	});
 
@@ -634,6 +632,7 @@ export const extractParagraphsForAudio = (text: string) => {
 	// Restore code blocks and process paragraphs
 	paragraphs = paragraphs.map((paragraph) => {
 		// Check if the paragraph includes a placeholder for a code block
+		// eslint-disable-next-line no-control-regex -- \u0000 はコードブロック退避の意図的プレースホルダ
 		return paragraph.replace(/\u0000(\d+)\u0000/g, (_, idx) => codeBlocks[idx]);
 	});
 
@@ -970,8 +969,8 @@ export const convertOpenApiToToolPayload = (openApiSpec: OpenApiSpec) => {
 		parameters: JsonSchema;
 	}[] = [];
 
-	for (const [path, methods] of Object.entries(openApiSpec.paths)) {
-		for (const [method, operation] of Object.entries(methods)) {
+	for (const [_path, methods] of Object.entries(openApiSpec.paths)) {
+		for (const [_method, operation] of Object.entries(methods)) {
 			const tool: (typeof toolPayload)[number] = {
 				type: 'function',
 				name: operation.operationId,

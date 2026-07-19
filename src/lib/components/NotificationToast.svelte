@@ -50,6 +50,7 @@
 		{/if}
 
 		<div class=" line-clamp-2 text-xs self-center text-content font-normal">
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 			{@html DOMPurify.sanitize(render(content))}
 		</div>
 	</div>

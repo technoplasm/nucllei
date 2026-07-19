@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
+	import { PaneGroup, Pane } from 'paneforge';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
@@ -399,7 +399,7 @@
 
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
-		session.chat = await getChatById($chatId).catch(async (error) => {
+		session.chat = await getChatById($chatId).catch(async () => {
 			await goto('/');
 			return null;
 		});
@@ -427,7 +427,7 @@
 				session.autoScroll = true;
 				await tick();
 
-				const taskRes = await getTaskIdsByChatId($chatId).catch((error) => {
+				const taskRes = await getTaskIdsByChatId($chatId).catch(() => {
 					return null;
 				});
 
@@ -581,7 +581,6 @@
 									atSelectedModel={session.atSelectedModel}
 									sendPrompt={send.sendPrompt}
 									showMessage={send.showMessage}
-									submitMessage={send.submitMessage}
 									continueResponse={send.continueResponse}
 									regenerateResponse={send.regenerateResponse}
 									chatActionHandler={events.chatActionHandler}

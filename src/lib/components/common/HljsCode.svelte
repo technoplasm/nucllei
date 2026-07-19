@@ -99,9 +99,11 @@
 	</div>
 
 	{#if open}
+		<!-- eslint-disable svelte/no-at-html-tags -- #17 XSS sink 監査済み(hljs 出力) -->
 		<pre class="overflow-x-auto p-3 pt-1.5 scrollbar-hidden"><code class="language-{lang}"
 				>{@html highlighted}</code
 			></pre>
+		<!-- eslint-enable svelte/no-at-html-tags -->
 	{:else}
 		<div class="px-3 pt-1 pb-2 italic opacity-60">
 			{$i18n.t('{{COUNT}} hidden lines', { COUNT: (code ?? '').split('\n').length })}

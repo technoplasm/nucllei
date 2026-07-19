@@ -30,7 +30,6 @@
 		regenerateResponse,
 		chatActionHandler = undefined,
 		showMessage = () => {},
-		submitMessage = () => {},
 		addMessages = () => {},
 		readOnly = false,
 		bottomPadding = false,
@@ -60,7 +59,6 @@
 			event?: unknown
 		) => void | Promise<void>;
 		showMessage?: (message: { id: string | null }) => void | Promise<void>;
-		submitMessage?: (parentId: string, prompt: string) => void | Promise<void>;
 		addMessages?: (data: {
 			modelId: string;
 			parentId: string;
@@ -303,11 +301,6 @@
 		await chatActionHandler?.(chatId, actionId, message.model, message.id, event);
 	};
 
-	const saveMessage = async (messageId: string, message: ChatMessage) => {
-		history.messages[messageId] = message;
-		await updateChat();
-	};
-
 	const deleteMessage = async (messageId: string) => {
 		const messageToDelete = history.messages[messageId];
 		const parentMessageId = messageToDelete.parentId;
@@ -412,8 +405,6 @@
 							{editMessage}
 							{deleteMessage}
 							{actionMessage}
-							{saveMessage}
-							{submitMessage}
 							{regenerateResponse}
 							{continueResponse}
 							{addMessages}

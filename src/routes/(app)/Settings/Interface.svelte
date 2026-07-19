@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { settings, user } from '$lib/stores';
+	import { settings } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 

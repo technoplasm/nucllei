@@ -1,37 +1,20 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
-	import { onMount, tick, getContext } from 'svelte';
-	import mermaid from 'mermaid';
+	import { onMount, tick } from 'svelte';
 
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
 
-	import { getFunctions } from '$lib/apis/functions';
 	import { getModels } from '$lib/apis';
 	import { getSkills } from '$lib/apis/skills';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
 
-	import {
-		config,
-		user,
-		settings,
-		models,
-		skills,
-		tools,
-		functions,
-		banners,
-		showSettings
-	} from '$lib/stores';
+	import { user, settings, models, skills, tools, banners, showSettings } from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from './SettingsModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
-	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-
-	const i18n = getContext('i18n');
 
 	let { children } = $props();
 

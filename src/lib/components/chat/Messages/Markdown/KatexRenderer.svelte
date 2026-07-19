@@ -12,4 +12,5 @@
 	} = $props();
 </script>
 
+<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 {@html katex.renderToString(content, { displayMode, throwOnError: false })}

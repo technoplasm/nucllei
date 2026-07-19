@@ -301,7 +301,7 @@
 
 						<div class="flex w-full gap-1.5">
 							<div class="flex-1 flex flex-col gap-1.5 mt-1.5">
-								{#each OLLAMA_BASE_URLS as url, idx}
+								{#each OLLAMA_BASE_URLS as _url, idx}
 									<OllamaConnection
 										bind:url={OLLAMA_BASE_URLS[idx]}
 										bind:config={OLLAMA_API_CONFIGS[idx]}

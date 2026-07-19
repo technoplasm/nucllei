@@ -514,7 +514,7 @@
 
 						{#if toolServers !== null}
 							<div class="flex flex-col gap-1.5">
-								{#each toolServers as server, idx}
+								{#each toolServers as _server, idx}
 									<Connection
 										bind:connection={toolServers[idx]}
 										onSubmit={() => {}}

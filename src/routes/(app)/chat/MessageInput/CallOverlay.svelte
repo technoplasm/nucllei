@@ -55,7 +55,7 @@
 		const devices = await navigator.mediaDevices.enumerateDevices();
 		videoInputDevices = devices.filter((device) => device.kind === 'videoinput');
 
-		if (!!navigator.mediaDevices.getDisplayMedia) {
+		if ('getDisplayMedia' in navigator.mediaDevices) {
 			videoInputDevices = [
 				...videoInputDevices,
 				{
@@ -154,7 +154,6 @@
 	};
 
 	const MIN_DECIBELS = -55;
-	const VISUALIZER_BUFFER_LENGTH = 300;
 
 	const transcribeHandler = async (audioBlob: Blob) => {
 		// Create a blob from the audio chunks

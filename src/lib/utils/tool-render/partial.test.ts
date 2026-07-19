@@ -174,7 +174,7 @@ describe('parsePartialArguments: 実キャプチャ全プレフィックス(漸�
 			const finalArgs = JSON.parse(full) as Record<string, string>;
 
 			let acc = '';
-			let prevValues: Record<string, string> = {};
+			const prevValues: Record<string, string> = {};
 			for (const piece of deltas) {
 				acc += piece;
 				const result = parsePartialArguments(acc);

@@ -1,9 +1,8 @@
 import { apiFetch } from '$lib/apis/fetch';
-import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
 
 import { parse } from 'yaml';
-import { toast } from 'svelte-sonner';
 
 export const getModels = async (base: boolean = false) => {
 	let error = null;
@@ -342,7 +341,7 @@ export const getPipelinesList = async () => {
 		throw error;
 	}
 
-	let pipelines = res?.data ?? [];
+	const pipelines = res?.data ?? [];
 	return pipelines;
 };
 
@@ -481,7 +480,7 @@ export const getPipelines = async (urlIdx?: string) => {
 		throw error;
 	}
 
-	let pipelines = res?.data ?? [];
+	const pipelines = res?.data ?? [];
 	return pipelines;
 };
 

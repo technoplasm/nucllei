@@ -16,10 +16,8 @@
 		showNextMessage,
 		updateChat,
 		editMessage,
-		saveMessage,
 		deleteMessage,
 		actionMessage,
-		submitMessage,
 		regenerateResponse,
 		continueResponse,
 		addMessages,
@@ -35,14 +33,12 @@
 		showNextMessage: (message: ChatMessage) => void;
 		updateChat: () => void | Promise<void>;
 		editMessage: (id: string, content: string, submit?: boolean) => void;
-		saveMessage: (id: string, message: ChatMessage) => void | Promise<void>;
 		deleteMessage: (id: string) => void;
 		actionMessage: (
 			actionId: string,
 			message: ChatMessage,
 			event?: unknown
 		) => void | Promise<void>;
-		submitMessage: (parentId: string, prompt: string) => void | Promise<void>;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
 		continueResponse: () => void | Promise<void>;
 		addMessages: (data: {
@@ -93,11 +89,8 @@
 				{gotoMessage}
 				{showPreviousMessage}
 				{showNextMessage}
-				{updateChat}
 				{editMessage}
-				{saveMessage}
 				{actionMessage}
-				{submitMessage}
 				{deleteMessage}
 				{continueResponse}
 				{regenerateResponse}
@@ -110,9 +103,7 @@
 				{messageId}
 				{updateChat}
 				{editMessage}
-				{saveMessage}
 				{actionMessage}
-				{submitMessage}
 				{deleteMessage}
 				{continueResponse}
 				{regenerateResponse}

@@ -159,11 +159,6 @@ export const updateFolderParentIdById = async (id: string, parentId?: string) =>
 	return res;
 };
 
-type FolderItems = {
-	chat_ids: string[];
-	file_ids: string[];
-};
-
 export const deleteFolderById = async (id: string) => {
 	let error = null;
 

@@ -80,7 +80,6 @@
 <!-- 注意: ルートに space-y を置かない — ヘッダ tab は -mb-px で枠上辺に密着させる -->
 <div {id} class="w-full text-sm -ml-2" bind:this={rootElement}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<div
 		class="w-fit cursor-pointer text-content-muted hover:text-content transition ms-2 px-2 py-0.5 border {toggleHover
 			? 'border-line-hover'
@@ -148,7 +147,6 @@
 
 			<div class="flex justify-between mx-2">
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<div
 					class="relative cursor-pointer -mt-px flex items-center gap-1 text-xs font-medium text-content-muted hover:text-content transition bg-gray-100 dark:bg-gray-850 border border-t-0 {toggleHover
 						? 'border-line-hover'
@@ -166,7 +164,6 @@
 
 				{#if onExpandAll}
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<div
 						class="relative cursor-pointer -mt-px flex items-center gap-1 text-xs font-medium text-content-muted hover:text-content transition bg-gray-100 dark:bg-gray-850 border border-t-0 {toggleHover
 							? 'border-line-hover'
