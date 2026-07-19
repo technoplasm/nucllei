@@ -101,10 +101,21 @@ li p {
 	display: inline;
 }
 
-/* 色は --scrollbar-thumb(src/tailwind.css のトークン)で light/dark 一元管理 */
+/* スクロールバーは全域で単一の挙動(2026-07-19 一本化): 平常時は隠し、スクロール中
+   + 停止後 1.5s だけ thumb を出す。.scrolling は root layout のグローバル scroll
+   リスナが実際にスクロールした要素(window スクロールは html)へ付与する。
+   色は --scrollbar-thumb(src/tailwind.css のトークン)で light/dark 一元管理。
+   個別の :hover 制御や scrollbar-hidden クラスによる出し分けはしない。 */
 ::-webkit-scrollbar-thumb {
 	background-color: var(--scrollbar-thumb);
 	border-radius: 9999px;
+	visibility: hidden;
+}
+
+.scrolling::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+	visibility: visible;
 }
 
 ::-webkit-scrollbar {
@@ -179,16 +190,7 @@ select {
 	display: none;
 }
 
-/* .scrolling は root layout のグローバル scroll リスナが付与。表示は「スクロール中だけ」に
-   一本化 — :hover を条件に入れると、画面全体を占めるコンテナ(チャット本文)では
-   カーソルがある限り出っぱなしになる(2026-07-19) */
-.scrollbar-hidden.scrolling::-webkit-scrollbar-thumb {
-	visibility: visible;
-}
-.scrollbar-hidden::-webkit-scrollbar-thumb {
-	visibility: hidden;
-}
-
+/* scrollbar-hidden は歴史的クラス — thumb の出し分けは上のグローバル定義に統合済み */
 .scrollbar-hidden::-webkit-scrollbar-corner {
 	display: none;
 }
@@ -226,15 +228,6 @@ input[type='number'] {
 	width: 0.4rem;
 }
 
-.katex-display:active::-webkit-scrollbar-thumb,
-.katex-display:focus::-webkit-scrollbar-thumb,
-.katex-display:hover::-webkit-scrollbar-thumb {
-	visibility: visible;
-}
-.katex-display::-webkit-scrollbar-thumb {
-	visibility: hidden;
-}
-
 .katex-display::-webkit-scrollbar-corner {
 	display: none;
 }
@@ -242,16 +235,6 @@ input[type='number'] {
 .cm-editor {
 	height: 100%;
 	width: 100%;
-}
-
-.cm-scroller:active::-webkit-scrollbar-thumb,
-.cm-scroller:focus::-webkit-scrollbar-thumb,
-.cm-scroller:hover::-webkit-scrollbar-thumb {
-	visibility: visible;
-}
-
-.cm-scroller::-webkit-scrollbar-thumb {
-	visibility: hidden;
 }
 
 .cm-scroller::-webkit-scrollbar-corner {

@@ -103,23 +103,68 @@
 			window.applyTheme();
 		}
 
-		// scrollbar-hidden なコンテナ(サイドバー・チャット本文等)は hover 中だけ thumb を
-		// 出す仕様だが、スクロール中も出す(止まって 800ms で隠れる)。scroll はバブルしない
-		// ため document の capture で一括捕捉し、全コンテナを 1 リスナで賄う。
+		// スクロールバーの表示は全域一本化(app.css): 平常時は隠し、「スクロール中 + 停止後
+		// 1.5s」と「バーの溝(右端/下端 20px)へのカーソル接近」で .scrolling を付けて出す。
+		// thumb 自体に乗っている間の保持は CSS(::-webkit-scrollbar-thumb:hover)が担う。
+		// scroll はバブルしないため document の capture で一括捕捉 —
+		// サイドバー/チャット/workspace/CodeMirror まで 2 リスナで賄う。
 		const scrollingTimeouts = new WeakMap();
-		const onAnyScroll = (/** @type {Event} */ e) => {
-			const el = e.target;
-			if (!(el instanceof Element) || !el.classList.contains('scrollbar-hidden')) {
-				return;
-			}
+		const revealScrollbar = (/** @type {Element} */ el) => {
 			el.classList.add('scrolling');
 			clearTimeout(scrollingTimeouts.get(el));
 			scrollingTimeouts.set(
 				el,
-				setTimeout(() => el.classList.remove('scrolling'), 800)
+				setTimeout(() => el.classList.remove('scrolling'), 1500)
 			);
 		};
+
+		const onAnyScroll = (/** @type {Event} */ e) => {
+			// window(文書)スクロールの target は document — スクロールバーを持つ html に付ける
+			const el = e.target === document ? document.documentElement : e.target;
+			if (el instanceof Element) {
+				revealScrollbar(el);
+			}
+		};
 		document.addEventListener('scroll', onAnyScroll, { capture: true, passive: true });
+
+		const SCROLLBAR_NEAR_PX = 20;
+		let hoverRafPending = false;
+		const onPointerMove = (/** @type {PointerEvent} */ e) => {
+			if (hoverRafPending) {
+				return;
+			}
+			hoverRafPending = true;
+			requestAnimationFrame(() => {
+				hoverRafPending = false;
+				// カーソル位置の要素から祖先へ、スクロール可能な要素の縁(バーの溝)に
+				// 近ければ表示。getBoundingClientRect は数階層 × rAF 間引きで十分軽い
+				let el = e.target instanceof Element ? e.target : null;
+				for (; el; el = el.parentElement) {
+					const cs = getComputedStyle(el);
+					const scrollableY =
+						el.scrollHeight > el.clientHeight && /auto|scroll/.test(cs.overflowY);
+					const scrollableX = el.scrollWidth > el.clientWidth && /auto|scroll/.test(cs.overflowX);
+					if (!scrollableY && !scrollableX) {
+						continue;
+					}
+					const rect = el.getBoundingClientRect();
+					if (
+						(scrollableY && rect.right - e.clientX <= SCROLLBAR_NEAR_PX) ||
+						(scrollableX && rect.bottom - e.clientY <= SCROLLBAR_NEAR_PX)
+					) {
+						revealScrollbar(el);
+					}
+				}
+				const docEl = document.documentElement;
+				if (
+					docEl.scrollHeight > docEl.clientHeight &&
+					window.innerWidth - e.clientX <= SCROLLBAR_NEAR_PX
+				) {
+					revealScrollbar(docEl);
+				}
+			});
+		};
+		document.addEventListener('pointermove', onPointerMove, { passive: true });
 
 		if (window?.electronAPI) {
 			const info = await window.electronAPI.send({
