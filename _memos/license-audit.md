@@ -76,3 +76,11 @@ pnpm licenses list
 - **LICENSE 再構成(2026-07-16、#2 #58)**: 本体 `LICENSE` = Technoplasm, Inc. 専有、
   upstream BSD-3-Clause 全文は `LICENSE.open-webui` へ退避(表示保持義務を充足)。
   About タブに fork 帰属表記 + 依存ライセンス一覧(static/licenses.json)を表示。
+
+## 追記(2026-07-20)
+
+- **markdown-it-attrs 5.0.0(MIT)追加**(#87 リンク属性の出し分け)。licenses.json 再生成時に
+  #34 スクロールバー移行分の追従漏れも解消(− @melt-ui/svelte, focus-trap /
+  + overlayscrollbars, runed, svelte-toolbelt, style-to-object, inline-style-parser, lz-string)。
+- 教訓: `scripts/generate_licenses.py` を**素の python で回さない**(システム環境の
+  パッケージ列挙になり backend が汚染される)。必ず `uv run task licenses`。

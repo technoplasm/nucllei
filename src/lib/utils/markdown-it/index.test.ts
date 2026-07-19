@@ -105,4 +105,40 @@ describe('markdown-it lexer (#22 L2)', () => {
 		const hasLink = JSON.stringify(tokens).includes('"type":"link"');
 		expect(hasLink).toBe(false);
 	});
+
+	describe('リンク属性の出し分け(#87 markdown-it-attrs)', () => {
+		const firstLink = (src: string) => {
+			const [p] = lex(src);
+			return p.tokens.find((t: any) => t.type === 'link');
+		};
+
+		it('無指定リンクは target/download とも null(描画側の既定 = _blank)', () => {
+			const link = firstLink('[x](https://e.x)');
+			expect(link.target).toBeNull();
+			expect(link.download).toBeNull();
+		});
+
+		it('{target=_self} が搬送される', () => {
+			const link = firstLink('[x](/somewhere){target=_self}');
+			expect(link.target).toBe('_self');
+		});
+
+		it('{download=voice.mp3} が搬送される', () => {
+			const link = firstLink('[x](/api/v1/files/abc/content){download=voice.mp3}');
+			expect(link.download).toBe('voice.mp3');
+		});
+
+		it('裸の {download} はファイル名なしのダウンロード指定(空文字)になる', () => {
+			const link = firstLink('[x](/api/v1/files/abc/content){download}');
+			expect(link.download).toBe('');
+		});
+
+		it('allowlist 外の属性(onclick / class 等)は捨てられる', () => {
+			// トークン直描画は DOMPurify を通らないため、lexer 段で落ちることが安全性の根拠
+			const [p] = lex('[x](https://e.x){onclick=alert(1) class=evil}');
+			const json = JSON.stringify(p);
+			expect(json).not.toContain('onclick');
+			expect(json).not.toContain('evil');
+		});
+	});
 });

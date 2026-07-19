@@ -101,6 +101,9 @@ importers:
       markdown-it:
         specifier: ^14.1.0
         version: 14.3.0
+      markdown-it-attrs:
+        specifier: ^5.0.0
+        version: 5.0.0(markdown-it@14.3.0)
       mermaid:
         specifier: ^11.6.0
         version: 11.16.0
@@ -2841,6 +2844,12 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+
+  markdown-it-attrs@5.0.0:
+    resolution: {integrity: sha512-7Wvp3Fc1YsHsj1oRKli1DGAMyGhozldtU99wEl4plc6OBsv1WZB+zT3Lgm1/49rVMvXWiYXbUU8rz3X6VVGKaQ==}
+    engines: {node: '>=6'}
+    peerDependencies:
+      markdown-it: '>= 9.0.0'
 
   markdown-it@14.3.0:
     resolution: {integrity: sha512-RCEsPjR+sr0x+AuYp601tKTkgFG4YEPLCzHST3cQ/fhlJkqAkz1L2/Qbp1j9qw5SBwQHFBoW8+hoN5xssOF0Tw==}
@@ -6602,6 +6611,10 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  markdown-it-attrs@5.0.0(markdown-it@14.3.0):
+    dependencies:
+      markdown-it: 14.3.0
 
   markdown-it@14.3.0:
     dependencies:

@@ -11,6 +11,7 @@
 import MarkdownIt from 'markdown-it';
 import type { Token as MDToken } from 'markdown-it/index.js';
 import hljs from 'highlight.js';
+import markdownItAttrs from 'markdown-it-attrs';
 import katexPlugin from './katex';
 
 const md = new MarkdownIt({
@@ -32,6 +33,11 @@ const md = new MarkdownIt({
 		return '';
 	}
 });
+
+// リンクの属性出し分け(#87): `[t](url){target=_self}` / `[t](url){download=voice.mp3}`。
+// トークン直描画(MarkdownInlineTokens)は DOMPurify を通らないため allowlist 必須 —
+// target / download 以外の属性(class / onclick 等)は書いても捨てられる。
+md.use(markdownItAttrs, { allowedAttributes: ['target', 'download'] });
 
 // 遡及文法の無効化(rendering-design.md §2c)。
 // lheading = setext 見出し(段落の次行の ---/=== で遡って h1/h2 になる)。
@@ -103,6 +109,9 @@ function convertInline(children: MDToken[] | null): AnyToken[] {
 						type: 'link',
 						href: attr(tok, 'href') ?? '',
 						title: attr(tok, 'title'),
+						// markdown-it-attrs 経由(#87)。無指定は null(描画側の既定 = _blank)
+						target: attr(tok, 'target'),
+						download: attr(tok, 'download'),
 						tokens: []
 					}
 				});

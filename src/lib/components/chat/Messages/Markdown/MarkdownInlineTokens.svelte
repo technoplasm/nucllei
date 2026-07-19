@@ -46,12 +46,28 @@
 			{@html html}
 		{/if}
 	{:else if token.type === 'link'}
+		<!-- #87: {target=_self} / {download=...} の出し分け。target は _self のみ opt-in
+		     (SPA からの同一タブ遷移は明示時だけ)、download は same-origin でのみ効く(ブラウザ仕様) -->
+		{@const linkTarget = token.target === '_self' ? '_self' : '_blank'}
+		{@const linkDownload = typeof token.download === 'string' ? token.download : undefined}
 		{#if token.tokens}
-			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>
+			<a
+				href={token.href}
+				target={linkTarget}
+				download={linkDownload}
+				rel="nofollow"
+				title={token.title}
+			>
 				<MarkdownInlineTokens id={`${id}-a`} tokens={token.tokens} {onSourceClick} />
 			</a>
 		{:else}
-			<a href={token.href} target="_blank" rel="nofollow" title={token.title}>{token.text}</a>
+			<a
+				href={token.href}
+				target={linkTarget}
+				download={linkDownload}
+				rel="nofollow"
+				title={token.title}>{token.text}</a
+			>
 		{/if}
 	{:else if token.type === 'image'}
 		<Image src={token.href} alt={token.text} />
