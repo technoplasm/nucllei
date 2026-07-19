@@ -136,7 +136,8 @@ li p {
 }
 
 ::-webkit-scrollbar {
-	height: 0.8rem;
+	/* 縦横同じ細さ(旧 height 0.8rem は CodeMirror 等の横バーだけ太く見えた) */
+	height: 0.4rem;
 	width: 0.4rem;
 }
 
