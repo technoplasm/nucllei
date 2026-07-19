@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
 	import { getContext, type Snippet } from 'svelte';
-	import { fade } from 'svelte/transition';
 
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import { showSettings, mobile, showSidebar, user } from '$lib/stores';
 	import { userSignOut } from '$lib/apis/auths';
 
@@ -26,12 +26,13 @@
 		{@render children?.()}
 	</DropdownMenu.Trigger>
 
-	<DropdownMenu.Content
-		class="w-full {className} text-sm rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg font-primary"
+	<!-- bits-ui 2.x 移行で transition は flyAndScale に統一(他メニューと同一様式)。フォーカスはトリガへ復帰(0.19 既定の維持) -->
+	<DropdownContent
+		className="w-full {className} text-sm rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg font-primary"
 		sideOffset={8}
 		side="bottom"
 		align="start"
-		transition={(e) => fade(e, { duration: 100 })}
+		restoreFocus
 	>
 		<button
 			class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -89,5 +90,5 @@
 			</div>
 			<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 		</button>
-	</DropdownMenu.Content>
+	</DropdownContent>
 </DropdownMenu.Root>

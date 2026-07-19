@@ -4,7 +4,6 @@
 	import { render } from '$lib/utils/markdown-it';
 	import Fuse from 'fuse.js';
 
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { onMount, getContext, tick } from 'svelte';
 
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
@@ -15,6 +14,7 @@
 	import { sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
 
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
@@ -281,7 +281,6 @@
 
 		resetView();
 	}}
-	closeFocus={false}
 >
 	<DropdownMenu.Trigger
 		class="relative w-full font-primary"
@@ -300,11 +299,10 @@
 		</div>
 	</DropdownMenu.Trigger>
 
-	<DropdownMenu.Content
-		class=" z-40 {$mobile
+	<DropdownContent
+		className=" z-40 {$mobile
 			? `w-full`
 			: `${className}`} max-w-[calc(100vw-1rem)] justify-start rounded-xl border border-line bg-surface-raised text-content shadow-sm outline-hidden"
-		transition={flyAndScale}
 		side="bottom"
 		align={$mobile ? 'center' : 'start'}
 		sideOffset={3}
@@ -570,5 +568,5 @@
 
 		<div class="hidden w-[42rem]"></div>
 		<div class="hidden w-[32rem]"></div>
-	</DropdownMenu.Content>
+	</DropdownContent>
 </DropdownMenu.Root>

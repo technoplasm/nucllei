@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext, type Snippet } from 'svelte';
 
 	import fileSaver from 'file-saver';
@@ -10,6 +9,7 @@
 	import html2canvas from 'html2canvas-pro';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import {
 		getChatById,
@@ -184,16 +184,15 @@
 	</Tooltip>
 
 	{#snippet content()}
-		<DropdownMenu.Content
-			class="w-full max-w-[200px] rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+		<DropdownContent
+			className="w-full max-w-[200px] rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 			sideOffset={-2}
 			side="bottom"
 			align="start"
-			transition={flyAndScale}
 		>
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					pinHandler();
 				}}
 			>
@@ -208,7 +207,7 @@
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					renameHandler();
 				}}
 			>
@@ -218,7 +217,7 @@
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					cloneChatHandler();
 				}}
 			>
@@ -228,7 +227,7 @@
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					archiveChatHandler();
 				}}
 			>
@@ -239,7 +238,7 @@
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.share ?? true)}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-md"
-					on:click={() => {
+					onSelect={() => {
 						shareHandler();
 					}}
 				>
@@ -256,14 +255,14 @@
 
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
-				<DropdownMenu.SubContent
-					class="w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-					transition={flyAndScale}
+				<DropdownContent
+					sub
+					className="w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 					sideOffset={8}
 				>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadJSONExport();
 						}}
 					>
@@ -271,7 +270,7 @@
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadTxt();
 						}}
 					>
@@ -280,23 +279,23 @@
 
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadPdf();
 						}}
 					>
 						<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
 					</DropdownMenu.Item>
-				</DropdownMenu.SubContent>
+				</DropdownContent>
 			</DropdownMenu.Sub>
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					deleteHandler();
 				}}
 			>
 				<span class="i-lucide-trash-2 size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
-		</DropdownMenu.Content>
+		</DropdownContent>
 	{/snippet}
 </Dropdown>

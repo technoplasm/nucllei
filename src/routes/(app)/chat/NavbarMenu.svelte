@@ -13,9 +13,9 @@
 	import type { ChatMessage } from '$lib/types/chat';
 
 	import { chatId, showControls, user } from '$lib/stores';
-	import { flyAndScale } from '$lib/utils/transitions';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import { getChatById } from '$lib/apis/chats';
 
 	const i18n = getContext('i18n');
@@ -152,12 +152,11 @@
 	{@render children?.()}
 
 	{#snippet content()}
-		<DropdownMenu.Content
-			class="w-full max-w-[200px] rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
+		<DropdownContent
+			className="w-full max-w-[200px] rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
 			sideOffset={8}
 			side="bottom"
 			align="end"
-			transition={flyAndScale}
 		>
 			<!-- llens(#19): 右ペイン(このチャットのファイル)のトグル。Navbar 直置きから移設。
 			     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
@@ -165,7 +164,7 @@
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 					id="chat-files-button"
-					on:click={() => {
+					onSelect={() => {
 						showControls.set(!$showControls);
 					}}
 				>
@@ -178,7 +177,7 @@
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 					id="chat-share-button"
-					on:click={() => {
+					onSelect={() => {
 						shareHandler();
 					}}
 				>
@@ -194,14 +193,14 @@
 					<span class="i-lucide-download size-4 block"></span>
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</DropdownMenu.SubTrigger>
-				<DropdownMenu.SubContent
-					class="w-full rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
-					transition={flyAndScale}
+				<DropdownContent
+					sub
+					className="w-full rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
 					sideOffset={8}
 				>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadJSONExport();
 						}}
 					>
@@ -209,7 +208,7 @@
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadTxt();
 						}}
 					>
@@ -218,19 +217,19 @@
 
 					<DropdownMenu.Item
 						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
-						on:click={() => {
+						onSelect={() => {
 							downloadPdf();
 						}}
 					>
 						<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
 					</DropdownMenu.Item>
-				</DropdownMenu.SubContent>
+				</DropdownContent>
 			</DropdownMenu.Sub>
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
 				id="chat-copy-button"
-				on:click={async () => {
+				onSelect={async () => {
 					const res = await copyToClipboard(await getChatAsText()).catch((e: unknown) => {
 						console.error(e);
 					});
@@ -243,6 +242,6 @@
 				<span class="i-lucide-clipboard size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Copy')}</div>
 			</DropdownMenu.Item>
-		</DropdownMenu.Content>
+		</DropdownContent>
 	{/snippet}
 </Dropdown>

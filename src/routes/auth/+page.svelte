@@ -174,7 +174,7 @@
 					<div class="  my-auto pb-10 w-full text-content">
 						<form
 							class=" flex flex-col justify-center"
-							on:submit={(e) => {
+							onsubmit={(e) => {
 								e.preventDefault();
 								submitHandler();
 							}}
@@ -276,7 +276,7 @@
 												<button
 													class=" font-medium underline"
 													type="button"
-													on:click={() => {
+													onclick={() => {
 														if (mode === 'signin') {
 															mode = 'signup';
 														} else {
@@ -308,7 +308,7 @@
 								{#if $config?.oauth?.providers?.google}
 									<button
 										class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
-										on:click={() => {
+										onclick={() => {
 											window.location.href = `${WEBUI_BASE_URL}/oauth/google/login`;
 										}}
 									>
@@ -319,7 +319,7 @@
 								{#if $config?.oauth?.providers?.microsoft}
 									<button
 										class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
-										on:click={() => {
+										onclick={() => {
 											window.location.href = `${WEBUI_BASE_URL}/oauth/microsoft/login`;
 										}}
 									>
@@ -330,7 +330,7 @@
 								{#if $config?.oauth?.providers?.github}
 									<button
 										class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
-										on:click={() => {
+										onclick={() => {
 											window.location.href = `${WEBUI_BASE_URL}/oauth/github/login`;
 										}}
 									>
@@ -341,7 +341,7 @@
 								{#if $config?.oauth?.providers?.oidc}
 									<button
 										class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 text-content dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
-										on:click={() => {
+										onclick={() => {
 											window.location.href = `${WEBUI_BASE_URL}/oauth/oidc/login`;
 										}}
 									>
@@ -362,7 +362,7 @@
 								<button
 									class="flex justify-center items-center text-xs w-full text-center underline"
 									type="button"
-									on:click={() => {
+									onclick={() => {
 										if (mode === 'ldap') mode = 'signin';
 										else mode = 'ldap';
 									}}

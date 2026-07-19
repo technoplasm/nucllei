@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext } from 'svelte';
 
 	import { settings, user } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
@@ -53,13 +53,12 @@
 	</Tooltip>
 
 	{#snippet content()}
-		<DropdownMenu.Content
-			class="w-max min-w-[180px] max-w-[calc(100vw-2rem)] rounded-xl px-1 py-1 border border-line z-50 bg-surface-raised text-content shadow-sm"
+		<DropdownContent
+			className="w-max min-w-[180px] max-w-[calc(100vw-2rem)] rounded-xl px-1 py-1 border border-line z-50 bg-surface-raised text-content shadow-sm"
 			sideOffset={10}
 			alignOffset={-8}
 			side="top"
 			align="start"
-			transition={flyAndScale}
 		>
 			<Tooltip
 				content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
@@ -69,7 +68,7 @@
 					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl {!fileUploadEnabled
 						? 'opacity-50'
 						: ''}"
-					on:click={() => {
+					onSelect={() => {
 						if (fileUploadEnabled) {
 							uploadFilesHandler();
 						}
@@ -88,7 +87,7 @@
 					class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl {!fileUploadEnabled
 						? 'opacity-50'
 						: ''}"
-					on:click={() => {
+					onSelect={() => {
 						if (fileUploadEnabled) {
 							openLibraryHandler();
 						}
@@ -101,7 +100,7 @@
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-surface-hover rounded-xl"
-				on:click={() => {
+				onSelect={() => {
 					toggleCtrlEnterToSend();
 				}}
 			>
@@ -120,6 +119,6 @@
 					{/if}
 				</div>
 			</DropdownMenu.Item>
-		</DropdownMenu.Content>
+		</DropdownContent>
 	{/snippet}
 </Dropdown>

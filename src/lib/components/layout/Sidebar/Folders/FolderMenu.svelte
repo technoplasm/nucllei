@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext, type Snippet } from 'svelte';
 
 	const i18n = getContext('i18n');
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	let {
@@ -29,16 +29,15 @@
 	</Tooltip>
 
 	{#snippet content()}
-		<DropdownMenu.Content
-			class="w-full max-w-[160px] rounded-lg px-1 py-1.5  z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+		<DropdownContent
+			className="w-full max-w-[160px] rounded-lg px-1 py-1.5  z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 			sideOffset={-2}
 			side="bottom"
 			align="start"
-			transition={flyAndScale}
 		>
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					onRename?.();
 				}}
 			>
@@ -48,7 +47,7 @@
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					onExport?.();
 				}}
 			>
@@ -59,13 +58,13 @@
 
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
+				onSelect={() => {
 					onDelete?.();
 				}}
 			>
 				<span class="i-lucide-trash-2 size-4 block"></span>
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
-		</DropdownMenu.Content>
+		</DropdownContent>
 	{/snippet}
 </Dropdown>

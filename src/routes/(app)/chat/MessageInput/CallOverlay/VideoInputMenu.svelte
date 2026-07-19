@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 
 	let {
 		onClose = () => {},
@@ -30,17 +30,16 @@
 	{@render children?.()}
 
 	{#snippet content()}
-		<DropdownMenu.Content
-			class="w-full max-w-[180px] rounded-lg px-1 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-9999 bg-white dark:bg-gray-900 dark:text-white shadow-xs"
+		<DropdownContent
+			className="w-full max-w-[180px] rounded-lg px-1 py-1.5 border border-gray-300/30 dark:border-gray-700/50 z-9999 bg-white dark:bg-gray-900 dark:text-white shadow-xs"
 			sideOffset={6}
 			side="top"
 			align="start"
-			transition={flyAndScale}
 		>
 			{#each devices as device}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-					on:click={() => {
+					onSelect={() => {
 						onChange(device.deviceId);
 					}}
 				>
@@ -51,6 +50,6 @@
 					</div>
 				</DropdownMenu.Item>
 			{/each}
-		</DropdownMenu.Content>
+		</DropdownContent>
 	{/snippet}
 </Dropdown>

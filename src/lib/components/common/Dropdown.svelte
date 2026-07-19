@@ -15,13 +15,13 @@
 	} = $props();
 </script>
 
+<!-- bits-ui 2.x: closeFocus 相当は DropdownContent(onCloseAutoFocus)へ移管。typeahead prop は廃止 -->
+
 <DropdownMenu.Root
 	bind:open={show}
-	closeFocus={false}
 	onOpenChange={(state) => {
 		onChange?.(state);
 	}}
-	typeahead={false}
 >
 	<DropdownMenu.Trigger>
 		{@render children?.()}
