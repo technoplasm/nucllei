@@ -98,6 +98,9 @@ class ChatResponse(BaseModel):
     pinned: Optional[bool] = False
     meta: dict = {}
     folder_id: Optional[str] = None
+    # llens(#19): admin の直参照ビュー(/share/{id} の admin 分岐)が
+    # 削除済み(soft delete)を明示表示するため露出する
+    deleted_at: Optional[int] = None
 
 
 class ChatTitleIdResponse(BaseModel):

@@ -43,12 +43,15 @@
 	import Navbar from './Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import NotFound from '$lib/components/common/NotFound.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let { chatIdProp = '' }: { chatIdProp?: string } = $props();
 
 	let loading = $state(false);
+	// 存在しない・削除済み・他人のチャット。URL を保ったまま 404 表示(2026-07-19 仕様)
+	let notFound = $state(false);
 
 	const eventTarget = new EventTarget();
 	let controlPane = $state<any>();
@@ -130,6 +133,7 @@
 
 		(async () => {
 			loading = true;
+			notFound = false;
 
 			session.prompt = '';
 			session.files = [];
@@ -152,7 +156,8 @@
 				const chatInput = document.getElementById('chat-input');
 				chatInput?.focus();
 			} else {
-				await goto('/');
+				notFound = true;
+				loading = false;
 			}
 		})();
 	};
@@ -399,10 +404,8 @@
 
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
-		session.chat = await getChatById($chatId).catch(async () => {
-			await goto('/');
-			return null;
-		});
+		// 404(存在しない・削除済み・他人)は握りつぶし、呼び出し側が notFound 表示にする
+		session.chat = await getChatById($chatId).catch(() => null);
 
 		if (session.chat) {
 			const chatContent = session.chat.chat;
@@ -514,7 +517,9 @@
 		: ' '} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
-	{#if !loading}
+	{#if notFound}
+		<NotFound message={t('Chat not found')} />
+	{:else if !loading}
 		{#if $settings?.backgroundImageUrl ?? null}
 			<div
 				class="absolute {$showSidebar

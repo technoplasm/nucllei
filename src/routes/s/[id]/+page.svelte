@@ -12,6 +12,7 @@
 	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 	import Messages from '$lib/components/chat/Messages.svelte';
+	import NotFound from '$lib/components/common/NotFound.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import { getUserById, getUserSettings } from '$lib/apis/users';
@@ -23,6 +24,9 @@
 	dayjs.extend(localizedFormat);
 
 	let loaded = $state(false);
+	// 見つからない(削除済み・共有解除・不正 id)は URL を保ったまま 404 表示 —
+	// 非 admin には「最初から存在しない」のと同じ見え方にする(2026-07-19 仕様)
+	let notFound = $state(false);
 
 	let autoScroll = $state(true);
 
@@ -32,6 +36,7 @@
 		id: string;
 		user_id: string;
 		updated_at?: number;
+		deleted_at?: number | null;
 		chat: {
 			title: string;
 			timestamp?: number;
@@ -128,13 +133,12 @@
 		loadedShareId = id;
 
 		(async () => {
+			notFound = false;
 			if (await loadSharedChat()) {
 				await tick();
 				loaded = true;
 			} else {
-				// 削除済み・共有解除・不正 id。無言で流さず理由を出してホームへ
-				toast.error($i18n.t('Chat not found'));
-				await goto('/');
+				notFound = true;
 			}
 		})();
 	};
@@ -167,7 +171,11 @@
 	</title>
 </svelte:head>
 
-{#if loaded}
+{#if notFound}
+	<div class="h-screen max-h-[100dvh] w-full flex text-content bg-white dark:bg-gray-900">
+		<NotFound message={$i18n.t('Chat not found')} />
+	</div>
+{:else if loaded}
 	<div class="h-screen max-h-[100dvh] w-full flex flex-col text-content bg-white dark:bg-gray-900">
 		<div class="flex flex-col flex-auto justify-center relative">
 			<div class=" flex flex-col w-full flex-auto overflow-auto h-0" id="messages-container">
@@ -187,11 +195,26 @@
 								{dayjs(chat?.chat?.timestamp ?? (chat?.updated_at ?? 0) * 1000).format('LLL')}
 							</div>
 						</div>
+
+						{#if chat?.deleted_at}
+							<!-- admin の直参照(#19)だけが到達する。削除済みを見ていることを誤認させない -->
+							<div
+								class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium"
+							>
+								<span class="i-lucide-trash-2 size-3.5 block"></span>
+								{$i18n.t('This chat has been deleted')}
+							</div>
+						{/if}
 					</div>
 				</div>
 
 				<div class=" h-full w-full flex flex-col py-2">
 					<div class="w-full">
+						{#if Object.keys(history.messages).length === 0}
+							<div class="w-full flex justify-center py-16 text-sm text-content-subtle">
+								{$i18n.t('No messages')}
+							</div>
+						{/if}
 						<Messages
 							className="h-full flex pt-4 pb-8 "
 							{user}
@@ -210,7 +233,7 @@
 				</div>
 			</div>
 
-			{#if $sessionUser?.role === 'admin' || ($sessionUser?.permissions?.chat?.clone ?? false)}
+			{#if Object.keys(history.messages).length > 0 && ($sessionUser?.role === 'admin' || ($sessionUser?.permissions?.chat?.clone ?? false))}
 				<div
 					class="absolute bottom-0 right-0 left-0 flex justify-center w-full bg-linear-to-b from-transparent to-white dark:to-gray-900"
 				>

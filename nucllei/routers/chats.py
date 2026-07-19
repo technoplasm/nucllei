@@ -547,6 +547,10 @@ def _get_chat_as_owner_or_admin(id: str, user) -> Optional[ChatModel]:
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if not chat and user.role == "admin" and ENABLE_ADMIN_CHAT_ACCESS:
         chat = Chats.get_chat_by_id(id)
+        # 削除済み(soft delete)は admin でも通常経路では存在しない扱い。
+        # 閲覧は /share/{id} の admin 分岐のみ(削除済み表示つき — 2026-07-19 仕様)
+        if chat and chat.deleted_at:
+            chat = None
     return chat
 
 

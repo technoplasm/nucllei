@@ -220,6 +220,34 @@ class TestChats(AbstractPostgresTest):
         assert chat.share_id is None
         assert self.chats.get_chat_by_share_id(share_id) is None
 
+    def test_deleted_chat_admin_only_view_via_share_endpoint(self):
+        # llens(#19): 削除済みチャットは admin だけが /share/{chat_id} の直参照で
+        # 閲覧できる(deleted_at で「削除済み」を明示)。非 admin には存在しない扱い。
+        chat_id = self.chats.get_chats()[0].id
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.delete(self.create_url(f"/{chat_id}"))
+        assert response.status_code == 200
+
+        with mock_webui_user(id="3", role="admin"):
+            response = self.fast_api_client.get(self.create_url(f"/share/{chat_id}"))
+        assert response.status_code == 200
+        assert response.json()["deleted_at"] is not None
+
+        with mock_webui_user(id="4", role="user"):
+            response = self.fast_api_client.get(self.create_url(f"/share/{chat_id}"))
+        assert response.status_code == 401
+
+    def test_deleted_chat_not_found_via_get_chat(self):
+        # llens(#19): /chats/{id}(/c/ の裏)は admin フォールバックでも削除済みを返さない
+        chat_id = self.chats.get_chats()[0].id
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.delete(self.create_url(f"/{chat_id}"))
+        assert response.status_code == 200
+
+        with mock_webui_user(id="3", role="admin"):
+            response = self.fast_api_client.get(self.create_url(f"/{chat_id}"))
+        assert response.status_code == 401
+
     def test_clone_chat_by_id(self):
         chat_id = self.chats.get_chats()[0].id
         with mock_webui_user(id="2"):
