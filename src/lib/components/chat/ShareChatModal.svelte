@@ -9,6 +9,9 @@
 
 	const i18n = getContext('i18n');
 
+	// llens: 旧 upstream の「英語語順で断片キーを連結する」文面は日本語に翻訳不能だったため
+	// 文単位キーで刷新(2026-07-19)。共有リンクは URL 行として明示し、
+	// 作成 / 更新+コピー / 解除 をボタンに分離した。
 	let {
 		chatId,
 		show = $bindable(false),
@@ -32,40 +35,51 @@
 	});
 
 	let chat = $state<any>(null);
-	let shareUrl: string | null = null;
 
-	const shareLocalChat = async () => {
-		const sharedChat = await shareChatById(chatId);
-		shareUrl = `${window.location.origin}/s/${sharedChat.id}`;
-		chat = await getChatById(chatId);
-
-		return shareUrl;
-	};
-
-	const isDifferentChat = (_chat: any) => {
-		if (!chat) {
-			return true;
-		}
-		if (!_chat) {
-			return false;
-		}
-		return chat.id !== _chat.id || chat.share_id !== _chat.share_id;
-	};
+	const shareUrl = $derived(chat?.share_id ? `${window.location.origin}/s/${chat.share_id}` : null);
 
 	$effect(() => {
 		if (show) {
 			(async () => {
-				if (chatId) {
-					const _chat = await getChatById(chatId);
-					if (isDifferentChat(_chat)) {
-						chat = _chat;
-					}
-				} else {
-					chat = null;
-				}
+				chat = chatId ? await getChatById(chatId).catch(() => null) : null;
 			})();
 		}
 	});
+
+	// Safari はユーザー操作と同期した ClipboardItem でしか書き込めないため、
+	// URL を返す Promise を渡す形でコピーする(それ以外は copyToClipboard)
+	const copyWith = async (getUrl: () => Promise<string>) => {
+		const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+		if (isSafari) {
+			navigator.clipboard
+				.write([
+					new ClipboardItem({
+						'text/plain': getUrl().then((url) => new Blob([url], { type: 'text/plain' }))
+					})
+				])
+				.catch((error) => {
+					console.error('Could not copy text: ', error);
+				});
+		} else {
+			copyToClipboard(await getUrl());
+		}
+		toast.success($i18n.t('Copied shared chat URL to clipboard!'));
+	};
+
+	// 共有(未共有なら作成 / 共有済みならスナップショット更新)して URL を返す
+	const shareAndGetUrl = async () => {
+		const sharedChat = await shareChatById(chatId);
+		chat = await getChatById(chatId);
+		return `${window.location.origin}/s/${sharedChat.id}`;
+	};
+
+	const stopSharing = async () => {
+		const res = await deleteSharedChatById(chatId);
+		if (res) {
+			chat = await getChatById(chatId);
+			toast.success($i18n.t('Sharing stopped'));
+		}
+	};
 </script>
 
 <Modal bind:show size="md">
@@ -84,78 +98,70 @@
 		</div>
 
 		{#if chat}
-			<div class="px-5 pt-4 pb-5 w-full flex flex-col justify-center">
-				<div class=" text-sm text-content mb-1">
-					{#if chat.share_id}
-						<a href="/s/{chat.share_id}" target="_blank"
-							>{$i18n.t('You have shared this chat')}
-							<span class=" underline">{$i18n.t('before')}</span>.</a
-						>
-						{$i18n.t('Click here to')}
+			<div class="px-5 pt-3 pb-5 w-full flex flex-col gap-3">
+				{#if shareUrl}
+					<!-- 共有中: URL 行(readonly + コピー)+ 更新/解除 -->
+					<div class="flex items-center gap-1.5">
+						<input
+							class="flex-1 min-w-0 px-2 py-1.5 text-sm bg-surface-form rounded-xs outline-hidden text-content-muted"
+							value={shareUrl}
+							readonly
+							onfocus={(e) => e.currentTarget.select()}
+						/>
 						<button
-							class="underline"
-							onclick={async () => {
-								const res = await deleteSharedChatById(chatId);
-
-								if (res) {
-									chat = await getChatById(chatId);
-								}
-							}}
-							>{$i18n.t('delete this link')}
+							class="shrink-0 p-2 rounded-lg hover:bg-surface-hover text-content-muted hover:text-content"
+							type="button"
+							aria-label={$i18n.t('Copy to clipboard')}
+							onclick={() => copyWith(async () => shareUrl)}
+						>
+							<span class="i-lucide-clipboard size-4 block"></span>
 						</button>
-						{$i18n.t('and create a new shared link.')}
-					{:else}
-						{$i18n.t(
-							"Messages you send after creating your link won't be shared. Users with the URL will be able to view the shared chat."
-						)}
-					{/if}
-				</div>
-
-				<div class="flex justify-end">
-					<div class="flex flex-col items-end space-x-1 mt-3">
-						<div class="flex gap-1">
-							<button
-								class="self-center flex items-center gap-1 px-3.5 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
-								type="button"
-								id="copy-and-share-chat-button"
-								onclick={async () => {
-									const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-									if (isSafari) {
-										// Safari はユーザー操作と同期した ClipboardItem でしか書き込めない
-										const getUrlPromise = async () => {
-											const url = await shareLocalChat();
-											return new Blob([url], { type: 'text/plain' });
-										};
-
-										navigator.clipboard
-											.write([
-												new ClipboardItem({
-													'text/plain': getUrlPromise()
-												})
-											])
-											.catch((error) => {
-												console.error('Could not copy text: ', error);
-											});
-									} else {
-										copyToClipboard(await shareLocalChat());
-									}
-
-									toast.success($i18n.t('Copied shared chat URL to clipboard!'));
-									show = false;
-								}}
-							>
-								<span class="i-lucide-link size-4 block"></span>
-
-								{#if chat.share_id}
-									{$i18n.t('Update and Copy Link')}
-								{:else}
-									{$i18n.t('Copy Link')}
-								{/if}
-							</button>
-						</div>
 					</div>
-				</div>
+
+					<div class="text-sm text-content-muted">
+						{$i18n.t(
+							'The link shows a snapshot of this chat from the last time it was shared or updated.'
+						)}
+					</div>
+
+					<div class="flex justify-between items-center mt-1">
+						<button
+							class="px-3.5 py-2 text-sm font-medium rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content"
+							type="button"
+							onclick={stopSharing}
+						>
+							{$i18n.t('Stop sharing')}
+						</button>
+						<button
+							class="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
+							type="button"
+							id="copy-and-share-chat-button"
+							onclick={() => copyWith(shareAndGetUrl)}
+						>
+							<span class="i-lucide-refresh-cw size-4 block"></span>
+							{$i18n.t('Update and Copy Link')}
+						</button>
+					</div>
+				{:else}
+					<!-- 未共有: 説明 + 作成 -->
+					<div class="text-sm text-content-muted">
+						{$i18n.t(
+							'Signed-in users with the link can view a snapshot of this chat. Messages you send after creating the link stay private until you update it.'
+						)}
+					</div>
+
+					<div class="flex justify-end mt-1">
+						<button
+							class="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-full"
+							type="button"
+							id="copy-and-share-chat-button"
+							onclick={() => copyWith(shareAndGetUrl)}
+						>
+							<span class="i-lucide-link size-4 block"></span>
+							{$i18n.t('Create and Copy Link')}
+						</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
