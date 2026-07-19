@@ -7,6 +7,7 @@ from typing import Optional
 from nucllei.models.chats import (
     ChatForm,
     ChatImportForm,
+    ChatModel,
     ChatResponse,
     Chats,
     ChatTitleIdResponse,
@@ -416,6 +417,7 @@ async def get_admin_chat_list(
     updated_from: Optional[int] = Query(None, ge=0),
     updated_to: Optional[int] = Query(None, ge=0),
     deleted: str = Query("include"),
+    shared: str = Query("include"),
     user=Depends(get_admin_user),
 ):
     """admin チャット閲覧ビュー(#19)用のページング一覧。
@@ -440,6 +442,11 @@ async def get_admin_chat_list(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="deleted must be one of: include, exclude, only",
         )
+    if shared not in ("include", "exclude", "only"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="shared must be one of: include, exclude, only",
+        )
 
     chats, total = Chats.get_chats_page_admin(
         user_id=user_id,
@@ -448,6 +455,7 @@ async def get_admin_chat_list(
         updated_from=updated_from,
         updated_to=updated_to,
         deleted=deleted,
+        shared=shared,
         order_by=order_by,
         direction=direction,
         limit=limit,
@@ -533,9 +541,20 @@ async def get_shared_chat_by_id(share_id: str, user=Depends(get_verified_user)):
 ############################
 
 
+def _get_chat_as_owner_or_admin(id: str, user) -> Optional[ChatModel]:
+    """llens(#19): owner のチャット、または admin(ENABLE_ADMIN_CHAT_ACCESS 下)なら
+    他人のチャットも返す。admin の閲覧経路(/share/{id} の admin 分岐)と同じゲート。"""
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat and user.role == "admin" and ENABLE_ADMIN_CHAT_ACCESS:
+        chat = Chats.get_chat_by_id(id)
+    return chat
+
+
 @router.get("/{id}", response_model=Optional[ChatResponse])
 async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    # llens(#19): admin は他人のチャットも取得可(共有モーダルが share_id を読むため。
+    # 内容自体は既に /share/{id} の admin 分岐で閲覧できるので新たな露出はない)
+    chat = _get_chat_as_owner_or_admin(id, user)
 
     if chat:
         return ChatResponse(**chat.model_dump())
@@ -774,7 +793,8 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    # llens(#19): admin(ENABLE_ADMIN_CHAT_ACCESS 下)は他人のチャットも共有化できる
+    chat = _get_chat_as_owner_or_admin(id, user)
     if chat:
         if chat.share_id:
             shared_chat = Chats.update_shared_chat_by_chat_id(chat.id)
@@ -787,8 +807,12 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
                 detail=ERROR_MESSAGES.DEFAULT(),
             )
 
-        # llens(#41): スナップショットが参照する file を public 化(再共有時は新規添付分も)
-        publish_chat_files(shared_chat.chat, user)
+        # llens(#41): スナップショットが参照する file を public 化(再共有時は新規添付分も)。
+        # 「共有者所有の file のみ public 化」の不変条件は chat の owner 基準 —
+        # admin が他人のチャットを共有する場合も public 化されるのは owner の file だけ
+        owner = user if chat.user_id == user.id else Users.get_user_by_id(chat.user_id)
+        if owner:
+            publish_chat_files(shared_chat.chat, owner)
 
         return ChatResponse(**shared_chat.model_dump())
 
@@ -806,7 +830,9 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
 
 @router.delete("/{id}/share", response_model=Optional[bool])
 async def delete_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
-    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    # llens(#19): admin(ENABLE_ADMIN_CHAT_ACCESS 下)は他人の共有も解除できる
+    # (狭める操作なので owner 側の共有権限ゲートは不要 — 既存方針どおり常時可)
+    chat = _get_chat_as_owner_or_admin(id, user)
     if chat:
         if not chat.share_id:
             return False

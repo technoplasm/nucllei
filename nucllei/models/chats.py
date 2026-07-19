@@ -735,6 +735,7 @@ class ChatTable:
         updated_from: Optional[int] = None,
         updated_to: Optional[int] = None,
         deleted: str = "include",
+        shared: str = "include",
         order_by: str = "updated_at",
         direction: str = "desc",
         limit: int = 60,
@@ -747,6 +748,7 @@ class ChatTable:
         メンバーシップ(dialect 別 JSON クエリ — search_text と同じ流儀)。
         updated_from/updated_to は updated_at の範囲(epoch 秒・両端含む)。
         deleted は soft delete 済み(#31)の扱い: include(既定)/ exclude / only。
+        shared は共有状態(share_id の有無 — #19)の扱い: include(既定)/ exclude / only。
         戻り値は (items, total)。total は filter 適用後・ページング前の件数。
         """
         with get_db() as db:
@@ -757,6 +759,10 @@ class ChatTable:
                 query = query.filter(Chat.deleted_at == None)
             elif deleted == "only":
                 query = query.filter(Chat.deleted_at != None)
+            if shared == "exclude":
+                query = query.filter(Chat.share_id == None)
+            elif shared == "only":
+                query = query.filter(Chat.share_id != None)
             if title:
                 query = query.filter(Chat.title.ilike(f"%{title}%"))
             if updated_from is not None:

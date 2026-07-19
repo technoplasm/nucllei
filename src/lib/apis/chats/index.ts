@@ -155,6 +155,8 @@ type AdminChatListOptions = {
 	updated_to?: number;
 	// llens(#31): soft delete 済みチャットの扱い(未指定 = include)
 	deleted?: 'include' | 'exclude' | 'only';
+	// llens(#19): 共有状態(share_id の有無)の扱い(未指定 = include)
+	shared?: 'include' | 'exclude' | 'only';
 };
 
 export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
@@ -190,6 +192,9 @@ export const getAdminChatList = async (options: AdminChatListOptions = {}) => {
 	}
 	if (options.deleted) {
 		searchParams.append('deleted', options.deleted);
+	}
+	if (options.shared) {
+		searchParams.append('shared', options.shared);
 	}
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/admin/list?${searchParams.toString()}`, {

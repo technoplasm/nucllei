@@ -17,6 +17,7 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -44,6 +45,21 @@
 	let dateTo = $state('');
 	// llens(#31): soft delete 済みチャットの扱い(既定 = 含めて表示、行に「削除済み」バッジ)
 	let deletedFilter = $state<'include' | 'exclude' | 'only'>('include');
+	// llens(#19): 共有状態フィルタ(院内に何が共有されているかの把握用)
+	let sharedFilter = $state<'include' | 'exclude' | 'only'>('include');
+
+	// llens(#19): admin からの共有権限編集 — 行の共有ボタンで ShareChatModal を開く。
+	// モーダル内で共有状態が変わりうるので、閉じたら一覧を再取得してバッジを追従させる
+	let shareChatId = $state('');
+	let showShareModal = $state(false);
+	const openShareModal = (chat: any) => {
+		shareChatId = chat.id;
+		showShareModal = true;
+	};
+	const onShareModalClose = () => {
+		shareChatId = '';
+		fetchChats(false);
+	};
 
 	// フィルタ連打時のフェッチ競合ガード(古い応答が後着で最新結果を上書きするのを防ぐ)
 	let fetchSeq = 0;
@@ -62,7 +78,8 @@
 			title: query !== '' ? query : undefined,
 			updated_from: dateFrom !== '' ? dayjs(dateFrom).startOf('day').unix() : undefined,
 			updated_to: dateTo !== '' ? dayjs(dateTo).endOf('day').unix() : undefined,
-			deleted: deletedFilter !== 'include' ? deletedFilter : undefined
+			deleted: deletedFilter !== 'include' ? deletedFilter : undefined,
+			shared: sharedFilter !== 'include' ? sharedFilter : undefined
 		}).catch((err) => {
 			toast.error(`${err}`);
 			return null;
@@ -154,6 +171,8 @@
 	</title>
 </svelte:head>
 
+<ShareChatModal bind:show={showShareModal} chatId={shareChatId} onClose={onShareModalClose} />
+
 {#if loaded}
 	<div class="flex flex-col gap-1 mt-1.5">
 		<div class="flex items-center text-xl font-medium px-0.5">
@@ -221,6 +240,21 @@
 				<option class=" text-content" value="only">{$i18n.t('Deleted only')}</option>
 			</select>
 
+			<select
+				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {sharedFilter !==
+				'include'
+					? ''
+					: 'text-content-subtle'}"
+				bind:value={sharedFilter}
+				onchange={() => {
+					fetchChats(false);
+				}}
+			>
+				<option class=" text-content" value="include">{$i18n.t('Include shared')}</option>
+				<option class=" text-content" value="exclude">{$i18n.t('Not shared')}</option>
+				<option class=" text-content" value="only">{$i18n.t('Shared only')}</option>
+			</select>
+
 			<div class="flex items-center gap-1">
 				<input
 					type="date"
@@ -274,6 +308,7 @@
 								></span>
 							</div>
 						</th>
+						<th scope="col" class="px-3 py-1.5 select-none"></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -334,6 +369,25 @@
 								{/if}
 							</td>
 							<td class="px-3 py-1">{formatTimestamp(chat.updated_at)}</td>
+							<td class="px-1 py-1 text-right">
+								<!-- llens(#19): admin からの共有権限編集(リンク発行/解除は ShareChatModal 経由)。
+								     削除済みチャットは共有対象にしない -->
+								{#if !chat.deleted_at}
+									<Tooltip content={$i18n.t('Share')}>
+										<button
+											class="p-1.5 rounded-lg hover:bg-surface-muted text-content-muted hover:text-content"
+											type="button"
+											aria-label={$i18n.t('Share')}
+											onclick={(e) => {
+												e.stopPropagation();
+												openShareModal(chat);
+											}}
+										>
+											<span class="i-lucide-share-2 size-3.5 block"></span>
+										</button>
+									</Tooltip>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>

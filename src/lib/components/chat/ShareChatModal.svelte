@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 
 	import { toast } from 'svelte-sonner';
 	import { deleteSharedChatById, getChatById, shareChatById } from '$lib/apis/chats';
@@ -11,11 +11,25 @@
 
 	let {
 		chatId,
-		show = $bindable(false)
+		show = $bindable(false),
+		onClose = undefined
 	}: {
 		chatId: string;
 		show?: boolean;
+		/** 閉じ遷移で発火(#19: admin 一覧が共有バッジを追従させるのに使う) */
+		onClose?: () => void;
 	} = $props();
+
+	// 閉じ遷移でのみ onClose を発火(Switch の lastState ガード + 罠(7) の untrack)
+	let lastShow = show;
+	$effect(() => {
+		if (show !== lastShow) {
+			lastShow = show;
+			if (!show) {
+				untrack(() => onClose?.());
+			}
+		}
+	});
 
 	let chat = $state<any>(null);
 	let shareUrl: string | null = null;

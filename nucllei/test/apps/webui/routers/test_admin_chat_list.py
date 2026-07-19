@@ -340,3 +340,89 @@ class TestAdminChatList(AbstractPostgresTest):
             {"model": "kimi-k2.6", "chat_count": 2},
             {"model": "gpt-oss:20b", "chat_count": 1},
         ]
+
+    # ---- admin からの共有権限編集(#19 残スコープ) ----
+
+    def test_admin_can_share_and_unshare_other_users_chat(self):
+        chat = self._insert_chat(user_id="2", title="other's chat")
+
+        # admin(非 owner)が共有化できる
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.post(self.create_url(f"/{chat.id}/share"))
+        assert r.status_code == 200, r.text
+        assert r.json()["id"] != chat.id  # 返るのは共有スナップショット
+
+        refreshed = self.chats.get_chat_by_id(chat.id)
+        assert refreshed.share_id is not None
+
+        # admin(非 owner)が共有解除できる
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.delete(self.create_url(f"/{chat.id}/share"))
+        assert r.status_code == 200, r.text
+        assert r.json() is True
+        assert self.chats.get_chat_by_id(chat.id).share_id is None
+
+    def test_admin_share_closed_when_admin_chat_access_disabled(self):
+        chat = self._insert_chat(user_id="2")
+        with patch("nucllei.routers.chats.ENABLE_ADMIN_CHAT_ACCESS", False):
+            with mock_webui_user(id="1", role="admin"):
+                r = self.fast_api_client.post(self.create_url(f"/{chat.id}/share"))
+            assert r.status_code == 401, r.text
+            with mock_webui_user(id="1", role="admin"):
+                r = self.fast_api_client.delete(self.create_url(f"/{chat.id}/share"))
+            assert r.status_code == 401, r.text
+        assert self.chats.get_chat_by_id(chat.id).share_id is None
+
+    def test_user_cannot_share_others_chat(self):
+        chat = self._insert_chat(user_id="2")
+        with mock_webui_user(id="3", role="user"):
+            r = self.fast_api_client.post(self.create_url(f"/{chat.id}/share"))
+        assert r.status_code == 401, r.text
+        with mock_webui_user(id="3", role="user"):
+            r = self.fast_api_client.delete(self.create_url(f"/{chat.id}/share"))
+        assert r.status_code == 401, r.text
+
+    def test_admin_can_get_others_chat_by_id(self):
+        # ShareChatModal が share_id を読む経路。ゲート off では従来どおり 401
+        chat = self._insert_chat(user_id="2")
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(self.create_url(f"/{chat.id}"))
+        assert r.status_code == 200, r.text
+        assert r.json()["id"] == chat.id
+
+        with patch("nucllei.routers.chats.ENABLE_ADMIN_CHAT_ACCESS", False):
+            with mock_webui_user(id="1", role="admin"):
+                r = self.fast_api_client.get(self.create_url(f"/{chat.id}"))
+            assert r.status_code == 401, r.text
+
+    def test_shared_filter(self):
+        shared_chat = self._insert_chat(user_id="2", title="shared one")
+        self._insert_chat(user_id="2", title="not shared")
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.post(self.create_url(f"/{shared_chat.id}/share"))
+        assert r.status_code == 200, r.text
+
+        # only = 共有中のみ(共有スナップショット行自体は user_id が實 owner でないため
+        # admin 一覧には出るが、share_id を持つのは元チャットだけ)
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"shared": "only"})
+            )
+        assert r.status_code == 200, r.text
+        items = r.json()["items"]
+        assert [item["title"] for item in items] == ["shared one"]
+        assert items[0]["share_id"] is not None
+
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"shared": "exclude"})
+            )
+        assert r.status_code == 200, r.text
+        assert all(item["share_id"] is None for item in r.json()["items"])
+
+        # 不正値は 400
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"shared": "bogus"})
+            )
+        assert r.status_code == 400, r.text
