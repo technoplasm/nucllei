@@ -244,8 +244,8 @@
 		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Skill Content')}</div>
 	</div>
 
-	<!-- 縦が狭い画面ではエディタを潰さず(min-h-64)ページスクロールに逃がす(親 #workspace-container が overflow-y-auto) -->
-	<div class="flex-1 min-h-64 rounded-lg border border-line overflow-auto">
+	<!-- 縦が狭い画面ではエディタを潰さず(min-h-96)ページスクロールに逃がす(親 #workspace-container が overflow-y-auto) -->
+	<div class="flex-1 min-h-96 rounded-lg border border-line overflow-auto">
 		<CodeEditor
 			id="skill"
 			lang="markdown"

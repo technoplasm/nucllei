@@ -262,8 +262,8 @@ class Tools:
 		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Tool Content')}</div>
 	</div>
 
-	<!-- 縦が狭い画面ではエディタを潰さず(min-h-64)ページスクロールに逃がす -->
-	<div class="flex-1 min-h-64 mb-2 rounded-lg overflow-auto">
+	<!-- 縦が狭い画面ではエディタを潰さず(min-h-96)ページスクロールに逃がす -->
+	<div class="flex-1 min-h-96 mb-2 rounded-lg overflow-auto">
 		<CodeEditor
 			bind:this={codeEditor}
 			value={content}
