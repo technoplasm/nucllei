@@ -31,6 +31,7 @@
 	let chat = $state<{
 		id: string;
 		user_id: string;
+		updated_at?: number;
 		chat: {
 			title: string;
 			timestamp?: number;
@@ -65,10 +66,8 @@
 				return null;
 			}),
 			getModels(),
-			getChatByShareId($chatId).catch(async () => {
-				await goto('/');
-				return null;
-			})
+			// 404(削除済み・共有解除)はここでは握りつぶし、呼び出し側で toast + リダイレクト
+			getChatByShareId($chatId).catch(() => null)
 		]);
 
 		if (userSettings) {
@@ -133,6 +132,8 @@
 				await tick();
 				loaded = true;
 			} else {
+				// 削除済み・共有解除・不正 id。無言で流さず理由を出してホームへ
+				toast.error($i18n.t('Chat not found'));
 				await goto('/');
 			}
 		})();
@@ -182,7 +183,8 @@
 
 						<div class="flex text-sm justify-between items-center mt-1">
 							<div class="text-content-muted">
-								{dayjs(chat?.chat?.timestamp).format('LLL')}
+								<!-- chat.timestamp(ms)が無いデータでも「今」を出さない(updated_at は秒) -->
+								{dayjs(chat?.chat?.timestamp ?? (chat?.updated_at ?? 0) * 1000).format('LLL')}
 							</div>
 						</div>
 					</div>

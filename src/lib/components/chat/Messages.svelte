@@ -353,7 +353,8 @@
 </script>
 
 <div class={className}>
-	{#if Object.keys(history?.messages ?? {}).length == 0}
+	<!-- 挨拶プレースホルダは入力できる文脈専用。readOnly(共有ビュー等)で空のときは何も出さない -->
+	{#if !readOnly && Object.keys(history?.messages ?? {}).length == 0}
 		<ChatPlaceholder
 			modelIds={selectedModels}
 			{atSelectedModel}
