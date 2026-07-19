@@ -378,7 +378,9 @@
 		<div class="w-full pt-2">
 			{#key chatId}
 				<div class="w-full">
-					{#if messages.at(0)?.parentId !== null}
+					<!-- 「上にまだある」ローダー。空配列だと at(0)?.parentId が undefined !== null で
+					 真になり無限 Loading になる(readOnly 空表示で露出 — 2026-07-19)ので長さも見る -->
+					{#if messages.length > 0 && messages.at(0)?.parentId !== null}
 						<Loader
 							onVisible={() => {
 								if (!messagesLoading) {
