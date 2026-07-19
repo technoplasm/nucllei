@@ -91,7 +91,10 @@ export default defineConfig({
 			'/ollama': BACKEND_PROXY,
 			'/oauth': BACKEND_PROXY,
 			// llens(#70 B3): 不達復帰ポーリング(apiFetch)が叩く BE の health endpoint
-			'/health': BACKEND_PROXY
+			'/health': BACKEND_PROXY,
+			// llens(#84): app.html の <link rel="manifest"> が叩く BE route(PWA off では {})。
+			// proxy に無いと dev だけ 404 が console に出る
+			'/manifest.json': BACKEND_PROXY
 		},
 		watch: {
 			// _links/ 配下の symlink ループ(llens ⇄ cage)を watcher が辿ると
