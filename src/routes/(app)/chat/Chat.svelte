@@ -4,7 +4,6 @@
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import { type Unsubscriber, type Writable } from 'svelte/store';
