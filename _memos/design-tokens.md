@@ -6,15 +6,15 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 
 ## 色トークン一覧(真実源 = `src/tailwind.css`)
 
-値は調整中につきドリフトする — 正確な現行値は常に `src/tailwind.css` を見る(下表は 2026-07-17 検証で全値一致)。
+値は調整中につきドリフトする — 正確な現行値は常に `src/tailwind.css` を見る(下表は 2026-07-19 検証で全値一致)。
 
 | トークン | 用途 | Tailwind クラス | light / dark |
 |---|---|---|---|
-| `--surface` | メイン背景 | `bg-surface` | `#f7f7f7` / `#1a1a1a` |
+| `--surface` | メイン背景 | `bg-surface` | `#fcfcfc` / `#1a1a1a` |
 | `--surface-sidebar` | サイドバー背景 | `bg-surface-sidebar` | `#eeeeee` / `#212121` |
 | `--surface-raised` | **elevation 専用**: カード・テーブル行・メニュー等の持ち上げ面(#85 で入力面を分離) | `bg-surface-raised` | `#ffffff` / `#2a2a2a` |
 | `--surface-form` | **入力面**: input / select / textarea / 検索ボックス / チップ入力(2026-07-19 #85 で raised から意味分離。初期値は raised と同値 — light だけ沈める等の独立調整がここでできる。目印: 入力の丸み規律 rounded-xs と対) | `bg-surface-form` | `#ffffff` / `#2a2a2a` |
-| `--surface-muted` | 控えめな帯(table thead・select 面・チップ入力面等)。**常に raised より暗い(沈む)** — dark も同順序(2026-07-19 改訂: 旧 `#2d2d2d` は raised より明るく明暗が逆転し、muted 面上に raised を置く構図(セグメント active 等)が dark で潰れていた — #85) | `bg-surface-muted` | `#e9e9e9` / `#202020` |
+| `--surface-muted` | 控えめな帯(table thead・セグメント track・badge 等 — select/チップ入力面は #85 で form へ)。**常に raised より暗い(沈む)** — dark も同順序(2026-07-19 改訂: 旧 `#2d2d2d` は raised より明るく明暗が逆転し、muted 面上に raised を置く構図(セグメント active 等)が dark で潰れていた — #85) | `bg-surface-muted` | `#e9e9e9` / `#101010` |
 | `--surface-hover` | raised 面の hover | `hover:bg-surface-hover` | `#f0f0f0` / `#313131`(dark は raised より**明るく**する方向 — 2026-07-15 改訂) |
 | `--primary(-hover/-content)` | 主ボタン(Save/Create) | `bg-primary hover:bg-primary-hover text-primary-content` | 黒地白字 / 白地黒字(モノクロ現行。旧「#58 で差し替え予定」の #58 は close 済み — ブランド本デザインは #76) |
 | `--secondary(-hover/-content)` | 副ボタン(戻る/キャンセル) | `bg-secondary hover:bg-secondary-hover text-secondary-content` | `#e9e9e9` / `#333333` 地 |
@@ -22,17 +22,18 @@ Tailwind への登録は `tailwind.config.js` の `theme.extend.colors`。
 | `--sidebar-selected` | サイドバー行 選択中/active | `bg-sidebar-selected` | `#dddddd` / `#313131` |
 | `--line` | 罫線・区切り線(table/hr) | `border-line` | `#d3d3d3` / `#404040` |
 | `--content` | 本文(既定テキスト色) | `text-content` | `#333333` / `#ececec` |
-| `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | `#909090` / `#b4b4b4` |
+| `--content-muted` | 2次情報・ラベル・キャプション | `text-content-muted` | `#606060` / `#b4b4b4` |
 | `--content-subtle` | placeholder・disabled・3次 | `text-content-subtle` | `#a0a0a0` / `#9b9b9b` |
 
 ### ボタン/コントロールの使い分け(2026-07-14 確立、users/skills/tools/functions に適用済み)
 
-- **コントロール(input/select/textarea)= `bg-surface-raised` + `rounded-xs` + `text-sm`**
+- **コントロール(input/select/textarea)= `bg-surface-form` + `rounded-xs` + `text-sm`**
+  (2026-07-19 #85 改訂: 旧 `bg-surface-raised` から意味分離 — raised は elevation 専用に。
+  値は当面同値なので見た目は不変、入力面だけの独立調整が可能になった)
   (丸みの使い分け・2026-07-15 改訂: **入力するもの(input/select/textarea)= `rounded-xs`** /
-  **そのまま押せるもの(ボタン・タブ)= `rounded-lg`** / pill(Create 等)= `rounded-full`)
-  (チャット入力欄と同じ「surface 上の持ち上げ面」)。ただし **raised は surface の直上でだけ** —
-  raised 相当の面(モーダル = bg-white dark:bg-gray-900 等)の中のコントロールは
-  `bg-surface-muted` を使う 2 段ルール。
+  **そのまま押せるもの(ボタン・タブ)= `rounded-lg`** / pill(Create 等)= `rounded-full`)。
+  モーダル面の中のコントロールに `bg-surface-muted` を使う旧 2 段ルールは、form 分離後は
+  「form に寄せると見た目が変わる」ため**当面現状維持(混在)** — 統一するかは別途判断(#85 残置)。
 - **主ボタン = primary(Create/Save)/ 副ボタン(キャンセル/Access)= secondary**。
   ボタンに raised を使わない(入力面と顔が被る)。
   **「一覧に戻る」は secondary をやめ subtle テキストリンク**(2026-07-15):
