@@ -256,9 +256,12 @@
 		>
 			{#each SEGMENTS as segment (segment.mode)}
 				{@const active = mode === segment.mode}
+				<!-- active 面は surface(地の色)— muted の track に「窓が開く」沈むメタファ
+				     (raised で浮かせる案との比較検討 2026-07-19。track を raised にする案は
+				     light でモーダル面と同化するため不成立) -->
 				<button
 					class="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md transition {active
-						? 'bg-surface-raised text-content shadow-sm'
+						? 'bg-surface text-content'
 						: 'text-content-muted hover:text-content'}"
 					type="button"
 					aria-pressed={active}

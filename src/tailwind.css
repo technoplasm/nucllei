@@ -55,9 +55,9 @@
 		color-scheme: dark;
 
 		--surface: #1a1a1a; /* dark メイン背景(gray-900) */
-		--surface-raised: #262626; /* dark 入力欄など(背景より少し明るい) */
+		--surface-raised: #2a2a2a; /* dark 入力欄など(背景より少し明るい) */
 		--surface-hover: #313131;
-		--surface-muted: #202020; /* dark 控えめな帯(table thead 等)。raised より1段「暗い」—
+		--surface-muted: #101010; /* dark 控えめな帯(table thead 等)。raised より1段「暗い」—
 		   light と同じ「muted は raised の下に沈む」順序に統一(旧 #2d2d2d は raised より明るく
 		   明暗が逆転し、muted 面上の raised(セグメント active 等)が沈んで見えなくなっていた — #85) */
 
