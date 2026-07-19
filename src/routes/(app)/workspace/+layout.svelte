@@ -115,7 +115,9 @@
 			     個々のページ/エディタは自前で max-w を持たず、この 5xl 中央寄せを継承する。
 			     h-full で高さの連鎖も確定させる(エディタ系ページが h-full + flex-1/min-h-0 で
 			     全高を貼れる。一覧ページは h-full を使わないので従来どおり親が縦スクロールを受ける)。 -->
-				<div class="max-w-5xl mx-auto w-full px-1.5 h-full">
+				<!-- flow-root: 先頭子の mt が collapse で h-full の器の外へ抜け、内容が空でも
+				 器 + margin 分の縦オーバーフロー(=スクロール可能)になるのを防ぐ -->
+				<div class="max-w-5xl mx-auto w-full px-1.5 h-full flow-root">
 					{@render children?.()}
 				</div>
 			</div>
