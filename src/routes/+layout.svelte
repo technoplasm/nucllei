@@ -103,6 +103,24 @@
 			window.applyTheme();
 		}
 
+		// scrollbar-hidden なコンテナ(サイドバー・チャット本文等)は hover 中だけ thumb を
+		// 出す仕様だが、スクロール中も出す(止まって 800ms で隠れる)。scroll はバブルしない
+		// ため document の capture で一括捕捉し、全コンテナを 1 リスナで賄う。
+		const scrollingTimeouts = new WeakMap();
+		const onAnyScroll = (/** @type {Event} */ e) => {
+			const el = e.target;
+			if (!(el instanceof Element) || !el.classList.contains('scrollbar-hidden')) {
+				return;
+			}
+			el.classList.add('scrolling');
+			clearTimeout(scrollingTimeouts.get(el));
+			scrollingTimeouts.set(
+				el,
+				setTimeout(() => el.classList.remove('scrolling'), 800)
+			);
+		};
+		document.addEventListener('scroll', onAnyScroll, { capture: true, passive: true });
+
 		if (window?.electronAPI) {
 			const info = await window.electronAPI.send({
 				type: 'app:info'

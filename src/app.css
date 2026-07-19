@@ -179,9 +179,11 @@ select {
 	display: none;
 }
 
+/* .scrolling は root layout のグローバル scroll リスナが付与(スクロール中は thumb を出す) */
 .scrollbar-hidden:active::-webkit-scrollbar-thumb,
 .scrollbar-hidden:focus::-webkit-scrollbar-thumb,
-.scrollbar-hidden:hover::-webkit-scrollbar-thumb {
+.scrollbar-hidden:hover::-webkit-scrollbar-thumb,
+.scrollbar-hidden.scrolling::-webkit-scrollbar-thumb {
 	visibility: visible;
 }
 .scrollbar-hidden::-webkit-scrollbar-thumb {

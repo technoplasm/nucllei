@@ -645,13 +645,4 @@
 	</div>
 </div>
 
-<style>
-	.scrollbar-hidden:active::-webkit-scrollbar-thumb,
-	.scrollbar-hidden:focus::-webkit-scrollbar-thumb,
-	.scrollbar-hidden:hover::-webkit-scrollbar-thumb {
-		visibility: visible;
-	}
-	.scrollbar-hidden::-webkit-scrollbar-thumb {
-		visibility: hidden;
-	}
-</style>
+<!-- scrollbar-hidden の表示制御は app.css のグローバル定義に一本化(scoped 複製は撤去) -->
