@@ -25,7 +25,8 @@
 		// variant='file' では 3 セグメントで受け渡しも file 意味論のまま行う
 		// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
 		variant = 'default',
-		showLabel = true
+		showLabel = true,
+		description = ''
 	}: {
 		onChange?: (accessControl: AccessControlValue | null) => void;
 		accessControl?: AccessControlValue | null;
@@ -33,6 +34,8 @@
 		variant?: 'default' | 'file';
 		/** エディタの label 行グリッドに埋めるとき false(行側が「公開範囲」ラベルを持つ — #85) */
 		showLabel?: boolean;
+		/** 編集対象の説明(ファイル名・「N 件選択中」等)。モーダル文脈で対象を明示する */
+		description?: string;
 	} = $props();
 
 	let groups = $state<{ id: string; name: string }[]>([]);
@@ -80,7 +83,7 @@
 				]
 	);
 
-	const description = $derived.by(() => {
+	const modeDescription = $derived.by(() => {
 		if (variant === 'file' && mode === 'private') {
 			return $i18n.t('Only you can access');
 		}
@@ -249,6 +252,10 @@
 </script>
 
 <div class="flex flex-col gap-y-2.5">
+	{#if description}
+		<div class="text-sm text-content-muted -mb-1">{description}</div>
+	{/if}
+
 	<div>
 		{#if showLabel}
 			<div class="text-sm font-semibold mb-1.5">{$i18n.t('Visibility')}</div>
@@ -275,7 +282,7 @@
 			{/each}
 		</div>
 
-		<div class="text-xs text-content-muted mt-1">{description}</div>
+		<div class="text-xs text-content-muted mt-1">{modeDescription}</div>
 	</div>
 
 	{#if showMembers}

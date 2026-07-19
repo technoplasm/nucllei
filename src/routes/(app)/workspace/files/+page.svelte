@@ -81,6 +81,10 @@
 				? [...files, ...res.items.filter((item: any) => !files.some((f) => f.id === item.id))]
 				: res.items;
 			total = res.total;
+			if (!append) {
+				// 表示条件(検索・フィルタ・ソート)が変わったら、見えなくなった選択を残さない
+				selectedIds = selectedIds.filter((id) => files.some((f) => f.id === id));
+			}
 		}
 
 		loading = false;
@@ -194,15 +198,62 @@
 		await fetchFiles(false);
 	};
 
-	// visibility(access_control)の一覧内編集: アイコン → AccessControlModal、閉じたら保存
+	// ---- 複数選択: サムネイル(アイコン)hover でチェックボックス化 → 一括削除/共有 ----
+	let selectedIds = $state<string[]>([]);
+	const selectionActive = $derived(selectedIds.length > 0);
+	const selectedFiles = $derived(files.filter((f) => selectedIds.includes(f.id)));
+	const allSelected = $derived(files.length > 0 && files.every((f) => selectedIds.includes(f.id)));
+
+	const toggleSelect = (file: any) => {
+		selectedIds = selectedIds.includes(file.id)
+			? selectedIds.filter((id) => id !== file.id)
+			: [...selectedIds, file.id];
+	};
+
+	const toggleSelectAll = () => {
+		selectedIds = allSelected ? [] : files.map((f) => f.id);
+	};
+
+	// visibility(access_control)の一覧内編集: アイコン → AccessControlModal、閉じたら保存。
+	// 一括編集(acBulk)は選択中の全 file に同じ ACL を適用する
 	let showAccessControlModal = $state(false);
 	let acItem = $state<any>(null);
 	let acValue = $state<any>(null);
+	let acBulk = $state(false);
 
 	const openAccessControl = (file: any) => {
 		acItem = file;
 		acValue = file?.access_control ?? null;
+		acBulk = false;
 		showAccessControlModal = true;
+	};
+
+	const openBulkAccessControl = () => {
+		// 全選択 file の ACL が一致していればそれを初期値に、混在なら非公開から始める
+		const acs = selectedFiles.map((f) => JSON.stringify(f?.access_control ?? null));
+		acValue = acs.length > 0 && acs.every((s) => s === acs[0]) ? JSON.parse(acs[0]) : null;
+		acItem = null;
+		acBulk = true;
+		showAccessControlModal = true;
+	};
+
+	// 一覧の行内ボタン: 選択中の file に対する操作は選択全体への一括操作になる
+	const requestAccessControl = (file: any) => {
+		if (selectedIds.includes(file.id)) {
+			openBulkAccessControl();
+		} else {
+			openAccessControl(file);
+		}
+	};
+
+	const requestDelete = (file: any) => {
+		if (selectedIds.includes(file.id)) {
+			deleteBulk = true;
+		} else {
+			deleteBulk = false;
+			deleteTarget = file;
+		}
+		showDeleteConfirm = true;
 	};
 
 	const commitAccessControl = async () => {
@@ -230,9 +281,30 @@
 		}
 	};
 
+	const commitBulkAccessControl = async () => {
+		acBulk = false;
+		const value = acValue;
+
+		for (const f of selectedFiles) {
+			const res = await updateFileAccessControlById(f.id, value).catch((err) => {
+				toast.error(`${f?.meta?.name ?? f.filename}: ${err}`);
+				return null;
+			});
+			if (res) {
+				files = files.map((x) =>
+					x.id === f.id ? { ...x, access_control: res.access_control ?? null } : x
+				);
+			}
+		}
+	};
+
 	$effect(() => {
-		if (!showAccessControlModal && acItem) {
-			commitAccessControl();
+		if (!showAccessControlModal) {
+			if (acBulk) {
+				commitBulkAccessControl();
+			} else if (acItem) {
+				commitAccessControl();
+			}
 		}
 	});
 
@@ -275,9 +347,10 @@
 			});
 	};
 
-	// 削除
+	// 削除(deleteBulk = 選択中の一括削除)
 	let showDeleteConfirm = $state(false);
 	let deleteTarget = $state<any>(null);
+	let deleteBulk = $state(false);
 
 	const deleteHandler = async (file: any) => {
 		const res = await deleteFileById(file.id).catch((err) => {
@@ -288,6 +361,21 @@
 		if (res) {
 			files = files.filter((f) => f.id !== file.id);
 			total = Math.max(0, total - 1);
+			selectedIds = selectedIds.filter((id) => id !== file.id);
+		}
+	};
+
+	const bulkDeleteHandler = async () => {
+		for (const f of selectedFiles) {
+			const res = await deleteFileById(f.id).catch((err) => {
+				toast.error(`${f?.meta?.name ?? f.filename}: ${err}`);
+				return null;
+			});
+			if (res) {
+				files = files.filter((x) => x.id !== f.id);
+				total = Math.max(0, total - 1);
+				selectedIds = selectedIds.filter((id) => id !== f.id);
+			}
 		}
 	};
 
@@ -315,14 +403,28 @@
 {#if loaded}
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
-		title={$i18n.t('Delete file?')}
+		title={deleteBulk
+			? $i18n.t('Delete {{n}} files?', { n: selectedFiles.length })
+			: $i18n.t('Delete file?')}
 		onConfirm={() => {
-			deleteHandler(deleteTarget);
+			if (deleteBulk) {
+				bulkDeleteHandler();
+			} else {
+				deleteHandler(deleteTarget);
+			}
 		}}
 	>
 		<div class=" text-sm text-content-muted">
 			{$i18n.t('This will delete')}
-			<span class=" font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
+			{#if deleteBulk}
+				<div class="mt-1 max-h-40 overflow-y-auto">
+					{#each selectedFiles as f (f.id)}
+						<div class="font-semibold truncate">{f?.meta?.name ?? f.filename}</div>
+					{/each}
+				</div>
+			{:else}
+				<span class=" font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
+			{/if}
 		</div>
 	</DeleteConfirmDialog>
 
@@ -337,6 +439,7 @@
 			}}
 			onDelete={() => {
 				deleteTarget = selectedItem.file;
+				deleteBulk = false;
 				showFileModal = false;
 				showDeleteConfirm = true;
 			}}
@@ -532,31 +635,56 @@
 				<div class="gap-3 grid lg:grid-cols-2 xl:grid-cols-3 {section.label ? '' : 'mt-6'}">
 					{#each section.items as file (file.id)}
 						{@const vis = visibilityOf(file)}
+						{@const selected = selectedIds.includes(file.id)}
 						<!-- カード全体がクリック=閲覧(button の after オーバーレイ)。右のボタン類は relative で上に載せる。
 						 models と違い全面クリックも button なので、hover 抑制は .card-action に限定する -->
 						<div
-							class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(.card-action:hover))]:bg-surface-hover rounded-xl"
+							class="relative flex items-center gap-0.5 px-4 py-3 bg-surface-raised [&:hover:not(:has(.card-action:hover))]:bg-surface-hover rounded-xl {selected
+								? 'ring-2 ring-primary'
+								: ''}"
 						>
+							<!-- サムネイルは選択トグル: hover(または選択モード中)でチェックボックスに変わる。
+							 全面クリックの after オーバーレイより手前に置くため z-10 -->
 							<button
-								class="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer after:absolute after:inset-0 after:content-['']"
+								class="card-action group/thumb relative z-10 shrink-0 mr-2.5 cursor-pointer"
 								type="button"
-								onclick={() => openFile(file)}
+								aria-label={$i18n.t('Select')}
+								aria-pressed={selected}
+								onclick={() => toggleSelect(file)}
 							>
 								{#if isImage(file)}
 									<img
 										src={`${WEBUI_API_BASE_URL}/files/${file.id}/content`}
 										alt={file?.meta?.name ?? file.filename}
 										loading="lazy"
-										class="size-12 shrink-0 rounded-lg object-cover bg-black/5 dark:bg-white/5"
+										class="size-12 rounded-lg object-cover bg-black/5 dark:bg-white/5"
 									/>
 								{:else}
 									<div
-										class="size-12 shrink-0 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
+										class="size-12 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center text-content-muted"
 									>
 										<span class="i-lucide-file-text size-5 block"></span>
 									</div>
 								{/if}
+								<div
+									class="absolute inset-0 rounded-lg flex items-center justify-center bg-surface-raised/85 {selected ||
+									selectionActive
+										? ''
+										: 'opacity-0 group-hover/thumb:opacity-100'}"
+								>
+									<span
+										class="{selected
+											? 'i-lucide-square-check-big text-content'
+											: 'i-lucide-square text-content-muted'} size-5 block"
+									></span>
+								</div>
+							</button>
 
+							<button
+								class="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer after:absolute after:inset-0 after:content-['']"
+								type="button"
+								onclick={() => openFile(file)}
+							>
 								<div class="flex-1 self-center min-w-0">
 									<div class="font-medium line-clamp-1">{file?.meta?.name ?? file.filename}</div>
 									<div class="text-xs text-content-muted line-clamp-1 mt-0.5">
@@ -584,7 +712,7 @@
 									class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 									type="button"
 									aria-label={vis.label}
-									onclick={() => openAccessControl(file)}
+									onclick={() => requestAccessControl(file)}
 								>
 									<span class="{vis.icon} size-4 block"></span>
 								</button>
@@ -595,10 +723,7 @@
 									class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
 									type="button"
 									aria-label={$i18n.t('Delete')}
-									onclick={() => {
-										deleteTarget = file;
-										showDeleteConfirm = true;
-									}}
+									onclick={() => requestDelete(file)}
 								>
 									<span class="i-lucide-trash-2 size-4 block"></span>
 								</button>
@@ -615,6 +740,21 @@
 			<table class="w-full text-sm text-left text-content-muted table-auto max-w-full rounded-sm">
 				<thead class="text-xs text-content-muted uppercase bg-surface-muted">
 					<tr>
+						<th scope="col" class="w-8 pl-3 pr-0 py-1.5">
+							<button
+								class="flex cursor-pointer"
+								type="button"
+								aria-label={$i18n.t('Select all')}
+								aria-pressed={allSelected}
+								onclick={toggleSelectAll}
+							>
+								<span
+									class="{allSelected
+										? 'i-lucide-square-check-big text-content'
+										: 'i-lucide-square'} size-4 block"
+								></span>
+							</button>
+						</th>
 						<th
 							scope="col"
 							class="px-3 py-1.5 cursor-pointer select-none"
@@ -672,17 +812,41 @@
 					{#each sections as section (section.label)}
 						{#if section.label}
 							<tr>
-								<td colspan="6" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
+								<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
 									{section.label}
 								</td>
 							</tr>
 						{/if}
 						{#each section.items as file (file.id)}
 							{@const vis = visibilityOf(file)}
+							{@const selected = selectedIds.includes(file.id)}
 							<tr
-								class="bg-surface-raised text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover"
+								class="group text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover {selected
+									? 'bg-surface-hover'
+									: 'bg-surface-raised'}"
 								onclick={() => openFile(file)}
 							>
+								<td class="w-8 pl-3 pr-0 py-1">
+									<!-- 行 hover(または選択モード中)でチェックボックスを出す -->
+									<button
+										class="flex py-1 cursor-pointer {selected || selectionActive
+											? ''
+											: 'opacity-0 group-hover:opacity-100'}"
+										type="button"
+										aria-label={$i18n.t('Select')}
+										aria-pressed={selected}
+										onclick={(e) => {
+											e.stopPropagation();
+											toggleSelect(file);
+										}}
+									>
+										<span
+											class="{selected
+												? 'i-lucide-square-check-big text-content'
+												: 'i-lucide-square text-content-muted'} size-4 block"
+										></span>
+									</button>
+								</td>
 								<td class="px-3 py-1 font-medium text-content">
 									<div class="flex items-center gap-2 max-w-72">
 										{#if isImage(file)}
@@ -726,7 +890,7 @@
 												aria-label={vis.label}
 												onclick={(e) => {
 													e.stopPropagation();
-													openAccessControl(file);
+													requestAccessControl(file);
 												}}
 											>
 												<span class="{vis.icon} size-4 block"></span>
@@ -740,8 +904,7 @@
 												aria-label={$i18n.t('Delete')}
 												onclick={(e) => {
 													e.stopPropagation();
-													deleteTarget = file;
-													showDeleteConfirm = true;
+													requestDelete(file);
 												}}
 											>
 												<span class="i-lucide-trash-2 size-4 block"></span>
@@ -773,10 +936,60 @@
 		</div>
 	{/if}
 
+	<!-- 選択中の一括操作バー(スクロールしても画面下に留まる) -->
+	{#if selectionActive}
+		<div class="sticky bottom-4 z-30 flex justify-center pb-1 pointer-events-none">
+			<div
+				class="pointer-events-auto flex items-center gap-0.5 pl-4 pr-1.5 py-1 bg-surface-raised border border-line rounded-full shadow-lg text-sm"
+			>
+				<span class="font-medium whitespace-nowrap">
+					{$i18n.t('{{n}} selected', { n: selectedIds.length })}
+				</span>
+				<div class="w-px self-stretch my-1.5 bg-line mx-2"></div>
+				<Tooltip content={$i18n.t('Share')}>
+					<button
+						class="p-2 rounded-full text-content hover:bg-surface-hover"
+						type="button"
+						aria-label={$i18n.t('Share')}
+						onclick={openBulkAccessControl}
+					>
+						<span class="i-lucide-users size-4 block"></span>
+					</button>
+				</Tooltip>
+				<Tooltip content={$i18n.t('Delete')}>
+					<button
+						class="p-2 rounded-full text-content hover:bg-surface-hover"
+						type="button"
+						aria-label={$i18n.t('Delete')}
+						onclick={() => {
+							deleteBulk = true;
+							showDeleteConfirm = true;
+						}}
+					>
+						<span class="i-lucide-trash-2 size-4 block"></span>
+					</button>
+				</Tooltip>
+				<Tooltip content={$i18n.t('Clear selection')}>
+					<button
+						class="p-2 rounded-full text-content hover:bg-surface-hover"
+						type="button"
+						aria-label={$i18n.t('Clear selection')}
+						onclick={() => (selectedIds = [])}
+					>
+						<span class="i-lucide-x size-4 block"></span>
+					</button>
+				</Tooltip>
+			</div>
+		</div>
+	{/if}
+
 	<AccessControlModal
 		bind:show={showAccessControlModal}
 		bind:accessControl={acValue}
 		variant="file"
+		description={acBulk
+			? $i18n.t('{{n}} files selected', { n: selectedFiles.length })
+			: (acItem?.meta?.name ?? acItem?.filename ?? '')}
 	/>
 
 	<ChatsListModal

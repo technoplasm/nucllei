@@ -11,12 +11,15 @@
 		allowPublic = true,
 		// llens(#69): file 用 variant('default' | 'file')。AccessControl へパススルー。
 		variant = 'default',
+		// 編集対象の説明(ファイル名・「N 件選択中」等)。AccessControl へパススルー。
+		description = '',
 		onChange = () => {}
 	}: {
 		show?: boolean;
 		accessControl?: Record<string, unknown> | null;
 		allowPublic?: boolean;
 		variant?: 'default' | 'file';
+		description?: string;
 		onChange?: (accessControl: Record<string, unknown> | null) => void;
 	} = $props();
 </script>
@@ -39,7 +42,7 @@
 		</div>
 
 		<div class="w-full px-5 pb-4 dark:text-white">
-			<AccessControl bind:accessControl {onChange} {allowPublic} {variant} />
+			<AccessControl bind:accessControl {onChange} {allowPublic} {variant} {description} />
 		</div>
 	</div>
 </Modal>
