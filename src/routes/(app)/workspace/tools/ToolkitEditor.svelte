@@ -4,7 +4,7 @@
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
+	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -34,7 +34,6 @@
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
 	let originalId = id;
 	let showRenameConfirm = $state(false);
-	let showAccessControlModal = $state(false);
 
 	let _content = $state('');
 
@@ -191,8 +190,6 @@ class Tools:
 	};
 </script>
 
-<AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
-
 <!-- 高さは workspace layout(.max-w-5xl の h-full)から一段で貼る(FunctionEditor と同型)。 -->
 <form
 	bind:this={formElement}
@@ -225,17 +222,6 @@ class Tools:
 				bind:value={name}
 				required
 			/>
-
-			<button
-				class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content text-sm font-medium"
-				type="button"
-				onclick={() => {
-					showAccessControlModal = true;
-				}}
-			>
-				<span class="i-lucide-lock size-3.5 block"></span>
-				{$i18n.t('Access')}
-			</button>
 		</div>
 
 		<div class="flex items-center gap-2 my-2">
@@ -263,6 +249,14 @@ class Tools:
 				bind:value={description}
 				rows={2}
 			/>
+		</div>
+
+		<!-- llens(#85): ACL はモーダルから行インラインへ(公開状態が開かずに見える) -->
+		<div class="flex items-start gap-2 my-2">
+			<div class="w-24 shrink-0 text-sm font-semibold pt-1">{$i18n.t('Visibility')}</div>
+			<div class="flex-1 min-w-0">
+				<AccessControl bind:accessControl allowPublic={true} showLabel={false} />
+			</div>
 		</div>
 
 		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Tool Content')}</div>

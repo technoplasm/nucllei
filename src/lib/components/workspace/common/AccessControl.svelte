@@ -24,12 +24,15 @@
 		//   {read:{public:true}} = 全体公開
 		// variant='file' では 3 セグメントで受け渡しも file 意味論のまま行う
 		// (default variant の「null=Public」正規化・onMount 書き換えは通さない)。
-		variant = 'default'
+		variant = 'default',
+		showLabel = true
 	}: {
 		onChange?: (accessControl: AccessControlValue | null) => void;
 		accessControl?: AccessControlValue | null;
 		allowPublic?: boolean;
 		variant?: 'default' | 'file';
+		/** エディタの label 行グリッドに埋めるとき false(行側が「公開範囲」ラベルを持つ — #85) */
+		showLabel?: boolean;
 	} = $props();
 
 	let groups = $state<{ id: string; name: string }[]>([]);
@@ -247,7 +250,9 @@
 
 <div class="flex flex-col gap-y-2.5">
 	<div>
-		<div class="text-sm font-semibold mb-1.5">{$i18n.t('Visibility')}</div>
+		{#if showLabel}
+			<div class="text-sm font-semibold mb-1.5">{$i18n.t('Visibility')}</div>
+		{/if}
 
 		<div
 			class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"

@@ -10,7 +10,7 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
-	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
+	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -45,7 +45,6 @@
 	let toolIds = $state<string[]>([]);
 
 	let accessControl = $state<any>({});
-	let showAccessControlModal = $state(false);
 
 	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。
 	// ACL(公開範囲)を触れるのは admin のみ — editor の保存では server 側でも温存される。
@@ -130,8 +129,6 @@
 	});
 </script>
 
-<AccessControlModal bind:show={showAccessControlModal} bind:accessControl allowPublic={true} />
-
 <!-- 高さは workspace layout(.max-w-5xl の h-full)から一段で貼る(FunctionEditor と同型)。 -->
 <form
 	class="flex flex-col h-full"
@@ -161,19 +158,6 @@
 				bind:value={name}
 				required
 			/>
-
-			{#if $user?.role === 'admin'}
-				<button
-					class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary hover:bg-secondary-hover text-secondary-content text-sm font-medium"
-					type="button"
-					onclick={() => {
-						showAccessControlModal = true;
-					}}
-				>
-					<span class="i-lucide-lock size-3.5 block"></span>
-					{$i18n.t('Access')}
-				</button>
-			{/if}
 		</div>
 
 		<div class="flex items-center gap-2 my-2">
@@ -245,6 +229,14 @@
 					<div class="text-xs text-content-muted mt-0.5">
 						{$i18n.t('Only admins can create or update skills with tools attached.')}
 					</div>
+				</div>
+			</div>
+
+			<!-- llens(#85): ACL はモーダルから行インラインへ(公開状態が開かずに見える)。触れるのは admin のみ -->
+			<div class="flex items-start gap-2 my-2">
+				<div class="w-24 shrink-0 text-sm font-semibold pt-1">{$i18n.t('Visibility')}</div>
+				<div class="flex-1 min-w-0">
+					<AccessControl bind:accessControl allowPublic={true} showLabel={false} />
 				</div>
 			</div>
 		{/if}

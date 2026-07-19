@@ -53,6 +53,12 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   コールバック本体は `untrack(() => onChange(x))` に置く**(AdvancedParams / AccessControl が実例)。
   初期ロード直後に出す toast は root layout onMount 末尾 + setTimeout 遅延で発火する
   (失効通知の実例が `src/routes/+layout.svelte`)。
+  (8) **依存パッケージを更新しても稼働中 vite は旧版の最適化キャッシュを配り続ける**
+  (2026-07-19、bits-ui 0.19→2.x で実害 — 新コードが旧ライブラリで動き Content が無描画。
+  console にエラーは出ない)。lockfile 変更の再最適化はサーバ再起動時にしか走らないため、
+  `rm -rf node_modules/.vite` + `touch vite.config.ts`(vite の config 変更検知で in-place
+  再起動 — ユーザーの tmux ペインの vite プロセスを kill せずに済む)で強制する。
+  疑ったら `grep -l melt node_modules/.vite/deps/bits-ui*.js` のように**キャッシュの中身**を見る。
 - **Svelte 5(互換モード)テンプレート式は「マークアップに直接書かれた変数」しか追跡しない**
   (#34 AdvancedParams で実害・修理済み)。`{#if isSet(item)}` のように reactive な `params` 読み取りを
   ヘルパ関数に隠すと、コンパイラがその呼び出しを **`$.untrack()` で包み再描画が起きない**(症状:
