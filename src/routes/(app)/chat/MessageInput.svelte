@@ -1,38 +1,24 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { v4 as uuidv4 } from 'uuid';
 
 	import { onMount, tick, getContext, onDestroy } from 'svelte';
 
-	import {
-		type Model,
-		mobile,
-		settings,
-		models,
-		config,
-		showCallOverlay,
-		user as _user,
-		showControls,
-		TTSWorker
-	} from '$lib/stores';
+	import { type Model, mobile, settings, models, config } from '$lib/stores';
 
-	import { blobToFile, compressImage, extractCurlyBraceWords } from '$lib/utils';
-	import { uploadFile, deleteFileById, processFileById } from '$lib/apis/files';
+	import { blobToFile, extractCurlyBraceWords } from '$lib/utils';
 
-	import { WEBUI_API_BASE_URL, DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
+	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import Commands from './MessageInput/Commands.svelte';
 	import FileLibraryModal from './MessageInput/FileLibraryModal.svelte';
+	import InputFiles from './MessageInput/InputFiles.svelte';
+	import CallButton from './MessageInput/CallButton.svelte';
+	import { MessageInputUploads } from './MessageInput/uploads';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import FileItem from '$lib/components/common/FileItem.svelte';
-	import Image from '$lib/components/common/Image.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
-
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const i18n = getContext('i18n');
 
@@ -99,11 +85,23 @@
 	let inputFiles = $state<FileList | null>(null);
 	let dragged = $state(false);
 
+	let showFileLibraryModal = $state(false);
+
 	const visionCapableModels = $derived(
 		[...(atSelectedModel ? [atSelectedModel] : selectedModels)].filter(
 			(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.vision ?? true
 		)
 	);
+
+	const t = (key: string, options?: Record<string, unknown>) => $i18n.t(key, options);
+
+	// アップロード・ライブラリ再添付・添付解除。files は $bindable なのでアクセサで渡す
+	const uploads = new MessageInputUploads({
+		t,
+		getFiles: () => files,
+		setFiles: (value) => (files = value),
+		getVisionCapableModels: () => visionCapableModels
+	});
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
@@ -115,239 +113,6 @@
 		}
 	};
 
-	const uploadFileHandler = async (file: File, fullContext: boolean = false) => {
-		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
-			toast.error($i18n.t('You do not have permission to upload files.'));
-			return null;
-		}
-
-		const tempItemId = uuidv4();
-		const fileItem = {
-			type: 'file',
-			file: '',
-			id: null,
-			url: '',
-			name: file.name,
-			collection_name: '',
-			status: 'uploading',
-			size: file.size,
-			error: '',
-			itemId: tempItemId,
-			...(fullContext ? { context: 'full' } : {})
-		};
-
-		if (fileItem.size == 0) {
-			toast.error($i18n.t('You cannot upload an empty file.'));
-			return null;
-		}
-
-		files = [...files, fileItem];
-
-		try {
-			// During the file upload, file content is automatically extracted.
-			// llens(#69): グローバル Attachment(ATTACHMENT_FUNCTION_ID)はサーバー側で発火する。
-			const uploadedFile = await uploadFile(file);
-
-			if (uploadedFile) {
-				// アップロード中に X で外された場合はサーバーに orphan を残さない
-				const idx = files.findIndex((item) => item?.itemId === tempItemId);
-				if (idx === -1) {
-					deleteFileById(uploadedFile.id).catch(() => {});
-					return null;
-				}
-
-				if (uploadedFile.error) {
-					console.warn('File upload warning:', uploadedFile.error);
-					toast.warning(uploadedFile.error);
-				}
-
-				// runes の $state プロキシに乗せた後の closure(生オブジェクト)を書いても
-				// 再描画されない — 必ず files[idx] 経由で置き換える(status が 'uploading' に
-				// 張り付くバグの実害箇所)
-				files[idx] = {
-					...files[idx],
-					status: 'uploaded',
-					file: uploadedFile,
-					id: uploadedFile.id,
-					collection_name: uploadedFile?.meta?.collection_name || uploadedFile?.collection_name,
-					url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`
-				};
-			} else {
-				files = files.filter((item) => item?.itemId !== tempItemId);
-			}
-		} catch (e) {
-			toast.error(`${e}`);
-			files = files.filter((item) => item?.itemId !== tempItemId);
-		}
-	};
-
-	// llens(#69): 画像も file として backend に保存する(base64 直入れを廃止)。
-	// chat JSON には正準形 "/api/v1/files/{id}/content" の相対 URL を保存する
-	// (送信 payload 中のこの形式だけ backend が base64 化する)。
-	// アップロード中はローカル objectURL でプレビュー(status:'uploading')。
-	const uploadImageHandler = async (file: File) => {
-		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
-			toast.error($i18n.t('You do not have permission to upload files.'));
-			return null;
-		}
-
-		if (file.size == 0) {
-			toast.error($i18n.t('You cannot upload an empty file.'));
-			return null;
-		}
-
-		const tempItemId = uuidv4();
-		const previewUrl = URL.createObjectURL(file);
-		const fileItem = {
-			type: 'image',
-			file: '',
-			id: null,
-			url: previewUrl,
-			name: file.name,
-			status: 'uploading',
-			size: file.size,
-			error: '',
-			itemId: tempItemId
-		};
-
-		files = [...files, fileItem];
-
-		try {
-			// llens: 画像縮小は配備設定(ATTACHMENT_IMAGE_MAX_DIMENSION → config.file.
-			// image_max_dimension)。長辺が上限を超える画像だけ dataURL 経由で縮小
-			// (MIME 維持)し、file に戻してからアップロード
-			let uploadTarget = file;
-
-			const maxDimension = $config?.file?.image_max_dimension ?? null;
-			if (maxDimension) {
-				const dataUrl = await new Promise<string>((resolve, reject) => {
-					const reader = new FileReader();
-					// readAsDataURL の onload では result は常に string
-					reader.onload = () => resolve(reader.result as string);
-					reader.onerror = reject;
-					reader.readAsDataURL(file);
-				});
-
-				const compressedUrl = await compressImage(dataUrl, maxDimension, file.type);
-				if (compressedUrl !== dataUrl) {
-					const compressedBlob = await (await fetch(compressedUrl)).blob();
-					uploadTarget = blobToFile(compressedBlob, file.name);
-				}
-			}
-
-			const uploadedFile = await uploadFile(uploadTarget);
-
-			if (uploadedFile) {
-				// アップロード中に X で外された場合はサーバーに orphan を残さない
-				const idx = files.findIndex((item) => item?.itemId === tempItemId);
-				if (idx === -1) {
-					deleteFileById(uploadedFile.id).catch(() => {});
-					return null;
-				}
-
-				if (uploadedFile.error) {
-					console.warn('File upload warning:', uploadedFile.error);
-					toast.warning(uploadedFile.error);
-				}
-
-				// uploadFileHandler と同じ理由で files[idx] 経由で置き換える
-				files[idx] = {
-					...files[idx],
-					status: 'uploaded',
-					file: uploadedFile,
-					id: uploadedFile.id,
-					name: uploadedFile?.meta?.name ?? file.name,
-					size: uploadedFile?.meta?.size ?? file.size,
-					url: `/api/v1/files/${uploadedFile.id}/content`
-				};
-			} else {
-				files = files.filter((item) => item?.itemId !== tempItemId);
-			}
-		} catch (e) {
-			toast.error(`${e}`);
-			files = files.filter((item) => item?.itemId !== tempItemId);
-		} finally {
-			URL.revokeObjectURL(previewUrl);
-		}
-	};
-
-	// llens(#69): 保存済みファイルの再添付。processFileById で Attachment フックを再発火し
-	// (発火は owner/admin のみサーバー側で制御)、戻りの FileModel から files エントリを組む。
-	// origin:'library' — dismiss 時に実体削除しない(添付解除のみ)。
-	const libraryFilesHandler = async (
-		selected: { id: string; meta?: { content_type?: string } }[]
-	) => {
-		for (const item of selected ?? []) {
-			if (files.some((f) => f?.id === item.id)) {
-				continue;
-			}
-
-			const isImage = (item?.meta?.content_type ?? '').startsWith('image/');
-			if (isImage && visionCapableModels.length === 0) {
-				toast.error($i18n.t('Selected model(s) do not support image inputs'));
-				continue;
-			}
-
-			try {
-				const file = (await processFileById(item.id)) ?? item;
-
-				if (isImage) {
-					files = [
-						...files,
-						{
-							type: 'image',
-							id: file.id,
-							url: `/api/v1/files/${file.id}/content`,
-							name: file?.meta?.name ?? file?.filename,
-							size: file?.meta?.size,
-							status: 'uploaded',
-							itemId: uuidv4(),
-							origin: 'library'
-						}
-					];
-				} else {
-					files = [
-						...files,
-						{
-							type: 'file',
-							file: file,
-							id: file.id,
-							url: `${WEBUI_API_BASE_URL}/files/${file.id}`,
-							name: file?.meta?.name ?? file?.filename,
-							collection_name: file?.meta?.collection_name ?? file?.collection_name ?? '',
-							status: 'uploaded',
-							size: file?.meta?.size,
-							error: '',
-							itemId: uuidv4(),
-							origin: 'library'
-						}
-					];
-				}
-			} catch (e) {
-				toast.error(`${e}`);
-			}
-		}
-	};
-
-	// llens(#69): dismiss の意味論 — 新規アップロード分は実体削除、
-	// library 再添付分(origin:'library')は添付解除のみ。
-	const dismissFileHandler = async (fileIdx: number) => {
-		const file = files[fileIdx];
-
-		if (file?.type !== 'collection' && !file?.collection && file?.origin !== 'library') {
-			if (file?.id) {
-				// This will handle both file deletion and Chroma cleanup
-				await deleteFileById(file.id);
-			}
-		}
-
-		// Remove from UI state
-		files.splice(fileIdx, 1);
-		files = files;
-	};
-
-	let showFileLibraryModal = $state(false);
-
 	// 送信キー(Enter ⇄ Ctrl+Enter)。切り替え UI は「+」メニュー(InputMenu)にある
 	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
 
@@ -358,32 +123,215 @@
 			: 'auto'
 	);
 
-	const inputFilesHandler = async (inputFiles: File[]) => {
-		inputFiles.forEach((file) => {
-			if (
-				($config?.file?.max_size ?? null) !== null &&
-				file.size > ($config?.file?.max_size ?? 0) * 1024 * 1024
-			) {
-				toast.error(
-					$i18n.t(`File size should not exceed {{maxSize}} MB.`, {
-						maxSize: $config?.file?.max_size
-					})
-				);
-				return;
+	const onPromptKeydown = async (e: KeyboardEvent) => {
+		const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
+
+		const commandsContainerElement = document.getElementById('commands-container');
+
+		if (e.key === 'Escape') {
+			stopResponse();
+		}
+
+		// Command/Ctrl + Shift + Enter to submit a message pair
+		if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
+			e.preventDefault();
+			createMessagePair(prompt);
+		}
+
+		// Check if Ctrl + R is pressed
+		if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
+			e.preventDefault();
+
+			const regenerateButton = (
+				[...document.getElementsByClassName('regenerate-response-button')] as HTMLElement[]
+			)?.at(-1);
+
+			regenerateButton?.click();
+		}
+
+		if (prompt === '' && e.key == 'ArrowUp') {
+			e.preventDefault();
+
+			const userMessageElement = [...document.getElementsByClassName('user-message')]?.at(-1);
+
+			const editButton = (
+				[...document.getElementsByClassName('edit-user-message-button')] as HTMLElement[]
+			)?.at(-1);
+
+			userMessageElement?.scrollIntoView({ block: 'center' });
+			editButton?.click();
+		}
+
+		if (commandsContainerElement) {
+			if (commandsContainerElement && e.key === 'ArrowUp') {
+				e.preventDefault();
+				commandsElement.selectUp();
+
+				const commandOptionButton = (
+					[...document.getElementsByClassName('selected-command-option-button')] as HTMLElement[]
+				)?.at(-1);
+				commandOptionButton?.scrollIntoView({ block: 'center' });
 			}
 
+			if (commandsContainerElement && e.key === 'ArrowDown') {
+				e.preventDefault();
+				commandsElement.selectDown();
+
+				const commandOptionButton = (
+					[...document.getElementsByClassName('selected-command-option-button')] as HTMLElement[]
+				)?.at(-1);
+				commandOptionButton?.scrollIntoView({ block: 'center' });
+			}
+
+			if (commandsContainerElement && e.key === 'Enter') {
+				e.preventDefault();
+
+				const commandOptionButton = (
+					[...document.getElementsByClassName('selected-command-option-button')] as HTMLElement[]
+				)?.at(-1);
+
+				if (e.shiftKey) {
+					prompt = `${prompt}\n`;
+				} else if (commandOptionButton) {
+					commandOptionButton?.click();
+				} else {
+					document.getElementById('send-message-button')?.click();
+				}
+			}
+
+			if (commandsContainerElement && e.key === 'Tab') {
+				e.preventDefault();
+
+				const commandOptionButton = (
+					[...document.getElementsByClassName('selected-command-option-button')] as HTMLElement[]
+				)?.at(-1);
+
+				commandOptionButton?.click();
+			}
+		} else {
 			if (
-				['image/gif', 'image/webp', 'image/jpeg', 'image/png', 'image/avif'].includes(file['type'])
+				!$mobile ||
+				!(
+					'ontouchstart' in window ||
+					navigator.maxTouchPoints > 0 ||
+					// IE/旧 Edge の prefixed プロパティ(lib.dom 未収載)— 型だけ拡張
+					((navigator as Navigator & { msMaxTouchPoints?: number }).msMaxTouchPoints ?? 0) > 0
+				)
 			) {
-				if (visionCapableModels.length === 0) {
-					toast.error($i18n.t('Selected model(s) do not support image inputs'));
+				if (isComposing) {
 					return;
 				}
-				uploadImageHandler(file);
-			} else {
-				uploadFileHandler(file);
+
+				// Prevent Enter key from creating a new line
+				const isCtrlPressed = e.ctrlKey || e.metaKey;
+				const enterPressed =
+					($settings?.ctrlEnterToSend ?? false)
+						? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
+						: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
+
+				if (enterPressed) {
+					e.preventDefault();
+				}
+
+				// Submit the prompt when Enter key is pressed
+				if ((prompt !== '' || files.length > 0) && enterPressed) {
+					onSubmit(prompt);
+				}
 			}
-		});
+		}
+
+		if (e.key === 'Tab') {
+			const words = extractCurlyBraceWords(prompt);
+			// await 後も参照できるよう e.target を textarea として捕まえる
+			const target = e.target as HTMLTextAreaElement;
+
+			if (words.length > 0) {
+				const word = words[0];
+				const fullPrompt = prompt;
+
+				prompt = prompt.substring(0, word.endIndex + 1);
+				await tick();
+
+				target.scrollTop = target.scrollHeight;
+				prompt = fullPrompt;
+				await tick();
+
+				e.preventDefault();
+				target.setSelectionRange(word.startIndex, word.endIndex + 1);
+			}
+
+			target.style.height = '';
+			target.style.height = Math.min(target.scrollHeight, 320) + 'px';
+		}
+
+		if (e.key === 'Escape') {
+			atSelectedModel = undefined;
+		}
+	};
+
+	// 入力量に応じた textarea の自動リサイズ(input / focus 共通)
+	const autosizePrompt = (e: Event) => {
+		const target = e.target as HTMLTextAreaElement;
+		target.style.height = '';
+		target.style.height = Math.min(target.scrollHeight, 320) + 'px';
+	};
+
+	const onPromptPaste = async (e: ClipboardEvent) => {
+		// IE 由来の window.clipboardData(lib.dom 未収載)— 型だけ拡張
+		const clipboardData =
+			e.clipboardData || (window as Window & { clipboardData?: DataTransfer }).clipboardData;
+
+		if (clipboardData && clipboardData.items) {
+			for (const item of clipboardData.items) {
+				if (item.type.indexOf('image') !== -1) {
+					// llens(#69): paste 画像も他の画像と同じアップロード経路に統一
+					const blob = item.getAsFile();
+					if (blob) {
+						uploads.inputFilesHandler([blobToFile(blob, `Pasted-Image-${Date.now()}.png`)]);
+					}
+				} else if (item.type === 'text/plain') {
+					// llens: 長文ペーストの .txt 化は配備設定(PASTED_TEXT_CHARACTER_LIMIT)
+					// のみで駆動する。未設定 = 無効(per-user トグルは廃止)
+					const pastedTextLimit = $config?.file?.pasted_text_character_limit ?? null;
+					if (pastedTextLimit) {
+						const text = clipboardData.getData('text/plain');
+
+						if (text.length > pastedTextLimit) {
+							e.preventDefault();
+							const blob = new Blob([text], { type: 'text/plain' });
+							const file = new File([blob], `Pasted_Text_${Date.now()}.txt`, {
+								type: 'text/plain'
+							});
+
+							await uploads.uploadFileHandler(file, true);
+						}
+					}
+				}
+			}
+		}
+	};
+
+	// マイク権限を確認してから録音 UI(VoiceRecording)へ切り替える
+	const onRecordVoiceClick = async () => {
+		try {
+			let stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(function (err) {
+				toast.error(
+					$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
+						error: err
+					})
+				);
+				return null;
+			});
+
+			if (stream) {
+				recording = true;
+				const tracks = stream.getTracks();
+				tracks.forEach((track) => track.stop());
+			}
+			stream = null;
+		} catch {
+			toast.error($i18n.t('Permission denied when accessing microphone'));
+		}
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
@@ -413,7 +361,7 @@
 		if (e.dataTransfer?.files) {
 			const inputFiles = Array.from(e.dataTransfer?.files);
 			if (inputFiles && inputFiles.length > 0) {
-				inputFilesHandler(inputFiles);
+				uploads.inputFilesHandler(inputFiles);
 			}
 		}
 
@@ -454,7 +402,7 @@
 
 <FilesOverlay show={dragged} />
 
-<FileLibraryModal bind:show={showFileLibraryModal} onSelect={libraryFilesHandler} />
+<FileLibraryModal bind:show={showFileLibraryModal} onSelect={uploads.libraryFilesHandler} />
 
 {#if loaded}
 	<div class="w-full font-primary">
@@ -549,7 +497,7 @@
 						onchange={async () => {
 							if (inputFiles && inputFiles.length > 0) {
 								const _inputFiles = Array.from(inputFiles);
-								inputFilesHandler(_inputFiles);
+								uploads.inputFilesHandler(_inputFiles);
 							} else {
 								toast.error($i18n.t(`File not found.`));
 							}
@@ -596,63 +544,13 @@
 								dir={chatDirection}
 							>
 								{#if files.length > 0}
-									<div class="mx-2 mt-2.5 -mb-1 flex items-center flex-wrap gap-2">
-										{#each files as file, fileIdx}
-											{#if file.type === 'image'}
-												<div class=" relative group">
-													<div class="relative flex items-center">
-														<Image
-															src={file.url}
-															alt="input"
-															imageClassName=" size-14 rounded-xl object-cover"
-														/>
-														{#if file.status === 'uploading'}
-															<div
-																class="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl pointer-events-none"
-															>
-																<Spinner className="size-4" />
-															</div>
-														{/if}
-														{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
-															<Tooltip
-																className=" absolute top-1 left-1"
-																content={[...(atSelectedModel ? [atSelectedModel] : selectedModels)]
-																	.filter((id) => !visionCapableModels.includes(id))
-																	.join(', ')}
-															>
-																<span class="i-lucide-triangle-alert size-4 block text-yellow-300"
-																></span>
-															</Tooltip>
-														{/if}
-													</div>
-													<div class=" absolute -top-1 -right-1">
-														<button
-															class=" bg-white text-black border border-white rounded-full group-hover:visible invisible"
-															type="button"
-															aria-label={$i18n.t('Remove file')}
-															onclick={async () => {
-																await dismissFileHandler(fileIdx);
-															}}
-														>
-															<span class="i-lucide-x size-4 block"></span>
-														</button>
-													</div>
-												</div>
-											{:else}
-												<FileItem
-													item={file}
-													name={file.name}
-													type={file.type}
-													size={file?.size}
-													loading={file.status === 'uploading'}
-													dismissible={true}
-													onDismiss={async () => {
-														await dismissFileHandler(fileIdx);
-													}}
-												/>
-											{/if}
-										{/each}
-									</div>
+									<InputFiles
+										{files}
+										{atSelectedModel}
+										{selectedModels}
+										{visionCapableModels}
+										onDismiss={uploads.dismissFileHandler}
+									/>
 								{/if}
 
 								<div class="px-2.5">
@@ -665,216 +563,11 @@
 										bind:value={prompt}
 										oncompositionstart={() => (isComposing = true)}
 										oncompositionend={() => (isComposing = false)}
-										onkeydown={async (e) => {
-											const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
-
-											const commandsContainerElement =
-												document.getElementById('commands-container');
-
-											if (e.key === 'Escape') {
-												stopResponse();
-											}
-
-											// Command/Ctrl + Shift + Enter to submit a message pair
-											if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
-												e.preventDefault();
-												createMessagePair(prompt);
-											}
-
-											// Check if Ctrl + R is pressed
-											if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
-												e.preventDefault();
-
-												const regenerateButton = (
-													[
-														...document.getElementsByClassName('regenerate-response-button')
-													] as HTMLElement[]
-												)?.at(-1);
-
-												regenerateButton?.click();
-											}
-
-											if (prompt === '' && e.key == 'ArrowUp') {
-												e.preventDefault();
-
-												const userMessageElement = [
-													...document.getElementsByClassName('user-message')
-												]?.at(-1);
-
-												const editButton = (
-													[
-														...document.getElementsByClassName('edit-user-message-button')
-													] as HTMLElement[]
-												)?.at(-1);
-
-												userMessageElement?.scrollIntoView({ block: 'center' });
-												editButton?.click();
-											}
-
-											if (commandsContainerElement) {
-												if (commandsContainerElement && e.key === 'ArrowUp') {
-													e.preventDefault();
-													commandsElement.selectUp();
-
-													const commandOptionButton = (
-														[
-															...document.getElementsByClassName('selected-command-option-button')
-														] as HTMLElement[]
-													)?.at(-1);
-													commandOptionButton?.scrollIntoView({ block: 'center' });
-												}
-
-												if (commandsContainerElement && e.key === 'ArrowDown') {
-													e.preventDefault();
-													commandsElement.selectDown();
-
-													const commandOptionButton = (
-														[
-															...document.getElementsByClassName('selected-command-option-button')
-														] as HTMLElement[]
-													)?.at(-1);
-													commandOptionButton?.scrollIntoView({ block: 'center' });
-												}
-
-												if (commandsContainerElement && e.key === 'Enter') {
-													e.preventDefault();
-
-													const commandOptionButton = (
-														[
-															...document.getElementsByClassName('selected-command-option-button')
-														] as HTMLElement[]
-													)?.at(-1);
-
-													if (e.shiftKey) {
-														prompt = `${prompt}\n`;
-													} else if (commandOptionButton) {
-														commandOptionButton?.click();
-													} else {
-														document.getElementById('send-message-button')?.click();
-													}
-												}
-
-												if (commandsContainerElement && e.key === 'Tab') {
-													e.preventDefault();
-
-													const commandOptionButton = (
-														[
-															...document.getElementsByClassName('selected-command-option-button')
-														] as HTMLElement[]
-													)?.at(-1);
-
-													commandOptionButton?.click();
-												}
-											} else {
-												if (
-													!$mobile ||
-													!(
-														'ontouchstart' in window ||
-														navigator.maxTouchPoints > 0 ||
-														// IE/旧 Edge の prefixed プロパティ(lib.dom 未収載)— 型だけ拡張
-														((navigator as Navigator & { msMaxTouchPoints?: number })
-															.msMaxTouchPoints ?? 0) > 0
-													)
-												) {
-													if (isComposing) {
-														return;
-													}
-
-													// Prevent Enter key from creating a new line
-													const isCtrlPressed = e.ctrlKey || e.metaKey;
-													const enterPressed =
-														($settings?.ctrlEnterToSend ?? false)
-															? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
-															: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
-
-													if (enterPressed) {
-														e.preventDefault();
-													}
-
-													// Submit the prompt when Enter key is pressed
-													if ((prompt !== '' || files.length > 0) && enterPressed) {
-														onSubmit(prompt);
-													}
-												}
-											}
-
-											if (e.key === 'Tab') {
-												const words = extractCurlyBraceWords(prompt);
-												// await 後も参照できるよう e.target を textarea として捕まえる
-												const target = e.target as HTMLTextAreaElement;
-
-												if (words.length > 0) {
-													const word = words[0];
-													const fullPrompt = prompt;
-
-													prompt = prompt.substring(0, word.endIndex + 1);
-													await tick();
-
-													target.scrollTop = target.scrollHeight;
-													prompt = fullPrompt;
-													await tick();
-
-													e.preventDefault();
-													target.setSelectionRange(word.startIndex, word.endIndex + 1);
-												}
-
-												target.style.height = '';
-												target.style.height = Math.min(target.scrollHeight, 320) + 'px';
-											}
-
-											if (e.key === 'Escape') {
-												atSelectedModel = undefined;
-											}
-										}}
+										onkeydown={onPromptKeydown}
 										rows="1"
-										oninput={async (e) => {
-											const target = e.target as HTMLTextAreaElement;
-											target.style.height = '';
-											target.style.height = Math.min(target.scrollHeight, 320) + 'px';
-										}}
-										onfocus={async (e) => {
-											const target = e.target as HTMLTextAreaElement;
-											target.style.height = '';
-											target.style.height = Math.min(target.scrollHeight, 320) + 'px';
-										}}
-										onpaste={async (e) => {
-											// IE 由来の window.clipboardData(lib.dom 未収載)— 型だけ拡張
-											const clipboardData =
-												e.clipboardData ||
-												(window as Window & { clipboardData?: DataTransfer }).clipboardData;
-
-											if (clipboardData && clipboardData.items) {
-												for (const item of clipboardData.items) {
-													if (item.type.indexOf('image') !== -1) {
-														// llens(#69): paste 画像も他の画像と同じアップロード経路に統一
-														const blob = item.getAsFile();
-														if (blob) {
-															inputFilesHandler([
-																blobToFile(blob, `Pasted-Image-${Date.now()}.png`)
-															]);
-														}
-													} else if (item.type === 'text/plain') {
-														// llens: 長文ペーストの .txt 化は配備設定(PASTED_TEXT_CHARACTER_LIMIT)
-														// のみで駆動する。未設定 = 無効(per-user トグルは廃止)
-														const pastedTextLimit =
-															$config?.file?.pasted_text_character_limit ?? null;
-														if (pastedTextLimit) {
-															const text = clipboardData.getData('text/plain');
-
-															if (text.length > pastedTextLimit) {
-																e.preventDefault();
-																const blob = new Blob([text], { type: 'text/plain' });
-																const file = new File([blob], `Pasted_Text_${Date.now()}.txt`, {
-																	type: 'text/plain'
-																});
-
-																await uploadFileHandler(file, true);
-															}
-														}
-													}
-												}
-											}
-										}}
+										oninput={autosizePrompt}
+										onfocus={autosizePrompt}
+										onpaste={onPromptPaste}
 									></textarea>
 								</div>
 
@@ -913,32 +606,7 @@
 													id="voice-input-button"
 													class=" text-content-muted hover:text-content rounded-full p-1.5 mr-0.5 self-center"
 													type="button"
-													onclick={async () => {
-														try {
-															let stream = await navigator.mediaDevices
-																.getUserMedia({ audio: true })
-																.catch(function (err) {
-																	toast.error(
-																		$i18n.t(
-																			`Permission denied when accessing microphone: {{error}}`,
-																			{
-																				error: err
-																			}
-																		)
-																	);
-																	return null;
-																});
-
-															if (stream) {
-																recording = true;
-																const tracks = stream.getTracks();
-																tracks.forEach((track) => track.stop());
-															}
-															stream = null;
-														} catch {
-															toast.error($i18n.t('Permission denied when accessing microphone'));
-														}
-													}}
+													onclick={onRecordVoiceClick}
 													aria-label={$i18n.t('Record voice')}
 												>
 													<span class="i-lucide-mic size-5 block translate-y-[0.5px]"></span>
@@ -964,69 +632,7 @@
 											{#if ($settings?.callEnabled ?? false) && prompt === '' && files.length === 0 && ($config?.audio?.stt?.enable ?? true) && ($config?.audio?.tts?.enable ?? true)}
 												<!-- llens(#53): Call は STT+TTS 両方が有効なときだけ(片方無効なら出さない)。
 											     ユーザー設定 callEnabled(既定 OFF)で表示自体を切り替える -->
-												<div class=" flex items-center">
-													<Tooltip content={$i18n.t('Call')}>
-														<button
-															class=" bg-primary hover:bg-primary-hover text-primary-content rounded-full p-1.5 self-center"
-															type="button"
-															onclick={async () => {
-																if (selectedModels.length > 1) {
-																	toast.error($i18n.t('Select only one model to call'));
-
-																	return;
-																}
-
-																if ($config?.audio?.stt?.engine === 'web') {
-																	toast.error(
-																		$i18n.t(
-																			'Call feature is not supported when using Web STT engine'
-																		)
-																	);
-
-																	return;
-																}
-																// check if user has access to getUserMedia
-																try {
-																	let stream: MediaStream | null =
-																		await navigator.mediaDevices.getUserMedia({
-																			audio: true
-																		});
-																	// If the user grants the permission, proceed to show the call overlay
-
-																	if (stream) {
-																		const tracks = stream.getTracks();
-																		tracks.forEach((track) => track.stop());
-																	}
-
-																	stream = null;
-
-																	if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-																		// If the user has not initialized the TTS worker, initialize it
-																		if (!$TTSWorker) {
-																			const worker = new KokoroWorker(
-																				$settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																			);
-																			TTSWorker.set(worker);
-
-																			await worker.init();
-																		}
-																	}
-
-																	showCallOverlay.set(true);
-																	showControls.set(true);
-																} catch (err) {
-																	// If the user denies the permission or an error occurs, show an error message
-																	toast.error(
-																		$i18n.t('Permission denied when accessing media devices')
-																	);
-																}
-															}}
-															aria-label={$i18n.t('Call')}
-														>
-															<span class="i-lucide-headphones size-5 block"></span>
-														</button>
-													</Tooltip>
-												</div>
+												<CallButton {selectedModels} />
 											{/if}
 
 											<div class=" flex items-center">
