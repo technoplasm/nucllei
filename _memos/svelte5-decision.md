@@ -59,3 +59,17 @@ svelte 5.56.4 / @sveltejs/vite-plugin-svelte 4.x / svelte-check 4.x に上げて
 - `<svelte:component>` はスパイク時 4 件 → **現存 1 件**(`chat/Messages/Markdown/AlertRenderer.svelte`)。
 - svelte-check は **warnings 全プロジェクト 0**(2026-07-16 達成、以後 warning 新規 0 運用)・
   **errors 1274**。CI(GitHub Actions)には依然入れていない(#25 の残タスクのまま)。
+
+## 完遂(2026-07-19 追記)— legacy 記法ゼロ
+
+- **アプリコードの legacy 記法は全廃**(5fd2e8bc3〜e35c12fbc): `$:` / `export let` / `<slot>` /
+  `createEventDispatcher` / `<svelte:component>` すべて **0 件**。svelte-check **0 errors / 0 warnings**。
+  「互換モードのまま段階移行」の方針どおり完走 — コンパイラの互換モード自体は
+  凍結ライブラリ(bits-ui 0.19 等)の legacy コンパイルのために継続する。
+- 意図的残置は 2 つだけ: **bits-ui 0.19 コンポーネントへの `on:` ディレクティブ**
+  (凍結 dep の API 要求。InputMenu / NavbarMenu / ChatMenu / FolderMenu / VideoInputMenu /
+  ModelEditor)と **RichTextInput の全面 runes 化見送り**(IME/undo パリティ理由、#70 記録)。
+- 変換で確立した罠は `dev-environment.md` のモーダル罠 (1)〜(7) に集約
+  ((7) = $effect 内の親コールバックは untrack に置く、はこの最終バッチの
+  AdvancedParams で顕在化 → 修正済み)。
+- svelte-check の CI 組み込みは依然未実施(#25 の残タスクのまま)。
