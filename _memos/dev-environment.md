@@ -45,6 +45,12 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (5) **`$: fn()` の依存は文中で「読んだ」変数だけ**(書き込みは依存にならない)。
   `$effect` 化で関数呼び出しの中身まで追跡されて発火過多になるときは、依存を
   `void x;` で明示し本体は先頭 `await tick()` などで追跡外に置く(Selector.resetView が実例)。
+  (7) **`$effect` から親コールバック(onChange 等)を呼ぶと親側の読み書きまで依存に入る**
+  (2026-07-19、AdvancedParams runes 化で実害 — `effect_update_depth_exceeded`)。
+  親の handler が `info.params = {...info.params, ...params}` のように「読んで書く」と、
+  effect が自分の依存 state を書く自己ループになる(legacy の `$: dispatch(...)` は
+  handler が追跡外で無害だった)。**通知系 effect は依存を `void x;` で明示し、
+  コールバック本体は `untrack(() => onChange(x))` に置く**(AdvancedParams / AccessControl が実例)。
   初期ロード直後に出す toast は root layout onMount 末尾 + setTimeout 遅延で発火する
   (失効通知の実例が `src/routes/+layout.svelte`)。
 - **Svelte 5(互換モード)テンプレート式は「マークアップに直接書かれた変数」しか追跡しない**
