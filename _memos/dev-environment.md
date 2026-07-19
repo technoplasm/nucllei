@@ -301,6 +301,10 @@ LLENS_STT_SMOKE=1 uv run pytest \
   SvelteKit の `goto` は SPA 遷移なので `wait_for_url` が 'load' 待ちで空振りすることがある —
   遷移確認は `wait_for_timeout` 後に `page.url` を直接読むほうが確実。レイアウト不具合は `getBoundingClientRect`・`elementFromPoint`・style 差し替えで
   **原因を数字で特定**してから直す(#47: タブバーが `overflow-x-auto` で高さ0に潰れる罠を Playwright で確定)。
+- **Playwright のスクリーンショットに native スクロールバーは写らない**(2026-07-20 実害):
+  headless の CDP キャプチャはスクロールバー領域を含まず、素のページの既定バーすら写らない —
+  「hover で出ない」等の結論をスクショで出してはいけない。検証は computed style / scrollHeight の
+  数値で行う。OverlayScrollbars のバーは実 DOM なので普通に写る(こちらはスクショ検証可)。
 - **bits-ui(melt)のメニュートリガーは JS の `element.click()` では開かない**(pointerdown を監視しているため
   合成 click イベントが素通り)。実マウスイベントを使う — hover 表示で不可視のボタンは
   `locator.click(force=True)`、要素特定が難しければ座標 `page.mouse.click(x, y)`(#70 共有コンポーネント検証で実績)。

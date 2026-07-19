@@ -70,6 +70,24 @@
     内部 URL を base64 化(`utils/file_images.py`)。share/clone の file 連動も image に適用。
 - `accessed_at` カラム新設(migration `d9f1c3b7a2e8`)。content 取得系 + `/process` でタッチ。
 
+## 削除済み/不存在チャットの閲覧仕様(2026-07-20 確定・#19)
+
+ユーザー決定: **admin だけが削除済み(soft delete)チャットを「削除済みと分かる状態」で
+無理やり見れる。非 admin には最初から存在しないのと同じ見え方。/c/ は誰でも 404**。
+
+- `/s/{id}` admin 分岐(chat id 直参照)は soft delete 行も返し、レスポンスの `deleted_at`
+  (ChatResponse に露出)で FE が赤バナー「このチャットは削除されています」を表示
+- `/chats/{id}`(= /c/ の裏)は admin フォールバックでも削除済みを返さない —
+  削除済みの閲覧経路は /s/ の admin 分岐(バナー付き)一本
+- FE は /s/ /c/ とも不達時に URL を保った in-place 404(`NotFound.svelte`、
+  +error.svelte と同じ顔)。toast + ホーム誘導は廃止
+- 共有ビューの空 history は挨拶プレースホルダでなく「メッセージがありません」+ Clone 非表示
+  (Messages の placeholder は readOnly で抑止。空配列で「上にまだある」ローダーが誤発火する
+  バグも長さガードで修理)
+
+出荷: c3b1d295a / 98cbfd053 / 95bd39bbe(回帰 2 件: share 直参照 = admin 200+deleted_at /
+非 admin 401、/chats/{id} = admin でも 401)
+
 ## 副産物・掃除
 
 - `has_access_to_file`(routers/files.py)の KB 依存を public マーカー判定へ置換
