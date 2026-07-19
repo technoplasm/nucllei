@@ -381,7 +381,7 @@
 			</button>
 
 			<div
-				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-raised rounded-xs"
+				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-form rounded-xs"
 			>
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
@@ -443,7 +443,7 @@
 			<label class="flex items-center gap-1.5">
 				{$i18n.t('Sort by')}
 				<select
-					class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
+					class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
 					bind:value={orderBy}
 					onchange={() => {
 						direction = defaultDirection(orderBy);
@@ -460,7 +460,7 @@
 				<label class="flex items-center gap-1.5">
 					{$i18n.t('Group by')}
 					<select
-						class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
+						class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden"
 						bind:value={groupBy}
 					>
 						<option value="day">{$i18n.t('Day')}</option>
@@ -473,7 +473,7 @@
 			{#if isAdmin}
 				<div class="flex flex-wrap items-center gap-1">
 					<select
-						class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUploaderId
+						class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUploaderId
 							? ''
 							: 'text-content-subtle'}"
 						bind:value={selectedUploaderId}

@@ -123,7 +123,7 @@
 			</a>
 
 			<div
-				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-raised rounded-xs"
+				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-form rounded-xs"
 			>
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input

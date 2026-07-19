@@ -79,7 +79,7 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('Local Models')}</div>
 						<select
-							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
+							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-form hover:bg-surface-hover outline-hidden"
 							bind:value={taskConfig.TASK_MODEL}
 							placeholder={$i18n.t('Select a model')}
 						>
@@ -95,7 +95,7 @@
 					<div class="flex-1">
 						<div class=" text-xs mb-1">{$i18n.t('External Models')}</div>
 						<select
-							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
+							class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-form hover:bg-surface-hover outline-hidden"
 							bind:value={taskConfig.TASK_MODEL_EXTERNAL}
 							placeholder={$i18n.t('Select a model')}
 						>

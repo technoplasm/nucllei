@@ -140,7 +140,7 @@
 						<div class=" self-center text-xs font-medium">{$i18n.t('Default User Role')}</div>
 						<div class="flex items-center relative">
 							<select
-								class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
+								class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
 								bind:value={adminConfig.DEFAULT_USER_ROLE}
 								placeholder="Select a role"
 							>
@@ -179,7 +179,7 @@
 								</div>
 
 								<input
-									class="w-full mt-1 text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="w-full mt-1 text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="text"
 									placeholder={`e.g.) /api/v1/chats, /api/v1/models`}
 									bind:value={adminConfig.API_KEY_ALLOWED_ENDPOINTS}
@@ -195,7 +195,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								type="text"
 								placeholder={`e.g.) "30m","1h", "10d". `}
 								bind:value={adminConfig.JWT_EXPIRES_IN}
@@ -233,7 +233,7 @@
 												{$i18n.t('Label')}
 											</div>
 											<input
-												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												required
 												placeholder={$i18n.t('Enter server label')}
 												bind:value={LDAP_SERVER.label}
@@ -247,7 +247,7 @@
 												{$i18n.t('Host')}
 											</div>
 											<input
-												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												required
 												placeholder={$i18n.t('Enter server host')}
 												bind:value={LDAP_SERVER.host}
@@ -263,7 +263,7 @@
 												className="w-full"
 											>
 												<input
-													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+													class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 													type="number"
 													placeholder={$i18n.t('Enter server port')}
 													bind:value={LDAP_SERVER.port}
@@ -281,7 +281,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+													class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Enter Application DN')}
 													bind:value={LDAP_SERVER.app_dn}
@@ -294,7 +294,7 @@
 											</div>
 											<SensitiveInput
 												placeholder={$i18n.t('Enter Application DN Password')}
-												outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+												outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 												inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 												bind:value={LDAP_SERVER.app_dn_password}
 											/>
@@ -312,7 +312,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+													class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Example: mail')}
 													bind:value={LDAP_SERVER.attribute_for_mail}
@@ -332,7 +332,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+													class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t(
 														'Example: sAMAccountName or uid or userPrincipalName'
@@ -352,7 +352,7 @@
 												placement="top-start"
 											>
 												<input
-													class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+													class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 													required
 													placeholder={$i18n.t('Example: ou=users,dc=foo,dc=example')}
 													bind:value={LDAP_SERVER.search_base}
@@ -366,7 +366,7 @@
 												{$i18n.t('Search Filters')}
 											</div>
 											<input
-												class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												placeholder={$i18n.t('Example: (&(objectClass=inetOrgPerson)(uid=%s))')}
 												bind:value={LDAP_SERVER.search_filters}
 											/>
@@ -396,7 +396,7 @@
 														{$i18n.t('Certificate Path')}
 													</div>
 													<input
-														class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+														class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 														placeholder={$i18n.t('Enter certificate path')}
 														bind:value={LDAP_SERVER.certificate_path}
 													/>
@@ -409,7 +409,7 @@
 													</div>
 													<Tooltip content={$i18n.t('Default to ALL')} placement="top-start">
 														<input
-															class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+															class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 															placeholder={$i18n.t('Example: ALL')}
 															bind:value={LDAP_SERVER.ciphers}
 														/>
@@ -449,7 +449,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								type="text"
 								placeholder={`e.g.) "http://localhost:3000"`}
 								bind:value={adminConfig.WEBUI_URL}
@@ -470,7 +470,7 @@
 
 						<div class="flex mt-2 space-x-2">
 							<input
-								class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								type="text"
 								placeholder={`https://example.com/webhook`}
 								bind:value={webhookUrl}

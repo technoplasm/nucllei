@@ -51,7 +51,7 @@
 		</div>
 
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
+			<div class="flex items-center px-2 bg-surface-form rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"

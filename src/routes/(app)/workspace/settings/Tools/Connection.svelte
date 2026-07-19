@@ -56,7 +56,7 @@
 		<div class="flex w-full gap-2">
 			<div class="flex-1 relative">
 				<input
-					class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+					class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 					placeholder={$i18n.t('API Base URL')}
 					bind:value={connection.url}
 					autocomplete="off"
@@ -65,7 +65,7 @@
 
 			{#if (connection?.auth_type ?? 'bearer') === 'bearer'}
 				<SensitiveInput
-					outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+					outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 					inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 					placeholder={$i18n.t('API Key')}
 					bind:value={connection.key}

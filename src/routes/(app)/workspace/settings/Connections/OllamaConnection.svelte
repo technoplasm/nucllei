@@ -69,7 +69,7 @@
 		{/if}
 
 		<input
-			class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+			class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 			placeholder={$i18n.t('Enter URL (e.g. http://localhost:11434)')}
 			bind:value={url}
 		/>

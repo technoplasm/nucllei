@@ -194,7 +194,7 @@
 					<div class="flex gap-2">
 						<div class="flex-1">
 							<select
-								class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
+								class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-form hover:bg-surface-hover outline-hidden"
 								bind:value={selectedPipelinesUrlIdx}
 								placeholder={$i18n.t('Select a pipeline url')}
 								onchange={async () => {
@@ -265,7 +265,7 @@
 					<div class="flex w-full">
 						<div class="flex-1 mr-2">
 							<input
-								class="w-full text-sm px-2 py-1 text-content bg-surface-raised rounded-xs outline-hidden"
+								class="w-full text-sm px-2 py-1 text-content bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('Enter Github Raw URL')}
 								bind:value={pipelineDownloadUrl}
 							/>
@@ -310,7 +310,7 @@
 								<div class="flex gap-2">
 									<div class="flex-1">
 										<select
-											class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
+											class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-form hover:bg-surface-hover outline-hidden"
 											bind:value={selectedPipelineIdx}
 											placeholder={$i18n.t('Select a pipeline')}
 											onchange={async () => {
@@ -369,7 +369,7 @@
 														<div class=" flex-1">
 															{#if valves_spec.properties[property]?.enum ?? null}
 																<select
-																	class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-raised hover:bg-surface-hover outline-hidden"
+																	class="w-full rounded-xs py-2 px-4 text-sm text-content bg-surface-form hover:bg-surface-hover outline-hidden"
 																	bind:value={valves[property]}
 																>
 																	{#each valves_spec.properties[property].enum as option}
@@ -390,7 +390,7 @@
 																</div>
 															{:else}
 																<input
-																	class="w-full text-sm px-2 py-1 text-content bg-surface-raised rounded-xs outline-hidden"
+																	class="w-full text-sm px-2 py-1 text-content bg-surface-form rounded-xs outline-hidden"
 																	type="text"
 																	placeholder={valves_spec.properties[property].title}
 																	bind:value={valves[property]}

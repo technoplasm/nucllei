@@ -191,7 +191,7 @@
 					<div class=" self-center text-xs font-medium">{$i18n.t('Speech-to-Text Engine')}</div>
 					<div class="flex items-center relative">
 						<select
-							class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
+							class="bg-surface-form hover:bg-surface-hover cursor-pointer w-fit px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 							bind:value={STT_ENGINE}
 							placeholder="Select an engine"
 						>
@@ -208,14 +208,14 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Base URL')}
 								bind:value={STT_OPENAI_API_BASE_URL}
 								required
 							/>
 
 							<SensitiveInput
-								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={STT_OPENAI_API_KEY}
@@ -231,7 +231,7 @@
 							<div class="flex-1">
 								<input
 									list="model-list"
-									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									bind:value={STT_MODEL}
 									placeholder="Select a model"
 								/>
@@ -246,7 +246,7 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<SensitiveInput
-								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={STT_DEEPGRAM_API_KEY}
@@ -261,7 +261,7 @@
 						<div class="flex w-full">
 							<div class="flex-1">
 								<input
-									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									bind:value={STT_MODEL}
 									placeholder="Select a model (optional)"
 								/>
@@ -282,14 +282,14 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<SensitiveInput
-								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={STT_AZURE_API_KEY}
 								required
 							/>
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('Azure Region')}
 								bind:value={STT_AZURE_REGION}
 								required
@@ -303,7 +303,7 @@
 							<div class="flex w-full">
 								<div class="flex-1">
 									<input
-										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 										bind:value={STT_AZURE_LOCALES}
 										placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')}
 									/>
@@ -318,7 +318,7 @@
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<input
-									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									placeholder={$i18n.t('Set whisper model')}
 									bind:value={STT_WHISPER_MODEL}
 								/>
@@ -374,7 +374,7 @@
 					<div class=" self-center text-xs font-medium">{$i18n.t('Text-to-Speech Engine')}</div>
 					<div class="flex items-center relative">
 						<select
-							class="bg-surface-raised hover:bg-surface-hover w-fit cursor-pointer px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
+							class="bg-surface-form hover:bg-surface-hover w-fit cursor-pointer px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 							bind:value={TTS_ENGINE}
 							placeholder="Select a mode"
 							onchange={async (e) => {
@@ -404,14 +404,14 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Base URL')}
 								bind:value={TTS_OPENAI_API_BASE_URL}
 								required
 							/>
 
 							<SensitiveInput
-								outerClassName="flex flex-1 px-2 bg-surface-raised rounded-xs"
+								outerClassName="flex flex-1 px-2 bg-surface-form rounded-xs"
 								inputClassName="w-full text-sm py-1 placeholder:text-content-subtle bg-transparent outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={TTS_OPENAI_API_KEY}
@@ -422,7 +422,7 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={TTS_API_KEY}
 								required
@@ -433,13 +433,13 @@
 					<div>
 						<div class="mt-1 flex gap-2 mb-1">
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('API Key')}
 								bind:value={TTS_API_KEY}
 								required
 							/>
 							<input
-								class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+								class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								placeholder={$i18n.t('Azure Region')}
 								bind:value={TTS_AZURE_SPEECH_REGION}
 								required
@@ -456,7 +456,7 @@
 						<div class="flex w-full">
 							<div class="flex-1">
 								<select
-									class="w-full text-sm px-2 py-1 bg-surface-raised hover:bg-surface-hover rounded-xs outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-form hover:bg-surface-hover rounded-xs outline-hidden"
 									bind:value={TTS_VOICE}
 								>
 									<option value="" selected={TTS_VOICE !== ''}>{$i18n.t('Default')}</option>
@@ -476,7 +476,7 @@
 							<div class="flex-1">
 								<input
 									list="model-list"
-									class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									bind:value={TTS_MODEL}
 									placeholder="CMU ARCTIC speaker embedding name"
 								/>
@@ -518,7 +518,7 @@
 								<div class="flex-1">
 									<input
 										list="voice-list"
-										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 										bind:value={TTS_VOICE}
 										placeholder="Select a voice"
 									/>
@@ -537,7 +537,7 @@
 								<div class="flex-1">
 									<input
 										list="tts-model-list"
-										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 										bind:value={TTS_MODEL}
 										placeholder="Select a model"
 									/>
@@ -559,7 +559,7 @@
 								<div class="flex-1">
 									<input
 										list="voice-list"
-										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 										bind:value={TTS_VOICE}
 										placeholder="Select a voice"
 									/>
@@ -586,7 +586,7 @@
 								<div class="flex-1">
 									<input
 										list="tts-model-list"
-										class="w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+										class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 										bind:value={TTS_AZURE_SPEECH_OUTPUT_FORMAT}
 										placeholder="Select a output format"
 									/>
@@ -602,7 +602,7 @@
 					<div class="self-center text-xs font-medium">{$i18n.t('Response splitting')}</div>
 					<div class="flex items-center relative">
 						<select
-							class="bg-surface-raised hover:bg-surface-hover w-fit cursor-pointer px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
+							class="bg-surface-form hover:bg-surface-hover w-fit cursor-pointer px-2 py-0.5 pr-6 rounded-xs text-xs outline-hidden text-right"
 							aria-label="Select how to split message text for TTS requests"
 							bind:value={TTS_SPLIT_ON}
 						>

@@ -461,7 +461,7 @@
 											</label>
 											<input
 												id="model-name"
-												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="text-sm w-full px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												placeholder={$i18n.t('Model Name')}
 												bind:value={name}
 												required
@@ -474,7 +474,7 @@
 											</label>
 											<input
 												id="model-id"
-												class="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="text-sm w-full px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												placeholder={$i18n.t('Model ID')}
 												bind:value={id}
 												required
@@ -488,7 +488,7 @@
 
 											<select
 												id="model-base-model"
-												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+												class="text-sm w-full max-w-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 												bind:value={info.base_model_id}
 												required
 											>
@@ -555,7 +555,7 @@
 
 									<Textarea
 										id="model-description"
-										className="text-sm w-full px-2 py-1 bg-surface-raised rounded-xs outline-hidden resize-none overflow-y-hidden"
+										className="text-sm w-full px-2 py-1 bg-surface-form rounded-xs outline-hidden resize-none overflow-y-hidden"
 										placeholder={$i18n.t('Add a short description about what this model does')}
 										bind:value={info.meta.description}
 									/>

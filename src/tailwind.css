@@ -23,7 +23,9 @@
 		--sidebar-width: 300px;
 
 		--surface: #f9f9f9; /* light メイン背景(gray-50 相当) */
-		--surface-raised: #ffffff; /* light 入力欄など(背景より少し明るい) */
+		--surface-raised: #ffffff; /* light 持ち上げ面(カード・行・メニュー等の elevation) */
+		--surface-form: #ffffff; /* light 入力面(input/select/textarea 等 — #85 で elevation から
+		   意味分離。初期値は raised と同値。light だけ沈める等の調整はここでできる) */
 		--surface-hover: #f0f0f0;
 		--surface-muted: #e9e9e9; /* light 控えめな帯(table thead 等。raised より1段濃い) */
 
@@ -55,7 +57,8 @@
 		color-scheme: dark;
 
 		--surface: #1a1a1a; /* dark メイン背景(gray-900) */
-		--surface-raised: #2a2a2a; /* dark 入力欄など(背景より少し明るい) */
+		--surface-raised: #2a2a2a; /* dark 持ち上げ面(カード・行・メニュー等の elevation) */
+		--surface-form: #2a2a2a; /* dark 入力面(raised と同値スタート — 意味分離 #85) */
 		--surface-hover: #313131;
 		--surface-muted: #101010; /* dark 控えめな帯(table thead 等)。raised より1段「暗い」—
 		   light と同じ「muted は raised の下に沈む」順序に統一(旧 #2d2d2d は raised より明るく

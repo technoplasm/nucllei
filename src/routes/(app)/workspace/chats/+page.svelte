@@ -180,7 +180,7 @@
 		</div>
 
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-			<div class="flex items-center px-2 bg-surface-raised rounded-xs">
+			<div class="flex items-center px-2 bg-surface-form rounded-xs">
 				<span class="i-lucide-search size-3.5 block shrink-0"></span>
 				<input
 					class="w-full sm:w-48 text-sm px-2 py-1 bg-transparent outline-hidden"
@@ -194,7 +194,7 @@
 		<!-- フィルタ: ユーザー(単一選択・空 = 全員)/ モデル / 更新日時範囲 -->
 		<div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-2 px-0.5 text-xs text-content-muted">
 			<select
-				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUserId
+				class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUserId
 					? ''
 					: 'text-content-subtle'}"
 				bind:value={selectedUserId}
@@ -209,7 +209,7 @@
 			</select>
 
 			<select
-				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedModel
+				class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedModel
 					? ''
 					: 'text-content-subtle'}"
 				bind:value={selectedModel}
@@ -226,7 +226,7 @@
 			</select>
 
 			<select
-				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {deletedFilter !==
+				class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {deletedFilter !==
 				'include'
 					? ''
 					: 'text-content-subtle'}"
@@ -241,7 +241,7 @@
 			</select>
 
 			<select
-				class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {sharedFilter !==
+				class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {sharedFilter !==
 				'include'
 					? ''
 					: 'text-content-subtle'}"
@@ -258,7 +258,7 @@
 			<div class="flex items-center gap-1">
 				<input
 					type="date"
-					class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 rounded-xs text-sm outline-hidden"
+					class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 rounded-xs text-sm outline-hidden"
 					bind:value={dateFrom}
 					onchange={() => {
 						fetchChats(false);
@@ -267,7 +267,7 @@
 				<span>–</span>
 				<input
 					type="date"
-					class="bg-surface-raised hover:bg-surface-hover w-fit px-2 py-0.5 rounded-xs text-sm outline-hidden"
+					class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 rounded-xs text-sm outline-hidden"
 					bind:value={dateTo}
 					onchange={() => {
 						fetchChats(false);

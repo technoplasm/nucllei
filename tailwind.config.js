@@ -38,8 +38,11 @@ export default {
 				surface: {
 					DEFAULT: 'var(--surface, #f9f9f9)',
 					sidebar: 'var(--surface-sidebar, #ececec)',
-					// 背景から1段持ち上げる面(チャット入力欄などのカード)。サーフェス基準で馴染む。
+					// 背景から1段持ち上げる面(カード・テーブル行・メニュー等の elevation)。
 					raised: 'var(--surface-raised, #ffffff)',
+					// 入力面(input / select / textarea / 検索ボックス / チップ入力 — #85 で
+					// elevation から意味分離)。初期値は raised と同値だが、独立して調整できる。
+					form: 'var(--surface-form, #ffffff)',
 					// hover
 					hover: 'var(--surface-hover, #fafafa)',
 					// 控えめな帯(table の thead など)。raised の上に置いて区別が付く濃さ。

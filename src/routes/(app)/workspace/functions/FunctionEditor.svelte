@@ -210,7 +210,7 @@ class Attachment:
 			</label>
 			<input
 				id="function-name"
-				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-raised rounded-xs outline-hidden font-primary"
+				class="flex-1 min-w-0 text-sm py-1 px-2 bg-surface-form rounded-xs outline-hidden font-primary"
 				type="text"
 				placeholder={$i18n.t('Function Name')}
 				bind:value={name}
@@ -222,7 +222,7 @@ class Attachment:
 			{:else}
 				<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
 				<select
-					class="shrink-0 capitalize rounded-xs text-sm bg-surface-raised text-content outline-hidden px-3 py-1.5"
+					class="shrink-0 capitalize rounded-xs text-sm bg-surface-form text-content outline-hidden px-3 py-1.5"
 					bind:value={selectedType}
 					aria-label={$i18n.t('Function Type')}
 				>
@@ -240,7 +240,7 @@ class Attachment:
 			</label>
 			<input
 				id="function-id"
-				class="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-xs outline-hidden"
+				class="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-form rounded-xs outline-hidden"
 				type="text"
 				placeholder={$i18n.t('Function ID')}
 				bind:value={id}
@@ -254,7 +254,7 @@ class Attachment:
 			</label>
 			<Textarea
 				id="function-description"
-				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-raised rounded-xs outline-hidden overflow-y-hidden resize-none"
+				className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
 				placeholder={$i18n.t('e.g. A filter to remove profanity from text')}
 				bind:value={description}
 				rows={2}

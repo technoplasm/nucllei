@@ -92,7 +92,7 @@
 								placement="top-start"
 							>
 								<select
-									class="bg-surface-raised hover:bg-surface-hover cursor-pointer w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
+									class="bg-surface-form hover:bg-surface-hover cursor-pointer w-fit px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
 									bind:value={RAGConfig.ATTACHMENT_FUNCTION_ID}
 								>
 									<option value="">{$i18n.t('None')}</option>
@@ -120,7 +120,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
 									bind:value={RAGConfig.ATTACHMENT_MAX_SIZE}
@@ -141,7 +141,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
 									bind:value={RAGConfig.ATTACHMENT_MAX_COUNT}
@@ -162,7 +162,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="text"
 									placeholder={$i18n.t('Leave empty to allow all')}
 									bind:value={allowedExtensions}
@@ -184,7 +184,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty to disable')}
 									bind:value={RAGConfig.ATTACHMENT_IMAGE_MAX_DIMENSION}
@@ -207,7 +207,7 @@
 								placement="top-start"
 							>
 								<input
-									class="flex-1 w-full text-sm px-2 py-1 bg-surface-raised rounded-xs outline-hidden"
+									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="number"
 									placeholder="1000"
 									bind:value={RAGConfig.PASTED_TEXT_CHARACTER_LIMIT}
