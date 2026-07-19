@@ -24,7 +24,7 @@
 				}}
 			>
 				<img
-					src="/static/splash.png"
+					src="/static/brand.png"
 					class="size-11 dark:invert p-0.5"
 					alt="logo"
 					draggable="false"

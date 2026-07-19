@@ -162,10 +162,10 @@ class TestAuths(AbstractPostgresTest):
         assert data["token_type"] == "Bearer"
 
     def test_get_pending_message(self, tmp_path):
-        """#59: DATA_DIR/pending.md を都度読む。無ければ content: null。"""
+        """#59/#84: CUSTOM_DIR/pending.md を都度読む。無ければ content: null。"""
         from unittest.mock import patch
 
-        with patch("nucllei.routers.auths.DATA_DIR", tmp_path):
+        with patch("nucllei.routers.auths.CUSTOM_DIR", tmp_path):
             with mock_webui_user():
                 response = self.fast_api_client.get(self.create_url("/pending_message"))
             assert response.status_code == 200

@@ -2,11 +2,10 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
+		<!-- llens(#84): アイコンは favicon.png 一本(CUSTOM_DIR で配備先が差し替え可能)。
+		     svg/ico/96x96/apple-touch の family は「svg が png より優先されカスタムが効かない」
+		     混在の原因だったため撤去 -->
 		<link rel="icon" type="image/png" href="/static/favicon.png" />
-		<link rel="icon" type="image/png" href="/static/favicon-96x96.png" sizes="96x96" />
-		<link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-		<link rel="shortcut icon" href="/static/favicon.ico" />
-		<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
 		<meta name="apple-mobile-web-app-title" content="Nucllei" />
 
 		<link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
@@ -98,7 +97,7 @@
 					left: 50%;
 					transform: translateX(-50%);
 				"
-				src="/static/splash.png"
+				src="/static/brand.png"
 			/>
 
 			<!-- <span style="position: absolute; bottom: 32px; left: 50%; margin: -36px 0 0 -36px">

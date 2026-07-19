@@ -11,8 +11,6 @@ from urllib.parse import urlencode, parse_qs, urlparse
 from pydantic import BaseModel
 from sqlalchemy import text
 
-import requests
-
 
 from fastapi import (
     Depends,
@@ -26,7 +24,7 @@ from fastapi import (
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -179,6 +177,8 @@ from nucllei.config import (
 from nucllei.env import (
     AUDIT_EXCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
+    CUSTOM_DIR,
+    ENABLE_PWA,
     GLOBAL_LOG_LEVEL,
     MAX_BODY_LOG_SIZE,
     SRC_LOG_LEVELS,
@@ -194,7 +194,6 @@ from nucllei.env import (
     BYPASS_MODEL_ACCESS_CONTROL,
     RESET_CONFIG_ON_START,
     ENABLE_OTEL,
-    EXTERNAL_PWA_MANIFEST_URL,
 )
 
 
@@ -414,7 +413,6 @@ app.state.config.LDAP_CIPHERS = LDAP_CIPHERS
 
 app.state.AUTH_TRUSTED_EMAIL_HEADER = WEBUI_AUTH_TRUSTED_EMAIL_HEADER
 app.state.AUTH_TRUSTED_NAME_HEADER = WEBUI_AUTH_TRUSTED_NAME_HEADER
-app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
 
 app.state.TOOLS = {}
 app.state.FUNCTIONS = {}
@@ -1070,34 +1068,39 @@ async def oauth_callback(provider: str, request: Request, response: Response):
 
 @app.get("/manifest.json")
 async def get_manifest_json():
-    if app.state.EXTERNAL_PWA_MANIFEST_URL:
-        # llens(#28): 同期 requests は to_thread でループ外へ
-        r = await asyncio.to_thread(requests.get, app.state.EXTERNAL_PWA_MANIFEST_URL)
-        return r.json()
-    else:
-        return {
-            "name": app.state.WEBUI_NAME,
-            "short_name": app.state.WEBUI_NAME,
-            "description": "Nucllei is a thin, self-hosted LLM chat platform.",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#343541",
-            "orientation": "natural",
-            "icons": [
-                {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "any",
-                },
-                {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "maskable",
-                },
-            ],
-        }
+    # llens(#84): PWA は既定 off(閉域デプロイでインストール導線が邪魔)。
+    # off では {} を返す — 有効な JSON だが name/icons/start_url を欠くため
+    # インストール可能性が立たず、app.html の <link rel="manifest"> も console を汚さない。
+    # 旧 EXTERNAL_PWA_MANIFEST_URL(外部 URL proxy)は消費者なしの upstream 残骸で撤去。
+    if not ENABLE_PWA:
+        return {}
+    return {
+        "name": app.state.WEBUI_NAME,
+        "short_name": app.state.WEBUI_NAME,
+        "description": "Nucllei is a thin, self-hosted LLM chat platform.",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#343541",
+        "orientation": "natural",
+        "icons": [
+            {
+                "src": "/static/favicon-192.png",
+                "type": "image/png",
+                "sizes": "192x192",
+            },
+            {
+                "src": "/static/favicon-512.png",
+                "type": "image/png",
+                "sizes": "512x512",
+            },
+            {
+                "src": "/static/favicon-512.png",
+                "type": "image/png",
+                "sizes": "512x512",
+                "purpose": "maskable",
+            },
+        ],
+    }
 
 
 @app.get("/opensearch.xml")
@@ -1125,6 +1128,37 @@ async def healthcheck_with_db():
     Session.execute(text("SELECT 1;")).all()
     return {"status": True}
 
+
+# 配備先カスタマイズ(#84): CUSTOM_DIR の規定名ファイルを同梱既定より優先して配信する。
+# 明示ルートは下の /static mount より先にマッチする。リクエスト都度ファイルを見るので
+# 差し替えに再起動不要(pending.md と同じ)。規定名は消費者のあるものだけに絞る:
+#   favicon.png = ブラウザタブ + アプリ内ホーム + webhook
+#   brand.png   = 起動スプラッシュ + auth ページのロゴ(旧 splash.png)
+#   model.png   = モデル既定アバター(旧 favicon-dark.png、gray 版)
+#   favicon-192/512.png = PWA manifest アイコン(ENABLE_PWA 時のみ参照される)
+CUSTOMIZABLE_STATIC = (
+    "favicon.png",
+    "brand.png",
+    "model.png",
+    "favicon-192.png",
+    "favicon-512.png",
+)
+
+
+def _customizable_static_route(filename: str):
+    async def serve():
+        custom_path = CUSTOM_DIR / filename
+        if custom_path.is_file():
+            return FileResponse(custom_path)
+        return FileResponse(STATIC_DIR / filename)
+
+    return serve
+
+
+for _filename in CUSTOMIZABLE_STATIC:
+    app.get(f"/static/{_filename}", include_in_schema=False)(
+        _customizable_static_route(_filename)
+    )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/cache", CacheStaticFiles(directory=CACHE_DIR), name="cache")

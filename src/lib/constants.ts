@@ -20,8 +20,9 @@ export const APP_VERSION = __APP_VERSION__;
 export const REQUIRED_OLLAMA_VERSION = '0.1.16';
 
 // カスタムアイコン未設定のモデルに使う既定アバター(gray 版プリズム)。
-// ブランドロゴ(splash / favicon.png = カラー)とは別。差し替えはここ一箇所。
-export const DEFAULT_MODEL_IMAGE_URL = '/static/favicon-dark.png';
+// ブランドロゴ(brand.png / favicon.png = カラー)とは別。
+// 旧 favicon-dark.png から意味名 model.png へ(#84)— CUSTOM_DIR で配備先が差し替え可能。
+export const DEFAULT_MODEL_IMAGE_URL = '/static/model.png';
 
 export const SUPPORTED_FILE_TYPE = [
 	'application/epub+zip',

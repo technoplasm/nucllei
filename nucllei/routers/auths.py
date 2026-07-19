@@ -22,7 +22,7 @@ from nucllei.models.users import Users, merge_additional_user_meta
 
 from nucllei.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from nucllei.env import (
-    DATA_DIR,
+    CUSTOM_DIR,
     WEBUI_AUTH,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
@@ -638,10 +638,11 @@ async def add_user(
 async def get_pending_message(user=Depends(get_current_user)):
     """pending(承認待ち)画面の配備先固有メッセージ(#59)。
 
-    DATA_DIR/pending.md を都度読む(表示頻度が低く、差し替えを再起動なしで
+    CUSTOM_DIR/pending.md を都度読む(表示頻度が低く、差し替えを再起動なしで
     反映するため)。無ければ null — フロントは既定文言(i18n)に落ちる。
+    置き場は #59 の DATA_DIR 直下から #84 で CUSTOM_DIR(配備カスタムの単一置き場)へ移設。
     """
-    path = DATA_DIR / "pending.md"
+    path = CUSTOM_DIR / "pending.md"
     try:
         content = path.read_text(encoding="utf-8").strip()
     except OSError:

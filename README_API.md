@@ -140,6 +140,20 @@ chat task registry are in-process, so multi-worker deployments are not supported
 (`WEBUI_NAME`, `WEBUI_VERSION`, `WEBUI_COPYRIGHT` show _your harness's_ identity in
 the UI, next to the Nucllei product version).
 
+**File-based customization (`/app/custom`)**: brand _text_ comes from env vars
+above; brand _files_ come from a single fixed directory. Mount a host dir
+read-only at `/app/custom` (repo checkout: `./custom`, gitignored) and drop
+files with these designated names — each one overrides the bundled default and
+is read per request (edits apply without a restart):
+
+| File                                  | Used as                                             |
+| ------------------------------------- | --------------------------------------------------- |
+| `favicon.png`                         | browser tab, in-app home button, webhook icon       |
+| `brand.png`                           | boot splash + auth page logo                        |
+| `model.png`                           | default model avatar (bundled default: gray prism)  |
+| `pending.md`                          | pending-approval page content (§5)                  |
+| `favicon-192.png` / `favicon-512.png` | PWA manifest icons (only referenced when PWA is on) |
+
 ### 3.2 Core / server
 
 | Var                                                                                                                         | Kind | Default                                  | Effect                                                                   |
@@ -154,7 +168,7 @@ the UI, next to the Nucllei product version).
 | `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                     | deployment-layer version / copyright on the License tab (empty = hidden) |
 | `ENABLE_FORWARD_USER_INFO_HEADERS`                                                                                          | env  | `false`                                  | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine        |
 | `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                      | `;`-separated origins                                                    |
-| `EXTERNAL_PWA_MANIFEST_URL`                                                                                                 | env  | unset                                    | proxy `/manifest.json` from this URL                                     |
+| `ENABLE_PWA`                                                                                                                | env  | `false`                                  | serve an installable `/manifest.json` (name follows `WEBUI_NAME`); off returns `{}` |
 | `OFFLINE_MODE`                                                                                                              | env  | `false`                                  | forces HF hub offline + disables whisper auto-update                     |
 | `USE_CUDA_DOCKER`                                                                                                           | env  | `false`                                  | run local ML (whisper) on CUDA                                           |
 | `RESET_CONFIG_ON_START`                                                                                                     | env  | `false`                                  | wipe runtime config at startup                                           |
@@ -298,7 +312,7 @@ restricted to a path allowlist — §3.3). Role tiers: `pending` (no access),
 `user`, `admin`.
 
 Pending users land on a dedicated `/pending` page. Its content is customized by
-mounting a markdown file at **`DATA_DIR/pending.md`** (read per request — edits
+placing a markdown file at **`/app/custom/pending.md`** (§3.1) (read per request — edits
 apply without a restart; served via `GET /api/v1/auths/pending_message`). When
 the file is absent the page shows a built-in default. There is no env/config
 knob for this message.
@@ -316,7 +330,7 @@ KEY=$(curl -s -X POST http://HOST/api/v1/auths/api_key \
 Other auth endpoints: `GET /api/v1/auths/` (session info + refreshed token),
 `GET /api/v1/auths/signout`, `POST /api/v1/auths/add` (admin: create a user),
 `POST /api/v1/auths/ldap`, `GET /api/v1/auths/pending_message` (the
-`DATA_DIR/pending.md` content as `{"content": string | null}`).
+`custom/pending.md` content as `{"content": string | null}`).
 
 ### 4.2 Models
 

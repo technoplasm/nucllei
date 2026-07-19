@@ -313,6 +313,11 @@ _links/
 # runtime data(旧 backend/.gitignore から統合 — フラット化 #34)
 /data/*
 !/data/readme.txt
+
+# 配備先カスタマイズの置き場(#84): 規定名ファイル(favicon.png / brand.png /
+# model.png / pending.md / favicon-192.png / favicon-512.png)を置くとリクエスト
+# 都度・同梱既定より優先で使われる。中身は環境固有なのでコミットしない
+/custom/
 /nucllei/data/*
 !/nucllei/data/readme.txt
 *.db
@@ -320,19 +325,12 @@ _links/
 
 # 起動時に build/static からコピーされる派生ブランド資産(nucllei/config.py:650)。
 # 真のソースは static/static/(+ _brand/ の master SVG)。デプロイでは pnpm build →
-# build/static → 起動時コピーで nucllei/static が埋まるため追跡しない。
+# build/static → 起動時コピーで nucllei/static が埋まるため追跡しない(名前は #84 で整理)。
 /nucllei/static/favicon.png
-/nucllei/static/favicon.svg
-/nucllei/static/favicon.ico
-/nucllei/static/favicon-96x96.png
-/nucllei/static/favicon-dark.png
-/nucllei/static/apple-touch-icon.png
-/nucllei/static/logo.png
-/nucllei/static/splash.png
-/nucllei/static/splash-dark.png
-/nucllei/static/web-app-manifest-192x192.png
-/nucllei/static/web-app-manifest-512x512.png
-/nucllei/static/site.webmanifest
+/nucllei/static/favicon-192.png
+/nucllei/static/favicon-512.png
+/nucllei/static/brand.png
+/nucllei/static/model.png
 /nucllei/static/loader.js
 
 # 生成物(generate.sh の中間出力)

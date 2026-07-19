@@ -178,6 +178,20 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# 配備先カスタマイズの単一置き場(#84)。規定名のファイルがあれば同梱既定より優先される:
+#   favicon.png(タブ + アプリ内)/ brand.png(起動画面 + auth ロゴ)/
+#   model.png(モデル既定アバター)/ pending.md(承認待ち画面の案内)/
+#   favicon-192.png・favicon-512.png(PWA アイコン)
+# 読み取りはリクエスト都度 — 差し替えは保存だけで反映、再起動不要。
+# パスは固定(env で動かせる意味がない): リポジトリでは gitignore 済みの custom/、
+# docker では /app/custom に host dir を read-only mount する。
+CUSTOM_DIR = (BASE_DIR / "custom").resolve()
+
+# PWA(manifest.json)の配信(#84)。機能としては維持するが、閉域デプロイでは
+# インストール導線が邪魔になりがちなので既定 off。on のとき manifest は動的生成で
+# name が WEBUI_NAME に追従する。off では {} を返す(インストール性なし)。
+ENABLE_PWA = os.environ.get("ENABLE_PWA", "False").lower() == "true"
+
 STATIC_DIR = Path(os.getenv("STATIC_DIR", NUCLLEI_DIR / "static"))
 
 FONTS_DIR = Path(os.getenv("FONTS_DIR", NUCLLEI_DIR / "static" / "fonts"))
@@ -424,8 +438,5 @@ OTEL_TRACES_SAMPLER = os.environ.get(
     "OTEL_TRACES_SAMPLER", "parentbased_always_on"
 ).lower()
 
-####################################
-# PROGRESSIVE WEB APP OPTIONS
-####################################
-
-EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
+# llens(#84): 旧 EXTERNAL_PWA_MANIFEST_URL(manifest を外部 URL から proxy)は
+# 消費者のいない upstream 残骸のため撤去。PWA は ENABLE_PWA 一本(DATA_DIR 節参照)。

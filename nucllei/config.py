@@ -610,29 +610,9 @@ for file_path in (FRONTEND_BUILD_DIR / "static").glob("**/*"):
         except Exception as e:
             logging.error(f"An error occurred: {e}")
 
-frontend_favicon = FRONTEND_BUILD_DIR / "static" / "favicon.png"
-
-if frontend_favicon.exists():
-    try:
-        shutil.copyfile(frontend_favicon, STATIC_DIR / "favicon.png")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
-
-frontend_splash = FRONTEND_BUILD_DIR / "static" / "splash.png"
-
-if frontend_splash.exists():
-    try:
-        shutil.copyfile(frontend_splash, STATIC_DIR / "splash.png")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
-
-frontend_loader = FRONTEND_BUILD_DIR / "static" / "loader.js"
-
-if frontend_loader.exists():
-    try:
-        shutil.copyfile(frontend_loader, STATIC_DIR / "loader.js")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+# llens(#84): 旧 favicon/splash/loader の個別コピー 3 連は上の glob コピーと
+# 完全重複だったため削除。配備先ブランドの差し替えは CUSTOM_DIR(main.py の
+# 規定名オーバーレイ配信)で行う — build/static へ被せる mount は不要になった。
 
 
 # llens: 旧 upstream の CUSTOM_NAME(api.openwebui.com への起動時 fetch)は
