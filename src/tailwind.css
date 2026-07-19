@@ -22,7 +22,7 @@
 		   値の食い違いは「合計幅が溢れて justify-end で左端=サイドバーが切れる」バグになる) */
 		--sidebar-width: 300px;
 
-		--surface: #fcfcfc; /* light メイン背景(gray-50 相当) */
+		--surface: #f9f9f9; /* light メイン背景(gray-50 相当) */
 		--surface-raised: #ffffff; /* light 入力欄など(背景より少し明るい) */
 		--surface-hover: #f0f0f0;
 		--surface-muted: #e9e9e9; /* light 控えめな帯(table thead 等。raised より1段濃い) */

@@ -279,7 +279,7 @@
 			<!-- チップ入力: 選択済みのグループ・ユーザー + 検索入力を 1 面に(入力面 = rounded-xs 規律)。
 			     label なので余白クリックでネイティブに input へフォーカスが移る -->
 			<label
-				class="flex flex-wrap items-center gap-1 px-1.5 py-1 bg-surface-muted rounded-xs cursor-text"
+				class="flex flex-wrap items-center gap-1 px-1.5 py-1 bg-surface-raised rounded-xs cursor-text"
 			>
 				{#each accessGroups as group (group.id)}
 					<span
