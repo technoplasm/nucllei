@@ -1,14 +1,22 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 
-	export let value = '';
-	export let placeholder = '';
-	export let rows = 1;
-	export let required = false;
-	// label の for と紐づけるための id(未指定なら属性ごと出ない)
-	export let id: string | undefined = undefined;
-	export let className =
-		'w-full rounded-lg px-3 py-2 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden  h-full';
+	let {
+		value = $bindable(''),
+		placeholder = '',
+		rows = 1,
+		required = false,
+		// label の for と紐づけるための id(未指定なら属性ごと出ない)
+		id = undefined,
+		className = 'w-full rounded-lg px-3 py-2 text-sm text-content bg-gray-50 dark:bg-gray-850 outline-hidden  h-full'
+	}: {
+		value?: string;
+		placeholder?: string;
+		rows?: number;
+		required?: boolean;
+		id?: string | undefined;
+		className?: string;
+	} = $props();
 
 	let textareaElement: HTMLTextAreaElement | undefined;
 
@@ -45,10 +53,10 @@
 	style="field-sizing: content;"
 	{rows}
 	{required}
-	on:input={() => {
+	oninput={() => {
 		resize();
 	}}
-	on:focus={() => {
+	onfocus={() => {
 		resize();
 	}}
 ></textarea>

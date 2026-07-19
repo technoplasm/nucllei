@@ -1,33 +1,28 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
 	import panzoom, { type PanZoom } from 'panzoom';
 
-	export let show = false;
-	export let src = '';
-	export let alt = '';
+	let {
+		show = $bindable(false),
+		src = '',
+		alt = ''
+	}: { show?: boolean; src?: string; alt?: string } = $props();
 
-	let mounted = false;
-
-	let previewElement: HTMLDivElement | null = null;
+	let previewElement = $state<HTMLDivElement | null>(null);
 
 	let instance: PanZoom;
 
-	let sceneParentElement: HTMLElement;
-	let sceneElement: HTMLElement;
+	let sceneElement = $state<HTMLElement>();
 
-	$: if (sceneElement) {
-		instance = panzoom(sceneElement, {
-			bounds: true,
-			boundsPadding: 0.1,
+	$effect(() => {
+		if (sceneElement) {
+			instance = panzoom(sceneElement, {
+				bounds: true,
+				boundsPadding: 0.1,
 
-			zoomSpeed: 0.065
-		});
-	}
-	const resetPanZoomViewport = () => {
-		instance.moveTo(0, 0);
-		instance.zoomAbs(0, 0, 1);
-		console.log(instance.getTransform());
-	};
+				zoomSpeed: 0.065
+			});
+		}
+	});
 
 	const downloadImage = (url: string, filename: string, prefixName = '') => {
 		fetch(url)
@@ -47,37 +42,33 @@
 
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
-			console.log('Escape');
 			show = false;
 		}
 	};
 
-	onMount(() => {
-		mounted = true;
-	});
+	// portal: 表示中だけ body 直下へ移す。$effect は DOM 更新後に走るため
+	// (非表示化では {#if} teardown が先で previewElement は null 化済み)、
+	// 後始末は else 分岐ではなく effect cleanup で行う — 要素は閉包で捕まえ、
+	// body 直下にいるときだけ外す(portal の NotFoundError 対策、common/Modal.svelte と同型)
+	$effect(() => {
+		if (show && previewElement) {
+			const element = previewElement;
+			document.body.appendChild(element);
+			window.addEventListener('keydown', handleKeyDown);
+			document.body.style.overflow = 'hidden';
 
-	$: if (show && previewElement) {
-		document.body.appendChild(previewElement);
-		window.addEventListener('keydown', handleKeyDown);
-		document.body.style.overflow = 'hidden';
-	} else if (previewElement) {
-		window.removeEventListener('keydown', handleKeyDown);
-		document.body.removeChild(previewElement);
-		document.body.style.overflow = 'unset';
-	}
-
-	onDestroy(() => {
-		show = false;
-
-		if (previewElement) {
-			document.body.removeChild(previewElement);
+			return () => {
+				window.removeEventListener('keydown', handleKeyDown);
+				if (element.parentNode === document.body) {
+					document.body.removeChild(element);
+				}
+				document.body.style.overflow = 'unset';
+			};
 		}
 	});
 </script>
 
 {#if show}
-	<!-- svelte-ignore a11y-click-events-have-key-events -->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		bind:this={previewElement}
 		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black text-white w-full min-h-screen h-screen flex justify-center z-9999 overflow-hidden overscroll-contain"
@@ -87,12 +78,12 @@
 				<button
 					class=" p-5"
 					aria-label="Close"
-					on:pointerdown={(e) => {
+					onpointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
 						show = false;
 					}}
-					on:click={(e) => {
+					onclick={() => {
 						show = false;
 					}}
 				>
@@ -104,12 +95,12 @@
 				<button
 					class=" p-5"
 					aria-label="Download"
-					on:pointerdown={(e) => {
+					onpointerdown={(e) => {
 						e.stopImmediatePropagation();
 						e.preventDefault();
 						downloadImage(src, src.substring(src.lastIndexOf('/') + 1), alt);
 					}}
-					on:click={(e) => {
+					onclick={() => {
 						downloadImage(src, src.substring(src.lastIndexOf('/') + 1), alt);
 					}}
 				>

@@ -1,6 +1,5 @@
 <script lang="ts">
-	export let type = 'info';
-	export let content = '';
+	let { type = 'info', content = '' }: { type?: string; content?: string } = $props();
 
 	const classNames: Record<string, string> = {
 		info: 'bg-blue-500/20 text-blue-700 dark:text-blue-200 ',

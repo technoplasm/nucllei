@@ -1,8 +1,11 @@
-<script>
-	import { getContext } from 'svelte';
+<script lang="ts">
+	import { getContext, type Snippet } from 'svelte';
 
-	export let title = '';
-	export let content = '';
+	let {
+		title = '',
+		content = '',
+		children
+	}: { title?: string; content?: string; children?: Snippet } = $props();
 	const i18n = getContext('i18n');
 </script>
 
@@ -16,13 +19,15 @@
 		{/if}
 	</div>
 
-	<slot
-		><div class="px-2 mt-2 text-center text-sm text-content-muted w-full">
+	{#if children}
+		{@render children()}
+	{:else}
+		<div class="px-2 mt-2 text-center text-sm text-content-muted w-full">
 			{#if content}
 				{content}
 			{:else}
 				{$i18n.t('Drop any files here to add to the conversation')}
 			{/if}
 		</div>
-	</slot>
+	{/if}
 </div>
