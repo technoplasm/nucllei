@@ -181,3 +181,9 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 ## 関連
 
 [[llens-renderer-track-status]] / `_memos/rendering-design.md`(L0〜L3)/ 旧 `_memos/tools-catchup.md`(#18 — #34 棚卸しで削除済み)
+
+- **将来(#88、2026-07-20 起票)**: tool の**ユーザー向け表示チャネル(display)**の検討。
+  本メモの「tool 結果は値を見る面でありデザイン対象ではない」は維持したまま、
+  tool が明示的にユーザーへ見せたいもの(音声プレイヤー・プロット等)を戻り値と別の
+  opt-in チャネル(`results[i].display`)で collapse 外に出す構想。`results[].files`
+  (data URL 残骸)はそこに吸収予定。設計確定は #88 上で。

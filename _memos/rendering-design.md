@@ -80,6 +80,19 @@ canonical なパースを 1 回で済ませられるが、chat UI では非推�
 
 実装順: #17(L0)→ L1 セグメンタ(#14 の中核)→ #20(L3)。
 
+- **追記(2026-07-20、#87)**: リンクとメディア埋め込みの語彙を追加。
+  - **リンク属性**: markdown-it-attrs(`allowedAttributes: ['target', 'download']` に限定)で
+    `[t](url){target=_self}` / `{download=名前}`。lexer が link トークンに搬送し
+    MarkdownInlineTokens が適用(`_self` のみ opt-in、既定 `_blank` 不変)。
+  - **メディア埋め込み**: 生 HTML `<audio>`/`<video>` を許容。「HTML は作らない」規律は
+    **機械構造**(reasoning/tool_calls — details 病の対象)の話で、モデル・tool 著の
+    **コンテンツ** HTML は DOMPurify の柵内で従来から許容(画像・iframe 特例と同列)という
+    区別を明文化。html トークンの sanitize は `sanitizeChatHtml`(FORBID_ATTR: autoplay)に
+    一本化し、ブロック html の @html 描画条件に `<audio` を追加(audio は CommonMark type-6
+    外で html_block になるため)。判断の詳細は `_memos/audio.md`。
+  - renderer ルール型の markdown-it プラグイン(html5-embed 等)は **lex() 経路では無反応**
+    (トークン変換で renderer が走らない)、ruler 型の独自トークンはコンバータで落ちる —
+    プラグイン導入は常にコンバータ配線とセット、という制約も同時に確認した。
 - **改訂(2026-07-17): L3 の表示コンポーネントを専用化**。reasoning / tool call の表示は
   汎用 `Collapsible` の attributes 経由レンダリングをやめ、`chat/Messages/ReasoningBlock.svelte` /
   `ToolCallBlock.svelte` に分離(Collapsible は children/content の素朴な開閉コンテナに縮小)。

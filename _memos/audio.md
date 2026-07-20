@@ -75,3 +75,9 @@ env 変更の反映は再起動(モデル再ロードは起動時 lazy と STT c
     自前トークン化で置換可能(書式は不変のまま移行できる)。
   - `/content` は audio/* / video/* を **inline 配信**(attachment だと Firefox が再生拒否 —
     routers/files.py、保存導線は `?attachment=true` と `{download}` リンク)。
+  - prism 層(prism-hu/llens)は skill 遅延ロード化済み: `nucllei/skills/audio.md`
+    (tool_ids: audio_tools)で preset には skillIds で紐づけ、音声の指示が要るときだけ
+    context に載る。tool の戻りはプレイヤー埋め込み + {download} リンクの 2 行
+    (モデルが本文に貼る契約)。
+  - **将来(#88)**: 「モデルに貼らせる」契約は tool のユーザー向け表示チャネル(display)
+    確立後にそちらへ差し替え検討(tool が自分で表示すれば約束が構成的に真になる)。
