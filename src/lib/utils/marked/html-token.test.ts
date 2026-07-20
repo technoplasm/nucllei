@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { lex } from '$lib/utils/markdown-it';
 import DOMPurify from 'dompurify';
-import { MARKDOWN_IFRAME_SANITIZE_CONFIG, sanitizeIframeHtml } from '$lib/utils/marked/html-token';
+import {
+	MARKDOWN_IFRAME_SANITIZE_CONFIG,
+	MARKDOWN_HTML_SANITIZE_CONFIG,
+	sanitizeIframeHtml,
+	sanitizeChatHtml
+} from '$lib/utils/marked/html-token';
 
 // GHSA-9f4f-jv96-8766 / CVE-2025-46719 regression tests.
 //
@@ -85,5 +90,39 @@ describe.skipIf(!hasDom)('sanitizeIframeHtml behaviour (requires a DOM)', () => 
 		);
 		expect(out).toContain('<iframe');
 		expect(out.toLowerCase()).not.toContain('onload');
+	});
+});
+
+// #87: メディア埋め込み(生 HTML <audio>/<video>)の柵。仕様は _memos/audio.md。
+describe('sanitizeChatHtml config (#87 media embeds)', () => {
+	it('forbids autoplay(チャットを開いた瞬間に鳴らさない)', () => {
+		expect(MARKDOWN_HTML_SANITIZE_CONFIG.FORBID_ATTR).toContain('autoplay');
+	});
+});
+
+describe.skipIf(!hasDom)('sanitizeChatHtml behaviour (requires a DOM)', () => {
+	it('keeps <audio controls src> for the files content URL', () => {
+		const out = sanitizeChatHtml(`<audio controls src="/api/v1/files/x/content"></audio>`);
+		expect(out).toContain('<audio');
+		expect(out).toContain('controls');
+		expect(out).toContain('/api/v1/files/x/content');
+	});
+
+	it('strips autoplay and event handlers from media elements', () => {
+		const out = sanitizeChatHtml(
+			`<audio controls autoplay src="/x" onplay="alert(1)"></audio><video autoplay src="/y"></video>`
+		);
+		expect(out).toContain('<audio');
+		expect(out).toContain('<video');
+		expect(out.toLowerCase()).not.toContain('autoplay');
+		expect(out.toLowerCase()).not.toContain('onplay');
+	});
+
+	it('still strips <script> and <iframe>(iframe は専用経路のみ)', () => {
+		const out = sanitizeChatHtml(
+			`<audio src="/x"></audio><script>alert(1)</script><iframe src="https://evil.example"></iframe>`
+		);
+		expect(out.toLowerCase()).not.toContain('<script');
+		expect(out.toLowerCase()).not.toContain('<iframe');
 	});
 });

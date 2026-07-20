@@ -61,4 +61,17 @@ env 変更の反映は再起動(モデル再ロードは起動時 lazy と STT c
   検討(現状のディクテーション用途では不要)。
 - #56(疑似ストリーミング STT)は `transcribe_audio(path)` のチャンク呼びで乗る。
   `NUM_WORKERS > 1` はチャンク並列にもそのまま効く。
-- tool が合成した音声のチャット内再生 UI は未定義(#53 スコープ外 — 必要になったら別 issue)。
+- ~~tool が合成した音声のチャット内再生 UI は未定義(#53 スコープ外 — 必要になったら別 issue)~~
+  → **確定(2026-07-20、#87)**: チャット内提示は 2 形態。
+  - **リンク**: markdown-it-attrs による出し分け — `[DL](/api/v1/files/{id}/content){download=voice.mp3}` /
+    `{target=_self}` / 無指定 = 新規タブ(allowlist は target / download のみ)。
+  - **埋め込み再生**: 生 HTML `<audio controls src="/api/v1/files/{id}/content"></audio>` を
+    DOMPurify(`sanitizeChatHtml`、autoplay は FORBID_ATTR)経由で許容。video も同様。
+    判断根拠: レンダラの「HTML を作らない」規律は**機械構造**(reasoning/tool_calls)の話で、
+    モデル・tool 著の**コンテンツ** HTML は DOMPurify の柵内で従来から許容(画像・iframe 特例と同列)。
+    markdown-it-html5-embed / block-embed は不採用 — renderer ルール型は lex()(トークン変換)経路で
+    無反応、ruler 型は独自トークンがコンバータで落ちるため、導入しても配線コストは自前実装と同額。
+    素の `<audio>` の方がモデルの既知度も高い。カスタム UI(波形等)が要る時は lexer 段の
+    自前トークン化で置換可能(書式は不変のまま移行できる)。
+  - `/content` は audio/* / video/* を **inline 配信**(attachment だと Firefox が再生拒否 —
+    routers/files.py、保存導線は `?attachment=true` と `{download}` リンク)。

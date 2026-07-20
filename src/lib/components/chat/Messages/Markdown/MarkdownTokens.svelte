@@ -1,5 +1,4 @@
 <script lang="ts">
-	import DOMPurify from 'dompurify';
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
@@ -7,7 +6,7 @@
 	const { saveAs } = fileSaver;
 
 	import { unescapeHtml } from '$lib/utils';
-	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
+	import { sanitizeIframeHtml, sanitizeChatHtml } from '$lib/utils/marked/html-token';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -235,8 +234,10 @@
 			</ul>
 		{/if}
 	{:else if token.type === 'html'}
-		{@const html = DOMPurify.sanitize(token.text)}
-		{#if html && html.includes('<video')}
+		{@const html = sanitizeChatHtml(token.text)}
+		<!-- #87: <audio>/<video> の埋め込みは生 HTML 許容(sanitize 済みを @html)。
+		     それ以外のブロック html は従来どおり素のテキスト表示 -->
+		{#if html && (html.includes('<video') || html.includes('<audio'))}
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 			{@html html}
 		{:else if token.text.includes(`<iframe src="${WEBUI_BASE_URL}/api/v1/files/`)}

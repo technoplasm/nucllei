@@ -1,5 +1,4 @@
 <script lang="ts">
-	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
 	import { getContext } from 'svelte';
@@ -8,7 +7,7 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
-	import { sanitizeIframeHtml } from '$lib/utils/marked/html-token';
+	import { sanitizeIframeHtml, sanitizeChatHtml } from '$lib/utils/marked/html-token';
 
 	import Image from '$lib/components/common/Image.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
@@ -32,7 +31,7 @@
 	{#if token.type === 'escape'}
 		{unescapeHtml(token.text)}
 	{:else if token.type === 'html'}
-		{@const html = DOMPurify.sanitize(token.text)}
+		{@const html = sanitizeChatHtml(token.text)}
 		{#if html && html.includes('<video')}
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 			{@html html}

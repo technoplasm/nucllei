@@ -661,6 +661,13 @@ async def get_file_content_by_id(
                             f"inline; filename*=UTF-8''{encoded_filename}"
                         )
                         content_type = "application/pdf"
+                    elif content_type and content_type.startswith(("audio/", "video/")):
+                        # #87: チャット埋め込み <audio>/<video> の再生用に inline 配信。
+                        # attachment だと Firefox がメディア要素での再生を拒否する。
+                        # 保存導線は ?attachment=true か {download} リンクで担う
+                        headers["Content-Disposition"] = (
+                            f"inline; filename*=UTF-8''{encoded_filename}"
+                        )
                     elif content_type != "text/plain":
                         headers["Content-Disposition"] = (
                             f"attachment; filename*=UTF-8''{encoded_filename}"

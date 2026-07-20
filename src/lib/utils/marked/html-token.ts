@@ -44,3 +44,17 @@ export const MARKDOWN_IFRAME_SANITIZE_CONFIG = {
  */
 export const sanitizeIframeHtml = (html: string): string =>
 	DOMPurify.sanitize(html ?? '', MARKDOWN_IFRAME_SANITIZE_CONFIG);
+
+/**
+ * 汎用 html トークンのサニタイズ(#87)。DOMPurify 既定 allowlist は <audio>/<video> を
+ * 通すので、メディア埋め込みは生 HTML で書ける(埋め込みの仕様決定 — _memos/audio.md)。
+ * FORBID_ATTR で autoplay だけ剥ぐ: チャットを開いた瞬間に音が鳴る悪戯・攻撃を柵で止める
+ * (ブラウザの autoplay policy に頼らず二重に)。script / イベントハンドラ / javascript:
+ * URL は DOMPurify 既定どおり除去される。
+ */
+export const MARKDOWN_HTML_SANITIZE_CONFIG = {
+	FORBID_ATTR: ['autoplay']
+};
+
+export const sanitizeChatHtml = (html: string): string =>
+	DOMPurify.sanitize(html ?? '', MARKDOWN_HTML_SANITIZE_CONFIG);
