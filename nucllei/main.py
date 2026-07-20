@@ -36,7 +36,6 @@ from starlette.responses import Response
 
 from nucllei.builtin_tools import sync_builtin_tools
 from nucllei.utils import logger
-from nucllei.utils.audit import AuditLevel, AuditLoggingMiddleware
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
@@ -174,12 +173,9 @@ from nucllei.config import (
     reset_config,
 )
 from nucllei.env import (
-    AUDIT_EXCLUDED_PATHS,
-    AUDIT_LOG_LEVEL,
     CUSTOM_DIR,
     ENABLE_PWA,
     GLOBAL_LOG_LEVEL,
-    MAX_BODY_LOG_SIZE,
     SRC_LOG_LEVELS,
     VERSION,
     WEBUI_NAME,
@@ -593,19 +589,6 @@ app.include_router(functions.router, prefix="/api/v1/functions", tags=["function
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 
-try:
-    audit_level = AuditLevel(AUDIT_LOG_LEVEL)
-except ValueError as e:
-    logger.error(f"Invalid audit level: {AUDIT_LOG_LEVEL}. Error: {e}")
-    audit_level = AuditLevel.NONE
-
-if audit_level != AuditLevel.NONE:
-    app.add_middleware(
-        AuditLoggingMiddleware,
-        audit_level=audit_level,
-        excluded_paths=AUDIT_EXCLUDED_PATHS,
-        max_body_size=MAX_BODY_LOG_SIZE,
-    )
 ##################################
 #
 # Chat Endpoints
