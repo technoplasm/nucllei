@@ -35,7 +35,6 @@ from starlette.responses import Response
 
 
 from nucllei.builtin_tools import sync_builtin_tools
-from nucllei.utils import logger
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
