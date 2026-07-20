@@ -305,6 +305,9 @@ dist
 
 # llens
 _links/
+# ローカル作業スクラッチ(個人の global gitignore 慣例。black 等のツールは
+# プロジェクト .gitignore しか見ないため、ここにも書いて `black .` の掃引から外す)
+,/
 !.claude/
 .claude/settings.local.json
 /llens
