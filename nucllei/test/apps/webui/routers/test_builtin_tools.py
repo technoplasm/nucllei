@@ -53,6 +53,30 @@ class TestBuiltinTools(AbstractPostgresTest):
         assert set(loaded.keys()) == {"list_history", "read_history", "grep_history"}
         assert loaded["list_history"]["spec"]["name"] == "list_history"
 
+    def test_sync_registers_builtin_view_image(self):
+        """view_image は builtin として立つ(#89、seed の custom 撤去に伴う露出保全)。"""
+        from nucllei.utils.tools import get_tools
+
+        self._sync()
+
+        row = self.Tools.get_tool_by_id("builtin_view_image")
+        assert row is not None
+        assert row.meta.builtin is True
+        assert row.content == ""
+        assert {s["name"] for s in row.specs} == {"view_image"}
+
+        loaded = get_tools(
+            _fake_request(),
+            ["builtin_view_image"],
+            types.SimpleNamespace(id="u1", role="user"),
+            {"__user__": {"id": "u1"}},
+        )
+        assert set(loaded.keys()) == {"view_image"}
+        # モデル spec には内部注入パラメータ(__ 始まり)を露出しない
+        props = loaded["view_image"]["spec"]["parameters"].get("properties", {})
+        assert "file_id" in props
+        assert not any(k.startswith("__") for k in props)
+
     def test_sync_is_idempotent_and_refreshes_from_repo(self):
         self._sync()
         # 手で specs を汚しても再 sync で repo から復元される

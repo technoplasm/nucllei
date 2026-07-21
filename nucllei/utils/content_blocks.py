@@ -89,10 +89,11 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       二重になる。
     - tool_calls は OpenAI 形 {id, type, function} だけを綴じ込む(llens #20):
       render(表示ディスクリプタ)・index 等の内部キーを漏らさない。
-    - tool 結果の画像(results[].files の data:image/* — middleware が list 戻り値
-      から抽出)は、tool メッセージ群の直後に image_url を持つ user メッセージとして
-      再投入する: role:tool の content は文字列契約で画素を運べないため。
-      view_image / 画像生成系 tool が「モデル自身が画像を見る」ための経路。
+    - tool 結果の画像(results[].model_images の file_id — view_image が返す型付き
+      image_ref を middleware が載せる、#89)は、tool メッセージ群の直後に
+      image_url(`/api/v1/files/{id}/content` 参照)を持つ user メッセージとして
+      再投入する: role:tool の content は文字列契約で画素を運べないため。実体化
+      (base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
     """
     messages = []
 
@@ -125,13 +126,12 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                     }
                 )
 
-            result_images = [
-                url
+            result_image_urls = [
+                f"/api/v1/files/{file_id}/content"
                 for result in block.get("results", [])
-                for url in (result.get("files") or [])
-                if isinstance(url, str) and url.startswith("data:image/")
+                for file_id in (result.get("model_images") or [])
             ]
-            if result_images:
+            if result_image_urls:
                 messages.append(
                     {
                         "role": "user",
@@ -139,7 +139,7 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                             {"type": "text", "text": "(直前の tool 結果の画像)"},
                             *(
                                 {"type": "image_url", "image_url": {"url": url}}
-                                for url in result_images
+                                for url in result_image_urls
                             ),
                         ],
                     }
