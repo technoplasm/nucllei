@@ -93,8 +93,10 @@
 	);
 
 	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
-	// 開閉と無関係に、枠下に常時描画する(下の {/if} と root </div> の間)。
+	// 開閉と無関係に常時見せる — open 時は枠の底に、閉時は badge から下がる専用枠に
+	// 描き、collapsible ブロックと 1 つの塊として「くっついて」見えるようにする。
 	const displayItems = $derived(Array.isArray(result?.display) ? result.display : []);
+	const hasDisplay = $derived(displayItems.length > 0);
 
 	// llens(#17): 長い展開の末尾からも閉じられるようにする
 	const collapseFromBottom = () => {
@@ -105,13 +107,31 @@
 	};
 </script>
 
+{#snippet displayBody(separated: boolean)}
+	<!--
+		display チャネル(#88): tool が __display__(content) で押した人間向け表示。
+		戻り値=モデル向けとは別のユーザー面。open 枠の底(separated=上罫で区切る)にも
+		閉時の専用枠にも同じ本体を出し、collapsible ブロックと 1 つの塊に見せる。
+		XSS 不変条件: 外部入力(tool 出力)なので Markdown(MarkdownTokens 内で
+		DOMPurify.sanitize)経由で描く — 本文・skill 結果と同じサニタイズ経路。
+		kind は将来の描画分岐用ヒントで、現状は markdown 一本ゆえ全種を Markdown で描く。
+	-->
+	<div class="{separated ? 'border-t border-line ' : ''}px-3 py-2 space-y-1.5">
+		{#each displayItems as item, i (i)}
+			<div class="text-sm px-0.5" dir="auto">
+				<Markdown id={`${id || call.id}-display-${i}`} content={item.content ?? ''} />
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
 <!-- 注意: ルートに space-y を置かない — ヘッダ tab は -mb-px で枠上辺に密着させる -->
 <div {id} class="w-full text-sm -ml-2" bind:this={rootElement}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="w-fit cursor-pointer text-content-muted hover:text-content transition ms-2 px-2 py-0.5 border {toggleHover
 			? 'border-line-hover'
-			: 'border-line'} bg-gray-100 dark:bg-gray-850 {open
+			: 'border-line'} bg-gray-100 dark:bg-gray-850 {open || hasDisplay
 			? 'relative z-[1] -mb-px rounded-t-md border-b-0'
 			: 'rounded-md'}"
 		onpointerenter={() => (toggleHover = true)}
@@ -251,6 +271,10 @@
 						{/if}
 					</div>
 				{/if}
+
+				{#if hasDisplay}
+					{@render displayBody(true)}
+				{/if}
 			</div>
 
 			<div class="flex justify-between mx-2">
@@ -291,21 +315,12 @@
 		</div>
 	{/if}
 
-	<!--
-		display チャネル(#88): tool が __display__(content) で明示的にユーザーへ見せる表示。
-		collapse(#if open)の外なので開閉と無関係に常時出す — 戻り値=モデル向けとは別のユーザー面。
-		左罫で tool 発と分かる帰属を与え、モデル発言と混ぜない(#88 の描画規約)。
-		XSS 不変条件: display は外部入力(tool 出力)なので Markdown(MarkdownTokens 内で
-		DOMPurify.sanitize)経由で描く — 本文・skill 結果と同じサニタイズ経路(#87 の audio 許容込み)。
-		kind は将来の描画分岐用ヒント。現状は markdown 一本なので全種を Markdown で描く。
-	-->
-	{#if displayItems.length > 0}
-		<div class="mt-1 space-y-1.5 border-l-2 border-line pl-2.5">
-			{#each displayItems as item, i (i)}
-				<div class="text-sm px-0.5" dir="auto">
-					<Markdown id={`${id || call.id}-display-${i}`} content={item.content ?? ''} />
-				</div>
-			{/each}
+	{#if !open && hasDisplay}
+		<!-- 閉時: badge から下がる専用枠に display を出す(open 時は枠の底に出るので
+		     ここは描かない)。badge は open||hasDisplay で下辺を開いたタブになり、この枠と
+		     -mb-px で密着して 1 つの塊に見える。 -->
+		<div class="border {toggleHover ? 'border-line-hover' : 'border-line'} rounded-lg transition">
+			{@render displayBody(false)}
 		</div>
 	{/if}
 </div>
