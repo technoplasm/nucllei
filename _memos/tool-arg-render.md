@@ -182,8 +182,14 @@ R7: まず「**型どおりに完成品を綺麗に描画**」を固め、逐次
 
 [[llens-renderer-track-status]] / `_memos/rendering-design.md`(L0〜L3)/ 旧 `_memos/tools-catchup.md`(#18 — #34 棚卸しで削除済み)
 
-- **将来(#88、2026-07-20 起票)**: tool の**ユーザー向け表示チャネル(display)**の検討。
-  本メモの「tool 結果は値を見る面でありデザイン対象ではない」は維持したまま、
-  tool が明示的にユーザーへ見せたいもの(音声プレイヤー・プロット等)を戻り値と別の
-  opt-in チャネル(`results[i].display`)で collapse 外に出す構想。`results[].files`
-  (data URL 残骸)はそこに吸収予定。設計確定は #88 上で。
+- **#89(2026-07-21 出荷、#90 merged)**: `results[].files`(単一無名フィールドが VLM 再注入と
+  人間 inline を型無しで二役兼ねていた)を撤去・分離。VLM(モデルの目)は `results[i].model_images`
+  (file_id 参照、`__feed_image__` emitter で push)へ。無差別 data: magic と base64-print を廃止し、
+  実体化は送信直前 inline の 1 回のみ。`ToolCallBlock` の files inline 描画も撤去。詳細は
+  [[file-handling]] #89 改訂節・[[builtin-tools]]。
+- **将来(#88、2026-07-20 起票)**: tool の**ユーザー向け表示チャネル(display)**。本メモの
+  「tool 結果は値を見る面でありデザイン対象ではない」は維持したまま、tool が明示的にユーザーへ
+  見せたいもの(音声プレイヤー・プロット等)を opt-in チャネル `results[i].display` で collapse 外に
+  出す。#89 で作った tool 出力 sink を再利用し `__display__` を `__feed_image__` と対称に足すだけ
+  ([[pr88-display-next]])。旧「`results[].files`(data URL 残骸)を吸収」は #89 で VLM 分を
+  model_images へ移したので、display が担うのは**人間 inline 分のみ**。設計確定は #88 上で。

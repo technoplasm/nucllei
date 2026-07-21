@@ -321,6 +321,39 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 6. `chat.file_upload` のサーバー側 enforcement は #69 のレビューで upload endpoint に実装
    (それまで UI ミラーのみ)。生成画像の内部保存(`store_uploaded_file`)はこのゲートを通らない。
 
+## 改訂(2026-07-21、#89 tool→VLM 画像注入の整理)
+
+真実源はコード(`#90` = `7b4f9aac7`〜`688d584f9`、master 統合済み)+ issue #89。
+`results[].files` が「VLM 再注入(モデルの目)」と「人間向け inline 表示」を型無しで
+二役兼ねていた混同を解体した。
+
+1. **無差別 data: magic 廃止**: 旧実装は「tool 戻り値が list なら中の `data:` 文字列を
+   全部 `results[].files` に抽出 → `data:image/` だけ再注入」という発火条件が緩い magic
+   だった(view_image 専用なのに任意 tool が化ける・非画像 data URL は静かに脱落)。撤去。
+2. **型付き汎用 emitter `__feed_image__(file_id)`**(`utils/tool_output.py`): どの tool でも
+   実行中にモデルの目へ画素を push できる注入ヘルパ。tool-call ごとの ContextVar sink
+   (`ToolOutputSink`、lock 付き)に蓄積し、`execute_tool_calls` が **成功時のみ** harvest して
+   `results[i].model_images`(file_id 配列)へ載せる。戻り値をハイジャックしない。
+   `#88` の `__display__`(人間の目)と対称の設計([[pr88-display-next]])。
+3. **base64-print 廃止・file_id 参照統一**: `content_blocks.convert_content_blocks_to_messages`
+   が `model_images` の file_id から `/api/v1/files/{id}/content` の image_url を組む。実体化
+   (base64)は **送信直前 `inline_internal_image_urls` の 1 回のみ**(#69 の入力画像と同じ機構)。
+   DB スナップショット・戻り境界に base64 を載せない(snapshot 肥大 ~10MB/turn を解消)。
+4. **要石**: tool ループの追撃リクエストにも `inline_internal_image_urls` を適用。従来 :541 の
+   `form_data["messages"]` にしか掛からず、file_id 参照化した追撃分の画素が届かなかった
+   (この 1 行が無いと VLM に画素が渡らない silent 失敗)。
+5. **`feed_image` はプリミティブ**: content_type / サイズを検証しない(file_id しか持たず、
+   ここで Files 参照すると async tool 実行中にイベントループを塞ぐ)。画像判定・上限は
+   **呼び出し側 tool の責務**(view_image が image/* と max_image_mb を担保)。認可は送信直前
+   inline の `has_read_access_to_file` が別途担保するので push 自体は認可しない。
+6. **view_image を builtin 化**(`nucllei/builtin_tools/view_image.py`、seed の custom 撤去)。
+   あわせて owner チェック欠落の **IDOR を封鎖**(`721fb768d`、#40 と同クラス。file_id 直指定で
+   他ユーザー画像を覗けた)。詳細は [[builtin-tools]]。
+7. **人間 inline は #88 へ**: `ToolCallBlock` の `results[].files` 描画は撤去。当面は
+   `message.files` ギャラリー(sandbox 成果物)、恒久は #88 display チャネルが担う。
+8. prism 側(Q4 sandbox 命名 `export_to_workspace`/`import_from_workspace`、prism custom
+   view_image 撤去)は prism-hu/llens#3(draft)+ #90 デプロイ後の follow-up。
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
   `owui/tools/sandbox.py`・`sandbox/README.md`。

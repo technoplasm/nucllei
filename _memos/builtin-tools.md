@@ -55,6 +55,26 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
    本物を隠し、モデルがダミー応答を取り繕う偽 PASS を作った)→ dummy は撤去。
    組み込みツール導入時は名前空間の衝突検出を意識する
 
+## 改訂(2026-07-21、#89 — view_image を builtin 化 + tool 出力 sink)
+
+真実源はコード(#90 = `7b4f9aac7`〜`688d584f9`)+ issue #89。画像/VLM 経路の詳細は
+[[file-handling]] の #89 改訂節、次タスクは [[pr88-display-next]]。
+
+- **第二の組み込みツール = view_image**(`nucllei/builtin_tools/view_image.py`)。旧 seed
+  custom(`nucllei/tools/view_image.py`)は撤去し builtin へ移設。理由: Files/Storage 内部 API +
+  `__user__` 密結合の汎用 OWUI tool で 1c の builtin 側そのもの(外部叩きの web 検索が prism tool
+  なのと対照)。seed の custom 登録撤去に伴い露出は `seed.py` の preset_tools に `builtin_view_image`
+  を明示追加して保全。旧 seed custom は list/str 返しの契約ズレ + owner チェック欠落(IDOR)を
+  抱えていた — builtin 化でどちらも構造的に解消。
+- **tool 出力チャネル基盤 `nucllei/utils/tool_output.py`**(#88 と共用): tool は戻り値と別に
+  「誰かに見せたい」出力を tool-push できる。`__feed_image__(file_id)` → `results[i].model_images`
+  (モデル/VLM の目)。tool-call ごとの ContextVar sink に蓄積・成功時のみ harvest。#88 で
+  `__display__`(人間の目)を対称に足す予定。emitter は `middleware` の extra_params 経由で
+  sig 一致注入(`__` 始まりはモデル spec に非露出)。
+- **R2 の sandbox 関数名改訂(Q4)**: `import_chat_file` → `export_to_workspace`(chat→workspace/inputs)、
+  `export_workspace_file` → `import_from_workspace`(workspace→chat)。前置詞が向きを表す対称命名。
+  実体は prism-hu/llens(prism-hu/llens#3 draft)。`list_workspace` は据置。
+
 ## 1. 設計(議論の着地)
 
 ### 1a. 制御面はモデル設定に一元化(グローバルフラグなし)
