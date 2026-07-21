@@ -98,6 +98,13 @@ class Tools:
         if not rec:
             return f"ERROR: file_id {file_id} のレコードが無い。"
 
+        # 所有者チェック (sandbox.import_chat_file / prism view_image と同じ規律):
+        # file_id 直指定で他ユーザーのファイルを覗かせない (#40 と同クラスの IDOR 封鎖)。
+        user_id = (__user__ or {}).get("id")
+        owner = getattr(rec, "user_id", None)
+        if owner and owner != user_id:
+            return f"ERROR: file_id {file_id} にアクセス権が無い。"
+
         meta = getattr(rec, "meta", None) or {}
         ct = (meta.get("content_type") or "").lower()
         if not ct.startswith("image/"):
