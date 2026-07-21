@@ -66,6 +66,8 @@ from nucllei.utils.filter import (
     process_filter_functions,
 )
 from nucllei.utils.file_images import inline_internal_image_urls
+from nucllei.utils import tool_output
+from nucllei.utils.tool_output import ToolOutputSink
 from nucllei.utils.content_blocks import (
     convert_content_blocks_to_messages,
     serialize_text_blocks,
@@ -284,6 +286,10 @@ async def process_chat_payload(
     extra_params = {
         "__event_emitter__": event_emitter,
         "__event_call__": event_call,
+        # llens(#89): モデルの目に画素を流す汎用 tool-push ヘルパ。宣言した tool
+        # だけに注入され(tools.py:49 の sig 一致)、実行中 tool-call の sink へ
+        # file_id を積む。実体化は送信直前 inline に一任。view_image に閉じない。
+        "__feed_image__": tool_output.feed_image,
         "__user__": {
             "id": user.id,
             "email": user.email,
@@ -947,6 +953,7 @@ async def execute_tool_calls(response_tool_calls, tools):
                 )
 
         tool_result = None
+        model_image_file_ids = []
 
         if tool_name not in tools:
             # llens(#18-2): tools 配列に無い tool の呼び出し。
@@ -963,6 +970,12 @@ async def execute_tool_calls(response_tool_calls, tools):
             tool = tools[tool_name]
             spec = tool.get("spec", {})
 
+            # llens(#89): tool-call ごとの出力 sink を張る。tool が
+            # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、下で
+            # harvest して results[i].model_images へ載せる(VLM 再注入トリガ)。
+            # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
+            sink = ToolOutputSink()
+            sink_token = tool_output.current_sink.set(sink)
             try:
                 allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
 
@@ -995,20 +1008,11 @@ async def execute_tool_calls(response_tool_calls, tools):
                 )
             except Exception as e:
                 tool_result = str(e)
-
-        tool_result_files = []
-        if isinstance(tool_result, list):
-            # data URL(生成ファイル)を結果から抜き出す。
-            # 旧実装はイテレーション中に list.remove しており要素を取りこぼしていた。
-            tool_result_files = [
-                item
-                for item in tool_result
-                if isinstance(item, str) and item.startswith("data:")
-            ]
-            if tool_result_files:
-                tool_result = [
-                    item for item in tool_result if item not in tool_result_files
-                ]
+            finally:
+                tool_output.current_sink.reset(sink_token)
+            # harvest は lock 下 snapshot(timeout orphan スレッドの遅延 append は
+            # copy 後に落ちるので混入しない)。
+            model_image_file_ids = sink.model_images()
 
         # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
         # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
@@ -1028,7 +1032,11 @@ async def execute_tool_calls(response_tool_calls, tools):
                 "tool_call_id": tool_call_id,
                 "content": tool_result,
                 **({"render": result_render} if result_render else {}),
-                **({"files": tool_result_files} if tool_result_files else {}),
+                **(
+                    {"model_images": model_image_file_ids}
+                    if model_image_file_ids
+                    else {}
+                ),
             }
         )
 
@@ -1253,6 +1261,19 @@ async def process_chat_response(
                 await _persist_message_snapshot(metadata, snapshot)
 
                 try:
+                    # llens(#89 要石): convert が生成する内部 file URL の image_url
+                    # (view_image の file_id 参照)を追撃でも画素化する。process_chat_payload
+                    # の inline は form_data["messages"] にしか掛からない(:「変換はこの
+                    # 1 箇所で足りる」は追撃を見落としていた)ため、合流後にもう一度
+                    # 掛ける。followup_msgs は毎周新規 list なので content_blocks の原本を
+                    # 汚さず、内部 URL 非一致は無変更=二重掛けでも冪等。
+                    followup_msgs = [
+                        *form_data["messages"],
+                        *convert_content_blocks_to_messages(assembler.content_blocks),
+                    ]
+                    followup_msgs = await inline_internal_image_urls(
+                        followup_msgs, user
+                    )
                     res = await generate_chat_completion(
                         request,
                         {
@@ -1269,12 +1290,7 @@ async def process_chat_response(
                                 else {}
                             ),
                             "tools": form_data["tools"],
-                            "messages": [
-                                *form_data["messages"],
-                                *convert_content_blocks_to_messages(
-                                    assembler.content_blocks
-                                ),
-                            ],
+                            "messages": followup_msgs,
                         },
                         user,
                     )

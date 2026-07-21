@@ -22,7 +22,6 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
-	import Image from '$lib/components/common/Image.svelte';
 	import Markdown from './Markdown.svelte';
 
 	const i18n = getContext('i18n');
@@ -35,7 +34,6 @@
 	type ToolResult = {
 		tool_call_id: string;
 		content?: string;
-		files?: unknown;
 		render?: { kind: string };
 	};
 
@@ -89,7 +87,6 @@
 	const resultDisplay = $derived(
 		result ? classifyToolResult(result.content ?? '', call?.render?.result ?? result.render) : null
 	);
-	const files = $derived(Array.isArray(result?.files) ? (result.files as string[]) : []);
 
 	// llens(#17): 長い展開の末尾からも閉じられるようにする
 	const collapseFromBottom = () => {
@@ -283,16 +280,6 @@
 					</div>
 				{/if}
 			</div>
-		</div>
-	{/if}
-
-	{#if isDone && files.length > 0}
-		<div class="mt-1 space-y-1">
-			{#each files as file}
-				{#if file.startsWith('data:image/')}
-					<Image src={file} alt="Image" />
-				{/if}
-			{/each}
 		</div>
 	{/if}
 </div>

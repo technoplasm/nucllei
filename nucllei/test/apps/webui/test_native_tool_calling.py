@@ -705,15 +705,30 @@ def test_followup_preserves_parallel_tool_calls(monkeypatch):
     assert len(tool_invocations) == 2
 
 
-def test_followup_reinjects_tool_result_images_as_user_message(monkeypatch):
-    """tool 結果の画像(list 戻り値から files へ抽出された data:image/*)は、
-    継続リクエストで role:tool の直後に image_url を持つ user メッセージとして
-    再投入される(role:tool の content は文字列契約で画素を運べない —
-    view_image 等「モデル自身が画像を見る」tool の経路)。非画像 data URL は対象外。"""
-    image_url = "data:image/png;base64,QUJD"
+def test_followup_reinjects_pushed_images_as_user_message(monkeypatch):
+    """tool が __feed_image__(file_id) で push した画像(#89)は、継続リクエストで
+    role:tool の直後に image_url(/api/v1/files/{id}/content 参照)を持つ user
+    メッセージとして再投入される。要石: 継続メッセージにも
+    inline_internal_image_urls が掛かる(ここでは fake で INLINED: マークを付け、
+    追撃分に inline が適用されたことを固定する)。base64 は戻り境界に載らない。"""
+    from nucllei.utils import middleware
+    from nucllei.utils.tool_output import feed_image
+
+    async def fake_inline(messages, user):
+        # 追撃 messages に inline が掛かったことを証明するマーカ(内部 URL のみ)。
+        for m in messages:
+            if isinstance(m.get("content"), list):
+                for p in m["content"]:
+                    if p.get("type") == "image_url":
+                        p["image_url"]["url"] = "INLINED:" + p["image_url"]["url"]
+        return messages
+
+    monkeypatch.setattr(middleware, "inline_internal_image_urls", fake_inline)
 
     async def get_weather(**kwargs):
-        return ["天気図を取得した", image_url, "data:application/pdf;base64,QUJD"]
+        # 汎用 tool-push: 実行中 sink に file_id を積む(view_image でなくても使える)
+        feed_image("img-file-1")
+        return "天気図を提示しました。"
 
     spec = {
         "name": "get_weather",
@@ -737,9 +752,8 @@ def test_followup_reinjects_tool_result_images_as_user_message(monkeypatch):
 
     tool_msgs = _tool_messages(completion_calls[0])
     assert len(tool_msgs) == 1
-    assert json.loads(tool_msgs[0]["content"]) == ["天気図を取得した"]
-    # 画像は data URL ごと content に残さない(files へ抽出済み)
-    assert image_url not in tool_msgs[0]["content"]
+    # role:tool の content は非空の status 文字列(画素は運ばない)
+    assert tool_msgs[0]["content"] == "天気図を提示しました。"
 
     user_msg = msgs[msgs.index(tool_msgs[0]) + 1]
     assert user_msg["role"] == "user"
@@ -748,7 +762,8 @@ def test_followup_reinjects_tool_result_images_as_user_message(monkeypatch):
         for p in user_msg["content"]
         if p.get("type") == "image_url"
     ]
-    assert injected == [image_url]
+    # file_id 参照が組まれ、追撃 inline(fake)が適用された
+    assert injected == ["INLINED:/api/v1/files/img-file-1/content"]
 
 
 def test_reasoning_not_leaked_into_followup_content(monkeypatch):

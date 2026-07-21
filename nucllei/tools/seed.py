@@ -38,12 +38,6 @@ TOOLS = {
         "description": "資料を別 context のサブエージェントに読ませて結果だけ返す",
         "preset": True,
     },
-    "view_image": {
-        "file": "view_image.py",
-        "name": "View Image",
-        "description": "生成/添付画像を自分の目で確認する",
-        "preset": True,
-    },
     "password_generator": {
         "file": "password_generator.py",
         "name": "Password Generator",
@@ -223,6 +217,9 @@ def main():
         skill_ids.append(skill_id)
 
     preset_tools = [tid for tid, e in TOOLS.items() if e["preset"]]
+    # builtin(#42/#89): view_image は起動時 sync_builtin_tools で立つため TOOLS には
+    # 載らないが、preset への露出はここで明示的に足す(custom 撤去による露出回帰を防ぐ)。
+    preset_tools.append("builtin_view_image")
     wire_preset(base, args.token, args.model, preset_tools, skill_ids)
     print("完了")
 

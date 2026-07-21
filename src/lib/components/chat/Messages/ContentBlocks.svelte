@@ -18,7 +18,6 @@
 	type ToolResult = {
 		tool_call_id: string;
 		content?: string;
-		files?: unknown;
 		render?: { kind: string };
 	};
 
