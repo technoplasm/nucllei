@@ -21,6 +21,7 @@ base64 は戻り境界にも DB スナップショットにも載らない。vie
 でも has_read_access_to_file が二重に効く)。
 """
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Optional
 
@@ -84,7 +85,10 @@ class Tools:
         if Files is None:
             return "ERROR: nucllei 内部 API を解決できない(実行環境を確認)。"
 
-        rec = Files.get_file_by_id(file_id)  # v0.6.5 は sync
+        # 同期 DB / ディスク read はワーカースレッドへ退避してイベントループを
+        # 塞がない(#28 の方針。本関数は __event_emitter__ を await するため async の
+        # まま、ブロッキング部分だけ to_thread する)。
+        rec = await asyncio.to_thread(Files.get_file_by_id, file_id)  # v0.6.5 は sync
         if not rec:
             return f"ERROR: file_id {file_id} のレコードが無い。"
 
@@ -105,7 +109,7 @@ class Tools:
 
         # サイズ検証: 壊れた/巨大なファイルを提示前に弾く(実体化は送信直前 inline に
         # 寄せるが、上限超過はここで早期に返す)。
-        raw = _read_raw(rec)
+        raw = await asyncio.to_thread(_read_raw, rec)
         if raw is None:
             return f"ERROR: 画像の実体を読めない(Storage 解決失敗): {file_id}"
         if len(raw) > self.valves.max_image_mb * 1024 * 1024:

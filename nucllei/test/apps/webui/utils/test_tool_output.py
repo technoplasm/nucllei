@@ -66,6 +66,24 @@ def test_execute_tool_calls_no_vlm_key_when_not_pushed():
     assert "model_images" not in results[0]
 
 
+def test_sync_tool_sink_propagates_via_to_thread():
+    """sync tool(#28 で asyncio.to_thread のワーカースレッド実行)から呼ばれた
+    feed_image が sink に届くことを固定する。ContextVar が to_thread の
+    copy_context でワーカースレッドへ伝播する load-bearing な前提の回帰
+    (to_thread を copy_context を通さない実装へ退行させると壊れる)。"""
+
+    def sync_tool():  # sync 関数 = tools.py が to_thread でラップする対象を模擬
+        feed_image("sync-img")
+        return "done"
+
+    async def wrapper():
+        return await asyncio.to_thread(sync_tool)
+
+    results = asyncio.run(execute_tool_calls(_call(), _tool(wrapper)))
+    assert results[0]["model_images"] == ["sync-img"]
+    assert results[0]["content"] == "done"
+
+
 def test_sink_isolated_per_tool_call():
     async def shower():
         feed_image("img-A")

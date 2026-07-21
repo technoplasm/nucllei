@@ -14,7 +14,13 @@ sink 未設定時は黙って no-op。
 sync tool(#28 でワーカースレッド実行)からも呼ばれるため sink は lock 付き。
 harvest は snapshot(lock 下 copy)で確定値だけを取り、生参照を results へ渡さない
 (timeout orphan スレッドの遅延 append が deepcopy 中の list を壊すのを防ぐ)。
-ContextVar は asyncio.to_thread が呼出時 copy_context するためワーカースレッドへ伝播する。
+
+伝播の前提と限界: sink は ContextVar で運ぶ。sync tool は `asyncio.to_thread` 経由で
+実行され、to_thread は呼出時に copy_context するためワーカースレッドへ伝播する。
+**この伝播は to_thread(および copy_context を通す経路)に限る** — tool が自前で
+`threading.Thread` / 独自 executor / multiprocessing を起こし、そのワーカーから
+emitter を呼ぶと ContextVar は継承されず current_sink.get() が None を返して
+黙って no-op になる。emitter は必ず tool の実行文脈(to_thread までを含む)から呼ぶこと。
 """
 
 import threading

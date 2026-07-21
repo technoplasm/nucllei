@@ -542,8 +542,12 @@ async def process_chat_payload(
 
     # llens(#69): 画像添付は files 経由に統一。内部 file URL("/api/v1/files/{id}/content")
     # の image_url は推論エンジン側から到達・認証できる保証がない — モデルへ出る直前の
-    # ここで base64 data URL に変換する。native tool ループの再送(process_chat_response)も
-    # form_data["messages"] を再利用するため、変換はこの 1 箇所で足りる。
+    # ここで base64 data URL に変換する。
+    # 注意(#89): これは初回 payload(form_data["messages"])の 1 箇所。tool ループの
+    # 追撃再送は convert_content_blocks_to_messages で新規に image_url(view_image の
+    # file_id 参照)を append するため、その経路にも別途 inline を掛けている
+    # (process_chat_response の追撃ブロック参照)。ここを「1 箇所で足りる」と誤解して
+    # 追撃側 inline を消すと、file_id 参照が未実体化のままモデルに渡り画素が届かない。
     form_data["messages"] = await inline_internal_image_urls(
         form_data["messages"], user
     )
