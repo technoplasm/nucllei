@@ -66,6 +66,19 @@ def test_execute_tool_calls_no_vlm_key_when_not_pushed():
     assert "model_images" not in results[0]
 
 
+def test_failed_tool_push_is_not_harvested():
+    """push した後に例外を投げた tool の画像は再注入しない(失敗 call は副産物を
+    出さない — content=エラー文言と画像が混在する不整合を避ける)。"""
+
+    async def boom():
+        feed_image("orphan-img")
+        raise RuntimeError("kaboom")
+
+    results = asyncio.run(execute_tool_calls(_call(), _tool(boom)))
+    assert "model_images" not in results[0]
+    assert "kaboom" in results[0]["content"]
+
+
 def test_sync_tool_sink_propagates_via_to_thread():
     """sync tool(#28 で asyncio.to_thread のワーカースレッド実行)から呼ばれた
     feed_image が sink に届くことを固定する。ContextVar が to_thread の

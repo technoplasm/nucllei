@@ -59,6 +59,12 @@ def feed_image(file_id: str) -> None:
     (base64)は送信直前 inline に一任し、その段で has_read_access_to_file が
     呼び出しユーザーの read 権を確認する(この push 自体は認可しない)。
     tool 実行文脈外(sink 未設定)では no-op。
+
+    低レベルプリミティブ: content_type / サイズの検証はしない(file_id しか持たず、
+    ここで Files 参照すると async tool 実行中にイベントループを塞ぐため #28 に反する)。
+    **呼び出し側 tool が画像であること・サイズ上限を保証する**(view_image は
+    image/* と max_image_mb を検証済み)。非画像 file_id を積むとモデルへ壊れた
+    image_url が渡る — それは tool のバグ(認可は inline が別途担保する)。
     """
     sink = current_sink.get()
     if sink is None:

@@ -980,6 +980,7 @@ async def execute_tool_calls(response_tool_calls, tools):
             # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
             sink = ToolOutputSink()
             sink_token = tool_output.current_sink.set(sink)
+            tool_succeeded = False
             try:
                 allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
 
@@ -999,6 +1000,7 @@ async def execute_tool_calls(response_tool_calls, tools):
                     )
                 else:
                     tool_result = await tool_function(**tool_function_params)
+                tool_succeeded = True
 
             except asyncio.TimeoutError:
                 log.warning(
@@ -1014,9 +1016,10 @@ async def execute_tool_calls(response_tool_calls, tools):
                 tool_result = str(e)
             finally:
                 tool_output.current_sink.reset(sink_token)
-            # harvest は lock 下 snapshot(timeout orphan スレッドの遅延 append は
-            # copy 後に落ちるので混入しない)。
-            model_image_file_ids = sink.model_images()
+            # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は副産物を
+            # 出さない — content=エラー文言と画像が混在する不整合を避ける)。成功時のみ
+            # harvest(lock 下 snapshot で timeout orphan スレッドの遅延 append を除外)。
+            model_image_file_ids = sink.model_images() if tool_succeeded else []
 
         # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
         # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
