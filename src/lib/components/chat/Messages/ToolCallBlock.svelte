@@ -31,10 +31,14 @@
 		function?: { name?: string; arguments?: string };
 		render?: ToolCallRender;
 	};
+	type DisplayItem = { kind: string; content: string };
 	type ToolResult = {
 		tool_call_id: string;
 		content?: string;
 		render?: { kind: string };
+		// display チャネル(#88): tool が __display__ で明示的にユーザーへ見せる表示。
+		// 戻り値(モデル向け)とは別面で collapse 外に常時出す。
+		display?: DisplayItem[];
 	};
 
 	let {
@@ -87,6 +91,10 @@
 	const resultDisplay = $derived(
 		result ? classifyToolResult(result.content ?? '', call?.render?.result ?? result.render) : null
 	);
+
+	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
+	// 開閉と無関係に、枠下に常時描画する(下の {/if} と root </div> の間)。
+	const displayItems = $derived(Array.isArray(result?.display) ? result.display : []);
 
 	// llens(#17): 長い展開の末尾からも閉じられるようにする
 	const collapseFromBottom = () => {
@@ -280,6 +288,24 @@
 					</div>
 				{/if}
 			</div>
+		</div>
+	{/if}
+
+	<!--
+		display チャネル(#88): tool が __display__(content) で明示的にユーザーへ見せる表示。
+		collapse(#if open)の外なので開閉と無関係に常時出す — 戻り値=モデル向けとは別のユーザー面。
+		左罫で tool 発と分かる帰属を与え、モデル発言と混ぜない(#88 の描画規約)。
+		XSS 不変条件: display は外部入力(tool 出力)なので Markdown(MarkdownTokens 内で
+		DOMPurify.sanitize)経由で描く — 本文・skill 結果と同じサニタイズ経路(#87 の audio 許容込み)。
+		kind は将来の描画分岐用ヒント。現状は markdown 一本なので全種を Markdown で描く。
+	-->
+	{#if displayItems.length > 0}
+		<div class="mt-1 space-y-1.5 border-l-2 border-line pl-2.5">
+			{#each displayItems as item, i (i)}
+				<div class="text-sm px-0.5" dir="auto">
+					<Markdown id={`${id || call.id}-display-${i}`} content={item.content ?? ''} />
+				</div>
+			{/each}
 		</div>
 	{/if}
 </div>

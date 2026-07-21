@@ -290,6 +290,10 @@ async def process_chat_payload(
         # だけに注入され(tools.py:49 の sig 一致)、実行中 tool-call の sink へ
         # file_id を積む。実体化は送信直前 inline に一任。view_image に閉じない。
         "__feed_image__": tool_output.feed_image,
+        # llens(#88): __feed_image__ と対称の、人間の目へ向けた汎用 tool-push。
+        # __display__(content, kind) を実行中 tool-call の sink へ積み、下で harvest
+        # して results[i].display へ載せる(collapse 外に描画・モデル非注入)。
+        "__display__": tool_output.display,
         "__user__": {
             "id": user.id,
             "email": user.email,
@@ -958,6 +962,7 @@ async def execute_tool_calls(response_tool_calls, tools):
 
         tool_result = None
         model_image_file_ids = []
+        display_items = []
 
         if tool_name not in tools:
             # llens(#18-2): tools 配列に無い tool の呼び出し。
@@ -1020,6 +1025,8 @@ async def execute_tool_calls(response_tool_calls, tools):
             # 出さない — content=エラー文言と画像が混在する不整合を避ける)。成功時のみ
             # harvest(lock 下 snapshot で timeout orphan スレッドの遅延 append を除外)。
             model_image_file_ids = sink.model_images() if tool_succeeded else []
+            # display(人間の目、#88)も同じ規律で成功時のみ harvest。
+            display_items = sink.displays() if tool_succeeded else []
 
         # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
         # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
@@ -1044,6 +1051,7 @@ async def execute_tool_calls(response_tool_calls, tools):
                     if model_image_file_ids
                     else {}
                 ),
+                **({"display": display_items} if display_items else {}),
             }
         )
 

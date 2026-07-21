@@ -94,6 +94,9 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       image_url(`/api/v1/files/{id}/content` 参照)を持つ user メッセージとして
       再投入する: role:tool の content は文字列契約で画素を運べないため。実体化
       (base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
+    - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
+      model_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
+      ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。
     """
     messages = []
 

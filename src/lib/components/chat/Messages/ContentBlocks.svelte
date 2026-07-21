@@ -19,6 +19,8 @@
 		tool_call_id: string;
 		content?: string;
 		render?: { kind: string };
+		// display チャネル(#88): tool 発の人間向け表示。そのまま ToolCallBlock へ渡す。
+		display?: { kind: string; content: string }[];
 	};
 
 	let {
