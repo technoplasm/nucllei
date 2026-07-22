@@ -10,7 +10,7 @@ from nucllei.models.tools import (
     ToolUserResponse,
     Tools,
 )
-from nucllei.builtin_tools import is_builtin_tool_id
+from nucllei.builtin_tools import is_builtin_tool_id, is_reserved_builtin_id
 from nucllei.utils.plugin import load_tool_module_by_id, replace_imports
 from nucllei.config import CACHE_DIR
 from nucllei.constants import ERROR_MESSAGES
@@ -145,11 +145,12 @@ async def create_new_tools(
 
     form_data.id = form_data.id.lower()
 
-    # llens(#42): 組み込みツールの id は予約(ユーザー作成 tool で shadow させない)
-    if is_builtin_tool_id(form_data.id):
+    # llens(#42): builtin 用の `builtin_` prefix は名前空間ごと予約する。
+    # 未定義の id でも prefix 一致で拒否(ユーザー作成 tool に builtin_ を使わせない)。
+    if is_reserved_builtin_id(form_data.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reserved id for a builtin tool",
+            detail="The 'builtin_' id prefix is reserved for builtin tools",
         )
 
     tools = Tools.get_tool_by_id(form_data.id)

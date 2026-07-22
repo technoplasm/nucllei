@@ -64,6 +64,45 @@ class TestBuiltinTools(AbstractPostgresTest):
         assert row.content == ""
         assert len(row.specs) == 3
 
+    def test_sync_prunes_builtin_removed_from_repo(self):
+        """repo から消えた builtin(`builtin_` prefix だが BUILTIN_TOOLS 未定義)は
+        次 sync で DB から削除される。定義済みは残る。"""
+        from nucllei.models.tools import ToolForm, ToolMeta
+
+        self._sync()
+        # コードから撤去された古い builtin(旧 builtin_view_image 相当)を模す
+        self.Tools.insert_new_tool(
+            "system",
+            ToolForm(
+                id="builtin_removed",
+                name="Old",
+                description="gone from repo",
+                content="",
+                meta=ToolMeta(builtin=True),
+                access_control=None,
+            ),
+            [],
+        )
+        assert self.Tools.get_tool_by_id("builtin_removed") is not None
+
+        self._sync()
+        assert self.Tools.get_tool_by_id("builtin_removed") is None
+        assert self.Tools.get_tool_by_id("builtin_history") is not None
+
+    def test_create_rejects_reserved_prefix(self):
+        """`builtin_` prefix は名前空間ごと予約 — 未定義 id でも create 不可。"""
+        with mock_webui_user(id="admin1", role="admin"):
+            res = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={
+                    "id": "builtin_myown",
+                    "name": "n",
+                    "description": "d",
+                    "content": "class Tools:\n    def x(self):\n        return 'x'",
+                },
+            )
+        assert res.status_code == 400
+
     def test_update_allows_only_access_control(self):
         self._sync()
         body = {
