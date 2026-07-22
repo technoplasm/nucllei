@@ -667,6 +667,8 @@
 								<div class="flex-1 min-h-0 rounded-xs border border-line overflow-auto">
 									<CodeEditor
 										value={info.params.system ?? ''}
+										lang="markdown"
+										lineWrapping={true}
 										onChange={(value: string) => {
 											info.params.system = value;
 										}}

@@ -35,6 +35,7 @@
 		lang = '',
 		boilerplate = '',
 		value = $bindable(''),
+		lineWrapping = false,
 		onSave = () => {},
 		onChange = () => {}
 	}: {
@@ -42,6 +43,8 @@
 		lang?: string;
 		boilerplate?: string;
 		value?: string;
+		// 長行を soft-wrap する(system prompt など散文向け。コードは既定 false のまま)。
+		lineWrapping?: boolean;
 		onSave?: () => void;
 		onChange?: (value: string) => void;
 	} = $props();
@@ -173,7 +176,9 @@
 			}
 		}),
 		editorTheme.of([]),
-		editorLanguage.of([])
+		editorLanguage.of([]),
+		// 散文向け: 横スクロールでなく折り返す。コード編集では渡さない(既定 false)。
+		...(lineWrapping ? [EditorView.lineWrapping] : [])
 	];
 
 	$effect(() => {
