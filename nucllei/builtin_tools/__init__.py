@@ -12,7 +12,7 @@
 
 import logging
 
-from nucllei.builtin_tools import history, view_image
+from nucllei.builtin_tools import history
 
 log = logging.getLogger(__name__)
 
@@ -25,11 +25,6 @@ BUILTIN_TOOLS = {
             "List, read and search your own chat history "
             "(list_history / read_history / grep_history). Owner-only"
         ),
-    },
-    "builtin_view_image": {
-        "module": view_image,
-        "name": "View Image",
-        "description": "生成/添付画像を自分の目で確認する(owner-only, file_id 参照)",
     },
 }
 

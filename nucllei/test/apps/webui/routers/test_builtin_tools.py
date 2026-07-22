@@ -53,58 +53,6 @@ class TestBuiltinTools(AbstractPostgresTest):
         assert set(loaded.keys()) == {"list_history", "read_history", "grep_history"}
         assert loaded["list_history"]["spec"]["name"] == "list_history"
 
-    def test_sync_registers_builtin_view_image(self):
-        """view_image は builtin として立つ(#89、seed の custom 撤去に伴う露出保全)。"""
-        from nucllei.utils.tools import get_tools
-
-        self._sync()
-
-        row = self.Tools.get_tool_by_id("builtin_view_image")
-        assert row is not None
-        assert row.meta.builtin is True
-        assert row.content == ""
-        assert {s["name"] for s in row.specs} == {"view_image"}
-
-        loaded = get_tools(
-            _fake_request(),
-            ["builtin_view_image"],
-            types.SimpleNamespace(id="u1", role="user"),
-            {"__user__": {"id": "u1"}},
-        )
-        assert set(loaded.keys()) == {"view_image"}
-        # モデル spec には内部注入パラメータ(__ 始まり)を露出しない
-        props = loaded["view_image"]["spec"]["parameters"].get("properties", {})
-        assert "file_id" in props
-        assert not any(k.startswith("__") for k in props)
-
-    def test_feed_image_wiring_reaches_view_image_callable(self, monkeypatch):
-        """extra_params['__feed_image__'] が get_tools の sig 一致注入(tools.py:49)を
-        通って view_image の callable に渡り、実行で file_id が push されることを固定する。
-        middleware.py の extra_params キー名 ↔ view_image の param 名カップリングが
-        片方だけ改名/削除されると view_image が『実行文脈外』で画素を落とす回帰を検出。"""
-        import asyncio
-        from nucllei.utils.tools import get_tools
-        from nucllei.builtin_tools import view_image as vi
-
-        self._sync()
-
-        rec = types.SimpleNamespace(
-            user_id="u1", meta={"content_type": "image/png"}, path="p", filename="x.png"
-        )
-        monkeypatch.setattr(vi.Files, "get_file_by_id", lambda fid: rec)
-        monkeypatch.setattr(vi, "_read_raw", lambda r: b"png-bytes")
-
-        pushed = []
-        loaded = get_tools(
-            _fake_request(),
-            ["builtin_view_image"],
-            types.SimpleNamespace(id="u1", role="user"),
-            {"__user__": {"id": "u1"}, "__feed_image__": pushed.append},
-        )
-        out = asyncio.run(loaded["view_image"]["callable"](file_id="img-1"))
-        assert pushed == ["img-1"]
-        assert "img-1" in out
-
     def test_sync_is_idempotent_and_refreshes_from_repo(self):
         self._sync()
         # 手で specs を汚しても再 sync で repo から復元される

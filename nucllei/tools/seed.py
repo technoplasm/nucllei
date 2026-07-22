@@ -217,9 +217,8 @@ def main():
         skill_ids.append(skill_id)
 
     preset_tools = [tid for tid, e in TOOLS.items() if e["preset"]]
-    # builtin(#42/#89): view_image は起動時 sync_builtin_tools で立つため TOOLS には
-    # 載らないが、preset への露出はここで明示的に足す(custom 撤去による露出回帰を防ぐ)。
-    preset_tools.append("builtin_view_image")
+    # view_image は builtin から外し、prism 側 tool `feed_image` に一本化(#89 改訂)。
+    # dev preset への露出は prism tool を seed する側で足す。
     wire_preset(base, args.token, args.model, preset_tools, skill_ids)
     print("完了")
 
