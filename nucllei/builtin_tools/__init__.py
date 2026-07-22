@@ -62,6 +62,14 @@ def sync_builtin_tools() -> None:
     from nucllei.models.tools import ToolForm, ToolMeta, Tools
     from nucllei.utils.tools import get_tool_specs
 
+    # 不変条件: 全 builtin id は予約 prefix を持つ。破れると prune(prefix 基準)が
+    # 撤去時に orphan を掃除できなくなる(#89 review nit)。開発時に早期検知する。
+    _bad = [k for k in BUILTIN_TOOLS if not k.startswith(BUILTIN_ID_PREFIX)]
+    if _bad:
+        raise ValueError(
+            f"builtin id は '{BUILTIN_ID_PREFIX}' 始まりが必須(prune 前提): {_bad}"
+        )
+
     for tool_id, entry in BUILTIN_TOOLS.items():
         try:
             specs = get_tool_specs(entry["module"].Tools())

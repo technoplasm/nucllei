@@ -215,18 +215,33 @@ class Tools:
         for tid in [t for t, v in _THREADS.items() if v["expires"] <= now]:
             _THREADS.pop(tid, None)
 
-    async def _save_thread(self, tid: str, rec: dict) -> None:
-        """会話履歴を thread_id で保存。TTL をターン毎に張り直す (スライディング)。"""
+    async def _save_thread(
+        self, tid: str, rec: dict, owner: Optional[str] = None
+    ) -> None:
+        """会話履歴を thread_id で保存。TTL をターン毎に張り直す (スライディング)。
+        owner (作成者の user id) を捕捉して継続時の所有者照合に使う (#89 review: IDOR 封鎖)。
+        継続保存が owner を渡さなくても、作成時の owner を保持する。"""
         self._sweep_threads()
+        prev = _THREADS.get(tid) or {}
         _THREADS[tid] = {
             "expires": time.time() + self.valves.thread_ttl_s,
             "rec": rec,
+            "owner": owner if owner is not None else prev.get("owner"),
         }
 
-    async def _load_thread(self, tid: str) -> Optional[dict]:
+    async def _load_thread(
+        self, tid: str, caller: Optional[str] = None
+    ) -> Optional[dict]:
         self._sweep_threads()
         entry = _THREADS.get(tid)
-        return entry["rec"] if entry else None
+        if not entry:
+            return None
+        # 所有者照合 (#89 review, IDOR): tid を知る他人に会話文脈を継続させない。
+        # 非所有者には None (=「見つからない」と同じ) を返し、存在自体も漏らさない。
+        owner = entry.get("owner")
+        if owner and owner != caller:
+            return None
+        return entry["rec"]
 
     async def _read_cage_doc(
         self, doc_path: str
@@ -380,7 +395,7 @@ class Tools:
         # =====================================================================
         if thread_id:
             try:
-                rec = await self._load_thread(thread_id)
+                rec = await self._load_thread(thread_id, (__user__ or {}).get("id"))
             except Exception as e:
                 return {"ok": False, "error": f"thread 復元失敗: {e!r}"}
             if not rec:
@@ -526,7 +541,11 @@ class Tools:
         messages.append({"role": "assistant", "content": answer})
         tid = uuid.uuid4().hex
         try:
-            await self._save_thread(tid, {"model": model, "messages": messages})
+            await self._save_thread(
+                tid,
+                {"model": model, "messages": messages},
+                owner=(__user__ or {}).get("id"),
+            )
         except Exception as e:
             return {"ok": False, "error": f"thread 保存失敗: {e!r}"}
 
