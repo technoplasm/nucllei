@@ -75,6 +75,21 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
   `export_workspace_file` → `import_from_workspace`(workspace→chat)。前置詞が向きを表す対称命名。
   実体は prism-hu/llens(prism-hu/llens#3 draft)。`list_workspace` は据置。
 
+## 改訂(2026-07-22、#89 D2 反転 + #42 builtin ライフサイクル)
+
+- **view_image は builtin から撤去**(`38895a982`、#89 D2 反転)。上の 2026-07-21 節で builtin 化した
+  view_image は prism tool **`feed_image`** へ一本化して撤去(builtin は `builtin_history` のみに戻る)。
+  `__feed_image__` プリミティブの正規 model-pull 入口は prism tool 側。経緯は [[pr88-display-next]]。
+- **builtin ライフサイクル = prune + prefix 予約**(`6063bd701`、#42)。`sync_builtin_tools()` を
+  「upsert + prune」に:`builtin_` prefix を持つのに BUILTIN_TOOLS 未定義の行を起動時に削除
+  (コードから外した builtin は DB からも消える。旧 `builtin_view_image` 等の orphan を残さない)。
+  create ガードは `is_reserved_builtin_id`(prefix 判定)へ拡張し、未定義 id でも `builtin_` 始まりは
+  一律拒否(update/delete 保護は実 builtin=dict 所属のみ、従来通り)。回帰 13 passed
+  (prune / prefix 予約の 2 ケース追加、`test_builtin_tools.py`)。
+- 注意: prune は **builtin(`builtin_` prefix)専用**。改名・撤去された **custom tool**(旧
+  `view_image` / `doc` 等)は prune 対象外で、`make nuc-sync`(prism sync)も削除しない。
+  dev では手削除した([[dev-environment]] のセッション追補)。custom 側 prune は別途検討(未起票)。
+
 ## 1. 設計(議論の着地)
 
 ### 1a. 制御面はモデル設定に一元化(グローバルフラグなし)

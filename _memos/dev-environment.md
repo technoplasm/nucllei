@@ -364,3 +364,27 @@ LLENS_STT_SMOKE=1 uv run pytest \
   `pnpm i18n:parse` して diff の追加/削除キーを全数目視する。
 - **parser の input は `src/**/*.{js,svelte}` — `.ts` を含まない**。.ts 内の静的 t('...')
   (例: tts.svelte.ts)も dynamic-keys.js に載せないと prune される。
+
+## セッション追補(2026-07-22、prism sync / preset / sandbox 再ビルド)
+
+dev 実機(:3000)に prism ツールを載せて検証したときの罠と手順。真実源はコード + issue #88/#89/#42。
+
+- **preset は `llens-thinking` に改名済み**(旧 `llens-assistant`)。prism `nuc-sync` の prompt 同期は
+  「ファイル名 stem = model id」で当たるため、`nucllei/prompts/llens-thinking.md` は model
+  `llens-thinking` にだけ届く。改名前は harness 管理外で system prompt がドリフトした
+  (`exports` に直したのに preset は旧 `outputs` のまま → モデルが `/workspace/outputs` に保存する実害)。
+  **preset は必ず prompt ファイル stem に一致させる**。
+- **preset の toolIds は生きた id のみ**。dead id を残すと "tool not available" になる
+  (実害: `feed_image` 未登録 + `view_image` dead で feed_image が呼べず、モデルが画像内容を捏造)。
+  現行の正: `view_image`→`feed_image`、`doc`→`doc_tool` に差し替え済み。
+- **改名・撤去された custom tool は手削除**。`nuc-sync` は custom を prune しないので、旧
+  `view_image` / `doc` の DB 行が残る。builtin の prune(#42)は `builtin_` prefix 専用で custom は対象外。
+  admin API で `DELETE /api/v1/tools/id/{id}/delete`(builtin でなければ通る)。
+- **prism `nuc-sync` の向き先 = `NUCLLEI_ORIGIN`**(llens `.env`、`005df9e`)。dev は
+  `NUCLLEI_ORIGIN=http://localhost:3000`。admin API Key は llens `.env` の `NUCLLEI_API_KEY` に置く
+  (この開発機だけの単一 .env 管理。`.env` は gitignore 済み)。dev key は
+  `POST /api/v1/auths/signin`(ken@llens.local / llens-dev)→ `GET /api/v1/auths/api_key` で取得。
+- **sandbox は imports/exports 命名で再ビルド要**(旧 inputs/outputs コンテナだと tool と食い違う)。
+  compose 補間が `nucllei` サービスの `NUCLLEI_DB_PASSWORD` を要求するので、sandbox 単体は
+  `docker build -t llens/sandbox:poc ./sandbox` → `NUCLLEI_DB_PASSWORD=x docker compose up -d --no-deps --force-recreate sandbox`。
+  `/exec` 応答キーが `outputs`→`exports` に変わったのを確認(スモーク: exports/ に書いて応答 keys を見る)。
