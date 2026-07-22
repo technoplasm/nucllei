@@ -77,8 +77,8 @@ class Tools:
 
         - 対象は画像(image/*)のみ。テキスト / PDF 等は対象外(それらは
           inspect_artifact / ask_subagent を使う)。
-        - run_python の戻り値(outputs/ 自動添付)や import_from_workspace が返す
-          file_id を渡す。/api/v1/files/<id>/content の <id> 部分(UUID)が file_id。
+        - 自分が生成 / 退避した画像や既存添付の file_id を渡す(どの tool が返した
+          file_id でもよい)。/api/v1/files/<id>/content の <id> 部分(UUID)が file_id。
 
         :param file_id: 見たい画像の file_id(UUID)
         """
