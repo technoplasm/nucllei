@@ -176,9 +176,7 @@
 			}
 		}),
 		editorTheme.of([]),
-		editorLanguage.of([]),
-		// 散文向け: 横スクロールでなく折り返す。コード編集では渡さない(既定 false)。
-		...(lineWrapping ? [EditorView.lineWrapping] : [])
+		editorLanguage.of([])
 	];
 
 	$effect(() => {
@@ -206,11 +204,16 @@
 		// Check if html class has dark mode
 		isDarkMode = document.documentElement.classList.contains('dark');
 
+		// 散文向け(system prompt 等)は横スクロールでなく折り返す。コード編集は既定 false。
+		// prop 参照は onMount 内(=マウント時に一度読む)に置く: top-level 配列で参照すると
+		// runes の state_referenced_locally 警告になる(lineWrapping は静的 prop なので初回読みで十分)。
+		const initExtensions = lineWrapping ? [...extensions, EditorView.lineWrapping] : extensions;
+
 		// python code editor, highlight python code
 		codeEditor = new EditorView({
 			state: EditorState.create({
 				doc: _value,
-				extensions: extensions
+				extensions: initExtensions
 			}),
 			parent: document.getElementById(`code-textarea-${id}`) ?? undefined
 		});
