@@ -292,6 +292,16 @@ class Tools:
                 "error": "該当 file_id のレコードが無い",
             }
 
+        # 所有者チェック(#40 と同クラスの IDOR 封鎖): 他ユーザーの file_id を
+        # subagent/主 context に読み込ませない(view_image と同じ規律)。
+        owner = getattr(rec, "user_id", None)
+        if owner and owner != (__user__ or {}).get("id"):
+            return {
+                "found": False,
+                "file_id": file_id,
+                "error": f"file_id {file_id} にアクセス権が無い",
+            }
+
         meta = getattr(rec, "meta", None) or {}
         content, source = _read_content(rec)
         content = content or ""
@@ -441,9 +451,15 @@ class Tools:
             if Files is None:
                 return {"ok": False, "error": "open_webui 内部 API を解決できない"}
 
-            rec = await Files.get_file_by_id(file_id)
+            rec = Files.get_file_by_id(file_id)  # v0.6.5 は sync(await は TypeError)
             if not rec:
                 return {"ok": False, "error": f"file_id {file_id} のレコードが無い"}
+
+            # 所有者チェック(#40 と同クラスの IDOR 封鎖): 他ユーザーの file_id を
+            # subagent に読ませない(view_image / inspect_artifact と同じ規律)。
+            owner = getattr(rec, "user_id", None)
+            if owner and owner != (__user__ or {}).get("id"):
+                return {"ok": False, "error": f"file_id {file_id} にアクセス権が無い"}
 
             meta = getattr(rec, "meta", None) or {}
             ct = (meta.get("content_type") or "").lower()
