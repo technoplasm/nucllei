@@ -47,7 +47,7 @@
 		--primary-content: #ffffff;
 
 		/* 副ボタン(戻る/キャンセル等の控えめな操作)。raised(入力面)とは顔を分ける */
-		--secondary: #e9e9e9;
+		--secondary: #f0f0f0;
 		--secondary-hover: #dddddd;
 		--secondary-content: #333333;
 		/* テキスト(前景)の意味トークン。実値は raw hex(--surface と同流儀)。
