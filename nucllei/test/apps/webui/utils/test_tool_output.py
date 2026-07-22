@@ -1,12 +1,12 @@
 """tool 出力 sink(#89 画像 / #88 display)と各経路の回帰。
 
 - feed_image は実行中 sink に file_id を積む。sink 未設定(文脈外)では no-op。
-- execute_tool_calls: __feed_image__ を呼ぶ tool の結果に model_images が載り、
+- execute_tool_calls: __feed_image__ を呼ぶ tool の結果に context_images が載り、
   呼ばない tool には載らない(型付きトリガのみで発火)。
-- convert_content_blocks_to_messages: model_images の file_id から
+- convert_content_blocks_to_messages: context_images の file_id から
   /api/v1/files/{id}/content の image_url user メッセージを 1 つ生成する。
 - display(#88、人間の目): __display__ を呼ぶ tool の結果に display が載る。
-  feed_image と対称の sink 経路だが、model_images と違い **モデルへ再注入しない**
+  feed_image と対称の sink 経路だが、context_images と違い **モデルへ再注入しない**
   (convert が display を読まない)— 2 チャネル分離の本体。
 """
 
@@ -33,7 +33,7 @@ def test_sink_collects_under_context():
         feed_image("")  # 空は無視
     finally:
         tool_output.current_sink.reset(token)
-    assert sink.model_images() == ["a", "b"]
+    assert sink.context_images() == ["a", "b"]
 
 
 def _tool(callable_, name="probe"):
@@ -51,14 +51,14 @@ def _call(name="probe"):
     ]
 
 
-def test_execute_tool_calls_harvests_model_images():
+def test_execute_tool_calls_harvests_context_images():
     async def shower():
         feed_image("file-123")
         return "画像を提示しました。"
 
     results = asyncio.run(execute_tool_calls(_call(), _tool(shower)))
     assert results[0]["content"] == "画像を提示しました。"
-    assert results[0]["model_images"] == ["file-123"]
+    assert results[0]["context_images"] == ["file-123"]
 
 
 def test_execute_tool_calls_no_vlm_key_when_not_pushed():
@@ -66,7 +66,7 @@ def test_execute_tool_calls_no_vlm_key_when_not_pushed():
         return "ok"
 
     results = asyncio.run(execute_tool_calls(_call(), _tool(plain)))
-    assert "model_images" not in results[0]
+    assert "context_images" not in results[0]
 
 
 def test_failed_tool_push_is_not_harvested():
@@ -78,7 +78,7 @@ def test_failed_tool_push_is_not_harvested():
         raise RuntimeError("kaboom")
 
     results = asyncio.run(execute_tool_calls(_call(), _tool(boom)))
-    assert "model_images" not in results[0]
+    assert "context_images" not in results[0]
     assert "kaboom" in results[0]["content"]
 
 
@@ -96,7 +96,7 @@ def test_sync_tool_sink_propagates_via_to_thread():
         return await asyncio.to_thread(sync_tool)
 
     results = asyncio.run(execute_tool_calls(_call(), _tool(wrapper)))
-    assert results[0]["model_images"] == ["sync-img"]
+    assert results[0]["context_images"] == ["sync-img"]
     assert results[0]["content"] == "done"
 
 
@@ -114,11 +114,11 @@ def test_sink_isolated_per_tool_call():
     ]
     tools = {**_tool(shower, "probe"), **_tool(plain, "plain")}
     results = asyncio.run(execute_tool_calls(calls, tools))
-    assert results[0]["model_images"] == ["img-A"]
-    assert "model_images" not in results[1]
+    assert results[0]["context_images"] == ["img-A"]
+    assert "context_images" not in results[1]
 
 
-def test_convert_builds_image_url_from_model_images():
+def test_convert_builds_image_url_from_context_images():
     blocks = [
         {"type": "text", "content": "見て"},
         {
@@ -130,7 +130,7 @@ def test_convert_builds_image_url_from_model_images():
                 {
                     "tool_call_id": "c1",
                     "content": "提示しました。",
-                    "model_images": ["abc"],
+                    "context_images": ["abc"],
                 }
             ],
         },
@@ -148,7 +148,7 @@ def test_convert_builds_image_url_from_model_images():
     assert all(not u.startswith("data:") for u in urls)
 
 
-def test_convert_no_user_message_without_model_images():
+def test_convert_no_user_message_without_context_images():
     blocks = [
         {
             "type": "tool_calls",
@@ -219,7 +219,7 @@ def test_execute_tool_calls_no_display_key_when_not_pushed():
 
 def test_failed_tool_push_display_not_harvested():
     """push した後に例外を投げた tool の display は載せない(失敗 call は副産物を
-    出さない — model_images と同じ規律)。"""
+    出さない — context_images と同じ規律)。"""
 
     async def boom():
         display("途中まで")
@@ -246,7 +246,7 @@ def test_sync_tool_display_propagates_via_to_thread():
     assert results[0]["content"] == "done"
 
 
-def test_display_and_model_images_coexist_on_same_result():
+def test_display_and_context_images_coexist_on_same_result():
     """1 tool が両チャネルへ push した場合、両キーが独立に載る。"""
 
     async def both():
@@ -255,7 +255,7 @@ def test_display_and_model_images_coexist_on_same_result():
         return "ok"
 
     results = asyncio.run(execute_tool_calls(_call(), _tool(both)))
-    assert results[0]["model_images"] == ["file-9"]
+    assert results[0]["context_images"] == ["file-9"]
     assert results[0]["display"] == [{"kind": "markdown", "content": "見せる"}]
 
 
@@ -278,7 +278,7 @@ def test_display_isolated_per_tool_call():
 
 
 def test_convert_does_not_inject_display_into_model_messages():
-    """display は人間の目 — model_images と対称だが向きが逆で、モデルへは再注入しない。
+    """display は人間の目 — context_images と対称だが向きが逆で、モデルへは再注入しない。
     tool メッセージの content はそのまま、追加の user メッセージも生えない。"""
     blocks = [
         {

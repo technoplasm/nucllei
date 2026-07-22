@@ -3,7 +3,7 @@
 - 引数パースは厳密 JSON 一次(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
   _memos/model-frames.md)、Python リテラル風は ast.literal_eval で救済。
 - #89: tool 結果 list からの data URL 無差別抽出(旧 files magic)は廃止。
-  VLM 注入は __feed_image__(file_id)→model_images の型付き経路のみ
+  VLM 注入は __feed_image__(file_id)→context_images の型付き経路のみ
   (test_tool_output.py)。list はそのまま JSON 直列化される。
 """
 
@@ -69,7 +69,7 @@ def test_arguments_fall_back_to_python_literal():
 def test_list_result_data_urls_are_no_longer_extracted():
     """#89: list 戻りからの data URL 無差別抽出(旧 files magic)は廃止。list は
     そのまま JSON 直列化され、data URL も content に残る(勝手に画像化しない)。
-    VLM 注入は __feed_image__(file_id)→model_images の型付き経路のみ。"""
+    VLM 注入は __feed_image__(file_id)→context_images の型付き経路のみ。"""
     data_a = "data:image/png;base64,AAAA"
 
     async def probe():
@@ -78,7 +78,7 @@ def test_list_result_data_urls_are_no_longer_extracted():
     results = asyncio.run(execute_tool_calls([_call("{}")], _tool(probe)))
 
     assert "files" not in results[0]
-    assert "model_images" not in results[0]
+    assert "context_images" not in results[0]
     assert json.loads(results[0]["content"]) == [data_a, "こんにちは"]
     assert results[0]["render"] == {"kind": "json"}
 
@@ -123,7 +123,7 @@ def test_dict_result_carries_json_render_kind():
 
 
 def test_list_result_has_no_image_side_channel_key():
-    """list 結果は画像サイドチャネルキー(旧 files / 新 model_images)を持たない
+    """list 結果は画像サイドチャネルキー(旧 files / 新 context_images)を持たない
     — JSON 直列化のみ。"""
 
     async def probe():
@@ -132,5 +132,5 @@ def test_list_result_has_no_image_side_channel_key():
     results = asyncio.run(execute_tool_calls([_call("{}")], _tool(probe)))
 
     assert "files" not in results[0]
-    assert "model_images" not in results[0]
+    assert "context_images" not in results[0]
     assert json.loads(results[0]["content"]) == ["a", "b"]

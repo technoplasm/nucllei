@@ -6,7 +6,7 @@ file_id)や既存添付の画像を、自分で確認・評価したいときに
 
 仕組み(#89、汎用 tool-push 経路に載る):本 tool は file_id を検証して
 `__feed_image__(file_id)`(どの tool でも使える汎用ヘルパ)を呼ぶだけ。middleware が
-実行中 tool-call の sink から file_id を harvest して results[i].model_images へ載せ、
+実行中 tool-call の sink から file_id を harvest して results[i].context_images へ載せ、
 convert_content_blocks_to_messages が `/api/v1/files/{id}/content` の image_url を組み、
 送信直前に inline_internal_image_urls が 1 回だけ base64 化してモデルへ再投入する。
 base64 は戻り境界にも DB スナップショットにも載らない。view_image はこの機構の
@@ -139,5 +139,5 @@ class Tools:
             )
 
         # role:tool の content は非空の status 文字列(空 content を拒否する互換
-        # サーバ対策 + モデルへ「提示した」ことを伝える)。画素は model_images 経由で届く。
+        # サーバ対策 + モデルへ「提示した」ことを伝える)。画素は context_images 経由で届く。
         return f"画像 {filename} を提示しました(file_id={file_id})。"

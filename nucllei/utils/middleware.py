@@ -961,7 +961,7 @@ async def execute_tool_calls(response_tool_calls, tools):
                 )
 
         tool_result = None
-        model_image_file_ids = []
+        context_image_file_ids = []
         display_items = []
 
         if tool_name not in tools:
@@ -981,7 +981,7 @@ async def execute_tool_calls(response_tool_calls, tools):
 
             # llens(#89): tool-call ごとの出力 sink を張る。tool が
             # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、下で
-            # harvest して results[i].model_images へ載せる(VLM 再注入トリガ)。
+            # harvest して results[i].context_images へ載せる(VLM 再注入トリガ)。
             # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
             sink = ToolOutputSink()
             sink_token = tool_output.current_sink.set(sink)
@@ -1024,7 +1024,7 @@ async def execute_tool_calls(response_tool_calls, tools):
             # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は副産物を
             # 出さない — content=エラー文言と画像が混在する不整合を避ける)。成功時のみ
             # harvest(lock 下 snapshot で timeout orphan スレッドの遅延 append を除外)。
-            model_image_file_ids = sink.model_images() if tool_succeeded else []
+            context_image_file_ids = sink.context_images() if tool_succeeded else []
             # display(人間の目、#88)も同じ規律で成功時のみ harvest。
             display_items = sink.displays() if tool_succeeded else []
 
@@ -1047,8 +1047,8 @@ async def execute_tool_calls(response_tool_calls, tools):
                 "content": tool_result,
                 **({"render": result_render} if result_render else {}),
                 **(
-                    {"model_images": model_image_file_ids}
-                    if model_image_file_ids
+                    {"context_images": context_image_file_ids}
+                    if context_image_file_ids
                     else {}
                 ),
                 **({"display": display_items} if display_items else {}),

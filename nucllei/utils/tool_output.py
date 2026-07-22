@@ -3,7 +3,7 @@
 tool は戻り値(モデル向け作業データ)とは別に、実行中に「誰かに見せたい」出力を
 push できる。誰の目に届くかでチャネルを分ける:
 
-- `__feed_image__(file_id)` → results[i].model_images(モデル/VLM の目。画素を再注入)
+- `__feed_image__(file_id)` → results[i].context_images(モデル/VLM の目。画素を再注入)
 - `__display__(content, kind)` → results[i].display(人間の目。collapse 外。モデル非注入。#88)
 
 いずれも「注入ヘルパ(tool-push)+ tool-call ごとの sink へ蓄積 + ブロック永続」で、
@@ -33,18 +33,18 @@ class ToolOutputSink:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._model_images: list[str] = []
+        self._context_images: list[str] = []
         self._displays: list[dict] = []
 
-    def add_model_image(self, file_id: str) -> None:
+    def add_context_image(self, file_id: str) -> None:
         if not file_id or not isinstance(file_id, str):
             return
         with self._lock:
-            self._model_images.append(file_id)
+            self._context_images.append(file_id)
 
-    def model_images(self) -> list[str]:
+    def context_images(self) -> list[str]:
         with self._lock:
-            return list(self._model_images)
+            return list(self._context_images)
 
     def add_display(self, content: str, kind: str = "markdown") -> None:
         # 空/非文字列の content は捨てる(見せる中身が無い push は no-op)。
@@ -86,7 +86,7 @@ def feed_image(file_id: str) -> None:
     sink = current_sink.get()
     if sink is None:
         return
-    sink.add_model_image(file_id)
+    sink.add_context_image(file_id)
 
 
 def display(content: str, kind: str = "markdown") -> None:
