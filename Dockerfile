@@ -40,10 +40,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl jq ffmpeg pandoc && \
     rm -rf /var/lib/apt/lists/*
 
-# python 依存は uv.lock に忠実に /app/.venv へ(--extra stt = 内蔵 faster-whisper、#53)
+# python 依存は uv.lock に忠実に /app/.venv へ(--extra stt = 内蔵 faster-whisper、#53)。
+# この層はソース未 COPY なので --no-install-project(依存だけ入れてレイヤーキャッシュを最大化)
 RUN pip3 install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra stt --no-cache
+RUN uv sync --frozen --no-dev --extra stt --no-cache --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
 # whisper モデルの焼き込み(air-gapped 先は初回 DL 不可 — 必要なら build 時に指定):
@@ -56,6 +57,8 @@ RUN if [ -n "$PRELOAD_WHISPER_MODEL" ]; then \
 COPY --from=build /app/build /app/build
 COPY --from=build /app/package.json /app/package.json
 COPY nucllei /app/nucllei
+# nucllei 本体を editable install(console script `nucllei` の生成。依存は上の層で解決済みなので一瞬)
+RUN uv sync --frozen --no-dev --extra stt --no-cache
 
 RUN mkdir -p /app/data
 

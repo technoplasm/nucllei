@@ -34,7 +34,7 @@ Open http://localhost:5173. The dev setup mirrors the production single-origin l
 so cookie auth works out of the box. Create the first admin with:
 
 ```sh
-uv run task create-admin   # or: uv run task cli --help
+uv run task create-dev-admin   # conventional dev admin; any account: uv run nucllei create-admin --email ...
 ```
 
 The backend reads a gitignored `.env` at the repo root on startup (`--reload` does not

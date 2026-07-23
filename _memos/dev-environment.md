@@ -187,15 +187,14 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
 
 DB(`data/webui.db`)は clone に含まれないので、新環境では作り直す:
 
-1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。taskipy タスクで作成する:
+1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。CLI で作成する:
    ```sh
-   uv run task create-admin        # 慣例 dev admin(ken@llens.local / llens-dev)を一発で作る
-   # 任意アカウントは汎用 cli で: uv run task cli create-admin --email a@llens.local --name A --password llens-dev
+   uv run task create-dev-admin    # 慣例 dev admin(ken@llens.local / llens-dev)を一発で作る
+   # 任意アカウントはサブコマンド直: uv run nucllei create-admin --email a@llens.local --name A --password llens-dev
    ```
    慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
-   ※ 旧手順の `.venv/bin/open-webui` は **使えない**(`package = false` でコンソールスクリプト未生成)。
-   タスクは `python -c 'from nucllei import app; app()'` で typer app を直接呼ぶ。
-   `uv run task cli --help` で全サブコマンド確認可。
+   ※ CLI は console script `nucllei`(2026-07-24 に package 化 — 旧 `uv run task cli` の
+   `python -c` 呪文は撤去)。`uv run nucllei --help` で全サブコマンド確認可。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
    **権限検証用の非 admin アカウント(#66 で作成、パスワードは同じ llens-dev)**:

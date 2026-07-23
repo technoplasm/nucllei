@@ -92,19 +92,19 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
 
 ### CLI
 
-The container CMD is `python -c 'from nucllei import app; app()' serve --port $PORT`.
-Commands:
+The backend ships a `nucllei` console script (the container CMD is `nucllei serve --port $PORT`;
+from a source checkout use `uv run nucllei ...`). Commands:
 
 | Command                                            | Purpose                                                                                        |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `serve --host 0.0.0.0 --port 8080`                 | production server (uvicorn, `UVICORN_WORKERS` workers)                                         |
 | `dev --reload`                                     | development server, single worker, no secret-key persistence                                   |
 | `create-admin --email X [--name N] [--password P]` | provision an admin from the server side (prompts for password if omitted; works on a fresh DB) |
-| `main --version`                                   | print version                                                                                  |
+| `--version`                                        | print version                                                                                  |
 
-The recommended bootstrap is `ENABLE_SIGNUP=false` + `create-admin` (e.g.
-`docker exec -it <ctr> python -c 'from nucllei import app; app()' create-admin --email ...`),
-then create users/groups from the admin UI or API.
+Bootstrap the first admin with `create-admin` (e.g.
+`docker exec -it <ctr> nucllei create-admin --email ...`),
+then manage users/groups from the admin UI or API.
 
 When running from source, a gitignored `.env` at the repo root is loaded at startup
 (real environment variables win over `.env` entries).
@@ -175,23 +175,23 @@ is read per request (edits apply without a restart):
 
 ### 3.3 Auth & security
 
-| Var                                                                                                                                                                                     | Kind | Default                 | Effect                                                                                                           |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `WEBUI_AUTH`                                                                                                                                                                            | env  | `true`                  | `false` = single-user, no-auth mode                                                                              |
-| `WEBUI_SECRET_KEY`                                                                                                                                                                      | env  | auto-generated (see §2) | JWT signing key                                                                                                  |
-| `JWT_EXPIRES_IN`                                                                                                                                                                        | RC   | `-1` (no expiry)        | session lifetime: `-1` \| `0` \| `<n>(s                                                                          | m   | h   | d   | w)` |
-| `ENABLE_SIGNUP`                                                                                                                                                                         | RC   | `true`                  | public signup (auto-disabled after the first user becomes admin; production reference: `false` + `create-admin`) |
-| `ENABLE_LOGIN_FORM`                                                                                                                                                                     | RC   | `true`                  | email/password form (off for SSO-only)                                                                           |
-| `DEFAULT_USER_ROLE`                                                                                                                                                                     | RC   | `pending`               | role given to new signups                                                                                        |
-| `ENABLE_API_KEY`                                                                                                                                                                        | RC   | `true`                  | allow user API keys (`sk-...`)                                                                                   |
-| `ENABLE_API_KEY_ENDPOINT_RESTRICTIONS`                                                                                                                                                  | RC   | `false`                 | restrict API keys to a path allowlist                                                                            |
-| `API_KEY_ALLOWED_ENDPOINTS`                                                                                                                                                             | RC   | `""`                    | comma-separated path prefixes; **empty list + restrictions on = deny all API-key requests**                      |
-| `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_SESSION_COOKIE_SECURE`                                                                                                                        | env  | `lax` / `false`         | session cookie flags                                                                                             |
-| `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE`                                                                                                                              | env  | = session values        | auth (`token`) cookie flags                                                                                      |
-| `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER`                                                                                                                    | env  | unset                   | header-based SSO behind a trusted proxy                                                                          |
-| `BYPASS_MODEL_ACCESS_CONTROL`                                                                                                                                                           | env  | `false`                 | skip per-model group ACL                                                                                         |
-| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS`                                                                                                                                      | env  | `true` / `true`         | admin DB export / admin access to user chats                                                                     |
-| `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env  | unset                   | each sets the corresponding response security header when present                                                |
+| Var                                                                                                                                                                                     | Kind | Default                 | Effect                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------- | ------------------------------------------------------------------------------------------- |
+| `WEBUI_AUTH`                                                                                                                                                                            | env  | `true`                  | `false` = single-user, no-auth mode                                                         |
+| `WEBUI_SECRET_KEY`                                                                                                                                                                      | env  | auto-generated (see §2) | JWT signing key                                                                             |
+| `JWT_EXPIRES_IN`                                                                                                                                                                        | RC   | `-1` (no expiry)        | session lifetime: `-1` \| `0` \| `<n>(s                                                     | m   | h   | d   | w)` |
+| `ENABLE_SIGNUP`                                                                                                                                                                         | RC   | `true`                  | public signup (auto-disabled after the first user becomes admin)                            |
+| `ENABLE_LOGIN_FORM`                                                                                                                                                                     | RC   | `true`                  | email/password form (off for SSO-only)                                                      |
+| `DEFAULT_USER_ROLE`                                                                                                                                                                     | RC   | `pending`               | role given to new signups                                                                   |
+| `ENABLE_API_KEY`                                                                                                                                                                        | RC   | `true`                  | allow user API keys (`sk-...`)                                                              |
+| `ENABLE_API_KEY_ENDPOINT_RESTRICTIONS`                                                                                                                                                  | RC   | `false`                 | restrict API keys to a path allowlist                                                       |
+| `API_KEY_ALLOWED_ENDPOINTS`                                                                                                                                                             | RC   | `""`                    | comma-separated path prefixes; **empty list + restrictions on = deny all API-key requests** |
+| `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_SESSION_COOKIE_SECURE`                                                                                                                        | env  | `lax` / `false`         | session cookie flags                                                                        |
+| `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE`                                                                                                                              | env  | = session values        | auth (`token`) cookie flags                                                                 |
+| `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER`                                                                                                                    | env  | unset                   | header-based SSO behind a trusted proxy                                                     |
+| `BYPASS_MODEL_ACCESS_CONTROL`                                                                                                                                                           | env  | `false`                 | skip per-model group ACL                                                                    |
+| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS`                                                                                                                                      | env  | `true` / `true`         | admin DB export / admin access to user chats                                                |
+| `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env  | unset                   | each sets the corresponding response security header when present                           |
 
 OAuth (Google / Microsoft / GitHub / generic OIDC via `GOOGLE_CLIENT_ID`&`_SECRET`,
 `MICROSOFT_CLIENT_ID`&`_SECRET`&`_TENANT_ID`, `GITHUB_CLIENT_ID`&`_SECRET`,

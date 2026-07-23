@@ -24,13 +24,13 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.command()
+@app.callback()
 def main(
     version: Annotated[
         Optional[bool], typer.Option("--version", callback=version_callback)
     ] = None,
 ):
-    pass
+    """Nucllei CLI."""
 
 
 @app.command()

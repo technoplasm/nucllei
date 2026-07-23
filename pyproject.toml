@@ -136,6 +136,14 @@ requires-python = ">=3.11,<3.13"
 # バージョンの真実源は git tag(APP_VERSION、#25)。ここは uv が要求するので置くだけ。
 version = "0.0.0"
 
+# CLI の正式な入口(typer app)。editable install されるので venv からそのまま叩ける:
+#   uv run nucllei --help
+#   uv run nucllei serve --port 8080
+#   uv run nucllei create-admin --email a@llens.local --name A --password llens-dev
+# Docker の CMD も同じ入口(`nucllei serve`)。
+[project.scripts]
+nucllei = "nucllei:app"
+
 [project.optional-dependencies]
 # 内蔵 STT(faster-whisper)。torch を引かないので軽く、Docker イメージに同梱する
 # (#53: prod は内蔵 faster-whisper STT)。
@@ -181,11 +189,11 @@ force-exclude = true
 # E9 = 構文/実行時エラー級、F = pyflakes(未定義名・未使用 import 等)
 select = ["E9", "F"]
 
-[tool.uv]
-# Treat this as a virtual project: `uv sync` installs dependencies into .venv
-# but does NOT build/install nucllei itself.
-# Run the backend from the repo root with `uv run task dev`.
-package = false
+# uv が nucllei 自身を editable install するのに必要(console script `nucllei` の生成元)。
+# wheel/PyPI 配布はしない(Docker のみ — #34)— これはローカル venv 用の最小構成。
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 # テストは `from test.util ...` / `from nucllei ...` の両方を import するため、
@@ -214,13 +222,8 @@ licenses = "python scripts/generate_licenses.py"
 # → CI が ghcr.io/technoplasm/nucllei:<tag> を出す。`uv run task tag pre` / `tag release`。
 tag = "python scripts/tag.py"
 
-# nucllei CLI(typer app: `nucllei:app`)への汎用エントリ。任意のサブコマンドを
-# 後ろに足して叩ける。コンソールスクリプトは未インストール(package=false)なので
-# typer app を直接呼ぶ。Docker の CMD も同じ入口(serve)を使う。
-#   uv run task cli --help
-#   uv run task cli create-admin --email a@llens.local --name A --password llens-dev
-#   uv run task cli generate-secret-key
-cli = "python -c 'from nucllei import app; app()'"
-# 慣例の dev admin(ken@llens.local / llens-dev)を一発で作る cli の薄いエイリアス。
-create-admin = "python -c 'from nucllei import app; app()' create-admin --email ken@llens.local --name Ken --password llens-dev"
+# CLI 本体は console script(`uv run nucllei --help`、[project.scripts])。ここに置くのは
+# repo 雑務タスクだけ。以下は慣例 dev admin(ken@llens.local / llens-dev)を一発で作る
+# dev 専用エイリアス — 一般の admin 作成は `uv run nucllei create-admin --email ...`。
+create-dev-admin = "nucllei create-admin --email ken@llens.local --name Ken --password llens-dev"
 

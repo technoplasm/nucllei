@@ -52,6 +52,9 @@ def backend_packages():
         name = meta.get("Name") or ""
         if not name:
             continue
+        # package 化(console script `nucllei`)で自分自身も venv に入る — 依存ではないので除外
+        if name == "nucllei":
+            continue
 
         # License-Expression(PEP 639)→ License → classifier の順で拾う。
         # 旧式パッケージは License にライセンス本文を丸ごと入れていることがあるので
