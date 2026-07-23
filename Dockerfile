@@ -20,7 +20,9 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 ENV APP_VERSION=${APP_VERSION}
-RUN pnpm build
+# multi-arch ビルドでは arm64 ステージの QEMU 実行が並走しメモリを圧迫する。
+# V8 の既定 heap 上限は環境依存でギリギリ(pre-11 で OOM 実績)— 明示して固定する
+RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
 
 ######## backend + runtime ########
 FROM python:3.11-slim-bookworm AS base

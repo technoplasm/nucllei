@@ -82,8 +82,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.app_version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # gha キャッシュは ref スコープ(tag run は自 tag + default branch しか読めない)のため
+          # tags-only の本 workflow では毎回コールドだった(pre-11 まで実測 CACHED ゼロ)。
+          # registry キャッシュはスコープが無く、tag を跨いで効く。
+          cache-from: type=registry,ref=ghcr.io/technoplasm/nucllei:buildcache
+          cache-to: type=registry,ref=ghcr.io/technoplasm/nucllei:buildcache,mode=max
 
       - name: Inspect
         run: docker buildx imagetools inspect "$IMAGE:${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
