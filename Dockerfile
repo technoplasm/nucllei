@@ -70,4 +70,4 @@ ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 
 # serve = 秘密鍵の生成/永続(DATA_DIR)+ uvicorn 起動(workers は UVICORN_WORKERS env)
-CMD exec python -c 'from nucllei import app; app()' serve --port "${PORT:-8080}"
+CMD exec nucllei serve --port "${PORT:-8080}"
