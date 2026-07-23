@@ -58,6 +58,9 @@ jobs:
             echo "tags=$IMAGE:dev" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Set up QEMU (arm64 エミュレーション)
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -73,7 +76,9 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64
+          # multi-arch: 同一 tag に manifest list で両アーキが同居(pull 側が自動選択)。
+          # フロントビルドは Dockerfile 側で $BUILDPLATFORM 固定(QEMU 二重実行の回避)。
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.app_version }}

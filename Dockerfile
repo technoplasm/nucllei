@@ -4,7 +4,10 @@
 # HuggingFace Space 分岐/requirements.txt/start.sh は全撤去。
 
 ######## frontend build ########
-FROM node:22-alpine3.20 AS build
+# --platform=$BUILDPLATFORM: ビルド成果物(/app/build)はアーキ非依存なので、
+# multi-arch ビルドでもフロントはランナーのネイティブ側で 1 回だけ走らせる
+# (QEMU 下で pnpm build を回すと時間が跳ね上がり OOM リスクもある)
+FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
 # バージョン焼き込み(真実源は git tag — リリース CI が ref 名を渡す。#25)
 ARG APP_VERSION
 
