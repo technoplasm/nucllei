@@ -10,6 +10,7 @@ dev アカウント(`ken@llens.local` / `llens-dev`、`_memos/dev-environment.md
 .venv/bin/python dev/e2e/check_skill_result_render.py # 構造化 result の md ハイライト + Tools loaded
 .venv/bin/python dev/e2e/check_sandbox_tools.py       # sandbox 自前ツール搭載(#18-3、E1〜E6)
 .venv/bin/python dev/e2e/check_skill_feature_gate.py  # 機能「スキル」トグル(#42 E7、後始末で ON に戻す)
+.venv/bin/python dev/e2e/mock_reasoning_model.py      # モックモデルサーバ(:13399) — think 綴じ込み再現(冒頭 docstring 参照)
 ```
 
 `check_sandbox_tools.py` は sandbox コンテナ(`llens/sandbox:poc`、`127.0.0.1:3000`)と

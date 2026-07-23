@@ -95,6 +95,76 @@ class TestReasoningDiscipline:
         reasoning = next(b for b in a.content_blocks if b["type"] == "reasoning")
         assert "ended_at" in reasoning
 
+    def test_promotion_reasoning_only_stop_becomes_text(self):
+        # 昇格規律: SGLang parser が最終回答を丸ごと reasoning_content に載せ
+        # content 空のまま stop する Kimi 実挙動(tool 追撃で観測)。
+        # 回答が思考折りたたみに綴じ込まれないよう本文へ昇格する。
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "秘密のパスワードは「じゃがいも」です。"})
+        a.note_finish_reason("stop")
+        a.finish_stream()
+
+        assert [b["type"] for b in a.content_blocks] == ["text"]
+        assert (
+            a.content_blocks[0]["content"] == "秘密のパスワードは「じゃがいも」です。"
+        )
+        assert a.content == "秘密のパスワードは「じゃがいも」です。"
+
+    def test_promotion_after_tool_results(self):
+        # 追撃ストリームの実形: tool_calls(+results)→ 空 text → reasoning のみ
+        a = make_assembler()
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        calls, _ = a.finish_stream()
+        a.ensure_tool_calls_block(calls)
+        a.set_tool_results([{"tool_call_id": "c1", "content": "ok"}])
+
+        a.start_stream()
+        a.handle_delta({"reasoning_content": "答えは 42 です。"})
+        a.note_finish_reason("stop")
+        a.finish_stream()
+
+        assert [b["type"] for b in a.content_blocks] == ["text", "tool_calls", "text"]
+        assert a.content_blocks[-1]["content"] == "答えは 42 です。"
+
+    def test_no_promotion_when_text_present(self):
+        # 本文があるなら末尾 reasoning は真正の思考 — 触らない
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "考え中"})
+        a.handle_delta({"content": "本文"})
+        a.handle_delta({"reasoning_content": "後思考"})
+        a.note_finish_reason("stop")
+        a.finish_stream()
+
+        assert [b["type"] for b in a.content_blocks] == [
+            "text",
+            "reasoning",
+            "text",
+            "reasoning",
+        ]
+
+    def test_no_promotion_without_stop(self):
+        # 切断(finish_reason 未達)・length 打ち切りの中途 reasoning は
+        # 回答に見せない(閉じ規律③で thinking のまま確定)
+        for finish_reason in (None, "length"):
+            a = make_assembler()
+            a.handle_delta({"reasoning_content": "考え中"})
+            if finish_reason:
+                a.note_finish_reason(finish_reason)
+            a.finish_stream()
+
+            reasoning = next(b for b in a.content_blocks if b["type"] == "reasoning")
+            assert "ended_at" in reasoning
+
+    def test_no_promotion_with_tool_calls(self):
+        # reasoning → tool_calls 直行(通常形)は昇格対象外
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "考え中"})
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        a.note_finish_reason("tool_calls")
+        a.finish_stream()
+
+        assert any(b["type"] == "reasoning" for b in a.content_blocks)
+
     def test_reasoning_alias_field(self):
         # reasoning_content / reasoning の両デルタ形を受ける
         a = make_assembler()

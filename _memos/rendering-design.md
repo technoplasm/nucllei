@@ -129,6 +129,26 @@ reasoning ブロックの終了は**タグ対(`</think>`)や content 到着で�
   スピナーの規律は「**task が生きている間だけ回す**」— ロード時に生きた task が
   無ければ FE が未完メッセージを done 化し、本文ゼロなら中断メッセージを表示する。
 
+### reasoning の昇格規律(2026-07-23 決定 — think 綴じ込み対策)
+
+ストリームが**正常終了(finish_reason=stop)したのに、可視テキストも tool_calls も
+無く reasoning だけで終わった**場合、その reasoning ブロックを本文(text)へ昇格する
+(`response_assembler._promote_orphan_reasoning`、finish_stream で閉じ規律③の直後)。
+
+- 根拠: Kimi は(特に tool 結果後の追撃で)最終回答を丸ごと think 内に書いて
+  閉じタグ直後に EOT することがある。SGLang reasoning parser は回答全文を
+  `reasoning_content` で流し content 空のまま stop → 回答が思考折りたたみに
+  綴じ込まれ、吹き出し本文が空になる(2026-07-23 実害・モック再現済み)。
+- 誤発火ガード(正常な思考を本文に化けさせない):
+  - **stop 限定** — 切断・task 中断・length 打ち切りの中途 reasoning は閉じ規律③で
+    thinking のまま確定(except 経路は finish_stream を通らないので構造的にも安全)
+  - **tool_calls があれば対象外**(reasoning → tool 直行は Kimi の常用形)
+  - **直前に非空 text があれば対象外**(本文があるなら末尾 reasoning は真正の思考)
+- 発火するのは「昇格しなければ吹き出しが空になる」ケースだけ。境界は
+  test_response_assembler.py の昇格 2 + 非発火 3 で固定。
+- 表示上は、ストリーム中は thinking として流れ、done の最終スナップショットで
+  本文へ置き換わる(途中では判定材料が無いため原理的に不可避)。
+
 ### L0 の確定スキーマ(2026-07-06 決定 — #17 / #27 同時決定)
 
 **永続化(#27)**: chat テーブルの JSON blob 続投。message オブジェクトに

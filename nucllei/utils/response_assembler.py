@@ -65,12 +65,14 @@ class ContentBlocksAssembler:
         """ストリーム終端処理。(tool_calls, mismatch) を返す。
 
         - reasoning の閉じ規律③(ストリーム終端 = finish / 切断 / エラー)を適用
+        - reasoning の昇格規律(下記)を適用
         - 末尾 text ブロックを strip し、空なら落とす(全滅時は空 text を 1 個残す)
         - mismatch(llens #18-2): finish_reason とパース結果の整合ガード。
           MISMATCH_MISSING_TOOL_CALLS は「tool_calls 終了なのに 1 つも組めて
           いない」= チャンク境界取りこぼしの無音失敗を可視化するためのもの。
         """
         self.close_open_reasoning_block()
+        self._promote_orphan_reasoning()
 
         if self.content_blocks:
             if self.content_blocks[-1]["type"] == "text":
@@ -206,6 +208,48 @@ class ContentBlocksAssembler:
         """最後の tool_calls ブロックに実行結果を綴じ、次の text ブロックを開く。"""
         self.content_blocks[-1]["results"] = results
         self.content_blocks.append({"type": "text", "content": ""})
+
+    def _promote_orphan_reasoning(self):
+        """reasoning の昇格規律(llens):
+
+        ストリームが正常終了(finish_reason=stop)したのに、可視テキストも
+        tool_calls も無く reasoning だけで終わった場合、その reasoning を本文
+        (text ブロック)へ昇格させる。Kimi(SGLang reasoning parser)は tool
+        結果後の追撃応答で最終回答を丸ごと reasoning_content に載せ、content
+        空のまま stop することがあり、そのままだと回答が思考折りたたみに
+        綴じ込まれて本文が空になる。
+
+        stop 限定なのは意図的: 切断・length 打ち切りの中途 reasoning を
+        回答に見せない(閉じ規律③で thinking のまま確定させる)。
+        """
+        if self._finish_reason != "stop" or self._response_tool_calls:
+            return
+
+        if not (
+            self.content_blocks
+            and self.content_blocks[-1]["type"] == "reasoning"
+            and self.content_blocks[-1].get("attributes", {}).get("type")
+            == "reasoning_content"
+        ):
+            return
+
+        # 直前に非空 text があるなら本文は既にある = 真正の末尾思考なので触らない
+        if (
+            len(self.content_blocks) >= 2
+            and self.content_blocks[-2]["type"] == "text"
+            and self.content_blocks[-2]["content"].strip()
+        ):
+            return
+
+        promoted = self.content_blocks.pop()["content"].strip()
+        if not promoted:
+            return
+
+        if self.content_blocks and self.content_blocks[-1]["type"] == "text":
+            self.content_blocks[-1]["content"] += promoted
+        else:
+            self.content_blocks.append({"type": "text", "content": promoted})
+        self.content = f"{self.content}{promoted}"
 
     def close_open_reasoning_block(self):
         """reasoning の閉じ規律(llens):

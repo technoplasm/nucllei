@@ -94,6 +94,13 @@ middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試�
 - クライアント切断(aborted_client_cut.sse): 途中までの正常フレームのみ。
   finish/usage/[DONE] は無い。リプレイテストでの「切断」入力に使う。
 - keep-alive コメント行(`: ping` 等)は観察されなかった。
+- **回答の think 綴じ込み(2026-07-23 実害)**: Kimi は(特に tool 結果後の追撃で)
+  最終回答を丸ごと think 内に書いて閉じタグ直後に EOT することがある。この場合
+  reasoning parser は回答全文を `reasoning_content` で流し、**content デルタゼロのまま
+  finish_reason=stop** で終わる。非決定的で fixture 未キャプチャ(決定的な再現は
+  `dev/e2e/mock_reasoning_model.py` — このパターンを吐くモックモデルサーバ)。
+  対策は assembler の昇格規律(`_memos/rendering-design.md` §3)。なお「think 内で回答を書いてから
+  content で言い直す」パターンの方が多く、そちらは無害(昇格は発火しない)。
 
 ## 未キャプチャ(条件が変わったら追加)
 
