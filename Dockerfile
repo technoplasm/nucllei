@@ -43,7 +43,8 @@ RUN apt-get update && \
 # python 依存は uv.lock に忠実に /app/.venv へ(--extra stt = 内蔵 faster-whisper、#53)。
 # この層はソース未 COPY なので --no-install-project(依存だけ入れてレイヤーキャッシュを最大化)
 RUN pip3 install --no-cache-dir uv
-COPY pyproject.toml uv.lock README.md ./
+# LICENSE は hatchling の project build(下の editable install)が要求する
+COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN uv sync --frozen --no-dev --extra stt --no-cache --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
