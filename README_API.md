@@ -76,12 +76,12 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
     model is downloaded into the image at _build_ time, so air-gapped targets never
     fetch at first use.
 - **Image facts**: `python:3.11-slim-bookworm` runtime; `ffmpeg` (audio), `pandoc`
-  and `markitdown[all]` (available to your Attachment Functions), bundled
+  and `markitdown[pdf,docx,pptx,xlsx,xls,outlook,epub]` (available to your Attachment Functions), bundled
   faster-whisper STT. Baked env: `ENV=prod`, `PORT=8080`, `DATA_DIR=/app/data`.
 - **Port**: `EXPOSE 8080`. `PORT` is consumed by the container CMD / HEALTHCHECK
   shell only; the app itself takes `serve --port`.
 - **Volume contract**: mount `/app/data` (= `DATA_DIR`). It holds the SQLite DB
-  (`webui.db`), uploads, model caches (whisper / HF / tiktoken), `audit.log`, and
+  (`webui.db`), uploads, model caches (whisper / HF / tiktoken), and
   the auto-generated secret key at `/app/data/.webui_secret_key`. No volume ⇒ all
   state is lost on container replacement.
 - **Secret key**: if `WEBUI_SECRET_KEY` is unset, `serve` loads
@@ -279,18 +279,17 @@ OpenAI-compatible `/v1` speech endpoint (the reference deployment points it at a
 VOICEVOX/AivisSpeech bridge), plus `AUDIO_TTS_MODEL`, `AUDIO_TTS_VOICE`,
 `AUDIO_TTS_SPLIT_ON`, `AUDIO_TTS_API_KEY`, `AUDIO_TTS_AZURE_*`.
 
-### 3.9 Logging / audit / telemetry
+### 3.9 Logging / telemetry
 
-| Var                                                                                                                   | Default                                   | Effect                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GLOBAL_LOG_LEVEL`                                                                                                    | `INFO`                                    | root level; per-source overrides: `MAIN_LOG_LEVEL`, `MODELS_LOG_LEVEL`, `OPENAI_LOG_LEVEL`, `OLLAMA_LOG_LEVEL`, `AUDIO_LOG_LEVEL`, `CONFIG_LOG_LEVEL`, `DB_LOG_LEVEL`, `WEBHOOK_LOG_LEVEL`, `OAUTH_LOG_LEVEL` |
-| `AUDIT_LOG_LEVEL`                                                                                                     | `NONE`                                    | `NONE` \| `METADATA` \| `REQUEST` \| `REQUEST_RESPONSE`; writes `$DATA_DIR/audit.log`                                                                                                                         |
-| `AUDIT_LOG_FILE_ROTATION_SIZE` / `MAX_BODY_LOG_SIZE` / `AUDIT_EXCLUDED_PATHS`                                         | `10MB` / `2048` / `/chats,/chat,/folders` | audit tuning                                                                                                                                                                                                  |
-| `ENABLE_OTEL` + `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` | `false`                                   | OpenTelemetry traces                                                                                                                                                                                          |
+| Var                                                                                                                   | Default | Effect                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GLOBAL_LOG_LEVEL`                                                                                                    | `INFO`  | root level; per-source overrides: `MAIN_LOG_LEVEL`, `MODELS_LOG_LEVEL`, `OPENAI_LOG_LEVEL`, `OLLAMA_LOG_LEVEL`, `AUDIO_LOG_LEVEL`, `CONFIG_LOG_LEVEL`, `DB_LOG_LEVEL`, `WEBHOOK_LOG_LEVEL`, `OAUTH_LOG_LEVEL` |
+| `ENABLE_OTEL` + `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` | `false` | OpenTelemetry traces                                                                                                                                                                                          |
 
 Vars you may know from stock Open WebUI that **do not exist here** (removed with
 their features): all `RAG_*` / embedding / web-search / image-generation config,
-`CODE_EXECUTION_*` / `CODE_INTERPRETER_*`, `WEBSOCKET_*`, community-sharing and
+`CODE_EXECUTION_*` / `CODE_INTERPRETER_*`, `WEBSOCKET_*`, `AUDIT_LOG_*` (the audit-log
+file mechanism is removed; logs go to stdout only), community-sharing and
 telemetry flags, `ENABLE_PERSISTENT_CONFIG` (replaced by the 3-tier model).
 
 ---
@@ -448,7 +447,9 @@ Remember to **assign** what you deploy: tools/filters/actions/skills only take
 effect on models whose preset lists them (`POST /api/v1/models/model/update`,
 fields `meta.toolIds` / `meta.filterIds` / `meta.actionIds` / `meta.skillIds`).
 The Attachment Function is instead activated globally via
-`POST /api/v1/configs/attachment` (`{"function_id": "..."}`).
+`POST /api/v1/configs/attachment`, whose body is the whole attachment config
+(`ATTACHMENT_MAX_SIZE`, `ATTACHMENT_MAX_COUNT`, `ATTACHMENT_ALLOWED_EXTENSIONS`,
+and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
 
 ### 4.6 Miscellaneous endpoints
 
@@ -525,7 +526,9 @@ from the model-facing spec, and the model cannot spoof them.
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization |
 | `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path                                                 |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input` / `execute`), awaits their reply; `None` headless              |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                          |
+| `__feed_image__`                | `fn(file_id)` — feed an internal image into the model's context for the follow-up call (the "model's eyes"); chat path only         |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only |
 | `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                          |
 | `__id__`                        | this tool's id                                                                                                                      |
 | `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                   |
@@ -593,7 +596,8 @@ async def read_doc(self, path: str) -> Markdown:
 - File outputs: write bytes via `nucllei.storage.provider.Storage.upload_file` +
   `nucllei.models.files.Files.insert_new_file`, then emit `chat:message:files`;
   images become visible when the model writes
-  `![name](/api/v1/files/{id}/content)`.
+  `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image file,
+  call `__feed_image__(file_id)` (§5.3) — it is injected into the follow-up call.
 
 ### 5.6 Access control & assignment
 
@@ -642,7 +646,7 @@ POST /api/v1/skills/create
 ```
 
 - `id` — the `/command` trigger **and** the identifier the model sees
-  (`[a-zA-Z0-9-]+`, immutable; rename = delete + recreate).
+  (`[a-zA-Z0-9_-]+`, immutable; rename = delete + recreate).
 - `name` — display only; never shown to the model.
 - `description` — the model-facing manifest line. **Empty description ⇒ the skill
   is invisible to the model** (only `/command` works). Write it as a "when to load
@@ -748,7 +752,7 @@ class Filter:
   are `None` — tolerate that); `outlet` runs when the turn completes on the chat
   wire (the frontend posts `/api/chat/completed`) — headless clients must call
   that endpoint themselves to get outlet processing.
-- A module-level `file_handler = True` on an inlet filter claims file handling:
+- A `file_handler = True` attribute on the `Filter` class claims file handling:
   the built-in `<source>` injection is skipped and your filter owns the files.
 
 ### 7.2 Pipe — self-made models
