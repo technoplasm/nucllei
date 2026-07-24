@@ -76,9 +76,11 @@ jobs:
         with:
           context: .
           push: true
-          # multi-arch: 同一 tag に manifest list で両アーキが同居(pull 側が自動選択)。
-          # フロントビルドは Dockerfile 側で $BUILDPLATFORM 固定(QEMU 二重実行の回避)。
-          platforms: linux/amd64,linux/arm64
+          # arm64 が要るときは下段に差し替える(v20260724-01 で multi-arch 出荷実績あり。
+          # 同一 tag に manifest list で両アーキ同居・pull 側が自動選択。QEMU step と
+          # Dockerfile の $BUILDPLATFORM 固定は残置済みなので行の差し替えだけで戻る):
+          # platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.app_version }}
