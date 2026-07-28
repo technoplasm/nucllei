@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dev DB へ render_probe tool を登録し、preset モデル llens-assistant に紐付ける開発用スクリプト。
+"""dev DB へ render_probe tool を登録し、preset モデル llens-thinking に紐付ける開発用スクリプト。
 
 使い方は同ディレクトリの README.md を参照。localhost の dev サーバにのみ投げる。
 アプリのソースには一切触れず、公開 API 経由で DB を更新するだけ。
@@ -14,7 +14,7 @@ from pathlib import Path
 
 TOOL_ID = "render_probe"
 TOOL_NAME = "Render Probe"
-MODEL_ID = "llens-assistant"  # --model で上書き可(dev DB の preset id は変遷している)
+MODEL_ID = "llens-thinking"  # --model で上書き可(dev DB の preset id は変遷している)
 
 SRC = Path(__file__).with_name("render_probe.py")
 
@@ -62,7 +62,7 @@ def register_tool(base, token, content):
 
 
 def attach_to_model(base, token, model_id):
-    """llens-assistant の meta.toolIds に render_probe を追加(既存 toolIds は保持)。"""
+    """llens-thinking の meta.toolIds に render_probe を追加(既存 toolIds は保持)。"""
     status, model = _req("GET", f"{base}/api/v1/models/model?id={model_id}", token)
     if status != 200 or not model:
         print(f"[model] {model_id} 取得失敗 status={status}: {model}", file=sys.stderr)
