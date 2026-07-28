@@ -153,6 +153,10 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
   ※ repo root 以外から叩くときは `DATABASE_URL=sqlite:////…/data/webui.db` を絶対パスで明示すると安全。
   作り直すなら `rm data/webui.db` → 再起動 → `create-admin` + fixture 再投入。
   症状の例(#94): file 一覧が全 500(`deleted_at` 列不在)= 「ファイルが全く見えない」。
+  **注意: stamp 復旧はスキーマドリフトまでは吸収しない** — squash 前世代の DB は列の
+  NOT NULL 制約が baseline と食い違う(実例: 旧 `file.filename` は NOT NULL で、purge の
+  filename NULL 化が IntegrityError → 400「Error purging file」)。おかしければ該当テーブルを
+  baseline 定義で作り直して行コピー(2026-07-28 に file テーブルで実施)か、DB ごと再作成。
   新テーブル追加時は `migrations/env.py` のモデル import 一覧にも 1 行足すこと(autogenerate の対象)。
 - **依存ライセンス一覧**: 依存を増減したら `uv run task licenses` で `static/licenses.json` を
   再生成してコミット(License タブが fetch して表示。pnpm store と .venv から生成、ネット不要)。

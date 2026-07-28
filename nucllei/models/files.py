@@ -364,7 +364,8 @@ class FilesTable:
                 db.commit()
 
                 return True
-        except Exception:
+        except Exception as e:
+            log.exception(f"Error soft-deleting file {id}: {e}")
             return False
 
     def restore_file_by_id(self, id: str) -> bool:
@@ -386,7 +387,8 @@ class FilesTable:
                 db.commit()
 
                 return True
-        except Exception:
+        except Exception as e:
+            log.exception(f"Error restoring file {id}: {e}")
             return False
 
     def purge_file_by_id(self, id: str, purged_by: str) -> Optional[FileModel]:
@@ -416,7 +418,8 @@ class FilesTable:
                 db.commit()
 
                 return FileModel.model_validate(file)
-        except Exception:
+        except Exception as e:
+            log.exception(f"Error purging file {id}: {e}")
             return None
 
 
