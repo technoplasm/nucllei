@@ -146,8 +146,13 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
 - **migration は出荷前 baseline 1 本(2026-07-17、#80)**: 履歴 replay(peewee 18 + alembic 27)を
   squash 済み。**squash 以前に作られた既存 dev DB は起動時に
   `Can't locate revision identified by '...'` を吐く**(起動は続くが以後 migration が当たらない)。
-  復旧は schema 同一なので `cd nucllei && uv run alembic stamp --purge head` で張り替えるだけ
-  (データ温存)。作り直すなら `rm data/webui.db` → 再起動 → `create-admin` + fixture 再投入。
+  復旧(2026-07-28 改訂、#94 で実発症): baseline の上に revision が積まれて以降は
+  `stamp --purge head` だと**新 revision を適用せず適用済み扱いにしてしまう**ので、
+  ① `cd nucllei && uv run alembic stamp --purge c33997f844fc`(baseline へ張り替え — squash 前 DB は
+  schema 同一なのでデータ温存)→ ② `uv run alembic upgrade head`(以降の revision を実適用)の 2 段で行う。
+  ※ repo root 以外から叩くときは `DATABASE_URL=sqlite:////…/data/webui.db` を絶対パスで明示すると安全。
+  作り直すなら `rm data/webui.db` → 再起動 → `create-admin` + fixture 再投入。
+  症状の例(#94): file 一覧が全 500(`deleted_at` 列不在)= 「ファイルが全く見えない」。
   新テーブル追加時は `migrations/env.py` のモデル import 一覧にも 1 行足すこと(autogenerate の対象)。
 - **依存ライセンス一覧**: 依存を増減したら `uv run task licenses` で `static/licenses.json` を
   再生成してコミット(License タブが fetch して表示。pnpm store と .venv から生成、ネット不要)。
