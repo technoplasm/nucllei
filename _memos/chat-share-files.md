@@ -107,3 +107,23 @@
 検証: backend 全 238 passed(当時)+ 実機 E2E(share → `{"read":{"public":true}}` 焼き込み、
 unshare 後も維持)。関連修正: `/default/permissions` の pydantic モデルに share/clone が
 欠落していた件は #55 のコミット(`f7f607b12`)で是正。
+
+## 改訂(2026-07-28、#94): file 削除の soft delete 化
+
+file 削除の意味論が #94 で変わった(チャット #31/#19 と同じ保全モデルへ)。本メモの
+「owner による file 削除 = 共有取り消し、参照は 404」の**効果は不変**だが、機構が変わる:
+
+- **ユーザー削除は常に soft**(`deleted_at`/`deleted_by`、実体・行とも残す)。
+  `Files.get_file_by_id` が既定 deleted 除外になったため、share の public 化
+  (`publish_chat_files`)は deleted を自動 skip し、read ゲートも deleted で閉じる
+  (「削除済み file が共有で復活」しない — 回帰テストで固定済み)。
+- **実体の破棄(purge)は admin のみ・行は残す**。purge は `filename`/`meta`(size 除く)/
+  `data`(抽出テキスト)/`path`/`access_control` を落とし、`hash` と監査列を残す。
+  → 原則 2「file は実質 immutable」の唯一の例外が purge。
+- **削除は access_control を触らない**(原則 1 の「狭めない」は削除でも維持)。
+  restore(admin のみ)すると削除前の ACL のまま復帰する(public だったものは public に戻る)。
+- 非 admin への削除済み file の見え方: owner のみ GET /{id} で `{id, deleted_at}` の
+  縮小 marker(チャット添付の「削除済み」バッジ用)、他は 404。purge 状態・実体残存は
+  非 admin に漏らさない。
+
+詳細仕様は issue #94、出荷は `c54ad53ec`。
