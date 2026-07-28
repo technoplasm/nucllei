@@ -6,17 +6,34 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - 'nucllei/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.node-version'
+      - '.eslintrc.cjs'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
+      - 'svelte.config.js'
+      - '.github/workflows/lint-frontend.yaml'
   pull_request:
     branches:
       - master
-    paths-ignore:
-      - 'nucllei/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.node-version'
+      - '.eslintrc.cjs'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
+      - 'svelte.config.js'
+      - '.github/workflows/lint-frontend.yaml'
+
+# 連続 push で旧 run を打ち切る。group は literal 固定(lint-backend.yaml の注記参照)
+concurrency:
+  group: lint-frontend-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   eslint:

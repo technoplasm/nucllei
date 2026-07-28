@@ -8,19 +8,29 @@ on:
       - master
     paths:
       - 'nucllei/**'
+      - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.github/workflows/lint-backend.yaml'
   pull_request:
     branches:
       - master
     paths:
       - 'nucllei/**'
+      - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.github/workflows/lint-backend.yaml'
+
+# 連続 push で旧 run を打ち切る。group は literal 固定 — reusable 呼び出し時の
+# ${{ github.workflow }} は呼び出し元名になり、gate 同士が同一 group で相互キャンセルするため。
+concurrency:
+  group: lint-backend-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ruff:
-    name: 'Ruff (backend)'
+  lint:
+    name: 'Black + Ruff (backend)'
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +40,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.12'
+
+      # 旧 Python CI(format-backend.yaml)を統合(2026-07-29): 実働 20 秒の black に
+      # workflow 1 本 = 課金 1 分単位を割くのをやめ、ruff と同居させる。
+      # バージョンは pyproject.toml の dev 依存に固定。
+      - name: Format check (black)
+        run: uvx black==25.1.0 --check . --exclude ".venv/|/venv/"
 
       # ruff 設定は pyproject.toml [tool.ruff](llens #25): select = E9,F。
       # 正しさ系(構文/未定義名/未使用 import 等)のみを gate 化し、整形は black が担う。

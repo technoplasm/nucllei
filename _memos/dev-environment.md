@@ -18,7 +18,7 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (未登録だと参照時に `Config key not found`)。優先順位は env > DB(UI 保存)> 既定。
 - **backend**: Python は uv(リポジトリ直下 `.venv`)。`uv sync` 相当で venv を作る。
   テストは `.venv/bin/pytest nucllei/test -q`(または repo ルートで `uv run pytest`)。
-  **CI に backend の black 整形ゲート("Python CI / Format Backend")あり** — 手編集や sed で行を消すと
+  **CI に backend の black 整形ゲート("Lint Backend" に統合、2026-07-29)あり** — 手編集や sed で行を消すと
   black 的に崩れて CI が落ちる。**backend を触ったら push 前に `.venv/bin/black nucllei/`**
   (Backend Tests(pytest)は別ジョブで pass しても Format で落ちる)。frontend にも同型の
   prettier ゲート("Frontend Build / Format & Build")があり、こちらは `pnpm format`。

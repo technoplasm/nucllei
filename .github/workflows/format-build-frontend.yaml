@@ -6,17 +6,42 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - 'nucllei/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+    paths:
+      - 'src/**'
+      - 'static/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.node-version'
+      - 'vite.config.ts'
+      - 'svelte.config.js'
+      - 'tailwind.config.js'
+      - 'postcss.config.js'
+      - 'tsconfig.json'
+      - '.prettierrc'
+      - '.prettierignore'
+      - '.github/workflows/format-build-frontend.yaml'
   pull_request:
     branches:
       - master
-    paths-ignore:
-      - 'nucllei/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+    paths:
+      - 'src/**'
+      - 'static/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.node-version'
+      - 'vite.config.ts'
+      - 'svelte.config.js'
+      - 'tailwind.config.js'
+      - 'postcss.config.js'
+      - 'tsconfig.json'
+      - '.prettierrc'
+      - '.prettierignore'
+      - '.github/workflows/format-build-frontend.yaml'
+
+# 連続 push で旧 run を打ち切る。group は literal 固定(lint-backend.yaml の注記参照)
+concurrency:
+  group: format-build-frontend-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -47,6 +72,11 @@ jobs:
       - name: Check for Changes After Format
         run: git diff --exit-code
 
+      # 旧 test-frontend job を統合(2026-07-29): 実行 1 秒の vitest に checkout +
+      # pnpm install をもう 1 周させる意味がない(job 分 = 課金 1 分単位も浮く)
+      - name: Run vitest
+        run: pnpm test:frontend
+
       # llens(#70): svelte-check 0 errors 達成(bcde37c38)を維持するゲート。
       # pre-push hook には足さない(hook は「差分のみ数秒」の設計、check は全量 ~1 分)。
       - name: Check Frontend (svelte-check)
@@ -57,25 +87,3 @@ jobs:
           # vite build は node 既定の 2GB ヒープでは OOM する
           NODE_OPTIONS: '--max-old-space-size=4096'
         run: pnpm build
-
-  test-frontend:
-    name: 'Frontend Unit Tests'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.node-version'
-          cache: 'pnpm'
-
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run vitest
-        run: pnpm test:frontend

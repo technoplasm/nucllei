@@ -15,9 +15,8 @@ env:
   IMAGE: ghcr.io/technoplasm/nucllei
 
 jobs:
-  # 全 CI gate green でなければ image を出さない(master push 時と同じ 5 workflow を再利用呼び出し)
-  format-backend:
-    uses: ./.github/workflows/format-backend.yaml
+  # 全 CI gate green でなければ image を出さない(master push 時と同じ 4 workflow を再利用呼び出し。
+  # 2026-07-29: 旧 Python CI(black)は lint-backend へ、vitest job は frontend build へ統合し 5→4 本)
   lint-backend:
     uses: ./.github/workflows/lint-backend.yaml
   test-backend:
@@ -28,7 +27,7 @@ jobs:
     uses: ./.github/workflows/lint-frontend.yaml
 
   build-and-push:
-    needs: [format-backend, lint-backend, test-backend, frontend, lint-frontend]
+    needs: [lint-backend, test-backend, frontend, lint-frontend]
     runs-on: ubuntu-latest
     permissions:
       contents: read
