@@ -2,12 +2,16 @@
 	// content_blocks(#17 L0)のブロック直接レンダリング。
 	// details 擬似 HTML の再パースを経由せず、構造のまま描画する。
 	// スキーマ: _memos/rendering-design.md §3「L0 の確定スキーマ」
+	import { getContext } from 'svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import ReasoningBlock from './ReasoningBlock.svelte';
+	import PendingIndicator from './PendingIndicator.svelte';
 	import ToolCallBlock from './ToolCallBlock.svelte';
 	import type { Model } from '$lib/stores';
 	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
 	import type { ToolCallRender } from '$lib/utils/tool-render';
+
+	const i18n = getContext('i18n');
 
 	// call.function.arguments はモデル由来の JSON 文字列(chat-events.ts では unknown 扱い)
 	type ToolCall = {
@@ -70,6 +74,26 @@
 	const requestExpandAll = (open: boolean) => {
 		expandAll = { seq: expandAll.seq + 1, open };
 	};
+
+	// tool 実行完了 → 追撃ストリーム初着(prefill 待ち)の間は emit すべきデルタが
+	// backend に無く、画面に動く要素がゼロになってフリーズに見える。後続 block が
+	// 現れるまで PendingIndicator(Preparing と同寸)を末尾に出す。判定は「最後に描画される
+	// block が results 充足済みの tool_calls」— 実行中は ToolCallBlock 自身の
+	// Executing 表示があるので対象外、reasoning/text が届いた瞬間に自然に消える。
+	const awaitingFollowup = $derived.by(() => {
+		if (done) return false;
+		for (let i = blocks.length - 1; i >= 0; i--) {
+			const block = blocks[i];
+			// 空 text block は描画スキップ(下の each と同じ規律)— 判定でも無視する
+			if (block.type === 'text' && (block.content ?? '').trim() === '') continue;
+			return (
+				block.type === 'tool_calls' &&
+				toolCalls(block).length > 0 &&
+				toolCalls(block).every((call) => toolResult(call, block) !== null)
+			);
+		}
+		return false;
+	});
 </script>
 
 <div class="w-full flex flex-col space-y-3">
@@ -110,4 +134,7 @@
 			{/each}
 		{/if}
 	{/each}
+	{#if awaitingFollowup}
+		<PendingIndicator label={$i18n.t('Processing results...')} />
+	{/if}
 </div>

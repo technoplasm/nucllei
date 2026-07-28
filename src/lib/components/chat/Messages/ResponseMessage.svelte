@@ -15,7 +15,7 @@
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
-	import Skeleton from './Skeleton.svelte';
+	import PendingIndicator from './PendingIndicator.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -253,7 +253,7 @@
 											{$i18n.t('The response was interrupted and no content was received.')}
 										</div>
 									{:else}
-										<Skeleton />
+										<PendingIndicator />
 									{/if}
 								{:else if message.content}
 									<!-- エラーがあっても本文は常に表示する(error は {content} オブジェクト形のみ —
