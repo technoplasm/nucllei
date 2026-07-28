@@ -34,6 +34,15 @@ class File(Base):
     # llens(#69): 最終利用時刻。content 取得・再添付フックでタッチ、一覧では更新しない。
     accessed_at = Column(BigInteger, nullable=True)
 
+    # llens(#94): soft delete。監査証憑の保全のため行は消さず、削除時刻(epoch 秒)と
+    # 実行者を立てる。ユーザー向けクエリは deleted_at IS NULL で除外し、admin 一覧では見える。
+    deleted_at = Column(BigInteger, nullable=True)
+    deleted_by = Column(Text, nullable=True)
+    # llens(#94): purge(実体削除)。Storage の実体を消し filename/path/data/access_control を
+    # 落とした後に立てる。行と id/hash/meta.size は監査用に残る。
+    purged_at = Column(BigInteger, nullable=True)
+    purged_by = Column(Text, nullable=True)
+
 
 class FileModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -42,7 +51,8 @@ class FileModel(BaseModel):
     user_id: str
     hash: Optional[str] = None
 
-    filename: str
+    # purge 済み行は filename も落ちる(#94)
+    filename: Optional[str] = None
     path: Optional[str] = None
 
     data: Optional[dict] = None
@@ -53,6 +63,11 @@ class FileModel(BaseModel):
     created_at: Optional[int]  # timestamp in epoch
     updated_at: Optional[int]  # timestamp in epoch
     accessed_at: Optional[int] = None  # timestamp in epoch
+
+    deleted_at: Optional[int] = None  # timestamp in epoch
+    deleted_by: Optional[str] = None
+    purged_at: Optional[int] = None  # timestamp in epoch
+    purged_by: Optional[str] = None
 
 
 ####################
@@ -127,10 +142,19 @@ class FilesTable:
                 log.exception(f"Error inserting a new file: {e}")
                 return None
 
-    def get_file_by_id(self, id: str) -> Optional[FileModel]:
+    def get_file_by_id(
+        self, id: str, include_deleted: bool = False
+    ) -> Optional[FileModel]:
+        # llens(#94): 既定で deleted(purged 含む)を除外する。tool 経路(sandbox 等)は
+        # 本メソッドを直呼びしており、既定除外で削除済み file への到達を一括で断つ。
+        # admin 経路・restore/purge・削除済み表示だけ include_deleted=True を使う。
         with get_db() as db:
             try:
                 file = db.get(File, id)
+                if file is None:
+                    return None
+                if not include_deleted and file.deleted_at is not None:
+                    return None
                 return FileModel.model_validate(file)
             except Exception:
                 return None
@@ -150,7 +174,10 @@ class FilesTable:
 
     def get_files(self) -> list[FileModel]:
         with get_db() as db:
-            return [FileModel.model_validate(file) for file in db.query(File).all()]
+            return [
+                FileModel.model_validate(file)
+                for file in db.query(File).filter(File.deleted_at == None).all()
+            ]
 
     def get_files_by_ids(self, ids: list[str]) -> list[FileModel]:
         with get_db() as db:
@@ -181,13 +208,17 @@ class FilesTable:
         with get_db() as db:
             return [
                 FileModel.model_validate(file)
-                for file in db.query(File).filter_by(user_id=user_id).all()
+                for file in db.query(File)
+                .filter_by(user_id=user_id)
+                .filter(File.deleted_at == None)
+                .all()
             ]
 
     def get_files_page(
         self,
         user_ids: Optional[list[str]] = None,
         filename: Optional[str] = None,
+        deleted: str = "exclude",
         order_by: str = "created_at",
         direction: str = "desc",
         limit: int = 60,
@@ -197,12 +228,17 @@ class FilesTable:
 
         order/limit/offset は SQL 側で効かせる(全件ロードして python で切らない)。
         user_ids=None は全ユーザー(admin 用)、指定時はそのユーザー群に絞る。
+        deleted は soft delete 済み(#94)の扱い: exclude(既定)/ only / include。
         戻り値は (items, total)。total は filter 適用後・ページング前の件数。
         """
         with get_db() as db:
             query = db.query(File)
             if user_ids is not None:
                 query = query.filter(File.user_id.in_(user_ids))
+            if deleted == "exclude":
+                query = query.filter(File.deleted_at == None)
+            elif deleted == "only":
+                query = query.filter(File.deleted_at != None)
             if filename:
                 query = query.filter(File.filename.ilike(f"%{filename}%"))
 
@@ -235,6 +271,7 @@ class FilesTable:
                     func.count(File.id).label("file_count"),
                 )
                 .join(File, File.user_id == User.id)
+                .filter(File.deleted_at == None)
                 .group_by(User.id, User.name, User.email)
                 .order_by(func.count(File.id).desc())
                 .all()
@@ -309,25 +346,78 @@ class FilesTable:
             except Exception:
                 return None
 
-    def delete_file_by_id(self, id: str) -> bool:
-        with get_db() as db:
-            try:
-                db.query(File).filter_by(id=id).delete()
+    # llens(#94): 削除系はすべて soft delete(deleted_at/deleted_by を立てて非表示化)。
+    # 監査証憑の保全のため行は消さない。実体の破棄は admin 明示操作の purge のみで、
+    # その場合も行と id/hash/meta.size は残す(行の物理削除経路は持たない)。
+
+    def soft_delete_file_by_id(self, id: str, deleted_by: str) -> bool:
+        """未削除の行にのみ deleted_at/deleted_by を立てる。
+
+        既に deleted/purged の行は対象にしない(元の deleted_at/deleted_by を
+        上書きしない)— 再実行は no-op として True を返す(冪等)。
+        """
+        try:
+            with get_db() as db:
+                db.query(File).filter_by(id=id, deleted_at=None).update(
+                    {"deleted_at": int(time.time()), "deleted_by": deleted_by}
+                )
                 db.commit()
 
                 return True
-            except Exception:
-                return False
+        except Exception:
+            return False
 
-    def delete_all_files(self) -> bool:
-        with get_db() as db:
-            try:
-                db.query(File).delete()
+    def restore_file_by_id(self, id: str) -> bool:
+        """deleted(未 purge)の行を active に戻す(deleted_at/deleted_by を NULL)。
+
+        active・purged・不存在の行は対象外(状態を事前取得してガードし False を返す)。
+        """
+        try:
+            with get_db() as db:
+                file = db.get(File, id)
+                if (
+                    file is None
+                    or file.deleted_at is None
+                    or file.purged_at is not None
+                ):
+                    return False
+                file.deleted_at = None
+                file.deleted_by = None
                 db.commit()
 
                 return True
-            except Exception:
-                return False
+        except Exception:
+            return False
+
+    def purge_file_by_id(self, id: str, purged_by: str) -> Optional[FileModel]:
+        """deleted(未 purge)の行から実体由来のフィールドを落とし purged_at/purged_by を立てる。
+
+        Storage の実体削除は呼び出し側(router)が先に済ませる。data も落とすのが仕様 —
+        抽出テキストは実体由来で、残すと purge 後もモデル注入できてしまう。
+        meta は監査用に size のみ残す。active・既 purge・不存在は None(事前ガード)。
+        """
+        try:
+            with get_db() as db:
+                file = db.get(File, id)
+                if (
+                    file is None
+                    or file.deleted_at is None
+                    or file.purged_at is not None
+                ):
+                    return None
+                file.purged_at = int(time.time())
+                file.purged_by = purged_by
+                file.filename = None
+                file.path = None
+                file.data = None
+                file.access_control = None
+                size = (file.meta or {}).get("size")
+                file.meta = {"size": size} if size is not None else {}
+                db.commit()
+
+                return FileModel.model_validate(file)
+        except Exception:
+            return None
 
 
 Files = FilesTable()

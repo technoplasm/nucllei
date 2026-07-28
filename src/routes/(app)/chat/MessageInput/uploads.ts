@@ -264,8 +264,11 @@ export class MessageInputUploads {
 
 		if (file?.type !== 'collection' && !file?.collection && file?.origin !== 'library') {
 			if (file?.id) {
-				// This will handle both file deletion and Chroma cleanup
-				await deleteFileById(file.id);
+				// #94: 削除は冪等な soft delete — 失敗してもチップは外す(残留させない)
+				await deleteFileById(file.id).catch((err) => {
+					console.log(err);
+					return null;
+				});
 			}
 		}
 

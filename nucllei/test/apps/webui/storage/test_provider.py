@@ -106,14 +106,6 @@ class TestLocalStorageProvider:
         self.Storage.delete_file(file_path)
         assert not (upload_dir / self.filename).exists()
 
-    def test_delete_all_files(self, monkeypatch, tmp_path):
-        upload_dir = mock_upload_dir(monkeypatch, tmp_path)
-        (upload_dir / self.filename).write_bytes(self.file_content)
-        (upload_dir / self.filename_extra).write_bytes(self.file_content)
-        self.Storage.delete_all_files()
-        assert not (upload_dir / self.filename).exists()
-        assert not (upload_dir / self.filename_extra).exists()
-
 
 @mock_aws
 class TestS3StorageProvider:
@@ -171,39 +163,6 @@ class TestS3StorageProvider:
         error = exc.value.response["Error"]
         assert error["Code"] == "404"
         assert error["Message"] == "Not Found"
-
-    def test_delete_all_files(self, monkeypatch, tmp_path):
-        upload_dir = mock_upload_dir(monkeypatch, tmp_path)
-        # create 2 files
-        self.s3_client.create_bucket(Bucket=self.Storage.bucket_name)
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename)
-        object = self.s3_client.Object(self.Storage.bucket_name, self.filename)
-        assert self.file_content == object.get()["Body"].read()
-        assert (upload_dir / self.filename).exists()
-        assert (upload_dir / self.filename).read_bytes() == self.file_content
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename_extra)
-        object = self.s3_client.Object(self.Storage.bucket_name, self.filename_extra)
-        assert self.file_content == object.get()["Body"].read()
-        assert (upload_dir / self.filename).exists()
-        assert (upload_dir / self.filename).read_bytes() == self.file_content
-
-        self.Storage.delete_all_files()
-        assert not (upload_dir / self.filename).exists()
-        with pytest.raises(ClientError) as exc:
-            self.s3_client.Object(self.Storage.bucket_name, self.filename).load()
-        error = exc.value.response["Error"]
-        assert error["Code"] == "404"
-        assert error["Message"] == "Not Found"
-        assert not (upload_dir / self.filename_extra).exists()
-        with pytest.raises(ClientError) as exc:
-            self.s3_client.Object(self.Storage.bucket_name, self.filename_extra).load()
-        error = exc.value.response["Error"]
-        assert error["Code"] == "404"
-        assert error["Message"] == "Not Found"
-
-        self.Storage.delete_all_files()
-        assert not (upload_dir / self.filename).exists()
-        assert not (upload_dir / self.filename_extra).exists()
 
     def test_init_without_credentials(self, monkeypatch):
         """Test that S3StorageProvider can initialize without explicit credentials."""
@@ -282,31 +241,6 @@ class TestGCSStorageProvider:
         # check that deleting file from gcs will delete the local file as well
         assert not (upload_dir / self.filename).exists()
         assert self.Storage.bucket.get_blob(self.filename) == None
-
-    def test_delete_all_files(self, monkeypatch, tmp_path, setup):
-        upload_dir = mock_upload_dir(monkeypatch, tmp_path)
-        # create 2 files
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename)
-        object = self.Storage.bucket.get_blob(self.filename)
-        assert (upload_dir / self.filename).exists()
-        assert (upload_dir / self.filename).read_bytes() == self.file_content
-        assert self.Storage.bucket.get_blob(self.filename).name == self.filename
-        assert self.file_content == object.download_as_bytes()
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename_extra)
-        object = self.Storage.bucket.get_blob(self.filename_extra)
-        assert (upload_dir / self.filename_extra).exists()
-        assert (upload_dir / self.filename_extra).read_bytes() == self.file_content
-        assert (
-            self.Storage.bucket.get_blob(self.filename_extra).name
-            == self.filename_extra
-        )
-        assert self.file_content == object.download_as_bytes()
-
-        self.Storage.delete_all_files()
-        assert not (upload_dir / self.filename).exists()
-        assert not (upload_dir / self.filename_extra).exists()
-        assert self.Storage.bucket.get_blob(self.filename) == None
-        assert self.Storage.bucket.get_blob(self.filename_extra) == None
 
 
 class TestAzureStorageProvider:
@@ -418,28 +352,6 @@ class TestAzureStorageProvider:
 
         self.Storage.container_client.get_blob_client().delete_blob.assert_called_once()
         assert not (upload_dir / self.filename).exists()
-
-    def test_delete_all_files(self, monkeypatch, tmp_path):
-        upload_dir = mock_upload_dir(monkeypatch, tmp_path)
-        self.Storage.create_container()
-
-        # Mock file uploads
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename)
-        self.Storage.upload_file(io.BytesIO(self.file_content), self.filename_extra)
-
-        # Mock listing and deletion behavior
-        self.Storage.container_client.list_blobs.return_value = [
-            {"name": self.filename},
-            {"name": self.filename_extra},
-        ]
-        self.Storage.container_client.get_blob_client().delete_blob.return_value = None
-
-        self.Storage.delete_all_files()
-
-        self.Storage.container_client.list_blobs.assert_called_once()
-        self.Storage.container_client.get_blob_client().delete_blob.assert_any_call()
-        assert not (upload_dir / self.filename).exists()
-        assert not (upload_dir / self.filename_extra).exists()
 
     def test_get_file_not_found(self, monkeypatch):
         self.Storage.create_container()

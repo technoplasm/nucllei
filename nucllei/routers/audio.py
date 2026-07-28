@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import uuid
 from functools import lru_cache
 from pydub import AudioSegment
@@ -29,7 +30,6 @@ from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.config import (
     WHISPER_MODEL_AUTO_UPDATE,
     WHISPER_MODEL_DIR,
-    CACHE_DIR,
 )
 
 from nucllei.constants import ERROR_MESSAGES
@@ -778,9 +778,10 @@ def transcription(
     try:
         # llens(GHSA-m8f9-9whg-f4xr / CVE-2026-45315): 保存拡張子をユーザー提供の
         # filename から取ると、audio content-type を詐称した polyglot(WAV+HTML)を
-        # .html 等で保存でき、無認証の /cache 配信で Content-Type が text/html と
-        # 推測され Stored XSS になる。検証済み content-type から安全な音声拡張子を
+        # .html 等で保存できてしまう。検証済み content-type から安全な音声拡張子を
         # サーバ側で決める(結果は必ず非アクティブな音声拡張子に限定される)。
+        # ※ #94 で保存先を一時ディレクトリに変更済み(/cache 配信には乗らない)が、
+        #   拡張子詐称の防御はそのまま維持する。
         content_type_to_ext = {
             "audio/mpeg": "mp3",
             "audio/wav": "wav",
@@ -800,16 +801,29 @@ def transcription(
         filename = f"{id}.{ext}"
         contents = file.file.read()
 
-        file_dir = f"{CACHE_DIR}/audio/transcriptions"
-        os.makedirs(file_dir, exist_ok=True)
-        file_path = f"{file_dir}/{filename}"
+        # llens(#94): 受信音声・派生物({id}.json / compressed 等)は一時ディレクトリで
+        # 完結させ、処理後にディレクトリごと自動削除する。旧実装の CACHE_DIR 配下は
+        # /cache として無認証配信されるため、そこに実体を無期限に残さない
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = f"{tmp_dir}/{filename}"
 
-        with open(file_path, "wb") as f:
-            f.write(contents)
+            with open(file_path, "wb") as f:
+                f.write(contents)
 
-        try:
             try:
-                file_path = compress_audio(file_path)
+                try:
+                    file_path = compress_audio(file_path)
+                except Exception as e:
+                    log.exception(e)
+
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=ERROR_MESSAGES.DEFAULT(e),
+                    )
+
+                data = transcribe(request, file_path)
+                file_path = file_path.split("/")[-1]
+                return {**data, "filename": file_path}
             except Exception as e:
                 log.exception(e)
 
@@ -817,17 +831,6 @@ def transcription(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=ERROR_MESSAGES.DEFAULT(e),
                 )
-
-            data = transcribe(request, file_path)
-            file_path = file_path.split("/")[-1]
-            return {**data, "filename": file_path}
-        except Exception as e:
-            log.exception(e)
-
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT(e),
-            )
 
     except Exception as e:
         log.exception(e)

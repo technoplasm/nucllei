@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -28,9 +29,6 @@ log.setLevel(SRC_LOG_LEVELS["AUDIO"])
 
 SPEECH_CACHE_DIR = CACHE_DIR / "audio" / "speech"
 SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-TRANSCRIPTION_CACHE_DIR = CACHE_DIR / "audio" / "transcriptions"
-TRANSCRIPTION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def transcribe_audio(
@@ -73,12 +71,15 @@ def transcribe_audio(
             raise ValueError(f"transcribe_audio: ファイルが存在しない: {src_path}")
 
     # transcribe(openai 経路)は WAV 変換で入力ファイルを in-place 書き換えするため、
-    # 元ファイル(Storage 実体・caller のファイル)を守る目的で必ず作業コピーを切る
+    # 元ファイル(Storage 実体・caller のファイル)を守る目的で必ず作業コピーを切る。
+    # 作業コピーは一時ディレクトリに置き、派生物({id}.json 等)ごと自動削除する —
+    # CACHE_DIR 配下は /cache として無認証配信されるため、purge 済み音声の実体コピーを
+    # そこに残さない(#94)
     ext = Path(src_path).suffix or ".wav"
-    work_path = str(TRANSCRIPTION_CACHE_DIR / f"{uuid.uuid4()}{ext}")
-    shutil.copyfile(src_path, work_path)
-
-    text = transcribe(request, work_path)["text"]
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        work_path = os.path.join(tmp_dir, f"{uuid.uuid4()}{ext}")
+        shutil.copyfile(src_path, work_path)
+        text = transcribe(request, work_path)["text"]
 
     if file_id is not None:
         Files.update_file_data_by_id(file_id, {"content": text, "status": "success"})

@@ -367,6 +367,29 @@ class TestAudioInternalFunctions(AbstractPostgresTest):
         assert transcribe_audio(self._request(), file_id=fid) == text
         assert len(self.mock_server.received) == 1
 
+    def test_transcribe_audio_leaves_no_cache_copy(self, tmp_path):
+        """作業コピーは一時ディレクトリで完結し、無認証配信(/cache)対象の
+        CACHE_DIR/audio/transcriptions に残らない(#94: purge 済み音声の実体残存防止)。"""
+        from pathlib import Path
+
+        from nucllei.config import CACHE_DIR
+        from nucllei.models.files import FileForm, Files
+        from nucllei.utils.audio import transcribe_audio
+
+        wav_path = self._make_wav(str(tmp_path))
+        fid = str(uuid.uuid4())
+        Files.insert_new_file(
+            "1",
+            FileForm(id=fid, filename="voice.wav", path=wav_path),
+        )
+
+        trans_dir = Path(CACHE_DIR) / "audio" / "transcriptions"
+        before = set(trans_dir.iterdir()) if trans_dir.is_dir() else set()
+        text = transcribe_audio(self._request(), file_id=fid)
+        assert text == "こんにちは、これはテストです。"
+        after = set(trans_dir.iterdir()) if trans_dir.is_dir() else set()
+        assert after == before
+
     def test_transcribe_audio_requires_exactly_one_input(self):
         import pytest
 

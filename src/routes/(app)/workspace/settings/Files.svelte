@@ -6,17 +6,12 @@
 	import { getAttachmentConfig, setAttachmentConfig } from '$lib/apis/configs';
 	import { getFunctions } from '$lib/apis/functions';
 
-	import { deleteAllFiles } from '$lib/apis/files';
-
-	import ResetUploadDirConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
 
 	let { onSave = () => {} }: { onSave?: () => void } = $props();
-
-	let showResetUploadDirConfirm = $state(false);
 
 	let RAGConfig = $state<any>(null);
 
@@ -52,20 +47,6 @@
 		allowedExtensions = (RAGConfig?.ATTACHMENT_ALLOWED_EXTENSIONS ?? []).join(', ');
 	});
 </script>
-
-<ResetUploadDirConfirmDialog
-	bind:show={showResetUploadDirConfirm}
-	onConfirm={async () => {
-		const res = await deleteAllFiles().catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t('Success'));
-		}
-	}}
-/>
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
@@ -215,27 +196,6 @@
 									min="0"
 								/>
 							</Tooltip>
-						</div>
-					</div>
-				</div>
-
-				<div class="mb-3">
-					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Danger Zone')}</div>
-
-					<hr class=" border-line my-2" />
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Reset Upload Directory')}</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								type="button"
-								onclick={() => {
-									showResetUploadDirConfirm = true;
-								}}
-							>
-								{$i18n.t('Reset')}
-							</button>
 						</div>
 					</div>
 				</div>

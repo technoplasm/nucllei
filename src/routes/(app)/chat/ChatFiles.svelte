@@ -62,16 +62,24 @@
 	let selectedItem = $state<any>(null);
 
 	const openFile = async (item: FileListItem) => {
+		// #94: 削除済み file は owner には縮小 marker {id, deleted_at}(meta/filename 無し)、
+		// owner 以外は 404 で返る。404 でもモーダルは snapshot で開き、削除済み表示は
+		// FileItemModal 側(refetch 404 → 削除済み)に任せる。表示名はチャット側の名前で補う
+		let notFound = false;
 		const res = await getFileById(item.id).catch((err) => {
-			toast.error(`${err}`);
+			if (err?.status === 404) {
+				notFound = true;
+			} else {
+				toast.error(`${err?.message ?? err}`);
+			}
 			return null;
 		});
-		if (!res) return;
+		if (!res && !notFound) return;
 
 		selectedItem = {
-			id: res.id,
-			name: res?.meta?.name ?? res?.filename,
-			size: res?.meta?.size,
+			id: item.id,
+			name: res?.meta?.name ?? res?.filename ?? item.name,
+			size: res?.meta?.size ?? item.size,
 			file: res
 		};
 		showFileModal = true;

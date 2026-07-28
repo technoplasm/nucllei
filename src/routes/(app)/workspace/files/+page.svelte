@@ -18,10 +18,12 @@
 		getFileChats,
 		uploadFile,
 		deleteFileById,
+		restoreFileById,
+		purgeFileById,
 		updateFileAccessControlById
 	} from '$lib/apis/files';
 
-	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -51,6 +53,9 @@
 	let selectedUploaderIds = $state<string[]>([]);
 	let selectedUploaderId = $state('');
 
+	// llens(#94): soft delete 済み行の扱い(admin 専用フィルタ。非 admin は常に exclude)
+	let deletedFilter = $state<'exclude' | 'only' | 'include'>('exclude');
+
 	const isAdmin = $derived($user?.role === 'admin');
 
 	const fetchFiles = async (append = false) => {
@@ -68,7 +73,8 @@
 					: $user?.id
 						? [$user.id]
 						: []
-				: undefined
+				: undefined,
+			deleted: isAdmin ? deletedFilter : undefined
 		}).catch((err) => {
 			toast.error(`${err}`);
 			return null;
@@ -162,6 +168,15 @@
 
 	const isImage = (file: any) => (file?.meta?.content_type ?? '').startsWith('image/');
 
+	// llens(#94): soft delete 状態。purged は filename/meta.name も落ちているので表示名は id へフォールバック
+	const isDeleted = (file: any) => !!file?.deleted_at;
+	const isPurged = (file: any) => !!file?.purged_at;
+	const displayName = (file: any) => file?.meta?.name ?? file?.filename ?? file?.id;
+
+	// deleted_by の名前解決(uploaders は admin が取得済み。引けなければ id 素通し)
+	const userName = (id: string | null | undefined) =>
+		uploaders.find((u) => u.id === id)?.name ?? id ?? '-';
+
 	// file の共有状態 3 値。file の ACL 意味論(他エンティティと逆):
 	// null=非公開 / {read:{public:true}}=全体公開 / {read:{group_ids,user_ids}}=グループ共有
 	const visibilityOf = (file: any) => {
@@ -203,6 +218,8 @@
 	const selectionActive = $derived(selectedIds.length > 0);
 	const selectedFiles = $derived(files.filter((f) => selectedIds.includes(f.id)));
 	const allSelected = $derived(files.length > 0 && files.every((f) => selectedIds.includes(f.id)));
+	// #94: deleted 行は共有(ACL 更新)不可 — 選択が全部 deleted なら一括 Share を無効化
+	const bulkShareEnabled = $derived(selectedFiles.some((f) => !isDeleted(f)));
 
 	const toggleSelect = (file: any) => {
 		selectedIds = selectedIds.includes(file.id)
@@ -230,7 +247,10 @@
 
 	const openBulkAccessControl = () => {
 		// 全選択 file の ACL が一致していればそれを初期値に、混在なら非公開から始める
-		const acs = selectedFiles.map((f) => JSON.stringify(f?.access_control ?? null));
+		// (#94: deleted 行は commit 対象外なので初期値の算定からも外す)
+		const acs = selectedFiles
+			.filter((f) => !isDeleted(f))
+			.map((f) => JSON.stringify(f?.access_control ?? null));
 		acValue = acs.length > 0 && acs.every((s) => s === acs[0]) ? JSON.parse(acs[0]) : null;
 		acItem = null;
 		acBulk = true;
@@ -285,9 +305,10 @@
 		acBulk = false;
 		const value = acValue;
 
-		for (const f of selectedFiles) {
+		// #94: deleted 行への access_control/update は admin でも 404 の契約 — 対象から外す
+		for (const f of selectedFiles.filter((f) => !isDeleted(f))) {
 			const res = await updateFileAccessControlById(f.id, value).catch((err) => {
-				toast.error(`${f?.meta?.name ?? f.filename}: ${err}`);
+				toast.error(`${displayName(f)}: ${err}`);
 				return null;
 			});
 			if (res) {
@@ -313,15 +334,20 @@
 	let selectedItem = $state<any>(null);
 
 	const openFile = async (file: any) => {
+		// purged は実体も抽出テキストも無い(#94)— 閲覧導線ごと落とす
+		if (isPurged(file)) {
+			return;
+		}
+		// getFileById は status 付き Error を投げる(#94)— 表示は message で
 		const res = await getFileById(file.id).catch((err) => {
-			toast.error(`${err}`);
+			toast.error(`${err?.message ?? err}`);
 			return null;
 		});
 		if (!res) return;
 
 		selectedItem = {
 			id: res.id,
-			name: res?.meta?.name ?? res?.filename,
+			name: res?.meta?.name ?? res?.filename ?? displayName(file),
 			size: res?.meta?.size,
 			file: res
 		};
@@ -359,23 +385,59 @@
 		});
 
 		if (res) {
-			files = files.filter((f) => f.id !== file.id);
-			total = Math.max(0, total - 1);
-			selectedIds = selectedIds.filter((id) => id !== file.id);
+			if (deletedFilter === 'exclude') {
+				files = files.filter((f) => f.id !== file.id);
+				total = Math.max(0, total - 1);
+				selectedIds = selectedIds.filter((id) => id !== file.id);
+			} else {
+				// 「削除済みのみ / すべて」表示では行が残る(#94 soft delete)— 再取得で deleted_at を反映
+				await fetchFiles(false);
+			}
 		}
 	};
 
 	const bulkDeleteHandler = async () => {
+		let deleted = false;
 		for (const f of selectedFiles) {
 			const res = await deleteFileById(f.id).catch((err) => {
-				toast.error(`${f?.meta?.name ?? f.filename}: ${err}`);
+				toast.error(`${displayName(f)}: ${err}`);
 				return null;
 			});
 			if (res) {
-				files = files.filter((x) => x.id !== f.id);
-				total = Math.max(0, total - 1);
-				selectedIds = selectedIds.filter((id) => id !== f.id);
+				deleted = true;
+				if (deletedFilter === 'exclude') {
+					files = files.filter((x) => x.id !== f.id);
+					total = Math.max(0, total - 1);
+					selectedIds = selectedIds.filter((id) => id !== f.id);
+				}
 			}
+		}
+		if (deleted && deletedFilter !== 'exclude') {
+			await fetchFiles(false);
+		}
+	};
+
+	// llens(#94): admin の復元 / 実体破棄。表示条件次第で行の見え方が変わるので再取得で反映する
+	let showPurgeConfirm = $state(false);
+	let purgeTarget = $state<any>(null);
+
+	const restoreHandler = async (file: any) => {
+		const res = await restoreFileById(file.id).catch((err) => {
+			toast.error(`${err}`);
+			return null;
+		});
+		if (res) {
+			await fetchFiles(false);
+		}
+	};
+
+	const purgeHandler = async (file: any) => {
+		const res = await purgeFileById(file.id).catch((err) => {
+			toast.error(`${err}`);
+			return null;
+		});
+		if (res) {
+			await fetchFiles(false);
 		}
 	};
 
@@ -401,7 +463,7 @@
 </svelte:head>
 
 {#if loaded}
-	<DeleteConfirmDialog
+	<ConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={deleteBulk
 			? $i18n.t('Delete {{n}} files?', { n: selectedFiles.length })
@@ -419,14 +481,34 @@
 			{#if deleteBulk}
 				<div class="mt-1 max-h-40 overflow-y-auto">
 					{#each selectedFiles as f (f.id)}
-						<div class="font-semibold truncate">{f?.meta?.name ?? f.filename}</div>
+						<div class="font-semibold truncate">{displayName(f)}</div>
 					{/each}
 				</div>
 			{:else}
 				<span class=" font-semibold">{deleteTarget?.meta?.name ?? deleteTarget?.filename}</span>.
 			{/if}
+			<!-- #94: soft delete — 添付として使われたチャット上では「削除済み」として表示が残る -->
+			<div class="mt-1.5">
+				{$i18n.t('Chats that used this file will keep showing it as deleted.')}
+			</div>
 		</div>
-	</DeleteConfirmDialog>
+	</ConfirmDialog>
+
+	<!-- #94: purge(実体破棄)は「削除」と別の不可逆操作 — 確認で復元不能を明示する -->
+	<ConfirmDialog
+		bind:show={showPurgeConfirm}
+		title={$i18n.t('Purge file content?')}
+		onConfirm={() => {
+			purgeHandler(purgeTarget);
+		}}
+	>
+		<div class=" text-sm text-content-muted">
+			<span class=" font-semibold">{displayName(purgeTarget)}</span>
+			<div class="mt-1.5">
+				{$i18n.t('The file content will be destroyed and cannot be restored.')}
+			</div>
+		</div>
+	</ConfirmDialog>
 
 	{#if selectedItem}
 		<FileItemModal
@@ -574,6 +656,22 @@
 			{/if}
 
 			{#if isAdmin}
+				<!-- #94: soft delete 済み行のフィルタ(admin のみ。既定 = 普通のファイルのみ) -->
+				<select
+					class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {deletedFilter !==
+					'exclude'
+						? ''
+						: 'text-content-subtle'}"
+					bind:value={deletedFilter}
+					onchange={() => {
+						fetchFiles(false);
+					}}
+				>
+					<option class=" text-content" value="exclude">{$i18n.t('Active files only')}</option>
+					<option class=" text-content" value="only">{$i18n.t('Deleted only')}</option>
+					<option class=" text-content" value="include">{$i18n.t('All')}</option>
+				</select>
+
 				<div class="flex flex-wrap items-center gap-1">
 					<select
 						class="bg-surface-form hover:bg-surface-hover w-fit px-2 py-0.5 pr-6 rounded-xs text-sm outline-hidden {selectedUploaderId
@@ -636,6 +734,8 @@
 					{#each section.items as file (file.id)}
 						{@const vis = visibilityOf(file)}
 						{@const selected = selectedIds.includes(file.id)}
+						{@const deleted = isDeleted(file)}
+						{@const purged = isPurged(file)}
 						<!-- カード全体がクリック=閲覧(button の after オーバーレイ)。右のボタン類は relative で上に載せる。
 						 models と違い全面クリックも button なので、hover 抑制は .card-action に限定する -->
 						<div
@@ -646,7 +746,9 @@
 							<!-- サムネイルは選択トグル: hover(または選択モード中)でチェックボックスに変わる。
 							 全面クリックの after オーバーレイより手前に置くため z-10 -->
 							<button
-								class="card-action group/thumb relative z-10 shrink-0 mr-2.5 cursor-pointer"
+								class="card-action group/thumb relative z-10 shrink-0 mr-2.5 cursor-pointer {deleted
+									? 'opacity-60'
+									: ''}"
 								type="button"
 								aria-label={$i18n.t('Select')}
 								aria-pressed={selected}
@@ -655,7 +757,7 @@
 								{#if isImage(file)}
 									<img
 										src={`${WEBUI_API_BASE_URL}/files/${file.id}/content`}
-										alt={file?.meta?.name ?? file.filename}
+										alt={displayName(file)}
 										loading="lazy"
 										class="size-12 rounded-lg object-cover bg-black/5 dark:bg-white/5"
 									/>
@@ -680,19 +782,45 @@
 								</div>
 							</button>
 
+							<!-- #94: purged は実体が無く開けないのでクリック導線を落とす(openFile 側でもガード) -->
 							<button
-								class="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer after:absolute after:inset-0 after:content-['']"
+								class="flex items-center gap-3 flex-1 min-w-0 text-left after:absolute after:inset-0 after:content-[''] {purged
+									? 'cursor-default'
+									: 'cursor-pointer'}"
 								type="button"
 								onclick={() => openFile(file)}
 							>
 								<div class="flex-1 self-center min-w-0">
-									<div class="font-medium line-clamp-1">{file?.meta?.name ?? file.filename}</div>
+									<div class="flex items-center gap-1.5 min-w-0">
+										<div class="font-medium truncate {deleted ? 'opacity-60' : ''}">
+											{displayName(file)}
+										</div>
+										{#if deleted}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-red-500/20 text-[10px] font-normal text-red-700 dark:text-red-200 shrink-0"
+												>{$i18n.t('Deleted')}</span
+											>
+										{/if}
+										{#if purged}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-surface-muted text-[10px] font-normal text-content-muted shrink-0"
+												>{$i18n.t('Purged')}</span
+											>
+										{/if}
+									</div>
 									<div class="text-xs text-content-muted line-clamp-1 mt-0.5">
 										{#if file?.meta?.size}
 											{formatFileSize(file.meta.size)} •
 										{/if}
 										{formatTimestamp(orderBy === 'filename' ? file?.created_at : file?.[orderBy])}
 									</div>
+									{#if deleted}
+										<div class="text-xs text-content-muted line-clamp-1 mt-0.5">
+											{$i18n.t('Deleted')}: {formatTimestamp(file.deleted_at)} • {userName(
+												file.deleted_by
+											)}
+										</div>
+									{/if}
 								</div>
 							</button>
 
@@ -707,27 +835,55 @@
 								</button>
 							</Tooltip>
 
-							<Tooltip className="relative flex" content={vis.label}>
-								<button
-									class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-									type="button"
-									aria-label={vis.label}
-									onclick={() => requestAccessControl(file)}
-								>
-									<span class="{vis.icon} size-4 block"></span>
-								</button>
-							</Tooltip>
+							{#if !deleted}
+								<Tooltip className="relative flex" content={vis.label}>
+									<button
+										class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+										type="button"
+										aria-label={vis.label}
+										onclick={() => requestAccessControl(file)}
+									>
+										<span class="{vis.icon} size-4 block"></span>
+									</button>
+								</Tooltip>
 
-							<Tooltip className="relative flex" content={$i18n.t('Delete')}>
-								<button
-									class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-									type="button"
-									aria-label={$i18n.t('Delete')}
-									onclick={() => requestDelete(file)}
-								>
-									<span class="i-lucide-trash-2 size-4 block"></span>
-								</button>
-							</Tooltip>
+								<Tooltip className="relative flex" content={$i18n.t('Delete')}>
+									<button
+										class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+										type="button"
+										aria-label={$i18n.t('Delete')}
+										onclick={() => requestDelete(file)}
+									>
+										<span class="i-lucide-trash-2 size-4 block"></span>
+									</button>
+								</Tooltip>
+							{:else if !purged}
+								<!-- #94: 削除済み行の admin 操作 — 復元 / 実体破棄。purged は操作なし -->
+								<Tooltip className="relative flex" content={$i18n.t('Restore')}>
+									<button
+										class="card-action px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+										type="button"
+										aria-label={$i18n.t('Restore')}
+										onclick={() => restoreHandler(file)}
+									>
+										<span class="i-lucide-rotate-ccw size-4 block"></span>
+									</button>
+								</Tooltip>
+
+								<Tooltip className="relative flex" content={$i18n.t('Purge file content')}>
+									<button
+										class="card-action px-2 py-2 text-red-600 dark:text-red-400 bg-transparent hover:bg-surface-hover rounded-xl"
+										type="button"
+										aria-label={$i18n.t('Purge file content')}
+										onclick={() => {
+											purgeTarget = file;
+											showPurgeConfirm = true;
+										}}
+									>
+										<span class="i-lucide-flame size-4 block"></span>
+									</button>
+								</Tooltip>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -803,6 +959,11 @@
 								></span>
 							</div>
 						</th>
+						{#if deletedFilter !== 'exclude'}
+							<!-- #94: 削除済みを表示中だけ deleted_at / deleted_by 列を出す -->
+							<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Deleted at')}</th>
+							<th scope="col" class="px-3 py-1.5 select-none">{$i18n.t('Deleted by')}</th>
+						{/if}
 						<th scope="col" class="px-3 py-2 text-right"></th>
 					</tr>
 				</thead>
@@ -810,7 +971,10 @@
 					{#each sections as section (section.label)}
 						{#if section.label}
 							<tr>
-								<td colspan="7" class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted">
+								<td
+									colspan={deletedFilter !== 'exclude' ? 9 : 7}
+									class="px-3 pt-2 pb-1 text-xs font-medium text-content-muted"
+								>
 									{section.label}
 								</td>
 							</tr>
@@ -818,10 +982,12 @@
 						{#each section.items as file (file.id)}
 							{@const vis = visibilityOf(file)}
 							{@const selected = selectedIds.includes(file.id)}
+							{@const deleted = isDeleted(file)}
+							{@const purged = isPurged(file)}
 							<tr
-								class="group text-xs cursor-pointer [&:hover:not(:has(button:hover))]:bg-surface-hover {selected
-									? 'bg-surface-hover'
-									: 'bg-surface-raised'}"
+								class="group text-xs [&:hover:not(:has(button:hover))]:bg-surface-hover {purged
+									? 'cursor-default'
+									: 'cursor-pointer'} {selected ? 'bg-surface-hover' : 'bg-surface-raised'}"
 								onclick={() => openFile(file)}
 							>
 								<td class="w-8 pl-3 pr-0 py-1">
@@ -850,12 +1016,28 @@
 										{#if isImage(file)}
 											<img
 												src={`${WEBUI_API_BASE_URL}/files/${file.id}/content`}
-												alt={file?.meta?.name ?? file.filename}
+												alt={displayName(file)}
 												loading="lazy"
-												class="size-6 shrink-0 rounded object-cover bg-black/5 dark:bg-white/5"
+												class="size-6 shrink-0 rounded object-cover bg-black/5 dark:bg-white/5 {deleted
+													? 'opacity-60'
+													: ''}"
 											/>
 										{/if}
-										<div class="font-medium truncate">{file?.meta?.name ?? file.filename}</div>
+										<div class="font-medium truncate {deleted ? 'opacity-60' : ''}">
+											{displayName(file)}
+										</div>
+										{#if deleted}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-red-500/20 text-[10px] font-normal text-red-700 dark:text-red-200 shrink-0"
+												>{$i18n.t('Deleted')}</span
+											>
+										{/if}
+										{#if purged}
+											<span
+												class="px-1.5 py-0.5 rounded-full bg-surface-muted text-[10px] font-normal text-content-muted shrink-0"
+												>{$i18n.t('Purged')}</span
+											>
+										{/if}
 									</div>
 								</td>
 								<td class="px-3 py-1">
@@ -864,6 +1046,12 @@
 								<td class="px-3 py-1">{file?.meta?.content_type ?? '-'}</td>
 								<td class="px-3 py-1">{formatTimestamp(file?.created_at)}</td>
 								<td class="px-3 py-1">{formatTimestamp(file?.accessed_at)}</td>
+								{#if deletedFilter !== 'exclude'}
+									<td class="px-3 py-1">{deleted ? formatTimestamp(file.deleted_at) : '-'}</td>
+									<td class="px-3 py-1">
+										<div class="max-w-32 truncate">{deleted ? userName(file.deleted_by) : '-'}</div>
+									</td>
+								{/if}
 								<td class="px-3 py-1 text-right">
 									<!-- カードと同構成の 1 セル(関連チャット / 共有状態 / 削除) -->
 									<div class="flex justify-end w-full">
@@ -881,33 +1069,65 @@
 											</button>
 										</Tooltip>
 
-										<Tooltip content={vis.label}>
-											<button
-												class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-												type="button"
-												aria-label={vis.label}
-												onclick={(e) => {
-													e.stopPropagation();
-													requestAccessControl(file);
-												}}
-											>
-												<span class="{vis.icon} size-4 block"></span>
-											</button>
-										</Tooltip>
+										{#if !deleted}
+											<Tooltip content={vis.label}>
+												<button
+													class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+													type="button"
+													aria-label={vis.label}
+													onclick={(e) => {
+														e.stopPropagation();
+														requestAccessControl(file);
+													}}
+												>
+													<span class="{vis.icon} size-4 block"></span>
+												</button>
+											</Tooltip>
 
-										<Tooltip content={$i18n.t('Delete')}>
-											<button
-												class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-												type="button"
-												aria-label={$i18n.t('Delete')}
-												onclick={(e) => {
-													e.stopPropagation();
-													requestDelete(file);
-												}}
-											>
-												<span class="i-lucide-trash-2 size-4 block"></span>
-											</button>
-										</Tooltip>
+											<Tooltip content={$i18n.t('Delete')}>
+												<button
+													class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+													type="button"
+													aria-label={$i18n.t('Delete')}
+													onclick={(e) => {
+														e.stopPropagation();
+														requestDelete(file);
+													}}
+												>
+													<span class="i-lucide-trash-2 size-4 block"></span>
+												</button>
+											</Tooltip>
+										{:else if !purged}
+											<!-- #94: 削除済み行の admin 操作 — 復元 / 実体破棄。purged は操作なし -->
+											<Tooltip content={$i18n.t('Restore')}>
+												<button
+													class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+													type="button"
+													aria-label={$i18n.t('Restore')}
+													onclick={(e) => {
+														e.stopPropagation();
+														restoreHandler(file);
+													}}
+												>
+													<span class="i-lucide-rotate-ccw size-4 block"></span>
+												</button>
+											</Tooltip>
+
+											<Tooltip content={$i18n.t('Purge file content')}>
+												<button
+													class="px-2 py-2 text-red-600 dark:text-red-400 bg-transparent hover:bg-surface-hover rounded-xl"
+													type="button"
+													aria-label={$i18n.t('Purge file content')}
+													onclick={(e) => {
+														e.stopPropagation();
+														purgeTarget = file;
+														showPurgeConfirm = true;
+													}}
+												>
+													<span class="i-lucide-flame size-4 block"></span>
+												</button>
+											</Tooltip>
+										{/if}
 									</div>
 								</td>
 							</tr>
@@ -944,11 +1164,15 @@
 					{$i18n.t('{{n}} selected', { n: selectedIds.length })}
 				</span>
 				<div class="w-px self-stretch my-1.5 bg-line mx-2"></div>
+				<!-- #94: 選択が全部 deleted のときは共有先が無い — disabled -->
 				<Tooltip content={$i18n.t('Share')}>
 					<button
-						class="p-2 rounded-full text-content hover:bg-surface-hover"
+						class="p-2 rounded-full {bulkShareEnabled
+							? 'text-content hover:bg-surface-hover'
+							: 'text-content-subtle cursor-not-allowed'}"
 						type="button"
 						aria-label={$i18n.t('Share')}
+						disabled={!bulkShareEnabled}
 						onclick={openBulkAccessControl}
 					>
 						<span class="i-lucide-users size-4 block"></span>
@@ -993,7 +1217,7 @@
 	<ChatsListModal
 		bind:show={showChatsModal}
 		title={$i18n.t('Related chats')}
-		subtitle={chatsFile?.meta?.name ?? chatsFile?.filename ?? ''}
+		subtitle={chatsFile ? displayName(chatsFile) : ''}
 		chats={fileChats}
 	/>
 {:else}

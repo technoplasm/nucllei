@@ -28,7 +28,10 @@ from nucllei.models.files import (
 )
 
 from nucllei.storage.provider import Storage
-from nucllei.utils.access_control import has_permission, has_read_access_to_file
+from nucllei.utils.access_control import (
+    has_permission,
+    has_read_access_to_file,
+)
 from nucllei.utils.attachment import process_attachment_functions
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
@@ -344,13 +347,15 @@ async def list_files_page(
     direction: str = Query("desc"),
     user_ids: Optional[str] = Query(None),
     filename: Optional[str] = Query(None),
+    deleted: str = Query("exclude"),
     user=Depends(get_verified_user),
 ):
     """ファイル管理ページ用のページング一覧(#69)。
 
     非 admin は常に自分の file のみ。`user_ids`(カンマ区切り)は admin 専用の
-    フィルタで、非 admin が指定したら 403。items は data.content を除いた軽量形
-    (data は status のみ残す。meta は残す)。返却は {"items": [...], "total": n}。
+    フィルタで、非 admin が指定したら 403。`deleted`(exclude/only/include — #94)も
+    admin 専用で、非 admin が exclude 以外を指定したら 403。items は data.content を
+    除いた軽量形(data は status のみ残す。meta は残す)。返却は {"items": [...], "total": n}。
     """
     if order_by not in ("created_at", "accessed_at", "filename"):
         raise HTTPException(
@@ -361,6 +366,16 @@ async def list_files_page(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="direction must be one of: desc, asc",
+        )
+    if deleted not in ("exclude", "only", "include"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="deleted must be one of: exclude, only, include",
+        )
+    if user.role != "admin" and deleted != "exclude":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
     if user.role == "admin":
@@ -380,6 +395,7 @@ async def list_files_page(
     files, total = Files.get_files_page(
         user_ids=scope,
         filename=filename,
+        deleted=deleted,
         order_by=order_by,
         direction=direction,
         limit=limit,
@@ -420,10 +436,17 @@ async def get_file_chats_by_id(id: str, user=Depends(get_verified_user)):
     非 admin は本人のチャットのみ。admin は全ユーザー(他人のチャットは
     ENABLE_ADMIN_CHAT_ACCESS 下で /s/{id} から開ける — 振り分けは user_id を見て FE で)。
     file 自体の閲覧権限(owner / admin / ACL read)は単品取得と同じ。
+    deleted は admin のみ可(#94、監査導線: file 行 → チャット)。
     """
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.deleted_at is not None and user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -487,39 +510,23 @@ async def search_files(
 
 
 ############################
-# Delete All Files
-############################
-
-
-@router.delete("/all")
-async def delete_all_files(user=Depends(get_admin_user)):
-    result = Files.delete_all_files()
-    if result:
-        try:
-            Storage.delete_all_files()
-        except Exception as e:
-            log.exception(e)
-            log.error("Error deleting files")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-            )
-        return {"message": "All files deleted successfully"}
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-        )
-
-
-############################
 # Get File By Id
 ############################
 
 
-@router.get("/{id}", response_model=Optional[FileModel])
+@router.get("/{id}")
 async def get_file_by_id(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    """file 単品取得。deleted/purged の扱いは #94:
+
+    - active: 従来通り(owner / admin / ACL read)
+    - deleted/purged: admin は全メタ(deleted_at/deleted_by/purged_at/purged_by 含む)。
+      非 admin は owner にのみ縮小 marker {id, deleted_at} を返す(FE のチャット添付
+      「削除済み」バッジの根拠。表示名はチャット JSON snapshot が持つので filename は
+      返さない — 凍結 ACL の評価は削除後のグループ加入者に filename を開示し得るし、
+      purge で filename が落ちる変化から purge 時点を推定できてしまう)。
+      owner 以外は 404(purged 情報・実体残存は漏らさない)。
+    """
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
         raise HTTPException(
@@ -527,17 +534,32 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if (
-        file.user_id == user.id
-        or user.role == "admin"
-        or has_access_to_file(id, "read", user)
-    ):
+    if file.deleted_at is None:
+        if (
+            file.user_id == user.id
+            or user.role == "admin"
+            or has_access_to_file(id, "read", user)
+        ):
+            return file
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
+
+    if user.role == "admin":
         return file
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
+
+    if file.user_id == user.id:
+        return {
+            "id": file.id,
+            "deleted_at": file.deleted_at,
+        }
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=ERROR_MESSAGES.NOT_FOUND,
+    )
 
 
 ############################
@@ -547,9 +569,18 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.get("/{id}/data/content")
 async def get_file_data_content_by_id(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # llens(#94): deleted は admin のみ取得可(実体がある限り)。purged は全員 404
+    if file.deleted_at is not None and (
+        user.role != "admin" or file.purged_at is not None
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -620,9 +651,18 @@ async def update_file_data_content_by_id(
 async def get_file_content_by_id(
     id: str, user=Depends(get_verified_user), attachment: bool = Query(False)
 ):
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # llens(#94): deleted は admin のみ取得可(実体がある限り)。purged は全員 404
+    if file.deleted_at is not None and (
+        user.role != "admin" or file.purged_at is not None
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -633,6 +673,12 @@ async def get_file_content_by_id(
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
+        # llens(#94): purge 済みは path が落ちている — Storage に触る前に弾く
+        if not file.path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
         Files.touch_file_accessed_at(id)
         try:
             file_path = Storage.get_file(file.path)
@@ -696,9 +742,18 @@ async def get_file_content_by_id(
 
 @router.get("/{id}/content/html")
 async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # llens(#94): deleted は admin のみ取得可(実体がある限り)。purged は全員 404
+    if file.deleted_at is not None and (
+        user.role != "admin" or file.purged_at is not None
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -709,6 +764,12 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "read", user)
     ):
+        # llens(#94): purge 済みは path が落ちている — Storage に触る前に弾く
+        if not file.path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
         Files.touch_file_accessed_at(id)
         try:
             file_path = Storage.get_file(file.path)
@@ -750,9 +811,18 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.get("/{id}/content/{file_name}")
 async def get_file_content_by_id_and_name(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # llens(#94): deleted は admin のみ取得可(実体がある限り)。purged は全員 404
+    if file.deleted_at is not None and (
+        user.role != "admin" or file.purged_at is not None
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -812,7 +882,11 @@ async def get_file_content_by_id_and_name(id: str, user=Depends(get_verified_use
 
 @router.delete("/{id}")
 async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    """soft delete(#94)。行は消さず deleted_at/deleted_by を立てる。Storage の実体は
+    触らない(実体の破棄は admin 明示操作の purge のみ)。既に deleted/purged の行への
+    再実行は no-op 成功(冪等 — 元の deleted_at/deleted_by を上書きしない)。
+    """
+    file = Files.get_file_by_id(id, include_deleted=True)
 
     if not file:
         raise HTTPException(
@@ -825,19 +899,11 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "write", user)
     ):
-        # We should add Chroma cleanup here
+        if file.deleted_at is not None:
+            return {"message": "File deleted successfully"}
 
-        result = Files.delete_file_by_id(id)
+        result = Files.soft_delete_file_by_id(id, deleted_by=user.id)
         if result:
-            try:
-                Storage.delete_file(file.path)
-            except Exception as e:
-                log.exception(e)
-                log.error("Error deleting files")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-                )
             return {"message": "File deleted successfully"}
         else:
             raise HTTPException(
@@ -849,3 +915,94 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+
+############################
+# Restore File By Id (admin)
+############################
+
+
+@router.post("/{id}/restore")
+async def restore_file_by_id(id: str, user=Depends(get_admin_user)):
+    """soft delete の取り消し(#94、admin 専有)。deleted → active に戻す。
+
+    purged は実体が無いので 400、active(未削除)も 400。
+    """
+    file = Files.get_file_by_id(id, include_deleted=True)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.purged_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("File is purged and cannot be restored"),
+        )
+    if file.deleted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("File is not deleted"),
+        )
+
+    result = Files.restore_file_by_id(id)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Error restoring file"),
+        )
+    return Files.get_file_by_id(id)
+
+
+############################
+# Purge File By Id (admin)
+############################
+
+
+@router.post("/{id}/purge")
+async def purge_file_by_id(id: str, user=Depends(get_admin_user)):
+    """実体の破棄(#94、admin 専有)。deleted 状態が前提 — active は先に削除が必要。
+
+    Storage の実体を消してから、行の実体由来フィールド
+    (filename/path/data/access_control)を落とし purged_at/purged_by を立てる。
+    実体削除に失敗したら DB は変更せず 500(Local provider は不存在でも warning のみ
+    なので再実行できる)。行と id/hash/meta.size は監査用に残す。
+    """
+    file = Files.get_file_by_id(id, include_deleted=True)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.purged_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("File is already purged"),
+        )
+    if file.deleted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("File must be deleted before purge"),
+        )
+
+    try:
+        Storage.delete_file(file.path)
+    except Exception as e:
+        log.exception(e)
+        log.error("Error deleting file from storage")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT("Error deleting file from storage"),
+        )
+
+    purged = Files.purge_file_by_id(id, purged_by=user.id)
+    if not purged:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Error purging file"),
+        )
+    return purged

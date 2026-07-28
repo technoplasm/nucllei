@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import dayjs from 'dayjs';
 	import { formatFileSize } from '$lib/utils';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { user } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
@@ -39,17 +41,26 @@
 	// llens: チャット側の item.file はアップロード時のスナップショットで古いことがある
 	// (後から抽出が走った・Attachment 設定が変わった等)。開くたびに API から取り直して
 	// data(抽出 content / status)を最新化する。取得失敗時はスナップショットのまま。
-	let freshFile = $state<{ data?: { content?: string; status?: string } } | null>(null);
+	// #94: 削除済み file は owner には縮小 marker {id, deleted_at} で返る(filename なし)。
+	// owner 以外(元共有者含む)は 404 — fetchNotFound で「削除済み」表示に落とす。
+	// 404 以外の失敗(ネットワーク等)は従来どおりスナップショット表示のまま。
+	let freshFile = $state<any>(null);
+	let fetchNotFound = $state(false);
 	$effect(() => {
 		if (!show) {
 			return;
 		}
 		selectedTab = 'preview';
 		freshFile = null;
+		fetchNotFound = false;
 		if (fileId) {
 			getFileById(fileId)
 				.then((f) => (freshFile = f))
-				.catch(() => {});
+				.catch((err) => {
+					if (err?.status === 404) {
+						fetchNotFound = true;
+					}
+				});
 		}
 	});
 
@@ -72,6 +83,22 @@
 	const visibility = $derived(
 		accessControl === null ? 'private' : accessControl?.read?.public ? 'public' : 'shared'
 	);
+
+	// llens(#94): soft delete 済み file の表示。非 admin には実体残存を見せない —
+	// 縮小レスポンスに data が無いのに snapshot へフォールバックして中身を出さないよう、
+	// deleted_at が立っていたらプレビュー・fallback を丸ごと抑止する。
+	// 判定は refetch 結果だけでなく呼び出し元が渡した item.file にも効かせる
+	// (refetch 解決までの一瞬に snapshot 中身が見えるのを防ぐ)。
+	// refetch が 404(purge 済み共有 file 等)なら snapshot fallback もせず削除済み表示。
+	// admin は purged でなければ実体を閲覧できる(これが #94 の「admin の閲覧」仕様)。
+	const isAdmin = $derived($user?.role === 'admin');
+	const fileState = $derived(freshFile ?? item?.file);
+	const fileDeleted = $derived(fetchNotFound || !!fileState?.deleted_at);
+	const filePurged = $derived(!!fileState?.purged_at);
+	const contentHidden = $derived(fetchNotFound || (fileDeleted && (!isAdmin || filePurged)));
+
+	const formatTimestamp = (ts: number | null | undefined) =>
+		dayjs((ts ?? 0) * 1000).format('YYYY-MM-DD HH:mm');
 </script>
 
 <Modal bind:show size="lg">
@@ -92,7 +119,7 @@
 							{#if item?.size}<span>•</span>{/if}
 							<span>{contentType}</span>
 						{/if}
-						{#if !isImage}
+						{#if !isImage && !contentHidden}
 							{#if extraction === 'failed'}
 								<span class="text-red-500 font-medium">・{$i18n.t('Extraction failed')}</span>
 							{:else if extraction === 'none'}
@@ -106,7 +133,27 @@
 				</button>
 			</div>
 
-			{#if !isImage && !isPdf}
+			{#if fileState?.deleted_at && isAdmin}
+				<!-- #94: admin には削除メタを見せる(deleted_by の名前解決はせず id 素通し) -->
+				<div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+					<span
+						class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 font-medium"
+					>
+						<span class="i-lucide-trash-2 size-3.5 block"></span>
+						{$i18n.t('Deleted')}
+					</span>
+					<span class="text-content-muted">
+						{formatTimestamp(fileState?.deleted_at)} • {fileState?.deleted_by}
+					</span>
+					{#if filePurged}
+						<span class="text-content-muted">
+							/ {$i18n.t('Purged')}: {formatTimestamp(fileState?.purged_at)} • {fileState?.purged_by}
+						</span>
+					{/if}
+				</div>
+			{/if}
+
+			{#if !contentHidden && !isImage && !isPdf}
 				<div class="text-sm text-content-muted mt-0.5">
 					{$i18n.t(
 						'Previewing the text extracted from the original data. Formatting and content may differ.'
@@ -114,7 +161,7 @@
 				</div>
 			{/if}
 
-			{#if !isImage && extraction === 'success'}
+			{#if !contentHidden && !isImage && extraction === 'success'}
 				<div
 					class="flex items-center gap-3 mt-3 text-sm border-b border-gray-100 dark:border-gray-850"
 				>
@@ -139,7 +186,17 @@
 		</div>
 
 		<div class="max-h-[75vh] overflow-auto mt-2">
-			{#if isImage}
+			{#if contentHidden}
+				<!-- #94: 非 admin には削除済みの事実だけ、admin でも purged は実体が無い -->
+				<div
+					class="flex flex-col items-center gap-2 py-10 text-sm text-red-600 dark:text-red-400 font-medium"
+				>
+					<span class="{filePurged ? 'i-lucide-file-x' : 'i-lucide-trash-2'} size-6 block"></span>
+					{filePurged && isAdmin
+						? $i18n.t('File content has been purged')
+						: $i18n.t('This file has been deleted')}
+				</div>
+			{:else if isImage}
 				<img
 					src={`${WEBUI_API_BASE_URL}/files/${fileId}/content`}
 					alt={item?.name ?? 'Image'}
@@ -173,7 +230,7 @@
 
 		{#if download || onDelete || onShare}
 			<div class="flex justify-end items-center gap-0.5 mt-3">
-				{#if onShare}
+				{#if onShare && !fileDeleted}
 					<Tooltip content={$i18n.t('Access Control')}>
 						<button
 							class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
@@ -192,7 +249,7 @@
 					</Tooltip>
 				{/if}
 
-				{#if download && fileId}
+				{#if download && fileId && !contentHidden}
 					<a
 						class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 						href={`${WEBUI_API_BASE_URL}/files/${fileId}/content?attachment=true`}
@@ -202,7 +259,7 @@
 					</a>
 				{/if}
 
-				{#if onDelete}
+				{#if onDelete && !fileDeleted}
 					<button
 						class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-content dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition"
 						type="button"

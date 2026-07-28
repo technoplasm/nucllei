@@ -168,6 +168,27 @@ class TestChatShareFiles(AbstractPostgresTest):
         file = self.Files.get_file_by_id("f-alice2")
         assert (file.access_control or {}).get("read", {}).get("public") is True
 
+    def test_share_skips_deleted_files(self):
+        # 添付 2 file のうち 1 つを soft delete(#94)して共有 → active だけ public 化され、
+        # deleted の access_control は据え置き(publish_chat_files が既定取得で skip)
+        self.Files.insert_new_file(
+            "alice",
+            self.FileForm(
+                id="f-alice-del", filename="d.txt", path="/data/d.txt", meta={}, data={}
+            ),
+        )
+        chat = self._insert_chat(file_ids=("f-alice", "f-alice-del"))
+        self.Files.soft_delete_file_by_id("f-alice-del", deleted_by="alice")
+
+        response = self._share(chat.id)
+        assert response.status_code == 200
+
+        active = self.Files.get_file_by_id("f-alice")
+        assert (active.access_control or {}).get("read", {}).get("public") is True
+        deleted = self.Files.get_file_by_id("f-alice-del", include_deleted=True)
+        assert deleted.deleted_at is not None
+        assert deleted.access_control is None
+
     def test_middleware_filter_keeps_public_file(self):
         from nucllei.utils.middleware import filter_files_by_user_access
 
@@ -255,10 +276,10 @@ class TestChatShareFiles(AbstractPostgresTest):
         assert response.status_code == 200
         new_id = response.json()["chat"]["files"][0]["id"]
 
-        # 元 owner が共有解除 + file 削除しても clone 側は生きる
+        # 元 owner が共有解除 + file 削除(#94: soft delete)しても clone 側は生きる
         with mock_webui_user(id="alice"):
             self.fast_api_client.delete(self.create_url(f"/{chat.id}/share"))
-        self.Files.delete_file_by_id("f-alice")
+        self.Files.soft_delete_file_by_id("f-alice", deleted_by="alice")
         os.remove(self.src_path)
 
         copied = self.Files.get_file_by_id(new_id)

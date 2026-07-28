@@ -186,9 +186,9 @@ class TestFileImagesInline(AbstractPostgresTest):
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_deleted_file_replaced_after_owner_delete(self):
-        # 再現シナリオ固定: 添付済み画像を /files ページで削除 → 以後のターンで
-        # 履歴中の内部 URL がプレースホルダになり、チャット自体は失敗しない。
-        self.Files.delete_file_by_id("f-img")
+        # 再現シナリオ固定: 添付済み画像を /files ページで削除(#94: soft delete)→
+        # 以後のターンで履歴中の内部 URL がプレースホルダになり、チャット自体は失敗しない。
+        self.Files.soft_delete_file_by_id("f-img", deleted_by="alice")
         messages = self._convert(
             self._messages("/api/v1/files/f-img/content"), self.alice
         )

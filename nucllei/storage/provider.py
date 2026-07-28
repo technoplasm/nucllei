@@ -1,5 +1,4 @@
 import os
-import shutil
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -48,10 +47,6 @@ class StorageProvider(ABC):
         pass
 
     @abstractmethod
-    def delete_all_files(self) -> None:
-        pass
-
-    @abstractmethod
     def delete_file(self, file_path: str) -> None:
         pass
 
@@ -81,22 +76,6 @@ class LocalStorageProvider(StorageProvider):
             os.remove(file_path)
         else:
             log.warning(f"File {file_path} not found in local storage.")
-
-    @staticmethod
-    def delete_all_files() -> None:
-        """Handles deletion of all files from local storage."""
-        if os.path.exists(UPLOAD_DIR):
-            for filename in os.listdir(UPLOAD_DIR):
-                file_path = os.path.join(UPLOAD_DIR, filename)
-                try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)  # Remove the file or link
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)  # Remove the directory
-                except Exception as e:
-                    log.exception(f"Failed to delete {file_path}. Reason: {e}")
-        else:
-            log.warning(f"Directory {UPLOAD_DIR} not found in local storage.")
 
 
 class S3StorageProvider(StorageProvider):
@@ -165,25 +144,6 @@ class S3StorageProvider(StorageProvider):
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
 
-    def delete_all_files(self) -> None:
-        """Handles deletion of all files from S3 storage."""
-        try:
-            response = self.s3_client.list_objects_v2(Bucket=self.bucket_name)
-            if "Contents" in response:
-                for content in response["Contents"]:
-                    # Skip objects that were not uploaded from nucllei in the first place
-                    if not content["Key"].startswith(self.key_prefix):
-                        continue
-
-                    self.s3_client.delete_object(
-                        Bucket=self.bucket_name, Key=content["Key"]
-                    )
-        except ClientError as e:
-            raise RuntimeError(f"Error deleting all files from S3: {e}")
-
-        # Always delete from local storage
-        LocalStorageProvider.delete_all_files()
-
     # The s3 key is the name assigned to an object. It excludes the bucket name, but includes the internal path and the file name.
     def _extract_s3_key(self, full_file_path: str) -> str:
         return "/".join(full_file_path.split("//")[1].split("/")[1:])
@@ -231,29 +191,21 @@ class GCSStorageProvider(StorageProvider):
 
     def delete_file(self, file_path: str) -> None:
         """Handles deletion of the file from GCS storage."""
-        try:
-            filename = file_path.removeprefix("gs://").split("/")[1]
-            blob = self.bucket.get_blob(filename)
-            blob.delete()
-        except NotFound as e:
-            raise RuntimeError(f"Error deleting file from GCS: {e}")
+        # llens(#94): purge のリトライ(Storage 削除成功 → DB 更新失敗)を通すため、
+        # 不存在は Local と同じ warning のみ(エラーにするとリトライが永久に失敗する)
+        filename = file_path.removeprefix("gs://").split("/")[1]
+        blob = self.bucket.get_blob(filename)
+        if blob is None:
+            log.warning(f"File {filename} not found in GCS storage.")
+        else:
+            try:
+                blob.delete()
+            except NotFound:
+                # get_blob と delete の間に消えた競合も不存在と同じ扱い
+                log.warning(f"File {filename} not found in GCS storage.")
 
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
-
-    def delete_all_files(self) -> None:
-        """Handles deletion of all files from GCS storage."""
-        try:
-            blobs = self.bucket.list_blobs()
-
-            for blob in blobs:
-                blob.delete()
-
-        except NotFound as e:
-            raise RuntimeError(f"Error deleting all files from GCS: {e}")
-
-        # Always delete from local storage
-        LocalStorageProvider.delete_all_files()
 
 
 class AzureStorageProvider(StorageProvider):
@@ -301,27 +253,17 @@ class AzureStorageProvider(StorageProvider):
 
     def delete_file(self, file_path: str) -> None:
         """Handles deletion of the file from Azure Blob Storage."""
+        # llens(#94): purge のリトライ(Storage 削除成功 → DB 更新失敗)を通すため、
+        # 不存在は Local と同じ warning のみ(エラーにするとリトライが永久に失敗する)
+        filename = file_path.split("/")[-1]
         try:
-            filename = file_path.split("/")[-1]
             blob_client = self.container_client.get_blob_client(filename)
             blob_client.delete_blob()
-        except ResourceNotFoundError as e:
-            raise RuntimeError(f"Error deleting file from Azure Blob Storage: {e}")
+        except ResourceNotFoundError:
+            log.warning(f"File {filename} not found in Azure Blob Storage.")
 
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
-
-    def delete_all_files(self) -> None:
-        """Handles deletion of all files from Azure Blob Storage."""
-        try:
-            blobs = self.container_client.list_blobs()
-            for blob in blobs:
-                self.container_client.delete_blob(blob.name)
-        except Exception as e:
-            raise RuntimeError(f"Error deleting all files from Azure Blob Storage: {e}")
-
-        # Always delete from local storage
-        LocalStorageProvider.delete_all_files()
 
 
 def get_storage_provider(storage_provider: str):

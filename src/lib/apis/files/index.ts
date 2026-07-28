@@ -35,6 +35,7 @@ export const uploadFile = async (file: File) => {
 // llens(#69): ファイル管理ページ用のページング一覧。
 // 返却は {"items": [FileModel(data は status のみ・content 無し)], "total": n}。
 // user_ids は admin 専用フィルタ(非 admin が渡すと 403)。
+// deleted(#94)は soft delete 済み行の扱い(admin 専用、既定 exclude — 非 admin が exclude 以外を渡すと 403)。
 type FileListOptions = {
 	limit?: number;
 	offset?: number;
@@ -42,6 +43,7 @@ type FileListOptions = {
 	direction?: 'desc' | 'asc';
 	user_ids?: string[];
 	filename?: string;
+	deleted?: 'exclude' | 'only' | 'include';
 };
 
 export const getFileList = async (options: FileListOptions = {}) => {
@@ -66,6 +68,9 @@ export const getFileList = async (options: FileListOptions = {}) => {
 	}
 	if (options.filename) {
 		searchParams.append('filename', options.filename);
+	}
+	if (options.deleted && options.deleted !== 'exclude') {
+		searchParams.append('deleted', options.deleted);
 	}
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/list?${searchParams.toString()}`, {
@@ -209,34 +214,28 @@ export const updateFileAccessControlById = async (id: string, accessControl: nul
 	return res;
 };
 
+// #94: 呼び出し側が 404(purge 済み共有 file 等)を他エラーと区別できるよう、
+// HTTP エラーは status 付きの Error で投げる(表示は err.message を使う)。
+// ネットワーク断は apiFetch 由来の例外がそのまま飛ぶ(status なし)。
 export const getFileById = async (id: string) => {
-	let error = null;
-
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json'
 		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
+	});
 
-	if (error) {
-		throw error;
+	if (!res.ok) {
+		const detail = (await res.json().catch(() => null))?.detail;
+		const err = Object.assign(new Error(typeof detail === 'string' ? detail : res.statusText), {
+			status: res.status
+		});
+		console.log(err);
+		throw err;
 	}
 
-	return res;
+	return res.json();
 };
 
 export const updateFileDataContentById = async (id: string, content: string) => {
@@ -302,11 +301,12 @@ export const deleteFileById = async (id: string) => {
 	return res;
 };
 
-export const deleteAllFiles = async () => {
+// llens(#94): soft delete 済み file を復元(admin 専用。purged / active は 400)。
+export const restoreFileById = async (id: string) => {
 	let error = null;
 
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/all`, {
-		method: 'DELETE',
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/restore`, {
+		method: 'POST',
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json'
@@ -316,8 +316,34 @@ export const deleteAllFiles = async () => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
-		.then((json) => {
-			return json;
+		.catch((err) => {
+			error = err.detail;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+// llens(#94): soft delete 済み file の実体を破棄(admin 専用。active / 既 purged は 400)。
+// Storage の実体と抽出テキスト(data)を消すため復元不能になる。
+export const purgeFileById = async (id: string) => {
+	let error = null;
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/${id}/purge`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
 		})
 		.catch((err) => {
 			error = err.detail;
