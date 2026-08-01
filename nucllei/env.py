@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -419,3 +420,49 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 
 # llens(#84): 旧 EXTERNAL_PWA_MANIFEST_URL(manifest を外部 URL から proxy)は
 # 消費者のいない upstream 残骸のため撤去。PWA は ENABLE_PWA 一本(DATA_DIR 節参照)。
+
+####################################
+# EXT_UPSTREAMS(#97 認証付き上流プロキシ)
+####################################
+
+_EXT_UPSTREAM_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
+
+
+def parse_ext_upstreams(value: str) -> dict[str, str]:
+    """`EXT_UPSTREAMS`("name=baseURL" のカンマ区切り)を {name: baseURL} にパースする。
+
+    name は [a-z0-9_-]+、baseURL は http/https のみ。不正エントリは log.warning
+    して捨てる(1 エントリの typo で全体を殺さない)。baseURL の末尾スラッシュは
+    落として正規化する(パス連結時の "//" を避ける)。
+    """
+    upstreams: dict[str, str] = {}
+    for entry in (value or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, base_url = entry.partition("=")
+        name = name.strip()
+        base_url = base_url.strip().rstrip("/")
+        if (
+            not sep
+            or not _EXT_UPSTREAM_NAME_PATTERN.match(name)
+            or not (base_url.startswith("http://") or base_url.startswith("https://"))
+        ):
+            log.warning(f"EXT_UPSTREAMS: ignoring invalid entry {entry!r}")
+            continue
+        upstreams[name] = base_url
+    return upstreams
+
+
+# "/ext/{name}/**" で中継する上流の allowlist(例 "cage=http://172.17.0.1:13303")。
+# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の "/ext/..." URL 解決
+# (utils/file_images.py)も同じ map を引く(別 allowlist env は作らない)。
+EXT_UPSTREAMS = parse_ext_upstreams(os.environ.get("EXT_UPSTREAMS", ""))
+
+# feed(context_images)の "/ext/..." オンデマンド解決(サーバ側 fetch → base64)の
+# サイズ上限。既定 25MB(sandbox 転送上限と同値)。
+EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")
+try:
+    EXT_INLINE_MAX_BYTES = int(EXT_INLINE_MAX_BYTES)
+except Exception:
+    EXT_INLINE_MAX_BYTES = 25 * 1024 * 1024

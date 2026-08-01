@@ -89,11 +89,13 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       二重になる。
     - tool_calls は OpenAI 形 {id, type, function} だけを綴じ込む(llens #20):
       render(表示ディスクリプタ)・index 等の内部キーを漏らさない。
-    - tool 結果の画像(results[].context_images の file_id — tool が emitter
-      __feed_image__(file_id) で push し middleware が載せる、#89)は、tool メッセージ群の直後に
-      image_url(`/api/v1/files/{id}/content` 参照)を持つ user メッセージとして
-      再投入する: role:tool の content は文字列契約で画素を運べないため。実体化
-      (base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
+    - tool 結果の画像(results[].context_images — tool が emitter
+      __feed_image__ で push し middleware が載せる、#89)は、tool メッセージ群の直後に
+      image_url を持つ user メッセージとして再投入する: role:tool の content は
+      文字列契約で画素を運べないため。エントリが "/" 始まり("/ext/{name}/..." 等の
+      相対 URL、#97)ならそのまま URL に、それ以外は file_id として
+      `/api/v1/files/{id}/content` に整形する。実体化(base64)は送信直前
+      inline_internal_image_urls の 1 回に一任する。
     - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
       context_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
       ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。
@@ -130,9 +132,14 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                 )
 
             result_image_urls = [
-                f"/api/v1/files/{file_id}/content"
+                (
+                    # "/" 始まりは相対 URL としてそのまま("/ext/..." 等、#97)
+                    entry
+                    if entry.startswith("/")
+                    else f"/api/v1/files/{entry}/content"
+                )
                 for result in block.get("results", [])
-                for file_id in (result.get("context_images") or [])
+                for entry in (result.get("context_images") or [])
             ]
             if result_image_urls:
                 messages.append(

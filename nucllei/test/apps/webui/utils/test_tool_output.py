@@ -148,6 +148,37 @@ def test_convert_builds_image_url_from_context_images():
     assert all(not u.startswith("data:") for u in urls)
 
 
+def test_convert_context_images_mixed_file_id_and_ext_url():
+    # #97: "/" 始まりのエントリ("/ext/{name}/..." 等)はそのまま URL、
+    # それ以外は従来通り file_id として /api/v1/files/{id}/content に整形
+    blocks = [
+        {
+            "type": "tool_calls",
+            "content": [
+                {"id": "c1", "type": "function", "function": {"name": "read_doc"}}
+            ],
+            "results": [
+                {
+                    "tool_call_id": "c1",
+                    "content": "図を提示しました。",
+                    "context_images": ["abc", "/ext/cage/figs/a.png"],
+                }
+            ],
+        },
+    ]
+    msgs = convert_content_blocks_to_messages(blocks)
+    user_imgs = [
+        m for m in msgs if m["role"] == "user" and isinstance(m["content"], list)
+    ]
+    assert len(user_imgs) == 1
+    urls = [
+        p["image_url"]["url"]
+        for p in user_imgs[0]["content"]
+        if p.get("type") == "image_url"
+    ]
+    assert urls == ["/api/v1/files/abc/content", "/ext/cage/figs/a.png"]
+
+
 def test_convert_no_user_message_without_context_images():
     blocks = [
         {

@@ -50,6 +50,7 @@ from nucllei.routers import (
     auths,
     chats,
     configs,
+    ext,
     groups,
     files,
     functions,
@@ -212,6 +213,7 @@ from nucllei.utils.auth import (
 )
 from nucllei.utils.oauth import OAuthManager
 from nucllei.utils.security_headers import SecurityHeadersMiddleware
+from nucllei.utils.content_hardening import active_content_headers
 
 from nucllei.tasks import (
     list_task_ids_by_chat_id,
@@ -243,17 +245,13 @@ class CacheStaticFiles(StaticFiles):
     # llens(GHSA-m8f9-9whg-f4xr): /cache は無認証で公開配信される。万一アクティブ型の
     # ファイル(HTML/SVG/JS)が置かれてもブラウザで実行されないよう、危険な content-type
     # は添付ダウンロード扱いにし、MIME スニッフィングも無効化する。音声・画像等の
-    # メディアは inline のまま(Content-Disposition を付けない)。
-    ACTIVE_TYPES = ("text/html", "application/xhtml+xml", "image/svg+xml")
-
+    # メディアは inline のまま。ハードニング定義は /ext プロキシと共有(content_hardening)。
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        content_type = (
-            response.headers.get("content-type", "").split(";")[0].strip().lower()
-        )
-        if content_type in self.ACTIVE_TYPES or "javascript" in content_type:
-            response.headers["Content-Disposition"] = "attachment"
+        for key, value in active_content_headers(
+            response.headers.get("content-type")
+        ).items():
+            response.headers[key] = value
         return response
 
 
@@ -586,6 +584,9 @@ app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+
+# 認証付き上流プロキシ(#97)。SPA/static mount より前に並べる(明示ルート優先)。
+app.include_router(ext.router, prefix="/ext", tags=["ext"])
 
 
 ##################################

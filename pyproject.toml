@@ -19,6 +19,10 @@ dependencies = [
 
     "requests==2.32.3",
     "aiohttp==3.11.11",
+    # llens(#97): これまで openai/anthropic 経由の transitive 依存だったが、CORE の請求経路
+    # (/ext プロキシ・context_images の inline 解決)と subagent.py が直接 import するため直接依存へ昇格。
+    # ピンしないのは SDK 側の httpx 制約と衝突させないため(aiofiles 等と同方針)。
+    "httpx",
     "async-timeout",
     "aiocache",
     "aiofiles",

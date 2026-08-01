@@ -260,7 +260,23 @@ separate reasoning block.
 | `STORAGE_PROVIDER`               | env  | `local`           | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
 | `TIKTOKEN_ENCODING_NAME`         | RC   | `cl100k_base`     | tokenizer for token counting                                                                                                                                |
 
-### 3.8 Audio (STT / TTS)
+### 3.8 External upstream proxy (`/ext`)
+
+`GET /ext/{name}/**` is a session-authenticated streaming proxy to
+admin-configured upstreams (e.g. an HTTP tool gateway on the Docker bridge that
+serves figures/PDFs referenced from documents). Point the upstream's public base
+URL at `/ext/{name}` and in-document relative references resolve in the browser
+with the session cookie. `context_images` entries starting with `/ext/` are
+fetched server-side and inlined as base64 right before the model call
+(`image/*` only). There is no per-user access check — the admin-managed
+allowlist is the source of truth for what an upstream exposes.
+
+| Var                    | Kind | Default            | Effect                                                                                                                                                       |
+| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=baseURL` allowlist (e.g. `cage=http://172.17.0.1:13303`); the single SSRF source of truth — invalid entries are dropped with a warning |
+| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap for the server-side fetch when inlining `/ext/...` context images                                                                                   |
+
+### 3.9 Audio (STT / TTS)
 
 Feature gates: `ENABLE_AUDIO_STT`, `ENABLE_AUDIO_TTS` (RC, both `true`; `false`
 hides the UI affordance and 403s the endpoints).
@@ -279,7 +295,7 @@ OpenAI-compatible `/v1` speech endpoint (the reference deployment points it at a
 VOICEVOX/AivisSpeech bridge), plus `AUDIO_TTS_MODEL`, `AUDIO_TTS_VOICE`,
 `AUDIO_TTS_SPLIT_ON`, `AUDIO_TTS_API_KEY`, `AUDIO_TTS_AZURE_*`.
 
-### 3.9 Logging / telemetry
+### 3.10 Logging / telemetry
 
 | Var                                                                                                                   | Default | Effect                                                                                                                                                                                                        |
 | --------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

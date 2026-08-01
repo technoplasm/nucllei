@@ -70,18 +70,22 @@ current_sink: ContextVar[Optional[ToolOutputSink]] = ContextVar(
 
 
 def feed_image(file_id: str) -> None:
-    """`__feed_image__` 実体。実行中 tool-call の sink に画像 file_id を積む。
+    """`__feed_image__` 実体。実行中 tool-call の sink に画像参照を積む。
 
-    どの tool でも(view_image に限らず)モデルの目に画素を流せる汎用経路。実体化
-    (base64)は送信直前 inline に一任し、その段で has_read_access_to_file が
-    呼び出しユーザーの read 権を確認する(この push 自体は認可しない)。
-    tool 実行文脈外(sink 未設定)では no-op。
+    どの tool でも(view_image に限らず)モデルの目に画素を流せる汎用経路。
+    引数は file_id 文字列のほか、**"/ext/" 始まりの相対パス**("/ext/{name}/...";
+    #97 上流プロキシの資料参照)もそのまま積める。sink は無検証の設計 —
+    検証・実体化(base64)は送信直前 inline(utils/file_images.py)に一任する。
+    file_id はその段で has_read_access_to_file が呼び出しユーザーの read 権を確認し、
+    "/ext/" パスは EXT_UPSTREAMS(admin 管理)を真実源にサーバ側 fetch する
+    (この push 自体は認可しない)。tool 実行文脈外(sink 未設定)では no-op。
 
     低レベルプリミティブ: content_type / サイズの検証はしない(file_id しか持たず、
     ここで Files 参照すると async tool 実行中にイベントループを塞ぐため #28 に反する)。
     **呼び出し側 tool が画像であること・サイズ上限を保証する**(view_image は
-    image/* と max_image_mb を検証済み)。非画像 file_id を積むとモデルへ壊れた
-    image_url が渡る — それは tool のバグ(認可は inline が別途担保する)。
+    image/* と max_image_mb を検証済み。"/ext/" パスは inline が image/* と
+    EXT_INLINE_MAX_BYTES を検査して失敗を吸収する)。非画像 file_id を積むと
+    モデルへ壊れた image_url が渡る — それは tool のバグ(認可は inline が別途担保する)。
     """
     sink = current_sink.get()
     if sink is None:
