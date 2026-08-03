@@ -97,17 +97,18 @@ export default defineConfig({
 			'/manifest.json': BACKEND_PROXY
 		},
 		watch: {
-			// _links/ 配下の symlink ループ(llens ⇄ cage)を watcher が辿ると
-			// ELOOP / OOM で dev サーバが落ちる
-			ignored: ['**/_links/**']
+			// _links/ ・ ,始まりディレクトリ(個人作業スペース、symlink 置き場を含む)配下の
+			// symlink ループ(llens ⇄ cage 等)を watcher が辿ると ELOOP / OOM で dev サーバが落ちる。
+			// ディレクトリ自体を入口で弾く裸形と配下 glob を併記(入口で弾けば symlink を踏まない)
+			ignored: ['**/_links', '**/_links/**', '**/,*', '**/,*/**']
 		}
 	},
 	worker: {
 		format: 'es'
 	},
 	test: {
-		// _links/ はマシン固有 symlink(現行 llens 等)。辿ると symlink ループや
-		// 巨大ツリーの走査で OOM するため探索対象から外す
-		exclude: ['**/node_modules/**', '**/dist/**', '**/_links/**']
+		// _links/ ・ ,始まりディレクトリはマシン固有 symlink(現行 llens 等)を含む。
+		// 辿ると symlink ループや巨大ツリーの走査で OOM するため探索対象から外す
+		exclude: ['**/node_modules/**', '**/dist/**', '**/_links/**', '**/,*/**']
 	}
 });

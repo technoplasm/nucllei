@@ -305,9 +305,10 @@ dist
 
 # llens
 _links/
-# ローカル作業スクラッチ(個人の global gitignore 慣例。black 等のツールは
-# プロジェクト .gitignore しか見ないため、ここにも書いて `black .` の掃引から外す)
-,/
+# ローカル作業スクラッチ(個人の global gitignore 慣例。black や Tailwind v4 の
+# source 自動検出等のツールはプロジェクト .gitignore しか見ないため、ここにも書いて
+# 掃引から外す。,links/ は symlink 循環を含みうる — 舐めると ELOOP/OOM で vite が死ぬ)
+,*/
 !.claude/
 .claude/settings.local.json
 /llens
