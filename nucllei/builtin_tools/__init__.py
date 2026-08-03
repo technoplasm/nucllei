@@ -12,7 +12,7 @@
 
 import logging
 
-from nucllei.builtin_tools import history
+from nucllei.builtin_tools import chat_files, history
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,14 @@ BUILTIN_TOOLS = {
         "description": (
             "List, read and search your own chat history "
             "(list_history / read_history / grep_history). Owner-only"
+        ),
+    },
+    "builtin_chat_files": {
+        "module": chat_files,
+        "name": "Chat Files",
+        "description": (
+            "List and search file attachments issued in the current chat "
+            "(list_chat_files / grep_chat_files). Metadata only, owner-only"
         ),
     },
 }
