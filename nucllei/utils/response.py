@@ -15,8 +15,13 @@ def convert_ollama_tool_call_to_openai(tool_calls: dict) -> dict:
             "type": "function",
             "function": {
                 "name": tool_call.get("function", {}).get("name", ""),
+                # ensure_ascii=False は必須(#99 A-2)。この文字列は assistant message の
+                # tool_calls に入り、以降のターンで会話履歴として毎回モデルへ再送される。
+                # 既定(True)だと日本語の引数(検索クエリ・文書 path 等)が \uXXXX の
+                # まま履歴に residue として残り続ける。
                 "arguments": json.dumps(
-                    tool_call.get("function", {}).get("arguments", {})
+                    tool_call.get("function", {}).get("arguments", {}),
+                    ensure_ascii=False,
                 ),
             },
         }
