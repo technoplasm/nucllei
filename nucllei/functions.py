@@ -1,7 +1,6 @@
 import logging
 import sys
 import inspect
-import json
 import asyncio
 
 from pydantic import BaseModel
@@ -35,6 +34,7 @@ from nucllei.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
 )
+from nucllei.utils.sse import sse_line, sse_raw
 
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -144,10 +144,9 @@ async def generate_function_chat_completion(
 
     def process_line(form_data: dict, line):
         if isinstance(line, BaseModel):
-            line = line.model_dump_json()
-            line = f"data: {line}"
+            return sse_raw(line.model_dump_json())
         if isinstance(line, dict):
-            line = f"data: {json.dumps(line)}"
+            return sse_line(line)
 
         try:
             line = line.decode("utf-8")
@@ -156,9 +155,7 @@ async def generate_function_chat_completion(
 
         if line.startswith("data:"):
             return f"{line}\n\n"
-        else:
-            line = openai_chat_chunk_message_template(form_data["model"], line)
-            return f"data: {json.dumps(line)}\n\n"
+        return sse_line(openai_chat_chunk_message_template(form_data["model"], line))
 
     def get_pipe_id(form_data: dict) -> str:
         pipe_id = form_data["model"]
@@ -273,17 +270,17 @@ async def generate_function_chat_completion(
                         yield data
                     return
                 if isinstance(res, dict):
-                    yield f"data: {json.dumps(res)}\n\n"
+                    yield sse_line(res)
                     return
 
             except Exception as e:
                 log.error(f"Error: {e}")
-                yield f"data: {json.dumps({'error': {'detail':str(e)}})}\n\n"
+                yield sse_line({"error": {"detail": str(e)}})
                 return
 
             if isinstance(res, str):
                 message = openai_chat_chunk_message_template(form_data["model"], res)
-                yield f"data: {json.dumps(message)}\n\n"
+                yield sse_line(message)
 
             if isinstance(res, Iterator):
                 for line in res:
@@ -298,7 +295,7 @@ async def generate_function_chat_completion(
                     form_data["model"], ""
                 )
                 finish_message["choices"][0]["finish_reason"] = "stop"
-                yield f"data: {json.dumps(finish_message)}\n\n"
+                yield sse_line(finish_message)
                 yield "data: [DONE]"
 
         return StreamingResponse(stream_content(), media_type="text/event-stream")

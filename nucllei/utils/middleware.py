@@ -78,6 +78,7 @@ from nucllei.utils.response_assembler import (
     MISMATCH_UNEXPECTED_FINISH,
     ContentBlocksAssembler,
 )
+from nucllei.utils.sse import sse_line
 
 from nucllei.tasks import create_task
 
@@ -1108,9 +1109,6 @@ async def process_chat_response(
         }
 
         async def stream_wrapper(original_generator, events):
-            def wrap_item(item):
-                return f"data: {item}\n\n"
-
             for event in events:
                 event, _ = await process_filter_functions(
                     request=request,
@@ -1121,7 +1119,7 @@ async def process_chat_response(
                 )
 
                 if event:
-                    yield wrap_item(json.dumps(event))
+                    yield sse_line(event)
 
             async for data in original_generator:
                 data, _ = await process_filter_functions(

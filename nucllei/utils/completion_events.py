@@ -15,11 +15,11 @@
 """
 
 import asyncio
-import json
 import logging
 from uuid import uuid4
 
 from nucllei.models.chats import Chats
+from nucllei.utils.sse import sse_line
 
 log = logging.getLogger(__name__)
 
@@ -210,13 +210,6 @@ def make_event_call(stream: CompletionEventStream):
         return await stream.call(event_data)
 
     return __event_caller__
-
-
-# --- SSE 直列化 ------------------------------------------------------------
-
-
-def sse_line(event: dict) -> str:
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 async def sse_event_generator(stream: CompletionEventStream, queue, first_events=()):

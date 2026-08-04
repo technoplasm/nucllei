@@ -44,6 +44,7 @@ from nucllei.utils.payload import (
 )
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
+from nucllei.utils.sse import sse_line
 
 
 from nucllei.config import (
@@ -1344,7 +1345,13 @@ async def download_file_stream(
                     done = current_size == total_size
                     progress = round((current_size / total_size) * 100, 2)
 
-                    yield f'data: {{"progress": {progress}, "completed": {current_size}, "total": {total_size}}}\n\n'
+                    yield sse_line(
+                        {
+                            "progress": progress,
+                            "completed": current_size,
+                            "total": total_size,
+                        }
+                    )
 
                 if done:
                     file.seek(0)
@@ -1362,7 +1369,7 @@ async def download_file_stream(
                         }
                         os.remove(file_path)
 
-                        yield f"data: {json.dumps(res)}\n\n"
+                        yield sse_line(res)
                     else:
                         raise "Ollama: Could not create blob, Please try again."
 
@@ -1444,7 +1451,7 @@ async def upload_model(
                         "total": total_size,
                         "completed": bytes_read,
                     }
-                    yield f"data: {json.dumps(data_msg)}\n\n"
+                    yield sse_line(data_msg)
 
             # --- P3: Upload to ollama /api/blobs ---
             with open(file_path, "rb") as f:
@@ -1484,7 +1491,7 @@ async def upload_model(
                         "name": file.filename,
                         "model_created": model_name,
                     }
-                    yield f"data: {json.dumps(done_msg)}\n\n"
+                    yield sse_line(done_msg)
                 else:
                     raise Exception(
                         f"Failed to create model in Ollama. {create_resp.text}"
@@ -1495,6 +1502,6 @@ async def upload_model(
 
         except Exception as e:
             res = {"error": str(e)}
-            yield f"data: {json.dumps(res)}\n\n"
+            yield sse_line(res)
 
     return StreamingResponse(file_process_stream(), media_type="text/event-stream")

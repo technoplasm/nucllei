@@ -4,6 +4,7 @@ from nucllei.utils.misc import (
     openai_chat_chunk_message_template,
     openai_chat_completion_message_template,
 )
+from nucllei.utils.sse import sse_line
 
 
 def convert_ollama_tool_call_to_openai(tool_calls: dict) -> dict:
@@ -126,7 +127,6 @@ async def convert_streaming_response_ollama_to_openai(ollama_streaming_response)
             model, message_content, openai_tool_calls, usage
         )
 
-        line = f"data: {json.dumps(data)}\n\n"
-        yield line
+        yield sse_line(data)
 
     yield "data: [DONE]\n\n"
