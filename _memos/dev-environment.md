@@ -6,9 +6,16 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
 
 ## ツールチェーン
 
-- **node**: `.node-version` = 24.18.0(マネージャは環境依存 — nodebrew や mise。
-  mise なら `mise install` が `.node-version` を拾い、`mise exec node@24.18.0 -- <cmd>` で実行)。
+- **node**: `.node-version` = 24.18.0(マネージャは環境依存 — nodebrew や mise)。
   **v24.4.0 は V8 バグで `pnpm install` が OOM クラッシュする(invalid array length)ので使わない**。
+  - **mise は既定では `.node-version` を読まない**(2026-08-05 実害 — `mise install` が
+    「all tools are installed」と言うのに `mise exec -- node` が「No such file or directory」、
+    `mise ls` は空)。idiomatic version file は既定 off なので **1 回だけ**
+    `mise settings set idiomatic_version_file_enable_tools node` を打つ(以後 `.node-version` を拾う)。
+    設定を入れない場合は `mise install node@24.18.0` と明示する。
+  - **pnpm は corepack で入れる**: `corepack enable --install-directory
+    ~/.local/share/mise/installs/node/24.18.0/bin`(`package.json` の `packageManager` =
+    pnpm@11.3.0 を corepack が読んで版を合わせる)。
 - **frontend**: pnpm(`pnpm install` / `pnpm add`)。**npm は使わない**(peer 依存で ERESOLVE 失敗。
   例: @fontsource をバンドルするフォント追加は `pnpm add`)。テストは `npx vitest run`。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
@@ -215,7 +222,11 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin -H 'Content-Type: application/json' \
      -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
    ```
-3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:13300/v1`、モデル `kimi-k2.6`、認証不要):
+3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:13300/v1`、モデル `kimi-k2.6`):
+   ⚠️ **2026-08-05 時点で認証が要る**(旧記載「認証不要」は現状と合わない)。`/v1/models` が
+   `{"error":"Unauthorized"}` / 401 を返す(`server: uvicorn` = SGLang 本体が `--api-key` 付きで
+   起動している)。`sk-dummy` では通らないので**実キーの確認が必要**。不達時の代替は
+   ローカル ollama(`gpt-oss:20b` 等)。
    ```sh
    curl -s -X POST http://localhost:3000/openai/config/update -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' \

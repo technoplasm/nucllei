@@ -54,6 +54,24 @@
   スカラー無限再帰(スタックオーバーフロー頼みの停止)を修正、backend は content を常に
   文字列に正規化(int/float/bool は str()、None は空文字)。
   結果 kind の目視確認は dev の `render_probe` tool(`probe_result_*` 群 — `dev/tools/README.md`)。
+- **改訂(2026-08-05、#99): dict/list の直列化は `json.dumps(x, ensure_ascii=False)`**
+  — `ensure_ascii` も `indent` も既定に戻さない。
+  - `ensure_ascii=False` は**必須**。既定(True)だと日本語が 1 文字ごとに `\uXXXX`(6 文字)へ
+    展開され、モデルに渡るトークンが倍以上に膨らむ(実測 11,402 → 5,282 tok)。
+  - `indent` は**付けない**。フロントは `kind=json` の content をパースして
+    `JSON.stringify(x, null, 2)` で整形し直す(`formatJSONString`)ため、backend が入れた空白は
+    表示に一切寄与せず、モデルだけがトークンを払う(5,282 → 5,042 tok)。
+    「見た目のために indent を残す」は誤り — FE テスト `index.test.ts` が
+    インデント無し入力 → インデント付き出力を固定している。
+  - **`Code("json")` は別物**。`Code(language, base=str)` の基底型は `str` で、
+    「この**文字列**を json 構文でハイライトして verbatim 表示せよ」という宣言。
+    対して `{kind:"json"}` は「戻り値は dict/list だった」という実行時の**型**ディスクリプタで、
+    フロントは値として正規化して整形する。**dict を返しつつ `Code("json")` を宣言するのは
+    注釈が str と言っているのに dict を返す型の嘘**(「型に忠実」原則に反する)。
+    str を返す tool が自前で整形した JSON を verbatim に見せたい場合だけ `Code("json")` を使う。
+  - 補足: A-1 修正前は本体の欠陥を各ツールが個別に回避していた
+    (str を返して `Code("json")` を宣言 / builtin tools は自前で `ensure_ascii=False`)。
+    本体が直ったので、dict を素直に返せば正しく出る。
 - **改訂(2026-07-17): コード表示を HljsCode に一本化**。チャット本文のコードフェンス
   (旧 CodeMirror ベースの CodeBlock)も tool 引数/結果も、同じ「ヘッダ(言語名 +
   折りたたみ + コピー)+ hljs 静的ハイライト」で描画する(`common/HljsCode.svelte` が

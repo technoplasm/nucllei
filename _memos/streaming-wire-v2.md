@@ -49,6 +49,26 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
 - 生のモデルフレーム(choices)はクライアントへ流れない(assembler 経由イベントのみ)。
 - 旧方式(テキストデルタごとに全文スナップショット)は **O(n²) ワイヤ帯域**だった — 戻さない。
 
+## SSE 行の組み立ては `utils/sse.py` 一本(2026-08-05、#99)
+
+- `data: ` の前置・`\n\n` の終端・JSON 直列化は **`sse_line()` / `sse_raw()` だけが持つ**。
+  呼び出し側が f-string を組まないので、`json.dumps` の既定に戻る事故が構造的に起きない。
+  - `sse_line(dict|list)` … JSON へ(**必ず `ensure_ascii=False`**)
+  - `sse_raw(str)` … 既に JSON 文字列のもの(pydantic の `model_dump_json()` 等)を二重直列化せず流す
+- **`ensure_ascii` の既定(True)は禁忌**: 日本語が 1 文字ごとに `\uXXXX`(6 文字)へ展開され、
+  素の 6 倍の回線量になる。JSON としては同値なのでブラウザのパース結果は変わらず
+  **表示は壊れない** — 壊れないまま黙って太る種類の欠陥で、書いた本人も気づけない。
+  #99 では同じ 1 行が 13 箇所へコピーされていた(`completion_events` だけが正しかった)。
+- 集約先: `middleware.stream_wrapper` / `response.convert_streaming_response_ollama_to_openai` /
+  `functions.process_line`(pipe 出力)/ `routers/ollama.py`(blob upload・DL 進捗)。
+- 番人は **`test/apps/webui/utils/test_sse.py`** — ast でリポジトリ全体を走査し、
+  ①裸の `json.dumps` が allowlist(DB/ログ/送信ボディ/重複排除キー)以外に無いこと
+  ②allowlist に実体の無い項目が残っていないこと ③`data:` 行を `sse.py` の外で
+  手組みしていないこと ④`from json import dumps` の抜け道が無いこと、を固定する。
+  **除外を増やすときは理由を書く**(allowlist に理由文字列を持たせてある)。
+- 推論バックエンドへの送信ボディ(`routers/openai.py` / `ollama.py` の payload)は対象外 —
+  受け手がデコードしてからトークン化するので、エスケープはトークンに影響しない。
+
 ## 永続化(ENABLE_REALTIME_CHAT_SAVE は廃止)
 
 DB upsert は「構造変化時 + 2 秒スロットル + done/cancel/error 時」で固定。
