@@ -137,6 +137,29 @@ def test_dict_result_keeps_non_ascii_unescaped():
     assert json.loads(content) == {"title": "針刺し・切創", "note": "曝露時の対応"}
 
 
+def test_dict_result_is_not_pretty_printed():
+    """dict/list 戻りに indent は付けない(#99)。
+
+    フロントは kind=json の content をパースして JSON.stringify(x, null, 2) で
+    整形し直す(src/lib/utils/tool-render/index.ts の formatJSONString)ので、
+    ここで入れた空白は表示に一切寄与せず、モデルだけがトークンを払う。
+    """
+
+    async def returns_nested():
+        return {"items": [{"title": "針刺し・切創", "dept": "感染制御部"}]}
+
+    content = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_nested)))[0][
+        "content"
+    ]
+
+    assert "\n" not in content
+    assert content == '{"items": [{"title": "針刺し・切創", "dept": "感染制御部"}]}'
+    # 値としては当然そのまま
+    assert json.loads(content) == {
+        "items": [{"title": "針刺し・切創", "dept": "感染制御部"}]
+    }
+
+
 def test_list_result_has_no_image_side_channel_key():
     """list 結果は画像サイドチャネルキー(旧 files / 新 context_images)を持たない
     — JSON 直列化のみ。"""

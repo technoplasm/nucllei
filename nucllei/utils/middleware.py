@@ -1036,9 +1036,12 @@ async def execute_tool_calls(response_tool_calls, tools):
         result_render = None
         if isinstance(tool_result, dict) or isinstance(tool_result, list):
             # ensure_ascii=False は必須。既定(True)だと日本語が 1 文字ごとに \uXXXX
-            # (6 文字)へ展開され、モデルに渡るトークンが倍以上に膨らむ
-            # (実測: 日本語の文書検索ツールの結果 30 件で 15,195 → 7,652 tok)。
-            tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
+            # (6 文字)へ展開され、モデルに渡るトークンが倍以上に膨らむ。
+            # indent も付けない: フロントは kind=json をパースして
+            # JSON.stringify(x, null, 2) で整形し直す(tool-render/index.ts)ため、
+            # ここで入れた空白は表示に一切寄与せず、モデルだけが払う。
+            # 実測(日本語 dict 30 件 / cl100k_base): 11,402 → 5,282 → 5,042 tok。
+            tool_result = json.dumps(tool_result, ensure_ascii=False)
             result_render = {"kind": "json"}
         elif not isinstance(tool_result, str):
             # int/float/bool は str()、None(戻り値なし)は空文字 —
