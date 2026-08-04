@@ -122,6 +122,21 @@ def test_dict_result_carries_json_render_kind():
     assert "render" not in results[0]
 
 
+def test_dict_result_keeps_non_ascii_unescaped():
+    """dict/list 戻りの直列化は ensure_ascii=False。既定(True)だと日本語が 1 文字ごとに
+    \\uXXXX(6 文字)へ展開され、モデルに渡るトークンが倍以上に膨らむ。"""
+
+    async def returns_japanese():
+        return {"title": "針刺し・切創", "note": "曝露時の対応"}
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_japanese)))
+    content = results[0]["content"]
+    assert "針刺し・切創" in content
+    assert "\\u" not in content
+    # 内容自体は往復して壊れない
+    assert json.loads(content) == {"title": "針刺し・切創", "note": "曝露時の対応"}
+
+
 def test_list_result_has_no_image_side_channel_key():
     """list 結果は画像サイドチャネルキー(旧 files / 新 context_images)を持たない
     — JSON 直列化のみ。"""

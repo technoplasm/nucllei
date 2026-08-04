@@ -1034,7 +1034,10 @@ async def execute_tool_calls(response_tool_calls, tools):
         # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
         result_render = None
         if isinstance(tool_result, dict) or isinstance(tool_result, list):
-            tool_result = json.dumps(tool_result, indent=2)
+            # ensure_ascii=False は必須。既定(True)だと日本語が 1 文字ごとに \uXXXX
+            # (6 文字)へ展開され、モデルに渡るトークンが倍以上に膨らむ
+            # (実測: 日本語の文書検索ツールの結果 30 件で 15,195 → 7,652 tok)。
+            tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
             result_render = {"kind": "json"}
         elif not isinstance(tool_result, str):
             # int/float/bool は str()、None(戻り値なし)は空文字 —
