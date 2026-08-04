@@ -125,6 +125,37 @@ async def get_function_models(request):
     return pipe_models
 
 
+def process_line(form_data: dict, line) -> str:
+    """pipe が吐いた 1 チャンクを SSE の 1 行にする。
+
+    pipe の戻りは型が定まらない(upstream 由来の緩い契約): pydantic model /
+    dict / bytes / str、しかも str は既に ``data:`` 前置済みのことがある。
+    受けた型ごとに素直へ落とすだけで、推測はしない:
+
+    - BaseModel … 自前 JSON(model_dump_json)を二重直列化せず素通し
+    - dict … JSON へ(ensure_ascii=False は sse_line が持つ)
+    - bytes … utf-8 デコードして str と同じ扱い
+    - ``data:`` 始まりの str … 既に SSE 行なので終端だけ足して素通し
+    - それ以外の str … チャンク封筒に詰めて JSON へ
+
+    ネストではなくモジュール関数に置いてあるのはテストのため
+    (この経路は upstream から引き継いだままテストが無かった — #99)。
+    """
+    if isinstance(line, BaseModel):
+        return sse_raw(line.model_dump_json())
+    if isinstance(line, dict):
+        return sse_line(line)
+
+    try:
+        line = line.decode("utf-8")
+    except Exception:
+        pass
+
+    if line.startswith("data:"):
+        return f"{line}\n\n"
+    return sse_line(openai_chat_chunk_message_template(form_data["model"], line))
+
+
 async def generate_function_chat_completion(
     request, form_data, user, models: dict = {}
 ):
@@ -141,21 +172,6 @@ async def generate_function_chat_completion(
             return "".join(map(str, res))
         if isinstance(res, AsyncGenerator):
             return "".join([str(stream) async for stream in res])
-
-    def process_line(form_data: dict, line):
-        if isinstance(line, BaseModel):
-            return sse_raw(line.model_dump_json())
-        if isinstance(line, dict):
-            return sse_line(line)
-
-        try:
-            line = line.decode("utf-8")
-        except Exception:
-            pass
-
-        if line.startswith("data:"):
-            return f"{line}\n\n"
-        return sse_line(openai_chat_chunk_message_template(form_data["model"], line))
 
     def get_pipe_id(form_data: dict) -> str:
         pipe_id = form_data["model"]
