@@ -16,9 +16,19 @@
 	let _tools = $state<Record<string, any>>({});
 
 	// llens(#42): 組み込み(repo 定義・起動時 sync)とカスタム(DB 定義)を分けて見せる。
-	// 仕組みは同列(どちらも toolIds に入るだけ)で、表示だけの区分
-	const builtinIds = $derived(Object.keys(_tools).filter((id) => _tools[id].meta?.builtin));
-	const customIds = $derived(Object.keys(_tools).filter((id) => !_tools[id].meta?.builtin));
+	// 仕組みは同列(どちらも toolIds に入るだけ)で、表示だけの区分。各セクションは name 昇順。
+	const byName = (a: string, b: string) =>
+		(_tools[a].name ?? '').localeCompare(_tools[b].name ?? '');
+	const builtinIds = $derived(
+		Object.keys(_tools)
+			.filter((id) => _tools[id].meta?.builtin)
+			.sort(byName)
+	);
+	const customIds = $derived(
+		Object.keys(_tools)
+			.filter((id) => !_tools[id].meta?.builtin)
+			.sort(byName)
+	);
 
 	onMount(() => {
 		_tools = tools.reduce((acc: Record<string, any>, tool) => {

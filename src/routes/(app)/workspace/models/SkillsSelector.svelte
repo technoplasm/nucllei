@@ -18,6 +18,9 @@
 
 	let _skills = $state<Record<string, any>>({});
 
+	// command 名(= skill.id、UI は /{id} で出す)昇順で並べる
+	const sortedSkillIds = $derived(Object.keys(_skills).sort((a, b) => a.localeCompare(b)));
+
 	onMount(() => {
 		// キーは skill.id(meta.skillIds はサーバが Skills.get_skill_by_id で引く)。
 		// 旧実装は command をキーにしており、保存された id と突き合わず
@@ -49,7 +52,7 @@
 	<div class="flex flex-col mt-1" class:opacity-50={disabled}>
 		{#if skills.length > 0}
 			<div class=" flex flex-col">
-				{#each Object.keys(_skills) as skillId}
+				{#each sortedSkillIds as skillId}
 					<!-- llens(#49): label で包み、行全体クリックでトグル(disabled 時は Checkbox 側が握り潰す) -->
 					<label class=" flex items-center gap-2 mr-3 cursor-pointer">
 						<span class="self-center flex items-center">
