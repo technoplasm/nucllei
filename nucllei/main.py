@@ -674,13 +674,52 @@ async def chat_completion(
     # 読み書き(クロスユーザー継続)を防ぐ。try の外で行うことで、下の except が
     # この 403 を被害者チャットへ書き込む(かつ 400 にラップする)のを避ける。
     _chat_id = form_data.get("chat_id")
+    _message_id = form_data.get("id")
     if _chat_id:
         _existing_chat = Chats.get_chat_by_id(_chat_id)
-        if _existing_chat is not None and _existing_chat.user_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have access to this chat.",
-            )
+        if _existing_chat is not None:
+            if _existing_chat.user_id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this chat.",
+                )
+
+            # llens(#98): chat-wire の `id` は「これから生成されるアシスタント
+            # メッセージ」の id でなければならない。検証しないと
+            # upsert_message_to_chat_by_id_and_message_id が
+            #   - 既存の user メッセージへ生成結果をマージ(回答がユーザー発話として残る)
+            #   - 未知 id なら role/parentId を欠いたメッセージ片を新規挿入
+            # を黙って行い、壊れたチャットが永続化される。サーバーが正しい形を
+            # 推測して作り直すのではなく、呼び出し側の誤りとして弾く
+            # (この fork は壊れた状態を黙って直さない — 型に忠実の原則)。
+            #
+            # try の外に置くのは所有者検証と同じ理由: 下の except は message_id へ
+            # エラーを upsert するので、不正な id のままそこへ落ちると
+            # エラー経路自体がメッセージ片を作ってしまう。
+            if _message_id:
+                _target = (
+                    ((_existing_chat.chat or {}).get("history") or {}).get("messages")
+                    or {}
+                ).get(_message_id)
+                if _target is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "`id` must be an existing message in this chat. "
+                            "In chat-wire mode, create the assistant message "
+                            "(role: 'assistant', content: '') in the chat first "
+                            "and pass its id."
+                        ),
+                    )
+                if _target.get("role") != "assistant":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "`id` must be the id of an assistant message "
+                            f"(got role={_target.get('role')!r}). The generated "
+                            "response is written to that message."
+                        ),
+                    )
 
     events_stream = None
     queue = None

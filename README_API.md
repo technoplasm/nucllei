@@ -400,9 +400,33 @@ curl -N http://HOST/api/chat/completions \
   text is injected into the system message as a `<source id=".." file_id="..">`
   block (full text — there is no RAG retrieval step).
 
-**Chat-wire mode** (`chat_id` + message `id` present) — the UI's own wire, usable
-by API clients that want the conversation to exist in the UI (create the chat via
-`POST /api/v1/chats/new` first; you must own it). The POST response is an SSE
+**Chat-wire mode** (`chat_id` + the **assistant** message `id` present) — the UI's
+own wire, usable by API clients that want the conversation to exist in the UI.
+Create the chat via `POST /api/v1/chats/new` first (you must own it) with **both**
+the user message and an **empty assistant message** (`role: "assistant"`,
+`content: ""`, `parentId` = the user message id), set `history.currentId` to the
+assistant message id, and pass **that** id as `id`. The generated response is
+written into that message, so it must already exist in `history.messages` with
+`role: "assistant"` — otherwise the request is rejected with `400`. Minimal
+example:
+
+```jsonc
+// 1. POST /api/v1/chats/new
+{"chat": {"models": ["<model>"],
+          "messages": [ {"id": "<uid>", "parentId": null, "childrenIds": ["<aid>"],
+                         "role": "user", "content": "1+1?"},
+                        {"id": "<aid>", "parentId": "<uid>", "childrenIds": [],
+                         "role": "assistant", "content": ""} ],
+          "history": {"currentId": "<aid>",
+                      "messages": {"<uid>": {...}, "<aid>": {...}}}}}
+
+// 2. POST /api/chat/completions
+{"model": "<model>", "stream": true,
+ "chat_id": "<chat id from step 1>", "id": "<aid>",   // ← assistant message id
+ "messages": [{"role": "user", "content": "1+1?"}]}
+```
+
+The POST response is an SSE
 subscription to a background task that always runs to completion (disconnecting
 does not cancel). Events are envelopes
 `data: {"chat_id","message_id","data":{"type","data"}}`; the first is
