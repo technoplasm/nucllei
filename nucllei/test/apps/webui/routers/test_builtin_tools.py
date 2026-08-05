@@ -320,6 +320,19 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         assert "\n" not in result["content"]
         assert json.loads(result["content"])[0]["title"] == "旅行の計画"
 
+    def test_read_history_declares_markdown_render(self):
+        """read_history は "# {title}\n\n{body}" のマークダウン成形を返すので、
+        戻り型 Markdown を宣言して md としてレンダリングさせる(JSON ではない)。"""
+        from nucllei.builtin_tools.history import Tools
+        from nucllei.utils.tool_render import extract_render_from_function
+
+        render = extract_render_from_function(Tools().read_history)
+        assert render == {"result": {"kind": "markdown"}}
+
+        # 一覧・検索は宣言なし = 実型(list)から backend が kind:json を付ける側
+        assert extract_render_from_function(Tools().list_history) == {}
+        assert extract_render_from_function(Tools().grep_history) == {}
+
 
 class TestBuiltinChatFilesTool(AbstractPostgresTest):
     """チャット添付一覧ツール(builtin_chat_files)の挙動。

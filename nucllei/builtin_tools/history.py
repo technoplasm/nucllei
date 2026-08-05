@@ -12,6 +12,7 @@ from typing import Optional
 
 from nucllei.models.chats import Chats
 from nucllei.utils.misc import get_message_list, get_messages_content
+from nucllei.utils.tool_render import Markdown
 
 MAX_LIMIT = 50
 
@@ -62,7 +63,7 @@ class Tools:
         self,
         chat_id: str,
         __user__: Optional[dict] = None,
-    ) -> str:
+    ) -> Markdown:
         """自分のチャット 1 件の内容(メッセージ列)を読み出す。
 
         :param chat_id: 対象チャットの id(list_history / grep_history で得たもの)
