@@ -5,7 +5,7 @@
 	// レイアウト: ヘッダ(Tool の使用 NAME)は開くと枠の上辺 tab に合体し、
 	// Arguments と Result は同じ 1 枚の枠の中の区画(Result は内部罫線 + tab)。
 	// 引数の無い tool は Arguments 区画にグレーの「引数なし」を出す。
-	// 閉じるハンドルは枠の下辺・左側、すべて閉じる(メッセージ内一括)は右側。
+	// 閉じるハンドルは枠の下辺・左側、すべて閉じる(チャット内一括)は右側。
 	// ヘッダ・Result tab・閉じるハンドルのどれをクリックしても閉じられる。
 	// tab は上側だけ rounded・下辺なしで、-mb-px/-mt-px で枠線に重ねて一体化する。
 	import { getContext } from 'svelte';
@@ -47,7 +47,7 @@
 		result = null,
 		// メッセージ確定後(中断含む)は result が無くてもスピナーを止める保険
 		done = false,
-		// メッセージ内一括開閉(ContentBlocks が採番)。seq が進んだら open に追従する
+		// チャット内一括開閉(collapse-all.svelte.ts が採番)。seq が進んだら open に追従する
 		expandAll = null,
 		onExpandAll = undefined
 	}: {

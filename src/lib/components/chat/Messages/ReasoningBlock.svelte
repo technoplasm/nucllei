@@ -2,7 +2,7 @@
 	// reasoning(CoT)ブロックの表示(content_blocks、#17)。
 	// 旧・汎用 Collapsible の attributes 経由レンダリングから独立させた専用コンポーネント。
 	// レイアウトは ToolCallBlock と同型: ヘッダはバッジ(開くと枠上辺 tab に合体)、
-	// 本文は枠、下辺左に閉じる・右にすべて閉じる(開きっぱなしを一括で畳む用)。
+	// 本文は枠、下辺左に閉じる・右にすべて閉じる(チャット内で開きっぱなしを一括で畳む用)。
 	import { getContext } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
@@ -41,7 +41,7 @@
 		// メッセージ確定後(中断含む)は block.done が立っていなくてもスピナーを止める保険
 		done = false,
 		duration = null,
-		// メッセージ内一括開閉(ContentBlocks が採番)。seq が進んだら open に追従する
+		// チャット内一括開閉(collapse-all.svelte.ts が採番)。seq が進んだら open に追従する
 		expandAll = null,
 		onExpandAll = undefined
 	}: {

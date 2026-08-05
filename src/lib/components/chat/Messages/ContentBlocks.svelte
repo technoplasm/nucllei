@@ -7,6 +7,7 @@
 	import ReasoningBlock from './ReasoningBlock.svelte';
 	import PendingIndicator from './PendingIndicator.svelte';
 	import ToolCallBlock from './ToolCallBlock.svelte';
+	import { collapseAllSignal, requestCollapseAll } from './collapse-all.svelte';
 	import type { Model } from '$lib/stores';
 	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
 	import type { ToolCallRender } from '$lib/utils/tool-render';
@@ -67,13 +68,12 @@
 	const toolResult = (call: ToolCall, block: ContentBlock): ToolResult | null =>
 		((block.results ?? []) as ToolResult[]).find((r) => r.tool_call_id === call.id) ?? null;
 
-	// メッセージ内の reasoning / tool call ブロックの一括開閉。各ブロックの下辺
-	// 「すべて開く / すべて閉じる」から呼ばれ、seq を進めて全ブロックに追従させる
-	// (各ブロックの open はローカル state のままなので、個別の手動開閉は殺さない)。
-	let expandAll = $state<{ seq: number; open: boolean }>({ seq: 0, open: false });
-	const requestExpandAll = (open: boolean) => {
-		expandAll = { seq: expandAll.seq + 1, open };
-	};
+	// reasoning / tool call ブロックの一括開閉。各ブロックの下辺「すべて閉じる」から
+	// 呼ばれ、seq を進めて全ブロックに追従させる(各ブロックの open はローカル state の
+	// ままなので、個別の手動開閉は殺さない)。合図はメッセージ単位ではなく
+	// チャット単位 — 押した通だけでなく、表示中の会話で開いているものを全部畳む。
+	const expandAll = collapseAllSignal;
+	const requestExpandAll = requestCollapseAll;
 
 	// tool 実行完了 → 追撃ストリーム初着(prefill 待ち)の間は emit すべきデルタが
 	// backend に無く、画面に動く要素がゼロになってフリーズに見える。後続 block が
