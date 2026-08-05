@@ -72,6 +72,26 @@
   - 補足: A-1 修正前は本体の欠陥を各ツールが個別に回避していた
     (str を返して `Code("json")` を宣言 / builtin tools は自前で `ensure_ascii=False`)。
     本体が直ったので、dict を素直に返せば正しく出る。
+- **改訂(2026-08-05、`a2f9cc07c`): 回避策を残すと描画が劣化する**(builtin tools で実害)。
+  自前で `json.dumps` した **str を返すと backend は実型ディスクリプタを付けられず**、
+  フロントは `classifyToolResult` の最終行 = `{kind:'text'}` に落ちて素の
+  `<div class="font-mono whitespace-pre-wrap">` で描画する — **ハイライトも言語ヘッダも
+  折りたたみもコピーボタンも無い**。`Code("json")` を宣言した外部 tool は `HljsCode` に
+  載るので、同じ JSON なのに builtin だけ見劣りしていた(`grep_history` vs cage の
+  `grep_doc` の食い違いとして発覚)。**実型を素直に返すのが唯一の正解**:
+  `history.list_history` / `grep_history` は list、`chat_files.list_chat_files` /
+  `grep_chat_files` は dict。副次的に、自前 `json.dumps` に付いていた `indent=2` も
+  本体経由になることで消える。
+  - **戻り値注釈はモデルに出ない**(spec 生成は `signature.parameters` のみ走査 —
+    `utils/tools.py`)。表示宣言(`RenderAs`)の抽出にしか使われないので、
+    `-> list | str` のように型を正直にしても副作用は無い。
+  - 散文の前置き(`"添付 30 件中、新しい 20 件:\n"` + JSON)は**やめる** — JSON として
+    パースできず表示も壊す。切り詰めは `{"total": N, "files": [...]}` と構造に載せれば
+    モデルが機械的に読めて表示も JSON 一本で済む。
+  - **`Markdown` 戻り型は宣言する側**(`74e24aada`)。`read_history` は
+    `"# {title}\n\n{body}"` を返すのに宣言が無く text 描画に落ちていた。
+    JSON ではないので実型からは決まらない — こういう「str だが md」は宣言が要る。
+    サニタイズは skill と同じ `Markdown` コンポーネント経路。
 - **改訂(2026-07-17): コード表示を HljsCode に一本化**。チャット本文のコードフェンス
   (旧 CodeMirror ベースの CodeBlock)も tool 引数/結果も、同じ「ヘッダ(言語名 +
   折りたたみ + コピー)+ hljs 静的ハイライト」で描画する(`common/HljsCode.svelte` が

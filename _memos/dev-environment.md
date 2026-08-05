@@ -17,7 +17,13 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
     ~/.local/share/mise/installs/node/24.18.0/bin`(`package.json` の `packageManager` =
     pnpm@11.3.0 を corepack が読んで版を合わせる)。
 - **frontend**: pnpm(`pnpm install` / `pnpm add`)。**npm は使わない**(peer 依存で ERESOLVE 失敗。
-  例: @fontsource をバンドルするフォント追加は `pnpm add`)。テストは `npx vitest run`。フォーマットは prettier
+  例: @fontsource をバンドルするフォント追加は `pnpm add`)。テストは `npx vitest run`
+  (**`pnpm test:frontend` は `vitest`(`run` 無し)なのでローカルでは watch モードに入り、
+  `.venv` まで監視して inotify 上限 ENOSPC で落ちる** — 2026-08-05 実害。CI は `CI=true` で
+  自動的に単発実行になるため顕在化しない。ローカルで CI と同条件にするなら
+  `CI=true pnpm test:frontend`)。**runes(`$state`/`$effect`)を使うテストは
+  `*.svelte.test.ts` 命名**でないとコンパイルされず、`*.test.svelte.ts` だと vitest の
+  include(`*.test.ts`)に拾われない。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
   スクリプトで package.json 等を書き換えたら**末尾改行を欠かさない**)。
 - **RuntimeConfig の追加は 2 点セット**(2026-07-17 に AttributeError で実害): `config.py` で
@@ -98,6 +104,10 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   して commit を再試行(走っている git プロセスは無い)。
 - **pytest の postgres**: `nucllei/test/conftest.py` が docker で自動起動しセッション共有。
   壊れたら `docker rm -f postgres-test-container-will-get-deleted` で確実に fresh になる。
+  - **同時に 2 本走らせない**(2026-08-05 実害): コンテナ名がセッション共有の固定名なので、
+    並行実行は同じコンテナを奪い合って**両方とも無言でハングする**(800 秒経っても
+    終わらない。タイムアウトまで気づけない)。バックグラウンド実行を重ねたときに起きやすい。
+    復旧は `pkill -f "pytest nucllei/test"` + 上の `docker rm -f` → 1 本で回し直す。
   - **podman 環境(2026-07-14 確認)**: usermod や root は不要。rootless の user socket を立てて
     docker-py に `DOCKER_HOST` で教えるだけ:
     ```sh

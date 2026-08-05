@@ -96,11 +96,28 @@ canonical なパースを 1 回で済ませられるが、chat UI では非推�
 - **改訂(2026-07-17): L3 の表示コンポーネントを専用化**。reasoning / tool call の表示は
   汎用 `Collapsible` の attributes 経由レンダリングをやめ、`chat/Messages/ReasoningBlock.svelte` /
   `ToolCallBlock.svelte` に分離(Collapsible は children/content の素朴な開閉コンテナに縮小)。
-  UI はバッジヘッダ(開くと枠上辺 tab に合体)+ 枠、メッセージ内一括「すべて閉じる」、
+  UI はバッジヘッダ(開くと枠上辺 tab に合体)+ 枠、一括「すべて閉じる」(当初はメッセージ
+  単位。2026-08-05 にチャット単位へ — 下の改訂節)、
   開閉コントロール hover で開閉単位のボーダー全体を強調(`line-hover` トークン)。
   コードの静的表示は本文コードフェンス・tool 引数/結果とも `common/HljsCode.svelte`
   (ヘッダ: 言語名 + Collapse + Copy)に一本化 — チャット内のコード編集(CodeMirror)は撤去。
   結果 kind の意味論は `tool-arg-render.md` の 2026-07-17 改訂を参照。
+- **改訂(2026-08-05、`b03a96b38`): 「すべて閉じる」の効果範囲をメッセージ単位 →
+  チャット単位へ**。合図(`{seq, open}`)が `ContentBlocks.svelte` のローカル `$state` に
+  あり、`ContentBlocks` はアシスタントメッセージ 1 通につき 1 インスタンスなので、
+  押しても**その 1 通の中しか畳めていなかった**(前のターンの開きっぱなしは残る)。
+  `chat/Messages/collapse-all.svelte.ts` のモジュール state に移し、表示中チャットの
+  全ブロックが同じ seq を見るようにした。描画されるのは常に 1 チャットぶんの
+  メッセージ列なので、モジュールスコープ = チャットスコープになる。
+  prop で 4 階層(Messages → Message → ResponseMessage → ContentBlocks)引き回さないのは、
+  これが「押した瞬間の一方向の合図」であって親が保持すべき状態ではないため。
+  `ReasoningBlock` / `ToolCallBlock` 側のインターフェース(`expandAll` prop +
+  seq 比較の追従 `$effect`)は不変。**性質も据え置き**: 各ブロックの `open` は
+  ローカル state のままで個別開閉は殺さない / 追従は seq が進んだときだけなので
+  合図の後にマウントされたブロック(ストリーム中の新着)は巻き戻らない /
+  チャット切替で再マウントし、その時点の seq を捉え直す。
+  テストは `collapse-all.svelte.test.ts`(**runes を動かすため `*.svelte.test.ts` 命名** —
+  vitest の include は `*.test.ts` なのでこの形でないと拾われない)。
 
 ### reasoning の閉じ規律(2026-07-06 決定 — think タグの閉じ問題)
 

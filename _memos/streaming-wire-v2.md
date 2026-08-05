@@ -49,6 +49,35 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
 - 生のモデルフレーム(choices)はクライアントへ流れない(assembler 経由イベントのみ)。
 - 旧方式(テキストデルタごとに全文スナップショット)は **O(n²) ワイヤ帯域**だった — 戻さない。
 
+## chat-wire の `id` はアシスタントメッセージの id(2026-08-05、#98 `e73945a35`)
+
+- `POST /api/chat/completions` の chat-wire モード(`chat_id` + `id`)で、**`id` は
+  「これから生成されるアシスタントメッセージ」の id**。生成結果はそのメッセージへ書かれる。
+  呼び出し側は chat 作成時に user メッセージと**空のアシスタントメッセージ**
+  (`role:"assistant"`, `content:""`, `parentId`=user の id)の両方を入れ、
+  `history.currentId` をアシスタント側にして、その id を渡す。
+- 検証が無い間は `upsert_message_to_chat_by_id_and_message_id`(`models/chats.py`)が
+  **黙って壊した**: user メッセージの id を渡すと生成結果がそこへマージされ(回答が
+  ユーザー発話として残る)、未知 id なら生 dict がそのまま挿入されて `id`/`role`/`parentId`
+  を欠いたメッセージ片が永続化される。医療系の配備では監査・引用の観点で誤解を招く。
+- **サーバーは正しい形を推測して作り直さない** — 呼び出し側の誤りとして `400`
+  (壊れた状態を黙って直さない fork の原則)。検証は既存チャットがあるときだけ効かせる:
+  `chat_id` が DB に無ければ upsert が no-op なので汚染は起きない。
+- **検証は try の外**(所有者検証と同じ位置)。payload 処理の except は `message_id` へ
+  エラーを upsert するので、不正 id のまま落ちると**エラー経路自体がメッセージ片を作る**。
+- **所有者検証(403)は id 検証より先**。順序を逆にすると 400 の有無で
+  「その id が他人のチャットに存在するか」が漏れる。
+- UI は影響を受けない: `send.ts` が `responseMessage`(`role:'assistant'`)を
+  `history.messages` へ入れ、`saveChatHandler` で **DB 保存してから** completion を POST する。
+  `continueResponse` も既存の done 済みアシスタントメッセージ id を渡す。
+- README_API §4.3 に「assistant message の id」と明記し、chat-wire の最小サンプル
+  (`chats/new` → `completions`)を追加した(旧文は「message `id`」としか書いておらず、
+  「先に作ったユーザーメッセージの id」と誤読できた — 実際に踏まれた)。
+- 回帰は `test_chat_wire_message_id.py`(7 本)。うち 3 本は検証を外すと落ちることを確認済み。
+  **罠**: ダミーモデル dict は `role="user"` だと `check_model_access` が
+  `Model not found` を投げ、`metadata` 代入**前**に落ちるので payload 処理の except に
+  入らない。エラー経路を突くテストは admin で回すこと。
+
 ## SSE 行の組み立ては `utils/sse.py` 一本(2026-08-05、#99)
 
 - `data: ` の前置・`\n\n` の終端・JSON 直列化は **`sse_line()` / `sse_raw()` だけが持つ**。

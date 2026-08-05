@@ -90,6 +90,27 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
   `view_image` / `doc` 等)は prune 対象外で、`make nuc-sync`(prism sync)も削除しない。
   dev では手削除した([[dev-environment]] のセッション追補)。custom 側 prune は別途検討(未起票)。
 
+## 改訂(2026-08-05、`a2f9cc07c` / `74e24aada` — 戻り値は実型で返す)
+
+builtin tools は自前で `json.dumps(..., ensure_ascii=False, indent=2)` した **str** を
+返していた。これは #99 A-1(本体の直列化に `ensure_ascii=False` が無かった)を各ツールが
+個別に回避していた名残で、本体が直った時点で害しかない — str には実型ディスクリプタが
+付かず、フロントは `{kind:'text'}` で素描画(ハイライト・ヘッダ・コピー無し)になる。
+
+- `history.list_history` / `grep_history` … **list を返す**(`-> list | str`。
+  空・エラー時のみ日本語の str)
+- `chat_files.list_chat_files` / `grep_chat_files` … **dict を返す**(`-> dict | str`)。
+  切り詰め通知は散文の前置きをやめ `{"total": N, "files": [...]}` の構造に載せた —
+  モデルが「まだある」を機械的に読めるし、表示も JSON 一本で済む
+- `history.read_history` … `"# {title}\n\n{body}"` なので **`Markdown` 戻り型を宣言**
+  (JSON ではないため実型からは決まらない)
+
+戻り値注釈はモデルに出ない(spec 生成は `signature.parameters` のみ走査)。
+表示宣言の抽出にしか使われないので型を正直にして副作用は無い。詳細は [[tool-arg-render]]
+の 2026-08-05 改訂。回帰は `test_builtin_tools.py`(実型で受ける形へ 12 箇所更新 +
+`execute_tool_calls` 経由で `render == {kind:"json"}` を見る 1 本 + 3 関数の
+ディスクリプタを並べる 1 本)。
+
 ## 1. 設計(議論の着地)
 
 ### 1a. 制御面はモデル設定に一元化(グローバルフラグなし)
