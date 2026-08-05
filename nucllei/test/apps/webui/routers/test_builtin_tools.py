@@ -241,8 +241,8 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         self._new_chat("other", "他人のチャット", [("user", "hi")])
 
         out = Tools().list_history(__user__={"id": "owner"})
-        assert "私のチャット" in out
-        assert "他人のチャット" not in out
+        # 戻りは素の list(直列化は本体が行う — #99)
+        assert [c["title"] for c in out] == ["私のチャット"]
 
     def test_read_history_renders_thread(self):
         from nucllei.builtin_tools.history import Tools
@@ -272,8 +272,7 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         self._new_chat("owner", "買い物", [("user", "牛乳を買う")])
 
         out = Tools().grep_history("京都", __user__={"id": "owner"})
-        assert "旅行の計画" in out
-        assert "買い物" not in out
+        assert [c["title"] for c in out] == ["旅行の計画"]
 
     def test_history_requires_user_context(self):
         import pytest
@@ -282,6 +281,44 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
 
         with pytest.raises(ValueError):
             Tools().list_history(__user__=None)
+
+    def test_result_carries_json_render_kind(self):
+        """builtin tool の結果に render {kind:"json"} が付く(#99)。
+
+        以前は自前で json.dumps した str を返していたため、backend は実型から
+        ディスクリプタを付けられず、フロントは text 描画(ハイライト・ヘッダ・
+        コピー無し)に落ちていた。cage の grep_doc(Code("json") 宣言あり)と
+        見え方が食い違う原因だったので、実型を素直に返す形へ戻した。
+        """
+        import asyncio
+
+        from nucllei.builtin_tools.history import Tools
+        from nucllei.utils.middleware import execute_tool_calls
+
+        self._new_chat("owner", "旅行の計画", [("user", "京都に行きたい")])
+
+        tool = Tools()
+
+        async def _call_list_history(**kwargs):
+            return tool.list_history(__user__={"id": "owner"})
+
+        tools = {
+            "list_history": {
+                "callable": _call_list_history,
+                "spec": {"name": "list_history", "parameters": {"properties": {}}},
+            }
+        }
+        call = {
+            "id": "functions.list_history:0",
+            "function": {"name": "list_history", "arguments": "{}"},
+        }
+        result = asyncio.run(execute_tool_calls([call], tools))[0]
+
+        assert result["render"] == {"kind": "json"}
+        # モデルに渡る文字列は非エスケープ・indent なし(#99)
+        assert "\\u" not in result["content"]
+        assert "\n" not in result["content"]
+        assert json.loads(result["content"])[0]["title"] == "旅行の計画"
 
 
 class TestBuiltinChatFilesTool(AbstractPostgresTest):
@@ -381,7 +418,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
             ],
         )
         out = Tools().list_chat_files(__user__={"id": "owner"}, __chat_id__=chat.id)
-        items = json.loads(out)
+        items = out["files"]
         assert [i["file_id"] for i in items] == ["f-up", "f-exp", "f-img"]
         assert items[0]["name"] == "report.pdf"
         assert items[0]["size"] == "2.0KB"
@@ -410,9 +447,8 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = Tools().list_chat_files(
             __user__={"id": "owner", "role": "user"}, __chat_id__=chat.id
         )
-        assert "f-secret" not in out
-        assert "secret.xlsx" not in out
-        assert "f-mine" in out
+        assert [i["file_id"] for i in out["files"]] == ["f-mine"]
+        assert "secret.xlsx" not in json.dumps(out, ensure_ascii=False)
 
     def test_deleted_own_file_is_marked(self):
         from nucllei.builtin_tools.chat_files import Tools
@@ -420,7 +456,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         self._new_file("owner", "f-del", "old.txt", deleted=True)
         chat = self._new_chat("owner", [[{"type": "file", "id": "f-del"}]])
         out = Tools().list_chat_files(__user__={"id": "owner"}, __chat_id__=chat.id)
-        items = json.loads(out)
+        items = out["files"]
         assert items[0]["file_id"] == "f-del"
         assert items[0]["deleted"] is True
 
@@ -436,8 +472,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = Tools().grep_chat_files(
             "report", __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "Report.PDF" in out
-        assert "data.csv" not in out
+        assert [i["name"] for i in out["files"]] == ["Report.PDF"]
 
         miss = Tools().grep_chat_files(
             "zzz", __user__={"id": "owner"}, __chat_id__=chat.id
@@ -455,9 +490,9 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = Tools().list_chat_files(
             limit=1, __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "添付 3 件中、新しい 1 件" in out
-        assert "f-2" in out
-        assert "f-0" not in out
+        # 切り詰めは散文ではなく total として構造に載る(#99)
+        assert out["total"] == 3
+        assert [i["file_id"] for i in out["files"]] == ["f-2"]
 
     def test_limit_clamped_by_valves(self):
         from nucllei.builtin_tools.chat_files import Tools
@@ -472,8 +507,8 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = tool.list_chat_files(
             limit=50, __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "添付 3 件中、新しい 2 件" in out
-        assert "f-0" not in out
+        assert out["total"] == 3
+        assert [i["file_id"] for i in out["files"]] == ["f-1", "f-2"]
 
     def test_requires_chat_context_with_metadata_fallback(self):
         from nucllei.builtin_tools.chat_files import Tools
@@ -487,7 +522,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = Tools().list_chat_files(
             __user__={"id": "owner"}, __metadata__={"chat_id": chat.id}
         )
-        assert "f-meta" in out
+        assert [i["file_id"] for i in out["files"]] == ["f-meta"]
 
     def test_empty_chat_returns_message(self):
         from nucllei.builtin_tools.chat_files import Tools
@@ -509,8 +544,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
             top_files=[{"type": "file", "id": "f-top"}],
         )
         out = Tools().list_chat_files(__user__={"id": "owner"}, __chat_id__=chat.id)
-        items = json.loads(out)
-        assert [i["file_id"] for i in items] == ["f-top", "f-msg"]
+        assert [i["file_id"] for i in out["files"]] == ["f-top", "f-msg"]
 
     def test_purged_file_lists_without_name_and_grep_skips_it(self):
         """purge(#94)後は filename=None・meta が {size} に縮退する別形状。
@@ -522,7 +556,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         chat = self._new_chat("owner", [[{"type": "file", "id": "f-purged"}]])
 
         out = Tools().list_chat_files(__user__={"id": "owner"}, __chat_id__=chat.id)
-        items = json.loads(out)
+        items = out["files"]
         assert items[0]["file_id"] == "f-purged"
         assert items[0]["name"] is None
         assert items[0]["deleted"] is True
@@ -544,15 +578,15 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         out = Tools().list_chat_files(
             limit=1.0, __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "添付 3 件中、新しい 1 件" in out
+        assert out["total"] == 3 and len(out["files"]) == 1
 
         out = Tools().list_chat_files(
             limit="2", __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "添付 3 件中、新しい 2 件" in out
+        assert out["total"] == 3 and len(out["files"]) == 2
 
         # 変換不能値は既定 20 へフォールバック(3 件なので全件出る)
         out = Tools().list_chat_files(
             limit="abc", __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert len(json.loads(out)) == 3
+        assert len(out["files"]) == 3

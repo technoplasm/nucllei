@@ -7,7 +7,6 @@ OWUI の Chats モデル(DB)に密結合するため fork の組み込みツー�
 (外部システムを叩く web 検索とは線引きが異なる — 2026-07-13 確定、#42)。
 """
 
-import json
 import time
 from typing import Optional
 
@@ -35,7 +34,7 @@ class Tools:
         self,
         limit: int = 20,
         __user__: Optional[dict] = None,
-    ) -> str:
+    ) -> list | str:
         """自分の最近のチャット一覧を返す(id・タイトル・更新日時)。
 
         :param limit: 返す件数の上限(省略時 20)
@@ -54,7 +53,10 @@ class Tools:
         ]
         if not items:
             return "チャット履歴はまだありません。"
-        return json.dumps(items, ensure_ascii=False, indent=2)
+        # list を素直に返す(自前で直列化しない)。#99 で本体が ensure_ascii=False で
+        # 直列化するようになり、実型から render {kind:"json"} も付く。str を返すと
+        # text 描画に落ちて JSON ハイライトが消える。
+        return items
 
     def read_history(
         self,
@@ -91,7 +93,7 @@ class Tools:
         query: str,
         limit: int = 20,
         __user__: Optional[dict] = None,
-    ) -> str:
+    ) -> list | str:
         """自分のチャット履歴をテキスト検索し、ヒットした一覧を返す。
 
         :param query: 検索文字列(タイトル・本文を対象)
@@ -114,4 +116,4 @@ class Tools:
         ]
         if not items:
             return f"「{query}」に一致するチャットは見つかりませんでした。"
-        return json.dumps(items, ensure_ascii=False, indent=2)
+        return items

@@ -13,7 +13,6 @@ fetch_from_workspace 等)を一覧・名前検索する(#42 history と同じ ow
 soft delete / purge は管理系の明示操作 — モデル起点の破壊操作にする理由がない)。
 """
 
-import json
 import time
 import types
 from typing import Optional
@@ -123,7 +122,7 @@ class Tools:
             items.append(item)
         return None, items
 
-    def _render(self, items: list[dict], limit) -> str:
+    def _render(self, items: list[dict], limit) -> dict:
         # tool 引数は実行時の型検証を通らない(モデルは 5.0 や "5" を出し得る)。
         # float のままだと末尾 slice が TypeError、str は min() で落ちる — int へ矯正。
         try:
@@ -132,11 +131,14 @@ class Tools:
             limit = DEFAULT_LIMIT
         limit = max(1, min(limit, self.valves.max_limit))
         total = len(items)
-        head = ""
         if total > limit:
             items = items[-limit:]  # 出現順の末尾 = 新しく発行された側を優先
-            head = f"添付 {total} 件中、新しい {limit} 件:\n"
-        return head + json.dumps(items, ensure_ascii=False, indent=2)
+        # dict を素直に返す(自前で直列化しない)。#99 で本体が ensure_ascii=False で
+        # 直列化するようになり、実型から render {kind:"json"} も付く。str を返すと
+        # text 描画に落ちて JSON ハイライトが消える。
+        # 切り詰めは散文の前置きではなく total として構造に載せる — モデルが
+        # 「まだある」を機械的に読めるし、表示も JSON 一本で済む。
+        return {"total": total, "files": items}
 
     def list_chat_files(
         self,
@@ -144,7 +146,7 @@ class Tools:
         __user__: Optional[dict] = None,
         __chat_id__: Optional[str] = None,
         __metadata__: Optional[dict] = None,
-    ) -> str:
+    ) -> dict | str:
         """このチャットで file_id 発行済みの添付ファイルを一覧する(発行順)。
 
         ユーザーのアップロードと tool が添付した成果物の両方が対象。過去に発行された
@@ -167,7 +169,7 @@ class Tools:
         __user__: Optional[dict] = None,
         __chat_id__: Optional[str] = None,
         __metadata__: Optional[dict] = None,
-    ) -> str:
+    ) -> dict | str:
         """このチャットの添付ファイルをファイル名で検索する(部分一致・大小文字無視)。
 
         :param query: 検索文字列(ファイル名に対する部分一致)
