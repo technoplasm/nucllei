@@ -1,6 +1,6 @@
-# llens — Open WebUI fork(基点 v0.6.5 固定)
+# nucllei — Open WebUI fork(基点 v0.6.5 固定)
 
-北大病院オンプレ向け「薄い LLM チャット基盤」。llens 独自の文書はすべて `_memos/` にある:
+北大病院オンプレ向け「薄い LLM チャット基盤」。nucllei 独自の文書はすべて `_memos/` にある:
 機能要件の一次根拠は `_memos/fork.md`(CORE / KEEP-MINIMAL / DROP / CONSTRAINT の 4 区分)、
 機能別の維持/削除判断は `_memos/feature-triage.md`、upstream の扱いは `_memos/upstream-policy.md`。
 実装判断で迷ったらまず fork.md に照らす。
