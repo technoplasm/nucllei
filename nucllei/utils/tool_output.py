@@ -132,7 +132,19 @@ class ToolOutputSink:
                 "done": False,
             }
             emit = self._emit_progress
-        emit(payload)
+        self._safe_emit(emit, payload)
+
+    @staticmethod
+    def _safe_emit(emit, payload) -> None:
+        """進捗は装飾 — 送出の失敗で tool 本体を巻き添えにしない。
+
+        close() は finally から呼ばれるので、ここで例外を通すと元の例外を
+        握り潰して tool ループごと落ちる。
+        """
+        try:
+            emit(payload)
+        except Exception:
+            log.debug("progress emit failed", exc_info=True)
 
     def push_progress(
         self, description="", *, current=None, total=None, done: bool = False
@@ -180,19 +192,43 @@ class ToolOutputSink:
                 emit, pending = None, None
 
         if emit is not None:
-            emit(pending)
+            self._safe_emit(emit, pending)
 
     def close(self) -> None:
-        """tool-call の終了。以後の push を no-op にし、抑制中の 1 通を流す。"""
+        """tool-call の終了。以後の push を no-op にし、**終端を 1 通流す**。
+
+        終端は `done=True`。フロントはこれで**経過時間の時計だけ**止める
+        (スピナーと完了表示の権威は results の到着のまま)。
+
+        これが要るのは results がラウンド単位で届くため: `execute_tool_calls` は
+        全 call を回し切ってから results を返し、スナップショットの emit も 1 回
+        しかない。個々の call の完了は wire に出ないので、終端が無いと**先に
+        終わった tool の時計が後続を待つ間ずっと回り続け、確定時に巻き戻る**
+        (A=2 秒 / B=60 秒なら A のヘッダが 62 秒まで数えてから 2 秒に落ちる)。
+        開始側の巻き戻りを mark_started() で潰したのと対になる。
+
+        抑制されていた最後の 1 通(description と数値)はここに畳んで載せる。
+        """
         with self._lock:
             if self._closed:
                 return
             self._closed = True
             pending, self._pending = self._pending, None
             emit = self._emit_progress
+            if emit is None:
+                return
+            payload = {
+                "tool_call_id": self._tool_call_id,
+                "description": self._description,
+                "done": True,
+            }
+            # スロットルで落ちた最後の数値も終端に持ち上げる(古い分数のまま
+            # 止まって見えないように)
+            if pending is not None and "current" in pending:
+                payload["current"] = pending["current"]
+                payload["total"] = pending["total"]
 
-        if pending is not None and emit is not None:
-            emit(pending)
+        self._safe_emit(emit, payload)
 
 
 # 現在実行中 tool-call の sink。execute_tool_calls が call ごとに set/reset する。
@@ -281,3 +317,13 @@ def progress(
         sink.push_progress(description, current=current, total=total, done=done)
     except Exception:
         log.debug("progress push failed", exc_info=True)
+
+
+__all__ = [
+    "PROGRESS_THROTTLE_S",
+    "ToolOutputSink",
+    "current_sink",
+    "display",
+    "feed_image",
+    "progress",
+]

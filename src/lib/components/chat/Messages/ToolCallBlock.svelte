@@ -110,13 +110,19 @@
 	// 実行中の経過時間。起点は backend が call 開始時に打つ progress の受信時刻
 	// (ブロックは実行前の 1 回の emit で一斉に描かれるので、マウント時刻を起点に
 	// すると 2 本目以降が前の tool の待ち時間まで数えてしまう)。
+	// 終点は終端 progress(done)の受信時刻 — results はラウンド単位で届くので、
+	// これが無いと先に終わった tool が後続を待つ間ずっと回り続けて巻き戻る。
+	// 依存は **真偽値だけ**にする(progress オブジェクトを依存に置くと更新のたびに
+	// 購読を張り直し、タイマが毎回作り直される偶然依存になる)。
+	const ticking = $derived(!isDone && progress != null && progress.doneAt == null);
 	$effect(() => {
-		if (isDone || !progress) return;
+		if (!ticking) return;
 		return subscribeTick();
 	});
 	const elapsedLabel = $derived.by(() => {
 		if (isDone || !progress) return '';
-		const seconds = Math.max(0, Math.round((tickNow() - progress.startedAt) / 1000));
+		const until = progress.doneAt ?? tickNow();
+		const seconds = Math.max(0, Math.round((until - progress.startedAt) / 1000));
 		return $i18n.t('{{DURATION}} seconds', { DURATION: seconds });
 	});
 

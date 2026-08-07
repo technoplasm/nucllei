@@ -18,9 +18,15 @@ tool が「戻り値以外」で何かを届ける口の全量。issue #88 / #89
 | `__event_emitter__({type,data})` | 人間 | 即時 | 型による | ✗(async) | 型による |
 | `__event_call__({type,data})` | 人間(モーダル) | 即時・双方向 | ✗ | ✗(async) | ✗ |
 
-`__event_emitter__` で tool が使える型は `chat:message:files` / `message` / `replace` /
-`source`(`citation`)/ `notification` / `chat:title`。**`status` は落とされる**
-(`make_tool_event_emitter`)。
+`__event_emitter__` は tool 向けだけ `make_tool_event_emitter` で包み、**`status` を落とす。
+それ以外の型は素通し**(allowlist ではない)。tool が実際に使うのは
+`chat:message:files`(sandbox の成果物添付)/ `message` / `replace` / `source`(`citation`)/
+`notification` / `chat:title`。素通しなので `chat:completion` を撃って本文を差し替えることも
+できるが、tool は元々任意の Python なのでここは**権限境界ではない**(認可は tool の
+access_control 側)。status だけを塞ぐのは、共用スロットの奪い合いを止めるため。
+
+**`__progress__` は tool 実行文脈でのみ効く。** pipe(`functions.py`)や filter 経路にも
+注入されるが、そちらは sink を張らないので恒久 no-op(呼んでも例外にならないだけ)。
 
 ## 選び方
 

@@ -30,7 +30,7 @@
 	import { SESSION_EXPIRED_FLAG } from '$lib/apis/fetch';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { setFallbackHandler } from '$lib/utils/completion-streams';
-	import { setToolProgress } from '$lib/stores/tool-progress.svelte';
+	import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
 
 	// vendor base(OverlayScrollbars)→ 自前 CSS の順 — app.css の .os-theme-app が上書きする側
 	import 'overlayscrollbars/overlayscrollbars.css';
@@ -67,6 +67,11 @@
 			const { done, content, title } = data ?? {};
 
 			if (done) {
+				// llens(#100): 進捗は揮発。表示中でないチャットでも確定時に捨てる
+				// (ここで捨てないと、別チャットを見ている間に走った tool の分が
+				// セッション終了まで残り続ける)
+				clearMessageProgress(envelope.message_id ?? '');
+
 				if ($isLastActiveTab) {
 					if ($settings?.notificationEnabled ?? false) {
 						new Notification(`${title} | ${$WEBUI_NAME}`, {
@@ -100,7 +105,10 @@
 			// llens(#100): 別チャットを見ている間の進捗も記録しておく。戻ったときに
 			// 実行中の tool が「今どこか」を出せる(再アタッチは既存タスクではスキップ
 			// されるので、ここで拾わないと復元経路が無い)。
-			setToolProgress(envelope.message_id ?? '', data);
+			// message_id が無い封筒は宛先が作れず、掃除もできないので捨てる。
+			if (envelope.message_id) {
+				setToolProgress(envelope.message_id, data);
+			}
 		}
 	};
 

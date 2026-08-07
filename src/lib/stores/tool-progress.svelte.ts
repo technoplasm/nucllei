@@ -27,6 +27,14 @@ export type ToolProgress = {
 	 * 起点にすると 2 本目以降が前の tool の待ち時間まで数えてしまう。
 	 */
 	startedAt: number;
+	/**
+	 * tool が終わった時刻(終端 `done=true` を観測した時刻)。経過時間はここで止める。
+	 *
+	 * results はラウンド単位で届く(全 call が終わってから 1 回)ので、これが無いと
+	 * 先に終わった tool の時計が後続を待つ間ずっと回り続け、確定時に巻き戻る。
+	 * スピナーと完了表示の権威はあくまで results の到着。
+	 */
+	doneAt?: number;
 };
 
 // id に現れない区切り(uuid にも `functions.name:0` にも含まれない)。
@@ -52,13 +60,16 @@ export const setToolProgress = (
 		return;
 	}
 	const key = keyOf(messageId, toolCallId);
+	const previous = entries[key];
+	const done = payload.done ?? false;
 	entries[key] = {
 		description: payload.description ?? '',
 		current: payload.current,
 		total: payload.total,
-		done: payload.done ?? false,
-		// 起点は最初の 1 件で確定させる(以降の更新で進み直させない)
-		startedAt: entries[key]?.startedAt ?? Date.now()
+		done,
+		// 起点・終点とも最初の 1 件で確定させる(以降の更新で進み直させない)
+		startedAt: previous?.startedAt ?? Date.now(),
+		doneAt: done ? (previous?.doneAt ?? Date.now()) : previous?.doneAt
 	};
 };
 

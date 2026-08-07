@@ -1285,9 +1285,7 @@ async def process_chat_response(
             initial_content=(
                 message.get("content", "")
                 if message
-                else last_assistant_message
-                if last_assistant_message
-                else ""
+                else last_assistant_message if last_assistant_message else ""
             ),
             seed_blocks=seed_blocks,
             tools=metadata.get("tools", {}),
@@ -1424,7 +1422,8 @@ async def process_chat_response(
                     error_data = {
                         "error": {
                             "content": (
-                                f"Follow-up model call after tool execution failed: {e}"
+                                "Follow-up model call after tool execution "
+                                f"failed: {e}"
                             )
                         },
                     }

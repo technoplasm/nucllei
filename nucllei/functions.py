@@ -88,7 +88,7 @@ async def get_function_models(request):
             )
 
             for p in sub_pipes:
-                sub_pipe_id = f"{pipe.id}.{p['id']}"
+                sub_pipe_id = f'{pipe.id}.{p["id"]}'
                 sub_pipe_name = p["name"]
 
                 if hasattr(function_module, "name"):

@@ -452,9 +452,11 @@ def test_progress_throttles_and_flushes_last_on_close():
     assert len(seen) == 1
     assert seen[0]["current"] == 0
 
+    # 終端は done=True。抑制されていた最後の数値をここに畳んで載せる
     sink.close()
     assert len(seen) == 2
     assert seen[1]["current"] == 99
+    assert seen[1]["done"] is True
 
 
 def test_progress_done_bypasses_throttle():
@@ -467,6 +469,22 @@ def test_progress_done_bypasses_throttle():
 
     assert [p["description"] for p in seen] == ["開始", "完了"]
     assert seen[-1]["done"] is True
+
+
+def test_start_marker_does_not_consume_the_throttle_window():
+    """開始マーカはスロットルの窓を動かさない。
+
+    動かしてしまうと、直後に tool が押す **最初の** description が 200ms の窓に
+    巻き込まれて抑制され、close の flush(= tool 終了時)まで画面に出ない。
+    実行中に見せるための機構なのに、実行が終わるまで何も出ないことになる。
+    """
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.mark_started()
+    sink.push_progress("すぐ出したい最初の 1 通")
+
+    assert [p["description"] for p in seen] == ["", "すぐ出したい最初の 1 通"]
 
 
 def test_progress_after_close_is_dropped(monkeypatch):
@@ -483,7 +501,11 @@ def test_progress_after_close_is_dropped(monkeypatch):
     sink.close()
     sink.push_progress("orphan からの遅延 push")
 
-    assert [p["description"] for p in seen] == ["実行中"]
+    # 実行中 → 終端(done)の 2 通だけ。close 後の push は増えない
+    assert [(p["description"], p["done"]) for p in seen] == [
+        ("実行中", False),
+        ("実行中", True),
+    ]
 
 
 def test_progress_close_is_idempotent():
@@ -493,7 +515,12 @@ def test_progress_close_is_idempotent():
     sink.push_progress("b")  # 抑制される
     sink.close()
     sink.close()
-    assert len(seen) == 2
+    # 2 回目の close は何も流さない。終端には抑制された最新の文言が載る
+    # (件数だけ見ると、間違った payload を流す退行を拾えない)
+    assert [(p["description"], p["done"]) for p in seen] == [
+        ("a", False),
+        ("b", True),
+    ]
 
 
 def test_progress_from_async_tool_does_not_deadlock(monkeypatch):
@@ -525,8 +552,14 @@ def test_progress_from_async_tool_does_not_deadlock(monkeypatch):
     results = asyncio.run(run())
     assert results[0]["content"] == "ok"
     payloads = stream.progress_payloads()
-    # 先頭は開始マーカ(description 空) — フロントの経過時間タイマの起点
-    assert [p["description"] for p in payloads] == ["", "問い合わせ中", "整形中"]
+    # 開始マーカ(description 空・タイマの起点)→ 進捗 2 件 → 終端(done・タイマの終点)
+    assert [p["description"] for p in payloads] == [
+        "",
+        "問い合わせ中",
+        "整形中",
+        "整形中",
+    ]
+    assert [p["done"] for p in payloads] == [False, False, False, True]
     assert all(p["tool_call_id"] == "functions.probe:0" for p in payloads)
     envelope = stream.events[0]
     assert envelope["chat_id"] == "chat-1"
@@ -565,6 +598,7 @@ def test_progress_from_sync_tool_via_to_thread(monkeypatch):
     assert [p["description"] for p in stream.progress_payloads()] == [
         "",
         "ワーカーから",
+        "ワーカーから",  # 終端(done)
     ]
 
 
@@ -612,8 +646,10 @@ def test_progress_isolated_per_tool_call(monkeypatch):
     ] == [
         ("functions.probe:0", ""),
         ("functions.probe:0", "A の進捗"),
+        ("functions.probe:0", "A の進捗"),  # 終端
         ("functions.plain:0", ""),
         ("functions.plain:0", "B の進捗"),
+        ("functions.plain:0", "B の進捗"),  # 終端
     ]
 
 
@@ -633,12 +669,10 @@ def test_start_marker_emitted_even_without_tool_progress_calls():
         execute_tool_calls(_call(), _tool(silent), events_stream=stream, metadata={})
     )
     payloads = stream.progress_payloads()
-    assert len(payloads) == 1
-    assert payloads[0] == {
-        "tool_call_id": "functions.probe:0",
-        "description": "",
-        "done": False,
-    }
+    assert payloads == [
+        {"tool_call_id": "functions.probe:0", "description": "", "done": False},
+        {"tool_call_id": "functions.probe:0", "description": "", "done": True},
+    ]
 
 
 def test_progress_without_stream_is_noop():

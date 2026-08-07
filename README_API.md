@@ -562,21 +562,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                            |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` events are dropped for tools** — use `__progress__` |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                          |
+| Parameter                       | Contents                                                                                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                  |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` events are dropped for tools** — use `__progress__`  |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                           |
 | `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile |
-| `__feed_image__`                | `fn(file_id)` — feed an internal image into the model's context for the follow-up call (the "model's eyes"); chat path only         |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                          |
-| `__id__`                        | this tool's id                                                                                                                      |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                   |
-| `__messages__`                  | the outbound message list                                                                                                           |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                  |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                           |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                             |
+| `__feed_image__`                | `fn(file_id)` — feed an internal image into the model's context for the follow-up call (the "model's eyes"); chat path only                          |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                  |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                           |
+| `__id__`                        | this tool's id                                                                                                                                       |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                    |
+| `__messages__`                  | the outbound message list                                                                                                                            |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                   |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                            |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                              |
 
 ### 5.4 Argument & result rendering
 
@@ -645,12 +645,12 @@ async def read_doc(self, path: str) -> Markdown:
   Completion is decided by the tool returning, not by `done=True`, so a tool that
   times out or raises still stops the spinner. Use `__display__` instead for
   anything the user should be able to read back later.
-- `__event_emitter__({"type": ..., "data": ...})` event types usable from a tool:
-  `chat:message:files` (attach files to the message), `message` / `replace`
-  (append to / replace the message text), `source`/`citation`, `notification`
-  (toast), `chat:title`. **`status` is dropped for tools** — it writes to a
-  message-wide slot shared with filters, which is what `__progress__` replaces.
-  Filters may still emit `status` (§7).
+- `__event_emitter__({"type": ..., "data": ...})`: for tools, **`status` is dropped
+  and every other type passes through** (it is not an allowlist). `status` writes to
+  a message-wide slot shared with filters, which is what `__progress__` replaces;
+  filters may still emit it (§7). Types tools actually use: `chat:message:files`
+  (attach files to the message), `message` / `replace` (append to / replace the
+  message text), `source`/`citation`, `notification` (toast), `chat:title`.
 - File outputs: write bytes via `nucllei.storage.provider.Storage.upload_file` +
   `nucllei.models.files.Files.insert_new_file`, then emit `chat:message:files`;
   images become visible when the model writes
