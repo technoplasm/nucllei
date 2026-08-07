@@ -9,6 +9,7 @@
 	import ToolCallBlock from './ToolCallBlock.svelte';
 	import { collapseAllSignal, requestCollapseAll } from './collapse-all.svelte';
 	import type { Model } from '$lib/stores';
+	import { getToolProgress } from '$lib/stores/tool-progress.svelte';
 	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
 	import type { ToolCallRender } from '$lib/utils/tool-render';
 
@@ -26,9 +27,13 @@
 		render?: { kind: string };
 		// display チャネル(#88): tool 発の人間向け表示。そのまま ToolCallBlock へ渡す。
 		display?: { kind: string; content: string }[];
+		// 所要時間(#100、秒)。実行中の進捗が消えた後に残るのはこれ
+		duration?: number;
 	};
 
 	let {
+		// message.id。ブロック id の前置に使うほか、実行中 tool の進捗(#100)を
+		// 引くキーの一部にもなる(tool_call_id はメッセージをまたぐと衝突しうる)
 		id,
 		blocks,
 		// メッセージ確定後(中断含む)は block.done が立っていなくてもスピナーを
@@ -128,6 +133,7 @@
 					{call}
 					result={toolResult(call, block)}
 					{done}
+					progress={getToolProgress(id, call.id)}
 					{expandAll}
 					onExpandAll={requestExpandAll}
 				/>

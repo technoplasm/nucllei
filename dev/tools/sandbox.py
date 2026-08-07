@@ -20,7 +20,7 @@ changelog:
          入出力の流れ・日本語作図) は system prompt (prompts/llens.md) に移行。
   0.1.0: 初版 (PoC)。run_python / run_shell / import_chat_file / list_workspace /
          export_workspace_file。outputs/ の自動回収・チャット添付、
-         実行中の経過秒数 status 表示。
+         実行中の経過秒数表示。
 """
 
 import asyncio
@@ -160,37 +160,24 @@ class Tools:
         payload: dict,
         timeout_s: float,
         label: str,
-        __event_emitter__,
+        __progress__,
     ) -> dict:
-        """実行中 5 秒ごとに経過秒数を status で流す (ユーザー向け表示のみ)。"""
+        """実行中 5 秒ごとに経過秒数を流す (ユーザー向け表示のみ)。
+
+        #100 で status から __progress__ へ移行。行き先がこの tool 自身の
+        ウィジェットに閉じるので、他の tool や filter の表示を踏み潰さない。
+        完了時の所要時間はフレームワークが results[i].duration として出すため、
+        ここで「完了 (Ns)」を撃つ必要はない。
+        """
         task = asyncio.create_task(self._post(path, payload, timeout_s + 30))
         t0 = time.monotonic()
         while True:
             done, _ = await asyncio.wait({task}, timeout=5.0)
             if done:
                 break
-            if __event_emitter__:
-                await __event_emitter__(
-                    {
-                        "type": "status",
-                        "data": {
-                            "description": f"{label} 実行中 ({int(time.monotonic() - t0)}s 経過)",
-                            "done": False,
-                        },
-                    }
-                )
-        result = task.result()  # 失敗時はここで raise
-        if __event_emitter__:
-            await __event_emitter__(
-                {
-                    "type": "status",
-                    "data": {
-                        "description": f"{label} 完了 ({int(time.monotonic() - t0)}s)",
-                        "done": True,
-                    },
-                }
-            )
-        return result
+            if __progress__:
+                __progress__(f"{label} 実行中 ({int(time.monotonic() - t0)}s 経過)")
+        return task.result()  # 失敗時はここで raise
 
     # ---- outputs/ の回収 → OWUI Files 登録 + チャット添付 ----------------------
     async def _persist_and_emit_files(
@@ -321,6 +308,7 @@ class Tools:
         timeout_s,
         __user__,
         __event_emitter__,
+        __progress__,
         __chat_id__,
         __message_id__,
     ) -> str:
@@ -338,7 +326,7 @@ class Tools:
                 payload,
                 payload["timeout_s"],
                 "python" if lang == "python" else "shell",
-                __event_emitter__,
+                __progress__,
             )
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
@@ -357,6 +345,7 @@ class Tools:
         timeout_s,
         __user__,
         __event_emitter__,
+        __progress__,
         __chat_id__,
         __message_id__,
     ) -> str:
@@ -375,7 +364,7 @@ class Tools:
         }
         try:
             res = await self._post_with_progress(
-                "/exec_cell", payload, payload["timeout_s"], "python", __event_emitter__
+                "/exec_cell", payload, payload["timeout_s"], "python", __progress__
             )
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
@@ -397,6 +386,7 @@ class Tools:
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
+        __progress__: Optional[Callable[..., None]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
     ) -> Text:
@@ -410,7 +400,13 @@ class Tools:
         :param timeout_s: このセルの wall clock 秒数 (省略時 120)
         """
         return await self._exec_cell(
-            code, timeout_s, __user__, __event_emitter__, __chat_id__, __message_id__
+            code,
+            timeout_s,
+            __user__,
+            __event_emitter__,
+            __progress__,
+            __chat_id__,
+            __message_id__,
         )
 
     async def run_python_once(
@@ -419,6 +415,7 @@ class Tools:
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
+        __progress__: Optional[Callable[..., None]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
     ) -> Text:
@@ -436,6 +433,7 @@ class Tools:
             timeout_s,
             __user__,
             __event_emitter__,
+            __progress__,
             __chat_id__,
             __message_id__,
         )
@@ -446,6 +444,7 @@ class Tools:
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
+        __progress__: Optional[Callable[..., None]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
     ) -> Text:
@@ -463,6 +462,7 @@ class Tools:
             timeout_s,
             __user__,
             __event_emitter__,
+            __progress__,
             __chat_id__,
             __message_id__,
         )

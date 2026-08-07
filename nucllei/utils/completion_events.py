@@ -38,22 +38,52 @@ class CompletionEventStream:
         # 再アタッチ用: 最後に emit した chat:completion スナップショット
         # (content_blocks を含むもののみ保持。デルタでは更新しない)
         self.latest_snapshot: dict | None = None
+        # 再アタッチ用: 実行中 tool の最新進捗(#100)。tool_call_id → 封筒。
+        # **DB には書かない** — 進捗は揮発で、タスクの生存期間だけ持つ。
+        # 結果が出た tool の分はスナップショット到着時に捨てる。
+        self.latest_progress: dict[str, dict] = {}
         # __event_call__(tool → UI の双方向呼び出し)の応答待ち
         self._pending_calls: dict[str, asyncio.Future] = {}
 
     # --- 配信 -----------------------------------------------------------
 
     def emit(self, event: dict):
-        """封筒済みイベントを全購読者へ配る(closed 後は無視)。"""
+        """封筒済みイベントを全購読者へ配る(closed 後は無視)。
+
+        ワーカースレッドから直接呼んではならない(購読者集合を触る)。sync tool の
+        進捗は `loop.call_soon_threadsafe(stream.emit, ...)` でループ側へ渡る。
+        """
         if self._closed:
             return
         data = event.get("data") or {}
-        if data.get("type") == "chat:completion" and "content_blocks" in (
-            data.get("data") or {}
-        ):
-            self.latest_snapshot = data["data"]
+        event_type = data.get("type")
+        payload = data.get("data") or {}
+
+        if event_type == "chat:completion" and "content_blocks" in payload:
+            self.latest_snapshot = payload
+            self._drop_finished_progress(payload)
+        elif event_type == "tool:progress":
+            tool_call_id = payload.get("tool_call_id")
+            if tool_call_id is not None:
+                self.latest_progress[tool_call_id] = event
+
         for queue in list(self._subscribers):
             queue.put_nowait(event)
+
+    def _drop_finished_progress(self, snapshot: dict):
+        """結果が出た tool の進捗を捨てる(#100)。
+
+        完了の権威は results の到着であって progress の done 宣言ではない。
+        ここで捨てておくと、再アタッチしたクライアントに終わった tool の
+        「実行中」が復元されることがない。
+        """
+        if not self.latest_progress:
+            return
+        for block in snapshot.get("content_blocks") or []:
+            if block.get("type") != "tool_calls":
+                continue
+            for result in block.get("results") or []:
+                self.latest_progress.pop(result.get("tool_call_id"), None)
 
     def close(self):
         if self._closed:
@@ -201,6 +231,31 @@ def make_event_emitter(stream: CompletionEventStream, metadata: dict, update_db=
             )
 
     return __event_emitter__
+
+
+def make_tool_event_emitter(event_emitter):
+    """tool へ渡す `__event_emitter__`。`status` だけを落とす(#100)。
+
+    tool が実行中にユーザーへ伝える口は `__progress__` 一本にした。行き先が
+    その tool 自身のウィジェットに閉じるので、同時に走る他の tool や filter の
+    表示を踏み潰さない。status で共用スロットへ書きに行く道は塞ぐ。
+
+    残りの型(`chat:message:files` 等)はそのまま通す — sandbox は outputs/ の
+    成果物をこの型でそのターンに添付しており、emitter ごと外すと機能が死ぬ。
+    filter 側の emitter は無変更(status は filter の常設表示に使われている)。
+    """
+    if event_emitter is None:
+        return None
+
+    async def __tool_event_emitter__(event_data):
+        if (event_data or {}).get("type") == "status":
+            log.debug(
+                "dropped status event from tool (use __progress__): %s", event_data
+            )
+            return
+        await event_emitter(event_data)
+
+    return __tool_event_emitter__
 
 
 def make_event_call(stream: CompletionEventStream):

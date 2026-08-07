@@ -138,7 +138,8 @@ class ContentBlocksAssembler:
                     "end_tag": "/think",
                     "attributes": {"type": "reasoning_content"},
                     "content": "",
-                    "started_at": time.time(),
+                    # 経過の計測なので monotonic(時刻表示には使わない)
+                    "started_at": time.monotonic(),
                 }
                 self.content_blocks.append(reasoning_block)
                 structural = True
@@ -159,9 +160,11 @@ class ContentBlocksAssembler:
                 == "reasoning_content"
             ):
                 reasoning_block = self.content_blocks[-1]
-                reasoning_block["ended_at"] = time.time()
-                reasoning_block["duration"] = int(
-                    reasoning_block["ended_at"] - reasoning_block["started_at"]
+                reasoning_block["ended_at"] = time.monotonic()
+                # llens(#100): int() 切り捨てだと 1 秒未満の思考が全部「0秒」に
+                # なっていた。小数で保持し、丸めは表示側の責務にする。
+                reasoning_block["duration"] = round(
+                    reasoning_block["ended_at"] - reasoning_block["started_at"], 3
                 )
 
                 self.content_blocks.append({"type": "text", "content": ""})
@@ -266,8 +269,8 @@ class ContentBlocksAssembler:
             and "ended_at" not in self.content_blocks[-1]
         ):
             block = self.content_blocks[-1]
-            block["ended_at"] = time.time()
-            block["duration"] = int(block["ended_at"] - block["started_at"])
+            block["ended_at"] = time.monotonic()
+            block["duration"] = round(block["ended_at"] - block["started_at"], 3)
             return True
         return False
 

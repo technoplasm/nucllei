@@ -188,10 +188,14 @@ text join へ切替。
 ```jsonc
 { "type": "text",      "content": "モデルが書いた散文 1 パートそのまま" }
 { "type": "reasoning", "content": "推論全文(markdown として解釈しない)",
-  "done": true, "duration": 12 }          // done=false 中は duration 無し
+  "done": true, "duration": 0.4 }         // done=false 中は duration 無し
+  // duration は秒・**小数**(#100)。int 切り捨てだと 1 秒未満が全部 0 秒になった。
+  // 丸めは表示側(src/lib/utils/duration.ts)の責務
 { "type": "tool_calls", "calls": [/* OpenAI tool_call 形 */],
-  "results": [{ "tool_call_id": "...", "content": "...", "files": [] }] }
+  "results": [{ "tool_call_id": "...", "content": "...", "duration": 1.2 }] }
   // call 単位の done はフロントが results の有無から導出
+  // results[i].duration(#100)は成否に関わらず載る。実行中の進捗は揮発で
+  // ブロックに載らない(tool:progress イベント — _memos/tool-channels.md)
 { "type": "code_interpreter", ... }        // 現行踏襲・薄く → #23(2026-07-14)で機能ごと撤去済み(この型は消滅)
 ```
 

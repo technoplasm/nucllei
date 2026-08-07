@@ -30,6 +30,7 @@
 	import { SESSION_EXPIRED_FLAG } from '$lib/apis/fetch';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { setFallbackHandler } from '$lib/utils/completion-streams';
+	import { setToolProgress } from '$lib/stores/tool-progress.svelte';
 
 	// vendor base(OverlayScrollbars)→ 自前 CSS の順 — app.css の .os-theme-app が上書きする側
 	import 'overlayscrollbars/overlayscrollbars.css';
@@ -95,6 +96,11 @@
 		} else if (type === 'chat:title') {
 			currentChatPage.set(1);
 			await chats.set(await getChatList($currentChatPage));
+		} else if (type === 'tool:progress') {
+			// llens(#100): 別チャットを見ている間の進捗も記録しておく。戻ったときに
+			// 実行中の tool が「今どこか」を出せる(再アタッチは既存タスクではスキップ
+			// されるので、ここで拾わないと復元経路が無い)。
+			setToolProgress(envelope.message_id ?? '', data);
 		}
 	};
 

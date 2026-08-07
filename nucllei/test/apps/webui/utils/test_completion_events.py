@@ -11,6 +11,7 @@ import json
 from nucllei.utils.completion_events import (
     CompletionEventStream,
     get_stream,
+    make_tool_event_emitter,
     register_stream,
     release_stream,
     sse_event_generator,
@@ -170,3 +171,93 @@ def test_registry_release_closes_stream():
     assert stream.closed
     # 二重 release は無害
     release_stream("task-1")
+
+
+# --- tool 進捗の保持と、tool 用 emitter の status 遮断(#100)------------------
+
+
+def test_latest_progress_kept_for_reattach():
+    """実行中 tool の進捗は tool_call_id ごとに最新 1 件だけ保持する。
+
+    再アタッチ(リロード・途中参加)で復元するための揮発バッファ。DB には書かない。
+    """
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+
+    stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "a", "n": 1}}))
+    stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "a", "n": 2}}))
+    stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "b", "n": 1}}))
+
+    assert set(stream.latest_progress) == {"a", "b"}
+    # 同じ tool_call_id は上書き(履歴は溜めない)
+    assert stream.latest_progress["a"]["data"]["data"]["n"] == 2
+
+
+def test_finished_tool_progress_is_dropped_on_snapshot():
+    """結果が出た tool の進捗は捨てる。
+
+    完了の権威は results の到着であって progress の done 宣言ではないので、
+    再アタッチしたクライアントに終わった tool の「実行中」が復元されない。
+    """
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+    stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "a"}}))
+    stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "b"}}))
+
+    stream.emit(
+        _env(
+            {
+                "type": "chat:completion",
+                "data": {
+                    "content_blocks": [
+                        {
+                            "type": "tool_calls",
+                            "calls": [{"id": "a"}, {"id": "b"}],
+                            "results": [{"tool_call_id": "a", "content": "ok"}],
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    # a は結果が出たので破棄、b はまだ実行中なので残る
+    assert set(stream.latest_progress) == {"b"}
+
+
+def test_progress_is_not_persisted_in_latest_snapshot():
+    """進捗はスナップショット(= 永続・再アタッチの本体)を汚さない。"""
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+    stream.emit(
+        _env({"type": "chat:completion", "data": {"content_blocks": [], "done": False}})
+    )
+    stream.emit(
+        _env(
+            {"type": "tool:progress", "data": {"tool_call_id": "a", "description": "x"}}
+        )
+    )
+    assert stream.latest_snapshot == {"content_blocks": [], "done": False}
+
+
+def test_tool_event_emitter_drops_status():
+    """tool の status は落とし、他の型はそのまま通す(#100)。
+
+    実行中の通知は __progress__ 一本。ただし emitter ごと外すと
+    chat:message:files(sandbox の成果物添付)が道連れになるため型で切る。
+    """
+    seen = []
+
+    async def base(event):
+        seen.append(event)
+
+    async def run():
+        emitter = make_tool_event_emitter(base)
+        await emitter({"type": "status", "data": {"description": "実行中"}})
+        await emitter({"type": "chat:message:files", "data": {"files": [1]}})
+        await emitter({"type": "notification", "data": {"content": "n"}})
+
+    asyncio.run(run())
+    assert [e["type"] for e in seen] == ["chat:message:files", "notification"]
+
+
+def test_tool_event_emitter_passthrough_none():
+    """emitter 自体が無い経路(headless)では None のまま。"""
+    assert make_tool_event_emitter(None) is None

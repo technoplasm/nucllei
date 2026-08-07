@@ -15,7 +15,9 @@ from nucllei.utils.completion_events import (
     get_stream_for_message,
     make_event_call,
     make_event_emitter,
+    make_tool_event_emitter,
 )
+from nucllei.utils import tool_output
 
 
 from nucllei.models.functions import Functions
@@ -86,7 +88,7 @@ async def get_function_models(request):
             )
 
             for p in sub_pipes:
-                sub_pipe_id = f'{pipe.id}.{p["id"]}'
+                sub_pipe_id = f"{pipe.id}.{p['id']}"
                 sub_pipe_name = p["name"]
 
                 if hasattr(function_module, "name"):
@@ -254,6 +256,14 @@ async def generate_function_chat_completion(
         user,
         {
             **extra_params,
+            # llens(#100): pipe 配下の tool も middleware 経路と同じ規律に揃える —
+            # 実行中の通知は __progress__ 一本、status は落とす。tool-push ヘルパ
+            # (#88/#89)もここには渡っておらず、宣言した tool が pipe 経由だと
+            # TypeError で落ちていた(既存の非対称)。いずれも sink が無ければ no-op。
+            "__event_emitter__": make_tool_event_emitter(__event_emitter__),
+            "__progress__": tool_output.progress,
+            "__display__": tool_output.display,
+            "__feed_image__": tool_output.feed_image,
             "__model__": models.get(form_data["model"], None),
             "__messages__": form_data["messages"],
             "__files__": files,

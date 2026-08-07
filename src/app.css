@@ -183,7 +183,11 @@ select {
 	color: #818286; /* Fallback color */
 }
 
-:global(.dark) .shimmer {
+/* llens(#100): `:global()` は Svelte の `<style>` 内でのみ有効な記法で、app.css は
+   +layout.svelte から plain CSS として import される(コンパイラのスコープ処理を
+   通らない)。そのままブラウザに届くと未知の擬似クラス = セレクタごと無効になり、
+   ダークテーマの shimmer が light のまま効いていなかった。 */
+.dark .shimmer {
 	background: linear-gradient(90deg, #818286 25%, #eae5e5 50%, #818286 75%);
 	background-size: 200% 100%;
 	background-clip: text;

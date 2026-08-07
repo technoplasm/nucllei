@@ -15,6 +15,8 @@
 	dayjs.extend(relativeTime);
 
 	import { settings } from '$lib/stores';
+	import { formatDurationSeconds } from '$lib/utils/duration';
+	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Markdown from './Markdown.svelte';
 
@@ -55,6 +57,20 @@
 
 	let open = $state($settings?.expandDetails ?? false);
 	let rootElement: HTMLElement | null = $state(null);
+
+	// 思考中の経過時間(#100)。reasoning ブロックは最初の reasoning デルタで生えるので、
+	// マウント時刻がそのまま起点になる(tool と違い同時に複数は走らない)。
+	// 起点は 1 度だけ決める(reactive にしない)
+	const startedAt = Date.now();
+	$effect(() => {
+		if (done) return;
+		return subscribeTick();
+	});
+	const elapsedLabel = $derived.by(() => {
+		if (done) return '';
+		const seconds = Math.max(0, Math.round((tickNow() - startedAt) / 1000));
+		return $i18n.t('Thinking for {{DURATION}} seconds', { DURATION: seconds });
+	});
 	// 開閉コントロール(バッジ/tab)hover 中は開閉単位のボーダー全部を強調する
 	let toggleHover = $state(false);
 
@@ -104,17 +120,21 @@
 			{/if}
 
 			<div>
-				<!-- duration は 0 秒がありうる(数値 0 / 文字列 "0" とも thought 扱い) -->
+				<!-- duration は 0 秒がありうる(数値 0 / 文字列 "0" とも thought 扱い)。
+				     #100 で小数保持になったので、丸めは formatDurationSeconds に一任する
+				     (生値だと「12.347000122秒間の思考」になる)。 -->
 				{#if done && duration != null}
 					{#if duration < 60}
-						{$i18n.t('Thought for {{DURATION}} seconds', { DURATION: duration })}
+						{$i18n.t('Thought for {{DURATION}} seconds', {
+							DURATION: formatDurationSeconds(duration)
+						})}
 					{:else}
 						{$i18n.t('Thought for {{DURATION}}', {
 							DURATION: dayjs.duration(duration, 'seconds').humanize()
 						})}
 					{/if}
 				{:else}
-					{$i18n.t('Thinking...')}
+					<span class="tabular-nums">{elapsedLabel}</span>
 				{/if}
 			</div>
 

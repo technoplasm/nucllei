@@ -203,7 +203,9 @@ web 検索を prism へ出したのと対照 — あちらは外部システム�
 - 依存する基盤機能が llens の native ループで全部動くこと(= #18-3 の確認事項):
   - extra params 注入: `__user__` `__chat_id__` `__message_id__` `__event_emitter__` `__files__` `__metadata__`
   - Valves(sandbox_url, default_timeout_s)の DB 永続と UI 編集
-  - status イベント(5 秒ごとの経過表示)、`chat:message:files` イベント
+  - 進捗表示(5 秒ごとの経過)と `chat:message:files` イベント
+    ※ 進捗は #100 で status → `__progress__` へ移行(行き先が tool 自身の
+    ウィジェットに閉じる)。tool の status は落とされる — `_memos/tool-channels.md`
   - OWUI Files/Storage への outputs 登録 + メッセージ添付
   - 型駆動レンダリング(#20): run_python の code 引数は `Code("python")` 宣言
     (dev ダミー run_python が既にこの形 — 置き換え時に宣言を引き継ぐ)

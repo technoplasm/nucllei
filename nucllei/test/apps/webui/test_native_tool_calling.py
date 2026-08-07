@@ -1283,7 +1283,10 @@ def test_content_blocks_final_event_reasoning_and_text(monkeypatch):
 
     reasoning, text = blocks
     assert reasoning["done"] is True
-    assert isinstance(reasoning["duration"], int)
+    # llens(#100): duration は小数(int 切り捨てだと 1 秒未満が全部 0 秒になる)。
+    # 丸めは表示側の責務なので、ここは非負の実数であることだけを固定する。
+    assert isinstance(reasoning["duration"], float)
+    assert reasoning["duration"] >= 0
     assert reasoning["content"] == _joined_deltas("reasoning", "reasoning_content")
     # text はデルタ結合そのまま(終端で末尾ブロックの両端 strip のみ)
     assert text["content"] == _joined_deltas("reasoning", "content").strip()

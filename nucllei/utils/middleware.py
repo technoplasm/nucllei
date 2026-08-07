@@ -4,6 +4,8 @@ import sys
 import asyncio
 import json
 import ast
+import threading
+import time
 
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +20,7 @@ from nucllei.models.users import Users
 from nucllei.utils.completion_events import (
     make_event_call,
     make_event_emitter,
+    make_tool_event_emitter,
     register_stream,
     release_stream,
     sse_event_generator,
@@ -261,7 +264,6 @@ def is_usage_requested(model) -> bool:
 async def process_chat_payload(
     request, form_data, user, metadata, model, events_stream
 ):
-
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
 
@@ -295,6 +297,9 @@ async def process_chat_payload(
         # __display__(content, kind) を実行中 tool-call の sink へ積み、下で harvest
         # して results[i].display へ載せる(collapse 外に描画・モデル非注入)。
         "__display__": tool_output.display,
+        # llens(#100): tool が実行中に進捗を伝える唯一の口。行き先はその tool 自身の
+        # ウィジェット(ToolCallBlock ヘッダ)に閉じる。揮発 — 完了後は所要時間が残る。
+        "__progress__": tool_output.progress,
         "__user__": {
             "id": user.id,
             "email": user.email,
@@ -390,6 +395,9 @@ async def process_chat_payload(
 
     tools_extra_params = {
         **extra_params,
+        # llens(#100): tool の実行中通知は __progress__ 一本。status は落とす
+        # (filter 側の emitter は無変更 — status は filter の常設表示に使われている)。
+        "__event_emitter__": make_tool_event_emitter(event_emitter),
         "__model__": models[task_model_id],
         "__messages__": form_data["messages"],
         "__files__": metadata.get("files", []),
@@ -935,12 +943,72 @@ async def ingest_model_response_json(
     return response_tool_calls
 
 
-async def execute_tool_calls(response_tool_calls, tools):
-    """tool call 群を順に実行し、tool result のリストを返す。"""
+def _make_progress_emitter(events_stream, metadata):
+    """tool 進捗(#100)の同期 emit を作る。sink 生成時に注入される。
+
+    `stream.emit` は put_nowait だけの同期関数なので、`call_soon_threadsafe` 一本で
+    イベントループ側(async tool)からもワーカースレッド側(sync tool)からも正しく、
+    待ちが要らない。**`run_coroutine_threadsafe` は使えない** — async tool は
+    `utils/tools.py` の iscoroutinefunction 分岐で to_thread を通らずループ上で直接
+    await されるため、そこから future を待つとループが自分自身を待って固まる。
+
+    `__event_emitter__` も経由しない: あちらは async で status/message に DB 書き
+    (to_thread)を含み、await 境界で順序が入れ替わるうえ共有 executor を圧迫する。
+
+    stream を**ここでオブジェクトごと捕まえる**のも要点。message_id からの遅延
+    逆引きにすると、regenerate 時に次のターンの stream へ幽霊進捗を注入しうる。
+    closed になった stream への emit は CompletionEventStream 側が黙って捨てる。
+    """
+    if events_stream is None:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # ループ外(同期テスト等)。進捗は黙って無効化する
+        return None
+
+    chat_id = (metadata or {}).get("chat_id")
+    message_id = (metadata or {}).get("message_id")
+    # この関数はループ上で呼ばれる = ここの ident がループスレッド
+    loop_thread_id = threading.get_ident()
+
+    def emitter_for(tool_call_id):
+        def _emit(payload):
+            envelope = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "data": {"type": "tool:progress", "data": payload},
+            }
+            if threading.get_ident() == loop_thread_id:
+                # async tool(大多数)はループ上で走るので直呼び。スケジュールすると
+                # ループ停止時に未実行のコールバックが落ちる余地が残る
+                events_stream.emit(envelope)
+            else:
+                # sync tool の to_thread ワーカーから。emit は購読者集合を触るので
+                # ワーカーから直接呼んではならない
+                loop.call_soon_threadsafe(events_stream.emit, envelope)
+
+        return _emit
+
+    return emitter_for
+
+
+async def execute_tool_calls(
+    response_tool_calls, tools, *, events_stream=None, metadata=None
+):
+    """tool call 群を順に実行し、tool result のリストを返す。
+
+    events_stream / metadata は tool 進捗(#100)の宛先。省略時(headless・テスト)は
+    `__progress__` が黙って no-op になる。
+    """
     results = []
+    progress_emitter_for = _make_progress_emitter(events_stream, metadata)
     for tool_call in response_tool_calls:
         tool_call_id = tool_call.get("id", "")
         tool_name = tool_call.get("function", {}).get("name", "")
+        # 所要時間(#100)は成否に関わらず測る — 落ちた tool が何秒走ったかこそ
+        # 知りたい(context_images/display の tool_succeeded ゲートとは規律が違う)。
+        started_at = time.monotonic()
 
         tool_function_params = {}
         try:
@@ -984,8 +1052,17 @@ async def execute_tool_calls(response_tool_calls, tools):
             # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、下で
             # harvest して results[i].context_images へ載せる(VLM 再注入トリガ)。
             # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
-            sink = ToolOutputSink()
+            sink = ToolOutputSink(
+                tool_call_id=tool_call_id,
+                emit_progress=(
+                    progress_emitter_for(tool_call_id) if progress_emitter_for else None
+                ),
+            )
             sink_token = tool_output.current_sink.set(sink)
+            # llens(#100): この call の開始をフロントへ通知する。ブロックは実行前の
+            # 1 回の emit で一斉に描かれるので、これがフロントの経過時間タイマの
+            # 起点になる(逐次実行なので 2 本目以降は「まだ始まっていない」)。
+            sink.mark_started()
             tool_succeeded = False
             try:
                 allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
@@ -1022,6 +1099,11 @@ async def execute_tool_calls(response_tool_calls, tools):
                 tool_result = str(e)
             finally:
                 tool_output.current_sink.reset(sink_token)
+                # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
+                # no-op にする。ContextVar の reset はメインループ側 context の話で、
+                # copy_context を持ったまま走り続ける timeout orphan スレッド
+                # (上の有界リーク)には効かない — closed フラグがそれを止める。
+                sink.close()
             # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は副産物を
             # 出さない — content=エラー文言と画像が混在する不整合を避ける)。成功時のみ
             # harvest(lock 下 snapshot で timeout orphan スレッドの遅延 append を除外)。
@@ -1052,6 +1134,9 @@ async def execute_tool_calls(response_tool_calls, tools):
             {
                 "tool_call_id": tool_call_id,
                 "content": tool_result,
+                # 所要時間(#100)。モデル向け履歴は tool_call_id/content しか拾わない
+                # ので、これがモデルへ漏れることはない(content_blocks.py)。
+                "duration": round(time.monotonic() - started_at, 3),
                 **({"render": result_render} if result_render else {}),
                 **(
                     {"context_images": context_image_file_ids}
@@ -1200,7 +1285,9 @@ async def process_chat_response(
             initial_content=(
                 message.get("content", "")
                 if message
-                else last_assistant_message if last_assistant_message else ""
+                else last_assistant_message
+                if last_assistant_message
+                else ""
             ),
             seed_blocks=seed_blocks,
             tools=metadata.get("tools", {}),
@@ -1266,7 +1353,12 @@ async def process_chat_response(
                     }
                 )
 
-                results = await execute_tool_calls(response_tool_calls, tools)
+                results = await execute_tool_calls(
+                    response_tool_calls,
+                    tools,
+                    events_stream=events_stream,
+                    metadata=metadata,
+                )
 
                 assembler.set_tool_results(results)
 
@@ -1332,8 +1424,7 @@ async def process_chat_response(
                     error_data = {
                         "error": {
                             "content": (
-                                "Follow-up model call after tool execution "
-                                f"failed: {e}"
+                                f"Follow-up model call after tool execution failed: {e}"
                             )
                         },
                     }

@@ -1,15 +1,21 @@
-"""tool 実行中の出力チャネル(sink)基盤(#89、#88 と共用)。
+"""tool 実行中の出力チャネル(sink)基盤(#89、#88 / #100 と共用)。
 
 tool は戻り値(モデル向け作業データ)とは別に、実行中に「誰かに見せたい」出力を
 push できる。誰の目に届くかでチャネルを分ける:
 
 - `__feed_image__(file_id)` → results[i].context_images(モデル/VLM の目。画素を再注入)
 - `__display__(content, kind)` → results[i].display(人間の目。collapse 外。モデル非注入。#88)
+- `__progress__(description, ...)` → `tool:progress` イベント(人間の目。**揮発**。#100)
 
-いずれも「注入ヘルパ(tool-push)+ tool-call ごとの sink へ蓄積 + ブロック永続」で、
+前 2 者は「注入ヘルパ(tool-push)+ tool-call ごとの sink へ蓄積 + ブロック永続」で、
 戻り値をハイジャックしない。emitter は揮発、永続はブロック(results[i])側が正
 (リロード再現)。emitter は tool の実行文脈からのみ有効で、文脈外(pipe/filter 等)や
 sink 未設定時は黙って no-op。
+
+`__progress__` だけは蓄積せず**その場で流して捨てる**(#100): 実行中の「今どうなって
+いるか」は終わった瞬間に情報として死ぬため、DB に書かない。完了後に残るのは
+results[i].duration(所要時間)で、進捗テキストは残さない。後から読み返してほしい
+実行ログは `__display__`(永続・リロード再現)の担当。
 
 sync tool(#28 でワーカースレッド実行)からも呼ばれるため sink は lock 付き。
 harvest は snapshot(lock 下 copy)で確定値だけを取り、生参照を results へ渡さない
@@ -23,18 +29,59 @@ emitter を呼ぶと ContextVar は継承されず current_sink.get() が None �
 黙って no-op になる。emitter は必ず tool の実行文脈(to_thread までを含む)から呼ぶこと。
 """
 
+import logging
 import threading
+import time
 from contextvars import ContextVar
-from typing import Optional
+from typing import Callable, Optional
+
+log = logging.getLogger(__name__)
+
+# 進捗の最小送出間隔(秒)。tool がループ内で毎周呼んでも SSE を溢れさせない
+# (tqdm の mininterval 相当)。抑制した最後の 1 通は close() で必ず流す。
+PROGRESS_THROTTLE_S = 0.2
+
+
+def _positive_number(value) -> Optional[float]:
+    """進捗の分母として使える正の実数だけを通す(bool は数値として扱わない)。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _clamp(value, total: float) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, min(value, total))
 
 
 class ToolOutputSink:
-    """1 tool-call の実行中に貯まる出力チャネル(lock 付き)。"""
+    """1 tool-call の実行中に貯まる出力チャネル(lock 付き)。
 
-    def __init__(self) -> None:
+    progress(#100)だけは貯めずに `emit_progress` へ即時に流す。`emit_progress` は
+    **同期呼び出し可能**であること — sync tool はワーカースレッドから呼ぶため、
+    実体は `loop.call_soon_threadsafe(stream.emit, envelope)` を包んだ closure になる
+    (middleware が sink 生成時に注入する)。
+    """
+
+    def __init__(
+        self,
+        tool_call_id: str = "",
+        emit_progress: Optional[Callable[[dict], None]] = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._context_images: list[str] = []
         self._displays: list[dict] = []
+        # --- progress(#100、揮発)---
+        self._tool_call_id = tool_call_id
+        self._emit_progress = emit_progress
+        self._closed = False
+        # description 省略時に維持する直前の文言(tqdm の set_description 相当)
+        self._description = ""
+        self._last_emit_at = 0.0
+        self._pending: Optional[dict] = None
 
     def add_context_image(self, file_id: str) -> None:
         if not file_id or not isinstance(file_id, str):
@@ -61,6 +108,91 @@ class ToolOutputSink:
         # snapshot(lock 下 copy)。要素 dict は不変値のみで生参照は漏らさない。
         with self._lock:
             return [dict(d) for d in self._displays]
+
+    # --- progress(#100、揮発)-------------------------------------------
+
+    def mark_started(self) -> None:
+        """tool-call の開始を 1 発通知する(フロントの経過時間タイマの起点)。
+
+        `execute_tool_calls` は逐次実行なのに、ブロックは実行前の 1 回の emit で
+        **一斉に**描かれる。これが無いと 2 本目以降のタイマが前の tool の待ち時間まで
+        数えてしまう(確定時に巻き戻って見える)。
+
+        スロットルの窓は動かさない — 直後に tool 自身が押す最初の description を
+        巻き添えで落とさないため。
+        """
+        if self._emit_progress is None:
+            return
+        with self._lock:
+            if self._closed:
+                return
+            payload = {
+                "tool_call_id": self._tool_call_id,
+                "description": self._description,
+                "done": False,
+            }
+            emit = self._emit_progress
+        emit(payload)
+
+    def push_progress(
+        self, description="", *, current=None, total=None, done: bool = False
+    ) -> None:
+        """進捗 1 件。スロットルを掛けて `emit_progress` へ流す(蓄積しない)。
+
+        正規化はここで済ませ、フロントに判断を残さない(型に忠実の原則):
+        `total` が正の数でなければ不定扱いに落とし、`current` は [0, total] に
+        クランプする。`description` が空なら直前の文言を維持する。
+        """
+        if self._emit_progress is None:
+            return
+
+        with self._lock:
+            # close 後(= tool-call 終了後)の push は捨てる。timeout で待ちだけ外れた
+            # orphan スレッド(middleware の有界リーク)が次の tool の進捗を汚さない。
+            if self._closed:
+                return
+
+            if isinstance(description, str) and description:
+                self._description = description
+
+            payload = {
+                "tool_call_id": self._tool_call_id,
+                "description": self._description,
+                "done": bool(done),
+            }
+            total_n = _positive_number(total)
+            current_n = None if total_n is None else _clamp(current, total_n)
+            # 決定的(current/total)として成立するときだけ載せる。片方でも欠ければ
+            # 不定 = キーごと出さない(フロントは total の有無だけを見ればよい)。
+            if current_n is not None:
+                payload["current"] = current_n
+                payload["total"] = total_n
+
+            now = time.monotonic()
+            if payload["done"] or now - self._last_emit_at >= PROGRESS_THROTTLE_S:
+                self._last_emit_at = now
+                self._pending = None
+                emit, pending = self._emit_progress, payload
+            else:
+                # 抑制した最後の 1 通は close() の flush で必ず届ける
+                # (leading-edge only だと末尾が落ちて古い値が残る)
+                self._pending = payload
+                emit, pending = None, None
+
+        if emit is not None:
+            emit(pending)
+
+    def close(self) -> None:
+        """tool-call の終了。以後の push を no-op にし、抑制中の 1 通を流す。"""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            pending, self._pending = self._pending, None
+            emit = self._emit_progress
+
+        if pending is not None and emit is not None:
+            emit(pending)
 
 
 # 現在実行中 tool-call の sink。execute_tool_calls が call ごとに set/reset する。
@@ -113,3 +245,39 @@ def display(content: str, kind: str = "markdown") -> None:
     if sink is None:
         return
     sink.add_display(content, kind)
+
+
+def progress(
+    description: str = "", *, current=None, total=None, done: bool = False
+) -> None:
+    """`__progress__` 実体。実行中 tool-call の進捗をユーザーへ流す(#100)。
+
+    tool が実行中にユーザーへ伝えられる唯一の口。行き先はチャットの共用領域では
+    なく、**その tool 自身のウィジェット(ToolCallBlock のヘッダ)** に閉じている
+    ため、同時に走る他の tool や filter の表示を踏み潰さない。
+
+    - `total` を渡すと決定的(current/total)、渡さなければ不定(ぐるぐる)
+    - `description` を省略すると直前の文言を維持する(tqdm の set_description 相当。
+      ループ内で `__progress__(current=i, total=n)` だけ呼べる)
+    - **sync / async どちらの tool からも sync 関数として呼べる**(sync tool は
+      `asyncio.to_thread` のワーカースレッドから呼ぶ。emit はイベントループへ
+      `call_soon_threadsafe` で渡るので、どちらのスレッドからでも待ちが要らない)
+
+    **揮発**: DB に書かない。タスク生存中はストリームが最新値を保持して再アタッチ
+    (リロード・途中参加)に耐えるが、完了後は残らない — 残るのは所要時間
+    (results[i].duration)。後から読み返してほしいものは `__display__` を使う。
+
+    完了の権威は tool の戻り(results[i] の到着)であり、`done=True` の宣言では
+    ない。撃たずに return しても、timeout / 例外で tool のコードを通らなくても、
+    フロントは結果の到着で進捗を破棄する。
+
+    進捗は装飾なので、ここでの失敗が tool 本体を巻き添えにすることはない
+    (文脈外・sink 未設定・stream 未設定はいずれも黙って no-op)。
+    """
+    sink = current_sink.get()
+    if sink is None:
+        return
+    try:
+        sink.push_progress(description, current=current, total=total, done=done)
+    except Exception:
+        log.debug("progress push failed", exc_info=True)

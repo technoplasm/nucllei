@@ -28,6 +28,7 @@ import {
 	type CompletionData
 } from '$lib/utils/chat-events';
 import type { ChatMessage } from '$lib/types/chat';
+import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
 import { getChatList, updateChatById } from '$lib/apis/chats';
 import { chatCompleted, chatAction } from '$lib/apis';
@@ -137,7 +138,11 @@ export class ChatEvents {
 			return;
 		}
 
-		if (type === 'chat:completion') {
+		if (type === 'tool:progress') {
+			// llens(#100): 実行中 tool の進捗。message には載せない(saveChatHandler が
+			// history を丸ごと送るので DB に載り、揮発の規律が破れる)。
+			setToolProgress(message.id, data);
+		} else if (type === 'chat:completion') {
 			await this.#chatCompletionEventHandler(data, message, targetChatId);
 		} else if (type === 'chat:title') {
 			chatTitle.set(data);
@@ -233,6 +238,10 @@ export class ChatEvents {
 		this.#session.history.messages[message.id] = message;
 
 		if (done) {
+			// llens(#100): 進捗は揮発。確定したメッセージの分は捨てる(残しても
+			// 描画は results 到着で止まるが、セッション中ずっと居座らせない)
+			clearMessageProgress(message.id);
+
 			if (get(settings).responseAutoPlayback && !get(showCallOverlay)) {
 				await tick();
 				document.getElementById(`speak-button-${message.id}`)?.click();

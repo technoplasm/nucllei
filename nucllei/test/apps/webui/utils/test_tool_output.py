@@ -8,12 +8,15 @@
 - display(#88、人間の目): __display__ を呼ぶ tool の結果に display が載る。
   feed_image と対称の sink 経路だが、context_images と違い **モデルへ再注入しない**
   (convert が display を読まない)— 2 チャネル分離の本体。
+- progress(#100、実行中の人間の目): __progress__ は貯めずに即時 emit して捨てる
+  (揮発)。正規化・スロットル・close 後の遮断、async/sync 双方からの呼び出し、
+  results に残らないこと、所要時間(duration)が成否に関わらず載ることを固定する。
 """
 
 import asyncio
 
 from nucllei.utils import tool_output
-from nucllei.utils.tool_output import ToolOutputSink, feed_image, display
+from nucllei.utils.tool_output import ToolOutputSink, feed_image, display, progress
 from nucllei.utils.middleware import execute_tool_calls
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
 
@@ -337,3 +340,346 @@ def test_convert_does_not_inject_display_into_model_messages():
     # display 文字列がどのメッセージにも紛れ込まない(全 content を平串で確認)
     serialized = repr(msgs)
     assert "<audio controls>" not in serialized
+
+
+# --- progress チャネル(#100、実行中の人間の目・揮発) ----------------------
+
+
+class _FakeStream:
+    """CompletionEventStream の emit だけを模した収集器。"""
+
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event):
+        self.events.append(event)
+
+    def progress_payloads(self):
+        return [
+            e["data"]["data"]
+            for e in self.events
+            if e["data"]["type"] == "tool:progress"
+        ]
+
+
+def _no_throttle(monkeypatch):
+    """スロットルを無効化(送出間隔そのものを検証するテスト以外で使う)。"""
+    monkeypatch.setattr(tool_output, "PROGRESS_THROTTLE_S", 0)
+
+
+def test_progress_noop_outside_tool_context():
+    # sink 未設定では黙って no-op(filter/pipe 等の文脈外でも安全)
+    assert tool_output.current_sink.get() is None
+    progress("進捗", current=1, total=10)  # 例外にならない
+
+
+def test_progress_noop_without_emitter():
+    # sink はあるが宛先が無い(headless・テスト)= 黙って捨てる
+    sink = ToolOutputSink(tool_call_id="c1")
+    token = tool_output.current_sink.set(sink)
+    try:
+        progress("見えない")
+    finally:
+        tool_output.current_sink.reset(token)
+
+
+def test_progress_normalizes_indeterminate(monkeypatch):
+    """不定に落ちる条件: total 不在 / total<=0 / current 不在 / bool。
+
+    フロントは total の有無だけを見ればよい — 片方でも欠ければキーごと出さない。
+    """
+    _no_throttle(monkeypatch)
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.push_progress("a")
+    sink.push_progress("b", current=1, total=0)
+    sink.push_progress("c", current=1, total=-5)
+    sink.push_progress("d", total=10)  # current 不在
+    sink.push_progress("e", current=True, total=10)  # bool は数値扱いしない
+    sink.push_progress("f", current=1, total=True)
+
+    assert all("total" not in p and "current" not in p for p in seen)
+    assert [p["description"] for p in seen] == ["a", "b", "c", "d", "e", "f"]
+
+
+def test_progress_clamps_current(monkeypatch):
+    _no_throttle(monkeypatch)
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.push_progress("x", current=-3, total=10)
+    sink.push_progress("x", current=99, total=10)
+    sink.push_progress("x", current=4, total=10)
+
+    assert [(p["current"], p["total"]) for p in seen] == [(0, 10), (10, 10), (4, 10)]
+
+
+def test_progress_keeps_last_description(monkeypatch):
+    """description 省略で直前の文言を維持(tqdm の set_description 相当)。
+
+    ループ内では push_progress(current=i, total=n) だけ呼べる。
+    """
+    _no_throttle(monkeypatch)
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.push_progress("PDF を変換中")
+    sink.push_progress(current=1, total=3)
+    sink.push_progress("", current=2, total=3)
+    sink.push_progress("後処理中", current=3, total=3)
+
+    assert [p["description"] for p in seen] == [
+        "PDF を変換中",
+        "PDF を変換中",
+        "PDF を変換中",
+        "後処理中",
+    ]
+
+
+def test_progress_throttles_and_flushes_last_on_close():
+    """ループ内で毎周呼んでも送出は間引かれ、抑制された最後の 1 通は close で届く。
+
+    leading-edge のみだと末尾が落ちて古い値が画面に残るため、flush が要る。
+    """
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    for i in range(100):
+        sink.push_progress("処理中", current=i, total=100)
+
+    # 先頭の 1 通だけが通っている(以降は 200ms 未満なので抑制)
+    assert len(seen) == 1
+    assert seen[0]["current"] == 0
+
+    sink.close()
+    assert len(seen) == 2
+    assert seen[1]["current"] == 99
+
+
+def test_progress_done_bypasses_throttle():
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.push_progress("開始")
+    sink.push_progress("抑制される")
+    sink.push_progress("完了", done=True)
+
+    assert [p["description"] for p in seen] == ["開始", "完了"]
+    assert seen[-1]["done"] is True
+
+
+def test_progress_after_close_is_dropped(monkeypatch):
+    """close 後の push は捨てる。
+
+    timeout で待ちだけ外れた orphan スレッド(middleware の有界リーク)が
+    走り続けても、次の tool の進捗を汚さない。
+    """
+    _no_throttle(monkeypatch)
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+
+    sink.push_progress("実行中")
+    sink.close()
+    sink.push_progress("orphan からの遅延 push")
+
+    assert [p["description"] for p in seen] == ["実行中"]
+
+
+def test_progress_close_is_idempotent():
+    seen = []
+    sink = ToolOutputSink(tool_call_id="c1", emit_progress=seen.append)
+    sink.push_progress("a")
+    sink.push_progress("b")  # 抑制される
+    sink.close()
+    sink.close()
+    assert len(seen) == 2
+
+
+def test_progress_from_async_tool_does_not_deadlock(monkeypatch):
+    """async tool から呼んでもデッドロックしない(#100 の要諦)。
+
+    async tool は utils/tools.py の iscoroutinefunction 分岐で to_thread を通らず
+    イベントループ上で直接 await される。ここで future を待つ実装
+    (run_coroutine_threadsafe(...).result())にするとループが自分自身を待って固まる。
+    """
+    _no_throttle(monkeypatch)
+    stream = _FakeStream()
+
+    async def slow():
+        progress("問い合わせ中", current=1, total=2)
+        progress("整形中", current=2, total=2)
+        return "ok"
+
+    async def run():
+        return await asyncio.wait_for(
+            execute_tool_calls(
+                _call(),
+                _tool(slow),
+                events_stream=stream,
+                metadata={"chat_id": "chat-1", "message_id": "msg-1"},
+            ),
+            timeout=5,
+        )
+
+    results = asyncio.run(run())
+    assert results[0]["content"] == "ok"
+    payloads = stream.progress_payloads()
+    # 先頭は開始マーカ(description 空) — フロントの経過時間タイマの起点
+    assert [p["description"] for p in payloads] == ["", "問い合わせ中", "整形中"]
+    assert all(p["tool_call_id"] == "functions.probe:0" for p in payloads)
+    envelope = stream.events[0]
+    assert envelope["chat_id"] == "chat-1"
+    assert envelope["message_id"] == "msg-1"
+
+
+def test_progress_from_sync_tool_via_to_thread(monkeypatch):
+    """sync tool(#28 の to_thread ワーカー)からの進捗もループへ渡る。
+
+    emit は購読者集合を触るのでワーカーから直接呼んではならず、
+    call_soon_threadsafe でループへ渡す経路を通る。
+    """
+    _no_throttle(monkeypatch)
+    stream = _FakeStream()
+
+    def sync_tool():
+        progress("ワーカーから", current=1, total=1)
+        return "done"
+
+    async def wrapper():
+        return await asyncio.to_thread(sync_tool)
+
+    async def run():
+        return await asyncio.wait_for(
+            execute_tool_calls(
+                _call(),
+                _tool(wrapper),
+                events_stream=stream,
+                metadata={"chat_id": "c", "message_id": "m"},
+            ),
+            timeout=5,
+        )
+
+    results = asyncio.run(run())
+    assert results[0]["content"] == "done"
+    assert [p["description"] for p in stream.progress_payloads()] == [
+        "",
+        "ワーカーから",
+    ]
+
+
+def test_progress_is_volatile_and_absent_from_results(monkeypatch):
+    """進捗は results に残らない(揮発)。残るのは所要時間だけ。"""
+    _no_throttle(monkeypatch)
+    stream = _FakeStream()
+
+    async def worker():
+        progress("途中経過")
+        return "ok"
+
+    results = asyncio.run(
+        execute_tool_calls(_call(), _tool(worker), events_stream=stream, metadata={})
+    )
+    assert stream.progress_payloads()  # 流れてはいる
+    assert "progress" not in results[0]
+    assert "途中経過" not in repr(results[0])
+
+
+def test_progress_isolated_per_tool_call(monkeypatch):
+    """進捗は tool_call_id で宛先が分かれる(共用スロットの奪い合いが起きない)。"""
+    _no_throttle(monkeypatch)
+    stream = _FakeStream()
+
+    async def first():
+        progress("A の進捗")
+        return "a"
+
+    async def second():
+        progress("B の進捗")
+        return "b"
+
+    calls = [
+        {"id": "functions.probe:0", "function": {"name": "probe", "arguments": "{}"}},
+        {"id": "functions.plain:0", "function": {"name": "plain", "arguments": "{}"}},
+    ]
+    tools = {**_tool(first, "probe"), **_tool(second, "plain")}
+    asyncio.run(execute_tool_calls(calls, tools, events_stream=stream, metadata={}))
+
+    # 各 call の開始マーカ → その call の進捗、の順に並ぶ(逐次実行なので
+    # 2 本目のマーカは 1 本目が終わってから飛ぶ = タイマの起点が正しくずれる)
+    assert [
+        (p["tool_call_id"], p["description"]) for p in stream.progress_payloads()
+    ] == [
+        ("functions.probe:0", ""),
+        ("functions.probe:0", "A の進捗"),
+        ("functions.plain:0", ""),
+        ("functions.plain:0", "B の進捗"),
+    ]
+
+
+def test_start_marker_emitted_even_without_tool_progress_calls():
+    """tool が __progress__ を一度も呼ばなくても開始は通知される。
+
+    ブロックは実行前の 1 回の emit で一斉に描かれるため、これが無いと
+    フロントの経過時間タイマが「前の tool の待ち時間」から数え始めてしまう。
+    開始マーカはスロットルの窓を動かさない(直後の初回 description を落とさない)。
+    """
+    stream = _FakeStream()
+
+    async def silent():
+        return "ok"
+
+    asyncio.run(
+        execute_tool_calls(_call(), _tool(silent), events_stream=stream, metadata={})
+    )
+    payloads = stream.progress_payloads()
+    assert len(payloads) == 1
+    assert payloads[0] == {
+        "tool_call_id": "functions.probe:0",
+        "description": "",
+        "done": False,
+    }
+
+
+def test_progress_without_stream_is_noop():
+    """events_stream 省略(headless・既存テスト)でも tool は普通に動く。"""
+
+    async def worker():
+        progress("誰も見ていない")
+        return "ok"
+
+    results = asyncio.run(execute_tool_calls(_call(), _tool(worker)))
+    assert results[0]["content"] == "ok"
+
+
+def test_tool_failure_still_records_duration():
+    """所要時間は成否に関わらず残す(落ちた tool が何秒走ったかこそ知りたい)。
+
+    context_images / display の tool_succeeded ゲートとは規律が異なる。
+    """
+
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    results = asyncio.run(execute_tool_calls(_call(), _tool(boom)))
+    assert "kaboom" in results[0]["content"]
+    assert isinstance(results[0]["duration"], float)
+    assert results[0]["duration"] >= 0
+
+
+def test_duration_is_not_injected_into_model_messages():
+    """所要時間はモデルへ漏らさない(人間の目だけの情報)。"""
+    blocks = [
+        {
+            "type": "tool_calls",
+            "content": [
+                {"id": "c1", "type": "function", "function": {"name": "probe"}}
+            ],
+            "results": [
+                {"tool_call_id": "c1", "content": "ok", "duration": 12.345},
+            ],
+        },
+    ]
+    msgs = convert_content_blocks_to_messages(blocks)
+    assert "12.345" not in repr(msgs)
+    assert "duration" not in repr(msgs)

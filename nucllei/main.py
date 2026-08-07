@@ -893,6 +893,9 @@ async def task_events_endpoint(task_id: str, user=Depends(get_verified_user)):
                 "data": {"type": "chat:completion", "data": stream.latest_snapshot},
             }
         )
+    # llens(#100): 実行中 tool の進捗はスナップショットの**後**に配る。進捗は
+    # ブロックへ紐づけて描かれるので、先に配ると宛先のブロックがまだ無い。
+    first_events.extend(stream.latest_progress.values())
 
     return StreamingResponse(
         sse_event_generator(stream, queue, first_events=first_events),

@@ -20,6 +20,9 @@
 		type ToolCallRender
 	} from '$lib/utils/tool-render';
 
+	import { formatDurationSeconds } from '$lib/utils/duration';
+	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
+	import type { ToolProgress } from '$lib/stores/tool-progress.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Markdown from './Markdown.svelte';
@@ -39,6 +42,8 @@
 		// display チャネル(#88): tool が __display__ で明示的にユーザーへ見せる表示。
 		// 戻り値(モデル向け)とは別面で collapse 外に常時出す。
 		display?: DisplayItem[];
+		// 所要時間(#100、秒)。成否に関わらず載る
+		duration?: number;
 	};
 
 	let {
@@ -47,6 +52,9 @@
 		result = null,
 		// メッセージ確定後(中断含む)は result が無くてもスピナーを止める保険
 		done = false,
+		// 実行中の進捗(#100、揮発)。tool が __progress__ で押した「今どこか」。
+		// 完了の権威は result の到着なので、result があればこれは無視する。
+		progress = null,
 		// チャット内一括開閉(collapse-all.svelte.ts が採番)。seq が進んだら open に追従する
 		expandAll = null,
 		onExpandAll = undefined
@@ -55,6 +63,7 @@
 		call: ToolCall;
 		result?: ToolResult | null;
 		done?: boolean;
+		progress?: ToolProgress | null;
 		expandAll?: { seq: number; open: boolean } | null;
 		onExpandAll?: (open: boolean) => void;
 	} = $props();
@@ -79,6 +88,37 @@
 	const name = $derived(call?.function?.name ?? '');
 	const args = $derived(call?.function?.arguments ?? '');
 	const isDone = $derived(Boolean(result) || done);
+
+	// 進捗(#100)は実行中だけ。tool が done を撃たずに return しても、timeout /
+	// 例外で tool のコードを通らなくても、結果の到着でここが止まる。
+	const activeProgress = $derived(isDone ? null : progress);
+	// 決定的(current/total)なら分数を添える。backend が正規化済みなので
+	// ここで「total があるか」以上の判断はしない。
+	const progressLabel = $derived.by(() => {
+		if (!activeProgress) return '';
+		const { description, current, total } = activeProgress;
+		const fraction = total != null && current != null ? `${current}/${total}` : '';
+		return [description, fraction].filter(Boolean).join(' ');
+	});
+
+	const durationLabel = $derived(
+		result?.duration != null
+			? $i18n.t('{{DURATION}} seconds', { DURATION: formatDurationSeconds(result.duration) })
+			: ''
+	);
+
+	// 実行中の経過時間。起点は backend が call 開始時に打つ progress の受信時刻
+	// (ブロックは実行前の 1 回の emit で一斉に描かれるので、マウント時刻を起点に
+	// すると 2 本目以降が前の tool の待ち時間まで数えてしまう)。
+	$effect(() => {
+		if (isDone || !progress) return;
+		return subscribeTick();
+	});
+	const elapsedLabel = $derived.by(() => {
+		if (isDone || !progress) return '';
+		const seconds = Math.max(0, Math.round((tickNow() - progress.startedAt) / 1000));
+		return $i18n.t('{{DURATION}} seconds', { DURATION: seconds });
+	});
 
 	// 引数はディスクリプタ(call.render.args、#20)どおりに引数単位で描画。
 	// ストリーミング中の未閉鎖 JSON は寛容パーサで部分値を逐次描画し、
@@ -164,6 +204,24 @@
 					/>
 				{/if}
 			</div>
+
+			<!--
+				実行中は進捗(#100)、完了後は所要時間。どちらも **素のテキスト**で描く —
+				ヘッダ本体は Markdown 経由だが、ここは tool が中身を決める文字列なので
+				md として通すと任意の markdown をヘッダへ注入できてしまう。
+				ヘッダは w-fit バッジで open 時は枠の上辺タブに合体するため、長い
+				description で幅が暴れないよう max-w + truncate で頭を押さえる。
+			-->
+			{#if progressLabel}
+				<div class="max-w-52 truncate font-normal" title={progressLabel}>
+					{progressLabel}
+				</div>
+			{/if}
+			{#if elapsedLabel}
+				<div class="font-normal tabular-nums">{elapsedLabel}</div>
+			{:else if isDone && durationLabel}
+				<div class="font-normal text-content-subtle tabular-nums">{durationLabel}</div>
+			{/if}
 
 			<div class="flex self-center translate-y-[1px]">
 				{#if open}
