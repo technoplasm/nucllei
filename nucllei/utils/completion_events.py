@@ -42,6 +42,11 @@ class CompletionEventStream:
         # **DB には書かない** — 進捗は揮発で、タスクの生存期間だけ持つ。
         # 結果が出た tool の分はスナップショット到着時に捨てる。
         self.latest_progress: dict[str, dict] = {}
+        # 再アタッチ用: ストリーミング中の最新累積 usage(#102)。message_id → 封筒
+        # (最新 1 件)。**DB には書かない** — 揮発で、最終真値は chat:completion
+        # {usage} が別途届く。done=True の chat:completion が流れたら該当 message の
+        # 分を捨てる(終わった生成の「途中値」を再アタッチに復元しない)。
+        self.latest_usage: dict = {}
         # __event_call__(tool → UI の双方向呼び出し)の応答待ち
         self._pending_calls: dict[str, asyncio.Future] = {}
 
@@ -59,13 +64,20 @@ class CompletionEventStream:
         event_type = data.get("type")
         payload = data.get("data") or {}
 
-        if event_type == "chat:completion" and "content_blocks" in payload:
-            self.latest_snapshot = payload
-            self._drop_finished_progress(payload)
+        if event_type == "chat:completion":
+            if "content_blocks" in payload:
+                self.latest_snapshot = payload
+                self._drop_finished_progress(payload)
+            if payload.get("done"):
+                # #102: 生成が終わった message のライブ usage は破棄する
+                # (最終真値は chat:completion {usage} 側が持つ)
+                self.latest_usage.pop(event.get("message_id"), None)
         elif event_type == "tool:progress":
             tool_call_id = payload.get("tool_call_id")
             if tool_call_id is not None:
                 self.latest_progress[tool_call_id] = event
+        elif event_type == "chat:usage":
+            self.latest_usage[event.get("message_id")] = event
 
         for queue in list(self._subscribers):
             queue.put_nowait(event)

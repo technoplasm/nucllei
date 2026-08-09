@@ -29,6 +29,7 @@ import {
 } from '$lib/utils/chat-events';
 import type { ChatMessage } from '$lib/types/chat';
 import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
+import { clearLiveUsage, setChatUsageBaseline, setLiveUsage } from '$lib/stores/live-usage.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
 import { getChatList, updateChatById } from '$lib/apis/chats';
 import { chatCompleted, chatAction } from '$lib/apis';
@@ -142,6 +143,10 @@ export class ChatEvents {
 			// llens(#100): 実行中 tool の進捗。message には載せない(saveChatHandler が
 			// history を丸ごと送るので DB に載り、揮発の規律が破れる)。
 			setToolProgress(message.id, data);
+		} else if (type === 'chat:usage') {
+			// llens(#102): 生成中のトークン使用量(~0.5 秒間隔・揮発)。tool:progress と
+			// 同じ規律で message には載せない。
+			setLiveUsage(message.id, data);
 		} else if (type === 'chat:completion') {
 			await this.#chatCompletionEventHandler(data, message, targetChatId);
 		} else if (type === 'chat:title') {
@@ -204,6 +209,11 @@ export class ChatEvents {
 	) => {
 		const { contentChanged, done, error } = applyCompletionData(message, data);
 
+		if (data.usage) {
+			// llens(#102): ターンの最終真値(context_size 同梱)— floating ゲージの確定値
+			setChatUsageBaseline(data.usage);
+		}
+
 		if (error) {
 			// {error: {content}} の一形 — message.error は適用済み。ここでは通知のみ
 			toast.error(typeof message.error === 'object' ? message.error.content : '');
@@ -241,6 +251,8 @@ export class ChatEvents {
 			// llens(#100): 進捗は揮発。確定したメッセージの分は捨てる(残しても
 			// 描画は results 到着で止まるが、セッション中ずっと居座らせない)
 			clearMessageProgress(message.id);
+			// llens(#102): live usage も揮発 — 破棄時にターン平均 tok/s を lastTurnRate へ残す
+			clearLiveUsage(message.id);
 
 			if (get(settings).responseAutoPlayback && !get(showCallOverlay)) {
 				await tick();

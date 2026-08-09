@@ -103,6 +103,11 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # 収束と障害時の取りこぼし上限を決めるだけの値。
 SNAPSHOT_INTERVAL = 2.0
 
+# ストリーミング中の累積 usage(chat:usage — issue #102)の emit 間引き間隔(秒)。
+# leading-edge throttle(最初の 1 発は即時、以降は間隔内を捨てる)。tail flush は
+# 持たない — 最終真値は既存の chat:completion {usage}(最終フレーム)が無条件で届く。
+USAGE_EMIT_INTERVAL = 0.5
+
 
 def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
     file_type = file.get("type")
@@ -259,6 +264,23 @@ def is_usage_requested(model) -> bool:
     meta = (model or {}).get("info", {}).get("meta", {}) or {}
     capabilities = meta.get("capabilities") or {}
     return capabilities.get("usage", True) is not False
+
+
+def is_continuous_usage_requested(model) -> bool:
+    """ストリーミング中の累積 usage(stream_options.continuous_usage_stats)を要求するか
+    (issue #102)。
+
+    既定 ON(キー不在は有効)。continuous_usage_stats は SGLang 拡張で、未知の
+    stream_options キーを弾く OpenAI 互換実装に繋ぐ配備向けの opt-out として、
+    モデルの capabilities.continuous_usage=False のときだけ要求しない。
+    usage 自体を要求しないモデル(is_usage_requested が False)では常に False —
+    include_usage 無しに continuous だけ頼む形は作らない。
+    """
+    if not is_usage_requested(model):
+        return False
+    meta = (model or {}).get("info", {}).get("meta", {}) or {}
+    capabilities = meta.get("capabilities") or {}
+    return capabilities.get("continuous_usage", True) is not False
 
 
 async def process_chat_payload(
@@ -571,6 +593,11 @@ async def process_chat_payload(
     if form_data.get("stream") and is_usage_requested(model):
         stream_options = form_data.get("stream_options") or {}
         stream_options["include_usage"] = True
+        # llens(#102): 累積 usage をチャンクにも載せてもらい(SGLang 実測済み)、
+        # ストリーミング中のライブ表示(chat:usage)の源にする。
+        # capabilities.continuous_usage=False のモデルは要求しない(opt-out)。
+        if is_continuous_usage_requested(model):
+            stream_options["continuous_usage_stats"] = True
         form_data["stream_options"] = stream_options
 
     # If there are citations, add them to the data_items
@@ -707,21 +734,48 @@ async def _persist_message_snapshot(metadata, snapshot):
 
 
 async def _record_usage(request, model, metadata, usage, event_emitter):
-    """実測 usage(llens #57)の永続化 + イベント。tool ループの各呼び出しで加算。"""
+    """実測 usage(llens #57)の永続化 + イベント。tool ループの各呼び出しで加算。
+
+    #102: emit する usage には DB へ渡すのと同じ context_size を同梱する
+    (解決できないときはキー自体を載せない)。
+    """
+    ctx = get_model_context_size(request, model)
     if metadata.get("chat_id") and metadata.get("message_id"):
         await asyncio.to_thread(
             Chats.record_usage_by_id_and_message_id,
             metadata["chat_id"],
             metadata["message_id"],
             usage,
-            context_size=get_model_context_size(request, model),
+            context_size=ctx,
         )
     await event_emitter(
         {
             "type": "chat:completion",
-            "data": {"usage": usage},
+            "data": {
+                "usage": {**usage, "context_size": ctx} if ctx is not None else usage
+            },
         }
     )
+
+
+def _live_usage_payload(usage: dict, context_size) -> dict:
+    """チャンク usage → chat:usage ペイロード(#102)の正規化。
+
+    契約キーのみ載せる(prompt_tokens_details 等のバックエンド固有キーは落とす)。
+    reasoning_tokens はチャンク usage にあるときのみ、context_size は解決できて
+    いるときのみ。
+    """
+    payload = {
+        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+    }
+    reasoning_tokens = usage.get("reasoning_tokens")
+    if reasoning_tokens is not None:
+        payload["reasoning_tokens"] = int(reasoning_tokens)
+    if context_size is not None:
+        payload["context_size"] = context_size
+    return payload
 
 
 async def consume_model_stream(
@@ -746,6 +800,10 @@ async def consume_model_stream(
     - 構造変化(ブロック開閉・tool_calls)はスナップショット + DB 永続化
     - テキスト連続中も SNAPSHOT_INTERVAL ごとにスナップショット + 永続化
       (途中参加の収束と障害時の取りこぼし上限)
+    - チャンク(choices 非空)に累積 usage が載っていれば(#102、
+      continuous_usage_stats)、USAGE_EMIT_INTERVAL の leading-edge throttle で
+      揮発イベント `chat:usage` として流す。**永続化は最終 usage フレーム
+      (choices: [])のみ** — ライブ usage は DB に書かない。
 
     ストリーム終端で reasoning の閉じ規律③と finish_reason 整合ガード
     (llens #18-2)を適用する。
@@ -754,6 +812,10 @@ async def consume_model_stream(
 
     loop = asyncio.get_running_loop()
     last_snapshot_at = loop.time()
+    # #102: ライブ usage(chat:usage)の throttle 時計と context_size。
+    # context_size はこのモデル呼び出しの間は不変なので 1 回だけ解決して使い回す。
+    last_usage_emit_at = None
+    context_size = get_model_context_size(request, model)
 
     async def emit_snapshot(persist):
         nonlocal last_snapshot_at
@@ -815,10 +877,30 @@ async def consume_model_stream(
                             "data": {"error": error},
                         }
                     )
+                # 不変条件(#102): usage の永続化点はこの最終フレーム
+                # (choices: [])だけ。チャンクに載る累積 usage(continuous)は
+                # 下の chat:usage(揮発)で流すのみで、DB には書かない。
                 usage = data.get("usage", {})
                 if usage:
                     await _record_usage(request, model, metadata, usage, event_emitter)
                 continue
+
+            # llens(#102): continuous_usage_stats でチャンクに載る累積 usage を
+            # leading-edge throttle で揮発イベントとして流す。tail flush は不要 —
+            # 最終真値は上の choices: [] フレーム(chat:completion {usage})が
+            # 無条件で届く。
+            live_usage = data.get("usage")
+            if live_usage and (
+                last_usage_emit_at is None
+                or loop.time() - last_usage_emit_at >= USAGE_EMIT_INTERVAL
+            ):
+                last_usage_emit_at = loop.time()
+                await event_emitter(
+                    {
+                        "type": "chat:usage",
+                        "data": _live_usage_payload(live_usage, context_size),
+                    }
+                )
 
             assembler.note_finish_reason(choices[0].get("finish_reason"))
 
@@ -1391,9 +1473,21 @@ async def process_chat_response(
                             # (stream 非対応モデル向けの opt-out を殺さない)
                             "stream": form_data.get("stream", True),
                             # llens(#57): tool ループの各呼び出しでも usage を受け取る
-                            # (capabilities.usage=False のモデルは opt-out)
+                            # (capabilities.usage=False のモデルは opt-out)。
+                            # #102: continuous_usage_stats もここで再度要求する —
+                            # 初回 payload だけに付けると tool 実行後の追撃ストリームで
+                            # ライブ usage が止まる。
                             **(
-                                {"stream_options": {"include_usage": True}}
+                                {
+                                    "stream_options": {
+                                        "include_usage": True,
+                                        **(
+                                            {"continuous_usage_stats": True}
+                                            if is_continuous_usage_requested(model)
+                                            else {}
+                                        ),
+                                    }
+                                }
                                 if form_data.get("stream", True)
                                 and is_usage_requested(model)
                                 else {}

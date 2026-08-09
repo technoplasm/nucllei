@@ -31,6 +31,7 @@
 	import { getSessionUser } from '$lib/apis/auths';
 	import { setFallbackHandler } from '$lib/utils/completion-streams';
 	import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
+	import { clearLiveUsage } from '$lib/stores/live-usage.svelte';
 
 	// vendor base(OverlayScrollbars)→ 自前 CSS の順 — app.css の .os-theme-app が上書きする側
 	import 'overlayscrollbars/overlayscrollbars.css';
@@ -71,6 +72,8 @@
 				// (ここで捨てないと、別チャットを見ている間に走った tool の分が
 				// セッション終了まで残り続ける)
 				clearMessageProgress(envelope.message_id ?? '');
+				// llens(#102): live usage も同型のリーク — 非表示チャットでも確定時に捨てる
+				clearLiveUsage(envelope.message_id ?? '');
 
 				if ($isLastActiveTab) {
 					if ($settings?.notificationEnabled ?? false) {

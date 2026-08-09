@@ -1,0 +1,238 @@
+"""ストリーミング中のライブ usage(chat:usage — issue #102)の回帰テスト。
+
+SGLang の stream_options.continuous_usage_stats は choices を持つ全チャンクに
+累積 usage を載せる(実機確認済み)。consume_model_stream はこれを
+USAGE_EMIT_INTERVAL の leading-edge throttle で揮発イベント chat:usage として
+流す。永続化(_record_usage → DB)は従来どおり最終 usage フレーム
+(choices: [])のみで、その emit には context_size が同梱される。
+
+フレームは実キャプチャ形式(SGLang × Kimi K2.6 — _memos/model-frames.md)に
+合わせて合成する: role フレーム → content* → finish → usage フレーム
+(choices: [])→ [DONE]。continuous では choices を持つチャンクにも累積
+usage が載る。
+"""
+
+import asyncio
+import json
+import types
+
+from starlette.responses import StreamingResponse
+
+from test.util import model_frames as mf
+
+from nucllei.utils import middleware
+from nucllei.utils.response_assembler import ContentBlocksAssembler
+
+
+def _usage(prompt, completion, reasoning=None):
+    """実キャプチャ形の累積 usage(prompt_tokens_details: null を含む)。"""
+    usage = {
+        "prompt_tokens": prompt,
+        "total_tokens": prompt + completion,
+        "completion_tokens": completion,
+        "prompt_tokens_details": None,
+    }
+    if reasoning is not None:
+        usage["reasoning_tokens"] = reasoning
+    return usage
+
+
+def _chunk(delta=None, finish_reason=None, usage=None):
+    """実キャプチャ形式のチャンク。delta も finish_reason も無ければ choices: []。"""
+    frame = {
+        "id": "245d5cac931d43c0b0f53300679d17e0",
+        "object": "chat.completion.chunk",
+        "created": 1783217380,
+        "model": "kimi-k2.6",
+        "choices": (
+            [
+                {
+                    "index": 0,
+                    "delta": delta or {},
+                    "logprobs": None,
+                    "finish_reason": finish_reason,
+                    "matched_stop": None,
+                }
+            ]
+            if delta is not None or finish_reason is not None
+            else []
+        ),
+    }
+    if usage is not None:
+        frame["usage"] = usage
+    return frame
+
+
+def _continuous_frames():
+    """continuous_usage_stats 有効時の応答(累積 usage が全チャンクに載る)。"""
+    return [
+        _chunk(
+            delta={"reasoning_content": None, "role": "assistant", "content": ""},
+            usage=_usage(28, 1, reasoning=1),
+        ),
+        _chunk(delta={"content": "こんにちは"}, usage=_usage(28, 2, reasoning=1)),
+        _chunk(delta={"content": "!"}, usage=_usage(28, 3, reasoning=1)),
+        _chunk(
+            delta={"reasoning_content": None},
+            finish_reason="stop",
+            usage=_usage(28, 4, reasoning=1),
+        ),
+        _chunk(usage=_usage(28, 4, reasoning=1)),  # 最終 usage フレーム(choices: [])
+    ]
+
+
+def _sse_response_from_frames(frames):
+    async def gen():
+        for frame in frames:
+            yield "data: " + json.dumps(frame, ensure_ascii=False) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+def _sse_response_from_fixture(name):
+    """実キャプチャ SSE(include_usage のみ — continuous なし)を行単位で流す。"""
+    raw = mf.load_raw(name).decode("utf-8")
+
+    async def gen():
+        for line in raw.split("\n"):
+            yield line + "\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+async def _consume(monkeypatch, response, model=None):
+    """consume_model_stream を単体で駆動し、(イベント列, DB record 呼び出し列) を返す。"""
+    events = []
+    record_calls = []
+
+    monkeypatch.setattr(
+        middleware.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda chat_id, message_id, data: None,
+    )
+    monkeypatch.setattr(
+        middleware.Chats,
+        "record_usage_by_id_and_message_id",
+        lambda chat_id, message_id, usage, context_size=None: record_calls.append(
+            {"usage": usage, "context_size": context_size}
+        ),
+    )
+
+    async def event_emitter(event):
+        events.append(event)
+
+    request = types.SimpleNamespace(
+        app=types.SimpleNamespace(state=types.SimpleNamespace(MODELS={}))
+    )
+    await middleware.consume_model_stream(
+        request,
+        response,
+        ContentBlocksAssembler(),
+        model=(
+            model
+            if model is not None
+            else {"id": "kimi-k2.6", "openai": {"max_model_len": 262144}}
+        ),
+        metadata={"chat_id": "chat-1", "message_id": "message-1"},
+        filter_functions=[],
+        extra_params={},
+        event_emitter=event_emitter,
+    )
+    return events, record_calls
+
+
+def _usage_events(events):
+    return [e["data"] for e in events if e.get("type") == "chat:usage"]
+
+
+def _completion_usage_events(events):
+    return [
+        e["data"]["usage"]
+        for e in events
+        if e.get("type") == "chat:completion" and "usage" in e.get("data", {})
+    ]
+
+
+def test_live_usage_is_throttled_leading_edge(monkeypatch):
+    """瞬時に届くチャンク列では最初の 1 発だけが emit される(leading edge)。
+
+    tail flush は無い — 最終真値は chat:completion {usage} が無条件で届く。
+    """
+    events, _ = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(_continuous_frames()))
+    )
+
+    assert _usage_events(events) == [
+        {
+            "prompt_tokens": 28,
+            "completion_tokens": 1,
+            "total_tokens": 29,
+            "reasoning_tokens": 1,
+            "context_size": 262144,
+        }
+    ]
+
+
+def test_live_usage_emits_again_after_interval(monkeypatch):
+    """throttle は間隔経過で再度通す(間隔 0 なら全チャンクが emit される)。"""
+    monkeypatch.setattr(middleware, "USAGE_EMIT_INTERVAL", 0.0)
+    events, _ = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(_continuous_frames()))
+    )
+
+    assert [u["completion_tokens"] for u in _usage_events(events)] == [1, 2, 3, 4]
+
+
+def test_only_final_usage_frame_is_recorded(monkeypatch):
+    """DB 永続化(_record_usage)は最終 usage フレーム(choices: [])の 1 回のみ。
+
+    ライブ usage(チャンクに載る累積値)は揮発イベントで流すだけで DB に書かない。
+    emit される chat:completion {usage} には DB と同じ context_size が同梱される。
+    """
+    events, record_calls = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(_continuous_frames()))
+    )
+
+    final_usage = _usage(28, 4, reasoning=1)
+    assert record_calls == [{"usage": final_usage, "context_size": 262144}]
+    assert _completion_usage_events(events) == [{**final_usage, "context_size": 262144}]
+
+
+def test_no_live_usage_without_continuous_chunks(monkeypatch):
+    """continuous なし(実キャプチャ text_basic)では chat:usage は流れない。
+
+    最終 usage フレームの永続化 + chat:completion {usage} は従来どおり効く。
+    """
+    events, record_calls = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_fixture("text_basic"))
+    )
+
+    assert _usage_events(events) == []
+    assert len(record_calls) == 1
+    assert record_calls[0]["usage"]["completion_tokens"] == 66
+    assert record_calls[0]["context_size"] == 262144
+
+
+def test_live_usage_payload_omits_unresolved_optional_keys(monkeypatch):
+    """reasoning_tokens はチャンク usage にあるときのみ、context_size は解決できた
+    ときのみ載せる(契約外キー prompt_tokens_details は落とす)。"""
+    frames = [
+        _chunk(
+            delta={"role": "assistant", "content": "2"},
+            usage=_usage(22, 1),
+        ),
+        _chunk(delta={}, finish_reason="stop", usage=_usage(22, 2)),
+        _chunk(usage=_usage(22, 2)),
+    ]
+    # max_model_len を持たないモデル(base も無し)→ context_size は解決できない
+    events, record_calls = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(frames), model={"id": "m"})
+    )
+
+    assert _usage_events(events) == [
+        {"prompt_tokens": 22, "completion_tokens": 1, "total_tokens": 23}
+    ]
+    # 最終 usage も context_size キーを載せない(None 同梱はしない)
+    assert _completion_usage_events(events) == [_usage(22, 2)]
+    assert record_calls == [{"usage": _usage(22, 2), "context_size": None}]

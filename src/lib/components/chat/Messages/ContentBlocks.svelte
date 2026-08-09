@@ -5,7 +5,7 @@
 	import { getContext } from 'svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import ReasoningBlock from './ReasoningBlock.svelte';
-	import PendingIndicator from './PendingIndicator.svelte';
+	import TurnIndicator from './TurnIndicator.svelte';
 	import ToolCallBlock from './ToolCallBlock.svelte';
 	import { collapseAllSignal, requestCollapseAll } from './collapse-all.svelte';
 	import type { Model } from '$lib/stores';
@@ -81,10 +81,10 @@
 	const requestExpandAll = requestCollapseAll;
 
 	// tool 実行完了 → 追撃ストリーム初着(prefill 待ち)の間は emit すべきデルタが
-	// backend に無く、画面に動く要素がゼロになってフリーズに見える。後続 block が
-	// 現れるまで PendingIndicator(Preparing と同寸)を末尾に出す。判定は「最後に描画される
+	// backend に無く、画面に動く要素がゼロになってフリーズに見える。この区間だけ
+	// TurnIndicator に「Processing results...」のラベルを付ける。判定は「最後に描画される
 	// block が results 充足済みの tool_calls」— 実行中は ToolCallBlock 自身の
-	// Executing 表示があるので対象外、reasoning/text が届いた瞬間に自然に消える。
+	// Executing 表示があるので対象外、reasoning/text が届いた瞬間に自然に外れる。
 	const awaitingFollowup = $derived.by(() => {
 		if (done) return false;
 		for (let i = blocks.length - 1; i >= 0; i--) {
@@ -140,7 +140,12 @@
 			{/each}
 		{/if}
 	{/each}
-	{#if awaitingFollowup}
-		<PendingIndicator label={$i18n.t('Processing results...')} />
+	{#if !done}
+		<!-- ターン進行中は常駐(#102)— live usage(donut + current/total + tok/s + 経過時間)を
+		     出し続け、done で消える(揮発)。ラベルは追撃待ち(awaitingFollowup)のときだけ -->
+		<TurnIndicator
+			messageId={id}
+			label={awaitingFollowup ? $i18n.t('Processing results...') : null}
+		/>
 	{/if}
 </div>

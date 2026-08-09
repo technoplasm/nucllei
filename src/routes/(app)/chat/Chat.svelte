@@ -33,6 +33,8 @@
 	import { getUserSettings } from '$lib/apis/users';
 	import { getTaskIdsByChatId } from '$lib/apis';
 
+	import { resetChatUsage, setChatUsageBaseline } from '$lib/stores/live-usage.svelte';
+
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
 	import { ChatSend } from './Chat/send';
@@ -372,6 +374,9 @@
 		session.chatFiles = [];
 		session.params = {};
 
+		// llens(#102): 新規チャットに前のチャットの usage(baseline / live)を持ち越さない
+		resetChatUsage();
+
 		if ($page.url.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
 			showControls.set(true);
@@ -413,6 +418,12 @@
 			if (chatContent) {
 				session.selectedModels = chatContent.models;
 				session.history = chatContent.history;
+
+				// llens(#102): 揮発 usage はチャット切替でリセットし、確定値(meta.usage)を
+				// floating ゲージの baseline に復元する。生成中チャットへの再アタッチ分は
+				// このあとの attachToTask で backend が最新 chat:usage を再送してくる。
+				resetChatUsage();
+				setChatUsageBaseline(session.chat.meta?.usage ?? null);
 
 				chatTitle.set(chatContent.title);
 

@@ -261,3 +261,91 @@ def test_tool_event_emitter_drops_status():
 def test_tool_event_emitter_passthrough_none():
     """emitter 自体が無い経路(headless)では None のまま。"""
     assert make_tool_event_emitter(None) is None
+
+
+# --- ライブ usage(chat:usage)の保持と破棄(#102)----------------------------
+
+
+def test_latest_usage_kept_for_reattach():
+    """chat:usage は message_id ごとに最新 1 件だけ保持する。
+
+    再アタッチ(リロード・途中参加)で復元するための揮発バッファ。DB には書かない。
+    """
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+
+    stream.emit(_env({"type": "chat:usage", "data": {"completion_tokens": 1}}))
+    stream.emit(_env({"type": "chat:usage", "data": {"completion_tokens": 5}}))
+
+    assert set(stream.latest_usage) == {"m"}
+    # 同じ message は上書き(履歴は溜めない)
+    assert stream.latest_usage["m"]["data"]["data"]["completion_tokens"] == 5
+
+
+def test_latest_usage_dropped_on_done_completion():
+    """done=True の chat:completion で該当 message のライブ usage を破棄する。
+
+    終わった生成の「途中値」を再アタッチに復元しない(最終真値は
+    chat:completion {usage} が別途届く)。
+    """
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+    stream.emit(_env({"type": "chat:usage", "data": {"completion_tokens": 5}}))
+
+    # done でないスナップショットでは残る(ストリーミング中の構造変化)
+    stream.emit(_env({"type": "chat:completion", "data": {"content_blocks": []}}))
+    assert set(stream.latest_usage) == {"m"}
+
+    stream.emit(
+        _env({"type": "chat:completion", "data": {"done": True, "content_blocks": []}})
+    )
+    assert stream.latest_usage == {}
+
+
+def test_usage_is_not_persisted_in_latest_snapshot():
+    """ライブ usage はスナップショット(= 永続・再アタッチの本体)を汚さない。"""
+    stream = CompletionEventStream(chat_id="c", message_id="m")
+    stream.emit(
+        _env({"type": "chat:completion", "data": {"content_blocks": [], "done": False}})
+    )
+    stream.emit(_env({"type": "chat:usage", "data": {"completion_tokens": 5}}))
+    assert stream.latest_snapshot == {"content_blocks": [], "done": False}
+
+
+def test_reattach_first_events_order_task_snapshot_progress_usage():
+    """再アタッチの first_events は task → snapshot → 揮発イベント(progress・usage)。
+
+    main.py の task_events_endpoint と同じ構成規律: 揮発イベント(進捗・ライブ usage)
+    はブロック・メッセージへ紐づけて描かれるため、宛先を作るスナップショットより
+    後に配る。
+    """
+
+    async def run():
+        stream = CompletionEventStream(chat_id="c", message_id="m")
+        stream.emit(_env({"type": "chat:completion", "data": {"content_blocks": []}}))
+        stream.emit(_env({"type": "tool:progress", "data": {"tool_call_id": "a"}}))
+        stream.emit(_env({"type": "chat:usage", "data": {"completion_tokens": 5}}))
+
+        # main.py(task_events_endpoint)と同じ組み立て
+        first_events = [_env({"type": "task", "data": {"task_id": "t-1"}})]
+        if stream.latest_snapshot is not None:
+            first_events.append(
+                _env({"type": "chat:completion", "data": stream.latest_snapshot})
+            )
+        first_events.extend(stream.latest_progress.values())
+        first_events.extend(stream.latest_usage.values())
+
+        queue = stream.subscribe()
+        stream.close()
+        lines = [
+            line
+            async for line in sse_event_generator(
+                stream, queue, first_events=first_events
+            )
+        ]
+        return [json.loads(line[len("data: ") :])["data"]["type"] for line in lines]
+
+    assert asyncio.run(run()) == [
+        "task",
+        "chat:completion",
+        "tool:progress",
+        "chat:usage",
+    ]

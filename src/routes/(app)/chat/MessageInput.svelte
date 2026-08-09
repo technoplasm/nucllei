@@ -16,6 +16,7 @@
 	import FileLibraryModal from './MessageInput/FileLibraryModal.svelte';
 	import InputFiles from './MessageInput/InputFiles.svelte';
 	import CallButton from './MessageInput/CallButton.svelte';
+	import UsageChip from './MessageInput/UsageChip.svelte';
 	import { MessageInputUploads } from './MessageInput/uploads';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -429,6 +430,12 @@
 							</button>
 						</div>
 					{/if}
+
+					<!-- llens(#102): floating トークンゲージ(入力カードの右上外側)。中央の
+					     スクロールボタンとは位置が重ならない。データが無ければ何も描かない -->
+					<div class="absolute -top-12 right-0 z-30 flex justify-end pointer-events-none">
+						<UsageChip />
+					</div>
 				</div>
 
 				<div class="w-full relative">

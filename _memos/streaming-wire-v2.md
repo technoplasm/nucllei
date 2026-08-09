@@ -43,7 +43,17 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     ①各モデルストリーム開始時(無条件)②構造変化(ブロック開閉・tool_calls)
     ③テキスト連続中の約 2 秒間引き(`SNAPSHOT_INTERVAL`)のみ**
   - `{done:true, content, content_blocks, title}` / `{error:{content}}`(唯一のエラー形)/
-    `{usage}` / `{sources}`
+    `{usage}`(context_size 同梱 — #102)/ `{sources}`
+- `chat:usage`(#102、揮発): ストリーミング中の累積 usage。SGLang の
+  `stream_options.continuous_usage_stats`(capabilities.continuous_usage=False で opt-out、
+  usage=False なら連動 OFF)でチャンクに載る累積値を、`USAGE_EMIT_INTERVAL`(0.5 秒)の
+  leading-edge throttle で流す。data =
+  `{prompt_tokens, completion_tokens, total_tokens, reasoning_tokens?, context_size?}`
+  (reasoning_tokens はチャンク usage にあるときのみ、context_size は解決できたときのみ)。
+  **永続化は最終 usage フレーム(choices: [])→ chat:completion {usage} のみ** — chat:usage は
+  DB に書かず、tail flush も無い(最終真値は chat:completion {usage} が無条件で届く)。
+  再アタッチでは最新 1 件をスナップショットの後(task → snapshot → 揮発イベントの順)に配り、
+  done=True の chat:completion で破棄する。
 - **done ≠ ストリーム終端**。done の後に chat:title 等が続く。終端はタスク終了によるサーバー側
   close = **EOF**(FE は EOF まで読む)。
 - 生のモデルフレーム(choices)はクライアントへ流れない(assembler 経由イベントのみ)。

@@ -15,7 +15,7 @@
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
-	import PendingIndicator from './PendingIndicator.svelte';
+	import TurnIndicator from './TurnIndicator.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -253,7 +253,9 @@
 											{$i18n.t('The response was interrupted and no content was received.')}
 										</div>
 									{:else}
-										<PendingIndicator />
+										<!-- content_blocks 未生成の初期区間 — ContentBlocks 側の常駐表示と
+										     同じメトリクス(live usage)が出るよう messageId を渡す -->
+										<TurnIndicator messageId={message.id} />
 									{/if}
 								{:else if message.content}
 									<!-- エラーがあっても本文は常に表示する(error は {content} オブジェクト形のみ —

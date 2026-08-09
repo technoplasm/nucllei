@@ -11,7 +11,7 @@
 	import { chatCompletion } from '$lib/apis/openai';
 
 	import Markdown from '../Messages/Markdown.svelte';
-	import PendingIndicator from '../Messages/PendingIndicator.svelte';
+	import TurnIndicator from '../Messages/TurnIndicator.svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -252,7 +252,7 @@
 			<div class="bg-white dark:bg-gray-850 text-content text-medium rounded-xl px-3.5 py-3 w-full">
 				<div class=" max-h-80 overflow-y-auto w-full markdown-prose-xs" id="response-container">
 					{#if responseContent.trim() === ''}
-						<PendingIndicator />
+						<TurnIndicator />
 					{:else}
 						<Markdown id={`${id}-float-response`} content={responseContent} />
 					{/if}
