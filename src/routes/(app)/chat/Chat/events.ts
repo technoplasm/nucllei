@@ -210,7 +210,8 @@ export class ChatEvents {
 		const { contentChanged, done, error } = applyCompletionData(message, data);
 
 		if (data.usage) {
-			// llens(#102): ターンの最終真値(context_size 同梱)— floating ゲージの確定値
+			// llens(#102): マージ済み message.usage(ターン累積 completion/duration・
+			// context_size 同梱)— floating ゲージの確定値
 			setChatUsageBaseline(data.usage);
 		}
 

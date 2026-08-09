@@ -44,7 +44,13 @@ class TestChatUsageRecording(AbstractPostgresTest):
             {"prompt_tokens": 100, "completion_tokens": 10},
             context_size=262144,
         )
-        assert result is not None
+        # 戻りはマージ後の message.usage(#102)— middleware がそのまま emit する
+        assert result == {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "context_size": 262144,
+        }
 
         chat = self.Chats.get_chat_by_id(self.chat_id)
         message_usage = chat.chat["history"]["messages"]["m1"]["usage"]
@@ -78,6 +84,27 @@ class TestChatUsageRecording(AbstractPostgresTest):
         assert meta_usage["prompt_tokens"] == 150
         assert meta_usage["completion_tokens"] == 30
 
+    def test_duration_accumulates_like_completion(self):
+        # 生成所要時間(#102): completion 同様に累積 — message はターンの生成時間、
+        # meta はチャットの総生成時間。duration の無い呼び出し(非ストリーム)は据え置き
+        self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id,
+            "m1",
+            {"prompt_tokens": 100, "completion_tokens": 10, "duration": 2.0},
+        )
+        self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id,
+            "m1",
+            {"prompt_tokens": 150, "completion_tokens": 20, "duration": 0.5},
+        )
+        self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id, "m1", {"prompt_tokens": 160, "completion_tokens": 1}
+        )
+
+        chat = self.Chats.get_chat_by_id(self.chat_id)
+        assert chat.chat["history"]["messages"]["m1"]["usage"]["duration"] == 2.5
+        assert chat.meta["usage"]["duration"] == 2.5
+
     def test_meta_accumulates_across_turns(self):
         # 別ターン(別 message)でも meta は会話累積
         self.Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -106,7 +133,9 @@ class TestChatUsageRecording(AbstractPostgresTest):
             "no-such-message",
             {"prompt_tokens": 50, "completion_tokens": 1},
         )
-        assert result is not None
+        # message 不在ではマージ後 message.usage を返せない(#102: 呼び手は生 usage に
+        # フォールバックして emit する)
+        assert result is None
 
         chat = self.Chats.get_chat_by_id(self.chat_id)
         # 骸骨 message は作られない

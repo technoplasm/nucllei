@@ -4,11 +4,11 @@ import {
 	formatTokens,
 	getActiveLiveUsage,
 	getChatUsageBaseline,
-	getLastTurnRate,
 	getLiveUsage,
 	resetChatUsage,
 	setChatUsageBaseline,
-	setLiveUsage
+	setLiveUsage,
+	turnStatsFromUsage
 } from './live-usage.svelte';
 
 // モジュール $state はテスト間で生き残る — 各テストの前に全部リセットする。
@@ -83,27 +83,31 @@ describe('setLiveUsage', () => {
 });
 
 describe('clearLiveUsage', () => {
-	it('破棄時にターン平均 tok/s(累計 completion / 実測経過秒)が lastTurnRate に残る', () => {
+	it('破棄でエントリが消える(揮発 — 確定値は message.usage / baseline 側)', () => {
 		setLiveUsage('m1', { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 });
-		vi.advanceTimersByTime(1000);
-		setLiveUsage('m1', { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 });
-		vi.advanceTimersByTime(500);
-		// 巻き戻り(前セグメントの 100 が累計へ)
-		setLiveUsage('m1', { prompt_tokens: 220, completion_tokens: 5, total_tokens: 225 });
-		vi.advanceTimersByTime(1000);
-		setLiveUsage('m1', { prompt_tokens: 220, completion_tokens: 55, total_tokens: 275 });
-
 		clearLiveUsage('m1');
-
 		expect(getLiveUsage('m1')).toBeNull();
-		// 累計 completion = 100 + 55 = 155、実測経過 = 2.5s → 62 tok/s
-		expect(getLastTurnRate()).toBeCloseTo(62);
+	});
+});
+
+describe('turnStatsFromUsage', () => {
+	it('永続化済み usage(duration ターン累積)から所要秒と平均 tok/s を導く', () => {
+		expect(
+			turnStatsFromUsage({
+				prompt_tokens: 9559,
+				completion_tokens: 155,
+				total_tokens: 9714,
+				duration: 2.5,
+				context_size: 262144
+			})
+		).toEqual({ seconds: 2.5, rate: 62 });
 	});
 
-	it('サンプル 1 件(経過ゼロ)の破棄では lastTurnRate を触らない', () => {
-		setLiveUsage('m1', { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 });
-		clearLiveUsage('m1');
-		expect(getLastTurnRate()).toBeNull();
+	it('duration や completion の無い/ゼロの usage は null(非ストリーム経路等)', () => {
+		expect(turnStatsFromUsage({ prompt_tokens: 10, completion_tokens: 5 })).toBeNull();
+		expect(turnStatsFromUsage({ completion_tokens: 0, duration: 2.5 })).toBeNull();
+		expect(turnStatsFromUsage({ completion_tokens: 5, duration: 0 })).toBeNull();
+		expect(turnStatsFromUsage(null)).toBeNull();
 	});
 });
 
@@ -149,19 +153,13 @@ describe('chat usage baseline', () => {
 		expect(getChatUsageBaseline()).toBeNull();
 	});
 
-	it('resetChatUsage で baseline / lastTurnRate / live エントリが全部消える', () => {
+	it('resetChatUsage で baseline / live エントリが全部消える', () => {
 		setChatUsageBaseline({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
 		setLiveUsage('m1', { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
-		vi.advanceTimersByTime(1000);
-		setLiveUsage('m1', { prompt_tokens: 1, completion_tokens: 11, total_tokens: 12 });
-		clearLiveUsage('m1');
-		expect(getLastTurnRate()).not.toBeNull();
-
 		setLiveUsage('m2', { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
 		resetChatUsage();
 
 		expect(getChatUsageBaseline()).toBeNull();
-		expect(getLastTurnRate()).toBeNull();
 		expect(getActiveLiveUsage()).toBeNull();
 	});
 });

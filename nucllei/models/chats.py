@@ -248,7 +248,7 @@ class ChatTable:
         message_id: str,
         usage: dict,
         context_size: Optional[int] = None,
-    ) -> Optional[ChatModel]:
+    ) -> Optional[dict]:
         """llens(#57): モデル応答の実測 usage(OpenAI 互換)を永続化する。
 
         tiktoken 等の推定ではなく、モデルサーバー(SGLang)が返す本物の
@@ -264,6 +264,7 @@ class ChatTable:
         """
         prompt_tokens = usage.get("prompt_tokens")
         completion_tokens = usage.get("completion_tokens")
+        duration = usage.get("duration")
         if prompt_tokens is None and completion_tokens is None:
             return None
 
@@ -278,6 +279,11 @@ class ChatTable:
             merged["total_tokens"] = merged.get("prompt_tokens", 0) + merged.get(
                 "completion_tokens", 0
             )
+            # 生成所要時間(#102): completion 同様に累積する。呼び出しごとの実測
+            # (stream 消費の壁時計)なので、tool ループでも tool 実行時間は含まれない。
+            # message 単位 = ターンの生成時間、meta = このチャットの総生成時間。
+            if isinstance(duration, (int, float)):
+                merged["duration"] = round(merged.get("duration", 0) + duration, 3)
             if context_size is not None:
                 merged["context_size"] = context_size
             return merged
@@ -292,8 +298,10 @@ class ChatTable:
                 # 骸骨 message で history を汚さない)
                 history = chat_item.chat.get("history", {})
                 message = history.get("messages", {}).get(message_id)
+                message_usage = None
                 if message is not None:
-                    message["usage"] = merge(message.get("usage") or {})
+                    message_usage = merge(message.get("usage") or {})
+                    message["usage"] = message_usage
                     flag_modified(chat_item, "chat")
 
                 # チャット単位(meta)
@@ -304,8 +312,10 @@ class ChatTable:
 
                 chat_item.updated_at = int(time.time())
                 db.commit()
-                db.refresh(chat_item)
-                return ChatModel.model_validate(chat_item)
+                # マージ後の message.usage を返す(#102): 呼び手(middleware)は
+                # これをそのまま emit する — FE の message.usage と DB が常に一致し、
+                # tool ループでも「ターン累積」の completion / duration が画面に出る。
+                return message_usage
         except Exception:
             log.exception(f"Failed to record usage for chat {id}")
             return None

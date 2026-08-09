@@ -243,6 +243,17 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      -d '{"ENABLE_OPENAI_API":true,"OPENAI_API_BASE_URLS":["http://prism-llens:13300/v1"],"OPENAI_API_KEYS":["sk-dummy"],"OPENAI_API_CONFIGS":{}}'
    ```
    ローカル ollama に `gpt-oss:20b` もある(SGLang 不達時の代替)。
+   なお SGLang 実キーは dev backend の接続設定(`GET /openai/config`、admin token で取得)に
+   入っている — `.env` の `SGLANG_API_KEY` は空のままなのでそちらを見ても出てこない。
+
+### uvicorn --reload が全リクエスト無応答で固まることがある
+
+`task dev`(uvicorn --reload)は、コード変更時に旧ワーカーの graceful shutdown を待つ。
+旧ワーカーの終了がハングすると(2026-08-09 に発生。SIGTERM も効かず)、リスナーは親が
+持ったまま誰も accept しなくなり、`/health` 含む**全リクエストが無限に待たされる**
+(接続拒否ではないので curl はタイムアウトまで沈黙し、FE はスプラッシュのまま固まる)。
+復旧はワーカー(`--multiprocessing-fork` の子)だけを `kill -KILL` — 親 reload が
+即座に新ワーカーを立て直す。`task dev` ごと再起動する必要はない。
 4. **preset モデル**: 生モデルはピッカーに出ない仕様(535da68e9)。workspace で
    preset **`llens-assistant`**(base=kimi-k2.6、system prompt 任意)を作る。UI からが早い。
 5. **dev ツール登録**: `python3 dev/tools/seed.py --token "$TOKEN"` が `render_probe` tool を

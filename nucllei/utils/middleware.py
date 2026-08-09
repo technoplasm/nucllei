@@ -736,24 +736,28 @@ async def _persist_message_snapshot(metadata, snapshot):
 async def _record_usage(request, model, metadata, usage, event_emitter):
     """実測 usage(llens #57)の永続化 + イベント。tool ループの各呼び出しで加算。
 
-    #102: emit する usage には DB へ渡すのと同じ context_size を同梱する
-    (解決できないときはキー自体を載せない)。
+    #102: emit するのは**マージ後の message.usage**(record の戻り — completion /
+    duration はターン累積、prompt は最新、context_size 同梱)。FE の message.usage と
+    DB が常に一致し、saveChatHandler の history 保存が DB のマージ結果を上書きしても
+    値が変わらない。記録できない経路(metadata 不足・message 不在)だけ生 usage +
+    context_size で emit する。
     """
     ctx = get_model_context_size(request, model)
+    merged = None
     if metadata.get("chat_id") and metadata.get("message_id"):
-        await asyncio.to_thread(
+        merged = await asyncio.to_thread(
             Chats.record_usage_by_id_and_message_id,
             metadata["chat_id"],
             metadata["message_id"],
             usage,
             context_size=ctx,
         )
+    if merged is None:
+        merged = {**usage, "context_size": ctx} if ctx is not None else usage
     await event_emitter(
         {
             "type": "chat:completion",
-            "data": {
-                "usage": {**usage, "context_size": ctx} if ctx is not None else usage
-            },
+            "data": {"usage": merged},
         }
     )
 
@@ -811,7 +815,8 @@ async def consume_model_stream(
     assembler.start_stream()
 
     loop = asyncio.get_running_loop()
-    last_snapshot_at = loop.time()
+    started_at = loop.time()
+    last_snapshot_at = started_at
     # #102: ライブ usage(chat:usage)の throttle 時計と context_size。
     # context_size はこのモデル呼び出しの間は不変なので 1 回だけ解決して使い回す。
     last_usage_emit_at = None
@@ -882,6 +887,11 @@ async def consume_model_stream(
                 # 下の chat:usage(揮発)で流すのみで、DB には書かない。
                 usage = data.get("usage", {})
                 if usage:
+                    # 生成所要時間(#102): この呼び出しの stream 消費の壁時計を実測して
+                    # usage に添える(DB では completion 同様に累積 → ターンの生成時間。
+                    # tool 実行時間は含まれない)。クライアント積算はリロードで消えるため
+                    # 計測は backend の責務。
+                    usage = {**usage, "duration": round(loop.time() - started_at, 3)}
                     await _record_usage(request, model, metadata, usage, event_emitter)
                 continue
 

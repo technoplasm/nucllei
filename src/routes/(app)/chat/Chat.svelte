@@ -419,11 +419,17 @@
 				session.selectedModels = chatContent.models;
 				session.history = chatContent.history;
 
-				// llens(#102): 揮発 usage はチャット切替でリセットし、確定値(meta.usage)を
-				// floating ゲージの baseline に復元する。生成中チャットへの再アタッチ分は
-				// このあとの attachToTask で backend が最新 chat:usage を再送してくる。
+				// llens(#102): 揮発 usage はチャット切替でリセットし、確定値を floating
+				// ゲージの baseline に復元する。leaf message の usage(マージ済み — emit と
+				// 同じ形)を優先し、無ければ meta.usage(会話累積)。生成中チャットへの
+				// 再アタッチ分はこのあとの attachToTask で backend が最新 chat:usage を
+				// 再送してくる。
 				resetChatUsage();
-				setChatUsageBaseline(session.chat.meta?.usage ?? null);
+				setChatUsageBaseline(
+					chatContent.history?.messages?.[chatContent.history?.currentId]?.usage ??
+						session.chat.meta?.usage ??
+						null
+				);
 
 				chatTitle.set(chatContent.title);
 

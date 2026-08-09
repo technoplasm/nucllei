@@ -14,6 +14,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { MessageSpeech } from './tts.svelte';
+	import { turnStatsFromUsage } from '$lib/stores/live-usage.svelte';
+	import { formatDurationSeconds } from '$lib/utils/duration';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -55,6 +57,10 @@
 	let showDeleteConfirm = $state(false);
 
 	const speech = new MessageSpeech((key) => $i18n.t(key));
+
+	// llens(#102): このターンの実測(backend が usage.duration をターン累積で永続化)。
+	// リロード後も message.usage から同じ数字が出る
+	const turnStats = $derived(turnStatsFromUsage(message.usage));
 
 	const usageTooltip = $derived(
 		message.usage
@@ -276,6 +282,22 @@
 						<span class="i-lucide-refresh-ccw size-4 block"></span>
 					</button>
 				</Tooltip>
+
+				{#if turnStats !== null}
+					<!-- llens(#102): このターンの生成所要時間と平均 tok/s(再生成の右) -->
+					<span
+						class="{isLastMessage
+							? 'visible'
+							: 'invisible group-hover:visible'} flex items-center gap-1 px-1.5 text-xs text-content-muted tabular-nums self-center"
+					>
+						{$i18n.t('{{DURATION}} seconds', {
+							DURATION: formatDurationSeconds(turnStats.seconds)
+						})}
+						<span class="text-content-subtle">·</span>
+						<span class="i-lucide-zap size-3 block"></span>
+						{Math.round(turnStats.rate)} tok/s
+					</span>
+				{/if}
 
 				{#if siblings.length > 1}
 					<Tooltip content={$i18n.t('Delete')} placement="bottom">

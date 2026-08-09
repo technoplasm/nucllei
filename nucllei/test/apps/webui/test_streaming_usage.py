@@ -195,8 +195,17 @@ def test_only_final_usage_frame_is_recorded(monkeypatch):
     )
 
     final_usage = _usage(28, 4, reasoning=1)
+    assert len(record_calls) == 1
+    # 生成所要時間(#102)は backend 実測 — 値は環境依存なのでキーの存在と型だけ固定し、
+    # DB へ渡る usage と emit される usage で同じ値であることを見る
+    recorded_duration = record_calls[0]["usage"].pop("duration")
+    assert isinstance(recorded_duration, float) and recorded_duration >= 0
     assert record_calls == [{"usage": final_usage, "context_size": 262144}]
-    assert _completion_usage_events(events) == [{**final_usage, "context_size": 262144}]
+
+    emitted = _completion_usage_events(events)
+    assert len(emitted) == 1
+    assert emitted[0].pop("duration") == recorded_duration
+    assert emitted == [{**final_usage, "context_size": 262144}]
 
 
 def test_no_live_usage_without_continuous_chunks(monkeypatch):
@@ -233,6 +242,13 @@ def test_live_usage_payload_omits_unresolved_optional_keys(monkeypatch):
     assert _usage_events(events) == [
         {"prompt_tokens": 22, "completion_tokens": 1, "total_tokens": 23}
     ]
-    # 最終 usage も context_size キーを載せない(None 同梱はしない)
-    assert _completion_usage_events(events) == [_usage(22, 2)]
+    # 最終 usage も context_size キーを載せない(None 同梱はしない)。
+    # duration(#102、backend 実測)は最終 usage にだけ載る — ライブ側には無い。
+    # ctx 不明時の emit は record と同一 dict を共有するので pop は record 側で 1 回
+    duration = record_calls[0]["usage"].pop("duration")
+    assert isinstance(duration, float) and duration >= 0
     assert record_calls == [{"usage": _usage(22, 2), "context_size": None}]
+    emitted = _completion_usage_events(events)
+    assert len(emitted) == 1
+    emitted[0].pop("duration", None)
+    assert emitted == [_usage(22, 2)]

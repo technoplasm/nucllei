@@ -8,10 +8,13 @@
  * - live エントリ(messageId キー): ターン進行中インジケータ(TurnIndicator)と
  *   floating ゲージ(UsageChip)の生成中表示。`chat:completion` の done で破棄。
  *   tool ループでは呼び出しごとに completion_tokens が小さい値へ巻き戻る —
- *   これを新セグメントの開始と解釈し、それまでの completion をターン累計に積む。
- * - チャットレベル state: floating ゲージの確定値(baseline — `chat:completion` の
- *   usage / `Chat.meta.usage` から)と、直近ターンの平均 tok/s(lastTurnRate)。
- *   チャット切替(loadChat / initNewChat)で resetChatUsage() する。
+ *   これを新セグメントの開始と解釈してレート計算をリセットする。
+ * - baseline: floating ゲージの確定値。`chat:completion {usage}`(backend がマージ済み
+ *   message.usage を emit — ターン累積 completion/duration・最新 prompt・context_size)
+ *   と、チャット読込時の leaf message usage から。チャット切替で resetChatUsage() する。
+ *
+ * ターンの所要時間・平均 tok/s は backend が `usage.duration` として永続化する —
+ * 表示側(MessageActions)は `message.usage` を直接読むので、この store は持たない。
  */
 
 export type UsagePayload = {
@@ -50,9 +53,8 @@ const EMA_ALPHA = 0.3;
 
 const entries = $state<Record<string, LiveUsage>>({});
 
-const chatUsage = $state<{ baseline: ChatUsageBaseline | null; lastTurnRate: number | null }>({
-	baseline: null,
-	lastTurnRate: null
+const chatUsage = $state<{ baseline: ChatUsageBaseline | null }>({
+	baseline: null
 });
 
 const asNumber = (value: unknown): number | undefined =>
@@ -121,30 +123,20 @@ export const getActiveLiveUsage = (): LiveUsage | null => {
 	return latest;
 };
 
-/**
- * ターン終了(done)時の破棄。ターン累計 completion / 実測経過秒を
- * チャットレベルの平均 tok/s(lastTurnRate)として残す。
- */
+/** ターン終了(done)時の破棄(揮発 — 確定値は message.usage / baseline に残る)。 */
 export const clearLiveUsage = (messageId: string) => {
 	if (!messageId) {
 		return;
 	}
-	const entry = entries[messageId];
-	if (!entry) {
-		return;
-	}
-	delete entries[messageId];
-
-	const turnCompletion = entry.segmentBase + entry.completion_tokens;
-	const elapsedSeconds = (entry.sampledAt - entry.startedAt) / 1000;
-	if (turnCompletion > 0 && elapsedSeconds > 0) {
-		chatUsage.lastTurnRate = turnCompletion / elapsedSeconds;
+	if (entries[messageId]) {
+		delete entries[messageId];
 	}
 };
 
 /**
- * floating ゲージの確定値。`chat:completion` の usage、またはチャット読込時の
- * `Chat.meta.usage` から。数値フィールドが 1 つも無い形は無視する(据え置き)。
+ * floating ゲージの確定値。`chat:completion` の usage(マージ済み message.usage)、
+ * またはチャット読込時の leaf message usage から。数値フィールドが 1 つも無い形は
+ * 無視する(据え置き)。
  */
 export const setChatUsageBaseline = (usage: Record<string, unknown> | null | undefined) => {
 	if (usage == null) {
@@ -169,10 +161,8 @@ export const setChatUsageBaseline = (usage: Record<string, unknown> | null | und
 
 export const getChatUsageBaseline = (): ChatUsageBaseline | null => chatUsage.baseline;
 
-export const getLastTurnRate = (): number | null => chatUsage.lastTurnRate;
-
 /**
- * チャット切替時のリセット。baseline / lastTurnRate に加えて live エントリも捨てる —
+ * チャット切替時のリセット。baseline に加えて live エントリも捨てる —
  * 前のチャットのエントリが残ると floating ゲージ(getActiveLiveUsage)が別チャットの
  * 値を出す。生成中のチャットへ戻れば backend が再アタッチで最新 1 件を再送してくる。
  */
@@ -181,7 +171,6 @@ export const resetChatUsage = () => {
 		delete entries[key];
 	}
 	chatUsage.baseline = null;
-	chatUsage.lastTurnRate = null;
 };
 
 /**
@@ -199,4 +188,23 @@ export const formatTokens = (n: number): string => {
 		return `${(n / 1024).toFixed(1)}k`;
 	}
 	return String(Math.round(n));
+};
+
+/**
+ * ターンの実測(所要秒 + 平均 tok/s)。`message.usage`(backend がターン累積で
+ * 永続化した duration / completion_tokens)から導く — MessageActions の表示用。
+ * 出せない形は null。
+ */
+export const turnStatsFromUsage = (
+	usage: Record<string, unknown> | null | undefined
+): { seconds: number; rate: number } | null => {
+	if (usage == null) {
+		return null;
+	}
+	const seconds = asNumber(usage.duration);
+	const completion = asNumber(usage.completion_tokens);
+	if (seconds === undefined || seconds <= 0 || completion === undefined || completion <= 0) {
+		return null;
+	}
+	return { seconds, rate: completion / seconds };
 };

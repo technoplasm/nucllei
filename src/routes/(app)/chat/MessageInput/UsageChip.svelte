@@ -1,22 +1,20 @@
 <script lang="ts">
-	// 入力欄右上の floating トークンゲージ(#102)。
+	// 入力欄右上の floating トークンゲージ(#102)— コンテキスト占有の常時表示。
 	// 生成中は live usage(total_tokens が現在占有)、それ以外は直近ターンの確定値
-	// (chat:completion の usage / Chat.meta.usage — prompt_tokens が占有)。
+	// (chat:completion のマージ済み usage / leaf message usage — prompt_tokens が占有)。
 	// どちらも無ければ何も描かない(新規チャット等)。
+	// ターンごとの所要時間・tok/s はここではなく各メッセージのアクション行に出す。
 	import { mobile } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
 	import {
 		formatTokens,
 		getActiveLiveUsage,
-		getChatUsageBaseline,
-		getLastTurnRate
+		getChatUsageBaseline
 	} from '$lib/stores/live-usage.svelte';
 
 	const live = $derived(getActiveLiveUsage());
 	const baseline = $derived(getChatUsageBaseline());
-	// 平均 tok/s は直近ターンの実測(lastTurnRate)— 生成中も確定値の方を出す
-	const rate = $derived(getLastTurnRate());
 
 	const current = $derived(
 		live ? live.total_tokens : (baseline?.prompt_tokens ?? baseline?.total_tokens ?? null)
@@ -26,17 +24,10 @@
 	const outTokens = $derived(baseline?.completion_tokens);
 	const hasInOut = $derived(inTokens !== undefined || outTokens !== undefined);
 
-	// 狭い画面では donut + 数値だけにし、詳細(tok/s・IN/OUT)は tooltip に畳む
-	const details = $derived.by(() => {
-		const parts: string[] = [];
-		if (rate !== null && rate > 0) {
-			parts.push(`${Math.round(rate)} tok/s`);
-		}
-		if (hasInOut) {
-			parts.push(`IN ${formatTokens(inTokens ?? 0)} / OUT ${formatTokens(outTokens ?? 0)}`);
-		}
-		return parts.join(' · ');
-	});
+	// 狭い画面では donut + 数値だけにし、詳細(IN/OUT)は tooltip に畳む
+	const details = $derived(
+		hasInOut ? `IN ${formatTokens(inTokens ?? 0)} / OUT ${formatTokens(outTokens ?? 0)}` : ''
+	);
 </script>
 
 {#if current !== null}
@@ -54,15 +45,9 @@
 			{:else}
 				<span>{formatTokens(current)}</span>
 			{/if}
-			{#if !$mobile}
-				{#if rate !== null && rate > 0}
-					<span class="text-content-subtle">·</span>
-					<span>{Math.round(rate)} tok/s</span>
-				{/if}
-				{#if hasInOut}
-					<span class="text-content-subtle">·</span>
-					<span>IN {formatTokens(inTokens ?? 0)} / OUT {formatTokens(outTokens ?? 0)}</span>
-				{/if}
+			{#if !$mobile && hasInOut}
+				<span class="text-content-subtle">·</span>
+				<span>IN {formatTokens(inTokens ?? 0)} / OUT {formatTokens(outTokens ?? 0)}</span>
 			{/if}
 		</div>
 	</Tooltip>
