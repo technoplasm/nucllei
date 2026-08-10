@@ -22,7 +22,6 @@ dependencies = [
     # (/ext プロキシ・context_images の inline 解決)と subagent.py が直接 import するため直接依存へ昇格。
     # ピンしないのは SDK 側の httpx 制約と衝突させないため(aiofiles 等と同方針)。
     "httpx",
-    "async-timeout",
     "aiocache",
     "aiofiles",
 
@@ -33,12 +32,6 @@ dependencies = [
 
     "boto3==1.35.53",
 
-    "argon2-cffi==23.1.0",
-    "APScheduler==3.10.4",
-
-
-    "RestrictedPython==8.0",
-
     "loguru==0.7.2",
     "asgiref==3.8.1",
 
@@ -47,7 +40,6 @@ dependencies = [
     "black==26.3.1",
 
     "openai",
-    "anthropic",
     "google-generativeai==0.8.4",
     "tiktoken",
 
@@ -55,15 +47,12 @@ dependencies = [
     # langchain / langchain-community は文書抽出ローダ専用だったため撤去し、core だけ直接依存へ昇格。
     "langchain-core==1.5.3",
 
-    "fake-useragent==2.1.0",
-
     # llens(#52): RAG ベクタ DB(chromadb/pymilvus/qdrant/opensearch/elasticsearch)は
     # RAG 撤去で全滅・撤去。ただし chromadb は (1) OTEL instrumentor が同梱ヘルパ経由で使い、
     # (2) typer(CLI)・opentelemetry stack・websocket-client(comfyui 画像生成)を推移的に
     # 供給していたため、それらを直接依存へ昇格し、instrumentors.py を素の FastAPIInstrumentor
     # 直呼びに置換して chromadb ごと撤去。
     "typer==0.15.1",
-    "websocket-client==1.8.0",
     "opentelemetry-api==1.31.1",
     "opentelemetry-sdk==1.31.1",
     "opentelemetry-exporter-otlp==1.31.1",
@@ -90,10 +79,8 @@ dependencies = [
     "fpdf2==2.8.2",
     "python-pptx==1.0.0",
     "Markdown==3.7",
-    "pypandoc==1.15",
     "pandas==2.2.3",
     "openpyxl==3.1.5",
-    "pyxlsb==1.0.10",
     "xlrd==2.0.1",
     "psutil",
     "sentencepiece",
@@ -108,17 +95,12 @@ dependencies = [
     "PyJWT[crypto]==2.13.0",
     "authlib==1.6.12",
 
-    "langfuse==2.44.0",
-    "youtube-transcript-api==1.0.3",
-    "pytube==15.0.0",
-
     # extract_msg は GPL 依存連鎖(extract-msg→RTFDE→oletools→pcodedmp[GPLv3])のため除外。
     # 用途は .msg(Outlook)アップロードのみ(_memos/license-audit.md、issue #2)
     "pydub",
 
     "google-api-python-client",
     "google-auth-httplib2",
-    "google-auth-oauthlib",
 
     "googleapis-common-protos==1.63.2",
     "google-cloud-storage==2.19.0",
@@ -127,9 +109,6 @@ dependencies = [
     "azure-storage-blob==12.24.1",
 
     "ldap3==2.9.1",
-
-
-    "tencentcloud-sdk-python==3.0.1336",
 
 ]
 readme = "README.md"
