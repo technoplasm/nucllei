@@ -14,7 +14,6 @@ dependencies = [
     # since the starlette >=1.0 bump made it an optional dependency.
     "itsdangerous",
 
-    "python-jose==3.4.0",
     "passlib[bcrypt]==1.7.4",
 
     "requests==2.32.3",
