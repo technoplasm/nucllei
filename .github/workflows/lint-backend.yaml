@@ -43,9 +43,10 @@ jobs:
 
       # 旧 Python CI(format-backend.yaml)を統合(2026-07-29): 実働 20 秒の black に
       # workflow 1 本 = 課金 1 分単位を割くのをやめ、ruff と同居させる。
-      # バージョンは pyproject.toml の dev 依存に固定。
+      # バージョンは pyproject.toml の依存と一致させること(ずれると整形結果が食い違って
+      # ここだけ落ちる — 実際 b95590df7 の 25.1.0 -> 26.3.1 でここが取り残された)。
       - name: Format check (black)
-        run: uvx black==25.1.0 --check . --exclude ".venv/|/venv/"
+        run: uvx black==26.3.1 --check . --exclude ".venv/|/venv/"
 
       # ruff 設定は pyproject.toml [tool.ruff](llens #25): select = E9,F。
       # 正しさ系(構文/未定義名/未使用 import 等)のみを gate 化し、整形は black が担う。
