@@ -220,6 +220,11 @@ format = "black ."
 lint = "ruff check nucllei"
 test = "pytest"
 check = "black --check . && ruff check nucllei"
+# 配布ホスト (depot) の CVE スキャン結果を手元から見る (#24)。**読み取りのみ**。
+# 手元にスキャナを持たないのは、関所 (promoter) / 網 (make scan) に続く 3 つ目の判定を
+# 作らないため — ずれると「手元では出ないのに配布側で止まる」が起きる。
+# 院内ネットの llens-depot に届く環境でだけ動く (CI では走らせない)。詳細は scripts/check_cve.py
+cve = "python scripts/check_cve.py"
 # 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
 licenses = "python scripts/generate_licenses.py"
 # deploy の入口(technoplasm-app `make tag` の移植): ガード → 採番 → tag → push(既定)
