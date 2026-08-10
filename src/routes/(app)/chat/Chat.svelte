@@ -565,6 +565,7 @@
 						}
 					}}
 					history={session.history}
+					chatFiles={session.chatFiles}
 					bind:selectedModels={session.selectedModels}
 					shareEnabled={!!session.history.currentId}
 					{initNewChat}

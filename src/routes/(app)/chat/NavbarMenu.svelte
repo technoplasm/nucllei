@@ -12,7 +12,7 @@
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
 	import type { ChatMessage } from '$lib/types/chat';
 
-	import { chatId, showControls, user } from '$lib/stores';
+	import { user } from '$lib/stores';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
@@ -158,21 +158,8 @@
 			side="bottom"
 			align="end"
 		>
-			<!-- llens(#19): 右ペイン(このチャットのファイル)のトグル。Navbar 直置きから移設。
-			     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
-			{#if $chatId}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"
-					id="chat-files-button"
-					onSelect={() => {
-						showControls.set(!$showControls);
-					}}
-				>
-					<span class="i-lucide-folder-open size-4 block"></span>
-					<div class="flex items-center">{$i18n.t('Files in this chat')}</div>
-				</DropdownMenu.Item>
-			{/if}
-
+			<!-- 右ペイン(このチャットのファイル)のトグルは Navbar 直置きへ戻した
+			     (バッジ付きアイコン、Navbar.svelte)。 -->
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.share ?? true)}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-surface-hover rounded-md"

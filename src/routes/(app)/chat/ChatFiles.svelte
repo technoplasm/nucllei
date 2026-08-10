@@ -6,62 +6,26 @@
 	import { showControls } from '$lib/stores';
 	import { formatFileSize } from '$lib/utils';
 	import { getFileById } from '$lib/apis/files';
+	import { collectChatFiles, type ChatFileListItem } from '$lib/utils/chat-files';
 	import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 
 	// llens(#69): 右ペイン「このチャットのファイル」。
-	// chatFiles(type 'file')+ history 全メッセージの画像(id 付き = file 化済み)を
-	// file.id で dedupe して一覧。クリックで getFileById(data 込み)→ FileItemModal。
-	// 旧チャットの data: URL 画像は id が無いため対象外(従来どおりメッセージ内でのみ表示)。
+	// 収集(chat レベル添付 + メッセージの画像・tool 生成ファイル、file.id dedupe)は
+	// collectChatFiles に一元化 — Navbar のバッジ数と同じ集合を見せる。
+	// クリックで getFileById(data 込み)→ FileItemModal。
 	const i18n = getContext('i18n');
 
 	let { history = null, chatFiles = [] }: { history?: ChatHistory | null; chatFiles?: ChatFile[] } =
 		$props();
 
-	type FileListItem = { id: string; type: 'file' | 'image'; name: string; size: number | null };
-
-	const collectFiles = (chatFiles: ChatFile[] | null, history: ChatHistory | null) => {
-		const items: FileListItem[] = [];
-		const seen = new Set();
-
-		for (const file of chatFiles ?? []) {
-			if (file?.type !== 'file' || !file?.id || seen.has(file.id)) {
-				continue;
-			}
-			seen.add(file.id);
-			items.push({
-				id: file.id,
-				type: 'file',
-				name: file?.name ?? file?.file?.meta?.name ?? file?.file?.filename ?? file.id,
-				size: file?.size ?? file?.file?.meta?.size ?? null
-			});
-		}
-
-		for (const message of Object.values(history?.messages ?? {})) {
-			for (const file of message?.files ?? []) {
-				if (file?.type !== 'image' || !file?.id || seen.has(file.id)) {
-					continue;
-				}
-				seen.add(file.id);
-				items.push({
-					id: file.id,
-					type: 'image',
-					name: file?.name ?? file.id,
-					size: file?.size ?? null
-				});
-			}
-		}
-
-		return items;
-	};
-
-	const items = $derived(collectFiles(chatFiles, history));
+	const items = $derived(collectChatFiles(chatFiles, history));
 
 	let showFileModal = $state(false);
 	let selectedItem = $state<any>(null);
 
-	const openFile = async (item: FileListItem) => {
+	const openFile = async (item: ChatFileListItem) => {
 		// #94: 削除済み file は owner には縮小 marker {id, deleted_at}(meta/filename 無し)、
 		// owner 以外は 404 で返る。404 でもモーダルは snapshot で開き、削除済み表示は
 		// FileItemModal 側(refetch 404 → 削除済み)に任せる。表示名はチャット側の名前で補う

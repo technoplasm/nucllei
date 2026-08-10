@@ -1,8 +1,18 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 
-	import { banners, chatId, showArchivedChats, showSidebar, theme, user } from '$lib/stores';
+	import {
+		banners,
+		chatId,
+		showArchivedChats,
+		showControls,
+		showSidebar,
+		theme,
+		user
+	} from '$lib/stores';
 	import { themeChangeHandler } from '$lib/utils/theme';
+	import { collectChatFiles } from '$lib/utils/chat-files';
+	import type { ChatFile } from '$lib/types/chat';
 
 	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
 	import ModelSelector from './ModelSelector.svelte';
@@ -18,14 +28,21 @@
 		shareEnabled = false,
 		chat,
 		history,
+		chatFiles = [],
 		selectedModels = $bindable()
 	}: {
 		initNewChat: () => void;
 		shareEnabled?: boolean;
 		chat: any;
 		history: any;
+		chatFiles?: ChatFile[];
 		selectedModels: string[];
 	} = $props();
+
+	// 「このチャットのファイル」アイコンのバッジ数。右ペイン(ChatFiles.svelte)と
+	// 同じ収集(chat レベル添付 + メッセージ画像・tool 生成ファイル)なので、
+	// run_python 等が chat:message:files で添付した時点で history 経由で live に増える
+	const chatFileCount = $derived(collectChatFiles(chatFiles, history).length);
 
 	// 'system' は matchMedia で解決、それ以外は名前に 'dark' を含むかで判定
 	const isDark = $derived(
@@ -90,8 +107,31 @@
 						</Menu>
 					{/if}
 
-					<!-- llens(#69→#19): 右ペイン(このチャットのファイル)のトグルは Navbar 直置きを
-					     やめ「…」メニュー内へ移設(NavbarMenu.svelte)。 -->
+					<!-- llens(#69→#19→再改訂): 右ペイン(このチャットのファイル)のトグル。
+					     「…」メニュー内では見つけにくいため Navbar 直置きへ戻し、
+					     関連ファイル数をバッジで出す(0 件はバッジ非表示)。
+					     ChatControls は !chatId で強制クローズするため、chat 未確定時は出さない -->
+					{#if chat?.id}
+						<Tooltip content={$i18n.t('Files in this chat')}>
+							<button
+								id="chat-files-button"
+								class="relative flex cursor-pointer px-2 py-2 rounded-xl hover:bg-surface-hover"
+								onclick={() => {
+									showControls.set(!$showControls);
+								}}
+								aria-label={$i18n.t('Files in this chat')}
+							>
+								<span class="i-lucide-folder-open size-5 block m-auto self-center"></span>
+								{#if chatFileCount > 0}
+									<span
+										class="absolute top-0.5 right-0 min-w-4 h-4 px-1 rounded-full bg-primary text-primary-content text-[10px] leading-4 font-medium text-center tabular-nums pointer-events-none"
+									>
+										{chatFileCount}
+									</span>
+								{/if}
+							</button>
+						</Tooltip>
+					{/if}
 
 					<Tooltip content={$i18n.t('New Chat')}>
 						<button
