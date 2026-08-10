@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.115.7",
     "uvicorn[standard]>=0.34.0",
     "pydantic>=2.10.6",
-    "python-multipart==0.0.20",
+    "python-multipart==0.0.30",
     # Required by starlette's SessionMiddleware; no longer pulled in transitively
     # since the starlette >=1.0 bump made it an optional dependency.
     "itsdangerous",
@@ -18,7 +18,7 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
 
     "requests==2.32.3",
-    "aiohttp==3.11.11",
+    "aiohttp==3.14.3",
     # llens(#97): これまで openai/anthropic 経由の transitive 依存だったが、CORE の請求経路
     # (/ext プロキシ・context_images の inline 解決)と subagent.py が直接 import するため直接依存へ昇格。
     # ピンしないのは SDK 側の httpx 制約と衝突させないため(aiofiles 等と同方針)。
@@ -107,7 +107,7 @@ dependencies = [
 
     "onnxruntime==1.20.1",
 
-    "PyJWT[crypto]==2.10.1",
+    "PyJWT[crypto]==2.13.0",
     "authlib==1.6.12",
 
     "langfuse==2.44.0",
@@ -205,6 +205,14 @@ build-backend = "hatchling.build"
 # sys.path に載せる。リポジトリルートから `uv run pytest` で実行する。
 testpaths = ["nucllei/test"]
 pythonpath = [".", "nucllei"]
+
+[tool.uv]
+# setuptools 81 で pkg_resources が削除され、これを import する依存 (fs 等) が壊れる
+# (実測: test_provider.py の収集が ModuleNotFoundError で落ちた)。
+# CVE-2025-47273 (setuptools の Path Traversal) の修正は 78.1.1 なので、
+# **直った版のうち pkg_resources が残っている系列**に収める。
+# setuptools は ctranslate2 / fs / torch が要求する = 配布 image にも載る。
+constraint-dependencies = ["setuptools>=78.1.1,<81"]
 
 [tool.taskipy.tasks]
 # Backend dev server (hot reload) on :3000 — matches the docker single-origin

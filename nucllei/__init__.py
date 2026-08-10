@@ -1,6 +1,5 @@
-import base64
 import os
-import random
+import secrets
 from pathlib import Path
 
 import typer
@@ -46,7 +45,14 @@ def serve(
         if not KEY_FILE.exists():
             typer.echo(f"Generating a new secret key and saving it to {KEY_FILE}")
             KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            KEY_FILE.write_bytes(base64.b64encode(random.randbytes(12)))
+            # **secrets を使う**。upstream は random.randbytes(12) を base64 して 16 文字を
+            # 書いていたが、random は Mersenne Twister で暗号用途の生成器ではない。
+            # 長さも 12 バイト = 96 bit で、HS256 が要求する鍵長 (RFC 7518 3.2: ハッシュ出力
+            # と同じ 32 バイト以上) を下回る — PyJWT 2.13 が InsecureKeyLengthWarning で
+            # 指すのがこれ。JWT の署名鍵はセッション偽造の可否そのものなので強い方に倒す。
+            # 既存の配備は鍵ファイルを持っているのでこの変更の影響を受けない
+            # (作り直すと全ユーザのセッションが失効する。回すのは意図した時だけ)
+            KEY_FILE.write_text(secrets.token_urlsafe(32))
         typer.echo(f"Loading WEBUI_SECRET_KEY from {KEY_FILE}")
         os.environ["WEBUI_SECRET_KEY"] = KEY_FILE.read_text()
 
