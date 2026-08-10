@@ -63,6 +63,21 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
+      # llens(#24): フロントの依存脆弱性。**depot 側のスキャンでは絶対に出ない** —
+      # ビルド後は /app/build にバンドルされ node_modules もロックも image に残らないので、
+      # registry の trivy は JS 依存を特定できない。見るならここしかない。
+      #
+      # --prod で本番依存だけを見る (devDependencies はバンドルに載らない)。
+      # **落とすのは critical だけ**。high 以上で落とすと、親パッケージ待ちの推移的依存
+      # (vite/postcss 等) で恒常的に赤くなり、赤が普通になって誰も見なくなる。
+      # critical は「直接依存を上げれば消せる」ものが実際そうだった (jspdf の
+      # Path Traversal / HTML Injection) ので、ゲートとして機能する水準。
+      # high 以下は落とさず一覧だけ出す — 手元では uv run task cve で image 側と一緒に見る。
+      - name: Audit Frontend Dependencies (fail on critical)
+        run: |
+          pnpm audit --prod || true
+          pnpm audit --prod --audit-level critical
+
       - name: Format Frontend
         run: pnpm format
 
