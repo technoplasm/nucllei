@@ -231,7 +231,8 @@ check = "black --check . && ruff check nucllei"
 # 作らないため — ずれると「手元では出ないのに配布側で止まる」が起きる。
 # 院内ネットの llens-depot に届く環境でだけ動く (CI では走らせない)。詳細は scripts/check_cve.py
 cve = "python scripts/check_cve.py"
-# 依存ライセンス一覧(static/licenses.json)の再生成 — 依存を増減したら回して結果をコミット
+# 依存ライセンス一覧の再生成。**配布物のこれは image ビルド時に作られる** (Dockerfile) ので
+# コミットは不要 — このタスクは手元の dev サーバで License タブを見たいときだけ使う
 licenses = "python scripts/generate_licenses.py"
 # deploy の入口(technoplasm-app `make tag` の移植): ガード → 採番 → tag → push(既定)
 # → CI が ghcr.io/technoplasm/nucllei:<tag> を出す。`uv run task tag pre` / `tag release`。

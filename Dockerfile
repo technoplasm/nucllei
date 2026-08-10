@@ -20,6 +20,11 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 ENV APP_VERSION=${APP_VERSION}
+# 依存クレジット(設定 > About の License タブ)の frontend 分をここで採る。
+# **node_modules があるのはこのステージだけ**なので、生の pnpm 出力を持ち越して
+# backend ステージで合流させる。コミット済みの生成物を配るのをやめたのは、
+# 依存を触るたびに腐って「正しく開示している」という誤った主張になっていたため
+RUN pnpm licenses list --prod --json > /app/licenses.frontend.json
 # multi-arch ビルドでは arm64 ステージの QEMU 実行が並走しメモリを圧迫する。
 # V8 の既定 heap 上限は環境依存でギリギリ(pre-11 で OOM 実績)— 明示して固定する
 RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
@@ -57,9 +62,19 @@ RUN if [ -n "$PRELOAD_WHISPER_MODEL" ]; then \
 
 COPY --from=build /app/build /app/build
 COPY --from=build /app/package.json /app/package.json
+COPY --from=build /app/licenses.frontend.json /tmp/licenses.frontend.json
 COPY nucllei /app/nucllei
+COPY scripts/generate_licenses.py /app/scripts/generate_licenses.py
 # nucllei 本体を editable install(console script `nucllei` の生成。依存は上の層で解決済みなので一瞬)
 RUN uv sync --frozen --no-dev --extra stt --no-cache
+
+# 依存クレジットを **この image の実際の中身から** 作る。frontend は上のステージで採った
+# 一覧、backend はいま入れた venv の importlib.metadata。リポジトリにコミットした JSON を
+# 配ると依存を触るたびに腐るので、build 時に作って /app/build へ置く
+RUN uv run --no-sync python scripts/generate_licenses.py \
+      --frontend-json /tmp/licenses.frontend.json \
+      --out /app/build/licenses.json \
+    && rm -f /tmp/licenses.frontend.json
 
 RUN mkdir -p /app/data
 

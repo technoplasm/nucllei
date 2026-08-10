@@ -11,6 +11,7 @@ venv で回すこと**。`--extra local-ml` 等が入った環境で回すと op
 (torch / nvidia-cuda 系など)が混入する(2026-07-17 に実際に混入していて除去した)。
 """
 
+import argparse
 import json
 import subprocess
 from pathlib import Path
@@ -19,15 +20,21 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "static" / "licenses.json"
 
 
-def frontend_packages():
-    out = subprocess.run(
-        ["pnpm", "licenses", "list", "--prod", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=ROOT,
-    ).stdout
-    data = json.loads(out)
+def frontend_packages(captured: Path | None = None):
+    # captured を渡すと pnpm を起動せず、その JSON を使う。**image ビルド時に使う** —
+    # node_modules があるのは frontend ステージだけで、backend ステージには pnpm が無い。
+    # frontend ステージで `pnpm licenses list` の出力だけを持ち越し、ここで合流させる
+    if captured is not None:
+        data = json.loads(captured.read_text())
+    else:
+        out = subprocess.run(
+            ["pnpm", "licenses", "list", "--prod", "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=ROOT,
+        ).stdout
+        data = json.loads(out)
 
     packages = []
     for license_name, items in data.items():
@@ -88,13 +95,23 @@ def backend_packages():
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--frontend-json",
+        type=Path,
+        help="pnpm licenses list --prod --json の出力。指定すると pnpm を起動しない",
+    )
+    ap.add_argument("--out", type=Path, default=OUT, help=f"出力先 (既定 {OUT})")
+    args = ap.parse_args()
+
     data = {
-        "frontend": frontend_packages(),
+        "frontend": frontend_packages(args.frontend_json),
         "backend": backend_packages(),
     }
-    OUT.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n")
     print(
-        f"wrote {OUT} (frontend {len(data['frontend'])} / backend {len(data['backend'])})"
+        f"wrote {args.out} (frontend {len(data['frontend'])} / backend {len(data['backend'])})"
     )
 
 

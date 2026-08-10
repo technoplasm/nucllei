@@ -339,3 +339,7 @@ _links/
 
 # 生成物(generate.sh の中間出力)
 /_brand/dist/
+
+# 依存クレジットは image ビルド時に生成する (Dockerfile)。コミットすると依存を触るたびに腐り、
+# 「正しく開示している」という誤った主張になる。ローカルで見たいときは uv run task licenses
+static/licenses.json
