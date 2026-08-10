@@ -144,12 +144,21 @@
 	const displayItems = $derived(Array.isArray(result?.display) ? result.display : []);
 	const hasDisplay = $derived(displayItems.length > 0);
 
-	// llens(#17): 長い展開の末尾からも閉じられるようにする
+	// llens(#17): 長い展開を閉じたあとの視点合わせ。slide の outro 完了
+	// (= ジオメトリ確定)後に scrollIntoView する — rAF 1 回では 300ms の収縮中に
+	// 測ってしまい、ビューポートより背の高い展開では 'nearest' が no-op になって、
+	// 収縮後の視界が無関係な位置に取り残される。
+	// フラグ方式なのは「すべて閉じる」の巻き添えで閉じる他ブロックまで
+	// スクロールを取り合わないため(合図を出した 1 ブロックだけが復帰する)。
+	let scrollOnClose = false;
 	const collapseFromBottom = () => {
+		scrollOnClose = true;
 		open = false;
-		requestAnimationFrame(() => {
-			rootElement?.scrollIntoView({ block: 'nearest' });
-		});
+	};
+	const restoreViewAfterCollapse = () => {
+		if (!scrollOnClose) return;
+		scrollOnClose = false;
+		rootElement?.scrollIntoView({ block: 'nearest' });
 	};
 </script>
 
@@ -183,6 +192,7 @@
 		onpointerenter={() => (toggleHover = true)}
 		onpointerleave={() => (toggleHover = false)}
 		onpointerup={() => {
+			if (open) scrollOnClose = true;
 			open = !open;
 		}}
 	>
@@ -240,7 +250,10 @@
 	</div>
 
 	{#if open}
-		<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
+		<div
+			transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+			onoutroend={restoreViewAfterCollapse}
+		>
 			<div class="border {toggleHover ? 'border-line-hover' : 'border-line'} rounded-lg transition">
 				<div class="px-3 py-2">
 					{#if !hasArgs}
@@ -368,6 +381,8 @@
 						onpointerleave={() => (toggleHover = false)}
 						onpointerup={(e) => {
 							e.stopPropagation();
+							// 一括で畳んだあとも、押したこのブロックは視界に戻す
+							scrollOnClose = true;
 							onExpandAll?.(false);
 						}}
 					>
