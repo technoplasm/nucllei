@@ -1,26 +1,6 @@
 """
 title: Sandbox
 description: サーバーサイドの隔離環境 (nsjail) で Python / shell を実行する。
-author: Ken Enda
-version: 0.3.1
-
-changelog:
-  0.3.1: llens fork (v0.6.5 基点) への適合 (#18-3)。0.9 ベースとの API 差分を吸収:
-         Files.insert_new_file / get_file_by_id は sync (await 除去)、
-         Storage.upload_file は 2 引数、メッセージ files の永続化は
-         add_message_files_by_id_and_message_id が無いため
-         get_chat_by_id + upsert_message_to_chat_by_id_and_message_id でマージ。
-  0.3.0: import_chat_file に file_id 引数を追加。large-file-gate 等で context から外れた
-         添付も file_id 直指定で取り込めるようにした (jail は無ネットワークで pyfetch 不可の
-         ため、添付一覧に無いファイルの回収経路が無かった)。所有者チェック付き。
-  0.2.0: run_python を stateful 化 (会話内で変数・import が永続。__chat_id__ ごとの
-         常駐 kernel = /exec_cell)。従来の使い捨て版は run_python_once にリネーム。
-         最後の式は notebook 風に値表示、セル timeout は中断 (namespace 保持)。
-  0.1.1: docstring を schema (目的1行 + :param:) に絞り、利用ガイド (状態モデル・
-         入出力の流れ・日本語作図) は system prompt (prompts/llens.md) に移行。
-  0.1.0: 初版 (PoC)。run_python / run_shell / import_chat_file / list_workspace /
-         export_workspace_file。outputs/ の自動回収・チャット添付、
-         実行中の経過秒数表示 (#100 で撤去 — nucllei が自動表示する)。
 """
 
 import base64
@@ -34,25 +14,67 @@ from typing import Any, Awaitable, Callable, Optional
 import aiohttp
 from pydantic import BaseModel, Field
 
-# 型駆動レンダリング(#20): code 引数はハイライト付き、戻り値は pre-wrap の text 表示
-from nucllei.utils.tool_render import Code, Text
-
 logger = logging.getLogger(__name__)
 
-# --- Nucllei 内部 API（ランタイムで解決される） ---------------------------
+# 環境差は nucllei コンテナの env で吸収する (compose の環境ごとの上書きがそのまま効く)。
+# import 時に解決して Field(default=) に渡すのは、default_factory だと valve の
+# JSON schema から default が落ち、管理画面が空欄表示になって「今どこを向いているか」が
+# 読めなくなるため (実測: default_factory の項目は spec で default=None)。
+SANDBOX_URL = os.getenv("SANDBOX_URL", "http://sandbox:8000")
+
+# write_file の本文上限。モデルの出力なのでそもそも巨大にはならないが、
+# 事故 (ループで巨大文字列を渡す等) で workspace quota を食い潰さないための蓋。
+WRITE_FILE_LIMIT = int(os.getenv("SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 1024)))
+
+# --- nucllei 内部 API（ランタイムで解決される） ------------------------------
 try:
     from nucllei.models.chats import Chats
     from nucllei.models.files import Files, FileForm
     from nucllei.storage.provider import Storage
+    from nucllei.utils.tool_render import Code
 except Exception:  # ローカルでの静的解析用フォールバック
     Chats = None
     Files = None
     FileForm = None
     Storage = None
 
+    def Code(language: str, base: type = str):
+        return base
+
+
+# #88: 画像出力を display チャネルで tool 枠下にユーザー表示する(モデルの本文貼り付けに
+# 依存しない)。別 try に分けるのは、#88 未対応の旧 nucllei で display が無くても上の
+# Files 等の import を巻き添えにしないため — その場合 None にフォールバックし、従来の
+# 「本文に ![](...) と貼れ」指示へ退避する(デプロイ順が逆転しても画像に辿り着ける)。
+try:
+    from nucllei.utils.tool_output import display as _tool_display
+except Exception:
+    _tool_display = None
+
+
+def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[str]:
+    """content_type から display チャネル用の markdown を返す(image/audio/video)。
+    それ以外(DL 提供のみ)は None。<audio>/<video> は sanitizeChatHtml が許可済(#87)。
+    exports/ に置いた成果物が「同じ経路」で自動表示に乗るための唯一の分岐点。"""
+    url = f"/api/v1/files/{file_id}/content"
+    ct = (content_type or "").lower()
+    if ct.startswith("image/"):
+        return f"![{name}]({url})"
+    if ct.startswith("audio/"):
+        return f'<audio controls src="{url}"></audio>'
+    if ct.startswith("video/"):
+        return f'<video controls src="{url}"></video>'
+    return None
+
+
+# 描画注釈(#20 型駆動レンダリング): 実行時/LLM 的には素の str のまま、
+# チャット UI でストリーミング中からハイライト付きコードブロックとして描画される。
+PythonCode = Code("python")
+ShellCommand = Code("bash")
+
 
 # -----------------------------------------------------------------------------
-# 低レベルヘルパ (mount_tool と同パターン)
+# 低レベルヘルパ
 # -----------------------------------------------------------------------------
 def _human_size(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
@@ -62,7 +84,7 @@ def _human_size(n: int) -> str:
 
 
 def _attachment_dict(file_id: str, name: str, content_type: str, size: int) -> dict:
-    """メッセージ files ストアに入れる添付オブジェクト (mount_tool と同形)。"""
+    """メッセージ files ストアに入れる添付オブジェクト。"""
     return {
         "type": "file",
         "id": file_id,
@@ -80,7 +102,7 @@ def _attachment_dict(file_id: str, name: str, content_type: str, size: int) -> d
 
 
 def _register_bytes_file(user_id: str, display_name: str, data: bytes) -> dict:
-    """bytes を Storage + Files に登録し、添付 dict を返す (v0.6.5: 全部 sync)。"""
+    """bytes を Storage + Files に登録し、添付 dict を返す。"""
     file_id = str(uuid.uuid4())
     content_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
     stored_name = f"{file_id}_{display_name}"
@@ -105,7 +127,7 @@ def _register_bytes_file(user_id: str, display_name: str, data: bytes) -> dict:
 
 
 def _iter_context_files(__files__, __metadata__):
-    """チャットコンテキストのファイル参照を正規化して列挙 (mount_tool と同形)。"""
+    """チャットコンテキストのファイル参照を正規化して列挙。"""
     raw = []
     if __files__:
         raw = __files__
@@ -114,11 +136,8 @@ def _iter_context_files(__files__, __metadata__):
     for f in raw or []:
         inner = f.get("file", {}) if isinstance(f, dict) else {}
         fid = (f.get("id") if isinstance(f, dict) else None) or inner.get("id")
-        fname = (
-            (f.get("name") if isinstance(f, dict) else None)
-            or inner.get("filename")
-            or (inner.get("meta") or {}).get("name")
-        )
+        fname = (f.get("name") if isinstance(f, dict) else None) \
+            or inner.get("filename") or (inner.get("meta") or {}).get("name")
         if fid:
             yield fid, fname
 
@@ -129,12 +148,14 @@ def _iter_context_files(__files__, __metadata__):
 class Tools:
     class Valves(BaseModel):
         sandbox_url: str = Field(
-            default="http://sandbox:8000",
-            description="sandbox サービスの URL (docker network 内)",
-        )
+            default=SANDBOX_URL,
+            description="sandbox サービスの URL。既定は nucllei の env (SANDBOX_URL) を流用し、"
+            "無ければ docker network 内の既定")
         default_timeout_s: int = Field(
-            default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)"
-        )
+            default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)")
+        max_output_chars: int = Field(
+            default=10_000,
+            description="stdout/stderr を tool result に載せる上限 (文字)。超過は head+tail 切り詰め。0 = 無効")
         debug: bool = Field(default=False, description="詳細ログ")
 
     def __init__(self):
@@ -152,77 +173,86 @@ class Tools:
                     raise RuntimeError(f"sandbox HTTP {resp.status}: {body}")
                 return await resp.json()
 
-    # ---- outputs/ の回収 → OWUI Files 登録 + チャット添付 ----------------------
+    # ---- exports/ の回収 → Files 登録 + チャット添付 ---------------------------
     async def _persist_and_emit_files(
-        self,
-        attachments,
-        chat_id,
-        message_id,
-        __event_emitter__,
+        self, attachments, chat_id, message_id, __event_emitter__,
     ):
-        """新規添付をメッセージに反映。v0.6.5 には add_message_files_by_id_and_message_id
-        が無いため、既存 files を読んでマージし upsert で永続化する。"""
+        """新規添付をメッセージに反映する。
+        frontend は chat:message:files を message.files への「置換」として扱うため、
+        DB 上の現在の files とマージしてから永続化 + emit する (差分だけ送ると
+        同一メッセージ内の既存添付が消える)。"""
         merged = list(attachments)
         if Chats is not None and chat_id and message_id:
             try:
-                chat = Chats.get_chat_by_id(chat_id)
-                if chat is not None:
-                    messages = chat.chat.get("history", {}).get("messages", {})
-                    existing = (messages.get(message_id) or {}).get("files") or []
-                    merged = existing + list(attachments)
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        chat_id,
-                        message_id,
-                        {"files": merged},
-                    )
+                cur = Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
+                merged = list(cur.get("files") or []) + list(attachments)
+                Chats.upsert_message_to_chat_by_id_and_message_id(
+                    chat_id, message_id, {"files": merged},
+                )
             except Exception as e:
                 logger.error(f"[sandbox] persist failed: {e!r} (emit のみで継続)")
         if __event_emitter__:
-            await __event_emitter__(
-                {
-                    "type": "chat:message:files",
-                    "data": {"files": merged},
-                }
-            )
+            await __event_emitter__({
+                "type": "chat:message:files",
+                "data": {"files": merged},
+            })
 
-    async def _register_outputs(
-        self,
-        user_id,
-        outputs,
-        chat_id,
-        message_id,
-        __event_emitter__,
+    async def _register_exports(
+        self, user_id, exports, chat_id, message_id, __event_emitter__,
     ) -> list[str]:
-        """sandbox の outputs 差分を OWUI Files に登録・添付し、報告行を返す。"""
+        """sandbox の exports 差分を Files に登録・添付し、報告行を返す。"""
         lines = []
         attachments = []
-        for out in outputs:
+        for out in exports:
             name = out["name"]
             if out.get("truncated") or "b64" not in out:
-                lines.append(
-                    f"- {name} ({_human_size(out['size'])}): 転送上限超過。"
-                    f"workspace には残っている"
+                # 転送上限(FILE_LIMIT、既定 25MB / compose 100MB)超過で未添付。
+                # モデルにも戻り値で明示 + ユーザーにも display で警告(気付けるように)。
+                warn = (
+                    f"{name} ({_human_size(out['size'])}) は転送上限を超えて添付できなかった"
+                    f"(workspace には残存)。分割・圧縮するか、必要な部分だけ書き出すこと。"
                 )
+                lines.append(f"- ⚠ {warn}")
+                if _tool_display is not None:
+                    _tool_display(f"⚠ {warn}")
                 continue
             try:
                 att = _register_bytes_file(
-                    user_id, os.path.basename(name), base64.b64decode(out["b64"])
-                )
+                    user_id, os.path.basename(name), base64.b64decode(out["b64"]))
                 attachments.append(att)
                 line = f"- {name} ({_human_size(out['size'])}) file_id={att['id']}"
-                if (att["file"]["meta"]["content_type"] or "").startswith("image/"):
-                    line += (
-                        f" 画像。本文に ![{name}](/api/v1/files/{att['id']}/content)"
-                        f" と書くと表示される"
-                    )
+                # #88: 画像/音声/動画は display チャネルで tool 枠下に自動表示(モデルの貼り付けに
+                # 依存しない)。gallery 添付は _persist_and_emit_files で常時付くので display 未対応
+                # nucllei でも辿り着ける → 本文への貼り付け指示は出さない(標準ガイダンスと矛盾させない)。
+                md = _display_markdown(name, att["id"], att["file"]["meta"]["content_type"])
+                if md:
+                    if _tool_display is not None:
+                        _tool_display(md)
+                    line += " ユーザーに提示済み(本文への再掲・貼り付けは不要)"
                 lines.append(line)
             except Exception as e:
                 lines.append(f"- {name}: 登録失敗 {e!r}")
         if attachments:
             await self._persist_and_emit_files(
-                attachments, chat_id, message_id, __event_emitter__
-            )
+                attachments, chat_id, message_id, __event_emitter__)
         return lines
+
+    def _truncate_output(self, text: str) -> str:
+        """context 保護の切り詰め。sandbox サービス側の 512KB cap (transport/OOM 保護) とは
+        別物で、こちらは tool result が会話 context を食い潰さないための上限。
+        エラー/トレースバックは末尾に出るので tail を残す head+tail 方式。"""
+        limit = self.valves.max_output_chars
+        if limit <= 0 or len(text) <= limit:
+            return text
+        head = int(limit * 0.8)
+        tail = limit - head
+        return (
+            text[:head]
+            + f"\n⋮ [切り詰め: 全 {len(text)} 字中 先頭 {head} 字 + 末尾 {tail} 字のみ表示。"
+            "全文が必要なら出力を /workspace のファイルに書き出し、"
+            "run_shell の rg / head / tail で部分参照すること]\n"
+            + text[-tail:]
+        )
 
     def _format_exec_result(self, res: dict, output_lines: list[str]) -> str:
         parts = [f"exit_code={res['exit_code']} ({res['duration_s']}s)"]
@@ -231,58 +261,46 @@ class Tools:
         stdout = res.get("stdout", "")
         stderr = res.get("stderr", "")
         if stdout:
-            parts.append("--- stdout ---\n" + stdout.rstrip("\n"))
+            parts.append("--- stdout ---\n" + self._truncate_output(stdout.rstrip("\n")))
             if res.get("stdout_truncated"):
-                parts.append("(stdout は上限で切り詰め)")
+                parts.append("(stdout はサーバー転送上限でも切り詰め)")
         if stderr:
-            parts.append("--- stderr ---\n" + stderr.rstrip("\n"))
+            parts.append("--- stderr ---\n" + self._truncate_output(stderr.rstrip("\n")))
             if res.get("stderr_truncated"):
-                parts.append("(stderr は上限で切り詰め)")
+                parts.append("(stderr はサーバー転送上限でも切り詰め)")
         if not stdout and not stderr:
             parts.append("(出力なし)")
         if output_lines:
-            parts.append(
-                "--- 生成ファイル (outputs/) — チャットに添付済み ---\n"
-                + "\n".join(output_lines)
-            )
+            parts.append("--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                         + "\n".join(output_lines))
         return "\n".join(parts)
 
     def _format_cell_result(self, res: dict, output_lines: list[str]) -> str:
         parts = []
         if res.get("session_reset"):
-            parts.append(
-                "※ 実行環境がリセットされ、以前の変数・import は失われています "
-                "(必要なら定義し直してから続けてください)。"
-            )
+            parts.append("※ 実行環境がリセットされ、以前の変数・import は失われています "
+                         "(必要なら定義し直してから続けてください)。")
         stdout = res.get("stdout", "")
         error = res.get("error")
         if res.get("timed_out"):
             parts.append("**タイムアウト (セルを中断。変数・import は保持)**")
         if stdout:
-            parts.append(stdout.rstrip("\n"))
+            parts.append(self._truncate_output(stdout.rstrip("\n")))
             if res.get("stdout_truncated"):
-                parts.append("(出力は上限で切り詰め)")
+                parts.append("(出力はサーバー転送上限でも切り詰め)")
         if error:
-            parts.append("--- エラー ---\n" + str(error).rstrip("\n"))
+            parts.append("--- エラー ---\n" + self._truncate_output(str(error).rstrip("\n")))
         if not stdout and not error and not res.get("timed_out"):
             parts.append("(出力なし)")
         if output_lines:
-            parts.append(
-                "--- 生成ファイル (outputs/) — チャットに添付済み ---\n"
-                + "\n".join(output_lines)
-            )
+            parts.append("--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                         + "\n".join(output_lines))
         parts.append(f"({res.get('duration_s', 0)}s)")
         return "\n".join(parts)
 
     async def _exec(
-        self,
-        lang,
-        code,
-        timeout_s,
-        __user__,
-        __event_emitter__,
-        __chat_id__,
-        __message_id__,
+        self, lang, code, timeout_s, __user__, __event_emitter__,
+        __chat_id__, __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
@@ -293,34 +311,24 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
         }
         try:
-            res = await self._post("/exec", payload, payload["timeout_s"] + 30)
+            res = await self._post(
+                "/exec", payload, payload["timeout_s"] + 30)
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
-        output_lines = await self._register_outputs(
-            __user__["id"],
-            res.get("outputs", []),
-            __chat_id__,
-            __message_id__,
-            __event_emitter__,
-        )
+        output_lines = await self._register_exports(
+            __user__["id"], res.get("exports", []),
+            __chat_id__, __message_id__, __event_emitter__)
         return self._format_exec_result(res, output_lines)
 
     async def _exec_cell(
-        self,
-        code,
-        timeout_s,
-        __user__,
-        __event_emitter__,
-        __chat_id__,
-        __message_id__,
+        self, code, timeout_s, __user__, __event_emitter__,
+        __chat_id__, __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         if not __chat_id__:
-            return (
-                "ERROR: chat_id が取得できず状態付き実行ができません。"
-                "単発実行が必要なら run_python_once を使ってください。"
-            )
+            return ("ERROR: chat_id が取得できず状態付き実行ができません。"
+                    "単発実行が必要なら run_python_once を使ってください。")
         payload = {
             "user_id": __user__["id"],
             "chat_id": __chat_id__,
@@ -328,16 +336,13 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
         }
         try:
-            res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
+            res = await self._post(
+                "/exec_cell", payload, payload["timeout_s"] + 30)
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
-        output_lines = await self._register_outputs(
-            __user__["id"],
-            res.get("outputs", []),
-            __chat_id__,
-            __message_id__,
-            __event_emitter__,
-        )
+        output_lines = await self._register_exports(
+            __user__["id"], res.get("exports", []),
+            __chat_id__, __message_id__, __event_emitter__)
         return self._format_cell_result(res, output_lines)
 
     # =========================================================================
@@ -345,89 +350,72 @@ class Tools:
     # =========================================================================
     async def run_python(
         self,
-        code: Code("python"),
+        code: PythonCode,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
-    ) -> Text:
+    ) -> str:
         """
         サーバーの隔離環境で Python コードを実行する。この会話の中では変数・import・関数
         定義が実行を跨いで保持される (前のセルで作った DataFrame をそのまま使える)。
         最後の式は notebook のように値が表示される。/workspace は永続、
-        /workspace/outputs/ に保存したファイルは自動でチャットに添付される。ネットワーク不可。
+        /workspace/exports/ に保存したファイルは自動でチャットに添付される。ネットワーク不可。
 
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120)
         """
         return await self._exec_cell(
-            code,
-            timeout_s,
-            __user__,
-            __event_emitter__,
-            __chat_id__,
-            __message_id__,
-        )
+            code, timeout_s, __user__, __event_emitter__,
+            __chat_id__, __message_id__)
 
     async def run_python_once(
         self,
-        code: Code("python"),
+        code: PythonCode,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
-    ) -> Text:
+    ) -> str:
         """
         サーバーの隔離環境で Python コードを 1 回だけ実行する (状態を持たない使い捨て)。
         run_python と違い変数は残らないが、他の会話の状態から完全に独立して走らせたい
-        単発処理向け。/workspace は永続、outputs/ は自動添付。ネットワーク不可。
+        単発処理向け。/workspace は永続、exports/ は自動添付。ネットワーク不可。
 
         :param code: 実行する Python コード
         :param timeout_s: wall clock 秒数 (省略時 120)
         """
         return await self._exec(
-            "python",
-            code,
-            timeout_s,
-            __user__,
-            __event_emitter__,
-            __chat_id__,
-            __message_id__,
-        )
+            "python", code, timeout_s, __user__, __event_emitter__,
+            __chat_id__, __message_id__)
 
     async def run_shell(
         self,
-        command: Code("bash"),
+        command: ShellCommand,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
-    ) -> Text:
+    ) -> str:
         """
         サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
-        pandoc, python が利用可能。/workspace は run_python と共有で実行を跨いで永続。
-        成果物は /workspace/outputs/ に置くと自動でチャットに添付される。ネットワーク不可。
+        pandoc, ffmpeg / ffprobe, python が利用可能。/workspace は run_python と共有で実行を跨いで永続。
+        成果物は /workspace/exports/ に置くと自動でチャットに添付される。ネットワーク不可。
 
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120)
         """
         return await self._exec(
-            "shell",
-            command,
-            timeout_s,
-            __user__,
-            __event_emitter__,
-            __chat_id__,
-            __message_id__,
-        )
+            "shell", command, timeout_s, __user__, __event_emitter__,
+            __chat_id__, __message_id__)
 
     # =========================================================================
     # ファイル操作 utils
     # =========================================================================
-    async def import_chat_file(
+    async def send_to_workspace(
         self,
         filename: Optional[str] = None,
         file_id: Optional[str] = None,
@@ -436,12 +424,14 @@ class Tools:
         __metadata__: Optional[dict] = None,
     ) -> str:
         """
-        チャットの添付ファイルを sandbox の /workspace/inputs/ に取り込む。
-        run_python / run_shell で処理する前に呼ぶこと。
+        チャットの添付ファイルを sandbox の /workspace/imports/ にコピーする。
+        **sandbox 内 (run_python / run_shell) で中身を扱う時だけ**呼ぶこと。
+        他のツールは file_id から直接読むので、その前段としては不要
+        (このコピーはファイルを「読めるようにする」汎用手段ではない)。
 
         :param filename: 対象ファイル名 (部分一致)。file_id 未指定時に添付一覧から探す。省略時は全件。
-        :param file_id: 取り込むファイルの file_id。large-file-gate 等で本文が context から
-            外れた添付も、この file_id 指定なら直接取得できる (添付一覧に無くてもよい)。
+        :param file_id: 取り込むファイルの file_id。添付一覧に出ていないファイルでも
+            file_id が分かっていれば取り込める。
         """
         if Files is None:
             return "ERROR: nucllei の内部 API を解決できません。"
@@ -454,9 +444,7 @@ class Tools:
             targets = [
                 (fid, fname)
                 for fid, fname in _iter_context_files(__files__, __metadata__)
-                if not (
-                    filename and (not fname or filename.lower() not in fname.lower())
-                )
+                if not (filename and (not fname or filename.lower() not in fname.lower()))
             ]
 
         report = []
@@ -467,31 +455,78 @@ class Tools:
                 continue
             # 所有者チェック: file_id 直指定で他ユーザーのファイルを取り込ませない
             owner = getattr(rec, "user_id", None)
-            if owner and owner != __user__["id"]:
+            if owner != __user__["id"]:
                 report.append(f"- {fname or fid}: アクセス権が無い (skip)")
                 continue
             try:
                 local_path = Storage.get_file(rec.path)
                 data = open(local_path, "rb").read()
                 name = os.path.basename(fname or rec.filename)
-                await self._post(
-                    "/files/write",
-                    {
-                        "user_id": __user__["id"],
-                        "path": f"inputs/{name}",
-                        "b64": base64.b64encode(data).decode(),
-                    },
-                    timeout_s=120,
-                )
-                report.append(
-                    f"- {name} ({_human_size(len(data))}) → /workspace/inputs/{name}"
-                )
+                await self._post("/files/write", {
+                    "user_id": __user__["id"],
+                    "path": f"imports/{name}",
+                    "b64": base64.b64encode(data).decode(),
+                }, timeout_s=120)
+                report.append(f"- {name} ({_human_size(len(data))}) → /workspace/imports/{name}")
             except Exception as e:
                 report.append(f"- {fname or fid}: 取り込み失敗 {e!r}")
 
         if not report:
             return "取り込み対象の添付ファイルがありませんでした。"
         return "取り込み結果:\n" + "\n".join(report)
+
+    async def write_file(
+        self,
+        path: str,
+        content: str,
+        __user__: Optional[dict] = None,
+    ) -> str:
+        """
+        テキストファイルを sandbox の /workspace に直接書く。HTML・Markdown・CSV・
+        テンプレート・設定ファイルなど、本文をそのまま渡したいときに使う。
+        run_python の文字列や run_shell のヒアドキュメントに本文を埋め込むと
+        クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
+        既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
+
+        :param path: 書き込み先 (workspace 相対。例: report.html, work/index.html)
+        :param content: ファイルの中身 (テキストそのまま)
+        """
+        if not __user__ or not __user__.get("id"):
+            return "ERROR: ユーザー情報が取得できませんでした。"
+
+        rel = (path or "").strip().lstrip("/")
+        if not rel:
+            return "ERROR: path が空です。"
+        if any(part in ("..", "") for part in rel.split("/")):
+            return f"ERROR: 不正な path です: {path!r}"
+
+        data = content.encode("utf-8")
+        if len(data) > WRITE_FILE_LIMIT:
+            return (
+                f"ERROR: 内容が大きすぎます ({_human_size(len(data))} > "
+                f"{_human_size(WRITE_FILE_LIMIT)})。分割して複数回に分けるか、"
+                "run_python で生成してください。"
+            )
+
+        try:
+            await self._post("/files/write", {
+                "user_id": __user__["id"],
+                "path": rel,
+                "b64": base64.b64encode(data).decode(),
+            }, timeout_s=60)
+        except Exception as e:
+            return f"ERROR: sandbox に接続できません: {e!r}"
+
+        msg = f"/workspace/{rel} に書き込みました ({_human_size(len(data))})。"
+        if rel.startswith("exports/"):
+            # exports/ の自動添付は「実行の後始末」で回収する仕組みなので、
+            # 実行を伴わない write_file では発火しない (取りこぼしの typical case)
+            msg += (
+                " なお exports/ への自動添付は run_python / run_shell の実行後に"
+                "回収する仕組みのため、この書き込みだけでは添付されません。"
+                "ユーザーに渡すなら fetch_from_workspace を呼んでください。"
+            )
+        return msg
 
     async def list_workspace(
         self,
@@ -506,22 +541,18 @@ class Tools:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         try:
-            res = await self._post(
-                "/files/list",
-                {
-                    "user_id": __user__["id"],
-                    "path": path,
-                },
-                timeout_s=30,
-            )
+            res = await self._post("/files/list", {
+                "user_id": __user__["id"], "path": path,
+            }, timeout_s=30)
         except Exception as e:
             return f"ERROR: sandbox に接続できません: {e!r}"
         entries = res.get("entries", [])
         if not entries:
             return f"/workspace/{path} は空です。"
-        return "\n".join(f"- {e['path']} ({_human_size(e['size'])})" for e in entries)
+        return "\n".join(
+            f"- {e['path']} ({_human_size(e['size'])})" for e in entries)
 
-    async def export_workspace_file(
+    async def fetch_from_workspace(
         self,
         path: str,
         __user__: Optional[dict] = None,
@@ -531,40 +562,34 @@ class Tools:
     ) -> str:
         """
         /workspace 配下の任意のファイルをチャットに添付してユーザーに渡す
-        (outputs/ 以外に作ったファイルや過去実行の成果物を渡すときに使う)。
+        (exports/ 以外に作ったファイルや過去実行の成果物を渡すときに使う)。
 
-        :param path: 対象ファイル (workspace 相対、例: inputs/converted.xlsx)
+        :param path: 対象ファイル (workspace 相対、例: imports/converted.xlsx)
         """
         if Files is None:
             return "ERROR: nucllei の内部 API を解決できません。"
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         try:
-            res = await self._post(
-                "/files/read",
-                {
-                    "user_id": __user__["id"],
-                    "path": path,
-                },
-                timeout_s=120,
-            )
+            res = await self._post("/files/read", {
+                "user_id": __user__["id"], "path": path,
+            }, timeout_s=120)
         except Exception as e:
             return f"ERROR: 読み出しに失敗: {e!r}"
         try:
             att = _register_bytes_file(
-                __user__["id"],
-                os.path.basename(res["name"]),
-                base64.b64decode(res["b64"]),
-            )
+                __user__["id"], os.path.basename(res["name"]),
+                base64.b64decode(res["b64"]))
         except Exception as e:
-            return f"ERROR: OWUI Files への登録に失敗: {e!r}"
+            return f"ERROR: Files への登録に失敗: {e!r}"
         await self._persist_and_emit_files(
-            [att], __chat_id__, __message_id__, __event_emitter__
-        )
+            [att], __chat_id__, __message_id__, __event_emitter__)
         line = f"{path} ({_human_size(res['size'])}) をチャットに添付しました。file_id={att['id']}"
-        if (att["file"]["meta"]["content_type"] or "").startswith("image/"):
-            line += (
-                f"\n画像なので本文に ![{res['name']}](/api/v1/files/{att['id']}/content)"
-                f" と書くと表示される。"
-            )
+        # #88: 画像/音声/動画は display で枠下に自動表示(exports/ 自動回収と同じ経路)。
+        # gallery 添付は常時付くので未対応 nucllei でも辿り着ける → 貼り付け指示は出さない。
+        md = _display_markdown(res["name"], att["id"], att["file"]["meta"]["content_type"])
+        if md:
+            if _tool_display is not None:
+                _tool_display(md)
+            line += "\nユーザーに提示済み(本文への再掲・貼り付けは不要)。"
         return line
