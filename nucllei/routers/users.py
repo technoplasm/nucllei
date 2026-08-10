@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from nucllei.utils.auth import get_admin_user, get_password_hash, get_verified_user
 from nucllei.utils.access_control import get_permissions
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 

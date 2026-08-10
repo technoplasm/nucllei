@@ -25,7 +25,6 @@ from test.util import model_frames as mf
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
 
-
 ####################################
 # 反復上限の env パース(既定 30 / -1 無制限 / 不正値は既定)
 ####################################

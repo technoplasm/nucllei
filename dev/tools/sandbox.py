@@ -136,8 +136,11 @@ def _iter_context_files(__files__, __metadata__):
     for f in raw or []:
         inner = f.get("file", {}) if isinstance(f, dict) else {}
         fid = (f.get("id") if isinstance(f, dict) else None) or inner.get("id")
-        fname = (f.get("name") if isinstance(f, dict) else None) \
-            or inner.get("filename") or (inner.get("meta") or {}).get("name")
+        fname = (
+            (f.get("name") if isinstance(f, dict) else None)
+            or inner.get("filename")
+            or (inner.get("meta") or {}).get("name")
+        )
         if fid:
             yield fid, fname
 
@@ -150,12 +153,15 @@ class Tools:
         sandbox_url: str = Field(
             default=SANDBOX_URL,
             description="sandbox サービスの URL。既定は nucllei の env (SANDBOX_URL) を流用し、"
-            "無ければ docker network 内の既定")
+            "無ければ docker network 内の既定",
+        )
         default_timeout_s: int = Field(
-            default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)")
+            default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)"
+        )
         max_output_chars: int = Field(
             default=10_000,
-            description="stdout/stderr を tool result に載せる上限 (文字)。超過は head+tail 切り詰め。0 = 無効")
+            description="stdout/stderr を tool result に載せる上限 (文字)。超過は head+tail 切り詰め。0 = 無効",
+        )
         debug: bool = Field(default=False, description="詳細ログ")
 
     def __init__(self):
@@ -175,7 +181,11 @@ class Tools:
 
     # ---- exports/ の回収 → Files 登録 + チャット添付 ---------------------------
     async def _persist_and_emit_files(
-        self, attachments, chat_id, message_id, __event_emitter__,
+        self,
+        attachments,
+        chat_id,
+        message_id,
+        __event_emitter__,
     ):
         """新規添付をメッセージに反映する。
         frontend は chat:message:files を message.files への「置換」として扱うため、
@@ -187,18 +197,27 @@ class Tools:
                 cur = Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
                 merged = list(cur.get("files") or []) + list(attachments)
                 Chats.upsert_message_to_chat_by_id_and_message_id(
-                    chat_id, message_id, {"files": merged},
+                    chat_id,
+                    message_id,
+                    {"files": merged},
                 )
             except Exception as e:
                 logger.error(f"[sandbox] persist failed: {e!r} (emit のみで継続)")
         if __event_emitter__:
-            await __event_emitter__({
-                "type": "chat:message:files",
-                "data": {"files": merged},
-            })
+            await __event_emitter__(
+                {
+                    "type": "chat:message:files",
+                    "data": {"files": merged},
+                }
+            )
 
     async def _register_exports(
-        self, user_id, exports, chat_id, message_id, __event_emitter__,
+        self,
+        user_id,
+        exports,
+        chat_id,
+        message_id,
+        __event_emitter__,
     ) -> list[str]:
         """sandbox の exports 差分を Files に登録・添付し、報告行を返す。"""
         lines = []
@@ -218,13 +237,16 @@ class Tools:
                 continue
             try:
                 att = _register_bytes_file(
-                    user_id, os.path.basename(name), base64.b64decode(out["b64"]))
+                    user_id, os.path.basename(name), base64.b64decode(out["b64"])
+                )
                 attachments.append(att)
                 line = f"- {name} ({_human_size(out['size'])}) file_id={att['id']}"
                 # #88: 画像/音声/動画は display チャネルで tool 枠下に自動表示(モデルの貼り付けに
                 # 依存しない)。gallery 添付は _persist_and_emit_files で常時付くので display 未対応
                 # nucllei でも辿り着ける → 本文への貼り付け指示は出さない(標準ガイダンスと矛盾させない)。
-                md = _display_markdown(name, att["id"], att["file"]["meta"]["content_type"])
+                md = _display_markdown(
+                    name, att["id"], att["file"]["meta"]["content_type"]
+                )
                 if md:
                     if _tool_display is not None:
                         _tool_display(md)
@@ -234,7 +256,8 @@ class Tools:
                 lines.append(f"- {name}: 登録失敗 {e!r}")
         if attachments:
             await self._persist_and_emit_files(
-                attachments, chat_id, message_id, __event_emitter__)
+                attachments, chat_id, message_id, __event_emitter__
+            )
         return lines
 
     def _truncate_output(self, text: str) -> str:
@@ -250,8 +273,7 @@ class Tools:
             text[:head]
             + f"\n⋮ [切り詰め: 全 {len(text)} 字中 先頭 {head} 字 + 末尾 {tail} 字のみ表示。"
             "全文が必要なら出力を /workspace のファイルに書き出し、"
-            "run_shell の rg / head / tail で部分参照すること]\n"
-            + text[-tail:]
+            "run_shell の rg / head / tail で部分参照すること]\n" + text[-tail:]
         )
 
     def _format_exec_result(self, res: dict, output_lines: list[str]) -> str:
@@ -261,25 +283,33 @@ class Tools:
         stdout = res.get("stdout", "")
         stderr = res.get("stderr", "")
         if stdout:
-            parts.append("--- stdout ---\n" + self._truncate_output(stdout.rstrip("\n")))
+            parts.append(
+                "--- stdout ---\n" + self._truncate_output(stdout.rstrip("\n"))
+            )
             if res.get("stdout_truncated"):
                 parts.append("(stdout はサーバー転送上限でも切り詰め)")
         if stderr:
-            parts.append("--- stderr ---\n" + self._truncate_output(stderr.rstrip("\n")))
+            parts.append(
+                "--- stderr ---\n" + self._truncate_output(stderr.rstrip("\n"))
+            )
             if res.get("stderr_truncated"):
                 parts.append("(stderr はサーバー転送上限でも切り詰め)")
         if not stdout and not stderr:
             parts.append("(出力なし)")
         if output_lines:
-            parts.append("--- 生成ファイル (exports/) — チャットに添付済み ---\n"
-                         + "\n".join(output_lines))
+            parts.append(
+                "--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                + "\n".join(output_lines)
+            )
         return "\n".join(parts)
 
     def _format_cell_result(self, res: dict, output_lines: list[str]) -> str:
         parts = []
         if res.get("session_reset"):
-            parts.append("※ 実行環境がリセットされ、以前の変数・import は失われています "
-                         "(必要なら定義し直してから続けてください)。")
+            parts.append(
+                "※ 実行環境がリセットされ、以前の変数・import は失われています "
+                "(必要なら定義し直してから続けてください)。"
+            )
         stdout = res.get("stdout", "")
         error = res.get("error")
         if res.get("timed_out"):
@@ -289,18 +319,28 @@ class Tools:
             if res.get("stdout_truncated"):
                 parts.append("(出力はサーバー転送上限でも切り詰め)")
         if error:
-            parts.append("--- エラー ---\n" + self._truncate_output(str(error).rstrip("\n")))
+            parts.append(
+                "--- エラー ---\n" + self._truncate_output(str(error).rstrip("\n"))
+            )
         if not stdout and not error and not res.get("timed_out"):
             parts.append("(出力なし)")
         if output_lines:
-            parts.append("--- 生成ファイル (exports/) — チャットに添付済み ---\n"
-                         + "\n".join(output_lines))
+            parts.append(
+                "--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                + "\n".join(output_lines)
+            )
         parts.append(f"({res.get('duration_s', 0)}s)")
         return "\n".join(parts)
 
     async def _exec(
-        self, lang, code, timeout_s, __user__, __event_emitter__,
-        __chat_id__, __message_id__,
+        self,
+        lang,
+        code,
+        timeout_s,
+        __user__,
+        __event_emitter__,
+        __chat_id__,
+        __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
@@ -311,24 +351,34 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
         }
         try:
-            res = await self._post(
-                "/exec", payload, payload["timeout_s"] + 30)
+            res = await self._post("/exec", payload, payload["timeout_s"] + 30)
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
         output_lines = await self._register_exports(
-            __user__["id"], res.get("exports", []),
-            __chat_id__, __message_id__, __event_emitter__)
+            __user__["id"],
+            res.get("exports", []),
+            __chat_id__,
+            __message_id__,
+            __event_emitter__,
+        )
         return self._format_exec_result(res, output_lines)
 
     async def _exec_cell(
-        self, code, timeout_s, __user__, __event_emitter__,
-        __chat_id__, __message_id__,
+        self,
+        code,
+        timeout_s,
+        __user__,
+        __event_emitter__,
+        __chat_id__,
+        __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         if not __chat_id__:
-            return ("ERROR: chat_id が取得できず状態付き実行ができません。"
-                    "単発実行が必要なら run_python_once を使ってください。")
+            return (
+                "ERROR: chat_id が取得できず状態付き実行ができません。"
+                "単発実行が必要なら run_python_once を使ってください。"
+            )
         payload = {
             "user_id": __user__["id"],
             "chat_id": __chat_id__,
@@ -336,13 +386,16 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
         }
         try:
-            res = await self._post(
-                "/exec_cell", payload, payload["timeout_s"] + 30)
+            res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
         except Exception as e:
             return f"ERROR: sandbox 実行に失敗: {e!r}"
         output_lines = await self._register_exports(
-            __user__["id"], res.get("exports", []),
-            __chat_id__, __message_id__, __event_emitter__)
+            __user__["id"],
+            res.get("exports", []),
+            __chat_id__,
+            __message_id__,
+            __event_emitter__,
+        )
         return self._format_cell_result(res, output_lines)
 
     # =========================================================================
@@ -367,8 +420,8 @@ class Tools:
         :param timeout_s: このセルの wall clock 秒数 (省略時 120)
         """
         return await self._exec_cell(
-            code, timeout_s, __user__, __event_emitter__,
-            __chat_id__, __message_id__)
+            code, timeout_s, __user__, __event_emitter__, __chat_id__, __message_id__
+        )
 
     async def run_python_once(
         self,
@@ -388,8 +441,14 @@ class Tools:
         :param timeout_s: wall clock 秒数 (省略時 120)
         """
         return await self._exec(
-            "python", code, timeout_s, __user__, __event_emitter__,
-            __chat_id__, __message_id__)
+            "python",
+            code,
+            timeout_s,
+            __user__,
+            __event_emitter__,
+            __chat_id__,
+            __message_id__,
+        )
 
     async def run_shell(
         self,
@@ -409,8 +468,14 @@ class Tools:
         :param timeout_s: wall clock 秒数 (省略時 120)
         """
         return await self._exec(
-            "shell", command, timeout_s, __user__, __event_emitter__,
-            __chat_id__, __message_id__)
+            "shell",
+            command,
+            timeout_s,
+            __user__,
+            __event_emitter__,
+            __chat_id__,
+            __message_id__,
+        )
 
     # =========================================================================
     # ファイル操作 utils
@@ -444,7 +509,9 @@ class Tools:
             targets = [
                 (fid, fname)
                 for fid, fname in _iter_context_files(__files__, __metadata__)
-                if not (filename and (not fname or filename.lower() not in fname.lower()))
+                if not (
+                    filename and (not fname or filename.lower() not in fname.lower())
+                )
             ]
 
         report = []
@@ -462,12 +529,18 @@ class Tools:
                 local_path = Storage.get_file(rec.path)
                 data = open(local_path, "rb").read()
                 name = os.path.basename(fname or rec.filename)
-                await self._post("/files/write", {
-                    "user_id": __user__["id"],
-                    "path": f"imports/{name}",
-                    "b64": base64.b64encode(data).decode(),
-                }, timeout_s=120)
-                report.append(f"- {name} ({_human_size(len(data))}) → /workspace/imports/{name}")
+                await self._post(
+                    "/files/write",
+                    {
+                        "user_id": __user__["id"],
+                        "path": f"imports/{name}",
+                        "b64": base64.b64encode(data).decode(),
+                    },
+                    timeout_s=120,
+                )
+                report.append(
+                    f"- {name} ({_human_size(len(data))}) → /workspace/imports/{name}"
+                )
             except Exception as e:
                 report.append(f"- {fname or fid}: 取り込み失敗 {e!r}")
 
@@ -509,11 +582,15 @@ class Tools:
             )
 
         try:
-            await self._post("/files/write", {
-                "user_id": __user__["id"],
-                "path": rel,
-                "b64": base64.b64encode(data).decode(),
-            }, timeout_s=60)
+            await self._post(
+                "/files/write",
+                {
+                    "user_id": __user__["id"],
+                    "path": rel,
+                    "b64": base64.b64encode(data).decode(),
+                },
+                timeout_s=60,
+            )
         except Exception as e:
             return f"ERROR: sandbox に接続できません: {e!r}"
 
@@ -541,16 +618,20 @@ class Tools:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         try:
-            res = await self._post("/files/list", {
-                "user_id": __user__["id"], "path": path,
-            }, timeout_s=30)
+            res = await self._post(
+                "/files/list",
+                {
+                    "user_id": __user__["id"],
+                    "path": path,
+                },
+                timeout_s=30,
+            )
         except Exception as e:
             return f"ERROR: sandbox に接続できません: {e!r}"
         entries = res.get("entries", [])
         if not entries:
             return f"/workspace/{path} は空です。"
-        return "\n".join(
-            f"- {e['path']} ({_human_size(e['size'])})" for e in entries)
+        return "\n".join(f"- {e['path']} ({_human_size(e['size'])})" for e in entries)
 
     async def fetch_from_workspace(
         self,
@@ -571,23 +652,33 @@ class Tools:
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         try:
-            res = await self._post("/files/read", {
-                "user_id": __user__["id"], "path": path,
-            }, timeout_s=120)
+            res = await self._post(
+                "/files/read",
+                {
+                    "user_id": __user__["id"],
+                    "path": path,
+                },
+                timeout_s=120,
+            )
         except Exception as e:
             return f"ERROR: 読み出しに失敗: {e!r}"
         try:
             att = _register_bytes_file(
-                __user__["id"], os.path.basename(res["name"]),
-                base64.b64decode(res["b64"]))
+                __user__["id"],
+                os.path.basename(res["name"]),
+                base64.b64decode(res["b64"]),
+            )
         except Exception as e:
             return f"ERROR: Files への登録に失敗: {e!r}"
         await self._persist_and_emit_files(
-            [att], __chat_id__, __message_id__, __event_emitter__)
+            [att], __chat_id__, __message_id__, __event_emitter__
+        )
         line = f"{path} ({_human_size(res['size'])}) をチャットに添付しました。file_id={att['id']}"
         # #88: 画像/音声/動画は display で枠下に自動表示(exports/ 自動回収と同じ経路)。
         # gallery 添付は常時付くので未対応 nucllei でも辿り着ける → 貼り付け指示は出さない。
-        md = _display_markdown(res["name"], att["id"], att["file"]["meta"]["content_type"])
+        md = _display_markdown(
+            res["name"], att["id"], att["file"]["meta"]["content_type"]
+        )
         if md:
             if _tool_display is not None:
                 _tool_display(md)

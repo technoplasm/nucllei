@@ -20,7 +20,6 @@ from alembic import op
 import sqlalchemy as sa
 import nucllei.internal.db
 
-
 # revision identifiers, used by Alembic.
 revision: str = "c33997f844fc"
 down_revision: Union[str, None] = None

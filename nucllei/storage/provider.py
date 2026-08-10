@@ -32,7 +32,6 @@ from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 from nucllei.env import SRC_LOG_LEVELS
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 

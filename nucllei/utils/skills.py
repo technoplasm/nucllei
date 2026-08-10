@@ -13,7 +13,6 @@ from nucllei.models.skills import Skills, normalize_command
 from nucllei.utils.access_control import has_access
 from nucllei.utils.task import prompt_template
 
-
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 

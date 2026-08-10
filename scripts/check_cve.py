@@ -270,8 +270,7 @@ def main() -> int:
         if title:
             print(f"                   {title[:94]}")
 
-    print(
-        """
+    print("""
   「修正版があるもの」= pyproject.toml / uv.lock / package.json を上げれば消せる分。
   それ以外は上流 (base image・親パッケージ) が直すまで残る。**CVE は昇格の条件に
   していない**ので、件数が出ていても配布は止まらない (depot README「CVE は関所に
@@ -282,8 +281,7 @@ def main() -> int:
     全部見る      : CVE_ALL=1 uv run task cve
     深刻度を変える: CVE_SEVERITY=CRITICAL uv run task cve
     版を指定      : CVE_TAG=v20260809-01 uv run task cve
-"""
-    )
+""")
     return 0
 
 

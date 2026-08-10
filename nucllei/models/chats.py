@@ -644,39 +644,29 @@ class ChatTable:
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
-                            """
+                    (Chat.title.ilike(f"%{search_text}%") | text("""
                             EXISTS (
                                 SELECT 1 
                                 FROM json_each(Chat.chat, '$.messages') AS message 
                                 WHERE LOWER(message.value->>'content') LIKE '%' || :search_text || '%'
                             )
-                            """
-                        )
-                    ).params(search_text=search_text)
+                            """)).params(  # Case-insensitive search in title
+                        search_text=search_text
+                    )
                 )
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
-                            """
+                    (Chat.title.ilike(f"%{search_text}%") | text("""
                             EXISTS (
                                 SELECT 1
                                 FROM json_array_elements(Chat.chat->'messages') AS message
                                 WHERE LOWER(message->>'content') LIKE '%' || :search_text || '%'
                             )
-                            """
-                        )
-                    ).params(search_text=search_text)
+                            """)).params(  # Case-insensitive search in title
+                        search_text=search_text
+                    )
                 )
             else:
                 raise NotImplementedError(
@@ -780,29 +770,21 @@ class ChatTable:
             if model:
                 dialect_name = db.bind.dialect.name
                 if dialect_name == "sqlite":
-                    query = query.filter(
-                        text(
-                            """
+                    query = query.filter(text("""
                             EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.chat, '$.models') AS m
                                 WHERE m.value = :model
                             )
-                            """
-                        ).params(model=model)
-                    )
+                            """).params(model=model))
                 elif dialect_name == "postgresql":
-                    query = query.filter(
-                        text(
-                            """
+                    query = query.filter(text("""
                             EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.chat->'models') AS m(value)
                                 WHERE m.value = :model
                             )
-                            """
-                        ).params(model=model)
-                    )
+                            """).params(model=model))
                 else:
                     raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
 
@@ -853,27 +835,19 @@ class ChatTable:
         with get_db() as db:
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
-                rows = db.execute(
-                    text(
-                        """
+                rows = db.execute(text("""
                         SELECT m.value AS model, COUNT(*) AS chat_count
                         FROM chat, json_each(chat.chat, '$.models') AS m
                         GROUP BY m.value
                         ORDER BY chat_count DESC, model ASC
-                        """
-                    )
-                ).all()
+                        """)).all()
             elif dialect_name == "postgresql":
-                rows = db.execute(
-                    text(
-                        """
+                rows = db.execute(text("""
                         SELECT m.value AS model, COUNT(*) AS chat_count
                         FROM chat, json_array_elements_text(chat.chat->'models') AS m(value)
                         GROUP BY m.value
                         ORDER BY chat_count DESC, model ASC
-                        """
-                    )
-                ).all()
+                        """)).all()
             else:
                 raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
             return [{"model": row.model, "chat_count": row.chat_count} for row in rows]

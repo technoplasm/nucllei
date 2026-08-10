@@ -19,7 +19,6 @@ from nucllei.utils.access_control import has_access
 from nucllei.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 from nucllei.models.users import UserModel
 
-
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])

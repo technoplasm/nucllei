@@ -12,7 +12,6 @@ from typing import List
 
 from nucllei.utils.tool_render import Code, Markdown, Text
 
-
 # =========================================================================
 # サンプルビルダ(モジュール関数)
 # 注: tool ローダは class Tools の「dunder でないメソッド」をすべて tool spec に

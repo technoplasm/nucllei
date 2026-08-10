@@ -4,7 +4,6 @@ import time
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-
 log = logging.getLogger(__name__)
 
 

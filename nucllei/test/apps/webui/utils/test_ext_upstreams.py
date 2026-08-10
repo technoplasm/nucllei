@@ -13,7 +13,6 @@ import httpx
 from nucllei.env import parse_ext_upstreams
 from nucllei.utils.ext_upstreams import _NoCookies, has_path_traversal
 
-
 # ---- parse_ext_upstreams ----
 
 

@@ -43,7 +43,6 @@ from nucllei.utils.misc import (
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
 

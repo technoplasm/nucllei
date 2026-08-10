@@ -20,7 +20,6 @@ from nucllei.config import DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE
 from nucllei.env import SRC_LOG_LEVELS, BYPASS_MODEL_ACCESS_CONTROL
 from nucllei.utils.models import check_model_access
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 

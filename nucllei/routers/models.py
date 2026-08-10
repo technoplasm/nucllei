@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
 
-
 router = APIRouter()
 
 

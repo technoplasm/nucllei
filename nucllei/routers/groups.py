@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.env import SRC_LOG_LEVELS
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 

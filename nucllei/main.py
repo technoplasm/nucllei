@@ -220,7 +220,6 @@ from nucllei.tasks import (
     stop_task,
 )  # Import from tasks.py
 
-
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -255,8 +254,7 @@ class CacheStaticFiles(StaticFiles):
         return response
 
 
-print(
-    rf"""
+print(rf"""
 ███╗   ██╗██╗   ██╗ ██████╗██╗     ██╗     ███████╗██╗
 ████╗  ██║██║   ██║██╔════╝██║     ██║     ██╔════╝██║
 ██╔██╗ ██║██║   ██║██║     ██║     ██║     █████╗  ██║
@@ -267,8 +265,7 @@ print(
 
 Nucllei {VERSION}
 Forked from Open WebUI v0.6.5
-"""
-)
+""")
 
 
 @asynccontextmanager

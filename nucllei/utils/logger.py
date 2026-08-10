@@ -7,7 +7,6 @@ from loguru import logger
 
 from nucllei.env import GLOBAL_LOG_LEVEL
 
-
 if TYPE_CHECKING:
     from loguru import Record
 

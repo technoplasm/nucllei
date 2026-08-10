@@ -45,14 +45,12 @@ def send_prompt(page, text):
 
 
 def response_text_length(page):
-    return page.evaluate(
-        """() => {
+    return page.evaluate("""() => {
             const nodes = document.querySelectorAll('.chat-assistant, [id^="message-"]');
             let total = 0;
             for (const n of nodes) total += (n.innerText || '').length;
             return total;
-        }"""
-    )
+        }""")
 
 
 def wait_done(page, timeout_s=180):

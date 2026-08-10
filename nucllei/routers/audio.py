@@ -40,7 +40,6 @@ from nucllei.env import (
 )
 from nucllei.utils.audio import SPEECH_CACHE_DIR, synthesize_speech
 
-
 router = APIRouter()
 
 # Constants

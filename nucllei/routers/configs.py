@@ -10,7 +10,6 @@ from nucllei.models.functions import Functions
 
 from nucllei.utils.tools import get_tool_server_data, get_tool_servers_data
 
-
 router = APIRouter()
 
 

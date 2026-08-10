@@ -38,7 +38,6 @@ from nucllei.utils.payload import (
 )
 from nucllei.utils.sse import sse_line, sse_raw
 
-
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])

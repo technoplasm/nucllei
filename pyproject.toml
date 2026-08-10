@@ -44,7 +44,7 @@ dependencies = [
 
     # runtime 依存(dev ツールではない): tool/function エディタの整形端点
     # POST /utils/code/format が black.format_str を呼ぶ。CI の整形ゲートも同じピン。
-    "black==25.1.0",
+    "black==26.3.1",
 
     "openai",
     "anthropic",

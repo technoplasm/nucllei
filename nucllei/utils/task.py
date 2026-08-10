@@ -9,7 +9,6 @@ from nucllei.utils.misc import get_last_user_message, get_messages_content
 
 from nucllei.env import SRC_LOG_LEVELS
 
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
