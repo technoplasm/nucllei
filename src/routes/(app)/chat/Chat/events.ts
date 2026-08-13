@@ -84,7 +84,10 @@ export class ChatEvents {
 	// BE が速いときの適用がレンダリング律速で滞留する — 生成完了後も「準備中」の
 	// まま固まって見える実害)。副作用が非同期のイベント(done の completed 経路・
 	// chat:title 等)だけ Promise を返し、consumeCompletionStream が順序を保って待つ。
-	chatEventHandler = (envelope: CompletionEnvelope, context: StreamContext): void | Promise<void> => {
+	chatEventHandler = (
+		envelope: CompletionEnvelope,
+		context: StreamContext
+	): void | Promise<void> => {
 		const messageId = envelope.message_id;
 		if (envelope.chat_id !== get(chatId) || !messageId) {
 			return;
