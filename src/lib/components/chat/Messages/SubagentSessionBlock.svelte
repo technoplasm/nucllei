@@ -19,6 +19,7 @@
 
 	import { chatId, chats, currentChatPage, models } from '$lib/stores';
 	import { requestSubagentResume } from '$lib/stores/subagent-resume.svelte';
+	import { removeBackgroundExec } from '$lib/stores/background-execs.svelte';
 	import { getChatById, cloneChatById, getChatList } from '$lib/apis/chats';
 	import { getTaskIdsByChatId, stopTask } from '$lib/apis';
 	import {
@@ -146,6 +147,8 @@
 		unregisterChatHandler(sessionId, envelopeHandler);
 		running = false;
 		stopping = false;
+		// #110: live done の即時検知 — バックグラウンドチップから次 tick を待たず落とす
+		removeBackgroundExec(sessionId);
 		// 確定状態(persisted usage / done)へ置換
 		await fetchChat();
 		markSettled();
@@ -212,6 +215,8 @@
 				}
 			} else {
 				markSettled();
+				// #110: 完走済みならバックグラウンドチップからも落とす(未登録なら no-op)
+				removeBackgroundExec(sessionId);
 				// #109: マウント時点で既に完走済み(折りたたみ中に子が終わっていた等)。
 				// spawn 即返し結果なら done 検知として親ターンの再開を要求する — 回収済みの
 				// 古い履歴での再検知は Chat.svelte が isSubagentResumeHandled で drop する

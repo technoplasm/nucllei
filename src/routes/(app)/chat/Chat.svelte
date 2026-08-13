@@ -42,6 +42,11 @@
 	import { clearChatProgress } from '$lib/stores/tool-progress.svelte';
 	import { clearChatChildren, refreshChatChildren } from '$lib/stores/chat-children.svelte';
 	import {
+		clearBackgroundExecs,
+		getBackgroundExecs,
+		setBackgroundExecs
+	} from '$lib/stores/background-execs.svelte';
+	import {
 		buildSubagentResumeMessage,
 		isSubagentResumeHandled,
 		isSubagentResumeRequested,
@@ -239,23 +244,36 @@
 		if (!targetChatId || loading || notFound || isAgentSession) {
 			return;
 		}
-		// enqueue 済み(requested)と処理済み(履歴に定型文 or 回収済み結果)は照会しない
-		const pending = listRunningSubagentSpawns(session.history).filter(
-			(sessionId) =>
-				!isSubagentResumeRequested(sessionId) &&
-				!isSubagentResumeHandled(session.history, sessionId)
+		// 処理済み(履歴に定型文 or 回収済み結果)は照会しない。resume enqueue 済み
+		// (requested)は enqueue こそしないが照会はする — 検知ゲートと表示は別で、
+		// task が生きている限りバックグラウンドチップ(#110)には出し続ける
+		const spawned = listRunningSubagentSpawns(session.history).filter(
+			(sessionId) => !isSubagentResumeHandled(session.history, sessionId)
 		);
-		for (const sessionId of pending) {
-			// fetch 失敗(ネットワーク断等)はこの tick では判断しない — 次 tick で再照会
+		const currentIds = new Set(getBackgroundExecs(targetChatId).map((entry) => entry.sessionId));
+		const runningIds: string[] = [];
+		for (const sessionId of spawned) {
 			const taskRes = await getTaskIdsByChatId(sessionId).catch(() => null);
 			// fetch 中に chat が切り替わっていたら破棄
 			if ($chatId !== targetChatId) {
 				return;
 			}
-			if (taskRes && (taskRes.task_ids ?? []).length === 0) {
+			if (!taskRes) {
+				// fetch 失敗(ネットワーク断等)はこの tick では判断しない — 次 tick で
+				// 再照会。表示は現状維持(チップを瞬断でちらつかせない)
+				if (currentIds.has(sessionId)) {
+					runningIds.push(sessionId);
+				}
+				continue;
+			}
+			if ((taskRes.task_ids ?? []).length > 0) {
+				runningIds.push(sessionId);
+			} else if (!isSubagentResumeRequested(sessionId)) {
 				requestSubagentResume(targetChatId, sessionId);
 			}
 		}
+		// tick の全量差し替え(走行中の増減がここで収束する)
+		setBackgroundExecs(targetChatId, runningIds);
 	};
 
 	$effect(() => {
@@ -264,7 +282,9 @@
 		}
 		// chat 切替・unmount は effect teardown が確実に止める(agent session の
 		// 観測ポーリングと同じ作法)。tick 側が $chatId / 履歴を都度読むので
-		// interval は張りっぱなしでよい
+		// interval は張りっぱなしでよい。初回 tick は即時に打つ — チャット読込直後の
+		// バックグラウンドチップ表示を 5 秒待たせない
+		untrack(() => void pollBackgroundSubagentSpawns());
 		const interval = window.setInterval(
 			() => void pollBackgroundSubagentSpawns(),
 			SUBAGENT_SPAWN_POLL_MS
@@ -565,6 +585,8 @@
 		isAgentSession = false;
 		parentChatId = null;
 		clearChatChildren();
+		// llens(#110): 前 chat のバックグラウンドチップを持ち越さない
+		clearBackgroundExecs();
 
 		if ($page.url.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
@@ -694,10 +716,11 @@
 			}
 		}
 
-		// 取得失敗(notFound 行き)。前のチャットの tree を残さない
+		// 取得失敗(notFound 行き)。前のチャットの tree もバックグラウンドチップも残さない
 		isAgentSession = false;
 		parentChatId = null;
 		clearChatChildren();
+		clearBackgroundExecs();
 	};
 
 	// llens(#107 P3): /c/ 観測モードの追いつきポーリング。loadChat はロード時点の走行
