@@ -681,6 +681,15 @@ async def chat_completion(
                     detail="You do not have access to this chat.",
                 )
 
+            # llens(#107): agent session は HTTP 経由では read-only。書き手は
+            # 親 tool 実行の内部経路(utils.chat.generate_chat_completion 直呼び)
+            # のみで、router を通らないので自然に許可される。
+            if _existing_chat.kind == "agent":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="agent session is read-only via HTTP",
+                )
+
             # llens(#98): chat-wire の `id` は「これから生成されるアシスタント
             # メッセージ」の id でなければならない。検証しないと
             # upsert_message_to_chat_by_id_and_message_id が
@@ -808,6 +817,17 @@ generate_chat_completion = chat_completion
 async def chat_completed(
     request: Request, form_data: dict, user=Depends(get_verified_user)
 ):
+    # llens(#107): agent session への outlet 実行も HTTP 経由では拒否
+    # (try の外に置き、except が 400 へラップし直すのを避ける — 所有者検証と同型)
+    _chat_id = form_data.get("chat_id")
+    if _chat_id:
+        _chat = Chats.get_chat_by_id(_chat_id)
+        if _chat is not None and _chat.kind == "agent":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="agent session is read-only",
+            )
+
     try:
         form_data.pop("model_item", None)
 
@@ -823,6 +843,16 @@ async def chat_completed(
 async def chat_action(
     request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)
 ):
+    # llens(#107): agent session への action 実行も HTTP 経由では拒否
+    _chat_id = form_data.get("chat_id")
+    if _chat_id:
+        _chat = Chats.get_chat_by_id(_chat_id)
+        if _chat is not None and _chat.kind == "agent":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="agent session is read-only",
+            )
+
     try:
         form_data.pop("model_item", None)
 

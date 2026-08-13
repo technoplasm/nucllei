@@ -19,6 +19,7 @@ from nucllei.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import SRC_LOG_LEVELS
 from nucllei.storage.provider import Storage
+from nucllei.tasks import list_task_ids_by_chat_id, stop_task
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
@@ -140,6 +141,26 @@ def copy_chat_files_for_user(chat_json: dict, user) -> dict:
     return chat_json
 
 
+async def _stop_chat_tasks(chat_id: str) -> None:
+    """chat_id に紐づく走行中 completion タスクを stop する。"""
+    # stop_task の cleanup callback が chat_tasks を書き換えるためコピーを回す
+    for task_id in list(list_task_ids_by_chat_id(chat_id)):
+        try:
+            await stop_task(task_id)
+        except ValueError:
+            # 既に完走して registry から消えた task — stop の目的は達成済み
+            pass
+
+
+async def _stop_chat_tree_tasks(chat_id: str) -> None:
+    """llens(#107): chat 自身 + 全子孫 agent session の走行中タスクを stop する。
+
+    soft delete の前に呼び、消えた chat へ書き続ける孤児タスクを作らない。
+    """
+    for target_id in [chat_id, *Chats.get_descendant_chat_ids(chat_id)]:
+        await _stop_chat_tasks(target_id)
+
+
 ############################
 # GetChatList
 ############################
@@ -174,6 +195,11 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # llens(#107): soft delete の前に走行中タスクを stop。子 agent session の走行は
+    # 親タスクの cancel 連鎖(run_subagent 側)で止まるため、自 chat 分の stop で足りる
+    for chat in Chats.get_chats_by_user_id(user.id):
+        await _stop_chat_tasks(chat.id)
 
     result = Chats.delete_chats_by_user_id(user.id)
     return result
@@ -360,6 +386,7 @@ def _to_admin_chat_list_item(chat, user_name: Optional[str]) -> dict:
         "user_id": chat.user_id,
         "user_name": user_name,
         "title": chat.title,
+        "kind": chat.kind,
         "snippet": snippet[:ADMIN_CHAT_SNIPPET_LENGTH],
         "models": chat_json.get("models") or [],
         "message_count": len(messages),
@@ -396,6 +423,7 @@ async def get_admin_chat_list(
     updated_to: Optional[int] = Query(None, ge=0),
     deleted: str = Query("include"),
     shared: str = Query("include"),
+    kind: Optional[str] = Query(None),
     user=Depends(get_admin_user),
 ):
     """admin チャット閲覧ビュー(#19)用のページング一覧。
@@ -425,6 +453,11 @@ async def get_admin_chat_list(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="shared must be one of: include, exclude, only",
         )
+    if kind not in (None, "user", "agent"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="kind must be one of: user, agent",
+        )
 
     chats, total = Chats.get_chats_page_admin(
         user_id=user_id,
@@ -434,6 +467,7 @@ async def get_admin_chat_list(
         updated_to=updated_to,
         deleted=deleted,
         shared=shared,
+        kind=kind,
         order_by=order_by,
         direction=direction,
         limit=limit,
@@ -548,8 +582,47 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
 
 
 ############################
+# GetChildChatsById (#107)
+############################
+
+
+@router.get("/{id}/children")
+async def get_chat_children_by_id(id: str, user=Depends(get_verified_user)):
+    """llens(#107): 親チャット直下の agent session 一覧(サイドバー tree / 親画面用)。
+    所有者のみ(admin の他人チャット閲覧経路には載せない)。"""
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+
+    return [
+        {
+            "id": child.id,
+            "title": child.title,
+            "kind": child.kind,
+            "updated_at": child.updated_at,
+            "created_at": child.created_at,
+            "parent_message_id": child.parent_message_id,
+        }
+        for child in Chats.get_child_chats_by_parent_id(id, user.id)
+    ]
+
+
+############################
 # UpdateChatById
 ############################
+
+
+def _assert_not_agent_session(chat: Optional[ChatModel]):
+    """llens(#107): agent session(kind="agent")への HTTP 経由の変更操作を拒否する。
+    書き手は親 tool 実行の内部経路のみ。削除も親 chat 削除の cascade でのみ起きる。
+    clone はガードしない(= 「介入したいときは fork」— 生成物は kind="user")。"""
+    if chat is not None and chat.kind == "agent":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="agent session is read-only",
+        )
 
 
 def _assert_message_history_preserved(old_chat: dict, new_chat: dict):
@@ -595,6 +668,7 @@ async def update_chat_by_id(
 ):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
+        _assert_not_agent_session(chat)
         updated_chat = {**chat.chat, **form_data.chat}
         _assert_message_history_preserved(chat.chat, updated_chat)
         chat = Chats.update_chat_by_id(id, updated_chat)
@@ -620,6 +694,13 @@ async def update_chat_by_id(
 @router.delete("/{id}", response_model=bool)
 async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
     if user.role == "admin":
+        # llens(#107): agent session の直接削除は拒否(親削除の cascade でのみ消える)。
+        # soft delete の前に自身 + 子孫の走行中タスクを stop(孤児タスク防止)
+        chat = Chats.get_chat_by_id(id)
+        _assert_not_agent_session(chat)
+        if chat:
+            await _stop_chat_tree_tasks(id)
+
         result = Chats.delete_chat_by_id(id)
 
         return result
@@ -631,6 +712,13 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
+
+        # llens(#107): 所有チャットに限りタスク stop(所有外の chat id で他人の走行を
+        # 止められないよう、fetch が None ならガードも stop も踏まない)
+        chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+        _assert_not_agent_session(chat)
+        if chat:
+            await _stop_chat_tree_tasks(id)
 
         result = Chats.delete_chat_by_id_and_user_id(id, user.id)
         return result
@@ -661,6 +749,7 @@ async def get_pinned_status_by_id(id: str, user=Depends(get_verified_user)):
 async def pin_chat_by_id(id: str, user=Depends(get_verified_user)):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
+        _assert_not_agent_session(chat)
         chat = Chats.toggle_chat_pinned_by_id(id)
         return chat
     else:
@@ -751,6 +840,7 @@ async def clone_shared_chat_by_id(
 async def archive_chat_by_id(id: str, user=Depends(get_verified_user)):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
+        _assert_not_agent_session(chat)
         chat = Chats.toggle_chat_archive_by_id(id)
         return ChatResponse(**chat.model_dump())
     else:
@@ -778,6 +868,8 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
     # llens(#19): admin(ENABLE_ADMIN_CHAT_ACCESS 下)は他人のチャットも共有化できる
     chat = _get_chat_as_owner_or_admin(id, user)
     if chat:
+        # llens(#107): agent session は共有(/s/)不可。unshare は現状維持(無害)
+        _assert_not_agent_session(chat)
         if chat.share_id:
             shared_chat = Chats.update_shared_chat_by_chat_id(chat.id)
         else:

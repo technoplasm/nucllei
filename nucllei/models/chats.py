@@ -7,7 +7,7 @@ from nucllei.internal.db import Base, get_db
 from nucllei.env import SRC_LOG_LEVELS
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, JSON
 from sqlalchemy import cast, or_, func, text
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -40,6 +40,15 @@ class Chat(Base):
     # ユーザー向けクエリは deleted_at IS NULL で除外し、admin 一覧(#19)では見える。
     deleted_at = Column(BigInteger, nullable=True)
 
+    # llens(#107): agent session(サブエージェント実行チャット)の種別と親リンク。
+    # 一覧クエリが全てカラム述語で引けるよう meta(JSON)ではなくカラムに持つ
+    # (ChatImportForm が meta を丸ごと受けるため、meta 置きは kind 詐称を許す)。
+    # ユーザー向け一覧は kind="user" で agent を除外し、admin/監査系は除外しない。
+    kind = Column(String, nullable=False, server_default="user")  # "user" | "agent"
+    parent_chat_id = Column(String, nullable=True, index=True)
+    parent_message_id = Column(String, nullable=True)
+    depth = Column(Integer, nullable=False, server_default="0")  # user chat = 0
+
 
 class ChatModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -58,6 +67,11 @@ class ChatModel(BaseModel):
 
     meta: dict = {}
     deleted_at: Optional[int] = None
+
+    kind: str = "user"
+    parent_chat_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+    depth: int = 0
 
 
 ####################
@@ -120,7 +134,17 @@ def _chat_snippet(chat_json: Optional[dict], limit: int = 120) -> str:
 
 
 class ChatTable:
-    def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
+    def insert_new_chat(
+        self,
+        user_id: str,
+        form_data: ChatForm,
+        kind: str = "user",
+        parent_chat_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+        depth: int = 0,
+    ) -> Optional[ChatModel]:
+        # llens(#107): kind 以下は agent session(サブエージェント)の spawn 経路のみが
+        # 指定する。HTTP 経由の作成は既定値のまま = 常に kind="user"。
         with get_db() as db:
             id = str(uuid.uuid4())
             chat = ChatModel(
@@ -133,6 +157,10 @@ class ChatTable:
                         else "New Chat"
                     ),
                     "chat": form_data.chat,
+                    "kind": kind,
+                    "parent_chat_id": parent_chat_id,
+                    "parent_message_id": parent_message_id,
+                    "depth": depth,
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                 }
@@ -444,7 +472,7 @@ class ChatTable:
             with get_db() as db:
                 db.query(Chat).filter_by(user_id=user_id).filter(
                     Chat.deleted_at == None
-                ).update({"archived": True})
+                ).filter(Chat.kind == "user").update({"archived": True})
                 db.commit()
                 return True
         except Exception:
@@ -458,6 +486,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id, archived=True)
                 .filter(Chat.deleted_at == None)
+                .filter(Chat.kind == "user")
                 .order_by(Chat.updated_at.desc())
                 # .limit(limit).offset(skip)
                 .all()
@@ -474,6 +503,7 @@ class ChatTable:
         with get_db() as db:
             query = db.query(Chat).filter_by(user_id=user_id)
             query = query.filter(Chat.deleted_at == None)
+            query = query.filter(Chat.kind == "user")
             if not include_archived:
                 query = query.filter_by(archived=False)
 
@@ -498,6 +528,7 @@ class ChatTable:
             query = db.query(Chat).filter_by(user_id=user_id)
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter(Chat.deleted_at == None)
+            query = query.filter(Chat.kind == "user")
 
             if not include_archived:
                 query = query.filter_by(archived=False)
@@ -548,6 +579,20 @@ class ChatTable:
         except Exception:
             return None
 
+    def get_chat_kind_and_depth_by_id(self, id: str) -> Optional[tuple]:
+        """llens(#107): id → (kind, depth) の軽量 lookup(chat JSON を運ばない)。
+
+        mount 経路(build_run_subagent_tool)の depth 判定用 — get_chat_by_id は
+        chat JSON 全体(MB 級になりうる)を運ぶため使わない。存在・deleted の
+        権威判定は callable 側の実行時再チェック(get_chat_by_id)が持つ。
+        """
+        try:
+            with get_db() as db:
+                row = db.query(Chat.kind, Chat.depth).filter_by(id=id).first()
+                return (row[0], row[1]) if row else None
+        except Exception:
+            return None
+
     def get_chat_by_share_id(self, id: str) -> Optional[ChatModel]:
         try:
             with get_db() as db:
@@ -590,6 +635,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id)
                 .filter(Chat.deleted_at == None)
+                .filter(Chat.kind == "user")
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -600,6 +646,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id, pinned=True, archived=False)
                 .filter(Chat.deleted_at == None)
+                .filter(Chat.kind == "user")
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
@@ -610,9 +657,48 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id, archived=True)
                 .filter(Chat.deleted_at == None)
+                .filter(Chat.kind == "user")
                 .order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
+
+    def get_child_chats_by_parent_id(
+        self, parent_chat_id: str, user_id: str
+    ) -> list[ChatModel]:
+        """llens(#107): 親チャット直下の agent session 一覧(サイドバー tree / 親画面用)。"""
+        with get_db() as db:
+            all_chats = (
+                db.query(Chat)
+                .filter_by(parent_chat_id=parent_chat_id, user_id=user_id)
+                .filter(Chat.deleted_at == None)
+                .order_by(Chat.updated_at.desc())
+                .all()
+            )
+            return [ChatModel.model_validate(chat) for chat in all_chats]
+
+    def get_descendant_chat_ids(self, chat_id: str) -> list[str]:
+        """llens(#107): 全子孫チャットの id を BFS で収集(deleted 済みは含まない)。
+
+        親削除の cascade soft delete と走行中タスクの stop 連鎖が使う。
+        depth は SUBAGENT_MAX_DEPTH で抑えられているが、上限値に依存せず層ごとに辿る。
+        """
+        with get_db() as db:
+            descendant_ids: list[str] = []
+            # visited は防御: 親子リンクが循環するデータ(現行 API では作れないが
+            # DB 破損時)で無限ループ = イベントループ停止にしない
+            visited = {chat_id}
+            frontier = [chat_id]
+            while frontier:
+                rows = (
+                    db.query(Chat.id)
+                    .filter(Chat.parent_chat_id.in_(frontier))
+                    .filter(Chat.deleted_at == None)
+                    .all()
+                )
+                frontier = [row[0] for row in rows if row[0] not in visited]
+                visited.update(frontier)
+                descendant_ids.extend(frontier)
+            return descendant_ids
 
     def get_chats_by_user_id_and_search_text(
         self,
@@ -633,6 +719,7 @@ class ChatTable:
         with get_db() as db:
             query = db.query(Chat).filter(Chat.user_id == user_id)
             query = query.filter(Chat.deleted_at == None)
+            query = query.filter(Chat.kind == "user")
 
             if not include_archived:
                 query = query.filter(Chat.archived == False)
@@ -734,6 +821,7 @@ class ChatTable:
         updated_to: Optional[int] = None,
         deleted: str = "include",
         shared: str = "include",
+        kind: Optional[str] = None,
         order_by: str = "updated_at",
         direction: str = "desc",
         limit: int = 60,
@@ -747,6 +835,7 @@ class ChatTable:
         updated_from/updated_to は updated_at の範囲(epoch 秒・両端含む)。
         deleted は soft delete 済み(#31)の扱い: include(既定)/ exclude / only。
         shared は共有状態(share_id の有無 — #19)の扱い: include(既定)/ exclude / only。
+        kind は chat 種別(#107 agent session)の絞り込み: None(既定・全部)/ "user" / "agent"。
         戻り値は (items, total)。total は filter 適用後・ページング前の件数。
         """
         with get_db() as db:
@@ -761,6 +850,8 @@ class ChatTable:
                 query = query.filter(Chat.share_id == None)
             elif shared == "only":
                 query = query.filter(Chat.share_id != None)
+            if kind is not None:
+                query = query.filter(Chat.kind == kind)
             if title:
                 query = query.filter(Chat.title.ilike(f"%{title}%"))
             if updated_from is not None:
@@ -858,25 +949,41 @@ class ChatTable:
 
     def delete_chat_by_id(self, id: str) -> bool:
         try:
+            # llens(#107): agent session(子孫チャット)は親と一体 — 親削除で
+            # cascade soft delete する(孤児の agent session を残さない)。
+            target_ids = [id, *self.get_descendant_chat_ids(id)]
             with get_db() as db:
-                db.query(Chat).filter_by(id=id).update(
-                    {"deleted_at": int(time.time()), "share_id": None}
+                db.query(Chat).filter(Chat.id.in_(target_ids)).update(
+                    {"deleted_at": int(time.time()), "share_id": None},
+                    synchronize_session=False,
                 )
                 db.commit()
 
-                return True and self.delete_shared_chat_by_chat_id(id)
+            result = True
+            for target_id in target_ids:
+                result = self.delete_shared_chat_by_chat_id(target_id) and result
+            return result
         except Exception:
             return False
 
     def delete_chat_by_id_and_user_id(self, id: str, user_id: str) -> bool:
         try:
+            # llens(#107): cascade は delete_chat_by_id と同じ。子孫は spawn 時に
+            # 同一 user_id で作られるため user_id 述語ごと一括で落とせる。
+            target_ids = [id, *self.get_descendant_chat_ids(id)]
             with get_db() as db:
-                db.query(Chat).filter_by(id=id, user_id=user_id).update(
-                    {"deleted_at": int(time.time()), "share_id": None}
+                db.query(Chat).filter(
+                    Chat.id.in_(target_ids), Chat.user_id == user_id
+                ).update(
+                    {"deleted_at": int(time.time()), "share_id": None},
+                    synchronize_session=False,
                 )
                 db.commit()
 
-                return True and self.delete_shared_chat_by_chat_id(id)
+            result = True
+            for target_id in target_ids:
+                result = self.delete_shared_chat_by_chat_id(target_id) and result
+            return result
         except Exception:
             return False
 
