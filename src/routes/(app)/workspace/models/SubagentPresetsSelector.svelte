@@ -59,20 +59,19 @@
 		{#if presets.length > 0}
 			<div class=" flex flex-col">
 				{#each sortedPresetIds as presetId}
-					<!-- llens(#107): is_active=False の preset は実行時に黙って除外される
-					     (_accessible_subagent_presets)ため、無効表記 + 新規選択不可にする。
-					     既に選択済みのものは表示を残し、外すことだけできる。 -->
+					<!-- llens(#107 仕様変更 2026-08-14): is_active=False はモデルピッカーに
+					     出ないだけで、subagent の spawnable としては選択・実行できる
+					     (裏方 preset の想定運用)。バッジで「一覧非表示」であることだけ示す。 -->
 					{@const inactive = _presets[presetId].is_active === false}
-					{@const unselectable = disabled || (inactive && !_presets[presetId].selected)}
 					<!-- llens(#49): label で包み、行全体クリックでトグル(disabled 時は Checkbox 側が握り潰す) -->
 					<label
-						class=" flex items-center gap-2 mr-3 {unselectable
+						class=" flex items-center gap-2 mr-3 {disabled
 							? 'cursor-not-allowed'
 							: 'cursor-pointer'}"
 					>
 						<span class="self-center flex items-center">
 							<Checkbox
-								disabled={unselectable}
+								{disabled}
 								state={_presets[presetId].selected ? 'checked' : 'unchecked'}
 								onChange={(state) => {
 									_presets[presetId].selected = state === 'checked';
@@ -81,15 +80,12 @@
 							/>
 						</span>
 
-						<div
-							class=" py-0.5 text-sm w-full font-medium flex items-center gap-1.5"
-							class:opacity-50={inactive}
-						>
+						<div class=" py-0.5 text-sm w-full font-medium flex items-center gap-1.5">
 							<span>{_presets[presetId].name}</span>
 							<span class="text-content-muted">{_presets[presetId].id}</span>
 							{#if inactive}
 								<span class="text-xs px-1.5 py-0.5 rounded-full bg-surface-hover text-content-muted"
-									>{$i18n.t('Disabled')}</span
+									>{$i18n.t('Hidden from model list')}</span
 								>
 							{/if}
 						</div>

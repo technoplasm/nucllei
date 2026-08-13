@@ -270,10 +270,12 @@ class TestRunSubagent(AbstractPostgresTest):
             self._build_tool(metadata={"chat_id": deep.id, "message_id": "x"}) is None
         )
 
-    def test_enum_excludes_inaccessible_and_inactive_presets(self):
+    def test_enum_excludes_inaccessible_but_includes_inactive_presets(self):
         from nucllei.models.models import ModelForm
 
-        # 他人の私有 preset(access_control={})と非 active preset は enum に出ない
+        # 他人の私有 preset(access_control={})は enum に出ない。
+        # is_active=False は「ユーザーのモデル一覧に出ない」だけで、subagent の
+        # spawnable としては選択できる(2026-08-14 仕様変更)— enum に載る。
         self.Models.insert_new_model(
             ModelForm(
                 id="private", name="Private", meta={}, params={}, access_control={}
@@ -297,7 +299,8 @@ class TestRunSubagent(AbstractPostgresTest):
             )
         )
         assert tool["spec"]["parameters"]["properties"]["preset_id"]["enum"] == [
-            "researcher"
+            "researcher",
+            "inactive",
         ]
         # アクセス可 preset がゼロなら tool 自体を載せない
         assert self._build_tool(model=self._parent_model(("private",))) is None
@@ -350,6 +353,74 @@ class TestRunSubagent(AbstractPostgresTest):
         assert self.parent.id in listed
         assert child_id not in listed
         assert child_id in {c.id for c in self.Chats.get_chats()}
+
+    def test_spawn_inactive_preset_synthesizes_child_model(self, monkeypatch):
+        """is_active=False の preset は MODELS に載らないが spawn できる(2026-08-14 仕様変更)。
+
+        子モデルは Model 行 + base モデルから、get_all_models のアクティブ preset
+        合成と同じ形で _resolve_child_model がその場合成する。base 自体が MODELS に
+        無ければ従来どおり「preset が利用できません」。
+        """
+        from nucllei.models.models import ModelForm
+
+        child_calls = self._patch_child_pipeline(monkeypatch)
+        self.Models.insert_new_model(
+            ModelForm(
+                id="hidden-worker",
+                base_model_id="kimi-base",
+                name="Hidden Worker",
+                meta={"description": "裏方"},
+                params={},
+                access_control=None,
+                is_active=False,
+            ),
+            "1",
+        )
+        request = self._request()
+        request.app.state.MODELS = {
+            "kimi-base": {
+                "id": "kimi-base",
+                "name": "kimi-base",
+                "owned_by": "openai",
+                "openai": {"max_model_len": 262144},
+            }
+        }
+        tool = self._build_tool(
+            request=request, model=self._parent_model(("hidden-worker",))
+        )
+        assert tool["spec"]["parameters"]["properties"]["preset_id"]["enum"] == [
+            "hidden-worker"
+        ]
+
+        result = asyncio.run(
+            tool["callable"](preset_id="hidden-worker", instruction="裏で調査")
+        )
+        assert result["ok"] is True
+        assert result["answer"] == "2"
+
+        # 子ターンへは合成 model が渡る(アクティブ preset 合成と同じ形)
+        assert len(child_calls) == 1
+        assert child_calls[0]["model"] == "hidden-worker"
+        synthesized = child_calls[0]["metadata"]["model"]
+        assert synthesized["preset"] is True
+        assert synthesized["owned_by"] == "openai"
+        assert synthesized["info"]["is_active"] is False
+        assert synthesized["info"]["base_model_id"] == "kimi-base"
+
+        child = self.Chats.get_chat_by_id(result["session_id"])
+        assert child.kind == "agent"
+        assert child.chat["history"]["messages"] != {}
+
+        # base が MODELS に無ければ従来どおりエラー
+        request.app.state.MODELS = {}
+        tool = self._build_tool(
+            request=request, model=self._parent_model(("hidden-worker",))
+        )
+        failed = json.loads(
+            asyncio.run(tool["callable"](preset_id="hidden-worker", instruction="x"))
+        )
+        assert failed["ok"] is False
+        assert "利用できません" in failed["error"]
 
     def test_session_id_continuation_appends_to_same_child(self, monkeypatch):
         child_calls = self._patch_child_pipeline(

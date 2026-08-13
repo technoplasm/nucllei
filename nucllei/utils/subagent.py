@@ -108,17 +108,62 @@ def _accessible_subagent_presets(model, user) -> list:
     generate_chat_completion を通るので既存検証も重ねて効く。
 
     Models.get_model_by_id を件数分引く(allowlist は少数前提。
-    get_models_by_user_id の全件走査は使わない)。is_active でない preset は
-    実行できない(app.state.MODELS に載らない)ため除外する。
+    get_models_by_user_id の全件走査は使わない)。is_active は見ない —
+    無効 preset は「ユーザーのモデル一覧に出ない」だけで、subagent の
+    spawnable としては選択・実行できる(2026-08-14 仕様変更。裏方 preset を
+    ピッカーから隠しつつ subagent 専用で使う運用のため。実行時の子モデルは
+    _resolve_child_model が合成する)。
     """
     presets = []
     for preset_id in get_model_subagent_preset_ids(model):
         m = Models.get_model_by_id(preset_id)
-        if m is None or not m.is_active:
+        if m is None:
             continue
         if m.user_id == user.id or has_access(user.id, "read", m.access_control):
             presets.append(m)
     return presets
+
+
+def _resolve_child_model(request, preset) -> dict | None:
+    """子ターンのモデル dict を解決する(#107 仕様変更 2026-08-14)。
+
+    アクティブ preset は get_all_models が app.state.MODELS に載せているので
+    そのまま使う。is_active=False の preset は MODELS に載らない(=ユーザーの
+    モデル一覧に出ない)が spawnable ではあるため、Model 行 + base モデルから
+    get_all_models のアクティブ preset 合成(utils/models.py)と同じ形の dict を
+    その場で合成する。base モデル自体が MODELS に無ければ None(従来どおり
+    「preset が利用できません」)。
+    """
+    model = request.app.state.MODELS.get(preset.id)
+    if model is not None:
+        return model
+
+    # base の解決は get_all_models と同じ述語(ollama の 'llama3' vs 'llama3:7b'
+    # 形式ゆれを含む)
+    base = None
+    for m in request.app.state.MODELS.values():
+        if (
+            preset.base_model_id == m["id"]
+            or preset.base_model_id == m["id"].split(":")[0]
+        ):
+            base = m
+            break
+    if base is None:
+        return None
+
+    return {
+        "id": preset.id,
+        "name": preset.name,
+        "object": "model",
+        "created": preset.created_at,
+        "owned_by": base.get("owned_by", "unknown owner"),
+        "info": preset.model_dump(),
+        "preset": True,
+        **({"pipe": base["pipe"]} if "pipe" in base else {}),
+        # actions は表示専用(get_all_models が /api/models 向けに解決する)で、
+        # チャット実行経路は読まない — 子ターン用の合成では空で足りる
+        "actions": [],
+    }
 
 
 def _error(message: str) -> str:
@@ -552,7 +597,7 @@ def build_subagent_tools(request, model, user, metadata):
                 _running_agent_sessions.add(child_chat_id)
                 running_session_id = child_chat_id
 
-            child_model = request.app.state.MODELS.get(preset.id)
+            child_model = _resolve_child_model(request, preset)
             if child_model is None:
                 return _error(f"preset が利用できません: {preset.id}")
 

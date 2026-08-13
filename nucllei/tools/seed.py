@@ -177,7 +177,7 @@ def ensure_subagent_preset(base, token, parent_model_id):
         "GET", f"{base}/api/v1/models/model?id={SUBAGENT_PRESET_ID}", token
     )
     if status == 200 and existing:
-        # 既存 meta / params は保持し、base の追従と有効化だけ行う
+        # 既存 meta / params は保持し、base の追従と無効化だけ行う
         meta = existing.get("meta") or {}
         params = existing.get("params") or {}
     else:
@@ -192,7 +192,10 @@ def ensure_subagent_preset(base, token, parent_model_id):
         "meta": meta,
         "params": params,
         "access_control": None,
-        "is_active": True,
+        # 裏方 preset の想定運用(#107 仕様変更 2026-08-14): is_active=False で
+        # ユーザーのモデルピッカーからは隠しつつ、subagent の spawnable としては
+        # 選択・実行できる(既存行があっても False へ更新する)。
+        "is_active": False,
     }
     if existing:
         status, payload = _req(

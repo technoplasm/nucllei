@@ -343,7 +343,13 @@ async def process_chat_payload(
 
     # Initialize events to store additional event to be sent to the client
     # Initialize contexts and citation
+    # llens(#107 仕様変更 2026-08-14): 無効 preset の agent session 子ターンでは
+    # model が app.state.MODELS に無い(subagent 側が Model 行から合成して渡す)。
+    # 後段の id 引き(get_task_model_id / pipeline inlet / __model__)が KeyError
+    # しないよう、この処理の中だけ合成 model を重ねた view を使う(state は汚さない)。
     models = request.app.state.MODELS
+    if model.get("id") and model["id"] not in models:
+        models = {**models, model["id"]: model}
 
     task_model_id = get_task_model_id(
         form_data["model"],

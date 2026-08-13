@@ -66,10 +66,25 @@ async def generate_chat_completion(
     models = request.app.state.MODELS
 
     model_id = form_data["model"]
-    if model_id not in models:
-        raise Exception("Model not found")
-
-    model = models[model_id]
+    model = models.get(model_id)
+    if model is None:
+        # llens(#107 仕様変更 2026-08-14): 無効 preset の agent session 子ターン
+        # (初回 + tool ループ追撃)。is_active=False の preset は MODELS に載らない
+        # ため、subagent が合成して metadata.model に積んだ dict を使う。
+        # metadata.model はサーバー内部経路しか書かない(/api/chat/completions は
+        # metadata を全置換してから来る)ので client 制御にはならないが、
+        # agent_session マーカ + id 一致まで要求して経路を子ターンに閉じる。
+        # 下の check_model_access は DB 行(is_active 非依存)で従来どおり効く。
+        metadata = form_data.get("metadata") or {}
+        candidate = metadata.get("model")
+        if (
+            metadata.get("agent_session")
+            and candidate
+            and candidate.get("id") == model_id
+        ):
+            model = candidate
+        else:
+            raise Exception("Model not found")
 
     # Check if user has access to the model
     if not bypass_filter and user.role == "user":

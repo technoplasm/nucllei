@@ -96,6 +96,9 @@
 // t('Previous 7 days')
 // t('Punctuation')
 // t('RTL')
+// llens(2026-08-14): Chat.svelte 観測モードバナーの `({t('Read-only')})` は
+// 静的呼び出しだが JavascriptLexer が拾えない(parse すると prune される)ためここで生かす
+// t('Read-only')
 // t('Role')
 // t('Scroll to bottom when switching between branches')
 // t('Selected model(s) do not support image inputs')
