@@ -17,12 +17,16 @@
 	// キーは vision / usage / citations(usage はベースモデル依存でキーごと消える)。
 	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
+	// llens(#107): 機能「サブエージェント」(meta.features.subagent、既定 ON)も同型。
+	// OFF でこのモデルへの run_subagent の提示が止まる。
 	let {
 		capabilities = $bindable({}),
-		featureSkills = $bindable(true)
+		featureSkills = $bindable(true),
+		featureSubagent = $bindable(true)
 	}: {
 		capabilities?: Record<string, boolean | undefined>;
 		featureSkills?: boolean;
+		featureSubagent?: boolean;
 	} = $props();
 </script>
 
@@ -47,6 +51,28 @@
 					content={$i18n.t('Expose the skill list to the model (load_skill) + /command activation')}
 				>
 					{$i18n.t('Skills')}
+				</Tooltip>
+			</div>
+		</label>
+
+		<!-- llens(#49): label で行クリックトグル -->
+		<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+			<span class="flex items-center">
+				<Checkbox
+					state={featureSubagent ? 'checked' : 'unchecked'}
+					onChange={(state) => {
+						featureSubagent = state === 'checked';
+					}}
+				/>
+			</span>
+
+			<div class=" py-0.5 text-sm capitalize">
+				<Tooltip
+					content={$i18n.t(
+						'Expose run_subagent to the model (delegate tasks to the assigned presets)'
+					)}
+				>
+					{$i18n.t('Subagent')}
 				</Tooltip>
 			</div>
 		</label>

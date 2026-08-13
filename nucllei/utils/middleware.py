@@ -60,6 +60,7 @@ from nucllei.utils.skills import (
     replay_skill_tool_ids,
     skill_activation_seed_block,
 )
+from nucllei.utils.subagent import build_run_subagent_tool
 from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
@@ -520,6 +521,18 @@ async def process_chat_payload(
             )
         tools_dict["load_skill"] = load_skill_tool
 
+    # llens(#107): サブエージェント起動の擬似 tool run_subagent(load_skill と同型)。
+    # allowlist / 機能フラグ / depth 上限の判定は build_run_subagent_tool 側に閉じ、
+    # 対象が無ければ None(tool 自体を載せない)。同期 DB read(親 chat の
+    # kind/depth + Models×allowlist 件数)を含むためワーカースレッドへ(#28 の規律)。
+    run_subagent_tool = await asyncio.to_thread(
+        build_run_subagent_tool, request, model, user, metadata
+    )
+    if run_subagent_tool is not None:
+        if "run_subagent" in tools_dict:
+            log.warning("tool 'run_subagent' is shadowed by the subagent pseudo-tool")
+        tools_dict["run_subagent"] = run_subagent_tool
+
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。
         # ツールがあれば常にモデルへ tool spec を渡す(function_calling パラメータは無視)。
@@ -635,6 +648,11 @@ async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
     温床になるため(cancel 経路も分岐を増やさず同じ扱い)。同チャットの応答が
     後で正常完了すれば通常のタイトル生成が上書きする。
     """
+    # llens(#107): agent session(サブエージェントの子ターン)はタイトルを触らない。
+    # spawn 時の決定的タイトルが正(tasks=None でも来ないはずの二重ガード)。
+    if metadata.get("agent_session"):
+        return
+
     if not (tasks and TASKS.TITLE_GENERATION in tasks):
         return
 
@@ -662,6 +680,11 @@ async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
 
 async def run_response_background_tasks(request, user, metadata, tasks, event_emitter):
     """応答確定後のバックグラウンドタスク(現状はタイトル生成のみ)。"""
+    # llens(#107): agent session の子ターンはタイトル生成を走らせない
+    # (spawn 時の決定的タイトルが正。tasks=None でも来ないはずの二重ガード)。
+    if metadata.get("agent_session"):
+        return
+
     message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
     message = message_map.get(metadata["message_id"]) if message_map else None
 
@@ -1177,10 +1200,13 @@ async def execute_tool_calls(
                 # 自前上限を持たなくてよい)。sync tool はワーカースレッド実行
                 # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
                 # 走り切ってから回収される(有界リーク — turn の進行を優先)。
-                if CHAT_TOOL_EXECUTION_TIMEOUT > 0:
+                # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
+                # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ)。
+                tool_timeout = tool.get("timeout", CHAT_TOOL_EXECUTION_TIMEOUT)
+                if tool_timeout > 0:
                     tool_result = await asyncio.wait_for(
                         tool_function(**tool_function_params),
-                        timeout=CHAT_TOOL_EXECUTION_TIMEOUT,
+                        timeout=tool_timeout,
                     )
                 else:
                     tool_result = await tool_function(**tool_function_params)
@@ -1188,12 +1214,11 @@ async def execute_tool_calls(
 
             except asyncio.TimeoutError:
                 log.warning(
-                    f"tool execution timed out: {tool_name} "
-                    f"(> {CHAT_TOOL_EXECUTION_TIMEOUT}s)"
+                    f"tool execution timed out: {tool_name} " f"(> {tool_timeout}s)"
                 )
                 # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
                 tool_result = (
-                    f"ツール {tool_name} の実行が {CHAT_TOOL_EXECUTION_TIMEOUT} 秒で"
+                    f"ツール {tool_name} の実行が {tool_timeout} 秒で"
                     "タイムアウトしました(システム側上限)。"
                 )
             except Exception as e:
@@ -1586,7 +1611,9 @@ async def process_chat_response(
             # webhook(triage KEEP): 「この応答を誰も見ていなかった」場合に通知。
             # 旧実装のプレゼンス(USER_POOL)でなく、完了時点のイベント購読者の
             # 有無で判定する(意味的により正確)。
-            if not events_stream.has_subscribers:
+            # llens(#107): agent session の子ターンは対象外 — 結果は親の tool
+            # result が運ぶ。購読ゼロで走るのが正常形(タイトル抑止と同じマーカ)。
+            if not events_stream.has_subscribers and not metadata.get("agent_session"):
                 webhook_url = await asyncio.to_thread(
                     Users.get_user_webhook_url_by_id, user.id
                 )

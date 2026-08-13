@@ -7,6 +7,7 @@
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { tools, functions, skills } from '$lib/stores';
 	import { getModels } from '$lib/apis';
+	import { getModels as getWorkspaceModels } from '$lib/apis/models';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
@@ -14,6 +15,7 @@
 	import AdvancedParams from './AdvancedParams.svelte';
 	import ToolsSelector from './ToolsSelector.svelte';
 	import SkillsSelector from './SkillsSelector.svelte';
+	import SubagentPresetsSelector from './SubagentPresetsSelector.svelte';
 	import FunctionsSelector from './FunctionsSelector.svelte';
 	import Capabilities from './Capabilities.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
@@ -87,6 +89,7 @@
 
 	let toolIds = $state<string[]>([]);
 	let skillIds = $state<string[]>([]);
+	let subagentPresetIds = $state<string[]>([]);
 	let filterIds = $state<string[]>([]);
 	let actionIds = $state<string[]>([]);
 
@@ -94,12 +97,20 @@
 	// manifest(load_skill)と /command 発火が両方止まる。
 	let featureSkills = $state(true);
 
+	// llens(#107): 機能「サブエージェント」(meta.features.subagent、既定 ON)。
+	// OFF でこのモデルへの run_subagent の提示が止まる。
+	let featureSubagent = $state(true);
+
 	let accessControl = $state<any>({});
 
 	// llens: チャットのモデルピッカー(/api/models = $models)は preset のみを返すよう
 	// になったため、preset のベースモデル選択には生モデルを含む /api/models/base を使う。
 	// admin ゲートのエンドポイントなので admin 前提(workspace.models 既定は False)。
 	let baseModels = $state<any[]>([]);
+
+	// llens(#107): サブエージェント委任先の候補(preset のみ = /api/v1/models/、
+	// workspace 一覧と同じ供給元)。picker 用の $models ストアは使わない。
+	let workspaceModels = $state<any[]>([]);
 
 	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
 	// 状態へ暗黙リセットする。名前/ID は対象外(リセットしない — リネームは submit 時の confirm で扱う)。
@@ -111,9 +122,11 @@
 			capabilities,
 			toolIds,
 			skillIds,
+			subagentPresetIds,
 			filterIds,
 			actionIds,
 			featureSkills,
+			featureSubagent,
 			accessControl
 		});
 	};
@@ -126,9 +139,11 @@
 			capabilities = s.capabilities;
 			toolIds = s.toolIds;
 			skillIds = s.skillIds;
+			subagentPresetIds = s.subagentPresetIds;
 			filterIds = s.filterIds;
 			actionIds = s.actionIds;
 			featureSkills = s.featureSkills;
+			featureSubagent = s.featureSubagent;
 			accessControl = s.accessControl;
 		}
 		selectedTab = tab;
@@ -172,11 +187,29 @@
 			}
 		}
 
+		if (subagentPresetIds.length > 0) {
+			info.meta.subagentPresetIds = subagentPresetIds;
+		} else {
+			if (info.meta.subagentPresetIds) {
+				delete info.meta.subagentPresetIds;
+			}
+		}
+
 		// 既定(ON)のときはキーを残さない(meta を汚さない)
 		if (!featureSkills) {
 			info.meta.features = { ...(info.meta.features ?? {}), skills: false };
 		} else if (info.meta.features?.skills !== undefined) {
 			delete info.meta.features.skills;
+			if (Object.keys(info.meta.features).length === 0) {
+				delete info.meta.features;
+			}
+		}
+
+		// 既定(ON)のときはキーを残さない(featureSkills と同型)
+		if (!featureSubagent) {
+			info.meta.features = { ...(info.meta.features ?? {}), subagent: false };
+		} else if (info.meta.features?.subagent !== undefined) {
+			delete info.meta.features.subagent;
 			if (Object.keys(info.meta.features).length === 0) {
 				delete info.meta.features;
 			}
@@ -248,6 +281,10 @@
 		// 非 admin では 403 を投げるため、空配列にフォールバックしてエディタを壊さない。
 		baseModels = (await getModels(true).catch(() => [])) ?? [];
 
+		// llens(#107): サブエージェント preset 候補。/api/v1/models/ は get_verified_user ゲートで
+		// 非 admin も read ACL の範囲で取得できる(通信失敗等に備えた空配列フォールバックのみ)
+		workspaceModels = (await getWorkspaceModels().catch(() => [])) ?? [];
+
 		await tools.set(await getTools());
 		await skills.set(await getSkills());
 		await functions.set(await getFunctions());
@@ -282,7 +319,9 @@
 
 			toolIds = model?.meta?.toolIds ?? [];
 			skillIds = model?.meta?.skillIds ?? [];
+			subagentPresetIds = model?.meta?.subagentPresetIds ?? [];
 			featureSkills = (model?.meta?.features?.skills ?? true) !== false;
+			featureSubagent = (model?.meta?.features?.subagent ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
@@ -566,7 +605,7 @@
 								</div>
 
 								<div class="my-2">
-									<Capabilities bind:capabilities bind:featureSkills />
+									<Capabilities bind:capabilities bind:featureSkills bind:featureSubagent />
 								</div>
 
 								<hr class=" border-line my-1.5" />
@@ -576,6 +615,16 @@
 										bind:selectedSkillIds={skillIds}
 										skills={$skills ?? []}
 										disabled={!featureSkills}
+									/>
+								</div>
+
+								<hr class=" border-line my-1.5" />
+
+								<div class="mt-2">
+									<SubagentPresetsSelector
+										bind:selectedPresetIds={subagentPresetIds}
+										presets={workspaceModels}
+										disabled={!featureSubagent}
 									/>
 								</div>
 

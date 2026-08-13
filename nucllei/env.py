@@ -274,6 +274,32 @@ try:
 except ValueError:
     CHAT_TOOL_EXECUTION_TIMEOUT = 300
 
+# llens(#107): サブエージェント(run_subagent)1 ターンのタイムアウト(秒、-1 で無効)。
+# 子ターンはモデル呼び出しと tool 実行の反復を丸ごと包むため、通常 tool の
+# CHAT_TOOL_EXECUTION_TIMEOUT より長い既定を持つ(tool エントリの per-tool
+# timeout キーとして execute_tool_calls に適用される)。
+SUBAGENT_TURN_TIMEOUT = os.environ.get("SUBAGENT_TURN_TIMEOUT", "1800")
+try:
+    SUBAGENT_TURN_TIMEOUT = int(SUBAGENT_TURN_TIMEOUT)
+except ValueError:
+    SUBAGENT_TURN_TIMEOUT = 1800
+
+# llens(#107): agent session の入れ子深さ上限(user chat = depth 0)。
+# 親 depth+1 が上限を超えるチャットでは run_subagent を合成しない(実行時にも再チェック)。
+SUBAGENT_MAX_DEPTH = os.environ.get("SUBAGENT_MAX_DEPTH", "2")
+try:
+    SUBAGENT_MAX_DEPTH = int(SUBAGENT_MAX_DEPTH)
+except ValueError:
+    SUBAGENT_MAX_DEPTH = 2
+
+# llens(#107): プロセス内の subagent 同時実行数上限。超過時は待たずにエラーを
+# tool result で返す(モデルに再試行を委ねる)。
+SUBAGENT_MAX_CONCURRENT = os.environ.get("SUBAGENT_MAX_CONCURRENT", "4")
+try:
+    SUBAGENT_MAX_CONCURRENT = int(SUBAGENT_MAX_CONCURRENT)
+except ValueError:
+    SUBAGENT_MAX_CONCURRENT = 4
+
 
 ####################################
 # UVICORN WORKERS
