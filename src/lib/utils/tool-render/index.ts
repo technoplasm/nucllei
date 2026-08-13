@@ -118,6 +118,14 @@ export const parseToolArgumentsStreaming = (
 	});
 };
 
+// run_subagent の usage 要点(BE が prompt_tokens / completion_tokens / duration の
+// 数値キーだけを同梱する — nucllei/utils/subagent.py)
+export type SubagentUsage = {
+	prompt_tokens?: number;
+	completion_tokens?: number;
+	duration?: number;
+};
+
 export type ResultDisplay =
 	| { kind: 'text'; value: string }
 	| { kind: 'code'; language: string; value: string }
@@ -125,7 +133,18 @@ export type ResultDisplay =
 	// md としてレンダリングして見せる(Code("markdown") = md ソースのハイライトとは別契約)
 	| { kind: 'markdown'; value: string }
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
-	| { kind: 'skill'; value: string; tools: string[] };
+	| { kind: 'skill'; value: string; tools: string[] }
+	// run_subagent の構造化結果(#107): 子 agent session の要約。sessionId で
+	// SubagentSessionBlock が子 transcript を遅延 fetch する
+	| {
+			kind: 'subagent';
+			sessionId: string;
+			ok: boolean;
+			answer: string;
+			truncated?: boolean;
+			error?: string;
+			usage?: SubagentUsage;
+	  };
 
 // 文字列化された JSON を再帰的に剥がす(tool 結果は dict/list が json.dumps 済み
 // 文字列で届くため)。剥がすのは文字列層のみ — 旧実装はスカラー到達後も再帰し、
@@ -173,6 +192,49 @@ export const classifyToolResult = (
 				parsed.tools.every((t: unknown) => typeof t === 'string')
 			) {
 				return { kind: 'skill', value: parsed.result, tools: parsed.tools };
+			}
+		} catch (e) {
+			// fall through
+		}
+	}
+	if (descriptor?.kind === 'subagent') {
+		// run_subagent の {ok, session_id, answer, ...}(#107)。spawn 前バリデーション
+		// エラー({ok:false, error} — session_id 不在)は形が合わないので json へ、
+		// JSON ですらない壊れ方は text へフォールバック(推測して壊れた表示を作らない)。
+		try {
+			const parsed = JSON.parse(content);
+			if (
+				parsed !== null &&
+				typeof parsed === 'object' &&
+				typeof parsed.ok === 'boolean' &&
+				typeof parsed.session_id === 'string' &&
+				typeof parsed.answer === 'string'
+			) {
+				// usage は数値キーだけ拾う(型に忠実 — 宣言外の形は捨てる)
+				let usage: SubagentUsage | undefined;
+				if (parsed.usage !== null && typeof parsed.usage === 'object') {
+					usage = {};
+					for (const key of ['prompt_tokens', 'completion_tokens', 'duration'] as const) {
+						if (typeof parsed.usage[key] === 'number') {
+							usage[key] = parsed.usage[key];
+						}
+					}
+					if (Object.keys(usage).length === 0) {
+						usage = undefined;
+					}
+				}
+				return {
+					kind: 'subagent',
+					sessionId: parsed.session_id,
+					ok: parsed.ok,
+					answer: parsed.answer,
+					...(parsed.truncated === true ? { truncated: true } : {}),
+					...(typeof parsed.error === 'string' ? { error: parsed.error } : {}),
+					...(usage ? { usage } : {})
+				};
+			}
+			if (parsed !== null && typeof parsed === 'object') {
+				return { kind: 'json', value: JSON.stringify(parsed, null, 2) };
 			}
 		} catch (e) {
 			// fall through

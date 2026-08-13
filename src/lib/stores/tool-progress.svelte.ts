@@ -14,6 +14,8 @@
  */
 
 export type ToolProgress = {
+	/** 属するチャット。chat 単位の一括破棄(clearChatProgress)の宛先(#107 W-A)。 */
+	chatId: string;
 	description: string;
 	/** current / total が揃うときだけ決定的。片方でも欠ければ不定(ぐるぐる)。 */
 	current?: number;
@@ -46,6 +48,7 @@ const keyOf = (messageId: string, toolCallId: string) => `${messageId}${SEP}${to
 
 /** SSE の `tool:progress` を適用する(同じ tool_call_id は上書き — 履歴は溜めない)。 */
 export const setToolProgress = (
+	chatId: string,
 	messageId: string,
 	payload: {
 		tool_call_id?: string;
@@ -56,13 +59,14 @@ export const setToolProgress = (
 	}
 ) => {
 	const toolCallId = payload?.tool_call_id;
-	if (!messageId || typeof toolCallId !== 'string') {
+	if (!chatId || !messageId || typeof toolCallId !== 'string') {
 		return;
 	}
 	const key = keyOf(messageId, toolCallId);
 	const previous = entries[key];
 	const done = payload.done ?? false;
 	entries[key] = {
+		chatId,
 		description: payload.description ?? '',
 		current: payload.current,
 		total: payload.total,
@@ -84,6 +88,23 @@ export const clearMessageProgress = (messageId: string) => {
 	const prefix = `${messageId}${SEP}`;
 	for (const key of Object.keys(entries)) {
 		if (key.startsWith(prefix)) {
+			delete entries[key];
+		}
+	}
+};
+
+/**
+ * chat 単位の一括破棄(#107 W-A)。done が届かず clearMessageProgress を通らなかった
+ * エントリ(stop / task 消滅 / メッセージ削除等)がセッション中残り続けるのを、
+ * 「走行中 task の無いチャットを読み込んだとき」に掃く。走行中のチャットでは呼ばない —
+ * 非表示中に fallback handler が記録した進捗が唯一の復元経路(+layout.svelte)。
+ */
+export const clearChatProgress = (chatId: string) => {
+	if (!chatId) {
+		return;
+	}
+	for (const [key, entry] of Object.entries(entries)) {
+		if (entry.chatId === chatId) {
 			delete entries[key];
 		}
 	}

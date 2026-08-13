@@ -4,14 +4,19 @@
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
+	import { toast } from 'svelte-sonner';
+
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 
 	import { type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
 	import {
 		chatId,
+		chats,
 		config,
+		currentChatPage,
 		models,
 		settings,
 		showSidebar,
@@ -29,11 +34,13 @@
 		getActiveTaskIds
 	} from '$lib/utils/completion-streams';
 
-	import { getChatById } from '$lib/apis/chats';
+	import { cloneChatById, getChatById, getChatList } from '$lib/apis/chats';
 	import { getUserSettings } from '$lib/apis/users';
 	import { getTaskIdsByChatId } from '$lib/apis';
 
 	import { resetChatUsage, setChatUsageBaseline } from '$lib/stores/live-usage.svelte';
+	import { clearChatProgress } from '$lib/stores/tool-progress.svelte';
+	import { clearChatChildren, refreshChatChildren } from '$lib/stores/chat-children.svelte';
 
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
@@ -54,6 +61,12 @@
 	let loading = $state(false);
 	// 存在しない・削除済み・他人のチャット。URL を保ったまま 404 表示(2026-07-19 仕様)
 	let notFound = $state(false);
+
+	// llens(#107 P3): /c/ の観測モード。kind="agent" の chat(subagent session)は
+	// readOnly で表示する — MessageInput 非表示・send/regenerate/edit 系導線なし。
+	// live 追従(task 再アタッチ・envelope 適用)はそのまま効く。
+	let isAgentSession = $state(false);
+	let parentChatId = $state<string | null>(null);
 
 	const eventTarget = new EventTarget();
 	let controlPane = $state<any>();
@@ -116,8 +129,33 @@
 		}
 	};
 
-	const events = new ChatEvents({ session, eventTarget, scrollToBottom, onEventCall });
+	const events = new ChatEvents({
+		session,
+		eventTarget,
+		scrollToBottom,
+		onEventCall,
+		// 観測モードでは done の completed / 保存経路を駆動しない(events.ts 参照)
+		isObserver: () => isAgentSession
+	});
 	const send = new ChatSend({ session, events, t, eventTarget, scrollToBottom });
+
+	// fork = clone(BE が kind=user へ落とす — 「介入したいときは fork」)。
+	// ChatItem / SubagentSessionBlock の clone 導線と同じ後処理(サイドバー一覧の追従)
+	const forkChatHandler = async () => {
+		const res = await cloneChatById(
+			$chatId,
+			t('Clone of {{TITLE}}', { TITLE: $chatTitle || $chatId })
+		).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			goto(`/c/${res.id}`);
+			currentChatPage.set(1);
+			await chats.set(await getChatList($currentChatPage));
+		}
+	};
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
@@ -374,8 +412,14 @@
 		session.chatFiles = [];
 		session.params = {};
 
-		// llens(#102): 新規チャットに前のチャットの usage(baseline / live)を持ち越さない
-		resetChatUsage();
+		// llens(#102): 新規チャット('' スコープ)に usage(baseline / live)を残さない。
+		// store は chatId スコープ(#107 W-A)なので他チャットの state はそもそも混ざらない
+		resetChatUsage($chatId);
+
+		// llens(#107 P3): 新規チャットは通常モード。サイドバー tree も畳む
+		isAgentSession = false;
+		parentChatId = null;
+		clearChatChildren();
 
 		if ($page.url.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
@@ -415,6 +459,13 @@
 		if (session.chat) {
 			const chatContent = session.chat.chat;
 
+			// llens(#107 P3): agent session(subagent の子 chat)は観測モードで開く。
+			// サイドバー tree は「表示中の user chat の children」— agent session を
+			// 観測中はその親の children を保持し、tree は親項目の下に出続ける
+			isAgentSession = session.chat.kind === 'agent';
+			parentChatId = session.chat.parent_chat_id ?? null;
+			refreshChatChildren(isAgentSession ? parentChatId : $chatId);
+
 			if (chatContent) {
 				session.selectedModels = chatContent.models;
 				session.history = chatContent.history;
@@ -424,8 +475,9 @@
 				// 同じ形)を優先し、無ければ meta.usage(会話累積)。生成中チャットへの
 				// 再アタッチ分はこのあとの attachToTask で backend が最新 chat:usage を
 				// 再送してくる。
-				resetChatUsage();
+				resetChatUsage($chatId);
 				setChatUsageBaseline(
+					$chatId,
 					chatContent.history?.messages?.[chatContent.history?.currentId]?.usage ??
 						session.chat.meta?.usage ??
 						null
@@ -469,6 +521,14 @@
 					}
 				}
 
+				// llens(#107 W-A): 生きた task が無ければ、このチャットの tool 進捗は確定済み
+				// の残骸 — チャット単位で掃く(done を通らず clearMessageProgress されなかった
+				// 分のリーク対策)。task が生きている間は消さない: 非表示中に fallback handler
+				// (+layout.svelte)が記録した進捗が唯一の復元経路。
+				if ((taskRes?.task_ids ?? []).length === 0) {
+					clearChatProgress($chatId);
+				}
+
 				// llens: 生きた task が無ければ、未完の assistant メッセージは「中断された
 				// 応答」として done 化しスピナーを止める(本文ゼロなら ResponseMessage が
 				// 中断メッセージを表示する)。task が生きている場合はストリームが SSE
@@ -488,7 +548,67 @@
 				return null;
 			}
 		}
+
+		// 取得失敗(notFound 行き)。前のチャットの tree を残さない
+		isAgentSession = false;
+		parentChatId = null;
+		clearChatChildren();
 	};
+
+	// llens(#107 P3): /c/ 観測モードの追いつきポーリング。loadChat はロード時点の走行
+	// task にしかアタッチしないため、観測開始後に親が同一 session を継続 turn で再駆動
+	// しても FE へ push は来ず、view が黙って stale 化する。isAgentSession の間だけ
+	// 軽量ポーリングで新 task を発見し、アタッチ + history の追いつき再取得を行う。
+	const AGENT_SESSION_POLL_MS = 5000;
+	const pollAgentSessionTasks = async () => {
+		// バックグラウンドタブでは何もしない(復帰後の次 tick で追いつく)
+		if (document.visibilityState === 'hidden') {
+			return;
+		}
+		const observedChatId = $chatId;
+		if (!observedChatId || !isAgentSession) {
+			return;
+		}
+		const taskRes = await getTaskIdsByChatId(observedChatId).catch(() => null);
+		if (!taskRes || $chatId !== observedChatId) {
+			return;
+		}
+		// loadChat の再アタッチと同じ二段ガード: このモジュールが消費中のストリームと、
+		// アタッチ fetch 未解決の task には重複アタッチしない
+		const activeTaskIds = getActiveTaskIds(observedChatId);
+		const newTaskIds = (taskRes.task_ids ?? []).filter(
+			(taskId: string) => !activeTaskIds.includes(taskId) && !attachedTaskIds.has(taskId)
+		);
+		if (newTaskIds.length === 0) {
+			return;
+		}
+		session.taskIds = taskRes.task_ids;
+		for (const taskId of newTaskIds) {
+			attachedTaskIds.add(taskId);
+			attachToTask(observedChatId, taskId).catch((error) => {
+				console.error('agent session task attach failed', taskId, error);
+			});
+		}
+		// 新 task の発見 = 継続 turn が始まっている。SSE スナップショットは走行中 turn の
+		// message しか運ばないため、fetch 済み history を読み直して追いつかせる
+		// (events.ts の観測モード refetch と同じ理由。以降の封筒適用で収束する)
+		const res = await getChatById(observedChatId).catch(() => null);
+		if (res?.chat?.history && $chatId === observedChatId) {
+			session.history = res.chat.history;
+		}
+	};
+
+	$effect(() => {
+		if (!isAgentSession) {
+			return;
+		}
+		// chat 切替(isAgentSession の変化)・unmount で effect teardown が確実に止める。
+		// 観測対象の切替は poll 側が $chatId を都度読むので interval は張りっぱなしでよい
+		const interval = window.setInterval(() => void pollAgentSessionTasks(), AGENT_SESSION_POLL_MS);
+		return () => {
+			window.clearInterval(interval);
+		};
+	});
 
 	// 初期 chatIdProp は init 時(onMount より先)に処理する。legacy `$:` は全宣言の
 	// 評価後に走っていたため、呼び出しはスクリプト末尾に置く(loadChat の TDZ 回避)。
@@ -571,8 +691,41 @@
 					{initNewChat}
 				/>
 
+				{#if isAgentSession}
+					<!-- llens(#107 P3): 観測モードのバナー — read-only 表示 + 親 chat リンク + fork。
+					 Navbar は sticky z-30 + -mb-8 で後続の上 32px に被さるため、mt-8 で実ボックス直下へ
+					 押し下げ(クリック横取り回避)、z-40 で nav 下端のフェードグラデより上に描く -->
+					<div class="flex justify-center z-40 mt-8 px-4 pt-1.5">
+						<div
+							class="flex items-center gap-x-3 gap-y-1 flex-wrap justify-center rounded-lg border border-line px-3 py-1.5 text-sm text-content-muted min-w-0"
+						>
+							<div class="flex items-center gap-1.5 min-w-0">
+								<span class="i-lucide-bot size-4 block shrink-0"></span>
+								<span class="font-medium text-content truncate">{t('Agent session')}</span>
+								<span class="text-xs shrink-0">({t('Read-only')})</span>
+							</div>
+							{#if parentChatId}
+								<a
+									class="flex items-center gap-1 shrink-0 hover:text-content transition"
+									href="/c/{parentChatId}"
+								>
+									<span class="i-lucide-corner-left-up size-3.5 block"></span>
+									{t('Parent chat')}
+								</a>
+							{/if}
+							<button
+								class="flex items-center gap-1 shrink-0 hover:text-content transition"
+								onclick={forkChatHandler}
+							>
+								<span class="i-lucide-git-branch size-3.5 block"></span>
+								{t('Fork')}
+							</button>
+						</div>
+					</div>
+				{/if}
+
 				<div class="flex flex-col flex-auto z-10 w-full @container">
-					{#if $settings?.landingPageMode === 'chat' || createMessagesList(session.history, session.history.currentId).length > 0}
+					{#if isAgentSession || $settings?.landingPageMode === 'chat' || createMessagesList(session.history, session.history.currentId).length > 0}
 						<!-- OverlayScrollbars はラッパをホストに、既存のスクロール要素を viewport として張る
 						 (childViewport)— bind/onscroll/id の scroll ロジックは無改修で生きる -->
 						<div
@@ -603,6 +756,7 @@
 								<div class=" h-full w-full flex flex-col" use:pinToBottomOnResize>
 									<Messages
 										chatId={$chatId}
+										readOnly={isAgentSession}
 										bind:history={session.history}
 										bind:autoScroll={session.autoScroll}
 										bind:prompt={session.prompt}
@@ -620,39 +774,41 @@
 							</div>
 						</div>
 
-						<div class=" pb-[1rem]">
-							<MessageInput
-								history={session.history}
-								taskIds={session.taskIds}
-								selectedModels={session.selectedModels}
-								bind:files={session.files}
-								bind:prompt={session.prompt}
-								bind:autoScroll={session.autoScroll}
-								bind:atSelectedModel={session.atSelectedModel}
-								transparentBackground={!!$settings?.backgroundImageUrl}
-								stopResponse={send.stopResponse}
-								createMessagePair={send.createMessagePair}
-								onChange={(input) => {
-									if (input.prompt) {
-										localStorage.setItem(`chat-input-${$chatId}`, JSON.stringify(input));
-									} else {
-										localStorage.removeItem(`chat-input-${$chatId}`);
-									}
-								}}
-								onSubmit={async (userPrompt) => {
-									if (userPrompt || session.files.length > 0) {
-										await tick();
-										send.submitPrompt(userPrompt);
-									}
-								}}
-							/>
+						{#if !isAgentSession}
+							<div class=" pb-[1rem]">
+								<MessageInput
+									history={session.history}
+									taskIds={session.taskIds}
+									selectedModels={session.selectedModels}
+									bind:files={session.files}
+									bind:prompt={session.prompt}
+									bind:autoScroll={session.autoScroll}
+									bind:atSelectedModel={session.atSelectedModel}
+									transparentBackground={!!$settings?.backgroundImageUrl}
+									stopResponse={send.stopResponse}
+									createMessagePair={send.createMessagePair}
+									onChange={(input) => {
+										if (input.prompt) {
+											localStorage.setItem(`chat-input-${$chatId}`, JSON.stringify(input));
+										} else {
+											localStorage.removeItem(`chat-input-${$chatId}`);
+										}
+									}}
+									onSubmit={async (userPrompt) => {
+										if (userPrompt || session.files.length > 0) {
+											await tick();
+											send.submitPrompt(userPrompt);
+										}
+									}}
+								/>
 
-							<div
-								class="absolute bottom-1 text-xs text-content-muted text-center line-clamp-1 right-0 left-0"
-							>
-								<!-- {$i18n.t('LLMs can make mistakes. Verify important information.')} -->
+								<div
+									class="absolute bottom-1 text-xs text-content-muted text-center line-clamp-1 right-0 left-0"
+								>
+									<!-- {$i18n.t('LLMs can make mistakes. Verify important information.')} -->
+								</div>
 							</div>
-						</div>
+						{/if}
 					{:else}
 						<div class="overflow-auto w-full h-full flex items-center">
 							<Placeholder

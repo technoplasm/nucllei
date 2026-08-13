@@ -490,6 +490,45 @@ export const getChatById = async (id: string) => {
 	return res;
 };
 
+// llens(#107): 親チャット直下の agent session 一覧(GET /chats/{id}/children — P1 実装済み)。
+// サイドバー tree と親画面の子セッション表示が読む。
+export type ChatChildItem = {
+	id: string;
+	title: string;
+	kind: string;
+	updated_at: number;
+	created_at: number;
+	parent_message_id: string | null;
+};
+
+export const getChatChildren = async (id: string): Promise<ChatChildItem[]> => {
+	let error = null;
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/children`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getChatByShareId = async (share_id: string) => {
 	let error = null;
 

@@ -73,7 +73,8 @@
 				// セッション終了まで残り続ける)
 				clearMessageProgress(envelope.message_id ?? '');
 				// llens(#102): live usage も同型のリーク — 非表示チャットでも確定時に捨てる
-				clearLiveUsage(envelope.message_id ?? '');
+				// (store は chatId スコープ — #107 W-A。chat_id 無しの封筒は宛先が作れない)
+				clearLiveUsage(envelope.chat_id ?? '', envelope.message_id ?? '');
 
 				if ($isLastActiveTab) {
 					if ($settings?.notificationEnabled ?? false) {
@@ -108,9 +109,9 @@
 			// llens(#100): 別チャットを見ている間の進捗も記録しておく。戻ったときに
 			// 実行中の tool が「今どこか」を出せる(再アタッチは既存タスクではスキップ
 			// されるので、ここで拾わないと復元経路が無い)。
-			// message_id が無い封筒は宛先が作れず、掃除もできないので捨てる。
-			if (envelope.message_id) {
-				setToolProgress(envelope.message_id, data);
+			// chat_id / message_id が無い封筒は宛先が作れず、掃除もできないので捨てる。
+			if (envelope.chat_id && envelope.message_id) {
+				setToolProgress(envelope.chat_id, envelope.message_id, data);
 			}
 		}
 	};

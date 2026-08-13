@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { chatId } from '$lib/stores';
 	import { getLiveUsage } from '$lib/stores/live-usage.svelte';
 
 	const i18n = getContext('i18n');
@@ -17,7 +18,9 @@
 	let { label = undefined, messageId = undefined }: { label?: string | null; messageId?: string } =
 		$props();
 
-	const live = $derived(messageId ? getLiveUsage(messageId) : null);
+	// live usage は chatId スコープ(#107 W-A)。表示中チャット($chatId)の分を読む —
+	// 子セッションの readOnly transcript(別 chatId)では entry が無く rate は出ない(仕様)。
+	const live = $derived(messageId ? getLiveUsage($chatId, messageId) : null);
 	const rate = $derived(live !== null && live.rate !== null && live.rate > 0 ? live.rate : null);
 </script>
 

@@ -26,6 +26,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Markdown from './Markdown.svelte';
+	import SubagentSessionBlock from './SubagentSessionBlock.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -332,6 +333,12 @@
 									{/each}
 								</div>
 							{/if}
+						{:else if resultDisplay.kind === 'subagent'}
+							<!--
+								run_subagent の構造化結果(#107): 子 agent session のインライン表示。
+								{#if open} の内側なので、開くまで子 chat の fetch は走らない。
+							-->
+							<SubagentSessionBlock id={`${id || call.id}-subagent`} display={resultDisplay} />
 						{:else if resultDisplay.kind === 'text'}
 							<div class="text-sm font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
 								{resultDisplay.value}

@@ -190,6 +190,71 @@ describe('classifyToolResult', () => {
 		});
 	});
 
+	it('subagent 宣言: {ok, session_id, answer, ...} を分解する(#107)', () => {
+		const content = JSON.stringify({
+			ok: true,
+			session_id: 'child-chat-1',
+			answer: '調査結果は以下の通りです。',
+			usage: { prompt_tokens: 1200, completion_tokens: 340, duration: 12.3 }
+		});
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-1',
+			ok: true,
+			answer: '調査結果は以下の通りです。',
+			usage: { prompt_tokens: 1200, completion_tokens: 340, duration: 12.3 }
+		});
+	});
+
+	it('subagent 宣言: error / truncated が付いた結果も透過する(#107)', () => {
+		const content = JSON.stringify({
+			ok: false,
+			session_id: 'child-chat-2',
+			answer: '途中までの回答',
+			truncated: true,
+			error: 'agent session は停止されました(回答は途中まで)。'
+		});
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-2',
+			ok: false,
+			answer: '途中までの回答',
+			truncated: true,
+			error: 'agent session は停止されました(回答は途中まで)。'
+		});
+	});
+
+	it('subagent 宣言: usage の宣言外の形は捨てる(型に忠実)', () => {
+		const content = JSON.stringify({
+			ok: true,
+			session_id: 'child-chat-3',
+			answer: 'x',
+			usage: { prompt_tokens: '多い', total_tokens: 99 }
+		});
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-3',
+			ok: true,
+			answer: 'x'
+		});
+	});
+
+	it('subagent 宣言: session_id 不在(spawn 前バリデーションエラー)は json に落とす', () => {
+		// nucllei/utils/subagent.py の _error は {ok: false, error} だけを返す
+		const content = JSON.stringify({ ok: false, error: 'instruction は必須です。' });
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify({ ok: false, error: 'instruction は必須です。' }, null, 2)
+		});
+	});
+
+	it('subagent 宣言でも JSON でない実値は text に落とす(壊れた表示を作らない)', () => {
+		expect(classifyToolResult('boom', { kind: 'subagent' })).toEqual({
+			kind: 'text',
+			value: 'boom'
+		});
+	});
+
 	it('skill 宣言でも形が合わない実値は text に落とす(壊れた表示を作らない・解釈しない)', () => {
 		expect(classifyToolResult('{"message": "boom"}', { kind: 'skill' }).kind).toBe('text');
 		expect(

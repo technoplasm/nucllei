@@ -37,16 +37,30 @@ export interface StreamContext {
 	reply: (callId: string, result: unknown) => Promise<void>;
 }
 
-const chatHandlers = new Map<string, EnvelopeHandler>();
+// chatId → handler の Set。同一 chat_id に複数の購読者が居る(同一子 session を指す
+// run_subagent ブロックが複数展開される・観測 view とインラインブロックの併存等)ため
+// 単一スロットにしない — 後勝ち上書きは先行購読者を無通知で凍らせる。
+const chatHandlers = new Map<string, Set<EnvelopeHandler>>();
 /** 表示中でないチャットのイベント既定処理(+layout が一度だけ設定する) */
 let fallbackHandler: EnvelopeHandler | null = null;
 
 export function registerChatHandler(chatId: string, handler: EnvelopeHandler) {
-	chatHandlers.set(chatId, handler);
+	let handlers = chatHandlers.get(chatId);
+	if (!handlers) {
+		handlers = new Set();
+		chatHandlers.set(chatId, handlers);
+	}
+	handlers.add(handler);
 }
 
-export function unregisterChatHandler(chatId: string, handler?: EnvelopeHandler) {
-	if (!handler || chatHandlers.get(chatId) === handler) {
+/** 参照一致で解除する — 同一 chat_id の他の購読者は消さない */
+export function unregisterChatHandler(chatId: string, handler: EnvelopeHandler) {
+	const handlers = chatHandlers.get(chatId);
+	if (!handlers) {
+		return;
+	}
+	handlers.delete(handler);
+	if (handlers.size === 0) {
 		chatHandlers.delete(chatId);
 	}
 }
@@ -153,8 +167,12 @@ export async function consumeCompletionStream(
 					continue;
 				}
 
-				const handler = chatHandlers.get(chatId) ?? fallbackHandler;
-				if (handler) {
+				const handlers = chatHandlers.get(chatId);
+				if (handlers && handlers.size > 0) {
+					// 登録済みの全 handler へ順に配る。1 つの handler の例外(同期 throw /
+					// 非同期 reject)は他の handler・ストリーム読取りへ波及させない。
+					// 配送中の解除(done → 自 handler を unregister)に備えスナップショットで回す。
+					//
 					// 同期で適用できたイベント(戻り値なし)は await しない — await を
 					// 挟むと 1 イベントごとに microtask 境界(= Svelte の flush)が入り、
 					// BE が速いときの適用がレンダリング律速で滞留する。1 回の read で
@@ -162,7 +180,18 @@ export async function consumeCompletionStream(
 					// 速いほどチャンクに多くのイベントが乗る自己均衡)。非同期の副作用を
 					// 持つイベント(done / chat:title 等)だけ Promise が返り、順序を
 					// 保って待つ。
-					const result = handler(envelope, context);
+					for (const handler of [...handlers]) {
+						try {
+							const result = handler(envelope, context);
+							if (result) {
+								await result;
+							}
+						} catch (error) {
+							console.error('chat handler failed', chatId, error);
+						}
+					}
+				} else if (fallbackHandler) {
+					const result = fallbackHandler(envelope, context);
 					if (result) {
 						await result;
 					}

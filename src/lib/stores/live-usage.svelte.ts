@@ -5,13 +5,19 @@
  * tool-progress.svelte.ts と同じ規律で **message オブジェクトの外**に置く — message に
  * 生やすと `saveChatHandler` が history を丸ごと DB に書くため「揮発」の規律が破れる。
  *
- * - live エントリ(messageId キー): ターン進行中インジケータ(TurnIndicator)と
+ * 全 state は **chatId でスコープ**する(#107 W-A)。subagent の子セッション等、
+ * 表示中でないチャットのイベントが混ざっても、読み手(UsageChip / TurnIndicator)は
+ * 自分の chatId の値しか見ない — グローバル単一スロットだと親の floating ゲージに
+ * 別チャットの値が混線する。
+ *
+ * - live エントリ(chatId → messageId キー): ターン進行中インジケータ(TurnIndicator)と
  *   floating ゲージ(UsageChip)の生成中表示。`chat:completion` の done で破棄。
  *   tool ループでは呼び出しごとに completion_tokens が小さい値へ巻き戻る —
  *   これを新セグメントの開始と解釈してレート計算をリセットする。
- * - baseline: floating ゲージの確定値。`chat:completion {usage}`(backend がマージ済み
- *   message.usage を emit — ターン累積 completion/duration・最新 prompt・context_size)
- *   と、チャット読込時の leaf message usage から。チャット切替で resetChatUsage() する。
+ * - baseline(chatId キー): floating ゲージの確定値。`chat:completion {usage}`(backend が
+ *   マージ済み message.usage を emit — ターン累積 completion/duration・最新 prompt・
+ *   context_size)と、チャット読込時の leaf message usage から。チャット読込で
+ *   resetChatUsage(chatId) してから seed し直す。
  *
  * ターンの所要時間・平均 tok/s は backend が `usage.duration` として永続化する —
  * 表示側(MessageActions)は `message.usage` を直接読むので、この store は持たない。
@@ -51,26 +57,31 @@ export type ChatUsageBaseline = {
 /** 瞬間レートの EMA 係数。0.5 秒間隔のサンプルで数秒スケールに平滑化する。 */
 const EMA_ALPHA = 0.3;
 
-const entries = $state<Record<string, LiveUsage>>({});
+/** chatId → messageId → LiveUsage。 */
+const entries = $state<Record<string, Record<string, LiveUsage>>>({});
 
-const chatUsage = $state<{ baseline: ChatUsageBaseline | null }>({
-	baseline: null
-});
+/** chatId → baseline。 */
+const baselines = $state<Record<string, ChatUsageBaseline>>({});
 
 const asNumber = (value: unknown): number | undefined =>
 	typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
 /** SSE の `chat:usage`(モデル呼び出しの累積値)を適用する。 */
-export const setLiveUsage = (messageId: string, payload: UsagePayload | null | undefined) => {
-	if (!messageId || payload == null) {
+export const setLiveUsage = (
+	chatId: string,
+	messageId: string,
+	payload: UsagePayload | null | undefined
+) => {
+	if (!chatId || !messageId || payload == null) {
 		return;
 	}
 	const now = Date.now();
 	const completion = asNumber(payload.completion_tokens) ?? 0;
-	const previous = entries[messageId];
+	const chatEntries = (entries[chatId] ??= {});
+	const previous = chatEntries[messageId];
 
 	if (!previous) {
-		entries[messageId] = {
+		chatEntries[messageId] = {
 			prompt_tokens: asNumber(payload.prompt_tokens) ?? 0,
 			completion_tokens: completion,
 			total_tokens: asNumber(payload.total_tokens) ?? 0,
@@ -97,7 +108,7 @@ export const setLiveUsage = (messageId: string, payload: UsagePayload | null | u
 		}
 	}
 
-	entries[messageId] = {
+	chatEntries[messageId] = {
 		prompt_tokens: asNumber(payload.prompt_tokens) ?? previous.prompt_tokens,
 		completion_tokens: completion,
 		total_tokens: asNumber(payload.total_tokens) ?? previous.total_tokens,
@@ -110,12 +121,13 @@ export const setLiveUsage = (messageId: string, payload: UsagePayload | null | u
 	};
 };
 
-export const getLiveUsage = (messageId: string): LiveUsage | null => entries[messageId] ?? null;
+export const getLiveUsage = (chatId: string, messageId: string): LiveUsage | null =>
+	entries[chatId]?.[messageId] ?? null;
 
-/** 最新(直近サンプル)の生きているエントリ 1 件 — floating ゲージ用。 */
-export const getActiveLiveUsage = (): LiveUsage | null => {
+/** 当該チャットの最新(直近サンプル)の生きているエントリ 1 件 — floating ゲージ用。 */
+export const getActiveLiveUsage = (chatId: string): LiveUsage | null => {
 	let latest: LiveUsage | null = null;
-	for (const entry of Object.values(entries)) {
+	for (const entry of Object.values(entries[chatId] ?? {})) {
 		if (!latest || entry.sampledAt > latest.sampledAt) {
 			latest = entry;
 		}
@@ -124,12 +136,16 @@ export const getActiveLiveUsage = (): LiveUsage | null => {
 };
 
 /** ターン終了(done)時の破棄(揮発 — 確定値は message.usage / baseline に残る)。 */
-export const clearLiveUsage = (messageId: string) => {
-	if (!messageId) {
+export const clearLiveUsage = (chatId: string, messageId: string) => {
+	if (!chatId || !messageId) {
 		return;
 	}
-	if (entries[messageId]) {
-		delete entries[messageId];
+	const chatEntries = entries[chatId];
+	if (chatEntries?.[messageId]) {
+		delete chatEntries[messageId];
+		if (Object.keys(chatEntries).length === 0) {
+			delete entries[chatId];
+		}
 	}
 };
 
@@ -138,9 +154,15 @@ export const clearLiveUsage = (messageId: string) => {
  * またはチャット読込時の leaf message usage から。数値フィールドが 1 つも無い形は
  * 無視する(据え置き)。
  */
-export const setChatUsageBaseline = (usage: Record<string, unknown> | null | undefined) => {
+export const setChatUsageBaseline = (
+	chatId: string,
+	usage: Record<string, unknown> | null | undefined
+) => {
+	if (!chatId) {
+		return;
+	}
 	if (usage == null) {
-		chatUsage.baseline = null;
+		delete baselines[chatId];
 		return;
 	}
 	const baseline: ChatUsageBaseline = {
@@ -156,21 +178,21 @@ export const setChatUsageBaseline = (usage: Record<string, unknown> | null | und
 	) {
 		return;
 	}
-	chatUsage.baseline = baseline;
+	baselines[chatId] = baseline;
 };
 
-export const getChatUsageBaseline = (): ChatUsageBaseline | null => chatUsage.baseline;
+export const getChatUsageBaseline = (chatId: string): ChatUsageBaseline | null =>
+	baselines[chatId] ?? null;
 
 /**
- * チャット切替時のリセット。baseline に加えて live エントリも捨てる —
- * 前のチャットのエントリが残ると floating ゲージ(getActiveLiveUsage)が別チャットの
- * 値を出す。生成中のチャットへ戻れば backend が再アタッチで最新 1 件を再送してくる。
+ * チャット読込時のリセット(当該チャットのみ)。baseline に加えて live エントリも
+ * 捨てる — 前回表示時の残骸を持ち越さない。他チャットのスコープには触らない
+ * (別チャットで走行中のターンの state を消さない)。生成中のチャットへ戻れば
+ * backend が再アタッチで最新 1 件を再送してくる。
  */
-export const resetChatUsage = () => {
-	for (const key of Object.keys(entries)) {
-		delete entries[key];
-	}
-	chatUsage.baseline = null;
+export const resetChatUsage = (chatId: string) => {
+	delete entries[chatId];
+	delete baselines[chatId];
 };
 
 /**

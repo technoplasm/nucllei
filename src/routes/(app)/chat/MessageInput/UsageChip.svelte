@@ -4,7 +4,7 @@
 	// (chat:completion のマージ済み usage / leaf message usage — prompt_tokens が占有)。
 	// どちらも無ければ何も描かない(新規チャット等)。
 	// ターンごとの所要時間・tok/s はここではなく各メッセージのアクション行に出す。
-	import { mobile } from '$lib/stores';
+	import { chatId, mobile } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
 	import {
@@ -13,8 +13,10 @@
 		getChatUsageBaseline
 	} from '$lib/stores/live-usage.svelte';
 
-	const live = $derived(getActiveLiveUsage());
-	const baseline = $derived(getChatUsageBaseline());
+	// store は chatId スコープ(#107 W-A)— 表示中チャットの分だけを読む。
+	// 別チャット(subagent の子セッション含む)の生成がここに混線しない。
+	const live = $derived(getActiveLiveUsage($chatId));
+	const baseline = $derived(getChatUsageBaseline($chatId));
 
 	const current = $derived(
 		live ? live.total_tokens : (baseline?.prompt_tokens ?? baseline?.total_tokens ?? null)

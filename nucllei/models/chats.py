@@ -111,6 +111,10 @@ class ChatResponse(BaseModel):
     # llens(#19): admin の直参照ビュー(/share/{id} の admin 分岐)が
     # 削除済み(soft delete)を明示表示するため露出する
     deleted_at: Optional[int] = None
+    # llens(#107 P3): FE の /c/ 観測モードが agent session 判定と
+    # 親 chat へのリンク表示に使う
+    kind: str = "user"
+    parent_chat_id: Optional[str] = None
 
 
 class ChatTitleIdResponse(BaseModel):

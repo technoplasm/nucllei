@@ -30,8 +30,9 @@ import {
 import type { ChatMessage } from '$lib/types/chat';
 import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
 import { clearLiveUsage, setChatUsageBaseline, setLiveUsage } from '$lib/stores/live-usage.svelte';
+import { refreshChatChildren, refreshCurrentChatChildren } from '$lib/stores/chat-children.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
-import { getChatList, updateChatById } from '$lib/apis/chats';
+import { getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 import { chatCompleted, chatAction } from '$lib/apis';
 
 import { type ChatSession } from './session.svelte';
@@ -54,12 +55,18 @@ export class ChatEvents {
 		request: EventCallRequest,
 		callback: (result: unknown) => Promise<void> | void
 	) => void;
+	// llens(#107 P3): /c/ の agent session 観測モード。true の間は done の
+	// completed / 保存経路(chatCompleted・updateChatById)を駆動しない —
+	// 子ターンの完了処理・永続化は BE の内部 runner(subagent)が持ち、
+	// agent session への updateChatById は BE が 400 で拒否する。
+	#isObserver: () => boolean;
 
 	constructor({
 		session,
 		eventTarget,
 		scrollToBottom,
-		onEventCall
+		onEventCall,
+		isObserver
 	}: {
 		session: ChatSession;
 		eventTarget: EventTarget;
@@ -68,11 +75,13 @@ export class ChatEvents {
 			request: EventCallRequest,
 			callback: (result: unknown) => Promise<void> | void
 		) => void;
+		isObserver?: () => boolean;
 	}) {
 		this.#session = session;
 		this.#eventTarget = eventTarget;
 		this.#scrollToBottom = scrollToBottom;
 		this.#onEventCall = onEventCall;
+		this.#isObserver = isObserver ?? (() => false);
 	}
 
 	// wire v2: completion-streams(SSE)から届くイベント封筒を message へ適用する。
@@ -95,6 +104,15 @@ export class ChatEvents {
 
 		const message = this.#session.history.messages[messageId];
 		if (!message) {
+			// 観測モード: BE の内部 runner が子 history へ直接メッセージを積むため、
+			// fetch 済み history に無い message_id の封筒は正規に届く。無言 drop すると
+			// アタッチ済みでも view が凍る — history を読み直して追いつく
+			// (SubagentSessionBlock.refetchForUnknownMessage と同じパターン。読み直し中に
+			// 落ちたイベントは後続の間引きスナップショット到着で収束する)。
+			// 通常チャットでは従来どおり無視(自分の送信経路で必ず既知の id が積まれている)。
+			if (this.#isObserver()) {
+				this.#refetchObservedChat(get(chatId));
+			}
 			return;
 		}
 
@@ -108,6 +126,27 @@ export class ChatEvents {
 		const result = this.#applyMessageEvent(type, data, message, envelope.chat_id, reply);
 		this.#session.history.messages[messageId] = message;
 		return result;
+	};
+
+	// 観測モードで未知 message_id が届いたときの history 読み直し。走行中(in-flight)は
+	// 1 本に間引く多重発火ガード付き — 高頻度封筒ごとに GET を積まない
+	#observerRefetching = false;
+	#refetchObservedChat = (targetChatId: string) => {
+		if (this.#observerRefetching) {
+			return;
+		}
+		this.#observerRefetching = true;
+		getChatById(targetChatId)
+			.then((res) => {
+				// 読み直し中にチャットを離れていたら捨てる(別チャットの history を上書きしない)
+				if (res?.chat?.history && get(chatId) === targetChatId) {
+					this.#session.history = res.chat.history;
+				}
+			})
+			.catch(() => null)
+			.finally(() => {
+				this.#observerRefetching = false;
+			});
 	};
 
 	// completed / actions の応答 JSON に同梱される events(outlet filter / action の
@@ -153,16 +192,19 @@ export class ChatEvents {
 		if (type === 'tool:progress') {
 			// llens(#100): 実行中 tool の進捗。message には載せない(saveChatHandler が
 			// history を丸ごと送るので DB に載り、揮発の規律が破れる)。
-			setToolProgress(message.id, data);
+			setToolProgress(targetChatId, message.id, data);
 		} else if (type === 'chat:usage') {
 			// llens(#102): 生成中のトークン使用量(~0.5 秒間隔・揮発)。tool:progress と
 			// 同じ規律で message には載せない。
-			setLiveUsage(message.id, data);
+			setLiveUsage(targetChatId, message.id, data);
 		} else if (type === 'chat:completion') {
 			return this.#chatCompletionEventHandler(data, message, targetChatId);
 		} else if (type === 'chat:title') {
 			chatTitle.set(data);
 			currentChatPage.set(1);
+			// llens(#107 P3): サイドバー tree の追従(fire-and-forget — 適用順序に依存しない)。
+			// 観測モード(targetChatId = agent session)では保持中の親の children を更新する
+			void (this.#isObserver() ? refreshCurrentChatChildren() : refreshChatChildren(targetChatId));
 			return getChatList(get(currentChatPage)).then((list) => chats.set(list));
 		} else if (type === 'notification') {
 			const toastType = data?.type ?? 'info';
@@ -224,7 +266,7 @@ export class ChatEvents {
 		if (data.usage) {
 			// llens(#102): マージ済み message.usage(ターン累積 completion/duration・
 			// context_size 同梱)— floating ゲージの確定値
-			setChatUsageBaseline(data.usage);
+			setChatUsageBaseline(targetChatId, data.usage);
 		}
 
 		if (error) {
@@ -275,7 +317,7 @@ export class ChatEvents {
 		// 描画は results 到着で止まるが、セッション中ずっと居座らせない)
 		clearMessageProgress(message.id);
 		// llens(#102): live usage も揮発 — 破棄時にターン平均 tok/s を lastTurnRate へ残す
-		clearLiveUsage(message.id);
+		clearLiveUsage(targetChatId, message.id);
 
 		if (get(settings).responseAutoPlayback && !get(showCallOverlay)) {
 			await tick();
@@ -305,12 +347,20 @@ export class ChatEvents {
 		);
 
 		this.#session.history.messages[message.id] = message;
-		await this.chatCompletedHandler(
-			targetChatId,
-			message.model,
-			message.id,
-			createMessagesList(this.#session.history, message.id)
-		);
+
+		if (this.#isObserver()) {
+			// 観測モード: completed / 保存経路は駆動しない(#isObserver のコメント参照)。
+			// task の畳みと、サイドバー tree の走行スピナー更新(親の children 再取得)のみ
+			this.#session.taskIds = null;
+			void refreshCurrentChatChildren();
+		} else {
+			await this.chatCompletedHandler(
+				targetChatId,
+				message.model,
+				message.id,
+				createMessagesList(this.#session.history, message.id)
+			);
+		}
 
 		if (this.#session.autoScroll) {
 			this.#scrollToBottom();
@@ -388,6 +438,9 @@ export class ChatEvents {
 
 			currentChatPage.set(1);
 			await chats.set(await getChatList(get(currentChatPage)));
+
+			// llens(#107 P3): このターンで生えた・確定した子 agent session を tree に反映
+			await refreshChatChildren(targetChatId);
 		}
 
 		session.taskIds = null;
@@ -455,6 +508,9 @@ export class ChatEvents {
 
 			currentChatPage.set(1);
 			await chats.set(await getChatList(get(currentChatPage)));
+
+			// llens(#107 P3): action 経由でも tree を追従(completed 経路と同じ)
+			await refreshChatChildren(targetChatId);
 		}
 	};
 }

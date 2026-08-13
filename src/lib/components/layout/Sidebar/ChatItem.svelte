@@ -23,11 +23,14 @@
 		currentChatPage
 	} from '$lib/stores';
 
+	import { chatChildrenState } from '$lib/stores/chat-children.svelte';
+
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ShareChatModal from '$lib/components/chat/ShareChatModal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DragGhost from '$lib/components/common/DragGhost.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let {
 		className = '',
@@ -427,3 +430,32 @@
 		{/if}
 	</div>
 </div>
+
+<!-- llens(#107 P3): 選択中 chat の子 agent session tree。選択中(または観測中の子の親)
+     の項目の下にだけ出す(chatChildrenState は 1 親分しか持たない)。 -->
+{#if chatChildrenState.parentId === id && chatChildrenState.entries.length > 0}
+	<div class="ml-4 pl-1 flex flex-col border-s border-gray-100 dark:border-gray-900">
+		{#each chatChildrenState.entries as child (child.id)}
+			<a
+				class="w-full flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs {child.id === $chatId
+					? 'bg-sidebar-selected'
+					: 'hover:bg-sidebar-hover'}"
+				href="/c/{child.id}"
+				draggable="false"
+				onclick={() => {
+					if ($mobile) {
+						showSidebar.set(false);
+					}
+				}}
+			>
+				<span class="i-lucide-corner-down-right size-3 block shrink-0 text-content-muted"></span>
+				<div dir="auto" class="flex-1 text-left truncate" title={child.title}>
+					{child.title}
+				</div>
+				{#if child.running}
+					<Spinner className="size-3 shrink-0" />
+				{/if}
+			</a>
+		{/each}
+	</div>
+{/if}

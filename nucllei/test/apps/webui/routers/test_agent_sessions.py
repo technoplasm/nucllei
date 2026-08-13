@@ -219,6 +219,25 @@ class TestAgentSessions(AbstractPostgresTest):
             r = self.fast_api_client.get(self.create_url(f"/{parent.id}/children"))
         assert r.status_code == 401
 
+    # ---- GET /{id} の kind / parent_chat_id 露出(#107 P3: /c/ 観測モード) ----
+
+    def test_get_chat_by_id_exposes_kind_and_parent_chat_id(self):
+        parent = self._insert_chat(title="parent")
+        agent = self._insert_agent_chat(parent=parent)
+
+        with mock_webui_user(id="2"):
+            r = self.fast_api_client.get(self.create_url(f"/{agent.id}"))
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["kind"] == "agent"
+            assert body["parent_chat_id"] == parent.id
+
+            r = self.fast_api_client.get(self.create_url(f"/{parent.id}"))
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["kind"] == "user"
+            assert body["parent_chat_id"] is None
+
     # ---- cascade delete ----
 
     def test_parent_delete_cascades_to_descendants(self):

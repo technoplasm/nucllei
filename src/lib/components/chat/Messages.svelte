@@ -127,6 +127,9 @@
 	};
 
 	const updateChat = async () => {
+		// 観測 view(readOnly — /s/ 共有・#107 agent session)から誤って DB を書く
+		// 事故の防壁。UI ゲート(ボタン非表示)に依存しない defense in depth。
+		if (readOnly) return;
 		notifyHistoryChange();
 		await tick();
 		await updateChatById(chatId, {
