@@ -79,7 +79,7 @@
 		<div class="flex space-x-1.5">
 			<button
 				id="close-edit-message-button"
-				class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 text-content rounded-3xl"
+				class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-850 text-content rounded-3xl"
 				onclick={() => {
 					onCancel();
 				}}
@@ -89,7 +89,7 @@
 
 			<button
 				id="confirm-edit-message-button"
-				class=" px-4 py-2 bg-gray-900 dark:bg-white hover:bg-gray-850 text-content rounded-3xl"
+				class=" px-4 py-2 bg-gray-900 text-white hover:bg-gray-850 dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-3xl"
 				onclick={() => {
 					onSave(editedContent);
 				}}
