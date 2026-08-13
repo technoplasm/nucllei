@@ -906,10 +906,7 @@ USER_PERMISSIONS_CHAT_CLONE = (
 
 # llens(#66): chat.stt / chat.tts / chat.call フラグは廃止(STT/TTS は全員使用可 —
 # 設定は admin、tool から呼ぶ内部 API は #53)。
-
-USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = (
-    os.environ.get("USER_PERMISSIONS_CHAT_MULTIPLE_MODELS", "True").lower() == "true"
-)
+# llens(#108): chat.multiple_models も機能(マルチモデル送信)ごと廃止。
 
 
 DEFAULT_USER_PERMISSIONS = {
@@ -922,7 +919,6 @@ DEFAULT_USER_PERMISSIONS = {
         "edit": USER_PERMISSIONS_CHAT_EDIT,
         "share": USER_PERMISSIONS_CHAT_SHARE,
         "clone": USER_PERMISSIONS_CHAT_CLONE,
-        "multiple_models": USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
     },
 }
 

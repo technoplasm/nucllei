@@ -248,3 +248,20 @@ Folders/RecursiveFolder/FolderMenu)・`chat.folder_id` 列・`folder` テーブ�
 (migration `f3d7a91c5b24`)。フォルダ所属だったチャットは未分類に戻るだけで本体は残る。
 副産物: フォルダ経由のチャット一括削除だけ共有コピー行の掃除が漏れていた欠陥も、経路ごと消滅。
 ※ `common/Folder.svelte` は同名の別物(折りたたみセクション部品、Pinned で使用)で残置。
+
+## マルチモデル送信(side-by-side 応答)の撤去(#108、2026-08-13 決定・出荷)
+
+1 プロンプトを複数モデルへ同時送信し応答を横並び表示する機能(ModelSelector の「+」/
+`MultiResponseMessages`)を**仕様ごと撤去**。Pipe の「複数モデル束ね」(モデル側で 1 つに
+見せる)とは別物 — あちらは残る。
+
+- 判断の背景: サブエージェント(#107)の表示は「親子が分かる形(サイドバー tree)」で
+  行くと決定。side-by-side は「並列の枝」の表現で親子の意味論に合わず、**流用もしない**。
+  紛らわしい入口(1 プロンプト複数応答)を #107 着手前に塞いだ(以前から気になっていた部分)
+- 撤去範囲: ModelSelector 複数選択 UI / send.ts の複数モデルループ /
+  `MultiResponseMessages.svelte` / `ChatMessage.modelIdx`・user message の `models[]`(型ごと)/
+  権限 `chat.multiple_models`(FE ゲート・admin Groups UI・backend config/permission model)
+- **旧データも互換を持たない**(負の遺産を残さない — ken): migration `ff163c4b7986` が
+  既存 chat JSON から lane メタデータ(modelIdx / user message models)を剥がし、
+  chat.models を先頭 1 要素へ正規化する。複数 lane の応答自体は通常の sibling(1/N ナビ)
+  として残る(枝は有効な履歴なので消さない)

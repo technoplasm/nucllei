@@ -80,12 +80,9 @@ export interface ChatMessage {
 	// assistant のモデル情報
 	model?: string;
 	modelName?: string;
-	modelIdx?: number;
 	selectedModelId?: string;
 
 	// user 側
-	/** このターンで選択されていたモデル id 群(MultiResponseMessages の分岐キー)。 */
-	models?: string[];
 	/** モデル発話をユーザー側に置く場合のモデル id(UserMessage のプロフィール表示)。 */
 	user?: string;
 

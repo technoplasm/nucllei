@@ -17,8 +17,7 @@
 			delete: true,
 			edit: true,
 			share: true,
-			clone: false,
-			multiple_models: true
+			clone: false
 		}
 	};
 
@@ -84,14 +83,6 @@
 				</div>
 
 				<Switch bind:state={permissions.chat.clone} />
-			</div>
-
-			<div class=" flex w-full justify-between my-2 pr-2">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Allow Multiple Models in Chat')}
-				</div>
-
-				<Switch bind:state={permissions.chat.multiple_models} />
 			</div>
 		</div>
 	</div>

@@ -56,7 +56,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | `chat.delete` / `chat.edit` / `chat.file_upload` | チャット操作 | routers/chats.py・files.py(file_upload は #69 で実装 — それまで UI ミラーのみで原則 1 違反だった。生成画像の内部保存 `store_uploaded_file` はゲート対象外) |
 | `chat.share` / `chat.clone` | チャット共有・共有チャットの clone | routers/chats.py の share / clone endpoint(#41 で新設。既定 share=on / clone=off)|
 | `features.image_generation` | 画像生成 | routers/images.py `/generations`(#66 で実装済み) |
-| `chat.multiple_models` | 複数モデル同時チャット | **フロントのみ**(ModelSelector の「+」表示)。選択肢を増やす UX ゲートでありセキュリティ境界ではない(モデル自体の可視性は read ACL が担う)ため原則 1 違反とはしない — 2026-07-17 棚卸しで明記 |
+| 廃止: `chat.multiple_models` | 複数モデル同時チャット(マルチモデル送信)は **#108(2026-08-13)で機能ごと撤去** — サブエージェント(#107)は親子が分かる形(サイドバー tree)で行くため side-by-side 応答は仕様から廃棄、紛らわしい入口を塞いだ | フラグごと撤去(FE ModelSelector / admin Groups UI / backend config・permission model とも)。既存 chat の lane メタデータは migration ff163c4b7986 で正規化 |
 | 廃止: `features.code_interpreter` | code_interpreter は #23(2026-07-14)で機能ごと撤去(tool 外コード実行の裏道を残さない)。コード実行は nsjail+IPython の自前 tool 一本で、ゲートは tool の read ACL が担う | フラグごと撤去済み |
 | 廃止: `features.web_search` | web 検索は prism 層の tool が担う方針に決定(→ **#51 close 2026-07-13**: 当初「fork 組み込みツール化」案は撤回、外部検索システム直叩きに確定)。ゲートは tool の read ACL が担うため専用フラグは冗長 | フラグごと撤去(2026-07-12、refs #52/#51。フロント UI・backend config・admin Groups UI とも) |
 | 廃止: `workspace.models` / `workspace.tools` / `workspace.knowledge` 残骸 / `sharing.*` | − | 撤去済み(#66、2026-07-10) |

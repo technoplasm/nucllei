@@ -47,7 +47,7 @@
 			history: ChatHistory,
 			prompt: string,
 			parentId: string,
-			opts?: { modelId?: string | null; modelIdx?: number | null; newChat?: boolean }
+			opts?: { modelId?: string | null; newChat?: boolean }
 		) => void | Promise<void>;
 		continueResponse: () => void | Promise<void>;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
@@ -236,7 +236,6 @@
 					role: 'user',
 					content: userPrompt,
 					...(history.messages[messageId].files && { files: history.messages[messageId].files }),
-					models: selectedModels,
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
@@ -338,18 +337,6 @@
 		// Update the chat
 		await updateChat();
 	};
-
-	const triggerScroll = () => {
-		if (autoScroll) {
-			const element = document.getElementById('messages-container');
-			if (element) {
-				autoScroll = element.scrollHeight - element.scrollTop <= element.clientHeight + 50;
-			}
-			setTimeout(() => {
-				scrollToBottom();
-			}, 100);
-		}
-	};
 </script>
 
 <div class={className}>
@@ -404,14 +391,12 @@
 							{gotoMessage}
 							{showPreviousMessage}
 							{showNextMessage}
-							{updateChat}
 							{editMessage}
 							{deleteMessage}
 							{actionMessage}
 							{regenerateResponse}
 							{continueResponse}
 							{addMessages}
-							{triggerScroll}
 							{readOnly}
 						/>
 					{/each}

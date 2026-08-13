@@ -144,8 +144,7 @@ export class ChatSend {
 			role: 'user',
 			content: userPrompt,
 			files: _files.length > 0 ? _files : undefined,
-			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-			models: session.selectedModels
+			timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 		};
 
 		// Add message to history and Set currentId to messageId
@@ -166,15 +165,13 @@ export class ChatSend {
 		await this.sendPrompt(session.history, userPrompt, userMessageId, { newChat: true });
 	};
 
+	// llens(#108): マルチモデル送信は仕様ごと撤去 — 対象は常に 1 モデル。
+	// modelId 指定(再生成)が無ければ選択中モデルを使う。
 	sendPrompt = async (
 		_history: ChatHistory,
-		prompt: string,
+		_prompt: string,
 		parentId: string,
-		{
-			modelId = null,
-			modelIdx = null,
-			newChat = false
-		}: { modelId?: string | null; modelIdx?: number | null; newChat?: boolean } = {}
+		{ modelId = null, newChat = false }: { modelId?: string | null; newChat?: boolean } = {}
 	) => {
 		const session = this.#session;
 
@@ -185,46 +182,37 @@ export class ChatSend {
 		let _chatId = get(chatId);
 		_history = JSON.parse(JSON.stringify(_history));
 
-		const responseMessageIds: Record<PropertyKey, string> = {};
-		// If modelId is provided, use it, else use selected model
-		const targetModelIds = modelId ? [modelId] : session.selectedModelIds;
+		const targetModelId = modelId ?? session.selectedModelIds[0];
+		const model = get(models).find((m) => m.id === targetModelId);
+		if (!model) {
+			toast.error(this.#t(`Model {{modelId}} not found`, { modelId: targetModelId }));
+			return;
+		}
 
-		// Create response messages for each selected model
-		for (const [_modelIdx, modelId] of targetModelIds.entries()) {
-			const model = get(models)
-				.filter((m) => m.id === modelId)
-				.at(0);
+		const responseMessageId = uuidv4();
+		const responseMessage = {
+			parentId: parentId,
+			id: responseMessageId,
+			childrenIds: [],
+			role: 'assistant',
+			content: '',
+			model: model.id,
+			modelName: model.name ?? model.id,
+			userContext: null,
+			timestamp: Math.floor(Date.now() / 1000) // Unix epoch
+		};
 
-			if (model) {
-				const responseMessageId = uuidv4();
-				const responseMessage = {
-					parentId: parentId,
-					id: responseMessageId,
-					childrenIds: [],
-					role: 'assistant',
-					content: '',
-					model: model.id,
-					modelName: model.name ?? model.id,
-					modelIdx: modelIdx ? modelIdx : _modelIdx,
-					userContext: null,
-					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
-				};
+		// Add message to history and Set currentId to messageId
+		session.history.messages[responseMessageId] = responseMessage;
+		session.history.currentId = responseMessageId;
 
-				// Add message to history and Set currentId to messageId
-				session.history.messages[responseMessageId] = responseMessage;
-				session.history.currentId = responseMessageId;
-
-				// Append messageId to childrenIds of parent message
-				if (parentId !== null && session.history.messages[parentId]) {
-					// Add null check before accessing childrenIds
-					session.history.messages[parentId].childrenIds = [
-						...session.history.messages[parentId].childrenIds,
-						responseMessageId
-					];
-				}
-
-				responseMessageIds[`${modelId}-${modelIdx ? modelIdx : _modelIdx}`] = responseMessageId;
-			}
+		// Append messageId to childrenIds of parent message
+		if (parentId !== null && session.history.messages[parentId]) {
+			// Add null check before accessing childrenIds
+			session.history.messages[parentId].childrenIds = [
+				...session.history.messages[parentId].childrenIds,
+				responseMessageId
+			];
 		}
 
 		// Create new chat if newChat is true and first user message
@@ -242,43 +230,26 @@ export class ChatSend {
 		// Save chat after all messages have been created
 		await session.saveChatHandler(_chatId, _history);
 
-		await Promise.all(
-			targetModelIds.map(async (modelId, _modelIdx) => {
-				const model = get(models)
-					.filter((m) => m.id === modelId)
-					.at(0);
-
-				if (model) {
-					const messages: ChatMessage[] = createMessagesList(_history, parentId);
-					// If there are image files, check if model is vision capable
-					const hasImages = messages.some((message) =>
-						message.files?.some((file) => file.type === 'image')
-					);
-
-					if (hasImages && !(model.info?.meta?.capabilities?.vision ?? true)) {
-						toast.error(
-							this.#t('Model {{modelName}} is not vision capable', {
-								modelName: model.name ?? model.id
-							})
-						);
-					}
-
-					const responseMessageId =
-						responseMessageIds[`${modelId}-${modelIdx ? modelIdx : _modelIdx}`];
-					const responseMessage = _history.messages[responseMessageId];
-
-					// llens(#63): 個人化(Memory)は機能ごと廃止(テーブルは温存)。
-					// userContext 注入は行わない。
-					const userContext = null;
-					responseMessage.userContext = userContext;
-
-					this.#scrollToBottom();
-					await this.#sendChatCompletionRequest(_history, model, responseMessageId, _chatId);
-				} else {
-					toast.error(this.#t(`Model {{modelId}} not found`, { modelId }));
-				}
-			})
+		const messages: ChatMessage[] = createMessagesList(_history, parentId);
+		// If there are image files, check if model is vision capable
+		const hasImages = messages.some((message) =>
+			message.files?.some((file) => file.type === 'image')
 		);
+
+		if (hasImages && !(model.info?.meta?.capabilities?.vision ?? true)) {
+			toast.error(
+				this.#t('Model {{modelName}} is not vision capable', {
+					modelName: model.name ?? model.id
+				})
+			);
+		}
+
+		// llens(#63): 個人化(Memory)は機能ごと廃止(テーブルは温存)。
+		// userContext 注入は行わない。
+		_history.messages[responseMessageId].userContext = null;
+
+		this.#scrollToBottom();
+		await this.#sendChatCompletionRequest(_history, model, responseMessageId, _chatId);
 
 		currentChatPage.set(1);
 		chats.set(await getChatList(get(currentChatPage)));
@@ -498,17 +469,7 @@ export class ChatSend {
 				this.#scrollToBottom();
 			}
 
-			if ((userMessage?.models ?? [...session.selectedModels]).length == 1) {
-				// If user message has only one model selected, sendPrompt automatically selects it for regeneration
-				await this.sendPrompt(session.history, userPrompt, userMessage.id);
-			} else {
-				// If there are multiple models selected, use the model of the response message for regeneration
-				// e.g. many model chat
-				await this.sendPrompt(session.history, userPrompt, userMessage.id, {
-					modelId: message.model,
-					modelIdx: message.modelIdx
-				});
-			}
+			await this.sendPrompt(session.history, userPrompt, userMessage.id);
 		}
 	};
 
@@ -575,7 +536,6 @@ export class ChatSend {
 				model: modelId,
 				// model は id 一致で引いているため model.id === modelId — fallback は同値
 				modelName: model?.name ?? modelId,
-				modelIdx: 0,
 				timestamp: Math.floor(Date.now() / 1000)
 			};
 
@@ -647,7 +607,6 @@ export class ChatSend {
 					// model は id 一致で引いているため model.id === modelId — fallback は同値
 					model: model?.id ?? modelId,
 					modelName: model?.name ?? modelId,
-					modelIdx: 0,
 					timestamp: Math.floor(Date.now() / 1000),
 					...message
 				};

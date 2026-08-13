@@ -112,7 +112,6 @@ class ChatPermissions(BaseModel):
     edit: bool = True
     share: bool = True
     clone: bool = False
-    multiple_models: bool = True
 
 
 class UserPermissions(BaseModel):

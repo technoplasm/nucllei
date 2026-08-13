@@ -2,7 +2,6 @@
 	import { settings } from '$lib/stores';
 	import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
-	import MultiResponseMessages from './MultiResponseMessages.svelte';
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
 
@@ -14,14 +13,12 @@
 		gotoMessage,
 		showPreviousMessage,
 		showNextMessage,
-		updateChat,
 		editMessage,
 		deleteMessage,
 		actionMessage,
 		regenerateResponse,
 		continueResponse,
 		addMessages,
-		triggerScroll,
 		readOnly = false
 	}: {
 		idx?: number;
@@ -31,7 +28,6 @@
 		gotoMessage: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		updateChat: () => void | Promise<void>;
 		editMessage: (id: string, content: string, submit?: boolean) => void;
 		deleteMessage: (id: string) => void;
 		actionMessage: (
@@ -46,7 +42,6 @@
 			parentId: string;
 			messages: { role: string; content: string }[];
 		}) => void | Promise<void>;
-		triggerScroll: () => void;
 		readOnly?: boolean;
 	} = $props();
 
@@ -80,7 +75,10 @@
 				{deleteMessage}
 				{readOnly}
 			/>
-		{:else if (parentMessage?.models?.length ?? 1) === 1}
+		{:else}
+			<!-- llens(#108): マルチモデル送信は撤去 — 応答は常に単一 lane。
+			     旧データ(models.length > 1 のチャット)の応答も sibling ナビ(1/N)で
+			     そのまま閲覧できる(side-by-side renderer は削除済み) -->
 			<ResponseMessage
 				{history}
 				{messageId}
@@ -94,20 +92,6 @@
 				{deleteMessage}
 				{continueResponse}
 				{regenerateResponse}
-				{addMessages}
-				{readOnly}
-			/>
-		{:else}
-			<MultiResponseMessages
-				bind:history
-				{messageId}
-				{updateChat}
-				{editMessage}
-				{actionMessage}
-				{deleteMessage}
-				{continueResponse}
-				{regenerateResponse}
-				{triggerScroll}
 				{addMessages}
 				{readOnly}
 			/>

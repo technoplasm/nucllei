@@ -35,8 +35,7 @@
 			controls: true,
 			file_upload: true,
 			delete: true,
-			edit: true,
-			multiple_models: true
+			edit: true
 		}
 	});
 
