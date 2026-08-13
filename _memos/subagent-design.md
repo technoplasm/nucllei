@@ -81,9 +81,14 @@
 
 ## 後続(別 issue)
 
-- [x] 非同期形(#109、2026-08-14 出荷 `f06626f0a`): run_subagent の `background: true`(spawn 即返し)+
-  `await_subagent`(回収)+ FE 自動再開(ブロック検知 + 5 秒ポーリングの二段構え、
-  resume store の once ガード。非表示タブでは休止・親画面が閉じている間は再開しない)。
-  実モデル E2E で並列 fan-out / fire-and-forget / 自動再開まで PASS。
+- ~~非同期形(#109、`f06626f0a`)~~ → **廃止(2026-08-14、`f1839349c` で巻取り)**。
+  subagent 専用の background/await は「一貫した非同期の土台」(ken)に反する矮小化だった。
+  非同期は **#110 の汎用 execution エンティティ**(どの tool も `run_async` で包める curry 化
+  builtin + 進行中インジケータ)に一本化する。#109 で得た知見(shield+cancelling の待ち方・
+  FE 自動再開の二段検知・once ガード)は #110 設計の入力として引き継ぐ。
+  実モデル E2E(並列 fan-out / fire-and-forget / 自動再開)は成立を確認済み — 機構の
+  実現可能性の証拠として記録のみ残す。
+  **リリース順序(ken 決定)**: サブエージェント + #110 土台が全部できてから tag →
+  その上で llens P4。v20260814-01 は撤回済み(ghcr イメージ削除は packages スコープ待ち)。
 - 子ストリーム消費中の stop で tool result が `ok=True` + 部分回答になる(error マーク無し)—
   厳密化には子 message への interrupted マーカ永続化が要る(現状は報告のみ)
