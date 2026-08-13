@@ -639,3 +639,192 @@ class TestSkills(AbstractPostgresTest):
         result = json.loads(asyncio.run(tool["callable"](skill_id="plain")))
         assert result == {"result": "c", "tools": []}
         assert loaded == ["hooked"]
+
+    def test_replay_skill_tool_ids_from_history(self):
+        """モデル自律 load_skill の tool は履歴から再導出される(#101、入口 2 の持続)。"""
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import replay_skill_tool_ids
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="audio",
+                name="音声",
+                description="音声処理",
+                content="c",
+                tool_ids=["audio-tools"],
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "文字起こしして"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "functions.load_skill:0",
+                            "type": "function",
+                            "function": {
+                                "name": "load_skill",
+                                "arguments": '{"skill_id": "audio"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "functions.load_skill:0",
+                    "content": "{}",
+                },
+                {"role": "assistant", "content": "inspect しました"},
+                {"role": "user", "content": "やってくれ"},
+            ]
+        }
+
+        assert replay_skill_tool_ids(form_data, user, _model_with_skills(skill.id)) == [
+            "audio-tools"
+        ]
+
+        # 認可は履歴に委ねない(その場で AND 条件を再確認):
+        # モデルから skill を外したら履歴があっても復活しない
+        assert replay_skill_tool_ids(form_data, user, _model_with_skills("other")) == []
+        # 機能「スキル」OFF でも復活しない
+        assert (
+            replay_skill_tool_ids(
+                form_data,
+                user,
+                _model_with_skills(skill.id, features={"skills": False}),
+            )
+            == []
+        )
+
+        # read 不可視ユーザーにも復活しない(private skill + 他人)
+        private = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="vault",
+                name="金庫番",
+                description="d",
+                content="c",
+                tool_ids=["secret-password"],
+                access_control={},
+            ),
+        )
+        private_history = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "functions.load_skill:0",
+                            "type": "function",
+                            "function": {
+                                "name": "load_skill",
+                                "arguments": '{"skill_id": "vault"}',
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+        stranger = types.SimpleNamespace(id="9", name="Jiro")
+        assert (
+            replay_skill_tool_ids(
+                private_history, stranger, _model_with_skills(private.id)
+            )
+            == []
+        )
+        # 作成者本人なら復活する
+        assert replay_skill_tool_ids(
+            private_history, user, _model_with_skills(private.id)
+        ) == ["secret-password"]
+
+    def test_replay_skill_tool_ids_blocks_dedup_and_garbage(self):
+        """content_blocks 形も拾う / synthetic 除外 / 重複排除 / 壊れた引数は無視(#101)。"""
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import replay_skill_tool_ids
+
+        audio = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="audio",
+                name="音声",
+                description="d",
+                content="c",
+                tool_ids=["audio-tools"],
+                access_control=None,
+            ),
+        )
+        doc = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="doc",
+                name="文書",
+                description="d",
+                content="c",
+                tool_ids=["doc-tools", "audio-tools"],
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(audio.id, doc.id)
+
+        call = lambda skill_id: {  # noqa: E731
+            "id": f"functions.load_skill:{skill_id}",
+            "type": "function",
+            "function": {
+                "name": "load_skill",
+                "arguments": f'{{"skill_id": "{skill_id}"}}',
+            },
+        }
+        form_data = {
+            "messages": [
+                # OpenAI 形 + 同一 skill の重複呼び出し
+                {"role": "assistant", "content": "", "tool_calls": [call("audio")]},
+                {"role": "assistant", "content": "", "tool_calls": [call("audio")]},
+                # content_blocks 形(UI 履歴)から doc を拾う。synthetic は除外
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "content_blocks": [
+                        {"type": "tool_calls", "content": [call("doc")]},
+                        {
+                            "type": "tool_calls",
+                            "synthetic": True,
+                            "content": [call("vault")],
+                        },
+                    ],
+                },
+                # 壊れた引数・別 tool・function 欠落は無視(落ちない)
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "x",
+                            "type": "function",
+                            "function": {
+                                "name": "load_skill",
+                                "arguments": "{broken json",
+                            },
+                        },
+                        {
+                            "id": "y",
+                            "type": "function",
+                            "function": {"name": "other_tool", "arguments": "{}"},
+                        },
+                        {"id": "z", "type": "function"},
+                    ],
+                },
+            ]
+        }
+
+        # audio-tools は 1 回だけ(重複排除)、doc-tools は content_blocks 経由
+        assert replay_skill_tool_ids(form_data, user, model) == [
+            "audio-tools",
+            "doc-tools",
+        ]

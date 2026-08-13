@@ -57,6 +57,7 @@ from nucllei.utils.skills import (
     apply_skill_command,
     build_load_skill_tool,
     current_skill_activation_seeds,
+    replay_skill_tool_ids,
     skill_activation_seed_block,
 )
 from nucllei.utils.access_control import (
@@ -440,6 +441,15 @@ async def process_chat_payload(
         for tool_id in a["tool_ids"]:
             if tool_id not in skill_tool_ids:
                 skill_tool_ids.append(tool_id)
+    # llens(#101): モデル自律 load_skill(入口 2)の分は履歴から再導出する。
+    # 認可は履歴に委ねず、その場で `/command` と同じ AND 条件を再確認
+    # (詳細は replay_skill_tool_ids の docstring)。DB read を含むので
+    # ワーカースレッドで(#28 と同じ規律)。
+    for tool_id in await asyncio.to_thread(
+        replay_skill_tool_ids, form_data, user, model
+    ):
+        if tool_id not in skill_tool_ids:
+            skill_tool_ids.append(tool_id)
     if skill_tool_ids:
         skill_tools = await asyncio.to_thread(
             get_tools,

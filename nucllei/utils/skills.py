@@ -172,6 +172,78 @@ def apply_skill_command(form_data, user, model):
     return form_data, activations
 
 
+def replay_skill_tool_ids(form_data, user, model) -> list[str]:
+    """履歴中の load_skill 呼び出しから skill の tool_ids を再導出する(issue #101)。
+
+    モデル自律の load_skill(入口 2)は発火ターンの tools_dict に足すだけで、
+    次のリクエストで再導出する経路が無かった — `/command`(入口 1)が毎リクエスト
+    再導出されるのと非対称で、「1 ターン目に軽い tool → 2 ターン目に本命」の
+    自然な流れで tool not available になる。ここで履歴(form_data["messages"])の
+    assistant tool_calls / content_blocks から load_skill 発火を拾い直す。
+
+    **認可を履歴に委ねない**: 履歴はクライアント入力なので「過去に呼ばれた事実」は
+    根拠にせず、`/command` と同じ AND 条件(機能「スキル」有効 ∧ モデル紐づき
+    meta.skillIds ∧ read 可視)をその場で再確認する。preset から skill を外せば
+    履歴があっても tool は復活しない。
+
+    skill 本文の再注入はしない(tool result として履歴に残っている)。headless
+    (chat_id 無し)でも messages は来るので同じ処理で足りる。
+
+    将来の動的 tool 源(MCP 等)を足すときもこの形を踏襲する: 「導入 tool の
+    持続性は会話履歴が唯一の状態」+「復活時はその場で再認可」。tool_calls の
+    走査は function.name で分岐しているので、別の導入 tool 名を足す拡張点は
+    この関数に閉じる。
+    """
+    if not is_skills_feature_enabled(model):
+        return []
+    model_skill_ids = set(get_model_skill_ids(model))
+    if not model_skill_ids:
+        return []
+
+    tool_ids: list[str] = []
+    seen_skill_ids: set[str] = set()
+
+    def collect(skill_id):
+        if not isinstance(skill_id, str):
+            return
+        skill_id = normalize_command(skill_id)
+        if not skill_id or skill_id in seen_skill_ids:
+            return
+        seen_skill_ids.add(skill_id)
+        skill = Skills.get_skill_by_id(skill_id)
+        if (
+            skill is None
+            or skill.id not in model_skill_ids
+            or not is_skill_visible(skill, user)
+        ):
+            return
+        for tool_id in skill.tool_ids or []:
+            if tool_id not in tool_ids:
+                tool_ids.append(tool_id)
+
+    for message in form_data.get("messages", []):
+        if message.get("role") != "assistant":
+            continue
+        calls = list(message.get("tool_calls") or [])
+        # UI 由来の履歴が content_blocks 形で来る経路にも備える(synthetic =
+        # `/command` の合成 exchange は apply_skill_command が毎回再導出するので除外)
+        for block in message.get("content_blocks") or []:
+            if block.get("type") == "tool_calls" and not block.get("synthetic"):
+                calls.extend(block.get("content") or [])
+        for call in calls:
+            function = (call or {}).get("function") or {}
+            if function.get("name") != "load_skill":
+                continue
+            try:
+                arguments = json.loads(function.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                continue
+            if isinstance(arguments, dict):
+                collect(arguments.get("skill_id"))
+
+    return tool_ids
+
+
 def current_skill_activation_seeds(skill_activations) -> list:
     """今回のターンの `/command` 発火を UI seed 用 metadata に載せる形へ絞る。
 
