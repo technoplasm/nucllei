@@ -59,6 +59,21 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
 - 生のモデルフレーム(choices)はクライアントへ流れない(assembler 経由イベントのみ)。
 - 旧方式(テキストデルタごとに全文スナップショット)は **O(n²) ワイヤ帯域**だった — 戻さない。
 
+## FE の適用は同期一括(2026-08-13、#103 `41b98d06a`)
+
+- **1 封筒ごとに await を挟まない**。旧実装は chatEventHandler が封筒ごとに
+  `await tick()`(= Svelte のフル flush + markdown 再レンダリング)を強制する直列処理で、
+  BE の配信が速い(SGLang ~200 tok/s)とレンダリング律速で適用が滞留した。症状:
+  文字の流れの遅延 / 生成完了後も「準備中」スピナー常駐 / リロードすると全文出現。
+- 現契約: `EnvelopeHandler` は**同期で完結するイベント(delta / chat:usage / tool:progress /
+  applyMessageMutation 系)では戻り値なし**、非同期の副作用を持つイベント
+  (done の completed 経路・chat:title・__event_call__)だけ Promise を返す。
+  `consumeCompletionStream` は**戻り値が falsy なら await しない**(`await undefined` でも
+  microtask 境界 = flush が入るため)。1 回の read で届いた分が同期一括適用 = flush 1 回に
+  まとまり、BE が FE より速いほどチャンクに多くの封筒が乗る(自己均衡)。
+- ハンドラに await を足すときは「高頻度イベントの経路か」を必ず確認 — delta 経路に
+  await を戻すと本節の症状が再発する。
+
 ## chat-wire の `id` はアシスタントメッセージの id(2026-08-05、#98 `e73945a35`)
 
 - `POST /api/chat/completions` の chat-wire モード(`chat_id` + `id`)で、**`id` は
