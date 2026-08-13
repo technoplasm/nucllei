@@ -13,6 +13,7 @@ valves は環境ごとの接続先(cage / SGLang)を --cage / --sglang で調整
 """
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -121,7 +122,9 @@ def parse_skill(path):
         meta[key.strip()] = value.strip()
     name = meta.get("name", path.stem)
     description = meta.get("description", "").strip('"')
-    tool_ids = json.loads(meta.get("tool_ids") or "[]")
+    # YAML の flow list は単引用符も可(large-file-handling.md が実例)なので
+    # json.loads でなく literal_eval で読む
+    tool_ids = ast.literal_eval(meta.get("tool_ids") or "[]")
     return name, description, tool_ids, body
 
 
@@ -153,8 +156,67 @@ def upsert_skill(base, token, skill_id, path):
     print(f"[skill] {verb} OK: {skill_id} (tools={tool_ids})")
 
 
-def wire_preset(base, token, model_id, tool_ids, skill_ids):
-    """preset の meta.toolIds / meta.skillIds に追記する(既存は保持)。"""
+# spawnable な子 preset(run_subagent の飛び先、#107)。seed が親 preset と同じ
+# base model で upsert し、親の meta.subagentPresetIds に配線する。
+SUBAGENT_PRESET_ID = "sub-worker"
+
+
+def ensure_subagent_preset(base, token, parent_model_id):
+    """親 preset と同じ base model の spawnable 子 preset を upsert して id を返す。"""
+    status, parent = _req(
+        "GET", f"{base}/api/v1/models/model?id={parent_model_id}", token
+    )
+    if status != 200 or not parent:
+        print(
+            f"[model] {parent_model_id} 取得失敗 status={status}: {parent}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    status, existing = _req(
+        "GET", f"{base}/api/v1/models/model?id={SUBAGENT_PRESET_ID}", token
+    )
+    if status == 200 and existing:
+        # 既存 meta / params は保持し、base の追従と有効化だけ行う
+        meta = existing.get("meta") or {}
+        params = existing.get("params") or {}
+    else:
+        existing = None
+        meta = {}
+        params = {}
+    meta["description"] = "subagent 検証用の spawnable 子 preset(seed.py が管理)"
+    form = {
+        "id": SUBAGENT_PRESET_ID,
+        "base_model_id": parent.get("base_model_id"),
+        "name": "Sub Worker",
+        "meta": meta,
+        "params": params,
+        "access_control": None,
+        "is_active": True,
+    }
+    if existing:
+        status, payload = _req(
+            "POST",
+            f"{base}/api/v1/models/model/update?id={SUBAGENT_PRESET_ID}",
+            token,
+            form,
+        )
+        verb = "update"
+    else:
+        status, payload = _req("POST", f"{base}/api/v1/models/create", token, form)
+        verb = "create"
+    if status != 200:
+        print(
+            f"[model] {SUBAGENT_PRESET_ID} {verb} 失敗 status={status}: {payload}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"[model] {verb} OK: {SUBAGENT_PRESET_ID} (base={form['base_model_id']})")
+    return SUBAGENT_PRESET_ID
+
+
+def wire_preset(base, token, model_id, tool_ids, skill_ids, subagent_preset_ids):
+    """preset の meta.toolIds / meta.skillIds / meta.subagentPresetIds に追記する(既存は保持)。"""
     status, model = _req("GET", f"{base}/api/v1/models/model?id={model_id}", token)
     if status != 200 or not model:
         print(f"[model] {model_id} 取得失敗 status={status}: {model}", file=sys.stderr)
@@ -162,6 +224,9 @@ def wire_preset(base, token, model_id, tool_ids, skill_ids):
     meta = model.get("meta") or {}
     meta["toolIds"] = list(dict.fromkeys((meta.get("toolIds") or []) + tool_ids))
     meta["skillIds"] = list(dict.fromkeys((meta.get("skillIds") or []) + skill_ids))
+    meta["subagentPresetIds"] = list(
+        dict.fromkeys((meta.get("subagentPresetIds") or []) + subagent_preset_ids)
+    )
     form = {
         "id": model["id"],
         "base_model_id": model.get("base_model_id"),
@@ -181,6 +246,7 @@ def wire_preset(base, token, model_id, tool_ids, skill_ids):
     print(f"[model] OK {model_id}")
     print(f"[model]   toolIds={new_meta.get('toolIds')}")
     print(f"[model]   skillIds={new_meta.get('skillIds')}")
+    print(f"[model]   subagentPresetIds={new_meta.get('subagentPresetIds')}")
     # MODELS キャッシュ再構築(これをしないと manifest に反映されない)
     _req("GET", f"{base}/api/models", token)
 
@@ -219,7 +285,15 @@ def main():
     preset_tools = [tid for tid, e in TOOLS.items() if e["preset"]]
     # view_image は builtin から外し、prism 側 tool `feed_image` に一本化(#89 改訂)。
     # dev preset への露出は prism tool を seed する側で足す。
-    wire_preset(base, args.token, args.model, preset_tools, skill_ids)
+    subagent_preset_id = ensure_subagent_preset(base, args.token, args.model)
+    wire_preset(
+        base,
+        args.token,
+        args.model,
+        preset_tools,
+        skill_ids,
+        [subagent_preset_id],
+    )
     print("完了")
 
 

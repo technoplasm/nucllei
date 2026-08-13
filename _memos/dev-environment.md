@@ -297,6 +297,25 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    filter — usage 捕捉・stream_options 注入・累積 state・context_size valve は一切不要
    (本体が全部やる)。表示例: `🟢 0.4% | 1.2k/256.0k | IN 1.2k / OUT累計 766`。
    llens 現行 token_meter を簡素化する際の参照実装。
+8. **subagent fixture(#107 検証用、2026-08-13)**: `nucllei/tools/seed.py` が spawnable な
+   子 preset **`sub-worker`**(親 preset と同じ `base_model_id`)を upsert し、親 preset の
+   `meta.subagentPresetIds` に配線する(llens 一次コンテンツの tools/skills 登録と同時に走る):
+   ```sh
+   python3 nucllei/tools/seed.py --token "$TOKEN" --model llens-thinking
+   ```
+   - `--model` の既定は旧名 `llens-assistant` のままなので dev では
+     **`--model llens-thinking` を明示**する(preset 改名は「セッション追補(2026-07-22)」参照)。
+   - 機能フラグ `meta.features.subagent` は既定 ON なので配線だけで `run_subagent` が
+     tool enum に出る(条件 = フラグ ON ∧ `subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1 —
+     `nucllei/utils/subagent.py`)。seed が末尾で `GET /api/models` を叩くので
+     MODELS キャッシュ再構築も済んでいる(手動で meta を書いた場合は自分で叩くこと)。
+   - **ollama でも動く**: `sub-worker` は親 preset の `base_model_id` を引き継ぐだけなので、
+     親を ollama ベース(例: base=`gpt-oss:20b` の preset)にして seed すれば
+     SGLang 不達環境でも子ターンまでローカルで完結する。
+   - 検証: 親 chat で「run_subagent で〜を調べて」等と指示 → 子 agent session
+     (chat.kind=`agent`)が作られ、tool result に `session_id` が載る。子一覧は
+     `GET /api/v1/chats/{id}/children`(サイドバーの通常一覧には kind=agent は出ない)。
+     再実行は冪等(sub-worker は update、subagentPresetIds は dedup 追記)。
 
 ## モデルフレーム fixture(SGLang × Kimi 実キャプチャ)
 

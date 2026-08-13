@@ -59,14 +59,25 @@
 
 - [x] P1 エンティティ + spawn 基盤(`4a583200c`)
 - [x] P2 builtin tool + preset 管理(`0048adc87`)
-- [ ] P3 web UI: tree ネスト表示(render descriptor `{kind:"subagent"}` は BE 側発行済み・FE は text フォールバック中)+
-      live 購読(**前提: live-usage store の chatId スコープ化** — グローバル store に子 usage が混線する)+
-      fork 導線 + サイドバー(通常一覧から分離済み。/c/ で選択中の chat の下に子を tree 展開 — 2026-08-13 ken 要件。
-      children API は実装済み)
+- [x] P3 web UI(2026-08-13 出荷): live-usage / tool-progress store の chatId スコープ化(前提作業)/
+      `SubagentSessionBlock`(tool ブロック内の遅延インライン表示・live 追従・fork/開く/停止)/
+      サイドバー tree(/c/ で選択中の chat の項目下に子を展開、子の観測中は親の下に出し続ける)/
+      /c/ 観測モード(readOnly バナー・親リンク・fork。events の isObserver ガードで DB 書き込み経路を遮断)。
+      `chatHandlers` は chatId→Set に多重化(同一 session の複数ブロック展開対応)。
+      観測モードは 5 秒ポーリングで継続 turn の新 task に追従
+- [x] dev fixture: `tools/seed.py` に `ensure_subagent_preset`(sub-worker)+ `wire_preset` の
+      subagentPresetIds 配線(dev-environment.md 項目 8)
 - [ ] P4 llens 追従: `tools/subagent.py`(486 行)置換。資料ハンドリング 9 ガード
       (所有者チェック/max_input_chars 等 — `llens:nucllei/tests/test_tool_guards.py` が固定)維持。
       skill `large-file-handling.md`・プロンプト・audio_tools の案内文も追随必要
-- [ ] dev fixture: spawnable preset の組を `tools/seed.py` の wire_preset に追加(dev-environment.md へ追記)
+
+## P3 の既知の意図的挙動
+
+- 子の live usage はグローバル store に書かない(親の floating ゲージへの混線を構造的に断つ)。
+  子ターンの usage は persisted 値(message.usage)で完走後に見える
+- 折りたたみ中/非表示の子完了で fallback の完了トーストが出る — クリックで /c/ 観測 view に飛べるので v1 許容
+- 観測モードで子の `__event_call__`(confirmation/input)に応答できる — #106 の降格ポリシー
+  「reply 先が居れば既存機構で成立」と一致する意図的挙動(read-only は履歴の書き手の話)
 
 ## 後続(別 issue)
 
