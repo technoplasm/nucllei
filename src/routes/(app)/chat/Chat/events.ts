@@ -78,13 +78,18 @@ export class ChatEvents {
 	// wire v2: completion-streams(SSE)から届くイベント封筒を message へ適用する。
 	// 表示中チャットのハンドラとして registerChatHandler で登録される
 	// (登録・解除が同一参照で行えるようアロー・フィールドで束縛している)。
-	chatEventHandler = async (envelope: CompletionEnvelope, context: StreamContext) => {
+	//
+	// 高頻度イベント(delta / chat:usage 等)は**同期で適用して戻り値なし**
+	// (await を挟むと 1 イベントごとに microtask 境界 = Svelte の flush が入り、
+	// BE が速いときの適用がレンダリング律速で滞留する — 生成完了後も「準備中」の
+	// まま固まって見える実害)。副作用が非同期のイベント(done の completed 経路・
+	// chat:title 等)だけ Promise を返し、consumeCompletionStream が順序を保って待つ。
+	chatEventHandler = (envelope: CompletionEnvelope, context: StreamContext): void | Promise<void> => {
 		const messageId = envelope.message_id;
 		if (envelope.chat_id !== get(chatId) || !messageId) {
 			return;
 		}
 
-		await tick();
 		const message = this.#session.history.messages[messageId];
 		if (!message) {
 			return;
@@ -97,8 +102,9 @@ export class ChatEvents {
 		const callId = envelope.call_id;
 		const reply = callId ? (result: unknown) => context.reply(callId, result) : null;
 
-		await this.#applyMessageEvent(type, data, message, envelope.chat_id, reply);
+		const result = this.#applyMessageEvent(type, data, message, envelope.chat_id, reply);
 		this.#session.history.messages[messageId] = message;
+		return result;
 	};
 
 	// completed / actions の応答 JSON に同梱される events(outlet filter / action の
@@ -126,13 +132,15 @@ export class ChatEvents {
 		this.#session.history.messages[messageId] = message;
 	};
 
-	#applyMessageEvent = async (
+	// 同期で完結するイベントは戻り値なし、非同期の副作用を持つイベントだけ
+	// Promise を返す(chatEventHandler のコメント参照)。
+	#applyMessageEvent = (
 		type: string | null,
 		data: any,
 		message: ChatMessage,
 		targetChatId: string,
 		reply: ((result: unknown) => Promise<void>) | null
-	) => {
+	): void | Promise<void> => {
 		// message の状態だけを変えるイベント(status / task-cancelled / delta / files /
 		// source 等)は純関数層(chat-events.ts)で適用する
 		if (applyMessageMutation(type, data, message)) {
@@ -148,11 +156,11 @@ export class ChatEvents {
 			// 同じ規律で message には載せない。
 			setLiveUsage(message.id, data);
 		} else if (type === 'chat:completion') {
-			await this.#chatCompletionEventHandler(data, message, targetChatId);
+			return this.#chatCompletionEventHandler(data, message, targetChatId);
 		} else if (type === 'chat:title') {
 			chatTitle.set(data);
 			currentChatPage.set(1);
-			await chats.set(await getChatList(get(currentChatPage)));
+			return getChatList(get(currentChatPage)).then((list) => chats.set(list));
 		} else if (type === 'notification') {
 			const toastType = data?.type ?? 'info';
 			const toastContent = data?.content ?? '';
@@ -202,11 +210,12 @@ export class ChatEvents {
 	// wire v2: chat:completion の data(スナップショット / delta / done / error / usage /
 	// sources)の message への適用は純関数 applyCompletionData に一元化。ここは
 	// 戻りフラグで副作用(TTS・haptic・自動スクロール・done 時の completed 経路)を駆動する。
-	#chatCompletionEventHandler = async (
+	// 高頻度の delta / スナップショットは同期で完結し、done のときだけ Promise を返す。
+	#chatCompletionEventHandler = (
 		data: CompletionData,
 		message: ChatMessage,
 		targetChatId: string
-	) => {
+	): void | Promise<void> => {
 		const { contentChanged, done, error } = applyCompletionData(message, data);
 
 		if (data.usage) {
@@ -249,47 +258,56 @@ export class ChatEvents {
 		this.#session.history.messages[message.id] = message;
 
 		if (done) {
-			// llens(#100): 進捗は揮発。確定したメッセージの分は捨てる(残しても
-			// 描画は results 到着で止まるが、セッション中ずっと居座らせない)
-			clearMessageProgress(message.id);
-			// llens(#102): live usage も揮発 — 破棄時にターン平均 tok/s を lastTurnRate へ残す
-			clearLiveUsage(message.id);
+			return this.#finishCompletion(message, targetChatId);
+		}
 
-			if (get(settings).responseAutoPlayback && !get(showCallOverlay)) {
-				await tick();
-				document.getElementById(`speak-button-${message.id}`)?.click();
-			}
+		if (this.#session.autoScroll) {
+			this.#scrollToBottom();
+		}
+	};
 
-			// Emit chat event for TTS
-			const lastMessageContentPart =
-				getMessageContentParts(
-					message.content,
-					get(config)?.audio?.tts?.split_on ?? 'punctuation'
-				)?.at(-1) ?? '';
-			if (lastMessageContentPart) {
-				this.#eventTarget.dispatchEvent(
-					new CustomEvent('chat', {
-						detail: { id: message.id, content: lastMessageContentPart }
-					})
-				);
-			}
+	// done の後処理(TTS 発話・chat:finish・completed 経路)— ターンに 1 回の低頻度パス
+	#finishCompletion = async (message: ChatMessage, targetChatId: string) => {
+		// llens(#100): 進捗は揮発。確定したメッセージの分は捨てる(残しても
+		// 描画は results 到着で止まるが、セッション中ずっと居座らせない)
+		clearMessageProgress(message.id);
+		// llens(#102): live usage も揮発 — 破棄時にターン平均 tok/s を lastTurnRate へ残す
+		clearLiveUsage(message.id);
+
+		if (get(settings).responseAutoPlayback && !get(showCallOverlay)) {
+			await tick();
+			document.getElementById(`speak-button-${message.id}`)?.click();
+		}
+
+		// Emit chat event for TTS
+		const lastMessageContentPart =
+			getMessageContentParts(
+				message.content,
+				get(config)?.audio?.tts?.split_on ?? 'punctuation'
+			)?.at(-1) ?? '';
+		if (lastMessageContentPart) {
 			this.#eventTarget.dispatchEvent(
-				new CustomEvent('chat:finish', {
-					detail: {
-						id: message.id,
-						content: message.content
-					}
+				new CustomEvent('chat', {
+					detail: { id: message.id, content: lastMessageContentPart }
 				})
 			);
-
-			this.#session.history.messages[message.id] = message;
-			await this.chatCompletedHandler(
-				targetChatId,
-				message.model,
-				message.id,
-				createMessagesList(this.#session.history, message.id)
-			);
 		}
+		this.#eventTarget.dispatchEvent(
+			new CustomEvent('chat:finish', {
+				detail: {
+					id: message.id,
+					content: message.content
+				}
+			})
+		);
+
+		this.#session.history.messages[message.id] = message;
+		await this.chatCompletedHandler(
+			targetChatId,
+			message.model,
+			message.id,
+			createMessagesList(this.#session.history, message.id)
+		);
 
 		if (this.#session.autoScroll) {
 			this.#scrollToBottom();

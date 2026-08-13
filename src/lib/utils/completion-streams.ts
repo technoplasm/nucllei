@@ -155,7 +155,17 @@ export async function consumeCompletionStream(
 
 				const handler = chatHandlers.get(chatId) ?? fallbackHandler;
 				if (handler) {
-					await handler(envelope, context);
+					// 同期で適用できたイベント(戻り値なし)は await しない — await を
+					// 挟むと 1 イベントごとに microtask 境界(= Svelte の flush)が入り、
+					// BE が速いときの適用がレンダリング律速で滞留する。1 回の read で
+					// 届いた分は同期一括適用 = flush 1 回に自然にまとまる(BE が FE より
+					// 速いほどチャンクに多くのイベントが乗る自己均衡)。非同期の副作用を
+					// 持つイベント(done / chat:title 等)だけ Promise が返り、順序を
+					// 保って待つ。
+					const result = handler(envelope, context);
+					if (result) {
+						await result;
+					}
 				}
 			}
 		}
