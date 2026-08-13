@@ -17,7 +17,8 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
-	import { chats, currentChatPage, models } from '$lib/stores';
+	import { chatId, chats, currentChatPage, models } from '$lib/stores';
+	import { requestSubagentResume } from '$lib/stores/subagent-resume.svelte';
 	import { getChatById, cloneChatById, getChatList } from '$lib/apis/chats';
 	import { getTaskIdsByChatId, stopTask } from '$lib/apis';
 	import {
@@ -51,6 +52,26 @@
 	// 結果 JSON は確定済みで変異しない — 初期値で固定してよい(意図的な初期値キャプチャ)
 	// svelte-ignore state_referenced_locally
 	const sessionId = display.sessionId;
+
+	// #109: background spawn の即返し結果(status: "running")を表示中か。
+	// svelte-ignore state_referenced_locally
+	const spawnRunning = display.status === 'running';
+
+	// #109: spawn 即返し結果の表示中に子の done を検知したら、親ターンの自動再開を
+	// resume store へ要求する。enqueue は session 単位 once(store 側)。
+	// 「親 chat 表示中 ∧ turn 非走行」ガード・処理済み drop・自動送信は Chat.svelte が持つ
+	// (観測モード /c/ では Chat 側ガードにより送信されない)。
+	// 自動送信された turn の await_subagent 結果は answer 形(status 無し)なので、
+	// ここの検知対象に戻らない — 再開ループは構造的に閉じない。
+	const requestResumeIfSpawnRunning = () => {
+		if (!spawnRunning) {
+			return;
+		}
+		const parentChatId = $chatId;
+		if (parentChatId) {
+			requestSubagentResume(parentChatId, sessionId);
+		}
+	};
 
 	// 入れ子深さ(表示は深さ 1 で切る)。setContext は init 時のみ有効なので
 	// ここで固定する。
@@ -128,6 +149,8 @@
 		// 確定状態(persisted usage / done)へ置換
 		await fetchChat();
 		markSettled();
+		// #109: live 追従中の完走検知 — spawn 即返し結果なら親ターンの再開を要求
+		requestResumeIfSpawnRunning();
 	};
 
 	const envelopeHandler = (envelope: CompletionEnvelope): void | Promise<void> => {
@@ -189,6 +212,10 @@
 				}
 			} else {
 				markSettled();
+				// #109: マウント時点で既に完走済み(折りたたみ中に子が終わっていた等)。
+				// spawn 即返し結果なら done 検知として親ターンの再開を要求する — 回収済みの
+				// 古い履歴での再検知は Chat.svelte が isSubagentResumeHandled で drop する
+				requestResumeIfSpawnRunning();
 			}
 			status = 'ready';
 		})();

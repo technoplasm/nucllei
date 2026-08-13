@@ -680,6 +680,33 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   `/openapi.json` operations are exposed as tools and invoked over HTTP (no
   reserved-param injection there).
 
+### 5.8 Subagents (`run_subagent` / `await_subagent`)
+
+When a model preset lists agent presets in `meta.subagentPresetIds` (and
+`meta.features.subagent` is not set to `false`), two pseudo-tools are mounted
+together on the parent chat's tool loop:
+
+- `run_subagent(preset_id, instruction, session_id?, background?)` — spawns a
+  child **agent session** (a first-class chat with `kind: "agent"`, linked to
+  the parent chat/message) and runs one turn on the selected preset. Returns
+  `{ok, session_id, answer, usage?, truncated?}` — the child's final assistant
+  text only (8000 chars max), never the transcript. Pass `session_id` instead
+  of `preset_id` to send a follow-up instruction to an existing session. With
+  `background: true` it returns `{ok, session_id, status: "running"}` right
+  after the child turn starts; the child keeps running even after the parent
+  turn ends.
+- `await_subagent(session_id)` — collects a session's result: waits for a
+  running turn to finish, or returns immediately when it is already done, with
+  the same `{ok, session_id, answer, usage?}` shape. Stopping the parent turn
+  while awaiting does **not** stop the background child.
+
+Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
+concurrency `SUBAGENT_MAX_CONCURRENT` (default 4 — spawns over the limit fail
+immediately, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT`
+(default 1800 s). Agent sessions never appear in the user's chat list, are
+read-only over HTTP, and are cascade-deleted (running turns stopped) with the
+parent chat.
+
 ---
 
 ## 6. Writing Skills

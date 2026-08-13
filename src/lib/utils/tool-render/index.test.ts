@@ -239,6 +239,42 @@ describe('classifyToolResult', () => {
 		});
 	});
 
+	it('subagent 宣言: {ok, session_id, status: "running"}(background 即返し形)を受ける(#109)', () => {
+		const content = JSON.stringify({ ok: true, session_id: 'child-chat-4', status: 'running' });
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-4',
+			ok: true,
+			answer: '',
+			status: 'running'
+		});
+	});
+
+	it('subagent 宣言: answer 無しで status も running でない形は json に落とす(型に忠実)', () => {
+		const content = JSON.stringify({ ok: true, session_id: 'child-chat-5', status: 'queued' });
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify({ ok: true, session_id: 'child-chat-5', status: 'queued' }, null, 2)
+		});
+	});
+
+	it('subagent 宣言: answer 付き(完走形)に status が紛れても answer 形として扱う', () => {
+		// BE の完走形は status を同梱しない(#109)。仮に紛れても running 扱いにしない —
+		// answer の有無が権威
+		const content = JSON.stringify({
+			ok: true,
+			session_id: 'child-chat-6',
+			answer: '完了しました。',
+			status: 'running'
+		});
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-6',
+			ok: true,
+			answer: '完了しました。'
+		});
+	});
+
 	it('subagent 宣言: session_id 不在(spawn 前バリデーションエラー)は json に落とす', () => {
 		// nucllei/utils/subagent.py の _error は {ok: false, error} だけを返す
 		const content = JSON.stringify({ ok: false, error: 'instruction は必須です。' });

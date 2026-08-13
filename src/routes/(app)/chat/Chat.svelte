@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { PaneGroup, Pane } from 'paneforge';
 
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, tick, untrack } from 'svelte';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
 	import { toast } from 'svelte-sonner';
@@ -41,6 +41,16 @@
 	import { resetChatUsage, setChatUsageBaseline } from '$lib/stores/live-usage.svelte';
 	import { clearChatProgress } from '$lib/stores/tool-progress.svelte';
 	import { clearChatChildren, refreshChatChildren } from '$lib/stores/chat-children.svelte';
+	import {
+		buildSubagentResumeMessage,
+		isSubagentResumeHandled,
+		isSubagentResumeRequested,
+		listRunningSubagentSpawns,
+		peekSubagentResume,
+		requestSubagentResume,
+		subagentResumeState,
+		takeSubagentResume
+	} from '$lib/stores/subagent-resume.svelte';
 
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
@@ -135,9 +145,134 @@
 		scrollToBottom,
 		onEventCall,
 		// 観測モードでは done の completed / 保存経路を駆動しない(events.ts 参照)
-		isObserver: () => isAgentSession
+		isObserver: () => isAgentSession,
+		// llens(#109): turn 終了(completed / 保存済み)で subagent 自動再開を再評価
+		onTurnEnd: () => {
+			void maybeResumeSubagent();
+		}
 	});
 	const send = new ChatSend({ session, events, t, eventTarget, scrollToBottom });
+
+	// llens(#109): background subagent の完了(SubagentSessionBlock → subagent-resume store)
+	// を受けて親ターンを自動再開する。定型 user メッセージを既存送信経路(send.submitPrompt)
+	// で送る。ガード(無限ループ・競合防止):
+	// - 親 chat 表示中(loading / notFound / 観測モードでない)∧ turn 非走行 —
+	//   走行中は送らず、events の onTurnEnd(turn 終了)で再評価する
+	// - session 単位 once は store 側(enqueue が 1 回)。自動送信した turn の
+	//   await_subagent 結果は answer 形なので新たな要求を生まない(検知対象外)
+	// - リロード後の再検知は isSubagentResumeHandled(履歴に定型文 or 回収済み結果)で drop
+	// - 入力中(draft prompt / 添付ファイル)には割り込まない(変化時に再評価される)
+	let subagentResumeInFlight = false;
+	const maybeResumeSubagent = async () => {
+		if (subagentResumeInFlight || loading || notFound || isAgentSession) {
+			return;
+		}
+		const targetChatId = $chatId;
+		if (!targetChatId || !peekSubagentResume(targetChatId)) {
+			return;
+		}
+		// turn 走行中は何もしない(送信経路の done ガードで空振りさせず、要求を残す)
+		if ((session.taskIds ?? []).length > 0) {
+			return;
+		}
+		const lastMessage = createMessagesList(session.history, session.history.currentId).at(-1);
+		if (lastMessage && lastMessage.done !== true) {
+			return;
+		}
+		// 直前応答が本文なしエラーだと submitPrompt が弾く — 自動送信でトーストを出さない
+		if (lastMessage && lastMessage.error && !lastMessage.content) {
+			return;
+		}
+		// ユーザーの入力中に割り込まない(prompt / files が空くと $effect が再評価する)
+		if (session.prompt !== '' || session.files.length > 0) {
+			return;
+		}
+		if (session.selectedModels.length === 0 || session.selectedModels.includes('')) {
+			return;
+		}
+
+		subagentResumeInFlight = true;
+		try {
+			// 処理済み要求は drop し、送るのは 1 turn に 1 件 — 残りは onTurnEnd の再評価で消化
+			let request = takeSubagentResume(targetChatId);
+			while (request && isSubagentResumeHandled(session.history, request.sessionId)) {
+				request = takeSubagentResume(targetChatId);
+			}
+			if (request) {
+				await send.submitPrompt(buildSubagentResumeMessage(request.sessionId));
+			}
+		} finally {
+			subagentResumeInFlight = false;
+		}
+	};
+
+	$effect(() => {
+		// 依存は「要求の増減・表示 chat の切替・入力欄と表示状態」に絞る。history は
+		// 依存にしない — done フリップ直後(completed / 保存前)の自動送信は
+		// updateChatById と競合するため、turn 終了は events の onTurnEnd で再評価する
+		void subagentResumeState.entries.length;
+		void $chatId;
+		void session.prompt;
+		void session.files.length;
+		void loading;
+		void notFound;
+		void isAgentSession;
+		untrack(() => void maybeResumeSubagent());
+	});
+
+	// llens(#109): background spawn の常時検知ポーリング。子 done の即時検知は
+	// SubagentSessionBlock が担うが、あれは ToolCallBlock の {#if open} 内 —
+	// 一度も開かれていないブロックでは動かず、background の主用途(開かず放置)で
+	// 自動再開が効かなくなる。表示中 chat の履歴に「未処理の running 形 spawn 結果」が
+	// ある間だけ、子 session の task を getTaskIdsByChatId で照会し、空(= 完走 or
+	// 消滅 — BE は不在 chat にも task_ids: [] を返す)になったら resume 要求を積む。
+	// SubagentSessionBlock 検知との二重 enqueue は store の session 単位 once ガードが
+	// 防ぐ。履歴の走査はポーリング tick 内でだけ行う(turn 中の高頻度評価を避ける —
+	// $effect の依存に history を入れない)。
+	const SUBAGENT_SPAWN_POLL_MS = 5000;
+	const pollBackgroundSubagentSpawns = async () => {
+		// バックグラウンドタブでは何もしない(復帰後の次 tick で追いつく)
+		if (document.visibilityState === 'hidden') {
+			return;
+		}
+		const targetChatId = $chatId;
+		if (!targetChatId || loading || notFound || isAgentSession) {
+			return;
+		}
+		// enqueue 済み(requested)と処理済み(履歴に定型文 or 回収済み結果)は照会しない
+		const pending = listRunningSubagentSpawns(session.history).filter(
+			(sessionId) =>
+				!isSubagentResumeRequested(sessionId) &&
+				!isSubagentResumeHandled(session.history, sessionId)
+		);
+		for (const sessionId of pending) {
+			// fetch 失敗(ネットワーク断等)はこの tick では判断しない — 次 tick で再照会
+			const taskRes = await getTaskIdsByChatId(sessionId).catch(() => null);
+			// fetch 中に chat が切り替わっていたら破棄
+			if ($chatId !== targetChatId) {
+				return;
+			}
+			if (taskRes && (taskRes.task_ids ?? []).length === 0) {
+				requestSubagentResume(targetChatId, sessionId);
+			}
+		}
+	};
+
+	$effect(() => {
+		if (loading || notFound || isAgentSession) {
+			return;
+		}
+		// chat 切替・unmount は effect teardown が確実に止める(agent session の
+		// 観測ポーリングと同じ作法)。tick 側が $chatId / 履歴を都度読むので
+		// interval は張りっぱなしでよい
+		const interval = window.setInterval(
+			() => void pollBackgroundSubagentSpawns(),
+			SUBAGENT_SPAWN_POLL_MS
+		);
+		return () => {
+			window.clearInterval(interval);
+		};
+	});
 
 	// fork = clone(BE が kind=user へ落とす — 「介入したいときは fork」)。
 	// ChatItem / SubagentSessionBlock の clone 導線と同じ後処理(サイドバー一覧の追従)
@@ -297,8 +432,18 @@
 			}
 		}
 
+		// 購読直後の初期発火では pane 未登録のまま collapse() が走り、paneforge の
+		// "Assertion failed" が console を汚す(assert は console.error なので try/catch
+		// では消えない)。Switch.svelte の lastState ガードパターンに倣い、値が実際に
+		// 変化したときだけ pane を操作する。初期値は常に false(stores の writable(false)・
+		// 永続化なし。ChatControls の onDestroy も false へ戻す)なので、初期発火を
+		// スキップしても「閉じたまま」の既定挙動は変わらない。
+		let lastShowControls: boolean | null = null;
 		showControlsUnsubscriber = showControls.subscribe(async (value) => {
-			if (controlPane && !$mobile) {
+			const changed = lastShowControls !== null && lastShowControls !== value;
+			lastShowControls = value;
+
+			if (changed && controlPane && !$mobile) {
 				try {
 					if (value) {
 						controlPaneComponent.openPane();
