@@ -341,7 +341,9 @@
 
 			<!-- llens(#102 続き): ターン実測 + コンテキスト使用量は行末尾に
 			     「アイコン群 … 秒数 · tok/s · コンテキスト」の順で並べる(2026-08-13)。
-			     どちらも readOnly(共有ページ)でも出す -->
+			     どちらも readOnly(共有ページ)でも出す。ただしコンテキスト量は
+			     最終メッセージでは省略(floating チップに常時出ていて重複するため —
+			     2026-08-13 ken)。共有ページはチップが無いので最終でも出す -->
 			{#if turnStats !== null}
 				<span
 					class="{isLastMessage
@@ -357,7 +359,7 @@
 				</span>
 			{/if}
 
-			{#if contextUsage !== null}
+			{#if contextUsage !== null && (!isLastMessage || readOnly)}
 				<span
 					class="{isLastMessage
 						? 'visible'
