@@ -540,7 +540,6 @@ class TestRunSubagent(AbstractPostgresTest):
         import threading
 
         from nucllei import tasks as task_registry
-        from nucllei.utils import subagent
 
         self._patch_child_pipeline(monkeypatch)
 

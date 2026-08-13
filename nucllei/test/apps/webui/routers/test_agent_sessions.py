@@ -113,7 +113,7 @@ class TestAgentSessions(AbstractPostgresTest):
 
     def test_agent_chats_excluded_from_user_lists(self):
         parent = self._insert_chat(title="findme parent")
-        agent = self._insert_agent_chat(parent=parent, title="findme agent")
+        self._insert_agent_chat(parent=parent, title="findme agent")
 
         with mock_webui_user(id="2"):
             # サイドバー一覧(L1)
