@@ -1,15 +1,9 @@
-"""subagent(agent session)実行ロジック(issue #107 / #109)。
+"""subagent(agent session)実行ロジック(issue #107)。
 
 親チャットのターン中に擬似 tool `run_subagent` で子の agent session
 (kind="agent" の一級チャット)を spawn し、サーバー内部で 1 ターン
 (process_chat_payload → generate_chat_completion → process_chat_response)を
 完走させて、最終回答だけを tool result として親へ返す(transcript は返さない)。
-
-非同期形(#109): `background: true` で子ターンの task を起動した直後に
-{ok, session_id, status: "running"} を返す(完走を待たない)。結果は姉妹 tool
-`await_subagent(session_id)` で回収する(走行中なら完走待ち、完了済みなら即返し)。
-background の子は親 turn 終了後も走る(fire の意思の尊重)— 止めたければ
-task stop / 親 chat 削除の既存経路(cascade stop)が効く。
 
 enforce もここに閉じる:
 - preset allowlist(親 preset の meta.subagentPresetIds)∩ アクセス可
@@ -63,23 +57,6 @@ _active_turns = 0
 # 継続経路の入口で拒否する。新規 spawn も実行中は載せておく(継続との一貫)。
 # check→add の間に await を挟まない(_active_turns と同じ規律)。
 _running_agent_sessions: set[str] = set()
-
-
-def _release_turn_slot(session_id: str | None):
-    """同時実行カウンタと実行中集合の解放(#109 で一本化)。
-
-    子 task が起動した後は、この解放を子 task の done callback で行う —
-    background(spawn 即返し)では callable が先に返り、try/finally では
-    子の完走まで会計を保持できないため。同期版も同じ callback 経路に一本化する
-    (callable が shield 越しに task 完走を待つ間に callback が先に走るだけで等価)。
-    task 起動前のエラー経路は callable の finally が直接これを呼ぶ。
-    tasks.py の cleanup_task(task 登録簿の掃除)とは独立した callback で、
-    互いに干渉しない(add_done_callback は複数登録可)。
-    """
-    global _active_turns
-    _active_turns -= 1
-    if session_id is not None:
-        _running_agent_sessions.discard(session_id)
 
 
 def get_model_subagent_preset_ids(model) -> list[str]:
@@ -197,14 +174,13 @@ def _append_turn_messages(
     return user_message_id, assistant_message_id
 
 
-async def _start_agent_session_turn(
+async def _run_agent_session_turn(
     request, child_model, user, chat_id, message_id, messages
 ):
-    """子 chat の 1 ターンを内部起動する(main.py chat_completion の内部版 3 段)。
+    """子 chat の 1 ターンを内部実行して完走を待つ(main.py chat_completion の内部版 3 段)。
 
-    process_chat_response が create_task した子タスクを見つけて
-    (child_task_id, child_task) を返す(完走は待たない — 待つのは
-    _await_child_task)。child_task は None になりうる(既に完走・回収済み)。
+    戻り値は stopped(bool): True = 子タスクが外部から stop された(persisted
+    済みの部分回答しか無い)。False = 完走。
 
     Request の罠: 親の Request を使い回さない。generate_chat_completion は
     request.state.metadata を form_data["metadata"] へマージするため、親の
@@ -265,32 +241,21 @@ async def _start_agent_session_turn(
         events_stream=events_stream,
     )
 
-    # process_chat_response が create_task した子タスク(id=子 chat_id)を探す。
+    # process_chat_response が create_task した子タスク(id=子 chat_id)を待つ。
     # 継続ターンは逐次実行なので末尾が今回のタスク。
     task_ids = list_task_ids_by_chat_id(chat_id)
     if not task_ids:
         raise RuntimeError(f"agent session task not found (chat_id={chat_id})")
     child_task_id = task_ids[-1]
-    return child_task_id, get_task(child_task_id)
-
-
-async def _await_child_task(child_task_id, child_task, stop_child_on_cancel: bool):
-    """子タスクの完走を待つ(stop 連鎖の分岐点)。
-
-    戻り値は stopped(bool): True = 子タスクが外部から stop された(persisted
-    済みの部分回答しか無い)。False = 完走。
-
-    stop_child_on_cancel: 親(自タスク)への cancel を受けたとき子を stop するか。
-    同期 run_subagent は True(stop 連鎖 — #107 決定事項 10)。await_subagent は
-    False(background で fire した意思の尊重 — #109。re-raise のみで子は走り続ける)。
-    """
+    child_task = get_task(child_task_id)
     try:
-        # shield 必須: 素の `await child_task` だと親への cancel が
-        # _fut_waiter 経由で子タスクへ転送され、子は CancelledError を
-        # 内部処理して正常終了する(tasks.py stop_task の注記参照)ため、
-        # cancel が子に吸収されて親コルーチンに届かない。shield で
-        # cancel をこちら側で受け、下の stop 連鎖分岐を成立させる。
-        await asyncio.shield(child_task)
+        if child_task is not None:
+            # shield 必須: 素の `await child_task` だと親への cancel が
+            # _fut_waiter 経由で子タスクへ転送され、子は CancelledError を
+            # 内部処理して正常終了する(tasks.py stop_task の注記参照)ため、
+            # cancel が子に吸収されて親コルーチンに届かない。shield で
+            # cancel をこちら側で受け、下の stop 連鎖分岐を成立させる。
+            await asyncio.shield(child_task)
     except asyncio.CancelledError:
         # この CancelledError には 2 源がある(shield 越しの await はどちらも
         # 同じ例外を投げる):
@@ -301,13 +266,12 @@ async def _await_child_task(child_task_id, child_task, stop_child_on_cancel: boo
         # (b) まで re-raise すると execute_tool_calls(Exception しか捕らない)を
         # 素通りして親ターン全体が interrupted になるため、(a) のみ re-raise する。
         if asyncio.current_task().cancelling():
-            if stop_child_on_cancel:
-                # stop 連鎖: 親の cancel を子タスクへ伝播してから re-raise する。
-                # 孤児タスク(親なき走行中の子)を作らない。
-                try:
-                    await stop_task(child_task_id)
-                except ValueError:
-                    pass  # 既に完走・回収済み
+            # stop 連鎖: 親の cancel を子タスクへ伝播してから re-raise する。
+            # 孤児タスク(親なき走行中の子)を作らない。
+            try:
+                await stop_task(child_task_id)
+            except ValueError:
+                pass  # 既に完走・回収済み
             raise
         # (b) 子側発: 親ターンは継続し、呼び出し元が persisted 済みの
         # 部分回答を tool result に載せる(stopped=True で error を付ける)。
@@ -315,62 +279,17 @@ async def _await_child_task(child_task_id, child_task, stop_child_on_cancel: boo
     return False
 
 
-async def _format_turn_result(child_chat_id: str, assistant_message_id: str, stopped):
-    """完走後の子 chat から最終 assistant メッセージだけを親向け結果に整形する。
-
-    run_subagent(同期)と await_subagent の共用(#109 決定事項 2)。
-    """
-    message = (
-        await asyncio.to_thread(
-            Chats.get_message_by_id_and_message_id,
-            child_chat_id,
-            assistant_message_id,
-        )
-        or {}
-    )
-    answer = message.get("content") or ""
-    error = message.get("error")
-    usage = message.get("usage") or {}
-
-    result = {"ok": error is None and not stopped, "session_id": child_chat_id}
-    if error is not None:
-        result["error"] = (
-            error.get("content") if isinstance(error, dict) else str(error)
-        )
-    elif stopped:
-        # 子タスクが外部から stop された(親ターンは継続)。answer は
-        # persisted 済みの部分回答。
-        result["error"] = "agent session は停止されました(回答は途中まで)。"
-    result["answer"] = answer[:ANSWER_MAX_CHARS]
-    if len(answer) > ANSWER_MAX_CHARS:
-        result["truncated"] = True
-    if usage:
-        result["usage"] = {
-            key: usage[key]
-            for key in ("prompt_tokens", "completion_tokens", "duration")
-            if usage.get(key) is not None
-        }
-    return result
-
-
 def build_run_subagent_tool(request, model, user, metadata):
-    """後方互換の薄い wrapper — run_subagent エントリ単体を返す(テスト・旧呼び出し向け)。"""
-    tools = build_subagent_tools(request, model, user, metadata)
-    return tools["run_subagent"] if tools else None
+    """preset allowlist から擬似 tool `run_subagent` を合成する(#107)。
 
-
-def build_subagent_tools(request, model, user, metadata):
-    """preset allowlist から擬似 tool `run_subagent` / `await_subagent` を合成する(#107 / #109)。
-
-    2 つは常に同時に合成する(同じ None 条件)。None(tool を載せない)条件:
+    None(tool を載せない)条件:
     - 機能フラグ OFF / allowlist(meta.subagentPresetIds)空 / アクセス可 preset ゼロ
     - chat_id / message_id 無し(素の completions — 子を紐づける親メッセージが無い)
     - 親 depth+1 が SUBAGENT_MAX_DEPTH 超(実行時にも再チェック)
 
-    戻り値は {name: tool エントリ} — エントリは native ループ互換の
-    {"spec", "callable", "render", "timeout"}。timeout は per-tool キー
-    (execute_tool_calls が CHAT_TOOL_EXECUTION_TIMEOUT より優先)—
-    子ターン全体を包む/待つため長い。
+    戻り値は native ループ互換の tool エントリ {"spec", "callable", "render",
+    "timeout"}。timeout は per-tool キー(execute_tool_calls が
+    CHAT_TOOL_EXECUTION_TIMEOUT より優先)— 子ターン全体を包むため長い。
     """
     if not is_subagent_feature_enabled(model):
         return None
@@ -410,9 +329,7 @@ def build_subagent_tools(request, model, user, metadata):
             "サブエージェント(agent session)を起動し、instruction を 1 ターン実行させる。"
             "返るのは最終回答(answer)のみ — 実行過程(transcript)は親には来ない。"
             "会話を継続するには、結果の session_id を session_id 引数に渡して"
-            "追いの instruction を送る。background: true なら完走を待たずに"
-            '{ok, session_id, status: "running"} を即返す(結果は await_subagent で回収)。'
-            "利用可能な preset:\n" + listing
+            "追いの instruction を送る。利用可能な preset:\n" + listing
         ),
         "parameters": {
             "type": "object",
@@ -430,23 +347,13 @@ def build_subagent_tools(request, model, user, metadata):
                     "type": "string",
                     "description": "継続する既存 agent session の id(省略で新規セッション)。",
                 },
-                "background": {
-                    "type": "boolean",
-                    "description": (
-                        "true で子ターンの完走を待たずに即返す(既定 false)。"
-                        "結果は後で await_subagent(session_id) で回収する。"
-                    ),
-                },
             },
             "required": ["instruction"],
         },
     }
 
     async def run_subagent(
-        preset_id: str = "",
-        instruction: str = "",
-        session_id: str = "",
-        background: bool = False,
+        preset_id: str = "", instruction: str = "", session_id: str = ""
     ):
         global _active_turns
 
@@ -460,11 +367,8 @@ def build_subagent_tools(request, model, user, metadata):
                 "達しています。しばらくしてから再試行してください。"
             )
         _active_turns += 1
-        # 実行中登録した agent session id。None = 未登録。
+        # 実行中登録した agent session id(finally で解除)。None = 未登録。
         running_session_id = None
-        # 会計(_active_turns / _running_agent_sessions)の解放を子 task の
-        # done callback へ移譲済みか。移譲前のエラー経路は finally が解放する。
-        handed_off = False
         try:
             # 実行時再チェック(mount 後に状態が変わりうる)。認可は enum 構築と
             # 同一述語をその場で再評価する(履歴・enum に委ねない)。
@@ -563,7 +467,7 @@ def build_subagent_tools(request, model, user, metadata):
             wire_messages = _wire_messages_from_history(
                 chat_json["history"]["messages"], assistant_message_id
             )
-            child_task_id, child_task = await _start_agent_session_turn(
+            stopped = await _run_agent_session_turn(
                 request,
                 child_model,
                 user,
@@ -572,114 +476,48 @@ def build_subagent_tools(request, model, user, metadata):
                 wire_messages,
             )
 
-            stopped = False
-            if child_task is not None:
-                # 会計の解放を子 task の done callback へ移譲(#109 決定事項 4)。
-                # background では callable が先に返るため try/finally では保持
-                # できない。同期版も同じ経路(shield 待ちの再開前に callback が
-                # 走るだけで等価)。
-                child_task.add_done_callback(
-                    lambda t, sid=running_session_id: _release_turn_slot(sid)
-                )
-                handed_off = True
-
-                if background:
-                    # spawn 即返し(#109 決定事項 1): 完走を待たない。
-                    # 結果は await_subagent(session_id) で回収する。
-                    return {
-                        "ok": True,
-                        "session_id": child_chat_id,
-                        "status": "running",
-                    }
-                stopped = await _await_child_task(
-                    child_task_id, child_task, stop_child_on_cancel=True
-                )
-
             # 完走後の子 chat を読み直し、最終 assistant メッセージだけを親へ返す
-            return await _format_turn_result(
-                child_chat_id, assistant_message_id, stopped
-            )
-        finally:
-            if not handed_off:
-                _release_turn_slot(running_session_id)
-
-    await_spec = {
-        "name": "await_subagent",
-        "description": (
-            "background で起動した agent session の完了を待ち、最終回答(answer)を"
-            "回収する。走行中なら完走まで待ち、完了済みなら即返す。"
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "回収する agent session の id(run_subagent の結果に含まれる)。",
-                },
-            },
-            "required": ["session_id"],
-        },
-    }
-
-    async def await_subagent(session_id: str = ""):
-        if not (session_id or "").strip():
-            return _error("session_id は必須です。")
-
-        # 検証は run_subagent の継続経路と同一述語(#109 決定事項 2):
-        # 存在 ∧ 非削除 ∧ 所有者 ∧ kind=agent ∧ parent_chat_id=親。
-        child = await asyncio.to_thread(Chats.get_chat_by_id, session_id)
-        if (
-            child is None
-            or child.deleted_at is not None
-            or child.user_id != user.id
-            or child.kind != "agent"
-            or child.parent_chat_id != parent_chat_id
-        ):
-            return _error(
-                f"session_id が不正です: {session_id}"
-                "(このチャットから起動した agent session のみ回収できます)"
-            )
-        # 走行中ターンの assistant メッセージは task 起動前に永続化済み
-        # (_append_turn_messages → update/insert が先)なので、ここで読む
-        # currentId は待つべき/読むべきターンのものと一致する。
-        assistant_message_id = (child.chat.get("history") or {}).get("currentId")
-        if not assistant_message_id:
-            return _error(
-                f"この agent session にはまだターンがありません: {session_id}"
-            )
-
-        stopped = False
-        task_ids = list_task_ids_by_chat_id(session_id)
-        if task_ids:
-            child_task_id = task_ids[-1]
-            child_task = get_task(child_task_id)
-            if child_task is not None:
-                tool_output.progress(f"agent session {session_id}")
-                # stop_child_on_cancel=False(#109 決定事項 3): 親 stop /
-                # timeout による await の cancel は子を止めない(fire の意思の
-                # 尊重 — re-raise のみ)。子側発 cancel(所有者の直接 stop)は
-                # 同期版と同じく stopped=True で部分回答を返す。
-                stopped = await _await_child_task(
-                    child_task_id, child_task, stop_child_on_cancel=False
+            message = (
+                await asyncio.to_thread(
+                    Chats.get_message_by_id_and_message_id,
+                    child_chat_id,
+                    assistant_message_id,
                 )
-        # task が無ければ完了済み — 即返し。会計はここでは触らない
-        # (走行中の子の slot は spawn 側の done callback が解放する)。
-        return await _format_turn_result(session_id, assistant_message_id, stopped)
+                or {}
+            )
+            answer = message.get("content") or ""
+            error = message.get("error")
+            usage = message.get("usage") or {}
+
+            result = {"ok": error is None and not stopped, "session_id": child_chat_id}
+            if error is not None:
+                result["error"] = (
+                    error.get("content") if isinstance(error, dict) else str(error)
+                )
+            elif stopped:
+                # 子タスクが外部から stop された(親ターンは継続)。answer は
+                # persisted 済みの部分回答。
+                result["error"] = "agent session は停止されました(回答は途中まで)。"
+            result["answer"] = answer[:ANSWER_MAX_CHARS]
+            if len(answer) > ANSWER_MAX_CHARS:
+                result["truncated"] = True
+            if usage:
+                result["usage"] = {
+                    key: usage[key]
+                    for key in ("prompt_tokens", "completion_tokens", "duration")
+                    if usage.get(key) is not None
+                }
+            return result
+        finally:
+            if running_session_id is not None:
+                _running_agent_sessions.discard(running_session_id)
+            _active_turns -= 1
 
     # render.result = subagent(#20 のディスクリプタ駆動): フロントは
-    # {ok, session_id, answer, ...} を subagent 表示で描画する(P3。
-    # {ok, session_id, status: "running"} の spawn 即返し形も同表示 — #109)。
+    # {ok, session_id, answer, ...} を subagent 表示で描画する(P3)。
     return {
-        "run_subagent": {
-            "spec": spec,
-            "callable": run_subagent,
-            "render": {"result": {"kind": "subagent"}},
-            "timeout": SUBAGENT_TURN_TIMEOUT,
-        },
-        "await_subagent": {
-            "spec": await_spec,
-            "callable": await_subagent,
-            "render": {"result": {"kind": "subagent"}},
-            "timeout": SUBAGENT_TURN_TIMEOUT,
-        },
+        "spec": spec,
+        "callable": run_subagent,
+        "render": {"result": {"kind": "subagent"}},
+        "timeout": SUBAGENT_TURN_TIMEOUT,
     }
