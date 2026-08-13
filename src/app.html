@@ -8,7 +8,10 @@
 		<link rel="icon" type="image/png" href="/static/favicon.png" />
 		<meta name="apple-mobile-web-app-title" content="Nucllei" />
 
-		<link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+		<!-- crossorigin="use-credentials" は旧 EXTERNAL_PWA_MANIFEST_URL(撤去済み)用の残骸。
+		     同一オリジンの manifest に資格情報付き fetch は不要で、間欠の
+		     「Manifest: Syntax error」(資格情報付き CORS の失敗)を招くため外した。 -->
+		<link rel="manifest" href="/manifest.json" />
 		<meta
 			name="viewport"
 			content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
