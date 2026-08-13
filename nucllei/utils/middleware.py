@@ -60,7 +60,7 @@ from nucllei.utils.skills import (
     replay_skill_tool_ids,
     skill_activation_seed_block,
 )
-from nucllei.utils.subagent import build_run_subagent_tool
+from nucllei.utils.subagent import build_subagent_tools
 from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
@@ -521,17 +521,18 @@ async def process_chat_payload(
             )
         tools_dict["load_skill"] = load_skill_tool
 
-    # llens(#107): サブエージェント起動の擬似 tool run_subagent(load_skill と同型)。
-    # allowlist / 機能フラグ / depth 上限の判定は build_run_subagent_tool 側に閉じ、
-    # 対象が無ければ None(tool 自体を載せない)。同期 DB read(親 chat の
-    # kind/depth + Models×allowlist 件数)を含むためワーカースレッドへ(#28 の規律)。
-    run_subagent_tool = await asyncio.to_thread(
-        build_run_subagent_tool, request, model, user, metadata
+    # llens(#107/#109): サブエージェントの擬似 tool 群 run_subagent / await_subagent
+    # (load_skill と同型・常に同時合成)。allowlist / 機能フラグ / depth 上限の
+    # 判定は build_subagent_tools 側に閉じ、対象が無ければ None(tool 自体を
+    # 載せない)。同期 DB read(親 chat の kind/depth + Models×allowlist 件数)を
+    # 含むためワーカースレッドへ(#28 の規律)。
+    subagent_tools = await asyncio.to_thread(
+        build_subagent_tools, request, model, user, metadata
     )
-    if run_subagent_tool is not None:
-        if "run_subagent" in tools_dict:
-            log.warning("tool 'run_subagent' is shadowed by the subagent pseudo-tool")
-        tools_dict["run_subagent"] = run_subagent_tool
+    for name, entry in (subagent_tools or {}).items():
+        if name in tools_dict:
+            log.warning(f"tool '{name}' is shadowed by the subagent pseudo-tool")
+        tools_dict[name] = entry
 
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。

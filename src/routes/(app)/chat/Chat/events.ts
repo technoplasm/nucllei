@@ -60,13 +60,17 @@ export class ChatEvents {
 	// 子ターンの完了処理・永続化は BE の内部 runner(subagent)が持ち、
 	// agent session への updateChatById は BE が 400 で拒否する。
 	#isObserver: () => boolean;
+	// llens(#109): turn 終了時の再評価フック。走行中に届いた subagent resume 要求を
+	// Chat.svelte が「親 chat 表示中 ∧ turn 非走行」ガード付きで消化する契機。
+	#onTurnEnd: () => void;
 
 	constructor({
 		session,
 		eventTarget,
 		scrollToBottom,
 		onEventCall,
-		isObserver
+		isObserver,
+		onTurnEnd
 	}: {
 		session: ChatSession;
 		eventTarget: EventTarget;
@@ -76,12 +80,14 @@ export class ChatEvents {
 			callback: (result: unknown) => Promise<void> | void
 		) => void;
 		isObserver?: () => boolean;
+		onTurnEnd?: () => void;
 	}) {
 		this.#session = session;
 		this.#eventTarget = eventTarget;
 		this.#scrollToBottom = scrollToBottom;
 		this.#onEventCall = onEventCall;
 		this.#isObserver = isObserver ?? (() => false);
+		this.#onTurnEnd = onTurnEnd ?? (() => {});
 	}
 
 	// wire v2: completion-streams(SSE)から届くイベント封筒を message へ適用する。
@@ -365,6 +371,10 @@ export class ChatEvents {
 		if (this.#session.autoScroll) {
 			this.#scrollToBottom();
 		}
+
+		// llens(#109): turn の後処理(completed / 保存・taskIds の畳み)まで済んだ地点で
+		// 再評価を促す — done フリップ直後に自動送信すると updateChatById が競合する
+		this.#onTurnEnd();
 	};
 
 	chatCompletedHandler = async (

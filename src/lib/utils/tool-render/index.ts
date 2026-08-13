@@ -135,12 +135,16 @@ export type ResultDisplay =
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
 	| { kind: 'skill'; value: string; tools: string[] }
 	// run_subagent の構造化結果(#107): 子 agent session の要約。sessionId で
-	// SubagentSessionBlock が子 transcript を遅延 fetch する
+	// SubagentSessionBlock が子 transcript を遅延 fetch する。
+	// status: 'running' は background spawn の即返し形(#109)— answer 未取得
+	// (answer は '' に正規化)。SubagentSessionBlock が live 追従し、子の完走検知で
+	// 親ターンの自動再開(subagent-resume store)を要求する。
 	| {
 			kind: 'subagent';
 			sessionId: string;
 			ok: boolean;
 			answer: string;
+			status?: 'running';
 			truncated?: boolean;
 			error?: string;
 			usage?: SubagentUsage;
@@ -198,11 +202,30 @@ export const classifyToolResult = (
 		}
 	}
 	if (descriptor?.kind === 'subagent') {
-		// run_subagent の {ok, session_id, answer, ...}(#107)。spawn 前バリデーション
-		// エラー({ok:false, error} — session_id 不在)は形が合わないので json へ、
-		// JSON ですらない壊れ方は text へフォールバック(推測して壊れた表示を作らない)。
+		// run_subagent / await_subagent の {ok, session_id, answer, ...}(#107)と
+		// background spawn の即返し形 {ok, session_id, status: "running"}(#109)。
+		// spawn 前バリデーションエラー({ok:false, error} — session_id 不在)は形が
+		// 合わないので json へ、JSON ですらない壊れ方は text へフォールバック
+		// (推測して壊れた表示を作らない)。
 		try {
 			const parsed = JSON.parse(content);
+			if (
+				parsed !== null &&
+				typeof parsed === 'object' &&
+				typeof parsed.ok === 'boolean' &&
+				typeof parsed.session_id === 'string' &&
+				parsed.answer === undefined &&
+				parsed.status === 'running'
+			) {
+				// 即返し形(#109): answer 無し。'' に正規化して subagent 表示に載せる
+				return {
+					kind: 'subagent',
+					sessionId: parsed.session_id,
+					ok: parsed.ok,
+					answer: '',
+					status: 'running'
+				};
+			}
 			if (
 				parsed !== null &&
 				typeof parsed === 'object' &&

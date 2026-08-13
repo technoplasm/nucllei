@@ -138,6 +138,16 @@ class TestRunSubagent(AbstractPostgresTest):
             metadata if metadata is not None else self._metadata(),
         )
 
+    def _build_tools(self, request=None, model=None, metadata=None, user=None):
+        from nucllei.utils.subagent import build_subagent_tools
+
+        return build_subagent_tools(
+            request if request is not None else self._request(),
+            model if model is not None else self._parent_model(),
+            user if user is not None else self._user(),
+            metadata if metadata is not None else self._metadata(),
+        )
+
     def _patch_child_pipeline(self, monkeypatch, child_responses=("text_basic",)):
         """子ターン 3 段のうちモデル呼び出しを fixture リプレイ、payload 段を素通しに。
 
@@ -162,6 +172,48 @@ class TestRunSubagent(AbstractPostgresTest):
         monkeypatch.setattr(middleware, "process_chat_payload", fake_payload)
         monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
         return child_calls
+
+    def _patch_gated_child_pipeline(self, monkeypatch):
+        """子ターンを gate 解放まで走行中に保つ(background / await 系 — #109)。
+
+        返す asyncio.Event の set() まで子タスクは完走しない(先頭 delta の
+        content "2" だけ流して堰き止める)。
+        """
+        from nucllei.utils import middleware, subagent
+
+        gate = asyncio.Event()
+
+        async def gated_child_completion(request, form_data, user):
+            async def gen():
+                yield (
+                    'data: {"choices":[{"index":0,"delta":'
+                    '{"role":"assistant","content":"2"},"finish_reason":null}]}\n'
+                )
+                await gate.wait()
+                yield "data: [DONE]\n"
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+
+        async def fake_payload(
+            request, form_data, user, metadata, model, events_stream
+        ):
+            return form_data, metadata, []
+
+        monkeypatch.setattr(
+            subagent, "generate_chat_completion", gated_child_completion
+        )
+        monkeypatch.setattr(middleware, "process_chat_payload", fake_payload)
+        monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
+        return gate
+
+    async def _wait_turn_slot_release(self):
+        """子 task の done callback(call_soon 経由)が会計を解放するまで譲る。"""
+        from nucllei.utils import subagent
+
+        for _ in range(10):
+            if subagent._active_turns == 0:
+                return
+            await asyncio.sleep(0)
 
     # ---- mount 条件 ----
 
@@ -664,6 +716,252 @@ class TestRunSubagent(AbstractPostgresTest):
             assert subagent._active_turns == 0
 
         asyncio.run(main())
+
+    # ---- 非同期形(#109): background spawn / await_subagent ----
+
+    def test_await_subagent_mounted_alongside_run_subagent(self):
+        """2 つの tool は常に同時合成・同じ None 条件(#109 決定事項 2)。"""
+        from nucllei.env import SUBAGENT_TURN_TIMEOUT
+
+        tools = self._build_tools()
+        assert set(tools.keys()) == {"run_subagent", "await_subagent"}
+
+        # run_subagent には background 引数が生える(必須にはならない)
+        run_spec = tools["run_subagent"]["spec"]
+        assert run_spec["parameters"]["properties"]["background"]["type"] == "boolean"
+        assert run_spec["parameters"]["required"] == ["instruction"]
+
+        await_spec = tools["await_subagent"]["spec"]
+        assert await_spec["name"] == "await_subagent"
+        assert await_spec["parameters"]["required"] == ["session_id"]
+        assert tools["await_subagent"]["render"] == {"result": {"kind": "subagent"}}
+        assert tools["await_subagent"]["timeout"] == SUBAGENT_TURN_TIMEOUT
+
+        # None 条件は run_subagent と同一(同時に消える)
+        assert (
+            self._build_tools(model=self._parent_model(features={"subagent": False}))
+            is None
+        )
+        assert self._build_tools(metadata={}) is None
+
+    def test_background_spawn_returns_immediately_and_frees_slot_on_done(
+        self, monkeypatch
+    ):
+        """spawn 即返し(#109 決定事項 1)+ 会計解放は子 task の done callback
+        (#109 決定事項 4)。走行中は同期版と同じく継続も拒否される。"""
+        from nucllei import tasks as task_registry
+        from nucllei.utils import subagent
+
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        tools = self._build_tools()
+        run = tools["run_subagent"]["callable"]
+
+        async def main():
+            result = await run(
+                preset_id="researcher", instruction="調査して", background=True
+            )
+            # 即返しの形: answer は無く status: running
+            session = result["session_id"]
+            assert result == {"ok": True, "session_id": session, "status": "running"}
+
+            # 子は走行中のまま — 会計(カウンタ・実行中集合)は保持されている
+            task_ids = task_registry.list_task_ids_by_chat_id(session)
+            assert task_ids
+            child_task = task_registry.get_task(task_ids[-1])
+            assert child_task is not None and not child_task.done()
+            assert subagent._active_turns == 1
+            assert session in subagent._running_agent_sessions
+
+            # 実行中 session への継続は同期版と同じく即エラー
+            racing = json.loads(await run(instruction="横入り", session_id=session))
+            assert racing["ok"] is False
+            assert "実行中" in racing["error"]
+
+            # 完走 → done callback が会計を解放する
+            gate.set()
+            await child_task
+            await self._wait_turn_slot_release()
+            assert subagent._active_turns == 0
+            assert session not in subagent._running_agent_sessions
+            return session
+
+        session = asyncio.run(main())
+        # 子 chat は通常どおり永続化されている(kind=agent・部分応答 "2" が保存済み)
+        child = self.Chats.get_chat_by_id(session)
+        assert child.kind == "agent"
+        assert child.parent_chat_id == self.parent.id
+
+    def test_background_spawn_respects_concurrency_limit(self, monkeypatch):
+        from nucllei.utils import subagent
+
+        self._patch_gated_child_pipeline(monkeypatch)
+        tools = self._build_tools()
+
+        monkeypatch.setattr(subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENT)
+        result = json.loads(
+            asyncio.run(
+                tools["run_subagent"]["callable"](
+                    preset_id="researcher", instruction="x", background=True
+                )
+            )
+        )
+        assert result["ok"] is False
+        assert "上限" in result["error"]
+        assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENT
+
+    def test_await_subagent_collects_background_result(self, monkeypatch):
+        """走行中 session への await は完走まで待って answer を返す。"""
+        from nucllei.utils import subagent
+
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        tools = self._build_tools()
+
+        async def main():
+            spawn = await tools["run_subagent"]["callable"](
+                preset_id="researcher", instruction="調査して", background=True
+            )
+            assert spawn["status"] == "running"
+            session = spawn["session_id"]
+
+            waiter = asyncio.create_task(
+                tools["await_subagent"]["callable"](session_id=session)
+            )
+            await asyncio.sleep(0.05)
+            assert not waiter.done()  # 走行中は返らない
+
+            gate.set()
+            result = await asyncio.wait_for(waiter, timeout=30)
+            assert result["ok"] is True
+            assert result["session_id"] == session
+            assert result["answer"] == "2"
+            await self._wait_turn_slot_release()
+            assert subagent._active_turns == 0
+            assert subagent._running_agent_sessions == set()
+
+        asyncio.run(main())
+
+    def test_await_subagent_returns_immediately_when_done(self, monkeypatch):
+        """完了済み session への await は待たずに最終結果を整形して返す。"""
+        self._patch_child_pipeline(monkeypatch)
+        tools = self._build_tools()
+
+        async def main():
+            first = await tools["run_subagent"]["callable"](
+                preset_id="researcher", instruction="1+1 は?"
+            )
+            assert first["ok"] is True
+            result = await tools["await_subagent"]["callable"](
+                session_id=first["session_id"]
+            )
+            return first, result
+
+        first, result = asyncio.run(main())
+        assert result["ok"] is True
+        assert result["session_id"] == first["session_id"]
+        assert result["answer"] == "2"
+        # usage も同期版の結果整形と同じ要点が載る(共用ロジック)
+        assert result["usage"]["prompt_tokens"] == 22
+        assert result["usage"]["completion_tokens"] == 66
+
+    def test_await_cancel_does_not_stop_child(self, monkeypatch):
+        """await 中の親 cancel は re-raise のみで子を止めない(#109 決定事項 3)。"""
+        from nucllei import tasks as task_registry
+        from nucllei.utils import subagent, tool_output
+
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+
+        # await_subagent が shield 待ちへ入る直前の progress を観測点にする
+        # (sleep 待ちにしない — cancel の配達先を shield 待ちに固定する)
+        progressed = asyncio.Event()
+        orig_progress = tool_output.progress
+
+        def spy_progress(text):
+            progressed.set()
+            orig_progress(text)
+
+        monkeypatch.setattr(tool_output, "progress", spy_progress)
+
+        tools = self._build_tools()
+
+        async def main():
+            spawn = await tools["run_subagent"]["callable"](
+                preset_id="researcher", instruction="調査して", background=True
+            )
+            session = spawn["session_id"]
+            child_task = task_registry.get_task(
+                task_registry.list_task_ids_by_chat_id(session)[-1]
+            )
+            progressed.clear()  # spawn 側の progress を捨てる
+
+            waiter = asyncio.create_task(
+                tools["await_subagent"]["callable"](session_id=session)
+            )
+            await asyncio.wait_for(progressed.wait(), timeout=30)
+            waiter.cancel()
+            try:
+                await waiter
+                raise RuntimeError("cancel が伝播していない")
+            except asyncio.CancelledError:
+                pass
+
+            # 子は走り続ける(fire の意思の尊重)— 会計も保持されたまま
+            assert not child_task.done()
+            assert subagent._active_turns == 1
+            assert session in subagent._running_agent_sessions
+
+            # 後始末: 完走で done callback が解放する
+            gate.set()
+            await child_task
+            await self._wait_turn_slot_release()
+            assert subagent._active_turns == 0
+            assert session not in subagent._running_agent_sessions
+
+        asyncio.run(main())
+
+    def test_await_subagent_validates_session(self, monkeypatch):
+        """検証は継続経路と同一述語(存在∧非削除∧所有者∧kind=agent∧親一致)。"""
+        from nucllei.models.chats import ChatForm
+
+        self._patch_child_pipeline(monkeypatch)
+        tools = self._build_tools()
+        await_call = tools["await_subagent"]["callable"]
+
+        other_parent_child = self.Chats.insert_new_chat(
+            "1",
+            ChatForm(chat={"title": "x"}),
+            kind="agent",
+            parent_chat_id="another-parent",
+            parent_message_id="m",
+            depth=1,
+        )
+        foreign_child = self.Chats.insert_new_chat(
+            "9",
+            ChatForm(chat={"title": "x"}),
+            kind="agent",
+            parent_chat_id=self.parent.id,
+            parent_message_id="m",
+            depth=1,
+        )
+
+        for session_id in (
+            "",  # 必須
+            "no-such-id",  # 存在しない
+            self.parent.id,  # kind=user(agent session ではない)
+            other_parent_child.id,
+            foreign_child.id,
+        ):
+            result = json.loads(asyncio.run(await_call(session_id=session_id)))
+            assert result["ok"] is False, session_id
+
+        # cascade 削除済みの子も拒否(deleted_at IS NULL 検証)
+        first = asyncio.run(
+            tools["run_subagent"]["callable"](
+                preset_id="researcher", instruction="最初"
+            )
+        )
+        assert self.Chats.delete_chat_by_id(first["session_id"])
+        result = json.loads(asyncio.run(await_call(session_id=first["session_id"])))
+        assert result["ok"] is False
 
     def test_child_turn_suppresses_webhook(self, monkeypatch):
         """子ターンは購読ゼロで走るのが正常形 — webhook(「誰も見ていなかった」
