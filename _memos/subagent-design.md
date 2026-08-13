@@ -81,6 +81,9 @@
 
 ## 後続(別 issue)
 
-- 非同期形(spawn 即返し + 子完了で親ターン再開)— #109 参照。v1 は意図的に同期待ち。
+- [x] 非同期形(#109、2026-08-14 出荷 `f06626f0a`): run_subagent の `background: true`(spawn 即返し)+
+  `await_subagent`(回収)+ FE 自動再開(ブロック検知 + 5 秒ポーリングの二段構え、
+  resume store の once ガード。非表示タブでは休止・親画面が閉じている間は再開しない)。
+  実モデル E2E で並列 fan-out / fire-and-forget / 自動再開まで PASS。
 - 子ストリーム消費中の stop で tool result が `ok=True` + 部分回答になる(error マーク無し)—
   厳密化には子 message への interrupted マーカ永続化が要る(現状は報告のみ)
