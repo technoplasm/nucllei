@@ -66,7 +66,7 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: ''} max-w-full"
 	>
-		<nav class="px-4 pt-1 backdrop-blur-xl drag-region">
+		<nav class="md:px-2 px-0 pt-1 backdrop-blur-xl drag-region">
 			<!-- llens(#34): 上部メニューも本文と同じ max-w-5xl 中央寄せに揃える -->
 			<div class=" flex items-center gap-1 max-w-5xl mx-auto w-full">
 				<div
@@ -109,8 +109,8 @@
 		</nav>
 
 		<!-- OverlayScrollbars: ラッパ=ホスト / 既存スクロール要素=viewport(childViewport) -->
-		<div class="flex-1 max-h-full min-h-0" use:overlayScrollbar={{ childViewport: true }}>
-			<div class="pb-1 px-[18px] h-full overflow-y-auto" id="workspace-container">
+		<div class="flex-1 max-h-full min-h-0 px-1.5" use:overlayScrollbar={{ childViewport: true }}>
+			<div class="pb-1 h-full overflow-y-auto" id="workspace-container">
 				<!-- llens(#34): workspace 全ページの横幅をここで一元管理(ページごとに max-w がばらつくのを防ぐ)。
 			     個々のページ/エディタは自前で max-w を持たず、この 5xl 中央寄せを継承する。
 			     h-full で高さの連鎖も確定させる(エディタ系ページが h-full + flex-1/min-h-0 で
