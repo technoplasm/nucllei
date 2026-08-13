@@ -191,6 +191,26 @@ export const formatTokens = (n: number): string => {
 };
 
 /**
+ * ターンのコンテキスト使用量(占有トークン + 上限)。`message.usage` から導く —
+ * MessageActions のターンごと表示用。占有の定義は UsageChip の baseline と同じ
+ * `prompt_tokens ?? total_tokens`(並んだとき数字が食い違わないように揃える)。
+ * 出せない形は null、context_size が無い形は contextSize: null(数値のみ表示)。
+ */
+export const contextUsageFromUsage = (
+	usage: Record<string, unknown> | null | undefined
+): { tokens: number; contextSize: number | null } | null => {
+	if (usage == null) {
+		return null;
+	}
+	const tokens = asNumber(usage.prompt_tokens) ?? asNumber(usage.total_tokens);
+	if (tokens === undefined) {
+		return null;
+	}
+	const contextSize = asNumber(usage.context_size);
+	return { tokens, contextSize: contextSize !== undefined && contextSize > 0 ? contextSize : null };
+};
+
+/**
  * ターンの実測(所要秒 + 平均 tok/s)。`message.usage`(backend がターン累積で
  * 永続化した duration / completion_tokens)から導く — MessageActions の表示用。
  * 出せない形は null。

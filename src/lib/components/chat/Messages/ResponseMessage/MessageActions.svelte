@@ -14,8 +14,13 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { MessageSpeech } from './tts.svelte';
-	import { turnStatsFromUsage } from '$lib/stores/live-usage.svelte';
+	import {
+		contextUsageFromUsage,
+		formatTokens,
+		turnStatsFromUsage
+	} from '$lib/stores/live-usage.svelte';
 	import { formatDurationSeconds } from '$lib/utils/duration';
+	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -61,6 +66,10 @@
 	// llens(#102): このターンの実測(backend が usage.duration をターン累積で永続化)。
 	// リロード後も message.usage から同じ数字が出る
 	const turnStats = $derived(turnStatsFromUsage(message.usage));
+
+	// llens(#102 続き): このターンのコンテキスト使用量。readOnly(共有ページ)でも出す —
+	// アクション行のアイコン列(コピー・読み上げ・info)に並べる
+	const contextUsage = $derived(contextUsageFromUsage(message.usage));
 
 	const usageTooltip = $derived(
 		message.usage
@@ -283,22 +292,6 @@
 					</button>
 				</Tooltip>
 
-				{#if turnStats !== null}
-					<!-- llens(#102): このターンの生成所要時間と平均 tok/s(再生成の右) -->
-					<span
-						class="{isLastMessage
-							? 'visible'
-							: 'invisible group-hover:visible'} flex items-center gap-1 px-1.5 text-xs text-content-muted tabular-nums self-center"
-					>
-						{$i18n.t('{{DURATION}} seconds', {
-							DURATION: formatDurationSeconds(turnStats.seconds)
-						})}
-						<span class="text-content-subtle">·</span>
-						<span class="i-lucide-zap size-3 block"></span>
-						{Math.round(turnStats.rate)} tok/s
-					</span>
-				{/if}
-
 				{#if siblings.length > 1}
 					<Tooltip content={$i18n.t('Delete')} placement="bottom">
 						<button
@@ -344,6 +337,44 @@
 						</Tooltip>
 					{/each}
 				{/if}
+			{/if}
+
+			<!-- llens(#102 続き): ターン実測 + コンテキスト使用量は行末尾に
+			     「アイコン群 … 秒数 · tok/s · コンテキスト」の順で並べる(2026-08-13)。
+			     どちらも readOnly(共有ページ)でも出す -->
+			{#if turnStats !== null}
+				<span
+					class="{isLastMessage
+						? 'visible'
+						: 'invisible group-hover:visible'} flex items-center gap-1 px-1.5 text-xs text-content-muted tabular-nums self-center"
+				>
+					{$i18n.t('{{DURATION}} seconds', {
+						DURATION: formatDurationSeconds(turnStats.seconds)
+					})}
+					<span class="text-content-subtle">·</span>
+					<span class="i-lucide-zap size-3 block"></span>
+					{Math.round(turnStats.rate)} tok/s
+				</span>
+			{/if}
+
+			{#if contextUsage !== null}
+				<span
+					class="{isLastMessage
+						? 'visible'
+						: 'invisible group-hover:visible'} flex items-center gap-1 px-1.5 text-xs text-content-muted tabular-nums self-center"
+				>
+					{#if contextUsage.contextSize !== null}
+						<UsageGauge
+							current={contextUsage.tokens}
+							total={contextUsage.contextSize}
+							class="size-3.5 shrink-0"
+						/>
+						<span>{formatTokens(contextUsage.tokens)}/{formatTokens(contextUsage.contextSize)}</span
+						>
+					{:else}
+						<span>{formatTokens(contextUsage.tokens)}</span>
+					{/if}
+				</span>
 			{/if}
 		{/if}
 	{/if}

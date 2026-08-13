@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	clearLiveUsage,
+	contextUsageFromUsage,
 	formatTokens,
 	getActiveLiveUsage,
 	getChatUsageBaseline,
@@ -108,6 +109,35 @@ describe('turnStatsFromUsage', () => {
 		expect(turnStatsFromUsage({ completion_tokens: 0, duration: 2.5 })).toBeNull();
 		expect(turnStatsFromUsage({ completion_tokens: 5, duration: 0 })).toBeNull();
 		expect(turnStatsFromUsage(null)).toBeNull();
+	});
+});
+
+describe('contextUsageFromUsage', () => {
+	it('永続化済み usage から占有(prompt 優先)と上限を導く', () => {
+		expect(
+			contextUsageFromUsage({
+				prompt_tokens: 9559,
+				completion_tokens: 155,
+				total_tokens: 9714,
+				context_size: 262144
+			})
+		).toEqual({ tokens: 9559, contextSize: 262144 });
+	});
+
+	it('prompt が無ければ total へフォールバック、context_size 無し/0 は contextSize: null', () => {
+		expect(contextUsageFromUsage({ total_tokens: 9714 })).toEqual({
+			tokens: 9714,
+			contextSize: null
+		});
+		expect(contextUsageFromUsage({ prompt_tokens: 10, context_size: 0 })).toEqual({
+			tokens: 10,
+			contextSize: null
+		});
+	});
+
+	it('数値の無い形・null は null', () => {
+		expect(contextUsageFromUsage({ duration: 2.5 })).toBeNull();
+		expect(contextUsageFromUsage(null)).toBeNull();
 	});
 });
 
