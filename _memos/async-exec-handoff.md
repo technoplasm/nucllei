@@ -39,8 +39,12 @@ dev 環境(preset・DB)を無断で書き換えない / **ライブの dev に�
 1. **進行中チップの実機確認が未了** — 実装はある(`MessageInput/BackgroundTasksChip.svelte`、
    データ源 = exec 行、停止導線あり)が、ken の環境で「左下に出て手動で止められる」ことを
    目視確認できていない。**ken の要求はここが本丸**(入力欄下部行・UsageChip と同列の左)
-2. **sandbox `run_python` の background 実機検証(sleep)が未了** — `dev/tools/sandbox.py` に
-   `backgroundable = ("run_python",)` は入ったが、dev DB の tool 行への反映と実走が未確認
+2. ~~sandbox `run_python` の background 実機検証(sleep)~~ → **完了(2026-08-14)**:
+   `time.sleep(20)` を background で spawn(親ターンは 4 秒で終了)→ `check_async` が
+   非ブロッキングで running(elapsed 6s)→ `await_async` が `slept 20s (20.04s)` を回収、
+   exec 行 done / duration 20.048。適格関数は dev で run_python / run_python_once /
+   run_shell / synthesize_speech / transcribe_speech(dev DB へは**宣言だけ注入**した —
+   DB の実装は repo 版と版差があるため丸ごと置換していない。**llens 本番側は P4 で反映**)
 3. **敵対検証レビューが未実施**(#107/#109 では実施した工程が #110 では飛んでいる)
 4. **P3 相当の統合検証**: 子 chat と exec 行の二重実体の整理(設計の未決部分)
 5. `_memos/async-exec-design.md` の open questions は全て推奨どおりで確定済み +
