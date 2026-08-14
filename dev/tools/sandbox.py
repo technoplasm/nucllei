@@ -154,7 +154,7 @@ class Tools:
     # 既知の v1 制約: ターン終了後に完了した実行では exports の添付 UI
     # (chat:message:files)は出ない — 実体は Files に永続済みで、tool result
     # 文字列にも列挙される(async-exec-design.md §6)。
-    backgroundable = ("run_python",)
+    backgroundable = ("run_python", "run_python_once", "run_shell")
 
     class Valves(BaseModel):
         sandbox_url: str = Field(
