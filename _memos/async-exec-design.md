@@ -299,6 +299,35 @@ tag 後に llens P4(userspace subagent.py の builtin 置換・プロンプト�
 9. **check_async の progress 露出**: in-process sink の最新 1 件で良いか。— 推奨: v1 は可(永続化は v2)。
 10. **親ターン stop の非伝播(D6)の最終確認**。— 推奨: 非伝播(チップ個別停止がある)。
 
+## 追補 3(2026-08-14)— 実使用フィードバック(llens-thinking 本人)と実測
+
+dev で実際に非同期 tool を使ったモデルからのフィードバック 5 点。**次回の作り直しで反映する。**
+
+1. **`check_async` が done でも result を返さない → 必ず 2 手になる**(採用)
+   `include_result_if_done`(または terminal なら常に result 同梱)にする。
+   **同時に必須**: FE の `isExecutionResumeHandled` は「`await_async` call + 終端結果」を
+   回収済みの根拠にしているため、check で回収できるようにするなら**判定側も
+   check_async を数える**よう直さないと自動再開が二重発火する(結合を見落とさないこと)。
+2. **`elapsed_s` の粒度が粗い**(採用・安い)— int 秒 + 呼んだ瞬間の値なので 1→2→2→4→5 と飛ぶ。
+   `started_at`(epoch)と float 秒を返し、消費側が連続的に表示できるようにする。
+3. **`[execution]` 通知が自然言語チャットとして届く → モデルが parse する必要がある**(部分採用)
+   v1 が FE 駆動である以上 wire 上は user メッセージになる。改善は 2 段:
+   (a) すぐ: 定型文を**機械可読に固定**(exec_id を独立行 or JSON ブロックで載せる)
+   (b) 根治: サーバ駆動でのターン再開(#106 の driver 原理)にして tool 結果として注入する — v2
+4. **結果の保持期間が不明**(採用・文言のみ)— 現状 `EXEC_RETENTION_DAYS=0` = **GC しない**
+   (無期限に await/check で回収できる)。モデルはそれを知らないので **tool description に明記**する。
+5. **stateful `run_python` の background と同期実行の競合** → **実測した(2026-08-14)**
+   - `/exec_cell`(chat 単位 kernel): 12 秒の背景セル実行中に投げた同期セルは **10 秒ブロック**され、
+     その後に実行された(`x` は最終値を観測)。**状態は壊れない — 直列化される**
+   - `/exec`(stateless。`run_shell` / `run_python_once`): こちらも**同一ユーザーで直列化**。
+     10 秒の実行中に投げた短い実行が 8 秒待たされた
+   - **帰結**: background にしても sandbox 側は並列化されない。得られるのは「親ターンが即返る」
+     ことだけで、**その間 同一ユーザーの sandbox 呼び出しは全部待たされる**(head-of-line blocking)。
+     長い background 実行中に同期 python/shell を呼ぶと `CHAT_TOOL_EXECUTION_TIMEOUT` に当たりうる
+   - **対処(次回の判断事項)**: (a) tool description に待たされる旨を明記する / (b) 走行中の
+     background sandbox exec があるとき同期呼び出しを即エラーにして待たせない /
+     (c) 真の並列化は sandbox サービス側(llens)の per-session ワーカー化が要る — nucllei 外
+
 ## 追補 2(2026-08-14 ken)— await の複数待ち
 
 `await_async` は **`exec_ids: string[]`(配列)で複数を 1 回で待つ**形にする(次回の作り直しで反映)。
