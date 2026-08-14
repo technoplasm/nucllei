@@ -42,7 +42,7 @@
 | # | 内容 |
 |---|---|
 | 7 | **tag**(サブエージェント + 非同期土台が揃った — `uv run task tag release`。切る前に ken と解釈の再確認) |
-| 8 | **llens P4**: `tools/subagent.py` 置換 / sandbox・audio の `backgroundable` 宣言を本番 tool へ / **プロンプト・skill の案内文を task 用語(check_task/await_task/stop_task・task_id)へ追随** / sandbox description の直列化文言 |
+| 8 | **llens P4**: `tools/subagent.py` 置換 / sandbox・audio の `backgroundable` 宣言を本番 tool へ / **プロンプト・skill の案内文を task 用語(check_task/await_task/stop_task・task_id)へ追随** / sandbox description の直列化文言 / **STT は遅い(ken 2026-08-14)**: 長尺音声は background へ誘導する案内 + `transcribe_speech` の per-tool `timeout` 宣言を検討(同期既定 300 秒では長尺が死ぬ。background 側は `ASYNC_EXEC_TIMEOUT`=1800 を維持 — 20 分案は STT の遅さを理由に見送り) |
 
 ## 実装の勘所(次セッション向けメモ)
 
