@@ -348,10 +348,15 @@ class TestAsyncExec(AbstractPostgresTest):
 
         monkeypatch.setattr(self.executions, "EXEC_RESULT_MAX_CHARS", 40)
 
+        # progress は走行中だけ読める揮発値(in-process sink)。probe が即 return すると
+        # 観測前に完走してしまうため、観測できたことを gate で通知するまで待たせる
+        observed = asyncio.Event()
+
         async def probe():
             tool_output.feed_image("file-1")
             tool_output.display("表示", "markdown")
             tool_output.progress("進行中", current=1, total=2)
+            await asyncio.wait_for(observed.wait(), timeout=5)
             return {"answer": "あ" * 100, "usage": {"prompt_tokens": 7}}
 
         entry = self._entry(probe, render={"result": {"kind": "subagent"}})
@@ -360,14 +365,17 @@ class TestAsyncExec(AbstractPostgresTest):
             spawned = await self._spawn(probe, entry=entry)
             exec_id = spawned["exec_id"]
             # 走行中は sink 経由で最新 progress 1 件が読める(check_async の源)
-            for _ in range(200):
-                progress = self.executions.get_latest_progress(exec_id)
-                if progress:
-                    assert progress["description"] == "進行中"
-                    break
-                await asyncio.sleep(0.01)
-            else:
-                raise AssertionError("progress was never observed")
+            try:
+                for _ in range(200):
+                    progress = self.executions.get_latest_progress(exec_id)
+                    if progress:
+                        assert progress["description"] == "進行中"
+                        break
+                    await asyncio.sleep(0.01)
+                else:
+                    raise AssertionError("progress was never observed")
+            finally:
+                observed.set()  # 失敗時も probe を解放してタスクを残さない
             await self._wait_registry_release(exec_id)
             return exec_id
 
