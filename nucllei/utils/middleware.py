@@ -160,6 +160,13 @@ def get_model_context_size(request, model: dict) -> Optional[int]:
     SGLang の /v1/models が返す max_model_len は raw model
     (app.state.MODELS[id]["openai"])に保持されている。preset モデル
     (base_model_id 持ち)は raw を持たないため base モデルを辿る。
+
+    max_model_len は OpenAI の /v1/models 仕様には無い SGLang 拡張で、間に
+    proxy が挟まると落ちる(LiteLLM v1.82.3 実測 — id/object/created/owned_by
+    の 4 キーしか返さず、context 長が既知の商用モデルでも同じ)。そういう配備
+    向けの**最後の手段**として meta.context_size(モデルへ手で設定)を見る。
+    実測値が取れるならそちらが真 — 手動値は stale になりうるので fallback 側に
+    置く(capabilities.usage 等と同じく UI は持たず model API から設定する)。
     """
     ctx = (model.get("openai") or {}).get("max_model_len")
     if ctx is None:
@@ -167,6 +174,9 @@ def get_model_context_size(request, model: dict) -> Optional[int]:
         if base_id:
             base = request.app.state.MODELS.get(base_id) or {}
             ctx = (base.get("openai") or {}).get("max_model_len")
+    if ctx is None:
+        meta = (model.get("info") or {}).get("meta") or {}
+        ctx = meta.get("context_size")
     return ctx
 
 
@@ -905,8 +915,10 @@ async def consume_model_stream(
       (途中参加の収束と障害時の取りこぼし上限)
     - チャンク(choices 非空)に累積 usage が載っていれば(#102、
       continuous_usage_stats)、USAGE_EMIT_INTERVAL の leading-edge throttle で
-      揮発イベント `chat:usage` として流す。**永続化は最終 usage フレーム
-      (choices: [])のみ** — ライブ usage は DB に書かない。
+      揮発イベント `chat:usage` として流す。
+    - usage の**永続化は 1 ストリームにつき 1 回**。原則は最終 usage フレーム
+      (choices: [])だが、そこに来なかった配備のために最後に観測した usage を
+      ストリーム終端で拾う(下の pending_usage を参照)。
 
     ストリーム終端で reasoning の閉じ規律③と finish_reason 整合ガード
     (llens #18-2)を適用する。
@@ -920,6 +932,10 @@ async def consume_model_stream(
     # context_size はこのモデル呼び出しの間は不変なので 1 回だけ解決して使い回す。
     last_usage_emit_at = None
     context_size = get_model_context_size(request, model)
+    # #102: usage の永続化状態。recorded_usage が False のままストリームが終わった
+    # ときだけ、最後に観測した pending_usage を終端で記録する(下の後始末を参照)。
+    recorded_usage = False
+    pending_usage = None
 
     async def emit_snapshot(persist):
         nonlocal last_snapshot_at
@@ -981,9 +997,9 @@ async def consume_model_stream(
                             "data": {"error": error},
                         }
                     )
-                # 不変条件(#102): usage の永続化点はこの最終フレーム
-                # (choices: [])だけ。チャンクに載る累積 usage(continuous)は
-                # 下の chat:usage(揮発)で流すのみで、DB には書かない。
+                # #102: usage の主たる永続化点はこの最終フレーム(choices: [])。
+                # チャンクに載る累積 usage(continuous)は下の chat:usage(揮発)で
+                # 流すのみで、ここを通らない限り DB には書かない。
                 usage = data.get("usage", {})
                 if usage:
                     # 生成所要時間(#102): この呼び出しの stream 消費の壁時計を実測して
@@ -992,24 +1008,27 @@ async def consume_model_stream(
                     # 計測は backend の責務。
                     usage = {**usage, "duration": round(loop.time() - started_at, 3)}
                     await _record_usage(request, model, metadata, usage, event_emitter)
+                    recorded_usage = True
                 continue
 
             # llens(#102): continuous_usage_stats でチャンクに載る累積 usage を
             # leading-edge throttle で揮発イベントとして流す。tail flush は不要 —
-            # 最終真値は上の choices: [] フレーム(chat:completion {usage})が
-            # 無条件で届く。
+            # 最終真値は上の choices: [] フレーム(chat:completion {usage})、
+            # それが来ない配備ではストリーム終端の後始末が受け持つ。
             live_usage = data.get("usage")
-            if live_usage and (
-                last_usage_emit_at is None
-                or loop.time() - last_usage_emit_at >= USAGE_EMIT_INTERVAL
-            ):
-                last_usage_emit_at = loop.time()
-                await event_emitter(
-                    {
-                        "type": "chat:usage",
-                        "data": _live_usage_payload(live_usage, context_size),
-                    }
-                )
+            if live_usage:
+                pending_usage = live_usage
+                if (
+                    last_usage_emit_at is None
+                    or loop.time() - last_usage_emit_at >= USAGE_EMIT_INTERVAL
+                ):
+                    last_usage_emit_at = loop.time()
+                    await event_emitter(
+                        {
+                            "type": "chat:usage",
+                            "data": _live_usage_payload(live_usage, context_size),
+                        }
+                    )
 
             assembler.note_finish_reason(choices[0].get("finish_reason"))
 
@@ -1036,6 +1055,18 @@ async def consume_model_stream(
             else:
                 log.debug("Error: ", e)
                 continue
+
+    if not recorded_usage and pending_usage is not None:
+        # llens(#102): usage を `choices: []` の専用フレームで送るのは SGLang の形で、
+        # OpenAI の streaming 仕様が定めた形ではない。間に proxy が挟まると同じ usage が
+        # choices 非空(delta: {})のチャンクに載って届く(LiteLLM v1.82.3 実測 —
+        # finish_reason チャンクの次、[DONE] の直前)。上のループはそれをライブ usage と
+        # してしか見ないため、この後始末が無いと usage が一度も永続化されず
+        # message.usage が空のままになる = 所要時間・tok/s・IN/OUT が丸ごと出ない。
+        # フレームの形を当てにいかず「最後に観測した累積 usage を終端で 1 回記録する」で
+        # 両方の形を拾う(SGLang では上で記録済みなのでここは通らない)。
+        usage = {**pending_usage, "duration": round(loop.time() - started_at, 3)}
+        await _record_usage(request, model, metadata, usage, event_emitter)
 
     response_tool_calls, mismatch = assembler.finish_stream()
 

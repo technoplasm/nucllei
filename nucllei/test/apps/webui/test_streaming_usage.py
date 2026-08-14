@@ -3,13 +3,17 @@
 SGLang の stream_options.continuous_usage_stats は choices を持つ全チャンクに
 累積 usage を載せる(実機確認済み)。consume_model_stream はこれを
 USAGE_EMIT_INTERVAL の leading-edge throttle で揮発イベント chat:usage として
-流す。永続化(_record_usage → DB)は従来どおり最終 usage フレーム
-(choices: [])のみで、その emit には context_size が同梱される。
+流す。永続化(_record_usage → DB)は 1 ストリームにつき 1 回で、その emit には
+context_size が同梱される。
 
 フレームは実キャプチャ形式(SGLang × Kimi K2.6 — _memos/model-frames.md)に
 合わせて合成する: role フレーム → content* → finish → usage フレーム
 (choices: [])→ [DONE]。continuous では choices を持つチャンクにも累積
 usage が載る。
+
+usage フレームの形は配備依存である点も併せて固定する — proxy(LiteLLM)越しでは
+usage が `choices: []` ではなく choices 非空(delta: {})のチャンクに載って届く。
+永続化はフレームの形ではなくストリーム終端で保証する(_litellm_frames)。
 """
 
 import asyncio
@@ -78,6 +82,41 @@ def _continuous_frames():
             usage=_usage(28, 4, reasoning=1),
         ),
         _chunk(usage=_usage(28, 4, reasoning=1)),  # 最終 usage フレーム(choices: [])
+    ]
+
+
+def _litellm_frames():
+    """LiteLLM proxy 越しの応答(実キャプチャ形式 — v1.82.3 / 2026-08-14)。
+
+    SGLang 直との差は 3 点:
+    - continuous_usage_stats が通らない(チャンクに累積 usage が載らない)
+    - **usage が `choices: []` ではなく choices 非空(delta: {})のチャンクに載る**
+      — finish_reason チャンクの次、[DONE] の直前
+    - reasoning は completion_tokens_details.reasoning_tokens に入れ子で入る
+      (SGLang 拡張の top-level reasoning_tokens は来ない)
+    """
+    usage = {
+        "completion_tokens": 101,
+        "prompt_tokens": 26,
+        "total_tokens": 127,
+        "completion_tokens_details": {"reasoning_tokens": 94, "text_tokens": 7},
+    }
+    return [
+        {
+            "id": "e99915b96b7a4b68a8a42b4a5f0113b1",
+            "object": "chat.completion.chunk",
+            "created": 1786683185,
+            "model": "kimi-k2.6",
+            "choices": [{"index": 0, "delta": delta, **extra}],
+            **({"usage": usage} if with_usage else {}),
+        }
+        for delta, extra, with_usage in [
+            ({"reasoning_content": "ユーザー", "role": "assistant"}, {}, False),
+            ({"content": "こん"}, {}, False),
+            ({"content": "にちは!"}, {}, False),
+            ({}, {"finish_reason": "stop"}, False),
+            ({}, {}, True),  # usage チャンク(choices 非空・finish_reason 無し)
+        ]
     ]
 
 
@@ -206,6 +245,78 @@ def test_only_final_usage_frame_is_recorded(monkeypatch):
     assert len(emitted) == 1
     assert emitted[0].pop("duration") == recorded_duration
     assert emitted == [{**final_usage, "context_size": 262144}]
+
+
+def test_usage_on_non_empty_choices_frame_is_recorded(monkeypatch):
+    """proxy 越し(usage が choices 非空のチャンクに載る)でも永続化される。
+
+    ここが落ちると message.usage が空のままになり、FE の所要時間・平均 tok/s・
+    IN/OUT が丸ごと出なくなる(LiteLLM 経由で実際に起きた)。
+    """
+    events, record_calls = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(_litellm_frames()))
+    )
+
+    assert len(record_calls) == 1
+    duration = record_calls[0]["usage"].pop("duration")
+    assert isinstance(duration, float) and duration >= 0
+    assert record_calls[0]["usage"] == {
+        "completion_tokens": 101,
+        "prompt_tokens": 26,
+        "total_tokens": 127,
+        "completion_tokens_details": {"reasoning_tokens": 94, "text_tokens": 7},
+    }
+    assert record_calls[0]["context_size"] == 262144
+
+    emitted = _completion_usage_events(events)
+    assert len(emitted) == 1
+    assert emitted[0]["completion_tokens"] == 101
+
+
+def test_usage_is_recorded_once_when_final_frame_follows(monkeypatch):
+    """終端の後始末は二重記録しない — 最終フレーム(choices: [])が来た形が正。
+
+    continuous(全チャンクに累積 usage)+ 最終フレーム、という SGLang の形で
+    記録が 1 回に留まることを固定する。throttle は無効化して全チャンクを
+    ライブ経路に通す(pending_usage が毎回更新される最悪条件)。
+    """
+    monkeypatch.setattr(middleware, "USAGE_EMIT_INTERVAL", 0.0)
+    _, record_calls = asyncio.run(
+        _consume(monkeypatch, _sse_response_from_frames(_continuous_frames()))
+    )
+
+    assert len(record_calls) == 1
+    assert record_calls[0]["usage"]["completion_tokens"] == 4
+
+
+def test_context_size_falls_back_to_model_meta(monkeypatch):
+    """max_model_len を返さない endpoint 向けに meta.context_size を手で設定できる。"""
+    _, record_calls = asyncio.run(
+        _consume(
+            monkeypatch,
+            _sse_response_from_frames(_litellm_frames()),
+            model={"id": "kimi-k2.6", "info": {"meta": {"context_size": 262144}}},
+        )
+    )
+
+    assert record_calls[0]["context_size"] == 262144
+
+
+def test_max_model_len_wins_over_model_meta(monkeypatch):
+    """実測値(max_model_len)が取れるならそちらが真 — 手動値は stale になりうる。"""
+    _, record_calls = asyncio.run(
+        _consume(
+            monkeypatch,
+            _sse_response_from_frames(_litellm_frames()),
+            model={
+                "id": "kimi-k2.6",
+                "openai": {"max_model_len": 262144},
+                "info": {"meta": {"context_size": 8192}},
+            },
+        )
+    )
+
+    assert record_calls[0]["context_size"] == 262144
 
 
 def test_no_live_usage_without_continuous_chunks(monkeypatch):
