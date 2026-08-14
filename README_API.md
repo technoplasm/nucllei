@@ -500,8 +500,14 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
 - Audio: `POST /api/v1/audio/transcriptions` (STT), `POST /api/v1/audio/speech` (TTS).
 - Chats CRUD: `/api/v1/chats/*` (`/new`, `/{id}`, `/search`, share/archive/clone...).
 - Executions of a chat (owner only, see §5.9):
-  `GET /api/v1/chats/{id}/executions` → the rows without the result body
-  (`id, tool_name, status, created_at, finished_at, duration, error`);
+  `GET /api/v1/chats/{id}/executions` →
+  `{executions: [...], resume_suspended: bool}`. Each row carries
+  `id, tool_name, status, created_at, finished_at, duration, error, delivered`
+  but never the result body. `delivered` is true once the result reached the
+  model's context (server-driven delivery notice, `await_task`/`stop_task`
+  report, or permanent abandonment on chat deletion); `resume_suspended` is
+  true while server-driven delivery is held back by the unattended-chain limit
+  (`ASYNC_EXEC_RESUME_CHAIN_LIMIT`) — the next human message releases it.
   `POST /api/v1/chats/{id}/executions/{exec_id}/stop` → stop one execution and
   return its updated row (idempotent — already-terminal rows are unchanged).
 - Users & groups (admin): `/api/v1/users/*`, `/api/v1/groups/*`.
@@ -699,11 +705,13 @@ the parent chat's tool loop:
   of `preset_id` to send a follow-up instruction to an existing session.
 
 `run_subagent` is **backgroundable** (§5.9): calling it with the shared
-`background: true` argument runs the child turn as an asynchronous execution
-and returns `{ok, exec_id, tool_name, status: "running"}` immediately; collect
-the result with `await_async(exec_id)`. `session_id` stays the resumable
-session handle, `exec_id` is the record of one run. There is no dedicated
-`await_subagent` — async collection is unified on the execution channel.
+`background: true` argument runs the child turn as a background task and
+returns `{ok, task_id, tool_name, status: "running"}` immediately. On
+completion the result is delivered automatically by the server (a notice turn
+in the parent chat — §5.9); to wait for it right now use
+`await_task(task_ids)`. `session_id` stays the resumable session handle,
+`task_id` is the record of one run. There is no dedicated `await_subagent` —
+async collection is unified on the execution channel.
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENT` (default 4 — spawns over the limit fail
@@ -712,37 +720,68 @@ immediately, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT`
 never appear in the user's chat list, are read-only over HTTP, and are
 cascade-deleted (running turns stopped) with the parent chat.
 
-### 5.9 Asynchronous execution (`background` / `check_async` / `await_async`)
+### 5.9 Background tasks (`background` / `check_task` / `await_task` / `stop_task`)
 
-Any **backgroundable** tool call can be promoted to an asynchronous
-**execution**: a first-class DB row that outlives the parent turn. On a normal
-user chat (never on agent-session child turns or headless completions), the
-server injects a shared `background: boolean` parameter into the model-facing
-spec of every eligible tool.
+Any **backgroundable** tool call can be promoted to a background task — an
+asynchronous **execution**: a first-class DB row that outlives the parent
+turn. On a normal user chat (never on agent-session child turns or headless
+completions), the server injects a shared `background: boolean` parameter into
+the model-facing spec of every eligible tool.
 
 - `background: true` → the call returns
-  `{ok, exec_id, tool_name, status: "running"}` immediately and that running
+  `{ok, task_id, tool_name, status: "running"}` immediately and that running
   form stays in the parent message's tool result forever (append-only); the
   truth about completion lives in the execution row
   (`running|done|failed|stopped|orphaned`). The execution keeps running after
   the parent turn ends; stopping the parent turn does **not** stop it.
-- `check_async(exec_id)` — non-blocking status poll:
-  `{exec_id, tool_name, status, elapsed_s, progress?}` (latest in-process
-  progress line). Never returns the result body.
-- `await_async(exec_id, timeout?)` — bounded wait (default 90 s, clamped to
-  10–300). On completion returns
-  `{ok, exec_id, tool_name, status: "done", result, duration, usage?}`
-  (with the original tool's render descriptor, and a one-time replay of
-  `context_images` / `display` side-channels); on timeout
-  returns the running form (report "still running" and end the turn — the
-  frontend auto-resume collects it later); on `failed/stopped/orphaned`
-  returns `{ok: false, ..., error}`. Re-awaiting is idempotent.
+- `check_task(task_ids?, include_done?)` — non-blocking status poll. With no
+  arguments lists the chat's running tasks (oldest first); `include_done:
+  true` lists terminal ones too (newest first, max 50); with `task_ids` returns
+  those entries in order. Each entry:
+  `{task_id, tool_name, status, started_at, elapsed_s}` plus `progress` while
+  running or `duration`/`error` when terminal. Never returns the result body
+  and never writes (read-only).
+- `await_task(task_ids, timeout?)` — collect results now. One bounded window
+  (default 90 s, clamped to 10–300) covers all ids (max 20 per call);
+  already-terminal tasks return immediately (idempotent — results are kept
+  indefinitely). Per entry: done →
+  `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
+  (with the original tool's render descriptor when exactly one done task was
+  requested, and a one-time replay of `context_images`/`display`
+  side-channels); `failed/stopped/orphaned` → `{ok: false, ..., error}`;
+  still running at the deadline → the running form (partial collection — the
+  server delivers the rest later).
+- `stop_task(task_ids)` — force-stop; returns each task's actual state
+  afterwards. Idempotent on already-terminal tasks. Side effects may already
+  have completed.
 
-Both collectors are builtin pseudo-tools, mounted automatically whenever an
-eligible tool is on the turn or the chat still has execution rows.
+All three collectors are builtin pseudo-tools, mounted automatically whenever
+an eligible tool is on the turn or the chat has execution rows (independent of
+the single-process spawn gate, so past rows stay collectible even under
+`UVICORN_WORKERS > 1`).
+
+**Server-driven delivery** (no browser required): when a background task
+reaches a terminal state, the **server** waits for the parent chat to be quiet
+(no running turn), appends a delivery notice — a user-role message with
+`meta: {"system_notice": "task"}` carrying the full result text (and
+`context_images` as message images) — marks the row `delivered` in the same
+transaction, and starts a continuation turn on the chat's model so the model
+reads the notice and continues on its own. `await_task`/`stop_task` reports
+also mark rows `delivered` (the result already reached the model's context).
+Unattended chains are limited to `ASYNC_EXEC_RESUME_CHAIN_LIMIT` (default 5)
+consecutive notice turns; the next human message resets the chain. If the
+continuation turn cannot start (engine down), the notice stays in history and
+the turn is retried with backoff; if the chat's model is unresolvable, the
+notice still gets read on the next user turn. Deleting the chat stops its
+executions and marks them delivered (permanent abandonment). On boot the
+server scans for undelivered rows and resumes delivery. Known v1 limit:
+workspace-export chat attachments emitted after the parent turn ended are not
+re-attached by the delivery notice (files themselves are persisted and listed
+in the result string).
 
 Over HTTP the rows are readable and stoppable by the chat's owner:
-`GET /api/v1/chats/{id}/executions` (list, no result bodies) and
+`GET /api/v1/chats/{id}/executions` (object form with `delivered` /
+`resume_suspended`, no result bodies — §4.6) and
 `POST /api/v1/chats/{id}/executions/{exec_id}/stop` (the UI's per-execution stop
 button). There is no SSE push — the frontend polls.
 
@@ -757,23 +796,25 @@ button). There is no SSE push — the frontend polls.
   backgrounded. Note that the sandbox serializes calls per user, so a
   synchronous call made while a backgrounded one is still running waits for it
   (head-of-line blocking — backgrounding frees the parent turn, not the
-  sandbox). Known v1 limit: workspace-export chat
-  attachments emitted after the parent turn ended don't show in the UI (files
-  themselves are persisted and listed in the result string).
-- Never eligible: `load_skill`, `check_async`, `await_async`, any tool that
-  declares its own `background` parameter (collision guard), and tool-server
-  tools (no opt-in surface in v1). `background: true` on a non-eligible tool
-  is ignored (synchronous run, warning logged).
+  sandbox).
+- Never eligible: `load_skill`, `check_task`, `await_task`, `stop_task`, any
+  tool that declares its own `background` parameter (collision guard), and
+  tool-server tools (no opt-in surface in v1). `background: true` on a
+  non-eligible tool is ignored (synchronous run, warning logged).
 
 Timeouts and limits: per-entry `timeout` wins, else `ASYNC_EXEC_TIMEOUT`
 (default 1800 s). Concurrency: `ASYNC_EXEC_MAX_CONCURRENT` (default 4 per
 user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
-fails immediately. Results are truncated at `EXEC_RESULT_MAX_CHARS` (default
-65536; truncation demotes structured rendering to text) and optionally purged
-after `EXEC_RETENTION_DAYS` (default 0 = keep forever). Single-process only:
-with `UVICORN_WORKERS > 1` spawning is refused. Executions are stopped (not
-deleted) when their chat is deleted; a server restart marks in-flight rows
-`orphaned` — the record survives, the computation does not resume.
+fails immediately. Tool results — synchronous and background alike — are
+truncated once at the production point at `TOOL_RESULT_MAX_CHARS` (default
+65536; truncation demotes structured rendering to text; the collectors'
+envelopes are exempt because their contents are already truncated at save
+time). Rows are optionally purged after `EXEC_RETENTION_DAYS` (default 0 =
+keep forever — results stay re-collectable indefinitely). Spawning is
+single-process only: with `UVICORN_WORKERS > 1` it is refused (collection and
+listing still work). Executions are stopped (not deleted) when their chat is
+deleted; a server restart marks in-flight rows `orphaned` — the record
+survives, the computation does not resume.
 
 ---
 

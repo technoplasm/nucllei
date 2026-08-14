@@ -13,6 +13,14 @@ def get_fast_api_client():
     from nucllei.main import app
 
     with TestClient(app) as c:
+        # llens(#110): TestClient の lifespan がサーバ駆動配達 driver を
+        # install(app)する。テストでは task 終了のたびに実 driver が起きて
+        # DB(delivered_at / chat 履歴)へ非決定的に書くため、無効化する
+        # (wake は _app が None なら no-op)。driver を検証するテスト
+        # (test_execution_resume.py)は setup で自前の app を差し込む。
+        from nucllei.utils import execution_resume
+
+        execution_resume._app = None
         return c
 
 

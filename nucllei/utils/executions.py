@@ -2,8 +2,11 @@
 
 どの tool 実行も `background: true` で非同期化できる汎用基盤。spawn は execution 行
 (models/executions.py)を INSERT して runner task を起動し、即座に
-{ok, exec_id, status: "running"} を返す。完了の真実は exec 行が持ち、回収は
-check_async / await_async(呼び出し面 — middleware 側)と FE の自動再開が行う。
+{ok, task_id, status: "running"} を返す(用語は契約 T1 — モデル向けは task_id、
+内部実体は exec 行のまま)。完了の真実は exec 行が持ち、回収は check_task /
+await_task(呼び出し面 — utils/exec_tools.py)が、完了結果の配達はサーバ駆動
+(契約 T3 — execution_resume の配達 driver がタスク終了時に親 chat へ通知
+メッセージを書き、続きターンを起動する。delivered_at が配達済みの事実)が行う。
 
 設計原則(_memos/async-exec-design.md):
 - D1: 状態遷移はすべて guarded UPDATE(finish_execution の CAS)。同着は先勝ち。
@@ -19,7 +22,7 @@ check_async / await_async(呼び出し面 — middleware 側)と FE の自動再
 
 runner は自前の sink(_ExecSink)を張る: create_task の context copy が引き継ぐ
 親ターンの sink は turn return 直後に close されるため。progress は SSE へ流さず
-最新 1 件を sink に保持し、check_async が registry 経由で読む(best-effort・
+最新 1 件を sink に保持し、check_task が registry 経由で読む(best-effort・
 プロセス内)。`in_exec` ContextVar は completion_events の DB 分岐遮断
 (append-only 破り・RMW 競合の防止 — §6 硬化)に使う。
 """
@@ -37,9 +40,9 @@ from nucllei.env import (
     ASYNC_EXEC_MAX_CONCURRENT,
     ASYNC_EXEC_MAX_TOTAL,
     ASYNC_EXEC_TIMEOUT,
-    EXEC_RESULT_MAX_CHARS,
     EXEC_RETENTION_DAYS,
     SRC_LOG_LEVELS,
+    TOOL_RESULT_MAX_CHARS,
     UVICORN_WORKERS,
 )
 from nucllei.models.executions import ExecutionModel, Executions
@@ -82,7 +85,7 @@ _exec_tasks: dict[str, Optional[str]] = {}
 # per-user 同時数会計(0 で pop)
 _active_execs_by_user: dict[str, int] = {}
 
-# 走行中 exec の sink(check_async の progress 読み出し用。done callback で pop)
+# 走行中 exec の sink(check_task の progress 読み出し用。done callback で pop)
 _exec_sinks: dict[str, "_ExecSink"] = {}
 
 
@@ -90,7 +93,7 @@ class _ExecSink(ToolOutputSink):
     """exec 専用 sink。
 
     progress は SSE へ流さず**最新 1 件を保持する**(揮発・プロセス内)—
-    check_async がポーリングで読む。context_images / display は親クラスの蓄積を
+    check_task がポーリングで読む。context_images / display は親クラスの蓄積を
     そのまま使い、完了時に exec 行の meta へ harvest される。
     """
 
@@ -124,6 +127,22 @@ def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
     if isinstance(raw, str):
         return raw, None
     return ("" if raw is None else str(raw)), None
+
+
+def truncate_tool_result(text: str) -> tuple[str, bool, int]:
+    """tool 結果の共通切詰め(契約 M0 — TOOL_RESULT_MAX_CHARS)。
+
+    適用は**結果の生産点で一度だけ**: 同期 tool は execute_tool_calls の wire
+    正規化直後、background は runner の保存時。以後の中継(await_task の envelope・
+    配達 notice)は透過 — 特に回収 builtin の返りに再適用すると envelope の
+    json.dumps 膨張で壊れ JSON になる(切詰め済みの中身を再び切る)。
+    戻り値は (text, truncated, original_chars)。切詰め時の render 降格
+    (JSON / descriptor 描画はパース前提なので落とす)は呼び出し側の責務。
+    """
+    original_chars = len(text)
+    if original_chars <= TOOL_RESULT_MAX_CHARS:
+        return text, False, original_chars
+    return text[:TOOL_RESULT_MAX_CHARS], True, original_chars
 
 
 def async_exec_available() -> bool:
@@ -186,12 +205,13 @@ async def spawn_execution(
     # subagent.py の規律)。超過は即エラー(行を作らない)。
     if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENT:
         return _error(
-            f"非同期実行の同時数がユーザー上限({ASYNC_EXEC_MAX_CONCURRENT})に"
-            "達しています。走行中の実行を await_async で回収してから再試行してください。"
+            f"バックグラウンドタスクの同時数がユーザー上限"
+            f"({ASYNC_EXEC_MAX_CONCURRENT})に達しています。走行中のタスクの完了を"
+            "待つか stop_task で止めてから再試行してください。"
         )
     if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
         return _error(
-            f"非同期実行の同時数がサーバー上限({ASYNC_EXEC_MAX_TOTAL})に"
+            f"バックグラウンドタスクの同時数がサーバー上限({ASYNC_EXEC_MAX_TOTAL})に"
             "達しています。しばらくしてから再試行してください。"
         )
     _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
@@ -260,7 +280,8 @@ async def spawn_execution(
     else:
         _exec_tasks[exec_id] = task_id
 
-    return {"ok": True, "exec_id": exec_id, "tool_name": tool_name, "status": "running"}
+    # 返りのキーは task_id(契約 T1 — モデル・UI 向けの用語。値は exec 行の id)
+    return {"ok": True, "task_id": exec_id, "tool_name": tool_name, "status": "running"}
 
 
 async def _run_execution(
@@ -326,14 +347,15 @@ async def _run_execution(
             render_descriptor = (entry.get("render") or {}).get("result")
             if render_descriptor:
                 meta["render_descriptor"] = render_descriptor
-            if len(text) > EXEC_RESULT_MAX_CHARS:
-                # 切詰めで JSON が壊れるため render は text に降格(不正 JSON を
-                # FE / json.loads に渡さない)。descriptor 描画もパース前提なので同時に落とす
+            # 切詰めは生産点で一度だけ(契約 M0 — 同期経路と共通のヘルパ)。
+            # 切詰めで JSON が壊れるため render は text に降格(不正 JSON を
+            # FE / json.loads に渡さない)。descriptor 描画もパース前提なので同時に落とす
+            text, truncated, original_chars = truncate_tool_result(text)
+            if truncated:
                 meta["truncated"] = True
-                meta["original_chars"] = len(text)
+                meta["original_chars"] = original_chars
                 meta.pop("render", None)
                 meta.pop("render_descriptor", None)
-                text = text[:EXEC_RESULT_MAX_CHARS]
             # 成功時のみ harvest(snapshot — 失敗 call は副産物を出さない規律は
             # middleware と同じ。failed 経路はこの分岐に来ない)
             context_images = sink.context_images()
@@ -413,7 +435,7 @@ async def stop_executions_by_chat_id(chat_id: str) -> int:
 
 
 def get_exec_task(exec_id: str) -> Optional[asyncio.Task]:
-    """走行中 exec の asyncio.Task(await_async の shield 待ち用)。無ければ None。"""
+    """走行中 exec の asyncio.Task(await_task の有界待ち用)。無ければ None。"""
     registered = _exec_tasks.get(exec_id)
     if isinstance(registered, str) and registered != _STOP_REQUESTED:
         return tasks.get_task(registered)
@@ -426,7 +448,7 @@ def has_exec_registry_entry(exec_id: str) -> bool:
 
 
 def get_latest_progress(exec_id: str) -> Optional[dict]:
-    """走行中 exec の最新 progress 1 件(best-effort・プロセス内 — check_async 用)。"""
+    """走行中 exec の最新 progress 1 件(best-effort・プロセス内 — check_task 用)。"""
     sink = _exec_sinks.get(exec_id)
     return sink.latest_progress if sink is not None else None
 
@@ -442,7 +464,7 @@ async def ensure_execution_liveness(
       (完走直後 = 「DB 書き済み・registry pop 済み」との取り違えレース対策。
       runner は永続化してから done callback で pop するので、再読が running を
       返すなら本当に失われている)
-    await_async / 個別 GET / stop の入口で使う。一覧 API は検出のみで書かない。
+    await_task / 個別 GET / stop の入口で使う。一覧 API は検出のみで書かない。
     """
     if execution.status != "running":
         return execution

@@ -36,6 +36,7 @@ from starlette.responses import Response
 
 from nucllei.builtin_tools import sync_builtin_tools
 from nucllei.utils.executions import sweep_executions_on_boot
+from nucllei.utils import execution_resume
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
@@ -290,6 +291,11 @@ async def lifespan(app: FastAPI):
     # llens(#110): 前プロセスの走行中 execution は失われている(単一プロセスが
     # 不変条件)— 起動時に orphaned へ倒す(orphaned の権威)+ 保持期限 GC。
     await asyncio.to_thread(sweep_executions_on_boot)
+
+    # llens(#110 契約 T3): サーバ駆動配達 driver の設置。sweep の**後**に
+    # 未配達 terminal 行を持つ chat をスキャンして配達を起こす(wake ③)。
+    # models は lazy なので、driver 側がターン起動前に get_all_models 相当を踏む。
+    await execution_resume.install(app)
 
     yield
 
@@ -684,6 +690,11 @@ async def chat_completion(
     _chat_id = form_data.get("chat_id")
     _message_id = form_data.get("id")
     if _chat_id:
+        # llens(#110 契約 M3): サーバ駆動配達が append〜続きターン起動の途中なら
+        # FE ターンを短く待たせる(レース窓の緩和 — 超過時は通す。競合の最終
+        # 検出は chat 保存側の CAS / FE の save 400 リカバリが持つ)。
+        await execution_resume.wait_for_quiet_delivery(_chat_id, timeout=5.0)
+
         _existing_chat = Chats.get_chat_by_id(_chat_id)
         if _existing_chat is not None:
             if _existing_chat.user_id != user.id:

@@ -422,6 +422,8 @@ class Tools:
         定義が実行を跨いで保持される (前のセルで作った DataFrame をそのまま使える)。
         最後の式は notebook のように値が表示される。/workspace は永続、
         /workspace/exports/ に保存したファイルは自動でチャットに添付される。ネットワーク不可。
+        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
+        呼ぶと、その完了まで待たされる (並列にはならない)。
 
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120)
@@ -443,6 +445,8 @@ class Tools:
         サーバーの隔離環境で Python コードを 1 回だけ実行する (状態を持たない使い捨て)。
         run_python と違い変数は残らないが、他の会話の状態から完全に独立して走らせたい
         単発処理向け。/workspace は永続、exports/ は自動添付。ネットワーク不可。
+        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
+        呼ぶと、その完了まで待たされる (並列にはならない)。
 
         :param code: 実行する Python コード
         :param timeout_s: wall clock 秒数 (省略時 120)
@@ -470,6 +474,8 @@ class Tools:
         サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
         pandoc, ffmpeg / ffprobe, python が利用可能。/workspace は run_python と共有で実行を跨いで永続。
         成果物は /workspace/exports/ に置くと自動でチャットに添付される。ネットワーク不可。
+        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
+        呼ぶと、その完了まで待たされる (並列にはならない)。
 
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120)

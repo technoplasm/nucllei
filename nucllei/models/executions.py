@@ -67,6 +67,10 @@ class Execution(Base):
     # 終端状態になった時刻(実行終了時刻ではない — orphaned はスイープ時刻)
     finished_at = Column(BigInteger, nullable=True)
     purged_at = Column(BigInteger, nullable=True)  # GC(result 減量)時刻
+    # 配達済み(#110 契約 T3): 結果がモデルの文脈に載った事実 — サーバ駆動配達の
+    # notice が親 chat 履歴に載った、await_task / stop_task が terminal 形を返した、
+    # または配達先が消えた(chat 削除 = 恒久断念)。一度立てたら戻さない。
+    delivered_at = Column(BigInteger, nullable=True)
 
     # チップの主クエリ = chat 内 running 絞り込み
     __table_args__ = (
@@ -96,6 +100,7 @@ class ExecutionModel(BaseModel):
     created_at: int  # epoch 秒
     finished_at: Optional[int] = None
     purged_at: Optional[int] = None
+    delivered_at: Optional[int] = None
 
 
 ####################
@@ -243,11 +248,11 @@ class ExecutionsTable:
             ]
 
     def has_awaitable_executions_by_chat_id(self, chat_id: str) -> bool:
-        """chat に exec 行があるか(check_async/await_async の mount 判定 — EXISTS)。
+        """chat に exec 行があるか(回収 builtin 3 tool の mount 判定 — EXISTS)。
 
-        「未回収か」は DB では判定できない(回収済みの権威は親 chat の履歴側)ため、
-        purge 済みを除く全行を対象にする。terminal への再 await は冪等なので過剰
-        mount は無害。
+        「未回収か」で絞らず purge 済みを除く全行を対象にする(配達済みでも
+        check_task の一覧・await_task の再回収は意味を持つ)。terminal への
+        再 await は冪等なので過剰 mount は無害。
         """
         with get_db() as db:
             try:
@@ -284,6 +289,69 @@ class ExecutionsTable:
         except Exception as e:
             log.exception(f"Error marking execution {id} as replayed: {e}")
             return False
+
+    def mark_delivered(self, ids: list[str]) -> int:
+        """delivered_at を立てる(#110 契約 T3 — 「結果がモデルの文脈に載った」事実)。
+
+        WHERE id IN ids AND delivered_at IS NULL の guarded UPDATE — 一度立てたら
+        戻さない(冪等: 既配達の行は数えない)。書き手は 3 者: サーバ駆動配達の
+        notice 追記(append_delivery_turn の同一トランザクション)、await_task /
+        stop_task の terminal 報告、配達先消滅(chat 削除 cascade)の恒久断念。
+        戻り値は今回立てた行数。
+        """
+        if not ids:
+            return 0
+        try:
+            with get_db() as db:
+                rowcount = (
+                    db.query(Execution)
+                    .filter(
+                        Execution.id.in_(ids),
+                        Execution.delivered_at == None,  # noqa: E712
+                    )
+                    .update(
+                        {"delivered_at": int(time.time())},
+                        synchronize_session=False,
+                    )
+                )
+                db.commit()
+                return rowcount
+        except Exception as e:
+            log.exception(f"Error marking executions as delivered {ids}: {e}")
+            return 0
+
+    def get_undelivered_terminal_by_chat_id(self, chat_id: str) -> list[ExecutionModel]:
+        """chat の未配達 terminal 行(サーバ駆動配達 driver の 1 サイクルの読み口)。"""
+        with get_db() as db:
+            return [
+                ExecutionModel.model_validate(row)
+                for row in db.query(Execution)
+                .filter(
+                    Execution.chat_id == chat_id,
+                    Execution.status != "running",
+                    Execution.delivered_at == None,  # noqa: E712
+                )
+                .order_by(Execution.created_at.asc(), Execution.id.asc())
+                .all()
+            ]
+
+    def list_chat_ids_with_undelivered(self) -> list[str]:
+        """未配達 terminal 行を持つ chat_id の一覧(boot 時の配達スキャン用)。"""
+        try:
+            with get_db() as db:
+                return [
+                    row[0]
+                    for row in db.query(Execution.chat_id)
+                    .filter(
+                        Execution.status != "running",
+                        Execution.delivered_at == None,  # noqa: E712
+                    )
+                    .distinct()
+                    .all()
+                ]
+        except Exception as e:
+            log.exception(f"Error listing chats with undelivered executions: {e}")
+            return []
 
     def purge_stale_results(self, before: int) -> int:
         """GC: before(epoch 秒)より前に終端化した行の重量フィールドを落とす。

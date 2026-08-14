@@ -7,11 +7,14 @@
 
 非同期形(#110): 汎用 execution 基盤に一本化。run_subagent エントリは
 `backgroundable: True` で、共有 `background` 引数(middleware が適格 tool の spec
-コピーへ注入)により exec 行へ昇格する — 回収は builtin `await_async` /
-`check_async`(utils/exec_tools.py)。#109 の専用 background / await_subagent は
-撤去済み(同一機能の二重機構になるため — 設計 §12)。exec stop → runner cancel は
-下の shield + cancelling() の stop 連鎖で子 chat まで届く。
-session_id = 継続可能ハンドル / exec_id = 1 実行の記録、の二層(§10)。
+コピーへ注入)により exec 行へ昇格する — 完了結果はサーバ駆動配達
+(utils/execution_resume.py)が親 chat へ通知ターンとして届け、能動的な回収は
+builtin `await_task` / `check_task`(utils/exec_tools.py)。#109 の専用
+background / await_subagent は撤去済み(同一機能の二重機構になるため — 設計 §12)。
+exec stop → runner cancel は下の shield + cancelling() の stop 連鎖で子 chat まで
+届く。session_id = 継続可能ハンドル / task_id(exec 行)= 1 実行の記録、の二層
+(§10)。内部 3 段ターン起動(start_internal_turn)はサーバ駆動配達の続きターンと
+共有する(契約 M5)。
 
 enforce もここに閉じる:
 - preset allowlist(親 preset の meta.subagentPresetIds)∩ アクセス可
@@ -27,12 +30,10 @@ enforce もここに閉じる:
 import asyncio
 import json
 import logging
-import time
-import uuid
 
 from fastapi import Request
 
-from nucllei.models.chats import ChatForm, Chats
+from nucllei.models.chats import ChatForm, Chats, append_turn_messages
 from nucllei.models.models import Models
 from nucllei.tasks import get_task, list_task_ids_by_chat_id, stop_task
 from nucllei.utils import tool_output
@@ -202,72 +203,53 @@ def _append_turn_messages(
 ):
     """子 chat の history に user メッセージ + 空 assistant メッセージを積む。
 
-    FE の submitPrompt / sendPrompt(send.ts)が書く形と同じ構造
-    (id / parentId / childrenIds / role / content / timestamp、assistant は
-    model / modelName 付き)。middleware の _persist_message_snapshot は
-    この assistant メッセージへスナップショットをマージする。
-    戻り値は (user_message_id, assistant_message_id)。
+    組み立ての実体は models 層の append_turn_messages(#110 でサーバ駆動配達の
+    notice 追記と共通化 — 単一トランザクション内で同じ形を作れるように寄せた)。
+    middleware の _persist_message_snapshot はこの assistant メッセージへ
+    スナップショットをマージする。戻り値は (user_message_id, assistant_message_id)。
     """
-    history = chat_json.setdefault("history", {"messages": {}, "currentId": None})
-    messages_map = history.setdefault("messages", {})
-    parent_id = history.get("currentId")
-
-    user_message_id = str(uuid.uuid4())
-    assistant_message_id = str(uuid.uuid4())
-    now = int(time.time())
-
-    messages_map[user_message_id] = {
-        "id": user_message_id,
-        "parentId": parent_id,
-        "childrenIds": [assistant_message_id],
-        "role": "user",
-        "content": instruction,
-        "timestamp": now,
-    }
-    if parent_id and parent_id in messages_map:
-        messages_map[parent_id].setdefault("childrenIds", []).append(user_message_id)
-
-    messages_map[assistant_message_id] = {
-        "id": assistant_message_id,
-        "parentId": user_message_id,
-        "childrenIds": [],
-        "role": "assistant",
-        "content": "",
-        "model": model_id,
-        "modelName": model_name,
-        "timestamp": now,
-    }
-    history["currentId"] = assistant_message_id
-
-    # FE 同様に線形リスト(messages)も同期しておく(_chat_snippet 等の読み手向け)
-    chat_json["messages"] = get_message_list(messages_map, assistant_message_id) or []
-
-    return user_message_id, assistant_message_id
+    return append_turn_messages(
+        chat_json,
+        {"role": "user", "content": instruction},
+        {"role": "assistant", "content": "", "model": model_id, "modelName": model_name},
+    )
 
 
-async def _start_agent_session_turn(
-    request, child_model, user, chat_id, message_id, messages
+async def start_internal_turn(
+    request,
+    model,
+    user,
+    chat_id,
+    message_id,
+    messages,
+    *,
+    metadata_extra: dict,
+    form_extra: dict | None = None,
 ):
-    """子 chat の 1 ターンを内部起動する(main.py chat_completion の内部版 3 段)。
+    """chat の 1 ターンを内部起動する(main.py chat_completion の内部版 3 段)。
 
-    process_chat_response が create_task した子タスクを見つけて
-    (child_task_id, child_task) を返す(完走は待たない — 待つのは
-    _await_child_task)。child_task は None になりうる(既に完走・回収済み)。
+    subagent の子ターンと、サーバ駆動配達の続きターン(#110 契約 M5 —
+    utils/execution_resume.py)が共有する。新造 Request / 専用 stream(購読なし)/
+    process_chat_payload → generate_chat_completion → process_chat_response の
+    3 段は同一で、ターンの性格(agent_session / task_resume)は metadata_extra が
+    与える。process_chat_response が create_task したタスクを見つけて
+    (task_id, task) を返す(完走は待たない)。task は None になりうる
+    (既に完走・回収済み)。
 
-    Request の罠: 親の Request を使い回さない。generate_chat_completion は
+    Request の罠: 呼び出し元の Request を使い回さない。generate_chat_completion は
     request.state.metadata を form_data["metadata"] へマージするため、親の
-    request.state に子 metadata を書くと親の追撃呼び出し(tool ループ)が
-    子 metadata を拾う。app だけ共有する新しい Request を作り、その state に
-    子 metadata を載せる(親 Request の state には一切書かない)。
+    request.state にこのターンの metadata を書くと親の追撃呼び出し(tool ループ)が
+    それを拾う。app だけ共有する新しい Request を作り、その state に載せる
+    (元 Request の state には一切書かない)。
     """
     # 循環 import 回避: middleware が本モジュールを import する(mount 側)
     from nucllei.utils.middleware import process_chat_payload, process_chat_response
 
     # llens(#110): background 実行の runner が立てた in_exec は ContextVar なので
-    # 子ターンにも伝播する。子ターンは子 chat の正規のターンであり、自分の
-    # message へ status / message / replace を書くのは append-only 上も正当
+    # このターンにも伝播しうる。内部起動するターンは対象 chat の正規のターンであり、
+    # 自分の message へ status / message / replace を書くのは append-only 上も正当
     # (遮断したいのは「終わった親ターンの message への遅延書き込み」だけ)。
-    # 子ターン境界で False に戻す — reset せず False を敷くのは、この関数を抜けた
+    # ターン境界で False に戻す — reset せず False を敷くのは、この関数を抜けた
     # 後も runner 側の in_exec=True を保つため(finally で元に戻す)。
     exec_token = in_exec.set(False)
 
@@ -282,15 +264,14 @@ async def _start_agent_session_turn(
         "message_id": message_id,
         "files": None,
         "variables": None,
-        "model": child_model,
-        # タイトル生成(通常 + 異常終了フォールバック)の抑止マーカ。
-        # spawn 時の決定的タイトルが正(middleware 側の入口 return が読む)。
-        "agent_session": True,
+        "model": model,
+        **metadata_extra,
     }
     form_data = {
-        "model": child_model["id"],
+        "model": model["id"],
         "stream": True,
         "messages": messages,
+        **(form_extra or {}),
         "metadata": metadata,
     }
     child_request.state.metadata = metadata
@@ -299,38 +280,41 @@ async def _start_agent_session_turn(
     # 購読は立てない: 立てても誰も消費せず、2 秒毎の content_blocks 全量
     # スナップショット含む全イベントがターン完了まで queue に溜まるだけ
     # (長ターンで数十 MB)。webhook(「誰も見ていなかった」通知)の誤発火は
-    # metadata.agent_session マーカで process_chat_response 側が抑止する
-    # (タイトル抑止と対称)。返却 SSE(sse_event_generator)は返却後に
-    # イテレートされない遅延評価のため queue=None(既定)で安全。
+    # metadata の性格マーカ(agent_session / task_resume の連鎖 2 通目以降)で
+    # process_chat_response 側が抑止する(タイトル抑止と対称)。返却 SSE
+    # (sse_event_generator)は返却後にイテレートされない遅延評価のため
+    # queue=None(既定)で安全。ストリーム自体は register_stream されるので、
+    # FE は task 一覧(GET /api/tasks/chat/{chat_id})から再アタッチできる。
 
     try:
         form_data, metadata, events = await process_chat_payload(
-            child_request, form_data, user, metadata, child_model, events_stream
+            child_request, form_data, user, metadata, model, events_stream
         )
         response = await generate_chat_completion(child_request, form_data, user)
-        # tasks=None: 子ではタイトル生成等のバックグラウンドタスクを予約しない。
-        # 戻り値(SSE 応答)は捨てる — 消費するのは下の task 完走待ち。
-        # ここで create_task される子タスクは**この時点の context を複製する**ので、
-        # in_exec=False が子ターン全体に効く(reset は下の finally で行う)。
+        # tasks=None: 内部起動ターンではタイトル生成等のバックグラウンドタスクを
+        # 予約しない(subagent は spawn 時の決定的タイトルが正 / 続きターンは
+        # 契約 M5 — background_tasks None)。戻り値(SSE 応答)は捨てる。
+        # ここで create_task されるタスクは**この時点の context を複製する**ので、
+        # in_exec=False がターン全体に効く(reset は下の finally で行う)。
         await process_chat_response(
             child_request,
             response,
             form_data,
             user,
             metadata,
-            child_model,
+            model,
             events,
             None,
             events_stream=events_stream,
         )
 
-        # process_chat_response が create_task した子タスク(id=子 chat_id)を探す。
-        # 継続ターンは逐次実行なので末尾が今回のタスク。
+        # process_chat_response が create_task したタスク(id=chat_id)を探す。
+        # ターンは逐次実行なので末尾が今回のタスク。
         task_ids = list_task_ids_by_chat_id(chat_id)
         if not task_ids:
-            raise RuntimeError(f"agent session task not found (chat_id={chat_id})")
-        child_task_id = task_ids[-1]
-        return child_task_id, get_task(child_task_id)
+            raise RuntimeError(f"internal turn task not found (chat_id={chat_id})")
+        turn_task_id = task_ids[-1]
+        return turn_task_id, get_task(turn_task_id)
     finally:
         in_exec.reset(exec_token)
 
@@ -615,13 +599,16 @@ def build_subagent_tools(request, model, user, metadata):
             wire_messages = _wire_messages_from_history(
                 chat_json["history"]["messages"], assistant_message_id
             )
-            child_task_id, child_task = await _start_agent_session_turn(
+            child_task_id, child_task = await start_internal_turn(
                 request,
                 child_model,
                 user,
                 child_chat_id,
                 assistant_message_id,
                 wire_messages,
+                # タイトル生成(通常 + 異常終了フォールバック)・webhook の抑止
+                # マーカ。spawn 時の決定的タイトルが正(middleware 側が読む)。
+                metadata_extra={"agent_session": True},
             )
 
             stopped = False
@@ -648,7 +635,7 @@ def build_subagent_tools(request, model, user, metadata):
     # render.result = subagent(#20 のディスクリプタ駆動): フロントは
     # {ok, session_id, answer, ...} を subagent 表示で描画する(P3)。
     # background 昇格時はこの宣言が exec 行の meta.render_descriptor に保存され、
-    # await_async の回収結果へパススルーされる(#110 §8)。
+    # await_task の回収結果へパススルーされる(#110 §8)。
     return {
         "run_subagent": {
             "spec": spec,

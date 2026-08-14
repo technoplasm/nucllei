@@ -326,13 +326,26 @@ try:
 except ValueError:
     ASYNC_EXEC_MAX_TOTAL = 16
 
-# llens(#110): exec 行に保存する result の切詰め長(文字)。超過時は render を
-# text に降格し meta.truncated / original_chars を立てる(不正 JSON を FE に渡さない)。
-EXEC_RESULT_MAX_CHARS = os.environ.get("EXEC_RESULT_MAX_CHARS", "65536")
+# llens(#110): tool 結果の切詰め長(文字)— 同期・バックグラウンド共通(契約 T5:
+# 暴走出力のリスクは同期でも同じで、無人経路 = サーバ駆動配達が詰まない保険も兼ねる)。
+# 適用は結果の生産点で一度だけ(同期 = execute_tool_calls の wire 正規化直後、
+# background = runner の保存時。中継 = 回収 builtin の envelope・配達 notice は透過)。
+# 超過時は render を text に降格し truncated / original_chars を立てる
+# (不正 JSON を FE / json.loads に渡さない)。
+TOOL_RESULT_MAX_CHARS = os.environ.get("TOOL_RESULT_MAX_CHARS", "65536")
 try:
-    EXEC_RESULT_MAX_CHARS = int(EXEC_RESULT_MAX_CHARS)
+    TOOL_RESULT_MAX_CHARS = int(TOOL_RESULT_MAX_CHARS)
 except ValueError:
-    EXEC_RESULT_MAX_CHARS = 65536
+    TOOL_RESULT_MAX_CHARS = 65536
+
+# llens(#110): サーバ駆動配達(execution_resume)の連鎖上限 — ユーザー発話なしに
+# 連続できる自動ターン(通知 + 続きターン)の数。上限到達で配達を保留し、人間の
+# 発話で自然解除される(無人連続ターンの暴走ガード — 契約 T3)。
+ASYNC_EXEC_RESUME_CHAIN_LIMIT = os.environ.get("ASYNC_EXEC_RESUME_CHAIN_LIMIT", "5")
+try:
+    ASYNC_EXEC_RESUME_CHAIN_LIMIT = int(ASYNC_EXEC_RESUME_CHAIN_LIMIT)
+except ValueError:
+    ASYNC_EXEC_RESUME_CHAIN_LIMIT = 5
 
 # llens(#110): exec 行の result 保持日数。0(既定)= GC しない。正の値なら boot
 # スイープ時に、終端化からこの日数を過ぎた行の重量フィールド(result/args/meta)を

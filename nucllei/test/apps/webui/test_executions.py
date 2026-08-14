@@ -10,8 +10,10 @@ _memos/async-exec-design.md の状態機械(§4)と実行系(§5)を固定する
 - chat 削除の cascade(単発 / 子孫 / 全削除)— exec task は `exec:{chat_id}`
   名前空間で detach されており、親ターンの cancel 連鎖では止まらない
 - 新エンドポイント 2 本(一覧 / 個別停止)の所有者検証・chat 一致検証・応答の形
+- delivered_at(サーバ駆動配達の土台 — redo 契約 M2)のモデル関数 3 本
 
-呼び出し面(background 昇格・check_async / await_async)は test_async_exec.py。
+呼び出し面(background 昇格・check_task / await_task / stop_task)は
+test_async_exec.py。
 """
 
 import asyncio
@@ -268,7 +270,7 @@ class TestExecutions(AbstractPostgresTest):
                 params={},
             )
             assert spawned["status"] == "running"
-            exec_id = spawned["exec_id"]
+            exec_id = spawned["task_id"]  # 返りのキーはモデル向け用語(契約 T1)
             await asyncio.wait_for(started.wait(), timeout=5)
 
             row = await self.executions.stop_execution(exec_id)
@@ -335,7 +337,7 @@ class TestExecutions(AbstractPostgresTest):
 
                 release.set()
                 spawned = await asyncio.wait_for(spawn, timeout=10)
-                assert spawned["exec_id"] == exec_id
+                assert spawned["task_id"] == exec_id
                 for _ in range(100):
                     if exec_id not in self.executions._exec_tasks:
                         break
@@ -387,6 +389,10 @@ class TestExecutions(AbstractPostgresTest):
         # 子孫 agent session の分も止める(cancel 連鎖では届かない — D6)
         assert self.Executions.get_execution_by_id("c1").status == "stopped"
         assert self.Executions.get_execution_by_id("o1").status == "running"
+        # 配達先消滅 = 恒久断念(契約 M2)— 未配達行に delivered_at を立てる
+        assert self.Executions.get_execution_by_id("p1").delivered_at is not None
+        assert self.Executions.get_execution_by_id("c1").delivered_at is not None
+        assert self.Executions.get_execution_by_id("o1").delivered_at is None
 
     def test_delete_all_chats_cascades_stop_to_executions(self):
         first = self._insert_chat(title="first")
@@ -403,6 +409,70 @@ class TestExecutions(AbstractPostgresTest):
         assert self.Executions.get_execution_by_id("x1").status == "stopped"
         assert self.Executions.get_execution_by_id("x2").status == "stopped"
         assert self.Executions.get_execution_by_id("y1").status == "running"
+        # 配達先消滅 = 恒久断念(契約 M2)
+        assert self.Executions.get_execution_by_id("x1").delivered_at is not None
+        assert self.Executions.get_execution_by_id("x2").delivered_at is not None
+        assert self.Executions.get_execution_by_id("y1").delivered_at is None
+
+    # ---- delivered_at(サーバ駆動配達の土台 — redo 契約 M2)----
+
+    def test_mark_delivered_is_one_shot(self):
+        self._insert("e1")
+        self._insert("e2")
+        self._insert("e3")
+        assert self.Executions.finish_execution("e1", status="done", result="ok")
+        assert self.Executions.finish_execution("e2", status="failed", error="x")
+
+        assert self.Executions.mark_delivered([]) == 0
+        # 存在しない id は数えない・他はまとめて立つ
+        assert self.Executions.mark_delivered(["e1", "e2", "no-such"]) == 2
+        first = self.Executions.get_execution_by_id("e1").delivered_at
+        assert first is not None
+        assert self.Executions.get_execution_by_id("e2").delivered_at is not None
+        assert self.Executions.get_execution_by_id("e3").delivered_at is None
+
+        # 一度立てたら戻さない・上書きしない(WHERE delivered_at IS NULL の guard)
+        assert self.Executions.mark_delivered(["e1", "e2"]) == 0
+        assert self.Executions.get_execution_by_id("e1").delivered_at == first
+
+    def test_get_undelivered_terminal_by_chat_id(self):
+        self._insert("r1", chat_id="chat-a")  # running は配達対象でない
+        self._insert("u1", chat_id="chat-a")
+        self._insert("u2", chat_id="chat-a")
+        self._insert("d1", chat_id="chat-a")
+        self._insert("b1", chat_id="chat-b")
+        assert self.Executions.finish_execution("u1", status="done", result="ok")
+        assert self.Executions.finish_execution("u2", status="stopped", error="x")
+        assert self.Executions.finish_execution("d1", status="done", result="ok")
+        assert self.Executions.finish_execution("b1", status="failed", error="x")
+        assert self.Executions.mark_delivered(["d1"]) == 1
+
+        rows = self.Executions.get_undelivered_terminal_by_chat_id("chat-a")
+        # created_at 同秒でも id で tie-break した全順序(古い順)
+        assert [row.id for row in rows] == ["u1", "u2"]
+        # 他 chat は混ざらない
+        assert [
+            row.id for row in self.Executions.get_undelivered_terminal_by_chat_id("chat-b")
+        ] == ["b1"]
+
+    def test_list_chat_ids_with_undelivered(self):
+        assert self.Executions.list_chat_ids_with_undelivered() == []
+        self._insert("u1", chat_id="chat-a")
+        self._insert("u2", chat_id="chat-a")
+        self._insert("b1", chat_id="chat-b")
+        self._insert("r1", chat_id="chat-c")  # running のみの chat は対象外
+        assert self.Executions.finish_execution("u1", status="done", result="ok")
+        assert self.Executions.finish_execution("u2", status="done", result="ok")
+        assert self.Executions.finish_execution("b1", status="orphaned", error="x")
+
+        assert sorted(self.Executions.list_chat_ids_with_undelivered()) == [
+            "chat-a",
+            "chat-b",
+        ]
+
+        # 全部配達済みになった chat は消える(boot スキャンの終了条件)
+        assert self.Executions.mark_delivered(["u1", "u2"]) == 2
+        assert self.Executions.list_chat_ids_with_undelivered() == ["chat-b"]
 
     # ---- エンドポイント(一覧 / 個別停止)----
 
@@ -410,17 +480,24 @@ class TestExecutions(AbstractPostgresTest):
         chat = self._insert_chat(title="chat")
         self._insert("e1", chat_id=chat.id, tool_name="run_subagent")
         self._insert("e2", chat_id=chat.id)
+        self._insert("e3", chat_id=chat.id)
         assert self.Executions.finish_execution(
             "e2", status="done", result="秘密の結果", duration=2.5
         )
+        assert self.Executions.finish_execution("e3", status="done", result="ok")
+        assert self.Executions.mark_delivered(["e3"]) == 1
 
         with mock_webui_user(id="1"):
             response = self.fast_api_client.get(
                 self.create_url(f"/{chat.id}/executions")
             )
         assert response.status_code == 200, response.text
-        items = response.json()
-        assert [item["id"] for item in items] == ["e1", "e2"]
+        body = response.json()
+        # 応答は {executions, resume_suspended} のオブジェクト形(契約 M2)
+        assert set(body.keys()) == {"executions", "resume_suspended"}
+        assert body["resume_suspended"] is False
+        items = body["executions"]
+        assert [item["id"] for item in items] == ["e1", "e2", "e3"]
         assert set(items[0].keys()) == {
             "id",
             "tool_name",
@@ -429,12 +506,17 @@ class TestExecutions(AbstractPostgresTest):
             "finished_at",
             "duration",
             "error",
+            "delivered",
         }
         assert items[0]["tool_name"] == "run_subagent"
         assert items[0]["status"] == "running"
         assert items[1]["status"] == "done"
         assert items[1]["duration"] == 2.5
-        # result 本文は載せない(回収は await_async の仕事)
+        # delivered = 「結果がモデルの文脈に載った」事実(FE 未回収バッジの根拠)
+        assert items[0]["delivered"] is False
+        assert items[1]["delivered"] is False
+        assert items[2]["delivered"] is True
+        # result 本文は載せない(回収は await_task の仕事)
         assert "result" not in items[1]
 
         # 所有者以外は 401(行の存在も漏らさない)
@@ -456,7 +538,7 @@ class TestExecutions(AbstractPostgresTest):
                 self.create_url(f"/{chat.id}/executions")
             )
         assert response.status_code == 200, response.text
-        by_id = {item["id"]: item for item in response.json()}
+        by_id = {item["id"]: item for item in response.json()["executions"]}
         assert by_id["fresh"]["status"] == "running"  # spawn 窓グレース
         assert by_id["stale"]["status"] == "orphaned"
 

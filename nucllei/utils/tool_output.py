@@ -115,7 +115,7 @@ class ToolOutputSink:
     def set_result_render(self, render: dict) -> None:
         """この call の結果ブロックの表示ディスクリプタ(results[].render)を宣言する。
 
-        await_async(#110)が exec 行に保存された実 tool の戻り値宣言
+        await_task(#110)が exec 行に保存された実 tool の戻り値宣言
         (meta.render_descriptor)を持ち上げるための口。execute_tool_calls が
         成功時に harvest し、型由来の render(kind=json 等)より優先する。
         """

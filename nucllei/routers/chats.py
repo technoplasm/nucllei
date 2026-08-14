@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import logging
 import time
@@ -28,6 +29,7 @@ from pydantic import BaseModel
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_permission, has_read_access_to_file
+from nucllei.utils import execution_resume
 from nucllei.utils.executions import (
     EXEC_SPAWN_GRACE_S,
     has_exec_registry_entry,
@@ -160,17 +162,31 @@ async def _stop_chat_tasks(chat_id: str) -> None:
             pass
 
 
+async def _mark_chat_executions_delivered(chat_id: str) -> None:
+    """llens(#110 契約 M2): 削除系 cascade の恒久断念 — 配達先が消えるため、
+    当該 chat の未配達 terminal 行(直前の stop で terminal 化した分を含む)へ
+    delivered_at を立てる。立てないとサーバ駆動配達 driver が消えた chat へ
+    幽霊配達を試み続ける。"""
+    rows = await asyncio.to_thread(
+        Executions.get_undelivered_terminal_by_chat_id, chat_id
+    )
+    if rows:
+        await asyncio.to_thread(Executions.mark_delivered, [row.id for row in rows])
+
+
 async def _stop_chat_tree_tasks(chat_id: str) -> None:
     """llens(#107): chat 自身 + 全子孫 agent session の走行中タスクを stop する。
 
     soft delete の前に呼び、消えた chat へ書き続ける孤児タスクを作らない。
     llens(#110): 非同期 tool 実行(execution)は `exec:{chat_id}` 名前空間で
     親ターンから detach されており、completion タスクの cancel 連鎖では止まらない
-    (設計 D6)。chat 削除だけは cascade する(設計 §5)ので明示的に停止する。
+    (設計 D6)。chat 削除だけは cascade する(設計 §5)ので明示的に停止し、
+    未配達行は配達先消滅として delivered 確定する(契約 M2)。
     """
     for target_id in [chat_id, *Chats.get_descendant_chat_ids(chat_id)]:
         await _stop_chat_tasks(target_id)
         await stop_executions_by_chat_id(target_id)
+        await _mark_chat_executions_delivered(target_id)
 
 
 ############################
@@ -216,6 +232,7 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
     for chat in Chats.get_chats_by_user_id(user.id):
         await _stop_chat_tasks(chat.id)
         await stop_executions_by_chat_id(chat.id)
+        await _mark_chat_executions_delivered(chat.id)
 
     result = Chats.delete_chats_by_user_id(user.id)
     return result
@@ -631,10 +648,12 @@ async def get_chat_children_by_id(id: str, user=Depends(get_verified_user)):
 
 
 def _execution_item(execution: ExecutionModel) -> dict:
-    """一覧・停止応答の行(result 本文は載せない — 回収は await_async の仕事)。
+    """一覧・停止応答の行(result 本文は載せない — 回収は await_task の仕事)。
 
     liveness は**検出のみで書かない**(設計 §4: orphaned の権威は boot スイープと
     個別経路)。registry に居ない running をグレース超過で orphaned として見せる。
+    delivered(#110 契約 M2)は「結果がモデルの文脈に載った」事実 — FE の
+    未回収バッジ(terminal ∧ !delivered)と poll 述語の根拠。
     """
     status_ = execution.status
     if (
@@ -652,23 +671,32 @@ def _execution_item(execution: ExecutionModel) -> dict:
         "finished_at": execution.finished_at,
         "duration": execution.duration,
         "error": execution.error,
+        "delivered": execution.delivered_at is not None,
     }
 
 
 @router.get("/{id}/executions")
 async def get_chat_executions_by_id(id: str, user=Depends(get_verified_user)):
-    """llens(#110): chat の execution 行一覧(バックグラウンドチップ・自動再開走査)。
-    所有者のみ。"""
+    """llens(#110): chat の execution 行一覧(バックグラウンドチップ用)。所有者のみ。
+
+    応答は {executions, resume_suspended} のオブジェクト形(契約 M2)。
+    resume_suspended は連鎖上限(ASYNC_EXEC_RESUME_CHAIN_LIMIT)でサーバ駆動配達が
+    保留中であることの表示用 — 人間の発話で自然解除される。
+    """
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
 
-    return [
+    items = [
         _execution_item(execution)
         for execution in Executions.get_executions_by_chat_id(id)
     ]
+    resume_suspended = execution_resume.is_resume_suspended(chat.chat) and any(
+        item["status"] != "running" and not item["delivered"] for item in items
+    )
+    return {"executions": items, "resume_suspended": resume_suspended}
 
 
 @router.post("/{id}/executions/{exec_id}/stop")
@@ -692,7 +720,12 @@ async def stop_chat_execution_by_id(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
         )
 
-    return _execution_item(await stop_execution(exec_id) or execution)
+    stopped = await stop_execution(exec_id) or execution
+    # llens(#110): stop の CAS 勝者はサーバ駆動配達の wake 起点(契約 M3 ②)。
+    # registry に居た exec は task 終了の cleanup hook でも起きるが、再起動残骸
+    # (registry 不在の running 行)を stopped にした場合はここが唯一の起点。
+    execution_resume.wake(id)
+    return _execution_item(stopped)
 
 
 ############################

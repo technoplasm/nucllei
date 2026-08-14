@@ -6,6 +6,11 @@ message 永続化で共用する最小形へ落とす。消費者のいないフ
 """
 
 import copy
+import json
+
+# llens(#110): result 未着の call に対にする合成 result(FE
+# chat-messages.ts expandAssistantToolHistory と同文 — 中断で途切れた履歴の修復)
+INTERRUPTED_TOOL_RESULT = "[interrupted: this tool call produced no result]"
 
 
 def serialize_text_blocks(content_blocks: list) -> str:
@@ -78,6 +83,23 @@ def _model_facing_text(blocks: list) -> str:
     ).strip()
 
 
+def _call_arguments_are_sendable(call: dict) -> bool:
+    """tool call の arguments が履歴再送に耐えるか(llens #110 — 修復の判定)。
+
+    空文字は「引数なし」として送れる。非空は JSON として完全であること —
+    途中で切れた壊れ JSON は SGLang が履歴パースで拒否するため落とす
+    (FE chat-messages.ts の sendableCalls フィルタと同じ規律)。
+    """
+    arguments = (call.get("function") or {}).get("arguments") or ""
+    if not arguments.strip():
+        return True
+    try:
+        json.loads(arguments)
+        return True
+    except Exception:
+        return False
+
+
 def convert_content_blocks_to_messages(content_blocks: list) -> list:
     """組み立て済み content_blocks を tool ループ再送用のモデル向け履歴へ変換する。
 
@@ -99,6 +121,13 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
     - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
       context_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
       ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。
+    - 壊れ tool_calls の修復(llens #110 契約 M5 — FE expandAssistantToolHistory
+      chat-messages.ts と同等): 中断で途切れた履歴を再送すると SGLang は
+      tool_calls.arguments をパースして "unexpected end of data" で拒否する(実測
+      400)。arguments が壊れ JSON の call は落とし(実行されていない)、残った
+      call に result が無ければ合成 result([interrupted])を対にする(tool_calls
+      に tool 応答が無い履歴も不正になるため)。全滅ならブロックごとスキップ
+      (text は前後に合流)。subagent の継続とサーバ駆動配達の続きターンの両方に効く。
     """
     messages = []
 
@@ -107,6 +136,15 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
         if block.get("synthetic"):
             continue
         if block["type"] == "tool_calls":
+            sendable_calls = [
+                call
+                for call in block.get("content", [])
+                if _call_arguments_are_sendable(call)
+            ]
+            if not sendable_calls:
+                # 全滅(中断直後など)はブロックごとスキップ — text は前後に合流
+                continue
+
             messages.append(
                 {
                     "role": "assistant",
@@ -117,17 +155,34 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                             "type": call.get("type", "function"),
                             "function": call.get("function", {}),
                         }
-                        for call in block.get("content", [])
+                        for call in sendable_calls
                     ],
                 }
             )
 
-            for result in block.get("results", []):
+            results_by_call_id = {
+                result.get("tool_call_id"): result
+                for result in block.get("results", [])
+            }
+            sendable_results = []
+            for call in sendable_calls:
+                result = results_by_call_id.get(call.get("id"))
+                if result is None:
+                    # result 未着(中断)— 合成 result で対にする(修復)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "content": INTERRUPTED_TOOL_RESULT,
+                        }
+                    )
+                    continue
+                sendable_results.append(result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": result["tool_call_id"],
-                        "content": result["content"],
+                        "content": result.get("content") or "",
                     }
                 )
 
@@ -138,7 +193,7 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                     if entry.startswith("/")
                     else f"/api/v1/files/{entry}/content"
                 )
-                for result in block.get("results", [])
+                for result in sendable_results
                 for entry in (result.get("context_images") or [])
             ]
             if result_image_urls:

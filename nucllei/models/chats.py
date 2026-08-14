@@ -1,3 +1,4 @@
+import copy
 import logging
 import time
 import uuid
@@ -122,6 +123,55 @@ class ChatTitleIdResponse(BaseModel):
     title: str
     updated_at: int
     created_at: int
+
+
+def append_turn_messages(
+    chat_json: dict, user_message: dict, assistant_message: dict
+) -> tuple[str, str]:
+    """chat JSON の history に user + assistant 対を積む(ターン追記の共通組み立て)。
+
+    FE の submitPrompt / sendPrompt(send.ts)が書く形と同じ構造
+    (id / parentId / childrenIds / role / content / timestamp)。id・親子リンク・
+    currentId・線形リスト(messages — _chat_snippet 等の読み手向け)はここが補完し、
+    呼び出し側は role / content / files / meta / model 等の中身だけを渡す。
+    書き手は 2 者: subagent の子ターン追記(utils/subagent.py)と、サーバ駆動配達の
+    notice 追記(append_delivery_turn — #110 契約 T3)。models 層に置くのは後者が
+    単一トランザクション内で同じ組み立てを使うため。
+    戻り値は (user_message_id, assistant_message_id)。
+    """
+    # 循環 import 回避のため遅延 import(get_chat_previews の User と同じ流儀)
+    from nucllei.utils.misc import get_message_list
+
+    history = chat_json.setdefault("history", {"messages": {}, "currentId": None})
+    messages_map = history.setdefault("messages", {})
+    parent_id = history.get("currentId")
+
+    user_message_id = str(uuid.uuid4())
+    assistant_message_id = str(uuid.uuid4())
+    now = int(time.time())
+
+    messages_map[user_message_id] = {
+        **user_message,
+        "id": user_message_id,
+        "parentId": parent_id,
+        "childrenIds": [assistant_message_id],
+        "timestamp": user_message.get("timestamp", now),
+    }
+    if parent_id and parent_id in messages_map:
+        messages_map[parent_id].setdefault("childrenIds", []).append(user_message_id)
+
+    messages_map[assistant_message_id] = {
+        **assistant_message,
+        "id": assistant_message_id,
+        "parentId": user_message_id,
+        "childrenIds": [],
+        "timestamp": assistant_message.get("timestamp", now),
+    }
+    history["currentId"] = assistant_message_id
+
+    chat_json["messages"] = get_message_list(messages_map, assistant_message_id) or []
+
+    return user_message_id, assistant_message_id
 
 
 def _chat_snippet(chat_json: Optional[dict], limit: int = 120) -> str:
@@ -273,6 +323,73 @@ class ChatTable:
 
         chat["history"] = history
         return self.update_chat_by_id(id, chat)
+
+    def append_delivery_turn(
+        self,
+        chat_id: str,
+        notice_message: dict,
+        assistant_message: dict,
+        exec_ids: list[str],
+    ) -> tuple[str, Optional[ChatModel]]:
+        """サーバ駆動配達の CAS 追記(#110 契約 M2)。
+
+        単一 DB トランザクションで:
+        1. chat 行を読む(updated_at を CAS の期待値として控える)
+        2. history / messages に notice(user)+ 空 assistant 対を append
+           (append_turn_messages — currentId 更新・線形 messages 同期込み)
+        3. `UPDATE chat SET chat=?, updated_at=? WHERE id=? AND updated_at=読値`
+           の guarded UPDATE(FE 保存・別ターンの書き込みとの同着は CAS で検出)
+        4. 同一トランザクションで execution 行の delivered_at を確定
+
+        notice 追記と delivered 確定が原子化されるので、クラッシュ窓での
+        「notice は載ったが未配達のまま → 二重 append」が構造的に消える。
+        戻り値は (status, chat):
+        - ("ok", 更新後 ChatModel) — 成功
+        - ("conflict", None) — CAS 負け。呼び出し側は再読して呼び直す(再試行可能)
+        - ("missing", None) — chat 不在 / 削除済み。恒久断念へ
+        """
+        # 循環 import 回避(models 同士でも慣行どおり遅延 import)
+        from nucllei.models.executions import Execution
+
+        try:
+            with get_db() as db:
+                row = db.get(Chat, chat_id)
+                if row is None or row.deleted_at is not None:
+                    return ("missing", None)
+                expected_updated_at = row.updated_at
+
+                # deepcopy: JSON カラムの ORM インスタンスを in-place 変異させない
+                # (CAS 負けで rollback するとき部分変更を持ち越さないため)
+                chat_json = copy.deepcopy(row.chat)
+                append_turn_messages(chat_json, notice_message, assistant_message)
+
+                now = int(time.time())
+                rowcount = (
+                    db.query(Chat)
+                    .filter_by(id=chat_id, updated_at=expected_updated_at)
+                    .update(
+                        {"chat": chat_json, "updated_at": now},
+                        synchronize_session=False,
+                    )
+                )
+                if rowcount == 0:
+                    db.rollback()
+                    return ("conflict", None)
+
+                if exec_ids:
+                    db.query(Execution).filter(
+                        Execution.id.in_(exec_ids),
+                        Execution.delivered_at == None,  # noqa: E712
+                    ).update(
+                        {"delivered_at": now},
+                        synchronize_session=False,
+                    )
+                db.commit()
+                db.refresh(row)
+                return ("ok", ChatModel.model_validate(row))
+        except Exception:
+            log.exception(f"Failed to append delivery turn to chat {chat_id}")
+            return ("conflict", None)
 
     def record_usage_by_id_and_message_id(
         self,

@@ -63,12 +63,18 @@ from nucllei.utils.skills import (
 from nucllei.utils.subagent import build_subagent_tools
 from nucllei.models.executions import Executions
 from nucllei.utils.exec_tools import (
-    build_exec_tools,
+    EXEC_RECALL_TOOL_NAMES,
     entry_is_backgroundable,
+    exec_recall_context_ok,
     exec_spawn_context_ok,
+    mount_recall_tools,
     spec_for_model,
 )
-from nucllei.utils.executions import spawn_execution
+from nucllei.utils.executions import (
+    normalize_tool_result,
+    spawn_execution,
+    truncate_tool_result,
+)
 from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
@@ -530,6 +536,16 @@ async def process_chat_payload(
                     }
                 )
             loaded.append(name)
+        # llens(#110 A-3): 適格(backgroundable)tool がこの遅延ロードで初めて
+        # 載ったターンでも、回収 builtin(check_task/await_task/stop_task)を追加
+        # mount する — 初回合成時の判定は「その時点の tools_dict」しか見ておらず、
+        # ここで昇格面だけ現れて回収面が無い片肺になるため。spec append は上と
+        # 同じ配達機序(tools_dict / form_data["tools"] は native ループが毎
+        # イテレーション参照する同一オブジェクト)。
+        if exec_recall_context_ok(metadata) and any(
+            entry_is_backgroundable(name, tools_dict[name]) for name in loaded
+        ):
+            mount_recall_tools(tools_dict, form_data, user, metadata)
         return loaded
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
@@ -555,25 +571,26 @@ async def process_chat_payload(
             log.warning(f"tool '{name}' is shadowed by the subagent pseudo-tool")
         tools_dict[name] = entry
 
-    # llens(#110): 非同期実行の回収 builtin check_async / await_async。適格
+    # llens(#110): 回収 builtin check_task / await_task / stop_task。適格
     # (backgroundable)tool が載るターン、または chat に exec 行が残っている場合に
-    # mount する(§7 — 過剰 mount は無害: terminal への再 await は冪等)。builtin
+    # mount する(§7 — 過剰 mount は無害: terminal への再 await は冪等)。mount
+    # 条件は spawn 系(async_exec_available)と**独立**(契約 M1 — 回収は DB 読みで
+    # 完結し、multi-worker でも boot スイープが running を倒すので liveness 誤爆は
+    # ない。過去に spawn された行が構成変更後も回収不能にならないため)。builtin
     # なので #101 の履歴再導出は不要。agent session(D9)と chat 文脈なしでは
     # 載せない(spawn も同条件で拒否される)。
-    allow_background = exec_spawn_context_ok(metadata)
-    if allow_background:
-        mount_exec_tools = any(
+    if exec_recall_context_ok(metadata):
+        should_mount_recall = any(
             entry_is_backgroundable(name, entry) for name, entry in tools_dict.items()
         )
-        if not mount_exec_tools:
-            mount_exec_tools = await asyncio.to_thread(
+        if not should_mount_recall:
+            should_mount_recall = await asyncio.to_thread(
                 Executions.has_awaitable_executions_by_chat_id, metadata["chat_id"]
             )
-        if mount_exec_tools:
-            for name, entry in build_exec_tools(user, metadata).items():
-                if name in tools_dict:
-                    log.warning(f"tool '{name}' is shadowed by the execution builtin")
-                tools_dict[name] = entry
+        if should_mount_recall:
+            mount_recall_tools(tools_dict, form_data, user, metadata)
+
+    allow_background = exec_spawn_context_ok(metadata)
 
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。
@@ -1197,7 +1214,7 @@ async def _execute_tool_call_sync(
         # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
         # 走り切ってから回収される(有界リーク — turn の進行を優先)。
         # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
-        # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ。await_async は
+        # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ。await_task は
         # 0 = 無効化 — 自前の clamp 済み有界待ちが running 形を返す)。
         tool_timeout = tool.get("timeout", CHAT_TOOL_EXECUTION_TIMEOUT)
         if tool_timeout > 0:
@@ -1315,8 +1332,9 @@ async def execute_tool_calls(
                 # llens(#110): execution チャンネルへ昇格(K2)。spawn は exec 行を
                 # INSERT して runner task を起動し、即座に running 形(K3)を返す。
                 # この running 形が親メッセージの tool result として以後不変
-                # (append-only)— 完了の真実は exec 行、回収は await_async /
-                # check_async と FE 自動再開。params は unknown-drop 済み(監査
+                # (append-only)— 完了の真実は exec 行、回収は await_task /
+                # check_task とサーバ駆動配達(execution_resume)。params は
+                # unknown-drop 済み(監査
                 # 保存と callable 引数の両方に使われる)。
                 tool_result = await spawn_execution(
                     user_id=metadata["user_id"],
@@ -1342,7 +1360,7 @@ async def execute_tool_calls(
                 context_image_file_ids = sink.context_images() if tool_succeeded else []
                 # display(人間の目、#88)も同じ規律で成功時のみ harvest。
                 display_items = sink.displays() if tool_succeeded else []
-                # #110(§8): await_async が宣言した表示ディスクリプタ
+                # #110(§8): await_task が宣言した表示ディスクリプタ
                 # (exec 行の render_descriptor)は型由来の render より優先する
                 result_render_override = (
                     sink.result_render() if tool_succeeded else None
@@ -1352,26 +1370,29 @@ async def execute_tool_calls(
         # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
         # dict/list だけ kind=json を明示し、それ以外は省略(フロント既定 = text)。
         # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
-        result_render = None
-        if isinstance(tool_result, dict) or isinstance(tool_result, list):
-            # ensure_ascii=False は必須。既定(True)だと日本語が 1 文字ごとに \uXXXX
-            # (6 文字)へ展開され、モデルに渡るトークンが倍以上に膨らむ。
-            # indent も付けない: フロントは kind=json をパースして
-            # JSON.stringify(x, null, 2) で整形し直す(tool-render/index.ts)ため、
-            # ここで入れた空白は表示に一切寄与せず、モデルだけが払う。
-            # 実測(日本語 dict 30 件 / cl100k_base): 11,402 → 5,282 → 5,042 tok。
-            tool_result = json.dumps(tool_result, ensure_ascii=False)
-            result_render = {"kind": "json"}
-        elif not isinstance(tool_result, str):
-            # int/float/bool は str()、None(戻り値なし)は空文字 —
-            # "None" という見かけの出力を作らない。
-            tool_result = "" if tool_result is None else str(tool_result)
+        # 正規化は executions.normalize_tool_result と共有(#110 契約 M0 —
+        # ensure_ascii=False / indent なしの根拠はそちらの docstring)。
+        tool_result, result_render = normalize_tool_result(tool_result)
 
-        # llens(#110 §8): await_async の render_descriptor パススルー。exec 行に
+        # llens(#110 §8): await_task の render_descriptor パススルー。exec 行に
         # 保存された実 tool の戻り値宣言(sink.set_result_render 経由)が、
         # 型由来の render(kind=json)より優先する(subagent 等の描画復元)。
         if result_render_override:
             result_render = result_render_override
+
+        # llens(#110 契約 M0): 切詰めは結果の生産点で一度だけ — 同期 tool は
+        # ここが生産点(background は runner の保存時)。回収 builtin
+        # (check_task/await_task/stop_task)は適用除外: 中身は保存時に切詰め
+        # 済みで、envelope の json.dumps 膨張で再切詰めすると壊れ JSON になる。
+        # 切詰め時は render を text へ降格(JSON / descriptor 描画はパース前提)。
+        result_truncated = False
+        original_chars = 0
+        if tool_name not in EXEC_RECALL_TOOL_NAMES:
+            tool_result, result_truncated, original_chars = truncate_tool_result(
+                tool_result
+            )
+            if result_truncated:
+                result_render = None
 
         results.append(
             {
@@ -1381,6 +1402,11 @@ async def execute_tool_calls(
                 # ので、これがモデルへ漏れることはない(content_blocks.py)。
                 "duration": round(time.monotonic() - started_at, 3),
                 **({"render": result_render} if result_render else {}),
+                **(
+                    {"truncated": True, "original_chars": original_chars}
+                    if result_truncated
+                    else {}
+                ),
                 **(
                     {"context_images": context_image_file_ids}
                     if context_image_file_ids
@@ -1730,7 +1756,17 @@ async def process_chat_response(
             # 有無で判定する(意味的により正確)。
             # llens(#107): agent session の子ターンは対象外 — 結果は親の tool
             # result が運ぶ。購読ゼロで走るのが正常形(タイトル抑止と同じマーカ)。
-            if not events_stream.has_subscribers and not metadata.get("agent_session"):
+            # llens(#110 契約 M5): サーバ駆動配達の続きターン(task_resume)は
+            # **連鎖 1 通目のみ**発火 — 無人連鎖の 2 通目以降まで webhook を
+            # 連打しない(task_resume_chain は配達 driver が載せる連鎖カウント)。
+            if (
+                not events_stream.has_subscribers
+                and not metadata.get("agent_session")
+                and (
+                    not metadata.get("task_resume")
+                    or metadata.get("task_resume_chain", 1) <= 1
+                )
+            ):
                 webhook_url = await asyncio.to_thread(
                     Users.get_user_webhook_url_by_id, user.id
                 )
