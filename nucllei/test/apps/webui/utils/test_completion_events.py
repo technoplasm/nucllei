@@ -11,6 +11,7 @@ import json
 from nucllei.utils.completion_events import (
     CompletionEventStream,
     get_stream,
+    make_event_emitter,
     make_tool_event_emitter,
     register_stream,
     release_stream,
@@ -349,3 +350,117 @@ def test_reattach_first_events_order_task_snapshot_progress_usage():
         "tool:progress",
         "chat:usage",
     ]
+
+
+# --- ターン寿命リソースの硬化(#110 §6)--------------------------------------
+
+
+def test_event_emitter_skips_db_writes_inside_execution(monkeypatch):
+    """exec runner 内(ターン寿命を超えた実行)からの DB 分岐は全面スキップ。
+
+    親メッセージの tool result は spawn 時の running 形のみで以後不変
+    (append-only)であり、ターン中の chat JSON RMW とも競合するため。
+    配信(SSE)自体は素通しで、購読者が居れば見える。
+    """
+    from nucllei.utils import completion_events
+    from nucllei.utils.executions import in_exec
+
+    written = []
+    for name in (
+        "add_message_status_to_chat_by_id_and_message_id",
+        "upsert_message_to_chat_by_id_and_message_id",
+        "get_message_by_id_and_message_id",
+    ):
+        monkeypatch.setattr(
+            completion_events.Chats,
+            name,
+            lambda *args, _name=name, **kwargs: written.append(_name),
+        )
+
+    async def run():
+        stream = CompletionEventStream(chat_id="c", message_id="m")
+        queue = stream.subscribe()
+        emitter = make_event_emitter(stream, {"chat_id": "c", "message_id": "m"})
+
+        token = in_exec.set(True)
+        try:
+            await emitter({"type": "status", "data": {"description": "実行中"}})
+            await emitter({"type": "message", "data": {"content": "追記"}})
+            await emitter({"type": "replace", "data": {"content": "上書き"}})
+        finally:
+            in_exec.reset(token)
+        assert written == []
+
+        # 通常のターン文脈では従来どおり DB へ書く
+        await emitter({"type": "replace", "data": {"content": "上書き"}})
+        assert written == ["upsert_message_to_chat_by_id_and_message_id"]
+
+        stream.close()
+        return queue.qsize()
+
+    # 4 通 + close 番兵(DB を書かなくても配信は素通し)
+    assert asyncio.run(run()) == 5
+
+
+def test_event_emitter_skips_db_writes_on_closed_stream(monkeypatch):
+    """ターンが畳まれた後の遅延 emit で DB だけ変異させない(#110 §6)。"""
+    from nucllei.utils import completion_events
+
+    written = []
+    monkeypatch.setattr(
+        completion_events.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda *args, **kwargs: written.append(args),
+    )
+
+    async def run():
+        stream = CompletionEventStream(chat_id="c", message_id="m")
+        emitter = make_event_emitter(stream, {"chat_id": "c", "message_id": "m"})
+        stream.close()
+        await emitter({"type": "replace", "data": {"content": "遅延"}})
+
+    asyncio.run(run())
+    assert written == []
+
+
+def test_call_on_closed_stream_fails_fast():
+    """closed 後の __event_call__ は future を作らず即エラー(#110 §6)。
+
+    応答を返せる相手が居ない以上、待てば timeout まで hang するだけ。
+    """
+
+    async def run():
+        stream = CompletionEventStream(chat_id="c", message_id="m")
+        stream.close()
+        try:
+            await asyncio.wait_for(stream.call({"type": "confirm"}), timeout=5)
+        except RuntimeError as e:
+            return str(e)
+        raise AssertionError("closed stream への call がエラーにならない")
+
+    assert "closed" in asyncio.run(run())
+
+
+def test_close_wakes_pending_calls_with_an_exception():
+    """close は pending call を cancel ではなく set_exception で起こす(#110 §6)。
+
+    cancel だと待ち手が CancelledError を受け、「停止された」意味論
+    (exec runner の D2 / 親ターン stop)と混ざるため。
+    """
+
+    async def run():
+        stream = CompletionEventStream(chat_id="c", message_id="m")
+        stream.subscribe()
+        call_task = asyncio.create_task(stream.call({"type": "confirm"}))
+        await asyncio.sleep(0)  # future 登録まで進める
+
+        stream.close()
+        try:
+            await asyncio.wait_for(call_task, timeout=5)
+        except asyncio.CancelledError:
+            raise AssertionError("pending call が cancel で起こされている")
+        except RuntimeError as e:
+            return str(e)
+        raise AssertionError("pending call が起こされていない")
+
+    assert "closed" in asyncio.run(run())

@@ -136,19 +136,20 @@ export type ResultDisplay =
 	| { kind: 'skill'; value: string; tools: string[] }
 	// run_subagent の構造化結果(#107): 子 agent session の要約。sessionId で
 	// SubagentSessionBlock が子 transcript を遅延 fetch する。
-	// status: 'running' は background spawn の即返し形(#109)— answer 未取得
-	// (answer は '' に正規化)。SubagentSessionBlock が live 追従し、子の完走検知で
-	// 親ターンの自動再開(subagent-resume store)を要求する。
 	| {
 			kind: 'subagent';
 			sessionId: string;
 			ok: boolean;
 			answer: string;
-			status?: 'running';
 			truncated?: boolean;
 			error?: string;
 			usage?: SubagentUsage;
-	  };
+	  }
+	// background 昇格された tool 呼び出しの running 形(#110)— spawn の即返し
+	// {ok, exec_id, tool_name, status: "running"} と check_async / await_async の
+	// timeout 形。親メッセージの result は以後不変(append-only)なので、現在の
+	// 状態は ExecutionBlock が executions store(exec 行ポーリング)から引く。
+	| { kind: 'execution'; execId: string; toolName?: string };
 
 // 文字列化された JSON を再帰的に剥がす(tool 結果は dict/list が json.dumps 済み
 // 文字列で届くため)。剥がすのは文字列層のみ — 旧実装はスカラー到達後も再帰し、
@@ -184,6 +185,29 @@ export const classifyToolResult = (
 	content: string,
 	descriptor?: RenderDescriptor
 ): ResultDisplay => {
+	// #110: exec の running 形(background spawn の即返し / check_async /
+	// await_async timeout)は shape で判定し、descriptor 分岐より**先**に置く —
+	// spawn call の descriptor は実 tool(subagent 等)のもので、この結果の形を
+	// 表さない。生文字列で先に絞り、無関係な result の JSON.parse を避ける
+	if (content.includes('exec_id') && content.includes('running')) {
+		try {
+			const parsed = JSON.parse(content);
+			if (
+				parsed !== null &&
+				typeof parsed === 'object' &&
+				typeof parsed.exec_id === 'string' &&
+				parsed.status === 'running'
+			) {
+				return {
+					kind: 'execution',
+					execId: parsed.exec_id,
+					...(typeof parsed.tool_name === 'string' ? { toolName: parsed.tool_name } : {})
+				};
+			}
+		} catch (e) {
+			// JSON でない・形が合わない → 通常の descriptor 分岐へ
+		}
+	}
 	if (descriptor?.kind === 'skill') {
 		// load_skill の {result, tools}(#35)。形が合わなければ json フォールバック
 		// (推測して壊れた表示を作らない — 他 kind と同じ規律)。
@@ -202,30 +226,13 @@ export const classifyToolResult = (
 		}
 	}
 	if (descriptor?.kind === 'subagent') {
-		// run_subagent / await_subagent の {ok, session_id, answer, ...}(#107)と
-		// background spawn の即返し形 {ok, session_id, status: "running"}(#109)。
+		// run_subagent の {ok, session_id, answer, ...}(#107)。
 		// spawn 前バリデーションエラー({ok:false, error} — session_id 不在)は形が
 		// 合わないので json へ、JSON ですらない壊れ方は text へフォールバック
-		// (推測して壊れた表示を作らない)。
+		// (推測して壊れた表示を作らない)。background 昇格の即返し形は exec 行の
+		// running 形(#110)であり、冒頭の execution 分岐が先に受ける。
 		try {
 			const parsed = JSON.parse(content);
-			if (
-				parsed !== null &&
-				typeof parsed === 'object' &&
-				typeof parsed.ok === 'boolean' &&
-				typeof parsed.session_id === 'string' &&
-				parsed.answer === undefined &&
-				parsed.status === 'running'
-			) {
-				// 即返し形(#109): answer 無し。'' に正規化して subagent 表示に載せる
-				return {
-					kind: 'subagent',
-					sessionId: parsed.session_id,
-					ok: parsed.ok,
-					answer: '',
-					status: 'running'
-				};
-			}
 			if (
 				parsed !== null &&
 				typeof parsed === 'object' &&

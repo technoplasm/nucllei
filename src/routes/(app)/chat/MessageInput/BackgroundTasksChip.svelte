@@ -1,68 +1,102 @@
 <script lang="ts">
 	// 入力欄下部行(floating トークンゲージと同じ行)の左側に出す
-	// 「実行中バックグラウンド tool」チップ(#110)。走行中の background subagent が
-	// あるときだけ描く。供給は Chat.svelte の常時検知ポーリング + SubagentSessionBlock の
-	// live done(background-execs store 参照)。クリックで一覧をポップオーバー表示し、
-	// 各 session の「開く」(/c/ 観測モードへ)と「停止」(SubagentSessionBlock の
-	// stopSession と同じ合成: サーバが知る task ∪ 消費中ストリームの task)を提供する。
+	// 「バックグラウンド実行」チップ(#110)。データ源は exec 行
+	// (executions store — 5 秒ポーリング + 境界の refreshAndScan)。
+	// running + 未回収 terminal の件数バッジを出し、0 件なら非表示。
+	// クリックで一覧をポップオーバー表示し、tool 名・経過・個別停止を提供する。
+	// 連鎖上限(自動再開の停止中)もここに表示する。
 	import { getContext } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
 	import { chatId, mobile } from '$lib/stores';
-	import { getBackgroundExecs, removeBackgroundExec } from '$lib/stores/background-execs.svelte';
-	import { chatChildrenState } from '$lib/stores/chat-children.svelte';
-	import { getTaskIdsByChatId, stopTask } from '$lib/apis';
-	import { getActiveTaskIds } from '$lib/utils/completion-streams';
+	import {
+		executionsState,
+		refreshAndScanExecutions,
+		type ExecutionEntry
+	} from '$lib/stores/executions.svelte';
+	import { isExecutionResumeChainLimited } from '$lib/stores/execution-resume.svelte';
+	import { stopChatExecution } from '$lib/apis/chats';
+	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
+	import type { ChatHistory } from '$lib/types/chat';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 
 	const i18n = getContext('i18n');
 
-	const entries = $derived(getBackgroundExecs($chatId));
+	// 個別停止後の refreshAndScan(stopped の terminal 検知)に履歴が要る —
+	// handled 判定・自動再開の走査は exec 行と履歴の突合(仕様 §9)
+	let { history }: { history: ChatHistory } = $props();
+
+	// 表示対象 = running + 未回収 terminal(chatId スコープ一致のときだけ)
+	const entries = $derived(
+		$chatId && executionsState.chatId === $chatId
+			? executionsState.entries.filter(
+					(entry) => entry.status === 'running' || executionsState.unrecoveredIds.includes(entry.id)
+				)
+			: []
+	);
+	const runningCount = $derived(entries.filter((entry) => entry.status === 'running').length);
+	const chainLimited = $derived(isExecutionResumeChainLimited($chatId));
 
 	let show = $state(false);
 	let stoppingIds = $state<Record<string, boolean>>({});
 
-	// タイトルはサイドバー tree 用の chat-children store から引く(表示中 chat の
-	// children を保持している)。無ければ sessionId 短縮で示す
-	const labelFor = (sessionId: string): string =>
-		chatChildrenState.entries.find((child) => child.id === sessionId)?.title ||
-		sessionId.slice(0, 8);
-
-	const openSession = (sessionId: string) => {
-		show = false;
-		goto(`/c/${sessionId}`);
+	// 実行中の経過時間(exec 行の created_at 起点)。running がある間だけ共有クロック購読
+	$effect(() => {
+		if (runningCount === 0) return;
+		return subscribeTick();
+	});
+	const timeLabel = (entry: ExecutionEntry): string => {
+		if (entry.status === 'running') {
+			const seconds = Math.max(0, Math.round(tickNow() / 1000 - entry.created_at));
+			return $i18n.t('{{DURATION}} seconds', { DURATION: seconds });
+		}
+		if (entry.duration != null) {
+			return $i18n.t('{{DURATION}} seconds', { DURATION: Math.round(entry.duration) });
+		}
+		return '';
 	};
 
-	// 停止: SubagentSessionBlock の stopSession と同じ合成。表示は即時に落とす —
-	// 完走扱いの後始末(resume enqueue 等)は既存のポーリング検知に委ねる
-	const stopSession = async (sessionId: string) => {
-		stoppingIds[sessionId] = true;
+	const statusLabel = (entry: ExecutionEntry): string => {
+		if (entry.status === 'done') return $i18n.t('Completed');
+		if (entry.status === 'failed') return $i18n.t('Failed');
+		if (entry.status === 'stopped') return $i18n.t('Stopped');
+		if (entry.status === 'orphaned') return $i18n.t('Lost on server restart');
+		return $i18n.t('Running...');
+	};
+
+	// 個別停止(D6: 親ターン stop は exec に伝播しない — 止めたければここ)。
+	// 停止後は refreshAndScan で stopped を即取り込み、自動再開の走査も回す
+	const stopExecution = async (execId: string) => {
+		const targetChatId = $chatId;
+		if (!targetChatId) {
+			return;
+		}
+		stoppingIds[execId] = true;
 		try {
-			const taskRes = await getTaskIdsByChatId(sessionId).catch(() => null);
-			const taskIds = [...new Set([...(taskRes?.task_ids ?? []), ...getActiveTaskIds(sessionId)])];
-			for (const taskId of taskIds) {
-				await stopTask(taskId).catch((error) => {
-					toast.error(`${error}`);
-					return null;
-				});
-			}
-			removeBackgroundExec(sessionId);
+			await stopChatExecution(targetChatId, execId).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+			await refreshAndScanExecutions(targetChatId, history);
 		} finally {
-			delete stoppingIds[sessionId];
+			delete stoppingIds[execId];
 		}
 	};
 </script>
 
-{#if entries.length > 0}
+{#if entries.length > 0 || chainLimited}
 	<Dropdown bind:show>
 		<button
 			class="flex items-center gap-1.5 bg-surface-raised border border-line rounded-full px-2.5 py-1 text-xs text-content-muted tabular-nums pointer-events-auto cursor-pointer hover:text-content transition"
 			aria-label={$i18n.t('Background tasks')}
 		>
-			<span class="i-lucide-loader-circle size-3.5 block shrink-0 animate-spin"></span>
+			{#if runningCount > 0}
+				<span class="i-lucide-loader-circle size-3.5 block shrink-0 animate-spin"></span>
+			{:else}
+				<span class="i-lucide-circle-ellipsis size-3.5 block shrink-0"></span>
+			{/if}
 			<span>{entries.length}</span>
 			{#if !$mobile}
 				<span>{$i18n.t('Background')}</span>
@@ -71,34 +105,46 @@
 
 		{#snippet content()}
 			<DropdownContent
-				className="w-max min-w-[220px] max-w-[calc(100vw-2rem)] rounded-xl px-1 py-1 border border-line z-50 bg-surface-raised text-content shadow-sm"
+				className="w-max min-w-[240px] max-w-[calc(100vw-2rem)] rounded-xl px-1 py-1 border border-line z-50 bg-surface-raised text-content shadow-sm"
 				sideOffset={6}
 				side="top"
 				align="start"
 			>
-				{#each entries as entry (entry.sessionId)}
+				{#each entries as entry (entry.id)}
 					<div class="flex items-center gap-2 px-3 py-2 text-sm min-w-0">
-						<span class="i-lucide-bot size-4 block shrink-0 text-content-muted"></span>
-						<div class="line-clamp-1 flex-1 min-w-0 font-medium">{labelFor(entry.sessionId)}</div>
-						<button
-							class="p-1 rounded-md text-content-muted hover:text-content hover:bg-surface-hover transition disabled:opacity-50"
-							title={$i18n.t('Stop')}
-							aria-label={$i18n.t('Stop')}
-							disabled={stoppingIds[entry.sessionId] ?? false}
-							onclick={() => stopSession(entry.sessionId)}
-						>
-							<span class="i-lucide-circle-stop size-4 block"></span>
-						</button>
-						<button
-							class="p-1 rounded-md text-content-muted hover:text-content hover:bg-surface-hover transition"
-							title={$i18n.t('Open')}
-							aria-label={$i18n.t('Open')}
-							onclick={() => openSession(entry.sessionId)}
-						>
-							<span class="i-lucide-arrow-up-right size-4 block"></span>
-						</button>
+						<span class="i-lucide-terminal size-4 block shrink-0 text-content-muted"></span>
+						<div class="flex-1 min-w-0">
+							<div class="line-clamp-1 font-medium font-mono">{entry.tool_name}</div>
+							<div class="text-xs text-content-muted tabular-nums line-clamp-1">
+								{statusLabel(entry)}
+								{#if timeLabel(entry)}
+									· {timeLabel(entry)}
+								{/if}
+							</div>
+						</div>
+						{#if entry.status === 'running'}
+							<button
+								class="p-1 rounded-md text-content-muted hover:text-content hover:bg-surface-hover transition disabled:opacity-50"
+								title={$i18n.t('Stop')}
+								aria-label={$i18n.t('Stop')}
+								disabled={stoppingIds[entry.id] ?? false}
+								onclick={() => stopExecution(entry.id)}
+							>
+								<span class="i-lucide-circle-stop size-4 block"></span>
+							</button>
+						{/if}
 					</div>
 				{/each}
+				{#if chainLimited}
+					<!-- 連鎖上限(仕様 §9): ユーザー発話なしの自動 turn が上限に達した。
+					     次のユーザー発話で連鎖カウントが切れて自動再開が再度有効になる -->
+					<div
+						class="flex items-center gap-2 px-3 py-2 text-xs text-content-muted border-t border-line min-w-0"
+					>
+						<span class="i-lucide-pause-circle size-3.5 block shrink-0"></span>
+						<span class="line-clamp-2">{$i18n.t('Auto-resume paused (limit reached)')}</span>
+					</div>
+				{/if}
 			</DropdownContent>
 		{/snippet}
 	</Dropdown>

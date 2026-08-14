@@ -300,6 +300,49 @@ try:
 except ValueError:
     SUBAGENT_MAX_CONCURRENT = 4
 
+# llens(#110): 非同期 tool 実行(execution)1 本のタイムアウト(秒、-1 で無効)。
+# per-tool の timeout 宣言が最優先で、無ければこれ。sync 既定
+# (CHAT_TOOL_EXECUTION_TIMEOUT=300)の流用は非同期化の動機と矛盾するため別建て(設計 D5)。
+ASYNC_EXEC_TIMEOUT = os.environ.get("ASYNC_EXEC_TIMEOUT", "1800")
+try:
+    ASYNC_EXEC_TIMEOUT = int(ASYNC_EXEC_TIMEOUT)
+except ValueError:
+    ASYNC_EXEC_TIMEOUT = 1800
+
+# llens(#110): 非同期実行の同時数上限(per-user)。超過は待たずに即エラーを
+# tool result で返す(モデルに再試行を委ねる)。SUBAGENT_MAX_CONCURRENT とは
+# 別会計(exec 席 ≠ 子ターン席の AND)。
+ASYNC_EXEC_MAX_CONCURRENT = os.environ.get("ASYNC_EXEC_MAX_CONCURRENT", "4")
+try:
+    ASYNC_EXEC_MAX_CONCURRENT = int(ASYNC_EXEC_MAX_CONCURRENT)
+except ValueError:
+    ASYNC_EXEC_MAX_CONCURRENT = 4
+
+# llens(#110): 非同期実行の同時数上限(プロセス全体)。default executor
+# (全 DB アクセス共有)の枯渇に対する実効防衛。
+ASYNC_EXEC_MAX_TOTAL = os.environ.get("ASYNC_EXEC_MAX_TOTAL", "16")
+try:
+    ASYNC_EXEC_MAX_TOTAL = int(ASYNC_EXEC_MAX_TOTAL)
+except ValueError:
+    ASYNC_EXEC_MAX_TOTAL = 16
+
+# llens(#110): exec 行に保存する result の切詰め長(文字)。超過時は render を
+# text に降格し meta.truncated / original_chars を立てる(不正 JSON を FE に渡さない)。
+EXEC_RESULT_MAX_CHARS = os.environ.get("EXEC_RESULT_MAX_CHARS", "65536")
+try:
+    EXEC_RESULT_MAX_CHARS = int(EXEC_RESULT_MAX_CHARS)
+except ValueError:
+    EXEC_RESULT_MAX_CHARS = 65536
+
+# llens(#110): exec 行の result 保持日数。0(既定)= GC しない。正の値なら boot
+# スイープ時に、終端化からこの日数を過ぎた行の重量フィールド(result/args/meta)を
+# 落とす(行自体は監査のため消さない)。
+EXEC_RETENTION_DAYS = os.environ.get("EXEC_RETENTION_DAYS", "0")
+try:
+    EXEC_RETENTION_DAYS = int(EXEC_RETENTION_DAYS)
+except ValueError:
+    EXEC_RETENTION_DAYS = 0
+
 
 ####################################
 # UVICORN WORKERS

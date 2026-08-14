@@ -680,32 +680,86 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   `/openapi.json` operations are exposed as tools and invoked over HTTP (no
   reserved-param injection there).
 
-### 5.8 Subagents (`run_subagent` / `await_subagent`)
+### 5.8 Subagents (`run_subagent`)
 
 When a model preset lists agent presets in `meta.subagentPresetIds` (and
-`meta.features.subagent` is not set to `false`), two pseudo-tools are mounted
-together on the parent chat's tool loop:
+`meta.features.subagent` is not set to `false`), one pseudo-tool is mounted on
+the parent chat's tool loop:
 
-- `run_subagent(preset_id, instruction, session_id?, background?)` — spawns a
-  child **agent session** (a first-class chat with `kind: "agent"`, linked to
-  the parent chat/message) and runs one turn on the selected preset. Returns
+- `run_subagent(preset_id, instruction, session_id?)` — spawns a child **agent
+  session** (a first-class chat with `kind: "agent"`, linked to the parent
+  chat/message) and runs one turn on the selected preset. Returns
   `{ok, session_id, answer, usage?, truncated?}` — the child's final assistant
   text only (8000 chars max), never the transcript. Pass `session_id` instead
-  of `preset_id` to send a follow-up instruction to an existing session. With
-  `background: true` it returns `{ok, session_id, status: "running"}` right
-  after the child turn starts; the child keeps running even after the parent
-  turn ends.
-- `await_subagent(session_id)` — collects a session's result: waits for a
-  running turn to finish, or returns immediately when it is already done, with
-  the same `{ok, session_id, answer, usage?}` shape. Stopping the parent turn
-  while awaiting does **not** stop the background child.
+  of `preset_id` to send a follow-up instruction to an existing session.
+
+`run_subagent` is **backgroundable** (§5.9): calling it with the shared
+`background: true` argument runs the child turn as an asynchronous execution
+and returns `{ok, exec_id, tool_name, status: "running"}` immediately; collect
+the result with `await_async(exec_id)`. `session_id` stays the resumable
+session handle, `exec_id` is the record of one run. There is no dedicated
+`await_subagent` — async collection is unified on the execution channel.
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENT` (default 4 — spawns over the limit fail
 immediately, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT`
-(default 1800 s). Agent sessions never appear in the user's chat list, are
-read-only over HTTP, and are cascade-deleted (running turns stopped) with the
-parent chat.
+(default 1800 s; also the execution timeout when backgrounded). Agent sessions
+never appear in the user's chat list, are read-only over HTTP, and are
+cascade-deleted (running turns stopped) with the parent chat.
+
+### 5.9 Asynchronous execution (`background` / `check_async` / `await_async`)
+
+Any **backgroundable** tool call can be promoted to an asynchronous
+**execution**: a first-class DB row that outlives the parent turn. On a normal
+user chat (never on agent-session child turns or headless completions), the
+server injects a shared `background: boolean` parameter into the model-facing
+spec of every eligible tool.
+
+- `background: true` → the call returns
+  `{ok, exec_id, tool_name, status: "running"}` immediately and that running
+  form stays in the parent message's tool result forever (append-only); the
+  truth about completion lives in the execution row
+  (`running|done|failed|stopped|orphaned`). The execution keeps running after
+  the parent turn ends; stopping the parent turn does **not** stop it.
+- `check_async(exec_id)` — non-blocking status poll:
+  `{exec_id, tool_name, status, elapsed_s, progress?}` (latest in-process
+  progress line). Never returns the result body.
+- `await_async(exec_id, timeout?)` — bounded wait (default 90 s, clamped to
+  10–300). On completion returns
+  `{ok, exec_id, tool_name, status: "done", result, duration, usage?}`
+  (with the original tool's render descriptor, and a one-time replay of
+  `context_images` / `display` side-channels); on timeout
+  returns the running form (report "still running" and end the turn — the
+  frontend auto-resume collects it later); on `failed/stopped/orphaned`
+  returns `{ok: false, ..., error}`. Re-awaiting is idempotent.
+
+Both collectors are builtin pseudo-tools, mounted automatically whenever an
+eligible tool is on the turn or the chat still has execution rows.
+
+**Eligibility is opt-in** (`backgroundable` key on the tool entry):
+
+- builtin: `run_subagent` only (default).
+- DB tools: declare a `backgroundable` class attribute on the `Tools` class —
+  `True` (all functions) or a list/tuple/set of function names (tool CRUD is
+  admin-only, so this is an admin decision). Example: the reference sandbox
+  tool declares `backgroundable = ("run_python",)` so long-running Python can
+  be backgrounded. Known v1 limit: workspace-export chat attachments emitted
+  after the parent turn ended don't show in the UI (files themselves are
+  persisted and listed in the result string).
+- Never eligible: `load_skill`, `check_async`, `await_async`, any tool that
+  declares its own `background` parameter (collision guard), and tool-server
+  tools (no opt-in surface in v1). `background: true` on a non-eligible tool
+  is ignored (synchronous run, warning logged).
+
+Timeouts and limits: per-entry `timeout` wins, else `ASYNC_EXEC_TIMEOUT`
+(default 1800 s). Concurrency: `ASYNC_EXEC_MAX_CONCURRENT` (default 4 per
+user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
+fails immediately. Results are truncated at `EXEC_RESULT_MAX_CHARS` (default
+65536; truncation demotes structured rendering to text) and optionally purged
+after `EXEC_RETENTION_DAYS` (default 0 = keep forever). Single-process only:
+with `UVICORN_WORKERS > 1` spawning is refused. Executions are stopped (not
+deleted) when their chat is deleted; a server restart marks in-flight rows
+`orphaned` — the record survives, the computation does not resume.
 
 ---
 

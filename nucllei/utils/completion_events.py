@@ -19,6 +19,7 @@ import logging
 from uuid import uuid4
 
 from nucllei.models.chats import Chats
+from nucllei.utils.executions import in_exec
 from nucllei.utils.sse import sse_line
 
 log = logging.getLogger(__name__)
@@ -105,7 +106,15 @@ class CompletionEventStream:
             queue.put_nowait(_CLOSE)
         for future in self._pending_calls.values():
             if not future.done():
-                future.cancel()
+                # llens(#110 §6): pending は cancel ではなく set_exception で起こす。
+                # cancel だと in-flight の待ち手(tool)が CancelledError を受け、
+                # 「停止された」意味論(exec runner の D2 / 親ターン stop)と混ざる。
+                # 例外なら呼び手の失敗として扱われ、failed に落ちる。
+                future.set_exception(
+                    RuntimeError("completion event stream closed before reply")
+                )
+                # 誰も await しない場合の "exception was never retrieved" 警告抑止
+                future.exception()
         self._pending_calls.clear()
 
     @property
@@ -130,7 +139,16 @@ class CompletionEventStream:
     # --- 双方向呼び出し(__event_call__)---------------------------------
 
     async def call(self, event_data: dict):
-        """イベントを配ってクライアントの応答を待つ(POST reply で解決)。"""
+        """イベントを配ってクライアントの応答を待つ(POST reply で解決)。
+
+        llens(#110 §6): closed 後は誰も応答を返せない(emit は no-op で、
+        reply エンドポイントが叩く相手も居ない)ため、future を作らず即エラーに
+        する。ターン終了後も生きる exec(非同期 tool 実行)が親ターンの
+        `__event_call__` を握ったまま呼ぶと、待ちが timeout まで hang するため。
+        """
+        if self._closed:
+            raise RuntimeError("completion event stream is closed; cannot call client")
+
         call_id = str(uuid4())
         future = asyncio.get_running_loop().create_future()
         self._pending_calls[call_id] = future
@@ -197,7 +215,14 @@ def get_stream_for_message(chat_id, message_id) -> CompletionEventStream | None:
 
 
 def make_event_emitter(stream: CompletionEventStream, metadata: dict, update_db=True):
-    """__event_emitter__ 実体。イベント配信 + 種別ごとの DB 副作用(旧 socket 実装踏襲)。"""
+    """__event_emitter__ 実体。イベント配信 + 種別ごとの DB 副作用(旧 socket 実装踏襲)。
+
+    llens(#110 §6): callable には mount 時に partial で焼き込まれる(utils/tools.py)
+    ため、非同期 tool 実行(execution)はターン終了後もこの emitter を握ったまま
+    走り続ける。DB 副作用(親 assistant メッセージの変異)は exec 文脈では全面
+    スキップする — 親メッセージの tool result は spawn 時の running 形のみで以後
+    不変(append-only)であり、ターン中の chat JSON RMW とも競合するため。
+    """
 
     chat_id = metadata.get("chat_id")
     message_id = metadata.get("message_id")
@@ -212,6 +237,21 @@ def make_event_emitter(stream: CompletionEventStream, metadata: dict, update_db=
         )
 
         if not (update_db and chat_id and message_id):
+            return
+        if in_exec.get():
+            # exec runner 内(ターン寿命を超えた実行)からの DB 分岐は無効
+            log.debug(
+                "skipped event_emitter DB write from async execution: %s",
+                (event_data or {}).get("type"),
+            )
+            return
+        if stream.closed:
+            # ターンが畳まれた後の遅延 emit(timeout orphan スレッド等)。
+            # 配信先が居ない以上、DB だけ変異させるのは append-only 側の害
+            log.debug(
+                "skipped event_emitter DB write on closed stream: %s",
+                (event_data or {}).get("type"),
+            )
             return
 
         event_type = (event_data or {}).get("type")

@@ -23,10 +23,12 @@
 	import { formatDurationSeconds } from '$lib/utils/duration';
 	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
 	import type { ToolProgress } from '$lib/stores/tool-progress.svelte';
+	import { getExecutionEntry } from '$lib/stores/executions.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Markdown from './Markdown.svelte';
 	import SubagentSessionBlock from './SubagentSessionBlock.svelte';
+	import ExecutionBlock from './ExecutionBlock.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -139,6 +141,14 @@
 		result ? classifyToolResult(result.content ?? '', call?.render?.result ?? result.render) : null
 	);
 
+	// #110: background 昇格された呼び出し。spawn は result(running 形)が即存在するため
+	// isDone が緑チェックを出してしまう — exec 行が running の間はスピナーに上書きする。
+	// store に行が無い間(未 fetch)も running 扱い(result の running 形が最後の真実)
+	const execRunning = $derived(
+		resultDisplay?.kind === 'execution' &&
+			(getExecutionEntry(resultDisplay.execId)?.status ?? 'running') === 'running'
+	);
+
 	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
 	// 開閉と無関係に常時見せる — open 時は枠の底に、閉時は badge から下がる専用枠に
 	// 描き、collapsible ブロックと 1 つの塊として「くっついて」見えるようにする。
@@ -197,8 +207,8 @@
 			open = !open;
 		}}
 	>
-		<div class="font-medium flex items-center gap-2 {isDone ? '' : 'shimmer'}">
-			{#if !isDone}
+		<div class="font-medium flex items-center gap-2 {isDone && !execRunning ? '' : 'shimmer'}">
+			{#if !isDone || execRunning}
 				<div>
 					<Spinner className="size-4" />
 				</div>
@@ -209,7 +219,7 @@
 			{/if}
 
 			<div>
-				{#if isDone}
+				{#if isDone && !execRunning}
 					<Markdown
 						id={`${id}-header`}
 						content={$i18n.t('Tool used **{{NAME}}**', { NAME: name })}
@@ -339,6 +349,12 @@
 								{#if open} の内側なので、開くまで子 chat の fetch は走らない。
 							-->
 							<SubagentSessionBlock id={`${id || call.id}-subagent`} display={resultDisplay} />
+						{:else if resultDisplay.kind === 'execution'}
+							<!--
+								background 昇格された呼び出しの running 形(#110): exec 行の現在状態を
+								executions store から引く 1 行ステータス。結果の回収は await_async。
+							-->
+							<ExecutionBlock id={`${id || call.id}-execution`} display={resultDisplay} />
 						{:else if resultDisplay.kind === 'text'}
 							<div class="text-sm font-mono whitespace-pre-wrap my-0.5 px-0.5" dir="ltr">
 								{resultDisplay.value}

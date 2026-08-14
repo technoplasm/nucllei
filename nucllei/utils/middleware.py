@@ -61,6 +61,14 @@ from nucllei.utils.skills import (
     skill_activation_seed_block,
 )
 from nucllei.utils.subagent import build_subagent_tools
+from nucllei.models.executions import Executions
+from nucllei.utils.exec_tools import (
+    build_exec_tools,
+    entry_is_backgroundable,
+    exec_spawn_context_ok,
+    spec_for_model,
+)
+from nucllei.utils.executions import spawn_execution
 from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
@@ -511,8 +519,15 @@ async def process_chat_payload(
                 continue
             tools_dict[name] = tool
             if "tools" in form_data:
+                # llens(#110): 第 2 経路(遅延ロード)でも適格 tool には background
+                # 引数を注入する(下の初回合成と同じヘルパ — spec はコピー)。
                 form_data["tools"].append(
-                    {"type": "function", "function": tool.get("spec", {})}
+                    {
+                        "type": "function",
+                        "function": spec_for_model(
+                            name, tool, exec_spawn_context_ok(metadata)
+                        ),
+                    }
                 )
             loaded.append(name)
         return loaded
@@ -527,11 +542,11 @@ async def process_chat_payload(
             )
         tools_dict["load_skill"] = load_skill_tool
 
-    # llens(#107/#109): サブエージェントの擬似 tool 群 run_subagent / await_subagent
-    # (load_skill と同型・常に同時合成)。allowlist / 機能フラグ / depth 上限の
-    # 判定は build_subagent_tools 側に閉じ、対象が無ければ None(tool 自体を
-    # 載せない)。同期 DB read(親 chat の kind/depth + Models×allowlist 件数)を
-    # 含むためワーカースレッドへ(#28 の規律)。
+    # llens(#107/#109): サブエージェントの擬似 tool run_subagent(load_skill と
+    # 同型)。allowlist / 機能フラグ / depth 上限の判定は build_subagent_tools 側に
+    # 閉じ、対象が無ければ None(tool 自体を載せない)。同期 DB read(親 chat の
+    # kind/depth + Models×allowlist 件数)を含むためワーカースレッドへ(#28 の規律)。
+    # 非同期形は #110 の execution 基盤に一本化(旧 await_subagent は撤去)。
     subagent_tools = await asyncio.to_thread(
         build_subagent_tools, request, model, user, metadata
     )
@@ -540,13 +555,38 @@ async def process_chat_payload(
             log.warning(f"tool '{name}' is shadowed by the subagent pseudo-tool")
         tools_dict[name] = entry
 
+    # llens(#110): 非同期実行の回収 builtin check_async / await_async。適格
+    # (backgroundable)tool が載るターン、または chat に exec 行が残っている場合に
+    # mount する(§7 — 過剰 mount は無害: terminal への再 await は冪等)。builtin
+    # なので #101 の履歴再導出は不要。agent session(D9)と chat 文脈なしでは
+    # 載せない(spawn も同条件で拒否される)。
+    allow_background = exec_spawn_context_ok(metadata)
+    if allow_background:
+        mount_exec_tools = any(
+            entry_is_backgroundable(name, entry) for name, entry in tools_dict.items()
+        )
+        if not mount_exec_tools:
+            mount_exec_tools = await asyncio.to_thread(
+                Executions.has_awaitable_executions_by_chat_id, metadata["chat_id"]
+            )
+        if mount_exec_tools:
+            for name, entry in build_exec_tools(user, metadata).items():
+                if name in tools_dict:
+                    log.warning(f"tool '{name}' is shadowed by the execution builtin")
+                tools_dict[name] = entry
+
     if tools_dict:
         # llens: native function calling のみサポート(issue #18)。
         # ツールがあれば常にモデルへ tool spec を渡す(function_calling パラメータは無視)。
+        # #110: 適格 tool の spec には共有 background 引数を注入する(spec の
+        # コピーに対して — tools_dict 側は汚さず、unknown-drop の基準は元 spec)。
         metadata["tools"] = tools_dict
         form_data["tools"] = [
-            {"type": "function", "function": tool.get("spec", {})}
-            for tool in tools_dict.values()
+            {
+                "type": "function",
+                "function": spec_for_model(name, tool, allow_background),
+            }
+            for name, tool in tools_dict.items()
         ]
 
     try:
@@ -1124,13 +1164,78 @@ def _make_progress_emitter(events_stream, metadata):
     return emitter_for
 
 
+async def _execute_tool_call_sync(
+    tool, tool_name, tool_call_id, tool_function_params, progress_emitter_for
+):
+    """1 件の tool call を同期(このターン内)で実行する(execute_tool_calls の本体)。
+
+    戻り値は (tool_result, tool_succeeded, sink)。sink は close 済みで、呼び出し側が
+    成功時のみ harvest する(context_images / display / result_render)。
+    background 昇格時(#110)はここを通らず spawn_execution が代替する。
+    """
+    # llens(#89): tool-call ごとの出力 sink を張る。tool が
+    # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、呼び出し側で
+    # harvest して results[i].context_images へ載せる(VLM 再注入トリガ)。
+    # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
+    sink = ToolOutputSink(
+        tool_call_id=tool_call_id,
+        emit_progress=(
+            progress_emitter_for(tool_call_id) if progress_emitter_for else None
+        ),
+    )
+    sink_token = tool_output.current_sink.set(sink)
+    # llens(#100): この call の開始をフロントへ通知する。ブロックは実行前の
+    # 1 回の emit で一斉に描かれるので、これがフロントの経過時間タイマの
+    # 起点になる(逐次実行なので 2 本目以降は「まだ始まっていない」)。
+    sink.mark_started()
+    tool_succeeded = False
+    tool_result = None
+    try:
+        tool_function = tool["callable"]
+        # llens: システム側の権威的タイムアウト(sandbox 等の実行側は
+        # 自前上限を持たなくてよい)。sync tool はワーカースレッド実行
+        # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
+        # 走り切ってから回収される(有界リーク — turn の進行を優先)。
+        # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
+        # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ。await_async は
+        # 0 = 無効化 — 自前の clamp 済み有界待ちが running 形を返す)。
+        tool_timeout = tool.get("timeout", CHAT_TOOL_EXECUTION_TIMEOUT)
+        if tool_timeout > 0:
+            tool_result = await asyncio.wait_for(
+                tool_function(**tool_function_params),
+                timeout=tool_timeout,
+            )
+        else:
+            tool_result = await tool_function(**tool_function_params)
+        tool_succeeded = True
+
+    except asyncio.TimeoutError:
+        log.warning(f"tool execution timed out: {tool_name} " f"(> {tool_timeout}s)")
+        # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
+        tool_result = (
+            f"ツール {tool_name} の実行が {tool_timeout} 秒で"
+            "タイムアウトしました(システム側上限)。"
+        )
+    except Exception as e:
+        tool_result = str(e)
+    finally:
+        tool_output.current_sink.reset(sink_token)
+        # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
+        # no-op にする。ContextVar の reset はメインループ側 context の話で、
+        # copy_context を持ったまま走り続ける timeout orphan スレッド
+        # (上の有界リーク)には効かない — closed フラグがそれを止める。
+        sink.close()
+    return tool_result, tool_succeeded, sink
+
+
 async def execute_tool_calls(
     response_tool_calls, tools, *, events_stream=None, metadata=None
 ):
     """tool call 群を順に実行し、tool result のリストを返す。
 
     events_stream / metadata は tool 進捗(#100)の宛先。省略時(headless・テスト)は
-    `__progress__` が黙って no-op になる。
+    `__progress__` が黙って no-op になる。metadata は background 昇格(#110)の
+    exec 行束縛(user_id / chat_id / message_id)にも使われる。
     """
     results = []
     progress_emitter_for = _make_progress_emitter(events_stream, metadata)
@@ -1163,6 +1268,7 @@ async def execute_tool_calls(
         tool_result = None
         context_image_file_ids = []
         display_items = []
+        result_render_override = None
 
         if tool_name not in tools:
             # llens(#18-2): tools 配列に無い tool の呼び出し。
@@ -1179,70 +1285,68 @@ async def execute_tool_calls(
             tool = tools[tool_name]
             spec = tool.get("spec", {})
 
-            # llens(#89): tool-call ごとの出力 sink を張る。tool が
-            # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、下で
-            # harvest して results[i].context_images へ載せる(VLM 再注入トリガ)。
-            # 戻り値をハイジャックしない汎用経路 — view_image に閉じない。
-            sink = ToolOutputSink(
-                tool_call_id=tool_call_id,
-                emit_progress=(
-                    progress_emitter_for(tool_call_id) if progress_emitter_for else None
-                ),
-            )
-            sink_token = tool_output.current_sink.set(sink)
-            # llens(#100): この call の開始をフロントへ通知する。ブロックは実行前の
-            # 1 回の emit で一斉に描かれるので、これがフロントの経過時間タイマの
-            # 起点になる(逐次実行なので 2 本目以降は「まだ始まっていない」)。
-            sink.mark_started()
-            tool_succeeded = False
-            try:
-                allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
+            # llens(#110): 共有 background 引数は allowed_params フィルタより前に
+            # 必ず pop する(適格 tool の spec **コピー**にのみ注入される引数で、
+            # 元 spec には無い)。tool 自身が background を宣言している場合は tool の
+            # 実引数であり恒久不適格(D4)— 触らずそのまま渡す。
+            allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
+            background_requested = False
+            if "background" not in allowed_params:
+                background_requested = bool(
+                    tool_function_params.pop("background", False)
+                )
+            tool_function_params = {
+                k: v for k, v in tool_function_params.items() if k in allowed_params
+            }
 
-                tool_function_params = {
-                    k: v for k, v in tool_function_params.items() if k in allowed_params
-                }
-
-                tool_function = tool["callable"]
-                # llens: システム側の権威的タイムアウト(sandbox 等の実行側は
-                # 自前上限を持たなくてよい)。sync tool はワーカースレッド実行
-                # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
-                # 走り切ってから回収される(有界リーク — turn の進行を優先)。
-                # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
-                # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ)。
-                tool_timeout = tool.get("timeout", CHAT_TOOL_EXECUTION_TIMEOUT)
-                if tool_timeout > 0:
-                    tool_result = await asyncio.wait_for(
-                        tool_function(**tool_function_params),
-                        timeout=tool_timeout,
-                    )
-                else:
-                    tool_result = await tool_function(**tool_function_params)
-                tool_succeeded = True
-
-            except asyncio.TimeoutError:
+            if background_requested and not (
+                entry_is_backgroundable(tool_name, tool)
+                and exec_spawn_context_ok(metadata)
+            ):
+                # 不適格 tool / 文脈(agent session・chat 文脈なし)への指定は
+                # 無視して同期実行(§7)
                 log.warning(
-                    f"tool execution timed out: {tool_name} " f"(> {tool_timeout}s)"
+                    f"background=true ignored for tool '{tool_name}' "
+                    "(not backgroundable in this context)"
                 )
-                # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
-                tool_result = (
-                    f"ツール {tool_name} の実行が {tool_timeout} 秒で"
-                    "タイムアウトしました(システム側上限)。"
+                background_requested = False
+
+            if background_requested:
+                # llens(#110): execution チャンネルへ昇格(K2)。spawn は exec 行を
+                # INSERT して runner task を起動し、即座に running 形(K3)を返す。
+                # この running 形が親メッセージの tool result として以後不変
+                # (append-only)— 完了の真実は exec 行、回収は await_async /
+                # check_async と FE 自動再開。params は unknown-drop 済み(監査
+                # 保存と callable 引数の両方に使われる)。
+                tool_result = await spawn_execution(
+                    user_id=metadata["user_id"],
+                    chat_id=metadata["chat_id"],
+                    message_id=metadata["message_id"],
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    entry=tool,
+                    params=tool_function_params,
                 )
-            except Exception as e:
-                tool_result = str(e)
-            finally:
-                tool_output.current_sink.reset(sink_token)
-                # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
-                # no-op にする。ContextVar の reset はメインループ側 context の話で、
-                # copy_context を持ったまま走り続ける timeout orphan スレッド
-                # (上の有界リーク)には効かない — closed フラグがそれを止める。
-                sink.close()
-            # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は副産物を
-            # 出さない — content=エラー文言と画像が混在する不整合を避ける)。成功時のみ
-            # harvest(lock 下 snapshot で timeout orphan スレッドの遅延 append を除外)。
-            context_image_file_ids = sink.context_images() if tool_succeeded else []
-            # display(人間の目、#88)も同じ規律で成功時のみ harvest。
-            display_items = sink.displays() if tool_succeeded else []
+            else:
+                tool_result, tool_succeeded, sink = await _execute_tool_call_sync(
+                    tool,
+                    tool_name,
+                    tool_call_id,
+                    tool_function_params,
+                    progress_emitter_for,
+                )
+                # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は
+                # 副産物を出さない — content=エラー文言と画像が混在する不整合を
+                # 避ける)。成功時のみ harvest(lock 下 snapshot で timeout orphan
+                # スレッドの遅延 append を除外)。
+                context_image_file_ids = sink.context_images() if tool_succeeded else []
+                # display(人間の目、#88)も同じ規律で成功時のみ harvest。
+                display_items = sink.displays() if tool_succeeded else []
+                # #110(§8): await_async が宣言した表示ディスクリプタ
+                # (exec 行の render_descriptor)は型由来の render より優先する
+                result_render_override = (
+                    sink.result_render() if tool_succeeded else None
+                )
 
         # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
         # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
@@ -1262,6 +1366,12 @@ async def execute_tool_calls(
             # int/float/bool は str()、None(戻り値なし)は空文字 —
             # "None" という見かけの出力を作らない。
             tool_result = "" if tool_result is None else str(tool_result)
+
+        # llens(#110 §8): await_async の render_descriptor パススルー。exec 行に
+        # 保存された実 tool の戻り値宣言(sink.set_result_render 経由)が、
+        # 型由来の render(kind=json)より優先する(subagent 等の描画復元)。
+        if result_render_override:
+            result_render = result_render_override
 
         results.append(
             {

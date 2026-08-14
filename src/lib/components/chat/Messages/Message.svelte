@@ -4,6 +4,8 @@
 
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
+	import SystemNoticeMessage from './SystemNoticeMessage.svelte';
+	import { isExecutionResumeMessage } from '$lib/stores/execution-resume.svelte';
 
 	let {
 		idx = 0,
@@ -57,7 +59,11 @@
 		: 'max-w-5xl'} mx-auto rounded-lg group"
 >
 	{#if message}
-		{#if message.role === 'user'}
+		{#if message.role === 'user' && isExecutionResumeMessage(message.content)}
+			<!-- llens(#110): 非同期 tool 完了の自動再開は wire 上 user ロールだが、
+			     ユーザー発言には見せない(システム挿入として描く) -->
+			<SystemNoticeMessage {history} {messageId} />
+		{:else if message.role === 'user'}
 			<UserMessage
 				{user}
 				{history}

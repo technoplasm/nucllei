@@ -1,6 +1,7 @@
 {
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w' 或 '-1' 表示无过期时间。",
 	"(no description)": "(无描述)",
+	"Inserted by the system": "由系统插入",
 	"{{COUNT}} hidden lines": "{{COUNT}} 行被隐藏",
 	"{{DURATION}} seconds": "{{DURATION}} 秒",
 	"{{n}} files selected": "已选择 {{n}} 个文件",

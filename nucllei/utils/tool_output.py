@@ -74,6 +74,7 @@ class ToolOutputSink:
         self._lock = threading.Lock()
         self._context_images: list[str] = []
         self._displays: list[dict] = []
+        self._result_render: Optional[dict] = None
         # --- progress(#100、揮発)---
         self._tool_call_id = tool_call_id
         self._emit_progress = emit_progress
@@ -108,6 +109,24 @@ class ToolOutputSink:
         # snapshot(lock 下 copy)。要素 dict は不変値のみで生参照は漏らさない。
         with self._lock:
             return [dict(d) for d in self._displays]
+
+    # --- result render override(#110 §8)---------------------------------
+
+    def set_result_render(self, render: dict) -> None:
+        """この call の結果ブロックの表示ディスクリプタ(results[].render)を宣言する。
+
+        await_async(#110)が exec 行に保存された実 tool の戻り値宣言
+        (meta.render_descriptor)を持ち上げるための口。execute_tool_calls が
+        成功時に harvest し、型由来の render(kind=json 等)より優先する。
+        """
+        if not isinstance(render, dict) or not render:
+            return
+        with self._lock:
+            self._result_render = dict(render)
+
+    def result_render(self) -> Optional[dict]:
+        with self._lock:
+            return dict(self._result_render) if self._result_render else None
 
     # --- progress(#100、揮発)-------------------------------------------
 

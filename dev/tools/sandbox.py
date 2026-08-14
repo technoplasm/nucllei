@@ -149,6 +149,13 @@ def _iter_context_files(__files__, __metadata__):
 # Tool 本体
 # -----------------------------------------------------------------------------
 class Tools:
+    # llens(#110): 非同期実行(background 昇格)への opt-in。時間のかかる Python
+    # 実行を background にできるようにする(承認済み Q2 — 2026-08-14)。
+    # 既知の v1 制約: ターン終了後に完了した実行では exports の添付 UI
+    # (chat:message:files)は出ない — 実体は Files に永続済みで、tool result
+    # 文字列にも列挙される(async-exec-design.md §6)。
+    backgroundable = ("run_python",)
+
     class Valves(BaseModel):
         sandbox_url: str = Field(
             default=SANDBOX_URL,

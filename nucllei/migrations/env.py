@@ -9,6 +9,7 @@ from nucllei.models import (  # noqa: F401
     auths,
     chats,
     configs,
+    executions,
     files,
     functions,
     groups,

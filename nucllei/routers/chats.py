@@ -1,5 +1,6 @@
 import copy
 import logging
+import time
 import uuid
 from typing import Optional
 
@@ -12,6 +13,7 @@ from nucllei.models.chats import (
     Chats,
     ChatTitleIdResponse,
 )
+from nucllei.models.executions import ExecutionModel, Executions
 from nucllei.models.files import FileForm, Files
 from nucllei.models.users import Users
 
@@ -26,6 +28,12 @@ from pydantic import BaseModel
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_permission, has_read_access_to_file
+from nucllei.utils.executions import (
+    EXEC_SPAWN_GRACE_S,
+    has_exec_registry_entry,
+    stop_execution,
+    stop_executions_by_chat_id,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -156,9 +164,13 @@ async def _stop_chat_tree_tasks(chat_id: str) -> None:
     """llens(#107): chat 自身 + 全子孫 agent session の走行中タスクを stop する。
 
     soft delete の前に呼び、消えた chat へ書き続ける孤児タスクを作らない。
+    llens(#110): 非同期 tool 実行(execution)は `exec:{chat_id}` 名前空間で
+    親ターンから detach されており、completion タスクの cancel 連鎖では止まらない
+    (設計 D6)。chat 削除だけは cascade する(設計 §5)ので明示的に停止する。
     """
     for target_id in [chat_id, *Chats.get_descendant_chat_ids(chat_id)]:
         await _stop_chat_tasks(target_id)
+        await stop_executions_by_chat_id(target_id)
 
 
 ############################
@@ -197,9 +209,13 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
         )
 
     # llens(#107): soft delete の前に走行中タスクを stop。子 agent session の走行は
-    # 親タスクの cancel 連鎖(run_subagent 側)で止まるため、自 chat 分の stop で足りる
+    # 親タスクの cancel 連鎖(run_subagent 側)で止まるため、自 chat 分の stop で足りる。
+    # llens(#110): execution は detach されており cancel 連鎖では止まらない
+    # (設計 §5 — 「cancel 連鎖で止まる」前提は exec に崩壊する)ので明示停止する。
+    # 子 agent session には exec を持たせない(D9)ため、走査は自 chat 分で足りる。
     for chat in Chats.get_chats_by_user_id(user.id):
         await _stop_chat_tasks(chat.id)
+        await stop_executions_by_chat_id(chat.id)
 
     result = Chats.delete_chats_by_user_id(user.id)
     return result
@@ -607,6 +623,76 @@ async def get_chat_children_by_id(id: str, user=Depends(get_verified_user)):
         }
         for child in Chats.get_child_chats_by_parent_id(id, user.id)
     ]
+
+
+############################
+# Executions(#110)
+############################
+
+
+def _execution_item(execution: ExecutionModel) -> dict:
+    """一覧・停止応答の行(result 本文は載せない — 回収は await_async の仕事)。
+
+    liveness は**検出のみで書かない**(設計 §4: orphaned の権威は boot スイープと
+    個別経路)。registry に居ない running をグレース超過で orphaned として見せる。
+    """
+    status_ = execution.status
+    if (
+        status_ == "running"
+        and not has_exec_registry_entry(execution.id)
+        and int(time.time()) - execution.created_at >= EXEC_SPAWN_GRACE_S
+    ):
+        status_ = "orphaned"
+
+    return {
+        "id": execution.id,
+        "tool_name": execution.tool_name,
+        "status": status_,
+        "created_at": execution.created_at,
+        "finished_at": execution.finished_at,
+        "duration": execution.duration,
+        "error": execution.error,
+    }
+
+
+@router.get("/{id}/executions")
+async def get_chat_executions_by_id(id: str, user=Depends(get_verified_user)):
+    """llens(#110): chat の execution 行一覧(バックグラウンドチップ・自動再開走査)。
+    所有者のみ。"""
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+
+    return [
+        _execution_item(execution)
+        for execution in Executions.get_executions_by_chat_id(id)
+    ]
+
+
+@router.post("/{id}/executions/{exec_id}/stop")
+async def stop_chat_execution_by_id(
+    id: str, exec_id: str, user=Depends(get_verified_user)
+):
+    """llens(#110): execution の個別停止(チップの停止導線)。
+
+    所有者検証 + exec が当該 chat のものかを確認してから stop_execution(stopped へ
+    CAS → 勝ったときだけ task cancel)。既に終端なら no-op で最新行を返す(冪等)。
+    """
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+
+    execution = Executions.get_execution_by_id(exec_id)
+    if execution is None or execution.chat_id != id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+
+    return _execution_item(await stop_execution(exec_id) or execution)
 
 
 ############################

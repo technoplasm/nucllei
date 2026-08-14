@@ -231,6 +231,20 @@ def get_tools(
                 if render:
                     tool_dict["render"] = render
 
+                # llens(#110): 非同期実行(background 昇格)への opt-in(設計 D4)。
+                # tool 作者が `Tools` クラス属性 `backgroundable` で宣言する
+                # (tool CRUD は admin 専用 = admin の明示指定): True で全関数、
+                # 関数名の list/tuple/set で個別指定。`file_handler` と同じ
+                # クラス属性の流儀で、per-entry キー(`timeout` と同型)へ落とす。
+                # 衝突ガード(自前 background 引数・恒久不適格名)は呼び出し面
+                # (utils/exec_tools.entry_is_backgroundable)が判定する。
+                backgroundable = getattr(module, "backgroundable", None)
+                if backgroundable is True or (
+                    isinstance(backgroundable, (list, tuple, set, frozenset))
+                    and function_name in backgroundable
+                ):
+                    tool_dict["backgroundable"] = True
+
                 # TODO: if collision, prepend toolkit name
                 if function_name in tools_dict:
                     log.warning(

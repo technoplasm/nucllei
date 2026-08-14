@@ -35,6 +35,7 @@ from starlette.responses import Response
 
 
 from nucllei.builtin_tools import sync_builtin_tools
+from nucllei.utils.executions import sweep_executions_on_boot
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
@@ -234,6 +235,12 @@ class SPAStaticFiles(StaticFiles):
                 if path.endswith(".js"):
                     # Return 404 for javascript files
                     raise ex
+                elif path.lstrip("/").startswith(("api/", "openai/", "ollama/")):
+                    # llens(#110): 未マッチの API パスに index.html を 200 で返さない。
+                    # ブラウザはその HTML をキャッシュするため、FE/BE のバージョン差で
+                    # 一度でも踏むと、後から endpoint を足しても古い HTML を掴み続けて
+                    # JSON パース失敗が延々続く(dev で実害。vite の SPA fallback も同型)
+                    raise ex
                 else:
                     return await super().get_response("index.html", scope)
             else:
@@ -279,6 +286,10 @@ async def lifespan(app: FastAPI):
 
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
+
+    # llens(#110): 前プロセスの走行中 execution は失われている(単一プロセスが
+    # 不変条件)— 起動時に orphaned へ倒す(orphaned の権威)+ 保持期限 GC。
+    await asyncio.to_thread(sweep_executions_on_boot)
 
     yield
 

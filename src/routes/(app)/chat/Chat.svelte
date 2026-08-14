@@ -42,20 +42,22 @@
 	import { clearChatProgress } from '$lib/stores/tool-progress.svelte';
 	import { clearChatChildren, refreshChatChildren } from '$lib/stores/chat-children.svelte';
 	import {
-		clearBackgroundExecs,
-		getBackgroundExecs,
-		setBackgroundExecs
-	} from '$lib/stores/background-execs.svelte';
+		clearExecutions,
+		executionsState,
+		refreshAndScanExecutions
+	} from '$lib/stores/executions.svelte';
 	import {
-		buildSubagentResumeMessage,
-		isSubagentResumeHandled,
-		isSubagentResumeRequested,
-		listRunningSubagentSpawns,
-		peekSubagentResume,
-		requestSubagentResume,
-		subagentResumeState,
-		takeSubagentResume
-	} from '$lib/stores/subagent-resume.svelte';
+		buildExecutionResumeMessage,
+		clearExecutionResumeChainLimited,
+		countTrailingAutoResumes,
+		EXECUTION_RESUME_CHAIN_LIMIT,
+		executionResumeState,
+		hasPendingExecutionResume,
+		isExecutionResumeHandled,
+		requeueExecutionResumes,
+		setExecutionResumeChainLimited,
+		takeExecutionResumes
+	} from '$lib/stores/execution-resume.svelte';
 
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
@@ -151,29 +153,32 @@
 		onEventCall,
 		// 観測モードでは done の completed / 保存経路を駆動しない(events.ts 参照)
 		isObserver: () => isAgentSession,
-		// llens(#109): turn 終了(completed / 保存済み)で subagent 自動再開を再評価
+		// llens(#110): turn 終了(completed / 保存済み)で exec 行を読み直し、
+		// 自動再開を再評価する(refreshAndScan 一本化の onTurnEnd 経路)
 		onTurnEnd: () => {
-			void maybeResumeSubagent();
+			void refreshAndScanThenMaybeResume();
 		}
 	});
 	const send = new ChatSend({ session, events, t, eventTarget, scrollToBottom });
 
-	// llens(#109): background subagent の完了(SubagentSessionBlock → subagent-resume store)
-	// を受けて親ターンを自動再開する。定型 user メッセージを既存送信経路(send.submitPrompt)
-	// で送る。ガード(無限ループ・競合防止):
+	// llens(#110): execution(background 昇格された tool 実行)の terminal 未回収を受けて
+	// 親ターンを自動再開する。定型 user メッセージを既存送信経路(send.submitPrompt)で
+	// **バッチ 1 通**送る。ガード(無限ループ・競合防止):
 	// - 親 chat 表示中(loading / notFound / 観測モードでない)∧ turn 非走行 —
 	//   走行中は送らず、events の onTurnEnd(turn 終了)で再評価する
-	// - session 単位 once は store 側(enqueue が 1 回)。自動送信した turn の
-	//   await_subagent 結果は answer 形なので新たな要求を生まない(検知対象外)
-	// - リロード後の再検知は isSubagentResumeHandled(履歴に定型文 or 回収済み結果)で drop
+	// - exec 単位 once は store 側(enqueue が 1 回)。リロード後の再検知は
+	//   isExecutionResumeHandled(履歴に定型文 or await_async の終端回収結果)で drop —
+	//   take 時にも再評価する(送信直前の状態が権威)
+	// - 連鎖上限(EXECUTION_RESUME_CHAIN_LIMIT): ユーザー発話なしの自動 turn が続いたら
+	//   停止してチップに出す。pending は消費しない — 次のユーザー発話で連鎖が切れて再開
 	// - 入力中(draft prompt / 添付ファイル)には割り込まない(変化時に再評価される)
-	let subagentResumeInFlight = false;
-	const maybeResumeSubagent = async () => {
-		if (subagentResumeInFlight || loading || notFound || isAgentSession) {
+	let executionResumeInFlight = false;
+	const maybeResumeExecutions = async () => {
+		if (executionResumeInFlight || loading || notFound || isAgentSession) {
 			return;
 		}
 		const targetChatId = $chatId;
-		if (!targetChatId || !peekSubagentResume(targetChatId)) {
+		if (!targetChatId || !hasPendingExecutionResume(targetChatId)) {
 			return;
 		}
 		// turn 走行中は何もしない(送信経路の done ガードで空振りさせず、要求を残す)
@@ -195,19 +200,30 @@
 		if (session.selectedModels.length === 0 || session.selectedModels.includes('')) {
 			return;
 		}
+		// 連鎖上限は履歴末尾から決定的に数える(リロードでリセットされない)
+		if (countTrailingAutoResumes(session.history) >= EXECUTION_RESUME_CHAIN_LIMIT) {
+			setExecutionResumeChainLimited(targetChatId);
+			return;
+		}
+		clearExecutionResumeChainLimited();
 
-		subagentResumeInFlight = true;
+		executionResumeInFlight = true;
 		try {
-			// 処理済み要求は drop し、送るのは 1 turn に 1 件 — 残りは onTurnEnd の再評価で消化
-			let request = takeSubagentResume(targetChatId);
-			while (request && isSubagentResumeHandled(session.history, request.sessionId)) {
-				request = takeSubagentResume(targetChatId);
+			// take 時にも handled を再評価して drop し、残り全件をバッチ 1 通で送る
+			const requests = takeExecutionResumes(targetChatId).filter(
+				(request) => !isExecutionResumeHandled(session.history, request.execId)
+			);
+			if (requests.length === 0) {
+				return;
 			}
-			if (request) {
-				await send.submitPrompt(buildSubagentResumeMessage(request.sessionId));
+			try {
+				await send.submitPrompt(buildExecutionResumeMessage(requests));
+			} catch (e) {
+				// 送信失敗は要求を戻す(消費確定は送信成功後 — 次の契機で再送)
+				requeueExecutionResumes(requests);
 			}
 		} finally {
-			subagentResumeInFlight = false;
+			executionResumeInFlight = false;
 		}
 	};
 
@@ -215,28 +231,32 @@
 		// 依存は「要求の増減・表示 chat の切替・入力欄と表示状態」に絞る。history は
 		// 依存にしない — done フリップ直後(completed / 保存前)の自動送信は
 		// updateChatById と競合するため、turn 終了は events の onTurnEnd で再評価する
-		void subagentResumeState.entries.length;
+		void executionResumeState.entries.length;
 		void $chatId;
 		void session.prompt;
 		void session.files.length;
 		void loading;
 		void notFound;
 		void isAgentSession;
-		untrack(() => void maybeResumeSubagent());
+		untrack(() => void maybeResumeExecutions());
 	});
 
-	// llens(#109): background spawn の常時検知ポーリング。子 done の即時検知は
-	// SubagentSessionBlock が担うが、あれは ToolCallBlock の {#if open} 内 —
-	// 一度も開かれていないブロックでは動かず、background の主用途(開かず放置)で
-	// 自動再開が効かなくなる。表示中 chat の履歴に「未処理の running 形 spawn 結果」が
-	// ある間だけ、子 session の task を getTaskIdsByChatId で照会し、空(= 完走 or
-	// 消滅 — BE は不在 chat にも task_ids: [] を返す)になったら resume 要求を積む。
-	// SubagentSessionBlock 検知との二重 enqueue は store の session 単位 once ガードが
-	// 防ぐ。履歴の走査はポーリング tick 内でだけ行う(turn 中の高頻度評価を避ける —
-	// $effect の依存に history を入れない)。
-	const SUBAGENT_SPAWN_POLL_MS = 5000;
-	const pollBackgroundSubagentSpawns = async () => {
-		// バックグラウンドタブでは何もしない(復帰後の次 tick で追いつく)
+	// llens(#110): exec 行の 5 秒ポーリング(SSE push はしない仕様 — 既存慣行)。
+	// fetch → store 差し替え → terminal 未回収の enqueue 走査は refreshAndScanExecutions に
+	// 一本化されており、loadChat seed / onTurnEnd / 個別停止後もすべて同関数を呼ぶ —
+	// tick の述語ゲート内にだけ走査を置くと、リロード後・turn 末完了の自動再開が
+	// 永久に回らない(仕様 §9)。ここの述語 P は cadence 制御のみ:
+	// running ∨ 親 turn 走行中 ∨ 未回収 ∨ pending ∨ 直近 refresh 失敗(自己接地)。
+	const EXECUTION_POLL_MS = 5000;
+	const shouldPollExecutions = (): boolean =>
+		executionsState.lastRefreshFailed ||
+		(session.taskIds ?? []).length > 0 ||
+		hasPendingExecutionResume($chatId) ||
+		(executionsState.chatId === $chatId &&
+			(executionsState.unrecoveredIds.length > 0 ||
+				executionsState.entries.some((entry) => entry.status === 'running')));
+	const pollExecutions = async () => {
+		// バックグラウンドタブでは休止(復帰後の次 tick で追いつく)
 		if (document.visibilityState === 'hidden') {
 			return;
 		}
@@ -244,36 +264,20 @@
 		if (!targetChatId || loading || notFound || isAgentSession) {
 			return;
 		}
-		// 処理済み(履歴に定型文 or 回収済み結果)は照会しない。resume enqueue 済み
-		// (requested)は enqueue こそしないが照会はする — 検知ゲートと表示は別で、
-		// task が生きている限りバックグラウンドチップ(#110)には出し続ける
-		const spawned = listRunningSubagentSpawns(session.history).filter(
-			(sessionId) => !isSubagentResumeHandled(session.history, sessionId)
-		);
-		const currentIds = new Set(getBackgroundExecs(targetChatId).map((entry) => entry.sessionId));
-		const runningIds: string[] = [];
-		for (const sessionId of spawned) {
-			const taskRes = await getTaskIdsByChatId(sessionId).catch(() => null);
-			// fetch 中に chat が切り替わっていたら破棄
-			if ($chatId !== targetChatId) {
-				return;
-			}
-			if (!taskRes) {
-				// fetch 失敗(ネットワーク断等)はこの tick では判断しない — 次 tick で
-				// 再照会。表示は現状維持(チップを瞬断でちらつかせない)
-				if (currentIds.has(sessionId)) {
-					runningIds.push(sessionId);
-				}
-				continue;
-			}
-			if ((taskRes.task_ids ?? []).length > 0) {
-				runningIds.push(sessionId);
-			} else if (!isSubagentResumeRequested(sessionId)) {
-				requestSubagentResume(targetChatId, sessionId);
-			}
+		if (!shouldPollExecutions()) {
+			return;
 		}
-		// tick の全量差し替え(走行中の増減がここで収束する)
-		setBackgroundExecs(targetChatId, runningIds);
+		await refreshAndScanExecutions(targetChatId, session.history);
+	};
+
+	// onTurnEnd(turn 完了・保存済み)の経路: exec 行を読み直してから再評価する —
+	// turn 中に完了した exec を 5 秒 tick を待たず拾う
+	const refreshAndScanThenMaybeResume = async () => {
+		const targetChatId = $chatId;
+		if (targetChatId && !loading && !notFound && !isAgentSession) {
+			await refreshAndScanExecutions(targetChatId, session.history);
+		}
+		await maybeResumeExecutions();
 	};
 
 	$effect(() => {
@@ -281,14 +285,10 @@
 			return;
 		}
 		// chat 切替・unmount は effect teardown が確実に止める(agent session の
-		// 観測ポーリングと同じ作法)。tick 側が $chatId / 履歴を都度読むので
-		// interval は張りっぱなしでよい。初回 tick は即時に打つ — チャット読込直後の
-		// バックグラウンドチップ表示を 5 秒待たせない
-		untrack(() => void pollBackgroundSubagentSpawns());
-		const interval = window.setInterval(
-			() => void pollBackgroundSubagentSpawns(),
-			SUBAGENT_SPAWN_POLL_MS
-		);
+		// 観測ポーリングと同じ作法)。tick 側が $chatId / 状態を都度読むので
+		// interval は張りっぱなしでよい(seed は loadChat が P を通さず必ず打つ)
+		untrack(() => void pollExecutions());
+		const interval = window.setInterval(() => void pollExecutions(), EXECUTION_POLL_MS);
 		return () => {
 			window.clearInterval(interval);
 		};
@@ -585,8 +585,8 @@
 		isAgentSession = false;
 		parentChatId = null;
 		clearChatChildren();
-		// llens(#110): 前 chat のバックグラウンドチップを持ち越さない
-		clearBackgroundExecs();
+		// llens(#110): 前 chat の exec 行キャッシュ(バックグラウンドチップ)を持ち越さない
+		clearExecutions();
 
 		if ($page.url.searchParams.get('call') === 'true') {
 			showCallOverlay.set(true);
@@ -708,6 +708,15 @@
 					}
 				}
 
+				// llens(#110): exec 行の seed(refreshAndScan 一本化の loadChat 経路)。
+				// poll の述語 P を通さず必ず打つ — リロード後の terminal 未回収の検知は
+				// ここが起点(fire-and-forget: チップ・自動再開は store / $effect が追従)。
+				// 観測モード(agent session)は対象外 — 子 chat に exec は無い(設計 D9)
+				clearExecutions();
+				if (!isAgentSession) {
+					void refreshAndScanExecutions($chatId, session.history);
+				}
+
 				await tick();
 
 				return true;
@@ -720,7 +729,7 @@
 		isAgentSession = false;
 		parentChatId = null;
 		clearChatChildren();
-		clearBackgroundExecs();
+		clearExecutions();
 	};
 
 	// llens(#107 P3): /c/ 観測モードの追いつきポーリング。loadChat はロード時点の走行

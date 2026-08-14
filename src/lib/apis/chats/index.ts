@@ -529,6 +529,77 @@ export const getChatChildren = async (id: string): Promise<ChatChildItem[]> => {
 	return res;
 };
 
+// llens(#110): chat の execution 行一覧(GET /chats/{id}/executions)。
+// バックグラウンドチップ・ExecutionBlock・自動再開走査のデータ源。
+// result 本文は載せない(回収は await_async — 一覧は状態のみ)。
+export type ChatExecutionItem = {
+	id: string;
+	tool_name: string;
+	status: string; // running|done|failed|stopped|orphaned
+	created_at: number; // epoch 秒
+	finished_at: number | null;
+	duration: number | null;
+	error: string | null;
+};
+
+export const getChatExecutions = async (id: string): Promise<ChatExecutionItem[]> => {
+	let error = null;
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/executions`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+// llens(#110): execution の個別停止(POST /chats/{id}/executions/{exec_id}/stop)。
+// stopped へ CAS → task cancel は BE 側。冪等(既に終端なら no-op 相当)。
+export const stopChatExecution = async (id: string, execId: string) => {
+	let error = null;
+
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/executions/${execId}/stop`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getChatByShareId = async (share_id: string) => {
 	let error = null;
 

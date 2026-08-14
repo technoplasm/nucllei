@@ -438,10 +438,10 @@
 						<UsageChip />
 					</div>
 
-					<!-- llens(#110): 実行中バックグラウンド tool のチップ(トークンゲージと
-					     同じ行の左側)。走行中の background subagent が無ければ何も描かない -->
+					<!-- llens(#110): バックグラウンド実行(exec 行)のチップ(トークンゲージと
+					     同じ行の左側)。running も未回収 terminal も無ければ何も描かない -->
 					<div class="absolute -top-12 left-0 z-30 flex justify-start pointer-events-none">
-						<BackgroundTasksChip />
+						<BackgroundTasksChip {history} />
 					</div>
 				</div>
 

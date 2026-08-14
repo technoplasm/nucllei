@@ -239,14 +239,44 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('subagent 宣言: {ok, session_id, status: "running"}(background 即返し形)を受ける(#109)', () => {
-		const content = JSON.stringify({ ok: true, session_id: 'child-chat-4', status: 'running' });
-		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
-			kind: 'subagent',
-			sessionId: 'child-chat-4',
+	it('execution: spawn 即返し形 {ok, exec_id, tool_name, status: "running"} は descriptor より先に shape で受ける(#110)', () => {
+		// spawn call の descriptor は実 tool(subagent 等)のもの — subagent 宣言が
+		// 付いていても exec running 形は execution として描く
+		const content = JSON.stringify({
 			ok: true,
-			answer: '',
+			exec_id: 'exec-1111',
+			tool_name: 'run_subagent',
 			status: 'running'
+		});
+		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
+			kind: 'execution',
+			execId: 'exec-1111',
+			toolName: 'run_subagent'
+		});
+		expect(classifyToolResult(content)).toEqual({
+			kind: 'execution',
+			execId: 'exec-1111',
+			toolName: 'run_subagent'
+		});
+	});
+
+	it('execution: tool_name 欠落(await_async timeout 形 {exec_id, status, elapsed_s})も受ける(#110)', () => {
+		const content = JSON.stringify({ exec_id: 'exec-2222', status: 'running', elapsed_s: 12 });
+		expect(classifyToolResult(content)).toEqual({
+			kind: 'execution',
+			execId: 'exec-2222'
+		});
+	});
+
+	it('execution: exec_id があっても status が running でなければ通常分岐に落とす(#110)', () => {
+		// await_async の回収形(status: "done" 等)は render_descriptor パススルーで
+		// 既存ブロックが描く — execution 扱いにしない
+		const done = JSON.stringify({ ok: true, exec_id: 'exec-3333', status: 'done', result: 'x' });
+		expect(classifyToolResult(done).kind).toBe('text');
+		// 'exec_id'・'running' を本文に含むだけの非 JSON も text のまま
+		expect(classifyToolResult('exec_id exec-4444 is running')).toEqual({
+			kind: 'text',
+			value: 'exec_id exec-4444 is running'
 		});
 	});
 
