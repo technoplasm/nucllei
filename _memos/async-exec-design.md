@@ -299,6 +299,20 @@ tag 後に llens P4(userspace subagent.py の builtin 置換・プロンプト�
 9. **check_async の progress 露出**: in-process sink の最新 1 件で良いか。— 推奨: v1 は可(永続化は v2)。
 10. **親ターン stop の非伝播(D6)の最終確認**。— 推奨: 非伝播(チップ個別停止がある)。
 
+## 追補 2(2026-08-14 ken)— await の複数待ち
+
+`await_async` は **`exec_ids: string[]`(配列)で複数を 1 回で待つ**形にする(次回の作り直しで反映)。
+
+- tool パラメータの可変長は JSON Schema の配列型(`{"type":"array","items":{"type":"string"}}`)で
+  そのまま表現できる — スペース区切りリテラル等の回避策は不要(Kimi は配列引数を清潔に出す。
+  `_memos/model-frames.md` の実測)
+- **単発 await を N 回並べてはいけない**理由: 有界タイムアウト(既定 90 秒)が N 倍に伸び、
+  親ターンが最悪 N×90 秒 占有される。配列なら 1 回の有界待ちで全件をカバーできる
+- 戻り値は per-exec の結果配列。全件 terminal で返す / タイムアウト時は terminal な分だけ
+  結果を載せ、残りは running 形で返す(部分回収 — 残りは自動再開が拾う)
+- 単発の `check_async` も同様に配列を受けられると対称だが必須ではない(非ブロッキングなので
+  N 回呼んでも安い)
+
 ## 承認と追補(2026-08-14 ken)
 
 - open questions は全項**推奨どおり**で確定。ただし以下を上書き:
