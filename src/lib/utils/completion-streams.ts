@@ -101,7 +101,9 @@ export function selectAttachableTaskIds(
 	const activeTaskIds = new Set(
 		contexts.map((context) => context.taskId).filter((taskId): taskId is string => taskId !== null)
 	);
-	return serverTaskIds.filter((taskId) => !activeTaskIds.has(taskId) && !attachedTaskIds.has(taskId));
+	return serverTaskIds.filter(
+		(taskId) => !activeTaskIds.has(taskId) && !attachedTaskIds.has(taskId)
+	);
 }
 
 function trackStream(chatId: string, context: StreamContext) {

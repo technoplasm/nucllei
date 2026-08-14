@@ -1236,7 +1236,9 @@ class TestAsyncExec(AbstractPostgresTest):
             self.exec_tools.entry_is_backgroundable(name, tools_dict[name])
             for name in loaded
         ):
-            self.exec_tools.mount_recall_tools(tools_dict, form_data, self.user, metadata)
+            self.exec_tools.mount_recall_tools(
+                tools_dict, form_data, self.user, metadata
+            )
         assert "check_task" not in tools_dict
 
         # 遅延ロードで適格 tool が載った → 回収 builtin を追加 mount
@@ -1245,7 +1247,9 @@ class TestAsyncExec(AbstractPostgresTest):
             {
                 "type": "function",
                 "function": self.exec_tools.spec_for_model(
-                    "probe", eligible_entry, self.exec_tools.exec_spawn_context_ok(metadata)
+                    "probe",
+                    eligible_entry,
+                    self.exec_tools.exec_spawn_context_ok(metadata),
                 ),
             }
         )
@@ -1254,13 +1258,18 @@ class TestAsyncExec(AbstractPostgresTest):
             self.exec_tools.entry_is_backgroundable(name, tools_dict[name])
             for name in loaded
         ):
-            self.exec_tools.mount_recall_tools(tools_dict, form_data, self.user, metadata)
+            self.exec_tools.mount_recall_tools(
+                tools_dict, form_data, self.user, metadata
+            )
 
         assert {"check_task", "await_task", "stop_task"} <= set(tools_dict)
         spec_names = [t["function"]["name"] for t in form_data["tools"]]
         assert spec_names == ["probe", "check_task", "await_task", "stop_task"]
         # probe の spec には background が注入されている(第 2 経路)
-        assert "background" in form_data["tools"][0]["function"]["parameters"]["properties"]
+        assert (
+            "background"
+            in form_data["tools"][0]["function"]["parameters"]["properties"]
+        )
 
     def test_inject_skill_tools_source_wires_a3(self):
         """A-3 の配線が inject_skill_tools 実体に存在することを固定する

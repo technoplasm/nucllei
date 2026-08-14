@@ -180,7 +180,12 @@
 		) {
 			return;
 		}
-		await refreshExecutions(targetChatId);
+		const { deliveredAdvanced } = await refreshExecutions(targetChatId);
+		if (deliveredAdvanced && $chatId === targetChatId) {
+			// 非表示タブ休止中(または poll 間隙)に配達が完走した — 続きターンの封筒は
+			// もう来ないので、history を読み直して notice + 続きターンへ追いつく
+			events.refetchChat(targetChatId);
+		}
 		await attachNewChatTasks(targetChatId);
 	};
 

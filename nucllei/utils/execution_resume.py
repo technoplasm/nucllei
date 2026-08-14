@@ -297,9 +297,7 @@ def build_delivery_notice(
     切詰め済み result の透過的な中継。media_by_id は mark_replayed に勝った行の
     (context_images, display) — 負けた行(await_task が既に注入済み)は結果のみ。
     """
-    sections = [
-        _notice_section(row, media_by_id.get(row.id)) for row in rows
-    ]
+    sections = [_notice_section(row, media_by_id.get(row.id)) for row in rows]
     text = NOTICE_HEADER + "\n\n" + "\n\n".join(sections)
     files = []
     for row in rows:
@@ -376,10 +374,7 @@ def _user_message_to_wire(message: dict) -> dict:
         "role": "user",
         "content": [
             {"type": "text", "text": content},
-            *(
-                {"type": "image_url", "image_url": {"url": url}}
-                for url in image_urls
-            ),
+            *({"type": "image_url", "image_url": {"url": url}} for url in image_urls),
         ],
     }
 
@@ -553,14 +548,17 @@ async def _deliver_cycle(chat_id: str) -> str:
         if chat is not None
         else None
     )
-    if chat is None or chat.deleted_at is not None or chat.kind != "user" or user is None:
+    if (
+        chat is None
+        or chat.deleted_at is not None
+        or chat.kind != "user"
+        or user is None
+    ):
         rows = await asyncio.to_thread(
             Executions.get_undelivered_terminal_by_chat_id, chat_id
         )
         if rows:
-            await asyncio.to_thread(
-                Executions.mark_delivered, [row.id for row in rows]
-            )
+            await asyncio.to_thread(Executions.mark_delivered, [row.id for row in rows])
             log.info(
                 f"delivery abandoned permanently (chat_id={chat_id}, "
                 f"rows={len(rows)}): no deliverable chat"

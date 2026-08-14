@@ -466,7 +466,8 @@ class TestExecutions(AbstractPostgresTest):
         assert [row.id for row in rows] == ["u1", "u2"]
         # 他 chat は混ざらない
         assert [
-            row.id for row in self.Executions.get_undelivered_terminal_by_chat_id("chat-b")
+            row.id
+            for row in self.Executions.get_undelivered_terminal_by_chat_id("chat-b")
         ] == ["b1"]
 
     def test_list_chat_ids_with_undelivered(self):

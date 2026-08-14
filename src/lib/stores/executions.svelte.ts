@@ -41,6 +41,9 @@ const state = $state<{
 /** 遅延解決した古い fetch が新しい状態を上書きしないためのシーケンス。 */
 let requestSeq = 0;
 
+/** 同一 chat 内での delivered 増分検知の基準(chat 切替・clear でリセット)。 */
+let deliveredBaseline: Set<string> | null = null;
+
 /** chat 切替・新規チャットでの全消し(前 chat の残骸を持ち越さない)。 */
 export const clearExecutions = () => {
 	requestSeq += 1;
@@ -48,20 +51,30 @@ export const clearExecutions = () => {
 	state.entries = [];
 	state.resumeSuspended = false;
 	state.lastRefreshFailed = false;
+	deliveredBaseline = null;
 };
 
 /**
  * exec 行一覧を取得して差し替える。fetch 失敗時は表示を現状維持(チップを瞬断で
  * ちらつかせない)しつつ lastRefreshFailed を立てる(poll 述語の自己接地)。
+ *
+ * 返り値 deliveredAdvanced: **同一 chat の前回観測と比べて** delivered な行が
+ * 増えたか。非表示タブ休止中(poll 停止)にサーバ駆動配達が完了すると、復帰後の
+ * tick では続きターンが既に終わっていて attach 経路(未知 message_id 封筒 →
+ * refetch)が発火しない — この増分を合図に呼び出し側(Chat.svelte)が history を
+ * 読み直す。chat 切替直後の初回観測は false(fetch 済み history が配達済み分を
+ * 含んでいる — 追いつき不要)。
  */
-export const refreshExecutions = async (chatId: string) => {
+export const refreshExecutions = async (
+	chatId: string
+): Promise<{ deliveredAdvanced: boolean }> => {
 	if (!chatId) {
-		return;
+		return { deliveredAdvanced: false };
 	}
 	const seq = ++requestSeq;
 	const res = await getChatExecutions(chatId).catch(() => null);
 	if (seq !== requestSeq) {
-		return;
+		return { deliveredAdvanced: false };
 	}
 	if (res === null) {
 		if (state.chatId !== chatId) {
@@ -69,14 +82,26 @@ export const refreshExecutions = async (chatId: string) => {
 			state.chatId = chatId;
 			state.entries = [];
 			state.resumeSuspended = false;
+			deliveredBaseline = null;
 		}
 		state.lastRefreshFailed = true;
-	} else {
-		state.chatId = chatId;
-		state.entries = res.executions ?? [];
-		state.resumeSuspended = res.resume_suspended === true;
-		state.lastRefreshFailed = false;
+		return { deliveredAdvanced: false };
 	}
+	const sameChat = state.chatId === chatId;
+	state.chatId = chatId;
+	state.entries = res.executions ?? [];
+	state.resumeSuspended = res.resume_suspended === true;
+	state.lastRefreshFailed = false;
+
+	const delivered = new Set(
+		state.entries.filter((entry) => entry.delivered).map((entry) => entry.id)
+	);
+	const advanced =
+		sameChat &&
+		deliveredBaseline !== null &&
+		[...delivered].some((id) => !deliveredBaseline!.has(id));
+	deliveredBaseline = delivered;
+	return { deliveredAdvanced: advanced };
 };
 
 /**

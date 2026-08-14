@@ -736,7 +736,7 @@ the model-facing spec of every eligible tool.
   the parent turn ends; stopping the parent turn does **not** stop it.
 - `check_task(task_ids?, include_done?)` — non-blocking status poll. With no
   arguments lists the chat's running tasks (oldest first); `include_done:
-  true` lists terminal ones too (newest first, max 50); with `task_ids` returns
+true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   those entries in order. Each entry:
   `{task_id, tool_name, status, started_at, elapsed_s}` plus `progress` while
   running or `duration`/`error` when terminal. Never returns the result body

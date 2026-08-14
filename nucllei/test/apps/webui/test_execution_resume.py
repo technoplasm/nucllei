@@ -163,9 +163,7 @@ class TestExecutionResume(AbstractPostgresTest):
         chat = self.Chats.get_chat_by_id(chat_id)
         messages = (chat.chat.get("history") or {}).get("messages") or {}
         return [
-            m
-            for m in messages.values()
-            if (m.get("meta") or {}).get("system_notice")
+            m for m in messages.values() if (m.get("meta") or {}).get("system_notice")
         ]
 
     # ---- append_delivery_turn(models 層 — 契約 M2)----
@@ -515,9 +513,7 @@ class TestExecutionResume(AbstractPostgresTest):
         assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "empty"
         assert len(self._notice_messages(chat.id)) == 1
 
-    def test_transient_turn_failure_retries_turn_without_reappending(
-        self, monkeypatch
-    ):
+    def test_transient_turn_failure_retries_turn_without_reappending(self, monkeypatch):
         calls = self._patch_turn_start(
             monkeypatch, side_effects=[RuntimeError("SGLang down"), None]
         )
@@ -615,8 +611,8 @@ class TestExecutionResume(AbstractPostgresTest):
         assert self.resume._merged_params(chat_json, user)["stop"] == ["\n", "END"]
 
         # どちらにも無ければ stop キー自体を持たない
-        assert "stop" not in self.resume._merged_params({"params": {}},
-            types.SimpleNamespace(name="J", settings=None)
+        assert "stop" not in self.resume._merged_params(
+            {"params": {}}, types.SimpleNamespace(name="J", settings=None)
         )
 
     def test_build_wire_messages_expands_user_image_files(self):
@@ -820,9 +816,7 @@ class TestExecutionResume(AbstractPostgresTest):
                 async def hang():
                     await asyncio.Event().wait()
 
-                task_id, _task = tasks_module.create_task(
-                    hang(), id=f"exec:{chat.id}"
-                )
+                task_id, _task = tasks_module.create_task(hang(), id=f"exec:{chat.id}")
                 self.executions._exec_tasks["e1"] = task_id
 
                 stopped = await self.executions.stop_executions_by_chat_id(chat.id)
@@ -1004,6 +998,7 @@ class TestExecutionResume(AbstractPostgresTest):
 
         tasks_module.register_cleanup_listener(listener)
         try:
+
             async def main():
                 async def noop():
                     return None

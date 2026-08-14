@@ -169,3 +169,42 @@ describe('shouldPollExecutions(poll 述語 — 契約 §M6 / 批評 F-2)', () =>
 		expect(shouldPollExecutions('chat-other', false, NOW)).toBe(false);
 	});
 });
+
+describe('deliveredAdvanced(復帰後の追いつき合図)', () => {
+	it('同一 chat で delivered が増えたときだけ true(初回観測は false)', async () => {
+		respond([entry('exec-1', 'running')]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(false);
+
+		// 変化なし
+		respond([entry('exec-1', 'running')]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(false);
+
+		// 非表示休止中に配達が完走 → 復帰後の観測で delivered へ遷移
+		respond([entry('exec-1', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(true);
+
+		// 以後は安定(再度 true にならない)
+		respond([entry('exec-1', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(false);
+	});
+
+	it('chat 切替直後の初回観測は delivered 済みでも false(履歴は fetch 済み)', async () => {
+		respond([entry('exec-1', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(false);
+
+		clearExecutions();
+		respond([entry('exec-9', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions('chat-2')).deliveredAdvanced).toBe(false);
+	});
+
+	it('fetch 失敗を挟んでも基準は保持される(復帰成功時に増分を検知)', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		mockedGetChatExecutions.mockRejectedValueOnce(new Error('network'));
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(false);
+
+		respond([entry('exec-1', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(true);
+	});
+});

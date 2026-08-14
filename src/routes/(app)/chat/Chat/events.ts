@@ -149,6 +149,13 @@ export class ChatEvents {
 		return result;
 	};
 
+	// llens(#110): poll(Chat.svelte)が delivered の増分を観測したときの追いつき口。
+	// 非表示タブ休止中に配達(通知ターン)が完走すると、復帰後は attach 対象の task が
+	// もう無く封筒 refetch が発火しない — 同じ読み直し(in-flight 間引き込み)を貸す
+	refetchChat = (targetChatId: string) => {
+		this.#refetchObservedChat(targetChatId);
+	};
+
 	// 観測モードで未知 message_id が届いたときの history 読み直し。走行中(in-flight)は
 	// 1 本に間引く多重発火ガード付き — 高頻度封筒ごとに GET を積まない
 	#observerRefetching = false;

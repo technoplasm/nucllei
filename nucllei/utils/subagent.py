@@ -211,7 +211,12 @@ def _append_turn_messages(
     return append_turn_messages(
         chat_json,
         {"role": "user", "content": instruction},
-        {"role": "assistant", "content": "", "model": model_id, "modelName": model_name},
+        {
+            "role": "assistant",
+            "content": "",
+            "model": model_id,
+            "modelName": model_name,
+        },
     )
 
 

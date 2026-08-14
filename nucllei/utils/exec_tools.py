@@ -177,9 +177,7 @@ def mount_recall_tools(tools_dict: dict, form_data: dict, user, metadata) -> lis
             log.warning(f"tool '{name}' is shadowed by the execution builtin")
         tools_dict[name] = entry
         if isinstance(form_data.get("tools"), list):
-            form_data["tools"].append(
-                {"type": "function", "function": entry["spec"]}
-            )
+            form_data["tools"].append({"type": "function", "function": entry["spec"]})
         mounted.append(name)
     return mounted
 
@@ -431,9 +429,7 @@ def build_exec_tools(user, metadata) -> dict:
                 if task is not None:
                     wait_set.add(task)
         if wait_set:
-            tool_output.progress(
-                f"{len(wait_set)} 件のバックグラウンドタスクを待機中"
-            )
+            tool_output.progress(f"{len(wait_set)} 件のバックグラウンドタスクを待機中")
             try:
                 await asyncio.wait(wait_set, timeout=timeout)
             except asyncio.CancelledError:
