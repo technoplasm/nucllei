@@ -377,3 +377,58 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
 - 進行中インジケータ(チップ)と inactive preset の spawnable 化は先行実装済み
   (`e5f10f00d` / `5b819db96`)— #110 実装でチップのデータ源を exec 行へ切替
 - ゴミ tool の基準 = 「llens repo に現存しない・明らかに stale」。dev DB から subagent / cage / doc を削除済み
+
+## 追補 5(2026-08-14 夜)— redo 確定版(ken 裁定・実装済み)
+
+**このセクションが現行実装の正**。以前の §8(check_async/await_async)と §9 の FE 駆動
+自動再開の記述は本追補で上書きされた(コードは master `35ab3e885`〜`9ed4bd13f`)。
+
+### 用語「タスク」統一(T1)
+
+- モデル・UI に見える言葉を「タスク」に統一: tool 名 `check_task` / `await_task` /
+  `stop_task`、返りキー `exec_id` → `task_id`(「async は Python 用語と衝突する」— ken)。
+- 内部(DB テーブル execution・API パス /executions・モジュール名)は不変
+  (tasks.py = asyncio registry との内部衝突回避)。
+
+### 関数セマンティクス(T2 — 役割 1 関数 1 つ)
+
+- `check_task(task_ids?, include_done=false)` — **状態確認のみ・常に同じ形**。
+  引数なし = 実行中のみ(「残りタスク」)。結果本文は決して返さない。read-only。
+- `await_task(task_ids, timeout=90)` — **結果取り出しの一本化**。複数 id を 1 回の
+  有界窓(asyncio.wait)でカバー・部分回収。終了済みは即返(冪等)。replay と
+  render_descriptor(単一 id ∧ done のみ)はここだけ。terminal 報告行に delivered。
+- `stop_task(task_ids)` — 強制終了(チャットの「止めて」に応答可能に)。報告行に delivered。
+- 上限: 1 呼び出し task_ids 20 件・一覧 50 件。単一 string coerce・不正 id per-entry error。
+
+### 配達はサーバ駆動(T3 — FE 駆動の全廃)
+
+「タスクの配達がブラウザの開閉に依存するのは根本的にダメ」(ken)。
+
+- `nucllei/utils/execution_resume.py`: タスク終了 wake → 静穏確認(chat にターン非走行)→
+  連鎖上限(`ASYNC_EXEC_RESUME_CHAIN_LIMIT`=5、meta.system_notice の遡行)→
+  **notice(結果全文差し込み・固定書式・meta.system_notice)+ 空 assistant を
+  `append_delivery_turn`(updated_at CAS・delivered_at 同一 txn)で追記** →
+  続きターンを内部起動(subagent 駆動系 `start_internal_turn` の共有化)。
+- exec 行の `delivered_at` が配達状態の事実(FE の履歴推測 handled 判定は削除)。
+  await_task / stop_task の報告・cascade(chat 削除)も delivered を立てる。
+- 結果は**例外なし全文差し込み**(T4 — 長さで落とさない。切詰めは保存時のみ)。
+  context_images は notice の files 添付(VLM 本来の経路)、display は本文併記。
+  sandbox exports(chat:message:files)の添付 UI は v1 制約のまま(実体は Files に永続)。
+- FE に残るのはチップ(表示・停止)・ExecutionBlock・poll・BE 発ターンの発見
+  (tick で task attach + delivered 増分での refetch)。B-1/B-4 は機構ごと消滅・根治。
+
+### 切詰めの一般化(T5)
+
+- `TOOL_RESULT_MAX_CHARS`(既定 65536)— **結果の生産点で一度だけ**
+  (同期 = wire 正規化直後 / background = 保存時)。回収 builtin と配達は
+  切詰め済みの中継なので再適用しない(envelope の再切詰めは壊れ JSON になる — 批評裁定)。
+  `EXEC_RESULT_MAX_CHARS` は廃止。
+
+### 品質工程(このセッションで実施)
+
+- 設計批評 3 レンズ(並行性 / wire・永続化 / 要件忠実性)→ FATAL 6 件を実装前に裁定
+  (chat 文書 CAS・claim プロトコル・切詰め衝突・FE 可視性・save-400・恒久断念)。
+- 実装後の敵対検証レビュー(5 レンズ find → 反証 verify、21 指摘 → 9 確定)→ 全修正
+  (updated_at 単調増加・FE 保存 CAS 化・cascade レース・content_blocks 'calls' 両形受け 等)。
+- 実機 E2E(dev・llens-thinking + sandbox run_shell): チップ表示/停止・
+  **タブ完全クローズ中の配達**(notice + 続きターン)・stopped 通知配達を実測。
