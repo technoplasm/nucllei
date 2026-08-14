@@ -404,7 +404,7 @@
 						/>
 					{/each}
 				</div>
-				<div class="pb-12"></div>
+				<div class="pb-16"></div>
 				{#if bottomPadding}
 					<div class="  pb-6"></div>
 				{/if}

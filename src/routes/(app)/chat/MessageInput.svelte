@@ -434,13 +434,13 @@
 
 					<!-- llens(#102): floating トークンゲージ(入力カードの右上外側)。中央の
 					     スクロールボタンとは位置が重ならない。データが無ければ何も描かない -->
-					<div class="absolute -top-12 right-0 z-30 flex justify-end pointer-events-none">
+					<div class="absolute -top-10 right-0 z-30 flex justify-end pointer-events-none">
 						<UsageChip />
 					</div>
 
 					<!-- llens(#110): バックグラウンド実行(exec 行)のチップ(トークンゲージと
 					     同じ行の左側)。running も未回収 terminal も無ければ何も描かない -->
-					<div class="absolute -top-12 left-0 z-30 flex justify-start pointer-events-none">
+					<div class="absolute -top-10 left-0 z-30 flex justify-start pointer-events-none">
 						<BackgroundTasksChip {history} />
 					</div>
 				</div>
