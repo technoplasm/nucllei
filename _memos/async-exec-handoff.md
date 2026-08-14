@@ -34,6 +34,48 @@ dev 環境(preset・DB)を無断で書き換えない / **ライブの dev に�
 | 自動再開がユーザー発言に見える | wire 上は user ロールが必要だが UI もユーザー吹き出しだった | `SystemNoticeMessage.svelte` でシステム挿入として描画 |
 | 子 chat の status 履歴が書かれない | `in_exec` ContextVar が子ターンへ伝播 | 子ターン境界で False に戻す(try/finally) |
 
+## 残タスク一覧(2026-08-14 セッション終了時点・優先順)
+
+**P0 — 使うと必ず当たる / 設計の芯**
+
+| # | 内容 | 出所 |
+|---|---|---|
+| 1 | **進行中チップの実機目視**(入力欄下部行の左に出て手動停止できること)— 実装はあるが ken 環境で未確認。**ken 要求の本丸** | ken |
+| 2 | **自動再開の二度手間を潰す** — resume メッセージに結果をインライン(上限超のみ await に落とす) | 追補 4 |
+| 3 | **`list_async()` / `stop_async(exec_id)` を足す** — exec_id を失うと詰む / UI からしか止められない非対称 | 追補 4 |
+| 4 | **A-3**: モデル自律 `load_skill` で後から適格 tool が載ると回収 builtin が mount されず 1 ターン潰れる(`inject_skill_tools` で追加 mount) | レビュー |
+
+**P1 — 使い勝手(モデル本人のフィードバック)**
+
+| # | 内容 | 出所 |
+|---|---|---|
+| 5 | `check_async` を terminal 時に結果同梱にする(**FE の handled 判定も同時に直す** — 二重発火する) | 追補 3-1 |
+| 6 | `elapsed_s` に `started_at` + float 秒(進捗表示が飛ぶ) | 追補 3-2 |
+| 7 | `[execution]` 通知を機械可読に固定(根治はサーバ駆動注入 = v2) | 追補 3-3 |
+| 8 | 保持期間(既定 GC しない = 無期限)を tool description に明記 | 追補 3-4 |
+| 9 | sandbox の直列化(background 中は同一ユーザーの sandbox 呼び出しが待つ)を description に明記 or 即エラー化。真の並列化は llens の sandbox サービス側 | 追補 3-5 実測 |
+| 10 | `await_async(exec_ids: string[])` の複数待ち | 追補 2 |
+
+**P2 — 堅牢性(レビュー B 群)**
+
+| # | 内容 |
+|---|---|
+| 11 | B-1 送信失敗時の resume 再送タイトループ(backoff / requeue 見直し) |
+| 12 | B-2 exec 一覧 poll の失敗時 無限リトライ(backoff・上限) |
+| 13 | B-3 モデルが回収しない exec 行が running のまま滞留(DB のゴミ) |
+| 14 | B-4 システム挿入判定が**本文プレフィクス依存** — ロール/meta フラグで持つべき(ユーザーが `[execution] ` と打つと誤判定) |
+| 15 | B-5 `delete_all_user_chats` の N+1(一括クエリ化) |
+| 16 | B-6 exec 一覧が全行を毎 5 秒返す(単調増加) |
+
+**P3 — 出荷まわり**
+
+| # | 内容 |
+|---|---|
+| 17 | 敵対検証レビューの**再実施**(修正後の再監査。今回は 1 巡のみ) |
+| 18 | **tag**(サブエージェント + 非同期土台が全部揃ってから) |
+| 19 | **llens P4**: `tools/subagent.py` 置換 + sandbox/audio の `backgroundable` 宣言を llens 本番側へ + skill/プロンプト/audio_tools の案内文追随 |
+| 20 | ghcr の `v20260814-01` イメージ削除(**ken の packages スコープが要る** — Claude では消せない) |
+
 ## 次セッションで最初に確認すべき残件
 
 1. **進行中チップの実機確認が未了** — 実装はある(`MessageInput/BackgroundTasksChip.svelte`、
