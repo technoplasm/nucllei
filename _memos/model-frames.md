@@ -102,6 +102,29 @@ middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試�
   対策は assembler の昇格規律(`_memos/rendering-design.md` §3)。なお「think 内で回答を書いてから
   content で言い直す」パターンの方が多く、そちらは無害(昇格は発火しない)。
 
+## proxy 越しの差分(LiteLLM、2026-08-14 実測)
+
+上の仕様は **SGLang に直結したとき**の形。OpenAI 互換 proxy を挟む配備
+(llens staging は LiteLLM v1.82.3 経由)では次が崩れる。**fixture は SGLang 直の
+一次資料として保つ** — proxy の形は `test_streaming_usage.py` の
+`_litellm_frames()` に実キャプチャ形式で合成してある。
+
+1. **usage フレームの `choices: []` が保たれない。** 同じ usage が
+   `choices: [{"index": 0, "delta": {}}]`(finish_reason 無し)のチャンクに載って
+   届く — finish_reason チャンクの次、`[DONE]` の直前。`choices: []` は OpenAI の
+   streaming 仕様が定めた形ではないので、**フレームの形を永続化の条件にしない**
+   (consume_model_stream はストリーム終端で最後に観測した usage を拾う)。
+2. **`stream_options.continuous_usage_stats` が通らない。** SGLang 拡張のため
+   proxy が落とし、usage チャンクは最後の 1 個しか来ない。生成中のライブ tok/s
+   (#102)は原理的に出せない — 確定値表示のみになる。
+3. **`usage.reasoning_tokens`(SGLang 拡張)が来ない。** 代わりに OpenAI 形の
+   `usage.completion_tokens_details.reasoning_tokens` が入る。
+4. **`/v1/models` の `max_model_len` が消える。** LiteLLM は
+   id/object/created/owned_by の 4 キーしか返さない(context 長が既知の商用モデルでも
+   同じ)。context_size は `info.meta.context_size` を手で設定して補う
+   (`get_model_context_size` の最終 fallback)。
+5. delta の `reasoning_content: null` の明示、`matched_stop`、`logprobs` も落ちる。
+
 ## 未キャプチャ(条件が変わったら追加)
 
 - **reasoning parser 無効**時の生 `<think>` タグ混り content
