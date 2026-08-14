@@ -15,8 +15,6 @@ import {
 	clearExecutions,
 	executionsState,
 	getExecutionEntry,
-	hasRunningExecutions,
-	isTerminalExecutionStatus,
 	refreshAndScanExecutions,
 	type ExecutionEntry
 } from './executions.svelte';
@@ -53,18 +51,27 @@ beforeEach(() => {
 	mockedGetChatExecutions.mockReset();
 });
 
-describe('isTerminalExecutionStatus', () => {
-	it('終端 4 状態のみ。running・未知の文字列は終端扱いしない(誤 enqueue 防止)', () => {
-		expect(isTerminalExecutionStatus('done')).toBe(true);
-		expect(isTerminalExecutionStatus('failed')).toBe(true);
-		expect(isTerminalExecutionStatus('stopped')).toBe(true);
-		expect(isTerminalExecutionStatus('orphaned')).toBe(true);
-		expect(isTerminalExecutionStatus('running')).toBe(false);
-		expect(isTerminalExecutionStatus('queued')).toBe(false);
-	});
-});
-
 describe('refreshAndScanExecutions', () => {
+	it('終端判定: 4 状態のみ enqueue。running・未知の文字列は終端扱いしない(誤 enqueue 防止)', async () => {
+		mockedGetChatExecutions.mockResolvedValue([
+			entry('exec-done', 'done'),
+			entry('exec-failed', 'failed'),
+			entry('exec-stopped', 'stopped'),
+			entry('exec-orphaned', 'orphaned'),
+			entry('exec-running', 'running'),
+			entry('exec-queued', 'queued')
+		]);
+
+		await refreshAndScanExecutions(CHAT, EMPTY_HISTORY);
+
+		expect(executionsState.unrecoveredIds).toEqual([
+			'exec-done',
+			'exec-failed',
+			'exec-stopped',
+			'exec-orphaned'
+		]);
+	});
+
 	it('fetch 成功: entries を差し替え、terminal 未回収を enqueue + unrecoveredIds に載せる', async () => {
 		mockedGetChatExecutions.mockResolvedValue([
 			entry('exec-1', 'running'),
@@ -81,8 +88,6 @@ describe('refreshAndScanExecutions', () => {
 			{ chatId: CHAT, execId: 'exec-2', toolName: 'run_subagent', status: 'done' }
 		]);
 		expect(getExecutionEntry('exec-1')?.status).toBe('running');
-		expect(hasRunningExecutions(CHAT)).toBe(true);
-		expect(hasRunningExecutions('other')).toBe(false);
 	});
 
 	it('履歴で処理済み(定型文に full exec_id)の terminal は enqueue しない', async () => {

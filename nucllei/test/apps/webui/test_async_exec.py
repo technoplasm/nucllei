@@ -17,6 +17,8 @@ _memos/async-exec-design.md の K2(tool 単位の静的適格性 `backgroundable
 import asyncio
 import json
 
+import pytest
+
 from test.util.abstract_integration_test import AbstractPostgresTest
 
 
@@ -428,6 +430,87 @@ class TestAsyncExec(AbstractPostgresTest):
         assert "multi-worker" in error["error"]
         assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
 
+    def test_multi_worker_hides_the_whole_background_surface(self, monkeypatch):
+        """D7: 露出・mount・実行分岐は 1 述語(exec_spawn_context_ok)で揃う。
+
+        spawn だけ拒否すると、モデルには background 引数が見えて回収 builtin も
+        載るのに、呼ぶと必ずエラーになる(見えるのに使えない面を作らない)。
+        """
+        from nucllei.utils.middleware import execute_tool_calls
+
+        calls = []
+
+        async def probe(city: str = ""):
+            calls.append(city)
+            return "同期の結果"
+
+        monkeypatch.setattr(self.executions, "UVICORN_WORKERS", 2)
+        assert self.exec_tools.exec_spawn_context_ok(self._metadata()) is False
+
+        entry = self._entry(probe, properties={"city": {"type": "string"}})
+        # spec 注入なし(mount 判定も同じ述語をゲートに使う — middleware:563)
+        assert (
+            self.exec_tools.spec_for_model(
+                "probe", entry, self.exec_tools.exec_spawn_context_ok(self._metadata())
+            )
+            is entry["spec"]
+        )
+        # 実行分岐も昇格しない(同期実行・行も作らない)
+        results = asyncio.run(
+            execute_tool_calls(
+                [self._call({"city": "小樽", "background": True})],
+                {"probe": entry},
+                metadata=self._metadata(),
+            )
+        )
+        assert results[0]["content"] == "同期の結果"
+        assert calls == ["小樽"]
+        assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
+
+    def test_spawn_releases_the_slot_when_cancelled_mid_insert(self, monkeypatch):
+        """INSERT の await でキャンセルされても席とセンチネルを残さない。
+
+        CancelledError は BaseException 派生 — `except Exception` では捕らえられず、
+        素通りすると同時数スロットと registry センチネルが恒久リークする
+        (以後その exec_id は「走行中」と誤認され、ユーザーの席も 1 つ減ったまま)。
+        """
+        import threading
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingExecutions:
+            """INSERT を掴んだまま離さない Executions(キャンセル点の再現)。"""
+
+            @staticmethod
+            def insert_execution(**kwargs):
+                entered.set()
+                release.wait(5)
+                return None
+
+        monkeypatch.setattr(self.executions, "Executions", BlockingExecutions)
+
+        async def probe():
+            return "ok"
+
+        async def main():
+            spawning = asyncio.create_task(self._spawn(probe))
+            await asyncio.to_thread(entered.wait, 5)
+            # spawn 中(センチネル登録済み・INSERT の await 中)にキャンセル
+            assert self.executions._active_execs_by_user == {"1": 1}
+            assert list(self.executions._exec_tasks.values()) == [None]
+            spawning.cancel()
+            try:
+                await spawning
+            finally:
+                release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(main())
+
+        assert self.executions._exec_tasks == {}
+        assert self.executions._active_execs_by_user == {}
+
     # ---- check_async(K4)----
 
     def test_check_async_authorization(self):
@@ -721,14 +804,23 @@ class TestAsyncExec(AbstractPostgresTest):
         assert out["error"] == self.executions.STOPPED_ERROR
 
     def test_await_async_result_render_reaches_the_tool_call_result(self):
-        """§8: exec 行の render_descriptor が results[].render を上書きする。"""
+        """§8: exec 行の render_descriptor が results[].render を上書きする。
+
+        併せて FE との契約を固定する: 回収形は封筒
+        {ok, exec_id, tool_name, status, result, ...} で、**descriptor が指すのは
+        封筒ではなく result の中身**。FE(tool-render/index.ts の
+        parseExecutionEnvelope)は exec_id ∧ 終端 status ∧ result で封筒と判定して
+        剥がし、中身へ descriptor を適用する — この形を変えるなら FE も直すこと。
+        """
         from nucllei.utils.middleware import execute_tool_calls
 
         self._insert("e1", tool_name="run_subagent")
         assert self.Executions.finish_execution(
             "e1",
             status="done",
-            result=json.dumps({"answer": "2"}, ensure_ascii=False),
+            result=json.dumps(
+                {"ok": True, "session_id": "c1", "answer": "2"}, ensure_ascii=False
+            ),
             meta={
                 "render": {"kind": "json"},
                 "render_descriptor": {"kind": "subagent"},
@@ -745,4 +837,9 @@ class TestAsyncExec(AbstractPostgresTest):
         )
         # 型由来の render(kind=json)ではなく実 tool の宣言が勝つ
         assert results[0]["render"] == {"kind": "subagent"}
-        assert json.loads(results[0]["content"])["result"] == {"answer": "2"}
+        payload = json.loads(results[0]["content"])
+        # 封筒の外形(FE の剥がし条件)
+        assert payload["exec_id"] == "e1"
+        assert payload["status"] == "done"
+        # 中身は実 tool の生 object のまま(二重エスケープしない)= descriptor の対象
+        assert payload["result"] == {"ok": True, "session_id": "c1", "answer": "2"}

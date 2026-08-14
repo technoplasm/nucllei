@@ -499,6 +499,11 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   `GET /api/version`.
 - Audio: `POST /api/v1/audio/transcriptions` (STT), `POST /api/v1/audio/speech` (TTS).
 - Chats CRUD: `/api/v1/chats/*` (`/new`, `/{id}`, `/search`, share/archive/clone...).
+- Executions of a chat (owner only, see §5.9):
+  `GET /api/v1/chats/{id}/executions` → the rows without the result body
+  (`id, tool_name, status, created_at, finished_at, duration, error`);
+  `POST /api/v1/chats/{id}/executions/{exec_id}/stop` → stop one execution and
+  return its updated row (idempotent — already-terminal rows are unchanged).
 - Users & groups (admin): `/api/v1/users/*`, `/api/v1/groups/*`.
 - Config import/export (admin): `POST /api/v1/configs/import`, `GET /api/v1/configs/export`.
 - External OpenAPI tool servers (admin): `GET/POST /api/v1/configs/tool_servers`.
@@ -736,16 +741,25 @@ spec of every eligible tool.
 Both collectors are builtin pseudo-tools, mounted automatically whenever an
 eligible tool is on the turn or the chat still has execution rows.
 
+Over HTTP the rows are readable and stoppable by the chat's owner:
+`GET /api/v1/chats/{id}/executions` (list, no result bodies) and
+`POST /api/v1/chats/{id}/executions/{exec_id}/stop` (the UI's per-execution stop
+button). There is no SSE push — the frontend polls.
+
 **Eligibility is opt-in** (`backgroundable` key on the tool entry):
 
 - builtin: `run_subagent` only (default).
 - DB tools: declare a `backgroundable` class attribute on the `Tools` class —
   `True` (all functions) or a list/tuple/set of function names (tool CRUD is
   admin-only, so this is an admin decision). Example: the reference sandbox
-  tool declares `backgroundable = ("run_python",)` so long-running Python can
-  be backgrounded. Known v1 limit: workspace-export chat attachments emitted
-  after the parent turn ended don't show in the UI (files themselves are
-  persisted and listed in the result string).
+  tool marks all three of its execution entry points backgroundable
+  (`run_python`, `run_python_once`, `run_shell`) so long-running code can be
+  backgrounded. Note that the sandbox serializes calls per user, so a
+  synchronous call made while a backgrounded one is still running waits for it
+  (head-of-line blocking — backgrounding frees the parent turn, not the
+  sandbox). Known v1 limit: workspace-export chat
+  attachments emitted after the parent turn ended don't show in the UI (files
+  themselves are persisted and listed in the result string).
 - Never eligible: `load_skill`, `check_async`, `await_async`, any tool that
   declares its own `background` parameter (collision guard), and tool-server
   tools (no opt-in surface in v1). `background: true` on a non-eligible tool

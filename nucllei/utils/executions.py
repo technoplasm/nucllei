@@ -140,6 +140,17 @@ def _decrement_user(user_id: str) -> None:
         _active_execs_by_user[user_id] = count
 
 
+def _release_spawn_slot(exec_id: str, user_id: str) -> None:
+    """spawn が task 起動まで到達しなかったときの解放(同期のみ)。
+
+    registry センチネル pop + 同時数 decrement。done callback が付く前の失敗経路
+    (例外・**キャンセル**)で呼ぶ — ここを飛ばすと席とセンチネルが恒久リークし、
+    以後その exec_id は「走行中」と誤認され続ける。
+    """
+    _exec_tasks.pop(exec_id, None)
+    _decrement_user(user_id)
+
+
 def _on_exec_task_done(exec_id: str, user_id: str) -> None:
     """runner task の done callback: registry pop + 会計 decrement。
 
@@ -219,8 +230,7 @@ async def spawn_execution(
     except Exception as e:
         # スロット恒久リークの防止: decrement + registry pop + 行があれば failed へ CAS
         log.exception(f"spawn_execution failed (tool={tool_name}): {e}")
-        _exec_tasks.pop(exec_id, None)
-        _decrement_user(user_id)
+        _release_spawn_slot(exec_id, user_id)
         if inserted:
             try:
                 await asyncio.to_thread(
@@ -232,6 +242,15 @@ async def spawn_execution(
             except Exception:
                 log.exception(f"failed to mark spawn-failed execution {exec_id}")
         return _error("非同期実行の起動に失敗しました。")
+    except BaseException:
+        # CancelledError は BaseException 派生 — 上の except では捕らえられない。
+        # INSERT の await がキャンセル点で、ここを素通りすると席とセンチネルが
+        # 恒久リークする。解放は**同期分だけ**行って re-raise する(cancel 後の
+        # await は再び即 cancel されうるので DB 書きはしない — to_thread の
+        # INSERT が後から着地して残る running 行は boot スイープ / liveness
+        # ガードが orphaned に倒す)。
+        _release_spawn_slot(exec_id, user_id)
+        raise
 
     # INSERT の await 中に stop / cascade が予約を立てた場合、task_id 確定後に cancel
     # (create_task → ここまで await 無し = done callback より先に必ず実行される)

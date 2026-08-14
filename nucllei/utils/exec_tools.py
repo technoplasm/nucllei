@@ -28,6 +28,7 @@ from nucllei.env import SRC_LOG_LEVELS
 from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
 from nucllei.utils.executions import (
+    async_exec_available,
     ensure_execution_liveness,
     get_exec_task,
     get_latest_progress,
@@ -57,12 +58,18 @@ BACKGROUND_PARAM_SPEC = {
 def exec_spawn_context_ok(metadata) -> bool:
     """このターンで background 昇格を許すか(spec 注入と execute 分岐の共通述語)。
 
-    exec 行の束縛に必要な user_id / chat_id / message_id が揃い、かつ agent session
-    (子ターン)でないこと(D9 — 子 chat の exec は FE 回収者不在)。
+    条件は 2 つ:
+    - サーバー構成が非同期実行を持てること(D7 — `UVICORN_WORKERS > 1` では
+      registry がプロセス内で完結せず spawn は拒否される。**述語をここで AND して
+      おかないと** spec 注入・回収 builtin の mount・実行分岐がバラバラに振る舞い、
+      モデルには background 引数が見えるのに呼ぶと必ずエラーになる)
+    - exec 行の束縛に必要な user_id / chat_id / message_id が揃い、かつ
+      agent session(子ターン)でないこと(D9 — 子 chat の exec は FE 回収者不在)
     """
     md = metadata or {}
     return bool(
-        md.get("user_id")
+        async_exec_available()
+        and md.get("user_id")
         and md.get("chat_id")
         and md.get("message_id")
         and not md.get("agent_session")

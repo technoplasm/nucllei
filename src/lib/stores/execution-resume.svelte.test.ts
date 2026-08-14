@@ -17,7 +17,6 @@ import {
 	isExecutionResumeChainLimited,
 	isExecutionResumeHandled,
 	isExecutionResumeMessage,
-	isExecutionResumeRequested,
 	requeueExecutionResumes,
 	resetExecutionResume,
 	setExecutionResumeChainLimited,
@@ -64,7 +63,6 @@ describe('enqueue / take / requeue', () => {
 		// 消費後の再検知(ポーリング走査は毎 tick 回る)でも再 enqueue しない
 		enqueueExecutionResume(CHAT, request());
 		expect(executionResumeState.entries).toHaveLength(0);
-		expect(isExecutionResumeRequested(EXEC)).toBe(true);
 	});
 
 	it('chatId / execId 欠落の要求は捨てる(once ガードも汚さない)', () => {

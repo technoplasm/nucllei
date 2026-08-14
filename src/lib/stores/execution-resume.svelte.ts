@@ -40,9 +40,6 @@ const state = $state<{ entries: ExecutionResumeRequest[]; chainLimitedChatId: st
 // exec 単位 once ガード(ページセッション内)。take で消費されても再 enqueue しない
 const requested = new Set<string>();
 
-/** この exec の resume 要求が enqueue 済みか(走査の再 enqueue 抑止の可視化)。 */
-export const isExecutionResumeRequested = (execId: string): boolean => requested.has(execId);
-
 /** terminal 未回収の検知(refreshAndScanExecutions)からの要求。exec 単位で 1 回だけ積む。 */
 export const enqueueExecutionResume = (
 	chatId: string,

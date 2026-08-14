@@ -28,7 +28,7 @@ export type ExecutionEntry = ChatExecutionItem;
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'stopped', 'orphaned']);
 
 /** 終端状態か(running 以外の既知状態)。未知の文字列は終端扱いしない(誤 enqueue 防止)。 */
-export const isTerminalExecutionStatus = (status: string): boolean => TERMINAL_STATUSES.has(status);
+const isTerminalExecutionStatus = (status: string): boolean => TERMINAL_STATUSES.has(status);
 
 const state = $state<{
 	chatId: string | null;
@@ -102,10 +102,6 @@ export const refreshAndScanExecutions = async (chatId: string, history: ChatHist
 /** exec_id で 1 行引く(ExecutionBlock / ToolCallBlock のバッジ上書き)。 */
 export const getExecutionEntry = (execId: string): ExecutionEntry | null =>
 	state.entries.find((entry) => entry.id === execId) ?? null;
-
-/** 表示中 chat に running の exec があるか(poll 述語・チップ)。 */
-export const hasRunningExecutions = (chatId: string | null | undefined): boolean =>
-	!!chatId && state.chatId === chatId && state.entries.some((entry) => entry.status === 'running');
 
 /** 読み手用のリアクティブな参照。プロパティ読み取りで購読される。 */
 export const executionsState = state;

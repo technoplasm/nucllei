@@ -268,12 +268,108 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('execution: exec_id があっても status が running でなければ通常分岐に落とす(#110)', () => {
-		// await_async の回収形(status: "done" 等)は render_descriptor パススルーで
-		// 既存ブロックが描く — execution 扱いにしない
-		const done = JSON.stringify({ ok: true, exec_id: 'exec-3333', status: 'done', result: 'x' });
-		expect(classifyToolResult(done).kind).toBe('text');
-		// 'exec_id'・'running' を本文に含むだけの非 JSON も text のまま
+	it('execution: 封筒(await_async の done 回収形)を剥がして中身を descriptor で描く(#110)', () => {
+		// BE は results[].render を実 tool の宣言(exec 行の render_descriptor)で
+		// 上書きしてくる。descriptor が指すのは封筒ではなく **result の中身**
+		const inner = {
+			ok: true,
+			session_id: 'child-chat-9',
+			answer: '子エージェントの回答',
+			usage: { prompt_tokens: 10, completion_tokens: 20 }
+		};
+		const envelope = JSON.stringify({
+			ok: true,
+			exec_id: 'exec-5555',
+			tool_name: 'run_subagent',
+			status: 'done',
+			result: inner, // BE が json.loads 済みの生 object で載せる(二重エスケープ回避)
+			duration: 12.5,
+			usage: { prompt_tokens: 10 }
+		});
+		expect(classifyToolResult(envelope, { kind: 'subagent' })).toEqual({
+			kind: 'subagent',
+			sessionId: 'child-chat-9',
+			ok: true,
+			answer: '子エージェントの回答',
+			usage: { prompt_tokens: 10, completion_tokens: 20 }
+		});
+	});
+
+	it('execution: 封筒剥がしは中身が文字列でも効く(text / markdown / code 宣言)', () => {
+		const wrap = (result: unknown) =>
+			JSON.stringify({
+				ok: true,
+				exec_id: 'exec-6666',
+				tool_name: 'probe',
+				status: 'done',
+				result
+			});
+
+		expect(classifyToolResult(wrap('本文だけの結果'), { kind: 'text' })).toEqual({
+			kind: 'text',
+			value: '本文だけの結果'
+		});
+		expect(classifyToolResult(wrap('# 見出し'), { kind: 'markdown' })).toEqual({
+			kind: 'markdown',
+			value: '# 見出し'
+		});
+		expect(classifyToolResult(wrap('print(1)'), { kind: 'code', language: 'python' })).toEqual({
+			kind: 'code',
+			language: 'python',
+			value: 'print(1)'
+		});
+		// 中身が dict の tool + 宣言なし: 封筒由来の kind=json は中身に効かせてよい
+		expect(classifyToolResult(wrap({ a: 1 }), { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify({ a: 1 }, null, 2)
+		});
+		// 中身が**文字列**での kind=json は封筒 dict 由来(または切詰めの降格)—
+		// 実 tool が json を宣言していれば BE は object を返す。text に落とす
+		expect(classifyToolResult(wrap('ただの文字列'), { kind: 'json' })).toEqual({
+			kind: 'text',
+			value: 'ただの文字列'
+		});
+	});
+
+	it('execution: 結果本文の無い終端形(failed/stopped/orphaned)は execution 表示のまま(#110)', () => {
+		const failed = JSON.stringify({
+			ok: false,
+			exec_id: 'exec-7777',
+			tool_name: 'run_subagent',
+			status: 'failed',
+			error: '壊れた'
+		});
+		expect(classifyToolResult(failed, { kind: 'subagent' })).toEqual({
+			kind: 'execution',
+			execId: 'exec-7777',
+			toolName: 'run_subagent',
+			status: 'failed',
+			error: '壊れた'
+		});
+		// check_async の terminal 形(結果本文を返さない)も同じ状態表示に落ちる
+		const checked = JSON.stringify({
+			exec_id: 'exec-8888',
+			tool_name: 'probe',
+			status: 'stopped',
+			elapsed_s: 3,
+			hint: '結果は await_async(exec_id) で回収してください。'
+		});
+		expect(classifyToolResult(checked)).toEqual({
+			kind: 'execution',
+			execId: 'exec-8888',
+			toolName: 'probe',
+			status: 'stopped'
+		});
+	});
+
+	it('execution: 封筒に見えない形は通常分岐へ(#110)', () => {
+		// 未知 status は封筒扱いしない(形が合わなければ descriptor どおり)
+		const unknown = JSON.stringify({ exec_id: 'exec-9999', status: 'queued' });
+		expect(classifyToolResult(unknown, { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify({ exec_id: 'exec-9999', status: 'queued' }, null, 2)
+		});
+		// 'exec_id' を本文に含むだけの非 JSON も text のまま
 		expect(classifyToolResult('exec_id exec-4444 is running')).toEqual({
 			kind: 'text',
 			value: 'exec_id exec-4444 is running'

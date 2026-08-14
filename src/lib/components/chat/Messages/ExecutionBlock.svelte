@@ -26,9 +26,12 @@
 	} = $props();
 
 	const entry = $derived(getExecutionEntry(display.execId));
-	// store に行が無い間は running 扱い(result の running 形が最後に知られた真実)
-	const status = $derived(entry?.status ?? 'running');
+	// store に行が無い間は結果が運んできた status(await_async の終端形)、それも
+	// 無ければ running 扱い(result の running 形が最後に知られた真実)
+	const status = $derived(entry?.status ?? display.status ?? 'running');
 	const toolName = $derived(entry?.tool_name ?? display.toolName ?? '');
+	// 終端のエラー文言は畳まずに見せる(tooltip だけだと気づけない)
+	const errorText = $derived(entry?.error ?? display.error ?? '');
 
 	const statusLabel = $derived.by(() => {
 		if (status === 'done') return $i18n.t('Completed');
@@ -57,7 +60,7 @@
 	});
 </script>
 
-<div {id} class="flex items-center gap-2 text-sm min-w-0 px-0.5 my-0.5" title={entry?.error ?? ''}>
+<div {id} class="flex items-center gap-2 text-sm min-w-0 px-0.5 my-0.5" title={errorText}>
 	{#if running}
 		<Spinner className="size-3.5 shrink-0" />
 	{:else if status === 'done'}
@@ -78,3 +81,6 @@
 	{/if}
 	<span class="text-xs text-content-subtle font-mono truncate" dir="ltr">{display.execId}</span>
 </div>
+{#if !running && errorText}
+	<div class="text-xs text-content-muted whitespace-pre-wrap px-0.5 pb-0.5">{errorText}</div>
+{/if}

@@ -146,7 +146,8 @@
 	// store に行が無い間(未 fetch)も running 扱い(result の running 形が最後の真実)
 	const execRunning = $derived(
 		resultDisplay?.kind === 'execution' &&
-			(getExecutionEntry(resultDisplay.execId)?.status ?? 'running') === 'running'
+			(getExecutionEntry(resultDisplay.execId)?.status ?? resultDisplay.status ?? 'running') ===
+				'running'
 	);
 
 	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
