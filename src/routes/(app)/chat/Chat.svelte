@@ -31,7 +31,8 @@
 		attachToTask,
 		registerChatHandler,
 		unregisterChatHandler,
-		getActiveTaskIds
+		getActiveTaskIds,
+		selectAttachableTaskIds
 	} from '$lib/utils/completion-streams';
 
 	import { cloneChatById, getChatById, getChatList } from '$lib/apis/chats';
@@ -184,16 +185,20 @@
 	};
 
 	// llens(#110): BE 発ターン(サーバ駆動の続きターン)の発見とアタッチ。
-	// loadChat の再アタッチと同じ二段ガード(activeTaskIds / attachedTaskIds)。
+	// loadChat の再アタッチと同じ二段ガード(activeTaskIds / attachedTaskIds)に加え、
+	// 送信直後の自ターン(task イベント未着で taskId 未確定 = getActiveTaskIds に
+	// 現れない)が居る tick は全件スキップ — 判定は selectAttachableTaskIds に集約
+	// (fetch の await 中に送信が始まる窓があるため、判定は fetch 解決後に行う)。
 	// 履歴の追いつき自体は未知 message_id 封筒の refetch ゲート(events.ts)が担う
 	const attachNewChatTasks = async (targetChatId: string) => {
 		const taskRes = await getTaskIdsByChatId(targetChatId).catch(() => null);
 		if (!taskRes || $chatId !== targetChatId) {
 			return;
 		}
-		const activeTaskIds = getActiveTaskIds(targetChatId);
-		const newTaskIds = (taskRes.task_ids ?? []).filter(
-			(taskId: string) => !activeTaskIds.includes(taskId) && !attachedTaskIds.has(taskId)
+		const newTaskIds = selectAttachableTaskIds(
+			targetChatId,
+			taskRes.task_ids ?? [],
+			attachedTaskIds
 		);
 		if (newTaskIds.length === 0) {
 			return;

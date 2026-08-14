@@ -136,9 +136,15 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
         if block.get("synthetic"):
             continue
         if block["type"] == "tool_calls":
+            # call 列のキーは 2 形ある(#110 敵対検証 4): 組み立て中の内部表現は
+            # "content"、永続化スナップショット(snapshot_content_blocks)は
+            # "calls"。続きターン(execution_resume / subagent の build_wire)は
+            # DB の message.content_blocks = 永続化形を読むため、"calls" を
+            # 読めないと tool 往復が丸ごと落ち、M5 の壊れ tool_calls 修復も
+            # 効かない。両形を受ける("results" キーは両形で同名 — 形差なし)。
             sendable_calls = [
                 call
-                for call in block.get("content", [])
+                for call in (block.get("calls") or block.get("content") or [])
                 if _call_arguments_are_sendable(call)
             ]
             if not sendable_calls:

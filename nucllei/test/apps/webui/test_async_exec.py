@@ -909,6 +909,28 @@ class TestAsyncExec(AbstractPostgresTest):
             # terminal 報告 = 配達済み
             assert self._delivered_at(entry["task_id"]) is not None
 
+    def test_await_task_all_invalid_head_with_over_limit_stays_per_entry(self):
+        """先頭 20 件が全不正でも 21 件目以降(over)がある場合は全体エラーに
+        しない(敵対検証 5)— over に有効 id が残っているかもしれず、全体エラー
+        だと per-entry の「次の呼び出しで指定」案内が届かない。"""
+        await_task = self._exec_tools()["await_task"]["callable"]
+        self._insert("valid-21")
+        assert self.Executions.finish_execution("valid-21", status="done", result="ok")
+
+        ids = [f"no-such-{i}" for i in range(20)] + ["valid-21"]
+        out = asyncio.run(await_task(task_ids=ids))
+        assert isinstance(out, dict)  # 全体エラー文字列(_error)ではない
+        assert len(out["tasks"]) == 21
+        for entry in out["tasks"][:20]:
+            assert "task_id が不正です" in entry["error"]
+        assert "20 件まで" in out["tasks"][20]["error"]
+        # over の有効 id は今回処理されていない(次の呼び出しで回収できる)
+        assert self._delivered_at("valid-21") is None
+
+        # over が無い全不正は従来どおり全体エラー(既存挙動の保存)
+        result = json.loads(asyncio.run(await_task(task_ids=["no-such-a"])))
+        assert result["ok"] is False
+
     def test_await_task_caps_ids_at_20(self):
         await_task = self._exec_tools()["await_task"]["callable"]
         self._insert("e1")

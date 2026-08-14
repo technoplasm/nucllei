@@ -95,7 +95,8 @@ _claimed_exec_ids: set[str] = set()
 
 # mark_replayed に勝って media(context_images / display)を消費した行の控え。
 # CAS 追記が負けて notice を組み直しても media を失わないための持ち越し。
-# 配達確定(delivered)で捨てる。
+# 配達確定(delivered)で捨てる。自分以外の経路(await_task / stop_task / 恒久
+# 断念)が配達を確定した行は _sweep_consumed_media が回収する(敵対検証 6/7)。
 _consumed_media: dict[str, tuple[list, list]] = {}
 
 # 配達 semaphore。asyncio primitive はループに遅延束縛されるため、テスト
@@ -464,6 +465,25 @@ async def _ensure_models_loaded(user) -> None:
     await get_all_models(_shim_request(), user=user)
 
 
+async def _sweep_consumed_media() -> None:
+    """delivered 済み行の _consumed_media を回収する(#110 敵対検証 6/7)。
+
+    _consumed_media は CAS 追記の再試行で media を失わないための控えで、正常系は
+    配達確定時に pop される。しかし配達確定を**他の経路**が済ませた終端 —
+    "missing" 断念・手順 1 断念(chat 消滅)・await_task / stop_task が先に
+    配達した行("empty" 終端)・conflict 後 abandoned — では pop する者がおらず
+    プロセス寿命いっぱい残留する(リーク)。delivered_at が立った行(= 以後
+    どの経路も media を使わない)と行自体が消えた分をここで捨てる。
+    サイクルの各終端(手順 0/1 の早期 return と finally)から呼ぶ。
+    """
+    if not _consumed_media:
+        return
+    for exec_id in list(_consumed_media):
+        row = await asyncio.to_thread(Executions.get_execution_by_id, exec_id)
+        if row is None or row.delivered_at is not None:
+            _consumed_media.pop(exec_id, None)
+
+
 # ---- driver 本体 ----
 
 
@@ -521,6 +541,9 @@ async def _deliver_cycle(chat_id: str) -> str:
     if not await asyncio.to_thread(
         Executions.get_undelivered_terminal_by_chat_id, chat_id
     ):
+        # 前サイクルで media を控えた行が await_task / stop_task 側で配達済みに
+        # なっていることがある(敵対検証 7)— 控えを回収してから終了
+        await _sweep_consumed_media()
         return "empty"
 
     # 1. 配達先の確認: 不在 / 削除済み / agent chat は恒久断念
@@ -542,6 +565,8 @@ async def _deliver_cycle(chat_id: str) -> str:
                 f"delivery abandoned permanently (chat_id={chat_id}, "
                 f"rows={len(rows)}): no deliverable chat"
             )
+        # 前サイクルで控えた media は恒久断念(delivered 化)で用済み(敵対検証 6)
+        await _sweep_consumed_media()
         return "abandoned"
 
     semaphore = _get_semaphore()
@@ -677,6 +702,9 @@ async def _deliver_cycle(chat_id: str) -> str:
         _delivering.discard(chat_id)
         if semaphore_held:
             semaphore.release()
+        # delivered 済み行の media 控えを回収(敵対検証 6/7 — "missing" 断念・
+        # conflict 後 abandoned・await_task が先に配達した "empty" 等の終端)
+        await _sweep_consumed_media()
 
 
 class _PermanentTurnFailure(Exception):

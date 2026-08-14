@@ -241,6 +241,41 @@ class TestExecutionResume(AbstractPostgresTest):
         fresh = self.Chats.get_chat_by_id(chat.id)
         assert len((fresh.chat["history"] or {}).get("messages")) == 2
 
+    def test_append_delivery_turn_cas_survives_same_second_interleaving(
+        self, monkeypatch
+    ):
+        """介在書き込みが読値と**同秒**でも CAS は偽成功しない(敵対検証 2)。
+
+        updated_at は秒粒度の int なので、全書き込み点が厳密単調増加
+        (max(now, 旧値+1))で前進させないと、同秒の介在コミットでスタンプが
+        変わらず guarded UPDATE が通ってしまう(ABA — 介在分の上書き消失)。
+        既存テストのように updated_at を過去へ巻き戻さず、同秒のまま縛る。
+        """
+        from nucllei.models import chats as chats_module
+
+        chat = self._insert_chat()
+        self._insert_exec("e1", chat.id)
+
+        original = chats_module.append_turn_messages
+
+        def racing_append(chat_json, user_message, assistant_message):
+            result = original(chat_json, user_message, assistant_message)
+            # 読値と同秒(直後)の介在書き込み
+            self.Chats.update_chat_by_id(chat.id, dict(chat.chat))
+            return result
+
+        monkeypatch.setattr(chats_module, "append_turn_messages", racing_append)
+
+        status, updated = self.Chats.append_delivery_turn(
+            chat.id,
+            {"role": "user", "content": "notice"},
+            {"role": "assistant", "content": ""},
+            ["e1"],
+        )
+        assert status == "conflict"
+        assert updated is None
+        assert self.Executions.get_execution_by_id("e1").delivered_at is None
+
     def test_append_delivery_turn_missing_chat(self):
         status, updated = self.Chats.append_delivery_turn(
             "no-such-chat", {"role": "user", "content": "x"}, {"role": "assistant"}, []
@@ -692,6 +727,201 @@ class TestExecutionResume(AbstractPostgresTest):
         assert convert_content_blocks_to_messages(blocks) == [
             {"role": "assistant", "content": "前\n後"}
         ]
+
+    def test_convert_content_blocks_reads_persisted_calls_key(self):
+        """永続化形('calls' キー — snapshot_content_blocks の出力)でも tool
+        往復が wire に載り、M5 の壊れ tool_calls 修復が効く(敵対検証 4)。
+
+        DB の message.content_blocks は snapshot 形(call 列のキーが 'calls')。
+        内部形('content' キー)しか読めないと、続きターン・subagent 継続の
+        wire から tool 往復が丸ごと落ちる。fixture は snapshot 関数の実出力から
+        作り、永続化形とのずれを構造ごと縛る。
+        """
+        from nucllei.utils.content_blocks import (
+            INTERRUPTED_TOOL_RESULT,
+            convert_content_blocks_to_messages,
+            snapshot_content_blocks,
+        )
+
+        internal = [
+            {"type": "text", "content": "前置き"},
+            {
+                "type": "tool_calls",
+                "content": [
+                    {
+                        "id": "call-ok",
+                        "function": {"name": "probe", "arguments": '{"x": 1}'},
+                    },
+                    {
+                        "id": "call-broken",
+                        "function": {"name": "probe", "arguments": '{"x": '},
+                    },
+                    {
+                        "id": "call-interrupted",
+                        "function": {"name": "probe", "arguments": ""},
+                    },
+                ],
+                "results": [{"tool_call_id": "call-ok", "content": "ok"}],
+            },
+        ]
+        persisted = snapshot_content_blocks(internal)
+        # 永続化形は 'calls' キー(内部形の 'content' は持たない)
+        assert "calls" in persisted[1]
+        assert "content" not in persisted[1]
+
+        messages = convert_content_blocks_to_messages(persisted)
+        assert messages[0]["role"] == "assistant"
+        # 壊れ JSON の call 除去(修復)が永続化形でも効く
+        assert [c["id"] for c in messages[0]["tool_calls"]] == [
+            "call-ok",
+            "call-interrupted",
+        ]
+        assert messages[1] == {
+            "role": "tool",
+            "tool_call_id": "call-ok",
+            "content": "ok",
+        }
+        # result 未着 call への合成 result(修復)も永続化形で効く
+        assert messages[2] == {
+            "role": "tool",
+            "tool_call_id": "call-interrupted",
+            "content": INTERRUPTED_TOOL_RESULT,
+        }
+
+    # ---- cascade 停止 × wake のレース(敵対検証 1)----
+
+    def test_cascade_stop_is_delivered_before_wake_so_driver_stays_silent(
+        self, monkeypatch
+    ):
+        """chat 削除 cascade の停止は stopped への CAS と**同一 UPDATE** で
+        delivered_at を立てる — task cancel の cleanup wake が届いた時点で
+        未配達 0 になっており、配達 driver は消えゆく chat へ notice を
+        書かない(順序込みで縛る: wake 時点の delivered_at を観測する)。"""
+        from nucllei import tasks as tasks_module
+
+        calls = self._patch_turn_start(monkeypatch)
+        chat = self._insert_chat()
+        self._insert_exec("e1", chat.id, status="running")
+
+        delivered_at_wake = []
+
+        def observer(namespace_id):
+            if namespace_id == f"exec:{chat.id}":
+                delivered_at_wake.append(
+                    self.Executions.get_execution_by_id("e1").delivered_at
+                )
+
+        # install() と同じ hook + 観測 listener(wake と同じタイミングで走る)
+        tasks_module.register_cleanup_listener(self.resume._on_task_cleanup)
+        tasks_module.register_cleanup_listener(observer)
+        try:
+
+            async def main():
+                async def hang():
+                    await asyncio.Event().wait()
+
+                task_id, _task = tasks_module.create_task(
+                    hang(), id=f"exec:{chat.id}"
+                )
+                self.executions._exec_tasks["e1"] = task_id
+
+                stopped = await self.executions.stop_executions_by_chat_id(chat.id)
+                assert stopped == 1
+                # cancel の cleanup wake で立った driver が回りきるのを待つ
+                for _ in range(500):
+                    if chat.id not in self.resume._delivery_tasks:
+                        break
+                    await asyncio.sleep(0.01)
+                assert chat.id not in self.resume._delivery_tasks
+
+            asyncio.run(main())
+        finally:
+            tasks_module._cleanup_listeners.remove(self.resume._on_task_cleanup)
+            tasks_module._cleanup_listeners.remove(observer)
+            self.executions._exec_tasks.pop("e1", None)
+
+        # 順序: wake(cleanup hook)の時点で既に配達済み — レース窓が存在しない
+        assert delivered_at_wake and delivered_at_wake[0] is not None
+        row = self.Executions.get_execution_by_id("e1")
+        assert row.status == "stopped"
+        assert row.delivered_at is not None
+        # driver は配達しない: notice もターンも生まれない
+        assert self._notice_messages(chat.id) == []
+        assert calls == []
+
+    # ---- _consumed_media の掃除(敵対検証 6/7)----
+
+    def test_consumed_media_swept_when_row_delivered_elsewhere(self, monkeypatch):
+        """CAS 負けで media を控えた後、await_task / stop_task が先に配達した行
+        ("empty" 終端)の控えがリークせず回収される(敵対検証 7)。"""
+        calls = self._patch_turn_start(monkeypatch)
+        chat = self._insert_chat()
+        self._insert_exec(
+            "e1",
+            chat.id,
+            result="ok",
+            meta={"context_images": ["file-1"], "display": [{"content": "d"}]},
+        )
+
+        def conflicting_append(*args, **kwargs):
+            # CAS 負けの間に await_task 側が配達を確定した状況
+            self.Executions.mark_delivered(["e1"])
+            return ("conflict", None)
+
+        monkeypatch.setattr(self.Chats, "append_delivery_turn", conflicting_append)
+
+        assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "empty"
+        # media は mark_replayed で消費済みだが、控えは残留しない
+        assert self.resume._consumed_media == {}
+        assert self._notice_messages(chat.id) == []
+        assert calls == []
+
+    def test_consumed_media_swept_on_missing_abandonment(self, monkeypatch):
+        """append 直前に chat が消えた("missing" 断念)場合も控えを回収する
+        (敵対検証 6)。"""
+        chat = self._insert_chat()
+        self._insert_exec(
+            "e1", chat.id, result="ok", meta={"context_images": ["file-1"]}
+        )
+
+        monkeypatch.setattr(
+            self.Chats, "append_delivery_turn", lambda *a, **k: ("missing", None)
+        )
+
+        assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "abandoned"
+        assert self.Executions.get_execution_by_id("e1").delivered_at is not None
+        assert self.resume._consumed_media == {}
+
+    def test_consumed_media_swept_on_step1_abandonment(self):
+        """前サイクルで media を控えた後に chat が消えた(手順 1 断念)場合も
+        回収する(敵対検証 6 — 手順 1 の早期 return は finally を通らない)。"""
+        chat = self._insert_chat()
+        self._insert_exec(
+            "e1", chat.id, result="ok", meta={"context_images": ["file-1"]}
+        )
+        # 前サイクルの CAS 負けで media を控えた状態を再現
+        self.resume._consumed_media["e1"] = (["file-1"], [])
+        assert self.Chats.delete_chat_by_id(chat.id)
+
+        assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "abandoned"
+        assert self.Executions.get_execution_by_id("e1").delivered_at is not None
+        assert self.resume._consumed_media == {}
+
+    def test_consumed_media_survives_conflict_while_undelivered(self, monkeypatch):
+        """まだ配達されていない行の控えは掃除**されない**(本来の持ち越し —
+        CAS 連敗の "retry" 終端でも media を失わない)。"""
+        chat = self._insert_chat()
+        self._insert_exec(
+            "e1", chat.id, result="ok", meta={"context_images": ["file-1"]}
+        )
+
+        monkeypatch.setattr(
+            self.Chats, "append_delivery_turn", lambda *a, **k: ("conflict", None)
+        )
+
+        assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "retry"
+        # 未配達のままなので控えは持ち越される(次サイクルの notice 用)
+        assert self.resume._consumed_media == {"e1": (["file-1"], [])}
 
     # ---- wake / registry / wait_for_quiet_delivery ----
 

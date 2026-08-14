@@ -73,3 +73,47 @@ export const graftLocalTurnOntoServerHistory = (
 
 	return merged;
 };
+
+/**
+ * llens(#110): save-400 リカバリの refetch 失敗分岐用 — ローカルで積んだ送信対を
+ * history から取り除き、送信前の先端へ currentId を巻き戻した形を返す。
+ *
+ * 再保存失敗分岐(サーバ形へ巻き戻し)と後始末を揃える: 送信対を残したまま
+ * ok:false を返すと、呼び出し側の prompt 復元 → 再送で user メッセージが二重化する。
+ *
+ * 取り除く範囲:
+ * - currentId の message(送信中の応答受け皿 assistant)
+ * - その親が user で、子が送信中 assistant だけのとき(= この送信で作られた user)は
+ *   それも取り除く。再生成(既存 user に assistant を足しただけ — user は保存済みで
+ *   他の子を持つ)では user を残す
+ */
+export const stripLocalTurn = (local: ChatHistory): ChatHistory => {
+	const rolled: ChatHistory = JSON.parse(JSON.stringify(local));
+	const tipId = rolled.currentId;
+	const tip = tipId ? rolled.messages[tipId] : undefined;
+	if (!tipId || !tip) {
+		return rolled;
+	}
+
+	const removeIds = new Set<string>([tipId]);
+	let anchorId = tip.parentId;
+	const parent = anchorId ? rolled.messages[anchorId] : undefined;
+	if (
+		parent &&
+		parent.role === 'user' &&
+		parent.childrenIds.every((childId) => removeIds.has(childId))
+	) {
+		removeIds.add(parent.id);
+		anchorId = parent.parentId;
+	}
+
+	for (const id of removeIds) {
+		delete rolled.messages[id];
+	}
+	const anchor = anchorId ? rolled.messages[anchorId] : undefined;
+	if (anchor) {
+		anchor.childrenIds = anchor.childrenIds.filter((childId) => !removeIds.has(childId));
+	}
+	rolled.currentId = anchor ? anchorId : null;
+	return rolled;
+};

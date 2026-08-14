@@ -13,7 +13,7 @@ import { get } from 'svelte/store';
 import { chatId, chats, currentChatPage, type Model } from '$lib/stores';
 import { createMessagesList } from '$lib/utils';
 import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
-import { graftLocalTurnOntoServerHistory } from '$lib/utils/history-graft';
+import { graftLocalTurnOntoServerHistory, stripLocalTurn } from '$lib/utils/history-graft';
 import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -132,6 +132,9 @@ export class ChatSession {
 			}
 			const server = await getChatById(_chatId).catch(() => null);
 			if (!server?.chat?.history) {
+				// refetch まで失敗 — 再保存失敗分岐と後始末を揃える: 送信対を取り除いた形へ
+				// 巻き戻す(残すと prompt 復元 → 再送で user メッセージが二重化する)
+				this.history = stripLocalTurn(history);
 				return { ok: false };
 			}
 			merged = graftLocalTurnOntoServerHistory(server.chat.history, history);

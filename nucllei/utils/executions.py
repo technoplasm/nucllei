@@ -392,19 +392,28 @@ async def _run_execution(
         log.exception(f"failed to persist execution outcome (exec_id={exec_id})")
 
 
-async def stop_execution(exec_id: str) -> Optional[ExecutionModel]:
+async def stop_execution(
+    exec_id: str, *, mark_delivered: bool = False
+) -> Optional[ExecutionModel]:
     """個別停止(stop API / cascade 共用)。
 
     権威は endpoint 側(D2): stopped へ CAS → 勝ったときだけ task を cancel する
     (runner は CancelledError で何も書かない)。registry に無い running 行
     (再起動残骸)もこの CAS で stopped にできる。CAS 負け(既に終端)は no-op。
     戻り値は最新の行(存在しなければ None)。
+
+    mark_delivered=True(cascade 専用 — #110 敵対検証 1)は stopped への CAS と
+    同一 UPDATE で delivered_at も立てる。この後の task cancel の await 中に
+    cleanup wake → 配達 driver が走るため、CAS 勝ちの時点で配達済みに
+    なっていないと消えゆく chat へ notice が書かれる(幽霊配達)。チップの
+    個別 stop(stop エンドポイント / stop_task)は配達対象のまま — 指定しない。
     """
     won = await asyncio.to_thread(
         Executions.finish_execution,
         exec_id,
         status="stopped",
         error=STOPPED_ERROR,
+        delivered=mark_delivered,
     )
     if won:
         registered = _exec_tasks.get(exec_id)
@@ -425,12 +434,17 @@ async def stop_executions_by_chat_id(chat_id: str) -> int:
     親ターンの task cancel 連鎖は detach された exec に届かない(exec task は
     exec:{chat_id} 名前空間)ため、削除経路(単発・全削除・ユーザー削除)は
     これを明示的に呼ぶこと。行は消さない(soft delete と対称の監査)。
+
+    mark_delivered=True で呼ぶ(#110 敵対検証 1): 配達先が消えるため恒久断念 —
+    stopped への CAS と同時に delivered_at を立てる。呼び出し元の一括
+    _mark_chat_executions_delivered(routers/chats.py)は CAS 負け行(自然完走
+    済みの未配達行)向けの保険として残る。
     """
     rows = await asyncio.to_thread(
         Executions.get_running_executions_by_chat_id, chat_id
     )
     for row in rows:
-        await stop_execution(row.id)
+        await stop_execution(row.id, mark_delivered=True)
     return len(rows)
 
 

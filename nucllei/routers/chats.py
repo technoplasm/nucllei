@@ -786,17 +786,44 @@ async def update_chat_by_id(
     id: str, form_data: ChatForm, user=Depends(get_verified_user)
 ):
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if chat:
-        _assert_not_agent_session(chat)
-        updated_chat = {**chat.chat, **form_data.chat}
-        _assert_message_history_preserved(chat.chat, updated_chat)
-        chat = Chats.update_chat_by_id(id, updated_chat)
-        return ChatResponse(**chat.model_dump())
-    else:
+    if not chat:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+    _assert_not_agent_session(chat)
+
+    # llens(#110 敵対検証 3): 保存を CAS 化 — 読んだ updated_at を期待値に
+    # guarded UPDATE(配達 driver の append_delivery_turn と同じスタンプの取り合い)。
+    # 無ガードの read-modify-write だと、read と write の間に driver が notice を
+    # 追記した場合、FE の古い履歴で丸ごと上書きされ notice が無言で消える。
+    # CAS 負けは再読して append-only 検証を新鮮な chat で再評価: 通れば再試行
+    # (最大 3 回)、通らなければ既存どおり 400(FE の save-400 リカバリに乗る)。
+    for _ in range(3):
+        updated_chat = {**chat.chat, **form_data.chat}
+        _assert_message_history_preserved(chat.chat, updated_chat)  # 通らねば 400
+        cas_status, updated = Chats.update_chat_by_id_guarded(
+            id, updated_chat, chat.updated_at
+        )
+        if cas_status == "ok":
+            return ChatResponse(**updated.model_dump())
+        if cas_status == "missing":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+        chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+
+    # CAS 3 連敗(書き込みが殺到)— FE に再取得と再保存を委ねる
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Chat was modified concurrently; refetch and retry.",
+    )
 
 
 # llens(wire v2): POST /{id}/messages/{message_id}/event(任意イベント注入 API)は

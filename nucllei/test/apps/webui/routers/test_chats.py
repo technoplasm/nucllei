@@ -412,3 +412,137 @@ class TestChatAppendOnlyHistory(AbstractPostgresTest):
                 json={"content": "overwritten"},
             )
         assert response.status_code in (404, 405)
+
+
+class TestChatSaveCas(AbstractPostgresTest):
+    """llens(#110 敵対検証 3): FE 保存経路(POST /{id})の CAS 化。
+
+    保存の read と guarded UPDATE の間に配達 driver の notice 追記
+    (append_delivery_turn)が挟まっても、無ガード上書きで notice が無言で
+    消えない: CAS 負け → 再読 → append-only 検証を新鮮な chat で再評価し、
+    通れば再試行・通らなければ 400(FE の save-400 リカバリに乗る)。
+    あわせて updated_at の厳密単調増加(敵対検証 2 — 同秒 ABA 防止)も縛る。
+    """
+
+    BASE_PATH = "/api/v1/chats"
+
+    def setup_method(self):
+        super().setup_method()
+        from nucllei.models.chats import ChatForm, Chats
+
+        self.chats = Chats
+        self.history = {
+            "currentId": "m2",
+            "messages": {
+                "m1": {
+                    "id": "m1",
+                    "parentId": None,
+                    "childrenIds": ["m2"],
+                    "role": "user",
+                    "content": "hello",
+                },
+                "m2": {
+                    "id": "m2",
+                    "parentId": "m1",
+                    "childrenIds": [],
+                    "role": "assistant",
+                    "content": "hi there",
+                },
+            },
+        }
+        chat = self.chats.insert_new_chat(
+            "2", ChatForm(**{"chat": {"title": "t", "history": self.history}})
+        )
+        self.chat_id = chat.id
+
+    def _interleave_driver_append(self, monkeypatch):
+        """router の read と 1 回目の guarded UPDATE の間に driver の notice
+        追記が挟まった状況を再現する。"""
+        original = self.chats.update_chat_by_id_guarded
+        state = {"first": True}
+
+        def racing_guarded(id, chat, expected_updated_at):
+            if state["first"]:
+                state["first"] = False
+                status, _ = self.chats.append_delivery_turn(
+                    id,
+                    {
+                        "role": "user",
+                        "content": "notice",
+                        "meta": {"system_notice": "task"},
+                    },
+                    {"role": "assistant", "content": ""},
+                    [],
+                )
+                assert status == "ok"
+            return original(id, chat, expected_updated_at)
+
+        monkeypatch.setattr(self.chats, "update_chat_by_id_guarded", racing_guarded)
+
+    def _notice_ids(self):
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        return [
+            mid
+            for mid, m in chat.chat["history"]["messages"].items()
+            if (m.get("meta") or {}).get("system_notice")
+        ]
+
+    def test_save_with_stale_history_gets_400_and_notice_survives(self, monkeypatch):
+        """FE の古い全量 history での保存は CAS 負け → 再検証で append-only 違反
+        (notice 消失に相当)= 400。driver の notice は履歴に残る。"""
+        import copy
+
+        self._interleave_driver_append(monkeypatch)
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url(f"/{self.chat_id}"),
+                json={"chat": {"history": copy.deepcopy(self.history)}},
+            )
+        assert response.status_code == 400
+        assert len(self._notice_ids()) == 1  # notice は消えない
+
+    def test_save_without_history_retries_and_keeps_notice(self, monkeypatch):
+        """history を含まない保存(タイトル等)は CAS 負け後の再読 + 再試行で
+        成功し、driver の notice はそのまま残る。"""
+        self._interleave_driver_append(monkeypatch)
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url(f"/{self.chat_id}"),
+                json={"chat": {"title": "renamed"}},
+            )
+        assert response.status_code == 200, response.text
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        assert chat.title == "renamed"
+        assert len(self._notice_ids()) == 1  # notice は消えない
+
+    def test_save_without_interleaving_succeeds_first_try(self):
+        """介在が無ければ CAS は 1 回で通る(既存挙動の保存)。"""
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.post(
+                self.create_url(f"/{self.chat_id}"),
+                json={"chat": {"title": "plain"}},
+            )
+        assert response.status_code == 200
+        assert self.chats.get_chat_by_id(self.chat_id).title == "plain"
+
+    def test_updated_at_is_strictly_monotonic_within_a_second(self):
+        """chat 行への連続書き込みは同秒でも updated_at が必ず前進する
+        (敵対検証 2 — CAS のバージョンスタンプが秒粒度で ABA しない)。"""
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        stamps = [chat.updated_at]
+
+        updated = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
+        stamps.append(updated.updated_at)
+        updated = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
+        stamps.append(updated.updated_at)
+        updated = self.chats.toggle_chat_pinned_by_id(self.chat_id)
+        stamps.append(updated.updated_at)
+        updated = self.chats.toggle_chat_archive_by_id(self.chat_id)
+        stamps.append(updated.updated_at)
+        assert self.chats.record_usage_by_id_and_message_id(
+            self.chat_id, "m2", {"prompt_tokens": 1, "completion_tokens": 1}
+        )
+        stamps.append(self.chats.get_chat_by_id(self.chat_id).updated_at)
+
+        assert stamps == sorted(stamps)
+        assert len(set(stamps)) == len(stamps), stamps  # 同秒でも重複しない

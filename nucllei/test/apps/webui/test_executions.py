@@ -366,6 +366,20 @@ class TestExecutions(AbstractPostgresTest):
         assert self.Executions.get_execution_by_id("a3").status == "done"
         # 他 chat は無傷
         assert self.Executions.get_execution_by_id("b1").status == "running"
+        # cascade の停止は CAS と同時に配達済み(敵対検証 1 — 配達先消滅の恒久断念)。
+        # CAS 負け(自然完走済み)の a3 は保険の一括 mark(routers 側)が拾う
+        assert self.Executions.get_execution_by_id("a1").delivered_at is not None
+        assert self.Executions.get_execution_by_id("a2").delivered_at is not None
+        assert self.Executions.get_execution_by_id("a3").delivered_at is None
+        assert self.Executions.get_execution_by_id("b1").delivered_at is None
+
+    def test_individual_stop_keeps_the_row_undelivered(self):
+        """チップの個別 stop(stop エンドポイント / stop_task の基盤)は配達対象の
+        まま — delivered_at を立てない(敵対検証 1 の対称: cascade だけが立てる)。"""
+        self._insert()
+        row = asyncio.run(self.executions.stop_execution("e1"))
+        assert row.status == "stopped"
+        assert row.delivered_at is None
 
     def test_delete_chat_cascades_stop_to_chat_tree_executions(self):
         parent = self._insert_chat(title="parent")

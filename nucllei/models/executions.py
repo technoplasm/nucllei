@@ -152,12 +152,18 @@ class ExecutionsTable:
         meta: Optional[dict] = None,
         usage: Optional[dict] = None,
         duration: Optional[float] = None,
+        delivered: bool = False,
     ) -> bool:
         """running → 終端の guarded UPDATE(設計 D1)。
 
         WHERE id=? AND status='running' の CAS。rowcount 0 = 負け(既に他の書き手が
         終端化済み)= False を返し、呼び出し側は no-op(必要なら行を再読)。
         終端は一方向・一度きり — 終端間の遷移は存在しない。
+
+        delivered=True は終端化と**同一 UPDATE** で delivered_at も立てる
+        (chat 削除 cascade の恒久断念用 — #110 敵対検証 1)。終端化と配達確定の
+        間に await 窓を作ると、task cancel の cleanup wake で起きた配達 driver が
+        「terminal ∧ 未配達」の行を拾って消えゆく chat へ notice を書いてしまう。
         """
         if status not in ("done", "failed", "stopped", "orphaned"):
             log.error(f"finish_execution: invalid terminal status '{status}'")
@@ -168,6 +174,8 @@ class ExecutionsTable:
                     "status": status,
                     "finished_at": int(time.time()),
                 }
+                if delivered:
+                    values["delivered_at"] = int(time.time())
                 if result is not None:
                     values["result"] = result
                 if error is not None:

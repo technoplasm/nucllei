@@ -402,8 +402,11 @@ def build_exec_tools(user, metadata) -> dict:
         over = ids[TASK_IDS_MAX:]
         requested = ids[:TASK_IDS_MAX]
         rows = await _load_rows(requested)
-        if all(rows[tid] is None for tid in requested):
-            # 空・全不正は全体エラー(部分回収の形を返す意味がない)
+        if not over and all(rows[tid] is None for tid in requested):
+            # 全不正は全体エラー(部分回収の形を返す意味がない)。ただし上限超過分
+            # (over)がある場合は除く(#110 敵対検証 5): 21 件目以降に有効 id が
+            # 残っているかもしれず、全体エラーにするとモデルが per-entry の
+            # 「次の呼び出しで指定」案内を受け取れない — per-entry 形で返す。
             return _error(
                 "有効な task_id がありません"
                 "(このチャットで起動したタスクのみ扱えます)。"

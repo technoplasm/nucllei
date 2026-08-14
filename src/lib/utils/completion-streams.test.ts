@@ -10,6 +10,7 @@ import {
 	registerChatHandler,
 	unregisterChatHandler,
 	setFallbackHandler,
+	selectAttachableTaskIds,
 	type CompletionEnvelope,
 	type EnvelopeHandler
 } from './completion-streams';
@@ -171,5 +172,73 @@ describe('fallback handler の発動条件', () => {
 
 		expect(a.received).toEqual([]);
 		expect(fallback.received).toEqual(['m1']);
+	});
+});
+
+/**
+ * llens(#110): poll tick のアタッチ判定(selectAttachableTaskIds)の契約。
+ *
+ * 送信直後の自タブのターンは task イベント到着まで taskId: null の走行中 context
+ * として存在し getActiveTaskIds に現れない — この窓で 5 秒 tick がサーバ一覧の id へ
+ * アタッチすると同じ task に二重アタッチし delta が二重適用される(敵対検証で確定)。
+ * null-context が居る tick は全件スキップすることをここで縛る。
+ */
+describe('selectAttachableTaskIds(poll tick のアタッチ判定)', () => {
+	/** enqueue を手動制御できる SSE ボディ(task イベント未着の窓を再現する) */
+	const openSse = () => {
+		let controller!: ReadableStreamDefaultController<Uint8Array>;
+		const body = new ReadableStream<Uint8Array>({
+			start(c) {
+				controller = c;
+			}
+		});
+		return {
+			body,
+			push: (e: unknown) =>
+				controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`)),
+			close: () => controller.close()
+		};
+	};
+
+	const taskEnvelope = (chatId: string, taskId: string): CompletionEnvelope => ({
+		chat_id: chatId,
+		message_id: null,
+		data: { type: 'task', data: { task_id: taskId } }
+	});
+
+	it('taskId 未確定(task イベント未着)の走行中 context が居る間は全件スキップする', async () => {
+		const sse = openSse();
+		// consumeCompletionStream は最初の await(read)まで同期実行 = trackStream 済み
+		const consumed = consumeCompletionStream('cp1', sse.body);
+
+		// 送信直後の窓: サーバ一覧には task が載るが、自ターンの taskId は未確定
+		expect(selectAttachableTaskIds('cp1', ['t1'], new Set())).toEqual([]);
+
+		// task イベント到着後は通常ガードへ戻る: 自 task は除外・新規だけ返す
+		sse.push(taskEnvelope('cp1', 't1'));
+		await vi.waitFor(() => {
+			expect(selectAttachableTaskIds('cp1', ['t1', 't2'], new Set())).toEqual(['t2']);
+		});
+
+		sse.close();
+		await consumed;
+
+		// EOF 後は走行中 context が消え、全件アタッチ可能
+		expect(selectAttachableTaskIds('cp1', ['t1'], new Set())).toEqual(['t1']);
+	});
+
+	it('attach 済み(fetch 未解決含む)の id は返さない', () => {
+		expect(selectAttachableTaskIds('cp2', ['a', 'b'], new Set(['a']))).toEqual(['b']);
+	});
+
+	it('null-context スキップは chat 単位 — 他 chat の判定には波及しない', async () => {
+		const sse = openSse();
+		const consumed = consumeCompletionStream('cp3', sse.body);
+
+		expect(selectAttachableTaskIds('cp3', ['t1'], new Set())).toEqual([]);
+		expect(selectAttachableTaskIds('cp3-other', ['t9'], new Set())).toEqual(['t9']);
+
+		sse.close();
+		await consumed;
 	});
 });

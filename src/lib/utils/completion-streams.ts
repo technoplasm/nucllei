@@ -78,6 +78,32 @@ export function getActiveTaskIds(chatId: string): string[] {
 		.filter((taskId): taskId is string => taskId !== null);
 }
 
+/**
+ * llens(#110): poll tick(Chat の attachNewChatTasks)のアタッチ判定を一点に集約 —
+ * サーバが返した task 一覧から、いまアタッチしてよい id だけを返す。
+ *
+ * - 走行中 context が既に持つ id / attach 済み(fetch 未解決含む)id は除外
+ * - この chat に taskId 未確定(task イベント未着)の走行中 context が居る間は
+ *   全件スキップ([] を返す)。送信直後の自タブのターンは task_id が届くまで
+ *   taskId: null のまま activeStreams に居て getActiveTaskIds に現れない — この窓で
+ *   サーバ一覧の id へアタッチすると同じ task に二重アタッチし delta が二重適用される。
+ *   確定後の tick では通常の除外ガードが効く(スキップは 1 tick 遅延するだけ)。
+ */
+export function selectAttachableTaskIds(
+	chatId: string,
+	serverTaskIds: string[],
+	attachedTaskIds: ReadonlySet<string>
+): string[] {
+	const contexts = [...(activeStreams.get(chatId) ?? [])];
+	if (contexts.some((context) => context.taskId === null)) {
+		return [];
+	}
+	const activeTaskIds = new Set(
+		contexts.map((context) => context.taskId).filter((taskId): taskId is string => taskId !== null)
+	);
+	return serverTaskIds.filter((taskId) => !activeTaskIds.has(taskId) && !attachedTaskIds.has(taskId));
+}
+
 function trackStream(chatId: string, context: StreamContext) {
 	if (!activeStreams.has(chatId)) {
 		activeStreams.set(chatId, new Set());

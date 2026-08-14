@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { graftLocalTurnOntoServerHistory } from './history-graft';
+import { graftLocalTurnOntoServerHistory, stripLocalTurn } from './history-graft';
 import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 const msg = (
@@ -120,5 +120,74 @@ describe('graftLocalTurnOntoServerHistory', () => {
 
 		expect(server).toEqual(serverSnapshot);
 		expect(local).toEqual(localSnapshot);
+	});
+});
+
+// llens(#110): save-400 リカバリの refetch 失敗分岐の巻き戻し(敵対検証 A: 分岐非対称)。
+// 送信対を残したまま ok:false → prompt 復元 → 再送で user が二重化するのを防ぐ。
+describe('stripLocalTurn', () => {
+	it('送信対(user+assistant)を取り除き、送信前の先端へ currentId を戻す', () => {
+		// u1 → a1(保存済み)→ u2(送信中)→ a2(応答受け皿)
+		const local = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', ['u2']),
+				msg('u2', 'user', 'a1', ['a2']),
+				msg('a2', 'assistant', 'u2', [])
+			],
+			'a2'
+		);
+
+		const rolled = stripLocalTurn(local);
+
+		expect(rolled.messages['u2']).toBeUndefined();
+		expect(rolled.messages['a2']).toBeUndefined();
+		expect(rolled.currentId).toBe('a1');
+		// 幽霊参照を残さない
+		expect(rolled.messages['a1'].childrenIds).toEqual([]);
+	});
+
+	it('再生成(既存 user に assistant を足しただけ)では保存済み user を残す', () => {
+		// u1 → [a1(既存), a2(再生成の受け皿)]
+		const local = historyOf(
+			[
+				msg('u1', 'user', null, ['a1', 'a2']),
+				msg('a1', 'assistant', 'u1', []),
+				msg('a2', 'assistant', 'u1', [])
+			],
+			'a2'
+		);
+
+		const rolled = stripLocalTurn(local);
+
+		expect(rolled.messages['a2']).toBeUndefined();
+		expect(rolled.messages['u1']).toBeDefined();
+		expect(rolled.messages['u1'].childrenIds).toEqual(['a1']);
+		expect(rolled.currentId).toBe('u1');
+	});
+
+	it('初回対(root からの送信)は空 history へ戻る', () => {
+		const local = historyOf(
+			[msg('u1', 'user', null, ['a1']), msg('a1', 'assistant', 'u1', [])],
+			'a1'
+		);
+
+		const rolled = stripLocalTurn(local);
+
+		expect(rolled.messages).toEqual({});
+		expect(rolled.currentId).toBeNull();
+	});
+
+	it('currentId が null / 不在ならそのまま返し、入力は破壊しない', () => {
+		const empty = historyOf([], null);
+		expect(stripLocalTurn(empty)).toEqual(empty);
+
+		const local = historyOf(
+			[msg('u1', 'user', null, ['a1']), msg('a1', 'assistant', 'u1', [])],
+			'a1'
+		);
+		const snapshot = JSON.parse(JSON.stringify(local));
+		stripLocalTurn(local);
+		expect(local).toEqual(snapshot);
 	});
 });
