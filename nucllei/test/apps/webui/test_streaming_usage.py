@@ -289,6 +289,23 @@ def test_usage_is_recorded_once_when_final_frame_follows(monkeypatch):
     assert record_calls[0]["usage"]["completion_tokens"] == 4
 
 
+def test_context_size_from_litellm_max_input_tokens(monkeypatch):
+    """LiteLLM(1.96+)の /v1/models が載せる max_input_tokens も実測値として読む。
+
+    config.yaml の model_info.max_input_tokens がそのまま出るキー。SGLang の
+    max_model_len と同格に扱うので手動設定は要らない。
+    """
+    _, record_calls = asyncio.run(
+        _consume(
+            monkeypatch,
+            _sse_response_from_frames(_litellm_frames()),
+            model={"id": "kimi-k2.6", "openai": {"max_input_tokens": 262144}},
+        )
+    )
+
+    assert record_calls[0]["context_size"] == 262144
+
+
 def test_context_size_falls_back_to_model_meta(monkeypatch):
     """max_model_len を返さない endpoint 向けに meta.context_size を手で設定できる。"""
     _, record_calls = asyncio.run(

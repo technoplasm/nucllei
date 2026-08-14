@@ -148,26 +148,39 @@ def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
     return True
 
 
-def get_model_context_size(request, model: dict) -> Optional[int]:
-    """llens(#57): モデルの context 長(max_model_len)を解決する。
+def _context_size_from_raw(raw: dict) -> Optional[int]:
+    """/v1/models のエントリから context 長を読む。
 
-    SGLang の /v1/models が返す max_model_len は raw model
-    (app.state.MODELS[id]["openai"])に保持されている。preset モデル
-    (base_model_id 持ち)は raw を持たないため base モデルを辿る。
-
-    max_model_len は OpenAI の /v1/models 仕様には無い SGLang 拡張で、間に
-    proxy が挟まると落ちる(LiteLLM v1.82.3 実測 — id/object/created/owned_by
-    の 4 キーしか返さず、context 長が既知の商用モデルでも同じ)。そういう配備
-    向けの**最後の手段**として meta.context_size(モデルへ手で設定)を見る。
-    実測値が取れるならそちらが真 — 手動値は stale になりうるので fallback 側に
-    置く(capabilities.usage 等と同じく UI は持たず model API から設定する)。
+    `max_model_len` は SGLang 拡張、`max_input_tokens` は LiteLLM が
+    (1.96 以降の)/v1/models に載せるキーで、config.yaml の
+    `model_info.max_input_tokens` がそのまま出る。どちらも「その endpoint が
+    申告した実測値」なので同格に扱う。
     """
-    ctx = (model.get("openai") or {}).get("max_model_len")
+    for key in ("max_model_len", "max_input_tokens"):
+        value = (raw or {}).get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def get_model_context_size(request, model: dict) -> Optional[int]:
+    """llens(#57): モデルの context 長を解決する。
+
+    endpoint の /v1/models が返す値は raw model(app.state.MODELS[id]["openai"])に
+    保持されている。preset モデル(base_model_id 持ち)は raw を持たないため
+    base モデルを辿る。
+
+    endpoint が何も申告しない配備向けの**最後の手段**として
+    meta.context_size(モデルへ手で設定)を見る。実測値が取れるならそちらが真 —
+    手動値は stale になりうるので fallback 側に置く(capabilities.usage 等と
+    同じく UI は持たず model API から設定する)。
+    """
+    ctx = _context_size_from_raw(model.get("openai") or {})
     if ctx is None:
         base_id = (model.get("info") or {}).get("base_model_id")
         if base_id:
             base = request.app.state.MODELS.get(base_id) or {}
-            ctx = (base.get("openai") or {}).get("max_model_len")
+            ctx = _context_size_from_raw(base.get("openai") or {})
     if ctx is None:
         meta = (model.get("info") or {}).get("meta") or {}
         ctx = meta.get("context_size")

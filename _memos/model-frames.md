@@ -114,15 +114,26 @@ middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試�
    届く — finish_reason チャンクの次、`[DONE]` の直前。`choices: []` は OpenAI の
    streaming 仕様が定めた形ではないので、**フレームの形を永続化の条件にしない**
    (consume_model_stream はストリーム終端で最後に観測した usage を拾う)。
-2. **`stream_options.continuous_usage_stats` が通らない。** SGLang 拡張のため
-   proxy が落とし、usage チャンクは最後の 1 個しか来ない。生成中のライブ tok/s
-   (#102)は原理的に出せない — 確定値表示のみになる。
+2. **チャンクに載る累積 usage が消える。** `stream_options` 自体は proxy を素通りして
+   SGLang まで届く(`litellm/utils.py` の drop_params ループが `stream_options` を
+   明示的に除外している)ので、SGLang は continuous で usage を返している。**落として
+   いるのは LiteLLM の受信側** — `litellm_core_utils/streaming_handler.py` が全チャンク
+   から usage を削除し(`# remove usage from chunk, only send on final chunk`)、
+   最後に自前で 1 個合成する。上の 1. の「choices 非空 + usage」はこの合成チャンク。
+   ハードコードで config のノブは無く、1.96 でも同じ(退避先が `_hidden_params` に
+   増えただけ)。生成中のライブ tok/s(#102)は proxy 経由では出せない — 確定値表示のみ。
+   raw が要るなら LiteLLM の pass-through endpoint(`general_settings.pass_through_endpoints`、
+   SSE をバイト単位で無改変に流す)を使う。
 3. **`usage.reasoning_tokens`(SGLang 拡張)が来ない。** 代わりに OpenAI 形の
    `usage.completion_tokens_details.reasoning_tokens` が入る。
-4. **`/v1/models` の `max_model_len` が消える。** LiteLLM は
+4. **`/v1/models` の `max_model_len` が消える。** LiteLLM 1.82.3 は
    id/object/created/owned_by の 4 キーしか返さない(context 長が既知の商用モデルでも
-   同じ)。context_size は `info.meta.context_size` を手で設定して補う
-   (`get_model_context_size` の最終 fallback)。
+   同じ)。**1.96 以降は `max_input_tokens` / `max_output_tokens` / `mode` を返す**
+   (`proxy/utils.py` の `create_model_info_response`。config.yaml の
+   `model_info.max_input_tokens` が `router.get_configured_token_limits()` 経由で
+   優先される)。`get_model_context_size` は `max_model_len` と `max_input_tokens` を
+   同格に読む。どちらも来ない配備は `info.meta.context_size` を手で設定して補う
+   (最終 fallback)。
 5. delta の `reasoning_content: null` の明示、`matched_stop`、`logprobs` も落ちる。
 
 ## 未キャプチャ(条件が変わったら追加)
