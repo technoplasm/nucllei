@@ -12,7 +12,8 @@ import { get } from 'svelte/store';
 
 import { chatId, chats, currentChatPage, type Model } from '$lib/stores';
 import { createMessagesList } from '$lib/utils';
-import { createNewChat, getChatList, updateChatById } from '$lib/apis/chats';
+import { createNewChat, getChatById, getChatList, updateChatById } from '$lib/apis/chats';
+import { graftLocalTurnOntoServerHistory } from '$lib/utils/history-graft';
 import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -95,17 +96,59 @@ export class ChatSession {
 		return _chatId;
 	};
 
-	saveChatHandler = async (_chatId: string, history: ChatHistory) => {
-		if (get(chatId) == _chatId) {
-			this.chat = await updateChatById(_chatId, {
+	/**
+	 * llens(#110): 保存 + save-400 リカバリ(契約 §M6 / 批評 F-3 裁定)。
+	 *
+	 * BE のサーバ駆動配達(通知ターンの直接 append)と競合すると updateChatById が
+	 * 400 で拒否する。その場合は ① getChatById で refetch ② ローカルの送信中
+	 * user+assistant 対を新 currentId へ接ぎ直し(history-graft)③ 再保存 1 回。
+	 * それでも失敗なら {ok:false} — 呼び出し側(send.ts)が prompt 復元 + toast。
+	 * 接ぎ直しが起きたときは history に採用した merged を返す(送信側は wire を
+	 * これで組み直す — 通知メッセージがモデルに載る)。
+	 */
+	saveChatHandler = async (
+		_chatId: string,
+		history: ChatHistory
+	): Promise<{ ok: boolean; history?: ChatHistory }> => {
+		if (get(chatId) != _chatId) {
+			return { ok: true };
+		}
+		const save = (target: ChatHistory) =>
+			updateChatById(_chatId, {
 				models: this.selectedModels,
-				history: history,
-				messages: createMessagesList(history, history.currentId),
+				history: target,
+				messages: createMessagesList(target, target.currentId),
 				params: this.params,
 				files: this.chatFiles
 			});
-			currentChatPage.set(1);
-			await chats.set(await getChatList(get(currentChatPage)));
+
+		let saved: unknown = null;
+		let merged: ChatHistory | undefined;
+		try {
+			saved = await save(history);
+		} catch (e) {
+			if ((e as { status?: number } | null)?.status !== 400) {
+				throw e;
+			}
+			const server = await getChatById(_chatId).catch(() => null);
+			if (!server?.chat?.history) {
+				return { ok: false };
+			}
+			merged = graftLocalTurnOntoServerHistory(server.chat.history, history);
+			try {
+				saved = await save(merged);
+			} catch (e2) {
+				// 再試行は 1 回だけ。ローカルは refetch したサーバ形へ揃える
+				// (未保存の見かけを残さない — 呼び出し側が prompt を入力欄へ復元する)
+				this.history = server.chat.history;
+				return { ok: false };
+			}
+			this.history = merged;
 		}
+
+		this.chat = saved;
+		currentChatPage.set(1);
+		await chats.set(await getChatList(get(currentChatPage)));
+		return { ok: true, ...(merged ? { history: merged } : {}) };
 	};
 }

@@ -1,43 +1,41 @@
 <script lang="ts">
 	// 入力欄下部行(floating トークンゲージと同じ行)の左側に出す
-	// 「バックグラウンド実行」チップ(#110)。データ源は exec 行
-	// (executions store — 5 秒ポーリング + 境界の refreshAndScan)。
-	// running + 未回収 terminal の件数バッジを出し、0 件なら非表示。
-	// クリックで一覧をポップオーバー表示し、tool 名・経過・個別停止を提供する。
-	// 連鎖上限(自動再開の停止中)もここに表示する。
+	// 「バックグラウンドタスク」チップ(#110)。データ源は exec 行
+	// (executions store — 5 秒ポーリング + 境界の refresh)。
+	// running + 未配達 terminal(terminal ∧ !delivered)の件数バッジを出し、
+	// 0 件なら非表示。クリックで一覧をポップオーバー表示し、tool 名・経過・
+	// 個別停止を提供する。連鎖上限で BE の自動再開(配達)が保留中
+	// (一覧 API の resume_suspended)もここに表示する。
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import { chatId, mobile } from '$lib/stores';
 	import {
 		executionsState,
-		refreshAndScanExecutions,
+		isUndeliveredTerminal,
+		refreshExecutions,
 		type ExecutionEntry
 	} from '$lib/stores/executions.svelte';
-	import { isExecutionResumeChainLimited } from '$lib/stores/execution-resume.svelte';
 	import { stopChatExecution } from '$lib/apis/chats';
 	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
-	import type { ChatHistory } from '$lib/types/chat';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 
 	const i18n = getContext('i18n');
 
-	// 個別停止後の refreshAndScan(stopped の terminal 検知)に履歴が要る —
-	// handled 判定・自動再開の走査は exec 行と履歴の突合(仕様 §9)
-	let { history }: { history: ChatHistory } = $props();
-
-	// 表示対象 = running + 未回収 terminal(chatId スコープ一致のときだけ)
+	// 表示対象 = running + 未配達 terminal(chatId スコープ一致のときだけ)
 	const entries = $derived(
 		$chatId && executionsState.chatId === $chatId
 			? executionsState.entries.filter(
-					(entry) => entry.status === 'running' || executionsState.unrecoveredIds.includes(entry.id)
+					(entry) => entry.status === 'running' || isUndeliveredTerminal(entry)
 				)
 			: []
 	);
 	const runningCount = $derived(entries.filter((entry) => entry.status === 'running').length);
-	const chainLimited = $derived(isExecutionResumeChainLimited($chatId));
+	const resumeSuspended = $derived(
+		!!$chatId && executionsState.chatId === $chatId && executionsState.resumeSuspended
+	);
 
 	let show = $state(false);
 	let stoppingIds = $state<Record<string, boolean>>({});
@@ -67,7 +65,7 @@
 	};
 
 	// 個別停止(D6: 親ターン stop は exec に伝播しない — 止めたければここ)。
-	// 停止後は refreshAndScan で stopped を即取り込み、自動再開の走査も回す
+	// 停止後は refresh で stopped を即取り込む(配達はサーバ駆動 — FE は表示のみ)
 	const stopExecution = async (execId: string) => {
 		const targetChatId = $chatId;
 		if (!targetChatId) {
@@ -79,14 +77,14 @@
 				toast.error(`${error}`);
 				return null;
 			});
-			await refreshAndScanExecutions(targetChatId, history);
+			await refreshExecutions(targetChatId);
 		} finally {
 			delete stoppingIds[execId];
 		}
 	};
 </script>
 
-{#if entries.length > 0 || chainLimited}
+{#if entries.length > 0 || resumeSuspended}
 	<Dropdown bind:show>
 		<button
 			class="flex items-center gap-1.5 bg-surface-raised border border-line rounded-full px-2.5 py-1 text-xs text-content-muted tabular-nums pointer-events-auto cursor-pointer hover:text-content transition"
@@ -99,7 +97,7 @@
 			{/if}
 			<span>{entries.length}</span>
 			{#if !$mobile}
-				<span>{$i18n.t('Background')}</span>
+				<span>{$i18n.t('Background tasks')}</span>
 			{/if}
 		</button>
 
@@ -135,8 +133,8 @@
 						{/if}
 					</div>
 				{/each}
-				{#if chainLimited}
-					<!-- 連鎖上限(仕様 §9): ユーザー発話なしの自動 turn が上限に達した。
+				{#if resumeSuspended}
+					<!-- 連鎖上限(契約 §M3): 無人連続ターンが上限に達し、BE が配達を保留中。
 					     次のユーザー発話で連鎖カウントが切れて自動再開が再度有効になる -->
 					<div
 						class="flex items-center gap-2 px-3 py-2 text-xs text-content-muted border-t border-line min-w-0"

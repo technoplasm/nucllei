@@ -1,10 +1,10 @@
 <script lang="ts">
-	// background 昇格された tool 呼び出しの running 形表示(#110)。
+	// background 昇格された tool 呼び出し(バックグラウンドタスク)の spawn 表示(#110)。
 	// 親メッセージの tool result は spawn 時の running 形のまま不変(append-only)で、
 	// 完了の真実は exec 行 — 現在の状態は executions store(5 秒ポーリング)から引く
 	// 1 行ステータス。store に行が無い(未 fetch・他 chat の履歴)間は result の
-	// running 形を信じてスピナーを出す。回収後の結果は別 call(await_async)の
-	// render_descriptor パススルーで既存ブロックが描く。
+	// running 形を信じてスピナーを出す。結果は BE の配達通知(SystemNoticeMessage)
+	// または await_task の render_descriptor パススルーで描かれる。
 	import { getContext } from 'svelte';
 
 	import { getExecutionEntry } from '$lib/stores/executions.svelte';
@@ -26,12 +26,11 @@
 	} = $props();
 
 	const entry = $derived(getExecutionEntry(display.execId));
-	// store に行が無い間は結果が運んできた status(await_async の終端形)、それも
-	// 無ければ running 扱い(result の running 形が最後に知られた真実)
-	const status = $derived(entry?.status ?? display.status ?? 'running');
+	// store に行が無い間は running 扱い(result の running 形が最後に知られた真実)
+	const status = $derived(entry?.status ?? 'running');
 	const toolName = $derived(entry?.tool_name ?? display.toolName ?? '');
 	// 終端のエラー文言は畳まずに見せる(tooltip だけだと気づけない)
-	const errorText = $derived(entry?.error ?? display.error ?? '');
+	const errorText = $derived(entry?.error ?? '');
 
 	const statusLabel = $derived.by(() => {
 		if (status === 'done') return $i18n.t('Completed');

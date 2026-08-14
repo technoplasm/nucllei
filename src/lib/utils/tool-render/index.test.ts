@@ -239,38 +239,39 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('execution: spawn 即返し形 {ok, exec_id, tool_name, status: "running"} は descriptor より先に shape で受ける(#110)', () => {
+	it('execution: spawn 即返し形 {ok, task_id, tool_name, status: "running"} は descriptor より先に shape で受ける(#110)', () => {
 		// spawn call の descriptor は実 tool(subagent 等)のもの — subagent 宣言が
-		// 付いていても exec running 形は execution として描く
+		// 付いていても spawn running 形は execution として描く
 		const content = JSON.stringify({
 			ok: true,
-			exec_id: 'exec-1111',
+			task_id: 'task-1111',
 			tool_name: 'run_subagent',
 			status: 'running'
 		});
 		expect(classifyToolResult(content, { kind: 'subagent' })).toEqual({
 			kind: 'execution',
-			execId: 'exec-1111',
+			execId: 'task-1111',
 			toolName: 'run_subagent'
 		});
 		expect(classifyToolResult(content)).toEqual({
 			kind: 'execution',
-			execId: 'exec-1111',
+			execId: 'task-1111',
 			toolName: 'run_subagent'
 		});
 	});
 
-	it('execution: tool_name 欠落(await_async timeout 形 {exec_id, status, elapsed_s})も受ける(#110)', () => {
-		const content = JSON.stringify({ exec_id: 'exec-2222', status: 'running', elapsed_s: 12 });
+	it('execution: spawn 形は tool_name 欠落でも受ける(#110)', () => {
+		const content = JSON.stringify({ task_id: 'task-2222', status: 'running' });
 		expect(classifyToolResult(content)).toEqual({
 			kind: 'execution',
-			execId: 'exec-2222'
+			execId: 'task-2222'
 		});
 	});
 
-	it('execution: 封筒(await_async の done 回収形)を剥がして中身を descriptor で描く(#110)', () => {
-		// BE は results[].render を実 tool の宣言(exec 行の render_descriptor)で
-		// 上書きしてくる。descriptor が指すのは封筒ではなく **result の中身**
+	it('execution: await_task の {"tasks":[...]} は 1 件 ∧ done ∧ render 宣言ありのとき剥がす(#110)', () => {
+		// BE は results[].render を実 tool の宣言(render_descriptor)で上書きしてくる
+		// のは「要求 id ちょうど 1 件 ∧ done」のときだけ(契約 §M1)。
+		// descriptor が指すのは封筒ではなく **result の中身**
 		const inner = {
 			ok: true,
 			session_id: 'child-chat-9',
@@ -278,13 +279,17 @@ describe('classifyToolResult', () => {
 			usage: { prompt_tokens: 10, completion_tokens: 20 }
 		};
 		const envelope = JSON.stringify({
-			ok: true,
-			exec_id: 'exec-5555',
-			tool_name: 'run_subagent',
-			status: 'done',
-			result: inner, // BE が json.loads 済みの生 object で載せる(二重エスケープ回避)
-			duration: 12.5,
-			usage: { prompt_tokens: 10 }
+			tasks: [
+				{
+					ok: true,
+					task_id: 'task-5555',
+					tool_name: 'run_subagent',
+					status: 'done',
+					result: inner, // BE が json.loads 済みの生 object で載せる(二重エスケープ回避)
+					duration: 12.5,
+					usage: { prompt_tokens: 10 }
+				}
+			]
 		});
 		expect(classifyToolResult(envelope, { kind: 'subagent' })).toEqual({
 			kind: 'subagent',
@@ -298,11 +303,7 @@ describe('classifyToolResult', () => {
 	it('execution: 封筒剥がしは中身が文字列でも効く(text / markdown / code 宣言)', () => {
 		const wrap = (result: unknown) =>
 			JSON.stringify({
-				ok: true,
-				exec_id: 'exec-6666',
-				tool_name: 'probe',
-				status: 'done',
-				result
+				tasks: [{ ok: true, task_id: 'task-6666', tool_name: 'probe', status: 'done', result }]
 			});
 
 		expect(classifyToolResult(wrap('本文だけの結果'), { kind: 'text' })).toEqual({
@@ -331,48 +332,57 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('execution: 結果本文の無い終端形(failed/stopped/orphaned)は execution 表示のまま(#110)', () => {
-		const failed = JSON.stringify({
-			ok: false,
-			exec_id: 'exec-7777',
-			tool_name: 'run_subagent',
-			status: 'failed',
-			error: '壊れた'
+	it('execution: 複数件・running(時間切れ)・非 done の tasks は剥がさず JSON のまま(#110)', () => {
+		// 複数件(fan-out 回収)は per-entry の JSON をそのまま見せる
+		const multi = {
+			tasks: [
+				{ ok: true, task_id: 'task-a', tool_name: 'probe', status: 'done', result: 'x' },
+				{ ok: false, task_id: 'task-b', tool_name: 'probe', status: 'failed', error: '壊れた' }
+			]
+		};
+		expect(classifyToolResult(JSON.stringify(multi), { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify(multi, null, 2)
 		});
-		expect(classifyToolResult(failed, { kind: 'subagent' })).toEqual({
-			kind: 'execution',
-			execId: 'exec-7777',
-			toolName: 'run_subagent',
-			status: 'failed',
-			error: '壊れた'
+		// 1 件でも running(時間切れの部分回収)は剥がさない
+		const running = {
+			tasks: [
+				{ task_id: 'task-c', tool_name: 'probe', status: 'running', started_at: 1, elapsed_s: 9.5 }
+			]
+		};
+		expect(classifyToolResult(JSON.stringify(running), { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify(running, null, 2)
 		});
-		// check_async の terminal 形(結果本文を返さない)も同じ状態表示に落ちる
-		const checked = JSON.stringify({
-			exec_id: 'exec-8888',
-			tool_name: 'probe',
-			status: 'stopped',
-			elapsed_s: 3,
-			hint: '結果は await_async(exec_id) で回収してください。'
-		});
-		expect(classifyToolResult(checked)).toEqual({
-			kind: 'execution',
-			execId: 'exec-8888',
-			toolName: 'probe',
-			status: 'stopped'
+		// 1 件でも result を持たない終端形(failed — check_task/stop_task の形も同じ)は
+		// 剥がさない
+		const failed = {
+			tasks: [{ ok: false, task_id: 'task-d', tool_name: 'probe', status: 'failed', error: 'x' }]
+		};
+		expect(classifyToolResult(JSON.stringify(failed), { kind: 'json' })).toEqual({
+			kind: 'json',
+			value: JSON.stringify(failed, null, 2)
 		});
 	});
 
+	it('execution: render 宣言なしの tasks は剥がさない(通常描画 — 契約 §M6)', () => {
+		const envelope = JSON.stringify({
+			tasks: [{ ok: true, task_id: 'task-e', tool_name: 'probe', status: 'done', result: 'x' }]
+		});
+		expect(classifyToolResult(envelope)).toEqual({ kind: 'text', value: envelope });
+	});
+
 	it('execution: 封筒に見えない形は通常分岐へ(#110)', () => {
-		// 未知 status は封筒扱いしない(形が合わなければ descriptor どおり)
-		const unknown = JSON.stringify({ exec_id: 'exec-9999', status: 'queued' });
+		// running 以外の status は spawn 形として扱わない(形が合わなければ descriptor どおり)
+		const unknown = JSON.stringify({ task_id: 'task-9999', status: 'queued' });
 		expect(classifyToolResult(unknown, { kind: 'json' })).toEqual({
 			kind: 'json',
-			value: JSON.stringify({ exec_id: 'exec-9999', status: 'queued' }, null, 2)
+			value: JSON.stringify({ task_id: 'task-9999', status: 'queued' }, null, 2)
 		});
-		// 'exec_id' を本文に含むだけの非 JSON も text のまま
-		expect(classifyToolResult('exec_id exec-4444 is running')).toEqual({
+		// 'task_id' を本文に含むだけの非 JSON も text のまま
+		expect(classifyToolResult('task_id task-4444 is running')).toEqual({
 			kind: 'text',
-			value: 'exec_id exec-4444 is running'
+			value: 'task_id task-4444 is running'
 		});
 	});
 

@@ -1,0 +1,75 @@
+/**
+ * llens(#110): save-400 リカバリの接ぎ直し(契約 §M6 / 批評 F-3 裁定)。
+ *
+ * BE がバックグラウンドタスクの配達ターン(通知 user + 空 assistant)を chat へ
+ * 直接 append すると、FE の手元 history は stale になり updateChatById が 400 で
+ * 拒否される(BE 追加分を消す上書きを防ぐガード)。ここでは refetch した
+ * サーバ history を土台に、ローカルで積んだ送信中の user+assistant 対
+ * (= サーバに無いローカル末尾鎖)を新 currentId へ parentId 接ぎ直しして返す。
+ *
+ * - サーバに**ある** id はローカル版で上書き(ストリーム済み本文はローカルが新しい)。
+ *   ただし childrenIds はサーバ側を優先に和集合 — BE が生やした通知子を消さない
+ * - サーバに**無い**ローカル末尾鎖(currentId から親方向に辿った未保存分)は、
+ *   先頭の parentId をサーバ currentId に差し替えて接ぐ
+ * - 末尾鎖が無ければサーバ currentId を採る(配達ターンの先端 = より深い側)
+ */
+import type { ChatHistory, ChatMessage } from '$lib/types/chat';
+
+export const graftLocalTurnOntoServerHistory = (
+	server: ChatHistory,
+	local: ChatHistory
+): ChatHistory => {
+	const merged: ChatHistory = JSON.parse(JSON.stringify(server));
+
+	// ローカル末尾鎖: currentId から親方向へ、サーバに無い message を集める
+	// (deepest → shallow の順に貯め、最後に反転して oldest-first)
+	const suffix: ChatMessage[] = [];
+	const seen = new Set<string>();
+	let id = local.currentId;
+	while (id && !seen.has(id) && !server.messages[id]) {
+		seen.add(id);
+		const message = local.messages[id];
+		if (!message) {
+			break;
+		}
+		suffix.push(message);
+		id = message.parentId;
+	}
+	suffix.reverse();
+	const suffixIds = new Set(suffix.map((message) => message.id));
+
+	// 共有 id の上書き: 本文・状態はローカルが新しい。childrenIds はサーバの並びを
+	// 保った和集合(BE の通知子を温存)から末尾鎖の id を除く — 鎖は接ぎ直し先
+	// (新 currentId)にだけぶら下げる(旧位置に幽霊参照を残さない)
+	for (const message of Object.values(local.messages)) {
+		const serverMessage = merged.messages[message.id];
+		if (!serverMessage) {
+			continue;
+		}
+		const childrenIds = [
+			...serverMessage.childrenIds,
+			...message.childrenIds.filter((childId) => !serverMessage.childrenIds.includes(childId))
+		].filter((childId) => !suffixIds.has(childId));
+		merged.messages[message.id] = {
+			...JSON.parse(JSON.stringify(message)),
+			childrenIds
+		};
+	}
+
+	if (suffix.length > 0) {
+		const graftParentId = merged.currentId;
+		const head = { ...JSON.parse(JSON.stringify(suffix[0])), parentId: graftParentId };
+		merged.messages[head.id] = head;
+		for (const message of suffix.slice(1)) {
+			merged.messages[message.id] = JSON.parse(JSON.stringify(message));
+		}
+		const graftParent = graftParentId ? merged.messages[graftParentId] : undefined;
+		if (graftParent && !graftParent.childrenIds.includes(head.id)) {
+			graftParent.childrenIds = [...graftParent.childrenIds, head.id];
+		}
+		merged.currentId = local.currentId;
+	}
+	// 末尾鎖が無ければ merged.currentId(サーバの先端)をそのまま採る
+
+	return merged;
+};

@@ -146,12 +146,12 @@ export type ResultDisplay =
 			usage?: SubagentUsage;
 	  }
 	// background 昇格された tool 呼び出しの状態表示(#110)。spawn の即返し
-	// {ok, exec_id, tool_name, status: "running"} / check_async / await_async の
-	// timeout 形と、結果本文を持たない終端形(failed / stopped / orphaned)。
-	// 親メッセージの result は以後不変(append-only)なので、現在の状態は
-	// ExecutionBlock が executions store(exec 行ポーリング)から引く。status /
-	// error は store に行が無いとき(未 fetch・GC 済み)の拠り所。
-	| { kind: 'execution'; execId: string; toolName?: string; status?: string; error?: string };
+	// {ok, task_id, tool_name, status: "running"} が対象。親メッセージの result は
+	// 以後不変(append-only)なので、現在の状態は ExecutionBlock が executions store
+	// (exec 行ポーリング)から引く。回収(await_task)は {"tasks":[...]} 形で届き、
+	// ここではなく tasks 封筒の剥がし(classifyToolResult)が扱う。
+	// FE 内部の変数名は execId のまま(asyncio の task_id と取り違えないための境界)
+	| { kind: 'execution'; execId: string; toolName?: string };
 
 // 文字列化された JSON を再帰的に剥がす(tool 結果は dict/list が json.dumps 済み
 // 文字列で届くため)。剥がすのは文字列層のみ — 旧実装はスカラー到達後も再帰し、
@@ -176,24 +176,26 @@ export const formatJSONString = (str: unknown): string => {
 	return `${JSON.stringify(String(parsed))}`;
 };
 
-// #110: execution チャンネルの「封筒」— spawn 即返し / check_async / await_async が
-// 返す {exec_id, tool_name, status, result?, error?, ...} の共通形。
-const EXECUTION_STATUSES = new Set(['running', 'done', 'failed', 'stopped', 'orphaned']);
+// #110: execution チャンネルの「封筒」2 種。
+// ① spawn 即返し {ok, task_id, tool_name, status: "running"} — kind=execution の
+//    状態表示へ(現在状態は exec 行ポーリングが持つ)。
+// ② await_task の返り {"tasks":[ENTRY...]} — 要求 id がちょうど 1 件 ∧ done ∧
+//    render 宣言ありのときだけ中身(ENTRY.result)を descriptor で描き直す。
+//    複数件・running(時間切れ)・terminal 非 done は剥がさず通常描画(JSON のまま)。
+//    check_task / stop_task も {"tasks":[...]} だが結果本文(result)を持たないため
+//    剥がし条件に合わず、自然に通常描画になる。
 
-type ExecutionEnvelope = {
+type SpawnEnvelope = {
 	execId: string;
 	toolName?: string;
-	status: string;
-	error?: string;
-	// done の回収形のみ。実 tool の生結果(文字列 or BE が json.loads 済みの object)
-	result?: unknown;
 };
 
-// 封筒として読めるなら剥がした要素を返す。exec_id ∧ 既知 status の shape で判定する
-// (descriptor は封筒ではなく**中身**を指すため、descriptor 分岐より先に効く必要がある)。
-const parseExecutionEnvelope = (content: string): ExecutionEnvelope | null => {
+// spawn 即返し形として読めるなら剥がした要素を返す。task_id ∧ status running の
+// shape で判定する(descriptor は封筒ではなく実 tool を指すため、descriptor 分岐より
+// 先に効く必要がある)。
+const parseSpawnEnvelope = (content: string): SpawnEnvelope | null => {
 	// 生文字列で先に絞り、無関係な結果の JSON.parse を避ける
-	if (!content.includes('exec_id')) {
+	if (!content.includes('task_id')) {
 		return null;
 	}
 	let parsed: unknown;
@@ -206,19 +208,46 @@ const parseExecutionEnvelope = (content: string): ExecutionEnvelope | null => {
 		return null;
 	}
 	const record = parsed as Record<string, unknown>;
-	if (typeof record.exec_id !== 'string' || typeof record.status !== 'string') {
-		return null;
-	}
-	if (!EXECUTION_STATUSES.has(record.status)) {
+	if (typeof record.task_id !== 'string' || record.status !== 'running') {
 		return null;
 	}
 	return {
-		execId: record.exec_id,
-		...(typeof record.tool_name === 'string' ? { toolName: record.tool_name } : {}),
-		status: record.status,
-		...(typeof record.error === 'string' ? { error: record.error } : {}),
-		...(record.result === undefined || record.result === null ? {} : { result: record.result })
+		execId: record.task_id,
+		...(typeof record.tool_name === 'string' ? { toolName: record.tool_name } : {})
 	};
+};
+
+// await_task の {"tasks":[...]} から「1 件 ∧ done ∧ result あり」の中身を取り出す。
+// 条件に合わない形(複数件・running・result 無し・tasks 以外)は null。
+const parseSingleDoneTaskResult = (content: string): unknown | undefined => {
+	if (!content.includes('task_id')) {
+		return undefined;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch (e) {
+		return undefined;
+	}
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return undefined;
+	}
+	const tasks = (parsed as Record<string, unknown>).tasks;
+	if (!Array.isArray(tasks) || tasks.length !== 1) {
+		return undefined;
+	}
+	const entry = tasks[0];
+	if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+		return undefined;
+	}
+	const record = entry as Record<string, unknown>;
+	if (typeof record.task_id !== 'string' || record.status !== 'done') {
+		return undefined;
+	}
+	if (record.result === undefined || record.result === null) {
+		return undefined;
+	}
+	return record.result;
 };
 
 // tool 結果(文字列)をディスクリプタで出し分ける。ディスクリプタは
@@ -234,15 +263,24 @@ export const classifyToolResult = (
 ): ResultDisplay => {
 	// #110: execution の封筒は shape で判定し、descriptor 分岐より**先**に置く。
 	// この call に付く descriptor は実 tool(subagent 等)のものであって封筒の形を
-	// 表さない — await_async の回収形はここで剥がし、中身に descriptor を適用する。
-	const envelope = parseExecutionEnvelope(content);
-	if (envelope !== null) {
-		if (envelope.status !== 'running' && envelope.result !== undefined) {
-			// done の回収形: 封筒を剥がして実 tool の結果として描き直す
-			// (BE は results[].render を実 tool の宣言で上書きしてくる — §8)。
+	// 表さない。spawn 即返しは状態表示(kind=execution)へ。
+	const spawn = parseSpawnEnvelope(content);
+	if (spawn !== null) {
+		return {
+			kind: 'execution',
+			execId: spawn.execId,
+			...(spawn.toolName ? { toolName: spawn.toolName } : {})
+		};
+	}
+	// await_task の回収形 {"tasks":[...]}: 要求 id がちょうど 1 件 ∧ done ∧
+	// render 宣言ありのときだけ剥がし、中身に descriptor を適用する(BE は
+	// results[].render を実 tool の宣言で上書きしてくる — この条件のときだけ)。
+	// 複数件・running・非 done は剥がさない — 通常描画(runtime の json render)。
+	if (descriptor !== undefined) {
+		const raw = parseSingleDoneTaskResult(content);
+		if (raw !== undefined) {
 			// 中身がさらに封筒でも剥がせるよう再帰する。中身は必ず封筒より短いので
 			// 停止する(文字列は JSON が自身を含み得ない)。
-			const raw = envelope.result;
 			const inner = typeof raw === 'string' ? raw : JSON.stringify(raw);
 			// 中身が**文字列**なのに kind=json は、封筒 dict 由来の型 render が
 			// そのまま来た(または切詰めで render が降格された)ケース — 実 tool が
@@ -251,16 +289,6 @@ export const classifyToolResult = (
 				typeof raw === 'string' && descriptor?.kind === 'json' ? undefined : descriptor;
 			return classifyToolResult(inner, innerDescriptor);
 		}
-		// running(spawn 即返し / check_async / await_async timeout)と、結果本文を
-		// 持たない終端形(failed / stopped / orphaned・purge 済み)は状態表示へ。
-		// 終端は status / error を持たせる — store に行が無くてもエラーが読める
-		return {
-			kind: 'execution',
-			execId: envelope.execId,
-			...(envelope.toolName ? { toolName: envelope.toolName } : {}),
-			...(envelope.status === 'running' ? {} : { status: envelope.status }),
-			...(envelope.error ? { error: envelope.error } : {})
-		};
 	}
 	if (descriptor?.kind === 'skill') {
 		// load_skill の {result, tools}(#35)。形が合わなければ json フォールバック

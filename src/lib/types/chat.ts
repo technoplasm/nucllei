@@ -105,6 +105,13 @@ export interface ChatMessage {
 	/** completed(outlet)応答の messages が持ち得る付帯情報。FE は読まず wire へ素通しする。 */
 	info?: unknown;
 
+	/**
+	 * llens(#110): BE が履歴へ直接書くメッセージの機械可読フラグ。
+	 * system_notice = バックグラウンドタスクの配達通知(user ロール・サーバ挿入)。
+	 * FE の描画分岐(SystemNoticeMessage)の唯一の根拠 — 文面プレフィクス判定はしない。
+	 */
+	meta?: { system_notice?: string };
+
 	/** filter outlet が content を書き換えたときの原文(Chat.svelte)。 */
 	originalContent?: string;
 	/** TTS 自動読み上げの送出済み末尾文(Chat.svelte)。 */

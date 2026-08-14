@@ -5,7 +5,7 @@
 	import ResponseMessage from './ResponseMessage.svelte';
 	import UserMessage from './UserMessage.svelte';
 	import SystemNoticeMessage from './SystemNoticeMessage.svelte';
-	import { isExecutionResumeMessage } from '$lib/stores/execution-resume.svelte';
+	import { isSystemNoticeMessage } from '$lib/utils/system-notice';
 
 	let {
 		idx = 0,
@@ -59,9 +59,10 @@
 		: 'max-w-5xl'} mx-auto rounded-lg group"
 >
 	{#if message}
-		{#if message.role === 'user' && isExecutionResumeMessage(message.content)}
-			<!-- llens(#110): 非同期 tool 完了の自動再開は wire 上 user ロールだが、
-			     ユーザー発言には見せない(システム挿入として描く) -->
+		{#if isSystemNoticeMessage(message)}
+			<!-- llens(#110): バックグラウンドタスクの配達通知(BE 挿入)は wire 上
+			     user ロールだが、ユーザー発言には見せない(システム挿入として描く)。
+			     判定は meta.system_notice のみ — 文面プレフィクス判定はしない -->
 			<SystemNoticeMessage {history} {messageId} />
 		{:else if message.role === 'user'}
 			<UserMessage

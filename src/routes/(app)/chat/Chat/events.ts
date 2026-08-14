@@ -35,7 +35,7 @@ import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-st
 import { getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 import { chatCompleted, chatAction } from '$lib/apis';
 
-import { type ChatSession } from './session.svelte';
+import { type ChatSession, type Translate } from './session.svelte';
 
 // __event_call__(confirmation / input)のダイアログ表示要求。表示自体は
 // Chat.svelte の EventConfirmDialog が担う
@@ -60,10 +60,15 @@ export class ChatEvents {
 	// 子ターンの完了処理・永続化は BE の内部 runner(subagent)が持ち、
 	// agent session への updateChatById は BE が 400 で拒否する。
 	#isObserver: () => boolean;
-	// llens(#110): turn 終了時の再評価フック。Chat.svelte が exec 行を読み直し
-	// (refreshAndScan)、走行中に完了した execution の自動再開を「親 chat 表示中 ∧
-	// turn 非走行」ガード付きで消化する契機。
+	// llens(#110): turn 終了時の再評価フック。Chat.svelte が exec 行を読み直す契機
+	// (turn 中に完了した execution を 5 秒 tick を待たず拾う)。
 	#onTurnEnd: () => void;
+	// llens(#110): 表示中 chat に exec 行があるか。BE のサーバ駆動配達(通知ターン)は
+	// 履歴へ直接 append されるため、未知 message_id の封筒 refetch ゲートを
+	// 観測モードに加えて exec のある chat にも開放する。
+	#hasExecutionRows: () => boolean;
+
+	#t: Translate;
 
 	constructor({
 		session,
@@ -71,7 +76,9 @@ export class ChatEvents {
 		scrollToBottom,
 		onEventCall,
 		isObserver,
-		onTurnEnd
+		onTurnEnd,
+		hasExecutionRows,
+		t
 	}: {
 		session: ChatSession;
 		eventTarget: EventTarget;
@@ -82,6 +89,8 @@ export class ChatEvents {
 		) => void;
 		isObserver?: () => boolean;
 		onTurnEnd?: () => void;
+		hasExecutionRows?: () => boolean;
+		t?: Translate;
 	}) {
 		this.#session = session;
 		this.#eventTarget = eventTarget;
@@ -89,6 +98,8 @@ export class ChatEvents {
 		this.#onEventCall = onEventCall;
 		this.#isObserver = isObserver ?? (() => false);
 		this.#onTurnEnd = onTurnEnd ?? (() => {});
+		this.#hasExecutionRows = hasExecutionRows ?? (() => false);
+		this.#t = t ?? ((key: string) => key);
 	}
 
 	// wire v2: completion-streams(SSE)から届くイベント封筒を message へ適用する。
@@ -116,8 +127,11 @@ export class ChatEvents {
 			// アタッチ済みでも view が凍る — history を読み直して追いつく
 			// (SubagentSessionBlock.refetchForUnknownMessage と同じパターン。読み直し中に
 			// 落ちたイベントは後続の間引きスナップショット到着で収束する)。
-			// 通常チャットでは従来どおり無視(自分の送信経路で必ず既知の id が積まれている)。
-			if (this.#isObserver()) {
+			// llens(#110): exec 行のある chat も同様 — BE のサーバ駆動配達(通知ターン)は
+			// 履歴へ直接 append され、その続きターンの封筒は FE の知らない id で届く。
+			// それ以外の通常チャットでは従来どおり無視(自分の送信経路で必ず既知の id が
+			// 積まれている)。in-flight 間引き(#observerRefetching)が throttle を兼ねる。
+			if (this.#isObserver() || this.#hasExecutionRows()) {
 				this.#refetchObservedChat(get(chatId));
 			}
 			return;
@@ -439,16 +453,13 @@ export class ChatEvents {
 		await tick();
 
 		if (get(chatId) == targetChatId) {
-			session.chat = await updateChatById(targetChatId, {
-				models: session.selectedModels,
-				messages: messages,
-				history: session.history,
-				params: session.params,
-				files: session.chatFiles
-			});
-
-			currentChatPage.set(1);
-			await chats.set(await getChatList(get(currentChatPage)));
+			// llens(#110): 完了時保存も saveChatHandler 経由 — BE のサーバ駆動配達
+			// (通知ターン append)との競合(400)は接ぎ直しリカバリされる。
+			// 保存 + サイドバー一覧の追従は saveChatHandler が持つ
+			const saveRes = await session.saveChatHandler(targetChatId, session.history);
+			if (!saveRes.ok) {
+				toast.error(this.#t('Failed to save the chat.'));
+			}
 
 			// llens(#107 P3): このターンで生えた・確定した子 agent session を tree に反映
 			await refreshChatChildren(targetChatId);

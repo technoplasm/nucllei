@@ -228,7 +228,20 @@ export class ChatSend {
 
 		_history = JSON.parse(JSON.stringify(session.history));
 		// Save chat after all messages have been created
-		await session.saveChatHandler(_chatId, _history);
+		// llens(#110): BE のサーバ駆動配達(通知ターン append)と競合した 400 は
+		// saveChatHandler が接ぎ直しリカバリする。接ぎ直しが起きたら wire は
+		// merged で組み直す(通知メッセージをモデルに載せる)。恒久失敗は送信中止
+		const saveRes = await session.saveChatHandler(_chatId, _history);
+		if (!saveRes.ok) {
+			if (session.prompt === '') {
+				session.prompt = _prompt;
+			}
+			toast.error(this.#t('Failed to save the chat. Your message was restored to the input.'));
+			return;
+		}
+		if (saveRes.history) {
+			_history = JSON.parse(JSON.stringify(saveRes.history));
+		}
 
 		const messages: ChatMessage[] = createMessagesList(_history, parentId);
 		// If there are image files, check if model is vision capable

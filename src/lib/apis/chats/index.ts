@@ -530,8 +530,8 @@ export const getChatChildren = async (id: string): Promise<ChatChildItem[]> => {
 };
 
 // llens(#110): chat の execution 行一覧(GET /chats/{id}/executions)。
-// バックグラウンドチップ・ExecutionBlock・自動再開走査のデータ源。
-// result 本文は載せない(回収は await_async — 一覧は状態のみ)。
+// バックグラウンドチップ・ExecutionBlock・poll 述語のデータ源。
+// result 本文は載せない(回収は await_task — 一覧は状態のみ)。
 export type ChatExecutionItem = {
 	id: string;
 	tool_name: string;
@@ -540,9 +540,19 @@ export type ChatExecutionItem = {
 	finished_at: number | null;
 	duration: number | null;
 	error: string | null;
+	// 配達済み(terminal の結果が通知ターン or 回収 tool で消化された)。
+	// 未配達(terminal ∧ !delivered)がチップの未回収バッジ・poll 継続の根拠
+	delivered: boolean;
 };
 
-export const getChatExecutions = async (id: string): Promise<ChatExecutionItem[]> => {
+export type ChatExecutionsResponse = {
+	executions: ChatExecutionItem[];
+	// 連鎖上限で BE の自動再開(配達)が保留中(チップの案内行)。
+	// BE 未実装の間は undefined — 消費側は falsy として扱う
+	resume_suspended?: boolean;
+};
+
+export const getChatExecutions = async (id: string): Promise<ChatExecutionsResponse> => {
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/executions`, {
@@ -567,7 +577,9 @@ export const getChatExecutions = async (id: string): Promise<ChatExecutionItem[]
 		throw error;
 	}
 
-	return res;
+	// top-level resume_suspended 付きのオブジェクト形が正。素の配列は BE 追随までの
+	// 過渡形として受ける(resume_suspended は undefined のまま)
+	return Array.isArray(res) ? { executions: res } : res;
 };
 
 // llens(#110): execution の個別停止(POST /chats/{id}/executions/{exec_id}/stop)。
@@ -889,7 +901,9 @@ export const updateChatById = async (id: string, chat: object) => {
 		})
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			// llens(#110): status を同梱 — BE のサーバ駆動配達との競合(400)を
+			// 呼び出し側(session.saveChatHandler)が接ぎ直しリカバリで判別する
+			if (!res.ok) throw { status: res.status, ...(await res.json().catch(() => ({}))) };
 			return res.json();
 		})
 		.then((json) => {

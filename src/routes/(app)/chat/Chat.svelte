@@ -44,20 +44,9 @@
 	import {
 		clearExecutions,
 		executionsState,
-		refreshAndScanExecutions
+		refreshExecutions,
+		shouldPollExecutions
 	} from '$lib/stores/executions.svelte';
-	import {
-		buildExecutionResumeMessage,
-		clearExecutionResumeChainLimited,
-		countTrailingAutoResumes,
-		EXECUTION_RESUME_CHAIN_LIMIT,
-		executionResumeState,
-		hasPendingExecutionResume,
-		isExecutionResumeHandled,
-		requeueExecutionResumes,
-		setExecutionResumeChainLimited,
-		takeExecutionResumes
-	} from '$lib/stores/execution-resume.svelte';
 
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
@@ -151,110 +140,31 @@
 		eventTarget,
 		scrollToBottom,
 		onEventCall,
+		t,
 		// 観測モードでは done の completed / 保存経路を駆動しない(events.ts 参照)
 		isObserver: () => isAgentSession,
-		// llens(#110): turn 終了(completed / 保存済み)で exec 行を読み直し、
-		// 自動再開を再評価する(refreshAndScan 一本化の onTurnEnd 経路)
+		// llens(#110): BE のサーバ駆動配達(通知ターンの直接 append)は FE の知らない
+		// message_id の封筒を生む — exec 行のある chat は未知 id で history を読み直す
+		hasExecutionRows: () =>
+			executionsState.chatId === $chatId && executionsState.entries.length > 0,
+		// llens(#110): turn 終了(completed / 保存済み)で exec 行を読み直す —
+		// turn 中に完了した execution を 5 秒 tick を待たず拾う
 		onTurnEnd: () => {
-			void refreshAndScanThenMaybeResume();
+			const targetChatId = $chatId;
+			if (targetChatId && !loading && !notFound && !isAgentSession) {
+				void refreshExecutions(targetChatId);
+			}
 		}
 	});
 	const send = new ChatSend({ session, events, t, eventTarget, scrollToBottom });
 
-	// llens(#110): execution(background 昇格された tool 実行)の terminal 未回収を受けて
-	// 親ターンを自動再開する。定型 user メッセージを既存送信経路(send.submitPrompt)で
-	// **バッチ 1 通**送る。ガード(無限ループ・競合防止):
-	// - 親 chat 表示中(loading / notFound / 観測モードでない)∧ turn 非走行 —
-	//   走行中は送らず、events の onTurnEnd(turn 終了)で再評価する
-	// - exec 単位 once は store 側(enqueue が 1 回)。リロード後の再検知は
-	//   isExecutionResumeHandled(履歴に定型文 or await_async の終端回収結果)で drop —
-	//   take 時にも再評価する(送信直前の状態が権威)
-	// - 連鎖上限(EXECUTION_RESUME_CHAIN_LIMIT): ユーザー発話なしの自動 turn が続いたら
-	//   停止してチップに出す。pending は消費しない — 次のユーザー発話で連鎖が切れて再開
-	// - 入力中(draft prompt / 添付ファイル)には割り込まない(変化時に再評価される)
-	let executionResumeInFlight = false;
-	const maybeResumeExecutions = async () => {
-		if (executionResumeInFlight || loading || notFound || isAgentSession) {
-			return;
-		}
-		const targetChatId = $chatId;
-		if (!targetChatId || !hasPendingExecutionResume(targetChatId)) {
-			return;
-		}
-		// turn 走行中は何もしない(送信経路の done ガードで空振りさせず、要求を残す)
-		if ((session.taskIds ?? []).length > 0) {
-			return;
-		}
-		const lastMessage = createMessagesList(session.history, session.history.currentId).at(-1);
-		if (lastMessage && lastMessage.done !== true) {
-			return;
-		}
-		// 直前応答が本文なしエラーだと submitPrompt が弾く — 自動送信でトーストを出さない
-		if (lastMessage && lastMessage.error && !lastMessage.content) {
-			return;
-		}
-		// ユーザーの入力中に割り込まない(prompt / files が空くと $effect が再評価する)
-		if (session.prompt !== '' || session.files.length > 0) {
-			return;
-		}
-		if (session.selectedModels.length === 0 || session.selectedModels.includes('')) {
-			return;
-		}
-		// 連鎖上限は履歴末尾から決定的に数える(リロードでリセットされない)
-		if (countTrailingAutoResumes(session.history) >= EXECUTION_RESUME_CHAIN_LIMIT) {
-			setExecutionResumeChainLimited(targetChatId);
-			return;
-		}
-		clearExecutionResumeChainLimited();
-
-		executionResumeInFlight = true;
-		try {
-			// take 時にも handled を再評価して drop し、残り全件をバッチ 1 通で送る
-			const requests = takeExecutionResumes(targetChatId).filter(
-				(request) => !isExecutionResumeHandled(session.history, request.execId)
-			);
-			if (requests.length === 0) {
-				return;
-			}
-			try {
-				await send.submitPrompt(buildExecutionResumeMessage(requests));
-			} catch (e) {
-				// 送信失敗は要求を戻す(消費確定は送信成功後 — 次の契機で再送)
-				requeueExecutionResumes(requests);
-			}
-		} finally {
-			executionResumeInFlight = false;
-		}
-	};
-
-	$effect(() => {
-		// 依存は「要求の増減・表示 chat の切替・入力欄と表示状態」に絞る。history は
-		// 依存にしない — done フリップ直後(completed / 保存前)の自動送信は
-		// updateChatById と競合するため、turn 終了は events の onTurnEnd で再評価する
-		void executionResumeState.entries.length;
-		void $chatId;
-		void session.prompt;
-		void session.files.length;
-		void loading;
-		void notFound;
-		void isAgentSession;
-		untrack(() => void maybeResumeExecutions());
-	});
-
 	// llens(#110): exec 行の 5 秒ポーリング(SSE push はしない仕様 — 既存慣行)。
-	// fetch → store 差し替え → terminal 未回収の enqueue 走査は refreshAndScanExecutions に
-	// 一本化されており、loadChat seed / onTurnEnd / 個別停止後もすべて同関数を呼ぶ —
-	// tick の述語ゲート内にだけ走査を置くと、リロード後・turn 末完了の自動再開が
-	// 永久に回らない(仕様 §9)。ここの述語 P は cadence 制御のみ:
-	// running ∨ 親 turn 走行中 ∨ 未回収 ∨ pending ∨ 直近 refresh 失敗(自己接地)。
+	// 自動再開はサーバ駆動(契約 T3)— FE は状態表示と BE 発ターンの発見だけを持つ。
+	// 述語 P(shouldPollExecutions — executions store)は cadence 制御のみ:
+	// seed は loadChat が P を通さず必ず打つ(自己接地)。
+	// 各 tick で getTaskIdsByChatId も読み、BE 発の続きターン(配達後の自動再開)へ
+	// 未アタッチなら attachToTask する — ストリームが FE に表示される。
 	const EXECUTION_POLL_MS = 5000;
-	const shouldPollExecutions = (): boolean =>
-		executionsState.lastRefreshFailed ||
-		(session.taskIds ?? []).length > 0 ||
-		hasPendingExecutionResume($chatId) ||
-		(executionsState.chatId === $chatId &&
-			(executionsState.unrecoveredIds.length > 0 ||
-				executionsState.entries.some((entry) => entry.status === 'running')));
 	const pollExecutions = async () => {
 		// バックグラウンドタブでは休止(復帰後の次 tick で追いつく)
 		if (document.visibilityState === 'hidden') {
@@ -264,20 +174,37 @@
 		if (!targetChatId || loading || notFound || isAgentSession) {
 			return;
 		}
-		if (!shouldPollExecutions()) {
+		if (
+			!shouldPollExecutions(targetChatId, (session.taskIds ?? []).length > 0, Date.now() / 1000)
+		) {
 			return;
 		}
-		await refreshAndScanExecutions(targetChatId, session.history);
+		await refreshExecutions(targetChatId);
+		await attachNewChatTasks(targetChatId);
 	};
 
-	// onTurnEnd(turn 完了・保存済み)の経路: exec 行を読み直してから再評価する —
-	// turn 中に完了した exec を 5 秒 tick を待たず拾う
-	const refreshAndScanThenMaybeResume = async () => {
-		const targetChatId = $chatId;
-		if (targetChatId && !loading && !notFound && !isAgentSession) {
-			await refreshAndScanExecutions(targetChatId, session.history);
+	// llens(#110): BE 発ターン(サーバ駆動の続きターン)の発見とアタッチ。
+	// loadChat の再アタッチと同じ二段ガード(activeTaskIds / attachedTaskIds)。
+	// 履歴の追いつき自体は未知 message_id 封筒の refetch ゲート(events.ts)が担う
+	const attachNewChatTasks = async (targetChatId: string) => {
+		const taskRes = await getTaskIdsByChatId(targetChatId).catch(() => null);
+		if (!taskRes || $chatId !== targetChatId) {
+			return;
 		}
-		await maybeResumeExecutions();
+		const activeTaskIds = getActiveTaskIds(targetChatId);
+		const newTaskIds = (taskRes.task_ids ?? []).filter(
+			(taskId: string) => !activeTaskIds.includes(taskId) && !attachedTaskIds.has(taskId)
+		);
+		if (newTaskIds.length === 0) {
+			return;
+		}
+		session.taskIds = taskRes.task_ids;
+		for (const taskId of newTaskIds) {
+			attachedTaskIds.add(taskId);
+			attachToTask(targetChatId, taskId).catch((error) => {
+				console.error('chat task attach failed', taskId, error);
+			});
+		}
 	};
 
 	$effect(() => {
@@ -708,13 +635,13 @@
 					}
 				}
 
-				// llens(#110): exec 行の seed(refreshAndScan 一本化の loadChat 経路)。
-				// poll の述語 P を通さず必ず打つ — リロード後の terminal 未回収の検知は
-				// ここが起点(fire-and-forget: チップ・自動再開は store / $effect が追従)。
+				// llens(#110): exec 行の seed(loadChat 経路)。poll の述語 P を通さず
+				// 必ず打つ — リロード後の未配達 terminal・running の検知はここが起点
+				// (fire-and-forget: チップ・poll 述語は store が追従)。
 				// 観測モード(agent session)は対象外 — 子 chat に exec は無い(設計 D9)
 				clearExecutions();
 				if (!isAgentSession) {
-					void refreshAndScanExecutions($chatId, session.history);
+					void refreshExecutions($chatId);
 				}
 
 				await tick();

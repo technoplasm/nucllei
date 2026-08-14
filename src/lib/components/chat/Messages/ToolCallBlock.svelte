@@ -146,8 +146,7 @@
 	// store に行が無い間(未 fetch)も running 扱い(result の running 形が最後の真実)
 	const execRunning = $derived(
 		resultDisplay?.kind === 'execution' &&
-			(getExecutionEntry(resultDisplay.execId)?.status ?? resultDisplay.status ?? 'running') ===
-				'running'
+			(getExecutionEntry(resultDisplay.execId)?.status ?? 'running') === 'running'
 	);
 
 	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
@@ -352,8 +351,9 @@
 							<SubagentSessionBlock id={`${id || call.id}-subagent`} display={resultDisplay} />
 						{:else if resultDisplay.kind === 'execution'}
 							<!--
-								background 昇格された呼び出しの running 形(#110): exec 行の現在状態を
-								executions store から引く 1 行ステータス。結果の回収は await_async。
+								background 昇格された呼び出し(バックグラウンドタスク)の spawn 形(#110):
+								exec 行の現在状態を executions store から引く 1 行ステータス。
+								結果は BE の配達通知(SystemNoticeMessage)または await_task が運ぶ。
 							-->
 							<ExecutionBlock id={`${id || call.id}-execution`} display={resultDisplay} />
 						{:else if resultDisplay.kind === 'text'}
