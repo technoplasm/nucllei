@@ -180,6 +180,15 @@ def get_tools(
                     **Tools.get_user_valves_by_id_and_user_id(tool_id, user.id)
                 )
 
+            # llens(#110 P4): toolkit 共通注記 — `Tools` クラス属性 `toolkit_note`(str)。
+            # 全関数に共通する注意(直列化・実行環境の性質等)を関数ごとの docstring に
+            # 複製せず、toolkit の**先頭 spec の description に 1 回だけ**前置する宣言口
+            # (backgroundable / timeouts と同じクラス属性の流儀)。文言は tool 作者
+            # (配備側)の持ち物 — 本体は機構だけを提供する。
+            toolkit_note = getattr(module, "toolkit_note", None)
+            if not (isinstance(toolkit_note, str) and toolkit_note.strip()):
+                toolkit_note = None
+
             for spec in tool.specs:
                 # TODO: Fix hack for OpenAI API
                 # Some times breaks OpenAI but others don't. Leaving the comment
@@ -209,6 +218,12 @@ def get_tools(
                     spec["description"] = s[0]
                 else:
                     spec["description"] = function_name
+
+                if toolkit_note and spec is tool.specs[0]:
+                    spec["description"] = (
+                        f"【{tool.name} ツール群 共通】{toolkit_note.strip()}\n\n"
+                        f"{spec['description']}"
+                    )
 
                 # llens(#20): 関数の Annotated 宣言(生きた型が一次情報)から表示
                 # ディスクリプタを抽出し、spec にも contentMediaType として反映する

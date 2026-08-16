@@ -79,13 +79,13 @@ EXEC_RECALL_TOOL_NAMES = ("check_task", "await_task", "stop_task")
 # 恒久不適格(D4): 回収 builtin 自身と load_skill は昇格対象にしない
 EXEC_INELIGIBLE_TOOL_NAMES = {"load_skill", *EXEC_RECALL_TOOL_NAMES}
 
-# 適格 tool の spec コピーへ注入する共有引数(§7)
+# 適格 tool の spec コピーへ注入する共有引数(§7)。適格 tool の数だけ複製されて
+# 毎ターン context に載るため最小限に保つ — 機構の詳細(自動配達・使い分け)は
+# 1 回しか載らない回収 3 tool(check_task / await_task / stop_task)の spec が持つ。
 BACKGROUND_PARAM_SPEC = {
     "type": "boolean",
     "description": (
-        "true でバックグラウンドタスクとして実行する。即座に task_id が返り、"
-        "完了時は結果が自動で届く(通知ターン)。今すぐ結果が必要な場合のみ "
-        "await_task で待つ。通常は指定しない。"
+        "true でバックグラウンド実行(task_id 即返し・結果は自動配達)。通常は指定しない。"
     ),
 }
 

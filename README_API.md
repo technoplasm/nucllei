@@ -543,6 +543,11 @@ class Tools:
   never sees it.)
 - Methods may be `def` or `async def`; sync methods run in a worker thread, so
   blocking I/O is fine.
+- **Shared notes**: a `toolkit_note` class attribute (str) on `Tools` is
+  prepended **once** — to the first function's spec description only — instead
+  of being copied into every docstring. Use it for caveats that apply to the
+  whole toolkit (execution-environment properties, serialization behavior, …);
+  same class-attribute idiom as `backgroundable` / `timeouts` (§5.9).
 - Function names must be **globally unique across all tools assigned to a model**
   — on collision the first-loaded wins and the duplicate is dropped with a warning.
 
