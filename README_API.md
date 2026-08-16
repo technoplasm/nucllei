@@ -684,9 +684,19 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 
 ### 5.7 Builtin tools, code execution, tool servers
 
-- **Builtin tools** ship with the server (`builtin_` id prefix; currently
-  `builtin_history` — `list_history` / `read_history` / `grep_history` over the
-  calling user's own chats). Only their ACL is editable.
+- **Builtin tools** ship with the server (`builtin_` id prefix). Only their ACL
+  is editable. Currently:
+  - `builtin_history` — `list_history` / `read_history` / `grep_history` over
+    the calling user's own chats.
+  - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
+    issued in the current chat, metadata only.
+  - `builtin_attachment_text` — `read_attachment(file_id, offset?, max_chars?)`:
+    the extracted text of an owned attachment (`Files.data.content` written by
+    the deployment's Attachment function — §7; text-typed files fall back to a
+    raw decode). Owner-only by direct file_id, deliberately **not** chat-scoped:
+    mount it on an agent preset and a subagent (§5.8) can read materials the
+    parent references by file_id without the content ever entering the parent's
+    context.
 - **Code execution is a deployment-layer tool**, not a server feature: the
   reference implementation (`dev/tools/sandbox.py` in the source tree) bridges to
   an external nsjail + IPython sandbox service over HTTP and provides a stateful

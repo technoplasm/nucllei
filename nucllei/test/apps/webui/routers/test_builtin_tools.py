@@ -603,3 +603,112 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
             limit="abc", __user__={"id": "owner"}, __chat_id__=chat.id
         )
         assert len(out["files"]) == 3
+
+
+class TestAttachmentText(AbstractPostgresTest):
+    """builtin_attachment_text(#113)— file_id → 抽出テキストの読み口。
+
+    owner-only fail-closed / data.content 優先 / text 系 raw フォールバック /
+    offset 窓(尻尾が黙って落ちない)を固定する。
+    """
+
+    BASE_PATH = "/api/v1/tools"
+
+    def setup_class(cls):
+        super().setup_class()
+        from nucllei.models.files import Files
+
+        cls.Files = Files
+
+    def _new_file(
+        self,
+        user_id,
+        file_id,
+        name,
+        content=None,
+        content_type="text/plain",
+        path="",
+    ):
+        from nucllei.models.files import FileForm
+
+        self.Files.insert_new_file(
+            user_id,
+            FileForm(
+                id=file_id,
+                filename=name,
+                path=path,
+                data={"content": content} if content is not None else {},
+                meta={"name": name, "content_type": content_type, "size": 1},
+            ),
+        )
+
+    def test_reads_extracted_content_with_offset_window(self):
+        from nucllei.builtin_tools.attachment_text import Tools
+
+        self._new_file(
+            "owner",
+            "doc-1",
+            "doc.pdf",
+            content="あ" * 10,
+            content_type="application/pdf",
+        )
+
+        out = Tools().read_attachment("doc-1", max_chars=4, __user__={"id": "owner"})
+        assert out["ok"] is True
+        assert out["source"] == "extracted"
+        assert out["text"] == "ああああ"
+        assert out["total_chars"] == 10
+        assert out["next_offset"] == 4
+
+        # 続き → 最終窓では next_offset が消える(終端の合図)
+        out = Tools().read_attachment(
+            "doc-1", offset=8, max_chars=4, __user__={"id": "owner"}
+        )
+        assert out["text"] == "ああ"
+        assert "next_offset" not in out
+
+    def test_owner_check_is_fail_closed(self):
+        from nucllei.builtin_tools.attachment_text import Tools
+
+        self._new_file("owner", "doc-2", "doc.txt", content="secret")
+        # 他人は拒否
+        denied = Tools().read_attachment("doc-2", __user__={"id": "intruder"})
+        assert denied["ok"] is False and "アクセス権" in denied["error"]
+        # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
+        self._new_file("owner", "doc-orphan", "orphan.txt", content="x")
+        from nucllei.internal.db import get_db
+        from nucllei.models.files import File
+
+        with get_db() as db:
+            db.query(File).filter_by(id="doc-orphan").update({"user_id": None})
+            db.commit()
+        denied = Tools().read_attachment("doc-orphan", __user__={"id": "owner"})
+        assert denied["ok"] is False
+        # ユーザー文脈なしも拒否
+        denied = Tools().read_attachment("doc-2", __user__=None)
+        assert denied["ok"] is False
+
+    def test_raw_text_fallback_and_binary_refusal(self, tmp_path):
+        from nucllei.builtin_tools.attachment_text import Tools
+
+        # 抽出なし + text 系 content_type → Storage raw を decode
+        raw = tmp_path / "note.txt"
+        raw.write_text("生テキスト", encoding="utf-8")
+        self._new_file("owner", "raw-1", "note.txt", path=str(raw))
+        out = Tools().read_attachment("raw-1", __user__={"id": "owner"})
+        assert out["ok"] is True and out["source"] == "raw"
+        assert out["text"] == "生テキスト"
+
+        # 抽出なし + binary → 読まず、feed_image への誘導を返す
+        self._new_file("owner", "img-1", "scan.png", content_type="image/png")
+        out = Tools().read_attachment("img-1", __user__={"id": "owner"})
+        assert out["ok"] is False and "feed_image" in out["error"]
+
+    def test_sync_registers_builtin_row(self):
+        from nucllei.builtin_tools import sync_builtin_tools
+        from nucllei.models.tools import Tools as ToolsTable
+
+        sync_builtin_tools()
+        row = ToolsTable.get_tool_by_id("builtin_attachment_text")
+        assert row is not None
+        assert [s["name"] for s in row.specs] == ["read_attachment"]

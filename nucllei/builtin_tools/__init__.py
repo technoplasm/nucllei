@@ -12,7 +12,7 @@
 
 import logging
 
-from nucllei.builtin_tools import chat_files, history
+from nucllei.builtin_tools import attachment_text, chat_files, history
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,14 @@ BUILTIN_TOOLS = {
         "description": (
             "List and search file attachments issued in the current chat "
             "(list_chat_files / grep_chat_files). Metadata only, owner-only"
+        ),
+    },
+    "builtin_attachment_text": {
+        "module": attachment_text,
+        "name": "Attachment Text",
+        "description": (
+            "Read the extracted text of an attachment by file_id "
+            "(read_attachment). Owner-only"
         ),
     },
 }
