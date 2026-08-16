@@ -288,6 +288,9 @@ def is_continuous_usage_requested(model) -> bool:
     既定 ON(キー不在は有効)。continuous_usage_stats は SGLang 拡張で、未知の
     stream_options キーを弾く OpenAI 互換実装に繋ぐ配備向けの opt-out として、
     モデルの capabilities.continuous_usage=False のときだけ要求しない。
+    なお手動 opt-out が無くても、上流が 4xx で弾いた場合は egress
+    (routers/openai.py)が剥がして 1 回リトライし、以後そのモデルには
+    送らないことを学習する(混在ゲートウェイ配備の自動対応 — 2026-08-16)。
     usage 自体を要求しないモデル(is_usage_requested が False)では常に False —
     include_usage 無しに continuous だけ頼む形は作らない。
     """

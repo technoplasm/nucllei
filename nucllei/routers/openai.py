@@ -91,6 +91,46 @@ async def cleanup_response(
         await session.close()
 
 
+# llens(#102): stream_options.continuous_usage_stats(SGLang 拡張)を弾く上流の
+# 学習集合(キー = f"{url}::{model}")。LiteLLM 経由の OpenAI/Anthropic 系などは
+# 未知の stream_options キーを 400 で拒否する — 一度弾かれたモデルはプロセス内で
+# 記憶し、以後は送らない(初回だけ剥がして 1 回リトライ)。手動 opt-out
+# (capabilities.continuous_usage=False — utils/middleware.py)は併存する。
+# プロセス再起動で再学習になるが、コストは初回の追加往復 1 回だけ。
+_continuous_usage_rejected: set[str] = set()
+
+
+def strip_continuous_usage_stats(payload: dict) -> bool:
+    """payload から SGLang 拡張 continuous_usage_stats を除く(除いたら True)。
+
+    標準の include_usage は残す(usage 最終チャンク自体は OpenAI 標準)。
+    """
+    stream_options = payload.get("stream_options")
+    if (
+        not isinstance(stream_options, dict)
+        or "continuous_usage_stats" not in stream_options
+    ):
+        return False
+    stream_options = {
+        k: v for k, v in stream_options.items() if k != "continuous_usage_stats"
+    }
+    if stream_options:
+        payload["stream_options"] = stream_options
+    else:
+        payload.pop("stream_options", None)
+    return True
+
+
+def is_continuous_usage_rejection(status: int, body: str) -> bool:
+    """上流の 4xx 応答が continuous_usage_stats 未対応を指しているか。
+
+    LiteLLM / OpenAI 系の「Unknown parameter: 'stream_options.continuous_usage_stats'」
+    形を想定し、キー名の言及で判定する(4xx 限定 — 5xx や無関係な 4xx で
+    機能を恒久に落とさない)。
+    """
+    return 400 <= status < 500 and "continuous_usage_stats" in (body or "")
+
+
 def openai_o1_o3_handler(payload):
     """
     Handle o1, o3 specific parameters
@@ -682,7 +722,10 @@ async def generate_chat_completion(
             convert_logit_bias_input_to_json(payload["logit_bias"])
         )
 
-    payload = json.dumps(payload)
+    # llens(#102): このモデルが SGLang 拡張を弾くと学習済みなら送信前に剥がす
+    reject_key = f"{url}::{payload['model']}"
+    if reject_key in _continuous_usage_rejected:
+        strip_continuous_usage_stats(payload)
 
     r = None
     session = None
@@ -701,50 +744,67 @@ async def generate_chat_completion(
             ),
         )
 
-        r = await session.request(
-            method="POST",
-            url=f"{url}/chat/completions",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-                **(
-                    {
-                        "X-Title": "Nucllei",
-                    }
-                    if "openrouter.ai" in url
-                    else {}
-                ),
-                **(
-                    {
-                        "X-Nucllei-User-Name": user.name,
-                        "X-Nucllei-User-Id": user.id,
-                        "X-Nucllei-User-Email": user.email,
-                        "X-Nucllei-User-Role": user.role,
-                    }
-                    if ENABLE_FORWARD_USER_INFO_HEADERS
-                    else {}
-                ),
-            },
-        )
-
-        # Check if response is SSE
-        if "text/event-stream" in r.headers.get("Content-Type", ""):
-            streaming = True
-            return StreamingResponse(
-                r.content,
-                status_code=r.status,
-                headers=dict(r.headers),
-                background=BackgroundTask(
-                    cleanup_response, response=r, session=session
-                ),
+        # llens(#102): attempt 0 で上流が continuous_usage_stats を 4xx で弾いたら、
+        # 剥がして 1 回だけ再送し学習する(それ以外の失敗は従来どおり 1 回で確定)
+        for attempt in (0, 1):
+            r = await session.request(
+                method="POST",
+                url=f"{url}/chat/completions",
+                data=json.dumps(payload),
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    **(
+                        {
+                            "X-Title": "Nucllei",
+                        }
+                        if "openrouter.ai" in url
+                        else {}
+                    ),
+                    **(
+                        {
+                            "X-Nucllei-User-Name": user.name,
+                            "X-Nucllei-User-Id": user.id,
+                            "X-Nucllei-User-Email": user.email,
+                            "X-Nucllei-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS
+                        else {}
+                    ),
+                },
             )
-        else:
+
+            # Check if response is SSE
+            if "text/event-stream" in r.headers.get("Content-Type", ""):
+                streaming = True
+                return StreamingResponse(
+                    r.content,
+                    status_code=r.status,
+                    headers=dict(r.headers),
+                    background=BackgroundTask(
+                        cleanup_response, response=r, session=session
+                    ),
+                )
+
             try:
                 response = await r.json()
             except Exception as e:
                 log.error(e)
                 response = await r.text()
+
+            if (
+                attempt == 0
+                and is_continuous_usage_rejection(r.status, str(response))
+                and strip_continuous_usage_stats(payload)
+            ):
+                _continuous_usage_rejected.add(reject_key)
+                log.info(
+                    f"model '{payload['model']}' rejects "
+                    "stream_options.continuous_usage_stats; "
+                    "retrying without it (remembered for this process)"
+                )
+                r.release()
+                continue
 
             r.raise_for_status()
             return response

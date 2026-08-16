@@ -252,3 +252,58 @@ def test_live_usage_payload_omits_unresolved_optional_keys(monkeypatch):
     assert len(emitted) == 1
     emitted[0].pop("duration", None)
     assert emitted == [_usage(22, 2)]
+
+
+class TestContinuousUsageAutoOptOut:
+    """continuous_usage_stats を弾く上流への自動対応(routers/openai.py — 2026-08-16)。
+
+    LiteLLM 経由の OpenAI/Anthropic 系は未知の stream_options キーを 400 で拒否する。
+    egress は初回の 4xx を観測したら剥がして 1 回リトライし、(url, model) を
+    プロセス内で学習して以後送らない。SGLang 系(受理する上流)は従来どおり。
+    """
+
+    def setup_method(self):
+        from nucllei.routers import openai as openai_router
+
+        openai_router._continuous_usage_rejected.clear()
+
+    def test_strip_removes_only_the_sglang_extension(self):
+        from nucllei.routers.openai import strip_continuous_usage_stats
+
+        payload = {
+            "model": "gpt-5.6-luna",
+            "stream_options": {"include_usage": True, "continuous_usage_stats": True},
+        }
+        assert strip_continuous_usage_stats(payload) is True
+        # 標準の include_usage は残す(usage 最終チャンクは OpenAI 標準)
+        assert payload["stream_options"] == {"include_usage": True}
+        # 冪等: 既に無ければ False
+        assert strip_continuous_usage_stats(payload) is False
+
+    def test_strip_drops_empty_stream_options(self):
+        from nucllei.routers.openai import strip_continuous_usage_stats
+
+        payload = {"stream_options": {"continuous_usage_stats": True}}
+        assert strip_continuous_usage_stats(payload) is True
+        assert "stream_options" not in payload
+
+    def test_strip_is_a_noop_without_stream_options(self):
+        from nucllei.routers.openai import strip_continuous_usage_stats
+
+        payload = {"model": "kimi-k2.6"}
+        assert strip_continuous_usage_stats(payload) is False
+
+    def test_rejection_predicate_requires_4xx_and_key_mention(self):
+        from nucllei.routers.openai import is_continuous_usage_rejection
+
+        litellm_body = (
+            "litellm.BadRequestError: OpenAIException - Unknown parameter: "
+            "'stream_options.continuous_usage_stats'. Received Model Group=gpt-5.6-luna"
+        )
+        assert is_continuous_usage_rejection(400, litellm_body) is True
+        assert is_continuous_usage_rejection(422, litellm_body) is True
+        # 5xx(上流障害)や無関係の 4xx で機能を落とさない
+        assert is_continuous_usage_rejection(500, litellm_body) is False
+        assert is_continuous_usage_rejection(400, "invalid api key") is False
+        assert is_continuous_usage_rejection(400, "") is False
+        assert is_continuous_usage_rejection(400, None) is False
