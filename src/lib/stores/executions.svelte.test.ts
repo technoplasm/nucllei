@@ -5,7 +5,7 @@
 // lastRefreshFailed ∨ 自タブ taskIds ∨ running ∨ 未配達 terminal ∨
 // (terminal ∧ delivered ∧ finished_at が直近 10 分)。
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // executions store の import チェーン($lib/apis/chats → $lib/apis/fetch → $lib/stores
 // → $app/*)を test 環境から切る
@@ -15,7 +15,9 @@ import { getChatExecutions } from '$lib/apis/chats';
 import {
 	clearExecutions,
 	executionsState,
+	EXECUTION_POLL_MS,
 	getExecutionEntry,
+	isExecutionsRefreshBackedOff,
 	isUndeliveredTerminal,
 	refreshExecutions,
 	shouldPollExecutions,
@@ -167,6 +169,61 @@ describe('shouldPollExecutions(poll 述語 — 契約 §M6 / 批評 F-2)', () =>
 		respond([entry('exec-1', 'running')]);
 		await refreshExecutions(CHAT);
 		expect(shouldPollExecutions('chat-other', false, NOW)).toBe(false);
+	});
+});
+
+describe('isExecutionsRefreshBackedOff(B-2 — 連続失敗の backoff)', () => {
+	const T0 = 1_700_000_000_000; // ms
+
+	const failOnce = async () => {
+		mockedGetChatExecutions.mockRejectedValueOnce(new Error('network down'));
+		await refreshExecutions(CHAT);
+	};
+
+	let nowSpy: { mockRestore(): void };
+
+	beforeEach(() => {
+		nowSpy = vi.spyOn(Date, 'now').mockReturnValue(T0);
+	});
+
+	afterEach(() => {
+		nowSpy.mockRestore();
+	});
+
+	it('失敗 1 回は基本間隔のまま(次 tick は通る)、2 回目から倍々', async () => {
+		await failOnce();
+		expect(isExecutionsRefreshBackedOff(T0 + EXECUTION_POLL_MS - 1)).toBe(true);
+		expect(isExecutionsRefreshBackedOff(T0 + EXECUTION_POLL_MS)).toBe(false);
+
+		await failOnce(); // 2 回目 → 10s
+		expect(isExecutionsRefreshBackedOff(T0 + EXECUTION_POLL_MS)).toBe(true);
+		expect(isExecutionsRefreshBackedOff(T0 + 2 * EXECUTION_POLL_MS)).toBe(false);
+	});
+
+	it('上限 60s で頭打ち', async () => {
+		for (let i = 0; i < 8; i++) {
+			await failOnce();
+		}
+		expect(isExecutionsRefreshBackedOff(T0 + 60_000 - 1)).toBe(true);
+		expect(isExecutionsRefreshBackedOff(T0 + 60_000)).toBe(false);
+	});
+
+	it('成功で即解除(以後の失敗は 1 回目から数え直し)', async () => {
+		await failOnce();
+		await failOnce();
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+		expect(isExecutionsRefreshBackedOff(T0)).toBe(false);
+
+		await failOnce(); // 数え直し → 5s
+		expect(isExecutionsRefreshBackedOff(T0 + EXECUTION_POLL_MS)).toBe(false);
+	});
+
+	it('clearExecutions でリセット', async () => {
+		await failOnce();
+		await failOnce();
+		clearExecutions();
+		expect(isExecutionsRefreshBackedOff(T0)).toBe(false);
 	});
 });
 

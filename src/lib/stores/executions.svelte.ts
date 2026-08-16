@@ -29,6 +29,10 @@ export const isUndeliveredTerminal = (entry: ExecutionEntry): boolean =>
 /** 配達直後の追従窓(秒)。BE 発の続きターン発見(attachToTask)を取りこぼさない。 */
 export const RECENT_DELIVERY_WINDOW_S = 10 * 60;
 
+/** poll の基本間隔(Chat.svelte のタイマー)と、連続失敗時 backoff の上限(B-2)。 */
+export const EXECUTION_POLL_MS = 5000;
+export const EXECUTION_POLL_BACKOFF_MAX_MS = 60_000;
+
 const state = $state<{
 	chatId: string | null;
 	entries: ExecutionEntry[];
@@ -44,6 +48,10 @@ let requestSeq = 0;
 /** 同一 chat 内での delivered 増分検知の基準(chat 切替・clear でリセット)。 */
 let deliveredBaseline: Set<string> | null = null;
 
+/** B-2: 連続失敗回数と、次の poll 試行を許す時刻(ms)。成功・clear でリセット。 */
+let consecutiveRefreshFailures = 0;
+let refreshBackoffUntilMs = 0;
+
 /** chat 切替・新規チャットでの全消し(前 chat の残骸を持ち越さない)。 */
 export const clearExecutions = () => {
 	requestSeq += 1;
@@ -52,6 +60,8 @@ export const clearExecutions = () => {
 	state.resumeSuspended = false;
 	state.lastRefreshFailed = false;
 	deliveredBaseline = null;
+	consecutiveRefreshFailures = 0;
+	refreshBackoffUntilMs = 0;
 };
 
 /**
@@ -85,6 +95,13 @@ export const refreshExecutions = async (
 			deliveredBaseline = null;
 		}
 		state.lastRefreshFailed = true;
+		consecutiveRefreshFailures += 1;
+		refreshBackoffUntilMs =
+			Date.now() +
+			Math.min(
+				EXECUTION_POLL_MS * 2 ** (consecutiveRefreshFailures - 1),
+				EXECUTION_POLL_BACKOFF_MAX_MS
+			);
 		return { deliveredAdvanced: false };
 	}
 	const sameChat = state.chatId === chatId;
@@ -92,6 +109,8 @@ export const refreshExecutions = async (
 	state.entries = res.executions ?? [];
 	state.resumeSuspended = res.resume_suspended === true;
 	state.lastRefreshFailed = false;
+	consecutiveRefreshFailures = 0;
+	refreshBackoffUntilMs = 0;
 
 	const delivered = new Set(
 		state.entries.filter((entry) => entry.delivered).map((entry) => entry.id)
@@ -128,6 +147,15 @@ export const shouldPollExecutions = (
 					entry.finished_at != null &&
 					nowEpochS - entry.finished_at < RECENT_DELIVERY_WINDOW_S)
 		));
+
+/**
+ * B-2: 連続失敗中の poll 抑制(5s → 10s → 20s → 40s → 60s cap。成功で解除)。
+ * lastRefreshFailed は poll を「続ける」根拠(自己接地)、こちらは試行を「間引く」制御 —
+ * 役割が逆なので述語(shouldPollExecutions)には畳み込まない。
+ * seed(loadChat)は tick を通らないので対象外(ユーザー起点の即時試行は妨げない)。
+ */
+export const isExecutionsRefreshBackedOff = (nowMs: number): boolean =>
+	nowMs < refreshBackoffUntilMs;
 
 /** exec_id で 1 行引く(ExecutionBlock / ToolCallBlock のバッジ上書き)。 */
 export const getExecutionEntry = (execId: string): ExecutionEntry | null =>

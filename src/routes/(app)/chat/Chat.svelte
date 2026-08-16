@@ -45,6 +45,8 @@
 	import {
 		clearExecutions,
 		executionsState,
+		EXECUTION_POLL_MS,
+		isExecutionsRefreshBackedOff,
 		refreshExecutions,
 		shouldPollExecutions
 	} from '$lib/stores/executions.svelte';
@@ -165,7 +167,6 @@
 	// seed は loadChat が P を通さず必ず打つ(自己接地)。
 	// 各 tick で getTaskIdsByChatId も読み、BE 発の続きターン(配達後の自動再開)へ
 	// 未アタッチなら attachToTask する — ストリームが FE に表示される。
-	const EXECUTION_POLL_MS = 5000;
 	const pollExecutions = async () => {
 		// バックグラウンドタブでは休止(復帰後の次 tick で追いつく)
 		if (document.visibilityState === 'hidden') {
@@ -173,6 +174,10 @@
 		}
 		const targetChatId = $chatId;
 		if (!targetChatId || loading || notFound || isAgentSession) {
+			return;
+		}
+		// B-2: 連続失敗中は tick を間引く(backend 断で 5 秒固定連打しない)
+		if (isExecutionsRefreshBackedOff(Date.now())) {
 			return;
 		}
 		if (
