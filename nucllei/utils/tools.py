@@ -245,6 +245,18 @@ def get_tools(
                 ):
                     tool_dict["backgroundable"] = True
 
+                # llens(#110 P4): per-entry timeout の宣言(backgroundable と対称の
+                # `Tools` クラス属性 `timeouts` — 関数名 → 秒の dict)。同期は
+                # execute_tool_calls が CHAT_TOOL_EXECUTION_TIMEOUT より優先し、
+                # background は exec runner が ASYNC_EXEC_TIMEOUT より優先する
+                # (builtin エントリの timeout キーと同じ意味)。長時間 tool
+                # (STT の長尺音声等)が同期既定 300 秒で死ぬのを tool 側で救う口。
+                timeouts = getattr(module, "timeouts", None)
+                if isinstance(timeouts, dict):
+                    timeout = timeouts.get(function_name)
+                    if isinstance(timeout, (int, float)) and timeout > 0:
+                        tool_dict["timeout"] = timeout
+
                 # TODO: if collision, prepend toolkit name
                 if function_name in tools_dict:
                     log.warning(

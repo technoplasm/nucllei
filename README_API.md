@@ -803,7 +803,12 @@ button). There is no SSE push — the frontend polls.
   non-eligible tool is ignored (synchronous run, warning logged).
 
 Timeouts and limits: per-entry `timeout` wins, else `ASYNC_EXEC_TIMEOUT`
-(default 1800 s). Concurrency: `ASYNC_EXEC_MAX_CONCURRENT` (default 4 per
+(default 1800 s). DB tools declare per-entry timeouts with a `timeouts` class
+attribute on the `Tools` class — a `{function_name: seconds}` dict, symmetric
+with `backgroundable`; the same value also overrides the synchronous
+`CHAT_TOOL_EXECUTION_TIMEOUT` (default 300 s) for that entry, which is how a
+long-running tool (e.g. speech transcription) survives a synchronous call.
+Concurrency: `ASYNC_EXEC_MAX_CONCURRENT` (default 4 per
 user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
 fails immediately. Tool results — synchronous and background alike — are
 truncated once at the production point at `TOOL_RESULT_MAX_CHARS` (default

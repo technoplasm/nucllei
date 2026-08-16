@@ -1271,6 +1271,48 @@ class TestAsyncExec(AbstractPostgresTest):
             in form_data["tools"][0]["function"]["parameters"]["properties"]
         )
 
+    def test_db_tool_class_attribute_declarations_reach_the_entry(self):
+        """K2/P4: `Tools` クラス属性 backgroundable / timeouts が entry キーへ落ちる。
+
+        timeouts(関数名 → 秒)は per-entry timeout の宣言口 — 同期は
+        execute_tool_calls、background は exec runner が同キーを読む。
+        """
+        import types
+
+        from nucllei.models.tools import ToolForm, Tools as ToolsTable
+        from nucllei.utils.tools import get_tools
+
+        content = (
+            "class Tools:\n"
+            '    backgroundable = ("probe",)\n'
+            '    timeouts = {"probe": 1234, "unknown": 9}\n'
+            "\n"
+            "    async def probe(self) -> str:\n"
+            '        """probe"""\n'
+            '        return "ok"\n'
+        )
+        ToolsTable.insert_new_tool(
+            user_id="1",
+            form_data=ToolForm(id="declaring", name="declaring", content=content),
+            specs=[
+                {
+                    "name": "probe",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+        )
+        request = types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(TOOLS={}))
+        )
+        loaded = get_tools(
+            request,
+            ["declaring"],
+            types.SimpleNamespace(id="1", role="admin"),
+            {"__user__": {"id": "1"}},
+        )
+        assert loaded["probe"]["backgroundable"] is True
+        assert loaded["probe"]["timeout"] == 1234
+
     def test_inject_skill_tools_source_wires_a3(self):
         """A-3 の配線が inject_skill_tools 実体に存在することを固定する
         (closure のため直接呼べない — ソース契約として検証)。"""
