@@ -67,9 +67,14 @@
       観測モードは 5 秒ポーリングで継続 turn の新 task に追従
 - [x] dev fixture: `tools/seed.py` に `ensure_subagent_preset`(sub-worker)+ `wire_preset` の
       subagentPresetIds 配線(dev-environment.md 項目 8)
-- [ ] P4 llens 追従: `tools/subagent.py`(486 行)置換。資料ハンドリング 9 ガード
-      (所有者チェック/max_input_chars 等 — `llens:nucllei/tests/test_tool_guards.py` が固定)維持。
-      skill `large-file-handling.md`・プロンプト・audio_tools の案内文も追随必要
+- [x] P4 llens 追従 — **改訂の上で完了(2026-08-16)**: まず `tools/subagent.py` を
+      agent session 機構へ置換(llens `0a3b672` — 9 ガード維持・session_id 化)したが、
+      同日 ken 裁定で **ask_subagent 自体を廃止**(llens `e47d9aa`)。固有価値だった
+      「file_id → 抽出テキストの搬入」は nucllei builtin `builtin_attachment_text`
+      (#113、`fb06797e4`)へ本体化し、素の run_subagent + 子 preset
+      (read_attachment / feed_image / cage)に一本化。skill・プロンプト・audio の
+      案内文も同体制へ追随済み。残は配備 admin 操作(llens-subagent preset 作成 +
+      主 preset の subagentPresetIds — #110 handoff 参照)
 
 ## P3 の既知の意図的挙動
 

@@ -274,3 +274,18 @@ sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の
    read_history は get_message_list でスレッド復元。owner-only 固定。builtin-tool 帯に残タスク無し
    (ユーザー判断 2026-07-06)。着手時は E2E に E8(list/read/grep の owner-only)を足す
 4. リリースタグ候補点(D 完了)
+
+## 追記(2026-08-16)— 現行 builtin 一覧と attachment_text の追加
+
+現行の builtin は 3 本(真実源は `nucllei/builtin_tools/__init__.py` の BUILTIN_TOOLS):
+
+- `builtin_history` — list/read/grep_history(自分のチャット履歴)
+- `builtin_chat_files` — list/grep_chat_files(現在チャットの添付。**メタデータのみ**・
+  chat スコープ — 1 チャットから他チャットのファイルを発見させない)
+- `builtin_attachment_text`(#113)— `read_attachment(file_id, offset?, max_chars?)`。
+  Attachment 抽出(配備側 function が書く `Files.data.content`)の**読み口**。
+  data.content 優先 + text 系 content_type の raw decode フォールバック、offset 窓。
+  認可は **owner-only fail-closed の file_id 直指定で chat 非スコープ** —
+  子 agent session(#107)は親と別 chat のため、chat 縛りでは資料搬入が成立しない。
+  「発見面(一覧)は chat スコープ・読み面(直指定)は owner-only」という分担。
+  主用途: サブエージェントの資料搬入(llens ask_subagent の廃止を可能にした)。

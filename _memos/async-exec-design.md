@@ -432,3 +432,28 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
   (updated_at 単調増加・FE 保存 CAS 化・cascade レース・content_blocks 'calls' 両形受け 等)。
 - 実機 E2E(dev・llens-thinking + sandbox run_shell): チップ表示/停止・
   **タブ完全クローズ中の配達**(notice + 続きターン)・stopped 通知配達を実測。
+
+## 追補 6(2026-08-16)— B 群消化・呼び出し面の仕上げ・llens P4 とその先
+
+- **B 群全消化**: B-2 = FE poll の連続失敗 backoff(5s→倍々→60s cap・成功で解除、`1d95a9ea4`)/
+  B-5 = delete_all_user_chats を user_id スコープ一括読みへ / B-6 = exec 一覧 poll を
+  `?scope=active`(running ∨ 未配達 ∨ 直近終端)で有界化・FE はマージで終端行を保持し、
+  非最終行が active から消えたら全量照合(>追従窓の休止の追いつき)(`71c04d019`)。
+  B-3 は close(running が終端に到達しない穴は runner finally + boot スイープ + liveness の
+  三層で無し。行の単調増加は監査設計 + EXEC_RETENTION_DAYS で運用判断)。
+- **呼び出し面の宣言口を 2 つ追加**(llens 指示面検査の帰結):
+  ① `timeouts`(Tools クラス属性、関数名→秒)= per-entry timeout。同期
+  (CHAT_TOOL_EXECUTION_TIMEOUT=300)と background(ASYNC_EXEC_TIMEOUT)の両方に効く
+  (`2564a7857`)。② toolkit 共通注記 = **Tools クラス docstring** を先頭 spec に 1 回だけ
+  前置(`a3cdb14be` 属性案 → `df5eaaf2e` で docstring 方式へ改訂 — 関数 docstring が
+  モデル向けである以上クラスだけ開発者向けは非一貫、という ken 指摘)。
+  `BACKGROUND_PARAM_SPEC` は適格 tool 数ぶん複製されるため最小化(詳細は回収 3 tool の
+  spec が持つ)。
+- **llens P4 → ask_subagent 廃止まで**: P4 コード出荷(task 用語追随・backgroundable・
+  timeouts)後、ken 裁定で llens の ask_subagent を廃止。固有価値だった
+  「file_id → 抽出テキストの搬入」は **builtin_attachment_text**(#113、
+  `read_attachment(file_id, offset?, max_chars?)`・owner-only fail-closed・chat 非スコープ)
+  として本体化し、サブエージェントは素の run_subagent + 子 preset
+  (read_attachment / feed_image / cage)に一本化(llens `e47d9aa`)。
+  ACL は三段(mount ゲート = アクセス可 preset ゼロなら spec 不注入 / 実行時の同一述語
+  再検証 / 子ターンは呼び出しユーザー本人 + get_tools の per-user ACL)で検証済み。
