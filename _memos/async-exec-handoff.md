@@ -34,8 +34,10 @@
 |---|---|
 | 3 | ~~B-2 exec 一覧 poll の失敗時リトライ~~ ✔ 出荷(2026-08-16、`1d95a9ea4`): 連続失敗で 5s→倍々→60s cap、成功で解除。述語(続ける根拠)とは分離した間引きゲート |
 | 4 | ~~B-3 running 行の滞留~~ **close(2026-08-16、ken 裁定「明らかにおかしいなら直す、でなければ閉じる」)**: 実装確認の結果、running が終端に到達しない穴は無し — runner の finally + finish_execution CAS / boot スイープ(orphaned)/ liveness ガードの三層。terminal はサーバ駆動配達が回収し、行の単調増加は監査目的の設計で GC(`EXEC_RETENTION_DAYS`、既定 0=無効)実装済み — 残るのは llens 側で retention を有効にするかの運用判断のみ |
-| 5 | B-5 `delete_all_user_chats` の N+1 |
-| 6 | B-6 exec 一覧が全行を毎 5 秒返す(単調増加。一覧上限は check_task 側のみ) |
+| 5 | ~~B-5 `delete_all_user_chats` の N+1~~ ✔ 出荷(2026-08-16、`15658aa23`): user_id スコープの一括読み(id 専用 chat 一覧 + running / 未配達 terminal)へ。cascade の意味(契約 M2)は不変 |
+| 6 | ~~B-6 exec 一覧が全行を毎 5 秒返す~~ ✔ 出荷(2026-08-16、`15658aa23`): `?scope=active`(running ∨ 未配達 ∨ 直近終端)で tick を有界化。seed は全量のまま(ExecutionBlock は store に無い行を running 扱い)・FE はマージで終端行を保持・非最終行が active から消えたら全量で照合し直す(>追従窓の休止の追いつき) |
+
+**→ B 群はこれで全消化**(B-1/B-4 は redo で機構ごと消滅、B-2/B-5/B-6 出荷、B-3 close)。残は P3(tag → llens P4)のみ。
 
 **P3 — 出荷**
 
