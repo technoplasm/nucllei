@@ -135,6 +135,14 @@ middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試�
    同格に読む。どちらも来ない配備は `info.meta.context_size` を手で設定して補う
    (最終 fallback)。
 5. delta の `reasoning_content: null` の明示、`matched_stop`、`logprobs` も落ちる。
+6. **先が SGLang ですらない場合、`continuous_usage_stats` は 400 で弾かれる**
+   (2026-08-16 実発症: prism-spark:4000 ゲートウェイの gpt-5.6-luna —
+   LiteLLM 経由の OpenAI/Anthropic 系は未知の stream_options キーを
+   `Unknown parameter` で拒否する)。egress(`routers/openai.py`)が自動対応する:
+   4xx かつ本文がキー名に言及する拒否を観測したら拡張だけ剥がして 1 回再送し、
+   `(url, model)` をプロセス内で学習して以後送らない(`include_usage` は維持 —
+   ライブ累積 usage だけの劣化で完結。5xx・無関係の 4xx では学習しない)。
+   手動 opt-out `capabilities.continuous_usage=False` は併存(`ed05d518e`)。
 
 ## 未キャプチャ(条件が変わったら追加)
 
