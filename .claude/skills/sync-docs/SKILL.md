@@ -1,6 +1,6 @@
 ---
 name: sync-docs
-description: 作業セッションの区切りで、進捗・決定事項をドキュメントと GitHub に同期する(/catchup の書き込み側)。設計メモ(_memos)の追従、作業 issue へのコメント記録、tracking issue #16 のチェックリスト更新、dev 知見の反映までを一括で行う。「ドキュメント同期して」「ここまでの進捗をまとめて」で使う。
+description: 作業セッションの区切りで、進捗・決定事項をドキュメントと GitHub に同期する(/catchup の書き込み側)。設計メモ(_memos)の追従、作業 issue へのコメント記録・handoff メモの残タスク更新、dev 知見の反映までを一括で行う。「ドキュメント同期して」「ここまでの進捗をまとめて」で使う。
 ---
 
 # llens ドキュメント同期(セッションの区切り処理)
@@ -35,16 +35,12 @@ git status --short                                 # 未コミットがあれば
 - 残タスク(なぜ残るか・何を待つか)
 - 1 セッション複数コメントより、区切りでのロールアップ 1 つを好む
 
-## 3. tracking issue #16 の同期
+## 3. 残タスクの同期(handoff メモ / open issue)
 
-```bash
-gh issue view 16 -R technoplasm/nucllei --json body --jq .body > /tmp/issue16.md
-```
-
-- 完了したトラック項目を [x] + 一行サマリ + コミット/日付に更新(python で該当ブロックだけ置換し、
-  `gh issue edit 16 --body-file`。**本文全体を書き直さない**)
-- 別トラックへ移動した残タスク(例: async 化は C へ)は移動先に明記
+- 対象 issue の handoff メモ(例: #110 → `_memos/async-exec-handoff.md`)の残タスク表を
+  実態に合わせて更新(完了は ~~取り消し線~~ + ✔ + 日付。行削除より完了痕跡を残す方を好む)
 - closed にすべき issue(実装が終わっているのに open)があれば報告し、ユーザーの確認を得て close
+- ※ 旧 tracking #16 は 2026-08-13 close — **記録専用**。編集しない
 
 ## 4. タスクリスト・memory の掃除
 
@@ -55,5 +51,5 @@ gh issue view 16 -R technoplasm/nucllei --json body --jq .body > /tmp/issue16.md
 ## 5. コミットとレポート
 
 - メモ・skill の変更は `docs:` でコミット(`refs #N` を忘れない)
-- 最後にレポート: 更新したメモ / 記録した issue コメント(URL)/ #16 の変更点 /
-  持ち越しタスク一覧。**次の一手**を /catchup と同じ基準(#16 実行順)で 1 つ提案する
+- 最後にレポート: 更新したメモ / 記録した issue コメント(URL)/ 残タスクの変更点 /
+  持ち越しタスク一覧。**次の一手**を /catchup と同じ基準(handoff の優先度順)で 1 つ提案する
