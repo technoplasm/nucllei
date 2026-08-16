@@ -22,7 +22,9 @@ git rev-list --count origin/master..master 2>/dev/null    # 未 push 数(origin/
 - 直近コミットの `refs #N` から対象 issue を特定し、**自分の最新コメント(前回の
   /sync-docs ロールアップ)** を読む: `gh issue view N -R technoplasm/nucllei --comments | tail`
 - TaskList で持ち越しタスクを確認
-- 迷ったら `gh issue view 16` で実行順(⓪ → A〜H)の現在地を見る
+- 迷ったら open issue(`gh issue list -R technoplasm/nucllei`)と、対象 issue の
+  handoff メモ(例: #110 → `_memos/async-exec-handoff.md`)を見る。
+  ※ 旧 tracking #16 は 2026-08-13 close — **記録としてのみ参照**(実行順の判断に使わない)
 
 ## 3. dev 環境ヘルス(落ちていれば起動まで面倒を見る)
 
@@ -40,5 +42,5 @@ curl -s -m 2 http://prism-llens:13300/v1/models | head -c 80   # SGLang(不達�
 
 - **前回どこまで**: 直近の出荷内容 1〜2 行 + 持ち越しタスク
 - **足元**: 未コミット・未 push の有無 / 環境の生死(起動したなら何をしたか)
-- **次の一手**: #16 実行順で未完了の最先頭を根拠付きで 1 つ提案
-  (⓪ セキュリティに未完了があれば常に最優先)
+- **次の一手**: open issue と handoff メモの残タスク優先度(P0 > P1 > …)で
+  未完了の最先頭を根拠付きで 1 つ提案(セキュリティ系の未完了があれば常に最優先)
