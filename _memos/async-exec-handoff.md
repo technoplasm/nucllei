@@ -44,7 +44,7 @@
 | # | 内容 |
 |---|---|
 | 7 | **tag**(サブエージェント + 非同期土台が揃った — `uv run task tag release`。切る前に ken と解釈の再確認) |
-| 8 | ~~llens P4~~ ✔ コード出荷(2026-08-16、llens `0a3b672`〜`c06293f` — ローカルコミット・push は ken 判断): subagent を agent session 機構へ置換(session_id 化・9 ガード維持・画像は子の feed_image へ誘導)/ sandbox・audio の backgroundable + 直列化文言 / transcribe_speech の timeouts=1800(nucllei `2564a7857` の per-entry timeout 宣言を新設して使用)/ プロンプト・skill の task 用語追随 / README_API スナップショット同期。**残る配備手順(admin 操作)**: sub-reader preset 作成(toolIds に feed_image)+ 主 preset の meta.subagentPresetIds 追加 + ask_subagent valve の preset id 確認 |
+| 8 | ~~llens P4~~ ✔ コード出荷(2026-08-16、llens `0a3b672`〜`c06293f` — ローカルコミット・push は ken 判断): subagent を agent session 機構へ置換(session_id 化・9 ガード維持・画像は子の feed_image へ誘導)/ sandbox・audio の backgroundable + 直列化文言 / transcribe_speech の timeouts=1800(nucllei `2564a7857` の per-entry timeout 宣言を新設して使用)/ プロンプト・skill の task 用語追随 / README_API スナップショット同期。**改訂(2026-08-16 夜)**: その後 ask_subagent 自体を廃止(llens `e47d9aa` — 固有価値だった資料搬入は nucllei builtin_attachment_text(#113、`fb06797e4`)へ本体化し、素の run_subagent に一本化)。**残る配備手順(admin 操作)**: llens-subagent preset 作成(system prompt は sync の `llens-subagent.md`、toolIds = builtin_attachment_text + feed_image、doc 消化も任せるなら + cage)+ 主 preset の meta.subagentPresetIds 追加 + DB 上の旧 ask_subagent tool 行の割り当て解除・削除 |
 
 ## 実装の勘所(次セッション向けメモ)
 
