@@ -1314,8 +1314,9 @@ class TestAsyncExec(AbstractPostgresTest):
         assert loaded["probe"]["timeout"] == 1234
 
     def test_db_tool_toolkit_note_is_prepended_once(self):
-        """P4: `Tools` クラス属性 `toolkit_note` は先頭 spec の description にだけ
-        1 回前置される(全関数への複製をしない — 宣言口の意味そのもの)。"""
+        """P4: `Tools` クラス docstring は toolkit 共通注記として先頭 spec の
+        description にだけ 1 回前置される(全関数への複製をしない)。関数 docstring が
+        モデル向けであるのと同じ規約 — 開発者メモは # コメントに書く。"""
         import types
 
         from nucllei.models.tools import ToolForm, Tools as ToolsTable
@@ -1323,7 +1324,7 @@ class TestAsyncExec(AbstractPostgresTest):
 
         content = (
             "class Tools:\n"
-            '    toolkit_note = "共通の注意である。"\n'
+            '    """共通の注意である。"""\n'
             "\n"
             "    async def first(self) -> str:\n"
             '        """一つ目。"""\n'

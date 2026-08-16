@@ -180,14 +180,18 @@ def get_tools(
                     **Tools.get_user_valves_by_id_and_user_id(tool_id, user.id)
                 )
 
-            # llens(#110 P4): toolkit 共通注記 — `Tools` クラス属性 `toolkit_note`(str)。
-            # 全関数に共通する注意(直列化・実行環境の性質等)を関数ごとの docstring に
-            # 複製せず、toolkit の**先頭 spec の description に 1 回だけ**前置する宣言口
-            # (backgroundable / timeouts と同じクラス属性の流儀)。文言は tool 作者
-            # (配備側)の持ち物 — 本体は機構だけを提供する。
-            toolkit_note = getattr(module, "toolkit_note", None)
-            if not (isinstance(toolkit_note, str) and toolkit_note.strip()):
-                toolkit_note = None
+            # llens(#110 P4): toolkit 共通注記 — `Tools` **クラス docstring** を toolkit の
+            # **先頭 spec の description に 1 回だけ**前置する。関数 docstring がモデル向け
+            # (spec description)であるのと同じ規約をクラス docstring にも適用する —
+            # tool ファイル内の docstring はモデルに見える文面、開発者メモは # コメント
+            # (ken 決定 2026-08-16)。全関数に共通する注意(直列化・実行環境の性質等)を
+            # 関数ごとに複製しないための口。文言は tool 作者(配備側)の持ち物。
+            toolkit_note = type(module).__doc__
+            toolkit_note = (
+                inspect.cleandoc(toolkit_note).strip()
+                if isinstance(toolkit_note, str) and toolkit_note.strip()
+                else None
+            )
 
             for spec in tool.specs:
                 # TODO: Fix hack for OpenAI API
