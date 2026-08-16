@@ -32,8 +32,8 @@
 
 | # | 内容 |
 |---|---|
-| 3 | B-2 exec 一覧 poll の失敗時リトライ(backoff・上限)— lastRefreshFailed で poll は継続するが間隔は固定 5 秒 |
-| 4 | B-3 モデルが回収しない running 行の滞留(DB のゴミ)— 配達で大半消えるが running 放置は残る |
+| 3 | ~~B-2 exec 一覧 poll の失敗時リトライ~~ ✔ 出荷(2026-08-16、`1d95a9ea4`): 連続失敗で 5s→倍々→60s cap、成功で解除。述語(続ける根拠)とは分離した間引きゲート |
+| 4 | ~~B-3 running 行の滞留~~ **close(2026-08-16、ken 裁定「明らかにおかしいなら直す、でなければ閉じる」)**: 実装確認の結果、running が終端に到達しない穴は無し — runner の finally + finish_execution CAS / boot スイープ(orphaned)/ liveness ガードの三層。terminal はサーバ駆動配達が回収し、行の単調増加は監査目的の設計で GC(`EXEC_RETENTION_DAYS`、既定 0=無効)実装済み — 残るのは llens 側で retention を有効にするかの運用判断のみ |
 | 5 | B-5 `delete_all_user_chats` の N+1 |
 | 6 | B-6 exec 一覧が全行を毎 5 秒返す(単調増加。一覧上限は check_task 側のみ) |
 
