@@ -552,16 +552,24 @@ export type ChatExecutionsResponse = {
 	resume_suspended?: boolean;
 };
 
-export const getChatExecutions = async (id: string): Promise<ChatExecutionsResponse> => {
+// scope 'active'(B-6)は poll tick 用の有界応答(running ∨ 未配達 ∨ 直近終端のみ。
+// 消費側はマージで既知の終端行を保持する)。省略時は全量(seed の履歴描画用)
+export const getChatExecutions = async (
+	id: string,
+	scope?: 'active'
+): Promise<ChatExecutionsResponse> => {
 	let error = null;
 
-	const res = await apiFetch(`${WEBUI_API_BASE_URL}/chats/${id}/executions`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
+	const res = await apiFetch(
+		`${WEBUI_API_BASE_URL}/chats/${id}/executions${scope ? `?scope=${scope}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json'
+			}
 		}
-	})
+	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();

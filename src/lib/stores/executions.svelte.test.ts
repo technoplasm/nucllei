@@ -172,6 +172,62 @@ describe('shouldPollExecutions(poll 述語 — 契約 §M6 / 批評 F-2)', () =>
 	});
 });
 
+describe('activeOnly(B-6 — 有界応答のマージ)', () => {
+	it('既知行を上書き・新規を末尾追加し、応答に無い終端行を保持する', async () => {
+		// seed(全量)
+		respond([
+			entry('old-1', 'done', { delivered: true, finished_at: NOW - 3600 }),
+			entry('run-1', 'running')
+		]);
+		await refreshExecutions(CHAT);
+
+		// tick(active): old-1 は応答に無い / run-1 は done へ / new-1 が出現
+		respond([entry('run-1', 'done', { finished_at: NOW }), entry('new-1', 'running')]);
+		await refreshExecutions(CHAT, { activeOnly: true });
+
+		expect(mockedGetChatExecutions).toHaveBeenLastCalledWith(CHAT, 'active');
+		expect(executionsState.entries.map((e) => e.id)).toEqual(['old-1', 'run-1', 'new-1']);
+		// 応答に無い終端行の保持 — ExecutionBlock の状態表示が running に退行しない
+		expect(getExecutionEntry('old-1')?.status).toBe('done');
+		expect(getExecutionEntry('run-1')?.status).toBe('done');
+	});
+
+	it('activeOnly でも delivered 増分は検知される', async () => {
+		respond([entry('run-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		respond([entry('run-1', 'done', { delivered: true, finished_at: NOW })]);
+		expect((await refreshExecutions(CHAT, { activeOnly: true })).deliveredAdvanced).toBe(true);
+	});
+
+	it('非最終と見ていた行が active 応答から消えたら全量で照合し直す(>追従窓の休止の追いつき)', async () => {
+		respond([entry('run-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		// 休止中に終端化・配達され追従窓も過ぎた → active には無い → 全量 refetch
+		mockedGetChatExecutions.mockResolvedValueOnce({ executions: [] });
+		mockedGetChatExecutions.mockResolvedValueOnce({
+			executions: [entry('run-1', 'done', { delivered: true, finished_at: NOW - 1200 })]
+		});
+		const { deliveredAdvanced } = await refreshExecutions(CHAT, { activeOnly: true });
+
+		expect(mockedGetChatExecutions).toHaveBeenLastCalledWith(CHAT, undefined);
+		expect(getExecutionEntry('run-1')?.status).toBe('done'); // stale running が残らない
+		expect(deliveredAdvanced).toBe(true); // 追いつき refetch(history 読み直し)の合図
+	});
+
+	it('chat 不一致(seed 前)の activeOnly は差し替えとして扱う', async () => {
+		respond([entry('a-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		respond([entry('b-1', 'running')]);
+		await refreshExecutions('chat-other', { activeOnly: true });
+
+		expect(executionsState.chatId).toBe('chat-other');
+		expect(executionsState.entries.map((e) => e.id)).toEqual(['b-1']);
+	});
+});
+
 describe('isExecutionsRefreshBackedOff(B-2 — 連続失敗の backoff)', () => {
 	const T0 = 1_700_000_000_000; // ms
 

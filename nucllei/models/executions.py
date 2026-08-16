@@ -255,6 +255,59 @@ class ExecutionsTable:
                 .all()
             ]
 
+    def get_active_executions_by_chat_id(
+        self, chat_id: str, recent_cutoff: int
+    ) -> list[ExecutionModel]:
+        """chat の「動きうる」行だけ返す(FE poll tick 用 — B-6)。
+
+        running ∨ 未配達 ∨ finished_at が recent_cutoff 以降。terminal ∧ 配達済み ∧
+        古い行は終端で以後不変なので、poll の差し替え対象から外して応答を有界にする
+        (FE はマージで既知の終端行を保持する)。全量は seed(scope 無し)が返す。
+        """
+        with get_db() as db:
+            return [
+                ExecutionModel.model_validate(row)
+                for row in db.query(Execution)
+                .filter(
+                    Execution.chat_id == chat_id,
+                    (Execution.status == "running")
+                    | (Execution.delivered_at == None)  # noqa: E712
+                    | (Execution.finished_at >= recent_cutoff),
+                )
+                .order_by(Execution.created_at.asc(), Execution.id.asc())
+                .all()
+            ]
+
+    def get_running_executions_by_user_id(self, user_id: str) -> list[ExecutionModel]:
+        """ユーザー全 chat の running 行(全チャット削除 cascade 用 — B-5)。
+
+        chat 単位の N+1 を避ける一括読み口。exec の user_id は spawn した chat の
+        所有者なので、所有 chat 全削除の停止対象と一致する。
+        """
+        with get_db() as db:
+            return [
+                ExecutionModel.model_validate(row)
+                for row in db.query(Execution)
+                .filter_by(user_id=user_id, status="running")
+                .order_by(Execution.created_at.asc(), Execution.id.asc())
+                .all()
+            ]
+
+    def get_undelivered_terminal_by_user_id(self, user_id: str) -> list[ExecutionModel]:
+        """ユーザー全 chat の未配達 terminal 行(全チャット削除 cascade 用 — B-5)。"""
+        with get_db() as db:
+            return [
+                ExecutionModel.model_validate(row)
+                for row in db.query(Execution)
+                .filter(
+                    Execution.user_id == user_id,
+                    Execution.status != "running",
+                    Execution.delivered_at == None,  # noqa: E712
+                )
+                .order_by(Execution.created_at.asc(), Execution.id.asc())
+                .all()
+            ]
+
     def has_awaitable_executions_by_chat_id(self, chat_id: str) -> bool:
         """chat に exec 行があるか(回収 builtin 3 tool の mount 判定 — EXISTS)。
 

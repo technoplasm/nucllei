@@ -68,6 +68,11 @@ export const clearExecutions = () => {
  * exec 行一覧を取得して差し替える。fetch 失敗時は表示を現状維持(チップを瞬断で
  * ちらつかせない)しつつ lastRefreshFailed を立てる(poll 述語の自己接地)。
  *
+ * activeOnly(B-6 — poll tick 用): BE へ scope=active(running ∨ 未配達 ∨
+ * 直近終端のみ)を要求し、既知行へ**マージ**する。応答に無い既知行は
+ * 「terminal ∧ 配達済み ∧ 古い」= 以後不変なので保持(ExecutionBlock の
+ * 状態表示が落ちない)。全量差し替えは seed(loadChat)等の既定経路。
+ *
  * 返り値 deliveredAdvanced: **同一 chat の前回観測と比べて** delivered な行が
  * 増えたか。非表示タブ休止中(poll 停止)にサーバ駆動配達が完了すると、復帰後の
  * tick では続きターンが既に終わっていて attach 経路(未知 message_id 封筒 →
@@ -76,13 +81,16 @@ export const clearExecutions = () => {
  * 含んでいる — 追いつき不要)。
  */
 export const refreshExecutions = async (
-	chatId: string
+	chatId: string,
+	opts: { activeOnly?: boolean } = {}
 ): Promise<{ deliveredAdvanced: boolean }> => {
 	if (!chatId) {
 		return { deliveredAdvanced: false };
 	}
 	const seq = ++requestSeq;
-	const res = await getChatExecutions(chatId).catch(() => null);
+	const res = await getChatExecutions(chatId, opts.activeOnly ? 'active' : undefined).catch(
+		() => null
+	);
 	if (seq !== requestSeq) {
 		return { deliveredAdvanced: false };
 	}
@@ -105,8 +113,30 @@ export const refreshExecutions = async (
 		return { deliveredAdvanced: false };
 	}
 	const sameChat = state.chatId === chatId;
-	state.chatId = chatId;
-	state.entries = res.executions ?? [];
+	const fetched = res.executions ?? [];
+	if (opts.activeOnly && sameChat) {
+		// 非最終(running ∨ 未配達)と見ていた行が active 応答に無い = 休止中
+		// (>追従窓)に終端化・配達済み。マージでは stale running が残り、
+		// delivered 増分も観測できないため、全量で照合し直す(稀な追いつきのみ)
+		const returned = new Set(fetched.map((entry) => entry.id));
+		const lostNonFinal = state.entries.some(
+			(entry) => !returned.has(entry.id) && (entry.status === 'running' || !entry.delivered)
+		);
+		if (lostNonFinal) {
+			return refreshExecutions(chatId);
+		}
+		// B-6: 既知行を上書き・新規行を末尾追加(created_at 昇順が保たれる — 新規は常に最新)
+		state.chatId = chatId;
+		const byId = new Map(fetched.map((entry) => [entry.id, entry]));
+		const known = new Set(state.entries.map((entry) => entry.id));
+		state.entries = [
+			...state.entries.map((entry) => byId.get(entry.id) ?? entry),
+			...fetched.filter((entry) => !known.has(entry.id))
+		];
+	} else {
+		state.chatId = chatId;
+		state.entries = fetched;
+	}
 	state.resumeSuspended = res.resume_suspended === true;
 	state.lastRefreshFailed = false;
 	consecutiveRefreshFailures = 0;

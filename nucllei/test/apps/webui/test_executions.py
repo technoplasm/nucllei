@@ -67,6 +67,18 @@ class TestExecutions(AbstractPostgresTest):
             db.commit()
         return self.Executions.get_execution_by_id(exec_id)
 
+    def _age_finished(self, exec_id, seconds):
+        """finished_at を過去へずらす(scope=active の追従窓を抜けさせる)。"""
+        from nucllei.internal.db import get_db
+        from nucllei.models.executions import Execution
+
+        with get_db() as db:
+            db.query(Execution).filter_by(id=exec_id).update(
+                {"finished_at": int(time.time()) - seconds}
+            )
+            db.commit()
+        return self.Executions.get_execution_by_id(exec_id)
+
     def _insert_chat(self, user_id="1", title="chat", **kwargs):
         from nucllei.models.chats import ChatForm
 
@@ -489,6 +501,36 @@ class TestExecutions(AbstractPostgresTest):
         assert self.Executions.mark_delivered(["u1", "u2"]) == 2
         assert self.Executions.list_chat_ids_with_undelivered() == ["chat-b"]
 
+    def test_user_scoped_reads_for_delete_all_cascade(self):
+        """B-5: 全チャット削除 cascade の一括読み口(user_id スコープ・N+1 回避)。"""
+        self._insert("r1", chat_id="c1", user_id="1")
+        self._insert("r2", chat_id="c2", user_id="1")
+        self._insert("f1", chat_id="c9", user_id="9")  # 他ユーザーは混ざらない
+        self._insert("u1", chat_id="c1", user_id="1")
+        self._insert("d1", chat_id="c2", user_id="1")
+        assert self.Executions.finish_execution("u1", status="done", result="ok")
+        assert self.Executions.finish_execution("d1", status="done", result="ok")
+        assert self.Executions.mark_delivered(["d1"]) == 1
+
+        assert [
+            row.id for row in self.Executions.get_running_executions_by_user_id("1")
+        ] == ["r1", "r2"]
+        assert [
+            row.id for row in self.Executions.get_undelivered_terminal_by_user_id("1")
+        ] == ["u1"]
+
+    def test_delete_all_chats_delivers_undelivered_terminal_rows(self):
+        """B-5: cascade は running の stop に加え、自然完走済みの未配達 terminal も
+        恒久断念として delivered 確定する(契約 M2 — stop CAS 負け相当の行)。"""
+        chat = self._insert_chat(title="mine")
+        self._insert("t1", chat_id=chat.id)
+        assert self.Executions.finish_execution("t1", status="done", result="ok")
+
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.delete(self.create_url())
+        assert response.status_code == 200, response.text
+        assert self.Executions.get_execution_by_id("t1").delivered_at is not None
+
     # ---- エンドポイント(一覧 / 個別停止)----
 
     def test_execution_list_shape_and_ownership(self):
@@ -540,6 +582,36 @@ class TestExecutions(AbstractPostgresTest):
                 self.create_url(f"/{chat.id}/executions")
             )
         assert response.status_code == 401, response.text
+
+    def test_execution_list_scope_active_bounds_the_response(self):
+        """B-6: scope=active は running ∨ 未配達 ∨ 直近終端のみ(poll tick 用の
+        有界応答)。terminal ∧ 配達済み ∧ 古い行は不変なので落とす(FE はマージで
+        保持)。未知の scope は 422 — 黙って全量にしない。"""
+        chat = self._insert_chat(title="chat")
+        self._insert("run1", chat_id=chat.id)
+        self._insert("und1", chat_id=chat.id)
+        self._insert("rec1", chat_id=chat.id)
+        self._insert("old1", chat_id=chat.id)
+        assert self.Executions.finish_execution("und1", status="done", result="ok")
+        assert self.Executions.finish_execution("rec1", status="done", result="ok")
+        assert self.Executions.finish_execution("old1", status="done", result="ok")
+        assert self.Executions.mark_delivered(["rec1", "old1"]) == 2
+        self._age_finished("old1", 3600)  # 追従窓(10 分)の外へ
+
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url(f"/{chat.id}/executions?scope=active")
+            )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # created_at 同秒 → id tie-break の昇順(old1 だけ落ちる)
+        assert [item["id"] for item in body["executions"]] == ["rec1", "run1", "und1"]
+
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url(f"/{chat.id}/executions?scope=bogus")
+            )
+        assert response.status_code == 422, response.text
 
     def test_execution_list_detects_orphans_without_writing(self):
         """一覧は liveness を**検出のみ**(orphaned の権威は boot スイープ)。"""

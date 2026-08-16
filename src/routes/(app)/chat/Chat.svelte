@@ -185,7 +185,8 @@
 		) {
 			return;
 		}
-		const { deliveredAdvanced } = await refreshExecutions(targetChatId);
+		// B-6: tick は有界の active 応答(store 側でマージ)— 全量は seed が担う
+		const { deliveredAdvanced } = await refreshExecutions(targetChatId, { activeOnly: true });
 		if (deliveredAdvanced && $chatId === targetChatId) {
 			// 非表示タブ休止中(または poll 間隙)に配達が完走した — 続きターンの封筒は
 			// もう来ないので、history を読み直して notice + 続きターンへ追いつく

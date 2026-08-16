@@ -215,7 +215,6 @@ async def get_session_user_chat_list(
 
 @router.delete("/", response_model=bool)
 async def delete_all_user_chats(request: Request, user=Depends(get_verified_user)):
-
     if user.role == "user" and not has_permission(
         user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
     ):
@@ -229,10 +228,20 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
     # llens(#110): execution は detach されており cancel 連鎖では止まらない
     # (設計 §5 — 「cancel 連鎖で止まる」前提は exec に崩壊する)ので明示停止する。
     # 子 agent session には exec を持たせない(D9)ため、走査は自 chat 分で足りる。
-    for chat in Chats.get_chats_by_user_id(user.id):
-        await _stop_chat_tasks(chat.id)
-        await stop_executions_by_chat_id(chat.id)
-        await _mark_chat_executions_delivered(chat.id)
+    # B-5: chat ごとの DB 往復(N+1)を避ける — exec の停止・恒久断念はユーザー単位の
+    # 一括読みで行う(stop → 断念確定の順は chat 単位経路と同じ。CAS 負けの自然完走
+    # 分は後段の undelivered 一括 mark が拾う — 契約 M2)。
+    for chat_id in await asyncio.to_thread(Chats.get_chat_ids_by_user_id, user.id):
+        await _stop_chat_tasks(chat_id)  # in-process registry のみ(DB を打たない)
+    for row in await asyncio.to_thread(
+        Executions.get_running_executions_by_user_id, user.id
+    ):
+        await stop_execution(row.id, mark_delivered=True)
+    rows = await asyncio.to_thread(
+        Executions.get_undelivered_terminal_by_user_id, user.id
+    )
+    if rows:
+        await asyncio.to_thread(Executions.mark_delivered, [row.id for row in rows])
 
     result = Chats.delete_chats_by_user_id(user.id)
     return result
@@ -675,13 +684,28 @@ def _execution_item(execution: ExecutionModel) -> dict:
     }
 
 
+# B-6: scope=active の「直近終端」窓。FE の poll 述語の追従窓
+# (executions.svelte.ts RECENT_DELIVERY_WINDOW_S)と同値に保つ — active 応答は
+# 「FE の tick が差し替えたい行」の上位集合でなければならない
+EXEC_ACTIVE_RECENT_WINDOW_S = 10 * 60
+
+
 @router.get("/{id}/executions")
-async def get_chat_executions_by_id(id: str, user=Depends(get_verified_user)):
+async def get_chat_executions_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    scope: Optional[str] = Query(default=None, pattern="^active$"),
+):
     """llens(#110): chat の execution 行一覧(バックグラウンドチップ用)。所有者のみ。
 
     応答は {executions, resume_suspended} のオブジェクト形(契約 M2)。
     resume_suspended は連鎖上限(ASYNC_EXEC_RESUME_CHAIN_LIMIT)でサーバ駆動配達が
     保留中であることの表示用 — 人間の発話で自然解除される。
+
+    scope=active(B-6)は poll tick 用の有界応答: running ∨ 未配達 ∨ 直近終端のみ
+    返す(terminal ∧ 配達済み ∧ 古い行は不変 — FE はマージで保持)。全量既定は
+    seed(loadChat)の履歴描画用(ExecutionBlock は store に無い行を running 扱い
+    するため、seed を絞ると古いブロックが壊れる)。
     """
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if not chat:
@@ -689,10 +713,13 @@ async def get_chat_executions_by_id(id: str, user=Depends(get_verified_user)):
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
 
-    items = [
-        _execution_item(execution)
-        for execution in Executions.get_executions_by_chat_id(id)
-    ]
+    if scope == "active":
+        executions = Executions.get_active_executions_by_chat_id(
+            id, int(time.time()) - EXEC_ACTIVE_RECENT_WINDOW_S
+        )
+    else:
+        executions = Executions.get_executions_by_chat_id(id)
+    items = [_execution_item(execution) for execution in executions]
     resume_suspended = execution_resume.is_resume_suspended(chat.chat) and any(
         item["status"] != "running" and not item["delivered"] for item in items
     )

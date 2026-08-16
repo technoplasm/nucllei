@@ -811,6 +811,21 @@ class ChatTable:
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
+    def get_chat_ids_by_user_id(self, user_id: str) -> list[str]:
+        """get_chats_by_user_id の id 専用版(全チャット削除 cascade 用 — B-5)。
+
+        重い chat JSON を運ばない。フィルタは get_chats_by_user_id と同一に保つこと。
+        """
+        with get_db() as db:
+            return [
+                row[0]
+                for row in db.query(Chat.id)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at == None)  # noqa: E712
+                .filter(Chat.kind == "user")
+                .all()
+            ]
+
     def get_chats_by_user_id(self, user_id: str) -> list[ChatModel]:
         with get_db() as db:
             all_chats = (
