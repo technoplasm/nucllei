@@ -153,8 +153,25 @@ class Tools:
     # 実行を background にできるようにする(承認済み Q2 — 2026-08-14)。
     # 既知の v1 制約: ターン終了後に完了した実行では exports の添付 UI
     # (chat:message:files)は出ない — 実体は Files に永続済みで、tool result
-    # 文字列にも列挙される(async-exec-design.md §6)。
+    # 文字列にも列挙される(nucllei _memos/async-exec-design.md §6)。
     backgroundable = ("run_python", "run_python_once", "run_shell")
+
+    # llens(#110 P4): per-entry timeout(nucllei の `timeouts` クラス属性)。
+    # sandbox サービスは timeout_s を最大 600 秒まで受ける(SANDBOX_TIMEOUT_MAX_S)のに、
+    # 宣言が無いと同期経路は CHAT_TOOL_EXECUTION_TIMEOUT=300 で切られ、
+    # timeout_s=300〜600 の正当な指定が harness 側で失われる(検査 2026-08-16)。
+    # 600 + HTTP 余裕 30 = _post の付け足しと同じ余裕幅。
+    timeouts = {"run_python": 630, "run_python_once": 630, "run_shell": 630}
+
+    # nucllei の toolkit 共通注記 — 先頭 spec (run_python) の description に 1 回だけ
+    # 前置される。3 実行ツールの docstring に複製していた共通事項の一本化 (2026-08-16)。
+    toolkit_note = (
+        "ネットワーク不可。/workspace は run_python / run_python_once / run_shell の"
+        "3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは"
+        "自動でチャットに添付される。同一ユーザーの sandbox 実行は直列化される — "
+        "長いバックグラウンドタスクの実行中に呼ぶと、その完了まで待たされる"
+        " (並列にはならない)。"
+    )
 
     class Valves(BaseModel):
         sandbox_url: str = Field(
@@ -420,10 +437,7 @@ class Tools:
         """
         サーバーの隔離環境で Python コードを実行する。この会話の中では変数・import・関数
         定義が実行を跨いで保持される (前のセルで作った DataFrame をそのまま使える)。
-        最後の式は notebook のように値が表示される。/workspace は永続、
-        /workspace/exports/ に保存したファイルは自動でチャットに添付される。ネットワーク不可。
-        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
-        呼ぶと、その完了まで待たされる (並列にはならない)。
+        最後の式は notebook のように値が表示される。
 
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120)
@@ -444,9 +458,7 @@ class Tools:
         """
         サーバーの隔離環境で Python コードを 1 回だけ実行する (状態を持たない使い捨て)。
         run_python と違い変数は残らないが、他の会話の状態から完全に独立して走らせたい
-        単発処理向け。/workspace は永続、exports/ は自動添付。ネットワーク不可。
-        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
-        呼ぶと、その完了まで待たされる (並列にはならない)。
+        単発処理向け。
 
         :param code: 実行する Python コード
         :param timeout_s: wall clock 秒数 (省略時 120)
@@ -472,10 +484,7 @@ class Tools:
     ) -> str:
         """
         サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
-        pandoc, ffmpeg / ffprobe, python が利用可能。/workspace は run_python と共有で実行を跨いで永続。
-        成果物は /workspace/exports/ に置くと自動でチャットに添付される。ネットワーク不可。
-        同一ユーザーの sandbox 実行は直列化される — 長いバックグラウンドタスクの実行中に
-        呼ぶと、その完了まで待たされる (並列にはならない)。
+        pandoc, ffmpeg / ffprobe, python が利用可能。
 
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120)
