@@ -149,6 +149,16 @@ def _iter_context_files(__files__, __metadata__):
 # Tool 本体
 # -----------------------------------------------------------------------------
 class Tools:
+    """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
+    3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは
+    自動でチャットに添付される。同一ユーザーの sandbox 実行は直列化される —
+    長いバックグラウンドタスクの実行中に呼ぶと、その完了まで待たされる
+    (並列にはならない)。"""
+
+    # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
+    # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
+    # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
+
     # llens(#110): 非同期実行(background 昇格)への opt-in。時間のかかる Python
     # 実行を background にできるようにする(承認済み Q2 — 2026-08-14)。
     # 既知の v1 制約: ターン終了後に完了した実行では exports の添付 UI
@@ -162,16 +172,6 @@ class Tools:
     # timeout_s=300〜600 の正当な指定が harness 側で失われる(検査 2026-08-16)。
     # 600 + HTTP 余裕 30 = _post の付け足しと同じ余裕幅。
     timeouts = {"run_python": 630, "run_python_once": 630, "run_shell": 630}
-
-    # nucllei の toolkit 共通注記 — 先頭 spec (run_python) の description に 1 回だけ
-    # 前置される。3 実行ツールの docstring に複製していた共通事項の一本化 (2026-08-16)。
-    toolkit_note = (
-        "ネットワーク不可。/workspace は run_python / run_python_once / run_shell の"
-        "3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは"
-        "自動でチャットに添付される。同一ユーザーの sandbox 実行は直列化される — "
-        "長いバックグラウンドタスクの実行中に呼ぶと、その完了まで待たされる"
-        " (並列にはならない)。"
-    )
 
     class Valves(BaseModel):
         sandbox_url: str = Field(
