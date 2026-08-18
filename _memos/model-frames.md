@@ -144,6 +144,23 @@ middleware は tool_call の `arguments` を **`ast.literal_eval` を先に試�
    ライブ累積 usage だけの劣化で完結。5xx・無関係の 4xx では学習しない)。
    手動 opt-out `capabilities.continuous_usage=False` は併存(`ed05d518e`)。
 
+## エンジン差: vLLM(2026-08-18 実測)
+
+dev の接続先 prism-spark:4000 は **prism-gw**(`prism-hu/chat` の自前ゲートウェイ —
+モデル名でルーティングし本文はバイト無改変で中継)。qwen3.6-35b は vLLM 0.26 透過、
+kimi-k2.6 は llens の SGLang 透過なので、届くフレームは**素のエンジン形**
+(上の LiteLLM 節の崩れはここでは起きない)。
+
+- **tool_call 初回デルタに `arguments: ""` が無い。** SGLang は初回フレームに必ず
+  `id + name + arguments: ""` を載せる(§tool_calls の形状)が、vLLM は初回が
+  `id + name` のみで **`arguments` キー自体が無く**、断片は後続デルタで届く。
+  正規化なしだと assembler の累積(`+=`)が KeyError で全滅 → per-line except に
+  握りつぶされて「引数なし tool call」になり、follow-up 再送も上流 validation 400
+  (`function.arguments` Field required)で落ちていた(2026-08-18 実発症)。
+  対策: 累積の追加時に `function.name` / `function.arguments` を `""` で正規化 +
+  履歴再送(`convert_content_blocks_to_messages`)は arguments を常に文字列で綴じる。
+  回帰: `test_response_assembler.py::test_first_delta_without_arguments_key_accumulates`。
+
 ## 未キャプチャ(条件が変わったら追加)
 
 - **reasoning parser 無効**時の生 `<think>` タグ混り content

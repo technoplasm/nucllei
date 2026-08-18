@@ -182,6 +182,33 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
     assert urls == ["/api/v1/files/abc/content", "/ext/cage/figs/a.png"]
 
 
+def test_convert_tool_call_missing_arguments_sent_as_empty_string():
+    # arguments キーを欠いた call(初回デルタ形がエンジン依存 — 修正前の累積で
+    # 実際に生じた形)をそのまま再送すると上流 validation が Field required で
+    # 400 を返す。function は name/arguments を常に文字列で明示して綴じる。
+    blocks = [
+        {
+            "type": "tool_calls",
+            "content": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "index": 0,
+                    "function": {"name": "probe"},
+                    "render": {"result": {"kind": "subagent"}},
+                }
+            ],
+            "results": [{"tool_call_id": "c1", "content": "ok"}],
+        },
+    ]
+    msgs = convert_content_blocks_to_messages(blocks)
+    assistant = next(m for m in msgs if m["role"] == "assistant")
+    call = assistant["tool_calls"][0]
+    assert call["function"] == {"name": "probe", "arguments": ""}
+    # 内部キー(index / render)は漏らさない
+    assert set(call.keys()) == {"id", "type", "function"}
+
+
 def test_convert_no_user_message_without_context_images():
     blocks = [
         {

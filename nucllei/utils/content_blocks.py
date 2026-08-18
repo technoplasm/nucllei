@@ -159,7 +159,16 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                         {
                             "id": call.get("id"),
                             "type": call.get("type", "function"),
-                            "function": call.get("function", {}),
+                            # arguments は常に文字列で綴じる — キー欠落のまま再送
+                            # すると上流の validation が Field required で 400 を
+                            # 返す(vLLM 0.26 で実測、2026-08-18)
+                            "function": {
+                                "name": (call.get("function") or {}).get("name") or "",
+                                "arguments": (call.get("function") or {}).get(
+                                    "arguments"
+                                )
+                                or "",
+                            },
                         }
                         for call in sendable_calls
                     ],

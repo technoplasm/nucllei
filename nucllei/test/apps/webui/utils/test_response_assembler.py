@@ -184,6 +184,23 @@ class TestToolCallAccumulation:
         assert calls[0]["function"]["name"] == "get_time"
         assert calls[0]["function"]["arguments"] == '{"a": 1}'
 
+    def test_first_delta_without_arguments_key_accumulates(self):
+        # vLLM(qwen3.6-35b / vLLM 0.26、2026-08-18 実測)は初回デルタが
+        # id + name のみで arguments キーを載せない
+        # (SGLang は必ず arguments: "" を載せる — fixture の形)。
+        # 正規化なしだと後続の += が KeyError → 引数なし tool call で
+        # 実行され、follow-up 再送も上流 validation 400 になる。
+        a = make_assembler()
+        a.handle_delta(tool_call_delta(id="c1", name="get_weather"))
+        a.handle_delta(tool_call_delta(arguments='{"city": "'))
+        a.handle_delta(tool_call_delta(arguments='札幌"}'))
+
+        a.note_finish_reason("tool_calls")
+        calls, mismatch = a.finish_stream()
+        assert mismatch is None
+        assert calls[0]["function"]["name"] == "get_weather"
+        assert calls[0]["function"]["arguments"] == '{"city": "札幌"}'
+
     def test_parallel_calls_tracked_by_index(self):
         a = make_assembler()
         a.handle_delta(

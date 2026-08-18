@@ -291,6 +291,15 @@ class ContentBlocksAssembler:
                     break
 
             if current is None:
+                # 初回デルタの形はエンジン依存: SGLang は arguments: "" を
+                # 必ず載せる(fixture の形)が、vLLM は arguments キー自体を
+                # 省く。累積(+=)の土台をここで正規化しないと後続の argument
+                # デルタが KeyError で全滅する(引数なし tool call になる —
+                # 2026-08-18 qwen3.6-35b / vLLM 0.26 で実測)。
+                function = delta_tool_call.get("function") or {}
+                function.setdefault("name", "")
+                function.setdefault("arguments", "")
+                delta_tool_call["function"] = function
                 self._response_tool_calls.append(delta_tool_call)
             else:
                 delta_name = delta_tool_call.get("function", {}).get("name")
