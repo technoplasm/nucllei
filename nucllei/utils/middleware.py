@@ -1067,9 +1067,7 @@ async def consume_model_stream(
                 # デルタ処理の例外をここで握りつぶすとフレームが黙って欠落する
                 # (qwen の arguments デルタ全滅が debug ログのまま無言死した前科、
                 # 2026-08-18)。異常は warning で見えるようにする。
-                log.warning(
-                    "stream frame processing failed (frame dropped): %s", e
-                )
+                log.warning("stream frame processing failed (frame dropped): %s", e)
                 continue
 
     if not recorded_usage and pending_usage is not None:
