@@ -18,12 +18,15 @@ tool が「戻り値以外」で何かを届ける口の全量。issue #88 / #89
 | `__event_emitter__({type,data})` | 人間 | 即時 | 型による | ✗(async) | 型による |
 | `__event_call__({type,data})` | 人間(モーダル) | 即時・双方向 | ✗ | ✗(async) | ✗ |
 
-`__event_emitter__` は tool 向けだけ `make_tool_event_emitter` で包み、**`status` を落とす。
-それ以外の型は素通し**(allowlist ではない)。tool が実際に使うのは
+`__event_emitter__` は tool・filter とも**素通し**(allowlist ではない)。tool が実際に使うのは
 `chat:message:files`(sandbox の成果物添付)/ `message` / `replace` / `source`(`citation`)/
 `notification` / `chat:title`。素通しなので `chat:completion` を撃って本文を差し替えることも
 できるが、tool は元々任意の Python なのでここは**権限境界ではない**(認可は tool の
-access_control 側)。status だけを塞ぐのは、共用スロットの奪い合いを止めるため。
+access_control 側)。
+
+**`status` は 2026-08-18 に機構ごと全廃した(#92)。** 受け口(DB 書き込み・FE 表示・
+`make_tool_event_emitter` の選別)をすべて撤去済みなので、撃っても誰も拾わない。
+経緯は下の「status は廃止した」節。
 
 **`__progress__` は tool 実行文脈でのみ効く。** pipe(`functions.py`)や filter 経路にも
 注入されるが、そちらは sink を張らないので恒久 no-op(呼んでも例外にならないだけ)。
@@ -43,7 +46,8 @@ access_control 側)。status だけを塞ぐのは、共用スロットの奪い
 行き先は **その tool 自身のウィジェット(ToolCallBlock のヘッダ)**。メッセージ単位の
 共用スロットではないので、同時に走る他の tool や filter の表示を踏み潰さない。
 これが status からの移行理由そのもの — 旧実装は共用の 1 行(`.at(-1)`)を last-wins で
-奪い合い、トークン計(filter)の常設表示を tool の進捗が潰していた。
+奪い合い、トークン計(filter)の常設表示を tool の進捗が潰していた(status 自体はその後
+全廃 — 下記)。
 
 ### 規律
 
@@ -104,14 +108,27 @@ access_control 側)。status だけを塞ぐのは、共用スロットの奪い
 - 丸めは表示側(`src/lib/utils/duration.ts`)。backend は小数のまま持つ
   (`int()` 切り捨てだと 1 秒未満の思考が全部「0秒間の思考」になっていた)
 
-## filter は別系統
+## status は廃止した(2026-08-18、#92)
 
-filter(function)の `__event_emitter__` は無変更で、**`status` を使える**。行き先は
-メッセージ本文の上の 1 行(`ResponseMessage.svelte`)で、トークン計のような
-メッセージ単位の常設表示はここ。tool が抜けたことで奪い合いは起きない。
+**メッセージ本文の上の共用 1 行(status / `statusHistory`)は機構ごと撤去した。**
+filter・tool のどちらからも触れない。
 
-残件は #92(`statusHistory` を FE / BE が独立に append しており、FE のチャット保存が
-DB 行を上書きして BE 分が蒸発する)。filter だけになれば量は減るので優先度は低い。
+- 撤去範囲: `completion_events.py` の status 分岐と `make_tool_event_emitter` /
+  `Chats.add_message_status_to_chat_by_id_and_message_id` / FE の
+  `applyMessageMutation('status')`・`MessageStatus` 型・`ResponseMessage.svelte` の
+  表示ブロック(`knowledge_search` 特例と i18n 3 キー含む)/ `.status-description` CSS /
+  dev fixture `dev/functions/token_meter_lite.py`
+- **なぜ**: 本 fork は OWUI の拡張点として status を使う立場をやめた。必要な表示は
+  本体にネイティブで入れられる — tool の進捗は `__progress__`(tool 自身のウィジェット)、
+  トークン計は `live-usage` store + `MessageActions.svelte`、非同期タスクは
+  入力欄下部の進行中チップ。**共用 1 行を last-wins で奪い合う設計そのものが不要**だった
+- 実態としても撤去前から死んでいた: llens 側の filter は 2026-08-09 に status を全廃済み
+  (`large_file_gate.py` / `token_meter.py` のコメント)、tool は #100 で遮断済み、
+  本体 core は元々 emit していなかった
+- これで #92 の原因(`statusHistory` を FE / BE が独立に append し、FE のチャット保存が
+  DB 行を上書きして BE 分が蒸発する)も消滅した
+- **旧データ互換は持たない**(CLAUDE.md)。既存 chat JSON に残る `statusHistory` は
+  読まれず、表示もされない
 
 ## 関連
 

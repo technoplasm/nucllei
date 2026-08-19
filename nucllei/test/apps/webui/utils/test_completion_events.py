@@ -12,7 +12,6 @@ from nucllei.utils.completion_events import (
     CompletionEventStream,
     get_stream,
     make_event_emitter,
-    make_tool_event_emitter,
     register_stream,
     release_stream,
     sse_event_generator,
@@ -238,32 +237,6 @@ def test_progress_is_not_persisted_in_latest_snapshot():
     assert stream.latest_snapshot == {"content_blocks": [], "done": False}
 
 
-def test_tool_event_emitter_drops_status():
-    """tool の status は落とし、他の型はそのまま通す(#100)。
-
-    実行中の通知は __progress__ 一本。ただし emitter ごと外すと
-    chat:message:files(sandbox の成果物添付)が道連れになるため型で切る。
-    """
-    seen = []
-
-    async def base(event):
-        seen.append(event)
-
-    async def run():
-        emitter = make_tool_event_emitter(base)
-        await emitter({"type": "status", "data": {"description": "実行中"}})
-        await emitter({"type": "chat:message:files", "data": {"files": [1]}})
-        await emitter({"type": "notification", "data": {"content": "n"}})
-
-    asyncio.run(run())
-    assert [e["type"] for e in seen] == ["chat:message:files", "notification"]
-
-
-def test_tool_event_emitter_passthrough_none():
-    """emitter 自体が無い経路(headless)では None のまま。"""
-    assert make_tool_event_emitter(None) is None
-
-
 # --- ライブ usage(chat:usage)の保持と破棄(#102)----------------------------
 
 
@@ -367,7 +340,6 @@ def test_event_emitter_skips_db_writes_inside_execution(monkeypatch):
 
     written = []
     for name in (
-        "add_message_status_to_chat_by_id_and_message_id",
         "upsert_message_to_chat_by_id_and_message_id",
         "get_message_by_id_and_message_id",
     ):
@@ -384,7 +356,6 @@ def test_event_emitter_skips_db_writes_inside_execution(monkeypatch):
 
         token = in_exec.set(True)
         try:
-            await emitter({"type": "status", "data": {"description": "実行中"}})
             await emitter({"type": "message", "data": {"content": "追記"}})
             await emitter({"type": "replace", "data": {"content": "上書き"}})
         finally:
@@ -398,8 +369,8 @@ def test_event_emitter_skips_db_writes_inside_execution(monkeypatch):
         stream.close()
         return queue.qsize()
 
-    # 4 通 + close 番兵(DB を書かなくても配信は素通し)
-    assert asyncio.run(run()) == 5
+    # 3 通 + close 番兵(DB を書かなくても配信は素通し)
+    assert asyncio.run(run()) == 4
 
 
 def test_event_emitter_skips_db_writes_on_closed_stream(monkeypatch):

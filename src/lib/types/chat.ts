@@ -34,16 +34,6 @@ export interface ChatFile {
 	};
 }
 
-/** status イベント(applyMessageMutation type === 'status')の 1 件。 */
-export interface MessageStatus {
-	done?: boolean;
-	action?: string; // 'knowledge_search' 等
-	description?: string;
-	urls?: string[];
-	query?: string;
-	hidden?: boolean;
-}
-
 /** citation/source イベントの 1 件(Citations.svelte が集約表示)。 */
 export interface MessageSource {
 	source?: { id?: string; name?: string; url?: string; [key: string]: unknown };
@@ -93,10 +83,6 @@ export interface ChatMessage {
 	error?: boolean | { content: string };
 	/** ユーザー中断(task-cancelled)。completed outlet へ成否として伝搬。 */
 	interrupted?: boolean;
-
-	statusHistory?: MessageStatus[];
-	/** statusHistory 不在時の単発 status(ResponseMessage のフォールバック表示)。 */
-	status?: MessageStatus;
 
 	sources?: MessageSource[];
 	code_executions?: CodeExecution[];

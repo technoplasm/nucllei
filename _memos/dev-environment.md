@@ -290,13 +290,12 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    **注意**: preset の meta を API で書き換えたら `GET /api/models` を叩いて
    `app.state.MODELS` キャッシュを再構築しないと manifest に反映されない
    (UI 経由なら自然に起きる)。
-7. **token filter fixture(#57 検証用、2026-07-10)**: `dev/functions/token_meter_lite.py` を
-   function id `token_meter_lite` で登録(POST /api/v1/functions/create — type は content の
-   `Filter` クラスから自動判定)し、preset の `meta.filterIds` に追加。
-   OWUI が永続化した `Chat.meta["usage"]`(#57)を outlet で読んで status 表示するだけの
-   filter — usage 捕捉・stream_options 注入・累積 state・context_size valve は一切不要
-   (本体が全部やる)。表示例: `🟢 0.4% | 1.2k/256.0k | IN 1.2k / OUT累計 766`。
-   llens 現行 token_meter を簡素化する際の参照実装。
+7. ~~**token filter fixture(#57 検証用、2026-07-10)**~~ **撤去(2026-08-18)**:
+   `dev/functions/token_meter_lite.py` は status イベントで表示する filter だったが、
+   **status を機構ごと全廃**したため削除した(#92)。トークン計は本体ネイティブの
+   `live-usage` store + `MessageActions.svelte` が持つので fixture 自体が不要。
+   dev DB に `token_meter_lite` の function 行が残っている場合は、
+   preset の `meta.filterIds` から外して削除してよい(呼ばれても no-op)。
 8. **subagent fixture(#107 検証用、2026-08-13)**: `nucllei/tools/seed.py` が spawnable な
    子 preset **`sub-worker`**(親 preset と同じ `base_model_id`)を upsert し、親 preset の
    `meta.subagentPresetIds` に配線する(llens 一次コンテンツの tools/skills 登録と同時に走る):

@@ -20,7 +20,6 @@ from nucllei.models.users import Users
 from nucllei.utils.completion_events import (
     make_event_call,
     make_event_emitter,
-    make_tool_event_emitter,
     register_stream,
     release_stream,
     sse_event_generator,
@@ -464,9 +463,8 @@ async def process_chat_payload(
 
     tools_extra_params = {
         **extra_params,
-        # llens(#100): tool の実行中通知は __progress__ 一本。status は落とす
-        # (filter 側の emitter は無変更 — status は filter の常設表示に使われている)。
-        "__event_emitter__": make_tool_event_emitter(event_emitter),
+        # llens(#100): tool の実行中通知は __progress__ 一本。
+        "__event_emitter__": event_emitter,
         "__model__": models[task_model_id],
         "__messages__": form_data["messages"],
         "__files__": metadata.get("files", []),
@@ -1192,7 +1190,7 @@ def _make_progress_emitter(events_stream, metadata):
     `utils/tools.py` の iscoroutinefunction 分岐で to_thread を通らずループ上で直接
     await されるため、そこから future を待つとループが自分自身を待って固まる。
 
-    `__event_emitter__` も経由しない: あちらは async で status/message に DB 書き
+    `__event_emitter__` も経由しない: あちらは async で message/replace の DB 書き
     (to_thread)を含み、await 境界で順序が入れ替わるうえ共有 executor を圧迫する。
 
     stream を**ここでオブジェクトごと捕まえる**のも要点。message_id からの遅延

@@ -18,7 +18,6 @@
 	import TurnIndicator from './TurnIndicator.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 
 	import Error from './Error.svelte';
@@ -83,10 +82,6 @@
 			: undefined
 	);
 
-	const status = $derived(
-		(message.statusHistory ?? (message.status ? [message.status] : [])).at(-1)
-	);
-
 	const citationsEnabled = $derived(
 		(model?.info?.meta?.capabilities as { citations?: boolean } | undefined)?.citations ?? true
 	);
@@ -149,50 +144,6 @@
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if status && !status.hidden}
-							<div class="status-description flex items-center gap-2 py-0.5">
-								{#if status.done === false}
-									<div class="">
-										<Spinner className="size-4" />
-									</div>
-								{/if}
-
-								{#if status.action === 'knowledge_search'}
-									<div class="flex flex-col justify-center -space-y-0.5">
-										<div
-											class="{status.done === false
-												? 'shimmer'
-												: ''} text-content-muted text-base line-clamp-1 text-wrap"
-										>
-											{$i18n.t(`Searching Knowledge for "{{searchQuery}}"`, {
-												searchQuery: status.query
-											})}
-										</div>
-									</div>
-								{:else}
-									<div class="flex flex-col justify-center -space-y-0.5">
-										<div
-											class="{status.done === false
-												? 'shimmer'
-												: ''} text-content-muted text-base line-clamp-1 text-wrap"
-										>
-											{#if status.description?.includes('{{searchQuery}}')}
-												{$i18n.t(status.description, {
-													searchQuery: status.query
-												})}
-											{:else if status.description === 'No search query generated'}
-												{$i18n.t('No search query generated')}
-											{:else if status.description === 'Generating search query'}
-												{$i18n.t('Generating search query')}
-											{:else}
-												{status.description}
-											{/if}
-										</div>
-									</div>
-								{/if}
-							</div>
-						{/if}
-
 						{#if message.files && message.files.filter((f) => f.type === 'image').length > 0}
 							<div class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap">
 								{#each message.files as file}

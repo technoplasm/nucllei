@@ -139,15 +139,6 @@ export function applyMessageMutation(
 	data: any,
 	message: Record<string, any>
 ): boolean {
-	if (type === 'status') {
-		if (message?.statusHistory) {
-			message.statusHistory.push(data);
-		} else {
-			message.statusHistory = [data];
-		}
-		return true;
-	}
-
 	if (type === 'task-cancelled') {
 		// llens: 中断された応答を done 化してスピナーを止める。interrupted は
 		// 直後に届く done イベント → completed(outlet filter)経路で成否として

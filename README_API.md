@@ -582,7 +582,7 @@ from the model-facing spec, and the model cannot spoof them.
 | Parameter                       | Contents                                                                                                                                             |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                  |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` events are dropped for tools** — use `__progress__`  |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`         |
 | `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                           |
 | `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile |
 | `__feed_image__`                | `fn(file_id)` — feed an internal image into the model's context for the follow-up call (the "model's eyes"); chat path only                          |
@@ -662,10 +662,11 @@ async def read_doc(self, path: str) -> Markdown:
   Completion is decided by the tool returning, not by `done=True`, so a tool that
   times out or raises still stops the spinner. Use `__display__` instead for
   anything the user should be able to read back later.
-- `__event_emitter__({"type": ..., "data": ...})`: for tools, **`status` is dropped
-  and every other type passes through** (it is not an allowlist). `status` writes to
-  a message-wide slot shared with filters, which is what `__progress__` replaces;
-  filters may still emit it (§7). Types tools actually use: `chat:message:files`
+- `__event_emitter__({"type": ..., "data": ...})`: **every type passes through** (it is
+  not an allowlist). The one exception is `status`, which **no longer exists** — the
+  message-wide shared slot it wrote to was removed platform-wide, for tools and
+  filters alike; emitting it is a no-op. Use `__progress__` instead.
+  Types tools actually use: `chat:message:files`
   (attach files to the message), `message` / `replace` (append to / replace the
   message text), `source`/`citation`, `notification` (toast), `chat:title`.
 - File outputs: write bytes via `nucllei.storage.provider.Storage.upload_file` +
@@ -930,10 +931,10 @@ do (§5.2), and the same signature-based reserved-parameter injection (`__user__
 `__id__`; availability varies slightly per hook). Sync handlers run in worker
 threads; async is fine everywhere.
 
-Unlike tools, functions **may** emit `status`
-(`{"description","done"}`) — it renders as a single line above the message body
-and is the place for message-wide notes such as a token meter. `__progress__` is
-tool-scoped and is not available here.
+Functions **cannot** emit `status` either — the message-wide slot above the message
+body was removed (it is a no-op now). Token-meter style information is native: the
+action row under a message shows live context usage. `__progress__` is tool-scoped
+and is not available here.
 
 ### 7.1 Filter — the core pipeline
 

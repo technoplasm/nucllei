@@ -110,11 +110,10 @@ describe('applyCompletionData', () => {
 });
 
 describe('applyMessageMutation', () => {
-	it('status は statusHistory に蓄積する', () => {
+	it('status は管轄外(撤去済み — 誰も蓄積しない)', () => {
 		const message: any = {};
-		expect(applyMessageMutation('status', { description: 'a' }, message)).toBe(true);
-		expect(applyMessageMutation('status', { description: 'b' }, message)).toBe(true);
-		expect(message.statusHistory).toEqual([{ description: 'a' }, { description: 'b' }]);
+		expect(applyMessageMutation('status', { description: 'a' }, message)).toBe(false);
+		expect(message).toEqual({});
 	});
 
 	it('task-cancelled は done + interrupted を立てる(cancel 時の順序契約)', () => {

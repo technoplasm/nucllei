@@ -255,14 +255,7 @@ def make_event_emitter(stream: CompletionEventStream, metadata: dict, update_db=
             return
 
         event_type = (event_data or {}).get("type")
-        if event_type == "status":
-            await asyncio.to_thread(
-                Chats.add_message_status_to_chat_by_id_and_message_id,
-                chat_id,
-                message_id,
-                event_data.get("data", {}),
-            )
-        elif event_type == "message":
+        if event_type == "message":
 
             def _append_content():
                 message = Chats.get_message_by_id_and_message_id(chat_id, message_id)
@@ -283,31 +276,6 @@ def make_event_emitter(stream: CompletionEventStream, metadata: dict, update_db=
             )
 
     return __event_emitter__
-
-
-def make_tool_event_emitter(event_emitter):
-    """tool へ渡す `__event_emitter__`。`status` だけを落とす(#100)。
-
-    tool が実行中にユーザーへ伝える口は `__progress__` 一本にした。行き先が
-    その tool 自身のウィジェットに閉じるので、同時に走る他の tool や filter の
-    表示を踏み潰さない。status で共用スロットへ書きに行く道は塞ぐ。
-
-    残りの型(`chat:message:files` 等)はそのまま通す — sandbox は outputs/ の
-    成果物をこの型でそのターンに添付しており、emitter ごと外すと機能が死ぬ。
-    filter 側の emitter は無変更(status は filter の常設表示に使われている)。
-    """
-    if event_emitter is None:
-        return None
-
-    async def __tool_event_emitter__(event_data):
-        if (event_data or {}).get("type") == "status":
-            log.debug(
-                "dropped status event from tool (use __progress__): %s", event_data
-            )
-            return
-        await event_emitter(event_data)
-
-    return __tool_event_emitter__
 
 
 def make_event_call(stream: CompletionEventStream):
