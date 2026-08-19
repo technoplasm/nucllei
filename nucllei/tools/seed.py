@@ -115,7 +115,10 @@ def parse_skill(path):
         key, _, value = line.partition(":")
         meta[key.strip()] = value.strip()
     name = meta.get("name", path.stem)
-    description = meta.get("description", "").strip('"')
+    # 引用符は両形を剥がす。prettier が front matter の "…" を '…' に正規化するので
+    # (llens から同期した large-file-handling.md が実例)、" だけ剥がすと description の
+    # 先頭末尾に ' が残ったまま DB へ入る
+    description = meta.get("description", "").strip("\"'")
     # YAML の flow list は単引用符も可(large-file-handling.md が実例)なので
     # json.loads でなく literal_eval で読む
     tool_ids = ast.literal_eval(meta.get("tool_ids") or "[]")
