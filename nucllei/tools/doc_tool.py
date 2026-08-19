@@ -39,7 +39,7 @@ class Tools:
                  `body_chars` は read_doc で返る本文の文字数 (0 = 本文なし)。
                  read 自体はどのノードでも呼んでよい (中間ノードでも本文を持つ場合がある)。
                  読む前にペイロードの大きさが分かるので、通常サイズなら read_doc、
-                 数万字級の長大ノードは ask_subagent の doc_path に渡す、の判断に使う。
+                 数万字級の長大ノードは run_subagent に読ませる、の判断に使う。
                  not_found 時 {error: "not_found", missing, valid_path, siblings_at_parent}
         """
         r = requests.post(

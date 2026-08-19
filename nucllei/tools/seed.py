@@ -2,7 +2,7 @@
 """llens 一次コンテンツ(nucllei/tools/*.py + nucllei/skills/*.md)を DB へ登録する。
 
 アプリのソースには触れず、公開 API 経由で create/update するだけ(再実行可)。
-valves は環境ごとの接続先(cage / SGLang)を --cage / --sglang で調整する。
+valves は環境ごとの接続先(cage)を --cage で調整する。
 
 使い方(dev):
     TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin \
@@ -31,12 +31,6 @@ TOOLS = {
         "file": "doc_tool.py",
         "name": "Doc",
         "description": "cage 文書ツリーの目次・本文・全文検索",
-        "preset": True,
-    },
-    "subagent": {
-        "file": "subagent.py",
-        "name": "Subagent",
-        "description": "資料を別 context のサブエージェントに読ませて結果だけ返す",
         "preset": True,
     },
     "password_generator": {
@@ -264,17 +258,11 @@ def main():
     ap.add_argument(
         "--cage", default="http://localhost:13303", help="cage API の base URL"
     )
-    ap.add_argument(
-        "--sglang",
-        default="http://prism-llens:13300/v1",
-        help="SGLang OpenAI 互換 endpoint(subagent 用)",
-    )
     args = ap.parse_args()
     base = args.base.rstrip("/")
 
     valves = {
         "doc": {"api_base": args.cage},
-        "subagent": {"model_base_url": args.sglang, "cage_api_base": args.cage},
     }
     for tool_id, entry in TOOLS.items():
         upsert_tool(base, args.token, tool_id, entry, valves.get(tool_id))
