@@ -13,7 +13,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import ValvesModal from './ValvesModal.svelte';
+	import ValvesModal from '$lib/components/workspace/common/ValvesModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -128,11 +128,15 @@
 							</div>
 						</a>
 
-						<Tooltip className="relative flex" content={$i18n.t('Valves')}>
+						<Tooltip
+							className="relative flex"
+							content={func.has_valves ? $i18n.t('Values') : $i18n.t('No values')}
+						>
 							<button
-								class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+								class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl disabled:opacity-35 disabled:hover:bg-transparent"
 								type="button"
-								aria-label={$i18n.t('Valves')}
+								aria-label={$i18n.t('Values')}
+								disabled={!func.has_valves}
 								onclick={() => {
 									selectedFunction = func;
 									showValvesModal = true;

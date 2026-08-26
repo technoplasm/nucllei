@@ -308,7 +308,7 @@ class Attachment:
 			</div>
 			<ul class=" mt-1 list-disc pl-4 text-xs">
 				<li>{$i18n.t('Assignments and references from other items will be detached.')}</li>
-				<li>{$i18n.t('Per-item settings such as valves will be reset.')}</li>
+				<li>{$i18n.t('Per-item settings such as values will be reset.')}</li>
 			</ul>
 		</div>
 	</div>

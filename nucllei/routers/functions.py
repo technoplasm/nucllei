@@ -38,9 +38,34 @@ def validate_function_metadata(form_data: FunctionForm) -> None:
 ############################
 
 
+def get_function_module(request: Request, function_id: str):
+    """app.state.FUNCTIONS キャッシュ越しに function モジュールを得る(未ロードならロード)。"""
+    if function_id in request.app.state.FUNCTIONS:
+        return request.app.state.FUNCTIONS[function_id]
+    function_module, _, _ = load_function_module_by_id(function_id)
+    request.app.state.FUNCTIONS[function_id] = function_module
+    return function_module
+
+
+def function_has_valves(request: Request, function_id: str) -> bool:
+    """一覧 UI の Valves ボタン disable 用。ロード失敗は「設定不可」に倒す。"""
+    try:
+        return hasattr(get_function_module(request, function_id), "Valves")
+    except Exception:
+        log.exception(f"Failed to load the function by id {function_id}")
+        return False
+
+
 @router.get("/", response_model=list[FunctionResponse])
-async def get_functions(user=Depends(get_verified_user)):
-    return Functions.get_functions()
+async def get_functions(request: Request, user=Depends(get_verified_user)):
+    functions = Functions.get_functions()
+    return [
+        FunctionResponse(
+            **function.model_dump(),
+            has_valves=function_has_valves(request, function.id),
+        )
+        for function in functions
+    ]
 
 
 ############################
@@ -225,11 +250,7 @@ async def get_function_valves_spec_by_id(
 ):
     function = Functions.get_function_by_id(id)
     if function:
-        if id in request.app.state.FUNCTIONS:
-            function_module = request.app.state.FUNCTIONS[id]
-        else:
-            function_module, function_type, _ = load_function_module_by_id(id)
-            request.app.state.FUNCTIONS[id] = function_module
+        function_module = get_function_module(request, id)
 
         if hasattr(function_module, "Valves"):
             Valves = function_module.Valves
@@ -253,11 +274,7 @@ async def update_function_valves_by_id(
 ):
     function = Functions.get_function_by_id(id)
     if function:
-        if id in request.app.state.FUNCTIONS:
-            function_module = request.app.state.FUNCTIONS[id]
-        else:
-            function_module, function_type, _ = load_function_module_by_id(id)
-            request.app.state.FUNCTIONS[id] = function_module
+        function_module = get_function_module(request, id)
 
         if hasattr(function_module, "Valves"):
             Valves = function_module.Valves
@@ -316,11 +333,7 @@ async def get_function_user_valves_spec_by_id(
 ):
     function = Functions.get_function_by_id(id)
     if function:
-        if id in request.app.state.FUNCTIONS:
-            function_module = request.app.state.FUNCTIONS[id]
-        else:
-            function_module, function_type, _ = load_function_module_by_id(id)
-            request.app.state.FUNCTIONS[id] = function_module
+        function_module = get_function_module(request, id)
 
         if hasattr(function_module, "UserValves"):
             UserValves = function_module.UserValves
@@ -340,11 +353,7 @@ async def update_function_user_valves_by_id(
     function = Functions.get_function_by_id(id)
 
     if function:
-        if id in request.app.state.FUNCTIONS:
-            function_module = request.app.state.FUNCTIONS[id]
-        else:
-            function_module, function_type, _ = load_function_module_by_id(id)
-            request.app.state.FUNCTIONS[id] = function_module
+        function_module = get_function_module(request, id)
 
         if hasattr(function_module, "UserValves"):
             UserValves = function_module.UserValves

@@ -59,6 +59,9 @@ class FunctionResponse(BaseModel):
     type: str
     name: str
     description: Optional[str] = None
+    # 一覧 UI の Valves 設定ボタンを disable するための派生情報。
+    # DB には持たず GET / で router がモジュールから埋める(真実源はコード)
+    has_valves: Optional[bool] = None
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
 

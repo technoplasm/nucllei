@@ -79,6 +79,9 @@ class ToolModel(BaseModel):
 
 class ToolUserModel(ToolModel):
     user: Optional[UserResponse] = None
+    # 一覧 UI の Valves 設定ボタンを disable するための派生情報。
+    # DB には持たず /list で router がモジュールから埋める(真実源はコード)
+    has_valves: Optional[bool] = None
 
 
 class ToolResponse(BaseModel):

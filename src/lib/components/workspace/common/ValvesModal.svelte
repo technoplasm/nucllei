@@ -59,7 +59,7 @@
 			}
 
 			if (res) {
-				toast.success($i18n.t('Valves updated successfully'));
+				toast.success($i18n.t('Values updated successfully'));
 				onSave();
 			}
 		}
@@ -112,7 +112,7 @@
 <Modal size="sm" bind:show>
 	<div>
 		<div class=" flex justify-between text-content px-5 pt-4 pb-2">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Valves')}</div>
+			<div class=" text-lg font-medium self-center">{$i18n.t('Values')}</div>
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close')}

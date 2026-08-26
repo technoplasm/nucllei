@@ -58,6 +58,8 @@
 // t('Expand code blocks in responses')
 // t('Expand reasoning and tool calls')
 // t('External')
+// t('Failed to save the chat.')
+// t('Failed to save the chat. Your message was restored to the input.')
 // t('File')
 // t('File size should not exceed {{maxSize}} MB.')
 // t('Files')

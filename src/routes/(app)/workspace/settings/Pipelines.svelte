@@ -56,13 +56,13 @@
 			);
 
 			if (res) {
-				toast.success($i18n.t('Valves updated successfully'));
+				toast.success($i18n.t('Values updated successfully'));
 				setPipelines();
 				models.set(await getModels());
 				saveHandler();
 			}
 		} else {
-			toast.error($i18n.t('No valves to update'));
+			toast.error($i18n.t('No values to update'));
 		}
 	};
 
@@ -302,7 +302,7 @@
 					{#if pipelines.length > 0}
 						<div class="flex w-full justify-between mb-2">
 							<div class=" self-center text-sm font-semibold">
-								{$i18n.t('Pipelines Valves')}
+								{$i18n.t('Pipeline values')}
 							</div>
 						</div>
 						<div class="space-y-1">
@@ -407,7 +407,7 @@
 										<Spinner className="size-5" />
 									{/if}
 								{:else}
-									<div>No valves</div>
+									<div>{$i18n.t('No values')}</div>
 								{/if}
 							</div>
 						</div>

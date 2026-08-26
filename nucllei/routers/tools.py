@@ -99,13 +99,34 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 ############################
 
 
+def get_tool_module(request: Request, tool_id: str):
+    """app.state.TOOLS キャッシュ越しに tool モジュールを得る(未ロードならロード)。"""
+    if tool_id in request.app.state.TOOLS:
+        return request.app.state.TOOLS[tool_id]
+    tools_module, _ = load_tool_module_by_id(tool_id)
+    request.app.state.TOOLS[tool_id] = tools_module
+    return tools_module
+
+
+def tool_has_valves(request: Request, tool_id: str) -> bool:
+    """一覧 UI の Valves ボタン disable 用。ロード失敗は「設定不可」に倒す。"""
+    try:
+        return hasattr(get_tool_module(request, tool_id), "Valves")
+    except Exception:
+        log.exception(f"Failed to load the tool by id {tool_id}")
+        return False
+
+
 # llens(#47 A1): workspace のツール管理一覧は content 込みで返す(ToolUserModel)。
 # 一覧内で visibility(access_control)を編集する際、update に必要な content を
 # 追加 fetch なしで round-trip するため。
 # llens(#66): tool 管理は admin 専有(write ACL は廃止)。
 @router.get("/list", response_model=list[ToolUserModel])
-async def get_tool_list(user=Depends(get_admin_user)):
-    return Tools.get_tools()
+async def get_tool_list(request: Request, user=Depends(get_admin_user)):
+    tools = Tools.get_tools()
+    for tool in tools:
+        tool.has_valves = tool_has_valves(request, tool.id)
+    return tools
 
 
 ############################
@@ -338,11 +359,7 @@ async def get_tools_valves_spec_by_id(
 ):
     tools = Tools.get_tool_by_id(id)
     if tools:
-        if id in request.app.state.TOOLS:
-            tools_module = request.app.state.TOOLS[id]
-        else:
-            tools_module, _ = load_tool_module_by_id(id)
-            request.app.state.TOOLS[id] = tools_module
+        tools_module = get_tool_module(request, id)
 
         if hasattr(tools_module, "Valves"):
             Valves = tools_module.Valves
@@ -371,11 +388,7 @@ async def update_tools_valves_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if id in request.app.state.TOOLS:
-        tools_module = request.app.state.TOOLS[id]
-    else:
-        tools_module, _ = load_tool_module_by_id(id)
-        request.app.state.TOOLS[id] = tools_module
+    tools_module = get_tool_module(request, id)
 
     if not hasattr(tools_module, "Valves"):
         raise HTTPException(
@@ -427,11 +440,7 @@ async def get_tools_user_valves_spec_by_id(
 ):
     tools = Tools.get_tool_by_id(id)
     if tools:
-        if id in request.app.state.TOOLS:
-            tools_module = request.app.state.TOOLS[id]
-        else:
-            tools_module, _ = load_tool_module_by_id(id)
-            request.app.state.TOOLS[id] = tools_module
+        tools_module = get_tool_module(request, id)
 
         if hasattr(tools_module, "UserValves"):
             UserValves = tools_module.UserValves
@@ -451,11 +460,7 @@ async def update_tools_user_valves_by_id(
     tools = Tools.get_tool_by_id(id)
 
     if tools:
-        if id in request.app.state.TOOLS:
-            tools_module = request.app.state.TOOLS[id]
-        else:
-            tools_module, _ = load_tool_module_by_id(id)
-            request.app.state.TOOLS[id] = tools_module
+        tools_module = get_tool_module(request, id)
 
         if hasattr(tools_module, "UserValves"):
             UserValves = tools_module.UserValves

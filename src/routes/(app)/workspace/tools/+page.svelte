@@ -1,9 +1,10 @@
 <script lang="ts">
 	// openwebui.com/community 連携(share)・可搬性導線(clone・import/export JSON)は
 	// skill(#35)の前例どおり撤去した(issue #44)。機能は一覧/検索/作成/編集/削除のみ。
-	// llens(#47 A1): TOOL バッジ・name tooltip・By 表示・Valves・… メニューを撤去。
+	// llens(#47 A1): TOOL バッジ・name tooltip・By 表示・… メニューを撤去。
+	// Valves は一度撤去したが一覧アイコンとして復活(valves API は admin 専有 — このページ自体 admin 専用)。
 	// 組み込みは上部に別セクション。visibility(access_control)は一覧のアイコンから直接編集する
-	// (builtin は access_control のみ更新可 — routers/tools.py)。
+	// (builtin は access_control のみ更新可 — routers/tools.py。valves は builtin も可)。
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 	import { WEBUI_NAME, tools as _tools } from '$lib/stores';
@@ -14,6 +15,7 @@
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
+	import ValvesModal from '$lib/components/workspace/common/ValvesModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -22,6 +24,7 @@
 
 	let selectedTool = $state<any>(null);
 	let showDeleteConfirm = $state(false);
+	let showValvesModal = $state(false);
 
 	// visibility(access_control)の一覧内編集: アイコン → AccessControlModal、閉じたら保存
 	let showAccessControlModal = $state(false);
@@ -140,7 +143,7 @@
 	</div>
 
 	<!-- llens(#47 A1): 組み込みツールは上部に別セクション。編集/削除は不可だが
-	 visibility(access_control)だけは一覧のアイコンから直接編集できる(個別に開かせない)。 -->
+	 visibility(access_control)と valves は一覧のアイコンから直接編集できる(個別に開かせない)。 -->
 	{#if builtinItems.length}
 		<div class="text-md font-medium text-content-muted px-0.5 mt-6 mb-1">
 			{$i18n.t('Builtin')}
@@ -181,6 +184,21 @@
 							{:else}
 								<span class="i-lucide-lock size-4 block"></span>
 							{/if}
+						</button>
+					</Tooltip>
+
+					<Tooltip content={tool.has_valves ? $i18n.t('Values') : $i18n.t('No values')}>
+						<button
+							class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl disabled:opacity-35 disabled:hover:bg-transparent"
+							type="button"
+							aria-label={$i18n.t('Values')}
+							disabled={!tool.has_valves}
+							onclick={() => {
+								selectedTool = tool;
+								showValvesModal = true;
+							}}
+						>
+							<span class="i-lucide-settings size-4 block"></span>
 						</button>
 					</Tooltip>
 				</div>
@@ -230,6 +248,24 @@
 					</button>
 				</Tooltip>
 
+				<Tooltip
+					className="relative flex"
+					content={tool.has_valves ? $i18n.t('Values') : $i18n.t('No values')}
+				>
+					<button
+						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl disabled:opacity-35 disabled:hover:bg-transparent"
+						type="button"
+						aria-label={$i18n.t('Values')}
+						disabled={!tool.has_valves}
+						onclick={() => {
+							selectedTool = tool;
+							showValvesModal = true;
+						}}
+					>
+						<span class="i-lucide-settings size-4 block"></span>
+					</button>
+				</Tooltip>
+
 				<Tooltip className="relative flex" content={$i18n.t('Delete')}>
 					<button
 						class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
@@ -264,6 +300,8 @@
 		bind:accessControl={acValue}
 		allowPublic={true}
 	/>
+
+	<ValvesModal bind:show={showValvesModal} type="tool" id={selectedTool?.id ?? null} />
 {:else}
 	<div class="w-full h-full flex justify-center items-center">
 		<Spinner />
