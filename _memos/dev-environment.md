@@ -296,14 +296,14 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    `live-usage` store + `MessageActions.svelte` が持つので fixture 自体が不要。
    dev DB に `token_meter_lite` の function 行が残っている場合は、
    preset の `meta.filterIds` から外して削除してよい(呼ばれても no-op)。
-8. **subagent fixture(#107 検証用、2026-08-13)**: `nucllei/tools/seed.py` が spawnable な
+8. **subagent fixture(#107 検証用、2026-08-13)**: `dev/tools/seed.py` が spawnable な
    子 preset **`sub-worker`**(親 preset と同じ `base_model_id`)を upsert し、親 preset の
-   `meta.subagentPresetIds` に配線する(llens 一次コンテンツの tools/skills 登録と同時に走る):
+   `meta.subagentPresetIds` に配線する(render_probe の登録と同時に走る):
    ```sh
-   python3 nucllei/tools/seed.py --token "$TOKEN" --model llens-thinking
+   python3 dev/tools/seed.py --token "$TOKEN" --model llens-thinking
    ```
-   - `--model` の既定は旧名 `llens-assistant` のままなので dev では
-     **`--model llens-thinking` を明示**する(preset 改名は「セッション追補(2026-07-22)」参照)。
+   - **改訂(2026-08-26)**: 旧 `nucllei/tools/seed.py` は撤去し、本スクリプトに統合した。
+     llens 一次コンテンツの登録は担わない(下の「llens コンテンツは llens 側から入れる」)。
    - 機能フラグ `meta.features.subagent` は既定 ON なので配線だけで `run_subagent` が
      tool enum に出る(条件 = フラグ ON ∧ `subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1 —
      `nucllei/utils/subagent.py`)。seed が末尾で `GET /api/models` を叩くので
@@ -315,6 +315,33 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      (chat.kind=`agent`)が作られ、tool result に `session_id` が載る。子一覧は
      `GET /api/v1/chats/{id}/children`(サイドバーの通常一覧には kind=agent は出ない)。
      再実行は冪等(sub-worker は update、subagentPresetIds は dedup 追記)。
+
+## llens コンテンツは llens 側から入れる(2026-08-26 に一本化)
+
+**llens の tool / skill / filter / システムプロンプトの原本は `prism-hu/llens` の
+`nucllei/{tools,skills,functions,prompts}/`** で、dev DB への登録も**あちらの
+`scripts/nucllei/sync.py`** が持つ。nucllei repo 側にコピーを置かない。
+
+```sh
+# llens repo で。NUCLLEI_ORIGIN で向き先を dev に振る(既定は release の :13301)
+cd ~/src/github.com/prism-hu/llens
+NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py            # 全量
+NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py tools/sandbox skills/large-file-handling
+```
+
+- 認証は llens の `.env` の `NUCLLEI_API_KEY`(`sk-` 始まり)。nucllei の dev admin
+  トークンではない
+- **べき等**。既存は update・不在は create。**valves には触らない**ので dev 固有の
+  接続先(sandbox URL 等)は生き残る。`access_control` も現状 echo で不変
+- **配線(preset の meta.toolIds / filterIds / skillIds)は sync.py の責務外** — UI か
+  手 API で行う。nucllei 側の fixture 配線だけは `dev/tools/seed.py` が持つ
+- `prompts/llens-*.md` は同 id の preset の `params.system` を**全文置換**する。
+  dev の preset を llens 本番の文言に揃えたくない時は区分指定で除外する
+
+**経緯(2026-08-26)**: nucllei repo の `nucllei/tools/` と `nucllei/skills/` は移管前の
+世代の丸ごとコピーで、llens 現行と乖離したまま dev DB に古い内容を seed していた
+(ask_subagent 前提の large-file-handling 等)。さらに `COPY nucllei /app/nucllei` で
+**本番イメージにまで載っていた**。llens を単一情報源として repo から撤去した。
 
 ## モデルフレーム fixture(SGLang × Kimi 実キャプチャ)
 

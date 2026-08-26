@@ -1,7 +1,13 @@
 # dev/tools
 
-レンダリング/tool call 表示デバッグ用の開発ツール（`render_probe`）とその登録スクリプト。
+nucllei 側の dev fixture — レンダリング/tool call 表示デバッグ用の開発ツール
+（`render_probe`）、subagent 検証用の子 preset（`sub-worker`）、それらの登録スクリプト。
 アプリ本体には手を入れず、公開 API 経由で dev DB に登録するだけ。localhost のみ。
+
+**llens の tool / skill / filter / システムプロンプトはここでは扱わない。**
+原本は `prism-hu/llens` の `nucllei/{tools,skills,functions,prompts}/` で、登録は
+あちらの `scripts/nucllei/sync.py`（dev へ向けるなら `NUCLLEI_ORIGIN=http://localhost:3000`）。
+詳細は `_memos/dev-environment.md` の「llens コンテンツは llens 側から入れる」。
 
 ## 登録手順
 
@@ -11,7 +17,8 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin \
   -H 'Content-Type: application/json' \
   -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 
-# 2) render_probe を登録し、llens-thinking の toolIds に追加
+# 2) render_probe を登録し llens-thinking の toolIds に追加、
+#    sub-worker preset を作って subagentPresetIds に配線
 python3 dev/tools/seed.py --token "$TOKEN"
 ```
 

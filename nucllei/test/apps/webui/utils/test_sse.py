@@ -34,7 +34,6 @@ EXEMPT_FILES = {
     "main.py": "ログ出力",
     "utils/access_control.py": "json.loads(json.dumps(x)) の deepcopy 代用",
     "utils/misc.py": "logit_bias の内部処理",
-    "tools/seed.py": "自 API への送信ボディ(受け手がデコードする)",
     "routers/audio.py": "ファイル書き出しと外部 STT/TTS への送信ボディ",
     "routers/openai.py": "推論バックエンドへの送信ボディ",
 }
