@@ -32,7 +32,7 @@
 
 	// 送信キー(Enter ⇄ Ctrl+Enter)のその場切り替え。設定 > チャットと同じ値を書く。
 	// 現在の割り当ては送信ボタンのホバー(MessageInput)にも出る
-	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
+	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? true);
 
 	const toggleCtrlEnterToSend = async () => {
 		settings.set({ ...$settings, ctrlEnterToSend: !ctrlEnterToSend });

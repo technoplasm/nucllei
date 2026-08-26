@@ -116,7 +116,7 @@
 	};
 
 	// 送信キー(Enter ⇄ Ctrl+Enter)。切り替え UI は「+」メニュー(InputMenu)にある
-	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? false);
+	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? true);
 
 	// 設定値は 'LTR' | 'RTL' | 'auto'(大文字)— dir 属性用に小文字化(UserMessage.svelte と同じ)
 	const chatDirection = $derived(
@@ -227,7 +227,7 @@
 				// Prevent Enter key from creating a new line
 				const isCtrlPressed = e.ctrlKey || e.metaKey;
 				const enterPressed =
-					($settings?.ctrlEnterToSend ?? false)
+					($settings?.ctrlEnterToSend ?? true)
 						? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
 						: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
 

@@ -38,7 +38,7 @@
 						{ value: false, label: 'Enter to Send' },
 						{ value: true, label: 'Ctrl+Enter to Send' }
 					],
-					init: () => $settings.ctrlEnterToSend ?? false
+					init: () => $settings.ctrlEnterToSend ?? true
 				},
 				{
 					key: 'titleAutoGenerate',
