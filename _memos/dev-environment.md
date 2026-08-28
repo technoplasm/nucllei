@@ -141,12 +141,16 @@ uv run task dev
 pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退避
 ```
 
-- **起動場所は tmux(2026-07-16 確定、2026-07-17 再々改訂)**: window 構成 = 0:FE(pnpm dev)/
-  **1:BE(uv run task dev)** / 2〜:claude・nvim・zsh。**セッション名は固定と思わない**(2026-07-17 夜に
-  実害: 旧記載 `owui` 決め打ちで `can't find session`。現況は無名セッション `0`)。BE ペインは
-  `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_tty} #{pane_current_command}'`
-  で `uv` を探して特定してから send-keys する。再起動は nohup でなく
-  `tmux send-keys -t <pane> 'uv run task dev' Enter`(状態確認は `tmux capture-pane -t <pane> -p`)。
+- **起動場所は tmux(2026-07-16 確定、2026-08-28 再改訂)**: technoplasm 共通様式に合わせ
+  session 名を **`nuc`** に固定、windows = **BE**(uv run task dev)/ **FE**(pnpm dev)/ claude 等
+  — 正典は **CLAUDE.md「tmux 規約」**(app/scan と同型)。
+  ※改訂(2026-08-28): 旧記述「セッション名は固定と思わない」(2026-07-17、`owui` 決め打ちで
+  can't find session の実害)は撤回 — 無名運用が原因だったので、app/scan 同様に名前を固定して解消。
+  session が見つからなければ
+  `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}'`
+  で `uv`/`node` を探し、見つけた session を `nuc` に rename して合わせる。
+  再起動は nohup でなく `tmux send-keys -t nuc:BE 'uv run task dev' Enter`
+  (状態確認は `tmux capture-pane -p -t nuc:BE`)。
   ログはその window に流れる — 500 の一次調査はまずそこの traceback を読む。
   **再起動時の罠(2026-07-17 実害)**: `C-c` 後に履歴 `Up` で再実行しない — シェル履歴が vite 等を
   拾って BE の代わりに別プロセスを起動しうる。コマンドは必ず明示で送る。

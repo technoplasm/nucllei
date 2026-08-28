@@ -51,6 +51,21 @@
   現行の Filter 実装・nsjail sandbox(stateful run_python)・TTS 構成・SGLang 設定は適宜ここを参照する。
   リンクが無い環境では `~/src/github.com/prism-hu/llens` を確認。
 
+## tmux 規約(technoplasm 共通様式、2026-08-28 適用)
+
+- 作業は tmux session **`nuc`** 上で行う。windows: **`BE`**(backend サーバー)/ **`FE`**(vite サーバー)/
+  `claude` など。ken が手作業するときも同じ。
+- 開発サーバーは**必ず BE/FE window で起動**し、**Claude Code 内部の shell では起動しない**
+  (foreground/background とも。ken がログを見られないため): BE は `uv run task dev`(:3000)、
+  FE は `pnpm dev`(vite :5173)。いずれも repo root で実行。
+- **作業開始時にまず tmux を確認**: `tmux list-windows -t nuc -F '#I: #W (#{pane_current_command})'`。
+  session/window が無ければ作って名前を付け、サーバーが死んでいれば send-keys で起動する:
+  - `tmux send-keys -t nuc:BE 'uv run task dev' Enter`
+  - `tmux send-keys -t nuc:FE 'pnpm dev' Enter`
+  - 罠: `C-c` 後に履歴 `Up` で再実行しない(別コマンドを拾いうる)。コマンドは必ず明示で送る。
+- サーバーログは `tmux capture-pane -p -t nuc:BE`(/FE)で読む。500 の一次調査は BE の traceback から。
+- .env 反映・二重起動・reload の固まり等の詳細は `_memos/dev-environment.md`「dev サーバ」節。
+
 ## 環境の前提
 
 - 推論エンジンは **SGLang**(`prism-llens:13300`、OpenAI 互換 — 2026-07-13 に `:8000` から変更)。接続モデルは Kimi K2.6 で reasoning 出力あり(`reasoning_content` / `<think>` タグ)。
