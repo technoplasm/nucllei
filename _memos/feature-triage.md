@@ -116,6 +116,8 @@ Public/Private=access_control とは別軸)。
   (Functions は CORE=Filter なので admin 固定)。`/admin/{functions,settings,users}` を `/workspace/*` に
   物理移動(コンポーネントは `lib/components/admin/*` を再利用)、`/admin` は `/workspace` へリダイレクト、
   Sidebar UserMenu の「管理者パネル」導線を撤去(入口は Sidebar の Workspace リンク)。
+  ※改訂(2026-08-28): UserMenu に「ワークスペース」項目を追加(19d1e0a23)— 右上メニューからも
+  到達できるように。入口は Sidebar リンク + UserMenu の 2 箇所(管理者パネル復活ではなく同一 `/workspace` への導線追加)。
 - **Evaluations / feedback / arena を完全撲滅**(feature-triage「評価 / Arena」行参照):
   Phase1 で UI(admin Evaluations 画面・チャット 👍/👎)+ frontend API、Phase3a で backend router/model +
   DB テーブル drop(migration e3b1c9f4a7d2)+ ENABLE_MESSAGE_RATING、Phase3b で arena の dead code
