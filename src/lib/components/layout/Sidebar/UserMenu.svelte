@@ -68,6 +68,23 @@
 			<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 		</button>
 
+		<a
+			class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800"
+			href="/workspace"
+			onclick={() => {
+				show = false;
+
+				if ($mobile) {
+					showSidebar.set(false);
+				}
+			}}
+		>
+			<div class=" self-center mr-3">
+				<span class="i-lucide-layout-grid size-5 block"></span>
+			</div>
+			<div class=" self-center truncate">{$i18n.t('Workspace')}</div>
+		</a>
+
 		<!-- llens(#48): 管理者パネル導線は撤去(Admin を Workspace に統合)。管理面は Sidebar の Workspace リンクから到達。 -->
 		<!-- llens(wire v2): Playground は機能ごと撤去(独自ストリーム消費者・薄い基盤に不要) -->
 
