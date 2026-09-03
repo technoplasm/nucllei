@@ -179,13 +179,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.SANDBOX_IMAGE }}
-          # タグ名 = image タグ の 1:1。`latest` は付けない。
-          # metadata-action の既定 flavor は latest=auto で、タグ push に latest を自動付与する。
-          # 本体 image は compose の既定参照が :latest なので付けているが、sandbox の参照側は
-          # 配備層が SANDBOX_TAG で明示指定する運用で、閉域では latest 追従をしない
-          # (どの時点の image か読めなくなる)ため明示的に切る
+          # 自動付与は切って、本体 image と**同じ規則**を明示で書く(flavor: latest=auto は
+          # タグ push なら常に latest を付けてしまい、手動の焼き直しでも動いてしまう)。
+          # **`latest` は本体と揃えて付ける**: 配備層は 1 つの変数(NUCLLEI_TAG)で 2 枚まとめて
+          # pin する運用になった(llens 側で SANDBOX_TAG を廃止)。1 変数で駆動する以上、
+          # **その変数が取りうる値のすべてに 2 枚とも応えられないといけない** —
+          # 本体だけ latest があって sandbox に無いと、NUCLLEI_TAG=latest の機で
+          # sandbox だけ manifest unknown になる。
+          # リリース以外(手動の焼き直し・:dev)では動かさないのも本体と同じ。
           flavor: latest=false
-          tags: type=raw,value=${{ needs.version.outputs.image_tag }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.image_tag }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.is_release == 'true' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
