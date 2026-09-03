@@ -12,7 +12,7 @@
 
 import logging
 
-from nucllei.builtin_tools import attachment_text, chat_files, history
+from nucllei.builtin_tools import attachment_text, chat_files, history, sandbox
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,28 @@ BUILTIN_TOOLS = {
     },
 }
 
+# sandbox だけは env ゲート付き。他の 3 本は nucllei 自身の DB を読むだけで
+# 外部依存ゼロ = どの配備でも必ず動くのに対し、sandbox は外部サービス
+# (sandbox コンテナ) が要る。居ない配備で一覧に生やすと「見えているのに呼ぶと
+# 必ずエラー」になり、builtin の性質(常に動く)に反する。
+# 向き先 env(SANDBOX_URL)が設定されている配備でだけ BUILTIN_TOOLS に載せ、
+# 未設定なら定義そのものが無い扱いにする — 撤去時の後片付けは下の prune
+# (`builtin_` prefix かつ BUILTIN_TOOLS 未定義の行を削除)がそのまま担う。
+# 帰結として **env を外すと access_control 設定は失われる**(行ごと消えるため)。
+# 再設定は運用の手間だが、専用の無効化状態を DB に持つより素直と判断した
+# (2026-09-03)。
+if sandbox.SANDBOX_URL:
+    BUILTIN_TOOLS["builtin_sandbox"] = {
+        "module": sandbox,
+        "name": "Sandbox",
+        "description": (
+            "Run Python / shell in a server-side isolated environment (nsjail) "
+            "with a persistent /workspace "
+            "(run_python / run_python_once / run_shell / send_to_workspace / "
+            "write_file / list_workspace / fetch_from_workspace)"
+        ),
+    }
+
 
 def is_builtin_tool_id(tool_id: str) -> bool:
     """現に登録されている builtin か(update/delete 保護・ロード分岐用)。"""
@@ -70,9 +92,10 @@ def sync_builtin_tools() -> None:
 
     - 定義済み: specs / name / description を毎回 repo から再生成(コード更新の反映)。
       access_control は admin の運用設定なので既存値を保持する。
-    - 撤去済み: コードから消えた builtin 行(`builtin_` prefix かつ BUILTIN_TOOLS 未定義)は
-      DB から削除する。定義の真実源は常に repo なので orphan を残さない
-      (builtin を削除したら次回起動で DB からも消える)。
+    - 未定義: `builtin_` prefix かつ BUILTIN_TOOLS に居ない行は DB から削除する。
+      定義の真実源は常に repo なので orphan を残さない(builtin を削除したら次回起動で
+      DB からも消える)。**env ゲートが閉じた builtin もここに落ちる** —
+      builtin_sandbox は SANDBOX_URL を外して再起動すると同じ経路で消える。
     """
     # 循環 import 回避(utils.tools → utils.plugin → builtin_tools)のため遅延 import
     from nucllei.models.tools import ToolForm, ToolMeta, Tools
@@ -119,12 +142,15 @@ def sync_builtin_tools() -> None:
         except Exception as e:
             log.error(f"builtin tool sync failed: {tool_id}: {e!r}")
 
-    # repo から消えた builtin 行を prune。予約 prefix を持つのに現定義に無いものは
-    # コード側で撤去された証拠なので DB から削除する(旧 builtin_view_image 等の orphan 掃除)。
+    # 現定義に無い builtin 行を prune。予約 prefix を持つのに BUILTIN_TOOLS に居ない
+    # ものは DB に残しておく理由が無い(旧 builtin_view_image 等の orphan 掃除)。
+    # 理由は 2 通りあり、**ログでは区別できない**: コード側で撤去された(定義ごと消えた)か、
+    # env ゲートが閉じた(builtin_sandbox の SANDBOX_URL 未設定)か。後者は配備の設定変更で
+    # 日常的に起こりうるので、「repo から消えた」と断定する文言にはしない。
     try:
         for tool in Tools.get_tools():
             if tool.id.startswith(BUILTIN_ID_PREFIX) and tool.id not in BUILTIN_TOOLS:
                 Tools.delete_tool_by_id(tool.id)
-                log.info(f"builtin tool pruned (removed from repo): {tool.id}")
+                log.info(f"builtin tool pruned (not defined in this build): {tool.id}")
     except Exception as e:
         log.error(f"builtin tool prune failed: {e!r}")
