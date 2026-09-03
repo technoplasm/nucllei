@@ -128,6 +128,9 @@ nsjail jail
   - `/workspace/imports/` — チャット添付ファイルの取り込み先 (tool の import 操作)
   - `/workspace/exports/` — 書かれた新規/更新ファイルは実行後に tool が自動回収し、
     Files に登録してチャットに添付する
+  - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
+    が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
+    無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
 - 直列化は 2 系統で独立: `/exec_cell` は (user, chat) の session lock、`/exec` は user lock。
   run_python と run_shell、別 chat の run_python 同士は並列に走る。全体の同時実行数は
   semaphore (`SANDBOX_MAX_CONCURRENCY`) で制限。lock 待ちは tool 側 HTTP timeout
