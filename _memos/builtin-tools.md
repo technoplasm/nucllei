@@ -2,11 +2,23 @@
 
 2026-07-06 起草、同日改訂 ×2(設計議論の着地: **制御面はすべてモデル設定** — グローバル
 フラグ・workspace ページのトグルは作らない)。#18-3(自前ツール搭載確認 → #18 close)の
-要件とテスト設計。現行実装の参照は `_links/llens`(owui/tools/sandbox.py、sandbox/app/)。
+要件とテスト設計。
+
+> **決着(2026-09-03、#114)**: 本メモが「sandbox はカスタム tool」で始まっているのは
+> 起草時点の判断で、**いまは覆っている** — sandbox はランタイムも tool も nucllei 製品側に
+> 移り、tool は env ゲート付きの組み込み `builtin_sandbox` になった。当時の判断の理由は
+> 履歴として下に残してあるが、**現在の事実は末尾の「改訂(2026-09-03、#114)」節**を見ること。
+> 実装の参照先も `_links/llens` ではなく本 repo の `nucllei/builtin_tools/sandbox.py` と
+> `sandbox/README.md`。
 
 ## 0. 事前調査の結果(2026-07-06 実測)
 
-### sandbox コンテナ(llens/sandbox:poc、127.0.0.1:3000)外形
+### sandbox コンテナ外形
+
+> 当時の実測(コンテナは llens 側でビルドした `llens/sandbox:poc`、host `127.0.0.1:3000`)。
+> **現在**: image は `ghcr.io/technoplasm/nucllei-sandbox`(ソースは本 repo の `sandbox/`)、
+> host 公開は `127.0.0.1:13302`、`outputs`/`inputs` は `exports`/`imports` に改名済み。
+> API の単一情報源は `sandbox/README.md`。
 
 - `GET /healthz` → `{ok, nsjail: true}`
 - `POST /exec` (user_id, lang: python|shell, code, timeout_s?, inputs[]?) →
@@ -164,7 +176,9 @@ builtin tools は自前で `json.dumps(..., ensure_ascii=False, indent=2)` し�
   - 組み込み = OWUI の内部概念(チャット履歴・skill)の操作が目的そのもの。
     本体と一緒にバージョニングされないと壊れるもの
   - カスタム = 外部サービスへのブリッジ。本体と独立に差し替え・更新したいもの。
-    → **Sandbox はカスタム**(現行 prism-hu/llens と同じ DB 登録の配布形を維持)
+    → ~~**Sandbox はカスタム**(現行 prism-hu/llens と同じ DB 登録の配布形を維持)~~
+    → **反転(2026-09-03、#114): Sandbox は組み込み**。基準そのものは変えていない —
+    「出荷単位」を当てはめ直したら答えが逆になった(下の改訂節)
 - この整理により **#18-3 は「カスタム tool として現行基盤に乗ることの確認」に純化**され、
   組み込み機構の実装を待たずに進められる
 
@@ -195,6 +209,10 @@ web 検索を prism へ出したのと対照 — あちらは外部システム�
   「履歴管理 skill の作り方」は手順書/fixture で提供
 
 ### R2. sandbox 自前ツール群の搭載(#18-3 本体)
+
+> **現在は R2 の前提が反転している(#114)**: 下は「カスタム tool のまま搭載検証する」という
+> 2026-07-06 時点の要件。搭載形態は組み込みへ変わったが、**確認事項(依存する基盤機能の一覧)
+> はそのまま組み込みでも成立が要る**ので、内容は残す。関数名も改名済み(改訂節の表を見ること)。
 
 `_links/llens/owui/tools/sandbox.py` を**カスタム tool のまま**(DB 登録)本 fork に搭載検証:
 
@@ -247,15 +265,22 @@ sandbox ツール(R2、respx 等で sandbox API をモック):
 - T11: sandbox HTTP 障害(接続不能・非 200)→ "ERROR: ..." 文字列で graceful(例外を漏らさない)
 - T12: spec 生成 — docstring から name/description/parameters が正しく出る + Code("python") render
 
-sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の管轄(カスタム tool
-として配布)のため fork 側 CI には載せない — fork 側の担保は基盤回帰(上記 3 件)+ E2E。
-組み込みツール(R1)を実装する際に同型の単体を fork 側に持つ。
+~~sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の管轄(カスタム tool
+として配布)のため fork 側 CI には載せない~~ → **#114 で本 repo に来た**(2026-09-03)。
+`nucllei/test/apps/webui/routers/test_builtin_sandbox.py` が T7〜T12 相当を全部持ち、
+CI の `uv run pytest` で毎回走る(env ゲート・prune・valves 編集・exports 登録/添付・
+send_to_workspace の owner-only、および llens から引き取った url= 経路の SSRF ガード回帰)。
+**tool と一緒にテストも移設した**のが要点 — tool だけ移して担保を配備層に残さない。
 
 ### E2E(実 Kimi × 実 sandbox / 実モデル、CI 外)
 
 - **`check_sandbox_tools.py`(#18-3)— E1〜E6 全 PASS(8 チェック、2026-07-06)**:
   stateful(x=42→84)・timeout 後の変数保持・outputs 自動添付(result.csv)・
   import_chat_file の実読み出し。
+  ※ **#114(2026-09-03)で対象を組み込み `builtin_sandbox` に切り替え**、命名も現行へ追随
+  (outputs → **exports**、import_chat_file → **send_to_workspace**)。チェック項目 E1〜E6 は
+  そのまま。手動 tool 登録の前提は消え、代わりに「`SANDBOX_URL` 付きで起動しているか」を
+  preflight で先に落とす(モデルが tool を呼ばないだけの読み取りにくい FAIL を防ぐ)。
 - **`check_skill_feature_gate.py`(#42 E7)— 2/2 PASS(2026-07-06)**:
   機能スキル OFF で `/kansai` 非発火(load_skill 呼ばれない)、ON で発火。終了時に既定へ戻す。
 
@@ -277,7 +302,8 @@ sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の
 
 ## 追記(2026-08-16)— 現行 builtin 一覧と attachment_text の追加
 
-現行の builtin は 3 本(真実源は `nucllei/builtin_tools/__init__.py` の BUILTIN_TOOLS):
+無条件に載る builtin は 3 本(**加えて #114 以降は env ゲート付きの `builtin_sandbox`**。
+真実源は `nucllei/builtin_tools/__init__.py` の BUILTIN_TOOLS):
 
 - `builtin_history` — list/read/grep_history(自分のチャット履歴)
 - `builtin_chat_files` — list/grep_chat_files(現在チャットの添付。**メタデータのみ**・
@@ -289,3 +315,72 @@ sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の
   子 agent session(#107)は親と別 chat のため、chat 縛りでは資料搬入が成立しない。
   「発見面(一覧)は chat スコープ・読み面(直指定)は owner-only」という分担。
   主用途: サブエージェントの資料搬入(llens ask_subagent の廃止を可能にした)。
+
+## 改訂(2026-09-03、#114)— sandbox の移設と builtin 化(R2 の決着)
+
+**判断の一次根拠は issue #114 の本文**。ここは要点と、本メモの旧記述との対応。
+
+### 何が変わったか
+
+sandbox を **3 層に分けて帰属させ直した**。
+
+| | 帰属 | 実体 |
+|---|---|---|
+| ランタイム(nsjail イメージ) | **nucllei repo** | `sandbox/` → `ghcr.io/technoplasm/nucllei-sandbox`(本体と同じ tag で焼く。CI = `.github/workflows/sandbox-image.yml`) |
+| tool(LLM 向け表面) | **nucllei の条件付き builtin** | `nucllei/builtin_tools/sandbox.py` = `builtin_sandbox` |
+| quota / prompt / 開放範囲 / compose | 配備層 `prism-hu/llens` | サービス定義・env の実値・host 公開ポート・workspace の GC |
+
+### なぜ 1c の「出荷単位」基準が逆の答えを出したか
+
+起草時(2026-07-06)は「sandbox = 外部サービスへのブリッジ = カスタム」と当てはめた。
+実運用で見えたのは逆の事実で、**基準は変えずに答えだけが反転**した:
+
+1. **依存の向きが逆だった**。llens の `tools/sandbox.py` は `nucllei.models.chats` /
+   `models.files` / `storage.provider` / `utils.tool_render.Code` / `utils.tool_output.display`
+   という**本体の内部 API を掴んでいて**、`#88 未対応の旧 nucllei で display が無くても…`
+   という try/except で**ホストの内部 API にバージョン交渉していた**。配備層のコードが
+   host の内部を触るのは配置ミスの症状。「本体と一緒にバージョニングされないと壊れるもの」
+   = 1c の組み込み側の定義そのものだった。
+2. **院内固有物が一つも無い**。同じ棚の `cage.py` / `medical_calculator.py` / `pdf_vision.py`
+   とは質が違う(あちらは LLENS 固有の外部システムへのブリッジ)。
+3. **出荷単位が境界**。HTTP API 契約(`/exec` `/exec_cell` `/files/*`)が repo を跨いでいると
+   「ランタイムと tool のどちらが先に出るか分からない」。同じ repo・同じ tag で出れば交渉が要らない。
+4. 実務として、別ホストに立てるたびに 827 行の tool を sync で push し valves を手設定する
+   必要があった。ハーネス化のコストを配置が生んでいた。
+
+**却下した案**: nucllei コンテナに sandbox を同梱する。特権境界の内と外が逆転する —
+sandbox が `privileged: true` を許されているのは中に nsjail を起こす以外何も無いからで、
+一方 nucllei は認証・アップロード・任意文書パース・`/ext` プロキシを持つスタック最大の攻撃面。
+同梱すると非特権コンテナ内で止まるパースバグがホスト root に届く(詳細は #114)。
+
+### env ゲート(既存 3 本との違い)
+
+既存 builtin は「nucllei 自身の DB を読むだけ = 外部依存ゼロ = 必ず動く」。sandbox は
+外部サービスが要るので**無条件には生やさない**。
+
+- `SANDBOX_URL` が設定されている配備でだけ `BUILTIN_TOOLS` に載り、sync が upsert する
+- **既定値は撤去**(既定があると全配備で常に有効になり、ゲートが意味を失う)
+- 未設定なら**新機構を足さず**、既存の prune 経路(`builtin_` prefix かつ BUILTIN_TOOLS
+  未定義の行を削除)がそのまま片付ける。ログは「repo から消えた」と断定しない文言にした
+  — prune の理由が「撤去」か「env ゲートが閉じた」か区別できないため
+- **帰結: env を外すと `access_control` 設定が失われる**(行ごと消える)。専用の無効化状態を
+  DB に持つより素直、と判断した。再設定は運用の手間として許容
+- Valves(`sandbox_url` / timeout 等)は維持。`70743aa68` で ValvesModal は builtin/custom
+  両方に配線済みなので、DB に値を入れれば env より優先される
+
+素の nucllei を配る相手に、立てていないサービス用の tool を見せない。
+
+### 関数名の現行(旧メモの記述との対応)
+
+`run_python`(stateful)/ `run_python_once` / `run_shell` / **`send_to_workspace`**(旧
+`import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / `list_workspace` /
+**`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
+ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
+
+### 担保
+
+- 単体: `nucllei/test/apps/webui/routers/test_builtin_sandbox.py`(CI の `uv run pytest`)
+- ランタイム: `uv run task sandbox-unit`(CI)/ `uv run task sandbox-test`(稼働コンテナ必須、手元)
+- E2E: `dev/e2e/check_sandbox_tools.py`(E1〜E6。実 Kimi × 実コンテナ、CI 外)
+- **同名関数の衝突に注意**(#18-3 の教訓は今も生きる)。この移設に伴い、衝突源だった
+  `dev/tools/sandbox.py`(手動登録用の古いコピー)を削除した

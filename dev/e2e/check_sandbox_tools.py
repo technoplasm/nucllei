@@ -1,11 +1,20 @@
-"""#18-3(sandbox 自前ツール搭載)の答え合わせ。実 Kimi × 実 sandbox(:3000)。
+"""組み込み sandbox tool(`builtin_sandbox`)の答え合わせ。実 Kimi × 実 sandbox コンテナ。
 
-前提: dev/tools/sandbox.py を tool id `sandbox` で登録し、valves の sandbox_url を
-http://127.0.0.1:3000 に設定、llens-assistant の toolIds に追加済み
-(_memos/builtin-tools.md §0 と #35 コメント参照)。
+起源は #18-3(sandbox 自前ツール搭載)。当時は `dev/tools/sandbox.py` を tool id `sandbox`
+で dev DB へ手動登録していたが、**#114(2026-09-03)で tool は nucllei 本体の組み込み
+`builtin_sandbox` になった**ので、手動登録の手順は消えている。
 
-E1 計算 / E2 stateful(x=42 → 84)/ E3 outputs 自動添付 / E4 timeout(変数保持)/
-E5 shell / E6 添付取り込み(import_chat_file)
+前提:
+1. sandbox コンテナが `127.0.0.1:13302`(133xx 帯)で稼働している
+   (`docker build -t nucllei-sandbox:dev ./sandbox` → 配備層 llens の compose で up。
+   詳細は `_memos/dev-environment.md`)
+2. backend を **`SANDBOX_URL=http://127.0.0.1:13302` 付きで起動**している。
+   env が空だと `builtin_sandbox` はそもそも Tools テーブルに生えない(env ゲート)
+3. preset(`MODEL_ID`)に `builtin_sandbox` が接続されている
+   — 未接続ならこのスクリプトが接続して MODELS キャッシュを張り直す(冪等)
+
+E1 計算 / E2 stateful(x=42 → 84)/ E3 exports 自動添付 / E4 timeout(変数保持)/
+E5 shell / E6 添付取り込み(send_to_workspace)
 """
 
 import io
@@ -19,6 +28,10 @@ import requests
 BASE = "http://localhost:3000"
 FRONT = "http://localhost:5174"
 SECRET = "himitsu-ingredient-7742"
+# 組み込み tool の id(`nucllei/builtin_tools/__init__.py` の BUILTIN_TOOLS)。
+TOOL_ID = "builtin_sandbox"
+# 検証に使う preset。dev の主 preset は 2026-07-22 に llens-assistant → llens-thinking へ改名。
+MODEL_ID = "llens-thinking"
 
 req = urllib.request.Request(
     BASE + "/api/v1/auths/signin",
@@ -28,6 +41,63 @@ req = urllib.request.Request(
 )
 token = json.loads(urllib.request.urlopen(req).read())["token"]
 auth = {"Authorization": f"Bearer {token}"}
+
+
+def _req(method, url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    r = urllib.request.Request(
+        BASE + url,
+        data=data,
+        method=method,
+        headers={**auth, "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(r, timeout=30) as resp:
+        raw = resp.read().decode()
+        return json.loads(raw) if raw else None
+
+
+def preflight():
+    """組み込み tool が生えていて preset に接続されていることを確かめる。
+
+    ここで落ちないと、症状が「モデルが run_python を呼ばずに雑談で返す」という
+    読み取りにくい FAIL に化ける(#18-3 の偽 PASS と同じ罠)。
+    """
+    tools = _req("GET", "/api/v1/tools/") or []
+    if not any(t["id"] == TOOL_ID for t in tools):
+        raise SystemExit(
+            f"{TOOL_ID} が Tools に無い。backend を SANDBOX_URL 付きで起動していない可能性が高い:\n"
+            "  tmux send-keys -t nuc:BE 'SANDBOX_URL=http://127.0.0.1:13302 uv run task dev' Enter\n"
+            "(env 未設定だと __init__.py の env ゲートで登録されず、prune で DB からも消える)"
+        )
+
+    # valves は未設定なら env(SANDBOX_URL)が既定として効く。DB に値が入っていると
+    # そちらが優先されるので、向き先が読めるよう毎回出す。
+    valves = _req("GET", f"/api/v1/tools/id/{TOOL_ID}/valves") or {}
+    print(f"valves: {valves or '(未設定 — env SANDBOX_URL の既定を使用)'}")
+
+    model = _req("GET", f"/api/v1/models/model?id={MODEL_ID}")
+    if model is None:
+        raise SystemExit(f"preset {MODEL_ID} が無い。dev fixture を確認すること")
+    meta = model.get("meta") or {}
+    tool_ids = list(meta.get("toolIds") or [])
+    if TOOL_ID not in tool_ids:
+        # #54 以降 toolIds はサーバー側解決。接続が無いとモデルに spec が渡らない。
+        meta["toolIds"] = tool_ids + [TOOL_ID]
+        _req(
+            "POST",
+            f"/api/v1/models/model/update?id={MODEL_ID}",
+            {
+                "id": model["id"],
+                "base_model_id": model.get("base_model_id"),
+                "name": model["name"],
+                "meta": meta,
+                "params": model.get("params") or {},
+                "access_control": model.get("access_control"),
+                "is_active": model.get("is_active", True),
+            },
+        )
+        _req("GET", "/api/models")  # app.state.MODELS 再構築(API 更新時の必須手順)
+        print(f"{MODEL_ID} の toolIds に {TOOL_ID} を接続した")
 
 
 def get_chat(chat_id):
@@ -74,6 +144,8 @@ def check(label, cond, detail=""):
         f"{label}: {'PASS' if cond else 'FAIL'}" + (f"  ({detail})" if detail else "")
     )
 
+
+preflight()
 
 from playwright.sync_api import sync_playwright
 
@@ -138,16 +210,17 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/sandbox_e2e_chat1.png", full_page=True)
 
     # ---- chat 2: E3 / E5 --------------------------------------------------
+    # exports/ = 実行前後の差分を tool が回収して添付する置き場(旧 outputs/ から改名)。
     new_chat()
     chat_id, chat = send_and_wait(
-        "run_python で、ヘッダ a,b と行 1,2 だけの CSV を outputs/result.csv に保存して",
+        "run_python で、ヘッダ a,b と行 1,2 だけの CSV を exports/result.csv に保存して",
         1,
     )
     asst = last_assistant(chat)
     calls, reply = describe(asst)
     files = asst.get("files") or []
     check(
-        "E3 outputs 自動添付",
+        "E3 exports 自動添付",
         "run_python" in calls
         and any(
             (f.get("name") or f.get("file", {}).get("filename", "")).endswith(
@@ -170,6 +243,7 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/sandbox_e2e_chat2.png", full_page=True)
 
     # ---- chat 3: E6 添付取り込み ------------------------------------------
+    # 取り込みは send_to_workspace(旧 import_chat_file)。置き場は /workspace/imports/。
     up = requests.post(
         f"{BASE}/api/v1/files/",
         headers=auth,
@@ -186,13 +260,13 @@ with sync_playwright() as p:
 
     new_chat()
     chat_id, chat = send_and_wait(
-        f"file_id={file_id} のファイルを import_chat_file で sandbox に取り込み、"
-        "run_python で /workspace/inputs/ のそのファイルを読んで中身をそのまま教えて",
+        f"file_id={file_id} のファイルを send_to_workspace で sandbox に取り込み、"
+        "run_python で /workspace/imports/ のそのファイルを読んで中身をそのまま教えて",
         1,
     )
     calls, reply = describe(last_assistant(chat))
     check(
-        "E6 添付取り込み", "import_chat_file" in calls and SECRET in reply, reply[:120]
+        "E6 添付取り込み", "send_to_workspace" in calls and SECRET in reply, reply[:120]
     )
     page.screenshot(path="/tmp/sandbox_e2e_chat3.png", full_page=True)
 

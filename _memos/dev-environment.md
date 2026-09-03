@@ -272,11 +272,26 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    - このほか dev DB に `get_weather` tool(fixture の call 先)を手で作って toolIds に足しておくと
      モデルフレーム fixture と同じシナリオを UI で再現できる(spec は
      `test_native_tool_calling.py` の weather_spec 参照)。
-   **sandbox tool(#18-3)**: 実行系は `dev/tools/sandbox.py` を tool id `sandbox` で
-   DB 登録(API 経由。llens 現行 tool の v0.6.5 適合版)。sandbox コンテナ
-   (`llens/sandbox:poc`)を **`127.0.0.1:13302->8000`**(133xx 帯の正典採番)で起こし、
-   valves は `{"sandbox_url":"http://127.0.0.1:13302"}`(2026-07-13 設定済み)。
-   答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
+   **sandbox tool(#18-3 → #114 で組み込み化、2026-09-03)**: 実行系は
+   **組み込み `builtin_sandbox`**(`nucllei/builtin_tools/sandbox.py`)。**DB への手動登録は不要**
+   — 旧 `dev/tools/sandbox.py` を tool id `sandbox` で登録する手順は撤去した(コピーごと削除。
+   残すと組み込みと関数名が丸ごと衝突し、先勝ち discard で片方が黙って捨てられる)。
+   - 生やす条件は **env `SANDBOX_URL`** ただ一つ(既定値は持たない)。
+     `SANDBOX_URL=http://127.0.0.1:13302 uv run task dev` で起動すれば起動時 sync で生える。
+     未設定で起動すると **prune で DB からも消える**(access_control 設定も一緒に消える)。
+     valves の `sandbox_url` は空なら env の値が既定として効くので、dev で触る必要は無い。
+   - preset への接続(`meta.toolIds` に `builtin_sandbox`)は必要。E2E スクリプトが冪等に張る。
+   - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
+     `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは
+     `docker build -t nucllei-sandbox:dev ./sandbox`、公開は **`127.0.0.1:13302->8000`**
+     (133xx 帯の正典採番)。compose のサービス定義は配備層(llens)持ちなので、
+     そちらで上げるなら image を張り替えてから `docker compose up -d --no-deps sandbox`。
+   - **テストが本 repo で回せるようになった**: `uv run task sandbox-unit`(コンテナ不要の
+     SessionManager ユニット。CI の test-backend でも走る)/ `uv run task sandbox-test`
+     (稼働中の privileged コンテナに対する隔離テスト。コンテナ名は `SANDBOX_CONTAINER`、
+     既定 `llens-sandbox`。無ければ全 skip)。素の `uv run pytest` には入らない
+     (`testpaths = ["nucllei/test"]`)。
+   - 答え合わせは `.venv/bin/python dev/e2e/check_sandbox_tools.py`(E1〜E6)。
    **docling コンテナ**(`llens-docling` = docling-serve v1.17.0)は
    **`127.0.0.1:13304->5001`**、`docling_extract` の valves は `http://localhost:13304`
    (function content は `_links/llens/owui/attachments/docling_extract.py` から同期)。
@@ -330,13 +345,15 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
 # llens repo で。NUCLLEI_ORIGIN で向き先を dev に振る(既定は release の :13301)
 cd ~/src/github.com/prism-hu/llens
 NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py            # 全量
-NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py tools/sandbox skills/large-file-handling
+NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py tools/medical_calculator skills/large-file-handling
 ```
 
 - 認証は llens の `.env` の `NUCLLEI_API_KEY`(`sk-` 始まり)。nucllei の dev admin
   トークンではない
 - **べき等**。既存は update・不在は create。**valves には触らない**ので dev 固有の
-  接続先(sandbox URL 等)は生き残る。`access_control` も現状 echo で不変
+  接続先(外部サービスの URL 等)は生き残る。`access_control` も現状 echo で不変
+- **`tools/sandbox` はもう sync 対象に無い**(#114、2026-09-03)。sandbox tool は nucllei の
+  組み込み `builtin_sandbox` になり、llens 側の custom tool は撤去された
 - **配線(preset の meta.toolIds / filterIds / skillIds)は sync.py の責務外** — UI か
   手 API で行う。nucllei 側の fixture 配線だけは `dev/tools/seed.py` が持つ
 - `prompts/llens-*.md` は同 id の preset の `params.system` を**全文置換**する。
@@ -431,9 +448,11 @@ LLENS_STT_SMOKE=1 uv run pytest \
   vite の `/ws` プロキシは撤去済み。
 - **dev DB の tool content はリポジトリのリネームに追従しない**: #34 の `open_webui`→`nucllei`
   リネーム後、DB 登録済み `sandbox` tool のモジュールが `No module named 'open_webui'` で
-  ロード失敗し、チャット全体が 400 になっていた(2026-07-17 に `dev/tools/sandbox.py` の
-  現内容で DB を更新して解消)。**パッケージ構造を動かしたら DB 登録 tool の再同期を忘れない**
+  ロード失敗し、チャット全体が 400 になっていた(2026-07-17 に当時の dev コピーの内容で
+  DB を更新して解消)。**パッケージ構造を動かしたら DB 登録 tool の再同期を忘れない**
   (`POST /api/v1/tools/id/{id}/update` に repo ファイルの content を流す)。
+  ※ **sandbox は #114 で組み込み化したのでこの罠から外れた**(builtin の content は DB に
+  持たず起動ごとに repo から解決される)。教訓が生きるのは残った custom tool(llens 由来)だけ。
 - **実機ストリーミング e2e**: `.venv/bin/python dev/e2e/check_streaming_wire_v2.py`
   (実 SGLang 前提。単調成長・ストリーム中リロード再アタッチ・完走を検証)。
 - **dev アカウント(ken@llens.local)は `ctrlEnterToSend: true`**: 素の Enter では送信されない。
@@ -476,4 +495,8 @@ dev 実機(:3000)に prism ツールを載せて検証したときの罠と手�
 - **sandbox は imports/exports 命名で再ビルド要**(旧 inputs/outputs コンテナだと tool と食い違う)。
   compose 補間が `nucllei` サービスの `NUCLLEI_DB_PASSWORD` を要求するので、sandbox 単体は
   `docker build -t llens/sandbox:poc ./sandbox` → `NUCLLEI_DB_PASSWORD=x docker compose up -d --no-deps --force-recreate sandbox`。
+  ※ **追記(2026-09-03、#114)**: このビルドコマンドは当時の llens repo のもの。sandbox の
+  ソースは nucllei へ移り、image も `ghcr.io/technoplasm/nucllei-sandbox` に変わった。
+  いま手元で焼くなら **nucllei repo で** `docker build -t nucllei-sandbox:dev ./sandbox`。
+  llens の compose は `build:` を持たず ghcr の image を引くだけになっている。
   `/exec` 応答キーが `outputs`→`exports` に変わったのを確認(スモーク: exports/ に書いて応答 keys を見る)。

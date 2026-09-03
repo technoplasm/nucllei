@@ -344,6 +344,7 @@ class Tools:
         return f"received sql ({lines} lines), note={note!r}"
 
     # 旧 run_python(Code("python") + Text 戻りの #20 確認用ダミー)は、本物の
-    # sandbox tool(dev/tools/sandbox.py)の搭載(#18-3)に伴い撤去 — 同名衝突で
-    # 本物を discard してしまうため。宣言は sandbox 側に引き継ぎ済み。
+    # sandbox tool の搭載(#18-3)に伴い撤去 — 同名衝突で本物を discard してしまうため。
+    # 宣言は sandbox 側に引き継ぎ済み(#114 以降の実体は組み込み
+    # `nucllei/builtin_tools/sandbox.py`)。
     # 旧 probe_result_table(戻り型 Table)は table 描画の廃止(#60)に伴い撤去。

@@ -281,7 +281,8 @@ tag 後に llens P4(userspace subagent.py の builtin 置換・プロンプト�
 - exec は spawn 時点の認可・token で最後まで走る(ユーザー無効化・tool 剥奪は走行中 exec に効かない。
   tool server の session token は途中失効で failed になりうる)。
 - ターン中の chat JSON RMW 競合は ContextVar 遮断(§6)で emitter 経路のみ塞いだ。tool 独自の DB 書き
-  (llens sandbox の files upsert 等)は tool 側の宿題。
+  (sandbox tool の files upsert 等)は tool 側の宿題(#114 以降その tool も本 repo の
+  `nucllei/builtin_tools/sandbox.py`)。
 - sandbox exports の添付 UI はターン終了後出ない(実体・result 文字列は残る — §6)。
   複数タブの自動再開二重送信は秒未満の窓が残る(await の冪等性で無害化 — ムダ 1 turn)。
 - default executor(min(32, cpu+4))は遅い sync tool が並ぶと逼迫しうる(専用 executor 隔離は v2)。
@@ -352,7 +353,9 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
      長い background 実行中に同期 python/shell を呼ぶと `CHAT_TOOL_EXECUTION_TIMEOUT` に当たりうる
    - **対処(次回の判断事項)**: (a) tool description に待たされる旨を明記する / (b) 走行中の
      background sandbox exec があるとき同期呼び出しを即エラーにして待たせない /
-     (c) 真の並列化は sandbox サービス側(llens)の per-session ワーカー化が要る — nucllei 外
+     (c) 真の並列化は sandbox サービス側の per-session ワーカー化が要る
+     ~~— nucllei 外~~ → **#114(2026-09-03)で sandbox は nucllei repo(`sandbox/`)の
+     出荷物になったので、これも本 repo の作業**(配備層の判断ではない)
 
 ## 追補 2(2026-08-14 ken)— await の複数待ち
 

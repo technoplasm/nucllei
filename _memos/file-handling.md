@@ -57,10 +57,11 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 - **②③は 1 filter に合体しても 2 filter に分けてもよい**。どちらも filter なので同じレベルに落ちる。
 
 ### tool(#18 builtin / サンドボックス)
-- **④ 取り込み**: モデルが `import_chat_file(file_id)` を呼ぶ → 原本 raw を `/workspace/inputs/` に配置 →
+- **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
+  原本 raw を `/workspace/imports/`(旧 inputs)に配置 →
   python/shell で分割読み(docx は py 直読、docling 結果ではなく raw を読む)→ 結果だけ context に戻す。
-  **OWUI core は無関与**。`owui/tools/sandbox.py`(v0.3.0 で `import_chat_file` に file_id 引数追加済み)を
-  fork の builtin tool として移植する。
+  **core のファイル経路は無関与**。**実体は組み込み `nucllei/builtin_tools/sandbox.py`**
+  (2026-09-03、#114 で配備層 llens のカスタム tool から移設 — 下の 2026-09-03 節)。
 
 ## 抽出タイミング(反転の実体)
 
@@ -78,7 +79,8 @@ upload は別リクエストでモデル未確定 → **抽出は upload 時(eag
 [chat inlet] ─► ③ Filter(per-model)
                  gate: data.content を実測→大きい順除去(合算予算)→残り注入 /
                        除去分・未抽出は file_id 告知
-[モデルが必要なら] ─► ④ tool: import_chat_file(file_id) → /workspace/inputs/ → python/shell
+[モデルが必要なら] ─► ④ tool: send_to_workspace(file_id) → /workspace/imports/ → python/shell
+                        (起草時の名は import_chat_file / inputs。実体は組み込み builtin_sandbox)
 ```
 
 注: プランA では ② も inlet filter に同居していた(→プレビュー喪失)。プランB は ② を upload フックに出す。
@@ -164,7 +166,9 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 4. **① 薄い受け入れゲート**だけ core(size / ext、upload は filter 前なので拒否はここだけ)。
 5. **③gate は inlet filter(案件層=prism)**: fork は inlet filter 機構を提供するだけ。実体
    (prism `large_file_gate`=合算予算・大きい順除去・file_id 告知、`pdf_vision_router`)は prism の
-   Function をそのまま使う。**fork 本体には移植しない**(重複回避)。④ sandbox tool も同様に prism 層。
+   Function をそのまま使う。**fork 本体には移植しない**(重複回避)。~~④ sandbox tool も同様に prism 層。~~
+   → **反転(2026-09-03、#114): ④ sandbox tool は fork 本体の組み込み**(下の 2026-09-03 節)。
+   ③gate(院内ポリシーの塊)はいまも prism 層のまま。
 6. **フロント**: 処理中/failed プレビュー、送信時の未抽出ハンドリング。
 
 ## 実装状況(master 統合済み、2026-07-08)
@@ -186,12 +190,14 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 - **upload を dispatch に配線**(e79a1c955): `utils/attachment.py::process_attachment_functions`
   (filter dispatch と同型・sync 実行)。files.py のハードコード分岐を撤去し一本化。
 
-**方針の確定(2026-07-08)— fork 本体 vs 案件層(prism)の線引き**:
+**方針の確定(2026-07-08)— fork 本体 vs 案件層(prism)の線引き**
+(**④ sandbox tool の帰属だけ 2026-09-03 に反転済み** — 下の #114 節):
 - prism-llens の filter/tool(gate = `owui/filters/large_file_gate.py`、sandbox tool =
   `owui/tools/sandbox.py` 等)は**そのまま使う**。同じものを fork 本体に重複させない。
 - **fork 本体が持つのは「仕組み」だけ**: Attachment という新 Function type(plugin loader の
   type 判定 + dispatch + files.py 配線)、内部関数 `extract_file_text`、既存の filter/tool 機構、
-  Files API。**③gate も ④sandbox tool も fork には作らない**(prism 層のポリシー)。
+  Files API。**③gate は fork には作らない**(prism 層のポリシー)。
+  ~~④sandbox tool も fork には作らない~~ → **反転(2026-09-03、#114)**。
 - **builtin Attachment も持たない**: 一時「初期/参照実装として1本だけ builtin」としたが、
   UI に既定として現れて邪魔・重複なので撤去。`builtin_functions/` 機構ごと不要になり削除。
   fork 単体では Attachment 未割り当て=upload で抽出は走らない(prism が積む)。
@@ -246,8 +252,8 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
   `data.content` 依存から `data` 有りに修正済み(98652bebe、未抽出/失敗も開くように)。ただし content 有りでも
   出ないなら Markdown 描画等の runtime 問題の可能性 → **実機描画を目視確認**(ブラウザ自動化のファイル添付
   制約で自動取得は保留、dev は 0.0.0.0 + `enda-personal` で実機アクセス可)。
-- **prism 層(fork の仕事でない)**: ③gate(`large_file_gate`)/ PDF→VLM(`pdf_vision_router`)/
-  ④sandbox tool(`import_chat_file`)。
+- **prism 層(fork の仕事でない)**: ③gate(`large_file_gate`)/ PDF→VLM(`pdf_vision_router`)。
+  ~~④sandbox tool(`import_chat_file`)~~ → **2026-09-03(#114)に fork 本体の組み込みへ移設**。
 - ~~**KB 撤去**: 根が深く据え置き~~ → **完了(2026-07-08 第2セッション、下記参照)**。
 - **§未確定**: ③ で画像・音声を予算に数えるか(prism gate)。① 上限は 25MB で確定・全文強制トグルは撤去確定。
 
@@ -297,7 +303,8 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
     併せて `middleware.py::_file_entry_is_readable` の `file_type in ("web_search","text")` 死に分岐も撤去
     (末尾 `return True` の fallthrough と冗長・両型とも生成されない)。IDOR テストの web_search 例は汎用インライン項目へ。
   - 残(軽微・後続): orphan i18n キー("Web Search" 等)は end-game i18n(#34)で一括 prune。
-- **prism 層**: web 検索 tool(**改訂 2026-07-13、#51**: fork の内部検索 API 案は撤回 — SearXNG 等の外部検索システムを Valves 設定で直叩き。fork の WEB_SEARCH_* config / retrieval/web providers は全撤去 `eae47a4bd`)/ ③gate / PDF→VLM / ④sandbox tool。
+- **prism 層**: web 検索 tool(**改訂 2026-07-13、#51**: fork の内部検索 API 案は撤回 — SearXNG 等の外部検索システムを Valves 設定で直叩き。fork の WEB_SEARCH_* config / retrieval/web providers は全撤去 `eae47a4bd`)/ ③gate / PDF→VLM。~~/ ④sandbox tool~~
+  → **④ は 2026-09-03(#114)に fork 本体の組み込み `builtin_sandbox` へ移設**。
 
 ## 改訂(2026-07-12、#69 ファイル管理機構)
 
@@ -353,10 +360,38 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
    `message.files` ギャラリー(sandbox 成果物)、恒久は #88 display チャネルが担う。
 8. prism 側(Q4 sandbox 命名 `export_to_workspace`/`import_from_workspace`、prism custom
    view_image 撤去)は prism-hu/llens#3(draft)+ #90 デプロイ後の follow-up。
+   ※ 命名は最終的に **`send_to_workspace` / `fetch_from_workspace`** に着地し、
+   実体は #114 で nucllei の組み込みへ移った(下の 2026-09-03 節)。
+
+## 改訂(2026-09-03、#114)— ④sandbox tool は fork 本体へ(判断の反転)
+
+本メモは複数箇所で「**④ sandbox tool は prism 層。fork には作らない**」と書いていた
+(2026-07-08 の線引き)。**この判断は覆った**。sandbox はランタイム(nsjail イメージ)も
+tool も nucllei 製品側に移り、tool は env ゲート付きの組み込み **`builtin_sandbox`**
+(`nucllei/builtin_tools/sandbox.py`)になった。一次根拠は issue #114、詳細は [[builtin-tools]]。
+
+反転の理由(③gate と何が違ったか):
+
+- **sandbox に院内固有物が一つも無い**。③gate(合算予算・除去ポリシー)や PDF→VLM は
+  「その現場でどう運用するか」の塊で案件層のままが正しい。sandbox はコード実行という
+  汎用機能で、LLENS の知識をコードに一つも含んでいなかった。
+- **依存の向きが逆だった**。llens 側の tool は `nucllei.models.chats` / `models.files` /
+  `storage.provider` / `utils.tool_render` / `utils.tool_output`(= 本メモが扱う
+  ファイル経路の内部 API そのもの)を掴んでおり、`#88 未対応の旧 nucllei で display が
+  無くても…` という try/except で**ホストの内部 API にバージョン交渉していた**。
+  「fork は仕組みだけ持つ」の裏返しで、④ は仕組みの利用者ではなく**仕組みと同じ寿命の部品**
+  だった。実際 #88(display/feed チャネル)を入れるたび配備層 tool の追従が要っていた。
+- **出荷単位が境界**。sandbox サービスとの HTTP 契約(`/exec` `/exec_cell` `/files/*`)が
+  repo を跨ぐと、どちらが先に出るか分からない。同じ repo・同じ tag なら交渉が要らない。
+
+**変わらない部分**: ③gate・PDF→VLM は prism 層のまま。sandbox でも
+「立てるか / quota / 開放範囲 / system prompt」は配備層(llens)の判断で、nucllei が持つのは
+image とその中身の設計 + LLM 向け表面だけ。`SANDBOX_URL` 未設定の配備では tool 自体が生えない。
 
 ## 参照
-- prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`・
-  `owui/tools/sandbox.py`・`sandbox/README.md`。
+- prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
+  ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、
+  ランタイムと設計文書 = 本 repo の `sandbox/` と `sandbox/README.md`。
 - 現状 fork のフロー(2026-07-08 第2セッション後): upload=`routers/files.py` → `utils/attachment.py`
   (Attachment dispatch) / 抽出=**prism の Attachment Function が docling 直叩き**(fork の
   `process_file`/`extract_file_text` は撤去済み) / 注入=`utils/middleware.py::chat_completion_files_handler`

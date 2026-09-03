@@ -698,11 +698,22 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     mount it on an agent preset and a subagent (§5.8) can read materials the
     parent references by file_id without the content ever entering the parent's
     context.
-- **Code execution is a deployment-layer tool**, not a server feature: the
-  reference implementation (`dev/tools/sandbox.py` in the source tree) bridges to
-  an external nsjail + IPython sandbox service over HTTP and provides a stateful
-  `run_python` (per user+chat kernel), `run_shell`, and workspace file exchange
-  wired to chat attachments. There is no Pyodide and no in-server interpreter —
+  - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
+    `send_to_workspace` / `write_file` / `list_workspace` /
+    `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
+    no value the tool is absent from `/api/v1/tools/` entirely (and an existing
+    row is pruned on the next boot, ACL included). It is gated because, unlike
+    the three above, it needs an external service to be reachable — a builtin
+    that is listed but always errors would be worse than one that is absent.
+    The `sandbox_url` valve defaults to the env value so an admin can read where
+    it currently points.
+- **Code execution runs in an external sandbox service**, never in the server
+  process. `builtin_sandbox` bridges over HTTP to an nsjail + IPython service
+  and provides a stateful `run_python` (per user+chat kernel), `run_shell`, and
+  workspace file exchange wired to chat attachments. That service ships from
+  this repo as a second image, `ghcr.io/technoplasm/nucllei-sandbox` (source in
+  `sandbox/`, built from the same git tag as the server image); the deployment
+  decides whether to run it. There is no Pyodide and no in-server interpreter —
   don't target either.
 - **External OpenAPI tool servers**: admin-configured connections whose
   `/openapi.json` operations are exposed as tools and invoked over HTTP (no
@@ -804,13 +815,14 @@ button). There is no SSE push — the frontend polls.
 
 **Eligibility is opt-in** (`backgroundable` key on the tool entry):
 
-- builtin: `run_subagent` only (default).
+- builtin: `run_subagent`, plus `builtin_sandbox`'s three execution entry points
+  (`run_python`, `run_python_once`, `run_shell`) so long-running code can be
+  backgrounded.
 - DB tools: declare a `backgroundable` class attribute on the `Tools` class —
   `True` (all functions) or a list/tuple/set of function names (tool CRUD is
-  admin-only, so this is an admin decision). Example: the reference sandbox
-  tool marks all three of its execution entry points backgroundable
-  (`run_python`, `run_python_once`, `run_shell`) so long-running code can be
-  backgrounded. Note that the sandbox serializes calls per user, so a
+  admin-only, so this is an admin decision). Builtins declare it the same way;
+  the entry is built from the loaded module either way.
+  Note that the sandbox serializes calls per user, so a
   synchronous call made while a backgrounded one is still running waits for it
   (head-of-line blocking — backgrounding frees the parent turn, not the
   sandbox).

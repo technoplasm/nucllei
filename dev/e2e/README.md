@@ -8,13 +8,15 @@ dev アカウント(`ken@llens.local` / `llens-dev`、`_memos/dev-environment.md
 .venv/bin/python dev/e2e/check_skill_command.py       # /command 発火・会話持続・View Result 表示
 .venv/bin/python dev/e2e/check_lazy_tools.py          # tool 遅延取り込みの答え合わせ(両入口)
 .venv/bin/python dev/e2e/check_skill_result_render.py # 構造化 result の md ハイライト + Tools loaded
-.venv/bin/python dev/e2e/check_sandbox_tools.py       # sandbox 自前ツール搭載(#18-3、E1〜E6)
+.venv/bin/python dev/e2e/check_sandbox_tools.py       # 組み込み sandbox tool(#18-3 起源、E1〜E6)
 .venv/bin/python dev/e2e/check_skill_feature_gate.py  # 機能「スキル」トグル(#42 E7、後始末で ON に戻す)
 .venv/bin/python dev/e2e/mock_reasoning_model.py      # モックモデルサーバ(:13399) — think 綴じ込み再現(冒頭 docstring 参照)
 ```
 
-`check_sandbox_tools.py` は sandbox コンテナ(`llens/sandbox:poc`、`127.0.0.1:3000`)と
-tool `sandbox`(`dev/tools/sandbox.py` を DB 登録、valves の sandbox_url を dev ポートに)を要求する。
+`check_sandbox_tools.py` は sandbox コンテナ(この repo の `sandbox/` = `ghcr.io/technoplasm/nucllei-sandbox`、
+`127.0.0.1:13302`)と、**`SANDBOX_URL=http://127.0.0.1:13302` 付きで起動した backend** を要求する。
+tool は組み込みの `builtin_sandbox`(#114、2026-09-03)なので DB への手動登録は要らない —
+env が空だと env ゲートでそもそも生えない。preset への接続(toolIds)はスクリプトが冪等に張る。
 `check_skill_feature_gate.py` は llens-assistant の `meta.features.skills` を一時的に false にして
 `/kansai` の非発火を確認し、終了時に必ず既定(ON)へ戻す。
 

@@ -37,6 +37,12 @@ python3 dev/tools/seed.py --token "$TOKEN"
   - `probe_result_image(label)` — data URL 抽出(files チャンネル)→ 画像表示
   - `probe_result_error(message)` — 必ず例外 → str(e) の表示確認
 
-旧 `run_python` ダミーは本物の sandbox tool(`dev/tools/sandbox.py`、#18-3)搭載に伴い
-撤去 — 同名衝突で本物が discard されるため。旧 `probe_result_table` は table 描画の
-廃止(#60)に伴い撤去。
+旧 `run_python` ダミーは本物の sandbox tool(#18-3)搭載に伴い撤去 — 同名衝突で本物が
+discard されるため。旧 `probe_result_table` は table 描画の廃止(#60)に伴い撤去。
+
+**旧 `dev/tools/sandbox.py` は撤去(2026-09-03、#114)**。sandbox tool は nucllei 本体の
+組み込み `builtin_sandbox`(`nucllei/builtin_tools/sandbox.py`)になったので、dev に手動登録用の
+コピーを置く理由が無くなった。むしろ**置いておくと有害** — 関数名(`run_python` /
+`run_shell` / `send_to_workspace` …)が組み込みと丸ごと衝突し、先勝ち discard でどちらかが
+黙って捨てられる(#18-3 のダミー run_python と同じ事故)。使うときは backend を
+`SANDBOX_URL` 付きで起動する(`_memos/dev-environment.md`)。
