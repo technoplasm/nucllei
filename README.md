@@ -61,9 +61,15 @@ differently and produce different output than CI).
 
 ## Versioning
 
-The single source of truth is git tags: releases are `vYYYYMMDD-NN`, pre-releases `pre-NN`.
-The version is resolved at startup/build time via `APP_VERSION` env → `git describe` →
-`package.json` fallback. Release images pass `--build-arg APP_VERSION=<tag>`.
+The single source of truth is git tags, in a single format: `vYYYYMMDD-NN`. Cut one with
+`uv run task tag`. The version is resolved at startup/build time via `APP_VERSION` env →
+`git describe` → `package.json` fallback. Release images pass `--build-arg APP_VERSION=<tag>`.
+
+One tag builds both images at the same version — `ghcr.io/technoplasm/nucllei` and
+`ghcr.io/technoplasm/nucllei-sandbox` — as two jobs of a single workflow
+(`.github/workflows/docker-build.yaml`) behind one set of CI gates. To smoke-test the
+image pipeline without cutting a tag, run that workflow via `workflow_dispatch`
+(it publishes `:dev`).
 
 ## License
 

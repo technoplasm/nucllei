@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""リリース/プレ tag を切って push する(refs #25)。technoplasm-app `make tag` の移植。
+"""リリース tag を切って push する(refs #25)。technoplasm-app `make tag` の移植。
 
-    uv run task tag pre        # 次の pre-NN
-    uv run task tag release    # 今日の vYYYYMMDD-NN
+    uv run task tag    # 今日の vYYYYMMDD-NN
+
+tag 形式は `vYYYYMMDD-NN` だけ。出荷しない試し焼きが要るときは tag を切らず、
+image workflow(`.github/workflows/docker-build.yaml`)を workflow_dispatch で
+手動起動する — image tag `dev` が出る。
 
 make tag と同じ流儀:
 - ガード(branch 上 / clean tree / origin にブランチあり / 未 push コミットなし)を
   全て満たさないと tag を切らせない。tag の指すコミットは常に push 済みブランチ上にある。
-- 採番は既存 tag から自動(pre は 00 始まり、リリースは日毎 01 始まり)。
+- 採番は既存 tag から自動(日毎 01 始まり)。
 - tag を打ったら確認プロンプト(Y/n、既定 = push)。push した時点で CI が
   ghcr.io/technoplasm/nucllei:<tag> と ghcr.io/technoplasm/nucllei-sandbox:<tag> を
   **同じタグで**ビルドする(#114 — 本体とコード実行 sandbox は 1 セットで出す)。
   n なら local に残して終了。
 """
 
-import argparse
 import datetime
 import re
 import subprocess
@@ -47,13 +49,9 @@ def preflight() -> None:
     print(f"✅ origin/{branch} と同期済み")
 
 
-def next_tag(kind: str) -> str:
-    if kind == "pre":
-        # pre は 00 始まり(pre-00 が実在する慣例)
-        prefix, pat, first = "pre-", "pre-*", -1
-    else:
-        # リリースは日毎 01 始まり(例: v20260716-01)
-        prefix, pat, first = f"v{datetime.date.today():%Y%m%d}-", "v[0-9]*", 0
+def next_tag() -> str:
+    # リリースは日毎 01 始まり(例: v20260716-01)
+    prefix, pat, first = f"v{datetime.date.today():%Y%m%d}-", "v[0-9]*", 0
 
     tags = set(_run("git", "tag", "-l", pat).split())
     try:
@@ -74,12 +72,8 @@ def next_tag(kind: str) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="リリース/プレ tag を切って push する")
-    ap.add_argument("kind", choices=["pre", "release"])
-    args = ap.parse_args()
-
     preflight()
-    tag = next_tag(args.kind)
+    tag = next_tag()
     head = _run("git", "rev-parse", "--short", "HEAD").strip()
 
     subprocess.run(["git", "tag", "-a", tag, "-m", f"Release: {tag}"], check=True)
@@ -95,10 +89,9 @@ def main() -> None:
 
     subprocess.run(["git", "push", "origin", tag], check=True)
     print(f"✅ push 済み: {tag} → CI が 2 つの image を同じタグでビルドする(#114):")
-    print(f"     ghcr.io/technoplasm/nucllei:{tag}          (本体、docker-build.yaml)")
-    print(
-        f"     ghcr.io/technoplasm/nucllei-sandbox:{tag}  (コード実行、sandbox-image.yml)"
-    )
+    print(f"     ghcr.io/technoplasm/nucllei:{tag}          (本体)")
+    print(f"     ghcr.io/technoplasm/nucllei-sandbox:{tag}  (コード実行)")
+    print("   どちらも docker-build.yaml の 2 job(同じ gate・同じ APP_VERSION)")
     print("   https://github.com/technoplasm/nucllei/actions")
 
 

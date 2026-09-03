@@ -1,18 +1,37 @@
 # tag push → ghcr へイメージを出す(refs #25)。git tag = image tag の 1:1 対応。
-# tag 形式はリリース `vYYYYMMDD-NN` / プレ `pre-NN` の 2 形式のみ(0d69f2da4)。
+# tag 形式はリリース `vYYYYMMDD-NN` の 1 形式のみ。
+#
+# **1 本のタグから 2 つの image を同じ版で出す**(#114 — 本体とコード実行 sandbox は 1 セット):
+#   - ghcr.io/technoplasm/nucllei          … 本体(build context = repo root)
+#   - ghcr.io/technoplasm/nucllei-sandbox  … コード実行 sandbox(build context = sandbox/)
+# 版(APP_VERSION)と image タグは `version` job で **1 回だけ**解決し、2 つの build job が
+# その output を参照する。ここを二重定義にすると「同じタグなのに中身の版が違う image」が
+# 生まれる — 閉域では版一覧しか手掛かりが無いので致命的になる。
+# 2 つの build job は同じ CI gate(lint/test)に needs でぶら下がり、並列に走る。
+# gate を呼ぶ workflow が 1 本しかないので、再利用呼び出し同士が concurrency group を
+# 食い合って互いをキャンセルする問題も構造的に起きない。
+# それでも片方の push だけが infra 都合で失敗することはありうる。**その場合は
+# 失敗した job だけを re-run する**(タグを切り直さない — 版がずれる)。
+#
 # APP_VERSION に tag 名を焼き込む(BE/FE のバージョン真実源 — Dockerfile の ARG)。
-# workflow_dispatch は配管テスト用(image tag `dev`、リリースには使わない)。
+# workflow_dispatch は配管テスト用(既定は image tag `dev`、リリースには使わない)。
+# 焼き直しだけしたいときのために追加 tag も受ける。
 name: Docker Image (ghcr)
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '追加 image tag (例 v20260903-01)。空なら dev'
+        required: false
+        default: ''
   push:
     tags:
       - 'v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9]'
-      - 'pre-[0-9][0-9]'
 
 env:
   IMAGE: ghcr.io/technoplasm/nucllei
+  SANDBOX_IMAGE: ghcr.io/technoplasm/nucllei-sandbox
 
 jobs:
   # 全 CI gate green でなければ image を出さない(master push 時と同じ 4 workflow を再利用呼び出し。
@@ -26,18 +45,22 @@ jobs:
   lint-frontend:
     uses: ./.github/workflows/lint-frontend.yaml
 
-  build-and-push:
-    needs: [lint-backend, test-backend, frontend, lint-frontend]
+  # 版と image タグの単一解決点。2 つの build job はここの output しか見ない。
+  version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      app_version: ${{ steps.meta.outputs.app_version }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      is_release: ${{ steps.meta.outputs.is_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve version and image tags
+      # 入力は env 経由で渡す(run 本文に ${{ }} を直に埋めない = 注入面を作らない)
+      - name: Resolve version
         id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
@@ -48,14 +71,48 @@ jobs:
             [ "$HEAD_COMMIT" = "$TAG_COMMIT" ] || { echo "HEAD != tag commit"; exit 1; }
 
             echo "app_version=$TAG" >> "$GITHUB_OUTPUT"
-            # latest は最新 tag に追従(pre-NN 含む)。参照側 compose の既定が
-            # `:latest` で、v* リリース開始前でも pull 可能にする(2026-07-18 変更)
-            TAGS="$IMAGE:$TAG,$IMAGE:latest"
-            echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+            echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$INPUT_TAG" ]; then
+            # 手動の焼き直し。版も image タグも指定どおりにする
+            echo "app_version=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+            echo "image_tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           else
+            # 配管テストの :dev。commit が分かる形にしておく
             echo "app_version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-            echo "tags=$IMAGE:dev" >> "$GITHUB_OUTPUT"
+            echo "image_tag=dev" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Show resolved version
+        run: |
+          echo "APP_VERSION = ${{ steps.meta.outputs.app_version }}"
+          echo "image tag   = ${{ steps.meta.outputs.image_tag }}"
+
+  build-and-push:
+    needs: [lint-backend, test-backend, frontend, lint-frontend, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tags
+        id: meta
+        env:
+          IMAGE_TAG: ${{ needs.version.outputs.image_tag }}
+          IS_RELEASE: ${{ needs.version.outputs.is_release }}
+        run: |
+          TAGS="$IMAGE:$IMAGE_TAG"
+          # latest は最新のリリース tag に追従する。参照側 compose の既定が
+          # `:latest` のため(2026-07-18 変更)。手動の焼き直しでは動かさない
+          if [ "$IS_RELEASE" = "true" ]; then
+            TAGS="$TAGS,$IMAGE:latest"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU (arm64 エミュレーション)
         uses: docker/setup-qemu-action@v3
@@ -82,12 +139,77 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            APP_VERSION=${{ steps.meta.outputs.app_version }}
+            APP_VERSION=${{ needs.version.outputs.app_version }}
           # gha キャッシュは ref スコープ(tag run は自 tag + default branch しか読めない)のため
-          # tags-only の本 workflow では毎回コールドだった(pre-11 まで実測 CACHED ゼロ)。
+          # tags-only の本 workflow では毎回コールドだった(実測 CACHED ゼロ)。
           # registry キャッシュはスコープが無く、tag を跨いで効く。
           cache-from: type=registry,ref=ghcr.io/technoplasm/nucllei:buildcache
           cache-to: type=registry,ref=ghcr.io/technoplasm/nucllei:buildcache,mode=max
 
       - name: Inspect
-        run: docker buildx imagetools inspect "$IMAGE:${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
+        run: docker buildx imagetools inspect "$IMAGE:${{ needs.version.outputs.image_tag }}"
+
+  # コード実行 sandbox(source は本 repo の `sandbox/` — nucllei 製品の部品。設計は sandbox/README.md)。
+  # 本体とは別 package だが、同じ repo・同じ gate・同じ tag・同じ APP_VERSION で焼かれるので
+  # 「どの版の nucllei と組で作られたか」がタグからも image の中身からも読める。
+  # package は private(repo visibility 継承)。consume 側は read:packages で pull し、
+  # 閉域へは registry 間 copy で運ぶ(手順は配備層 prism-hu/llens の docs/airgap.md)。
+  build-and-push-sandbox:
+    needs: [lint-backend, test-backend, frontend, lint-frontend, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.SANDBOX_IMAGE }}
+          # タグ名 = image タグ の 1:1。`latest` は付けない。
+          # metadata-action の既定 flavor は latest=auto で、タグ push に latest を自動付与する。
+          # 本体 image は compose の既定参照が :latest なので付けているが、sandbox の参照側は
+          # 配備層が SANDBOX_TAG で明示指定する運用で、閉域では latest 追従をしない
+          # (どの時点の image か読めなくなる)ため明示的に切る
+          flavor: latest=false
+          tags: type=raw,value=${{ needs.version.outputs.image_tag }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # build context は sandbox/ のみ(Dockerfile は sandbox/Dockerfile)。
+          # repo 全体を渡すと node_modules ごと送ることになる
+          context: ./sandbox
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # ENV APP_VERSION として image に焼く(理由は sandbox/Dockerfile のコメント —
+          # 閉域の restore.sh が ext image の版をここからしか読めない)。
+          # 値は version job 発。本体 image と必ず同じ文字列になる
+          build-args: |
+            APP_VERSION=${{ needs.version.outputs.app_version }}
+          # metadata-action が OCI ラベルを載せる。version=タグ名 / revision=commit sha が
+          # image に焼かれるので、閉域で別名に retag した後でも出所を引ける
+          labels: ${{ steps.meta.outputs.labels }}
+          # tag でしか走らない workflow は gha キャッシュ(ref スコープ)が毎回コールドになる。
+          # registry キャッシュはスコープが無いのでタグを跨いで効く。
+          # nsjail のソースビルドと venv の pip install がここで効くかどうかで所要時間が桁で変わる
+          cache-from: type=registry,ref=ghcr.io/technoplasm/nucllei-sandbox:buildcache
+          cache-to: type=registry,ref=ghcr.io/technoplasm/nucllei-sandbox:buildcache,mode=max
+          # 単一マニフェスト(attestation 無し)に。digest 参照(registry 間 copy / pull @digest)を素直にする
+          provenance: false
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "$SANDBOX_IMAGE:${{ needs.version.outputs.image_tag }}"

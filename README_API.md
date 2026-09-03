@@ -70,7 +70,7 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
 
 - **Build args**
   - `APP_VERSION` — product version baked into backend and frontend. Truth source
-    is the git tag (`vYYYYMMDD-NN` releases, `pre-NN` pre-releases). Resolution at
+    is the git tag, one format only: `vYYYYMMDD-NN` (releases). Resolution at
     runtime: `APP_VERSION` env → `git describe` (source runs) → `package.json` fallback.
   - `PRELOAD_WHISPER_MODEL` — if non-empty (e.g. `small`), the faster-whisper STT
     model is downloaded into the image at _build_ time, so air-gapped targets never

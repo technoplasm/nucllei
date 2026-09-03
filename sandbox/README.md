@@ -5,8 +5,9 @@ Pyodide (ブラウザ WASM) のコード実行を置き換える、nsjail ベー
 
 **source は nucllei 製品の部品としてこの repo が持ち**、CI がリリースタグ push で
 `ghcr.io/technoplasm/nucllei-sandbox:<tag>` を publish する
-(`.github/workflows/sandbox-image.yml`)。**配備 (compose のサービス定義・env の実値・
-ホスト公開ポート・閉域搬入・workspace の GC 運用) は配備層の `prism-hu/llens` が持つ** —
+(`.github/workflows/docker-build.yaml` — 本体 image と同じ workflow・同じ CI gate)。
+**配備 (compose のサービス定義・env の実値・ホスト公開ポート・閉域搬入・workspace の
+GC 運用) は配備層の `prism-hu/llens` が持つ** —
 この repo は「image とその中身の設計」だけを持ち、何番で上げるか・quota を何 GB にするかは
 配備側の決定。以下で llens の文書 (DEPLOYMENT.md / RELEASE.md / docs/airgap.md) を指すのは
 そのため。
@@ -297,9 +298,16 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 - **image 名**: `ghcr.io/technoplasm/nucllei-sandbox`。本体 image
   (`ghcr.io/technoplasm/nucllei`) と別 package だが、同じ repo・同じ git タグで焼かれるので
   「どの版の nucllei と組で作られたか」がタグから読める。
-- **ビルド契機**: リリースタグ (`vYYYYMMDD-NN`) / プレタグ (`pre-NN`) の push、または
-  workflow_dispatch (`.github/workflows/sandbox-image.yml`)。master push ごとには焼かない
+- **ビルド契機**: リリースタグ (`vYYYYMMDD-NN`) の push、または workflow_dispatch
+  (image tag は既定 `dev`)。master push ごとには焼かない
   — 空撃ちになる上、「いつ時点の image か」がタグから読めなくなる。
+- **本体と同じ workflow で焼く**: `.github/workflows/docker-build.yaml` の
+  `build-and-push-sandbox` job。本体 job と**同じ CI gate (lint/test) にぶら下がり**、
+  版 (`APP_VERSION`) と image タグは同 workflow の `version` job が 1 回だけ解決した値を
+  両 job が参照する。**nucllei と sandbox は常に同じ版で出る**のがこの構成の目的
+  (別 workflow に分けると、テストが落ちたタグで sandbox だけ出て版が割れる)。
+  片方の push だけが infra 都合で失敗したら、失敗した job だけ re-run する
+  (タグを切り直すと版がずれる)。
 - **版の焼き込み**: CI が `--build-arg APP_VERSION=<タグ名>` を渡し、image は OCI ラベルと
   **ENV `APP_VERSION`** の両方で版を持つ。ENV が要るのは、閉域で版を表示する llens の
   `scripts/depot/restore.sh` が「自 repo 産以外 (ext) の image は ENV しか見ない」ため

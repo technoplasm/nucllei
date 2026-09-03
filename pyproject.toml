@@ -222,7 +222,8 @@ cve = "python scripts/check_cve.py"
 # コミットは不要 — このタスクは手元の dev サーバで License タブを見たいときだけ使う
 licenses = "python scripts/generate_licenses.py"
 # deploy の入口(technoplasm-app `make tag` の移植): ガード → 採番 → tag → push(既定)
-# → CI が ghcr.io/technoplasm/nucllei:<tag> を出す。`uv run task tag pre` / `tag release`。
+# → CI が ghcr.io/technoplasm/nucllei:<tag> と nucllei-sandbox:<tag> を同じ版で出す。
+# 打鍵は `uv run task tag`(tag 形式は vYYYYMMDD-NN。試し焼きは workflow_dispatch の :dev で)。
 tag = "python scripts/tag.py"
 
 # CLI 本体は console script(`uv run nucllei --help`、[project.scripts])。ここに置くのは

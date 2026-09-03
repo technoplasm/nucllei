@@ -157,8 +157,8 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
 - **`.env`(repo 直下、gitignored)を BE が起動時に読む**(env.py の load_dotenv。
   `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
   `WEBUI_NAME` / `WEBUI_VERSION` / `WEBUI_COPYRIGHT` を入れてある。
-- **バージョン**(2026-07-16、0d69f2da4): 真実源は git tag(リリース `vYYYYMMDD-NN` /
-  プレ `pre-NN` の 2 形式だけを describe --match で拾う)。BE は起動時・FE は vite 起動時に解決
+- **バージョン**(2026-07-16、0d69f2da4): 真実源は git tag(リリース `vYYYYMMDD-NN` の
+  1 形式だけを describe --match `v[0-9]*` で拾う)。BE は起動時・FE は vite 起動時に解決
   するので、**tag を切ったら BE 再起動 + vite は自動再起動(反映されなければ `touch vite.config.ts`)**。
   命名は APP_* = 本体 Nucllei / WEBUI_* = 配備層。git hash(BUILD_HASH 系)は全面撤去済み。
 - **migration のファイル名は日時プレフィックス**(2026-07-18): `alembic.ini` の `file_template` を
@@ -436,9 +436,8 @@ LLENS_STT_SMOKE=1 uv run pytest \
   実装側の仕事なので採らない)。git tag = ghcr image tag を 1:1 対応、その瞬間の head に打つだけ。
   連番はリポジトリごとに独立(app とのロックステップはしない。組み合わせの同一性は deploy 側が持つ)。
   ※ 旧 `v0.6.5-llens.N` 方式は廃止、`v0.6.5-llens.1` はローカル・origin とも削除済み。
-  ※ 2026-07-16 改訂(0d69f2da4): tag 形式はリリース `vYYYYMMDD-NN` / プレ `pre-NN` に変更
-  (`prodYYYYMMDD_NN` 案は採らない。現行の真実源は上記「dev サーバ」節の**バージョン**項。
-  プレ tag `pre-00` は打鍵済み — 「出荷までタグを切らない」はリリース tag についての方針)。
+  ※ 2026-07-16 改訂(0d69f2da4): tag 形式はリリース `vYYYYMMDD-NN` に変更
+  (`prodYYYYMMDD_NN` 案は採らない。現行の真実源は上記「dev サーバ」節の**バージョン**項)。
 - GitHub 操作は `gh` CLI(issue 単位で作業、コミットに `refs #N`)。
 - 外部ネットワーク必須の機能・依存を増やさない(air-gapped 配備もあるため)。閉域を理由にオプショナルな外部連携は切らない。
 

@@ -326,7 +326,7 @@ sandbox を **3 層に分けて帰属させ直した**。
 
 | | 帰属 | 実体 |
 |---|---|---|
-| ランタイム(nsjail イメージ) | **nucllei repo** | `sandbox/` → `ghcr.io/technoplasm/nucllei-sandbox`(本体と同じ tag で焼く。CI = `.github/workflows/sandbox-image.yml`) |
+| ランタイム(nsjail イメージ) | **nucllei repo** | `sandbox/` → `ghcr.io/technoplasm/nucllei-sandbox`(本体と同じ workflow・同じ tag・同じ APP_VERSION で焼く。CI = `.github/workflows/docker-build.yaml`) |
 | tool(LLM 向け表面) | **nucllei の条件付き builtin** | `nucllei/builtin_tools/sandbox.py` = `builtin_sandbox` |
 | quota / prompt / 開放範囲 / compose | 配備層 `prism-hu/llens` | サービス定義・env の実値・host 公開ポート・workspace の GC |
 

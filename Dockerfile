@@ -26,7 +26,7 @@ ENV APP_VERSION=${APP_VERSION}
 # 依存を触るたびに腐って「正しく開示している」という誤った主張になっていたため
 RUN pnpm licenses list --prod --json > /app/licenses.frontend.json
 # multi-arch ビルドでは arm64 ステージの QEMU 実行が並走しメモリを圧迫する。
-# V8 の既定 heap 上限は環境依存でギリギリ(pre-11 で OOM 実績)— 明示して固定する
+# V8 の既定 heap 上限は環境依存でギリギリ(CI で OOM 実績あり)— 明示して固定する
 RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
 
 ######## backend + runtime ########

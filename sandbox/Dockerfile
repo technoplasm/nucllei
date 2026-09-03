@@ -1,6 +1,6 @@
 # nucllei sandbox イメージ (設計・API は sandbox/README.md)
 # CI が ghcr.io/technoplasm/nucllei-sandbox として publish する
-# (.github/workflows/sandbox-image.yml)。build context は sandbox/ のみ。
+# (.github/workflows/docker-build.yaml の build-and-push-sandbox job)。build context は sandbox/ のみ。
 #
 # - nsjail: apt パッケージが無いためソースビルド (builder ステージにキャッシュされる)
 # - /opt/venv: jail 内でユーザーコードが使う Python 環境

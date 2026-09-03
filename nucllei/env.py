@@ -135,19 +135,10 @@ def _git_describe():
     try:
         return (
             subprocess.run(
-                # バージョンとみなすタグは 2 形式のみ(作業タグ混入防止):
-                # リリース = vYYYYMMDD-NN / プレ = pre-NN(日付形式に pre は混ぜない —
-                # 日付バージョンは切った時点で本番なので「未来日付の pre」は成立しない)
-                [
-                    "git",
-                    "describe",
-                    "--tags",
-                    "--always",
-                    "--match",
-                    "v[0-9]*",
-                    "--match",
-                    "pre-*",
-                ],
+                # バージョンとみなすタグはリリース `vYYYYMMDD-NN` の 1 形式のみ
+                # (作業タグの混入防止)。--always があるので、リリースタグが
+                # 1 つも無い repo でも short sha に落ちて解決自体は壊れない。
+                ["git", "describe", "--tags", "--always", "--match", "v[0-9]*"],
                 capture_output=True,
                 text=True,
                 cwd=BASE_DIR,

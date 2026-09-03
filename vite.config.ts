@@ -41,9 +41,8 @@ const BACKEND_PROXY = {
 // git tag からのバージョン導出(リポジトリ外ビルドや git 不在では null)
 const gitDescribe = () => {
 	try {
-		// バージョンとみなすタグは 2 形式のみ(作業タグ混入防止):
-		// リリース = vYYYYMMDD-NN / プレ = pre-NN
-		return execSync('git describe --tags --always --match "v[0-9]*" --match "pre-*"', {
+		// バージョンとみなすタグはリリース `vYYYYMMDD-NN` の 1 形式のみ(作業タグの混入防止)
+		return execSync('git describe --tags --always --match "v[0-9]*"', {
 			stdio: ['ignore', 'pipe', 'ignore']
 		})
 			.toString()
