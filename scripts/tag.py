@@ -9,7 +9,9 @@ make tag と同じ流儀:
   全て満たさないと tag を切らせない。tag の指すコミットは常に push 済みブランチ上にある。
 - 採番は既存 tag から自動(pre は 00 始まり、リリースは日毎 01 始まり)。
 - tag を打ったら確認プロンプト(Y/n、既定 = push)。push した時点で CI が
-  ghcr.io/technoplasm/nucllei:<tag> をビルドする。n なら local に残して終了。
+  ghcr.io/technoplasm/nucllei:<tag> と ghcr.io/technoplasm/nucllei-sandbox:<tag> を
+  **同じタグで**ビルドする(#114 — 本体とコード実行 sandbox は 1 セットで出す)。
+  n なら local に残して終了。
 """
 
 import argparse
@@ -92,7 +94,11 @@ def main() -> None:
         sys.exit(1)
 
     subprocess.run(["git", "push", "origin", tag], check=True)
-    print(f"✅ push 済み: {tag} → CI が ghcr.io/technoplasm/nucllei:{tag} をビルドする")
+    print(f"✅ push 済み: {tag} → CI が 2 つの image を同じタグでビルドする(#114):")
+    print(f"     ghcr.io/technoplasm/nucllei:{tag}          (本体、docker-build.yaml)")
+    print(
+        f"     ghcr.io/technoplasm/nucllei-sandbox:{tag}  (コード実行、sandbox-image.yml)"
+    )
     print("   https://github.com/technoplasm/nucllei/actions")
 
 
