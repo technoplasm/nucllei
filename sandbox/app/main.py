@@ -1,0 +1,898 @@
+"""nucllei sandbox サービス: nsjail で隔離した Python / shell 実行 API。
+
+設計・セキュリティモデル・API 仕様は sandbox/README.md を参照。
+"""
+
+import asyncio
+import base64
+import binascii
+import json
+import os
+import re
+import stat
+import struct
+import subprocess
+import time
+import uuid
+from pathlib import Path
+from typing import Literal, Optional
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel, Field
+
+WORKSPACES = Path(os.environ.get("SANDBOX_WORKSPACES", "/workspaces"))
+IMAGES = WORKSPACES / ".images"
+VENV_BIN = "/opt/venv/bin"
+JAIL_UID = 65534
+
+# ユーザー単位 quota: 各 workspace は sparse な loopback ext4 (見かけ QUOTA_GB、
+# 実消費は書いた分だけ、discard で削除分は解放)。sandbox/README.md 参照。
+QUOTA_GB = int(os.environ.get("SANDBOX_QUOTA_GB", "10"))
+try:
+    QUOTA_OVERRIDES = {
+        str(k): int(v)
+        for k, v in json.loads(os.environ.get("SANDBOX_QUOTA_OVERRIDES", "{}")).items()
+    }
+except Exception:
+    QUOTA_OVERRIDES = {}
+
+TIMEOUT_DEFAULT_S = int(os.environ.get("SANDBOX_TIMEOUT_DEFAULT_S", "120"))
+TIMEOUT_MAX_S = int(os.environ.get("SANDBOX_TIMEOUT_MAX_S", "600"))
+MEM_MB = int(os.environ.get("SANDBOX_MEM_MB", "4096"))
+# 単一ファイルの rlimit_fsize。ディスク総量の本来の上限は per-user quota (ext4 cap) 側なので、
+# ここは quota を跨がない範囲で大きめにし、大きな成果物ファイルを妨げないようにする
+FSIZE_MB = int(os.environ.get("SANDBOX_FSIZE_MB", "8192"))
+MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "4"))
+STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024)))
+# tool の成果物回収 (/files/read = fetch_from_workspace / exports 自動添付) の単一ファイル上限。
+# nucllei 側のユーザーアップロード制限とは独立 (別レイヤ)。read は base64 で JSON に載せる実装
+# のため、ファイルサイズの ~2.3 倍が service プロセスの RAM に一時的に載る → 真の無制限には
+# しない (巨大ファイルで OOM しうる)。恒久値は compose の SANDBOX_FILE_LIMIT_BYTES。GB 級を
+# 恒常的に出すなら base64-in-JSON をやめて raw ストリーム化する必要がある (現状は未対応)。
+FILE_LIMIT = int(os.environ.get("SANDBOX_FILE_LIMIT_BYTES", str(25 * 1024 * 1024)))
+
+# stateful run_python の常駐セッション (kernel.py)。TTL は kernel の nsjail time_limit でもある
+# ので実効は「セッション開始から」の絶対上限 (idle 回収も同値。README「回収」参照)。
+KERNEL_PATH = "/opt/app-src/kernel.py"
+SESSION_TTL_S = int(os.environ.get("SANDBOX_SESSION_TTL_S", str(12 * 3600)))
+SESSION_MAX = int(os.environ.get("SANDBOX_SESSION_MAX", "64"))
+SESSION_GRACE_S = int(os.environ.get("SANDBOX_SESSION_GRACE_S", "5"))
+
+# jail に read-only で見せるホスト (=コンテナ) 側パス
+RO_BINDS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt/venv"]
+
+# jail の / は tmpfs で新規なので /dev が無い。最低限のデバイスノードを bind する
+# (これが無いと dd if=/dev/zero や /dev/urandom を使うコードが失敗する)
+DEV_BINDS = ["/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom"]
+
+# quota 用 loopback で確保しうる loop デバイスのノード数。コンテナには udev が無く、
+# loop-control が割り当てた番号のノードが自動生成されないため、起動時に先に mknod する
+# (ホストの snapd 等が既に低番号を使うので余裕を持たせる)。
+LOOP_NODE_COUNT = int(os.environ.get("SANDBOX_LOOP_NODES", "256"))
+
+# jail 内で BLAS/OMP が使うスレッド数。64 コア機で既定 (=コア数) のままだと
+# OpenBLAS がコア数ぶんのバッファを確保して rlimit_as を超え失敗する。加えて
+# SGLang と CPU を食い合わないよう小さく固定する。
+BLAS_THREADS = os.environ.get("SANDBOX_BLAS_THREADS", "4")
+
+# jail 内に渡す環境変数 (これ以外は渡らない)
+JAIL_ENV = {
+    "PATH": f"{VENV_BIN}:/usr/local/bin:/usr/bin:/bin",
+    "HOME": "/workspace",
+    "LANG": "C.UTF-8",
+    # jail は JAIL_ENV しか継承しないため TZ を明示的に渡す。無いと datetime/date が UTC に
+    # なり日本運用で 9h ずれる (朝方は日付自体がずれる)。既定はコンテナ TZ (compose=Asia/Tokyo)。
+    "TZ": os.environ.get("TZ", "Asia/Tokyo"),
+    "TMPDIR": "/tmp",
+    "MPLBACKEND": "Agg",
+    "MPLCONFIGDIR": "/tmp/mpl",
+    "MATPLOTLIBRC": "/opt/venv/matplotlibrc",
+    # キャッシュ類は揮発の /tmp に逃がす。既定だと HOME=/workspace に fontconfig 等が
+    # .cache を書き、永続 workspace (quota 対象) を汚し続ける
+    "XDG_CACHE_HOME": "/tmp/.cache",
+    "OMP_NUM_THREADS": BLAS_THREADS,
+    "OPENBLAS_NUM_THREADS": BLAS_THREADS,
+    "MKL_NUM_THREADS": BLAS_THREADS,
+    "NUMEXPR_NUM_THREADS": BLAS_THREADS,
+    "VECLIB_MAXIMUM_THREADS": BLAS_THREADS,
+    # joblib の multiprocessing を無効化 (jail に /dev/shm が無く serial fallback の
+    # 警告が毎回出るのを抑止。サンドボックスでは multiprocessing 無効が安全側でもある)
+    "JOBLIB_MULTIPROCESSING": "0",
+}
+
+_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+app = FastAPI()
+_sem = asyncio.Semaphore(MAX_CONCURRENCY)
+_user_locks: dict[str, asyncio.Lock] = {}
+# workspace の loop mount は本来張りっぱなしで単調増加する。idle-detach reaper で umount して
+# budget を非単調化する (sandbox/docs/health.md の ①)。_ws_registry は「現在 mount 済みの
+# workspace の最終利用時刻」。_mount_locks は mount/remount/umount/削除を user 単位で直列化
+# (reaper と新規 remount の競合回避 + 初回同時二重 mount の防止)。
+_mount_locks: dict[str, asyncio.Lock] = {}
+_ws_registry: dict[str, float] = {}  # user_id -> last_used (monotonic)
+WS_IDLE_TTL_S = int(os.environ.get("SANDBOX_WS_IDLE_TTL_S", "3600"))
+
+
+# ---------------------------------------------------------------------------
+# workspace ヘルパ
+# ---------------------------------------------------------------------------
+def _run(cmd: list[str], ok=(0,)):
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode not in ok:
+        raise RuntimeError(
+            f"{cmd[0]} rc={p.returncode}: {(p.stderr or p.stdout).strip()[:200]}"
+        )
+    return p
+
+
+def _ensure_loop_nodes() -> None:
+    """/dev/loop0..N のノードを先に作る。privileged 前提 (mknod, major 7)。
+    コンテナ起動時に存在する loop ノードは host が使用中の低番号のみで、mount -o loop が
+    新番号を割り当てても対応ノードが無く 'No such file or directory' で失敗するため。"""
+    created = 0
+    for i in range(LOOP_NODE_COUNT):
+        path = f"/dev/loop{i}"
+        if os.path.exists(path):
+            continue
+        try:
+            os.mknod(path, stat.S_IFBLK | 0o660, os.makedev(7, i))
+            created += 1
+        except FileExistsError:
+            pass
+        except OSError:
+            break  # mknod 不可 (非 privileged 等) なら諦める
+    if created:
+        print(f"[sandbox] created {created} loop device node(s)", flush=True)
+
+
+def _loop_available() -> bool:
+    """loop ドライバが実際に使えるか。/dev/loop-control の open が ENODEV なら
+    ドライバ不在 = 全 workspace mount が失敗する状態。典型はホストのカーネル
+    パッケージ更新が稼働中カーネルの module ツリーを消したまま再起動していない場合
+    (2026-08-10 実障害: node は残るので存在チェックでは検出できない。開いて確かめる)。"""
+    try:
+        fd = os.open("/dev/loop-control", os.O_RDWR)
+        os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
+def _provision_fresh(img: Path, gb: int) -> None:
+    """空の sparse ext4 を atomic に用意する (tmp に mkfs → rename)。
+    mkfs 途中で失敗しても本番名の .img には半生成物を残さない (次回 img.exists() が
+    True になって壊れた fs を掴む poison を防ぐ)。"""
+    tmp = img.parent / (img.name + ".new")
+    tmp.unlink(missing_ok=True)
+    try:
+        with open(tmp, "wb") as f:
+            f.truncate(gb * 1024**3)  # sparse: 実ブロックは書込時のみ確保
+        _run(
+            [
+                "mkfs.ext4",
+                "-q",
+                "-F",
+                "-m",
+                "0",
+                "-O",
+                "^has_journal",
+                "-E",
+                "lazy_itable_init=1,lazy_journal_init=1",
+                str(tmp),
+            ]
+        )
+        os.replace(tmp, img)  # 同一 fs 内 atomic rename
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _quarantine(img: Path) -> None:
+    """破損 .img を退避リネームする (fresh 化の前段)。データは失われるが恒久 500 を回避。"""
+    dest = img.parent / f"{img.name}.corrupt-{int(time.time())}"
+    try:
+        os.replace(img, dest)
+        print(
+            f"[sandbox] quarantined corrupt image {img.name} -> {dest.name}", flush=True
+        )
+    except FileNotFoundError:
+        pass
+
+
+def _ensure_workspace(user_id: str) -> Path:
+    """ユーザーの workspace を用意して返す (同期)。
+    /workspaces/<user_id> に sparse loopback ext4 をマウントする。
+    - 初回: quota GB の sparse イメージを作成 + mkfs (journal 無し・lazy init で
+      実消費を最小化)。以降マウントするだけ。
+    - コンテナ再起動後: イメージは volume に残るので e2fsck して再マウント。
+    journal 無し ext4 は停電等 unclean shutdown 後に e2fsck が自動修復不能 (rc>=2) に
+    なりうる。その場合・mkfs 失敗の半生成物は fresh 化フォールバックで恒久 500 を避ける。
+    ブロッキング処理なので呼び出し側は asyncio.to_thread で回す。"""
+    if not _USER_ID_RE.match(user_id):
+        raise HTTPException(400, f"invalid user_id: {user_id!r}")
+    IMAGES.mkdir(parents=True, exist_ok=True)
+    img = IMAGES / f"{user_id}.img"
+    ws = WORKSPACES / user_id
+    ws.mkdir(parents=True, exist_ok=True)
+
+    if not os.path.ismount(ws):
+        gb = QUOTA_OVERRIDES.get(user_id, QUOTA_GB)
+        if not img.exists():
+            _provision_fresh(img, gb)
+        else:
+            try:
+                _run(["e2fsck", "-p", str(img)], ok=(0, 1))  # 1 = 自動修復した
+            except RuntimeError as e:
+                # rc>=2 = 自動修復不能 (journal 無し + unclean)。恒久 500 を避け fresh 化。
+                print(
+                    f"[sandbox] e2fsck unrecoverable for {img.name}: {e}; reprovisioning",
+                    flush=True,
+                )
+                _quarantine(img)
+                _provision_fresh(img, gb)
+        # discard = jail 内で消したファイルの領域をホスト側へ即返す (実消費を抑える)。
+        # mount 失敗 (loop 枯渇 / disk 満杯) はここで RuntimeError → _workspace が 503 に変換。
+        _run(["mount", "-o", "loop,discard", str(img), str(ws)])
+        os.chown(ws, JAIL_UID, JAIL_UID)
+
+    for d in (ws / "imports", ws / "exports", ws / ".exec"):
+        if not d.exists():
+            d.mkdir(parents=True)
+            os.chown(d, JAIL_UID, JAIL_UID)
+    return ws
+
+
+def _mount_lock(user_id: str) -> asyncio.Lock:
+    return _mount_locks.setdefault(user_id, asyncio.Lock())
+
+
+async def _workspace(user_id: str) -> Path:
+    # _mount_lock: 初回同時二重 mount と reaper の umount を直列化。SessionManager.get() は
+    # SM._lock を保持したままこれを呼ぶので、ロック順は常に SM._lock -> _mount_lock (逆転なし)。
+    async with _mount_lock(user_id):
+        try:
+            ws = await asyncio.to_thread(_ensure_workspace, user_id)
+        except RuntimeError as e:
+            # loop 枯渇 / disk 満杯 / mount 不能 = 容量系。障害の 500 と区別して 503 で返す。
+            raise HTTPException(
+                503,
+                "sandbox capacity full (同時利用ユーザー数の上限)。しばらく後に再試行してください",
+            ) from e
+    _ws_registry[user_id] = time.monotonic()  # mount 完了後 event loop 上で touch
+    return ws
+
+
+def _safe_path(ws: Path, rel: str) -> Path:
+    """workspace 内に閉じたパスへ解決。外に出るパスは拒否。"""
+    p = (ws / rel).resolve()
+    if p != ws.resolve() and ws.resolve() not in p.parents:
+        raise HTTPException(400, f"path escapes workspace: {rel!r}")
+    return p
+
+
+def _user_lock(user_id: str) -> asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
+    return _user_locks[user_id]
+
+
+def _snapshot_exports(ws: Path) -> dict[str, tuple[int, int]]:
+    out = ws / "exports"
+    snap = {}
+    for p in out.rglob("*"):
+        if p.is_file():
+            st = p.stat()
+            snap[str(p.relative_to(out))] = (st.st_mtime_ns, st.st_size)
+    return snap
+
+
+def _collect_exports(ws: Path, before: dict) -> list[dict]:
+    """exports/ の実行前後差分 (新規 + 更新) を b64 で返す。"""
+    results = []
+    for rel, sig in sorted(_snapshot_exports(ws).items()):
+        if before.get(rel) == sig:
+            continue
+        p = ws / "exports" / rel
+        size = sig[1]
+        entry = {"name": rel, "size": size, "truncated": size > FILE_LIMIT}
+        if not entry["truncated"]:
+            entry["b64"] = base64.b64encode(p.read_bytes()).decode()
+        results.append(entry)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# nsjail 実行
+# ---------------------------------------------------------------------------
+def _jail_base(ws: Path, wall_s: int) -> list[str]:
+    """stateless exec と常駐 kernel で共通の nsjail 引数。wall_s は --time_limit
+    (プロセスの生存上限。stateless は実行秒、kernel はセッション TTL のバックストップ)。"""
+    cmd = [
+        "nsjail",
+        "--mode",
+        "o",
+        "--really_quiet",
+        "--hostname",
+        "sandbox",
+        # user namespace は作らず実 uid 65534(nobody) で動かす。これで bind した
+        # workspace (実 65534 所有) が書ける。ユーザー間隔離は mount ns のみ (sandbox/README.md)
+        "--disable_clone_newuser",
+        # netns 内で lo を上げるには CAP_NET_ADMIN が要るが userns 無しでは持たない。
+        # そもそも通信は全遮断が目的なので lo ごと上げない (完全に無ネットワーク)
+        "--iface_no_lo",
+        "--user",
+        str(JAIL_UID),
+        "--group",
+        str(JAIL_UID),
+        "--cwd",
+        "/workspace",
+        "--time_limit",
+        str(wall_s),
+        "--rlimit_as",
+        str(MEM_MB),
+        "--rlimit_fsize",
+        str(FSIZE_MB),
+        "--rlimit_nproc",
+        "128",
+        "--rlimit_nofile",
+        "256",
+        # ルート tmpfs を 16MB に固定。既定 (未指定) だと RAM の半分 (このホストで 756GB)
+        # が df に出て「その容量が使える」と誤解される。ルートは元々マウント点を載せる
+        # 土台で書き込みには使わない (実書込先は /workspace と /tmp)。明示 mount にすると
+        # read-only ではなくなるが 16MB・実行ごと使い捨て・jail 隔離で無害。RO 保証が要る
+        # システム系は下の bindmount_ro で別途担保される。bind より前に置く必要がある。
+        "--mount",
+        "none:/:tmpfs:size=16777216",
+        "--bindmount",
+        f"{ws}:/workspace",
+        "--mount",
+        "none:/tmp:tmpfs:size=268435456",
+    ]
+    for p in RO_BINDS:
+        if os.path.exists(p):
+            cmd += ["--bindmount_ro", p]
+    # ビルド時 fc-cache で焼いた system フォントキャッシュ (/var は非 bind なので個別に)。
+    # これで fontconfig は user キャッシュを書かずに済む
+    if os.path.exists("/var/cache/fontconfig"):
+        cmd += ["--bindmount_ro", "/var/cache/fontconfig"]
+    if os.path.exists(KERNEL_PATH):
+        cmd += ["--bindmount_ro", KERNEL_PATH]
+    for p in DEV_BINDS:
+        if os.path.exists(p):
+            cmd += ["--bindmount", p]  # rw (デバイスノード)
+    for k, v in JAIL_ENV.items():
+        cmd += ["--env", f"{k}={v}"]
+    return cmd
+
+
+def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str]) -> list[str]:
+    # stateless: プロセス = 1 実行。time_limit と rlimit_cpu を実行秒に張る。
+    cmd = _jail_base(ws, timeout_s)
+    cmd += ["--rlimit_cpu", str(timeout_s)]
+    return cmd + ["--"] + argv
+
+
+def _kernel_nsjail_cmd(ws: Path) -> list[str]:
+    # stateful: 常駐 kernel。生存上限はセッション TTL (バックストップ)。per-cell の
+    # timeout は kernel が SIGALRM で内部処理するので rlimit_cpu は張らない。
+    cmd = _jail_base(ws, SESSION_TTL_S)
+    return cmd + ["--", f"{VENV_BIN}/python", "-u", KERNEL_PATH]
+
+
+async def _read_capped(stream: asyncio.StreamReader) -> tuple[bytes, bool]:
+    """上限まで保持し、以降は捨てながら EOF まで排水 (メモリ膨張防止)。"""
+    buf = bytearray()
+    truncated = False
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            return bytes(buf), truncated
+        room = STREAM_LIMIT - len(buf)
+        if room > 0:
+            buf += chunk[:room]
+        if len(chunk) > room:
+            truncated = True
+
+
+# ---------------------------------------------------------------------------
+# 常駐セッション (stateful run_python)
+# ---------------------------------------------------------------------------
+class Session:
+    """(user_id, chat_id) ごとの常駐 kernel プロセス。framed protocol で通信。"""
+
+    def __init__(self, user_id: str, chat_id: str, proc):
+        self.user_id = user_id
+        self.chat_id = chat_id
+        self.proc = proc
+        self.lock = asyncio.Lock()  # 1 セッション = 直列実行
+        self.last_used = time.monotonic()
+        self.alive = True
+
+    def _send(self, code: str, timeout: float):
+        b = json.dumps({"code": code, "timeout": timeout}).encode("utf-8")
+        self.proc.stdin.write(struct.pack(">I", len(b)) + b)
+        self.proc.stdin.flush()
+
+    def _recv(self) -> Optional[dict]:
+        hdr = self.proc.stdout.read(4)
+        if len(hdr) < 4:
+            return None
+        (n,) = struct.unpack(">I", hdr)
+        data = b""
+        while len(data) < n:
+            chunk = self.proc.stdout.read(n - len(data))
+            if not chunk:
+                return None
+            data += chunk
+        return json.loads(data)
+
+    def kill(self):
+        self.alive = False
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+
+
+class SessionManager:
+    def __init__(self):
+        self._sessions: dict[tuple[str, str], Session] = {}
+        # reaper / evict が黙って落とした (user, chat) の印。次の get で「前世代あり」=
+        # session_reset を返すため。無いと 12h 満了・SESSION_MAX 追い出しが「初回」と
+        # 区別できず、モデルは NameError で初めて気付く。drop() は呼び元が自分で
+        # session_reset を返すので印は残さない (二重通知になる)。
+        self._tombstones: set[tuple[str, str]] = set()
+        self._lock = asyncio.Lock()
+
+    def _key(self, user_id, chat_id):
+        return (user_id, chat_id)
+
+    async def get(self, user_id: str, chat_id: str) -> tuple[Session, bool]:
+        """既存 or 新規の Session を返す。2 要素目 = 新規作成 (reset) したか。"""
+        async with self._lock:
+            key = self._key(user_id, chat_id)
+            sess = self._sessions.get(key)
+            if sess is not None and sess.alive and sess.proc.poll() is None:
+                return sess, False
+            # 死んでいた/初回 → 掃除して作り直し
+            if sess is not None:
+                sess.kill()
+                self._sessions.pop(key, None)
+            # 前世代があった = リセット (dict に残っていた死骸、または reaper が残した印)
+            was_reset = sess is not None or key in self._tombstones
+            self._tombstones.discard(key)
+            await self._reap_if_full_locked()
+            ws = await _workspace(user_id)
+            proc = await asyncio.to_thread(
+                lambda: subprocess.Popen(
+                    _kernel_nsjail_cmd(ws),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+            )
+            sess = Session(user_id, chat_id, proc)
+            self._sessions[key] = sess
+            return sess, was_reset
+
+    async def _reap_if_full_locked(self):
+        """SESSION_MAX を超えるなら最も長く idle なものを 1 つ落とす。"""
+        if len(self._sessions) < SESSION_MAX:
+            return
+        victim_key = min(self._sessions, key=lambda k: self._sessions[k].last_used)
+        self._sessions.pop(victim_key).kill()
+        self._tombstones.add(victim_key)
+
+    async def drop(self, sess: Session):
+        async with self._lock:
+            key = self._key(sess.user_id, sess.chat_id)
+            if self._sessions.get(key) is sess:
+                self._sessions.pop(key, None)
+        sess.kill()
+
+    async def reap_idle(self):
+        now = time.monotonic()
+        async with self._lock:
+            dead = [
+                k
+                for k, s in self._sessions.items()
+                if now - s.last_used > SESSION_TTL_S or s.proc.poll() is not None
+            ]
+            for k in dead:
+                self._sessions.pop(k).kill()
+                self._tombstones.add(k)
+        return len(dead)
+
+
+_sessions = SessionManager()
+
+
+def _has_live_session(user_id: str) -> bool:
+    """user に生存中の kernel session があるか。SM._lock は取らない (reaper のロック順逆転を
+    避けるため)。await を挟まないので event loop に対して atomic に読める。"""
+    for (u, _c), s in _sessions._sessions.items():
+        if u == user_id and s.alive and s.proc.poll() is None:
+            return True
+    return False
+
+
+async def reap_idle_workspaces() -> int:
+    """idle 超過した workspace を umount して loop を解放する (detach は mount の autoclear 任せ)。
+    生存 session 中は umount しない (jail が superblock を掴んだまま次アクセスで同一 .img を
+    二重 mount → ext4 破損するため。sandbox/docs/health.md C7)。次アクセスで自動再 mount。"""
+    freed = 0
+    for user in list(_ws_registry.keys()):
+        if time.monotonic() - _ws_registry.get(user, 0) <= WS_IDLE_TTL_S:
+            continue
+        lock = _mount_lock(user)
+        if (
+            lock.locked() or _user_lock(user).locked()
+        ):  # mount/remount or stateless 実行中
+            continue
+        async with lock:
+            if time.monotonic() - _ws_registry.get(user, 0) <= WS_IDLE_TTL_S:
+                continue  # ロック待ちの間に touch された
+            if _has_live_session(user):
+                continue  # hard gate
+            ws = WORKSPACES / user
+            if not os.path.ismount(ws):
+                _ws_registry.pop(user, None)
+                continue
+            try:
+                await asyncio.to_thread(_run, ["umount", str(ws)])
+            except RuntimeError as e:
+                # EBUSY 等は次ラウンドで再試行 (開いた fd 等)
+                if "busy" not in str(e).lower():
+                    print(f"[sandbox] ws umount failed for {user}: {e}", flush=True)
+                continue
+            _ws_registry.pop(user, None)
+            # _mount_locks は pop しない: 待機中の coroutine がいると setdefault が別 lock を
+            # 作り並行 mount → 二重 mount 破損する。leak は user 数ぶんで極小 (_user_locks と同様)。
+            freed += 1
+    if freed:
+        print(f"[sandbox] reaped {freed} idle workspace(s)", flush=True)
+    return freed
+
+
+async def _reaper_loop():
+    while True:
+        await asyncio.sleep(300)
+        try:
+            await _sessions.reap_idle()
+            await reap_idle_workspaces()
+        except Exception as e:
+            print(f"[sandbox] reaper error: {e!r}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+class FileIn(BaseModel):
+    name: str
+    b64: str
+
+
+class ExecRequest(BaseModel):
+    user_id: str
+    lang: Literal["python", "shell"]
+    code: str
+    timeout_s: Optional[int] = None
+    imports: list[FileIn] = Field(default_factory=list)
+
+
+class PathRequest(BaseModel):
+    user_id: str
+    path: str = "."
+
+
+class WriteRequest(BaseModel):
+    user_id: str
+    path: str
+    b64: str
+
+
+class CellRequest(BaseModel):
+    user_id: str
+    chat_id: str
+    code: str
+    timeout_s: Optional[int] = None
+
+
+@app.on_event("startup")
+async def _startup():
+    _ensure_loop_nodes()
+    if not _loop_available():
+        print(
+            "[sandbox] WARNING: loop ドライバが使えない (/dev/loop-control open 失敗)。"
+            "全 workspace mount が失敗する。ホストで modprobe loop、それが "
+            "'Module loop not found' ならカーネル更新後の再起動漏れ — ホストの reboot が必要",
+            flush=True,
+        )
+    asyncio.create_task(_reaper_loop())
+
+
+@app.get("/healthz")
+async def healthz():
+    # loop 不能は全実行が 5xx になる hard fault なので healthz でも落とす
+    # (compose healthcheck は非 200 で unhealthy になり docker ps で見える)
+    loop_ok = _loop_available()
+    body = {
+        "ok": loop_ok,
+        "nsjail": os.path.exists("/usr/local/bin/nsjail"),
+        "loop": loop_ok,
+    }
+    return JSONResponse(body, status_code=200 if loop_ok else 503)
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus text 形式 (依存を足さず手書き)。全て label なし集約 (user_id を出さない)。
+    loop_used は /workspaces 直下の mountpoint を数える → ホスト snapd の loop は構造上入らない。"""
+    loop_used = 0
+    for d in WORKSPACES.iterdir():
+        if d.name == ".images":
+            continue
+        if d.is_dir() and os.path.ismount(d):
+            loop_used += 1
+    try:
+        ws_total = sum(1 for p in IMAGES.iterdir() if p.suffix == ".img")
+    except FileNotFoundError:
+        ws_total = 0
+    st = os.statvfs(WORKSPACES)
+    disk_total = st.f_blocks * st.f_frsize
+    disk_used = (st.f_blocks - st.f_bfree) * st.f_frsize
+    m = [
+        (
+            "sandbox_loop_used",
+            "gauge",
+            "現在 mount 済み workspace 数 (= 使用中 loop)",
+            loop_used,
+        ),
+        (
+            "sandbox_loop_nodes_total",
+            "gauge",
+            "loop ノード上限 (SANDBOX_LOOP_NODES)",
+            LOOP_NODE_COUNT,
+        ),
+        (
+            "sandbox_workspaces_total",
+            "gauge",
+            "provision 済み .img 数 (未 mount 含む)",
+            ws_total,
+        ),
+        (
+            "sandbox_sessions_active",
+            "gauge",
+            "生存 kernel session 数",
+            len(_sessions._sessions),
+        ),
+        ("sandbox_disk_used_bytes", "gauge", "/workspaces 使用バイト", disk_used),
+        ("sandbox_disk_total_bytes", "gauge", "/workspaces 総バイト", disk_total),
+    ]
+    lines = []
+    for name, typ, help_, val in m:
+        lines += [f"# HELP {name} {help_}", f"# TYPE {name} {typ}", f"{name} {val}"]
+    return PlainTextResponse("\n".join(lines) + "\n")
+
+
+async def _abandon_if_client_gone(request: Request):
+    """lock 待ちの間に client (nucllei tool) が timeout で切れていたら実行しない。
+
+    tool 側は待ち時間込みで timeout_s+30 秒しか待たず ERROR を返す。ここで確認しないと
+    切れた要求が lock 取得後にそのまま走り (結果は誰にも返らない)、モデルの再試行と
+    合わせて同じコードが 2 回実行される (exports の二重生成、kernel なら namespace 副作用)。
+    """
+    if await request.is_disconnected():
+        raise HTTPException(499, "client disconnected while waiting for lock")
+
+
+@app.post("/exec")
+async def exec_code(req: ExecRequest, request: Request):
+    timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
+    ws = await _workspace(req.user_id)
+
+    async with _user_lock(req.user_id), _sem:
+        await _abandon_if_client_gone(request)
+        for f in req.imports:
+            name = os.path.basename(f.name)
+            if not name:
+                raise HTTPException(400, f"invalid input name: {f.name!r}")
+            try:
+                data = base64.b64decode(f.b64)
+            except binascii.Error:
+                raise HTTPException(400, f"invalid b64 for input: {name}")
+            dest = ws / "imports" / name
+            dest.write_bytes(data)
+            os.chown(dest, JAIL_UID, JAIL_UID)
+
+        ext = "py" if req.lang == "python" else "sh"
+        script = ws / ".exec" / f"{uuid.uuid4().hex[:8]}.{ext}"
+        script.write_text(req.code, encoding="utf-8")
+        os.chown(script, JAIL_UID, JAIL_UID)
+        jail_script = f"/workspace/.exec/{script.name}"
+        if req.lang == "python":
+            argv = [f"{VENV_BIN}/python", "-u", jail_script]
+        else:
+            argv = ["/bin/bash", jail_script]
+
+        before = _snapshot_exports(ws)
+        t0 = time.monotonic()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *_nsjail_cmd(ws, timeout_s, argv),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                async with asyncio.timeout(
+                    timeout_s + 15
+                ):  # 本命は nsjail --time_limit
+                    (out, out_trunc), (err, err_trunc) = await asyncio.gather(
+                        _read_capped(proc.stdout),
+                        _read_capped(proc.stderr),
+                    )
+                    exit_code = await proc.wait()
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                out, out_trunc, err, err_trunc, exit_code = b"", False, b"", False, -9
+        finally:
+            script.unlink(missing_ok=True)
+        duration_s = round(time.monotonic() - t0, 2)
+
+        return {
+            "exit_code": exit_code,
+            "timed_out": exit_code != 0 and duration_s >= timeout_s,
+            "duration_s": duration_s,
+            "stdout": out.decode("utf-8", errors="replace"),
+            "stderr": err.decode("utf-8", errors="replace"),
+            "stdout_truncated": out_trunc,
+            "stderr_truncated": err_trunc,
+            "exports": _collect_exports(ws, before),
+        }
+
+
+@app.post("/exec_cell")
+async def exec_cell(req: CellRequest, request: Request):
+    """stateful run_python: (user, chat) の常駐 kernel で永続 namespace 実行。"""
+    if not req.chat_id:
+        raise HTTPException(400, "chat_id required for stateful exec")
+    timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
+    ws = await _workspace(req.user_id)
+    sess, was_reset = await _sessions.get(req.user_id, req.chat_id)
+
+    async with sess.lock, _sem:
+        await _abandon_if_client_gone(request)
+        sess.last_used = time.monotonic()
+        before = _snapshot_exports(ws)
+        t0 = time.monotonic()
+        try:
+            await asyncio.to_thread(sess._send, req.code, float(timeout_s))
+            # kernel は自前 SIGALRM で timeout を処理し即応答する。ここは中断不能な
+            # C 演算で kernel が応答しない場合のバックストップ (grace 超過で kill)。
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(sess._recv), timeout=timeout_s + SESSION_GRACE_S
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            # 応答なし/パイプ破損 → セッションを落として次回作り直し (namespace 消失)
+            await _sessions.drop(sess)
+            hard = isinstance(e, asyncio.TimeoutError)
+            return {
+                "stdout": "",
+                "error": (
+                    "セルが応答せず中断不能だったため実行環境を再起動しました "
+                    "(変数・import は失われました)"
+                    if hard
+                    else f"実行環境との通信に失敗しました: {e!r}"
+                ),
+                "timed_out": hard,
+                "session_reset": True,
+                "duration_s": 0,
+                "stdout_truncated": False,
+                "exports": _collect_exports(ws, before),
+            }
+        duration_s = round(time.monotonic() - t0, 2)
+        sess.last_used = time.monotonic()
+
+        if resp is None:  # kernel が EOF (クラッシュ)
+            await _sessions.drop(sess)
+            return {
+                "stdout": "",
+                "error": "実行環境が異常終了しました (変数・import は失われました)",
+                "timed_out": False,
+                "session_reset": True,
+                "duration_s": duration_s,
+                "stdout_truncated": False,
+                "exports": _collect_exports(ws, before),
+            }
+
+        return {
+            "stdout": resp.get("stdout", ""),
+            "error": resp.get("error"),
+            "timed_out": resp.get("timed_out", False),
+            "session_reset": was_reset,
+            "duration_s": duration_s,
+            "stdout_truncated": resp.get("truncated", False),
+            "exports": _collect_exports(ws, before),
+        }
+
+
+@app.post("/files/list")
+async def files_list(req: PathRequest):
+    ws = await _workspace(req.user_id)
+    base = _safe_path(ws, req.path)
+    if not base.exists():
+        return {"entries": []}
+    entries = []
+    for p in sorted(base.rglob("*")):
+        rel = p.relative_to(ws)
+        # `.` 始まりの要素 (.exec / .cache 等の内部・隠しファイル) は見せない
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if p.is_file():
+            entries.append({"path": str(rel), "size": p.stat().st_size})
+        if len(entries) >= 500:
+            break
+    return {"entries": entries}
+
+
+@app.post("/files/read")
+async def files_read(req: PathRequest):
+    ws = await _workspace(req.user_id)
+    p = _safe_path(ws, req.path)
+    if not p.is_file():
+        raise HTTPException(404, f"not a file: {req.path}")
+    size = p.stat().st_size
+    if size > FILE_LIMIT:
+        raise HTTPException(413, f"file too large: {size} bytes (limit {FILE_LIMIT})")
+    return {
+        "name": p.name,
+        "size": size,
+        "b64": base64.b64encode(p.read_bytes()).decode(),
+    }
+
+
+@app.post("/files/write")
+async def files_write(req: WriteRequest):
+    ws = await _workspace(req.user_id)
+    p = _safe_path(ws, req.path)
+    try:
+        data = base64.b64decode(req.b64)
+    except binascii.Error:
+        raise HTTPException(400, "invalid b64")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    os.chown(p, JAIL_UID, JAIL_UID)
+    return {"ok": True, "size": len(data)}
+
+
+@app.delete("/workspace/{user_id}")
+async def delete_workspace(user_id: str):
+    """外部 stale-img GC の mechanism (sandbox/docs/health.md ④)。破壊は app のロック下でのみ
+    行い、外部スクリプトは fs を直接触らない (mount/remount との TOCTOU 回避)。.img は即 unlink
+    せず trash rename (誤削除の回復余地を残す)。app は DB を持たず「誰を消すか」は外部が決める。"""
+    if not _USER_ID_RE.match(user_id):
+        raise HTTPException(400, f"invalid user_id: {user_id!r}")
+    async with _mount_lock(user_id):
+        if _has_live_session(user_id):
+            return {"deleted": False, "reason": "live_session"}
+        if _user_lock(user_id).locked():
+            return {"deleted": False, "reason": "busy"}
+        ws = WORKSPACES / user_id
+        img = IMAGES / f"{user_id}.img"
+        if os.path.ismount(ws):
+            try:
+                await asyncio.to_thread(_run, ["umount", str(ws)])
+            except RuntimeError as e:
+                if "busy" in str(e).lower():
+                    return {"deleted": False, "reason": "ebusy"}
+                raise
+        _ws_registry.pop(user_id, None)
+        _mount_locks.pop(user_id, None)
+        trashed = None
+        if img.exists():
+            dest = img.parent / f"{img.name}.trash-{int(time.time())}"
+            os.replace(img, dest)
+            trashed = dest.name
+        return {"deleted": True, "trashed": trashed}

@@ -230,3 +230,16 @@ tag = "python scripts/tag.py"
 # dev 専用エイリアス — 一般の admin 作成は `uv run nucllei create-admin --email ...`。
 create-dev-admin = "nucllei create-admin --email ken@llens.local --name Ken --password llens-dev"
 
+# ----- sandbox (sandbox/ = ghcr.io/technoplasm/nucllei-sandbox。設計は sandbox/README.md) -----
+# `[tool.pytest.ini_options]` の testpaths は `nucllei/test` だけなので、sandbox/tests は
+# 素の `uv run pytest` には入らない。**明示指定するこの 2 タスクからだけ走る** —
+# コンテナ依存の統合テストで backend のゲートを汚さないための切り分け。
+#
+# 統合テスト: 稼働中の privileged コンテナに対し、jail の *中から* 権限昇格・デバイス可視性・
+# 無ネットワークを突く。コンテナが無ければ全 skip。名前は SANDBOX_CONTAINER で差し替え
+# (既定は現行配備の llens-sandbox)。pytest 不要のランナーを持つので直接叩く。
+sandbox-test = "python3 sandbox/tests/test_isolation.py"
+# ユニットテスト: main.py を直接 import して SessionManager 等を確認。コンテナ不要。
+# main.py の import に要る fastapi/pydantic は本体の依存に既にあるので `--with` は不要。
+sandbox-unit = "pytest -p no:warnings sandbox/tests/test_session_manager.py"
+

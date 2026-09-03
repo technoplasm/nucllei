@@ -1,0 +1,4 @@
+# build context = sandbox/ 用の除外
+__pycache__/
+*.py[oc]
+tests/

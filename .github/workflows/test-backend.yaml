@@ -8,6 +8,7 @@ on:
       - master
     paths:
       - 'nucllei/**'
+      - 'sandbox/**'
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -17,6 +18,7 @@ on:
       - master
     paths:
       - 'nucllei/**'
+      - 'sandbox/**'
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -57,3 +59,12 @@ jobs:
       # docker で自前起動する(postgres:16.2 / port 8081)
       - name: Run pytest
         run: uv run pytest -q
+
+      # sandbox (image 側) のユニットテスト。`testpaths = ["nucllei/test"]` なので上の
+      # pytest では収集されず、明示指定のこのタスクからしか走らない。
+      # **別 job / 別 workflow を立てないのは課金単位のため** (lint-backend が black を
+      # ruff と同居させたのと同じ理由 — 実働 0.2 秒に runner 1 分を割かない)。
+      # 隔離テスト (sandbox/tests/test_isolation.py) は稼働中の privileged コンテナが要るので
+      # CI では走らせない (手元・配備先で `uv run task sandbox-test`)。
+      - name: Run sandbox unit tests
+        run: uv run task sandbox-unit

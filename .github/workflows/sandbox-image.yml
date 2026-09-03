@@ -1,0 +1,116 @@
+# tag push → ghcr へ sandbox イメージを出す。git tag = image tag の 1:1 対応。
+# source は本 repo の `sandbox/`(nucllei 製品の部品。設計は sandbox/README.md)、
+# image は本体(`ghcr.io/technoplasm/nucllei`)とは別 package の
+# `ghcr.io/technoplasm/nucllei-sandbox`。同じ repo・同じ tag で焼かれるので
+# 「どの版の nucllei と組で作られたか」がタグから読める。
+# package は private(repo visibility 継承)。consume 側は read:packages で pull し、
+# 閉域へは registry 間 copy で運ぶ(手順は配備層 prism-hu/llens の docs/airgap.md)。
+name: Sandbox Image (ghcr)
+
+on:
+  # tag を打った時だけビルドする。master push ごとに焼くと Actions を空撃ちする上、
+  # 「いつ時点の image か」がタグから読めなくなる。
+  # パターンは scripts/tag.py が打つ 2 形式に限定する(`v*` だと無関係な v タグでも焼ける)。
+  # docker-build.yaml と同じ 2 形式にするのは、本体 image と sandbox image を
+  # 「同じ tag で 1 セット」にするため — 片方だけ存在するタグを作らない。
+  push:
+    tags:
+      - 'v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9]'
+      - 'pre-[0-9][0-9]'
+  # 配管テスト用(既定は image tag `dev`、リリースには使わない)。
+  # 焼き直しだけしたいときのために追加 tag も受ける。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '追加 image tag (例 v20260903-01)。空なら dev'
+        required: false
+        default: ''
+
+# docker-build.yaml と違い、CI gate(lint/test)は再利用呼び出ししない。理由は 2 つ:
+#   1. この image に nucllei の backend コードは入らない(build context は sandbox/ のみ)ので
+#      バックエンドのゲートは対象がずれている
+#   2. gate 側の concurrency group は `<name>-${{ github.ref }}` の literal 固定。同じ tag ref で
+#      2 本の workflow から呼ぶと同一 group になり、後発が docker-build.yaml の gate を
+#      **キャンセルして本体ビルドを落とす**。呼ばないことが唯一の安全な選択
+env:
+  IMAGE: ghcr.io/technoplasm/nucllei-sandbox
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # タグ名 = image タグ の 1:1。`latest` は付けない。
+          # metadata-action の既定 flavor は latest=auto で、タグ push に latest を自動付与する。
+          # 本体 image(docker-build.yaml)は compose の既定参照が :latest なので付けているが、
+          # sandbox の参照側は配備層が SANDBOX_TAG で明示指定する運用で、閉域では latest 追従を
+          # しない(どの時点の image か読めなくなる)ため明示的に切る
+          flavor: latest=false
+          tags: |
+            type=ref,event=tag
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=raw,value=dev,enable=${{ github.ref_type != 'tag' && inputs.tag == '' }}
+
+      # image に焼く版。docker-build.yaml (本体 image) と同じ解決規則にする —
+      # 同じ tag で焼かれた本体と sandbox に違う文字列が入ると、閉域の版一覧で
+      # 「組で作られた」ことが読めなくなる。
+      # 入力は env 経由で渡す (run 本文に ${{ }} を直に埋めない = 注入面を作らない)。
+      - name: Resolve APP_VERSION
+        id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "app_version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          elif [ -n "$INPUT_TAG" ]; then
+            echo "app_version=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          else
+            # 配管テストの :dev。commit が分かる形にしておく (本体と同じ)
+            echo "app_version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # build context は sandbox/ のみ(Dockerfile は sandbox/Dockerfile)。
+          # repo 全体を渡すと node_modules ごと送ることになる
+          context: ./sandbox
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # ENV APP_VERSION として image に焼く (理由は sandbox/Dockerfile のコメント —
+          # 閉域の restore.sh が ext image の版をここからしか読めない)
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.app_version }}
+          # metadata-action が OCI ラベルを載せる。version=タグ名 / revision=commit sha が
+          # image に焼かれるので、閉域で別名に retag した後でも出所を引ける
+          labels: ${{ steps.meta.outputs.labels }}
+          # tag でしか走らない workflow は gha キャッシュ(ref スコープ)が毎回コールドになる
+          # (docker-build.yaml の実測メモ参照)。registry キャッシュはスコープが無いのでタグを跨いで効く。
+          # nsjail のソースビルドと venv の pip install がここで効くかどうかで所要時間が桁で変わる
+          cache-from: type=registry,ref=ghcr.io/technoplasm/nucllei-sandbox:buildcache
+          cache-to: type=registry,ref=ghcr.io/technoplasm/nucllei-sandbox:buildcache,mode=max
+          # 単一マニフェスト(attestation 無し)に。digest 参照(registry 間 copy / pull @digest)を素直にする
+          provenance: false
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"

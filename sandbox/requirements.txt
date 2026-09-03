@@ -1,0 +1,67 @@
+# jail 内ユーザーコード用 Python 環境。旧 Pyodide 環境と同等のセット +
+# サーバー実行で足せる解析系。
+#
+# 現状は未 pin (最新を取得)。閉域配備では後から追加も更新も不可なので、搬入前に全パッケージを
+# バージョン固定すること (配備層 = prism-hu/llens の DEPLOYMENT / preflight のデプロイ前タスク)。
+# 重量級 ML (torch / tensorflow / transformers 等) と DL 系は入れない方針。
+
+# 数値・統計・解析
+numpy
+pandas
+scipy
+scikit-learn
+statsmodels
+sympy
+joblib
+lifelines
+
+# 可視化・画像
+matplotlib
+seaborn
+pillow
+
+# 音声処理 (ffmpeg / libsndfile は apt 側で同梱)。トリム・結合・変換・フェード等。
+# 重い特徴量抽出 (librosa/numba) は投機的かつ閉域で pin が壊れやすいため意図的に不採用。
+# 軽い DSP は既存の scipy.signal で足りる。
+pydub
+soundfile
+
+# HTML/XML・テキスト
+beautifulsoup4
+lxml
+regex
+tiktoken
+chardet
+tabulate  # pandas .to_markdown() が要求
+jaconv
+rapidfuzz
+
+# 日時・型
+python-dateutil
+pytz
+pydantic
+
+# HTTP クライアント (jail は無ネットワークだが import 互換のため同梱)
+requests
+httpx
+
+# Office / ドキュメント生成・加工
+# weasyprint: HTML+CSS → PDF。pandoc の --pdf-engine にも指定でき (md → PDF)、
+# LaTeX も Chromium も入れずに済む。フォントは Noto CJK をサブセット埋め込みするので、
+# 出力 PDF を後で画像化・印刷しても字が落ちない (apt 側の libpango が必要)
+weasyprint
+openpyxl
+xlsxwriter
+xlrd  # レガシー .xls の read エンジン
+python-docx
+python-pptx
+fpdf2
+pypdf
+defusedxml
+
+# 医療・その他ユーティリティ
+pydicom
+jinja2
+pycryptodome
+segno
+sqlglot

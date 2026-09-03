@@ -1,0 +1,4 @@
+# jail 内 matplotlib の既定 rc (main.py の JAIL_ENV MATPLOTLIBRC で参照)
+font.sans-serif: Noto Sans CJK JP, DejaVu Sans
+font.monospace: Noto Sans Mono CJK JP, DejaVu Sans Mono
+font.serif: Noto Serif CJK JP, DejaVu Serif
