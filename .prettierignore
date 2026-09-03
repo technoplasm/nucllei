@@ -314,6 +314,10 @@ dist
 # --- llens fork 追加分 ---
 # fork 独自文書・エージェント設定は prettier の対象外(手書きの整形を維持)
 _memos/
+# 移設してきた sandbox(ghcr.io/technoplasm/nucllei-sandbox)の設計文書も同じ扱い。
+# llens から持ってきた手書きの日本語文書で、prettier の再流し込みで読みにくくなる。
+# 配下のコードは black/ruff の管轄なので prettier に見せる必要が無い
+sandbox/
 .claude/
 # 現行プロジェクトへの symlink(別リポ)。pnpm format が symlink 先まで整形するのを防ぐ
 _links/
