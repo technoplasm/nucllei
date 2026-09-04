@@ -13,14 +13,30 @@
 	const i18n = getContext('i18n');
 
 	let { selectedModels }: { selectedModels: string[] } = $props();
+
+	// llens(#56): マイクは secure context(https / localhost)でしか使えない。
+	// http 配備では navigator.mediaDevices ごと生えず、押しても無反応になるので押せなくする。
+	// ※ 配備レベルの ENABLE_AUDIO_STT/TTS(ボタンごと非表示)とは別物 —
+	//    あちらは「この配備に機能があるか」、こちらは「このブラウザ経路で使えるか」
+	const micAvailable = !!navigator?.mediaDevices?.getUserMedia;
+	const micUnavailableMessage = 'Microphone requires a secure (HTTPS) connection.';
 </script>
 
 <div class=" flex items-center">
-	<Tooltip content={$i18n.t('Call')}>
+	<Tooltip content={micAvailable ? $i18n.t('Call') : $i18n.t(micUnavailableMessage)}>
 		<button
-			class=" bg-primary hover:bg-primary-hover text-primary-content rounded-full p-1.5 self-center"
+			class=" {micAvailable
+				? 'bg-primary hover:bg-primary-hover text-primary-content'
+				: 'bg-secondary text-content-subtle cursor-not-allowed'} rounded-full p-1.5 self-center"
 			type="button"
+			aria-disabled={!micAvailable}
 			onclick={async () => {
+				if (!micAvailable) {
+					toast.error($i18n.t(micUnavailableMessage));
+
+					return;
+				}
+
 				if (selectedModels.length > 1) {
 					toast.error($i18n.t('Select only one model to call'));
 

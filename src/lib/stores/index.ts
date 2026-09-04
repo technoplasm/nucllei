@@ -145,6 +145,10 @@ type Settings = {
 	expandCodeBlocks?: boolean;
 	expandDetails?: boolean;
 	voiceInterruption?: boolean;
+	// llens(#56): 音声入力の共通パラメータ。Call オーバーレイと逐次ディクテーション(録音バー)の
+	// 両方が読む。既定値は各消費側の定数(4000 / 1000ms)— 根拠は _memos/audio.md「読み取り猶予」節
+	voiceSilenceTimeout?: number; // 無音がこの ms 続いたら発話の区切りとみなす(読み取り猶予)
+	voiceMinChunkDuration?: number; // これより短い録音チャンクは文字起こしへ送らない(ms)
 	hapticFeedback?: boolean;
 	backgroundImageUrl?: string | null;
 	notifications?: { webhook_url?: string };

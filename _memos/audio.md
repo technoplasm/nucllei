@@ -25,6 +25,65 @@ admin Settings > Audio にトグルあり)。off にすると **FE のアイコ�
   sync 提供(主 caller = sync tool。async からは `asyncio.to_thread`)。
   TTS の voice/model は config 既定 + 引数上書き、en/ja→voice の対応表は caller(prism 層 tool)責務。
 
+## 逐次文字起こし(疑似ストリーミング)と読み取り猶予(#56、2026-09-04)
+
+録音バー(`src/routes/(app)/chat/MessageInput/VoiceRecording.svelte`)は完全バッチ
+(stop 時に 1 blob を投げる)をやめ、**発話の区切りごとに転写して入力欄へ追記**する。
+
+- **切り方**: timeslice で細切れにしない。webm/opus は先頭チャンクにしかヘッダが無く、
+  2 個目以降が単体でデコードできないため。**無音の切れ目で MediaRecorder を stop →
+  すぐ次のセグメントを起こす**(CallOverlay の `stopRecordingCallback` と同じ形)。
+- **無音検出**: 波形表示と同じ rAF ループで AnalyserNode(`minDecibels` = -45)+ `lastSoundTime`。
+  外部 VAD ライブラリは入れない(オフライン配備で CDN / モデル DL を持ち込まない制約)。
+  音を検出したところで `MediaRecorder.start()`(無音だけのセグメントを作らない)。
+- **転写**: 既存の `transcribeAudio()`(`POST /api/v1/audio/transcriptions`)のまま。
+  新エンドポイント・WebSocket は作らない(socket.io は撤去済み — `streaming-wire-v2.md`)。
+- **順序保証**: チャンクは**直列 Promise キュー**(`transcribeQueue`)に積む。
+  並列に投げると順不同で追記され文が壊れる。確定ボタンも同じキューの最後尾に乗るので、
+  途中チャンクの追記が終わってから `onConfirm` が走る(二重挿入・順序逆転が構造的に起きない)。
+- **親への渡し方**: 途中の区間は `onTranscript({text})`(入力欄へ追記するだけ)、
+  最後の 1 区間だけ従来どおり `onConfirm({text})`(追記 + 録音 UI を閉じる + `speechAutoSend`)。
+- **表示**: 録音中は入力欄が録音バーに置き換わって見えないので、確定済みテキストを
+  バー内にも出す(親の `prompt` と同じ内容)。
+- **トグルは作らない(常時 ON)**: 逐次はバッチの上位互換 — 一度も間を置かずに喋れば
+  結果は従来と同一(1 チャンク)。トグルを付けると使われない 2 本目の経路が残るだけで、
+  fork の「互換のためだけのコードを残さない」規律に反する。可変にする価値があるのは
+  下の「読み取り猶予」の方なので、そちらを設定に出した。
+- **キャンセルの意味**: 既に入力欄へ入ったテキストは残る(送信済みの確定分)。
+  飛行中の転写結果は破棄する(`aborted`)。
+
+### 読み取り猶予(`$settings.voiceSilenceTimeout`)
+
+無音がこの長さ続いたら発話の区切りとみなす。**既定 4000ms**
+(旧ハードコード 2000ms は「喋りながら考える」人には短すぎる — ken 指摘。
+上限側は Call の応答遅延に直結するので 3〜5 秒レンジの中央を採った)。
+UI は **Settings > Chats > Voice**(0.5〜30 秒、秒で入力し ms で保存)。
+**録音バーと Call オーバーレイの両方**が読む(Call の `2000` ハードコードは撤去済み)。
+
+同じ設定群に **`$settings.voiceMinChunkDuration`(既定 1000ms)** —
+これより短い区間は精度が落ちるので転写に送らない。
+
+### secure context ガード
+
+`navigator.mediaDevices` は **secure context(https / localhost)でしか生えない**。
+llens 実機は `http://<内部IP>/` 配備なので、無ガードだとマイク/Call ボタンが
+**トーストも出さずに無反応**になる(getUserMedia 呼び出しで例外)。
+`MessageInput.svelte` / `CallButton.svelte` はボタンを押せない見た目にしてツールチップで理由を出し、
+押した場合もトースト(`Microphone requires a secure (HTTPS) connection.`)を出す。
+`VoiceRecording.svelte` / `CallOverlay.svelte` の getUserMedia 直前にも同じガードを置く。
+**`ENABLE_AUDIO_STT=false` の非表示とは別物** — あちらは「この配備に機能があるか」、
+こちらは「このブラウザ経路で使えるか」。
+
+### アップロードの MIME(`audio/webm`)
+
+FE は長らく `recording.wav` / `type: 'audio/wav'` の**偽装ラベル**で送っていた
+(MediaRecorder の実体は Chrome/Edge = webm/opus)。`routers/audio.py` の許可リストと
+拡張子マップに `audio/webm` を足し、FE は `MediaRecorder.isTypeSupported` で
+`audio/webm` → `audio/ogg` の順に選んで**実際の MIME をそのまま送る**。
+**残件**: Safari の MediaRecorder は `audio/mp4` しか作れず、許可リストに無いので 400
+(現状は偽装で通っていた)。必要になったら `audio/mp4` を許可リスト + 拡張子マップに 1 行ずつ足す
+(mp4 音声は非アクティブ形式なので GHSA-m8f9-9whg-f4xr の防御方針とは矛盾しない)。
+
 ## 並列モデル — どの層で直列化されるか(STT 内蔵経路)
 
 1. **サービング層**: route は sync def / to_thread → AnyIO threadpool(既定 40 本)。
@@ -59,8 +118,10 @@ env 変更の反映は再起動(モデル再ロードは起動時 lazy と STT c
 
 - threadpool 40 本: 長尺音声の大量並列で埋まる運用が見えたら STT 専用 executor / semaphore を
   検討(現状のディクテーション用途では不要)。
-- #56(疑似ストリーミング STT)は `transcribe_audio(path)` のチャンク呼びで乗る。
-  `NUM_WORKERS > 1` はチャンク並列にもそのまま効く。
+- ~~#56(疑似ストリーミング STT)は `transcribe_audio(path)` のチャンク呼びで乗る~~
+  → **実装済み(2026-09-04)**: FE 側で発話区間を切って既存 `/transcriptions` を直列に叩く形
+  (上の「逐次文字起こし」節)。BE は無改造。1 発話 = 1 リクエストになるので、
+  複数人が同時にディクテーションする配備では `WHISPER_NUM_WORKERS > 1` の効きが上がる。
 - ~~tool が合成した音声のチャット内再生 UI は未定義(#53 スコープ外 — 必要になったら別 issue)~~
   → **確定(2026-07-20、#87)**: チャット内提示は 2 形態。
   - **リンク**: markdown-it-attrs による出し分け — `[DL](/api/v1/files/{id}/content){download=voice.mp3}` /

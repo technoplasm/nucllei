@@ -313,8 +313,21 @@
 		}
 	};
 
+	// llens(#56): マイクは secure context(https / localhost)でしか使えない。
+	// http 配備では navigator.mediaDevices ごと生えず、getUserMedia が例外になって
+	// 「押しても無反応」になるので、押す前に理由を出せるようにここで判定する。
+	// ※ 配備レベルの ENABLE_AUDIO_STT(アイコンごと非表示)とは別物 —
+	//    あちらは「この配備に機能があるか」、こちらは「このブラウザ経路で使えるか」
+	const micAvailable = !!navigator?.mediaDevices?.getUserMedia;
+	const micUnavailableMessage = 'Microphone requires a secure (HTTPS) connection.';
+
 	// マイク権限を確認してから録音 UI(VoiceRecording)へ切り替える
 	const onRecordVoiceClick = async () => {
+		if (!micAvailable) {
+			toast.error($i18n.t(micUnavailableMessage));
+			return;
+		}
+
 		try {
 			let stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(function (err) {
 				toast.error(
@@ -531,10 +544,19 @@
 								await tick();
 								document.getElementById('chat-input')?.focus();
 							}}
+							onTranscript={(data) => {
+								// llens(#56): 逐次文字起こし。発話の区切りごとに確定テキストが届く
+								// (最後の 1 区間は onConfirm 側で来るのでここでは追記しない)
+								const { text } = data;
+								if (text) {
+									prompt = `${prompt}${text} `;
+								}
+							}}
 							onConfirm={async (data) => {
 								const { text } = data;
-								prompt = `${prompt}${text} `;
-
+								if (text) {
+									prompt = `${prompt}${text} `;
+								}
 								recording = false;
 
 								await tick();
@@ -615,11 +637,18 @@
 										<!-- llens(#66/#53): per-user フラグは廃止(全員使用可)。
 										     配備レベルの enable(audio.stt.enable)でアイコンごと制御 -->
 										{#if ($config?.audio?.stt?.enable ?? true) && (!history?.currentId || history.messages[history.currentId]?.done == true)}
-											<Tooltip content={$i18n.t('Record voice')}>
+											<Tooltip
+												content={micAvailable
+													? $i18n.t('Record voice')
+													: $i18n.t(micUnavailableMessage)}
+											>
 												<button
 													id="voice-input-button"
-													class=" text-content-muted hover:text-content rounded-full p-1.5 mr-0.5 self-center"
+													class=" {micAvailable
+														? 'text-content-muted hover:text-content'
+														: 'text-content-subtle cursor-not-allowed'} rounded-full p-1.5 mr-0.5 self-center"
 													type="button"
+													aria-disabled={!micAvailable}
 													onclick={onRecordVoiceClick}
 													aria-label={$i18n.t('Record voice')}
 												>

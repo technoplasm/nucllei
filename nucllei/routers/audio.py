@@ -766,7 +766,15 @@ def transcription(
 
     log.info(f"file.content_type: {file.content_type}")
 
-    supported_filetypes = ("audio/mpeg", "audio/wav", "audio/ogg", "audio/x-m4a")
+    # llens(#56): MediaRecorder の既定コンテナ(Chrome/Edge = audio/webm;codecs=opus)を
+    # そのままの MIME で受ける。FE が audio/wav を騙って送る回避をやめるための追加。
+    supported_filetypes = (
+        "audio/mpeg",
+        "audio/wav",
+        "audio/ogg",
+        "audio/x-m4a",
+        "audio/webm",
+    )
 
     if not file.content_type.startswith(supported_filetypes):
         raise HTTPException(
@@ -786,6 +794,7 @@ def transcription(
             "audio/wav": "wav",
             "audio/ogg": "ogg",
             "audio/x-m4a": "m4a",
+            "audio/webm": "webm",
         }
         ext = next(
             (

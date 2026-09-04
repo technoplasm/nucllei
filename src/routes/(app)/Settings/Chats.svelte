@@ -8,14 +8,24 @@
 
 	let { saveSettings }: { saveSettings: (updated: any) => void | Promise<void> } = $props();
 
+	// llens(#56): 音声入力の既定値。消費側(VoiceRecording / CallOverlay)と同じ値を持つ
+	// — 根拠は _memos/audio.md「読み取り猶予と逐次文字起こし」節
+	const DEFAULT_VOICE_SILENCE_TIMEOUT = 4000;
+	const DEFAULT_VOICE_MIN_CHUNK_DURATION = 1000;
+
+	const clamp = (value: number, min: number, max: number, fallback: number) =>
+		Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
 	// 設定行は宣言的に定義して {#each} で展開する(旧 Interface タブの Chat/Voice/File
 	// セクションをこのタブへ移設)。type: 'switch' | 'select' / init: $settings からの初期値 /
 	// save: 既定は { key: 値 } で保存(title の nested 形や権限ゲートは行ごとに上書き)
 	type Row = {
 		key: string;
 		label: string;
-		type: 'switch' | 'select';
+		type: 'switch' | 'select' | 'number';
 		options?: { value: any; label: string }[];
+		// type: 'number' の入力欄の範囲(単位は label に書く)
+		number?: { min: number; max: number; step: number };
 		init: () => any;
 		save?: (value: any) => void | Promise<void>;
 		show?: () => boolean;
@@ -103,6 +113,33 @@
 					label: 'Allow Voice Interruption in Call',
 					type: 'switch',
 					init: () => $settings.voiceInterruption ?? false
+				},
+				{
+					// llens(#56): 読み取り猶予 — 無音がこの長さ続いたら発話の区切りとみなす。
+					// 録音バーの逐次文字起こしと Call オーバーレイの両方が読む(既定 4 秒)
+					key: 'voiceSilenceTimeout',
+					label: 'Silence Before Transcribing (seconds)',
+					type: 'number',
+					number: { min: 0.5, max: 30, step: 0.5 },
+					init: () => ($settings.voiceSilenceTimeout ?? DEFAULT_VOICE_SILENCE_TIMEOUT) / 1000,
+					save: (value) => {
+						const seconds = clamp(Number(value), 0.5, 30, DEFAULT_VOICE_SILENCE_TIMEOUT / 1000);
+						values.voiceSilenceTimeout = seconds;
+						saveSettings({ voiceSilenceTimeout: Math.round(seconds * 1000) });
+					}
+				},
+				{
+					// llens(#56): 短すぎる区間は文字起こしの精度が落ちるので送らない
+					key: 'voiceMinChunkDuration',
+					label: 'Minimum Voice Segment Length (seconds)',
+					type: 'number',
+					number: { min: 0, max: 5, step: 0.1 },
+					init: () => ($settings.voiceMinChunkDuration ?? DEFAULT_VOICE_MIN_CHUNK_DURATION) / 1000,
+					save: (value) => {
+						const seconds = clamp(Number(value), 0, 5, DEFAULT_VOICE_MIN_CHUNK_DURATION / 1000);
+						values.voiceMinChunkDuration = seconds;
+						saveSettings({ voiceMinChunkDuration: Math.round(seconds * 1000) });
+					}
 				}
 			]
 		},
@@ -191,6 +228,16 @@
 											<option value={option.value}>{$i18n.t(option.label)}</option>
 										{/each}
 									</select>
+								{:else if row.type === 'number'}
+									<input
+										class="bg-surface-muted hover:bg-surface-hover w-16 px-2 py-0.5 rounded-xs text-xs text-right outline-hidden"
+										type="number"
+										min={row.number?.min}
+										max={row.number?.max}
+										step={row.number?.step}
+										bind:value={values[row.key]}
+										onchange={() => saveRow(row)}
+									/>
 								{/if}
 							</label>
 						{/if}

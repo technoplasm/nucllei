@@ -1,6 +1,9 @@
 {
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w' または '-1' で無期限。",
 	"(no description)": "(説明なし)",
+	"Microphone requires a secure (HTTPS) connection.": "マイクの利用には HTTPS 接続が必要です。",
+	"Minimum Voice Segment Length (seconds)": "最短の発話区間(秒)",
+	"Silence Before Transcribing (seconds)": "読み取り猶予 — 無音がこの秒数続いたら区切る(秒)",
 	"{{COUNT}} hidden lines": "{{COUNT}} 行を非表示",
 	"{{DURATION}} seconds": "{{DURATION}}秒",
 	"{{n}} files selected": "{{n}} 件のファイルを選択中",

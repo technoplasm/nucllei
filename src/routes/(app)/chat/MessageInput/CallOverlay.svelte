@@ -155,6 +155,17 @@
 
 	const MIN_DECIBELS = -55;
 
+	// llens(#56): 読み取り猶予 — 無音がこの長さ続いたら発話の区切りとみなす。
+	// 既定は Settings > Chats > Voice の同名行と揃える(根拠は _memos/audio.md)
+	const DEFAULT_SILENCE_TIMEOUT = 4000;
+	const silenceTimeout = $derived($settings?.voiceSilenceTimeout ?? DEFAULT_SILENCE_TIMEOUT);
+
+	// llens(#56): マイク/カメラは secure context(https / localhost)でしか使えない。
+	// http 配備では navigator.mediaDevices ごと生えず、例外で無反応になるので理由を出す。
+	// ※ 配備レベルの ENABLE_AUDIO_STT/TTS(ボタンごと非表示)とは別物
+	const mediaDevicesAvailable = () => !!navigator?.mediaDevices?.getUserMedia;
+	const MEDIA_UNAVAILABLE_MESSAGE = 'Microphone requires a secure (HTTPS) connection.';
+
 	const transcribeHandler = async (audioBlob: Blob) => {
 		// Create a blob from the audio chunks
 
@@ -224,6 +235,14 @@
 
 	const startRecording = async () => {
 		if ($showCallOverlay) {
+			if (!mediaDevicesAvailable()) {
+				toast.error($i18n.t(MEDIA_UNAVAILABLE_MESSAGE));
+				showCallOverlay.set(false);
+				onClose();
+
+				return;
+			}
+
 			if (!audioStream) {
 				audioStream = await navigator.mediaDevices.getUserMedia({
 					audio: {
@@ -341,7 +360,7 @@
 
 				// Start silence detection only after initial speech/noise has been detected
 				if (hasStartedSpeaking) {
-					if (Date.now() - lastSoundTime > 2000) {
+					if (Date.now() - lastSoundTime > silenceTimeout) {
 						confirmed = true;
 
 						if (mediaRecorder) {
@@ -783,6 +802,12 @@
 							type="button"
 							aria-label={$i18n.t('Camera')}
 							onclick={async () => {
+								if (!mediaDevicesAvailable()) {
+									toast.error($i18n.t(MEDIA_UNAVAILABLE_MESSAGE));
+
+									return;
+								}
+
 								await navigator.mediaDevices.getUserMedia({ video: true });
 								startCamera();
 							}}
