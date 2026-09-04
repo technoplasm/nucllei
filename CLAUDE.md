@@ -53,17 +53,25 @@
 
 ## tmux 規約(technoplasm 共通様式、2026-08-28 適用)
 
-- 作業は tmux session **`nuc`** 上で行う。windows: **`BE`**(backend サーバー)/ **`FE`**(vite サーバー)/
-  `claude` など。ken が手作業するときも同じ。
-- 開発サーバーは**必ず BE/FE window で起動**し、**Claude Code 内部の shell では起動しない**
+- 作業は tmux session **`nuc`** 上で行う(**別 session を新たに立てない**)。windows: **`BE`**(backend サーバー)/
+  **`FE`**(vite サーバー)/ `claude` など。ken が手作業するときも同じ。
+- 開発サーバーは**必ず同じ `nuc` session の BE/FE window で起動**し、**Claude Code 内部の shell では起動しない**
   (foreground/background とも。ken がログを見られないため): BE は `uv run task dev`(:3000)、
   FE は `pnpm dev`(vite :5173)。いずれも repo root で実行。
 - **作業開始時にまず tmux を確認**: `tmux list-windows -t nuc -F '#I: #W (#{pane_current_command})'`。
-  session/window が無ければ作って名前を付け、サーバーが死んでいれば send-keys で起動する:
-  - `tmux send-keys -t nuc:BE 'uv run task dev' Enter`
-  - `tmux send-keys -t nuc:FE 'pnpm dev' Enter`
+  - **既に動いていたらそのまま使う**(再起動しない。他セッション・ken の作業を踏み潰す)。
+  - session/window が無ければ作って名前を付け、サーバーが死んでいれば send-keys で起動する:
+    - `tmux send-keys -t nuc:BE 'uv run task dev' Enter`
+    - `tmux send-keys -t nuc:FE 'pnpm dev' Enter`
   - 罠: `C-c` 後に履歴 `Up` で再実行しない(別コマンドを拾いうる)。コマンドは必ず明示で送る。
-- サーバーログは `tmux capture-pane -p -t nuc:BE`(/FE)で読む。500 の一次調査は BE の traceback から。
+- サーバーログは**必ず底(末尾)を見る**: `tmux capture-pane -p -t nuc:BE -S -40`(/FE)。
+  起動バナーや過去の履歴ではなく直近の出力が判断材料。500 の一次調査は BE の traceback から。
+- **他の claude window が同時に動いていることがある**(ken が並列作業のため複数セッションを立てる)。
+  window 一覧で `claude` が複数あれば、まず `tmux capture-pane -p -t nuc:<N> -S -30` で
+  何をやっているかを把握してから着手する(触る範囲が重なるなら自分の作業を待避・分割)。
+  - **作業がレースしたら**(同一ファイルの競合・push の衝突等)、相手の window を探して
+    `tmux send-keys -t nuc:<N> '<用件>' Enter` で**話しかけてよい**
+    (global CLAUDE.md の「疎通の前に必ず ken に確認する」は本 repo では緩和 — ken 指示 2026-09-04)。
 - .env 反映・二重起動・reload の固まり等の詳細は `_memos/dev-environment.md`「dev サーバ」節。
 
 ## 環境の前提
