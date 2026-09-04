@@ -23,7 +23,8 @@
 | 「Upstream License」 | この製品のもとになったソフトウェア (Open WebUI v0.6.5、BSD-3-Clause) のライセンス全文。 |
 | 「Third-Party Licenses」 | 配布物に同梱されているフォントのライセンス表記 (SIL Open Font License 1.1)。該当が無い場合はこの段ごと表示されません。 |
 
-「Upstream License」「Third-Party Licenses」「Fonts」の見出しは、日本語表示でも英語のままです。
+「Upstream License」「Third-Party Licenses」の見出しと、「Third-Party Licenses」の中の小見出し
+「Fonts」は、日本語表示でも英語のままです。
 ライセンス本文も原文のまま表示されます (ライセンス文書は翻訳せずに掲示するのが通例のためです)。
 
 ## こんなときに使う
