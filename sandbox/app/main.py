@@ -6,6 +6,7 @@
 import asyncio
 import base64
 import binascii
+import hmac
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
 
 WORKSPACES = Path(os.environ.get("SANDBOX_WORKSPACES", "/workspaces"))
 IMAGES = WORKSPACES / ".images"
@@ -103,7 +105,89 @@ JAIL_ENV = {
 
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+# ---------------------------------------------------------------------------
+# API 認証 (呼び出し元と共有する 1 本のトークン。#132)
+# ---------------------------------------------------------------------------
+# この API は「到達した者が body に書いた user_id をそのまま名乗る」設計なので、到達 =
+# 任意ユーザーとしてのコード実行・他ユーザー workspace の破棄と同義。ユーザー間の隔離
+# (README「セキュリティモデル」) は user_id が正しいことを前提にしており、その前提を
+# 担保するものが従来は「届く経路が狭い」以外に無かった。
+#
+# 呼び出し元 (nucllei backend) と `SANDBOX_TOKEN` を env で持ち合い、
+# `Authorization: Bearer <token>` で照合する。トークンが保証するのは「呼び出し元が
+# nucllei であること」だけで、**user_id の正しさは依然として呼び出し元任せ** —
+# nucllei を信頼境界とする、が本 fork の設計判断 (より強い紐付け = 署名付き user_id 等は
+# 採らない。nucllei が落ちれば sandbox も同時に落ちる一体の出荷物であり、2 段目の
+# 検証は運用コストに見合わない)。
+#
+# **fail-closed**: 未設定なら起動を拒否する (`_startup` で RuntimeError → uvicorn が
+# 終了 → コンテナが crash-loop するので docker ps / logs で必ず気付く)。「未設定なら
+# 素通し」は穴が残るので採らない。下の middleware も TOKEN 空を不一致として扱うので、
+# 起動チェックを迂回して app を立てても開かない。
+TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
+
+# 認証を免除するパス。**既定は要認証** (パス単位の allow ではなく deny がデフォルト) —
+# endpoint を足したときに「書き忘れたら開く」ではなく「書き忘れたら閉じる」側に倒す。
+#   - `/healthz`: 配備側 compose の healthcheck が叩く。token を持たせると healthcheck の
+#     コマンド行に平文で載り (`docker inspect` に出る)、値がずれただけで unhealthy になる。
+#     返すのは真偽値 3 つだけでユーザーデータを含まない。
+#   - `/metrics`: 配備側 Prometheus が scrape する (docs/health.md ②)。label なしの集約値
+#     のみで user_id を含まない。認証すると scrape 側にも token 配布が要る。
+# どちらも「同じ境界に居る監視系が無認証で読める」ことを前提にした設計で、機微は無い。
+PUBLIC_PATHS = frozenset({"/healthz", "/metrics"})
+
+
+def _token_ok(authorization: str) -> bool:
+    """`Authorization: Bearer <token>` を定数時間で照合する。
+
+    TOKEN 未設定 (空) は常に不一致 — 空トークンで素通しになる経路を作らない。
+    """
+    if not TOKEN:
+        return False
+    scheme, _, presented = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return False
+    # 非 ASCII のトークンでも落ちないよう bytes で比較する (str 版は ASCII 限定)
+    return hmac.compare_digest(presented.strip().encode(), TOKEN.encode())
+
+
+class _RequireToken:
+    """全リクエストにトークンを要求する ASGI middleware (免除は PUBLIC_PATHS)。
+
+    **素の ASGI で書く** (`@app.middleware("http")` = BaseHTTPMiddleware を使わない):
+    あちらは下流に渡す `receive` を差し替えるため、`/exec` `/exec_cell` が lock 待ちの
+    間に使う `request.is_disconnected()` (= 切れた要求を実行しない仕組み) の挙動を
+    巻き込みうる。ここは scope の header を見て通すか 401 を返すかだけなので、
+    receive/send は素通しでよい。
+
+    **守備範囲は HTTP のみ**: 未知パスも含めて既定 deny なので endpoint を足しても
+    書き忘れで開かないが、それは HTTP の話。この API に WebSocket は無い (2026-09-04
+    時点で `@app.websocket` はゼロ) — 足すときはここも通るように直すこと。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] not in PUBLIC_PATHS:
+            auth = Headers(scope=scope).get("authorization", "")
+            if not _token_ok(auth):
+                # トークン値はログにもレスポンスにも出さない
+                # (どこまで一致したかも返さない)
+                print(
+                    f"[sandbox] 401 {scope.get('method')} {scope['path']}",
+                    flush=True,
+                )
+                res = JSONResponse({"detail": "unauthorized"}, status_code=401)
+                await res(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app = FastAPI()
+app.add_middleware(_RequireToken)
+
+
 _sem = asyncio.Semaphore(MAX_CONCURRENCY)
 _user_locks: dict[str, asyncio.Lock] = {}
 # workspace の loop mount は本来張りっぱなしで単調増加する。idle-detach reaper で umount して
@@ -601,6 +685,16 @@ class CellRequest(BaseModel):
 
 @app.on_event("startup")
 async def _startup():
+    # fail-closed (#132): トークンが無い状態では上げない。ここで落とすと uvicorn は
+    # "Application startup failed. Exiting." で終了し、コンテナは restart policy 下で
+    # crash-loop する = 設定漏れが確実に可視化される (無認証で上がって気付かないより良い)。
+    if not TOKEN:
+        raise RuntimeError(
+            "SANDBOX_TOKEN が未設定です。この API は到達した者が任意の user_id を"
+            "名乗れるため、共有トークン無しでは起動しません (sandbox/README.md"
+            " セキュリティモデル)。呼び出し元の nucllei にも**同じ値**を"
+            " SANDBOX_TOKEN として渡してください (生成例: openssl rand -hex 32)"
+        )
     _ensure_loop_nodes()
     if not _loop_available():
         print(

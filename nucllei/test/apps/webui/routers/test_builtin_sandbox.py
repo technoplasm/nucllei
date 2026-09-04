@@ -30,32 +30,37 @@ def _fake_request():
 
 
 @contextlib.contextmanager
-def sandbox_env(url):
-    """SANDBOX_URL を差し替えて builtin_tools を読み直す(url=None で未設定)。
+def sandbox_env(url, token="test-token"):
+    """SANDBOX_URL / SANDBOX_TOKEN を差し替えて builtin_tools を読み直す(None で未設定)。
 
     ゲートは import 時に決まる(Valves の default に env を焼くため — default_factory
     だと管理画面の spec から default が落ちる)。テストからは module reload で
     やり直す。reload は module オブジェクトを作り直さないので、他モジュールが
     掴んだ `is_builtin_tool_id` 等の関数も新しい BUILTIN_TOOLS を見る。
+
+    token の既定を入れてあるのは、#132 で**登録条件が URL と token の AND になった**ため
+    (URL だけの配備は全呼び出しが 401 になるので生やさない)。token 側だけを試す
+    テストは明示的に渡す。
     """
     import nucllei.builtin_tools as pkg
     from nucllei.builtin_tools import sandbox as mod
 
-    old = os.environ.get("SANDBOX_URL")
+    olds = {k: os.environ.get(k) for k in ("SANDBOX_URL", "SANDBOX_TOKEN")}
 
-    def _apply(value):
-        if value is None:
-            os.environ.pop("SANDBOX_URL", None)
-        else:
-            os.environ["SANDBOX_URL"] = value
+    def _apply(values):
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         importlib.reload(mod)
         importlib.reload(pkg)
 
-    _apply(url)
+    _apply({"SANDBOX_URL": url, "SANDBOX_TOKEN": token})
     try:
         yield pkg
     finally:
-        _apply(old)
+        _apply(olds)
 
 
 def _sandbox(responses=None, error=None):
@@ -122,6 +127,25 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
         with sandbox_env(None) as pkg:
             pkg.sync_builtin_tools()
             assert self.Tools.get_tool_by_id("builtin_sandbox") is None
+
+    def test_not_registered_without_token(self):
+        """#132: URL だけあってトークンが無い配備では生やさない。
+
+        sandbox は共有トークン必須なので、URL だけの状態で登録すると「一覧に見えて
+        いるのに呼ぶと必ず 401」になる — env ゲートが避けたい状態そのもの。
+        """
+        with sandbox_env("http://sandbox.test:8000", token=None) as pkg:
+            assert "builtin_sandbox" not in pkg.BUILTIN_TOOLS
+            assert pkg._SANDBOX_TOKEN_MISSING is True  # sync 時に log.error を出す印
+            pkg.sync_builtin_tools()
+            assert self.Tools.get_tool_by_id("builtin_sandbox") is None
+            assert self.Tools.get_tool_by_id("builtin_history") is not None
+
+        # トークンだけあって URL が無いのは「sandbox の居ない配備」— 従来通り非登録で、
+        # 設定漏れの警告も出さない
+        with sandbox_env(None, token="test-token") as pkg:
+            assert "builtin_sandbox" not in pkg.BUILTIN_TOOLS
+            assert pkg._SANDBOX_TOKEN_MISSING is False
 
     def test_reserved_prefix_blocks_user_created_id(self):
         """env 未設定で未登録でも、`builtin_` prefix の予約はユーザー作成を拒む。"""
@@ -302,6 +326,71 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         ):
             assert asyncio.run(coro).startswith("ERROR:")
         assert tool.calls == []
+
+    def test_post_sends_bearer_token(self):
+        """#132: 全リクエストに Authorization: Bearer が付く(唯一の HTTP 出口 = _post)。
+
+        他のテストは _post ごと差し替えるので、ここだけ本物の _post を通し
+        aiohttp を偽物にしてヘッダを見る。
+        """
+        with sandbox_env("http://sandbox.test:8000", token="tok-abc"):
+            from nucllei.builtin_tools.sandbox import Tools
+
+            seen = {}
+
+            class FakeResp:
+                status = 200
+
+                async def json(self):
+                    return {"entries": []}
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *a):
+                    return False
+
+            class FakeSession:
+                def __init__(self, timeout=None, headers=None):
+                    seen["headers"] = dict(headers or {})
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *a):
+                    return False
+
+                def post(self, url, json=None):
+                    seen["url"] = url
+                    return FakeResp()
+
+            tool = Tools()
+            tool.valves.sandbox_url = "http://sandbox.test:8000"
+            fake_aiohttp = types.SimpleNamespace(
+                ClientSession=FakeSession, ClientTimeout=lambda total: total
+            )
+            import nucllei.builtin_tools.sandbox as mod
+
+            real = mod.aiohttp
+            mod.aiohttp = fake_aiohttp
+            try:
+                asyncio.run(tool._post("/files/list", {"user_id": "u1"}, 30))
+            finally:
+                mod.aiohttp = real
+
+            assert seen["headers"] == {"Authorization": "Bearer tok-abc"}
+            assert seen["url"] == "http://sandbox.test:8000/files/list"
+
+    def test_401_error_names_the_token_mismatch(self):
+        """401 は原因(両側の SANDBOX_TOKEN 不一致)を言う。トークン値は出さない。"""
+        tool = _sandbox(
+            error=RuntimeError(
+                "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
+                "SANDBOX_TOKEN が一致していません (配備の env を確認)"
+            )
+        )
+        out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
+        assert out.startswith("ERROR:") and "SANDBOX_TOKEN" in out
 
     def test_http_failure_is_graceful(self):
         """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。"""

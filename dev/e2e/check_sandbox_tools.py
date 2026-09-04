@@ -8,8 +8,9 @@
 1. sandbox コンテナが `127.0.0.1:13302`(133xx 帯)で稼働している
    (`docker build -t nucllei-sandbox:dev ./sandbox` → 配備層 llens の compose で up。
    詳細は `_memos/dev-environment.md`)
-2. backend を **`SANDBOX_URL=http://127.0.0.1:13302` 付きで起動**している。
-   env が空だと `builtin_sandbox` はそもそも Tools テーブルに生えない(env ゲート)
+2. backend を **`SANDBOX_URL=http://127.0.0.1:13302` と `SANDBOX_TOKEN=<コンテナと同じ値>`
+   付きで起動**している。どちらかが空だと `builtin_sandbox` はそもそも Tools テーブルに
+   生えない(env ゲート)。token は #132 で必須になった共有トークン
 3. preset(`MODEL_ID`)に `builtin_sandbox` が接続されている
    — 未接続ならこのスクリプトが接続して MODELS キャッシュを張り直す(冪等)
 
@@ -65,9 +66,12 @@ def preflight():
     tools = _req("GET", "/api/v1/tools/") or []
     if not any(t["id"] == TOOL_ID for t in tools):
         raise SystemExit(
-            f"{TOOL_ID} が Tools に無い。backend を SANDBOX_URL 付きで起動していない可能性が高い:\n"
-            "  tmux send-keys -t nuc:BE 'SANDBOX_URL=http://127.0.0.1:13302 uv run task dev' Enter\n"
-            "(env 未設定だと __init__.py の env ゲートで登録されず、prune で DB からも消える)"
+            f"{TOOL_ID} が Tools に無い。backend を SANDBOX_URL / SANDBOX_TOKEN 付きで"
+            "起動していない可能性が高い:\n"
+            "  tmux send-keys -t nuc:BE 'SANDBOX_URL=http://127.0.0.1:13302 "
+            "SANDBOX_TOKEN=<sandbox コンテナと同じ値> uv run task dev' Enter\n"
+            "(どちらかが未設定だと __init__.py の env ゲートで登録されず、prune で DB からも"
+            "消える。URL だけ設定した場合は BE の起動ログに log.error が出る — #132)"
         )
 
     # valves は未設定なら env(SANDBOX_URL)が既定として効く。DB に値が入っていると

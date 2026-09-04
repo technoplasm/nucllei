@@ -10,9 +10,11 @@ LLENS 固有の知識はこのファイルに一つも無い (同ディレクト
 medical_calculator.py とは質が違う) ことも移設の条件を満たしていた。
 
 **他の builtin と違い外部サービス (sandbox コンテナ) を要する**ので、向き先 env
-(`SANDBOX_URL`) が設定されている配備でだけ登録する (ゲートは `__init__.py` 側)。
-既定値を持たせない = 未設定なら tool 一覧にすら現れないのが要点 — sandbox の居ない
-配備で「一覧に生えているのに呼ぶと必ずエラー」は builtin の性質に反する。
+(`SANDBOX_URL`) と共有トークン (`SANDBOX_TOKEN`) が両方設定されている配備でだけ登録する
+(ゲートは `__init__.py` 側)。既定値を持たせない = 未設定なら tool 一覧にすら現れないのが
+要点 — sandbox の居ない配備で「一覧に生えているのに呼ぶと必ずエラー」は builtin の性質に
+反する。トークン未設定は sandbox 側が全リクエストを 401 で拒む (#132) ので、URL だけ
+設定された配備はまさにこの「呼ぶと必ずエラー」に当たる。
 """
 
 import asyncio
@@ -46,6 +48,12 @@ log = logging.getLogger(__name__)
 # **既定値は持たない**: 空 = sandbox の居ない配備、として `__init__.py` が登録を止める。
 # 既定 URL を置くと全配備で常に有効になり、ゲートが意味を失う。
 SANDBOX_URL = os.getenv("SANDBOX_URL", "").strip()
+
+# sandbox API の共有トークン (#132)。sandbox 側は `SANDBOX_TOKEN` 未設定では**起動しない**
+# ので、両側 (sandbox コンテナと nucllei) に同じ値を置く。**valve / DB には持たせない** —
+# 秘密の置き場を DB に増やさない、という既存方針 (llens の compose が CAGE_TOKEN を env に
+# しているのと同じ理由)。未設定なら tool 自体を登録しない (ゲートは `__init__.py` 側)。
+SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "").strip()
 
 # send_to_workspace(url=) の相対パス解決先 = nucllei 自分自身の listen 口 (コンテナ内)。
 # Caddy / 公開 origin には依存しない。
@@ -228,13 +236,26 @@ class Tools:
 
     # ---- HTTP -----------------------------------------------------------------
     async def _post(self, path: str, payload: dict, timeout_s: float) -> dict:
+        """sandbox サービスへの POST。**全リクエストに共有トークンを付ける** (#132)。
+
+        header は session に持たせる (この session はこの 1 リクエストにしか使わない)。
+        `_http_get` は別 session — 任意 URL を取りに行く経路なので、そちらへトークンが
+        漏れないよう混ぜない。
+        """
         url = self.valves.sandbox_url.rstrip("/") + path
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout_s)
+            timeout=aiohttp.ClientTimeout(total=timeout_s),
+            headers={"Authorization": f"Bearer {SANDBOX_TOKEN}"},
         ) as session:
             async with session.post(url, json=payload) as resp:
                 if resp.status != 200:
                     body = (await resp.text())[:300]
+                    if resp.status == 401:
+                        # 値は出さない。原因は「両側の SANDBOX_TOKEN 不一致」しかない
+                        raise RuntimeError(
+                            "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
+                            "SANDBOX_TOKEN が一致していません (配備の env を確認)"
+                        )
                     raise RuntimeError(f"sandbox HTTP {resp.status}: {body}")
                 return await resp.json()
 

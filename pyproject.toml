@@ -240,7 +240,8 @@ create-dev-admin = "nucllei create-admin --email ken@llens.local --name Ken --pa
 # 無ネットワークを突く。コンテナが無ければ全 skip。名前は SANDBOX_CONTAINER で差し替え
 # (既定は現行配備の llens-sandbox)。pytest 不要のランナーを持つので直接叩く。
 sandbox-test = "python3 sandbox/tests/test_isolation.py"
-# ユニットテスト: main.py を直接 import して SessionManager 等を確認。コンテナ不要。
+# ユニットテスト: main.py を直接 import して SessionManager と共有トークン認証 (#132) を
+# 確認する。コンテナ不要。
 # main.py の import に要る fastapi/pydantic は本体の依存に既にあるので `--with` は不要。
-sandbox-unit = "pytest -p no:warnings sandbox/tests/test_session_manager.py"
+sandbox-unit = "pytest -p no:warnings sandbox/tests/test_session_manager.py sandbox/tests/test_auth.py"
 

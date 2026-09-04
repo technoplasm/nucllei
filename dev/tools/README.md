@@ -45,4 +45,4 @@ discard されるため。旧 `probe_result_table` は table 描画の廃止(#60
 コピーを置く理由が無くなった。むしろ**置いておくと有害** — 関数名(`run_python` /
 `run_shell` / `send_to_workspace` …)が組み込みと丸ごと衝突し、先勝ち discard でどちらかが
 黙って捨てられる(#18-3 のダミー run_python と同じ事故)。使うときは backend を
-`SANDBOX_URL` 付きで起動する(`_memos/dev-environment.md`)。
+`SANDBOX_URL` + `SANDBOX_TOKEN` 付きで起動する(`_memos/dev-environment.md`)。

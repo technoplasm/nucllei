@@ -276,9 +276,15 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    **組み込み `builtin_sandbox`**(`nucllei/builtin_tools/sandbox.py`)。**DB への手動登録は不要**
    — 旧 `dev/tools/sandbox.py` を tool id `sandbox` で登録する手順は撤去した(コピーごと削除。
    残すと組み込みと関数名が丸ごと衝突し、先勝ち discard で片方が黙って捨てられる)。
-   - 生やす条件は **env `SANDBOX_URL`** ただ一つ(既定値は持たない)。
-     `SANDBOX_URL=http://127.0.0.1:13302 uv run task dev` で起動すれば起動時 sync で生える。
-     未設定で起動すると **prune で DB からも消える**(access_control 設定も一緒に消える)。
+   - 生やす条件は **env `SANDBOX_URL` と `SANDBOX_TOKEN` の両方**(どちらも既定値を持たない。
+     token は #132 で追加 — sandbox 側が全リクエストに `Authorization: Bearer` を要求し、
+     **未設定では sandbox コンテナ自体が起動しない**)。
+     `SANDBOX_URL=http://127.0.0.1:13302 SANDBOX_TOKEN=<コンテナと同じ値> uv run task dev`
+     で起動すれば起動時 sync で生える。値は sandbox コンテナに渡したものと一致させる
+     (dev で新規に決めるなら `openssl rand -hex 32`。`.env` に書いておくのが楽 —
+     ただし `--reload` は `.env` を watch しないので変更後は BE を再起動する)。
+     どちらかが未設定で起動すると **prune で DB からも消える**(access_control 設定も
+     一緒に消える)。URL だけ設定して token が無い場合は起動ログに `log.error` が出る。
      valves の `sandbox_url` は空なら env の値が既定として効くので、dev で触る必要は無い。
    - preset への接続(`meta.toolIds` に `builtin_sandbox`)は必要。E2E スクリプトが冪等に張る。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =

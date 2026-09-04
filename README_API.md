@@ -247,6 +247,7 @@ separate reasoning block.
 | `CHAT_TOOL_EXECUTION_TIMEOUT`                                  | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result |
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                    |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                      |
+| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL + shared bearer token; both required for `builtin_sandbox` (§5.7)    |
 
 ### 3.7 Attachments / files / storage
 
@@ -701,13 +702,18 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     context.
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `list_workspace` /
-    `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
-    no value the tool is absent from `/api/v1/tools/` entirely (and an existing
-    row is pruned on the next boot, ACL included). It is gated because, unlike
-    the three above, it needs an external service to be reachable — a builtin
-    that is listed but always errors would be worse than one that is absent.
-    The `sandbox_url` valve defaults to the env value so an admin can read where
-    it currently points.
+    `fetch_from_workspace`. **Registered only when both `SANDBOX_URL` and
+    `SANDBOX_TOKEN` are set**; with either missing the tool is absent from
+    `/api/v1/tools/` entirely (and an existing row is pruned on the next boot,
+    ACL included). It is gated because, unlike the three above, it needs an
+    external service to be reachable — a builtin that is listed but always
+    errors would be worse than one that is absent. `SANDBOX_TOKEN` is the shared
+    bearer token of the sandbox API: the sandbox service refuses to start
+    without it and rejects every unauthenticated call with 401, so a URL-only
+    deployment is exactly the "listed but always errors" case. Set the same
+    value on both sides; it is read from the environment only (never a valve or
+    a DB row). The `sandbox_url` valve defaults to the env value so an admin can
+    read where it currently points.
 - **Code execution runs in an external sandbox service**, never in the server
   process. `builtin_sandbox` bridges over HTTP to an nsjail + IPython service
   and provides a stateful `run_python` (per user+chat kernel), `run_shell`, and

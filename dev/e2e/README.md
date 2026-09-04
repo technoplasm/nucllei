@@ -14,7 +14,8 @@ dev アカウント(`ken@llens.local` / `llens-dev`、`_memos/dev-environment.md
 ```
 
 `check_sandbox_tools.py` は sandbox コンテナ(この repo の `sandbox/` = `ghcr.io/technoplasm/nucllei-sandbox`、
-`127.0.0.1:13302`)と、**`SANDBOX_URL=http://127.0.0.1:13302` 付きで起動した backend** を要求する。
+`127.0.0.1:13302`)と、**`SANDBOX_URL=http://127.0.0.1:13302` + `SANDBOX_TOKEN=<コンテナと同じ値>`
+付きで起動した backend** を要求する(token は #132 の共有トークン。sandbox 側は未設定だと起動しない)。
 tool は組み込みの `builtin_sandbox`(#114、2026-09-03)なので DB への手動登録は要らない —
 env が空だと env ゲートでそもそも生えない。preset への接続(toolIds)はスクリプトが冪等に張る。
 `check_skill_feature_gate.py` は llens-assistant の `meta.features.skills` を一時的に false にして

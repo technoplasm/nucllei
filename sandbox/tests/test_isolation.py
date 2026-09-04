@@ -26,12 +26,16 @@ USER_ID = "isolationtest"  # _USER_ID_RE に合う専用テストユーザー
 
 # コンテナ内で /exec を叩く固定クライアント。ユーザーコードは stdin の JSON に載せ、
 # この -c 文字列自体は不変にして quoting 事故を避ける。
+# 共有トークン (#132) は**コンテナ自身の env から取る** — 配備側がサービスに渡した値が
+# そのまま正解なので、テスト側に値を持たせない (ずれようがない)。未設定なら service が
+# 起動していないはずで、到達不能 → 全 skip になる。
 _CLIENT = (
-    "import sys,urllib.request\n"
+    "import os,sys,urllib.request\n"
     "d=sys.stdin.read()\n"
     "r=urllib.request.urlopen(urllib.request.Request("
     "'http://localhost:8000/exec',data=d.encode(),"
-    "headers={'Content-Type':'application/json'}),timeout=90)\n"
+    "headers={'Content-Type':'application/json',"
+    "'Authorization':'Bearer '+os.environ.get('SANDBOX_TOKEN','')}),timeout=90)\n"
     "sys.stdout.write(r.read().decode())\n"
 )
 

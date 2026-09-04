@@ -384,3 +384,30 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 - E2E: `dev/e2e/check_sandbox_tools.py`(E1〜E6。実 Kimi × 実コンテナ、CI 外)
 - **同名関数の衝突に注意**(#18-3 の教訓は今も生きる)。この移設に伴い、衝突源だった
   `dev/tools/sandbox.py`(手動登録用の古いコピー)を削除した
+
+## 改訂(2026-09-04、#132)— sandbox API に共有トークン、ゲートは URL ∧ TOKEN
+
+sandbox の HTTP API は**無認証**で、body に書いた `user_id` を無検証で信じていた
+(到達 = 任意ユーザーとしてのコード実行・他ユーザー workspace 破棄)。#114 で sandbox が
+nucllei の出荷物になり「素の nucllei を配る相手にも届く」ようになったので塞いだ。
+設計の単一情報源は `sandbox/README.md`「セキュリティモデル」。ここは builtin 側の帰結だけ。
+
+- **env は両側同名 `SANDBOX_TOKEN`**(sandbox サービスと nucllei)。compose で 1 つの値を
+  2 サービスに配れば済む。**valve / DB には置かない**(秘密の置き場を増やさない。llens の
+  compose が `CAGE_TOKEN` を env にしているのと同じ理由)。`sandbox_url` は valve のままなので、
+  valve で向き先だけ変えてもトークンは env のものが飛ぶ。
+- **登録ゲートが `SANDBOX_URL` ∧ `SANDBOX_TOKEN` の AND になった**。基準は 2026-09-03 の
+  ゲートと同じ(「一覧に生えているのに呼ぶと必ずエラー」を作らない)— トークン未設定の
+  nucllei からの呼び出しは sandbox 側で**必ず 401** になるので、URL だけの配備はまさに
+  この状態に当たる。**トークンだけあって URL が無い場合は従来通り非登録**(sandbox の
+  居ない配備)で、警告も出さない。
+- **原因が読めるログ**: 「URL はあるのに TOKEN が無い」ときだけ `sync_builtin_tools()` の
+  冒頭で `log.error`(import 時は logging 未設定の可能性があるのでフラグ
+  `_SANDBOX_TOKEN_MISSING` を立てて sync で吐く)。tool が黙って消えると配備者は原因に
+  辿り着けない — prune のログは「撤去か env ゲートか」を区別しない文言のままなので、
+  この 1 行が唯一の手掛かりになる。
+- 401 の tool エラー文は原因(両側の `SANDBOX_TOKEN` 不一致)を名指しする。**トークン値は
+  ログにもレスポンスにも出さない**。
+- 回帰: `test_builtin_sandbox.py` に「TOKEN 無しでは非登録」「`_post` が
+  `Authorization: Bearer` を必ず付ける」「401 の文言」を追加。sandbox 側は
+  `sandbox/tests/test_auth.py`(`uv run task sandbox-unit` = CI)。

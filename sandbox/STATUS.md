@@ -32,6 +32,14 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       ④ DELETE /workspace mechanism (外部 GC 用、trash rename) /
       C9 ext4 brick 耐性 (破損 .img を退避 → fresh、atomic 生成) / C5 枯渇 503。
       exec/exec_cell 回帰なし・live_session ガード・C9 復旧を実機検証済
+- [x] **API の共有トークン認証** (#132、2026-09-04)。`Authorization: Bearer <SANDBOX_TOKEN>`
+      を middleware で全パスに要求 (免除は `/healthz` `/metrics` のみ)。**未設定なら起動
+      拒否**の fail-closed、比較は `hmac.compare_digest`。呼び出し元 (nucllei) 側は
+      `SANDBOX_TOKEN` 未設定だと `builtin_sandbox` を登録しない。回帰は
+      `sandbox/tests/test_auth.py` + `nucllei/test/.../test_builtin_sandbox.py`。
+      設計は README「セキュリティモデル」。**配備側 (llens) の追従は向こう持ち** =
+      compose の 2 サービス (sandbox / nucllei) に同じ `SANDBOX_TOKEN` を渡す + 外部 GC
+      スクリプトにヘッダを足す。Prometheus と healthcheck は免除なので変更不要
 
 ## 残課題
 
@@ -43,6 +51,5 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       — DB を引くので image に DB 資格情報を持たせない。docs/health.md ④ 参照
 - [ ] 監視配線 (prometheus job + Grafana alert: loop 0.75 / disk 0.80) は**配備層 (llens) 側**。
       image 側の `/metrics` は実装済
-- [ ] sandbox API の shared token 認証 (現状 docker network 内限定で暫定不要)
 - [ ] per-user uid 分離 (懸念として保留。README のセキュリティモデル参照)
 - [ ] seccomp 絞り込み (現状 nsjail デフォルト。コスト重く優先度低・見送り可)
