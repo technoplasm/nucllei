@@ -812,6 +812,20 @@ ENABLE_LOGIN_FORM = RuntimeConfig(
     os.environ.get("ENABLE_LOGIN_FORM", "True").lower() == "true",
 )
 
+# 共有 PC 配備向け: False にするとログインフォームの autocomplete 属性を抑止方向に
+# 切り替える(form 全体 `autocomplete="off"` + パスワード欄 `new-password` + 他欄 `off`)。
+# 既定 True = 現状維持。
+# **効果の範囲を誤解しないこと**: これで抑えられるのは「保存済み資格情報のオートフィル」まで。
+# 「パスワードを保存しますか」プロンプト自体は Web 側からは抑止できない
+# (Chrome/Edge は password 欄の autocomplete=off を意図的に無視する仕様)。
+# 端末で確実に止めるにはブラウザポリシー(`PasswordManagerEnabled=false` の GPO/Intune 等)が要る。
+# 切り分けの詳細は `_memos/auth-profile.md`「共有 PC 配備」節。
+ENABLE_LOGIN_AUTOCOMPLETE = RuntimeConfig(
+    "ENABLE_LOGIN_AUTOCOMPLETE",
+    "ui.enable_login_autocomplete",
+    os.environ.get("ENABLE_LOGIN_AUTOCOMPLETE", "True").lower() == "true",
+)
+
 
 DEFAULT_LOCALE = RuntimeConfig(
     "DEFAULT_LOCALE",

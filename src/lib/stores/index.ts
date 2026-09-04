@@ -248,6 +248,9 @@ type Config = {
 		enable_api_key: boolean;
 		enable_signup: boolean;
 		enable_login_form: boolean;
+		// 共有 PC 配備で false。ログインフォームの autocomplete 属性を抑止方向に切り替える
+		// (ブラウザの保存プロンプト自体は止められない — _memos/auth-profile.md 参照)
+		enable_login_autocomplete?: boolean;
 		enable_admin_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_user_webhooks?: boolean;

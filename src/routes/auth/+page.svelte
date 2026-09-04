@@ -27,6 +27,11 @@
 
 	let ldapUsername = '';
 
+	// 共有 PC 配備(ENABLE_LOGIN_AUTOCOMPLETE=false)では autocomplete を抑止方向に倒す。
+	// 抑えられるのは保存済み資格情報のオートフィルまでで、ブラウザの「保存しますか」
+	// プロンプトは Web 側からは止められない(_memos/auth-profile.md「共有 PC 配備」)。
+	$: autocompleteEnabled = $config?.features?.enable_login_autocomplete ?? true;
+
 	/** @param {string} key */
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
@@ -174,6 +179,7 @@
 					<div class="  my-auto pb-10 w-full text-content">
 						<form
 							class=" flex flex-col justify-center"
+							autocomplete={autocompleteEnabled ? null : 'off'}
 							onsubmit={(e) => {
 								e.preventDefault();
 								submitHandler();
@@ -200,7 +206,7 @@
 												bind:value={name}
 												type="text"
 												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-												autocomplete="name"
+												autocomplete={autocompleteEnabled ? 'name' : 'off'}
 												placeholder={$i18n.t('Enter Your Full Name')}
 												required
 											/>
@@ -214,7 +220,7 @@
 												bind:value={ldapUsername}
 												type="text"
 												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-												autocomplete="username"
+												autocomplete={autocompleteEnabled ? 'username' : 'off'}
 												name="username"
 												placeholder={$i18n.t('Enter Your Username')}
 												required
@@ -227,7 +233,7 @@
 												bind:value={email}
 												type="email"
 												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-												autocomplete="email"
+												autocomplete={autocompleteEnabled ? 'email' : 'off'}
 												name="email"
 												placeholder={$i18n.t('Enter Your Email')}
 												required
@@ -243,7 +249,7 @@
 											type="password"
 											class="my-0.5 w-full text-sm outline-hidden bg-transparent"
 											placeholder={$i18n.t('Enter Your Password')}
-											autocomplete="current-password"
+											autocomplete={autocompleteEnabled ? 'current-password' : 'new-password'}
 											name="current-password"
 											required
 										/>

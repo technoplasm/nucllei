@@ -122,6 +122,7 @@ from nucllei.config import (
     JWT_EXPIRES_IN,
     ENABLE_SIGNUP,
     ENABLE_LOGIN_FORM,
+    ENABLE_LOGIN_AUTOCOMPLETE,
     ENABLE_API_KEY,
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
     API_KEY_ALLOWED_ENDPOINTS,
@@ -371,6 +372,7 @@ app.state.TOOL_SERVERS = []
 app.state.config.WEBUI_URL = WEBUI_URL
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
+app.state.config.ENABLE_LOGIN_AUTOCOMPLETE = ENABLE_LOGIN_AUTOCOMPLETE
 
 app.state.config.ENABLE_API_KEY = ENABLE_API_KEY
 app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
@@ -1038,6 +1040,9 @@ async def get_app_config(request: Request):
             "enable_api_key": app.state.config.ENABLE_API_KEY,
             "enable_signup": app.state.config.ENABLE_SIGNUP,
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
+            # 共有 PC 配備でログインフォームの autocomplete を抑止する(未認証で読める必要が
+            # ある — ログイン画面が使う)。効果の範囲は config.py の定義コメント参照。
+            "enable_login_autocomplete": app.state.config.ENABLE_LOGIN_AUTOCOMPLETE,
             **(
                 {
                     # llens(#52/#67/#51): built-in web 検索・retrieval router・WEB_SEARCH_*

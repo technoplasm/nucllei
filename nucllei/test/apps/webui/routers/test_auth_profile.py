@@ -106,6 +106,28 @@ class TestLlensAuthProfile(AbstractPostgresTest):
         assert data["role"] == "user"
         assert data["email"] == "naika@hospital.example"
 
+    def test_login_autocomplete_flag_is_public_and_defaults_on(self):
+        """共有 PC 配備フラグ ENABLE_LOGIN_AUTOCOMPLETE。
+
+        ログイン画面(未認証)で読める必要があるので `/api/config` の
+        features に**認証前でも**載ること、既定は現状維持(True)であることを固定する。
+        """
+        from nucllei.main import app
+
+        assert app.state.config.ENABLE_LOGIN_AUTOCOMPLETE is True
+
+        response = self.fast_api_client.get("/api/config")
+        assert response.status_code == 200, response.text
+        features = response.json()["features"]
+        assert features["enable_login_autocomplete"] is True
+
+        app.state.config.ENABLE_LOGIN_AUTOCOMPLETE = False
+        try:
+            response = self.fast_api_client.get("/api/config")
+            assert response.json()["features"]["enable_login_autocomplete"] is False
+        finally:
+            app.state.config.ENABLE_LOGIN_AUTOCOMPLETE = True
+
     def test_signin_returns_token(self):
         from nucllei.models.auths import Auths
         from nucllei.utils.auth import get_password_hash
