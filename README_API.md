@@ -928,10 +928,16 @@ Both paths return the same tool result:
 
 `result` enters the model history as a `role:"tool"` message (not a system
 message); the UI renders it as a collapsible "load_skill" card with the loaded
-tool names. One asymmetry to know: on the `/command` path the skill's tools stay
-loaded for the rest of the conversation; on the model path they are loaded for
-the current request's tool loop — on later turns the model sees the instructions
-in history but must call `load_skill` again (idempotent) if it needs the tools.
+tool names. Both entry points persist for the rest of the conversation: the
+`/command` path re-derives its tool ids from the preset on every request, and
+the model path re-derives them by replaying the `load_skill` calls found in the
+history (`replay_skill_tool_ids`). The model does not need to call `load_skill`
+again on a later turn to keep the tools.
+
+Authorization is never inherited from the history. Every re-derivation re-checks
+the same AND as the `/command` path (feature flag, the model's `meta.skillIds`,
+and read visibility), so removing a skill from the preset drops its tools even
+though the earlier `load_skill` call is still sitting in the conversation.
 
 ---
 
