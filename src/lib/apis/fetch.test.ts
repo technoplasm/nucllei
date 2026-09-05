@@ -115,16 +115,31 @@ describe('activity ヘッダ', () => {
 		expect(init.method).toBe('POST');
 	});
 
-	it('mousemove は操作として数えない', async () => {
-		await loadModule();
+	it('wheel は操作として数える(長い回答を読んでいる人を追い出さない)', async () => {
+		const { apiFetch, ACTIVITY_HEADER } = await loadModule();
 
-		// 通りすがりのカーソル移動で離席中のセッションが延命されないこと
+		fire(windowListeners, 'wheel');
+		await apiFetch('/api/v1/chats/');
+		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBe('1');
+	});
+
+	it('mousemove は操作として数えない', async () => {
+		const { apiFetch, ACTIVITY_HEADER } = await loadModule();
+
+		// 通りすがりのカーソル移動で離席中のセッションが延命されないこと。
+		// `wheel` を含めて `mousemove` を外しているのは意図的(上のテストと対)。
 		expect(Object.keys(windowListeners).sort()).toEqual([
 			'click',
 			'keydown',
 			'pointerdown',
-			'touchstart'
+			'touchstart',
+			'wheel'
 		]);
+
+		// リスナが無いので、発火させてもヘッダは付かない
+		fire(windowListeners, 'mousemove');
+		await apiFetch('/api/v1/chats/');
+		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBeNull();
 	});
 
 	it('クロスオリジン宛には付けない(無用な preflight を出さない)', async () => {
@@ -178,6 +193,82 @@ describe('FE 側アイドルタイマ', () => {
 		fire(documentListeners, 'visibilitychange');
 
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('操作はあるがリクエストが出ないときは、延命の 1 本を出す', async () => {
+		// スクロールして読む・長文を打つ = 操作はあるがリクエストは 0 本。
+		// これを放置するとサーバ側の期限だけ切れ、次のクリックで追い出される。
+		// このタブではまだヘッダを 1 本も運べていない(= 半減期の条件は自動的に成立)。
+		const { startIdleWatch, ACTIVITY_HEADER } = await loadModule();
+
+		startIdleWatch(3600);
+		fire(windowListeners, 'wheel');
+
+		expect(fetchMock.mock.calls).toHaveLength(1);
+		expect(String(fetchMock.mock.calls[0][0])).toContain('/auths/');
+		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBe('1');
+	});
+
+	it('無操作のときは延命の 1 本も出さない(ポーリングでは延命しない)', async () => {
+		const { startIdleWatch } = await loadModule();
+
+		startIdleWatch(3600);
+		vi.advanceTimersByTime(15000 * 10);
+
+		expect(fetchMock.mock.calls).toHaveLength(0);
+	});
+
+	it('keepalive はタイマの tick では出さない(サーバ期限が FE の期限を追い越さない)', async () => {
+		// tick で出すと、操作から最大半減期ぶん遅れて再発行が走り、サーバの期限が
+		// FE のアイドル期限を追い越す。すると FE が /auth へ逃がしても、まだ生きて
+		// いるセッションを見て /auth がアプリへ戻し、前の人の画面が復活する。
+		const { startIdleWatch } = await loadModule();
+
+		startIdleWatch(60);
+		fire(windowListeners, 'wheel'); // 操作した瞬間に 1 本(まだ運べていないため)
+		expect(fetchMock.mock.calls).toHaveLength(1);
+
+		// 以後は無操作。tick がいくら回っても増えない(= 追い越しが起きない)
+		vi.advanceTimersByTime(45000);
+		expect(fetchMock.mock.calls).toHaveLength(1);
+	});
+
+	it('半減期を過ぎるまでは keepalive を出さない(操作し続けても増やさない)', async () => {
+		const { startIdleWatch, apiFetch } = await loadModule();
+
+		// 通常の API 呼び出しがヘッダを運んだ = ここが起点
+		fire(windowListeners, 'click');
+		await apiFetch('/api/v1/chats/');
+		startIdleWatch(3600);
+
+		// 15 秒ごとにホイールを回し続けるが、まだ半減期(1800 秒)に届かない
+		for (let i = 0; i < 100; i++) {
+			vi.advanceTimersByTime(15000);
+			fire(windowListeners, 'wheel');
+		}
+
+		expect(fetchMock.mock.calls).toHaveLength(1); // 最初の 1 本だけ
+	});
+
+	it('操作が続いても keepalive は半減期ごとに 1 本(操作のたびには出さない)', async () => {
+		const { startIdleWatch, apiFetch } = await loadModule();
+
+		fire(windowListeners, 'click');
+		await apiFetch('/api/v1/chats/');
+		startIdleWatch(3600);
+
+		// 3 時間ぶん、15 秒ごとにホイールを回し続ける
+		for (let i = 0; i < 720; i++) {
+			vi.advanceTimersByTime(15000);
+			fire(windowListeners, 'wheel');
+		}
+
+		// 10800 秒 / 半減期 1800 秒 = 6 本。操作のたびに出すと 720 本になってしまう
+		const keepalives = fetchMock.mock.calls.slice(1);
+		expect(keepalives).toHaveLength(6);
+		for (const call of keepalives) {
+			expect(String(call[0])).toContain('/auths/');
+		}
 	});
 
 	it('stopIdleWatch でリスナが残らない', async () => {

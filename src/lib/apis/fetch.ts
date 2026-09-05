@@ -20,6 +20,9 @@
  *     タブを開いたまま離席しても延命されない(将来ポーリングが増えても安全側)。
  *   - 画面側: サーバで切れても、アイドル中のチャットはリクエストを 1 本も出さないため
  *     前の人の画面が残り続ける。startIdleWatch() が経過時間を見て自分でログイン画面へ逃がす。
+ *   - 逆に「操作はしているがリクエストが出ない」(スクロールして読む・長文を打つ)ときは、
+ *     **操作した瞬間に、半減期に 1 本だけ**延命のリクエスト(sendKeepalive)を出す。
+ *     操作が無ければ 1 本も出ない。
  */
 import { get } from 'svelte/store';
 
@@ -39,6 +42,9 @@ let verifying: Promise<void> | null = null;
 
 // 最後の延命以降に人の操作があったか(リクエストにヘッダを付けたら降ろす)
 let interacted = false;
+// 最後に活動ヘッダを**実際に運べた**時刻(keepalive でも通常の API 呼び出しでもよい)。
+// keepalive を出すかの判定に使う。`0` = このタブではまだ 1 本も運べていない。
+let lastActivitySentAt = 0;
 // 最後に人の操作があった時刻(FE 側アイドルタイマの起点)。
 // 残り時間ではなく**時刻の差**で判定するので、スリープ・背面タブでタイマが
 // 飛んでも復帰時点で正しく評価できる。
@@ -47,12 +53,15 @@ let lastInteractionAt = Date.now();
 const noteInteraction = () => {
 	interacted = true;
 	lastInteractionAt = Date.now();
+	// 延命の 1 本は**操作した瞬間**に出す(理由は sendKeepalive の説明)
+	sendKeepalive();
 };
 
 if (typeof window !== 'undefined') {
-	// 「操作」= 明確な意図のある入力だけ。mousemove は数えない
-	// (通りすがりのカーソル移動で離席中のセッションが延命されてしまうため)。
-	for (const type of ['keydown', 'pointerdown', 'click', 'touchstart']) {
+	// 「操作」= 明確な意図のある入力だけ。**`mousemove` は除外・`wheel` は含める** —
+	// 机にぶつかってカーソルが動いただけを在席と見なしたくない一方、ホイールは
+	// 「長い回答をスクロールして読んでいる = 在席している」の代表例だから。
+	for (const type of ['keydown', 'pointerdown', 'click', 'touchstart', 'wheel']) {
 		window.addEventListener(type, noteInteraction, { passive: true, capture: true });
 	}
 }
@@ -76,6 +85,7 @@ const withActivityHeader = (
 		return init;
 	}
 	interacted = false;
+	lastActivitySentAt = Date.now();
 
 	const headers = new Headers(
 		init?.headers ?? (input instanceof Request ? input.headers : undefined)
@@ -159,8 +169,53 @@ const IDLE_CHECK_MS = 15000;
 
 let idleTimer: ReturnType<typeof setInterval> | null = null;
 let idleResumeHook: (() => void) | null = null;
+// 監視中のアイドルタイムアウト秒数(null = 無期限 / 未ログイン = keepalive も出さない)
+let idleTimeoutSeconds: number | null = null;
+
+/**
+ * 「操作したのに、ヘッダを運ぶリクエストが出ていない」ときに出す延命用の 1 本。
+ *
+ * 人の操作は必ずしもリクエストを生まない — 長い回答をホイールで読む、長文を打ち込む、
+ * サイドバーを畳む。その間サーバ側のスライディング期限は延びないので、
+ * **画面の前に人が居るのに**次のクリックで 403 → ログイン画面、になってしまう
+ * (E2E で実測: wheel だけ 150 秒 → 次のクリックで追い出し。2026-09-05)。
+ *
+ * 出す条件:
+ *   1. 最後に**ヘッダを運べた**時刻から `idleTimeoutSeconds / 2`(= BE が再発行を
+ *      始める半減期)以上経っている。普通に API を叩いている間はここで弾かれるので、
+ *      チャットを使っているだけでは追加のリクエストは出ない。
+ *      判定間隔で刻むと 4 リクエスト/分になるが、半減期で刻めば `1d` なら 12 時間に
+ *      1 本、`30m` なら 15 分に 1 本(院内の多人数配備では無視できない — ken 2026-09-05)。
+ *   2. 呼ばれるのが `noteInteraction()` からだけ = 人が操作した瞬間。
+ *      **無操作なら 1 本も出ない** — 「ポーリングでは延命しない」の要はここで守られる。
+ *
+ * **アイドル判定のタイマからは呼ばない。** タイマの tick で出すと、操作から最大
+ * 半減期ぶん遅れて再発行が走り、サーバの期限が FE のアイドル期限を**追い越す**。
+ * すると FE がログイン画面へ逃がしても `/auth` がまだ生きているセッションを見て
+ * アプリへ戻してしまい、前の人の画面が復活する(E2E で実測: 操作 t=1.6s →
+ * tick で延命 t=26.2s → FE 追い出し t=71.2s → `/auth` が `/` へ戻す。2026-09-05)。
+ * 操作した瞬間に出せば `lastActivitySentAt <= lastInteractionAt` が常に成り立ち、
+ * サーバのセッションは必ず FE の期限**以前**に死ぬ。
+ */
+const sendKeepalive = () => {
+	if (!idleTimeoutSeconds) {
+		return;
+	}
+	// lastActivitySentAt === 0 = このタブではまだ 1 本も運べていない
+	// (開き直した直後など。手元の cookie が既に半分を過ぎている可能性があるので出す)
+	if (Date.now() - lastActivitySentAt < (idleTimeoutSeconds / 2) * 1000) {
+		return;
+	}
+	void apiFetch(`${WEBUI_API_BASE_URL}/auths/`, {
+		method: 'GET',
+		headers: { Accept: 'application/json' }
+	}).catch(() => {
+		// 不達・失効の面倒は apiFetch 側(B2/B3)が見る
+	});
+};
 
 export const stopIdleWatch = () => {
+	idleTimeoutSeconds = null;
 	if (idleTimer) {
 		clearInterval(idleTimer);
 		idleTimer = null;
@@ -191,6 +246,7 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 
 	// 起点はこの瞬間(ページ読み込み自体が人の操作)
 	lastInteractionAt = Date.now();
+	idleTimeoutSeconds = timeoutSeconds;
 
 	const check = () => {
 		if (sessionExpired) {
