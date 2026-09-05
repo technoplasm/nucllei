@@ -313,3 +313,19 @@ def test_non_ascii_token_warns_at_startup(monkeypatch, tmp_path, capsys):
     assert mod.TOKEN_IS_ASCII is True
     mod._log_auth_state()
     assert "WARNING" not in capsys.readouterr().out
+
+
+def test_unknown_path_with_token_is_404(monkeypatch, tmp_path):
+    """認証を通ると routing に落ちて 404。
+
+    配備側の監査 (llens の `scripts/preflight/audit.sh`) が **positive control** に使う:
+    トークン無しで 401 だけでは「全部落ちている」と区別できないため、同じ存在しない
+    パスにトークンを付けて 404 が返ることで「トークンが受理された」ことまで示す。
+    副作用のあるパス (`/exec` 等) を叩かずに両方向を取れる形なので、**契約として維持する**
+    (`sandbox/README.md` セキュリティモデル節に明記)。
+    """
+    c = _client(monkeypatch, tmp_path)
+    assert c.get("/nope").status_code == 401
+    assert (
+        c.get("/nope", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 404
+    )
