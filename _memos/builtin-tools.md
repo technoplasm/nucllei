@@ -385,29 +385,36 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 - **同名関数の衝突に注意**(#18-3 の教訓は今も生きる)。この移設に伴い、衝突源だった
   `dev/tools/sandbox.py`(手動登録用の古いコピー)を削除した
 
-## 改訂(2026-09-04、#132)— sandbox API に共有トークン、ゲートは URL ∧ TOKEN
+## 改訂(2026-09-04 / 2026-09-05、#132)— sandbox API の共有トークンは opt-in、ゲートは URL のみ
 
 sandbox の HTTP API は**無認証**で、body に書いた `user_id` を無検証で信じていた
 (到達 = 任意ユーザーとしてのコード実行・他ユーザー workspace 破棄)。#114 で sandbox が
-nucllei の出荷物になり「素の nucllei を配る相手にも届く」ようになったので塞いだ。
-設計の単一情報源は `sandbox/README.md`「セキュリティモデル」。ここは builtin 側の帰結だけ。
+nucllei の出荷物になり「素の nucllei を配る相手にも届く」ようになったので共有トークンを
+入れた。設計の単一情報源は `sandbox/README.md`「セキュリティモデル」。ここは builtin 側の
+帰結だけ。
+
+**2026-09-05 に fail-closed → opt-in へ変更(ken 判断)**。当初は「未設定なら sandbox は
+起動しない / tool も登録しない」だったが、「キーが無ければ元のまま」= トークンを渡して
+いない配備を壊さないことを優先する方針に変えた。トレードオフの事実として、**未設定の
+配備は #132 以前と同じ無認証状態のまま**(到達できた者が任意 `user_id` を名乗れる)。
 
 - **env は両側同名 `SANDBOX_TOKEN`**(sandbox サービスと nucllei)。compose で 1 つの値を
   2 サービスに配れば済む。**valve / DB には置かない**(秘密の置き場を増やさない。llens の
   compose が `CAGE_TOKEN` を env にしているのと同じ理由)。`sandbox_url` は valve のままなので、
   valve で向き先だけ変えてもトークンは env のものが飛ぶ。
-- **登録ゲートが `SANDBOX_URL` ∧ `SANDBOX_TOKEN` の AND になった**。基準は 2026-09-03 の
-  ゲートと同じ(「一覧に生えているのに呼ぶと必ずエラー」を作らない)— トークン未設定の
-  nucllei からの呼び出しは sandbox 側で**必ず 401** になるので、URL だけの配備はまさに
-  この状態に当たる。**トークンだけあって URL が無い場合は従来通り非登録**(sandbox の
-  居ない配備)で、警告も出さない。
-- **原因が読めるログ**: 「URL はあるのに TOKEN が無い」ときだけ `sync_builtin_tools()` の
-  冒頭で `log.error`(import 時は logging 未設定の可能性があるのでフラグ
-  `_SANDBOX_TOKEN_MISSING` を立てて sync で吐く)。tool が黙って消えると配備者は原因に
-  辿り着けない — prune のログは「撤去か env ゲートか」を区別しない文言のままなので、
-  この 1 行が唯一の手掛かりになる。
-- 401 の tool エラー文は原因(両側の `SANDBOX_TOKEN` 不一致)を名指しする。**トークン値は
-  ログにもレスポンスにも出さない**。
-- 回帰: `test_builtin_sandbox.py` に「TOKEN 無しでは非登録」「`_post` が
-  `Authorization: Bearer` を必ず付ける」「401 の文言」を追加。sandbox 側は
+- **登録ゲートは `SANDBOX_URL` ただ一つ**(2026-09-04 に一度 URL ∧ TOKEN の AND にしたが
+  戻した)。ゲートの基準は 2026-09-03 と同じ「一覧に生えているのに呼ぶと必ずエラー」を
+  作らないこと — sandbox 側の認証が opt-in になった今、トークン未設定の組み合わせは
+  401 ではなく**普通に動く**ので、ゲートに入れる理由が無い。
+- **`_post` はトークンがあるときだけ `Authorization: Bearer` を付ける**(空文字で
+  `Bearer ` を送らない)。任意 URL を取りに行く `_http_get` には混ぜない。
+- **設定漏れに気付ける warning**: 「URL はあるのに TOKEN が無い」ときだけ
+  `sync_builtin_tools()` の冒頭で `log.warning`「認証なしで接続します」
+  (import 時は logging 未設定の可能性があるのでフラグ `_SANDBOX_TOKEN_MISSING` を立てて
+  sync で吐く)。tool は生えるので**エラーではなく警告**の水準。sandbox 側も起動ログに
+  同種の warning を 1 行出す。
+- 401 の tool エラー文は原因(両側の `SANDBOX_TOKEN` 不一致 — 片側だけ未設定を含む)を
+  名指しする。**トークン値はログにもレスポンスにも出さない**。
+- 回帰: `test_builtin_sandbox.py` に「TOKEN 無しでも登録される」「TOKEN があれば `_post` が
+  `Authorization: Bearer` を付け、無ければヘッダ自体を付けない」「401 の文言」。sandbox 側は
   `sandbox/tests/test_auth.py`(`uv run task sandbox-unit` = CI)。

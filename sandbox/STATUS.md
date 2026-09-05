@@ -32,14 +32,18 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       ④ DELETE /workspace mechanism (外部 GC 用、trash rename) /
       C9 ext4 brick 耐性 (破損 .img を退避 → fresh、atomic 生成) / C5 枯渇 503。
       exec/exec_cell 回帰なし・live_session ガード・C9 復旧を実機検証済
-- [x] **API の共有トークン認証** (#132、2026-09-04)。`Authorization: Bearer <SANDBOX_TOKEN>`
-      を middleware で全パスに要求 (免除は `/healthz` `/metrics` のみ)。**未設定なら起動
-      拒否**の fail-closed、比較は `hmac.compare_digest`。呼び出し元 (nucllei) 側は
-      `SANDBOX_TOKEN` 未設定だと `builtin_sandbox` を登録しない。回帰は
-      `sandbox/tests/test_auth.py` + `nucllei/test/.../test_builtin_sandbox.py`。
-      設計は README「セキュリティモデル」。**配備側 (llens) の追従は向こう持ち** =
-      compose の 2 サービス (sandbox / nucllei) に同じ `SANDBOX_TOKEN` を渡す + 外部 GC
-      スクリプトにヘッダを足す。Prometheus と healthcheck は免除なので変更不要
+- [x] **API の共有トークン認証 (opt-in)** (#132。2026-09-04 実装、2026-09-05 に
+      fail-closed → opt-in へ変更)。`SANDBOX_TOKEN` を**設定すれば** middleware が全パスで
+      `Authorization: Bearer <SANDBOX_TOKEN>` を要求する (免除は `/healthz` `/metrics`
+      のみ、比較は `hmac.compare_digest`)。**未設定なら認証は掛からず従来どおり動く** —
+      起動は拒否せず warning を 1 行出すだけ (「キーが無ければ元のまま」、ken 判断)。
+      呼び出し元 (nucllei) 側の登録ゲートは `SANDBOX_URL` のみで、トークンがあるときだけ
+      ヘッダを付ける。回帰は `sandbox/tests/test_auth.py` +
+      `nucllei/test/.../test_builtin_sandbox.py`。設計は README「セキュリティモデル」。
+      **配備側 (llens) の追従は向こう持ち** = compose の 2 サービス (sandbox / nucllei) に
+      同じ `SANDBOX_TOKEN` を渡す + 外部 GC スクリプトにヘッダを足す。Prometheus と
+      healthcheck は免除なので変更不要。**トークンを渡さない配備は無認証のまま**なので、
+      渡すこと自体が配備側の作業として残る
 
 ## 残課題
 

@@ -38,9 +38,9 @@ def sandbox_env(url, token="test-token"):
     やり直す。reload は module オブジェクトを作り直さないので、他モジュールが
     掴んだ `is_builtin_tool_id` 等の関数も新しい BUILTIN_TOOLS を見る。
 
-    token の既定を入れてあるのは、#132 で**登録条件が URL と token の AND になった**ため
-    (URL だけの配備は全呼び出しが 401 になるので生やさない)。token 側だけを試す
-    テストは明示的に渡す。
+    **登録ゲートは `SANDBOX_URL` ただ一つ** — token (#132) は opt-in なので条件に
+    入らない (2026-09-05)。既定で token を入れてあるのは「認証ありの配備」を既定の
+    前提にしておくためで、token だけを動かすテストは明示的に渡す。
     """
     import nucllei.builtin_tools as pkg
     from nucllei.builtin_tools import sandbox as mod
@@ -128,24 +128,26 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
             pkg.sync_builtin_tools()
             assert self.Tools.get_tool_by_id("builtin_sandbox") is None
 
-    def test_not_registered_without_token(self):
-        """#132: URL だけあってトークンが無い配備では生やさない。
+    def test_registered_without_token(self):
+        """#132 (2026-09-05 改訂): トークン無しでも URL があれば生やす。
 
-        sandbox は共有トークン必須なので、URL だけの状態で登録すると「一覧に見えて
-        いるのに呼ぶと必ず 401」になる — env ゲートが避けたい状態そのもの。
+        sandbox 側の認証は opt-in で、トークン未設定の sandbox は認証なしで応じる
+        — 「一覧に見えているのに呼ぶと必ず 401」にはならないので、ゲートに入れない。
+        設定漏れに気付けるよう sync 時に warning だけ出す。
         """
         with sandbox_env("http://sandbox.test:8000", token=None) as pkg:
-            assert "builtin_sandbox" not in pkg.BUILTIN_TOOLS
-            assert pkg._SANDBOX_TOKEN_MISSING is True  # sync 時に log.error を出す印
+            assert "builtin_sandbox" in pkg.BUILTIN_TOOLS
+            assert pkg._SANDBOX_TOKEN_MISSING is True  # sync 時に warning を出す印
             pkg.sync_builtin_tools()
-            assert self.Tools.get_tool_by_id("builtin_sandbox") is None
-            assert self.Tools.get_tool_by_id("builtin_history") is not None
+            assert self.Tools.get_tool_by_id("builtin_sandbox") is not None
 
-        # トークンだけあって URL が無いのは「sandbox の居ない配備」— 従来通り非登録で、
+        # URL が無いのは「sandbox の居ない配備」— 非登録。トークンの有無に依らず
         # 設定漏れの警告も出さない
         with sandbox_env(None, token="test-token") as pkg:
             assert "builtin_sandbox" not in pkg.BUILTIN_TOOLS
             assert pkg._SANDBOX_TOKEN_MISSING is False
+            pkg.sync_builtin_tools()
+            assert self.Tools.get_tool_by_id("builtin_sandbox") is None
 
     def test_reserved_prefix_blocks_user_created_id(self):
         """env 未設定で未登録でも、`builtin_` prefix の予約はユーザー作成を拒む。"""
@@ -328,10 +330,11 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert tool.calls == []
 
     def test_post_sends_bearer_token(self):
-        """#132: 全リクエストに Authorization: Bearer が付く(唯一の HTTP 出口 = _post)。
+        """#132: トークンがあれば Authorization: Bearer が付く(唯一の HTTP 出口 = _post)。
 
         他のテストは _post ごと差し替えるので、ここだけ本物の _post を通し
-        aiohttp を偽物にしてヘッダを見る。
+        aiohttp を偽物にしてヘッダを見る。トークン未設定ならヘッダ自体が無いことも
+        併せて固定する (opt-in、2026-09-05)。
         """
         with sandbox_env("http://sandbox.test:8000", token="tok-abc"):
             from nucllei.builtin_tools.sandbox import Tools
@@ -381,12 +384,28 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             assert seen["headers"] == {"Authorization": "Bearer tok-abc"}
             assert seen["url"] == "http://sandbox.test:8000/files/list"
 
+        # トークン未設定なら header 自体を付けない (空の `Bearer ` を送らない)
+        with sandbox_env("http://sandbox.test:8000", token=None):
+            import nucllei.builtin_tools.sandbox as mod
+
+            tool = mod.Tools()
+            tool.valves.sandbox_url = "http://sandbox.test:8000"
+            real = mod.aiohttp
+            mod.aiohttp = fake_aiohttp
+            try:
+                asyncio.run(tool._post("/files/list", {"user_id": "u1"}, 30))
+            finally:
+                mod.aiohttp = real
+
+            assert seen["headers"] == {}
+
     def test_401_error_names_the_token_mismatch(self):
         """401 は原因(両側の SANDBOX_TOKEN 不一致)を言う。トークン値は出さない。"""
         tool = _sandbox(
             error=RuntimeError(
                 "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
-                "SANDBOX_TOKEN が一致していません (配備の env を確認)"
+                "SANDBOX_TOKEN が一致していません "
+                "(片側だけ未設定の場合も含む。配備の env を確認)"
             )
         )
         out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))

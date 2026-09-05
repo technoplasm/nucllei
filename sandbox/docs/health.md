@@ -57,7 +57,8 @@ Prometheus text 形式を**依存を足さず手書き**(`PlainTextResponse`)。
 | `sandbox_sessions_active` | 生存 kernel session 数 |
 | `sandbox_disk_used_bytes` / `_total_bytes` | `statvfs(/workspaces)`。**`/` には nucllei-db(Postgres)も同居**するため disk 監視は必須(満杯で DB ごと落ちる) |
 
-- **`/metrics` は認証免除のまま**(#132 で他の全 endpoint に共有トークンを掛けた後も):
+- **`/metrics` は認証免除のまま**(#132 の共有トークンを設定した配備でも。未設定の配備は
+  そもそも全 endpoint が無認証):
   返すのは label なしの集約 gauge だけで user_id を含まず厳密に低感度。認証すると配備側の
   Prometheus にトークン配布(`bearer_token` 設定)が要り、監視のために秘密を 1 箇所増やす。
   免除は `main.py` の `PUBLIC_PATHS`(`/healthz` と 2 つだけ)。
@@ -76,8 +77,9 @@ Prometheus text 形式を**依存を足さず手書き**(`PlainTextResponse`)。
   「存在する user との set 差分 = 削除済 user」のみ対象
   (inactive は復帰しうるので対象外)。**0 件/閾値未満で abort**(DB 不達での全削除防止)、
   `.img` mtime の min-age を AND(時刻**単独**判定はしない)。dry-run 既定 → `--apply` で内部 DELETE を呼ぶ。
-  JSONL 監査ログ。**fs は直接触らない**。**#132 以降、内部 DELETE の呼び出しには
-  `Authorization: Bearer <SANDBOX_TOKEN>` が要る**(sandbox と同じ値を配備側で渡す)。
+  JSONL 監査ログ。**fs は直接触らない**。**#132 の `SANDBOX_TOKEN` を設定した配備では、
+  内部 DELETE の呼び出しに `Authorization: Bearer <SANDBOX_TOKEN>` が要る**
+  (sandbox と同じ値を配備側で渡す。認証は opt-in なので未設定の配備ではヘッダ不要)。
 - app は nucllei の DB を一切知らない(user_id を opaque token として受けるだけ)。
   privileged コンテナに DB 資格情報を持たせない。
 

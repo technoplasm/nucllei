@@ -111,7 +111,8 @@ _USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # この API は「到達した者が body に書いた user_id をそのまま名乗る」設計なので、到達 =
 # 任意ユーザーとしてのコード実行・他ユーザー workspace の破棄と同義。ユーザー間の隔離
 # (README「セキュリティモデル」) は user_id が正しいことを前提にしており、その前提を
-# 担保するものが従来は「届く経路が狭い」以外に無かった。
+# 担保するものが「届く経路が狭い」以外に無かった (= 下の認証を有効にしない配備は
+# 今もその状態のまま)。
 #
 # 呼び出し元 (nucllei backend) と `SANDBOX_TOKEN` を env で持ち合い、
 # `Authorization: Bearer <token>` で照合する。トークンが保証するのは「呼び出し元が
@@ -120,14 +121,24 @@ _USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # 採らない。nucllei が落ちれば sandbox も同時に落ちる一体の出荷物であり、2 段目の
 # 検証は運用コストに見合わない)。
 #
-# **fail-closed**: 未設定なら起動を拒否する (`_startup` で RuntimeError → uvicorn が
-# 終了 → コンテナが crash-loop するので docker ps / logs で必ず気付く)。「未設定なら
-# 素通し」は穴が残るので採らない。下の middleware も TOKEN 空を不一致として扱うので、
-# 起動チェックを迂回して app を立てても開かない。
+# **opt-in** (2026-09-05 に fail-closed から変更、ken 判断): `SANDBOX_TOKEN` を
+# **設定すれば認証が有効になり**、未設定なら**認証なしで従来どおり動く**。
+# 「キーが無ければ元のまま」= 既存の配備・手元の docker run を token 設定なしで
+# 壊さないことを優先した判断。
+#   - トレードオフ (事実): 未設定の配備は #132 以前と同じ状態のまま = API に到達できた
+#     者が body の `user_id` を名乗るだけで任意ユーザーとしてのコード実行・他ユーザー
+#     workspace の破棄までできる。「設定し忘れ」は静かに無防備になる。
+#   - そのため**未設定なら起動時に warning を 1 行出す** (`_startup`)。落としはしないが、
+#     ログを見れば無認証で上がっていることが分かる状態にはしておく。
 TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 
-# 認証を免除するパス。**既定は要認証** (パス単位の allow ではなく deny がデフォルト) —
-# endpoint を足したときに「書き忘れたら開く」ではなく「書き忘れたら閉じる」側に倒す。
+# **トークンが空かどうかの判定はここ 1 箇所だけ**。middleware の素通し判断も
+# `_token_ok` の防御もこのフラグを見る (同じ「空」の意味を 2 箇所に持たせない)。
+AUTH_ENABLED = bool(TOKEN)
+
+# 認証が有効なときに免除するパス。**認証有効なら既定は要認証** (パス単位の allow では
+# なく deny がデフォルト) — endpoint を足したときに「書き忘れたら開く」ではなく
+# 「書き忘れたら閉じる」側に倒す。
 #   - `/healthz`: 配備側 compose の healthcheck が叩く。token を持たせると healthcheck の
 #     コマンド行に平文で載り (`docker inspect` に出る)、値がずれただけで unhealthy になる。
 #     返すのは真偽値 3 つだけでユーザーデータを含まない。
@@ -140,9 +151,12 @@ PUBLIC_PATHS = frozenset({"/healthz", "/metrics"})
 def _token_ok(authorization: str) -> bool:
     """`Authorization: Bearer <token>` を定数時間で照合する。
 
-    TOKEN 未設定 (空) は常に不一致 — 空トークンで素通しになる経路を作らない。
+    **認証が有効なときだけ意味を持つ関数**。認証が無効 (TOKEN 未設定) の状態では
+    middleware がここに来る前に素通しするので呼ばれないが、呼ばれても「一致」を
+    返さない — 空トークン (`Authorization: Bearer `) が正解になる経路を作らないため。
+    空判定そのものは `AUTH_ENABLED` の 1 箇所だけが持つ。
     """
-    if not TOKEN:
+    if not AUTH_ENABLED:
         return False
     scheme, _, presented = authorization.partition(" ")
     if scheme.lower() != "bearer":
@@ -151,8 +165,29 @@ def _token_ok(authorization: str) -> bool:
     return hmac.compare_digest(presented.strip().encode(), TOKEN.encode())
 
 
+def _log_auth_state() -> None:
+    """起動時に認証の on/off をログ 1 行で残す (`_startup` から呼ぶ)。
+
+    opt-in (#132、2026-09-05 改訂) では未設定でも起動するので、**黙って無防備**に
+    ならないよう状態だけは必ずログに出す。無認証だと何ができてしまうかの説明は
+    ログに書かない — README「セキュリティモデル」が単一情報源。
+    """
+    if AUTH_ENABLED:
+        print("[sandbox] API 認証: 有効 (SANDBOX_TOKEN)", flush=True)
+    else:
+        print(
+            "[sandbox] WARNING: API 認証は無効です (SANDBOX_TOKEN 未設定)。"
+            "設定すれば全 endpoint で有効になります"
+            " — 影響は sandbox/README.md セキュリティモデル",
+            flush=True,
+        )
+
+
 class _RequireToken:
-    """全リクエストにトークンを要求する ASGI middleware (免除は PUBLIC_PATHS)。
+    """認証が有効なとき、全リクエストにトークンを要求する ASGI middleware。
+
+    **`AUTH_ENABLED` が False (= `SANDBOX_TOKEN` 未設定) なら丸ごと素通し** —
+    「キーが無ければ元のまま」(2026-09-05)。有効なときの免除は PUBLIC_PATHS のみ。
 
     **素の ASGI で書く** (`@app.middleware("http")` = BaseHTTPMiddleware を使わない):
     あちらは下流に渡す `receive` を差し替えるため、`/exec` `/exec_cell` が lock 待ちの
@@ -160,8 +195,8 @@ class _RequireToken:
     巻き込みうる。ここは scope の header を見て通すか 401 を返すかだけなので、
     receive/send は素通しでよい。
 
-    **守備範囲は HTTP のみ**: 未知パスも含めて既定 deny なので endpoint を足しても
-    書き忘れで開かないが、それは HTTP の話。この API に WebSocket は無い (2026-09-04
+    **守備範囲は HTTP のみ**: 認証が有効なら未知パスも含めて既定 deny なので endpoint を
+    足しても書き忘れで開かないが、それは HTTP の話。この API に WebSocket は無い (2026-09-04
     時点で `@app.websocket` はゼロ) — 足すときはここも通るように直すこと。
     """
 
@@ -169,7 +204,11 @@ class _RequireToken:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"] not in PUBLIC_PATHS:
+        if (
+            AUTH_ENABLED
+            and scope["type"] == "http"
+            and scope["path"] not in PUBLIC_PATHS
+        ):
             auth = Headers(scope=scope).get("authorization", "")
             if not _token_ok(auth):
                 # トークン値はログにもレスポンスにも出さない
@@ -685,16 +724,7 @@ class CellRequest(BaseModel):
 
 @app.on_event("startup")
 async def _startup():
-    # fail-closed (#132): トークンが無い状態では上げない。ここで落とすと uvicorn は
-    # "Application startup failed. Exiting." で終了し、コンテナは restart policy 下で
-    # crash-loop する = 設定漏れが確実に可視化される (無認証で上がって気付かないより良い)。
-    if not TOKEN:
-        raise RuntimeError(
-            "SANDBOX_TOKEN が未設定です。この API は到達した者が任意の user_id を"
-            "名乗れるため、共有トークン無しでは起動しません (sandbox/README.md"
-            " セキュリティモデル)。呼び出し元の nucllei にも**同じ値**を"
-            " SANDBOX_TOKEN として渡してください (生成例: openssl rand -hex 32)"
-        )
+    _log_auth_state()
     _ensure_loop_nodes()
     if not _loop_available():
         print(

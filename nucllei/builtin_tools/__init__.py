@@ -59,13 +59,13 @@ BUILTIN_TOOLS = {
 # 再設定は運用の手間だが、専用の無効化状態を DB に持つより素直と判断した
 # (2026-09-03)。
 #
-# **共有トークン(SANDBOX_TOKEN)も条件に含める**(#132、2026-09-04): sandbox API は
-# 全リクエストに `Authorization: Bearer` を要求し、未設定側からの呼び出しは必ず 401 に
-# なる。URL だけ設定された配備で登録すると、まさにこのゲートが避けたい「一覧に生えて
-# いるのに呼ぶと必ずエラー」になる。**トークンだけ設定して URL が無い場合は従来通り
-# 非登録**(sandbox の居ない配備)。原因が読めるよう、URL はあるのにトークンが無い
-# ケースだけ sync 時に log.error を出す(下の sync_builtin_tools)。
-if sandbox.SANDBOX_URL and sandbox.SANDBOX_TOKEN:
+# **共有トークン(SANDBOX_TOKEN)はゲートに含めない**(#132、2026-09-05 に
+# 2026-09-04 の AND ゲートから戻した): sandbox 側の認証が opt-in
+# (トークン未設定なら認証なしで動く)になったため、「URL はあるがトークンが無い」配備は
+# 401 で必ず失敗する状態ではなく**普通に動く状態**になった。ゲートは向き先 env
+# (`SANDBOX_URL`)ただ一つに戻す。設定漏れに気付けるよう、URL はあるのにトークンが
+# 無いケースだけ sync 時に warning を出す(下の sync_builtin_tools)。
+if sandbox.SANDBOX_URL:
     BUILTIN_TOOLS["builtin_sandbox"] = {
         "module": sandbox,
         "name": "Sandbox",
@@ -77,9 +77,10 @@ if sandbox.SANDBOX_URL and sandbox.SANDBOX_TOKEN:
         ),
     }
 
-# 「URL はあるのにトークンが無い」= 配備の設定漏れ。import 時点ではまだ logging の設定が
-# 済んでいない可能性があるので、フラグだけ立てて sync_builtin_tools() で吐く(起動ログに
-# 必ず載る)。tool が黙って消えると原因が読めないため、これが唯一の手掛かりになる。
+# 「URL はあるのにトークンが無い」= sandbox に**認証なしで**繋ぐ配備。動きはするが、
+# 意図した状態かは配備者にしか分からないので warning を 1 行出す。import 時点ではまだ
+# logging の設定が済んでいない可能性があるので、フラグだけ立てて sync_builtin_tools()
+# で吐く(起動ログに必ず載る)。
 _SANDBOX_TOKEN_MISSING = bool(sandbox.SANDBOX_URL) and not sandbox.SANDBOX_TOKEN
 
 
@@ -107,16 +108,13 @@ def sync_builtin_tools() -> None:
     - 未定義: `builtin_` prefix かつ BUILTIN_TOOLS に居ない行は DB から削除する。
       定義の真実源は常に repo なので orphan を残さない(builtin を削除したら次回起動で
       DB からも消える)。**env ゲートが閉じた builtin もここに落ちる** —
-      builtin_sandbox は SANDBOX_URL / SANDBOX_TOKEN のどちらかを外して再起動すると
-      同じ経路で消える。
+      builtin_sandbox は SANDBOX_URL を外して再起動すると同じ経路で消える。
     """
     if _SANDBOX_TOKEN_MISSING:
-        log.error(
-            "builtin_sandbox を登録しません: SANDBOX_URL は設定されていますが "
-            "SANDBOX_TOKEN が未設定です。sandbox API は共有トークン必須で "
-            "(sandbox 側もトークン無しでは起動しません)、このままでは全呼び出しが "
-            "401 になります。sandbox コンテナと同じ値を nucllei にも SANDBOX_TOKEN "
-            "として渡してください"
+        log.warning(
+            "builtin_sandbox は認証なしで sandbox に接続します: SANDBOX_URL は "
+            "設定されていますが SANDBOX_TOKEN が未設定です。sandbox コンテナと同じ値を "
+            "nucllei にも SANDBOX_TOKEN として渡すと共有トークン認証が有効になります"
         )
 
     # 循環 import 回避(utils.tools → utils.plugin → builtin_tools)のため遅延 import

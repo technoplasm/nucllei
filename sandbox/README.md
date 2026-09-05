@@ -94,29 +94,44 @@ nsjail jail
   上限バイトまで読んで以降は捨てる (メモリ膨張防止)。
 - **監査ログ**: sandbox 側では取らない。tool の入出力 (= 実行コードと結果) は
   chat 履歴に完全に残り、そちらを保全する運用のため二重化しない。
-- **API 認証 = 共有トークン** (#132、2026-09-04 に導入。それ以前は無認証だった):
-  全 endpoint が `Authorization: Bearer <SANDBOX_TOKEN>` を要求する。この API は
-  「到達した者が body の `user_id` をそのまま名乗る」設計なので、**到達 = 任意ユーザーと
-  してのコード実行・他ユーザー workspace の破棄**と同義だった。compose 内 (`sandbox:8000`)
-  に加え host `127.0.0.1:13302` へ公開する (フォークした UI をホスト側で動かして叩くため)
-  以上、ホスト上のローカルプロセスから無認証で叩ける状態は塞ぐ。
+- **API 認証 = 共有トークン、opt-in** (#132。2026-09-04 に導入、2026-09-05 に
+  fail-closed から opt-in へ変更):
+  - **`SANDBOX_TOKEN` を設定すれば認証が有効**になり、`/healthz` `/metrics` 以外の全
+    endpoint が `Authorization: Bearer <SANDBOX_TOKEN>` を要求する。
+  - **未設定なら認証は掛からず、従来どおり無認証で動く**。「キーが無ければ元のまま」
+    (ken 判断) — トークンを渡していない既存の配備・手元の `docker run` を壊さないことを
+    優先した。起動を拒否したり 401 を返したりはしない。
+  - **未設定時に何が起きるか** (トレードオフの事実。#132 以前と同じ状態):
+    この API は「到達した者が body の `user_id` をそのまま名乗る」設計なので、
+    **到達 = 任意ユーザーとしてのコード実行・任意ユーザー workspace の読み書き・
+    `DELETE /workspace/{user_id}` による他ユーザー workspace の破棄**と同義になる。
+    compose 内 (`sandbox:8000`) に加え host `127.0.0.1:13302` へ公開する
+    (フォークした UI をホスト側で動かして叩くため) ので、ホスト上のローカルプロセスは
+    無認証で叩ける。**実配備では設定すること。**
+  - **黙って無防備にはしない**: 未設定で起動したときは起動ログに warning を 1 行出す
+    (`[sandbox] WARNING: API 認証は無効です (SANDBOX_TOKEN 未設定)…`)。呼び出し元の
+    nucllei 側も、`SANDBOX_URL` はあるのに `SANDBOX_TOKEN` が無い配備で同種の warning を
+    出す (`_memos/builtin-tools.md`)。ログには状態だけを書き、上の「何が起きるか」は
+    この節が単一情報源。
   - **env は両側で同名 `SANDBOX_TOKEN`** (sandbox サービスと呼び出し元の nucllei)。
     compose では 1 つの値を 2 サービスに配れば済み、「どちらの名前だったか」を
     考えなくてよい。値の作り方は任意の高エントロピー文字列 (例: `openssl rand -hex 32`)。
-  - **fail-closed**: 未設定なら**サービスが起動しない** (startup で RuntimeError →
-    uvicorn 終了 → コンテナ crash-loop)。「未設定なら素通し」は入れた意味が消えるので
-    採らない。middleware も TOKEN 空を不一致として 401 にする。
-  - **既定 deny**: 認証は middleware で全パスに掛かり、免除は `PUBLIC_PATHS` に書いた
-    `/healthz` と `/metrics` だけ (endpoint を足したときに開く側へ倒れない)。この 2 つを
-    免除するのは、配備側の healthcheck / Prometheus が叩く口で、返すのが真偽値と
-    label なし集約値だけ = user データを含まないため (docs/health.md ②)。
-  - **保証するのは「呼び出し元が nucllei であること」だけ**。`user_id` の正しさは
-    依然として呼び出し元任せ = **nucllei を信頼境界とする**のが本 fork の設計判断。
+    **片側だけ設定すると壊れる**: sandbox 側だけ設定 → nucllei からの呼び出しが全て
+    401、nucllei 側だけ設定 → 送ったヘッダは無視されて素通し (認証されていない)。
+  - **有効なときは既定 deny**: 認証は middleware で全パスに掛かり、免除は `PUBLIC_PATHS`
+    に書いた `/healthz` と `/metrics` だけ (endpoint を足したときに開く側へ倒れない)。
+    この 2 つを免除するのは、配備側の healthcheck / Prometheus が叩く口で、返すのが
+    真偽値と label なし集約値だけ = user データを含まないため (docs/health.md ②)。
+  - 「トークンが空かどうか」の判定は `main.py` の `AUTH_ENABLED` 1 箇所だけが持つ。
+    middleware の素通し判断も `_token_ok` の防御も同じフラグを見る (認証が有効なとき、
+    空トークン `Bearer ` が正解になる経路は無い)。
+  - **有効なときに保証するのは「呼び出し元が nucllei であること」だけ**。`user_id` の
+    正しさは依然として呼び出し元任せ = **nucllei を信頼境界とする**のが本 fork の設計判断。
     署名付き user_id 等の強い紐付けは採らない (nucllei と sandbox は同じ tag で出る
     一体の出荷物であり、2 段目の検証は運用コストに見合わない)。
   - トークン値はログにもレスポンスにも出さない。比較は `hmac.compare_digest` (定数時間)。
   - 配備側の外部 GC スクリプト (`DELETE /workspace/{user_id}` を呼ぶ、docs/health.md ④)
-    も同じヘッダが要る。
+    も、トークンを設定した配備では同じヘッダが要る。
   - ホスト公開ポート採番は配備層 (llens の DEPLOYMENT.md のサービス表) が単一情報源で、
     この repo は番号を決めない。
 
@@ -160,8 +175,9 @@ nsjail jail
 
 ## API (sandbox サービス、port 8000)
 
-**`/healthz` と `/metrics` 以外は全て `Authorization: Bearer <SANDBOX_TOKEN>` が要る**
-(無い/違う → 401。上の「セキュリティモデル」参照)。
+**`SANDBOX_TOKEN` を設定した配備では、`/healthz` と `/metrics` 以外の全 endpoint に
+`Authorization: Bearer <SANDBOX_TOKEN>` が要る** (無い/違う → 401)。未設定の配備では
+認証は掛からない (opt-in。上の「セキュリティモデル」参照)。
 
 - `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}]}`
   → `{exit_code, timed_out, duration_s, stdout, stderr, stdout_truncated, stderr_truncated,
@@ -210,7 +226,7 @@ nsjail jail
 
 | env | 既定 | 意味 |
 |---|---|---|
-| `SANDBOX_TOKEN` | **なし (必須)** | API の共有トークン。**未設定なら起動しない**。呼び出し元の nucllei にも同じ値を同じ名前で渡す |
+| `SANDBOX_TOKEN` | なし (**未設定 = 認証なし**) | API の共有トークン。設定すると全 endpoint (`/healthz` `/metrics` を除く) が Bearer 認証必須になる。未設定なら従来どおり無認証で動く (起動時に warning)。**配備では設定すること** — 呼び出し元の nucllei にも同じ値を同じ名前で渡す |
 | `SANDBOX_TIMEOUT_DEFAULT_S` | 120 | wall clock 既定 (tool から実行ごとに指定可) |
 | `SANDBOX_TIMEOUT_MAX_S` | 600 | wall clock 上限 (指定値はこれで clamp) |
 | `SANDBOX_MEM_MB` | 4096 | rlimit_as |
@@ -317,13 +333,15 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 
 - `sandbox/tests/test_session_manager.py` — kernel 起動を偽物にして、SessionManager の
   リセット通知 (TTL 満了 / 追い出し / drop の非二重) と lock 待ち中の client 切断検知。
-- `sandbox/tests/test_auth.py` — 共有トークン認証 (#132)。ヘッダ無し / 誤トークン /
-  別スキーム / 未知パスが 401、正しい Bearer が通る、`/healthz` `/metrics` は公開、
-  トークン未設定なら startup が RuntimeError (fail-closed) を固定する。
+- `sandbox/tests/test_auth.py` — 共有トークン認証 (#132)。トークンを設定したとき
+  ヘッダ無し / 誤トークン / 別スキーム / 未知パスが 401、正しい Bearer が通る、
+  `/healthz` `/metrics` は公開、そして**トークン未設定なら認証が掛からず素通しする**
+  (opt-in) ことを固定する。
 
 なお `test_isolation.py` の HTTP クライアントは、トークンを**コンテナ自身の env**
 (`SANDBOX_TOKEN`) から取る — 配備側がサービスに渡した値が常に正解なので、テストに
-値を持たせない。
+値を持たせない (未設定のコンテナでは中身が空になるが、その場合は service 側も認証を
+掛けないので通る)。
 
 ## イメージと配布
 

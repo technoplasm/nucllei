@@ -1,11 +1,12 @@
 """sandbox API の共有トークン認証の回帰 (#132)。
 
-固定するのは 3 点:
+認証は **opt-in** (2026-09-05 に fail-closed から変更)。固定するのは 3 点:
 
-1. **既定は要認証** — ヘッダ無し / 誤トークン / 別スキームは 401。正しい Bearer だけ通る。
+1. **トークンを設定したら要認証** — ヘッダ無し / 誤トークン / 別スキーム / 未知パスは
+   401。正しい Bearer だけ通る。
 2. **公開パスは `/healthz` と `/metrics` だけ** (compose の healthcheck と Prometheus)。
-3. **fail-closed** — `SANDBOX_TOKEN` 未設定なら startup が RuntimeError で落ちる
-   (= uvicorn が終了しコンテナが crash-loop する)。未設定で素通しする経路は無い。
+3. **トークン未設定なら認証は掛からない** — 従来どおり素通しし、startup も落ちない
+   (警告ログだけ出る)。「キーが無ければ元のまま」。
 
 `test_session_manager.py` と同じく main.py を直接 import する (コンテナ不要)。
 TestClient は context manager にしない — lifespan (= startup) を走らせないため。
@@ -14,12 +15,10 @@ TestClient は context manager にしない — lifespan (= startup) を走ら�
     uv run task sandbox-unit
 """
 
-import asyncio
 import importlib.util
 import pathlib
 import sys
 
-import pytest
 from fastapi.testclient import TestClient
 
 _MAIN = pathlib.Path(__file__).resolve().parents[1] / "app" / "main.py"
@@ -130,21 +129,46 @@ def test_healthz_and_metrics_are_public(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# fail-closed
+# opt-in (トークン未設定 = 認証なしで従来どおり)
 # ---------------------------------------------------------------------------
-def test_startup_refuses_without_token(monkeypatch, tmp_path):
+def test_unset_token_disables_auth(monkeypatch, tmp_path):
+    """未設定なら認証は掛からない — ヘッダ無しでも通る (「キーが無ければ元のまま」)。"""
     mod = _load_main(monkeypatch, tmp_path, token=None)
-    with pytest.raises(RuntimeError, match="SANDBOX_TOKEN"):
-        asyncio.new_event_loop().run_until_complete(mod._startup())
+    assert mod.AUTH_ENABLED is False
+    c = TestClient(mod.app)
+    r = c.post("/files/list", json={"user_id": "u1", "path": "."})
+    assert r.status_code == 200
+    assert r.json() == {"entries": []}
+    # 未知パスも middleware では止めない (routing に落ちて 404)
+    assert c.get("/nope").status_code == 404
 
 
-def test_unset_token_never_lets_a_request_through(monkeypatch, tmp_path):
-    """起動チェックを迂回して app を立てても、空 token での素通しは無い。"""
-    c = _client(monkeypatch, tmp_path, token=None)
-    assert c.post("/files/list", json={"user_id": "u1"}).status_code == 401
+def test_unset_token_warns_at_startup(monkeypatch, tmp_path, capsys):
+    """起動は拒否しない。ただし無認証であることが起動ログで分かる。
+
+    `_startup()` そのものは loop ノードの mknod / reaper 起動まで走るので、
+    起動ログを出す部分 (`_log_auth_state`) だけを呼ぶ。
+    """
+    mod = _load_main(monkeypatch, tmp_path, token=None)
+    mod._log_auth_state()
+    out = capsys.readouterr().out
+    assert "SANDBOX_TOKEN" in out and "WARNING" in out
+
+    mod = _load_main(monkeypatch, tmp_path)
+    mod._log_auth_state()
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_empty_bearer_is_not_a_match_when_auth_is_on(monkeypatch, tmp_path):
+    """認証が有効なら、空トークン (`Bearer `) が正解になる経路は無い。"""
+    mod = _load_main(monkeypatch, tmp_path)
+    assert mod.AUTH_ENABLED is True
+    assert mod._token_ok("Bearer ") is False
     assert (
-        c.post(
+        TestClient(mod.app)
+        .post(
             "/files/list", json={"user_id": "u1"}, headers={"Authorization": "Bearer "}
-        ).status_code
+        )
+        .status_code
         == 401
     )
