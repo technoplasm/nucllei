@@ -116,6 +116,9 @@ nsjail jail
   - **env は両側で同名 `SANDBOX_TOKEN`** (sandbox サービスと呼び出し元の nucllei)。
     compose では 1 つの値を 2 サービスに配れば済み、「どちらの名前だったか」を
     考えなくてよい。値の作り方は任意の高エントロピー文字列 (例: `openssl rand -hex 32`)。
+    **値は ASCII 限定** — HTTP ヘッダは latin-1 で解釈されるため非 ASCII を含むトークンは
+    どう送っても一致せず全要求が 401 になる (起動ログで warning を出す。推奨の
+    `openssl rand -hex 32` は常に ASCII)。
     **片側だけ設定すると壊れる**: sandbox 側だけ設定 → nucllei からの呼び出しが全て
     401、nucllei 側だけ設定 → 送ったヘッダは無視されて素通し (認証されていない)。
   - **有効なときは既定 deny**: 認証は middleware で全パスに掛かり、免除は `PUBLIC_PATHS`
@@ -226,7 +229,7 @@ nsjail jail
 
 | env | 既定 | 意味 |
 |---|---|---|
-| `SANDBOX_TOKEN` | なし (**未設定 = 認証なし**) | API の共有トークン。設定すると全 endpoint (`/healthz` `/metrics` を除く) が Bearer 認証必須になる。未設定なら従来どおり無認証で動く (起動時に warning)。**配備では設定すること** — 呼び出し元の nucllei にも同じ値を同じ名前で渡す |
+| `SANDBOX_TOKEN` | なし (**未設定 = 認証なし**) | API の共有トークン。設定すると全 endpoint (`/healthz` `/metrics` を除く) が Bearer 認証必須になる。未設定なら従来どおり無認証で動く (起動時に warning)。**値は ASCII 限定** (非 ASCII は全要求 401 になる。起動時に warning)。**配備では設定すること** — 呼び出し元の nucllei にも同じ値を同じ名前で渡す |
 | `SANDBOX_TIMEOUT_DEFAULT_S` | 120 | wall clock 既定 (tool から実行ごとに指定可) |
 | `SANDBOX_TIMEOUT_MAX_S` | 600 | wall clock 上限 (指定値はこれで clamp) |
 | `SANDBOX_MEM_MB` | 4096 | rlimit_as |
@@ -336,7 +339,10 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 - `sandbox/tests/test_auth.py` — 共有トークン認証 (#132)。トークンを設定したとき
   ヘッダ無し / 誤トークン / 別スキーム / 未知パスが 401、正しい Bearer が通る、
   `/healthz` `/metrics` は公開、そして**トークン未設定なら認証が掛からず素通しする**
-  (opt-in) ことを固定する。
+  (opt-in) ことを固定する。加えて**免除は完全一致だけ** (`/healthz/` `//healthz`
+  `/HEALTHZ` `/healthz/../files/list` 等はすべて 401 — 免除判定を prefix 一致や自前の
+  正規化に変えたら落ちる) と、**非 ASCII トークンは起動ログで名指しする**ことも見る。
+  形状のテストは httpx がクライアント側で URL を畳んでしまうため ASGI を直接叩く。
 
 なお `test_isolation.py` の HTTP クライアントは、トークンを**コンテナ自身の env**
 (`SANDBOX_TOKEN`) から取る — 配備側がサービスに渡した値が常に正解なので、テストに

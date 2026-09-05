@@ -7,6 +7,10 @@
 2. **公開パスは `/healthz` と `/metrics` だけ** (compose の healthcheck と Prometheus)。
 3. **トークン未設定なら認証は掛からない** — 従来どおり素通しし、startup も落ちない
    (警告ログだけ出る)。「キーが無ければ元のまま」。
+4. **免除は完全一致だけ** — `/healthz/` `//healthz` `/HEALTHZ` `/healthz/../…` 等の
+   似た形は 401。免除判定を prefix 一致や正規化に変えたら落ちる。
+5. **非 ASCII のトークン**は HTTP ヘッダの latin-1 解釈のため一致せず全要求が 401 に
+   なるので、起動ログで理由を名指しする (起動は止めない)。
 
 `test_session_manager.py` と同じく main.py を直接 import する (コンテナ不要)。
 TestClient は context manager にしない — lifespan (= startup) を走らせないため。
@@ -15,6 +19,7 @@ TestClient は context manager にしない — lifespan (= startup) を走ら�
     uv run task sandbox-unit
 """
 
+import asyncio
 import importlib.util
 import pathlib
 import sys
@@ -172,3 +177,139 @@ def test_empty_bearer_is_not_a_match_when_auth_is_on(monkeypatch, tmp_path):
         .status_code
         == 401
     )
+
+
+# ---------------------------------------------------------------------------
+# 免除パスの形状 — 「完全一致だけが免除」を固定する
+# ---------------------------------------------------------------------------
+# 現実装の免除判定は `scope["path"] not in PUBLIC_PATHS` = 完全一致なので、以下は
+# すべて閉じている。ここを `startswith` や自前の正規化に変えた瞬間に**静かに開く**
+# ので、開かないことをテストで宣言しておく (レビュー指摘 #132)。
+#
+# **ASGI を直接叩く** (TestClient を使わない): httpx はクライアント側で URL を正規化して
+# しまい、`//healthz` を protocol-relative URL (host=healthz, path=/) と見なし、
+# `/healthz/../files/list` を `/files/list` に解決するため、これらの形が middleware に
+# 届かない。uvicorn はリクエストラインを percent-decode するだけで dot-segment を畳まない
+# ので、実配備で middleware が見るのは下の生パスそのもの。
+PUBLIC_PATH_LOOKALIKES = [
+    "/healthz/",  # 末尾スラッシュ
+    "//healthz",  # 先頭二重スラッシュ
+    "/HEALTHZ",  # 大文字 (パスは case-sensitive)
+    "/healthz/../files/list",  # 相対参照で免除パスを頭に付ける (uvicorn は畳まない)
+    "/healthz%2f../files/list",  # 同上をパーセントエンコードのまま渡した形
+    "/metrics/",  # 末尾スラッシュ (/metrics 側)
+]
+
+
+def _asgi_status(
+    app, path: str, headers: list[tuple[bytes, bytes]] | None = None
+) -> int:
+    """`scope["path"]` を生のまま指定して ASGI アプリを 1 回叩き、ステータスを返す。"""
+    got = {}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            got["status"] = message["status"]
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers or [],
+        "client": ("127.0.0.1", 51000),
+        "server": ("testserver", 80),
+    }
+    asyncio.run(app(scope, receive, send))
+    return got["status"]
+
+
+def test_public_path_lookalikes_are_401(monkeypatch, tmp_path):
+    """免除は `/healthz` `/metrics` への**完全一致だけ**。似た形のパスは通さない。
+
+    末尾スラッシュ・二重スラッシュ・大文字・`..` の混入 (パーセントエンコード由来も
+    含む) のいずれでも認証を迂回できないこと (= 免除判定を prefix 一致や自前の正規化に
+    変えたらこのテストが落ちる)。
+    """
+    mod = _load_main(monkeypatch, tmp_path)
+    for path in PUBLIC_PATH_LOOKALIKES:
+        status = _asgi_status(mod.app, path)
+        assert status == 401, f"{path} が 401 でない: {status}"
+
+
+def test_public_path_lookalikes_pass_with_token(monkeypatch, tmp_path):
+    """上記が 401 なのは「認証で止めている」から (パス自体が壊れているからではない)。
+
+    正しい Bearer を付ければ middleware は通り、routing の結果 (404 / 405 / 307 等)
+    が返る。
+    """
+    mod = _load_main(monkeypatch, tmp_path)
+    auth = [(b"authorization", f"Bearer {TOKEN}".encode())]
+    for path in PUBLIC_PATH_LOOKALIKES:
+        status = _asgi_status(mod.app, path, auth)
+        assert status != 401, f"{path} が token 付きで 401"
+
+
+def test_exact_public_paths_are_exempt(monkeypatch, tmp_path):
+    """同じ経路で「完全一致は素通し」も見る (上の 401 が全部落としているだけではない)。"""
+    mod = _load_main(monkeypatch, tmp_path)
+    assert _asgi_status(mod.app, "/healthz") in (200, 503)
+    assert _asgi_status(mod.app, "/metrics") == 200
+
+
+def test_duplicate_authorization_header_uses_first(monkeypatch, tmp_path):
+    """`Authorization` が重複したら**先頭勝ち** (Starlette の Headers.get の挙動)。
+
+    誤 → 正の順で 2 本送っても、後から正しい値を足して通す経路にはならない。
+    正 → 誤の順は通る (先頭が正しいため)。どちらも「先頭だけを見る」の帰結。
+    """
+    c = _client(monkeypatch, tmp_path)
+    body = {"user_id": "u1", "path": "."}
+    wrong_first = c.post(
+        "/files/list",
+        json=body,
+        headers=[
+            ("Authorization", "Bearer wrong"),
+            ("Authorization", f"Bearer {TOKEN}"),
+        ],
+    )
+    assert wrong_first.status_code == 401
+    right_first = c.post(
+        "/files/list",
+        json=body,
+        headers=[
+            ("Authorization", f"Bearer {TOKEN}"),
+            ("Authorization", "Bearer wrong"),
+        ],
+    )
+    assert right_first.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 非 ASCII トークン (ヘッダは latin-1 で解釈されるため一致しない)
+# ---------------------------------------------------------------------------
+def test_non_ascii_token_warns_at_startup(monkeypatch, tmp_path, capsys):
+    """非 ASCII のトークンは「設定したのに全要求 401」になるので起動ログで名指しする。
+
+    起動は止めない (opt-in を壊さない)。認証自体は有効のまま = 安全側に倒れる。
+    ASCII のトークンではこの warning を出さない。
+    """
+    mod = _load_main(monkeypatch, tmp_path, token="tokén-非ascii")
+    assert mod.AUTH_ENABLED is True
+    assert mod.TOKEN_IS_ASCII is False
+    mod._log_auth_state()
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "ASCII" in out
+
+    mod = _load_main(monkeypatch, tmp_path)  # ASCII の既定トークン
+    assert mod.TOKEN_IS_ASCII is True
+    mod._log_auth_state()
+    assert "WARNING" not in capsys.readouterr().out

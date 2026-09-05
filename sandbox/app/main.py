@@ -136,6 +136,14 @@ TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 # `_token_ok` の防御もこのフラグを見る (同じ「空」の意味を 2 箇所に持たせない)。
 AUTH_ENABLED = bool(TOKEN)
 
+# **トークンは ASCII 限定**。HTTP ヘッダの値は Starlette が latin-1 でデコードするため、
+# 非 ASCII を含むトークンは UTF-8 で送っても受け側で別の文字列になり、**どう送っても
+# 一致しない** = 全リクエストが 401 になる。倒れる側は安全だが「設定したのに全部 401」は
+# 原因が分からない壊れ方なので、起動時に理由を名指しする (`_log_auth_state`)。
+# 起動は止めない — opt-in の方針 (キーが無ければ元のまま) と、compose の crash-loop より
+# ログ 1 行のほうが配備時に手が打てるため。推奨値 `openssl rand -hex 32` は常に ASCII。
+TOKEN_IS_ASCII = TOKEN.isascii()
+
 # 認証が有効なときに免除するパス。**認証有効なら既定は要認証** (パス単位の allow では
 # なく deny がデフォルト) — endpoint を足したときに「書き忘れたら開く」ではなく
 # 「書き忘れたら閉じる」側に倒す。
@@ -161,7 +169,11 @@ def _token_ok(authorization: str) -> bool:
     scheme, _, presented = authorization.partition(" ")
     if scheme.lower() != "bearer":
         return False
-    # 非 ASCII のトークンでも落ちないよう bytes で比較する (str 版は ASCII 限定)
+    # **トークンは実質 ASCII 限定** (`TOKEN_IS_ASCII` 参照)。ここで bytes に直すのは
+    # `hmac.compare_digest` が非 ASCII の str で TypeError を投げるのを避けるためだけで、
+    # 非 ASCII トークンを通せるようにする効果は無い — HTTP ヘッダは Starlette が
+    # latin-1 でデコードするので、UTF-8 で送られた値はこの時点で別物になっている
+    # (`Bearer tokén` → `'Bearer tokÃ©n'`) 。倒れる側は安全 (常に 401)。
     return hmac.compare_digest(presented.strip().encode(), TOKEN.encode())
 
 
@@ -171,9 +183,19 @@ def _log_auth_state() -> None:
     opt-in (#132、2026-09-05 改訂) では未設定でも起動するので、**黙って無防備**に
     ならないよう状態だけは必ずログに出す。無認証だと何ができてしまうかの説明は
     ログに書かない — README「セキュリティモデル」が単一情報源。
+
+    有効なのに**非 ASCII のトークン**という「設定したのに全要求 401」も同じ理由で
+    名指しする (`TOKEN_IS_ASCII`)。どちらも起動は止めない。
     """
     if AUTH_ENABLED:
         print("[sandbox] API 認証: 有効 (SANDBOX_TOKEN)", flush=True)
+        if not TOKEN_IS_ASCII:
+            print(
+                "[sandbox] WARNING: SANDBOX_TOKEN に非 ASCII 文字が含まれます。"
+                "HTTP ヘッダは latin-1 で解釈されるため一致せず、全要求が 401 になります"
+                " — ASCII のトークンにしてください (例: openssl rand -hex 32)",
+                flush=True,
+            )
     else:
         print(
             "[sandbox] WARNING: API 認証は無効です (SANDBOX_TOKEN 未設定)。"
