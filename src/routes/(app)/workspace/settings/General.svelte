@@ -207,6 +207,9 @@
 							<span class=" text-content font-medium"
 								>{$i18n.t("'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.")}</span
 							>
+							<div class="mt-1">
+								{$i18n.t('Counted from the last user interaction, not from login.')}
+							</div>
 						</div>
 					</div>
 

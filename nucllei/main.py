@@ -209,6 +209,8 @@ from nucllei.utils.middleware import process_chat_payload, process_chat_response
 from nucllei.utils.access_control import has_access
 
 from nucllei.utils.auth import (
+    apply_session_renewal,
+    session_idle_timeout_seconds,
     get_http_authorization_cred,
     decode_token,
     get_admin_user,
@@ -561,6 +563,12 @@ async def check_url(request: Request, call_next):
 
     request.state.enable_api_key = app.state.config.ENABLE_API_KEY
     response = await call_next(request)
+    # llens: アイドルタイムアウト(スライディング期限)の延命 cookie。
+    # 認証依存関数(utils/auth.py の mark_session_renewal)が request.state に
+    # 積んだ token をここで Set-Cookie する。依存関数の sub-response では
+    # StreamingResponse を返す endpoint(chat completion 等)で header が
+    # 捨てられるため、middleware で書く。
+    apply_session_renewal(request, response)
     process_time = int(time.time()) - start_time
     response.headers["X-Process-Time"] = str(process_time)
     return response
@@ -1027,6 +1035,14 @@ async def get_app_config(request: Request):
         "copyright": WEBUI_COPYRIGHT,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
+        # llens: アイドルタイムアウトの秒数(= 既存 JWT_EXPIRES_IN。設定項目は増やさない)。
+        # 無期限(`-1` / `0`)なら null。FE は最後の人の操作からこの秒数が経ったら
+        # 自分でログイン画面へ逃がす — サーバ側で切れていても、アイドル中のチャットは
+        # リクエストを 1 本も出さないので前の人の画面が残り続けるため(共有 PC 対策)。
+        # ログイン画面(未認証)からも読める位置に置く。
+        "session_idle_timeout": session_idle_timeout_seconds(
+            app.state.config.JWT_EXPIRES_IN
+        ),
         "oauth": {
             "providers": {
                 name: config.get("name", name)

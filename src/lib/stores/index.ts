@@ -240,6 +240,9 @@ type Config = {
 	copyright?: string;
 	version: string;
 	default_locale: string;
+	// 共有 PC のアイドルタイムアウト秒数(= 既存 JWT_EXPIRES_IN。無期限なら null)。
+	// FE 側タイマ($lib/apis/fetch の startIdleWatch)の TTL — 設定項目ではない
+	session_idle_timeout?: number | null;
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {

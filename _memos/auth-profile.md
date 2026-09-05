@@ -51,7 +51,8 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 | 保存済み資格情報の**オートフィル**を抑える | ◯(概ね効く) | `ENABLE_LOGIN_AUTOCOMPLETE=false`(下記) |
 | 「パスワードを保存しますか」**プロンプトを出させない** | ✕ | 端末のブラウザポリシー。Chrome / Edge の `PasswordManagerEnabled=false`(GPO / Intune / macOS 構成プロファイル。Windows GUI は「パスワード マネージャーへのパスワードの保存を有効にする」を無効) |
 | **既に保存済み**の資格情報を消す | ✕ | 端末側での削除。ポリシーを後から入れても既存の保存分は残る |
-| 席を離れた後の**セッション乗っ取り** | ◯ | `JWT_EXPIRES_IN`(既存 env、下記) |
+| 席を離れた後の**セッション乗っ取り** | ◯ | `JWT_EXPIRES_IN`(既存 env、下記の「アイドルタイムアウト」) |
+| 離席中に**前の人の画面が出たまま**になる | ◯ | 同上(FE 側タイマが `/auth` へ逃がす) |
 
 > ブラウザポリシーの適用は病院の端末管理(情シス)側の作業。
 > nucllei 側でやれるのは「オートフィルを促さない」ところまで、と説明すること。
@@ -77,7 +78,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 
 | env | 既定 | 共有 PC での推奨 | 備考 |
 |---|---|---|---|
-| `JWT_EXPIRES_IN` | `-1`(無期限) | `4h` 等 | RuntimeConfig。`s/m/h/d/w` 表記。cookie の `expires` と JWT の exp の両方に効く(`nucllei/routers/auths.py`) |
+| `JWT_EXPIRES_IN` | `-1`(無期限) | `4h` 等 | RuntimeConfig。`s/m/h/d/w` 表記。**アイドル(無操作)タイムアウト** — 下記 |
 | `WEBUI_SESSION_COOKIE_SECURE` / `WEBUI_AUTH_COOKIE_SECURE` | `false` | HTTPS 配備なら `true` | `nucllei/env.py` |
 | `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SAME_SITE` | `lax` | `strict` も可 | 同上 |
 
@@ -86,10 +87,55 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 - **トークンは httpOnly cookie に一本化済み**(#70 B1、`auth/+page.svelte` のコメント)。
   `localStorage` に JWT を残さないので、共有 PC で「ブラウザに残る」のは cookie のみ。
   `JWT_EXPIRES_IN` を有限にすれば端末に残り続けない。
-- **アイドル(無操作)タイムアウトの実装は無い。** `JWT_EXPIRES_IN` は発行時刻からの絶対期限
-  であって無操作検出ではない。加えて `GET /api/v1/auths/` が呼ばれるたびに token を再発行して
-  cookie を更新する(`auths.py:get_session_user`)ため、実質は「最後のセッション取得からの期限」に近い。
-  厳密なアイドルタイムアウトが要るなら別途実装が必要 — **未実装**。
+
+### アイドルタイムアウト(`JWT_EXPIRES_IN` の意味)
+
+**配備者向けの説明**:
+
+> `JWT_EXPIRES_IN` は「無操作でこの時間が経ったらログアウトする」時間。
+> **使っている間は切れない** — 最後にキーを叩いた / クリックした時点から数え直す。
+> 例: `JWT_EXPIRES_IN=1d` なら、丸一日使い続けても切れず、席を立って 1 日経つと切れる。
+> 既定は `-1`(無期限 = タイムアウトしない)。設定はこれ 1 つで、絶対上限は無い。
+> 値は `s` / `m` / `h` / `d` / `w`(例 `30m` `4h` `1d`)。管理画面 > 設定 > 全般 からも変えられる。
+> 切れたときは操作した本人がログイン画面に戻され、「セッションの有効期限が切れました」と出る。
+
+実装(2026-09-05、共有 PC 対策):
+
+| 層 | 何をするか | 実体 |
+|---|---|---|
+| FE 送信側 | 最後の延命以降に**人の操作**(`keydown` / `pointerdown` / `click` / `touchstart`。**`mousemove` は数えない**)があったリクエストにだけ `X-Nucllei-Activity: 1` を付ける | `src/lib/apis/fetch.ts`(全 API が通る唯一の口) |
+| BE | そのヘッダがあり、かつ token が**寿命の半分**を過ぎていたら cookie を再発行。`-1` なら何もしない。**API キー(`sk-`)経路は延命しない** | `nucllei/utils/auth.py`(`mark_session_renewal`)、Set-Cookie は `nucllei/main.py` の middleware |
+| FE 画面側 | 最後の人の操作から `JWT_EXPIRES_IN` 経過したら自分で `/auth?redirect=` へ逃がす | `src/lib/apis/fetch.ts`(`startIdleWatch`)、起動は `src/routes/+layout.svelte` |
+
+設計上の要点(触るときはここを壊さないこと):
+
+- **延命の起点は「認証付きリクエストが来たこと」ではなく「人が操作したこと」。**
+  チャット画面は開いている間 5 秒ごとに認証付き API を叩く
+  (`Chat.svelte` の `pollExecutions` / agent session ポーリング)。リクエスト基準にすると
+  **タブを開いたまま離席した人が永久にログインしたまま**になり、離席対策として無意味になる。
+  ヘッダ方式なので**endpoint の除外リストを持たない** — 将来ポーリングが増えても自動的に安全側。
+- **`Set-Cookie` は依存関数ではなく HTTP middleware で書く。** endpoint が `Response` を直接返す
+  場合(chat completion の `StreamingResponse` 等)、FastAPI は依存関数の sub-response の
+  header を捨てる(`fastapi/routing.py`)。依存関数だけに置くと「メッセージ送信」という
+  最も人間的な操作で延命が落ちる。
+- **FE 側タイマも要る。** アイドル中のチャットは**リクエストを 1 本も出さない**
+  (`pollExecutions` は `visibilityState === 'hidden'` と `shouldPollExecutions` で二重に止まる)。
+  サーバのセッションが死んでも、次にリクエストが飛ぶまで画面は前の人のチャット一覧と本文のまま。
+  共有 PC で一番効かせたいのがここ。TTL は `/api/config` の `session_idle_timeout`
+  (= 既存 `JWT_EXPIRES_IN` を秒で露出しただけ。**設定項目は増やしていない**)。
+  判定は `setTimeout` の残り時間ではなく**時刻の差** — スリープ・背面タブでタイマが飛んでも
+  復帰時点(`visibilitychange` / `focus`)で評価する。
+  失効の後始末(sessionStorage フラグ + ハード遷移 + 到着後トースト)は 401 経路(#70 B2)と共用で、
+  二重には走らない。
+- **`GET /api/v1/auths/` は token を再発行しない**(2026-09-05 に撤去)。呼び出し元は
+  アプリ起動時・プロフィール更新後・ログイン直後の 3 箇所 = **ページ読み込み時**だけなので、
+  再発行を残すと「タブを開き直せば無期限に延命できる」離席対策の穴になる。
+  応答から `token` / `token_type` も落とした(#70 B1 で cookie 一本化済み・FE 未参照)。
+  `expires_at` は現セッションの `exp` を返す。
+- **絶対上限(何時間使っても必ず切る)は作らない**(設定が増えるため不要と判断 — ken、2026-09-05)。
+
+回帰テスト: `nucllei/test/apps/webui/routers/test_session_idle_timeout.py`(BE)、
+`src/lib/apis/fetch.test.ts`(FE)。
 
 ## 方針(fork.md より)
 

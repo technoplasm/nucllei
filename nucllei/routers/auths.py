@@ -39,6 +39,7 @@ from nucllei.utils.auth import (
     create_api_key,
     create_token,
     get_admin_user,
+    get_session_expires_at,
     get_verified_user,
     get_current_user,
     get_password_hash,
@@ -65,48 +66,37 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 class SessionUserResponse(Token, UserResponse):
+    """token を発行する経路(signin / signup / ldap)の応答。"""
+
     expires_at: Optional[int] = None
     permissions: Optional[dict] = None
 
 
-@router.get("/", response_model=SessionUserResponse)
-async def get_session_user(
-    request: Request, response: Response, user=Depends(get_current_user)
-):
-    expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-    expires_at = None
-    if expires_delta:
-        expires_at = int(time.time()) + int(expires_delta.total_seconds())
+class SessionInfoResponse(UserResponse):
+    """`GET /api/v1/auths/` の応答 — **token は発行しない**(下記参照)。"""
 
-    token = create_token(
-        data={"id": user.id},
-        expires_delta=expires_delta,
-    )
+    expires_at: Optional[int] = None
+    permissions: Optional[dict] = None
 
-    datetime_expires_at = (
-        datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-        if expires_at
-        else None
-    )
 
-    # Set the cookie token
-    response.set_cookie(
-        key="token",
-        value=token,
-        expires=datetime_expires_at,
-        httponly=True,  # Ensures the cookie is not accessible via JavaScript
-        samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-        secure=WEBUI_AUTH_COOKIE_SECURE,
-    )
+@router.get("/", response_model=SessionInfoResponse)
+async def get_session_user(request: Request, user=Depends(get_current_user)):
+    """現在のセッション情報を返す。
 
+    llens: 以前はこの endpoint が呼ばれるたびに token を再発行して cookie を
+    上書きしていた。呼び出し元は**ページ読み込み時**の 3 箇所だけなので、
+    「タブを開き直せば無期限に延命できる / 長いチャットを続けていても切れる」という
+    共有 PC の離席対策として意味のない挙動になっていた。
+    延命は `utils/auth.py` のスライディング期限(人の操作を伴うリクエストのみ)へ
+    一本化し、ここでは発行しない。応答から `token` / `token_type` も落とした
+    (#70 B1 で token は httpOnly cookie 一本化済み — FE は参照していない)。
+    """
     user_permissions = get_permissions(
         user.id, request.app.state.config.USER_PERMISSIONS
     )
 
     return {
-        "token": token,
-        "token_type": "Bearer",
-        "expires_at": expires_at,
+        "expires_at": get_session_expires_at(request),
         "id": user.id,
         "email": user.email,
         "name": user.name,
@@ -373,7 +363,6 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
         user = Auths.authenticate_user(form_data.email.lower(), form_data.password)
 
     if user:
-
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
         expires_at = None
         if expires_delta:
@@ -426,7 +415,6 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
 
 @router.post("/signup", response_model=SessionUserResponse)
 async def signup(request: Request, response: Response, form_data: SignupForm):
-
     if WEBUI_AUTH:
         if (
             not request.app.state.config.ENABLE_SIGNUP

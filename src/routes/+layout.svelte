@@ -27,7 +27,7 @@
 	import { Toaster, toast } from 'svelte-sonner';
 
 	import { getBackendConfig } from '$lib/apis';
-	import { SESSION_EXPIRED_FLAG } from '$lib/apis/fetch';
+	import { SESSION_EXPIRED_FLAG, startIdleWatch } from '$lib/apis/fetch';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { setFallbackHandler } from '$lib/utils/completion-streams';
 	import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
@@ -56,6 +56,17 @@
 	let loaded = $state(false);
 
 	const BREAKPOINT = 768;
+
+	// 共有 PC の離席対策(_memos/auth-profile.md)。無操作が続いたら画面を空にして
+	// ログインへ戻す — サーバ側でセッションが切れても、アイドル中のチャットは
+	// リクエストを 1 本も出さないので前の人のチャット一覧と本文が残ってしまう。
+	// TTL は既存 JWT_EXPIRES_IN(/api/config の session_idle_timeout。無期限なら null)。
+	// ログイン後の遷移は SPA(goto)で root layout の onMount は再実行されないため、
+	// $user の変化に追従させる。値が変わったときだけ張り直る($derived の等価判定)。
+	const idleTimeout = $derived($user ? ($config?.session_idle_timeout ?? null) : null);
+	$effect(() => {
+		startIdleWatch(idleTimeout);
+	});
 
 	// llens(wire v2): 表示中でないチャット(Chat コンポーネントがハンドラ未登録)の
 	// completion イベント既定処理。done の通知トーストとチャット一覧の追従だけ担う。
