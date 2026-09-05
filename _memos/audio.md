@@ -51,6 +51,21 @@ admin Settings > Audio にトグルあり)。off にすると **FE のアイコ�
   下の「読み取り猶予」の方なので、そちらを設定に出した。
 - **キャンセルの意味**: 既に入力欄へ入ったテキストは残る(送信済みの確定分)。
   飛行中の転写結果は破棄する(`aborted`)。
+- **後始末は `onDestroy` が持つ**: `recording` を false にするのは親の onCancel / onConfirm
+  だけなので、ルート遷移でコンポーネントが破棄されると `recording` は true のまま残る。
+  `onDestroy` で `stopRecording()`(トラック停止・`AudioContext.close()`・interval clear・
+  recorder 停止)まで確実にやる。rAF ループの継続判定も `recording` prop ではなく
+  `aborted` を見る — でないと破棄後もループが回り、無音の切れ目ごとに転写を投げ続けて
+  マイクインジケータが点きっぱなしになる(2026-09-05 修正)。
+- **stop() と発話再開のレース**: `MediaRecorder.stop()` は同期で state を `inactive` に
+  するが `onstop` は後から来る。この窓で喋り直すと rAF ループが同じ recorder を
+  `start()` し直してしまうため、**`stopping` を見て起こさない**。起こすと直前の発話が
+  捨てられ、古い recorder が残り、共有している `audioChunks` に別ストリームのチャンクが
+  混ざって壊れた webm になる(2026-09-05 修正)。
+- **キューは必ず解決状態へ戻す**: `transcribeQueue` を 1 度でも reject させると以後の
+  `.then` が全部スキップされ、確定しても `finish()` が呼ばれず録音バーがスピナーのまま
+  固まる。末尾に `.catch()` を置き、最終セグメントで落ちたときは `finish('')` で必ず閉じる。
+- **STT 障害時のトーストは 1 録音につき 1 回**。切れ目ごとに出すと積み上がる。
 
 ### 読み取り猶予(`$settings.voiceSilenceTimeout`)
 
@@ -60,8 +75,19 @@ admin Settings > Audio にトグルあり)。off にすると **FE のアイコ�
 UI は **Settings > Chats > Voice**(0.5〜30 秒、秒で入力し ms で保存)。
 **録音バーと Call オーバーレイの両方**が読む(Call の `2000` ハードコードは撤去済み)。
 
-同じ設定群に **`$settings.voiceMinChunkDuration`(既定 1000ms)** —
-これより短い区間は精度が落ちるので転写に送らない。
+同じ設定群に **`$settings.voiceMinChunkDuration`(既定 300ms)** —
+これより短い区間は精度が落ちるので転写に送らない。測るのは**発話区間の長さ**
+(最初に音を検出した時刻 → そのセグメントで最後に音を検出した時刻)であって、
+録音していた実時間ではない。無音カットの `stop()` は `最後の音 + silenceTimeout` に来るので、
+実時間で測ると必ず `silenceTimeout` 以上になり、既定値の関係(4000 > 1000)で
+**判定が常に真になって効かない**(2026-09-05 修正。それ以前は咳払いや物音でも
+1 セグメント転写に飛び、Whisper のハルシネーションが入力欄に入っていた)。
+この修正で**初めて実際に効く**ようになったため、**既定を 1000ms から 300ms へ下げた**
+(2026-09-05)。1000ms のままだと「はい」「うん」のような相槌が丸ごと落ちる —
+ken の方針は「読み取り猶予は長めに = 話者を途中で切らない」なので、
+**利用者の発話を落とすより、物音由来のノイズを許す**側に倒す。300ms は咳払い・
+ドアの音のような単発の物音を落としつつ短い返事を残す妥協点で、根拠のある閾値では
+ないので、配備で実測して動かしてよい(UI の範囲は 0〜5 秒、0 = 無効)。
 
 ### secure context ガード
 
@@ -80,9 +106,12 @@ FE は長らく `recording.wav` / `type: 'audio/wav'` の**偽装ラベル**で�
 (MediaRecorder の実体は Chrome/Edge = webm/opus)。`routers/audio.py` の許可リストと
 拡張子マップに `audio/webm` を足し、FE は `MediaRecorder.isTypeSupported` で
 `audio/webm` → `audio/ogg` の順に選んで**実際の MIME をそのまま送る**。
-**残件**: Safari の MediaRecorder は `audio/mp4` しか作れず、許可リストに無いので 400
-(現状は偽装で通っていた)。必要になったら `audio/mp4` を許可リスト + 拡張子マップに 1 行ずつ足す
-(mp4 音声は非アクティブ形式なので GHSA-m8f9-9whg-f4xr の防御方針とは矛盾しない)。
+Safari の MediaRecorder は `audio/mp4` しか作れないので、**`audio/mp4` も許可リスト +
+拡張子マップに入れてある**(2026-09-05。入れる前は Safari / iOS が 400 になっていた —
+偽装をやめた #56 からの回帰)。mp4 音声は非アクティブ形式なので
+GHSA-m8f9-9whg-f4xr の「拡張子はサーバ側で決める」方針とは矛盾しない。
+FE 側は `isTypeSupported` で webm → ogg の順に選び、どちらも使えなければ
+ブラウザ既定(Safari = `audio/mp4`)に任せて実 MIME をそのまま送る。
 
 ## 並列モデル — どの層で直列化されるか(STT 内蔵経路)
 

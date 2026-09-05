@@ -26,7 +26,7 @@
 	// llens(#56): 逐次文字起こし(疑似ストリーミング)のパラメータ。
 	// 既定値は Settings > Chats > Voice の同名行と揃える(根拠は _memos/audio.md)
 	const DEFAULT_SILENCE_TIMEOUT = 4000;
-	const DEFAULT_MIN_CHUNK_DURATION = 1000;
+	const DEFAULT_MIN_CHUNK_DURATION = 300;
 
 	const silenceTimeout = $derived($settings?.voiceSilenceTimeout ?? DEFAULT_SILENCE_TIMEOUT);
 	const minChunkDuration = $derived($settings?.voiceMinChunkDuration ?? DEFAULT_MIN_CHUNK_DURATION);
@@ -96,14 +96,23 @@
 	let audioChunks: Blob[] = [];
 	// 現セグメントの録音開始時刻(0 = まだ録っていない)
 	let segmentStartedAt = 0;
+	// 現セグメントで最後に音を検出した時刻。minChunkDuration は「録音していた長さ」ではなく
+	// **発話区間の長さ**(= 末尾の無音猶予を含まない)で判定するのでこれを使う
+	let segmentEndedAt = 0;
 	// 確定ボタン後の最終セグメント処理中(この stop では次のセグメントを起こさない)
 	let finishing = false;
 	// stop() 済みで onstop 待ち(無音カットと確定ボタンが同フレームで競合するのを防ぐ)
 	let stopping = false;
 	// finish() は 1 度だけ(onConfirm の二重発火 = 入力欄への二重挿入を防ぐ)
 	let finalized = false;
-	// キャンセル/停止後に遅れて返ってきた転写を捨てるためのフラグ
+	// キャンセル/停止/破棄後に遅れて返ってきた転写を捨てるためのフラグ。
+	// rAF ループの継続判定もこれで見る(recording prop はルート遷移で破棄されても
+	// true のまま残るため、あれに依存すると破棄後もループが回り続ける)
 	let aborted = false;
+	// STT 失敗のトーストは 1 録音につき 1 回だけ(逐次化で発話の切れ目ごとに出ると積み上がる)
+	let sttErrorNotified = false;
+	// コンポーネント破棄済み(ルート遷移等)。破棄経路でだけ Web Speech のハンドラを外す
+	let destroyed = false;
 	// チャンクの POST は順序保証が要る(並列に投げると文が入れ替わる)ので直列キューに積む
 	let transcribeQueue: Promise<void> = Promise.resolve();
 
@@ -115,8 +124,9 @@
 	const usesWebSpeech = () =>
 		$config?.audio?.stt?.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web';
 
-	// llens(#56): backend の許可 MIME(audio/webm|ogg|wav|mpeg|x-m4a)に載る型を選ぶ。
+	// llens(#56): backend の許可 MIME(audio/webm|ogg|mp4|wav|mpeg|x-m4a)に載る型を選ぶ。
 	// 選べなければブラウザ既定に任せ、実際の MIME をそのまま送る(wav 詐称はしない)。
+	// Safari は webm/ogg を作れず既定の audio/mp4 になるが、それも許可リストに載っている。
 	const pickMimeType = () => {
 		if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
 			return '';
@@ -183,7 +193,10 @@
 
 		const detectSound = () => {
 			const processFrame = () => {
-				if (!recording || loading) return;
+				// aborted = stopRecording() 済み(キャンセル / 確定 / コンポーネント破棄)。
+				// recording prop はルート遷移で破棄されても true のままなので、継続判定を
+				// あれだけに依存させるとループが生き残って転写を投げ続ける
+				if (aborted || !recording || loading) return;
 
 				analyser.getByteTimeDomainData(timeDomainData);
 				analyser.getByteFrequencyData(domainData);
@@ -202,13 +215,27 @@
 
 				const hasSound = domainData.some((value) => value > 0);
 				if (hasSound) {
-					// 発話が始まったところで録音開始(無音だけのセグメントを作らない)
-					if (mediaRecorder && mediaRecorder.state === 'inactive') {
-						mediaRecorder.start();
-						segmentStartedAt = Date.now();
-					}
 					speaking = true;
 					lastSoundTime = Date.now();
+
+					// 発話が始まったところで録音開始(無音だけのセグメントを作らない)。
+					// stop() 済みで onstop 待ち(stopping)の recorder は起こさない —
+					// 起こすと ① segmentStartedAt が上書きされて直前の発話が
+					// minChunkDuration 未満と判定され捨てられる ② 古い recorder が
+					// 誰にも止められず残る ③ 共有している audioChunks に別ストリームの
+					// チャンクが混ざって壊れた webm になる。confirmRecording() が
+					// 同じ窓を !stopping で守っているのと同じ理由
+					if (!stopping && mediaRecorder && mediaRecorder.state === 'inactive') {
+						mediaRecorder.start();
+						segmentStartedAt = lastSoundTime;
+						segmentEndedAt = lastSoundTime;
+					}
+
+					// 発話区間の終端。stop() 後は state が inactive なので更新されず、
+					// 「最後に音がした時刻」がそのセグメントのものとして残る
+					if (mediaRecorder && mediaRecorder.state === 'recording') {
+						segmentEndedAt = lastSoundTime;
+					}
 				}
 
 				// 「読み取り猶予」ぶん無音が続いたら発話の区切りとみなす
@@ -235,32 +262,50 @@
 		const file = blobToFile(blob, `recording.${extensionFor(mimeType)}`);
 
 		const res = await transcribeAudio(file).catch((error) => {
-			toast.error(`${error}`);
+			// 逐次化で発話の切れ目ごと(既定 4 秒間隔)に呼ばれるため、STT が落ちている間
+			// 喋り続けるとトーストが積み上がる。1 録音セッションにつき 1 回に抑える
+			if (!sttErrorNotified) {
+				sttErrorNotified = true;
+				toast.error(`${error}`);
+			}
 			return null;
 		});
 
 		return `${res?.text ?? ''}`.trim();
 	};
 
-	// 転写は直列キュー。並列に投げると順不同で追記され文が壊れる
+	// 転写は直列キュー。並列に投げると順不同で追記され文が壊れる。
+	// キューは必ず解決状態へ戻す(1 度 reject させると以後の .then が全部スキップされ、
+	// 確定しても finish() が呼ばれず録音バーがスピナーのまま固まる)
 	const enqueueSegment = (chunks: Blob[], duration: number, mimeType: string, isFinal: boolean) => {
-		transcribeQueue = transcribeQueue.then(async () => {
-			let text = '';
+		transcribeQueue = transcribeQueue
+			.then(async () => {
+				let text = '';
 
-			// 短すぎるチャンクは精度が落ちるので送らない(拾い損ねた物音もここで落ちる)
-			if (!aborted && chunks.length > 0 && duration >= minChunkDuration) {
-				text = await transcribeSegment(chunks, mimeType);
-			}
+				// 発話区間が短すぎるチャンクは精度が落ちるので送らない
+				// (咳払い・物音のような単発の音もここで落ちる)
+				if (!aborted && chunks.length > 0 && duration >= minChunkDuration) {
+					text = await transcribeSegment(chunks, mimeType);
+				}
 
-			if (aborted) return;
+				if (aborted) return;
 
-			if (isFinal) {
-				await finish(text);
-			} else if (text) {
-				dictationText = `${dictationText}${text} `;
-				onTranscript({ text });
-			}
-		});
+				if (isFinal) {
+					await finish(text);
+				} else if (text) {
+					dictationText = `${dictationText}${text} `;
+					onTranscript({ text });
+				}
+			})
+			.catch(async (error) => {
+				console.error('VoiceRecording: transcription segment failed', error);
+				// 最終セグメントで落ちても録音 UI は必ず閉じる(× でしか抜けられなくなるのを防ぐ)
+				if (isFinal && !aborted) {
+					await finish('').catch((finishError) => {
+						console.error('VoiceRecording: finish failed', finishError);
+					});
+				}
+			});
 	};
 
 	const startSegment = () => {
@@ -271,6 +316,7 @@
 
 		audioChunks = [];
 		segmentStartedAt = 0;
+		segmentEndedAt = 0;
 
 		recorder.ondataavailable = (event) => {
 			if (event.data.size > 0) {
@@ -282,11 +328,18 @@
 			stopping = false;
 
 			const chunks = audioChunks.slice(0);
-			const duration = segmentStartedAt === 0 ? 0 : Date.now() - segmentStartedAt;
+			// minChunkDuration の判定は「録音していた長さ」ではなく**発話区間の長さ**で測る。
+			// 無音カットの stop は lastSoundTime + silenceTimeout に来るので、経過時間で
+			// 測ると常に silenceTimeout(既定 4000ms)以上になり、既定の minChunkDuration
+			// (1000ms)では判定が常に真になって物音でも 1 セグメント飛んでいた。
+			// 確定ボタンで閉じる最終セグメントも同じ式でよい(recorder は音を検出した
+			// ところでしか start しないので segmentEndedAt >= segmentStartedAt が保証される)
+			const duration = segmentStartedAt === 0 ? 0 : Math.max(0, segmentEndedAt - segmentStartedAt);
 			const isFinal = finishing;
 
 			audioChunks = [];
 			segmentStartedAt = 0;
+			segmentEndedAt = 0;
 
 			// 次のセグメントを先に用意してから転写を積む(取りこぼしを最小化)
 			if (!isFinal) {
@@ -342,6 +395,15 @@
 		if (!_stream) {
 			loading = false;
 			onCancel();
+			return;
+		}
+
+		// 権限ダイアログを出している間にキャンセル/ルート遷移で破棄されると、後片付け
+		// (onDestroy → stopRecording)はもう済んでいる。受け取ったばかりの stream を
+		// そのまま持つとマイクが開きっぱなしになるので、ここで止めて何も始めない
+		if (destroyed || aborted) {
+			_stream.getTracks().forEach((track) => track.stop());
+			loading = false;
 			return;
 		}
 
@@ -414,6 +476,8 @@
 		};
 	};
 
+	// 録音資源の解放。キャンセル / 確定 / コンポーネント破棄のどこからでも、何度呼ばれても
+	// 安全(解放済みは undefined / null で素通りする)
 	const stopRecording = async () => {
 		aborted = true;
 
@@ -423,7 +487,18 @@
 		mediaRecorder = undefined;
 
 		if (speechRecognition) {
-			speechRecognition.stop();
+			const recognition = speechRecognition;
+			// 破棄経路ではハンドラを外してから止める。onend → finish() → onConfirm() が
+			// 走ると、消えたコンポーネントから親の入力欄へ書き込むことになる。
+			// 通常のキャンセル/確定経路では従来どおりハンドラを残す
+			// (Web Speech の確定は onend → finish() で閉じるため)
+			if (destroyed) {
+				speechRecognition = undefined;
+				recognition.onresult = null;
+				recognition.onend = null;
+				recognition.onerror = null;
+			}
+			recognition.stop();
 		}
 
 		stopDurationCounter();
@@ -484,6 +559,15 @@
 	onDestroy(() => {
 		// remove resize observer
 		resizeObserver?.disconnect();
+
+		// recording を false にする経路は親の onCancel / onConfirm だけなので、ルート遷移で
+		// コンポーネントごと破棄されると recording は true のまま残る。そのままだと
+		// マイクのトラックも AudioContext も duration の interval も解放されず、
+		// rAF ループが回り続けて無音の切れ目ごとに転写を投げ続ける。
+		// stopRecording() は再入しても安全で、aborted 経由で rAF ループと
+		// 飛行中の転写(startSegment / enqueueSegment)も止まる
+		destroyed = true;
+		stopRecording();
 	});
 </script>
 

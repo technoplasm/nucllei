@@ -9,9 +9,9 @@
 	let { saveSettings }: { saveSettings: (updated: any) => void | Promise<void> } = $props();
 
 	// llens(#56): 音声入力の既定値。消費側(VoiceRecording / CallOverlay)と同じ値を持つ
-	// — 根拠は _memos/audio.md「読み取り猶予と逐次文字起こし」節
+	// — 根拠は _memos/audio.md「逐次文字起こし(疑似ストリーミング)と読み取り猶予」節
 	const DEFAULT_VOICE_SILENCE_TIMEOUT = 4000;
-	const DEFAULT_VOICE_MIN_CHUNK_DURATION = 1000;
+	const DEFAULT_VOICE_MIN_CHUNK_DURATION = 300;
 
 	const clamp = (value: number, min: number, max: number, fallback: number) =>
 		Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;

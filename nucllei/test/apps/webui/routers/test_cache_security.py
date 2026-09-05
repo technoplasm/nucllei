@@ -37,6 +37,32 @@ class TestCacheSecurity(AbstractPostgresTest):
         assert filename.endswith(".wav")
         assert not filename.endswith(".html")
 
+    def test_transcription_accepts_safari_mp4(self):
+        """Safari の MediaRecorder は audio/mp4 しか作れない(#56 レビュー P5)。
+
+        許可リストに無いと 400 になる。受理した上で、保存拡張子は
+        ユーザー提供の filename ではなく content-type から決まる(GHSA の方針)。
+        """
+        with (
+            mock_webui_user(id="1"),
+            patch("nucllei.routers.audio.compress_audio", side_effect=lambda p: p),
+            patch("nucllei.routers.audio.transcribe", return_value={"text": "ok"}),
+        ):
+            response = self.fast_api_client.post(
+                self.create_url("/transcriptions"),
+                files={
+                    "file": (
+                        "evil.html",
+                        b"\x00\x00\x00\x20ftypM4A ",
+                        "audio/mp4",
+                    )
+                },
+            )
+        assert response.status_code == 200
+        filename = response.json()["filename"]
+        assert filename.endswith(".mp4")
+        assert not filename.endswith(".html")
+
     def test_cache_active_content_forced_attachment(self):
         """/cache 上の HTML は添付ダウンロード扱い + nosniff(ブラウザで実行させない)。"""
         from nucllei.config import CACHE_DIR

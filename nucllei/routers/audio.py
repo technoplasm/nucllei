@@ -774,6 +774,7 @@ def transcription(
         "audio/ogg",
         "audio/x-m4a",
         "audio/webm",
+        "audio/mp4",
     )
 
     if not file.content_type.startswith(supported_filetypes):
@@ -795,6 +796,7 @@ def transcription(
             "audio/ogg": "ogg",
             "audio/x-m4a": "m4a",
             "audio/webm": "webm",
+            "audio/mp4": "mp4",
         }
         ext = next(
             (
