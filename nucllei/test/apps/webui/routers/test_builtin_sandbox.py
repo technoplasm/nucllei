@@ -197,15 +197,15 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
                 )
                 assert spec.status_code == 200
                 props = spec.json()["properties"]
-                # env が Field(default=) に焼かれている(管理画面で現在の向き先が読める)
-                assert props["sandbox_url"]["default"] == "http://sandbox.test:8000"
+                # 向き先は env 専用 — valve として露出しない (2026-09-05)
+                assert "sandbox_url" not in props
 
                 upd = self.fast_api_client.post(
                     self.create_url("/id/builtin_sandbox/valves/update"),
-                    json={"sandbox_url": "http://other:9000", "default_timeout_s": 30},
+                    json={"default_timeout_s": 30},
                 )
                 assert upd.status_code == 200
-                assert upd.json()["sandbox_url"] == "http://other:9000"
+                assert upd.json()["default_timeout_s"] == 30
 
             # 保存した valves は get_tools のロード経路で実インスタンスへ適用される
             from nucllei.utils.tools import get_tools
@@ -219,8 +219,94 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
             )
             assert "run_python" in loaded
             module = req.app.state.TOOLS["builtin_sandbox"]
-            assert module.valves.sandbox_url == "http://other:9000"
             assert module.valves.default_timeout_s == 30
+
+    def test_destination_is_env_only_and_unreachable_from_db(self):
+        """向き先は env `SANDBOX_URL` のみ。DB からは変えられない (2026-09-05)。
+
+        `sandbox_url` valve を廃止した理由の回帰。valve だった頃は、admin 権限を
+        取った者が宛先を外部に向けて env の `SANDBOX_TOKEN` を
+        `Authorization: Bearer` ごと回収できた。ここで固定するのは 3 点:
+
+        1. `valves/update` に `sandbox_url` を送っても保存されない (未知キーは無視)
+        2. **旧配備の DB に `sandbox_url` 行が残っていても** ValidationError にならず
+           ロードできる (pydantic v2 の既定 extra='ignore'。旧データ互換コードは
+           書かない方針なので「落ちないこと」だけを担保する)
+        3. `_post` の宛先は env の値のまま
+        """
+        with sandbox_env("http://sandbox.test:8000") as pkg:
+            pkg.sync_builtin_tools()
+
+            with mock_webui_user(id="admin1", role="admin"):
+                upd = self.fast_api_client.post(
+                    self.create_url("/id/builtin_sandbox/valves/update"),
+                    json={"sandbox_url": "http://evil.test:9000"},
+                )
+                assert upd.status_code == 200
+                assert "sandbox_url" not in upd.json()
+
+            # 旧配備の残骸を直接 DB へ書き戻す (router を通さない = 移行前の状態)
+            from nucllei.models.tools import Tools as ToolsTable
+
+            ToolsTable.update_tool_valves_by_id(
+                "builtin_sandbox",
+                {"sandbox_url": "http://evil.test:9000", "default_timeout_s": 45},
+            )
+
+            from nucllei.utils.tools import get_tools
+
+            req = _fake_request()
+            loaded = get_tools(
+                req,
+                ["builtin_sandbox"],
+                types.SimpleNamespace(id="a1", role="admin"),
+                {"__user__": {"id": "a1"}},
+            )
+            assert "run_python" in loaded  # ValidationError で落ちない
+            module = req.app.state.TOOLS["builtin_sandbox"]
+            assert not hasattr(module.valves, "sandbox_url")
+            assert module.valves.default_timeout_s == 45
+
+            # 実際の宛先は env の値 (module は load_builtin_tool が返す Tools インスタンス)
+            seen = {}
+
+            class FakeResp:
+                status = 200
+
+                async def json(self):
+                    return {"entries": []}
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *a):
+                    return False
+
+            class FakeSession:
+                def __init__(self, timeout=None, headers=None):
+                    pass
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *a):
+                    return False
+
+                def post(self, url, json=None):
+                    seen["url"] = url
+                    return FakeResp()
+
+            import nucllei.builtin_tools.sandbox as mod
+
+            real = mod.aiohttp
+            mod.aiohttp = types.SimpleNamespace(
+                ClientSession=FakeSession, ClientTimeout=lambda total: total
+            )
+            try:
+                asyncio.run(module._post("/files/list", {"user_id": "u1"}, 30))
+            finally:
+                mod.aiohttp = real
+            assert seen["url"] == "http://sandbox.test:8000/files/list"
 
     def test_code_arg_render_is_declared(self):
         """run_python の code 引数は Code("python") 宣言を持つ(#20 型駆動レンダリング)。"""
@@ -368,7 +454,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                     return FakeResp()
 
             tool = Tools()
-            tool.valves.sandbox_url = "http://sandbox.test:8000"
             fake_aiohttp = types.SimpleNamespace(
                 ClientSession=FakeSession, ClientTimeout=lambda total: total
             )
@@ -389,7 +474,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             import nucllei.builtin_tools.sandbox as mod
 
             tool = mod.Tools()
-            tool.valves.sandbox_url = "http://sandbox.test:8000"
             real = mod.aiohttp
             mod.aiohttp = fake_aiohttp
             try:

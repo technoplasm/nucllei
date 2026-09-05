@@ -713,9 +713,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the same value on both sides — the backend then sends
     `Authorization: Bearer` on every sandbox call and the sandbox rejects
     everything else with 401; a URL-without-token deployment logs a warning at
-    boot. It is read from the environment only (never a valve or a DB row). The
-    `sandbox_url` valve defaults to the env value so an admin can read where it
-    currently points.
+    boot. **Both are read from the environment only — never a valve or a DB
+    row.** The sandbox ships with the server (same git tag) and compose brings
+    it up alongside, so there is no legitimate reason to repoint it at runtime;
+    keeping the destination out of the DB also means an admin account cannot
+    aim it at an outside host and harvest the bearer token.
 - **Code execution runs in an external sandbox service**, never in the server
   process. `builtin_sandbox` bridges over HTTP to an nsjail + IPython service
   and provides a stateful `run_python` (per user+chat kernel), `run_shell`, and

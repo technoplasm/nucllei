@@ -288,7 +288,8 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      `SANDBOX_URL=http://127.0.0.1:13302 SANDBOX_TOKEN=<コンテナと同じ値> uv run task dev`
      (値は `openssl rand -hex 32`。`.env` に書いておくのが楽 — ただし `--reload` は
      `.env` を watch しないので変更後は BE を再起動する)。
-     valves の `sandbox_url` は空なら env の値が既定として効くので、dev で触る必要は無い。
+     **向き先の valve は無い**(`sandbox_url` は 2026-09-05 に廃止 — env のみ)。
+     旧 dev DB に `sandbox_url` 行が残っていても無視されるだけで、掃除は要らない。
    - preset への接続(`meta.toolIds` に `builtin_sandbox`)は必要。E2E スクリプトが冪等に張る。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
      `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは

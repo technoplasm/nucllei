@@ -74,10 +74,12 @@ def preflight():
             "#132 の SANDBOX_TOKEN は opt-in なのでゲートには関係しない)"
         )
 
-    # valves は未設定なら env(SANDBOX_URL)が既定として効く。DB に値が入っていると
-    # そちらが優先されるので、向き先が読めるよう毎回出す。
+    # 向き先は env(SANDBOX_URL)のみ — valve には無い(2026-09-05)。valves は
+    # timeout / 出力上限だけなので、動作の解釈に効く範囲で毎回出す。
     valves = _req("GET", f"/api/v1/tools/id/{TOOL_ID}/valves") or {}
-    print(f"valves: {valves or '(未設定 — env SANDBOX_URL の既定を使用)'}")
+    print(
+        f"valves: {valves or '(未設定 — コード既定を使用)'} / 向き先は env SANDBOX_URL"
+    )
 
     model = _req("GET", f"/api/v1/models/model?id={MODEL_ID}")
     if model is None:

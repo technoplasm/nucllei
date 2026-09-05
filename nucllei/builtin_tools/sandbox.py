@@ -41,12 +41,15 @@ from nucllei.utils.tool_render import Code
 log = logging.getLogger(__name__)
 
 # 環境差は nucllei コンテナの env で吸収する (compose の環境ごとの上書きがそのまま効く)。
-# import 時に解決して Field(default=) に渡すのは、default_factory だと valve の
-# JSON schema から default が落ち、管理画面が空欄表示になって「今どこを向いているか」が
-# 読めなくなるため (実測: default_factory の項目は spec で default=None)。
 #
 # **既定値は持たない**: 空 = sandbox の居ない配備、として `__init__.py` が登録を止める。
 # 既定 URL を置くと全配備で常に有効になり、ゲートが意味を失う。
+#
+# **valve を持たない (#114 の帰結、2026-09-05)**: sandbox は nucllei の出荷物になり
+# compose で必ず一緒に立つので、admin が実行時に向き先を差し替える正当な用途が消えた。
+# 副次的に、DB (valve) 経由で宛先を外部へ向けて env の `SANDBOX_TOKEN` を
+# `Authorization: Bearer` ごと回収する経路も構造的に無くなる — 「env と一致するときだけ
+# ヘッダを付ける」条件分岐を足すより素直で、設定も 1 つ減る。
 SANDBOX_URL = os.getenv("SANDBOX_URL", "").strip()
 
 # sandbox API の共有トークン (#132)。**opt-in** — 設定すれば `_post` が
@@ -209,10 +212,8 @@ class Tools:
     timeouts = {"run_python": 630, "run_python_once": 630, "run_shell": 630}
 
     class Valves(BaseModel):
-        sandbox_url: str = Field(
-            default=SANDBOX_URL,
-            description="sandbox サービスの URL。既定は nucllei の env (SANDBOX_URL)",
-        )
+        # 向き先 (SANDBOX_URL) と共有トークン (SANDBOX_TOKEN) は **env 専用** —
+        # valve に置かない。理由はモジュール冒頭の SANDBOX_URL のコメント。
         default_timeout_s: int = Field(
             default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)"
         )
@@ -239,13 +240,14 @@ class Tools:
     async def _post(self, path: str, payload: dict, timeout_s: float) -> dict:
         """sandbox サービスへの POST。**トークンがあるときだけ**共有トークンを付ける (#132)。
 
+        宛先は module 定数 `SANDBOX_URL` (env) のみ — DB (valve) からは変えられない。
         header は session に持たせる (この session はこの 1 リクエストにしか使わない)。
         未設定なら header 自体を付けない — 空の `Bearer ` を送らない (sandbox 側の
         認証が有効な配備では、無ヘッダも空トークンも等しく 401 なので実害は無いが、
         「無いものを送る」経路を作らない)。`_http_get` は別 session — 任意 URL を
         取りに行く経路なので、そちらへトークンが漏れないよう混ぜない。
         """
-        url = self.valves.sandbox_url.rstrip("/") + path
+        url = SANDBOX_URL.rstrip("/") + path
         headers = {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout_s),

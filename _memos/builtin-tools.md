@@ -220,7 +220,8 @@ web 検索を prism へ出したのと対照 — あちらは外部システム�
   list_workspace / export_workspace_file
 - 依存する基盤機能が llens の native ループで全部動くこと(= #18-3 の確認事項):
   - extra params 注入: `__user__` `__chat_id__` `__message_id__` `__event_emitter__` `__files__` `__metadata__`
-  - Valves(sandbox_url, default_timeout_s)の DB 永続と UI 編集
+  - Valves(default_timeout_s 等)の DB 永続と UI 編集
+    ※ `sandbox_url` valve は 2026-09-05 に廃止(下の改訂節)。向き先は env のみ
   - 進捗表示(5 秒ごとの経過)と `chat:message:files` イベント
     ※ 進捗は #100 で status → `__progress__` へ移行(行き先が tool 自身の
     ウィジェットに閉じる)。tool の status は落とされる — `_memos/tool-channels.md`
@@ -228,7 +229,7 @@ web 検索を prism へ出したのと対照 — あちらは外部システム�
   - 型駆動レンダリング(#20): run_python の code 引数は `Code("python")` 宣言
     (dev ダミー run_python が既にこの形 — 置き換え時に宣言を引き継ぐ)
 - 認可: access_control で group 単位の出し分け(CORE)
-- オフライン完結: sandbox_url は docker network 内。外部ネットワーク依存なし(閉域配備でも成立)
+- オフライン完結: `SANDBOX_URL` は docker network 内。外部ネットワーク依存なし(閉域配備でも成立)
 
 ### R3. #15 の結論(Responses API 要否)
 
@@ -365,8 +366,8 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
   — prune の理由が「撤去」か「env ゲートが閉じた」か区別できないため
 - **帰結: env を外すと `access_control` 設定が失われる**(行ごと消える)。専用の無効化状態を
   DB に持つより素直、と判断した。再設定は運用の手間として許容
-- Valves(`sandbox_url` / timeout 等)は維持。`70743aa68` で ValvesModal は builtin/custom
-  両方に配線済みなので、DB に値を入れれば env より優先される
+- Valves(timeout / 出力上限等)は維持。`70743aa68` で ValvesModal は builtin/custom
+  両方に配線済み。**向き先 `sandbox_url` は 2026-09-05 に valve から外した**(下の改訂節)
 
 素の nucllei を配る相手に、立てていないサービス用の tool を見せない。
 
@@ -400,8 +401,8 @@ nucllei の出荷物になり「素の nucllei を配る相手にも届く」よ
 
 - **env は両側同名 `SANDBOX_TOKEN`**(sandbox サービスと nucllei)。compose で 1 つの値を
   2 サービスに配れば済む。**valve / DB には置かない**(秘密の置き場を増やさない。llens の
-  compose が `CAGE_TOKEN` を env にしているのと同じ理由)。`sandbox_url` は valve のままなので、
-  valve で向き先だけ変えてもトークンは env のものが飛ぶ。
+  compose が `CAGE_TOKEN` を env にしているのと同じ理由)。**向き先 `SANDBOX_URL` も
+  2026-09-05 に env 専用へ揃えた**(次の改訂節)。
 - **登録ゲートは `SANDBOX_URL` ただ一つ**(2026-09-04 に一度 URL ∧ TOKEN の AND にしたが
   戻した)。ゲートの基準は 2026-09-03 と同じ「一覧に生えているのに呼ぶと必ずエラー」を
   作らないこと — sandbox 側の認証が opt-in になった今、トークン未設定の組み合わせは
@@ -418,3 +419,24 @@ nucllei の出荷物になり「素の nucllei を配る相手にも届く」よ
 - 回帰: `test_builtin_sandbox.py` に「TOKEN 無しでも登録される」「TOKEN があれば `_post` が
   `Authorization: Bearer` を付け、無ければヘッダ自体を付けない」「401 の文言」。sandbox 側は
   `sandbox/tests/test_auth.py`(`uv run task sandbox-unit` = CI)。
+
+## 改訂(2026-09-05)— `sandbox_url` valve の廃止、向き先は env のみ
+
+`sandbox_url` valve を削除した。**向き先は module 定数 `SANDBOX_URL`(env)だけ**を見る
+(`nucllei/builtin_tools/sandbox.py` の `_post`)。
+
+- 根拠(ken 判断): #114 で sandbox は nucllei の出荷物になり、compose で必ず一緒に立つ。
+  **admin が実行時に向き先を差し替える正当な用途が無くなった**。
+- 副次的効果: **トークン漏洩経路が構造的に消える**。valve だった頃はトークンが env でも
+  宛先は DB に載っていたので、admin 権限を取った者が `sandbox_url` を外部に向けて
+  `Authorization: Bearer` を回収し、以後 sandbox を直接叩いて任意 `user_id` を名乗れた。
+  「env と一致するときだけヘッダを付ける」条件分岐を足すより素直で、**設定も 1 つ減る**。
+- **旧配備の DB に `sandbox_url` 行が残っていても壊れない**(実測 2026-09-05):
+  valves は `module.Valves(**valves)`(`nucllei/utils/tools.py`)で組み直され、pydantic v2 の
+  既定 `extra='ignore'` が未知キーを黙って捨てる。ValidationError にならない。
+  **旧データ互換コードは書いていない** — 「落ちない」だけを回帰で固定した。
+- 残る valve: `default_timeout_s` / `max_output_chars` / `url_blocked_cidrs` / `url_max_mb` /
+  `debug`。UI 編集は従来どおり効く。
+- 回帰: `test_builtin_sandbox.py::test_destination_is_env_only_and_unreachable_from_db`
+  (spec に `sandbox_url` が出ない / `valves/update` に送っても保存されない /
+  旧行が DB に残っていてもロードできる / `_post` の宛先は env の値)。
