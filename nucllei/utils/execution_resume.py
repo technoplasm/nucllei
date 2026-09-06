@@ -267,20 +267,22 @@ def _notice_section(row: ExecutionModel, media: Optional[tuple[list, list]]) -> 
 
 
 def _notice_files(context_images: list) -> list:
-    """context_images(file id / "/" 始まり参照)→ notice 添付 files(契約 M4)。
+    """context_images(file id / URL / "/" 始まり fs 参照)→ notice 添付 files(契約 M4)。
 
-    "/" 始まりのうち url として載せるのは **"/ext/" だけ** — これはブラウザが
-    session cookie で開ける表示形。"/mnt/...#page=N" / "/workspace/..." /
-    "/api/v1/files/{id}/content#page=N"(添付 PDF のページ参照)はブラウザでそのまま
+    url として載せるのは **スキーム付き URL だけ**(`https://…/ext/{name}/...` —
+    ブラウザが session cookie で開ける表示形、または EXT_PUBLIC_BASES 配下の原本 URL)。
+    "/" 始まり("/mnt/...#page=N" / "/workspace/..." /
+    "/api/v1/files/{id}/content#page=N"(添付 PDF のページ参照))はブラウザでそのまま
     開けない(#139)ので落とす(モデルへの再注入は別経路で行われる。フロントに壊れた
     img を出さない)。"""
     files = []
     for entry in context_images:
         if not isinstance(entry, str) or not entry:
             continue
-        if entry.startswith("/"):
-            if entry.startswith("/ext/"):
-                files.append({"type": "image", "url": entry})
+        if entry[:8].lower().startswith(("http://", "https://")):
+            files.append({"type": "image", "url": entry})
+        elif entry.startswith("/"):
+            continue
         else:
             files.append(
                 {
@@ -450,9 +452,27 @@ def _resolve_turn_model_id(chat_json: dict) -> Optional[str]:
     return ((chat_json or {}).get("models") or [None])[0]
 
 
-def _shim_request() -> Request:
-    """driver には受信 Request が無い — app だけ持つ内部 Request を作る。"""
-    return Request(scope={"type": "http", "app": _app, "headers": []})
+def _shim_request(origin: Optional[dict] = None) -> Request:
+    """driver には受信 Request が無い — app だけ持つ内部 Request を作る。
+
+    origin(spawn 時に exec 行 meta["origin"] へ残した `{"scheme","host"}`)があれば
+    scheme と Host / X-Forwarded-* を復元する — 続きターンの tool が __request__ から
+    自オリジンを組めるように(llens doc tool が文書 URL を絶対化する。無いと相対 /ext/
+    に落ちて feed_image が拒否する)。無くても request.url が例外にならない scope。
+    """
+    # 循環 import 回避: subagent → middleware → (executions ↔ 本モジュールの hook)
+    from nucllei.utils.subagent import internal_request
+
+    return internal_request(_app, origin=origin)
+
+
+def _rows_origin(rows) -> Optional[dict]:
+    """配達対象の exec 行から origin を 1 つ選ぶ(新しい行を優先)。無ければ None。"""
+    for row in sorted(rows, key=lambda r: r.created_at or 0, reverse=True):
+        origin = (row.meta or {}).get("origin")
+        if isinstance(origin, dict) and origin.get("host"):
+            return origin
+    return None
 
 
 async def _ensure_models_loaded(user) -> None:
@@ -691,7 +711,9 @@ async def _deliver_cycle(chat_id: str) -> str:
                     if updated
                     else None
                 )
-                await _start_resume_turn(chat_id, assistant_id, user, notice_chain + 1)
+                await _start_resume_turn(
+                    chat_id, assistant_id, user, notice_chain + 1, _rows_origin(rows)
+                )
                 return "delivered"
             finally:
                 if semaphore_held:
@@ -720,6 +742,7 @@ async def _start_resume_turn(
     assistant_id: Optional[str],
     user,
     chain_count: int,
+    origin: Optional[dict] = None,
 ) -> None:
     """続きターンを内部起動する(契約 M5 / M3 手順 7)。
 
@@ -749,7 +772,7 @@ async def _start_resume_turn(
             return
 
         try:
-            await _try_start_turn(chat, assistant_id, user, chain_count)
+            await _try_start_turn(chat, assistant_id, user, chain_count, origin)
             return
         except asyncio.CancelledError:
             raise
@@ -773,7 +796,9 @@ async def _start_resume_turn(
         backoff = min(backoff * 2, TURN_RETRY_MAX_BACKOFF_S)
 
 
-async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> None:
+async def _try_start_turn(
+    chat, assistant_id: str, user, chain_count: int, origin: Optional[dict] = None
+) -> None:
     """1 回のターン起動の試み(分類は呼び出し側 — 恒久は _PermanentTurnFailure)。"""
     # 循環 import 回避: subagent → middleware → (executions ↔ 本モジュールの hook)
     from nucllei.utils import subagent
@@ -801,7 +826,7 @@ async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> No
     # background_tasks は None(start_internal_turn が tasks=None で呼ぶ)、
     # webhook は連鎖 1 通目のみ(task_resume_chain を middleware の述語が読む)
     await subagent.start_internal_turn(
-        _shim_request(),
+        _shim_request(origin),
         model,
         user,
         chat.id,

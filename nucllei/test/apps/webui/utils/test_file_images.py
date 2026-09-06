@@ -199,10 +199,12 @@ class TestFileImagesInline(AbstractPostgresTest):
         messages = self._convert(self._messages(data_url), self.alice)
         assert messages[0]["content"][1]["image_url"]["url"] == data_url
 
-    def test_external_url_untouched(self):
+    def test_external_url_unavailable(self):
+        # 絶対 URL は resolver(image_refs)の名前空間 — /ext/ 形でも EXT_PUBLIC_BASES
+        # 配下でもなければ解決せず、URL のまま残さない(fail closed、#139)
         url = "https://example.com/images/cat.png"
         messages = self._convert(self._messages(url), self.alice)
-        assert messages[0]["content"][1]["image_url"]["url"] == url
+        assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_plain_string_content_untouched(self):
         messages = [{"role": "user", "content": "/api/v1/files/f-img/content"}]

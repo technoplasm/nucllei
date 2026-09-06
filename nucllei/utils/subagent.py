@@ -220,6 +220,86 @@ def _append_turn_messages(
     )
 
 
+# 内部起動 Request が親 scope から引き継ぐ key。path / query_string は引き継がない
+# (内部ターンは特定のルートの要求ではない)が、request.url が KeyError('path') で
+# 死なないよう "/" を置く。
+_INHERITED_SCOPE_KEYS = (
+    "headers",
+    "scheme",
+    "server",
+    "client",
+    "http_version",
+    "root_path",
+)
+
+
+def request_origin(request) -> dict | None:
+    """受信 Request から自オリジン `{"scheme", "host"}` を取り出す。
+
+    読み方は llens doc tool と同じ(Caddy 越しの X-Forwarded-Proto / X-Forwarded-Host、
+    無ければ scope の scheme / Host)。取れなければ None。background 実行(#110)の
+    続きターンには受信 Request が無いので、spawn 時にこれを exec 行へ残し、resume 時に
+    `internal_request(origin=…)` で復元する。
+    """
+    scope = getattr(request, "scope", None)
+    if not isinstance(scope, dict):
+        return None
+    headers: dict[str, str] = {}
+    for key, value in scope.get("headers") or []:
+        try:
+            headers.setdefault(key.decode("latin-1").lower(), value.decode("latin-1"))
+        except (AttributeError, UnicodeDecodeError):
+            continue
+    proto = (headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    host = headers.get("x-forwarded-host") or headers.get("host") or ""
+    host = host.split(",")[0].strip()
+    if not host:
+        return None
+    return {"scheme": proto or scope.get("scheme") or "http", "host": host}
+
+
+def internal_request(
+    app, *, scope_from: dict | None = None, origin: dict | None = None
+):
+    """内部起動ターン用の Request。app だけを共有し state は新しい(親の state に書かない)。
+
+    - `scope_from`(親 Request の scope)があれば `_INHERITED_SCOPE_KEYS` を引き継ぐ
+      (headers は複製)。
+    - `origin`(`request_origin` の形)があれば scheme と Host / X-Forwarded-* ヘッダを
+      それから組む(受信 Request の無い resume ターン用)。
+    どちらも無くても `request.url` が例外にならない最小 scope を持つ。
+    """
+    scope: dict = {
+        "type": "http",
+        "app": app,
+        "method": "POST",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "http",
+        "http_version": "1.1",
+        "server": None,
+        "client": None,
+        "headers": [],
+    }
+    if isinstance(scope_from, dict):
+        for key in _INHERITED_SCOPE_KEYS:
+            if key in scope_from:
+                scope[key] = scope_from[key]
+        scope["headers"] = list(scope_from.get("headers") or [])
+    if origin and origin.get("host"):
+        scheme = str(origin.get("scheme") or "http")
+        host = str(origin["host"])
+        scope["scheme"] = scheme
+        scope["headers"] = [
+            (b"host", host.encode("latin-1", "ignore")),
+            (b"x-forwarded-proto", scheme.encode("latin-1", "ignore")),
+            (b"x-forwarded-host", host.encode("latin-1", "ignore")),
+        ]
+    return Request(scope=scope)
+
+
 async def start_internal_turn(
     request,
     model,
@@ -258,7 +338,13 @@ async def start_internal_turn(
     # 後も runner 側の in_exec=True を保つため(finally で元に戻す)。
     exec_token = in_exec.set(False)
 
-    child_request = Request(scope={"type": "http", "app": request.app, "headers": []})
+    # 親の scope(headers / scheme / server / client …)を引き継ぐ — tool は __request__ の
+    # X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組んで文書 URL を
+    # 絶対化する(llens doc tool)。ヘッダ空の合成 Request だと子ターンで origin が
+    # 組めず相対 /ext/ に落ちて feed_image が拒否する(行き止まり)
+    child_request = internal_request(
+        request.app, scope_from=getattr(request, "scope", None)
+    )
     # tool server(auth_type=session)が request.state.token を読む経路のための引き継ぎ
     if hasattr(request.state, "token"):
         child_request.state.token = request.state.token

@@ -119,8 +119,10 @@ class ExecutionsTable:
         tool_call_id: str,
         tool_name: str,
         args: Optional[dict] = None,
+        meta: Optional[dict] = None,
     ) -> Optional[ExecutionModel]:
-        """running 行を作る(唯一の INSERT 経路 — spawn 専用)。"""
+        """running 行を作る(唯一の INSERT 経路 — spawn 専用)。meta は spawn 時点で
+        分かっている付帯情報(origin — 続きターンの __request__ 復元用)。"""
         with get_db() as db:
             try:
                 row = Execution(
@@ -131,6 +133,7 @@ class ExecutionsTable:
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
                     args=args,
+                    meta=meta,
                     status="running",
                     created_at=int(time.time()),
                 )

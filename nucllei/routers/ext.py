@@ -2,9 +2,10 @@
 
 cage(HTTP ツールゲートウェイ)等が配信する文書内の図・PDF は Docker bridge
 内部 URL やコンテナ内パスでしか参照できず、ブラウザから到達できない。上流側が
-PUBLIC_BASE を "/ext/{name}" にすると文書内の参照が同一オリジン相対 URL になり、
-チャット表示・引用・display すべてでブラウザが session cookie 付きでそのまま
-解決できる。
+PUBLIC_BASE を "https://<自ホスト>/ext/{name}" にすると文書内の参照が自オリジンの
+絶対 URL になり、チャット表示・引用・display すべてでブラウザが session cookie 付きで
+そのまま解決できる(絶対にするのは、モデルが tool へ渡す参照の名前空間で「URL は
+スキーム付き、"/" 始まりは sandbox の fs」と分けるため — utils/image_refs.py)。
 
 backend は env EXT_UPSTREAMS の値の形で 2 種(`utils/ext_upstreams.ext_backend`):
 

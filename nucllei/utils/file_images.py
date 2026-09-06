@@ -6,21 +6,24 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 (process_chat_payload 末尾)に、要求ユーザーが読める file だけを Storage から
 読み出して data URL に変換する。
 
-それ以外の **"/" 始まりの参照**("/ext/{name}/..." / "/mnt/..." / "/workspace/..."、
+それ以外の **参照文字列**(スキーム付き URL = `https://…/ext/{name}/...` や
+EXT_PUBLIC_BASES 配下の原本 URL、および sandbox の fs パス "/mnt/..." / "/workspace/..."、
 任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
 context_images に文字列のまま永続し、送信直前のここが実体化する(File は発行
 しない。context_images は same-turn 限定なので読み出しはそのターンの送信数回で
 自然に止まる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
 共有)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
 (既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
-"/" 参照の公開範囲は admin 管理の EXT_UPSTREAMS / RO マウント / 呼び出しユーザーの
-workspace が境界で、解決層が fail closed で持つ。
+URL / fs 参照の公開範囲は admin 管理の EXT_UPSTREAMS(+ EXT_PUBLIC_BASES)/ RO マウント /
+呼び出しユーザーの workspace が境界で、解決層が fail closed で持つ。
 
 変換できない参照(アクセス不可・削除済み・storage 欠落・root 外・非画像・サイズ超過・
-不達)は、相対 URL のまま残すとモデル側がリクエストごと落とし該当チャットが恒久的に
-失敗するため、text パーツ "(image unavailable)" に置換する。全経路とも同一の置換に
-することで、payload からアクセス不可と不存在を区別できない(存在有無をモデル経由で
-漏らさない)。data URL・絶対 URL・文字列 content のメッセージは触らない。
+不達・どの名前空間にも当たらない絶対 URL)は、URL のまま残すとモデル側がリクエストごと
+落とし該当チャットが恒久的に失敗するため、text パーツ "(image unavailable)" に置換する。
+全経路とも同一の置換にすることで、payload からアクセス不可と不存在を区別できない
+(存在有無をモデル経由で漏らさない)。data URL・文字列 content のメッセージは触らない。それ以外の形
+("//host/..." プロトコル相対、http(s) 以外のスキーム、相対パス)も unavailable に倒す —
+headless API(`/api/chat/completions`)の image_url に外部 URL を渡した場合も同じ。
 
 読み出し + base64 エンコード + PDF 画像化は blocking なので thread にオフロードする
 (attachment dispatch と同じ方針 — event loop を塞がない)。
@@ -118,8 +121,8 @@ async def inline_internal_image_urls(messages: list, user) -> list:
     """messages(OpenAI 形式)内の内部参照の image_url パーツを data URL に置換する。
 
     messages を破壊的に書き換えて同じ list を返す。変換できない内部 file URL /
-    "/" 始まり参照パーツは text "(image unavailable)" に置換(冒頭 docstring 参照)。
-    それ以外の URL は無変更。
+    絶対 URL / "/" 始まり参照パーツ(およびどの名前空間でもない URL)は text
+    "(image unavailable)" に置換(冒頭 docstring 参照)。data URL は無変更。
     """
     # 同一ターン内で同じ file / 参照を複数回参照しても読み出しは 1 回(結果 None も
     # キャッシュ)。バイト列は参照単位、data URL はページ単位 — PDF の複数ページは
@@ -165,16 +168,20 @@ async def inline_internal_image_urls(messages: list, user) -> list:
             if not isinstance(url, str):
                 continue
 
-            # "#page=N" は file URL にも "/" 参照にも付く(PDF のページ指定)
+            # "#page=N" は file URL にも参照にも付く(PDF のページ指定)
             ref, page = split_page(url)
             match = INTERNAL_FILE_URL_PATTERN.match(ref)
             if match:
                 data_url = await load(match.group(1), page)
-            elif ref.startswith("/") and not ref.startswith("//"):
-                # "//host/..." はプロトコル相対の外部 URL — 絶対 URL と同じく触らない
-                data_url = await load_reference(ref, page)
-            else:
+            elif ref.startswith("data:"):
+                # 既に実体(送信できる形)— 触らない
                 continue
+            else:
+                # 残りは全部 resolver(image_refs)へ — http(s) URL と "/" 始まりの fs パス
+                # だけが解決され、それ以外("//host/..." プロトコル相対、ftp: / file: 等の
+                # 他スキーム、相対パス)は None → "(image unavailable)"(fail closed。
+                # URL のまま残すと推論エンジンがリクエストごと落とす)
+                data_url = await load_reference(ref, page)
             if data_url is None:
                 part.clear()
                 part["type"] = "text"

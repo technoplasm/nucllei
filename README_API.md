@@ -266,8 +266,10 @@ separate reasoning block.
 
 `GET /ext/{name}/**` is a session-authenticated gate to admin-configured
 backends serving figures/PDFs referenced from documents. Point the upstream's
-public base URL at `/ext/{name}` and in-document relative references resolve in
-the browser with the session cookie. Two backends, chosen by the value's form:
+public base URL at `https://<nucllei host>/ext/{name}` (absolute — so the model
+can hand references back as URLs, see the namespace table below) and
+in-document references resolve in the browser with the session cookie. Two
+backends, chosen by the value's form:
 
 - `http(s)://…` — streaming proxy (2xx passed through, 404 → 404, anything else
   incl. redirects → 502 without `Location`).
@@ -282,19 +284,32 @@ forced to `Content-Disposition: attachment` + `nosniff`. There is no per-user
 access check — the admin-managed allowlist is the source of truth for what a
 backend exposes.
 
-`context_images` entries starting with `/` (`/ext/…`, `/mnt/…`, `/workspace/…`,
-optional `#page=N`) are resolved server-side by `nucllei/utils/image_refs.py`
-and inlined as base64 right before the model call: images as-is, PDFs
-rasterized page by page (default page 1) — no File is created. `/mnt/…` is read
-locally from the same read-only mount root the sandbox binds (#138);
-`/workspace/…` goes through the sandbox `/files/read` of the calling user.
-Anything outside those roots, oversize, missing, or neither image nor PDF
-becomes `(image unavailable)`. The mount contents are logged once at boot.
+**Reference namespaces** (what a model hands to `__feed_image__` / the feed
+tools, and what `context_images` carries — resolved server-side by
+`nucllei/utils/image_refs.py` `load_ref(ref, user_id)`, no exceptions):
 
-| Var                    | Kind | Default            | Effect                                                                                                                                                                                            |
-| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning |
-| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining `/`-prefixed context images                                                                                                                                  |
+| Form                                  | Meaning                   | Resolution                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| absolute URL (`http://` / `https://`) | something a browser opens | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (it is the same-origin display URL; the host is never connected to). Otherwise, if the URL starts with `<base>/` of an `EXT_PUBLIC_BASES` entry, the remainder goes to that name's backend. Anything else → unresolved (fail closed, not a generic fetch) |
+| `/workspace/…`, `/mnt/…`              | sandbox filesystem only   | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                       |
+| `/ext/…` (relative)                   | **rejected**              | `/ext/` is a URL, not a path — pass it as an absolute URL. Unresolved + warning                                                                                                                                                                                                                                                                  |
+
+An optional trailing `#page=N` (1-origin) selects a PDF page on any form (only
+the trailing `#page=N` is parsed, so it does not collide with a URL's own
+fragment). Resolved references are inlined as base64 right before the model
+call: images as-is, PDFs rasterized page by page (default page 1) — no File is
+created. Anything outside those roots, oversize, missing, or neither image nor
+PDF becomes `(image unavailable)` — as does any other `image_url` form
+(protocol-relative `//host/…`, non-http(s) schemes, relative paths), including
+an external URL passed in `image_url` on the headless `/api/chat/completions`
+path. The mount contents (and `EXT_PUBLIC_BASES` names lacking an
+`EXT_UPSTREAMS` backend) are logged once at boot.
+
+| Var                    | Kind | Default            | Effect                                                                                                                                                                                                                                                                                              |
+| ---------------------- | ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning                                                                                                   |
+| `EXT_PUBLIC_BASES`     | env  | empty              | comma-separated `name=baseURL` (same format as `EXT_UPSTREAMS`, http(s) only): the public root of the original intranet site for that name (e.g. `his=http://his-info.example/docs`). Absolute URLs under `<base>/` resolve via that name's `EXT_UPSTREAMS` backend; the name must also exist there |
+| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining context images (URL and filesystem references alike)                                                                                                                                                                                                           |
 
 ### 3.9 Audio (STT / TTS)
 
@@ -612,21 +627,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                   |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                        |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                               |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                 |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                       |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context for the follow-up call (the "model's eyes"); `ref` is a file_id or a `/`-prefixed reference (`/ext/…`, `/mnt/…`, `/workspace/…`, optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8); chat path only |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                        |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                 |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                             |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                          |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                  |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                         |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                  |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                    |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                 |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                        |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                          |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context for the follow-up call (the "model's eyes"); `ref` is a file_id, an absolute URL (`https://…/ext/{name}/…` or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                 |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                          |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                      |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                   |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                           |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                  |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                           |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                             |
 
 ### 5.4 Argument & result rendering
 
@@ -707,7 +722,9 @@ async def read_doc(self, path: str) -> Markdown:
   images become visible when the model writes
   `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image or a
   PDF page, call `__feed_image__(file_id_or_ref)` (§5.3) — it is injected into
-  the follow-up call; a `/mnt/…` or `/workspace/…` reference needs no File.
+  the follow-up call; an absolute `/ext/` URL, an `EXT_PUBLIC_BASES` URL, a
+  `/mnt/…` or a `/workspace/…` reference needs no File (§3.8 for the
+  namespaces).
 
 ### 5.6 Access control & assignment
 

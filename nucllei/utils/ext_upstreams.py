@@ -1,11 +1,14 @@
 """EXT_UPSTREAMS(#97)の共有ヘルパ。
 
 "/ext/{name}/**" ゲート(routers/ext.py — 人間の目)と context_images の
-"/ext/..." オンデマンド解決(utils/image_refs.py — モデルの目)が同じ基準を共有する:
+参照解決(utils/image_refs.py — モデルの目)が同じ基準を共有する:
 
 - backend allowlist は env EXT_UPSTREAMS 一本(SSRF の真実源。別 allowlist は作らない)。
   値の形で backend が決まる(#139): http(s) の base URL = HTTP 中継、
   `file:///abs/path` = ローカル root からの静的配信(`ext_backend`)
+- env EXT_PUBLIC_BASES(`name=原本 URL のルート`)は「モデルが渡した絶対 URL が
+  どの name の物か」の対応だけ(`match_public_base`)。到達先は相変わらず
+  EXT_UPSTREAMS の backend — base に当たっても name が EXT_UPSTREAMS に無ければ解決しない
 - path traversal 拒否は同一判定(percent デコード後の ".." セグメント・バックスラッシュ)
 - httpx AsyncClient はモジュールで 1 個を共有(リクエスト毎に生成しない)。
   follow_redirects は常に False — 上流の redirect 先(内部 URL)を辿らない・漏らさない
@@ -13,11 +16,11 @@
 
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from nucllei.env import EXT_UPSTREAMS
+from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
 
 # 接続 5s / 読み 30s。上流はローカル(Docker bridge)想定 — 不達・遅延で
 # ワーカーを長く掴ませない。
@@ -104,3 +107,44 @@ def ext_backend(name: str) -> tuple[str, str] | tuple[str, Path] | None:
     if value.startswith("file://"):
         return ("file", _resolved_root(value))
     return ("http", value)
+
+
+def match_public_base(url: str) -> tuple[str, str] | None:
+    """絶対 URL が EXT_PUBLIC_BASES のどれかの `<base>/` に前方一致すれば
+    `(name, rel)` を返す。rel は base の次のスラッシュから後ろ(path[?query][#fragment]
+    をそのまま — 分解は呼ぶ側)。当たらなければ None。
+
+    比較は urlsplit した scheme と netloc(host:port、小文字化 — URL の scheme / host は
+    大文字小文字を区別しない)の一致 + path の `<base path>/` 前方一致。netloc は
+    userinfo を含めて比べるので `http://his-info.test@evil/...` は base
+    `http://his-info.test` に当たらない。base はパース時に末尾スラッシュを落として
+    あるので `<base path>/` で比べることで `http://h/docs` が `http://h/docs2/...` に
+    当たることは無い。複数 base に当たる場合(片方がもう片方の prefix)は長い方を採る。
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    best: tuple[str, str] | None = None
+    best_len = -1
+    for name, base in EXT_PUBLIC_BASES.items():
+        try:
+            b = urlsplit(base)
+        except ValueError:
+            continue
+        if (
+            parts.scheme.lower() != b.scheme.lower()
+            or parts.netloc.lower() != b.netloc.lower()
+        ):
+            continue
+        prefix = f"{b.path}/"
+        if not parts.path.startswith(prefix) or len(prefix) <= best_len:
+            continue
+        rel = parts.path[len(prefix) :]
+        if parts.query:
+            rel += f"?{parts.query}"
+        if parts.fragment:
+            rel += f"#{parts.fragment}"
+        best = (name, rel)
+        best_len = len(prefix)
+    return best

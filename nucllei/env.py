@@ -501,17 +501,16 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 _EXT_UPSTREAM_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 
-def parse_ext_upstreams(value: str) -> dict[str, str]:
-    """`EXT_UPSTREAMS`("name=値" のカンマ区切り)を {name: 値} にパースする。
+def _parse_name_map(value: str, label: str, schemes: tuple[str, ...]) -> dict[str, str]:
+    """ "name=値" のカンマ区切りを {name: 値} にパースする(EXT_UPSTREAMS /
+    EXT_PUBLIC_BASES 共通の書式)。
 
-    name は [a-z0-9_-]+。値は http/https の base URL(HTTP 中継)か
-    `file:///abs/path`(ローカル root からの静的配信、#139)のどちらか — どちらの
-    backend かは値の形だけで決まり、別 env は増やさない。不正エントリは log.warning
-    して捨てる(1 エントリの typo で全体を殺さない)。末尾スラッシュは落として
-    正規化する(パス連結時の "//" を避ける。`file:///` 単体は root "/" の意味になり
-    捨てられる — 配備で root を / にする正当な用途は無い)。
+    name は [a-z0-9_-]+。値は `schemes` のいずれかで始まること。不正エントリは
+    log.warning して捨てる(1 エントリの typo で全体を殺さない)。末尾スラッシュは
+    落として正規化する(パス連結時の "//" を避ける。`file:///` 単体は root "/" の
+    意味になり捨てられる — 配備で root を / にする正当な用途は無い)。
     """
-    upstreams: dict[str, str] = {}
+    parsed: dict[str, str] = {}
     for entry in (value or "").split(","):
         entry = entry.strip()
         if not entry:
@@ -522,20 +521,43 @@ def parse_ext_upstreams(value: str) -> dict[str, str]:
         if (
             not sep
             or not _EXT_UPSTREAM_NAME_PATTERN.match(name)
-            or not base.startswith(("http://", "https://", "file:///"))
+            or not base.startswith(schemes)
         ):
-            log.warning(f"EXT_UPSTREAMS: ignoring invalid entry {entry!r}")
+            log.warning(f"{label}: ignoring invalid entry {entry!r}")
             continue
-        upstreams[name] = base
-    return upstreams
+        parsed[name] = base
+    return parsed
+
+
+def parse_ext_upstreams(value: str) -> dict[str, str]:
+    """`EXT_UPSTREAMS` をパースする。値は http/https の base URL(HTTP 中継)か
+    `file:///abs/path`(ローカル root からの静的配信、#139)のどちらか — どちらの
+    backend かは値の形だけで決まり、別 env は増やさない。書式は `_parse_name_map`。
+    """
+    return _parse_name_map(value, "EXT_UPSTREAMS", ("http://", "https://", "file:///"))
+
+
+def parse_ext_public_bases(value: str) -> dict[str, str]:
+    """`EXT_PUBLIC_BASES` をパースする。値は http/https の絶対 URL のみ(原本 URL の
+    ルート。file:// は「ブラウザが開く URL」でないので受けない)。書式は
+    EXT_UPSTREAMS と同じ `_parse_name_map`。
+    """
+    return _parse_name_map(value, "EXT_PUBLIC_BASES", ("http://", "https://"))
 
 
 # "/ext/{name}/**" の backend allowlist(例 "cage=file:///mnt/cage,his=http://172.17.0.1:13303")。
-# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の "/ext/..." 参照解決
+# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の参照解決
 # (utils/image_refs.py)も同じ map を引く(別 allowlist env は作らない)。
 EXT_UPSTREAMS = parse_ext_upstreams(os.environ.get("EXT_UPSTREAMS", ""))
 
-# feed(context_images)の "/" 始まり参照のオンデマンド解決(utils/image_refs.py —
+# 院内 web の原本 URL のルート(例 "his=http://his-info.example/docs")。モデルが tool に
+# 渡す**絶対 URL** が `<base>/` に前方一致すれば、その name の EXT_UPSTREAMS backend に
+# 残りを渡して解決する(utils/image_refs.py)。name は EXT_UPSTREAMS 側にも要る —
+# ここは「どの URL がどの backend の物か」の対応だけで、到達先(SSRF の真実源)は
+# 相変わらず EXT_UPSTREAMS 一本。既定は空 = 絶対 URL は自オリジンの /ext/ 形しか解決しない。
+EXT_PUBLIC_BASES = parse_ext_public_bases(os.environ.get("EXT_PUBLIC_BASES", ""))
+
+# feed(context_images)の参照(絶対 URL / sandbox fs パス)のオンデマンド解決(utils/image_refs.py —
 # ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。
 EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")
 try:

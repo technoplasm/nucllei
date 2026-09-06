@@ -697,6 +697,15 @@ def test_url_exclusive_with_file_id_and_filename():
         assert result.startswith("ERROR") and "同時指定" in result, extra
 
 
+@contextlib.contextmanager
+def _patched(mapping: dict, key, value):
+    mapping[key] = value
+    try:
+        yield
+    finally:
+        mapping.pop(key, None)
+
+
 def test_url_rejects_non_url():
     env = _UrlEnv()
     result = env.run(url="ext/cage/x.png")
@@ -709,7 +718,7 @@ def test_url_rejects_non_url():
 def test_self_fetch_forwards_auth_headers():
     env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
     result = env.run(
-        url="/ext/cage/static/kansen_manual/docs/10-14.pdf",
+        url="https://llens.test/ext/cage/static/kansen_manual/docs/10-14.pdf",
         __request__=_FakeRequest({"cookie": "token=abc", "authorization": "Bearer x"}),
     )
     assert env.gets == [
@@ -738,23 +747,85 @@ def test_self_fetch_files_url_uses_content_disposition_name():
     assert not result.startswith("ERROR")
 
 
+def test_self_fetch_absolute_ext_url_any_host():
+    # path が /ext/{name}/... の完全 URL は host を問わず自分自身への self fetch
+    # (認証ヘッダ付き)。与えられた host には接続しない(#139 の名前空間規則)
+    env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
+    result = env.run(
+        url="https://elsewhere.example/ext/cage/static/x.pdf?rev=2",
+        __request__=_FakeRequest({"cookie": "token=abc"}),
+    )
+    assert env.gets == [
+        (
+            "http://127.0.0.1:8080/ext/cage/static/x.pdf?rev=2",
+            {"cookie": "token=abc"},
+        )
+    ]
+    assert env.writes[0]["payload"]["path"] == "imports/x.pdf"
+    assert not result.startswith("ERROR")
+
+
 def test_self_fetch_without_request_sends_no_headers():
     env = _UrlEnv(responses=[(200, {}, b"x")])
-    env.run(url="/ext/cage/a.png")
+    env.run(url="https://llens.test/ext/cage/a.png")
     assert env.gets == [("http://127.0.0.1:8080/ext/cage/a.png", {})]
 
 
 def test_self_fetch_auth_failure_surfaces_status():
     env = _UrlEnv(responses=[(401, {}, b"")])
-    result = env.run(url="/ext/cage/a.png")
+    result = env.run(url="https://llens.test/ext/cage/a.png")
     assert result.startswith("ERROR") and "401" in result
     assert env.writes == []
+
+
+def test_relative_ext_path_rejected():
+    # 名前空間は image_refs と同じ: "/" 始まりは sandbox の fs、/ext/ は URL(絶対で渡す)
+    env = _UrlEnv(responses=[(200, {}, b"x")])
+    result = env.run(url="/ext/cage/a.png")
+    assert result.startswith("ERROR") and "絶対 URL" in result
+    assert env.gets == [] and env.writes == []
+
+
+def test_sandbox_paths_need_no_import():
+    env = _UrlEnv(responses=[(200, {}, b"x")])
+    for u in ("/workspace/x", "/mnt/cage/x.pdf"):
+        result = env.run(url=u)
+        assert result.startswith("ERROR") and "取り込み不要" in result, u
+    assert env.gets == [] and env.writes == []
+
+
+def test_other_relative_paths_rejected():
+    env = _UrlEnv(responses=[(200, {}, b"x")])
+    result = env.run(url="/etc/passwd")
+    assert result.startswith("ERROR") and env.gets == []
+
+
+def test_public_base_url_goes_through_self_ext():
+    # EXT_PUBLIC_BASES 配下の原本 URL は原本 host へ直接行かず /ext/{name}/{rel} の self fetch
+    from nucllei.env import EXT_PUBLIC_BASES
+
+    env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
+    with _patched(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs"):
+        result = env.run(
+            url="http://his-info.test/docs/a/b.pdf?rev=2#page=3",
+            __request__=_FakeRequest({"cookie": "token=abc"}),
+        )
+    assert env.gets == [
+        ("http://127.0.0.1:8080/ext/his/a/b.pdf?rev=2", {"cookie": "token=abc"})
+    ]
+    assert not result.startswith("ERROR")
+
+
+def test_malformed_absolute_url_is_error():
+    env = _UrlEnv(responses=[(200, {}, b"x")])
+    result = env.run(url="http://[::1/ext/cage/a.png")
+    assert result.startswith("ERROR") and env.gets == []
 
 
 def test_self_fetch_does_not_follow_redirects():
     env = _UrlEnv(responses=[(302, {"location": "http://10.0.0.5/x"}, b"")])
     result = env.run(
-        url="/ext/cage/a.png",
+        url="https://llens.test/ext/cage/a.png",
         __request__=_FakeRequest({"cookie": "token=abc"}),
     )
     assert result.startswith("ERROR") and "redirect" in result

@@ -152,8 +152,8 @@ def test_convert_builds_image_url_from_context_images():
 
 
 def test_convert_context_images_mixed_file_id_and_ext_url():
-    # #97: "/" 始まりのエントリ("/ext/{name}/..." 等)はそのまま URL、
-    # それ以外は従来通り file_id として /api/v1/files/{id}/content に整形
+    # #97 / #139: スキーム付き URL("https://…/ext/{name}/...")と "/" 始まりの fs 参照は
+    # そのまま URL、それ以外は従来通り file_id として /api/v1/files/{id}/content に整形
     blocks = [
         {
             "type": "tool_calls",
@@ -164,7 +164,11 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
                 {
                     "tool_call_id": "c1",
                     "content": "図を提示しました。",
-                    "context_images": ["abc", "/ext/cage/figs/a.png"],
+                    "context_images": [
+                        "abc",
+                        "https://llens.test/ext/cage/figs/a.png",
+                        "/mnt/cage/x.pdf#page=2",
+                    ],
                 }
             ],
         },
@@ -179,7 +183,11 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
         for p in user_imgs[0]["content"]
         if p.get("type") == "image_url"
     ]
-    assert urls == ["/api/v1/files/abc/content", "/ext/cage/figs/a.png"]
+    assert urls == [
+        "/api/v1/files/abc/content",
+        "https://llens.test/ext/cage/figs/a.png",
+        "/mnt/cage/x.pdf#page=2",
+    ]
 
 
 def test_convert_tool_call_missing_arguments_sent_as_empty_string():

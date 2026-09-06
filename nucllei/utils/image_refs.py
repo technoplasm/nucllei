@@ -1,28 +1,43 @@
 """「参照 → バイト」の共有 resolver(#139)。
 
 モデルに見せる画像参照は 2 つの形しか無い: `file_id`(ユーザー添付 = Storage)と、
-tool の戻り値に literal で出る **"/" 始まりの参照**。後者の解決規則をここ 1 箇所に
-置く — feed 側の tool(配備層の feed_image / fetch_url、nucllei プロセス内で動く)と、
-送信直前に image_url を data URL 化する `utils/file_images.py` の両方がこれを呼ぶ。
-規則を 2 箇所に持つと、tool が「見えた」と判断したものが送信時に落ちる(またはその逆)
-ずれが生まれる。
+tool の戻り値に literal で出る **参照文字列**(絶対 URL または sandbox の fs パス)。
+後者の解決規則をここ 1 箇所に置く — feed 側の tool(配備層の feed_image / fetch_url、
+nucllei プロセス内で動く)と、送信直前に image_url を data URL 化する
+`utils/file_images.py` の両方がこれを呼ぶ。規則を 2 箇所に持つと、tool が「見えた」と
+判断したものが送信時に落ちる(またはその逆)ずれが生まれる。
 
-受ける参照の形と解決先:
+名前空間は 2 つで、形で機械的に分かれる(例外なし):
 
-- `/ext/{name}/{path}[?q]` — EXT_UPSTREAMS の backend(`ext_upstreams.ext_backend`)。
-  file なら root 内をローカル読み、http なら httpx で取得(content-type は上流ヘッダ)。
-  文書本文には `/ext/cage/static/X` が literal で焼き込まれている(cage の
-  PUBLIC_BASE)ので、モデルはこれを読み替えずそのまま渡せばよい。
-- `/mnt/...`(`RO_MOUNT_ROOT` 配下)— nucllei 自身に read-only で bind された参照用
-  データ(sandbox と同じ置き場 #138)。resolve() して root 内でなければ読まない。
-- `/workspace/...` — sandbox の `/files/read`(呼び出しユーザーの workspace に閉じる)。
-  jail 内で作ったものをモデルが見るだけなら、Files に登録する必要は無い。
-- それ以外(絶対 URL、`/api/v1/files/...`、相対)— ここでは扱わない(None)。
+- **スキーム付き URL**(`http://` / `https://`)— ブラウザが開くもの。
+  - path が `/ext/{name}/{rest}` なら **host を問わず** EXT_UPSTREAMS の backend
+    (`ext_upstreams.ext_backend`)で解決する。これは自オリジンの表示 URL
+    (文書本文には `https://<自ホスト>/ext/cage/static/X` が literal で焼き込まれている —
+    cage の PUBLIC_BASE)で、モデルは読み替えずそのまま渡せばよい。host を検証しない
+    のは、解決が backend 経由で与えられた host には接続しないため(SSRF の真実源は
+    EXT_UPSTREAMS 一本)。
+  - それ以外は env EXT_PUBLIC_BASES(`name=院内 web の原本 URL のルート`)のいずれかの
+    `<base>/` に前方一致すれば、その name の backend に残り(`rel`)を渡して解決する
+    (`ext_upstreams.match_public_base`)。
+  - どれにも当たらなければ None(fail closed。任意の URL を取りに行く口ではない)。
+  file backend なら root 内をローカル読み、http backend なら httpx で取得
+  (content-type は上流ヘッダ)。
+- **"/" 始まり = sandbox の fs パスだけ**:
+  - `/mnt/...`(`RO_MOUNT_ROOT` 配下)— nucllei 自身に read-only で bind された参照用
+    データ(sandbox と同じ置き場 #138)。resolve() して root 内でなければ読まない。
+  - `/workspace/...` — sandbox の `/files/read`(呼び出しユーザーの workspace に閉じる)。
+    jail 内で作ったものをモデルが見るだけなら、Files に登録する必要は無い。
+  - **`/ext/...` は受けない**(None + warning)。`/ext/` は URL であって fs パスでは
+    ない — 同じ "/" 始まりで同居させると、モデルが `/ext/` を fs と誤認したり fs パスを
+    URL に書き換えたりする事故の温床になる。URL は絶対 URL で渡す。
+- それ以外(`/api/v1/files/...`、相対)— ここでは扱わない(None)。
 
 **File を発行しない**: PDF は送信直前にページを画像化して data URL にする
 (`rasterize_pdf_page`)。「見るために置く」ものが Storage / Files に永久に残る
 経路(旧 feed_image の `_register_png`)を無くすのが目的の 1 つ。ページ指定は参照の
-`#page=N`(1-origin)に載せる(`split_page` / `with_page`)。
+`#page=N`(1-origin)に載せる(`split_page` / `with_page`)。URL でも同じ — 末尾の
+`#page=N` だけを見るので、URL 自身の fragment とは衝突しない(`#page=N` は常に
+一番後ろに付く。`https://h/x.pdf#page=3` → base `https://h/x.pdf`)。
 
 **fail closed**: 境界(root の外・サイズ上限・不達・不明な種別)はすべて None +
 log.warning。tool 側に on/off の valve は置かない — 境界を持つのは解決層だけで、
@@ -38,15 +53,22 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
 from nucllei.builtin_tools import sandbox
-from nucllei.env import EXT_INLINE_MAX_BYTES, EXT_UPSTREAMS, SRC_LOG_LEVELS
+from nucllei.env import (
+    EXT_INLINE_MAX_BYTES,
+    EXT_PUBLIC_BASES,
+    EXT_UPSTREAMS,
+    SRC_LOG_LEVELS,
+)
 from nucllei.utils.ext_upstreams import (
     ext_backend,
     get_ext_client,
     has_path_traversal,
+    match_public_base,
 )
 
 log = logging.getLogger(__name__)
@@ -63,10 +85,17 @@ WORKSPACE_PREFIX = "/workspace/"
 # PDF ページ画像化の解像度。valve にしない — モデルが読める解像度は配備で変わらない。
 PDF_RASTER_DPI = 150
 
-# "/ext/{name}/{path}[?q]"。**相対のみ** — 絶対 URL は外部 URL として扱わない。
-# name の文字種は EXT_UPSTREAMS のパース(env.py)と同じ [a-z0-9_-]+。
-EXT_REF_PATTERN = re.compile(r"^/ext/([a-z0-9_-]+)/([^?#]+)(\?[^#]*)?$")
+# 絶対 URL の **path 部** "/ext/{name}/{rest}"(query / fragment は urlsplit で分離済み)。
+# host は問わない(module docstring)。name の文字種は EXT_UPSTREAMS のパース(env.py)と
+# 同じ [a-z0-9_-]+。"/" 始まりの参照には掛けない — `/ext/...` は fs パスとして受けない。
+EXT_URL_PATH_PATTERN = re.compile(r"^/ext/([a-z0-9_-]+)/(.+)$")
 
+# "/" 始まりのうち、URL を fs パスの形で渡してきたもの(受けない)。
+_EXT_PATH_PREFIX = "/ext/"
+
+_ABSOLUTE_URL_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
+
+# 末尾の "#page=N" だけを見る(URL 自身の fragment とは衝突しない — module docstring)。
 _PAGE_SUFFIX_PATTERN = re.compile(r"^(.*)#page=(\d+)$")
 
 # 種別判定の magic。content-type と拡張子は自己申告(上流ヘッダ / ファイル名)なので
@@ -89,7 +118,8 @@ class LoadedRef:
 
 
 def split_page(ref: str) -> tuple[str, int | None]:
-    """ "/a.pdf#page=3" → ("/a.pdf", 3)。ページ指定が無ければ (ref, None)。"""
+    """ "/a.pdf#page=3" → ("/a.pdf", 3)。ページ指定が無ければ (ref, None)。
+    URL でも同じ("https://h/a.pdf#page=3" → ("https://h/a.pdf", 3))。"""
     match = _PAGE_SUFFIX_PATTERN.match(ref)
     if not match:
         return ref, None
@@ -209,10 +239,19 @@ async def _load_ext(name: str, path: str, query: str) -> LoadedRef | None:
         return None
     kind, target = backend
     if kind == "file":
+        # URL の path は percent-encoded のまま来る(文書に焼かれた URL は日本語
+        # ディレクトリを %E7%A5%9E… で持つ)。ブラウザ側 routers/ext.py は Starlette が
+        # decode 済みの path を受けるので、同じ URL が同じファイルに当たるようここでも
+        # decode してから結合する。traversal 判定は decode 後で見る(念のため再判定)。
+        decoded = unquote(path)
+        if has_path_traversal(decoded):
+            log.warning(f"image_refs: rejecting traversal ext path (name={name})")
+            return None
         # 先頭 "/" は Path 結合で root を捨てさせる(routers/ext.py と同じ扱い)
         return await asyncio.to_thread(
-            _read_confined, target, target / path.lstrip("/"), f"ext:{name}"
+            _read_confined, target, target / decoded.lstrip("/"), f"ext:{name}"
         )
+    # http backend へは encode されたまま渡す(上流が decode する)
     return await _fetch_http(f"{target}/{path}{query or ''}", name, path)
 
 
@@ -282,24 +321,65 @@ async def _load_workspace(rel_path: str, user_id: str) -> LoadedRef | None:
     )
 
 
-async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
-    """ "/" 始まりの参照(`#page` を含まない)をバイト列にする。解決できなければ None。
-
-    受ける形と境界は module docstring のとおり。サイズ上限は EXT_INLINE_MAX_BYTES
-    (どの経路も同じ)。
-    """
-    if not isinstance(ref, str) or not ref.startswith("/"):
+async def _load_url(url: str) -> LoadedRef | None:
+    """スキーム付き URL(traversal / 制御文字は入口で拒否済み)を backend で解決する。"""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        log.warning("image_refs: malformed URL")
         return None
-    # 制御文字 / ".." / バックスラッシュはどの形でも読まない。/ext/ と /workspace/ の分岐は
-    # 個別にも見るが、/mnt/ 直読みは Path.resolve() が NUL で ValueError を投げる
+    query = f"?{parts.query}" if parts.query else ""
+
+    match = EXT_URL_PATH_PATTERN.match(parts.path)
+    if match:
+        # 自オリジンの表示 URL。host は見ない(module docstring)
+        name, rest = match.groups()
+        return await _load_ext(name, rest, query)
+
+    hit = match_public_base(url)
+    if hit is None:
+        log.warning(
+            "image_refs: absolute URL is neither an /ext/ URL nor under "
+            f"EXT_PUBLIC_BASES ({url[:80]!r})"
+        )
+        return None
+    name, rel = hit
+    rel_path, sep, rel_query = rel.split("#", 1)[0].partition("?")
+    if not rel_path:
+        log.warning(f"image_refs: empty path under EXT_PUBLIC_BASES (name={name})")
+        return None
+    return await _load_ext(name, rel_path, f"?{rel_query}" if sep else "")
+
+
+async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
+    """参照(`#page` を含まない)をバイト列にする。解決できなければ None。
+
+    受ける形は 2 つ — スキーム付き URL(`http(s)://`)と sandbox の fs パス("/" 始まりの
+    `/workspace/...` / `/mnt/...`)。境界は module docstring のとおり。サイズ上限は
+    EXT_INLINE_MAX_BYTES(どの経路も同じ)。
+    """
+    if not isinstance(ref, str):
+        return None
+    is_url = bool(_ABSOLUTE_URL_PATTERN.match(ref))
+    if not is_url and not ref.startswith("/"):
+        return None
+    # 制御文字 / ".." / バックスラッシュはどの形でも読まない(URL は path / query ごと
+    # 文字列全体に掛ける — urlsplit は CR/LF/TAB を黙って落とすので、分解前に見る)。
+    # 分岐先でも個別に見るが、/mnt/ 直読みは Path.resolve() が NUL で ValueError を投げる
     # (fail closed の約束を破って 500 になる) ので、入口で一律に落とす。
     if has_path_traversal(ref):
         log.warning("image_refs: rejecting reference with traversal/control chars")
         return None
 
-    match = EXT_REF_PATTERN.match(ref)
-    if match:
-        return await _load_ext(*match.groups())
+    if is_url:
+        return await _load_url(ref)
+
+    if ref.startswith(_EXT_PATH_PREFIX):
+        log.warning(
+            "image_refs: '/ext/...' is a URL, not a filesystem path — pass it as an "
+            f"absolute URL (https://<host>/ext/...) ({ref[:80]!r})"
+        )
+        return None
 
     if ref.startswith(WORKSPACE_PREFIX):
         return await _load_workspace(ref[len(WORKSPACE_PREFIX) :], user_id)
@@ -318,6 +398,8 @@ def log_mounts() -> None:
     """起動時 1 行: `RO_MOUNT_ROOT` に何が見えているか(sandbox の `_log_ro_mounts` と
     同じ流儀)。配備側が volume を足すだけで増える口で、env を見ても分からないため。
     EXT_UPSTREAMS の file root が無ければ WARNING — その name は全 404 になる。
+    EXT_PUBLIC_BASES の name が EXT_UPSTREAMS に無ければ WARNING — その base 配下の
+    URL は到達先が無く解決されない。
     """
     root = Path(RO_MOUNT_ROOT)
     try:
@@ -334,4 +416,10 @@ def log_mounts() -> None:
             log.warning(
                 f"[nucllei] WARNING: EXT_UPSTREAMS {name} の root {backend[1]} が無い "
                 f"(/ext/{name}/** は全て 404 になる)"
+            )
+    for name, base in EXT_PUBLIC_BASES.items():
+        if name not in EXT_UPSTREAMS:
+            log.warning(
+                f"[nucllei] WARNING: EXT_PUBLIC_BASES {name}={base} に対応する "
+                f"EXT_UPSTREAMS が無い({base}/** の参照は解決されない)"
             )

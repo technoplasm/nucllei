@@ -29,6 +29,8 @@ import uuid
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import unquote, urljoin, urlsplit
 
+from nucllei.utils.ext_upstreams import match_public_base
+
 import aiohttp
 from pydantic import BaseModel, Field
 
@@ -600,9 +602,9 @@ class Tools:
         :param file_id: 取り込むファイルの file_id。添付一覧に出ていないファイルでも
             file_id が分かっていれば取り込める。
         :param url: 取り込むリソースの URL。file_id/filename と排他。受けられる形は 2 つ:
-            "/" 始まりの相対パス (チャット本文に出る同一オリジン参照 — read_doc の
-            /ext/... や /api/v1/files/{id}/content — を literal のまま渡す) と、
-            院内の完全な http(s) URL。
+            完全な http(s) URL (文書に出る https://…/ext/... の表示 URL や院内 web の
+            原本 URL を literal のまま渡す) と、"/" 始まりの同一オリジン相対パス
+            (/api/v1/files/{id}/content)。
             jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
         """
         if not __user__ or not __user__.get("id"):
@@ -663,25 +665,69 @@ class Tools:
 
     # ---- send_to_workspace の url ソース ---------------------------------------
     async def _import_url(self, u: str, user_id: str, request) -> str:
-        """url を取得して imports/ へ書く。受けるのは 2 形だけ:
+        """url を取得して imports/ へ書く。
 
-        - "/" 始まりの相対パス → 自分自身 (SELF_BASE_URL) に、呼び出し元リクエストの
-          認証ヘッダをそのまま付けて GET — ブラウザがチャット画面で解決するのと同じ
-          意味論。/ext/ の session 認証も /api/v1/files/... の所有 ACL もサーバ側
-          ルートがそのまま効くので、tool 側は経路ごとの検査を持たない。
-          宛先が自分固定なので CIDR ガードは通さない。パスはモデル制御下だが、
-          本人の権限で本人が到達できるルートを GET できるだけ (= ブラウザ相当) という
-          受容 — 安全の根拠は route 側の認証・ACL であって宛先固定ではない
-        - 完全な http(s) URL → 院内 LAN fetch (_fetch_lan の宛先ガード付き。
+        参照の名前空間は image_refs と同じ (README §3.8): URL はスキーム付き、"/" 始まりは
+        sandbox の fs。
+
+        - "/api/v1/files/{id}/content" (添付の同一オリジン相対パス)、および path が
+          /ext/{name}/... の完全 URL (host を問わない — 自オリジンの表示 URL) →
+          自分自身 (SELF_BASE_URL) に、呼び出し元リクエストの認証ヘッダをそのまま付けて
+          GET — ブラウザがチャット画面で解決するのと同じ意味論。/ext/ の session 認証も
+          /api/v1/files/... の所有 ACL もサーバ側ルートがそのまま効くので、tool 側は
+          経路ごとの検査を持たない。宛先が自分固定なので CIDR ガードは通さない。
+          パスはモデル制御下だが、本人の権限で本人が到達できるルートを GET できるだけ
+          (= ブラウザ相当) という受容 — 安全の根拠は route 側の認証・ACL であって
+          宛先固定ではない
+        - EXT_PUBLIC_BASES 配下の完全 URL (院内 web の原本 URL) → 原本 host へは行かず、
+          その name の "/ext/{name}/{rel}" として上と同じ self fetch (image_refs が
+          backend 経由で解決するのと同じ向き)
+        - それ以外の完全な http(s) URL → 院内 LAN fetch (_fetch_lan の宛先ガード付き。
           認証ヘッダは付けない — session を外へ持ち出さない)
+        - 相対 "/ext/..." は受けない (URL は絶対 URL で渡す)。"/workspace/..." "/mnt/..."
+          は sandbox に既に見えているので取り込む必要が無い (ERROR で案内)
         """
         max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
         if u.startswith("/"):
-            got = await self._fetch_self(u, max_bytes, request)
+            if u.startswith("/api/v1/files/"):
+                got = await self._fetch_self(u, max_bytes, request)
+            elif u.startswith("/ext/"):
+                return (
+                    "ERROR: /ext/... は URL であって fs パスではない。"
+                    "絶対 URL (https://<host>/ext/...) で渡すこと。"
+                )
+            elif u.startswith(("/workspace/", "/mnt/")):
+                return (
+                    f"ERROR: {u} は sandbox から既に見えている (取り込み不要)。"
+                    "run_python / run_shell からそのまま読むこと。"
+                )
+            else:
+                return (
+                    "ERROR: / 始まりで受けるのは /api/v1/files/{id}/content だけ "
+                    "(URL は絶対 URL で、sandbox のファイルは /workspace/ か /mnt/ で)。"
+                )
         elif u.lower().startswith(("http://", "https://")):
-            got = await self._fetch_lan(u, max_bytes)
+            try:
+                parts = urlsplit(u)
+            except ValueError as e:
+                return f"ERROR: URL を解釈できない ({e})。"
+            query = f"?{parts.query}" if parts.query else ""
+            hit = match_public_base(u)
+            if parts.path.startswith("/ext/"):
+                # 自オリジンの表示 URL — 相対パスと同じ self fetch (認証ヘッダ付き)
+                got = await self._fetch_self(parts.path + query, max_bytes, request)
+            elif hit is not None:
+                # 原本 URL → その name の /ext/ に寄せる (原本 host へ直接は行かない)
+                name, rel = hit
+                rel = rel.split("#", 1)[0]
+                got = await self._fetch_self(f"/ext/{name}/{rel}", max_bytes, request)
+            else:
+                got = await self._fetch_lan(u, max_bytes)
         else:
-            return "ERROR: url は完全な http(s) URL か / 始まりの相対パスで渡すこと。"
+            return (
+                "ERROR: url は完全な http(s) URL か "
+                "/api/v1/files/{id}/content の相対パスで渡すこと。"
+            )
 
         if isinstance(got, str):
             return got

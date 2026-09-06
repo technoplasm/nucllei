@@ -190,8 +190,13 @@ async def spawn_execution(
     tool_name: str,
     entry: dict,
     params: dict,
+    origin: dict | None = None,
 ):
     """exec 行を作って runner task を起動し、running 形を即返す(§5 spawn)。
+
+    origin(`subagent.request_origin` の `{"scheme","host"}`)は exec 行の
+    meta["origin"] に残す — 配達の続きターン(execution_resume)には受信 Request が
+    無いので、ここで残した値から __request__ を復元する。
 
     execute_tool_calls の background 分岐から呼ばれる。params は unknown-drop
     (allowed_params フィルタ)済みの実引数であること(そのまま args に監査保存し、
@@ -231,6 +236,7 @@ async def spawn_execution(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             args=params,
+            meta={"origin": origin} if origin else None,
         )
         if row is None:
             raise RuntimeError(f"execution row insert failed (exec_id={exec_id})")
@@ -241,7 +247,9 @@ async def spawn_execution(
         # 走行判定が壊れる(§5)。親ターンの stop(素の chat_id 宛)も届かない
         # = D6(stop 非伝播)がここで構造的に成立する。
         task_id, task = tasks.create_task(
-            _run_execution(exec_id, tool_call_id, tool_name, entry, params),
+            _run_execution(
+                exec_id, tool_call_id, tool_name, entry, params, origin=origin
+            ),
             id=f"exec:{chat_id}",
         )
         task.add_done_callback(
@@ -285,7 +293,12 @@ async def spawn_execution(
 
 
 async def _run_execution(
-    exec_id: str, tool_call_id: str, tool_name: str, entry: dict, params: dict
+    exec_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    entry: dict,
+    params: dict,
+    origin: dict | None = None,
 ) -> None:
     """runner: callable を走らせ、終端(done/failed)を guarded UPDATE で書く。
 
@@ -364,6 +377,9 @@ async def _run_execution(
             displays = sink.displays()
             if displays:
                 meta["display"] = displays
+            # finish_execution の meta は置換なので、insert 時に残した origin を持ち越す
+            if origin:
+                meta["origin"] = origin
             usage = raw.get("usage") if isinstance(raw, dict) else None
             outcome = {
                 "status": "done",

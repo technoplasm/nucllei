@@ -13,6 +13,11 @@ import json
 INTERRUPTED_TOOL_RESULT = "[interrupted: this tool call produced no result]"
 
 
+def _is_absolute_url(entry: str) -> bool:
+    """context_images のエントリがスキーム付き URL か(image_refs と同じ判定)。"""
+    return entry[:8].lower().startswith(("http://", "https://"))
+
+
 def serialize_text_blocks(content_blocks: list) -> str:
     """text ブロックのみを join した派生 content。
 
@@ -114,10 +119,10 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
     - tool 結果の画像(results[].context_images — tool が emitter
       __feed_image__ で push し middleware が載せる、#89)は、tool メッセージ群の直後に
       image_url を持つ user メッセージとして再投入する: role:tool の content は
-      文字列契約で画素を運べないため。エントリが "/" 始まり("/ext/{name}/..." 等の
-      相対 URL、#97)ならそのまま URL に、それ以外は file_id として
-      `/api/v1/files/{id}/content` に整形する。実体化(base64)は送信直前
-      inline_internal_image_urls の 1 回に一任する。
+      文字列契約で画素を運べないため。エントリがスキーム付き URL
+      (`https://…/ext/{name}/...` #97)か "/" 始まりの fs パス("/mnt/..." "/workspace/...")
+      ならそのまま URL に、それ以外は file_id として `/api/v1/files/{id}/content` に
+      整形する。実体化(base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
     - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
       context_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
       ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。
@@ -203,11 +208,11 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
 
             result_image_urls = [
                 (
-                    # "/" 始まりは参照文字列のまま("/ext/..." #97、"/mnt/..." "/workspace/..."
-                    # "/api/v1/files/{id}/content#page=N" #139 — 実体化は送信直前の
-                    # utils/file_images.py)
+                    # スキーム付き URL("https://…/ext/..." #97)と "/" 始まり("/mnt/..."
+                    # "/workspace/..." "/api/v1/files/{id}/content#page=N" #139)は参照文字列の
+                    # まま — 実体化は送信直前の utils/file_images.py
                     entry
-                    if entry.startswith("/")
+                    if entry.startswith("/") or _is_absolute_url(entry)
                     else f"/api/v1/files/{entry}/content"
                 )
                 for result in sendable_results

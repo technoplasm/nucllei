@@ -354,6 +354,85 @@ class TestRunSubagent(AbstractPostgresTest):
         assert child_id not in listed
         assert child_id in {c.id for c in self.Chats.get_chats()}
 
+    def test_child_turn_request_inherits_forwarded_headers(self, monkeypatch):
+        """子ターンの __request__ は親の scope(headers / scheme / server …)を引き継ぐ —
+        tool が X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組める。"""
+        from starlette.requests import Request
+
+        from nucllei.utils import middleware
+
+        self._patch_child_pipeline(monkeypatch)
+        seen = []
+
+        async def capturing_payload(
+            request, form_data, user, metadata, model, events_stream
+        ):
+            seen.append(request)
+            return form_data, metadata, []
+
+        monkeypatch.setattr(middleware, "process_chat_payload", capturing_payload)
+
+        fake = self._request()
+        parent = Request(
+            scope={
+                "type": "http",
+                "app": fake.app,
+                "method": "POST",
+                "path": "/api/chat/completions",
+                "raw_path": b"/api/chat/completions",
+                "query_string": b"",
+                "root_path": "",
+                "scheme": "http",
+                "http_version": "1.1",
+                "server": ("127.0.0.1", 13301),
+                "client": ("10.105.2.9", 51234),
+                "headers": [
+                    (b"host", b"10.105.2.1"),
+                    (b"x-forwarded-proto", b"https"),
+                    (b"cookie", b"token=abc"),
+                ],
+            }
+        )
+        tool = self._build_tool(request=parent)
+        result = asyncio.run(
+            tool["callable"](preset_id="researcher", instruction="1+1 は?")
+        )
+        assert result["ok"] is True
+
+        assert len(seen) == 1
+        child = seen[0]
+        assert child is not parent  # 親 Request は使い回さない(state を汚さない)
+        assert child.app is parent.app
+        assert child.headers["x-forwarded-proto"] == "https"
+        assert child.headers["host"] == "10.105.2.1"
+        assert child.headers["cookie"] == "token=abc"
+        assert child.scope["server"] == ("127.0.0.1", 13301)
+        assert child.scope["client"] == ("10.105.2.9", 51234)
+        # path は引き継がない("/" — 特定ルートの要求ではない)が url は組める
+        assert str(child.url) == "http://10.105.2.1/"
+        # 親の scope と headers を共有しない(子で足しても親に漏れない)
+        child.scope["headers"].append((b"x-extra", b"1"))
+        assert (b"x-extra", b"1") not in parent.scope["headers"]
+
+    def test_child_turn_request_from_thin_parent_is_well_formed(self, monkeypatch):
+        # 親が scope を持たない薄い fake でも request.url が例外にならない
+        from nucllei.utils import middleware
+
+        self._patch_child_pipeline(monkeypatch)
+        seen = []
+
+        async def capturing_payload(
+            request, form_data, user, metadata, model, events_stream
+        ):
+            seen.append(request)
+            return form_data, metadata, []
+
+        monkeypatch.setattr(middleware, "process_chat_payload", capturing_payload)
+        tool = self._build_tool()
+        asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
+        assert str(seen[0].url) == "/"
+        assert list(seen[0].headers.items()) == []
+
     def test_spawn_inactive_preset_synthesizes_child_model(self, monkeypatch):
         """is_active=False の preset は MODELS に載らないが spawn できる(2026-08-14 仕様変更)。
 
@@ -949,3 +1028,44 @@ class TestRunSubagent(AbstractPostgresTest):
             for e in events
         )
         assert children[0].kind == "agent"
+
+
+def test_request_origin_reads_forwarded_headers_like_doc_tool():
+    from starlette.requests import Request
+
+    from nucllei.utils.subagent import internal_request, request_origin
+
+    def req(headers, scheme="http"):
+        return Request(
+            scope={
+                "type": "http",
+                "path": "/",
+                "query_string": b"",
+                "scheme": scheme,
+                "headers": headers,
+            }
+        )
+
+    # X-Forwarded-* 優先(Caddy 越し)、先頭の値だけ
+    assert request_origin(
+        req(
+            [
+                (b"host", b"127.0.0.1:13301"),
+                (b"x-forwarded-proto", b"https, http"),
+                (b"x-forwarded-host", b"llens.example, 10.0.0.1"),
+            ]
+        )
+    ) == {"scheme": "https", "host": "llens.example"}
+    # forwarded 無し → Host と scope の scheme
+    assert request_origin(req([(b"Host", b"10.105.2.1:8080")], scheme="https")) == {
+        "scheme": "https",
+        "host": "10.105.2.1:8080",
+    }
+    # host が無ければ None(scope 無しの薄い fake も None)
+    assert request_origin(req([])) is None
+    assert request_origin(object()) is None
+
+    # origin から復元した Request は同じ読み方で同じ値を返す(往復)
+    restored = internal_request(None, origin={"scheme": "https", "host": "h.test"})
+    assert request_origin(restored) == {"scheme": "https", "host": "h.test"}
+    assert str(restored.url) == "https://h.test/"

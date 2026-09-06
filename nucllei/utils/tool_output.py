@@ -260,19 +260,20 @@ def feed_image(file_id: str) -> None:
     """`__feed_image__` 実体。実行中 tool-call の sink に画像参照を積む。
 
     どの tool でも(view_image に限らず)モデルの目に画素を流せる汎用経路。
-    引数は file_id 文字列のほか、**"/" 始まりの参照**("/ext/{name}/..." /
-    "/mnt/..." / "/workspace/..."、任意で末尾 "#page=N" — 解決規則は
+    引数は file_id 文字列のほか、**参照文字列**(スキーム付き URL
+    `https://…/ext/{name}/...` / EXT_PUBLIC_BASES 配下の原本 URL、または sandbox の
+    fs パス "/mnt/..." / "/workspace/..."、任意で末尾 "#page=N" — 解決規則は
     utils/image_refs.py、#97 / #139)もそのまま積める。sink は無検証の設計 —
     検証・実体化(base64、PDF はページ画像化)は送信直前 inline
     (utils/file_images.py)に一任する。file_id はその段で has_read_access_to_file が
-    呼び出しユーザーの read 権を確認し、"/" 参照は image_refs が境界(EXT_UPSTREAMS /
+    呼び出しユーザーの read 権を確認し、URL / fs 参照は image_refs が境界(EXT_UPSTREAMS /
     RO マウント / 呼び出しユーザーの workspace)を fail closed で持つ(この push 自体は
     認可しない)。tool 実行文脈外(sink 未設定)では no-op。
 
     低レベルプリミティブ: content_type / サイズの検証はしない(file_id しか持たず、
     ここで Files 参照すると async tool 実行中にイベントループを塞ぐため #28 に反する)。
     **呼び出し側 tool が画像であること・サイズ上限を保証する**(view_image は
-    image/* と max_image_mb を検証済み。"/" 参照は inline が種別と
+    image/* と max_image_mb を検証済み。URL / fs 参照は inline が種別と
     EXT_INLINE_MAX_BYTES を検査して失敗を吸収する)。画像でも PDF でもないものを
     積んでも inline が "(image unavailable)" に置換するので壊れた image_url は渡らないが、
     モデルには何も見えない — 積む前に種別を見るのは tool の責務(認可は inline が別途担保する)。
