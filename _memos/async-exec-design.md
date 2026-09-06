@@ -257,7 +257,7 @@ TOTAL 上限が実効防衛 — 専用 executor 隔離は v2。
 | P2 | completion_events 硬化 3 点(先行コミット)+ executions.py(spawn/runner/stop)+ spec 注入 + execute_tool_calls 分岐 + check_async/await_async + env 4 本 + test_async_exec.py | 2 |
 | P3 | subagent 統合検証(同期 18 テスト無改変 green が回帰条件)+ f06626f0a の async テスト翻訳復活 + README_API §5.9 | 0.5〜1 |
 | P4 | FE: store/ExecChip/ExecutionBlock/render/自動再開 + vitest 移植 | 1.5〜2 |
-| P5 | 実モデル E2E(fan-out / fire-and-forget / 自動再開 / 再起動→orphaned→同期継続回復)→ `uv run task tag` | 0.5 |
+| P5 | 実モデル E2E(fan-out / fire-and-forget / 自動再開 / 再起動→orphaned→同期継続回復)→ `uv run task release` | 0.5 |
 
 tag 後に llens P4(userspace subagent.py の builtin 置換・プロンプト整備)— K7 どおり。
 

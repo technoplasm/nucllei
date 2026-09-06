@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """リリース tag を切って push する(refs #25)。technoplasm-app `make tag` の移植。
 
-    uv run task tag    # 今日の vYYYYMMDD-NN
+    uv run task release    # 今日の vYYYYMMDD-NN
 
 tag 形式は `vYYYYMMDD-NN` だけ。出荷しない試し焼きが要るときは tag を切らず、
 image workflow(`.github/workflows/docker-build.yaml`)を workflow_dispatch で

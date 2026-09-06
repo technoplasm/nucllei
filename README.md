@@ -62,7 +62,7 @@ differently and produce different output than CI).
 ## Versioning
 
 The single source of truth is git tags, in a single format: `vYYYYMMDD-NN`. Cut one with
-`uv run task tag`. The version is resolved at startup/build time via `APP_VERSION` env →
+`uv run task release`. The version is resolved at startup/build time via `APP_VERSION` env →
 `git describe` → `package.json` fallback. Release images pass `--build-arg APP_VERSION=<tag>`.
 
 One tag builds both images at the same version — `ghcr.io/technoplasm/nucllei` and
