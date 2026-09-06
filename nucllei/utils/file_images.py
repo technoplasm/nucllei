@@ -1,4 +1,4 @@
-"""内部 file URL 画像の base64 インライン化(#69 画像の files 化)。
+"""内部画像参照の base64 インライン化(#69 画像の files 化 / #97 / #139)。
 
 画像添付は base64 直入れをやめ files テーブル経由に統一した。チャット payload の
 image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが、モデル
@@ -6,22 +6,24 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 (process_chat_payload 末尾)に、要求ユーザーが読める file だけを Storage から
 読み出して data URL に変換する。
 
-変換できない内部 file URL(アクセス不可・削除済み・storage 欠落)は、相対 URL の
-まま残すとモデル側がリクエストごと落とし該当チャットが恒久的に失敗するため、
-text パーツ "(image unavailable)" に置換する。3 経路とも同一の置換にすることで、
-payload からアクセス不可と不存在を区別できない(file の存在有無をモデル経由で
-漏らさない)。data URL・外部 URL・文字列 content のメッセージは触らない。
+それ以外の **"/" 始まりの参照**("/ext/{name}/..." / "/mnt/..." / "/workspace/..."、
+任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
+context_images に文字列のまま永続し、送信直前のここが実体化する(File は発行
+しない。context_images は same-turn 限定なので読み出しはそのターンの送信数回で
+自然に止まる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
+共有)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
+(既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
+"/" 参照の公開範囲は admin 管理の EXT_UPSTREAMS / RO マウント / 呼び出しユーザーの
+workspace が境界で、解決層が fail closed で持つ。
 
-読み出し + base64 エンコードは blocking I/O なので thread にオフロードする
+変換できない参照(アクセス不可・削除済み・storage 欠落・root 外・非画像・サイズ超過・
+不達)は、相対 URL のまま残すとモデル側がリクエストごと落とし該当チャットが恒久的に
+失敗するため、text パーツ "(image unavailable)" に置換する。全経路とも同一の置換に
+することで、payload からアクセス不可と不存在を区別できない(存在有無をモデル経由で
+漏らさない)。data URL・絶対 URL・文字列 content のメッセージは触らない。
+
+読み出し + base64 エンコード + PDF 画像化は blocking なので thread にオフロードする
 (attachment dispatch と同じ方針 — event loop を塞がない)。
-
-#97: file URL に加え、"/ext/{name}/..."(EXT_UPSTREAMS 上流プロキシの相対パス)の
-image_url もここでオンデマンド解決する — feed_image が "/ext/..." を sink に積み、
-context_images に URL のまま永続し、送信直前のこの層がサーバ側 httpx fetch で
-base64 化する(File は発行しない。context_images は same-turn 限定なので fetch は
-そのターンの送信数回で自然に止まる)。per-user のアクセス検査はしない — 上流の
-公開範囲は admin 管理の EXT_UPSTREAMS が真実源。失敗(未知 name・非 image/*・
-サイズ超過・上流不達)はすべて file 経路と同じ "(image unavailable)" 置換に合流する。
 """
 
 import asyncio
@@ -30,13 +32,17 @@ import logging
 import mimetypes
 import re
 
-import httpx
-
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.access_control import has_read_access_to_file
-from nucllei.utils.ext_upstreams import get_ext_client, has_path_traversal
-from nucllei.env import EXT_INLINE_MAX_BYTES, EXT_UPSTREAMS, SRC_LOG_LEVELS
+from nucllei.utils.image_refs import (
+    LoadedRef,
+    detect_kind,
+    load_ref,
+    rasterize_pdf_page,
+    split_page,
+)
+from nucllei.env import SRC_LOG_LEVELS
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -47,14 +53,15 @@ INTERNAL_FILE_URL_PATTERN = re.compile(
     r"^(?:https?://[^/]+)?/api/v1/files/([^/?#]+)/content(?:\?[^#]*)?$"
 )
 
-# "/ext/{name}/{path}"(#97)。**相対のみ** — 絶対 URL は外部 URL として触らない。
-# name の文字種は EXT_UPSTREAMS のパース(env.py)と同じ [a-z0-9_-]+。
-EXT_URL_PATTERN = re.compile(r"^/ext/([a-z0-9_-]+)/([^?#]+)(\?[^#]*)?$")
-
 UNAVAILABLE_IMAGE_TEXT = "(image unavailable)"
 
 
-def _load_file_as_data_url(file_id: str, user) -> str | None:
+def _to_data_url(content_type: str, raw: bytes) -> str:
+    return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _load_file(file_id: str, user) -> LoadedRef | None:
+    """file_id の実体を読む(blocking — thread で呼ぶ)。読めない・権限が無ければ None。"""
     if not has_read_access_to_file(file_id, user):
         log.warning(
             "file_images: skipping unreadable or missing file reference "
@@ -80,88 +87,69 @@ def _load_file_as_data_url(file_id: str, user) -> str | None:
         log.exception(f"file_images: storage read failed (file_id={file_id})")
         return None
 
-    return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+    return LoadedRef(data=raw, content_type=content_type, name=file.filename or "")
 
 
-async def _load_ext_url_as_data_url(name: str, path: str, query: str) -> str | None:
-    """ "/ext/{name}/{path}" を EXT_UPSTREAMS 上流からサーバ側 fetch して data URL 化する。
+async def _materialize(loaded: LoadedRef, page: int | None, label: str) -> str | None:
+    """読めたバイト列を data URL にする。画像はそのまま、PDF は指定ページ(既定 1)を PNG 化。
 
-    - name が map に無い(機能無効含む)/ traversal パス → None
-    - content-type が image/* でない → None(feed の url 解決は画像限定 — PDF 等は
-      表示のプロキシ経由原本参照で足りる)
-    - EXT_INLINE_MAX_BYTES 超過 → 読み中断して None
-    - redirect は辿らない(follow_redirects=False の共有クライアント)、2xx 以外 → None
+    file_id 経路と "/" 参照経路の共通の出口 — 添付 PDF も feed_image が
+    "/api/v1/files/{id}/content#page=N" で積む(File を作らない、#139)ので、
+    ページ画像化は経路によらずここ 1 箇所。
     """
-    base_url = EXT_UPSTREAMS.get(name)
-    if base_url is None:
-        log.warning(f"file_images: unknown ext upstream (name={name})")
-        return None
-    if has_path_traversal(path):
-        log.warning(f"file_images: rejecting traversal ext path (name={name})")
-        return None
-
-    url = f"{base_url}/{path}{query or ''}"
-    try:
-        async with get_ext_client().stream("GET", url) as response:
-            if not response.is_success:
-                log.warning(
-                    f"file_images: ext fetch failed (name={name}, "
-                    f"status={response.status_code})"
-                )
-                return None
-            content_type = (
-                response.headers.get("content-type", "").split(";")[0].strip()
-            )
-            if not content_type.startswith("image/"):
-                log.warning(
-                    f"file_images: ext content is not an image (name={name}, "
-                    f"content_type={content_type!r})"
-                )
-                return None
-            chunks = []
-            total = 0
-            async for chunk in response.aiter_bytes():
-                total += len(chunk)
-                if total > EXT_INLINE_MAX_BYTES:
-                    log.warning(
-                        f"file_images: ext content exceeds size limit "
-                        f"(name={name}, limit={EXT_INLINE_MAX_BYTES})"
-                    )
-                    return None
-                chunks.append(chunk)
-    except (httpx.HTTPError, httpx.InvalidURL):
-        # InvalidURL は httpx.HTTPError の subclass でない(#97 review)。制御文字は
-        # has_path_traversal で既に弾いているが、funnel の約束(全失敗を
-        # "(image unavailable)" へ)を破らないよう明示的に合流させる。
-        log.exception(f"file_images: ext fetch error (name={name})")
-        return None
-
-    raw = b"".join(chunks)
-    return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+    kind = detect_kind(loaded)
+    if kind == "image":
+        return _to_data_url(loaded.content_type, loaded.data)
+    if kind == "pdf":
+        try:
+            png = await asyncio.to_thread(rasterize_pdf_page, loaded.data, page or 1)
+        except Exception:
+            log.exception(f"file_images: pdf rasterize failed ({label}, page={page})")
+            return None
+        return _to_data_url("image/png", png)
+    log.warning(
+        f"file_images: reference is neither image nor pdf ({label}, "
+        f"content_type={loaded.content_type!r})"
+    )
+    return None
 
 
 async def inline_internal_image_urls(messages: list, user) -> list:
-    """messages(OpenAI 形式)内の内部 file URL の image_url パーツを data URL に置換する。
+    """messages(OpenAI 形式)内の内部参照の image_url パーツを data URL に置換する。
 
     messages を破壊的に書き換えて同じ list を返す。変換できない内部 file URL /
-    "/ext/..." パーツは text "(image unavailable)" に置換(冒頭 docstring 参照)。
+    "/" 始まり参照パーツは text "(image unavailable)" に置換(冒頭 docstring 参照)。
     それ以外の URL は無変更。
     """
-    # 同一ターン内で同じ file / ext URL を複数回参照しても読み出しは 1 回
-    # (結果 None もキャッシュ)。
-    cache: dict[str, str | None] = {}
+    # 同一ターン内で同じ file / 参照を複数回参照しても読み出しは 1 回(結果 None も
+    # キャッシュ)。バイト列は参照単位、data URL はページ単位 — PDF の複数ページは
+    # 同じ 1 本を読んでページだけ変える(上流 http の PDF をページ数ぶん取りに行かない)。
+    loaded_cache: dict[str, LoadedRef | None] = {}
+    data_cache: dict[str, str | None] = {}
 
-    async def load(file_id: str) -> str | None:
-        key = f"file:{file_id}"
-        if key not in cache:
-            cache[key] = await asyncio.to_thread(_load_file_as_data_url, file_id, user)
-        return cache[key]
+    async def materialize(key: str, loader, page: int | None, label: str):
+        if key not in loaded_cache:
+            loaded_cache[key] = await loader()
+        page_key = f"{key}#{page}"
+        if page_key not in data_cache:
+            loaded = loaded_cache[key]
+            data_cache[page_key] = (
+                None if loaded is None else await _materialize(loaded, page, label)
+            )
+        return data_cache[page_key]
 
-    async def load_ext(url: str, name: str, path: str, query: str) -> str | None:
-        key = f"ext:{url}"
-        if key not in cache:
-            cache[key] = await _load_ext_url_as_data_url(name, path, query)
-        return cache[key]
+    async def load(file_id: str, page: int | None) -> str | None:
+        return await materialize(
+            f"file:{file_id}",
+            lambda: asyncio.to_thread(_load_file, file_id, user),
+            page,
+            f"file_id={file_id}",
+        )
+
+    async def load_reference(ref: str, page: int | None) -> str | None:
+        return await materialize(
+            f"ref:{ref}", lambda: load_ref(ref, user.id), page, f"ref={ref}"
+        )
 
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None
@@ -177,14 +165,16 @@ async def inline_internal_image_urls(messages: list, user) -> list:
             if not isinstance(url, str):
                 continue
 
-            match = INTERNAL_FILE_URL_PATTERN.match(url)
+            # "#page=N" は file URL にも "/" 参照にも付く(PDF のページ指定)
+            ref, page = split_page(url)
+            match = INTERNAL_FILE_URL_PATTERN.match(ref)
             if match:
-                data_url = await load(match.group(1))
+                data_url = await load(match.group(1), page)
+            elif ref.startswith("/") and not ref.startswith("//"):
+                # "//host/..." はプロトコル相対の外部 URL — 絶対 URL と同じく触らない
+                data_url = await load_reference(ref, page)
             else:
-                ext_match = EXT_URL_PATTERN.match(url)
-                if not ext_match:
-                    continue
-                data_url = await load_ext(url, *ext_match.groups())
+                continue
             if data_url is None:
                 part.clear()
                 part["type"] = "text"

@@ -72,9 +72,9 @@ dependencies = [
     # magika(0.1.x のコア依存)が py3.13 で numpy>=2.1 を要求し local-ml の rapidocr と
     # 衝突するため requires-python は <3.13(docker=3.11 / dev=3.12 で実害なし)。
     "markitdown[pdf,docx,pptx,xlsx,xls,outlook,epub]>=0.1.6",
-    # 配備層 Function 向けの PDF ラスタライズ(llens pdf_vision 等)。pip のみで完結し
-    # poppler 等の system deps を要らない pdfium バインディング。markitdown と同じ
-    # 「同梱するだけ・fork は画像化コードを持たない」の位置づけ。
+    # PDF ラスタライズ。pip のみで完結し poppler 等の system deps を要らない pdfium
+    # バインディング。#139 から fork 本体も使う(utils/image_refs.py — feed した PDF の
+    # ページを送信直前に画像化する)。配備層 Function(llens pdf_vision 等)も同じ同梱物を使う。
     "pypdfium2==4.30.1",
     "fpdf2==2.8.2",
     # --- ここから下は「同梱するだけ」の道具箱 -------------------------------

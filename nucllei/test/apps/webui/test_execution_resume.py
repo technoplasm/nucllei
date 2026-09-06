@@ -340,7 +340,13 @@ class TestExecutionResume(AbstractPostgresTest):
         chat = self._insert_chat()
         row = self._insert_exec("e1", chat.id, result="ok", duration=1.0)
         media = (
-            ["file-123", "/ext/tool/img.png"],
+            # "/mnt/..." "/workspace/..." はブラウザで開けないので添付には載せない(#139)
+            [
+                "file-123",
+                "/ext/tool/img.png",
+                "/mnt/cage/x.pdf#page=2",
+                "/workspace/a.png",
+            ],
             [{"content": "## グラフ", "kind": "markdown"}],
         )
         text, files = self.resume.build_delivery_notice([row], {"e1": media})

@@ -1,8 +1,10 @@
 """EXT_UPSTREAMS のパースと path traversal 判定の回帰テスト(#97)。
 
-- parse_ext_upstreams(env.py): "name=baseURL" のカンマ区切り。name は [a-z0-9_-]+、
-  baseURL は http/https のみ。不正エントリは warning して捨てる(全体は殺さない)。
-  既定空 = {} = 機能無効。
+- parse_ext_upstreams(env.py): "name=値" のカンマ区切り。name は [a-z0-9_-]+、
+  値は http/https の base URL か `file:///abs/path`(#139 ローカル root)。不正
+  エントリは warning して捨てる(全体は殺さない)。既定空 = {} = 機能無効。
+- ext_backend(utils/ext_upstreams.py): 値の形で ("http", base_url) / ("file", root)
+  に分ける。file の root は resolve 済み(symlink 越え判定の基準)。
 - has_path_traversal(utils/ext_upstreams.py): プロキシ router と inline 解決が
   共有する同一判定。percent デコード(多重エンコード対策で安定するまで)後の
   ".." セグメントとバックスラッシュを拒否する。
@@ -10,8 +12,8 @@
 
 import httpx
 
-from nucllei.env import parse_ext_upstreams
-from nucllei.utils.ext_upstreams import _NoCookies, has_path_traversal
+from nucllei.env import EXT_UPSTREAMS, parse_ext_upstreams
+from nucllei.utils.ext_upstreams import _NoCookies, ext_backend, has_path_traversal
 
 # ---- parse_ext_upstreams ----
 
@@ -45,8 +47,10 @@ def test_parse_drops_invalid_entries_keeps_valid():
                 "no-equals-here",  # "=" なし
                 "Bad=http://x",  # name に大文字
                 "sp ace=http://x",  # name に空白
-                "ftp=ftp://x",  # スキームが http/https でない
-                "file=file:///etc/passwd",  # 同上
+                "ftp=ftp://x",  # スキームが http/https/file でない
+                "rel=file://relative/path",  # file は絶対パスのみ
+                "hostful=file://host/etc",  # 同上(host 付き = 絶対でない)
+                "slash=file:///",  # root "/" は捨てる
                 "=http://x",  # name 空
                 "empty=",  # baseURL 空
             ]
@@ -60,6 +64,32 @@ def test_parse_base_url_may_contain_equals():
     assert parse_ext_upstreams("cage=http://x/base?sig=abc=") == {
         "cage": "http://x/base?sig=abc="
     }
+
+
+def test_parse_file_root(monkeypatch):
+    # #139: file:///abs/path はローカル root backend。末尾スラッシュは落とす
+    assert parse_ext_upstreams("cage=file:///mnt/cage/") == {"cage": "file:///mnt/cage"}
+
+
+# ---- ext_backend ----
+
+
+def test_ext_backend_http_and_file(monkeypatch, tmp_path):
+    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://172.17.0.1:13303")
+    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{tmp_path}")
+    assert ext_backend("his") == ("http", "http://172.17.0.1:13303")
+    assert ext_backend("cage") == ("file", tmp_path.resolve())
+    assert ext_backend("nope") is None
+
+
+def test_ext_backend_file_root_is_resolved(monkeypatch, tmp_path):
+    # 配備では root 自体が symlink(bind 先)— 閉じ込め判定の基準は実体側
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{link}")
+    assert ext_backend("cage") == ("file", real.resolve())
 
 
 # ---- has_path_traversal ----

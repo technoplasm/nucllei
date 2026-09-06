@@ -262,21 +262,39 @@ separate reasoning block.
 | `STORAGE_PROVIDER`               | env  | `local`           | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
 | `TIKTOKEN_ENCODING_NAME`         | RC   | `cl100k_base`     | tokenizer for token counting                                                                                                                                |
 
-### 3.8 External upstream proxy (`/ext`)
+### 3.8 External reference gate (`/ext`)
 
-`GET /ext/{name}/**` is a session-authenticated streaming proxy to
-admin-configured upstreams (e.g. an HTTP tool gateway on the Docker bridge that
-serves figures/PDFs referenced from documents). Point the upstream's public base
-URL at `/ext/{name}` and in-document relative references resolve in the browser
-with the session cookie. `context_images` entries starting with `/ext/` are
-fetched server-side and inlined as base64 right before the model call
-(`image/*` only). There is no per-user access check — the admin-managed
-allowlist is the source of truth for what an upstream exposes.
+`GET /ext/{name}/**` is a session-authenticated gate to admin-configured
+backends serving figures/PDFs referenced from documents. Point the upstream's
+public base URL at `/ext/{name}` and in-document relative references resolve in
+the browser with the session cookie. Two backends, chosen by the value's form:
 
-| Var                    | Kind | Default            | Effect                                                                                                                                                       |
-| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=baseURL` allowlist (e.g. `cage=http://172.17.0.1:13303`); the single SSRF source of truth — invalid entries are dropped with a warning |
-| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap for the server-side fetch when inlining `/ext/...` context images                                                                                   |
+- `http(s)://…` — streaming proxy (2xx passed through, 404 → 404, anything else
+  incl. redirects → 502 without `Location`).
+- `file:///abs/path` — static serving from a local root the container sees
+  read-only (`FileResponse`: Range / etag / last-modified). The root is resolved
+  once; the requested path is resolved and confined to it (symlinks pointing
+  outside → 404); directories and missing files → 404; content-type from the
+  extension (`application/octet-stream` when unknown).
+
+Both: `..`/backslash/control-char paths → 400; active types (HTML/SVG/JS) are
+forced to `Content-Disposition: attachment` + `nosniff`. There is no per-user
+access check — the admin-managed allowlist is the source of truth for what a
+backend exposes.
+
+`context_images` entries starting with `/` (`/ext/…`, `/mnt/…`, `/workspace/…`,
+optional `#page=N`) are resolved server-side by `nucllei/utils/image_refs.py`
+and inlined as base64 right before the model call: images as-is, PDFs
+rasterized page by page (default page 1) — no File is created. `/mnt/…` is read
+locally from the same read-only mount root the sandbox binds (#138);
+`/workspace/…` goes through the sandbox `/files/read` of the calling user.
+Anything outside those roots, oversize, missing, or neither image nor PDF
+becomes `(image unavailable)`. The mount contents are logged once at boot.
+
+| Var                    | Kind | Default            | Effect                                                                                                                                                                                      |
+| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning |
+| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining `/`-prefixed context images                                                                                                                             |
 
 ### 3.9 Audio (STT / TTS)
 
@@ -600,7 +618,7 @@ from the model-facing spec, and the model cannot spoof them.
 | `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`         |
 | `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                           |
 | `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile |
-| `__feed_image__`                | `fn(file_id)` — feed an internal image into the model's context for the follow-up call (the "model's eyes"); chat path only                          |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context for the follow-up call (the "model's eyes"); `ref` is a file_id or a `/`-prefixed reference (`/ext/…`, `/mnt/…`, `/workspace/…`, optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8); chat path only |
 | `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                  |
 | `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                           |
 | `__id__`                        | this tool's id                                                                                                                                       |
@@ -687,8 +705,9 @@ async def read_doc(self, path: str) -> Markdown:
 - File outputs: write bytes via `nucllei.storage.provider.Storage.upload_file` +
   `nucllei.models.files.Files.insert_new_file`, then emit `chat:message:files`;
   images become visible when the model writes
-  `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image file,
-  call `__feed_image__(file_id)` (§5.3) — it is injected into the follow-up call.
+  `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image or a
+  PDF page, call `__feed_image__(file_id_or_ref)` (§5.3) — it is injected into
+  the follow-up call; a `/mnt/…` or `/workspace/…` reference needs no File.
 
 ### 5.6 Access control & assignment
 

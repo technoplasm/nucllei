@@ -267,14 +267,20 @@ def _notice_section(row: ExecutionModel, media: Optional[tuple[list, list]]) -> 
 
 
 def _notice_files(context_images: list) -> list:
-    """context_images(file id / "/" 始まり URL)→ notice 添付 files
-    (content_blocks.py の image_url 分岐と同じ規律 — 契約 M4)。"""
+    """context_images(file id / "/" 始まり参照)→ notice 添付 files(契約 M4)。
+
+    "/" 始まりのうち url として載せるのは **"/ext/" だけ** — これはブラウザが
+    session cookie で開ける表示形。"/mnt/...#page=N" / "/workspace/..." /
+    "/api/v1/files/{id}/content#page=N"(添付 PDF のページ参照)はブラウザでそのまま
+    開けない(#139)ので落とす(モデルへの再注入は別経路で行われる。フロントに壊れた
+    img を出さない)。"""
     files = []
     for entry in context_images:
         if not isinstance(entry, str) or not entry:
             continue
         if entry.startswith("/"):
-            files.append({"type": "image", "url": entry})
+            if entry.startswith("/ext/"):
+                files.append({"type": "image", "url": entry})
         else:
             files.append(
                 {

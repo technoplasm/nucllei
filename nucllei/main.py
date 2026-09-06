@@ -36,7 +36,7 @@ from starlette.responses import Response
 
 from nucllei.builtin_tools import sync_builtin_tools
 from nucllei.utils.executions import sweep_executions_on_boot
-from nucllei.utils import execution_resume
+from nucllei.utils import execution_resume, image_refs
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
@@ -290,6 +290,10 @@ async def lifespan(app: FastAPI):
 
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
+
+    # llens(#139): RO マウント(/mnt)に何が見えているかを 1 行(sandbox と同じ流儀)。
+    # 配備側が volume を足すだけで増える口で、env を見ても分からない。
+    image_refs.log_mounts()
 
     # llens(#110): 前プロセスの走行中 execution は失われている(単一プロセスが
     # 不変条件)— 起動時に orphaned へ倒す(orphaned の権威)+ 保持期限 GC。

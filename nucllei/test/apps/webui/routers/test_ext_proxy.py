@@ -12,6 +12,10 @@ cage 等の HTTP ツールゲートウェイが配信する文書内の図・PDF
 - 制御文字パスは fail-closed(400 か、ASGI 層が先に弾く 404)
 - アクティブ型(HTML/SVG/JS)は nosniff + 添付で実行を止める
 - GET(HEAD は Starlette 既定で同経路)。POST 等は 405
+
+#139: 値が `file:///abs/path` の name はローカル root からの静的配信(FileResponse)。
+ゲートは同じで、root の外(traversal / symlink 越え)・ディレクトリ・不在は 404、
+content-type は拡張子から、アクティブ型は同じく添付 + nosniff。
 """
 
 import httpx
@@ -230,3 +234,137 @@ class TestExtProxy(AbstractPostgresTest):
         with mock_webui_user(id="1"):
             response = self.fast_api_client.post(self.create_url("/cage/fig.png"))
         assert response.status_code == 405
+
+
+class TestExtFileBackend(AbstractPostgresTest):
+    """`cage=file:///...` のローカル配信(#139)。"""
+
+    BASE_PATH = "/ext"
+
+    def _enable_root(self, monkeypatch, root):
+        from nucllei.env import EXT_UPSTREAMS
+
+        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}")
+
+    def _populate(self, tmp_path):
+        root = tmp_path / "cage"
+        (root / "static" / "figs").mkdir(parents=True)
+        (root / "static" / "figs" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\npng-bytes")
+        (root / "static" / "page.html").write_text("<script>1</script>")
+        (root / "static" / "v.svg").write_text("<svg/>")
+        (root / "static" / "noext").write_bytes(b"?")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret")
+        (root / "static" / "escape.txt").symlink_to(outside)
+        return root
+
+    def test_success_serves_local_file(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url("/cage/static/figs/a.png", query_params={"v": "1"})
+            )
+        assert response.status_code == 200
+        assert response.content == b"\x89PNG\r\n\x1a\npng-bytes"
+        assert response.headers["content-type"] == "image/png"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "content-disposition" not in response.headers
+        # FileResponse: ブラウザの PDF ビューアが投げる Range に応える
+        assert response.headers.get("accept-ranges") == "bytes"
+        assert "etag" in response.headers
+        assert "last-modified" in response.headers
+
+    def test_range_request(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url("/cage/static/figs/a.png"),
+                headers={"range": "bytes=0-3"},
+            )
+        assert response.status_code == 206
+        assert response.content == b"\x89PNG"
+
+    def test_unknown_extension_is_octet_stream(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(self.create_url("/cage/static/noext"))
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/octet-stream"
+
+    def test_directory_404(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            for path in ("/cage/static", "/cage/static/", "/cage/static/figs"):
+                response = self.fast_api_client.get(self.create_url(path))
+                assert response.status_code == 404, path
+
+    def test_missing_404(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url("/cage/static/figs/missing.png")
+            )
+        assert response.status_code == 404
+
+    def test_missing_root_404(self, monkeypatch, tmp_path):
+        # root 自体が無い配備(bind 忘れ)は全 404(起動時 WARNING は image_refs 側)
+        self._enable_root(monkeypatch, tmp_path / "nowhere")
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(self.create_url("/cage/static/a.png"))
+        assert response.status_code == 404
+
+    def test_traversal_400(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            for path in (
+                "/cage/..%2Foutside.txt",
+                "/cage/static/..%2F..%2Foutside.txt",
+            ):
+                response = self.fast_api_client.get(self.create_url(path))
+                assert response.status_code == 400, path
+
+    def test_symlink_outside_root_404(self, monkeypatch, tmp_path):
+        # ".." を含まないのでゲートは通るが、resolve 後に root の外 → 404
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url("/cage/static/escape.txt")
+            )
+        assert response.status_code == 404
+
+    def test_absolute_path_in_tail_404(self, monkeypatch, tmp_path):
+        # "//" 由来の先頭 "/" で Path 結合に root を捨てさせない
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        with mock_webui_user(id="1"):
+            response = self.fast_api_client.get(
+                self.create_url(f"/cage//{tmp_path}/outside.txt")
+            )
+        assert response.status_code == 404
+
+    def test_active_type_forced_to_attachment(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        for path, ct in (
+            ("/cage/static/page.html", "text/html"),
+            ("/cage/static/v.svg", "image/svg+xml"),
+        ):
+            with mock_webui_user(id="1"):
+                response = self.fast_api_client.get(self.create_url(path))
+            assert response.status_code == 200, path
+            assert response.headers["content-type"].startswith(ct), path
+            assert response.headers["x-content-type-options"] == "nosniff", path
+            assert response.headers.get("content-disposition") == "attachment", path
+
+    def test_unauthenticated_request_rejected(self, monkeypatch, tmp_path):
+        root = self._populate(tmp_path)
+        self._enable_root(monkeypatch, root)
+        response = self.fast_api_client.get(self.create_url("/cage/static/figs/a.png"))
+        assert response.status_code == 403

@@ -52,12 +52,49 @@ log = logging.getLogger(__name__)
 # ヘッダを付ける」条件分岐を足すより素直で、設定も 1 つ減る。
 SANDBOX_URL = os.getenv("SANDBOX_URL", "").strip()
 
-# sandbox API の共有トークン (#132)。**opt-in** — 設定すれば `_post` が
+# sandbox API の共有トークン (#132)。**opt-in** — 設定すれば `sandbox_post` が
 # `Authorization: Bearer` を付け、sandbox 側も認証を強制する。未設定なら両側とも
 # 認証なしで従来どおり動く (ヘッダ自体を付けない)。両側 (sandbox コンテナと nucllei) で
 # 同名・同値を持ち合うこと。**valve / DB には持たせない** — 秘密の置き場を DB に
 # 増やさない、という既存方針 (llens の compose が CAGE_TOKEN を env にしているのと同じ理由)。
 SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "").strip()
+
+
+async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
+    """sandbox サービスへの POST。**トークンがあるときだけ**共有トークンを付ける (#132)。
+
+    module 関数なのは、この tool 以外にも sandbox を読む側がいるから (#139:
+    `utils/image_refs.py` が `/workspace/...` 参照を `/files/read` で解決する)。
+    sandbox への HTTP 出口をここ 1 本にして、トークンの付け方を 2 箇所に持たない。
+
+    宛先は module 定数 `SANDBOX_URL` (env) のみ — DB (valve) からは変えられない。
+    header は session に持たせる (この session はこの 1 リクエストにしか使わない)。
+    未設定なら header 自体を付けない — 空の `Bearer ` を送らない (sandbox 側の
+    認証が有効な配備では、無ヘッダも空トークンも等しく 401 なので実害は無いが、
+    「無いものを送る」経路を作らない)。`Tools._http_get` は別 session — 任意 URL を
+    取りに行く経路なので、そちらへトークンが漏れないよう混ぜない。
+    """
+    url = SANDBOX_URL.rstrip("/") + path
+    headers = {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=timeout_s),
+        headers=headers,
+    ) as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status != 200:
+                body = (await resp.text())[:300]
+                if resp.status == 401:
+                    # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
+                    # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
+                    # まとめて説明がつく (未設定は「不一致」の一種)
+                    raise RuntimeError(
+                        "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
+                        "SANDBOX_TOKEN が一致していません "
+                        "(片側だけ未設定の場合も含む。配備の env を確認)"
+                    )
+                raise RuntimeError(f"sandbox HTTP {resp.status}: {body}")
+            return await resp.json()
+
 
 # send_to_workspace(url=) の相対パス解決先 = nucllei 自分自身の listen 口 (コンテナ内)。
 # Caddy / 公開 origin には依存しない。
@@ -238,35 +275,12 @@ class Tools:
 
     # ---- HTTP -----------------------------------------------------------------
     async def _post(self, path: str, payload: dict, timeout_s: float) -> dict:
-        """sandbox サービスへの POST。**トークンがあるときだけ**共有トークンを付ける (#132)。
+        """sandbox サービスへの POST(実体は module の `sandbox_post`)。
 
-        宛先は module 定数 `SANDBOX_URL` (env) のみ — DB (valve) からは変えられない。
-        header は session に持たせる (この session はこの 1 リクエストにしか使わない)。
-        未設定なら header 自体を付けない — 空の `Bearer ` を送らない (sandbox 側の
-        認証が有効な配備では、無ヘッダも空トークンも等しく 401 なので実害は無いが、
-        「無いものを送る」経路を作らない)。`_http_get` は別 session — 任意 URL を
-        取りに行く経路なので、そちらへトークンが漏れないよう混ぜない。
+        メソッドとして残すのは、テストが tool インスタンスの `_post` を差し替えて
+        HTTP を切り離す (実コンテナに依存させない) 口だから。
         """
-        url = SANDBOX_URL.rstrip("/") + path
-        headers = {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout_s),
-            headers=headers,
-        ) as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    body = (await resp.text())[:300]
-                    if resp.status == 401:
-                        # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
-                        # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
-                        # まとめて説明がつく (未設定は「不一致」の一種)
-                        raise RuntimeError(
-                            "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
-                            "SANDBOX_TOKEN が一致していません "
-                            "(片側だけ未設定の場合も含む。配備の env を確認)"
-                        )
-                    raise RuntimeError(f"sandbox HTTP {resp.status}: {body}")
-                return await resp.json()
+        return await sandbox_post(path, payload, timeout_s)
 
     # ---- exports/ の回収 → Files 登録 + チャット添付 ---------------------------
     async def _persist_and_emit_files(

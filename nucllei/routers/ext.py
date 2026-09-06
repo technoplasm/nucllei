@@ -1,35 +1,52 @@
-"""認証付き汎用上流プロキシ "/ext/{name}/**"(#97)。
+"""認証付き汎用参照ゲート "/ext/{name}/**"(#97 / #139)。
 
 cage(HTTP ツールゲートウェイ)等が配信する文書内の図・PDF は Docker bridge
-内部 URL でしか参照できず、ブラウザから到達できない。上流側が PUBLIC_BASE を
-"/ext/{name}" にすると文書内の参照が同一オリジン相対 URL になり、チャット表示・
-引用・display すべてでブラウザが session cookie 付きでそのまま解決できる。
+内部 URL やコンテナ内パスでしか参照できず、ブラウザから到達できない。上流側が
+PUBLIC_BASE を "/ext/{name}" にすると文書内の参照が同一オリジン相対 URL になり、
+チャット表示・引用・display すべてでブラウザが session cookie 付きでそのまま
+解決できる。
 
-- 上流 allowlist は env EXT_UPSTREAMS("name=baseURL" のカンマ区切り、既定空=無効)。
-  SSRF の真実源はこれ一本。map に無い name / map 空は 404。
+backend は env EXT_UPSTREAMS の値の形で 2 種(`utils/ext_upstreams.ext_backend`):
+
+- http(s) base URL: httpx で中継。upstream 2xx はストリーミング透過、404 は 404、
+  3xx を含むその他は 502(Location 等で内部 URL を漏らさない)。
+- `file:///abs/path`: nucllei 自身に read-only で見えている root からの静的配信
+  (#139 — cage のコーパスは nucllei にも bind されるので、上流 HTTP を叩かずに
+  済む)。`FileResponse`(Range / etag / last-modified — PDF はブラウザのビューアが
+  Range を投げる)。root は resolve 済み、要求パスも resolve して `is_relative_to`
+  で閉じる(symlink 越えも閉じる)。ディレクトリ・不在は 404(一覧は出さない)。
+  content-type は拡張子から、不明は application/octet-stream。
+
+backend によらないゲート:
+
+- allowlist は EXT_UPSTREAMS 一本(SSRF の真実源)。map に無い name / map 空は 404。
 - セッション認証必須(get_verified_user)。per-user のアクセス検査はしない —
-  上流の公開範囲は admin 管理の EXT_UPSTREAMS が真実源。
+  公開範囲は admin 管理の EXT_UPSTREAMS が真実源。
 - GET(read-only 参照資料の中継)。HEAD は Starlette 既定で GET と同経路、
-  それ以外のメソッドは 405。
-- upstream 2xx はストリーミング透過。404 は 404、3xx を含むその他は 502
-  (Location 等で内部 URL を漏らさない)。
-- 上流の content-type は透過するが、アクティブ型(HTML/SVG/JS)は添付扱い +
+  それ以外のメソッドは 405。traversal パスは 400。
+- content-type はそのまま出すが、アクティブ型(HTML/SVG/JS)は添付扱い +
   nosniff で実行を止める(#97 review — 同一オリジン配信の stored XSS 対策。
   /cache と同じ content_hardening を共有)。
-- cage 資料は Files 意味論(#94 soft delete/purge)の外 — 記録責任は上流側。
+- 資料は Files 意味論(#94 soft delete/purge)の外 — 記録責任は上流側。
 """
 
 import logging
+import mimetypes
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.background import BackgroundTask
-from starlette.responses import StreamingResponse
+from starlette.responses import FileResponse, StreamingResponse
 
-from nucllei.env import EXT_UPSTREAMS, SRC_LOG_LEVELS
+from nucllei.env import SRC_LOG_LEVELS
 from nucllei.utils.auth import get_verified_user
 from nucllei.utils.content_hardening import active_content_headers
-from nucllei.utils.ext_upstreams import get_ext_client, has_path_traversal
+from nucllei.utils.ext_upstreams import (
+    ext_backend,
+    get_ext_client,
+    has_path_traversal,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -46,16 +63,43 @@ PASSTHROUGH_RESPONSE_HEADERS = ("content-type", "content-length", "content-encod
 async def proxy_ext_upstream(
     request: Request, name: str, path: str, user=Depends(get_verified_user)
 ):
-    base_url = EXT_UPSTREAMS.get(name)
-    if base_url is None:
+    backend = ext_backend(name)
+    if backend is None:
         raise HTTPException(status_code=404, detail="Not found")
 
     if has_path_traversal(path):
         raise HTTPException(status_code=400, detail="Invalid path")
 
+    kind, target = backend
+    if kind == "file":
+        return _serve_local(target, path)
+    return await _proxy_http(target, name, path, request.url.query)
+
+
+def _serve_local(root: Path, path: str):
+    # "{path:path}" は "//" 由来の先頭 "/" を残しうる。Path の結合は右辺が絶対だと
+    # 左辺を捨てる(root / "/etc/passwd" = /etc/passwd)ので剥がしてから結合する。
+    # 閉じ込めの権威は下の is_relative_to — ここは事故の芽を摘むだけ。
+    try:
+        resolved = (root / path.lstrip("/")).resolve()
+    except (OSError, RuntimeError):
+        # 深すぎる symlink ループ等。root の外か中かを判定できないので不在扱い
+        raise HTTPException(status_code=404, detail="Not found")
+    if not resolved.is_relative_to(root) or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    return FileResponse(
+        resolved,
+        media_type=content_type,
+        headers=active_content_headers(content_type),
+    )
+
+
+async def _proxy_http(base_url: str, name: str, path: str, query: str):
     upstream_url = f"{base_url}/{path}"
-    if request.url.query:
-        upstream_url += f"?{request.url.query}"
+    if query:
+        upstream_url += f"?{query}"
 
     # クライアントのヘッダは上流へ転送しない(cookie / authorization を漏らさない)。
     client = get_ext_client()

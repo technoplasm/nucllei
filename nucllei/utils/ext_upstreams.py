@@ -1,17 +1,23 @@
 """EXT_UPSTREAMS(#97)の共有ヘルパ。
 
-"/ext/{name}/**" プロキシ(routers/ext.py — 人間の目)と context_images の
-"/ext/..." オンデマンド解決(utils/file_images.py — モデルの目)が同じ基準を共有する:
+"/ext/{name}/**" ゲート(routers/ext.py — 人間の目)と context_images の
+"/ext/..." オンデマンド解決(utils/image_refs.py — モデルの目)が同じ基準を共有する:
 
-- 上流 allowlist は env EXT_UPSTREAMS 一本(SSRF の真実源。別 allowlist は作らない)
+- backend allowlist は env EXT_UPSTREAMS 一本(SSRF の真実源。別 allowlist は作らない)。
+  値の形で backend が決まる(#139): http(s) の base URL = HTTP 中継、
+  `file:///abs/path` = ローカル root からの静的配信(`ext_backend`)
 - path traversal 拒否は同一判定(percent デコード後の ".." セグメント・バックスラッシュ)
 - httpx AsyncClient はモジュールで 1 個を共有(リクエスト毎に生成しない)。
   follow_redirects は常に False — 上流の redirect 先(内部 URL)を辿らない・漏らさない
 """
 
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
+
+from nucllei.env import EXT_UPSTREAMS
 
 # 接続 5s / 読み 30s。上流はローカル(Docker bridge)想定 — 不達・遅延で
 # ワーカーを長く掴ませない。
@@ -70,3 +76,31 @@ def has_path_traversal(path: str) -> bool:
     if "\\" in decoded:
         return True
     return ".." in decoded.split("/")
+
+
+@lru_cache(maxsize=None)
+def _resolved_root(value: str) -> Path:
+    """`file:///abs/path` の root を **1 回だけ** resolve() する。
+
+    配備では root 自体が symlink(compose の bind 先)でありうる。要求パスの閉じ込め
+    (`is_relative_to`)は resolve 済み同士で比べないと成り立たないので、root 側も
+    resolve しておく。値は起動時に env から確定していて変わらないため、要求ごとに
+    resolve し直す理由が無い(strict=False — 無い root は "全 404" に倒れるだけ。
+    有無は起動時に image_refs.log_mounts が WARNING で知らせる)。
+    """
+    return Path(value[len("file://") :]).resolve()
+
+
+def ext_backend(name: str) -> tuple[str, str] | tuple[str, Path] | None:
+    """name の backend を `("http", base_url)` / `("file", resolved_root)` で返す。
+
+    map に無い name(機能無効を含む)は None。呼ぶ側は None を「無い」(404 /
+    unavailable)として扱い、backend 種別で経路を分ける — 値の形の解釈をここ 1 箇所に
+    置き、router と resolver が別々に文字列を見ないようにする。
+    """
+    value = EXT_UPSTREAMS.get(name)
+    if value is None:
+        return None
+    if value.startswith("file://"):
+        return ("file", _resolved_root(value))
+    return ("http", value)

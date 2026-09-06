@@ -502,38 +502,41 @@ _EXT_UPSTREAM_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 
 def parse_ext_upstreams(value: str) -> dict[str, str]:
-    """`EXT_UPSTREAMS`("name=baseURL" のカンマ区切り)を {name: baseURL} にパースする。
+    """`EXT_UPSTREAMS`("name=値" のカンマ区切り)を {name: 値} にパースする。
 
-    name は [a-z0-9_-]+、baseURL は http/https のみ。不正エントリは log.warning
-    して捨てる(1 エントリの typo で全体を殺さない)。baseURL の末尾スラッシュは
-    落として正規化する(パス連結時の "//" を避ける)。
+    name は [a-z0-9_-]+。値は http/https の base URL(HTTP 中継)か
+    `file:///abs/path`(ローカル root からの静的配信、#139)のどちらか — どちらの
+    backend かは値の形だけで決まり、別 env は増やさない。不正エントリは log.warning
+    して捨てる(1 エントリの typo で全体を殺さない)。末尾スラッシュは落として
+    正規化する(パス連結時の "//" を避ける。`file:///` 単体は root "/" の意味になり
+    捨てられる — 配備で root を / にする正当な用途は無い)。
     """
     upstreams: dict[str, str] = {}
     for entry in (value or "").split(","):
         entry = entry.strip()
         if not entry:
             continue
-        name, sep, base_url = entry.partition("=")
+        name, sep, base = entry.partition("=")
         name = name.strip()
-        base_url = base_url.strip().rstrip("/")
+        base = base.strip().rstrip("/")
         if (
             not sep
             or not _EXT_UPSTREAM_NAME_PATTERN.match(name)
-            or not (base_url.startswith("http://") or base_url.startswith("https://"))
+            or not base.startswith(("http://", "https://", "file:///"))
         ):
             log.warning(f"EXT_UPSTREAMS: ignoring invalid entry {entry!r}")
             continue
-        upstreams[name] = base_url
+        upstreams[name] = base
     return upstreams
 
 
-# "/ext/{name}/**" で中継する上流の allowlist(例 "cage=http://172.17.0.1:13303")。
-# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の "/ext/..." URL 解決
-# (utils/file_images.py)も同じ map を引く(別 allowlist env は作らない)。
+# "/ext/{name}/**" の backend allowlist(例 "cage=file:///mnt/cage,his=http://172.17.0.1:13303")。
+# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の "/ext/..." 参照解決
+# (utils/image_refs.py)も同じ map を引く(別 allowlist env は作らない)。
 EXT_UPSTREAMS = parse_ext_upstreams(os.environ.get("EXT_UPSTREAMS", ""))
 
-# feed(context_images)の "/ext/..." オンデマンド解決(サーバ側 fetch → base64)の
-# サイズ上限。既定 25MB(sandbox 転送上限と同値)。
+# feed(context_images)の "/" 始まり参照のオンデマンド解決(utils/image_refs.py —
+# ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。
 EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")
 try:
     EXT_INLINE_MAX_BYTES = int(EXT_INLINE_MAX_BYTES)

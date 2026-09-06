@@ -203,7 +203,9 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
 
             result_image_urls = [
                 (
-                    # "/" 始まりは相対 URL としてそのまま("/ext/..." 等、#97)
+                    # "/" 始まりは参照文字列のまま("/ext/..." #97、"/mnt/..." "/workspace/..."
+                    # "/api/v1/files/{id}/content#page=N" #139 — 実体化は送信直前の
+                    # utils/file_images.py)
                     entry
                     if entry.startswith("/")
                     else f"/api/v1/files/{entry}/content"

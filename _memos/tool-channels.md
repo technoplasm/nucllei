@@ -14,7 +14,7 @@ tool が「戻り値以外」で何かを届ける口の全量。issue #88 / #89
 | 戻り値(`return`) | モデル | tool 終了時 | ○(results[i].content) | ○ | ○ |
 | `__progress__(description, *, current, total, done)` | 人間 | **実行中に即時** | **✗(揮発)** | ○ | ✗ |
 | `__display__(content, kind)` | 人間 | 実行後 harvest | ○(results[i].display) | ○ | ✗ |
-| `__feed_image__(file_id)` | モデル(VLM) | 実行後 harvest | ○(results[i].context_images) | ○ | ○(画素) |
+| `__feed_image__(file_id または "/" 始まり参照)` | モデル(VLM) | 実行後 harvest | ○(results[i].context_images) | ○ | ○(画素) |
 | `__event_emitter__({type,data})` | 人間 | 即時 | 型による | ✗(async) | 型による |
 | `__event_call__({type,data})` | 人間(モーダル) | 即時・双方向 | ✗ | ✗(async) | ✗ |
 
@@ -35,7 +35,9 @@ access_control 側)。
 
 - **実行中の「今どこか」** → `__progress__`。他に手段は無い
 - **後から読み返してほしい実行ログ・プレイヤー・図** → `__display__`(collapse 外・永続・リロード再現)
-- **モデルに画像を見せたい** → `__feed_image__`
+- **モデルに画像を見せたい** → `__feed_image__`。引数は file_id か `/` 始まりの参照
+  (`/ext/…` `/mnt/…` `/workspace/…`、PDF は `#page=N`)。参照は送信直前に
+  `utils/image_refs.py` が実体化する(File は作らない、#139)
 - **モデルに伝えたい作業データ** → 戻り値。表示種別は型注釈で決める(`tool-arg-render.md`)
 - **成果物をチャット添付にしたい** → `__event_emitter__({"type":"chat:message:files"})`
   (sandbox の outputs/ 回収がこれ。DB へ upsert してから emit する)
