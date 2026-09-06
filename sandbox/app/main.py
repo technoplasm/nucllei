@@ -64,6 +64,14 @@ SESSION_GRACE_S = int(os.environ.get("SANDBOX_SESSION_GRACE_S", "5"))
 # jail に read-only で見せるホスト (=コンテナ) 側パス
 RO_BINDS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt/venv"]
 
+# 参照用データの「置き場」(#138)。**直下に在るものが、同じパスのまま jail へ read-only で
+# bind される** — 配備側は compose の volume を `- /host/path/doc:/mnt/doc:ro` と足すだけで、
+# サービス側の設定 (env) は増やさない。guest 側 = コンテナ側のパスなので `host:guest` の
+# 対応表を持たず、複数置いても名前順に並ぶだけで衝突しない。見るのは直下 1 階層だけ
+# (「volume 1 本 = 1 エントリ」)。空 (= 既定) なら何も足さない。
+# 全ユーザーに同じものが見える点を含め、詳細は README「参照用データを jail に見せる」。
+RO_MOUNT_ROOT = Path("/mnt")
+
 # jail の / は tmpfs で新規なので /dev が無い。最低限のデバイスノードを bind する
 # (これが無いと dd if=/dev/zero や /dev/urandom を使うコードが失敗する)
 DEV_BINDS = ["/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom"]
@@ -450,6 +458,47 @@ def _collect_exports(ws: Path, before: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # nsjail 実行
 # ---------------------------------------------------------------------------
+def _scan_ro_mount_root() -> tuple[list[str], list[str]]:
+    """`RO_MOUNT_ROOT` 直下を見て (bind するパス, 飛ばしたパス) を名前順で返す (#138)。
+
+    jail を組むたびに見る (`RO_BINDS` の `os.path.exists` と同じ流儀)。中身が変わるのは
+    実質コンテナ起動時だけなので、キャッシュを持って実際とずれる余地を作らない。
+
+    飛ばすのは dot 始まりと、**nsjail に渡すと jail の起動ごと失敗するもの** = 全ユーザーの
+    全実行が落ちるので警告に回す: 実体を辿れないもの (壊れた symlink) と、名前に ":" を
+    含むもの (nsjail の `src:dst` 区切り。dst を相対パスと解釈して落ちる)。名前は配備側が
+    自由に付けられる = 外部入力なので、ここで防ぐ。
+    """
+    try:
+        names = sorted(os.listdir(RO_MOUNT_ROOT))
+    except OSError:  # 置き場そのものが無い / 読めない = 何も足さない
+        return [], []
+    binds, skipped = [], []
+    for name in names:
+        if name.startswith("."):
+            continue
+        p = str(RO_MOUNT_ROOT / name)
+        ok = ":" not in name and os.path.exists(p)
+        (binds if ok else skipped).append(p)
+    return binds, skipped
+
+
+def _log_ro_mounts() -> None:
+    """起動時に「jail に何が余分に見えているか」をログ 1 行で残す (`_startup` から呼ぶ)。
+
+    配備側が volume を足すだけで増える口で、サービスの env を見ても分からないため。
+    """
+    binds, skipped = _scan_ro_mount_root()
+    if binds:
+        print(f"[sandbox] 追加 read-only bind: {' '.join(binds)}", flush=True)
+    for p in skipped:
+        print(
+            f"[sandbox] WARNING: {p} は bind しません "
+            "(実体を辿れない = 壊れた symlink か、名前に ':' を含む)",
+            flush=True,
+        )
+
+
 def _jail_base(ws: Path, wall_s: int) -> list[str]:
     """stateless exec と常駐 kernel で共通の nsjail 引数。wall_s は --time_limit
     (プロセスの生存上限。stateless は実行秒、kernel はセッション TTL のバックストップ)。"""
@@ -503,6 +552,10 @@ def _jail_base(ws: Path, wall_s: int) -> list[str]:
         cmd += ["--bindmount_ro", "/var/cache/fontconfig"]
     if os.path.exists(KERNEL_PATH):
         cmd += ["--bindmount_ro", KERNEL_PATH]
+    # 置き場 (RO_MOUNT_ROOT) に在るものを同じパスのまま read-only で (#138)。
+    # nsjail は `src` だけ渡すと dst = src なので、`src:dst` の対応表は要らない
+    for p in _scan_ro_mount_root()[0]:
+        cmd += ["--bindmount_ro", p]
     for p in DEV_BINDS:
         if os.path.exists(p):
             cmd += ["--bindmount", p]  # rw (デバイスノード)
@@ -747,6 +800,7 @@ class CellRequest(BaseModel):
 @app.on_event("startup")
 async def _startup():
     _log_auth_state()
+    _log_ro_mounts()
     _ensure_loop_nodes()
     if not _loop_available():
         print(

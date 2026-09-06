@@ -56,6 +56,7 @@ nsjail jail
   - /workspace: ユーザー単位の loopback ext4 を rw bind (下記 quota 参照)
   - /tmp: 256MB tmpfs (RAM-backed・実行ごとに消える。実行中の一時ファイル用。
     跨いで残すなら /workspace へ)
+  - /mnt/<名前>: 配備側が置いた参照用データを read-only bind (既定は空。下記)
   - network namespace: 空 (loopback 含め通信不可)
 ```
 
@@ -67,6 +68,33 @@ nsjail jail
   閉域後の追加インストールは無い前提で、閉域前にリストを確定する。
 - UI とのファイル入出力は tool (UI プロセス側) が bytes を持ち運ぶ。
   sandbox サービスは UI に一切アクセスしない (信頼方向は UI → sandbox の一方通行)。
+
+### 参照用データを jail に見せる (`/mnt`)
+
+「大きな読み取り専用データを丸ごと走査したい」用途 (コーパス横断の集計など) のために、
+**コンテナの `/mnt` 直下に在るものが、同じパスのまま jail へ read-only で bind される**
+(#138)。**サービス側の設定は無い** — 配備側は compose に volume を足すだけでよい。
+
+```yaml
+services:
+  sandbox:
+    volumes:
+      - /srv/cage/data/doc:/mnt/doc:ro       # jail からも /mnt/doc で見える
+      - /srv/cage/data/static:/mnt/static:ro # 足すぶんだけ並ぶ
+```
+
+- **guest 側 = コンテナ側と同じパス**。`host:guest` の対応表を持たないので、複数置いても
+  名前順に並ぶだけで衝突しない (同じ名前は同じ 1 つの mount point にしかならない)。
+- **直下 1 階層だけ**を見る (`/mnt/doc` は bind するが `/mnt/doc/guideline` を個別には
+  足さない)。「volume 1 本 = `/mnt` の 1 エントリ」の対応を保つため。
+- **何も置かなければ何も足さない** = 従来どおりの jail (これが既定)。
+- **read-only**。compose 側で `:ro` を書き忘れてもコンテナ内が rw になるだけで、jail へは
+  `--bindmount_ro` でしか渡らない (jail 内は EROFS)。
+- **全ユーザーに同じものが見える** — 置いてよいのは「利用者全員が読んでよいデータ」だけで、
+  その判断は配備側が持つ (workspace のユーザー間隔離は従来どおり)。
+- 実体を辿れないもの (壊れた symlink) は**飛ばして警告**する。そのまま渡すと jail の起動ごと
+  失敗し全ユーザーの全実行が落ちるため。dot 始まりは無視。
+- 起動ログに bind 一覧が 1 行出る (`[sandbox] 追加 read-only bind: /mnt/doc`)。
 
 ## セキュリティモデル
 
@@ -89,6 +117,8 @@ nsjail jail
     が DAC では守られない。対策としては per-user uid オフセット割当があるが、
     脱出 + α の多段前提であり、利用者が院内医師に限られるため PoC では見送り。
 - **rootfs read-only**: 書けるのは /workspace と /tmp (tmpfs) のみ。
+  配備側が `/mnt` に足した参照用データも read-only (bind した各エントリが EROFS。
+  それを載せている `/` 自体は 16MB の使い捨て tmpfs なので `/mnt` 直下は書ける)。
   rlimit (wall/CPU/メモリ/ファイルサイズ/プロセス数) で資源を制限。
   stdout/stderr はパイプなので rlimit_fsize が効かない → サービス側で
   上限バイトまで読んで以降は捨てる (メモリ膨張防止)。
@@ -270,6 +300,9 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
 
+参照用データの read-only bind には **env が無い** — `/mnt` 直下に置いた volume がそのまま
+jail に出る (上記「参照用データを jail に見せる」)。
+
 ## UI tool (nucllei/builtin_tools/sandbox.py)
 
 | メソッド | 役割 |
@@ -351,6 +384,8 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   のみ / ホストの block・GPU デバイス (sda/loop/nvme/mem/kmsg/nvidia/dm) 不可視 / 無ネットワーク
   (外部接続不可) / `df` は quota (既定 10GB) を返しホスト実容量は見えない / PID namespace 独立
   (jail 内から見える pid は自プロセスのみ)。
+- **参照用データ (`/mnt`)**: volume を入れた配備でのみ確認する — 見えること + 書けないこと
+  (EROFS)。何も入れていない配備 (既定) は確認対象が無いので何もしない。
 
 実行: `uv run task sandbox-test` / `python3 sandbox/tests/test_isolation.py` (pytest 不要の
 末尾ランナー付き)。**本体の `uv run pytest` には含めない** — `[tool.pytest.ini_options]` の
@@ -369,6 +404,10 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   `/HEALTHZ` `/healthz/../files/list` 等はすべて 401 — 免除判定を prefix 一致や自前の
   正規化に変えたら落ちる) と、**非 ASCII トークンは起動ログで名指しする**ことも見る。
   形状のテストは httpx がクライアント側で URL を畳んでしまうため ASGI を直接叩く。
+- `sandbox/tests/test_ro_mounts.py` — 参照用データの read-only bind (#138)。置き場が
+  空/不在なら nsjail の引数が増えない (挙動不変)、直下のものが同じパスで名前順に並ぶ、
+  **rw では絶対に足さない**、1 階層だけ見る、dot 始まり・壊れた symlink は飛ばす
+  (後者は警告)、を固定する。
 
 なお `test_isolation.py` の HTTP クライアントは、トークンを**コンテナ自身の env**
 (`SANDBOX_TOKEN`) から取る — 配備側がサービスに渡した値が常に正解なので、テストに

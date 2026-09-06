@@ -45,6 +45,14 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       healthcheck は免除なので変更不要。**トークンを渡さない配備は無認証のまま**なので、
       渡すこと自体が配備側の作業として残る
 
+- [x] **参照用データの read-only bind** (#138)。コンテナの **`/mnt` 直下に在るものが、同じ
+      パスのまま jail へ `--bindmount_ro`** で出る (env は増やさない)。空なら挙動不変、
+      渡すと jail の起動ごと落ちる名前 (壊れた symlink・`:` 入り) は飛ばして警告、
+      起動ログに bind 一覧を 1 行。回帰は
+      `tests/test_ro_mounts.py` と `test_isolation.py` の `test_ro_mount_root_is_read_only`
+      (volume を入れた配備でのみ実効)。**配備側 (llens) の追従は向こう持ち** = compose に
+      volume を足す + モデルへの使い分け指示を prompt に書く
+
 ## 残課題
 
 - [ ] **実チャットでの実践シナリオ検証** (プロット/画像/Office 読み書き/複数セル連携)

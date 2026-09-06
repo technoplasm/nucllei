@@ -119,6 +119,20 @@ def test_system_dirs_read_only():
     assert "No such file" in r["stdout"]  # どのファイルも作られていない
 
 
+def test_ro_mount_root_is_read_only():
+    # 参照用データの置き場 (/mnt、#138): 入れたものは jail から読めるが**書けない**。
+    # 何も入れていない配備 (= 既定) では確かめる対象が無いので何もしない。
+    listed = run("shell", "ls /mnt 2>/dev/null")["stdout"].split()
+    if not listed:
+        print("  note: /mnt に何も無い配備なので確認をスキップ (volume 未設定 = 既定)")
+        return
+    target = f"/mnt/{listed[0]}"
+    # touch は dir/file どちらでも書き込み扱い (utimensat) なので RO なら EROFS になる
+    r = run("shell", f"[ -e {target} ] && echo VISIBLE; touch {target} 2>&1")
+    assert "VISIBLE" in r["stdout"], r["stdout"]
+    assert "Read-only file system" in r["stdout"], r["stdout"]
+
+
 def test_no_host_filesystem_access():
     # 他ユーザーの workspace / イメージ置き場 (ホスト /workspaces) は jail に bind されない。
     r = run("shell", "ls -d /workspaces /workspaces/.images 2>&1")
