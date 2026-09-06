@@ -291,10 +291,10 @@ locally from the same read-only mount root the sandbox binds (#138);
 Anything outside those roots, oversize, missing, or neither image nor PDF
 becomes `(image unavailable)`. The mount contents are logged once at boot.
 
-| Var                    | Kind | Default            | Effect                                                                                                                                                                                      |
-| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Var                    | Kind | Default            | Effect                                                                                                                                                                                            |
+| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning |
-| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining `/`-prefixed context images                                                                                                                             |
+| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining `/`-prefixed context images                                                                                                                                  |
 
 ### 3.9 Audio (STT / TTS)
 
@@ -612,21 +612,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                             |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                  |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`         |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                           |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                   |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                        |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                               |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                 |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                       |
 | `__feed_image__`                | `fn(ref)` — feed an image into the model's context for the follow-up call (the "model's eyes"); `ref` is a file_id or a `/`-prefixed reference (`/ext/…`, `/mnt/…`, `/workspace/…`, optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8); chat path only |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                  |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                           |
-| `__id__`                        | this tool's id                                                                                                                                       |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                    |
-| `__messages__`                  | the outbound message list                                                                                                                            |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                   |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                            |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                              |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                        |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                 |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                             |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                          |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                  |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                         |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                  |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                    |
 
 ### 5.4 Argument & result rendering
 
