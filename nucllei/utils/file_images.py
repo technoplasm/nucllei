@@ -41,8 +41,8 @@ from nucllei.utils.access_control import has_read_access_to_file
 from nucllei.utils.image_refs import (
     LoadedRef,
     detect_kind,
-    load_ref,
     rasterize_pdf_page,
+    resolve_ref,
     split_page,
 )
 from nucllei.env import SRC_LOG_LEVELS
@@ -149,10 +149,24 @@ async def inline_internal_image_urls(messages: list, user) -> list:
             f"file_id={file_id}",
         )
 
+    async def resolve(ref: str) -> LoadedRef | None:
+        # 置換の文面は理由を問わず同じ("(image unavailable)" — 存在有無を漏らさない)
+        # だが、ログには code を残す。「リンク切れ」と「サイズ超過」を運用で見分ける
+        # ためで、image_refs 側の warning と合わせて読む
+        loaded, error = await resolve_ref(ref, user.id)
+        if error is not None:
+            log.warning(
+                f"file_images: reference unavailable (ref={ref[:120]!r}, "
+                f"code={error.code}, detail={error.detail}"
+                + (f", size={error.size}" if error.size is not None else "")
+                + (f", limit={error.limit}" if error.limit is not None else "")
+                + (f", status={error.status}" if error.status is not None else "")
+                + ")"
+            )
+        return loaded
+
     async def load_reference(ref: str, page: int | None) -> str | None:
-        return await materialize(
-            f"ref:{ref}", lambda: load_ref(ref, user.id), page, f"ref={ref}"
-        )
+        return await materialize(f"ref:{ref}", lambda: resolve(ref), page, f"ref={ref}")
 
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None

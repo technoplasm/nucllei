@@ -19,7 +19,8 @@ nucllei プロセス内で動く)と、送信直前に image_url を data URL �
   - それ以外は env EXT_PUBLIC_BASES(`name=院内 web の原本 URL のルート`)のいずれかの
     `<base>/` に前方一致すれば、その name の backend に残り(`rel`)を渡して解決する
     (`ext_upstreams.match_public_base`)。
-  - どれにも当たらなければ None(fail closed。任意の URL を取りに行く口ではない)。
+  - どれにも当たらなければ失敗 `unknown_upstream`(fail closed。任意の URL を取りに行く
+    口ではない)。
   file backend なら root 内をローカル読み、http backend なら httpx で取得
   (content-type は上流ヘッダ)。
 - **"/" 始まり = sandbox の fs パスだけ**:
@@ -27,10 +28,10 @@ nucllei プロセス内で動く)と、送信直前に image_url を data URL �
     データ(sandbox と同じ置き場 #138)。resolve() して root 内でなければ読まない。
   - `/workspace/...` — sandbox の `/files/read`(呼び出しユーザーの workspace に閉じる)。
     jail 内で作ったものをモデルが見るだけなら、Files に登録する必要は無い。
-  - **`/ext/...` は受けない**(None + warning)。`/ext/` は URL であって fs パスでは
+  - **`/ext/...` は受けない**(失敗 `relative_ext` + warning)。`/ext/` は URL であって fs パスでは
     ない — 同じ "/" 始まりで同居させると、モデルが `/ext/` を fs と誤認したり fs パスを
     URL に書き換えたりする事故の温床になる。URL は絶対 URL で渡す。
-- それ以外(`/api/v1/files/...`、相対)— ここでは扱わない(None)。
+- それ以外(`/api/v1/files/...`、相対)— ここでは扱わない(失敗 `unsupported_form`)。
 
 **File を発行しない**: PDF は送信直前にページを画像化して data URL にする
 (`rasterize_pdf_page`)。「見るために置く」ものが Storage / Files に永久に残る
@@ -39,8 +40,11 @@ nucllei プロセス内で動く)と、送信直前に image_url を data URL �
 `#page=N` だけを見るので、URL 自身の fragment とは衝突しない(`#page=N` は常に
 一番後ろに付く。`https://h/x.pdf#page=3` → base `https://h/x.pdf`)。
 
-**fail closed**: 境界(root の外・サイズ上限・不達・不明な種別)はすべて None +
-log.warning。tool 側に on/off の valve は置かない — 境界を持つのは解決層だけで、
+**fail closed**: 境界(root の外・サイズ上限・不達・不明な種別)はすべて失敗 +
+log.warning。`resolve_ref` は失敗理由を `RefError`(code + 人向け detail)で返し、
+`load_ref` はそれを捨てて None にする薄い wrapper — 呼び手が「リンク切れ」と
+「サイズ超過」を言い分けられるように(実走で 32.6 MB の PDF が上限 25 MB に当たり、
+モデルが「リンク切れ」と誤報した)。tool 側に on/off の valve は置かない — 境界を持つのは解決層だけで、
 tool のスイッチはモデルが届く範囲を変えない(意味の無い設定になる)。
 """
 
@@ -115,6 +119,47 @@ class LoadedRef:
     data: bytes
     content_type: str
     name: str
+
+
+@dataclass(frozen=True)
+class RefError:
+    """`resolve_ref` の失敗理由。`code` はこの一覧のどれか(増やさない — 呼び手の tool が
+    code からモデル向け文面を組むので、ここと README §3.8 と tool 側で同じ集合を持つ):
+
+    - `unsupported_form` — スキーム付き URL でも `/workspace/` `/mnt/` でもない
+      (相対パス・空・`ftp:` 等、"/" 始まりでどの名前空間でもないもの)
+    - `relative_ext` — `/ext/…` の相対参照(URL は絶対で渡す)
+    - `traversal` — 制御文字・`..`・バックスラッシュ・NUL
+    - `unknown_upstream` — `/ext/{name}/…` 形か EXT_PUBLIC_BASES 配下だが name が
+      EXT_UPSTREAMS に無い / どの名前空間にも当たらない絶対 URL(外部サイト)。
+      detail で両者を区別する
+    - `not_found` — file backend / mount でファイルが無い・ディレクトリ・root 外、
+      http backend の 404、workspace の 404
+    - `too_large` — サイズ上限超過(file・http・workspace の 3 経路とも)。
+      `size` は実サイズ(http stream 打ち切りなら Content-Length か打ち切り時点の
+      受信量)、`limit` は上限
+    - `upstream_status` — http backend の 2xx 以外(404 は not_found。3xx = redirect も
+      ここ)。`status` に HTTP status
+    - `upstream_unreachable` — http backend への接続失敗・タイムアウト・InvalidURL
+    - `workspace_unavailable` — SANDBOX_URL 無し / sandbox API 失敗(404 は not_found、
+      413 は too_large に寄せる)
+
+    `detail` は人(ログ)向けの 1 行。モデル向け文面は tool 側が code から組む。
+    """
+
+    code: str
+    detail: str
+    size: int | None = None
+    limit: int | None = None
+    status: int | None = None
+
+
+# 内部の各経路が返す形。成功 (loaded, None) / 失敗 (None, RefError) のどちらか一方。
+_Result = tuple[LoadedRef | None, RefError | None]
+
+
+def _fail(code: str, detail: str, **fields) -> _Result:
+    return None, RefError(code, detail, **fields)
 
 
 def split_page(ref: str) -> tuple[str, int | None]:
@@ -197,46 +242,56 @@ def _content_type_for(data: bytes, declared: str | None, name: str) -> str:
     )
 
 
-def _read_confined(root: Path, target: Path, label: str) -> LoadedRef | None:
+def _read_confined(root: Path, target: Path, label: str, limit: int) -> _Result:
     """root(resolve 済み)の中にある通常ファイルだけを読む。blocking — thread で呼ぶ。"""
     try:
         resolved = target.resolve()
     except (OSError, RuntimeError, ValueError):
         log.warning(f"image_refs: cannot resolve path ({label})")
-        return None
+        return _fail("not_found", f"cannot resolve path ({label})")
     if not resolved.is_relative_to(root):
         log.warning(f"image_refs: path escapes root ({label}, root={root})")
-        return None
+        return _fail("not_found", f"path escapes root ({label})")
     if not resolved.is_file():
         log.warning(f"image_refs: not a file ({label})")
-        return None
+        return _fail("not_found", f"not a file ({label})")
     try:
         size = resolved.stat().st_size
-        if size > EXT_INLINE_MAX_BYTES:
+        if size > limit:
             log.warning(
                 f"image_refs: file exceeds size limit ({label}, size={size}, "
-                f"limit={EXT_INLINE_MAX_BYTES})"
+                f"limit={limit})"
             )
-            return None
+            return _fail(
+                "too_large",
+                f"file exceeds size limit ({label})",
+                size=size,
+                limit=limit,
+            )
         data = resolved.read_bytes()
-    except OSError:
+    except OSError as e:
         log.exception(f"image_refs: read failed ({label})")
-        return None
-    return LoadedRef(
-        data=data,
-        content_type=_content_type_for(data, None, resolved.name),
-        name=resolved.name,
+        return _fail("not_found", f"read failed ({label}): {e}")
+    return (
+        LoadedRef(
+            data=data,
+            content_type=_content_type_for(data, None, resolved.name),
+            name=resolved.name,
+        ),
+        None,
     )
 
 
-async def _load_ext(name: str, path: str, query: str) -> LoadedRef | None:
+async def _load_ext(name: str, path: str, query: str, limit: int) -> _Result:
     backend = ext_backend(name)
     if backend is None:
         log.warning(f"image_refs: unknown ext backend (name={name})")
-        return None
+        return _fail(
+            "unknown_upstream", f"/ext/{name}/ is not in EXT_UPSTREAMS (name={name})"
+        )
     if has_path_traversal(path):
         log.warning(f"image_refs: rejecting traversal ext path (name={name})")
-        return None
+        return _fail("traversal", f"traversal in ext path (name={name})")
     kind, target = backend
     if kind == "file":
         # URL の path は percent-encoded のまま来る(文書に焼かれた URL は日本語
@@ -246,95 +301,166 @@ async def _load_ext(name: str, path: str, query: str) -> LoadedRef | None:
         decoded = unquote(path)
         if has_path_traversal(decoded):
             log.warning(f"image_refs: rejecting traversal ext path (name={name})")
-            return None
+            return _fail("traversal", f"traversal in ext path (name={name})")
         # 先頭 "/" は Path 結合で root を捨てさせる(routers/ext.py と同じ扱い)
         return await asyncio.to_thread(
-            _read_confined, target, target / decoded.lstrip("/"), f"ext:{name}"
+            _read_confined,
+            target,
+            target / decoded.lstrip("/"),
+            f"ext:{name}",
+            limit,
         )
     # http backend へは encode されたまま渡す(上流が decode する)
-    return await _fetch_http(f"{target}/{path}{query or ''}", name, path)
+    return await _fetch_http(f"{target}/{path}{query or ''}", name, path, limit)
 
 
-async def _fetch_http(url: str, name: str, path: str) -> LoadedRef | None:
-    """http backend。redirect は辿らない(共有クライアント)、2xx 以外・上限超過は None。"""
+async def _fetch_http(url: str, name: str, path: str, limit: int) -> _Result:
+    """http backend。redirect は辿らない(共有クライアント)。404 → not_found、
+    それ以外の 2xx 以外(3xx 含む)→ upstream_status、上限超過 → too_large、
+    接続失敗 / タイムアウト / InvalidURL → upstream_unreachable。"""
     try:
         async with get_ext_client().stream("GET", url) as response:
             if not response.is_success:
+                status = response.status_code
                 log.warning(
-                    f"image_refs: ext fetch failed (name={name}, "
-                    f"status={response.status_code})"
+                    f"image_refs: ext fetch failed (name={name}, status={status})"
                 )
-                return None
+                if status == 404:
+                    return _fail("not_found", f"upstream 404 (name={name})", status=404)
+                return _fail(
+                    "upstream_status",
+                    f"upstream returned {status} (name={name})",
+                    status=status,
+                )
             chunks = []
             total = 0
             async for chunk in response.aiter_bytes():
                 total += len(chunk)
-                if total > EXT_INLINE_MAX_BYTES:
-                    # 全量バッファせず、超過した時点でストリームを打ち切る
+                if total > limit:
+                    # 全量バッファせず、超過した時点でストリームを打ち切る。size は
+                    # 打ち切り時点の受信量(実サイズの下限)— Content-Length が
+                    # 有ればそちらを採る
+                    declared_len = response.headers.get("content-length")
+                    size = (
+                        int(declared_len) if (declared_len or "").isdigit() else total
+                    )
                     log.warning(
                         f"image_refs: ext content exceeds size limit "
-                        f"(name={name}, limit={EXT_INLINE_MAX_BYTES})"
+                        f"(name={name}, size>={size}, limit={limit})"
                     )
-                    return None
+                    return _fail(
+                        "too_large",
+                        f"upstream content exceeds size limit (name={name})",
+                        size=size,
+                        limit=limit,
+                    )
                 chunks.append(chunk)
             declared = response.headers.get("content-type")
-    except (httpx.HTTPError, httpx.InvalidURL):
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
         # InvalidURL は httpx.HTTPError の subclass でない(#97 review)。制御文字は
         # has_path_traversal で既に弾いているが、fail closed の約束を破らないよう
         # 明示的に合流させる。
         log.exception(f"image_refs: ext fetch error (name={name})")
-        return None
+        return _fail(
+            "upstream_unreachable",
+            f"upstream fetch error (name={name}): {type(e).__name__}: {e}",
+        )
     data = b"".join(chunks)
     filename = os.path.basename(path)
-    return LoadedRef(
-        data=data,
-        content_type=_content_type_for(data, declared, filename),
-        name=filename,
+    return (
+        LoadedRef(
+            data=data,
+            content_type=_content_type_for(data, declared, filename),
+            name=filename,
+        ),
+        None,
     )
 
 
-async def _load_workspace(rel_path: str, user_id: str) -> LoadedRef | None:
+# sandbox_post が投げる RuntimeError の文面(`sandbox HTTP {status}: {body}`)から
+# status と、413 の body(`file too large: N bytes (limit L)`)からサイズを拾う。
+_SANDBOX_HTTP_PATTERN = re.compile(r"^sandbox HTTP (\d{3})\b")
+_SANDBOX_TOO_LARGE_PATTERN = re.compile(r"(\d+) bytes \(limit (\d+)\)")
+
+
+def _workspace_error(exc: Exception, rel_path: str) -> RefError:
+    """sandbox `/files/read` の失敗を code に振り分ける。404 → not_found、
+    413 → too_large、それ以外(不達・401・5xx)→ workspace_unavailable。"""
+    message = str(exc)
+    match = _SANDBOX_HTTP_PATTERN.match(message)
+    status = int(match.group(1)) if match else None
+    if status == 404:
+        return RefError("not_found", f"workspace file not found (path={rel_path})")
+    if status == 413:
+        size_match = _SANDBOX_TOO_LARGE_PATTERN.search(message)
+        return RefError(
+            "too_large",
+            f"workspace file exceeds sandbox size limit (path={rel_path})",
+            size=int(size_match.group(1)) if size_match else None,
+            limit=int(size_match.group(2)) if size_match else None,
+        )
+    return RefError(
+        "workspace_unavailable",
+        f"sandbox read failed (path={rel_path}): {type(exc).__name__}: {message[:200]}",
+        status=status,
+    )
+
+
+async def _load_workspace(rel_path: str, user_id: str, limit: int) -> _Result:
     if not sandbox.SANDBOX_URL:
         log.warning("image_refs: /workspace reference without SANDBOX_URL")
-        return None
-    if not rel_path or has_path_traversal(rel_path):
+        return _fail("workspace_unavailable", "SANDBOX_URL is not configured")
+    if not rel_path:
+        log.warning("image_refs: empty workspace path")
+        return _fail("not_found", "empty workspace path")
+    if has_path_traversal(rel_path):
         log.warning("image_refs: rejecting workspace path")
-        return None
+        return _fail("traversal", "traversal in workspace path")
     try:
         res = await sandbox.sandbox_post(
             "/files/read", {"user_id": user_id, "path": rel_path}, 60
         )
         data = base64.b64decode(res["b64"])
-    except Exception:
+    except Exception as e:
         # 不在(404)・上限(413)・不達は全部ここ — sandbox 側のメッセージは log に残す
         log.exception(f"image_refs: workspace read failed (path={rel_path})")
-        return None
-    if len(data) > EXT_INLINE_MAX_BYTES:
+        return None, _workspace_error(e, rel_path)
+    if len(data) > limit:
         log.warning(
             f"image_refs: workspace file exceeds size limit (path={rel_path}, "
-            f"size={len(data)}, limit={EXT_INLINE_MAX_BYTES})"
+            f"size={len(data)}, limit={limit})"
         )
-        return None
+        return _fail(
+            "too_large",
+            f"workspace file exceeds size limit (path={rel_path})",
+            size=len(data),
+            limit=limit,
+        )
     filename = res.get("name") or os.path.basename(rel_path)
-    return LoadedRef(
-        data=data, content_type=_content_type_for(data, None, filename), name=filename
+    return (
+        LoadedRef(
+            data=data,
+            content_type=_content_type_for(data, None, filename),
+            name=filename,
+        ),
+        None,
     )
 
 
-async def _load_url(url: str) -> LoadedRef | None:
+async def _load_url(url: str, limit: int) -> _Result:
     """スキーム付き URL(traversal / 制御文字は入口で拒否済み)を backend で解決する。"""
     try:
         parts = urlsplit(url)
-    except ValueError:
+    except ValueError as e:
         log.warning("image_refs: malformed URL")
-        return None
+        return _fail("unsupported_form", f"malformed URL: {e}")
     query = f"?{parts.query}" if parts.query else ""
 
     match = EXT_URL_PATH_PATTERN.match(parts.path)
     if match:
         # 自オリジンの表示 URL。host は見ない(module docstring)
         name, rest = match.groups()
-        return await _load_ext(name, rest, query)
+        return await _load_ext(name, rest, query, limit)
 
     hit = match_public_base(url)
     if hit is None:
@@ -342,56 +468,93 @@ async def _load_url(url: str) -> LoadedRef | None:
             "image_refs: absolute URL is neither an /ext/ URL nor under "
             f"EXT_PUBLIC_BASES ({url[:80]!r})"
         )
-        return None
+        return _fail(
+            "unknown_upstream",
+            "absolute URL is neither an /ext/{name}/ URL nor under EXT_PUBLIC_BASES "
+            f"(external site: {parts.scheme}://{parts.netloc})",
+        )
     name, rel = hit
     rel_path, sep, rel_query = rel.split("#", 1)[0].partition("?")
     if not rel_path:
         log.warning(f"image_refs: empty path under EXT_PUBLIC_BASES (name={name})")
-        return None
-    return await _load_ext(name, rel_path, f"?{rel_query}" if sep else "")
+        return _fail("not_found", f"empty path under EXT_PUBLIC_BASES (name={name})")
+    return await _load_ext(name, rel_path, f"?{rel_query}" if sep else "", limit)
 
 
-async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
-    """参照(`#page` を含まない)をバイト列にする。解決できなければ None。
+async def resolve_ref(
+    ref: str, user_id: str, *, max_bytes: int | None = None
+) -> _Result:
+    """参照(`#page` を含まない)をバイト列にする。
 
-    受ける形は 2 つ — スキーム付き URL(`http(s)://`)と sandbox の fs パス("/" 始まりの
-    `/workspace/...` / `/mnt/...`)。境界は module docstring のとおり。サイズ上限は
-    EXT_INLINE_MAX_BYTES(どの経路も同じ)。
+    成功なら `(loaded, None)`、失敗なら `(None, RefError)`。例外は投げない(fail
+    closed の約束 — 境界の外は全部 RefError に閉じる)。受ける形は 2 つ — スキーム付き
+    URL(`http(s)://`)と sandbox の fs パス("/" 始まりの `/workspace/...` /
+    `/mnt/...`)。境界は module docstring のとおり。
+
+    サイズ上限は `max_bytes`(None なら env の EXT_INLINE_MAX_BYTES)— どの経路
+    (file / http stream / workspace)も同じ値で見る。上限は呼び手の都合(画像 inline は
+    小さく、文書を読む用途は大きく)なので resolver の env 1 本で縛らない。`too_large`
+    の `limit` には実際に使った値が入る。
+
+    失敗理由は `RefError.code`(一覧は RefError の docstring)。呼ぶ側(feed 側の tool、
+    送信直前 inline)はこれで「不在」「上限超過」「上流不達」を言い分ける — 本 module は
+    warning ログも残すので、ログ側の文面は `detail` と同じ事実を指す。
     """
+    limit = EXT_INLINE_MAX_BYTES if max_bytes is None else max_bytes
     if not isinstance(ref, str):
-        return None
+        return _fail(
+            "unsupported_form", f"reference is not a string ({type(ref).__name__})"
+        )
     is_url = bool(_ABSOLUTE_URL_PATTERN.match(ref))
     if not is_url and not ref.startswith("/"):
-        return None
+        log.warning(f"image_refs: unsupported reference form ({ref[:80]!r})")
+        return _fail(
+            "unsupported_form",
+            "reference is neither an http(s) URL nor a sandbox path "
+            f"(/workspace/ or {RO_MOUNT_ROOT}/)",
+        )
     # 制御文字 / ".." / バックスラッシュはどの形でも読まない(URL は path / query ごと
     # 文字列全体に掛ける — urlsplit は CR/LF/TAB を黙って落とすので、分解前に見る)。
     # 分岐先でも個別に見るが、/mnt/ 直読みは Path.resolve() が NUL で ValueError を投げる
     # (fail closed の約束を破って 500 になる) ので、入口で一律に落とす。
     if has_path_traversal(ref):
         log.warning("image_refs: rejecting reference with traversal/control chars")
-        return None
+        return _fail("traversal", "reference contains '..', backslash or control chars")
 
     if is_url:
-        return await _load_url(ref)
+        return await _load_url(ref, limit)
 
     if ref.startswith(_EXT_PATH_PREFIX):
         log.warning(
             "image_refs: '/ext/...' is a URL, not a filesystem path — pass it as an "
             f"absolute URL (https://<host>/ext/...) ({ref[:80]!r})"
         )
-        return None
+        return _fail(
+            "relative_ext",
+            "'/ext/...' is a URL, not a filesystem path — pass it as an absolute URL",
+        )
 
     if ref.startswith(WORKSPACE_PREFIX):
-        return await _load_workspace(ref[len(WORKSPACE_PREFIX) :], user_id)
+        return await _load_workspace(ref[len(WORKSPACE_PREFIX) :], user_id, limit)
 
     root = Path(RO_MOUNT_ROOT)
     if ref.startswith(f"{root}/"):
         return await asyncio.to_thread(
-            _read_confined, root.resolve(), Path(ref), f"mount:{ref}"
+            _read_confined, root.resolve(), Path(ref), f"mount:{ref}", limit
         )
 
     log.warning(f"image_refs: unsupported reference form ({ref[:80]!r})")
-    return None
+    return _fail(
+        "unsupported_form",
+        f"'/' path is neither /workspace/ nor {root}/ ({ref[:80]!r})",
+    )
+
+
+async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
+    """`resolve_ref` の薄い wrapper — 解決できなければ None(理由を要らない呼び手向け)。
+    上限は従来どおり EXT_INLINE_MAX_BYTES(引数は増やさない)。"""
+    loaded, _ = await resolve_ref(ref, user_id)
+    return loaded
 
 
 def log_mounts() -> None:
