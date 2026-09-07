@@ -158,7 +158,11 @@ async def inline_internal_image_urls(messages: list, user) -> list:
             log.warning(
                 f"file_images: reference unavailable (ref={ref[:120]!r}, "
                 f"code={error.code}, detail={error.detail}"
-                + (f", size={error.size}" if error.size is not None else "")
+                + (
+                    f", size{'=' if error.size_exact else '>='}{error.size}"
+                    if error.size is not None
+                    else ""
+                )
                 + (f", limit={error.limit}" if error.limit is not None else "")
                 + (f", status={error.status}" if error.status is not None else "")
                 + ")"

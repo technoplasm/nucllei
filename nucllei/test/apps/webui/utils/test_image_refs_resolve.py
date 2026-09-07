@@ -89,14 +89,17 @@ def _install_sandbox(monkeypatch, files: dict, url="http://sandbox.test", fail=N
 def test_ref_error_shape():
     from nucllei.utils.image_refs import RefError
 
-    err = RefError("too_large", "x", size=3, limit=2)
-    assert (err.code, err.detail, err.size, err.limit, err.status) == (
+    err = RefError("too_large", "x", size=3, limit=2, size_exact=True)
+    assert (err.code, err.detail, err.size, err.limit, err.status, err.size_exact) == (
         "too_large",
         "x",
         3,
         2,
         None,
+        True,
     )
+    # too_large 以外は size_exact を持たない(既定 False)
+    assert RefError("not_found", "x").size_exact is False
     with pytest.raises(Exception):  # frozen
         err.code = "other"
 
@@ -253,6 +256,7 @@ def test_too_large_file(monkeypatch, tmp_path):
     assert err.code == "too_large"
     assert err.size == len(PNG_BYTES)
     assert err.limit == len(PNG_BYTES) - 1
+    assert err.size_exact is True  # stat の値
 
 
 def test_too_large_http_stream_aborted(monkeypatch):
@@ -278,6 +282,7 @@ def test_too_large_http_stream_aborted(monkeypatch):
     assert err.code == "too_large"
     assert err.size == 80
     assert err.limit == 20
+    assert err.size_exact is True  # Content-Length の値
     assert pulled["chunks"] < 10
 
 
@@ -300,6 +305,7 @@ def test_too_large_http_stream_without_content_length(monkeypatch):
     assert err.code == "too_large"
     assert err.limit == 20
     assert err.size is not None and 20 < err.size <= 80
+    assert err.size_exact is False  # 下限(打ち切り時点の受信量)
 
 
 def test_too_large_workspace(monkeypatch):
@@ -311,6 +317,7 @@ def test_too_large_workspace(monkeypatch):
     assert err.code == "too_large"
     assert err.size == len(PNG_BYTES)
     assert err.limit == len(PNG_BYTES) - 1
+    assert err.size_exact is True  # 全量読めている
 
 
 def test_too_large_workspace_sandbox_413(monkeypatch):
@@ -323,6 +330,7 @@ def test_too_large_workspace_sandbox_413(monkeypatch):
     err = _code("/workspace/out/huge.bin")
     assert err.code == "too_large"
     assert (err.size, err.limit) == (999, 500)
+    assert err.size_exact is True  # sandbox は stat で見る
 
 
 # ---- upstream_status(3xx / 5xx)----

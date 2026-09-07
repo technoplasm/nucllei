@@ -137,7 +137,11 @@ class RefError:
       http backend の 404、workspace の 404
     - `too_large` — サイズ上限超過(file・http・workspace の 3 経路とも)。
       `size` は実サイズ(http stream 打ち切りなら Content-Length か打ち切り時点の
-      受信量)、`limit` は上限
+      受信量)、`limit` は上限。`size_exact` は `size` が確定値か下限かの区別 —
+      True: stat(file backend / `/mnt` / sandbox 413)・全量読了(workspace)・
+      Content-Length(http)。False: Content-Length の無い http stream を打ち切った
+      時点の受信量(実サイズは不明で、`size` は limit を少し超えた値になる)。
+      too_large 以外の code では常に False(意味を持たない)
     - `upstream_status` — http backend の 2xx 以外(404 は not_found。3xx = redirect も
       ここ)。`status` に HTTP status
     - `upstream_unreachable` — http backend への接続失敗・タイムアウト・InvalidURL
@@ -152,6 +156,7 @@ class RefError:
     size: int | None = None
     limit: int | None = None
     status: int | None = None
+    size_exact: bool = False
 
 
 # 内部の各経路が返す形。成功 (loaded, None) / 失敗 (None, RefError) のどちらか一方。
@@ -267,6 +272,7 @@ def _read_confined(root: Path, target: Path, label: str, limit: int) -> _Result:
                 f"file exceeds size limit ({label})",
                 size=size,
                 limit=limit,
+                size_exact=True,
             )
         data = resolved.read_bytes()
     except OSError as e:
@@ -341,18 +347,19 @@ async def _fetch_http(url: str, name: str, path: str, limit: int) -> _Result:
                     # 打ち切り時点の受信量(実サイズの下限)— Content-Length が
                     # 有ればそちらを採る
                     declared_len = response.headers.get("content-length")
-                    size = (
-                        int(declared_len) if (declared_len or "").isdigit() else total
-                    )
+                    exact = (declared_len or "").isdigit()
+                    size = int(declared_len) if exact else total
                     log.warning(
                         f"image_refs: ext content exceeds size limit "
-                        f"(name={name}, size>={size}, limit={limit})"
+                        f"(name={name}, size{'=' if exact else '>='}{size}, "
+                        f"limit={limit})"
                     )
                     return _fail(
                         "too_large",
                         f"upstream content exceeds size limit (name={name})",
                         size=size,
                         limit=limit,
+                        size_exact=exact,
                     )
                 chunks.append(chunk)
             declared = response.headers.get("content-type")
@@ -398,6 +405,8 @@ def _workspace_error(exc: Exception, rel_path: str) -> RefError:
             f"workspace file exceeds sandbox size limit (path={rel_path})",
             size=int(size_match.group(1)) if size_match else None,
             limit=int(size_match.group(2)) if size_match else None,
+            # sandbox は stat で見て 413 を返す — body から拾えた size は確定値
+            size_exact=size_match is not None,
         )
     return RefError(
         "workspace_unavailable",
@@ -435,6 +444,7 @@ async def _load_workspace(rel_path: str, user_id: str, limit: int) -> _Result:
             f"workspace file exceeds size limit (path={rel_path})",
             size=len(data),
             limit=limit,
+            size_exact=True,
         )
     filename = res.get("name") or os.path.basename(rel_path)
     return (

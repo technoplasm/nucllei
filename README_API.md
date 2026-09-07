@@ -314,22 +314,31 @@ on every route (file, http stream, workspace) — the cap is the caller's concer
 (inlining an image vs. reading a document), and `too_large.limit` carries the
 value actually used. `load_ref` is a thin wrapper that drops the reason, keeps
 the env cap, and returns `LoadedRef | None`. `RefError` is a frozen dataclass
-`(code, detail, size=None, limit=None, status=None)`: `detail` is a one-line
+`(code, detail, size=None, limit=None, status=None, size_exact=False)`: `detail` is a one-line
 human/log message; tools build the model-facing wording from `code` (the
 inline step above still emits the same `(image unavailable)` for every code and
 only logs the reason). The `code` set is closed — do not add to it:
 
-| `code`                  | When                                                                                                                                                                                     | Extra fields                                                                        |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `unsupported_form`      | neither an `http(s)://` URL nor `/workspace/…` / `/mnt/…` (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                                                           |                                                                                     |
-| `relative_ext`          | `/ext/…` given as a path — pass it as an absolute URL                                                                                                                                    |                                                                                     |
-| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                    |                                                                                     |
-| `unknown_upstream`      | `/ext/{name}/…` or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site). `detail` tells the two apart |                                                                                     |
-| `not_found`             | file backend / `/mnt/…`: missing, a directory, or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                            | `status=404` for http                                                               |
-| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                 | `size` (actual; for an aborted http stream Content-Length or bytes so far), `limit` |
-| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                  | `status`                                                                            |
-| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                |                                                                                     |
-| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                 | `status` when the sandbox answered                                                  |
+| `code`                  | When                                                                                                                                                                                     | Extra fields                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `unsupported_form`      | neither an `http(s)://` URL nor `/workspace/…` / `/mnt/…` (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                                                           |                                           |
+| `relative_ext`          | `/ext/…` given as a path — pass it as an absolute URL                                                                                                                                    |                                           |
+| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                    |                                           |
+| `unknown_upstream`      | `/ext/{name}/…` or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site). `detail` tells the two apart |                                           |
+| `not_found`             | file backend / `/mnt/…`: missing, a directory, or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                            | `status=404` for http                     |
+| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                 | `size`, `limit`, `size_exact` (see below) |
+| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                  | `status`                                  |
+| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                |                                           |
+| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                 | `status` when the sandbox answered        |
+
+`too_large.size_exact` says whether `size` is the real size or only a lower
+bound: `True` when it comes from `stat` (file backend, `/mnt/…`, sandbox `413`),
+a fully read workspace file, or an http `Content-Length`; `False` when the http
+stream had no `Content-Length` and was aborted just past `limit` — `size` is
+then the bytes received so far (slightly above `limit`) and the real size is
+unknown. On every other code it is meaningless and stays `False`. Tool hint:
+when `False`, say "about N MB or more" rather than quoting `size` as the file's
+size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 
 | Var                    | Kind | Default            | Effect                                                                                                                                                                                                                                                                                              |
 | ---------------------- | ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
