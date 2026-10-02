@@ -1032,7 +1032,7 @@ def test_unknown_upstream_wording_follows_reason(monkeypatch):
     env = _UrlEnv(monkeypatch)
     env.http_backend()
     unknown_name = env.run(url="/ext/nosuch/a.png")
-    not_ext_form = env.run(url="/ext/cage")
+    not_ext_form = env.run(url="/ext/")
     outside = env.run(url="https://example.com/a.pdf")
     assert "その配信元はこの配備に設定されていない" in unknown_name
     assert "`/ext/<配信元>/<パス>` の形でない" in not_ext_form

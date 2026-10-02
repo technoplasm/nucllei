@@ -75,8 +75,15 @@ BE が行う)。
   接続しないため(SSRF の真実源は EXT_UPSTREAMS 一本)。相対 `/ext/{name}/{rest}` は
   「今のサーバの URL」= 同じ backend。
 - それ以外の絶対 URL は env EXT_PUBLIC_BASES(`name=院内 web の原本 URL のルート`)の
-  いずれかの `<base>/` に前方一致すれば、その name の backend に残り(`rel`)を渡して解決する
-  (`ext_upstreams.match_public_base`)。
+  いずれかの `<base>` そのもの、または `<base>/` に前方一致すれば、その name の backend に
+  残り(`rel`)を渡して解決する(`ext_upstreams.match_public_base`)。
+- **name の直下(rel が空)も正しい形** — `/ext/{name}`・`/ext/{name}/`・原本の `<base>`・
+  `<base>/` はどれも「その name のルート」を指す(rel = `""`。末尾 `/` の有無は区別しない)。
+  特別扱いはせず、他の rel と同じに backend へ渡す: http backend は上流の `<base>/` を GET
+  する(/ext ゲートが `/ext/{name}/` を中継するのと同じ URL。上流が redirect を返せば
+  `upstream_status`)。file backend は root = ディレクトリなので `not_found`(一覧は
+  出さない — ゲートも 404)。2026-10-03 までは原本の `<base>/` を上流に問い合わせずに
+  `not_found` にしていて、実在するトップページ(上流は 302)が「リンク切れ」と案内された。
 - どれにも当たらなければ失敗 `unknown_upstream`(fail closed。任意の URL を取りに行く
   口ではない)。
 - file backend なら root 内をローカル読み、http backend なら httpx で取得
@@ -193,10 +200,11 @@ WORKSPACE_PREFIX = "/workspace/"
 # PDF ページ画像化の解像度。valve にしない — モデルが読める解像度は配備で変わらない。
 PDF_RASTER_DPI = 150
 
-# URL の **path 部** "/ext/{name}/{rest}"(query / fragment は urlsplit で分離済み)。
+# URL の **path 部** "/ext/{name}[/{rest}]"(query / fragment は urlsplit で分離済み)。
 # 絶対 URL なら host は問わない(module docstring)。name の文字種は EXT_UPSTREAMS の
-# パース(env.py)と同じ [a-z0-9_-]+。
-EXT_URL_PATH_PATTERN = re.compile(r"^/ext/([a-z0-9_-]+)/(.+)$")
+# パース(env.py)と同じ [a-z0-9_-]+。rest は空でもよい(name の直下 = ルート。
+# `/ext/{name}` と `/ext/{name}/` は同じ)— name が取れない形だけが一致しない。
+EXT_URL_PATH_PATTERN = re.compile(r"^/ext/([a-z0-9_-]+)(?:/(.*))?$")
 
 # tool の引数が受ける形の固定文(module docstring「エラーに添える固定文」)。公開名 —
 # builtin(sandbox / attachment_text)と配備層の tool が import して、形の誤りのエラーに
@@ -263,8 +271,8 @@ class RefError:
       ないもの、`resolve_ref` ならそのどちらでもないもの(相対パス・空・`ftp:` 等)
     - `traversal` — 制御文字・`..`・バックスラッシュ・NUL
     - `unknown_upstream` — URL のルーティングの失敗。内訳は `reason`(下記)
-    - `not_found` — file backend / mount でファイルが無い・ディレクトリ・root 外、
-      http backend の 404、workspace の 404
+    - `not_found` — file backend / mount でファイルが無い・ディレクトリ(file backend の
+      name 直下 `/ext/{name}/` を含む)・root 外、http backend の 404、workspace の 404
     - `too_large` — サイズ上限超過(file・http・workspace の 3 経路とも)。
       `size` は実サイズ(http stream 打ち切りなら Content-Length か打ち切り時点の
       受信量)、`limit` は上限。`size_exact` は `size` が確定値か下限かの区別 —
@@ -284,7 +292,10 @@ class RefError:
 
     - `unknown_name` — `/ext/{name}/…` 形(絶対・相対)か EXT_PUBLIC_BASES 配下だが、
       その name が EXT_UPSTREAMS に無い(未知の配信元)
-    - `not_ext_form` — `/ext/` 始まりの相対 URL だが `/ext/{name}/{path}` の形でない
+    - `not_ext_form` — `/ext/` 始まりの相対 URL だが **name が取れない**(`/ext/`・
+      `/ext//x`・name の文字種 `[a-z0-9_-]+` に合わない `/ext/CAGE/x`)。`/ext/{name}`・
+      `/ext/{name}/`(name の直下)は正しい形で、これには当たらない — backend のルートとして
+      解決する(http は上流のルートを GET、file は `not_found`)
     - `outside_public_bases` — どの名前空間にも当たらない絶対 URL(`/ext/{name}/…` 形でも
       EXT_PUBLIC_BASES 配下でもない = 外部サイト)
 
@@ -308,7 +319,8 @@ class UrlRoute:
 
     - `name` — EXT_UPSTREAMS の name(存在は確認済み)
     - `rel` — name 配下の相対パス(URL に書かれたまま = percent-encoded。先頭 `/`・
-      query・fragment を含まない)
+      query・fragment を含まない)。name の直下(`/ext/{name}`・`/ext/{name}/`・原本の
+      `<base>`・`<base>/`)は `""`
     - `query` — `"?a=b"` か `""`
     - `public_base` — その name の原本の公開 URL のルート(EXT_PUBLIC_BASES[name]。
       末尾スラッシュ無し)。無ければ None
@@ -710,13 +722,14 @@ def _route_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
     match = EXT_URL_PATH_PATTERN.match(parts.path)
     if match:
         # 自オリジンの表示 URL(相対ならそのまま今のサーバ)。host は見ない(module docstring)
-        name, rel = match.groups()
+        # rest が無い / 空 = name の直下(rel "")。他の rel と同じに backend へ渡す
+        name, rel = match.group(1), match.group(2) or ""
         ext_form = True
     elif origin is None:
-        # 相対で来るのは `/ext/` 始まりだけ(`_is_url`)— name か rest が欠けた形
+        # 相対で来るのは `/ext/` 始まりだけ(`_is_url`)— name が取れない形
         return None, RefError(
             "unknown_upstream",
-            "same-server URL is not of the form /ext/{name}/{path}",
+            "same-server URL is not of the form /ext/{name}/{path} (no upstream name)",
             reason="not_ext_form",
         )
     else:
@@ -729,11 +742,8 @@ def _route_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
                 reason="outside_public_bases",
             )
         name, rest = hit
+        # rel が空 = 原本のルートそのもの。閉じずに backend へ渡す(module docstring)
         rel, sep, rel_query = rest.split("#", 1)[0].partition("?")
-        if not rel:
-            return None, RefError(
-                "not_found", f"empty path under EXT_PUBLIC_BASES (name={name})"
-            )
         query = f"?{rel_query}" if sep else ""
         ext_form = False
 
@@ -782,9 +792,10 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
 
     成功は `(UrlRoute, None)`、ルーティングできない URL は `(None, RefError)` —
     `resolve_url` が同じ入力に返すのと同じ code / reason(`unsupported_form` /
-    `traversal` / `unknown_upstream` + reason / `not_found`(EXT_PUBLIC_BASES のルート
-    そのもの))。**配信範囲(EXT_FILE_SCOPES)や実在は見ない** — 「どこに属するか」だけで、
-    読めるかどうかは `resolve_url` の責務。`/api/v1/files/{id}/content` はここでは
+    `traversal` / `unknown_upstream` + reason)。name の直下(`/ext/{name}`・`/ext/{name}/`・
+    原本の `<base>`・`<base>/`)は成功で、`rel` が `""`。**配信範囲(EXT_FILE_SCOPES)や
+    実在は見ない** — 「どこに属するか」だけで、読めるかどうかは `resolve_url` の責務
+    (file backend の直下は `resolve_url` では `not_found`)。`/api/v1/files/{id}/content` はここでは
     `unsupported_form`(`file_id_of_url` で先に拾う — `resolve_url` と同じ)。
     """
     err = _check_url(url)

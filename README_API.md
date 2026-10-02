@@ -274,12 +274,14 @@ as `url` unchanged (see the reference rules below). Two
 backends, chosen by the value's form:
 
 - `http(s)://…` — streaming proxy (2xx passed through, 404 → 404, anything else
-  incl. redirects → 502 without `Location`).
+  incl. redirects → 502 without `Location`). The root of a name (`/ext/{name}/`,
+  `/ext/{name}`) proxies the upstream `<base>/`.
 - `file:///abs/path` — static serving from a local root the container sees
   read-only (`FileResponse`: Range / etag / last-modified). The root is resolved
   once; the requested path is resolved and confined to it (symlinks pointing
-  outside → 404); directories and missing files → 404; content-type from the
-  extension (`application/octet-stream` when unknown).
+  outside → 404); directories (including the root of the name, `/ext/{name}/`)
+  and missing files → 404; content-type from the extension
+  (`application/octet-stream` when unknown).
 
 **Serving scope of a file backend (`EXT_FILE_SCOPES`).** By default everything
 under the root is served. When the root is shared with something else — e.g.
@@ -374,12 +376,24 @@ according to the argument's name, not `resolve_ref`.
 
 | Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http://` / `https://`                           | absolute URL                                      | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (the host is never connected to). Otherwise, if the URL starts with `<base>/` of an `EXT_PUBLIC_BASES` entry, the remainder goes to that name's backend. Anything else → `unknown_upstream` (fail closed, not a generic fetch)                                                   |
-| `/ext/`                                          | same-server URL                                   | `/ext/{name}/{rest}` → the same backend as the absolute form. Unknown `name`, or not of that shape → `unknown_upstream`                                                                                                                                                                                                                                                 |
+| `http://` / `https://`                           | absolute URL                                      | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (the host is never connected to). Otherwise, if the URL is the `<base>` of an `EXT_PUBLIC_BASES` entry or starts with `<base>/`, the remainder goes to that name's backend. Anything else → `unknown_upstream` (fail closed, not a generic fetch)                                |
+| `/ext/`                                          | same-server URL                                   | `/ext/{name}/{rest}` → the same backend as the absolute form. Unknown `name`, or no `name` at all (`/ext/`) → `unknown_upstream`                                                                                                                                                                                                                                        |
 | `/workspace/`, `/mnt/`                           | sandbox filesystem                                | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                              |
 | `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form` |
 | a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                             |
 | anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                      |
+
+**The root of a name (empty `rest`).** `/ext/{name}`, `/ext/{name}/`, and an
+`EXT_PUBLIC_BASES` root with or without its trailing slash (`<base>`, `<base>/`)
+are all well-formed and mean the same thing: the root of that name (`rel` is
+`""`; the trailing slash is not significant). It is not special-cased — the
+empty `rel` goes to the backend like any other: an http backend is asked for
+its `<base>/` (exactly what the gate proxies for `/ext/{name}/`), so a `200` is
+returned as content and a redirect is `upstream_status` with the `3xx` status; a
+file backend's root is a directory, so it is `not_found` (no listing — the gate
+answers 404). Until 2026-10-03 the public-base root was answered `not_found`
+without asking the upstream, which made a tool report a live top page (the
+upstream answers `302`) as a broken link.
 
 **Fragments on `/api/v1/files/{id}/content`.** Only a trailing `#page=N` means
 something (read with `split_page`); any other fragment is ignored and the URL
@@ -391,7 +405,7 @@ fragment, so every tool treats `…/content#section` alike.
 routing step as `resolve_url` and returns it: `UrlRoute(name, rel, query,
 public_base, origin, ext_form)` plus the property `relative` — the upstream
 `name` (present in `EXT_UPSTREAMS`), the path under it (`rel`, as written in the
-URL, i.e. still percent-encoded, no leading `/`), `query` (`"?a=b"` or `""`),
+URL, i.e. still percent-encoded, no leading `/`; `""` for the root of a name), `query` (`"?a=b"` or `""`),
 that name's `EXT_PUBLIC_BASES` root or `None`, the `origin` (`"scheme://host"`
 as given, `None` for a relative URL) and whether the URL had the
 `/ext/{name}/…` shape (`ext_form`) or matched a public base. It is pure — no
@@ -483,22 +497,22 @@ stable field for telling cases of one code apart without growing that set; its
 values are a closed set too, and today only `unknown_upstream` carries one
 (`None` on every other code):
 
-| `reason`               | When                                                                                                            |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `unknown_name`         | `/ext/{name}/…` (relative or absolute) or an `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend |
-| `not_ext_form`         | a relative `/ext/…` URL not of the shape `/ext/{name}/{path}`                                                   |
-| `outside_public_bases` | an absolute URL that is neither `/ext/{name}/…` nor under an `EXT_PUBLIC_BASES` root (an external site)         |
+| `reason`               | When                                                                                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unknown_name`         | `/ext/{name}/…` (relative or absolute) or an `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend                                                                                                                      |
+| `not_ext_form`         | a relative `/ext/…` URL from which **no name can be taken**: `/ext/`, `/ext//x`, or a name outside `[a-z0-9_-]+` (`/ext/CAGE/x`). `/ext/{name}` and `/ext/{name}/` are well-formed (the root of that name) and never get this reason |
+| `outside_public_bases` | an absolute URL that is neither `/ext/{name}/…` nor under an `EXT_PUBLIC_BASES` root (an external site)                                                                                                                              |
 
-| `code`                  | When                                                                                                                                                                                                                                                                           | Extra fields                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                    |                                           |
-| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                          |                                           |
-| `unknown_upstream`      | `/ext/{name}/…` (relative or absolute) or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site), **or** a relative `/ext/…` not of the shape `/ext/{name}/{rest}`. `reason` tells them apart | `reason` (see above)                      |
-| `not_found`             | file backend / `/mnt/…`: missing, a directory, or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                                                                                                                  | `status=404` for http                     |
-| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                       | `size`, `limit`, `size_exact` (see below) |
-| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                                                                                                        | `status`                                  |
-| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                                                                                                      |                                           |
-| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                                       | `status` when the sandbox answered        |
+| `code`                  | When                                                                                                                                                                                                                                                                     | Extra fields                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                              |                                           |
+| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                    |                                           |
+| `unknown_upstream`      | `/ext/{name}/…` (relative or absolute) or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site), **or** a relative `/ext/…` with no usable `name` (`/ext/`). `reason` tells them apart | `reason` (see above)                      |
+| `not_found`             | file backend / `/mnt/…`: missing, a directory (incl. the root of a file backend, `/ext/{name}/`), or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                                                         | `status=404` for http                     |
+| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                 | `size`, `limit`, `size_exact` (see below) |
+| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                                                                                                  | `status`                                  |
+| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                                                                                                |                                           |
+| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                                 | `status` when the sandbox answered        |
 
 `too_large.size_exact` says whether `size` is the real size or only a lower
 bound: `True` when it comes from `stat` (file backend, `/mnt/…`, sandbox `413`),

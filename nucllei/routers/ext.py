@@ -28,6 +28,10 @@ backend によらないゲート:
   公開範囲は admin 管理の EXT_UPSTREAMS が真実源。
 - GET(read-only 参照資料の中継)。HEAD は Starlette 既定で GET と同経路、
   それ以外のメソッドは 405。traversal パスは 400。
+- name の直下 `/ext/{name}/`・`/ext/{name}`(path が空)も同じ経路: http backend は上流の
+  `<base>/` を中継し、file backend は root = ディレクトリなので 404。resolver
+  (`image_refs.resolve_url`)が同じ入力で取りに行く先と揃える(あちらは http の
+  `<base>/` を GET / file は `not_found`)。
 - content-type はそのまま出すが、アクティブ型(HTML/SVG/JS)は添付扱い +
   nosniff で実行を止める(#97 review — 同一オリジン配信の stored XSS 対策。
   /cache と同じ content_hardening を共有)。
@@ -64,9 +68,12 @@ router = APIRouter()
 PASSTHROUGH_RESPONSE_HEADERS = ("content-type", "content-length", "content-encoding")
 
 
+# "/{name}" は末尾 "/" 無しの name 直下。これが無いと SPA の catch-all("/" の mount)に
+# 落ちて、resolver が解決する URL をブラウザが開けない
+@router.get("/{name}")
 @router.get("/{name}/{path:path}")
 async def proxy_ext_upstream(
-    request: Request, name: str, path: str, user=Depends(get_verified_user)
+    request: Request, name: str, path: str = "", user=Depends(get_verified_user)
 ):
     backend = ext_backend(name)
     if backend is None:

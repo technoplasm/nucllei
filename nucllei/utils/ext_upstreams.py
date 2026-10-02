@@ -176,12 +176,14 @@ def ext_file_withheld(resolved: Path) -> bool:
 
 
 def match_public_base(url: str) -> tuple[str, str] | None:
-    """絶対 URL が EXT_PUBLIC_BASES のどれかの `<base>/` に前方一致すれば
-    `(name, rel)` を返す。rel は base の次のスラッシュから後ろ(path[?query][#fragment]
-    をそのまま — 分解は呼ぶ側)。当たらなければ None。
+    """絶対 URL が EXT_PUBLIC_BASES のどれかの `<base>` そのもの、または `<base>/` に
+    前方一致すれば `(name, rel)` を返す。rel は base の次のスラッシュから後ろ
+    (path[?query][#fragment] をそのまま — 分解は呼ぶ側)。base そのもの(末尾 `/` の
+    有無によらず)は path 部が空の rel になる(= その name のルート)。当たらなければ None。
 
     比較は urlsplit した scheme と netloc(host:port、小文字化 — URL の scheme / host は
-    大文字小文字を区別しない)の一致 + path の `<base path>/` 前方一致。netloc は
+    大文字小文字を区別しない)の一致 + path の `<base path>` 完全一致または
+    `<base path>/` 前方一致。netloc は
     userinfo を含めて比べるので `http://his-info.test@evil/...` は base
     `http://his-info.test` に当たらない。base はパース時に末尾スラッシュを落として
     あるので `<base path>/` で比べることで `http://h/docs` が `http://h/docs2/...` に
@@ -204,9 +206,14 @@ def match_public_base(url: str) -> tuple[str, str] | None:
         ):
             continue
         prefix = f"{b.path}/"
-        if not parts.path.startswith(prefix) or len(prefix) <= best_len:
+        if parts.path == b.path:
+            rel = ""
+        elif parts.path.startswith(prefix):
+            rel = parts.path[len(prefix) :]
+        else:
             continue
-        rel = parts.path[len(prefix) :]
+        if len(prefix) <= best_len:
+            continue
         if parts.query:
             rel += f"?{parts.query}"
         if parts.fragment:

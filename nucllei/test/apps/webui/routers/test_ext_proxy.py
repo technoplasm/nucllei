@@ -216,6 +216,55 @@ class TestExtProxy(AbstractPostgresTest):
         assert response.status_code == 502
         assert "location" not in response.headers
 
+    def test_name_root_is_proxied_to_upstream_base(self, monkeypatch):
+        """`/ext/{name}/`(name の直下)は上流の `<base>/` を中継する — resolver
+        (`image_refs.resolve_url`)が同じ入力で取りに行く URL と同じ。"""
+        self._enable_cage(monkeypatch)
+        seen = []
+
+        async def body():
+            yield b"top"
+
+        def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(
+                200, content=body(), headers={"content-type": "text/plain"}
+            )
+
+        self._install_transport(monkeypatch, handler)
+        # create_url は末尾 "/" を落とすので、URL は直に書く
+        with mock_webui_user(id="1"):
+            for url in ("/ext/cage/", "/ext/cage", "/ext/cage/?page=top"):
+                response = self.fast_api_client.get(url)
+                assert response.status_code == 200, url
+                assert response.content == b"top", url
+        assert seen == [f"{UPSTREAM}/", f"{UPSTREAM}/", f"{UPSTREAM}/?page=top"]
+
+    def test_name_root_unknown_name_404(self, monkeypatch):
+        self._enable_cage(monkeypatch)
+        with mock_webui_user(id="1"):
+            for url in ("/ext/other/", "/ext/other"):
+                assert self.fast_api_client.get(url).status_code == 404, url
+
+    def test_name_root_requires_auth(self, monkeypatch):
+        self._enable_cage(monkeypatch)
+        for url in ("/ext/cage/", "/ext/cage"):
+            assert self.fast_api_client.get(url).status_code == 403, url
+
+    def test_name_root_upstream_redirect_maps_to_502(self, monkeypatch):
+        self._enable_cage(monkeypatch)
+        self._install_transport(
+            monkeypatch,
+            lambda request: httpx.Response(
+                302, headers={"location": "/his-info/top.aspx"}
+            ),
+        )
+        with mock_webui_user(id="1"):
+            for url in ("/ext/cage/", "/ext/cage"):
+                response = self.fast_api_client.get(url)
+                assert response.status_code == 502, url
+                assert "location" not in response.headers, url
+
     def test_upstream_unreachable_502(self, monkeypatch):
         self._enable_cage(monkeypatch)
 
@@ -355,6 +404,10 @@ class TestExtFileBackend(AbstractPostgresTest):
             for path in ("/cage/static", "/cage/static/", "/cage/static/figs"):
                 response = self.fast_api_client.get(self.create_url(path))
                 assert response.status_code == 404, path
+            # name の直下も root = ディレクトリ(resolver は not_found)。create_url は
+            # 末尾 "/" を落とすので直に書く
+            for url in ("/ext/cage/", "/ext/cage", "/ext/cage/static/"):
+                assert self.fast_api_client.get(url).status_code == 404, url
 
     def test_missing_404(self, monkeypatch, tmp_path):
         root = self._populate(tmp_path)

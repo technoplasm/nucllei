@@ -182,9 +182,14 @@ def test_match_public_base(monkeypatch):
         "deep",
         "c.png",
     )
-    # "<base>/" で切る — 似た prefix・base そのもの・scheme 違いは当たらない
+    # "<base>/" で切る — 似た prefix・scheme 違いは当たらない
     assert match_public_base("http://his-info.test/docs2/a.png") is None
-    assert match_public_base("http://his-info.test/docs") is None
+    assert match_public_base("http://his-info.test/docs2") is None
+    # base そのもの(末尾 "/" の有無によらず)は path 部が空の rel = その name のルート
+    assert match_public_base("http://his-info.test/docs") == ("his", "")
+    assert match_public_base("http://his-info.test/docs/") == ("his", "")
+    assert match_public_base("http://his-info.test/docs?x=1#f") == ("his", "?x=1#f")
+    assert match_public_base("http://his-info.test/docs/deep") == ("deep", "")
     assert match_public_base("https://his-info.test/docs/a.png") is None
     # scheme / host は小文字化して比較(base 側も)。userinfo は netloc の一部なので外れる
     monkeypatch.setitem(EXT_PUBLIC_BASES, "up", "HTTPS://Host.test:8443/Docs")

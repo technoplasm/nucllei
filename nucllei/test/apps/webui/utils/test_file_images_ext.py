@@ -343,14 +343,15 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         assert str(seen[0].url) == f"{UPSTREAM}/docs/a.pdf"
 
     def test_relative_ext_unknown_name_unavailable(self, monkeypatch):
-        # 未知の name・形の崩れた "/ext/"・"/ext/" でない "/" 始まりは閉じたまま
+        # 未知の name・name の取れない "/ext/"・"/ext/" でない "/" 始まりは閉じたまま
         self._enable_cage(monkeypatch)
         seen = []
         self._install_transport(monkeypatch, self._png_handler(seen))
         for url in (
             "/ext/nothere/a.png",
             "/ext/cage/../a.png",
-            "/ext/cage",
+            "/ext/",
+            "/ext/nothere",
             "/extra/a.png",
             "//elsewhere.example/ext/cage/a.png",
         ):
@@ -463,14 +464,31 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ), url
         assert [str(r.url) for r in seen] == [f"{UPSTREAM}/figs/a.png"] * 2
 
-    def test_ext_url_empty_name_or_rest_unavailable(self, monkeypatch):
+    def test_ext_url_empty_name_unavailable(self, monkeypatch):
         self._enable_cage(monkeypatch)
         seen = []
         self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in ("https://host/ext/", "https://host/ext/cage/", "https://host/ext"):
+        for url in ("https://host/ext/", "https://host/ext"):
             messages = self._convert(self._messages(url))
             assert messages[0]["content"][1] == UNAVAILABLE, url
         assert seen == []
+
+    def test_ext_name_root_asks_upstream(self, monkeypatch):
+        # name の直下(rest が空)は形として正しい — http backend の `<base>/` に問い合わせる
+        # (image_refs module docstring)。上流が redirect を返せば unavailable
+        self._enable_cage(monkeypatch)
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(302, headers={"location": "/top.aspx"})
+
+        self._install_transport(monkeypatch, handler)
+        urls = ("https://host/ext/cage/", "https://host/ext/cage", "/ext/cage/")
+        for url in urls:
+            messages = self._convert(self._messages(url))
+            assert messages[0]["content"][1] == UNAVAILABLE, url
+        assert seen == [f"{UPSTREAM}/"] * len(urls)
 
     def test_ext_url_encoded_traversal_and_nul_unavailable(self, monkeypatch):
         self._enable_cage(monkeypatch)

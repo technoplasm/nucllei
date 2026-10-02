@@ -193,11 +193,24 @@ def test_relative_ext_stays_closed(monkeypatch, tmp_path):
     assert _code("/ext/cage/static/nope.png").code == "not_found"
     assert _code("/ext/cage/../outside.png").code == "traversal"
     assert _code("/ext/cage/static/%2e%2e/%2e%2e/outside.png").code == "traversal"
-    for malformed in ("/ext/", "/ext/cage", "/ext/cage/", "/ext/CAGE/static/a.png"):
+    # not_ext_form は name が取れない形だけ
+    for malformed in ("/ext/", "/ext//a.png", "/ext/CAGE/static/a.png"):
         err = _code(malformed)
         assert err.code == "unknown_upstream", malformed
         assert err.reason == "not_ext_form", malformed
         assert "/ext/{name}/{path}" in err.detail, malformed
+    # name の直下は正しい形。file backend の root はディレクトリ = not_found(一覧を出さない)
+    for root_url in (
+        "/ext/cage",
+        "/ext/cage/",
+        f"{SELF}/ext/cage/",
+        "/ext/cage/static/",
+    ):
+        err = _code(root_url)
+        assert (err.code, err.reason) == ("not_found", None), root_url
+    # 未知の name の直下は unknown_name(形は正しい)
+    assert _code("/ext/nothere").reason == "unknown_name"
+    assert _code("/ext/nothere/").reason == "unknown_name"
     # "/ext" 始まりでも "/ext/" でなければ URL ではない。protocol-relative も受けない
     assert _code("/extra/cage/a.png").code == "unsupported_form"
     assert _code("//evil.example/ext/cage/static/a.png").code == "unsupported_form"
@@ -411,12 +424,85 @@ def test_not_found_workspace_404(monkeypatch):
     assert _code("/workspace/out/nope.png").code == "not_found"
 
 
-def test_not_found_public_base_empty_path(monkeypatch):
+# name の直下(rel が空)の URL の全表記。http backend ではどれも上流の `<base>/` を GET する
+_ROOT_URLS = (
+    f"{PUBLIC_BASE}/",
+    PUBLIC_BASE,
+    "/ext/cage/",
+    "/ext/cage",
+    f"{SELF}/ext/cage/",
+    f"{SELF}/ext/cage",
+)
+
+
+def _public_base_http(monkeypatch, handler):
     from nucllei.env import EXT_PUBLIC_BASES
 
     _enable_cage_http(monkeypatch)
     monkeypatch.setitem(EXT_PUBLIC_BASES, "cage", PUBLIC_BASE)
-    assert _code(f"{PUBLIC_BASE}/").code == "not_found"
+    seen = []
+
+    def record(request):
+        seen.append(str(request.url))
+        return handler(request)
+
+    _install_transport(monkeypatch, record)
+    return seen
+
+
+def test_root_of_http_backend_asks_upstream(monkeypatch):
+    """base の直下(rel が空)も上流に取りに行く(問い合わせる前に not_found にしない —
+    実走で原本のトップページ `<base>/`(上流は 302)が「リンク切れ」と誤案内された)。"""
+    seen = _public_base_http(
+        monkeypatch,
+        lambda r: httpx.Response(
+            200, content=b"<html>top</html>", headers={"content-type": "text/html"}
+        ),
+    )
+    for url in _ROOT_URLS:
+        loaded, error = _resolve(url)
+        assert error is None, url
+        assert loaded.data == b"<html>top</html>", url
+        assert loaded.content_type == "text/html" and loaded.name == "", url
+    assert seen == [f"{UPSTREAM}/"] * len(_ROOT_URLS)
+    # query は付いたまま渡る
+    seen.clear()
+    assert _resolve(f"{PUBLIC_BASE}/?page=top")[1] is None
+    assert _resolve(f"{PUBLIC_BASE}?page=top")[1] is None
+    assert _resolve("/ext/cage/?page=top")[1] is None
+    assert seen == [f"{UPSTREAM}/?page=top"] * 3
+
+
+def test_root_of_http_backend_redirect_is_upstream_status(monkeypatch):
+    seen = _public_base_http(
+        monkeypatch,
+        lambda r: httpx.Response(302, headers={"location": "/docs/top.aspx?x=1"}),
+    )
+    for url in _ROOT_URLS:
+        err = _code(url)
+        assert (err.code, err.status) == ("upstream_status", 302), url
+    assert seen == [f"{UPSTREAM}/"] * len(_ROOT_URLS)
+
+
+def test_root_of_http_backend_404_is_not_found(monkeypatch):
+    seen = _public_base_http(monkeypatch, lambda r: httpx.Response(404))
+    err = _code(f"{PUBLIC_BASE}/")
+    assert (err.code, err.status) == ("not_found", 404)
+    assert seen == [f"{UPSTREAM}/"]
+
+
+def test_root_of_file_backend_stays_closed(monkeypatch, tmp_path):
+    """file backend の直下はディレクトリ — 一覧を出さず not_found(原本 URL でも /ext 形でも)。"""
+    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+    from nucllei.utils.image_refs import mounted_path_for_url
+
+    root = _mount(monkeypatch, tmp_path)
+    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
+    monkeypatch.setitem(EXT_PUBLIC_BASES, "cage", PUBLIC_BASE)
+    for url in _ROOT_URLS:
+        err = _code(url)
+        assert (err.code, err.reason) == ("not_found", None), url
+        assert asyncio.run(mounted_path_for_url(url)) is None, url
 
 
 # ---- too_large(3 経路とも size / limit を持つ)----
@@ -1003,6 +1089,30 @@ def test_route_of_url(monkeypatch):
     assert (route.public_base, route.origin) == (PUBLIC_BASE, "http://his-info.test")
     assert (route.relative, route.ext_form) == (False, False)
 
+    # name の直下: rel は ""(末尾 `/` の有無は区別しない)。失敗にしない
+    for url, ext_form, origin in (
+        ("/ext/his", True, None),
+        ("/ext/his/", True, None),
+        ("https://elsewhere.example/ext/his", True, "https://elsewhere.example"),
+        (PUBLIC_BASE, False, "http://his-info.test"),
+        (f"{PUBLIC_BASE}/", False, "http://his-info.test"),
+        (f"{PUBLIC_BASE}/#top", False, "http://his-info.test"),
+    ):
+        route, err = route_of_url(url)
+        assert err is None, url
+        assert route == UrlRoute(
+            name="his",
+            rel="",
+            query="",
+            public_base=PUBLIC_BASE,
+            origin=origin,
+            ext_form=ext_form,
+        ), url
+    route, err = route_of_url(f"{PUBLIC_BASE}?a=1")
+    assert err is None and (route.rel, route.query) == ("", "?a=1")
+    route, err = route_of_url("/ext/his/?a=1")
+    assert err is None and (route.rel, route.query) == ("", "?a=1")
+
 
 def test_route_of_url_fails_like_resolve_url(monkeypatch):
     """ルーティングできない URL は、resolve_url が同じ入力に返すのと同じ code / reason。"""
@@ -1015,8 +1125,13 @@ def test_route_of_url_fails_like_resolve_url(monkeypatch):
         "/ext/nosuch/a.png": ("unknown_upstream", "unknown_name"),
         "https://llens.test/ext/nosuch/a.png": ("unknown_upstream", "unknown_name"),
         f"{PUBLIC_BASE}/a.png": ("unknown_upstream", "unknown_name"),
-        "/ext/cage": ("unknown_upstream", "not_ext_form"),
+        "/ext/nosuch": ("unknown_upstream", "unknown_name"),
+        PUBLIC_BASE: ("unknown_upstream", "unknown_name"),
+        f"{PUBLIC_BASE}/": ("unknown_upstream", "unknown_name"),
         "/ext/": ("unknown_upstream", "not_ext_form"),
+        "/ext//a.png": ("unknown_upstream", "not_ext_form"),
+        "/ext/CAGE/a.png": ("unknown_upstream", "not_ext_form"),
+        "http://his-info.test/docs2": ("unknown_upstream", "outside_public_bases"),
         "https://example.com/a.pdf": ("unknown_upstream", "outside_public_bases"),
         "/ext/cage/../x": ("traversal", None),
         "/workspace/a.png": ("unsupported_form", None),

@@ -676,6 +676,22 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   前まで(`:return:` は丸ごと見えない)、`:param` は 1 行目だけ。`read_attachment` の戻り値の形は
   `:return:` にだけ書かれていてモデルに届いていなかったので本文へ移した。builtin の他の tool と
   harness tool(`run_subagent` / skill / task 系 — 手書きの spec dict)に同種の漏れは無かった。
+- **name の直下(rel が空)も上流に問い合わせる**(staging の実走で発覚): 原本の
+  `<base>/`(`EXT_PUBLIC_BASES` のルートそのもの)を `_route_url` が上流に問い合わせずに
+  `not_found` にしていて、`fetch_url("https://…/his-info/")`(上流は 302 → `top.aspx`)が
+  「リンク切れ」と誤案内された(#139 で EXT_PUBLIC_BASES を入れたときからの挙動で、今日の
+  変更による退行ではない)。`/ext/{name}`・`/ext/{name}/`・`<base>`・`<base>/` はどれも
+  「その name のルート」= `rel ""` として、他の rel と同じに backend へ渡す: http backend は
+  上流の `<base>/` を GET(redirect なら `upstream_status` + status)、file backend は root =
+  ディレクトリなので `not_found`(一覧は出さない)。末尾 `/` の有無は区別しない
+  (`match_public_base` が base そのものにも当たる)。**`not_ext_form` の定義を狭めた**: name が
+  取れない形(`/ext/`・`/ext//x`・文字種の外)だけ。`/ext/{name}` と `/ext/{name}/` は
+  正しい形になった(従来は `not_ext_form`)。`route_of_url` も直下で成功し `rel == ""`
+  (従来 `<base>/` は `not_found`)。/ext ゲートは `/ext/{name}/` を元から `<base>/` へ中継して
+  いた(file は 404)ので resolver がそれに揃った形。末尾 `/` 無しの `/ext/{name}` だけは
+  ルートに当たらず SPA の catch-all に落ちていたので、ゲートに `/{name}` のルートを足した。
+  builtin の `send_to_workspace(url=)` の `not_ext_form` の文面(「`/ext/<配信元>/<パス>` の
+  形でない」)は未変更。
 - 担保: `test_image_refs_resolve.py`(定数の文面 / `stored_ref_kind` / `route_of_url` が
   `resolve_url` と同じ code・reason で落ちること / `mounted_path_withheld` / `file_id_of_url` の
   fragment / reason)、`test_builtin_sandbox.py`(相対パスを断る / 3 つの引数のエラーの形 /
