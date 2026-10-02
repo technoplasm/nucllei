@@ -1278,6 +1278,48 @@ WHISPER_NUM_WORKERS = RuntimeConfig(
 )
 
 
+def env_number(name: str, default, minimum, maximum):
+    """env 専用の数値設定を読む。未設定は既定、非数・範囲外は warning を出して既定に落とす。
+
+    型は default の型(int / float)に合わせる。
+    """
+    raw = os.environ.get(name, "").strip()
+    if raw == "":
+        return default
+    try:
+        value = type(default)(raw)
+    except ValueError:
+        value = None
+    # NaN は比較が常に偽になるので、範囲の内側にあることを肯定形で確かめる
+    if value is None or not (minimum <= value <= maximum):
+        log.warning(
+            f"{name}={raw!r} is not a number in {minimum}..{maximum}; "
+            f"using the default {default}"
+        )
+        return default
+    return value
+
+
+# llens: 配備先(マイク・部屋の雑音・CPU の速さ)で調整が要る音声入力の値。**env 専用** —
+# 配備の設定ファイルで決める値なので RuntimeConfig(DB 保存・管理画面)にはしない。
+# 既定値の根拠と動かし方は _memos/audio.md「配備ごとの調整」。
+# 上の 4 つは /api/config の audio.stt で FE(録音バー)へ渡す。
+# - SEGMENT_SECONDS: 区切りの目安秒。これを過ぎたら次の息継ぎで切る(強制切りは + 4 秒で固定)
+# - SEGMENT_PAUSE_MS: 息継ぎとみなす無音の長さ
+# - SILENCE_THRESHOLD_DB: 無音判定のしきい値(AnalyserNode の minDecibels)。入力の音量に依存する
+# - RECORDING_BITRATE_KBPS: 通し録音(添付に残す原本)のビットレート
+AUDIO_STT_SEGMENT_SECONDS = env_number("AUDIO_STT_SEGMENT_SECONDS", 12.0, 4, 30)
+AUDIO_STT_SEGMENT_PAUSE_MS = env_number("AUDIO_STT_SEGMENT_PAUSE_MS", 400, 100, 2000)
+AUDIO_STT_SILENCE_THRESHOLD_DB = env_number(
+    "AUDIO_STT_SILENCE_THRESHOLD_DB", -45.0, -90, -10
+)
+AUDIO_STT_RECORDING_BITRATE_KBPS = env_number(
+    "AUDIO_STT_RECORDING_BITRATE_KBPS", 24, 8, 128
+)
+# 内蔵 faster-whisper の beam size(外部 STT エンジンには効かない)
+WHISPER_BEAM_SIZE = env_number("WHISPER_BEAM_SIZE", 5, 1, 10)
+
+
 # Add Deepgram configuration
 DEEPGRAM_API_KEY = RuntimeConfig(
     "DEEPGRAM_API_KEY",

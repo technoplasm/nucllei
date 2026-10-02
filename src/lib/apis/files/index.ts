@@ -3,9 +3,14 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 // llens(#69): model_id クエリは撤去(per-model Attachment 廃止)。
 // グローバル Attachment(ATTACHMENT_FUNCTION_ID)は upload 時にサーバー側で発火する。
-export const uploadFile = async (file: File) => {
+// dictation は音声入力の通し録音に付ける印(meta.dictation)。backend が形を検証して受ける
+// 唯一の meta で、それ以外のキーをクライアントから meta へ書き込む口は無い。
+export const uploadFile = async (file: File, dictation?: Record<string, unknown>) => {
 	const data = new FormData();
 	data.append('file', file);
+	if (dictation) {
+		data.append('dictation', JSON.stringify(dictation));
+	}
 	let error = null;
 
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/files/`, {

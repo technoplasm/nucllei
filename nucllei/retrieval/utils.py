@@ -7,6 +7,21 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
+def _dictation_marks(file_object) -> dict:
+    """音声入力の通し録音(meta.dictation)なら、`<source>` に載せる印を返す。
+
+    載せるのは印と「何本中の何本目か」だけ(区間一覧・本文は prompt に入れない)。
+    """
+    dictation = (file_object.meta or {}).get("dictation")
+    if not dictation:
+        return {}
+    return {
+        "dictation": True,
+        "dictation_part": dictation.get("part"),
+        "dictation_parts": dictation.get("parts"),
+    }
+
+
 def get_sources_from_files(request, files):
     # RAG 撤去(#52): ベクタ検索・チャンク・reranking を廃止。添付は data.content を全文注入する。
     log.debug(f"files: {files}")
@@ -42,6 +57,7 @@ def get_sources_from_files(request, files):
                                 "source": file_object.filename,
                                 # llens(#52): 抽出状態(attachment が制御)を注入側へ渡す
                                 "extraction_status": data.get("status"),
+                                **_dictation_marks(file_object),
                             }
                         )
 
@@ -64,6 +80,7 @@ def get_sources_from_files(request, files):
                                     "source": file_object.filename,
                                     # llens(#52): 抽出状態を注入側へ渡す(成功/失敗/未抽出)
                                     "extraction_status": data.get("status"),
+                                    **_dictation_marks(file_object),
                                 }
                             ]
                         ],

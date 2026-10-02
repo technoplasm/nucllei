@@ -16,6 +16,7 @@ import mimetypes
 from fastapi import (
     Depends,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -469,8 +470,27 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         return FileResponse(file_path)
 
 
-def transcribe(request: Request, file_path):
-    log.info(f"transcribe: {file_path}")
+# 転写に渡す文脈(prompt)の上限文字数。Whisper の prompt はデコーダ文脈の半分 = 224 トークン
+# までしか効かず、超えた分は先頭側が捨てられる(効くのは末尾)。large-v3-turbo の tokenizer で
+# 数えると日本語は 1 文字 0.8〜1.1 トークン(200 文字 = 160〜220 トークンで枠にほぼ収まる)、
+# 英語は 1 文字 0.23 トークン前後(同 50 トークン弱)。これ以上は受け取らない
+# (外部 STT へ転送する量の上限でもある)
+STT_PROMPT_MAX_CHARS = 200
+
+
+def normalize_stt_prompt(prompt: str | None) -> str | None:
+    """prompt を末尾 STT_PROMPT_MAX_CHARS 文字に丸める。空・空白だけなら None。"""
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return None
+    return prompt[-STT_PROMPT_MAX_CHARS:].lstrip()
+
+
+def transcribe(request: Request, file_path, prompt: str | None = None):
+    # prompt = 転写の文脈(用語リスト等を渡したい呼び出し元のための任意引数。マイクの音声入力は
+    # 送らない — _memos/audio.md)。呼び出し元の内容そのものなので、ログには長さだけを出す
+    prompt = normalize_stt_prompt(prompt)
+    log.info(f"transcribe: {file_path} (prompt: {len(prompt) if prompt else 0} chars)")
     filename = os.path.basename(file_path)
     file_dir = os.path.dirname(file_path)
     id = filename.split(".")[0]
@@ -494,10 +514,12 @@ def transcribe(request: Request, file_path):
             )
         segments, info = model.transcribe(
             file_path,
-            beam_size=5,
+            beam_size=request.app.state.WHISPER_BEAM_SIZE,
             vad_filter=request.app.state.config.WHISPER_VAD_FILTER,
             # llens: 言語固定(空なら従来通り自動判定)。北大運用は ja 固定
             language=request.app.state.config.WHISPER_LANGUAGE or None,
+            # None = 渡さないのと同じ(faster-whisper の既定値)
+            initial_prompt=prompt,
         )
         log.info(
             "Detected language '%s' with probability %f"
@@ -533,7 +555,11 @@ def transcribe(request: Request, file_path):
                     "Authorization": f"Bearer {request.app.state.config.STT_OPENAI_API_KEY}"
                 },
                 files={"file": (filename, open(file_path, "rb"))},
-                data={"model": request.app.state.config.STT_MODEL},
+                # prompt は OpenAI transcriptions API の同名フィールド。無ければ載せない
+                data={
+                    "model": request.app.state.config.STT_MODEL,
+                    **({"prompt": prompt} if prompt else {}),
+                },
             )
 
             r.raise_for_status()
@@ -560,6 +586,7 @@ def transcribe(request: Request, file_path):
             raise Exception(detail if detail else "Nucllei: Server Connection Error")
 
     elif request.app.state.config.STT_ENGINE == "deepgram":
+        # Deepgram の listen API には転写の文脈を渡す口が無いので、prompt は無視する
         try:
             # Determine the MIME type of the file
             mime, _ = mimetypes.guess_type(file_path)
@@ -623,6 +650,7 @@ def transcribe(request: Request, file_path):
             raise Exception(detail if detail else "Nucllei: Server Connection Error")
 
     elif request.app.state.config.STT_ENGINE == "azure":
+        # Azure の transcribe API にも転写の文脈を渡す口が無いので、prompt は無視する
         # Check file exists and size
         if not os.path.exists(file_path):
             raise HTTPException(status_code=400, detail="Audio file not found")
@@ -758,6 +786,9 @@ def compress_audio(file_path):
 def transcription(
     request: Request,
     file: UploadFile = File(...),
+    # OpenAI の transcriptions API と同名の任意フィールド。内蔵 faster-whisper では initial_prompt に
+    # なる(省略時は従来と同じ)。長さの丸めは transcribe() 側。マイクの音声入力(FE)は送らない
+    prompt: str | None = Form(None),
     user=Depends(get_verified_user),
 ):
     # llens(#53 フォロー): 配備レベルの機能フラグ(FE のアイコン制御と対のサーバー側 enforcement)
@@ -831,7 +862,7 @@ def transcription(
                         detail=ERROR_MESSAGES.DEFAULT(e),
                     )
 
-                data = transcribe(request, file_path)
+                data = transcribe(request, file_path, prompt)
                 file_path = file_path.split("/")[-1]
                 return {**data, "filename": file_path}
             except Exception as e:

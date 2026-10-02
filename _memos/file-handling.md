@@ -388,6 +388,22 @@ tool も nucllei 製品側に移り、tool は env ゲート付きの組み込�
 「立てるか / quota / 開放範囲 / system prompt」は配備層(llens)の判断で、nucllei が持つのは
 image とその中身の設計 + LLM 向け表面だけ。`SANDBOX_URL` 未設定の配備では tool 自体が生えない。
 
+## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
+
+マイクの音声入力は、区切りが 2 つ以上あった録音を 1 本(長ければ約 60 分ごとに複数本)の音声と
+して、その発言の**普通の添付**に残す(経路・チップ・削除の意味論は他の添付と同じ)。
+詳細は `audio.md`「通し録音の添付」、契約の正本は `README_API.md` §4.4。本メモに関わる点:
+
+- **`Files.meta` にクライアントが書けるキーは `dictation` だけ**。upload の Form `dictation`
+  (JSON)を `routers/files.py::DictationMeta` が検証して受ける(未知のキー拒否・512KB まで・
+  `audio/*` のみ)。任意の meta を受ける口は作っていない。
+- `<source>` タグは `utils/middleware.py::build_source_context` に切り出した。属性は
+  `id` / `file_id` / `dictation="true"`(+ 分かれた録音だけ `part` / `parts`)/ `extraction`。
+  音声はふつう未抽出なので `extraction="none"` + file_id 告知のまま、印だけが増える。
+- Attachment フックは他の添付と同じく発火する(`__event__="upload"`)。音声をどう扱うかは
+  配備の Attachment 次第。
+- 添付チップのモーダルは `audio/*` をその場で再生できる。
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
   ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、

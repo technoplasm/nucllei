@@ -47,6 +47,25 @@ export class MessageInputUploads {
 			return null;
 		}
 
+		if (file.size == 0) {
+			toast.error(this.#t('You cannot upload an empty file.'));
+			return null;
+		}
+
+		await this.#uploadFileItem(file, { fullContext }).catch((e) => {
+			toast.error(`${e}`);
+		});
+	};
+
+	// ファイルをアップロードして files に添付チップを足す。チップの itemId を返す(アップロード中に
+	// X で外された等で残らなかったら null)。失敗したらチップを外して throw する
+	#uploadFileItem = async (
+		file: File,
+		{
+			fullContext = false,
+			dictation
+		}: { fullContext?: boolean; dictation?: Record<string, unknown> } = {}
+	): Promise<string | null> => {
 		const tempItemId = uuidv4();
 		const fileItem = {
 			type: 'file',
@@ -62,50 +81,97 @@ export class MessageInputUploads {
 			...(fullContext ? { context: 'full' } : {})
 		};
 
-		if (fileItem.size == 0) {
-			toast.error(this.#t('You cannot upload an empty file.'));
-			return null;
-		}
-
 		this.#setFiles([...this.#getFiles(), fileItem]);
 
 		try {
 			// During the file upload, file content is automatically extracted.
 			// llens(#69): グローバル Attachment(ATTACHMENT_FUNCTION_ID)はサーバー側で発火する。
-			const uploadedFile = await uploadFile(file);
+			const uploadedFile = await uploadFile(file, dictation);
 
-			if (uploadedFile) {
-				// アップロード中に X で外された場合はサーバーに orphan を残さない
-				const files = this.#getFiles();
-				const idx = files.findIndex((item) => item?.itemId === tempItemId);
-				if (idx === -1) {
-					deleteFileById(uploadedFile.id).catch(() => {});
-					return null;
-				}
-
-				if (uploadedFile.error) {
-					console.warn('File upload warning:', uploadedFile.error);
-					toast.warning(uploadedFile.error);
-				}
-
-				// runes の $state プロキシに乗せた後の closure(生オブジェクト)を書いても
-				// 再描画されない — 必ず files[idx] 経由で置き換える(status が 'uploading' に
-				// 張り付くバグの実害箇所)
-				files[idx] = {
-					...files[idx],
-					status: 'uploaded',
-					file: uploadedFile,
-					id: uploadedFile.id,
-					collection_name: uploadedFile?.meta?.collection_name || uploadedFile?.collection_name,
-					url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`
-				};
-			} else {
+			if (!uploadedFile) {
 				this.#setFiles(this.#getFiles().filter((item) => item?.itemId !== tempItemId));
+				return null;
 			}
+
+			// アップロード中に X で外された場合はサーバーに orphan を残さない
+			const files = this.#getFiles();
+			const idx = files.findIndex((item) => item?.itemId === tempItemId);
+			if (idx === -1) {
+				deleteFileById(uploadedFile.id).catch(() => {});
+				return null;
+			}
+
+			if (uploadedFile.error) {
+				console.warn('File upload warning:', uploadedFile.error);
+				toast.warning(uploadedFile.error);
+			}
+
+			// 通し録音の区間一覧(meta.dictation)は本文と同じ量の文字を持つ。チャットに残る
+			// スナップショットには載せない(読むのは配備側の tool で、Files から引く)
+			const { dictation: _dictation, ...meta } = uploadedFile.meta ?? {};
+
+			// runes の $state プロキシに乗せた後の closure(生オブジェクト)を書いても
+			// 再描画されない — 必ず files[idx] 経由で置き換える(status が 'uploading' に
+			// 張り付くバグの実害箇所)
+			files[idx] = {
+				...files[idx],
+				status: 'uploaded',
+				file: { ...uploadedFile, meta },
+				id: uploadedFile.id,
+				collection_name: uploadedFile?.meta?.collection_name || uploadedFile?.collection_name,
+				url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`
+			};
+			return tempItemId;
 		} catch (e) {
-			toast.error(`${e}`);
 			this.#setFiles(this.#getFiles().filter((item) => item?.itemId !== tempItemId));
+			throw e;
 		}
+	};
+
+	// 音声入力の通し録音を、この発言の添付に残せるか(VoiceRecording が録音開始時に聞く)。
+	// 権限が無い利用者・その拡張子を受けない配備では、黙って残さない(音声入力は今までどおり)
+	canKeepRecording = (extension: string) => {
+		const currentUser = get(user);
+		if (currentUser?.role !== 'admin' && !(currentUser?.permissions?.chat?.file_upload ?? true)) {
+			return false;
+		}
+		const allowedExtensions = get(config)?.file?.allowed_extensions ?? [];
+		return allowedExtensions.length === 0 || allowedExtensions.includes(extension);
+	};
+
+	// 音声入力の通し録音(長い録音は複数本)を添付にする。全部残せたら true。失敗の知らせは
+	// 呼び出し側が 1 回だけ出す(ここではトーストを出さない)。待っている間に録音が × で
+	// 取り消されたら、足した分をすべて外してサーバーからも消す(× では何も残さない)
+	keepRecordingHandler = async (
+		recordings: { file: File; dictation: Record<string, unknown> }[],
+		isCancelled: () => boolean
+	) => {
+		const itemIds: string[] = [];
+		let kept = true;
+
+		for (const { file, dictation } of recordings) {
+			const itemId = await this.#uploadFileItem(file, { dictation }).catch((e) => {
+				console.error('Keeping the voice recording failed:', e);
+				return null;
+			});
+			if (itemId) {
+				itemIds.push(itemId);
+			} else {
+				kept = false;
+			}
+			if (isCancelled()) break;
+		}
+
+		if (isCancelled()) {
+			const files = this.#getFiles();
+			for (const item of files.filter((item) => itemIds.includes(item?.itemId))) {
+				deleteFileById(item.id).catch(() => {});
+			}
+			this.#setFiles(files.filter((item) => !itemIds.includes(item?.itemId)));
+			return false;
+		}
+
+		return kept;
 	};
 
 	// llens(#69): 画像も file として backend に保存する(base64 直入れを廃止)。

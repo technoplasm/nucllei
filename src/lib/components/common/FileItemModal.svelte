@@ -37,6 +37,25 @@
 	const contentType = $derived(item?.file?.meta?.content_type ?? item?.meta?.content_type ?? '');
 	const isImage = $derived(contentType.startsWith('image/'));
 	const isPdf = $derived(contentType === 'application/pdf');
+	// 音声は原本をその場で再生できるようにする(抽出テキストがあればその上に出す)。
+	// 音声入力の通し録音を利用者が自分で聞き直せることが、文字起こしの誤りの一番確実な確認手段
+	const isAudio = $derived(contentType.startsWith('audio/'));
+
+	// ブラウザの MediaRecorder が作る webm は長さを持たず、duration が Infinity になって
+	// シークバーが効かない。末尾へ一度シークさせると長さが確定するので、確定したら先頭へ戻す
+	const settleAudioDuration = (event: Event) => {
+		const audio = event.currentTarget as HTMLAudioElement;
+		if (audio.duration !== Infinity) return;
+
+		audio.addEventListener(
+			'durationchange',
+			() => {
+				audio.currentTime = 0;
+			},
+			{ once: true }
+		);
+		audio.currentTime = Number.MAX_SAFE_INTEGER;
+	};
 
 	// llens: チャット側の item.file はアップロード時のスナップショットで古いことがある
 	// (後から抽出が走った・Attachment 設定が変わった等)。開くたびに API から取り直して
@@ -115,7 +134,7 @@
 						{#if item?.size}
 							<span>{formatFileSize(item.size)}</span>
 						{/if}
-						{#if (isImage || isPdf) && contentType}
+						{#if (isImage || isPdf || isAudio) && contentType}
 							{#if item?.size}<span>•</span>{/if}
 							<span>{contentType}</span>
 						{/if}
@@ -153,7 +172,7 @@
 				</div>
 			{/if}
 
-			{#if !contentHidden && !isImage && !isPdf}
+			{#if !contentHidden && !isImage && !isPdf && !(isAudio && extraction === 'none')}
 				<div class="text-sm text-content-muted mt-0.5">
 					{$i18n.t(
 						'Previewing the text extracted from the original data. Formatting and content may differ.'
@@ -186,6 +205,16 @@
 		</div>
 
 		<div class="max-h-[75vh] overflow-auto mt-2">
+			{#if isAudio && !contentHidden}
+				<audio
+					controls
+					preload="metadata"
+					src={`${WEBUI_API_BASE_URL}/files/${fileId}/content`}
+					class="w-full mb-3"
+					onloadedmetadata={settleAudioDuration}
+				></audio>
+			{/if}
+
 			{#if contentHidden}
 				<!-- #94: 非 admin には削除済みの事実だけ、admin でも purged は実体が無い -->
 				<div

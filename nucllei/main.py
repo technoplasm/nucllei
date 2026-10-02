@@ -107,6 +107,11 @@ from nucllei.config import (
     WHISPER_COMPUTE_TYPE,
     WHISPER_CPU_THREADS,
     WHISPER_NUM_WORKERS,
+    WHISPER_BEAM_SIZE,
+    AUDIO_STT_SEGMENT_SECONDS,
+    AUDIO_STT_SEGMENT_PAUSE_MS,
+    AUDIO_STT_SILENCE_THRESHOLD_DB,
+    AUDIO_STT_RECORDING_BITRATE_KBPS,
     DEEPGRAM_API_KEY,
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_MAX_SIZE,
@@ -469,6 +474,15 @@ app.state.config.WHISPER_LANGUAGE = WHISPER_LANGUAGE
 app.state.config.WHISPER_COMPUTE_TYPE = WHISPER_COMPUTE_TYPE
 app.state.config.WHISPER_CPU_THREADS = WHISPER_CPU_THREADS
 app.state.config.WHISPER_NUM_WORKERS = WHISPER_NUM_WORKERS
+# env 専用(RuntimeConfig ではない = DB にも管理画面にも出ない)ので config の外に置く
+app.state.WHISPER_BEAM_SIZE = WHISPER_BEAM_SIZE
+# 録音バー(FE)へ /api/config の audio.stt でそのまま渡す値
+app.state.AUDIO_STT_INPUT = {
+    "segment_seconds": AUDIO_STT_SEGMENT_SECONDS,
+    "segment_pause_ms": AUDIO_STT_SEGMENT_PAUSE_MS,
+    "silence_threshold_db": AUDIO_STT_SILENCE_THRESHOLD_DB,
+    "recording_bitrate_kbps": AUDIO_STT_RECORDING_BITRATE_KBPS,
+}
 app.state.config.DEEPGRAM_API_KEY = DEEPGRAM_API_KEY
 
 app.state.config.AUDIO_STT_AZURE_API_KEY = AUDIO_STT_AZURE_API_KEY
@@ -1092,6 +1106,8 @@ async def get_app_config(request: Request):
                     "stt": {
                         "enable": app.state.config.ENABLE_AUDIO_STT,
                         "engine": app.state.config.STT_ENGINE,
+                        # 配備ごとの調整値(env 専用 — _memos/audio.md)
+                        **app.state.AUDIO_STT_INPUT,
                     },
                 },
                 "file": {

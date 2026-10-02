@@ -53,6 +53,7 @@ from nucllei.utils.misc import (
     convert_logit_bias_input_to_json,
 )
 from nucllei.utils.skills import (
+    apply_skill_auto_load,
     apply_skill_command,
     build_load_skill_tool,
     current_skill_activation_seeds,
@@ -218,6 +219,45 @@ def filter_files_by_user_access(files: list, user: UserModel) -> list:
     return accessible
 
 
+def build_source_context(sources: list[dict]) -> str:
+    """添付の sources をモデルへ注入する `<source …>` タグ列に組む。
+
+    llens(#52): file_id と抽出状態(成功/失敗/未抽出)をタグに載せ、モデルが状態を
+    理解し file_id を tool で扱えるようにする。音声入力の通し録音(meta.dictation)は
+    `dictation="true"` の印を足す — 読み直すかどうかの判断と tool は配備側の仕事。
+    長い録音が複数のファイルに分かれたときだけ、どれを読み直すか決められるように
+    `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
+    """
+    context_string = ""
+    citated_file_idx = {}
+    for source in sources:
+        if "document" in source:
+            for doc_context, doc_meta in zip(source["document"], source["metadata"]):
+                file_id = doc_meta.get("file_id")
+                if file_id not in citated_file_idx:
+                    citated_file_idx[file_id] = len(citated_file_idx) + 1
+                status = doc_meta.get("extraction_status")
+                attrs = f'id="{citated_file_idx[file_id]}"'
+                if file_id:
+                    attrs += f' file_id="{file_id}"'
+                if doc_meta.get("dictation"):
+                    attrs += ' dictation="true"'
+                    parts = doc_meta.get("dictation_parts")
+                    if isinstance(parts, int) and parts >= 2:
+                        attrs += f' part="{int(doc_meta.get("dictation_part") or 0)}" parts="{parts}"'
+                if status == "failed":
+                    attrs += ' extraction="failed"'
+                    body = doc_context or ""
+                elif not (doc_context or "").strip() and status != "success":
+                    attrs += ' extraction="none"'
+                    body = "(このファイルはテキスト抽出されていません。file_id を使って tool で読めます)"
+                else:
+                    body = doc_context
+                context_string += f"<source {attrs}>{body}</source>\n"
+
+    return context_string.strip()
+
+
 async def chat_completion_files_handler(
     request: Request, body: dict, user: UserModel
 ) -> tuple[dict, dict[str, list]]:
@@ -344,6 +384,14 @@ async def process_chat_payload(
     # 偽装 file_id / collection がソース解決に到達しないようにする。
     if form_data.get("files"):
         form_data["files"] = filter_files_by_user_access(form_data["files"], user)
+
+    # 添付による skill の自動ロード(入口 3 — _memos/skill-design.md)。条件
+    # (content_type の前方一致)に合う添付があれば `/command` と同じ合成 exchange を
+    # 足す。読取権限で絞った後の files を見る。DB read を含むのでワーカースレッドで。
+    form_data, auto_loaded_skills = await asyncio.to_thread(
+        apply_skill_auto_load, form_data, user, model, metadata
+    )
+    skill_activations.extend(auto_loaded_skills)
 
     event_emitter = make_event_emitter(events_stream, metadata)
     event_call = make_event_call(events_stream)
@@ -478,7 +526,7 @@ async def process_chat_payload(
         )
 
     # llens(#35 step2b): 発火済み skill の tool_ids を遅延ロードして tools に加える
-    # (`/command` 入口。会話持続 = 毎リクエスト再導出なので以降のターンでも載り続ける)。
+    # (`/command` 入口と自動ロード。会話持続 = 毎リクエスト再導出なので以降のターンでも載り続ける)。
     # id は skill 行(tool 紐づき skill は admin のみ作成可)由来なので per-tool の
     # アクセス検証はスキップ — skill の read 可視性が認可の単位。
     skill_tool_ids = []
@@ -638,33 +686,7 @@ async def process_chat_payload(
 
     # If context is not empty, insert it into the messages
     if len(sources) > 0:
-        context_string = ""
-        citated_file_idx = {}
-        for _, source in enumerate(sources, 1):
-            if "document" in source:
-                for doc_context, doc_meta in zip(
-                    source["document"], source["metadata"]
-                ):
-                    file_id = doc_meta.get("file_id")
-                    if file_id not in citated_file_idx:
-                        citated_file_idx[file_id] = len(citated_file_idx) + 1
-                    # llens(#52): file_id と抽出状態(成功/失敗/未抽出)をタグに載せ、モデルが
-                    # 状態を理解し file_id を tool で扱えるようにする。
-                    status = doc_meta.get("extraction_status")
-                    attrs = f'id="{citated_file_idx[file_id]}"'
-                    if file_id:
-                        attrs += f' file_id="{file_id}"'
-                    if status == "failed":
-                        attrs += ' extraction="failed"'
-                        body = doc_context or ""
-                    elif not (doc_context or "").strip() and status != "success":
-                        attrs += ' extraction="none"'
-                        body = "(このファイルはテキスト抽出されていません。file_id を使って tool で読めます)"
-                    else:
-                        body = doc_context
-                    context_string += f"<source {attrs}>{body}</source>\n"
-
-        context_string = context_string.strip()
+        context_string = build_source_context(sources)
         prompt = get_last_user_message(form_data["messages"])
 
         if prompt is None:

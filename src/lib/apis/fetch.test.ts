@@ -151,6 +151,58 @@ describe('activity ヘッダ', () => {
 	});
 });
 
+describe('noteInteraction(DOM イベントにならない在席 = 音声入力の発話)', () => {
+	it('呼ぶと次の 1 本に activity ヘッダが付く', async () => {
+		const { apiFetch, noteInteraction, ACTIVITY_HEADER } = await loadModule();
+
+		noteInteraction();
+		await apiFetch('/api/v1/audio/transcriptions', { method: 'POST' });
+		await apiFetch('/api/v1/audio/transcriptions', { method: 'POST' });
+
+		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBe('1');
+		expect(sentActivityHeader(1, ACTIVITY_HEADER)).toBeNull();
+	});
+
+	it('呼び続けているうちは TTL を過ぎても切れない', async () => {
+		const { startIdleWatch, noteInteraction } = await loadModule();
+
+		startIdleWatch(60);
+		for (let i = 0; i < 30; i++) {
+			vi.advanceTimersByTime(5000);
+			noteInteraction();
+		}
+
+		expect(location.href).toBe('http://localhost/c/abc');
+	});
+
+	it('呼ばなければ今までどおり切れる(録音バーが開いているだけの無音)', async () => {
+		const { startIdleWatch, apiFetch, ACTIVITY_HEADER } = await loadModule();
+
+		startIdleWatch(60);
+		// 操作を伴わないリクエストが出ていても延命されない
+		vi.advanceTimersByTime(30000);
+		await apiFetch('/api/v1/audio/transcriptions', { method: 'POST' });
+		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBeNull();
+		vi.advanceTimersByTime(31000);
+
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('呼ぶのをやめてから TTL が経てば切れる(喋り終えて離席)', async () => {
+		const { startIdleWatch, noteInteraction } = await loadModule();
+
+		startIdleWatch(60);
+		vi.advanceTimersByTime(50000);
+		noteInteraction();
+		vi.advanceTimersByTime(50000);
+		expect(location.href).toBe('http://localhost/c/abc');
+		// 判定は 15 秒刻み(IDLE_CHECK_MS)— 最後の記録から 60 秒を過ぎた次の tick で切れる
+		vi.advanceTimersByTime(20000);
+
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+});
+
 describe('FE 側アイドルタイマ', () => {
 	it('無期限(null)なら何もしない', async () => {
 		const { startIdleWatch } = await loadModule();

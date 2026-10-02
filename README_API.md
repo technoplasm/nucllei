@@ -359,6 +359,19 @@ sites), `WHISPER_COMPUTE_TYPE` (`int8`), `WHISPER_CPU_THREADS` (`0`),
 `AUDIO_STT_OPENAI_API_BASE_URL/_KEY`, `AUDIO_STT_MODEL`, `DEEPGRAM_API_KEY`,
 `AUDIO_STT_AZURE_*`.
 
+Microphone dictation tuning — env only (not RC: no DB value, no admin UI). A value
+that is not a number or is out of range falls back to the default with one startup
+warning. Tune per site (microphone, room noise, CPU speed); background in
+`_memos/audio.md`.
+
+| Var                                | Kind | Default | Range      | Effect                                                                                                                                                                                  |
+| ---------------------------------- | ---- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUDIO_STT_SEGMENT_SECONDS`        | env  | `12`    | 4 – 30     | while the user keeps talking, cut a segment at the first pause after this many seconds (forced cut at this + 4 s). Shorter = text appears sooner but more words break at the cuts       |
+| `AUDIO_STT_SEGMENT_PAUSE_MS`       | env  | `400`   | 100 – 2000 | silence length that counts as a pause to cut at. Shorter = fewer forced cuts, but more cuts inside a word                                                                               |
+| `AUDIO_STT_SILENCE_THRESHOLD_DB`   | env  | `-45`   | -90 – -10  | level below which input counts as silence (`AnalyserNode.minDecibels`). Depends on the microphone level: lower it for quiet input, raise it when room noise is never treated as silence |
+| `AUDIO_STT_RECORDING_BITRATE_KBPS` | env  | `24`    | 8 – 128    | bitrate of the full recording kept as an attachment (§4.4)                                                                                                                              |
+| `WHISPER_BEAM_SIZE`                | env  | `5`     | 1 – 10     | beam size of the bundled faster-whisper (ignored by external STT engines). Smaller = faster, less accurate                                                                              |
+
 TTS: `AUDIO_TTS_ENGINE` (RC, `""` = browser speech API; or `openai`, `azure`,
 `elevenlabs`, `transformers`). `AUDIO_TTS_OPENAI_API_BASE_URL` accepts any
 OpenAI-compatible `/v1` speech endpoint (the reference deployment points it at a
@@ -471,7 +484,7 @@ curl -N http://HOST/api/chat/completions \
   (`data: {...}` frames, terminated by `data: [DONE]`). A usage chunk is always
   included on streams (the server forces `stream_options.include_usage`).
 - **Inlet and stream Filters run** on this path (model params, system prompt, skill
-  `/command` expansion, file context injection too). Outlet filters do not run
+  `/command` expansion and attachment auto-load, file context injection too). Outlet filters do not run
   headless (call `POST /api/chat/completed` yourself if you need them).
 - **Tools are attached but not executed**: the model's configured tools are put in
   the request, so you may receive raw `tool_calls` in the response — executing them
@@ -481,7 +494,11 @@ curl -N http://HOST/api/chat/completions \
   availability is model configuration — §1).
 - `files` entries are ACL-checked against the caller, and each file's extracted
   text is injected into the system message as a `<source id=".." file_id="..">`
-  block (full text — there is no RAG retrieval step).
+  block (full text — there is no RAG retrieval step). Attributes, in this order:
+  `id` (1-based index in this request), `file_id`, then for a voice-dictation
+  recording (§4.4) `dictation="true"` — plus `part=".." parts=".."` only when the
+  recording was split into two or more files — then `extraction="failed"` /
+  `extraction="none"` when the file has no extracted text.
 
 **Chat-wire mode** (`chat_id` + the **assistant** message `id` present) — the UI's
 own wire, usable by API clients that want the conversation to exist in the UI.
@@ -532,20 +549,66 @@ Reverse-proxy note: SSE must not be buffered (the server sends
 
 ### 4.4 Files
 
-| Endpoint                                                            | Notes                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/v1/files/`                                               | multipart field `file`; optional `?process=false` to skip extraction. Enforces the upload permission, extension whitelist and size cap. Returns `{id, filename, meta{name,content_type,size}, data{content?,status?}}` |
-| `POST /api/v1/files/{id}/process`                                   | re-run the Attachment Function (`__event__="attach"`)                                                                                                                                                                  |
-| `GET /api/v1/files/{id}` / `/{id}/content` / `/{id}/data/content`   | metadata / raw bytes / extracted text                                                                                                                                                                                  |
-| `POST /api/v1/files/{id}/data/content/update`                       | overwrite extracted text                                                                                                                                                                                               |
-| `POST /api/v1/files/{id}/access_control/update`                     | `null` (public) or `{"read":{group_ids:[],user_ids:[]}}`                                                                                                                                                               |
-| `GET /api/v1/files/` `/list` `/search`, `DELETE /api/v1/files/{id}` | listing / deletion                                                                                                                                                                                                     |
+| Endpoint                                                            | Notes                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/v1/files/`                                               | multipart field `file` (and optional `dictation`, below); optional `?process=false` to skip extraction. Enforces the upload permission, extension whitelist and size cap. Returns `{id, filename, meta{name,content_type,size}, data{content?,status?}}` |
+| `POST /api/v1/files/{id}/process`                                   | re-run the Attachment Function (`__event__="attach"`)                                                                                                                                                                                                    |
+| `GET /api/v1/files/{id}` / `/{id}/content` / `/{id}/data/content`   | metadata / raw bytes / extracted text                                                                                                                                                                                                                    |
+| `POST /api/v1/files/{id}/data/content/update`                       | overwrite extracted text                                                                                                                                                                                                                                 |
+| `POST /api/v1/files/{id}/access_control/update`                     | `null` (public) or `{"read":{group_ids:[],user_ids:[]}}`                                                                                                                                                                                                 |
+| `GET /api/v1/files/` `/list` `/search`, `DELETE /api/v1/files/{id}` | listing / deletion                                                                                                                                                                                                                                       |
 
 To use a file in a completion: pass `{"type":"file","id":...}` in the request
 `files` array (text injection), or reference `/api/v1/files/{id}/content` as an
 `image_url` in message content — internal image URLs are inlined to base64 before
 reaching the engine. Client-facing limits are advertised in `GET /api/config`
 (`file.max_size`, `file.max_count`, `file.allowed_extensions`).
+
+**Voice-dictation recordings (`meta.dictation`).** The chat UI transcribes
+microphone input in 12–16 s segments, so a word can break at a cut. When a
+dictation had two or more transcribed segments, the UI also uploads the
+continuous recording as an ordinary audio attachment of that message
+(`meta.content_type` is `audio/webm` — Opus, mono, ~22 kbps — from Chrome / Edge /
+Firefox, `audio/mp4` from a browser whose MediaRecorder cannot produce WebM (Safari); never with a
+`;codecs=` suffix) and passes the optional multipart field `dictation` (a JSON
+string). It is the only client-writable `meta` key: the shape below is validated
+(unknown keys rejected, ≤ 512 KB, audio files only) and stored as `meta.dictation`.
+The model only sees the `<source … dictation="true">` mark (§4.3); a deployment
+tool reads the segment list from `GET /api/v1/files/{id}` to re-transcribe a span
+from the original.
+
+```json
+{
+	"version": 1,
+	"session_id": "812704ee-f883-4e7c-b97c-19f585663868",
+	"part": 1,
+	"parts": 1,
+	"offset_sec": 0.0,
+	"duration_sec": 41.8,
+	"container": "webm/opus",
+	"segments": [
+		{ "i": 1, "start_sec": 0.3, "end_sec": 11.6, "cut": "breath", "text": "…" },
+		{ "i": 2, "start_sec": 11.6, "end_sec": 27.6, "cut": "forced", "text": "…" }
+	],
+	"joined_text": "…"
+}
+```
+
+- A recording longer than about 60 minutes is split into several files that share
+  `session_id`; `part` / `parts` number them and `offset_sec` is where this file
+  starts in the whole recording. A segment never spans two files. A file's tail
+  overlaps the next file's head by about 0.3 s (so nothing is lost at the switch);
+  segments do not overlap.
+- `start_sec` / `end_sec` are seconds **from the start of this file**: when the
+  segment recorder started and when it was stopped. Segments leave gaps where the
+  UI was waiting for speech. `i` numbers segments across the whole recording.
+- `cut`: `breath` (cut at a pause after the 12 s target), `forced` (16 s hard
+  limit, possibly mid-word), `silence` (the user's silence timeout), `end` (closed
+  by confirm / send).
+- `text` is that segment's transcript (empty if it was too short to transcribe or
+  transcription failed); `joined_text` joins the non-empty texts **of this file**
+  with a space — what was appended to the input box.
+- `container`: `webm/opus`, `ogg/opus` or `mp4/aac`.
 
 What extraction happens at upload is entirely up to the deployment's single
 **Attachment Function** (§7.3). With none configured, files are stored raw and the
@@ -560,7 +623,7 @@ the intended workflow — keep sources in your repo, register on deploy):
 | -------- | ---------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tool     | `POST /api/v1/tools/create`, `POST /api/v1/tools/id/{id}/update` | admin         | `{id, name, description?, content, meta?, access_control?}` — `content` is the Python source; the module is imported and spec'd at save time (syntax errors reject the save) |
 | Function | `POST /api/v1/functions/create`, `.../id/{id}/update`            | admin         | `{id, name, description?, content}` — type (filter/pipe/action/attachment) is auto-detected from the class in `content`                                                      |
-| Skill    | `POST /api/v1/skills/create`, `.../id/{id}/update`               | skill editor+ | `{id, name, description?, content, tool_ids?, access_control?}` (markdown content; `tool_ids` admin-only)                                                                    |
+| Skill    | `POST /api/v1/skills/create`, `.../id/{id}/update`               | skill editor+ | `{id, name, description?, content, tool_ids?, auto_load_content_types?, access_control?}` (markdown content; `tool_ids` admin-only)                                          |
 
 `id` for tools/functions must be a valid Python identifier (lowercased on save)
 and is immutable. Valves values: `GET/POST /api/v1/{tools,functions}/id/{id}/valves*`
@@ -580,7 +643,10 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
 - `GET /api/config` — instance metadata (name, version, auth features, locale;
   with a session also default models, audio config, file limits, permissions).
   `GET /api/version`.
-- Audio: `POST /api/v1/audio/transcriptions` (STT), `POST /api/v1/audio/speech` (TTS).
+- Audio: `POST /api/v1/audio/transcriptions` (STT; multipart `file`, plus optional
+  `prompt` — context such as a term list, like the OpenAI field of the same name; only the
+  last 200 chars are used; the built-in microphone input does not send it),
+  `POST /api/v1/audio/speech` (TTS).
 - Chats CRUD: `/api/v1/chats/*` (`/new`, `/{id}`, `/search`, share/archive/clone...).
 - Executions of a chat (owner only, see §5.9):
   `GET /api/v1/chats/{id}/executions` →
@@ -662,21 +728,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                            |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                 |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                        |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                          |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context for the follow-up call (the "model's eyes"); `ref` is a file_id, an absolute URL (`https://…/ext/{name}/…` or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                 |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                          |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                      |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                   |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                           |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                  |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                           |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                             |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, an absolute URL (`https://…/ext/{name}/…` or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### 5.4 Argument & result rendering
 
@@ -950,9 +1016,10 @@ survives, the computation does not resume.
 ## 6. Writing Skills
 
 A **Skill** is a markdown instruction package with optional lazy-loaded tools.
-It activates through a single server-side path, triggered either by the user
-typing `/<id>` or by the model calling the `load_skill` pseudo-tool — both leave
-the same visible `load_skill` tool exchange in the conversation.
+It activates through a single server-side path, triggered by the user typing
+`/<id>`, by the model calling the `load_skill` pseudo-tool, or automatically by
+an attachment whose content type the skill declares — all three leave the same
+visible `load_skill` tool exchange in the conversation.
 
 ### 6.1 Definition
 
@@ -964,6 +1031,7 @@ POST /api/v1/skills/create
   "description": "Retrieve secrets from the vault. Load when the user asks about stored passwords.",
   "content": "You now have vault access tools. Use secret_password to retrieve the stored secret.\nToday is {{CURRENT_DATE}}; the user is {{USER_NAME}}.",
   "tool_ids": ["vault-tools"],
+  "auto_load_content_types": [],
   "access_control": null
 }
 ```
@@ -980,6 +1048,12 @@ POST /api/v1/skills/create
   mechanism.
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
+- `auto_load_content_types` — content-type **prefixes** (e.g. `["audio/"]`,
+  `["image/png", "application/pdf"]`). When the conversation has an attachment
+  whose stored content type starts with one of them, the skill is loaded
+  automatically (§6.3). Empty (the default) disables it. Normalized on save
+  (trimmed, lowercased, empty entries and duplicates dropped). **An update
+  replaces the list** — omit the field and it is reset to `[]`.
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
 
 ### 6.2 Permissions (three tiers)
@@ -1006,7 +1080,31 @@ condition passes through as plain text (no error).
   manifest (`- <id>: <description>` lines, enum-constrained). Tools loaded this
   way are available from the next tool-loop iteration.
 
-Both paths return the same tool result:
+- **Attachment path** (auto-load): for every skill of the preset that declares
+  `auto_load_content_types`, the server checks the request's attachments — the
+  top-level `files` list (after the caller's read-ACL filter) and `image_url`
+  parts of user messages (internal `/api/v1/files/{id}/content` URLs and
+  `data:` URLs). The content type is always the one stored with the file, never
+  a client-supplied value or the file extension. On a match the server injects
+  the same synthetic `load_skill` exchange as the user path (call id
+  `skill:<id>:auto`) and loads the skill's tools. Same AND condition as above;
+  if it fails, nothing happens.
+  - Placement: an image match goes right after the first user message carrying
+    a matching image. A match from `files` goes right after the **first user
+    message** — `files` is a per-chat list and does not say which message a
+    file was attached to.
+  - Persistence: stateless. Attachments are part of every request, so the
+    activation is re-derived each time and the tools stay available on later
+    turns that add no attachment. A headless client keeps it active simply by
+    sending the same `files` again.
+  - No double activation: if the history already contains a `load_skill` call
+    for that skill (from `/command` or from the model), nothing is added.
+    Several matching attachments still activate a skill once; several matching
+    skills all activate, in `meta.skillIds` order.
+  - In the UI the `load_skill` card appears on the response to the message the
+    attachment was added with.
+
+All paths return the same tool result:
 
 ```json
 { "result": "<expanded skill content>", "tools": ["secret_password"] }
@@ -1014,10 +1112,10 @@ Both paths return the same tool result:
 
 `result` enters the model history as a `role:"tool"` message (not a system
 message); the UI renders it as a collapsible "load_skill" card with the loaded
-tool names. Both entry points persist for the rest of the conversation: the
-`/command` path re-derives its tool ids from the preset on every request, and
-the model path re-derives them by replaying the `load_skill` calls found in the
-history (`replay_skill_tool_ids`). The model does not need to call `load_skill`
+tool names. All entry points persist for the rest of the conversation: the
+`/command` and attachment paths re-derive their activation (and tool ids) from
+the request on every turn, and the model path re-derives its tool ids by
+replaying the `load_skill` calls found in the history (`replay_skill_tool_ids`). The model does not need to call `load_skill`
 again on a later turn to keep the tools.
 
 Authorization is never inherited from the history. Every re-derivation re-checks

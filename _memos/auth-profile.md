@@ -104,7 +104,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 | 層 | 何をするか | 実体 |
 |---|---|---|
 | FE 送信側 | 最後の延命以降に**人の操作**(`keydown` / `pointerdown` / `click` / `touchstart` / `wheel`。**`mousemove` は数えない**。
-ホイールは「長い回答をスクロールして読んでいる = 在席」なので数える、カーソルが動いただけは数えない)があったリクエストにだけ `X-Nucllei-Activity: 1` を付ける | `src/lib/apis/fetch.ts`(全 API が通る唯一の口) |
+ホイールは「長い回答をスクロールして読んでいる = 在席」なので数える、カーソルが動いただけは数えない。DOM イベントのほかに**マイク入力で発話を検出している間**も数える — 下記)があったリクエストにだけ `X-Nucllei-Activity: 1` を付ける | `src/lib/apis/fetch.ts`(全 API が通る唯一の口) |
 | BE | そのヘッダがあり、かつ token が**寿命の半分**を過ぎていたら cookie を再発行。`-1` なら何もしない。**API キー(`sk-`)経路は延命しない** | `nucllei/utils/auth.py`(`mark_session_renewal`)、Set-Cookie は `nucllei/main.py` の middleware |
 | FE 画面側 | 最後の人の操作から `JWT_EXPIRES_IN` 経過したら自分で `/auth?redirect=` へ逃がす | `src/lib/apis/fetch.ts`(`startIdleWatch`)、起動は `src/routes/+layout.svelte` |
 
@@ -128,6 +128,16 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
   復帰時点(`visibilitychange` / `focus`)で評価する。
   失効の後始末(sessionStorage フラグ + ハード遷移 + 到着後トースト)は 401 経路(#70 B2)と共用で、
   二重には走らない。
+- **「人の操作」にはマイク入力の発話も含める**(2026-10-03、ken 指示「読み取り中はタイムアウト
+  しないように」)。喋っているだけの間はキーもクリックも無いので、`JWT_EXPIRES_IN` を短くした
+  配備では長い口述の途中で FE タイマが追い出し、読み取った文が失われていた(口述中の
+  `/transcriptions` にも延命ヘッダは付かなかった)。`fetch.ts` が `noteInteraction()` を公開し、
+  `VoiceRecording.svelte` の音検出ループが**音を検出しているフレームで、5 秒に 1 回へ間引いて**
+  呼ぶ(Web Speech 経路も同じループを回すので同じ扱い)。DOM イベントと同じ関数なので、FE タイマの
+  起点・次のリクエスト(= 次の `/transcriptions`)のヘッダ・半減期の keepalive がすべて同じに効く。
+  **録音バーが開いているだけの無音では呼ばない** — マイクを付けたまま離席した共用 PC は今までどおり
+  切れる。「音」の判定は録音の区切りと同じ(`silence_threshold_db` を超える bin があるか)なので、
+  しきい値を超える環境音が鳴り続ける部屋では延命されうる。Call(`CallOverlay.svelte`)は未対応。
 - **「操作はあるがリクエストが出ない」時間帯を塞ぐ延命の 1 本(`sendKeepalive`)。**
   人の操作は必ずしもリクエストを生まない — 長い回答をホイールで読む、長文を打ち込む。
   ヘッダを運ぶ乗り物が来ないのでサーバ側の期限だけ切れ、**画面の前に人が居るのに**

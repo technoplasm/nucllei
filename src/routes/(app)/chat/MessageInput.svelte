@@ -538,6 +538,9 @@
 					{#if recording}
 						<VoiceRecording
 							bind:recording
+							draft={prompt}
+							canKeepRecording={uploads.canKeepRecording}
+							onKeepRecording={uploads.keepRecordingHandler}
 							onCancel={async () => {
 								recording = false;
 
@@ -553,7 +556,8 @@
 								}
 							}}
 							onConfirm={async (data) => {
-								const { text } = data;
+								// send = 録音バーの「ここで切って送信」ボタン
+								const { text, send } = data;
 								if (text) {
 									prompt = `${prompt}${text} `;
 								}
@@ -562,7 +566,9 @@
 								await tick();
 								document.getElementById('chat-input')?.focus();
 
-								if ($settings?.speechAutoSend ?? false) {
+								// 送るものが無ければ送らない(何も読み取れなかった録音を空送信しない。
+								// 入力欄の送信ボタン・Enter 送信と同じ条件)
+								if (send && (prompt !== '' || files.length > 0)) {
 									onSubmit(prompt);
 								}
 							}}

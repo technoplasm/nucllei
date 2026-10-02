@@ -1,15 +1,17 @@
+import json
 import logging
 import os
 import uuid
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -34,7 +36,7 @@ from nucllei.utils.access_control import (
 )
 from nucllei.utils.attachment import process_attachment_functions
 from nucllei.utils.auth import get_admin_user, get_verified_user
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -68,6 +70,87 @@ def has_access_to_file(
 
 
 ############################
+# Dictation meta(音声入力の通し録音)
+############################
+
+# 音声入力(マイク)の通し録音に FE が付ける印(_memos/audio.md「通し録音の添付」)。
+# Files.meta に **クライアントが書き込める唯一のキー**で、下の形だけを受ける(extra は拒否)。
+# 配備側の tool が原本から読み直すための区間一覧で、モデルの prompt には入れない
+# (`<source … dictation="true">` の印だけが載る)。
+# 長い録音は約 60 分ごとに複数のファイルへ分かれて届く(session_id が共通、part / parts が
+# 何本目か、offset_sec が録音全体の何秒目から始まるか)。segments の秒は**そのファイルの
+# 先頭から**、i は録音全体の通し番号。
+# 上限: 1 ファイル 60 分で区間は多くて数百・本文は数万字なので、JSON 全体 512KB・区間 2000 個で足りる
+DICTATION_MAX_BYTES = 512 * 1024
+DICTATION_MAX_SEGMENTS = 2000
+
+
+class DictationSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    i: int = Field(ge=1)
+    start_sec: float = Field(ge=0)
+    end_sec: float = Field(ge=0)
+    cut: Literal["breath", "forced", "silence", "end"]
+    text: str
+
+
+class DictationMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1]
+    session_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    part: int = Field(ge=1)
+    parts: int = Field(ge=1)
+    offset_sec: float = Field(ge=0)
+    duration_sec: float = Field(ge=0)
+    container: str = Field(pattern=r"^[a-z0-9]+/[a-z0-9.]+$", max_length=32)
+    segments: list[DictationSegment] = Field(
+        min_length=1, max_length=DICTATION_MAX_SEGMENTS
+    )
+    joined_text: str
+
+    @model_validator(mode="after")
+    def _segments_are_ordered(self):
+        if self.part > self.parts:
+            raise ValueError("part must be <= parts")
+        previous_end = 0.0
+        for index, segment in enumerate(self.segments):
+            if segment.i != self.segments[0].i + index:
+                raise ValueError("segments[].i must be consecutive")
+            if segment.end_sec < segment.start_sec:
+                raise ValueError("segments[].end_sec must be >= start_sec")
+            if segment.start_sec < previous_end:
+                raise ValueError("segments must not overlap and must be in order")
+            previous_end = segment.end_sec
+        return self
+
+
+def parse_dictation_meta(raw: str, content_type: Optional[str]) -> dict:
+    """upload の Form `dictation`(JSON 文字列)を検証して meta に載せる dict を返す。
+
+    形が違う・大きすぎる・音声でないファイルに付いている場合は 400。
+    """
+    if not (content_type or "").startswith("audio/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="dictation is only accepted for audio files",
+        )
+    if len(raw.encode("utf-8")) > DICTATION_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"dictation must not exceed {DICTATION_MAX_BYTES} bytes",
+        )
+    try:
+        return DictationMeta.model_validate(json.loads(raw)).model_dump()
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid dictation: {e}",
+        )
+
+
+############################
 # Upload File
 ############################
 
@@ -78,6 +161,7 @@ async def store_uploaded_file(
     user,
     file_metadata: dict = {},
     process: bool = True,
+    dictation: Optional[dict] = None,
 ):
     """upload の実体(受け入れゲート → Storage 保存 → Attachment dispatch)。
 
@@ -125,6 +209,8 @@ async def store_uploaded_file(
                         "content_type": file.content_type,
                         "size": len(contents),
                         "data": file_metadata,
+                        # 検証済み(parse_dictation_meta)のものだけがここへ来る
+                        **({"dictation": dictation} if dictation else {}),
                     },
                 }
             ),
@@ -173,6 +259,7 @@ async def upload_file(
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
     process: bool = Query(True),
+    dictation: Optional[str] = Form(None),
 ):
     # llens(#69): chat.file_upload はフロントの UI 隠しだけでサーバー側未チェックだった
     # (permissions.md 原則 1 違反)。ここが enforcement point。
@@ -184,7 +271,15 @@ async def upload_file(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    return await store_uploaded_file(request, file, user, process=process)
+    return await store_uploaded_file(
+        request,
+        file,
+        user,
+        process=process,
+        dictation=(
+            parse_dictation_meta(dictation, file.content_type) if dictation else None
+        ),
+    )
 
 
 ############################

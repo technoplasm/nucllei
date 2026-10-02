@@ -23,6 +23,8 @@
  *   - 逆に「操作はしているがリクエストが出ない」(スクロールして読む・長文を打つ)ときは、
  *     **操作した瞬間に、半減期に 1 本だけ**延命のリクエスト(sendKeepalive)を出す。
  *     操作が無ければ 1 本も出ない。
+ *   - 「人の操作」には、マイクの音声入力で発話を検出している間も含める(noteInteraction を
+ *     VoiceRecording が呼ぶ)。録音バーが開いているだけの無音は含めない。
  */
 import { get } from 'svelte/store';
 
@@ -50,7 +52,16 @@ let lastActivitySentAt = 0;
 // 飛んでも復帰時点で正しく評価できる。
 let lastInteractionAt = Date.now();
 
-const noteInteraction = () => {
+/**
+ * 「人の操作があった」と記録する(アイドルタイマの起点を進め、次のリクエストに延命ヘッダを付ける)。
+ *
+ * 下の DOM イベントのほかに、**イベントにならない在席の証拠**を持つ側が呼ぶ — マイクの音声入力で
+ * 発話を検出している間(VoiceRecording)。喋っているだけの間はキーもクリックも無いので、
+ * 呼ばないと長い口述の途中でログイン画面へ追い出され、読み取った文が失われる。
+ * 呼ぶ側は「人がそこに居る」と言えるときだけ、間引いて呼ぶこと(機械的な周期で呼ぶと
+ * 「ポーリングでは延命しない」が崩れる)。
+ */
+export const noteInteraction = () => {
 	interacted = true;
 	lastInteractionAt = Date.now();
 	// 延命の 1 本は**操作した瞬間**に出す(理由は sendKeepalive の説明)
