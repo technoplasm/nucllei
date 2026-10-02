@@ -99,7 +99,8 @@ export default defineConfig({
 			// _links/ ・ ,始まりディレクトリ(個人作業スペース、symlink 置き場を含む)配下の
 			// symlink ループ(llens ⇄ cage 等)を watcher が辿ると ELOOP / OOM で dev サーバが落ちる。
 			// ディレクトリ自体を入口で弾く裸形と配下 glob を併記(入口で弾けば symlink を踏まない)
-			ignored: ['**/_links', '**/_links/**', '**/,*', '**/,*/**']
+			// .venv は site-packages が数万ディレクトリあり、監視すると inotify 上限(ENOSPC)で落ちる
+			ignored: ['**/_links', '**/_links/**', '**/,*', '**/,*/**', '**/.venv', '**/.venv/**']
 		}
 	},
 	worker: {
