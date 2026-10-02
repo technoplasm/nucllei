@@ -123,6 +123,9 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       (`https://…/ext/{name}/...` #97)か "/" 始まりの fs パス("/mnt/..." "/workspace/...")
       ならそのまま URL に、それ以外は file_id として `/api/v1/files/{id}/content` に
       整形する。実体化(base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
+      次ターン以降の履歴では FE expandAssistantToolHistory(chat-messages.ts)が同じ形・
+      同じ位置で再送する(#142)— 形は共有 fixture
+      test/fixtures/history_wire/context_images.json で両側のテストが固定している。
     - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
       context_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
       ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。

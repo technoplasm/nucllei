@@ -45,6 +45,17 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     ③テキスト連続中の約 2 秒間引き(`SNAPSHOT_INTERVAL`)のみ**
   - `{done:true, content, content_blocks, title}` / `{error:{content}}`(唯一のエラー形)/
     `{usage}`(context_size 同梱 — #102)/ `{sources}`
+  - **不変条件: 1 モデル呼び出し(1 ストリーム)の tool calls は tool_calls ブロック 1 個**
+    (2026-10-03 修正)。assembler は「calls のブロックが既にあるか」で判定する — 以前は
+    「末尾が calls のブロックか」しか見ておらず、tool call デルタの間に content デルタを挟む
+    モデル(並列 call の区切りに改行を出す。2026-10-02 に qwen3.8-27b で実測)では間に text
+    ブロックが開くたびに同じ calls のブロックを積み増していた。N call で N 個が永続化され、
+    results が綴じられるのは末尾だけ → 同ターンの追撃と次ターンの履歴に、同じ call id の
+    assistant(tool_calls)が N 回(N-1 回は `[interrupted…]` の合成 result 付き)再送された。
+    calls の後に本文を出して終わるストリームも同型だった(実行直前の ensure が 2 個目を積む)。
+    今は ensure がブロックを末尾へ移す(本文 → tool_calls → 結果の順 = 「content + tool_calls
+    の 1 assistant メッセージ」の形)。回帰は `test_response_assembler.py` と
+    `test_native_tool_calling.py::test_content_between_parallel_calls_does_not_duplicate_tool_calls_block`。
 - `chat:usage`(#102、揮発): ストリーミング中の累積 usage。SGLang の
   `stream_options.continuous_usage_stats`(capabilities.continuous_usage=False で opt-out、
   usage=False なら連動 OFF)でチャンクに載る累積値を、`USAGE_EMIT_INTERVAL`(0.5 秒)の
@@ -55,6 +66,31 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
   DB に書かず、tail flush も無い(最終真値は chat:completion {usage} が無条件で届く)。
   再アタッチでは最新 1 件をスナップショットの後(task → snapshot → 揮発イベントの順)に配り、
   done=True の chat:completion で破棄する。
+- **floating ゲージ(UsageChip)の読み方と既知の落差(2026-10-02 実測)**: ゲージは
+  「直近のモデル呼び出しに実際に入った量」= 生成中は `chat:usage` の total、確定後は
+  マージ済み usage の最新 prompt。tool ループ中の値に合算・二重計上は無い(SGLang 直結 /
+  LiteLLM 経由の両方で、SSE・DB・次ターン先頭の値が一致することを確認)。
+  **tool 結果の画像(`results[].context_images`、`__feed_image__`)は次ターン以降の履歴にも
+  再送する**(#142、ken 決定 2026-10-02 — 画像は忘れさせない。画像の多いチャットが高い占有の
+  まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE
+  `convert_content_blocks_to_messages`(ターン内の追撃 / execution_resume / subagent)は同じ形 —
+  tool メッセージ群の直後に `{role:'user', content:[{text:'(直前の tool 結果の画像)'}, image_url…]}`
+  を挟む。url は参照文字列のまま(file id は `/api/v1/files/{id}/content`、スキーム付き URL と
+  "/" 始まりはそのまま)で、実体化は毎ターン送信直前の `inline_internal_image_urls`
+  (解決できなくなった参照 — 削除済み file 等 — は "(image unavailable)" に落ち、チャットは続く)。
+  両側の形は共有 fixture `nucllei/test/fixtures/history_wire/context_images.json` で固定
+  (vitest `chat-messages.test.ts` / pytest `test_tool_output.py`)。
+  修正前は FE だけが `context_images` を読まず、画像を見た次のターンでモデルが画像を忘れ、
+  ゲージも落ちていた(実測: 画像 6 枚で prompt 13,190 → 次ターン 1,556、qwen3.8-27b)。
+  修正後の実測(画像 3 枚): ターン末 6,611 → 次ターン 6,645 → リロード後の次ターン 6,675。
+- **開始画面にゲージを出さない**: store は '' スコープに書けない(テストで固定)。開始画面に
+  出ていたのは `$chatId` の持ち越し — `/c/<id>` からロゴ・ブラウザ「戻る」で `/` に来ると
+  Chat が再マウントされるのに `$chatId` が前のチャットのままだった。`Chat.svelte` の onMount が
+  chatIdProp 無しのとき '' へ戻して initNewChat に入る(2026-10-02)。
+  別件(2026-10-03): 開始画面から最初のメッセージを送った直後は URL だけ `replaceState` で
+  `/c/<id>` になり、SvelteKit 上のルートは `/` のまま — ロゴ(`href="/"`)は同一ルートへの遷移で
+  Chat が再マウントされず、チャットもゲージも出たままだった。ロゴも「新しいチャット」と同じ
+  `newChatHandler`(Sidebar.svelte。goto の後に Navbar の new-chat-button = initNewChat を押す)に揃えた。
 - **done ≠ ストリーム終端**。done の後に chat:title 等が続く。終端はタスク終了によるサーバー側
   close = **EOF**(FE は EOF まで読む)。
 - 生のモデルフレーム(choices)はクライアントへ流れない(assembler 経由イベントのみ)。

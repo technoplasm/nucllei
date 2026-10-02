@@ -1,0 +1,110 @@
+{
+	"_comment": "tool 結果の画像(results[].context_images)を次ターンの履歴へ再送する wire 形(#142)。BE convert_content_blocks_to_messages(test_tool_output.py)と FE expandAssistantToolHistory(chat-messages.test.ts)が同じ blocks → 同じ expected になることを両側のテストで固定する。blocks は永続化形(snapshot_content_blocks — calls / results)。",
+	"cases": [
+		{
+			"name": "file_id / 絶対 URL / fs 参照の混在 + 並列 call + 結果未着 call",
+			"blocks": [
+				{ "type": "reasoning", "content": "どの図を見るか考える", "done": true, "duration": 1 },
+				{ "type": "text", "content": "図を確認します。" },
+				{
+					"type": "tool_calls",
+					"calls": [
+						{
+							"id": "c1",
+							"type": "function",
+							"function": { "name": "view_image", "arguments": "{\"n\": 1}" }
+						},
+						{
+							"id": "c2",
+							"type": "function",
+							"function": { "name": "read_doc", "arguments": "{}" }
+						},
+						{
+							"id": "c3",
+							"type": "function",
+							"function": { "name": "probe", "arguments": "" }
+						}
+					],
+					"results": [
+						{ "tool_call_id": "c1", "content": "提示しました。", "context_images": ["abc"] },
+						{
+							"tool_call_id": "c2",
+							"content": "図を提示しました。",
+							"context_images": [
+								"https://llens.test/ext/cage/figs/a.png",
+								"HTTP://llens.test/ext/cage/figs/b.png",
+								"/mnt/cage/x.pdf#page=2",
+								"/api/v1/files/def/content#page=3"
+							]
+						}
+					]
+				},
+				{ "type": "text", "content": "次も見ます。" },
+				{
+					"type": "tool_calls",
+					"calls": [
+						{
+							"id": "c4",
+							"type": "function",
+							"function": { "name": "probe", "arguments": "{}" }
+						}
+					],
+					"results": [{ "tool_call_id": "c4", "content": "ok", "context_images": [] }]
+				},
+				{ "type": "text", "content": "以上です。" }
+			],
+			"expected": [
+				{
+					"role": "assistant",
+					"content": "図を確認します。",
+					"tool_calls": [
+						{
+							"id": "c1",
+							"type": "function",
+							"function": { "name": "view_image", "arguments": "{\"n\": 1}" }
+						},
+						{
+							"id": "c2",
+							"type": "function",
+							"function": { "name": "read_doc", "arguments": "{}" }
+						},
+						{ "id": "c3", "type": "function", "function": { "name": "probe", "arguments": "" } }
+					]
+				},
+				{ "role": "tool", "tool_call_id": "c1", "content": "提示しました。" },
+				{ "role": "tool", "tool_call_id": "c2", "content": "図を提示しました。" },
+				{
+					"role": "tool",
+					"tool_call_id": "c3",
+					"content": "[interrupted: this tool call produced no result]"
+				},
+				{
+					"role": "user",
+					"content": [
+						{ "type": "text", "text": "(直前の tool 結果の画像)" },
+						{ "type": "image_url", "image_url": { "url": "/api/v1/files/abc/content" } },
+						{
+							"type": "image_url",
+							"image_url": { "url": "https://llens.test/ext/cage/figs/a.png" }
+						},
+						{
+							"type": "image_url",
+							"image_url": { "url": "HTTP://llens.test/ext/cage/figs/b.png" }
+						},
+						{ "type": "image_url", "image_url": { "url": "/mnt/cage/x.pdf#page=2" } },
+						{ "type": "image_url", "image_url": { "url": "/api/v1/files/def/content#page=3" } }
+					]
+				},
+				{
+					"role": "assistant",
+					"content": "次も見ます。",
+					"tool_calls": [
+						{ "id": "c4", "type": "function", "function": { "name": "probe", "arguments": "{}" } }
+					]
+				},
+				{ "role": "tool", "tool_call_id": "c4", "content": "ok" },
+				{ "role": "assistant", "content": "以上です。" }
+			]
+		}
+	]
+}

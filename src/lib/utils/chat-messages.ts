@@ -4,8 +4,13 @@
 // 次ターン以降のモデルから消えていた(「さっきの結果を使って」が壊れる)。
 // content_blocks(#17 L0 で永続化済み)から、バックエンドの
 // convert_content_blocks_to_messages と同じ wire 形に展開する:
-//   assistant(text?, tool_calls) → tool(result)... → assistant(text)
+//   assistant(text?, tool_calls) → tool(result)... → user(tool 結果の画像)? → assistant(text)
 //
+// - tool 結果の画像(results[].context_images、`__feed_image__`)は tool メッセージ群の
+//   直後に image_url を持つ user メッセージとして再送する(#142 — 次ターンでモデルが
+//   画像を忘れない)。エントリは参照文字列(file id / スキーム付き URL / "/" 始まり)で、
+//   実体化(base64)は送信直前の backend inline_internal_image_urls。形はバックエンドと
+//   共有 fixture(nucllei/test/fixtures/history_wire/context_images.json)で固定している
 // - reasoning はモデルへ再送しない(バックエンドと同じ規律)
 // - synthetic な tool_calls(`/command` 発火の合成 exchange、#35)はスキップする
 //   — 実体は inlet が毎リクエスト再注入するため、ここで送ると二重になる
@@ -18,13 +23,16 @@ type ContentBlock = {
 		type?: string;
 		function?: { name?: string; arguments?: string };
 	}[];
-	results?: { tool_call_id: string; content?: string }[];
+	results?: { tool_call_id: string; content?: string; context_images?: string[] }[];
 	synthetic?: boolean;
 };
 
+type WireContentPart =
+	{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type WireMessage = {
 	role: string;
-	content: string;
+	content: string | WireContentPart[];
 	tool_calls?: {
 		id: string;
 		type: string;
@@ -32,6 +40,15 @@ export type WireMessage = {
 	}[];
 	tool_call_id?: string;
 };
+
+// tool 結果の画像を運ぶ user メッセージの text パート(content_blocks.py と同文)
+const TOOL_RESULT_IMAGES_TEXT = '(直前の tool 結果の画像)';
+
+// context_images のエントリ → image_url の url(content_blocks.py と同分岐):
+// スキーム付き URL と "/" 始まり(fs 参照・"/api/v1/files/{id}/content#page=N")は
+// そのまま、それ以外は file id。
+const contextImageUrl = (entry: string): string =>
+	entry.startsWith('/') || /^https?:\/\//i.test(entry) ? entry : `/api/v1/files/${entry}/content`;
 
 export const expandAssistantToolHistory = (
 	content: string,
@@ -91,6 +108,7 @@ export const expandAssistantToolHistory = (
 				}))
 			});
 			textBuffer = [];
+			const imageUrls: string[] = [];
 			for (const call of sendableCalls) {
 				const result = results.find((r) => r.tool_call_id === call.id);
 				messages.push({
@@ -99,6 +117,17 @@ export const expandAssistantToolHistory = (
 					content: result
 						? (result.content ?? '')
 						: '[interrupted: this tool call produced no result]'
+				});
+				imageUrls.push(...(result?.context_images ?? []).map(contextImageUrl));
+			}
+			if (imageUrls.length > 0) {
+				// role:tool の content は文字列契約で画素を運べないため user ロールで挟む
+				messages.push({
+					role: 'user',
+					content: [
+						{ type: 'text', text: TOOL_RESULT_IMAGES_TEXT },
+						...imageUrls.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
+					]
 				});
 			}
 		}
@@ -119,7 +148,8 @@ export const expandAssistantToolHistory = (
  * - user メッセージの画像 file は image_url パートに展開する。
  *   llens(#69): url は正準形 "/api/v1/files/{id}/content"。送信直前に backend の
  *   inline_internal_image_urls が base64 化する(推論エンジンは /content に到達できない)。
- * - assistant は過去ターンの tool 往復を wire 形に復元(#18-2)。
+ * - assistant は過去ターンの tool 往復を wire 形に復元(#18-2)。tool 結果の画像
+ *   (context_images)も image_url を持つ user メッセージとして再送する(#142)。
  *   tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
  * - 空 content のメッセージは落とす(user / tool / tool_calls 持ちは温存)。
  */

@@ -10,8 +10,9 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 EXT_PUBLIC_BASES 配下の原本 URL、および sandbox の fs パス "/mnt/..." / "/workspace/..."、
 任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
 context_images に文字列のまま永続し、送信直前のここが実体化する(File は発行
-しない。context_images は same-turn 限定なので読み出しはそのターンの送信数回で
-自然に止まる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
+しない。context_images は次ターン以降の履歴にも再送される(#142)ので、読み出しは
+そのチャットが続くかぎり毎ターンの送信ごとに走る。解決できなくなった参照は下記の
+とおり "(image unavailable)" に落ちる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
 共有)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
 (既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
 URL / fs 参照の公開範囲は admin 管理の EXT_UPSTREAMS(+ EXT_PUBLIC_BASES)/ RO マウント /

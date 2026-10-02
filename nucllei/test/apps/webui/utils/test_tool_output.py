@@ -14,6 +14,10 @@
 """
 
 import asyncio
+import json
+from pathlib import Path
+
+import pytest
 
 from nucllei.utils import tool_output
 from nucllei.utils.tool_output import ToolOutputSink, feed_image, display, progress
@@ -188,6 +192,26 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
         "https://llens.test/ext/cage/figs/a.png",
         "/mnt/cage/x.pdf#page=2",
     ]
+
+
+# #142: FE(chat-messages.ts expandAssistantToolHistory)が次ターンの履歴に同じ形で
+# 再送する。FE の vitest(chat-messages.test.ts)と同じ fixture・同じ期待値で、
+# 両側の wire 形がずれないことを固定する。
+_HISTORY_WIRE_FIXTURE = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "fixtures"
+        / "history_wire"
+        / "context_images.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize(
+    "case", _HISTORY_WIRE_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_convert_matches_shared_history_wire_fixture(case):
+    assert convert_content_blocks_to_messages(case["blocks"]) == case["expected"]
 
 
 def test_convert_tool_call_missing_arguments_sent_as_empty_string():

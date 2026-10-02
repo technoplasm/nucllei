@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 import { buildWireMessages, expandAssistantToolHistory, parseStopSequences } from './chat-messages';
 
@@ -195,6 +197,83 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 	});
 });
 
+describe('expandAssistantToolHistory: tool 結果の画像の再送(#142)', () => {
+	// バックエンド convert_content_blocks_to_messages と同じ fixture・同じ期待値
+	// (test_tool_output.py test_convert_matches_shared_history_wire_fixture)
+	const fixture = JSON.parse(
+		readFileSync(
+			new URL('../../../nucllei/test/fixtures/history_wire/context_images.json', import.meta.url),
+			'utf-8'
+		)
+	) as { cases: { name: string; blocks: any[]; expected: unknown[] }[] };
+
+	for (const { name, blocks, expected } of fixture.cases) {
+		it(`共有 fixture: ${name}`, () => {
+			expect(expandAssistantToolHistory('', blocks)).toEqual(expected);
+		});
+	}
+
+	it('context_images が無い / 空なら user メッセージを挟まない', () => {
+		const blocks = [
+			{
+				type: 'tool_calls',
+				calls: [
+					{ id: 'a', function: { name: 'f1', arguments: '{}' } },
+					{ id: 'b', function: { name: 'f2', arguments: '{}' } }
+				],
+				results: [
+					{ tool_call_id: 'a', content: 'r1' },
+					{ tool_call_id: 'b', content: 'r2', context_images: [] }
+				]
+			}
+		];
+		expect(expandAssistantToolHistory('', blocks).map((m) => m.role)).toEqual([
+			'assistant',
+			'tool',
+			'tool'
+		]);
+	});
+
+	it('履歴から落とした call(arguments 壊れ)の result の画像は送らない', () => {
+		const blocks = [
+			{
+				type: 'tool_calls',
+				calls: [
+					{ id: 'a', function: { name: 'f1', arguments: '{}' } },
+					{ id: 'b', function: { name: 'f2', arguments: '{"x":' } }
+				],
+				results: [
+					{ tool_call_id: 'a', content: 'r1', context_images: ['img-a'] },
+					{ tool_call_id: 'b', content: 'r2', context_images: ['img-b'] }
+				]
+			}
+		];
+		const messages = expandAssistantToolHistory('', blocks);
+		expect(messages.at(-1)).toEqual({
+			role: 'user',
+			content: [
+				{ type: 'text', text: '(直前の tool 結果の画像)' },
+				{ type: 'image_url', image_url: { url: '/api/v1/files/img-a/content' } }
+			]
+		});
+	});
+
+	it('synthetic ブロックの画像は送らない(ブロックごとスキップ)', () => {
+		const blocks = [
+			{
+				type: 'tool_calls',
+				synthetic: true,
+				calls: [{ id: 's', function: { name: 'load_skill', arguments: '{}' } }],
+				results: [{ tool_call_id: 's', content: 'x', context_images: ['img'] }]
+			},
+			{ type: 'text', content: '本文' }
+		];
+		expect(expandAssistantToolHistory('本文', blocks)).toEqual([
+			{ role: 'assistant', content: '本文' }
+		]);
+	});
+});
+
 describe('buildWireMessages', () => {
 	it('system 文があれば先頭に注入する', () => {
 		const messages = buildWireMessages([{ role: 'user', content: 'こんにちは' }], 'あなたは犬');
@@ -277,6 +356,43 @@ describe('buildWireMessages', () => {
 			{ role: 'tool', tool_call_id: 'c1', content: '42' },
 			{ role: 'assistant', content: '結果です' }
 		]);
+	});
+
+	it('tool 結果の画像は次ターンの履歴に user(image_url) として残る(#142)', () => {
+		const messages = buildWireMessages(
+			[
+				{ role: 'user', content: '図を見て' },
+				{
+					role: 'assistant',
+					content: '見ました',
+					content_blocks: [
+						{
+							type: 'tool_calls',
+							calls: [{ id: 'c1', function: { name: 'view_image', arguments: '{}' } }],
+							results: [{ tool_call_id: 'c1', content: '提示しました。', context_images: ['abc'] }]
+						},
+						{ type: 'text', content: '見ました' }
+					]
+				},
+				{ role: 'user', content: '何が写っていた?' }
+			],
+			null
+		);
+		expect(messages.map((m) => m.role)).toEqual([
+			'user',
+			'assistant',
+			'tool',
+			'user',
+			'assistant',
+			'user'
+		]);
+		expect(messages[3]).toEqual({
+			role: 'user',
+			content: [
+				{ type: 'text', text: '(直前の tool 結果の画像)' },
+				{ type: 'image_url', image_url: { url: '/api/v1/files/abc/content' } }
+			]
+		});
 	});
 
 	it('空 content の assistant は落とす・user は空でも残す', () => {
