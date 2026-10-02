@@ -32,9 +32,11 @@
 	</title>
 </svelte:head>
 
-<div class="w-full h-screen max-h-[100dvh] flex text-content bg-surface">
-	<div class="m-auto pb-10 flex flex-col justify-center">
-		<div class="max-w-md px-4">
+<!-- html は全体で overflow-y: hidden(app.html)なので、このページ自身がスクロール容器になる。
+     中央寄せは min-h-full の flex + m-auto で行い、あふれたら auto margin が 0 になって上から流れる -->
+<div class="w-full h-screen max-h-[100dvh] overflow-y-auto text-content bg-surface">
+	<div class="min-h-full flex">
+		<div class="m-auto w-full max-w-xl px-6 py-10">
 			{#if isDisabled}
 				<div class="text-center dark:text-white text-2xl font-medium">
 					{$i18n.t('Account Disabled')}
@@ -45,7 +47,8 @@
 				</div>
 			{:else if pendingMessage}
 				<!-- 配備先 md がタイトル込みで画面を持つ(既定タイトルと二重にしない) -->
-				<div class="text-sm text-content w-full markdown-prose">
+				<!-- 配備先 md の画像(ポータルの QR 等)は原寸だと画面を占めるので控えめに絞る -->
+				<div class="text-sm text-content w-full markdown-prose max-w-none [&_img]:max-w-44">
 					<Markdown id="pending-message" content={pendingMessage} />
 				</div>
 			{:else}
