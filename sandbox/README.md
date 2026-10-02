@@ -16,7 +16,8 @@ GC 運用) は配備層の `prism-hu/llens` が持つ** —
 
 | パス | 中身 |
 |---|---|
-| `sandbox/Dockerfile` | イメージ (nsjail ソースビルド + 2 つの venv + シェルツール + 日本語フォント) |
+| `sandbox/Dockerfile` | イメージ (nsjail ソースビルド + 2 つの venv + シェルツール + Office 変換 + 日本語フォント) |
+| `sandbox/soffice-wrapper.sh` | `/usr/local/bin/soffice` に置く LibreOffice の wrapper (プロファイルを `/tmp` へ。下記「Office 文書」) |
 | `sandbox/app/main.py` | service (FastAPI)。実行ごとに nsjail を起動、workspace / quota / session を管理 |
 | `sandbox/app/kernel.py` | stateful `run_python` の常駐 kernel (永続 namespace, SIGALRM でセル中断) |
 | `sandbox/requirements.txt` | jail 内ユーザーコード用 venv のパッケージ (単一情報源。**未 pin**) |
@@ -309,7 +310,7 @@ jail に出る (上記「参照用データを jail に見せる」)。
 |---|---|
 | `run_python(code, timeout_s?)` | **stateful**。会話ごとの常駐 kernel で永続 namespace 実行 (`/exec_cell`)。exports/ 自動添付 |
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
-| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg)。exports/ 自動添付 |
+| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt)。exports/ 自動添付 |
 | `send_to_workspace(filename?, file_id?)` | チャット添付を `/workspace/imports/` に取り込む |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
 | `list_workspace(path?)` | workspace のファイル一覧 |
@@ -347,6 +348,28 @@ jail に出る (上記「参照用データを jail に見せる」)。
   静的な帳票には weasyprint で足りる。**mermaid や plotly を静止画にする要求が出たら再考する**。
   weasyprint はフォントをサブセット埋め込みするので、出力を後から画像化・印刷しても
   字が落ちない (非埋め込み PDF でよくある欠落を作らない)。
+- **Office 文書 (レガシー 97-2003 形式を含む)**: 院内の添付は今も `.doc` / `.xls` / `.ppt` が多いので、
+  開く道具を一通り焼き込む (Office 系 apt は重いので別層)。image 増分は約 +360MB (非圧縮。
+  圧縮 = pull 量で約 +140MB)、ほぼ LibreOffice。
+
+  | 道具 | 入っているもの | 用途 |
+  |---|---|---|
+  | `soffice --headless --convert-to <fmt>` | apt `libreoffice-{writer,calc,impress}-nogui` (GUI・Java 無し、7.4) | 本命。.doc/.xls/.ppt ⇄ docx/xlsx/pptx、→ pdf / csv / png。PDF の日本語は Noto CJK で埋め込まれる |
+  | `antiword -m UTF-8.txt` | apt `antiword` | .doc → テキスト (表は `\|` 区切り)。soffice を起動しない軽量経路 |
+  | `catdoc -d utf-8` / `xls2csv -d utf-8` / `catppt` | apt `catdoc` | .doc → テキスト / .xls → CSV (全シート連結)。**`catppt` は LibreOffice が書いた .ppt から何も取れなかった** (本物の PowerPoint 産は未確認) — .ppt は soffice 経由が確実 |
+  | `olefile` / `xlrd` / `python-docx` / `openpyxl` / `python-pptx` | venv | OLE2 の低レベル読み出し / .xls 読み / OOXML 読み書き |
+  | `msoffcrypto-tool` | venv (CLI も同名) | パスワード付き Office の復号 (`msoffcrypto-tool -p <pw> in out`) |
+
+  **jail で soffice を動かす工夫 (運用者向け)**: LibreOffice は起動のたびにユーザープロファイルを書き、
+  既定の置き場は `$HOME` (jail では永続 workspace = quota 対象)。rootfs は ro なので、
+  `/usr/local/bin/soffice` (PATH で `/usr/bin` より前) の wrapper (`sandbox/soffice-wrapper.sh`) が
+  `-env:UserInstallation=file:///tmp/lo-profile` を足し、`HOME` も `/tmp/lo-home` に差し替えて
+  (プロファイルとは別に `$HOME/.config` を作るため) 実体 `/usr/lib/libreoffice/program/soffice` を呼ぶ。
+  `/tmp` は実行ごとに消えるので毎回まっさらなプロファイルで起動し、それでも 1 回 1 秒未満。
+  呼び出し側が `-env:UserInstallation=` を渡せばそちらが優先される。stderr に出る
+  `Warning: failed to launch javaldx` は Java を入れていないための無害な警告。
+  出力ファイル名は入力の basename + 新拡張子なので、同名の .doc と .xls を同じ `--outdir` に
+  変換すると上書きされる。回帰は `test_isolation.py` の `test_soffice_*` / `test_legacy_office_*`。
 - 日本語フォント: `fonts-noto-cjk` を同梱。matplotlib は `sandbox/matplotlibrc`
   (JAIL_ENV の `MATPLOTLIBRC` で注入) が sans-serif / monospace / serif 各ファミリの
   先頭を Noto CJK JP 系にするため、rcParams 設定なしで日本語が出る。prompt 指示
@@ -384,6 +407,9 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   のみ / ホストの block・GPU デバイス (sda/loop/nvme/mem/kmsg/nvidia/dm) 不可視 / 無ネットワーク
   (外部接続不可) / `df` は quota (既定 10GB) を返しホスト実容量は見えない / PID namespace 独立
   (jail 内から見える pid は自プロセスのみ)。
+- **同梱ツールが jail の制約下で動くこと**: LibreOffice headless で .doc/.xls を作って PDF に変換でき
+  (日本語フォント埋め込み)、workspace にプロファイル等を残さない / antiword・xls2csv・xlrd・olefile
+  で読める。
 - **参照用データ (`/mnt`)**: volume を入れた配備でのみ確認する — 見えること + 書けないこと
   (EROFS)。何も入れていない配備 (既定) は確認対象が無いので何もしない。
 

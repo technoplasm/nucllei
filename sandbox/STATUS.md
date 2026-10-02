@@ -52,6 +52,11 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       `tests/test_ro_mounts.py` と `test_isolation.py` の `test_ro_mount_root_is_read_only`
       (volume を入れた配備でのみ実効)。**配備側 (llens) の追従は向こう持ち** = compose に
       volume を足す + モデルへの使い分け指示を prompt に書く
+- [x] **レガシー Office (.doc/.xls/.ppt) を開く道具** (2026-10-02)。LibreOffice headless
+      (writer/calc/impress の nogui 最小構成) + antiword + catdoc、venv に olefile /
+      msoffcrypto-tool。soffice のプロファイルは wrapper で /tmp へ (rootfs ro・HOME=workspace
+      対策)。jail 経由の変換を `test_isolation.py` に回帰として追加。**配備側 (llens) の追従は
+      向こう持ち** = モデル向けの使い方 (skill / prompt)
 
 ## 残課題
 

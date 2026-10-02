@@ -1,4 +1,6 @@
 """sandbox jail の隔離テスト (権限昇格 / デバイス・ハードウェア・システムの見え方)。
+加えて、jail の制約 (rootfs ro・HOME=/workspace) に引っかかりやすい同梱ツール
+(LibreOffice headless 等) が jail の中で実際に動くことも見る。
 
 これは稼働中の privileged コンテナに対する統合テストで、service が組み立てる nsjail の設定
 (sandbox/README.md「セキュリティモデル」) を jail の *中から* 実際に突いて確認する。
@@ -202,6 +204,72 @@ def test_pid_namespace_hides_host_processes():
     my_pid, visible = (int(x) for x in line.split())
     assert my_pid <= 3
     assert visible <= 5
+
+
+# ---------------------------------------------------------------------------
+# 同梱ツールが jail の制約 (rootfs ro・HOME=/workspace・無ネットワーク) の下で動く
+# ---------------------------------------------------------------------------
+# LibreOffice は起動のたびにプロファイルを書くので、rootfs ro の jail では置き場を誤ると
+# 死ぬか、HOME (= 永続 workspace) を汚す。/usr/local/bin/soffice の wrapper が /tmp へ
+# 向けている (sandbox/soffice-wrapper.sh)。ここではそれを外から確かめる。
+_OFFICE_FIXTURE = (
+    "set -e; mkdir -p /tmp/o && cd /tmp/o\n"
+    "python - <<'P'\n"
+    "import docx, openpyxl\n"
+    "d = docx.Document()\n"
+    "for i in range(20): d.add_paragraph(f'退院時サマリー 第{i}段落 discharge summary {i}')\n"
+    "d.save('t.docx')\n"
+    "wb = openpyxl.Workbook(); ws = wb.active; ws.title = '検査'\n"
+    "ws.append(['項目', '値']); ws.append(['WBC', 5400]); wb.save('t.xlsx')\n"
+    "P\n"
+    # 97-2003 形式は LibreOffice 自身に作らせる (= 書き出しも jail で通ることの確認を兼ねる)
+    "soffice --headless --convert-to doc t.docx >/dev/null 2>&1\n"
+    "soffice --headless --convert-to xls t.xlsx >/dev/null 2>&1\n"
+)
+
+
+def test_soffice_converts_legacy_office_in_jail():
+    # .doc/.xls を PDF へ。日本語が Noto CJK で埋め込まれて落ちないこと、
+    # そして workspace にプロファイル類 (.config / .local 等の dotfile) を残さないこと。
+    ws_before = out("shell", "ls -A /workspace")
+    r = run(
+        "shell",
+        _OFFICE_FIXTURE
+        + "file -b t.doc t.xls | cut -c1-30\n"
+        # 出力名は入力の basename なので、t.doc と t.xls は outdir を分ける (同じだと上書き)
+        + "soffice --headless --convert-to pdf --outdir d t.doc >/dev/null 2>&1\n"
+        + "soffice --headless --convert-to pdf --outdir x t.xls >/dev/null 2>&1\n"
+        + "pdftotext x/t.pdf - | grep -m1 WBC\n"
+        + "pdftotext d/t.pdf - | head -1\n"
+        + "pdffonts d/t.pdf | grep -c NotoSansCJK\n",
+        timeout_s=120,
+    )
+    assert r["exit_code"] == 0, r["stderr"][-500:]
+    lines = r["stdout"].splitlines()
+    # 1・2 行目: 本当に OLE2 (97-2003 形式) になっている
+    assert lines[0].startswith("Composite Document File V2"), lines
+    assert lines[1].startswith("Composite Document File V2"), lines
+    assert lines[2].startswith("WBC"), lines
+    assert "退院時サマリー" in lines[3], lines
+    assert int(lines[-1]) >= 1  # 日本語フォントが埋め込まれている
+    assert out("shell", "ls -A /workspace") == ws_before  # HOME を汚していない
+
+
+def test_legacy_office_text_extractors_in_jail():
+    # 軽量抽出 (soffice を起動しない経路): antiword (.doc) / xls2csv (.xls) / xlrd / olefile
+    r = run(
+        "shell",
+        _OFFICE_FIXTURE
+        + "antiword -m UTF-8.txt t.doc | grep -m1 退院時\n"
+        + "xls2csv -d utf-8 t.xls | grep WBC\n"
+        + "python -c \"import xlrd,olefile;print(olefile.isOleFile('t.doc'),"
+        + "xlrd.open_workbook('t.xls').sheet_names())\"\n",
+        timeout_s=120,
+    )
+    assert r["exit_code"] == 0, r["stderr"][-500:]
+    assert "退院時サマリー 第0段落" in r["stdout"]
+    assert '"WBC","5400"' in r["stdout"]
+    assert "True ['検査']" in r["stdout"]
 
 
 if __name__ == "__main__":

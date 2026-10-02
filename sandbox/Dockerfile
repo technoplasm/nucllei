@@ -24,6 +24,9 @@ FROM python:3.12-slim-bookworm
 # nsjail ランタイム依存 + jail 内シェルツール + 日本語フォント
 #   + e2fsprogs/mount/util-linux: ユーザー単位の quota 用 loopback ext4 の作成/マウント
 #   + libpango*: weasyprint (HTML → PDF) のテキスト整形バックエンド
+#   + libreoffice-*-nogui: レガシー Office (.doc/.xls/.ppt) を含む相互変換 (soffice --headless)。
+#     GUI 無し・Java 無しの最小構成。日本語は上の fonts-noto-cjk で出る
+#   + antiword / catdoc (catdoc・xls2csv・catppt): .doc/.xls/.ppt の軽量テキスト抽出
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libprotobuf32 libnl-route-3-200 \
@@ -35,6 +38,21 @@ RUN apt-get update \
         e2fsprogs mount util-linux \
  && rm -rf /var/lib/apt/lists/* \
  && fc-cache -f  # フォントキャッシュを焼いておく (jail からは /var 非 bind のため)
+
+# Office 系は別層 (重いので、上の層を変えずに足し引きできるように)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
+        antiword catdoc \
+ && rm -rf /var/lib/apt/lists/*
+
+# soffice / libreoffice の wrapper (jail の PATH では /usr/local/bin が /usr/bin より前)。
+# LibreOffice は起動のたびにユーザープロファイルを書く。既定の置き場は $HOME (jail では
+# 永続 workspace = quota 対象) なので、揮発の /tmp へ向ける。呼び出し側が
+# -env:UserInstallation を自分で渡したときはそれを尊重する
+COPY soffice-wrapper.sh /usr/local/bin/soffice
+RUN chmod 755 /usr/local/bin/soffice \
+ && ln -s soffice /usr/local/bin/libreoffice
 
 COPY --from=nsjail-build /nsjail/nsjail /usr/local/bin/nsjail
 

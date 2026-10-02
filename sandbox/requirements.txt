@@ -55,6 +55,8 @@ xlsxwriter
 xlrd  # レガシー .xls の read エンジン
 python-docx
 python-pptx
+olefile  # OLE2 複合文書 (.doc/.xls/.ppt・Outlook .msg 等) の低レベル読み出し
+msoffcrypto-tool  # パスワード付き Office (97-2003 / OOXML) の復号。CLI は msoffcrypto-tool
 fpdf2
 pypdf
 defusedxml
