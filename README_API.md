@@ -413,9 +413,11 @@ network, no filesystem, no logging — and fails with the same `code` / `reason`
 `resolve_url` would give for that input. It does **not** check existence or the
 serving scope (`EXT_FILE_SCOPES`); whether the URL can be read stays
 `resolve_url`'s job. Intended for a tool that, after a successful
-`resolve_url`, needs the root for in-page links (relative input → `/ext/{name}`;
-absolute with a public base → that base; otherwise `{origin}/ext/{name}`)
-without re-implementing the URL routing.
+`resolve_url`, needs the root for in-page links without re-implementing the URL routing: a
+name with a public base → that base, whether the input was relative or absolute
+(the public URL is what a user can actually open — the `/ext` gate turns an
+upstream 3xx into a 502); otherwise relative input → `/ext/{name}`, absolute →
+`{origin}/ext/{name}`.
 
 **Bridging a URL and a sandbox path.** The same file can have both names (a
 file backend whose root lives under `/mnt`, e.g. `EXT_UPSTREAMS=cage=file:///mnt/cage`:

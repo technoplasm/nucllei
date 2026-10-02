@@ -786,8 +786,10 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
     (ネットワークにもファイルにも触れない純粋な関数。ログも出さない)。
 
     用途: `resolve_url` で取得できた URL について、呼び手(配備層の fetch_url)が
-    ページ内リンクのルートを組む — 相対入力(`route.relative`)なら `/ext/{name}`、
-    絶対で原本ルートがあれば `route.public_base`、無ければ `{route.origin}/ext/{name}`。
+    ページ内リンクのルートを組む — 原本ルートがある name は入力が相対でも絶対でも
+    `route.public_base`(利用者が実際に開けるのは原本の URL。`/ext` ゲートは上流の 3xx を
+    502 に落とす)、無ければ相対入力(`route.relative`)は `/ext/{name}`、絶対は
+    `{route.origin}/ext/{name}`。
     URL の分解(`/ext/{name}/…`・EXT_PUBLIC_BASES・EXT_UPSTREAMS)を呼び手に複製させない。
 
     成功は `(UrlRoute, None)`、ルーティングできない URL は `(None, RefError)` —
