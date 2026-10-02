@@ -55,10 +55,16 @@
 
 - 作業は tmux session **`nuc`** 上で行う(**別 session を新たに立てない**)。windows: **`BE`**(backend サーバー)/
   **`FE`**(vite サーバー)/ `claude` など。ken が手作業するときも同じ。
+  - **`nuc` は「ken が attach している、今 Claude が居る session」の名前**。自分が居る session が
+    別名(既定名の `0` 等)なら、そこが `nuc` になるべき場所 — attach されていない `nuc` が別にあっても
+    そちらでは起動しない。`nuc` の BE/FE window を今居る session へ `tmux move-window -d` で移し、
+    今居る session を `nuc` に rename する(手順は global CLAUDE.md「tmux 規約」。2026-10-02)。
 - 開発サーバーは**必ず同じ `nuc` session の BE/FE window で起動**し、**Claude Code 内部の shell では起動しない**
   (foreground/background とも。ken がログを見られないため): BE は `uv run task dev`(:3000)、
   FE は `pnpm dev`(vite :5173)。いずれも repo root で実行。
-- **作業開始時にまず tmux を確認**: `tmux list-windows -t nuc -F '#I: #W (#{pane_current_command})'`。
+- **作業開始時にまず tmux を確認**: 自分の居場所 `tmux display-message -p '#S:#I'` と
+  attach 状況 `tmux list-sessions -F '#S attached=#{session_attached}'` を見てから、
+  `tmux list-windows -t nuc -F '#I: #W (#{pane_current_command})'`。
   - **既に動いていたらそのまま使う**(再起動しない。他セッション・ken の作業を踏み潰す)。
   - session/window が無ければ作って名前を付け、サーバーが死んでいれば send-keys で起動する:
     - `tmux send-keys -t nuc:BE 'uv run task dev' Enter`
