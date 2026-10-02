@@ -704,6 +704,100 @@ def test_followup_preserves_parallel_tool_calls(monkeypatch):
     assert len(tool_invocations) == 2
 
 
+def test_content_between_parallel_calls_does_not_duplicate_tool_calls_block(
+    monkeypatch,
+):
+    """並列 tool call の区切りに content デルタ(改行)を挟むストリームでも、
+    tool_calls ブロックは 1 個だけ永続化され、継続リクエストに同じ call id の
+    assistant(tool_calls)と [interrupted] の合成 result が混ざらない。
+
+    実測(2026-10-02、qwen3.8-27b): 3 call のストリームで同じ calls のブロックが
+    3 個永続化され(先頭 2 個は results: [])、同ターンの継続と次ターンの履歴に
+    `a+3tc t t t` が 3 回([interrupted] 付き 2 回)再送されていた。実キャプチャの
+    fixture が無い形なので、フレームはインラインで組む(call の形は vLLM の
+    実キャプチャと同形 — 初回デルタに arguments キーが無い)。
+    """
+    from nucllei.utils.content_blocks import INTERRUPTED_TOOL_RESULT
+
+    def frame(delta, finish_reason=None):
+        return "data: " + json.dumps(
+            {"choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]},
+            ensure_ascii=False,
+        )
+
+    cities = ["東京", "大阪", "札幌"]
+    frames = []
+    for index, city in enumerate(cities):
+        frames += [
+            frame({"content": "\n\n"}),
+            frame(
+                {
+                    "tool_calls": [
+                        {
+                            "id": f"call-{index}",
+                            "type": "function",
+                            "index": index,
+                            "function": {"name": "get_weather"},
+                        }
+                    ]
+                }
+            ),
+            frame(
+                {
+                    "tool_calls": [
+                        {
+                            "index": index,
+                            "function": {
+                                "arguments": json.dumps(
+                                    {"city": city}, ensure_ascii=False
+                                )
+                            },
+                        }
+                    ]
+                }
+            ),
+        ]
+    frames.append(frame({}, finish_reason="tool_calls"))
+
+    upserts = []
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_response=_sse_response_from_frames(frames),
+            upserts=upserts,
+        )
+    )
+    assert [inv["city"] for inv in tool_invocations] == cities
+    assert len(completion_calls) == 1
+
+    call_ids = ["call-0", "call-1", "call-2"]
+
+    # 継続リクエスト: assistant(tool_calls)は 1 本、tool 結果は実物が 3 本だけ
+    msgs = completion_calls[0]["messages"]
+    assistants = [m for m in msgs if m.get("tool_calls")]
+    assert len(assistants) == 1
+    assert [tc["id"] for tc in assistants[0]["tool_calls"]] == call_ids
+    tool_msgs = _tool_messages(completion_calls[0])
+    assert [m["tool_call_id"] for m in tool_msgs] == call_ids
+    assert all(m["content"] != INTERRUPTED_TOOL_RESULT for m in tool_msgs)
+
+    # イベントと永続化: tool_calls ブロックは 1 個で、3 call 分の results を持つ
+    final = _final_done_data(events)
+    tool_blocks = [b for b in final["content_blocks"] if b["type"] == "tool_calls"]
+    assert len(tool_blocks) == 1
+    assert [c["id"] for c in tool_blocks[0]["calls"]] == call_ids
+    assert [r["tool_call_id"] for r in tool_blocks[0]["results"]] == call_ids
+
+    # 途中の永続化スナップショットにも重複ブロックは 1 度も現れない
+    persisted = [u for u in upserts if "content_blocks" in u]
+    assert persisted[-1]["content_blocks"] == final["content_blocks"]
+    for snapshot in persisted:
+        blocks = [b for b in snapshot["content_blocks"] if b["type"] == "tool_calls"]
+        assert len(blocks) <= 1
+
+
 def test_followup_reinjects_pushed_images_as_user_message(monkeypatch):
     """tool が __feed_image__(file_id) で push した画像(#89)は、継続リクエストで
     role:tool の直後に image_url(/api/v1/files/{id}/content 参照)を持つ user

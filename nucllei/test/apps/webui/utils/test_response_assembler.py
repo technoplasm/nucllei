@@ -252,6 +252,50 @@ class TestToolCallAccumulation:
         assert a.content_blocks[0]["content"] == "前置き"
         assert a.content_blocks[-1]["content"] == "後段"
 
+    def test_content_between_parallel_calls_keeps_single_block(self):
+        # 並列 call の区切りに content デルタ(改行等)を挟むモデルでは、間に text
+        # ブロックが開いて calls のブロックが末尾でなくなる。call ごとに同じ calls の
+        # ブロックを積み増さない(実測: 3 call で 3 ブロック、先頭 2 つは results 空のまま
+        # 永続化され、次ターンで [interrupted] 付きで再送されていた)。
+        a = make_assembler()
+        for index in range(3):
+            a.handle_delta({"content": "\n\n"})
+            a.handle_delta(tool_call_delta(index=index, id=f"c{index}", name="t"))
+            a.handle_delta(tool_call_delta(index=index, arguments="{}"))
+
+        calls, _ = a.finish_stream()
+        a.ensure_tool_calls_block(calls)
+        results = [{"tool_call_id": f"c{i}", "content": "ok"} for i in range(3)]
+        a.set_tool_results(results)
+
+        blocks = [b for b in a.content_blocks if b["type"] == "tool_calls"]
+        assert len(blocks) == 1
+        assert [c["id"] for c in blocks[0]["content"]] == ["c0", "c1", "c2"]
+        assert blocks[0]["results"] is results
+        # 区切りの空白 text は末尾 strip で落ち、calls の前の 1 個だけが残る
+        assert [b["type"] for b in a.content_blocks] == ["text", "tool_calls", "text"]
+
+    def test_ensure_moves_block_after_trailing_text(self):
+        # calls の後に本文を出して終わるストリーム: 実行直前の ensure がブロックを
+        # 末尾へ移す(重複を積まない)。結果は calls のブロックに綴じられ、本文は
+        # その前に来る = 「content + tool_calls の 1 assistant メッセージ」の形。
+        a = make_assembler()
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        a.handle_delta({"content": "後段"})
+
+        calls, _ = a.finish_stream()
+        a.ensure_tool_calls_block(calls)
+        assert [b["type"] for b in a.content_blocks if b["type"] == "tool_calls"] == [
+            "tool_calls"
+        ]
+        assert a.content_blocks[-1]["content"] is calls
+        assert a.content_blocks[-2] == {"type": "text", "content": "後段"}
+
+        results = [{"tool_call_id": "c1", "content": "ok"}]
+        a.set_tool_results(results)
+        assert a.content_blocks[-2]["results"] is results
+        assert a.content_blocks[-1] == {"type": "text", "content": ""}
+
     def test_set_tool_results_closes_block_and_opens_text(self):
         a = make_assembler()
         a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))

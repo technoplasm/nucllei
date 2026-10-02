@@ -121,7 +121,7 @@ class ContentBlocksAssembler:
             # 部分 arguments 込みの snapshot を毎フレーム emit できるようにする
             # (フロントは寛容パーサで逐次描画)。ブロックの content は
             # _response_tool_calls と同一オブジェクトなので以後の累積は自動反映。
-            self.ensure_tool_calls_block(self._response_tool_calls)
+            self._open_tool_calls_block(self._response_tool_calls)
             changed.add(CHANGED_TOOL_CALLS)
             # tool_calls は部分 arguments の突き合わせが要るためスナップショット一択
             structural = True
@@ -194,18 +194,21 @@ class ContentBlocksAssembler:
     # --- tool ループ側の操作 ---------------------------------------------
 
     def ensure_tool_calls_block(self, calls):
-        """calls を最後の tool_calls ブロックとして保証する(冪等)。
+        """calls のブロックを末尾の tool_calls ブロックとして保証する(冪等)。
 
-        ストリーム中に open ブロック化済み(content が同一オブジェクト)なら
-        再追加しない。render(表示ディスクリプタ)も冪等に付与する。
+        tool ループが実行直前に呼ぶ。通常はストリーム中に open ブロック化済み
+        (content が同一オブジェクト)で、何もしない。同じストリームで calls の後に
+        text / reasoning が積まれていたら(tool call デルタの後に content デルタを
+        出すモデル)、ブロックを末尾へ移す — set_tool_results が末尾ブロックに
+        結果を綴じるためと、モデル向け履歴で「content + tool_calls の 1 assistant
+        メッセージ → tool 結果」の形を保つため。
         """
         self._attach_tool_renders(calls)
-        if not (
-            self.content_blocks
-            and self.content_blocks[-1]["type"] == "tool_calls"
-            and self.content_blocks[-1]["content"] is calls
-        ):
+        index = self._find_tool_calls_block(calls)
+        if index is None:
             self.content_blocks.append({"type": "tool_calls", "content": calls})
+        elif index != len(self.content_blocks) - 1:
+            self.content_blocks.append(self.content_blocks.pop(index))
 
     def set_tool_results(self, results):
         """最後の tool_calls ブロックに実行結果を綴じ、次の text ブロックを開く。"""
@@ -275,6 +278,27 @@ class ContentBlocksAssembler:
         return False
 
     # --- 内部 -------------------------------------------------------------
+
+    def _find_tool_calls_block(self, calls):
+        """calls(同一オブジェクト)を content に持つ tool_calls ブロックの位置。"""
+        for index, block in enumerate(self.content_blocks):
+            if block["type"] == "tool_calls" and block["content"] is calls:
+                return index
+        return None
+
+    def _open_tool_calls_block(self, calls):
+        """ストリーム中の calls を open ブロックとして載せる(1 ストリーム 1 個)。
+
+        「末尾が calls のブロックか」ではなく「calls のブロックが既にあるか」で
+        判定する。tool call デルタの間に content デルタを挟むモデル(並列 call の
+        区切りに改行を出す等)では、間に text ブロックが開いて calls のブロックが
+        末尾でなくなる。末尾だけを見ると call ごとに同じ calls のブロックを積み増し、
+        results の無い重複ブロックが永続化される(次ターンで [interrupted] 付きで
+        再送される)。
+        """
+        self._attach_tool_renders(calls)
+        if self._find_tool_calls_block(calls) is None:
+            self.content_blocks.append({"type": "tool_calls", "content": calls})
 
     def _accumulate_tool_call_deltas(self, delta_tool_calls):
         """index キーで tool call デルタを突き合わせ、name/arguments を累積する。"""
