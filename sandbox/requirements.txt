@@ -57,13 +57,47 @@ python-docx
 python-pptx
 olefile  # OLE2 複合文書 (.doc/.xls/.ppt・Outlook .msg 等) の低レベル読み出し
 msoffcrypto-tool  # パスワード付き Office (97-2003 / OOXML) の復号。CLI は msoffcrypto-tool
+xlwt  # 97-2003 .xls の書き出し (xlrd の対。openpyxl は .xls を書けない)
+extract-msg  # Outlook .msg の本文・添付の取り出し (CLI は extract_msg)
+pdfplumber  # PDF の表抽出 (pdftotext では列が崩れる帳票向け)
 fpdf2
 pypdf
 defusedxml
 
 # 医療・その他ユーティリティ
 pydicom
+hl7  # HL7 v2 メッセージ (SS-MIX2 標準化ストレージの中身) のパース
 jinja2
 pycryptodome
 segno
 sqlglot
+
+# レガシーデータ (病院に残る古い形式。apt 側の「レガシーデータ層」と対)
+dbfread  # dBASE / FoxPro .dbf
+pyreadstat  # SPSS .sav / SAS .sas7bdat / Stata .dta (pandas.read_spss 等のエンジンも兼ねる)
+mojimoji  # 全角 ⇄ 半角 (jaconv より高速。カナ・英数・記号を個別に指定できる)
+jpholiday  # 日本の祝日 (営業日・診療日計算)
+
+# OCR・画像 (apt 側の「OCR・画像・研究データ層」= tesseract / ghostscript / zbar と対)
+ocrmypdf  # スキャン PDF → 検索可能 PDF (tesseract + ghostscript)
+pytesseract  # tesseract の Python 呼び出し (画像 → テキスト / 位置付き)
+img2pdf  # 画像 → PDF (再圧縮しない)
+pdf2image  # PDF → PIL 画像 (poppler の pdftoppm を呼ぶ)
+pyzbar  # QR / バーコード読み取り (libzbar)
+opencv-python-headless  # 画像処理 (傾き補正・二値化・輪郭)。GUI 無し版 (ken 指定)
+graphviz  # dot の Python ラッパ (apt の graphviz を呼ぶ)
+docxtpl  # Word テンプレート (jinja2) への差し込み
+
+# 研究データ・統計
+tableone  # 論文の Table 1 (患者背景表)
+pingouin  # 統計検定の簡便 API (効果量・事後検定込み)
+scikit-posthocs  # 多重比較の事後検定 (Dunn / Nemenyi 等)
+h5py  # HDF5
+nibabel  # NIfTI 等の医用画像ボリューム
+
+# 日本語テキスト・データ整形
+neologdn  # 日本語テキストの正規化 (全半角・長音・空白)
+pykakasi  # 漢字 → かな / ローマ字
+csvkit  # CSV の CLI 一式 (csvlook / csvcut / csvstat / csvsql / in2csv)
+pyyaml
+xmltodict

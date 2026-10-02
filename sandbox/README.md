@@ -16,7 +16,7 @@ GC 運用) は配備層の `prism-hu/llens` が持つ** —
 
 | パス | 中身 |
 |---|---|
-| `sandbox/Dockerfile` | イメージ (nsjail ソースビルド + 2 つの venv + シェルツール + Office 変換 + 日本語フォント) |
+| `sandbox/Dockerfile` | イメージ (nsjail ソースビルド + 2 つの venv + シェルツール + Office 変換 + レガシーデータ + OCR・画像・研究データ + 日本語フォント) |
 | `sandbox/soffice-wrapper.sh` | `/usr/local/bin/soffice` に置く LibreOffice の wrapper (プロファイルを `/tmp` へ。下記「Office 文書」) |
 | `sandbox/app/main.py` | service (FastAPI)。実行ごとに nsjail を起動、workspace / quota / session を管理 |
 | `sandbox/app/kernel.py` | stateful `run_python` の常駐 kernel (永続 namespace, SIGALRM でセル中断) |
@@ -310,7 +310,7 @@ jail に出る (上記「参照用データを jail に見せる」)。
 |---|---|
 | `run_python(code, timeout_s?)` | **stateful**。会話ごとの常駐 kernel で永続 namespace 実行 (`/exec_cell`)。exports/ 自動添付 |
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
-| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt)。exports/ 自動添付 |
+| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具)。exports/ 自動添付 |
 | `send_to_workspace(filename?, file_id?)` | チャット添付を `/workspace/imports/` に取り込む |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
 | `list_workspace(path?)` | workspace のファイル一覧 |
@@ -354,7 +354,7 @@ jail に出る (上記「参照用データを jail に見せる」)。
 
   | 道具 | 入っているもの | 用途 |
   |---|---|---|
-  | `soffice --headless --convert-to <fmt>` | apt `libreoffice-{writer,calc,impress}-nogui` (GUI・Java 無し、7.4) | 本命。.doc/.xls/.ppt ⇄ docx/xlsx/pptx、→ pdf / csv / png。PDF の日本語は Noto CJK で埋め込まれる |
+  | `soffice --headless --convert-to <fmt>` | apt `libreoffice-{writer,calc,impress}-nogui` (GUI・Java 無し、7.4) | 本命。.doc/.xls/.ppt ⇄ docx/xlsx/pptx、→ pdf / csv / png。PDF の日本語は埋め込まれる (明朝・ゴシック指定は IPA、指定の無い和文は Noto CJK。下記「レガシーデータ」のフォント節) |
   | `antiword -m UTF-8.txt` | apt `antiword` | .doc → テキスト (表は `\|` 区切り)。soffice を起動しない軽量経路 |
   | `catdoc -d utf-8` / `xls2csv -d utf-8` / `catppt` | apt `catdoc` | .doc → テキスト / .xls → CSV (全シート連結)。**`catppt` は LibreOffice が書いた .ppt から何も取れなかった** (本物の PowerPoint 産は未確認) — .ppt は soffice 経由が確実 |
   | `olefile` / `xlrd` / `python-docx` / `openpyxl` / `python-pptx` | venv | OLE2 の低レベル読み出し / .xls 読み / OOXML 読み書き |
@@ -370,6 +370,87 @@ jail に出る (上記「参照用データを jail に見せる」)。
   `Warning: failed to launch javaldx` は Java を入れていないための無害な警告。
   出力ファイル名は入力の basename + 新拡張子なので、同名の .doc と .xls を同じ `--outdir` に
   変換すると上書きされる。回帰は `test_isolation.py` の `test_soffice_*` / `test_legacy_office_*`。
+- **レガシーデータ (2026-10-02)**: 院内に残る古い形式を開く軽い道具を一通り。Office 層の後ろに
+  apt の別層 + venv の「レガシーデータ」節。image 増分は非圧縮で約 +100MB (apt 層 +58MB・venv +43MB)、
+  圧縮 (pull 量) で約 +48MB。**重いもの (ghostscript / imagemagick / tesseract) は入れていない** (別判断)。
+
+  | 道具 | 入っているもの | 用途 |
+  |---|---|---|
+  | `xxd` / `hexdump -C` | apt `xxd` / `bsdextrautils` | 正体不明のバイナリの先頭を覗く (マジックナンバー確認) |
+  | `mdb-tables` / `mdb-export` / `mdb-schema` / `mdb-ver` | apt `mdbtools` (1.0) | Access .mdb / .accdb の表一覧・CSV 書き出し・DDL。日付は既定が `MM/DD/YY` なので `mdb-export -T '%Y-%m-%d %H:%M:%S'` を付ける |
+  | `unrtf --html` | apt `unrtf` | RTF → HTML。**`--text` は和文を落とす** — 平文が欲しければ `unrtf --html x.rtf \| pandoc -f html -t plain` か soffice (`--convert-to txt:Text`)。文字コードは fonttbl の `\fcharset128` で解く (`\ansicpg932` だけでは化ける) |
+  | `7z` | apt `p7zip-full` | 7z・zip (パスワード付きを含む) の作成と展開 |
+  | `unar` / `lsar` | apt `unar` | 汎用展開 (rar・lzh・cab・sit 等)。**Windows で作った zip / lzh の Shift_JIS ファイル名を推定して UTF-8 に直す** — `unzip` / `lha` / `7z` は生バイトのまま出して化けるので、日本語名の書庫はこちら (`lsar` で中身一覧、外したら `-e cp932`) |
+  | `lha` | apt `lhasa` | LZH の一覧・展開 (展開専用。作成はできない)。ファイル名は化けるので上の unar が先 |
+  | `cabextract` | apt `cabextract` | Windows .cab の展開 |
+  | `sqlite3` | apt `sqlite3` | SQLite DB を開く / CSV を SQL で集計する |
+  | `xmllint` | apt `libxml2-utils` | XML の整形・XPath 抽出・スキーマ検証 (MML・CDA 等) |
+  | `dos2unix` / `unix2dos` | apt `dos2unix` | CRLF ⇄ LF |
+  | `qpdf` | apt `qpdf` | PDF の復号 (パスワード既知)・ページ抜き出し/結合・壊れた PDF の修復 |
+  | `dbfread` | venv | dBASE / FoxPro .dbf の読み出し (`encoding='cp932'` を明示) |
+  | `xlwt` | venv | 97-2003 .xls の書き出し (openpyxl は .xls を書けない。読みは xlrd) |
+  | `extract_msg` | venv `extract-msg` (CLI は `extract_msg`) | Outlook .msg の本文・添付の取り出し。依存で oletools (`olevba` 等) も入る |
+  | `hl7` | venv | HL7 v2 メッセージ (SS-MIX2 標準化ストレージの中身) のパース |
+  | `pyreadstat` | venv | SPSS .sav / SAS .sas7bdat / Stata .dta の読み書き (変数ラベル付き) |
+  | `pdfplumber` | venv | PDF の表抽出 (`pdftotext` で列が崩れる帳票向け)。依存で pypdfium2 も入る |
+  | `mojimoji` | venv | 全角 ⇄ 半角 (カナ・英数・記号を個別に指定) |
+  | `jpholiday` | venv | 日本の祝日 (診療日・営業日計算) |
+
+  **フォント**: `fonts-ipafont` を足し、fontconfig の alias (`/etc/fonts/conf.d/64-nucllei-fonts.conf`、
+  Dockerfile 内で生成) で「ＭＳ 明朝 / ＭＳ ゴシック / ＭＳ Ｐ明朝 / ＭＳ Ｐゴシック」(全角・半角・
+  英字表記、`MS UI Gothic` も) を IPA 明朝 / ゴシック / P 系へ寄せる。古い Word を soffice で
+  PDF 化したとき字幅が原本に近くなり、改行位置のずれが減る。alias が無いと LibreOffice は
+  DejaVu と IPA を混ぜて P (プロポーショナル) も区別せず、IPA 自体が無かった前の image では
+  明朝指定でも Noto Sans CJK (ゴシック体) に落ちていた。**和文の既定は Noto CJK のまま**: IPA を
+  入れると Debian の `65-nonlatin.conf` が `sans-serif` / `serif` の和文 (lang=ja) を IPA に倒すので、
+  同じ conf (番号 64 = 65 より先) で Noto Sans / Serif / Sans Mono CJK JP を前に戻している
+  (dot・weasyprint・soffice の指定無し和文が IPA に変わらない。欧文は DejaVu のまま)。
+
+  確認済み (jail 経由): Access は mdbtools の公開テストデータ (JET4 の .mdb / ACE12 の .accdb、
+  英語) で表一覧・export、.msg は extract-msg の公開サンプル (英語) で本文取り出し。
+  **未検証**: 日本語を含む実物の .mdb / .msg / .cab、圧縮 (-lh5-) の LZH (テストは無圧縮 -lh0- を手で組む)。
+  回帰は `test_isolation.py` の `test_legacy_data_*` / `test_soffice_maps_ms_fonts_to_ipa_in_jail`。
+- **OCR・画像・研究データ (2026-10-02)**: 軽くてよく使うもの (ken 判断)。レガシー層の後ろに apt の
+  別層 + venv の「OCR・画像」「研究データ・統計」「日本語テキスト・データ整形」節。
+  **OCR はモデルの目 (画像入力 / feed_image) と役割が違う**: モデルが 1 枚を見て判断するのではなく、
+  何十ページのスキャン束を機械的に一括でテキスト化 / 検索可能 PDF 化する用途。
+  image 増分はレガシー層の後から非圧縮で約 +530MB (apt 層 +231MB・venv +330MB)、圧縮 (pull 量) で
+  約 +194MB。venv の大物は opencv (153MB)。janome (辞書同梱で 202MB) と pyarrow (156MB) は
+  サイズ対効果で外した (ken 判断 2026-10-02。表は pandas / numpy で足りる)。
+  ocrmypdf は既定で全コアにページを振る (300dpi で密な 10 ページが wall 5.4 秒・CPU 42 秒)。
+  `rlimit_cpu` はプロセス単位なので落ちないが、SGLang と CPU を食い合わないよう `--jobs 4` を付ける。
+
+  | 道具 | 入っているもの | 用途 |
+  |---|---|---|
+  | `ocrmypdf -l jpn --force-ocr in.pdf out.pdf` | venv `ocrmypdf` (+ apt `tesseract-ocr`・`ghostscript`) | スキャン PDF の束を検索可能 PDF に (後は `pdftotext`)。縦書きは `-l jpn_vert`。テキスト層が既にあるページは `--skip-text` |
+  | `tesseract img - -l jpn` | apt `tesseract-ocr` + `-jpn` / `-jpn-vert` / `-eng` (5.3) | 画像 1 枚 → テキスト。Python からは `pytesseract` (位置付きは `image_to_data`) |
+  | `gs -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook` | apt `ghostscript` | スキャン PDF の圧縮 (`-dNOPAUSE -dBATCH -sOutputFile=out.pdf in.pdf`)。ocrmypdf の前提 |
+  | `img2pdf` / `pdf2image` | venv | 画像 → PDF (再圧縮しない) / PDF → PIL 画像 (poppler) |
+  | `tiffsplit` / `tiffinfo` | apt `libtiff-tools` | マルチページ TIFF (FAX・スキャナ出力) の分割・情報 |
+  | `zbarimg` / `pyzbar` | apt `zbar-tools` / venv | QR・バーコードの読み取り (作るのは既存の `segno`) |
+  | `exiftool` | apt `libimage-exiftool-perl` (+ `libarchive-zip-perl`) | 画像・PDF・Office のメタデータ (作成者・撮影日時・GPS) の確認と除去 |
+  | `dot` / `graphviz` | apt `graphviz` / venv | フロー図・関係図 (`dot -Tpng`/`-Tsvg`/`-Tpdf`)。和文ラベルは既定で Noto CJK |
+  | `opencv-python-headless` (`cv2`) | venv | 画像処理 (傾き補正・二値化・輪郭・切り出し)。GUI 無し版 |
+  | `git` | apt `git` | workspace 内の版管理、`git diff --no-index --word-diff a b` で文書の語単位差分 |
+  | `wdiff` | apt `wdiff` | 2 ファイルの語単位差分 (git 無しで) |
+  | `tree` / `mediainfo` | apt | ディレクトリ構造の一覧 / 音声・動画のメタ (コーデック・長さ) |
+  | `csvlook` / `csvcut` / `csvstat` / `csvsql` / `in2csv` | venv `csvkit` | CSV をシェルで覗く・切る・集計する・SQL で引く |
+  | `docxtpl` | venv | Word テンプレート (jinja2 記法) への差し込みで帳票を作る |
+  | `tableone` | venv | 論文の Table 1 (群別の患者背景・p 値) |
+  | `pingouin` / `scikit-posthocs` | venv | 検定の簡便 API (効果量・検出力込み。**結果の列名は `p_val`**) / 多重比較の事後検定 |
+  | `h5py` / `nibabel` | venv | HDF5 / NIfTI 等の医用画像ボリューム |
+  | `neologdn` / `pykakasi` | venv | 日本語テキストの正規化 / 漢字 → かな・ローマ字 |
+  | `pyyaml` / `xmltodict` | venv | YAML / XML ⇄ dict |
+
+  **jail で動かす工夫**: git は jail のユーザー (nobody) に名前もメールも無く commit が落ちるので、
+  `/etc/gitconfig` (system) に既定の identity (`sandbox <sandbox@localhost>`)・`init.defaultBranch=main`・
+  `core.quotePath=false` (日本語ファイル名を `\343...` にしない) を焼いた。HOME (= 永続 workspace) に
+  `.gitconfig` は作られない (利用者が `--global` で書けばそちらが勝つ)。ocrmypdf / tesseract は
+  `TMPDIR=/tmp` (JAIL_ENV) の揮発 tmpfs だけを使い、workspace を汚さない。**/tmp は 256MB** なので、
+  巨大なスキャン束は分割して流す。シェルのプロセス置換 `<(...)` は jail に `/dev/fd` が無いので
+  使えない (一時ファイルを経由する)。
+  回帰は `test_isolation.py` の `test_ocr_*` / `test_image_and_doc_shell_tools_in_jail` /
+  `test_research_python_libs_in_jail`。
 - 日本語フォント: `fonts-noto-cjk` を同梱。matplotlib は `sandbox/matplotlibrc`
   (JAIL_ENV の `MATPLOTLIBRC` で注入) が sans-serif / monospace / serif 各ファミリの
   先頭を Noto CJK JP 系にするため、rcParams 設定なしで日本語が出る。prompt 指示
@@ -409,7 +490,11 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   (jail 内から見える pid は自プロセスのみ)。
 - **同梱ツールが jail の制約下で動くこと**: LibreOffice headless で .doc/.xls を作って PDF に変換でき
   (日本語フォント埋め込み)、workspace にプロファイル等を残さない / antiword・xls2csv・xlrd・olefile
-  で読める。
+  で読める / ＭＳ 明朝・ゴシック指定の docx が IPA で PDF 化される / レガシーデータ層の道具
+  (xxd・Shift_JIS 名の LZH / zip を unar で展開・unrtf・sqlite3・xmllint・qpdf・7z、venv の
+  dbfread・hl7・pyreadstat・pdfplumber・xlwt 等) が動く / tesseract (jpn) と ocrmypdf で画像だけの
+  PDF が検索可能 PDF になる (workspace を汚さない) / zbarimg・exiftool・gs・dot (和文は Noto)・git
+  (commit と word-diff。HOME に .gitconfig を作らない)・cv2・tableone・pingouin・h5py・nibabel 等が動く。
 - **参照用データ (`/mnt`)**: volume を入れた配備でのみ確認する — 見えること + 書けないこと
   (EROFS)。何も入れていない配備 (既定) は確認対象が無いので何もしない。
 

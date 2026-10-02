@@ -57,6 +57,19 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       msoffcrypto-tool。soffice のプロファイルは wrapper で /tmp へ (rootfs ro・HOME=workspace
       対策)。jail 経由の変換を `test_isolation.py` に回帰として追加。**配備側 (llens) の追従は
       向こう持ち** = モデル向けの使い方 (skill / prompt)
+- [x] **レガシーデータを開く軽い道具** (2026-10-02)。apt の別層に xxd / hexdump / mdbtools /
+      unrtf / p7zip / unar / lhasa / cabextract / sqlite3 / xmllint / dos2unix / qpdf / IPA フォント
+      (+ ＭＳ 明朝・ゴシック → IPA の fontconfig alias)、venv に dbfread / xlwt / extract-msg / hl7 /
+      pyreadstat / pdfplumber / mojimoji / jpholiday。非圧縮 +約 100MB。ghostscript / imagemagick /
+      tesseract は重いので見送り (別判断)。回帰は `test_isolation.py` の `test_legacy_data_*`。
+      **未検証**: 日本語を含む実物の .mdb / .msg / .cab、圧縮 LZH。**配備側 (llens) の追従は
+      向こう持ち** = モデル向けの使い分け (日本語名の書庫は unar、RTF は --html 経由 等)
+- [x] **OCR・画像・研究データの道具** (2026-10-02、ken「軽くてよく使うものは入れておく。opencv も」)。
+      apt の別層に tesseract (jpn / jpn_vert / eng) / ghostscript / libtiff-tools / zbar / exiftool /
+      graphviz / tree / wdiff / mediainfo / git (identity は /etc/gitconfig)、venv に ocrmypdf ほか
+      (README の表)。あわせて IPA 導入で和文の既定が IPA に倒れていたのを Noto に戻した
+      (64-nucllei-fonts.conf)。回帰は `test_ocr_*` / `test_image_and_doc_*` / `test_research_*`。
+      **配備側 (llens) の追従は向こう持ち** = モデル向けの使い分け (OCR は束の一括処理用 等)
 
 ## 残課題
 
