@@ -35,8 +35,23 @@ def prompt_variables_template(template: str, variables: dict[str, str]) -> str:
     return template
 
 
+def resolve_base_model_id(model: Optional[dict]) -> Optional[str]:
+    """model dict(app.state.MODELS の形)から {{BASE_MODEL_ID}} の値を引く。
+
+    実際に推論する base model の id(preset なら info.base_model_id、base を持たない
+    素のモデルならそのモデル自身の id)。取れなければ None(prompt_template が
+    "Unknown" に落とす)。
+    """
+    model = model or {}
+    info = model.get("info") or {}
+    return info.get("base_model_id") or model.get("id")
+
+
 def prompt_template(
-    template: str, user_name: Optional[str] = None, user_location: Optional[str] = None
+    template: str,
+    user_name: Optional[str] = None,
+    user_location: Optional[str] = None,
+    base_model_id: Optional[str] = None,
 ) -> str:
     # Get the current date
     current_date = datetime.now()
@@ -66,6 +81,10 @@ def prompt_template(
     else:
         # Replace {{USER_LOCATION}} in the template with "Unknown"
         template = template.replace("{{USER_LOCATION}}", "Unknown")
+
+    # 実際に推論する base model の id(値の引き方は resolve_base_model_id)。
+    # 取れなければ "Unknown"
+    template = template.replace("{{BASE_MODEL_ID}}", base_model_id or "Unknown")
 
     return template
 

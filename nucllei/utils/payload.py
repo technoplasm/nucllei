@@ -9,8 +9,14 @@ import json
 
 # inplace function: form_data is modified
 def apply_model_system_prompt_to_body(
-    params: dict, form_data: dict, metadata: Optional[dict] = None, user=None
+    params: dict,
+    form_data: dict,
+    metadata: Optional[dict] = None,
+    user=None,
+    model_info=None,
 ) -> dict:
+    """model_info は params の持ち主(models テーブルの行)。{{BASE_MODEL_ID}} の
+    出どころ(値の定義は task.resolve_base_model_id と同じ)。"""
     system = params.get("system", None)
     if not system:
         return form_data
@@ -29,6 +35,9 @@ def apply_model_system_prompt_to_body(
         }
     else:
         template_params = {}
+
+    if model_info:
+        template_params["base_model_id"] = model_info.base_model_id or model_info.id
 
     system = prompt_template(system, **template_params)
 

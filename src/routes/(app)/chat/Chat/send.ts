@@ -311,7 +311,12 @@ export class ChatSend {
 		const messages = buildWireMessages(
 			createMessagesList(_history, responseMessageId),
 			session.params?.system
-				? promptTemplate(session.params?.system ?? '', get(user)?.name, undefined)
+				? promptTemplate(
+						session.params?.system ?? '',
+						get(user)?.name,
+						undefined,
+						model.info?.base_model_id || model.id
+					)
 				: null
 		);
 

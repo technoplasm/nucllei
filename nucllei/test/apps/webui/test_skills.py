@@ -442,6 +442,56 @@ class TestSkills(AbstractPostgresTest):
         assert result["messages"][0]["content"] == "/unattached hi"
         assert activations == []
 
+    def test_base_model_id_expands_in_skill_content(self):
+        """skill 本文の {{BASE_MODEL_ID}} は発火ターンのモデルの base で展開される。
+
+        `/command`(合成 exchange)と load_skill(擬似 tool)の両入口。
+        """
+        import asyncio
+        import json
+
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import apply_skill_command, build_load_skill_tool
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="whoami",
+                name="t",
+                description="基盤モデルを答える",
+                content="on {{BASE_MODEL_ID}} for {{USER_NAME}}",
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        model = {
+            "id": "llens",
+            "name": "LLENS",
+            "info": {
+                "base_model_id": "qwen3.8-flash-next",
+                "meta": {"skillIds": [skill.id]},
+            },
+        }
+        expected = "on qwen3.8-flash-next for Taro"
+
+        # `/command`
+        form_data = {"messages": [{"role": "user", "content": "/whoami"}]}
+        result, activations = apply_skill_command(form_data, user, model)
+        assert json.loads(result["messages"][2]["content"])["result"] == expected
+        assert activations[0]["content"] == expected
+
+        # load_skill
+        tool = build_load_skill_tool(model, user)
+        result = json.loads(asyncio.run(tool["callable"](skill_id="whoami")))
+        assert result["result"] == expected
+
+        # モデル情報が取れない(id の無い dict)ときは Unknown に落ちる
+        bare = _model_with_skills(skill.id)
+        _, activations = apply_skill_command(
+            {"messages": [{"role": "user", "content": "/whoami"}]}, user, bare
+        )
+        assert activations[0]["content"] == "on Unknown for Taro"
+
     def test_build_load_skill_tool(self):
         """load_skill 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有りのみ manifest に載る。"""
         import asyncio

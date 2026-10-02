@@ -235,7 +235,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert "mock-model" not in model_ids
 
     def _create_preset(
-        self, model_id="my-preset", access_control=None, filter_ids=None
+        self, model_id="my-preset", access_control=None, filter_ids=None, params=None
     ):
         meta = {
             "profile_image_url": "/static/favicon.png",
@@ -251,12 +251,41 @@ class TestOpenAICompatChat(AbstractPostgresTest):
             "base_model_id": "mock-model",
             "name": "My Preset",
             "meta": meta,
-            "params": {},
+            "params": params or {},
             "access_control": access_control,
         }
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post("/api/v1/models/create", json=payload)
         assert response.status_code == 200, response.text
+
+    def test_preset_system_prompt_expands_base_model_id(self):
+        """preset のシステムプロンプトの {{BASE_MODEL_ID}} が展開されて届く。
+
+        値は実際に推論する base の id。利用者の本文に書かれた変数は展開しない。
+        """
+        self._create_preset(
+            model_id="named-preset",
+            params={"system": "基盤は {{BASE_MODEL_ID}}"},
+        )
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/api/chat/completions",
+                json={
+                    "model": "named-preset",
+                    "messages": [{"role": "user", "content": "{{BASE_MODEL_ID}} とは"}],
+                    "stream": False,
+                },
+            )
+        assert response.status_code == 200, response.text
+
+        sent = self.mock_server.received[0]
+        assert sent["model"] == "mock-model"
+        assert sent["messages"][0] == {"role": "system", "content": "基盤は mock-model"}
+        assert sent["messages"][-1] == {
+            "role": "user",
+            "content": "{{BASE_MODEL_ID}} とは",
+        }
 
     def test_models_endpoint_returns_preset_but_not_base(self):
         """preset(Models 行あり)は返るが、そのベースの生モデルは隠れたまま。"""

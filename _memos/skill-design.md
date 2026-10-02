@@ -14,7 +14,11 @@
    (フロントのテンプレート全文挿入は廃止、picker は補完のみ)
 3. Skill に Tool を紐づけ、**遅延評価**(発火時に初めて tool 群がロードされ、モデルに公開される)
 4. 変数: ブラウザ専用変数({{CLIPBOARD}} 等)廃止。依存宣言リストも設けない。
-   サーバーが自力で解決できる変数({{USER_NAME}} / {{CURRENT_DATE}} 等)を注入時に無条件展開するだけ
+   サーバーが自力で解決できる変数({{USER_NAME}} / {{CURRENT_DATE}} 等)を注入時に無条件展開するだけ。
+   {{BASE_MODEL_ID}}(2026-10-03 追加)= 発火ターンのモデルが実際に推論する base の id
+   (preset の base_model_id)。subagent の子ターンでは子 preset の値。モデル情報が無ければ
+   "Unknown"。一覧と定義は `utils/task.py`(prompt_template / resolve_base_model_id)が
+   単一情報源で、preset のシステムプロンプトと共通
 5. 引数機構は初期実装なし(将来 optional で {{PARAM}} = frontmatter 定義の呼び出し時パラメータ)
 6. グローバル有効化トグルなし。制御面は**モデル(preset)設定に一元化**(#42 改訂):
    - モデル capability「スキル」(`meta.features.skills`、既定 ON)。OFF で manifest も

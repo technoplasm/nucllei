@@ -14,7 +14,7 @@ from nucllei.models.files import Files
 from nucllei.models.skills import Skills, normalize_command
 from nucllei.utils.access_control import has_access, has_read_access_to_file
 from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
-from nucllei.utils.task import prompt_template
+from nucllei.utils.task import prompt_template, resolve_base_model_id
 
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
@@ -25,11 +25,12 @@ def is_skill_visible(skill, user) -> bool:
     return skill.user_id == user.id or has_access(user.id, "read", skill.access_control)
 
 
-def activate_skill(skill, user) -> str:
+def activate_skill(skill, user, model=None) -> str:
     """skill 発火の単一パス(issue #35): content を展開して返す。
 
     `/command` 起動(apply_skill_command)と load_skill 起動の両方がここを通る。
-    変数はサーバー既知のもののみ({{USER_NAME}} / {{CURRENT_DATE}} 等。ブラウザ専用変数は無し)、
+    変数はサーバー既知のもののみ({{USER_NAME}} / {{CURRENT_DATE}} / {{BASE_MODEL_ID}} 等。
+    ブラウザ専用変数は無し。BASE_MODEL_ID は skill を発火させたターンのモデル = model の base)、
     毎リクエスト再展開(発火時点への固定はしない — _memos/skill-design.md「発火の有効範囲」)。
 
     tool_ids の遅延取り込み(#35 step2b)は呼び出し側が担う:
@@ -37,7 +38,11 @@ def activate_skill(skill, user) -> str:
     build_load_skill_tool の load_tools フック(どちらも get_tools を
     enforce_access_control=False で呼ぶ — skill の read 可視性が認可の単位)。
     """
-    return prompt_template(skill.content, user_name=user.name)
+    return prompt_template(
+        skill.content,
+        user_name=user.name,
+        base_model_id=resolve_base_model_id(model),
+    )
 
 
 def is_skills_feature_enabled(model) -> bool:
@@ -129,7 +134,7 @@ def apply_skill_command(form_data, user, model):
 
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
         exchange, activation = synthesize_load_skill_exchange(
-            skill, user, f"skill:{skill.id}:{idx}", idx == last_user_idx
+            skill, user, model, f"skill:{skill.id}:{idx}", idx == last_user_idx
         )
         new_messages.extend(exchange)
         activations.append(activation)
@@ -138,13 +143,13 @@ def apply_skill_command(form_data, user, model):
     return form_data, activations
 
 
-def synthesize_load_skill_exchange(skill, user, call_id, current):
+def synthesize_load_skill_exchange(skill, user, model, call_id, current):
     """「load_skill を呼んだことにする」合成 exchange と発火情報を作る。
 
     `/command`(入口 1)と添付による自動ロード(入口 3)の共通部。戻り値は
     ([assistant tool_call, tool result], activation)。
     """
-    expanded = activate_skill(skill, user)
+    expanded = activate_skill(skill, user, model)
     arguments = json.dumps({"skill_id": skill.id}, ensure_ascii=False)
     # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
     # 後段(process_chat_payload の skill tools ロード)で書き足される。
@@ -379,7 +384,7 @@ def apply_skill_auto_load(form_data, user, model, metadata=None):
             continue
 
         exchange, activation = synthesize_load_skill_exchange(
-            skill, user, f"skill:{skill.id}:auto", current
+            skill, user, model, f"skill:{skill.id}:auto", current
         )
         pending.setdefault(anchor, []).extend(exchange)
         activations.append(activation)
@@ -543,7 +548,10 @@ def build_load_skill_tool(model, user, load_tools=None):
         # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
         # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
         return json.dumps(
-            {"result": activate_skill(skill, user), "tools": loaded_tool_names},
+            {
+                "result": activate_skill(skill, user, model),
+                "tools": loaded_tool_names,
+            },
             ensure_ascii=False,
         )
 

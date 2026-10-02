@@ -704,7 +704,8 @@ export const getPromptVariables = (user_name?: string, user_location?: string) =
 export const promptTemplate = (
 	template: string,
 	user_name?: string,
-	user_location?: string
+	user_location?: string,
+	base_model_id?: string
 ): string => {
 	// Get the current date
 	const currentDate = new Date();
@@ -764,6 +765,10 @@ export const promptTemplate = (
 		// Replace {{USER_LOCATION}} in the template with 'Unknown' if no location is provided
 		template = template.replace('{{USER_LOCATION}}', 'LOCATION_UNKNOWN');
 	}
+
+	// 実際に推論する base model の id(BE nucllei/utils/task.py の prompt_template /
+	// resolve_base_model_id と同じ定義)
+	template = template.replace('{{BASE_MODEL_ID}}', base_model_id || 'Unknown');
 
 	return template;
 };
