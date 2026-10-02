@@ -228,6 +228,13 @@ describe('chat usage baseline', () => {
 		expect(getChatUsageBaseline(C1)).toBeNull();
 	});
 
+	it("新規チャット('' スコープ)には baseline を置けない — 開始画面のゲージは常に空", () => {
+		// 開始画面に前チャットの値が出るのは store ではなく $chatId の持ち越し側の不具合
+		// (Chat.svelte onMount が '' へ戻す)。'' スコープ自体は書き込めないことを固定する。
+		setChatUsageBaseline('', { prompt_tokens: 1200, completion_tokens: 30, total_tokens: 1230 });
+		expect(getChatUsageBaseline('')).toBeNull();
+	});
+
 	it('resetChatUsage で当該 chat の baseline / live エントリが全部消える', () => {
 		setChatUsageBaseline(C1, { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
 		setLiveUsage(C1, 'm1', { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });

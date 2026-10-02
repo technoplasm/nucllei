@@ -41,7 +41,6 @@
 		showNextMessage,
 		editMessage,
 		actionMessage,
-		deleteMessage,
 		continueResponse,
 		regenerateResponse,
 		addMessages,
@@ -54,10 +53,9 @@
 		gotoMessage?: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		editMessage: (id: string, content: string, submit?: boolean) => void;
+		editMessage: (id: string, content: string) => void;
 		/** 未使用(親の呼び出し互換のため受け取りだけ維持)。 */
 		actionMessage: (actionId: string, message: ChatMessage) => void;
-		deleteMessage: (id: string) => void;
 		/** 未使用(旧 on:select 死に購読の撤去で不要化。呼び出し互換のため維持)。 */
 		continueResponse: () => void;
 		regenerateResponse: (message: ChatMessage) => void;
@@ -169,10 +167,6 @@
 							<MessageEditor
 								messageId={message.id}
 								content={message.content}
-								onSave={(content) => {
-									editMessage(message.id, content, false);
-									edit = false;
-								}}
 								onSaveAsCopy={(content) => {
 									editMessage(message.id, content);
 									edit = false;
@@ -259,7 +253,6 @@
 						{continueResponse}
 						{regenerateResponse}
 						{actionMessage}
-						{deleteMessage}
 					/>
 				{/if}
 			</div>

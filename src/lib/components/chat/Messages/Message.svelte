@@ -8,7 +8,6 @@
 	import { isSystemNoticeMessage } from '$lib/utils/system-notice';
 
 	let {
-		idx = 0,
 		history = $bindable(),
 		messageId,
 		user,
@@ -16,22 +15,19 @@
 		showPreviousMessage,
 		showNextMessage,
 		editMessage,
-		deleteMessage,
 		actionMessage,
 		regenerateResponse,
 		continueResponse,
 		addMessages,
 		readOnly = false
 	}: {
-		idx?: number;
 		history: ChatHistory;
 		messageId: string;
 		user: { name: string; profile_image_url?: string } | undefined;
 		gotoMessage: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		editMessage: (id: string, content: string, submit?: boolean) => void;
-		deleteMessage: (id: string) => void;
+		editMessage: (id: string, content: string) => void;
 		actionMessage: (
 			actionId: string,
 			message: ChatMessage,
@@ -69,7 +65,6 @@
 				{user}
 				{history}
 				{messageId}
-				isFirstMessage={idx === 0}
 				siblings={message.parentId !== null
 					? (parentMessage?.childrenIds ?? [])
 					: Object.values(history.messages)
@@ -79,7 +74,6 @@
 				{showPreviousMessage}
 				{showNextMessage}
 				{editMessage}
-				{deleteMessage}
 				{readOnly}
 			/>
 		{:else}
@@ -96,7 +90,6 @@
 				{showNextMessage}
 				{editMessage}
 				{actionMessage}
-				{deleteMessage}
 				{continueResponse}
 				{regenerateResponse}
 				{addMessages}

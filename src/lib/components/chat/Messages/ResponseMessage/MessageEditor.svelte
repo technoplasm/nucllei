@@ -1,6 +1,7 @@
 <script lang="ts">
 	// ResponseMessage の本文編集フォーム。編集バッファはここに閉じ、
-	// 確定・複製保存・キャンセルは callback prop で親に返す。
+	// 複製保存・キャンセルは callback prop で親に返す。その場の書き換え(旧「保存」)は置かない —
+	// 履歴は append-only(#31)でサーバが必ず拒否する。編集結果は兄弟ブランチとして残す(#119)。
 	import { onMount, tick } from 'svelte';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
@@ -11,13 +12,11 @@
 	let {
 		messageId,
 		content,
-		onSave,
 		onSaveAsCopy,
 		onCancel
 	}: {
 		messageId: string;
 		content: string;
-		onSave: (content: string) => void;
 		onSaveAsCopy: (content: string) => void;
 		onCancel: () => void;
 	} = $props();
@@ -63,19 +62,7 @@
 		}}
 	></textarea>
 
-	<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
-		<div>
-			<button
-				id="save-new-message-button"
-				class=" px-4 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-content rounded-3xl"
-				onclick={() => {
-					onSaveAsCopy(editedContent);
-				}}
-			>
-				{$i18n.t('Save As Copy')}
-			</button>
-		</div>
-
+	<div class=" mt-2 mb-1 flex justify-end text-sm font-medium">
 		<div class="flex space-x-1.5">
 			<button
 				id="close-edit-message-button"
@@ -91,10 +78,10 @@
 				id="confirm-edit-message-button"
 				class=" px-4 py-2 bg-gray-900 text-white hover:bg-gray-850 dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-3xl"
 				onclick={() => {
-					onSave(editedContent);
+					onSaveAsCopy(editedContent);
 				}}
 			>
-				{$i18n.t('Save')}
+				{$i18n.t('Save As Copy')}
 			</button>
 		</div>
 	</div>

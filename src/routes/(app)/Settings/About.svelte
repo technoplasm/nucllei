@@ -1,26 +1,33 @@
 <script lang="ts">
 	import { APP_VERSION } from '$lib/constants';
 	import { WEBUI_NAME, config } from '$lib/stores';
-	import { onMount } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 
 	import OPEN_WEBUI_LICENSE from '../../../../LICENSE.open-webui?raw';
+
+	const i18n = getContext('i18n');
 
 	type LicensedPackage = { name: string; version: string; license: string };
 
 	// 依存クレジット(static/licenses.json — `uv run task licenses` で再生成)
 	let licenses = $state<{ frontend: LicensedPackage[]; backend: LicensedPackage[] } | null>(null);
+	// 取得の試行が終わったか(#135)。終わるまでは「読み込めなかった」案内を出さない
+	let licensesLoaded = $state(false);
 
 	// llens(2026-07-17 決定): UI で明示するのは「配布物に実体が同梱されるもの」だけ —
 	// フォント(OFL-1.1、表記義務あり)のみ。MIT/BSD/Apache 等はソース同梱の各 LICENSE で
 	// 充足するため全列挙はしない。licenses.json からの自動抽出なのでフォント入れ替えにも追従する。
+	// 判定は前方一致でなく語としての OFL(#135): `SIL OFL 1.1` / `(OFL-1.1 AND MIT)` のような
+	// 表記揺れで静かに 0 件になるのを避ける。
 	const fontPackages = $derived(
-		(licenses?.frontend ?? []).filter((pkg) => (pkg.license ?? '').startsWith('OFL'))
+		(licenses?.frontend ?? []).filter((pkg) => /(^|[^A-Za-z])OFL/i.test(pkg.license ?? ''))
 	);
 
 	onMount(async () => {
 		licenses = await fetch('/licenses.json')
 			.then((res) => (res.ok ? res.json() : null))
 			.catch(() => null);
+		licensesLoaded = true;
 	});
 
 	// fork base の BSD-3-Clause 全文。文字列リテラルで埋め込むと本文をカラム 0 に
@@ -81,22 +88,30 @@
 			</div>
 		</div>
 
-		<!-- 下段 2: サードパーティ(配布物に実体が同梱されるもののみ = フォント) -->
-		{#if fontPackages.length > 0}
-			<hr class=" border-line" />
+		<!-- 下段 2: サードパーティ(配布物に実体が同梱されるもののみ = フォント)。
+		     段は常に出す(#135): フォントは表記義務(OFL-1.1)があり実体も同梱されるので、
+		     licenses.json が無い / OFL を 1 件も拾えないときは「欠けている」ことを見せる
+		     (以前は段ごと黙って消え、本番で落ちていても気づけなかった)。
+		     dev サーバでは licenses.json を生成しない限り常に案内側になる(uv run task licenses) -->
+		<hr class=" border-line" />
 
-			<div>
-				<div class="text-sm font-medium">Third-Party Licenses</div>
+		<div>
+			<div class="text-sm font-medium">Third-Party Licenses</div>
 
-				<div class="mt-2">
-					<div class="text-xs font-medium text-content-muted">Fonts</div>
+			<div class="mt-2">
+				<div class="text-xs font-medium text-content-muted">Fonts</div>
 
+				{#if fontPackages.length > 0}
 					<div class="mt-1 text-xs text-content-subtle leading-relaxed break-words">
 						{fontPackages.map((pkg) => `${pkg.name} ${pkg.version}`).join(', ')} — SIL Open Font License
 						1.1
 					</div>
-				</div>
+				{:else if licensesLoaded}
+					<div class="mt-1 text-xs text-red-600 dark:text-red-400 leading-relaxed">
+						{$i18n.t('Font license notices could not be loaded.')}
+					</div>
+				{/if}
 			</div>
-		{/if}
+		</div>
 	</div>
 </div>

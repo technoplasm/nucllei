@@ -73,9 +73,16 @@
 	const enabledModels = $derived(($models ?? []).filter((m) => m?.id));
 
 	// モデル行クリック: そのモデルを選択した状態で新規チャットを開く(?models= を initNewChat が解釈)。
-	const modelChatHandler = async (modelId: string) => {
+	const modelChatHandler = (modelId: string) =>
+		newChatHandler(`/?models=${encodeURIComponent(modelId)}`);
+
+	// 新規チャットの開始画面へ(ロゴ / 「新しいチャット」/ モデル行で共通)。goto だけでは足りない:
+	// 開始画面から最初のメッセージを送ると URL は replaceState で /c/<id> になるが、SvelteKit 上の
+	// ルートは / のまま — そこへの goto('/') は同一ルートへの遷移で Chat が再マウントされず、
+	// チャットが表示され続ける。Navbar の new-chat-button(= Chat の initNewChat)まで押す
+	const newChatHandler = async (url = '/') => {
 		selectedChatId = null;
-		await goto(`/?models=${encodeURIComponent(modelId)}`);
+		await goto(url);
 		const newChatButton = document.getElementById('new-chat-button');
 		setTimeout(() => {
 			newChatButton?.click();
@@ -338,11 +345,7 @@
 							class="px-1 py-2 flex items-center gap-1.5 min-w-0 flex-1 rounded-lg no-drag-region"
 							href="/"
 							draggable="false"
-							onclick={() => {
-								if ($mobile) {
-									showSidebar.set(false);
-								}
-							}}
+							onclick={() => newChatHandler()}
 						>
 							<img
 								crossorigin="anonymous"
@@ -372,17 +375,7 @@
 							class=" px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover no-drag-region"
 							href="/"
 							draggable="false"
-							onclick={async () => {
-								selectedChatId = null;
-								await goto('/');
-								const newChatButton = document.getElementById('new-chat-button');
-								setTimeout(() => {
-									newChatButton?.click();
-									if ($mobile) {
-										showSidebar.set(false);
-									}
-								}, 0);
-							}}
+							onclick={() => newChatHandler()}
 						>
 							<span class="i-lucide-square-pen size-[1.1rem] block self-center"></span>
 							<div class="flex self-center translate-y-[0.5px]">
@@ -462,20 +455,22 @@
 											</div>
 										</button>
 
-										<!-- 右端: 編集(pencil)。hover で出現。分の幅は常に確保するので文字と重ならない -->
-										<a
-											class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected"
-											href="/workspace/models/edit?id={model.id}"
-											draggable="false"
-											aria-label={$i18n.t('Edit')}
-											onclick={() => {
-												if ($mobile) {
-													showSidebar.set(false);
-												}
-											}}
-										>
-											<span class="i-lucide-pencil size-4 block"></span>
-										</a>
+										<!-- 右端: 編集(pencil)。admin のみ(#133 — 遷移先の /workspace/models は非 admin を弾く)。hover で出現。分の幅は常に確保するので文字と重ならない -->
+										{#if $user?.role === 'admin'}
+											<a
+												class="invisible group-hover:visible shrink-0 p-1 mr-1.5 rounded-lg text-content-muted hover:bg-sidebar-selected"
+												href="/workspace/models/edit?id={model.id}"
+												draggable="false"
+												aria-label={$i18n.t('Edit')}
+												onclick={() => {
+													if ($mobile) {
+														showSidebar.set(false);
+													}
+												}}
+											>
+												<span class="i-lucide-pencil size-4 block"></span>
+											</a>
+										{/if}
 									</div>
 								{/each}
 							</div>

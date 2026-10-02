@@ -374,6 +374,15 @@
 	onMount(async () => {
 		window.addEventListener('message', onMessageHandler);
 
+		// 新規チャット画面(chatIdProp なし)へ前のチャットの $chatId を持ち越さない。
+		// /c/<id> からロゴ(href="/")やブラウザの「戻る」で / に来ると、この Chat は
+		// 新しくマウントされるのに $chatId は前のチャットのまま — 下の購読が張られず
+		// initNewChat も走らないので、開始画面なのに前チャットのコンテキスト量ゲージ
+		// (UsageChip)が出ていた。'' にして下の購読の初期発火で initNewChat へ入る。
+		if (!chatIdProp && $chatId) {
+			await chatId.set('');
+		}
+
 		if (!$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
 				if (!value) {
@@ -519,10 +528,6 @@
 
 		session.chatFiles = [];
 		session.params = {};
-
-		// llens(#102): 新規チャット('' スコープ)に usage(baseline / live)を残さない。
-		// store は chatId スコープ(#107 W-A)なので他チャットの state はそもそも混ざらない
-		resetChatUsage($chatId);
 
 		// llens(#107 P3): 新規チャットは通常モード。サイドバー tree も畳む
 		isAgentSession = false;
@@ -883,7 +888,6 @@
 										selectedModels={session.selectedModels}
 										atSelectedModel={session.atSelectedModel}
 										sendPrompt={send.sendPrompt}
-										showMessage={send.showMessage}
 										continueResponse={send.continueResponse}
 										regenerateResponse={send.regenerateResponse}
 										chatActionHandler={events.chatActionHandler}

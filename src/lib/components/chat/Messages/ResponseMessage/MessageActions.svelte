@@ -12,7 +12,6 @@
 	import type { ChatMessage } from '$lib/types/chat';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { MessageSpeech } from './tts.svelte';
 	import {
 		contextUsageFromUsage,
@@ -38,8 +37,7 @@
 		showNextMessage,
 		continueResponse,
 		regenerateResponse,
-		actionMessage,
-		deleteMessage
+		actionMessage
 	}: {
 		message: ChatMessage;
 		// model.actions は backend(nucllei/utils/models.py)が action function から同梱する
@@ -54,12 +52,10 @@
 		continueResponse: () => void;
 		regenerateResponse: (message: ChatMessage) => void;
 		actionMessage: (actionId: string, message: ChatMessage) => void;
-		deleteMessage: (id: string) => void;
 	} = $props();
 
 	let buttonsContainerElement: HTMLDivElement | null = $state(null);
 	let messageIndexEdit = $state(false);
-	let showDeleteConfirm = $state(false);
 
 	const speech = new MessageSpeech((key) => $i18n.t(key));
 
@@ -103,14 +99,6 @@
 		});
 	});
 </script>
-
-<DeleteConfirmDialog
-	bind:show={showDeleteConfirm}
-	title={$i18n.t('Delete message?')}
-	onConfirm={() => {
-		deleteMessage(message.id);
-	}}
-/>
 
 <div
 	bind:this={buttonsContainerElement}
@@ -291,24 +279,6 @@
 						<span class="i-lucide-refresh-ccw size-4 block"></span>
 					</button>
 				</Tooltip>
-
-				{#if siblings.length > 1}
-					<Tooltip content={$i18n.t('Delete')} placement="bottom">
-						<button
-							type="button"
-							id="delete-response-button"
-							class="{isLastMessage
-								? 'visible'
-								: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black regenerate-response-button"
-							aria-label={$i18n.t('Delete')}
-							onclick={() => {
-								showDeleteConfirm = true;
-							}}
-						>
-							<span class="i-lucide-trash-2 size-4 block"></span>
-						</button>
-					</Tooltip>
-				{/if}
 
 				{#if isLastMessage}
 					{#each model?.actions ?? [] as action (action.id)}

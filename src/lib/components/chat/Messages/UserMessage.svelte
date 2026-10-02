@@ -14,7 +14,6 @@
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import Markdown from './Markdown.svelte';
 	import Image from '$lib/components/common/Image.svelte';
-	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -30,8 +29,6 @@
 		showPreviousMessage,
 		showNextMessage,
 		editMessage,
-		deleteMessage,
-		isFirstMessage,
 		readOnly
 	}: {
 		user: { name: string; profile_image_url?: string } | undefined;
@@ -41,13 +38,9 @@
 		gotoMessage: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		editMessage: (id: string, content: string, submit?: boolean) => void;
-		deleteMessage: (id: string) => void;
-		isFirstMessage: boolean;
+		editMessage: (id: string, content: string) => void;
 		readOnly: boolean;
 	} = $props();
-
-	let showDeleteConfirm = $state(false);
 
 	let messageIndexEdit = $state(false);
 
@@ -90,8 +83,8 @@
 		}
 	};
 
-	const editMessageConfirmHandler = async (submit = true) => {
-		editMessage(message.id, editedContent, submit);
+	const editMessageConfirmHandler = async () => {
+		editMessage(message.id, editedContent);
 
 		edit = false;
 		editedContent = '';
@@ -101,19 +94,7 @@
 		edit = false;
 		editedContent = '';
 	};
-
-	const deleteMessageHandler = async () => {
-		deleteMessage(message.id);
-	};
 </script>
-
-<DeleteConfirmDialog
-	bind:show={showDeleteConfirm}
-	title={$i18n.t('Delete message?')}
-	onConfirm={() => {
-		deleteMessageHandler();
-	}}
-/>
 
 <div class=" flex w-full user-message" dir={chatDirection} id="message-{message.id}">
 	{#if !($settings?.chatBubble ?? true)}
@@ -204,19 +185,9 @@
 							></textarea>
 						</div>
 
-						<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
-							<div>
-								<button
-									id="save-edit-message-button"
-									class=" px-4 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-content rounded-3xl"
-									onclick={() => {
-										editMessageConfirmHandler(false);
-									}}
-								>
-									{$i18n.t('Save')}
-								</button>
-							</div>
-
+						<!-- 「保存」(その場で書き換え)は置かない: 履歴は append-only(#31)でサーバが必ず拒否する。
+						     書き換えるなら「送信」= 兄弟ブランチとして送り直す(#119) -->
+						<div class=" mt-2 mb-1 flex justify-end text-sm font-medium">
 							<div class="flex space-x-1.5">
 								<button
 									id="close-edit-message-button"
@@ -338,7 +309,8 @@
 									</div>
 								{/if}
 							{/if}
-							{#if !readOnly}
+							<!-- #120: 応答側(MessageActions)と同じ chat.edit ゲート。UX 用の導線隠しで、境界はサーバ側 -->
+							{#if !readOnly && ($_user?.role === 'user' ? ($_user?.permissions?.chat?.edit ?? true) : true)}
 								<Tooltip content={$i18n.t('Edit')} placement="bottom">
 									<button
 										class="invisible group-hover:visible p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black edit-user-message-button"
@@ -363,20 +335,6 @@
 									<span class="i-lucide-copy size-4 block"></span>
 								</button>
 							</Tooltip>
-
-							{#if !readOnly && (!isFirstMessage || siblings.length > 1)}
-								<Tooltip content={$i18n.t('Delete')} placement="bottom">
-									<button
-										class="invisible group-hover:visible p-1 rounded-sm dark:hover:text-white hover:text-black"
-										aria-label={$i18n.t('Delete')}
-										onclick={() => {
-											showDeleteConfirm = true;
-										}}
-									>
-										<span class="i-lucide-trash-2 size-4 block"></span>
-									</button>
-								</Tooltip>
-							{/if}
 
 							{#if $settings?.chatBubble ?? true}
 								{#if siblings.length > 1}

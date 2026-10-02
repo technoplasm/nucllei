@@ -29,7 +29,6 @@
 		continueResponse,
 		regenerateResponse,
 		chatActionHandler = undefined,
-		showMessage = () => {},
 		addMessages = () => {},
 		readOnly = false,
 		bottomPadding = false,
@@ -58,7 +57,6 @@
 			messageId: string,
 			event?: unknown
 		) => void | Promise<void>;
-		showMessage?: (message: { id: string | null }) => void | Promise<void>;
 		addMessages?: (data: {
 			modelId: string;
 			parentId: string;
@@ -126,16 +124,28 @@
 		history = history;
 	};
 
-	const updateChat = async () => {
+	// #119: ローカル変異の前に取る巻き戻し用の写し(保存が拒否されたら updateChat がこれへ戻す)
+	const snapshotHistory = () => $state.snapshot(history) as ChatHistory;
+
+	// rollback: 保存失敗時に戻すローカル履歴。
+	const updateChat = async (rollback: ChatHistory) => {
 		// 観測 view(readOnly — /s/ 共有・#107 agent session)から誤って DB を書く
 		// 事故の防壁。UI ゲート(ボタン非表示)に依存しない defense in depth。
 		if (readOnly) return;
 		notifyHistoryChange();
 		await tick();
-		await updateChatById(chatId, {
-			history: history,
-			messages: messages
-		});
+		try {
+			await updateChatById(chatId, {
+				history: history,
+				messages: messages
+			});
+		} catch {
+			// #119: 保存されなかった見かけを残さない — ローカルを変異前へ戻して知らせる
+			// (以前は unhandled rejection で無言、再読み込みで初めて元に戻っていた)
+			history = rollback;
+			toast.error($i18n.t('Failed to save the chat.'));
+			return;
+		}
 
 		currentChatPage.set(1);
 		await chats.set(await getChatList($currentChatPage));
@@ -225,120 +235,73 @@
 		scrollOnBranchChange();
 	};
 
-	const editMessage = async (messageId: string, content: string, submit = true) => {
+	// 履歴は append-only(#31): その場の書き換えとメッセージ削除はサーバが拒否するので、
+	// 経路ごと持たない(#119 — 削除ボタンと「保存」を撤去)。
+	// user = 兄弟ブランチとして送り直す / assistant = 兄弟ブランチとして複製保存する。元は残る。
+	const editMessage = async (messageId: string, content: string) => {
 		if (history.messages[messageId].role === 'user') {
-			if (submit) {
-				// New user message
-				const userPrompt = content;
-				const userMessageId = uuidv4();
+			// New user message
+			const userPrompt = content;
+			const userMessageId = uuidv4();
 
-				const userMessage: ChatMessage = {
-					id: userMessageId,
-					parentId: history.messages[messageId].parentId,
-					childrenIds: [],
-					role: 'user',
-					content: userPrompt,
-					...(history.messages[messageId].files && { files: history.messages[messageId].files }),
-					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
-				};
+			const userMessage: ChatMessage = {
+				id: userMessageId,
+				parentId: history.messages[messageId].parentId,
+				childrenIds: [],
+				role: 'user',
+				content: userPrompt,
+				...(history.messages[messageId].files && { files: history.messages[messageId].files }),
+				timestamp: Math.floor(Date.now() / 1000) // Unix epoch
+			};
 
-				const messageParentId = history.messages[messageId].parentId;
+			const messageParentId = history.messages[messageId].parentId;
 
-				if (messageParentId !== null) {
-					history.messages[messageParentId].childrenIds = [
-						...history.messages[messageParentId].childrenIds,
-						userMessageId
-					];
-				}
-
-				history.messages[userMessageId] = userMessage;
-				history.currentId = userMessageId;
-
-				await tick();
-				await sendPrompt(history, userPrompt, userMessageId);
-			} else {
-				// Edit user message
-				history.messages[messageId].content = content;
-				await updateChat();
+			if (messageParentId !== null) {
+				history.messages[messageParentId].childrenIds = [
+					...history.messages[messageParentId].childrenIds,
+					userMessageId
+				];
 			}
+
+			history.messages[userMessageId] = userMessage;
+			history.currentId = userMessageId;
+
+			await tick();
+			await sendPrompt(history, userPrompt, userMessageId);
 		} else {
-			if (submit) {
-				// New response message
-				const responseMessageId = uuidv4();
-				const message = history.messages[messageId];
-				const parentId = message.parentId;
+			// New response message
+			const rollback = snapshotHistory();
+			const responseMessageId = uuidv4();
+			const message = history.messages[messageId];
+			const parentId = message.parentId;
 
-				const responseMessage: ChatMessage = {
-					...message,
-					id: responseMessageId,
-					parentId: parentId,
-					childrenIds: [],
-					files: undefined,
-					content: content,
-					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
-				};
+			const responseMessage: ChatMessage = {
+				...message,
+				id: responseMessageId,
+				parentId: parentId,
+				childrenIds: [],
+				files: undefined,
+				content: content,
+				timestamp: Math.floor(Date.now() / 1000) // Unix epoch
+			};
 
-				history.messages[responseMessageId] = responseMessage;
-				history.currentId = responseMessageId;
+			history.messages[responseMessageId] = responseMessage;
+			history.currentId = responseMessageId;
 
-				// Append messageId to childrenIds of parent message
-				if (parentId !== null) {
-					history.messages[parentId].childrenIds = [
-						...history.messages[parentId].childrenIds,
-						responseMessageId
-					];
-				}
-
-				await updateChat();
-			} else {
-				// Edit response message
-				history.messages[messageId].originalContent = history.messages[messageId].content;
-				history.messages[messageId].content = content;
-				await updateChat();
+			// Append messageId to childrenIds of parent message
+			if (parentId !== null) {
+				history.messages[parentId].childrenIds = [
+					...history.messages[parentId].childrenIds,
+					responseMessageId
+				];
 			}
+
+			await updateChat(rollback);
 		}
 	};
 
 	const actionMessage = async (actionId: string, message: ChatMessage, event: unknown = null) => {
 		await chatActionHandler?.(chatId, actionId, message.model, message.id, event);
-	};
-
-	const deleteMessage = async (messageId: string) => {
-		const messageToDelete = history.messages[messageId];
-		const parentMessageId = messageToDelete.parentId;
-		const childMessageIds = messageToDelete.childrenIds ?? [];
-
-		// Collect all grandchildren
-		const grandchildrenIds = childMessageIds.flatMap(
-			(childId) => history.messages[childId]?.childrenIds ?? []
-		);
-
-		// Update parent's children
-		if (parentMessageId && history.messages[parentMessageId]) {
-			history.messages[parentMessageId].childrenIds = [
-				...history.messages[parentMessageId].childrenIds.filter((id) => id !== messageId),
-				...grandchildrenIds
-			];
-		}
-
-		// Update grandchildren's parent
-		grandchildrenIds.forEach((grandchildId) => {
-			if (history.messages[grandchildId]) {
-				history.messages[grandchildId].parentId = parentMessageId;
-			}
-		});
-
-		// Delete the message and its children
-		[messageId, ...childMessageIds].forEach((id) => {
-			delete history.messages[id];
-		});
-
-		await tick();
-
-		showMessage({ id: parentMessageId });
-
-		// Update the chat
-		await updateChat();
 	};
 </script>
 
@@ -385,17 +348,15 @@
 						</Loader>
 					{/if}
 
-					{#each messages as message, messageIdx (message.id)}
+					{#each messages as message (message.id)}
 						<Message
 							bind:history
 							messageId={message.id}
-							idx={messageIdx}
 							{user}
 							{gotoMessage}
 							{showPreviousMessage}
 							{showNextMessage}
 							{editMessage}
-							{deleteMessage}
 							{actionMessage}
 							{regenerateResponse}
 							{continueResponse}

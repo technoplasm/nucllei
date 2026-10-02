@@ -58,6 +58,10 @@
 
 	const isAdmin = $derived($user?.role === 'admin');
 
+	// #118: chat.file_upload の UI ミラー(チャット入力欄の uploads.ts / InputMenu と同じ判定)。
+	// 導線を隠すためのもので、enforcement はサーバ(routers/files.py)側
+	const fileUploadEnabled = $derived(isAdmin || ($user?.permissions?.chat?.file_upload ?? true));
+
 	const fetchFiles = async (append = false) => {
 		loading = true;
 
@@ -198,6 +202,10 @@
 
 	const uploadHandler = async (fileList: File[]) => {
 		if (fileList.length === 0) {
+			return;
+		}
+		if (!fileUploadEnabled) {
+			toast.error($i18n.t('You do not have permission to upload files.'));
 			return;
 		}
 		uploading = true;
@@ -549,21 +557,35 @@
 		<!-- 狭幅は models 同型の 2 行折り返し(Upload ←端寄せ→ 表示コントロール / 検索は全幅)。
 		 DOM は 1 セットのまま flex の order + wrap で並べ替える({#if} 二重化はしない)。 -->
 		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-			<button
-				class="order-1 shrink-0 whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary hover:bg-primary-hover text-primary-content font-medium text-sm"
-				type="button"
-				disabled={uploading}
-				onclick={() => {
-					fileInput?.click();
-				}}
+			<!-- #118: 権限が無いときは消さずに淡色 + 理由のツールチップ(チャット入力欄の「+」メニューと同じ見せ方)。
+			 disabled 属性だと hover が親へ届かずツールチップが出ないので aria-disabled + onclick ガードにする -->
+			<Tooltip
+				className="order-1 shrink-0 flex"
+				content={!fileUploadEnabled ? $i18n.t('You do not have permission to upload files') : ''}
 			>
-				{#if uploading}
-					<Spinner className="size-3.5 mr-1" />
-				{:else}
-					<span class="i-lucide-upload size-3.5 block mr-1"></span>
-				{/if}
-				{$i18n.t('Upload Files')}
-			</button>
+				<button
+					class="whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 rounded-full bg-primary text-primary-content font-medium text-sm {fileUploadEnabled
+						? 'hover:bg-primary-hover'
+						: 'opacity-50 cursor-not-allowed'}"
+					type="button"
+					disabled={uploading}
+					aria-disabled={!fileUploadEnabled}
+					onclick={() => {
+						if (!fileUploadEnabled) {
+							toast.error($i18n.t('You do not have permission to upload files.'));
+							return;
+						}
+						fileInput?.click();
+					}}
+				>
+					{#if uploading}
+						<Spinner className="size-3.5 mr-1" />
+					{:else}
+						<span class="i-lucide-upload size-3.5 block mr-1"></span>
+					{/if}
+					{$i18n.t('Upload Files')}
+				</button>
+			</Tooltip>
 
 			<div
 				class="order-3 w-full sm:order-2 sm:w-auto flex items-center px-2 bg-surface-form rounded-xs"

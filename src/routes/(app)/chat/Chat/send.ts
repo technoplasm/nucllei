@@ -648,39 +648,4 @@ export class ChatSend {
 			await session.saveChatHandler(get(chatId), session.history);
 		}
 	};
-
-	// メッセージ樹の表示位置を message へ移し、末端まで下って保存する
-	showMessage = async (message: { id: string | null }) => {
-		const session = this.#session;
-		const _chatId = get(chatId);
-		let _messageId = message.id;
-
-		let messageChildrenIds: string[] = [];
-		if (_messageId === null) {
-			messageChildrenIds = Object.keys(session.history.messages).filter(
-				(id) => session.history.messages[id].parentId === null
-			);
-		} else {
-			messageChildrenIds = session.history.messages[_messageId].childrenIds;
-		}
-
-		while (messageChildrenIds.length !== 0) {
-			_messageId = messageChildrenIds[messageChildrenIds.length - 1];
-			messageChildrenIds = session.history.messages[_messageId].childrenIds;
-		}
-
-		session.history.currentId = _messageId;
-
-		await tick();
-		await tick();
-		await tick();
-
-		const messageElement = document.getElementById(`message-${message.id}`);
-		if (messageElement) {
-			messageElement.scrollIntoView({ behavior: 'smooth' });
-		}
-
-		await tick();
-		session.saveChatHandler(_chatId, session.history);
-	};
 }
