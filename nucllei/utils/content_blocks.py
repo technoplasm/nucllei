@@ -8,14 +8,11 @@ message 永続化で共用する最小形へ落とす。消費者のいないフ
 import copy
 import json
 
+from nucllei.utils.image_refs import stored_ref_kind
+
 # llens(#110): result 未着の call に対にする合成 result(FE
 # chat-messages.ts expandAssistantToolHistory と同文 — 中断で途切れた履歴の修復)
 INTERRUPTED_TOOL_RESULT = "[interrupted: this tool call produced no result]"
-
-
-def _is_absolute_url(entry: str) -> bool:
-    """context_images のエントリがスキーム付き URL か(image_refs と同じ判定)。"""
-    return entry[:8].lower().startswith(("http://", "https://"))
 
 
 def serialize_text_blocks(content_blocks: list) -> str:
@@ -119,10 +116,12 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
     - tool 結果の画像(results[].context_images — tool が emitter
       __feed_image__ で push し middleware が載せる、#89)は、tool メッセージ群の直後に
       image_url を持つ user メッセージとして再投入する: role:tool の content は
-      文字列契約で画素を運べないため。エントリがスキーム付き URL
-      (`https://…/ext/{name}/...` #97)か "/" 始まりの fs パス("/mnt/..." "/workspace/...")
-      ならそのまま URL に、それ以外は file_id として `/api/v1/files/{id}/content` に
-      整形する。実体化(base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
+      文字列契約で画素を運べないため。エントリの振り分けは `image_refs.stored_ref_kind`
+      (保存済み参照の 1 箇所の規則): 裸の文字列(file id)だけ
+      `/api/v1/files/{id}/content` に整形し、それ以外(`http(s)://…`・同一サーバの
+      `/ext/…`・sandbox のパス `/mnt/…` `/workspace/…`・
+      `/api/v1/files/{id}/content#page=N`)は参照文字列のまま image_url の url にする。
+      実体化(base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
       次ターン以降の履歴では FE expandAssistantToolHistory(chat-messages.ts)が同じ形・
       同じ位置で再送する(#142)— 形は共有 fixture
       test/fixtures/history_wire/context_images.json で両側のテストが固定している。
@@ -211,12 +210,13 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
 
             result_image_urls = [
                 (
-                    # スキーム付き URL("https://…/ext/..." #97)と "/" 始まり("/mnt/..."
-                    # "/workspace/..." "/api/v1/files/{id}/content#page=N" #139)は参照文字列の
-                    # まま — 実体化は送信直前の utils/file_images.py
-                    entry
-                    if entry.startswith("/") or _is_absolute_url(entry)
-                    else f"/api/v1/files/{entry}/content"
+                    # 裸の文字列 = file id だけ配信 URL に組む。URL("https://…" と同一
+                    # サーバの "/ext/…")・sandbox のパス("/mnt/…" "/workspace/…")・
+                    # "/api/v1/files/{id}/content#page=N" は参照文字列のまま — 実体化は
+                    # 送信直前の utils/file_images.py
+                    f"/api/v1/files/{entry}/content"
+                    if stored_ref_kind(entry) == "file_id"
+                    else entry
                 )
                 for result in sendable_results
                 for entry in (result.get("context_images") or [])

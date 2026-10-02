@@ -6,6 +6,12 @@
 - backend allowlist は env EXT_UPSTREAMS 一本(SSRF の真実源。別 allowlist は作らない)。
   値の形で backend が決まる(#139): http(s) の base URL = HTTP 中継、
   `file:///abs/path` = ローカル root からの静的配信(`ext_backend`)
+- file backend が配信する範囲は `ext_file_served` 1 箇所: resolve 済みの実ファイルが root の
+  中にあること、env EXT_FILE_SCOPES(`name=root からの相対ディレクトリ`)があればその
+  ディレクトリの中にあること。/ext ゲート・resolver(`resolve_url`)・URL ⇔ sandbox パスの
+  橋渡し(`mounted_path_for_url` / `url_for_mounted_path`)が全部これを通る — 「ブラウザには
+  404 だが tool には読める」(またはその逆)を作らない。root 配下で配信範囲の外の物は
+  添付としても渡さない(`ext_file_withheld`)
 - env EXT_PUBLIC_BASES(`name=原本 URL のルート`)は「モデルが渡した絶対 URL が
   どの name の物か」の対応だけ(`match_public_base`)。到達先は相変わらず
   EXT_UPSTREAMS の backend — base に当たっても name が EXT_UPSTREAMS に無ければ解決しない
@@ -20,7 +26,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+from nucllei.env import EXT_FILE_SCOPES, EXT_PUBLIC_BASES, EXT_UPSTREAMS
 
 # 接続 5s / 読み 30s。上流はローカル(Docker bridge)想定 — 不達・遅延で
 # ワーカーを長く掴ませない。
@@ -107,6 +113,66 @@ def ext_backend(name: str) -> tuple[str, str] | tuple[str, Path] | None:
     if value.startswith("file://"):
         return ("file", _resolved_root(value))
     return ("http", value)
+
+
+@lru_cache(maxsize=None)
+def _served_roots(value: str, scopes: tuple[str, ...] | None) -> tuple[Path, ...]:
+    """file backend が配信するディレクトリ(resolve 済み)。scopes が None なら root 全体、
+    あれば各 `<root>/<scope>` — resolve して root の外へ出る scope(symlink)は捨てる。
+    `_resolved_root` と同じく 1 回だけ resolve する(値は起動時に env から確定)。"""
+    root = _resolved_root(value)
+    if scopes is None:
+        return (root,)
+    served = []
+    for scope in scopes:
+        try:
+            resolved = (root / scope).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if resolved.is_relative_to(root):
+            served.append(resolved)
+    return tuple(served)
+
+
+def ext_file_served(name: str, resolved: Path) -> bool:
+    """`resolved`(**resolve 済み**の実パス)が、name の file backend が配信する範囲に
+    あるか。file backend の閉じ込めの権威はここ 1 箇所(module docstring)。
+
+    - name が file backend でない(無い・http)→ False
+    - EXT_FILE_SCOPES に name が無い → root の中なら True(従来どおり)
+    - EXT_FILE_SCOPES に name が有る → 列挙したディレクトリのどれかの中なら True
+      (有効なエントリが無ければ常に False)
+
+    判定は resolve 後の実体で行う(URL の文字列ではなく)— symlink で範囲の外へ出る物は
+    範囲外、範囲の外から中を指す symlink は実体が範囲内なので配信される。通常ファイルか
+    どうかは見ない(呼び手が見る)。
+    """
+    backend = ext_backend(name)
+    if backend is None or backend[0] != "file":
+        return False
+    roots = _served_roots(EXT_UPSTREAMS[name], EXT_FILE_SCOPES.get(name))
+    return any(resolved.is_relative_to(root) for root in roots)
+
+
+def ext_file_withheld(resolved: Path) -> bool:
+    """`resolved`(**resolve 済み**の実パス)が、いずれかの file backend の root 配下に
+    あって、**どの file backend の配信範囲(`ext_file_served`)にも無い** か。
+
+    配信範囲の設定(EXT_FILE_SCOPES)を「利用者に渡してよい範囲」として 1 つの意味に
+    するための、`ext_file_served` の裏返し: True の物は /ext ゲートが 404 にするだけで
+    なく、tool が別の形(添付)で利用者に渡すこともしない(`image_refs.mounted_path_withheld`)。
+    どの file backend の root 配下でもないパスは False(配信の設定と無関係な置き場)。
+    root が入れ子で、外側の scope からは外れるが内側の backend が配信している物は False。
+    """
+    under_a_root = False
+    for name in EXT_UPSTREAMS:
+        backend = ext_backend(name)
+        if backend is None or backend[0] != "file":
+            continue
+        if ext_file_served(name, resolved):
+            return False
+        under_a_root = under_a_root or resolved.is_relative_to(backend[1])
+    return under_a_root
 
 
 def match_public_base(url: str) -> tuple[str, str] | None:

@@ -58,7 +58,14 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 
 ### tool(#18 builtin / サンドボックス)
 - **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
-  原本 raw を `/workspace/imports/`(旧 inputs)に配置 →
+  原本 raw を `/workspace/imports/`(旧 inputs)に配置
+  (`url=` の URL(絶対、または同一サーバの `/ext/…`)も同じ置き場へ — 解決は共有 resolver
+  `utils/image_refs`、`/mnt` 配下に実体がある物はコピーせずパスを返す。
+  **参照の規則**(url = 絶対 URL または同一サーバの `/ext/…`・`/api/v1/files/{id}/content` / path = sandbox の絶対パス(相対は受けない)/
+  file_id = 添付・生成物(本文リンクは `/api/v1/files/{id}/content`、tool には file_id で渡す)/
+  引数名で解釈が決まり、値の中身では判断しない / 受け取った形のまま渡す)の定義は
+  `utils/image_refs.py` の module docstring と `README_API.md` §3.8、経緯は
+  `_memos/builtin-tools.md`「参照の規則の改訂(2026-10-03)」節)→
   python/shell で分割読み(docx は py 直読、docling 結果ではなく raw を読む)→ 結果だけ context に戻す。
   **core のファイル経路は無関与**。**実体は組み込み `nucllei/builtin_tools/sandbox.py`**
   (2026-09-03、#114 で配備層 llens のカスタム tool から移設 — 下の 2026-09-03 節)。

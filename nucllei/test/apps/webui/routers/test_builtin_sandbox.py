@@ -8,8 +8,8 @@
 2. **HTTP は全部モック** — 実 sandbox コンテナに依存せず CI で回る。障害時に例外を
    漏らさず "ERROR: ..." 文字列で返る(builtin-tools メモの T11)ことも含む。
 
-末尾の `send_to_workspace(url=)` 節は、移設元 prism-hu/llens にあった
-`nucllei/tests/test_send_to_workspace_url.py` を引き取ったもの(SSRF ガードの回帰)。
+末尾の `send_to_workspace(url=)` 節は、URL の解決が共有 resolver
+(`utils/image_refs`)経由であること・値の形による振り分け・失敗理由の言い分けの回帰。
 """
 
 import asyncio
@@ -18,6 +18,8 @@ import contextlib
 import importlib
 import os
 import types
+
+import httpx
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
@@ -407,9 +409,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool.run_python("x", __chat_id__="c1"),
             tool.run_python_once("x"),
             tool.run_shell("x"),
-            tool.write_file("a.txt", "x"),
+            tool.write_file("/workspace/a.txt", "x"),
             tool.list_workspace(),
-            tool.fetch_from_workspace("a.txt"),
+            tool.fetch_from_workspace("/workspace/a.txt"),
             tool.send_to_workspace(),
         ):
             assert asyncio.run(coro).startswith("ERROR:")
@@ -485,26 +487,33 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
     def test_401_error_names_the_token_mismatch(self):
         """401 は原因(両側の SANDBOX_TOKEN 不一致)を言う。トークン値は出さない。"""
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
         tool = _sandbox(
-            error=RuntimeError(
-                "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
+            error=SandboxHTTPError(
+                401,
+                "認証に失敗しました。nucllei と sandbox の "
                 "SANDBOX_TOKEN が一致していません "
-                "(片側だけ未設定の場合も含む。配備の env を確認)"
+                "(片側だけ未設定の場合も含む。配備の env を確認)",
             )
         )
         out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
         assert out.startswith("ERROR:") and "SANDBOX_TOKEN" in out
+        # 繋がってはいるので「接続できません」とは言わない
+        assert "接続できません" not in out
 
     def test_http_failure_is_graceful(self):
         """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。"""
-        tool = _sandbox(error=RuntimeError("sandbox HTTP 502: bad gateway"))
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+        tool = _sandbox(error=SandboxHTTPError(502, "bad gateway"))
         calls = [
             tool.run_python("x", __user__={"id": "u1"}, __chat_id__="c1"),
             tool.run_python_once("x", __user__={"id": "u1"}),
             tool.run_shell("x", __user__={"id": "u1"}),
-            tool.write_file("a.txt", "x", __user__={"id": "u1"}),
+            tool.write_file("/workspace/a.txt", "x", __user__={"id": "u1"}),
             tool.list_workspace(__user__={"id": "u1"}),
-            tool.fetch_from_workspace("a.txt", __user__={"id": "u1"}),
+            tool.fetch_from_workspace("/workspace/a.txt", __user__={"id": "u1"}),
         ]
         for coro in calls:
             out = asyncio.run(coro)
@@ -596,338 +605,982 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = asyncio.run(
             tool.send_to_workspace(file_id="f-yours", __user__={"id": "owner"})
         )
-        assert "アクセス権が無い" in out
+        # 「レコードが無い」と同じ文(存在の有無を漏らさない)
+        from nucllei.utils.image_refs import FILE_ID_ARG_FORM
+
+        assert out == (
+            "ERROR: file_id f-yours のレコードが無い、またはアクセス権が無い。"
+            f"{FILE_ID_ARG_FORM}"
+        )
         assert tool.calls == []
 
     def test_write_file_guards_path_and_size(self):
         tool = _sandbox({"/files/write": {"ok": True}})
-        assert asyncio.run(
-            tool.write_file("../escape", "x", __user__={"id": "u1"})
-        ).startswith("ERROR:")
-        assert asyncio.run(tool.write_file("", "x", __user__={"id": "u1"})).startswith(
-            "ERROR:"
+        user = {"id": "u1"}
+        for bad in (
+            "../escape",
+            "/workspace/../etc/passwd",
+            "/etc/passwd",
+            "/mnt/server/a.txt",
+            "/workspacefoo/a.txt",
+            "",
+            # 相対パスは受けない (/workspace からの相対として救済しない)
+            "work/a.txt",
+            "./a.txt",
+            "https://x.example/y.html",
+            # ディレクトリを指すもの (ファイル名が無い)
+            "/workspace",
+            "/workspace/dir/",
+        ):
+            out = asyncio.run(tool.write_file(bad, "x", __user__=user))
+            assert out.startswith("ERROR:"), bad
+            # tool 側で弾いたのであって、接続の問題ではない
+            assert "接続できません" not in out, bad
+        # read-only の置き場は理由を言う
+        assert "read-only" in asyncio.run(
+            tool.write_file("/mnt/server/a.txt", "x", __user__=user)
         )
+        # 形の誤りは値によらず同じ文: 全 tool 共通の形 + この tool の path が受ける形
+        from nucllei.utils.image_refs import REF_ARGS_RULE, WORKSPACE_PATH_ARG_FORM
+
+        for bad in ("work/a.txt", "/etc/passwd", "https://x.example/y.html"):
+            assert asyncio.run(tool.write_file(bad, "x", __user__=user)) == (
+                f"ERROR: {bad} は sandbox のパスの形でない。"
+                f"{WORKSPACE_PATH_ARG_FORM} {REF_ARGS_RULE}"
+            )
+        assert asyncio.run(tool.write_file("", "x", __user__=user)).startswith(
+            "ERROR: (空) は sandbox のパスの形でない。"
+        )
+        assert tool.calls == []
 
         from nucllei.builtin_tools import sandbox as mod
 
         big = "a" * (mod.WRITE_FILE_LIMIT + 1)
         assert asyncio.run(
-            tool.write_file("big.txt", big, __user__={"id": "u1"})
+            tool.write_file("/workspace/big.txt", big, __user__=user)
         ).startswith("ERROR:")
         assert tool.calls == []
 
         out = asyncio.run(
-            tool.write_file("exports/r.html", "<p>", __user__={"id": "u1"})
+            tool.write_file("/workspace/exports/r.html", "<p>", __user__=user)
         )
-        assert "書き込みました" in out
+        assert "/workspace/exports/r.html に書き込みました" in out
         # exports/ 直書きは自動添付されない旨をモデルに伝える
         assert "fetch_from_workspace" in out
 
-    def test_list_workspace_formats_entries(self):
-        tool = _sandbox({"/files/list": {"entries": [{"path": "a.csv", "size": 2048}]}})
-        out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
-        assert "- a.csv (2.0KB)" in out
+    def test_workspace_paths_are_absolute_in_and_out(self):
+        """3 本とも /workspace/ の絶対パスだけを受け、戻り値も絶対。sandbox の wire
+        (workspace 相対) は変えない。相対パスは受けない (下の test)。"""
+        user = {"id": "u1"}
+        png = base64.b64encode(b"x").decode()
+        responses = {
+            "/files/write": {"ok": True},
+            "/files/list": {"entries": [{"path": "imports/a.csv", "size": 2048}]},
+            "/files/read": {"name": "a.csv", "size": 1, "b64": png},
+        }
+
+        # (渡す path, sandbox に届く相対, 戻り値に出る絶対)
+        cases = [
+            ("/workspace/imports/a.csv", "imports/a.csv", "/workspace/imports/a.csv"),
+            (
+                "//workspace//imports/./a.csv",
+                "imports/a.csv",
+                "/workspace/imports/a.csv",
+            ),
+            (
+                "/workspace/x/../imports/a.csv",
+                "imports/a.csv",
+                "/workspace/imports/a.csv",
+            ),
+        ]
+        for given, rel, absolute in cases:
+            tool = _sandbox(responses)
+            out = asyncio.run(tool.write_file(given, "x", __user__=user))
+            assert tool.calls[0][0] == "/files/write"
+            assert tool.calls[0][1]["path"] == rel, given
+            assert f"{absolute} に書き込みました" in out, given
+
+            tool = _sandbox(responses)
+            out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
+            assert tool.calls[0][1]["path"] == rel, given
+            assert out.startswith(f"{absolute} ("), given
+
+        # /workspace/x を /workspace/workspace/x に読み替えない (旧不具合)
+        tool = _sandbox(responses)
+        asyncio.run(tool.write_file("/workspace/x.txt", "x", __user__=user))
+        assert tool.calls[0][1]["path"] == "x.txt"
+
+        # 一覧: 既定 (= /workspace) / 絶対のどちらでも、戻り値の各行は絶対パス
+        for args, rel in (
+            ((), "."),
+            (("/workspace",), "."),
+            (("/workspace/",), "."),
+            (("/workspace/imports",), "imports"),
+        ):
+            tool = _sandbox(responses)
+            out = asyncio.run(tool.list_workspace(*args, __user__=user))
+            assert tool.calls[0][1]["path"] == rel, args
+            assert out == "- /workspace/imports/a.csv (2.0KB)", args
 
         tool = _sandbox({"/files/list": {"entries": []}})
-        assert "空です" in asyncio.run(
-            tool.list_workspace("sub", __user__={"id": "u1"})
+        out = asyncio.run(tool.list_workspace("/workspace/sub", __user__=user))
+        assert "/workspace/sub は空です" in out
+
+    def test_relative_paths_are_refused(self):
+        """path の形は絶対パス 1 つ。相対を「/workspace からの相対」として通さない
+        (`https://x/y.html` が `/workspace/https:/x/y.html` になる、を作らない)。
+        エラーは値によらず同じ形 (全 tool 共通) + その tool の path が受ける形の固定文。"""
+        from nucllei.utils.image_refs import (
+            PATH_ARG_FORM,
+            REF_ARGS_RULE,
+            WORKSPACE_PATH_ARG_FORM,
         )
 
+        user = {"id": "u1"}
+        tool = _sandbox({})
+        for bad in ("imports/a.csv", "./imports/a.csv", ".", "https://x.example/y"):
+            for coro, form in (
+                (tool.write_file(bad, "x", __user__=user), WORKSPACE_PATH_ARG_FORM),
+                (tool.list_workspace(bad, __user__=user), WORKSPACE_PATH_ARG_FORM),
+                (tool.fetch_from_workspace(bad, __user__=user), PATH_ARG_FORM),
+            ):
+                assert asyncio.run(coro) == (
+                    f"ERROR: {bad} は sandbox のパスの形でない。{form} {REF_ARGS_RULE}"
+                ), bad
+        assert tool.calls == []
+
+    def test_send_to_workspace_result_feeds_list_and_fetch(self):
+        """send_to_workspace が返す絶対パスを、そのまま list / fetch に渡せる。"""
+        user = {"id": "u1"}
+        given = "/workspace/imports/mine.txt"
+        tool = _sandbox(
+            {
+                "/files/list": {"entries": [{"path": "imports/mine.txt", "size": 6}]},
+                "/files/read": {
+                    "name": "mine.txt",
+                    "size": 6,
+                    "b64": base64.b64encode(b"abcdef").decode(),
+                },
+            }
+        )
+        listed = asyncio.run(tool.list_workspace("/workspace/imports", __user__=user))
+        assert f"- {given} (" in listed
+        out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
+        assert out.startswith(f"{given} (") and "file_id=" in out
+        assert [c[1]["path"] for c in tool.calls] == ["imports", "imports/mine.txt"]
+
+    def test_list_and_fetch_refuse_paths_outside_workspace(self):
+        tool = _sandbox({})
+        user = {"id": "u1"}
+        for bad in ("/etc", "../..", "/workspace/../etc", "/workspacefoo"):
+            for coro in (
+                tool.list_workspace(bad, __user__=user),
+                tool.fetch_from_workspace(bad, __user__=user),
+            ):
+                out = asyncio.run(coro)
+                assert out.startswith(
+                    f"ERROR: {bad} は sandbox のパスの形でない。"
+                ), bad
+        # /mnt/ は sandbox の /files/* が扱えない — 使える手段を案内して断る
+        out = asyncio.run(tool.list_workspace("/mnt/server42", __user__=user))
+        assert out.startswith("ERROR:") and "run_shell" in out and "ls" in out
+        # 見せる手段は fetch_from_workspace(path) — 固定文で案内する
+        assert "fetch_from_workspace" in out
+        # fetch_from_workspace は /mnt/ を受ける (sandbox の /files/* は使わず、nucllei 側の
+        # 同じ置き場から読む — 末尾の「fetch_from_workspace(path) の /mnt/…」節)。無ければ不在
+        out = asyncio.run(
+            tool.fetch_from_workspace("/mnt/server42/a.png", __user__=user)
+        )
+        assert out.startswith("ERROR:") and "読めない" in out
+        assert tool.calls == []
+
+    def test_file_errors_say_what_went_wrong(self):
+        """400 = パスの問題、404 = 無い、413 = 大きい、それ以外の例外 = 接続の問題。"""
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+        user = {"id": "u1"}
+
+        def outs(error):
+            tool = _sandbox(error=error)
+            return [
+                asyncio.run(tool.write_file("/workspace/a.txt", "x", __user__=user)),
+                asyncio.run(tool.list_workspace("/workspace/a", __user__=user)),
+                asyncio.run(
+                    tool.fetch_from_workspace("/workspace/a.txt", __user__=user)
+                ),
+            ]
+
+        # sandbox 側の _safe_path が弾いた (symlink 越しの脱出など、tool からは見えない分)
+        for out in outs(SandboxHTTPError(400, "path escapes workspace: 'a.txt'")):
+            assert out.startswith("ERROR:") and "path escapes workspace" in out
+            assert "接続できません" not in out
+
+        out = outs(SandboxHTTPError(404, "not a file: a.txt"))[2]
+        assert "/workspace/a.txt というファイルはありません" in out
+
+        out = outs(SandboxHTTPError(413, "file too large: 9 bytes (limit 5)"))[2]
+        assert "大きすぎ" in out and "接続できません" not in out
+
+        for out in outs(ConnectionRefusedError("refused")):
+            assert out.startswith("ERROR: sandbox に接続できません")
+
 
 # =============================================================================
-# send_to_workspace(url=) の契約(SSRF ガードの回帰)
+# send_to_workspace(url=) の契約
 #
-# 移設元 prism-hu/llens の `nucllei/tests/test_send_to_workspace_url.py` を
-# 引き取ったもの(tool 本体と一緒に来るべきテスト)。あちらは配備層 tool として
-# nucllei の venv の外でも単体実行できるよう pydantic/aiohttp の stub 差し込み +
-# ファイルパス直読み + 自前ランナーという作りだったが、builtin になった今その
-# 前提は消えたので、普通に import する pytest の流儀へ書き直してある。
+# URL の解決は共有 resolver(`utils/image_refs.resolve_ref`)一本 — 許可範囲・redirect の
+# 扱い・失敗理由が配備層の fetch_url / feed_image と同じになる(独自の self fetch /
+# LAN fetch は撤去した。許可先の外の URL は取りに行かない)。ここで固定するのは
+# tool 側の持ち分: 引数名どおりの解釈(url は URL、file_id は file の id — 値の形を見て
+# 別の引数に読み替えない)、RefError の言い分け、「解決先が sandbox から既に見えている物は
+# コピーしない」、取り込み先と戻り値の絶対パス。
 #
-# DB を触らないので AbstractPostgresTest には載せない(url 経路は Files を見ない)。
-# ネットワークは _http_get / _post の差し替えで切り離す — 宛先ガードの
-# getaddrinfo は literal IP を使うので実解決は起きない。
+# DB を触らないので AbstractPostgresTest には載せない(file_id へ吸収する経路だけ
+# Files / Storage を差し替える)。ネットワークは ext_upstreams の共有 client を
+# MockTransport に差し替えて切り離す。
 # =============================================================================
 
-# _http_get が上限超過(_TooLarge)を投げる、と応答表で示すための番兵
-_TOO_LARGE = object()
-
-
-class _FakeRequest:
-    def __init__(self, headers):
-        self.headers = headers
+UPSTREAM = "http://upstream.test"
+PUBLIC_BASE = "http://his-info.test/docs"
+FILE_UUID = "0b54ed0c-6f0b-4b5c-9d0e-3f6f3f0a1c11"
+# url が受ける形の固定文(値を調べて出し分けない。llens の tool と共有する公開定数)
+from nucllei.utils.image_refs import (  # noqa: E402
+    FILE_ID_ARG_FORM,
+    PATH_ARG_FORM,
+    REF_ARGS_RULE,
+    URL_ARG_FORM,
+)
 
 
 class _UrlEnv:
-    """1 テスト分の道具立て: tool + 偽 _http_get / _post + 記録。"""
+    """1 テスト分の道具立て: tool + 偽の上流(MockTransport)+ 偽 _post + 記録。"""
 
-    def __init__(self, responses=None):
-        from nucllei.builtin_tools.sandbox import Tools, _TooLarge
+    def __init__(self, monkeypatch, handler=None):
+        from nucllei.builtin_tools.sandbox import Tools
+        from nucllei.utils import ext_upstreams
 
+        self.monkeypatch = monkeypatch
         self.tools = Tools()
-        self.gets: list[tuple] = []  # (target, 送信 headers)
+        self.gets: list[str] = []  # 上流へ出た URL
+        self.sent_headers: list[dict] = []
         self.writes: list[dict] = []
-        self._responses = list(responses or [])
 
-        async def fake_http_get(target, max_bytes, headers=None):
-            self.gets.append((target, headers or {}))
-            status, resp_headers, data = self._responses.pop(0)
-            if data is _TOO_LARGE:
-                raise _TooLarge()
-            return status, resp_headers, data
+        def transport(request):
+            self.gets.append(str(request.url))
+            self.sent_headers.append(dict(request.headers))
+            if handler is None:
+                return httpx.Response(200, content=b"data")
+            return handler(request)
+
+        monkeypatch.setattr(
+            ext_upstreams,
+            "_client",
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(transport), follow_redirects=False
+            ),
+        )
 
         async def fake_post(path, payload, timeout_s):
             self.writes.append({"path": path, "payload": payload})
             return {}
 
-        self.tools._http_get = fake_http_get
         self.tools._post = fake_post
 
-    def run(self, __request__=None, **kwargs):
+    def http_backend(self, name="cage", base=UPSTREAM):
+        from nucllei.env import EXT_UPSTREAMS
+
+        self.monkeypatch.setitem(EXT_UPSTREAMS, name, base)
+
+    def public_base(self, name="his", base=PUBLIC_BASE):
+        from nucllei.env import EXT_PUBLIC_BASES
+
+        self.monkeypatch.setitem(EXT_PUBLIC_BASES, name, base)
+
+    def file_backend(self, root, name="cage"):
+        from nucllei.env import EXT_UPSTREAMS
+
+        self.monkeypatch.setitem(EXT_UPSTREAMS, name, f"file://{root}")
+
+    def mount_root(self, root):
+        from nucllei.utils import image_refs
+
+        self.monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+
+    def files(self, tmp_path, records: dict):
+        """Files / Storage を差し替える。records = {file_id: (owner, filename, bytes)}。"""
+        from nucllei.builtin_tools import sandbox as mod
+
+        recs = {}
+        for fid, (owner, filename, data) in records.items():
+            src = tmp_path / f"{fid}_{filename}"
+            src.write_bytes(data)
+            recs[fid] = types.SimpleNamespace(
+                user_id=owner, filename=filename, path=str(src)
+            )
+        self.monkeypatch.setattr(
+            mod.Files, "get_file_by_id", staticmethod(lambda fid: recs.get(fid))
+        )
+        self.monkeypatch.setattr(mod.Storage, "get_file", staticmethod(lambda p: p))
+
+    def run(self, **kwargs):
         return asyncio.run(
-            self.tools.send_to_workspace(
-                __user__={"id": "u1"}, __request__=__request__, **kwargs
+            self.tools.send_to_workspace(__user__={"id": "u1"}, **kwargs)
+        )
+
+
+def test_url_exclusive_with_file_id_and_filename(monkeypatch):
+    env = _UrlEnv(monkeypatch)
+    for extra in ({"file_id": "some-uuid"}, {"filename": "x"}):
+        result = env.run(url="http://his-info.test/docs/a.pdf", **extra)
+        assert result.startswith("ERROR") and "同時指定" in result, extra
+
+
+def test_spec_has_no_request_param_and_no_lan_valve():
+    """cookie 転送も CIDR ガードも無い(resolver が境界を持つ)ことを形で固定する。"""
+    import inspect
+
+    from nucllei.builtin_tools import sandbox as mod
+
+    assert (
+        "__request__" not in inspect.signature(mod.Tools.send_to_workspace).parameters
+    )
+    assert "url_blocked_cidrs" not in mod.Tools.Valves.model_fields
+    for gone in ("_fetch_self", "_fetch_lan", "_http_get", "_blocked_ip_error"):
+        assert not hasattr(mod.Tools, gone), gone
+    assert not hasattr(mod, "SELF_BASE_URL")
+
+
+# --- resolver 経由の取り込み(http backend)-----------------------------------
+
+
+def test_ext_url_goes_through_backend_not_given_host(monkeypatch):
+    # path が /ext/{name}/... の URL は host を問わず EXT_UPSTREAMS の backend へ。
+    # 与えられた host にも自オリジンにも接続しない。cookie / 認証ヘッダは転送しない
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
+    env.http_backend()
+    result = env.run(
+        url="https://elsewhere.example/ext/cage/static/docs/10-14.pdf?rev=2"
+    )
+    assert env.gets == [f"{UPSTREAM}/static/docs/10-14.pdf?rev=2"]
+    assert "cookie" not in env.sent_headers[0]
+    assert "authorization" not in env.sent_headers[0]
+    assert env.writes[0]["payload"]["path"] == "imports/10-14.pdf"
+    assert base64.b64decode(env.writes[0]["payload"]["b64"]) == b"%PDF-fake"
+    # 戻り値は絶対パス(そのまま run_python / list_workspace / fetch_from_workspace へ)
+    assert not result.startswith("ERROR")
+    assert "→ /workspace/imports/10-14.pdf" in result
+
+
+def test_public_base_url_goes_through_backend(monkeypatch):
+    # EXT_PUBLIC_BASES 配下の原本 URL は原本 host へ直接行かず、その name の backend へ
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
+    env.http_backend("his", UPSTREAM)
+    env.public_base()
+    result = env.run(url=f"{PUBLIC_BASE}/a/b.pdf?rev=2#page=3")
+    assert env.gets == [f"{UPSTREAM}/a/b.pdf?rev=2"]
+    assert env.writes[0]["payload"]["path"] == "imports/b.pdf"
+    assert "→ /workspace/imports/b.pdf" in result
+
+
+def test_percent_encoded_name_is_decoded(monkeypatch):
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3.png")
+    assert env.writes[0]["payload"]["path"] == "imports/図.png"
+
+
+def test_uppercase_scheme_is_a_url(monkeypatch):
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    result = env.run(url="HTTPS://llens.test/ext/cage/a.png")
+    assert not result.startswith("ERROR") and len(env.gets) == 1
+
+
+# --- 許可先の外 / 失敗理由の言い分け -------------------------------------------
+
+
+def test_url_outside_allowed_upstreams_is_not_fetched(monkeypatch):
+    """挙動変更の番兵: 許可先の外の URL(任意の LAN / 外部サイト)は取りに行かない。
+    旧実装は CIDR 拒否リストだけで LAN の任意ホストを取れた。"""
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    env.public_base()
+    for u in (
+        "http://10.0.0.5/docs/manual.pdf",
+        "http://127.0.0.1:8000/files/write",
+        "https://example.com/a.pdf",
+        "http://his-info.test/other/a.pdf",  # 許可 host だが base の外
+    ):
+        result = env.run(url=u)
+        assert result.startswith("ERROR") and "許可先の外" in result, u
+        # url が受ける形を固定文で言う。リンク切れとは言わない
+        assert URL_ARG_FORM in result, u
+        assert "リンク切れ" not in result, u
+    assert env.gets == [] and env.writes == []
+
+
+def test_unknown_ext_name_is_outside_too(monkeypatch):
+    env = _UrlEnv(monkeypatch)
+    result = env.run(url="https://llens.test/ext/nosuch/a.png")
+    assert result.startswith("ERROR") and "許可先の外" in result
+    assert env.gets == [] and env.writes == []
+
+
+def test_unknown_upstream_wording_follows_reason(monkeypatch):
+    """`unknown_upstream` の内訳は resolver の `RefError.reason`(解決結果)で言い分ける。
+    tool は値を自前でパースし直さない。"""
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    unknown_name = env.run(url="/ext/nosuch/a.png")
+    not_ext_form = env.run(url="/ext/cage")
+    outside = env.run(url="https://example.com/a.pdf")
+    assert "その配信元はこの配備に設定されていない" in unknown_name
+    assert "`/ext/<配信元>/<パス>` の形でない" in not_ext_form
+    assert "任意の Web / LAN の URL は取りに行かない" in outside
+    for result in (unknown_name, not_ext_form, outside):
+        assert result.startswith("ERROR") and result.endswith(URL_ARG_FORM)
+    assert env.gets == [] and env.writes == []
+
+
+def test_too_large_reports_actual_size_and_limit(monkeypatch):
+    big = b"x" * (3 * 1024 * 1024)
+    env = _UrlEnv(
+        monkeypatch,
+        lambda r: httpx.Response(
+            200, content=big, headers={"content-length": str(len(big))}
+        ),
+    )
+    env.http_backend()
+    env.tools.valves.url_max_mb = 1
+    result = env.run(url="https://llens.test/ext/cage/big.bin")
+    assert result.startswith("ERROR")
+    # 実サイズ(Content-Length)と上限(valve)の両方。リンク切れではないと言う
+    assert "3.0MB" in result and "上限 1.0MB" in result
+    assert "少なくとも" not in result
+    assert "リンク切れではない" in result
+    assert env.writes == []
+
+
+def test_too_large_without_content_length_says_at_least(monkeypatch):
+    async def chunks():
+        for _ in range(40):
+            yield b"x" * 65536
+
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=chunks()))
+    env.http_backend()
+    env.tools.valves.url_max_mb = 1
+    result = env.run(url="https://llens.test/ext/cage/stream.bin")
+    assert result.startswith("ERROR")
+    assert "少なくとも" in result and "実サイズは不明" in result
+    assert env.writes == []
+
+
+def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
+    # resolver の既定(EXT_INLINE_MAX_BYTES)ではなく valve の値が上限になる
+    seen = {}
+
+    async def fake_resolve(url, *, max_bytes=None):
+        from nucllei.utils.image_refs import RefError
+
+        seen.update(url=url, max_bytes=max_bytes)
+        return None, RefError("not_found", "x")
+
+    from nucllei.utils import image_refs
+
+    # url 引数の入口は resolve_url(保存済み文字列用の resolve_ref は通さない)
+    monkeypatch.setattr(image_refs, "resolve_url", fake_resolve)
+    env = _UrlEnv(monkeypatch)
+    env.tools.valves.url_max_mb = 100
+    env.run(url="https://llens.test/ext/cage/a.bin")
+    assert seen == {
+        "url": "https://llens.test/ext/cage/a.bin",
+        "max_bytes": 100 * 1024 * 1024,
+    }
+
+
+def test_failure_reasons_are_told_apart(monkeypatch):
+    cases = [
+        (httpx.Response(404), ("存在しない", "リンク切れ")),
+        (
+            httpx.Response(302, headers={"location": "http://10.0.0.5/x"}),
+            ("redirect", "302"),
+        ),
+        (httpx.Response(401), ("上流が 401",)),
+        (httpx.Response(503), ("上流が 503",)),
+    ]
+    for response, expected in cases:
+        env = _UrlEnv(monkeypatch, lambda r, response=response: response)
+        env.http_backend()
+        result = env.run(url="https://llens.test/ext/cage/a.png")
+        assert result.startswith("ERROR"), response
+        for word in expected:
+            assert word in result, (response, result)
+        if response.status_code != 404:
+            assert "リンク切れ" not in result, result
+        assert len(env.gets) == 1  # redirect は追っていない
+        assert env.writes == []
+
+
+def test_unreachable_upstream(monkeypatch):
+    def boom(request):
+        raise httpx.ConnectError("refused")
+
+    env = _UrlEnv(monkeypatch, boom)
+    env.http_backend()
+    result = env.run(url="https://llens.test/ext/cage/a.png")
+    assert result.startswith("ERROR") and "届かない" in result
+    assert "リンク切れ" not in result
+
+
+def test_traversal_and_malformed_url(monkeypatch):
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    result = env.run(url="https://llens.test/ext/cage/../secret")
+    assert result.startswith("ERROR") and "範囲の外" in result
+    result = env.run(url="http://[::1/ext/cage/a.png")
+    assert result.startswith("ERROR")
+    assert env.gets == [] and env.writes == []
+
+
+# --- sandbox から既に見えている物はコピーしない --------------------------------
+
+
+def _cage_mount(tmp_path):
+    root = tmp_path / "mnt"
+    (root / "cage" / "static" / "図").mkdir(parents=True)
+    (root / "cage" / "static" / "図" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    return root
+
+
+def test_file_backend_under_mount_returns_path_without_copy(monkeypatch, tmp_path):
+    """file backend の実体が RO_MOUNT_ROOT(/mnt)配下 = sandbox と同じ置き場(#138)。
+    URL → fs パスの読み替えを tool が橋渡しし、コピーは作らない。"""
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage")
+    # サイズ上限は掛からない(コピーしないので)
+    env.tools.valves.url_max_mb = 0.000001
+    result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
+    assert not result.startswith("ERROR")
+    assert "取り込み不要" in result
+    assert f"{root}/cage/static/図/a.png" in result
+    assert "run_python / run_shell" in result
+    assert env.writes == [] and env.gets == []
+
+
+def test_public_base_on_file_backend_under_mount(monkeypatch, tmp_path):
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage" / "static", name="his")
+    env.public_base()
+    result = env.run(url=f"{PUBLIC_BASE}/%E5%9B%B3/a.png#page=1")
+    assert "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
+    assert env.writes == []
+
+
+def test_file_backend_outside_mount_is_copied(monkeypatch, tmp_path):
+    # root が /mnt の外 = sandbox から見える保証が無い → 従来どおり取り込む
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(tmp_path / "elsewhere")
+    env.file_backend(root / "cage")
+    result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
+    assert "→ /workspace/imports/a.png" in result
+    assert env.writes[0]["payload"]["path"] == "imports/a.png"
+
+
+def test_file_backend_missing_file_is_not_found(monkeypatch, tmp_path):
+    # 無いファイルを「既に見えている」と言わない
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage")
+    result = env.run(url="https://llens.test/ext/cage/static/nope.png")
+    assert result.startswith("ERROR") and "存在しない" in result
+    assert env.writes == []
+
+
+def test_file_backend_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
+    # /mnt の外を指す symlink は backend root の外でもある — パスも返さず、読みもしない
+    root = _cage_mount(tmp_path)
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"x")
+    (root / "cage" / "static" / "escape.png").symlink_to(outside)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage")
+    result = env.run(url="https://llens.test/ext/cage/static/escape.png")
+    assert result.startswith("ERROR") and "取り込み不要" not in result
+    assert env.writes == []
+
+
+# --- 同一サーバの相対 URL --------------------------------------------------------
+
+
+def test_relative_ext_url_is_imported_via_backend(monkeypatch):
+    # 相対 `/ext/{name}/…` は「このサーバの URL」= 絶対形と同じ backend で解決する
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
+    env.http_backend()
+    result = env.run(url="/ext/cage/static/docs/10-14.pdf?rev=2")
+    assert env.gets == [f"{UPSTREAM}/static/docs/10-14.pdf?rev=2"]
+    assert env.writes[0]["payload"]["path"] == "imports/10-14.pdf"
+    assert "→ /workspace/imports/10-14.pdf" in result
+
+
+def test_relative_ext_url_on_file_backend_under_mount(monkeypatch, tmp_path):
+    # 解決先が /mnt 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage")
+    result = env.run(url="/ext/cage/static/%E5%9B%B3/a.png")
+    assert "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
+    assert env.writes == [] and env.gets == []
+
+
+def test_relative_ext_url_stays_closed(monkeypatch, tmp_path):
+    root = _cage_mount(tmp_path)
+    env = _UrlEnv(monkeypatch)
+    env.mount_root(root)
+    env.file_backend(root / "cage")
+    result = env.run(url="/ext/nosuch/a.png")
+    assert result.startswith("ERROR") and "許可先の外" in result
+    result = env.run(url="/ext/cage/static/nope.png")
+    assert result.startswith("ERROR") and "存在しない" in result
+    result = env.run(url="/ext/cage/../secret")
+    assert result.startswith("ERROR") and "範囲の外" in result
+    assert env.gets == [] and env.writes == []
+
+
+def test_files_content_url_is_routed_to_the_file(monkeypatch, tmp_path):
+    """`/api/v1/files/{id}/content`(このサーバのファイル配信口。相対、または絶対 = host
+    不問)は URL のルーティングとして file に当たる。HTTP では取りに行かない = 所有者
+    チェックは file_id 経路のものがそのまま効く。"""
+    for given in (
+        f"/api/v1/files/{FILE_UUID}/content",
+        f"https://llens.test/api/v1/files/{FILE_UUID}/content",
+        # fragment は `#page=N` 以外も無視して同じ file に当たる(file_id_of_url の規則)
+        f"/api/v1/files/{FILE_UUID}/content#page=2",
+        f"/api/v1/files/{FILE_UUID}/content#section",
+    ):
+        env = _UrlEnv(monkeypatch)
+        env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
+        result = env.run(url=given)
+        assert "→ /workspace/imports/report.xlsx" in result, given
+        assert env.writes[0]["payload"]["path"] == "imports/report.xlsx"
+        assert env.gets == []
+
+    env = _UrlEnv(monkeypatch)
+    env.files(tmp_path, {FILE_UUID: ("someone-else", "secret.xlsx", b"x")})
+    given = f"/api/v1/files/{FILE_UUID}/content"
+    result = env.run(url=given)
+    # url= 経由は形の誤りではないので、file_id の固定文は添えない
+    assert result == f"ERROR: {given} のレコードが無い、またはアクセス権が無い。"
+    assert env.writes == []
+
+
+# --- 引数は名前で解釈が決まる(値の形を見て別の引数に読み替えない)--------------
+
+
+def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
+    """url= に URL でない値(UUID / sandbox のパス / サーバに無い経路 / スキーム無し)が
+    来ても、file_id や path として救済しない。エラーは値によらず同じ文 + 固定の案内。"""
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
+    results = {}
+    for bad in (
+        FILE_UUID,
+        "/workspace/x",
+        "/mnt/cage/x.pdf",
+        f"/api/v1/files/{FILE_UUID}",
+        "/etc/passwd",
+        "ext/cage/x.png",
+        "his-info.test/docs/a.pdf",
+        "ftp://10.0.0.5/a.pdf",
+    ):
+        result = env.run(url=bad)
+        # 全 tool 共通の形: 値 + 固定文(url が受ける形)+ 行き先の規則(1 文)
+        assert result == (
+            f"ERROR: {bad} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+        ), bad
+        results[bad] = result.replace(bad, "<value>")
+    # 値を調べて文面を出し分けていない
+    assert len(set(results.values())) == 1
+    assert env.gets == [] and env.writes == []
+
+
+def test_file_id_is_only_ever_a_file_id(monkeypatch, tmp_path):
+    """file_id= に URL や sandbox のパスが来ても url / path として処理しない
+    (レコードが無い、で答える)。"""
+    env = _UrlEnv(monkeypatch)
+    env.http_backend()
+    env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
+    for bad in (
+        "https://llens.test/ext/cage/static/a.pdf",
+        "/ext/cage/static/a.pdf",
+        f"https://llens.test/api/v1/files/{FILE_UUID}/content",
+        f"/api/v1/files/{FILE_UUID}/content",
+        "/workspace/x",
+    ):
+        result = env.run(file_id=bad)
+        assert result == (
+            f"ERROR: file_id {bad} のレコードが無い、またはアクセス権が無い。"
+            f"{FILE_ID_ARG_FORM}"
+        ), bad
+    assert env.gets == [] and env.writes == []
+    # 正しい file_id は従来どおり
+    result = env.run(file_id=FILE_UUID)
+    assert "→ /workspace/imports/report.xlsx" in result
+
+
+def test_no_value_sniffing_helpers_left():
+    from nucllei.builtin_tools import sandbox as mod
+
+    for gone in (
+        "_classify_source",
+        "_already_visible",
+        "_URL_ACCEPTS",
+        "_ERR_RELATIVE_EXT",
+        "_UUID_PATTERN",
+        "_FILES_URL_PATH_PATTERN",
+    ):
+        assert not hasattr(mod, gone), gone
+
+
+# =============================================================================
+# fetch_from_workspace(path) の /mnt/…(sandbox のパス → 利用者に見せられる形)
+#
+# send_to_workspace(url=) の「URL → sandbox で開けるパス」の逆向き。値の形ではなく
+# 解決結果で分かれる: 実体が /ext の file backend で配信されていれば URL を返し(コピーも
+# 添付もしない)、配信されていなければ nucllei 側の同じ置き場から読んで添付する。
+# =============================================================================
+
+
+class _MountEnv(_UrlEnv):
+    """_UrlEnv + tmp の RO root + Files 登録の記録(DB / Storage は触らない)。"""
+
+    def __init__(self, monkeypatch, tmp_path):
+        super().__init__(monkeypatch)
+        from nucllei.builtin_tools import sandbox as mod
+
+        self.root = _cage_mount(tmp_path)
+        (self.root / "cage" / "static" / "表 1.csv").write_text("a,b\n1,2\n")
+        (self.root / "cage" / "doc").mkdir()
+        (self.root / "cage" / "doc" / "本文.md").write_text("# x")
+        (self.root / "shared").mkdir()
+        (self.root / "shared" / "案内 図.png").write_bytes(b"\x89PNG\r\n\x1a\nshared")
+        (self.root / "shared" / "memo.txt").write_bytes(b"hello")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret")
+        (self.root / "shared" / "escape.txt").symlink_to(outside)
+        self.mount_root(self.root)
+        # tool 側の「/mnt 配下か」の判定も同じ tmp root に向ける
+        monkeypatch.setattr(mod, "_RO_MOUNT_ROOT", str(self.root))
+
+        self.registered: list[tuple] = []
+        self.displayed: list[str] = []
+
+        def fake_register(user_id, name, data):
+            self.registered.append((user_id, name, data))
+            content_type = mod.mimetypes.guess_type(name)[0] or "x/y"
+            return mod._attachment_dict("fid-1", name, content_type, len(data))
+
+        monkeypatch.setattr(mod, "_register_bytes_file", fake_register)
+        monkeypatch.setattr(mod, "display", self.displayed.append)
+        self.emitted: list[dict] = []
+
+    def fetch(self, path):
+        async def emit(event):
+            self.emitted.append(event)
+
+        return asyncio.run(
+            self.tools.fetch_from_workspace(
+                path, __user__={"id": "u1"}, __event_emitter__=emit
             )
         )
 
 
-def test_url_exclusive_with_file_id_and_filename():
-    env = _UrlEnv()
-    for extra in ({"file_id": "some-uuid"}, {"filename": "x"}):
-        result = env.run(url="http://10.0.0.5/a.pdf", **extra)
-        assert result.startswith("ERROR") and "同時指定" in result, extra
+def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
+    env = _MountEnv(monkeypatch, tmp_path)
+    env.file_backend(env.root / "cage")
 
-
-@contextlib.contextmanager
-def _patched(mapping: dict, key, value):
-    mapping[key] = value
-    try:
-        yield
-    finally:
-        mapping.pop(key, None)
-
-
-def test_url_rejects_non_url():
-    env = _UrlEnv()
-    result = env.run(url="ext/cage/x.png")
-    assert result.startswith("ERROR") and env.gets == []
-
-
-# --- "/" 始まり = self fetch --------------------------------------------------
-
-
-def test_self_fetch_forwards_auth_headers():
-    env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
-    result = env.run(
-        url="https://llens.test/ext/cage/static/kansen_manual/docs/10-14.pdf",
-        __request__=_FakeRequest({"cookie": "token=abc", "authorization": "Bearer x"}),
-    )
-    assert env.gets == [
-        (
-            "http://127.0.0.1:8080/ext/cage/static/kansen_manual/docs/10-14.pdf",
-            {"cookie": "token=abc", "authorization": "Bearer x"},
-        )
-    ]
-    assert env.writes[0]["payload"]["path"] == "imports/10-14.pdf"
-    assert base64.b64decode(env.writes[0]["payload"]["b64"]) == b"%PDF-fake"
-    assert not result.startswith("ERROR")
-
-
-def test_self_fetch_files_url_uses_content_disposition_name():
-    env = _UrlEnv(
-        responses=[
-            (200, {"content-disposition": 'attachment; filename="report.xlsx"'}, b"x"),
-        ]
-    )
-    result = env.run(
-        url="/api/v1/files/1111-2222/content",
-        __request__=_FakeRequest({"cookie": "token=abc"}),
-    )
-    assert env.gets[0][0] == "http://127.0.0.1:8080/api/v1/files/1111-2222/content"
-    assert env.writes[0]["payload"]["path"] == "imports/report.xlsx"
-    assert not result.startswith("ERROR")
-
-
-def test_self_fetch_absolute_ext_url_any_host():
-    # path が /ext/{name}/... の完全 URL は host を問わず自分自身への self fetch
-    # (認証ヘッダ付き)。与えられた host には接続しない(#139 の名前空間規則)
-    env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
-    result = env.run(
-        url="https://elsewhere.example/ext/cage/static/x.pdf?rev=2",
-        __request__=_FakeRequest({"cookie": "token=abc"}),
-    )
-    assert env.gets == [
-        (
-            "http://127.0.0.1:8080/ext/cage/static/x.pdf?rev=2",
-            {"cookie": "token=abc"},
-        )
-    ]
-    assert env.writes[0]["payload"]["path"] == "imports/x.pdf"
-    assert not result.startswith("ERROR")
-
-
-def test_self_fetch_without_request_sends_no_headers():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    env.run(url="https://llens.test/ext/cage/a.png")
-    assert env.gets == [("http://127.0.0.1:8080/ext/cage/a.png", {})]
-
-
-def test_self_fetch_auth_failure_surfaces_status():
-    env = _UrlEnv(responses=[(401, {}, b"")])
-    result = env.run(url="https://llens.test/ext/cage/a.png")
-    assert result.startswith("ERROR") and "401" in result
+    out = env.fetch(f"{env.root}/cage/static/図/a.png")
+    url = "/ext/cage/static/%E5%9B%B3/a.png"
+    assert not out.startswith("ERROR") and "添付不要" in out
+    # 画像は画像記法で、URL は相対のまま
+    assert f"![a.png]({url})" in out
+    # Files には何も登録しない・添付しない・sandbox も叩かない
+    assert env.registered == [] and env.emitted == [] and env.displayed == []
     assert env.writes == []
 
+    # 画像以外はリンク。空白を含む名前も markdown のリンク先に置ける形
+    out = env.fetch(f"{env.root}/cage/static/表 1.csv")
+    assert "[表 1.csv](/ext/cage/static/%E8%A1%A8%201.csv)" in out
+    # static に限らず、backend の root 配下ならゲートが配信している = URL を返す
+    out = env.fetch(f"{env.root}/cage/doc/本文.md")
+    assert "(/ext/cage/doc/%E6%9C%AC%E6%96%87.md)" in out
+    assert env.registered == []
 
-def test_relative_ext_path_rejected():
-    # 名前空間は image_refs と同じ: "/" 始まりは sandbox の fs、/ext/ は URL(絶対で渡す)
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    result = env.run(url="/ext/cage/a.png")
-    assert result.startswith("ERROR") and "絶対 URL" in result
-    assert env.gets == [] and env.writes == []
-
-
-def test_sandbox_paths_need_no_import():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    for u in ("/workspace/x", "/mnt/cage/x.pdf"):
-        result = env.run(url=u)
-        assert result.startswith("ERROR") and "取り込み不要" in result, u
-    assert env.gets == [] and env.writes == []
+    # 返した URL は send_to_workspace(url=) に渡すと同じパスに戻る(往復)
+    back = env.run(url=url)
+    assert "取り込み不要" in back and f"{env.root}/cage/static/図/a.png" in back
 
 
-def test_other_relative_paths_rejected():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    result = env.run(url="/etc/passwd")
-    assert result.startswith("ERROR") and env.gets == []
+def test_fetch_mounted_file_not_served_is_attached(monkeypatch, tmp_path):
+    """配信されていない /mnt のファイルは file にする(/workspace と同じ手順で添付)。"""
+    env = _MountEnv(monkeypatch, tmp_path)
+    env.file_backend(env.root / "cage")
+
+    path = f"{env.root}/shared/案内 図.png"
+    out = env.fetch(path)
+    assert out.startswith(f"{path} (") and "file_id=fid-1" in out
+    assert env.registered == [("u1", "案内 図.png", b"\x89PNG\r\n\x1a\nshared")]
+    assert env.emitted[0]["type"] == "chat:message:files"
+    assert env.emitted[0]["data"]["files"][0]["id"] == "fid-1"
+    # 画像は /workspace と同じく display で提示済みにする
+    assert env.displayed == ["![案内 図.png](/api/v1/files/fid-1/content)"]
+    assert "提示済み" in out
+    assert "/ext/" not in out
+    # sandbox の /files/read は使わない(nucllei 側の同じ置き場から読む)
+    assert env.writes == []
+
+    # backend が 1 つも無い配備でも同じ(cage 配下も添付になる)
+    env = _MountEnv(monkeypatch, tmp_path / "second")
+    out = env.fetch(f"{env.root}/cage/static/図/a.png")
+    assert "file_id=fid-1" in out and len(env.registered) == 1
 
 
-def test_public_base_url_goes_through_self_ext():
-    # EXT_PUBLIC_BASES 配下の原本 URL は原本 host へ直接行かず /ext/{name}/{rel} の self fetch
-    from nucllei.env import EXT_PUBLIC_BASES
+def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
+    env = _MountEnv(monkeypatch, tmp_path)
+    env.file_backend(env.root / "cage")
 
-    env = _UrlEnv(responses=[(200, {}, b"%PDF-fake")])
-    with _patched(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs"):
-        result = env.run(
-            url="http://his-info.test/docs/a/b.pdf?rev=2#page=3",
-            __request__=_FakeRequest({"cookie": "token=abc"}),
-        )
-    assert env.gets == [
-        ("http://127.0.0.1:8080/ext/his/a/b.pdf?rev=2", {"cookie": "token=abc"})
-    ]
-    assert not result.startswith("ERROR")
-
-
-def test_malformed_absolute_url_is_error():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    result = env.run(url="http://[::1/ext/cage/a.png")
-    assert result.startswith("ERROR") and env.gets == []
-
-
-def test_self_fetch_does_not_follow_redirects():
-    env = _UrlEnv(responses=[(302, {"location": "http://10.0.0.5/x"}, b"")])
-    result = env.run(
-        url="https://llens.test/ext/cage/a.png",
-        __request__=_FakeRequest({"cookie": "token=abc"}),
-    )
-    assert result.startswith("ERROR") and "redirect" in result
-    assert len(env.gets) == 1  # 追っていない
-
-
-# --- 完全 URL = LAN fetch -----------------------------------------------------
-
-
-def test_lan_blocked_destinations():
+    # 不在 / ディレクトリ / mount の外へ出る symlink → 読まない(同じ文面 = fail closed)
     for bad in (
-        "http://127.0.0.1:8000/files/write",
-        "http://172.17.0.5/metrics",
-        "http://169.254.1.1/x",
-        # ガード貫通の回帰 (レビュー指摘): IPv4-mapped IPv6 と unspecified は
-        # いずれも自ホストに落ちる
-        "http://[::ffff:127.0.0.1]:8000/files/write",
-        "http://0.0.0.0:8080/x",
-        "http://[::]:8080/x",
+        f"{env.root}/shared/nope.txt",
+        f"{env.root}/shared",
+        f"{env.root}",
+        f"{env.root}/shared/escape.txt",
+        f"{env.root}/cage/static/nope.png",
     ):
-        env = _UrlEnv()
-        result = env.run(url=bad)
-        assert result.startswith("ERROR") and "拒否レンジ" in result, bad
-        assert env.gets == [], bad
+        out = env.fetch(bad)
+        assert out.startswith("ERROR:") and "読めない" in out, bad
+        assert "大きすぎ" not in out and "上限" not in out, bad
+
+    # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない
+    out = env.fetch(f"{env.root}/shared/../../outside.txt")
+    assert out.startswith("ERROR:") and out.endswith(f"{PATH_ARG_FORM} {REF_ARGS_RULE}")
+    out = env.fetch(f"{env.root}/shared/../shared/memo.txt")
+    assert "file_id=fid-1" in out
+
+    # 大きすぎる: 実サイズと上限を言い、「存在しない」とは言わない
+    env.registered.clear()
+    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 3)
+    out = env.fetch(f"{env.root}/shared/memo.txt")
+    assert out.startswith("ERROR:") and "5B" in out and "上限 3B" in out
+    assert "ファイルは存在する" in out and "読めない" not in out
+    # 配信されている物は読まないので上限に掛からない
+    env.emitted.clear()
+    assert "添付不要" in env.fetch(f"{env.root}/cage/static/図/a.png")
+    assert env.registered == [] and env.emitted == []
 
 
-def test_lan_rejects_non_http_scheme():
-    env = _UrlEnv()
-    result = env.run(url="ftp://10.0.0.5/a.pdf")
-    assert result.startswith("ERROR") and "http" in result
+def test_fetch_mounted_file_outside_file_scope_is_withheld(monkeypatch, tmp_path):
+    """配備が EXT_FILE_SCOPES で配信範囲を絞っていれば、file backend の root 配下で範囲の
+    外にある物は URL も返さず **添付にもしない** — 配信範囲の設定は「利用者に渡してよい
+    範囲」という 1 つの意味を持つ(URL では 404 なのに添付なら渡る、を作らない)。
+    nucllei にディレクトリ名は焼かない。"""
+    from nucllei.env import EXT_FILE_SCOPES
+
+    env = _MountEnv(monkeypatch, tmp_path)
+    env.file_backend(env.root / "cage")
+    monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
+
+    out = env.fetch(f"{env.root}/cage/static/図/a.png")
+    assert "添付不要" in out and "(/ext/cage/static/%E5%9B%B3/a.png)" in out
+    assert env.registered == []
+
+    # 範囲外: 実在しても・しなくても同じ文で断る(範囲の判定だけ。読まない)
+    for withheld in (
+        f"{env.root}/cage/doc/本文.md",
+        f"{env.root}/cage/doc/nope.md",
+        f"{env.root}/cage/doc/../doc/本文.md",
+    ):
+        out = env.fetch(withheld)
+        assert out.startswith("ERROR:") and "利用者に配信しない範囲" in out, withheld
+        assert "file_id=" not in out and "/ext/" not in out, withheld
+    # 範囲外の実体を指す symlink(配信の設定と無関係な置き場に置かれていても)も実体で判定
+    (env.root / "shared" / "link.md").symlink_to(env.root / "cage" / "doc" / "本文.md")
+    out = env.fetch(f"{env.root}/shared/link.md")
+    assert out.startswith("ERROR:") and "利用者に配信しない範囲" in out
+    assert env.registered == [] and env.emitted == [] and env.displayed == []
+
+    # どの backend の root 配下でもない /mnt/… は従来どおり添付
+    out = env.fetch(f"{env.root}/shared/memo.txt")
+    assert "file_id=fid-1" in out
+    assert env.registered == [("u1", "memo.txt", b"hello")]
 
 
-def test_lan_accepts_uppercase_scheme():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    result = env.run(url="HTTP://10.0.0.5/a.pdf")
-    assert not result.startswith("ERROR") and len(env.gets) == 1
+def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
+    """path に URL / file_id が来ても読み替えない — sandbox のパスとして解いて失敗する。"""
+    env = _MountEnv(monkeypatch, tmp_path)
+    env.file_backend(env.root / "cage")
+    for given in (
+        "/ext/cage/static/%E5%9B%B3/a.png",
+        f"/api/v1/files/{FILE_UUID}/content",
+    ):
+        out = env.fetch(given)
+        assert out == (
+            f"ERROR: {given} は sandbox のパスの形でない。{PATH_ARG_FORM} {REF_ARGS_RULE}"
+        ), given
+    assert env.registered == [] and env.writes == []
 
 
-def test_lan_ok_writes_with_basename_and_no_auth_headers():
-    env = _UrlEnv(responses=[(200, {}, b"data")])
-    result = env.run(
-        url="http://10.0.0.5/docs/manual.pdf",
-        __request__=_FakeRequest({"cookie": "token=abc"}),
+def test_fetch_from_workspace_spec_mentions_both_outcomes():
+    """モデルに見える説明(docstring の :param より前)と引数。引数は path だけ。"""
+    from nucllei.builtin_tools.sandbox import Tools
+    from nucllei.utils.tools import get_tool_specs
+
+    description = Tools.fetch_from_workspace.__doc__.split(":param")[0]
+    assert "file_id" in description and "/ext/" in description
+    spec = next(
+        s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )
-    # 認証ヘッダは外へ持ち出さない
-    assert env.gets == [("http://10.0.0.5/docs/manual.pdf", {})]
-    assert env.writes[0]["payload"]["path"] == "imports/manual.pdf"
-    assert not result.startswith("ERROR")
+    assert list(spec["parameters"]["properties"]) == ["path"]
+    assert "/mnt/" in spec["parameters"]["properties"]["path"]["description"]
+    # 橋渡しで返る URL は percent-encode される(本文の URL と別表記になりうる)
+    assert "別表記" in description
 
 
-def test_lan_name_from_content_disposition():
-    env = _UrlEnv(
-        responses=[
-            (200, {"content-disposition": 'attachment; filename="report.xlsx"'}, b"x"),
-        ]
+def test_reference_params_are_described_in_fixed_words():
+    """モデルに見える spec: 参照の引数(url / path / file_id)の説明が、どの builtin でも
+    同じ言葉(固定文の定数と同じ形の列挙)で、1 行に収まって spec に入っている
+    (spec ビルダは :param の継続行を落とす)。"""
+    from nucllei.builtin_tools.attachment_text import Tools as AttachmentTools
+    from nucllei.builtin_tools.sandbox import Tools
+    from nucllei.utils.tools import get_tool_specs
+
+    def described(tools, name, arg):
+        spec = next(s for s in get_tool_specs(tools) if s["name"] == name)
+        return spec["parameters"]["properties"][arg]["description"]
+
+    url_form = (
+        "スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・"
+        "`/api/v1/files/{id}/content`。"
     )
-    env.run(url="http://10.0.0.5/download?id=3")
-    assert env.writes[0]["payload"]["path"] == "imports/report.xlsx"
+    workspace_form = "sandbox の絶対パス (`/workspace/…`)。"
+    path_form = "sandbox の絶対パス (`/workspace/…` `/mnt/…`)。"
+    file_id_form = "添付・生成物の id"
 
-
-def test_lan_name_fallback_when_no_basename():
-    env = _UrlEnv(responses=[(200, {}, b"x")])
-    env.run(url="http://10.0.0.5/")
-    assert env.writes[0]["payload"]["path"] == "imports/download"
-
-
-def test_lan_follows_redirect_with_recheck():
-    env = _UrlEnv(
-        responses=[
-            (302, {"location": "http://10.0.0.6/real.pdf"}, b""),
-            (200, {}, b"pdf"),
-        ]
-    )
-    result = env.run(url="http://10.0.0.5/alias")
-    assert [g[0] for g in env.gets] == [
-        "http://10.0.0.5/alias",
-        "http://10.0.0.6/real.pdf",
-    ]
-    assert env.writes[0]["payload"]["path"] == "imports/real.pdf"
-    assert not result.startswith("ERROR")
-
-
-def test_lan_redirect_to_blocked_is_rejected():
-    env = _UrlEnv(responses=[(302, {"location": "http://127.0.0.1:8000/x"}, b"")])
-    result = env.run(url="http://10.0.0.5/alias")
-    assert result.startswith("ERROR") and "拒否レンジ" in result
-    assert env.writes == []
-
-
-def test_lan_too_many_redirects():
-    env = _UrlEnv(responses=[(302, {"location": "http://10.0.0.5/loop"}, b"")] * 4)
-    result = env.run(url="http://10.0.0.5/loop")
-    assert result.startswith("ERROR") and "redirect" in result
-
-
-def test_lan_size_cap():
-    env = _UrlEnv(responses=[(200, {}, _TOO_LARGE)])
-    result = env.run(url="http://10.0.0.5/big.iso")
-    assert result.startswith("ERROR") and "大きすぎる" in result
-
-
-def test_lan_error_status():
-    env = _UrlEnv(responses=[(404, {}, b"")])
-    result = env.run(url="http://10.0.0.5/missing.pdf")
-    assert result.startswith("ERROR") and "404" in result
+    sandbox = Tools()
+    assert url_form in described(sandbox, "send_to_workspace", "url")
+    assert file_id_form in described(sandbox, "send_to_workspace", "file_id")
+    assert workspace_form in described(sandbox, "write_file", "path")
+    assert workspace_form in described(sandbox, "list_workspace", "path")
+    assert path_form in described(sandbox, "fetch_from_workspace", "path")
+    assert file_id_form in described(AttachmentTools(), "read_attachment", "file_id")
+    # 「相対も通る」は消えている
+    for name in ("write_file", "list_workspace", "fetch_from_workspace"):
+        assert "相対" not in described(sandbox, name, "path"), name

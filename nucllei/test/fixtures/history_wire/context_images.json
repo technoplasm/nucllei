@@ -2,7 +2,7 @@
 	"_comment": "tool 結果の画像(results[].context_images)を次ターンの履歴へ再送する wire 形(#142)。BE convert_content_blocks_to_messages(test_tool_output.py)と FE expandAssistantToolHistory(chat-messages.test.ts)が同じ blocks → 同じ expected になることを両側のテストで固定する。blocks は永続化形(snapshot_content_blocks — calls / results)。",
 	"cases": [
 		{
-			"name": "file_id / 絶対 URL / fs 参照の混在 + 並列 call + 結果未着 call",
+			"name": "file_id / 絶対 URL / 同一サーバの相対 URL (/ext/) / fs 参照の混在 + 並列 call + 結果未着 call",
 			"blocks": [
 				{ "type": "reasoning", "content": "どの図を見るか考える", "done": true, "duration": 1 },
 				{ "type": "text", "content": "図を確認します。" },
@@ -33,6 +33,8 @@
 							"context_images": [
 								"https://llens.test/ext/cage/figs/a.png",
 								"HTTP://llens.test/ext/cage/figs/b.png",
+								"/ext/cage/figs/c.png",
+								"/ext/cage/docs/d.pdf#page=4",
 								"/mnt/cage/x.pdf#page=2",
 								"/api/v1/files/def/content#page=3"
 							]
@@ -91,6 +93,8 @@
 							"type": "image_url",
 							"image_url": { "url": "HTTP://llens.test/ext/cage/figs/b.png" }
 						},
+						{ "type": "image_url", "image_url": { "url": "/ext/cage/figs/c.png" } },
+						{ "type": "image_url", "image_url": { "url": "/ext/cage/docs/d.pdf#page=4" } },
 						{ "type": "image_url", "image_url": { "url": "/mnt/cage/x.pdf#page=2" } },
 						{ "type": "image_url", "image_url": { "url": "/api/v1/files/def/content#page=3" } }
 					]

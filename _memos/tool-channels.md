@@ -14,7 +14,7 @@ tool が「戻り値以外」で何かを届ける口の全量。issue #88 / #89
 | 戻り値(`return`) | モデル | tool 終了時 | ○(results[i].content) | ○ | ○ |
 | `__progress__(description, *, current, total, done)` | 人間 | **実行中に即時** | **✗(揮発)** | ○ | ✗ |
 | `__display__(content, kind)` | 人間 | 実行後 harvest | ○(results[i].display) | ○ | ✗ |
-| `__feed_image__(file_id または "/" 始まり参照)` | モデル(VLM) | 実行後 harvest | ○(results[i].context_images) | ○ | ○(画素) |
+| `__feed_image__(参照文字列: file_id / URL(`http(s)://…`・同一サーバの `/ext/…`)/ sandbox のパス(`/workspace/…` `/mnt/…`)/ `/api/v1/files/{id}/content#page=N`。振り分けは `image_refs.stored_ref_kind`)` | モデル(VLM) | 実行後 harvest | ○(results[i].context_images) | ○ | ○(画素) |
 | `__event_emitter__({type,data})` | 人間 | 即時 | 型による | ✗(async) | 型による |
 | `__event_call__({type,data})` | 人間(モーダル) | 即時・双方向 | ✗ | ✗(async) | ✗ |
 

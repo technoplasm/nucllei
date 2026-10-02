@@ -236,8 +236,8 @@ _INHERITED_SCOPE_KEYS = (
 def request_origin(request) -> dict | None:
     """受信 Request から自オリジン `{"scheme", "host"}` を取り出す。
 
-    読み方は llens doc tool と同じ(Caddy 越しの X-Forwarded-Proto / X-Forwarded-Host、
-    無ければ scope の scheme / Host)。取れなければ None。background 実行(#110)の
+    読み方は Caddy 越しの X-Forwarded-Proto / X-Forwarded-Host、無ければ scope の
+    scheme / Host。取れなければ None。background 実行(#110)の
     続きターンには受信 Request が無いので、spawn 時にこれを exec 行へ残し、resume 時に
     `internal_request(origin=…)` で復元する。
     """
@@ -338,10 +338,10 @@ async def start_internal_turn(
     # 後も runner 側の in_exec=True を保つため(finally で元に戻す)。
     exec_token = in_exec.set(False)
 
-    # 親の scope(headers / scheme / server / client …)を引き継ぐ — tool は __request__ の
-    # X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組んで文書 URL を
-    # 絶対化する(llens doc tool)。ヘッダ空の合成 Request だと子ターンで origin が
-    # 組めず相対 /ext/ に落ちて feed_image が拒否する(行き止まり)
+    # 親の scope(headers / scheme / server / client …)を引き継ぐ — __request__ の
+    # X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組む tool が、子ターンでも
+    # 親と同じ origin を得られるように。文書の図は 2026-10-03 から相対 `/ext/…` のまま渡す
+    # 運用(`image_refs.py` の module docstring)で、llens doc tool はもう origin を補わない
     child_request = internal_request(
         request.app, scope_from=getattr(request, "scope", None)
     )

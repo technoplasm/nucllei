@@ -275,6 +275,60 @@ class TestExtFileBackend(AbstractPostgresTest):
         assert "etag" in response.headers
         assert "last-modified" in response.headers
 
+    # --- EXT_FILE_SCOPES: 配信範囲を root 直下のディレクトリに絞る ---
+
+    def _populate_scoped(self, tmp_path):
+        root = self._populate(tmp_path)
+        (root / "doc").mkdir()
+        (root / "doc" / "本文.md").write_text("{{PUBLIC_BASE}}")
+        (root / "static2").mkdir()
+        (root / "static2" / "b.png").write_bytes(b"\x89PNG\r\n\x1a\nb")
+        # 範囲内から範囲外(root の中)を指す symlink / 範囲外から範囲内を指す symlink
+        (root / "static" / "leak.md").symlink_to(root / "doc" / "本文.md")
+        (root / "doc" / "fig.png").symlink_to(root / "static" / "figs" / "a.png")
+        return root
+
+    def _get(self, path):
+        with mock_webui_user(id="1"):
+            return self.fast_api_client.get(self.create_url(path))
+
+    def test_scope_unset_serves_whole_root(self, monkeypatch, tmp_path):
+        # 未設定の配備は従来どおり(root の下は全部)
+        root = self._populate_scoped(tmp_path)
+        self._enable_root(monkeypatch, root)
+        assert self._get("/cage/static/figs/a.png").status_code == 200
+        assert self._get("/cage/doc/本文.md").status_code == 200
+        assert self._get("/cage/static2/b.png").status_code == 200
+
+    def test_scope_restricts_serving(self, monkeypatch, tmp_path):
+        from nucllei.env import EXT_FILE_SCOPES
+
+        root = self._populate_scoped(tmp_path)
+        self._enable_root(monkeypatch, root)
+        monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
+        assert self._get("/cage/static/figs/a.png").status_code == 200
+        # 範囲外は不在と同じ 404(存在を漏らさない)
+        assert self._get("/cage/doc/本文.md").status_code == 404
+        assert self._get("/cage/static2/b.png").status_code == 404  # 前方一致ではない
+        # 判定は resolve 後の実体: 範囲内の symlink が範囲外を指す → 404、
+        # 範囲外の symlink が範囲内を指す → 実体が範囲内なので配信
+        assert self._get("/cage/static/leak.md").status_code == 404
+        assert self._get("/cage/doc/fig.png").status_code == 200
+        assert self._get("/cage/static/escape.txt").status_code == 404
+
+    def test_scope_multiple_and_empty(self, monkeypatch, tmp_path):
+        from nucllei.env import EXT_FILE_SCOPES
+
+        root = self._populate_scoped(tmp_path)
+        self._enable_root(monkeypatch, root)
+        monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static/figs", "static2"))
+        assert self._get("/cage/static/figs/a.png").status_code == 200
+        assert self._get("/cage/static2/b.png").status_code == 200
+        assert self._get("/cage/static/noext").status_code == 404
+        # name はあるが有効なエントリが無い(全部 typo)→ 何も配信しない(fail closed)
+        monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ())
+        assert self._get("/cage/static/figs/a.png").status_code == 404
+
     def test_range_request(self, monkeypatch, tmp_path):
         root = self._populate(tmp_path)
         self._enable_root(monkeypatch, root)

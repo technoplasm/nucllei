@@ -311,11 +311,65 @@ jail に出る (上記「参照用データを jail に見せる」)。
 | `run_python(code, timeout_s?)` | **stateful**。会話ごとの常駐 kernel で永続 namespace 実行 (`/exec_cell`)。exports/ 自動添付 |
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
 | `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具)。exports/ 自動添付 |
-| `send_to_workspace(filename?, file_id?)` | チャット添付を `/workspace/imports/` に取り込む |
-| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
-| `list_workspace(path?)` | workspace のファイル一覧 |
-| `fetch_from_workspace(path)` | workspace の任意ファイルを Files に登録しチャットに添付 |
+| `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
+| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下の絶対パス。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
+| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
+| `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/mnt/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。既に `/ext/…` で配信されている `/mnt/…` のファイルは添付せず、その URL を返す (下記) |
 
+- **`send_to_workspace(url=)` が取れる URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) の
+  範囲だけ** (2026-10-03): `/ext/{name}/…` (同一サーバの相対、または絶対 `https://<host>/ext/{name}/…` = host 不問) と `EXT_PUBLIC_BASES` 配下の URL を、
+  `EXT_UPSTREAMS` の backend 経由で取る (redirect は辿らない・cookie を転送しない)。配備層の
+  `fetch_url` / `feed_image` と同じ URL が同じように通り、同じ理由で落ちる。**許可先の外の URL
+  (任意の LAN ホスト・外部サイト) は取りに行かない** — 旧実装は CIDR 拒否リスト (valve
+  `url_blocked_cidrs`、撤去) 以外の LAN を全部取れた。上限は valve `url_max_mb` (既定 50 MB)。
+  - **`/mnt` 配下にある物はコピーしない**: URL の解決先が file backend (`EXT_UPSTREAMS=name=file:///mnt/…`) で
+    実体が `/mnt` 配下なら、取り込まずに「`/mnt/…` として既に sandbox から見えている」とパスを返す
+    (上限も掛からない)。`/mnt` は nucllei と sandbox が同じ volume を bind する置き場という規約
+    (上の「参照用データを jail に見せる (`/mnt`)」) に依存する — **nucllei は sandbox 側の bind の有無を確かめない**
+    ので、nucllei にだけ bind した配備ではモデルに無いパスを案内することになる。必ず両方に bind する。
+  - **引数は名前で解釈が決まる。値の中身を見て別の引数に読み替えない**: `url` は URL としてだけ
+    解決し (UUID や `/workspace/…` `/mnt/…` は「URL として解決できない」+ 固定の案内文)、`file_id` に
+    URL が来ても url としては処理しない。`url` の `/api/v1/files/{id}/content` (このサーバのファイル
+    配信口。相対・絶対) は URL のルーティングとして file に当たり、file_id と同じ所有者チェックで取り込む。
+    規則の定義は nucllei の `README_API.md` §3.8。
+- **`fetch_from_workspace(path)` は `send_to_workspace(url=)` の逆向きの橋渡し** (2026-10-03)。利用者に
+  見せられるのは URL だけ (`/ext/…` か `/api/v1/files/{id}/content`) で、sandbox のパスはブラウザでは
+  開けない。モデルにパスを URL へ書き換えさせず、tool が解決結果で決める:
+
+  | tool | 向き | 同じ実体が両方にあるとき | そうでないとき |
+  |---|---|---|---|
+  | `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/mnt/…` を返す | `/workspace/imports/` にコピー |
+  | `fetch_from_workspace(path)` | sandbox のパス → 利用者に見せられる URL / file_id | 添付せず `/ext/{name}/…` を返す | Files に登録して添付 (file_id) |
+
+  - `/mnt/…` の実体が `EXT_UPSTREAMS` の file backend の root 配下 (例 `cage=file:///mnt/cage`) なら、
+    その配信 URL (相対 `/ext/cage/…`、パス部は percent-encode 済み) を返す。Files には何も作らない。
+    **`/ext` ゲートが既に配信している物の URL を教えるだけで、公開範囲は広げない** — 逆に言えば
+    backend が配信する範囲は全部 URL になる。root (`/mnt/cage`) の下に「利用者に配信する物」
+    (`static/`) と「sandbox で読むだけの物」(`doc/`) が同居する配備は、nucllei の env
+    `EXT_FILE_SCOPES=cage=static` で配信範囲を絞る (ゲートも 404 になり、root 配下で範囲外の
+    パスは **URL も返さず添付にもしない** — 「利用者に配信しない範囲にある」と断る。配信範囲 =
+    利用者に渡してよい範囲。未設定なら root 全体。nucllei の `README_API.md` §3.8)。
+  - 配信されていない `/mnt/…` (例 `/mnt/shared/…`) は、nucllei 自身に bind された同じ置き場から読んで
+    添付する (sandbox の `/files/read` は workspace しか扱わないので使わない)。上限は nucllei の
+    `EXT_INLINE_MAX_BYTES` (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別)。
+    **sandbox にだけ bind した置き場は nucllei から読めず「読めない」になる** — そのときは
+    `run_shell` で `/workspace/` にコピーしてから渡すよう tool が案内する。両方に bind するのが前提 (上記)。
+  - 不在・ディレクトリ・置き場の外を指す symlink は同じ「読めない」(fail closed)、上限超過は
+    実サイズと上限を言う。`path` に URL が来ても URL としては扱わない。
+- **tool の `path` は jail から見た絶対パス (`/workspace/...`) で揃える**。`send_to_workspace` の
+  戻り値・`run_python` / `run_shell` の中のパス・`list_workspace` の戻り値が全部同じ形なので、
+  ある tool の結果を別の tool の `path` にそのまま渡せる。**相対パスは受けない** (2026-10-03。`path` の形は
+  絶対パス 1 つ — 相対を「`/workspace` からの相対」と解くと `path="https://x/y.html"` が
+  `/workspace/https:/x/y.html` になる。`list_workspace` の無指定の既定は `/workspace`)。
+  相対・空・URL・`/workspace` の外 (`/etc/...`、`..` での脱出) は tool 側で、全 tool 共通の固定文
+  (`README_API.md` §3.8) で断り、`/mnt/...` (read-only の参照
+  データ) は `write_file` / `list_workspace` が「`run_shell` の `ls` で見る。利用者に見せるなら
+  `fetch_from_workspace`」と案内して断る — サービスの `/files/*` は workspace しか
+  扱わないため (`fetch_from_workspace` だけは `/mnt/...` を受ける。上の項)。**サービスの wire (`/files/list|read|write` の `path`) は workspace 相対のまま**で、
+  絶対 ↔ 相対の変換は tool 側だけが持つ (sandbox image と nucllei の版がずれても動く)。境界の検査は
+  tool 側 (文字列の正規化) とサービス側 (`_safe_path`、symlink 越しの脱出も実 fs で弾く) の二重。
+  失敗時の文面は原因で言い分ける: 400 = path の問題、404 = ファイルが無い、413 = 大きすぎる、
+  HTTP 応答が無い = 接続できない。
 - `write_file` は本文を function calling の引数として受け取るので、`run_python` の
   文字列や `run_shell` のヒアドキュメントを経由しない。裸の HTML/CSV/テンプレートを
   書かせるときのクォート事故 (本文中の `"""` や `EOF` 行で壊れる) を構造的に潰すのが目的で、

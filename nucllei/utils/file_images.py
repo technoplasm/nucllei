@@ -6,14 +6,15 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 (process_chat_payload 末尾)に、要求ユーザーが読める file だけを Storage から
 読み出して data URL に変換する。
 
-それ以外の **参照文字列**(スキーム付き URL = `https://…/ext/{name}/...` や
-EXT_PUBLIC_BASES 配下の原本 URL、および sandbox の fs パス "/mnt/..." / "/workspace/..."、
-任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
+それ以外の **参照文字列**(URL = `https://…/ext/{name}/...`・同一サーバの相対
+`/ext/{name}/...`・EXT_PUBLIC_BASES 配下の原本 URL、および sandbox の fs パス "/mnt/..." /
+"/workspace/..."、任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
 context_images に文字列のまま永続し、送信直前のここが実体化する(File は発行
 しない。context_images は次ターン以降の履歴にも再送される(#142)ので、読み出しは
 そのチャットが続くかぎり毎ターンの送信ごとに走る。解決できなくなった参照は下記の
 とおり "(image unavailable)" に落ちる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
-共有)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
+共有。image_url の url は引数名を持たない保存済み文字列なので、先頭で振り分ける
+`resolve_ref` を通す — 表は image_refs の module docstring)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
 (既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
 URL / fs 参照の公開範囲は admin 管理の EXT_UPSTREAMS(+ EXT_PUBLIC_BASES)/ RO マウント /
 呼び出しユーザーの workspace が境界で、解決層が fail closed で持つ。
@@ -23,7 +24,8 @@ URL / fs 参照の公開範囲は admin 管理の EXT_UPSTREAMS(+ EXT_PUBLIC_BAS
 落とし該当チャットが恒久的に失敗するため、text パーツ "(image unavailable)" に置換する。
 全経路とも同一の置換にすることで、payload からアクセス不可と不存在を区別できない
 (存在有無をモデル経由で漏らさない)。data URL・文字列 content のメッセージは触らない。それ以外の形
-("//host/..." プロトコル相対、http(s) 以外のスキーム、相対パス)も unavailable に倒す —
+("//host/..." プロトコル相対、http(s) 以外のスキーム、相対パス、"/ext/" でも sandbox でも
+ない "/" 始まり)も unavailable に倒す —
 headless API(`/api/chat/completions`)の image_url に外部 URL を渡した場合も同じ。
 
 読み出し + base64 エンコード + PDF 画像化は blocking なので thread にオフロードする
@@ -34,14 +36,15 @@ import asyncio
 import base64
 import logging
 import mimetypes
-import re
 
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.access_control import has_read_access_to_file
 from nucllei.utils.image_refs import (
+    INTERNAL_FILE_URL_PATTERN as INTERNAL_FILE_URL_PATTERN,  # utils/skills.py が引く
     LoadedRef,
     detect_kind,
+    file_id_of_url,
     rasterize_pdf_page,
     resolve_ref,
     split_page,
@@ -50,12 +53,6 @@ from nucllei.env import SRC_LOG_LEVELS
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
-
-# 相対("/api/v1/files/{id}/content")と絶対(スキーム+ホスト付き)の両方に一致。
-# {id} は uuid 想定だがフォーマットは強制しない(パス区切り・クエリ開始文字以外)。
-INTERNAL_FILE_URL_PATTERN = re.compile(
-    r"^(?:https?://[^/]+)?/api/v1/files/([^/?#]+)/content(?:\?[^#]*)?$"
-)
 
 UNAVAILABLE_IMAGE_TEXT = "(image unavailable)"
 
@@ -189,16 +186,17 @@ async def inline_internal_image_urls(messages: list, user) -> list:
 
             # "#page=N" は file URL にも参照にも付く(PDF のページ指定)
             ref, page = split_page(url)
-            match = INTERNAL_FILE_URL_PATTERN.match(ref)
-            if match:
-                data_url = await load(match.group(1), page)
+            file_id = file_id_of_url(ref)
+            if file_id:
+                data_url = await load(file_id, page)
             elif ref.startswith("data:"):
                 # 既に実体(送信できる形)— 触らない
                 continue
             else:
-                # 残りは全部 resolver(image_refs)へ — http(s) URL と "/" 始まりの fs パス
-                # だけが解決され、それ以外("//host/..." プロトコル相対、ftp: / file: 等の
-                # 他スキーム、相対パス)は None → "(image unavailable)"(fail closed。
+                # 残りは全部 resolver(image_refs)へ — URL(http(s):// / 同一サーバの
+                # "/ext/")と sandbox の fs パス("/workspace/" "/mnt/")だけが解決され、
+                # それ以外("//host/..." プロトコル相対、ftp: / file: 等の他スキーム、
+                # 相対パス)は None → "(image unavailable)"(fail closed。
                 # URL のまま残すと推論エンジンがリクエストごと落とす)
                 data_url = await load_reference(ref, page)
             if data_url is None:

@@ -89,37 +89,47 @@ class Tools:
         PDF / Office / テキスト系の中身をそのまま文字で返す。長い文書は offset で
         続きを取る(next_offset が返る間は続きがある)。画像・スキャン等の
         テキスト層が無いファイルは読めない — 視覚が要るものは feed_image を使う。
+        戻り値は {ok, filename, content_type, source, total_chars, offset, text,
+        next_offset?}、失敗時は {ok: False, error}。
 
-        :param file_id: 読む添付の file_id(UUID)
+        :param file_id: 読むファイル。添付・生成物の id
         :param offset: 読み始めの文字位置(省略時 0 = 先頭。続きは前回の next_offset)
         :param max_chars: 1 回で返す最大文字数(省略時 40000)
-        :return: {ok, filename, content_type, source, total_chars, offset, text,
-                 next_offset?} / 失敗時は {ok: False, error}
         """
+        # 戻り値の形は本文側に書いてある — spec ビルダは `:return:` をモデルに見せない
+        # (README_API §5.1)
         user_id = (__user__ or {}).get("id")
         if not user_id:
             return {"ok": False, "error": "ユーザー文脈が無い(__user__ 未注入)。"}
 
         rec = Files.get_file_by_id(file_id)
-        if not rec:
-            return {"ok": False, "error": f"file_id {file_id} のレコードが無い。"}
-
         # 所有者チェックは fail-closed(owner が falsy でも拒否 — IDOR 同型の穴を
-        # 開けない)。存在有無より先に権利を確かめる形にはしない(レコード無しと
-        # 権利無しで応答を割っても、id は UUID で探索空間が無い)
-        owner = getattr(rec, "user_id", None)
-        if owner != user_id:
-            return {"ok": False, "error": f"file_id {file_id} にアクセス権が無い。"}
+        # 開けない)。「レコードが無い」と「所有者でない」は同じ文で返す(存在の有無を
+        # 漏らさない)。文面は全 tool 共通(`image_refs.py` の module docstring
+        # 「エラーに添える固定文」)— file_id が受ける形の固定文を添え、値は調べない
+        if not rec or getattr(rec, "user_id", None) != user_id:
+            # image_refs は builtin_tools(sandbox)を import する — 循環を避けて
+            # 呼び出し時に引く
+            from nucllei.utils.image_refs import FILE_ID_ARG_FORM
+
+            return {
+                "ok": False,
+                "error": (
+                    f"file_id {file_id} のレコードが無い、またはアクセス権が無い。"
+                    f"{FILE_ID_ARG_FORM}"
+                ),
+            }
 
         content, source = _resolve_text(rec)
         meta = getattr(rec, "meta", None) or {}
         if content is None:
+            # 事実だけを返す。ファイルの種類を決めつけて別の tool へ誘導しない
+            # (音声など、feed_image が当たらない物にも同じ文が出る)
             return {
                 "ok": False,
                 "error": (
-                    "テキストとして読める中身が無い。PDF/Office は抽出が未完 / 失敗の"
-                    "可能性(後で再試行)。画像・スキャン等の視覚が要るものは "
-                    f"feed_image を使う(content_type={meta.get('content_type') or '不明'})。"
+                    f"file_id {file_id} には抽出テキストが無い"
+                    f"(content_type={meta.get('content_type') or '不明'})。"
                 ),
             }
 

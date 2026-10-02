@@ -270,7 +270,8 @@ sandbox ツール(R2、respx 等で sandbox API をモック):
 として配布)のため fork 側 CI には載せない~~ → **#114 で本 repo に来た**(2026-09-03)。
 `nucllei/test/apps/webui/routers/test_builtin_sandbox.py` が T7〜T12 相当を全部持ち、
 CI の `uv run pytest` で毎回走る(env ゲート・prune・valves 編集・exports 登録/添付・
-send_to_workspace の owner-only、および llens から引き取った url= 経路の SSRF ガード回帰)。
+send_to_workspace の owner-only、および url= 経路の回帰 — 2026-10-03 に resolver 経由へ書き直し、
+llens から引き取った SSRF ガード (CIDR 拒否リスト) のテストは経路ごと撤去)。
 **tool と一緒にテストも移設した**のが要点 — tool だけ移して担保を配備層に残さない。
 
 ### E2E(実 Kimi × 実 sandbox / 実モデル、CI 外)
@@ -378,6 +379,19 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 **`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
 ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
 
+**`path` 引数は sandbox の fs の絶対パス**(2026-10-03、ken 決定「名前 = 形」: `url` = URL
+(絶対、または同一サーバの `/ext/…` — 末尾の「参照の規則の改訂」節)、
+`path` = `/workspace/…` `/mnt/…` の絶対パス、`file_id` = 添付)。`write_file` / `list_workspace` /
+`fetch_from_workspace` の 3 本は以前 workspace 相対で、他の tool の戻り値(絶対)をそのまま渡せず、
+`write_file("/workspace/x")` は `/workspace/workspace/x` に黙って書いていた。現行は 3 本とも
+`/workspace/…` を受けて絶対で返す(`list_workspace` の各行も絶対)。**相対パスは受けない**
+(同日中に改めた — 末尾の「両 repo 通しの検証で直したこと」節。当初は「`/workspace` からの相対」
+として通していた)。相対・空・URL・`/workspace` の外は tool 側で固定文で断る
+(`/mnt/…` は sandbox サービスの `/files/*` が扱えないので「run_shell の ls で」と案内)。
+サービスの wire は workspace 相対のまま(変換は tool 側の `_resolve_workspace_path`)。
+失敗の文面は `SandboxHTTPError.status` で言い分ける(400 path / 404 不在 / 413 上限 / それ以外の
+例外 = 接続不能)。詳細は `sandbox/README.md`「UI tool」。
+
 ### 担保
 
 - 単体: `nucllei/test/apps/webui/routers/test_builtin_sandbox.py`(CI の `uv run pytest`)
@@ -408,7 +422,8 @@ nucllei の出荷物になり「素の nucllei を配る相手にも届く」よ
   作らないこと — sandbox 側の認証が opt-in になった今、トークン未設定の組み合わせは
   401 ではなく**普通に動く**ので、ゲートに入れる理由が無い。
 - **`_post` はトークンがあるときだけ `Authorization: Bearer` を付ける**(空文字で
-  `Bearer ` を送らない)。任意 URL を取りに行く `_http_get` には混ぜない。
+  `Bearer ` を送らない)。~~任意 URL を取りに行く `_http_get` には混ぜない~~ — `_http_get` は
+  2026-10-03 に撤去(下の「send_to_workspace(url=) を resolver に」節)。
 - **設定漏れに気付ける warning**: 「URL はあるのに TOKEN が無い」ときだけ
   `sync_builtin_tools()` の冒頭で `log.warning`「認証なしで接続します」
   (import 時は logging 未設定の可能性があるのでフラグ `_SANDBOX_TOKEN_MISSING` を立てて
@@ -435,8 +450,240 @@ nucllei の出荷物になり「素の nucllei を配る相手にも届く」よ
   valves は `module.Valves(**valves)`(`nucllei/utils/tools.py`)で組み直され、pydantic v2 の
   既定 `extra='ignore'` が未知キーを黙って捨てる。ValidationError にならない。
   **旧データ互換コードは書いていない** — 「落ちない」だけを回帰で固定した。
-- 残る valve: `default_timeout_s` / `max_output_chars` / `url_blocked_cidrs` / `url_max_mb` /
-  `debug`。UI 編集は従来どおり効く。
+- 残る valve: `default_timeout_s` / `max_output_chars` / `url_max_mb` / `debug`
+  (`url_blocked_cidrs` は 2026-10-03 に撤去 — DB に残った値は同じく `extra='ignore'` で捨てられる)。UI 編集は従来どおり効く。
 - 回帰: `test_builtin_sandbox.py::test_destination_is_env_only_and_unreachable_from_db`
   (spec に `sandbox_url` が出ない / `valves/update` に送っても保存されない /
   旧行が DB に残っていてもロードできる / `_post` の宛先は env の値)。
+
+## send_to_workspace(url=) を resolver に(2026-10-03、#141)
+
+ken 決定: モデルに見える tool の引数は意味を固定する — **`url` = URL(スキーム付きの絶対 URL。
+同日中に同一サーバの `/ext/…`・`/api/v1/files/{id}/content` も URL として受けることにした —
+次の節)/ `path` = sandbox の fs の絶対パス / `file_id` = 添付・生成物**。受け取った形のまま渡し、
+モデルに読み替えさせない。`send_to_workspace` をこの規則に揃えた。
+
+- **URL の解決は `image_refs.resolve_ref` 一本**(同日中に url 専用の入口 `resolve_url` へ — 末尾の節)。独自の `_fetch_self`(`/ext/` と
+  `EXT_PUBLIC_BASES` 配下を cookie 付きで自オリジンへ)/ `_fetch_lan`(CIDR 拒否リストだけの
+  LAN fetch、redirect 3 回)/ `_http_get` / `_blocked_ip_error` / `_derive_name` / `_TooLarge` /
+  env `SELF_BASE_URL` / valve `url_blocked_cidrs` / 引数 `__request__` を削除した。
+  - 直ったこと: 配備層の `fetch_url` / `feed_image` と同じ URL が同じように通る・同じ理由で
+    落ちる。cookie 転送が無いので background 続きターン(リクエスト文脈なし)でも 401 に
+    ならない(#141「直す `send_to_workspace(ref)`」)。
+  - **挙動変更**: 許可先(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`)の外の URL は取り込めない
+    (`unknown_upstream`)。旧実装は docker 帯・loopback 以外の LAN を全部取れた。redirect も
+    辿らない(旧 LAN 経路は 3 回まで追った)。
+  - 取り込み名は URL の basename(decode 済み)。旧実装の Content-Disposition 優先は無くなった
+    (`LoadedRef` が応答ヘッダを持たない — 要るなら resolver 側に足す)。
+- **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50)。失敗は `RefError.code` で
+  言い分ける(`_explain_ref_error`。配備層 2 tool と同じ code・同じ言い方)。
+- **sandbox から既に見えている物はコピーしない**: `image_refs.mounted_path_for_url(url)` が
+  「解決先が file backend で実体が `/mnt` 配下」のときそのパスを返し、tool は取り込まずに
+  パスを案内する(cage の図・原本 = `EXT_UPSTREAMS=cage=file:///mnt/cage`)。URL → パスの
+  読み替えをモデルにさせず tool が橋渡しする。**sandbox 側に同じ bind があるかは確かめられない**
+  — `/mnt` は両者が同じ volume を bind する置き場、という #138 の規約に依存。
+- ~~**値の形で振り分ける**(`_classify_source`)~~ — **同日中に撤回**(下の「参照の規則の改訂」節)。
+  値の形を見て別の引数に読み替える処理は持たない。
+
+## 参照の規則の改訂(2026-10-03)— 相対 `/ext/…` を URL として受ける / 値の中身で判断しない
+
+ken 決定(同日 2 件)。#139(2026-09-07)の「参照は 3 形・相対 `/ext/…` は受けない(`relative_ext`)」と、
+上の節の「値の形で振り分ける(`_classify_source`)」を覆す。**規則の定義は
+`nucllei/utils/image_refs.py` の module docstring、英語の正文は `README_API.md` §3.8
+「Reference rules」**(ここは決定の経緯だけ持つ)。
+
+規則(要約):
+
+- **引数の名前で解釈が決まる。値の中身を見て別の引数の意味に読み替えない。**
+- **`url` = ブラウザが開ける URL**: スキーム付きの絶対 URL、または同一サーバの相対 URL
+  (`/` 始まり = 今のサーバの URL。実質 `/ext/{name}/…`)→ `image_refs.resolve_url`
+- **`path` = sandbox の fs の絶対パス**(`/workspace/…` `/mnt/…`)→ `image_refs.resolve_path`
+- **`file_id` = 添付・生成物**(本文リンクは `/api/v1/files/{id}/content`、tool には file_id で渡す)
+- **受け取った形のまま渡す**(読み替えない・origin を補わない)
+
+決定 1 — **相対 `/ext/…` を URL として受ける**。cage の図は相対 `/ext/cage/static/X` のままモデルに
+渡す(配備層 llens の `read_doc` は origin を補わない)。理由: 生成物の本文リンク
+`/api/v1/files/{id}/content` が相対で運用できているのと同じで、相対なら origin や http/https が
+変わっても表示が壊れない。origin を補う仕組み(リクエストヘッダから組む・組めないときの
+fallback・サブエージェント経由で別ホストになる問題)が要らなくなる。#139 が相対を断った理由
+(URL と fs パスが同じ `/` 始まりで同居すると取り違える)は、引数名と文脈(markdown の
+リンク・画像か、コードの中か)で防ぐ。既存の絶対 URL(`https://<任意の host>/ext/{name}/…`)は
+引き続き解決する。失敗 code `relative_ext` は削除(code の集合から 1 つ減った)。
+
+決定 2 — **値の中身で判断するのをやめる**。`send_to_workspace` の `_classify_source` /
+`_already_visible` / `_ERR_RELATIVE_EXT` を削除した:
+
+- `url=` は URL として解決するだけ。UUID・`/workspace/…`・`/mnt/…`・サーバに無い経路は
+  どれも同じ「URL として解決できない」+ 固定の案内文(`_URL_ACCEPTS`: url が受ける形 /
+  sandbox のファイルは取り込み不要 / 添付は file_id)。値を調べて文面を出し分けない。
+- `file_id=` は file の id として引くだけ。URL が来ても url として処理しない(レコード無し)。
+- **`url=` の `/api/v1/files/{id}/content` は file に当たる**(相対、または絶対 = host 不問)。
+  これは型の当て推量ではなく URL のルーティング — このサーバが実際に持つファイル配信口で、
+  本文リンクとして頻出する形。HTTP では取りに行かず、`image_refs.file_id_of_url` で id を取り、
+  file_id 経路と同じ読み出し・同じ所有者チェック(`_import_files`)で取り込む。
+  絶対形で host を見ないのは `/ext/` と同じ理由(与えられた host には接続しない。他ホストの
+  同じ path でも読むのは自サーバの Storage で、所有者チェックを通る)。`/content` の無い
+  `/api/v1/files/{id}`(メタデータの JSON を返す API)は配信口ではないので当てない。
+- 失敗理由の言い分け(不在 / サイズ超過 / redirect / 上流エラー / 不達 / 許可先の外)は
+  解決結果(`RefError.code`)に基づくので残る。「解決先が file backend で `/mnt` 配下 → パスを
+  返す」(`mounted_path_for_url`)も値の形ではなく解決結果なので残る。
+
+resolver の入口を分けた: `resolve_url(url, *, max_bytes)`(user を取らない — `/ext/` の公開範囲は
+admin 管理で per-user ではない)/ `resolve_path(path, user_id, *, max_bytes)` /
+`resolve_ref(ref, user_id, *, max_bytes)`(**保存済みの参照文字列**専用の薄い dispatcher。
+`context_images` や image_url の url は引数名を持たないので、ここだけは先頭で機械的に振り分ける:
+`http(s)://` と `/ext/` = URL、`/workspace/` `/mnt/` = fs、それ以外は `unsupported_form`)。
+`resolve_ref` のシグネチャは変えていない(送信直前 inline `file_images.py` が使う)。
+配備層の tool は引数名に応じて `resolve_url` / `resolve_path` を呼ぶ形に追従する(llens 側の作業)。
+
+配備の順序: llens の tool は nucllei の resolver を呼ぶ。**nucllei のこの版が配備される前に
+llens(cage / read_doc)が相対 `/ext/…` を返し始めると、feed が旧 resolver の `relative_ext` で落ちる**
+— nucllei を先に(または同じ機会に)入れ替える。
+
+未対応(dev だけの話): vite dev(:5173)の proxy に `/ext` が無いので、dev で `EXT_UPSTREAMS` を
+設定しても FE 経由の `/ext/…` は 404 になる(本番は単一オリジンなので関係ない)。
+
+## fetch_from_workspace(path) が `/mnt/…` を受ける(2026-10-03)— パス → 見せられる形の橋渡し
+
+埋めた穴: モデルが sandbox の中で見つけたファイルを**利用者に見せる**手段が、`/workspace/…` には
+あった(`fetch_from_workspace` で file_id、`exports/` の自動添付)が、`/mnt/…`(read-only の参照
+データ)には無かった。配備では cage の図・原本が `/mnt/cage/static/…` にあり、同じ物が
+`/ext/cage/static/…` で配信されているが、モデルが `/mnt/cage/` を `/ext/cage/` に書き換えるのは
+「読み替えない」に反する。ken:「sandbox のファイルを file id に変換するしかない。重複になるけど
+しかない。同じモノが ext から配信されているのをうまく伝えるすべがあればよいが」。
+
+決定: `send_to_workspace(url=)` の橋渡し(`mounted_path_for_url`)の**逆向き**を
+`fetch_from_workspace(path)` に入れる。値の形ではなく解決結果で分かれる。
+
+| tool | 向き | 同じ実体が両方にあるとき | そうでないとき |
+|---|---|---|---|
+| `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/mnt/…` を返す | `/workspace/imports/` にコピー |
+| `fetch_from_workspace(path)` | sandbox のパス → 利用者に見せられる URL / file_id | 添付せず `/ext/{name}/…` を返す | Files に登録して添付 |
+
+- `image_refs.url_for_mounted_path(path)`: `RO_MOUNT_ROOT` 配下の実ファイルが EXT_UPSTREAMS の
+  file backend の root 配下なら相対 `/ext/{name}/{rest}` を返す。閉じ込めは `_mounted_file` と同じ
+  (resolve 済み同士の `is_relative_to`)。rest は percent-encode(日本語・空白・括弧・`#?%`)。
+  組んだ URL を `_route_url` → `_ext_file_target` に通して同じファイルに戻ることを確かめてから
+  返す(URL の形の規則を二重に持たない)。root が入れ子なら深い方。
+- 配信されている → **コピーも添付もしない**。「`<path>` は `<url>` として配信されている。本文に
+  この URL を貼る」+ 画像なら `![name](url)`、それ以外は `[name](url)` を返す。display もしない
+  (貼るのはモデル。`/workspace` の添付は tool が display するので「貼らない」— ここは逆)。
+- 配信されていない `/mnt/…` → `resolve_path`(境界・上限 `EXT_INLINE_MAX_BYTES` は resolver)で
+  nucllei 側の同じ置き場から読み、`/workspace` と同じ `_attach`(Files 登録 → 添付 → 画像等は
+  display)。sandbox の `/files/read` は workspace 専用なので通さない。
+- 失敗の文面は `RefError.code` で分ける(`_explain_mount_error`): `not_found`(不在・ディレクトリ・
+  置き場の外を指す symlink を同じ文面で — resolver が同じ code に閉じているので tool も分けない)/
+  `too_large`(実サイズと上限、「ファイルは存在する」)。`not_found` には「sandbox からは開けるなら
+  run_shell で /workspace にコピーして渡す」を添える — **sandbox にだけ bind した置き場は nucllei
+  から読めない**ため(bind の有無は確かめられない。`mounted_path_for_url` と同じ規約依存)。
+- `path` は sandbox のパスとしてだけ解く。`/ext/…` や `/api/v1/files/…` が来ても読み替えず
+  「/workspace の外」で断る。関数名は変えない(`/mnt` も受けるので名前は実態より狭いが、改名は
+  prompt / skill / 既存会話の tool 名を全部動かすので見送り)。
+- **公開範囲は広げない**が、URL をモデルに教えることにはなる: backend が配信する範囲は全部
+  URL になる。llens は root が `/mnt/cage` で `doc/` と `static/` の 2 本を bind しているので、
+  そのままだと `/mnt/cage/doc/*.md`(doc 本文の生ファイル)にも `/ext/cage/doc/…` を返す。
+  生ファイルは利用者に配信する設計ではない(置換前の `{{PUBLIC_BASE}}` と frontmatter が入った
+  まま。置換済みの本文は cage の read_doc だけが返す — llens セッションの回答)。`doc/` が
+  root の下にあるのは sandbox への RO bind と root を共有している副産物で、**/ext ゲートは
+  今回以前からそれをログイン済みユーザー全員に配信していた**(per-user 検査なし)。
+- **`EXT_FILE_SCOPES`(同日追加)で配備が配信範囲を絞る**: `cage=static`(書式は EXT_UPSTREAMS
+  と同じ `name=値`、値は root からの相対ディレクトリ、同じ name の繰り返しで複数)。nucllei に
+  `static` は焼かない。URL の形(`/ext/cage/static/X`)は変えずに範囲だけ狭める — root 自体を
+  `/mnt/cage/static` にすると URL から `static/` が消え、cage の `{{PUBLIC_BASE}}/static/X`
+  (http backend の dev 構成と共通)と合わなくなるため。
+  - 規則は `ext_upstreams.ext_file_served(name, resolved)` 1 箇所(resolve 済みの実体が root の
+    中 + scope の中)。/ext ゲート(`_serve_local`)・`resolve_url`(`_read_confined` の閉じ込めを
+    述語にした)・`mounted_path_for_url`・`url_for_mounted_path` が全部これを通る。範囲外は
+    ゲートで 404、resolver で `not_found`、橋渡しは None(`send_to_workspace(url=)` は不在扱い。
+    `fetch_from_workspace` は当初「添付側」だったが、同日中に **添付もしない** に改めた —
+    末尾の「両 repo 通しの検証で直したこと」節)。
+  - `routers/ext.py` の変更は「`is_relative_to(root)` を共有の述語に差し替える」1 行と引数の
+    name だけ(個別の分岐は足していない)。
+  - sandbox のパスとしての読み(`resolve_path` の `/mnt/…`、jail 内)は範囲と無関係 — 絞るのは
+    「利用者に配信する範囲」。
+  - fail closed: name が現れたら絞り込みは有効のまま(不正な値だけなら何も配信しない)。
+    file backend でない name は起動時 WARNING。起動ログに配信範囲を 1 行出す(`log_mounts`)。
+  - **未設定の配備は挙動が変わらない**(root 全体)。
+- 担保: `test_image_refs_resolve.py`(`url_for_mounted_path` の境界・入れ子 root・path ⇔ URL の
+  往復・/ext ゲート `_serve_local` と同じファイルに当たること・scope のパースと 4 経路への適用)、
+  `test_builtin_sandbox.py` 末尾の節(URL を返し Files に登録しない / 配信外・scope 外は添付 /
+  失敗の言い分け / path を読み替えない)、`test_ext_proxy.py`(scope 内は配信 / 外は 404 /
+  未設定は従来どおり / symlink は実体で判定 / 有効エントリ無しは全 404)。
+
+## 両 repo 通しの検証で直したこと(2026-10-03)— 固定文 / 相対パス廃止 / `reason` / 配信範囲外は渡さない
+
+llens(配備層の tool)と通しで検証して見つかった nucllei 側の修正。規則の定義は引き続き
+`nucllei/utils/image_refs.py` の module docstring、英語の正文は `README_API.md` §3.8。
+
+- **完了通知から cage の図が消えるのを直した**: `execution_resume._notice_files` が旧規則
+  (「url として載せるのはスキーム付き URL だけ」、`"/"` 始まりは全部落とす)のままで、相対
+  `/ext/cage/…png` が background 実行の完了通知から落ちていた。保存済み参照の振り分けを
+  **`image_refs.stored_ref_kind` 1 箇所**に置き(`file_url` / `url` / `path` / `file_id` / None)、
+  `_notice_files`・`content_blocks.py`(履歴の組み立て)・`resolve_ref` がこれを使う。独自の
+  `startswith("/")` 判定は無くした。通知に載せるのは「ブラウザが画像として開ける物」— URL
+  (`http(s)://…`・`/ext/…`)と裸の file id。sandbox のパスと **`#page=N` の付いた参照**(PDF の
+  ページ。送信直前に画像化される物で img としては開けない)は落とす。後者は絶対 URL +
+  `#page=N` も落とすようになった(従来は壊れた img として載っていた)。
+- **相対パスを受けない**(llens と合意): `write_file` / `list_workspace` / `fetch_from_workspace`
+  の `path` は絶対パスだけ。相対を「`/workspace` からの相対」として通すと
+  `write_file(path="https://x/y.html")` が `/workspace/https:/x/y.html` を作る。
+  `list_workspace` の無指定の既定は `/workspace`。llens の `query_emr(save_to=)` も絶対のみ。
+- **固定文を公開定数にした**(llens と文面を合意。`image_refs.py`): `URL_ARG_FORM` /
+  `PATH_ARG_FORM` / `WORKSPACE_PATH_ARG_FORM`(`write_file` / `list_workspace` 用)/
+  `FILE_ID_ARG_FORM` / `REF_ARGS_RULE`(行き先の規則。全 tool 共通の 1 文)。配備層の tool は
+  これを import して同じ文面を使う。エラーの組み立ては全 tool 共通:
+  - url: `ERROR: <値> は URL として解決できない。` + `URL_ARG_FORM` + ` ` + `REF_ARGS_RULE`
+  - path: `ERROR: <値> は sandbox のパスの形でない。` + `PATH_ARG_FORM`(または
+    `WORKSPACE_PATH_ARG_FORM`)+ ` ` + `REF_ARGS_RULE`
+  - file_id: `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
+    (「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない。`read_attachment` は
+    dict を返すので `{ok: False, error}` の error に `ERROR: ` 抜きの同文)
+  - tool 固有の行き先(「sandbox のファイルは取り込み不要」「添付は file_id= に」)はエラーから
+    消した。旧 `_URL_ACCEPTS` は「添付・生成物は file_id= に渡す」と言いつつ
+    `/api/v1/files/…` を url で受けていて自己矛盾だった。
+  - `list_workspace` / `write_file` の `/mnt` 向け案内(「run_shell の ls で」)は、同じ `path`
+    引数の中の区分で解決結果に基づくので残した。
+  - `read_attachment` が抽出の無いファイルに返す文は「抽出テキストが無い(content_type=…)」の
+    事実だけ。旧文面の「視覚が要るものは feed_image」は種類を決めつけた誘導で、音声には誤り。
+- **`RefError.reason`**: `unknown_upstream` の内訳を安定したフィールドで返す(`unknown_name` /
+  `not_ext_form` / `outside_public_bases`。閉じた集合。他の code では None)。code の集合は
+  変えていない。llens の tool が文面の出し分けのために resolver の正規表現を複製して値を
+  再パースしていたのを不要にする。`detail` は人向けで文面は固定ではない(分岐に使わない)。
+  未知の name の判定は `_route_url` に寄せた(`_load_ext` から移動)。
+- **`route_of_url(url)`**(llens の要望): URL を解決規則と同じ `_route_url` で分解して
+  `UrlRoute(name, rel, query, public_base, origin, ext_form)`(+ `relative`)を返す公開関数。
+  読まない純粋な関数で、失敗は `resolve_url` と同じ code / reason。配備層の `fetch_url` が
+  リンク一覧のルートを組むために `/ext/{name}/…` の分解・`match_public_base`・`ext_backend` を
+  自前で複製していた(その結果、同じ入力に `feed_image` と違うエラー文面を返していた)。
+  配信範囲・実在は見ない(`resolve_url` の責務のまま)。
+- **配信範囲の外は添付でも渡さない**: `EXT_FILE_SCOPES=cage=static` でも
+  `fetch_from_workspace("/mnt/cage/doc/x.md")` は「配信されていない `/mnt`」として添付にして
+  いた(上の節の「範囲外は … 添付側」)。file backend の root 配下にあって、どの backend の配信
+  範囲にも無い物は、URL も返さず添付にもしない(`ext_upstreams.ext_file_withheld` →
+  `image_refs.mounted_path_withheld`)。配信範囲の設定が「利用者に渡してよい範囲」として
+  1 つの意味を持つ。どの backend の root 配下でもない `/mnt/…`(`/mnt/shared/…`)は従来どおり
+  添付、scope 未設定なら従来どおり URL。実在は見ない(範囲外なら無いファイルでも同じ文)。
+  **限界**: モデルが `run_shell` で `/workspace` にコピーしてから添付する経路は塞げない
+  (エラー文で「コピーして渡すこともしない」と言うだけ — 規則であって境界ではない)。
+- **`/api/v1/files/{id}/content` の fragment**: 意味を持つのは末尾の `#page=N` だけ
+  (`split_page`)。他の fragment は無視して同じ file に当てる — `file_id_of_url` が fragment
+  付きでも id を返すようにした(従来は呼び手が `split_page` で外す前提で、`#page=N` 以外が
+  付くと `unsupported_form` になる tool と通る tool があった)。
+- **橋渡しの往復の注記**: `url_for_mounted_path` は percent-encode した相対 URL を返すので、
+  cage の本文にある生の日本語 URL とは文字列が一致しない(同じファイルの別表記)。
+  `fetch_from_workspace` の docstring(モデルに見える部分)と README に 1 行。
+- **spec ビルダの制約を README_API §5.1 に明記**: description は最初の `:param` / `:return` の
+  前まで(`:return:` は丸ごと見えない)、`:param` は 1 行目だけ。`read_attachment` の戻り値の形は
+  `:return:` にだけ書かれていてモデルに届いていなかったので本文へ移した。builtin の他の tool と
+  harness tool(`run_subagent` / skill / task 系 — 手書きの spec dict)に同種の漏れは無かった。
+- 担保: `test_image_refs_resolve.py`(定数の文面 / `stored_ref_kind` / `route_of_url` が
+  `resolve_url` と同じ code・reason で落ちること / `mounted_path_withheld` / `file_id_of_url` の
+  fragment / reason)、`test_builtin_sandbox.py`(相対パスを断る / 3 つの引数のエラーの形 /
+  reason での言い分け / 配信範囲外を断る / spec の `:param` が固定の言葉で 1 行)、
+  `test_builtin_tools.py`(`read_attachment` の文面)、`test_execution_resume.py`(完了通知に
+  `/ext/…` が載る)。
+- 残っている物(今回は触っていない): `subagent.request_origin` / exec 行 `meta["origin"]` /
+  `internal_request(origin=)` は「tool が `__request__` から自オリジンを組む」ための仕組みで、
+  主な利用者だった llens doc tool は相対 `/ext/…` に切り替えて origin を補わなくなった。
+  llens の現行 tool に `X-Forwarded-*` を読むものは無い(2026-10-03 に grep で確認)。
+  利用者が居ないなら撤去の候補。

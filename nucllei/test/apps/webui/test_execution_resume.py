@@ -341,14 +341,22 @@ class TestExecutionResume(AbstractPostgresTest):
         chat = self._insert_chat()
         row = self._insert_exec("e1", chat.id, result="ok", duration=1.0)
         media = (
-            # url として載せるのはスキーム付き URL だけ。"/mnt/..." "/workspace/..." は
-            # ブラウザで開けず、"/ext/..." は fs パスの形では受けない(#139)
+            # 載せるのはブラウザが画像として開ける物だけ(振り分けは
+            # image_refs.stored_ref_kind): file id / 絶対 URL / 同一サーバの "/ext/…"
+            # (cage の図はこの形)。sandbox のパス("/mnt/…" "/workspace/…")と PDF の
+            # ページ参照("#page=N")、どの形でもない物は落とす
             [
                 "file-123",
                 "https://llens.test/ext/tool/img.png",
-                "/ext/tool/img.png",
+                "/ext/cage/static/図.png",
                 "/mnt/cage/x.pdf#page=2",
                 "/workspace/a.png",
+                "/api/v1/files/file-123/content#page=2",
+                "/ext/cage/static/doc.pdf#page=3",
+                "https://llens.test/ext/cage/static/doc.pdf#page=3",
+                "/etc/passwd",
+                "",
+                None,
             ],
             [{"content": "## グラフ", "kind": "markdown"}],
         )
@@ -363,6 +371,7 @@ class TestExecutionResume(AbstractPostgresTest):
                 "status": "uploaded",
             },
             {"type": "image", "url": "https://llens.test/ext/tool/img.png"},
+            {"type": "image", "url": "/ext/cage/static/図.png"},
         ]
 
     # ---- 連鎖上限の遡行(契約 M3 手順 3)----
@@ -669,6 +678,23 @@ class TestExecutionResume(AbstractPostgresTest):
         assert "stop" not in self.resume._merged_params(
             {"params": {}}, types.SimpleNamespace(name="J", settings=None)
         )
+
+    def test_build_wire_messages_expands_system_variables(self):
+        chat_json = {
+            "params": {"system": "{{USER_NAME}} / {{BASE_MODEL_ID}}"},
+            "history": {"currentId": None, "messages": {}},
+        }
+        user = types.SimpleNamespace(name="J", settings=None)
+        model = {
+            "id": "llens",
+            "name": "LLENS",
+            "info": {"base_model_id": "qwen3.8-flash-next"},
+        }
+        wire = self.resume.build_wire_messages(chat_json, user, None, model)
+        assert wire == [{"role": "system", "content": "J / qwen3.8-flash-next"}]
+        # モデルを渡さない呼び出しでも変数は残らない
+        wire = self.resume.build_wire_messages(chat_json, user, None)
+        assert wire == [{"role": "system", "content": "J / Unknown"}]
 
     def test_build_wire_messages_expands_user_image_files(self):
         chat_json = {

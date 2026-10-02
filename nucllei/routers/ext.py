@@ -2,10 +2,11 @@
 
 cage(HTTP ツールゲートウェイ)等が配信する文書内の図・PDF は Docker bridge
 内部 URL やコンテナ内パスでしか参照できず、ブラウザから到達できない。上流側が
-PUBLIC_BASE を "https://<自ホスト>/ext/{name}" にすると文書内の参照が自オリジンの
-絶対 URL になり、チャット表示・引用・display すべてでブラウザが session cookie 付きで
-そのまま解決できる(絶対にするのは、モデルが tool へ渡す参照の名前空間で「URL は
-スキーム付き、"/" 始まりは sandbox の fs」と分けるため — utils/image_refs.py)。
+PUBLIC_BASE を "/ext/{name}"(相対)にすると文書内の参照が同一オリジンの URL になり、
+チャット表示・引用・display すべてでブラウザが session cookie 付きでそのまま解決できる
+(相対なので origin や http/https が変わっても壊れない。絶対の
+"https://<自ホスト>/ext/{name}" でも同じに動く。モデルが tool の `url` にそのまま渡す
+ときの解決規則は utils/image_refs.py — 2026-10-03 に「相対 /ext/ は受けない」を覆した)。
 
 backend は env EXT_UPSTREAMS の値の形で 2 種(`utils/ext_upstreams.ext_backend`):
 
@@ -14,8 +15,10 @@ backend は env EXT_UPSTREAMS の値の形で 2 種(`utils/ext_upstreams.ext_bac
 - `file:///abs/path`: nucllei 自身に read-only で見えている root からの静的配信
   (#139 — cage のコーパスは nucllei にも bind されるので、上流 HTTP を叩かずに
   済む)。`FileResponse`(Range / etag / last-modified — PDF はブラウザのビューアが
-  Range を投げる)。root は resolve 済み、要求パスも resolve して `is_relative_to`
-  で閉じる(symlink 越えも閉じる)。ディレクトリ・不在は 404(一覧は出さない)。
+  Range を投げる)。root は resolve 済み、要求パスも resolve して root の中に閉じる
+  (symlink 越えも閉じる)。env EXT_FILE_SCOPES(`cage=static`)があれば、配信するのは
+  root のそのディレクトリの中だけ(範囲外は 404)— 判定は resolver と共有の
+  `ext_upstreams.ext_file_served`。ディレクトリ・不在は 404(一覧は出さない)。
   content-type は拡張子から、不明は application/octet-stream。
 
 backend によらないゲート:
@@ -45,6 +48,7 @@ from nucllei.utils.auth import get_verified_user
 from nucllei.utils.content_hardening import active_content_headers
 from nucllei.utils.ext_upstreams import (
     ext_backend,
+    ext_file_served,
     get_ext_client,
     has_path_traversal,
 )
@@ -73,20 +77,21 @@ async def proxy_ext_upstream(
 
     kind, target = backend
     if kind == "file":
-        return _serve_local(target, path)
+        return _serve_local(name, target, path)
     return await _proxy_http(target, name, path, request.url.query)
 
 
-def _serve_local(root: Path, path: str):
+def _serve_local(name: str, root: Path, path: str):
     # "{path:path}" は "//" 由来の先頭 "/" を残しうる。Path の結合は右辺が絶対だと
     # 左辺を捨てる(root / "/etc/passwd" = /etc/passwd)ので剥がしてから結合する。
-    # 閉じ込めの権威は下の is_relative_to — ここは事故の芽を摘むだけ。
+    # 閉じ込めの権威は下の ext_file_served(root の中 + EXT_FILE_SCOPES。resolver と共有)—
+    # ここは事故の芽を摘むだけ。
     try:
         resolved = (root / path.lstrip("/")).resolve()
     except (OSError, RuntimeError):
         # 深すぎる symlink ループ等。root の外か中かを判定できないので不在扱い
         raise HTTPException(status_code=404, detail="Not found")
-    if not resolved.is_relative_to(root) or not resolved.is_file():
+    if not ext_file_served(name, resolved) or not resolved.is_file():
         raise HTTPException(status_code=404, detail="Not found")
 
     content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"

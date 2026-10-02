@@ -557,6 +557,55 @@ EXT_UPSTREAMS = parse_ext_upstreams(os.environ.get("EXT_UPSTREAMS", ""))
 # 相変わらず EXT_UPSTREAMS 一本。既定は空 = 絶対 URL は自オリジンの /ext/ 形しか解決しない。
 EXT_PUBLIC_BASES = parse_ext_public_bases(os.environ.get("EXT_PUBLIC_BASES", ""))
 
+
+def parse_ext_file_scopes(value: str) -> dict[str, tuple[str, ...]]:
+    """`EXT_FILE_SCOPES` をパースする。書式は EXT_UPSTREAMS と同じ `name=値` のカンマ区切りで、
+    値は **その name の file backend の root からの相対ディレクトリ**(例 `cage=static`)。
+    同じ name を複数回書けば複数のディレクトリ(`cage=static,cage=figs`)。
+
+    name が 1 回でも現れたら、その name は「列挙したディレクトリの下だけ配信する」に
+    なる。値が不正(空・絶対・`.` `..` セグメント・バックスラッシュ・制御文字)な
+    エントリは log.warning して捨てるが、**name の絞り込み自体は有効のまま**(fail closed —
+    typo で root 全体の配信に戻さない。有効なエントリが 1 つも無ければ何も配信しない)。
+    name の形が不正なエントリはどの backend にも対応しないので捨てるだけ。
+    """
+    parsed: dict[str, list[str]] = {}
+    for entry in (value or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, sub = entry.partition("=")
+        name = name.strip()
+        sub = sub.strip().strip("/")
+        if not sep or not _EXT_UPSTREAM_NAME_PATTERN.match(name):
+            log.warning(f"EXT_FILE_SCOPES: ignoring invalid entry {entry!r}")
+            continue
+        scopes = parsed.setdefault(name, [])
+        if (
+            not sub
+            or "\\" in sub
+            or any(ord(c) < 0x20 or ord(c) == 0x7F for c in sub)
+            or any(seg in ("", ".", "..") for seg in sub.split("/"))
+        ):
+            log.warning(
+                f"EXT_FILE_SCOPES: ignoring invalid entry {entry!r} "
+                f"(/ext/{name}/ stays restricted to its other entries)"
+            )
+            continue
+        if sub not in scopes:
+            scopes.append(sub)
+    return {name: tuple(scopes) for name, scopes in parsed.items()}
+
+
+# file backend(`EXT_UPSTREAMS` の `name=file:///…`)が配信する範囲を、root 直下の
+# ディレクトリに絞る(例 "cage=static")。既定は空 = root 全体(従来どおり)。root を
+# sandbox への read-only bind と共有していて、root の下に「利用者に配信する物」と
+# 「sandbox で読むだけの物」が同居する配備のための設定 — URL の形(`/ext/{name}/static/X`)を
+# 変えずに配信範囲だけを狭める。規則は `utils/ext_upstreams.ext_file_served` 1 箇所で、
+# /ext ゲート・resolver・URL ⇔ sandbox パスの橋渡しのすべてに同じに効く。
+# http backend の name に書いても効かない(起動時に WARNING)。
+EXT_FILE_SCOPES = parse_ext_file_scopes(os.environ.get("EXT_FILE_SCOPES", ""))
+
 # feed(context_images)の参照(絶対 URL / sandbox fs パス)のオンデマンド解決(utils/image_refs.py —
 # ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。
 EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")

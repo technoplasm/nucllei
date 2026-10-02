@@ -674,6 +674,17 @@ class TestAttachmentText(AbstractPostgresTest):
         # 他人は拒否
         denied = Tools().read_attachment("doc-2", __user__={"id": "intruder"})
         assert denied["ok"] is False and "アクセス権" in denied["error"]
+        # 「レコードが無い」と「所有者でない」は同じ文(存在の有無を漏らさない)。
+        # 文面は全 tool 共通の形 + file_id が受ける形の固定文
+        from nucllei.utils.image_refs import FILE_ID_ARG_FORM
+
+        missing = Tools().read_attachment("no-such-id", __user__={"id": "intruder"})
+        for out, fid in ((denied, "doc-2"), (missing, "no-such-id")):
+            assert out == {
+                "ok": False,
+                "error": f"file_id {fid} のレコードが無い、またはアクセス権が無い。"
+                f"{FILE_ID_ARG_FORM}",
+            }
         # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
         self._new_file("owner", "doc-orphan", "orphan.txt", content="x")
         from nucllei.internal.db import get_db
@@ -699,10 +710,19 @@ class TestAttachmentText(AbstractPostgresTest):
         assert out["ok"] is True and out["source"] == "raw"
         assert out["text"] == "生テキスト"
 
-        # 抽出なし + binary → 読まず、feed_image への誘導を返す
-        self._new_file("owner", "img-1", "scan.png", content_type="image/png")
-        out = Tools().read_attachment("img-1", __user__={"id": "owner"})
-        assert out["ok"] is False and "feed_image" in out["error"]
+        # 抽出なし + binary → 読まず、「抽出テキストが無い」事実だけを返す。種類を
+        # 決めつけた誘導(feed_image)はしない — 音声でも同じ文
+        outs = {}
+        for fid, name, content_type in (
+            ("img-1", "scan.png", "image/png"),
+            ("aud-1", "rec.webm", "audio/webm"),
+        ):
+            self._new_file("owner", fid, name, content_type=content_type)
+            out = Tools().read_attachment(fid, __user__={"id": "owner"})
+            assert out["ok"] is False and "抽出テキストが無い" in out["error"]
+            assert "feed_image" not in out["error"]
+            outs[fid] = out["error"].replace(fid, "<id>").replace(content_type, "<ct>")
+        assert len(set(outs.values())) == 1
 
     def test_sync_registers_builtin_row(self):
         from nucllei.builtin_tools import sync_builtin_tools

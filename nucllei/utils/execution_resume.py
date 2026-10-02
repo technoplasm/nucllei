@@ -49,7 +49,8 @@ from nucllei.models.executions import ExecutionModel, Executions
 from nucllei.models.users import Users
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
 from nucllei.utils.executions import async_exec_available
-from nucllei.utils.task import prompt_template
+from nucllei.utils.image_refs import split_page, stored_ref_kind
+from nucllei.utils.task import prompt_template, resolve_base_model_id
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -267,23 +268,29 @@ def _notice_section(row: ExecutionModel, media: Optional[tuple[list, list]]) -> 
 
 
 def _notice_files(context_images: list) -> list:
-    """context_images(file id / URL / "/" 始まり fs 参照)→ notice 添付 files(契約 M4)。
+    """context_images(保存済みの参照文字列)→ notice 添付 files(契約 M4)。
 
-    url として載せるのは **スキーム付き URL だけ**(`https://…/ext/{name}/...` —
-    ブラウザが session cookie で開ける表示形、または EXT_PUBLIC_BASES 配下の原本 URL)。
-    "/" 始まり("/mnt/...#page=N" / "/workspace/..." /
-    "/api/v1/files/{id}/content#page=N"(添付 PDF のページ参照))はブラウザでそのまま
-    開けない(#139)ので落とす(モデルへの再注入は別経路で行われる。フロントに壊れた
-    img を出さない)。"""
+    載せるのは **ブラウザが画像として開ける物だけ**(フロントに壊れた img を出さない。
+    モデルへの再注入は別経路で行われる)。振り分けは `image_refs.stored_ref_kind` の
+    1 箇所の規則に従う — ここに独自の先頭判定を持たない:
+
+    - `url`(`http(s)://…` と同一サーバの `/ext/{name}/…`)→ url としてそのまま載せる
+      (相対 `/ext/…` はブラウザが session cookie で開ける。cage の図はこの形)
+    - `file_id`(裸の id)→ `/api/v1/files/{id}/content` に組んで載せる
+    - `path`(`/mnt/…` `/workspace/…`)→ sandbox のパスはブラウザでは開けないので落とす
+    - `file_url`(`/api/v1/files/{id}/content#page=N` — 添付 PDF のページ参照)と、
+      `#page=N` の付いた参照全般 → PDF のページは送信直前に画像化される物で、ブラウザは
+      そのまま img として開けないので落とす
+    - それ以外(どの形でもない)→ 落とす
+    """
     files = []
     for entry in context_images:
-        if not isinstance(entry, str) or not entry:
+        kind = stored_ref_kind(entry)
+        if kind is None or split_page(entry)[1] is not None:
             continue
-        if entry[:8].lower().startswith(("http://", "https://")):
+        if kind == "url":
             files.append({"type": "image", "url": entry})
-        elif entry.startswith("/"):
-            continue
-        else:
+        elif kind == "file_id":
             files.append(
                 {
                     "type": "image",
@@ -387,7 +394,7 @@ def _user_message_to_wire(message: dict) -> dict:
     }
 
 
-def build_wire_messages(chat_json: dict, user, leaf_id: str) -> list:
+def build_wire_messages(chat_json: dict, user, leaf_id: str, model=None) -> list:
     """chat の history 樹から続きターンの wire(OpenAI messages)を組む(契約 M5)。
 
     FE buildWireMessages(chat-messages.ts)の backend 対応物:
@@ -419,7 +426,11 @@ def build_wire_messages(chat_json: dict, user, leaf_id: str) -> list:
         wire.append(
             {
                 "role": "system",
-                "content": prompt_template(system, getattr(user, "name", None)),
+                "content": prompt_template(
+                    system,
+                    getattr(user, "name", None),
+                    base_model_id=resolve_base_model_id(model),
+                ),
             }
         )
     for message in chain:
@@ -457,8 +468,9 @@ def _shim_request(origin: Optional[dict] = None) -> Request:
 
     origin(spawn 時に exec 行 meta["origin"] へ残した `{"scheme","host"}`)があれば
     scheme と Host / X-Forwarded-* を復元する — 続きターンの tool が __request__ から
-    自オリジンを組めるように(llens doc tool が文書 URL を絶対化する。無いと相対 /ext/
-    に落ちて feed_image が拒否する)。無くても request.url が例外にならない scope。
+    自オリジンを組めるように(絶対 URL を自分で組む tool 向け。文書の図は 2026-10-03 から
+    相対 `/ext/…` のまま渡す運用で、llens doc tool はもう origin を補わない —
+    `image_refs.py` の module docstring)。無くても request.url が例外にならない scope。
     """
     # 循環 import 回避: subagent → middleware → (executions ↔ 本モジュールの hook)
     from nucllei.utils.subagent import internal_request
@@ -813,7 +825,7 @@ async def _try_start_turn(
     if model is None:
         raise _PermanentTurnFailure(f"model '{model_id}' is not resolvable")
 
-    wire_messages = build_wire_messages(chat_json, user, assistant_id)
+    wire_messages = build_wire_messages(chat_json, user, assistant_id, model)
     params = _merged_params(chat_json, user)
     chat_files = chat_json.get("files") or []
 

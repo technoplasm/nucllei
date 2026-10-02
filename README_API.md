@@ -266,9 +266,11 @@ separate reasoning block.
 
 `GET /ext/{name}/**` is a session-authenticated gate to admin-configured
 backends serving figures/PDFs referenced from documents. Point the upstream's
-public base URL at `https://<nucllei host>/ext/{name}` (absolute — so the model
-can hand references back as URLs, see the namespace table below) and
-in-document references resolve in the browser with the session cookie. Two
+public base at **`/ext/{name}`** (relative — same-origin, so it keeps working
+whatever origin or scheme the user reached the server by; an absolute
+`https://<nucllei host>/ext/{name}` works too) and in-document references
+resolve in the browser with the session cookie, and are handed back to tools
+as `url` unchanged (see the reference rules below). Two
 backends, chosen by the value's form:
 
 - `http(s)://…` — streaming proxy (2xx passed through, 404 → 404, anything else
@@ -279,21 +281,177 @@ backends, chosen by the value's form:
   outside → 404); directories and missing files → 404; content-type from the
   extension (`application/octet-stream` when unknown).
 
+**Serving scope of a file backend (`EXT_FILE_SCOPES`).** By default everything
+under the root is served. When the root is shared with something else — e.g.
+the same directory is bound read-only into the sandbox and holds both files
+meant for users (`static/`) and raw material only tools should read (`doc/`) —
+set `EXT_FILE_SCOPES=cage=static` (repeat the name for several directories:
+`cage=static,cage=figs`; a value is a directory relative to the root). Then only
+files whose **resolved** path lies inside one of those directories are served;
+everything else under the root is a 404, indistinguishable from a missing file.
+URLs keep their shape (`/ext/cage/static/X`) — only the range narrows. The rule
+lives in one function (`utils/ext_upstreams.ext_file_served`) used by the gate,
+by `resolve_url`, and by both bridges below, so a file is never "404 in the
+browser but readable through a tool" or the reverse. Reading the same file as a
+**sandbox path** (`/mnt/…` via `resolve_path`, or inside the jail) is not
+affected: the scope is about what is _served to users_. A name that appears in
+`EXT_FILE_SCOPES` stays restricted even if all its entries are invalid (it then
+serves nothing — a typo never reopens the whole root); a name that is not a
+file backend is ignored with a boot warning.
+
 Both: `..`/backslash/control-char paths → 400; active types (HTML/SVG/JS) are
 forced to `Content-Disposition: attachment` + `nosniff`. There is no per-user
 access check — the admin-managed allowlist is the source of truth for what a
 backend exposes.
 
-**Reference namespaces** (what a model hands to `__feed_image__` / the feed
-tools, and what `context_images` carries — resolved server-side by
-`nucllei/utils/image_refs.py` `resolve_ref(ref, user_id)` /
-`load_ref(ref, user_id)`, no exceptions):
+**Reference rules** (the single statement of how a tool argument or a stored
+reference is interpreted; the code-side definition is the module docstring of
+`nucllei/utils/image_refs.py`):
 
-| Form                                  | Meaning                   | Resolution                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| absolute URL (`http://` / `https://`) | something a browser opens | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (it is the same-origin display URL; the host is never connected to). Otherwise, if the URL starts with `<base>/` of an `EXT_PUBLIC_BASES` entry, the remainder goes to that name's backend. Anything else → unresolved (fail closed, not a generic fetch) |
-| `/workspace/…`, `/mnt/…`              | sandbox filesystem only   | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                       |
-| `/ext/…` (relative)                   | **rejected**              | `/ext/` is a URL, not a path — pass it as an absolute URL. Unresolved + warning                                                                                                                                                                                                                                                                  |
+- **The argument name decides the interpretation. The value is never inspected
+  to reinterpret it as a different argument.** A sandbox path in `url`, or a URL
+  in `path`, fails as what the argument says it is.
+- **`url`** — a URL a browser can open: an absolute `http(s)://…` URL, **or a
+  same-server relative URL** (resolved as "a URL of this server", against the
+  routes the server really has): `/ext/{name}/…` — entry point
+  `resolve_url(url, *, max_bytes=None)` — and `/api/v1/files/{id}/content`,
+  which `file_id_of_url(url)` routes to a file that the caller then reads with
+  its own per-user check.
+- **`path`** — an **absolute** path on the sandbox filesystem (`/workspace/…`,
+  `/mnt/…`). Entry point: `resolve_path(path, user_id, *, max_bytes=None)`.
+  Relative paths are not accepted (since 2026-10-03; they used to be resolved
+  against `/workspace`, which turned `path="https://x/y.html"` into
+  `/workspace/https:/x/y.html`).
+- **`file_id`** — the id of an attachment or a generated file.
+- **Pass references along exactly as received** — do not rewrite them, and do
+  not prepend an origin to a relative URL.
+
+**Fixed sentences for argument-form errors.** A tool never inspects the value
+to choose its wording; a form error states what the argument accepts in a fixed
+sentence. The sentences are public constants of `nucllei/utils/image_refs.py`,
+and **deployment-layer tools import these constants and use the same wording**
+(the text was agreed with the llens tools; change both sides together):
+
+| Constant                  | Text                                                                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `URL_ARG_FORM`            | ``url が受けるのは、スキーム付きの絶対 URL (`http(s)://…`) と、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` だけ。``              |
+| `PATH_ARG_FORM`           | ``path が受けるのは、sandbox の絶対パス (`/workspace/…` `/mnt/…`) だけ。``                                                               |
+| `WORKSPACE_PATH_ARG_FORM` | ``path が受けるのは、sandbox の絶対パス (`/workspace/…`) だけ。`` (tools that only handle the workspace: `write_file`, `list_workspace`) |
+| `FILE_ID_ARG_FORM`        | `file_id は添付・生成物の id。`                                                                                                          |
+| `REF_ARGS_RULE`           | `URL は url、sandbox のパスは path、添付・生成物は file_id に、受け取った形のまま渡す (値を書き換えて別の引数に入れ直さない)。`          |
+
+`REF_ARGS_RULE` is the one sentence about where things go, identical in every
+tool (it mentions arguments a given tool may not have — it states the rule, not
+that tool's signature); tools do not add destinations of their own. Errors are
+assembled the same way everywhere:
+
+- `url` not resolvable as a URL:
+  `ERROR: <value> は URL として解決できない。` + `URL_ARG_FORM` + `" "` + `REF_ARGS_RULE`
+- `path` not a sandbox path:
+  `ERROR: <value> は sandbox のパスの形でない。` + `PATH_ARG_FORM` (or
+  `WORKSPACE_PATH_ARG_FORM`) + `" "` + `REF_ARGS_RULE`
+- `file_id` cannot be read:
+  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
+  — "no such record" and "not yours" are deliberately one sentence (existence
+  is not leaked). `read_attachment` returns a dict, so it carries the same
+  sentence without the `ERROR: ` prefix in `{ok: False, error}`.
+
+Wording that depends on the **resolution result** (missing / oversize /
+redirect / upstream status / unreachable / outside the allowed upstreams /
+outside the serving scope) is separate and built per `RefError.code` (and
+`reason`), still without looking at the value.
+
+Stored reference strings (entries of `context_images`, the `url` of an
+`image_url` part) carry no argument name, so they — and only they — are
+dispatched mechanically by their prefix, in one place: `stored_ref_kind(ref)`
+(returns `"file_url"`, `"url"`, `"path"`, `"file_id"` or `None`; a trailing
+`#page=N` is allowed). `resolve_ref(ref, user_id, *, max_bytes=None)` is a thin
+dispatcher over the two entry points above built on it, and the history
+builder (`content_blocks.py`) and the background-task completion notice
+(`execution_resume._notice_files`) use the same function — nothing else carries
+a prefix test of its own. Tools must call `resolve_url` / `resolve_path`
+according to the argument's name, not `resolve_ref`.
+
+| Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http://` / `https://`                           | absolute URL                                      | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (the host is never connected to). Otherwise, if the URL starts with `<base>/` of an `EXT_PUBLIC_BASES` entry, the remainder goes to that name's backend. Anything else → `unknown_upstream` (fail closed, not a generic fetch)                                                   |
+| `/ext/`                                          | same-server URL                                   | `/ext/{name}/{rest}` → the same backend as the absolute form. Unknown `name`, or not of that shape → `unknown_upstream`                                                                                                                                                                                                                                                 |
+| `/workspace/`, `/mnt/`                           | sandbox filesystem                                | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                              |
+| `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form` |
+| a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                             |
+| anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                      |
+
+**Fragments on `/api/v1/files/{id}/content`.** Only a trailing `#page=N` means
+something (read with `split_page`); any other fragment is ignored and the URL
+routes to the same file — `file_id_of_url` returns the id with or without a
+fragment, so every tool treats `…/content#section` alike.
+
+**Where a URL belongs, without reading it.**
+`route_of_url(url) -> (UrlRoute | None, RefError | None)` runs the same single
+routing step as `resolve_url` and returns it: `UrlRoute(name, rel, query,
+public_base, origin, ext_form)` plus the property `relative` — the upstream
+`name` (present in `EXT_UPSTREAMS`), the path under it (`rel`, as written in the
+URL, i.e. still percent-encoded, no leading `/`), `query` (`"?a=b"` or `""`),
+that name's `EXT_PUBLIC_BASES` root or `None`, the `origin` (`"scheme://host"`
+as given, `None` for a relative URL) and whether the URL had the
+`/ext/{name}/…` shape (`ext_form`) or matched a public base. It is pure — no
+network, no filesystem, no logging — and fails with the same `code` / `reason`
+`resolve_url` would give for that input. It does **not** check existence or the
+serving scope (`EXT_FILE_SCOPES`); whether the URL can be read stays
+`resolve_url`'s job. Intended for a tool that, after a successful
+`resolve_url`, needs the root for in-page links (relative input → `/ext/{name}`;
+absolute with a public base → that base; otherwise `{origin}/ext/{name}`)
+without re-implementing the URL routing.
+
+**Bridging a URL and a sandbox path.** The same file can have both names (a
+file backend whose root lives under `/mnt`, e.g. `EXT_UPSTREAMS=cage=file:///mnt/cage`:
+`/ext/cage/static/X` ⇔ `/mnt/cage/static/X`). The model never rewrites one into
+the other; the tool it calls does, based on **what the reference resolves to**
+(the real file's location), not on the value's shape:
+
+| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                    |
+| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the `/mnt/…` path, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                                                                                                                                |
+| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{name}/…` URL, nothing attached; a file under a file backend's root but outside what it serves is refused (`mounted_path_withheld`); any other file is attached and a `file_id` returned (a duplicate) |
+
+Only URLs can be shown to the user (`/ext/…` or `/api/v1/files/{id}/content`); a
+sandbox path means nothing to a browser. `url_for_mounted_path` returns a URL
+only for a regular file that the file backend serves (inside its root, and
+inside `EXT_FILE_SCOPES` when set) **and** that is under the
+read-only mount root, after resolving symlinks (deepest root wins when roots
+nest); the path part is percent-encoded, and the URL round-trips through
+`resolve_url` / the `/ext` gate to the same file. It never widens what `/ext`
+serves — it only names what the gate already serves. Because the path is
+percent-encoded, the returned URL can differ **as a string** from the URL a
+document's text carries for the same file (e.g. raw Japanese
+`…/forms/参考書式_5.pdf` vs `…/forms/%E5%8F%82…_5.pdf`): two spellings of one
+file, not two files.
+
+**The serving scope is also the hand-over scope.** `mounted_path_withheld(path)`
+is true for a `/mnt/…` path whose resolved file lies under the root of some
+`EXT_UPSTREAMS` file backend but in **no** backend's serving scope (the
+predicate is `ext_upstreams.ext_file_withheld`, the complement of the gate's
+`ext_file_served`). `fetch_from_workspace` refuses such a file — no URL and no
+attachment — so `EXT_FILE_SCOPES=cage=static` means one thing: what may be
+handed to the user (otherwise `/mnt/cage/doc/x.md`, a raw document with
+unreplaced placeholders, would be 404 as a URL yet obtainable as an
+attachment). A `/mnt/…` file under no file backend's root (`/mnt/shared/…`) is
+still attached, and a backend without `EXT_FILE_SCOPES` serves its whole root,
+so nothing changes there. Existence is not checked (a missing path in the
+withheld range gets the same refusal). The model reading such a file itself
+(`resolve_path`, the jail) is unaffected. Note the limit: a model can still
+copy the file into `/workspace` with `run_shell` and attach the copy — the
+refusal message tells it not to, but this is a rule, not an enforced boundary.
+
+Relative `/ext/…` was rejected (`relative_ext`) from #139 (2026-09-07) until
+2026-10-03, on the grounds that a URL and a filesystem path sharing the leading
+`/` invite mix-ups. That was reversed: document figures are now handed to the
+model as relative `/ext/{name}/…`, like `/api/v1/files/{id}/content` links
+already are — a relative URL keeps rendering when the origin or the scheme
+changes, and nothing has to compose an origin (from request headers, with a
+fallback, or across a sub-agent on another host). The mix-up is prevented by
+the argument name (`url` vs `path`) and by context (a markdown link/image vs
+code). Absolute `https://<any host>/ext/{name}/…` URLs keep resolving.
 
 An optional trailing `#page=N` (1-origin) selects a PDF page on any form (only
 the trailing `#page=N` is parsed, so it does not collide with a URL's own
@@ -301,35 +459,46 @@ fragment). Resolved references are inlined as base64 right before the model
 call: images as-is, PDFs rasterized page by page (default page 1) — no File is
 created. Anything outside those roots, oversize, missing, or neither image nor
 PDF becomes `(image unavailable)` — as does any other `image_url` form
-(protocol-relative `//host/…`, non-http(s) schemes, relative paths), including
+(protocol-relative `//host/…`, non-http(s) schemes, relative paths, any other
+`/…`), including
 an external URL passed in `image_url` on the headless `/api/chat/completions`
 path. The mount contents (and `EXT_PUBLIC_BASES` names lacking an
 `EXT_UPSTREAMS` backend) are logged once at boot.
 
-**Failure reasons.**
-`resolve_ref(ref, user_id, *, max_bytes=None) -> (LoadedRef | None, RefError | None)`
-returns `(loaded, None)` on success and `(None, RefError)` on failure, never
-raising; `max_bytes` overrides the `EXT_INLINE_MAX_BYTES` size cap for that call
+**Failure reasons.** `resolve_url` / `resolve_path` / `resolve_ref` all return
+`(LoadedRef | None, RefError | None)` — `(loaded, None)` on success and
+`(None, RefError)` on failure, never raising; `max_bytes` overrides the `EXT_INLINE_MAX_BYTES` size cap for that call
 on every route (file, http stream, workspace) — the cap is the caller's concern
 (inlining an image vs. reading a document), and `too_large.limit` carries the
-value actually used. `load_ref` is a thin wrapper that drops the reason, keeps
-the env cap, and returns `LoadedRef | None`. `RefError` is a frozen dataclass
-`(code, detail, size=None, limit=None, status=None, size_exact=False)`: `detail` is a one-line
-human/log message; tools build the model-facing wording from `code` (the
-inline step above still emits the same `(image unavailable)` for every code and
-only logs the reason). The `code` set is closed — do not add to it:
+value actually used. `load_ref(ref, user_id)` is a thin wrapper over
+`resolve_ref` that drops the reason, keeps the env cap, and returns
+`LoadedRef | None`. `RefError` is a frozen dataclass
+`(code, detail, size=None, limit=None, status=None, size_exact=False, reason=None)`: `detail` is a one-line
+human/log message **whose wording is not stable — never branch on it or
+re-parse the value to guess what happened**; tools build the model-facing
+wording from `code` and, where a code has a breakdown, `reason` (the inline
+step above still emits the same `(image unavailable)` for every code and only
+logs the reason). The `code` set is closed — do not add to it. `reason` is a
+stable field for telling cases of one code apart without growing that set; its
+values are a closed set too, and today only `unknown_upstream` carries one
+(`None` on every other code):
 
-| `code`                  | When                                                                                                                                                                                     | Extra fields                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `unsupported_form`      | neither an `http(s)://` URL nor `/workspace/…` / `/mnt/…` (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                                                           |                                           |
-| `relative_ext`          | `/ext/…` given as a path — pass it as an absolute URL                                                                                                                                    |                                           |
-| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                    |                                           |
-| `unknown_upstream`      | `/ext/{name}/…` or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site). `detail` tells the two apart |                                           |
-| `not_found`             | file backend / `/mnt/…`: missing, a directory, or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                            | `status=404` for http                     |
-| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                 | `size`, `limit`, `size_exact` (see below) |
-| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                  | `status`                                  |
-| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                |                                           |
-| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                 | `status` when the sandbox answered        |
+| `reason`               | When                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `unknown_name`         | `/ext/{name}/…` (relative or absolute) or an `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend |
+| `not_ext_form`         | a relative `/ext/…` URL not of the shape `/ext/{name}/{path}`                                                   |
+| `outside_public_bases` | an absolute URL that is neither `/ext/{name}/…` nor under an `EXT_PUBLIC_BASES` root (an external site)         |
+
+| `code`                  | When                                                                                                                                                                                                                                                                           | Extra fields                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                    |                                           |
+| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                          |                                           |
+| `unknown_upstream`      | `/ext/{name}/…` (relative or absolute) or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace at all (external site), **or** a relative `/ext/…` not of the shape `/ext/{name}/{rest}`. `reason` tells them apart | `reason` (see above)                      |
+| `not_found`             | file backend / `/mnt/…`: missing, a directory, or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                                                                                                                  | `status=404` for http                     |
+| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                       | `size`, `limit`, `size_exact` (see below) |
+| `upstream_status`       | http backend answered non-2xx other than 404 — including `3xx` redirects (not followed)                                                                                                                                                                                        | `status`                                  |
+| `upstream_unreachable`  | http backend connection failure, timeout, or `InvalidURL`                                                                                                                                                                                                                      |                                           |
+| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                                       | `status` when the sandbox answered        |
 
 `too_large.size_exact` says whether `size` is the real size or only a lower
 bound: `True` when it comes from `stat` (file backend, `/mnt/…`, sandbox `413`),
@@ -344,6 +513,7 @@ size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 | ---------------------- | ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning                                                                                                   |
 | `EXT_PUBLIC_BASES`     | env  | empty              | comma-separated `name=baseURL` (same format as `EXT_UPSTREAMS`, http(s) only): the public root of the original intranet site for that name (e.g. `his=http://his-info.example/docs`). Absolute URLs under `<base>/` resolve via that name's `EXT_UPSTREAMS` backend; the name must also exist there |
+| `EXT_FILE_SCOPES`      | env  | empty = whole root | comma-separated `name=subdir` (same format; repeat the name for several): restrict what a **file backend** serves to those directories under its root (e.g. `cage=static`). See "Serving scope" above                                                                                               |
 | `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining context images (URL and filesystem references alike)                                                                                                                                                                                                           |
 
 ### 3.9 Audio (STT / TTS)
@@ -690,6 +860,21 @@ class Tools:
   description = text before the first `:param:`; per-argument descriptions from
   `:param name: ...` lines. (The DB `description` field is list-UI only — the model
   never sees it.)
+- **What the spec builder drops** (`nucllei/utils/tools.py`) — write docstrings
+  with this in mind:
+  - The description is cut at the **first `:param` or `:return`**. Everything
+    after it — including the whole `:return:` text — never reaches the model.
+    The cut is a plain text split (`re.split(":(param|return)", doc, 1)`), so
+    do not write the literal `:param` / `:return` inside the description
+    prose either; the description would end there.
+  - A `:param name:` description is **one line only**. The parser matches
+    `:param (\w+):\s*(.+)` line by line, so continuation lines are silently
+    dropped (real incident: an enum-like list of choices on the following
+    lines was invisible to the model).
+  - Therefore: **rules, cautions, the return shape and "what to do next" go in
+    the description (before the first `:param`); each `:param` fits on one
+    line.** `:return:` is developer documentation at best — prefer a `#`
+    comment.
 - Methods may be `def` or `async def`; sync methods run in a worker thread, so
   blocking I/O is fine.
 - **Shared notes**: the `Tools` **class docstring** is prepended **once** — to
@@ -728,21 +913,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, an absolute URL (`https://…/ext/{name}/…` or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{name}/…`, absolute `https://…/ext/{name}/…`, or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### 5.4 Argument & result rendering
 
@@ -823,9 +1008,9 @@ async def read_doc(self, path: str) -> Markdown:
   images become visible when the model writes
   `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image or a
   PDF page, call `__feed_image__(file_id_or_ref)` (§5.3) — it is injected into
-  the follow-up call; an absolute `/ext/` URL, an `EXT_PUBLIC_BASES` URL, a
-  `/mnt/…` or a `/workspace/…` reference needs no File (§3.8 for the
-  namespaces).
+  the follow-up call; an `/ext/` URL (relative or absolute), an
+  `EXT_PUBLIC_BASES` URL, a `/mnt/…` or a `/workspace/…` reference needs no File
+  (§3.8 for the reference rules).
 
 ### 5.6 Access control & assignment
 
@@ -868,6 +1053,68 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     it up alongside, so there is no legitimate reason to repoint it at runtime;
     keeping the destination out of the DB also means an admin account cannot
     aim it at an outside host and harvest the bearer token.
+    The `path` argument of `write_file(path, content)` / `list_workspace(path?)`
+    / `fetch_from_workspace(path)` is an **absolute path on the sandbox
+    filesystem under `/workspace/`** — the same form `send_to_workspace`
+    returns (`/workspace/imports/<name>`) and that code sees inside
+    `run_python` / `run_shell` — and everything these tools return is absolute
+    too, so one tool's result can be passed straight to another. **Relative
+    paths are refused** (`path` has one form; `list_workspace()` without an
+    argument lists `/workspace`). Anything that is not a sandbox path the tool
+    handles — relative, empty, a URL, outside `/workspace` — gets the common
+    fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
+    `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/mnt/…`
+    (read-only reference data) is refused by `write_file` and `list_workspace`
+    with a pointer to `run_shell` (a distinction inside the same `path`
+    argument, based on what the path resolves to).
+    `fetch_from_workspace(path)` turns a sandbox file into something the user
+    can open, and **also takes `/mnt/…`**: a `/workspace/…` file is read through
+    the sandbox, registered as a File and attached to the chat (`file_id`
+    returned). A `/mnt/…` file that an `EXT_UPSTREAMS` file backend already
+    serves (within `EXT_FILE_SCOPES` when the deployment sets it) is **not copied or attached** — the tool answers with its relative
+    `/ext/{name}/…` URL (`image_refs.url_for_mounted_path`) and tells the model
+    to put that URL in the message (image syntax for images, a link otherwise).
+    A `/mnt/…` file under a file backend's root but **outside its serving
+    scope** is refused — neither a URL nor an attachment (§3.8, "The serving
+    scope is also the hand-over scope").
+    Any other `/mnt/…` file is read by the server from its own read-only mount
+    (`resolve_path`: confined to the mount root, capped at
+    `EXT_INLINE_MAX_BYTES`) and attached like a workspace file. Failures are
+    worded per `RefError.code`: unreadable (missing, a directory, or a link
+    leaving the mount — one wording, fail closed) vs. over the cap (with actual
+    size and limit). `path` is only ever a sandbox path — a URL or a file URL in
+    it is refused as "not a sandbox path" (fixed sentence). The returned
+    `/ext/…` URL is percent-encoded, so it may be a different spelling of the
+    URL a document shows for the same file. This is the reverse of
+    `send_to_workspace(url=)` below (§3.8, bridging table).
+    `send_to_workspace(filename?, file_id?, url?)` copies into
+    `/workspace/imports/` and returns the absolute path. Its arguments are
+    interpreted by name, as everywhere else (§3.8 reference rules): `file_id` =
+    an owned attachment / generated file, `url` = a **URL** — absolute
+    `http(s)://…` or same-server `/ext/{name}/…` — resolved by the shared
+    resolver (`resolve_url`), so exactly the URLs the feed tools can read
+    (`/ext/{name}/…` relative or on any host, and URLs under
+    `EXT_PUBLIC_BASES`), through the `EXT_UPSTREAMS` backend, no redirects
+    followed, no cookie forwarded.
+    **Any other URL is refused (`unknown_upstream`); it is not a generic
+    LAN/web fetcher** (until 2026-10-03 it fetched any LAN URL outside a CIDR
+    deny-list — valve `url_blocked_cidrs`, now removed). Failures are reported
+    per `RefError.code` (missing / oversize with actual size and limit /
+    redirect / upstream status / unreachable / outside the allowed upstreams).
+    Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
+    When the URL resolves to a **file backend whose file lives under `/mnt`**
+    (`image_refs.mounted_path_for_url`), nothing is copied: the tool answers
+    with that `/mnt/…` path, because `/mnt` is the same read-only mount the
+    sandbox binds (#138) — this relies on the deployment binding the same
+    volume on both sides, which the server cannot verify; the size cap does not
+    apply. A `url` that is this server's file delivery URL
+    (`/api/v1/files/{id}/content`, relative or absolute) is routed to that file
+    and imported with the same owner check as `file_id` (URL routing, not HTTP).
+    **No value is reinterpreted as another argument**: a UUID or a sandbox path
+    in `url` is "not resolvable as a URL", a URL in `file_id` is "no such
+    record, or no access". Form errors are assembled from the shared fixed
+    sentences (§3.8) and never vary with the value; `unknown_upstream` is
+    worded by `RefError.reason`.
 - **Code execution runs in an external sandbox service**, never in the server
   process. `builtin_sandbox` bridges over HTTP to an nsjail + IPython service
   and provides a stateful `run_python` (per user+chat kernel), `run_shell`, and
@@ -1044,8 +1291,11 @@ POST /api/v1/skills/create
   this" hint.
 - `content` — markdown instructions. Template variables expanded at every
   request: `{{CURRENT_DATE}}`, `{{CURRENT_TIME}}`, `{{CURRENT_DATETIME}}`,
-  `{{CURRENT_WEEKDAY}}`, `{{USER_NAME}}`. There is no call-time parameter
-  mechanism.
+  `{{CURRENT_WEEKDAY}}`, `{{USER_NAME}}`, `{{BASE_MODEL_ID}}` (id of the base model
+  that actually runs inference — the selected preset's `base_model_id`; `Unknown`
+  if the server cannot resolve it). The same variables are expanded in a preset's
+  system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
+  refers to the child preset's base. There is no call-time parameter mechanism.
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
 - `auto_load_content_types` — content-type **prefixes** (e.g. `["audio/"]`,

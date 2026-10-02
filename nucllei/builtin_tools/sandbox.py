@@ -17,19 +17,15 @@ medical_calculator.py とは質が違う) ことも移設の条件を満たし�
 opt-in で、トークンが無ければ両側とも認証なしで従来どおり繋がるため。
 """
 
-import asyncio
 import base64
 import io
-import ipaddress
 import logging
 import mimetypes
 import os
-import re
+import posixpath
 import uuid
 from typing import Any, Awaitable, Callable, Optional
-from urllib.parse import unquote, urljoin, urlsplit
-
-from nucllei.utils.ext_upstreams import match_public_base
+from urllib.parse import unquote
 
 import aiohttp
 from pydantic import BaseModel, Field
@@ -62,6 +58,20 @@ SANDBOX_URL = os.getenv("SANDBOX_URL", "").strip()
 SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "").strip()
 
 
+class SandboxHTTPError(RuntimeError):
+    """sandbox サービスが 200 以外を返した (= 繋がってはいる)。
+
+    接続失敗 (aiohttp の例外・タイムアウト) と型で分ける — tool がモデルに返す文面を
+    「パスの問題 (400) / ファイルが無い (404) / 繋がらない」で言い分けるため。
+    文面は `sandbox HTTP {status}: {detail}` (`utils/image_refs.py` がこの形を読む)。
+    """
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(f"sandbox HTTP {status}: {detail}")
+        self.status = status
+        self.detail = detail
+
+
 async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
     """sandbox サービスへの POST。**トークンがあるときだけ**共有トークンを付ける (#132)。
 
@@ -73,8 +83,7 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
     header は session に持たせる (この session はこの 1 リクエストにしか使わない)。
     未設定なら header 自体を付けない — 空の `Bearer ` を送らない (sandbox 側の
     認証が有効な配備では、無ヘッダも空トークンも等しく 401 なので実害は無いが、
-    「無いものを送る」経路を作らない)。`Tools._http_get` は別 session — 任意 URL を
-    取りに行く経路なので、そちらへトークンが漏れないよう混ぜない。
+    「無いものを送る」経路を作らない)。
     """
     url = SANDBOX_URL.rstrip("/") + path
     headers = {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
@@ -89,28 +98,94 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
                     # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
                     # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
                     # まとめて説明がつく (未設定は「不一致」の一種)
-                    raise RuntimeError(
-                        "sandbox HTTP 401: 認証に失敗しました。nucllei と sandbox の "
+                    raise SandboxHTTPError(
+                        401,
+                        "認証に失敗しました。nucllei と sandbox の "
                         "SANDBOX_TOKEN が一致していません "
-                        "(片側だけ未設定の場合も含む。配備の env を確認)"
+                        "(片側だけ未設定の場合も含む。配備の env を確認)",
                     )
-                raise RuntimeError(f"sandbox HTTP {resp.status}: {body}")
+                raise SandboxHTTPError(resp.status, body)
             return await resp.json()
 
-
-# send_to_workspace(url=) の相対パス解決先 = nucllei 自分自身の listen 口 (コンテナ内)。
-# Caddy / 公開 origin には依存しない。
-SELF_BASE_URL = os.getenv("SELF_BASE_URL", "http://127.0.0.1:8080")
 
 # write_file の本文上限。モデルの出力なのでそもそも巨大にはならないが、
 # 事故 (ループで巨大文字列を渡す等) で workspace quota を食い潰さないための蓋。
 WRITE_FILE_LIMIT = int(os.getenv("SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 1024)))
 
-_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+# jail から見た workspace の置き場 (= jail の cwd)。モデルに見せる `path` は全部
+# この絶対パスで揃える。sandbox サービスの `/files/*` は workspace 相対で受けるので、
+# 変換はここ (tool 側) で持つ — wire を変えないので sandbox image と版がずれても動く。
+WORKSPACE_ROOT = "/workspace"
+# read-only の参照データの置き場 (sandbox / image_refs の RO_MOUNT_ROOT と同じ場所)。
+# sandbox の `/files/*` はここを扱えない — write_file / list_workspace は使える手段を
+# 案内して断り、fetch_from_workspace は nucllei 側の同じ置き場から橋渡しする。
+_RO_MOUNT_ROOT = "/mnt"
 
 
-class _TooLarge(Exception):
-    """_http_get のサイズ上限超過。aiohttp の InvalidURL (ValueError 系) と区別する番兵。"""
+def _normalize_sandbox_path(path: str) -> str:
+    """モデルが渡した path (**絶対パスのみ**) を正規化する。空・NUL・相対は ""。
+    `.` / `..` / 重複した `/` は畳む。相対を「/workspace からの相対」として救済しない —
+    `path` の形は 1 つ (`path="https://x/y.html"` が `/workspace/https:/x/y.html` に
+    なる、といった帰結を作らない)。"""
+    raw = (path or "").strip()
+    if not posixpath.isabs(raw) or "\x00" in raw:
+        return ""
+    # 先頭の `//` は normpath が畳まない (POSIX の実装定義) ので先に 1 本にする
+    return posixpath.normpath("/" + raw.lstrip("/"))
+
+
+def _under_ro_mount(abs_path: str) -> bool:
+    return abs_path == _RO_MOUNT_ROOT or abs_path.startswith(_RO_MOUNT_ROOT + "/")
+
+
+def _resolve_workspace_path(
+    path: str, arg_form: str, ro_hint: str = ""
+) -> tuple[str, str, str]:
+    """モデルが渡した path を (絶対パス, workspace 相対, エラー文) に解決する。
+
+    受けるのは絶対パス (`/workspace/...`) だけ。`.` / `..` / 重複した `/` は畳んだうえで
+    /workspace の外に出るものを断る — `/workspace/workspace/x` に黙って書くような読み替えは
+    しない。エラー時は前 2 つが空で、エラー文だけが入る。
+    symlink 越しの脱出はここでは見えない (sandbox 側の `_safe_path` が実 fs で弾く)。
+
+    形の誤り (空・相対・URL・/workspace の外) は値を調べて言い分けず、全 tool 共通の形で
+    返す: その tool の path が受ける形の固定文 `arg_form` (`image_refs.PATH_ARG_FORM` /
+    `WORKSPACE_PATH_ARG_FORM`) + 行き先の規則 `REF_ARGS_RULE`。
+    `/mnt/…` だけは同じ `path` の中の区分 (read-only の参照データ) なので、`ro_hint` で
+    使える手段を案内する。
+    """
+    abs_path = _normalize_sandbox_path(path)
+    if abs_path == WORKSPACE_ROOT:
+        return abs_path, ".", ""
+    if abs_path.startswith(WORKSPACE_ROOT + "/"):
+        return abs_path, abs_path[len(WORKSPACE_ROOT) + 1 :], ""
+    if _under_ro_mount(abs_path):
+        return "", "", f"ERROR: {abs_path} は read-only の参照データ。{ro_hint}"
+    # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
+    from nucllei.utils.image_refs import REF_ARGS_RULE
+
+    return (
+        "",
+        "",
+        f"ERROR: {(path or '').strip() or '(空)'} は sandbox のパスの形でない。"
+        f"{arg_form} {REF_ARGS_RULE}",
+    )
+
+
+def _files_error(e: Exception, abs_path: str) -> str:
+    """sandbox `/files/*` の失敗をモデル向けの文面にする (原因を言い分ける)。"""
+    if not isinstance(e, SandboxHTTPError):
+        return f"ERROR: sandbox に接続できません: {e!r}"
+    if e.status == 400:
+        return f"ERROR: {abs_path} は使えない path です (sandbox が拒否: {e.detail})"
+    if e.status == 404:
+        return (
+            f"ERROR: {abs_path} というファイルはありません "
+            "(ディレクトリは不可。list_workspace で確認すること)。"
+        )
+    if e.status == 413:
+        return f"ERROR: {abs_path} は大きすぎて取り出せません ({e.detail})"
+    return f"ERROR: sandbox がエラーを返しました: {e}"
 
 
 def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[str]:
@@ -193,13 +268,114 @@ def _safe_import_name(name: str) -> str:
     return "" if name in ("", ".", "..") else name
 
 
-def _derive_name(headers: dict, url_path: str) -> str:
-    """取得結果のファイル名を Content-Disposition → URL の basename → download で導出。"""
-    m = re.search(r'filename="?([^";]+)"?', headers.get("content-disposition", ""))
-    name = _safe_import_name(unquote(m.group(1))) if m else ""
-    if not name:
-        name = _safe_import_name(unquote(os.path.basename(url_path)))
-    return name or "download"
+# file が引けないときの理由 (レコードが無い / 所有者でない を言い分けない)。file_id の
+# エラーは全 tool 共通で `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` +
+# `image_refs.FILE_ID_ARG_FORM`
+_NO_FILE = "レコードが無い、またはアクセス権が無い"
+
+
+def _explain_ref_error(u: str, err) -> str:
+    """resolver の RefError をモデル向けの ERROR 文にする (send_to_workspace(url=) 用)。
+
+    「何が起きたか + 次にどうするか」。code の集合は `image_refs.RefError` の docstring。
+    配備層の fetch_url / feed_image と同じ code を同じ言い方で言い分ける — 「読めなかった」を
+    全部リンク切れにしない。内部名 (env 名・detail) は出さない (resolver が warning ログに残す)。
+
+    形の誤り (`unsupported_form`) は全 tool 共通の形: 固定文 `image_refs.URL_ARG_FORM`
+    (url が受ける形) + `REF_ARGS_RULE` (行き先の規則)。値を調べて文面を出し分けない —
+    言い分けは解決結果 (`code` / `reason`) だけ。
+    """
+    # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
+    from nucllei.utils.image_refs import REF_ARGS_RULE, URL_ARG_FORM
+
+    code = err.code
+    if code == "too_large":
+        limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
+        if err.size is None:
+            what = f"{u} は取り込みの上限{limit} を超えている (実サイズは不明)。"
+        elif err.size_exact:
+            what = f"{u} は {_human_size(err.size)} で、取り込みの上限{limit} を超えている。"
+        else:
+            # Content-Length の無い stream を打ち切った時点の受信量 = 実サイズの下限
+            what = (
+                f"{u} は少なくとも {_human_size(err.size)} あり、取り込みの上限{limit} を"
+                "超えている (実サイズは不明)。"
+            )
+        return (
+            f"ERROR: {what}sandbox には取り込めない (上限は管理者の設定で、引数では"
+            "上げられない)。リンク切れではない — ユーザーには URL をそのまま案内する "
+            "(ブラウザでは開ける)。"
+        )
+    if code == "not_found":
+        return (
+            f"ERROR: {u} は存在しない (404 / ファイル無し)。リンク切れとして案内する。"
+        )
+    if code == "upstream_status":
+        if err.status is not None and 300 <= err.status < 400:
+            return (
+                f"ERROR: {u} は redirect ({err.status}) を返した。redirect は辿らないので、"
+                "ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
+            )
+        return (
+            f"ERROR: {u} の上流が {err.status if err.status is not None else 'エラー'} を"
+            "返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
+        )
+    if code == "upstream_unreachable":
+        return (
+            f"ERROR: {u} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
+            "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
+        )
+    if code == "unknown_upstream":
+        # 内訳は resolver の reason (解決結果) で言い分ける。値は見ない
+        if err.reason == "unknown_name":
+            what = "は許可先の外 (その配信元はこの配備に設定されていない)。"
+        elif err.reason == "not_ext_form":
+            what = "は `/ext/<配信元>/<パス>` の形でない。"
+        else:
+            what = (
+                "は許可先の外 (この配備が取得を許可している上流の URL ではない)。"
+                "任意の Web / LAN の URL は取りに行かない。"
+            )
+        return f"ERROR: {u} {what}{URL_ARG_FORM}"
+    if code == "traversal":
+        return (
+            f"ERROR: {u} は許可された範囲の外を指している (上の階層への参照 `..` や"
+            f"制御文字を含む)。{URL_ARG_FORM}"
+        )
+    if code == "unsupported_form":
+        return f"ERROR: {u} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+    return f"ERROR: {u} を取得できない ({code})。"
+
+
+def _explain_mount_error(abs_path: str, err) -> str:
+    """resolver の RefError をモデル向けの ERROR 文にする (fetch_from_workspace の `/mnt/…` 用)。
+
+    文面は解決結果 (RefError.code) で言い分ける。`not_found` は「無い / ディレクトリ /
+    read-only の置き場の外を指すリンク」をまとめて言う — resolver がこの 3 つを同じ code に
+    閉じている (fail closed。/ext ゲートが全部 404 にするのと同じ) ので、tool も分けない。
+    """
+    code = err.code
+    if code == "too_large":
+        limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
+        size = f" {_human_size(err.size)} で、" if err.size is not None else ""
+        return (
+            f"ERROR: {abs_path} は{size}添付できる上限{limit} を超えている "
+            "(上限は管理者の設定で、引数では上げられない)。ファイルは存在する。"
+            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡すこと。"
+        )
+    if code == "not_found":
+        return (
+            f"ERROR: {abs_path} というファイルは読めない (存在しない、ディレクトリ、"
+            "または read-only の置き場の外を指すリンク)。run_shell の ls で確認すること。"
+            "sandbox からは開けるファイルなら、run_shell で /workspace/ にコピーしてから"
+            "そのパスを渡す。"
+        )
+    if code == "traversal":
+        return (
+            f"ERROR: {abs_path} は使えない path (制御文字やバックスラッシュを含む)。"
+            "run_shell で /workspace/ に別名でコピーしてからそのパスを渡すこと。"
+        )
+    return f"ERROR: {abs_path} を読めない ({code})。"
 
 
 def _iter_context_files(__files__, __metadata__):
@@ -260,15 +436,11 @@ class Tools:
             default=10_000,
             description="stdout/stderr を tool result に載せる上限 (文字)。超過は head+tail 切り詰め。0 = 無効",
         )
-        url_blocked_cidrs: str = Field(
-            default="127.0.0.0/8,::1/128,0.0.0.0/8,::/128,169.254.0.0/16,172.16.0.0/12",
-            description="send_to_workspace(url=) の絶対 URL 取得で拒否する宛先 CIDR (カンマ区切り)。"
-            "既定は loopback / unspecified (0.0.0.0, :: は自ホストに落ちる) / link-local / "
-            "docker 帯 (compose 内部サービス)",
-        )
         url_max_mb: float = Field(
             default=50.0,
-            description="send_to_workspace(url=) で取得する 1 ファイルの上限 MB",
+            description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
+            "(取れる URL の範囲は env EXT_UPSTREAMS / EXT_PUBLIC_BASES が決める。"
+            "sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
 
@@ -589,7 +761,6 @@ class Tools:
         __user__: Optional[dict] = None,
         __files__: Optional[list] = None,
         __metadata__: Optional[dict] = None,
-        __request__: Optional[Any] = None,
     ) -> str:
         """
         チャットの添付ファイルや URL で参照できるリソースを sandbox の
@@ -598,141 +769,61 @@ class Tools:
         他のツールは file_id から直接読むので、その前段としては不要
         (このコピーはファイルを「読めるようにする」汎用手段ではない)。
 
+        引数は名前のとおりに解釈する (他の tool と共通)。受け取った形のまま渡すこと
+        (読み替えない・ホストを補わない)。
+        sandbox のパス (/workspace/… /mnt/…) は既に jail から見えているので取り込み不要。
+        jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
+
         :param filename: 対象ファイル名 (部分一致)。file_id 未指定時に添付一覧から探す。省略時は全件。
-        :param file_id: 取り込むファイルの file_id。添付一覧に出ていないファイルでも
-            file_id が分かっていれば取り込める。
-        :param url: 取り込むリソースの URL。file_id/filename と排他。受けられる形は 2 つ:
-            完全な http(s) URL (文書に出る https://…/ext/... の表示 URL や院内 web の
-            原本 URL を literal のまま渡す) と、"/" 始まりの同一オリジン相対パス
-            (/api/v1/files/{id}/content)。
-            jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
+        :param file_id: 取り込むファイル。添付・生成物の id (添付一覧に出ていなくても、分かっていれば取り込める)。
+        :param url: 取り込むリソース。スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。file_id / filename と排他。
         """
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
 
+        url = (url or "").strip()
+        file_id = (file_id or "").strip()
+        if url and (file_id or filename):
+            return (
+                "ERROR: url は file_id/filename と同時指定できない。"
+                "どちらか一方だけを指定すること。"
+            )
+
+        # 引数は名前で解釈が決まる — url は URL として、file_id は file の id として解決する。
+        # 値の形を見て別の引数に読み替えない (url= に UUID / sandbox のパス、file_id= に URL が
+        # 来ても救済しない。それぞれの解決が失敗し、受ける形を固定文で返す)。
         if url:
-            if file_id or filename:
-                return (
-                    "ERROR: url は file_id/filename と同時指定できない。"
-                    "どちらか一方だけを指定すること。"
-                )
-            return await self._import_url(url.strip(), __user__["id"], __request__)
-
+            return await self._import_url(url, __user__["id"])
         if file_id:
-            targets = [(file_id, None)]
-        else:
-            targets = [
-                (fid, fname)
-                for fid, fname in _iter_context_files(__files__, __metadata__)
-                if not (
-                    filename and (not fname or filename.lower() not in fname.lower())
-                )
-            ]
+            from nucllei.utils.image_refs import FILE_ID_ARG_FORM
 
+            return await self._import_one(
+                file_id, __user__["id"], f"file_id {file_id}", FILE_ID_ARG_FORM
+            )
+        # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
-        for fid, fname in targets:
-            rec = Files.get_file_by_id(fid)
-            if not rec or not rec.path:
-                report.append(f"- {fname or fid}: レコード無し (skip)")
+        for fid, fname in _iter_context_files(__files__, __metadata__):
+            if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
-            # 所有者チェック: file_id 直指定で他ユーザーのファイルを取り込ませない
-            owner = getattr(rec, "user_id", None)
-            if owner != __user__["id"]:
-                report.append(f"- {fname or fid}: アクセス権が無い (skip)")
-                continue
-            try:
-                local_path = Storage.get_file(rec.path)
-                data = open(local_path, "rb").read()
-                name = os.path.basename(fname or rec.filename)
-                await self._post(
-                    "/files/write",
-                    {
-                        "user_id": __user__["id"],
-                        "path": f"imports/{name}",
-                        "b64": base64.b64encode(data).decode(),
-                    },
-                    timeout_s=120,
-                )
-                report.append(
-                    f"- {name} ({_human_size(len(data))}) → /workspace/imports/{name}"
-                )
-            except Exception as e:
-                report.append(f"- {fname or fid}: 取り込み失敗 {e!r}")
-
+            line, failure = await self._import_file(fid, fname, __user__["id"])
+            report.append(line or f"- {fname or fid}: {failure} (skip)")
         if not report:
             return "取り込み対象の添付ファイルがありませんでした。"
         return "取り込み結果:\n" + "\n".join(report)
 
-    # ---- send_to_workspace の url ソース ---------------------------------------
-    async def _import_url(self, u: str, user_id: str, request) -> str:
-        """url を取得して imports/ へ書く。
-
-        参照の名前空間は image_refs と同じ (README §3.8): URL はスキーム付き、"/" 始まりは
-        sandbox の fs。
-
-        - "/api/v1/files/{id}/content" (添付の同一オリジン相対パス)、および path が
-          /ext/{name}/... の完全 URL (host を問わない — 自オリジンの表示 URL) →
-          自分自身 (SELF_BASE_URL) に、呼び出し元リクエストの認証ヘッダをそのまま付けて
-          GET — ブラウザがチャット画面で解決するのと同じ意味論。/ext/ の session 認証も
-          /api/v1/files/... の所有 ACL もサーバ側ルートがそのまま効くので、tool 側は
-          経路ごとの検査を持たない。宛先が自分固定なので CIDR ガードは通さない。
-          パスはモデル制御下だが、本人の権限で本人が到達できるルートを GET できるだけ
-          (= ブラウザ相当) という受容 — 安全の根拠は route 側の認証・ACL であって
-          宛先固定ではない
-        - EXT_PUBLIC_BASES 配下の完全 URL (院内 web の原本 URL) → 原本 host へは行かず、
-          その name の "/ext/{name}/{rel}" として上と同じ self fetch (image_refs が
-          backend 経由で解決するのと同じ向き)
-        - それ以外の完全な http(s) URL → 院内 LAN fetch (_fetch_lan の宛先ガード付き。
-          認証ヘッダは付けない — session を外へ持ち出さない)
-        - 相対 "/ext/..." は受けない (URL は絶対 URL で渡す)。"/workspace/..." "/mnt/..."
-          は sandbox に既に見えているので取り込む必要が無い (ERROR で案内)
-        """
-        max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
-        if u.startswith("/"):
-            if u.startswith("/api/v1/files/"):
-                got = await self._fetch_self(u, max_bytes, request)
-            elif u.startswith("/ext/"):
-                return (
-                    "ERROR: /ext/... は URL であって fs パスではない。"
-                    "絶対 URL (https://<host>/ext/...) で渡すこと。"
-                )
-            elif u.startswith(("/workspace/", "/mnt/")):
-                return (
-                    f"ERROR: {u} は sandbox から既に見えている (取り込み不要)。"
-                    "run_python / run_shell からそのまま読むこと。"
-                )
-            else:
-                return (
-                    "ERROR: / 始まりで受けるのは /api/v1/files/{id}/content だけ "
-                    "(URL は絶対 URL で、sandbox のファイルは /workspace/ か /mnt/ で)。"
-                )
-        elif u.lower().startswith(("http://", "https://")):
-            try:
-                parts = urlsplit(u)
-            except ValueError as e:
-                return f"ERROR: URL を解釈できない ({e})。"
-            query = f"?{parts.query}" if parts.query else ""
-            hit = match_public_base(u)
-            if parts.path.startswith("/ext/"):
-                # 自オリジンの表示 URL — 相対パスと同じ self fetch (認証ヘッダ付き)
-                got = await self._fetch_self(parts.path + query, max_bytes, request)
-            elif hit is not None:
-                # 原本 URL → その name の /ext/ に寄せる (原本 host へ直接は行かない)
-                name, rel = hit
-                rel = rel.split("#", 1)[0]
-                got = await self._fetch_self(f"/ext/{name}/{rel}", max_bytes, request)
-            else:
-                got = await self._fetch_lan(u, max_bytes)
-        else:
-            return (
-                "ERROR: url は完全な http(s) URL か "
-                "/api/v1/files/{id}/content の相対パスで渡すこと。"
-            )
-
-        if isinstance(got, str):
-            return got
-        name, data = got
+    async def _import_file(self, fid: str, fname, user_id: str) -> tuple[str, str]:
+        """file (Files のレコード) 1 件を `/workspace/imports/` に書く。
+        戻り値は (成功の報告行, "") か ("", 失敗の理由)。所有者でないファイルは取り込まない —
+        「レコードが無い」と「所有者でない」は同じ理由 `_NO_FILE` で返す (存在の有無を
+        漏らさない。llens の tool と同文)。"""
+        rec = Files.get_file_by_id(fid)
+        # 所有者チェック: file_id 直指定で他ユーザーのファイルを取り込ませない
+        if not rec or not rec.path or getattr(rec, "user_id", None) != user_id:
+            return "", _NO_FILE
         try:
+            local_path = Storage.get_file(rec.path)
+            data = open(local_path, "rb").read()
+            name = os.path.basename(fname or rec.filename)
             await self._post(
                 "/files/write",
                 {
@@ -743,128 +834,96 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
+            return "", f"取り込みに失敗 {e!r}"
+        return (
+            f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
+            "",
+        )
+
+    async def _import_one(
+        self, fid: str, user_id: str, given: str, arg_form: str = ""
+    ) -> str:
+        """引数で直に指された file 1 件を取り込む (file_id= / url= の配信口 URL)。
+
+        失敗は ERROR で返す。`given` はモデルが渡した引数の言い方 (`file_id <値>` / URL)。
+        file が引けないときは全 tool 共通の文 + その引数が受ける形の固定文 `arg_form`
+        (file_id= なら `image_refs.FILE_ID_ARG_FORM`。url= 経由は形の誤りではないので無し)。
+        """
+        line, failure = await self._import_file(fid, None, user_id)
+        if failure == _NO_FILE:
+            return f"ERROR: {given} の{_NO_FILE}。{arg_form}"
+        if failure:
+            return f"ERROR: {given} の{failure}。"
+        return "取り込み結果:\n" + line
+
+    # ---- send_to_workspace の url ソース ---------------------------------------
+    async def _import_url(self, u: str, user_id: str) -> str:
+        """`url` を **URL として** 共有 resolver (`utils/image_refs`) で解決して取り込む。
+        受ける形はスキーム付きの絶対 URL と、同一サーバの相対 URL (`/` 始まり = このサーバの
+        URL として、サーバが実際に持つ経路に当てる)。値の形から別の意味には読み替えない。
+
+        許可範囲・redirect の扱い・失敗理由は resolver 一本 = 配備層の fetch_url /
+        feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
+        `/ext/{name}/…` (相対、または絶対 = host 不問) と EXT_PUBLIC_BASES 配下の URL で、
+        どちらも EXT_UPSTREAMS の backend 経由 — 与えられた host へは接続せず、redirect も
+        辿らない。
+        **許可先の外の URL は取りに行かない** (`unknown_upstream`)。cookie / 認証ヘッダを
+        どこにも転送しないので、リクエスト文脈の無い background 続きターンでも同じに動く。
+
+        - 解決先が file backend で実体が `/mnt` 配下 → コピーせず、sandbox から見える
+          パスを返す (`mounted_path_for_url`)。`/mnt` 配下は sandbox と同じ置き場という
+          配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
+          確かめられない (規約どおりでない配備では、返したパスが jail に無い)
+        - それ以外 (http backend、`/mnt` の外の file backend) → `/workspace/imports/<name>`
+          に書く。上限は valve `url_max_mb`
+        - `/api/v1/files/{id}/content` (このサーバのファイル配信口。本文リンクとして頻出。
+          相対、または絶対 = `/ext/` と同じく host 不問) → URL のルーティングとして file に
+          当たる (`file_id_of_url`)。HTTP では取りに行かず、file_id 経路と同じ読み出し・
+          同じ所有者チェックで取り込む
+        """
+        # image_refs は本 module (sandbox_post / SANDBOX_URL) を import する — 循環を
+        # 避けて呼び出し時に引く
+        from nucllei.utils.image_refs import (
+            file_id_of_url,
+            mounted_path_for_url,
+            resolve_url,
+        )
+
+        # fragment は付いていても同じ file に当たる (`file_id_of_url` の規則)
+        file_id = file_id_of_url(u)
+        if file_id:
+            return await self._import_one(file_id, user_id, u)
+
+        mounted = await mounted_path_for_url(u)
+        if mounted:
+            return (
+                f"取り込み不要: {u} は sandbox から {mounted} として既に見えている "
+                "(read-only)。run_python / run_shell からそのパスで開くこと。"
+            )
+
+        max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
+        loaded, err = await resolve_url(u, max_bytes=max_bytes)
+        if loaded is None:
+            return _explain_ref_error(u, err)
+        # http backend の name は URL の basename (percent-encoded のまま)
+        name = _safe_import_name(unquote(loaded.name)) or "download"
+        try:
+            await self._post(
+                "/files/write",
+                {
+                    "user_id": user_id,
+                    "path": f"imports/{name}",
+                    "b64": base64.b64encode(loaded.data).decode(),
+                },
+                timeout_s=120,
+            )
+        except Exception as e:
             return f"ERROR: sandbox へ書き込めません: {e!r}"
         return (
             "取り込み結果:\n"
-            f"- {name} ({_human_size(len(data))}) → /workspace/imports/{name}"
+            f"- {name} ({_human_size(len(loaded.data))}) → "
+            f"{WORKSPACE_ROOT}/imports/{name}"
         )
-
-    async def _fetch_self(self, path: str, max_bytes: int, request):
-        """相対パスを自分自身から取得する。(filename, bytes) か "ERROR: ..." 文字列。
-
-        redirect は追わない — 認証ヘッダ付きの要求を他所へ持ち出さないための一線
-        (自分の GET ルートは今のところ redirect を返さないので実害もない)。
-        """
-        headers = {}
-        for k in ("cookie", "authorization"):
-            try:
-                v = request.headers.get(k) if request is not None else None
-            except Exception:
-                v = None
-            if v:
-                headers[k] = v
-        target = SELF_BASE_URL.rstrip("/") + path
-        try:
-            status, resp_headers, data = await self._http_get(
-                target, max_bytes, headers=headers
-            )
-        except _TooLarge:
-            return f"ERROR: 大きすぎる (> {self.valves.url_max_mb:g}MB)。"
-        except Exception as e:
-            log.error(f"[send_to_workspace] self fetch failed ({path}): {e!r}")
-            return f"ERROR: 取得できない ({e})。"
-        if status in _REDIRECT_STATUSES:
-            return f"ERROR: redirect は追わない (status={status})。"
-        if not 200 <= status < 300:
-            return f"ERROR: 取得できない (status={status})。"
-        return _derive_name(resp_headers, urlsplit(path).path), data
-
-    async def _fetch_lan(self, target: str, max_bytes: int):
-        """院内の絶対 URL を GET する。(filename, bytes) か "ERROR: ..." 文字列。
-
-        宛先ガード: イントラは LAN 内全開放の前提で許可し、url_blocked_cidrs
-        (loopback / link-local / docker 帯 = compose 内部サービス) だけ拒否する。
-        redirect は各 hop で宛先を再検査しつつ 3 回まで追う。解決→接続間の再解決
-        (DNS rebinding) は院内閉域の脅威モデルでは受容。
-        """
-        current = target
-        for _hop in range(4):
-            parts = urlsplit(current)
-            if parts.scheme not in ("http", "https"):
-                return f"ERROR: http/https のみ取得できる ({parts.scheme or '不明'})。"
-            if not parts.hostname:
-                return "ERROR: ホスト名が無い。"
-            err = await self._blocked_ip_error(parts.hostname)
-            if err:
-                return err
-            try:
-                status, headers, data = await self._http_get(current, max_bytes)
-            except _TooLarge:
-                return f"ERROR: 大きすぎる (> {self.valves.url_max_mb:g}MB)。"
-            except Exception as e:
-                log.error(f"[send_to_workspace] fetch failed ({current}): {e!r}")
-                return f"ERROR: 取得できない ({e})。"
-            if status in _REDIRECT_STATUSES:
-                loc = headers.get("location")
-                if not loc:
-                    return f"ERROR: redirect (status={status}) に Location が無い。"
-                current = urljoin(current, loc)
-                continue
-            if not 200 <= status < 300:
-                return f"ERROR: 取得できない (status={status})。"
-            return _derive_name(headers, parts.path), data
-        return "ERROR: redirect が多すぎる。"
-
-    async def _blocked_ip_error(self, host: str) -> Optional[str]:
-        """host の解決先が url_blocked_cidrs に入っていればエラー文字列を返す。"""
-        blocked = []
-        for c in self.valves.url_blocked_cidrs.split(","):
-            c = c.strip()
-            if not c:
-                continue
-            try:
-                blocked.append(ipaddress.ip_network(c))
-            except ValueError:
-                log.warning(f"[send_to_workspace] invalid blocked cidr: {c!r}")
-        try:
-            infos = await asyncio.get_running_loop().getaddrinfo(host, None)
-        except OSError as e:
-            return f"ERROR: ホスト名を解決できない ({host}: {e})。"
-        for info in infos:
-            ip = ipaddress.ip_address(info[4][0])
-            # IPv4-mapped IPv6 (::ffff:127.0.0.1 等) は v4 に正規化してから照合する —
-            # version 一致ゲートがあるため、正規化しないと v4 の拒否レンジを素通りする
-            mapped = getattr(ip, "ipv4_mapped", None)
-            if mapped is not None:
-                ip = mapped
-            for net in blocked:
-                if ip.version == net.version and ip in net:
-                    return f"ERROR: 宛先 {host} ({ip}) は拒否レンジ ({net}) 内。"
-        return None
-
-    async def _http_get(self, target: str, max_bytes: int, headers: dict = None):
-        """1 hop の GET。(status, 小文字キーの headers, bytes) を返す。
-
-        redirect ステータスは本文を読まずに返す (追うかは呼び出し側)。
-        上限超過は _TooLarge。
-        """
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=60)
-        ) as session:
-            async with session.get(
-                target, allow_redirects=False, headers=headers or {}
-            ) as resp:
-                headers = {k.lower(): v for k, v in resp.headers.items()}
-                if resp.status in _REDIRECT_STATUSES:
-                    return resp.status, headers, b""
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.content.iter_chunked(65536):
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise _TooLarge()
-                    chunks.append(chunk)
-                return resp.status, headers, b"".join(chunks)
 
     async def write_file(
         self,
@@ -879,17 +938,20 @@ class Tools:
         クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
         既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
 
-        :param path: 書き込み先 (workspace 相対。例: report.html, work/index.html)
+        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。例: /workspace/work/index.html
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
+        from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
-        rel = (path or "").strip().lstrip("/")
-        if not rel:
-            return "ERROR: path が空です。"
-        if any(part in ("..", "") for part in rel.split("/")):
-            return f"ERROR: 不正な path です: {path!r}"
+        abs_path, rel, err = _resolve_workspace_path(
+            path, WORKSPACE_PATH_ARG_FORM, "書き込めるのは /workspace/ 配下だけ。"
+        )
+        if err:
+            return err
+        if rel == "." or path.rstrip().endswith("/"):
+            return f"ERROR: {path!r} はディレクトリ。ファイル名まで指定すること。"
 
         data = content.encode("utf-8")
         if len(data) > WRITE_FILE_LIMIT:
@@ -910,9 +972,9 @@ class Tools:
                 timeout_s=60,
             )
         except Exception as e:
-            return f"ERROR: sandbox に接続できません: {e!r}"
+            return _files_error(e, abs_path)
 
-        msg = f"/workspace/{rel} に書き込みました ({_human_size(len(data))})。"
+        msg = f"{abs_path} に書き込みました ({_human_size(len(data))})。"
         if rel.startswith("exports/"):
             # exports/ の自動添付は「実行の後始末」で回収する仕組みなので、
             # 実行を伴わない write_file では発火しない (取りこぼしの typical case)
@@ -925,31 +987,47 @@ class Tools:
 
     async def list_workspace(
         self,
-        path: str = ".",
+        path: str = WORKSPACE_ROOT,
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        sandbox の /workspace 配下のファイル一覧を返す (実行を跨いで永続する領域)。
+        sandbox の /workspace 配下のファイル一覧を絶対パスで返す (実行を跨いで永続する領域)。
+        返ったパスは他の tool の path にそのまま渡せる。
 
-        :param path: 一覧するディレクトリ (workspace 相対、省略時はルート)
+        :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。省略時は /workspace
         """
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
+        from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
+
+        abs_path, rel, err = _resolve_workspace_path(
+            path,
+            WORKSPACE_PATH_ARG_FORM,
+            "list_workspace が一覧できるのは /workspace/ 配下だけ。"
+            "/mnt/ は run_shell の ls で見ること "
+            "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
+        )
+        if err:
+            return err
         try:
             res = await self._post(
                 "/files/list",
                 {
                     "user_id": __user__["id"],
-                    "path": path,
+                    "path": rel,
                 },
                 timeout_s=30,
             )
         except Exception as e:
-            return f"ERROR: sandbox に接続できません: {e!r}"
+            return _files_error(e, abs_path)
         entries = res.get("entries", [])
         if not entries:
-            return f"/workspace/{path} は空です。"
-        return "\n".join(f"- {e['path']} ({_human_size(e['size'])})" for e in entries)
+            return f"{abs_path} は空です (ファイルが無いか、ディレクトリが存在しない)。"
+        # sandbox は workspace 相対で返す — モデルには絶対パスで見せる
+        return "\n".join(
+            f"- {WORKSPACE_ROOT}/{e['path']} ({_human_size(e['size'])})"
+            for e in entries
+        )
 
     async def fetch_from_workspace(
         self,
@@ -960,43 +1038,134 @@ class Tools:
         __message_id__: Optional[str] = None,
     ) -> str:
         """
-        /workspace 配下の任意のファイルをチャットに添付してユーザーに渡す
-        (exports/ 以外に作ったファイルや過去実行の成果物を渡すときに使う)。
+        sandbox のファイルをユーザーに見せられる形にする: チャットに添付して file_id を返す
+        (exports/ 以外に作ったファイルや過去実行の成果物、/mnt/ で見つけた資料を渡すときに使う)。
+        既に `/ext/…` の URL で配信されているファイルは添付せず、その URL を返す
+        (本文にはその URL を貼る。文書の本文にある URL とは、同じファイルの別表記に
+        なることがある)。sandbox のパスはブラウザでは開けないので、
+        パスを本文に貼ったり URL に書き換えたりせず、これに渡すこと。
 
-        :param path: 対象ファイル (workspace 相対、例: imports/converted.xlsx)
+        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/mnt/…`)。例: /workspace/imports/converted.xlsx
         """
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
+        from nucllei.utils.image_refs import PATH_ARG_FORM
+
+        # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
+        # /workspace か /mnt かは sandbox の fs の区分で、読み出し口が違うだけ
+        normalized = _normalize_sandbox_path(path)
+        if _under_ro_mount(normalized):
+            return await self._fetch_mounted(
+                normalized,
+                __user__["id"],
+                __chat_id__,
+                __message_id__,
+                __event_emitter__,
+            )
+        abs_path, rel, err = _resolve_workspace_path(path, PATH_ARG_FORM)
+        if err:
+            return err
         try:
             res = await self._post(
                 "/files/read",
                 {
                     "user_id": __user__["id"],
-                    "path": path,
+                    "path": rel,
                 },
                 timeout_s=120,
             )
         except Exception as e:
-            return f"ERROR: 読み出しに失敗: {e!r}"
+            return _files_error(e, abs_path)
         try:
-            att = _register_bytes_file(
-                __user__["id"],
-                os.path.basename(res["name"]),
-                base64.b64decode(res["b64"]),
+            data = base64.b64decode(res["b64"])
+        except Exception as e:
+            return f"ERROR: sandbox の応答を読めません: {e!r}"
+        return await self._attach(
+            abs_path,
+            os.path.basename(res["name"]),
+            data,
+            __user__["id"],
+            __chat_id__,
+            __message_id__,
+            __event_emitter__,
+        )
+
+    async def _fetch_mounted(
+        self, abs_path: str, user_id: str, chat_id, message_id, __event_emitter__
+    ) -> str:
+        """`/mnt/…` (read-only の参照データ) を利用者に見せられる形にする。
+
+        `send_to_workspace(url=)` の「URL の解決先が sandbox から見えるならパスを返す」
+        (`mounted_path_for_url`) の逆向き。値の形ではなく解決結果で分かれる:
+
+        - 実体が EXT_UPSTREAMS の file backend で配信されている → コピーも添付もせず、
+          その URL (`/ext/{name}/…`) を返す (`url_for_mounted_path`)
+        - file backend の root 配下にあって配信範囲 (EXT_FILE_SCOPES) の外 → URL も返さず
+          添付にもしない (`mounted_path_withheld`)。配信範囲の設定は「利用者に渡してよい
+          範囲」— URL では 404 なのに添付なら渡る、を作らない
+        - どの file backend の root 配下でもない → nucllei 自身に bind された同じ置き場から
+          読み (`resolve_path`。境界・上限は resolver)、/workspace のファイルと同じ手順で
+          添付する
+        """
+        # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
+        from nucllei.utils.image_refs import (
+            mounted_path_withheld,
+            resolve_path,
+            url_for_mounted_path,
+        )
+
+        url = await url_for_mounted_path(abs_path)
+        if url:
+            name = os.path.basename(abs_path)
+            is_image = (mimetypes.guess_type(name)[0] or "").startswith("image/")
+            link = f"![{name}]({url})" if is_image else f"[{name}]({url})"
+            return (
+                f"添付不要: {abs_path} は {url} として既に配信されている "
+                "(ユーザーのブラウザがそのまま開ける URL)。ユーザーに見せるときは、"
+                f"この URL を 1 文字も変えずに本文に貼る: {link}"
             )
+        if await mounted_path_withheld(abs_path):
+            return (
+                f"ERROR: {abs_path} は利用者に配信しない範囲にある (管理者の設定)。"
+                "URL での案内も添付もできない (/workspace/ にコピーして渡すこともしない)。"
+            )
+        loaded, err = await resolve_path(abs_path, user_id)
+        if loaded is None:
+            return _explain_mount_error(abs_path, err)
+        return await self._attach(
+            abs_path,
+            loaded.name,
+            loaded.data,
+            user_id,
+            chat_id,
+            message_id,
+            __event_emitter__,
+        )
+
+    async def _attach(
+        self,
+        abs_path: str,
+        name: str,
+        data: bytes,
+        user_id: str,
+        chat_id,
+        message_id,
+        __event_emitter__,
+    ) -> str:
+        """バイト列を Files に登録してチャットに添付し、モデル向けの報告文を返す。"""
+        try:
+            att = _register_bytes_file(user_id, name, data)
         except Exception as e:
             return f"ERROR: Files への登録に失敗: {e!r}"
         await self._persist_and_emit_files(
-            [att], __chat_id__, __message_id__, __event_emitter__
+            [att], chat_id, message_id, __event_emitter__
         )
         line = (
-            f"{path} ({_human_size(res['size'])}) をチャットに添付しました。"
+            f"{abs_path} ({_human_size(len(data))}) をチャットに添付しました。"
             f"file_id={att['id']}"
         )
         # #88: 画像/音声/動画は display で枠下に自動表示(exports/ 自動回収と同じ経路)。
-        md = _display_markdown(
-            res["name"], att["id"], att["file"]["meta"]["content_type"]
-        )
+        md = _display_markdown(name, att["id"], att["file"]["meta"]["content_type"])
         if md:
             display(md)
             line += "\nユーザーに提示済み(本文への再掲・貼り付けは不要)。"
