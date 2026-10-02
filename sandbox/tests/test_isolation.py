@@ -234,8 +234,7 @@ def test_soffice_converts_legacy_office_in_jail():
     ws_before = out("shell", "ls -A /workspace")
     r = run(
         "shell",
-        _OFFICE_FIXTURE
-        + "file -b t.doc t.xls | cut -c1-30\n"
+        _OFFICE_FIXTURE + "file -b t.doc t.xls | cut -c1-30\n"
         # 出力名は入力の basename なので、t.doc と t.xls は outdir を分ける (同じだと上書き)
         + "soffice --headless --convert-to pdf --outdir d t.doc >/dev/null 2>&1\n"
         + "soffice --headless --convert-to pdf --outdir x t.xls >/dev/null 2>&1\n"
