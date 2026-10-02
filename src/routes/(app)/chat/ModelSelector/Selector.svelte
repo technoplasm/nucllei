@@ -431,7 +431,7 @@
 							</div>
 
 							{#if item.model.owned_by === 'openai'}
-								<Tooltip content={`${'External'}`}>
+								<Tooltip content={$i18n.t('External')}>
 									<span class="i-lucide-link size-3 block translate-y-[1px]"></span>
 								</Tooltip>
 							{/if}

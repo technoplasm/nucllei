@@ -121,7 +121,6 @@ type OllamaModelDetails = {
 type Settings = {
 	models?: string[];
 	conversationMode?: boolean;
-	speechAutoSend?: boolean;
 	responseAutoPlayback?: boolean;
 	audio?: AudioSettings;
 	showUsername?: boolean;
@@ -216,6 +215,7 @@ export type Skill = {
 	description?: string | null;
 	content: string;
 	tool_ids: string[];
+	auto_load_content_types: string[];
 	access_control?: null | object;
 	created_at: number;
 	updated_at: number;
@@ -277,6 +277,12 @@ type Config = {
 			// 配備レベルの音声入力有効化(ENABLE_AUDIO_STT — nucllei/main.py)
 			enable?: boolean;
 			engine: string;
+			// 配備ごとの音声入力の調整値(env 専用 — nucllei/config.py の AUDIO_STT_*。
+			// 消費側は VoiceRecording.svelte)
+			segment_seconds?: number;
+			segment_pause_ms?: number;
+			silence_threshold_db?: number;
+			recording_bitrate_kbps?: number;
 		};
 	};
 	file?: {

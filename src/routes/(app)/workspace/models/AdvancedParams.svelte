@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 
 	import Switch from '$lib/components/common/Switch.svelte';
+
+	const i18n = getContext('i18n');
 
 	let {
 		admin = false,
@@ -43,7 +45,8 @@
 	} = $props();
 
 	// すべての項目をここで宣言的に定義する。ラベルは実際にシステムへ渡すキー名(item.key)を
-	// そのまま表示する。マークアップは下の {#each} 一箇所だけなので、ラベルと値の位置・行
+	// そのまま表示する(訳さない)。節見出し(title)と状態ラベル(states の label)は $i18n.t() を
+	// 通す — 変数経由なのでキーは src/lib/i18n/dynamic-keys.js に登録してある(#117)。マークアップは下の {#each} 一箇所だけなので、ラベルと値の位置・行
 	// レイアウトはテンプレートを一度いじれば全項目に一括で反映される。
 	//
 	// type:
@@ -125,7 +128,7 @@
 					type: 'input',
 					def: 0,
 					inputType: 'number',
-					placeholder: 'Enter Seed',
+					placeholder: 'Enter seed',
 					min: 0
 				},
 				{
@@ -176,7 +179,7 @@
 					def: '',
 					inputType: 'text',
 					placeholder:
-						'Enter comma-seperated "token:bias_value" pairs (example: 5432:100, 413:-100)'
+						'Enter comma-separated "token:bias_value" pairs (example: 5432:100, 413:-100)'
 				}
 			]
 		},
@@ -357,7 +360,7 @@
 				? 'mt-4'
 				: ''}"
 		>
-			{section.title}
+			{$i18n.t(section.title)}
 		</div>
 
 		<!-- 1col だと横に伸びて視認性が落ちるので自動で列分けする。max は 1fr にすること:
@@ -379,7 +382,7 @@
 									type="button"
 									onclick={() => cycle(item)}
 								>
-									<span class="self-center">{cycleLabel(item, params[item.key])}</span>
+									<span class="self-center">{$i18n.t(cycleLabel(item, params[item.key]))}</span>
 								</button>
 							{:else}
 								<button
@@ -390,7 +393,7 @@
 									{#if (params[item.key] ?? null) !== null}
 										<span class="i-lucide-x size-4 self-center block"></span>
 									{:else}
-										<span class="self-center">Default</span>
+										<span class="self-center">{$i18n.t('Default')}</span>
 									{/if}
 								</button>
 
@@ -423,7 +426,7 @@
 										<div class="w-32 min-w-0 shrink">
 											<input
 												type={item.inputType}
-												placeholder={item.placeholder}
+												placeholder={item.placeholder ? $i18n.t(item.placeholder) : undefined}
 												value={params[item.key]}
 												oninput={(e) =>
 													item.inputType === 'number' ? setNumber(item, e) : setText(item, e)}
@@ -434,7 +437,7 @@
 										</div>
 									{:else if item.type === 'switch'}
 										<div class="text-sm text-content-muted">
-											{params[item.key] ? 'Enabled' : 'Disabled'}
+											{params[item.key] ? $i18n.t('Enabled') : $i18n.t('Disabled')}
 										</div>
 										<div class=" pr-2">
 											<Switch
@@ -456,7 +459,7 @@
 	<div
 		class="text-md font-semibold text-content-muted border-b border-gray-100 dark:border-gray-800 pb-1 mb-2 mt-4"
 	>
-		Custom
+		{$i18n.t('Custom')}
 	</div>
 
 	<div class="space-y-1">
@@ -481,7 +484,7 @@
 				<button
 					class="p-1 shrink-0 text-content-muted hover:text-content"
 					type="button"
-					aria-label="Remove"
+					aria-label={$i18n.t('Remove')}
 					onclick={() => removeCustomRow(index)}
 				>
 					<span class="i-lucide-x size-4 block"></span>
@@ -495,7 +498,7 @@
 			onclick={addCustomRow}
 		>
 			<span class="i-lucide-plus size-4 block"></span>
-			<span>Add</span>
+			<span>{$i18n.t('Add')}</span>
 		</button>
 	</div>
 </div>

@@ -138,6 +138,15 @@ class Attachment:
         return extract_file_text(__request__, file)
 `;
 
+	// 編集時バッジの表示名。一覧(+page.svelte の FUNCTION_TYPES)の見出しと同じ訳語にする。
+	// 未知の type は生値のまま見せる
+	const TYPE_LABELS: Record<string, string> = {
+		attachment: 'Attachment',
+		filter: 'Filter',
+		action: 'Action',
+		pipe: 'Pipe'
+	};
+
 	// 作成時に選択中の type(雛形の切り替えに使う)。編集時は既存 content をそのまま出す。
 	let selectedType = $state('filter');
 	const boilerplate = $derived(
@@ -218,7 +227,10 @@ class Attachment:
 			/>
 
 			{#if edit}
-				<Badge type="muted" content={type || $i18n.t('Function')} />
+				<Badge
+					type="muted"
+					content={TYPE_LABELS[type] ? $i18n.t(TYPE_LABELS[type]) : type || $i18n.t('Function')}
+				/>
 			{:else}
 				<!-- llens(#45): 作成時のみ type を選ぶ(雛形の差し替え)。filter が既定。 -->
 				<select
@@ -226,10 +238,10 @@ class Attachment:
 					bind:value={selectedType}
 					aria-label={$i18n.t('Function Type')}
 				>
-					<option value="filter">Filter</option>
-					<option value="attachment">Attachment</option>
-					<option value="action">Action</option>
-					<option value="pipe">Pipe</option>
+					<option value="filter">{$i18n.t('Filter')}</option>
+					<option value="attachment">{$i18n.t('Attachment')}</option>
+					<option value="action">{$i18n.t('Action')}</option>
+					<option value="pipe">{$i18n.t('Pipe')}</option>
 				</select>
 			{/if}
 		</div>

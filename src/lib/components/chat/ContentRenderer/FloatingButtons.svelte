@@ -54,7 +54,7 @@
 	const streamResponse = async (userPrompt: string) => {
 		const modelId = model;
 		if (!modelId) {
-			toast.error('Model not selected');
+			toast.error($i18n.t('Model not selected'));
 			return;
 		}
 
@@ -77,7 +77,7 @@
 		});
 
 		if (!res?.ok || !res.body) {
-			toast.error('An error occurred while fetching the explanation');
+			toast.error($i18n.t('An error occurred while fetching the explanation'));
 			return;
 		}
 

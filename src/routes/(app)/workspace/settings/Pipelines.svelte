@@ -288,10 +288,10 @@
 					</div>
 
 					<div class="mt-2 text-xs text-content-muted">
-						<span class=" font-semibold text-content">Warning:</span> Pipelines are a plugin system
-						with arbitrary code execution —
+						<span class=" font-semibold text-content">{$i18n.t('Warning:')}</span>
+						{$i18n.t('Pipelines are a plugin system with arbitrary code execution —')}
 						<span class=" font-medium text-content-muted"
-							>don't fetch random pipelines from sources you don't trust.</span
+							>{$i18n.t("don't fetch random pipelines from sources you don't trust.")}</span
 						>
 					</div>
 				</div>
@@ -412,7 +412,7 @@
 							</div>
 						</div>
 					{:else if pipelines.length === 0}
-						<div>Pipelines Not Detected</div>
+						<div>{$i18n.t('Pipelines Not Detected')}</div>
 					{/if}
 				{:else}
 					<div class="flex justify-center">

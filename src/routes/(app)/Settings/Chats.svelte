@@ -16,7 +16,7 @@
 	const clamp = (value: number, min: number, max: number, fallback: number) =>
 		Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 
-	// 設定行は宣言的に定義して {#each} で展開する(旧 Interface タブの Chat/Voice/File
+	// 設定行は宣言的に定義して {#each} で展開する(旧 Interface タブの Chat/Voice
 	// セクションをこのタブへ移設)。type: 'switch' | 'select' / init: $settings からの初期値 /
 	// save: 既定は { key: 値 } で保存(title の nested 形や権限ゲートは行ごとに上書き)
 	type Row = {
@@ -142,10 +142,6 @@
 					}
 				}
 			]
-		},
-		{
-			title: 'File',
-			rows: []
 		}
 	];
 

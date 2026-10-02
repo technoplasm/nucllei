@@ -110,7 +110,7 @@
 	<div class="mt-6">
 		{#each groupedItems as group (group.label)}
 			<div class="text-md font-medium text-content-muted px-0.5 mt-3 first:mt-0 mb-1">
-				{group.label}
+				{$i18n.t(group.label)}
 			</div>
 			<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 				{#each group.items as func (func.id)}
