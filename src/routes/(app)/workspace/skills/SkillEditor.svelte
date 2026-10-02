@@ -44,6 +44,10 @@
 	let _tools = $state<Record<string, any>>({});
 	let toolIds = $state<string[]>([]);
 
+	// 自動ロード条件: content_type の前方一致をカンマ区切りで編集する(例 "audio/, image/png")。
+	// 正規化(小文字化・空要素と重複の除去)はバックエンドが行う。
+	let autoLoadContentTypes = $state('');
+
 	let accessControl = $state<any>({});
 
 	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。
@@ -90,6 +94,7 @@
 			description: description,
 			content,
 			tool_ids: toolIds,
+			auto_load_content_types: autoLoadContentTypes.split(',').map((type) => type.trim()),
 			access_control: accessControl
 		});
 		loading = false;
@@ -111,6 +116,7 @@
 			content = skill.content;
 			_content = content;
 			toolIds = skill?.tool_ids ?? [];
+			autoLoadContentTypes = (skill?.auto_load_content_types ?? []).join(', ');
 
 			accessControl = skill?.access_control ?? null;
 		}
@@ -200,6 +206,25 @@
 				bind:value={description}
 				rows={2}
 			/>
+		</div>
+
+		<div class="flex items-start gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-auto-load">
+				{$i18n.t('Auto-load')}
+			</label>
+			<div class="flex-1 min-w-0">
+				<input
+					id="skill-auto-load"
+					class="w-full text-sm py-1 px-2 bg-surface-form rounded-xs outline-hidden"
+					placeholder="audio/, image/png"
+					bind:value={autoLoadContentTypes}
+				/>
+				<div class="text-xs text-content-muted mt-0.5">
+					{$i18n.t(
+						'Loads this skill automatically when a chat has an attachment whose content type starts with one of these (comma-separated). Leave empty to disable.'
+					)}
+				</div>
+			</div>
 		</div>
 
 		{#if $user?.role === 'admin'}

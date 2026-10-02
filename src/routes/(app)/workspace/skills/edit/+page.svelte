@@ -71,6 +71,7 @@
 					description: _skill.description ?? '',
 					content: _skill.content,
 					tool_ids: _skill?.tool_ids ?? [],
+					auto_load_content_types: _skill?.auto_load_content_types ?? [],
 					access_control: _skill?.access_control ?? null
 				};
 			} else {

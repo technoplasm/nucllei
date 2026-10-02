@@ -1,16 +1,19 @@
 """skill 発火ロジック(issue #35 / #42 / #43)。
 
-`/command` 発火(apply_skill_command)と load_skill 擬似 tool
-(build_load_skill_tool)の 2 入口、およびその共通部(activate_skill /
-可視性・機能フラグ判定)。middleware(オーケストレーション)から
-issue #23 で分離した。設計の一次情報は _memos/skill-design.md。
+`/command` 発火(apply_skill_command)・load_skill 擬似 tool
+(build_load_skill_tool)・添付による自動ロード(apply_skill_auto_load)の
+3 入口、およびその共通部(activate_skill / 可視性・機能フラグ判定)。
+middleware(オーケストレーション)から issue #23 で分離した。設計の一次情報は _memos/skill-design.md。
 """
 
 import json
 import re
 
+from nucllei.models.chats import Chats
+from nucllei.models.files import Files
 from nucllei.models.skills import Skills, normalize_command
-from nucllei.utils.access_control import has_access
+from nucllei.utils.access_control import has_access, has_read_access_to_file
+from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
 from nucllei.utils.task import prompt_template
 
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
@@ -124,49 +127,285 @@ def apply_skill_command(form_data, user, model):
         ):
             continue
 
-        expanded = activate_skill(skill, user)
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
-        call_id = f"skill:{skill.id}:{idx}"
-        arguments = json.dumps({"skill_id": skill.id}, ensure_ascii=False)
-        # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
-        # 後段(process_chat_payload の skill tools ロード)で書き足される。
-        result_content = json.dumps(
-            {"result": expanded, "tools": []}, ensure_ascii=False
+        exchange, activation = synthesize_load_skill_exchange(
+            skill, user, f"skill:{skill.id}:{idx}", idx == last_user_idx
+        )
+        new_messages.extend(exchange)
+        activations.append(activation)
+
+    form_data["messages"] = new_messages
+    return form_data, activations
+
+
+def synthesize_load_skill_exchange(skill, user, call_id, current):
+    """「load_skill を呼んだことにする」合成 exchange と発火情報を作る。
+
+    `/command`(入口 1)と添付による自動ロード(入口 3)の共通部。戻り値は
+    ([assistant tool_call, tool result], activation)。
+    """
+    expanded = activate_skill(skill, user)
+    arguments = json.dumps({"skill_id": skill.id}, ensure_ascii=False)
+    # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
+    # 後段(process_chat_payload の skill tools ロード)で書き足される。
+    result_content = json.dumps({"result": expanded, "tools": []}, ensure_ascii=False)
+    result_message = {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": result_content,
+    }
+    exchange = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "load_skill", "arguments": arguments},
+                }
+            ],
+        },
+        result_message,
+    ]
+    activation = {
+        "call_id": call_id,
+        "id": skill.id,
+        "name": skill.name,
+        "content": expanded,
+        "result": result_content,
+        # 導入 tool 名を後段で書き戻すための参照(dict は共有される)
+        "result_message": result_message,
+        "tool_ids": skill.tool_ids or [],
+        "current": current,
+    }
+    return exchange, activation
+
+
+def iter_loaded_skill_ids(messages):
+    """履歴中の load_skill 呼び出しが指す skill id を順に返す(正規化済み)。
+
+    assistant の tool_calls に加え、UI 由来の履歴が content_blocks 形で来る経路も読む
+    (synthetic = `/command`・自動ロードの合成 exchange は、発火側が毎リクエスト
+    再導出して tool_calls 形で注入するので除外)。
+    """
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        calls = list(message.get("tool_calls") or [])
+        for block in message.get("content_blocks") or []:
+            if block.get("type") == "tool_calls" and not block.get("synthetic"):
+                calls.extend(block.get("content") or [])
+        for call in calls:
+            function = (call or {}).get("function") or {}
+            if function.get("name") != "load_skill":
+                continue
+            try:
+                arguments = json.loads(function.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(arguments, dict):
+                continue
+            skill_id = arguments.get("skill_id")
+            if isinstance(skill_id, str) and normalize_command(skill_id):
+                yield normalize_command(skill_id)
+
+
+def _readable_content_type(file_id, user, cache) -> str:
+    """要求ユーザーが読める file の content_type(小文字)。読めない・無ければ ""。
+
+    クライアントが申告した meta は信用せず、必ず DB の値で判定する。
+    """
+    if file_id not in cache:
+        content_type = ""
+        if has_read_access_to_file(file_id, user):
+            file = Files.get_file_by_id(file_id)
+            if file is not None:
+                content_type = str((file.meta or {}).get("content_type") or "").lower()
+        cache[file_id] = content_type
+    return cache[file_id]
+
+
+def _chat_level_attachments(form_data, user, cache) -> list[tuple[str, str]]:
+    """リクエスト直下の `files`(チャットの添付一覧)を [(file_id, content_type)] にする。
+
+    チャット wire では画像以外の添付はメッセージに載らず、チャット全体の一覧として
+    毎リクエスト届く(どの発言に付いたかは wire からは分からない)。
+    """
+    attachments = []
+    for entry in form_data.get("files") or []:
+        if not isinstance(entry, dict) or entry.get("type") == "collection":
+            continue
+        file_id = entry.get("id")
+        if not isinstance(file_id, str) or not file_id:
+            continue
+        content_type = _readable_content_type(file_id, user, cache)
+        if content_type:
+            attachments.append((file_id, content_type))
+    return attachments
+
+
+def _message_level_attachments(messages, user, cache) -> list[tuple[int, str]]:
+    """user メッセージの image_url パートを [(メッセージ位置, content_type)] にする。
+
+    内部 file URL(/api/v1/files/{id}/content)は DB の content_type、data URL は
+    その MIME を読む。tool 結果の画像を運ぶ user メッセージ(tool メッセージの直後に
+    置かれる — content_blocks.py / chat-messages.ts)は利用者の添付ではないので除く。
+    """
+    attachments = []
+    for idx, message in enumerate(messages):
+        if message.get("role") != "user" or not isinstance(
+            message.get("content"), list
+        ):
+            continue
+        if idx > 0 and messages[idx - 1].get("role") == "tool":
+            continue
+        for part in message["content"]:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                continue
+            url = (part.get("image_url") or {}).get("url")
+            if not isinstance(url, str):
+                continue
+            content_type = ""
+            if url.startswith("data:"):
+                content_type = url[5:].split(",", 1)[0].split(";", 1)[0].lower()
+            else:
+                match = INTERNAL_FILE_URL_PATTERN.match(url)
+                if match:
+                    content_type = _readable_content_type(match.group(1), user, cache)
+            if content_type:
+                attachments.append((idx, content_type))
+    return attachments
+
+
+def _current_turn_file_ids(metadata) -> set[str]:
+    """いま応答しようとしている user メッセージに付いた添付の file id(チャット DB から)。
+
+    チャットの添付一覧は「どの発言に付いたか」を運ばないので、自動ロードのカードを
+    「添付が付いたターン」にだけ出すための判定に使う(発火・認可・tool の有効化には
+    使わない — それらは payload だけで決まる)。chat 文脈が無ければ空。
+    """
+    chat_id = (metadata or {}).get("chat_id")
+    message_id = (metadata or {}).get("message_id")
+    if not chat_id or not message_id:
+        return set()
+    chat = Chats.get_chat_by_id(chat_id)
+    if chat is None:
+        return set()
+    history = ((chat.chat or {}).get("history") or {}).get("messages") or {}
+    parent = history.get((history.get(message_id) or {}).get("parentId")) or {}
+    if parent.get("role") != "user":
+        return set()
+    return {
+        file.get("id")
+        for file in parent.get("files") or []
+        if isinstance(file, dict) and file.get("id")
+    }
+
+
+def apply_skill_auto_load(form_data, user, model, metadata=None):
+    """添付の content_type を条件に skill を自動ロードする(入口 3)。
+
+    skill が `auto_load_content_types`(content_type の前方一致リスト、例 ["audio/"])を
+    宣言していて、会話に条件に合う添付があれば、`/command` と同じく「load_skill を
+    呼んだことにする」合成 exchange を注入する。apply_skill_command の後、かつ
+    クライアント申告の `files` を読取権限で絞った後に呼ぶこと。
+
+    - **認可は `/command` と同じ AND**: 機能「スキル」有効 ∧ モデルに紐づく
+      (meta.skillIds)∧ read 可視。欠ければ何もしない。
+    - **添付の出どころは 2 つ**: リクエスト直下の `files`(チャットの添付一覧。画像以外は
+      ここに載り、毎リクエスト届く)と、user メッセージの image_url パート(画像)。
+      content_type は DB の値で判定する(拡張子・クライアント申告は見ない)。
+    - **持続**: 状態は持たない。添付は毎リクエスト payload に載って来るので、発火も
+      毎リクエスト再導出される(後のターンでも tool が載り続ける)。
+    - **二重発火しない**: 履歴に同じ skill の load_skill(`/command` の合成 exchange・
+      モデル自律の呼び出し)が既にあれば足さない。条件に合う添付が複数でも 1 回。
+    - **位置**: 画像は「最初に条件に合った user メッセージ」の直後。チャットの添付一覧は
+      どの発言に付いたかを運ばないので、最初の user メッセージの直後(チャット全体に
+      効く添付として扱う — `<source>` が system メッセージに載るのと同じ扱い)。
+      同じ位置に `/command` の exchange があればその後ろ。複数 skill は meta.skillIds の順。
+
+    戻り値は (form_data, 発火リスト)。発火リストの形は apply_skill_command と同じ。
+    """
+    activations = []
+
+    if not is_skills_feature_enabled(model):
+        return form_data, activations
+
+    candidates = []
+    for skill_id in get_model_skill_ids(model):
+        skill = Skills.get_skill_by_id(skill_id)
+        if (
+            skill is not None
+            and skill.auto_load_content_types
+            and is_skill_visible(skill, user)
+            and skill.id not in [c.id for c in candidates]
+        ):
+            candidates.append(skill)
+    if not candidates:
+        return form_data, activations
+
+    messages = form_data.get("messages", [])
+    user_idxs = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    if not user_idxs:
+        return form_data, activations
+
+    cache = {}
+    chat_attachments = _chat_level_attachments(form_data, user, cache)
+    message_attachments = _message_level_attachments(messages, user, cache)
+    if not chat_attachments and not message_attachments:
+        return form_data, activations
+
+    loaded = set(iter_loaded_skill_ids(messages))
+    turn_file_ids = None  # 要るときだけ DB を読む
+
+    # 位置(messages の index)→ その直後に置く exchange 群
+    pending = {}
+    for skill in candidates:
+        if skill.id in loaded:
+            continue
+        prefixes = tuple(skill.auto_load_content_types)
+        chat_hits = [fid for fid, ct in chat_attachments if ct.startswith(prefixes)]
+        message_hits = [i for i, ct in message_attachments if ct.startswith(prefixes)]
+        if chat_hits:
+            anchor = user_idxs[0]
+            if turn_file_ids is None:
+                turn_file_ids = _current_turn_file_ids(metadata)
+            current = any(fid in turn_file_ids for fid in chat_hits)
+        elif message_hits:
+            anchor = min(message_hits)
+            current = anchor == user_idxs[-1]
+        else:
+            continue
+
+        exchange, activation = synthesize_load_skill_exchange(
+            skill, user, f"skill:{skill.id}:auto", current
+        )
+        pending.setdefault(anchor, []).extend(exchange)
+        activations.append(activation)
+
+    if not activations:
+        return form_data, activations
+
+    def is_command_exchange(message):
+        if message.get("role") == "tool":
+            return str(message.get("tool_call_id") or "").startswith("skill:")
+        return message.get("role") == "assistant" and any(
+            str((call or {}).get("id") or "").startswith("skill:")
+            for call in message.get("tool_calls") or []
         )
 
-        new_messages.append(
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": "load_skill", "arguments": arguments},
-                    }
-                ],
-            }
-        )
-        result_message = {
-            "role": "tool",
-            "tool_call_id": call_id,
-            "content": result_content,
-        }
-        new_messages.append(result_message)
-
-        activations.append(
-            {
-                "call_id": call_id,
-                "id": skill.id,
-                "name": skill.name,
-                "content": expanded,
-                "result": result_content,
-                # 導入 tool 名を後段で書き戻すための参照(dict は共有される)
-                "result_message": result_message,
-                "tool_ids": skill.tool_ids or [],
-                "current": idx == last_user_idx,
-            }
-        )
+    new_messages = []
+    deferred = []
+    for idx, message in enumerate(messages):
+        # 同じ位置の `/command` exchange を先に通してから自動ロード分を置く
+        if deferred and not is_command_exchange(message):
+            new_messages.extend(deferred)
+            deferred = []
+        new_messages.append(message)
+        if idx in pending:
+            deferred = pending[idx]
+    new_messages.extend(deferred)
 
     form_data["messages"] = new_messages
     return form_data, activations
@@ -191,8 +430,8 @@ def replay_skill_tool_ids(form_data, user, model) -> list[str]:
 
     将来の動的 tool 源(MCP 等)を足すときもこの形を踏襲する: 「導入 tool の
     持続性は会話履歴が唯一の状態」+「復活時はその場で再認可」。tool_calls の
-    走査は function.name で分岐しているので、別の導入 tool 名を足す拡張点は
-    この関数に閉じる。
+    走査(iter_loaded_skill_ids)は function.name で分岐しているので、別の導入
+    tool 名を足す拡張点はそこに閉じる。
     """
     if not is_skills_feature_enabled(model):
         return []
@@ -203,12 +442,9 @@ def replay_skill_tool_ids(form_data, user, model) -> list[str]:
     tool_ids: list[str] = []
     seen_skill_ids: set[str] = set()
 
-    def collect(skill_id):
-        if not isinstance(skill_id, str):
-            return
-        skill_id = normalize_command(skill_id)
-        if not skill_id or skill_id in seen_skill_ids:
-            return
+    for skill_id in iter_loaded_skill_ids(form_data.get("messages", [])):
+        if skill_id in seen_skill_ids:
+            continue
         seen_skill_ids.add(skill_id)
         skill = Skills.get_skill_by_id(skill_id)
         if (
@@ -216,36 +452,16 @@ def replay_skill_tool_ids(form_data, user, model) -> list[str]:
             or skill.id not in model_skill_ids
             or not is_skill_visible(skill, user)
         ):
-            return
+            continue
         for tool_id in skill.tool_ids or []:
             if tool_id not in tool_ids:
                 tool_ids.append(tool_id)
-
-    for message in form_data.get("messages", []):
-        if message.get("role") != "assistant":
-            continue
-        calls = list(message.get("tool_calls") or [])
-        # UI 由来の履歴が content_blocks 形で来る経路にも備える(synthetic =
-        # `/command` の合成 exchange は apply_skill_command が毎回再導出するので除外)
-        for block in message.get("content_blocks") or []:
-            if block.get("type") == "tool_calls" and not block.get("synthetic"):
-                calls.extend(block.get("content") or [])
-        for call in calls:
-            function = (call or {}).get("function") or {}
-            if function.get("name") != "load_skill":
-                continue
-            try:
-                arguments = json.loads(function.get("arguments") or "{}")
-            except (TypeError, ValueError):
-                continue
-            if isinstance(arguments, dict):
-                collect(arguments.get("skill_id"))
 
     return tool_ids
 
 
 def current_skill_activation_seeds(skill_activations) -> list:
-    """今回のターンの `/command` 発火を UI seed 用 metadata に載せる形へ絞る。
+    """今回のターンの `/command` 発火・自動ロードを UI seed 用 metadata に載せる形へ絞る。
 
     受け側は process_chat_response(応答先頭の synthetic tool_calls ブロック)で、
     call_id / id / result の 3 キーを読む。#43 で skill の可読キーを command→id に
@@ -341,7 +557,7 @@ def build_load_skill_tool(model, user, load_tools=None):
 
 
 def skill_activation_seed_block(skill_activations) -> dict:
-    """`/command` 発火をモデル自律起動と同形の tool_calls ブロックにする(#35)。
+    """`/command` 発火・自動ロードをモデル自律起動と同形の tool_calls ブロックにする(#35)。
 
     process_chat_response が応答先頭の seed として使う
     「View Result from load_skill」表示用。synthetic マーカ付き =

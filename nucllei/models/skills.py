@@ -4,7 +4,7 @@ from typing import Optional
 from nucllei.internal.db import Base, get_db
 from nucllei.models.users import Users, UserResponse
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import BigInteger, Column, String, Text, JSON
 
 from nucllei.utils.access_control import has_access
@@ -33,6 +33,10 @@ class Skill(Base):
     content = Column(Text)
     # tool_ids は紐づく tool。#35 step2 の遅延評価で消費。
     tool_ids = Column(JSON, nullable=True)
+    # 自動ロード条件(入口 3): content_type の前方一致リスト(例 ["audio/"])。
+    # 条件に合う添付が会話にあれば `/command` と同じ経路で発火する
+    # (utils/skills.py apply_skill_auto_load)。空 = 自動ロードしない。
+    auto_load_content_types = Column(JSON, nullable=True)
 
     access_control = Column(JSON, nullable=True)  # Controls data access levels.
     # Defines access control rules for this entry.
@@ -57,8 +61,15 @@ class SkillModel(BaseModel):
     description: Optional[str] = None
     content: str
     tool_ids: list[str] = []
+    auto_load_content_types: list[str] = []
 
     access_control: Optional[dict] = None
+
+    @field_validator("auto_load_content_types", mode="before")
+    @classmethod
+    def _none_as_empty(cls, value):
+        # 列追加より前からある行は NULL — モデル上は常にリスト
+        return [] if value is None else value
 
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
@@ -81,7 +92,27 @@ class SkillForm(BaseModel):
     description: Optional[str] = None
     content: str
     tool_ids: list[str] = []
+    auto_load_content_types: list[str] = []
     access_control: Optional[dict] = None
+
+    @field_validator("auto_load_content_types")
+    @classmethod
+    def _normalize_content_types(cls, value):
+        return normalize_content_type_prefixes(value)
+
+
+def normalize_content_type_prefixes(prefixes: list[str]) -> list[str]:
+    """自動ロード条件(content_type の前方一致リスト)を正規化する。
+
+    前後空白を落として小文字化し、空要素と重複を除く(順序は保つ)。空文字を残すと
+    「どの添付にも一致」になるので必ず落とす。
+    """
+    normalized = []
+    for prefix in prefixes or []:
+        prefix = prefix.strip().lower()
+        if prefix and prefix not in normalized:
+            normalized.append(prefix)
+    return normalized
 
 
 def normalize_command(command: str) -> str:
@@ -161,6 +192,7 @@ class SkillsTable:
                 skill.description = form_data.description
                 skill.content = form_data.content
                 skill.tool_ids = form_data.tool_ids
+                skill.auto_load_content_types = form_data.auto_load_content_types
                 skill.access_control = form_data.access_control
                 skill.updated_at = int(time.time())
                 db.commit()

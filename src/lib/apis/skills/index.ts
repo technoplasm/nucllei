@@ -9,6 +9,8 @@ export type SkillItem = {
 	description?: string | null;
 	content: string;
 	tool_ids?: string[];
+	// 自動ロード条件: content_type の前方一致リスト(例 ['audio/'])。空 = 自動ロードしない
+	auto_load_content_types?: string[];
 	access_control?: null | object;
 };
 
