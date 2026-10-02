@@ -1,7 +1,7 @@
 # dev/e2e — Playwright 実機チェック(skill 機能)
 
 dev サーバ(backend :3000 + vite。ポートはスクリプト冒頭の `FRONT` を環境に合わせる)と
-dev アカウント(`ken@llens.local` / `llens-dev`、`_memos/dev-environment.md`)前提の
+dev アカウント(`dev@llens.local` / `dev`、`_memos/dev-environment.md`)前提の
 半自動チェック。pytest ではなく実 SGLang × Kimi を叩くので CI には載せない。
 
 ```sh

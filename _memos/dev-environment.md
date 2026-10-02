@@ -219,22 +219,22 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
 
 1. **admin 作成**: 公開オンボーディング画面は撤去済み(#62)。CLI で作成する:
    ```sh
-   uv run task create-dev-admin    # 慣例 dev admin(ken@llens.local / llens-dev)を一発で作る
-   # 任意アカウントはサブコマンド直: uv run nucllei create-admin --email a@llens.local --name A --password llens-dev
+   uv run task create-dev-admin    # 慣例 dev admin(dev@llens.local / dev)を一発で作る
+   # 任意アカウントはサブコマンド直: uv run nucllei create-admin --email a@llens.local --name A --password dev
    ```
-   慣例の dev アカウント: **ken@llens.local / llens-dev**(name: Ken)。
+   慣例の dev アカウント: **dev@llens.local / dev**(name: dev)。
    ※ CLI は console script `nucllei`(2026-07-24 に package 化 — 旧 `uv run task cli` の
    `python -c` 呪文は撤去)。`uv run nucllei --help` で全サブコマンド確認可。
    ※ `POST /api/v1/auths/signup` の curl も `ENABLE_SIGNUP` が有効なら使えるが、
    フロントの初回 signup 導線は無い(CLI が正)。
-   **権限検証用の非 admin アカウント(#66 で作成、パスワードは同じ llens-dev)**:
+   **権限検証用の非 admin アカウント(#66 で作成、パスワードは同じ dev)**:
    `editor@llens.local`(group `skill-editors` 所属 = `workspace.skills` 持ち)と
    `plainuser@llens.local`(無所属)。admin の `POST /api/v1/auths/add` で作る。
    3層権限(admin / skill editor / user)の実機確認はこの 3 アカウントで一巡できる。
 2. **トークン取得**:
    ```sh
    TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin -H 'Content-Type: application/json' \
-     -d '{"email":"ken@llens.local","password":"llens-dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+     -d '{"email":"dev@llens.local","password":"dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
    ```
 3. **SGLang 接続**(院内ネットワーク: `http://prism-llens:13300/v1`、モデル `kimi-k2.6`):
    ⚠️ **2026-08-05 時点で認証が要る**(旧記載「認証不要」は現状と合わない)。`/v1/models` が
@@ -464,7 +464,7 @@ LLENS_STT_SMOKE=1 uv run pytest \
   持たず起動ごとに repo から解決される)。教訓が生きるのは残った custom tool(llens 由来)だけ。
 - **実機ストリーミング e2e**: `.venv/bin/python dev/e2e/check_streaming_wire_v2.py`
   (実 SGLang 前提。単調成長・ストリーム中リロード再アタッチ・完走を検証)。
-- **dev アカウント(ken@llens.local)は `ctrlEnterToSend: true`**: 素の Enter では送信されない。
+- **旧 dev アカウント(ken@llens.local)は `ctrlEnterToSend: true` だった(アカウントごとの設定)**: 素の Enter では送信されない。
   Playwright からの送信は `#send-message-button` クリックが設定非依存で確実。
 - リッチテキスト入力は全廃(textarea 一本、`2894654da`)。`#chat-input` は常に textarea。
 
@@ -500,7 +500,7 @@ dev 実機(:3000)に prism ツールを載せて検証したときの罠と手�
 - **prism `nuc-sync` の向き先 = `NUCLLEI_ORIGIN`**(llens `.env`、`005df9e`)。dev は
   `NUCLLEI_ORIGIN=http://localhost:3000`。admin API Key は llens `.env` の `NUCLLEI_API_KEY` に置く
   (この開発機だけの単一 .env 管理。`.env` は gitignore 済み)。dev key は
-  `POST /api/v1/auths/signin`(ken@llens.local / llens-dev)→ `GET /api/v1/auths/api_key` で取得。
+  `POST /api/v1/auths/signin`(dev@llens.local / dev)→ `GET /api/v1/auths/api_key` で取得。
 - **sandbox は imports/exports 命名で再ビルド要**(旧 inputs/outputs コンテナだと tool と食い違う)。
   compose 補間が `nucllei` サービスの `NUCLLEI_DB_PASSWORD` を要求するので、sandbox 単体は
   `docker build -t llens/sandbox:poc ./sandbox` → `NUCLLEI_DB_PASSWORD=x docker compose up -d --no-deps --force-recreate sandbox`。

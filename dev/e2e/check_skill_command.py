@@ -15,7 +15,7 @@ FRONT = "http://localhost:5174"
 
 req = urllib.request.Request(
     BASE + "/api/v1/auths/signin",
-    data=json.dumps({"email": "ken@llens.local", "password": "llens-dev"}).encode(),
+    data=json.dumps({"email": "dev@llens.local", "password": "dev"}).encode(),
     headers={"Content-Type": "application/json"},
     method="POST",
 )
