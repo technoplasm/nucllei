@@ -510,7 +510,7 @@
 
 					<!-- llens(#121): チャット検索(一覧の直上)。入力中は下の一覧が検索結果に切り替わる -->
 					<div class="mt-3">
-						<ChatSearch onSearch={searchHandler} onAsk={askInChatHandler} />
+						<ChatSearch active={!!searchText} onSearch={searchHandler} onAsk={askInChatHandler} />
 					</div>
 
 					{#if searchText}
