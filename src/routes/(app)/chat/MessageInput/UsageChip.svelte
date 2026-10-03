@@ -1,13 +1,15 @@
 <script lang="ts">
 	// 入力欄右上の floating トークンゲージ(#102)— コンテキスト占有の常時表示。
 	// 生成中は live usage(total_tokens が現在占有)、それ以外は直近ターンの確定値
-	// (chat:completion のマージ済み usage / leaf message usage — prompt_tokens が占有)。
+	// (chat:completion のマージ済み usage / leaf message usage — 次ターンへ持ち越す
+	// carried_tokens が占有、無ければ prompt_tokens。contextUsageFromUsage に揃える)。
 	// どちらも無ければ何も描かない(新規チャット等)。
 	// ターンごとの所要時間・tok/s はここではなく各メッセージのアクション行に出す。
 	import { chatId, mobile } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
 	import {
+		contextUsageFromUsage,
 		formatTokens,
 		getActiveLiveUsage,
 		getChatUsageBaseline
@@ -19,7 +21,7 @@
 	const baseline = $derived(getChatUsageBaseline($chatId));
 
 	const current = $derived(
-		live ? live.total_tokens : (baseline?.prompt_tokens ?? baseline?.total_tokens ?? null)
+		live ? live.total_tokens : (contextUsageFromUsage(baseline)?.tokens ?? null)
 	);
 	const contextSize = $derived(live?.context_size ?? baseline?.context_size ?? null);
 	const inTokens = $derived(baseline?.prompt_tokens);

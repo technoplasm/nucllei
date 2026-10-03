@@ -156,3 +156,38 @@ class TestChatUsageRecording(AbstractPostgresTest):
         )
         chat = self.Chats.get_chat_by_id(self.chat_id)
         assert "context_size" not in chat.meta["usage"]
+
+    def test_carried_tokens_is_latest_not_accumulated(self):
+        # 次ターンへ持ち越す量(carried_tokens)は prompt 同様「最後の呼び出し」の値。
+        # tool ループで 2 回記録されたら最新で上書き(累積すると二重計上になる)
+        result = self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id,
+            "m1",
+            {"prompt_tokens": 100, "completion_tokens": 50, "carried_tokens": 120},
+        )
+        assert result["carried_tokens"] == 120
+
+        result = self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id,
+            "m1",
+            {"prompt_tokens": 150, "completion_tokens": 20, "carried_tokens": 160},
+        )
+        assert result["carried_tokens"] == 160
+        assert result["completion_tokens"] == 70
+
+        chat = self.Chats.get_chat_by_id(self.chat_id)
+        assert chat.chat["history"]["messages"]["m1"]["usage"]["carried_tokens"] == 160
+        assert chat.meta["usage"]["carried_tokens"] == 160
+
+    def test_carried_tokens_absent_keeps_previous(self):
+        # carried の無い記録(completion の無いフレーム等)は据え置き
+        self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id,
+            "m1",
+            {"prompt_tokens": 100, "completion_tokens": 50, "carried_tokens": 120},
+        )
+        self.Chats.record_usage_by_id_and_message_id(
+            self.chat_id, "m1", {"prompt_tokens": 110}
+        )
+        chat = self.Chats.get_chat_by_id(self.chat_id)
+        assert chat.chat["history"]["messages"]["m1"]["usage"]["carried_tokens"] == 120

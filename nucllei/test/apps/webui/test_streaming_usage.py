@@ -140,8 +140,11 @@ def _sse_response_from_fixture(name):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-async def _consume(monkeypatch, response, model=None):
-    """consume_model_stream を単体で駆動し、(イベント列, DB record 呼び出し列) を返す。"""
+async def _consume(monkeypatch, response, model=None, assembler=None):
+    """consume_model_stream を単体で駆動し、(イベント列, DB record 呼び出し列) を返す。
+
+    assembler を渡すと同じ assembler で続けて駆動できる(tool ループ相当)。
+    """
     events = []
     record_calls = []
 
@@ -167,7 +170,7 @@ async def _consume(monkeypatch, response, model=None):
     await middleware.consume_model_stream(
         request,
         response,
-        ContentBlocksAssembler(),
+        assembler if assembler is not None else ContentBlocksAssembler(),
         model=(
             model
             if model is not None
@@ -233,7 +236,8 @@ def test_only_final_usage_frame_is_recorded(monkeypatch):
         _consume(monkeypatch, _sse_response_from_frames(_continuous_frames()))
     )
 
-    final_usage = _usage(28, 4, reasoning=1)
+    # carried_tokens(次ターンへ持ち越す量)= prompt + (completion − reasoning)
+    final_usage = {**_usage(28, 4, reasoning=1), "carried_tokens": 28 + (4 - 1)}
     assert len(record_calls) == 1
     # 生成所要時間(#102)は backend 実測 — 値は環境依存なのでキーの存在と型だけ固定し、
     # DB へ渡る usage と emit される usage で同じ値であることを見る
@@ -265,6 +269,8 @@ def test_usage_on_non_empty_choices_frame_is_recorded(monkeypatch):
         "prompt_tokens": 26,
         "total_tokens": 127,
         "completion_tokens_details": {"reasoning_tokens": 94, "text_tokens": 7},
+        # reasoning は入れ子(completion_tokens_details)からも読む: 26 + (101 − 94)
+        "carried_tokens": 33,
     }
     assert record_calls[0]["context_size"] == 262144
 
@@ -375,11 +381,177 @@ def test_live_usage_payload_omits_unresolved_optional_keys(monkeypatch):
     # ctx 不明時の emit は record と同一 dict を共有するので pop は record 側で 1 回
     duration = record_calls[0]["usage"].pop("duration")
     assert isinstance(duration, float) and duration >= 0
-    assert record_calls == [{"usage": _usage(22, 2), "context_size": None}]
+    # reasoning 未報告・出力は text のみ → 出力を丸ごと再送扱い: 22 + 2
+    expected = {**_usage(22, 2), "carried_tokens": 24}
+    assert record_calls == [{"usage": expected, "context_size": None}]
     emitted = _completion_usage_events(events)
     assert len(emitted) == 1
     emitted[0].pop("duration", None)
-    assert emitted == [_usage(22, 2)]
+    assert emitted == [expected]
+
+
+class TestCarriedTokens:
+    """次ターンへ持ち越すコンテキスト量 carried_tokens(ken 指摘 2026-10-03)。
+
+    ゲージが最後の呼び出しの prompt_tokens を出すと、ターンの出力分だけ次ターンの
+    先頭で跳ねる。確定時に「次の呼び出しの prompt」を見積もって message.usage に載せる:
+        carried = prompt + (completion − reasoning)   … reasoning は再送されない
+    reasoning_tokens はバックエンド報告(top-level / completion_tokens_details)を使い、
+    無ければこの呼び出しの出力ブロックの文字数比で推定する。
+    """
+
+    def test_reported_reasoning_tokens(self):
+        usage = _usage(100, 40, reasoning=30)
+        assert middleware.carried_tokens_from_usage(usage, None) == 110
+
+    def test_nested_reasoning_details(self):
+        usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 40,
+            "completion_tokens_details": {"reasoning_tokens": 35},
+        }
+        # ブロックは無視される(報告があれば推定しない)
+        blocks = [{"type": "reasoning", "content": "x" * 1000}]
+        assert middleware.carried_tokens_from_usage(usage, blocks) == 105
+
+    def test_estimated_from_output_chars(self):
+        usage = _usage(100, 40)
+        blocks = [
+            {"type": "reasoning", "content": "r" * 60},
+            {"type": "text", "content": "t" * 15},
+            {
+                "type": "tool_calls",
+                "content": [
+                    {
+                        "id": "functions.f:0",
+                        "function": {"name": "f", "arguments": "{}"},
+                        "render": {"ignored": True},
+                    }
+                ],
+            },
+        ]
+        # 再送 15 + (1 + 2) = 18 文字、全体 78 文字 → round(40 × 18 / 78) = 9
+        assert middleware.carried_tokens_from_usage(usage, blocks) == 109
+
+    def test_estimate_without_blocks_resends_whole_completion(self):
+        assert middleware.carried_tokens_from_usage(_usage(100, 40), []) == 140
+        assert middleware.carried_tokens_from_usage(_usage(100, 40), None) == 140
+
+    def test_clamped_to_completion_range(self):
+        # reasoning > completion(壊れた報告)でも prompt を下回らない
+        assert (
+            middleware.carried_tokens_from_usage(_usage(100, 40, reasoning=50)) == 100
+        )
+        # 負の reasoning も completion 以上には膨らまない
+        assert (
+            middleware.carried_tokens_from_usage(_usage(100, 40, reasoning=-5)) == 140
+        )
+
+    def test_absent_prompt_or_completion_yields_none(self):
+        assert middleware.carried_tokens_from_usage({"prompt_tokens": 5}, []) is None
+        assert (
+            middleware.carried_tokens_from_usage({"completion_tokens": 5}, []) is None
+        )
+        assert middleware.carried_tokens_from_usage({}, []) is None
+
+    def test_absent_completion_records_no_field(self, monkeypatch):
+        """completion の無い usage フレームでは carried_tokens を載せない。"""
+        frames = [
+            _chunk(delta={"role": "assistant", "content": "2"}),
+            _chunk(delta={}, finish_reason="stop"),
+            _chunk(usage={"prompt_tokens": 22}),
+        ]
+        _, record_calls = asyncio.run(
+            _consume(monkeypatch, _sse_response_from_frames(frames))
+        )
+        assert len(record_calls) == 1
+        assert "carried_tokens" not in record_calls[0]["usage"]
+
+    def test_estimate_uses_only_this_streams_blocks_in_tool_loop(self, monkeypatch):
+        """tool ループでは最後の呼び出しだけで見積もる。
+
+        1 回目(tool_call fixture — reasoning 報告あり)の出力は 2 回目の prompt に
+        含まれているので、2 回目(reasoning 未報告)の推定に 1 回目の reasoning 文字が
+        混ざってはいけない(assembler.stream_blocks のスコープ)。
+        """
+        assembler = ContentBlocksAssembler()
+        _, first = asyncio.run(
+            _consume(
+                monkeypatch,
+                _sse_response_from_fixture("tool_call"),
+                assembler=assembler,
+            )
+        )
+        # tool_call fixture の最終 usage: prompt 141 / completion 886 / reasoning 719
+        assert first[0]["usage"]["carried_tokens"] == 141 + (886 - 719)
+
+        # tool ループ側の操作(実行結果を綴じて次の text ブロックを開く)
+        calls, _ = assembler.finish_stream()
+        assembler.ensure_tool_calls_block(calls)
+        assembler.set_tool_results(
+            [{"tool_call_id": call["id"], "content": "晴れ"} for call in calls]
+        )
+
+        frames = [
+            _chunk(delta={"role": "assistant", "content": ""}),
+            _chunk(delta={"reasoning_content": "r" * 30}),
+            _chunk(delta={"content": "t" * 10}),
+            _chunk(delta={}, finish_reason="stop"),
+            _chunk(usage=_usage(1200, 40)),  # reasoning 未報告
+        ]
+        _, second = asyncio.run(
+            _consume(
+                monkeypatch, _sse_response_from_frames(frames), assembler=assembler
+            )
+        )
+        # この呼び出しの出力だけで推定: round(40 × 10 / 40) = 10 → 1200 + 10。
+        # ターン累積の completion(886 + 40)は使わない。
+        assert second[0]["usage"]["carried_tokens"] == 1210
+
+    def test_carried_rides_non_streaming_response(self, monkeypatch):
+        """非ストリーム JSON 応答(ingest_model_response_json)でも載る。"""
+        record_calls = []
+        monkeypatch.setattr(
+            middleware.Chats,
+            "upsert_message_to_chat_by_id_and_message_id",
+            lambda chat_id, message_id, data: None,
+        )
+        monkeypatch.setattr(
+            middleware.Chats,
+            "record_usage_by_id_and_message_id",
+            lambda chat_id, message_id, usage, context_size=None: record_calls.append(
+                usage
+            ),
+        )
+
+        async def event_emitter(event):
+            pass
+
+        request = types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(MODELS={}))
+        )
+        asyncio.run(
+            middleware.ingest_model_response_json(
+                request,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "t" * 10,
+                                "reasoning_content": "r" * 30,
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": _usage(50, 40),
+                },
+                ContentBlocksAssembler(),
+                model={"id": "m"},
+                metadata={"chat_id": "chat-1", "message_id": "message-1"},
+                event_emitter=event_emitter,
+            )
+        )
+        assert record_calls[0]["carried_tokens"] == 60
 
 
 class TestContinuousUsageAutoOptOut:

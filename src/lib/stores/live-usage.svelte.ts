@@ -51,6 +51,8 @@ export type ChatUsageBaseline = {
 	prompt_tokens?: number;
 	completion_tokens?: number;
 	total_tokens?: number;
+	/** 次ターンへ持ち越す量(backend 算出 — 最後の呼び出しの prompt + 再送される出力)。 */
+	carried_tokens?: number;
 	context_size?: number;
 };
 
@@ -169,6 +171,7 @@ export const setChatUsageBaseline = (
 		prompt_tokens: asNumber(usage.prompt_tokens),
 		completion_tokens: asNumber(usage.completion_tokens),
 		total_tokens: asNumber(usage.total_tokens),
+		carried_tokens: asNumber(usage.carried_tokens),
 		context_size: asNumber(usage.context_size)
 	};
 	if (
@@ -214,8 +217,14 @@ export const formatTokens = (n: number): string => {
 
 /**
  * ターンのコンテキスト使用量(占有トークン + 上限)。`message.usage` から導く —
- * MessageActions のターンごと表示用。占有の定義は UsageChip の baseline と同じ
- * `prompt_tokens ?? total_tokens`(並んだとき数字が食い違わないように揃える)。
+ * MessageActions のターンごと表示と UsageChip の確定値(baseline)が共用する
+ * (並んだとき数字が食い違わないように揃える)。
+ *
+ * 占有の定義は `carried_tokens ?? prompt_tokens ?? total_tokens`:
+ * - carried_tokens(2026-10-03、ken 指摘): backend が確定時に測り直した「次ターンへ
+ *   持ち越す量」= 最後の呼び出しの prompt + 再送される出力(text + tool_calls。
+ *   reasoning は再送されない)。これを出すと次ターンの先頭でゲージが跳ねない。
+ * - 無い形(旧い記録・completion の無い usage)は従来どおり最後の呼び出しの prompt。
  * 出せない形は null、context_size が無い形は contextSize: null(数値のみ表示)。
  */
 export const contextUsageFromUsage = (
@@ -224,7 +233,8 @@ export const contextUsageFromUsage = (
 	if (usage == null) {
 		return null;
 	}
-	const tokens = asNumber(usage.prompt_tokens) ?? asNumber(usage.total_tokens);
+	const tokens =
+		asNumber(usage.carried_tokens) ?? asNumber(usage.prompt_tokens) ?? asNumber(usage.total_tokens);
 	if (tokens === undefined) {
 		return null;
 	}

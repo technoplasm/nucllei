@@ -875,7 +875,88 @@ async def _persist_message_snapshot(metadata, snapshot):
         )
 
 
-async def _record_usage(request, model, metadata, usage, event_emitter):
+def _reasoning_tokens_from_usage(usage: dict) -> Optional[int]:
+    """バックエンドが報告した reasoning のトークン数。無ければ None。
+
+    SGLang 拡張のトップレベル `reasoning_tokens`(dev の prism-gw 越しの kimi-k2.6 も
+    この形)と、OpenAI 形 `completion_tokens_details.reasoning_tokens`(LiteLLM 越し)の
+    両方を読む。
+    """
+    value = usage.get("reasoning_tokens")
+    if value is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, dict):
+            value = details.get("reasoning_tokens")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _output_chars(blocks) -> tuple[int, int]:
+    """出力ブロック列の文字数 (再送される分, reasoning の分)。
+
+    再送される分 = text 本文 + tool_calls の name / arguments。reasoning は次ターンの
+    履歴に乗らない(convert_content_blocks_to_messages / chat-messages.ts と同じ規律)。
+    """
+    visible = 0
+    reasoning = 0
+    for block in blocks or []:
+        kind = block.get("type")
+        content = block.get("content")
+        if kind == "text" and isinstance(content, str):
+            visible += len(content)
+        elif kind == "reasoning" and isinstance(content, str):
+            reasoning += len(content)
+        elif kind == "tool_calls" and isinstance(content, list):
+            for call in content:
+                function = (call or {}).get("function") or {}
+                visible += len(function.get("name") or "")
+                visible += len(function.get("arguments") or "")
+    return visible, reasoning
+
+
+def carried_tokens_from_usage(usage: dict, output_blocks=None) -> Optional[int]:
+    """次ターンへ持ち越されるコンテキスト量の見積り(ken 指摘 2026-10-03)。
+
+    ゲージが「最後の呼び出しの prompt_tokens」を出すと、ターンの出力分だけ次ターンの
+    先頭で跳ねる。次の呼び出しの prompt は
+
+        carried = prompt_tokens + (completion_tokens − reasoning_tokens)
+
+    = この呼び出しの入力 + 再送される出力(text + tool_calls)。reasoning は再送されない。
+    tool ループでは**最後の呼び出し**だけで計算する(以前の呼び出しの出力は最新の
+    prompt_tokens に既に含まれている)— 呼び出しごとに記録して最新値で上書きする。
+
+    reasoning_tokens はバックエンドの報告を使う(_reasoning_tokens_from_usage)。
+    報告が無ければ、この呼び出しの出力ブロックの文字数比から**推定**する:
+        resent ≈ completion × len(text + tool_calls) / len(text + tool_calls + reasoning)
+    出力ブロックが無い(文字数 0)なら completion を丸ごと再送扱い。いずれも
+    [0, completion] に clamp。prompt / completion のどちらかが無ければ None(出さない)。
+    """
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    if not isinstance(prompt, (int, float)) or not isinstance(completion, (int, float)):
+        return None
+    prompt = int(prompt)
+    completion = max(int(completion), 0)
+
+    reasoning = _reasoning_tokens_from_usage(usage)
+    if reasoning is not None:
+        resent = completion - reasoning
+    else:
+        visible_chars, reasoning_chars = _output_chars(output_blocks)
+        total_chars = visible_chars + reasoning_chars
+        if total_chars > 0:
+            resent = round(completion * visible_chars / total_chars)
+        else:
+            resent = completion
+    resent = min(max(resent, 0), completion)
+    return prompt + resent
+
+
+async def _record_usage(
+    request, model, metadata, usage, event_emitter, *, output_blocks=None
+):
     """実測 usage(llens #57)の永続化 + イベント。tool ループの各呼び出しで加算。
 
     #102: emit するのは**マージ後の message.usage**(record の戻り — completion /
@@ -883,7 +964,14 @@ async def _record_usage(request, model, metadata, usage, event_emitter):
     DB が常に一致し、saveChatHandler の history 保存が DB のマージ結果を上書きしても
     値が変わらない。記録できない経路(metadata 不足・message 不在)だけ生 usage +
     context_size で emit する。
+
+    output_blocks はこの呼び出しの出力ブロック(assembler.stream_blocks())。
+    carried_tokens(次ターンへ持ち越す量)の推定に使う — reasoning_tokens が報告される
+    配備では使わない。
     """
+    carried = carried_tokens_from_usage(usage, output_blocks)
+    if carried is not None:
+        usage = {**usage, "carried_tokens": carried}
     ctx = get_model_context_size(request, model)
     merged = None
     if metadata.get("chat_id") and metadata.get("message_id"):
@@ -1040,7 +1128,14 @@ async def consume_model_stream(
                     # tool 実行時間は含まれない)。クライアント積算はリロードで消えるため
                     # 計測は backend の責務。
                     usage = {**usage, "duration": round(loop.time() - started_at, 3)}
-                    await _record_usage(request, model, metadata, usage, event_emitter)
+                    await _record_usage(
+                        request,
+                        model,
+                        metadata,
+                        usage,
+                        event_emitter,
+                        output_blocks=assembler.stream_blocks(),
+                    )
                     recorded_usage = True
                 continue
 
@@ -1102,7 +1197,14 @@ async def consume_model_stream(
         # フレームの形を当てにいかず「最後に観測した累積 usage を終端で 1 回記録する」で
         # 両方の形を拾う(SGLang では上で記録済みなのでここは通らない)。
         usage = {**pending_usage, "duration": round(loop.time() - started_at, 3)}
-        await _record_usage(request, model, metadata, usage, event_emitter)
+        await _record_usage(
+            request,
+            model,
+            metadata,
+            usage,
+            event_emitter,
+            output_blocks=assembler.stream_blocks(),
+        )
 
     response_tool_calls, mismatch = assembler.finish_stream()
 
@@ -1193,7 +1295,14 @@ async def ingest_model_response_json(
 
     usage = response.get("usage", {})
     if usage:
-        await _record_usage(request, model, metadata, usage, event_emitter)
+        await _record_usage(
+            request,
+            model,
+            metadata,
+            usage,
+            event_emitter,
+            output_blocks=assembler.stream_blocks(),
+        )
 
     response_tool_calls, mismatch = assembler.finish_stream()
     if mismatch == MISMATCH_MISSING_TOOL_CALLS:

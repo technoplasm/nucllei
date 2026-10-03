@@ -166,6 +166,24 @@ describe('contextUsageFromUsage', () => {
 		expect(contextUsageFromUsage({ duration: 2.5 })).toBeNull();
 		expect(contextUsageFromUsage(null)).toBeNull();
 	});
+
+	it('carried_tokens(次ターンへ持ち越す量)があれば prompt より優先する', () => {
+		// backend が確定時に測り直した値 = 最後の呼び出しの prompt + 再送される出力
+		expect(
+			contextUsageFromUsage({
+				prompt_tokens: 9559,
+				completion_tokens: 155,
+				total_tokens: 9714,
+				carried_tokens: 9600,
+				context_size: 262144
+			})
+		).toEqual({ tokens: 9600, contextSize: 262144 });
+		// 数値でない carried は無視して従来の prompt へ
+		expect(contextUsageFromUsage({ prompt_tokens: 10, carried_tokens: 'x' })).toEqual({
+			tokens: 10,
+			contextSize: null
+		});
+	});
 });
 
 describe('getActiveLiveUsage', () => {
@@ -207,8 +225,22 @@ describe('chat usage baseline', () => {
 			prompt_tokens: 41267,
 			completion_tokens: 1200,
 			total_tokens: 42467,
+			carried_tokens: undefined,
 			context_size: 262144
 		});
+	});
+
+	it('baseline は carried_tokens を保持し、UsageChip の占有は contextUsageFromUsage と一致する', () => {
+		setChatUsageBaseline(C1, {
+			prompt_tokens: 41267,
+			completion_tokens: 1200,
+			total_tokens: 42467,
+			carried_tokens: 41500,
+			context_size: 262144
+		});
+		const baseline = getChatUsageBaseline(C1);
+		expect(baseline?.carried_tokens).toBe(41500);
+		expect(contextUsageFromUsage(baseline)).toEqual({ tokens: 41500, contextSize: 262144 });
 	});
 
 	it('baseline は chat ごとに独立', () => {

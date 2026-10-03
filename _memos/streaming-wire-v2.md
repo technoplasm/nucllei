@@ -70,6 +70,22 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
   「直近のモデル呼び出しに実際に入った量」= 生成中は `chat:usage` の total、確定後は
   マージ済み usage の最新 prompt。tool ループ中の値に合算・二重計上は無い(SGLang 直結 /
   LiteLLM 経由の両方で、SSE・DB・次ターン先頭の値が一致することを確認)。
+  - **確定値は「次ターンへ持ち越す量」`carried_tokens` に変更(2026-10-03、ken「出力終わった
+    段階で測り直すようにしたら?」)**。最後の呼び出しの prompt を出すと、そのターンの出力分
+    (text + tool_calls は次ターンで再送される)だけ次ターンの先頭でゲージが跳ねていた。
+    backend が `_record_usage` で `carried = prompt_tokens + clamp(completion_tokens −
+    reasoning_tokens, 0, completion)` を算出して `message.usage.carried_tokens` に載せる
+    (`middleware.carried_tokens_from_usage`。DB merge は prompt 同様「最新で上書き」—
+    tool ループでは最後の呼び出しだけ。以前の呼び出しの出力は最新 prompt に含まれているので
+    ターン累積の completion は使わない)。reasoning_tokens は top-level(SGLang 拡張 —
+    dev の prism-gw 越し kimi-k2.6 も同じ)/ `completion_tokens_details.reasoning_tokens`
+    (LiteLLM)の報告を使い、無ければ**推定**: その呼び出しの出力ブロック
+    (`assembler.stream_blocks()` — start_stream 以降の分だけ)の文字数比
+    `completion × len(text + tool_calls) / len(全出力)`。出力ブロックが無ければ completion
+    丸ごと再送扱い。FE は `contextUsageFromUsage` が `carried_tokens ?? prompt_tokens ??
+    total_tokens` を読み、UsageChip の確定値も同関数に揃えた(MessageActions と同じ数字)。
+    生成中(`chat:usage` の total)は従来どおり。回帰: `test_streaming_usage.py::TestCarriedTokens`、
+    `test_chat_usage.py::test_carried_tokens_*`、`test_response_assembler.py::TestStreamBlocks`。
   **tool 結果の画像(`results[].context_images`、`__feed_image__`)は次ターン以降の履歴にも
   再送する**(#142、ken 決定 2026-10-02 — 画像は忘れさせない。画像の多いチャットが高い占有の
   まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE

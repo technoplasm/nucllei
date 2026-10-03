@@ -465,3 +465,49 @@ class TestLastFrame:
         a.handle_delta({"content": "x"})
         a.handle_delta({})
         assert a.last_frame == {"structural": False, "appends": []}
+
+
+class TestStreamBlocks:
+    """stream_blocks: 直近の start_stream 以降に積んだ出力だけを返す(carried_tokens
+    の推定に使う — tool ループで以前の呼び出しの出力を混ぜない)。"""
+
+    def test_first_stream_returns_all_output(self):
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "考える"})
+        a.handle_delta({"content": "答え"})
+        # 先頭は __init__ が置く空 text(追記先)— 文字数 0 なので推定に影響しない
+        assert [(b["type"], b["content"]) for b in a.stream_blocks()] == [
+            ("text", ""),
+            ("reasoning", "考える"),
+            ("text", "答え"),
+        ]
+
+    def test_second_stream_excludes_previous_calls_output(self):
+        a = make_assembler()
+        a.handle_delta({"reasoning_content": "前の思考"})
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        calls, _ = a.finish_stream()
+        a.ensure_tool_calls_block(calls)
+        a.set_tool_results([{"tool_call_id": "c1", "content": "ok"}])
+
+        a.start_stream()
+        a.handle_delta({"reasoning_content": "次の思考"})
+        a.handle_delta({"content": "本文"})
+        blocks = a.stream_blocks()
+        # set_tool_results が開いた空 text(今回のストリームで追記される先)から始まる。
+        # reasoning が開く前なので空 text が先頭に残る
+        assert [(b["type"], b["content"]) for b in blocks] == [
+            ("text", ""),
+            ("reasoning", "次の思考"),
+            ("text", "本文"),
+        ]
+
+    def test_resumed_text_block_prefix_is_excluded(self):
+        # initial_content(resume)は前回の出力 — 今回の追記分だけを数える
+        a = make_assembler(initial_content="既存")
+        a.handle_delta({"content": "追記"})
+        assert [(b["type"], b["content"]) for b in a.stream_blocks()] == [
+            ("text", "追記")
+        ]
+        # 元のブロックは書き換えない(コピーを返す)
+        assert a.content_blocks[-1]["content"] == "既存追記"

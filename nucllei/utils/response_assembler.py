@@ -44,6 +44,9 @@ class ContentBlocksAssembler:
         self._response_tool_calls = []
         self._finish_reason = None
         self.last_frame = {"structural": False, "appends": []}
+        # 現ストリームの出力範囲(stream_blocks 用)。start_stream で確定する。
+        self._stream_start_index = 0
+        self._stream_start_text_len = 0
 
     # --- ストリーム境界 -------------------------------------------------
 
@@ -52,6 +55,36 @@ class ContentBlocksAssembler:
         self._response_tool_calls = []
         self._finish_reason = None
         self.last_frame = {"structural": False, "appends": []}
+        # この呼び出しの出力が積まれ始める位置を覚える。末尾が text ブロックなら
+        # そこへ追記されるので、そのブロックを含めて既存の文字数を差し引く。
+        if self.content_blocks and self.content_blocks[-1]["type"] == "text":
+            self._stream_start_index = len(self.content_blocks) - 1
+            self._stream_start_text_len = len(self.content_blocks[-1]["content"])
+        else:
+            self._stream_start_index = len(self.content_blocks)
+            self._stream_start_text_len = 0
+
+    def stream_blocks(self):
+        """現ストリーム(直近の start_stream 以降)で積んだ出力ブロックだけを返す。
+
+        tool ループでは assembler がターン全体のブロックを持つが、「次ターンへ持ち越す
+        出力」(carried_tokens の推定)はこの呼び出しの出力だけが対象 — 以前の呼び出しの
+        出力は最新の prompt_tokens に既に含まれている。先頭の text ブロックに
+        start_stream 時点の内容があれば、その分を除いたコピーを返す。
+        """
+        blocks = self.content_blocks[self._stream_start_index :]
+        if (
+            blocks
+            and self._stream_start_text_len
+            and blocks[0]["type"] == "text"
+            and isinstance(blocks[0].get("content"), str)
+        ):
+            first = {
+                **blocks[0],
+                "content": blocks[0]["content"][self._stream_start_text_len :],
+            }
+            blocks = [first, *blocks[1:]]
+        return blocks
 
     def note_finish_reason(self, finish_reason):
         if finish_reason:
