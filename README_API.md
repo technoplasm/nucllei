@@ -1235,6 +1235,26 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     mount it on an agent preset and a subagent (§5.8) can read materials the
     parent references by file_id without the content ever entering the parent's
     context.
+  - `builtin_context_budget` — `get_context_budget()`: the current chat's
+    measured context usage, for the model to check how much room it has left
+    in a long piece of work (tool chains, long reasoning). Reads the usage
+    nucllei records per model call (`chat.meta.usage`; the fields are the
+    usage table in §4.3):
+    `used_tokens` = `carried_tokens` of the latest call of this turn (prompt +
+    the non-reasoning output that is re-sent, i.e. what the next call starts
+    from; falls back to `prompt_tokens`, then `total_tokens`),
+    `context_size` = the recorded one, else `get_model_context_size` (endpoint
+    `max_model_len` → the model's `meta.context_size`; no constant fallback),
+    `remaining_tokens`, `used_pct` (one decimal) and a `note`. With no usable
+    context size the three derived fields are `null` and the note says why.
+    Before the first model call of a chat completes: `{ok: false, error}`.
+    Within a native tool loop the tool runs between model calls, so the value
+    is as of the latest completed call — the pending tool results of the
+    current step are not yet counted. Owner-only (the chat must belong to
+    `__user__`); chat path only. Always registered. Moved from
+    prism-hu/llens `tools/context_budget.py` on 2026-10-03: nucllei records
+    usage per call, so the builtin sees the current turn where the llens
+    version was one turn stale and needed a hand-written context-size valve.
   - `builtin_feed_image` — `feed_image(url?, path?, file_id?, filename?, pages?)`:
     shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
     through `__feed_image__` (§5.3). Exactly one reference argument, interpreted

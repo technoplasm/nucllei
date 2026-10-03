@@ -1068,3 +1068,53 @@ llens への申し送り(配備層。compose の mount 先が変わる):
 - cage の `PUBLIC_BASE=/ext/cage`・URL の形は不変。prompt / skill の「sandbox では `/mnt/cage/…`」は
   `/ext/cage/…` に書き換える。
 
+
+## 改訂(2026-10-03、context_budget の builtin 化)— llens の `get_context_budget` を nucllei へ
+
+ken 決定(2026-10-03)。prism-hu/llens の custom tool `nucllei/tools/context_budget.py` を、
+nucllei の組み込み **`builtin_context_budget`**(`nucllei/builtin_tools/context_budget.py`、
+name "Context Budget")へ移した。関数名は **`get_context_budget` のまま**(llens の prompt / skill が
+名前で呼ぶ)。常時登録(nucllei 自身が記録する `chat.meta.usage` を読むだけで外部依存ゼロ)。
+英語の正文は `README_API.md` §5.7。
+
+### なぜ移すか
+
+- **真実源が nucllei の記録そのもの**: usage の永続化はモデル呼び出しごと(tool ループの各 stream 末、
+  `utils/middleware._record_usage` → `Chats.record_usage_by_id_and_message_id`、#57 / #102)。
+  tool はモデル呼び出しの**間**で走るので、ループの途中で呼べば**今ターンの最新呼び出し**の値が
+  読める。llens 版は「直前ターン終了時点の累積」で 1 ターン古く、docstring でもそう断っていた —
+  記録が呼び出し単位になった時点で、その断りは builtin なら要らない。
+- **context 長の手書き定数が要らない**: llens 版は `fallback_context_size` valve(Kimi の 262144)を
+  持ち、token_meter filter の同名 valve と数字を合わせる運用だった。nucllei では記録済みの
+  `context_size`(= `get_model_context_size` が解決した値)が usage に同梱されており、無ければ
+  同じ関数で `__request__` / `__model__` から引く(endpoint の `max_model_len` → モデルの
+  `meta.context_size`)。それでも不明なら **null で返す**(定数で誤魔化さない)。
+- **owner-only の検証が無かった**: llens 版は `Chats.get_chat_by_id` で chat_id だけで読んでいた。
+  builtin は `get_chat_by_id_and_user_id`(builtin_history と同じ)で `__user__` の chat だけ読む。
+- 院内固有物は無い(`__metadata__.chat_id` と記録済み usage だけ)。「いつ呼ぶか」は prompt / skill の文。
+
+### 返す形(llens 版と互換)
+
+`{ok, used_tokens, remaining_tokens, context_size, used_pct, note}`。usage がまだ無ければ
+`{ok: False, error}`(文言は llens 版に揃えた)。
+
+- `used_tokens`: **`carried_tokens`**(最後の呼び出しの prompt + 再送される非 reasoning 出力 = 次の
+  呼び出しの先頭の量)> `prompt_tokens` > `total_tokens` の順。llens 版の分子は `prompt_tokens`
+  だったが、FE のゲージ(#102)と同じ `carried_tokens` を優先する。
+- `context_size` が不明なら `remaining_tokens` / `used_pct` も `null`、`note` に理由を添える。
+- `note` に「いま実行中のステップの tool 結果はまだ含まれない」と書く(次の呼び出しで加算される)。
+
+### 担保
+
+`test_builtin_context_budget.py`(7 件): 登録・usage 無し・carried / context_size からの数値・
+prompt_tokens へのフォールバック・owner-only(他人の chat_id は無い扱い)・context 長不明の null・
+`__request__` / `__model__` からの解決(endpoint 申告 → `meta.context_size`)。
+
+### llens への申し送り(配備層)
+
+- `nucllei/tools/context_budget.py` を削除する(builtin と同名関数 `get_context_budget` が並ぶと
+  先勝ち discard — #18-3 の教訓)。
+- preset の toolIds / skill の `tool_ids` は custom tool の id → **`builtin_context_budget`** に差し替える。
+- prompt / skill の「値は直前ターン終了時点で 1 ターン古い」の断りは「このターンの最新呼び出し時点、
+  いまのステップの tool 結果は未反映」に書き換える。token_meter filter の `fallback_context_size`
+  と数字を合わせる運用は builtin には無い。

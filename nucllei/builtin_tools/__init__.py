@@ -9,9 +9,9 @@
 - content 更新・削除は拒否(access_control の編集のみ可)。定義の真実源は常に repo
 - 同名関数の衝突は先勝ち discard(#18-3 の教訓)— builtin の関数名は他とぶつけない
 
-登録は 2 種類: **常に登録**(history / chat_files / attachment_text / feed_image / fetch_url —
-nucllei 自身の DB・Storage・共有 resolver だけで動く)と、**env ゲート付き**(sandbox は
-SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
+登録は 2 種類: **常に登録**(history / chat_files / attachment_text / context_budget /
+feed_image / fetch_url — nucllei 自身の DB・Storage・共有 resolver だけで動く)と、
+**env ゲート付き**(sandbox は SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
 一覧に生やさない(builtin の性質 = 常に動く、に反する)。feed_image / fetch_url は配備層
 (prism-hu/llens)から移設した(#141、2026-10-03)。fetch_url は同日中に env ゲート
 (当時の EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれか — 同日に設定ごと
@@ -26,6 +26,7 @@ from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL
 from nucllei.builtin_tools import (
     attachment_text,
     chat_files,
+    context_budget,
     feed_image,
     fetch_url,
     history,
@@ -62,6 +63,19 @@ BUILTIN_TOOLS = {
         "description": (
             "Read the extracted text of an attachment by file_id "
             "(read_attachment). Owner-only"
+        ),
+    },
+    # context_budget は常に登録: nucllei 自身がモデル呼び出しごとに記録する実測 usage
+    # (chat.meta.usage)を読むだけで外部依存ゼロ。llens の tools/context_budget.py から
+    # 移設(2026-10-03、ken 決定)— 記録が呼び出しごとになった(#102)ので、tool ループの
+    # 途中で呼べば今ターンの最新値が読める。
+    "builtin_context_budget": {
+        "module": context_budget,
+        "name": "Context Budget",
+        "description": (
+            "Report the current chat's measured context usage and remaining budget "
+            "(get_context_budget), from the engine's usage of the latest model call. "
+            "Owner-only"
         ),
     },
     # feed_image は常に登録: file_id 経路は nucllei 自身の Files / Storage だけで動き、
