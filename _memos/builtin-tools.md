@@ -715,6 +715,10 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   主な利用者だった llens doc tool は相対 `/ext/…` に切り替えて origin を補わなくなった。
   llens の現行 tool に `X-Forwarded-*` を読むものは無い(2026-10-03 に grep で確認)。
   利用者が居ないなら撤去の候補。
+  → **同日に撤去した**(ken 裁定): `request_origin` / `internal_request(origin=)` /
+  exec 行 `meta["origin"]` / `execute_tool_calls(origin=)` / resume 側の origin 引数。
+  通常ターン・子ターンの `__request__` は従来どおり、続きターンの `__request__` は origin を
+  持たない。詳細は `async-exec-design.md` 追補 7。
 
 ## 院内の範囲(EXT_INTRANET_CIDRS)— 登録した配信元の外の院内 Web も拾う(2026-10-03、**同日に撤回**)
 

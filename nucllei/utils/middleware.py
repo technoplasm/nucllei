@@ -60,7 +60,7 @@ from nucllei.utils.skills import (
     replay_skill_tool_ids,
     skill_activation_seed_block,
 )
-from nucllei.utils.subagent import build_subagent_tools, request_origin
+from nucllei.utils.subagent import build_subagent_tools
 from nucllei.models.executions import Executions
 from nucllei.utils.exec_tools import (
     EXEC_RECALL_TOOL_NAMES,
@@ -1425,7 +1425,7 @@ async def _execute_tool_call_sync(
 
 
 async def execute_tool_calls(
-    response_tool_calls, tools, *, events_stream=None, metadata=None, origin=None
+    response_tool_calls, tools, *, events_stream=None, metadata=None
 ):
     """tool call 群を順に実行し、tool result のリストを返す。
 
@@ -1523,7 +1523,6 @@ async def execute_tool_calls(
                     tool_name=tool_name,
                     entry=tool,
                     params=tool_function_params,
-                    origin=origin,
                 )
             else:
                 tool_result, tool_succeeded, sink = await _execute_tool_call_sync(
@@ -1805,9 +1804,6 @@ async def process_chat_response(
                     tools,
                     events_stream=events_stream,
                     metadata=metadata,
-                    # background 昇格した exec 行に自オリジンを残す(配達の続きターンで
-                    # tool が __request__ から文書 URL を絶対化できるように — #110/#139)
-                    origin=request_origin(request),
                 )
 
                 assembler.set_tool_results(results)

@@ -233,41 +233,18 @@ _INHERITED_SCOPE_KEYS = (
 )
 
 
-def request_origin(request) -> dict | None:
-    """受信 Request から自オリジン `{"scheme", "host"}` を取り出す。
-
-    読み方は Caddy 越しの X-Forwarded-Proto / X-Forwarded-Host、無ければ scope の
-    scheme / Host。取れなければ None。background 実行(#110)の
-    続きターンには受信 Request が無いので、spawn 時にこれを exec 行へ残し、resume 時に
-    `internal_request(origin=…)` で復元する。
-    """
-    scope = getattr(request, "scope", None)
-    if not isinstance(scope, dict):
-        return None
-    headers: dict[str, str] = {}
-    for key, value in scope.get("headers") or []:
-        try:
-            headers.setdefault(key.decode("latin-1").lower(), value.decode("latin-1"))
-        except (AttributeError, UnicodeDecodeError):
-            continue
-    proto = (headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    host = headers.get("x-forwarded-host") or headers.get("host") or ""
-    host = host.split(",")[0].strip()
-    if not host:
-        return None
-    return {"scheme": proto or scope.get("scheme") or "http", "host": host}
-
-
-def internal_request(
-    app, *, scope_from: dict | None = None, origin: dict | None = None
-):
+def internal_request(app, *, scope_from: dict | None = None):
     """内部起動ターン用の Request。app だけを共有し state は新しい(親の state に書かない)。
 
     - `scope_from`(親 Request の scope)があれば `_INHERITED_SCOPE_KEYS` を引き継ぐ
-      (headers は複製)。
-    - `origin`(`request_origin` の形)があれば scheme と Host / X-Forwarded-* ヘッダを
-      それから組む(受信 Request の無い resume ターン用)。
-    どちらも無くても `request.url` が例外にならない最小 scope を持つ。
+      (headers は複製)— subagent の子ターンは親と同じ Host / X-Forwarded-* を見る。
+    - 無ければ `request.url` が例外にならない最小 scope(scheme http・headers 空)。
+      受信 Request の無いターン(background 実行の配達の続きターン —
+      execution_resume)はこの形で、**自オリジンを持たない**: tool が `__request__` の
+      Host / X-Forwarded-* から絶対 URL を組んでも何も出ない。受信 Request の origin を
+      exec 行に残して続きターンへ運ぶ仕組みは 2026-10-03 に撤去した(利用者だった
+      「相対 `/ext/…` の絶対化」「自サーバーへの HTTP 再接続」がどちらも無くなったため)。
+      tool は通常ターンでは従来どおり `__request__` から読める。
     """
     scope: dict = {
         "type": "http",
@@ -288,15 +265,6 @@ def internal_request(
             if key in scope_from:
                 scope[key] = scope_from[key]
         scope["headers"] = list(scope_from.get("headers") or [])
-    if origin and origin.get("host"):
-        scheme = str(origin.get("scheme") or "http")
-        host = str(origin["host"])
-        scope["scheme"] = scheme
-        scope["headers"] = [
-            (b"host", host.encode("latin-1", "ignore")),
-            (b"x-forwarded-proto", scheme.encode("latin-1", "ignore")),
-            (b"x-forwarded-host", host.encode("latin-1", "ignore")),
-        ]
     return Request(scope=scope)
 
 
@@ -338,10 +306,9 @@ async def start_internal_turn(
     # 後も runner 側の in_exec=True を保つため(finally で元に戻す)。
     exec_token = in_exec.set(False)
 
-    # 親の scope(headers / scheme / server / client …)を引き継ぐ — __request__ の
-    # X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組む tool が、子ターンでも
-    # 親と同じ origin を得られるように。文書の図は 2026-10-03 から相対 `/ext/…` のまま渡す
-    # 運用(`image_refs.py` の module docstring)で、llens doc tool はもう origin を補わない
+    # 親の scope(headers / scheme / server / client …)を引き継ぐ — __request__ を読む
+    # tool が子ターンでも親と同じ Host / X-Forwarded-* を見られるように(受信 Request の
+    # 無い resume ターンは scope_from が無く、自オリジンを持たない — internal_request)
     child_request = internal_request(
         request.app, scope_from=getattr(request, "scope", None)
     )

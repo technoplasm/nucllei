@@ -122,7 +122,8 @@ class ExecutionsTable:
         meta: Optional[dict] = None,
     ) -> Optional[ExecutionModel]:
         """running 行を作る(唯一の INSERT 経路 — spawn 専用)。meta は spawn 時点で
-        分かっている付帯情報(origin — 続きターンの __request__ 復元用)。"""
+        分かっている付帯情報(現在は無し。旧 `meta["origin"]` は 2026-10-03 に撤去 —
+        既存行に残っていても読まない)。"""
         with get_db() as db:
             try:
                 row = Execution(

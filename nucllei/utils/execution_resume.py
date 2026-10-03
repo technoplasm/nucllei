@@ -464,28 +464,18 @@ def _resolve_turn_model_id(chat_json: dict) -> Optional[str]:
     return ((chat_json or {}).get("models") or [None])[0]
 
 
-def _shim_request(origin: Optional[dict] = None) -> Request:
+def _shim_request() -> Request:
     """driver には受信 Request が無い — app だけ持つ内部 Request を作る。
 
-    origin(spawn 時に exec 行 meta["origin"] へ残した `{"scheme","host"}`)があれば
-    scheme と Host / X-Forwarded-* を復元する — 続きターンの tool が __request__ から
-    自オリジンを組めるように(絶対 URL を自分で組む tool 向け。文書の図は 2026-10-03 から
-    相対 `/ext/…` のまま渡す運用で、llens doc tool はもう origin を補わない —
-    `image_refs.py` の module docstring)。無くても request.url が例外にならない scope。
+    request.url が例外にならない最小 scope で、自オリジン(Host / X-Forwarded-*)は
+    持たない — 続きターンの tool は __request__ から origin を読めない(受信 Request の
+    origin を exec 行 meta["origin"] に残して運ぶ仕組みは 2026-10-03 に撤去。既存行に
+    残る meta["origin"] は読まない)。
     """
     # 循環 import 回避: subagent → middleware → (executions ↔ 本モジュールの hook)
     from nucllei.utils.subagent import internal_request
 
-    return internal_request(_app, origin=origin)
-
-
-def _rows_origin(rows) -> Optional[dict]:
-    """配達対象の exec 行から origin を 1 つ選ぶ(新しい行を優先)。無ければ None。"""
-    for row in sorted(rows, key=lambda r: r.created_at or 0, reverse=True):
-        origin = (row.meta or {}).get("origin")
-        if isinstance(origin, dict) and origin.get("host"):
-            return origin
-    return None
+    return internal_request(_app)
 
 
 async def _ensure_models_loaded(user) -> None:
@@ -724,9 +714,7 @@ async def _deliver_cycle(chat_id: str) -> str:
                     if updated
                     else None
                 )
-                await _start_resume_turn(
-                    chat_id, assistant_id, user, notice_chain + 1, _rows_origin(rows)
-                )
+                await _start_resume_turn(chat_id, assistant_id, user, notice_chain + 1)
                 return "delivered"
             finally:
                 if semaphore_held:
@@ -755,7 +743,6 @@ async def _start_resume_turn(
     assistant_id: Optional[str],
     user,
     chain_count: int,
-    origin: Optional[dict] = None,
 ) -> None:
     """続きターンを内部起動する(契約 M5 / M3 手順 7)。
 
@@ -785,7 +772,7 @@ async def _start_resume_turn(
             return
 
         try:
-            await _try_start_turn(chat, assistant_id, user, chain_count, origin)
+            await _try_start_turn(chat, assistant_id, user, chain_count)
             return
         except asyncio.CancelledError:
             raise
@@ -809,9 +796,7 @@ async def _start_resume_turn(
         backoff = min(backoff * 2, TURN_RETRY_MAX_BACKOFF_S)
 
 
-async def _try_start_turn(
-    chat, assistant_id: str, user, chain_count: int, origin: Optional[dict] = None
-) -> None:
+async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> None:
     """1 回のターン起動の試み(分類は呼び出し側 — 恒久は _PermanentTurnFailure)。"""
     # 循環 import 回避: subagent → middleware → (executions ↔ 本モジュールの hook)
     from nucllei.utils import subagent
@@ -839,7 +824,7 @@ async def _try_start_turn(
     # background_tasks は None(start_internal_turn が tasks=None で呼ぶ)、
     # webhook は連鎖 1 通目のみ(task_resume_chain を middleware の述語が読む)
     await subagent.start_internal_turn(
-        _shim_request(origin),
+        _shim_request(),
         model,
         user,
         chat.id,

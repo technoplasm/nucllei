@@ -460,3 +460,24 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
   (read_attachment / feed_image / cage)に一本化(llens `e47d9aa`)。
   ACL は三段(mount ゲート = アクセス可 preset ゼロなら spec 不注入 / 実行時の同一述語
   再検証 / 子ターンは呼び出しユーザー本人 + get_tools の per-user ACL)で検証済み。
+
+## 追補 7(2026-10-03)— 続きターンへの origin 持ち越しを撤去
+
+- 経緯: `b3dd40679`(#139)で、受信 Request の自オリジン(`X-Forwarded-Proto` /
+  `X-Forwarded-Host` / `Host` → `{"scheme","host"}`)を `subagent.request_origin` で取り、
+  background 昇格時に exec 行 `meta["origin"]` に残し、配達の続きターンで
+  `internal_request(origin=…)` が scheme / Host / X-Forwarded-* を復元して `__request__` に
+  載せていた。目的は「tool が `__request__` から相対 `/ext/…` を絶対化する」「自サーバーへ
+  HTTP で再接続する」の 2 つ。
+- どちらも無くなった(相対参照は in-process で解決、HTTP 中継は撤去 — `builtin-tools.md`
+  「参照の渡し方」節)ので、ken 裁定で仕組みごと撤去: `request_origin` /
+  `internal_request(origin=)` / `spawn_execution(origin=)` / `_run_execution` の `meta["origin"]`
+  持ち越し / `execute_tool_calls(origin=)` / `execution_resume._rows_origin` と
+  `_shim_request(origin)` / `_start_resume_turn` → `_try_start_turn` の `origin` 引数。
+- 残る形: 通常ターンと subagent の子ターン(`scope_from` で親 scope を引き継ぐ)では tool は
+  従来どおり `__request__` から origin を読める。**続きターンの `__request__` は origin を
+  持たない**(headers 空・scheme http。`request.url` は `/`)。
+- 既存 exec 行に `meta["origin"]` が残っていても読まない(移行なし・黙って無視)。
+- 担保: `test_execution_resume.py::test_resume_turn_request_has_no_origin`(旧 origin 付き行でも
+  続きターンの Request に Host / X-Forwarded-* が無い)。`test_subagent.py` の `scope_from`
+  引き継ぎテストは据え置き。

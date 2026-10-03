@@ -512,9 +512,9 @@ class TestExecutionResume(AbstractPostgresTest):
             self.resume._claimed_exec_ids.discard("e1")
         assert self.Executions.get_execution_by_id("e1").delivered_at is None
 
-    def test_resume_turn_request_restores_origin_from_exec_row(self, monkeypatch):
-        """続きターンの __request__ は exec 行の origin から scheme / host を復元する
-        (tool が X-Forwarded-* / Host から文書 URL を絶対化できる)。"""
+    def test_resume_turn_request_has_no_origin(self, monkeypatch):
+        """続きターンの __request__ は自オリジンを持たない(Host / X-Forwarded-* 無し)。
+        exec 行に旧 meta["origin"] が残っていても読まない(2026-10-03 撤去・移行なし)。"""
         calls = self._patch_turn_start(monkeypatch)
         chat = self._insert_chat()
         self._insert_exec(
@@ -524,39 +524,10 @@ class TestExecutionResume(AbstractPostgresTest):
         )
 
         assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "delivered"
-        assert len(calls) == 1
-        request = calls[0]["request"]
-        assert request.headers["x-forwarded-proto"] == "https"
-        assert request.headers["x-forwarded-host"] == "10.105.2.1"
-        assert request.headers["host"] == "10.105.2.1"
-        assert request.scope["scheme"] == "https"
-        # request.url が KeyError('path') で死なない
-        assert str(request.url) == "https://10.105.2.1/"
-        assert request.app is self.app
-
-    def test_resume_turn_request_without_origin_is_still_well_formed(self, monkeypatch):
-        calls = self._patch_turn_start(monkeypatch)
-        chat = self._insert_chat()
-        self._insert_exec("e1", chat.id)
-
-        assert asyncio.run(self.resume._deliver_cycle(chat.id)) == "delivered"
         request = calls[0]["request"]
         assert list(request.headers.items()) == []
         assert str(request.url) == "/"  # 例外にならない(host 無し → path のみ)
-
-    def test_rows_origin_prefers_newest_row_with_origin(self):
-        row_old = types.SimpleNamespace(
-            created_at=1, meta={"origin": {"scheme": "http", "host": "old"}}
-        )
-        row_new = types.SimpleNamespace(created_at=2, meta={})
-        row_newer = types.SimpleNamespace(
-            created_at=3, meta={"origin": {"scheme": "https", "host": "new"}}
-        )
-        assert self.resume._rows_origin([row_old, row_new, row_newer]) == {
-            "scheme": "https",
-            "host": "new",
-        }
-        assert self.resume._rows_origin([row_new]) is None
+        assert request.app is self.app
 
     def test_permanent_turn_failure_keeps_single_notice(self, monkeypatch):
         """モデル id 解決不能 = 恒久断念。notice は 1 通だけ残り再 append しない。"""
