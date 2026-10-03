@@ -495,6 +495,13 @@ must be declared there (default empty; the startup log lists both sets as
   time, so a DNS-rebinding answer cannot steer the fetch to the server itself
   (`ext_upstreams.pin_address`). A name that resolves to both an outside
   address and a self address is refused (`server_self`).
+  TLS is verified normally: a hostname URL is checked against the certificate
+  with SNI = that hostname; an **IP-literal https URL** (closed-network
+  production) sends no SNI and the certificate must list that IP. Intranet
+  servers with self-signed or private-CA certificates therefore fail with a
+  verification error unless the CA is trusted in the container — mount the CA
+  bundle and point `SSL_CERT_FILE` (or `SSL_CERT_DIR`) at it; httpx honours
+  both. nucllei does not disable verification.
 - **The self-deny set is computed at runtime, not configured**
   (`ext_upstreams.self_addresses` / `is_self_address`, cached 60 s). It is
   the union of (1) addresses that can never be a legitimate destination —
