@@ -1280,6 +1280,41 @@ def _url(url, **kw):
     return asyncio.run(resolve_url(url, **kw))
 
 
+def test_ext_self_addresses_env_adds_host_addresses(monkeypatch, caplog):
+    """`EXT_SELF_ADDRESSES`(配備が足す host の外向き IP)は固定集合・発見した集合に**追加**で
+    効く(コンテナからは host の物理 / VPN インタフェースを列挙できない)。IP 以外・CIDR は捨てて
+    WARNING、既定は空。起動ログには「設定で追加」として載る。"""
+    import ipaddress
+    import logging
+
+    from nucllei import env
+    from nucllei.utils import ext_upstreams, image_refs
+
+    assert env.EXT_SELF_ADDRESSES == frozenset()
+    with caplog.at_level(logging.WARNING, logger=env.log.name):
+        parsed = env.parse_ext_self_addresses(
+            " 10.105.2.1, 172.16.41.21 ,, 10.0.0.0/8, host, fe80::1 "
+        )
+    assert parsed == frozenset(
+        ipaddress.ip_address(a) for a in ("10.105.2.1", "172.16.41.21", "fe80::1")
+    )
+    assert caplog.text.count("EXT_SELF_ADDRESSES: ignoring invalid entry") == 2
+
+    _self(monkeypatch)
+    assert not ext_upstreams.is_self_address("10.105.2.1")
+    monkeypatch.setattr(
+        env,
+        "EXT_SELF_ADDRESSES",
+        frozenset({ipaddress.ip_address("10.105.2.1")}),
+    )
+    monkeypatch.setattr(image_refs, "EXT_SELF_ADDRESSES", env.EXT_SELF_ADDRESSES)
+    assert ext_upstreams.is_self_address("10.105.2.1")
+    assert not ext_upstreams.is_self_address("10.105.2.2")
+    with caplog.at_level(logging.INFO, logger=image_refs.log.name):
+        image_refs.log_mounts()
+    assert "設定で追加 (EXT_SELF_ADDRESSES): 10.105.2.1" in caplog.text
+
+
 def test_env_has_no_intranet_cidrs():
     """EXT_INTRANET_CIDRS は撤去済み(同日に入れて同日に撤回)— env にもパーサにも残さない。"""
     from nucllei import env

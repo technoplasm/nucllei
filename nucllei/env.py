@@ -607,6 +607,32 @@ def parse_ext_file_scopes(value: str) -> dict[str, tuple[str, ...]]:
 EXT_FILE_SCOPES = parse_ext_file_scopes(os.environ.get("EXT_FILE_SCOPES", ""))
 
 
+def parse_ext_self_addresses(raw: str) -> frozenset:
+    """`EXT_SELF_ADDRESSES` をパースする — カンマ区切りの IP アドレス(IPv4 / IPv6)。
+    url= の一般 URL で「このサーバ自身」として取りに行かないアドレスに**追加**する
+    (`utils/ext_upstreams.is_self_address`)。コンテナからは host の物理 / VPN
+    インタフェースの IP を列挙できない(見えるのは bridge の gateway だけ)ので、host の
+    外向き IP 宛てに同居サービスへ届く穴を配備側が塞ぐための口(ken 決定 2026-10-03。
+    既定は空 = 実行時に求めた集合だけ)。IP でないもの・CIDR は捨てて WARNING。"""
+    import ipaddress
+
+    found = set()
+    for entry in (raw or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            found.add(ipaddress.ip_address(entry))
+        except ValueError:
+            log.warning(
+                f"EXT_SELF_ADDRESSES: ignoring invalid entry {entry!r} (IP アドレスのみ。CIDR は不可)"
+            )
+    return frozenset(found)
+
+
+EXT_SELF_ADDRESSES = parse_ext_self_addresses(os.environ.get("EXT_SELF_ADDRESSES", ""))
+
+
 # feed(context_images)の参照(絶対 URL / sandbox fs パス)のオンデマンド解決(utils/image_refs.py —
 # ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。
 EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")

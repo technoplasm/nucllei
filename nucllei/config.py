@@ -1010,14 +1010,22 @@ def validate_cors_origin(origin):
 # To test CORS_ALLOW_ORIGIN locally, you can set something like
 # CORS_ALLOW_ORIGIN=http://localhost:5173;http://localhost:8080
 # in your .env file depending on your frontend port, 5173 in this case.
-CORS_ALLOW_ORIGIN = os.environ.get("CORS_ALLOW_ORIGIN", "*").split(";")
+# llens(2026-10-03 ken 決定): 空文字は「CORS を一切許さない = 同一 origin のみ」。UI は同一
+# origin で配信され cross-origin の API 利用は無いので、機ごとの origin を env に書く knob を
+# 持たずに済む(compose に `CORS_ALLOW_ORIGIN=` と literal で書く)。空の要素は捨てる。
+def parse_cors_allow_origin(raw: str) -> list[str]:
+    """`;` 区切りの origin の list。空要素は捨てる(空文字 → `[]` = 同一 origin のみ)。
+    `*` は WARNING(本番非推奨)。不正な origin は ValueError(起動を止める)。"""
+    origins = [o.strip() for o in (raw or "").split(";") if o.strip()]
+    if "*" in origins:
+        log.warning(
+            "\n\nWARNING: CORS_ALLOW_ORIGIN IS SET TO '*' - NOT RECOMMENDED FOR PRODUCTION DEPLOYMENTS.\n"
+        )
+    validate_cors_origins(origins)
+    return origins
 
-if "*" in CORS_ALLOW_ORIGIN:
-    log.warning(
-        "\n\nWARNING: CORS_ALLOW_ORIGIN IS SET TO '*' - NOT RECOMMENDED FOR PRODUCTION DEPLOYMENTS.\n"
-    )
 
-validate_cors_origins(CORS_ALLOW_ORIGIN)
+CORS_ALLOW_ORIGIN = parse_cors_allow_origin(os.environ.get("CORS_ALLOW_ORIGIN", "*"))
 
 
 class BannerModel(BaseModel):

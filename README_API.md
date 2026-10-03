@@ -167,7 +167,7 @@ is read per request (edits apply without a restart):
 | `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                | brand name shown in the UI                                                          |
 | `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                     | deployment-layer version / copyright on the License tab (empty = hidden)            |
 | `ENABLE_FORWARD_USER_INFO_HEADERS`                                                                                          | env  | `false`                                  | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine                   |
-| `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                      | `;`-separated origins                                                               |
+| `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                      | `;`-separated origins; empty = same-origin only (no CORS, no warning)               |
 | `ENABLE_PWA`                                                                                                                | env  | `false`                                  | serve an installable `/manifest.json` (name follows `WEBUI_NAME`); off returns `{}` |
 | `OFFLINE_MODE`                                                                                                              | env  | `false`                                  | forces HF hub offline + disables whisper auto-update                                |
 | `USE_CUDA_DOCKER`                                                                                                           | env  | `false`                                  | run local ML (whisper) on CUDA                                                      |
@@ -248,6 +248,7 @@ separate reasoning block.
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                           |
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                           |
 | `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES`       | env  | `""`                  | `/ext/{name}` upstreams, serving scope of file backends, original-site roots for link lists (§3.8, §5.7). `builtin_fetch_url` is always on |
+| `EXT_SELF_ADDRESSES`                                           | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8)                      |
 
 ### 3.7 Attachments / files / storage
 
@@ -413,7 +414,13 @@ air-gapped production network the internet is simply unreachable
 sentence for the prompt / skill, not a gate in the resolver. The only
 destination refused is **this server itself and the services co-located with
 it** (`unknown_upstream` / `server_self`) — e.g. the host's unauthenticated
-cage API, the sandbox API, a cloud metadata address.
+cage API, the sandbox API, a cloud metadata address. The self set is computed
+at runtime (own interfaces, default gateway, `host.docker.internal`) **plus**
+`EXT_SELF_ADDRESSES`, a comma-separated list of IP addresses the deployment
+adds — a container cannot enumerate the host's physical / VPN interfaces, so
+the host's outward-facing IPs (where a co-located service is published)
+must be declared there (default empty; the startup log lists both sets as
+`self addresses` / `設定で追加 (EXT_SELF_ADDRESSES)`).
 
 > History: on the same day an allowlist `EXT_INTRANET_CIDRS` ("fetch only
 > inside the declared intranet range") was added in the morning and removed in

@@ -394,6 +394,12 @@ def is_self_address(address: str) -> bool:
         return False
     if any(ip in network for network in _SELF_FIXED_NETWORKS):
         return True
+    # 配備が足した host の外向き IP(`EXT_SELF_ADDRESSES`、nucllei.env)。import 時でなく
+    # 呼び出し時に引く — テストが env を差し替えられるように
+    from nucllei.env import EXT_SELF_ADDRESSES
+
+    if ip in EXT_SELF_ADDRESSES:
+        return True
     return ip in self_addresses()
 
 

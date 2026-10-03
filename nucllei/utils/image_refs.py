@@ -222,6 +222,7 @@ import httpx
 
 from nucllei.env import (
     EXT_FILE_SCOPES,
+    EXT_SELF_ADDRESSES,
     EXT_INLINE_MAX_BYTES,
     EXT_PUBLIC_BASES,
     EXT_UPSTREAMS,
@@ -1391,4 +1392,9 @@ def log_mounts() -> None:
         "[nucllei] url= の一般 URL はどこでも取りに行く(行き先で絞らない)。取りに行かない"
         "のはこのサーバ自身だけ — loopback / リンクローカルに加えて実行時に求めた自分の"
         f"アドレス (self addresses): {' '.join(own) or '(無し)'}"
+        + (
+            f" / 設定で追加 (EXT_SELF_ADDRESSES): {' '.join(sorted(str(ip) for ip in EXT_SELF_ADDRESSES))}"
+            if EXT_SELF_ADDRESSES
+            else ""
+        )
     )
