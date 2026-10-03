@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from nucllei.models.models import (
@@ -13,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -52,6 +55,23 @@ def _require_base_model_id(form_data: ModelForm):
         )
 
 
+async def _refresh_models_cache(request: Request, user) -> None:
+    """preset の作成・更新・削除のあと、チャット経路が読む `app.state.MODELS` を作り直す。
+
+    チャットは preset (skillIds・toolIds・system prompt 等) を `app.state.MODELS` から読み、
+    これは GET /api/models でしか作り直されていなかった — API だけで preset を変える運用
+    (sync スクリプト等) では、誰かが一覧を開くまで古い preset のまま動いた (llens staging
+    2026-10-04: 追加した skill が load_skill の一覧に出なかった)。失敗しても書き込み自体は
+    成功しているので、ログだけ残して握る。
+    """
+    try:
+        from nucllei.utils.models import get_all_models
+
+        await get_all_models(request, user=user)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"models cache refresh failed after a preset write: {e!r}")
+
+
 @router.post("/create", response_model=Optional[ModelModel])
 async def create_new_model(
     request: Request,
@@ -70,6 +90,7 @@ async def create_new_model(
     else:
         model = Models.insert_new_model(form_data, user.id)
         if model:
+            await _refresh_models_cache(request, user)
             return model
         else:
             raise HTTPException(
@@ -103,12 +124,13 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/model/toggle", response_model=Optional[ModelResponse])
-async def toggle_model_by_id(id: str, user=Depends(get_admin_user)):
+async def toggle_model_by_id(request: Request, id: str, user=Depends(get_admin_user)):
     model = Models.get_model_by_id(id)
     if model:
         model = Models.toggle_model_by_id(id)
 
         if model:
+            await _refresh_models_cache(request, user)
             return model
         else:
             raise HTTPException(
@@ -129,6 +151,7 @@ async def toggle_model_by_id(id: str, user=Depends(get_admin_user)):
 
 @router.post("/model/update", response_model=Optional[ModelModel])
 async def update_model_by_id(
+    request: Request,
     id: str,
     form_data: ModelForm,
     user=Depends(get_admin_user),
@@ -144,6 +167,7 @@ async def update_model_by_id(
         )
 
     model = Models.update_model_by_id(id, form_data)
+    await _refresh_models_cache(request, user)
     return model
 
 
@@ -153,7 +177,7 @@ async def update_model_by_id(
 
 
 @router.delete("/model/delete", response_model=bool)
-async def delete_model_by_id(id: str, user=Depends(get_admin_user)):
+async def delete_model_by_id(request: Request, id: str, user=Depends(get_admin_user)):
     model = Models.get_model_by_id(id)
     if not model:
         raise HTTPException(
@@ -162,10 +186,12 @@ async def delete_model_by_id(id: str, user=Depends(get_admin_user)):
         )
 
     result = Models.delete_model_by_id(id)
+    await _refresh_models_cache(request, user)
     return result
 
 
 @router.delete("/delete/all", response_model=bool)
-async def delete_all_models(user=Depends(get_admin_user)):
+async def delete_all_models(request: Request, user=Depends(get_admin_user)):
     result = Models.delete_all_models()
+    await _refresh_models_cache(request, user)
     return result
