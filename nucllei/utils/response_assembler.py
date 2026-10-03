@@ -337,15 +337,29 @@ class ContentBlocksAssembler:
         """index キーで tool call デルタを突き合わせ、name/arguments を累積する。"""
         for delta_tool_call in delta_tool_calls:
             tool_call_index = delta_tool_call.get("index")
-
-            if tool_call_index is None:
-                continue
+            tool_call_id = delta_tool_call.get("id")
 
             current = None
-            for response_tool_call in self._response_tool_calls:
-                if response_tool_call.get("index") == tool_call_index:
-                    current = response_tool_call
-                    break
+            if tool_call_index is not None:
+                for response_tool_call in self._response_tool_calls:
+                    if response_tool_call.get("index") == tool_call_index:
+                        current = response_tool_call
+                        break
+            elif tool_call_id:
+                # index を省いて id だけで続きを送る変換層がある (OpenAI 互換の proxy 越し。
+                # 並列 2 本の arguments が両方 "" で届いた — llens staging 2026-10-03)。
+                # 以前はここで捨てていた。id で突き合わせ、無ければ新しい call として積む
+                for response_tool_call in self._response_tool_calls:
+                    if response_tool_call.get("id") == tool_call_id:
+                        current = response_tool_call
+                        break
+                if current is None:
+                    delta_tool_call["index"] = len(self._response_tool_calls)
+            elif self._response_tool_calls:
+                # index も id も無い続き = 直前の call の続き (arguments の断片)
+                current = self._response_tool_calls[-1]
+            else:
+                continue
 
             if current is None:
                 # 初回デルタの形はエンジン依存: SGLang は arguments: "" を

@@ -225,6 +225,48 @@ class TestToolCallAccumulation:
         assert [c["id"] for c in calls] == ["c0", "c1"]
         assert calls[1]["function"]["arguments"] == "{}"
 
+    def test_parallel_calls_without_index_are_matched_by_id(self):
+        # proxy 越しに index を省き id だけで続きを送る形 (llens staging 2026-10-03:
+        # 並列 run_subagent 2 本の arguments が両方 "" で届いた)。以前は index 無しの
+        # デルタを捨てていた
+        a = make_assembler()
+        a.handle_delta(
+            {
+                "tool_calls": [
+                    {"id": "call_a", "function": {"name": "f", "arguments": ""}}
+                ]
+            }
+        )
+        a.handle_delta(
+            {
+                "tool_calls": [
+                    {"id": "call_b", "function": {"name": "f", "arguments": ""}}
+                ]
+            }
+        )
+        a.handle_delta(
+            {"tool_calls": [{"id": "call_a", "function": {"arguments": '{"x": 1}'}}]}
+        )
+        a.handle_delta(
+            {"tool_calls": [{"id": "call_b", "function": {"arguments": '{"x": 2}'}}]}
+        )
+
+        calls, _ = a.finish_stream()
+        assert [c["id"] for c in calls] == ["call_a", "call_b"]
+        assert [c["function"]["arguments"] for c in calls] == ['{"x": 1}', '{"x": 2}']
+        assert [c["index"] for c in calls] == [0, 1]
+
+    def test_delta_without_index_and_id_continues_the_last_call(self):
+        a = make_assembler()
+        a.handle_delta(
+            {"tool_calls": [{"id": "c1", "function": {"name": "f", "arguments": ""}}]}
+        )
+        a.handle_delta({"tool_calls": [{"function": {"arguments": '{"y"'}}]})
+        a.handle_delta({"tool_calls": [{"function": {"arguments": ": 2}"}}]})
+
+        calls, _ = a.finish_stream()
+        assert len(calls) == 1 and calls[0]["function"]["arguments"] == '{"y": 2}'
+
     def test_open_block_is_shared_object_and_not_duplicated(self):
         # llens(#20 ステップ5): ストリーム中の open ブロックは累積 calls と
         # 同一オブジェクト。tool ループ側の ensure は再追加しない。
