@@ -242,5 +242,5 @@ sandbox-test = "python3 sandbox/tests/test_isolation.py"
 # ユニットテスト: main.py を直接 import して SessionManager・共有トークン認証 (#132)・
 # 参照用データの read-only bind (#138) を確認する。コンテナ不要。
 # main.py の import に要る fastapi/pydantic は本体の依存に既にあるので `--with` は不要。
-sandbox-unit = "pytest -p no:warnings sandbox/tests/test_session_manager.py sandbox/tests/test_auth.py sandbox/tests/test_ro_mounts.py"
+sandbox-unit = "pytest -p no:warnings sandbox/tests/test_session_manager.py sandbox/tests/test_auth.py sandbox/tests/test_ro_mounts.py sandbox/tests/test_retention.py"
 

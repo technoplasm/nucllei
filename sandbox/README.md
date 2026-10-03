@@ -289,6 +289,13 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   上限)。loop デバイスはカーネル全体で共有 (ホストの snapd 等と番号を共有する)。
 - イメージは volume に永続。コンテナ再起動時は e2fsck して再マウントする
   (journal 無し fs のため)。
+- **保持期限** (`SANDBOX_WORKSPACE_RETENTION_DAYS`、既定 0 = 消さない): >0 にすると、
+  最終利用から N 日経った **未 mount** の `.img` を reaper が unlink する (起動直後に 1 回、
+  以降 1 時間ごと。`docs/health.md` の ⑤)。最終利用時刻は `.images/<user_id>.last_used`
+  (image の隣 = 未 mount でも読める sidecar) を利用のたびに touch して再起動を跨いで持つ。
+  marker が無い古い image は `.img` の mtime で一回限り判定する。本番は 40TB NAS なので
+  既定は「消さない」 — 半年〜1 年の不在で消してよい配備だけ 180〜365 を設定する
+  (ken 決定 2026-10-03)。
 
 ## リソース制限 (変更場所: 配備側 compose の environment)
 
@@ -305,6 +312,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_FSIZE_MB` | 8192 | rlimit_fsize (1 ファイルの書込上限。disk 総量は quota 側が本来の上限) |
 | `SANDBOX_QUOTA_GB` | 10 | ユーザー単位の workspace 容量上限 (loopback ext4) |
 | `SANDBOX_QUOTA_OVERRIDES` | {} | ユーザー別 quota 上書き `{"<user_id>": GB}` (新規作成時のみ) |
+| `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0 (**= 消さない**) | 最終利用から N 日経った未 mount の workspace `.img` を削除 (上記「disk quota」の保持期限)。mount 中・実行中・session 生存中は飛ばす |
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |

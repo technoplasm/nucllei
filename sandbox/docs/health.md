@@ -83,6 +83,25 @@ Prometheus text 形式を**依存を足さず手書き**(`PlainTextResponse`)。
 - app は nucllei の DB を一切知らない(user_id を opaque token として受けるだけ)。
   privileged コンテナに DB 資格情報を持たせない。
 
+## ⑤ 保持期限(内部、opt-in)
+
+④ が「削除済 user」を消すのに対し、⑤ は **inactive な user** の `.img` を時間だけで消す
+(ken 決定 2026-10-03: 半年〜1 年不在なら消えてよい。ただし本番は 40TB NAS なので
+**既定は消さない**)。④ の「inactive は対象外」はこの既定で維持され、⑤ を有効にした配備だけが変わる。
+
+- **env**: `SANDBOX_WORKSPACE_RETENTION_DAYS`(既定 0 = 無効)。
+- **最終利用時刻**: `.images/<user_id>.last_used` を `_workspace()` が利用のたびに touch する
+  (`_mount_lock` 内)。`.img` の隣 = loop image の**外**なので未 mount でも読め、再起動を跨ぐ。
+  marker が無い image(導入前のもの)は `.img` の mtime で一回限り判定(次の利用で marker ができる)。
+- **契機**: `_retention_loop`(起動直後に 1 回、以降 1 時間ごと)→ `reap_stale_workspaces()`。
+- **ガード**(全て満たすまで消さない): `_mount_lock` / `_user_lock` が空いている(busy なら
+  ログを出して次回)→ lock を取って live session 無し・`ismount` でない・lock 待ち中に touch
+  されていない。見るのは `.images/*.img` だけ(`.new` `.corrupt-*` `.trash-*`・`/workspaces/<user>`・
+  `/ext` には触れない)。
+- **削除**: `.img` と marker を unlink、空の mountpoint を rmdir。④ と違い trash rename は
+  しない(N 日は配備側が決めた「消えてよい」期間)。INFO 1 行:
+  `workspace of <user_id> removed after <N> days inactive, <size>`(size は sparse の実消費)。
+
 ## C9 brick 耐性 / C5 枯渇応答
 
 - **C9**: mkfs は journal 無し(`-O ^has_journal`)。停電等 unclean shutdown 後に `e2fsck -p` が
@@ -117,6 +136,7 @@ loop ドライバ自体が使えない状態は、①〜④ が守る「リソ�
 |---|---|---|
 | `SANDBOX_LOOP_NODES` | 256 | loop ノード上限。実効は host snap ぶん(~14)引いた ≈242。壁を上げる保険に増やせる(根治は ①) |
 | `SANDBOX_WS_IDLE_TTL_S` | 3600 | この秒数 idle で workspace を umount。`TIMEOUT_MAX_S`(600)より長く `SESSION_TTL_S`(43200)より短く |
+| `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0(= 消さない) | この日数使われていない未 mount の `.img` を削除(⑤)。本番 NAS では既定のまま、消してよい配備で 180〜365 |
 
 ## 運用メモ
 

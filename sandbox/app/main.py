@@ -269,6 +269,14 @@ _user_locks: dict[str, asyncio.Lock] = {}
 _mount_locks: dict[str, asyncio.Lock] = {}
 _ws_registry: dict[str, float] = {}  # user_id -> last_used (monotonic)
 WS_IDLE_TTL_S = int(os.environ.get("SANDBOX_WS_IDLE_TTL_S", "3600"))
+# workspace の保持期限 (日)。0 = 消さない (既定。本番は 40TB NAS なので容量より復帰時の
+# 「消えていた」事故を避ける側に倒す — ken 決定 2026-10-03)。>0 なら最終利用から N 日経った
+# 未 mount の .img を reaper が unlink する (`reap_stale_workspaces`)。最終利用時刻は
+# 再起動を跨いで残す必要があるので、`.img` の隣の `<user_id>.last_used` (image の外 = 未 mount
+# でも読める) を利用のたびに touch する。`.img` の mtime は marker が無い場合の一回限りの代替
+# (loop 経由の書込で動くかはカーネル任せなので頼らない)。
+WS_RETENTION_DAYS = int(os.environ.get("SANDBOX_WORKSPACE_RETENTION_DAYS", "0"))
+WS_RETENTION_SWEEP_S = 3600
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +411,20 @@ def _mount_lock(user_id: str) -> asyncio.Lock:
     return _mount_locks.setdefault(user_id, asyncio.Lock())
 
 
+def _last_used_marker(user_id: str) -> Path:
+    """最終利用時刻を持つ sidecar。`.img` と同じ置き場 (= image の外) なので未 mount でも読める。"""
+    return IMAGES / f"{user_id}.last_used"
+
+
+def _touch_last_used(user_id: str) -> None:
+    """利用のたびに marker の mtime を今にする (無ければ作る)。失敗しても利用は止めない
+    (保持期限の判定が image mtime 代替に落ちるだけ)。"""
+    try:
+        _last_used_marker(user_id).touch()
+    except OSError as e:
+        print(f"[sandbox] last_used touch failed for {user_id}: {e}", flush=True)
+
+
 async def _workspace(user_id: str) -> Path:
     # _mount_lock: 初回同時二重 mount と reaper の umount を直列化。SessionManager.get() は
     # SM._lock を保持したままこれを呼ぶので、ロック順は常に SM._lock -> _mount_lock (逆転なし)。
@@ -415,6 +437,8 @@ async def _workspace(user_id: str) -> Path:
                 503,
                 "sandbox capacity full (同時利用ユーザー数の上限)。しばらく後に再試行してください",
             ) from e
+        # lock 内で touch: reap_stale_workspaces が lock を取った時点で必ず最新の時刻を見る
+        _touch_last_used(user_id)
     _ws_registry[user_id] = time.monotonic()  # mount 完了後 event loop 上で touch
     return ws
 
@@ -756,6 +780,83 @@ async def reap_idle_workspaces() -> int:
     return freed
 
 
+def _fmt_size(n: int) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if n < 1024 or unit == "TiB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
+        n /= 1024
+    return f"{n:.1f} TiB"
+
+
+def _last_used_at(img: Path) -> float:
+    """保持期限の基準時刻 (epoch)。marker があればその mtime、無ければ `.img` の mtime
+    (marker 導入前からある image の一回限りの代替 — 次の利用で marker が作られる)。"""
+    try:
+        return _last_used_marker(img.stem).stat().st_mtime
+    except FileNotFoundError:
+        return img.stat().st_mtime
+
+
+async def reap_stale_workspaces() -> int:
+    """`WS_RETENTION_DAYS` 日使われていない workspace の `.img` を消す (0 = 何もしない)。
+
+    見るのは `IMAGES` 直下の `<user_id>.img` だけ: `.new` `.corrupt-*` `.trash-*` は suffix が
+    違うので glob に掛からず、`/workspaces/<user_id>` (mountpoint) や `/ext` には触れない。
+    消すのは **未 mount かつ lock が空いている** もののみ — mount 中 / 実行中 / 生存 session 中は
+    次回に回す (削除中の remount で同一 .img を掴む TOCTOU は `_mount_lock` で潰す)。
+    DELETE /workspace (外部 GC 向け、trash rename) と違い即 unlink する: N 日は配備側が決めた
+    「消えてよい」期間なので回復余地は持たない。"""
+    if WS_RETENTION_DAYS <= 0:
+        return 0
+    cutoff = time.time() - WS_RETENTION_DAYS * 86400
+    try:
+        imgs = sorted(p for p in IMAGES.iterdir() if p.suffix == ".img" and p.is_file())
+    except FileNotFoundError:
+        return 0
+    removed = 0
+    for img in imgs:
+        user = img.stem
+        if not _USER_ID_RE.match(user):
+            continue
+        try:
+            if _last_used_at(img) > cutoff:
+                continue
+        except FileNotFoundError:
+            continue  # 判定中に消えた (DELETE /workspace 等)
+        lock = _mount_lock(user)
+        if lock.locked() or _user_lock(user).locked():
+            print(
+                f"[sandbox] workspace of {user} is busy; retention sweep skipped",
+                flush=True,
+            )
+            continue
+        async with lock:
+            if _has_live_session(user) or os.path.ismount(WORKSPACES / user):
+                continue
+            try:
+                if _last_used_at(img) > cutoff:
+                    continue  # lock 待ちの間に使われた
+                size = img.stat().st_blocks * 512  # sparse なので実消費
+                img.unlink()
+            except FileNotFoundError:
+                continue
+            _last_used_marker(user).unlink(missing_ok=True)
+            _ws_registry.pop(user, None)
+            try:
+                os.rmdir(
+                    WORKSPACES / user
+                )  # 空の mountpoint だけ。中身があれば触らない
+            except OSError:
+                pass
+            print(
+                f"[sandbox] workspace of {user} removed after {WS_RETENTION_DAYS} days "
+                f"inactive, {_fmt_size(size)}",
+                flush=True,
+            )
+            removed += 1
+    return removed
+
+
 async def _reaper_loop():
     while True:
         await asyncio.sleep(300)
@@ -764,6 +865,16 @@ async def _reaper_loop():
             await reap_idle_workspaces()
         except Exception as e:
             print(f"[sandbox] reaper error: {e!r}", flush=True)
+
+
+async def _retention_loop():
+    """起動直後に 1 回、以降 1 時間ごとに保持期限の掃除。`WS_RETENTION_DAYS` > 0 のときだけ起動。"""
+    while True:
+        try:
+            await reap_stale_workspaces()
+        except Exception as e:
+            print(f"[sandbox] retention sweep error: {e!r}", flush=True)
+        await asyncio.sleep(WS_RETENTION_SWEEP_S)
 
 
 # ---------------------------------------------------------------------------
@@ -813,6 +924,13 @@ async def _startup():
             flush=True,
         )
     asyncio.create_task(_reaper_loop())
+    if WS_RETENTION_DAYS > 0:
+        print(
+            f"[sandbox] workspace retention: {WS_RETENTION_DAYS} 日未使用の workspace を削除する"
+            " (SANDBOX_WORKSPACE_RETENTION_DAYS)",
+            flush=True,
+        )
+        asyncio.create_task(_retention_loop())
 
 
 @app.get("/healthz")
@@ -1098,4 +1216,5 @@ async def delete_workspace(user_id: str):
             dest = img.parent / f"{img.name}.trash-{int(time.time())}"
             os.replace(img, dest)
             trashed = dest.name
+        _last_used_marker(user_id).unlink(missing_ok=True)
         return {"deleted": True, "trashed": trashed}

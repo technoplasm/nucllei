@@ -30,6 +30,8 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       ① idle-detach reaper (idle workspace を umount して loop 単調増加を根治) /
       ② GET /metrics (loop/workspace/session/disk。手書き・依存なし) /
       ④ DELETE /workspace mechanism (外部 GC 用、trash rename) /
+      ⑤ 保持期限 `SANDBOX_WORKSPACE_RETENTION_DAYS` (既定 0 = 消さない。>0 で N 日未使用の
+      未 mount `.img` を削除。最終利用は `.images/<user>.last_used` sidecar。2026-10-03、ユニットテストのみ) /
       C9 ext4 brick 耐性 (破損 .img を退避 → fresh、atomic 生成) / C5 枯渇 503。
       exec/exec_cell 回帰なし・live_session ガード・C9 復旧を実機検証済
 - [x] **API の共有トークン認証 (opt-in)** (#132。2026-09-04 実装、2026-09-05 に
