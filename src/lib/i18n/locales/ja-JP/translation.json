@@ -256,6 +256,8 @@
 	"Enter server label": "サーバーラベルを入力",
 	"Enter server port": "サーバーポートを入力",
 	"Enter stop sequence": "停止シーケンスを入力",
+	"Parameter name (e.g. chat_template_kwargs)": "パラメータ名 (例: chat_template_kwargs)",
+	"Value as JSON (e.g. {\"thinking\": true})": "値を JSON で (例: {\"thinking\": true})",
 	"Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.": "WebUI の公開 URL を入力します。この URL は通知内のリンク生成に使用されます。",
 	"Enter to Send": "Enter で送信",
 	"Enter URL (e.g. http://localhost:11434)": "URL を入力してください (例: http://localhost:11434)",

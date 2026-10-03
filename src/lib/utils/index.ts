@@ -233,15 +233,20 @@ export const generateInitialsImage = (name: string | undefined) => {
 	return canvas.toDataURL();
 };
 
-export const formatDate = (inputDate: string | number | Date) => {
+// メッセージ見出しの日時。「今日」「昨日」は呼び手の i18n(`$i18n.t`)で訳す — ここは
+// Svelte の store を読めないので translator を受け取る(省略時は英語のまま)
+export const formatDate = (
+	inputDate: string | number | Date,
+	t: (key: string) => string = (key) => key
+) => {
 	const date = dayjs(inputDate);
 
 	if (date.isToday()) {
-		return `Today at ${date.format('LT')}`;
+		return `${t('Today')} ${date.format('LT')}`;
 	} else if (date.isYesterday()) {
-		return `Yesterday at ${date.format('LT')}`;
+		return `${t('Yesterday')} ${date.format('LT')}`;
 	} else {
-		return `${date.format('L')} at ${date.format('LT')}`;
+		return `${date.format('L')} ${date.format('LT')}`;
 	}
 };
 

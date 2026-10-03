@@ -256,6 +256,8 @@
 	"Enter server label": "输入服务器标签",
 	"Enter server port": "输入服务器端口",
 	"Enter stop sequence": "输入停止序列",
+	"Parameter name (e.g. chat_template_kwargs)": "参数名(例如:chat_template_kwargs)",
+	"Value as JSON (e.g. {\"thinking\": true})": "JSON 形式的值(例如:{\"thinking\": true})",
 	"Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.": "输入 WebUI 的公共 URL。此 URL 将用于在通知中生成链接。",
 	"Enter to Send": "Enter 键发送",
 	"Enter URL (e.g. http://localhost:11434)": "输入地址 (例如：http://localhost:11434)",

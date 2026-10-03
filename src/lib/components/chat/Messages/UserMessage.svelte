@@ -126,7 +126,7 @@
 							class=" self-center text-xs invisible group-hover:visible text-content-subtle font-medium first-letter:capitalize ml-0.5 translate-y-[1px]"
 						>
 							<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
-								<span class="line-clamp-1">{formatDate(message.timestamp * 1000)}</span>
+								<span class="line-clamp-1">{formatDate(message.timestamp * 1000, $i18n.t)}</span>
 							</Tooltip>
 						</div>
 					{/if}
@@ -158,7 +158,10 @@
 
 			{#if message.content !== ''}
 				{#if edit === true}
-					<div class=" w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-5 py-3 mb-2">
+					<!-- ライトでは bg-gray-50 が地と同化して編集枠が見えない(目視 2026-10-03)— 一段濃く + 枠線 -->
+					<div
+						class=" w-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl px-5 py-3 mb-2"
+					>
 						<div class="max-h-96 overflow-auto">
 							<textarea
 								id="message-edit-{message.id}"

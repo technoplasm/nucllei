@@ -100,7 +100,17 @@ export default defineConfig({
 			// symlink ループ(llens ⇄ cage 等)を watcher が辿ると ELOOP / OOM で dev サーバが落ちる。
 			// ディレクトリ自体を入口で弾く裸形と配下 glob を併記(入口で弾けば symlink を踏まない)
 			// .venv は site-packages が数万ディレクトリあり、監視すると inotify 上限(ENOSPC)で落ちる
-			ignored: ['**/_links', '**/_links/**', '**/,*', '**/,*/**', '**/.venv', '**/.venv/**']
+			ignored: [
+				'**/_links',
+				'**/_links/**',
+				'**/,*',
+				'**/,*/**',
+				'**/.venv',
+				'**/.venv/**',
+				// dev の data/ (uploads・DB) は監視しない — 添付の録音 (mp4/webm) で inotify 上限 (ENOSPC) に当たり vite が落ちる
+				'**/data',
+				'**/data/**'
+			]
 		}
 	},
 	worker: {

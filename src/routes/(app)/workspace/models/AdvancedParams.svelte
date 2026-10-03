@@ -467,7 +467,7 @@
 			<div class="flex items-center gap-2">
 				<input
 					type="text"
-					placeholder="chat_template_kwargs"
+					placeholder={$i18n.t('Parameter name (e.g. chat_template_kwargs)')}
 					bind:value={row.key}
 					oninput={syncCustom}
 					class="w-56 shrink-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
@@ -475,7 +475,7 @@
 				/>
 				<input
 					type="text"
-					placeholder={'{"thinking": true}'}
+					placeholder={$i18n.t('Value as JSON (e.g. {"thinking": true})')}
 					bind:value={row.text}
 					oninput={syncCustom}
 					class="flex-1 min-w-0 rounded-lg py-1 px-1.5 text-sm font-mono text-content dark:bg-gray-850 outline-hidden"
