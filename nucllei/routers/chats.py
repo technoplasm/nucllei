@@ -18,7 +18,6 @@ from nucllei.models.executions import ExecutionModel, Executions
 from nucllei.models.files import FileForm, Files
 from nucllei.models.users import Users
 
-from nucllei.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import SRC_LOG_LEVELS
 from nucllei.storage.provider import Storage
@@ -261,11 +260,6 @@ async def get_user_chat_list_by_user_id(
 ):
     # llens(#69): admin のユーザーチャット一覧(UserChatsModal)。ファイル管理の
     # 「関連チャット」と同じプレビュー形(snippet 込み)に統一 — 消費側は ChatsListModal。
-    if not ENABLE_ADMIN_CHAT_ACCESS:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
     return Chats.get_chat_previews(user_id=user_id, skip=skip, limit=limit)
 
 
@@ -374,11 +368,6 @@ async def get_user_archived_chats(user=Depends(get_verified_user)):
 
 @router.get("/all/db", response_model=list[ChatResponse])
 async def get_all_user_chats_in_db(user=Depends(get_admin_user)):
-    if not ENABLE_ADMIN_EXPORT:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
     return [ChatResponse(**chat.model_dump()) for chat in Chats.get_chats()]
 
 
@@ -444,14 +433,6 @@ def _to_admin_chat_list_item(chat, user_name: Optional[str]) -> dict:
     }
 
 
-def _ensure_admin_chat_access():
-    if not ENABLE_ADMIN_CHAT_ACCESS:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-
 @router.get("/admin/list")
 async def get_admin_chat_list(
     limit: int = Query(60, ge=1, le=200),
@@ -473,8 +454,6 @@ async def get_admin_chat_list(
     行は chat JSON を含まない軽量形(導出列はページ分だけサーバーでパース)。
     返却は {"items": [...], "total": n}。
     """
-    _ensure_admin_chat_access()
-
     if order_by not in ("created_at", "updated_at"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -531,14 +510,12 @@ async def get_admin_chat_list(
 @router.get("/admin/users")
 async def get_admin_chat_users(user=Depends(get_admin_user)):
     """チャットを 1 件以上持つユーザーの一覧(#19、admin のフィルタ UI 用)。"""
-    _ensure_admin_chat_access()
     return Chats.get_chat_owners()
 
 
 @router.get("/admin/models")
 async def get_admin_chat_models(user=Depends(get_admin_user)):
     """チャットで使われている model id の一覧(#19、admin のフィルタ UI 用)。"""
-    _ensure_admin_chat_access()
     return Chats.get_chat_models()
 
 
@@ -576,10 +553,11 @@ async def get_shared_chat_by_id(share_id: str, user=Depends(get_verified_user)):
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
         )
 
-    if user.role == "user" or (user.role == "admin" and not ENABLE_ADMIN_CHAT_ACCESS):
-        chat = Chats.get_chat_by_share_id(share_id)
-    elif user.role == "admin" and ENABLE_ADMIN_CHAT_ACCESS:
+    # llens: admin は生 chat_id でも開ける(他人のチャット閲覧 — 管理者は常に可、2026-10-03)
+    if user.role == "admin":
         chat = Chats.get_chat_by_id(share_id)
+    else:
+        chat = Chats.get_chat_by_share_id(share_id)
 
     if chat:
         return ChatResponse(**chat.model_dump())
@@ -596,10 +574,10 @@ async def get_shared_chat_by_id(share_id: str, user=Depends(get_verified_user)):
 
 
 def _get_chat_as_owner_or_admin(id: str, user) -> Optional[ChatModel]:
-    """llens(#19): owner のチャット、または admin(ENABLE_ADMIN_CHAT_ACCESS 下)なら
-    他人のチャットも返す。admin の閲覧経路(/share/{id} の admin 分岐)と同じゲート。"""
+    """llens(#19): owner のチャット、または admin なら他人のチャットも返す
+    (管理者は常に可 — 2026-10-03)。admin の閲覧経路(/share/{id} の admin 分岐)と同じゲート。"""
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
-    if not chat and user.role == "admin" and ENABLE_ADMIN_CHAT_ACCESS:
+    if not chat and user.role == "admin":
         chat = Chats.get_chat_by_id(id)
         # 削除済み(soft delete)は admin でも通常経路では存在しない扱い。
         # 閲覧は /share/{id} の admin 分岐のみ(削除済み表示つき — 2026-07-19 仕様)
@@ -1038,7 +1016,7 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    # llens(#19): admin(ENABLE_ADMIN_CHAT_ACCESS 下)は他人のチャットも共有化できる
+    # llens(#19): admin は他人のチャットも共有化できる
     chat = _get_chat_as_owner_or_admin(id, user)
     if chat:
         # llens(#107): agent session は共有(/s/)不可。unshare は現状維持(無害)
@@ -1077,7 +1055,7 @@ async def share_chat_by_id(request: Request, id: str, user=Depends(get_verified_
 
 @router.delete("/{id}/share", response_model=Optional[bool])
 async def delete_shared_chat_by_id(id: str, user=Depends(get_verified_user)):
-    # llens(#19): admin(ENABLE_ADMIN_CHAT_ACCESS 下)は他人の共有も解除できる
+    # llens(#19): admin は他人の共有も解除できる
     # (狭める操作なので owner 側の共有権限ゲートは不要 — 既存方針どおり常時可)
     chat = _get_chat_as_owner_or_admin(id, user)
     if chat:

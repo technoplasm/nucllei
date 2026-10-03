@@ -529,7 +529,7 @@ async def get_file_chats_by_id(id: str, user=Depends(get_verified_user)):
     """この file を参照しているチャット一覧(#69、ファイル管理ページのチャット導線)。
 
     非 admin は本人のチャットのみ。admin は全ユーザー(他人のチャットは
-    ENABLE_ADMIN_CHAT_ACCESS 下で /s/{id} から開ける — 振り分けは user_id を見て FE で)。
+    /s/{id} から開ける — 振り分けは user_id を見て FE で)。
     file 自体の閲覧権限(owner / admin / ACL read)は単品取得と同じ。
     deleted は admin のみ可(#94、監査導線: file 行 → チャット)。
     """

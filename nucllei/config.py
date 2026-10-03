@@ -16,6 +16,7 @@ from nucllei.env import (
     OFFLINE_MODE,
     NUCLLEI_DIR,
     WEBUI_AUTH,
+    env_int,
     log,
 )
 from nucllei.internal.db import get_db
@@ -952,11 +953,8 @@ WEBHOOK_URL = RuntimeConfig(
     "WEBHOOK_URL", "webhook_url", os.environ.get("WEBHOOK_URL", "")
 )
 
-ENABLE_ADMIN_EXPORT = os.environ.get("ENABLE_ADMIN_EXPORT", "True").lower() == "true"
-
-ENABLE_ADMIN_CHAT_ACCESS = (
-    os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
-)
+# llens: ENABLE_ADMIN_EXPORT / ENABLE_ADMIN_CHAT_ACCESS は撤去(ken 決定 2026-10-03)。
+# 管理者は常にすべてできる — 「管理者の中で見れる人と見れない人が分かれるなら別の権限が要る」。
 
 # llens(#10): openwebui.com コミュニティ共有(ストア導線)は外部サービス前提のため機能ごと撤去。
 # llens(#48): 評価(👍/👎)機能撤去に伴い ENABLE_MESSAGE_RATING を廃止。
@@ -1123,11 +1121,7 @@ ENABLE_TITLE_GENERATION = RuntimeConfig(
 ATTACHMENT_MAX_COUNT = RuntimeConfig(
     "ATTACHMENT_MAX_COUNT",
     "attachment.max_count",
-    (
-        int(os.environ.get("ATTACHMENT_MAX_COUNT"))
-        if os.environ.get("ATTACHMENT_MAX_COUNT")
-        else None
-    ),
+    env_int("ATTACHMENT_MAX_COUNT", None, minimum=0),
 )
 
 # 受け入れ上限(MB)。既定 25MB。sandbox の SANDBOX_FILE_LIMIT_BYTES(既定 25MB)とは別 config
@@ -1135,11 +1129,7 @@ ATTACHMENT_MAX_COUNT = RuntimeConfig(
 ATTACHMENT_MAX_SIZE_MB = RuntimeConfig(
     "ATTACHMENT_MAX_SIZE_MB",
     "attachment.max_size",
-    (
-        int(os.environ.get("ATTACHMENT_MAX_SIZE_MB"))
-        if os.environ.get("ATTACHMENT_MAX_SIZE_MB")
-        else 25
-    ),
+    env_int("ATTACHMENT_MAX_SIZE_MB", 25, minimum=0),
 )
 
 # llens: 添付画像のクライアント側縮小。長辺がこの px を超える画像はアップロード前に
@@ -1147,11 +1137,7 @@ ATTACHMENT_MAX_SIZE_MB = RuntimeConfig(
 ATTACHMENT_IMAGE_MAX_DIMENSION = RuntimeConfig(
     "ATTACHMENT_IMAGE_MAX_DIMENSION",
     "attachment.image_max_dimension",
-    (
-        int(os.environ.get("ATTACHMENT_IMAGE_MAX_DIMENSION"))
-        if os.environ.get("ATTACHMENT_IMAGE_MAX_DIMENSION")
-        else None
-    ),
+    env_int("ATTACHMENT_IMAGE_MAX_DIMENSION", None, minimum=0),
 )
 
 # llens: 長文ペーストの .txt ファイル化閾値(文字数)。ペーストがこれを超えると
@@ -1159,11 +1145,7 @@ ATTACHMENT_IMAGE_MAX_DIMENSION = RuntimeConfig(
 PASTED_TEXT_CHARACTER_LIMIT = RuntimeConfig(
     "PASTED_TEXT_CHARACTER_LIMIT",
     "attachment.pasted_text_character_limit",
-    (
-        int(os.environ.get("PASTED_TEXT_CHARACTER_LIMIT"))
-        if os.environ.get("PASTED_TEXT_CHARACTER_LIMIT")
-        else None
-    ),
+    env_int("PASTED_TEXT_CHARACTER_LIMIT", None, minimum=0),
 )
 
 # 受け入れ拡張子の whitelist(小文字・ドット無し、カンマ区切り env)。空 = 全許可(非破壊の既定)。
@@ -1254,13 +1236,13 @@ WHISPER_COMPUTE_TYPE = RuntimeConfig(
 WHISPER_CPU_THREADS = RuntimeConfig(
     "WHISPER_CPU_THREADS",
     "audio.stt.whisper_cpu_threads",
-    int(os.getenv("WHISPER_CPU_THREADS", "0")),
+    env_int("WHISPER_CPU_THREADS", 0, minimum=0),
 )
 
 WHISPER_NUM_WORKERS = RuntimeConfig(
     "WHISPER_NUM_WORKERS",
     "audio.stt.whisper_num_workers",
-    int(os.getenv("WHISPER_NUM_WORKERS", "1")),
+    env_int("WHISPER_NUM_WORKERS", 1, minimum=1),
 )
 
 
@@ -1438,7 +1420,7 @@ LDAP_SERVER_HOST = RuntimeConfig(
 LDAP_SERVER_PORT = RuntimeConfig(
     "LDAP_SERVER_PORT",
     "ldap.server.port",
-    int(os.environ.get("LDAP_SERVER_PORT", "389")),
+    env_int("LDAP_SERVER_PORT", 389, minimum=1),
 )
 
 LDAP_ATTRIBUTE_FOR_MAIL = RuntimeConfig(

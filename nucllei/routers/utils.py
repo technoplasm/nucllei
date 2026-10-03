@@ -2,7 +2,6 @@ import black
 import logging
 
 from nucllei.models.chats import ChatTitleMessagesForm
-from nucllei.config import ENABLE_ADMIN_EXPORT
 from nucllei.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -58,11 +57,6 @@ async def download_chat_as_pdf(
 
 @router.get("/db/download")
 async def download_db(user=Depends(get_admin_user)):
-    if not ENABLE_ADMIN_EXPORT:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
     from nucllei.internal.db import engine
 
     if engine.name != "sqlite":

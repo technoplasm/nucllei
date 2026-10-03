@@ -3,8 +3,7 @@
 	// 「user に紐づくチャット」(admin の UserChatsModal)が同じ見た目でこれを消費する。
 	// データは BE の Chats.get_chat_previews の形({id, user_id, user_name, title, snippet,
 	// created_at, updated_at})。null = 読み込み中 / [] = なし。
-	// 行リンクは自分のチャット = /c/、他人の分 = /s/(admin は ENABLE_ADMIN_CHAT_ACCESS 下で
-	// /s/{chat_id} を閲覧できる)。onDelete を渡したときだけ削除列が出る。
+	// 行リンクは自分のチャット = /c/、他人の分 = /s/(admin は /s/{chat_id} を閲覧できる)。onDelete を渡したときだけ削除列が出る。
 	import { getContext } from 'svelte';
 	import dayjs from '$lib/dayjs';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';

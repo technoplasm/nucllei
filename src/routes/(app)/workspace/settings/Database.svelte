@@ -4,7 +4,6 @@
 
 	import { downloadDatabase } from '$lib/apis/utils';
 	import { getContext } from 'svelte';
-	import { config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { getAllUserChats } from '$lib/apis/chats';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
@@ -91,39 +90,37 @@
 
 			<hr class="border-line my-1" />
 
-			{#if $config?.features.enable_admin_export ?? true}
-				<div class="  flex w-full justify-between">
-					<button
-						class=" flex rounded-md py-1.5 px-3 w-full hover:bg-surface-hover"
-						type="button"
-						onclick={() => {
-							downloadDatabase().catch((error) => {
-								toast.error(`${error}`);
-							});
-						}}
-					>
-						<div class=" self-center mr-3">
-							<span class="i-lucide-database size-4 block"></span>
-						</div>
-						<div class=" self-center text-sm font-medium">{$i18n.t('Download Database')}</div>
-					</button>
-				</div>
-
+			<div class="  flex w-full justify-between">
 				<button
-					class=" flex rounded-md py-2 px-3 w-full hover:bg-surface-hover"
+					class=" flex rounded-md py-1.5 px-3 w-full hover:bg-surface-hover"
 					type="button"
 					onclick={() => {
-						exportAllUserChats();
+						downloadDatabase().catch((error) => {
+							toast.error(`${error}`);
+						});
 					}}
 				>
 					<div class=" self-center mr-3">
-						<span class="i-lucide-file-down size-4 block"></span>
+						<span class="i-lucide-database size-4 block"></span>
 					</div>
-					<div class=" self-center text-sm font-medium">
-						{$i18n.t('Export All Chats (All Users)')}
-					</div>
+					<div class=" self-center text-sm font-medium">{$i18n.t('Download Database')}</div>
 				</button>
-			{/if}
+			</div>
+
+			<button
+				class=" flex rounded-md py-2 px-3 w-full hover:bg-surface-hover"
+				type="button"
+				onclick={() => {
+					exportAllUserChats();
+				}}
+			>
+				<div class=" self-center mr-3">
+					<span class="i-lucide-file-down size-4 block"></span>
+				</div>
+				<div class=" self-center text-sm font-medium">
+					{$i18n.t('Export All Chats (All Users)')}
+				</div>
+			</button>
 		</div>
 	</div>
 </div>

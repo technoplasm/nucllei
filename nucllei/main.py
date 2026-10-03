@@ -168,8 +168,6 @@ from nucllei.config import (
     OAUTH_PROVIDERS,
     WEBUI_URL,
     # Admin
-    ENABLE_ADMIN_CHAT_ACCESS,
-    ENABLE_ADMIN_EXPORT,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -1079,9 +1077,9 @@ async def get_app_config(request: Request):
                     # config・retrieval/web providers はすべて撤去済み。検索は案件層(prism)の
                     # tool が外部検索システム(SearXNG 等)を直接叩く(docling と同じ線引き)。
                     # llens(#23): code_interpreter(タグ検出実行)も機能ごと撤去。
+                    # llens: enable_admin_export / enable_admin_chat_access は撤去
+                    # (管理者は常にすべてできる — ken 決定 2026-10-03)
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
-                    "enable_admin_export": ENABLE_ADMIN_EXPORT,
-                    "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
                 }
                 if user is not None
                 else {}

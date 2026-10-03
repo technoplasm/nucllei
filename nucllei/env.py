@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from nucllei.constants import ERROR_MESSAGES
-
 ####################################
 # Load .env file
 ####################################
@@ -33,6 +31,30 @@ else:
 
 log = logging.getLogger(__name__)
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
+
+
+def env_int(name: str, default, *, minimum=None):
+    """整数の env を安全に読む。未設定 / 空は既定、非数(や下限未満)は warning を出して既定。
+
+    素の `int(os.environ.get(...))` は設定ファイルの打ち間違い 1 つで起動自体が落ちる
+    (配備先で直すまで誰もログインできない)ので、import 時に読む整数は必ずこれを通す。
+    範囲の両端まで要るものは config.py の `env_number` を使う。
+    """
+    raw = os.environ.get(name, "").strip()
+    if raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        log.warning(f"{name}={raw!r} is not an integer; using the default {default}")
+        return default
+    if minimum is not None and value < minimum:
+        log.warning(
+            f"{name}={raw!r} is below the minimum {minimum}; using the default {default}"
+        )
+        return default
+    return value
+
 
 log_sources = [
     "AUDIO",
@@ -377,7 +399,26 @@ WEBUI_AUTH_TRUSTED_NAME_HEADER = os.environ.get("WEBUI_AUTH_TRUSTED_NAME_HEADER"
 ####################################
 
 # nucllei: 旧 alias WEBUI_JWT_SECRET_KEY は撤去(旧データ互換を持たない方針)
-WEBUI_SECRET_KEY = os.environ.get("WEBUI_SECRET_KEY", "t0p-s3cr3t")
+#
+# 固定鍵のフォールバックは **dev 限定**(ken 決定 2026-10-03「固定鍵は dev 以外では無効化」)。
+# `nucllei serve` は env が無ければ `$DATA_DIR/.webui_secret_key` を生成して env に入れてから
+# ここを import するので、本番(ENV=prod)でここに来るのは「serve 以外の入口 + env 未設定」=
+# 設定漏れ。既知の固定鍵で JWT を署名すると誰でもセッションを偽造できるので、起動を止める。
+_DEV_SECRET_KEY = "t0p-s3cr3t"
+WEBUI_SECRET_KEY = os.environ.get("WEBUI_SECRET_KEY", "")
+if WEBUI_SECRET_KEY == "":
+    if ENV == "dev":
+        WEBUI_SECRET_KEY = _DEV_SECRET_KEY
+        log.warning(
+            "WEBUI_SECRET_KEY is not set; using the fixed development key "
+            "(ENV=dev only — never deploy like this)"
+        )
+    else:
+        raise RuntimeError(
+            "WEBUI_SECRET_KEY is not set and ENV is not 'dev'. "
+            "Set WEBUI_SECRET_KEY, or start via `nucllei serve` "
+            "(it generates and persists $DATA_DIR/.webui_secret_key)."
+        )
 
 WEBUI_SESSION_COOKIE_SAME_SITE = os.environ.get("WEBUI_SESSION_COOKIE_SAME_SITE", "lax")
 
@@ -396,9 +437,6 @@ WEBUI_AUTH_COOKIE_SECURE = (
     ).lower()
     == "true"
 )
-
-if WEBUI_AUTH and WEBUI_SECRET_KEY == "":
-    raise ValueError(ERROR_MESSAGES.ENV_VAR_NOT_FOUND)
 
 AIOHTTP_CLIENT_TIMEOUT = os.environ.get("AIOHTTP_CLIENT_TIMEOUT", "")
 

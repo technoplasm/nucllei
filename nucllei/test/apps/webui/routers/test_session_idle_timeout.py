@@ -13,6 +13,9 @@ CORE 領域(認証)なので、延命が起きる条件・**起きない**条件
 - API キー(`sk-`)経路では延命しない(cookie セッション限定)。
 - `SESSION_IDLE_TIMEOUT` が `-1`(既定 = 無期限)なら何もしない = 既定の挙動は不変。
 - 延命 cookie の属性は signin の発行箇所と同一(80/443 併用の配備で壊れないこと)。
+- アイドル失効の後始末(#137): FE が切ったとき `GET /auths/signout` でサーバ側セッション
+  (= httpOnly cookie)を落とせること — 認証無しで通り、cookie を発行時と同じ属性で消す。
+  その後 cookie 無しの `GET /auths/` は 401/403(= `/auth` がアプリへ戻さない)。
 """
 
 import time
@@ -249,6 +252,60 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         assert "httponly" in renewal_attrs
         assert renewal_attrs.get("samesite") == "lax"
         assert "secure" not in renewal_attrs  # 既定(HTTP 配備)
+
+    # ---- signout(#137: FE のアイドル失効からの明示的な失効) ------
+
+    def test_signout_needs_no_valid_session(self):
+        """期限切れの token(= FE タイマが切った後の典型)でも、token 無しでも 200。
+
+        FE はアイドル失効時に `/auth` へ行く前にこれを叩く。認証依存があると
+        「サーバ側が先に切れていた」ケースで 401 になり cookie が残る。
+        """
+        from nucllei.main import app
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+
+        self._login_with(user, remaining=timedelta(seconds=-10))
+        response = self.fast_api_client.get(self.create_url("/signout"))
+        assert response.status_code == 200, response.text
+        assert response.json() == {"status": True}
+
+        self.fast_api_client.cookies.clear()
+        response = self.fast_api_client.get(self.create_url("/signout"))
+        assert response.status_code == 200, response.text
+
+    def test_signout_clears_the_cookie_with_matching_attributes(self):
+        """まだ生きている token でも signout で cookie が消え、以後は未認証になる。
+
+        消す Set-Cookie の属性(httponly / samesite / secure)は発行箇所と同一でなければ、
+        secure/samesite の違いで消えない配備がある。期限は過去(Max-Age=0)。
+        """
+        from nucllei.main import app
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+        self._login_with(user, remaining=timedelta(minutes=59))
+
+        signin = self.fast_api_client.post(
+            self.create_url("/signin"),
+            json={"email": "doctor@hospital.example", "password": "password"},
+        )
+        assert signin.status_code == 200, signin.text
+        signin_attrs = _attributes(_set_cookie_header(signin))
+
+        response = self.fast_api_client.get(self.create_url("/signout"))
+        assert response.status_code == 200, response.text
+        cleared = _set_cookie_header(response)
+        assert cleared is not None
+        assert cleared.split(";")[0] == 'token=""'
+        assert "max-age=0" in cleared.lower()
+        assert _attributes(cleared) == signin_attrs
+
+        # ブラウザ相当: cookie が消えた後の /auths/ は未認証(= /auth がアプリへ戻さない)
+        self.fast_api_client.cookies.clear()
+        response = self._get_me(activity=False)
+        assert response.status_code in (401, 403), response.text
 
     # ---- GET /api/v1/auths/ は token を発行しない ----------------
 

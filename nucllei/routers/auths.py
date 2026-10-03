@@ -527,7 +527,16 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
 
 @router.get("/signout")
 async def signout(request: Request, response: Response):
-    response.delete_cookie("token")
+    # llens(#137): 認証依存を持たない — FE のアイドルタイマが切ったとき(token が期限切れでも
+    # まだ生きていても)必ず cookie を落とせること。JWT は stateless なので「サーバ側の
+    # セッションを落とす」= ブラウザから httpOnly cookie を消すこと。属性は発行箇所
+    # (signin / 延命 middleware)と同一でなければ、secure/samesite の違いで消えない配備がある。
+    response.delete_cookie(
+        "token",
+        httponly=True,
+        samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+        secure=WEBUI_AUTH_COOKIE_SECURE,
+    )
 
     if ENABLE_OAUTH_SIGNUP.value:
         oauth_id_token = request.cookies.get("oauth_id_token")

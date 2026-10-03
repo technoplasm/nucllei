@@ -9,7 +9,7 @@
 	dayjs.extend(localizedFormat);
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { config, user as sessionUser } from '$lib/stores';
+	import { user as sessionUser } from '$lib/stores';
 	import { getUserMetaFields, getUsers } from '$lib/apis/users';
 
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -272,21 +272,19 @@
 									<div class="flex justify-end w-full">
 										<!-- llens(#69): admin 同士でも閲覧可に(user.role !== 'admin' の除外を撤去。
 										 BE は元々 target の role を見ていない — 隠していたのは FE だけ) -->
-										{#if $config?.features?.enable_admin_chat_access}
-											<Tooltip content={$i18n.t('Chats')}>
-												<button
-													class="self-center w-fit text-sm px-2 py-2 hover:bg-surface-hover rounded-xl"
-													aria-label={$i18n.t('Chats')}
-													onclick={(e) => {
-														e.stopPropagation();
-														showUserChatsModal = !showUserChatsModal;
-														selectedUser = user;
-													}}
-												>
-													<span class="i-lucide-messages-square size-4 block"></span>
-												</button>
-											</Tooltip>
-										{/if}
+										<Tooltip content={$i18n.t('Chats')}>
+											<button
+												class="self-center w-fit text-sm px-2 py-2 hover:bg-surface-hover rounded-xl"
+												aria-label={$i18n.t('Chats')}
+												onclick={(e) => {
+													e.stopPropagation();
+													showUserChatsModal = !showUserChatsModal;
+													selectedUser = user;
+												}}
+											>
+												<span class="i-lucide-messages-square size-4 block"></span>
+											</button>
+										</Tooltip>
 									</div>
 								</td>
 							</tr>

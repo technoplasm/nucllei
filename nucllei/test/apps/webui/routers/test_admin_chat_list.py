@@ -3,10 +3,8 @@
 - GET /chats/admin/list: ページング一覧(ソート・limit/offset・total・フィルタ・軽量行の導出列)
 - GET /chats/admin/users: チャットを持つユーザー一覧(admin 専有)
 - GET /chats/admin/models: 使用モデル一覧(admin 専有)
-- ENABLE_ADMIN_CHAT_ACCESS=False で全 endpoint が閉じる
+- admin は常に通る(ENABLE_ADMIN_CHAT_ACCESS は撤去 — 管理者は常にすべてできる、2026-10-03)
 """
-
-from unittest.mock import patch
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user, mock_webui_user_strict
@@ -71,12 +69,12 @@ class TestAdminChatList(AbstractPostgresTest):
                 r = self.fast_api_client.get(self.create_url(path))
             assert r.status_code == 401, f"{path}: {r.text}"
 
-    def test_closed_when_admin_chat_access_disabled(self):
+    def test_admin_always_allowed(self):
+        # 管理者を絞るトグルは持たない(撤去済み)— admin は無条件に通る
         for path in ("/admin/list", "/admin/users", "/admin/models"):
-            with patch("nucllei.routers.chats.ENABLE_ADMIN_CHAT_ACCESS", False):
-                with mock_webui_user(id="1", role="admin"):
-                    r = self.fast_api_client.get(self.create_url(path))
-            assert r.status_code == 401, f"{path}: {r.text}"
+            with mock_webui_user(id="1", role="admin"):
+                r = self.fast_api_client.get(self.create_url(path))
+            assert r.status_code == 200, f"{path}: {r.text}"
 
     # ---- GET /chats/admin/list ----
 
@@ -362,17 +360,6 @@ class TestAdminChatList(AbstractPostgresTest):
         assert r.json() is True
         assert self.chats.get_chat_by_id(chat.id).share_id is None
 
-    def test_admin_share_closed_when_admin_chat_access_disabled(self):
-        chat = self._insert_chat(user_id="2")
-        with patch("nucllei.routers.chats.ENABLE_ADMIN_CHAT_ACCESS", False):
-            with mock_webui_user(id="1", role="admin"):
-                r = self.fast_api_client.post(self.create_url(f"/{chat.id}/share"))
-            assert r.status_code == 401, r.text
-            with mock_webui_user(id="1", role="admin"):
-                r = self.fast_api_client.delete(self.create_url(f"/{chat.id}/share"))
-            assert r.status_code == 401, r.text
-        assert self.chats.get_chat_by_id(chat.id).share_id is None
-
     def test_user_cannot_share_others_chat(self):
         chat = self._insert_chat(user_id="2")
         with mock_webui_user(id="3", role="user"):
@@ -383,17 +370,12 @@ class TestAdminChatList(AbstractPostgresTest):
         assert r.status_code == 401, r.text
 
     def test_admin_can_get_others_chat_by_id(self):
-        # ShareChatModal が share_id を読む経路。ゲート off では従来どおり 401
+        # ShareChatModal が share_id を読む経路。admin は常に通る
         chat = self._insert_chat(user_id="2")
         with mock_webui_user(id="1", role="admin"):
             r = self.fast_api_client.get(self.create_url(f"/{chat.id}"))
         assert r.status_code == 200, r.text
         assert r.json()["id"] == chat.id
-
-        with patch("nucllei.routers.chats.ENABLE_ADMIN_CHAT_ACCESS", False):
-            with mock_webui_user(id="1", role="admin"):
-                r = self.fast_api_client.get(self.create_url(f"/{chat.id}"))
-            assert r.status_code == 401, r.text
 
     def test_shared_filter(self):
         shared_chat = self._insert_chat(user_id="2", title="shared one")

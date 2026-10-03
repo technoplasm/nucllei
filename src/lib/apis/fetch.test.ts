@@ -64,6 +64,18 @@ const loadModule = async () => {
 	return await import('./fetch');
 };
 
+/**
+ * アイドル失効は signout の応答を待ってから遷移する(#137)ので、promise の
+ * 決着(マイクロタスク)を流してから `location.href` を見る。
+ */
+const settle = async () => {
+	await vi.advanceTimersByTimeAsync(0);
+};
+
+/** signout を叩いた回数(`/auths/signout` 宛の fetch)。 */
+const signoutCalls = () =>
+	fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/auths/signout'));
+
 /** 直近の fetch 呼び出しに付いた activity ヘッダの値。 */
 const sentActivityHeader = (call: number, headerName: string) => {
 	const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
@@ -184,6 +196,7 @@ describe('noteInteraction(DOM イベントにならない在席 = 音声入力�
 		await apiFetch('/api/v1/audio/transcriptions', { method: 'POST' });
 		expect(sentActivityHeader(0, ACTIVITY_HEADER)).toBeNull();
 		vi.advanceTimersByTime(31000);
+		await settle();
 
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 	});
@@ -198,6 +211,7 @@ describe('noteInteraction(DOM イベントにならない在席 = 音声入力�
 		expect(location.href).toBe('http://localhost/c/abc');
 		// 判定は 15 秒刻み(IDLE_CHECK_MS)— 最後の記録から 60 秒を過ぎた次の tick で切れる
 		vi.advanceTimersByTime(20000);
+		await settle();
 
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 	});
@@ -217,10 +231,71 @@ describe('FE 側アイドルタイマ', () => {
 
 		startIdleWatch(3600);
 		vi.advanceTimersByTime(3600 * 1000 + 1000);
+		await settle();
 
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 		// 到着後のトーストは既存の失効通知(#70 B2)に乗る
 		expect(sessionStorage.getItem(SESSION_EXPIRED_FLAG)).toBe('1');
+	});
+
+	it('アイドル失効では /auth へ行く前に signout でサーバ側セッションも落とす(#137)', async () => {
+		// FE が失効と判断したのにサーバ側のセッションが生きていると、/auth が生きた
+		// セッションを見てアプリへ戻し、共有 PC で前の人の画面が復活する。
+		// signout を先に叩けば「FE が切った ⇒ サーバでも切れている」が構成的に真になる。
+		const { startIdleWatch } = await loadModule();
+
+		startIdleWatch(60);
+		vi.advanceTimersByTime(61 * 1000);
+
+		// 遷移は signout の応答を待ってから
+		expect(signoutCalls()).toHaveLength(1);
+		const init = signoutCalls()[0][1] as RequestInit;
+		expect(init.credentials).toBe('include');
+		expect(init.keepalive).toBe(true);
+		expect(location.href).toBe('http://localhost/c/abc');
+
+		await settle();
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('signout が失敗しても必ず遷移する(ネットワーク断で画面が残る方が悪い)', async () => {
+		const { startIdleWatch } = await loadModule();
+		fetchMock.mockImplementation(async () => {
+			throw new TypeError('Failed to fetch');
+		});
+
+		startIdleWatch(60);
+		vi.advanceTimersByTime(61 * 1000);
+		await settle();
+
+		expect(signoutCalls()).toHaveLength(1);
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('signout が返ってこなくても上限時間で遷移する', async () => {
+		const { startIdleWatch } = await loadModule();
+		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+
+		startIdleWatch(60);
+		vi.advanceTimersByTime(61 * 1000);
+		await settle();
+		expect(location.href).toBe('http://localhost/c/abc'); // まだ待っている
+
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('401 起因の失効では signout を叩かない(サーバ側は既に死んでいる)', async () => {
+		const { apiFetch } = await loadModule();
+		const { user } = await import('$lib/stores');
+		user.set({ id: '1' } as never);
+		fetchMock.mockImplementation(async () => new Response('{}', { status: 401 }));
+
+		await apiFetch('/api/v1/chats/');
+		await settle();
+
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+		expect(signoutCalls()).toHaveLength(0);
 	});
 
 	it('操作があるうちは切れない(スライディング)', async () => {
@@ -243,6 +318,7 @@ describe('FE 側アイドルタイマ', () => {
 		// interval を進めずに時計だけ進める(= スリープでタイマが発火しなかった状態)
 		vi.setSystemTime(new Date('2026-09-05T05:00:00Z'));
 		fire(documentListeners, 'visibilitychange');
+		await settle();
 
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 	});

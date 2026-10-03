@@ -3,8 +3,7 @@
 	// 一覧はサーバーページング(GET /chats/admin/list)。導出列(snippet・ターン数・
 	// 添付数)はページ分だけサーバーで chat JSON をパースした軽量行で返る。
 	// token は #57 が Chat.meta["usage"] に記録した保存値の表示(無い旧チャットは「-」)。
-	// 行クリック: 自分のチャット=/c/、他人の分=/s/(admin は ENABLE_ADMIN_CHAT_ACCESS
-	// 経由で chat id を共有ビューで開ける)。
+	// 行クリック: 自分のチャット=/c/、他人の分=/s/(admin は chat id を共有ビューで開ける)。
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -118,7 +117,7 @@
 	};
 
 	// 自分のチャットは通常ビュー(/c — サイドバー維持・編集可)で開く。
-	// 他人のと削除済みは共有ビュー(/s — admin は ENABLE_ADMIN_CHAT_ACCESS 経由で閲覧のみ。
+	// 他人のと削除済みは共有ビュー(/s — admin は閲覧のみ。
 	// 削除済みは /c だと本人向け取得から除外されて開けないため自分のでも /s で開く — #31)。
 	const openChat = (chat: any) => {
 		goto(chat.user_id === $user?.id && !chat.deleted_at ? `/c/${chat.id}` : `/s/${chat.id}`);

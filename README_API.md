@@ -86,9 +86,14 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
   (`webui.db`), uploads, model caches (whisper / HF), and
   the auto-generated secret key at `/app/data/.webui_secret_key`. No volume ⇒ all
   state is lost on container replacement.
-- **Secret key**: if `WEBUI_SECRET_KEY` is unset, `serve` loads
+- **Secret key**: if `WEBUI_SECRET_KEY` is unset, `serve` (and `create-admin`) loads
   `$DATA_DIR/.webui_secret_key`, generating and persisting it on first boot. Set the
-  env explicitly if you rotate keys or run multiple replicas.
+  env explicitly if you rotate keys or run multiple replicas. Any other entrypoint
+  (`uvicorn nucllei.main:app`, `nucllei dev`, a plain `import nucllei.env`) has no key
+  file to fall back on: with `ENV=dev` it uses a fixed development key and logs a
+  warning; with any other `ENV` (the image bakes `ENV=prod`) it **refuses to start**
+  until `WEBUI_SECRET_KEY` is set (2026-10-03 — a known fixed key would let anyone
+  forge sessions).
 - **HEALTHCHECK**: `GET /health` must return `{"status": true}`.
 - **DB migrations** run automatically on startup (and on `create-admin`).
 
@@ -149,20 +154,21 @@ the UI, next to the Nucllei product version).
 **Renamed / removed 2026-10-03** (no aliases — the old names are dead; update
 compose/env files):
 
-| Old                                      | New                          | Note                                                                                                                                                              |
-| ---------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JWT_EXPIRES_IN`                         | `SESSION_IDLE_TIMEOUT`       | RC; DB path `auth.jwt_expiry` → `auth.session_idle_timeout` (an old DB value is not migrated — set the env or re-save in the admin UI)                            |
-| `CHAT_TOOL_EXECUTION_TIMEOUT`            | `TOOL_EXEC_TIMEOUT_S`        | §3.6                                                                                                                                                              |
-| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS` | `TOOL_CALL_MAX_ITERATIONS`   | §3.6                                                                                                                                                              |
-| `SUBAGENT_TURN_TIMEOUT`                  | `SUBAGENT_TURN_TIMEOUT_S`    | §3.6 / §5.8                                                                                                                                                       |
-| `SUBAGENT_MAX_CONCURRENT`                | `SUBAGENT_MAX_CONCURRENCY`   | §3.6 / §5.8                                                                                                                                                       |
-| `ASYNC_EXEC_TIMEOUT`                     | `ASYNC_EXEC_TIMEOUT_S`       | §3.6 / §5.9                                                                                                                                                       |
-| `ASYNC_EXEC_MAX_CONCURRENT`              | `ASYNC_EXEC_MAX_CONCURRENCY` | §3.6 / §5.9                                                                                                                                                       |
-| `EXEC_RETENTION_DAYS`                    | `ASYNC_EXEC_RETENTION_DAYS`  | §3.6 / §5.9                                                                                                                                                       |
-| `ATTACHMENT_MAX_SIZE`                    | `ATTACHMENT_MAX_SIZE_MB`     | RC (DB path `attachment.max_size` unchanged); the admin form field `/api/v1/configs/attachment` follows the new name; `/api/config` still exposes `file.max_size` |
-| `BYPASS_MODEL_ACCESS_CONTROL`            | _(removed)_                  | group ACL on models always applies                                                                                                                                |
-| `USE_CUDA_DOCKER`                        | _(removed)_                  | built-in whisper STT runs on `cpu`; the torch device probe is gone (§3.9)                                                                                         |
-| `ENABLE_OLLAMA_API`                      | (default `true` → `false`)   | §3.5                                                                                                                                                              |
+| Old                                                | New                          | Note                                                                                                                                                                                                                     |
+| -------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `JWT_EXPIRES_IN`                                   | `SESSION_IDLE_TIMEOUT`       | RC; DB path `auth.jwt_expiry` → `auth.session_idle_timeout` (an old DB value is not migrated — set the env or re-save in the admin UI)                                                                                   |
+| `CHAT_TOOL_EXECUTION_TIMEOUT`                      | `TOOL_EXEC_TIMEOUT_S`        | §3.6                                                                                                                                                                                                                     |
+| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`           | `TOOL_CALL_MAX_ITERATIONS`   | §3.6                                                                                                                                                                                                                     |
+| `SUBAGENT_TURN_TIMEOUT`                            | `SUBAGENT_TURN_TIMEOUT_S`    | §3.6 / §5.8                                                                                                                                                                                                              |
+| `SUBAGENT_MAX_CONCURRENT`                          | `SUBAGENT_MAX_CONCURRENCY`   | §3.6 / §5.8                                                                                                                                                                                                              |
+| `ASYNC_EXEC_TIMEOUT`                               | `ASYNC_EXEC_TIMEOUT_S`       | §3.6 / §5.9                                                                                                                                                                                                              |
+| `ASYNC_EXEC_MAX_CONCURRENT`                        | `ASYNC_EXEC_MAX_CONCURRENCY` | §3.6 / §5.9                                                                                                                                                                                                              |
+| `EXEC_RETENTION_DAYS`                              | `ASYNC_EXEC_RETENTION_DAYS`  | §3.6 / §5.9                                                                                                                                                                                                              |
+| `ATTACHMENT_MAX_SIZE`                              | `ATTACHMENT_MAX_SIZE_MB`     | RC (DB path `attachment.max_size` unchanged); the admin form field `/api/v1/configs/attachment` follows the new name; `/api/config` still exposes `file.max_size`                                                        |
+| `BYPASS_MODEL_ACCESS_CONTROL`                      | _(removed)_                  | group ACL on models always applies                                                                                                                                                                                       |
+| `USE_CUDA_DOCKER`                                  | _(removed)_                  | built-in whisper STT runs on `cpu`; the torch device probe is gone (§3.9)                                                                                                                                                |
+| `ENABLE_OLLAMA_API`                                | (default `true` → `false`)   | §3.5                                                                                                                                                                                                                     |
+| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS` | _(removed)_                  | admins can always export the DB / all chats and open any user's chat (a narrower admin needs a separate role, not a toggle); `/api/config` no longer exposes `features.enable_admin_export` / `enable_admin_chat_access` |
 
 `SANDBOX_URL` / `SANDBOX_TOKEN` / `SANDBOX_WRITE_FILE_LIMIT_BYTES` keep their names
 but are now read in `nucllei/env.py` like every other env (they used to be read
@@ -207,7 +213,7 @@ is read per request (edits apply without a restart):
 | Var                                                                                                                                                                                     | Kind | Default                 | Effect                                                                                                                                                                                                                                                                                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `WEBUI_AUTH`                                                                                                                                                                            | env  | `true`                  | `false` = single-user, no-auth mode                                                                                                                                                                                                                                                                              |
-| `WEBUI_SECRET_KEY`                                                                                                                                                                      | env  | auto-generated (see §2) | JWT signing key                                                                                                                                                                                                                                                                                                  |
+| `WEBUI_SECRET_KEY`                                                                                                                                                                      | env  | auto-generated (see §2) | JWT signing key. Required outside `ENV=dev` unless started via `serve` (§2)                                                                                                                                                                                                                                      |
 | `SESSION_IDLE_TIMEOUT`                                                                                                                                                                  | RC   | `-1` (none)             | **idle** timeout: log out after this long _without user input_ — the clock restarts on every keypress/click, so an in-use session never expires (see §4.1). `-1` / `0` = none; otherwise `<n>` + `s`,`m`,`h`,`d`,`w` (e.g. `30m`, `4h`, `1d`). Was `JWT_EXPIRES_IN` (DB path `auth.jwt_expiry`) until 2026-10-03 |
 | `ENABLE_SIGNUP`                                                                                                                                                                         | RC   | `true`                  | public signup (auto-disabled after the first user becomes admin)                                                                                                                                                                                                                                                 |
 | `ENABLE_LOGIN_FORM`                                                                                                                                                                     | RC   | `true`                  | email/password form (off for SSO-only)                                                                                                                                                                                                                                                                           |
@@ -219,7 +225,6 @@ is read per request (edits apply without a restart):
 | `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_SESSION_COOKIE_SECURE`                                                                                                                        | env  | `lax` / `false`         | session cookie flags                                                                                                                                                                                                                                                                                             |
 | `WEBUI_AUTH_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SECURE`                                                                                                                              | env  | = session values        | auth (`token`) cookie flags                                                                                                                                                                                                                                                                                      |
 | `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER`                                                                                                                    | env  | unset                   | header-based SSO behind a trusted proxy                                                                                                                                                                                                                                                                          |
-| `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS`                                                                                                                                      | env  | `true` / `true`         | admin DB export / admin access to user chats                                                                                                                                                                                                                                                                     |
 | `CACHE_CONTROL`, `HSTS`, `PERMISSIONS_POLICY`, `REFERRER_POLICY`, `XCONTENT_TYPE`, `XDOWNLOAD_OPTIONS`, `XFRAME_OPTIONS`, `XPERMITTED_CROSS_DOMAIN_POLICIES`, `CONTENT_SECURITY_POLICY` | env  | unset                   | each sets the corresponding response security header when present                                                                                                                                                                                                                                                |
 
 OAuth (Google / Microsoft / GitHub / generic OIDC via `GOOGLE_CLIENT_ID`&`_SECRET`,
@@ -772,8 +777,17 @@ shared terminal does not keep the user logged in. `GET /api/v1/auths/` does **no
 refresh the session (that would let a page reload extend it forever), and API-key
 requests are never extended — they carry their own credential. `/api/config`
 exposes the value as `session_idle_timeout` (seconds, `null` when unlimited) so the
-UI can send the user back to the login screen once it elapses. Default `-1` keeps
-sessions unlimited, unchanged from before.
+UI can send the user back to the login screen once it elapses. When the UI's own idle
+timer fires it first calls `GET /api/v1/auths/signout` and only then navigates to
+`/auth`, so a client-side expiry always ends the server-side session too (#137) —
+`/auth` can never bounce the next person back into the previous user's chats because
+a still-valid cookie happened to survive. `signout` needs no valid session (an expired
+or missing token still gets `200`) and clears the `token` cookie with the same
+`httponly` / `samesite` / `secure` attributes it was issued with. Sessions are
+stateless JWTs: "invalidating" one means removing the httpOnly cookie from the
+browser; a copy of the token taken out of the browser stays valid until its `exp`
+(= the idle deadline, re-stamped on activity). Default `-1` keeps sessions
+unlimited, unchanged from before.
 
 ### 4.2 Models
 

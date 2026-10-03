@@ -167,6 +167,29 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 回帰テスト: `nucllei/test/apps/webui/routers/test_session_idle_timeout.py`(BE)、
 `src/lib/apis/fetch.test.ts`(FE)。
 
+### アイドル失効時はサーバ側セッションも落とす(#137、2026-10-03)
+
+上の「keepalive を tick から出さない」は**不変条件**(`lastActivitySentAt <= lastInteractionAt`
+⇒ サーバ期限 ≤ FE 期限)で安全を保っていた。将来 keepalive の発火点に手が入ってテストを
+すり抜けると、「FE が `/auth` へ逃がしたのにサーバ側がまだ生きていて `/auth` がアプリへ戻す =
+共有 PC で前の人の画面が残る」が静かに復活する。それを**構成的に**塞いだ:
+
+- **FE**(`fetch.ts` `handleSessionExpired('idle')`): アイドルタイマで切ったときは、`/auth` へ
+  ハード遷移する**前に** `GET /api/v1/auths/signout` を叩く(`credentials: 'include'`、
+  `keepalive: true` = 遷移でページが消えても完走)。応答を待ってから遷移するが、
+  **上限 2 秒**(`IDLE_SIGNOUT_WAIT_MS`)・失敗時も必ず遷移する(ネットワーク断で画面が残る方が悪い)。
+  401/403 起因の失効(`'unauthorized'`、既定)ではサーバ側は既に死んでいるので叩かない。
+- **BE**(`routers/auths.py` `signout`): 認証依存を持たない(期限切れでも token 無しでも 200)。
+  `delete_cookie` の属性を発行箇所(signin / 延命 middleware)と同じ `httponly` / `samesite` /
+  `secure` にした — ずれていると secure/samesite の違いで消えない配備がある。
+- **設計の前提**: セッションは stateless JWT で、`exp` がそのままアイドル期限(操作で再発行)。
+  `exp` を過ぎた token はサーバが元々拒否する(`test_expired_token_is_rejected_not_renewed`)。
+  なので「サーバ側セッションを落とす」= ブラウザの httpOnly cookie を消すことで足り、
+  失効リスト(DB)は作らない。ブラウザの外へ持ち出した token は `exp` まで生きる —
+  これは #137 の対象外(共有 PC の離席 = ブラウザに残る cookie が問題)。
+- 回帰: BE `test_signout_needs_no_valid_session` / `test_signout_clears_the_cookie_with_matching_attributes`、
+  FE `fetch.test.ts` の「アイドル失効では /auth へ行く前に signout …」以下 4 件。
+
 ## 方針(fork.md より)
 
 - 認証(誰がログインできるか)と認可(group 権限)は分離して扱う。

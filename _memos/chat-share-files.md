@@ -36,7 +36,7 @@
   (storage raw + `data`/`meta` を新 file_id で複製、**cloner 所有・`access_control=None`(private)**)し、
   clone 側 chat JSON 内の file_id を差し替える。
 - clone した瞬間から元 file の生死・共有状態と無縁(共有解除・元 file 削除に耐える)。
-- **admin の `ENABLE_ADMIN_CHAT_ACCESS` 経路**(生 chat_id からの clone)も同じコピーを通す。
+- **admin の経路**(生 chat_id からの clone。admin は常に他人のチャットを開ける — 2026-10-03 にトグル撤去)も同じコピーを通す。
 - 自チャットの clone(`clone_chat_by_id`)は同一 owner の参照共有のままで可(コピー不要)。
 - 割り切り: 抽出中(status 未確定)の file はその時点の状態でコピーされ、後から元の抽出が
   完了しても追従しない(稀・許容)。

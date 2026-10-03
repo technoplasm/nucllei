@@ -32,29 +32,39 @@ def main(
     """Nucllei CLI."""
 
 
+def _load_secret_key() -> None:
+    """env に WEBUI_SECRET_KEY が無ければ `$DATA_DIR/.webui_secret_key` から入れる(無ければ生成)。
+
+    旧 start.sh の秘密鍵ロジック。**nucllei.env を import する前に呼ぶ** — env.py は
+    ENV=dev 以外で鍵が無いと起動を止める(固定鍵のフォールバックは dev 限定、2026-10-03)。
+    serve だけでなく、同じ DATA_DIR で動く CLI(create-admin)も同じ鍵で動くべきなので共通化。
+    """
+    if os.getenv("WEBUI_SECRET_KEY"):
+        return
+    typer.echo(
+        "Loading WEBUI_SECRET_KEY from file, not provided as an environment variable."
+    )
+    if not KEY_FILE.exists():
+        typer.echo(f"Generating a new secret key and saving it to {KEY_FILE}")
+        KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # **secrets を使う**。upstream は random.randbytes(12) を base64 して 16 文字を
+        # 書いていたが、random は Mersenne Twister で暗号用途の生成器ではない。
+        # 長さも 12 バイト = 96 bit で、HS256 が要求する鍵長 (RFC 7518 3.2: ハッシュ出力
+        # と同じ 32 バイト以上) を下回る — PyJWT 2.13 が InsecureKeyLengthWarning で
+        # 指すのがこれ。JWT の署名鍵はセッション偽造の可否そのものなので強い方に倒す。
+        # 既存の配備は鍵ファイルを持っているのでこの変更の影響を受けない
+        # (作り直すと全ユーザのセッションが失効する。回すのは意図した時だけ)
+        KEY_FILE.write_text(secrets.token_urlsafe(32))
+    typer.echo(f"Loading WEBUI_SECRET_KEY from {KEY_FILE}")
+    os.environ["WEBUI_SECRET_KEY"] = KEY_FILE.read_text()
+
+
 @app.command()
 def serve(
     host: str = "0.0.0.0",
     port: int = 8080,
 ):
-    # 旧 start.sh の秘密鍵ロジックを引き継ぐ(env 未指定/空なら生成して永続化)
-    if not os.getenv("WEBUI_SECRET_KEY"):
-        typer.echo(
-            "Loading WEBUI_SECRET_KEY from file, not provided as an environment variable."
-        )
-        if not KEY_FILE.exists():
-            typer.echo(f"Generating a new secret key and saving it to {KEY_FILE}")
-            KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            # **secrets を使う**。upstream は random.randbytes(12) を base64 して 16 文字を
-            # 書いていたが、random は Mersenne Twister で暗号用途の生成器ではない。
-            # 長さも 12 バイト = 96 bit で、HS256 が要求する鍵長 (RFC 7518 3.2: ハッシュ出力
-            # と同じ 32 バイト以上) を下回る — PyJWT 2.13 が InsecureKeyLengthWarning で
-            # 指すのがこれ。JWT の署名鍵はセッション偽造の可否そのものなので強い方に倒す。
-            # 既存の配備は鍵ファイルを持っているのでこの変更の影響を受けない
-            # (作り直すと全ユーザのセッションが失効する。回すのは意図した時だけ)
-            KEY_FILE.write_text(secrets.token_urlsafe(32))
-        typer.echo(f"Loading WEBUI_SECRET_KEY from {KEY_FILE}")
-        os.environ["WEBUI_SECRET_KEY"] = KEY_FILE.read_text()
+    _load_secret_key()
 
     import nucllei.main  # we need set environment variables before importing main
     from nucllei.env import UVICORN_WORKERS  # Import the workers setting
@@ -105,6 +115,8 @@ def create_admin(
 
     # import 時に alembic(config.run_migrations)マイグレーションが走り、
     # 新規 DB でもスキーマが用意される。重い import は関数内に閉じる(serve と同じ流儀)。
+    # 鍵は serve と同じファイルから(ENV=prod のコンテナ内で docker exec しても落ちないように)
+    _load_secret_key()
     import nucllei.config  # noqa: F401
     from nucllei.models.auths import Auths
     from nucllei.models.users import Users

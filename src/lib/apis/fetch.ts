@@ -15,6 +15,8 @@
  * アイドルタイムアウト(共有 PC の離席対策、_memos/auth-profile.md):
  *   `SESSION_IDLE_TIMEOUT` は「発行からの絶対期限」ではなく「無操作でこの時間が経ったら切れる」。
  *   その判定に要る「人の操作があったか」をここ(全 API が通る唯一の口)で持つ。
+ *   - FE タイマで切ったときは、`/auth` へ遷移する前に signout を叩いてサーバ側セッションも
+ *     落とす(#137)。失効の判断が FE 側で起きた以上、サーバ側を道連れにするのは FE の責任。
  *   - 送信側: 最後の延命以降に操作があったリクエストにだけ ACTIVITY_HEADER を付ける。
  *     チャット画面の 5 秒ポーリングのような機械的なリクエストには付かないので、
  *     タブを開いたまま離席しても延命されない(将来ポーリングが増えても安全側)。
@@ -105,7 +107,41 @@ const withActivityHeader = (
 	return { ...(init ?? {}), headers };
 };
 
-const handleSessionExpired = () => {
+// アイドル失効時の signout を待つ上限。ネットワーク断で画面が残る方が悪いので、
+// これを過ぎたら応答を待たずに遷移する(リクエスト自体は keepalive で生き残る)。
+const IDLE_SIGNOUT_WAIT_MS = 2000;
+
+/**
+ * サーバ側セッションを落とす(#137)。cookie は httpOnly なので FE からは消せない —
+ * `GET /auths/signout`(認証不要)に消してもらう。失敗・遅延しても必ず戻る。
+ */
+const revokeSession = async () => {
+	await Promise.race([
+		fetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
+			method: 'GET',
+			headers: { Accept: 'application/json' },
+			credentials: 'include',
+			// 直後にハード遷移するので、ページが消えてもリクエストは完走させる
+			keepalive: true
+		}).catch(() => {
+			// 不達でも遷移はする
+		}),
+		new Promise<void>((resolve) => setTimeout(resolve, IDLE_SIGNOUT_WAIT_MS))
+	]);
+};
+
+/**
+ * セッション失効の後始末(フラグ + `/auth` へのハード遷移)。
+ *
+ * `reason`:
+ *   - `'unauthorized'`: サーバが 401/403 を返した = サーバ側は既に死んでいる。即遷移。
+ *   - `'idle'`: FE のアイドルタイマが切った(#137)。**遷移の前に signout を叩いて
+ *     サーバ側セッションも落とす**。こうしておけば「FE が失効と判断した ⇒ サーバでも
+ *     失効している」が構成的に真になり、`/auth` が生きているセッションを見てアプリへ
+ *     戻す(共有 PC で前の人の画面が残る)ことが keepalive の発火タイミングの不変条件に
+ *     依存しなくなる。
+ */
+const handleSessionExpired = (reason: 'unauthorized' | 'idle' = 'unauthorized') => {
 	if (sessionExpired) {
 		return;
 	}
@@ -117,9 +153,17 @@ const handleSessionExpired = () => {
 		// sessionStorage 不能でも遷移はする(toast が出ないだけ)
 	}
 
-	const currentUrl = `${location.pathname}${location.search}`;
-	// ハード遷移でアプリ状態(モジュール状態含む)をリセットする
-	location.href = `/auth?redirect=${encodeURIComponent(currentUrl)}`;
+	const redirect = () => {
+		const currentUrl = `${location.pathname}${location.search}`;
+		// ハード遷移でアプリ状態(モジュール状態含む)をリセットする
+		location.href = `/auth?redirect=${encodeURIComponent(currentUrl)}`;
+	};
+
+	if (reason === 'idle') {
+		void revokeSession().then(redirect, redirect);
+		return;
+	}
+	redirect();
 };
 
 const verifySession = () => {
@@ -265,7 +309,7 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 		}
 		if (Date.now() - lastInteractionAt >= timeoutSeconds * 1000) {
 			stopIdleWatch();
-			handleSessionExpired();
+			handleSessionExpired('idle');
 		}
 	};
 
