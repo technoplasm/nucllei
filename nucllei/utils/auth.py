@@ -208,18 +208,23 @@ def get_current_user(
     auth_token: HTTPAuthorizationCredentials = Depends(bearer_security),
 ):
     token = None
+    from_cookie = False
 
     if auth_token is not None:
         token = auth_token.credentials
 
     if token is None and "token" in request.cookies:
         token = request.cookies.get("token")
+        from_cookie = True
 
     if token is None:
         raise HTTPException(status_code=403, detail="Not authenticated")
 
     # auth by api key
-    if token.startswith("sk-"):
+    # llens(#144): API キーは `Authorization: Bearer sk-…` 専用。cookie `token` は
+    # 人の JWT セッション専用なので、cookie に入った `sk-` は API キーとして扱わず
+    # 下の JWT 検証に落とす(decode できない = 不正 token と同じ 401)。
+    if token.startswith("sk-") and not from_cookie:
         if not request.state.enable_api_key:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED

@@ -568,10 +568,14 @@ async def check_url(request: Request, call_next):
     request.state.token = get_http_authorization_cred(
         request.headers.get("Authorization")
     )
-    if request.state.token is None and "token" in request.cookies:
-        request.state.token = get_http_authorization_cred(
-            f"Bearer {request.cookies.get('token')}"
-        )
+    # #144: cookie は JWT セッション専用 — `sk-`(API キー)は cookie からは採らない。
+    cookie_token = request.cookies.get("token")
+    if (
+        request.state.token is None
+        and cookie_token
+        and not cookie_token.startswith("sk-")
+    ):
+        request.state.token = get_http_authorization_cred(f"Bearer {cookie_token}")
 
     request.state.enable_api_key = app.state.config.ENABLE_API_KEY
     response = await call_next(request)
@@ -1020,6 +1024,8 @@ async def list_tasks_by_chat_id_endpoint(chat_id: str, user=Depends(get_verified
 async def get_app_config(request: Request):
     user = None
     if "token" in request.cookies:
+        # cookie は JWT セッション専用(#144)。`sk-` は decode_token が None を返す
+        # = 未ログイン扱いで、API キーとしては解釈しない。
         token = request.cookies.get("token")
         try:
             data = decode_token(token)

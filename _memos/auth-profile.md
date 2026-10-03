@@ -190,6 +190,20 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 - 回帰: BE `test_signout_needs_no_valid_session` / `test_signout_clears_the_cookie_with_matching_attributes`、
   FE `fetch.test.ts` の「アイドル失効では /auth へ行く前に signout …」以下 4 件。
 
+### cookie はセッション専用、API キーはヘッダ専用(#144、2026-10-04)
+
+旧実装(upstream 由来)は `Authorization` が無いとき cookie `token` を拾い、`sk-` 始まりなら
+API キーとして認証していた — 人の cookie セッション(httpOnly・アイドル延命の対象)と
+API キーが 1 つの cookie 名に同居していた。使う側は無い(FE は JWT を cookie に、
+llens の sync は `Authorization` ヘッダ)ので経路を分けた:
+
+- `get_current_user`(`utils/auth.py`): cookie 由来の `sk-` は API キー分岐に入れず JWT 検証へ落とす
+  = 不正 token と同じ 401。API キーは `Authorization: Bearer sk-…` のみ。
+- `main.py` の middleware: cookie の `sk-` は `request.state.token`(tool server への転送等)に載せない。
+  `/api/config` は元々 JWT として decode するだけなので `sk-` は未ログイン扱い(変更なし)。
+- アイドル延命(cookie セッション限定)は無変更。
+- 回帰: `nucllei/test/apps/webui/routers/test_auth_token_channels.py`。
+
 ## 方針(fork.md より)
 
 - 認証(誰がログインできるか)と認可(group 権限)は分離して扱う。
