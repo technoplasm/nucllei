@@ -21,7 +21,9 @@ private repo 前提で dev 用の資格情報も書く(本番の秘密は無い)
   (**`pnpm test:frontend` は `vitest`(`run` 無し)なのでローカルでは watch モードに入り、
   `.venv` まで監視して inotify 上限 ENOSPC で落ちる** — 2026-08-05 実害。CI は `CI=true` で
   自動的に単発実行になるため顕在化しない。ローカルで CI と同条件にするなら
-  `CI=true pnpm test:frontend`)。**runes(`$state`/`$effect`)を使うテストは
+  `CI=true pnpm test:frontend`)。vite の dev サーバも同じ罠を踏む: `data/uploads` の録音
+  (mp4/webm)を watch して ENOSPC で落ちた(2026-10-03、c8a5e677f で `vite.config.ts` の
+  `server.watch.ignored` に `**/data/**` を追加。`.venv` / `_links` / `,*` と同列)。**runes(`$state`/`$effect`)を使うテストは
   `*.svelte.test.ts` 命名**でないとコンパイルされず、`*.test.svelte.ts` だと vitest の
   include(`*.test.ts`)に拾われない。フォーマットは prettier
   (CI に format チェックあり。`fixture` / `_memos/` / `.claude/` は `.prettierignore` 対象外なので触らない。
@@ -464,6 +466,24 @@ LLENS_STT_SMOKE=1 uv run pytest \
   ※ 2026-07-16 改訂(0d69f2da4): tag 形式はリリース `vYYYYMMDD-NN` に変更
   (`prodYYYYMMDD_NN` 案は採らない。現行の真実源は上記「dev サーバ」節の**バージョン**項)。
 - GitHub 操作は `gh` CLI(issue 単位で作業、コミットに `refs #N`)。
+- **CI は最小限・試し用 image はローカルで焼く**(ken 指示 2026-10-03: 「余計な tag を CI で出すのは
+  禁止」「CI 連打すると CI 時間が無くなる」「ghcr を経由しないで」)。GitHub Actions の枠が有限なので:
+  - push は作業をまとめて 1 回。lint / テストは push 前にローカルで全部通す
+    (`uv run black nucllei/` / `uv run ruff check nucllei/` / `uv run pytest nucllei/test` /
+    `pnpm format` / `pnpm check` / `pnpm exec vitest run`)。
+  - リリース tag(`vYYYYMMDD-NN`、`uv run task release`)は ken が明示したときだけ。試しに切って
+    後で消す、はしない(v20261003-01 の件)。`gh workflow run docker-build.yaml`(`:dev`)も連打しない。
+  - **staging(llens)への受け渡しはローカルビルド**: このマシン(prism-gpu)が staging ホストそのもの
+    で docker daemon も同じなので、`docker build --build-arg APP_VERSION=dev-<sha7> -t
+    ghcr.io/technoplasm/nucllei:dev-<sha7> .` で焼けばそのまま `docker images` に出る。llens 側は
+    `.env` の `NUCLLEI_TAG=dev-<sha7>` にして `docker compose up -d nucllei`。sandbox に変更が無ければ
+    `docker tag …nucllei-sandbox:<前の tag> …nucllei-sandbox:dev-<sha7>` で揃える。ghcr には push しない。
+  - 罠: このマシンの docker CLI には buildx が無く、Dockerfile の `--platform=$BUILDPLATFORM` が
+    素の builder で通らない。`~/.docker/cli-plugins/docker-buildx`(GitHub release のバイナリ、
+    ユーザー領域のみ)を入れてある(2026-10-03)。
+  - 罠: image の Python は 3.11、手元の venv と CI は 3.12。3.12 で通って 3.11 で落ちる書き方
+    (dataclass の既定値に mappingproxy 等)があるので、焼いた image で
+    `docker run --rm --entrypoint python <image> -c "import nucllei.builtin_tools"` を一度通す。
 - 外部ネットワーク必須の機能・依存を増やさない(air-gapped 配備もあるため)。閉域を理由にオプショナルな外部連携は切らない。
 
 ## wire v2 以後の dev 知見(2026-07-17)
