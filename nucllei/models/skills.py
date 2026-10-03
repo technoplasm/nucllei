@@ -159,7 +159,7 @@ class SkillsTable:
         with get_db() as db:
             skills = []
 
-            for skill in db.query(Skill).order_by(Skill.updated_at.desc()).all():
+            for skill in db.query(Skill).order_by(Skill.id).all():
                 user = Users.get_user_by_id(skill.user_id)
                 skills.append(
                     SkillUserResponse.model_validate(

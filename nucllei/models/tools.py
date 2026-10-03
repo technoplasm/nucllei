@@ -154,7 +154,7 @@ class ToolsTable:
     def get_tools(self) -> list[ToolUserModel]:
         with get_db() as db:
             tools = []
-            for tool in db.query(Tool).order_by(Tool.updated_at.desc()).all():
+            for tool in db.query(Tool).order_by(Tool.id).all():
                 user = Users.get_user_by_id(tool.user_id)
                 tools.append(
                     ToolUserModel.model_validate(

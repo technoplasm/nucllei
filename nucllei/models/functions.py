@@ -117,14 +117,17 @@ class FunctionsTable:
         with get_db() as db:
             return [
                 FunctionModel.model_validate(function)
-                for function in db.query(Function).all()
+                for function in db.query(Function).order_by(Function.id).all()
             ]
 
     def get_functions_by_type(self, type: str) -> list[FunctionModel]:
         with get_db() as db:
             return [
                 FunctionModel.model_validate(function)
-                for function in db.query(Function).filter_by(type=type).all()
+                for function in db.query(Function)
+                .filter_by(type=type)
+                .order_by(Function.id)
+                .all()
             ]
 
     def get_function_valves_by_id(self, id: str) -> Optional[dict]:
