@@ -483,7 +483,7 @@ def test_unavailable_tool_call_returns_explicit_message(monkeypatch):
         m for m in completion_calls[0]["messages"] if m.get("role") == "tool"
     ]
     assert len(tool_messages) == 1
-    assert "tool not available: get_weather" in tool_messages[0]["content"]
+    assert "ツール get_weather は今は使えない" in tool_messages[0]["content"]
 
 
 ####################################

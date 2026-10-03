@@ -100,7 +100,7 @@ class Tools:
         # (README_API §5.1)
         user_id = (__user__ or {}).get("id")
         if not user_id:
-            return {"ok": False, "error": "ユーザー文脈が無い(__user__ 未注入)。"}
+            return {"ok": False, "error": "ユーザー文脈が無い。"}
 
         rec = Files.get_file_by_id(file_id)
         # 所有者チェックは fail-closed(owner が falsy でも拒否 — IDOR 同型の穴を
@@ -137,7 +137,10 @@ class Tools:
             offset = max(0, int(offset))
             max_chars = int(max_chars)
         except (TypeError, ValueError):
-            return {"ok": False, "error": "offset / max_chars は整数で渡すこと。"}
+            return {
+                "ok": False,
+                "error": "offset / max_chars が整数でない。次の手: 整数で渡す。",
+            }
         max_chars = max(1, min(max_chars, MAX_MAX_CHARS))
 
         total = len(content)

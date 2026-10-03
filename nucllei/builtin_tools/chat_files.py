@@ -44,7 +44,7 @@ def _human_size(n: Optional[int]) -> Optional[str]:
 def _require_user_id(__user__: Optional[dict]) -> str:
     user_id = (__user__ or {}).get("id")
     if not user_id:
-        raise ValueError("添付一覧ツールはユーザー文脈が必要です(__user__ 未注入)")
+        raise ValueError("ユーザーを特定できないので添付ファイルは一覧できない。")
     return user_id
 
 
@@ -82,12 +82,12 @@ class Tools:
         user_id = _require_user_id(__user__)
         chat_id = __chat_id__ or (__metadata__ or {}).get("chat_id")
         if not chat_id:
-            return "現在のチャットを特定できません(チャット文脈でのみ使えます)。", []
+            return "現在のチャットを特定できない (チャットの中でだけ使える)。", []
 
         # owner-only: 他ユーザーの chat は「見つからない」扱い(history と同じ)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
-            return "チャットが見つかりません(自分のチャットのみ一覧できます)。", []
+            return "チャットが見つからない (一覧できるのは自分のチャットだけ)。", []
 
         ids = list(dict.fromkeys(_iter_chat_file_ids(chat.chat or {})))
         if not ids:
@@ -159,7 +159,7 @@ class Tools:
         if err:
             return err
         if not items:
-            return "このチャットに添付ファイルはありません。"
+            return "このチャットに添付ファイルは無い。"
         return self._render(items, limit)
 
     def grep_chat_files(
@@ -176,10 +176,10 @@ class Tools:
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
         """
         if not (query or "").strip():
-            return "検索文字列を指定してください。"
+            return "ERROR: 検索文字列が空。次の手: query に検索文字列を入れて呼び直す。"
         err, items = self._collect(__user__, __chat_id__, __metadata__, query)
         if err:
             return err
         if not items:
-            return f"「{query}」に一致する添付ファイルは見つかりませんでした。"
+            return f"「{query}」に一致する添付ファイルは見つからなかった。"
         return self._render(items, limit)

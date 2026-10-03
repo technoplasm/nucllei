@@ -452,7 +452,15 @@ class TestAsyncExec(AbstractPostgresTest):
         results = asyncio.run(
             execute_tool_calls([self._call({})], tools, metadata=self._metadata())
         )
-        assert len(results[0]["content"]) == 40
+        # 黙って切らない: 先頭 40 字の後ろに事実 + 次の手の印が付く
+        content = results[0]["content"]
+        assert (
+            content[:40] == json.dumps({"answer": "あ" * 100}, ensure_ascii=False)[:40]
+        )
+        assert content[40:] == self.executions.truncation_marker(
+            results[0]["original_chars"]
+        )
+        assert "ここで切れている" in content and "次の手:" in content
         assert results[0]["truncated"] is True
         assert results[0]["original_chars"] > 40
         # 切詰めで JSON が壊れるため render(kind=json)は落ちる(text 降格)
@@ -560,7 +568,10 @@ class TestAsyncExec(AbstractPostgresTest):
         task_id = asyncio.run(main())
         row = self.Executions.get_execution_by_id(task_id)
         assert row.status == "done"
-        assert len(row.result) == 40
+        # background の保存時も同じ印(配達 notice / await_task は透過中継)
+        assert row.result[40:] == self.executions.truncation_marker(
+            row.meta["original_chars"]
+        )
         assert row.meta["truncated"] is True
         assert row.meta["original_chars"] > 40
         # 切詰めで JSON が壊れるため render / descriptor は降格・破棄
@@ -581,7 +592,7 @@ class TestAsyncExec(AbstractPostgresTest):
         self.executions._active_execs_by_user["1"] = 1
         error = json.loads(asyncio.run(self._spawn(probe)))
         assert error["ok"] is False
-        assert "ユーザー上限" in error["error"]
+        assert "ユーザーごとの上限" in error["error"]
         # 超過エラーは席を消費しない・行も作らない
         assert self.executions._active_execs_by_user == {"1": 1}
         assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
@@ -591,7 +602,7 @@ class TestAsyncExec(AbstractPostgresTest):
         self.executions._active_execs_by_user["other"] = 1
         error = json.loads(asyncio.run(self._spawn(probe)))
         assert error["ok"] is False
-        assert "サーバー上限" in error["error"]
+        assert "サーバー全体の上限" in error["error"]
 
     def test_spawn_is_disabled_for_multi_worker_deployments(self, monkeypatch):
         """D7: registry はプロセス内 — multi-worker では liveness 判定が壊れる。"""
@@ -703,7 +714,7 @@ class TestAsyncExec(AbstractPostgresTest):
 
         # 空のとき: note で明示
         out = asyncio.run(check())
-        assert out == {"tasks": [], "total": 0, "note": "実行中のタスクはありません"}
+        assert out == {"tasks": [], "total": 0, "note": "実行中のタスクは無い"}
 
         self._insert("old-running")
         self._age("old-running", 100)
@@ -784,7 +795,7 @@ class TestAsyncExec(AbstractPostgresTest):
         # 不正 / 他人 / 他 chat は per-entry error(存在を漏らさない同一文言)
         for entry in out["tasks"][1:]:
             assert set(entry) == {"task_id", "error"}
-            assert "task_id が不正です" in entry["error"]
+            assert "task_id が不正" in entry["error"]
 
         # 単一 string も受ける(coerce)
         out = asyncio.run(check(task_ids="mine"))
@@ -835,7 +846,7 @@ class TestAsyncExec(AbstractPostgresTest):
             )
         )
         assert result["ok"] is False
-        assert "有効な task_id がありません" in result["error"]
+        assert "有効な task_id が無い" in result["error"]
 
     def test_await_task_mixes_results_with_per_entry_errors(self):
         await_task = self._exec_tools()["await_task"]["callable"]
@@ -846,7 +857,7 @@ class TestAsyncExec(AbstractPostgresTest):
         assert [t["task_id"] for t in out["tasks"]] == ["mine", "no-such"]
         assert out["tasks"][0]["ok"] is True
         assert out["tasks"][0]["result"] == "回答"
-        assert "task_id が不正です" in out["tasks"][1]["error"]
+        assert "task_id が不正" in out["tasks"][1]["error"]
 
     def test_await_task_returns_running_form_on_timeout_without_killing_exec(
         self, monkeypatch
@@ -949,7 +960,7 @@ class TestAsyncExec(AbstractPostgresTest):
         assert self.Executions.finish_execution(
             "orphaned-1",
             status="orphaned",
-            error=self.executions.ORPHANED_ON_BOOT_ERROR,
+            error=self.executions.ORPHANED_ERROR,
         )
 
         ids = ["failed-1", "stopped-1", "orphaned-1"]
@@ -976,7 +987,7 @@ class TestAsyncExec(AbstractPostgresTest):
         assert isinstance(out, dict)  # 全体エラー文字列(_error)ではない
         assert len(out["tasks"]) == 21
         for entry in out["tasks"][:20]:
-            assert "task_id が不正です" in entry["error"]
+            assert "task_id が不正" in entry["error"]
         assert "20 件まで" in out["tasks"][20]["error"]
         # over の有効 id は今回処理されていない(次の呼び出しで回収できる)
         assert self._delivered_at("valid-21") is None
@@ -1135,7 +1146,7 @@ class TestAsyncExec(AbstractPostgresTest):
         entry = out["tasks"][0]
         assert entry["ok"] is False
         assert entry["status"] == "orphaned"
-        assert entry["error"] == self.executions.ORPHANED_ON_PROBE_ERROR
+        assert entry["error"] == self.executions.ORPHANED_ERROR
         assert self.Executions.get_execution_by_id("e1").status == "orphaned"
         assert self._delivered_at("e1") is not None
 
@@ -1258,7 +1269,7 @@ class TestAsyncExec(AbstractPostgresTest):
             "status": "done",  # 終了済みに撃っても現状を返すだけ(冪等)
         }
         for entry in out["tasks"][1:]:
-            assert "task_id が不正です" in entry["error"]
+            assert "task_id が不正" in entry["error"]
         # done のまま(stop で上書きしない)+ 報告済みなので delivered
         row = self.Executions.get_execution_by_id("done-1")
         assert row.status == "done"

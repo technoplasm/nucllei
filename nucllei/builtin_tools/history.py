@@ -79,7 +79,7 @@ def _fmt_time(epoch: Optional[int]) -> str:
 def _require_user_id(__user__: Optional[dict]) -> str:
     user_id = (__user__ or {}).get("id")
     if not user_id:
-        raise ValueError("履歴ツールはユーザー文脈が必要です(__user__ 未注入)")
+        raise ValueError("ユーザーを特定できないので履歴は読めない。")
     return user_id
 
 
@@ -106,7 +106,7 @@ class Tools:
             for c in chats
         ]
         if not items:
-            return "チャット履歴はまだありません。"
+            return "チャット履歴はまだ無い。"
         # list を素直に返す(自前で直列化しない)。#99 で本体が ensure_ascii=False で
         # 直列化するようになり、実型から render {kind:"json"} も付く。str を返すと
         # text 描画に落ちて JSON ハイライトが消える。
@@ -126,7 +126,10 @@ class Tools:
         # owner-only: 他ユーザーの chat_id は「見つからない」扱い(所有者検証を漏らさない)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
-            return "指定のチャットが見つかりません(自分のチャットのみ読み出せます)。"
+            return (
+                "指定のチャットは見つからない (読めるのは自分のチャットだけ)。"
+                "次の手: list_history / grep_history で得た chat_id を渡す。"
+            )
 
         history = chat.chat.get("history", {})
         messages_map = history.get("messages", {})
@@ -137,7 +140,7 @@ class Tools:
             message_list = get_message_list(messages_map, current_id)
 
         if not message_list:
-            return f"「{chat.title}」には読み出せるメッセージがありません。"
+            return f"「{chat.title}」には読み出せるメッセージが無い。"
 
         body = get_messages_content(message_list)
         return f"# {chat.title}\n\n{body}"
@@ -161,7 +164,7 @@ class Tools:
         limit = max(1, min(limit, MAX_LIMIT))
 
         if not (query or "").strip():
-            return "検索文字列を指定してください。"
+            return "ERROR: 検索文字列が空。次の手: query に検索文字列を入れて呼び直す。"
 
         # 進行中のチャット (__chat_id__) は除く — 「『X』で検索して」という発言自身が X にヒットする
         # (ken 2026-10-03)。除いた分だけ 1 件多く取っておく
@@ -185,5 +188,5 @@ class Tools:
                 }
             )
         if not items:
-            return f"「{query}」に一致するチャットは見つかりませんでした。"
+            return f"「{query}」に一致するチャットは見つからなかった。"
         return items

@@ -48,7 +48,11 @@ from nucllei.models.chats import Chats
 from nucllei.models.executions import ExecutionModel, Executions
 from nucllei.models.users import Users
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
-from nucllei.utils.executions import async_exec_available
+from nucllei.utils.executions import (
+    ORPHANED_ERROR,
+    STOPPED_ERROR,
+    async_exec_available,
+)
 from nucllei.utils.image_refs import split_page, stored_ref_kind
 from nucllei.utils.task import prompt_template, resolve_base_model_id
 
@@ -68,9 +72,12 @@ TURN_RETRY_INITIAL_BACKOFF_S = 2.0
 TURN_RETRY_MAX_BACKOFF_S = 300.0
 
 # notice ヘッダ(契約 M4 — 機械可読な固定書式。テストで固定)
+# モデルが回答へ写しうる文面なので命令形・markdown 見出しを持たない(2026-10-04 監査)
 NOTICE_HEADER = (
-    "[task] バックグラウンドタスクの結果通知。この通知に結果が含まれる —\n"
-    "再取得のための await_task は不要。結果を踏まえて続行せよ。"
+    "[task] バックグラウンドタスクの完了通知 (システムからの自動通知。"
+    "ユーザーの発言ではない)。結果は下にある — await_task で取り直さなくてよい。"
+    "成果物の画像・ファイルはまだ表示されていないので、見せるなら本文にリンクを書く。"
+    "この通知の書式は回答に写さない。"
 )
 
 # meta.system_notice の値(FE 描画・連鎖カウントの唯一の根拠 — B-4 根治)
@@ -237,7 +244,7 @@ def _fenced(text: str) -> str:
 
 
 def _notice_section(row: ExecutionModel, media: Optional[tuple[list, list]]) -> str:
-    lines = [f"## task_id: {row.id}({row.tool_name})"]
+    lines = [f"task_id: {row.id} ({row.tool_name})"]
     if row.status == "done":
         if row.duration is not None:
             lines.append(f"status: done(duration: {row.duration}s)")
@@ -249,12 +256,11 @@ def _notice_section(row: ExecutionModel, media: Optional[tuple[list, list]]) -> 
         lines.append("status: failed")
         lines.append(f"error: {row.error or ''}")
     elif row.status == "stopped":
-        lines.append("status: stopped(ユーザー操作または stop_task による)")
+        lines.append("status: stopped")
+        lines.append(f"note: {STOPPED_ERROR}")
     else:  # orphaned
-        lines.append(
-            "status: orphaned(サーバー再起動により結果は失われた。"
-            "再実行の可否はタスクの性質による)"
-        )
+        lines.append("status: orphaned")
+        lines.append(f"note: {ORPHANED_ERROR}")
 
     displays = media[1] if media else []
     if displays:

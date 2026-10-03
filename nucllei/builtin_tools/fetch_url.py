@@ -46,8 +46,8 @@ SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配
   後にページ自身の URL (`route_of_url(u).page_url`) でリンクを解決するだけ。
 
 戻り値の URL は 1 本:
-  リンク一覧も `# url` 行も、次の fetch_url / feed_image / send_to_workspace(url=) に
-  そのまま渡せ、職員にもそのまま案内できる URL にする — ページ内リンクは `/ext/…` のページでも
+  リンク一覧も `url:` 行も、次の fetch_url / feed_image / send_to_workspace(url=) に
+  そのまま渡せ、ユーザーにもリンクで示せる URL にする — ページ内リンクは `/ext/…` のページでも
   一般の URL でも**そのページ自身の URL 基準の urljoin** (通常の Web と同じ。`/ext/…` の相対
   入力なら相対 `/ext/…` のまま、絶対なら `{origin}/ext/…`)。基準 URL は resolver の
   `route_of_url` から引く — tool 側に valve を持たない (2026-09-07 レビュー: valve を管理
@@ -93,10 +93,12 @@ from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
 from nucllei.utils.ref_errors import (
+    NEXT,
     RefErrorHints,
     explain_ref_error,
     file_id_error,
     mb,
+    show_as_link,
 )
 from nucllei.utils.tool_render import Text
 
@@ -150,11 +152,12 @@ def _decode(raw: bytes, content_type: str) -> str:
     return raw.decode(_charset_of(content_type), errors="replace")
 
 
+# モデルに返す文は「事実の文 + `次の手:` 以降」(`utils/ref_errors` の module docstring)。
+# 別の toolkit の tool (feed_image / send_to_workspace / run_subagent / read_attachment) は
+# 載っていないことがあるので「〜が使えるなら」と条件付きで書く。
+
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
-_ERR_UNEXPLAINED = (
-    "を取得できない (上流不達・不在・redirect・サイズ超過のいずれか。"
-    "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと)。"
-)
+_ERR_UNEXPLAINED = "を取得できない (届かない・存在しない・redirect を辿れない・大きすぎる のいずれか)。"
 
 
 def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
@@ -172,7 +175,7 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
     size, limit = err.size, err.limit
     mib = 1024 * 1024
     limit_txt = f" {mb(limit)}" if limit is not None else ""
-    hand_over = "中身が要らなければ URL をそのまま案内する (ブラウザでは開ける)。"
+    hand_over = "中身が要らなければ、" + show_as_link(u)
     size_known = size is not None and err.size_exact is True
     if size_known:
         # 実サイズが確定している (size_exact=True)。
@@ -181,7 +184,8 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
             return (
                 f"ERROR: {u} は {mb(size)} で、取得の上限{limit_txt} を超えている。"
                 f"この tool の最大 {ceiling_mb:.1f} MB も超えるので中身は読めない。"
-                "ユーザーには URL をそのまま案内する (ブラウザでは開ける)。"
+                + NEXT
+                + show_as_link(u)
             )
         # X を超える整数 MB を具体値で示す (31.1 MB → 32)。
         suggest = str(int(size // mib) + 1)
@@ -206,11 +210,11 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
         suggest, more = "<X を超える値>", ""
         what = f"{u} は取得の上限を超えている (実サイズは不明)。"
     return (
-        f"ERROR: {what}主 context では読まず、run_subagent に URL と指示を渡し、"
+        f"ERROR: {what}{NEXT}この会話では読まない。run_subagent が使えるなら URL と指示を渡し、"
         f'子が fetch_url(url="{u}", max_mb={suggest}) で読む (子は offset で続きを取れる)。'
         f"{more}"
-        "pandas 等で加工・集計したいだけなら send_to_workspace(url=…) で sandbox に取り込む "
-        "(読むためのテキスト化には使わない)。"
+        "pandas 等で加工・集計したいだけなら、send_to_workspace が使えるなら"
+        " send_to_workspace(url=…) で sandbox に取り込む (読むためのテキスト化には使わない)。"
         f"{hand_over}"
     )
 
@@ -317,7 +321,7 @@ class Tools:
             description="1 ページの取得サイズ上限 (MB) の既定。resolver に max_bytes として渡す (文書を"
             "読む用途なので、画像 inline 用の既定上限は借りない)。既定は控えめ (大きいと主 context が"
             "頓死する)。上限を超えるものは中身を読まず、run_subagent + 引数 max_mb で読むか URL を"
-            "案内するだけになる",
+            "リンクで示すだけになる",
         )
         max_fetch_mb_ceiling: float = Field(
             default=200.0,
@@ -355,7 +359,8 @@ class Tools:
         大きいページは query で該当行に絞る (続きは offset)。
 
         戻り値はヘッダ (url / 種別 / 分量) + 本文 + リンク一覧。
-        失敗時は "ERROR: ..." で始まる文 — 何が起きたかと次の一手。
+        失敗時は "ERROR: ..." で始まる文 — 何が起きたか (事実) と、「次の手:」以降に自分が次に
+        すること (ユーザーには伝えない)。
 
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値などに出た URL の literal をそのまま)。
         :param query: (任意) 指定すると、本文行・リンク行のうちこの語を含む行だけを返す。
@@ -366,7 +371,7 @@ class Tools:
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
         # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
 
         u = (url or "").strip()
 
@@ -409,13 +414,15 @@ class Tools:
                 return (
                     f"ERROR: {u} は {mb(len(loaded.data))} で大きすぎる "
                     f"(この呼び出しの上限 {cap_mb:.1f} MB)。中身は読めない。"
-                    "ユーザーには URL をそのまま案内する (ブラウザでは開ける)。"
+                    + NEXT
+                    + show_as_link(u)
                 )
             content_type = loaded.content_type or ""
             raw = loaded.data
-            # このページ自身の URL (職員に案内する 1 本 = ページ内リンクの基準)
+            # このページ自身の URL (ユーザーにリンクで示す 1 本 = ページ内リンクの基準)
             page_url = self._page_url(u)
-        head = f"# {u}\n"
+        # 先頭行は `url: …` (見出し `# …` にしない — モデルが本文の見出しに写しやすい)
+        head = f"url: {u}\n"
 
         if __progress__:
             __progress__("変換中")
@@ -423,35 +430,38 @@ class Tools:
             kind, body, links = self._to_lines(raw, content_type, page_url)
         except Exception as e:
             log.error(f"[fetch_url] convert failed ({u}): {e!r}")
-            return f"ERROR: 変換に失敗した ({e})。"
+            return (
+                f"ERROR: {u} の中身を平文に変換できなかった。"
+                + NEXT
+                + show_as_link(page_url or u)
+            )
 
         media_type = _media_type(content_type)
         if kind == "other" and media_type.startswith("image/"):
             # 画像は平文にできないが**行き止まりではない** — feed_image が同じ URL を
             # url でそのまま受けて自分の目に入れられる (2026-09-04 に拡張子判定をやめたので、
             # 拡張子を持たない配信口の画像もそのまま渡せる)。ここで原本 URL だけを
-            # 返すと、モデルは見られるものを見ずに職員へ丸投げする。
+            # 返すと、モデルは見られるものを見ずにユーザーへ丸投げする。
             return (
                 head + f"種別: 画像 (content-type={media_type})。平文にはできない。\n"
-                f'feed_image(url="{u}") で自分の目で見ること。'
+                f'{NEXT}feed_image が使えるなら feed_image(url="{u}") で自分の目で見る。'
             )
         if kind == "other":
             return (
                 f"ERROR: 平文にできない形式 (content-type={media_type or '不明'})。"
-                f'加工が要るなら send_to_workspace(url="{u}") で sandbox に取り込む。'
-                f" 職員にはこの URL を案内する: {page_url or u}"
+                + NEXT
+                + f'加工が要るなら、send_to_workspace が使えるなら send_to_workspace(url="{u}")'
+                " で sandbox に取り込む。" + show_as_link(page_url or u)
             )
         if kind == "pdf-noText":
             # feed_image は拡張子ではなく取得した content-type で PDF を判定する。
             # log_write.aspx のような拡張子を持たない配信口でもそのまま渡してよい。
-            hint = (
-                f'feed_image(url="{u}") でページを見ること (pages="3" 等で範囲指定)。'
-            )
+            hint = f'feed_image が使えるなら feed_image(url="{u}") でページを見る (pages="3" 等で範囲指定)。'
             return (
                 head + f"種別: PDF / テキスト層が無い (抽出 {len(body)} 字 < "
                 f"{self.valves.pdf_text_char_threshold} 字)。スキャン画像の PDF。\n"
-                f"{hint}\n"
-                "内容を要約するより、原本 URL を職員に開いてもらう方が確実。"
+                f"{NEXT}{hint}\n"
+                f"ユーザーには原本を [ラベル]({u}) のリンクで示す (要約より確実)。"
             )
 
         return self._render(head, kind, body, links, query, offset, limit, url=u)
@@ -492,7 +502,8 @@ class Tools:
                 "",
                 (
                     f"ERROR: このファイルは {mb(len(raw))} で、取得の上限 {cap_mb:.1f} MB を超えている。"
-                    "添付は read_attachment(file_id=) で読む。"
+                    + NEXT
+                    + "read_attachment が使えるなら read_attachment(file_id=…) で抽出テキストを読む。"
                 ),
             )
         meta = getattr(rec, "meta", None) or {}
@@ -548,7 +559,8 @@ class Tools:
             # 重い処理ではない (ken 2026-09-07: PDF はできるだけ見る)。
             head += (
                 "テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。"
-                f'ユーザーが見るものと同じものを見るなら feed_image(url="{url}", pages="1-3" 等) (重くない)。\n'
+                f'{NEXT}feed_image が使えるなら、feed_image(url="{url}", pages="1-3" 等) で'
+                "ユーザーが見るものと同じものを見られる (重くない)。\n"
             )
         link_header = f"--- リンク ({len(links)} 件) ---" if links else None
         all_lines = list(body) + ([link_header] + links if links else [])
@@ -564,7 +576,8 @@ class Tools:
                     head
                     + f"種別: {kind} / 本文 {len(body)} 行 + リンク {len(links)} 件\n"
                     + f'query="{query}" に一致する行が無い。'
-                    "語を短く・具体的にして引き直すか、query 無しで先頭から読むこと。"
+                    + NEXT
+                    + "語を短く・具体的にして引き直すか、query 無しで先頭から読む。"
                 )
             all_lines = kept
 
@@ -575,7 +588,8 @@ class Tools:
         if offset >= len(text):
             return (
                 f"ERROR: offset={offset} は末尾 ({len(text)} 字) を超えている。"
-                "offset を戻すか、query で絞ること。"
+                + NEXT
+                + "offset を戻すか、query で絞る。"
             )
         shown = text[offset : offset + limit]
         end = offset + len(shown)

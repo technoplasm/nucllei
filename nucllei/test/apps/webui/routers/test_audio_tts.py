@@ -400,6 +400,29 @@ class TestAudioInternalFunctions(AbstractPostgresTest):
         with pytest.raises(ValueError):
             transcribe_audio(self._request(), "/tmp/a.wav", file_id="x")
 
+    def test_transcribe_audio_errors_do_not_leak_paths(self, tmp_path, monkeypatch):
+        """エラー文言はモデルに届きうる — 入力パスも作業コピーのパスも載せない。"""
+        import pytest
+
+        from nucllei.routers import audio as audio_router
+        from nucllei.utils.audio import transcribe_audio
+
+        missing = str(tmp_path / "secret-dir" / "missing.wav")
+        with pytest.raises(ValueError) as exc:
+            transcribe_audio(self._request(), missing)
+        assert "secret-dir" not in str(exc.value)
+
+        def failing(request, path, prompt=None):
+            raise RuntimeError(f"Invalid data found when processing input: '{path}'")
+
+        monkeypatch.setattr(audio_router, "transcribe", failing)
+        wav_path = self._make_wav(str(tmp_path))
+        with pytest.raises(ValueError) as exc:
+            transcribe_audio(self._request(), wav_path)
+        message = str(exc.value)
+        assert message.startswith("文字起こしに失敗した: Invalid data")
+        assert "/" not in message.split("Invalid data", 1)[1]
+
 
 class TestOpenAICompatSTT(AbstractPostgresTest):
     """STT の OpenAI 互換経路({base}/audio/transcriptions)のスモークテスト。

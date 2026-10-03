@@ -543,7 +543,7 @@ class TestSkills(AbstractPostgresTest):
 
         # 未知 command はモデル向けエラーメッセージ(例外にしない)
         result = asyncio.run(tool["callable"](skill_id="nope"))
-        assert "not found" in result
+        assert "skill が見つからない: nope" in result
 
         # render ディスクリプタ(#20): result を skill 表示で描画
         assert tool["render"] == {"result": {"kind": "skill"}}

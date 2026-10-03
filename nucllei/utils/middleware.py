@@ -251,7 +251,7 @@ def build_source_context(sources: list[dict]) -> str:
                     body = doc_context or ""
                 elif not (doc_context or "").strip() and status != "success":
                     attrs += ' extraction="none"'
-                    body = "(このファイルはテキスト抽出されていません。file_id を使って tool で読めます)"
+                    body = "(テキスト抽出されていない。中身は file_id で扱う)"
                 else:
                     body = doc_context
                 context_string += f"<source {attrs}>{body}</source>\n"
@@ -1412,11 +1412,17 @@ async def _execute_tool_call_sync(
         log.warning(f"tool execution timed out: {tool_name} " f"(> {tool_timeout}s)")
         # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
         tool_result = (
-            f"ツール {tool_name} の実行が {tool_timeout} 秒で"
-            "タイムアウトしました(システム側上限)。"
+            f"ERROR: ツール {tool_name} の実行が {tool_timeout} 秒の上限でタイムアウトした。"
+            "次の手: 入力を小さく分けて呼び直す。"
         )
     except Exception as e:
-        tool_result = str(e)
+        # 例外文言は残す(モデルの軌道修正の材料)が、stack・パスは載せない
+        # (log にだけ出す)。モデルが回答へ写しうる文面なので事実の文で始める
+        log.warning(f"tool raised: {tool_name}", exc_info=True)
+        tool_result = (
+            f"ERROR: ツール {tool_name} の実行中にエラー: "
+            f"{str(e) or e.__class__.__name__}"
+        )
     finally:
         tool_output.current_sink.reset(sink_token)
         # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
@@ -1473,8 +1479,9 @@ async def _execute_one_tool_call(
         # できる明示メッセージを返す(例外にもしない)。
         log.warning(f"model called unavailable tool '{tool_name}'")
         tool_result = (
-            f"tool not available: {tool_name}. "
-            "Use only the tools currently provided."
+            f"ツール {tool_name} は今は使えない (このターンの一覧に無い)。"
+            "次の手: 一覧にある tool だけを使う。"
+            "skill の tool なら先に load_skill で読み込む。"
         )
     else:
         tool = tools[tool_name]
@@ -1669,7 +1676,10 @@ async def execute_tool_calls(
             log.exception(f"tool call failed unexpectedly: {tool_call}")
             results[index] = {
                 "tool_call_id": tool_call.get("id", ""),
-                "content": str(e) or e.__class__.__name__,
+                "content": (
+                    f"ERROR: ツール {tool_call.get('function', {}).get('name', '')}"
+                    f" の実行中にエラー: {str(e) or e.__class__.__name__}"
+                ),
                 "duration": 0.0,
             }
 

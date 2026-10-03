@@ -383,7 +383,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = asyncio.run(
             tool.run_python("while True: pass", __user__={"id": "u1"}, __chat_id__="c1")
         )
-        assert "タイムアウト" in out and "変数・import は保持" in out
+        assert "タイムアウト" in out and "変数・import は残っている" in out
 
     def test_run_shell_and_run_python_once_use_exec(self):
         res = {
@@ -492,15 +492,15 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         tool = _sandbox(
             error=SandboxHTTPError(
                 401,
-                "認証に失敗しました。nucllei と sandbox の "
-                "SANDBOX_TOKEN が一致していません "
+                "認証に失敗した。nucllei と sandbox の "
+                "SANDBOX_TOKEN が一致していない "
                 "(片側だけ未設定の場合も含む。配備の env を確認)",
             )
         )
         out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
         assert out.startswith("ERROR:") and "SANDBOX_TOKEN" in out
-        # 繋がってはいるので「接続できません」とは言わない
-        assert "接続できません" not in out
+        # 繋がってはいるので「接続できない」とは言わない
+        assert "接続できない" not in out
 
     def test_http_failure_is_graceful(self):
         """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。"""
@@ -563,6 +563,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         assert "plot.png" in out and "file_id=" in out
         assert "転送上限" in out and "huge.bin" in out
+        # 画像は画面に出ている — 貼り直させない。上限超過の次の手はモデル向けの行にだけ
+        assert "ユーザーの画面には既に表示されている — 本文に貼り直さない" in out
+        assert "次の手: 分割・圧縮するか" in out
 
         assert emitted[0]["type"] == "chat:message:files"
         files = emitted[0]["data"]["files"]
@@ -573,6 +576,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         shown = [d["content"] for d in sink.displays()]
         assert any(c.startswith("![plot.png](/api/v1/files/") for c in shown)
         assert any("転送上限" in c for c in shown)
+        assert not any("次の手" in c for c in shown)  # 人間の目には事実だけ
 
     def test_send_to_workspace_is_owner_only(self, tmp_path):
         from nucllei.models.files import FileForm
@@ -635,7 +639,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             out = asyncio.run(tool.write_file(bad, "x", __user__=user))
             assert out.startswith("ERROR:"), bad
             # tool 側で弾いたのであって、接続の問題ではない
-            assert "接続できません" not in out, bad
+            assert "接続できない" not in out, bad
         # read-only の置き場は理由を言う
         assert "read-only" in asyncio.run(
             tool.write_file("/ext/server/a.txt", "x", __user__=user)
@@ -664,7 +668,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = asyncio.run(
             tool.write_file("/workspace/exports/r.html", "<p>", __user__=user)
         )
-        assert "/workspace/exports/r.html に書き込みました" in out
+        assert "/workspace/exports/r.html に書き込んだ" in out
         # exports/ 直書きは自動添付されない旨をモデルに伝える
         assert "fetch_from_workspace" in out
 
@@ -698,7 +702,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             out = asyncio.run(tool.write_file(given, "x", __user__=user))
             assert tool.calls[0][0] == "/files/write"
             assert tool.calls[0][1]["path"] == rel, given
-            assert f"{absolute} に書き込みました" in out, given
+            assert f"{absolute} に書き込んだ" in out, given
 
             tool = _sandbox(responses)
             out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
@@ -724,7 +728,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         tool = _sandbox({"/files/list": {"entries": []}})
         out = asyncio.run(tool.list_workspace("/workspace/sub", __user__=user))
-        assert "/workspace/sub は空です" in out
+        assert "/workspace/sub は空 (" in out
 
     def test_relative_paths_are_refused(self):
         """path の形は絶対パス 1 つ。相対を「/workspace からの相対」として通さない
@@ -767,6 +771,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert f"- {given} (" in listed
         out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
         assert out.startswith(f"{given} (") and "file_id=" in out
+        # 画像・音声・動画でない添付はファイル一覧にだけ載る — 本文で示すリンクを渡す
+        assert "本文で示すなら [mine.txt](/api/v1/files/" in out
+        assert "画面には既に表示されている" not in out
         assert [c[1]["path"] for c in tool.calls] == ["imports", "imports/mine.txt"]
 
     def test_list_and_fetch_refuse_paths_outside_workspace(self):
@@ -791,7 +798,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = asyncio.run(
             tool.fetch_from_workspace("/ext/server42/a.png", __user__=user)
         )
-        assert out.startswith("ERROR:") and "読めない" in out
+        assert out.startswith("ERROR:") and "このサーバの /ext に無い" in out
         assert tool.calls == []
 
     def test_file_errors_say_what_went_wrong(self):
@@ -813,16 +820,16 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         # sandbox 側の _safe_path が弾いた (symlink 越しの脱出など、tool からは見えない分)
         for out in outs(SandboxHTTPError(400, "path escapes workspace: 'a.txt'")):
             assert out.startswith("ERROR:") and "path escapes workspace" in out
-            assert "接続できません" not in out
+            assert "接続できない" not in out
 
         out = outs(SandboxHTTPError(404, "not a file: a.txt"))[2]
-        assert "/workspace/a.txt というファイルはありません" in out
+        assert "/workspace/a.txt というファイルは無い" in out
 
         out = outs(SandboxHTTPError(413, "file too large: 9 bytes (limit 5)"))[2]
-        assert "大きすぎ" in out and "接続できません" not in out
+        assert "大きすぎ" in out and "接続できない" not in out
 
         for out in outs(ConnectionRefusedError("refused")):
-            assert out.startswith("ERROR: sandbox に接続できません")
+            assert out.startswith("ERROR: sandbox に接続できない")
 
 
 # =============================================================================
@@ -917,7 +924,7 @@ def test_url_exclusive_with_file_id_and_filename(monkeypatch):
     env = _UrlEnv(monkeypatch)
     for extra in ({"file_id": "some-uuid"}, {"filename": "x"}):
         result = env.run(url="http://his-info.test/docs/a.pdf", **extra)
-        assert result.startswith("ERROR") and "同時指定" in result, extra
+        assert result.startswith("ERROR") and "同時に指定できない" in result, extra
 
 
 def test_spec_has_no_request_param_and_no_lan_valve():
@@ -1082,7 +1089,7 @@ def test_general_url_wording_follows_reason(monkeypatch):
     assert "転送先が このサーバ自身" in to_self and "302" in to_self
     assert env.gets == ["http://10.1.2.3/leave"]
     loop = env.run(url="http://10.1.2.3/loop")
-    assert "3 回を超えて" in loop
+    assert "4 回以上続いた" in loop and "[ラベル](http://10.1.2.3/loop)" in loop
     assert env.gets.count("http://10.1.2.3/loop") == 1 and len(env.gets) == 1 + 4
     unresolved = env.run(url="http://nosuch.test/x")
     assert "ホスト名を解決できない" in unresolved and "IP アドレスで指定" in unresolved
@@ -1469,7 +1476,14 @@ def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_
         "/ext/elsewhere/x.txt",
     ):
         out = env.fetch(missing)
-        assert out.startswith("ERROR:") and "読めない" in out, missing
+        # 本当に無いか、配備の mount のずれ (sandbox にだけ mount)。「渡さない」とも
+        # 「/workspace にコピーして渡す」とも言わない (ken 2026-10-04: /ext は URL で見せる
+        # だけ — 同じ組を nucllei と sandbox に mount する)
+        assert out == (
+            f"ERROR: {missing} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
+            " mount されている)。次の手: 中身が要るなら sandbox で読んで使う。"
+        ), missing
+        assert "渡さない" not in out and "コピー" not in out, missing
         # URL(markdown のリンク / 画像記法)も file_id も出ない(パスの echo は出る)
         assert "file_id=" not in out and "](/ext/" not in out, missing
         assert "添付不要" not in out, missing
@@ -1492,7 +1506,9 @@ def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
         "/ext/cage/static/%E5%9B%B3/a.png",
     ):
         out = env.fetch(bad)
-        assert out.startswith("ERROR:") and "読めない" in out, bad
+        # `/ext` 自体は sandbox のパスの形 (`/ext/…`) でない — 理由を付けない「読めない」
+        want = "を読めない。" if bad == "/ext" else "はこのサーバの /ext に無い"
+        assert out.startswith("ERROR:") and want in out, bad
         assert "大きすぎ" not in out and "上限" not in out, bad
 
     # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない

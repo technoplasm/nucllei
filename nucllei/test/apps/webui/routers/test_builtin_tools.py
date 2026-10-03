@@ -262,7 +262,7 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         chat = self._new_chat("owner", "秘密", [("user", "内緒")])
         # 他人が chat_id を知っていても「見つからない」扱い(所有者検証を漏らさない)
         out = Tools().read_history(chat.id, __user__={"id": "intruder"})
-        assert "見つかりません" in out
+        assert "見つからない" in out
         assert "内緒" not in out
 
     def test_grep_history_matches_content(self):
@@ -482,7 +482,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         self._new_file("owner", "f-own", "mine.txt")
         chat = self._new_chat("owner", [[{"type": "file", "id": "f-own"}]])
         out = Tools().list_chat_files(__user__={"id": "intruder"}, __chat_id__=chat.id)
-        assert "見つかりません" in out
+        assert "見つからない" in out
         assert "mine.txt" not in out
 
     def test_foreign_file_id_planted_in_own_chat_is_hidden(self):
@@ -529,7 +529,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         miss = Tools().grep_chat_files(
             "zzz", __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "見つかりませんでした" in miss
+        assert "見つからなかった" in miss
 
     def test_limit_keeps_newest_and_reports_total(self):
         from nucllei.builtin_tools.chat_files import Tools
@@ -566,7 +566,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         from nucllei.builtin_tools.chat_files import Tools
 
         out = Tools().list_chat_files(__user__={"id": "owner"})
-        assert "チャット文脈" in out
+        assert "チャットの中でだけ" in out
 
         # __chat_id__ 未注入経路でも __metadata__.chat_id で解決できる
         self._new_file("owner", "f-meta", "meta.txt")
@@ -581,7 +581,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
 
         chat = self._new_chat("owner", [[]])
         out = Tools().list_chat_files(__user__={"id": "owner"}, __chat_id__=chat.id)
-        assert "添付ファイルはありません" in out
+        assert "添付ファイルは無い" in out
 
     def test_top_level_chat_files_are_collected(self):
         """走査は routers/chats.get_file_ids_from_chat の同形複製 — トップレベル
@@ -616,7 +616,7 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         miss = Tools().grep_chat_files(
             "gone", __user__={"id": "owner"}, __chat_id__=chat.id
         )
-        assert "見つかりませんでした" in miss
+        assert "見つからなかった" in miss
 
     def test_limit_tolerates_non_int_values(self):
         """tool 引数は実行時型検証を通らない — モデル由来の 5.0 / "5" / ゴミ文字列でも落ちない。"""

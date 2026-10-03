@@ -68,7 +68,9 @@ def transcribe_audio(
     else:
         src_path = file_path
         if not os.path.isfile(src_path):
-            raise ValueError(f"transcribe_audio: ファイルが存在しない: {src_path}")
+            # パスはモデルへ返さない(tool 経由で回答に写りうる)— log にだけ出す
+            log.warning(f"transcribe_audio: file not found: {src_path}")
+            raise ValueError("transcribe_audio: 音声ファイルが存在しない")
 
     # transcribe(openai 経路)は WAV 変換で入力ファイルを in-place 書き換えするため、
     # 元ファイル(Storage 実体・caller のファイル)を守る目的で必ず作業コピーを切る。
@@ -79,7 +81,15 @@ def transcribe_audio(
     with tempfile.TemporaryDirectory() as tmp_dir:
         work_path = os.path.join(tmp_dir, f"{uuid.uuid4()}{ext}")
         shutil.copyfile(src_path, work_path)
-        text = transcribe(request, work_path)["text"]
+        try:
+            text = transcribe(request, work_path)["text"]
+        except Exception as e:
+            # エンジンの例外文言(faster-whisper / ffmpeg 等)は作業パスを含みうる。
+            # 文言は軌道修正の材料として残し、パスだけ伏せる(全文は log)
+            log.warning(f"transcribe_audio failed: {e}", exc_info=True)
+            message = (str(e) or e.__class__.__name__).replace(work_path, "<音声>")
+            message = message.replace(tmp_dir, "<作業ディレクトリ>")
+            raise ValueError(f"文字起こしに失敗した: {message}") from None
 
     if file_id is not None:
         Files.update_file_data_by_id(file_id, {"content": text, "status": "success"})

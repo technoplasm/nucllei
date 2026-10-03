@@ -299,7 +299,7 @@ def test_fetch_passes_a_general_url_to_the_resolver_and_renders_header(
     """一般の URL: そのまま resolver に渡し、ヘッダは入力 URL 1 本。リンクはページ基準。"""
     result, resolver = _run(monkeypatch, ext_env, f"{SITE}/top.aspx")
     assert resolver.refs == [f"{SITE}/top.aspx"]
-    assert result.startswith(f"# {SITE}/top.aspx\n種別: html")
+    assert result.startswith(f"url: {SITE}/top.aspx\n種別: html")
     assert "原本" not in result and "注意:" not in result
     # リンク一覧は絶対 URL 1 本
     assert f"→ {SITE}/log_write.aspx?" in result and "/ext/" not in result
@@ -310,7 +310,7 @@ def test_fetch_accepts_the_ext_form_and_keeps_links_in_that_form(monkeypatch, ex
     形 (`{origin}/ext/…`)。原本行も注意書きも無い (2026-10-03 設定撤去)。"""
     result, resolver = _run(monkeypatch, ext_env, EXT_TOP)
     assert resolver.refs == [EXT_TOP]
-    assert result.startswith(f"# {EXT_TOP}\n種別: html")
+    assert result.startswith(f"url: {EXT_TOP}\n種別: html")
     assert "原本" not in result and "注意:" not in result
     assert f"→ {ORIGIN}/ext/his/log_write.aspx?" in result
     assert SITE not in result
@@ -404,7 +404,7 @@ def test_accepts_a_same_server_relative_ext_url(monkeypatch, ext_env):
     リンクは相対 `/ext/…` のまま。"""
     result, resolver = _run(monkeypatch, ext_env, "/ext/his/top.aspx")
     assert resolver.refs == ["/ext/his/top.aspx"]
-    assert result.startswith("# /ext/his/top.aspx\n種別: html"), result
+    assert result.startswith("url: /ext/his/top.aspx\n種別: html"), result
     assert "→ /ext/his/log_write.aspx?" in result and "https://llens" not in result
     assert "原本" not in result and "注意:" not in result
     result, resolver = _run(
@@ -465,7 +465,7 @@ def test_general_urls_are_fetched_and_the_server_itself_is_refused(
     ):
         result, resolver = _run(monkeypatch, ext_env, u)
         assert resolver.refs == [u], u
-        assert not result.startswith("ERROR") and result.startswith(f"# {u}\n"), (
+        assert not result.startswith("ERROR") and result.startswith(f"url: {u}\n"), (
             u,
             result,
         )
@@ -479,7 +479,7 @@ def test_general_urls_are_fetched_and_the_server_itself_is_refused(
 
 def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
     """直下 (`/ext/{name}` `/ext/{name}/` / サイトのルート) は resolver がそのまま取りに行き、
-    302 なら upstream_status (status=302)。redirect の案内文になる。
+    302 なら upstream_status (status=302)。辿れなかった redirect の文になる。
     tool は末尾 `/` を補わず、受け取った形のまま resolver に渡す。"""
     for u in (SITE, f"{SITE}/", "/ext/his", "/ext/his/"):
         result, resolver = _run(
@@ -491,7 +491,7 @@ def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
         assert resolver.refs == [u], u
         assert (
             "redirect (302)" in result
-            and "ディレクトリではなくページを直接指す" in result
+            and "次の手: 転送先のページを直接指す URL を渡す。" in result
         ), (u, result)
         assert "リンク切れ" not in result, u
 
@@ -532,7 +532,7 @@ def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):
     ):
         result, resolver = _run(monkeypatch, ext_env, u)
         assert resolver.refs == [u], u
-        assert result.startswith(f"# {u}\n"), u
+        assert result.startswith(f"url: {u}\n"), u
         links = [ln for ln in result.split("\n") if re.match(r"^\[\d+\] ", ln)]
         assert len(links) == 3 and all(
             f"→ {root}/log_write.aspx?" in ln for ln in links
@@ -593,7 +593,7 @@ def test_pdf_without_text_layer_guides_to_feed_image_even_without_pdf_extension(
     assert "テキスト層が無い" in result
     assert f'feed_image(url="{u}")' in result
     assert "判定できず" not in result
-    assert result.startswith(f"# {u}\n")
+    assert result.startswith(f"url: {u}\n")
 
 
 def test_pdf_is_detected_by_magic_bytes_when_content_type_lies(monkeypatch, ext_env):
@@ -614,11 +614,11 @@ def test_resolver_failure_without_a_reason_falls_back_to_the_bundled_text(
     monkeypatch, ext_env
 ):
     """resolve_url が (None, None) を返した (通常起きない): 理由が無いので束ねた 1 文
-    (redirect を辿らないことだけは案内する)。"""
+    (redirect は 3 回まで辿るので、「辿らない」とは言わない)。"""
     result, resolver = _run(monkeypatch, ext_env, f"{SITE}/index", resp=False)
     assert resolver.refs == [f"{SITE}/index"]
     assert result.startswith(f"ERROR: {SITE}/index を取得できない")
-    assert "redirect" in result and "ページを直接指す URL を渡すこと" in result
+    assert "redirect を辿れない" in result and "辿らない" not in result
     assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)
 
 
@@ -759,7 +759,7 @@ def test_too_large_names_size_and_limit_in_mb_and_sends_a_subagent_with_max_mb(
     monkeypatch, ext_env
 ):
     """32,646,426 B → 31.1 MB / limit 26,214,400 B → 25.0 MB (小数 1 桁、MiB 換算)。
-    次の一手は「主 context で読まず run_subagent の子が max_mb 付きで読む」。"""
+    次の手は「この会話では読まず run_subagent の子が max_mb 付きで読む」。"""
     result = _explained(
         monkeypatch,
         ext_env,
@@ -769,13 +769,17 @@ def test_too_large_names_size_and_limit_in_mb_and_sends_a_subagent_with_max_mb(
         size_exact=True,
     )
     assert f"{_PDF_URL} は 31.1 MB で、取得の上限 25.0 MB を超えている" in result
-    assert "主 context では読まず" in result and "run_subagent" in result
+    assert (
+        "次の手: この会話では読まない。" in result
+        and "run_subagent が使えるなら" in result
+    )
     assert (
         f'fetch_url(url="{_PDF_URL}", max_mb=32)' in result
     )  # X (31.1) を超える整数 MB
     assert "offset で続き" in result
     assert (
-        "中身が要らなければ URL をそのまま案内" in result
+        f"中身が要らなければ、ユーザーに示すなら [ラベル]({_PDF_URL}) のリンクにする"
+        in result
         and "ブラウザでは開ける" in result
     )
     assert (
@@ -786,7 +790,7 @@ def test_too_large_names_size_and_limit_in_mb_and_sends_a_subagent_with_max_mb(
 
 
 def test_too_large_beyond_the_ceiling_hands_the_url_over_instead(monkeypatch, ext_env):
-    """天井 (既定 200 MB) も超える資料は max_mb を上げても読めないので、URL 案内だけ。"""
+    """天井 (既定 200 MB) も超える資料は max_mb を上げても読めないので、リンクで示すだけ。"""
     result = _explained(
         monkeypatch,
         ext_env,
@@ -797,7 +801,7 @@ def test_too_large_beyond_the_ceiling_hands_the_url_over_instead(monkeypatch, ex
     )
     assert "は 250.0 MB で、取得の上限 25.0 MB を超えている" in result
     assert "最大 200.0 MB も超える" in result and "中身は読めない" in result
-    assert "URL をそのまま案内" in result
+    assert "次の手: ユーザーに示すなら [ラベル](" in result
     assert "run_subagent" not in result and "max_mb" not in result
 
 
@@ -880,23 +884,23 @@ def test_too_large_without_numbers_still_says_it_is_the_size_cap(monkeypatch, ex
         "取得の上限" in result and "超えている" in result and "実サイズは不明" in result
     )
     assert "run_subagent" in result and "max_mb=<X を超える値>" in result
-    assert "URL をそのまま案内" in result
+    assert "ユーザーに示すなら [ラベル](" in result
 
 
 def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch, ext_env):
     result = _explained(monkeypatch, ext_env, "not_found")
     assert f"{_PDF_URL} は存在しない (404 / ファイル無し)" in result
-    assert "リンク切れとして案内" in result
+    assert "次の手: ユーザーにはリンク切れと伝える。" in result
 
 
-def test_redirect_status_points_to_a_page_not_a_directory(monkeypatch, ext_env):
+def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch, ext_env):
+    """reason 無しの 3xx = 転送先が URL として組めなかった (redirect は 3 回まで辿る)。"""
     result = _explained(
         monkeypatch, ext_env, "upstream_status", url=f"{SITE}/dir", status=302
     )
-    assert (
-        "redirect (302)" in result and "ディレクトリではなくページを直接指す" in result
-    )
-    assert "URL を渡すこと" in result
+    assert "redirect (302)" in result and "転送先が開ける URL ではなかった" in result
+    assert "次の手: 転送先のページを直接指す URL を渡す。" in result
+    assert "辿らない" not in result
     assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)
     assert "リンク切れ" not in result
 
@@ -907,7 +911,9 @@ def test_server_error_status_suggests_retry_or_handing_over_the_url(
     for status in (500, 503, 403):
         result = _explained(monkeypatch, ext_env, "upstream_status", status=status)
         assert f"上流が {status} を返した" in result, status
-        assert "時間を置いて再試行" in result and "URL をそのまま案内" in result, status
+        assert (
+            "時間を置いて再試行" in result and "ユーザーに示すなら [ラベル](" in result
+        ), status
         assert "redirect" not in result, status
 
 
@@ -916,7 +922,7 @@ def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(
 ):
     result = _explained(monkeypatch, ext_env, "upstream_unreachable")
     assert "のホストに届かない" in result and "この配備からは到達できない" in result
-    assert "URL をそのまま案内" in result and "リンク切れ" not in result
+    assert "ユーザーに示すなら [ラベル](" in result and "リンク切れ" not in result
 
 
 def test_unsupported_form_code_uses_the_fixed_text(monkeypatch, ext_env):
@@ -1018,7 +1024,7 @@ def test_size_cap(monkeypatch, ext_env):
     assert (
         "0.0 MB で大きすぎる (この呼び出しの上限 0.0 MB)" in result
     )  # 4 KB / 1 KB を MB 小数 1 桁で
-    assert "URL をそのまま案内" in result
+    assert f"ユーザーに示すなら [ラベル]({SITE}/top.aspx) のリンクにする" in result
 
 
 def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
@@ -1033,7 +1039,9 @@ def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
     assert u in result
     # 加工が要るなら sandbox に取り込む (too_large と同じ次の一手。2026-10-04)
     assert f'send_to_workspace(url="{u}")' in result
-    # /ext/ 形 (相対) も入力と同じ形で案内する
+    # 渡すときは markdown リンク (2026-10-04。裸の URL を「案内」させない)
+    assert f"ユーザーに示すなら [ラベル]({u}) のリンクにする" in result
+    # /ext/ 形 (相対) も入力と同じ形でリンクにする
     u = "/ext/his/log_write.aspx?LI_URL=x.xls"
     result, _c = _run(
         monkeypatch,
@@ -1042,6 +1050,7 @@ def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
         resp=_Loaded(content_type="application/vnd.ms-excel", body=b"\xd0\xcf"),
     )
     assert result.startswith("ERROR") and u in result and "https://" not in result
+    assert f"[ラベル]({u})" in result
 
 
 def test_image_guides_to_feed_image_not_to_a_dead_end(monkeypatch, ext_env):
@@ -1184,7 +1193,7 @@ def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
 
     monkeypatch.setattr(mod, "resolve_url", resolve)
     result = env.run(page)
-    assert result.startswith(f"# {page}\n種別:"), result
+    assert result.startswith(f"url: {page}\n種別:"), result
     links = _listed_links(result)
     assert "http://172.16.9.9/app/dir/unyou_mn.aspx" in links, links
     assert "http://172.16.9.9/his-info/x.pdf" in links, links

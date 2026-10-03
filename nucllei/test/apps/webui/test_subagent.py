@@ -567,7 +567,7 @@ class TestRunSubagent(AbstractPostgresTest):
             asyncio.run(tool["callable"](preset_id="hidden-worker", instruction="x"))
         )
         assert failed["ok"] is False
-        assert "利用できません" in failed["error"]
+        assert "使えない" in failed["error"]
 
     def test_session_id_continuation_appends_to_same_child(self, monkeypatch):
         child_calls = self._patch_child_pipeline(
@@ -703,7 +703,7 @@ class TestRunSubagent(AbstractPostgresTest):
             asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
         )
         assert result["ok"] is False
-        assert "上限" in result["error"]
+        assert "自分で処理する" in result["error"]
 
     def test_concurrency_limit_returns_error(self, monkeypatch):
         from nucllei.utils import subagent
@@ -718,7 +718,7 @@ class TestRunSubagent(AbstractPostgresTest):
             asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
         )
         assert result["ok"] is False
-        assert "上限" in result["error"]
+        assert "同時" in result["error"]
         # 超過エラーはカウンタを消費しない(decrement で負にならない)
         assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
 
@@ -736,6 +736,10 @@ class TestRunSubagent(AbstractPostgresTest):
         assert result["ok"] is True
         assert result["answer"] == ""
         assert result["truncated"] is True
+        # 黙って切らない: 事実と次の手を添える
+        assert result["note"] == (
+            "回答は先頭 0 字で切った。次の手: 続きが要るなら同じ session_id で頼む。"
+        )
 
     # ---- stop 連鎖 ----
 
@@ -856,7 +860,7 @@ class TestRunSubagent(AbstractPostgresTest):
 
         child_id, result = asyncio.run(main())
         assert result["ok"] is False
-        assert "停止" in result["error"]
+        assert "止められた" in result["error"]
         assert result["session_id"] == child_id
         from nucllei.utils import subagent as _subagent
 

@@ -101,8 +101,8 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
                     # まとめて説明がつく (未設定は「不一致」の一種)
                     raise SandboxHTTPError(
                         401,
-                        "認証に失敗しました。nucllei と sandbox の "
-                        "SANDBOX_TOKEN が一致していません "
+                        "認証に失敗した。nucllei と sandbox の "
+                        "SANDBOX_TOKEN が一致していない "
                         "(片側だけ未設定の場合も含む。配備の env を確認)",
                     )
                 raise SandboxHTTPError(resp.status, body)
@@ -174,20 +174,35 @@ def _resolve_workspace_path(
     )
 
 
+# モデルに返す文は「事実の文 + `次の手:` 以降」、常体 (`utils/ref_errors` の module
+# docstring)。この toolkit に無い tool は「〜が使えるなら」と条件付きで書く。
+_NEXT = "次の手: "
+
+# 画像・音声・動画は display チャネルで tool の枠の下に出る (`_display_markdown`)。
+# それを受けたモデル向けの 1 文 (exports の自動添付と fetch_from_workspace で共通)
+_DISPLAYED = "ユーザーの画面には既に表示されている — 本文に貼り直さない"
+
+
+def _file_link_note(name: str, file_id: str) -> str:
+    """display に乗らない添付 (このチャットのファイル一覧にだけ載る) を本文で示すリンク。"""
+    label = (name or "").replace("[", "(").replace("]", ")")
+    return f"本文で示すなら [{label}](/api/v1/files/{file_id}/content)"
+
+
 def _files_error(e: Exception, abs_path: str) -> str:
     """sandbox `/files/*` の失敗をモデル向けの文面にする (原因を言い分ける)。"""
     if not isinstance(e, SandboxHTTPError):
-        return f"ERROR: sandbox に接続できません: {e!r}"
+        return f"ERROR: sandbox に接続できない: {e!r}"
     if e.status == 400:
-        return f"ERROR: {abs_path} は使えない path です (sandbox が拒否: {e.detail})"
+        return f"ERROR: {abs_path} は使えない path (sandbox が拒否: {e.detail})。"
     if e.status == 404:
         return (
-            f"ERROR: {abs_path} というファイルはありません "
-            "(ディレクトリは不可。list_workspace で確認すること)。"
+            f"ERROR: {abs_path} というファイルは無い (ディレクトリは不可)。"
+            f"{_NEXT}list_workspace で確かめる。"
         )
     if e.status == 413:
-        return f"ERROR: {abs_path} は大きすぎて取り出せません ({e.detail})"
-    return f"ERROR: sandbox がエラーを返しました: {e}"
+        return f"ERROR: {abs_path} は大きすぎて取り出せない ({e.detail})。"
+    return f"ERROR: sandbox がエラーを返した: {e}"
 
 
 def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[str]:
@@ -291,10 +306,11 @@ def _too_large_import(u: str, err) -> str:
             f"{u} は少なくとも {_human_size(err.size)} あり、取り込みの上限{limit} を"
             "超えている (実サイズは不明)。"
         )
+    from nucllei.utils.ref_errors import show_as_link
+
     return (
         f"ERROR: {what}sandbox には取り込めない (上限は管理者の設定で、引数では"
-        "上げられない)。リンク切れではない — ユーザーには URL をそのまま案内する "
-        "(ブラウザでは開ける)。"
+        f"上げられない)。リンク切れではない。{_NEXT}" + show_as_link(u)
     )
 
 
@@ -302,45 +318,17 @@ def _explain_ref_error(u: str, err) -> str:
     """resolver の RefError をモデル向けの ERROR 文にする (send_to_workspace(url=) 用)。
 
     組み立ては全 tool 共通の `utils/ref_errors.explain_ref_error` (feed_image / fetch_url と
-    同じ code を言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool 固有の
-    言い方 (取り込みの上限は valve / 登録した配信元の redirect は辿らない / 上流に届かない)
-    だけを hints で渡す。内部名 (env 名・detail) は出さない (resolver が warning ログに残す)。
+    同じ code を同じ文で言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool
+    固有の言い方は too_large (取り込みの上限は valve) と unexplained だけ (2026-10-04 に
+    redirect / 上流不達 / 許可先の独自文面は既定へ揃えた)。内部名 (env 名・detail・code) は
+    出さない (resolver が warning ログに残す)。
     """
     # ref_errors → image_refs は本 module を参照する — 循環を避けて呼び出し時に引く
     from nucllei.utils.ref_errors import RefErrorHints, explain_ref_error
 
     hints = RefErrorHints(
         too_large=_too_large_import,
-        unexplained="ERROR: {ref} を取得できない ({code})。",
-        redirect_next=(
-            "登録した配信元の redirect は辿らないので、ディレクトリではなくファイルや"
-            "ページを直接指す URL を渡すこと。"
-        ),
-        redirect_self=(
-            "ERROR: {ref} は redirect ({status}) を返したが、転送先が このサーバ自身"
-            " (または同居するサービス) なので辿らなかった。"
-            "ユーザーには URL をそのまま案内する。"
-        ),
-        too_many_redirects=(
-            "ERROR: {ref} は redirect を 3 回を超えて繰り返した (転送のループか、"
-            "ログインが要るページ)。ユーザーには URL をそのまま案内する。"
-        ),
-        unresolvable=(
-            "ERROR: {ref} のホスト名を解決できない (この環境に DNS が無い場合は、"
-            "ホスト名ではなく IP アドレスで指定する)。"
-        ),
-        unreachable=(
-            "ERROR: {ref} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
-            "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
-        ),
-        # 内訳は resolver の reason (解決結果) で言い分ける。値は見ない
-        unknown_upstream={
-            # 一般の URL で取りに行かない唯一の相手 (行き先では絞らない)
-            "server_self": (
-                "は このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
-            ),
-            None: "は許可先の外 (この配備が取得を許可している URL ではない)",
-        },
+        unexplained="ERROR: {ref} を取得できない。",
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
 
@@ -359,21 +347,24 @@ def _explain_mount_error(abs_path: str, err) -> str:
         return (
             f"ERROR: {abs_path} は{size}添付できる上限{limit} を超えている "
             "(上限は管理者の設定で、引数では上げられない)。ファイルは存在する。"
-            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡すこと。"
+            f"{_NEXT}run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。"
         )
     if code == "not_found":
+        # nucllei 側の EXT_DIR に無い = 本当に無いか、配備の mount のずれ (sandbox にだけ
+        # mount されている)。resolver は分けられないので 1 文で両方を言う。ken 2026-10-04:
+        # 配備は nucllei と sandbox に同じ /ext の組を mount する — /ext のファイルは URL で
+        # 見せるだけで、取り出し (添付) の経路は作らない (要らない file_id を増やさない)
         return (
-            f"ERROR: {abs_path} というファイルは読めない (存在しない、ディレクトリ、"
-            "または read-only の置き場の外を指すリンク)。run_shell の ls で確認すること。"
-            "sandbox からは開けるファイルなら、run_shell で /workspace/ にコピーしてから"
-            "そのパスを渡す。"
+            f"ERROR: {abs_path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
+            f" mount されている)。{_NEXT}中身が要るなら sandbox で読んで使う。"
         )
     if code == "traversal":
         return (
             f"ERROR: {abs_path} は使えない path (制御文字やバックスラッシュを含む)。"
-            "run_shell で /workspace/ に別名でコピーしてからそのパスを渡すこと。"
+            f"{_NEXT}run_shell で /workspace/ に別名でコピーしてからそのパスを渡す。"
         )
-    return f"ERROR: {abs_path} を読めない ({code})。"
+    log.info(f"[sandbox] fetch_from_workspace {abs_path}: unexplained {code}")
+    return f"ERROR: {abs_path} を読めない。"
 
 
 def _iter_context_files(__files__, __metadata__):
@@ -510,11 +501,14 @@ class Tools:
             if out.get("truncated") or "b64" not in out:
                 # 転送上限(FILE_LIMIT、既定 25MB / compose 100MB)超過で未添付。
                 # モデルにも戻り値で明示 + ユーザーにも display で警告(気付けるように)。
+                # display (人間の目) には事実だけ、次の手はモデル向けの行にだけ付ける
                 warn = (
                     f"{name} ({_human_size(out['size'])}) は転送上限を超えて添付できなかった"
-                    f"(workspace には残存)。分割・圧縮するか、必要な部分だけ書き出すこと。"
+                    " (workspace には残っている)。"
                 )
-                lines.append(f"- ⚠ {warn}")
+                lines.append(
+                    f"- ⚠ {warn}{_NEXT}分割・圧縮するか、必要な部分だけ書き出す。"
+                )
                 display(f"⚠ {warn}")
                 continue
             try:
@@ -522,18 +516,23 @@ class Tools:
                     user_id, os.path.basename(name), base64.b64decode(out["b64"])
                 )
                 attachments.append(att)
-                line = f"- {name} ({_human_size(out['size'])}) file_id={att['id']}"
+                line = f"- {name} ({_human_size(out['size'])}) file_id={att['id']}。"
                 # #88: 画像/音声/動画は display チャネルで tool 枠下に自動表示(モデルの
-                # 貼り付けに依存しない)。gallery 添付は _persist_and_emit_files で常時付く。
+                # 貼り付けに依存しない)。それ以外はチャットのファイル一覧(右ペイン —
+                # message.files の type 'file' は本文の下には描かれない)にだけ載るので、
+                # 本文で示すリンクを渡す。background 完了の [task] 通知では display の
+                # 中身がモデルに渡り、画面には出ていない(execution_resume)ので貼らせる。
                 md = _display_markdown(
                     name, att["id"], att["file"]["meta"]["content_type"]
                 )
                 if md:
                     display(md)
-                    line += " ユーザーに提示済み — 本文には貼らない ([task] 通知で受け取った場合のみ貼る)"
+                    line += f" {_DISPLAYED} ([task] 通知で受け取ったときは表示されていないので貼る)"
+                else:
+                    line += " " + _file_link_note(name, att["id"])
                 lines.append(line)
             except Exception as e:
-                lines.append(f"- {name}: 登録失敗 {e!r}")
+                lines.append(f"- {name}: ファイルの登録に失敗した ({e!r})")
         if attachments:
             await self._persist_and_emit_files(
                 attachments, chat_id, message_id, __event_emitter__
@@ -551,15 +550,15 @@ class Tools:
         tail = limit - head
         return (
             text[:head]
-            + f"\n⋮ [切り詰め: 全 {len(text)} 字中 先頭 {head} 字 + 末尾 {tail} 字のみ表示。"
-            "全文が必要なら出力を /workspace のファイルに書き出し、"
-            "run_shell の rg / head / tail で部分参照すること]\n" + text[-tail:]
+            + f"\n⋮ [切り詰め: 全 {len(text)} 字中 先頭 {head} 字 + 末尾 {tail} 字だけを表示した。"
+            f"{_NEXT}全文が要るなら出力を /workspace のファイルに書き出し、"
+            "run_shell の rg / head / tail で部分参照する]\n" + text[-tail:]
         )
 
     def _format_exec_result(self, res: dict, output_lines: list[str]) -> str:
         parts = [f"exit_code={res['exit_code']} ({res['duration_s']}s)"]
         if res.get("timed_out"):
-            parts[0] += " **タイムアウト (time_limit で強制終了)**"
+            parts[0] += " **タイムアウト (timeout_s の秒数を超えたので強制終了した)**"
         stdout = res.get("stdout", "")
         stderr = res.get("stderr", "")
         if stdout:
@@ -578,7 +577,7 @@ class Tools:
             parts.append("(出力なし)")
         if output_lines:
             parts.append(
-                "--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
                 + "\n".join(output_lines)
             )
         return "\n".join(parts)
@@ -587,13 +586,13 @@ class Tools:
         parts = []
         if res.get("session_reset"):
             parts.append(
-                "※ 実行環境がリセットされ、以前の変数・import は失われています "
-                "(必要なら定義し直してから続けてください)。"
+                "※ 実行環境がリセットされ、以前の変数・import は失われた。"
+                f"{_NEXT}必要なら定義し直してから続ける。"
             )
         stdout = res.get("stdout", "")
         error = res.get("error")
         if res.get("timed_out"):
-            parts.append("**タイムアウト (セルを中断。変数・import は保持)**")
+            parts.append("**タイムアウト (セルを中断した。変数・import は残っている)**")
         if stdout:
             parts.append(self._truncate_output(stdout.rstrip("\n")))
             if res.get("stdout_truncated"):
@@ -606,7 +605,7 @@ class Tools:
             parts.append("(出力なし)")
         if output_lines:
             parts.append(
-                "--- 生成ファイル (exports/) — チャットに添付済み ---\n"
+                "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
                 + "\n".join(output_lines)
             )
         parts.append(f"({res.get('duration_s', 0)}s)")
@@ -623,7 +622,7 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
         payload = {
             "user_id": __user__["id"],
             "lang": lang,
@@ -653,11 +652,11 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
         if not __chat_id__:
             return (
-                "ERROR: chat_id が取得できず状態付き実行ができません。"
-                "単発実行が必要なら run_python_once を使ってください。"
+                "ERROR: この呼び出しには会話の id が無く、状態を持つ実行ができない。"
+                f"{_NEXT}単発で足りるなら run_python_once を使う。"
             )
         payload = {
             "user_id": __user__["id"],
@@ -777,7 +776,7 @@ class Tools:
 
         引数は名前のとおりに解釈する (他の tool と共通)。受け取った形のまま渡すこと
         (読み替えない・ホストを補わない)。
-        sandbox のパス (/workspace/… /ext/…) は既に jail から見えているので取り込み不要。
+        sandbox のパス (`/workspace/…` `/ext/…`) は既に jail から見えているので取り込み不要。
         同一サーバの URL `/ext/…` は sandbox のパス `/ext/…` と同じ文字列で同じファイル
         (url に渡せばコピーせずそのパスを返す)。
         jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
@@ -787,14 +786,14 @@ class Tools:
         :param url: 取り込むリソース。スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。file_id / filename と排他。
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
 
         url = (url or "").strip()
         file_id = (file_id or "").strip()
         if url and (file_id or filename):
             return (
-                "ERROR: url は file_id/filename と同時指定できない。"
-                "どちらか一方だけを指定すること。"
+                "ERROR: url は file_id / filename と同時に指定できない。"
+                f"{_NEXT}どちらか一方だけを指定する。"
             )
 
         # 引数は名前で解釈が決まる — url は URL として、file_id は file の id として解決する。
@@ -814,9 +813,9 @@ class Tools:
             if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
             line, failure = await self._import_file(fid, fname, __user__["id"])
-            report.append(line or f"- {fname or fid}: {failure} (skip)")
+            report.append(line or f"- {fname or fid}: {failure} (取り込まなかった)")
         if not report:
-            return "取り込み対象の添付ファイルがありませんでした。"
+            return "取り込み対象の添付ファイルが無かった。"
         return "取り込み結果:\n" + "\n".join(report)
 
     async def _import_file(self, fid: str, fname, user_id: str) -> tuple[str, str]:
@@ -842,7 +841,7 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
-            return "", f"取り込みに失敗 {e!r}"
+            return "", f"取り込みに失敗した ({e!r})"
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
             "",
@@ -909,7 +908,7 @@ class Tools:
         if mounted:
             return (
                 f"取り込み不要: {u} は sandbox から {mounted} として既に見えている "
-                "(read-only)。run_python / run_shell からそのパスで開くこと。"
+                f"(read-only)。{_NEXT}run_python / run_shell からそのパスで開く。"
             )
 
         max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
@@ -929,7 +928,7 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
-            return f"ERROR: sandbox へ書き込めません: {e!r}"
+            return f"ERROR: sandbox へ書き込めない: {e!r}"
         return (
             "取り込み結果:\n"
             f"- {name} ({_human_size(len(loaded.data))}) → "
@@ -953,7 +952,7 @@ class Tools:
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         abs_path, rel, err = _resolve_workspace_path(
@@ -962,14 +961,14 @@ class Tools:
         if err:
             return err
         if rel == "." or path.rstrip().endswith("/"):
-            return f"ERROR: {path!r} はディレクトリ。ファイル名まで指定すること。"
+            return f"ERROR: {path!r} はディレクトリ。{_NEXT}ファイル名まで指定する。"
 
         data = content.encode("utf-8")
         if len(data) > WRITE_FILE_LIMIT:
             return (
-                f"ERROR: 内容が大きすぎます ({_human_size(len(data))} > "
-                f"{_human_size(WRITE_FILE_LIMIT)})。分割して複数回に分けるか、"
-                "run_python で生成してください。"
+                f"ERROR: 内容が大きすぎる ({_human_size(len(data))} > "
+                f"{_human_size(WRITE_FILE_LIMIT)})。{_NEXT}分割して複数回に分けるか、"
+                "run_python で生成する。"
             )
 
         try:
@@ -985,14 +984,14 @@ class Tools:
         except Exception as e:
             return _files_error(e, abs_path)
 
-        msg = f"{abs_path} に書き込みました ({_human_size(len(data))})。"
+        msg = f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
         if rel.startswith("exports/"):
             # exports/ の自動添付は「実行の後始末」で回収する仕組みなので、
             # 実行を伴わない write_file では発火しない (取りこぼしの typical case)
             msg += (
-                " なお exports/ への自動添付は run_python / run_shell の実行後に"
-                "回収する仕組みのため、この書き込みだけでは添付されません。"
-                "ユーザーに渡すなら fetch_from_workspace を呼んでください。"
+                " exports/ の自動添付は run_python / run_shell の実行後に回収する仕組みなので、"
+                f"この書き込みだけでは添付されない。{_NEXT}ユーザーに渡すなら"
+                " fetch_from_workspace を呼ぶ。"
             )
         return msg
 
@@ -1008,14 +1007,14 @@ class Tools:
         :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。省略時は /workspace
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         abs_path, rel, err = _resolve_workspace_path(
             path,
             WORKSPACE_PATH_ARG_FORM,
             "list_workspace が一覧できるのは /workspace/ 配下だけ。"
-            "/ext/ は run_shell の ls で見ること "
+            f"{_NEXT}`/ext/` は run_shell の ls で見る "
             "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
         )
         if err:
@@ -1033,7 +1032,7 @@ class Tools:
             return _files_error(e, abs_path)
         entries = res.get("entries", [])
         if not entries:
-            return f"{abs_path} は空です (ファイルが無いか、ディレクトリが存在しない)。"
+            return f"{abs_path} は空 (ファイルが無いか、ディレクトリが存在しない)。"
         # sandbox は workspace 相対で返す — モデルには絶対パスで見せる
         return "\n".join(
             f"- {WORKSPACE_ROOT}/{e['path']} ({_human_size(e['size'])})"
@@ -1049,17 +1048,19 @@ class Tools:
         __message_id__: Optional[str] = None,
     ) -> str:
         """
-        sandbox のファイルをユーザーに見せられる形にする: チャットに添付して file_id を返す
-        (exports/ 以外に作ったファイルや過去実行の成果物、/ext/ で見つけた資料を渡すときに使う)。
+        sandbox のファイルをユーザーに見せられる形にする: チャットに添付して file_id と本文用の
+        リンクを返す (exports/ 以外に作ったファイルや過去実行の成果物、`/ext/` で見つけた資料を
+        渡すときに使う)。
+        画像・音声・動画は添付と同時にユーザーの画面に表示される (本文に貼り直さない)。
         `/ext/…` のファイルは sandbox のパスと URL が同じ文字列で、サーバが配信していれば
-        添付せずその URL を返す (本文にはその URL を貼る。日本語名は percent-encode された
-        同じファイルの別表記になる)。/workspace のパスはブラウザでは開けないので、
+        添付せずその URL のリンクを返す (本文にはそれをそのまま書く。日本語名は percent-encode
+        された同じファイルの別表記になる)。/workspace のパスはブラウザでは開けないので、
         パスを本文に貼ったり URL に書き換えたりせず、これに渡すこと。
 
         :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/imports/converted.xlsx
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できませんでした。"
+            return "ERROR: ユーザー情報が取得できない。"
         from nucllei.utils.image_refs import PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
@@ -1090,7 +1091,7 @@ class Tools:
         try:
             data = base64.b64decode(res["b64"])
         except Exception as e:
-            return f"ERROR: sandbox の応答を読めません: {e!r}"
+            return f"ERROR: sandbox の応答を読めない: {e!r}"
         return await self._attach(
             abs_path,
             os.path.basename(res["name"]),
@@ -1112,10 +1113,10 @@ class Tools:
         - 実体が nucllei 側の `EXT_DIR` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
           している) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
         - それ以外 → nucllei 自身に bind された同じ置き場から読み (`resolve_path`。境界・上限は
-          resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物 (sandbox に
-          だけ bind した置き場) は「読めない」になる — 配備は配信したくない物を nucllei 側の
-          `EXT_DIR` に置かないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
-          「配信範囲の外は添付もしない」は設定ごと無くした)
+          resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物は
+          「このサーバの /ext に無い」(本当に無いか mount のずれ)。ken 2026-10-04: 配備は
+          nucllei と sandbox に同じ /ext の組を mount し、/ext のファイルは URL で見せるだけ —
+          sandbox 経由で読み出して添付する経路は作らない (要らない file_id を増やさない)
         """
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
         from nucllei.utils.image_refs import resolve_path, url_for_mounted_path
@@ -1126,9 +1127,9 @@ class Tools:
             is_image = (mimetypes.guess_type(name)[0] or "").startswith("image/")
             link = f"![{name}]({url})" if is_image else f"[{name}]({url})"
             return (
-                f"添付不要: {abs_path} は {url} として既に配信されている "
-                "(ユーザーのブラウザがそのまま開ける URL)。ユーザーに見せるときは、"
-                f"この URL を 1 文字も変えずに本文に貼る: {link}"
+                f"添付不要: {abs_path} は既に URL として配信されている "
+                f"(ユーザーのブラウザがそのまま開ける)。{_NEXT}ユーザーに見せるときは、"
+                f"これを 1 文字も変えずに本文に書く: {link}"
             )
         loaded, err = await resolve_path(abs_path, user_id)
         if loaded is None:
@@ -1157,17 +1158,20 @@ class Tools:
         try:
             att = _register_bytes_file(user_id, name, data)
         except Exception as e:
-            return f"ERROR: Files への登録に失敗: {e!r}"
+            return f"ERROR: ファイルの登録に失敗した: {e!r}"
         await self._persist_and_emit_files(
             [att], chat_id, message_id, __event_emitter__
         )
         line = (
-            f"{abs_path} ({_human_size(len(data))}) をチャットに添付しました。"
-            f"file_id={att['id']}"
+            f"{abs_path} ({_human_size(len(data))}) をこのチャットのファイル一覧に添付した"
+            f" (file_id={att['id']})。"
         )
         # #88: 画像/音声/動画は display で枠下に自動表示(exports/ 自動回収と同じ経路)。
+        # それ以外はファイル一覧にだけ載る — 本文で示すリンクを渡す(_register_exports と同じ)
         md = _display_markdown(name, att["id"], att["file"]["meta"]["content_type"])
         if md:
             display(md)
-            line += "\nユーザーに提示済み(本文への再掲・貼り付けは不要)。"
+            line += f"\n{_DISPLAYED}。"
+        else:
+            line += f"\n{_file_link_note(name, att['id'])}。"
         return line

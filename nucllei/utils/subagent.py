@@ -433,10 +433,15 @@ async def _format_turn_result(child_chat_id: str, assistant_message_id: str, sto
     elif stopped:
         # 子タスクが外部から stop された(親ターンは継続)。answer は
         # persisted 済みの部分回答。
-        result["error"] = "agent session は停止されました(回答は途中まで)。"
+        result["error"] = "サブエージェントは止められた (回答は途中まで)。"
     result["answer"] = answer[:ANSWER_MAX_CHARS]
     if len(answer) > ANSWER_MAX_CHARS:
         result["truncated"] = True
+        # 黙って切らない — モデルが「回答はここまで」と誤読しないよう事実と次の手を添える
+        result["note"] = (
+            f"回答は先頭 {ANSWER_MAX_CHARS} 字で切った。"
+            "次の手: 続きが要るなら同じ session_id で頼む。"
+        )
     if usage:
         result["usage"] = {
             key: usage[key]
@@ -536,17 +541,20 @@ async def run_subagent_turn(
 
     if not (parent_chat_id and parent_message_id):
         return _error(
-            "サブエージェントはチャットの文脈(chat_id / message_id)でのみ起動できます。"
+            "サブエージェントはチャットの中でだけ起動できる (chat_id / message_id が無い)。"
         )
 
     if not (instruction or "").strip():
-        return _error("instruction は必須です。")
+        return _error(
+            "instruction が空。次の手: 子への指示を instruction に書いて呼び直す。"
+        )
 
     # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
     if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
         return _error(
-            f"サブエージェントの同時実行数が上限({SUBAGENT_MAX_CONCURRENCY})に"
-            "達しています。しばらくしてから再試行してください。"
+            f"サブエージェントは同時 {SUBAGENT_MAX_CONCURRENCY} 本まで"
+            " (超えた分は起動していない)。"
+            "次の手: 起動済みの分の結果がそろってから残りを呼ぶ。"
         )
     _active_turns += 1
     # 実行中登録した agent session id。None = 未登録。
@@ -559,12 +567,12 @@ async def run_subagent_turn(
         # 同一述語をその場で再評価する(履歴・enum に委ねない)。
         parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
         if parent is None or parent.deleted_at is not None:
-            return _error("親チャットが見つかりません。")
+            return _error("親チャットが見つからない。")
         depth = parent.depth + 1
         if depth > SUBAGENT_MAX_DEPTH:
             return _error(
-                f"サブエージェントの入れ子深さが上限({SUBAGENT_MAX_DEPTH})を"
-                "超えるため起動できません。"
+                f"サブエージェントの入れ子は {SUBAGENT_MAX_DEPTH} 段が上限で、"
+                "ここからはサブエージェントを起動できない。次の手: 自分で処理する。"
             )
         accessible = {
             m.id: m
@@ -576,8 +584,8 @@ async def run_subagent_turn(
             # 並行継続の排他(lost update 防止): 実行中なら待たずに即エラー。
             if session_id in _running_agent_sessions:
                 return _error(
-                    f"この agent session は実行中です: {session_id}"
-                    "(完了を待ってから継続してください)"
+                    f"このサブエージェントのセッションは実行中: {session_id}。"
+                    "次の手: 今の実行の結果がそろってから同じ session_id で続ける。"
                 )
             _running_agent_sessions.add(session_id)
             running_session_id = session_id
@@ -590,14 +598,15 @@ async def run_subagent_turn(
                 or child.parent_chat_id != parent_chat_id
             ):
                 return _error(
-                    f"session_id が不正です: {session_id}"
-                    "(このチャットから起動した agent session のみ継続できます)"
+                    f"session_id が不正: {session_id} (続けられるのはこのチャットから"
+                    "起動したサブエージェントのセッションだけ)。"
+                    "次の手: run_subagent の返りの session_id をそのまま渡す。"
                 )
             chat_json = child.chat
             target_preset_id = (chat_json.get("models") or [None])[0]
             preset = accessible.get(target_preset_id)
             if preset is None:
-                return _error(f"preset にアクセスできません: {target_preset_id}")
+                return _error(f"preset を使えない: {target_preset_id}")
             _, assistant_message_id = _append_turn_messages(
                 chat_json, instruction, preset.id, preset.name
             )
@@ -606,10 +615,14 @@ async def run_subagent_turn(
         else:
             # 新規 spawn
             if not preset_id:
-                return _error("新規セッションには preset_id が必須です。")
+                return _error(
+                    "preset_id が無い。次の手: 新しく起動するときは preset_id を指定する。"
+                )
             preset = accessible.get(preset_id)
             if preset is None:
-                return _error(f"preset にアクセスできません: {preset_id}")
+                return _error(
+                    f"preset を使えない: {preset_id}。次の手: run_subagent の説明の一覧にある preset_id を渡す。"
+                )
             # 決定的タイトル(生成タスクは走らせない — agent_session マーカで抑止)
             title = f"{preset.name} — {' '.join(instruction.split())[:40]}"
             chat_json = {
@@ -632,7 +645,9 @@ async def run_subagent_turn(
                 depth=depth,
             )
             if child is None:
-                return _error("agent session の作成に失敗しました。")
+                return _error(
+                    "サブエージェントのセッションを作れなかった。次の手: 自分で処理する。"
+                )
             child_chat_id = child.id
             # 新規 id は衝突しない(uuid)が、spawn 完了→実行の間も継続経路
             # から「実行中」に見えるよう同じ集合へ載せる
@@ -641,7 +656,7 @@ async def run_subagent_turn(
 
         child_model = _resolve_child_model(request, preset)
         if child_model is None:
-            return _error(f"preset が利用できません: {preset.id}")
+            return _error(f"preset を使えない: {preset.id}")
 
         # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
         # 結果 JSON にも session_id が載る)。description はモデル向け(check_task の
@@ -650,7 +665,7 @@ async def run_subagent_turn(
         # マウントし、task_id の到着で live 追従を始める。ラベルは FE が子の
         # イベントから組む)。sync / background(_ExecSink が親 stream へ転送)共通
         tool_output.progress(
-            f"agent session {child_chat_id}",
+            f"サブエージェントのセッション {child_chat_id}",
             subagent={"session_id": child_chat_id},
         )
 

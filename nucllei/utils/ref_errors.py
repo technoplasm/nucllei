@@ -6,25 +6,29 @@ tool の仕事だが、同じ code を 3 本の tool(feed_image / fetch_url / sa
 send_to_workspace(url=))が別々に言い分けていた — llens からの移設(nucllei #141)で
 ここ 1 箇所にまとめる。
 
-文面は「何が起きたか + 次にどうするか」。モデルがそのままユーザーに転記しても差し支えない
-言い方にする(内部名・env 名・`detail` は出さない。`detail` は log に残す)。「読めなかった」を
+文面は「**事実の文** + `次の手:` 以降(モデルだけに向けた指示)」の 2 部(2026-10-04、
+README_API §5.1「事実の文 + 次の手」)。事実の文はユーザーにそのまま伝えてよい言い方にし
+(内部名・env 名・`detail` は出さない。`detail` は log に残す)、配備は自分のモデルに「事実は
+伝え、次の手は伝えない」と言える。常体(だ・である)で書く。ユーザーに渡すリンクは
+`[ラベル](URL)` の markdown で書かせる(裸の相対パスを本文に出させない — `SHOW_AS_LINK`)。
+同じ toolkit に無い tool を次の手に挙げるときは「〜が使えるなら」と条件付きで書く。「読めなかった」を
 全部リンク切れと言い換えさせないために、code / reason ごとに言い分ける(実走 2026-09-06:
 32.6 MB の PDF が上限に当たったのを束ねた 1 文のせいでモデルが「リンク切れ」と誤報した)。
 
 役割分担:
 
-- **何が起きたか**(code / reason に対応する部分)はここが持つ。feed_image と fetch_url が
-  同文で持っていた言い方を既定にする。
-- **次にどうするか**は tool ごとに違う(fetch_url は run_subagent + max_mb、feed_image は
-  縮小して path= で渡す、send_to_workspace は上限が valve …)ので、呼び手が `RefErrorHints`
-  で渡す。既定(feed_image / fetch_url の共通文)と違う言い方を持つ tool は、その code の
-  テンプレートごと差し替える — 3 本が同じ状況を別の言葉で言っていた箇所は、まとめるときに
-  文面を変えない(モデルに見える文を黙って変えない)。
+- **何が起きたか**(code / reason に対応する部分)と既定の次の手はここが持つ。3 本の
+  tool が同じ状況を言う文は同じにする(2026-10-04 の監査で、sandbox だけが持っていた
+  言い換え — 「登録した配信元」「許可先の外」「3 回を超えて」 — は既定に揃えて外した)。
+- **次にどうするか**が tool ごとに違う code(too_large: fetch_url は run_subagent + max_mb、
+  feed_image は縮小して path= で渡す、send_to_workspace は上限が valve …、path で来た参照の
+  not_found / unreachable)だけ、呼び手が `RefErrorHints` でその code のテンプレートごと
+  差し替える。
 - `arg`(`"url"` / `"path"`)は **どの引数で来たか**(値の形では判定しない)。形の誤り
   (`unsupported_form`)と traversal で添える固定文(`URL_ARG_FORM` / `PATH_ARG_FORM`)を選ぶ。
 
 テンプレートの差し込み語は `{ref}`(参照の literal)・`{status}`(HTTP status)・`{code}`
-(RefError.code)の 3 つだけで、`str.replace` で埋める(`URL_ARG_FORM` の `{id}` を
+(RefError.code。内部名なので builtin の文面では使っていない)の 3 つだけで、`str.replace` で埋める(`URL_ARG_FORM` の `{id}` を
 `str.format` に噛ませない)。
 """
 
@@ -69,6 +73,24 @@ def mb(n) -> str:
     return f"{n / 1024 / 1024:.1f} MB"
 
 
+# --- 「事実の文 + 次の手」の共通部品 (module docstring) ---------------------------------
+
+# 次の手 (モデルだけに向けた指示) の始まり。この語より前が事実の文
+NEXT = "次の手: "
+# URL をユーザーに渡すときの言い方 (全 tool 共通の 1 文)。`{ref}` は渡す URL — 裸の相対パス
+# (`/ext/…`) を本文に出させず、必ず markdown リンクにさせる
+SHOW_AS_LINK = (
+    "ユーザーに示すなら [ラベル]({ref}) のリンクにする (ブラウザでは開ける)。"
+)
+# 404 だけはリンクを示しても開けない
+TELL_BROKEN_LINK = "ユーザーにはリンク切れと伝える。"
+
+
+def show_as_link(url: str) -> str:
+    """`SHOW_AS_LINK` に URL を埋めた 1 文 (テンプレートでなく全文を組む呼び手用)。"""
+    return SHOW_AS_LINK.replace("{ref}", url)
+
+
 # `unknown_upstream` の内訳(`RefError.reason`)→ 「何が起きたか」(feed_image / fetch_url の
 # 共通文。`None` は reason が無い・知らない値のときの 1 文面)。文は `{ref} ` の後ろに続け、
 # 末尾の「。」は組み立て側が付ける。detail は使わない — 文面は固定でない。
@@ -85,12 +107,15 @@ UNKNOWN_UPSTREAM_WHAT: Mapping[str | None, str] = MappingProxyType(
     }
 )
 
-# redirect(3xx、辿らなかった)の「何が起きたか」。次の一手は tool ごと(`RefErrorHints.redirect_next`)
+# reason 無しの 3xx(redirect は 3 回まで辿る — ここに来るのは転送先が URL として組めない
+# とき)の「何が起きたか」の前半。続きは `RefErrorHints.redirect_next`
 _REDIRECT_WHAT = "ERROR: {ref} は redirect ({status}) を返した。"
 # 2xx / 3xx / 404 以外の上流 status。3 本とも同文
 _UPSTREAM_STATUS = (
     "ERROR: {ref} の上流が {status} を返した。"
-    "時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
+    + NEXT
+    + "時間を置いて再試行する。"
+    + SHOW_AS_LINK
 )
 # traversal(`..` / 制御文字)。添える形の文は arg で選ぶ
 _TRAVERSAL = "ERROR: {ref} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
@@ -102,35 +127,42 @@ class RefErrorHints:
     `too_large` だけは全文を組む callable `(ref, err) -> str`(次の一手が tool ごとに全く
     違い、size / limit / size_exact の読み方も tool の文脈に依るため)。
 
-    既定値は feed_image と fetch_url が同文で持っていた言い方(url で来た参照向け)。
+    既定値は全 tool 共通の言い方(url で来た参照向け)。事実の文 + `次の手:`(module docstring)。
     """
 
     too_large: Callable[[str, RefError], str]
     # resolver が理由を付けずに失敗した・知らない code(通常起きない)
     unexplained: str
     not_found: str = (
-        "ERROR: {ref} は存在しない (404 / ファイル無し)。リンク切れとして案内する。"
+        "ERROR: {ref} は存在しない (404 / ファイル無し)。" + NEXT + TELL_BROKEN_LINK
     )
-    # 3xx(`_REDIRECT_WHAT` に続ける次の一手)
+    # reason 無しの 3xx(`_REDIRECT_WHAT` に続ける。転送先が URL として組めなかった)
     redirect_next: str = (
-        "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと。"
+        "転送先が開ける URL ではなかった (http(s) でない・形が不正)。"
+        + NEXT
+        + "転送先のページを直接指す URL を渡す。"
     )
     # 一般の URL の redirect の転送先がこのサーバ自身 / 回数超過(reason 付き)
     redirect_self: str = (
-        "ERROR: {ref} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
-        "辿らなかった。ユーザーには URL をそのまま案内する。"
+        "ERROR: {ref} の redirect ({status}) の転送先が このサーバ自身 (または同居するサービス)"
+        " なので辿らなかった。" + NEXT + SHOW_AS_LINK
     )
     too_many_redirects: str = (
-        "ERROR: {ref} は redirect が 4 回以上続いた (辿るのは 3 回まで)。"
-        "転送先のページを直接指す URL を渡すこと。"
+        "ERROR: {ref} は redirect が 4 回以上続いた (辿るのは 3 回まで。転送のループか、"
+        "ログインが要るページのことが多い)。"
+        + NEXT
+        + "転送先のページを直接指す URL を渡す。"
+        + SHOW_AS_LINK
     )
     unresolvable: str = (
-        "ERROR: {ref} のホスト名を解決できない — DNS の無い環境では IP アドレスで指定する "
-        "(例 `http://192.0.2.10/…`)。"
+        "ERROR: {ref} のホスト名を解決できない。"
+        + NEXT
+        + "DNS の無い環境では IP アドレスで指定する (例 `http://192.0.2.10/…`)。"
     )
     unreachable: str = (
         "ERROR: {ref} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
-        "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
+        + NEXT
+        + SHOW_AS_LINK.replace("開ける", "開けることがある")
     )
     # reason → 何が起きたか(`UNKNOWN_UPSTREAM_WHAT` と同じ形)。`extra` は tool が添える
     # 許可先の一覧など(「。」の後、`URL_ARG_FORM` の前)

@@ -521,15 +521,15 @@ def build_load_skill_tool(model, user, load_tools=None):
     spec = {
         "name": "load_skill",
         "description": (
-            "Load a skill: returns instructions you must follow to perform "
-            "a specific kind of task. Available skills:\n" + listing
+            "skill を読み込む。作業の手順書 (自分向けの指示) を返す。"
+            "手順書の見出しや文言は回答に写さない。使える skill:\n" + listing
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "Id of the skill to load.",
+                    "description": "読み込む skill の id。",
                     "enum": list(manifest.keys()),
                 }
             },
@@ -540,7 +540,10 @@ def build_load_skill_tool(model, user, load_tools=None):
     async def load_skill(skill_id: str = ""):
         skill = manifest.get(normalize_command(skill_id))
         if skill is None:
-            return f"skill not found: {skill_id}"
+            return (
+                f"skill が見つからない: {skill_id}。"
+                "次の手: load_skill の説明の一覧にある id をそのまま渡す。"
+            )
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
             # load_tools は async フック(#28: 中で get_tools をワーカースレッド実行)

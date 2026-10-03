@@ -5,8 +5,9 @@ feed_image / fetch_url / sandbox(send_to_workspace(url=)) が別々に持って�
 - code / reason ごとに分岐が届くこと (全 code・全 reason)
 - 既定の文面 = feed_image と fetch_url が同文で持っていた言い方 (url 向け)
 - hints による差し替えが効くこと、`arg` で形の固定文を選ぶこと
-- 3 本の呼び手が渡す hints を通した文面が、移設前の llens / sandbox の原文と一致すること
-  (同じ状況の別の言い方を、まとめるときに黙って変えていない)
+- 3 本の呼び手が渡す hints を通した文面を全文で固定すること (モデルに見える文を黙って
+  変えない。2026-10-04 に「事実の文 + 次の手:」の形へ意図して書き換えた — README_API §5.1)
+- モデルに見える文が「案内」「職員」・敬体・裸の `/ext/` `/api/v1/files/` を含まないこと
 """
 
 from nucllei.utils.image_refs import (
@@ -83,7 +84,7 @@ def test_too_large_is_delegated_to_the_hint():
 
 def test_not_found_default_and_override():
     assert _explain(RefError("not_found", "x")) == (
-        f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。"
+        f"ERROR: {U} は存在しない (404 / ファイル無し)。次の手: ユーザーにはリンク切れと伝える。"
     )
     assert (
         _explain(RefError("not_found", "x"), arg="path", not_found="NF {ref}")
@@ -94,40 +95,44 @@ def test_not_found_default_and_override():
 def test_upstream_status_redirect_reasons_and_plain_status():
     to_self = RefError("upstream_status", "x", status=302, reason="redirect_self")
     assert _explain(to_self) == (
-        f"ERROR: {U} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
-        "辿らなかった。ユーザーには URL をそのまま案内する。"
+        f"ERROR: {U} の redirect (302) の転送先が このサーバ自身 (または同居するサービス) なので"
+        f"辿らなかった。次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
     assert _explain(to_self, redirect_self="RS {ref} {status}") == f"RS {U} 302"
     loop = RefError("upstream_status", "x", status=302, reason="too_many_redirects")
     assert _explain(loop) == (
-        f"ERROR: {U} は redirect が 4 回以上続いた (辿るのは 3 回まで)。転送先のページを直接指す URL を渡すこと。"
+        f"ERROR: {U} は redirect が 4 回以上続いた (辿るのは 3 回まで。転送のループか、ログインが要るページの"
+        "ことが多い)。次の手: 転送先のページを直接指す URL を渡す。"
+        f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
     assert _explain(loop, too_many_redirects="TM {ref}") == f"TM {U}"
-    # reason 無しの 3xx: 「何が起きたか」は共通、次の一手は hint
+    # reason 無しの 3xx (転送先が URL として組めない): 前半は共通、続きは hint
     assert _explain(RefError("upstream_status", "x", status=301)) == (
-        f"ERROR: {U} は redirect (301) を返した。redirect は辿らないので、ディレクトリではなく"
-        "ページを直接指す URL を渡すこと。"
+        f"ERROR: {U} は redirect (301) を返した。転送先が開ける URL ではなかった (http(s) でない・"
+        "形が不正)。次の手: 転送先のページを直接指す URL を渡す。"
     )
     assert _explain(
         RefError("upstream_status", "x", status=301), redirect_next="NEXT"
     ) == (f"ERROR: {U} は redirect (301) を返した。NEXT")
     for status in (401, 403, 500, 503):
         assert _explain(RefError("upstream_status", "x", status=status)) == (
-            f"ERROR: {U} の上流が {status} を返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
+            f"ERROR: {U} の上流が {status} を返した。次の手: 時間を置いて再試行する。"
+            f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
         )
     assert _explain(RefError("upstream_status", "x")) == (
-        f"ERROR: {U} の上流が エラー を返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
+        f"ERROR: {U} の上流が エラー を返した。次の手: 時間を置いて再試行する。"
+        f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
 
 
 def test_upstream_unreachable_with_and_without_reason():
     assert _explain(RefError("upstream_unreachable", "x", reason="unresolvable")) == (
-        f"ERROR: {U} のホスト名を解決できない — DNS の無い環境では IP アドレスで指定する "
+        f"ERROR: {U} のホスト名を解決できない。次の手: DNS の無い環境では IP アドレスで指定する "
         "(例 `http://192.0.2.10/…`)。"
     )
     assert _explain(RefError("upstream_unreachable", "x")) == (
         f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
-        "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
+        f"次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開けることがある)。"
     )
     assert (
         _explain(RefError("upstream_unreachable", "x"), unreachable="UR {ref}")
@@ -187,10 +192,37 @@ def test_templates_are_filled_by_replace_not_format():
     )
 
 
-# --- 3 本の呼び手の hints を通した文面が原文 (移設前) と一致する -------------------------
+# --- 3 本の呼び手の hints を通した文面 (全文で固定) ----------------------------------
+
+_LINK = "ユーザーに示すなら [ラベル]({u}) のリンクにする (ブラウザでは開ける)。"
+_NOT_FOUND = f"ERROR: {U} は存在しない (404 / ファイル無し)。次の手: ユーザーにはリンク切れと伝える。"
+_REDIRECT = (
+    f"ERROR: {U} は redirect (302) を返した。転送先が開ける URL ではなかった (http(s) でない・"
+    "形が不正)。次の手: 転送先のページを直接指す URL を渡す。"
+)
+_REDIRECT_SELF = (
+    f"ERROR: {U} の redirect (302) の転送先が このサーバ自身 (または同居するサービス) なので"
+    "辿らなかった。次の手: " + _LINK.format(u=U)
+)
+_TOO_MANY = (
+    f"ERROR: {U} は redirect が 4 回以上続いた (辿るのは 3 回まで。転送のループか、ログインが要る"
+    "ページのことが多い)。次の手: 転送先のページを直接指す URL を渡す。"
+    + _LINK.format(u=U)
+)
+_UNREACHABLE = (
+    f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
+    f"次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開けることがある)。"
+)
+_SERVER_SELF = (
+    f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
+    f"{URL_ARG_FORM}"
+)
+_NOT_ALLOWED = f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
 
 
-def test_sandbox_wording_is_unchanged():
+def test_sandbox_wording():
+    """send_to_workspace(url=): too_large と unexplained 以外は共通の既定文 (2026-10-04 に
+    「登録した配信元」「許可先の外」「3 回を超えて」の独自文面を外した)。"""
     from nucllei.builtin_tools.sandbox import _explain_ref_error as sandbox_explain
 
     cases = {
@@ -198,83 +230,53 @@ def test_sandbox_wording_is_unchanged():
             "too_large", "x", size=3 * 1024 * 1024, limit=1024 * 1024, size_exact=True
         ): (
             f"ERROR: {U} は 3.0MB で、取り込みの上限 1.0MB を超えている。sandbox には取り込めない "
-            "(上限は管理者の設定で、引数では上げられない)。リンク切れではない — ユーザーには URL を"
-            "そのまま案内する (ブラウザでは開ける)。"
+            "(上限は管理者の設定で、引数では上げられない)。リンク切れではない。次の手: "
+            + _LINK.format(u=U)
         ),
+        RefError("not_found", "x"): _NOT_FOUND,
         RefError(
-            "not_found", "x"
-        ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
-        RefError("upstream_status", "x", status=302, reason="redirect_self"): (
-            f"ERROR: {U} は redirect (302) を返したが、転送先が このサーバ自身 (または同居するサービス)"
-            " なので辿らなかった。ユーザーには URL をそのまま案内する。"
-        ),
-        RefError("upstream_status", "x", status=302, reason="too_many_redirects"): (
-            f"ERROR: {U} は redirect を 3 回を超えて繰り返した (転送のループか、ログインが要るページ)。"
-            "ユーザーには URL をそのまま案内する。"
-        ),
-        RefError("upstream_status", "x", status=302): (
-            f"ERROR: {U} は redirect (302) を返した。登録した配信元の redirect は辿らないので、"
-            "ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
-        ),
+            "upstream_status", "x", status=302, reason="redirect_self"
+        ): _REDIRECT_SELF,
+        RefError(
+            "upstream_status", "x", status=302, reason="too_many_redirects"
+        ): _TOO_MANY,
+        RefError("upstream_status", "x", status=302): _REDIRECT,
         RefError("upstream_status", "x", status=503): (
-            f"ERROR: {U} の上流が 503 を返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
+            f"ERROR: {U} の上流が 503 を返した。次の手: 時間を置いて再試行する。"
+            + _LINK.format(u=U)
         ),
         RefError("upstream_unreachable", "x", reason="unresolvable"): (
-            f"ERROR: {U} のホスト名を解決できない (この環境に DNS が無い場合は、ホスト名ではなく IP アドレスで指定する)。"
+            f"ERROR: {U} のホスト名を解決できない。次の手: DNS の無い環境では IP アドレスで指定する "
+            "(例 `http://192.0.2.10/…`)。"
         ),
-        RefError("upstream_unreachable", "x"): (
-            f"ERROR: {U} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
-            "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
-        ),
-        RefError("unknown_upstream", "x", reason="server_self"): (
-            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-            f"{URL_ARG_FORM}"
-        ),
+        RefError("upstream_unreachable", "x"): _UNREACHABLE,
+        RefError("unknown_upstream", "x", reason="server_self"): _SERVER_SELF,
         # unknown_name / not_ext_form は 2026-10-03 に無くした — 知らない reason は 1 文面
-        RefError("unknown_upstream", "x", reason="unknown_name"): (
-            f"ERROR: {U} は許可先の外 (この配備が取得を許可している URL ではない)。{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は許可先の外 (この配備が取得を許可している URL ではない)。{URL_ARG_FORM}"
-        ),
+        RefError("unknown_upstream", "x", reason="unknown_name"): _NOT_ALLOWED,
+        RefError("unknown_upstream", "x"): _NOT_ALLOWED,
         RefError("traversal", "x"): (
             f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{URL_ARG_FORM}"
         ),
         RefError(
             "unsupported_form", "x"
         ): f"ERROR: {U} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}",
-        RefError("something_new", "x"): f"ERROR: {U} を取得できない (something_new)。",
+        # code (内部名) は出さない
+        RefError("something_new", "x"): f"ERROR: {U} を取得できない。",
     }
     for err, want in cases.items():
         assert sandbox_explain(U, err) == want, err
 
 
-def test_feed_image_wording_is_unchanged():
+def test_feed_image_wording():
     from nucllei.builtin_tools.feed_image import _explain_ref_error as feed_explain
 
-    literal = "tool の戻り値に出た URL の literal をそのまま渡すこと。"
     cases_url = {
-        RefError(
-            "not_found", "x"
-        ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
-        RefError("upstream_status", "x", status=302): (
-            f"ERROR: {U} は redirect (302) を返した。redirect は辿らないので、ディレクトリではなく"
-            f"ファイルやページを直接指す URL を渡すこと。{literal}"
-        ),
-        RefError("upstream_unreachable", "x"): (
-            f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
-            "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
-        ),
-        RefError("unknown_upstream", "x", reason="server_self"): (
-            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-            f"{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x", reason="not_ext_form"): (
-            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
-        ),
+        RefError("not_found", "x"): _NOT_FOUND,
+        RefError("upstream_status", "x", status=302): _REDIRECT,
+        RefError("upstream_unreachable", "x"): _UNREACHABLE,
+        RefError("unknown_upstream", "x", reason="server_self"): _SERVER_SELF,
+        RefError("unknown_upstream", "x"): _NOT_ALLOWED,
+        RefError("unknown_upstream", "x", reason="not_ext_form"): _NOT_ALLOWED,
         RefError(
             "something_new", "x"
         ): f"ERROR: {U} を読めない (存在しない / 許可された場所の外 / 大きすぎる)。",
@@ -282,16 +284,16 @@ def test_feed_image_wording_is_unchanged():
     for err, want in cases_url.items():
         assert feed_explain(U, err) == want, err
     cases_path = {
-        RefError(
-            "not_found", "x"
-        ): f"ERROR: {P} は存在しない (ファイル無し)。run_shell の ls で存在を確認すること。",
+        RefError("not_found", "x"): (
+            f"ERROR: {P} は存在しない。次の手: run_shell が使えるなら ls で確かめる。"
+        ),
         RefError("upstream_unreachable", "x"): (
             f"ERROR: {P} に届かない (この配備からは到達できない、または一時的な障害)。"
-            "run_shell の ls で存在を確認すること。"
+            "次の手: run_shell が使えるなら ls で存在を確かめる。"
         ),
         RefError("workspace_unavailable", "x"): (
             f"ERROR: {P} は sandbox のファイルだが読めない (sandbox が起動していないか、ファイルが無い)。"
-            "list_workspace で存在を確認すること。"
+            "次の手: list_workspace が使えるなら存在を確かめる。"
         ),
         RefError("traversal", "x"): (
             f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{PATH_ARG_FORM}"
@@ -300,59 +302,59 @@ def test_feed_image_wording_is_unchanged():
     }
     for err, want in cases_path.items():
         assert feed_explain(P, err, True) == want, err
-    # too_large (url / path) — 原文の先頭と次の一手
+    # `/ext/…` の not_found は fetch_from_workspace と同文 (このサーバの /ext に無い)
+    from nucllei.builtin_tools.sandbox import _explain_mount_error
+
+    ext = "/ext/doc/a.pdf"
+    assert (
+        feed_explain(ext, RefError("not_found", "x"), True)
+        == _explain_mount_error(ext, RefError("not_found", "x"))
+        == (
+            f"ERROR: {ext} はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount"
+            " されている)。次の手: 中身が要るなら sandbox で読んで使う。"
+        )
+    )
+    # too_large (url / path)
     big = RefError(
         "too_large", "x", size=32_646_426, limit=25 * 1024 * 1024, size_exact=True
     )
-    assert feed_explain(U, big).startswith(
-        f"ERROR: {U} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない。"
-        "画像なら send_to_workspace(url=…) で sandbox に取り込み、"
+    assert feed_explain(U, big) == (
+        f"ERROR: {U} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない"
+        " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で send_to_workspace と run_python が"
+        "使えるなら、send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小してから"
+        " /workspace/… の path を feed_image(path=…) に渡す。PDF のテキストが要り、run_subagent と"
+        " fetch_url が使えるなら、run_subagent の子が fetch_url を max_mb 付きで読む。"
+        + _LINK.format(u=U)
     )
-    assert feed_explain(U, big).endswith(
-        "ユーザーには URL をそのまま案内する (ブラウザでは開ける)。"
+    assert feed_explain(P, big, True) == (
+        f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない"
+        " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で run_python が使えるなら、このパスを"
+        "開いて縮小し、出力を /workspace/… に書いてからその path を feed_image(path=…) に渡す。"
+        "sandbox のファイルなので、ユーザーに見せるなら、fetch_from_workspace が使えるならそれに path を"
+        "渡し、返ったリンクを本文に書く。"
     )
-    assert feed_explain(P, big, True).endswith(
-        "sandbox のファイルなので、見せるなら fetch_from_workspace(path=…) に渡し、返った URL か file_id で案内する。"
-    )
-    assert feed_explain(U, RefError("too_large", "x")) == (
-        f"ERROR: {U} は 取得の上限 を超えている。このままでは自分の目に入れられない。"
-        "画像なら send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小してから /workspace/… の path を"
-        " feed_image(path=…) に渡す。PDF なら pages を絞っても上限は変わらない (テキストが要るなら fetch_url を"
-        " run_subagent の子が max_mb 付きで読む)。ユーザーには URL をそのまま案内する (ブラウザでは開ける)。"
+    assert feed_explain(U, RefError("too_large", "x")).startswith(
+        f"ERROR: {U} は 取得の上限 を超えている。このままでは自分の目に入れられない"
     )
 
 
-def test_fetch_url_wording_is_unchanged(monkeypatch):
+def test_fetch_url_wording(monkeypatch):
     """原本ホスト (EXT_PUBLIC_BASES) の句は 2026-10-03 に設定ごと無くなった。"""
     from nucllei.builtin_tools import fetch_url
 
     explain = fetch_url._explain_ref_error
     cases = {
+        RefError("not_found", "x"): _NOT_FOUND,
+        RefError("upstream_status", "x", status=302): _REDIRECT,
         RefError(
-            "not_found", "x"
-        ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
-        RefError("upstream_status", "x", status=302): (
-            f"ERROR: {U} は redirect (302) を返した。redirect は辿らないので、ディレクトリではなく"
-            "ページを直接指す URL を渡すこと。"
-        ),
-        RefError("upstream_status", "x", status=302, reason="redirect_self"): (
-            f"ERROR: {U} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
-            "辿らなかった。ユーザーには URL をそのまま案内する。"
-        ),
-        RefError("unknown_upstream", "x", reason="server_self"): (
-            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-            f"{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x", reason="unknown_name"): (
-            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
-        ),
+            "upstream_status", "x", status=302, reason="redirect_self"
+        ): _REDIRECT_SELF,
+        RefError("unknown_upstream", "x", reason="server_self"): _SERVER_SELF,
+        RefError("unknown_upstream", "x", reason="unknown_name"): _NOT_ALLOWED,
+        RefError("unknown_upstream", "x"): _NOT_ALLOWED,
         RefError("unsupported_form", "x"): url_error(U),
         RefError("something_new", "x"): (
-            f"ERROR: {U} を取得できない (上流不達・不在・redirect・サイズ超過のいずれか。"
-            "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと)。"
+            f"ERROR: {U} を取得できない (届かない・存在しない・redirect を辿れない・大きすぎる のいずれか)。"
         ),
     }
     for err, want in cases.items():
@@ -362,10 +364,11 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
         "too_large", "x", size=32_646_426, limit=25 * 1024 * 1024, size_exact=True
     )
     assert explain(U, big, 200.0) == (
-        f"ERROR: {U} は 31.1 MB で、取得の上限 25.0 MB を超えている。主 context では読まず、run_subagent に URL と"
-        f'指示を渡し、子が fetch_url(url="{U}", max_mb=32) で読む (子は offset で続きを取れる)。'
-        "pandas 等で加工・集計したいだけなら send_to_workspace(url=…) で sandbox に取り込む "
-        "(読むためのテキスト化には使わない)。中身が要らなければ URL をそのまま案内する (ブラウザでは開ける)。"
+        f"ERROR: {U} は 31.1 MB で、取得の上限 25.0 MB を超えている。次の手: この会話では読まない。"
+        f'run_subagent が使えるなら URL と指示を渡し、子が fetch_url(url="{U}", max_mb=32) で読む'
+        " (子は offset で続きを取れる)。pandas 等で加工・集計したいだけなら、send_to_workspace が"
+        "使えるなら send_to_workspace(url=…) で sandbox に取り込む (読むためのテキスト化には使わない)。"
+        "中身が要らなければ、" + _LINK.format(u=U)
     )
 
 
@@ -384,7 +387,6 @@ def test_model_visible_texts_name_no_deployment():
         if isinstance(f.default, str)
     ]
     texts += [
-        feed_image._HINT_LITERAL,
         fetch_url._ERR_UNEXPLAINED,
         feed_image.Tools.feed_image.__doc__,
         fetch_url.Tools.fetch_url.__doc__,
@@ -402,3 +404,149 @@ def test_model_visible_texts_name_no_deployment():
             "grep_doc",
         ):
             assert gone not in text, (gone, text)
+
+
+# --- 監査: モデルに見える文の書き方 (2026-10-04、llens の監査依頼) -----------------------
+#
+# tool が返す文はモデルが本文へ写しうる。内部向けの指示語 (「〜を案内」) が見出しに写り、
+# 裸の相対パス `/ext/…` がそのまま答えに出た (staging の実例)。owned な 6 ファイルの
+# 文字列リテラル (docstring・log・Field の description を除く = モデルに返る文の部品) と
+# 公開メソッドの docstring を走査する。
+
+_AUDITED_MODULES = (
+    "nucllei.utils.ref_errors",
+    "nucllei.builtin_tools.feed_image",
+    "nucllei.builtin_tools.fetch_url",
+    "nucllei.builtin_tools.sandbox",
+    "nucllei.builtin_tools.context_budget",
+    "nucllei.builtin_tools.attachment_text",
+)
+_FORBIDDEN = ("案内", "職員", "です", "ます。", "ました", "ません", "ください")
+
+
+def _model_visible_literals(module_name):
+    """module の文字列リテラルのうち、モデルに返る文の部品になりうるもの。"""
+    import ast
+    import importlib
+    import inspect
+
+    module = importlib.import_module(module_name)
+    tree = ast.parse(inspect.getsource(module))
+    skip = set()
+    for node in ast.walk(tree):
+        # docstring (module / class / function)
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+            ):
+                skip.add(id(body[0].value))
+        # log.* の引数と Field(description=…) (管理画面向け) はモデルに返らない
+        if isinstance(node, ast.Call):
+            func = node.func
+            is_log = (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "log"
+            )
+            is_field = isinstance(func, ast.Name) and func.id == "Field"
+            if is_log or is_field:
+                for sub in ast.walk(node):
+                    skip.add(id(sub))
+    out = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in skip
+        ):
+            out.append(node.value)
+    # 公開メソッド (= tool 関数) の docstring はモデルに見える
+    tools = getattr(module, "Tools", None)
+    if tools is not None:
+        for name, fn in vars(tools).items():
+            if not name.startswith("_") and callable(fn) and fn.__doc__:
+                out.append(fn.__doc__)
+    return out
+
+
+def _bare_paths(text):
+    """`](…)` の中でも backtick の中でもない `/ext/` `/api/v1/files/` の出現。"""
+    import re
+
+    stripped = re.sub(r"`[^`]*`", "", text)
+    hits = []
+    for m in re.finditer(r"/ext/|/api/v1/files/", stripped):
+        if stripped[max(0, m.start() - 2) : m.start()] != "](":
+            hits.append(m.group(0))
+    return hits
+
+
+def _is_prose(text):
+    """日本語か空白を含む = 文。URL を組むだけの断片 (`"/api/v1/files/"`) は対象外。"""
+    return any(ord(ch) > 0x2FFF for ch in text) or " " in text
+
+
+def test_model_visible_texts_follow_the_wording_rules():
+    """「案内」「職員」・敬体を書かない。ユーザーに渡すパスは `[ラベル](URL)` のリンクで
+    書く (裸の `/ext/…` `/api/v1/files/…` を出さない)。README_API §5.1。"""
+    for module_name in _AUDITED_MODULES:
+        for text in _model_visible_literals(module_name):
+            for word in _FORBIDDEN:
+                assert word not in text, (module_name, word, text)
+            if _is_prose(text):
+                assert not _bare_paths(text), (module_name, text)
+
+
+def test_generated_error_texts_follow_the_wording_rules():
+    """組み上がった ERROR 文 (全 code × 3 本の tool) でも同じ規則。参照そのもの (`{ref}`) の
+    エコーは入力の写しなので除いて見る。リンクを示す文は必ず `次の手:` の後ろにある。"""
+    from nucllei.builtin_tools import feed_image, fetch_url, sandbox
+
+    codes = [
+        RefError("too_large", "x", size=30 * 1024 * 1024, limit=25 * 1024 * 1024),
+        RefError(
+            "too_large",
+            "x",
+            size=30 * 1024 * 1024,
+            limit=25 * 1024 * 1024,
+            size_exact=True,
+        ),
+        RefError("too_large", "x", size=300 * 1024 * 1024, limit=1, size_exact=True),
+        RefError("not_found", "x"),
+        RefError("upstream_status", "x", status=302),
+        RefError("upstream_status", "x", status=302, reason="redirect_self"),
+        RefError("upstream_status", "x", status=302, reason="too_many_redirects"),
+        RefError("upstream_status", "x", status=500),
+        RefError("upstream_unreachable", "x"),
+        RefError("upstream_unreachable", "x", reason="unresolvable"),
+        RefError("unknown_upstream", "x", reason="server_self"),
+        RefError("unknown_upstream", "x"),
+        RefError("traversal", "x"),
+        RefError("unsupported_form", "x"),
+        RefError("workspace_unavailable", "x"),
+        RefError("brand_new", "x"),
+        None,
+    ]
+    ref = "/ext/a/b.pdf"
+    texts = []
+    for err in codes:
+        texts += [
+            feed_image._explain_ref_error(ref, err),
+            feed_image._explain_ref_error(ref, err, True),
+            fetch_url._explain_ref_error(ref, err, 200.0),
+        ]
+        if err is not None:
+            texts += [sandbox._explain_ref_error(ref, err)]
+    for text in texts:
+        for word in _FORBIDDEN:
+            assert word not in text, (word, text)
+        rest = text.replace(f"[ラベル]({ref})", "[ラベル](LINK)").replace(ref, "REF")
+        assert not _bare_paths(rest), text
+        assert "/ext/" not in rest.replace("`/ext/…`", ""), text
+        if "[ラベル](" in text or "リンク切れと伝える" in text:
+            assert text.index("次の手: ") < text.index("ユーザー"), text

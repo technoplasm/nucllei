@@ -63,11 +63,14 @@ class Tools:
         """
         user_id = (__user__ or {}).get("id")
         if not user_id:
-            return {"ok": False, "error": "ユーザー文脈が無い(__user__ 未注入)。"}
+            return {"ok": False, "error": "ユーザー文脈が無い。"}
 
         chat_id = (__metadata__ or {}).get("chat_id")
         if not chat_id:
-            return {"ok": False, "error": "chat_id が無い(chat 経路からのみ呼べる)。"}
+            return {
+                "ok": False,
+                "error": "会話の id が無い (会話の中からだけ呼べる)。",
+            }
 
         # owner-only: 他ユーザーの chat_id は「無い」扱い(所有者検証を漏らさない)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
@@ -122,12 +125,11 @@ class Tools:
                 "context_size": None,
                 "used_pct": None,
                 "note": note
-                + " context 長が不明(endpoint が申告せず、モデルの meta.context_size も既定値も未設定)"
-                "のため残量は出せない。",
+                + " context 長が分からない (接続が申告せず、既定値も未設定) ので残量は出せない。",
             }
 
         if fallback_used:
-            note += " context 長は管理者が設定した既定値(endpoint の申告ではない)。"
+            note += " context 長は管理者が設定した既定値 (接続の申告ではない)。"
         remaining = max(0, context_size - used)
         return {
             "ok": True,

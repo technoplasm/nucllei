@@ -145,8 +145,10 @@ TABLE = {
 URL_FORM = f"{URL_ARG_FORM} {REF_ARGS_RULE}"
 PATH_FORM = f"{PATH_ARG_FORM} {REF_ARGS_RULE}"
 SHOW_PATH = (
-    "見せるなら fetch_from_workspace(path=…) に渡し、返った URL か file_id で案内する。"
+    "ユーザーに見せるなら、fetch_from_workspace が使えるならそれに path を渡し、"
+    "返ったリンクを本文に書く。"
 )
+LINK_HINT = "ユーザーに示すなら [ラベル]("
 
 
 def _ref_kw(ref, arg=None):
@@ -613,12 +615,13 @@ def test_too_large_names_size_and_limit_in_mb_and_hands_the_url_to_the_user(
         and "run_python" in result
         and "/workspace/" in result
     )
-    assert "URL をそのまま案内" in result and "ブラウザでは開ける" in result
+    assert f"{LINK_HINT}{HIS_PDF_URL}) のリンクにする" in result
+    assert "ブラウザでは開ける" in result
     assert "リンク切れ" not in result and "存在しない" not in result
 
 
 def test_too_large_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
-    """`/ext/…` `/workspace/…` はブラウザに意味が無い — 「URL を案内」と言わず、
+    """`/ext/…` `/workspace/…` はブラウザに意味が無い — 「リンクで示す」と言わず、
     run_python で直接開いて縮小 / fetch_from_workspace で渡す、を言う。"""
     for ref in ("/ext/doc/static/big.png", "/workspace/out/huge.pdf"):
         result = _explained(
@@ -631,7 +634,7 @@ def test_too_large_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
             size_exact=True,
         )
         assert f"{ref} は 31.1 MB あり" in result, ref  # fs の stat 由来 = 実サイズ
-        assert "URL をそのまま案内" not in result and "ブラウザ" not in result, (
+        assert LINK_HINT not in result and "ブラウザ" not in result, (
             ref,
             result,
         )
@@ -663,9 +666,7 @@ def test_too_large_without_numbers_still_says_it_is_the_size_cap(monkeypatch):
     for kw in ({}, dict(size_exact=True), dict(size_exact=False)):
         result = _explained(monkeypatch, "too_large", **kw)
         assert (
-            "取得の上限" in result
-            and "超えている" in result
-            and "URL をそのまま案内" in result
+            "取得の上限" in result and "超えている" in result and LINK_HINT in result
         ), kw
         assert "少なくとも" not in result and "MB あり" not in result, (kw, result)
 
@@ -674,7 +675,7 @@ def test_unreachable_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
     result = _explained(
         monkeypatch, "upstream_unreachable", ref="/workspace/out/plot.png"
     )
-    assert "URL をそのまま案内" not in result and "run_shell の ls" in result
+    assert LINK_HINT not in result and "run_shell が使えるなら ls" in result
 
 
 def test_image_over_the_image_cap_tells_how_to_shrink_by_ref_shape(monkeypatch):
@@ -689,41 +690,47 @@ def test_image_over_the_image_cap_tells_how_to_shrink_by_ref_shape(monkeypatch):
 
 def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch):
     """404 も、table に無い ref (偽 resolver が not_found にする) も同じ文。
-    path で来たもの (sandbox のファイル) はリンク切れと言わず run_shell の ls を案内する。"""
+    path で来たもの (sandbox のファイル) はリンク切れと言わず run_shell の ls を挙げる。"""
     result = _explained(monkeypatch, "not_found")
     assert (
         f"{HIS_PDF_URL} は存在しない (404 / ファイル無し)" in result
-        and "リンク切れとして案内" in result
+        and "次の手: ユーザーにはリンク切れと伝える。" in result
     )
     result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
-    assert fed == [] and "/ext/cage/static/missing.png は存在しない" in result
-    assert "リンク切れ" not in result and "run_shell の ls" in result
-
-
-def test_redirect_status_points_to_a_file_not_a_directory(monkeypatch):
-    result = _explained(monkeypatch, "upstream_status", ref=f"{HIS}/dir", status=302)
-    assert "redirect (302)" in result and "ディレクトリではなく" in result
-    result = _explained(monkeypatch, "upstream_status", ref=f"{HIS}/dir", status=301)
-    assert (
-        "redirect (301)" in result
-        and "ディレクトリではなく" in result
-        and "literal" in result
+    # `/ext/…` は fetch_from_workspace と同文 (ken 2026-10-04)
+    assert fed == [] and result == (
+        "ERROR: /ext/cage/static/missing.png はこのサーバの /ext に無い (存在しないか、"
+        "sandbox にだけ mount されている)。次の手: 中身が要るなら sandbox で読んで使う。"
     )
     assert "リンク切れ" not in result
+
+
+def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch):
+    """reason 無しの 3xx = 転送先が URL として組めなかった (redirect 自体は 3 回まで辿る)。"""
+    for status in (301, 302):
+        result = _explained(
+            monkeypatch, "upstream_status", ref=f"{HIS}/dir", status=status
+        )
+        assert (
+            f"redirect ({status})" in result
+            and "転送先が開ける URL ではなかった" in result
+        )
+        assert "次の手: 転送先のページを直接指す URL を渡す。" in result
+        assert "辿らない" not in result and "リンク切れ" not in result
 
 
 def test_server_error_status_suggests_retry_or_handing_over_the_url(monkeypatch):
     for status in (500, 503, 403):
         result = _explained(monkeypatch, "upstream_status", status=status)
         assert f"上流が {status} を返した" in result, status
-        assert "時間を置いて再試行" in result and "URL をそのまま案内" in result, status
+        assert "時間を置いて再試行" in result and LINK_HINT in result, status
         assert "redirect" not in result, status
 
 
 def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(monkeypatch):
     result = _explained(monkeypatch, "upstream_unreachable")
     assert "のホストに届かない" in result and "この配備からは到達できない" in result
-    assert "URL をそのまま案内" in result and "リンク切れ" not in result
+    assert LINK_HINT in result and "リンク切れ" not in result
 
 
 def test_traversal_code_says_out_of_bounds(monkeypatch):
@@ -787,7 +794,7 @@ def test_non_image_non_pdf_is_an_error_pointing_to_text_tools(monkeypatch):
     table = dict(TABLE)
     table["/ext/cage/doc/a.md"] = _Loaded(b"# a", "text/markdown", "a.md")
     result, fed, _r = _run(monkeypatch, table, url="/ext/cage/doc/a.md")
-    assert fed == [] and "fetch_url(url=)" in result and "run_shell" not in result
+    assert fed == [] and "fetch_url(url=…)" in result and "run_shell" not in result
 
 
 def test_path_exclusive_with_file_id_and_filename(monkeypatch):
@@ -795,7 +802,10 @@ def test_path_exclusive_with_file_id_and_filename(monkeypatch):
         for src in ({"path": "/workspace/out/plot.png"}, {"url": FIG_URL}):
             result, fed, resolver = _run(monkeypatch, **src, **extra)
             assert fed == [] and resolver.calls == [], (src, extra)
-            assert result.startswith("ERROR") and "同時指定" in result, (src, extra)
+            assert result.startswith("ERROR") and "同時に指定できない" in result, (
+                src,
+                extra,
+            )
 
 
 def test_no_source_at_all_is_an_error(monkeypatch):
@@ -808,7 +818,7 @@ def test_requires_user_and_feed_channel(monkeypatch):
     assert asyncio.run(
         mod.Tools().feed_image(url=FIG_URL, __feed_image__=lambda r: None)
     ).startswith("ERROR: ユーザー情報")
-    assert "実行文脈外" in asyncio.run(
+    assert "画像を目に入れる経路が使えない" in asyncio.run(
         mod.Tools().feed_image(url=FIG_URL, __user__={"id": "u1"})
     )
     assert resolver.refs == []
@@ -862,6 +872,8 @@ def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
         monkeypatch, {"f1": rec}, raw=b"\xff\xd8\xff" + b"\0" * 8, file_id="f1"
     )
     assert fed == ["f1"] and "file_id=f1" in result
+    # 見せるなら本文に書く形をそのまま渡す (2026-10-04)
+    assert "見せるなら本文に ![photo.jpg](/api/v1/files/f1/content) を書く" in result
     mod, _r = _install(monkeypatch, TABLE)
     monkeypatch.setattr(
         mod, "Files", types.SimpleNamespace(get_file_by_id=lambda fid: rec)
@@ -875,7 +887,8 @@ def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
     result = asyncio.run(
         tools.feed_image(file_id="f1", __user__={"id": "u1"}, __feed_image__=fed.append)
     )
-    assert fed == [] and "大きすぎる" in result and "リサイズ" in result
+    assert fed == [] and "大きすぎる" in result and "縮小" in result
+    assert "次の手: send_to_workspace と run_python が使えるなら" in result
 
 
 def test_file_id_owner_check_is_fail_closed(monkeypatch):

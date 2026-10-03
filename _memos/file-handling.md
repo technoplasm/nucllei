@@ -440,6 +440,24 @@ docker 専用ではなく(dev は host で動く)、固定の `/mnt` だと (a) 
   `EXT_DIR/X` の実在確認だけ(日本語名は URL 側が percent-encode)。
 - 正本は `README_API.md` §3.8。詳細は [[builtin-tools]]「改訂(2026-10-03 夜)」。
 
+## 改訂(2026-10-04)— `/ext` のファイルは URL で見せるだけ(取り出しの経路は作らない)
+
+ken 決定: **配備は nucllei と sandbox に同じ `/ext` の組を mount する**(llens は
+`cage/data/doc:/ext/cage/doc:ro` を nucllei 側にも足す)。だから sandbox に見える `/ext` の
+ファイルには必ず URL がある。`/ext` のファイルは URL で見せるだけで、生のファイル(コーパスの
+md 等)を添付して要らない file_id を増やさない — sandbox 経由で読み出して添付する経路は
+作らない(2026-10-04 に一度検討して取りやめ)。
+
+- `fetch_from_workspace(path="/ext/X")` / `feed_image(path="/ext/X")`: nucllei の `EXT_DIR/X` に
+  あれば URL(従来どおり)。無ければ本当に無いか mount のずれで、中立の 1 文
+  「{path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)。
+  次の手: 中身が要るなら sandbox で読んで使う。」— 「渡さない」とも「/workspace にコピーして
+  渡す」とも言わない(resolver は「無い」と「sandbox にだけ在る」を分けられない)。
+- 同日、tool がモデルに返す文を「事実の文 + `次の手:`」の形に揃えた(README_API §5.1)。
+  添付の報告は、画像・音声・動画なら「ユーザーの画面には既に表示されている — 本文に貼り直さない」、
+  それ以外(チャットのファイル一覧にだけ載る)は「本文で示すなら [名前](/api/v1/files/{id}/content)」。
+- 正本は `README_API.md` §3.8 / §5.7。
+
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
 
 マイクの音声入力は、区切りが 2 つ以上あった録音を 1 本(長ければ約 60 分ごとに複数本)の音声と

@@ -88,12 +88,12 @@ class Tools:
         __user__: Optional[dict] = None,
         __metadata__: Optional[dict] = None,
     ) -> Annotated[Union[dict, str], RenderAs(kind="subagent")]:
-        """サブエージェント(agent session)を起動し、instruction を 1 ターン実行させる。返るのは最終回答(answer)のみ — 実行過程(transcript)は親には来ない。会話を継続するには、結果の session_id を session_id 引数に渡して追いの instruction を送る。
+        """サブエージェントを起動し、instruction を 1 ターン実行させる。返るのは最終回答(answer)のみ — 実行過程(transcript)は親には来ない。会話を継続するには、結果の session_id を session_id 引数に渡して追いの instruction を送る。
 
         :param preset_id: 起動する preset の id。新規セッション時は必須(session_id 継続時は不要)。
         :param instruction: サブエージェントへの指示。
-        :param session_id: 継続する既存 agent session の id(省略で新規セッション)。
-        :return: {ok, session_id, answer, truncated?, usage?, error?}
+        :param session_id: 続ける既存のサブエージェントのセッション id(省略で新規セッション)。
+        :return: {ok, session_id, answer, truncated?, note?, usage?, error?}
         """
         from nucllei.models.users import Users
         from nucllei.utils.subagent import _error, run_subagent_turn
@@ -105,7 +105,7 @@ class Tools:
             await asyncio.to_thread(Users.get_user_by_id, user_id) if user_id else None
         )
         if user is None:
-            return _error("ユーザー文脈が無い(__user__ 未注入)。")
+            return _error("ユーザーを特定できないのでサブエージェントは起動できない。")
 
         metadata = __metadata__ or {}
         return await run_subagent_turn(

@@ -138,7 +138,7 @@ class TestBuiltinContextBudgetTool(AbstractPostgresTest):
         assert out["context_size"] is None
         assert out["remaining_tokens"] is None
         assert out["used_pct"] is None
-        assert "context 長が不明" in out["note"]
+        assert "context 長が分からない" in out["note"]
 
     def test_context_size_falls_back_to_the_valve(self):
         """記録にも endpoint の申告にも meta にも無いときだけ valve fallback_context_size を使い、

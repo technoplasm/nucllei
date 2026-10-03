@@ -428,9 +428,20 @@ assembled the same way everywhere:
   sentence without the `ERROR: ` prefix in `{ok: False, error}`.
 
 Wording that depends on the **resolution result** (missing / oversize /
-redirect / upstream status / unreachable / outside the allowed upstreams /
-outside the serving scope) is separate and built per `RefError.code` (and
-`reason`), still without looking at the value.
+redirect that could not be followed / upstream status / unreachable / the
+server itself) is separate and built per `RefError.code` (and `reason`), still
+without looking at the value. Each text is a **fact sentence + `次の手:`**
+(§5.1): e.g. `ERROR: <url> は存在しない (404 / ファイル無し)。次の手: ユーザーには
+リンク切れと伝える。` Where the model may hand the URL to the user, the next
+step is one shared sentence, `ref_errors.SHOW_AS_LINK` —
+`ユーザーに示すなら [ラベル](<url>) のリンクにする (ブラウザでは開ける)。` — so a
+relative `/ext/…` never reaches an answer as a bare path. The defaults
+(`RefErrorHints`) are the same in all three tools; a tool overrides only the
+codes whose next step really differs (`too_large`, and `not_found` /
+`unreachable` for a `path` argument, which has no browser URL). On
+2026-10-04 `send_to_workspace`'s own variants (「登録した配信元の redirect は辿らない」
+— stale since redirects are followed —, 「許可先の外」, 「3 回を超えて」) were
+dropped for the shared defaults, and no text shows a `RefError.code` any more.
 
 Stored reference strings (entries of `context_images`, the `url` of an
 `image_url` part) carry no argument name, so they — and only they — are
@@ -585,10 +596,10 @@ never has to rewrite anything; what the tool still decides, based on **what the
 reference resolves to** (whether the file exists on nucllei's side), is whether
 to copy / attach or to hand the name back:
 
-| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                             |
-| ------------------------------------------ | ---------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/{rest}` (same string, percent-decoded) when `/ext/{rest}` names a regular file that exists under nucllei's `$EXT_DIR`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                              |
-| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL (same string, percent-encoded) when `$EXT_DIR/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `$EXT_DIR` and attached — a path that is not there is simply unreadable |
+| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                                               |
+| ------------------------------------------ | ---------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/{rest}` (same string, percent-decoded) when `/ext/{rest}` names a regular file that exists under nucllei's `$EXT_DIR`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                                                |
+| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL (same string, percent-encoded) when `$EXT_DIR/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `$EXT_DIR` and attached — a path that is not there is "not on this server's /ext" (below) |
 
 Both are an existence check on nucllei's own filesystem (`$EXT_DIR`), after
 resolving symlinks and confining to the mount (`served_mount`); the names the
@@ -602,8 +613,15 @@ for the same file (e.g. raw Japanese `…/forms/参考書式_5.pdf` vs
 URLs can be shown to the user (`/ext/…` or `/api/v1/files/{id}/content`); a
 sandbox path means nothing to a browser. Whether the sandbox really binds the
 same volume cannot be verified from nucllei — it is the deployment convention
-(#138). A deployment withholds a file from users by **not putting it under
-nucllei's `$EXT_DIR`** (the sandbox may still see it at its own `/ext`): until
+(#138). **Deployments mount the same `/ext` set into nucllei and the sandbox**
+(ken, 2026-10-04), so every `/ext` file the sandbox sees has a URL. `/ext`
+files are shown to users **by URL only** — there is no extraction path that
+reads a sandbox-only `/ext` file and attaches it (it would only mint needless
+file_ids; raw corpus files are rarely what a user wants). A `/ext` path that
+is not under nucllei's `$EXT_DIR` is therefore a true not-found or a mount
+mismatch, and `fetch_from_workspace` / `feed_image(path=)` say so in one
+neutral sentence: `ERROR: <path> はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)。次の手: 中身が要るなら sandbox で読んで使う。`
+(no "withheld" wording, no "copy it to `/workspace` and attach" route). Until
 2026-10-03 there was a serving scope (`EXT_FILE_SCOPES`) and a
 `mounted_path_withheld` refusal 「利用者に配信しない範囲にある」 — both gone.
 
@@ -1103,6 +1121,24 @@ class Tools:
     at sync / create / update) and the per-turn spec use the same cut, so the
     stored `description` equals what the model gets (before per-turn hooks
     and the class-docstring note).
+  - **Returned texts: a fact sentence + `次の手:`** (2026-10-04). Anything a
+    tool returns can be copied into an answer — an internal instruction
+    (「〜を案内」) once became a heading, and a bare relative `/ext/…` path was
+    shown to the user. So every ERROR / status text the builtins return is in
+    two parts: first the **fact** (what happened — safe to relay to the user),
+    then, after the literal `次の手: `, the **model-only** part (what to do
+    next). A deployment can therefore tell its model "relay the facts, never
+    the 次の手 part". Rules: plain style (だ / である, no です / ます); a link the
+    model may hand to the user is written as a markdown link `[ラベル](URL)`,
+    never as a bare path (`ref_errors.SHOW_AS_LINK` / `show_as_link(url)`);
+    a next step that names a tool from another toolkit (`run_subagent`,
+    `run_python`, `run_shell`, `send_to_workspace`, `feed_image`, `fetch_url`,
+    …) is conditional — 「〜が使えるなら …」 — because that tool may not be
+    mounted; no internal names (codes, env names, storage terms) and nothing
+    deployment-specific. `nucllei/test/apps/webui/utils/test_ref_errors.py`
+    audits `ref_errors` / `feed_image` / `fetch_url` / `sandbox` /
+    `context_budget` / `attachment_text` for this. Deployment-layer tools should follow
+    the same contract.
   - The description is re-sent on **every turn** for every mounted function:
     keep it to what the model needs to decide whether and how to call
     (purpose, argument forms, return shape, a one-line ERROR shape) and put
@@ -1321,9 +1357,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `max_model_len` → the model's `meta.context_size` → the tool valve
     `fallback_context_size` (admin, tool list gear; default 0 = unused — for
     connections that do not report a context length; the note then says the
-    size is an admin default)),
+    size is an admin default — 「管理者が設定した既定値 (接続の申告ではない)」)),
     `remaining_tokens`, `used_pct` (one decimal) and a `note`. With no usable
-    context size the three derived fields are `null` and the note says why.
+    context size the three derived fields are `null` and the note says why
+    (「context 長が分からない (接続が申告せず、既定値も未設定) ので残量は出せない」 — no
+    internal names such as `meta.context_size` in model-visible text).
     Before the first model call of a chat completes: `{ok: false, error}`.
     Within a native tool loop the tool runs between model calls, so the value
     is as of the latest completed call — the pending tool results of the
@@ -1428,20 +1466,32 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `fetch_from_workspace(path)` turns a sandbox file into something the user
     can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
     the sandbox, registered as a File and attached to the chat (`file_id`
-    returned). An `/ext/…` file that exists under nucllei's own `$EXT_DIR`
+    returned). Where the attachment shows up decides the returned note
+    (2026-10-04): image / audio / video are also pushed to the display
+    channel, i.e. **already on the user's screen** under the tool call, and the
+    result says 「ユーザーの画面には既に表示されている — 本文に貼り直さない」; any
+    other file is only listed in the chat's file pane (`message.files` entries
+    of type `file` are not drawn under the message), so the result carries a
+    ready link 「本文で示すなら [<name>](/api/v1/files/<id>/content)」. The
+    `exports/` auto-attach of `run_python` / `run_shell` reports each file the
+    same way (for media it adds that a `[task]` notification of a background
+    run must paste it, since nothing was displayed then). An `/ext/…` file that exists under nucllei's own `$EXT_DIR`
     (= the `/ext` gate serves it) is **not copied or attached** — the tool
     answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
     same string as the path for ASCII names, percent-encoded otherwise) and
-    tells the model to put that URL in the message (image syntax for images, a
-    link otherwise). Any other `/ext/…` path is read by the server from its own
+    returns it ready to paste (`![name](/ext/…)` for images, `[name](/ext/…)`
+    otherwise). Any other `/ext/…` path is read by the server from its own
     `$EXT_DIR` (`resolve_path`: confined to the mount, capped at
     `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
     means a path the sandbox sees but nucllei does not is reported as
     unreadable (the deployment withholds by not mounting; §3.8). Failures are
     worded per `RefError.code`: unreadable (missing, a directory, or a link
     leaving the mount — one wording, fail closed) vs. over the cap (with actual
-    size and limit). `path` is only ever a sandbox path — a URL or a file URL in
-    it is refused as "not a sandbox path" (fixed sentence). The returned
+    size and limit). The unreadable wording (2026-10-04) is the neutral
+    「このサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)」
+    sentence of §3.8 "Bridging" — `/ext` files are shown by URL only.
+    `path` is only ever a sandbox path — a URL or a file URL in it is refused
+    as "not a sandbox path" (fixed sentence). The returned
     `/ext/…` URL is percent-encoded, so it may be a different spelling of the
     URL a document shows for the same file. This is the reverse of
     `send_to_workspace(url=)` below (§3.8, bridging table).
@@ -1465,10 +1515,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     allowlist was added and withdrawn — ken decided the tool must not gate by
     destination.) Failures are reported
     per `RefError.code` and `reason` (missing / oversize with actual size and
-    limit / redirect — not followed, to the server itself, too many / upstream
-    status / unreachable or unresolvable name / outside the registered
-    upstreams or the server itself), each with a fixed sentence that never
-    inspects the value.
+    limit / redirect — to an unusable target, to the server itself, too many /
+    upstream status / unreachable or unresolvable name / the server itself),
+    each with a fixed sentence that never inspects the value — the shared
+    defaults of `ref_errors` (§3.8) except `too_large` (the cap is a valve and
+    cannot be raised by an argument).
     Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
     When the URL is `/ext/{rest}` and **`$EXT_DIR/{rest}` exists on
     nucllei's side** (`image_refs.mounted_path_for_url`), nothing is copied: the
@@ -1506,8 +1557,10 @@ per turn). A deployment that wants the model to know it carries it in its
 prompts / skill bodies; the text below is a **template** (テンプレート — skill
 を書くときの雛形) that names no deployment: put the deployment's own corpus
 tools, entry URLs and sites in place of the generic wording. The ERROR texts
-the tools return at runtime are unchanged and still carry the per-failure next
-step.
+the tools return at runtime still carry the per-failure next step, after
+`次の手:` (§5.1). The template follows the same wording rules as the returned
+texts (plain style, no 「案内」, links as `[ラベル](URL)`), because a prompt is
+copied into answers just as easily.
 
 **feed_image**
 
@@ -1522,15 +1575,18 @@ step.
   - http(s) の URL はどのネットワークの URL でもそのまま渡す — どこに届くかは配備の
     ネットワークが決める (断るのはこのサーバ自身を指す URL だけ)。
 - `path`: `/ext/…` は url でも path でも同じファイル。
+- `/ext/…` のファイルはユーザーには URL で示す。生のファイル (コーパスの md 等) を添付して
+  要らない file_id を増やさない。
 - `file_id`: run_python の戻り値やシステム注記の file_id もここに渡す。本文リンク
   `/api/v1/files/{id}/content` しか手元に無ければ、それを `url=` にそのまま渡す。
 - 3 つとも省略したときの対象は添付 PDF だけ。直接添付の画像は既に見えているので対象に
   しない (見直すなら file_id を明示する。docstring にも短く残している)。
 - `pages` は PDF のときだけ意味を持つ (画像はそのまま、PDF は指定ページを画像化して目に入れる)。
 - 中身が画像か PDF かは tool が中身を読んで判定する (拡張子の無い URL でも同じ)。
-- 失敗の種類: 存在しない / サイズ上限超過 / redirect / 上流のエラー / 届かない /
-  このサーバ自身 / sandbox が読めない。ERROR 文がどれかと次の一手を書く。
-  「読めなかった」を全部リンク切れと言い換えないこと。
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 上流のエラー / 届かない /
+  このサーバ自身 / sandbox が読めない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
+  次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
+  言い換えない。
 
 **fetch_url**
 
@@ -1543,23 +1599,23 @@ step.
   出てきた URL の literal をそのままコピーする (相対ならホストを補わない)。
 - 戻り値のリンク一覧の URL は 1 行に 1 本 — Web のページはそのページ基準の絶対 URL、
   同一サーバの `/ext/…` のページは同じ形の `/ext/…`。次の fetch_url(url=) / feed_image(url=) /
-  send_to_workspace(url=) にそのまま渡せ、ユーザーにもそのまま案内できる。どちらの用途でも
-  1 文字も変えずにコピーする。
+  send_to_workspace(url=) にそのまま渡せ、ユーザーにも `[ラベル](URL)` のリンクで示せる。
+  どちらの用途でも 1 文字も変えずにコピーする。
 - 大きいページを丸ごと読むと会話が埋まる。索引ページ (お知らせ一覧など) は必ず `query` を
   付けて該当行だけ取る (部分一致・大小文字と全角半角は無視。1,000 件級の一覧ページには必ず
   付ける)。実体ページや PDF は run_subagent に 1 ページ 1 本で投げる。
 - 既定のサイズ上限を超える大きい資料は、サブエージェントの中で `max_mb` を付けて読む
-  (主 context では読まない)。サイズ上限超過の ERROR が出たら run_subagent の子が `max_mb` を
-  付けて読む (中身が要らなければ URL を案内する)。
+  (この会話では読まない)。サイズ上限超過の ERROR が出たら run_subagent の子が `max_mb` を
+  付けて読む (中身が要らなければ、ユーザーには URL を `[ラベル](URL)` のリンクで示す)。
 - テキスト層の無い PDF (スキャン PDF) は ERROR ではなく、戻り値のヘッダが
-  「種別: PDF / テキスト層が無い …」と言い、feed_image(url=…) を案内する — feed_image で
-  見る。画像も同様に「種別: 画像 …」で feed_image を案内する。テキスト層のある PDF でも
+  「種別: PDF / テキスト層が無い …」と言い、次の手に feed_image(url=…) を挙げる — feed_image で
+  見る。画像も同様に「種別: 画像 …」で feed_image を挙げる。テキスト層のある PDF でも
   読んだのはテキストだけなので、レイアウト・図・表・印影は feed_image で見る。
 - 平文にできない形式 (Excel / Word 等) は ERROR になる。加工が要るなら
-  send_to_workspace(url=…) で sandbox に取り込み、中身が要らなければ URL を案内する。
-- 失敗の種類: 存在しない / サイズ上限超過 / redirect / 上流のエラー / 届かない /
-  このサーバ自身。ERROR 文がどれかと次の一手を書く。「取れなかった」を全部リンク切れと
-  言い換えないこと。
+  send_to_workspace(url=…) で sandbox に取り込み、中身が要らなければ URL をリンクで示す。
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 上流のエラー / 届かない /
+  このサーバ自身。ERROR 文は事実と `次の手:` を書く。「取れなかった」を全部リンク切れと
+  言い換えない。
 
 ### 5.8 Subagents (`run_subagent`)
 
@@ -1582,15 +1638,19 @@ layers decide whether it appears in a turn:
    `enum` and lists them (`id: name — description`) at the end of the
    description. The same predicate is re-evaluated at call time.
 
-The toolkit's class docstring (operating rules: when to delegate, parallel
-fan-out with `background`, how to treat the answer) reaches the model as the
-§5.1 shared note, so deployment prompts need not repeat it.
+The toolkit's class docstring (operating rules: when to delegate, how to run
+children in parallel — several calls in one response, `background` only to keep
+working meanwhile — and how to treat the answer) reaches the model as the §5.1
+shared note, so deployment prompts need not repeat it.
 
 - `run_subagent(preset_id, instruction, session_id?)` — spawns a child **agent
   session** (a first-class chat with `kind: "agent"`, linked to the parent
   chat/message) and runs one turn on the selected preset. Returns
-  `{ok, session_id, answer, usage?, truncated?}` — the child's final assistant
-  text only (8000 chars max), never the transcript. Pass `session_id` instead
+  `{ok, session_id, answer, usage?, truncated?, note?, error?}` — the child's
+  final assistant text only (8000 chars max), never the transcript. A truncated
+  answer carries `note` (the cut length and "ask for the rest with the same
+  `session_id`"); errors (`ok: false`) follow the §5.1 convention (a fact
+  sentence, then a model-only `次の手:` part). Pass `session_id` instead
   of `preset_id` to send a follow-up instruction to an existing session.
   While it runs, the call's `tool:progress` carries
   `subagent: {session_id, task_id?}` (§4.3 stream events) so a client can follow the
@@ -1612,7 +1672,8 @@ response run concurrently (§5.5) and the turn continues when all are done;
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
-immediately, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
+immediately with an error that says how many may run at once and that the
+excess was not started, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
 (default 1800 s; also the execution timeout when backgrounded). Agent sessions
 never appear in the user's chat list, are read-only over HTTP, and are
 cascade-deleted (running turns stopped) with the parent chat.
@@ -1650,8 +1711,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   and never writes (read-only).
 - `await_task(task_ids, timeout?)` — collect results now. One bounded window
   (default 90 s, clamped to 10–300) covers all ids (max 20 per call);
-  already-terminal tasks return immediately (idempotent — results are kept
-  indefinitely). Per entry: done →
+  already-terminal tasks return immediately (idempotent — results stay
+  re-collectable while the row is retained: indefinitely by default, see
+  `ASYNC_EXEC_RETENTION_DAYS`; the tool description states the configured
+  period). Per entry: done →
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
   (with the original tool's render descriptor when exactly one done task was
   requested, and a one-time replay of `context_images`/`display`
@@ -1673,7 +1736,14 @@ reaches a terminal state, the **server** waits for the parent chat to be quiet
 `meta: {"system_notice": "task"}` carrying the full result text (and
 `context_images` as message images) — marks the row `delivered` in the same
 transaction, and starts a continuation turn on the chat's model so the model
-reads the notice and continues on its own. `await_task`/`stop_task` reports
+reads the notice and continues on its own. The notice is plain text, not
+markdown: a `[task]` header line (an automatic system notice, not the user;
+results are below so no `await_task` is needed; produced images/files are not
+shown yet, so link them in the answer; do not copy the notice's format into
+the answer), then one section per task starting with a plain
+`task_id: {id} ({tool})` line followed by `status:` and `result:` (fenced) /
+`error:` / `note:` lines. It has no headings and no imperatives because the
+model may echo user-role text into its answer. `await_task`/`stop_task` reports
 also mark rows `delivered` (the result already reached the model's context).
 Unattended chains are limited to `ASYNC_EXEC_RESUME_CHAIN_LIMIT` (default 5)
 consecutive notice turns; the next human message resets the chain. If the
@@ -1725,14 +1795,19 @@ Concurrency: `ASYNC_EXEC_MAX_CONCURRENCY` (default 4 per
 user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
 fails immediately. Tool results — synchronous and background alike — are
 truncated once at the production point at `TOOL_RESULT_MAX_CHARS` (default
-65536; truncation demotes structured rendering to text; the collectors'
-envelopes are exempt because their contents are already truncated at save
-time). Rows are optionally purged after `ASYNC_EXEC_RETENTION_DAYS` (default 0 =
+65536; truncation demotes structured rendering to text and appends a marker
+line `(ここで切れている: 全 N 字のうち先頭 MAX 字。次の手: …)` so the model never
+mistakes a cut result for the whole; the collectors' envelopes are exempt
+because their contents are already truncated at save time). Rows are optionally purged after `ASYNC_EXEC_RETENTION_DAYS` (default 0 =
 keep forever — results stay re-collectable indefinitely). Spawning is
 single-process only: with `UVICORN_WORKERS > 1` it is refused (collection and
 listing still work). Executions are stopped (not deleted) when their chat is
 deleted; a server restart marks in-flight rows `orphaned` — the record
-survives, the computation does not resume.
+survives, the computation does not resume. Stopped and orphaned rows carry one
+fixed `error` text each (the same wording in `check_task` / `await_task` and in
+the delivery notice): stopped = side effects may already have completed;
+orphaned = the result was lost, re-run read-only work with the same arguments
+and check before re-running anything that writes or sends.
 
 ---
 

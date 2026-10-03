@@ -47,7 +47,11 @@ import json
 import logging
 import time
 
-from nucllei.env import ASYNC_EXEC_TIMEOUT_S, SRC_LOG_LEVELS
+from nucllei.env import (
+    ASYNC_EXEC_RETENTION_DAYS,
+    ASYNC_EXEC_TIMEOUT_S,
+    SRC_LOG_LEVELS,
+)
 from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
 from nucllei.utils.executions import (
@@ -56,6 +60,14 @@ from nucllei.utils.executions import (
     get_exec_task,
     get_latest_progress,
     stop_execution,
+)
+
+# await_task の説明に載せる保持期間(env に従う — 0 / 未設定は無期限。
+# exec 行の purge は ASYNC_EXEC_RETENTION_DAYS 日で走る)
+_RETENTION_PHRASE = (
+    f"結果は {ASYNC_EXEC_RETENTION_DAYS} 日保持"
+    if ASYNC_EXEC_RETENTION_DAYS > 0
+    else "結果は無期限に保持"
 )
 
 log = logging.getLogger(__name__)
@@ -237,26 +249,31 @@ def build_exec_tools(user, metadata) -> dict:
         # 他人・他 chat の行は「存在しない」と同じ応答(存在を漏らさない)
         return {
             "task_id": task_id,
-            "error": "task_id が不正です(このチャットで起動したタスクのみ扱えます)",
+            "error": (
+                "task_id が不正 (扱えるのはこのチャットで起動したタスクだけ)。"
+                "次の手: background: true の返りの task_id をそのまま渡す。"
+            ),
         }
 
     def _over_limit_entry(task_id: str) -> dict:
         return {
             "task_id": task_id,
             "error": (
-                f"1 回の呼び出しで扱える task_id は {TASK_IDS_MAX} 件までです"
-                "(この id は処理されていません。次の呼び出しで指定してください)"
+                f"1 回の呼び出しで扱える task_id は {TASK_IDS_MAX} 件まで"
+                " (この id は処理していない)。次の手: 次の呼び出しで指定する。"
             ),
         }
 
     def _coerce_ids(task_ids):
         """(ids, error) — 単一 string は [str] に coerce。順序を保って dedupe。"""
         if task_ids is None:
-            return None, _error("task_ids は必須です。")
+            return None, _error("task_ids が空。次の手: task_id を配列で渡す。")
         if isinstance(task_ids, str):
             task_ids = [task_ids]
         if not isinstance(task_ids, (list, tuple)):
-            return None, _error("task_ids は文字列の配列で指定してください。")
+            return None, _error(
+                "task_ids の形が違う。次の手: task_id を文字列の配列で渡す。"
+            )
         ids = []
         seen = set()
         for tid in task_ids:
@@ -268,7 +285,7 @@ def build_exec_tools(user, metadata) -> dict:
             seen.add(tid)
             ids.append(tid)
         if not ids:
-            return None, _error("task_ids は必須です。")
+            return None, _error("task_ids が空。次の手: task_id を配列で渡す。")
         return ids, None
 
     async def _load_rows(ids: list[str]) -> dict:
@@ -386,17 +403,15 @@ def build_exec_tools(user, metadata) -> dict:
             total = len(rows)
         out = {"tasks": [_status_entry(row) for row in rows], "total": total}
         if not out["tasks"]:
-            out["note"] = (
-                "タスクはありません" if include_done else "実行中のタスクはありません"
-            )
+            out["note"] = "タスクは無い" if include_done else "実行中のタスクは無い"
         return out
 
     await_spec = {
         "name": "await_task",
         "description": (
             "バックグラウンドタスク(task_ids)の完了を有界で待ち、結果を回収する。"
-            "終了済みのタスクは待たず即返す(冪等 — 結果の保持は無期限で、"
-            "いつでも再回収できる)。timeout 秒(既定 "
+            "終了済みのタスクは待たず即返す(冪等 — "
+            f"{_RETENTION_PHRASE}、その間は何度でも再回収できる)。timeout 秒(既定 "
             f"{AWAIT_TASK_DEFAULT_TIMEOUT})の 1 回の待ちで全 id をカバーし、"
             '時間切れのタスクは status: "running" で返る(終わった分だけの部分回収)。'
             "完了時は結果が自動で届く(通知ターン)ため、今すぐ結果が必要なとき"
@@ -439,8 +454,8 @@ def build_exec_tools(user, metadata) -> dict:
             # 残っているかもしれず、全体エラーにするとモデルが per-entry の
             # 「次の呼び出しで指定」案内を受け取れない — per-entry 形で返す。
             return _error(
-                "有効な task_id がありません"
-                "(このチャットで起動したタスクのみ扱えます)。"
+                "有効な task_id が無い (扱えるのはこのチャットで起動したタスクだけ)。"
+                "次の手: background: true の返りの task_id をそのまま渡す。"
             )
 
         try:

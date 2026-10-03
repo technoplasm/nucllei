@@ -172,10 +172,11 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 `/ext/{rest}` は **同じ文字列** で、`EXT_DIR/{rest}` の実在の確認だけ(rest は URL 側が
 percent-encoded、fs 側が decode 済み — なので `url_for_mounted_path` が返す URL は、文書の
 本文にある生の日本語 URL とは文字列が一致しないことがある。同じファイルの別表記)。sandbox の
-`/ext/X` が nucllei の `EXT_DIR/X` に無ければ「配信されていない」だけ(`fetch_from_workspace`
-は読めれば添付、読めなければ `not_found`)— 配備は配信したくない物を nucllei 側の `EXT_DIR` に
-置かないことで渡さない(2026-10-03 までの「配信範囲の外は添付もしない」
-(`mounted_path_withheld`)は設定ごと無くした)。
+`/ext/X` が nucllei の `EXT_DIR/X` に無ければ「このサーバの /ext に無い」(not_found)。配備は
+nucllei と sandbox に**同じ `/ext` を mount する**規約(ken 2026-10-04)なので、通常この場合は
+起きない。`/ext` のファイルは URL で示すだけで、sandbox から汲み出して添付にする経路は持たない
+(生の md などを添付にして file_id を無駄に増やさない)。2026-10-03 までの「配信範囲の外は
+添付もしない」(`mounted_path_withheld`)は撤去済み。
 利用者に見せられるのは URL だけ(sandbox のパスはブラウザでは開けない)。
 
 **相対 `/ext/…` の経緯**: #139(2026-09-07)は「"/" 始まり = sandbox の fs だけ、`/ext/…` は

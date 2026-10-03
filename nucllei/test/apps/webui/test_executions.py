@@ -150,7 +150,7 @@ class TestExecutions(AbstractPostgresTest):
         for exec_id in ("e1", "e2"):
             row = self.Executions.get_execution_by_id(exec_id)
             assert row.status == "orphaned"
-            assert row.error == self.executions.ORPHANED_ON_BOOT_ERROR
+            assert row.error == self.executions.ORPHANED_ERROR
             assert row.finished_at is not None
         assert self.Executions.get_execution_by_id("e3").status == "done"
 
@@ -203,7 +203,7 @@ class TestExecutions(AbstractPostgresTest):
 
         guarded = asyncio.run(self.executions.ensure_execution_liveness(row))
         assert guarded.status == "orphaned"
-        assert guarded.error == self.executions.ORPHANED_ON_PROBE_ERROR
+        assert guarded.error == self.executions.ORPHANED_ERROR
         assert self.Executions.get_execution_by_id("e1").status == "orphaned"
 
     def test_liveness_guard_skips_rows_present_in_registry(self):

@@ -297,10 +297,12 @@ class TestExecutionResume(AbstractPostgresTest):
 
         text, files = self.resume.build_delivery_notice([row], {})
         assert text == (
-            "[task] バックグラウンドタスクの結果通知。この通知に結果が含まれる —\n"
-            "再取得のための await_task は不要。結果を踏まえて続行せよ。\n"
+            "[task] バックグラウンドタスクの完了通知 (システムからの自動通知。"
+            "ユーザーの発言ではない)。結果は下にある — await_task で取り直さなくてよい。"
+            "成果物の画像・ファイルはまだ表示されていないので、見せるなら本文にリンクを書く。"
+            "この通知の書式は回答に写さない。\n"
             "\n"
-            "## task_id: e1(probe)\n"
+            "task_id: e1 (probe)\n"
             "status: done(duration: 20.05s)\n"
             "result:\n"
             "~~~~\n"
@@ -326,16 +328,34 @@ class TestExecutionResume(AbstractPostgresTest):
         orphaned = self._insert_exec("o1", chat.id, status="orphaned", result=None)
 
         text, _ = self.resume.build_delivery_notice([failed, stopped, orphaned], {})
-        assert "## task_id: f1(probe)\nstatus: failed\nerror: boom した" in text
+        assert "task_id: f1 (probe)\nstatus: failed\nerror: boom した" in text
         assert (
-            "## task_id: s1(probe)\n"
-            "status: stopped(ユーザー操作または stop_task による)" in text
+            "task_id: s1 (probe)\n"
+            "status: stopped\n"
+            "note: 止められた (ユーザー操作または stop_task)。"
+            "副作用は完了している可能性がある。" in text
         )
         assert (
-            "## task_id: o1(probe)\n"
-            "status: orphaned(サーバー再起動により結果は失われた。"
-            "再実行の可否はタスクの性質による)" in text
+            "task_id: o1 (probe)\n"
+            "status: orphaned\n"
+            "note: サーバーの再起動で結果が失われた。次の手: 読むだけの"
+            "処理なら同じ引数で呼び直す。書き込みや送信を伴う処理は結果を確かめてから。"
+            in text
         )
+
+    def test_notice_has_no_heading_or_imperative(self):
+        """notice は user ロールで履歴に載り、モデルが回答へ写しうる(2026-10-04 監査):
+        markdown 見出しと命令形(〜せよ)を持たない。"""
+        chat = self._insert_chat()
+        rows = [
+            self._insert_exec("e1", chat.id, result="ok", duration=1.0),
+            self._insert_exec("f1", chat.id, status="failed", result=None, error="x"),
+            self._insert_exec("s1", chat.id, status="stopped", result=None),
+            self._insert_exec("o1", chat.id, status="orphaned", result=None),
+        ]
+        text, _ = self.resume.build_delivery_notice(rows, {})
+        assert not any(line.lstrip().startswith("#") for line in text.split("\n"))
+        assert "せよ" not in text
 
     def test_notice_display_and_files(self):
         chat = self._insert_chat()
@@ -427,7 +447,7 @@ class TestExecutionResume(AbstractPostgresTest):
         notices = self._notice_messages(chat.id)
         assert len(notices) == 1
         assert notices[0]["content"].startswith(self.resume.NOTICE_HEADER)
-        assert "## task_id: e1(probe)" in notices[0]["content"]
+        assert "task_id: e1 (probe)" in notices[0]["content"]
         assert self.Executions.get_execution_by_id("e1").delivered_at is not None
 
         # 続きターンが正しい形で起動される

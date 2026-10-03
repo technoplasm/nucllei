@@ -582,7 +582,9 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                     if "error" in res:
                         detail = f"External: {res['error'].get('message', '')}"
                 except Exception:
-                    detail = f"External: {e}"
+                    # 例外文言(requests の HTTPError)は STT の URL を含む — tool 経由で
+                    # モデルに届きうるので載せない(全文は上の log.exception に出ている)
+                    detail = f"External: STT engine returned HTTP {r.status_code}"
 
             raise Exception(detail if detail else "Nucllei: Server Connection Error")
 
@@ -647,7 +649,9 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                     if "error" in res:
                         detail = f"External: {res['error'].get('message', '')}"
                 except Exception:
-                    detail = f"External: {e}"
+                    # 例外文言(requests の HTTPError)は STT の URL を含む — tool 経由で
+                    # モデルに届きうるので載せない(全文は上の log.exception に出ている)
+                    detail = f"External: STT engine returned HTTP {r.status_code}"
             raise Exception(detail if detail else "Nucllei: Server Connection Error")
 
     elif request.app.state.config.STT_ENGINE == "azure":

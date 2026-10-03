@@ -99,7 +99,7 @@ def test_one_failure_does_not_cancel_its_siblings():
     )
     elapsed = time.monotonic() - started
 
-    assert results[0]["content"] == "壊れた"
+    assert results[0]["content"] == "ERROR: ツール boom の実行中にエラー: 壊れた"
     assert "タイムアウト" in results[1]["content"]
     assert results[2]["content"] == "完走"
     assert sibling_done == [True]

@@ -63,15 +63,20 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # センチネル登録が INSERT より先なので二重の防御)。
 EXEC_SPAWN_GRACE_S = 10
 
-# boot スイープ・liveness ガードの orphaned 文言(モデル向け日本語 — model-frames 規約)
-ORPHANED_ON_BOOT_ERROR = (
-    "サーバー再起動により実行が失われました。再実行の可否は tool の性質によります。"
+# boot スイープ・liveness ガードの orphaned 文言と stopped 文言(モデル向け日本語 —
+# model-frames 規約)。exec 行の error に入り、await_task / check_task の返りと配達
+# notice(execution_resume)の status 行の両方でこの 1 つを使う(2026-10-04 監査で統一:
+# 事実の文 + モデル向けの「次の手:」)
+ORPHANED_ERROR = (
+    "サーバーの再起動で結果が失われた。次の手: 読むだけの処理なら同じ引数で呼び直す。"
+    "書き込みや送信を伴う処理は結果を確かめてから。"
 )
-ORPHANED_ON_PROBE_ERROR = (
-    "実行タスクが失われています(サーバー再起動等)。結果は失われました。"
-    "再実行の可否は tool の性質によります。"
+SPAWN_FAILED_ERROR = (
+    "background 実行を起動できなかった。次の手: background を付けずに呼び直す。"
 )
-STOPPED_ERROR = "実行は停止されました。副作用は完了している可能性があります。"
+STOPPED_ERROR = (
+    "止められた (ユーザー操作または stop_task)。副作用は完了している可能性がある。"
+)
 
 # exec runner 内で立つ ContextVar(§6 硬化)。completion_events の DB 書き分岐
 # (message/replace の親メッセージ変異)はこれが True のとき全面スキップする —
@@ -281,11 +286,27 @@ def truncate_tool_result(text: str) -> tuple[str, bool, int]:
     json.dumps 膨張で壊れ JSON になる(切詰め済みの中身を再び切る)。
     戻り値は (text, truncated, original_chars)。切詰め時の render 降格
     (JSON / descriptor 描画はパース前提なので落とす)は呼び出し側の責務。
+
+    黙って切らない(2026-10-04 監査): 切った先頭の後ろに事実 + 次の手の印を
+    付ける — モデルが途中までの結果を全量と誤読しないため。印の分だけ
+    TOOL_RESULT_MAX_CHARS を僅かに超える。
     """
     original_chars = len(text)
     if original_chars <= TOOL_RESULT_MAX_CHARS:
         return text, False, original_chars
-    return text[:TOOL_RESULT_MAX_CHARS], True, original_chars
+    return (
+        text[:TOOL_RESULT_MAX_CHARS] + truncation_marker(original_chars),
+        True,
+        original_chars,
+    )
+
+
+def truncation_marker(original_chars: int) -> str:
+    """切詰め済み tool 結果の末尾に付ける印(モデル向け — 事実 + 次の手)。"""
+    return (
+        f"\n(ここで切れている: 全 {original_chars} 字のうち先頭 "
+        f"{TOOL_RESULT_MAX_CHARS} 字。次の手: 続きが要るなら範囲を絞って呼び直す)"
+    )
 
 
 def async_exec_available() -> bool:
@@ -342,20 +363,25 @@ async def spawn_execution(
     どちらも middleware の wire 正規化にそのまま乗る。
     """
     if not async_exec_available():
-        return _error("非同期実行はこのサーバー構成(multi-worker)では利用できません。")
+        return _error(
+            "このサーバー構成 (multi-worker) では background 実行を使えない。"
+            "次の手: background を付けずに呼び直す。"
+        )
 
     # 同時数 check → 同期で increment(check→increment 間に await を挟まない —
     # subagent.py の規律)。超過は即エラー(行を作らない)。
     if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENCY:
         return _error(
-            f"バックグラウンドタスクの同時数がユーザー上限"
-            f"({ASYNC_EXEC_MAX_CONCURRENCY})に達しています。走行中のタスクの完了を"
-            "待つか stop_task で止めてから再試行してください。"
+            f"バックグラウンドタスクの同時数がユーザーごとの上限"
+            f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)。"
+            "次の手: 走行中のタスクを await_task で待つか stop_task で止めてから"
+            "呼び直す。急ぐなら background を付けずに呼び直す。"
         )
     if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
         return _error(
-            f"バックグラウンドタスクの同時数がサーバー上限({ASYNC_EXEC_MAX_TOTAL})に"
-            "達しています。しばらくしてから再試行してください。"
+            f"バックグラウンドタスクの同時数がサーバー全体の上限"
+            f" ({ASYNC_EXEC_MAX_TOTAL}) に達している (起動していない)。"
+            "次の手: background を付けずに呼び直す。"
         )
     _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
 
@@ -408,11 +434,11 @@ async def spawn_execution(
                     Executions.finish_execution,
                     exec_id,
                     status="failed",
-                    error="非同期実行の起動に失敗しました。",
+                    error=SPAWN_FAILED_ERROR,
                 )
             except Exception:
                 log.exception(f"failed to mark spawn-failed execution {exec_id}")
-        return _error("非同期実行の起動に失敗しました。")
+        return _error(SPAWN_FAILED_ERROR)
     except BaseException:
         # CancelledError は BaseException 派生 — 上の except では捕らえられない。
         # INSERT の await がキャンセル点で、ここを素通りすると席とセンチネルが
@@ -487,8 +513,8 @@ async def _run_execution(
             outcome = {
                 "status": "failed",
                 "error": (
-                    f"ツール {tool_name} の非同期実行が {tool_timeout} 秒で"
-                    "タイムアウトしました(システム側上限)。"
+                    f"ツール {tool_name} の background 実行が {tool_timeout} 秒の"
+                    "上限でタイムアウトした。次の手: 入力を小さく分けて呼び直す。"
                 ),
                 "duration": round(time.monotonic() - started_at, 3),
             }
@@ -674,7 +700,7 @@ async def ensure_execution_liveness(
         Executions.finish_execution,
         fresh.id,
         status="orphaned",
-        error=ORPHANED_ON_PROBE_ERROR,
+        error=ORPHANED_ERROR,
     )
     return await asyncio.to_thread(Executions.get_execution_by_id, fresh.id) or fresh
 
@@ -693,7 +719,7 @@ def sweep_executions_on_boot() -> int:
             "単一プロセス前提のため無効化されます(spawn は拒否されます)。"
         )
 
-    orphaned = Executions.mark_running_as_orphaned_on_boot(ORPHANED_ON_BOOT_ERROR)
+    orphaned = Executions.mark_running_as_orphaned_on_boot(ORPHANED_ERROR)
     if orphaned:
         log.info(f"boot sweep: marked {orphaned} running execution(s) as orphaned")
 
