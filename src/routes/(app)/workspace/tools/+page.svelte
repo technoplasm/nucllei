@@ -47,11 +47,11 @@
 
 	// llens(#47 A1): 一覧の2段目は description ではなく、その tool が公開する関数名を
 	// できるだけ並べる(#49 の tool spec 露出。list は specs 込みの ToolUserModel)。
-	const toolFnNames = (tool: any) =>
-		(tool?.specs ?? [])
-			.map((s: any) => s?.name)
-			.filter(Boolean)
-			.join(', ');
+	const toolFnList = (tool: any): string[] =>
+		(tool?.specs ?? []).map((s: any) => s?.name).filter(Boolean);
+	const toolFnNames = (tool: any) => toolFnList(tool).join(', ');
+	// 見切れても全関数を知れるように、2 段目のホバーで全部を 1 行ずつ出す (ken 2026-10-03)
+	const toolFnTooltip = (tool: any) => toolFnList(tool).join('<br/>');
 
 	const openAccessControl = (tool: any) => {
 		acItem = tool;
@@ -151,20 +151,31 @@
 		<div class="mb-3 gap-3 grid lg:grid-cols-2 xl:grid-cols-3">
 			{#each builtinItems as tool (tool.id)}
 				<div class="flex items-center gap-0.5 px-4 py-3 bg-surface-raised rounded-xl">
-					<!-- 組み込みは編集不可 — tooltip とカーソルで明示(visibility だけ右のアイコンで編集可) -->
-					<Tooltip
-						className="flex-1 min-w-0"
-						content={$i18n.t('Builtin tools cannot be edited.')}
-						placement="top-start"
-					>
-						<div class="cursor-not-allowed">
-							<div class="font-semibold line-clamp-1">{tool.name}</div>
-							<div class="flex gap-1.5 text-xs">
-								<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
+					<!-- 組み込みは編集不可 — 名前の行だけに tooltip とカーソルで明示(visibility だけ右のアイコンで編集可)。
+					     2 段目は関数一覧のホバーと競合しないよう外に出す -->
+					<div class="flex-1 min-w-0">
+						<Tooltip
+							className="block"
+							content={$i18n.t('Builtin tools cannot be edited.')}
+							placement="top-start"
+						>
+							<div class="font-semibold line-clamp-1 cursor-not-allowed">{tool.name}</div>
+						</Tooltip>
+						<div class="flex items-center gap-1.5 text-xs">
+							<span
+								class="font-mono text-[11px] leading-5 px-1.5 rounded-md bg-surface-muted text-content-muted shrink-0"
+								>{tool.id}</span
+							>
+							<Tooltip
+								className="min-w-0"
+								content={toolFnTooltip(tool)}
+								allowHTML={true}
+								placement="bottom-start"
+							>
 								<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
-							</div>
+							</Tooltip>
 						</div>
-					</Tooltip>
+					</div>
 
 					<Tooltip
 						content={(tool.access_control ?? null) === null
@@ -222,9 +233,19 @@
 					href={`/workspace/tools/edit?id=${encodeURIComponent(tool.id)}`}
 				>
 					<div class="font-semibold line-clamp-1">{tool.name}</div>
-					<div class="flex gap-1.5 text-xs">
-						<span class="text-content-muted font-medium shrink-0">{tool.id}</span>
-						<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
+					<div class="flex items-center gap-1.5 text-xs">
+						<span
+							class="font-mono text-[11px] leading-5 px-1.5 rounded-md bg-surface-muted text-content-muted shrink-0"
+							>{tool.id}</span
+						>
+						<Tooltip
+							className="min-w-0"
+							content={toolFnTooltip(tool)}
+							allowHTML={true}
+							placement="bottom-start"
+						>
+							<span class="text-content-muted line-clamp-1">{toolFnNames(tool)}</span>
+						</Tooltip>
 					</div>
 				</a>
 

@@ -131,9 +131,12 @@
 					href={`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`}
 				>
 					<div class="font-semibold line-clamp-1 capitalize">{skill.name}</div>
-					<div class="flex gap-1.5 text-xs">
-						<span class="text-content-muted font-medium shrink-0">/{skill.id}</span>
-						<span class="line-clamp-1">{skill.description}</span>
+					<div class="flex items-center gap-1.5 text-xs">
+						<span
+							class="font-mono text-[11px] leading-5 px-1.5 rounded-md bg-surface-muted text-content-muted shrink-0"
+							>/{skill.id}</span
+						>
+						<span class="text-content-muted line-clamp-1">{skill.description}</span>
 					</div>
 				</a>
 

@@ -122,9 +122,12 @@
 							href={`/workspace/functions/edit?id=${encodeURIComponent(func.id)}`}
 						>
 							<div class="font-semibold line-clamp-1">{func.name}</div>
-							<div class="flex gap-1.5 text-xs">
-								<span class="text-content-muted font-medium shrink-0">{func.id}</span>
-								<span class="line-clamp-1">{func.description}</span>
+							<div class="flex items-center gap-1.5 text-xs">
+								<span
+									class="font-mono text-[11px] leading-5 px-1.5 rounded-md bg-surface-muted text-content-muted shrink-0"
+									>{func.id}</span
+								>
+								<span class="text-content-muted line-clamp-1">{func.description}</span>
 							</div>
 						</a>
 
