@@ -119,7 +119,6 @@ from nucllei.config import (
     ATTACHMENT_IMAGE_MAX_DIMENSION,
     PASTED_TEXT_CHARACTER_LIMIT,
     ATTACHMENT_FUNCTION_ID,
-    TIKTOKEN_ENCODING_NAME,
     # Retrieval (Web Search)
     WEBUI_AUTH,
     WEBUI_BANNERS,
@@ -161,7 +160,6 @@ from nucllei.config import (
     LDAP_CA_CERT_FILE,
     LDAP_CIPHERS,
     # Misc
-    ENV,
     CACHE_DIR,
     STATIC_DIR,
     FRONTEND_BUILD_DIR,
@@ -182,6 +180,7 @@ from nucllei.config import (
 )
 from nucllei.env import (
     CUSTOM_DIR,
+    ENV,
     ENABLE_PWA,
     GLOBAL_LOG_LEVEL,
     SRC_LOG_LEVELS,
@@ -450,9 +449,6 @@ app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
 app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
 app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION = ATTACHMENT_IMAGE_MAX_DIMENSION
 app.state.config.PASTED_TEXT_CHARACTER_LIMIT = PASTED_TEXT_CHARACTER_LIMIT
-
-
-app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
 
 ########################################

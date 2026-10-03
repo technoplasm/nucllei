@@ -2,9 +2,6 @@ import logging
 import time
 import uuid
 import jwt
-import base64
-import hmac
-import hashlib
 
 
 from datetime import datetime, timedelta, timezone
@@ -16,7 +13,6 @@ from nucllei.models.users import Users
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import (
     WEBUI_SECRET_KEY,
-    TRUSTED_SIGNATURE_KEY,
     WEBUI_AUTH_COOKIE_SAME_SITE,
     WEBUI_AUTH_COOKIE_SECURE,
     SRC_LOG_LEVELS,
@@ -38,22 +34,6 @@ ALGORITHM = "HS256"
 ##############
 # Auth Utils
 ##############
-
-
-def verify_signature(payload: str, signature: str) -> bool:
-    """
-    Verifies the HMAC signature of the received payload.
-    """
-    try:
-        expected_signature = base64.b64encode(
-            hmac.new(TRUSTED_SIGNATURE_KEY, payload.encode(), hashlib.sha256).digest()
-        ).decode()
-
-        # Compare securely to prevent timing attacks
-        return hmac.compare_digest(expected_signature, signature)
-
-    except Exception:
-        return False
 
 
 # llens(#28): get_license_data / override_static を撤去 — 起動時に

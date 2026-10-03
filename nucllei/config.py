@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from nucllei.env import (
     DATA_DIR,
-    ENV,
     FRONTEND_BUILD_DIR,
     OFFLINE_MODE,
     NUCLLEI_DIR,
@@ -676,36 +675,17 @@ ENABLE_OLLAMA_API = RuntimeConfig(
     os.environ.get("ENABLE_OLLAMA_API", "True").lower() == "true",
 )
 
-OLLAMA_API_BASE_URL = os.environ.get(
-    "OLLAMA_API_BASE_URL", "http://localhost:11434/api"
-)
-
+# llens: K8S_FLAG(kubernetes 内 ollama-service への切替)は k8s サポート撤去済みのため撤去
+# nucllei: 旧 alias OLLAMA_API_BASE_URL("…/api" 付き)と USE_OLLAMA_DOCKER(prod で
+# "/ollama" を docker 内アドレスへ書き換える)は撤去。既定値だけ引き継ぐ。
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "")
 if OLLAMA_BASE_URL:
     # Remove trailing slash
     OLLAMA_BASE_URL = (
         OLLAMA_BASE_URL[:-1] if OLLAMA_BASE_URL.endswith("/") else OLLAMA_BASE_URL
     )
-
-
-# llens: K8S_FLAG(kubernetes 内 ollama-service への切替)は k8s サポート撤去済みのため撤去
-USE_OLLAMA_DOCKER = os.environ.get("USE_OLLAMA_DOCKER", "false")
-
-if OLLAMA_BASE_URL == "" and OLLAMA_API_BASE_URL != "":
-    OLLAMA_BASE_URL = (
-        OLLAMA_API_BASE_URL[:-4]
-        if OLLAMA_API_BASE_URL.endswith("/api")
-        else OLLAMA_API_BASE_URL
-    )
-
-if ENV == "prod":
-    if OLLAMA_BASE_URL == "/ollama":
-        if USE_OLLAMA_DOCKER.lower() == "true":
-            # if you use all-in-one docker container (Nucllei + Ollama)
-            # with the docker build arg USE_OLLAMA=true (--build-arg="USE_OLLAMA=true") this only works with http://localhost:11434
-            OLLAMA_BASE_URL = "http://localhost:11434"
-        else:
-            OLLAMA_BASE_URL = "http://host.docker.internal:11434"
+else:
+    OLLAMA_BASE_URL = "http://localhost:11434"
 
 
 OLLAMA_BASE_URLS = os.environ.get("OLLAMA_BASE_URLS", "")
@@ -1205,14 +1185,8 @@ ATTACHMENT_FUNCTION_ID = RuntimeConfig(
 
 # llens(#52): reranking(ベクタ検索の再ランキング)は RAG 撤去に伴い廃止。config・
 # 起動時ロード(rf)ともに撤去済み。
-
-
-TIKTOKEN_CACHE_DIR = os.environ.get("TIKTOKEN_CACHE_DIR", f"{CACHE_DIR}/tiktoken")
-TIKTOKEN_ENCODING_NAME = RuntimeConfig(
-    "TIKTOKEN_ENCODING_NAME",
-    "rag.tiktoken_encoding_name",
-    os.environ.get("TIKTOKEN_ENCODING_NAME", "cl100k_base"),
-)
+# tiktoken(TIKTOKEN_CACHE_DIR / TIKTOKEN_ENCODING_NAME)も読む側が無く撤去。
+# トークン数はモデルサーバーが返す usage を使う(models/chats.py)。
 
 
 ####################################
@@ -1492,7 +1466,7 @@ LDAP_SEARCH_BASE = RuntimeConfig(
 LDAP_SEARCH_FILTERS = RuntimeConfig(
     "LDAP_SEARCH_FILTER",
     "ldap.server.search_filter",
-    os.environ.get("LDAP_SEARCH_FILTER", os.environ.get("LDAP_SEARCH_FILTERS", "")),
+    os.environ.get("LDAP_SEARCH_FILTER", ""),
 )
 
 LDAP_USE_TLS = RuntimeConfig(

@@ -76,7 +76,6 @@ log_sources = [
     "OPENAI",
     "RAG",
     "WEBHOOK",
-    "SOCKET",
     "OAUTH",
 ]
 
@@ -109,8 +108,6 @@ WEBUI_COPYRIGHT = os.environ.get("WEBUI_COPYRIGHT", "")
 # llens: 外部照会を避けるためローカル static を指す(旧 upstream は openwebui.com の
 # 外部 URL だった)。使用箇所は webhook 通知(Teams payload)のアイコンのみ。
 WEBUI_FAVICON_URL = "/static/favicon.png"
-
-TRUSTED_SIGNATURE_KEY = os.environ.get("TRUSTED_SIGNATURE_KEY", "")
 
 ####################################
 # ENV (dev,test,prod)
@@ -388,12 +385,8 @@ BYPASS_MODEL_ACCESS_CONTROL = (
 # WEBUI_SECRET_KEY
 ####################################
 
-WEBUI_SECRET_KEY = os.environ.get(
-    "WEBUI_SECRET_KEY",
-    os.environ.get(
-        "WEBUI_JWT_SECRET_KEY", "t0p-s3cr3t"
-    ),  # DEPRECATED: remove at next major version
-)
+# nucllei: 旧 alias WEBUI_JWT_SECRET_KEY は撤去(旧データ互換を持たない方針)
+WEBUI_SECRET_KEY = os.environ.get("WEBUI_SECRET_KEY", "t0p-s3cr3t")
 
 WEBUI_SESSION_COOKIE_SAME_SITE = os.environ.get("WEBUI_SESSION_COOKIE_SAME_SITE", "lax")
 
@@ -447,8 +440,7 @@ except Exception:
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 300
 
 AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST = os.environ.get(
-    "AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST",
-    os.environ.get("AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST", "10"),
+    "AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST", "10"
 )
 
 if AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST == "":
@@ -492,12 +484,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
     "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
 )
 OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "nucllei")
-OTEL_RESOURCE_ATTRIBUTES = os.environ.get(
-    "OTEL_RESOURCE_ATTRIBUTES", ""
-)  # e.g. key1=val1,key2=val2
-OTEL_TRACES_SAMPLER = os.environ.get(
-    "OTEL_TRACES_SAMPLER", "parentbased_always_on"
-).lower()
+# OTEL_RESOURCE_ATTRIBUTES / OTEL_TRACES_SAMPLER は nucllei 側に読む側が無いので定数を持たない
+# (OpenTelemetry SDK 自身が環境変数を読む)。
 
 # llens(#84): 旧 EXTERNAL_PWA_MANIFEST_URL(manifest を外部 URL から proxy)は
 # 消費者のいない upstream 残骸のため撤去。PWA は ENABLE_PWA 一本(DATA_DIR 節参照)。

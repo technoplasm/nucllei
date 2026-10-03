@@ -41,7 +41,6 @@ dependencies = [
 
     "openai",
     "google-generativeai==0.8.4",
-    "tiktoken",
 
     # llens(#52): langchain-core は tools.py の function-calling スキーマ変換で使用(CORE tool 基盤)。
     # langchain / langchain-community は文書抽出ローダ専用だったため撤去し、core だけ直接依存へ昇格。
