@@ -21,7 +21,7 @@ enforce もここに閉じる:
   (所有者 or read ACL)。enum 構築と callable 実行時の両方で同一述語を評価する。
 - 機能フラグ meta.features.subagent(既定 ON — skills と対称)
 - depth 上限(SUBAGENT_MAX_DEPTH。user chat = depth 0)
-- プロセス内同時実行数(SUBAGENT_MAX_CONCURRENT。超過は待たずにエラー)
+- プロセス内同時実行数(SUBAGENT_MAX_CONCURRENCY。超過は待たずにエラー)
 
 構造は skills.py(build_load_skill_tool)と同型。middleware(process_chat_payload)
 が mount するため、3 段パイプラインの import は実行時に遅延させる(循環回避)。
@@ -45,9 +45,9 @@ from nucllei.utils.executions import in_exec
 from nucllei.utils.misc import get_message_list
 from nucllei.env import (
     SRC_LOG_LEVELS,
-    SUBAGENT_MAX_CONCURRENT,
+    SUBAGENT_MAX_CONCURRENCY,
     SUBAGENT_MAX_DEPTH,
-    SUBAGENT_TURN_TIMEOUT,
+    SUBAGENT_TURN_TIMEOUT_S,
 )
 
 log = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def _accessible_subagent_presets(model, user) -> list:
     """allowlist(meta.subagentPresetIds)∩ ユーザーがアクセスできる preset 行。
 
     述語は「所有者 or has_access(read)」— check_model_access には依存しない
-    (admin バイパス・BYPASS_MODEL_ACCESS_CONTROL の穴があるため)。enum 構築と
+    (admin バイパスの穴があるため。旧 BYPASS_MODEL_ACCESS_CONTROL は 2026-10-03 に撤去)。enum 構築と
     callable 実行時の両方でこの同一述語を評価する。ただし子ターン自体は
     generate_chat_completion を通るので既存検証も重ねて効く。
 
@@ -468,7 +468,7 @@ def build_subagent_tools(request, model, user, metadata):
 
     戻り値は {name: tool エントリ} — エントリは native ループ互換の
     {"spec", "callable", "render", "timeout", "backgroundable"}。timeout は
-    per-tool キー(execute_tool_calls が CHAT_TOOL_EXECUTION_TIMEOUT より優先)—
+    per-tool キー(execute_tool_calls が TOOL_EXEC_TIMEOUT_S より優先)—
     子ターン全体を包む/待つため長い(background 昇格時は exec runner の
     wait_for 上限としても同キーが効く — 設計 D5)。backgroundable: True は
     #110 の呼び出し面(K2)への opt-in — builtin では run_subagent のみ既定適格
@@ -548,9 +548,9 @@ def build_subagent_tools(request, model, user, metadata):
             return _error("instruction は必須です。")
 
         # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
-        if _active_turns >= SUBAGENT_MAX_CONCURRENT:
+        if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
             return _error(
-                f"サブエージェントの同時実行数が上限({SUBAGENT_MAX_CONCURRENT})に"
+                f"サブエージェントの同時実行数が上限({SUBAGENT_MAX_CONCURRENCY})に"
                 "達しています。しばらくしてから再試行してください。"
             )
         _active_turns += 1
@@ -699,7 +699,7 @@ def build_subagent_tools(request, model, user, metadata):
             "spec": spec,
             "callable": run_subagent,
             "render": {"result": {"kind": "subagent"}},
-            "timeout": SUBAGENT_TURN_TIMEOUT,
+            "timeout": SUBAGENT_TURN_TIMEOUT_S,
             # #110(K2/D4): builtin で唯一の既定適格。共有 background 引数は
             # middleware が spec のコピーへ注入する(ここでは宣言しない —
             # 自前宣言は恒久不適格の衝突ガードに掛かる)。

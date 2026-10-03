@@ -241,7 +241,7 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
   (memories #8)/ CHUNK・docling・tika / PDF_EXTRACT_IMAGES~~ → **改訂(2026-07-08 第2セッション)で全撤去**
   (下記「## RAG/KB 完全撤去」参照)。強制全文(context=="full")分岐も撤去。
 - **① 受け入れゲート**(c0654415d): upload 入口(Attachment 前)で server-side に拡張子 whitelist +
-  サイズ上限を強制。config を **`ATTACHMENT_MAX_SIZE`(既定 25MB)/ `ATTACHMENT_MAX_COUNT` /
+  サイズ上限を強制。config を **`ATTACHMENT_MAX_SIZE_MB`(既定 25MB)/ `ATTACHMENT_MAX_COUNT` /
   `ATTACHMENT_ALLOWED_EXTENSIONS`(空=全許可)** に統一(旧 RAG_FILE_MAX_* を廃止、`attachment.*` 永続キー)。
   SANDBOX_FILE_LIMIT_BYTES とは別 config だが 25MB で揃える運用。
 - **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。

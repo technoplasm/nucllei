@@ -51,7 +51,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 | 保存済み資格情報の**オートフィル**を抑える | ◯(概ね効く) | `ENABLE_LOGIN_AUTOCOMPLETE=false`(下記) |
 | 「パスワードを保存しますか」**プロンプトを出させない** | ✕ | 端末のブラウザポリシー。Chrome / Edge の `PasswordManagerEnabled=false`(GPO / Intune / macOS 構成プロファイル。Windows GUI は「パスワード マネージャーへのパスワードの保存を有効にする」を無効) |
 | **既に保存済み**の資格情報を消す | ✕ | 端末側での削除。ポリシーを後から入れても既存の保存分は残る |
-| 席を離れた後の**セッション乗っ取り** | ◯ | `JWT_EXPIRES_IN`(既存 env、下記の「アイドルタイムアウト」) |
+| 席を離れた後の**セッション乗っ取り** | ◯ | `SESSION_IDLE_TIMEOUT`(既存 env、下記の「アイドルタイムアウト」) |
 | 離席中に**前の人の画面が出たまま**になる | ◯ | 同上(FE 側タイマが `/auth` へ逃がす) |
 
 > ブラウザポリシーの適用は病院の端末管理(情シス)側の作業。
@@ -78,7 +78,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 
 | env | 既定 | 共有 PC での推奨 | 備考 |
 |---|---|---|---|
-| `JWT_EXPIRES_IN` | `-1`(無期限) | `4h` 等 | RuntimeConfig。`s/m/h/d/w` 表記。**アイドル(無操作)タイムアウト** — 下記 |
+| `SESSION_IDLE_TIMEOUT` | `-1`(無期限) | `4h` 等 | RuntimeConfig。`s/m/h/d/w` 表記。**アイドル(無操作)タイムアウト** — 下記 |
 | `WEBUI_SESSION_COOKIE_SECURE` / `WEBUI_AUTH_COOKIE_SECURE` | `false` | HTTPS 配備なら `true` | `nucllei/env.py` |
 | `WEBUI_SESSION_COOKIE_SAME_SITE` / `WEBUI_AUTH_COOKIE_SAME_SITE` | `lax` | `strict` も可 | 同上 |
 
@@ -86,15 +86,15 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
   抑止対象そのものが無い。
 - **トークンは httpOnly cookie に一本化済み**(#70 B1、`auth/+page.svelte` のコメント)。
   `localStorage` に JWT を残さないので、共有 PC で「ブラウザに残る」のは cookie のみ。
-  `JWT_EXPIRES_IN` を有限にすれば端末に残り続けない。
+  `SESSION_IDLE_TIMEOUT` を有限にすれば端末に残り続けない。
 
-### アイドルタイムアウト(`JWT_EXPIRES_IN` の意味)
+### アイドルタイムアウト(`SESSION_IDLE_TIMEOUT` の意味)
 
 **配備者向けの説明**:
 
-> `JWT_EXPIRES_IN` は「無操作でこの時間が経ったらログアウトする」時間。
+> `SESSION_IDLE_TIMEOUT` は「無操作でこの時間が経ったらログアウトする」時間。
 > **使っている間は切れない** — 最後にキーを叩いた / クリックした時点から数え直す。
-> 例: `JWT_EXPIRES_IN=1d` なら、丸一日使い続けても切れず、席を立って 1 日経つと切れる。
+> 例: `SESSION_IDLE_TIMEOUT=1d` なら、丸一日使い続けても切れず、席を立って 1 日経つと切れる。
 > 既定は `-1`(無期限 = タイムアウトしない)。設定はこれ 1 つで、絶対上限は無い。
 > 値は `s` / `m` / `h` / `d` / `w`(例 `30m` `4h` `1d`)。管理画面 > 設定 > 全般 からも変えられる。
 > 切れたときは操作した本人がログイン画面に戻され、「セッションの有効期限が切れました」と出る。
@@ -106,7 +106,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
 | FE 送信側 | 最後の延命以降に**人の操作**(`keydown` / `pointerdown` / `click` / `touchstart` / `wheel`。**`mousemove` は数えない**。
 ホイールは「長い回答をスクロールして読んでいる = 在席」なので数える、カーソルが動いただけは数えない。DOM イベントのほかに**マイク入力で発話を検出している間**も数える — 下記)があったリクエストにだけ `X-Nucllei-Activity: 1` を付ける | `src/lib/apis/fetch.ts`(全 API が通る唯一の口) |
 | BE | そのヘッダがあり、かつ token が**寿命の半分**を過ぎていたら cookie を再発行。`-1` なら何もしない。**API キー(`sk-`)経路は延命しない** | `nucllei/utils/auth.py`(`mark_session_renewal`)、Set-Cookie は `nucllei/main.py` の middleware |
-| FE 画面側 | 最後の人の操作から `JWT_EXPIRES_IN` 経過したら自分で `/auth?redirect=` へ逃がす | `src/lib/apis/fetch.ts`(`startIdleWatch`)、起動は `src/routes/+layout.svelte` |
+| FE 画面側 | 最後の人の操作から `SESSION_IDLE_TIMEOUT` 経過したら自分で `/auth?redirect=` へ逃がす | `src/lib/apis/fetch.ts`(`startIdleWatch`)、起動は `src/routes/+layout.svelte` |
 
 設計上の要点(触るときはここを壊さないこと):
 
@@ -123,13 +123,13 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
   (`pollExecutions` は `visibilityState === 'hidden'` と `shouldPollExecutions` で二重に止まる)。
   サーバのセッションが死んでも、次にリクエストが飛ぶまで画面は前の人のチャット一覧と本文のまま。
   共有 PC で一番効かせたいのがここ。TTL は `/api/config` の `session_idle_timeout`
-  (= 既存 `JWT_EXPIRES_IN` を秒で露出しただけ。**設定項目は増やしていない**)。
+  (= 既存 `SESSION_IDLE_TIMEOUT` を秒で露出しただけ。**設定項目は増やしていない**)。
   判定は `setTimeout` の残り時間ではなく**時刻の差** — スリープ・背面タブでタイマが飛んでも
   復帰時点(`visibilitychange` / `focus`)で評価する。
   失効の後始末(sessionStorage フラグ + ハード遷移 + 到着後トースト)は 401 経路(#70 B2)と共用で、
   二重には走らない。
 - **「人の操作」にはマイク入力の発話も含める**(2026-10-03、ken 指示「読み取り中はタイムアウト
-  しないように」)。喋っているだけの間はキーもクリックも無いので、`JWT_EXPIRES_IN` を短くした
+  しないように」)。喋っているだけの間はキーもクリックも無いので、`SESSION_IDLE_TIMEOUT` を短くした
   配備では長い口述の途中で FE タイマが追い出し、読み取った文が失われていた(口述中の
   `/transcriptions` にも延命ヘッダは付かなかった)。`fetch.ts` が `noteInteraction()` を公開し、
   `VoiceRecording.svelte` の音検出ループが**音を検出しているフレームで、5 秒に 1 回へ間引いて**
@@ -146,7 +146,7 @@ Firefox / Safari も程度の差はあれ同様に、保存の可否は最終的
   条件は 2 つ:
   - **人が操作した瞬間**にだけ出す(`noteInteraction` から呼ぶ)。**無操作なら 1 本も
     出ない**ので「ポーリングでは延命しない」は保たれる。
-  - 最後にヘッダを運べた時刻から**半減期**(`JWT_EXPIRES_IN / 2` = BE が再発行を始める
+  - 最後にヘッダを運べた時刻から**半減期**(`SESSION_IDLE_TIMEOUT / 2` = BE が再発行を始める
     境目)以上経っているときだけ。`1d` なら 12 時間に 1 本、`30m` なら 15 分に 1 本。
     普通に API を叩いている間は条件が成立しないので追加リクエストは出ない
     (E2E 実測: 20 秒ごとにクリックして 150 秒 → keepalive 0 本)。

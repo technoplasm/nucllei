@@ -104,7 +104,7 @@
 									class="flex-1 w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 									type="number"
 									placeholder={$i18n.t('Leave empty for unlimited')}
-									bind:value={RAGConfig.ATTACHMENT_MAX_SIZE}
+									bind:value={RAGConfig.ATTACHMENT_MAX_SIZE_MB}
 									autocomplete="off"
 									min="0"
 								/>

@@ -273,8 +273,10 @@ API_KEY_ALLOWED_ENDPOINTS = RuntimeConfig(
 )
 
 
-JWT_EXPIRES_IN = RuntimeConfig(
-    "JWT_EXPIRES_IN", "auth.jwt_expiry", os.environ.get("JWT_EXPIRES_IN", "-1")
+SESSION_IDLE_TIMEOUT = RuntimeConfig(
+    "SESSION_IDLE_TIMEOUT",
+    "auth.session_idle_timeout",
+    os.environ.get("SESSION_IDLE_TIMEOUT", "-1"),
 )
 
 ####################################
@@ -669,10 +671,12 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # OLLAMA_BASE_URL
 ####################################
 
+# nucllei: 既定 false(2026-10-03、旧既定 true)。推論エンジンは OpenAI 互換接続が本線で、
+# ollama は dev の代替手段に留まる。
 ENABLE_OLLAMA_API = RuntimeConfig(
     "ENABLE_OLLAMA_API",
     "ollama.enable",
-    os.environ.get("ENABLE_OLLAMA_API", "True").lower() == "true",
+    os.environ.get("ENABLE_OLLAMA_API", "False").lower() == "true",
 )
 
 # llens: K8S_FLAG(kubernetes 内 ollama-service への切替)は k8s サポート撤去済みのため撤去
@@ -1128,12 +1132,12 @@ ATTACHMENT_MAX_COUNT = RuntimeConfig(
 
 # 受け入れ上限(MB)。既定 25MB。sandbox の SANDBOX_FILE_LIMIT_BYTES(既定 25MB)とは別 config
 # だが、原本をサンドボックスへ渡す運用では同値に揃えるのが筋。
-ATTACHMENT_MAX_SIZE = RuntimeConfig(
-    "ATTACHMENT_MAX_SIZE",
+ATTACHMENT_MAX_SIZE_MB = RuntimeConfig(
+    "ATTACHMENT_MAX_SIZE_MB",
     "attachment.max_size",
     (
-        int(os.environ.get("ATTACHMENT_MAX_SIZE"))
-        if os.environ.get("ATTACHMENT_MAX_SIZE")
+        int(os.environ.get("ATTACHMENT_MAX_SIZE_MB"))
+        if os.environ.get("ATTACHMENT_MAX_SIZE_MB")
         else 25
     ),
 )

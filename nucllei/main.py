@@ -114,7 +114,7 @@ from nucllei.config import (
     AUDIO_STT_RECORDING_BITRATE_KBPS,
     DEEPGRAM_API_KEY,
     ATTACHMENT_MAX_COUNT,
-    ATTACHMENT_MAX_SIZE,
+    ATTACHMENT_MAX_SIZE_MB,
     ATTACHMENT_ALLOWED_EXTENSIONS,
     ATTACHMENT_IMAGE_MAX_DIMENSION,
     PASTED_TEXT_CHARACTER_LIMIT,
@@ -123,7 +123,7 @@ from nucllei.config import (
     WEBUI_AUTH,
     WEBUI_BANNERS,
     WEBHOOK_URL,
-    JWT_EXPIRES_IN,
+    SESSION_IDLE_TIMEOUT,
     ENABLE_SIGNUP,
     ENABLE_LOGIN_FORM,
     ENABLE_LOGIN_AUTOCOMPLETE,
@@ -193,7 +193,6 @@ from nucllei.env import (
     WEBUI_SESSION_COOKIE_SECURE,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
-    BYPASS_MODEL_ACCESS_CONTROL,
     RESET_CONFIG_ON_START,
     ENABLE_OTEL,
 )
@@ -391,7 +390,7 @@ app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
 )
 app.state.config.API_KEY_ALLOWED_ENDPOINTS = API_KEY_ALLOWED_ENDPOINTS
 
-app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
+app.state.config.SESSION_IDLE_TIMEOUT = SESSION_IDLE_TIMEOUT
 
 app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
 app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
@@ -443,7 +442,7 @@ app.state.FUNCTIONS = {}
 ########################################
 
 
-app.state.config.ATTACHMENT_MAX_SIZE = ATTACHMENT_MAX_SIZE
+app.state.config.ATTACHMENT_MAX_SIZE_MB = ATTACHMENT_MAX_SIZE_MB
 app.state.config.ATTACHMENT_MAX_COUNT = ATTACHMENT_MAX_COUNT
 app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = ATTACHMENT_ALLOWED_EXTENSIONS
 app.state.config.ATTACHMENT_FUNCTION_ID = ATTACHMENT_FUNCTION_ID
@@ -677,7 +676,7 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         )
 
     # Filter out models that the user does not have access to
-    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
+    if user.role == "user":
         models = get_filtered_models(models, user)
 
     log.debug(
@@ -785,7 +784,7 @@ async def chat_completion(
         model = request.app.state.MODELS[model_id]
 
         # Check if user has access to the model
-        if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
+        if user.role == "user":
             check_model_access(user, model)
 
         metadata = {
@@ -1050,13 +1049,13 @@ async def get_app_config(request: Request):
         "copyright": WEBUI_COPYRIGHT,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
-        # llens: アイドルタイムアウトの秒数(= 既存 JWT_EXPIRES_IN。設定項目は増やさない)。
+        # llens: アイドルタイムアウトの秒数(= 既存 SESSION_IDLE_TIMEOUT。設定項目は増やさない)。
         # 無期限(`-1` / `0`)なら null。FE は最後の人の操作からこの秒数が経ったら
         # 自分でログイン画面へ逃がす — サーバ側で切れていても、アイドル中のチャットは
         # リクエストを 1 本も出さないので前の人の画面が残り続けるため(共有 PC 対策)。
         # ログイン画面(未認証)からも読める位置に置く。
         "session_idle_timeout": session_idle_timeout_seconds(
-            app.state.config.JWT_EXPIRES_IN
+            app.state.config.SESSION_IDLE_TIMEOUT
         ),
         "oauth": {
             "providers": {
@@ -1109,7 +1108,7 @@ async def get_app_config(request: Request):
                 },
                 "file": {
                     # wire は互換のため `file` キー維持(フロント enforcement)。値は attachment 設定。
-                    "max_size": app.state.config.ATTACHMENT_MAX_SIZE,
+                    "max_size": app.state.config.ATTACHMENT_MAX_SIZE_MB,
                     "max_count": app.state.config.ATTACHMENT_MAX_COUNT,
                     "allowed_extensions": app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
                     "image_max_dimension": app.state.config.ATTACHMENT_IMAGE_MAX_DIMENSION,

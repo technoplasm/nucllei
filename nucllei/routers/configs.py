@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 class AttachmentConfigForm(BaseModel):
-    ATTACHMENT_MAX_SIZE: Optional[int]
+    ATTACHMENT_MAX_SIZE_MB: Optional[int]
     ATTACHMENT_MAX_COUNT: Optional[int]
     ATTACHMENT_ALLOWED_EXTENSIONS: list[str]
     ATTACHMENT_FUNCTION_ID: str = ""
@@ -32,7 +32,7 @@ class AttachmentConfigForm(BaseModel):
 
 def _attachment_config(request: Request):
     return {
-        "ATTACHMENT_MAX_SIZE": request.app.state.config.ATTACHMENT_MAX_SIZE,
+        "ATTACHMENT_MAX_SIZE_MB": request.app.state.config.ATTACHMENT_MAX_SIZE_MB,
         "ATTACHMENT_MAX_COUNT": request.app.state.config.ATTACHMENT_MAX_COUNT,
         "ATTACHMENT_ALLOWED_EXTENSIONS": request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS,
         "ATTACHMENT_FUNCTION_ID": request.app.state.config.ATTACHMENT_FUNCTION_ID,
@@ -61,7 +61,7 @@ async def set_attachment_config(
                 detail=f"Attachment function not found: {function_id}",
             )
 
-    request.app.state.config.ATTACHMENT_MAX_SIZE = form_data.ATTACHMENT_MAX_SIZE
+    request.app.state.config.ATTACHMENT_MAX_SIZE_MB = form_data.ATTACHMENT_MAX_SIZE_MB
     request.app.state.config.ATTACHMENT_MAX_COUNT = form_data.ATTACHMENT_MAX_COUNT
     request.app.state.config.ATTACHMENT_ALLOWED_EXTENSIONS = (
         form_data.ATTACHMENT_ALLOWED_EXTENSIONS

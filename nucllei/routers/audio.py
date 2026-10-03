@@ -37,7 +37,6 @@ from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import (
     AIOHTTP_CLIENT_TIMEOUT,
     SRC_LOG_LEVELS,
-    DEVICE_TYPE,
 )
 from nucllei.utils.audio import SPEECH_CACHE_DIR, synthesize_speech
 
@@ -110,7 +109,9 @@ def set_faster_whisper_model(
 
         faster_whisper_kwargs = {
             "model_size_or_path": model,
-            "device": DEVICE_TYPE if DEVICE_TYPE and DEVICE_TYPE == "cuda" else "cpu",
+            # 2026-10-03: torch による CUDA/MPS 探索(USE_CUDA_DOCKER / DEVICE_TYPE)は撤去。
+            # 内蔵 STT は CPU 固定(GPU 配備が現れたら CTranslate2 の device 設定を足す)。
+            "device": "cpu",
             "compute_type": compute_type,
             # llens(#53 フォロー): 強い CPU 向けのスレッド系つまみ(config.py 参照)
             "cpu_threads": cpu_threads,

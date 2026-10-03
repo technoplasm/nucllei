@@ -523,7 +523,7 @@ class TestAsyncExec(AbstractPostgresTest):
         async def probe():
             return "ok"
 
-        monkeypatch.setattr(self.executions, "ASYNC_EXEC_MAX_CONCURRENT", 1)
+        monkeypatch.setattr(self.executions, "ASYNC_EXEC_MAX_CONCURRENCY", 1)
         self.executions._active_execs_by_user["1"] = 1
         error = json.loads(asyncio.run(self._spawn(probe)))
         assert error["ok"] is False

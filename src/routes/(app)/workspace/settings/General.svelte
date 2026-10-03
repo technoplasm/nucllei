@@ -190,7 +190,7 @@
 
 					<div class=" mb-2.5 w-full justify-between">
 						<div class="flex w-full justify-between">
-							<div class=" self-center text-xs font-medium">{$i18n.t('JWT Expiration')}</div>
+							<div class=" self-center text-xs font-medium">{$i18n.t('Session idle timeout')}</div>
 						</div>
 
 						<div class="flex mt-2 space-x-2">
@@ -198,7 +198,7 @@
 								class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
 								type="text"
 								placeholder={`e.g.) "30m","1h", "10d". `}
-								bind:value={adminConfig.JWT_EXPIRES_IN}
+								bind:value={adminConfig.SESSION_IDLE_TIMEOUT}
 							/>
 						</div>
 

@@ -22,6 +22,7 @@ SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**ど�
 
 import logging
 
+from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL
 from nucllei.builtin_tools import (
     attachment_text,
     chat_files,
@@ -107,7 +108,7 @@ BUILTIN_TOOLS = {
 # 401 で必ず失敗する状態ではなく**普通に動く状態**になった。ゲートは向き先 env
 # (`SANDBOX_URL`)ただ一つに戻す。設定漏れに気付けるよう、URL はあるのにトークンが
 # 無いケースだけ sync 時に warning を出す(下の sync_builtin_tools)。
-if sandbox.SANDBOX_URL:
+if SANDBOX_URL:
     BUILTIN_TOOLS["builtin_sandbox"] = {
         "module": sandbox,
         "name": "Sandbox",
@@ -123,7 +124,7 @@ if sandbox.SANDBOX_URL:
 # 意図した状態かは配備者にしか分からないので warning を 1 行出す。import 時点ではまだ
 # logging の設定が済んでいない可能性があるので、フラグだけ立てて sync_builtin_tools()
 # で吐く(起動ログに必ず載る)。
-_SANDBOX_TOKEN_MISSING = bool(sandbox.SANDBOX_URL) and not sandbox.SANDBOX_TOKEN
+_SANDBOX_TOKEN_MISSING = bool(SANDBOX_URL) and not SANDBOX_TOKEN
 
 
 def is_builtin_tool_id(tool_id: str) -> bool:

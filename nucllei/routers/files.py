@@ -188,7 +188,7 @@ async def store_uploaded_file(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"許可されていないファイル形式です(.{ext or '拡張子なし'})。",
             )
-        max_size = request.app.state.config.ATTACHMENT_MAX_SIZE  # MB
+        max_size = request.app.state.config.ATTACHMENT_MAX_SIZE_MB  # MB
         if max_size and file.size and file.size > max_size * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

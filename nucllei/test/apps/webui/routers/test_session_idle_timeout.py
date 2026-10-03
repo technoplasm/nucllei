@@ -1,6 +1,6 @@
 """セッションのアイドルタイムアウト(スライディング期限)の回帰テスト。
 
-共有 PC(北大病院の使い回し端末)の離席対策。`JWT_EXPIRES_IN` の意味を
+共有 PC(北大病院の使い回し端末)の離席対策。`SESSION_IDLE_TIMEOUT` の意味を
 「発行からの絶対期限」から「**無操作**でこの時間が経ったら切れる」へ変えた。
 設計と配備者向けの説明は `_memos/auth-profile.md`「共有 PC 配備」節。
 
@@ -11,7 +11,7 @@ CORE 領域(認証)なので、延命が起きる条件・**起きない**条件
   = タブを開いたまま離席しても永久ログインにならない。
 - 発行するのは token が**寿命の半分**を過ぎたときだけ(毎リクエスト発行しない)。
 - API キー(`sk-`)経路では延命しない(cookie セッション限定)。
-- `JWT_EXPIRES_IN` が `-1`(既定 = 無期限)なら何もしない = 既定の挙動は不変。
+- `SESSION_IDLE_TIMEOUT` が `-1`(既定 = 無期限)なら何もしない = 既定の挙動は不変。
 - 延命 cookie の属性は signin の発行箇所と同一(80/443 併用の配備で壊れないこと)。
 """
 
@@ -50,13 +50,13 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         super().setup_method()
         from nucllei.main import app
 
-        self._original_expiry = app.state.config.JWT_EXPIRES_IN
+        self._original_expiry = app.state.config.SESSION_IDLE_TIMEOUT
         self.fast_api_client.cookies.clear()
 
     def teardown_method(self):
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = self._original_expiry
+        app.state.config.SESSION_IDLE_TIMEOUT = self._original_expiry
         self.fast_api_client.cookies.clear()
         super().teardown_method()
 
@@ -89,10 +89,10 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
     # ---- 既定(無期限)は挙動を変えない --------------------------
 
     def test_default_is_unlimited_and_never_renews(self):
-        """既定 `JWT_EXPIRES_IN=-1` では、操作ヘッダが付いても何も起きない。"""
+        """既定 `SESSION_IDLE_TIMEOUT=-1` では、操作ヘッダが付いても何も起きない。"""
         from nucllei.main import app
 
-        assert app.state.config.JWT_EXPIRES_IN == "-1"
+        assert app.state.config.SESSION_IDLE_TIMEOUT == "-1"
 
         user = self._create_user()
         self._login_with(user, remaining=timedelta(seconds=30))
@@ -102,7 +102,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         assert _set_cookie_header(response) is None
 
     def test_config_exposes_idle_timeout_seconds(self):
-        """FE 側タイマの TTL は `/api/config` で既存 `JWT_EXPIRES_IN` を露出する。
+        """FE 側タイマの TTL は `/api/config` で既存 `SESSION_IDLE_TIMEOUT` を露出する。
 
         設定項目は増やさない — 既にある値を秒で見せるだけ。無期限なら null。
         ログイン画面(未認証)からも読めること。
@@ -113,7 +113,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         assert response.status_code == 200, response.text
         assert response.json()["session_idle_timeout"] is None
 
-        app.state.config.JWT_EXPIRES_IN = "4h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "4h"
         response = self.fast_api_client.get("/api/config")
         assert response.json()["session_idle_timeout"] == 4 * 60 * 60
 
@@ -123,7 +123,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         from nucllei.main import app
         from nucllei.utils.auth import decode_token
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
 
         # 寿命(1h)の半分を過ぎている token。ヘッダが無ければ延命しない
@@ -149,7 +149,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         """毎リクエスト発行しない — 半分を過ぎるまでは何もしない。"""
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
         self._login_with(user, remaining=timedelta(minutes=59))
 
@@ -164,7 +164,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         """
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
         self._login_with(user, remaining=timedelta(minutes=5))
 
@@ -178,7 +178,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         """寿命を過ぎた token は、操作ヘッダが付いていても復活しない。"""
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
         self._login_with(user, remaining=timedelta(seconds=-10))
 
@@ -195,7 +195,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         self.fast_api_client.cookies.set(
             "token", create_token(data={"id": user.id}, expires_delta=None)
         )
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
 
         response = self._get_me(activity=True)
         assert response.status_code == 200, response.text
@@ -208,7 +208,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         from nucllei.main import app
         from nucllei.models.users import Users
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
         Users.update_user_api_key_by_id(user.id, "sk-idle-timeout-test")
 
@@ -231,7 +231,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         """
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
 
         signin = self.fast_api_client.post(
@@ -256,7 +256,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         """ページ読み込みだけで無期限に延命できる経路を塞いだこと。"""
         from nucllei.main import app
 
-        app.state.config.JWT_EXPIRES_IN = "1h"
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
         token = self._login_with(user, remaining=timedelta(minutes=59))
 
@@ -285,7 +285,7 @@ def _attributes(set_cookie: str) -> dict:
 
 @pytest.mark.parametrize("expiry,expected", [("-1", None), ("0", None), ("30m", 1800)])
 def test_session_idle_timeout_seconds(expiry, expected):
-    """`JWT_EXPIRES_IN` → 秒の変換(DB 不要の単体)。"""
+    """`SESSION_IDLE_TIMEOUT` → 秒の変換(DB 不要の単体)。"""
     from nucllei.utils.auth import session_idle_timeout_seconds
 
     assert session_idle_timeout_seconds(expiry) == expected

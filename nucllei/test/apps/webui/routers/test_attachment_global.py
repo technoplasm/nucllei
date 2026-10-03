@@ -197,7 +197,7 @@ class TestAttachmentConfigFunctionId(AbstractPostgresTest):
 
     def _form(self, function_id):
         return {
-            "ATTACHMENT_MAX_SIZE": 25,
+            "ATTACHMENT_MAX_SIZE_MB": 25,
             "ATTACHMENT_MAX_COUNT": None,
             "ATTACHMENT_ALLOWED_EXTENSIONS": [],
             "ATTACHMENT_FUNCTION_ID": function_id,

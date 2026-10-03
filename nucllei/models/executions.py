@@ -423,7 +423,7 @@ class ExecutionsTable:
 
         行は消さない(監査 — id/status/tool_name/usage/duration/error は残す)。
         result / args / meta を NULL にして purged_at を立てる。running 行と
-        purge 済み行は対象外。EXEC_RETENTION_DAYS=0(既定)では呼ばれない。
+        purge 済み行は対象外。ASYNC_EXEC_RETENTION_DAYS=0(既定)では呼ばれない。
         """
         try:
             with get_db() as db:

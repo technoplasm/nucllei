@@ -21,34 +21,6 @@ try:
 except ImportError:
     print("dotenv not installed, skipping...")
 
-# device type embedding models - "cpu" (default), "cuda" (nvidia gpu required) or "mps" (apple silicon) - choosing this right can lead to better performance
-USE_CUDA = os.environ.get("USE_CUDA_DOCKER", "false")
-
-if USE_CUDA.lower() == "true":
-    try:
-        import torch
-
-        assert torch.cuda.is_available(), "CUDA not available"
-        DEVICE_TYPE = "cuda"
-    except Exception as e:
-        cuda_error = (
-            "Error when testing CUDA but USE_CUDA_DOCKER is true. "
-            f"Resetting USE_CUDA_DOCKER to false: {e}"
-        )
-        os.environ["USE_CUDA_DOCKER"] = "false"
-        USE_CUDA = "false"
-        DEVICE_TYPE = "cpu"
-else:
-    DEVICE_TYPE = "cpu"
-
-try:
-    import torch
-
-    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
-        DEVICE_TYPE = "mps"
-except Exception:
-    pass
-
 ####################################
 # LOGGING
 ####################################
@@ -61,10 +33,6 @@ else:
 
 log = logging.getLogger(__name__)
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
-
-if "cuda_error" in locals():
-    log.exception(cuda_error)
-    del cuda_error
 
 log_sources = [
     "AUDIO",
@@ -253,32 +221,30 @@ RESET_CONFIG_ON_START = (
 
 # llens: native function calling のツール呼び出し反復上限(issue #18)。
 # -1 で無制限。上限到達時はチャット内にエラーを表示する。
-CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = os.environ.get(
-    "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS", "30"
-)
+TOOL_CALL_MAX_ITERATIONS = os.environ.get("TOOL_CALL_MAX_ITERATIONS", "30")
 try:
-    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = int(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)
+    TOOL_CALL_MAX_ITERATIONS = int(TOOL_CALL_MAX_ITERATIONS)
 except ValueError:
-    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS = 30
+    TOOL_CALL_MAX_ITERATIONS = 30
 
 # llens: tool 実行 1 回のシステム側タイムアウト(秒、-1 で無効)。
 # ここが権威的な上限なので sandbox 等の実行側は自前の上限を持たなくてよい。
 # タイムアウトは例外にせず tool result として モデルに返す(軌道修正を委ねる)。
-CHAT_TOOL_EXECUTION_TIMEOUT = os.environ.get("CHAT_TOOL_EXECUTION_TIMEOUT", "300")
+TOOL_EXEC_TIMEOUT_S = os.environ.get("TOOL_EXEC_TIMEOUT_S", "300")
 try:
-    CHAT_TOOL_EXECUTION_TIMEOUT = int(CHAT_TOOL_EXECUTION_TIMEOUT)
+    TOOL_EXEC_TIMEOUT_S = int(TOOL_EXEC_TIMEOUT_S)
 except ValueError:
-    CHAT_TOOL_EXECUTION_TIMEOUT = 300
+    TOOL_EXEC_TIMEOUT_S = 300
 
 # llens(#107): サブエージェント(run_subagent)1 ターンのタイムアウト(秒、-1 で無効)。
 # 子ターンはモデル呼び出しと tool 実行の反復を丸ごと包むため、通常 tool の
-# CHAT_TOOL_EXECUTION_TIMEOUT より長い既定を持つ(tool エントリの per-tool
+# TOOL_EXEC_TIMEOUT_S より長い既定を持つ(tool エントリの per-tool
 # timeout キーとして execute_tool_calls に適用される)。
-SUBAGENT_TURN_TIMEOUT = os.environ.get("SUBAGENT_TURN_TIMEOUT", "1800")
+SUBAGENT_TURN_TIMEOUT_S = os.environ.get("SUBAGENT_TURN_TIMEOUT_S", "1800")
 try:
-    SUBAGENT_TURN_TIMEOUT = int(SUBAGENT_TURN_TIMEOUT)
+    SUBAGENT_TURN_TIMEOUT_S = int(SUBAGENT_TURN_TIMEOUT_S)
 except ValueError:
-    SUBAGENT_TURN_TIMEOUT = 1800
+    SUBAGENT_TURN_TIMEOUT_S = 1800
 
 # llens(#107): agent session の入れ子深さ上限(user chat = depth 0)。
 # 親 depth+1 が上限を超えるチャットでは run_subagent を合成しない(実行時にも再チェック)。
@@ -290,29 +256,29 @@ except ValueError:
 
 # llens(#107): プロセス内の subagent 同時実行数上限。超過時は待たずにエラーを
 # tool result で返す(モデルに再試行を委ねる)。
-SUBAGENT_MAX_CONCURRENT = os.environ.get("SUBAGENT_MAX_CONCURRENT", "4")
+SUBAGENT_MAX_CONCURRENCY = os.environ.get("SUBAGENT_MAX_CONCURRENCY", "4")
 try:
-    SUBAGENT_MAX_CONCURRENT = int(SUBAGENT_MAX_CONCURRENT)
+    SUBAGENT_MAX_CONCURRENCY = int(SUBAGENT_MAX_CONCURRENCY)
 except ValueError:
-    SUBAGENT_MAX_CONCURRENT = 4
+    SUBAGENT_MAX_CONCURRENCY = 4
 
 # llens(#110): 非同期 tool 実行(execution)1 本のタイムアウト(秒、-1 で無効)。
 # per-tool の timeout 宣言が最優先で、無ければこれ。sync 既定
-# (CHAT_TOOL_EXECUTION_TIMEOUT=300)の流用は非同期化の動機と矛盾するため別建て(設計 D5)。
-ASYNC_EXEC_TIMEOUT = os.environ.get("ASYNC_EXEC_TIMEOUT", "1800")
+# (TOOL_EXEC_TIMEOUT_S=300)の流用は非同期化の動機と矛盾するため別建て(設計 D5)。
+ASYNC_EXEC_TIMEOUT_S = os.environ.get("ASYNC_EXEC_TIMEOUT_S", "1800")
 try:
-    ASYNC_EXEC_TIMEOUT = int(ASYNC_EXEC_TIMEOUT)
+    ASYNC_EXEC_TIMEOUT_S = int(ASYNC_EXEC_TIMEOUT_S)
 except ValueError:
-    ASYNC_EXEC_TIMEOUT = 1800
+    ASYNC_EXEC_TIMEOUT_S = 1800
 
 # llens(#110): 非同期実行の同時数上限(per-user)。超過は待たずに即エラーを
-# tool result で返す(モデルに再試行を委ねる)。SUBAGENT_MAX_CONCURRENT とは
+# tool result で返す(モデルに再試行を委ねる)。SUBAGENT_MAX_CONCURRENCY とは
 # 別会計(exec 席 ≠ 子ターン席の AND)。
-ASYNC_EXEC_MAX_CONCURRENT = os.environ.get("ASYNC_EXEC_MAX_CONCURRENT", "4")
+ASYNC_EXEC_MAX_CONCURRENCY = os.environ.get("ASYNC_EXEC_MAX_CONCURRENCY", "4")
 try:
-    ASYNC_EXEC_MAX_CONCURRENT = int(ASYNC_EXEC_MAX_CONCURRENT)
+    ASYNC_EXEC_MAX_CONCURRENCY = int(ASYNC_EXEC_MAX_CONCURRENCY)
 except ValueError:
-    ASYNC_EXEC_MAX_CONCURRENT = 4
+    ASYNC_EXEC_MAX_CONCURRENCY = 4
 
 # llens(#110): 非同期実行の同時数上限(プロセス全体)。default executor
 # (全 DB アクセス共有)の枯渇に対する実効防衛。
@@ -346,11 +312,40 @@ except ValueError:
 # llens(#110): exec 行の result 保持日数。0(既定)= GC しない。正の値なら boot
 # スイープ時に、終端化からこの日数を過ぎた行の重量フィールド(result/args/meta)を
 # 落とす(行自体は監査のため消さない)。
-EXEC_RETENTION_DAYS = os.environ.get("EXEC_RETENTION_DAYS", "0")
+ASYNC_EXEC_RETENTION_DAYS = os.environ.get("ASYNC_EXEC_RETENTION_DAYS", "0")
 try:
-    EXEC_RETENTION_DAYS = int(EXEC_RETENTION_DAYS)
+    ASYNC_EXEC_RETENTION_DAYS = int(ASYNC_EXEC_RETENTION_DAYS)
 except ValueError:
-    EXEC_RETENTION_DAYS = 0
+    ASYNC_EXEC_RETENTION_DAYS = 0
+
+
+####################################
+# SANDBOX (builtin_sandbox / image_refs)
+####################################
+
+# sandbox サービス (nsjail + IPython) の向き先。**既定値は持たない**: 空 = sandbox の
+# 居ない配備、として `builtin_tools/__init__.py` が builtin_sandbox の登録を止める。
+# 既定 URL を置くと全配備で常に有効になり、ゲートが意味を失う。valve / DB には持たせない
+# (経緯は `builtin_tools/sandbox.py` 冒頭)。読み取りは env.py に集約 (2026-10-03) —
+# builtin_tools 側は `from nucllei.env import SANDBOX_URL` で引く (env.py は
+# builtin_tools を import しない: 循環禁止)。
+SANDBOX_URL = os.environ.get("SANDBOX_URL", "").strip()
+
+# sandbox API の共有トークン (#132)。**opt-in** — 設定すれば `sandbox_post` が
+# `Authorization: Bearer` を付け、sandbox 側も認証を強制する。未設定なら両側とも
+# 認証なしで動く (ヘッダ自体を付けない)。両側 (sandbox コンテナと nucllei) で
+# 同名・同値を持ち合うこと。
+SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
+
+# write_file の本文上限 (bytes)。モデルの出力なのでそもそも巨大にはならないが、
+# 事故 (ループで巨大文字列を渡す等) で workspace quota を食い潰さないための蓋。
+SANDBOX_WRITE_FILE_LIMIT_BYTES = os.environ.get(
+    "SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 1024)
+)
+try:
+    SANDBOX_WRITE_FILE_LIMIT_BYTES = int(SANDBOX_WRITE_FILE_LIMIT_BYTES)
+except ValueError:
+    SANDBOX_WRITE_FILE_LIMIT_BYTES = 1024 * 1024
 
 
 ####################################
@@ -376,10 +371,6 @@ WEBUI_AUTH_TRUSTED_EMAIL_HEADER = os.environ.get(
     "WEBUI_AUTH_TRUSTED_EMAIL_HEADER", None
 )
 WEBUI_AUTH_TRUSTED_NAME_HEADER = os.environ.get("WEBUI_AUTH_TRUSTED_NAME_HEADER", None)
-
-BYPASS_MODEL_ACCESS_CONTROL = (
-    os.environ.get("BYPASS_MODEL_ACCESS_CONTROL", "False").lower() == "true"
-)
 
 ####################################
 # WEBUI_SECRET_KEY

@@ -28,16 +28,16 @@
 6. **タイトル**: spawn 時に決定的付与(`{preset名} — {instruction先頭40字}`)。
    生成タスクとフォールバックは子 metadata の `agent_session` マーカで抑止(webhook 抑止も同マーカ)。
 7. **タイムアウト**: tool エントリの per-tool `timeout` キー(execute_tool_calls が
-   `CHAT_TOOL_EXECUTION_TIMEOUT` より優先)。run_subagent は `SUBAGENT_TURN_TIMEOUT`(既定 1800s)。
+   `TOOL_EXEC_TIMEOUT_S` より優先)。run_subagent は `SUBAGENT_TURN_TIMEOUT_S`(既定 1800s)。
 8. **depth 上限**: `SUBAGENT_MAX_DEPTH`(既定 2、user chat = depth 0)。上限超は tool を合成しない + 実行時再チェック。
-9. **同時数上限**: `SUBAGENT_MAX_CONCURRENT`(既定 4)。プロセス内カウンタ、超過は**待たずに即エラー**。
+9. **同時数上限**: `SUBAGENT_MAX_CONCURRENCY`(既定 4)。プロセス内カウンタ、超過は**待たずに即エラー**。
 10. **stop 連鎖**: `asyncio.shield(child_task)` + `Task.cancelling()` で親 cancel と子側発 cancel を判別。
     親 stop / turn timeout → 子を stop して伝播。子の外部 stop → 部分回答を tool result で返し**親は続行**。
 11. **usage は親子で合算しない**(既存機構で自動成立)。親へは tool result に子 usage の要点を載せる。
 12. **機能フラグ** `meta.features.subagent`(既定 ON、skills と対称)。tool の出現は
     「フラグ ON ∧ `meta.subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1」。
 13. **allowlist 認可は enum 構築と実行時で同一述語を二重評価**(allowlist ∩ 所有者 or has_access(read))。
-    `check_model_access` に依存しない(admin バイパス・`BYPASS_MODEL_ACCESS_CONTROL` の穴)。
+    `check_model_access` に依存しない(admin バイパスの穴。`BYPASS_MODEL_ACCESS_CONTROL` は 2026-10-03 に撤去)。
     子ターン自体は generate_chat_completion を通るので既存検証も重ねて効く(#101 の AND)。
 14. **子の回答規律**: tool result は最終 assistant テキストのみ(transcript は返さない)。8000 字で切詰 + truncated。
 15. **継続**: `session_id` 引数で既存子セッションへ追いメッセージ(所有者 ∧ kind=agent ∧ 親一致を実行時検証)。

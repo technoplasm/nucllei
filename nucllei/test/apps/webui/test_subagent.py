@@ -218,7 +218,7 @@ class TestRunSubagent(AbstractPostgresTest):
     # ---- mount 条件 ----
 
     def test_mounts_with_accessible_preset(self):
-        from nucllei.env import SUBAGENT_TURN_TIMEOUT
+        from nucllei.env import SUBAGENT_TURN_TIMEOUT_S
 
         tool = self._build_tool()
         assert tool is not None
@@ -230,7 +230,7 @@ class TestRunSubagent(AbstractPostgresTest):
         assert "Researcher" in spec["description"]
         assert "調査担当" in spec["description"]
         # per-tool timeout(execute_tool_calls が全体上限より優先)と表示ディスクリプタ
-        assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT
+        assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S
         assert tool["render"] == {"result": {"kind": "subagent"}}
 
     def test_not_mounted_when_feature_off_or_allowlist_empty(self):
@@ -643,14 +643,16 @@ class TestRunSubagent(AbstractPostgresTest):
         self._patch_child_pipeline(monkeypatch)
         tool = self._build_tool()
 
-        monkeypatch.setattr(subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENT)
+        monkeypatch.setattr(
+            subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENCY
+        )
         result = json.loads(
             asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
         )
         assert result["ok"] is False
         assert "上限" in result["error"]
         # 超過エラーはカウンタを消費しない(decrement で負にならない)
-        assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENT
+        assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
 
     def test_long_answer_is_truncated(self, monkeypatch):
         from nucllei.utils import subagent

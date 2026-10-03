@@ -37,10 +37,10 @@ from typing import Optional
 
 from nucllei import tasks
 from nucllei.env import (
-    ASYNC_EXEC_MAX_CONCURRENT,
+    ASYNC_EXEC_MAX_CONCURRENCY,
     ASYNC_EXEC_MAX_TOTAL,
-    ASYNC_EXEC_TIMEOUT,
-    EXEC_RETENTION_DAYS,
+    ASYNC_EXEC_TIMEOUT_S,
+    ASYNC_EXEC_RETENTION_DAYS,
     SRC_LOG_LEVELS,
     TOOL_RESULT_MAX_CHARS,
     UVICORN_WORKERS,
@@ -203,10 +203,10 @@ async def spawn_execution(
 
     # 同時数 check → 同期で increment(check→increment 間に await を挟まない —
     # subagent.py の規律)。超過は即エラー(行を作らない)。
-    if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENT:
+    if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENCY:
         return _error(
             f"バックグラウンドタスクの同時数がユーザー上限"
-            f"({ASYNC_EXEC_MAX_CONCURRENT})に達しています。走行中のタスクの完了を"
+            f"({ASYNC_EXEC_MAX_CONCURRENCY})に達しています。走行中のタスクの完了を"
             "待つか stop_task で止めてから再試行してください。"
         )
     if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
@@ -306,7 +306,7 @@ async def _run_execution(
     exec_token = in_exec.set(True)
     started_at = time.monotonic()
     outcome: Optional[dict] = None
-    tool_timeout = entry.get("timeout") or ASYNC_EXEC_TIMEOUT
+    tool_timeout = entry.get("timeout") or ASYNC_EXEC_TIMEOUT_S
     try:
         try:
             sink.mark_started()
@@ -511,7 +511,7 @@ def sweep_executions_on_boot() -> int:
 
     単一プロセスが不変条件(D7)なので、起動時に running の行は前プロセスの死で
     失われた実行 — まとめて orphaned に倒す(記録は残るが計算は再開しない。
-    冪等性は tool 側の宿題)。EXEC_RETENTION_DAYS > 0 なら古い終端行の重量
+    冪等性は tool 側の宿題)。ASYNC_EXEC_RETENTION_DAYS > 0 なら古い終端行の重量
     フィールドも落とす。戻り値は orphaned に倒した行数。
     """
     if UVICORN_WORKERS > 1:
@@ -524,13 +524,13 @@ def sweep_executions_on_boot() -> int:
     if orphaned:
         log.info(f"boot sweep: marked {orphaned} running execution(s) as orphaned")
 
-    if EXEC_RETENTION_DAYS > 0:
-        before = int(time.time()) - EXEC_RETENTION_DAYS * 86400
+    if ASYNC_EXEC_RETENTION_DAYS > 0:
+        before = int(time.time()) - ASYNC_EXEC_RETENTION_DAYS * 86400
         purged = Executions.purge_stale_results(before)
         if purged:
             log.info(
                 f"boot sweep: purged results of {purged} execution(s) older than "
-                f"{EXEC_RETENTION_DAYS}d"
+                f"{ASYNC_EXEC_RETENTION_DAYS}d"
             )
 
     return orphaned

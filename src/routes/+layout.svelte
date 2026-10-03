@@ -60,7 +60,7 @@
 	// 共有 PC の離席対策(_memos/auth-profile.md)。無操作が続いたら画面を空にして
 	// ログインへ戻す — サーバ側でセッションが切れても、アイドル中のチャットは
 	// リクエストを 1 本も出さないので前の人のチャット一覧と本文が残ってしまう。
-	// TTL は既存 JWT_EXPIRES_IN(/api/config の session_idle_timeout。無期限なら null)。
+	// TTL は既存 SESSION_IDLE_TIMEOUT(/api/config の session_idle_timeout。無期限なら null)。
 	// ログイン後の遷移は SPA(goto)で root layout の onMount は再実行されないため、
 	// $user の変化に追従させる。値が変わったときだけ張り直る($derived の等価判定)。
 	const idleTimeout = $derived($user ? ($config?.session_idle_timeout ?? null) : null);

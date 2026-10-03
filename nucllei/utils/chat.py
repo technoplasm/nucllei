@@ -37,7 +37,7 @@ from nucllei.utils.filter import (
     process_filter_functions,
 )
 
-from nucllei.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL, BYPASS_MODEL_ACCESS_CONTROL
+from nucllei.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -51,8 +51,6 @@ async def generate_chat_completion(
     bypass_filter: bool = False,
 ):
     log.debug(f"generate_chat_completion: {form_data}")
-    if BYPASS_MODEL_ACCESS_CONTROL:
-        bypass_filter = True
 
     if hasattr(request.state, "metadata"):
         if "metadata" not in form_data:

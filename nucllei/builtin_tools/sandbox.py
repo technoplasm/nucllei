@@ -30,6 +30,7 @@ from urllib.parse import unquote
 import aiohttp
 from pydantic import BaseModel, Field
 
+from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL, SANDBOX_WRITE_FILE_LIMIT_BYTES
 from nucllei.models.chats import Chats
 from nucllei.models.files import FileForm, Files
 from nucllei.storage.provider import Storage
@@ -38,7 +39,9 @@ from nucllei.utils.tool_render import Code
 
 log = logging.getLogger(__name__)
 
-# 環境差は nucllei コンテナの env で吸収する (compose の環境ごとの上書きがそのまま効く)。
+# 向き先 (`SANDBOX_URL`) と共有トークン (`SANDBOX_TOKEN`) は env 専用で、読み取りは
+# `nucllei/env.py` に集約 (2026-10-03)。ここでは module 属性として持ち直す —
+# `__init__.py` のゲートと `utils/image_refs.py` が `sandbox.SANDBOX_URL` を見る。
 #
 # **既定値は持たない**: 空 = sandbox の居ない配備、として `__init__.py` が登録を止める。
 # 既定 URL を置くと全配備で常に有効になり、ゲートが意味を失う。
@@ -48,14 +51,12 @@ log = logging.getLogger(__name__)
 # 副次的に、DB (valve) 経由で宛先を外部へ向けて env の `SANDBOX_TOKEN` を
 # `Authorization: Bearer` ごと回収する経路も構造的に無くなる — 「env と一致するときだけ
 # ヘッダを付ける」条件分岐を足すより素直で、設定も 1 つ減る。
-SANDBOX_URL = os.getenv("SANDBOX_URL", "").strip()
-
-# sandbox API の共有トークン (#132)。**opt-in** — 設定すれば `sandbox_post` が
+#
+# 共有トークン (#132) は **opt-in** — 設定すれば `sandbox_post` が
 # `Authorization: Bearer` を付け、sandbox 側も認証を強制する。未設定なら両側とも
-# 認証なしで従来どおり動く (ヘッダ自体を付けない)。両側 (sandbox コンテナと nucllei) で
-# 同名・同値を持ち合うこと。**valve / DB には持たせない** — 秘密の置き場を DB に
-# 増やさない、という既存方針 (llens の compose が CAGE_TOKEN を env にしているのと同じ理由)。
-SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "").strip()
+# 認証なしで従来どおり動く (ヘッダ自体を付けない)。**valve / DB には持たせない** —
+# 秘密の置き場を DB に増やさない、という既存方針 (llens の compose が CAGE_TOKEN を
+# env にしているのと同じ理由)。
 
 
 class SandboxHTTPError(RuntimeError):
@@ -108,9 +109,8 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
             return await resp.json()
 
 
-# write_file の本文上限。モデルの出力なのでそもそも巨大にはならないが、
-# 事故 (ループで巨大文字列を渡す等) で workspace quota を食い潰さないための蓋。
-WRITE_FILE_LIMIT = int(os.getenv("SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 1024)))
+# write_file の本文上限 (env `SANDBOX_WRITE_FILE_LIMIT_BYTES`、読み取りは env.py)。
+WRITE_FILE_LIMIT = SANDBOX_WRITE_FILE_LIMIT_BYTES
 
 # jail から見た workspace の置き場 (= jail の cwd)。モデルに見せる `path` は全部
 # この絶対パスで揃える。sandbox サービスの `/files/*` は workspace 相対で受けるので、
@@ -419,7 +419,7 @@ class Tools:
 
     # #110 P4: per-entry timeout(`timeouts` クラス属性)。sandbox サービスは
     # timeout_s を最大 600 秒まで受ける(SANDBOX_TIMEOUT_MAX_S)のに、宣言が無いと
-    # 同期経路は CHAT_TOOL_EXECUTION_TIMEOUT=300 で切られ、timeout_s=300〜600 の
+    # 同期経路は TOOL_EXEC_TIMEOUT_S=300 で切られ、timeout_s=300〜600 の
     # 正当な指定が harness 側で失われる(検査 2026-08-16)。
     # 600 + HTTP 余裕 30 = _post の付け足しと同じ余裕幅。
     timeouts = {"run_python": 630, "run_python_once": 630, "run_shell": 630}

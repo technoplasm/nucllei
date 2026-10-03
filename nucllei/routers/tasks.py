@@ -17,7 +17,7 @@ from nucllei.routers.pipelines import process_pipeline_inlet_filter
 from nucllei.utils.task import get_task_model_id
 
 from nucllei.config import DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE
-from nucllei.env import SRC_LOG_LEVELS, BYPASS_MODEL_ACCESS_CONTROL
+from nucllei.env import SRC_LOG_LEVELS
 from nucllei.utils.models import check_model_access
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def _check_task_model_access(user, models: dict, model_id: str) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Model not found",
         )
-    if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
+    if user.role == "user":
         try:
             check_model_access(user, models[model_id])
         except Exception:

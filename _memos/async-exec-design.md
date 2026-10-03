@@ -43,7 +43,7 @@ migration head は `b4d19c7a52e3`(実装時に再確認)。file:line は現ツ�
   `load_skill` / `check_async` / `await_async` と、自前で `background` パラメータを宣言する tool は
   恒久不適格(衝突ガード、warning ログ)。
 - **D5 exec のタイムアウト既定は sync と別**: per-tool `timeout` 宣言が最優先、無ければ
-  `ASYNC_EXEC_TIMEOUT`(既定 1800)。sync 既定 300 秒(env.py:271)の流用は非同期化の動機と矛盾。
+  `ASYNC_EXEC_TIMEOUT_S`(既定 1800)。sync 既定 300 秒(env.py:271)の流用は非同期化の動機と矛盾。
 - **D6 親ターンの stop は exec に伝播しない**(fire の意思の尊重 — #109 決定 3 の昇格)。止めたければ
   チップの個別停止。chat 削除だけは cascade(§5)。
 - **D7 単一プロセスが不変条件**: `_exec_tasks` は in-process。`UVICORN_WORKERS`(env.py:309)> 1 なら
@@ -124,7 +124,7 @@ registry: `_exec_tasks: dict[str, Optional[str]]`(exec_id → task_id。None = s
 
 - 自前 `ToolOutputSink` を張る(create_task の context copy が引き継ぐ親 sink は return 直後に
   close される — middleware.py:1232)。`_in_exec` ContextVar も set(§6)。
-- `timeout = entry.get("timeout") or ASYNC_EXEC_TIMEOUT` で `wait_for`(D5)。
+- `timeout = entry.get("timeout") or ASYNC_EXEC_TIMEOUT_S` で `wait_for`(D5)。
 - 正常 return → `_normalize_tool_result`(§6)→ 切詰め → guarded `finish_execution(done)`。meta へ sink の
   context_images / display と entry の `render.result`(render_descriptor)、生戻り値 dict の `usage` を転記。
 - TimeoutError / Exception → `finish_execution(failed)`。DB 書き自体の例外も握って log(行は running の
@@ -203,8 +203,8 @@ await_async(exec_id: str, timeout: int = 90) -> 有界待ち(K5)
   # failed/stopped/orphaned → {ok:false, exec_id, tool_name, status, error}。再 await は冪等
 ```
 
-同時数: `ASYNC_EXEC_MAX_CONCURRENT`(per-user、既定 4)+ `ASYNC_EXEC_MAX_TOTAL`(プロセス全体、
-既定 16)。超過は即エラー。SUBAGENT_MAX_CONCURRENT=4(env.py:297)とは別会計(exec 席 ≠ 子ターン席
+同時数: `ASYNC_EXEC_MAX_CONCURRENCY`(per-user、既定 4)+ `ASYNC_EXEC_MAX_TOTAL`(プロセス全体、
+既定 16)。超過は即エラー。SUBAGENT_MAX_CONCURRENCY=4(env.py:297)とは別会計(exec 席 ≠ 子ターン席
 の AND が正しい会計)。default executor 枯渇(全 DB アクセス共有)は
 TOTAL 上限が実効防衛 — 専用 executor 隔離は v2。
 
@@ -242,7 +242,7 @@ TOTAL 上限が実効防衛 — 専用 executor 隔離は v2。
   復活させない)。**session_id = 継続可能ハンドル / exec_id = 1 実行の記録**の二層。継続の非同期化も
   `run_subagent(session_id=..., background: true)` = 新しい exec 行。
 - run_subagent 側の変更は原則ゼロ: `_active_turns` 上限(subagent.py:364-369)・並行継続拒否
-  (:394-399)・SUBAGENT_TURN_TIMEOUT は callable に閉じており exec 経由でも効く。exec stop →
+  (:394-399)・SUBAGENT_TURN_TIMEOUT_S は callable に閉じており exec 経由でも効く。exec stop →
   runner cancel → shield + cancelling() の子 stop 連鎖(subagent.py:258-268)で子 chat も止まる。
 - orphaned 時の回復: 子の部分回答は chat に永続済み — 同期 `run_subagent(session_id=...)` で回復
   (汎用機構に subagent 固有フォールバックは混ぜない)。
@@ -341,7 +341,7 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
    v1 が FE 駆動である以上 wire 上は user メッセージになる。改善は 2 段:
    (a) すぐ: 定型文を**機械可読に固定**(exec_id を独立行 or JSON ブロックで載せる)
    (b) 根治: サーバ駆動でのターン再開(#106 の driver 原理)にして tool 結果として注入する — v2
-4. **結果の保持期間が不明**(採用・文言のみ)— 現状 `EXEC_RETENTION_DAYS=0` = **GC しない**
+4. **結果の保持期間が不明**(採用・文言のみ)— 現状 `ASYNC_EXEC_RETENTION_DAYS=0` = **GC しない**
    (無期限に await/check で回収できる)。モデルはそれを知らないので **tool description に明記**する。
 5. **stateful `run_python` の background と同期実行の競合** → **実測した(2026-08-14)**
    - `/exec_cell`(chat 単位 kernel): 12 秒の背景セル実行中に投げた同期セルは **10 秒ブロック**され、
@@ -350,7 +350,7 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
      10 秒の実行中に投げた短い実行が 8 秒待たされた
    - **帰結**: background にしても sandbox 側は並列化されない。得られるのは「親ターンが即返る」
      ことだけで、**その間 同一ユーザーの sandbox 呼び出しは全部待たされる**(head-of-line blocking)。
-     長い background 実行中に同期 python/shell を呼ぶと `CHAT_TOOL_EXECUTION_TIMEOUT` に当たりうる
+     長い background 実行中に同期 python/shell を呼ぶと `TOOL_EXEC_TIMEOUT_S` に当たりうる
    - **対処(次回の判断事項)**: (a) tool description に待たされる旨を明記する / (b) 走行中の
      background sandbox exec があるとき同期呼び出しを即エラーにして待たせない /
      (c) 真の並列化は sandbox サービス側の per-session ワーカー化が要る
@@ -443,10 +443,10 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
   `?scope=active`(running ∨ 未配達 ∨ 直近終端)で有界化・FE はマージで終端行を保持し、
   非最終行が active から消えたら全量照合(>追従窓の休止の追いつき)(`71c04d019`)。
   B-3 は close(running が終端に到達しない穴は runner finally + boot スイープ + liveness の
-  三層で無し。行の単調増加は監査設計 + EXEC_RETENTION_DAYS で運用判断)。
+  三層で無し。行の単調増加は監査設計 + ASYNC_EXEC_RETENTION_DAYS で運用判断)。
 - **呼び出し面の宣言口を 2 つ追加**(llens 指示面検査の帰結):
   ① `timeouts`(Tools クラス属性、関数名→秒)= per-entry timeout。同期
-  (CHAT_TOOL_EXECUTION_TIMEOUT=300)と background(ASYNC_EXEC_TIMEOUT)の両方に効く
+  (TOOL_EXEC_TIMEOUT_S=300)と background(ASYNC_EXEC_TIMEOUT_S)の両方に効く
   (`2564a7857`)。② toolkit 共通注記 = **Tools クラス docstring** を先頭 spec に 1 回だけ
   前置(`a3cdb14be` 属性案 → `df5eaaf2e` で docstring 方式へ改訂 — 関数 docstring が
   モデル向けである以上クラスだけ開発者向けは非一貫、という ken 指摘)。

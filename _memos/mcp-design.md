@@ -99,7 +99,7 @@ MCP サーバ = admin 登録の行(tool 行・skill 行と同格):
 - list キャッシュは `ttlMs` / `cacheScope` に従う。unknown tool エラー時に refresh。
 - 結果 content は当面 text のみ(image は #77 の受け口ができてから)。
 - サーバ不達・タイムアウトは **tool result のエラーで返す**(リクエスト全体を
-  落とさない)。タイムアウトは `CHAT_TOOL_EXECUTION_TIMEOUT` をそのまま適用。
+  落とさない)。タイムアウトは `TOOL_EXEC_TIMEOUT_S` をそのまま適用。
 
 ### 命名(決着)
 

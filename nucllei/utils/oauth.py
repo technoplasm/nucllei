@@ -32,7 +32,7 @@ from nucllei.config import (
     OAUTH_ADMIN_ROLES,
     OAUTH_ALLOWED_DOMAINS,
     WEBHOOK_URL,
-    JWT_EXPIRES_IN,
+    SESSION_IDLE_TIMEOUT,
     AppConfig,
 )
 from nucllei.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
@@ -66,7 +66,7 @@ auth_manager_config.OAUTH_ALLOWED_ROLES = OAUTH_ALLOWED_ROLES
 auth_manager_config.OAUTH_ADMIN_ROLES = OAUTH_ADMIN_ROLES
 auth_manager_config.OAUTH_ALLOWED_DOMAINS = OAUTH_ALLOWED_DOMAINS
 auth_manager_config.WEBHOOK_URL = WEBHOOK_URL
-auth_manager_config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
+auth_manager_config.SESSION_IDLE_TIMEOUT = SESSION_IDLE_TIMEOUT
 
 
 class OAuthManager:
@@ -404,7 +404,7 @@ class OAuthManager:
 
         jwt_token = create_token(
             data={"id": user.id},
-            expires_delta=parse_duration(auth_manager_config.JWT_EXPIRES_IN),
+            expires_delta=parse_duration(auth_manager_config.SESSION_IDLE_TIMEOUT),
         )
 
         if auth_manager_config.ENABLE_OAUTH_GROUP_MANAGEMENT and user.role != "admin":

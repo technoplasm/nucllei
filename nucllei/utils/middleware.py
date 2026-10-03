@@ -104,8 +104,8 @@ from nucllei.tasks import create_task
 from nucllei.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
-    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
-    CHAT_TOOL_EXECUTION_TIMEOUT,
+    TOOL_CALL_MAX_ITERATIONS,
+    TOOL_EXEC_TIMEOUT_S,
 )
 from nucllei.constants import TASKS
 
@@ -1393,9 +1393,9 @@ async def _execute_tool_call_sync(
         # (#28)のため wait_for の cancel で待ちだけが外れ、スレッド自体は
         # 走り切ってから回収される(有界リーク — turn の進行を優先)。
         # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
-        # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT を持つ。await_task は
+        # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT_S を持つ。await_task は
         # 0 = 無効化 — 自前の clamp 済み有界待ちが running 形を返す)。
-        tool_timeout = tool.get("timeout", CHAT_TOOL_EXECUTION_TIMEOUT)
+        tool_timeout = tool.get("timeout", TOOL_EXEC_TIMEOUT_S)
         if tool_timeout > 0:
             tool_result = await asyncio.wait_for(
                 tool_function(**tool_function_params),
@@ -1774,7 +1774,7 @@ async def process_chat_response(
                 tool_calls.append(response_tool_calls)
 
             # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
-            max_tool_call_iterations = CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
+            max_tool_call_iterations = TOOL_CALL_MAX_ITERATIONS
             tool_call_iterations = 0
 
             while len(tool_calls) > 0 and (
@@ -1899,7 +1899,7 @@ async def process_chat_response(
                 log.warning(
                     "Tool call iteration limit reached: "
                     f"{max_tool_call_iterations} "
-                    "(CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS)"
+                    "(TOOL_CALL_MAX_ITERATIONS)"
                 )
                 await event_emitter(
                     {
@@ -1910,7 +1910,7 @@ async def process_chat_response(
                                     "Tool call iteration limit reached "
                                     f"({max_tool_call_iterations}). "
                                     "Response stopped. Increase "
-                                    "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS "
+                                    "TOOL_CALL_MAX_ITERATIONS "
                                     "to allow more tool calls."
                                 )
                             },

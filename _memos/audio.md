@@ -227,7 +227,7 @@ Form `prompt` と `transcribe(request, file_path, prompt=None)` は残してあ�
   その拡張子が無い(`uploads.ts::canKeepRecording`。録音開始時に判定し、通し録音そのものをしない)。
   Web Speech 経路(ブラウザが区切る)も対象外。
 - **約 60 分ごとにファイルを分ける**(録音は止めない。利用者には見せない — 経過時間の表示も
-  今までどおり)。`FULL_RECORDING_PART_SECONDS`。25MB(`ATTACHMENT_MAX_SIZE` 既定)には約 160 分
+  今までどおり)。`FULL_RECORDING_PART_SECONDS`。25MB(`ATTACHMENT_MAX_SIZE_MB` 既定)には約 160 分
   入るのでサイズではなく、**1 本全体の読み直しに実時間の約 1/4 かかる**ことから決めた値。
   配備の添付上限から逆算した時間(2 割の余裕込み)の方が短ければそちらで分ける。
   - 分けるのは **60 分を過ぎた最初の区切り**(息継ぎ / 強制 / 無音)。1 つの区間が 2 つの
@@ -384,7 +384,11 @@ env 変更の反映は再起動(モデル再ロードは起動時 lazy と STT c
 
 ## GPU を含むスケール路線(広く見据えた整理)
 
-- **路線A: 内蔵 + CUDA** — `DEVICE_TYPE=cuda` で配線済み。`WHISPER_COMPUTE_TYPE` は
+- **路線A: 内蔵 + CUDA** — ~~`DEVICE_TYPE=cuda` で配線済み~~ **2026-10-03 に撤去**:
+  torch ベースの device 探索(`USE_CUDA_DOCKER` / `DEVICE_TYPE`)は env ごと消し、内蔵
+  faster-whisper は `device="cpu"` 固定にした(torch は `local-ml` extra にしか無く、出荷
+  image では常に cpu に落ちていた)。GPU 配備が現れたら CTranslate2 の device 設定
+  (env 1 本)を足せばよい。その場合 `WHISPER_COMPUTE_TYPE` は
   float16 / int8_float16 へ(int8 既定は CPU 向け)。cpu_threads は無関係になる。
   欠点: **web プロセスが CUDA コンテキストを抱える**(VRAM 常駐・再起動の重さ・依存)。
 - **路線B: 外部 OpenAI 互換 STT サーバ(本命)** — TTS bridge と同型の別コンテナ

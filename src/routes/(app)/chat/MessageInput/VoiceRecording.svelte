@@ -118,7 +118,7 @@
 	const FULL_RECORDING_BITRATE = (sttConfig?.recording_bitrate_kbps ?? 24) * 1000;
 	const FULL_RECORDING_BYTES_PER_SEC = (FULL_RECORDING_BITRATE * 0.9) / 8;
 	// 通し録音は約 60 分ごとに次のファイルへ分ける(録音そのものは止めない。利用者には見せない)。
-	// 添付の上限(ATTACHMENT_MAX_SIZE、既定 25MB)には上のビットレートで約 160 分入るので、
+	// 添付の上限(ATTACHMENT_MAX_SIZE_MB、既定 25MB)には上のビットレートで約 160 分入るので、
 	// サイズより先に「読み直しにかかる時間」で決めている: 1 本全体の読み直しは実時間の約 1/4
 	// (60 分で約 15 分)かかる。配備の添付上限から逆算した時間の方が短ければそちらで分ける
 	// (ビットレートを守らないブラウザと、切れ目を待つ間の超過に備えて 2 割の余裕を見る)

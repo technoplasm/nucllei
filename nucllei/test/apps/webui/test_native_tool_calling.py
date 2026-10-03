@@ -3,7 +3,7 @@
 - 非 native(プロンプトベース)tool calling 経路は削除済み。ツールが指定されたら
   function_calling パラメータに関係なく常に native 経路(payload の "tools")で
   モデルへ渡ることを固定する。
-- ツール呼び出しの反復上限は CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
+- ツール呼び出しの反復上限は TOOL_CALL_MAX_ITERATIONS
   (既定 30 / -1 で無制限)。上限到達時はチャット内エラーイベントを発行する。
 
 反復ループのテストは issue #29 の実キャプチャ fixture(SGLang × Kimi K2.6)を
@@ -44,7 +44,7 @@ def _parse_iterations_env(value):
     テストできない(他モジュールが古い値を保持する)。
     """
     code = (
-        "from nucllei.env import CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS as v;"
+        "from nucllei.env import TOOL_CALL_MAX_ITERATIONS as v;"
         "print('ITERATIONS=%d' % v)"
     )
     env = {**os.environ}
@@ -52,9 +52,9 @@ def _parse_iterations_env(value):
         [_BACKEND_DIR, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
     )
     if value is None:
-        env.pop("CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS", None)
+        env.pop("TOOL_CALL_MAX_ITERATIONS", None)
     else:
-        env["CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS"] = value
+        env["TOOL_CALL_MAX_ITERATIONS"] = value
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -148,7 +148,7 @@ async def _drive_tool_call_loop(
         return _sse_response(name)
 
     if cap is not None:
-        monkeypatch.setattr(middleware, "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS", cap)
+        monkeypatch.setattr(middleware, "TOOL_CALL_MAX_ITERATIONS", cap)
     monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
     monkeypatch.setattr(
         middleware, "generate_chat_completion", fake_generate_chat_completion
@@ -991,7 +991,7 @@ def test_tool_call_iteration_cap_emits_chat_error(monkeypatch):
     errors = _iteration_limit_errors(events)
     assert len(errors) == 1
     assert "(2)" in errors[0]
-    assert "CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS" in errors[0]
+    assert "TOOL_CALL_MAX_ITERATIONS" in errors[0]
 
 
 def test_tool_call_iteration_cap_minus_one_is_unlimited(monkeypatch):

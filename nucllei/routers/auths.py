@@ -282,7 +282,7 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
                 token = create_token(
                     data={"id": user.id},
                     expires_delta=parse_duration(
-                        request.app.state.config.JWT_EXPIRES_IN
+                        request.app.state.config.SESSION_IDLE_TIMEOUT
                     ),
                 )
 
@@ -363,7 +363,7 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
         user = Auths.authenticate_user(form_data.email.lower(), form_data.password)
 
     if user:
-        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_delta = parse_duration(request.app.state.config.SESSION_IDLE_TIMEOUT)
         expires_at = None
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
@@ -463,7 +463,9 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         )
 
         if user:
-            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+            expires_delta = parse_duration(
+                request.app.state.config.SESSION_IDLE_TIMEOUT
+            )
             expires_at = None
             if expires_delta:
                 expires_at = int(time.time()) + int(expires_delta.total_seconds())
@@ -652,7 +654,7 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,
         "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
-        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
+        "SESSION_IDLE_TIMEOUT": request.app.state.config.SESSION_IDLE_TIMEOUT,
         "ENABLE_USER_WEBHOOKS": request.app.state.config.ENABLE_USER_WEBHOOKS,
     }
 
@@ -664,7 +666,7 @@ class AdminConfig(BaseModel):
     ENABLE_API_KEY_ENDPOINT_RESTRICTIONS: bool
     API_KEY_ALLOWED_ENDPOINTS: str
     DEFAULT_USER_ROLE: str
-    JWT_EXPIRES_IN: str
+    SESSION_IDLE_TIMEOUT: str
     ENABLE_USER_WEBHOOKS: bool
 
 
@@ -689,8 +691,8 @@ async def update_admin_config(
     pattern = r"^(-1|0|(-?\d+(\.\d+)?)(ms|s|m|h|d|w))$"
 
     # Check if the input string matches the pattern
-    if re.match(pattern, form_data.JWT_EXPIRES_IN):
-        request.app.state.config.JWT_EXPIRES_IN = form_data.JWT_EXPIRES_IN
+    if re.match(pattern, form_data.SESSION_IDLE_TIMEOUT):
+        request.app.state.config.SESSION_IDLE_TIMEOUT = form_data.SESSION_IDLE_TIMEOUT
 
     request.app.state.config.ENABLE_USER_WEBHOOKS = form_data.ENABLE_USER_WEBHOOKS
 
@@ -701,7 +703,7 @@ async def update_admin_config(
         "ENABLE_API_KEY_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
         "API_KEY_ALLOWED_ENDPOINTS": request.app.state.config.API_KEY_ALLOWED_ENDPOINTS,
         "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
-        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
+        "SESSION_IDLE_TIMEOUT": request.app.state.config.SESSION_IDLE_TIMEOUT,
         "ENABLE_USER_WEBHOOKS": request.app.state.config.ENABLE_USER_WEBHOOKS,
     }
 

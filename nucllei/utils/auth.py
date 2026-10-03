@@ -96,7 +96,7 @@ def get_http_authorization_cred(auth_header: Optional[str]):
 # Idle timeout(スライディング期限)
 ####################################
 #
-# llens: `JWT_EXPIRES_IN` の意味は「発行からの絶対期限」ではなく
+# llens: `SESSION_IDLE_TIMEOUT` の意味は「発行からの絶対期限」ではなく
 # **「無操作でこの時間が経ったら切れる」** = アイドルタイムアウトである。
 # 共有 PC(北大病院の使い回し端末)の離席対策 — `_memos/auth-profile.md` 参照。
 #
@@ -109,7 +109,7 @@ def get_http_authorization_cred(auth_header: Optional[str]):
 #      endpoint の除外リストを持たないのが要点)。
 #   2. 現在の token が**寿命の半分を過ぎている**こと。毎リクエスト発行しない。
 #
-# `JWT_EXPIRES_IN` が `-1` / `0`(無期限)のときは何もしない(既定は現状維持)。
+# `SESSION_IDLE_TIMEOUT` が `-1` / `0`(無期限)のときは何もしない(既定は現状維持)。
 # **cookie セッション限定** — API キー(`sk-`)経路は延命しない。
 #
 # 実際の `Set-Cookie` は `nucllei/main.py` の HTTP middleware が
@@ -122,7 +122,7 @@ SESSION_ACTIVITY_HEADER = "X-Nucllei-Activity"
 
 
 def session_idle_timeout_seconds(jwt_expires_in) -> Optional[int]:
-    """`JWT_EXPIRES_IN` をアイドルタイムアウトの秒数に直す。無期限なら None。
+    """`SESSION_IDLE_TIMEOUT` をアイドルタイムアウトの秒数に直す。無期限なら None。
 
     `/api/config` が FE へ露出する値でもある(FE 側タイマの TTL)。
     """
@@ -143,7 +143,9 @@ def mark_session_renewal(request: Request, user_id: str, token_data: dict) -> No
     if not request.headers.get(SESSION_ACTIVITY_HEADER):
         return
 
-    lifetime = session_idle_timeout_seconds(request.app.state.config.JWT_EXPIRES_IN)
+    lifetime = session_idle_timeout_seconds(
+        request.app.state.config.SESSION_IDLE_TIMEOUT
+    )
     if not lifetime:
         # `-1` / `0` = 無期限。アイドルタイムアウトも無い
         return

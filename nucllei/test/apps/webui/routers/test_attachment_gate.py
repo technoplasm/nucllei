@@ -35,7 +35,7 @@ class TestAttachmentGate(AbstractPostgresTest):
     def test_oversize_rejected(self):
         from nucllei.main import app
 
-        app.state.config.ATTACHMENT_MAX_SIZE = 1  # 1 MB
+        app.state.config.ATTACHMENT_MAX_SIZE_MB = 1  # 1 MB
         try:
             r = self._upload("big.pdf", b"x" * (2 * 1024 * 1024), "application/pdf")
             assert r.status_code == 400, r.text
@@ -45,7 +45,7 @@ class TestAttachmentGate(AbstractPostgresTest):
             ok = self._upload("small.pdf", b"x" * 1024, "application/pdf")
             assert ok.status_code == 200, ok.text
         finally:
-            app.state.config.ATTACHMENT_MAX_SIZE = 25
+            app.state.config.ATTACHMENT_MAX_SIZE_MB = 25
 
     def test_default_allows_all_extensions(self):
         # 既定(ATTACHMENT_ALLOWED_EXTENSIONS 空)は全許可

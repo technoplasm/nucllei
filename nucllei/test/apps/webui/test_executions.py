@@ -178,7 +178,7 @@ class TestExecutions(AbstractPostgresTest):
         assert self.executions.sweep_executions_on_boot() == 0
         assert self.Executions.get_execution_by_id("old").result == "重い結果"
 
-        monkeypatch.setattr(self.executions, "EXEC_RETENTION_DAYS", 7)
+        monkeypatch.setattr(self.executions, "ASYNC_EXEC_RETENTION_DAYS", 7)
         self.executions.sweep_executions_on_boot()
 
         old = self.Executions.get_execution_by_id("old")

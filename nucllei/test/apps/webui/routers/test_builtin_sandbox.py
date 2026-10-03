@@ -16,7 +16,6 @@ import asyncio
 import base64
 import contextlib
 import importlib
-import os
 import types
 
 import httpx
@@ -45,16 +44,17 @@ def sandbox_env(url, token="test-token"):
     前提にしておくためで、token だけを動かすテストは明示的に渡す。
     """
     import nucllei.builtin_tools as pkg
+    import nucllei.env as env
     from nucllei.builtin_tools import sandbox as mod
 
-    olds = {k: os.environ.get(k) for k in ("SANDBOX_URL", "SANDBOX_TOKEN")}
+    # 読み取りは env.py に集約されている (2026-10-03) ので、差し替えるのは
+    # `nucllei.env` の属性。os.environ を触って env.py を reload すると .env が
+    # 読み直されて「未設定」が作れない。
+    olds = {k: getattr(env, k) for k in ("SANDBOX_URL", "SANDBOX_TOKEN")}
 
     def _apply(values):
         for key, value in values.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+            setattr(env, key, "" if value is None else value)
         importlib.reload(mod)
         importlib.reload(pkg)
 

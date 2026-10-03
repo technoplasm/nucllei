@@ -56,7 +56,6 @@ from nucllei.env import (
     AIOHTTP_CLIENT_TIMEOUT_CONNECT,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
-    BYPASS_MODEL_ACCESS_CONTROL,
 )
 from nucllei.constants import ERROR_MESSAGES
 
@@ -457,7 +456,7 @@ async def get_ollama_tags(
                 detail=detail if detail else "Nucllei: Server Connection Error",
             )
 
-    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
+    if user.role == "user":
         models["models"] = await get_filtered_models(models, user)
 
     return models
@@ -962,9 +961,6 @@ async def generate_chat_completion(
     user=Depends(get_verified_user),
     bypass_filter: Optional[bool] = False,
 ):
-    if BYPASS_MODEL_ACCESS_CONTROL:
-        bypass_filter = True
-
     metadata = form_data.pop("metadata", None)
     try:
         form_data = GenerateChatCompletionForm(**form_data)
@@ -1281,7 +1277,7 @@ async def get_openai_models(
                 detail=error_detail,
             )
 
-    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
+    if user.role == "user":
         # Filter models based on user access control
         filtered_models = []
         for model in models:

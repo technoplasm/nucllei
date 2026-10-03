@@ -13,7 +13,7 @@
  *   root layout がバナーを表示する。
  *
  * アイドルタイムアウト(共有 PC の離席対策、_memos/auth-profile.md):
- *   `JWT_EXPIRES_IN` は「発行からの絶対期限」ではなく「無操作でこの時間が経ったら切れる」。
+ *   `SESSION_IDLE_TIMEOUT` は「発行からの絶対期限」ではなく「無操作でこの時間が経ったら切れる」。
  *   その判定に要る「人の操作があったか」をここ(全 API が通る唯一の口)で持つ。
  *   - 送信側: 最後の延命以降に操作があったリクエストにだけ ACTIVITY_HEADER を付ける。
  *     チャット画面の 5 秒ポーリングのような機械的なリクエストには付かないので、
@@ -247,7 +247,7 @@ export const stopIdleWatch = () => {
  * 401 経路(B2)と同じ handleSessionExpired に乗せる — 二重には走らない。
  *
  * `timeoutSeconds` は `/api/config` の `session_idle_timeout`
- * (= 既存 `JWT_EXPIRES_IN`。無期限なら null)。null のときは何もしない。
+ * (= 既存 `SESSION_IDLE_TIMEOUT`。無期限なら null)。null のときは何もしない。
  */
 export const startIdleWatch = (timeoutSeconds?: number | null) => {
 	stopIdleWatch();
