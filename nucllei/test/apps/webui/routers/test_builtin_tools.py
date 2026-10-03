@@ -276,6 +276,23 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         # 一致箇所の抜粋 (発言者 + 前後の文脈) が付く — grep_doc と同じく何がヒットしたか見せる
         assert out[0]["matches"] == [{"role": "user", "excerpt": "京都に行きたい"}]
 
+    def test_grep_history_excludes_the_current_chat(self):
+        """検索を頼んだ発言 (「『京都』で検索して」) 自身がヒットしないよう、進行中の
+        チャット (__chat_id__) は結果から外す。"""
+        from nucllei.builtin_tools.history import Tools
+
+        self._new_chat("owner", "旅行の計画", [("user", "京都に行きたい")])
+        current = self._new_chat(
+            "owner", "新しいチャット", [("user", "「京都」でチャット履歴を検索して")]
+        )
+        out = Tools().grep_history(
+            "京都", __user__={"id": "owner"}, __chat_id__=current.id
+        )
+        assert [c["title"] for c in out] == ["旅行の計画"]
+        # __chat_id__ 無し (ツール外からの呼び出し) では従来どおり両方
+        out = Tools().grep_history("京都", __user__={"id": "owner"})
+        assert len(out) == 2
+
     def test_grep_history_excerpts_are_bounded_and_fold_width_case(self):
         """抜粋は前後 60 文字で切り (… を付ける)、1 チャット最大 3 件。照合は NFKC + casefold
         (全角半角・大小文字を無視) で、長さが変わらないときは原文のまま見せる。"""

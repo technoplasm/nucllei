@@ -147,10 +147,12 @@ class Tools:
         query: str,
         limit: int = 20,
         __user__: Optional[dict] = None,
+        __chat_id__: Optional[str] = None,
     ) -> list | str:
         """自分のチャット履歴をテキスト検索し、ヒットした一覧を返す。各ヒットには一致箇所の
         抜粋 (`matches`: 発言者と前後の文脈、最大 3 件) が付くので、どのチャットが目的の物かは
-        抜粋で判断し、全文が要るときだけ read_history で読む。
+        抜粋で判断し、全文が要るときだけ read_history で読む。いま進行中のチャットは対象外
+        (検索を頼んだ発言自身がヒットするのを避ける)。
 
         :param query: 検索文字列(タイトル・本文を対象)
         :param limit: 返す件数の上限(省略時 20)
@@ -161,9 +163,17 @@ class Tools:
         if not (query or "").strip():
             return "検索文字列を指定してください。"
 
-        chats = Chats.get_chats_by_user_id_and_search_text(user_id, query, limit=limit)
+        # 進行中のチャット (__chat_id__) は除く — 「『X』で検索して」という発言自身が X にヒットする
+        # (ken 2026-10-03)。除いた分だけ 1 件多く取っておく
+        chats = Chats.get_chats_by_user_id_and_search_text(
+            user_id, query, limit=limit + (1 if __chat_id__ else 0)
+        )
         items = []
         for c in chats:
+            if __chat_id__ and c.id == __chat_id__:
+                continue
+            if len(items) >= limit:
+                break
             matches = _excerpts(c, query)
             items.append(
                 {
