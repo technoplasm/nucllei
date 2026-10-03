@@ -1603,6 +1603,10 @@ in the parent chat — §5.9); to wait for it right now use
 `await_task(task_ids)`. `session_id` stays the resumable session handle,
 `task_id` is the record of one run. There is no dedicated `await_subagent` —
 async collection is unified on the execution channel.
+Parallel children do not need `background`: calls placed in **one** model
+response run concurrently (§5.5) and the turn continues when all are done;
+`background` is for continuing other work while children run (and a lone
+`background: true` call in a response runs inline — §5.9).
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
