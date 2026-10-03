@@ -21,6 +21,7 @@ import { getChatList } from '$lib/apis/chats';
 import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 import { stopTask } from '$lib/apis';
 import { WEBUI_BASE_URL } from '$lib/constants';
+import { clearLiveUsage, markLiveUsagePending } from '$lib/stores/live-usage.svelte';
 
 import { type ChatSession, type Translate } from './session.svelte';
 import { type ChatEvents } from './events';
@@ -206,6 +207,12 @@ export class ChatSend {
 		session.history.messages[responseMessageId] = responseMessage;
 		session.history.currentId = responseMessageId;
 
+		// llens(#102): floating ゲージを送信の瞬間から「計測中」にする(最初の chat:completion
+		// を待つと新規チャットで ~80ms ゲージが空になる)。新規チャットは chat 作成前で
+		// _chatId が '' — '' スコープに付けて、作成後に実 id へ付け替える。外すのは
+		// 最初の chat:usage / done(events)か、下の失敗・中断の各分岐
+		markLiveUsagePending(_chatId, responseMessageId);
+
 		// Append messageId to childrenIds of parent message
 		if (parentId !== null && session.history.messages[parentId]) {
 			// Add null check before accessing childrenIds
@@ -221,7 +228,13 @@ export class ChatSend {
 			_history.currentId !== null &&
 			_history.messages[_history.currentId].parentId === null
 		) {
-			_chatId = await session.initChatHandler(_history);
+			const draftChatId = _chatId;
+			try {
+				_chatId = await session.initChatHandler(_history);
+			} finally {
+				clearLiveUsage(draftChatId, responseMessageId);
+			}
+			markLiveUsagePending(_chatId, responseMessageId);
 		}
 
 		await tick();
@@ -233,6 +246,7 @@ export class ChatSend {
 		// merged で組み直す(通知メッセージをモデルに載せる)。恒久失敗は送信中止
 		const saveRes = await session.saveChatHandler(_chatId, _history);
 		if (!saveRes.ok) {
+			clearLiveUsage(_chatId, responseMessageId);
 			if (session.prompt === '') {
 				session.prompt = _prompt;
 			}
@@ -367,6 +381,7 @@ export class ChatSend {
 			`${WEBUI_BASE_URL}/api`,
 			abortController.signal
 		).catch(async (error) => {
+			clearLiveUsage(_chatId, responseMessageId);
 			if (abortController.signal.aborted) {
 				// stop によるユーザー中断 — エラーにしない(task-cancelled と同じ扱い)。
 				// completed(outlet)へは下の !res 分岐から interrupted 付きで流れる
@@ -397,6 +412,7 @@ export class ChatSend {
 			}).catch((error) => {
 				// 消費中の接続断。タスクはサーバー側で継続する(リロード/再訪で再アタッチ)
 				console.error('completion stream disconnected', error);
+				clearLiveUsage(_chatId, responseMessageId);
 				responseMessage.error = { content: `${error}` };
 				session.history.messages[responseMessageId] = responseMessage;
 			});
@@ -404,6 +420,7 @@ export class ChatSend {
 			// llens: task 生成前の失敗(接続エラー等)は done イベントが来ないため、
 			// ここから completed(outlet filter)を通す — error 付き message が
 			// outlet に渡り、turn の失敗として記録できる
+			clearLiveUsage(_chatId, responseMessageId);
 			await this.#events.chatCompletedHandler(
 				_chatId,
 				model.id,

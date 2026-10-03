@@ -31,6 +31,7 @@ from nucllei.utils.access_control import has_permission, has_read_access_to_file
 from nucllei.utils import execution_resume
 from nucllei.utils.executions import (
     EXEC_SPAWN_GRACE_S,
+    SUBAGENT_SESSION_META_KEY,
     has_exec_registry_entry,
     stop_execution,
     stop_executions_by_chat_id,
@@ -659,6 +660,9 @@ def _execution_item(execution: ExecutionModel) -> dict:
         "duration": execution.duration,
         "error": execution.error,
         "delivered": execution.delivered_at is not None,
+        # run_subagent の子 agent session(実行中に exec 行 meta へ永続化 — リロード後の
+        # カードが子 session へ再リンクする。他の tool / 子の無い行は None)
+        "session_id": (execution.meta or {}).get(SUBAGENT_SESSION_META_KEY),
     }
 
 

@@ -148,9 +148,11 @@
 	// #110: background 昇格された呼び出し。spawn は result(running 形)が即存在するため
 	// isDone が緑チェックを出してしまう — exec 行が running の間はスピナーに上書きする。
 	// store に行が無い間(未 fetch)も running 扱い(result の running 形が最後の真実)
+	const executionEntry = $derived(
+		resultDisplay?.kind === 'execution' ? getExecutionEntry(resultDisplay.execId) : null
+	);
 	const execRunning = $derived(
-		resultDisplay?.kind === 'execution' &&
-			(getExecutionEntry(resultDisplay.execId)?.status ?? 'running') === 'running'
+		resultDisplay?.kind === 'execution' && (executionEntry?.status ?? 'running') === 'running'
 	);
 
 	// #140 UI 追従: run_subagent の子 agent session の所在(progress の `subagent`)。
@@ -178,17 +180,22 @@
 
 	// 子 session を描くか(結果の subagent 形 / live の所在)。同じ位置に 1 個だけ置く —
 	// live → 結果到着で同じインスタンスが続き、二重に描かない
+	// background の所在は progress(揮発)のほか exec 行にも永続化されている — リロード後
+	// (live の所在が無い)はこちらで子 session へ再リンクする
 	const subagentSessionId = $derived(
 		resultDisplay?.kind === 'subagent'
 			? resultDisplay.sessionId
-			: (liveSubagent?.session_id ?? null)
+			: (liveSubagent?.session_id ?? executionEntry?.session_id ?? null)
 	);
 	const subagentDisplay = $derived(resultDisplay?.kind === 'subagent' ? resultDisplay : null);
 
 	// 実行中ヘッダのラベル: 素の `agent session <uuid>` ではなく、子のイベントから
 	// 「子を起動しました → 考え中 → 回答中」
+	// 子ブロックは {#if open} の内側 — 畳むと unmount されて phase が届かなくなる
+	// (畳んだ時点のラベルで固まる)。畳んでいる間は段階を言わず「実行中」に倒す
 	const subagentLabel = $derived.by(() => {
 		if (!liveSubagent || !toolRunning) return '';
+		if (!open) return $i18n.t('Running...');
 		const phase = childPhase ?? 'started';
 		if (phase === 'answering') return $i18n.t('Subagent answering');
 		if (phase === 'thinking') return $i18n.t('Subagent thinking');
@@ -460,6 +467,7 @@
 							{#key subagentSessionId}
 								<SubagentSessionBlock
 									id={`${id || call.id}-subagent`}
+									sessionId={subagentSessionId}
 									display={subagentDisplay}
 									live={liveSubagent}
 									onPhase={onChildPhase}

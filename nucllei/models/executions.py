@@ -329,6 +329,29 @@ class ExecutionsTable:
             except Exception:
                 return False
 
+    def set_running_meta(self, id: str, key: str, value) -> bool:
+        """走行中の行の meta に 1 キーを書く(終端化済みの行には書かない)。
+
+        現在の用途は run_subagent の子 session id(`subagent_session_id` — 実行中に
+        判明し、リロード後のカードが子 session へ再リンクする手がかり)。mark_replayed
+        と同じく単一トランザクションの read-modify-write。終端化(finish_execution の
+        meta 上書き)との競合は呼び出し側(runner)が書き込み完了を待ってから終端化する
+        ことで避ける。
+        """
+        try:
+            with get_db() as db:
+                row = db.get(Execution, id)
+                if row is None or row.status != "running":
+                    return False
+                meta = dict(row.meta or {})
+                meta[key] = value
+                row.meta = meta
+                db.commit()
+                return True
+        except Exception as e:
+            log.exception(f"Error setting meta.{key} of execution {id}: {e}")
+            return False
+
     def mark_replayed(self, id: str) -> bool:
         """meta.replayed_at を一度だけ立てる(await 時の context_images/display の
         replay 重複防止)。

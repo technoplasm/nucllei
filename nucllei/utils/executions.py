@@ -94,6 +94,9 @@ _active_execs_by_user: dict[str, int] = {}
 # 走行中 exec の sink(check_task の progress 読み出し用。done callback で pop)
 _exec_sinks: dict[str, "_ExecSink"] = {}
 
+# exec 行 meta のキー: run_subagent の子 agent session id(一覧 API が session_id として出す)
+SUBAGENT_SESSION_META_KEY = "subagent_session_id"
+
 
 def _call_on_loop(loop, loop_thread_id, fn, *args) -> None:
     """ループ上なら直呼び、ワーカースレッドからなら call_soon_threadsafe。
@@ -182,9 +185,17 @@ class _ExecSink(ToolOutputSink):
         *,
         chat_id: Optional[str] = None,
         message_id: Optional[str] = None,
+        exec_id: Optional[str] = None,
     ) -> None:
         # _store_progress が参照する属性を親 __init__ より先に用意する
         self.latest_progress: Optional[dict] = None
+        self._exec_id = exec_id
+        # run_subagent の子 session id(progress の `subagent.session_id`)。exec 行の
+        # meta へ永続化する — progress は揮発なので、リロード後のカードはこれで子
+        # session へ再リンクする(一覧 API の session_id)。runner は終端化の前に
+        # 書き込み(_subagent_persist)の完了を待ち、終端の meta にも同じ値を載せる
+        self.subagent_session_id: Optional[str] = None
+        self._subagent_persist: Optional[asyncio.Future] = None
         self._chat_id = chat_id
         self._message_id = message_id
         try:
@@ -196,6 +207,16 @@ class _ExecSink(ToolOutputSink):
 
     def _store_progress(self, payload: dict) -> None:
         self.latest_progress = payload
+        subagent = payload.get("subagent") if isinstance(payload, dict) else None
+        session_id = subagent.get("session_id") if isinstance(subagent, dict) else None
+        if session_id and session_id != self.subagent_session_id:
+            self.subagent_session_id = session_id
+            _call_on_loop(
+                self._loop,
+                self._loop_thread_id,
+                self._persist_subagent_session,
+                session_id,
+            )
         if self._chat_id and self._message_id:
             _call_on_loop(
                 self._loop,
@@ -205,6 +226,27 @@ class _ExecSink(ToolOutputSink):
                 self._message_id,
                 payload,
             )
+
+    def _persist_subagent_session(self, session_id: str) -> None:
+        """ループ上で呼ぶ: exec 行の meta.subagent_session_id を書く(fire-and-forget)。"""
+        if not self._exec_id:
+            return
+        self._subagent_persist = asyncio.ensure_future(
+            asyncio.to_thread(
+                Executions.set_running_meta,
+                self._exec_id,
+                SUBAGENT_SESSION_META_KEY,
+                session_id,
+            )
+        )
+
+    async def wait_persisted(self) -> None:
+        """meta 書き込みの完了待ち(終端化の meta 上書きと RMW が交差しないように)。"""
+        if self._subagent_persist is not None:
+            try:
+                await self._subagent_persist
+            except Exception:
+                log.debug("subagent session persist failed", exc_info=True)
 
 
 def _error(message: str) -> str:
@@ -412,7 +454,12 @@ async def _run_execution(
     """
     # 自前 sink: create_task の context copy が引き継ぐ親ターンの sink は
     # turn return 直後に close されるため張り替える(§5 runner)
-    sink = _ExecSink(tool_call_id=tool_call_id, chat_id=chat_id, message_id=message_id)
+    sink = _ExecSink(
+        tool_call_id=tool_call_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        exec_id=exec_id,
+    )
     _exec_sinks[exec_id] = sink
     sink_token = tool_output.current_sink.set(sink)
     exec_token = in_exec.set(True)
@@ -480,6 +527,10 @@ async def _run_execution(
             displays = sink.displays()
             if displays:
                 meta["display"] = displays
+            # 終端の meta は上書き — 走行中に書いた子 session id を載せ直す
+            # (failed / stopped は meta を書かないので走行中の値が残る)
+            if sink.subagent_session_id:
+                meta[SUBAGENT_SESSION_META_KEY] = sink.subagent_session_id
             usage = raw.get("usage") if isinstance(raw, dict) else None
             outcome = {
                 "status": "done",
@@ -497,6 +548,8 @@ async def _run_execution(
     # 永続化(cancel 時は上の raise で到達しない)。guarded UPDATE 負け
     # (stop と同着で stopped が先行済み)は no-op。
     try:
+        # 走行中の meta 書き(子 session id)と終端の meta 上書きを交差させない
+        await sink.wait_persisted()
         won = await asyncio.to_thread(Executions.finish_execution, exec_id, **outcome)
         if not won:
             log.info(

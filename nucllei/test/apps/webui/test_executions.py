@@ -301,6 +301,73 @@ class TestExecutions(AbstractPostgresTest):
         assert row.status == "stopped"
         assert row.result is None
 
+    def test_subagent_session_id_is_persisted_while_running_and_kept_on_finish(self):
+        """run_subagent の子 session id(progress の subagent.session_id)は走行中に
+        exec 行 meta へ書かれ、done の meta 上書き後も残る — リロード後のカードが
+        一覧 API の session_id で子 session へ再リンクする。"""
+        from nucllei.utils import tool_output
+
+        progressed = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_subagent():
+            tool_output.progress(
+                "agent session child-1", subagent={"session_id": "child-1"}
+            )
+            progressed.set()
+            await release.wait()
+            return {"ok": True, "session_id": "child-1", "answer": "a"}
+
+        async def main():
+            spawned = await self.executions.spawn_execution(
+                user_id="1",
+                chat_id="c1",
+                message_id="pm-a",
+                tool_call_id="functions.run_subagent:0",
+                tool_name="run_subagent",
+                entry={
+                    "callable": fake_subagent,
+                    "render": {"result": {"kind": "subagent"}},
+                },
+                params={},
+            )
+            exec_id = spawned["task_id"]
+            await asyncio.wait_for(progressed.wait(), timeout=5)
+            for _ in range(50):
+                row = await asyncio.to_thread(
+                    self.Executions.get_execution_by_id, exec_id
+                )
+                if (row.meta or {}).get("subagent_session_id"):
+                    break
+                await asyncio.sleep(0.02)
+            assert row.status == "running"
+            assert row.meta == {"subagent_session_id": "child-1"}
+            release.set()
+            for _ in range(100):
+                row = await asyncio.to_thread(
+                    self.Executions.get_execution_by_id, exec_id
+                )
+                if row.status != "running":
+                    break
+                await asyncio.sleep(0.02)
+            return exec_id
+
+        exec_id = asyncio.run(main())
+        row = self.Executions.get_execution_by_id(exec_id)
+        assert row.status == "done"
+        assert row.meta["subagent_session_id"] == "child-1"
+        assert row.meta["render_descriptor"] == {"kind": "subagent"}
+
+    def test_set_running_meta_skips_terminal_rows(self):
+        self._insert()
+        assert self.Executions.set_running_meta("e1", "subagent_session_id", "s1")
+        assert self.Executions.finish_execution("e1", status="stopped", error="x")
+        assert self.Executions.get_execution_by_id("e1").meta == {
+            "subagent_session_id": "s1"
+        }
+        assert not self.Executions.set_running_meta("e1", "subagent_session_id", "s2")
+        assert self.Executions.set_running_meta("no-such", "k", "v") is False
+
     def test_stop_during_spawn_window_cancels_once_the_task_id_is_known(
         self, monkeypatch
     ):
@@ -564,7 +631,9 @@ class TestExecutions(AbstractPostgresTest):
             "duration",
             "error",
             "delivered",
+            "session_id",
         }
+        assert items[0]["session_id"] is None
         assert items[0]["tool_name"] == "run_subagent"
         assert items[0]["status"] == "running"
         assert items[1]["status"] == "done"

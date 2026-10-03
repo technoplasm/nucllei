@@ -543,6 +543,9 @@ export type ChatExecutionItem = {
 	// 配達済み(terminal の結果が通知ターン or 回収 tool で消化された)。
 	// 未配達(terminal ∧ !delivered)がチップの未回収バッジ・poll 継続の根拠
 	delivered: boolean;
+	// run_subagent の子 agent session(BE が走行中に exec 行へ永続化)。リロード後の
+	// background カードが子 session へ再リンクする手がかり。他の tool は null
+	session_id?: string | null;
 };
 
 export type ChatExecutionsResponse = {

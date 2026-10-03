@@ -50,24 +50,29 @@
 
 	let {
 		id = '',
+		sessionId: sessionIdProp = '',
 		display = null,
 		live = null,
 		onPhase = undefined
 	}: {
 		id?: string;
+		/** 結果も live も無いときの所在(background の exec 行に永続化された子 session — リロード後) */
+		sessionId?: string;
 		display?: SubagentDisplay | null;
 		live?: SubagentProgress | null;
 		onPhase?: (phase: SubagentPhase) => void;
 	} = $props();
 
-	// session id は結果 JSON / live の所在のどちらでも同じ値で、以後変わらない
+	// session id は結果 JSON / live の所在 / exec 行のどれでも同じ値で、以後変わらない
 	// (ToolCallBlock は同じ session を指す間だけこのインスタンスを保つ)— 初期値で固定する
 	// svelte-ignore state_referenced_locally
-	const sessionId = display?.sessionId ?? live?.session_id ?? '';
-	// マウント時点で結果が無かった(live で始まった)か。結果の後着は「子ターンが
-	// 終わった」合図になる(sync の run_subagent は子の完走まで戻らない)
+	const sessionId = display?.sessionId ?? live?.session_id ?? sessionIdProp;
+	// マウント時点で結果が無く live の所在で始まったか。結果の後着は「子ターンが
+	// 終わった」合図になる(sync の run_subagent は子の完走まで戻らない)。exec 行由来
+	// (リロード後)は live ではない — 走行中の子 task は初回 fetch の task 一覧で拾い、
+	// 無ければ確定状態で描く(task_id の追送を待たない — 来ないので回り続けてしまう)
 	// svelte-ignore state_referenced_locally
-	const startedLive = display == null;
+	const startedLive = display == null && live != null;
 
 	// 入れ子深さ(表示は深さ 1 で切る)。setContext は init 時のみ有効なので
 	// ここで固定する。

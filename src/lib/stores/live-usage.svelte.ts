@@ -157,11 +157,16 @@ const dropPending = (chatId: string, messageId: string) => {
 };
 
 /**
- * ターン進行中の印(`chat:completion` の done 以外のイベントで呼ぶ)。既に live サンプルが
+ * ターン進行中の印。送信時(ChatSend — 応答の受け皿を作った時点)と、`chat:completion` の
+ * done 以外のイベント(再アタッチ・他タブ由来のターン)で付ける。既に live サンプルが
  * あるメッセージには付けない — 印は「最初のサンプル待ち」の区間だけを表す。
+ *
+ * chatId は '' を許す: 新規チャットの 1 ターン目は chat 作成(POST /chats/new)が返るまで
+ * id が無い。その間は '' スコープ(= 開始画面の $chatId)に付け、作成後に ChatSend が
+ * 実 id へ付け替える。setLiveUsage は '' を受けない(サンプルは必ず実 id で届く)。
  */
 export const markLiveUsagePending = (chatId: string, messageId: string) => {
-	if (!chatId || !messageId || entries[chatId]?.[messageId] || pendings[chatId]?.[messageId]) {
+	if (!messageId || entries[chatId]?.[messageId] || pendings[chatId]?.[messageId]) {
 		return;
 	}
 	(pendings[chatId] ??= {})[messageId] = true;
@@ -173,7 +178,7 @@ export const isLiveUsagePending = (chatId: string): boolean =>
 
 /** ターン終了(done)時の破棄(揮発 — 確定値は message.usage / baseline に残る)。 */
 export const clearLiveUsage = (chatId: string, messageId: string) => {
-	if (!chatId || !messageId) {
+	if (!messageId) {
 		return;
 	}
 	dropPending(chatId, messageId);
