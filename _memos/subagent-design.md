@@ -144,3 +144,37 @@ llens への申し送り: `README.md` のサブエージェント手順に「親
   その上で llens P4。v20260814-01 は撤回済み(ghcr イメージ削除は packages スコープ待ち)。
 - 子ストリーム消費中の stop で tool result が `ok=True` + 部分回答になる(error マーク無し)—
   厳密化には子 message への interrupted マーカ永続化が要る(現状は報告のみ)
+
+## 実行中カードの live 追従(2026-10-04、ken 承認 — #140 UI 追従)
+
+実測(dev / qwen3.8-flash-next): 子の実行中(2〜6 秒)カードは `agent session <uuid>` と
+秒カウンタだけで、子の思考・本文は**完走まで一切ページに届かなかった**
+(SubagentSessionBlock は結果の subagent 形が来てから初めてマウント)。background は
+exec 行の 5 秒ポーリングでしか終端を知らず、スピナーが子の完走から平均 ~2.8 秒遅れた。
+
+- **所在を構造化して流す**: run_subagent は dispatch 時に `__progress__` へ
+  `subagent={"session_id"}`、子ターン起動直後に `task_id` を追送する
+  (`tool_output.progress(subagent=...)`。粘着 = 以後の payload・終端・再アタッチの
+  最新値にも載る / 値が変わった 1 通はスロットル素通し)。description
+  (`agent session <uuid>`)は check_task 越しにモデルが読む手がかりとして残す
+- **background も同じ経路**: `_ExecSink` は最新値保持(check_task)に加えて、spawn した
+  ターンの stream が開いていれば `tool:progress` を転送する(閉じていれば捨てる)。
+  終端(done/failed/stopped)は chat の開いている stream 全部へ `execution:done` を push
+  (`completion_events.get_streams_for_chat`)。middleware は触らない — exec 側だけで完結
+- **FE**: ToolCallBlock は progress の `subagent` を観測した時点で(結果を待たず)
+  SubagentSessionBlock を live モード(`live={session_id, task_id?}`)でマウントし、
+  task_id 到着で `attachToTask`。結果(display)が後着しても**同じ位置・同じインスタンス**の
+  まま続く(二重描画しない)。子の content_blocks からラベル「子を起動しました → 考え中 →
+  回答中」(i18n `Subagent started/thinking/answering`)。子の走行中はカードを自動展開し、
+  終わったら expandDetails 設定へ戻す(途中で手で開閉したら触らない)
+- **終端の即時反映**: `execution:done` → `applyExecutionDone`(executions store の行を
+  即終端化)+ activeOnly 読み直し。stream が無いときは子の live 追従の完走観測を合図に
+  `refreshExecutionsUntilTerminal`(150/400/1000/2000 ms の短い再試行)。5 秒ポーリングは
+  どちらも無いときの最後の fallback
+- 実測(after): sync — dispatch から 30 ms でカードに子(指示 + 実行中)、子の最初の
+  reasoning は dispatch +1.1 s(=子モデルの初トークン待ちそのもの)。background 並列 2 本 —
+  各カードが自分の子を追従、子完走 → カードのスピナー停止 ≤ 0.1 s(計測の刻み)
+- 既知の割り切り: 所在は揮発(progress)なので、リロード後の background spawn カードは
+  従来どおり ExecutionBlock のみ(子 transcript は await_task / 配達側のカードで見える)。
+  カードを手で畳むと子ブロックは unmount され、ヘッダのラベルは最後の段階で止まる
+  (完了表示の権威は結果 / exec 行のまま)

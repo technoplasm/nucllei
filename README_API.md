@@ -806,6 +806,14 @@ delete are admin-only). Every model row **must** declare a `base_model_id`
 exposed as chat models; they only exist as base choices (admin inventory:
 `GET /api/models/base`).
 
+The raw connection model list is fetched from the engine's `/models` when
+`GET /api/models` (or `/api/models/base`, `/openai/models`) is called, and
+cached in-process. Completions do not re-fetch it: they look the base model up
+in the cache and only refetch when the id is missing (a model just added
+upstream) or after the connection settings were updated. Preset fields
+(params, system prompt, ACL) are read from the database on every completion,
+so preset edits apply immediately.
+
 A model preset is where all capability wiring happens (`meta` fields):
 `toolIds` (tools available to the model), `filterIds` / `actionIds` (functions),
 `skillIds` + `features.skills` (skills), plus params and system prompt.
@@ -888,8 +896,24 @@ does not cancel). Events are envelopes
 `{content, content_blocks}` snapshots, or terminals
 (`{done:true,...}` / `{error:...}` / `{usage}`). `done` is not EOF — read until the
 server closes. Volatile `chat:usage` events (cumulative usage of the model call in
-progress, ~0.5 s) may precede the terminal usage. The terminal `{usage}` is the
-merged, persisted `message.usage`:
+progress, ~0.5 s) may precede the terminal usage. Two more volatile event types
+ride the same stream (never persisted):
+
+- `tool:progress` — `{tool_call_id, description, done, current?, total?,
+subagent?}` for a running tool call (§5.5 `__progress__`). The call emits one
+  at start (`description: ""`) and a terminal `done: true` when it returns.
+  `subagent: {session_id, task_id?}` is present only for `run_subagent` (§5.8):
+  `session_id` (= the child agent-session chat id) arrives at dispatch,
+  `task_id` (the child turn's task — `GET /api/tasks/{task_id}/events`) follows
+  as soon as the child turn starts; once set it is repeated on every later
+  payload of that call. For a background call (§5.9) these are forwarded to the
+  spawning turn's stream while it is still open.
+- `execution:done` — `{task_id, tool_call_id, tool_name, status, finished_at,
+duration, error}` when a background task (§5.9) reaches a terminal state
+  (`done|failed|stopped`), sent to every open stream of the chat; the envelope's
+  `message_id` is the spawning message.
+
+The terminal `{usage}` is the merged, persisted `message.usage`:
 
 | Field               | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1198,6 +1222,23 @@ async def read_doc(self, path: str) -> Markdown:
 - Generators are not supported.
 - Per-call timeout `TOOL_EXEC_TIMEOUT_S` (default 300 s) and loop cap
   `TOOL_CALL_MAX_ITERATIONS` (default 30) — see §3.6.
+- **Calls in one model response run concurrently** (since 2026-10-04; earlier
+  they ran one after another). Results still go back to the model in call
+  order, each call keeps its own timeout, and a call that raises or times out
+  does not cancel its siblings. Stopping the turn cancels every running call.
+  Two `run_subagent` calls in one response therefore run their child turns
+  side by side without `background`. Two exceptions:
+  - **`serial = True`** (class attribute on `Tools`) opts a toolkit out: its
+    calls run one at a time, in call order (keyed by tool id), while calls to
+    other tools still run alongside. Use it when the backend serializes anyway
+    or order matters — `builtin_sandbox` declares it (a stateful `run_python`
+    cell usually depends on the previous one, and the sandbox queues per
+    chat/user, so concurrency would only reorder cells and eat into timeouts).
+  - `load_skill` calls run first, so a later call in the same response can use
+    the tools the skill loaded.
+    A tool that mutates shared state through `__event_emitter__` `message` /
+    `replace` events can now interleave with a sibling doing the same; keep such
+    tools `serial` if that matters.
 - **Elapsed time is shown for you.** A running tool's block already displays a live
   seconds counter, and the total is shown once it returns. Use `__progress__` only
   for information the server cannot infer — which item, which stage.
@@ -1473,6 +1514,10 @@ fan-out with `background`, how to treat the answer) reaches the model as the
   `{ok, session_id, answer, usage?, truncated?}` — the child's final assistant
   text only (8000 chars max), never the transcript. Pass `session_id` instead
   of `preset_id` to send a follow-up instruction to an existing session.
+  While it runs, the call's `tool:progress` carries
+  `subagent: {session_id, task_id?}` (§4.3 stream events) so a client can follow the
+  child turn live before the result exists (the web UI renders the child's
+  thinking/answer inside the running tool card).
 
 `run_subagent` is **backgroundable** (§5.9): calling it with the shared
 `background: true` argument runs the child turn as a background task and
@@ -1504,6 +1549,16 @@ the model-facing spec of every eligible tool.
   truth about completion lives in the execution row
   (`running|done|failed|stopped|orphaned`). The execution keeps running after
   the parent turn ends; stopping the parent turn does **not** stop it.
+- **A lone background call runs synchronously** (since 2026-10-04): if the
+  model response contains exactly one tool call and it asks for
+  `background: true`, the call runs inline as if `background` were false — the
+  result is the normal synchronous result (no `task_id`, no execution row),
+  because the extra `await_task` round trip would cost more than it saves.
+  The inline run uses the background timeout (per-entry `timeout`, else
+  `ASYNC_EXEC_TIMEOUT_S`), but like any synchronous call it stops when the
+  parent turn is stopped. With two or more calls in the response, `background:
+true` is honoured as before (plain synchronous calls already run
+  concurrently — §5.5 — so background is only needed to let the turn move on).
 - `check_task(task_ids?, include_done?)` — non-blocking status poll. With no
   arguments lists the chat's running tasks (oldest first); `include_done:
 true` lists terminal ones too (newest first, max 50); with `task_ids` returns
@@ -1553,7 +1608,9 @@ Over HTTP the rows are readable and stoppable by the chat's owner:
 `GET /api/v1/chats/{id}/executions` (object form with `delivered` /
 `resume_suspended`, no result bodies — §4.6) and
 `POST /api/v1/chats/{id}/executions/{exec_id}/stop` (the UI's per-execution stop
-button). There is no SSE push — the frontend polls.
+button). Terminal states are also pushed as `execution:done` on any open
+completion stream of the chat (§4.3 stream events); with no stream open the frontend
+falls back to polling.
 
 **Eligibility is opt-in** (`backgroundable` key on the tool entry):
 
@@ -1567,7 +1624,8 @@ button). There is no SSE push — the frontend polls.
   Note that the sandbox serializes calls per user, so a
   synchronous call made while a backgrounded one is still running waits for it
   (head-of-line blocking — backgrounding frees the parent turn, not the
-  sandbox).
+  sandbox). For the same reason `builtin_sandbox` is `serial` (§5.5): its
+  synchronous calls in one response run in call order, not concurrently.
 - Never eligible: `load_skill`, `check_task`, `await_task`, `stop_task`, any
   tool that declares its own `background` parameter (collision guard), and
   tool-server tools (no opt-in surface in v1). `background: true` on a

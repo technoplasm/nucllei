@@ -51,6 +51,24 @@ def _positive_number(value) -> Optional[float]:
     return value
 
 
+def _normalize_subagent(value) -> Optional[dict]:
+    """進捗の構造化フィールド `subagent` を正規化する(#140 UI 追従)。
+
+    `{"session_id": str, "task_id"?: str}` だけを通す(未知キー・非文字列は捨てる)。
+    session_id が無ければ None(= 載せない)。
+    """
+    if not isinstance(value, dict):
+        return None
+    session_id = value.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    normalized = {"session_id": session_id}
+    task_id = value.get("task_id")
+    if isinstance(task_id, str) and task_id:
+        normalized["task_id"] = task_id
+    return normalized
+
+
 def _clamp(value, total: float) -> Optional[float]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -81,6 +99,9 @@ class ToolOutputSink:
         self._closed = False
         # description 省略時に維持する直前の文言(tqdm の set_description 相当)
         self._description = ""
+        # 子 agent session の所在(run_subagent — #140 UI 追従)。description と同じく
+        # **粘着**: 一度載せたら以後の全 payload(終端・再アタッチ用の最新値)に載る
+        self._subagent: Optional[dict] = None
         self._last_emit_at = 0.0
         self._pending: Optional[dict] = None
 
@@ -145,13 +166,20 @@ class ToolOutputSink:
         with self._lock:
             if self._closed:
                 return
-            payload = {
-                "tool_call_id": self._tool_call_id,
-                "description": self._description,
-                "done": False,
-            }
+            payload = self._base_payload(done=False)
             emit = self._emit_progress
         self._safe_emit(emit, payload)
+
+    def _base_payload(self, *, done: bool) -> dict:
+        """lock 下で呼ぶ。tool_call_id / description / done と粘着フィールド。"""
+        payload = {
+            "tool_call_id": self._tool_call_id,
+            "description": self._description,
+            "done": done,
+        }
+        if self._subagent is not None:
+            payload["subagent"] = dict(self._subagent)
+        return payload
 
     @staticmethod
     def _safe_emit(emit, payload) -> None:
@@ -166,7 +194,13 @@ class ToolOutputSink:
             log.debug("progress emit failed", exc_info=True)
 
     def push_progress(
-        self, description="", *, current=None, total=None, done: bool = False
+        self,
+        description="",
+        *,
+        current=None,
+        total=None,
+        done: bool = False,
+        subagent=None,
     ) -> None:
         """進捗 1 件。スロットルを掛けて `emit_progress` へ流す(蓄積しない)。
 
@@ -186,11 +220,18 @@ class ToolOutputSink:
             if isinstance(description, str) and description:
                 self._description = description
 
-            payload = {
-                "tool_call_id": self._tool_call_id,
-                "description": self._description,
-                "done": bool(done),
-            }
+            # subagent は差分があるときだけ更新し、更新した 1 通はスロットルを
+            # 素通しする(task_id の到着は FE の live 追従の起点 — 終端まで
+            # 抑制されると意味が無い)。既存キーは保ったまま上書きマージ。
+            subagent_changed = False
+            normalized = _normalize_subagent(subagent)
+            if normalized is not None:
+                merged = {**(self._subagent or {}), **normalized}
+                if merged != self._subagent:
+                    self._subagent = merged
+                    subagent_changed = True
+
+            payload = self._base_payload(done=bool(done))
             total_n = _positive_number(total)
             current_n = None if total_n is None else _clamp(current, total_n)
             # 決定的(current/total)として成立するときだけ載せる。片方でも欠ければ
@@ -200,7 +241,11 @@ class ToolOutputSink:
                 payload["total"] = total_n
 
             now = time.monotonic()
-            if payload["done"] or now - self._last_emit_at >= PROGRESS_THROTTLE_S:
+            if (
+                payload["done"]
+                or subagent_changed
+                or now - self._last_emit_at >= PROGRESS_THROTTLE_S
+            ):
                 self._last_emit_at = now
                 self._pending = None
                 emit, pending = self._emit_progress, payload
@@ -236,11 +281,7 @@ class ToolOutputSink:
             emit = self._emit_progress
             if emit is None:
                 return
-            payload = {
-                "tool_call_id": self._tool_call_id,
-                "description": self._description,
-                "done": True,
-            }
+            payload = self._base_payload(done=True)
             # スロットルで落ちた最後の数値も終端に持ち上げる(古い分数のまま
             # 止まって見えないように)
             if pending is not None and "current" in pending:
@@ -307,7 +348,12 @@ def display(content: str, kind: str = "markdown") -> None:
 
 
 def progress(
-    description: str = "", *, current=None, total=None, done: bool = False
+    description: str = "",
+    *,
+    current=None,
+    total=None,
+    done: bool = False,
+    subagent: Optional[dict] = None,
 ) -> None:
     """`__progress__` 実体。実行中 tool-call の進捗をユーザーへ流す(#100)。
 
@@ -332,12 +378,23 @@ def progress(
 
     進捗は装飾なので、ここでの失敗が tool 本体を巻き添えにすることはない
     (文脈外・sink 未設定・stream 未設定はいずれも黙って no-op)。
+
+    `subagent={"session_id", "task_id"?}`(#140 UI 追従)は run_subagent が子
+    agent session の所在を FE へ渡す構造化フィールド。**粘着**(以後の全 payload に
+    載る)で、値が変わった 1 通はスロットルを素通しする。FE はこれで実行中の
+    カードに子 transcript を live 追従で描く(README_API §5.5)。
     """
     sink = current_sink.get()
     if sink is None:
         return
     try:
-        sink.push_progress(description, current=current, total=total, done=done)
+        sink.push_progress(
+            description,
+            current=current,
+            total=total,
+            done=done,
+            subagent=subagent,
+        )
     except Exception:
         log.debug("progress push failed", exc_info=True)
 

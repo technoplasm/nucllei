@@ -211,6 +211,23 @@ def get_stream_for_message(chat_id, message_id) -> CompletionEventStream | None:
     return None
 
 
+def get_streams_for_chat(chat_id) -> list[CompletionEventStream]:
+    """chat_id の開いている stream 全部(ターン横断の chat 単位通知向け)。
+
+    background 実行(#110)の終端通知 `execution:done` のように、特定ターンでは
+    なく chat に属する事実を「今その chat を見ている誰か」へ届ける経路が使う。
+    spawn したターンが終わっていても、同じ chat の後続ターン(配達の続きターン・
+    ユーザーの次の送信)の stream が開いていればそこに乗る。
+    """
+    if not chat_id:
+        return []
+    return [
+        stream
+        for stream in _streams.values()
+        if not stream.closed and stream.chat_id == chat_id
+    ]
+
+
 # --- emitter / caller(tool・filter へ渡す関数)---------------------------
 
 

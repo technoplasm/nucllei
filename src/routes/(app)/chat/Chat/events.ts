@@ -31,6 +31,7 @@ import type { ChatMessage } from '$lib/types/chat';
 import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
 import { clearLiveUsage, setChatUsageBaseline, setLiveUsage } from '$lib/stores/live-usage.svelte';
 import { refreshChatChildren, refreshCurrentChatChildren } from '$lib/stores/chat-children.svelte';
+import { applyExecutionDone, refreshExecutions } from '$lib/stores/executions.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
 import { getChatById, getChatList, updateChatById } from '$lib/apis/chats';
 import { chatCompleted, chatAction } from '$lib/apis';
@@ -221,6 +222,13 @@ export class ChatEvents {
 			// llens(#100): 実行中 tool の進捗。message には載せない(saveChatHandler が
 			// history を丸ごと送るので DB に載り、揮発の規律が破れる)。
 			setToolProgress(targetChatId, message.id, data);
+		} else if (type === 'execution:done') {
+			// llens(#140 UI 追従): background 実行の終端 push。行を即座に終端へ書き換えて
+			// カードのスピナーを止め、配達状態(delivered)は直後の読み直しで揃える
+			// (5 秒ポーリングは stream の無いときの fallback)
+			if (applyExecutionDone(targetChatId, data ?? {})) {
+				void refreshExecutions(targetChatId, { activeOnly: true });
+			}
 		} else if (type === 'chat:usage') {
 			// llens(#102): 生成中のトークン使用量(~0.5 秒間隔・揮発)。tool:progress と
 			// 同じ規律で message には載せない。

@@ -61,3 +61,30 @@ describe('clearChatProgress', () => {
 		expect(getToolProgress('m9', 't1')?.description).toBe('other chat');
 	});
 });
+
+// #140 UI 追従: run_subagent の子 session の所在は粘着(task_id は後着で埋まる)
+describe('subagent の所在', () => {
+	it('session_id → task_id の順に届いた所在を合成し、所在の無い後続通知でも保持する', () => {
+		setToolProgress(C1, 'm1', {
+			tool_call_id: 't1',
+			description: 'agent session s1',
+			subagent: { session_id: 's1' }
+		});
+		expect(getToolProgress('m1', 't1')?.subagent).toEqual({ session_id: 's1' });
+
+		setToolProgress(C1, 'm1', {
+			tool_call_id: 't1',
+			subagent: { session_id: 's1', task_id: 'task-1' }
+		});
+		setToolProgress(C1, 'm1', { tool_call_id: 't1', done: true });
+
+		const progress = getToolProgress('m1', 't1');
+		expect(progress?.subagent).toEqual({ session_id: 's1', task_id: 'task-1' });
+		expect(progress?.done).toBe(true);
+	});
+
+	it('所在を持たない tool には付かない', () => {
+		setToolProgress(C1, 'm1', { tool_call_id: 't2', description: 'x' });
+		expect(getToolProgress('m1', 't2')?.subagent).toBeUndefined();
+	});
+});

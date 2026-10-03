@@ -1,8 +1,9 @@
 /**
  * 表示中 chat の execution 行(#110)の FE キャッシュ。
  *
- * データ源は exec 行一覧 API(GET /chats/{id}/executions — 5 秒ポーリング。SSE push は
- * しない仕様)。読み手はバックグラウンドチップ(MessageInput/BackgroundTasksChip)と
+ * データ源は exec 行一覧 API(GET /chats/{id}/executions — 5 秒ポーリング)。終端だけは
+ * BE が chat の開いている stream へ `execution:done` を push する(#140 UI 追従 —
+ * applyExecutionDone で即反映。ポーリングは stream の無いときの fallback)。読み手はバックグラウンドチップ(MessageInput/BackgroundTasksChip)と
  * ExecutionBlock(spawn 即返し結果の現在状態表示)と poll 述語(Chat.svelte)。
  *
  * 自動再開はサーバ駆動(契約 T3)— FE は履歴を推測して回収要求を積まない。
@@ -186,6 +187,81 @@ export const shouldPollExecutions = (
  */
 export const isExecutionsRefreshBackedOff = (nowMs: number): boolean =>
 	nowMs < refreshBackoffUntilMs;
+
+/** BE の `execution:done`(#140 UI 追従)の payload。 */
+export type ExecutionDonePayload = {
+	task_id?: string;
+	status?: string;
+	finished_at?: number | null;
+	duration?: number | null;
+	error?: string | null;
+};
+
+/**
+ * 終端の即時反映(#140 UI 追従)。BE は exec の終端を chat の開いている stream へ
+ * `execution:done` で push する — 5 秒ポーリングを待たずにスピナーを止める。
+ *
+ * 表示中 chat の既知行だけを書き換える(未知行・他 chat は無視 — 次の refresh が
+ * 全量で拾う)。delivered はここでは触らない(配達の真実は BE。直後の refresh で揃う)。
+ * 戻り値: 書き換えたか。
+ */
+export const applyExecutionDone = (chatId: string, payload: ExecutionDonePayload): boolean => {
+	const execId = payload?.task_id;
+	const status = payload?.status;
+	if (!chatId || state.chatId !== chatId || !execId || !status) {
+		return false;
+	}
+	if (!isTerminalExecutionStatus(status)) {
+		return false;
+	}
+	const index = state.entries.findIndex((entry) => entry.id === execId);
+	if (index < 0) {
+		return false;
+	}
+	const current = state.entries[index];
+	state.entries[index] = {
+		...current,
+		status,
+		finished_at: payload.finished_at ?? current.finished_at ?? Math.floor(Date.now() / 1000),
+		duration: payload.duration ?? current.duration,
+		error: payload.error ?? current.error
+	};
+	return true;
+};
+
+/** refreshExecutionsUntilTerminal の再試行間隔(ms)。exec 行の終端書きは子の完走より僅かに遅れる。 */
+export const EXECUTION_SETTLE_RETRY_MS = [150, 400, 1000, 2000];
+
+/**
+ * 子の live 追従が完走を観測したときの fallback(#140 UI 追従)— stream が無く
+ * `execution:done` を受け取れない場合も、5 秒ポーリングを待たずに行を読み直す。
+ * exec 行の終端書きは子ターンの完走から僅かに遅れるので、終端が見えるまで短く再試行する。
+ */
+export const refreshExecutionsUntilTerminal = async (
+	execId: string,
+	sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<boolean> => {
+	const chatId = state.chatId;
+	if (!chatId || !execId) {
+		return false;
+	}
+	for (const delay of EXECUTION_SETTLE_RETRY_MS) {
+		await sleep(delay);
+		if (state.chatId !== chatId) {
+			return false;
+		}
+		const entry = getExecutionEntry(execId);
+		if (entry && isTerminalExecutionStatus(entry.status)) {
+			return true;
+		}
+		await refreshExecutions(chatId, { activeOnly: true });
+		const refreshed = getExecutionEntry(execId);
+		if (refreshed && isTerminalExecutionStatus(refreshed.status)) {
+			return true;
+		}
+	}
+	return false;
+};
 
 /** exec_id で 1 行引く(ExecutionBlock / ToolCallBlock のバッジ上書き)。 */
 export const getExecutionEntry = (execId: string): ExecutionEntry | null =>

@@ -13,6 +13,19 @@
  * メッセージをまたぐと衝突しうるため、単独では宛先にならない。
  */
 
+/**
+ * run_subagent の子 agent session の所在(#140 UI 追従)。BE が dispatch 時に
+ * session_id、子ターン起動直後に task_id を載せる(粘着 — 以後の payload にも載る)。
+ * session_id = 子 chat id。task_id は GET /api/tasks/{task_id}/events の宛先。
+ */
+export type SubagentProgress = { session_id: string; task_id?: string };
+
+/**
+ * 子 agent session の進み具合(SubagentSessionBlock が子のイベントから判定し、
+ * ToolCallBlock のヘッダ表示・自動展開の畳み戻しに使う)。done = 走行中の子ターンが無い。
+ */
+export type SubagentPhase = 'started' | 'thinking' | 'answering' | 'done';
+
 export type ToolProgress = {
 	/** 属するチャット。chat 単位の一括破棄(clearChatProgress)の宛先(#107 W-A)。 */
 	chatId: string;
@@ -21,6 +34,8 @@ export type ToolProgress = {
 	current?: number;
 	total?: number;
 	done: boolean;
+	/** 子 agent session の所在(run_subagent のみ)。一度観測したら保持する。 */
+	subagent?: SubagentProgress;
 	/**
 	 * この tool_call を最初に観測した時刻(クライアント時計)。経過時間表示の起点。
 	 *
@@ -56,6 +71,7 @@ export const setToolProgress = (
 		current?: number;
 		total?: number;
 		done?: boolean;
+		subagent?: SubagentProgress;
 	}
 ) => {
 	const toolCallId = payload?.tool_call_id;
@@ -71,6 +87,11 @@ export const setToolProgress = (
 		current: payload.current,
 		total: payload.total,
 		done,
+		// 所在は粘着(BE も粘着だが、欠けた payload で消さない防御)。task_id は後着で埋まる
+		subagent:
+			typeof payload.subagent?.session_id === 'string'
+				? { ...previous?.subagent, ...payload.subagent }
+				: previous?.subagent,
 		// 起点・終点とも最初の 1 件で確定させる(以降の更新で進み直させない)
 		startedAt: previous?.startedAt ?? Date.now(),
 		doneAt: done ? (previous?.doneAt ?? Date.now()) : previous?.doneAt

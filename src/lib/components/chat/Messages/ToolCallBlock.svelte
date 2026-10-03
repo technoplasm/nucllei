@@ -8,7 +8,7 @@
 	// 閉じるハンドルは枠の下辺・左側、すべて閉じる(チャット内一括)は右側。
 	// ヘッダ・Result tab・閉じるハンドルのどれをクリックしても閉じられる。
 	// tab は上側だけ rounded・下辺なしで、-mb-px/-mt-px で枠線に重ねて一体化する。
-	import { getContext } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -22,8 +22,12 @@
 
 	import { formatDurationSeconds } from '$lib/utils/duration';
 	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
-	import type { ToolProgress } from '$lib/stores/tool-progress.svelte';
-	import { getExecutionEntry } from '$lib/stores/executions.svelte';
+	import type {
+		SubagentPhase,
+		SubagentProgress,
+		ToolProgress
+	} from '$lib/stores/tool-progress.svelte';
+	import { getExecutionEntry, refreshExecutionsUntilTerminal } from '$lib/stores/executions.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Markdown from './Markdown.svelte';
@@ -149,6 +153,83 @@
 			(getExecutionEntry(resultDisplay.execId)?.status ?? 'running') === 'running'
 	);
 
+	// #140 UI 追従: run_subagent の子 agent session の所在(progress の `subagent`)。
+	// 実行中(結果がまだ無い sync / spawn 即返しの background)でも子 transcript を
+	// カード内に live 追従で描く。progress は揮発(メッセージ確定で store から消える)
+	// ので、一度観測した所在はこのブロックが持ち続ける。
+	let liveSubagent = $state<SubagentProgress | null>(null);
+	$effect(() => {
+		const observed = progress?.subagent;
+		if (!observed?.session_id) return;
+		untrack(() => {
+			if (
+				liveSubagent?.session_id !== observed.session_id ||
+				liveSubagent?.task_id !== observed.task_id
+			) {
+				liveSubagent = { ...observed };
+			}
+		});
+	});
+	// 子ブロックが返す進み具合(ヘッダのラベル・自動展開の畳み戻し)
+	let childPhase = $state<SubagentPhase | null>(null);
+
+	// tool として「まだ終わっていない」: 結果未着(sync)か、exec 行が running(background)
+	const toolRunning = $derived(!isDone || execRunning);
+
+	// 子 session を描くか(結果の subagent 形 / live の所在)。同じ位置に 1 個だけ置く —
+	// live → 結果到着で同じインスタンスが続き、二重に描かない
+	const subagentSessionId = $derived(
+		resultDisplay?.kind === 'subagent'
+			? resultDisplay.sessionId
+			: (liveSubagent?.session_id ?? null)
+	);
+	const subagentDisplay = $derived(resultDisplay?.kind === 'subagent' ? resultDisplay : null);
+
+	// 実行中ヘッダのラベル: 素の `agent session <uuid>` ではなく、子のイベントから
+	// 「子を起動しました → 考え中 → 回答中」
+	const subagentLabel = $derived.by(() => {
+		if (!liveSubagent || !toolRunning) return '';
+		const phase = childPhase ?? 'started';
+		if (phase === 'answering') return $i18n.t('Subagent answering');
+		if (phase === 'thinking') return $i18n.t('Subagent thinking');
+		if (phase === 'started') return $i18n.t('Subagent started');
+		return '';
+	});
+
+	// 子が走っている間はカードを自動で開き、終わったらユーザーの既定(expandDetails)へ
+	// 戻す。途中でユーザーが手で開閉したらそれを尊重する(以後触らない)
+	let autoOpened = false;
+	let autoExpandConsumed = false;
+	$effect(() => {
+		if (!liveSubagent || !toolRunning || childPhase === 'done') return;
+		untrack(() => {
+			if (autoExpandConsumed) return;
+			autoExpandConsumed = true;
+			if (!open) {
+				open = true;
+				autoOpened = true;
+			}
+		});
+	});
+	$effect(() => {
+		const finished = !toolRunning || childPhase === 'done';
+		if (!finished) return;
+		untrack(() => {
+			if (!autoOpened) return;
+			autoOpened = false;
+			open = $settings?.expandDetails ?? false;
+		});
+	});
+
+	const onChildPhase = (phase: SubagentPhase) => {
+		childPhase = phase;
+		// background: 子の完走を live 追従で観測したら exec 行を即読み直す
+		// (`execution:done` の push が届かない — 親の stream が閉じている — 場合の fallback)
+		if (phase === 'done' && resultDisplay?.kind === 'execution' && execRunning) {
+			void refreshExecutionsUntilTerminal(resultDisplay.execId);
+		}
+	};
+
 	// display チャネル(#88): tool が __display__ で押した人間向け表示。collapse の
 	// 開閉と無関係に常時見せる — open 時は枠の底に、閉時は badge から下がる専用枠に
 	// 描き、collapsible ブロックと 1 つの塊として「くっついて」見えるようにする。
@@ -165,6 +246,7 @@
 	const collapseFromBottom = () => {
 		scrollOnClose = true;
 		open = false;
+		autoOpened = false;
 	};
 	const restoreViewAfterCollapse = () => {
 		if (!scrollOnClose) return;
@@ -205,6 +287,7 @@
 		onpointerup={() => {
 			if (open) scrollOnClose = true;
 			open = !open;
+			autoOpened = false;
 		}}
 	>
 		<div class="font-medium flex items-center gap-2 {isDone && !execRunning ? '' : 'shimmer'}">
@@ -239,7 +322,9 @@
 				ヘッダは w-fit バッジで open 時は枠の上辺タブに合体するため、長い
 				description で幅が暴れないよう max-w + truncate で頭を押さえる。
 			-->
-			{#if progressLabel}
+			{#if subagentLabel}
+				<div class="max-w-52 truncate font-normal">{subagentLabel}</div>
+			{:else if progressLabel}
 				<div class="max-w-52 truncate font-normal" title={progressLabel}>
 					{progressLabel}
 				</div>
@@ -293,7 +378,7 @@
 					{/if}
 				</div>
 
-				{#if resultDisplay}
+				{#if resultDisplay || subagentSessionId}
 					<div class="flex ms-2 mt-1">
 						<!-- Result tab: クリックでも閉じられる -->
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -315,9 +400,11 @@
 					<div
 						class="border-t {toggleHover
 							? 'border-line-hover'
-							: 'border-line'} transition px-3 py-2"
+							: 'border-line'} transition px-3 py-2 space-y-2"
 					>
-						{#if resultDisplay.kind === 'skill'}
+						{#if !resultDisplay || resultDisplay.kind === 'subagent'}
+							<!-- 子 session は下の固定位置で描く(live → 結果到着で同じインスタンス) -->
+						{:else if resultDisplay.kind === 'skill'}
 							<!--
 								load_skill の構造化結果(#35): 指示本文(md レンダリング)+ 導入 tool 一覧。
 								XSS 不変条件: tool 結果は外部入力なのでサニタイズ必須 — Markdown は
@@ -343,12 +430,6 @@
 									{/each}
 								</div>
 							{/if}
-						{:else if resultDisplay.kind === 'subagent'}
-							<!--
-								run_subagent の構造化結果(#107): 子 agent session のインライン表示。
-								{#if open} の内側なので、開くまで子 chat の fetch は走らない。
-							-->
-							<SubagentSessionBlock id={`${id || call.id}-subagent`} display={resultDisplay} />
 						{:else if resultDisplay.kind === 'execution'}
 							<!--
 								background 昇格された呼び出し(バックグラウンドタスク)の spawn 形(#110):
@@ -369,6 +450,21 @@
 							<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
 						{:else}
 							<HljsCode lang="json" code={resultDisplay.value} />
+						{/if}
+						{#if subagentSessionId}
+							<!--
+								run_subagent の子 agent session のインライン表示(#107)。結果の subagent 形
+								(display)と、実行中の所在(live — #140 UI 追従)の両方をここ 1 箇所で描く。
+								{#if open} の内側なので、開くまで子 chat の fetch は走らない。
+							-->
+							{#key subagentSessionId}
+								<SubagentSessionBlock
+									id={`${id || call.id}-subagent`}
+									display={subagentDisplay}
+									live={liveSubagent}
+									onPhase={onChildPhase}
+								/>
+							{/key}
 						{/if}
 					</div>
 				{/if}

@@ -1024,6 +1024,167 @@ class TestRunSubagent(AbstractPostgresTest):
         assert result["ok"] is True
         assert posted == []
 
+    # ---- 実行中カードの live 追従(#140 UI 追従)----
+
+    def test_sync_progress_carries_child_session_and_task_ids(self, monkeypatch):
+        """dispatch 時点で `subagent.session_id` が、子ターン起動直後に
+        `task_id` が progress に載る(FE は session_id で子 transcript を即マウントし、
+        task_id で live 追従を始める)。どちらも完走より前に届く。"""
+        from nucllei import tasks as task_registry
+        from nucllei.utils import tool_output
+
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        emitted = []
+
+        async def main():
+            sink = tool_output.ToolOutputSink(
+                tool_call_id="functions.run_subagent:0", emit_progress=emitted.append
+            )
+            token = tool_output.current_sink.set(sink)
+            try:
+                outer = asyncio.create_task(
+                    tool["callable"](preset_id="researcher", instruction="1+1 は?")
+                )
+            finally:
+                tool_output.current_sink.reset(token)
+
+            for _ in range(200):
+                if any((p.get("subagent") or {}).get("task_id") for p in emitted):
+                    break
+                await asyncio.sleep(0.02)
+            # 子はまだ走行中(gate 未解放)— 所在は完走前に届いている
+            assert not outer.done()
+            with_session = [p for p in emitted if p.get("subagent")]
+            first = with_session[0]["subagent"]
+            assert set(first) == {"session_id"}
+            task_id = with_session[-1]["subagent"]["task_id"]
+            session_id = first["session_id"]
+            assert task_id in task_registry.list_task_ids_by_chat_id(session_id)
+
+            gate.set()
+            result = await outer
+            await self._wait_turn_slot_release()
+            return session_id, result
+
+        session_id, result = asyncio.run(main())
+        assert result["ok"] is True
+        assert result["session_id"] == session_id
+
+    def test_background_progress_reaches_parent_stream_and_done_is_pushed(
+        self, monkeypatch
+    ):
+        """background(#110 の exec)でも子の所在が spawn したターンの stream へ
+        `tool:progress` として転送され、終端は `execution:done` で即時に届く
+        (FE の 5 秒ポーリングを待たない)。"""
+        from nucllei.utils import completion_events, executions
+
+        executions._exec_tasks.clear()
+        executions._active_execs_by_user.clear()
+        executions._exec_sinks.clear()
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+
+        async def main():
+            stream = completion_events.CompletionEventStream(
+                chat_id=self.parent.id, message_id="pm-a"
+            )
+            completion_events.register_stream("parent-turn", stream)
+            queue = stream.subscribe()
+            try:
+                spawned = await executions.spawn_execution(
+                    user_id="1",
+                    chat_id=self.parent.id,
+                    message_id="pm-a",
+                    tool_call_id="functions.run_subagent:0",
+                    tool_name="run_subagent",
+                    entry=tool,
+                    params={"preset_id": "researcher", "instruction": "1+1 は?"},
+                )
+                assert spawned["status"] == "running"
+                exec_id = spawned["task_id"]
+
+                events = []
+
+                async def collect_until(predicate):
+                    while True:
+                        event = await asyncio.wait_for(queue.get(), timeout=10)
+                        events.append(event)
+                        if predicate(event):
+                            return event
+
+                progress_event = await collect_until(
+                    lambda e: e["data"]["type"] == "tool:progress"
+                    and (e["data"]["data"].get("subagent") or {}).get("task_id")
+                )
+                assert progress_event["message_id"] == "pm-a"
+                payload = progress_event["data"]["data"]
+                assert payload["tool_call_id"] == "functions.run_subagent:0"
+                session_id = payload["subagent"]["session_id"]
+                assert (
+                    self.Chats.get_chat_by_id(session_id).parent_chat_id
+                    == self.parent.id
+                )
+
+                gate.set()
+                done_event = await collect_until(
+                    lambda e: e["data"]["type"] == "execution:done"
+                )
+                assert done_event["message_id"] == "pm-a"
+                done = done_event["data"]["data"]
+                assert done["task_id"] == exec_id
+                assert done["status"] == "done"
+                assert done["tool_call_id"] == "functions.run_subagent:0"
+                assert done["finished_at"] is not None
+                await self._wait_turn_slot_release()
+                return exec_id
+            finally:
+                stream.unsubscribe(queue)
+                completion_events.release_stream("parent-turn")
+
+        exec_id = asyncio.run(main())
+        from nucllei.models.executions import Executions
+
+        assert Executions.get_execution_by_id(exec_id).status == "done"
+
+    def test_background_progress_is_dropped_without_open_parent_stream(
+        self, monkeypatch
+    ):
+        """spawn したターンの stream が無ければ転送は黙って捨てる(check_task 用の
+        最新値は従来どおり保持)。"""
+        from nucllei.utils import executions
+
+        executions._exec_tasks.clear()
+        executions._active_execs_by_user.clear()
+        executions._exec_sinks.clear()
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+
+        async def main():
+            spawned = await executions.spawn_execution(
+                user_id="1",
+                chat_id=self.parent.id,
+                message_id="pm-a",
+                tool_call_id="functions.run_subagent:0",
+                tool_name="run_subagent",
+                entry=tool,
+                params={"preset_id": "researcher", "instruction": "1+1 は?"},
+            )
+            exec_id = spawned["task_id"]
+            for _ in range(200):
+                latest = executions.get_latest_progress(exec_id) or {}
+                if (latest.get("subagent") or {}).get("task_id"):
+                    break
+                await asyncio.sleep(0.02)
+            assert latest["subagent"]["session_id"]
+            gate.set()
+            task = executions.get_exec_task(exec_id)
+            if task is not None:
+                await asyncio.wait_for(asyncio.shield(task), timeout=10)
+            await self._wait_turn_slot_release()
+
+        asyncio.run(main())
+
     # ---- 親ターン統合(実イベントバス + SSE EOF 完走待ち)----
 
     def test_parent_turn_carries_child_answer_into_tool_result(self, monkeypatch):

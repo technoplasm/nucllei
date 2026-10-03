@@ -13,6 +13,7 @@ vi.mock('$lib/apis/chats', () => ({ getChatExecutions: vi.fn() }));
 
 import { getChatExecutions } from '$lib/apis/chats';
 import {
+	applyExecutionDone,
 	clearExecutions,
 	executionsState,
 	EXECUTION_POLL_MS,
@@ -20,6 +21,7 @@ import {
 	isExecutionsRefreshBackedOff,
 	isUndeliveredTerminal,
 	refreshExecutions,
+	refreshExecutionsUntilTerminal,
 	shouldPollExecutions,
 	type ExecutionEntry
 } from './executions.svelte';
@@ -319,5 +321,73 @@ describe('deliveredAdvanced(復帰後の追いつき合図)', () => {
 
 		respond([entry('exec-1', 'done', { delivered: true, finished_at: NOW })]);
 		expect((await refreshExecutions(CHAT)).deliveredAdvanced).toBe(true);
+	});
+});
+
+// #140 UI 追従: 終端は BE の `execution:done` push で即反映し、stream が無いときは
+// 子の完走観測を合図に短い再試行で読み直す(5 秒ポーリングを待たない)
+describe('applyExecutionDone', () => {
+	it('表示中 chat の既知行を終端へ即時に書き換える(delivered は触らない)', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		const applied = applyExecutionDone(CHAT, {
+			task_id: 'exec-1',
+			status: 'done',
+			finished_at: NOW,
+			duration: 3.2
+		});
+		expect(applied).toBe(true);
+		const updated = getExecutionEntry('exec-1');
+		expect(updated?.status).toBe('done');
+		expect(updated?.finished_at).toBe(NOW);
+		expect(updated?.duration).toBe(3.2);
+		expect(updated?.delivered).toBe(false);
+		expect(isUndeliveredTerminal(updated!)).toBe(true);
+	});
+
+	it('他 chat・未知行・非終端 status は無視する', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		expect(applyExecutionDone('chat-2', { task_id: 'exec-1', status: 'done' })).toBe(false);
+		expect(applyExecutionDone(CHAT, { task_id: 'exec-x', status: 'done' })).toBe(false);
+		expect(applyExecutionDone(CHAT, { task_id: 'exec-1', status: 'running' })).toBe(false);
+		expect(applyExecutionDone(CHAT, { task_id: 'exec-1' })).toBe(false);
+		expect(getExecutionEntry('exec-1')?.status).toBe('running');
+	});
+});
+
+describe('refreshExecutionsUntilTerminal', () => {
+	const noSleep = () => Promise.resolve();
+
+	it('終端が見えるまで短く再試行して読み直す', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		// 1 回目はまだ running(exec 行の終端書きは子の完走より僅かに遅れる)→ 2 回目で done
+		mockedGetChatExecutions
+			.mockResolvedValueOnce({ executions: [entry('exec-1', 'running')] })
+			.mockResolvedValueOnce({
+				executions: [entry('exec-1', 'done', { finished_at: NOW })]
+			});
+		expect(await refreshExecutionsUntilTerminal('exec-1', noSleep)).toBe(true);
+		expect(getExecutionEntry('exec-1')?.status).toBe('done');
+		// 1 (seed) + 2 (再試行)
+		expect(mockedGetChatExecutions).toHaveBeenCalledTimes(3);
+	});
+
+	it('既に終端(push 済み)なら読み直さない', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+		applyExecutionDone(CHAT, { task_id: 'exec-1', status: 'done' });
+
+		expect(await refreshExecutionsUntilTerminal('exec-1', noSleep)).toBe(true);
+		expect(mockedGetChatExecutions).toHaveBeenCalledTimes(1);
+	});
+
+	it('表示中 chat が無ければ何もしない', async () => {
+		expect(await refreshExecutionsUntilTerminal('exec-1', noSleep)).toBe(false);
+		expect(mockedGetChatExecutions).not.toHaveBeenCalled();
 	});
 });

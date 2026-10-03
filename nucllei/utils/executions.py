@@ -21,15 +21,21 @@ await_task(呼び出し面 — utils/exec_tools.py)が、完了結果の配達�
   殺すため)。
 
 runner は自前の sink(_ExecSink)を張る: create_task の context copy が引き継ぐ
-親ターンの sink は turn return 直後に close されるため。progress は SSE へ流さず
-最新 1 件を sink に保持し、check_task が registry 経由で読む(best-effort・
-プロセス内)。`in_exec` ContextVar は completion_events の DB 分岐遮断
+親ターンの sink は turn return 直後に close されるため。progress は最新 1 件を
+sink に保持し、check_task が registry 経由で読む(best-effort・プロセス内)。
+加えて spawn したターンの stream がまだ開いていれば `tool:progress` として
+転送する(#140 UI 追従 — background の run_subagent カードが子 session の所在
+`subagent` を受け取り live 追従できるように。閉じていれば黙って捨てる)。
+終端(done / failed / stopped)は chat の開いている stream 全部へ
+`execution:done` を 1 発流す — FE はこれでスピナーを即止める(5 秒ポーリングは
+stream の無いときの fallback として残る)。`in_exec` ContextVar は completion_events の DB 分岐遮断
 (append-only 破り・RMW 競合の防止 — §6 硬化)に使う。
 """
 
 import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
 from contextvars import ContextVar
@@ -89,21 +95,116 @@ _active_execs_by_user: dict[str, int] = {}
 _exec_sinks: dict[str, "_ExecSink"] = {}
 
 
+def _call_on_loop(loop, loop_thread_id, fn, *args) -> None:
+    """ループ上なら直呼び、ワーカースレッドからなら call_soon_threadsafe。
+
+    stream の購読者集合・_streams レジストリはループ上からのみ触る
+    (middleware._make_progress_emitter と同じ規律)。
+    """
+    if loop is None:
+        return
+    if threading.get_ident() == loop_thread_id:
+        fn(*args)
+    else:
+        try:
+            loop.call_soon_threadsafe(fn, *args)
+        except RuntimeError:
+            pass  # ループ停止済み(shutdown)— 装飾なので捨てる
+
+
+def _forward_progress(chat_id, message_id, payload: dict) -> None:
+    """spawn したターンの stream へ tool:progress を転送する(ループ上で呼ぶ)。"""
+    # 循環 import 回避(completion_events が本モジュールの in_exec を import する)
+    from nucllei.utils.completion_events import get_stream_for_message
+
+    stream = get_stream_for_message(chat_id, message_id)
+    if stream is None:
+        return
+    stream.emit(
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "data": {"type": "tool:progress", "data": payload},
+        }
+    )
+
+
+def _emit_execution_done(row: Optional[ExecutionModel]) -> None:
+    """exec の終端を chat の開いている stream 全部へ流す(ループ上で呼ぶ)。
+
+    `execution:done` {task_id, tool_call_id, tool_name, status, finished_at,
+    duration, error}。封筒の message_id は spawn したメッセージ(FE はこれを
+    既知の message として受け、executions store の行を即座に更新する)。
+    装飾 — 失敗は握る(真実は exec 行。FE は 5 秒ポーリングで追いつく)。
+    """
+    if row is None:
+        return
+    try:
+        from nucllei.utils.completion_events import get_streams_for_chat
+
+        envelope = {
+            "chat_id": row.chat_id,
+            "message_id": row.message_id,
+            "data": {
+                "type": "execution:done",
+                "data": {
+                    "task_id": row.id,
+                    "tool_call_id": row.tool_call_id,
+                    "tool_name": row.tool_name,
+                    "status": row.status,
+                    "finished_at": row.finished_at,
+                    "duration": row.duration,
+                    "error": row.error,
+                },
+            },
+        }
+        for stream in get_streams_for_chat(row.chat_id):
+            stream.emit(envelope)
+    except Exception:
+        log.debug("execution:done emit failed", exc_info=True)
+
+
 class _ExecSink(ToolOutputSink):
     """exec 専用 sink。
 
-    progress は SSE へ流さず**最新 1 件を保持する**(揮発・プロセス内)—
-    check_task がポーリングで読む。context_images / display は親クラスの蓄積を
-    そのまま使い、完了時に exec 行の meta へ harvest される。
+    progress は**最新 1 件を保持する**(揮発・プロセス内)— check_task が
+    ポーリングで読む。spawn したターンの stream が開いていればそこへも
+    `tool:progress` を転送する(#140 UI 追従。閉じていれば捨てる)。
+    context_images / display は親クラスの蓄積をそのまま使い、完了時に exec 行の
+    meta へ harvest される。
+
+    ループ上(runner の先頭)で生成すること — 転送先のループを捕まえる。
     """
 
-    def __init__(self, tool_call_id: str = "") -> None:
+    def __init__(
+        self,
+        tool_call_id: str = "",
+        *,
+        chat_id: Optional[str] = None,
+        message_id: Optional[str] = None,
+    ) -> None:
         # _store_progress が参照する属性を親 __init__ より先に用意する
         self.latest_progress: Optional[dict] = None
+        self._chat_id = chat_id
+        self._message_id = message_id
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None  # ループ外(同期テスト)— 転送しない
+        self._loop_thread_id = threading.get_ident()
         super().__init__(tool_call_id=tool_call_id, emit_progress=self._store_progress)
 
     def _store_progress(self, payload: dict) -> None:
         self.latest_progress = payload
+        if self._chat_id and self._message_id:
+            _call_on_loop(
+                self._loop,
+                self._loop_thread_id,
+                _forward_progress,
+                self._chat_id,
+                self._message_id,
+                payload,
+            )
 
 
 def _error(message: str) -> str:
@@ -241,7 +342,15 @@ async def spawn_execution(
         # 走行判定が壊れる(§5)。親ターンの stop(素の chat_id 宛)も届かない
         # = D6(stop 非伝播)がここで構造的に成立する。
         task_id, task = tasks.create_task(
-            _run_execution(exec_id, tool_call_id, tool_name, entry, params),
+            _run_execution(
+                exec_id,
+                tool_call_id,
+                tool_name,
+                entry,
+                params,
+                chat_id=chat_id,
+                message_id=message_id,
+            ),
             id=f"exec:{chat_id}",
         )
         task.add_done_callback(
@@ -290,6 +399,9 @@ async def _run_execution(
     tool_name: str,
     entry: dict,
     params: dict,
+    *,
+    chat_id: Optional[str] = None,
+    message_id: Optional[str] = None,
 ) -> None:
     """runner: callable を走らせ、終端(done/failed)を guarded UPDATE で書く。
 
@@ -300,7 +412,7 @@ async def _run_execution(
     """
     # 自前 sink: create_task の context copy が引き継ぐ親ターンの sink は
     # turn return 直後に close されるため張り替える(§5 runner)
-    sink = _ExecSink(tool_call_id=tool_call_id)
+    sink = _ExecSink(tool_call_id=tool_call_id, chat_id=chat_id, message_id=message_id)
     _exec_sinks[exec_id] = sink
     sink_token = tool_output.current_sink.set(sink)
     exec_token = in_exec.set(True)
@@ -391,6 +503,11 @@ async def _run_execution(
                 f"execution {exec_id} already finalized elsewhere "
                 f"(runner outcome '{outcome['status']}' dropped)"
             )
+        else:
+            # 終端の即時通知(#140 UI 追従)— FE のスピナーをポーリング待ちにしない
+            _emit_execution_done(
+                await asyncio.to_thread(Executions.get_execution_by_id, exec_id)
+            )
     except Exception:
         # 行は running のまま残る → boot スイープ / liveness ガードが orphaned に倒す
         log.exception(f"failed to persist execution outcome (exec_id={exec_id})")
@@ -429,7 +546,10 @@ async def stop_execution(
                 await tasks.stop_task(registered)
             except ValueError:
                 pass  # 既に完走・回収済み(CAS が勝っているので行は stopped のまま)
-    return await asyncio.to_thread(Executions.get_execution_by_id, exec_id)
+    row = await asyncio.to_thread(Executions.get_execution_by_id, exec_id)
+    if won:
+        _emit_execution_done(row)
+    return row
 
 
 async def stop_executions_by_chat_id(chat_id: str) -> int:

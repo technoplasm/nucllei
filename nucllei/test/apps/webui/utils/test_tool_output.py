@@ -776,3 +776,59 @@ def test_duration_is_not_injected_into_model_messages():
     msgs = convert_content_blocks_to_messages(blocks)
     assert "12.345" not in repr(msgs)
     assert "duration" not in repr(msgs)
+
+
+# ---- subagent 構造化フィールド(#140 UI 追従)----
+
+
+def test_progress_subagent_field_is_sticky_and_bypasses_throttle():
+    """`subagent` は粘着(以後の全 payload に載る)。値が変わった 1 通は
+    スロットル窓の中でも即時に流れる(task_id の到着を終端まで遅らせない)。"""
+    emitted = []
+    sink = ToolOutputSink(
+        tool_call_id="functions.run_subagent:0", emit_progress=emitted.append
+    )
+    sink.mark_started()
+    sink.push_progress("agent session s1", subagent={"session_id": "s1"})
+    # スロットル窓内(~0 秒後)でも task_id 追送は即時
+    sink.push_progress(subagent={"session_id": "s1", "task_id": "t1"})
+    # 同値の再送は特別扱いしない(窓内なので抑制される)
+    sink.push_progress(subagent={"session_id": "s1", "task_id": "t1"})
+    sink.close()
+
+    assert "subagent" not in emitted[0]  # 開始マーカーはまだ所在を知らない
+    assert emitted[1]["subagent"] == {"session_id": "s1"}
+    assert emitted[1]["description"] == "agent session s1"
+    assert emitted[2]["subagent"] == {"session_id": "s1", "task_id": "t1"}
+    # description は粘着(省略時は直前の文言を維持)
+    assert emitted[2]["description"] == "agent session s1"
+    # 終端にも載る(再アタッチ・最終状態で所在が欠けない)
+    assert emitted[-1]["done"] is True
+    assert emitted[-1]["subagent"] == {"session_id": "s1", "task_id": "t1"}
+    assert len(emitted) == 4
+
+
+def test_progress_subagent_field_is_normalized():
+    """session_id の無い値・非文字列・未知キーは落とす(FE に判断を残さない)。"""
+    emitted = []
+    sink = ToolOutputSink(tool_call_id="x", emit_progress=emitted.append)
+    sink.push_progress("a", subagent={"task_id": "t-only"})
+    sink.push_progress("b", subagent="s1")
+    sink.close()
+    assert all("subagent" not in payload for payload in emitted)
+
+    emitted.clear()
+    sink = ToolOutputSink(tool_call_id="x", emit_progress=emitted.append)
+    sink.push_progress(subagent={"session_id": "s1", "task_id": 3, "evil": "y"})
+    assert emitted[0]["subagent"] == {"session_id": "s1"}
+
+
+def test_progress_helper_passes_subagent_through_context():
+    emitted = []
+    sink = ToolOutputSink(tool_call_id="x", emit_progress=emitted.append)
+    token = tool_output.current_sink.set(sink)
+    try:
+        progress("agent session s1", subagent={"session_id": "s1"})
+    finally:
+        tool_output.current_sink.reset(token)
+    assert emitted[0]["subagent"] == {"session_id": "s1"}

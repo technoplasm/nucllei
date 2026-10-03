@@ -644,8 +644,15 @@ async def run_subagent_turn(
             return _error(f"preset が利用できません: {preset.id}")
 
         # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
-        # 結果 JSON にも session_id が載る)
-        tool_output.progress(f"agent session {child_chat_id}")
+        # 結果 JSON にも session_id が載る)。description はモデル向け(check_task の
+        # progress)の手がかりとして残し、FE には構造化フィールド `subagent` で
+        # 所在を渡す(#140 UI 追従 — FE は実行中のカードに子 transcript を即
+        # マウントし、task_id の到着で live 追従を始める。ラベルは FE が子の
+        # イベントから組む)。sync / background(_ExecSink が親 stream へ転送)共通
+        tool_output.progress(
+            f"agent session {child_chat_id}",
+            subagent={"session_id": child_chat_id},
+        )
 
         wire_messages = _wire_messages_from_history(
             chat_json["history"]["messages"], assistant_message_id
@@ -660,6 +667,11 @@ async def run_subagent_turn(
             # タイトル生成(通常 + 異常終了フォールバック)・webhook の抑止
             # マーカ。spawn 時の決定的タイトルが正(middleware 側が読む)。
             metadata_extra={"agent_session": True},
+        )
+        # 子ターンの task_id(GET /api/tasks/{task_id}/events の宛先)を追送する。
+        # 値の変化した 1 通はスロットルを素通しする(tool_output.push_progress)
+        tool_output.progress(
+            subagent={"session_id": child_chat_id, "task_id": child_task_id}
         )
 
         stopped = False
