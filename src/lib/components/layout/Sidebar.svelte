@@ -24,6 +24,7 @@
 
 	import {
 		getChatList,
+		getChatListBySearchText,
 		getPinnedChatList,
 		toggleChatPinnedStatusById,
 		getChatById,
@@ -33,6 +34,7 @@
 	import ArchivedChatsModal from './Sidebar/ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
+	import ChatSearch from './Sidebar/ChatSearch.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import Folder from '../common/Folder.svelte';
@@ -90,6 +92,35 @@
 				showSidebar.set(false);
 			}
 		}, 0);
+	};
+
+	// llens(#121): サイドバーのチャット検索。searchText が空でない間は通常一覧の代わりに
+	// サーバ検索(タイトル + 本文の部分一致、`GET /chats/search`)の結果を出す。
+	// ピン留め / 時期見出し / 無限スクロールは通常一覧だけのもので、結果一覧には出さない。
+	let searchText = $state('');
+	let searchResults: { id: string; title: string }[] | null = $state(null);
+	let searchSeq = 0;
+
+	const searchHandler = async (text: string) => {
+		searchText = text;
+		const seq = ++searchSeq;
+		if (!text) {
+			searchResults = null;
+			return;
+		}
+		const res = await getChatListBySearchText(text).catch(() => null);
+		if (seq !== searchSeq) {
+			return; // 古い応答(入力が進んでいる)
+		}
+		searchResults = res ?? [];
+	};
+
+	// 「チャットで調べる」: 検索語を含む依頼文を新規チャットの入力欄にプリフィルする(送信はしない —
+	// 利用者が文面を直してから送る)。?draft= は Chat.initNewChat が解釈する(?q= は自動送信なので使わない)。
+	// モデルは組み込みの履歴ツール(list_history / grep_history)で履歴を探す。
+	const askInChatHandler = (text: string) => {
+		const draft = $i18n.t('Search my chat history for "{{query}}"', { query: text });
+		newChatHandler(`/?draft=${encodeURIComponent(draft)}`);
 	};
 
 	let shiftKey = $state(false);
@@ -477,76 +508,117 @@
 						</div>
 					{/if}
 
-					<div class="flex flex-col flex-1 mt-3 space-y-3">
-						{#if $pinnedChats.length > 0}
-							<div class="flex flex-col space-y-1 rounded-xl">
-								<Folder
-									className=""
-									bind:open={showPinnedChat}
-									onChange={(open) => {
-										localStorage.setItem('showPinnedChat', String(open));
-									}}
-									onImport={(items) => {
-										importChatHandler(items, true);
-									}}
-									onDrop={async (data) => {
-										const { type, id, item } = data;
+					<!-- llens(#121): チャット検索(一覧の直上)。入力中は下の一覧が検索結果に切り替わる -->
+					<div class="mt-3">
+						<ChatSearch onSearch={searchHandler} onAsk={askInChatHandler} />
+					</div>
 
-										if (type === 'chat') {
-											let chat = await getChatById(id).catch(() => {
-												return null;
-											});
-											if (!chat && item) {
-												chat = await importChat(item.chat, item?.meta ?? {});
-											}
+					{#if searchText}
+						<div class="px-1.5 flex-1 flex flex-col mt-1.5">
+							{#if searchResults === null}
+								<div
+									class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+								>
+									<Spinner className=" size-4" />
+									<div class=" ">Loading...</div>
+								</div>
+							{:else if searchResults.length === 0}
+								<div class="px-1 py-1.5 w-full text-xs text-content-muted">
+									{$i18n.t('No matching chats')}
+								</div>
+							{:else}
+								{#each searchResults as chat (chat.id)}
+									<ChatItem
+										className="text-sm"
+										id={chat.id}
+										title={chat.title}
+										{shiftKey}
+										selected={selectedChatId === chat.id}
+										onSelect={() => {
+											selectedChatId = chat.id;
+										}}
+										onUnselect={() => {
+											selectedChatId = null;
+										}}
+										onChange={() => {
+											initChatList();
+											searchHandler(searchText);
+										}}
+									/>
+								{/each}
+							{/if}
+						</div>
+					{:else}
+						<div class="flex flex-col flex-1 mt-1.5 space-y-3">
+							{#if $pinnedChats.length > 0}
+								<div class="flex flex-col space-y-1 rounded-xl">
+									<Folder
+										className=""
+										bind:open={showPinnedChat}
+										onChange={(open) => {
+											localStorage.setItem('showPinnedChat', String(open));
+										}}
+										onImport={(items) => {
+											importChatHandler(items, true);
+										}}
+										onDrop={async (data) => {
+											const { type, id, item } = data;
 
-											if (chat) {
-												if (!chat.pinned) {
-													await toggleChatPinnedStatusById(chat.id);
+											if (type === 'chat') {
+												let chat = await getChatById(id).catch(() => {
+													return null;
+												});
+												if (!chat && item) {
+													chat = await importChat(item.chat, item?.meta ?? {});
 												}
 
-												initChatList();
-											}
-										}
-									}}
-									name={$i18n.t('Pinned')}
-								>
-									<div
-										class="ml-3 pl-1 mt-[1px] flex flex-col border-s border-gray-100 dark:border-gray-900"
-									>
-										{#each $pinnedChats as chat (chat.id)}
-											<ChatItem
-												id={chat.id}
-												className="text-sm"
-												title={chat.title}
-												{shiftKey}
-												selected={selectedChatId === chat.id}
-												onSelect={() => {
-													selectedChatId = chat.id;
-												}}
-												onUnselect={() => {
-													selectedChatId = null;
-												}}
-												onChange={() => {
-													initChatList();
-												}}
-											/>
-										{/each}
-									</div>
-								</Folder>
-							</div>
-						{/if}
+												if (chat) {
+													if (!chat.pinned) {
+														await toggleChatPinnedStatusById(chat.id);
+													}
 
-						<div class="px-1.5 flex-1 flex flex-col">
-							{#if $chats}
-								{#each $chats as chat, idx (chat.id)}
-									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
+													initChatList();
+												}
+											}
+										}}
+										name={$i18n.t('Pinned')}
+									>
 										<div
-											class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
-										{idx > 0 ? 'mt-1.5' : ''}"
+											class="ml-3 pl-1 mt-[1px] flex flex-col border-s border-gray-100 dark:border-gray-900"
 										>
-											{$i18n.t(chat.time_range ?? '')}
-											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
+											{#each $pinnedChats as chat (chat.id)}
+												<ChatItem
+													id={chat.id}
+													className="text-sm"
+													title={chat.title}
+													{shiftKey}
+													selected={selectedChatId === chat.id}
+													onSelect={() => {
+														selectedChatId = chat.id;
+													}}
+													onUnselect={() => {
+														selectedChatId = null;
+													}}
+													onChange={() => {
+														initChatList();
+													}}
+												/>
+											{/each}
+										</div>
+									</Folder>
+								</div>
+							{/if}
+
+							<div class="px-1.5 flex-1 flex flex-col">
+								{#if $chats}
+									{#each $chats as chat, idx (chat.id)}
+										{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
+											<div
+												class="px-1 py-1.5 w-full text-xs text-content-muted font-medium
+										{idx > 0 ? 'mt-1.5' : ''}"
+											>
+												{$i18n.t(chat.time_range ?? '')}
+												<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
 											{$i18n.t('Today')}
 											{$i18n.t('Yesterday')}
 											{$i18n.t('Previous 7 days')}
@@ -564,53 +636,54 @@
 											{$i18n.t('November')}
 											{$i18n.t('December')}
 											-->
-										</div>
-									{/if}
+											</div>
+										{/if}
 
-									<ChatItem
-										className="text-sm"
-										id={chat.id}
-										title={chat.title}
-										{shiftKey}
-										selected={selectedChatId === chat.id}
-										onSelect={() => {
-											selectedChatId = chat.id;
-										}}
-										onUnselect={() => {
-											selectedChatId = null;
-										}}
-										onChange={() => {
-											initChatList();
-										}}
-									/>
-								{/each}
+										<ChatItem
+											className="text-sm"
+											id={chat.id}
+											title={chat.title}
+											{shiftKey}
+											selected={selectedChatId === chat.id}
+											onSelect={() => {
+												selectedChatId = chat.id;
+											}}
+											onUnselect={() => {
+												selectedChatId = null;
+											}}
+											onChange={() => {
+												initChatList();
+											}}
+										/>
+									{/each}
 
-								{#if $scrollPaginationEnabled && !allChatsLoaded}
-									<Loader
-										onVisible={() => {
-											if (!chatListLoading) {
-												loadMoreChats();
-											}
-										}}
-									>
-										<div
-											class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+									{#if $scrollPaginationEnabled && !allChatsLoaded}
+										<Loader
+											onVisible={() => {
+												if (!chatListLoading) {
+													loadMoreChats();
+												}
+											}}
 										>
-											<Spinner className=" size-4" />
-											<div class=" ">Loading...</div>
-										</div>
-									</Loader>
+											<div
+												class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+											>
+												<Spinner className=" size-4" />
+												<div class=" ">Loading...</div>
+											</div>
+										</Loader>
+									{/if}
+								{:else}
+									<div
+										class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+									>
+										<Spinner className=" size-4" />
+										<div class=" ">Loading...</div>
+									</div>
 								{/if}
-							{:else}
-								<div
-									class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
-								>
-									<Spinner className=" size-4" />
-									<div class=" ">Loading...</div>
-								</div>
-							{/if}
+							</div>
 						</div>
-					</div>
+					{/if}
 
 					<!-- 下に隠れたコンテンツがあるときだけスクロール領域の下辺に出るフェード -->
 					<div

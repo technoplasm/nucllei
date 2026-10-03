@@ -548,6 +548,12 @@
 				await tick();
 				send.submitPrompt(session.prompt);
 			}
+		} else if ($page.url.searchParams.get('draft')) {
+			// llens(#121): ?draft= は入力欄にプリフィルするだけで送信しない(?q= は自動送信)。
+			// サイドバーの「チャットで調べる」が使う — 利用者が文面を直してから送る前提
+			session.prompt = $page.url.searchParams.get('draft') ?? '';
+			await tick();
+			document.getElementById('chat-input')?.focus();
 		}
 
 		session.selectedModels = session.selectedModels.map((modelId) =>
