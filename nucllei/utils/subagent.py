@@ -1,30 +1,36 @@
-"""subagent(agent session)実行ロジック(issue #107 / #109)。
+"""subagent(agent session)実行ロジック(issue #107 / #109 / #140)。
 
-親チャットのターン中に擬似 tool `run_subagent` で子の agent session
+親チャットのターン中に tool `run_subagent` で子の agent session
 (kind="agent" の一級チャット)を spawn し、サーバー内部で 1 ターン
 (process_chat_payload → generate_chat_completion → process_chat_response)を
 完走させて、最終回答だけを tool result として親へ返す(transcript は返さない)。
 
-非同期形(#110): 汎用 execution 基盤に一本化。run_subagent エントリは
-`backgroundable: True` で、共有 `background` 引数(middleware が適格 tool の spec
-コピーへ注入)により exec 行へ昇格する — 完了結果はサーバ駆動配達
-(utils/execution_resume.py)が親 chat へ通知ターンとして届け、能動的な回収は
-builtin `await_task` / `check_task`(utils/exec_tools.py)。#109 の専用
-background / await_subagent は撤去済み(同一機能の二重機構になるため — 設計 §12)。
-exec stop → runner cancel は下の shield + cancelling() の stop 連鎖で子 chat まで
-届く。session_id = 継続可能ハンドル / task_id(exec 行)= 1 実行の記録、の二層
-(§10)。内部 3 段ターン起動(start_internal_turn)はサーバ駆動配達の続きターンと
-共有する(契約 M5)。
+入口(#140、2026-10-03): run_subagent は Tools テーブルの builtin
+`builtin_subagent`(builtin_tools/subagent.py)。middleware の擬似 tool 直接注入は
+撤去し、get_tools の通常経路(tool 行の read ACL・meta.toolIds・クラス属性の
+backgroundable / timeouts)に載る。本モジュールは実行本体と、builtin の
+`available` / `spec_overrides` フックの中身(subagent_available /
+build_spec_overrides)を持つ。
 
-enforce もここに閉じる:
-- preset allowlist(親 preset の meta.subagentPresetIds)∩ アクセス可
-  (所有者 or read ACL)。enum 構築と callable 実行時の両方で同一述語を評価する。
-- 機能フラグ meta.features.subagent(既定 ON — skills と対称)
-- depth 上限(SUBAGENT_MAX_DEPTH。user chat = depth 0)
-- プロセス内同時実行数(SUBAGENT_MAX_CONCURRENCY。超過は待たずにエラー)
+非同期形(#110): 汎用 execution 基盤に一本化。builtin が `backgroundable` を
+宣言し、共有 `background` 引数(middleware が適格 tool の spec コピーへ注入)により
+exec 行へ昇格する — 完了結果はサーバ駆動配達(utils/execution_resume.py)が親 chat へ
+通知ターンとして届け、能動的な回収は builtin `await_task` / `check_task`
+(utils/exec_tools.py)。exec stop → runner cancel は下の shield + cancelling() の
+stop 連鎖で子 chat まで届く。session_id = 継続可能ハンドル / task_id(exec 行)=
+1 実行の記録、の二層(§10)。内部 3 段ターン起動(start_internal_turn)はサーバ駆動
+配達の続きターンと共有する(契約 M5)。
 
-構造は skills.py(build_load_skill_tool)と同型。middleware(process_chat_payload)
-が mount するため、3 段パイプラインの import は実行時に遅延させる(循環回避)。
+enforce は二層(#140):
+- 使えるか: tool 行の access_control(read)+ 親 preset の meta.toolIds
+  (get_tools が判定 — 旧 meta.features.subagent はここへ吸収して撤去)
+- どこへ飛べるか: preset allowlist(親 preset の meta.subagentPresetIds)∩ アクセス可
+  (所有者 or read ACL)。spec_overrides の enum 構築と実行時の両方で同一述語を評価する。
+加えて depth 上限(SUBAGENT_MAX_DEPTH。user chat = depth 0)と
+プロセス内同時実行数(SUBAGENT_MAX_CONCURRENCY。超過は待たずにエラー)。
+
+3 段パイプラインの import は実行時に遅延させる(middleware が本モジュールを
+間接 import するため — 循環回避)。
 """
 
 import asyncio
@@ -47,7 +53,6 @@ from nucllei.env import (
     SRC_LOG_LEVELS,
     SUBAGENT_MAX_CONCURRENCY,
     SUBAGENT_MAX_DEPTH,
-    SUBAGENT_TURN_TIMEOUT_S,
 )
 
 log = logging.getLogger(__name__)
@@ -90,17 +95,6 @@ def get_model_subagent_preset_ids(model) -> list[str]:
     return (model or {}).get("info", {}).get("meta", {}).get(
         "subagentPresetIds", []
     ) or []
-
-
-def is_subagent_feature_enabled(model) -> bool:
-    """モデル(preset)の機能「サブエージェント」が有効か(#107)。
-
-    meta.features.subagent に持つ(既定 ON — キー不在は有効)。skills と対称で、
-    グローバルフラグは作らない(制御面はモデル設定に一元化)。
-    """
-    meta = (model or {}).get("info", {}).get("meta", {}) or {}
-    features = meta.get("features") or {}
-    return features.get("subagent", True) is not False
 
 
 def _accessible_subagent_presets(model, user) -> list:
@@ -452,52 +446,53 @@ async def _format_turn_result(child_chat_id: str, assistant_message_id: str, sto
     return result
 
 
-def build_run_subagent_tool(request, model, user, metadata):
-    """後方互換の薄い wrapper — run_subagent エントリ単体を返す(テスト・旧呼び出し向け)。"""
-    tools = build_subagent_tools(request, model, user, metadata)
-    return tools["run_subagent"] if tools else None
+def _depth_allows_spawn(parent_chat_id) -> bool:
+    """親 chat の depth+1 が SUBAGENT_MAX_DEPTH 以内か(実在しない親は False)。
 
-
-def build_subagent_tools(request, model, user, metadata):
-    """preset allowlist から擬似 tool `run_subagent` を合成する(#107 / #110)。
-
-    None(tool を載せない)条件:
-    - 機能フラグ OFF / allowlist(meta.subagentPresetIds)空 / アクセス可 preset ゼロ
-    - chat_id / message_id 無し(素の completions — 子を紐づける親メッセージが無い)
-    - 親 depth+1 が SUBAGENT_MAX_DEPTH 超(実行時にも再チェック)
-
-    戻り値は {name: tool エントリ} — エントリは native ループ互換の
-    {"spec", "callable", "render", "timeout", "backgroundable"}。timeout は
-    per-tool キー(execute_tool_calls が TOOL_EXEC_TIMEOUT_S より優先)—
-    子ターン全体を包む/待つため長い(background 昇格時は exec runner の
-    wait_for 上限としても同キーが効く — 設計 D5)。backgroundable: True は
-    #110 の呼び出し面(K2)への opt-in — builtin では run_subagent のみ既定適格
-    (D4)。共有 background 引数はここでは宣言しない(middleware が適格 tool の
-    spec コピーへ注入する)。
+    軽量 lookup(kind, depth)を使う — get_chat_by_id は chat JSON 全体
+    (MB 級になりうる)を運ぶため、ターンごとに読むには重い。
     """
-    if not is_subagent_feature_enabled(model):
-        return None
-    if not get_model_subagent_preset_ids(model):
-        return None
-
-    parent_chat_id = (metadata or {}).get("chat_id")
-    parent_message_id = (metadata or {}).get("message_id")
-    if not (parent_chat_id and parent_message_id):
-        return None
-
-    # 軽量 lookup(kind, depth)を使う — get_chat_by_id は chat JSON 全体
-    # (MB 級になりうる)を運ぶため、mount のたびに読むには重い。
     parent_row = Chats.get_chat_kind_and_depth_by_id(parent_chat_id)
     if parent_row is None:
-        return None
-    child_depth = parent_row[1] + 1
-    if child_depth > SUBAGENT_MAX_DEPTH:
-        return None
+        return False
+    return parent_row[1] + 1 <= SUBAGENT_MAX_DEPTH
 
+
+def subagent_available(model, user, metadata) -> bool:
+    """このターンで run_subagent を載せるか(builtin の `available` フックの実体)。
+
+    False(tool を載せない)条件 — #140 以前の build_subagent_tools の None 条件と同一:
+    - allowlist(meta.subagentPresetIds)空 / アクセス可 preset ゼロ
+    - chat_id / message_id 無し(素の completions — 子を紐づける親メッセージが無い)
+    - 親 chat が無い / 親 depth+1 が SUBAGENT_MAX_DEPTH 超(実行時にも再チェック)
+
+    「使えるか」(ユーザー/グループ単位)は tool 行の ACL と meta.toolIds が持つ
+    (get_tools が先に判定する)。ここは「どこへ飛べるか」の層だけを見る。
+    同期 DB read を含む — get_tools はワーカースレッドで呼ばれる(#28)。
+    """
+    if not get_model_subagent_preset_ids(model):
+        return False
+    metadata = metadata or {}
+    parent_chat_id = metadata.get("chat_id")
+    if not (parent_chat_id and metadata.get("message_id")):
+        return False
+    if not _depth_allows_spawn(parent_chat_id):
+        return False
+    return bool(_accessible_subagent_presets(model, user))
+
+
+def build_spec_overrides(model, user, base_description: str) -> dict:
+    """run_subagent の spec のターン時パッチ(builtin の `spec_overrides` フックの実体)。
+
+    preset_id の enum と description 末尾の preset 一覧は user × 親 preset に依存する
+    ため、sync 時の静的 spec には持てない。get_tools がこの dict を spec へ
+    deep-merge する(description は置き換えなので、静的な説明文 base_description —
+    builtin の関数 docstring — の末尾に一覧を足して返す)。
+    アクセス可 preset がゼロなら空(available が先に落とすので通常は来ない)。
+    """
     presets = _accessible_subagent_presets(model, user)
     if not presets:
-        return None
-
+        return {}
     listing = "\n".join(
         f"- {m.id}: {m.name}"
         + (
@@ -507,202 +502,181 @@ def build_subagent_tools(request, model, user, metadata):
         )
         for m in presets
     )
-    spec = {
-        "name": "run_subagent",
-        "description": (
-            "サブエージェント(agent session)を起動し、instruction を 1 ターン実行させる。"
-            "返るのは最終回答(answer)のみ — 実行過程(transcript)は親には来ない。"
-            "会話を継続するには、結果の session_id を session_id 引数に渡して"
-            "追いの instruction を送る。"
-            "利用可能な preset:\n" + listing
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "preset_id": {
-                    "type": "string",
-                    "description": "起動する preset の id。新規セッション時は必須(session_id 継続時は不要)。",
-                    "enum": [m.id for m in presets],
-                },
-                "instruction": {
-                    "type": "string",
-                    "description": "サブエージェントへの指示。",
-                },
-                "session_id": {
-                    "type": "string",
-                    "description": "継続する既存 agent session の id(省略で新規セッション)。",
-                },
-            },
-            "required": ["instruction"],
-        },
-    }
-
-    async def run_subagent(
-        preset_id: str = "",
-        instruction: str = "",
-        session_id: str = "",
-    ):
-        global _active_turns
-
-        if not (instruction or "").strip():
-            return _error("instruction は必須です。")
-
-        # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
-        if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
-            return _error(
-                f"サブエージェントの同時実行数が上限({SUBAGENT_MAX_CONCURRENCY})に"
-                "達しています。しばらくしてから再試行してください。"
-            )
-        _active_turns += 1
-        # 実行中登録した agent session id。None = 未登録。
-        running_session_id = None
-        # 会計(_active_turns / _running_agent_sessions)の解放を子 task の
-        # done callback へ移譲済みか。移譲前のエラー経路は finally が解放する。
-        handed_off = False
-        try:
-            # 実行時再チェック(mount 後に状態が変わりうる)。認可は enum 構築と
-            # 同一述語をその場で再評価する(履歴・enum に委ねない)。
-            parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
-            if parent is None or parent.deleted_at is not None:
-                return _error("親チャットが見つかりません。")
-            depth = parent.depth + 1
-            if depth > SUBAGENT_MAX_DEPTH:
-                return _error(
-                    f"サブエージェントの入れ子深さが上限({SUBAGENT_MAX_DEPTH})を"
-                    "超えるため起動できません。"
-                )
-            accessible = {
-                m.id: m
-                for m in await asyncio.to_thread(
-                    _accessible_subagent_presets, model, user
-                )
-            }
-
-            if session_id:
-                # 継続: 既存の子セッションへ追いメッセージ。
-                # 並行継続の排他(lost update 防止): 実行中なら待たずに即エラー。
-                if session_id in _running_agent_sessions:
-                    return _error(
-                        f"この agent session は実行中です: {session_id}"
-                        "(完了を待ってから継続してください)"
-                    )
-                _running_agent_sessions.add(session_id)
-                running_session_id = session_id
-                child = await asyncio.to_thread(Chats.get_chat_by_id, session_id)
-                if (
-                    child is None
-                    or child.deleted_at is not None
-                    or child.user_id != user.id
-                    or child.kind != "agent"
-                    or child.parent_chat_id != parent_chat_id
-                ):
-                    return _error(
-                        f"session_id が不正です: {session_id}"
-                        "(このチャットから起動した agent session のみ継続できます)"
-                    )
-                chat_json = child.chat
-                target_preset_id = (chat_json.get("models") or [None])[0]
-                preset = accessible.get(target_preset_id)
-                if preset is None:
-                    return _error(f"preset にアクセスできません: {target_preset_id}")
-                _, assistant_message_id = _append_turn_messages(
-                    chat_json, instruction, preset.id, preset.name
-                )
-                await asyncio.to_thread(Chats.update_chat_by_id, session_id, chat_json)
-                child_chat_id = session_id
-            else:
-                # 新規 spawn
-                if not preset_id:
-                    return _error("新規セッションには preset_id が必須です。")
-                preset = accessible.get(preset_id)
-                if preset is None:
-                    return _error(f"preset にアクセスできません: {preset_id}")
-                # 決定的タイトル(生成タスクは走らせない — agent_session マーカで抑止)
-                title = f"{preset.name} — {' '.join(instruction.split())[:40]}"
-                chat_json = {
-                    "title": title,
-                    "models": [preset.id],
-                    "params": {},
-                    "history": {"messages": {}, "currentId": None},
-                    "messages": [],
-                }
-                _, assistant_message_id = _append_turn_messages(
-                    chat_json, instruction, preset.id, preset.name
-                )
-                child = await asyncio.to_thread(
-                    Chats.insert_new_chat,
-                    user.id,
-                    ChatForm(chat=chat_json),
-                    kind="agent",
-                    parent_chat_id=parent_chat_id,
-                    parent_message_id=parent_message_id,
-                    depth=depth,
-                )
-                if child is None:
-                    return _error("agent session の作成に失敗しました。")
-                child_chat_id = child.id
-                # 新規 id は衝突しない(uuid)が、spawn 完了→実行の間も継続経路
-                # から「実行中」に見えるよう同じ集合へ載せる
-                _running_agent_sessions.add(child_chat_id)
-                running_session_id = child_chat_id
-
-            child_model = _resolve_child_model(request, preset)
-            if child_model is None:
-                return _error(f"preset が利用できません: {preset.id}")
-
-            # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
-            # 結果 JSON にも session_id が載る)
-            tool_output.progress(f"agent session {child_chat_id}")
-
-            wire_messages = _wire_messages_from_history(
-                chat_json["history"]["messages"], assistant_message_id
-            )
-            child_task_id, child_task = await start_internal_turn(
-                request,
-                child_model,
-                user,
-                child_chat_id,
-                assistant_message_id,
-                wire_messages,
-                # タイトル生成(通常 + 異常終了フォールバック)・webhook の抑止
-                # マーカ。spawn 時の決定的タイトルが正(middleware 側が読む)。
-                metadata_extra={"agent_session": True},
-            )
-
-            stopped = False
-            if child_task is not None:
-                # 会計の解放を子 task の done callback へ移譲(#109 決定事項 4)。
-                # cancel(親 stop / exec stop)で callable が先に消えても、
-                # 走り続ける子の会計を子自身の終端まで保持できる(通常経路は
-                # shield 待ちの再開前に callback が走るだけで等価)。
-                child_task.add_done_callback(
-                    lambda t, sid=running_session_id: _release_turn_slot(sid)
-                )
-                handed_off = True
-
-                stopped = await _await_child_task(child_task_id, child_task)
-
-            # 完走後の子 chat を読み直し、最終 assistant メッセージだけを親へ返す
-            return await _format_turn_result(
-                child_chat_id, assistant_message_id, stopped
-            )
-        finally:
-            if not handed_off:
-                _release_turn_slot(running_session_id)
-
-    # render.result = subagent(#20 のディスクリプタ駆動): フロントは
-    # {ok, session_id, answer, ...} を subagent 表示で描画する(P3)。
-    # background 昇格時はこの宣言が exec 行の meta.render_descriptor に保存され、
-    # await_task の回収結果へパススルーされる(#110 §8)。
     return {
         "run_subagent": {
-            "spec": spec,
-            "callable": run_subagent,
-            "render": {"result": {"kind": "subagent"}},
-            "timeout": SUBAGENT_TURN_TIMEOUT_S,
-            # #110(K2/D4): builtin で唯一の既定適格。共有 background 引数は
-            # middleware が spec のコピーへ注入する(ここでは宣言しない —
-            # 自前宣言は恒久不適格の衝突ガードに掛かる)。
-            "backgroundable": True,
-        },
+            "description": f"{base_description}\n利用可能な preset:\n{listing}",
+            "parameters": {
+                "properties": {"preset_id": {"enum": [m.id for m in presets]}}
+            },
+        }
     }
+
+
+async def run_subagent_turn(
+    request,
+    model,
+    user,
+    parent_chat_id: str | None,
+    parent_message_id: str | None,
+    *,
+    preset_id: str = "",
+    instruction: str = "",
+    session_id: str = "",
+):
+    """run_subagent 1 回分の実行本体(builtin `builtin_subagent` の callable から呼ぶ)。
+
+    - model: 親ターンの preset(allowlist = meta.subagentPresetIds を読む)
+    - user: 親ターンのユーザー(UserModel — 子ターンの 3 段へそのまま渡る)
+    - parent_chat_id / parent_message_id: 子 chat を紐づける親(__metadata__ 由来)
+
+    戻り値は親への tool result(成功・子側 stop は dict、入力・認可エラーは
+    JSON 文字列 — どちらも例外にしない)。
+    """
+    global _active_turns
+
+    if not (parent_chat_id and parent_message_id):
+        return _error(
+            "サブエージェントはチャットの文脈(chat_id / message_id)でのみ起動できます。"
+        )
+
+    if not (instruction or "").strip():
+        return _error("instruction は必須です。")
+
+    # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
+    if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
+        return _error(
+            f"サブエージェントの同時実行数が上限({SUBAGENT_MAX_CONCURRENCY})に"
+            "達しています。しばらくしてから再試行してください。"
+        )
+    _active_turns += 1
+    # 実行中登録した agent session id。None = 未登録。
+    running_session_id = None
+    # 会計(_active_turns / _running_agent_sessions)の解放を子 task の
+    # done callback へ移譲済みか。移譲前のエラー経路は finally が解放する。
+    handed_off = False
+    try:
+        # 実行時再チェック(mount 後に状態が変わりうる)。認可は enum 構築と
+        # 同一述語をその場で再評価する(履歴・enum に委ねない)。
+        parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
+        if parent is None or parent.deleted_at is not None:
+            return _error("親チャットが見つかりません。")
+        depth = parent.depth + 1
+        if depth > SUBAGENT_MAX_DEPTH:
+            return _error(
+                f"サブエージェントの入れ子深さが上限({SUBAGENT_MAX_DEPTH})を"
+                "超えるため起動できません。"
+            )
+        accessible = {
+            m.id: m
+            for m in await asyncio.to_thread(_accessible_subagent_presets, model, user)
+        }
+
+        if session_id:
+            # 継続: 既存の子セッションへ追いメッセージ。
+            # 並行継続の排他(lost update 防止): 実行中なら待たずに即エラー。
+            if session_id in _running_agent_sessions:
+                return _error(
+                    f"この agent session は実行中です: {session_id}"
+                    "(完了を待ってから継続してください)"
+                )
+            _running_agent_sessions.add(session_id)
+            running_session_id = session_id
+            child = await asyncio.to_thread(Chats.get_chat_by_id, session_id)
+            if (
+                child is None
+                or child.deleted_at is not None
+                or child.user_id != user.id
+                or child.kind != "agent"
+                or child.parent_chat_id != parent_chat_id
+            ):
+                return _error(
+                    f"session_id が不正です: {session_id}"
+                    "(このチャットから起動した agent session のみ継続できます)"
+                )
+            chat_json = child.chat
+            target_preset_id = (chat_json.get("models") or [None])[0]
+            preset = accessible.get(target_preset_id)
+            if preset is None:
+                return _error(f"preset にアクセスできません: {target_preset_id}")
+            _, assistant_message_id = _append_turn_messages(
+                chat_json, instruction, preset.id, preset.name
+            )
+            await asyncio.to_thread(Chats.update_chat_by_id, session_id, chat_json)
+            child_chat_id = session_id
+        else:
+            # 新規 spawn
+            if not preset_id:
+                return _error("新規セッションには preset_id が必須です。")
+            preset = accessible.get(preset_id)
+            if preset is None:
+                return _error(f"preset にアクセスできません: {preset_id}")
+            # 決定的タイトル(生成タスクは走らせない — agent_session マーカで抑止)
+            title = f"{preset.name} — {' '.join(instruction.split())[:40]}"
+            chat_json = {
+                "title": title,
+                "models": [preset.id],
+                "params": {},
+                "history": {"messages": {}, "currentId": None},
+                "messages": [],
+            }
+            _, assistant_message_id = _append_turn_messages(
+                chat_json, instruction, preset.id, preset.name
+            )
+            child = await asyncio.to_thread(
+                Chats.insert_new_chat,
+                user.id,
+                ChatForm(chat=chat_json),
+                kind="agent",
+                parent_chat_id=parent_chat_id,
+                parent_message_id=parent_message_id,
+                depth=depth,
+            )
+            if child is None:
+                return _error("agent session の作成に失敗しました。")
+            child_chat_id = child.id
+            # 新規 id は衝突しない(uuid)が、spawn 完了→実行の間も継続経路
+            # から「実行中」に見えるよう同じ集合へ載せる
+            _running_agent_sessions.add(child_chat_id)
+            running_session_id = child_chat_id
+
+        child_model = _resolve_child_model(request, preset)
+        if child_model is None:
+            return _error(f"preset が利用できません: {preset.id}")
+
+        # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
+        # 結果 JSON にも session_id が載る)
+        tool_output.progress(f"agent session {child_chat_id}")
+
+        wire_messages = _wire_messages_from_history(
+            chat_json["history"]["messages"], assistant_message_id
+        )
+        child_task_id, child_task = await start_internal_turn(
+            request,
+            child_model,
+            user,
+            child_chat_id,
+            assistant_message_id,
+            wire_messages,
+            # タイトル生成(通常 + 異常終了フォールバック)・webhook の抑止
+            # マーカ。spawn 時の決定的タイトルが正(middleware 側が読む)。
+            metadata_extra={"agent_session": True},
+        )
+
+        stopped = False
+        if child_task is not None:
+            # 会計の解放を子 task の done callback へ移譲(#109 決定事項 4)。
+            # cancel(親 stop / exec stop)で callable が先に消えても、
+            # 走り続ける子の会計を子自身の終端まで保持できる(通常経路は
+            # shield 待ちの再開前に callback が走るだけで等価)。
+            child_task.add_done_callback(
+                lambda t, sid=running_session_id: _release_turn_slot(sid)
+            )
+            handed_off = True
+
+            stopped = await _await_child_task(child_task_id, child_task)
+
+        # 完走後の子 chat を読み直し、最終 assistant メッセージだけを親へ返す
+        return await _format_turn_result(child_chat_id, assistant_message_id, stopped)
+    finally:
+        if not handed_off:
+            _release_turn_slot(running_session_id)

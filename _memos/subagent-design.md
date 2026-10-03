@@ -34,8 +34,9 @@
 10. **stop 連鎖**: `asyncio.shield(child_task)` + `Task.cancelling()` で親 cancel と子側発 cancel を判別。
     親 stop / turn timeout → 子を stop して伝播。子の外部 stop → 部分回答を tool result で返し**親は続行**。
 11. **usage は親子で合算しない**(既存機構で自動成立)。親へは tool result に子 usage の要点を載せる。
-12. **機能フラグ** `meta.features.subagent`(既定 ON、skills と対称)。tool の出現は
-    「フラグ ON ∧ `meta.subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1」。
+12. ~~**機能フラグ** `meta.features.subagent`(既定 ON、skills と対称)。tool の出現は
+    「フラグ ON ∧ `meta.subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1」。~~
+    → **2026-10-03 撤去(#140)**: 下の「決定(2026-10-03、#140)」節。
 13. **allowlist 認可は enum 構築と実行時で同一述語を二重評価**(allowlist ∩ 所有者 or has_access(read))。
     `check_model_access` に依存しない(admin バイパスの穴。`BYPASS_MODEL_ACCESS_CONTROL` は 2026-10-03 に撤去)。
     子ターン自体は generate_chat_completion を通るので既存検証も重ねて効く(#101 の AND)。
@@ -43,15 +44,61 @@
 15. **継続**: `session_id` 引数で既存子セッションへ追いメッセージ(所有者 ∧ kind=agent ∧ 親一致を実行時検証)。
     同一 session への並行継続は実行中集合で拒否(read-modify-write の lost update 防止)。
 
+## 決定(2026-10-03、#140)— run_subagent を builtin tool にして ACL を付ける
+
+問題: 擬似 tool は `get_tools` の外で合成・直接注入されていたため、tool 行の read ACL も
+`meta.toolIds` も効かず、ユーザー/グループ単位で止める面が無かった(決定 12–13 の帰結。
+ken 2026-09-06「機能として提供されるものは ACL が付けられない。サブエージェントは組み込み
+ツールになるべき」)。
+
+1. **入口は builtin `builtin_subagent`**(`nucllei/builtin_tools/subagent.py` の `Tools.run_subagent`)。
+   常に登録。実行本体は `utils/subagent.run_subagent_turn`(旧 closure を関数化)。callable は
+   reserved param(`__request__` / `__user__` / `__metadata__`)で受け、`__user__` から UserModel を
+   引き直す。allowlist は `__metadata__["model"]`(親 preset)から読む — `__model__` はタスクモデルに
+   差し替えられうるので使わない。middleware の直接注入と `build_subagent_tools` /
+   `build_run_subagent_tool` / `is_subagent_feature_enabled` は削除。
+2. **二層**: 使えるか = tool 行の ACL × `meta.toolIds`(get_tools の per-user enforce)/
+   どこへ飛べるか = `meta.subagentPresetIds` ∩ アクセス可(従来どおり。UI もそのまま)。
+3. **`meta.features.subagent` 撤去**: migration `e7b3c90d2f14` が「フラグ ≠ false ∧ allowlist 非空」の
+   preset の toolIds に `builtin_subagent` を足し(dedupe)、全 preset からフラグを消す(空 features も)。
+   FE の Capabilities トグルを撤去し、SubagentPresetsSelector に「ツールに割り当てたときだけ有効」の
+   注記(未割り当てなら黄色)。
+4. **get_tools の汎用フック 2 つ**(他の toolkit も使える。`TOOLKIT_HOOK_NAMES` — spec 化しない):
+   - `available(self, request, user, model, metadata) -> bool`: read ACL の後に評価、False / 例外で
+     toolkit ごと載せない(fail-closed)。subagent は旧 None 条件(allowlist 空・アクセス可 preset ゼロ・
+     chat 文脈なし・親不在・depth 超過)
+   - `spec_overrides(self, request, user, model, metadata) -> dict[str, dict]`: 関数名 → spec 部分パッチを
+     deep-merge(dict 再帰・他は置き換え)。docstring 由来 description の後・toolkit 注記の前に適用。
+     例外なら静的 spec のまま。subagent は preset_id の enum と description 末尾の preset 一覧
+   - model は `metadata["model"]` 優先(無ければ `__model__`)
+   静的 spec(sync 時)は enum 無しの汎用形。実行時の認可は enum に委ねず同一述語で再評価(決定 13 維持)。
+5. **backgroundable / timeout はクラス属性宣言**(`backgroundable = ("run_subagent",)` /
+   `timeouts = {"run_subagent": SUBAGENT_TURN_TIMEOUT_S}`)。`exec_tools.py` に tool 名の特例は無い。
+   `timeouts` の非正値は「システム側上限なし」として通すよう get_tools を拡張
+   (`SUBAGENT_TURN_TIMEOUT_S=-1` = 無効を保つため。以前は非正値を無視していた)。
+6. **運用規律は toolkit クラス docstring**(get_tools が先頭 spec に 1 回前置 — tool が載ったターンに
+   だけ出る)。llens `llens-thinking.md` のサブエージェント規律(並列 4 本・background 併用・
+   使わない場面・結果の扱い)を汎用化して移した。ドメイン依存の「いつ使うか」は書かない
+   (llens の skill 側)。同時数は `SUBAGENT_MAX_CONCURRENCY` が既定 4 以外なら数値を差し替える。
+7. 担保: `test_subagent.py`(get_tools 経由に書き換え + 静的 spec / ACL / available / spec_overrides /
+   特例なし)、`utils/test_toolkit_hooks.py`(汎用フック・非正値 timeout・migration の meta 変換)。
+
+llens への申し送り: `README.md` のサブエージェント手順に「親 preset の toolIds に
+`builtin_subagent`」を足し、ACL の置き場(tool 行)を書く / `RELEASE.md` の該当手順 /
+`llens-thinking.md` のサブエージェント規律(並列・background・使わない場面)を docstring と
+二重にしないよう削る(ドメイン依存の「いつ使うか」だけ残す)。
+
 ## 実装配置
 
 - エンティティ + enforce: `nucllei/models/chats.py` / migration / `nucllei/routers/chats.py` / `nucllei/main.py`
-- 実行系: `nucllei/utils/subagent.py`(build_run_subagent_tool — `skills.py` の build_load_skill_tool 同型)。
+- 実行系: `nucllei/utils/subagent.py`(#140 以降は run_subagent_turn + フックの中身。入口は
+  `nucllei/builtin_tools/subagent.py`。当初は build_run_subagent_tool — `skills.py` の build_load_skill_tool 同型)。
   子ターンは内部 3 段(process_chat_payload → generate_chat_completion → process_chat_response)+
   task 完走待ち。**子 Request を新規生成**(親 request.state.metadata の汚染 = 親の追撃呼び出しが
-  子 metadata を拾う罠の回避)。mount は `middleware.py` の load_skill 直後(to_thread、#28 規律)。
+  子 metadata を拾う罠の回避)。mount は ~~`middleware.py` の load_skill 直後~~ → #140 で get_tools 経路。
 - 子一覧 API: `GET /api/v1/chats/{id}/children`(P3 のサイドバー tree / 観測 view の土台)
-- admin UI: `SubagentPresetsSelector.svelte`(SkillsSelector 同型)+ Capabilities の featureSubagent
+- admin UI: `SubagentPresetsSelector.svelte`(SkillsSelector 同型)。~~Capabilities の featureSubagent~~
+  は #140 で撤去(ToolsSelector の `builtin_subagent` に吸収)
 - テスト: `test_agent_sessions.py`(enforce/一覧/cascade)、`test_subagent.py`(spawn/認可/stop 連鎖/継続/上限)、
   authz・timeout の既存ファイル拡張
 

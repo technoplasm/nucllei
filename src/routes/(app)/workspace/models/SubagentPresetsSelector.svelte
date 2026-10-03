@@ -7,15 +7,16 @@
 	// llens(#107): run_subagent の委任先 preset の紐づけ(SkillsSelector 同型)。
 	// 一覧の供給元は workspace の getModels()(/api/v1/models/ = preset のみ)。
 	// 編集中の preset 自身も一覧に出す(選択可 — 実行時は depth 上限が守る)。
+	// llens(#140): ここは「どこへ飛べるか」の層。「使えるか」は builtin_subagent を
+	// toolIds に入れるか(+ tool 行の ACL)— 未割り当てでも紐づけは編集でき、効かない旨だけ示す。
 	let {
 		presets = [],
 		selectedPresetIds = $bindable([]),
-		// llens(#107): 機能「サブエージェント」OFF のとき。紐づけ設定は隠さず、発火しない旨だけ示す
-		disabled = false
+		toolAssigned = false
 	}: {
 		presets?: any[];
 		selectedPresetIds?: string[];
-		disabled?: boolean;
+		toolAssigned?: boolean;
 	} = $props();
 
 	let _presets = $state<Record<string, any>>({});
@@ -47,15 +48,15 @@
 		<div class=" self-center text-md font-semibold">{$i18n.t('Subagent presets')}</div>
 	</div>
 
-	{#if disabled}
-		<div class="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
-			{$i18n.t(
-				'Subagent is disabled for this model, so run_subagent will not be offered (assignments are preserved)'
-			)}
-		</div>
-	{/if}
+	<div
+		class="text-xs mt-1 {toolAssigned
+			? 'text-content-subtle'
+			: 'text-yellow-600 dark:text-yellow-500'}"
+	>
+		{$i18n.t('Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools')}
+	</div>
 
-	<div class="flex flex-col mt-1" class:opacity-50={disabled}>
+	<div class="flex flex-col mt-1">
 		{#if presets.length > 0}
 			<div class=" flex flex-col">
 				{#each sortedPresetIds as presetId}
@@ -63,15 +64,10 @@
 					     出ないだけで、subagent の spawnable としては選択・実行できる
 					     (裏方 preset の想定運用)。バッジで「一覧非表示」であることだけ示す。 -->
 					{@const inactive = _presets[presetId].is_active === false}
-					<!-- llens(#49): label で包み、行全体クリックでトグル(disabled 時は Checkbox 側が握り潰す) -->
-					<label
-						class=" flex items-center gap-2 mr-3 {disabled
-							? 'cursor-not-allowed'
-							: 'cursor-pointer'}"
-					>
+					<!-- llens(#49): label で包み、行全体クリックでトグル -->
+					<label class=" flex items-center gap-2 mr-3 cursor-pointer">
 						<span class="self-center flex items-center">
 							<Checkbox
-								{disabled}
 								state={_presets[presetId].selected ? 'checked' : 'unchecked'}
 								onChange={(state) => {
 									_presets[presetId].selected = state === 'checked';

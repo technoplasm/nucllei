@@ -754,7 +754,7 @@ class ChatTable:
     def get_chat_kind_and_depth_by_id(self, id: str) -> Optional[tuple]:
         """llens(#107): id → (kind, depth) の軽量 lookup(chat JSON を運ばない)。
 
-        mount 経路(build_run_subagent_tool)の depth 判定用 — get_chat_by_id は
+        run_subagent の出現判定(utils/subagent.subagent_available)の depth 判定用 — get_chat_by_id は
         chat JSON 全体(MB 級になりうる)を運ぶため使わない。存在・deleted の
         権威判定は callable 側の実行時再チェック(get_chat_by_id)が持つ。
         """

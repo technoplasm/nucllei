@@ -63,6 +63,41 @@ def get_async_tool_function_and_apply_extra_params(
         return new_function
 
 
+# llens(#140): `Tools` クラスの汎用フック名。get_tools がターンごとに呼ぶ予約名で、
+# tool 関数としては spec 化しない(get_functions_from_tool が除外する)。
+#   available(self, request, user, model, metadata) -> bool
+#       False ならこのターン toolkit ごと載せない(read ACL 判定の後に呼ぶ)
+#   spec_overrides(self, request, user, model, metadata) -> dict[str, dict]
+#       関数名 → spec の部分パッチ。このターンの spec へ deep-merge する
+# model は親ターンの preset(metadata["model"]。無ければ __model__)、metadata は
+# __metadata__。どちらのフックも同期関数で、get_tools ごとワーカースレッドで走る(#28)。
+TOOLKIT_HOOK_NAMES = frozenset({"available", "spec_overrides"})
+
+
+def _deep_merge_spec(base: dict, patch: dict) -> dict:
+    """spec_overrides の適用: dict は再帰マージ、それ以外(str / list / 数値)は置き換え。
+
+    base は get_tools がこの呼び出しで DB から読んだ spec(per-call の新しい
+    オブジェクト)なので in-place で変異してよい。
+    """
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge_spec(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
+
+
+def _hook_model(extra_params: dict):
+    """フックに渡す model: 親ターンの preset(metadata["model"])を優先する。
+
+    tools_extra_params の `__model__` はタスクモデル(get_task_model_id)に
+    差し替えられうるので、preset meta(allowlist 等)を読むフックには不向き。
+    """
+    metadata = extra_params.get("__metadata__") or {}
+    return metadata.get("model") or extra_params.get("__model__") or {}
+
+
 def get_tools(
     request: Request,
     tool_ids: list[str],
@@ -180,6 +215,33 @@ def get_tools(
                     **Tools.get_user_valves_by_id_and_user_id(tool_id, user.id)
                 )
 
+            # llens(#140): toolkit の汎用フック(TOOLKIT_HOOK_NAMES)。read ACL の後に
+            # 評価する — ACL は「使えるか」、available は「このターンで意味があるか」
+            # (subagent なら委任先 allowlist・depth・chat 文脈)。フックの例外は
+            # available が fail-closed(載せない)、spec_overrides は静的 spec のまま。
+            hook_model = _hook_model(extra_params)
+            hook_metadata = extra_params.get("__metadata__") or {}
+            available = getattr(module, "available", None)
+            if inspect.isroutine(available):
+                try:
+                    if not available(request, user, hook_model, hook_metadata):
+                        continue
+                except Exception as e:
+                    log.exception(f"tool {tool_id}: available() failed; skipping: {e}")
+                    continue
+            spec_overrides = {}
+            overrides_hook = getattr(module, "spec_overrides", None)
+            if inspect.isroutine(overrides_hook):
+                try:
+                    spec_overrides = (
+                        overrides_hook(request, user, hook_model, hook_metadata) or {}
+                    )
+                except Exception as e:
+                    log.exception(
+                        f"tool {tool_id}: spec_overrides() failed; using static spec: {e}"
+                    )
+                    spec_overrides = {}
+
             # llens(#110 P4): toolkit 共通注記 — `Tools` **クラス docstring** を toolkit の
             # **先頭 spec の description に 1 回だけ**前置する。関数 docstring がモデル向け
             # (spec description)であるのと同じ規約をクラス docstring にも適用する —
@@ -222,6 +284,12 @@ def get_tools(
                     spec["description"] = s[0]
                 else:
                     spec["description"] = function_name
+
+                # llens(#140): ターン依存の spec パッチ(docstring 由来の description の
+                # 後・toolkit 注記の前置の前 — description の置き換えにも注記は付く)
+                patch = spec_overrides.get(function_name)
+                if isinstance(patch, dict):
+                    _deep_merge_spec(spec, patch)
 
                 if toolkit_note and spec is tool.specs[0]:
                     spec["description"] = (
@@ -270,10 +338,15 @@ def get_tools(
                 # background は exec runner が ASYNC_EXEC_TIMEOUT_S より優先する
                 # (builtin エントリの timeout キーと同じ意味)。長時間 tool
                 # (STT の長尺音声等)が同期既定 300 秒で死ぬのを tool 側で救う口。
+                # 非正値(0 / -1)は「システム側上限なし」(#140 — SUBAGENT_TURN_TIMEOUT_S
+                # の -1 = 無効をクラス属性でも表せるように。execute_tool_calls は
+                # `timeout > 0` のときだけ wait_for する)。
                 timeouts = getattr(module, "timeouts", None)
                 if isinstance(timeouts, dict):
                     timeout = timeouts.get(function_name)
-                    if isinstance(timeout, (int, float)) and timeout > 0:
+                    if isinstance(timeout, (int, float)) and not isinstance(
+                        timeout, bool
+                    ):
                         tool_dict["timeout"] = timeout
 
                 # TODO: if collision, prepend toolkit name
@@ -400,6 +473,8 @@ def get_functions_from_tool(tool: object) -> list[Callable]:
         and not inspect.isclass(
             getattr(tool, func)
         )  # ensures that the callable is not a class itself, just a method or function.
+        # llens(#140): get_tools の汎用フック(available / spec_overrides)は tool ではない
+        and func not in TOOLKIT_HOOK_NAMES
     ]
 
 

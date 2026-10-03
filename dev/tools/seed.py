@@ -4,8 +4,9 @@
 やること:
   1. render_probe tool の登録(レンダリング/tool call 表示のデバッグ用)
   2. spawnable な子 preset `sub-worker` の upsert(#107 の subagent 検証用)
-  3. preset(既定 llens-thinking)への配線 — meta.toolIds に render_probe、
-     meta.subagentPresetIds に sub-worker を追記(既存の配線は保持)
+  3. preset(既定 llens-thinking)への配線 — meta.toolIds に render_probe と
+     builtin_subagent(#140: run_subagent は builtin tool)、meta.subagentPresetIds に
+     sub-worker を追記(既存の配線は保持)
 
 **llens の一次コンテンツ(tool / skill / filter / システムプロンプト)は扱わない。**
 原本は prism-hu/llens の `nucllei/{tools,skills,functions,prompts}/` で、登録は
@@ -31,6 +32,8 @@ MODEL_ID = "llens-thinking"  # --model で上書き可(dev DB の preset id は�
 # spawnable な子 preset(run_subagent の飛び先、#107)。親 preset と同じ base model で
 # upsert し、親の meta.subagentPresetIds に配線する。
 SUBAGENT_PRESET_ID = "sub-worker"
+# run_subagent 本体(#140 で builtin tool 化 — toolIds に入れたときだけ載る)
+SUBAGENT_TOOL_ID = "builtin_subagent"
 
 SRC = Path(__file__).with_name("render_probe.py")
 
@@ -184,7 +187,13 @@ def main():
 
     register_tool(base, args.token, content)
     subagent_preset_id = ensure_subagent_preset(base, args.token, args.model)
-    wire_preset(base, args.token, args.model, [TOOL_ID], [subagent_preset_id])
+    wire_preset(
+        base,
+        args.token,
+        args.model,
+        [TOOL_ID, SUBAGENT_TOOL_ID],
+        [subagent_preset_id],
+    )
     print("完了")
 
 

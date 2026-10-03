@@ -1118,3 +1118,19 @@ prompt_tokens へのフォールバック・owner-only(他人の chat_id は無�
 - prompt / skill の「値は直前ターン終了時点で 1 ターン古い」の断りは「このターンの最新呼び出し時点、
   いまのステップの tool 結果は未反映」に書き換える。token_meter filter の `fallback_context_size`
   と数字を合わせる運用は builtin には無い。
+
+## 改訂(2026-10-03、#140)— run_subagent を builtin `builtin_subagent` に
+
+- 常に登録の builtin が 7 本になった(history / chat_files / attachment_text / context_budget /
+  feed_image / fetch_url / **subagent**)+ env ゲートの sandbox。
+- subagent は「ターンによって出る/出ない・spec の一部が user × preset 依存」な初の builtin。これを
+  特例にせず、`get_tools` に **toolkit の汎用フック**を 2 つ足して解いた(カスタム tool も使える):
+  `available(self, request, user, model, metadata) -> bool`(read ACL の後、False / 例外で toolkit ごと
+  載せない)と `spec_overrides(self, request, user, model, metadata) -> dict[str, dict]`(関数名 → spec の
+  部分パッチを deep-merge。DB の静的 spec は汚さない)。フック名は spec 化しない(`TOOLKIT_HOOK_NAMES`)。
+  詳細は README_API §5.1 / `_memos/subagent-design.md` の #140 節。
+- 1a「制御面はモデル設定に一元化」の例外だった `meta.features.subagent` は撤去
+  (migration `e7b3c90d2f14`)。「使えるか」は tool 行の ACL × `meta.toolIds` に揃った — 機能フラグでは
+  user/group 単位で止められない、が理由(issue #140)。
+- `timeouts` クラス属性の非正値(0 / -1)は「システム側上限なし」として per-entry に載るようになった
+  (以前は無視して `TOOL_EXEC_TIMEOUT_S`)。

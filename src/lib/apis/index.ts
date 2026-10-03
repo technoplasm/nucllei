@@ -838,13 +838,12 @@ export interface ModelMeta {
 	// backend は meta.skillIds ∩ 可視 で発火 — nucllei/utils/skills.py)
 	features?: {
 		skills?: boolean;
-		// llens(#107): 機能「サブエージェント」(既定 ON、skills と対称)
-		subagent?: boolean;
 		[key: string]: boolean | undefined;
 	};
 	skillIds?: string[];
-	// llens(#107): サブエージェント preset の allowlist(ModelEditor が保存、
-	// backend は meta.subagentPresetIds ∩ アクセス可 で run_subagent を合成 — nucllei/utils/subagent.py)
+	// llens(#107/#140): サブエージェント preset の allowlist(ModelEditor が保存)。run_subagent
+	// 自体は builtin_subagent を toolIds に入れたときだけ載り、委任先は meta.subagentPresetIds ∩
+	// アクセス可 — nucllei/builtin_tools/subagent.py・nucllei/utils/subagent.py)
 	subagentPresetIds?: string[];
 }
 

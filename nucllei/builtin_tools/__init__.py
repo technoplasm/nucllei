@@ -10,7 +10,8 @@
 - 同名関数の衝突は先勝ち discard(#18-3 の教訓)— builtin の関数名は他とぶつけない
 
 登録は 2 種類: **常に登録**(history / chat_files / attachment_text / context_budget /
-feed_image / fetch_url — nucllei 自身の DB・Storage・共有 resolver だけで動く)と、
+feed_image / fetch_url / subagent — nucllei 自身の DB・Storage・共有 resolver・推論経路
+だけで動く)と、
 **env ゲート付き**(sandbox は SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
 一覧に生やさない(builtin の性質 = 常に動く、に反する)。feed_image / fetch_url は配備層
 (prism-hu/llens)から移設した(#141、2026-10-03)。fetch_url は同日中に env ゲート
@@ -31,6 +32,7 @@ from nucllei.builtin_tools import (
     fetch_url,
     history,
     sandbox,
+    subagent,
 )
 
 log = logging.getLogger(__name__)
@@ -103,9 +105,22 @@ BUILTIN_TOOLS = {
             "(fetch_url). PDFs return their text layer"
         ),
     },
+    # subagent も常に登録(#140、2026-10-03): 子ターンは nucllei 自身の推論経路で回る。
+    # 旧 meta.features.subagent は「この行を preset の toolIds に入れるか」に吸収した。
+    # 委任先(meta.subagentPresetIds)が空・アクセス可 preset ゼロ・depth 超過のターンは
+    # Tools.available が落とすので、割り当てても「呼ぶと必ず失敗する」ことは無い。
+    "builtin_subagent": {
+        "module": subagent,
+        "name": "Subagent",
+        "description": (
+            "Delegate a task to a subagent (agent session) running one of the presets "
+            "listed in the model's subagent presets, and get back only its final answer "
+            "(run_subagent). Owner-only sessions"
+        ),
+    },
 }
 
-# sandbox だけ env ゲート付き。他の 5 本は nucllei 自身の DB / Storage / 共有 resolver で動き
+# sandbox だけ env ゲート付き。他の 7 本は nucllei 自身の DB / Storage / 共有 resolver で動き
 # 外部依存ゼロ = どの配備でも必ず動くのに対し、sandbox は外部サービス
 # (sandbox コンテナ) が要る。居ない配備で一覧に生やすと「見えているのに呼ぶと
 # 必ずエラー」になり、builtin の性質(常に動く)に反する。

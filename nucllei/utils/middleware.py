@@ -60,7 +60,6 @@ from nucllei.utils.skills import (
     replay_skill_tool_ids,
     skill_activation_seed_block,
 )
-from nucllei.utils.subagent import build_subagent_tools
 from nucllei.models.executions import Executions
 from nucllei.utils.exec_tools import (
     EXEC_RECALL_TOOL_NAMES,
@@ -630,18 +629,9 @@ async def process_chat_payload(
             )
         tools_dict["load_skill"] = load_skill_tool
 
-    # llens(#107/#109): サブエージェントの擬似 tool run_subagent(load_skill と
-    # 同型)。allowlist / 機能フラグ / depth 上限の判定は build_subagent_tools 側に
-    # 閉じ、対象が無ければ None(tool 自体を載せない)。同期 DB read(親 chat の
-    # kind/depth + Models×allowlist 件数)を含むためワーカースレッドへ(#28 の規律)。
-    # 非同期形は #110 の execution 基盤に一本化(旧 await_subagent は撤去)。
-    subagent_tools = await asyncio.to_thread(
-        build_subagent_tools, request, model, user, metadata
-    )
-    for name, entry in (subagent_tools or {}).items():
-        if name in tools_dict:
-            log.warning(f"tool '{name}' is shadowed by the subagent pseudo-tool")
-        tools_dict[name] = entry
+    # llens(#140): run_subagent は builtin `builtin_subagent`(Tools 行)になり、上の
+    # get_tools 経路(meta.toolIds × 行の read ACL × available / spec_overrides フック)で
+    # 載る。#107 以来の擬似 tool 直接注入はここから撤去した。
 
     # llens(#110): 回収 builtin check_task / await_task / stop_task。適格
     # (backgroundable)tool が載るターン、または chat に exec 行が残っている場合に

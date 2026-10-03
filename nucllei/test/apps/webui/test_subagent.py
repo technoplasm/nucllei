@@ -1,7 +1,8 @@
-"""run_subagent(agent session 実行系 — issue #107)の回帰テスト。
+"""run_subagent(agent session 実行系 — issue #107 / #140)の回帰テスト。
 
-- mount 条件: preset allowlist ∩ アクセス可(所有者 or read ACL)/ 機能フラグ /
-  depth 上限 / chat 文脈(chat_id・message_id)の有無
+- 入口は builtin `builtin_subagent`(#140): get_tools 経由で載る。静的 spec(sync 時)/
+  tool 行の read ACL / `available` フック(allowlist ∩ アクセス可・depth 上限・
+  chat 文脈)/ `spec_overrides` フック(preset_id の enum と preset 一覧)
 - 実行: 子 chat の spawn(kind="agent"・親リンク・決定的タイトル)→ 子ターン完走 →
   最終 assistant テキストだけが親 tool result に返る(transcript は返らない)
 - session_id 継続 / 実行時再認可・depth 再チェック / 同時数上限 /
@@ -52,12 +53,20 @@ class TestRunSubagent(AbstractPostgresTest):
 
     def setup_method(self):
         super().setup_method()
+        from nucllei.builtin_tools import sync_builtin_tools
         from nucllei.models.chats import ChatForm, Chats
         from nucllei.models.models import ModelForm, Models
+        from nucllei.models.users import Users
         from nucllei.utils import subagent
 
         self.Chats = Chats
         self.Models = Models
+        # builtin 行(#140 — run_subagent は Tools 行の builtin)と、callable が
+        # __user__ から引き直す実ユーザー行
+        sync_builtin_tools()
+        Users.insert_new_user(
+            id="1", name="John Doe", email="john.doe@nucllei.local", role="user"
+        )
         # 失敗テストのカウンタ・実行中集合の残留が後続へ漏れないように毎回リセット
         subagent._active_turns = 0
         subagent._running_agent_sessions.clear()
@@ -101,9 +110,9 @@ class TestRunSubagent(AbstractPostgresTest):
             ),
         )
 
-    def _user(self):
+    def _user(self, id="1", role="user"):
         return types.SimpleNamespace(
-            id="1", email="john.doe@nucllei.local", name="John Doe", role="user"
+            id=id, email="john.doe@nucllei.local", name="John Doe", role=role
         )
 
     def _request(self):
@@ -114,39 +123,50 @@ class TestRunSubagent(AbstractPostgresTest):
                     WEBUI_NAME="llens",
                     config=types.SimpleNamespace(WEBUI_URL="http://localhost"),
                     MODELS={"researcher": {"id": "researcher", "name": "Researcher"}},
+                    TOOLS={},
                 )
             ),
             state=types.SimpleNamespace(),
         )
 
-    def _parent_model(self, preset_ids=("researcher",), features=None):
-        meta = {"subagentPresetIds": list(preset_ids)}
-        if features is not None:
-            meta["features"] = features
+    def _parent_model(self, preset_ids=("researcher",)):
+        meta = {
+            "subagentPresetIds": list(preset_ids),
+            "toolIds": ["builtin_subagent"],
+        }
         return {"id": "kimi", "info": {"meta": meta}}
 
     def _metadata(self):
         return {"chat_id": self.parent.id, "message_id": "pm-a"}
 
-    def _build_tool(self, request=None, model=None, metadata=None, user=None):
-        from nucllei.utils.subagent import build_run_subagent_tool
-
-        return build_run_subagent_tool(
-            request if request is not None else self._request(),
-            model if model is not None else self._parent_model(),
-            user if user is not None else self._user(),
-            metadata if metadata is not None else self._metadata(),
-        )
-
     def _build_tools(self, request=None, model=None, metadata=None, user=None):
-        from nucllei.utils.subagent import build_subagent_tools
+        """チャット経路と同じ get_tools(builtin 行 → モジュール)で載せる(#140)。
 
-        return build_subagent_tools(
-            request if request is not None else self._request(),
-            model if model is not None else self._parent_model(),
-            user if user is not None else self._user(),
-            metadata if metadata is not None else self._metadata(),
+        model は親ターンの preset — チャット経路と同じく metadata["model"] に載せる
+        (フックと callable はここから allowlist を読む)。
+        """
+        from nucllei.utils.tools import get_tools
+
+        request = request if request is not None else self._request()
+        user = user if user is not None else self._user()
+        metadata = metadata if metadata is not None else self._metadata()
+        metadata["model"] = model if model is not None else self._parent_model()
+        return get_tools(
+            request,
+            ["builtin_subagent"],
+            user,
+            {
+                "__user__": {"id": user.id, "role": user.role},
+                "__metadata__": metadata,
+                "__request__": request,
+                # タスクモデル(フックは見ない — metadata["model"] が優先)
+                "__model__": {"id": "task-model", "info": {"meta": {}}},
+            },
         )
+
+    def _build_tool(self, request=None, model=None, metadata=None, user=None):
+        tools = self._build_tools(request, model, metadata, user)
+        return tools.get("run_subagent")
 
     def _patch_child_pipeline(self, monkeypatch, child_responses=("text_basic",)):
         """子ターン 3 段のうちモデル呼び出しを fixture リプレイ、payload 段を素通しに。
@@ -217,30 +237,75 @@ class TestRunSubagent(AbstractPostgresTest):
 
     # ---- mount 条件 ----
 
+    def test_builtin_registered_with_generic_static_spec(self):
+        """#140: builtin 行の静的 spec(sync 時)は enum 無しの汎用形で、フック
+        (available / spec_overrides)は関数として spec 化されない。"""
+        from nucllei.builtin_tools import BUILTIN_TOOLS
+        from nucllei.models.tools import Tools
+
+        assert "builtin_subagent" in BUILTIN_TOOLS
+        row = Tools.get_tool_by_id("builtin_subagent")
+        assert row is not None and row.meta.builtin is True
+        assert [s["name"] for s in row.specs] == ["run_subagent"]
+        spec = row.specs[0]
+        props = spec["parameters"]["properties"]
+        assert set(props) == {"preset_id", "instruction", "session_id"}
+        assert "enum" not in props["preset_id"]
+        assert spec["parameters"]["required"] == ["instruction"]
+
     def test_mounts_with_accessible_preset(self):
         from nucllei.env import SUBAGENT_TURN_TIMEOUT_S
 
         tool = self._build_tool()
         assert tool is not None
+        assert tool["tool_id"] == "builtin_subagent"
         spec = tool["spec"]
         assert spec["name"] == "run_subagent"
+        # spec_overrides: preset_id の enum と description 末尾の preset 一覧
         assert spec["parameters"]["properties"]["preset_id"]["enum"] == ["researcher"]
+        assert spec["parameters"]["properties"]["preset_id"]["type"] == "string"
         assert spec["parameters"]["required"] == ["instruction"]
-        # listing に preset の名前と説明が載る
-        assert "Researcher" in spec["description"]
-        assert "調査担当" in spec["description"]
-        # per-tool timeout(execute_tool_calls が全体上限より優先)と表示ディスクリプタ
+        assert "利用可能な preset:\n- researcher: Researcher — 調査担当" in (
+            spec["description"]
+        )
+        # クラス docstring(運用規律)が toolkit 注記として 1 回前置される
+        assert spec["description"].startswith("【Subagent ツール群 共通】")
+        assert "同時 4 本まで" in spec["description"]
+        # per-tool timeout(クラス属性 timeouts)と表示ディスクリプタ(戻り型の Annotated)
         assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S
         assert tool["render"] == {"result": {"kind": "subagent"}}
 
-    def test_not_mounted_when_feature_off_or_allowlist_empty(self):
-        assert (
-            self._build_tool(model=self._parent_model(features={"subagent": False}))
-            is None
-        )
+    def test_spec_overrides_do_not_leak_into_stored_spec(self):
+        """ターン時のパッチ(user × preset 依存)は DB の静的 spec を汚さない。"""
+        from nucllei.models.tools import Tools
+
+        assert self._build_tool() is not None
+        spec = Tools.get_tool_by_id("builtin_subagent").specs[0]
+        assert "enum" not in spec["parameters"]["properties"]["preset_id"]
+
+    def test_not_mounted_when_allowlist_empty(self):
         assert self._build_tool(model=self._parent_model(preset_ids=())) is None
-        # キー不在は既定 ON(skills と対称)
-        assert self._build_tool(model=self._parent_model(features={})) is not None
+        # 旧 meta.features.subagent は撤去(#140)— もう読まない
+        model = self._parent_model()
+        model["info"]["meta"]["features"] = {"subagent": False}
+        assert self._build_tool(model=model) is not None
+
+    def test_tool_row_acl_gates_per_user(self):
+        """#140 の芯: tool 行の read ACL でユーザー単位に止められる。"""
+        from nucllei.models.tools import Tools
+
+        # 私有化(所有者 system のみ)→ 一般ユーザーには載らない
+        Tools.update_tool_by_id("builtin_subagent", {"access_control": {}})
+        assert self._build_tool() is None
+        # read を付与したユーザーには載る
+        Tools.update_tool_by_id(
+            "builtin_subagent",
+            {"access_control": {"read": {"group_ids": [], "user_ids": ["1"]}}},
+        )
+        assert self._build_tool() is not None
+        assert self._build_tool(user=self._user(id="2")) is None
+        # admin はバイパス(既存セマンティクス)
+        assert self._build_tool(user=self._user(id="9", role="admin")) is not None
 
     def test_not_mounted_without_chat_context(self):
         # 素の completions(chat_id / message_id 無し)では子を紐づけられない
@@ -298,6 +363,9 @@ class TestRunSubagent(AbstractPostgresTest):
                 ("researcher", "private", "inactive", "no-such-preset")
             )
         )
+        # description の一覧も enum と同じ集合
+        assert "- private:" not in tool["spec"]["description"]
+        assert "- inactive: Inactive" in tool["spec"]["description"]
         assert tool["spec"]["parameters"]["properties"]["preset_id"]["enum"] == [
             "researcher",
             "inactive",
@@ -873,16 +941,63 @@ class TestRunSubagent(AbstractPostgresTest):
 
     def test_run_subagent_is_backgroundable_without_own_async_surface(self):
         """非同期形は #110 の共有 background 引数(middleware が適格 tool の spec
-        コピーへ注入)に一本化 — エントリは backgroundable: True を宣言し、
+        コピーへ注入)に一本化 — builtin はクラス属性 backgroundable で宣言し(#140)、
         #109 の専用 background 引数と await_subagent は存在しない。"""
+        from nucllei.utils.exec_tools import entry_is_backgroundable
+
         tools = self._build_tools()
         assert set(tools.keys()) == {"run_subagent"}
 
         entry = tools["run_subagent"]
         assert entry["backgroundable"] is True
+        assert entry_is_backgroundable("run_subagent", entry) is True
         # 自前の background 宣言は恒久不適格(D4 衝突ガード)に掛かるため無いこと
         assert "background" not in entry["spec"]["parameters"]["properties"]
         assert entry["spec"]["parameters"]["required"] == ["instruction"]
+
+    def test_exec_tools_has_no_run_subagent_special_case(self):
+        """#140: 適格性は宣言経路だけ — exec_tools に tool 名の特例が無い。"""
+        import inspect
+
+        from nucllei.utils import exec_tools
+
+        source = inspect.getsource(exec_tools)
+        code = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert '"run_subagent"' not in code and "'run_subagent'" not in code
+
+    def test_middleware_no_longer_injects_pseudo_tool(self):
+        import inspect
+
+        from nucllei.utils import middleware as mw
+
+        source = inspect.getsource(mw.process_chat_payload)
+        assert "build_subagent_tools" not in source
+
+    def test_callable_without_user_row_or_chat_context_errors(self, monkeypatch):
+        """callable は __user__ から実ユーザー行を引き直す / chat 文脈が無ければ
+        起動しない(どちらも例外にせず tool result のエラー)。"""
+        self._patch_child_pipeline(monkeypatch)
+        # ユーザー行の無い __user__(tool 行は public read なので mount はされる)
+        tool = self._build_tool(user=self._user(id="ghost"))
+        metadata = self._metadata()
+        tool_no_ctx = self._build_tool(metadata=metadata)
+        metadata.pop("message_id")  # mount 後に文脈が欠けた(防御の固定)
+        result = json.loads(
+            asyncio.run(
+                tool_no_ctx["callable"](preset_id="researcher", instruction="x")
+            )
+        )
+        assert result["ok"] is False
+
+        result = json.loads(
+            asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
+        )
+        assert result["ok"] is False
+        assert "ユーザー" in result["error"]
+        assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
+        assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "ghost") == []
 
     def test_child_turn_suppresses_webhook(self, monkeypatch):
         """子ターンは購読ゼロで走るのが正常形 — webhook(「誰も見ていなかった」

@@ -24,10 +24,12 @@ terminal 形を返した行に delivered_at を立てるのは「この返りで
 載った = 配達不要」を配達 driver に伝えるため。
 
 適格性(設計 D4 — opt-in):
-- builtin では run_subagent のみ既定適格(subagent.py がエントリに付与)。
-- DB tool は tool 作者(CRUD は admin 専用 = admin の明示指定)が `Tools` クラス
-  属性 `backgroundable` で宣言する: True(全関数)または関数名の list/tuple/set
-  (utils/tools.py の get_tools が per-entry キーへ落とす。`file_handler` と同型)。
+- tool 行を持つ tool(builtin / DB tool とも)は `Tools` クラス属性 `backgroundable`
+  で宣言する: True(全関数)または関数名の list/tuple/set(utils/tools.py の
+  get_tools が per-entry キーへ落とす。`file_handler` と同型)。DB tool の CRUD は
+  admin 専用 = admin の明示指定。builtin では run_subagent(builtin_subagent)と
+  sandbox 系が宣言している — #140 で run_subagent も同じ宣言経路に揃え、
+  本モジュールに tool 名の特例は無い。
 - `load_skill` / 回収 builtin 3 つと、自前で `background` パラメータを宣言する
   tool は恒久不適格(衝突ガード — warning ログ)。tool server は v1 では opt-in 面を
   持たない(常に不適格)。

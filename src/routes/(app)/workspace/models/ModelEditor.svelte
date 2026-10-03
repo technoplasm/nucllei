@@ -97,10 +97,6 @@
 	// manifest(load_skill)と /command 発火が両方止まる。
 	let featureSkills = $state(true);
 
-	// llens(#107): 機能「サブエージェント」(meta.features.subagent、既定 ON)。
-	// OFF でこのモデルへの run_subagent の提示が止まる。
-	let featureSubagent = $state(true);
-
 	let accessControl = $state<any>({});
 
 	// llens: チャットのモデルピッカー(/api/models = $models)は preset のみを返すよう
@@ -126,7 +122,6 @@
 			filterIds,
 			actionIds,
 			featureSkills,
-			featureSubagent,
 			accessControl
 		});
 	};
@@ -143,7 +138,6 @@
 			filterIds = s.filterIds;
 			actionIds = s.actionIds;
 			featureSkills = s.featureSkills;
-			featureSubagent = s.featureSubagent;
 			accessControl = s.accessControl;
 		}
 		selectedTab = tab;
@@ -200,16 +194,6 @@
 			info.meta.features = { ...(info.meta.features ?? {}), skills: false };
 		} else if (info.meta.features?.skills !== undefined) {
 			delete info.meta.features.skills;
-			if (Object.keys(info.meta.features).length === 0) {
-				delete info.meta.features;
-			}
-		}
-
-		// 既定(ON)のときはキーを残さない(featureSkills と同型)
-		if (!featureSubagent) {
-			info.meta.features = { ...(info.meta.features ?? {}), subagent: false };
-		} else if (info.meta.features?.subagent !== undefined) {
-			delete info.meta.features.subagent;
 			if (Object.keys(info.meta.features).length === 0) {
 				delete info.meta.features;
 			}
@@ -321,7 +305,6 @@
 			skillIds = model?.meta?.skillIds ?? [];
 			subagentPresetIds = model?.meta?.subagentPresetIds ?? [];
 			featureSkills = (model?.meta?.features?.skills ?? true) !== false;
-			featureSubagent = (model?.meta?.features?.subagent ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
@@ -605,7 +588,7 @@
 								</div>
 
 								<div class="my-2">
-									<Capabilities bind:capabilities bind:featureSkills bind:featureSubagent />
+									<Capabilities bind:capabilities bind:featureSkills />
 								</div>
 
 								<hr class=" border-line my-1.5" />
@@ -624,7 +607,7 @@
 									<SubagentPresetsSelector
 										bind:selectedPresetIds={subagentPresetIds}
 										presets={workspaceModels}
-										disabled={!featureSubagent}
+										toolAssigned={toolIds.includes('builtin_subagent')}
 									/>
 								</div>
 

@@ -1081,6 +1081,27 @@ class Tools:
   already are); keep developer notes in `#` comments.
 - Function names must be **globally unique across all tools assigned to a model**
   — on collision the first-loaded wins and the duplicate is dropped with a warning.
+- **Per-turn hooks** (optional, 2026-10-03 — #140). Two method names on
+  `Tools` are reserved: they are called by the tool loader on every turn and
+  are **never exposed as functions** to the model. Both are plain (sync)
+  methods — the loader runs in a worker thread, so DB reads are fine.
+  - `available(self, request, user, model, metadata) -> bool` — return
+    `False` to leave the whole toolkit out of this turn. Evaluated **after**
+    the read ACL (§5.6), so it answers "does it make sense here", not "may
+    this user use it". An exception counts as `False` (fail-closed, logged).
+  - `spec_overrides(self, request, user, model, metadata) -> dict[str, dict]`
+    — `{function_name: partial_spec}` patches deep-merged into this turn's
+    spec (dicts merge recursively; strings, lists and numbers replace). Use it
+    for per-user / per-preset parts such as an `enum` of allowed values. It is
+    applied after the docstring-derived description (a `description` key
+    replaces it) and before the class-docstring note is prepended. The stored
+    (sync-time) spec is never modified, so it must be valid and generic on its
+    own; validate arguments in the function anyway. An exception keeps the
+    static spec (logged).
+  - Arguments: `request` and `user` as for the turn; `model` is the **parent
+    preset** of the turn (`metadata["model"]`, falling back to `__model__`,
+    which may be the task model); `metadata` is `__metadata__` (`chat_id`,
+    `message_id`, …; `{}` outside the chat path).
 
 ### 5.2 Valves (admin config) and UserValves (per-user config)
 
@@ -1310,6 +1331,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     and had to carry "this nucllei version lacks X" branches. What stays in the
     deployment is the env values, the prompts / skills that teach the model
     when to call them, and site knowledge.
+  - `builtin_subagent` — `run_subagent(preset_id?, instruction, session_id?)`:
+    delegates one turn to a child agent session (§5.8). Always registered;
+    whether it appears in a turn is the row ACL × the preset's `meta.toolIds`
+    × the preset's delegation allowlist (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `list_workspace` /
     `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
@@ -1416,9 +1441,28 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 
 ### 5.8 Subagents (`run_subagent`)
 
-When a model preset lists agent presets in `meta.subagentPresetIds` (and
-`meta.features.subagent` is not set to `false`), one pseudo-tool is mounted on
-the parent chat's tool loop:
+`run_subagent` is the builtin tool `builtin_subagent` (§5.7; since 2026-10-03
+— #140, before that a pseudo-tool injected outside the tool loader). Two
+layers decide whether it appears in a turn:
+
+1. **Who may use it** — the ordinary tool path: `builtin_subagent` is in the
+   parent preset's `meta.toolIds` and the user passes the tool row's read ACL
+   (§5.6; admins bypass). This replaces the removed `meta.features.subagent`
+   flag (migration `e7b3c90d2f14` added `builtin_subagent` to `toolIds` of
+   every preset whose flag was not `false` and whose allowlist was non-empty,
+   then deleted the flag).
+2. **Where it may delegate** — the parent preset's `meta.subagentPresetIds`
+   (agent presets) ∩ presets the user can access (owner or read ACL;
+   `is_active=false` presets stay spawnable). The tool's `available` hook
+   (§5.1) hides it when this set is empty, outside a chat (no `chat_id` /
+   `message_id`), or when the nesting depth would exceed the limit; its
+   `spec_overrides` hook puts the accessible preset ids into `preset_id`'s
+   `enum` and lists them (`id: name — description`) at the end of the
+   description. The same predicate is re-evaluated at call time.
+
+The toolkit's class docstring (operating rules: when to delegate, parallel
+fan-out with `background`, how to treat the answer) reaches the model as the
+§5.1 shared note, so deployment prompts need not repeat it.
 
 - `run_subagent(preset_id, instruction, session_id?)` — spawns a child **agent
   session** (a first-class chat with `kind: "agent"`, linked to the parent
@@ -1510,7 +1554,7 @@ button). There is no SSE push — the frontend polls.
 
 **Eligibility is opt-in** (`backgroundable` key on the tool entry):
 
-- builtin: `run_subagent`, plus `builtin_sandbox`'s three execution entry points
+- builtin: `run_subagent` (`builtin_subagent`), plus `builtin_sandbox`'s three execution entry points
   (`run_python`, `run_python_once`, `run_shell`) so long-running code can be
   backgrounded.
 - DB tools: declare a `backgroundable` class attribute on the `Tools` class —
@@ -1532,6 +1576,8 @@ attribute on the `Tools` class — a `{function_name: seconds}` dict, symmetric
 with `backgroundable`; the same value also overrides the synchronous
 `TOOL_EXEC_TIMEOUT_S` (default 300 s) for that entry, which is how a
 long-running tool (e.g. speech transcription) survives a synchronous call.
+A non-positive value (`0` / `-1`) means no system-side limit for the
+synchronous call (since 2026-10-03; earlier it was ignored).
 Concurrency: `ASYNC_EXEC_MAX_CONCURRENCY` (default 4 per
 user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
 fails immediately. Tool results — synchronous and background alike — are

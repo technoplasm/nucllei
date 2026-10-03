@@ -353,15 +353,16 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    preset の `meta.filterIds` から外して削除してよい(呼ばれても no-op)。
 8. **subagent fixture(#107 検証用、2026-08-13)**: `dev/tools/seed.py` が spawnable な
    子 preset **`sub-worker`**(親 preset と同じ `base_model_id`)を upsert し、親 preset の
-   `meta.subagentPresetIds` に配線する(render_probe の登録と同時に走る):
+   `meta.subagentPresetIds` に配線、`meta.toolIds` に `builtin_subagent` を足す
+   (render_probe の登録と同時に走る):
    ```sh
    python3 dev/tools/seed.py --token "$TOKEN" --model llens-thinking
    ```
    - **改訂(2026-08-26)**: 旧 `nucllei/tools/seed.py` は撤去し、本スクリプトに統合した。
      llens 一次コンテンツの登録は担わない(下の「llens コンテンツは llens 側から入れる」)。
-   - 機能フラグ `meta.features.subagent` は既定 ON なので配線だけで `run_subagent` が
-     tool enum に出る(条件 = フラグ ON ∧ `subagentPresetIds` 非空 ∧ アクセス可 preset ≥ 1 —
-     `nucllei/utils/subagent.py`)。seed が末尾で `GET /api/models` を叩くので
+   - `run_subagent` が出る条件(#140 改訂 2026-10-03 — 旧機能フラグ `meta.features.subagent` は
+     撤去): `builtin_subagent` が `toolIds` にある ∧ tool 行を read できる ∧ `subagentPresetIds`
+     非空 ∧ アクセス可 preset ≥ 1(`nucllei/builtin_tools/subagent.py` の `available`)。seed が末尾で `GET /api/models` を叩くので
      MODELS キャッシュ再構築も済んでいる(手動で meta を書いた場合は自分で叩くこと)。
    - **ollama でも動く**: `sub-worker` は親 preset の `base_model_id` を引き継ぐだけなので、
      親を ollama ベース(例: base=`gpt-oss:20b` の preset)にして seed すれば
