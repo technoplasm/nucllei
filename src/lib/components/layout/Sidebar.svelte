@@ -82,13 +82,18 @@
 	// 開始画面から最初のメッセージを送ると URL は replaceState で /c/<id> になるが、SvelteKit 上の
 	// ルートは / のまま — そこへの goto('/') は同一ルートへの遷移で Chat が再マウントされず、
 	// チャットが表示され続ける。Navbar の new-chat-button(= Chat の initNewChat)まで押す
-	const newChatHandler = async (url = '/') => {
-		selectedChatId = null;
-		// 検索は「過去を探す」、新しいチャットは「次を始める」— ここで文脈が切り替わるので
-		// 検索語と絞り込みを消す (結果を開いただけでは消さない。ken 2026-10-03)
+	// llens(#121): 検索語と絞り込みを消すタイミング (ken 決定 2026-10-03): 「別のことを始めた」とき
+	// = 新しいチャット (ロゴ・「チャットで調べる」含む)・設定・ワークスペース。結果を開いただけ、
+	// モバイルでサイドバーを閉じただけでは消さない (開き直したら同じ結果一覧)。
+	const clearSearch = () => {
 		searchInput = '';
 		searchText = '';
 		searchResults = null;
+	};
+
+	const newChatHandler = async (url = '/') => {
+		selectedChatId = null;
+		clearSearch();
 		await goto(url);
 		const newChatButton = document.getElementById('new-chat-button');
 		setTimeout(() => {
@@ -432,6 +437,7 @@
 							onclick={() => {
 								selectedChatId = null;
 								chatId.set('');
+								clearSearch();
 
 								if ($mobile) {
 									showSidebar.set(false);
@@ -452,6 +458,7 @@
 						<button
 							class="px-2 py-1.5 grow flex items-center space-x-3 rounded-lg hover:bg-sidebar-hover"
 							onclick={async () => {
+								clearSearch();
 								await showSettings.set(true);
 								if ($mobile) {
 									showSidebar.set(false);
