@@ -474,7 +474,9 @@
 						</button>
 					</div>
 
-					{#if enabledModels.length > 0}
+					<!-- モデルが 1 つだけなら選ぶ余地が無いので一覧を出さない (ken 2026-10-03)。
+					     admin の編集はワークスペース > モデルから -->
+					{#if enabledModels.length > 1}
 						<div class="px-1.5 mt-3">
 							<div class="px-1 w-full text-xs text-content-muted font-medium pb-1.5">
 								{$i18n.t('Models')}
