@@ -478,9 +478,9 @@ ken 決定: モデルに見える tool の引数は意味を固定する — **`
     ならない(#141「直す `send_to_workspace(ref)`」)。
   - **挙動変更**: 許可先(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`)の外の URL は取り込めない
     (`unknown_upstream`)。旧実装は docker 帯・loopback 以外の LAN を全部取れた。redirect も
-    辿らない(旧 LAN 経路は 3 回まで追った)。→ **同日中に「院内の範囲」を足した**(末尾の節):
-    配備が `EXT_INTRANET_CIDRS` で院内のアドレス範囲を宣言すれば、その範囲のホストの URL は
-    登録無しで取れ、redirect も範囲内で 3 回まで辿る。未設定なら上記のまま。
+    辿らない(旧 LAN 経路は 3 回まで追った)。→ **同日中に「院内の範囲」を足し、さらに同日中に
+    撤回して「一般の URL はどこでも」にした**(末尾の 2 節): 登録に当たらない絶対 URL は
+    そのホストに直接取りに行き、redirect も 3 回まで辿る。断るのはこのサーバ自身だけ。
   - 取り込み名は URL の basename(decode 済み)。旧実装の Content-Disposition 優先は無くなった
     (`LoadedRef` が応答ヘッダを持たない — 要るなら resolver 側に足す)。
 - **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50)。失敗は `RefError.code` で
@@ -655,7 +655,8 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   - `read_attachment` が抽出の無いファイルに返す文は「抽出テキストが無い(content_type=…)」の
     事実だけ。旧文面の「視覚が要るものは feed_image」は種類を決めつけた誘導で、音声には誤り。
 - **`RefError.reason`**: `unknown_upstream` の内訳を安定したフィールドで返す(`unknown_name` /
-  `not_ext_form` / `outside_public_bases`。閉じた集合。他の code では None)。code の集合は
+  `not_ext_form` / `outside_public_bases` — 後者は同日の「一般の URL」で `server_self` に
+  置き換わった。閉じた集合。他の code では None)。code の集合は
   変えていない。llens の tool が文面の出し分けのために resolver の正規表現を複製して値を
   再パースしていたのを不要にする。`detail` は人向けで文面は固定ではない(分岐に使わない)。
   未知の name の判定は `_route_url` に寄せた(`_load_ext` から移動)。
@@ -713,7 +714,13 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   llens の現行 tool に `X-Forwarded-*` を読むものは無い(2026-10-03 に grep で確認)。
   利用者が居ないなら撤去の候補。
 
-## 院内の範囲(EXT_INTRANET_CIDRS)— 登録した配信元の外の院内 Web も拾う(2026-10-03)
+## 院内の範囲(EXT_INTRANET_CIDRS)— 登録した配信元の外の院内 Web も拾う(2026-10-03、**同日に撤回**)
+
+> **2026-10-03 撤回**(ken 決定、llens セッション経由): この節の仕組みは同日の午後に丸ごと
+> 外した(`EXT_INTRANET_CIDRS` / `parse_ext_intranet_cidrs` / `INTRANET_DENIED_NETWORKS` /
+> `pin_intranet_address` / reason `outside_intranet` `outside_public_bases` `redirect_outside` は
+> 全部無い)。理由と現行の規則は下の「一般の URL」節。以下は経緯として残す — **現行の仕様として
+> 読まない**。
 
 `send_to_workspace(url=)` を resolver に一本化した結果、許可先(`EXT_UPSTREAMS` /
 `EXT_PUBLIC_BASES`)の外の院内 URL が取り込めなくなっていた(旧 `_fetch_lan` は loopback・
@@ -843,11 +850,10 @@ ken 決定(2026-10-03)。prism-hu/llens の custom tool `nucllei/tools/feed_imag
 
 ### 固定した設計(再決定しない)
 
-- **id とゲート**: `builtin_feed_image` は**常時登録**(file_id / path 経路は `/ext` 設定が無くても
-  動く)。`builtin_fetch_url` は **`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` の
-  いずれかが設定されているときだけ登録**(3 つとも空なら解決できる URL が無い — 載っていて必ず
-  失敗する builtin より、無い方がよい。`SANDBOX_URL` → `builtin_sandbox` と同じ型。未設定なら
-  起動時 prune で DB からも消える、#42)。
+- **id とゲート**: `builtin_feed_image` も `builtin_fetch_url` も**常時登録**。fetch_url は移設の
+  時点では「`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のいずれかが設定されている
+  ときだけ」のゲート付きだったが、同日の「一般の URL はどこでも」(下の節)で env が空でも
+  必ず失敗する builtin ではなくなったので外した。
 - **引数**: `feed_image(url | path | file_id, filename?, pages?)` / `fetch_url(url, query?, offset?,
   limit?, max_mb?)`。参照の規則(#141)は不変 — `url` = 絶対 URL か同一サーバの `/ext/…`・
   `/api/v1/files/{id}/content`、`path` = sandbox の絶対パス、`file_id` = 添付・生成物。
@@ -876,3 +882,73 @@ ken 決定(2026-10-03)。prism-hu/llens の custom tool `nucllei/tools/feed_imag
   同じく custom の DB 行は `nuc-sync` が prune しないので、既存配備では旧 custom tool の手削除と
   preset の `meta.toolIds` を `builtin_feed_image` / `builtin_fetch_url` に張り替える admin 作業が要る
   — [[dev-environment]] の 2026-07-22 追補と同じ罠)。
+
+## 一般の URL — `url=` はどこでも取りに行く / 断るのはこのサーバ自身だけ(2026-10-03、院内の範囲を撤回)
+
+ken 決定(2026-10-03、llens セッション経由。同日の「院内の範囲」節を**撤回**)。英語の正文は
+`README_API.md` §3.8「General URLs」、規則の定義は `nucllei/utils/image_refs.py` の module
+docstring「一般の URL」。ここは決定の経緯と、配備への申し送りだけ。
+
+決定:
+
+- **`url=`(fetch_url / feed_image / send_to_workspace)はスキーム付きの `http(s)://` URL なら
+  どこでも取りに行く** — 院内でもインターネットでも。「閉域だから外には届かない」は prompt /
+  skill に書く文であって、tool のゲートではない(届かなければ `upstream_unreachable`)。
+  行き先で機能を絞らない。
+- **同日の朝に入れた `EXT_INTRANET_CIDRS`(宣言した範囲の中だけ取る)は同日に撤去**。
+  理由は 2 つ: (1) 行き先で機能を絞っていた(配備が外に出られる環境でも範囲に無ければ失敗 —
+  ken の方針に反する)。(2) 固定 CIDR の拒否リスト(docker の既定 bridge `172.17.0.0/16`)は
+  本番の bridge が `10.106.x` なので**効かない**上に、固定で private 帯を書けば本物の院内
+  (MiNet は `10.`、staging は `172.16.`)を巻き込む。env・パーサ・`INTRANET_DENIED_NETWORKS`・
+  `pin_intranet_address`・reason `outside_intranet` / `outside_public_bases` / `redirect_outside` は
+  全部無い。`.env.example` / README の env 表からも消した。
+- **唯一断るのは「このサーバ自身(と同居するサービス)」**(`unknown_upstream` reason
+  `server_self`。redirect の転送先なら `upstream_status` reason `redirect_self`)。ホストの
+  unauthenticated な cage API(:13303)・sandbox API・クラウドのメタデータが相手。その集合は
+  **実行時に求める**(`ext_upstreams.discover_self_addresses` → `self_addresses`、60 秒キャッシュ):
+  - 固定で分かる「正当な行き先になり得ないアドレス」: loopback(127/8・::1)、unspecified
+    (0/8・::)、リンクローカル(169.254/16 = メタデータ 169.254.169.254 を含む・fe80::/10)、
+    multicast / 予約(224/4・240/4・ff00::/8)。**ネットワークポリシーではない** — private 帯
+    (10/8・172.16/12・192.168/16)も docker 帯も書かない。
+  - 実行時: 自分のインターフェースの全アドレス(`/proc/net/fib_trie` の `LOCAL` 葉 +
+    `/proc/net/if_inet6` + `getaddrinfo(gethostname())`)、既定ゲートウェイ(`/proc/net/route` の
+    RTF_GATEWAY + `/proc/net/ipv6_route`。コンテナでは docker bridge のホスト側 = ホストで
+    待ち受ける同居サービスの口)、`host.docker.internal` / `gateway.docker.internal` の解決結果
+    (引けなければ無視)。新しい依存は無し(psutil を入れない)。
+  - **限界**: Linux 以外(macOS の開発機)は /proc が無く hostname の分だけ(ゲートウェイは
+    取れない)。ホストが bridge のゲートウェイでも自分のアドレスでもない**別のインターフェース**
+    (ホストの LAN 側 `10.106.x.y` 等)で待ち受ける同居サービスは拾えない — そういう配備では
+    同居サービス側が認証を持つ(sandbox の `SANDBOX_TOKEN` と同型)。発見した集合は起動時に
+    1 行ログ(`log_mounts`)。
+- **接続先の固定(DNS rebinding 対策)は維持**(`ext_upstreams.pin_address`): 解決した IP に
+  接続し、Host ヘッダ / SNI は元のホスト名。解決結果の 1 つでも自分自身なら取らない
+  (外と loopback を同時に返す名前は怪しい)。採るのは最初のアドレス(OS の優先順)。
+- **redirect は 3 回まで**(`MAX_REDIRECTS`)、各ホップで同じ自分自身の判定。転送先が自分自身 →
+  `upstream_status` + `redirect_self`。転送先が URL として組めない(http(s) でない・制御文字・
+  未知の `/ext/{name}/`)→ reason 無しの `upstream_status`(辿らなかった redirect)。
+- `route_of_url` の `kind="intranet"` / property `intranet` は **`kind="general"` / `general`** に
+  改名(`fetch_url._link_roots` が読む)。`page_url` は同じ。
+- `builtin_fetch_url` のゲートを外して常時登録(上の「固定した設計」を更新)。docstring の
+  `{PUBLIC_BASES}` は「登録された原本ホスト = その配下のリンク一覧のルートになる配信元」として
+  残す(許可先の一覧ではない)。ERROR 文の `unknown_upstream_extra` も「登録された原本ホストは …」。
+- 現行の reason の集合: `unknown_upstream` = `unknown_name` / `not_ext_form` / `server_self`、
+  `upstream_status` = `redirect_self` / `too_many_redirects`(/ None)、`upstream_unreachable` =
+  `unresolvable`(/ None)。`ref_errors.UNKNOWN_UPSTREAM_WHAT` もこの集合。
+- 担保: `test_image_refs_resolve.py` 末尾の節(env に CIDR が無い / 固定の集合と発見した集合 /
+  TTL キャッシュ / `/proc` と hostname の読み / env 無しで一般 URL を取る・固定・Host・SNI /
+  IP リテラル主経路 / 自分自身の拒否(loopback・自分・ゲートウェイ・host.docker.internal・
+  混在)/ 引けない名前 / 名前空間の優先 / redirect 3 回・4 回目・自分自身への転送・組めない
+  転送先・配信元への転送 / 配信元は辿らない / 上限・404・5xx・不達 / `route_of_url` の形 /
+  起動ログ / 差し替え無しの loopback)、`test_builtin_fetch_url.py`(一般 URL は取る・自分自身は
+  断る・常時登録)、`test_builtin_feed_image.py` / `test_builtin_sandbox.py`(reason の文面)、
+  `test_ref_errors.py`(文面の恒等)。
+
+llens への申し送り(配備層):
+
+- `.env` / compose から `EXT_INTRANET_CIDRS` を消す(残っていても読まれないだけ)。
+- prompt / skill 側に「閉域の本番では外部サイト(インターネット)には届かない」を書く
+  (tool は断らないので、届かなければ「届かない」の ERROR になる)。
+- cage の API がホストの `0.0.0.0:13303` で認証無しなら、nucllei コンテナからは
+  bridge のゲートウェイ経由で届きうる — ゲートウェイは実行時発見で拒否されるが、ホストの
+  LAN 側アドレス経由は拾えない(上の限界)。cage 側の認証を検討。
+

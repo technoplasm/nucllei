@@ -77,10 +77,11 @@ UNKNOWN_UPSTREAM_WHAT: Mapping[str | None, str] = MappingProxyType(
         # name が取れない形だけ(`/ext/` `/ext//x` 文字種外)。`/ext/{name}` 直下は返らない
         "not_ext_form": "は `/ext/<配信元>/…` の形でない (配信元の名前が取れない)",
         "unknown_name": "の配信元は無い (この配備に構成されていない)",
-        "outside_intranet": (
-            "は院内の範囲の外。院内の閉域ネットワークなので外部の Web には届かない (取りに行かない)"
+        # 一般の URL で取りに行かない唯一の相手 (2026-10-03。行き先で絞らない — 外部サイトは
+        # 「届かない」なら upstream_unreachable で、ここには来ない)
+        "server_self": (
+            "は このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
         ),
-        "outside_public_bases": "は許可された原本ホストの外 (外部サイトは読めない)",
         None: "は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL",
     }
 )
@@ -116,10 +117,10 @@ class RefErrorHints:
         "redirect は辿らないので、ディレクトリではなくページを直接指すこと "
         "(例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
     )
-    # 院内の一般 URL の redirect が範囲の外へ出た / 回数超過(reason 付き)
-    redirect_outside: str = (
-        "ERROR: {ref} の redirect の転送先が院内の範囲の外 (外部の Web には届かない)。"
-        + URL_ARG_FORM
+    # 一般の URL の redirect の転送先がこのサーバ自身 / 回数超過(reason 付き)
+    redirect_self: str = (
+        "ERROR: {ref} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
+        "辿らなかった。ユーザーには URL をそのまま案内する。"
     )
     too_many_redirects: str = (
         "ERROR: {ref} は redirect が 4 回以上続いた (辿るのは 3 回まで)。"
@@ -172,9 +173,9 @@ def explain_ref_error(
     if code == "not_found":
         return _fill(hints.not_found, ref)
     if code == "upstream_status":
-        # 院内の一般 URL だけ redirect を 3 回まで追う。その失敗の内訳は reason
-        if err.reason == "redirect_outside":
-            return _fill(hints.redirect_outside, ref, err.status)
+        # 一般の URL だけ redirect を 3 回まで追う。その失敗の内訳は reason
+        if err.reason == "redirect_self":
+            return _fill(hints.redirect_self, ref, err.status)
         if err.reason == "too_many_redirects":
             return _fill(hints.too_many_redirects, ref, err.status)
         if err.status is not None and 300 <= int(err.status) < 400:

@@ -397,9 +397,11 @@ image とその中身の設計 + LLM 向け表面だけ。`SANDBOX_URL` 未設�
 
 **追記(2026-10-03)**: 同じ反転が **`feed_image` / `fetch_url`** にも起きた。2026-07-22 に
 prism tool へ寄せた `feed_image`(上の #89 節 6 の view_image の後継)と、院内 Web を 1 ページずつ
-読む `fetch_url` は、組み込み **`builtin_feed_image`**(常時)/ **`builtin_fetch_url`**
-(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のいずれかが設定されたとき)に
-なった。理由は sandbox と同型 — 参照の解決・許可先・院内の範囲・サイズ上限の規則は全部
+読む `fetch_url` は、組み込み **`builtin_feed_image`** / **`builtin_fetch_url`**(どちらも常時。
+fetch_url は移設時 `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のゲート付き
+だったが、同日の ken 決定「`url=` は http(s) URL ならどこでも取りに行く — 断るのはこのサーバ
+自身だけ、`EXT_INTRANET_CIDRS` は撤去」でゲートも外した。[[builtin-tools]]「一般の URL」)に
+なった。理由は sandbox と同型 — 参照の解決・登録した配信元・サイズ上限の規則は全部
 `utils/image_refs.py` にあり、llens の tool は殻だけで、殻が repo を跨ぐと ERROR 文が 3 コピー
 (feed_image / fetch_url / send_to_workspace)に割れた。文面は `utils/ref_errors.py` 1 本に統合
 (文面は不変)。詳細は [[builtin-tools]]「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」。

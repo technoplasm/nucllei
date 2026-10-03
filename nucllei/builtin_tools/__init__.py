@@ -9,12 +9,14 @@
 - content 更新・削除は拒否(access_control の編集のみ可)。定義の真実源は常に repo
 - 同名関数の衝突は先勝ち discard(#18-3 の教訓)— builtin の関数名は他とぶつけない
 
-登録は 2 種類: **常に登録**(history / chat_files / attachment_text / feed_image — nucllei
-自身の DB・Storage・共有 resolver だけで動く)と、**env ゲート付き**(sandbox は SANDBOX_URL、
-fetch_url は EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれか)。ゲートの
-理屈は 1 つ: 外部サービスや配備の設定が無いと**どの呼び出しも必ず失敗する** builtin を
+登録は 2 種類: **常に登録**(history / chat_files / attachment_text / feed_image / fetch_url —
+nucllei 自身の DB・Storage・共有 resolver だけで動く)と、**env ゲート付き**(sandbox は
+SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
 一覧に生やさない(builtin の性質 = 常に動く、に反する)。feed_image / fetch_url は配備層
-(prism-hu/llens)から移設した(#141、2026-10-03)。
+(prism-hu/llens)から移設した(#141、2026-10-03)。fetch_url は同日中に env ゲート
+(EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれか)を外して常に登録に
+した — `url=` はスキーム付きの http(s) URL ならどこでも取りに行く(ken 決定)ので、env が
+空でも「必ず失敗する」ことは無い。
 """
 
 import logging
@@ -27,7 +29,6 @@ from nucllei.builtin_tools import (
     history,
     sandbox,
 )
-from nucllei.env import EXT_INTRANET_CIDRS, EXT_PUBLIC_BASES, EXT_UPSTREAMS
 
 log = logging.getLogger(__name__)
 
@@ -62,8 +63,8 @@ BUILTIN_TOOLS = {
         ),
     },
     # feed_image は常に登録: file_id 経路は nucllei 自身の Files / Storage だけで動き、
-    # url / path 経路は共有 resolver(utils/image_refs)が配備の設定に応じて fail closed で
-    # 断る(配信元の無い配備でも file_id の添付 PDF を見る用途は残る)。
+    # url / path 経路は共有 resolver(utils/image_refs)が解決する(配信元の無い配備でも
+    # file_id の添付 PDF を見る用途は残る)。
     "builtin_feed_image": {
         "module": feed_image,
         "name": "Feed Image",
@@ -72,9 +73,23 @@ BUILTIN_TOOLS = {
             "by file_id, URL or sandbox path (feed_image). Issues no File; owner-only"
         ),
     },
+    # fetch_url も常に登録(2026-10-03、ken 決定): url= はスキーム付きの http(s) URL なら
+    # どこでも取りに行く(届くかは配備のネットワーク次第。取りに行かないのはこのサーバ自身
+    # だけ)ので、EXT_* が空でも「必ず失敗する」builtin ではない。同日の朝まで EXT_UPSTREAMS /
+    # EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、行き先で機能を
+    # 絞らない決定と一緒に外した。
+    "builtin_fetch_url": {
+        "module": fetch_url,
+        "name": "Fetch URL",
+        "description": (
+            "Fetch one web page by URL (any http(s) URL reachable from this deployment, "
+            "or a same-server /ext/ URL) as plain text with a numbered link list "
+            "(fetch_url). PDFs return their text layer"
+        ),
+    },
 }
 
-# sandbox と fetch_url は env ゲート付き。他の 4 本は nucllei 自身の DB / Storage を読むだけで
+# sandbox だけ env ゲート付き。他の 5 本は nucllei 自身の DB / Storage / 共有 resolver で動き
 # 外部依存ゼロ = どの配備でも必ず動くのに対し、sandbox は外部サービス
 # (sandbox コンテナ) が要る。居ない配備で一覧に生やすと「見えているのに呼ぶと
 # 必ずエラー」になり、builtin の性質(常に動く)に反する。
@@ -100,26 +115,6 @@ if sandbox.SANDBOX_URL:
             "with a persistent /workspace "
             "(run_python / run_python_once / run_shell / send_to_workspace / "
             "write_file / list_workspace / fetch_from_workspace)"
-        ),
-    }
-
-# fetch_url のゲート(#141、2026-10-03): 取りに行ける先は env で決まる — 登録した配信元
-# (EXT_UPSTREAMS)、原本ホスト(EXT_PUBLIC_BASES)、院内の範囲(EXT_INTRANET_CIDRS)の
-# 3 つが全部空なら、resolver はどの URL にも `unknown_upstream` を返す = どの呼び出しも
-# 必ず失敗する。sandbox と同じ理屈でいずれかが設定された配備でだけ載せる(いずれか 1 つで
-# 十分: EXT_UPSTREAMS だけなら `/ext/{name}/…`、EXT_INTRANET_CIDRS だけなら院内の一般
-# URL が取れる)。env を外せば上の sandbox と同じ prune 経路で行が消える(access_control も
-# 一緒に失われる — 同じ帰結を承知の上)。
-# ※ `/api/v1/files/{id}/content` を file として読む経路はこの 3 つに依らず動くが、それだけの
-# ために生やさない — 添付のテキストは builtin_attachment_text(read_attachment)の担当。
-if EXT_UPSTREAMS or EXT_PUBLIC_BASES or EXT_INTRANET_CIDRS:
-    BUILTIN_TOOLS["builtin_fetch_url"] = {
-        "module": fetch_url,
-        "name": "Fetch URL",
-        "description": (
-            "Fetch one page of the intranet web (registered upstreams, public bases "
-            "or the intranet address range) or a same-server /ext/ URL as plain text "
-            "with a numbered link list (fetch_url). PDFs return their text layer"
         ),
     }
 
@@ -154,8 +149,7 @@ def sync_builtin_tools() -> None:
     - 未定義: `builtin_` prefix かつ BUILTIN_TOOLS に居ない行は DB から削除する。
       定義の真実源は常に repo なので orphan を残さない(builtin を削除したら次回起動で
       DB からも消える)。**env ゲートが閉じた builtin もここに落ちる** —
-      builtin_sandbox は SANDBOX_URL を、builtin_fetch_url は EXT_* を全部外して再起動すると
-      同じ経路で消える。
+      builtin_sandbox は SANDBOX_URL を外して再起動すると同じ経路で消える。
     """
     if _SANDBOX_TOKEN_MISSING:
         log.warning(

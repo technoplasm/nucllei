@@ -314,9 +314,9 @@ def _explain_ref_error(u: str, err) -> str:
             "登録した配信元の redirect は辿らないので、ディレクトリではなくファイルや"
             "ページを直接指す URL を渡すこと。"
         ),
-        redirect_outside=(
-            "ERROR: {ref} は redirect ({status}) を返したが、転送先が院内の範囲の外"
-            " (またはこの配備が取得できない URL) なので辿らなかった。"
+        redirect_self=(
+            "ERROR: {ref} は redirect ({status}) を返したが、転送先が このサーバ自身"
+            " (または同居するサービス) なので辿らなかった。"
             "ユーザーには URL をそのまま案内する。"
         ),
         too_many_redirects=(
@@ -335,15 +335,11 @@ def _explain_ref_error(u: str, err) -> str:
         unknown_upstream={
             "unknown_name": "は許可先の外 (その配信元はこの配備に設定されていない)",
             "not_ext_form": "は `/ext/<配信元>/<パス>` の形でない",
-            # 院内の範囲は設定されているが、ホストのアドレスがその外 (インターネット等)
-            "outside_intranet": (
-                "は院内の範囲の外 (この配備が院内として設定したアドレス範囲に無い)。"
-                "外部の Web は取りに行かない"
+            # 一般の URL で取りに行かない唯一の相手 (行き先では絞らない)
+            "server_self": (
+                "は このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
             ),
-            None: (
-                "は許可先の外 (この配備が取得を許可している上流の URL ではなく、院内の"
-                "範囲も設定されていない)。任意の Web / LAN の URL は取りに行かない"
-            ),
+            None: "は許可先の外 (この配備が取得を許可している上流の URL ではない)",
         },
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
@@ -441,8 +437,8 @@ class Tools:
         url_max_mb: float = Field(
             default=50.0,
             description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
-            "(取れる URL の範囲は env EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS が"
-            "決める。sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
+            "(登録した配信元は env EXT_UPSTREAMS / EXT_PUBLIC_BASES、それ以外の http(s) URL は"
+            "どこでも。sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
 
@@ -864,16 +860,16 @@ class Tools:
         受ける形はスキーム付きの絶対 URL と、同一サーバの相対 URL (`/` 始まり = このサーバの
         URL として、サーバが実際に持つ経路に当てる)。値の形から別の意味には読み替えない。
 
-        許可範囲・redirect の扱い・失敗理由は resolver 一本 = 配備層の fetch_url /
+        行き先・redirect の扱い・失敗理由は resolver 一本 = builtin の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
         `/ext/{name}/…` (相対、または絶対 = host 不問) と EXT_PUBLIC_BASES 配下の URL
         (どちらも EXT_UPSTREAMS の backend 経由 — 与えられた host へは接続せず、redirect も
-        辿らない) と、配備が **院内の範囲** (env EXT_INTRANET_CIDRS) として宣言した
-        アドレスのホストの URL (登録無しで直接取得。接続先は解決したアドレスに固定、
-        redirect は範囲内に限って 3 回まで辿る — 一般の Web と同じ扱い)。
-        **それ以外 (院内の範囲の外・範囲が未設定の配備での登録外) の URL は取りに行かない**
-        (`unknown_upstream`)。cookie / 認証ヘッダをどこにも転送しないので、リクエスト文脈の
-        無い background 続きターンでも同じに動く。
+        辿らない) と、それ以外のスキーム付き http(s) URL **どこでも** (一般の URL。登録無しで
+        直接取得。接続先は解決したアドレスに固定、redirect は 3 回まで辿る — 一般の Web と
+        同じ扱い。届くかは配備のネットワーク次第、2026-10-03 ken 決定)。
+        **取りに行かないのはこのサーバ自身 (と同居するサービス) を指す URL だけ**
+        (`unknown_upstream` reason `server_self`)。cookie / 認証ヘッダをどこにも転送しないので、
+        リクエスト文脈の無い background 続きターンでも同じに動く。
 
         - 解決先が file backend で実体が `/mnt` 配下 → コピーせず、sandbox から見える
           パスを返す (`mounted_path_for_url`)。`/mnt` 配下は sandbox と同じ置き場という

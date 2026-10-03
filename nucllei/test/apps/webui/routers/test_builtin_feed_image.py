@@ -445,8 +445,7 @@ def test_unknown_upstream_is_told_apart_by_reason(monkeypatch):
     want = {
         "not_ext_form": "配信元の名前が取れない",
         "unknown_name": "配信元は無い",
-        "outside_public_bases": "許可された原本ホストの外",
-        "outside_intranet": "院内の範囲の外",
+        "server_self": "このサーバ自身",
     }
     for reason, phrase in want.items():
         err = RefError("unknown_upstream", "detail that must not matter", reason=reason)
@@ -739,15 +738,15 @@ def test_unknown_code_falls_back_to_the_bundled_text(monkeypatch):
     assert "読めない" in result and "internal detail" not in result
 
 
-def test_new_intranet_reasons_have_their_own_text(monkeypatch):
-    """reason: outside_intranet / redirect_outside / too_many_redirects / unresolvable。"""
+def test_general_url_reasons_have_their_own_text(monkeypatch):
+    """reason: server_self / redirect_self / too_many_redirects / unresolvable。"""
     for code, reason, kw, phrase in (
-        ("unknown_upstream", "outside_intranet", {}, "院内の範囲の外"),
+        ("unknown_upstream", "server_self", {}, "このサーバ自身"),
         (
             "upstream_status",
-            "redirect_outside",
+            "redirect_self",
             {"status": 302},
-            "転送先が院内の範囲の外",
+            "転送先が このサーバ自身",
         ),
         ("upstream_status", "too_many_redirects", {"status": 302}, "4 回以上"),
         ("upstream_unreachable", "unresolvable", {}, "ホスト名を解決できない"),

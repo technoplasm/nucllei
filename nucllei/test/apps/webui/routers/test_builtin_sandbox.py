@@ -999,23 +999,42 @@ def test_uppercase_scheme_is_a_url(monkeypatch):
 # --- 許可先の外 / 失敗理由の言い分け -------------------------------------------
 
 
-def test_url_outside_allowed_upstreams_is_not_fetched(monkeypatch):
-    """挙動変更の番兵: 許可先の外の URL(任意の LAN / 外部サイト)は取りに行かない。
-    旧実装は CIDR 拒否リストだけで LAN の任意ホストを取れた。院内の範囲
-    (EXT_INTRANET_CIDRS)が未設定の配備の挙動 — 設定した配備は下の test_intranet_*。"""
+def _self_env(monkeypatch, addresses=("10.106.0.5", "10.106.0.1"), dns=None):
+    """自分自身の発見(実行時)と DNS を差し替える。"""
+    import ipaddress
+
+    from nucllei.utils import ext_upstreams
+
+    found = frozenset(ipaddress.ip_address(a) for a in addresses)
+    monkeypatch.setattr(ext_upstreams, "discover_self_addresses", lambda: found)
+    ext_upstreams.reset_self_addresses()
+
+    async def fake_lookup(host):
+        return list((dns or {}).get(host, []))
+
+    monkeypatch.setattr(ext_upstreams, "lookup_host", fake_lookup)
+
+
+def test_server_itself_is_not_fetched(monkeypatch):
+    """挙動の番兵: 一般の URL で取りに行かないのは **このサーバ自身(と同居するサービス)**
+    だけ(loopback・自分のアドレス・既定ゲートウェイ・host.docker.internal)。固定文で
+    「このサーバ自身」と言い、リンク切れとは言わない。繋ぎもしない。"""
     env = _UrlEnv(monkeypatch)
     env.http_backend()
     env.public_base()
+    _self_env(monkeypatch, dns={"host.docker.internal": ["10.106.0.1"]})
     for u in (
-        "http://10.0.0.5/docs/manual.pdf",
         "http://127.0.0.1:8000/files/write",
-        "https://example.com/a.pdf",
-        "http://his-info.test/other/a.pdf",  # 許可 host だが base の外
+        "http://[::1]:3000/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.106.0.5:13303/",
+        "http://10.106.0.1:13303/",
+        "http://host.docker.internal:13303/",
     ):
         result = env.run(url=u)
-        assert result.startswith("ERROR") and "許可先の外" in result, u
+        assert result.startswith("ERROR") and "このサーバ自身" in result, u
         # url が受ける形を固定文で言う。リンク切れとは言わない
-        assert URL_ARG_FORM in result, u
+        assert result.endswith(URL_ARG_FORM), u
         assert "リンク切れ" not in result, u
     assert env.gets == [] and env.writes == []
 
@@ -1032,37 +1051,24 @@ def test_unknown_upstream_wording_follows_reason(monkeypatch):
     tool は値を自前でパースし直さない。"""
     env = _UrlEnv(monkeypatch)
     env.http_backend()
+    _self_env(monkeypatch)
     unknown_name = env.run(url="/ext/nosuch/a.png")
     not_ext_form = env.run(url="/ext/")
-    outside = env.run(url="https://example.com/a.pdf")
+    itself = env.run(url="http://127.0.0.1/a.pdf")
     assert "その配信元はこの配備に設定されていない" in unknown_name
     assert "`/ext/<配信元>/<パス>` の形でない" in not_ext_form
-    assert "任意の Web / LAN の URL は取りに行かない" in outside
-    for result in (unknown_name, not_ext_form, outside):
+    assert (
+        "このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
+        in itself
+    )
+    for result in (unknown_name, not_ext_form, itself):
         assert result.startswith("ERROR") and result.endswith(URL_ARG_FORM)
     assert env.gets == [] and env.writes == []
 
 
-def _intranet_env(monkeypatch, env, cidrs=("10.0.0.0/8",), dns=None):
-    import ipaddress
-
-    from nucllei.utils import ext_upstreams
-
-    monkeypatch.setattr(
-        ext_upstreams,
-        "EXT_INTRANET_CIDRS",
-        tuple(ipaddress.ip_network(c) for c in cidrs),
-    )
-
-    async def fake_lookup(host):
-        return list((dns or {}).get(host, []))
-
-    monkeypatch.setattr(ext_upstreams, "lookup_host", fake_lookup)
-
-
-def test_intranet_url_is_imported_when_the_range_is_configured(monkeypatch):
-    """院内の範囲を設定した配備では、登録無しの院内 URL(閉域の本番は IP リテラル)も
-    取り込める。接続先は固定済みのアドレス、Host は元のまま。redirect は範囲内で辿る。"""
+def test_general_url_is_imported_from_anywhere(monkeypatch):
+    """登録無しの URL(閉域の本番は IP リテラル。インターネットのホストも同じ)をそのまま
+    取り込める。接続先は固定済みのアドレス、Host は元のまま。redirect は辿る。"""
 
     def upstream(request):
         if request.url.path == "/old":
@@ -1072,7 +1078,7 @@ def test_intranet_url_is_imported_when_the_range_is_configured(monkeypatch):
         )
 
     env = _UrlEnv(monkeypatch, upstream)
-    _intranet_env(monkeypatch, env)
+    _self_env(monkeypatch, dns={"example.com": ["93.184.216.34"]})
     result = env.run(url="http://10.1.2.3/his-info/%E6%A7%98%E5%BC%8F.pdf")
     assert not result.startswith("ERROR"), result
     assert env.gets == ["http://10.1.2.3/his-info/%E6%A7%98%E5%BC%8F.pdf"]
@@ -1082,41 +1088,35 @@ def test_intranet_url_is_imported_when_the_range_is_configured(monkeypatch):
     assert not result.startswith("ERROR"), result
     assert env.gets[-2:] == ["http://10.1.2.3/old", "http://10.1.2.4/new.pdf"]
     assert env.writes[-1]["payload"]["path"].endswith("imports/new.pdf")
+    result = env.run(url="https://example.com/a.pdf")
+    assert not result.startswith("ERROR"), result
+    assert env.gets[-1] == "https://93.184.216.34/a.pdf"
+    assert env.sent_headers[-1]["host"] == "example.com"
+    # 同じホストでも登録した配信元の base の外は一般の URL として直接
+    env.public_base()
+    _self_env(monkeypatch, dns={"his-info.test": ["172.16.3.3"]})
+    result = env.run(url="http://his-info.test/other/a.pdf")
+    assert not result.startswith("ERROR"), result
+    assert env.gets[-1] == "http://172.16.3.3/other/a.pdf"
 
 
-def test_intranet_wording_follows_reason(monkeypatch):
-    """院内の範囲の外(インターネット等)は固定文で「院内の範囲の外」と言う(値は見ない)。
-    辿れなかった redirect・引けない名前も reason で言い分ける。"""
+def test_general_url_wording_follows_reason(monkeypatch):
+    """辿れなかった redirect(自分自身へ・回数超過)・引けない名前も reason で言い分ける。"""
 
     def upstream(request):
         path = request.url.path
         if path == "/leave":
-            return httpx.Response(302, headers={"location": "https://example.com/x"})
+            return httpx.Response(302, headers={"location": "http://127.0.0.1:3000/x"})
         if path.startswith("/loop"):
             n = int(path[len("/loop") :] or 0)
             return httpx.Response(302, headers={"location": f"/loop{n + 1}"})
         return httpx.Response(200, content=b"ok")
 
     env = _UrlEnv(monkeypatch, upstream)
-    _intranet_env(
-        monkeypatch,
-        env,
-        dns={"intra.test": ["10.5.5.5"], "example.com": ["93.184.216.34"]},
-    )
-    for u in (
-        "https://example.com/a.pdf",
-        "http://192.168.1.1/x",
-        "http://127.0.0.1/x",
-    ):
-        result = env.run(url=u)
-        assert result.startswith("ERROR") and "院内の範囲の外" in result, u
-        assert "外部の Web は取りに行かない" in result and result.endswith(
-            URL_ARG_FORM
-        ), u
-        assert "リンク切れ" not in result, u
-    assert env.gets == []
-    outside = env.run(url="http://10.1.2.3/leave")
-    assert "転送先が院内の範囲の外" in outside and "302" in outside
+    _self_env(monkeypatch, dns={"intra.test": ["10.5.5.5"]})
+    to_self = env.run(url="http://10.1.2.3/leave")
+    assert "転送先が このサーバ自身" in to_self and "302" in to_self
+    assert env.gets == ["http://10.1.2.3/leave"]
     loop = env.run(url="http://10.1.2.3/loop")
     assert "3 回を超えて" in loop
     assert env.gets.count("http://10.1.2.3/loop") == 1 and len(env.gets) == 1 + 4

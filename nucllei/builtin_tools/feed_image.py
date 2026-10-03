@@ -20,7 +20,8 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   - file_id: owner チェック (#40 と同クラスの IDOR 封鎖) を本 tool で行う。送信直前
     inline でも has_read_access_to_file が二重に効く (defense-in-depth)。
   - URL: ブラウザが開くもの。スキーム付きの絶対 URL (EXT_PUBLIC_BASES の base 配下の
-    原本 URL、既存チャットに残る `https://<host>/ext/…`、院内の範囲の一般 URL) と、
+    原本 URL、既存チャットに残る `https://<host>/ext/…`、それ以外の一般の URL — 院内でも
+    インターネットでも。届くかは配備のネットワーク次第) と、
     同一サーバの相対 URL `/ext/{name}/…` (配備層の read_doc の図・原本 PDF)。
   - sandbox の fs パス (`/mnt/…` `/workspace/…`)。
 
@@ -41,9 +42,10 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
 
   参照 → バイトの解決規則は `utils/image_refs.py` が**一箇所で**持つ。URL の上流解決
   (path が /ext/{name}/ なら host を問わず EXT_UPSTREAMS の backend、それ以外は
-  EXT_PUBLIC_BASES の base 前方一致、どちらでもなければ EXT_INTRANET_CIDRS の院内の範囲) も
+  EXT_PUBLIC_BASES の base 前方一致、どちらでもなければ一般の URL としてそのホストに直接 —
+  行き先で絞らず、断るのはこのサーバ自身だけ。2026-10-03 ken 決定) も
   traversal 判定もサイズ上限もそこにある — tool 側に allowlist も on/off valve も持たない
-  (境界は resolver が fail closed で持つ。tool のスイッチはモデルが届く範囲を変えない)。
+  (境界は resolver が持つ。tool のスイッチはモデルが届く範囲を変えない)。
   tool は call 時に同じ resolver で読んで検証 (存在・種別・サイズ・ページ数) し、参照を
   積むだけ。inline 層も同じ resolver で実体化し、PDF はページ指定 (`#page=N`、with_page。
   URL でも同じ) を送信直前にラスタライズする。
@@ -298,6 +300,8 @@ class Tools:
           `/api/v1/files/{id}/content`。read_doc / fetch_url の戻り値の literal をそのまま (図・原本 PDF・
           院内 Web の資料)。組み立てない・書き換えない・ホストを補わない。
           `#page=N` 付きの literal はそのまま渡してよい (`pages` を付ければそちらが優先)。
+          http(s) の URL は院内でもインターネットでもそのまま渡す — どこに届くかは配備の
+          ネットワークが決める (断るのはこのサーバ自身を指す URL だけ)。
         - path: sandbox のファイルの絶対パス (`/workspace/…` `/mnt/…`)。
         - file_id: 添付・生成物の id。run_python の戻り値やシステム注記の file_id もここ
           (本文リンク `/api/v1/files/{id}/content` しか手元に無ければ url= にそのまま渡す)。
@@ -309,7 +313,7 @@ class Tools:
         `…/log_write.aspx?…` でも同じ)。
 
         失敗時は "ERROR: ..." で始まる説明 — 何が起きたか (存在しない / サイズ上限超過 /
-        redirect / 上流のエラー / 院内 Web に届かない / 許可先の外 / sandbox が読めない) と次の
+        redirect / 上流のエラー / 届かない / このサーバ自身 / sandbox が読めない) と次の
         一手を書く。「読めなかった」を全部リンク切れと言い換えないこと。
 
         :param url: (任意) スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値の literal)。
@@ -319,7 +323,7 @@ class Tools:
         :param pages: (任意) PDF のページ範囲。"3" / "4-6" / "1-2,7" 形式。画像には付けない。
         :return: 何を自分の目に入れたかの説明 (ユーザー表示ではない) / 失敗時は "ERROR: ..." で始まる
                  説明 — 何が起きたか (存在しない / サイズ上限超過 / redirect / 上流のエラー /
-                 院内 Web に届かない / 許可先の外 / sandbox が読めない) と次の一手を書く。
+                 届かない / このサーバ自身 / sandbox が読めない) と次の一手を書く。
                  「読めなかった」を全部リンク切れと言い換えないこと。
         """
         if not __user__ or not __user__.get("id"):

@@ -1,4 +1,4 @@
-"""builtin_fetch_url (院内 Web と同一サーバの /ext/… を URL で 1 ページずつ辿る) のユニットテスト。
+"""builtin_fetch_url (Web のページと同一サーバの /ext/… を URL で 1 ページずつ辿る) のユニットテスト。
 
 配備層 (prism-hu/llens の tests/test_fetch_url.py) から tool と一緒に移設 (#141、2026-10-03)。
 pydantic stub / importlib のロードは落とし (nucllei の中なので直接 import する)、resolver の無い
@@ -13,19 +13,19 @@ EXT_PUBLIC_BASES) は**本物**を env の dict を書き換えて通す。HTML 
 
 受理規則 (2026-10-03 ken 決定: url = 絶対 URL か同一サーバの相対 URL。引数名だけで解釈) を番兵する:
   - (a) EXT_PUBLIC_BASES の base 配下 = 原本 URL、(b) path が /ext/{name}/… の URL (相対 `/ext/…`
-    と、host を問わない絶対形)。それ以外の相対 (`/mnt/…` `/workspace/…` 等) と外部サイトは
-    resolver に届く前に ERROR。相対の失敗は値によらない固定文 (url が受ける形を添える)
-  - 戻り値のリンク一覧は原本 URL 1 本。原本ホストの無い上流は入力と同じ形の `/ext/…`
+    と、host を問わない絶対形)、(c) それ以外のスキーム付き http(s) URL = 一般の URL (どこでも
+    取りに行く。断るのはこのサーバ自身だけ — 同日の ken 決定)。それ以外の相対 (`/mnt/…`
+    `/workspace/…` 等) は固定文の ERROR (url が受ける形を添える)
+  - 戻り値のリンク一覧は原本 URL 1 本。原本ホストの無い上流は入力と同じ形の `/ext/…`、
+    一般の URL はページ自身の URL 基準
   - RefError.code ごとに「何が起きたか + 次の一手」の ERROR 文 (組み立ては utils/ref_errors)
 
-登録ゲート (`__init__.py`): EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかが
-設定された配備でだけ BUILTIN_TOOLS に載る。
+登録 (`__init__.py`): 常に BUILTIN_TOOLS に載る (env ゲート無し — 2026-10-03 に外した)。
 """
 
 import asyncio
 import contextlib
 import importlib
-import ipaddress
 import pathlib
 import re
 import types
@@ -261,7 +261,10 @@ class _FakeResolver:
             bare = ref.split("#", 1)[0].partition("?")[0].rstrip("/")
             hit = next(((n, "") for n, b in self._bases.items() if b == bare), None)
         if hit is None:
-            return None, RefError("unknown_upstream", "external site")
+            # 一般の URL: どこでも取りに行く。断るのはこのサーバ自身 (loopback) だけ
+            if parts.hostname in ("127.0.0.1", "localhost", "::1"):
+                return None, RefError("unknown_upstream", "self", reason="server_self")
+            return self._loaded, None
         name, rel = hit
         if name not in self._ups:
             return None, RefError("unknown_upstream", f"name={name}")
@@ -501,20 +504,13 @@ def test_rejects_other_relative_and_non_url_values_with_the_fixed_text(
         assert resolver.refs == [bad], bad
 
 
-def test_outside_the_allowed_upstreams_is_one_fixed_text_naming_the_bases(
-    monkeypatch, ext_env
-):
-    """外部サイト・base の外・未構成の name・形の欠けた `/ext/` はどれも resolver の
-    unknown_upstream。detail で分岐せず (reason 無しは) 1 つの固定文にし、許可先 (原本ホスト) を名乗る。"""
+def test_unknown_upstream_is_one_fixed_text_naming_the_bases(monkeypatch, ext_env):
+    """未構成の name・形の欠けた `/ext/` は resolver の unknown_upstream。detail で分岐せず
+    (reason 無しは) 1 つの固定文にし、登録された原本ホストを名乗る。"""
     for bad in (
-        "https://example.com/x",
-        "http://172.17.0.1:13303/static/x.png",
-        "https://med-info.med.hokudai.ac.jp/other/app.aspx",  # 同ホスト・base の外
-        "https://med-info.med.hokudai.ac.jp/his-info2/top.aspx",  # base の prefix 衝突
         f"{ORIGIN}/ext/other/top.aspx",  # 未構成の name
         "/ext/",  # 配信元の名前が取れない同一サーバの URL
         "/ext/CAGE/x",  # 文字種外の name
-        f"{ORIGIN}/ext//top.aspx",
     ):
         result, resolver = _run(monkeypatch, ext_env, bad)
         assert resolver.refs == [bad], bad
@@ -522,6 +518,33 @@ def test_outside_the_allowed_upstreams_is_one_fixed_text_naming_the_bases(
             f"ERROR: {bad} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。"
         ), (bad, result)
         assert f"`{PUBLIC_BASE}` (his)" in result and "EXT_" not in result, bad
+
+
+def test_general_urls_are_fetched_and_the_server_itself_is_refused(
+    monkeypatch, ext_env
+):
+    """登録に当たらない絶対 URL (外部サイト・同ホストの base の外・任意の LAN) は一般の URL
+    として取りに行く (resolver 任せ。tool は行き先で断らない)。断るのはこのサーバ自身だけで、
+    その文面は reason `server_self`。"""
+    for u in (
+        "https://example.com/x",
+        "http://172.17.0.1:13303/static/x.png",
+        "https://med-info.med.hokudai.ac.jp/other/app.aspx",  # 同ホスト・base の外
+        "https://med-info.med.hokudai.ac.jp/his-info2/top.aspx",  # base の prefix 衝突
+        f"{ORIGIN}/ext//top.aspx",  # 絶対で name が取れない形も、ただの絶対 URL
+    ):
+        result, resolver = _run(monkeypatch, ext_env, u)
+        assert resolver.refs == [u], u
+        assert not result.startswith("ERROR") and result.startswith(f"# {u}\n"), (
+            u,
+            result,
+        )
+    result, resolver = _run(monkeypatch, ext_env, "http://127.0.0.1:3000/health")
+    assert result.startswith(
+        "ERROR: http://127.0.0.1:3000/health は このサーバ自身 (または同居するサービス) を"
+        "指しているので取りに行かない。"
+    ), result
+    assert result.endswith(URL_ARG_FORM) and "EXT_" not in result
 
 
 def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
@@ -570,18 +593,23 @@ def test_no_upstreams_configured(monkeypatch, ext_env):
     assert result.startswith("ERROR") and "許可された配信元の外" in result
 
 
-def test_no_public_bases_configured_rejects_original_urls_but_keeps_ext_form(
+def test_no_public_bases_configured_treats_original_urls_as_general(
     monkeypatch, ext_env
 ):
-    """env EXT_PUBLIC_BASES が空なら原本 URL は解決できない (ERROR。許可先は「未設定」と
-    名乗る)。/ext/ 形は残る。"""
-    result, resolver = _run(
-        monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", env_bases={}
+    """env EXT_PUBLIC_BASES が空なら原本 URL はただの一般の URL — そのホストに直接取りに行き、
+    リンクはページ自身の URL 基準 (`/ext/` の注意書きは出ない)。/ext/ 形は backend のまま。
+    unknown_upstream の ERROR では原本ホストを「未設定」と名乗る。"""
+    u = f"{PUBLIC_BASE}/top.aspx"
+    result, resolver = _run(monkeypatch, ext_env, u, env_bases={})
+    assert not result.startswith("ERROR") and resolver.refs == [u]
+    assert result.startswith(f"# {u}\n種別:") and "注意:" not in result
+    assert _listed_links(result) and all(
+        link.startswith(PUBLIC_BASE + "/") for link in _listed_links(result)
     )
-    assert result.startswith("ERROR")
-    assert "未設定" in result
     result, resolver = _run(monkeypatch, ext_env, EXT_TOP, env_bases={})
     assert not result.startswith("ERROR") and resolver.refs == [EXT_TOP]
+    result, _r = _run(monkeypatch, ext_env, "/ext/nosuch/x", env_bases={})
+    assert result.startswith("ERROR") and "未設定" in result
 
 
 def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):
@@ -631,13 +659,13 @@ def test_root_relative_hrefs_fold_on_the_public_base_path_not_the_backend_path(
     assert _listed_links(result) == [f"{ORIGIN}/ext/his/unyou_mn.aspx"]
 
 
-def test_error_text_names_the_same_bases_the_gate_uses(monkeypatch, ext_env):
-    """ERROR 文の許可先は受理判定と同じ dict (EXT_PUBLIC_BASES) から出る。"""
+def test_error_text_names_the_same_bases_the_router_uses(monkeypatch, ext_env):
+    """ERROR 文の原本ホストはルーティングと同じ dict (EXT_PUBLIC_BASES) から出る。"""
     other = "https://other.example/docs"
     result, _r = _run(
         monkeypatch,
         ext_env,
-        "https://example.com/x",
+        f"{ORIGIN}/ext/nosuch/x",
         env_bases={"his": PUBLIC_BASE, "other": other},
         upstreams={"his": UPSTREAM, "other": other},
     )
@@ -1051,12 +1079,11 @@ def test_unknown_upstream_does_not_branch_on_the_detail(monkeypatch, ext_env):
 
 
 def test_unknown_upstream_is_told_apart_by_reason(monkeypatch, ext_env):
-    """`RefError.reason` で言い分ける (detail は見ない)。outside_public_bases はこの tool の言い方。"""
+    """`RefError.reason` で言い分ける (detail は見ない)。"""
     want = {
         "not_ext_form": "配信元の名前が取れない",
         "unknown_name": "配信元は無い",
-        "outside_public_bases": "読めるのは院内 Web だけ",
-        "outside_intranet": "院内の範囲の外",
+        "server_self": "このサーバ自身",
     }
     for reason, phrase in want.items():
         result = _explained(
@@ -1083,16 +1110,16 @@ def test_unknown_code_falls_back_to_the_bundled_text(monkeypatch, ext_env):
     assert "internal detail" not in result
 
 
-def test_new_intranet_reasons_have_their_own_text(monkeypatch, ext_env):
-    """reason: outside_intranet / redirect_outside / too_many_redirects / unresolvable。"""
+def test_general_url_reasons_have_their_own_text(monkeypatch, ext_env):
+    """reason: server_self / redirect_self / too_many_redirects / unresolvable。"""
     cases = (
         (
-            RefError("unknown_upstream", "x", reason="outside_intranet"),
-            "院内の範囲の外",
+            RefError("unknown_upstream", "x", reason="server_self"),
+            "このサーバ自身",
         ),
         (
-            RefError("upstream_status", "x", status=302, reason="redirect_outside"),
-            "転送先が院内の範囲の外",
+            RefError("upstream_status", "x", status=302, reason="redirect_self"),
+            "転送先が このサーバ自身",
         ),
         (
             RefError("upstream_status", "x", status=302, reason="too_many_redirects"),
@@ -1192,7 +1219,7 @@ def _route(**fields):
         public_base=None,
         origin=None,
         relative=True,
-        intranet=False,
+        general=False,
         page_url=None,
     )
     base.update(fields)
@@ -1250,8 +1277,8 @@ def test_unroutable_url_after_a_successful_fetch_still_returns_the_text(
     assert not result.startswith("ERROR") and "令和８年度休日" in result
 
 
-def test_intranet_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
-    """院内の一般 URL (route.intranet) はリンクをページの URL 基準の urljoin で解決する。
+def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
+    """一般の URL (route.general) はリンクをページの URL 基準の urljoin で解決する。
     名前空間 (/ext/{name}・原本ルート) を通さず、ヘッダに /ext/ の注意書きも出さない。"""
     mod = _mod()
     page = "http://172.16.9.9/app/dir/page.aspx?x=1"
@@ -1260,13 +1287,13 @@ def test_intranet_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
         mod,
         "route_of_url",
         _route(
-            kind="intranet",
+            kind="general",
             name=None,
             rel="app/dir/page.aspx",
             query="?x=1",
             origin="http://172.16.9.9",
             ext_form=False,
-            intranet=True,
+            general=True,
             relative=False,
             page_url=page,
         ),
@@ -1312,62 +1339,48 @@ def test_docstring_names_the_public_bases_from_env(ext_env):
         importlib.reload(mod)
 
 
-# --- 登録ゲート (`__init__.py`) ---------------------------------------------------------
+# --- 登録 (`__init__.py`) --------------------------------------------------------------
 
 
 @contextlib.contextmanager
-def ext_gate(upstreams=None, bases=None, cidrs=()):
-    """EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS を差し替えて builtin_tools を
-    読み直す (test_builtin_sandbox の sandbox_env と同じ流儀)。"""
+def ext_gate(upstreams=None, bases=None):
+    """EXT_UPSTREAMS / EXT_PUBLIC_BASES を差し替えて builtin_tools を読み直す
+    (test_builtin_sandbox の sandbox_env と同じ流儀)。"""
     import nucllei.builtin_tools as pkg
     from nucllei import env
 
-    saved = (
-        dict(env.EXT_UPSTREAMS),
-        dict(env.EXT_PUBLIC_BASES),
-        env.EXT_INTRANET_CIDRS,
-    )
+    saved = (dict(env.EXT_UPSTREAMS), dict(env.EXT_PUBLIC_BASES))
 
-    def _apply(ups, bs, cs):
+    def _apply(ups, bs):
         env.EXT_UPSTREAMS.clear()
         env.EXT_UPSTREAMS.update(ups)
         env.EXT_PUBLIC_BASES.clear()
         env.EXT_PUBLIC_BASES.update(bs)
-        env.EXT_INTRANET_CIDRS = tuple(ipaddress.ip_network(c) for c in cs)
         importlib.reload(pkg)
 
-    _apply(upstreams or {}, bases or {}, cidrs)
+    _apply(upstreams or {}, bases or {})
     try:
         yield pkg
     finally:
-        env.EXT_UPSTREAMS.clear()
-        env.EXT_UPSTREAMS.update(saved[0])
-        env.EXT_PUBLIC_BASES.clear()
-        env.EXT_PUBLIC_BASES.update(saved[1])
-        env.EXT_INTRANET_CIDRS = saved[2]
-        importlib.reload(pkg)
+        _apply(*saved)
 
 
-def test_fetch_url_is_not_registered_when_nothing_is_fetchable():
-    """配信元も原本ホストも院内の範囲も無い配備では、どの URL も unknown_upstream になる =
-    一覧に生やさない。feed_image は常に居る (file_id 経路は env に依らない)。"""
-    with ext_gate() as pkg:
-        assert "builtin_fetch_url" not in pkg.BUILTIN_TOOLS
-        assert pkg.is_builtin_tool_id("builtin_fetch_url") is False
-        assert pkg.is_reserved_builtin_id("builtin_fetch_url") is True
-        assert "builtin_feed_image" in pkg.BUILTIN_TOOLS
-
-
-def test_fetch_url_is_registered_when_any_source_is_configured():
+def test_fetch_url_is_always_registered():
+    """配信元も原本ホストも無い配備でも載る (2026-10-03: url= はどこでも取りに行くので、
+    env が空でも「必ず失敗する」builtin ではない)。feed_image も常に居る。"""
     for kw in (
+        {},
         dict(upstreams={"cage": "file:///tmp"}),
         dict(bases={"his": PUBLIC_BASE}),
-        dict(cidrs=("172.16.0.0/16",)),
     ):
         with ext_gate(**kw) as pkg:
             entry = pkg.BUILTIN_TOOLS.get("builtin_fetch_url")
             assert entry is not None, kw
             assert entry["module"] is _mod() and entry["name"] == "Fetch URL"
+            assert pkg.is_builtin_tool_id("builtin_fetch_url") is True
+            assert pkg.is_reserved_builtin_id("builtin_fetch_url") is True
+            assert "builtin_feed_image" in pkg.BUILTIN_TOOLS
+            assert "EXT_" not in entry["description"]
 
 
 def test_builtin_specs_have_the_expected_function_names_and_valves():

@@ -92,11 +92,12 @@ def test_not_found_default_and_override():
 
 
 def test_upstream_status_redirect_reasons_and_plain_status():
-    outside = RefError("upstream_status", "x", status=302, reason="redirect_outside")
-    assert _explain(outside) == (
-        f"ERROR: {U} の redirect の転送先が院内の範囲の外 (外部の Web には届かない)。{URL_ARG_FORM}"
+    to_self = RefError("upstream_status", "x", status=302, reason="redirect_self")
+    assert _explain(to_self) == (
+        f"ERROR: {U} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
+        "辿らなかった。ユーザーには URL をそのまま案内する。"
     )
-    assert _explain(outside, redirect_outside="RO {ref} {status}") == f"RO {U} 302"
+    assert _explain(to_self, redirect_self="RS {ref} {status}") == f"RS {U} 302"
     loop = RefError("upstream_status", "x", status=302, reason="too_many_redirects")
     assert _explain(loop) == (
         f"ERROR: {U} は redirect が 4 回以上続いた (辿るのは 3 回まで)。転送先のページを直接指す URL を渡すこと。"
@@ -163,9 +164,9 @@ def test_unknown_upstream_by_reason_with_extra_and_fallback():
     assert _explain(err, unknown_upstream_extra="許可先は X。") == (
         f"ERROR: {U} {UNKNOWN_UPSTREAM_WHAT[None]}。許可先は X。{URL_ARG_FORM}"
     )
-    # 表の差し替え (fetch_url は outside_public_bases だけ、sandbox は全部)
-    table = {**UNKNOWN_UPSTREAM_WHAT, "outside_public_bases": "は別の言い方"}
-    err = RefError("unknown_upstream", "x", reason="outside_public_bases")
+    # 表の差し替え (sandbox は全部を自分の言い方で持つ)
+    table = {**UNKNOWN_UPSTREAM_WHAT, "server_self": "は別の言い方"}
+    err = RefError("unknown_upstream", "x", reason="server_self")
     assert (
         _explain(err, unknown_upstream=table)
         == f"ERROR: {U} は別の言い方。{URL_ARG_FORM}"
@@ -203,9 +204,9 @@ def test_sandbox_wording_is_unchanged():
         RefError(
             "not_found", "x"
         ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
-        RefError("upstream_status", "x", status=302, reason="redirect_outside"): (
-            f"ERROR: {U} は redirect (302) を返したが、転送先が院内の範囲の外 (またはこの配備が取得できない"
-            " URL) なので辿らなかった。ユーザーには URL をそのまま案内する。"
+        RefError("upstream_status", "x", status=302, reason="redirect_self"): (
+            f"ERROR: {U} は redirect (302) を返したが、転送先が このサーバ自身 (または同居するサービス)"
+            " なので辿らなかった。ユーザーには URL をそのまま案内する。"
         ),
         RefError("upstream_status", "x", status=302, reason="too_many_redirects"): (
             f"ERROR: {U} は redirect を 3 回を超えて繰り返した (転送のループか、ログインが要るページ)。"
@@ -231,13 +232,12 @@ def test_sandbox_wording_is_unchanged():
         RefError("unknown_upstream", "x", reason="not_ext_form"): (
             f"ERROR: {U} は `/ext/<配信元>/<パス>` の形でない。{URL_ARG_FORM}"
         ),
-        RefError("unknown_upstream", "x", reason="outside_intranet"): (
-            f"ERROR: {U} は院内の範囲の外 (この配備が院内として設定したアドレス範囲に無い)。"
-            f"外部の Web は取りに行かない。{URL_ARG_FORM}"
+        RefError("unknown_upstream", "x", reason="server_self"): (
+            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
+            f"{URL_ARG_FORM}"
         ),
-        RefError("unknown_upstream", "x", reason="outside_public_bases"): (
-            f"ERROR: {U} は許可先の外 (この配備が取得を許可している上流の URL ではなく、院内の範囲も"
-            f"設定されていない)。任意の Web / LAN の URL は取りに行かない。{URL_ARG_FORM}"
+        RefError("unknown_upstream", "x"): (
+            f"ERROR: {U} は許可先の外 (この配備が取得を許可している上流の URL ではない)。{URL_ARG_FORM}"
         ),
         RefError("traversal", "x"): (
             f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{URL_ARG_FORM}"
@@ -267,8 +267,9 @@ def test_feed_image_wording_is_unchanged():
             f"ERROR: {U} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
             "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
         ),
-        RefError("unknown_upstream", "x", reason="outside_public_bases"): (
-            f"ERROR: {U} は許可された原本ホストの外 (外部サイトは読めない)。{URL_ARG_FORM}"
+        RefError("unknown_upstream", "x", reason="server_self"): (
+            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
+            f"{URL_ARG_FORM}"
         ),
         RefError("unknown_upstream", "x"): (
             f"ERROR: {U} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。{URL_ARG_FORM}"
@@ -325,7 +326,7 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
 
     monkeypatch.setattr(fetch_url, "EXT_PUBLIC_BASES", {"his": "https://his.test/docs"})
     explain = fetch_url._explain_ref_error
-    bases = "許可先の原本ホストは `https://his.test/docs` (his)。"
+    bases = "登録された原本ホストは `https://his.test/docs` (his)。"
     cases = {
         RefError(
             "not_found", "x"
@@ -334,12 +335,13 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
             f"ERROR: {U} は redirect (302) を返した。redirect は辿らないので、ディレクトリではなく"
             "ページを直接指すこと (例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
         ),
-        RefError("upstream_status", "x", status=302, reason="redirect_outside"): (
-            f"ERROR: {U} の redirect の転送先が院内の範囲の外 (外部の Web には届かない)。{URL_ARG_FORM}"
+        RefError("upstream_status", "x", status=302, reason="redirect_self"): (
+            f"ERROR: {U} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
+            "辿らなかった。ユーザーには URL をそのまま案内する。"
         ),
-        RefError("unknown_upstream", "x", reason="outside_public_bases"): (
-            f"ERROR: {U} は許可された原本ホストの外 (院内の閉域ネットワークなので外部サイトには届かない。"
-            f"読めるのは院内 Web だけ)。{bases}{URL_ARG_FORM}"
+        RefError("unknown_upstream", "x", reason="server_self"): (
+            f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
+            f"{bases}{URL_ARG_FORM}"
         ),
         RefError("unknown_upstream", "x", reason="unknown_name"): (
             f"ERROR: {U} の配信元は無い (この配備に構成されていない)。{bases}{URL_ARG_FORM}"

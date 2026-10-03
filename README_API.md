@@ -248,7 +248,7 @@ separate reasoning block.
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                    |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                      |
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)      |
-| `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS`    | env  | `""`                  | any one set gates `builtin_fetch_url` (§3.8, §5.7)                                    |
+| `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`                           | env  | `""`                  | registered upstreams only; `builtin_fetch_url` is always on (§3.8, §5.7)              |
 
 ### 3.7 Attachments / files / storage
 
@@ -381,14 +381,14 @@ builder (`content_blocks.py`) and the background-task completion notice
 a prefix test of its own. Tools must call `resolve_url` / `resolve_path`
 according to the argument's name, not `resolve_ref`.
 
-| Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http://` / `https://`                           | absolute URL                                      | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (the host is never connected to). Otherwise, if the URL is the `<base>` of an `EXT_PUBLIC_BASES` entry or starts with `<base>/`, the remainder goes to that name's backend. Otherwise, if the host's address lies in the **intranet range** (`EXT_INTRANET_CIDRS`, below), fetched directly, pinned to that address. Anything else → `unknown_upstream` (fail closed, not a generic fetch) |
-| `/ext/`                                          | same-server URL                                   | `/ext/{name}/{rest}` → the same backend as the absolute form. Unknown `name`, or no `name` at all (`/ext/`) → `unknown_upstream`                                                                                                                                                                                                                                                                                                                                                  |
-| `/workspace/`, `/mnt/`                           | sandbox filesystem                                | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                                                                                                                                        |
-| `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form`                                                                                                           |
-| a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                                                                                                                                       |
-| anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http://` / `https://`                           | absolute URL                                      | path `/ext/{name}/{rest}` → that name's `EXT_UPSTREAMS` backend, **whatever the host** (the host is never connected to). Otherwise, if the URL is the `<base>` of an `EXT_PUBLIC_BASES` entry or starts with `<base>/`, the remainder goes to that name's backend. Otherwise it is a **general URL** (below): fetched directly from its host, pinned to the resolved address — **anywhere**, intranet or internet; the only refused destination is this server itself (`unknown_upstream` / `server_self`) |
+| `/ext/`                                          | same-server URL                                   | `/ext/{name}/{rest}` → the same backend as the absolute form. Unknown `name`, or no `name` at all (`/ext/`) → `unknown_upstream`                                                                                                                                                                                                                                                                                                                                                                           |
+| `/workspace/`, `/mnt/`                           | sandbox filesystem                                | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                                                                                                                                                                 |
+| `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form`                                                                                                                                    |
+| a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                                                                                                                                                                |
+| anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 **The root of a name (empty `rest`).** `/ext/{name}`, `/ext/{name}/`, and an
 `EXT_PUBLIC_BASES` root with or without its trailing slash (`<base>`, `<base>/`)
@@ -402,62 +402,85 @@ answers 404). Until 2026-10-03 the public-base root was answered `not_found`
 without asking the upstream, which made a tool report a live top page (the
 upstream answers `302`) as a broken link.
 
-**The intranet range (`EXT_INTRANET_CIDRS`).** Registered backends are not the
-only web a hospital has. A deployment may declare the address range of its
-intranet, and an absolute URL that matches **no** namespace above (not
-`/ext/{name}/…`, not under an `EXT_PUBLIC_BASES` root) is then fetched
-directly when its host's address lies in that range — with no registration,
-the way an ordinary browser on the intranet would ("the intranet is browsed
-like the ordinary web; a registered backend follows its own rules"). The
-default is **empty: there is no intranet range**, and such URLs stay
-`unknown_upstream` as before (fail closed). Nothing is baked in: the range
-differs per environment (e.g. a staging LAN on `172.16.0.0/16`, the
-air-gapped production network on a `10.` segment), so each deployment sets it
-in its own `.env`; several ranges are comma-separated.
+**General URLs (2026-10-03).** Registered backends are not the only web a
+hospital has, and the `url=` argument of a tool is a URL the way a browser
+understands it. An absolute `http(s)://` URL that matches **no** namespace above
+(not `/ext/{name}/…`, not under an `EXT_PUBLIC_BASES` root) is fetched directly
+from its host, with no registration, the way an ordinary browser would — on the
+intranet or on the internet. **The tool does not block by destination.**
+Whether a host can be reached is a property of the deployment's network: on the
+air-gapped production network the internet is simply unreachable
+(`upstream_unreachable`), and "the closed network does not reach outside" is a
+sentence for the prompt / skill, not a gate in the resolver. The only
+destination refused is **this server itself and the services co-located with
+it** (`unknown_upstream` / `server_self`) — e.g. the host's unauthenticated
+cage API, the sandbox API, a cloud metadata address.
+
+> History: on the same day an allowlist `EXT_INTRANET_CIDRS` ("fetch only
+> inside the declared intranet range") was added in the morning and removed in
+> the afternoon (ken). It gated a function by destination, and its fixed deny
+> entry for Docker's default bridge (`172.17.0.0/16`) was wrong anyway: the
+> production bridge is `10.106.x`, so a fixed CIDR could never have protected
+> the host while it risked excluding real intranet segments. There is no CIDR
+> variable left; the self-deny set below is computed at runtime.
 
 - **Hosts are usually IP literals.** The air-gapped production network has no
   DNS, so intranet URLs there look like `http://10.1.2.3/his-info/top.aspx`. An
-  IPv4 / IPv6 literal (bracketed `[fd00::7]` included) is checked against the
-  range as is, no lookup. A host **name** is resolved with `getaddrinfo` (so
-  `/etc/hosts` works); a name that does not resolve is `upstream_unreachable`
-  with `reason=unresolvable` (tools say "use the IP address when there is no
-  DNS"). Likewise an `EXT_PUBLIC_BASES` root may be an IP in production
+  IPv4 / IPv6 literal (bracketed `[fd00::7]` included) is checked as is, no
+  lookup. A host **name** is resolved with `getaddrinfo` (so `/etc/hosts`
+  works); a name that does not resolve is `upstream_unreachable` with
+  `reason=unresolvable` (tools say "use the IP address when there is no DNS").
+  Likewise an `EXT_PUBLIC_BASES` root may be an IP in production
   (`his=http://10.1.2.3/his-info`).
 - **The connection is pinned to the resolved address.** The resolver connects
   to the IP it checked and sends the original host in the `Host` header (and as
   SNI for https); it never lets the HTTP client resolve the name a second
-  time, so a DNS-rebinding answer cannot steer the fetch outside the range. A
-  name that resolves to both an in-range address and a denied one is refused.
-- **Always-denied addresses** are excluded even if the range covers them
-  (`ext_upstreams.INTRANET_DENIED_NETWORKS`): loopback (`127.0.0.0/8`, `::1`),
-  link-local (`169.254.0.0/16` — including the cloud metadata address
-  `169.254.169.254` — and `fe80::/10`), Docker's default bridge
-  **`172.17.0.0/16` only** (so `172.16.0.0/16` is untouched; declaring
-  `172.16.0.0/12` works but loses `172.17.x`), `0.0.0.0/8`, multicast, the
-  reserved `240.0.0.0/4` (incl. broadcast), `::`, `ff00::/8`, and the AWS IPv6
-  metadata address. A declared range overlapping one of these is logged as a
-  boot warning; the overlap is simply never fetched.
-- **Redirects are followed inside the range, at most 3 times.** The `Location`
-  (absolute or relative) is resolved as a URL by the same rules: an intranet
-  host → followed (pinned again); a URL that lands in a registered namespace →
+  time, so a DNS-rebinding answer cannot steer the fetch to the server itself
+  (`ext_upstreams.pin_address`). A name that resolves to both an outside
+  address and a self address is refused (`server_self`).
+- **The self-deny set is computed at runtime, not configured**
+  (`ext_upstreams.self_addresses` / `is_self_address`, cached 60 s). It is
+  the union of (1) addresses that can never be a legitimate destination —
+  loopback (`127.0.0.0/8`, `::1`), unspecified (`0.0.0.0/8`, `::`), link-local
+  (`169.254.0.0/16`, which includes the cloud metadata address
+  `169.254.169.254`, and `fe80::/10`), multicast and the reserved
+  `240.0.0.0/4` — **this is not a network policy: no private range (`10/8`,
+  `172.16/12`, `192.168/16`) and no Docker bridge range is listed, because on
+  the production network those are the real intranet** — and (2) what this
+  process discovers about its own environment: every address on its own
+  interfaces (`/proc/net/fib_trie` for IPv4, `/proc/net/if_inet6` for IPv6,
+  plus `getaddrinfo(gethostname())`), the IPv4 / IPv6 default gateway
+  (`/proc/net/route`, `/proc/net/ipv6_route` — inside a container this is the
+  Docker bridge's host side, i.e. where co-located host services listen), and
+  the resolutions of `host.docker.internal` / `gateway.docker.internal` when
+  they resolve. Known limits: outside Linux there is no `/proc`, so only the
+  hostname's addresses are found and the gateway is not; a host service bound
+  to a **different** host interface (not the bridge gateway, not a container
+  address — e.g. the host's LAN address) is not discovered, so such a service
+  must carry its own authentication (as the sandbox does with `SANDBOX_TOKEN`).
+  The discovered set is logged once at boot.
+- **Redirects are followed, at most 3 times.** The `Location` (absolute or
+  relative) is resolved as a URL by the same rules: a general URL → followed
+  (pinned again, same self check); a URL that lands in a registered namespace →
   fetched once through that backend (the backend's rules — no further
-  redirect); anything else (a host outside the range or on the deny list, a
-  non-http(s) scheme, control characters) → `upstream_status` with the `3xx`
-  status and `reason=redirect_outside`. A fourth redirect →
-  `upstream_status` with `reason=too_many_redirects`. Registered http backends
-  keep their behaviour: their `3xx` is `upstream_status` without a `reason`
-  and is not followed.
+  redirect); a `Location` pointing at this server itself → `upstream_status`
+  with the `3xx` status and `reason=redirect_self`; a `Location` that is not a
+  URL this server resolves (non-http(s) scheme, control characters, an unknown
+  `/ext/{name}/`) → `upstream_status` with the `3xx` status and no reason (a
+  redirect that was not followed). A fourth redirect → `upstream_status` with
+  `reason=too_many_redirects`. Registered http backends keep their behaviour:
+  their `3xx` is `upstream_status` without a `reason` and is not followed.
 - Size cap (`max_bytes`), content-type (upstream header), `404 → not_found`,
   other non-2xx → `upstream_status`, connection failure →
   `upstream_unreachable` are the same as for an http backend. No cookie or
   credential is sent.
-- `route_of_url` returns such a URL as `UrlRoute(kind="intranet", name=None,
+- `route_of_url` returns such a URL as `UrlRoute(kind="general", name=None,
 …)` without resolving the name (it stays pure); see below. The bridges
   (`mounted_path_for_url` / `url_for_mounted_path`) and the `/ext` gate are
-  unaffected — an intranet URL has no sandbox counterpart.
+  unaffected — a general URL has no sandbox counterpart.
 - Internal calls that tools make themselves (e.g. a deployment tool talking to
   its own API over the Docker bridge) do not go through the resolver and are
-  unaffected by the deny list.
+  unaffected by the self-deny set.
 
 **Fragments on `/api/v1/files/{id}/content`.** Only a trailing `#page=N` means
 something (read with `split_page`); any other fragment is ignored and the URL
@@ -468,7 +491,7 @@ fragment, so every tool treats `…/content#section` alike.
 `route_of_url(url) -> (UrlRoute | None, RefError | None)` runs the same single
 routing step as `resolve_url` and returns it: `UrlRoute(name, rel, query,
 public_base, origin, ext_form, kind="upstream")` plus the properties
-`relative`, `intranet` and `page_url` — the upstream
+`relative`, `general` and `page_url` — the upstream
 `name` (present in `EXT_UPSTREAMS`), the path under it (`rel`, as written in the
 URL, i.e. still percent-encoded, no leading `/`; `""` for the root of a name), `query` (`"?a=b"` or `""`),
 that name's `EXT_PUBLIC_BASES` root or `None`, the `origin` (`"scheme://host"`
@@ -485,19 +508,19 @@ name with a public base → that base, whether the input was relative or absolut
 upstream 3xx into a 502); otherwise relative input → `/ext/{name}`, absolute →
 `{origin}/ext/{name}`.
 
-A URL that belongs to no registered namespace in a deployment with
-`EXT_INTRANET_CIDRS` set comes back as **`kind="intranet"`** with
-`name=None`, `public_base=None`, `ext_form=False`, `rel` = the URL path
-without its leading `/` (`""` for `http://h/`), and `page_url` = the URL itself
-without fragment (`{origin}/{rel}{query}`). Such a page has no backend root:
-its in-page links resolve against `page_url`, as on the ordinary web. Because
-the function is pure it does **not** resolve the host — this is the one place
-where it can succeed on an input `resolve_url` would refuse (a host outside the
-range is `unknown_upstream` / `outside_intranet` only at fetch time); calling
-it after a successful `resolve_url`, as intended, never disagrees. Code written
-against the previous shape keeps working for registered routes (`kind`
-defaults to `"upstream"`, `page_url` is `None` there); a caller must check
-`route.intranet` (or `route.name is None`) before building `/ext/{name}`.
+An absolute URL that belongs to no registered namespace comes back as
+**`kind="general"`** with `name=None`, `public_base=None`, `ext_form=False`,
+`rel` = the URL path without its leading `/` (`""` for `http://h/`), and
+`page_url` = the URL itself without fragment (`{origin}/{rel}{query}`). Such a
+page has no backend root: its in-page links resolve against `page_url`, as on
+the ordinary web. Because the function is pure it does **not** resolve the host
+— this is the one place where it can succeed on an input `resolve_url` would
+refuse (a host that is this server itself is `unknown_upstream` / `server_self`
+only at fetch time); calling it after a successful `resolve_url`, as intended,
+never disagrees. Code written against the previous shape keeps working for
+registered routes (`kind` defaults to `"upstream"`, `page_url` is `None`
+there); a caller must check `route.general` (or `route.name is None`) before
+building `/ext/{name}`.
 
 **Bridging a URL and a sandbox path.** The same file can have both names (a
 file backend whose root lives under `/mnt`, e.g. `EXT_UPSTREAMS=cage=file:///mnt/cage`:
@@ -580,26 +603,25 @@ values are a closed set too, carried by `unknown_upstream`, `upstream_status`
 and `upstream_unreachable` (`None` on every other code and in every other
 case):
 
-| `code`                 | `reason`               | When                                                                                                                                                                                                                                                    |
-| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unknown_upstream`     | `unknown_name`         | `/ext/{name}/…` (relative or absolute) or an `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend                                                                                                                                         |
-| `unknown_upstream`     | `not_ext_form`         | a relative `/ext/…` URL from which **no name can be taken**: `/ext/`, `/ext//x`, or a name outside `[a-z0-9_-]+` (`/ext/CAGE/x`). `/ext/{name}` and `/ext/{name}/` are well-formed (the root of that name) and never get this reason                    |
-| `unknown_upstream`     | `outside_public_bases` | an absolute URL that is neither `/ext/{name}/…` nor under an `EXT_PUBLIC_BASES` root, in a deployment **without** `EXT_INTRANET_CIDRS` (as before)                                                                                                      |
-| `unknown_upstream`     | `outside_intranet`     | same, in a deployment **with** `EXT_INTRANET_CIDRS`, but the host's address is outside the range or on the always-denied list (an external site, another LAN, loopback). Fails even where the server could reach the internet — widen the range instead |
-| `upstream_status`      | `redirect_outside`     | an intranet URL answered `3xx` to a `Location` that cannot be followed: host outside the range / denied, non-http(s), control characters. `status` is the `3xx`. Registered backends never get this (their `3xx` carries no reason)                     |
-| `upstream_status`      | `too_many_redirects`   | an intranet URL redirected more than 3 times                                                                                                                                                                                                            |
-| `upstream_unreachable` | `unresolvable`         | an intranet URL whose host **name** does not resolve (`getaddrinfo`; the air-gapped production network has no DNS — use the IP literal)                                                                                                                 |
+| `code`                 | `reason`             | When                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unknown_upstream`     | `unknown_name`       | `/ext/{name}/…` (relative or absolute) or an `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend                                                                                                                                                                                                                                                                                                     |
+| `unknown_upstream`     | `not_ext_form`       | a relative `/ext/…` URL from which **no name can be taken**: `/ext/`, `/ext//x`, or a name outside `[a-z0-9_-]+` (`/ext/CAGE/x`). `/ext/{name}` and `/ext/{name}/` are well-formed (the root of that name) and never get this reason                                                                                                                                                                                |
+| `unknown_upstream`     | `server_self`        | a general URL (absolute, matching no namespace) whose host — an IP literal, or any of a name's resolved addresses — is **this server itself or a co-located service** (`is_self_address`: loopback, link-local / metadata, own interfaces, default gateway, `host.docker.internal`). The only destination a general URL is refused; an external site never gets this (unreachable hosts are `upstream_unreachable`) |
+| `upstream_status`      | `redirect_self`      | a general URL answered `3xx` to a `Location` pointing at this server itself. `status` is the `3xx`. Registered backends never get this (their `3xx` carries no reason); a `Location` that is not a resolvable URL (non-http(s), control characters, unknown `/ext/{name}/`) is `upstream_status` with the `3xx` and no reason                                                                                       |
+| `upstream_status`      | `too_many_redirects` | a general URL redirected more than 3 times                                                                                                                                                                                                                                                                                                                                                                          |
+| `upstream_unreachable` | `unresolvable`       | a general URL whose host **name** does not resolve (`getaddrinfo`; the air-gapped production network has no DNS — use the IP literal)                                                                                                                                                                                                                                                                               |
 
-| `code`                  | When                                                                                                                                                                                                                                                                                            | Extra fields                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                                                     |                                           |
-| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                                           |                                           |
-| `unknown_upstream`      | `/ext/{name}/…` (relative or absolute) or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** an absolute URL matching no namespace and not in the intranet range (external site), **or** a relative `/ext/…` with no usable `name` (`/ext/`). `reason` tells them apart | `reason` (see above)                      |
-| `not_found`             | file backend / `/mnt/…`: missing, a directory (incl. the root of a file backend, `/ext/{name}/`), or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                                                                                | `status=404` for http                     |
-| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                                        | `size`, `limit`, `size_exact` (see below) |
-| `upstream_status`       | http backend or intranet URL answered non-2xx other than 404 — including `3xx` redirects (not followed for a backend; for an intranet URL only the ones that could not be followed, see `reason`)                                                                                               | `status`, `reason` (intranet only)        |
-| `upstream_unreachable`  | http backend / intranet connection failure, timeout, `InvalidURL`, or an intranet host name that does not resolve (`reason=unresolvable`)                                                                                                                                                       | `reason` (intranet only)                  |
-| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                                                        | `status` when the sandbox answered        |
+| `code`                  | When                                                                                                                                                                                                                                                       | Extra fields                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                |                                           |
+| `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                      |                                           |
+| `unknown_upstream`      | `/ext/{name}/…` (relative or absolute) or `EXT_PUBLIC_BASES` URL whose `name` has no `EXT_UPSTREAMS` backend, **or** a general URL whose host is this server itself, **or** a relative `/ext/…` with no usable `name` (`/ext/`). `reason` tells them apart | `reason` (see above)                      |
+| `not_found`             | file backend / `/mnt/…`: missing, a directory (incl. the root of a file backend, `/ext/{name}/`), or resolves outside the root (symlink escape); http backend `404`; sandbox `/files/read` `404`                                                           | `status=404` for http                     |
+| `too_large`             | over the size cap (`max_bytes`, default `EXT_INLINE_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                   | `size`, `limit`, `size_exact` (see below) |
+| `upstream_status`       | http backend or general URL answered non-2xx other than 404 — including `3xx` redirects (not followed for a backend; for a general URL only the ones that could not be followed, see `reason`)                                                             | `status`, `reason` (general URLs only)    |
+| `upstream_unreachable`  | http backend / general URL connection failure, timeout, `InvalidURL`, or a general URL's host name that does not resolve (`reason=unresolvable`)                                                                                                           | `reason` (general URLs only)              |
+| `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                   | `status` when the sandbox answered        |
 
 `too_large.size_exact` says whether `size` is the real size or only a lower
 bound: `True` when it comes from `stat` (file backend, `/mnt/…`, sandbox `413`),
@@ -610,20 +632,19 @@ unknown. On every other code it is meaningless and stays `False`. Tool hint:
 when `False`, say "about N MB or more" rather than quoting `size` as the file's
 size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 
-| Var                    | Kind | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------- | ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `EXT_PUBLIC_BASES`     | env  | empty              | comma-separated `name=baseURL` (same format as `EXT_UPSTREAMS`, http(s) only): the public root of the original intranet site for that name (e.g. `his=http://his-info.example/docs`; on the air-gapped production network, which has no DNS, an IP literal such as `his=http://10.1.2.3/his-info`). Absolute URLs under `<base>/` resolve via that name's `EXT_UPSTREAMS` backend; the name must also exist there                                                                                                                                                                                                                                                  |
-| `EXT_INTRANET_CIDRS`   | env  | empty = no range   | comma-separated CIDRs declaring the deployment's **intranet range** (a bare address is a `/32` / `/128`). Absolute URLs matching no namespace are fetched directly when the host's address is inside, pinned to that address, redirects followed inside the range up to 3 times. **Differs per environment and is set in each deployment's `.env`** — e.g. `172.16.0.0/16` on a staging LAN, `10.0.0.0/8` (or a narrower segment the operators choose) on the production network; several ranges: `10.1.0.0/16,10.2.0.0/16`. Loopback, link-local, `172.17.0.0/16` etc. are always excluded (see "The intranet range"); invalid entries are dropped with a warning |
-| `EXT_FILE_SCOPES`      | env  | empty = whole root | comma-separated `name=subdir` (same format; repeat the name for several): restrict what a **file backend** serves to those directories under its root (e.g. `cage=static`). See "Serving scope" above                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining context images (URL and filesystem references alike)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Var                    | Kind | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ---- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT_UPSTREAMS`        | env  | empty = disabled   | comma-separated `name=value` allowlist; value is an http(s) base URL or `file:///abs/path` (e.g. `cage=file:///mnt/cage,his=http://172.17.0.1:13303`); invalid entries are dropped with a warning                                                                                                                                                                                                                 |
+| `EXT_PUBLIC_BASES`     | env  | empty              | comma-separated `name=baseURL` (same format as `EXT_UPSTREAMS`, http(s) only): the public root of the original intranet site for that name (e.g. `his=http://his-info.example/docs`; on the air-gapped production network, which has no DNS, an IP literal such as `his=http://10.1.2.3/his-info`). Absolute URLs under `<base>/` resolve via that name's `EXT_UPSTREAMS` backend; the name must also exist there |
+| `EXT_FILE_SCOPES`      | env  | empty = whole root | comma-separated `name=subdir` (same format; repeat the name for several): restrict what a **file backend** serves to those directories under its root (e.g. `cage=static`). See "Serving scope" above                                                                                                                                                                                                             |
+| `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining context images (URL and filesystem references alike)                                                                                                                                                                                                                                                                                                                         |
 
-Setting **any** of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS`
-also registers the builtin `builtin_fetch_url` tool (§5.7) — with all three
-empty there is nothing a URL could resolve to, so the tool is absent rather
-than always failing (the same gate style as `SANDBOX_URL` → `builtin_sandbox`).
-`builtin_feed_image` does not depend on these: it is always registered, since
-`file_id` and `path` references work without any `/ext` configuration.
+These variables only define the **registered** upstreams. `builtin_fetch_url`
+and `builtin_feed_image` (§5.7) are always registered: since 2026-10-03 the
+`url=` argument fetches any `http(s)://` URL (see "General URLs"), so an empty
+configuration does not make the tool always fail (until that day
+`builtin_fetch_url` was gated on any of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` /
+the removed `EXT_INTRANET_CIDRS`).
 
 ### 3.9 Audio (STT / TTS)
 
@@ -1162,11 +1183,14 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     Always registered.
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link
-    list, for browsing intranet web that no document corpus holds. `url` is
+    list, for browsing web that no document corpus holds. `url` is
     resolved by the shared resolver (`resolve_url`, §3.8) and nothing else —
-    the tool has no allowlist and no on/off valve of its own; what it can reach
-    is exactly `/ext/{name}/…` (relative or on any host), URLs under
-    `EXT_PUBLIC_BASES`, URLs inside `EXT_INTRANET_CIDRS`, and this server's
+    the tool has no allowlist and no on/off valve of its own; it accepts
+    `/ext/{name}/…` (relative or on any host), URLs under `EXT_PUBLIC_BASES`
+    (both through the registered backend), **any other scheme-qualified
+    `http(s)://` URL** (fetched directly — intranet or internet, whatever the
+    deployment's network reaches; the only refused destination is this server
+    itself, §3.8 "General URLs"), and this server's
     `/api/v1/files/{id}/content` (owner check). HTML is flattened in the server
     with lxml (generic: layout tables are not turned into Markdown tables, the
     charset is the `Content-Type` one when present, otherwise utf-8 — no
@@ -1176,21 +1200,22 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     turns to `feed_image`. The link list and the `# url` line are rewritten to
     the URL a user can open — the `EXT_PUBLIC_BASES` root when the name has
     one, the input's own `/ext/{name}/…` form otherwise, the page's own URL for
-    an intranet page (`route_of_url`, §3.8). `query` keeps only the body and
+    a general URL (`route_of_url`, §3.8). `query` keeps only the body and
     link lines containing it (substring; case- and full/half-width-insensitive);
     `offset` / `limit` (default 8000 chars) window the text, the result naming
     the next offset. Valves: `max_fetch_mb` (25; `max_mb` per call may raise it
     up to `max_fetch_mb_ceiling`, 200), `max_output_chars` (40000; also caps
     `limit`), `pdf_text_char_threshold` (100).
-    **Registered only when at least one of `EXT_UPSTREAMS` /
-    `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` is set** (§3.8); with all three
-    empty no URL could resolve, so the tool is absent (and an existing row is
-    pruned on the next boot), the same way as `builtin_sandbox` below.
+    **Always registered** (since 2026-10-03; before that it was gated on any
+    of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / the removed `EXT_INTRANET_CIDRS`,
+    because without them no URL could resolve). The docstring the model sees
+    names the registered `EXT_PUBLIC_BASES` roots as the sites whose link
+    lists get those roots — not as an allowlist.
     Both tools word their failures per `RefError.code` / `reason` and the fixed
     argument-form sentences through `nucllei/utils/ref_errors.py`, shared with
     `send_to_workspace`. Until 2026-10-03 they were deployment-layer tools in
     prism-hu/llens (`nucllei/tools/feed_image.py` / `fetch_url.py`); they moved
-    here because every rule they enforce (resolution, allowlist, intranet range,
+    here because every rule they enforce (resolution, registered upstreams,
     redirects, size caps, link roots) already lived in `utils/image_refs.py`,
     so the shells in llens only duplicated those rules and their error texts,
     and had to carry "this nucllei version lacks X" branches. What stays in the
@@ -1258,21 +1283,22 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     above can read:
     `/ext/{name}/…` (relative or on any host) and URLs under
     `EXT_PUBLIC_BASES`, through the `EXT_UPSTREAMS` backend with no redirect
-    followed; and, when the deployment declares its intranet range
-    (`EXT_INTRANET_CIDRS`, §3.8), any URL whose host is inside that range,
-    fetched directly and pinned to the resolved address, redirects followed
-    inside the range up to 3 times. No cookie is forwarded.
-    **Any other URL is refused (`unknown_upstream`); it is not a generic
-    web fetcher** — a URL outside the intranet range (the internet, another
-    LAN) fails even where the server could reach it; widen the range to allow
-    it. (Until 2026-10-03 the tool fetched any LAN URL outside a CIDR
-    deny-list — valve `url_blocked_cidrs`, now removed; between the move to the
-    shared resolver and `EXT_INTRANET_CIDRS` nothing outside the registered
-    upstreams could be imported.) Failures are reported
+    followed; and any other scheme-qualified `http(s)://` URL (§3.8 "General
+    URLs"), fetched directly from its host and pinned to the resolved address,
+    redirects followed up to 3 times — wherever the deployment's network
+    reaches. No cookie is forwarded. **The only refused destination is this
+    server itself and its co-located services** (`unknown_upstream` /
+    `server_self`, computed at runtime). (History: until 2026-10-03 the tool
+    fetched any LAN URL outside a CIDR deny-list — valve `url_blocked_cidrs`,
+    removed; the move to the shared resolver then made it refuse everything
+    outside the registered upstreams; the same day an `EXT_INTRANET_CIDRS`
+    allowlist was added and withdrawn — ken decided the tool must not gate by
+    destination.) Failures are reported
     per `RefError.code` and `reason` (missing / oversize with actual size and
-    limit / redirect — not followed, left the range, too many / upstream status /
-    unreachable or unresolvable name / outside the allowed upstreams or the
-    intranet range), each with a fixed sentence that never inspects the value.
+    limit / redirect — not followed, to the server itself, too many / upstream
+    status / unreachable or unresolvable name / outside the registered
+    upstreams or the server itself), each with a fixed sentence that never
+    inspects the value.
     Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
     When the URL resolves to a **file backend whose file lives under `/mnt`**
     (`image_refs.mounted_path_for_url`), nothing is copied: the tool answers

@@ -291,12 +291,15 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      **向き先の valve は無い**(`sandbox_url` は 2026-09-05 に廃止 — env のみ)。
      旧 dev DB に `sandbox_url` 行が残っていても無視されるだけで、掃除は要らない。
    - preset への接続(`meta.toolIds` に `builtin_sandbox`)は必要。E2E スクリプトが冪等に張る。
-   - **同型のゲートが `builtin_fetch_url` にもある**(2026-10-03): `EXT_UPSTREAMS` /
-     `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のどれか 1 つでも設定して起動すれば生え、
-     3 つとも空なら prune で消える。`builtin_feed_image` は無条件(file_id / path 経路は
-     `/ext` 設定なしで動く)。dev で院内 Web の代わりに試すなら、ローカルの http サーバを
-     `EXT_UPSTREAMS=x=http://127.0.0.1:<port>` で登録するのが手軽(vite dev の proxy に
-     `/ext` が無い件は [[builtin-tools]] の該当節)。
+   - **`builtin_fetch_url` / `builtin_feed_image` は無条件で生える**(2026-10-03 午後。
+     同日の朝は fetch_url に `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` の
+     ゲートがあったが、`url=` が http(s) URL ならどこでも取りに行く決定と一緒に外した —
+     [[builtin-tools]]「一般の URL」)。dev では `fetch_url(url="https://example.com/")` が
+     そのまま通る。**`http://127.0.0.1:<port>` は自分自身として断られる**(loopback は固定で
+     拒否)ので、ローカルの http サーバを院内 Web の代わりに試すなら
+     `EXT_UPSTREAMS=x=http://127.0.0.1:<port>` で登録して `/ext/x/…` で叩く(登録した配信元は
+     backend 経由なので自分自身の判定を通らない。vite dev の proxy に `/ext` が無い件は
+     [[builtin-tools]] の該当節)。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
      `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは
      `docker build -t nucllei-sandbox:dev ./sandbox`、公開は **`127.0.0.1:13302->8000`**
@@ -371,8 +374,8 @@ NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py tools/medic
 - **`tools/sandbox` はもう sync 対象に無い**(#114、2026-09-03)。sandbox tool は nucllei の
   組み込み `builtin_sandbox` になり、llens 側の custom tool は撤去された
 - **`tools/feed_image` / `tools/fetch_url` も sync 対象に無い**(2026-10-03)。組み込み
-  `builtin_feed_image`(常時)/ `builtin_fetch_url`(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` /
-  `EXT_INTRANET_CIDRS` のどれかを設定した起動で生える)になった。dev DB に旧 custom の
+  `builtin_feed_image` / `builtin_fetch_url`(どちらも常時。fetch_url の env ゲートは同日中に
+  外した)になった。dev DB に旧 custom の
   `feed_image` / `fetch_url` 行が残っていれば手削除し、preset の `meta.toolIds` を builtin id に
   張り替える(下の 2026-07-22 追補と同じ罠 — `nuc-sync` は custom を prune しない)。
   詳細は [[builtin-tools]]「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」
