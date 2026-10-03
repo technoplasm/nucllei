@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -495,120 +494,22 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 # 消費者のいない upstream 残骸のため撤去。PWA は ENABLE_PWA 一本(DATA_DIR 節参照)。
 
 ####################################
-# EXT_UPSTREAMS(#97 認証付き上流プロキシ)
+# /ext(参照資料の配信)と url= の一般 URL 取得
 ####################################
 
-_EXT_UPSTREAM_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
+# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): コンテナの `/mnt`
+# (`utils/image_refs.RO_MOUNT_ROOT`)に volume したものを、そのままの相対パスで
+# `/ext/<rel>` に read-only 配信する(`/mnt/cage/static/X` ⇔ `/ext/cage/static/X`。
+# ファイルのみ、ディレクトリ一覧は出さない)。何を配信するかは配備が `/mnt` に何を mount
+# するかで決める。sandbox も同じ置き場を `/mnt` に bind する規約(#138)なので、sandbox の
+# `/mnt/X` が nucllei 側にも実在すれば URL `/ext/X` と同じ実体(utils/image_refs の橋渡し)。
+# 2026-10-03 までの `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信
+# 範囲)・`EXT_PUBLIC_BASES`(原本 URL のルート)— と同日に一度置いた `EXT_DIRS` — は撤去。
+# `url=` の一般 URL がどこでも取れるようになり、http 中継と原本ルートの対応は要らなくなった。
 
 
-def _parse_name_map(value: str, label: str, schemes: tuple[str, ...]) -> dict[str, str]:
-    """ "name=値" のカンマ区切りを {name: 値} にパースする(EXT_UPSTREAMS /
-    EXT_PUBLIC_BASES 共通の書式)。
-
-    name は [a-z0-9_-]+。値は `schemes` のいずれかで始まること。不正エントリは
-    log.warning して捨てる(1 エントリの typo で全体を殺さない)。末尾スラッシュは
-    落として正規化する(パス連結時の "//" を避ける。`file:///` 単体は root "/" の
-    意味になり捨てられる — 配備で root を / にする正当な用途は無い)。
-    """
-    parsed: dict[str, str] = {}
-    for entry in (value or "").split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        name, sep, base = entry.partition("=")
-        name = name.strip()
-        base = base.strip().rstrip("/")
-        if (
-            not sep
-            or not _EXT_UPSTREAM_NAME_PATTERN.match(name)
-            or not base.startswith(schemes)
-        ):
-            log.warning(f"{label}: ignoring invalid entry {entry!r}")
-            continue
-        parsed[name] = base
-    return parsed
-
-
-def parse_ext_upstreams(value: str) -> dict[str, str]:
-    """`EXT_UPSTREAMS` をパースする。値は http/https の base URL(HTTP 中継)か
-    `file:///abs/path`(ローカル root からの静的配信、#139)のどちらか — どちらの
-    backend かは値の形だけで決まり、別 env は増やさない。書式は `_parse_name_map`。
-    """
-    return _parse_name_map(value, "EXT_UPSTREAMS", ("http://", "https://", "file:///"))
-
-
-def parse_ext_public_bases(value: str) -> dict[str, str]:
-    """`EXT_PUBLIC_BASES` をパースする。値は http/https の絶対 URL のみ(原本 URL の
-    ルート。file:// は「ブラウザが開く URL」でないので受けない)。書式は
-    EXT_UPSTREAMS と同じ `_parse_name_map`。
-    """
-    return _parse_name_map(value, "EXT_PUBLIC_BASES", ("http://", "https://"))
-
-
-# "/ext/{name}/**" の backend allowlist(例 "cage=file:///mnt/cage,his=http://172.17.0.1:13303")。
-# 既定は空 = 機能無効。SSRF の真実源はこの env 一本 — feed の参照解決
-# (utils/image_refs.py)も同じ map を引く(別 allowlist env は作らない)。
-EXT_UPSTREAMS = parse_ext_upstreams(os.environ.get("EXT_UPSTREAMS", ""))
-
-# 院内 web の原本 URL のルート(例 "his=http://his-info.example/docs")。モデルが tool に
-# 渡す**絶対 URL** が `<base>/` に前方一致すれば、その name の EXT_UPSTREAMS backend に
-# 残りを渡して解決する(utils/image_refs.py)。name は EXT_UPSTREAMS 側にも要る —
-# ここは「どの URL がどの backend の物か」の対応だけで、到達先(SSRF の真実源)は
-# 相変わらず EXT_UPSTREAMS 一本。既定は空 = 絶対 URL は自オリジンの /ext/ 形しか解決しない。
-EXT_PUBLIC_BASES = parse_ext_public_bases(os.environ.get("EXT_PUBLIC_BASES", ""))
-
-
-def parse_ext_file_scopes(value: str) -> dict[str, tuple[str, ...]]:
-    """`EXT_FILE_SCOPES` をパースする。書式は EXT_UPSTREAMS と同じ `name=値` のカンマ区切りで、
-    値は **その name の file backend の root からの相対ディレクトリ**(例 `cage=static`)。
-    同じ name を複数回書けば複数のディレクトリ(`cage=static,cage=figs`)。
-
-    name が 1 回でも現れたら、その name は「列挙したディレクトリの下だけ配信する」に
-    なる。値が不正(空・絶対・`.` `..` セグメント・バックスラッシュ・制御文字)な
-    エントリは log.warning して捨てるが、**name の絞り込み自体は有効のまま**(fail closed —
-    typo で root 全体の配信に戻さない。有効なエントリが 1 つも無ければ何も配信しない)。
-    name の形が不正なエントリはどの backend にも対応しないので捨てるだけ。
-    """
-    parsed: dict[str, list[str]] = {}
-    for entry in (value or "").split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        name, sep, sub = entry.partition("=")
-        name = name.strip()
-        sub = sub.strip().strip("/")
-        if not sep or not _EXT_UPSTREAM_NAME_PATTERN.match(name):
-            log.warning(f"EXT_FILE_SCOPES: ignoring invalid entry {entry!r}")
-            continue
-        scopes = parsed.setdefault(name, [])
-        if (
-            not sub
-            or "\\" in sub
-            or any(ord(c) < 0x20 or ord(c) == 0x7F for c in sub)
-            or any(seg in ("", ".", "..") for seg in sub.split("/"))
-        ):
-            log.warning(
-                f"EXT_FILE_SCOPES: ignoring invalid entry {entry!r} "
-                f"(/ext/{name}/ stays restricted to its other entries)"
-            )
-            continue
-        if sub not in scopes:
-            scopes.append(sub)
-    return {name: tuple(scopes) for name, scopes in parsed.items()}
-
-
-# file backend(`EXT_UPSTREAMS` の `name=file:///…`)が配信する範囲を、root 直下の
-# ディレクトリに絞る(例 "cage=static")。既定は空 = root 全体(従来どおり)。root を
-# sandbox への read-only bind と共有していて、root の下に「利用者に配信する物」と
-# 「sandbox で読むだけの物」が同居する配備のための設定 — URL の形(`/ext/{name}/static/X`)を
-# 変えずに配信範囲だけを狭める。規則は `utils/ext_upstreams.ext_file_served` 1 箇所で、
-# /ext ゲート・resolver・URL ⇔ sandbox パスの橋渡しのすべてに同じに効く。
-# http backend の name に書いても効かない(起動時に WARNING)。
-EXT_FILE_SCOPES = parse_ext_file_scopes(os.environ.get("EXT_FILE_SCOPES", ""))
-
-
-def parse_ext_self_addresses(raw: str) -> frozenset:
-    """`EXT_SELF_ADDRESSES` をパースする — カンマ区切りの IP アドレス(IPv4 / IPv6)。
+def parse_self_addresses(raw: str) -> frozenset:
+    """`SELF_ADDRESSES` をパースする — カンマ区切りの IP アドレス(IPv4 / IPv6)。
     url= の一般 URL で「このサーバ自身」として取りに行かないアドレスに**追加**する
     (`utils/ext_upstreams.is_self_address`)。コンテナからは host の物理 / VPN
     インタフェースの IP を列挙できない(見えるのは bridge の gateway だけ)ので、host の
@@ -625,18 +526,21 @@ def parse_ext_self_addresses(raw: str) -> frozenset:
             found.add(ipaddress.ip_address(entry))
         except ValueError:
             log.warning(
-                f"EXT_SELF_ADDRESSES: ignoring invalid entry {entry!r} (IP アドレスのみ。CIDR は不可)"
+                f"SELF_ADDRESSES: ignoring invalid entry {entry!r} (IP アドレスのみ。CIDR は不可)"
             )
     return frozenset(found)
 
 
-EXT_SELF_ADDRESSES = parse_ext_self_addresses(os.environ.get("EXT_SELF_ADDRESSES", ""))
+# 2026-10-03 までの名前は EXT_SELF_ADDRESSES(同日に EXT_ 接頭辞を外した — /ext とは無関係)
+SELF_ADDRESSES = parse_self_addresses(os.environ.get("SELF_ADDRESSES", ""))
 
 
-# feed(context_images)の参照(絶対 URL / sandbox fs パス)のオンデマンド解決(utils/image_refs.py —
-# ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。
-EXT_INLINE_MAX_BYTES = os.environ.get("EXT_INLINE_MAX_BYTES", "")
+# 参照(URL / sandbox fs パス)の解決(utils/image_refs.py — ローカル読み / サーバ側 fetch →
+# base64)の既定のサイズ上限。既定 25MB(sandbox 転送上限と同値)。呼び手が `max_bytes` で
+# 上書きできる(fetch_url / send_to_workspace の valve)。2026-10-03 までの名前は
+# EXT_INLINE_MAX_BYTES(同日に改名 — inline だけの上限ではない)。
+FETCH_MAX_BYTES = os.environ.get("FETCH_MAX_BYTES", "")
 try:
-    EXT_INLINE_MAX_BYTES = int(EXT_INLINE_MAX_BYTES)
+    FETCH_MAX_BYTES = int(FETCH_MAX_BYTES)
 except Exception:
-    EXT_INLINE_MAX_BYTES = 25 * 1024 * 1024
+    FETCH_MAX_BYTES = 25 * 1024 * 1024

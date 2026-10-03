@@ -549,8 +549,8 @@ admin 管理で per-user ではない)/ `resolve_path(path, user_id, *, max_byte
 llens(cage / read_doc)が相対 `/ext/…` を返し始めると、feed が旧 resolver の `relative_ext` で落ちる**
 — nucllei を先に(または同じ機会に)入れ替える。
 
-未対応(dev だけの話): vite dev(:5173)の proxy に `/ext` が無いので、dev で `EXT_UPSTREAMS` を
-設定しても FE 経由の `/ext/…` は 404 になる(本番は単一オリジンなので関係ない)。
+未対応(dev だけの話): vite dev(:5173)の proxy に `/ext` が無いので、dev でホストの `/mnt` に
+資料を置いても FE 経由の `/ext/…` は 404 になる(本番は単一オリジンなので関係ない)。
 
 ## fetch_from_workspace(path) が `/mnt/…` を受ける(2026-10-03)— パス → 見せられる形の橋渡し
 
@@ -951,4 +951,70 @@ llens への申し送り(配備層):
 - cage の API がホストの `0.0.0.0:13303` で認証無しなら、nucllei コンテナからは
   bridge のゲートウェイ経由で届きうる — ゲートウェイは実行時発見で拒否されるが、ホストの
   LAN 側アドレス経由は拾えない(上の限界)。cage 側の認証を検討。
+
+## 改訂(2026-10-03 夕)— `/ext` の設定を全部無くす: `/mnt` をそのまま配信 / `SELF_ADDRESSES` / `FETCH_MAX_BYTES`
+
+ken 決定(同日 3 段階で収束): **「nucllei の `/mnt` に volume したものをそのまま `/ext/` で配信する」**。
+上の節々にある `EXT_UPSTREAMS`(name ごとの http 中継 / `file://` root)・`EXT_FILE_SCOPES`
+(root からの相対の配信範囲)・`EXT_PUBLIC_BASES`(原本 URL のルート → リンク一覧のルート)は
+**全部撤去**(途中で `EXT_DIRS`(`name=/abs/path` → docker volume 風 `<dir>:<mount>`)に畳む案を
+2 段階経て、最後に「設定そのものが要らない」に落ちた)。URL の形は変わらない(`/ext/cage/static/X`)。
+
+理由: 同日の「`url=` は http(s) URL ならどこでも」(上の「一般の URL」節)で、http 中継
+(`EXT_UPSTREAMS=his=http://…`)と原本ホストの対応(`EXT_PUBLIC_BASES`)の存在理由が消えた —
+院内 Web は原本 URL をそのまま渡せばよい。残るのは cage の図・原本(ローカルの静的ファイル)の
+配信だけで、それは「nucllei に bind した物」と同じ集合。配信範囲(`EXT_FILE_SCOPES`)も
+「配信したくない物を nucllei 側に mount しない」で足りる(sandbox 側にだけ bind すれば、
+モデルは `/mnt` で読めるが利用者には渡らない)。
+
+何がどうなったか:
+
+- **ゲート `routers/ext.py`**: `GET /ext/{rest}` → `RO_MOUNT_ROOT/{rest}`(`image_refs.RO_MOUNT_ROOT`
+  = `/mnt`、定数。env での差し替えは無い)。閉じ込めは resolve 済みの実体が `/mnt` の中の通常ファイル
+  (resolver の `_read_confined` と同じ)。ディレクトリ(`/ext/` 自体を含む)・不在・symlink 越えは 404、
+  traversal は 400。http 中継(httpx ストリーミング・`PASSTHROUGH_RESPONSE_HEADERS`・302 → 502)は
+  コードごと消えた。
+- **resolver `utils/image_refs.py`**: `EXT_URL_PATH_PATTERN = ^/ext(?:/(.*))?$`(name の概念が無い)。
+  `_route_url` は `/ext/{rest}` を `UrlRoute(rel=rest, query, origin, kind="ext")` にするだけで
+  失敗しない — `/ext/…` の失敗は `not_found` だけ。**reason `unknown_name` / `not_ext_form` は無い**
+  (`ref_errors.UNKNOWN_UPSTREAM_WHAT` は `server_self` と None の 2 行。sandbox の表も同じ)。
+  `UrlRoute` は `(rel, query, origin, kind)` — `name` / `public_base` / `ext_form` を落とし、
+  `kind` は `"ext"` / `"general"` / `"file"`(`/api/v1/files/{id}/content` — `route_of_url` だけが
+  返す。`rel` = file id。`resolve_url` は従来どおり相対形を `unsupported_form`)。`page_url` は
+  **全 kind でそのページ自身の URL**(`/ext/{rel}{query}` / `{origin}/ext/{rel}{query}` /
+  `{origin}/{rel}{query}`、file は None)。
+- **橋渡し**: `mounted_path_for_url` / `url_for_mounted_path` は `/ext/` ⇔ `/mnt/` の前置きの
+  入れ替え + nucllei 側での実在確認(symlink を実体に畳み、`/mnt` の中に閉じる)。
+  **`mounted_path_withheld` と「利用者に配信しない範囲にある」の断りは撤去** — `fetch_from_workspace`
+  は URL にできれば URL、できなければ `resolve_path` で読んで添付(nucllei 側に無い物は「読めない」)。
+- **fetch_url**: リンク一覧は `urljoin(page_url, href)` 一本(`_resolve_href(href, page_url)` /
+  `_html_to_lines(raw, page_url, content_type)` / `Tools._page_url(u)`)。`_link_roots` /
+  `_base_prefix` / `_head`(原本行・「原本ホストが無い」の注意書き)/ `_describe_bases` /
+  docstring の `{PUBLIC_BASES}` スロット / ERROR 文の `unknown_upstream_extra` は消えた。相対の
+  `/ext/…` ページでは `/ext/` の外へ出る href(ルート相対・別ホスト)を落とし、絶対の `/ext/…`
+  ページと一般の URL では http(s) の結果を全部残す。
+- **改名**: `EXT_SELF_ADDRESSES` → **`SELF_ADDRESSES`**(`env.parse_self_addresses`。起動ログは
+  `設定で追加 (SELF_ADDRESSES)`)、`EXT_INLINE_MAX_BYTES` → **`FETCH_MAX_BYTES`**(既定 25 MB、
+  意味は同じ — inline だけの上限ではないので)。`EXT_` 接頭辞の env は無い。
+- **起動ログ** `log_mounts`: `/mnt` 直下の項目を `read-only mount (served at /ext/): /mnt/cage → /ext/cage`
+  の形で 1 行(無ければ `参照用データは無い(/ext/** は全て 404)`)。
+- **dev(docker 無し)**: ホストに `/mnt/<path>` を作る(symlink 可)。[[dev-environment]]。
+- 担保: `test_ext_proxy.py`(ゲートが tmp の `RO_MOUNT_ROOT` を配信 / 404・400 / symlink の両向き /
+  mount 自体が symlink)、`test_image_refs_resolve.py`(`/ext/…` の失敗は not_found だけ / 橋渡しの
+  往復と実在 / `route_of_url` の形と `"file"` / `/mnt` に無い物は配信されない)、
+  `test_builtin_fetch_url.py`(ページ URL 基準のリンク / 原本ホストの残骸が無い)、
+  `test_builtin_sandbox.py`(URL ⇔ パスの橋渡し / withheld の概念が無い)、`test_file_images_ext.py`
+  (inline が `/mnt` と一般の URL で解決)、`test_ext_upstreams.py`(旧 env・helper が無い)、
+  `test_ref_errors.py` / `test_builtin_feed_image.py`(reason の集合)。
+
+llens への申し送り(配備層):
+
+- compose: `.env` から `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES` を消し、
+  `EXT_SELF_ADDRESSES` → `SELF_ADDRESSES`、`EXT_INLINE_MAX_BYTES` → `FETCH_MAX_BYTES` に改名。
+  nucllei コンテナの volume を「利用者に配信してよい物だけ」`/mnt/<name>` に bind する
+  (cage の `static/` だけ配信したいなら `…/cage/static:/mnt/cage/static:ro` のように深く bind する —
+  `doc/` を nucllei に bind しなければ URL にならない。sandbox 側は従来どおり全体を bind してよい)。
+  URL の形(`/ext/cage/static/X`)は変わらないので cage の `PUBLIC_BASE=/ext/cage` はそのまま。
+- 院内 Web(旧 `his=http://…` の http 中継)は `fetch_url(url="http://<原本ホスト>/…")` で直接取る
+  (prompt / skill に原本 URL を書く。`/ext/his/…` の形は無い)。
 

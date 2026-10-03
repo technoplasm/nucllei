@@ -226,18 +226,16 @@ def test_sandbox_wording_is_unchanged():
             f"ERROR: {U} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
             "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
         ),
-        RefError("unknown_upstream", "x", reason="unknown_name"): (
-            f"ERROR: {U} は許可先の外 (その配信元はこの配備に設定されていない)。{URL_ARG_FORM}"
-        ),
-        RefError("unknown_upstream", "x", reason="not_ext_form"): (
-            f"ERROR: {U} は `/ext/<配信元>/<パス>` の形でない。{URL_ARG_FORM}"
-        ),
         RefError("unknown_upstream", "x", reason="server_self"): (
             f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
             f"{URL_ARG_FORM}"
         ),
+        # unknown_name / not_ext_form は 2026-10-03 に無くした — 知らない reason は 1 文面
+        RefError("unknown_upstream", "x", reason="unknown_name"): (
+            f"ERROR: {U} は許可先の外 (この配備が取得を許可している URL ではない)。{URL_ARG_FORM}"
+        ),
         RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は許可先の外 (この配備が取得を許可している上流の URL ではない)。{URL_ARG_FORM}"
+            f"ERROR: {U} は許可先の外 (この配備が取得を許可している URL ではない)。{URL_ARG_FORM}"
         ),
         RefError("traversal", "x"): (
             f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{URL_ARG_FORM}"
@@ -272,7 +270,10 @@ def test_feed_image_wording_is_unchanged():
             f"{URL_ARG_FORM}"
         ),
         RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。{URL_ARG_FORM}"
+            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
+        ),
+        RefError("unknown_upstream", "x", reason="not_ext_form"): (
+            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
         ),
         RefError(
             "something_new", "x"
@@ -322,11 +323,10 @@ def test_feed_image_wording_is_unchanged():
 
 
 def test_fetch_url_wording_is_unchanged(monkeypatch):
+    """原本ホスト (EXT_PUBLIC_BASES) の句は 2026-10-03 に設定ごと無くなった。"""
     from nucllei.builtin_tools import fetch_url
 
-    monkeypatch.setattr(fetch_url, "EXT_PUBLIC_BASES", {"his": "https://his.test/docs"})
     explain = fetch_url._explain_ref_error
-    bases = "登録された原本ホストは `https://his.test/docs` (his)。"
     cases = {
         RefError(
             "not_found", "x"
@@ -341,13 +341,13 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
         ),
         RefError("unknown_upstream", "x", reason="server_self"): (
             f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-            f"{bases}{URL_ARG_FORM}"
+            f"{URL_ARG_FORM}"
         ),
         RefError("unknown_upstream", "x", reason="unknown_name"): (
-            f"ERROR: {U} の配信元は無い (この配備に構成されていない)。{bases}{URL_ARG_FORM}"
+            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
         ),
         RefError("unknown_upstream", "x"): (
-            f"ERROR: {U} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。{bases}{URL_ARG_FORM}"
+            f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
         ),
         RefError("unsupported_form", "x"): url_error(U),
         RefError("something_new", "x"): (

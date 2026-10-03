@@ -14,7 +14,8 @@ nucllei 自身の DB・Storage・共有 resolver だけで動く)と、**env ゲ
 SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
 一覧に生やさない(builtin の性質 = 常に動く、に反する)。feed_image / fetch_url は配備層
 (prism-hu/llens)から移設した(#141、2026-10-03)。fetch_url は同日中に env ゲート
-(EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれか)を外して常に登録に
+(当時の EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれか — 同日に設定ごと
+撤去)を外して常に登録に
 した — `url=` はスキーム付きの http(s) URL ならどこでも取りに行く(ken 決定)ので、env が
 空でも「必ず失敗する」ことは無い。
 """
@@ -75,8 +76,8 @@ BUILTIN_TOOLS = {
     },
     # fetch_url も常に登録(2026-10-03、ken 決定): url= はスキーム付きの http(s) URL なら
     # どこでも取りに行く(届くかは配備のネットワーク次第。取りに行かないのはこのサーバ自身
-    # だけ)ので、EXT_* が空でも「必ず失敗する」builtin ではない。同日の朝まで EXT_UPSTREAMS /
-    # EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、行き先で機能を
+    # だけ)ので、/mnt が空でも「必ず失敗する」builtin ではない。同日の朝まで当時の
+    # EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、行き先で機能を
     # 絞らない決定と一緒に外した。
     "builtin_fetch_url": {
         "module": fetch_url,

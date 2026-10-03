@@ -316,15 +316,15 @@ jail に出る (上記「参照用データを jail に見せる」)。
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/mnt/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。既に `/ext/…` で配信されている `/mnt/…` のファイルは添付せず、その URL を返す (下記) |
 
-- **`send_to_workspace(url=)` が取れる URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) の
-  範囲だけ** (2026-10-03): `/ext/{name}/…` (同一サーバの相対、または絶対 `https://<host>/ext/{name}/…` = host 不問) と `EXT_PUBLIC_BASES` 配下の URL を、
-  `EXT_UPSTREAMS` の backend 経由で取る (redirect は辿らない・cookie を転送しない)。配備層の
-  `fetch_url` / `feed_image` と同じ URL が同じように通り、同じ理由で落ちる。**許可先の外の URL
-  (任意の LAN ホスト・外部サイト) は取りに行かない** — 旧実装は CIDR 拒否リスト (valve
-  `url_blocked_cidrs`、撤去) 以外の LAN を全部取れた。上限は valve `url_max_mb` (既定 50 MB)。
-  - **`/mnt` 配下にある物はコピーしない**: URL の解決先が file backend (`EXT_UPSTREAMS=name=file:///mnt/…`) で
-    実体が `/mnt` 配下なら、取り込まずに「`/mnt/…` として既に sandbox から見えている」とパスを返す
-    (上限も掛からない)。`/mnt` は nucllei と sandbox が同じ volume を bind する置き場という規約
+- **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**
+  (2026-10-03): `/ext/{rest}` (同一サーバの相対、または絶対 `https://<host>/ext/{rest}` = host 不問) は
+  nucllei の `/mnt/{rest}` そのもの (設定無し — 同日の夕に `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` /
+  `EXT_PUBLIC_BASES` を撤去)、それ以外のスキーム付き http(s) URL は**どこでも**直接取りに行く
+  (断るのはこのサーバ自身だけ。cookie は転送しない)。builtin の `fetch_url` / `feed_image` と同じ URL が
+  同じように通り、同じ理由で落ちる。上限は valve `url_max_mb` (既定 50 MB)。
+  - **`/mnt` 配下にある物はコピーしない**: URL が `/ext/{rest}` で nucllei 側の `/mnt/{rest}` が実在すれば、
+    取り込まずに「`/mnt/…` として既に sandbox から見えている」とパスを返す (上限も掛からない)。
+    `/mnt` は nucllei と sandbox が同じ volume を bind する置き場という規約
     (上の「参照用データを jail に見せる (`/mnt`)」) に依存する — **nucllei は sandbox 側の bind の有無を確かめない**
     ので、nucllei にだけ bind した配備ではモデルに無いパスを案内することになる。必ず両方に bind する。
   - **引数は名前で解釈が決まる。値の中身を見て別の引数に読み替えない**: `url` は URL としてだけ
@@ -341,19 +341,17 @@ jail に出る (上記「参照用データを jail に見せる」)。
   | `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/mnt/…` を返す | `/workspace/imports/` にコピー |
   | `fetch_from_workspace(path)` | sandbox のパス → 利用者に見せられる URL / file_id | 添付せず `/ext/{name}/…` を返す | Files に登録して添付 (file_id) |
 
-  - `/mnt/…` の実体が `EXT_UPSTREAMS` の file backend の root 配下 (例 `cage=file:///mnt/cage`) なら、
-    その配信 URL (相対 `/ext/cage/…`、パス部は percent-encode 済み) を返す。Files には何も作らない。
-    **`/ext` ゲートが既に配信している物の URL を教えるだけで、公開範囲は広げない** — 逆に言えば
-    backend が配信する範囲は全部 URL になる。root (`/mnt/cage`) の下に「利用者に配信する物」
-    (`static/`) と「sandbox で読むだけの物」(`doc/`) が同居する配備は、nucllei の env
-    `EXT_FILE_SCOPES=cage=static` で配信範囲を絞る (ゲートも 404 になり、root 配下で範囲外の
-    パスは **URL も返さず添付にもしない** — 「利用者に配信しない範囲にある」と断る。配信範囲 =
-    利用者に渡してよい範囲。未設定なら root 全体。nucllei の `README_API.md` §3.8)。
-  - 配信されていない `/mnt/…` (例 `/mnt/shared/…`) は、nucllei 自身に bind された同じ置き場から読んで
-    添付する (sandbox の `/files/read` は workspace しか扱わないので使わない)。上限は nucllei の
-    `EXT_INLINE_MAX_BYTES` (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別)。
-    **sandbox にだけ bind した置き場は nucllei から読めず「読めない」になる** — そのときは
-    `run_shell` で `/workspace/` にコピーしてから渡すよう tool が案内する。両方に bind するのが前提 (上記)。
+  - `/mnt/…` が nucllei 側の `/mnt` にも実在すれば (= `/ext` ゲートが配信している)、その配信 URL
+    (相対 `/ext/…`、パス部は percent-encode 済み) を返す。Files には何も作らない。
+    **nucllei の `/mnt` に見えている物は全部 URL になる** — 「利用者に配信する物」(`static/`) と
+    「sandbox で読むだけの物」(`doc/`) を分けたい配備は、nucllei 側には `static/` だけを
+    (`…/cage/static:/mnt/cage/static:ro` のように深く) bind し、`doc/` は sandbox にだけ bind する
+    (2026-10-03 夕に `EXT_FILE_SCOPES` と「利用者に配信しない範囲にある」の断りは撤去。
+    nucllei の `README_API.md` §3.8)。
+  - nucllei 側に無い `/mnt/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
+    `/files/read` は workspace しか扱わない) ので **「読めない」になる** — そのときは `run_shell` で
+    `/workspace/` にコピーしてから渡すよう tool が案内する。上限は nucllei の `FETCH_MAX_BYTES`
+    (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別。旧 `EXT_INLINE_MAX_BYTES`)。
   - 不在・ディレクトリ・置き場の外を指す symlink は同じ「読めない」(fail closed)、上限超過は
     実サイズと上限を言う。`path` に URL が来ても URL としては扱わない。
 - **tool の `path` は jail から見た絶対パス (`/workspace/...`) で揃える**。`send_to_workspace` の

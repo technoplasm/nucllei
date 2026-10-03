@@ -19,10 +19,10 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
 参照の形 (#139 → 2026-09-07 に 3 形へ整理): sink に積めるのは file_id か参照文字列。
   - file_id: owner チェック (#40 と同クラスの IDOR 封鎖) を本 tool で行う。送信直前
     inline でも has_read_access_to_file が二重に効く (defense-in-depth)。
-  - URL: ブラウザが開くもの。スキーム付きの絶対 URL (EXT_PUBLIC_BASES の base 配下の
-    原本 URL、既存チャットに残る `https://<host>/ext/…`、それ以外の一般の URL — 院内でも
-    インターネットでも。届くかは配備のネットワーク次第) と、
-    同一サーバの相対 URL `/ext/{name}/…` (配備層の read_doc の図・原本 PDF)。
+  - URL: ブラウザが開くもの。スキーム付きの絶対 URL (既存チャットに残る
+    `https://<host>/ext/…`、それ以外の一般の URL — 院内でもインターネットでも。届くかは
+    配備のネットワーク次第) と、同一サーバの相対 URL `/ext/{rest}` (配備層の read_doc の
+    図・原本 PDF。nucllei の `/mnt/{rest}` をそのまま配信)。
   - sandbox の fs パス (`/mnt/…` `/workspace/…`)。
 
 引数 (2026-10-03 ken 決定 — `read_ref` / `ref` への統一 (#141) は不採用。tool 全体で引数名の
@@ -41,9 +41,9 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   読む (send_to_workspace(url=) と同じ扱い)。
 
   参照 → バイトの解決規則は `utils/image_refs.py` が**一箇所で**持つ。URL の上流解決
-  (path が /ext/{name}/ なら host を問わず EXT_UPSTREAMS の backend、それ以外は
-  EXT_PUBLIC_BASES の base 前方一致、どちらでもなければ一般の URL としてそのホストに直接 —
-  行き先で絞らず、断るのはこのサーバ自身だけ。2026-10-03 ken 決定) も
+  (path が /ext/{rest} なら host を問わず nucllei の `/mnt/{rest}` をローカル読み、
+  それ以外は一般の URL としてそのホストに直接 — 行き先で絞らず、断るのはこのサーバ自身だけ。
+  2026-10-03 ken 決定) も
   traversal 判定もサイズ上限もそこにある — tool 側に allowlist も on/off valve も持たない
   (境界は resolver が持つ。tool のスイッチはモデルが届く範囲を変えない)。
   tool は call 時に同じ resolver で読んで検証 (存在・種別・サイズ・ページ数) し、参照を
@@ -162,7 +162,7 @@ def _hints(is_path: bool) -> RefErrorHints:
             "redirect は辿らないので、ディレクトリではなくファイルやページを直接指す URL を渡すこと "
             "(例 '<ルート>/' ではなく '<ルート>/top.aspx')。" + _HINT_LITERAL
         ),
-        # 上流不達は URL (http backend) でしか起きないが、万一 fs で来ても「URL を案内」とは言わない。
+        # 上流不達は URL (一般の URL) でしか起きないが、万一 fs で来ても「URL を案内」とは言わない。
         unreachable=(
             "ERROR: {ref} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
             "run_shell の ls で存在を確認すること。"

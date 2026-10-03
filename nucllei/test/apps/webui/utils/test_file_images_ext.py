@@ -1,4 +1,4 @@
-"""参照(URL / sandbox fs パス)のオンデマンド解決の回帰テスト(#97 / #139)。
+"""参照(URL / sandbox fs パス)のオンデマンド解決の回帰テスト(#97 / #139 / 2026-10-03)。
 
 feed_image が "https://…/ext/..." "/ext/..." "/mnt/..." "/workspace/..." の参照を sink に積むと
 context_images に文字列のまま永続し、送信直前の inline_internal_image_urls が
@@ -8,16 +8,15 @@ utils/image_refs.py で実体化して data URL にする(File は発行しな�
 保存済みの参照文字列(image_url の url)の振り分け(image_refs の module docstring の表。
 先頭で機械的に分かれる):
 
-- スキーム付き URL: path が "/ext/{name}/..." なら host を問わず EXT_UPSTREAMS の
-  backend(未知 name は解決しない)。それ以外は EXT_PUBLIC_BASES の `<base>/` に
-  前方一致するものだけ、その name の backend へ。どれにも当たらなければ unavailable
-- "/ext/{name}/..." = 同一サーバの相対 URL。絶対形と同じ backend で解決する
+- スキーム付き URL: path が "/ext/{rest}" なら host を問わず nucllei の `/mnt/{rest}` を
+  ローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL としてそのホストに直接
+  (断るのはこのサーバ自身だけ)
+- "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `/mnt` で解決する
   (2026-10-03 — #139 は「相対 /ext/ は受けない」だったのを覆した)
 - "/mnt/..." "/workspace/..." = sandbox の fs
-- http backend はサーバ側 httpx fetch。ここは cage を http に向けて従来経路を固定する
-- per-user のアクセス検査はしない(公開範囲は admin 管理の EXT_UPSTREAMS / RO
+- per-user のアクセス検査はしない(公開範囲は配備が `/mnt` に mount した物 / RO
   マウント、workspace は呼び出しユーザーのもの、が境界)
-- 画像でも PDF でもない・EXT_INLINE_MAX_BYTES 超過・上流不達・redirect・root 外・
+- 画像でも PDF でもない・FETCH_MAX_BYTES 超過・上流不達・redirect・root 外・
   不在はすべて失敗 → 既存の "(image unavailable)" 置換に合流(fail closed)
 - PDF は "#page=N"(既定 1)のページを PNG 化する(URL でも同じ)
 - 従来の file_id 経路("/api/v1/files/{id}/content")は無変更
@@ -26,6 +25,7 @@ utils/image_refs.py で実体化して data URL にする(File は発行しな�
 import asyncio
 import base64
 import io
+import ipaddress
 import os
 
 import httpx
@@ -38,13 +38,11 @@ PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
 
 UNAVAILABLE = {"type": "text", "text": "(image unavailable)"}
 
-UPSTREAM = "http://upstream.test"
-
 # 自オリジンの表示 URL(cage の PUBLIC_BASE がこの形で文書に焼き込まれる)
 SELF = "https://llens.test"
 
-# 院内 web の原本 URL のルート(EXT_PUBLIC_BASES)
-PUBLIC_BASE = "http://his-info.test/docs"
+# 一般の URL のホスト(DNS は差し替える。実ネットワークに出ない)
+GENERAL = "http://intra.test"
 
 
 def _pdf_bytes(pages: int) -> bytes:
@@ -57,6 +55,8 @@ def _pdf_bytes(pages: int) -> bytes:
 
 
 class TestFileImagesExtInline(AbstractPostgresTest):
+    """`/ext/{rest}`(絶対・相対)と一般の URL の送信直前 inline。"""
+
     BASE_PATH = "/api/v1/files"
 
     def setup_method(self):
@@ -85,10 +85,36 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ),
         )
 
-    def _enable_cage(self, monkeypatch):
-        from nucllei.env import EXT_UPSTREAMS
+    def _mount(self, monkeypatch, tmp_path):
+        """tmp の `/mnt`(= /ext の配信元)。"""
+        from nucllei.utils import image_refs
 
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", UPSTREAM)
+        root = tmp_path / "mnt"
+        (root / "cage" / "figs").mkdir(parents=True)
+        (root / "cage" / "figs" / "a.png").write_bytes(PNG_BYTES)
+        (root / "cage" / "figs" / "図").mkdir()
+        (root / "cage" / "figs" / "図" / "図.png").write_bytes(PNG_BYTES)
+        (root / "cage" / "static").mkdir()
+        (root / "cage" / "static" / "doc.pdf").write_bytes(_pdf_bytes(2))
+        (root / "cage" / "index.html").write_text("<html>")
+        outside = tmp_path / "outside.png"
+        outside.write_bytes(PNG_BYTES)
+        (root / "cage" / "figs" / "escape.png").symlink_to(outside)
+        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+        return root
+
+    def _self(self, monkeypatch):
+        """自分自身の発見と DNS を差し替える(一般の URL 用)。"""
+        from nucllei.utils import ext_upstreams
+
+        found = frozenset({ipaddress.ip_address("10.106.0.5")})
+        monkeypatch.setattr(ext_upstreams, "discover_self_addresses", lambda: found)
+        ext_upstreams.reset_self_addresses()
+
+        async def fake_lookup(host):
+            return {"intra.test": ["172.16.5.5"]}.get(host, [])
+
+        monkeypatch.setattr(ext_upstreams, "lookup_host", fake_lookup)
 
     def _install_transport(self, monkeypatch, handler):
         from nucllei.utils import ext_upstreams
@@ -126,41 +152,29 @@ class TestFileImagesExtInline(AbstractPostgresTest):
 
     # ---- 変換される ----
 
-    def test_ext_url_converted_to_data_url(self, monkeypatch):
-        self._enable_cage(monkeypatch)
+    def test_ext_url_converted_to_data_url(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
         seen = []
         self._install_transport(monkeypatch, self._png_handler(seen))
         messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
         url = messages[0]["content"][1]["image_url"]["url"]
         assert url == f"data:image/png;base64,{PNG_B64}"
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png"
+        assert seen == []  # ローカル読み。どこにも接続しない
 
-    def test_ext_url_query_passed_through(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png?rev=2"))
-        url = messages[0]["content"][1]["image_url"]["url"]
-        assert url.startswith("data:image/png;base64,")
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png?rev=2"
+    def test_ext_url_query_and_fragment_ignored(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
+        for url in (
+            f"{SELF}/ext/cage/figs/a.png?rev=2",
+            "/ext/cage/figs/a.png?rev=2#sec",
+        ):
+            messages = self._convert(self._messages(url))
+            assert messages[0]["content"][1]["image_url"]["url"].startswith(
+                "data:image/png;base64,"
+            ), url
 
-    def test_same_ext_url_fetched_once(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._messages(f"{SELF}/ext/cage/figs/a.png")
-        messages[0]["content"].append(
-            {"type": "image_url", "image_url": {"url": f"{SELF}/ext/cage/figs/a.png"}}
-        )
-        messages = self._convert(messages)
-        assert len(seen) == 1
-        assert messages[0]["content"][1]["image_url"]["url"].startswith("data:")
-        assert messages[0]["content"][2]["image_url"]["url"].startswith("data:")
-
-    def test_mixed_file_and_ext_entries(self, monkeypatch):
-        # file_id 経路(認可検査あり)と "/ext/..." 経路(EXT_UPSTREAMS が真実源)の混在
-        self._enable_cage(monkeypatch)
-        self._install_transport(monkeypatch, self._png_handler())
+    def test_mixed_file_and_ext_entries(self, monkeypatch, tmp_path):
+        # file_id 経路(認可検査あり)と "/ext/..." 経路(/mnt)の混在
+        self._mount(monkeypatch, tmp_path)
         messages = self._messages("/api/v1/files/f-img/content")
         messages[0]["content"].append(
             {"type": "image_url", "image_url": {"url": f"{SELF}/ext/cage/figs/a.png"}}
@@ -173,55 +187,184 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             f"data:image/png;base64,{PNG_B64}"
         )
 
+    def test_ext_pdf_rasterized(self, monkeypatch, tmp_path):
+        # PDF はページ画像化(File を作らない — #139)。相対でも絶対でも
+        self._mount(monkeypatch, tmp_path)
+        for url in (
+            f"{SELF}/ext/cage/static/doc.pdf#page=2",
+            "/ext/cage/static/doc.pdf#page=2",
+            "/ext/cage/static/doc.pdf",
+        ):
+            messages = self._convert(self._messages(url))
+            assert messages[0]["content"][1]["image_url"]["url"].startswith(
+                "data:image/png;base64,"
+            ), url
+
+    def test_ext_url_any_host_resolved(self, monkeypatch, tmp_path):
+        # path が /ext/{rest} なら host を問わず /mnt で解決する(与えられた host には接続しない)。
+        # 大文字 scheme・port 付きでも同じ
+        self._mount(monkeypatch, tmp_path)
+        seen = []
+        self._install_transport(monkeypatch, self._png_handler(seen))
+        for url in (
+            "http://elsewhere.example/ext/cage/figs/a.png",
+            "HTTPS://host/ext/cage/figs/a.png",
+            "https://host:8443/ext/cage/figs/a.png",
+        ):
+            messages = self._convert(self._messages(url))
+            assert messages[0]["content"][1]["image_url"]["url"].startswith(
+                "data:"
+            ), url
+        assert seen == []
+
+    def test_relative_ext_in_assistant_and_tool_image_messages(
+        self, monkeypatch, tmp_path
+    ):
+        # user / assistant どちらの image_url でも同じ(role を見ない)。context_images に
+        # 相対のまま永続し、毎ターンの送信でここが解決する(#142)
+        self._mount(monkeypatch, tmp_path)
+        messages = [
+            {
+                "role": role,
+                "content": [
+                    {"type": "text", "text": "図"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "/ext/cage/figs/a.png"},
+                    },
+                ],
+            }
+            for role in ("user", "assistant")
+        ]
+        for message in self._convert(messages):
+            assert message["content"][1]["image_url"]["url"].startswith("data:")
+
+    def test_percent_encoded_path(self, monkeypatch, tmp_path):
+        # 文書に焼かれた URL は日本語ディレクトリを percent-encoded で持つ。ブラウザ側
+        # (routers/ext.py、Starlette が decode)と同じファイルに当たること
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(
+            self._messages("https://any.host/ext/cage/figs/%E5%9B%B3/%E5%9B%B3.png")
+        )
+        assert messages[0]["content"][1]["image_url"]["url"] == (
+            f"data:image/png;base64,{PNG_B64}"
+        )
+
     # ---- 失敗はすべて "(image unavailable)" に合流 ----
 
-    def test_unknown_name_unavailable(self, monkeypatch):
-        # EXT_UPSTREAMS 未設定(機能無効)= 未知 name と同じ扱い
-        self._install_transport(monkeypatch, self._png_handler())
+    def test_nothing_mounted_unavailable(self, monkeypatch, tmp_path):
+        from nucllei.utils import image_refs
+
+        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "nowhere")
         messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    def test_ext_http_pdf_rasterized(self, monkeypatch):
-        # http backend でも PDF はページ画像化(File を作らない — #139)
-        self._enable_cage(monkeypatch)
-        self._install_transport(
-            monkeypatch,
-            lambda request: httpx.Response(
-                200,
-                content=_pdf_bytes(2),
-                headers={"content-type": "application/pdf"},
-            ),
-        )
-        messages = self._convert(
-            self._messages(f"{SELF}/ext/cage/static/doc.pdf#page=2")
-        )
-        url = messages[0]["content"][1]["image_url"]["url"]
-        assert url.startswith("data:image/png;base64,")
-
-    def test_non_image_content_type_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        self._install_transport(
-            monkeypatch,
-            lambda request: httpx.Response(
-                200, content=b"<html>", headers={"content-type": "text/html"}
-            ),
-        )
+    def test_non_image_unavailable(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
         messages = self._convert(self._messages(f"{SELF}/ext/cage/index.html"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    def test_size_limit_exceeded_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        self._install_transport(monkeypatch, self._png_handler())
+    def test_size_limit_exceeded_unavailable(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
         monkeypatch.setattr(
-            "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
+            "nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1
         )
         messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    def test_size_limit_aborts_mid_stream(self, monkeypatch):
+    def test_closed_forms_unavailable(self, monkeypatch, tmp_path):
+        # 不在・ディレクトリ・/mnt の外へ出る symlink・traversal(encode 済み / NUL)・
+        # 制御文字・name の取れない形・"/ext/" でない "/" 始まり・protocol-relative
+        self._mount(monkeypatch, tmp_path)
+        seen = []
+        self._install_transport(monkeypatch, self._png_handler(seen))
+        for url in (
+            f"{SELF}/ext/cage/figs/nope.png",
+            f"{SELF}/ext/cage/figs/escape.png",
+            f"{SELF}/ext/cage/figs",
+            f"{SELF}/ext/cage/",
+            f"{SELF}/ext/",
+            f"{SELF}/ext/cage/../secret.png",
+            "https://host/ext/cage/%2e%2e/x.png",
+            "https://host/ext/cage/a\x00.png",
+            "https://host/ext/cage/a%00.png",
+            f"{SELF}/ext/cage/a\r\nHost: evil/y.png",
+            "/ext/nothere/a.png",
+            "/ext/cage/../a.png",
+            "/ext/",
+            "/ext/nothere",
+            "/extra/a.png",
+            "//elsewhere.example/ext/cage/a.png",
+        ):
+            messages = self._convert(self._messages(url))
+            assert messages[0]["content"][1] == UNAVAILABLE, url
+        assert seen == []
+
+    # ---- 一般の URL(/ext/ 形でない絶対 URL)----
+
+    def test_general_url_fetched_and_inlined(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
+        self._self(monkeypatch)
+        seen = []
+        self._install_transport(monkeypatch, self._png_handler(seen))
+        messages = self._convert(self._messages(f"{GENERAL}/figs/a.png?rev=2"))
+        assert messages[0]["content"][1]["image_url"]["url"] == (
+            f"data:image/png;base64,{PNG_B64}"
+        )
+        # 接続先は解決したアドレスに固定、Host は元のまま。cookie は送らない
+        assert str(seen[0].url) == "http://172.16.5.5/figs/a.png?rev=2"
+        assert seen[0].headers["host"] == "intra.test"
+        assert "cookie" not in seen[0].headers
+
+    def test_general_pdf_page_via_url(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
+        self._self(monkeypatch)
+        self._install_transport(
+            monkeypatch,
+            lambda request: httpx.Response(
+                200, content=_pdf_bytes(2), headers={"content-type": "application/pdf"}
+            ),
+        )
+        messages = self._convert(self._messages(f"{GENERAL}/x.pdf#page=2"))
+        assert messages[0]["content"][1]["image_url"]["url"].startswith(
+            "data:image/png;base64,"
+        )
+
+    def test_general_failures_unavailable(self, monkeypatch, tmp_path):
+        self._mount(monkeypatch, tmp_path)
+        self._self(monkeypatch)
+        cases = (
+            ("a.png", httpx.Response(404)),
+            ("a.png", httpx.Response(302)),  # Location 無し = 辿れない redirect
+            (
+                "index.html",
+                httpx.Response(
+                    200, content=b"<html>", headers={"content-type": "text/html"}
+                ),
+            ),
+        )
+        for name, response in cases:
+            self._install_transport(monkeypatch, lambda r, response=response: response)
+            messages = self._convert(self._messages(f"{GENERAL}/{name}"))
+            assert messages[0]["content"][1] == UNAVAILABLE, response
+
+        def unreachable(request):
+            raise httpx.ConnectError("connection refused", request=request)
+
+        self._install_transport(monkeypatch, unreachable)
+        assert self._convert(self._messages(f"{GENERAL}/a.png"))[0]["content"][1] == (
+            UNAVAILABLE
+        )
+        # 自分自身は繋がない
+        self._install_transport(monkeypatch, self._png_handler())
+        messages = self._convert(self._messages("http://127.0.0.1:3000/a.png"))
+        assert messages[0]["content"][1] == UNAVAILABLE
+
+    def test_size_limit_aborts_mid_stream(self, monkeypatch, tmp_path):
         # 全部読んでから測るのでなく、上限超過時点でストリームを打ち切ること
         # (巨大上流で全量バッファしない)を、チャンク消費数で固定する
-        self._enable_cage(monkeypatch)
+        self._mount(monkeypatch, tmp_path)
+        self._self(monkeypatch)
         pulled = {"chunks": 0}
 
         async def body():
@@ -236,285 +379,14 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ),
         )
         # 8B/chunk、上限 20B → 3 チャンク目(24B)で超過検知して中断
-        monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 20)
-        messages = self._convert(self._messages(f"{SELF}/ext/cage/big.png"))
+        monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 20)
+        messages = self._convert(self._messages(f"{GENERAL}/big.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
         assert pulled["chunks"] < 10  # 全チャンクは読まない(mid-stream 中断)
 
-    def test_control_char_path_unavailable(self, monkeypatch):
-        # メッセージ JSON 由来の URL は Starlette デコードを経ないため、制御文字が
-        # 生で入りうる。共有ゲートが弾き "(image unavailable)" に合流する(500 化しない)
-        self._enable_cage(monkeypatch)
-        self._install_transport(monkeypatch, self._png_handler())
-        messages = self._convert(
-            self._messages(f"{SELF}/ext/cage/a\r\nHost: evil/y.png")
-        )
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_upstream_unreachable_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-
-        def handler(request):
-            raise httpx.ConnectError("connection refused", request=request)
-
-        self._install_transport(monkeypatch, handler)
-        messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_upstream_redirect_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        self._install_transport(
-            monkeypatch,
-            lambda request: httpx.Response(
-                302, headers={"location": f"{UPSTREAM}/moved.png"}
-            ),
-        )
-        messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_traversal_path_unavailable(self, monkeypatch):
-        # traversal 拒否はプロキシ router と同基準(共通ヘルパ)
-        self._enable_cage(monkeypatch)
-        self._install_transport(monkeypatch, self._png_handler())
-        messages = self._convert(self._messages(f"{SELF}/ext/cage/../secret.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    # ---- 対象外は無変更 ----
-
-    def test_ext_url_any_host_resolved(self, monkeypatch):
-        # path が /ext/{name}/... なら host を問わず backend で解決する(与えられた host
-        # には接続しない — 上流 URL は EXT_UPSTREAMS のもの)
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        url = "http://elsewhere.example/ext/cage/figs/a.png"
-        messages = self._convert(self._messages(url))
-        assert messages[0]["content"][1]["image_url"]["url"].startswith("data:")
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png"
-
-    def test_relative_ext_url_resolved(self, monkeypatch):
-        # 相対 "/ext/..." は同一サーバの URL — 絶対形と同じ backend で解決する。
-        # context_images に相対のまま永続し、毎ターンの送信でここが解決する(#142)
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages("/ext/cage/figs/a.png?rev=2"))
-        assert messages[0]["content"][1]["image_url"]["url"] == (
-            f"data:image/png;base64,{PNG_B64}"
-        )
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png?rev=2"
-
-    def test_relative_ext_in_assistant_and_tool_image_messages(self, monkeypatch):
-        # user / assistant どちらの image_url でも同じ(role を見ない)
-        self._enable_cage(monkeypatch)
-        self._install_transport(monkeypatch, self._png_handler())
-        messages = [
-            {
-                "role": role,
-                "content": [
-                    {"type": "text", "text": "図"},
-                    {"type": "image_url", "image_url": {"url": "/ext/cage/a.png"}},
-                ],
-            }
-            for role in ("user", "assistant")
-        ]
-        for message in self._convert(messages):
-            assert message["content"][1]["image_url"]["url"].startswith("data:")
-
-    def test_relative_ext_pdf_page(self, monkeypatch):
-        # "#page=N" は相対 URL でも同じ(末尾だけを見る)
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(
-            monkeypatch,
-            lambda request: (
-                seen.append(request)
-                or httpx.Response(
-                    200,
-                    content=_pdf_bytes(2),
-                    headers={"content-type": "application/pdf"},
-                )
-            ),
-        )
-        messages = self._convert(self._messages("/ext/cage/docs/a.pdf#page=2"))
-        assert messages[0]["content"][1]["image_url"]["url"].startswith(
-            "data:image/png;base64,"
-        )
-        assert str(seen[0].url) == f"{UPSTREAM}/docs/a.pdf"
-
-    def test_relative_ext_unknown_name_unavailable(self, monkeypatch):
-        # 未知の name・name の取れない "/ext/"・"/ext/" でない "/" 始まりは閉じたまま
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in (
-            "/ext/nothere/a.png",
-            "/ext/cage/../a.png",
-            "/ext/",
-            "/ext/nothere",
-            "/extra/a.png",
-            "//elsewhere.example/ext/cage/a.png",
-        ):
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1] == UNAVAILABLE, url
-        assert seen == []
-
-    # ---- EXT_PUBLIC_BASES(院内 web の原本 URL → その name の backend)----
-
-    def _enable_public_base(self, monkeypatch, name="cage", base=PUBLIC_BASE):
-        from nucllei.env import EXT_PUBLIC_BASES
-
-        monkeypatch.setitem(EXT_PUBLIC_BASES, name, base)
-
-    def test_public_base_url_routed_to_upstream(self, monkeypatch):
-        # 番兵 c: base 配下の絶対 URL は、その name の http upstream に rel を渡す
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages(f"{PUBLIC_BASE}/figs/a.png?rev=2"))
-        assert messages[0]["content"][1]["image_url"]["url"].startswith("data:")
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png?rev=2"
-
-    def test_public_base_pdf_page_via_url(self, monkeypatch):
-        # 番兵 e: URL 末尾の "#page=N" はページ指定(URL の fragment と衝突しない)
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch)
-        seen = []
-        self._install_transport(
-            monkeypatch,
-            lambda request: (
-                seen.append(request)
-                or httpx.Response(
-                    200,
-                    content=_pdf_bytes(2),
-                    headers={"content-type": "application/pdf"},
-                )
-            ),
-        )
-        messages = self._convert(self._messages(f"{PUBLIC_BASE}/x.pdf#page=2"))
-        assert messages[0]["content"][1]["image_url"]["url"].startswith(
-            "data:image/png;base64,"
-        )
-        assert str(seen[0].url) == f"{UPSTREAM}/x.pdf"
-
-    def test_public_base_outside_unavailable(self, monkeypatch):
-        # 番兵 d: base 外の絶対 URL は解決しない(任意の URL を取りに行く口ではない)。
-        # prefix が似ていても "<base>/" で切る
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in (
-            "http://his-info.test/other/a.png",
-            "http://his-info.test/docs2/a.png",
-            "https://his-info.test/docs/a.png",  # scheme 違いは別 URL
-            "http://elsewhere.example/a.png",
-        ):
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1] == UNAVAILABLE, url
-        assert seen == []
-
-    def test_public_base_without_upstream_unavailable(self, monkeypatch):
-        # base に当たっても name が EXT_UPSTREAMS に無ければ到達先が無い(fail closed)
-        self._enable_public_base(monkeypatch, name="his")
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages(f"{PUBLIC_BASE}/a.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-        assert seen == []
-
-    def test_public_base_case_insensitive_scheme_host_and_port(self, monkeypatch):
-        # scheme / host は大文字小文字を区別しない(base 側も同じ正規化)。port も一致に含む
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch, base="HTTP://His-Info.test:8080/docs")
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(
-            self._messages("http://HIS-INFO.test:8080/docs/figs/a.png")
-        )
-        assert messages[0]["content"][1]["image_url"]["url"].startswith("data:")
-        assert str(seen[0].url) == f"{UPSTREAM}/figs/a.png"
-        # port 違いは別 origin
-        messages = self._convert(self._messages("http://his-info.test/docs/figs/a.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_public_base_userinfo_host_unavailable(self, monkeypatch):
-        # userinfo で base の host を装っても netloc 全体の比較で外れる
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages("http://his-info.test@evil/docs/x.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-        assert seen == []
-
-    def test_ext_url_uppercase_scheme_and_port(self, monkeypatch):
-        # 大文字 scheme・port 付きでも /ext/ 分岐で解決する
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in (
-            "HTTPS://host/ext/cage/figs/a.png",
-            "https://host:8443/ext/cage/figs/a.png",
-        ):
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1]["image_url"]["url"].startswith(
-                "data:"
-            ), url
-        assert [str(r.url) for r in seen] == [f"{UPSTREAM}/figs/a.png"] * 2
-
-    def test_ext_url_empty_name_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in ("https://host/ext/", "https://host/ext"):
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1] == UNAVAILABLE, url
-        assert seen == []
-
-    def test_ext_name_root_asks_upstream(self, monkeypatch):
-        # name の直下(rest が空)は形として正しい — http backend の `<base>/` に問い合わせる
-        # (image_refs module docstring)。上流が redirect を返せば unavailable
-        self._enable_cage(monkeypatch)
-        seen = []
-
-        def handler(request):
-            seen.append(str(request.url))
-            return httpx.Response(302, headers={"location": "/top.aspx"})
-
-        self._install_transport(monkeypatch, handler)
-        urls = ("https://host/ext/cage/", "https://host/ext/cage", "/ext/cage/")
-        for url in urls:
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1] == UNAVAILABLE, url
-        assert seen == [f"{UPSTREAM}/"] * len(urls)
-
-    def test_ext_url_encoded_traversal_and_nul_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        for url in (
-            "https://host/ext/cage/%2e%2e/x.png",
-            "https://host/ext/cage/a\x00.png",
-            "https://host/ext/cage/a%00.png",
-        ):
-            messages = self._convert(self._messages(url))
-            assert messages[0]["content"][1] == UNAVAILABLE, url
-        assert seen == []
-
-    def test_public_base_traversal_unavailable(self, monkeypatch):
-        self._enable_cage(monkeypatch)
-        self._enable_public_base(monkeypatch)
-        seen = []
-        self._install_transport(monkeypatch, self._png_handler(seen))
-        messages = self._convert(self._messages(f"{PUBLIC_BASE}/../secret.png"))
-        assert messages[0]["content"][1] == UNAVAILABLE
-        assert seen == []
-
 
 class TestFileImagesFsRefs(AbstractPostgresTest):
-    """fs 参照("/mnt/..." / "/workspace/...")と file backend の "https://…/ext/..." の解決(#139)。
+    """fs 参照("/mnt/..." / "/workspace/...")の解決(#139)。`/ext/...` も同じ `/mnt`。
 
     RO マウントの root は module 属性 `image_refs.RO_MOUNT_ROOT`(呼び出し時に読む)
     なので tmp_path に差し替える。sandbox は `sandbox_post` を差し替えて切り離す。
@@ -617,74 +489,22 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
     def test_mount_size_limit_unavailable(self, monkeypatch, tmp_path):
         root = self._mount(monkeypatch, tmp_path)
         monkeypatch.setattr(
-            "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
+            "nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1
         )
         messages = self._convert(self._messages(f"{root}/cage/static/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    # ---- /ext URL の file backend(root 内をローカル読み、tail 一致)----
+    # ---- 同じ実体を /ext URL で(/mnt をローカル読み)----
 
-    def test_ext_file_backend_image(self, monkeypatch, tmp_path):
-        # 番兵 a: 任意 host の https://…/ext/cage/static/x が file backend で読める
-        from nucllei.env import EXT_UPSTREAMS
-
+    def test_same_file_via_ext_url_and_mount_path(self, monkeypatch, tmp_path):
         root = self._mount(monkeypatch, tmp_path)
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-        messages = self._convert(
-            self._messages("https://any.host/ext/cage/static/a.png")
-        )
-        assert self._url(messages) == f"data:image/png;base64,{PNG_B64}"
-
-    def test_ext_file_backend_percent_encoded_path(self, monkeypatch, tmp_path):
-        # 文書に焼かれた URL は日本語ディレクトリを percent-encoded で持つ。ブラウザ側
-        # (routers/ext.py、Starlette が decode)と同じファイルに当たること
-        from nucllei.env import EXT_UPSTREAMS
-
-        root = self._mount(monkeypatch, tmp_path)
-        (root / "cage" / "static" / "図").mkdir()
-        (root / "cage" / "static" / "図" / "図.png").write_bytes(PNG_BYTES)
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-        messages = self._convert(
-            self._messages("https://any.host/ext/cage/static/%E5%9B%B3/%E5%9B%B3.png")
-        )
-        assert self._url(messages) == f"data:image/png;base64,{PNG_B64}"
-        # decode 後に現れる ".." も拒否
-        messages = self._convert(
-            self._messages("https://any.host/ext/cage/static/%2e%2e/outside.png")
-        )
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_ext_file_backend_pdf_page(self, monkeypatch, tmp_path):
-        from nucllei.env import EXT_UPSTREAMS
-
-        root = self._mount(monkeypatch, tmp_path)
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-        messages = self._convert(
-            self._messages("https://any.host/ext/cage/static/doc.pdf#page=2")
-        )
-        assert self._url(messages).startswith("data:image/png;base64,")
-
-    def test_ext_file_backend_symlink_escape_unavailable(self, monkeypatch, tmp_path):
-        from nucllei.env import EXT_UPSTREAMS
-
-        root = self._mount(monkeypatch, tmp_path)
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-        messages = self._convert(
-            self._messages("https://any.host/ext/cage/static/escape.png")
-        )
-        assert messages[0]["content"][1] == UNAVAILABLE
-
-    def test_ext_relative_url_with_file_backend(self, monkeypatch, tmp_path):
-        # 相対 "/ext/cage/static/x" は同一サーバの URL — file backend の root 内を読む。
-        # root の外へ出る symlink・不在は絶対形と同じく閉じる
-        from nucllei.env import EXT_UPSTREAMS
-
-        root = self._mount(monkeypatch, tmp_path)
-        monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-        messages = self._convert(self._messages("/ext/cage/static/a.png"))
-        assert self._url(messages) == f"data:image/png;base64,{PNG_B64}"
-        messages = self._convert(self._messages("/ext/cage/static/doc.pdf#page=2"))
-        assert self._url(messages).startswith("data:image/png;base64,")
+        for ref in (
+            f"{root}/cage/static/a.png",
+            "/ext/cage/static/a.png",
+            "https://any.host/ext/cage/static/a.png",
+        ):
+            messages = self._convert(self._messages(ref))
+            assert self._url(messages) == f"data:image/png;base64,{PNG_B64}", ref
         for closed in ("/ext/cage/static/escape.png", "/ext/cage/static/nope.png"):
             messages = self._convert(self._messages(closed))
             assert messages[0]["content"][1] == UNAVAILABLE, closed
@@ -748,9 +568,16 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         messages = self._convert(self._messages(url))
         assert self._url(messages) == url
 
-    def test_unmatched_absolute_url_unavailable(self, monkeypatch, tmp_path):
-        # 絶対 URL は /ext/ 形でも EXT_PUBLIC_BASES 配下でもなければ解決しない(fail closed)
+    def test_unreachable_absolute_url_unavailable(self, monkeypatch, tmp_path):
+        # /ext/ 形でない絶対 URL は一般の URL — 届かなければ unavailable(URL のまま残さない)
+        from nucllei.utils import ext_upstreams
+
         self._mount(monkeypatch, tmp_path)
+
+        async def no_dns(host):
+            return []
+
+        monkeypatch.setattr(ext_upstreams, "lookup_host", no_dns)
         messages = self._convert(self._messages("https://his.example/x.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 

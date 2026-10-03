@@ -6,21 +6,23 @@ pydantic stub / importlib のロードは落とし (nucllei の中なので直�
 
 **実 HTTP は一切叩かない** — ネットワークの境界 `resolve_url` だけを module 属性の差し替えで
 偽装し (`_FakeResolver`。受ける形と許可先の判定は nucllei の `_is_url` / `_route_url` と同じ規則で
-模す。tool はこの判定を resolver に一任する)、ルーティング (`route_of_url` / `ext_backend` /
-EXT_PUBLIC_BASES) は**本物**を env の dict を書き換えて通す。HTML は
+模す。tool はこの判定を resolver に一任する)、ルーティング (`route_of_url`) は**本物**を通す
+(設定は無い — `/ext/{rest}` は nucllei の `/mnt/{rest}`)。HTML は
 `test/fixtures/fetch_url/his_*_excerpt.html` (実サイトの保存 HTML を必要な範囲だけ切り出した
 もの)、PDF は `_pdf_to_text` の差し替えで代用する。
 
 受理規則 (2026-10-03 ken 決定: url = 絶対 URL か同一サーバの相対 URL。引数名だけで解釈) を番兵する:
-  - (a) EXT_PUBLIC_BASES の base 配下 = 原本 URL、(b) path が /ext/{name}/… の URL (相対 `/ext/…`
-    と、host を問わない絶対形)、(c) それ以外のスキーム付き http(s) URL = 一般の URL (どこでも
+  - (a) path が /ext/{rest} の URL (相対 `/ext/…` と、host を問わない絶対形。nucllei の
+    `/mnt/{rest}` をローカル読み)、(b) それ以外のスキーム付き http(s) URL = 一般の URL (どこでも
     取りに行く。断るのはこのサーバ自身だけ — 同日の ken 決定)。それ以外の相対 (`/mnt/…`
     `/workspace/…` 等) は固定文の ERROR (url が受ける形を添える)
-  - 戻り値のリンク一覧は原本 URL 1 本。原本ホストの無い上流は入力と同じ形の `/ext/…`、
-    一般の URL はページ自身の URL 基準
+  - 戻り値のリンク一覧は URL 1 本。`/ext/…` のページでも一般の URL でも、そのページ自身の
+    URL 基準の urljoin (相対入力なら相対のまま)
   - RefError.code ごとに「何が起きたか + 次の一手」の ERROR 文 (組み立ては utils/ref_errors)
 
 登録 (`__init__.py`): 常に BUILTIN_TOOLS に載る (env ゲート無し — 2026-10-03 に外した)。
+EXT_UPSTREAMS / EXT_PUBLIC_BASES (原本ホスト) は同日に設定ごと撤去 — 原本行・docstring の
+原本ホストのスロット・ERROR 文の「登録された原本ホストは …」は無い。
 """
 
 import asyncio
@@ -37,9 +39,9 @@ from nucllei.utils.image_refs import REF_ARGS_RULE, URL_ARG_FORM, RefError
 
 _FIXTURES = pathlib.Path(__file__).resolve().parents[3] / "fixtures" / "fetch_url"
 
-PUBLIC_BASE = "https://med-info.med.hokudai.ac.jp/his-info"
-UPSTREAM = "https://med-info.med.hokudai.ac.jp/his-info"
-# 自オリジンの表示 URL (path が /ext/{name}/…)。host は resolver も tool も見ない。
+# 院内 Web (一般の URL)。偽 resolver がそのまま返す
+SITE = "https://med-info.med.hokudai.ac.jp/his-info"
+# 自オリジンの表示 URL (path が /ext/{rest})。host は resolver も tool も見ない。
 ORIGIN = "https://llens.example"
 EXT_TOP = f"{ORIGIN}/ext/his/top.aspx"
 
@@ -68,49 +70,34 @@ def _listed_links(result: str):
     ]
 
 
-# --- env (EXT_UPSTREAMS / EXT_PUBLIC_BASES) の差し替え ---------------------------
-# ext_upstreams / image_refs / fetch_url は env の dict を名前で import している (同じ object) ので、
-# 中身を書き換えて戻す。
+# --- /ext に env は無い (2026-10-03)。fixture 名は旧来のまま no-op で残す --------------
 
 
 @pytest.fixture
 def ext_env():
-    from nucllei import env
-
-    saved = (dict(env.EXT_UPSTREAMS), dict(env.EXT_PUBLIC_BASES))
-
-    def apply(upstreams: dict, bases: dict):
-        env.EXT_UPSTREAMS.clear()
-        env.EXT_UPSTREAMS.update(upstreams)
-        env.EXT_PUBLIC_BASES.clear()
-        env.EXT_PUBLIC_BASES.update(bases)
-
-    yield apply
-    apply(*saved)
+    yield
 
 
 # --- HTML → 平文 + リンク一覧 (変換ロジックだけを直接叩く) --------------------
 
 
-def _convert(
-    raw: bytes, page_path: str, public_base: str = PUBLIC_BASE, link_base=None
-):
-    return _mod()._html_to_lines(
-        raw, page_path, public_base, "his-info", link_base or public_base
-    )
+def _convert(raw: bytes, page_url: str):
+    """page_url (ページ自身の URL。絶対なら一般の URL / 絶対の /ext、相対なら `/ext/…`) 基準で
+    変換する。"""
+    return _mod()._html_to_lines(raw, page_url)
 
 
 def test_html_links_become_numbered_refs_with_one_absolute_url():
-    body, links = _convert(_fixture("his_top_excerpt.html"), "top.aspx")
+    body, links = _convert(_fixture("his_top_excerpt.html"), f"{SITE}/top.aspx")
     text = "\n".join(body)
     assert "令和８年度休日" in text
     # 本文中では `ラベル [n]` になる
     assert "の通常診療体制について(再掲載) [1]" in text
     assert len(links) == 3
-    # リンク一覧は絶対 URL (原本 URL) 1 本だけ。/ext/ の相対形も「(原本: …)」の併記も無い
+    # リンク一覧は絶対 URL 1 本だけ。/ext/ の相対形も「(原本: …)」の併記も無い
     assert links[0].startswith("[1] 令和８年度休日")
     assert (
-        f"→ {PUBLIC_BASE}/log_write.aspx?LI_BASE=TOP_NEW&LI_TB=REPO_TB"
+        f"→ {SITE}/log_write.aspx?LI_BASE=TOP_NEW&LI_TB=REPO_TB"
         "&LI_URL=report_his_14071338.pdf" in links[0]
     )
     for ln in links:
@@ -121,7 +108,7 @@ def test_html_links_become_numbered_refs_with_one_absolute_url():
 def test_postback_and_fragment_links_are_not_listed():
     """`javascript:__doPostBack` と `#...` はリンク一覧に載せない (辿れないため)。
     ラベル自体は本文に残す。"""
-    body, links = _convert(_fixture("his_top_excerpt.html"), "top.aspx")
+    body, links = _convert(_fixture("his_top_excerpt.html"), f"{SITE}/top.aspx")
     text = "\n".join(body)
     assert "院内電話番号表" in text  # postback リンクのラベルは本文に残る
     assert "院内電話番号表 [" not in text  # ただし番号は振らない
@@ -131,7 +118,7 @@ def test_postback_and_fragment_links_are_not_listed():
 
 
 def test_script_style_and_hidden_inputs_are_dropped():
-    body, links = _convert(_fixture("his_top_excerpt.html"), "top.aspx")
+    body, links = _convert(_fixture("his_top_excerpt.html"), f"{SITE}/top.aspx")
     text = "\n".join(body + links)
     assert "__VIEWSTATE" not in text  # ASP.NET の hidden input (数十 KB)
     assert "M_Click" not in text  # <script>
@@ -139,7 +126,7 @@ def test_script_style_and_hidden_inputs_are_dropped():
 
 
 def test_whitespace_is_normalized():
-    body, _links = _convert(_fixture("his_unyou_excerpt.html"), "unyou_mn.aspx")
+    body, _links = _convert(_fixture("his_unyou_excerpt.html"), f"{SITE}/unyou_mn.aspx")
     assert body[0] == "連絡関連"
     assert all(line == line.strip() for line in body)
     assert all("  " not in line for line in body)
@@ -150,35 +137,45 @@ _HREF_FORMS = (
     "<html><body>"
     '<a href="unyou_mn.aspx">相対</a>'
     '<a href="/his-info/x.pdf">ルート相対</a>'
-    f'<a href="{PUBLIC_BASE}/w.pdf">同一 origin の絶対</a>'
+    f'<a href="{SITE}/w.pdf">同一 origin の絶対</a>'
     '<a href="/other/app.aspx">アプリ外</a>'
     '<a href="https://example.com/z">別ホスト</a>'
     "</body></html>"
 ).encode("utf-8")
 
 
-def test_href_forms_are_resolved_to_the_public_base():
-    """相対 / ルート相対 / 同一 origin の絶対 / 別ホスト の 4 形を切り分ける。
-    上流 base が `.../his-info` なので、ルート相対 `/his-info/x.pdf` は `<base>/x.pdf` に
-    畳まれなければならない (`<base>/his-info/x.pdf` は誤り)。"""
-    _body, links = _convert(_HREF_FORMS, "annai.aspx")
+def test_href_forms_are_resolved_against_the_page_for_general_urls():
+    """一般の URL: 相対 / ルート相対 / 同一 origin の絶対 / 別 origin の絶対 / 別ホスト を
+    通常の Web と同じくページの URL 基準で解決する (別ホストも絶対 URL として載る —
+    取りに行けるかは次の fetch_url で resolver が判定する)。"""
+    _body, links = _convert(_HREF_FORMS, f"{SITE}/annai.aspx")
     assert _link_urls(links) == [
-        f"{PUBLIC_BASE}/unyou_mn.aspx",
-        f"{PUBLIC_BASE}/x.pdf",
-        f"{PUBLIC_BASE}/w.pdf",
+        f"{SITE}/unyou_mn.aspx",
+        f"{SITE}/x.pdf",
+        f"{SITE}/w.pdf",
+        "https://med-info.med.hokudai.ac.jp/other/app.aspx",
+        "https://example.com/z",
     ]
 
 
-def test_href_forms_fall_back_to_the_ext_url_without_a_public_base():
-    """原本 URL のルートが無い name は、入力と同じオリジンの /ext/{name}/… に畳む
-    (次の fetch_url / feed_image には渡せる)。原本 origin の絶対 href は畳めないので落ちる。"""
-    _body, links = _convert(
-        _HREF_FORMS, "annai.aspx", public_base="", link_base=f"{ORIGIN}/ext/his"
-    )
+def test_href_forms_resolve_against_the_ext_page_url():
+    """`/ext/{rest}` のページ: 通常の Web と同じくページ自身の URL 基準の urljoin。相対入力
+    (`/ext/his/annai.aspx`) なら `/ext/` に留まる結果だけ残す (ルート相対 `/his-info/x.pdf` や
+    別ホストはこのサーバの URL ではない)。絶対入力なら http(s) の結果を全部残す (一般の URL と
+    同じ — 取りに行けるかは次の fetch_url で resolver が判定する)。"""
+    _body, links = _convert(_HREF_FORMS, "/ext/his/annai.aspx")
+    assert _link_urls(links) == ["/ext/his/unyou_mn.aspx"]
+    _body, links = _convert(_HREF_FORMS, f"{ORIGIN}/ext/his/annai.aspx")
     assert _link_urls(links) == [
         f"{ORIGIN}/ext/his/unyou_mn.aspx",
-        f"{ORIGIN}/ext/his/x.pdf",
+        f"{ORIGIN}/his-info/x.pdf",
+        f"{SITE}/w.pdf",
+        f"{ORIGIN}/other/app.aspx",
+        "https://example.com/z",
     ]
+    # page_url が無い (file 経路) ならリンクを組まない
+    _body, links = _convert(_HREF_FORMS, "")
+    assert links == []
 
 
 def test_html_charset_parameter_is_honoured_and_defaults_to_utf8():
@@ -201,9 +198,7 @@ def test_html_charset_parameter_is_honoured_and_defaults_to_utf8():
 
 
 def _convert_ct(raw: bytes, content_type: str):
-    return _mod()._html_to_lines(
-        raw, "x.aspx", PUBLIC_BASE, "his-info", PUBLIC_BASE, content_type
-    )
+    return _mod()._html_to_lines(raw, "/ext/his/x.aspx", content_type)
 
 
 # --- fetch_url 本体 (上流は偽装) ---------------------------------------------
@@ -212,10 +207,11 @@ def _convert_ct(raw: bytes, content_type: str):
 class _Loaded:
     """image_refs.LoadedRef の使用面 (data / content_type / name) だけ模す。"""
 
-    def __init__(self, content_type="text/html", body=b"", name="x"):
+    def __init__(self, content_type="text/html", body=b"", name="x", missing=False):
         self.data = body
         self.content_type = content_type
         self.name = name
+        self.missing = missing  # /ext/{rest} で /mnt に無い物として振る舞う
 
 
 class _FakeResolver:
@@ -223,11 +219,9 @@ class _FakeResolver:
     受ける形と許可先の判定は nucllei の `_is_url` / `_route_url` と同じ規則で模す (tool は
     この判定を resolver に一任する)。error を与えればそれを返す (code ごとの文面の番兵用)。"""
 
-    def __init__(self, loaded, error=None, ups=None, bases=None):
+    def __init__(self, loaded, error=None):
         self._loaded = loaded
         self._error = error
-        self._ups = ups or {}
-        self._bases = bases or {}
         self.refs: list[str] = []
         self.max_bytes: list = []  # resolve ごとに渡された max_bytes
 
@@ -246,63 +240,23 @@ class _FakeResolver:
         ):
             return None, RefError("unsupported_form", "not a URL this server resolves")
         parts = urlsplit(ref)
-        m = re.match(r"^/ext/([a-z0-9_-]+)(?:/(.*))?$", parts.path)
-        if m:
-            if m.group(1) not in self._ups:
-                return None, RefError("unknown_upstream", f"name={m.group(1)}")
+        if re.match(r"^/ext(?:/.*)?$", parts.path):
+            # /mnt/{rest} のローカル読み (実在は _Env の mounted で模す)
+            if self._loaded is not None and self._loaded.missing:
+                return None, RefError("not_found", "missing")
             return self._loaded, None
-        if not parts.scheme:
-            return None, RefError(
-                "unknown_upstream",
-                "same-server URL is not of the form /ext/{name}/{path}",
-            )
-        hit = _match_public_base(self._bases)(ref)
-        if hit is None:
-            bare = ref.split("#", 1)[0].partition("?")[0].rstrip("/")
-            hit = next(((n, "") for n, b in self._bases.items() if b == bare), None)
-        if hit is None:
-            # 一般の URL: どこでも取りに行く。断るのはこのサーバ自身 (loopback) だけ
-            if parts.hostname in ("127.0.0.1", "localhost", "::1"):
-                return None, RefError("unknown_upstream", "self", reason="server_self")
-            return self._loaded, None
-        name, rel = hit
-        if name not in self._ups:
-            return None, RefError("unknown_upstream", f"name={name}")
+        # 一般の URL: どこでも取りに行く。断るのはこのサーバ自身 (loopback) だけ
+        if parts.hostname in ("127.0.0.1", "localhost", "::1"):
+            return None, RefError("unknown_upstream", "self", reason="server_self")
         return self._loaded, None
-
-
-def _match_public_base(env_bases):
-    """最長 `<base>/` 前方一致で (name, rel) (偽 resolver の判定用)。"""
-
-    def match(url):
-        best, best_len = None, -1
-        for name, base in env_bases.items():
-            prefix = base.rstrip("/") + "/"
-            if url.startswith(prefix) and len(prefix) > best_len:
-                best, best_len = (name, url[len(prefix) :]), len(prefix)
-        return best
-
-    return match
 
 
 class _Env:
     """1 テスト分の道具立て: env の dict と偽 resolver を入れ、Tools を返す。"""
 
-    def __init__(
-        self,
-        monkeypatch,
-        ext_env,
-        loaded,
-        upstreams=None,
-        env_bases=None,
-        error=None,
-        pdf_text=None,
-    ):
+    def __init__(self, monkeypatch, ext_env, loaded, error=None, pdf_text=None):
         mod = _mod()
-        ups = {"his": UPSTREAM} if upstreams is None else upstreams
-        bases = {"his": PUBLIC_BASE} if env_bases is None else env_bases
-        ext_env(ups, bases)
-        self.resolver = _FakeResolver(loaded, error, ups, bases)
+        self.resolver = _FakeResolver(loaded, error)
         monkeypatch.setattr(mod, "resolve_url", self.resolver.resolve)
         if pdf_text is not None:
             monkeypatch.setattr(mod, "_pdf_to_text", lambda raw: pdf_text)
@@ -320,8 +274,6 @@ def _run(
     url,
     *,
     resp=None,
-    upstreams=None,
-    env_bases=None,
     pdf_text=None,
     error=None,
     **kwargs,
@@ -335,44 +287,37 @@ def _run(
         monkeypatch,
         ext_env,
         None if resp is False else resp,
-        upstreams,
-        env_bases,
         error=error,
         pdf_text=pdf_text,
     )
     return env.run(url, **kwargs), env.resolver
 
 
-def test_fetch_passes_the_public_url_to_the_resolver_and_renders_header(
+def test_fetch_passes_a_general_url_to_the_resolver_and_renders_header(
     monkeypatch, ext_env
 ):
-    """(a) 原本 URL: そのまま resolver に渡し、ヘッダは入力 URL 1 本 (原本行の重複無し)。"""
-    result, resolver = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx")
-    assert resolver.refs == [f"{PUBLIC_BASE}/top.aspx"]
-    assert result.startswith(f"# {PUBLIC_BASE}/top.aspx\n")
-    assert "原本 (職員に案内する URL)" not in result
-    assert "注意:" not in result
-    assert "種別: html" in result
-    # リンク一覧は原本 URL 1 本
-    assert f"→ {PUBLIC_BASE}/log_write.aspx?" in result and "/ext/" not in result
+    """一般の URL: そのまま resolver に渡し、ヘッダは入力 URL 1 本。リンクはページ基準。"""
+    result, resolver = _run(monkeypatch, ext_env, f"{SITE}/top.aspx")
+    assert resolver.refs == [f"{SITE}/top.aspx"]
+    assert result.startswith(f"# {SITE}/top.aspx\n種別: html")
+    assert "原本" not in result and "注意:" not in result
+    # リンク一覧は絶対 URL 1 本
+    assert f"→ {SITE}/log_write.aspx?" in result and "/ext/" not in result
 
 
-def test_fetch_accepts_the_ext_form_and_maps_links_to_the_public_base(
-    monkeypatch, ext_env
-):
-    """(b) 自オリジンの /ext/{name}/… も受ける。resolver にはそのまま渡し、
-    ヘッダに原本 URL を添え、リンクは原本 URL にする。"""
+def test_fetch_accepts_the_ext_form_and_keeps_links_in_that_form(monkeypatch, ext_env):
+    """自オリジンの /ext/{rest} も受ける。resolver にはそのまま渡し、リンクは入力と同じ
+    形 (`{origin}/ext/…`)。原本行も注意書きも無い (2026-10-03 設定撤去)。"""
     result, resolver = _run(monkeypatch, ext_env, EXT_TOP)
     assert resolver.refs == [EXT_TOP]
-    assert result.startswith(
-        f"# {EXT_TOP}\n原本 (職員に案内する URL): {PUBLIC_BASE}/top.aspx\n"
-    )
-    assert f"→ {PUBLIC_BASE}/log_write.aspx?" in result
-    assert f"{ORIGIN}/ext/" not in result.split("\n", 1)[1]
+    assert result.startswith(f"# {EXT_TOP}\n種別: html")
+    assert "原本" not in result and "注意:" not in result
+    assert f"→ {ORIGIN}/ext/his/log_write.aspx?" in result
+    assert SITE not in result
 
 
 def test_query_string_is_passed_through(monkeypatch, ext_env):
-    u = f"{PUBLIC_BASE}/log_write.aspx?LI_UID=G_UID&LI_URL=x.pdf"
+    u = f"{SITE}/log_write.aspx?LI_UID=G_UID&LI_URL=x.pdf"
     result, resolver = _run(
         monkeypatch,
         ext_env,
@@ -387,7 +332,7 @@ def test_query_string_is_passed_through(monkeypatch, ext_env):
 
 
 def test_query_filters_lines(monkeypatch, ext_env):
-    result, _c = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", query="移送")
+    result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", query="移送")
     assert 'query="移送" に一致した行:' in result
     assert "移送" in result
     assert "令和８年度休日" not in result  # 一致しない行は落ちる
@@ -397,7 +342,7 @@ def test_query_is_case_and_width_insensitive(monkeypatch, ext_env):
     result, _c = _run(
         monkeypatch,
         ext_env,
-        f"{PUBLIC_BASE}/unyou_mn.aspx",
+        f"{SITE}/unyou_mn.aspx",
         query="ｐｈｓ",  # 全角小文字 → NFKC + casefold で "PHS" に当たる
         resp=_Loaded(body=_fixture("his_unyou_excerpt.html")),
     )
@@ -409,7 +354,7 @@ def test_query_matches_link_lines_too(monkeypatch, ext_env):
     result, _c = _run(
         monkeypatch,
         ext_env,
-        f"{PUBLIC_BASE}/top.aspx",
+        f"{SITE}/top.aspx",
         query="iji_kanzyaisou_01_rev2.pdf",
     )
     assert "iji_kanzyaisou_01_rev2.pdf" in result
@@ -420,35 +365,33 @@ def test_query_without_match_explains_instead_of_returning_everything(
     monkeypatch, ext_env
 ):
     result, _c = _run(
-        monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", query="存在しない語句xyz"
+        monkeypatch, ext_env, f"{SITE}/top.aspx", query="存在しない語句xyz"
     )
     assert "一致する行が無い" in result
     assert "令和８年度休日" not in result
 
 
 def test_offset_limit_and_next_offset(monkeypatch, ext_env):
-    first, _c = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", limit=40)
+    first, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", limit=40)
     assert "(続きあり)" in first and "next_offset=40" in first
     head, _sep, shown = first.partition("\n\n")
     assert len(shown) == 40
-    second, _c = _run(
-        monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", offset=40, limit=40
-    )
+    second, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", offset=40, limit=40)
     assert "next_offset=80" in second
     assert second.partition("\n\n")[2] != shown
-    whole, _c = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", limit=100000)
+    whole, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", limit=100000)
     assert "(末尾まで)" in whole and "next_offset" not in whole
 
 
 def test_limit_is_capped_by_valve(monkeypatch, ext_env):
     env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
     env.tools.valves.max_output_chars = 30
-    result = env.run(f"{PUBLIC_BASE}/top.aspx", limit=99999)
+    result = env.run(f"{SITE}/top.aspx", limit=99999)
     assert len(result.partition("\n\n")[2]) == 30
 
 
 def test_offset_past_the_end_is_an_error(monkeypatch, ext_env):
-    result, _c = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", offset=10**6)
+    result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", offset=10**6)
     assert result.startswith("ERROR") and "末尾" in result
 
 
@@ -458,18 +401,12 @@ def test_offset_past_the_end_is_an_error(monkeypatch, ext_env):
 
 def test_accepts_a_same_server_relative_ext_url(monkeypatch, ext_env):
     """相対 `/ext/…` (read_doc の図・原本の形) はそのまま resolver に渡す。ホストを補わない。
-    原本ルート (public_base) のある name は、相対入力でもリンクのルートが原本ルート (`/ext/` の
-    ゲートは上流の 3xx を 502 に落とすので、利用者が開ける原本の URL を返す)。原本ルートの無い
-    name だけ相対 `/ext/{name}/…` のまま。"""
+    リンクは相対 `/ext/…` のまま。"""
     result, resolver = _run(monkeypatch, ext_env, "/ext/his/top.aspx")
     assert resolver.refs == ["/ext/his/top.aspx"]
-    assert result.startswith(
-        f"# /ext/his/top.aspx\n原本 (職員に案内する URL): {PUBLIC_BASE}/top.aspx\n"
-    ), result
-    assert f"→ {PUBLIC_BASE}/log_write.aspx?" in result and "→ /ext/his/" not in result
-    result, resolver = _run(monkeypatch, ext_env, "/ext/his/top.aspx", env_bases={})
-    assert resolver.refs == ["/ext/his/top.aspx"] and not result.startswith("ERROR")
+    assert result.startswith("# /ext/his/top.aspx\n種別: html"), result
     assert "→ /ext/his/log_write.aspx?" in result and "https://llens" not in result
+    assert "原本" not in result and "注意:" not in result
     result, resolver = _run(
         monkeypatch,
         ext_env,
@@ -504,33 +441,26 @@ def test_rejects_other_relative_and_non_url_values_with_the_fixed_text(
         assert resolver.refs == [bad], bad
 
 
-def test_unknown_upstream_is_one_fixed_text_naming_the_bases(monkeypatch, ext_env):
-    """未構成の name・形の欠けた `/ext/` は resolver の unknown_upstream。detail で分岐せず
-    (reason 無しは) 1 つの固定文にし、登録された原本ホストを名乗る。"""
-    for bad in (
-        f"{ORIGIN}/ext/other/top.aspx",  # 未構成の name
-        "/ext/",  # 配信元の名前が取れない同一サーバの URL
-        "/ext/CAGE/x",  # 文字種外の name
-    ):
-        result, resolver = _run(monkeypatch, ext_env, bad)
+def test_ext_paths_not_mounted_are_dead_links(monkeypatch, ext_env):
+    """/mnt に無い `/ext/…` は resolver の not_found (設定も name の概念も無い —
+    2026-10-03)。リンク切れとして案内する。"""
+    for bad in (f"{ORIGIN}/ext/other/top.aspx", "/ext/other/x", "/ext/", "/ext/CAGE/x"):
+        result, resolver = _run(monkeypatch, ext_env, bad, resp=_Loaded(missing=True))
         assert resolver.refs == [bad], bad
-        assert result.startswith(
-            f"ERROR: {bad} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。"
-        ), (bad, result)
-        assert f"`{PUBLIC_BASE}` (his)" in result and "EXT_" not in result, bad
+        assert result.startswith(f"ERROR: {bad} は存在しない"), (bad, result)
+        assert "EXT_" not in result, bad
 
 
 def test_general_urls_are_fetched_and_the_server_itself_is_refused(
     monkeypatch, ext_env
 ):
-    """登録に当たらない絶対 URL (外部サイト・同ホストの base の外・任意の LAN) は一般の URL
-    として取りに行く (resolver 任せ。tool は行き先で断らない)。断るのはこのサーバ自身だけで、
-    その文面は reason `server_self`。"""
+    """`/ext/` 形でない絶対 URL (外部サイト・任意の LAN・絶対で name が取れない形) は一般の
+    URL として取りに行く (resolver 任せ。tool は行き先で断らない)。断るのはこのサーバ自身
+    だけで、その文面は reason `server_self`。"""
     for u in (
         "https://example.com/x",
         "http://172.17.0.1:13303/static/x.png",
-        "https://med-info.med.hokudai.ac.jp/other/app.aspx",  # 同ホスト・base の外
-        "https://med-info.med.hokudai.ac.jp/his-info2/top.aspx",  # base の prefix 衝突
+        "https://med-info.med.hokudai.ac.jp/other/app.aspx",
         f"{ORIGIN}/ext//top.aspx",  # 絶対で name が取れない形も、ただの絶対 URL
     ):
         result, resolver = _run(monkeypatch, ext_env, u)
@@ -548,10 +478,10 @@ def test_general_urls_are_fetched_and_the_server_itself_is_refused(
 
 
 def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
-    """直下 (`<base>` `<base>/` `/ext/{name}` `/ext/{name}/`) は name のルートとして resolver が
-    取りに行き、302 なら upstream_status (status=302)。redirect の案内文になる。
+    """直下 (`/ext/{name}` `/ext/{name}/` / サイトのルート) は resolver がそのまま取りに行き、
+    302 なら upstream_status (status=302)。redirect の案内文になる。
     tool は末尾 `/` を補わず、受け取った形のまま resolver に渡す。"""
-    for u in (PUBLIC_BASE, f"{PUBLIC_BASE}/", "/ext/his", "/ext/his/"):
+    for u in (SITE, f"{SITE}/", "/ext/his", "/ext/his/"):
         result, resolver = _run(
             monkeypatch,
             ext_env,
@@ -567,57 +497,38 @@ def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
 
 
 def test_root_page_has_link_roots_without_double_slashes(monkeypatch, ext_env):
-    """直下が 200 で返ったとき (rel == "")、リンクのルートは変わらず、`//` を作らない。"""
-    for u in (f"{PUBLIC_BASE}/", PUBLIC_BASE, "/ext/his/", "/ext/his"):
+    """ディレクトリ風の URL (末尾 `/`) が 200 で返ったとき、リンクはその下で `//` を作らない。
+    末尾 `/` 無し (`/ext/his`) はファイル名扱いで親の下 — 通常の Web と同じ urljoin。"""
+    for u, root in (
+        (f"{SITE}/", SITE),
+        ("/ext/his/", "/ext/his"),
+        ("/ext/his", "/ext"),
+        (f"{ORIGIN}/ext/his/", f"{ORIGIN}/ext/his"),
+    ):
         result, resolver = _run(monkeypatch, ext_env, u)
         assert resolver.refs == [u] and not result.startswith("ERROR"), (u, result)
         links = _listed_links(result)
         assert links and all(
-            link.startswith(PUBLIC_BASE + "/") and "//" not in link.split("://", 1)[-1]
+            link.startswith(root + "/") and "//" not in link.split("://", 1)[-1]
             for link in links
         ), (u, links)
 
 
 def test_traversal_is_an_error_via_the_resolver(monkeypatch, ext_env):
     """traversal の判定は tool ではなく resolver (fail closed)。tool は「範囲の外」と言う。"""
-    for bad in (f"{PUBLIC_BASE}/../secret.pdf", f"{ORIGIN}/ext/his/../secret.pdf"):
+    for bad in (f"{SITE}/../secret.pdf", f"{ORIGIN}/ext/his/../secret.pdf"):
         result, _r = _run(monkeypatch, ext_env, bad)
         assert result.startswith("ERROR") and "許可された範囲の外" in result, bad
         assert result.endswith(URL_ARG_FORM), bad
 
 
-def test_no_upstreams_configured(monkeypatch, ext_env):
-    result, resolver = _run(
-        monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx", upstreams={}
-    )
-    assert result.startswith("ERROR") and "許可された配信元の外" in result
-
-
-def test_no_public_bases_configured_treats_original_urls_as_general(
-    monkeypatch, ext_env
-):
-    """env EXT_PUBLIC_BASES が空なら原本 URL はただの一般の URL — そのホストに直接取りに行き、
-    リンクはページ自身の URL 基準 (`/ext/` の注意書きは出ない)。/ext/ 形は backend のまま。
-    unknown_upstream の ERROR に「原本ホストは未設定」の句は付けない (雑音)。"""
-    u = f"{PUBLIC_BASE}/top.aspx"
-    result, resolver = _run(monkeypatch, ext_env, u, env_bases={})
-    assert not result.startswith("ERROR") and resolver.refs == [u]
-    assert result.startswith(f"# {u}\n種別:") and "注意:" not in result
-    assert _listed_links(result) and all(
-        link.startswith(PUBLIC_BASE + "/") for link in _listed_links(result)
-    )
-    result, resolver = _run(monkeypatch, ext_env, EXT_TOP, env_bases={})
-    assert not result.startswith("ERROR") and resolver.refs == [EXT_TOP]
-    result, _r = _run(monkeypatch, ext_env, "/ext/nosuch/x", env_bases={})
-    assert result.startswith("ERROR") and "原本ホスト" not in result
-
-
 def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):
     """URL 末尾が `?` だけ (query 空) でも、resolver にはその literal を渡し、
-    リンクのルートは 1 字もずれない ((a)(b) 両形)。"""
+    リンクのルートは 1 字もずれない (一般 / /ext 両形)。"""
     for u, root in (
-        (f"{PUBLIC_BASE}/top.aspx?", PUBLIC_BASE),
-        (f"{ORIGIN}/ext/his/top.aspx?", PUBLIC_BASE),
+        (f"{SITE}/top.aspx?", SITE),
+        (f"{ORIGIN}/ext/his/top.aspx?", f"{ORIGIN}/ext/his"),
+        ("/ext/his/top.aspx?", "/ext/his"),
     ):
         result, resolver = _run(monkeypatch, ext_env, u)
         assert resolver.refs == [u], u
@@ -628,53 +539,25 @@ def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):
         ), u
 
 
-def test_root_relative_hrefs_fold_on_the_public_base_path_not_the_backend_path(
-    monkeypatch, ext_env
-):
-    """ページの `/his-info/x.pdf` は**職員側の origin** (EXT_PUBLIC_BASES) に対するルート相対。
-    backend (EXT_UPSTREAMS) が別パスで中継する配備 (例 `http://relay/apps/his`) でも、
-    prefix は原本ルートのパス (`his-info`) から取る。原本ルートが無い name だけ backend に落ちる。"""
+def test_ext_page_links_resolve_against_the_page_url(monkeypatch, ext_env):
+    """`/ext/{rest}` のページの href はページ自身の URL 基準 (通常の Web と同じ)。相対入力なら
+    `/ext/` に留まる物だけ、絶対入力なら http(s) の結果を全部。"""
     page = _Loaded(body=_HREF_FORMS)
-    result, _r = _run(
-        monkeypatch,
-        ext_env,
-        f"{PUBLIC_BASE}/annai.aspx",
-        resp=page,
-        upstreams={"his": "http://relay.example/apps/his"},
-    )
+    result, _r = _run(monkeypatch, ext_env, f"{ORIGIN}/ext/his/annai.aspx", resp=page)
     assert _listed_links(result) == [
-        f"{PUBLIC_BASE}/unyou_mn.aspx",
-        f"{PUBLIC_BASE}/x.pdf",
-        f"{PUBLIC_BASE}/w.pdf",
+        f"{ORIGIN}/ext/his/unyou_mn.aspx",
+        f"{ORIGIN}/his-info/x.pdf",
+        f"{SITE}/w.pdf",
+        f"{ORIGIN}/other/app.aspx",
+        "https://example.com/z",
     ]
-    # 原本ルート無し: backend のパス (`apps/his`) が prefix。`/his-info/x.pdf` はその外なので落ちる
-    result, _r = _run(
-        monkeypatch,
-        ext_env,
-        f"{ORIGIN}/ext/his/annai.aspx",
-        resp=page,
-        env_bases={},
-        upstreams={"his": "http://relay.example/apps/his"},
-    )
-    assert _listed_links(result) == [f"{ORIGIN}/ext/his/unyou_mn.aspx"]
-
-
-def test_error_text_names_the_same_bases_the_router_uses(monkeypatch, ext_env):
-    """ERROR 文の原本ホストはルーティングと同じ dict (EXT_PUBLIC_BASES) から出る。"""
-    other = "https://other.example/docs"
-    result, _r = _run(
-        monkeypatch,
-        ext_env,
-        f"{ORIGIN}/ext/nosuch/x",
-        env_bases={"his": PUBLIC_BASE, "other": other},
-        upstreams={"his": UPSTREAM, "other": other},
-    )
-    assert f"`{PUBLIC_BASE}` (his)" in result and f"`{other}` (other)" in result
+    result, _r = _run(monkeypatch, ext_env, "/ext/his/annai.aspx", resp=page)
+    assert _listed_links(result) == ["/ext/his/unyou_mn.aspx"]
 
 
 def test_requires_user(monkeypatch, ext_env):
     env = _Env(monkeypatch, ext_env, _Loaded(body=b"<html></html>"))
-    result = asyncio.run(env.tools.fetch_url(url=f"{PUBLIC_BASE}/top.aspx"))
+    result = asyncio.run(env.tools.fetch_url(url=f"{SITE}/top.aspx"))
     assert result.startswith("ERROR") and env.resolver.refs == []
 
 
@@ -682,7 +565,7 @@ def test_requires_user(monkeypatch, ext_env):
 
 
 def test_pdf_without_text_layer_points_to_feed_image(monkeypatch, ext_env):
-    u = f"{PUBLIC_BASE}/scan.pdf"
+    u = f"{SITE}/scan.pdf"
     result, _c = _run(
         monkeypatch,
         ext_env,
@@ -699,7 +582,7 @@ def test_pdf_without_text_layer_guides_to_feed_image_even_without_pdf_extension(
 ):
     """log_write.aspx 経由 (パスが .pdf で終わらない) でも feed_image へ誘導する
     (feed_image は拡張子ではなく content-type で PDF を判定する)。"""
-    u = f"{PUBLIC_BASE}/log_write.aspx?LI_URL=scan.pdf"
+    u = f"{SITE}/log_write.aspx?LI_URL=scan.pdf"
     result, _c = _run(
         monkeypatch,
         ext_env,
@@ -717,14 +600,14 @@ def test_pdf_is_detected_by_magic_bytes_when_content_type_lies(monkeypatch, ext_
     result, _c = _run(
         monkeypatch,
         ext_env,
-        f"{PUBLIC_BASE}/log_write.aspx?LI_URL=x.pdf",
+        f"{SITE}/log_write.aspx?LI_URL=x.pdf",
         pdf_text="B" * 300,
         resp=_Loaded(content_type="application/octet-stream", body=b"%PDF-1.7 x"),
     )
     assert "種別: pdf" in result and "BBB" in result
 
 
-# --- 取得失敗 / サイズ / 原本 URL 未設定 ------------------------------------
+# --- 取得失敗 / サイズ ----------------------------------------------------
 
 
 def test_resolver_failure_without_a_reason_falls_back_to_the_bundled_text(
@@ -732,9 +615,9 @@ def test_resolver_failure_without_a_reason_falls_back_to_the_bundled_text(
 ):
     """resolve_url が (None, None) を返した (通常起きない): 理由が無いので束ねた 1 文
     (redirect を辿らないことだけは案内する)。"""
-    result, resolver = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/index", resp=False)
-    assert resolver.refs == [f"{PUBLIC_BASE}/index"]
-    assert result.startswith(f"ERROR: {PUBLIC_BASE}/index を取得できない")
+    result, resolver = _run(monkeypatch, ext_env, f"{SITE}/index", resp=False)
+    assert resolver.refs == [f"{SITE}/index"]
+    assert result.startswith(f"ERROR: {SITE}/index を取得できない")
     assert "redirect" in result and "top.aspx" in result
 
 
@@ -743,19 +626,19 @@ def test_fetch_passes_the_valve_size_cap_to_the_resolver_as_max_bytes(
 ):
     """文書を読む用途の上限 (valve max_fetch_mb、既定 25 = 控えめ) を max_bytes で渡す — 画像
     inline 用の既定上限を借りない。"""
-    result, resolver = _run(monkeypatch, ext_env, f"{PUBLIC_BASE}/top.aspx")
+    result, resolver = _run(monkeypatch, ext_env, f"{SITE}/top.aspx")
     assert not result.startswith("ERROR")
     assert resolver.max_bytes == [25 * 1024 * 1024]
     env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
     env.tools.valves.max_fetch_mb = 2.5
-    env.run(f"{PUBLIC_BASE}/top.aspx")
+    env.run(f"{SITE}/top.aspx")
     assert env.resolver.max_bytes == [int(2.5 * 1024 * 1024)]
 
 
 def test_max_mb_argument_is_capped_by_the_ceiling(monkeypatch, ext_env):
     env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
-    env.run(f"{PUBLIC_BASE}/top.aspx", max_mb=30)
-    env.run(f"{PUBLIC_BASE}/top.aspx", max_mb=10_000)
+    env.run(f"{SITE}/top.aspx", max_mb=30)
+    env.run(f"{SITE}/top.aspx", max_mb=10_000)
     assert env.resolver.max_bytes == [30 * 1024 * 1024, 200 * 1024 * 1024]
 
 
@@ -859,21 +742,12 @@ def test_internal_file_charset_comes_from_the_files_meta(
 # 実走 (2026-09-06): 32.6 MB の PDF が上限 25 MB に当たったのを、束ねた ERROR 文のせいで
 # モデルが「リンク切れ」と誤報した。code ごとに「何が起きたか + 次の一手」を言う。
 
-_PDF_URL = f"{PUBLIC_BASE}/log_write.aspx?LI_UID=G_UID&LI_URL=big.pdf"
+_PDF_URL = f"{SITE}/log_write.aspx?LI_UID=G_UID&LI_URL=big.pdf"
 
 
-def _explained(
-    monkeypatch, ext_env, code, url=_PDF_URL, upstreams=None, env_bases=None, **kw
-):
+def _explained(monkeypatch, ext_env, code, url=_PDF_URL, **kw):
     kw.setdefault("detail", "")
-    result, resolver = _run(
-        monkeypatch,
-        ext_env,
-        url,
-        error=RefError(code, **kw),
-        upstreams=upstreams,
-        env_bases=env_bases,
-    )
+    result, resolver = _run(monkeypatch, ext_env, url, error=RefError(code, **kw))
     assert resolver.refs == [url], code
     assert result.startswith("ERROR"), (code, result)
     assert "cage" not in result.lower() and "EXT_" not in result, (code, result)
@@ -1016,7 +890,7 @@ def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch, ext_env):
 
 def test_redirect_status_points_to_a_page_not_a_directory(monkeypatch, ext_env):
     result = _explained(
-        monkeypatch, ext_env, "upstream_status", url=f"{PUBLIC_BASE}/dir", status=302
+        monkeypatch, ext_env, "upstream_status", url=f"{SITE}/dir", status=302
     )
     assert (
         "redirect (302)" in result and "ディレクトリではなくページを直接指す" in result
@@ -1050,40 +924,32 @@ def test_unsupported_form_code_uses_the_fixed_text(monkeypatch, ext_env):
 
 
 def test_unknown_upstream_does_not_branch_on_the_detail(monkeypatch, ext_env):
-    """unknown_upstream の detail 文言は変わりうるので分岐に使わない — どの detail でも同文。"""
-    ups = {"his": UPSTREAM, "other": "https://other.example/docs"}
+    """unknown_upstream の detail 文言は変わりうるので分岐に使わない — どの detail でも同文。
+    env の変数名も配信元の一覧も出ない。"""
     texts = set()
     for detail in (
         "name=other",
-        "absolute URL is neither an /ext/{name}/ URL nor under EXT_PUBLIC_BASES (external site: https://example.com)",
-        "same-server URL is not of the form /ext/{name}/{path}",
+        "host resolves to this server itself",
         "",
     ):
         texts.add(
             _explained(
-                monkeypatch,
-                ext_env,
-                "unknown_upstream",
-                url=_PDF_URL,
-                upstreams=ups,
-                detail=detail,
+                monkeypatch, ext_env, "unknown_upstream", url=_PDF_URL, detail=detail
             )
         )
     assert len(texts) == 1
     (text,) = texts
-    assert (
-        "許可された配信元の外" in text
-        and PUBLIC_BASE in text
-        and text.endswith(URL_ARG_FORM)
-    )
+    assert "取得を許可されていない URL" in text and text.endswith(URL_ARG_FORM)
+    assert "登録された原本ホスト" not in text and "/mnt/" not in text
 
 
 def test_unknown_upstream_is_told_apart_by_reason(monkeypatch, ext_env):
-    """`RefError.reason` で言い分ける (detail は見ない)。"""
+    """`RefError.reason` で言い分ける (detail は見ない)。reason の集合は server_self だけ
+    (`not_ext_form` / `unknown_name` は 2026-10-03 に無くした — 知らない reason は 1 文面)。"""
     want = {
-        "not_ext_form": "配信元の名前が取れない",
-        "unknown_name": "配信元は無い",
         "server_self": "このサーバ自身",
+        "not_ext_form": "取得を許可されていない URL",
+        "unknown_name": "取得を許可されていない URL",
     }
     for reason, phrase in want.items():
         result = _explained(
@@ -1094,11 +960,11 @@ def test_unknown_upstream_is_told_apart_by_reason(monkeypatch, ext_env):
             reason=reason,
         )
         assert phrase in result and result.endswith(URL_ARG_FORM), (reason, result)
-        assert f"`{PUBLIC_BASE}` (his)" in result, reason
+        assert "登録された原本ホスト" not in result, reason
 
 
 def test_traversal_code_says_out_of_bounds(monkeypatch, ext_env):
-    result = _explained(monkeypatch, ext_env, "traversal", url=f"{PUBLIC_BASE}/a.pdf")
+    result = _explained(monkeypatch, ext_env, "traversal", url=f"{SITE}/a.pdf")
     assert "許可された範囲の外" in result and result.endswith(URL_ARG_FORM)
 
 
@@ -1145,7 +1011,7 @@ def test_general_url_reasons_have_their_own_text(monkeypatch, ext_env):
 def test_size_cap(monkeypatch, ext_env):
     env = _Env(monkeypatch, ext_env, _Loaded(body=b"x" * 4096))
     env.tools.valves.max_fetch_mb = 0.001  # 約 1KB
-    result = env.run(f"{PUBLIC_BASE}/top.aspx")
+    result = env.run(f"{SITE}/top.aspx")
     assert result.startswith("ERROR") and "大きすぎる" in result
     assert (
         "0.0 MB で大きすぎる (この呼び出しの上限 0.0 MB)" in result
@@ -1153,8 +1019,8 @@ def test_size_cap(monkeypatch, ext_env):
     assert "URL をそのまま案内" in result
 
 
-def test_unsupported_content_type_hands_back_the_public_url(monkeypatch, ext_env):
-    u = f"{PUBLIC_BASE}/log_write.aspx?LI_URL=x.xls"
+def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
+    u = f"{SITE}/log_write.aspx?LI_URL=x.xls"
     result, _c = _run(
         monkeypatch,
         ext_env,
@@ -1163,11 +1029,20 @@ def test_unsupported_content_type_hands_back_the_public_url(monkeypatch, ext_env
     )
     assert result.startswith("ERROR") and "平文にできない形式" in result
     assert u in result
+    # /ext/ 形 (相対) も入力と同じ形で案内する
+    u = "/ext/his/log_write.aspx?LI_URL=x.xls"
+    result, _c = _run(
+        monkeypatch,
+        ext_env,
+        u,
+        resp=_Loaded(content_type="application/vnd.ms-excel", body=b"\xd0\xcf"),
+    )
+    assert result.startswith("ERROR") and u in result and "https://" not in result
 
 
 def test_image_guides_to_feed_image_not_to_a_dead_end(monkeypatch, ext_env):
     """画像は平文にできないが行き止まりではない — feed_image に同じ URL を渡して見る。"""
-    u = f"{PUBLIC_BASE}/log_write.aspx?LI_URL=fig.png"
+    u = f"{SITE}/log_write.aspx?LI_URL=fig.png"
     result, _c = _run(
         monkeypatch,
         ext_env,
@@ -1184,7 +1059,7 @@ def test_json_and_text_are_returned_as_lines(monkeypatch, ext_env):
         result, _c = _run(
             monkeypatch,
             ext_env,
-            f"{PUBLIC_BASE}/api/x",
+            f"{SITE}/api/x",
             resp=_Loaded(content_type=ct, body=b'{"a": 1}\n\n{"b": 2}\n'),
         )
         assert (
@@ -1192,20 +1067,24 @@ def test_json_and_text_are_returned_as_lines(monkeypatch, ext_env):
         ), (ct, result)
 
 
-def test_ext_form_without_public_base_keeps_links_absolute_and_says_so(
-    monkeypatch, ext_env
-):
-    """EXT_PUBLIC_BASES に無い name の /ext/ 形: リンクは入力と同じ形の /ext/ URL
-    (次の tool に渡せ、本文に貼れる) にし、原本ホストが無い旨をヘッダに 1 行出す。
-    上流の name (内部名) は出さない。"""
-    result, resolver = _run(monkeypatch, ext_env, EXT_TOP, env_bases={})
-    assert not result.startswith("ERROR") and resolver.refs == [EXT_TOP]
-    assert "注意: この資料の配信元には原本ホストが無い" in result
-    assert "(his)" not in result
-    assert "原本 (職員に案内する URL)" not in result
-    assert "med-info.med.hokudai.ac.jp" not in result
-    links = [ln for ln in result.split("\n") if re.match(r"^\[\d+\] ", ln)]
-    assert links and all(f"→ {ORIGIN}/ext/his/" in ln for ln in links)
+def test_no_original_host_text_is_left():
+    """原本ホスト (EXT_PUBLIC_BASES) の仕組みは無い: docstring のスロットも、ERROR 文の
+    「登録された原本ホスト」も、ヘッダの原本行・注意書きも。"""
+    mod = _mod()
+    for gone in (
+        "_describe_bases",
+        "_DOC_BASES_SLOT",
+        "EXT_PUBLIC_BASES",
+        "_FAKE_ORIGIN",
+    ):
+        assert not hasattr(mod, gone), gone
+    for gone in ("_base_prefix", "_head", "_link_roots"):
+        assert not hasattr(mod.Tools, gone), gone
+    doc = mod.Tools.fetch_url.__doc__
+    assert "http(s)://" in doc and "`/ext/…`" in doc
+    assert "`https://…`" not in doc  # http の URL を https に直させない
+    for gone in ("{PUBLIC_BASES}", "原本ホスト", "EXT_"):
+        assert gone not in doc, gone
 
 
 # --- _link_roots は route_of_url の結果だけで組む ------------------------------------
@@ -1213,11 +1092,10 @@ def test_ext_form_without_public_base_keeps_links_absolute_and_says_so(
 
 def _route(**fields):
     base = dict(
-        name="his",
         rel="",
         query="",
-        public_base=None,
         origin=None,
+        kind="ext",
         relative=True,
         general=False,
         page_url=None,
@@ -1226,43 +1104,42 @@ def _route(**fields):
     return lambda u: (types.SimpleNamespace(**base), None)
 
 
-def test_link_roots_follow_route_of_url(monkeypatch, ext_env):
-    """リンクのルートは route_of_url で引く (相対 → `/ext/{name}`、絶対で原本ルートあり → それ、
-    無し → `{origin}/ext/{name}`)。"""
+def test_page_url_follows_route_of_url(monkeypatch, ext_env):
+    """ページ内リンクの基準は route_of_url の `page_url` (相対 → `/ext/{rest}`、絶対 →
+    `{origin}/ext/{rest}`)。"""
     mod = _mod()
     env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
     calls = []
 
     def route_of_url(u):
         calls.append(u)
-        return _route(rel="top.aspx", origin="https://llens.example", relative=False)(u)
+        return _route(
+            rel="his/top.aspx",
+            origin="https://llens.example",
+            relative=False,
+            page_url="https://llens.example/ext/his/top.aspx",
+        )(u)
 
     monkeypatch.setattr(mod, "route_of_url", route_of_url)
     result = env.run(EXT_TOP)
     assert calls == [EXT_TOP]
     assert "→ https://llens.example/ext/his/log_write.aspx?" in result, result
+    assert mod.Tools._page_url(EXT_TOP) == "https://llens.example/ext/his/top.aspx"
+    monkeypatch.setattr(
+        mod,
+        "route_of_url",
+        _route(rel="his/top.aspx", query="?a=1", page_url="/ext/his/top.aspx?a=1"),
+    )
+    assert mod.Tools._page_url("/ext/his/top.aspx?a=1") == "/ext/his/top.aspx?a=1"
 
 
-def test_route_of_url_with_an_empty_rel_keeps_the_link_root(monkeypatch, ext_env):
-    """直下で rel == "" でも、リンクのルートは `/ext/{name}` のまま (`//` を作らない)。"""
+def test_directory_page_url_keeps_links_under_it(monkeypatch, ext_env):
+    """ディレクトリ風の URL (`/ext/his/`) が 200 で返っても、リンクはその下 (`//` を作らない)。"""
     env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
-    monkeypatch.setattr(_mod(), "route_of_url", _route(rel=""))
-    links = _listed_links(env.run("/ext/his"))
+    links = _listed_links(env.run("/ext/his/"))
     assert links and all(
         link.startswith("/ext/his/") and "//" not in link for link in links
     ), links
-
-
-def test_route_of_url_with_a_public_base_links_to_the_original_even_for_relative_input(
-    monkeypatch, ext_env
-):
-    """public_base のある name (http backend) は、相対入力でもリンクのルートを public_base にする。"""
-    env = _Env(monkeypatch, ext_env, _Loaded(body=_fixture("his_top_excerpt.html")))
-    monkeypatch.setattr(
-        _mod(), "route_of_url", _route(rel="top.aspx", public_base=PUBLIC_BASE)
-    )
-    links = _listed_links(env.run("/ext/his/top.aspx"))
-    assert links and all(link.startswith(PUBLIC_BASE + "/") for link in links), links
 
 
 def test_unroutable_url_after_a_successful_fetch_still_returns_the_text(
@@ -1279,7 +1156,7 @@ def test_unroutable_url_after_a_successful_fetch_still_returns_the_text(
 
 def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
     """一般の URL (route.general) はリンクをページの URL 基準の urljoin で解決する。
-    名前空間 (/ext/{name}・原本ルート) を通さず、ヘッダに /ext/ の注意書きも出さない。"""
+    名前空間 (/ext/{name}) を通さない。"""
     mod = _mod()
     page = "http://172.16.9.9/app/dir/page.aspx?x=1"
     env = _Env(monkeypatch, ext_env, _Loaded(body=_HREF_FORMS))
@@ -1292,7 +1169,6 @@ def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
             rel="app/dir/page.aspx",
             query="?x=1",
             origin="http://172.16.9.9",
-            ext_form=False,
             general=True,
             relative=False,
             page_url=page,
@@ -1311,83 +1187,57 @@ def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
     assert all(link.startswith("http") and "/ext/" not in link for link in links), links
 
 
-# --- docstring (spec) は env の許可先を名乗る ------------------------------------------
-
-
-def test_docstring_names_the_public_bases_from_env(ext_env):
-    """tool の説明文 (spec) は nucllei.env.EXT_PUBLIC_BASES (受理判定と同じ dict) を名乗る。
-    埋め込みは module 読み込み時なので reload で通す。"""
-    from nucllei import env
-
+def test_real_routing_is_used_for_ext_and_general(monkeypatch, ext_env):
+    """route_of_url の本物で `/ext/his/…` と一般の URL のページ URL が決まる (resolver は
+    偽物のまま)。"""
     mod = _mod()
-    saved = (dict(env.EXT_UPSTREAMS), dict(env.EXT_PUBLIC_BASES))
-    try:
-        ext_env({"his": UPSTREAM}, {"his": PUBLIC_BASE})
-        doc = importlib.reload(mod).Tools.fetch_url.__doc__
-        assert "{PUBLIC_BASES}" not in doc
-        assert f"登録された原本ホスト (`{PUBLIC_BASE}` (his))" in doc
-        assert (
-            "http(s)://" in doc and "`https://…`" not in doc
-        )  # http の原本を https に直させない
-
-        ext_env({}, {})
-        doc = importlib.reload(mod).Tools.fetch_url.__doc__
-        assert "{PUBLIC_BASES}" not in doc
-        assert "登録された原本ホスト ((未設定" in doc and "med-info" not in doc
-    finally:
-        ext_env(*saved)  # env を戻してから reload し、docstring を元の配備の値に戻す
-        importlib.reload(mod)
+    page = _Loaded(body=_HREF_FORMS)
+    result, _r = _run(monkeypatch, ext_env, "/ext/his/annai.aspx", resp=page)
+    assert _listed_links(result) == ["/ext/his/unyou_mn.aspx"]
+    result, _r = _run(monkeypatch, ext_env, f"{SITE}/annai.aspx", resp=page)
+    assert _listed_links(result)[:3] == [
+        f"{SITE}/unyou_mn.aspx",
+        f"{SITE}/x.pdf",
+        f"{SITE}/w.pdf",
+    ]
+    assert mod.Tools._page_url("/ext/x/y.html?q=1") == "/ext/x/y.html?q=1"
+    assert mod.Tools._page_url("/mnt/x") == ""
 
 
 # --- 登録 (`__init__.py`) --------------------------------------------------------------
 
 
 @contextlib.contextmanager
-def ext_gate(upstreams=None, bases=None):
-    """EXT_UPSTREAMS / EXT_PUBLIC_BASES を差し替えて builtin_tools を読み直す
-    (test_builtin_sandbox の sandbox_env と同じ流儀)。"""
+def ext_gate():
+    """builtin_tools を読み直す (test_builtin_sandbox の sandbox_env と同じ流儀。/ext に
+    env は無いので差し替える物は無い)。"""
     import nucllei.builtin_tools as pkg
-    from nucllei import env
 
-    saved = (dict(env.EXT_UPSTREAMS), dict(env.EXT_PUBLIC_BASES))
-
-    def _apply(ups, bs):
-        env.EXT_UPSTREAMS.clear()
-        env.EXT_UPSTREAMS.update(ups)
-        env.EXT_PUBLIC_BASES.clear()
-        env.EXT_PUBLIC_BASES.update(bs)
-        importlib.reload(pkg)
-
-    _apply(upstreams or {}, bases or {})
+    importlib.reload(pkg)
     try:
         yield pkg
     finally:
-        _apply(*saved)
+        importlib.reload(pkg)
 
 
 def test_fetch_url_is_always_registered():
-    """配信元も原本ホストも無い配備でも載る (2026-10-03: url= はどこでも取りに行くので、
-    env が空でも「必ず失敗する」builtin ではない)。feed_image も常に居る。"""
-    for kw in (
-        {},
-        dict(upstreams={"cage": "file:///tmp"}),
-        dict(bases={"his": PUBLIC_BASE}),
-    ):
-        with ext_gate(**kw) as pkg:
-            entry = pkg.BUILTIN_TOOLS.get("builtin_fetch_url")
-            assert entry is not None, kw
-            assert entry["module"] is _mod() and entry["name"] == "Fetch URL"
-            assert pkg.is_builtin_tool_id("builtin_fetch_url") is True
-            assert pkg.is_reserved_builtin_id("builtin_fetch_url") is True
-            assert "builtin_feed_image" in pkg.BUILTIN_TOOLS
-            assert "EXT_" not in entry["description"]
+    """env ゲート無しで載る (2026-10-03: url= はどこでも取りに行くので「必ず失敗する」builtin
+    ではない)。feed_image も常に居る。"""
+    with ext_gate() as pkg:
+        entry = pkg.BUILTIN_TOOLS.get("builtin_fetch_url")
+        assert entry is not None
+        assert entry["module"] is _mod() and entry["name"] == "Fetch URL"
+        assert pkg.is_builtin_tool_id("builtin_fetch_url") is True
+        assert pkg.is_reserved_builtin_id("builtin_fetch_url") is True
+        assert "builtin_feed_image" in pkg.BUILTIN_TOOLS
+        assert "EXT_" not in entry["description"]
 
 
 def test_builtin_specs_have_the_expected_function_names_and_valves():
     """spec は docstring から生成され、Valves は builtin でも載る (sync / 管理画面の編集経路)。"""
     from nucllei.utils.tools import get_tool_specs
 
-    with ext_gate(upstreams={"his": UPSTREAM}, bases={"his": PUBLIC_BASE}) as pkg:
+    with ext_gate() as pkg:
         fetch = pkg.BUILTIN_TOOLS["builtin_fetch_url"]["module"]
         feed = pkg.BUILTIN_TOOLS["builtin_feed_image"]["module"]
         assert [s["name"] for s in get_tool_specs(fetch.Tools())] == ["fetch_url"]

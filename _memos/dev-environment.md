@@ -298,10 +298,19 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      ゲートがあったが、`url=` が http(s) URL ならどこでも取りに行く決定と一緒に外した —
      [[builtin-tools]]「一般の URL」)。dev では `fetch_url(url="https://example.com/")` が
      そのまま通る。**`http://127.0.0.1:<port>` は自分自身として断られる**(loopback は固定で
-     拒否)ので、ローカルの http サーバを院内 Web の代わりに試すなら
-     `EXT_UPSTREAMS=x=http://127.0.0.1:<port>` で登録して `/ext/x/…` で叩く(登録した配信元は
-     backend 経由なので自分自身の判定を通らない。vite dev の proxy に `/ext` が無い件は
-     [[builtin-tools]] の該当節)。
+     拒否)。ローカルの http サーバを院内 Web の代わりに試すなら、docker bridge でないホストの
+     LAN 側 IP(`ip -4 addr` の 10.x / 192.168.x)で `http://<LAN IP>:<port>/…` を渡す
+     (自分のインターフェースのアドレスは実行時発見で自分自身扱いになる — その場合は
+     `SELF_ADDRESSES` ではなく別マシンのサーバを使う)。
+   - **`/ext/**` は nucllei の `/mnt` をそのまま配信する**(2026-10-03 夕、ken 決定。
+     `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES` は撤去、env での差し替えも無い —
+     `image_refs.RO_MOUNT_ROOT` は定数)。docker 無しの dev で cage の図を `/ext/cage/static/X`
+     で見たいなら、**ホストに `/mnt/cage` を作る**(`sudo ln -s ~/Sync/Projects/llens/cage/data
+     /mnt/cage` のような symlink でよい。resolve 済み同士で閉じ込めるので symlink 越しでも配信
+     される)。sandbox コンテナ側も同じ物を `/mnt/cage` に bind する(#138 の規約)。
+     `/mnt` に何も無ければ `/ext/**` は全 404(起動ログ `read-only mount (served at /ext/)` /
+     `参照用データは無い` で分かる)。vite dev の proxy に `/ext` が無い件は
+     [[builtin-tools]] の該当節。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
      `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは
      `docker build -t nucllei-sandbox:dev ./sandbox`、公開は **`127.0.0.1:13302->8000`**

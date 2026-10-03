@@ -2,7 +2,7 @@
 
 `load_ref` が None しか返さないと、呼び手(feed 側の tool / 送信直前 inline)は
 「上流不達・不在・redirect・サイズ超過」を束ねた 1 つの失敗しか出せない — 実走で
-32.6 MB の PDF が EXT_INLINE_MAX_BYTES(25 MB)に当たり、モデルが「リンク切れ」と
+32.6 MB の PDF が FETCH_MAX_BYTES(25 MB)に当たり、モデルが「リンク切れ」と
 誤報した。ここでは code ごとに 1 本ずつ、経路(file / http / workspace)が違っても
 同じ code に落ちることを固定する。成功経路と "(image unavailable)" への合流は
 test_file_images_ext.py が持つ(そちらは無変更で通ること = `load_ref` の互換)。
@@ -18,9 +18,9 @@ import httpx
 import pytest
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-image-bytes"
-UPSTREAM = "http://upstream.test"
 SELF = "https://llens.test"
-PUBLIC_BASE = "http://his-info.test/docs"
+# 一般の URL のホスト(DNS は `_self` の差し替えで 172.16.5.5 に引く。実ネットワークに出ない)
+GENERAL = "http://intra.test"
 
 
 def _resolve(ref, user_id="alice", **kw):
@@ -34,12 +34,6 @@ def _code(ref, user_id="alice", **kw):
     assert loaded is None
     assert error is not None
     return error
-
-
-def _enable_cage_http(monkeypatch):
-    from nucllei.env import EXT_UPSTREAMS
-
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", UPSTREAM)
 
 
 def _install_transport(monkeypatch, handler):
@@ -150,12 +144,9 @@ def test_unsupported_form_non_string():
 
 
 def test_relative_ext_resolves_like_absolute_file_backend(monkeypatch, tmp_path):
-    """相対 `/ext/{name}/{rest}` は「今のサーバの URL」= 絶対 `…/ext/{name}/{rest}` と
-    同じ backend で解決する。`relative_ext` という失敗 code はもう無い。"""
-    root = _mount(monkeypatch, tmp_path)
-    from nucllei.env import EXT_UPSTREAMS
-
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
+    """相対 `/ext/{rest}` は「今のサーバの URL」= 絶対 `…/ext/{rest}` と同じ `/mnt` で
+    解決する。`relative_ext` という失敗 code はもう無い。"""
+    _mount(monkeypatch, tmp_path)
     for ref in ("/ext/cage/static/a.png", "/ext/cage/static/a.png?v=1"):
         loaded, error = _resolve(ref)
         assert error is None, ref
@@ -164,53 +155,30 @@ def test_relative_ext_resolves_like_absolute_file_backend(monkeypatch, tmp_path)
     assert absolute.data == PNG_BYTES
 
 
-def test_relative_ext_http_backend(monkeypatch):
-    _enable_cage_http(monkeypatch)
-    seen = []
-
-    def handler(request):
-        seen.append(str(request.url))
-        return httpx.Response(
-            200, content=PNG_BYTES, headers={"content-type": "image/png"}
-        )
-
-    _install_transport(monkeypatch, handler)
-    loaded, error = _resolve("/ext/cage/figs/%E5%9B%B3.png?rev=2")
-    assert error is None and loaded.data == PNG_BYTES
-    # encode されたまま、EXT_UPSTREAMS の base へ
-    assert seen == [f"{UPSTREAM}/figs/%E5%9B%B3.png?rev=2"]
-
-
 def test_relative_ext_stays_closed(monkeypatch, tmp_path):
-    """fail closed は絶対 URL のときと同じ: 未知の name / root の外へ出る symlink / 不在 /
-    traversal / `/ext/{name}/{rest}` の形でないもの。"""
-    root = _mount(monkeypatch, tmp_path)
-    from nucllei.env import EXT_UPSTREAMS
-
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    assert _code("/ext/nothere/a.png").code == "unknown_upstream"
+    """fail closed は絶対 URL のときと同じ: /mnt に無い物 / /mnt の外へ出る symlink / 不在 /
+    traversal。`/ext/…` の失敗は not_found だけ(`unknown_name` / `not_ext_form` は
+    2026-10-03 に name の概念ごと無くした)。"""
+    _mount(monkeypatch, tmp_path)
+    assert _code("/ext/nothere/a.png").code == "not_found"
     assert _code("/ext/cage/static/escape.png").code == "not_found"
     assert _code("/ext/cage/static/nope.png").code == "not_found"
     assert _code("/ext/cage/../outside.png").code == "traversal"
     assert _code("/ext/cage/static/%2e%2e/%2e%2e/outside.png").code == "traversal"
-    # not_ext_form は name が取れない形だけ
+    # 旧 not_ext_form の形も、ただの /mnt のパス(無い・ディレクトリ)= not_found
     for malformed in ("/ext/", "/ext//a.png", "/ext/CAGE/static/a.png"):
         err = _code(malformed)
-        assert err.code == "unknown_upstream", malformed
-        assert err.reason == "not_ext_form", malformed
-        assert "/ext/{name}/{path}" in err.detail, malformed
-    # name の直下は正しい形。file backend の root はディレクトリ = not_found(一覧を出さない)
+        assert (err.code, err.reason) == ("not_found", None), malformed
+    # ディレクトリは not_found(一覧を出さない)
     for root_url in (
         "/ext/cage",
         "/ext/cage/",
         f"{SELF}/ext/cage/",
         "/ext/cage/static/",
+        "/ext/nothere",
     ):
         err = _code(root_url)
         assert (err.code, err.reason) == ("not_found", None), root_url
-    # 未知の name の直下は unknown_name(形は正しい)
-    assert _code("/ext/nothere").reason == "unknown_name"
-    assert _code("/ext/nothere/").reason == "unknown_name"
     # "/ext" 始まりでも "/ext/" でなければ URL ではない。protocol-relative も受けない
     assert _code("/extra/cage/a.png").code == "unsupported_form"
     assert _code("//evil.example/ext/cage/static/a.png").code == "unsupported_form"
@@ -274,17 +242,14 @@ def test_resolve_url_does_not_read_sandbox_paths(monkeypatch, tmp_path):
 
 def test_resolve_path_does_not_fetch_urls(monkeypatch, tmp_path):
     """`path` に URL(絶対・相対 `/ext/…`)が来ても URL としては解決しない。"""
-    root = _mount(monkeypatch, tmp_path)
-    from nucllei.env import EXT_UPSTREAMS
-
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
+    _mount(monkeypatch, tmp_path)
+    _self(monkeypatch)
     seen = []
     _install_transport(monkeypatch, lambda r: seen.append(r) or httpx.Response(200))
     for value in (
         "/ext/cage/static/a.png",
         f"{SELF}/ext/cage/static/a.png",
-        f"{SELF}/ext/web/a.png",
+        f"{GENERAL}/a.png",
         "/etc/hostname",
         "x.png",
     ):
@@ -293,11 +258,9 @@ def test_resolve_path_does_not_fetch_urls(monkeypatch, tmp_path):
 
 
 def test_resolve_url_and_path_succeed_on_their_own_forms(monkeypatch, tmp_path):
-    from nucllei.env import EXT_UPSTREAMS
     from nucllei.utils.image_refs import resolve_path, resolve_url
 
     root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
     _install_sandbox(monkeypatch, {"x.png": PNG_BYTES})
     for url in ("/ext/cage/static/a.png", f"{SELF}/ext/cage/static/a.png"):
         loaded, error = asyncio.run(resolve_url(url))
@@ -354,7 +317,6 @@ def test_file_id_of_url():
 )
 def test_traversal(monkeypatch, tmp_path, ref):
     _mount(monkeypatch, tmp_path)
-    _enable_cage_http(monkeypatch)
     _install_sandbox(monkeypatch, {})
     seen = []
     _install_transport(monkeypatch, lambda r: seen.append(r) or httpx.Response(200))
@@ -362,29 +324,12 @@ def test_traversal(monkeypatch, tmp_path, ref):
     assert seen == []
 
 
-# ---- unknown_upstream(2 種を detail で区別)----
-
-
-def test_unknown_upstream_ext_name_not_configured(monkeypatch):
-    # /ext/{name}/ 形だが name が EXT_UPSTREAMS に無い(機能無効も同じ)
-    err = _code(f"{SELF}/ext/nothere/figs/a.png")
-    assert err.code == "unknown_upstream" and err.reason == "unknown_name"
-    assert "EXT_UPSTREAMS" in err.detail and "nothere" in err.detail
-
-
-def test_unknown_upstream_public_base_without_backend(monkeypatch):
-    from nucllei.env import EXT_PUBLIC_BASES
-
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", PUBLIC_BASE)
-    err = _code(f"{PUBLIC_BASE}/a.png")
-    assert err.code == "unknown_upstream" and err.reason == "unknown_name"
-    assert "EXT_UPSTREAMS" in err.detail and "his" in err.detail
+# ---- unknown_upstream(一般の URL の自分自身だけ)----
 
 
 def test_unknown_upstream_server_self(monkeypatch):
-    """登録に当たらない絶対 URL は一般の URL として取りに行く(行き先で絞らない)。唯一
+    """`/ext/` 形でない絶対 URL は一般の URL として取りに行く(行き先で絞らない)。唯一
     断るのはこのサーバ自身 — reason `server_self`。"""
-    _enable_cage_http(monkeypatch)
     _self(monkeypatch)
     err = _code("http://127.0.0.1:3000/x.png")
     assert err.code == "unknown_upstream" and err.reason == "server_self"
@@ -404,19 +349,17 @@ def test_not_found_mount_missing_dir_and_escape(monkeypatch, tmp_path):
         assert _code(ref).code == "not_found", ref
 
 
-def test_not_found_ext_file_backend(monkeypatch, tmp_path):
-    from nucllei.env import EXT_UPSTREAMS
-
-    root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
+def test_not_found_ext(monkeypatch, tmp_path):
+    _mount(monkeypatch, tmp_path)
     assert _code(f"{SELF}/ext/cage/static/nope.png").code == "not_found"
     assert _code(f"{SELF}/ext/cage/static/escape.png").code == "not_found"
+    assert _code(f"{SELF}/ext/nothere/a.png").code == "not_found"
 
 
 def test_not_found_http_404(monkeypatch):
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
     _install_transport(monkeypatch, lambda r: httpx.Response(404, content=b"nope"))
-    err = _code(f"{SELF}/ext/cage/figs/a.png")
+    err = _code(f"{GENERAL}/figs/a.png")
     assert err.code == "not_found"
     assert err.status == 404
 
@@ -426,85 +369,28 @@ def test_not_found_workspace_404(monkeypatch):
     assert _code("/workspace/out/nope.png").code == "not_found"
 
 
-# name の直下(rel が空)の URL の全表記。http backend ではどれも上流の `<base>/` を GET する
-_ROOT_URLS = (
-    f"{PUBLIC_BASE}/",
-    PUBLIC_BASE,
-    "/ext/cage/",
-    "/ext/cage",
-    f"{SELF}/ext/cage/",
-    f"{SELF}/ext/cage",
-)
+# name の直下(rel が空)の URL の全表記
+_ROOT_URLS = ("/ext/cage/", "/ext/cage", f"{SELF}/ext/cage/", f"{SELF}/ext/cage")
 
 
-def _public_base_http(monkeypatch, handler):
-    from nucllei.env import EXT_PUBLIC_BASES
+def test_directories_stay_closed(monkeypatch, tmp_path):
+    """ディレクトリ(`/ext/` 自体を含む)— 一覧を出さず not_found(相対でも絶対でも。ゲートも 404)。"""
+    from nucllei.utils.image_refs import mounted_path_for_url, route_of_url
 
-    _enable_cage_http(monkeypatch)
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "cage", PUBLIC_BASE)
-    seen = []
-
-    def record(request):
-        seen.append(str(request.url))
-        return handler(request)
-
-    _install_transport(monkeypatch, record)
-    return seen
-
-
-def test_root_of_http_backend_asks_upstream(monkeypatch):
-    """base の直下(rel が空)も上流に取りに行く(問い合わせる前に not_found にしない —
-    実走で原本のトップページ `<base>/`(上流は 302)が「リンク切れ」と誤案内された)。"""
-    seen = _public_base_http(
-        monkeypatch,
-        lambda r: httpx.Response(
-            200, content=b"<html>top</html>", headers={"content-type": "text/html"}
-        ),
-    )
-    for url in _ROOT_URLS:
-        loaded, error = _resolve(url)
-        assert error is None, url
-        assert loaded.data == b"<html>top</html>", url
-        assert loaded.content_type == "text/html" and loaded.name == "", url
-    assert seen == [f"{UPSTREAM}/"] * len(_ROOT_URLS)
-    # query は付いたまま渡る
-    seen.clear()
-    assert _resolve(f"{PUBLIC_BASE}/?page=top")[1] is None
-    assert _resolve(f"{PUBLIC_BASE}?page=top")[1] is None
-    assert _resolve("/ext/cage/?page=top")[1] is None
-    assert seen == [f"{UPSTREAM}/?page=top"] * 3
-
-
-def test_root_of_http_backend_redirect_is_upstream_status(monkeypatch):
-    seen = _public_base_http(
-        monkeypatch,
-        lambda r: httpx.Response(302, headers={"location": "/docs/top.aspx?x=1"}),
-    )
-    for url in _ROOT_URLS:
-        err = _code(url)
-        assert (err.code, err.status) == ("upstream_status", 302), url
-    assert seen == [f"{UPSTREAM}/"] * len(_ROOT_URLS)
-
-
-def test_root_of_http_backend_404_is_not_found(monkeypatch):
-    seen = _public_base_http(monkeypatch, lambda r: httpx.Response(404))
-    err = _code(f"{PUBLIC_BASE}/")
-    assert (err.code, err.status) == ("not_found", 404)
-    assert seen == [f"{UPSTREAM}/"]
-
-
-def test_root_of_file_backend_stays_closed(monkeypatch, tmp_path):
-    """file backend の直下はディレクトリ — 一覧を出さず not_found(原本 URL でも /ext 形でも)。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
-    from nucllei.utils.image_refs import mounted_path_for_url
-
-    root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "cage", PUBLIC_BASE)
-    for url in _ROOT_URLS:
+    _mount(monkeypatch, tmp_path)
+    for url in _ROOT_URLS + (
+        "/ext/",
+        f"{SELF}/ext/",
+        "/ext/cage/static/",
+        "/ext/cage/?page=top",
+    ):
         err = _code(url)
         assert (err.code, err.reason) == ("not_found", None), url
         assert asyncio.run(mounted_path_for_url(url)) is None, url
+    # 形としては正しい
+    for url, rel in (("/ext/", ""), ("/ext/cage", "cage"), ("/ext/cage/", "cage/")):
+        route, err = route_of_url(url)
+        assert err is None and route.rel == rel, url
 
 
 # ---- too_large(3 経路とも size / limit を持つ)----
@@ -512,9 +398,7 @@ def test_root_of_file_backend_stays_closed(monkeypatch, tmp_path):
 
 def test_too_large_file(monkeypatch, tmp_path):
     root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
-    )
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
     err = _code(f"{root}/cage/static/a.png")
     assert err.code == "too_large"
     assert err.size == len(PNG_BYTES)
@@ -524,7 +408,7 @@ def test_too_large_file(monkeypatch, tmp_path):
 
 def test_too_large_http_stream_aborted(monkeypatch):
     # 全量バッファせず打ち切る。size は Content-Length(あれば)、limit は上限
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
     pulled = {"chunks": 0}
 
     async def body():
@@ -540,8 +424,8 @@ def test_too_large_http_stream_aborted(monkeypatch):
             headers={"content-type": "application/pdf", "content-length": "80"},
         ),
     )
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 20)
-    err = _code(f"{SELF}/ext/cage/big.pdf")
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 20)
+    err = _code(f"{GENERAL}/big.pdf")
     assert err.code == "too_large"
     assert err.size == 80
     assert err.limit == 20
@@ -551,7 +435,7 @@ def test_too_large_http_stream_aborted(monkeypatch):
 
 def test_too_large_http_stream_without_content_length(monkeypatch):
     # Content-Length が無ければ打ち切り時点の受信量(実サイズの下限)
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
 
     async def body():
         for _ in range(10):
@@ -563,8 +447,8 @@ def test_too_large_http_stream_without_content_length(monkeypatch):
             200, content=body(), headers={"content-type": "image/png"}
         ),
     )
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 20)
-    err = _code(f"{SELF}/ext/cage/big.png")
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 20)
+    err = _code(f"{GENERAL}/big.png")
     assert err.code == "too_large"
     assert err.limit == 20
     assert err.size is not None and 20 < err.size <= 80
@@ -573,9 +457,7 @@ def test_too_large_http_stream_without_content_length(monkeypatch):
 
 def test_too_large_workspace(monkeypatch):
     _install_sandbox(monkeypatch, {"out/plot.png": PNG_BYTES})
-    monkeypatch.setattr(
-        "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
-    )
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
     err = _code("/workspace/out/plot.png")
     assert err.code == "too_large"
     assert err.size == len(PNG_BYTES)
@@ -599,21 +481,18 @@ def test_too_large_workspace_sandbox_413(monkeypatch):
 # ---- upstream_status(3xx / 5xx)----
 
 
-def test_upstream_status_redirect(monkeypatch):
-    _enable_cage_http(monkeypatch)
-    _install_transport(
-        monkeypatch,
-        lambda r: httpx.Response(302, headers={"location": f"{UPSTREAM}/moved.png"}),
-    )
-    err = _code(f"{SELF}/ext/cage/figs/a.png")
-    assert err.code == "upstream_status"
-    assert err.status == 302
+def test_upstream_status_redirect_without_location(monkeypatch):
+    # Location の無い 3xx は辿れない redirect = upstream_status(reason 無し)
+    _self(monkeypatch)
+    _install_transport(monkeypatch, lambda r: httpx.Response(302))
+    err = _code(f"{GENERAL}/figs/a.png")
+    assert (err.code, err.status, err.reason) == ("upstream_status", 302, None)
 
 
 def test_upstream_status_5xx(monkeypatch):
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
     _install_transport(monkeypatch, lambda r: httpx.Response(503, content=b"down"))
-    err = _code(f"{SELF}/ext/cage/figs/a.png")
+    err = _code(f"{GENERAL}/figs/a.png")
     assert err.code == "upstream_status"
     assert err.status == 503
 
@@ -622,25 +501,25 @@ def test_upstream_status_5xx(monkeypatch):
 
 
 def test_upstream_unreachable_connect_error(monkeypatch):
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
 
     def handler(request):
         raise httpx.ConnectError("connection refused", request=request)
 
     _install_transport(monkeypatch, handler)
-    err = _code(f"{SELF}/ext/cage/figs/a.png")
+    err = _code(f"{GENERAL}/figs/a.png")
     assert err.code == "upstream_unreachable"
     assert "ConnectError" in err.detail
 
 
 def test_upstream_unreachable_timeout(monkeypatch):
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
 
     def handler(request):
         raise httpx.ReadTimeout("timed out", request=request)
 
     _install_transport(monkeypatch, handler)
-    assert _code(f"{SELF}/ext/cage/figs/a.png").code == "upstream_unreachable"
+    assert _code(f"{GENERAL}/figs/a.png").code == "upstream_unreachable"
 
 
 # ---- workspace_unavailable ----
@@ -667,45 +546,43 @@ def test_workspace_unavailable_sandbox_api_failure(monkeypatch):
     assert _code("/workspace/a.png").code == "workspace_unavailable"
 
 
-# ---- max_bytes(呼び手ごとの上限。None なら env の EXT_INLINE_MAX_BYTES)----
+# ---- max_bytes(呼び手ごとの上限。None なら env の FETCH_MAX_BYTES)----
 
 
 def test_max_bytes_overrides_env_cap_on_file(monkeypatch, tmp_path):
     root = _mount(monkeypatch, tmp_path)
     ref = f"{root}/cage/static/a.png"
     # env の上限では落ちるが、呼び手が大きめを指定すれば読める
-    monkeypatch.setattr(
-        "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
-    )
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
     assert _code(ref).code == "too_large"
     loaded, error = _resolve(ref, max_bytes=len(PNG_BYTES))
     assert error is None and loaded.data == PNG_BYTES
     # 逆に env より小さく指定すれば落ち、limit には指定値が入る
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 10**9)
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 10**9)
     err = _code(ref, max_bytes=len(PNG_BYTES) - 1)
     assert err.code == "too_large"
     assert (err.size, err.limit) == (len(PNG_BYTES), len(PNG_BYTES) - 1)
 
 
 def test_max_bytes_applies_to_http_stream(monkeypatch):
-    _enable_cage_http(monkeypatch)
+    _self(monkeypatch)
     _install_transport(
         monkeypatch,
         lambda r: httpx.Response(
             200, content=b"x" * 64, headers={"content-type": "image/png"}
         ),
     )
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 10**9)
-    err = _code(f"{SELF}/ext/cage/big.png", max_bytes=16)
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 10**9)
+    err = _code(f"{GENERAL}/big.png", max_bytes=16)
     assert err.code == "too_large"
     assert err.limit == 16
-    loaded, error = _resolve(f"{SELF}/ext/cage/big.png", max_bytes=64)
+    loaded, error = _resolve(f"{GENERAL}/big.png", max_bytes=64)
     assert error is None and len(loaded.data) == 64
 
 
 def test_max_bytes_applies_to_workspace(monkeypatch):
     _install_sandbox(monkeypatch, {"out/plot.png": PNG_BYTES})
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 10**9)
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 10**9)
     err = _code("/workspace/out/plot.png", max_bytes=4)
     assert err.code == "too_large"
     assert (err.size, err.limit) == (len(PNG_BYTES), 4)
@@ -717,9 +594,7 @@ def test_load_ref_keeps_env_cap(monkeypatch, tmp_path):
     from nucllei.utils.image_refs import load_ref
 
     root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", len(PNG_BYTES) - 1
-    )
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
     assert asyncio.run(load_ref(f"{root}/cage/static/a.png", "alice")) is None
 
 
@@ -727,39 +602,37 @@ def test_load_ref_keeps_env_cap(monkeypatch, tmp_path):
 
 
 def test_mounted_path_for_url(monkeypatch, tmp_path):
-    """file backend の実体が RO_MOUNT_ROOT 配下のときだけパスを返す。規則は resolve_url と
-    同じ `_route_url`(/ext/ 形(絶対・相対)・EXT_PUBLIC_BASES)— 理由は返さない(None)。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+    """`/ext/{rest}` で `RO_MOUNT_ROOT/{rest}` が実在する通常ファイルのときだけパスを返す。
+    規則は resolve_url と同じ `_route_url`(/ext/ 形(絶対・相対)— host は問わない)—
+    理由は返さない(None)。"""
     from nucllei.utils.image_refs import mounted_path_for_url
 
     root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "cage", PUBLIC_BASE)
+    _self(monkeypatch)
 
     def probe(url):
         return asyncio.run(mounted_path_for_url(url))
 
     expected = f"{root}/cage/static/a.png"
     assert probe(f"{SELF}/ext/cage/static/a.png?v=1") == expected
-    assert probe(f"{PUBLIC_BASE}/static/a.png#page=2") == expected
+    assert probe("http://any.host:8080/ext/cage/static/a.png#page=2") == expected
     # 同一サーバの相対 URL も同じ
     assert probe("/ext/cage/static/a.png") == expected
     assert probe("/ext/cage/static/a.png?v=1#page=2") == expected
     assert probe("/ext/cage/static/nope.png") is None
     assert probe("/ext/cage/static/escape.png") is None
     assert probe("/ext/cage/static/%2e%2e/x") is None
-    assert probe("/ext/web/a.png") is None
     assert probe("/ext/nothere/a.png") is None
-    # 不在 / root の外へ出る symlink / traversal / http backend / 許可先の外 / URL でない
+    # 不在 / /mnt の外へ出る symlink / traversal / 一般の URL / URL でない
     assert probe(f"{SELF}/ext/cage/static/nope.png") is None
     assert probe(f"{SELF}/ext/cage/static/escape.png") is None
     assert probe(f"{SELF}/ext/cage/static/%2e%2e/x") is None
-    assert probe(f"{SELF}/ext/web/a.png") is None
+    assert probe(f"{SELF}/ext/nothere/a.png") is None
+    assert probe(f"{GENERAL}/a.png") is None
     assert probe("https://example.com/a.png") is None
     assert probe(expected) is None
 
-    # backend root が RO_MOUNT_ROOT の外なら None(sandbox から見える保証が無い)
+    # /mnt 自体が無ければ None(= 404)
     from nucllei.utils import image_refs
 
     monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "elsewhere")
@@ -787,27 +660,24 @@ def _named_mount(monkeypatch, tmp_path):
 
 
 def test_url_for_mounted_path(monkeypatch, tmp_path):
-    """file backend の root 配下(かつ RO_MOUNT_ROOT 配下)の実ファイルだけ URL を返す。
-    値の形ではなく解決結果 — 配信されていない置き場・不在・root の外へ出る物は None。"""
-    from nucllei.env import EXT_UPSTREAMS
+    """RO_MOUNT_ROOT 配下の実ファイルだけ URL を返す(前置きの入れ替え + 実在)。
+    値の形ではなく解決結果 — 不在・ディレクトリ・/mnt の外へ出る物は None。"""
     from nucllei.utils.image_refs import url_for_mounted_path
 
     root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
 
     def probe(path):
         return asyncio.run(url_for_mounted_path(path))
 
     assert probe(f"{root}/cage/static/a.png") == "/ext/cage/static/a.png"
-    # root 配下なら static に限らない(/ext ゲートが配信している範囲と同じ)
+    # /mnt に見えている物は全部(cage / static に限らない — /ext ゲートが配信している範囲と同じ)
     assert probe(f"{root}/cage/doc/本文.md") == ("/ext/cage/doc/%E6%9C%AC%E6%96%87.md")
-    # root 内を指す symlink は実体の URL
+    assert probe(f"{root}/shared/s.png") == "/ext/shared/s.png"
+    # mount 内を指す symlink は実体の URL
     assert probe(f"{root}/cage/static/inner.png") == "/ext/cage/static/a.png"
 
-    # 配信されていない置き場 / 不在 / ディレクトリ / root(と mount)の外へ出る symlink /
-    # `..` / mount の外 / workspace / URL / 文字列でない
-    assert probe(f"{root}/shared/s.png") is None
+    # 不在 / ディレクトリ / mount の外へ出る symlink / `..` / mount の外 / workspace / URL /
+    # 文字列でない
     assert probe(f"{root}/cage/static/nope.png") is None
     assert probe(f"{root}/cage/static") is None
     assert probe(f"{root}/cage/static/escape.png") is None
@@ -817,34 +687,15 @@ def test_url_for_mounted_path(monkeypatch, tmp_path):
     assert probe("/ext/cage/static/a.png") is None
     assert probe(None) is None
 
-    # http backend しか無ければ、どのパスも URL にならない
-    monkeypatch.delitem(EXT_UPSTREAMS, "cage")
-    assert probe(f"{root}/cage/static/a.png") is None
-
 
 def test_url_for_mounted_path_needs_mount_root(monkeypatch, tmp_path):
-    # backend root が RO_MOUNT_ROOT の外 = sandbox のパスではない → None
-    from nucllei.env import EXT_UPSTREAMS
+    # RO_MOUNT_ROOT が別の場所 = sandbox のパスではない → None
     from nucllei.utils import image_refs
     from nucllei.utils.image_refs import url_for_mounted_path
 
     root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
     monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "elsewhere")
     assert asyncio.run(url_for_mounted_path(f"{root}/cage/static/a.png")) is None
-
-
-def test_url_for_mounted_path_prefers_deepest_root(monkeypatch, tmp_path):
-    from nucllei.env import EXT_UPSTREAMS
-    from nucllei.utils.image_refs import mounted_path_for_url, url_for_mounted_path
-
-    root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_UPSTREAMS, "figs", f"file://{root}/cage/static")
-    path = f"{root}/cage/static/a.png"
-    url = asyncio.run(url_for_mounted_path(path))
-    assert url == "/ext/figs/a.png"
-    assert asyncio.run(mounted_path_for_url(url)) == path
 
 
 def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
@@ -853,9 +704,7 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
     ファイルに当たる。"""
     from urllib.parse import unquote
 
-    from nucllei.env import EXT_UPSTREAMS
     from nucllei.routers.ext import _serve_local
-    from nucllei.utils.ext_upstreams import ext_backend
     from nucllei.utils.image_refs import (
         mounted_path_for_url,
         resolve_url,
@@ -863,7 +712,6 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
     )
 
     root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
 
     for rel in (
         "static/a.png",
@@ -883,7 +731,7 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
         loaded, err = asyncio.run(resolve_url(url))
         assert err is None and loaded.name == os.path.basename(path), rel
         # /ext ゲート: Starlette は decode 済みの path を渡す
-        response = _serve_local("cage", ext_backend("cage")[1], unquote(tail))
+        response = _serve_local(unquote("cage/" + tail))
         assert str(response.path) == path, rel
 
     # URL 側から: encode 済みの URL はそのまま戻る。生の日本語・絶対 URL・query 付きは
@@ -899,68 +747,33 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
         assert asyncio.run(url_for_mounted_path(path)) == canonical, url
 
 
-# ---- EXT_FILE_SCOPES(file backend の配信範囲。/ext ゲートと同じ ext_file_served)----
+# ---- /mnt に無い物は配信されていない(配備が mount しない = 渡さない)----
 
 
-def test_parse_ext_file_scopes():
-    from nucllei.env import parse_ext_file_scopes
-
-    assert parse_ext_file_scopes("") == {}
-    assert parse_ext_file_scopes("cage=static") == {"cage": ("static",)}
-    assert parse_ext_file_scopes(" cage=/static/ , cage=figs/a ,his=docs") == {
-        "cage": ("static", "figs/a"),
-        "his": ("docs",),
-    }
-    # 値が不正でも name の絞り込みは有効のまま(root 全体に戻さない)
-    assert parse_ext_file_scopes("cage=..,cage=a/../b,cage=,cage=a\\b") == {"cage": ()}
-    assert parse_ext_file_scopes("cage=static,cage=../x") == {"cage": ("static",)}
-    # name の形が不正 / "=" 無しは捨てる
-    assert parse_ext_file_scopes("Cage=static,static") == {}
-
-
-def test_file_scope_applies_to_every_resolution(monkeypatch, tmp_path):
-    """範囲外(root の中だが EXT_FILE_SCOPES の外)は、resolve_url でも読めず、URL ⇔ パスの
-    橋渡しも値を返さない。未設定なら従来どおり root 全体。"""
-    from nucllei.env import EXT_FILE_SCOPES, EXT_UPSTREAMS
+def test_unmounted_paths_are_simply_not_served(monkeypatch, tmp_path):
+    """nucllei 側の `/mnt` に無い物に URL は無い(設定で絞る仕組みは無い — 2026-10-03 までの
+    EXT_FILE_SCOPES / `mounted_path_withheld` は撤去)。sandbox のパスとしての読みも同じ
+    置き場なので「無い」。"""
     from nucllei.utils.image_refs import (
         mounted_path_for_url,
         resolve_path,
-        resolve_url,
         url_for_mounted_path,
     )
 
-    root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    doc_url, doc_path = (
-        "/ext/cage/doc/%E6%9C%AC%E6%96%87.md",
-        f"{root}/cage/doc/本文.md",
-    )
-    fig_url, fig_path = "/ext/cage/static/a.png", f"{root}/cage/static/a.png"
-
-    def state():
-        return (
-            asyncio.run(resolve_url(doc_url))[0] is not None,
-            asyncio.run(mounted_path_for_url(doc_url)),
-            asyncio.run(url_for_mounted_path(doc_path)),
-        )
-
-    assert state() == (True, doc_path, doc_url)
-
-    monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
-    assert state() == (False, None, None)
+    root = _mount(monkeypatch, tmp_path)
+    missing = f"{root}/cage/doc/本文.md"
+    doc_url = "/ext/cage/doc/%E6%9C%AC%E6%96%87.md"
+    assert asyncio.run(url_for_mounted_path(missing)) is None
+    assert asyncio.run(mounted_path_for_url(doc_url)) is None
     assert _url_code(doc_url).code == "not_found"
-    # 範囲内は変わらない
-    assert asyncio.run(resolve_url(fig_url))[1] is None
-    assert asyncio.run(mounted_path_for_url(fig_url)) == fig_path
-    assert asyncio.run(url_for_mounted_path(fig_path)) == fig_url
-    # sandbox のパスとしての読みは /ext の配信範囲と無関係(RO_MOUNT_ROOT の中なら読める)
-    loaded, err = asyncio.run(resolve_path(doc_path, "alice"))
+    assert _path_code(missing).code == "not_found"
+    # 置けば両方で見える
+    (root / "cage" / "doc").mkdir()
+    (root / "cage" / "doc" / "本文.md").write_text("# x")
+    assert asyncio.run(url_for_mounted_path(missing)) == doc_url
+    assert asyncio.run(mounted_path_for_url(doc_url)) == missing
+    loaded, err = asyncio.run(resolve_path(missing, "alice"))
     assert err is None and loaded.data == b"# x"
-
-    # http backend の name に書いても何も起きない
-    monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
-    monkeypatch.setitem(EXT_FILE_SCOPES, "web", ("static",))
-    assert asyncio.run(url_for_mounted_path(fig_path)) == fig_url
 
 
 # ---- 引数が受ける形の固定文(llens の tool が import する公開定数)----
@@ -1051,93 +864,82 @@ def test_history_wire_uses_the_same_dispatch():
 # ---- route_of_url(URL がどこに属するか。読まない)----
 
 
-def test_route_of_url(monkeypatch):
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+def test_route_of_url(monkeypatch, tmp_path):
     from nucllei.utils.image_refs import UrlRoute, route_of_url
 
     def boom(request):
         raise AssertionError("route_of_url must not touch the network")
 
     _install_transport(monkeypatch, boom)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", UPSTREAM)
-    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://172.17.0.1:13303/his-info")
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", PUBLIC_BASE)
+    _mount(monkeypatch, tmp_path)
 
-    # 相対 `/ext/{name}/…`: 原本ルートの無い name
+    # 相対 `/ext/{rest}`
     route, err = route_of_url("/ext/cage/static/%E5%9B%B3/a.png?rev=2")
     assert err is None
     assert route == UrlRoute(
-        name="cage",
-        rel="static/%E5%9B%B3/a.png",
-        query="?rev=2",
-        public_base=None,
-        origin=None,
-        ext_form=True,
+        rel="cage/static/%E5%9B%B3/a.png", query="?rev=2", origin=None, kind="ext"
     )
-    assert route.relative is True
+    assert route.relative is True and route.general is False
+    assert route.page_url == "/ext/cage/static/%E5%9B%B3/a.png?rev=2"
 
-    # 絶対 `/ext/{name}/…`: host は問わない(origin は与えられたまま)。原本ルートがあれば返す
+    # 絶対 `/ext/{rest}`: host は問わない(origin は与えられたまま)。実在も見ない
     route, err = route_of_url("https://elsewhere.example:8443/ext/his/a/b.aspx#top")
     assert err is None
-    assert (route.name, route.rel, route.query) == ("his", "a/b.aspx", "")
-    assert route.public_base == PUBLIC_BASE
+    assert (route.rel, route.query, route.kind) == ("his/a/b.aspx", "", "ext")
     assert route.origin == "https://elsewhere.example:8443"
-    assert (route.relative, route.ext_form) == (False, True)
+    assert route.relative is False
+    assert route.page_url == "https://elsewhere.example:8443/ext/his/a/b.aspx"
 
-    # 原本 URL(EXT_PUBLIC_BASES 配下)
-    route, err = route_of_url(f"{PUBLIC_BASE}/a/b.pdf?rev=2#page=3")
-    assert err is None
-    assert (route.name, route.rel, route.query) == ("his", "a/b.pdf", "?rev=2")
-    assert (route.public_base, route.origin) == (PUBLIC_BASE, "http://his-info.test")
-    assert (route.relative, route.ext_form) == (False, False)
-
-    # name の直下: rel は ""(末尾 `/` の有無は区別しない)。失敗にしない
-    for url, ext_form, origin in (
-        ("/ext/his", True, None),
-        ("/ext/his/", True, None),
-        ("https://elsewhere.example/ext/his", True, "https://elsewhere.example"),
-        (PUBLIC_BASE, False, "http://his-info.test"),
-        (f"{PUBLIC_BASE}/", False, "http://his-info.test"),
-        (f"{PUBLIC_BASE}/#top", False, "http://his-info.test"),
+    # `/ext/` 自体・ディレクトリも形としては正しい(読めば not_found)
+    for url, rel, origin in (
+        ("/ext/", "", None),
+        ("/ext/his", "his", None),
+        ("/ext/his/", "his/", None),
+        ("https://elsewhere.example/ext/", "", "https://elsewhere.example"),
     ):
         route, err = route_of_url(url)
         assert err is None, url
-        assert route == UrlRoute(
-            name="his",
-            rel="",
-            query="",
-            public_base=PUBLIC_BASE,
-            origin=origin,
-            ext_form=ext_form,
-        ), url
-    route, err = route_of_url(f"{PUBLIC_BASE}?a=1")
-    assert err is None and (route.rel, route.query) == ("", "?a=1")
+        assert route == UrlRoute(rel=rel, query="", origin=origin), url
     route, err = route_of_url("/ext/his/?a=1")
-    assert err is None and (route.rel, route.query) == ("", "?a=1")
+    assert err is None and (route.rel, route.query) == ("his/", "?a=1")
+    # 旧フィールドは無い
+    for gone in ("name", "public_base", "ext_form", "mount"):
+        assert not hasattr(route, gone), gone
 
 
-def test_route_of_url_fails_like_resolve_url(monkeypatch):
+def test_route_of_url_file_kind(monkeypatch):
+    """このサーバのファイル配信口は `kind="file"`・`rel` = id(route_of_url だけ。resolve_url は
+    権限検査が要るので unsupported_form のまま — 呼び手が file_id_of_url で読む)。"""
+    from nucllei.utils.image_refs import UrlRoute, resolve_url, route_of_url
+
+    for url, origin in (
+        ("/api/v1/files/abc/content", None),
+        ("/api/v1/files/abc/content?x=1#page=2", None),
+        ("https://any.host/api/v1/files/abc/content", "https://any.host"),
+    ):
+        route, err = route_of_url(url)
+        assert err is None, url
+        assert route == UrlRoute(rel="abc", query="", origin=origin, kind="file"), url
+        assert route.page_url is None and not route.general
+    # resolve_url は読まない: 相対形は unsupported_form(絶対形はただの一般の URL として
+    # 扱われる — 呼び手が file_id_of_url で先に拾うのが規則)
+    _, resolved_err = asyncio.run(resolve_url("/api/v1/files/abc/content"))
+    assert resolved_err.code == "unsupported_form"
+
+
+def test_route_of_url_fails_like_resolve_url(monkeypatch, tmp_path):
     """ルーティングできない URL は、resolve_url が同じ入力に返すのと同じ code / reason。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
     from nucllei.utils.image_refs import resolve_url, route_of_url
 
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", UPSTREAM)
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", PUBLIC_BASE)  # backend 無し
+    _mount(monkeypatch, tmp_path)
     cases = {
-        "/ext/nosuch/a.png": ("unknown_upstream", "unknown_name"),
-        "https://llens.test/ext/nosuch/a.png": ("unknown_upstream", "unknown_name"),
-        f"{PUBLIC_BASE}/a.png": ("unknown_upstream", "unknown_name"),
-        "/ext/nosuch": ("unknown_upstream", "unknown_name"),
-        PUBLIC_BASE: ("unknown_upstream", "unknown_name"),
-        f"{PUBLIC_BASE}/": ("unknown_upstream", "unknown_name"),
-        "/ext/": ("unknown_upstream", "not_ext_form"),
-        "/ext//a.png": ("unknown_upstream", "not_ext_form"),
-        "/ext/CAGE/a.png": ("unknown_upstream", "not_ext_form"),
-        # 登録に当たらない絶対 URL は一般の URL としてルーティングできる(下の
-        # test_route_of_url_general_shape)— ここには出ない
+        # `/ext/` 形でない絶対 URL は一般の URL としてルーティングできる(下の
+        # test_route_of_url_general_shape)— ここには出ない。未知の `/ext/…` も形としては
+        # 正しい(読めば not_found)— ここには出ない
         "/ext/cage/../x": ("traversal", None),
         "/workspace/a.png": ("unsupported_form", None),
-        "/api/v1/files/abc/content": ("unsupported_form", None),
+        "/extra/a.png": ("unsupported_form", None),
+        "/ext": ("unsupported_form", None),
         "abc": ("unsupported_form", None),
         "ftp://h/a": ("unsupported_form", None),
         "": ("unsupported_form", None),
@@ -1150,64 +952,17 @@ def test_route_of_url_fails_like_resolve_url(monkeypatch):
         assert (resolved_err.code, resolved_err.reason) == expected, url
 
 
-def test_route_of_url_ignores_serving_scope(monkeypatch, tmp_path):
-    """配信範囲(EXT_FILE_SCOPES)・実在は見ない(「どこに属するか」だけ。読めるかは
-    resolve_url の責務)。"""
-    from nucllei.env import EXT_FILE_SCOPES, EXT_UPSTREAMS
+def test_route_of_url_ignores_existence(monkeypatch, tmp_path):
+    """実在は見ない(「どこに属するか」だけ。読めるかは resolve_url の責務)。"""
     from nucllei.utils.image_refs import route_of_url
 
-    root = _mount(monkeypatch, tmp_path)
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
-    route, err = route_of_url("/ext/cage/doc/nope.md")
-    assert err is None and (route.name, route.rel) == ("cage", "doc/nope.md")
-    assert _url_code("/ext/cage/doc/nope.md").code == "not_found"
+    _mount(monkeypatch, tmp_path)
+    route, err = route_of_url("/ext/nothere/doc/nope.md")
+    assert err is None and route.rel == "nothere/doc/nope.md"
+    assert _url_code("/ext/nothere/doc/nope.md").code == "not_found"
 
 
-# ---- 配信範囲の外は利用者に渡さない(mounted_path_withheld)----
-
-
-def test_mounted_path_withheld(monkeypatch, tmp_path):
-    from nucllei.env import EXT_FILE_SCOPES, EXT_UPSTREAMS
-    from nucllei.utils.image_refs import mounted_path_withheld
-
-    root = _mount(monkeypatch, tmp_path)
-    (root / "cage" / "doc" / "inner").mkdir(parents=True)
-    (root / "cage" / "doc" / "x.md").write_text("# x")
-    (root / "cage" / "doc" / "inner" / "y.md").write_text("# y")
-    (root / "shared").mkdir()
-    (root / "shared" / "memo.txt").write_text("m")
-    (root / "shared" / "link.md").symlink_to(root / "cage" / "doc" / "x.md")
-
-    def withheld(path):
-        return asyncio.run(mounted_path_withheld(path))
-
-    doc, fig = f"{root}/cage/doc/x.md", f"{root}/cage/static/a.png"
-    # backend が無ければ、配信の設定と無関係
-    assert not withheld(doc)
-    # scope 未設定 = root 全体が配信範囲
-    monkeypatch.setitem(EXT_UPSTREAMS, "cage", f"file://{root}/cage")
-    assert not withheld(doc) and not withheld(fig)
-    # scope あり: root 配下で範囲の外だけが True(実在は見ない。symlink は実体で判定)
-    monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
-    assert withheld(doc) and withheld(f"{root}/cage/doc/nope.md")
-    assert withheld(f"{root}/shared/link.md")
-    assert not withheld(fig)
-    assert not withheld(f"{root}/shared/memo.txt")
-    # sandbox のパスでないもの・traversal は False(読みの失敗に任せる)
-    assert not withheld("/ext/cage/doc/x.md")
-    assert not withheld(f"{root}/cage/doc/../doc/x.md")
-    assert not withheld(None)
-    # root が入れ子: 外側の scope からは外れるが、内側の backend が配信している物は渡せる
-    monkeypatch.setitem(EXT_UPSTREAMS, "inner", f"file://{root}/cage/doc/inner")
-    assert not withheld(f"{root}/cage/doc/inner/y.md")
-    assert withheld(doc)
-    # http backend は関係しない
-    monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
-    assert withheld(doc)
-
-
-# ---- 一般の URL — 登録に当たらない絶対 URL はどこでも取りに行く(自分自身を除く)----
+# ---- 一般の URL — `/ext/` 形でない絶対 URL はどこでも取りに行く(自分自身を除く)----
 #
 # ken 決定(2026-10-03)「url= はスキーム付きの http(s) URL ならどこでも」。行き先で絞らない —
 # 「閉域だから届かない」は prompt の文で、tool のゲートではない。同日に一度入れた院内の範囲
@@ -1281,7 +1036,7 @@ def _url(url, **kw):
 
 
 def test_ext_self_addresses_env_adds_host_addresses(monkeypatch, caplog):
-    """`EXT_SELF_ADDRESSES`(配備が足す host の外向き IP)は固定集合・発見した集合に**追加**で
+    """`SELF_ADDRESSES`(配備が足す host の外向き IP)は固定集合・発見した集合に**追加**で
     効く(コンテナからは host の物理 / VPN インタフェースを列挙できない)。IP 以外・CIDR は捨てて
     WARNING、既定は空。起動ログには「設定で追加」として載る。"""
     import ipaddress
@@ -1290,29 +1045,30 @@ def test_ext_self_addresses_env_adds_host_addresses(monkeypatch, caplog):
     from nucllei import env
     from nucllei.utils import ext_upstreams, image_refs
 
-    assert env.EXT_SELF_ADDRESSES == frozenset()
+    assert env.SELF_ADDRESSES == frozenset()
     with caplog.at_level(logging.WARNING, logger=env.log.name):
-        parsed = env.parse_ext_self_addresses(
+        parsed = env.parse_self_addresses(
             " 10.105.2.1, 172.16.41.21 ,, 10.0.0.0/8, host, fe80::1 "
         )
     assert parsed == frozenset(
         ipaddress.ip_address(a) for a in ("10.105.2.1", "172.16.41.21", "fe80::1")
     )
-    assert caplog.text.count("EXT_SELF_ADDRESSES: ignoring invalid entry") == 2
+    assert caplog.text.count("SELF_ADDRESSES: ignoring invalid entry") == 2
 
     _self(monkeypatch)
     assert not ext_upstreams.is_self_address("10.105.2.1")
     monkeypatch.setattr(
         env,
-        "EXT_SELF_ADDRESSES",
+        "SELF_ADDRESSES",
         frozenset({ipaddress.ip_address("10.105.2.1")}),
     )
-    monkeypatch.setattr(image_refs, "EXT_SELF_ADDRESSES", env.EXT_SELF_ADDRESSES)
+    monkeypatch.setattr(image_refs, "SELF_ADDRESSES", env.SELF_ADDRESSES)
     assert ext_upstreams.is_self_address("10.105.2.1")
     assert not ext_upstreams.is_self_address("10.105.2.2")
     with caplog.at_level(logging.INFO, logger=image_refs.log.name):
         image_refs.log_mounts()
-    assert "設定で追加 (EXT_SELF_ADDRESSES): 10.105.2.1" in caplog.text
+    assert "設定で追加 (SELF_ADDRESSES): 10.105.2.1" in caplog.text
+    assert "EXT_SELF_ADDRESSES" not in caplog.text
 
 
 def test_env_has_no_intranet_cidrs():
@@ -1494,15 +1250,10 @@ def test_discover_self_addresses_reads_proc_and_hostname(monkeypatch, tmp_path):
 
 
 def test_general_url_is_fetched_without_any_env(monkeypatch):
-    """登録(EXT_UPSTREAMS / EXT_PUBLIC_BASES)が空でも、スキーム付きの URL はそのまま取れる。
+    """/ext の設定は無い — スキーム付きの URL はそのまま取れる。
     接続先は DNS の結果に固定し、Host ヘッダは元のホスト名(+port)。cookie / 認証は無し。
     content-type は上流ヘッダ、name は basename。インターネットのホストも同じ。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
-
     _self(monkeypatch)
-    monkeypatch.setattr("nucllei.utils.ext_upstreams.EXT_UPSTREAMS", {})
-    monkeypatch.setattr("nucllei.utils.ext_upstreams.EXT_PUBLIC_BASES", {})
-    assert EXT_UPSTREAMS is not None and EXT_PUBLIC_BASES is not None
     rec = _Recorder(
         {
             "http://172.16.5.5:8080/docs/%E5%9B%B3/a.png?rev=2": httpx.Response(
@@ -1592,44 +1343,32 @@ def test_general_unresolvable_host_is_unreachable(monkeypatch):
     assert (err.code, err.reason) == ("upstream_unreachable", "unresolvable")
 
 
-def test_registered_namespaces_win_over_the_general_rule(monkeypatch):
-    """同じホストでも EXT_PUBLIC_BASES の `<base>/` 配下は登録した配信元の規則(backend 経由、
-    redirect は辿らない)。その外は一般の URL(直接、redirect は辿る)。`/ext/{name}/…` 形は
-    host を問わず backend。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
-
+def test_ext_form_wins_over_the_general_rule(monkeypatch, tmp_path):
+    """`/ext/{rest}` 形は host を問わず nucllei の `/mnt` をローカル読み(そのホストには
+    繋がない)。同じホストでもその外は一般の URL(直接、redirect は辿る)。"""
+    _mount(monkeypatch, tmp_path)
     _self(monkeypatch, dns={**DNS, "his-info.test": ["172.16.3.3"]})
-    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://backend.test/his")
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs")
     rec = _Recorder(
         {
-            "http://backend.test/his/a.pdf": httpx.Response(
-                302, headers={"location": "http://his-info.test/docs/b.pdf"}
-            ),
             "http://172.16.3.3/other/a.pdf": httpx.Response(
                 302, headers={"location": "/other/b.pdf"}
             ),
             "http://172.16.3.3/other/b.pdf": httpx.Response(200, content=b"b"),
-            "http://172.16.3.3/ext/his/a.pdf": httpx.Response(200, content=b"nope"),
-            "http://backend.test/his/x/a.pdf": httpx.Response(200, content=b"ext"),
+            "http://172.16.3.3/ext/cage/static/a.png": httpx.Response(
+                200, content=b"nope"
+            ),
         }
     )
     _install_transport(monkeypatch, rec)
-    loaded, err = _url("http://his-info.test/docs/a.pdf")
-    assert loaded is None and (err.code, err.status, err.reason) == (
-        "upstream_status",
-        302,
-        None,
-    )
+    loaded, err = _url("http://his-info.test/ext/cage/static/a.png")
+    assert err is None and loaded.data == PNG_BYTES
     loaded, err = _url("http://his-info.test/other/a.pdf")
     assert err is None and loaded.data == b"b"
-    loaded, err = _url("http://his-info.test/ext/his/x/a.pdf")
-    assert err is None and loaded.data == b"ext"
+    loaded, err = _url("http://his-info.test/ext/nosuch/a.png")
+    assert loaded is None and (err.code, err.reason) == ("not_found", None)
     assert rec.urls == [
-        "http://backend.test/his/a.pdf",
         "http://172.16.3.3/other/a.pdf",
         "http://172.16.3.3/other/b.pdf",
-        "http://backend.test/his/x/a.pdf",
     ]
 
 
@@ -1715,13 +1454,13 @@ def test_general_redirect_to_the_server_itself_stops(monkeypatch):
 
 
 def test_general_redirect_to_an_unresolvable_form_is_a_plain_redirect(monkeypatch):
-    """転送先が URL として組めない(http(s) でない・traversal・未知の /ext/{name}/)なら
-    reason 無しの `upstream_status`(辿らなかった redirect)。繋がない。"""
+    """転送先が URL として組めない(http(s) でない・traversal)なら reason 無しの
+    `upstream_status`(辿らなかった redirect)。繋がない。"""
     _self(monkeypatch)
     for location in (
         "ftp://intra.test/x",
         "http://intra2.test/x\\y",  # バックスラッシュ(生の Location を traversal 判定)
-        "/ext/nosuch/x",
+        "/ext/../x",
     ):
         rec = _Recorder(
             {
@@ -1741,64 +1480,27 @@ def test_general_redirect_to_an_unresolvable_form_is_a_plain_redirect(monkeypatc
         assert rec.urls == ["http://172.16.5.5/go"], location
 
 
-def test_general_redirect_into_a_registered_upstream_uses_its_backend(monkeypatch):
-    """転送先が登録した配信元に当たれば、その backend で 1 回だけ取る(配信元の規則 —
-    そこから先の redirect は辿らない)。"""
-    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
-
+def test_general_redirect_into_an_ext_url_reads_the_mount(monkeypatch, tmp_path):
+    """転送先が `/ext/{rest}` 形に当たれば、nucllei の `/mnt` をローカル読み(そのホストには
+    繋がない)。"""
+    _mount(monkeypatch, tmp_path)
     _self(monkeypatch)
-    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://backend.test/his")
-    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs")
     rec = _Recorder(
         {
             "http://172.16.5.5/go": httpx.Response(
-                302, headers={"location": "http://his-info.test/docs/a.pdf"}
-            ),
-            "http://backend.test/his/a.pdf": httpx.Response(
-                200, content=b"via backend"
+                302, headers={"location": "http://his-info.test/ext/cage/static/a.png"}
             ),
             "http://172.16.5.5/go2": httpx.Response(
-                302, headers={"location": "http://his-info.test/docs/r.pdf"}
-            ),
-            "http://backend.test/his/r.pdf": httpx.Response(
-                302, headers={"location": "http://his-info.test/docs/a.pdf"}
+                302, headers={"location": "/ext/cage/static/nope.png"}
             ),
         }
     )
     _install_transport(monkeypatch, rec)
     loaded, err = _url("http://intra.test/go")
-    assert err is None and loaded.data == b"via backend"
+    assert err is None and loaded.data == PNG_BYTES and loaded.name == "a.png"
     loaded, err = _url("http://intra.test/go2")
-    assert loaded is None and (err.code, err.status, err.reason) == (
-        "upstream_status",
-        302,
-        None,
-    )
-    assert rec.urls == [
-        "http://172.16.5.5/go",
-        "http://backend.test/his/a.pdf",
-        "http://172.16.5.5/go2",
-        "http://backend.test/his/r.pdf",
-    ]
-
-
-def test_registered_http_backend_still_does_not_follow_redirects(monkeypatch):
-    """登録した配信元の挙動は変えない: backend の 3xx は `upstream_status`(reason 無し)で、
-    Location には行かない。"""
-    _self(monkeypatch)
-    _enable_cage_http(monkeypatch)
-    rec = _Recorder(
-        {
-            f"{UPSTREAM}/a.png": httpx.Response(
-                302, headers={"location": "http://intra.test/elsewhere.png"}
-            )
-        }
-    )
-    _install_transport(monkeypatch, rec)
-    loaded, err = _url("/ext/cage/a.png")
-    assert loaded is None
-    assert (err.code, err.status, err.reason) == ("upstream_status", 302, None)
-    assert rec.urls == [f"{UPSTREAM}/a.png"]
+    assert loaded is None and err.code == "not_found"
+    assert rec.urls == ["http://172.16.5.5/go", "http://172.16.5.5/go2"]
 
 
 def test_general_shares_the_http_limits_and_codes(monkeypatch):
@@ -1828,7 +1530,7 @@ def test_general_shares_the_http_limits_and_codes(monkeypatch):
         10,
         True,
     )
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 20)
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 20)
     _, err = _url("http://intra.test/big")
     assert (err.code, err.limit) == ("too_large", 20)
     _, err = _url("http://intra.test/404")
@@ -1839,7 +1541,7 @@ def test_general_shares_the_http_limits_and_codes(monkeypatch):
     assert (err.code, err.reason) == ("upstream_unreachable", None)
 
 
-def test_route_of_url_general_shape(monkeypatch):
+def test_route_of_url_general_shape(monkeypatch, tmp_path):
     """一般の URL は `kind="general"`・`name=None`。DNS も自分自身の判定も行わない(純粋)—
     自分自身のホストでも候補として返り、実際の判定は resolve_url。"""
     from nucllei.utils import ext_upstreams
@@ -1865,12 +1567,9 @@ def test_route_of_url_general_shape(monkeypatch):
     route, err = route_of_url("http://intra.test:8080/docs/%E5%9B%B3/a.png?rev=2#top")
     assert err is None
     assert route == UrlRoute(
-        name=None,
         rel="docs/%E5%9B%B3/a.png",
         query="?rev=2",
-        public_base=None,
         origin="http://intra.test:8080",
-        ext_form=False,
         kind="general",
     )
     assert route.general and not route.relative
@@ -1881,15 +1580,15 @@ def test_route_of_url_general_shape(monkeypatch):
     ):
         route, err = route_of_url(u)
         assert err is None and (route.kind, route.page_url) == ("general", page), u
-    # 登録した配信元の route は従来の形のまま(kind は既定の "upstream"、page_url は None)
-    _enable_cage_http(monkeypatch)
+    # `/ext/{rest}` の route は kind "ext"(page_url はそのページ自身)
+    _mount(monkeypatch, tmp_path)
     route, err = route_of_url("/ext/cage/a.png")
-    assert err is None and (route.kind, route.name, route.general) == (
-        "upstream",
-        "cage",
+    assert err is None and (route.kind, route.rel, route.general) == (
+        "ext",
+        "cage/a.png",
         False,
     )
-    assert route.page_url is None
+    assert route.page_url == "/ext/cage/a.png"
     # 一般の URL は sandbox に同じ実体を持たない
     assert asyncio.run(mounted_path_for_url("http://intra.test/a.png")) is None
     # ホストが無い・port が不正 → unsupported_form

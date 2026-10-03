@@ -840,8 +840,8 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 # MockTransport に差し替えて切り離す。
 # =============================================================================
 
-UPSTREAM = "http://upstream.test"
-PUBLIC_BASE = "http://his-info.test/docs"
+# 一般の URL のホスト(DNS は `_self_env` で差し替える。実ネットワークに出ない)
+INTRA = "http://10.1.2.3"
 FILE_UUID = "0b54ed0c-6f0b-4b5c-9d0e-3f6f3f0a1c11"
 # url が受ける形の固定文(値を調べて出し分けない。llens の tool と共有する公開定数)
 from nucllei.utils.image_refs import (  # noqa: E402
@@ -885,21 +885,6 @@ class _UrlEnv:
             return {}
 
         self.tools._post = fake_post
-
-    def http_backend(self, name="cage", base=UPSTREAM):
-        from nucllei.env import EXT_UPSTREAMS
-
-        self.monkeypatch.setitem(EXT_UPSTREAMS, name, base)
-
-    def public_base(self, name="his", base=PUBLIC_BASE):
-        from nucllei.env import EXT_PUBLIC_BASES
-
-        self.monkeypatch.setitem(EXT_PUBLIC_BASES, name, base)
-
-    def file_backend(self, root, name="cage"):
-        from nucllei.env import EXT_UPSTREAMS
-
-        self.monkeypatch.setitem(EXT_UPSTREAMS, name, f"file://{root}")
 
     def mount_root(self, root):
         from nucllei.utils import image_refs
@@ -950,18 +935,15 @@ def test_spec_has_no_request_param_and_no_lan_valve():
     assert not hasattr(mod, "SELF_BASE_URL")
 
 
-# --- resolver 経由の取り込み(http backend)-----------------------------------
+# --- resolver 経由の取り込み(一般の URL / /mnt の橋渡し)--------------------------
 
 
-def test_ext_url_goes_through_backend_not_given_host(monkeypatch):
-    # path が /ext/{name}/... の URL は host を問わず EXT_UPSTREAMS の backend へ。
-    # 与えられた host にも自オリジンにも接続しない。cookie / 認証ヘッダは転送しない
+def test_general_url_is_fetched_and_copied(monkeypatch):
+    # 一般の URL は直接取りに行く(接続先は固定済みのアドレス)。cookie / 認証ヘッダは送らない
     env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
-    env.http_backend()
-    result = env.run(
-        url="https://elsewhere.example/ext/cage/static/docs/10-14.pdf?rev=2"
-    )
-    assert env.gets == [f"{UPSTREAM}/static/docs/10-14.pdf?rev=2"]
+    _self_env(monkeypatch)
+    result = env.run(url=f"{INTRA}/static/docs/10-14.pdf?rev=2#page=3")
+    assert env.gets == [f"{INTRA}/static/docs/10-14.pdf?rev=2"]
     assert "cookie" not in env.sent_headers[0]
     assert "authorization" not in env.sent_headers[0]
     assert env.writes[0]["payload"]["path"] == "imports/10-14.pdf"
@@ -971,29 +953,22 @@ def test_ext_url_goes_through_backend_not_given_host(monkeypatch):
     assert "→ /workspace/imports/10-14.pdf" in result
 
 
-def test_public_base_url_goes_through_backend(monkeypatch):
-    # EXT_PUBLIC_BASES 配下の原本 URL は原本 host へ直接行かず、その name の backend へ
-    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
-    env.http_backend("his", UPSTREAM)
-    env.public_base()
-    result = env.run(url=f"{PUBLIC_BASE}/a/b.pdf?rev=2#page=3")
-    assert env.gets == [f"{UPSTREAM}/a/b.pdf?rev=2"]
-    assert env.writes[0]["payload"]["path"] == "imports/b.pdf"
-    assert "→ /workspace/imports/b.pdf" in result
-
-
-def test_percent_encoded_name_is_decoded(monkeypatch):
+def test_ext_url_is_read_from_the_mount_without_connecting(monkeypatch, tmp_path):
+    # path が /ext/{rest} の URL は host を問わず nucllei の /mnt/{rest} をローカル読み。
+    # 与えられた host にも自オリジンにも接続しない。実在すればコピーせずパスを返す
+    root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
-    env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3.png")
-    assert env.writes[0]["payload"]["path"] == "imports/図.png"
-
-
-def test_uppercase_scheme_is_a_url(monkeypatch):
-    env = _UrlEnv(monkeypatch)
-    env.http_backend()
-    result = env.run(url="HTTPS://llens.test/ext/cage/a.png")
-    assert not result.startswith("ERROR") and len(env.gets) == 1
+    env.mount_root(root)
+    for url in (
+        "https://elsewhere.example/ext/cage/static/%E5%9B%B3/a.png?rev=2",
+        "HTTPS://llens.test/ext/cage/static/%E5%9B%B3/a.png",
+        "/ext/cage/static/%E5%9B%B3/a.png",
+    ):
+        result = env.run(url=url)
+        assert (
+            "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
+        ), url
+    assert env.gets == [] and env.writes == []
 
 
 # --- 許可先の外 / 失敗理由の言い分け -------------------------------------------
@@ -1020,8 +995,6 @@ def test_server_itself_is_not_fetched(monkeypatch):
     だけ(loopback・自分のアドレス・既定ゲートウェイ・host.docker.internal)。固定文で
     「このサーバ自身」と言い、リンク切れとは言わない。繋ぎもしない。"""
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
-    env.public_base()
     _self_env(monkeypatch, dns={"host.docker.internal": ["10.106.0.1"]})
     for u in (
         "http://127.0.0.1:8000/files/write",
@@ -1039,30 +1012,27 @@ def test_server_itself_is_not_fetched(monkeypatch):
     assert env.gets == [] and env.writes == []
 
 
-def test_unknown_ext_name_is_outside_too(monkeypatch):
+def test_unmounted_ext_path_is_not_found(monkeypatch, tmp_path):
+    # /mnt に無い /ext/… は存在しない(設定も name の概念も無い — 2026-10-03)
     env = _UrlEnv(monkeypatch)
-    result = env.run(url="https://llens.test/ext/nosuch/a.png")
-    assert result.startswith("ERROR") and "許可先の外" in result
+    env.mount_root(_cage_mount(tmp_path))
+    for url in ("https://llens.test/ext/nosuch/a.png", "/ext/nosuch/a.png", "/ext/"):
+        result = env.run(url=url)
+        assert result.startswith("ERROR") and "存在しない" in result, url
     assert env.gets == [] and env.writes == []
 
 
 def test_unknown_upstream_wording_follows_reason(monkeypatch):
     """`unknown_upstream` の内訳は resolver の `RefError.reason`(解決結果)で言い分ける。
-    tool は値を自前でパースし直さない。"""
+    tool は値を自前でパースし直さない。reason は server_self だけ(2026-10-03)。"""
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
     _self_env(monkeypatch)
-    unknown_name = env.run(url="/ext/nosuch/a.png")
-    not_ext_form = env.run(url="/ext/")
     itself = env.run(url="http://127.0.0.1/a.pdf")
-    assert "その配信元はこの配備に設定されていない" in unknown_name
-    assert "`/ext/<配信元>/<パス>` の形でない" in not_ext_form
     assert (
         "このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
         in itself
     )
-    for result in (unknown_name, not_ext_form, itself):
-        assert result.startswith("ERROR") and result.endswith(URL_ARG_FORM)
+    assert itself.startswith("ERROR") and itself.endswith(URL_ARG_FORM)
     assert env.gets == [] and env.writes == []
 
 
@@ -1092,12 +1062,6 @@ def test_general_url_is_imported_from_anywhere(monkeypatch):
     assert not result.startswith("ERROR"), result
     assert env.gets[-1] == "https://93.184.216.34/a.pdf"
     assert env.sent_headers[-1]["host"] == "example.com"
-    # 同じホストでも登録した配信元の base の外は一般の URL として直接
-    env.public_base()
-    _self_env(monkeypatch, dns={"his-info.test": ["172.16.3.3"]})
-    result = env.run(url="http://his-info.test/other/a.pdf")
-    assert not result.startswith("ERROR"), result
-    assert env.gets[-1] == "http://172.16.3.3/other/a.pdf"
 
 
 def test_general_url_wording_follows_reason(monkeypatch):
@@ -1139,9 +1103,9 @@ def test_too_large_reports_actual_size_and_limit(monkeypatch):
             200, content=big, headers={"content-length": str(len(big))}
         ),
     )
-    env.http_backend()
+    _self_env(monkeypatch)
     env.tools.valves.url_max_mb = 1
-    result = env.run(url="https://llens.test/ext/cage/big.bin")
+    result = env.run(url=f"{INTRA}/big.bin")
     assert result.startswith("ERROR")
     # 実サイズ(Content-Length)と上限(valve)の両方。リンク切れではないと言う
     assert "3.0MB" in result and "上限 1.0MB" in result
@@ -1156,16 +1120,16 @@ def test_too_large_without_content_length_says_at_least(monkeypatch):
             yield b"x" * 65536
 
     env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=chunks()))
-    env.http_backend()
+    _self_env(monkeypatch)
     env.tools.valves.url_max_mb = 1
-    result = env.run(url="https://llens.test/ext/cage/stream.bin")
+    result = env.run(url=f"{INTRA}/stream.bin")
     assert result.startswith("ERROR")
     assert "少なくとも" in result and "実サイズは不明" in result
     assert env.writes == []
 
 
 def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
-    # resolver の既定(EXT_INLINE_MAX_BYTES)ではなく valve の値が上限になる
+    # resolver の既定(FETCH_MAX_BYTES)ではなく valve の値が上限になる
     seen = {}
 
     async def fake_resolve(url, *, max_bytes=None):
@@ -1190,23 +1154,21 @@ def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
 def test_failure_reasons_are_told_apart(monkeypatch):
     cases = [
         (httpx.Response(404), ("存在しない", "リンク切れ")),
-        (
-            httpx.Response(302, headers={"location": "http://10.0.0.5/x"}),
-            ("redirect", "302"),
-        ),
+        # Location の無い 3xx は辿れない redirect
+        (httpx.Response(302), ("redirect", "302")),
         (httpx.Response(401), ("上流が 401",)),
         (httpx.Response(503), ("上流が 503",)),
     ]
     for response, expected in cases:
         env = _UrlEnv(monkeypatch, lambda r, response=response: response)
-        env.http_backend()
-        result = env.run(url="https://llens.test/ext/cage/a.png")
+        _self_env(monkeypatch)
+        result = env.run(url=f"{INTRA}/a.png")
         assert result.startswith("ERROR"), response
         for word in expected:
             assert word in result, (response, result)
         if response.status_code != 404:
             assert "リンク切れ" not in result, result
-        assert len(env.gets) == 1  # redirect は追っていない
+        assert len(env.gets) == 1
         assert env.writes == []
 
 
@@ -1215,15 +1177,15 @@ def test_unreachable_upstream(monkeypatch):
         raise httpx.ConnectError("refused")
 
     env = _UrlEnv(monkeypatch, boom)
-    env.http_backend()
-    result = env.run(url="https://llens.test/ext/cage/a.png")
+    _self_env(monkeypatch)
+    result = env.run(url=f"{INTRA}/a.png")
     assert result.startswith("ERROR") and "届かない" in result
     assert "リンク切れ" not in result
 
 
-def test_traversal_and_malformed_url(monkeypatch):
+def test_traversal_and_malformed_url(monkeypatch, tmp_path):
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
+    env.mount_root(_cage_mount(tmp_path))
     result = env.run(url="https://llens.test/ext/cage/../secret")
     assert result.startswith("ERROR") and "範囲の外" in result
     result = env.run(url="http://[::1/ext/cage/a.png")
@@ -1241,13 +1203,12 @@ def _cage_mount(tmp_path):
     return root
 
 
-def test_file_backend_under_mount_returns_path_without_copy(monkeypatch, tmp_path):
-    """file backend の実体が RO_MOUNT_ROOT(/mnt)配下 = sandbox と同じ置き場(#138)。
+def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
+    """`/ext/{rest}` の実体 = RO_MOUNT_ROOT(/mnt)の `{rest}` = sandbox と同じ置き場(#138)。
     URL → fs パスの読み替えを tool が橋渡しし、コピーは作らない。"""
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage")
     # サイズ上限は掛からない(コピーしないので)
     env.tools.valves.url_max_mb = 0.000001
     result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
@@ -1258,48 +1219,36 @@ def test_file_backend_under_mount_returns_path_without_copy(monkeypatch, tmp_pat
     assert env.writes == [] and env.gets == []
 
 
-def test_public_base_on_file_backend_under_mount(monkeypatch, tmp_path):
+def test_any_mounted_path_is_bridged(monkeypatch, tmp_path):
+    # /mnt に見えている物は全部(cage に限らない)。fragment も query も付いてよい
     root = _cage_mount(tmp_path)
+    (root / "shared").mkdir()
+    (root / "shared" / "s.pdf").write_bytes(b"%PDF-1")
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage" / "static", name="his")
-    env.public_base()
-    result = env.run(url=f"{PUBLIC_BASE}/%E5%9B%B3/a.png#page=1")
-    assert "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
-    assert env.writes == []
+    result = env.run(url="http://any.host/ext/shared/s.pdf?v=1#page=1")
+    assert "取り込み不要" in result and f"{root}/shared/s.pdf" in result
+    assert env.writes == [] and env.gets == []
 
 
-def test_file_backend_outside_mount_is_copied(monkeypatch, tmp_path):
-    # root が /mnt の外 = sandbox から見える保証が無い → 従来どおり取り込む
-    root = _cage_mount(tmp_path)
-    env = _UrlEnv(monkeypatch)
-    env.mount_root(tmp_path / "elsewhere")
-    env.file_backend(root / "cage")
-    result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
-    assert "→ /workspace/imports/a.png" in result
-    assert env.writes[0]["payload"]["path"] == "imports/a.png"
-
-
-def test_file_backend_missing_file_is_not_found(monkeypatch, tmp_path):
+def test_missing_mounted_file_is_not_found(monkeypatch, tmp_path):
     # 無いファイルを「既に見えている」と言わない
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage")
     result = env.run(url="https://llens.test/ext/cage/static/nope.png")
     assert result.startswith("ERROR") and "存在しない" in result
     assert env.writes == []
 
 
-def test_file_backend_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
-    # /mnt の外を指す symlink は backend root の外でもある — パスも返さず、読みもしない
+def test_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
+    # /mnt の外を指す symlink — パスも返さず、読みもしない
     root = _cage_mount(tmp_path)
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"x")
     (root / "cage" / "static" / "escape.png").symlink_to(outside)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage")
     result = env.run(url="https://llens.test/ext/cage/static/escape.png")
     assert result.startswith("ERROR") and "取り込み不要" not in result
     assert env.writes == []
@@ -1308,22 +1257,12 @@ def test_file_backend_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_pat
 # --- 同一サーバの相対 URL --------------------------------------------------------
 
 
-def test_relative_ext_url_is_imported_via_backend(monkeypatch):
-    # 相対 `/ext/{name}/…` は「このサーバの URL」= 絶対形と同じ backend で解決する
-    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
-    env.http_backend()
-    result = env.run(url="/ext/cage/static/docs/10-14.pdf?rev=2")
-    assert env.gets == [f"{UPSTREAM}/static/docs/10-14.pdf?rev=2"]
-    assert env.writes[0]["payload"]["path"] == "imports/10-14.pdf"
-    assert "→ /workspace/imports/10-14.pdf" in result
-
-
-def test_relative_ext_url_on_file_backend_under_mount(monkeypatch, tmp_path):
+def test_relative_ext_url_under_mount(monkeypatch, tmp_path):
+    # 相対 `/ext/{rest}` は「このサーバの URL」= 絶対形と同じ /mnt で解決する。
     # 解決先が /mnt 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage")
     result = env.run(url="/ext/cage/static/%E5%9B%B3/a.png")
     assert "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
     assert env.writes == [] and env.gets == []
@@ -1333,9 +1272,8 @@ def test_relative_ext_url_stays_closed(monkeypatch, tmp_path):
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
-    env.file_backend(root / "cage")
     result = env.run(url="/ext/nosuch/a.png")
-    assert result.startswith("ERROR") and "許可先の外" in result
+    assert result.startswith("ERROR") and "存在しない" in result
     result = env.run(url="/ext/cage/static/nope.png")
     assert result.startswith("ERROR") and "存在しない" in result
     result = env.run(url="/ext/cage/../secret")
@@ -1377,7 +1315,6 @@ def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
     """url= に URL でない値(UUID / sandbox のパス / サーバに無い経路 / スキーム無し)が
     来ても、file_id や path として救済しない。エラーは値によらず同じ文 + 固定の案内。"""
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
     env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
     results = {}
     for bad in (
@@ -1405,7 +1342,6 @@ def test_file_id_is_only_ever_a_file_id(monkeypatch, tmp_path):
     """file_id= に URL や sandbox のパスが来ても url / path として処理しない
     (レコードが無い、で答える)。"""
     env = _UrlEnv(monkeypatch)
-    env.http_backend()
     env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
     for bad in (
         "https://llens.test/ext/cage/static/a.pdf",
@@ -1443,8 +1379,9 @@ def test_no_value_sniffing_helpers_left():
 # fetch_from_workspace(path) の /mnt/…(sandbox のパス → 利用者に見せられる形)
 #
 # send_to_workspace(url=) の「URL → sandbox で開けるパス」の逆向き。値の形ではなく
-# 解決結果で分かれる: 実体が /ext の file backend で配信されていれば URL を返し(コピーも
-# 添付もしない)、配信されていなければ nucllei 側の同じ置き場から読んで添付する。
+# 解決結果で分かれる: 実体が nucllei 側の /mnt にも実在すれば(= /ext で配信されている)URL を
+# 返し(コピーも添付もしない)、無ければ添付もできない(読めない)。2026-10-03 までの
+# EXT_FILE_SCOPES(配信範囲の外は添付もしない)は設定ごと撤去。
 # =============================================================================
 
 
@@ -1494,7 +1431,6 @@ class _MountEnv(_UrlEnv):
 
 def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
     env = _MountEnv(monkeypatch, tmp_path)
-    env.file_backend(env.root / "cage")
 
     out = env.fetch(f"{env.root}/cage/static/図/a.png")
     url = "/ext/cage/static/%E5%9B%B3/a.png"
@@ -1508,43 +1444,40 @@ def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
     # 画像以外はリンク。空白を含む名前も markdown のリンク先に置ける形
     out = env.fetch(f"{env.root}/cage/static/表 1.csv")
     assert "[表 1.csv](/ext/cage/static/%E8%A1%A8%201.csv)" in out
-    # static に限らず、backend の root 配下ならゲートが配信している = URL を返す
+    # cage に限らず、/mnt に見えている物はゲートが配信している = URL を返す
     out = env.fetch(f"{env.root}/cage/doc/本文.md")
     assert "(/ext/cage/doc/%E6%9C%AC%E6%96%87.md)" in out
-    assert env.registered == []
+    out = env.fetch(f"{env.root}/shared/案内 図.png")
+    assert "![案内 図.png](/ext/shared/%E6%A1%88%E5%86%85%20%E5%9B%B3.png)" in out
+    out = env.fetch(f"{env.root}/shared/memo.txt")
+    assert "[memo.txt](/ext/shared/memo.txt)" in out
+    assert env.registered == [] and env.emitted == [] and env.displayed == []
 
     # 返した URL は send_to_workspace(url=) に渡すと同じパスに戻る(往復)
     back = env.run(url=url)
     assert "取り込み不要" in back and f"{env.root}/cage/static/図/a.png" in back
 
 
-def test_fetch_mounted_file_not_served_is_attached(monkeypatch, tmp_path):
-    """配信されていない /mnt のファイルは file にする(/workspace と同じ手順で添付)。"""
+def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_path):
+    """nucllei 側の /mnt に無い物(sandbox にだけ bind した置き場)は URL も無く、読めも
+    しない — 配備は配信したくない物を nucllei 側に mount しないことで渡さない。添付の経路
+    (`_attach`)は /mnt にあって URL にできない物のためだけに残る(実質 resolver が
+    not_found で断る)。"""
     env = _MountEnv(monkeypatch, tmp_path)
-    env.file_backend(env.root / "cage")
-
-    path = f"{env.root}/shared/案内 図.png"
-    out = env.fetch(path)
-    assert out.startswith(f"{path} (") and "file_id=fid-1" in out
-    assert env.registered == [("u1", "案内 図.png", b"\x89PNG\r\n\x1a\nshared")]
-    assert env.emitted[0]["type"] == "chat:message:files"
-    assert env.emitted[0]["data"]["files"][0]["id"] == "fid-1"
-    # 画像は /workspace と同じく display で提示済みにする
-    assert env.displayed == ["![案内 図.png](/api/v1/files/fid-1/content)"]
-    assert "提示済み" in out
-    assert "/ext/" not in out
-    # sandbox の /files/read は使わない(nucllei 側の同じ置き場から読む)
+    for missing in (
+        f"{env.root}/shared/nope.png",
+        f"{env.root}/elsewhere/x.txt",
+    ):
+        out = env.fetch(missing)
+        assert out.startswith("ERROR:") and "読めない" in out, missing
+        assert "file_id=" not in out and "/ext/" not in out, missing
+    assert env.registered == [] and env.emitted == [] and env.displayed == []
+    # sandbox の /files/read は使わない(nucllei 側の同じ置き場を見る)
     assert env.writes == []
-
-    # backend が 1 つも無い配備でも同じ(cage 配下も添付になる)
-    env = _MountEnv(monkeypatch, tmp_path / "second")
-    out = env.fetch(f"{env.root}/cage/static/図/a.png")
-    assert "file_id=fid-1" in out and len(env.registered) == 1
 
 
 def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
     env = _MountEnv(monkeypatch, tmp_path)
-    env.file_backend(env.root / "cage")
 
     # 不在 / ディレクトリ / mount の外へ出る symlink → 読まない(同じ文面 = fail closed)
     for bad in (
@@ -1561,61 +1494,32 @@ def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
     # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない
     out = env.fetch(f"{env.root}/shared/../../outside.txt")
     assert out.startswith("ERROR:") and out.endswith(f"{PATH_ARG_FORM} {REF_ARGS_RULE}")
+    # `..` を畳めば /mnt の中 = 配信されている(URL)
     out = env.fetch(f"{env.root}/shared/../shared/memo.txt")
-    assert "file_id=fid-1" in out
+    assert "添付不要" in out and "(/ext/shared/memo.txt)" in out
 
-    # 大きすぎる: 実サイズと上限を言い、「存在しない」とは言わない
-    env.registered.clear()
-    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 3)
-    out = env.fetch(f"{env.root}/shared/memo.txt")
-    assert out.startswith("ERROR:") and "5B" in out and "上限 3B" in out
-    assert "ファイルは存在する" in out and "読めない" not in out
     # 配信されている物は読まないので上限に掛からない
+    monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 3)
     env.emitted.clear()
     assert "添付不要" in env.fetch(f"{env.root}/cage/static/図/a.png")
+    assert "添付不要" in env.fetch(f"{env.root}/shared/memo.txt")
     assert env.registered == [] and env.emitted == []
 
 
-def test_fetch_mounted_file_outside_file_scope_is_withheld(monkeypatch, tmp_path):
-    """配備が EXT_FILE_SCOPES で配信範囲を絞っていれば、file backend の root 配下で範囲の
-    外にある物は URL も返さず **添付にもしない** — 配信範囲の設定は「利用者に渡してよい
-    範囲」という 1 つの意味を持つ(URL では 404 なのに添付なら渡る、を作らない)。
-    nucllei にディレクトリ名は焼かない。"""
-    from nucllei.env import EXT_FILE_SCOPES
+def test_no_withheld_concept_left():
+    """2026-10-03: 配信範囲(EXT_FILE_SCOPES)と「利用者に配信しない範囲」の断りは撤去。"""
+    import inspect
 
-    env = _MountEnv(monkeypatch, tmp_path)
-    env.file_backend(env.root / "cage")
-    monkeypatch.setitem(EXT_FILE_SCOPES, "cage", ("static",))
+    from nucllei.builtin_tools import sandbox as mod
+    from nucllei.utils import image_refs
 
-    out = env.fetch(f"{env.root}/cage/static/図/a.png")
-    assert "添付不要" in out and "(/ext/cage/static/%E5%9B%B3/a.png)" in out
-    assert env.registered == []
-
-    # 範囲外: 実在しても・しなくても同じ文で断る(範囲の判定だけ。読まない)
-    for withheld in (
-        f"{env.root}/cage/doc/本文.md",
-        f"{env.root}/cage/doc/nope.md",
-        f"{env.root}/cage/doc/../doc/本文.md",
-    ):
-        out = env.fetch(withheld)
-        assert out.startswith("ERROR:") and "利用者に配信しない範囲" in out, withheld
-        assert "file_id=" not in out and "/ext/" not in out, withheld
-    # 範囲外の実体を指す symlink(配信の設定と無関係な置き場に置かれていても)も実体で判定
-    (env.root / "shared" / "link.md").symlink_to(env.root / "cage" / "doc" / "本文.md")
-    out = env.fetch(f"{env.root}/shared/link.md")
-    assert out.startswith("ERROR:") and "利用者に配信しない範囲" in out
-    assert env.registered == [] and env.emitted == [] and env.displayed == []
-
-    # どの backend の root 配下でもない /mnt/… は従来どおり添付
-    out = env.fetch(f"{env.root}/shared/memo.txt")
-    assert "file_id=fid-1" in out
-    assert env.registered == [("u1", "memo.txt", b"hello")]
+    assert not hasattr(image_refs, "mounted_path_withheld")
+    assert "利用者に配信しない範囲" not in inspect.getsource(mod)
 
 
 def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
     """path に URL / file_id が来ても読み替えない — sandbox のパスとして解いて失敗する。"""
     env = _MountEnv(monkeypatch, tmp_path)
-    env.file_backend(env.root / "cage")
     for given in (
         "/ext/cage/static/%E5%9B%B3/a.png",
         f"/api/v1/files/{FILE_UUID}/content",

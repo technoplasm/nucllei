@@ -333,13 +333,11 @@ def _explain_ref_error(u: str, err) -> str:
         ),
         # 内訳は resolver の reason (解決結果) で言い分ける。値は見ない
         unknown_upstream={
-            "unknown_name": "は許可先の外 (その配信元はこの配備に設定されていない)",
-            "not_ext_form": "は `/ext/<配信元>/<パス>` の形でない",
             # 一般の URL で取りに行かない唯一の相手 (行き先では絞らない)
             "server_self": (
                 "は このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
             ),
-            None: "は許可先の外 (この配備が取得を許可している上流の URL ではない)",
+            None: "は許可先の外 (この配備が取得を許可している URL ではない)",
         },
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
@@ -437,8 +435,8 @@ class Tools:
         url_max_mb: float = Field(
             default=50.0,
             description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
-            "(登録した配信元は env EXT_UPSTREAMS / EXT_PUBLIC_BASES、それ以外の http(s) URL は"
-            "どこでも。sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
+            "(http(s) URL はどこでも。同一サーバの /ext/… = sandbox と共有の /mnt 配下にある物は"
+            "コピーしないので、この上限は掛からない)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
 
@@ -862,21 +860,20 @@ class Tools:
 
         行き先・redirect の扱い・失敗理由は resolver 一本 = builtin の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
-        `/ext/{name}/…` (相対、または絶対 = host 不問) と EXT_PUBLIC_BASES 配下の URL
-        (どちらも EXT_UPSTREAMS の backend 経由 — 与えられた host へは接続せず、redirect も
-        辿らない) と、それ以外のスキーム付き http(s) URL **どこでも** (一般の URL。登録無しで
-        直接取得。接続先は解決したアドレスに固定、redirect は 3 回まで辿る — 一般の Web と
-        同じ扱い。届くかは配備のネットワーク次第、2026-10-03 ken 決定)。
+        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `/mnt/{rest}` をローカル読み —
+        与えられた host へは接続しない) と、それ以外のスキーム付き http(s) URL
+        **どこでも** (一般の URL。登録無しで直接取得。接続先は解決したアドレスに固定、
+        redirect は 3 回まで辿る — 一般の Web と同じ扱い。届くかは配備のネットワーク次第、
+        2026-10-03 ken 決定)。
         **取りに行かないのはこのサーバ自身 (と同居するサービス) を指す URL だけ**
         (`unknown_upstream` reason `server_self`)。cookie / 認証ヘッダをどこにも転送しないので、
         リクエスト文脈の無い background 続きターンでも同じに動く。
 
-        - 解決先が file backend で実体が `/mnt` 配下 → コピーせず、sandbox から見える
+        - `/ext/{rest}` で `/mnt/{rest}` が実在 → コピーせず、sandbox から見える
           パスを返す (`mounted_path_for_url`)。`/mnt` 配下は sandbox と同じ置き場という
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
-        - それ以外 (http backend、`/mnt` の外の file backend) → `/workspace/imports/<name>`
-          に書く。上限は valve `url_max_mb`
+        - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は valve `url_max_mb`
         - `/api/v1/files/{id}/content` (このサーバのファイル配信口。本文リンクとして頻出。
           相対、または絶対 = `/ext/` と同じく host 不問) → URL のルーティングとして file に
           当たる (`file_id_of_url`)。HTTP では取りに行かず、file_id 経路と同じ読み出し・
@@ -906,7 +903,7 @@ class Tools:
         loaded, err = await resolve_url(u, max_bytes=max_bytes)
         if loaded is None:
             return _explain_ref_error(u, err)
-        # http backend の name は URL の basename (percent-encoded のまま)
+        # name は URL の basename (percent-encoded のまま)
         name = _safe_import_name(unquote(loaded.name)) or "download"
         try:
             await self._post(
@@ -1099,21 +1096,16 @@ class Tools:
         `send_to_workspace(url=)` の「URL の解決先が sandbox から見えるならパスを返す」
         (`mounted_path_for_url`) の逆向き。値の形ではなく解決結果で分かれる:
 
-        - 実体が EXT_UPSTREAMS の file backend で配信されている → コピーも添付もせず、
-          その URL (`/ext/{name}/…`) を返す (`url_for_mounted_path`)
-        - file backend の root 配下にあって配信範囲 (EXT_FILE_SCOPES) の外 → URL も返さず
-          添付にもしない (`mounted_path_withheld`)。配信範囲の設定は「利用者に渡してよい
-          範囲」— URL では 404 なのに添付なら渡る、を作らない
-        - どの file backend の root 配下でもない → nucllei 自身に bind された同じ置き場から
-          読み (`resolve_path`。境界・上限は resolver)、/workspace のファイルと同じ手順で
-          添付する
+        - 実体が nucllei 側の `/mnt` にも実在する (= /ext ゲートが `/ext/{rest}` で配信して
+          いる) → コピーも添付もせず、その URL を返す (`url_for_mounted_path`)
+        - それ以外 → nucllei 自身に bind された同じ置き場から読み (`resolve_path`。境界・上限は
+          resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物 (sandbox に
+          だけ bind した置き場) は「読めない」になる — 配備は配信したくない物を nucllei 側の
+          `/mnt` に mount しないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
+          「配信範囲の外は添付もしない」は設定ごと無くした)
         """
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
-        from nucllei.utils.image_refs import (
-            mounted_path_withheld,
-            resolve_path,
-            url_for_mounted_path,
-        )
+        from nucllei.utils.image_refs import resolve_path, url_for_mounted_path
 
         url = await url_for_mounted_path(abs_path)
         if url:
@@ -1124,11 +1116,6 @@ class Tools:
                 f"添付不要: {abs_path} は {url} として既に配信されている "
                 "(ユーザーのブラウザがそのまま開ける URL)。ユーザーに見せるときは、"
                 f"この URL を 1 文字も変えずに本文に貼る: {link}"
-            )
-        if await mounted_path_withheld(abs_path):
-            return (
-                f"ERROR: {abs_path} は利用者に配信しない範囲にある (管理者の設定)。"
-                "URL での案内も添付もできない (/workspace/ にコピーして渡すこともしない)。"
             )
         loaded, err = await resolve_path(abs_path, user_id)
         if loaded is None:

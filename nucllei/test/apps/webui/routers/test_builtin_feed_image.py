@@ -424,10 +424,10 @@ def test_unknown_upstream_is_one_fixed_text_without_a_reason(monkeypatch):
     """unknown_upstream は detail の文言 (変わりうる) で分岐しない。reason の無いものは 1 文面。"""
     table = dict(TABLE)
     cases = {
-        "http://172.17.0.1:13303/static/x.jpg": "no public base",
-        "https://example.com/x.png": "absolute URL is neither an /ext/{name}/ URL nor under EXT_PUBLIC_BASES",
+        "http://172.17.0.1:13303/static/x.jpg": "host resolves to this server itself",
+        "https://example.com/x.png": "some other detail",
         f"{ORIGIN}/ext/unknown/x.png": "name=unknown",
-        "/ext/his": "same-server URL is not of the form /ext/{name}/{path}",
+        "/ext/his": "",
     }
     for bad, detail in cases.items():
         table[bad] = RefError("unknown_upstream", detail)
@@ -435,17 +435,17 @@ def test_unknown_upstream_is_one_fixed_text_without_a_reason(monkeypatch):
         result, fed, resolver = _run(monkeypatch, table, url=bad)
         assert resolver.refs == [bad], bad
         assert fed == [] and result == (
-            f"ERROR: {bad} は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL。"
-            + URL_ARG_FORM
+            f"ERROR: {bad} は取得を許可されていない URL。" + URL_ARG_FORM
         ), (bad, result)
 
 
 def test_unknown_upstream_is_told_apart_by_reason(monkeypatch):
     """`RefError.reason` で言い分ける (detail は見ない)。"""
     want = {
-        "not_ext_form": "配信元の名前が取れない",
-        "unknown_name": "配信元は無い",
         "server_self": "このサーバ自身",
+        # unknown_name / not_ext_form は 2026-10-03 に無くした — 知らない reason は 1 文面
+        "unknown_name": "取得を許可されていない URL",
+        "not_ext_form": "取得を許可されていない URL",
     }
     for reason, phrase in want.items():
         err = RefError("unknown_upstream", "detail that must not matter", reason=reason)

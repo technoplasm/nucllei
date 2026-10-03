@@ -4,18 +4,21 @@ URL で 1 ページずつ取得し、平文 + リンク一覧にして返す。
 配備層 (prism-hu/llens の `tools/fetch_url.py`) から本体へ移設した (2026-10-03、#141)。
 判断の根拠は feed_image / sandbox と同じ**依存の向き**: 受ける形・許可先・traversal・
 サイズ上限・redirect の規律は全部 `utils/image_refs` の resolver にあり、tool は
-`resolve_url` / `route_of_url` / `file_id_of_url` と `nucllei.env` の EXT_PUBLIC_BASES を
-掴んでいる。配備側に置く限り版の交渉 (try/except の fallback、`_link_roots` の最小実装の
-複製) が要った — builtin なら nucllei と同じ tag で出る (`_memos/builtin-tools.md` 1c)。
-LLENS 固有の知識はこのファイルに無い (配信元・原本ホストは env。「doc に収録済みの資料は
-取りに行かない」の案内は docstring の文面だけで、doc tool の存在には依存しない)。
+`resolve_url` / `route_of_url` / `file_id_of_url` を掴んでいるだけ。配備側に置く限り版の
+交渉 (try/except の fallback、`_link_roots` の最小実装の複製) が要った — builtin なら
+nucllei と同じ tag で出る (`_memos/builtin-tools.md` 1c)。LLENS 固有の知識はこのファイルに
+無い (配信元は env。「doc に収録済みの資料は取りに行かない」の案内は docstring の文面だけで、
+doc tool の存在には依存しない)。
 
 **常に登録** (2026-10-03 ken 決定): url= はスキーム付きの http(s) URL ならどこでも取りに行く
 (院内でもインターネットでも)。届くかどうかは配備のネットワークが決める — 「閉域だから外には
 届かない」は prompt / skill に書く文であって、この tool は行き先で絞らない。取りに行かないのは
 **このサーバ自身 (と同居するサービス)** だけ (resolver の `server_self`)。同日の朝まで
 EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、
-行き先で機能を絞らない決定と一緒に外した (EXT_INTRANET_CIDRS も同日に撤去)。
+行き先で機能を絞らない決定と一緒に外した (EXT_INTRANET_CIDRS も同日に撤去。同日のうちに
+EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_FILE_SCOPES も設定ごと無くし、`/ext/{rest}` は nucllei の
+`/mnt/{rest}` をそのまま配信する形にした — 原本ホストの対応 (docstring の原本ホストのスロット・
+ERROR 文の「登録された原本ホストは …」・ヘッダの原本行) はそのとき消えた)。
 
 何のための tool か:
   収録済みの文書コーパス (配備層の doc tool) に無い Web (院内の病院情報管理システム等) を、
@@ -23,11 +26,10 @@ EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲー�
 
 受ける URL の形 (2026-10-03 ken 決定: url = 絶対 URL か同一サーバの相対 URL):
   解決は共有 resolver (`image_refs.resolve_url`、feed_image / 送信直前 inline / send_to_workspace と
-  共通) に一任する。名前空間は 3 つ (image_refs の module docstring「URL の解決」):
-    (a) EXT_PUBLIC_BASES (`name=原本 URL のルート`) の `<base>/` 配下 — 職員が開く原本 URL
-    (b) path が `/ext/{name}/…` の URL — 同一サーバの相対 `/ext/…` と、絶対 `https://<host>/ext/…`
-        (既存チャット。host は問わない)。到達先は EXT_UPSTREAMS の backend
-    (c) どちらにも当たらない絶対 URL — 一般の URL。そのホストに直接取りに行く (自分自身を除く)
+  共通) に一任する。名前空間は 2 つ (image_refs の module docstring「URL の解決」):
+    (a) path が `/ext/{rest}` の URL — 同一サーバの相対 `/ext/…` と、絶対 `https://<host>/ext/…`
+        (既存チャット。host は問わない)。nucllei の `/mnt/{rest}` をローカル読み
+    (b) それ以外の絶対 URL — 一般の URL。そのホストに直接取りに行く (自分自身を除く)
   **解釈は引数名だけで決める** (feed_image と同じ): url に来た値は URL として `resolve_url` で
   解決し、`/mnt/…` `/workspace/…` を sandbox のパスとして読み替えない。URL として解決できない
   値は固定文 (`ref_errors.url_error`) の ERROR。値を調べて「それは run_shell で」と出し分けない —
@@ -36,28 +38,22 @@ EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲー�
   (`file_id_of_url`) — 所有者チェックの上で Storage から読み、同じ変換にかける
   (send_to_workspace(url=) と同じ扱い)。
 
-SSRF: **tool 側に host allowlist も valve も持たない。** 登録した配信元の真実源は env の
-  EXT_UPSTREAMS (到達先) と EXT_PUBLIC_BASES (どの原本 URL がどの name か)。それ以外の
-  一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居するサービス)」だけを
-  実行時に求めた集合で断る (`ext_upstreams.self_addresses`)。traversal 判定・サイズ上限・
-  redirect の規律、受ける形の判定は全部 resolver 側にある。この tool は取得できた後に
-  「どの名前空間の形か」 (`route_of_url`) でリンクのルートを決めるだけ。
+SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配信するのは nucllei の `/mnt` に
+  mount された物 (設定無し)。一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居する
+  サービス)」だけを実行時に求めた集合で断る (`ext_upstreams.self_addresses`)。traversal 判定・
+  サイズ上限・redirect の規律、受ける形の判定は全部 resolver 側にある。この tool は取得できた
+  後にページ自身の URL (`route_of_url(u).page_url`) でリンクを解決するだけ。
 
-戻り値の URL は 1 本 (原本 URL):
+戻り値の URL は 1 本:
   リンク一覧も `# url` 行も、次の fetch_url / feed_image / send_to_workspace(url=) に
-  そのまま渡せ、職員にもそのまま案内できる URL にする — 原本ホストのある上流は原本の
-  絶対 URL、無い上流 (文書の図・原本など) は入力と同じ形の `/ext/{name}/…` (相対入力なら
-  相対)、一般の URL はページ自身の URL 基準 (通常の Web と同じ)。原本 URL のルートは
-  `nucllei.env.EXT_PUBLIC_BASES` から name で引く — ルーティング (resolver の match_public_base)
-  と ERROR 文と docstring が**同じ 1 つの値**を見るようにするため、tool 側に valve を
-  持たない (2026-09-07 レビュー: valve を管理画面で変えると docstring と判定がずれる、
-  という真実源の分裂が起きた)。
-  env に無い name のページ (`/ext/{name}/…` 形) は原本 URL を組めないので、リンクは
-  入力 URL と同じ形の `/ext/{name}/…` (次の tool 呼び出しに渡せ、本文にも貼れる) にして、
-  その旨をヘッダに 1 行出す。
-  docstring に登録された原本ホストを名乗らせるのも同じ env から — tool の spec (モデルに
-  見える説明) は起動時 sync で nucllei プロセス内の docstring から生成され DB に保存される
-  ので、module 読み込み時に埋め込めば配備先ごとのホストが載る (module 末尾の置換)。
+  そのまま渡せ、職員にもそのまま案内できる URL にする — ページ内リンクは `/ext/…` のページでも
+  一般の URL でも**そのページ自身の URL 基準の urljoin** (通常の Web と同じ。`/ext/…` の相対
+  入力なら相対 `/ext/…` のまま、絶対なら `{origin}/ext/…`)。基準 URL は resolver の
+  `route_of_url` から引く — tool 側に valve を持たない (2026-09-07 レビュー: valve を管理
+  画面で変えると docstring と判定がずれる、という真実源の分裂が起きた)。
+  `/ext/…` の相対ページでは、`/ext/` の外へ出る href (ルート相対 `/x.pdf`・別ホストの絶対 URL)
+  はこのサーバの URL ではないので落とす。絶対の `/ext/…` ページでは http(s) の結果だけ残す
+  (一般の URL と同じ)。
 
 HTML を markitdown に通さない理由 (実測、2026-09-04):
   病院情報管理システムは ASP.NET WebForms でレイアウトが全部 table。markitdown は
@@ -88,14 +84,12 @@ import pathlib
 import re
 import unicodedata
 from typing import Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, Field
 
-from nucllei.env import EXT_PUBLIC_BASES
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
-from nucllei.utils.ext_upstreams import ext_backend
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
 from nucllei.utils.ref_errors import (
     RefErrorHints,
@@ -107,14 +101,8 @@ from nucllei.utils.tool_render import Text
 
 log = logging.getLogger(__name__)
 
-# ページの URL が絶対 (一般の URL) かの判定。_link_roots / _resolve_href が使う。
+# ページの URL が絶対かの判定。_resolve_href が使う。
 _ABSOLUTE_PAGE_RE = re.compile(r"^https?://", re.IGNORECASE)
-
-# 相対 href を解決するための仮 origin。ここに残っていれば「同じ上流の中」の意味。
-_FAKE_ORIGIN = "http://ext.invalid/"
-
-# docstring に登録された原本ホストを埋める差し込み位置 (module 末尾で置換する。冒頭コメント参照)。
-_DOC_BASES_SLOT = "{PUBLIC_BASES}"
 
 # 平文化のとき改行を入れるタグ (レイアウト table のセル単位で 1 行にする)。
 _BLOCK_TAGS = frozenset(
@@ -139,13 +127,6 @@ def _norm_space(s: str) -> str:
 def _fold(s: str) -> str:
     """query 照合用の正規化 (NFKC + case-insensitive)。"""
     return unicodedata.normalize("NFKC", s).casefold()
-
-
-def _describe_bases(bases: dict) -> str:
-    """docstring / ERROR に載せる登録された原本ホストの一覧 (EXT_PUBLIC_BASES から)。"""
-    if not bases:
-        return "(未設定 — 登録された原本ホストは無い)"
-    return "、".join(f"`{base}` ({name})" for name, base in bases.items())
 
 
 def _media_type(content_type: str) -> str:
@@ -237,74 +218,41 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
 def _explain_ref_error(u: str, err, ceiling_mb: Optional[float] = None) -> str:
     """resolver の RefError をモデル向けの ERROR 文にする (組み立ては `utils/ref_errors`)。
 
-    この tool 固有の言い方: too_large は run_subagent + max_mb (天井 ceiling_mb)、
-    unknown_upstream には登録された原本ホスト (EXT_PUBLIC_BASES、ルーティングと同じ dict) を
-    添える (リンク一覧のルートになる配信元 — 許可先の一覧ではない)。
+    この tool 固有の言い方: too_large は run_subagent + max_mb (天井 ceiling_mb)。
     """
     hints = RefErrorHints(
         too_large=lambda ref, e: _too_large(ref, e, ceiling_mb),
         unexplained=f"ERROR: {{ref}} {_ERR_UNEXPLAINED}",
-        # 原本ホストが無い配備 (llens は file 上流だけ) では「未設定」の句は雑音なので付けない
-        unknown_upstream_extra=(
-            f"登録された原本ホストは {_describe_bases(EXT_PUBLIC_BASES)}。"
-            if EXT_PUBLIC_BASES
-            else ""
-        ),
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
 
 
-def _resolve_href(
-    href: str, page_path: str, public_base: str, base_prefix: str, link_base: str
-):
-    """href を絶対 URL (原本 URL) に解決する。辿れない href は None。
+def _resolve_href(href: str, page_url: str):
+    """href をページ自身の URL (`page_url`) 基準で解決する (通常の Web と同じ urljoin)。
+    辿れない href は None。
 
-    page_path は今開いているページの上流内パス (例 "annai.aspx")。
-    base_prefix は上流 base URL のパス部分 (例 "his-info"; 無ければ "")。仮 origin の下に
-    この prefix を敷いて urljoin することで、相対 href (`unyou_mn.aspx`) と
-    ルート相対 href (`/his-info/x.pdf` — 実際にこの形が出る) を同じ規則で畳める。
-    prefix の外へ出た href は同じ上流に載らない = この経路では辿れないので落とす。
-    public_base は原本 origin を指す絶対 href を畳むための照合先 (無ければ "")、
-    link_base は出力する URL のルート (原本 URL のルート。無ければ自オリジンの `/ext/{name}`)。
+    page_url が絶対 (一般の URL、絶対の `/ext/…`) なら http(s) の結果だけ残す (取りに行けるかは
+    次の fetch_url で resolver が判定する — ここでは絞らない)。相対の `/ext/…` ページなら、
+    `/ext/` の中に留まる結果だけ残す (ルート相対 `/x.pdf` や別ホストはこのサーバの URL では
+    ない)。page_url が空 (file 経路・ルーティングできない) ならリンクを組まない。
     """
     href = (href or "").strip()
     if not href or href.startswith(("javascript:", "#", "mailto:", "tel:")):
         return None
-    if _ABSOLUTE_PAGE_RE.match(page_path):
-        # 一般の URL (_link_roots 参照): 通常の Web と同じくページの URL 基準で解決する。
-        # 取りに行けるかは次の fetch_url で resolver が判定する (ここでは絞らない)
-        resolved = urljoin(page_path, href).split("#", 1)[0]
-        return resolved if _ABSOLUTE_PAGE_RE.match(resolved) else None
-
-    root = _FAKE_ORIGIN + (base_prefix + "/" if base_prefix else "")
-    # 絶対 URL が原本 origin を指しているなら、上流内パスに畳み直す。
-    if public_base and href.startswith(public_base + "/"):
-        rel = href[len(public_base) + 1 :]
-    else:
-        resolved = urljoin(root + page_path, href)
-        if not resolved.startswith(root):
-            return None  # 別ホスト / 上流 base の外。allowlist の外なので辿れない
-        rel = resolved[len(root) :]
-
-    rel = rel.split("#", 1)[0]
-    if not rel or rel.startswith("?"):
+    if not page_url:
         return None
-    return f"{link_base}/{rel}"
+    resolved = urljoin(page_url, href).split("#", 1)[0]
+    if _ABSOLUTE_PAGE_RE.match(page_url):
+        return resolved if _ABSOLUTE_PAGE_RE.match(resolved) else None
+    return resolved if resolved.startswith("/ext/") else None
 
 
-def _html_to_lines(
-    raw: bytes,
-    page_path: str,
-    public_base: str,
-    base_prefix: str,
-    link_base: str,
-    content_type: str = "",
-):
+def _html_to_lines(raw: bytes, page_url: str, content_type: str = ""):
     """HTML を (本文行, リンク行) に変換する。
 
     - script / style / noscript / img / input を除去
     - <a href> は本文で `ラベル [n]` にし、末尾のリンク一覧に `[n] ラベル → URL` を出す
-      (URL は絶対 URL 1 本 = 原本 URL。_resolve_href)
+      (URL は 1 本。ページ自身の URL 基準 — _resolve_href)
     - 空白正規化 (連続空白を 1 つに、空行は落とす)
     - encoding は Content-Type の charset、無ければ utf-8 (冒頭コメント)。lxml に bytes を
       渡すと meta charset を見に行くので、必ず自分で decode した str を渡す
@@ -316,9 +264,7 @@ def _html_to_lines(
 
     links = []
     for a in doc.iter("a"):
-        url = _resolve_href(
-            a.get("href"), page_path, public_base, base_prefix, link_base
-        )
+        url = _resolve_href(a.get("href"), page_url)
         if url is None:
             continue  # postback (javascript:) / ページ内 (#) / 別ホスト
         n = len(links) + 1
@@ -413,13 +359,12 @@ class Tools:
         http(s) の URL は院内でもインターネットでもそのまま渡す (IP アドレス直指定も可。DNS の無い
         環境では IP で指定する)。**どのホストに届くかは配備のネットワークが決める** — この tool は
         行き先で断らず、届かなければ「届かない」と返す。断るのはこのサーバ自身を指す URL だけ。
-        登録された原本ホスト ({PUBLIC_BASES}) は、その配下のページのリンク一覧がそのルートで
-        組まれる配信元 (許可先の一覧ではない)。入口の 1 枚はルートにページ名を続ける
-        (例 `<ルート>/top.aspx`)。2 枚目からは **組み立てず、戻り値や read_doc に出てきた URL の
-        literal をそのままコピーする** (相対ならホストを補わない)。
+        入口の 1 枚はルートにページ名を続ける (例 `<ルート>/top.aspx`)。2 枚目からは
+        **組み立てず、戻り値や read_doc に出てきた URL の literal をそのままコピーする**
+        (相対ならホストを補わない)。
 
-        戻り値のリンク一覧の URL は 1 行に 1 本 — 原本ホストのある上流は**原本そのものの URL**、
-        原本ホストの無い配信元は同一サーバの `/ext/…`。次の fetch_url(url=) / feed_image(url=) /
+        戻り値のリンク一覧の URL は 1 行に 1 本 — Web のページはそのページ基準の絶対 URL、
+        同一サーバの `/ext/…` のページは同じ形の `/ext/…`。次の fetch_url(url=) / feed_image(url=) /
         send_to_workspace(url=) にそのまま渡せ、職員にもそのまま案内できる。どちらの用途でも
         1 文字も変えずにコピーする。
 
@@ -467,12 +412,13 @@ class Tools:
             )
             if err:
                 return err
-            path, public_base, base_prefix, link_base, page_url = "", "", "", "", u
-            head = f"# {u}\n"
+            # 添付・生成物の HTML の相対 href はどの名前空間にも属さない (`/page2.html` に
+            # なってしまう) ので、file 経路ではリンク一覧を出さない (page_url 空)
+            page_url = ""
         else:
             # 引数名どおり URL として扱う (冒頭コメント)。受ける形・行き先の判定は resolver に
             # 一任する (tool 側で同じ振り分けを重ねない)。ここで URL を分解するのは、取得できた
-            # 後にリンク一覧のルート (原本 URL のルート) と相対 href の畳み方を決めるためだけ。
+            # 後にページ内リンクの基準 (ページ自身の URL) を得るためだけ。
             if __progress__:
                 __progress__(f"取得中: {u}")
             # サイズ上限は max_bytes で渡す — 文書を読む用途なので画像 inline 用の既定上限を
@@ -490,29 +436,14 @@ class Tools:
                 )
             content_type = loaded.content_type or ""
             raw = loaded.data
-
-            path, public_base, link_base, base_prefix, qs = self._link_roots(u)
-            # このページ自身の原本 URL。入力が (a) なら u と同じ、(b) なら public base で組み直す。
-            # 直下 (path == "") は `<ルート>/` (相対 href の結合で `//` を作らない)。原本ルートが
-            # あればそれで組む (相対入力でリンクのルートが `/ext/{name}` でも、職員に案内するのは原本)。
-            if _ABSOLUTE_PAGE_RE.match(path):
-                # 一般の URL: 原本 URL は入力そのもの。/ext/ の注意書きは出さない
-                page_url, head = u, f"# {u}\n"
-            else:
-                page_root = public_base or link_base
-                page_url = f"{page_root}/{path}{qs}" if page_root else u
-                head = self._head(u, page_url, public_base)
+            # このページ自身の URL (職員に案内する 1 本 = ページ内リンクの基準)
+            page_url = self._page_url(u)
+        head = f"# {u}\n"
 
         if __progress__:
             __progress__("変換中")
         try:
-            kind, body, links = self._to_lines(
-                raw, content_type, path, public_base, base_prefix, link_base
-            )
-            if fid:
-                # 添付・生成物の HTML の相対 href はどの名前空間にも属さない (`/page2.html` に
-                # なってしまう) ので、file 経路ではリンク一覧を出さない
-                links = []
+            kind, body, links = self._to_lines(raw, content_type, page_url)
         except Exception as e:
             log.error(f"[fetch_url] convert failed ({u}): {e!r}")
             return f"ERROR: 変換に失敗した ({e})。"
@@ -530,7 +461,7 @@ class Tools:
         if kind == "other":
             return (
                 f"ERROR: 平文にできない形式 (content-type={media_type or '不明'})。"
-                f" 職員にはこの URL を案内する: {page_url}"
+                f" 職員にはこの URL を案内する: {page_url or u}"
             )
         if kind == "pdf-noText":
             # feed_image は拡張子ではなく取得した content-type で PDF を判定する。
@@ -550,47 +481,18 @@ class Tools:
     # --- 以下 helper (モデルからは見えない) ---------------------------------
 
     @staticmethod
-    def _link_roots(u: str):
-        """取得できた URL について (上流内 path, 原本ルート, リンクのルート, href を畳む prefix, ?query)。
+    def _page_url(u: str) -> str:
+        """取得できた URL について、ページ自身の URL (ページ内リンクの基準。fragment 抜き)。
 
-        **resolve_url が成功した後にだけ呼ぶ** (受理・許可先の判定はしない。リンク一覧を組む
-        ためのルートを求めるだけ)。`route_of_url` で引く — リンクのルートは原本ルート
-        (public_base) がある name なら入力が相対でも絶対でもそれ (`/ext/{name}/…` のゲートは
-        上流の 3xx を 502 に落とすので、利用者が実際に開ける原本の URL を返す)。無い name
-        (file backend) だけ、相対入力なら `/ext/{name}`、絶対なら `{origin}/ext/{name}`。
-        一般の URL (`route.general`) は名前空間を持たない — path にページの絶対 URL を
-        入れて返し、`_resolve_href` が通常の Web と同じくページの URL 基準で解決する。
-        ルーティングできない (resolver が通したのに、という構成のずれ) ときはリンクを組まない。
+        **resolve_url が成功した後にだけ呼ぶ** (受理・許可先の判定はしない)。`route_of_url` で
+        引く — `/ext/{rest}` は相対入力なら相対 `/ext/{rest}`、絶対なら `{origin}/ext/{rest}`、
+        一般の URL はその URL そのもの (`route.page_url`)。ルーティングできない (resolver が
+        通したのに、という構成のずれ) ときは "" (リンクを組まない)。
         """
         route, _err = route_of_url(u)
         if route is None:
-            return "", "", "", "", ""
-        if route.general:
-            return route.page_url or u.split("#", 1)[0], "", "", "", ""
-        name, path, qs = route.name, route.rel, route.query
-        public_base = route.public_base or ""
-        if public_base:
-            link_base = public_base
-        elif route.relative:
-            link_base = f"/ext/{name}"
-        else:
-            link_base = f"{route.origin}/ext/{name}"
-        return path, public_base, link_base, Tools._base_prefix(name, public_base), qs
-
-    @staticmethod
-    def _base_prefix(name: str, public_base: str) -> str:
-        """ルート相対 href (`/his-info/x.pdf`) を畳むための prefix。ページの href は**職員側の
-        origin** (原本 URL = EXT_PUBLIC_BASES) に対する相対なので、原本 URL のルートの
-        パス部分 (例 "his-info") を使う。原本ルートが無い name だけ http backend のパスに
-        落とす。file backend はローカル root なので prefix は無い。"""
-        if public_base:
-            return urlsplit(public_base).path.strip("/")
-        backend = ext_backend(name)
-        return (
-            urlsplit(backend[1]).path.strip("/")
-            if backend and backend[0] == "http"
-            else ""
-        )
+            return ""
+        return route.page_url or ""
 
     async def _read_file(self, fid: str, user_id: str, max_bytes: int, cap_mb: float):
         """url の `/api/v1/files/{id}/content` を file として読む → (raw, content_type, ERROR 文)。
@@ -618,29 +520,7 @@ class Tools:
         meta = getattr(rec, "meta", None) or {}
         return raw, meta.get("content_type") or "", None
 
-    @staticmethod
-    def _head(u: str, page_url: str, public_base: str) -> str:
-        """戻り値の先頭行群。`# url` + (入力と違うときだけ) 原本 URL、
-        原本 URL のルートが無い name ならその旨 1 行。"""
-        head = f"# {u}\n"
-        if public_base and page_url != u:
-            head += f"原本 (職員に案内する URL): {page_url}\n"
-        if not public_base:
-            head += (
-                "注意: この資料の配信元には原本ホストが無いため、リンク一覧の URL は同一サーバの "
-                "`/ext/…` (次の fetch_url / feed_image(url=) にそのまま渡せ、本文にもそのまま貼れる)。\n"
-            )
-        return head
-
-    def _to_lines(
-        self,
-        raw: bytes,
-        content_type: str,
-        path: str,
-        public_base: str,
-        base_prefix: str,
-        link_base: str,
-    ):
+    def _to_lines(self, raw: bytes, content_type: str, page_url: str):
         """取得したバイト列を (種別, 本文行 or 抽出文字列, リンク行) に分解する。
 
         種別は content-type (パラメータ抜きの型) で決める。**拡張子では決めない** —
@@ -663,9 +543,7 @@ class Tools:
             not media_type and b"<html" in raw[:4096].lower()
         )
         if is_html:
-            body, links = _html_to_lines(
-                raw, path, public_base, base_prefix, link_base, content_type
-            )
+            body, links = _html_to_lines(raw, page_url, content_type)
             return "html", body, links
 
         # JSON / XML / 素のテキスト系は本文をそのまま行にする (院内 API の応答・設定ファイル等。
@@ -736,11 +614,3 @@ class Tools:
         else:
             head += " (末尾まで)"
         return f"{head}\n\n{shown}"
-
-
-# 登録された原本ホストを tool の説明文に名乗らせる (冒頭コメント「戻り値の URL は 1 本」)。
-# spec は起動時 sync で nucllei プロセス内のこの docstring から生成されるので、そのときの
-# env EXT_PUBLIC_BASES (ルーティング・ERROR 文と同じ dict) が載る。
-Tools.fetch_url.__doc__ = Tools.fetch_url.__doc__.replace(
-    _DOC_BASES_SLOT, _describe_bases(EXT_PUBLIC_BASES)
-)

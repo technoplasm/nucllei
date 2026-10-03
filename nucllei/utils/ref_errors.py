@@ -74,15 +74,14 @@ def mb(n) -> str:
 # 末尾の「。」は組み立て側が付ける。detail は使わない — 文面は固定でない。
 UNKNOWN_UPSTREAM_WHAT: Mapping[str | None, str] = MappingProxyType(
     {
-        # name が取れない形だけ(`/ext/` `/ext//x` 文字種外)。`/ext/{name}` 直下は返らない
-        "not_ext_form": "は `/ext/<配信元>/…` の形でない (配信元の名前が取れない)",
-        "unknown_name": "の配信元は無い (この配備に構成されていない)",
         # 一般の URL で取りに行かない唯一の相手 (2026-10-03。行き先で絞らない — 外部サイトは
-        # 「届かない」なら upstream_unreachable で、ここには来ない)
+        # 「届かない」なら upstream_unreachable で、ここには来ない)。`not_ext_form` /
+        # `unknown_name` (`/ext/{name}/` の name の概念) は同日に /ext の設定ごと無くした —
+        # `/ext/…` の失敗は not_found だけ
         "server_self": (
             "は このサーバ自身 (または同居するサービス) を指しているので取りに行かない"
         ),
-        None: "は許可された配信元の外、または `/ext/<配信元>/<ファイル>` の形でない URL",
+        None: "は取得を許可されていない URL",
     }
 )
 

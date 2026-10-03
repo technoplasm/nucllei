@@ -199,9 +199,16 @@ class TestFileImagesInline(AbstractPostgresTest):
         messages = self._convert(self._messages(data_url), self.alice)
         assert messages[0]["content"][1]["image_url"]["url"] == data_url
 
-    def test_external_url_unavailable(self):
-        # 絶対 URL は resolver(image_refs)の名前空間 — /ext/ 形でも EXT_PUBLIC_BASES
-        # 配下でもなければ解決せず、URL のまま残さない(fail closed、#139)
+    def test_external_url_unavailable(self, monkeypatch):
+        # 絶対 URL は resolver(image_refs)の名前空間 — /ext/ 形でなければ一般の URL として
+        # 取りに行き、届かなければ URL のまま残さない(fail closed、#139 / 2026-10-03)。
+        # 実ネットワークに出ないよう名前解決を潰す(= 届かない)
+        from nucllei.utils import ext_upstreams
+
+        async def no_dns(host):
+            return []
+
+        monkeypatch.setattr(ext_upstreams, "lookup_host", no_dns)
         url = "https://example.com/images/cat.png"
         messages = self._convert(self._messages(url), self.alice)
         assert messages[0]["content"][1] == UNAVAILABLE

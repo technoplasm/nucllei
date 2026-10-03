@@ -408,6 +408,17 @@ fetch_url は移設時 `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDR
 #89 節 5 の「画像判定・上限は呼び出し側 tool の責務」は builtin_feed_image が担う(valve
 `max_image_mb` / `max_pages`)。③gate・PDF→VLM(filter)は引き続き prism 層。
 
+## 改訂(2026-10-03 夕)— `/ext` は nucllei の `/mnt` をそのまま配信(設定無し)
+
+ken 決定: **「nucllei の `/mnt` に volume したものをそのまま `/ext/` で配信する」**。`EXT_UPSTREAMS` /
+`EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES`(と同日に一度置いた `EXT_DIRS`)は撤去。`/ext/{rest}` ⇔
+`/mnt/{rest}`(`/mnt/cage/static/X` ⇔ `/ext/cage/static/X`。URL の形は不変)。利用者に渡したく
+ない物は nucllei 側の `/mnt` に mount しない(sandbox にだけ bind すればモデルは読めるが配信
+されない)— 「配信範囲の外は添付もしない」(`mounted_path_withheld`)の仕組みは不要になり撤去。
+本メモの ④ の「`/mnt` 配下に実体がある物はコピーせずパスを返す」は変わらない(nucllei 側に
+実在すれば、の条件が付く)。改名: `EXT_SELF_ADDRESSES` → `SELF_ADDRESSES`、`EXT_INLINE_MAX_BYTES` →
+`FETCH_MAX_BYTES`。詳細は [[builtin-tools]]「改訂(2026-10-03 夕)」、正本は `README_API.md` §3.8。
+
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
 
 マイクの音声入力は、区切りが 2 つ以上あった録音を 1 本(長ければ約 60 分ごとに複数本)の音声と
