@@ -5,7 +5,6 @@ import logging
 from typing import Optional
 
 import aiohttp
-from aiocache import cached
 import requests
 
 
@@ -214,6 +213,10 @@ async def update_config(
         if key in keys
     }
 
+    # 接続の並び・有効/無効・prefix が変わると OPENAI_MODELS の urlIdx / id が
+    # 陳腐化する — 捨てて、次の completion(miss)か /api/models で取り直させる
+    request.app.state.OPENAI_MODELS = {}
+
     return {
         "ENABLE_OPENAI_API": request.app.state.config.ENABLE_OPENAI_API,
         "OPENAI_API_BASE_URLS": request.app.state.config.OPENAI_API_BASE_URLS,
@@ -420,8 +423,11 @@ async def get_filtered_models(models, user):
     return filtered_models
 
 
-@cached(ttl=1)
 async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
+    # 2026-10-04: 旧 @cached(ttl=1) は撤去(鍵に Request が入るので別リクエスト間で
+    # ヒットせず、hot path の再取得を防いでいなかった)。呼べば必ず upstream を
+    # 取り直して OPENAI_MODELS を張り替える = 明示的な refresh。hot path は
+    # generate_chat_completion が OPENAI_MODELS から引く(miss 時だけここへ来る)。
     log.info("get_all_models()")
 
     if not request.app.state.config.ENABLE_OPENAI_API:
@@ -667,8 +673,20 @@ async def generate_chat_completion(
                 detail="Model not found",
             )
 
-    await get_all_models(request, user=user)
+    # 2026-10-04: hot path(tool ループの追撃・subagent の子ターン — 1 ターンに
+    # 何度も来る)では upstream の /models を叩かない。旧実装は毎回
+    # get_all_models を踏んでいた(@cached(ttl=1) は Request が鍵に入るので
+    # 事実上ヒットしなかった)— 1 回 8〜18 ms、接続が固まれば
+    # AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST まで待つ。ここで要るのは model_id →
+    # urlIdx の対応だけなので、OPENAI_MODELS(/api/models 等の既存の更新経路が
+    # 張り替える)から引き、**引けないときだけ**取り直す(新しく足された upstream
+    # モデル・起動直後の空キャッシュ)。preset の params / access_control は上で
+    # DB(Models.get_model_by_id)から毎回読むのでキャッシュの影響を受けない。
+    # 接続設定の更新(update_config)は OPENAI_MODELS を捨てる(urlIdx の陳腐化防止)。
     model = request.app.state.OPENAI_MODELS.get(model_id)
+    if model is None:
+        await get_all_models(request, user=user)
+        model = request.app.state.OPENAI_MODELS.get(model_id)
     if model:
         idx = model["urlIdx"]
     else:

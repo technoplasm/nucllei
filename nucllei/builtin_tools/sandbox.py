@@ -424,6 +424,14 @@ class Tools:
     # 600 + HTTP 余裕 30 = _post の付け足しと同じ余裕幅。
     timeouts = {"run_python": 630, "run_python_once": 630, "run_shell": 630}
 
+    # 2026-10-04: 1 応答に並んだ同期 call の並行実行から外す(toolkit 単位で応答順に
+    # 1 本ずつ — utils/middleware._tool_call_lane_key)。sandbox 側は同じ会話
+    # (run_python)/ 同じユーザー(run_python_once / run_shell)で直列化される
+    # (_memos/async-exec-design.md 追補 3-5 の実測)ので並行にしても速くならず、
+    # HTTP の到着順が応答順と食い違うと stateful なセルの実行順が入れ替わる
+    # (後ろのセルが前のセルの変数を使う)うえ、順番待ちが per-call timeout に食い込む。
+    serial = True
+
     class Valves(BaseModel):
         # 向き先 (SANDBOX_URL) と共有トークン (SANDBOX_TOKEN) は **env 専用** —
         # valve に置かない。理由はモジュール冒頭の SANDBOX_URL のコメント。

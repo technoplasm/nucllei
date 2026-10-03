@@ -349,6 +349,13 @@ def get_tools(
                     ):
                         tool_dict["timeout"] = timeout
 
+                # 2026-10-04: 並行実行の opt-out。execute_tool_calls は 1 応答の
+                # 同期 call を並行に走らせるが、`Tools` クラス属性 `serial = True`
+                # の toolkit は toolkit(tool_id)単位で応答順に 1 本ずつ走る
+                # (実行系が直列 / stateful で順序に意味がある tool — sandbox)。
+                if getattr(module, "serial", False) is True:
+                    tool_dict["serial"] = True
+
                 # TODO: if collision, prepend toolkit name
                 if function_name in tools_dict:
                     log.warning(

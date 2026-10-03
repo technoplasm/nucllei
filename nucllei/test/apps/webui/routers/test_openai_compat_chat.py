@@ -31,6 +31,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") == "/v1/models":
+            self.server.models_gets += 1
             self._json(
                 {
                     "object": "list",
@@ -143,6 +144,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         super().setup_class()
         cls.mock_server = ThreadingHTTPServer(("127.0.0.1", 0), MockOpenAIHandler)
         cls.mock_server.received = []
+        cls.mock_server.models_gets = 0
         cls.server_thread = threading.Thread(
             target=cls.mock_server.serve_forever, daemon=True
         )
@@ -173,6 +175,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         app.state.OPENAI_MODELS = {}
         app.state.FUNCTIONS = {}
         self.mock_server.received.clear()
+        self.mock_server.models_gets = 0
 
     def _register_e2e_filter(self):
         from nucllei.models.functions import FunctionForm, Functions
@@ -209,6 +212,50 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         sent = self.mock_server.received[0]
         assert sent["model"] == "mock-model"
         assert sent["messages"][-1] == {"role": "user", "content": "hi"}
+
+    def test_consecutive_completions_do_not_refetch_models(self):
+        """2026-10-04: completion の hot path は upstream の /models を取り直さない。
+
+        初回(キャッシュ空)だけ 1 回取り、2 回目以降(tool ループの追撃・subagent の
+        子ターンと同じ形)は OPENAI_MODELS から urlIdx を引く。新しいモデル id
+        (キャッシュに無い)だけが取り直しを起こす。
+        """
+        from nucllei.main import app
+
+        def complete(model="mock-model"):
+            with mock_webui_user(id="1", role="admin"):
+                return self.fast_api_client.post(
+                    "/api/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False,
+                    },
+                )
+
+        assert complete().status_code == 200
+        assert self.mock_server.models_gets == 1
+        assert complete().status_code == 200
+        assert complete().status_code == 200
+        assert self.mock_server.models_gets == 1
+        assert len(self.mock_server.received) == 3
+
+        # 接続設定の更新は OPENAI_MODELS を捨てる(urlIdx の陳腐化防止)→ 次の
+        # completion で 1 回だけ取り直す
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/openai/config/update",
+                json={
+                    "ENABLE_OPENAI_API": True,
+                    "OPENAI_API_BASE_URLS": [self.base_url],
+                    "OPENAI_API_KEYS": ["sk-dummy"],
+                    "OPENAI_API_CONFIGS": {},
+                },
+            )
+        assert response.status_code == 200, response.text
+        assert app.state.OPENAI_MODELS == {}
+        assert complete().status_code == 200
+        assert self.mock_server.models_gets == 2
 
     def test_base_models_endpoint_lists_raw_models(self):
         """/api/models/base(admin ゲート)は接続由来の生モデルを返す。"""

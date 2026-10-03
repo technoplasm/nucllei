@@ -63,7 +63,9 @@ from nucllei.utils.skills import (
 from nucllei.models.executions import Executions
 from nucllei.utils.exec_tools import (
     EXEC_RECALL_TOOL_NAMES,
+    background_runs_inline,
     entry_is_backgroundable,
+    inline_background_timeout,
     exec_recall_context_ok,
     exec_spawn_context_ok,
     mount_recall_tools,
@@ -1351,13 +1353,20 @@ def _make_progress_emitter(events_stream, metadata):
 
 
 async def _execute_tool_call_sync(
-    tool, tool_name, tool_call_id, tool_function_params, progress_emitter_for
+    tool,
+    tool_name,
+    tool_call_id,
+    tool_function_params,
+    progress_emitter_for,
+    timeout_override=None,
 ):
     """1 件の tool call を同期(このターン内)で実行する(execute_tool_calls の本体)。
 
     戻り値は (tool_result, tool_succeeded, sink)。sink は close 済みで、呼び出し側が
     成功時のみ harvest する(context_images / display / result_render)。
     background 昇格時(#110)はここを通らず spawn_execution が代替する。
+    timeout_override は単独 background の同期降格(exec_tools.background_runs_inline)
+    が background と同じ上限を渡すための口。
     """
     # llens(#89): tool-call ごとの出力 sink を張る。tool が
     # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、呼び出し側で
@@ -1372,7 +1381,7 @@ async def _execute_tool_call_sync(
     sink_token = tool_output.current_sink.set(sink)
     # llens(#100): この call の開始をフロントへ通知する。ブロックは実行前の
     # 1 回の emit で一斉に描かれるので、これがフロントの経過時間タイマの
-    # 起点になる(逐次実行なので 2 本目以降は「まだ始まっていない」)。
+    # 起点になる(serial toolkit の後続 call は「まだ始まっていない」)。
     sink.mark_started()
     tool_succeeded = False
     tool_result = None
@@ -1385,7 +1394,11 @@ async def _execute_tool_call_sync(
         # #107: tool エントリの per-tool timeout キーが優先(run_subagent は
         # 子ターン全体を包むため SUBAGENT_TURN_TIMEOUT_S を持つ。await_task は
         # 0 = 無効化 — 自前の clamp 済み有界待ちが running 形を返す)。
-        tool_timeout = tool.get("timeout", TOOL_EXEC_TIMEOUT_S)
+        tool_timeout = (
+            timeout_override
+            if timeout_override is not None
+            else tool.get("timeout", TOOL_EXEC_TIMEOUT_S)
+        )
         if tool_timeout > 0:
             tool_result = await asyncio.wait_for(
                 tool_function(**tool_function_params),
@@ -1414,176 +1427,292 @@ async def _execute_tool_call_sync(
     return tool_result, tool_succeeded, sink
 
 
+async def _execute_one_tool_call(
+    tool_call, tools, *, progress_emitter_for, metadata, call_count: int
+) -> dict:
+    """1 件の tool call を実行して wire の result dict を返す(execute_tool_calls の 1 要素)。
+
+    call_count はこの応答に並んだ call の総数 — 単独 background の同期降格
+    (exec_tools.background_runs_inline)の判定材料。
+    """
+    tool_call_id = tool_call.get("id", "")
+    tool_name = tool_call.get("function", {}).get("name", "")
+    # 所要時間(#100)は成否に関わらず測る — 落ちた tool が何秒走ったかこそ
+    # 知りたい(context_images/display の tool_succeeded ゲートとは規律が違う)。
+    started_at = time.monotonic()
+
+    tool_function_params = {}
+    try:
+        # 一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
+        # _memos/model-frames.md)。Python リテラル風を出すモデル向けの
+        # フォールバックとして ast.literal_eval を残す(モデル多様性)。
+        tool_function_params = json.loads(
+            tool_call.get("function", {}).get("arguments", "{}")
+        )
+    except Exception as e:
+        log.debug(e)
+        try:
+            tool_function_params = ast.literal_eval(
+                tool_call.get("function", {}).get("arguments", "{}")
+            )
+        except Exception:
+            log.debug(
+                f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
+            )
+
+    tool_result = None
+    context_image_file_ids = []
+    display_items = []
+    result_render_override = None
+
+    if tool_name not in tools:
+        # llens(#18-2): tools 配列に無い tool の呼び出し。
+        # 履歴に残った過去の tool call を真似るケース
+        # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
+        # 起きうる。黙って None を返さず、モデルが軌道修正
+        # できる明示メッセージを返す(例外にもしない)。
+        log.warning(f"model called unavailable tool '{tool_name}'")
+        tool_result = (
+            f"tool not available: {tool_name}. "
+            "Use only the tools currently provided."
+        )
+    else:
+        tool = tools[tool_name]
+        spec = tool.get("spec", {})
+
+        # llens(#110): 共有 background 引数は allowed_params フィルタより前に
+        # 必ず pop する(適格 tool の spec **コピー**にのみ注入される引数で、
+        # 元 spec には無い)。tool 自身が background を宣言している場合は tool の
+        # 実引数であり恒久不適格(D4)— 触らずそのまま渡す。
+        allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
+        background_requested = False
+        if "background" not in allowed_params:
+            background_requested = bool(tool_function_params.pop("background", False))
+        tool_function_params = {
+            k: v for k, v in tool_function_params.items() if k in allowed_params
+        }
+
+        if background_requested and not (
+            entry_is_backgroundable(tool_name, tool) and exec_spawn_context_ok(metadata)
+        ):
+            # 不適格 tool / 文脈(agent session・chat 文脈なし)への指定は
+            # 無視して同期実行(§7)
+            log.warning(
+                f"background=true ignored for tool '{tool_name}' "
+                "(not backgroundable in this context)"
+            )
+            background_requested = False
+
+        timeout_override = None
+        if background_requested and background_runs_inline(call_count):
+            # 2026-10-04 ken 承認: 単独の background call は同期で走らせる
+            # (await_task の 1 往復が丸損になるため)。結果は通常の同期結果
+            # (task_id を出さない)、上限は background と同じ値。根拠と
+            # トレードオフは exec_tools.background_runs_inline。
+            log.info(
+                f"lone background call to '{tool_name}' runs inline "
+                "(no other calls in this response)"
+            )
+            background_requested = False
+            timeout_override = inline_background_timeout(tool)
+
+        if background_requested:
+            # llens(#110): execution チャンネルへ昇格(K2)。spawn は exec 行を
+            # INSERT して runner task を起動し、即座に running 形(K3)を返す。
+            # この running 形が親メッセージの tool result として以後不変
+            # (append-only)— 完了の真実は exec 行、回収は await_task /
+            # check_task とサーバ駆動配達(execution_resume)。params は
+            # unknown-drop 済み(監査
+            # 保存と callable 引数の両方に使われる)。
+            tool_result = await spawn_execution(
+                user_id=metadata["user_id"],
+                chat_id=metadata["chat_id"],
+                message_id=metadata["message_id"],
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                entry=tool,
+                params=tool_function_params,
+            )
+        else:
+            tool_result, tool_succeeded, sink = await _execute_tool_call_sync(
+                tool,
+                tool_name,
+                tool_call_id,
+                tool_function_params,
+                progress_emitter_for,
+                timeout_override=timeout_override,
+            )
+            # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は
+            # 副産物を出さない — content=エラー文言と画像が混在する不整合を
+            # 避ける)。成功時のみ harvest(lock 下 snapshot で timeout orphan
+            # スレッドの遅延 append を除外)。
+            context_image_file_ids = sink.context_images() if tool_succeeded else []
+            # display(人間の目、#88)も同じ規律で成功時のみ harvest。
+            display_items = sink.displays() if tool_succeeded else []
+            # #110(§8): await_task が宣言した表示ディスクリプタ
+            # (exec 行の render_descriptor)は型由来の render より優先する
+            result_render_override = sink.result_render() if tool_succeeded else None
+
+    # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
+    # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
+    # dict/list だけ kind=json を明示し、それ以外は省略(フロント既定 = text)。
+    # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
+    # 正規化は executions.normalize_tool_result と共有(#110 契約 M0 —
+    # ensure_ascii=False / indent なしの根拠はそちらの docstring)。
+    tool_result, result_render = normalize_tool_result(tool_result)
+
+    # llens(#110 §8): await_task の render_descriptor パススルー。exec 行に
+    # 保存された実 tool の戻り値宣言(sink.set_result_render 経由)が、
+    # 型由来の render(kind=json)より優先する(subagent 等の描画復元)。
+    if result_render_override:
+        result_render = result_render_override
+
+    # llens(#110 契約 M0): 切詰めは結果の生産点で一度だけ — 同期 tool は
+    # ここが生産点(background は runner の保存時)。回収 builtin
+    # (check_task/await_task/stop_task)は適用除外: 中身は保存時に切詰め
+    # 済みで、envelope の json.dumps 膨張で再切詰めすると壊れ JSON になる。
+    # 切詰め時は render を text へ降格(JSON / descriptor 描画はパース前提)。
+    result_truncated = False
+    original_chars = 0
+    if tool_name not in EXEC_RECALL_TOOL_NAMES:
+        tool_result, result_truncated, original_chars = truncate_tool_result(
+            tool_result
+        )
+        if result_truncated:
+            result_render = None
+
+    return {
+        "tool_call_id": tool_call_id,
+        "content": tool_result,
+        # 所要時間(#100)。モデル向け履歴は tool_call_id/content しか拾わない
+        # ので、これがモデルへ漏れることはない(content_blocks.py)。
+        "duration": round(time.monotonic() - started_at, 3),
+        **({"render": result_render} if result_render else {}),
+        **(
+            {"truncated": True, "original_chars": original_chars}
+            if result_truncated
+            else {}
+        ),
+        **(
+            {"context_images": context_image_file_ids} if context_image_file_ids else {}
+        ),
+        **({"display": display_items} if display_items else {}),
+    }
+
+
+# 2026-10-04: 同じ応答の後続 call が使う tool を tools_dict に足しうる tool。
+# 並行化の前に順番どおり先に済ませる(load_skill の第 2 経路 inject_skill_tools が
+# 遅延ロードした tool を、同じ応答の後ろの call が引けるように — 逐次実行時代と
+# 同じ可視性)。
+TOOL_BATCH_PRELUDE_NAMES = ("load_skill",)
+
+
+def _tool_call_lane_key(index: int, tool_call: dict, tools: dict):
+    """並行実行のレーン鍵。同じ鍵の call は応答順に 1 本ずつ、鍵どうしは並行。
+
+    既定は call ごとに別レーン(= 全並行)。tool エントリに `serial` が立っていれば
+    toolkit(tool_id)単位で 1 レーンに束ねる(utils/tools.py が `Tools` クラス属性
+    `serial` から落とす)。sandbox はこれを宣言している — 実行系は同じ会話/ユーザー内で
+    直列化されるので並行にしても速くならず、むしろ順番待ちがタイムアウトに食い込み、
+    stateful な run_python の**実行順が応答順でなくなる**(後ろのセルが前のセルの
+    変数を参照するのは普通)。
+    """
+    name = tool_call.get("function", {}).get("name", "")
+    entry = tools.get(name)
+    if entry is not None and entry.get("serial"):
+        return ("serial", entry.get("tool_id") or name)
+    return ("call", index)
+
+
 async def execute_tool_calls(
     response_tool_calls, tools, *, events_stream=None, metadata=None
 ):
-    """tool call 群を順に実行し、tool result のリストを返す。
+    """1 応答ぶんの tool call 群を実行し、tool result のリストを**call 順**で返す。
+
+    2026-10-04(ken 承認): 同期 call は**並行**に走らせる(旧: 逐次)。1 応答に
+    run_subagent が 2 本並べば子 2 本が同時に走る — background + await_task を
+    使わずに済む。保つ性質:
+    - results の順 = call の順(followup messages / content_blocks の並び)
+    - per-call の timeout(`_execute_tool_call_sync` の wait_for)はそのまま
+    - per-call のエラー隔離: 1 本の失敗(例外・timeout)は他を巻き込まない。
+      想定外の例外もその call の result 文字列に落とす
+    - 同時数上限(SUBAGENT_MAX_CONCURRENCY / ASYNC_EXEC_*)は各 callable / spawn 側の
+      会計がそのまま効く(check→increment に await を挟まない規律)
+    - 停止: 親ターンの cancel は全 call に伝播する(gather の cancel)
+    - 直列化の opt-out: `serial` エントリは toolkit 単位で応答順に 1 本ずつ
+      (_tool_call_lane_key)。tools_dict を広げる load_skill は先に済ませる
+      (TOOL_BATCH_PRELUDE_NAMES)
+    - 単独の background call は同期降格(exec_tools.background_runs_inline)
 
     events_stream / metadata は tool 進捗(#100)の宛先。省略時(headless・テスト)は
     `__progress__` が黙って no-op になる。metadata は background 昇格(#110)の
     exec 行束縛(user_id / chat_id / message_id)にも使われる。
     """
-    results = []
+    calls = list(response_tool_calls or [])
     progress_emitter_for = _make_progress_emitter(events_stream, metadata)
-    for tool_call in response_tool_calls:
-        tool_call_id = tool_call.get("id", "")
-        tool_name = tool_call.get("function", {}).get("name", "")
-        # 所要時間(#100)は成否に関わらず測る — 落ちた tool が何秒走ったかこそ
-        # 知りたい(context_images/display の tool_succeeded ゲートとは規律が違う)。
-        started_at = time.monotonic()
+    results: list = [None] * len(calls)
 
-        tool_function_params = {}
+    async def run(index):
+        tool_call = calls[index]
         try:
-            # 一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
-            # _memos/model-frames.md)。Python リテラル風を出すモデル向けの
-            # フォールバックとして ast.literal_eval を残す(モデル多様性)。
-            tool_function_params = json.loads(
-                tool_call.get("function", {}).get("arguments", "{}")
+            results[index] = await _execute_one_tool_call(
+                tool_call,
+                tools,
+                progress_emitter_for=progress_emitter_for,
+                metadata=metadata,
+                call_count=len(calls),
             )
         except Exception as e:
-            log.debug(e)
-            try:
-                tool_function_params = ast.literal_eval(
-                    tool_call.get("function", {}).get("arguments", "{}")
-                )
-            except Exception:
-                log.debug(
-                    f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
-                )
-
-        tool_result = None
-        context_image_file_ids = []
-        display_items = []
-        result_render_override = None
-
-        if tool_name not in tools:
-            # llens(#18-2): tools 配列に無い tool の呼び出し。
-            # 履歴に残った過去の tool call を真似るケース
-            # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
-            # 起きうる。黙って None を返さず、モデルが軌道修正
-            # できる明示メッセージを返す(例外にもしない)。
-            log.warning(f"model called unavailable tool '{tool_name}'")
-            tool_result = (
-                f"tool not available: {tool_name}. "
-                "Use only the tools currently provided."
-            )
-        else:
-            tool = tools[tool_name]
-            spec = tool.get("spec", {})
-
-            # llens(#110): 共有 background 引数は allowed_params フィルタより前に
-            # 必ず pop する(適格 tool の spec **コピー**にのみ注入される引数で、
-            # 元 spec には無い)。tool 自身が background を宣言している場合は tool の
-            # 実引数であり恒久不適格(D4)— 触らずそのまま渡す。
-            allowed_params = spec.get("parameters", {}).get("properties", {}).keys()
-            background_requested = False
-            if "background" not in allowed_params:
-                background_requested = bool(
-                    tool_function_params.pop("background", False)
-                )
-            tool_function_params = {
-                k: v for k, v in tool_function_params.items() if k in allowed_params
+            # 隔離: 想定外の失敗(spawn の後段・正規化等)もこの call の result に
+            # 閉じる。逐次時代はターンごと落ちていたが、並行では兄弟 call を
+            # 道連れにしない方が素直
+            log.exception(f"tool call failed unexpectedly: {tool_call}")
+            results[index] = {
+                "tool_call_id": tool_call.get("id", ""),
+                "content": str(e) or e.__class__.__name__,
+                "duration": 0.0,
             }
 
-            if background_requested and not (
-                entry_is_backgroundable(tool_name, tool)
-                and exec_spawn_context_ok(metadata)
-            ):
-                # 不適格 tool / 文脈(agent session・chat 文脈なし)への指定は
-                # 無視して同期実行(§7)
-                log.warning(
-                    f"background=true ignored for tool '{tool_name}' "
-                    "(not backgroundable in this context)"
-                )
-                background_requested = False
+    prelude = [
+        i
+        for i, c in enumerate(calls)
+        if c.get("function", {}).get("name", "") in TOOL_BATCH_PRELUDE_NAMES
+    ]
+    for i in prelude:
+        await run(i)
 
-            if background_requested:
-                # llens(#110): execution チャンネルへ昇格(K2)。spawn は exec 行を
-                # INSERT して runner task を起動し、即座に running 形(K3)を返す。
-                # この running 形が親メッセージの tool result として以後不変
-                # (append-only)— 完了の真実は exec 行、回収は await_task /
-                # check_task とサーバ駆動配達(execution_resume)。params は
-                # unknown-drop 済み(監査
-                # 保存と callable 引数の両方に使われる)。
-                tool_result = await spawn_execution(
-                    user_id=metadata["user_id"],
-                    chat_id=metadata["chat_id"],
-                    message_id=metadata["message_id"],
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    entry=tool,
-                    params=tool_function_params,
-                )
-            else:
-                tool_result, tool_succeeded, sink = await _execute_tool_call_sync(
-                    tool,
-                    tool_name,
-                    tool_call_id,
-                    tool_function_params,
-                    progress_emitter_for,
-                )
-                # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は
-                # 副産物を出さない — content=エラー文言と画像が混在する不整合を
-                # 避ける)。成功時のみ harvest(lock 下 snapshot で timeout orphan
-                # スレッドの遅延 append を除外)。
-                context_image_file_ids = sink.context_images() if tool_succeeded else []
-                # display(人間の目、#88)も同じ規律で成功時のみ harvest。
-                display_items = sink.displays() if tool_succeeded else []
-                # #110(§8): await_task が宣言した表示ディスクリプタ
-                # (exec 行の render_descriptor)は型由来の render より優先する
-                result_render_override = (
-                    sink.result_render() if tool_succeeded else None
-                )
+    # レーン鍵は prelude の後に決める(load_skill が足した tool の serial も見る)
+    lanes: dict = {}
+    for i, c in enumerate(calls):
+        if i in prelude:
+            continue
+        lanes.setdefault(_tool_call_lane_key(i, c, tools), []).append(i)
 
-        # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
-        # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
-        # dict/list だけ kind=json を明示し、それ以外は省略(フロント既定 = text)。
-        # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
-        # 正規化は executions.normalize_tool_result と共有(#110 契約 M0 —
-        # ensure_ascii=False / indent なしの根拠はそちらの docstring)。
-        tool_result, result_render = normalize_tool_result(tool_result)
+    async def run_lane(indices):
+        for i in indices:
+            await run(i)
 
-        # llens(#110 §8): await_task の render_descriptor パススルー。exec 行に
-        # 保存された実 tool の戻り値宣言(sink.set_result_render 経由)が、
-        # 型由来の render(kind=json)より優先する(subagent 等の描画復元)。
-        if result_render_override:
-            result_render = result_render_override
-
-        # llens(#110 契約 M0): 切詰めは結果の生産点で一度だけ — 同期 tool は
-        # ここが生産点(background は runner の保存時)。回収 builtin
-        # (check_task/await_task/stop_task)は適用除外: 中身は保存時に切詰め
-        # 済みで、envelope の json.dumps 膨張で再切詰めすると壊れ JSON になる。
-        # 切詰め時は render を text へ降格(JSON / descriptor 描画はパース前提)。
-        result_truncated = False
-        original_chars = 0
-        if tool_name not in EXEC_RECALL_TOOL_NAMES:
-            tool_result, result_truncated, original_chars = truncate_tool_result(
-                tool_result
-            )
-            if result_truncated:
-                result_render = None
-
-        results.append(
-            {
-                "tool_call_id": tool_call_id,
-                "content": tool_result,
-                # 所要時間(#100)。モデル向け履歴は tool_call_id/content しか拾わない
-                # ので、これがモデルへ漏れることはない(content_blocks.py)。
-                "duration": round(time.monotonic() - started_at, 3),
-                **({"render": result_render} if result_render else {}),
-                **(
-                    {"truncated": True, "original_chars": original_chars}
-                    if result_truncated
-                    else {}
-                ),
-                **(
-                    {"context_images": context_image_file_ids}
-                    if context_image_file_ids
-                    else {}
-                ),
-                **({"display": display_items} if display_items else {}),
-            }
-        )
+    lane_list = list(lanes.values())
+    if len(lane_list) == 1:
+        # 1 レーン(単独 call / serial toolkit だけ)はタスクを作らず直に await —
+        # 逐次時代と同じ実行文脈(ContextVar・cancel 経路)のまま
+        await run_lane(lane_list[0])
+    elif lane_list:
+        tasks = [asyncio.ensure_future(run_lane(indices)) for indices in lane_list]
+        try:
+            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            # 親ターンの stop: gather が子へ cancel を伝播済み。子の後始末
+            # (subagent の子ターン停止連鎖等)を短く待ってから上げる
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks, timeout=5)
+            raise
+        for outcome in outcomes:
+            # Exception は run() が result へ落とし済み。残るのは BaseException
+            # (callable 内部由来の CancelledError 等)— 逐次時代と同じく上げる
+            if isinstance(outcome, BaseException):
+                raise outcome
 
     return results
 

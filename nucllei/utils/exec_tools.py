@@ -47,7 +47,7 @@ import json
 import logging
 import time
 
-from nucllei.env import SRC_LOG_LEVELS
+from nucllei.env import ASYNC_EXEC_TIMEOUT_S, SRC_LOG_LEVELS
 from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
 from nucllei.utils.executions import (
@@ -158,6 +158,37 @@ def spec_for_model(name: str, entry: dict, allow_background: bool) -> dict:
     properties = dict(parameters.get("properties") or {})
     properties["background"] = dict(BACKGROUND_PARAM_SPEC)
     return {**spec, "parameters": {**parameters, "properties": properties}}
+
+
+def background_runs_inline(call_count: int) -> bool:
+    """background: true の適格 call を同期実行へ降格するか(2026-10-04 ken 承認)。
+
+    **単独の background 呼び出しは同期で走らせる**: 1 応答に call が 1 本だけ
+    (他の tool も並ばない)なら、background にしても親ターンは次に await_task を
+    撃つだけで、その 1 往復(実測 3〜5 秒)がまるごと損になる。モデルは子 1 本でも
+    3 回に 1 回は background を選ぶ(subagent-timing 実測)。
+
+    2 本以上並ぶ応答では従来どおり昇格する(同期 call 同士は execute_tool_calls が
+    並行実行するので、並列のためだけに background を使う必要はもう無いが、
+    「投げて親ターンを先に進める」意図は残す)。
+
+    降格した call は通常の同期結果を返し(task_id は出さない・exec 行も作らない)、
+    タイムアウトは background と同じ値(`inline_background_timeout`)を使う —
+    長い仕事を background にした call が同期既定 300 秒で切られないように。
+    代わりに D6(親ターン stop は exec に伝播しない)は効かず、ユーザー停止で
+    止まる(同期 call と同じ)。判断はこの関数 1 箇所(呼び出し側は
+    middleware.execute_tool_calls のみ)。
+    """
+    return call_count == 1
+
+
+def inline_background_timeout(entry: dict):
+    """同期へ降格した background call のタイムアウト秒(exec runner と同じ式)。
+
+    per-entry `timeout` が最優先、無ければ ASYNC_EXEC_TIMEOUT_S。非正値は
+    「システム側上限なし」(execute_tool_calls は `> 0` のときだけ wait_for)。
+    """
+    return entry.get("timeout") or ASYNC_EXEC_TIMEOUT_S
 
 
 def mount_recall_tools(tools_dict: dict, form_data: dict, user, metadata) -> list[str]:

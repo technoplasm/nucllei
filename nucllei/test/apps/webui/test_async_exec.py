@@ -271,14 +271,26 @@ class TestAsyncExec(AbstractPostgresTest):
             await release.wait()
             return {"answer": city}
 
-        tools = {"probe": self._entry(probe, properties={"city": {"type": "string"}})}
+        async def other():
+            return "隣の同期 call"
+
+        # 単独の background call は同期降格される(background_runs_inline)ので、
+        # 昇格を見るには同じ応答に別の call を並べる
+        tools = {
+            "probe": self._entry(probe, properties={"city": {"type": "string"}}),
+            "other": self._entry(other, backgroundable=False),
+        }
 
         async def main():
             results = await execute_tool_calls(
-                [self._call({"city": "札幌", "background": True, "unknown": 1})],
+                [
+                    self._call({"city": "札幌", "background": True, "unknown": 1}),
+                    self._call({}, name="other", index=1),
+                ],
                 tools,
                 metadata=self._metadata(),
             )
+            assert results[1]["content"] == "隣の同期 call"
             # 親メッセージの tool result は running 形のみ(K3・append-only)。
             # キーは task_id(契約 T1 — モデル向けの用語)
             payload = json.loads(results[0]["content"])
@@ -309,6 +321,48 @@ class TestAsyncExec(AbstractPostgresTest):
         assert json.loads(row.result) == {"answer": "札幌"}
         assert row.meta["render"] == {"kind": "json"}
         assert row.duration >= 0
+
+    def test_lone_background_call_runs_inline(self, monkeypatch):
+        """2026-10-04: 応答に call が 1 本だけなら background: true でも同期で走る。
+
+        結果は通常の同期結果(task_id を出さない・exec 行を作らない)。上限は
+        background と同じ値(per-entry timeout ∨ ASYNC_EXEC_TIMEOUT_S)— 同期既定
+        (TOOL_EXEC_TIMEOUT_S)で切らない。
+        """
+        from nucllei.utils import middleware
+        from nucllei.utils.middleware import execute_tool_calls
+
+        calls = []
+
+        async def probe(city: str = ""):
+            calls.append(city)
+            await asyncio.sleep(0.2)
+            return {"answer": city}
+
+        monkeypatch.setattr(middleware, "TOOL_EXEC_TIMEOUT_S", 0.05)
+        tools = {"probe": self._entry(probe, properties={"city": {"type": "string"}})}
+        results = asyncio.run(
+            execute_tool_calls(
+                [self._call({"city": "函館", "background": True})],
+                tools,
+                metadata=self._metadata(),
+            )
+        )
+        assert calls == ["函館"]
+        assert json.loads(results[0]["content"]) == {"answer": "函館"}
+        assert results[0]["render"] == {"kind": "json"}
+        assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
+
+        # per-entry timeout が background と同じく優先される(ここでは短く切れる)
+        tools["probe"]["timeout"] = 0.05
+        results = asyncio.run(
+            execute_tool_calls(
+                [self._call({"city": "室蘭", "background": True})],
+                tools,
+                metadata=self._metadata(),
+            )
+        )
+        assert "タイムアウト" in results[0]["content"]
 
     def test_background_is_ignored_for_ineligible_tools_and_contexts(self):
         from nucllei.utils.middleware import execute_tool_calls
@@ -1272,7 +1326,7 @@ class TestAsyncExec(AbstractPostgresTest):
         )
 
     def test_db_tool_class_attribute_declarations_reach_the_entry(self):
-        """K2/P4: `Tools` クラス属性 backgroundable / timeouts が entry キーへ落ちる。
+        """K2/P4: `Tools` クラス属性 backgroundable / timeouts / serial が entry キーへ落ちる。
 
         timeouts(関数名 → 秒)は per-entry timeout の宣言口 — 同期は
         execute_tool_calls、background は exec runner が同キーを読む。
@@ -1286,6 +1340,7 @@ class TestAsyncExec(AbstractPostgresTest):
             "class Tools:\n"
             '    backgroundable = ("probe",)\n'
             '    timeouts = {"probe": 1234, "unknown": 9}\n'
+            "    serial = True\n"
             "\n"
             "    async def probe(self) -> str:\n"
             '        """probe"""\n'
@@ -1312,6 +1367,9 @@ class TestAsyncExec(AbstractPostgresTest):
         )
         assert loaded["probe"]["backgroundable"] is True
         assert loaded["probe"]["timeout"] == 1234
+        # 2026-10-04: 並行実行の opt-out(toolkit 単位の直列 — tool_id がレーン鍵)
+        assert loaded["probe"]["serial"] is True
+        assert loaded["probe"]["tool_id"] == "declaring"
 
     def test_db_tool_toolkit_note_is_prepended_once(self):
         """P4: `Tools` クラス docstring は toolkit 共通注記として先頭 spec の

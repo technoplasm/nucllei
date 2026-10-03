@@ -481,3 +481,46 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
 - 担保: `test_execution_resume.py::test_resume_turn_request_has_no_origin`(旧 origin 付き行でも
   続きターンの Request に Host / X-Forwarded-* が無い)。`test_subagent.py` の `scope_from`
   引き継ぎテストは据え置き。
+
+## 追補 8(2026-10-04 ken 承認)— 同期 call の並行化・単独 background の同期降格・/models 再取得の撤去
+
+subagent の所要時間調査(1 応答に子 2 本 / background + await_task の往復)で出た 3 点。
+
+- **同期 call の並行実行**(`middleware.execute_tool_calls`): 1 応答に並んだ同期 call は
+  `asyncio.gather` で並行に走る(旧: 逐次)。results は call 順・per-call timeout・per-call の
+  エラー隔離(例外 / timeout / 想定外の例外も その call の result 文字列に閉じる)・親ターン
+  stop は全 call に伝播(gather の cancel + 子の後始末を最大 5 秒待って re-raise)。同時数上限
+  (SUBAGENT_MAX_CONCURRENCY / ASYNC_EXEC_*)は各 callable / spawn の会計がそのまま効く。
+  単独 call(1 レーン)はタスクを作らず直 await(旧来の実行文脈のまま)。
+  効果: 「子 2 本を並列」は background + await_task 無しで成立する。
+- **直列化の opt-out = `Tools` クラス属性 `serial = True`**(utils/tools.py が entry の
+  `serial` キーへ落とす)。レーン鍵は toolkit(tool_id)— 同じ toolkit の call は応答順に
+  1 本ずつ、他の tool とは並行。**sandbox は serial**: 実行系は同じ会話(run_python)/
+  同じユーザー(run_python_once / run_shell)で直列化済み(追補 3-5 の実測)なので並行の
+  利得はゼロで、HTTP の到着順が入れ替わると stateful なセルの実行順が応答順でなくなる
+  (後ろのセルが前の変数を参照するのが普通)うえ、順番待ちが per-call timeout に食い込む。
+  §12「stateful tool の直列化を core に持つ」の却下とは別物 — core は stateful 性を
+  推測せず、tool 側の宣言を尊重するだけ。
+  `load_skill` は prelude として先に順番どおり実行する(遅延ロードした tool を同じ応答の
+  後ろの call が引ける — 逐次時代と同じ可視性)。
+  残リスク: `__event_emitter__` の message / replace(親メッセージの DB RMW)を出す tool が
+  兄弟と並行すると交錯しうる(該当 tool は現状なし — 要るなら serial)。
+- **単独 background の同期降格**(`exec_tools.background_runs_inline` が判断 1 箇所):
+  応答の call が 1 本だけで、それが適格な `background: true` なら同期で走らせる
+  (await_task の 1 往復 3〜5 秒が丸損・モデルは子 1 本でも 1/3 で background を選ぶ)。
+  結果は通常の同期結果(task_id なし・exec 行なし)。上限は background と同じ
+  (`inline_background_timeout` = per-entry timeout ∨ ASYNC_EXEC_TIMEOUT_S — 長い仕事を
+  background にした call を同期既定 300 秒で切らない)。トレードオフ: D6(親 stop 非伝播)は
+  効かず、ユーザー停止で止まる。2 本以上並ぶ応答では従来どおり昇格。
+- **`openai.get_all_models` の再取得撤去**: `@cached(ttl=1)` は鍵に Request が入るので
+  別リクエスト間で当たらず、`generate_chat_completion` が毎回 upstream `/models` を叩いていた
+  (子ターン・tool ループ追撃ごとに 8〜18 ms、固まれば AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)。
+  hot path は `app.state.OPENAI_MODELS` から urlIdx を引き、**miss 時だけ**取り直す。
+  更新経路は従来どおり /api/models・/api/models/base・/openai/models(呼べば必ず取り直す —
+  @cached は撤去)、接続設定の更新(/openai/config/update)は OPENAI_MODELS を捨てる。
+  preset の params / system prompt / ACL は completion ごとに DB から読むので即時反映
+  (app.state.MODELS の preset 一覧は従来どおり /api/models で張り替わる — 変更なし)。
+- 担保: `test_execute_tool_calls_concurrency.py`(重なり・順序・隔離・stop・serial・
+  load_skill prelude)/ `test_async_exec.py::test_lone_background_call_runs_inline`
+  (+ 昇格テストは隣に同期 call を並べる形へ)/ `test_openai_compat_chat.py::
+  test_consecutive_completions_do_not_refetch_models`。
