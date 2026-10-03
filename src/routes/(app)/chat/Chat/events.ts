@@ -29,7 +29,12 @@ import {
 } from '$lib/utils/chat-events';
 import type { ChatMessage } from '$lib/types/chat';
 import { clearMessageProgress, setToolProgress } from '$lib/stores/tool-progress.svelte';
-import { clearLiveUsage, setChatUsageBaseline, setLiveUsage } from '$lib/stores/live-usage.svelte';
+import {
+	clearLiveUsage,
+	markLiveUsagePending,
+	setChatUsageBaseline,
+	setLiveUsage
+} from '$lib/stores/live-usage.svelte';
 import { refreshChatChildren, refreshCurrentChatChildren } from '$lib/stores/chat-children.svelte';
 import { applyExecutionDone, refreshExecutions } from '$lib/stores/executions.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
@@ -298,6 +303,12 @@ export class ChatEvents {
 		targetChatId: string
 	): void | Promise<void> => {
 		const { contentChanged, done, error } = applyCompletionData(message, data);
+
+		if (!done && message.done !== true) {
+			// llens(#102): ターン進行中。最初の chat:usage(プリフィル後)が来るまで、
+			// 既知値の無い新規チャットでも floating ゲージを「計測中」で出し続ける
+			markLiveUsagePending(targetChatId, message.id);
+		}
 
 		if (data.usage) {
 			// llens(#102): マージ済み message.usage(ターン累積 completion/duration・

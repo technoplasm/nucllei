@@ -3,29 +3,35 @@
 	// 生成中は live usage(total_tokens が現在占有)、それ以外は直近ターンの確定値
 	// (chat:completion のマージ済み usage / leaf message usage — 次ターンへ持ち越す
 	// carried_tokens が占有、無ければ prompt_tokens。contextUsageFromUsage に揃える)。
-	// どちらも無ければ何も描かない(新規チャット等)。
+	// どちらも無くても、送信済みで最初の chat:usage 待ちなら「計測中」で出す(送信〜完了の
+	// 間ゲージを消さない)。何も無ければ何も描かない(新規チャットの開始画面等)。
 	// ターンごとの所要時間・tok/s はここではなく各メッセージのアクション行に出す。
 	import { chatId, mobile } from '$lib/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
 	import {
-		contextUsageFromUsage,
+		chipUsage,
 		formatTokens,
 		getActiveLiveUsage,
-		getChatUsageBaseline
+		getChatUsageBaseline,
+		isLiveUsagePending
 	} from '$lib/stores/live-usage.svelte';
 
 	// store は chatId スコープ(#107 W-A)— 表示中チャットの分だけを読む。
 	// 別チャット(subagent の子セッション含む)の生成がここに混線しない。
-	const live = $derived(getActiveLiveUsage($chatId));
-	const baseline = $derived(getChatUsageBaseline($chatId));
-
-	const current = $derived(
-		live ? live.total_tokens : (contextUsageFromUsage(baseline)?.tokens ?? null)
+	// 数値と IN / OUT は同じ出所(生成中は live、確定後は baseline)— chipUsage 参照。
+	const usage = $derived(
+		chipUsage(
+			getActiveLiveUsage($chatId),
+			getChatUsageBaseline($chatId),
+			isLiveUsagePending($chatId)
+		)
 	);
-	const contextSize = $derived(live?.context_size ?? baseline?.context_size ?? null);
-	const inTokens = $derived(baseline?.prompt_tokens);
-	const outTokens = $derived(baseline?.completion_tokens);
+
+	const current = $derived(usage?.current ?? null);
+	const contextSize = $derived(usage?.contextSize ?? null);
+	const inTokens = $derived(usage?.inTokens);
+	const outTokens = $derived(usage?.outTokens);
 	const hasInOut = $derived(inTokens !== undefined || outTokens !== undefined);
 
 	// 狭い画面では donut + 数値だけにし、詳細(IN/OUT)は tooltip に畳む
@@ -34,7 +40,7 @@
 	);
 </script>
 
-{#if current !== null}
+{#if usage}
 	<Tooltip
 		content={$mobile ? details : ''}
 		placement="top-end"
@@ -43,7 +49,12 @@
 		<div
 			class="flex items-center gap-1.5 bg-surface-raised border border-line rounded-full px-2.5 py-1 text-xs text-content-muted tabular-nums"
 		>
-			{#if contextSize}
+			{#if current === null}
+				<!-- 送信直後〜最初の chat:usage(プリフィル中)。既知値が無い新規チャットの
+				     1 ターン目だけ — 既知値があればそれを出し続ける -->
+				<span class="i-lucide-loader-circle size-3.5 shrink-0 block animate-spin"></span>
+				<span>…</span>
+			{:else if contextSize}
 				<UsageGauge {current} total={contextSize} class="size-3.5 shrink-0" />
 				<span>{formatTokens(current)}/{formatTokens(contextSize)}</span>
 			{:else}

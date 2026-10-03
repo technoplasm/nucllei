@@ -65,6 +65,14 @@ const entries = $state<Record<string, Record<string, LiveUsage>>>({});
 /** chatId → baseline。 */
 const baselines = $state<Record<string, ChatUsageBaseline>>({});
 
+/**
+ * chatId → messageId → true: ターンは走っているが `chat:usage` がまだ 1 件も来ていない
+ * メッセージ。送信直後〜最初のサンプル(プリフィル中、数秒かかる)の間、新規チャットでは
+ * live も baseline も無くゲージが消えていた — この間もゲージを「計測中」として出すための印。
+ * 最初の setLiveUsage / clearLiveUsage / resetChatUsage で外れる。
+ */
+const pendings = $state<Record<string, Record<string, true>>>({});
+
 const asNumber = (value: unknown): number | undefined =>
 	typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
@@ -77,6 +85,7 @@ export const setLiveUsage = (
 	if (!chatId || !messageId || payload == null) {
 		return;
 	}
+	dropPending(chatId, messageId);
 	const now = Date.now();
 	const completion = asNumber(payload.completion_tokens) ?? 0;
 	const chatEntries = (entries[chatId] ??= {});
@@ -137,11 +146,37 @@ export const getActiveLiveUsage = (chatId: string): LiveUsage | null => {
 	return latest;
 };
 
+const dropPending = (chatId: string, messageId: string) => {
+	const chatPendings = pendings[chatId];
+	if (chatPendings?.[messageId]) {
+		delete chatPendings[messageId];
+		if (Object.keys(chatPendings).length === 0) {
+			delete pendings[chatId];
+		}
+	}
+};
+
+/**
+ * ターン進行中の印(`chat:completion` の done 以外のイベントで呼ぶ)。既に live サンプルが
+ * あるメッセージには付けない — 印は「最初のサンプル待ち」の区間だけを表す。
+ */
+export const markLiveUsagePending = (chatId: string, messageId: string) => {
+	if (!chatId || !messageId || entries[chatId]?.[messageId] || pendings[chatId]?.[messageId]) {
+		return;
+	}
+	(pendings[chatId] ??= {})[messageId] = true;
+};
+
+/** 当該チャットに「最初の chat:usage 待ち」のターンがあるか — floating ゲージ用。 */
+export const isLiveUsagePending = (chatId: string): boolean =>
+	Object.keys(pendings[chatId] ?? {}).length > 0;
+
 /** ターン終了(done)時の破棄(揮発 — 確定値は message.usage / baseline に残る)。 */
 export const clearLiveUsage = (chatId: string, messageId: string) => {
 	if (!chatId || !messageId) {
 		return;
 	}
+	dropPending(chatId, messageId);
 	const chatEntries = entries[chatId];
 	if (chatEntries?.[messageId]) {
 		delete chatEntries[messageId];
@@ -196,6 +231,61 @@ export const getChatUsageBaseline = (chatId: string): ChatUsageBaseline | null =
 export const resetChatUsage = (chatId: string) => {
 	delete entries[chatId];
 	delete baselines[chatId];
+	delete pendings[chatId];
+};
+
+export type ChipUsage = {
+	/** ゲージの数値(占有)。pending でまだ値が無いときは null。 */
+	current: number | null;
+	contextSize: number | null;
+	/** IN / OUT の内訳。数値と同じ出所(生成中は live、確定後は baseline)。 */
+	inTokens: number | undefined;
+	outTokens: number | undefined;
+	/** 送信済み・最初の chat:usage 待ちで、出せる既知値も無い(新規チャットの 1 ターン目)。 */
+	pending: boolean;
+};
+
+/**
+ * floating ゲージ(UsageChip)の表示値。数値の定義は従来どおり — 生成中は live の
+ * total_tokens、それ以外は baseline の contextUsageFromUsage。IN / OUT も数値と同じ
+ * 出所から取る(生成中に前ターンの baseline の IN / OUT が残って数値と食い違っていた)。
+ * live も baseline も無くても pending なら出す(送信〜最初のサンプルの間ゲージを消さない)。
+ * 何も出せなければ null。
+ */
+export const chipUsage = (
+	live: LiveUsage | null,
+	baseline: ChatUsageBaseline | null,
+	pending: boolean
+): ChipUsage | null => {
+	if (live) {
+		return {
+			current: live.total_tokens,
+			contextSize: live.context_size ?? baseline?.context_size ?? null,
+			inTokens: live.prompt_tokens,
+			outTokens: live.completion_tokens,
+			pending: false
+		};
+	}
+	const settled = contextUsageFromUsage(baseline);
+	if (settled) {
+		return {
+			current: settled.tokens,
+			contextSize: baseline?.context_size ?? null,
+			inTokens: baseline?.prompt_tokens,
+			outTokens: baseline?.completion_tokens,
+			pending: false
+		};
+	}
+	if (pending) {
+		return {
+			current: null,
+			contextSize: null,
+			inTokens: undefined,
+			outTokens: undefined,
+			pending: true
+		};
+	}
+	return null;
 };
 
 /**

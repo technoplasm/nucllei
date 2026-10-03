@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+	chipUsage,
 	clearLiveUsage,
 	contextUsageFromUsage,
 	formatTokens,
 	getActiveLiveUsage,
 	getChatUsageBaseline,
 	getLiveUsage,
+	isLiveUsagePending,
+	markLiveUsagePending,
 	resetChatUsage,
 	setChatUsageBaseline,
 	setLiveUsage,
@@ -287,6 +290,129 @@ describe('chat usage baseline', () => {
 		expect(getActiveLiveUsage(C1)).toBeNull();
 		expect(getChatUsageBaseline(C2)?.prompt_tokens).toBe(100);
 		expect(getLiveUsage(C2, 'm9')?.total_tokens).toBe(2);
+	});
+});
+
+describe('UsageChip の表示値(chipUsage)', () => {
+	// UsageChip は chipUsage(getActiveLiveUsage, getChatUsageBaseline, isLiveUsagePending)を描く
+	const chip = (chatId: string) =>
+		chipUsage(getActiveLiveUsage(chatId), getChatUsageBaseline(chatId), isLiveUsagePending(chatId));
+
+	it('生成中の IN / OUT は前ターンの baseline ではなく live(数値と同じ出所)', () => {
+		// 前ターンの確定値(IN 4.5k / OUT 5.2k)が baseline に残っている状態で 2 ターン目が走る
+		setChatUsageBaseline(C1, {
+			prompt_tokens: 4562,
+			completion_tokens: 5300,
+			total_tokens: 9862,
+			carried_tokens: 5638,
+			context_size: 262144
+		});
+		setLiveUsage(C1, 'm2', {
+			prompt_tokens: 5700,
+			completion_tokens: 40,
+			total_tokens: 5740,
+			context_size: 262144
+		});
+
+		expect(chip(C1)).toEqual({
+			current: 5740,
+			contextSize: 262144,
+			inTokens: 5700,
+			outTokens: 40,
+			pending: false
+		});
+
+		// 次のサンプルで IN / OUT も追従する
+		setLiveUsage(C1, 'm2', { prompt_tokens: 5700, completion_tokens: 90, total_tokens: 5790 });
+		expect(chip(C1)?.outTokens).toBe(90);
+		expect(chip(C1)?.current).toBe(5790);
+	});
+
+	it('確定後(live 破棄)は baseline の数値・IN / OUT に戻る(数値定義は従来どおり carried)', () => {
+		setLiveUsage(C1, 'm2', { prompt_tokens: 5700, completion_tokens: 90, total_tokens: 5790 });
+		setChatUsageBaseline(C1, {
+			prompt_tokens: 5700,
+			completion_tokens: 120,
+			total_tokens: 5820,
+			carried_tokens: 5760,
+			context_size: 262144
+		});
+		clearLiveUsage(C1, 'm2');
+
+		expect(chip(C1)).toEqual({
+			current: 5760,
+			contextSize: 262144,
+			inTokens: 5700,
+			outTokens: 120,
+			pending: false
+		});
+	});
+
+	it('新規チャットの 1 ターン目: 送信〜最初の chat:usage の間も消えない(pending)', () => {
+		expect(chip(C1)).toBeNull(); // 開始画面は何も描かない
+
+		markLiveUsagePending(C1, 'm1'); // 最初の snapshot(content_blocks: [])
+		expect(chip(C1)).toEqual({
+			current: null,
+			contextSize: null,
+			inTokens: undefined,
+			outTokens: undefined,
+			pending: true
+		});
+
+		// 最初のサンプルで live に切り替わり、pending は外れる
+		setLiveUsage(C1, 'm1', {
+			prompt_tokens: 4562,
+			completion_tokens: 0,
+			total_tokens: 4562,
+			context_size: 262144
+		});
+		expect(isLiveUsagePending(C1)).toBe(false);
+		expect(chip(C1)?.current).toBe(4562);
+
+		// 後続の snapshot で印が付き直さない(live が既にある)
+		markLiveUsagePending(C1, 'm1');
+		expect(isLiveUsagePending(C1)).toBe(false);
+
+		// done → baseline。送信から完了まで chip が null になる瞬間が無い
+		setChatUsageBaseline(C1, {
+			prompt_tokens: 4562,
+			completion_tokens: 60,
+			total_tokens: 4622,
+			carried_tokens: 4580,
+			context_size: 262144
+		});
+		clearLiveUsage(C1, 'm1');
+		expect(chip(C1)?.current).toBe(4580);
+	});
+
+	it('既知値(baseline)があれば pending 中もそれを出し続ける', () => {
+		setChatUsageBaseline(C1, {
+			prompt_tokens: 4562,
+			completion_tokens: 60,
+			total_tokens: 4622,
+			carried_tokens: 4580,
+			context_size: 262144
+		});
+		markLiveUsagePending(C1, 'm2');
+		expect(chip(C1)).toMatchObject({
+			current: 4580,
+			inTokens: 4562,
+			outTokens: 60,
+			pending: false
+		});
+	});
+
+	it('pending は clearLiveUsage / resetChatUsage で外れ、chat ごとに独立', () => {
+		markLiveUsagePending(C1, 'm1');
+		markLiveUsagePending(C2, 'm9');
+		clearLiveUsage(C1, 'm1');
+		expect(isLiveUsagePending(C1)).toBe(false);
+		expect(chip(C1)).toBeNull();
+		expect(isLiveUsagePending(C2)).toBe(true);
+
+		resetChatUsage(C2);
+		expect(isLiveUsagePending(C2)).toBe(false);
 	});
 });
 
