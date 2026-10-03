@@ -86,6 +86,12 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     total_tokens` を読み、UsageChip の確定値も同関数に揃えた(MessageActions と同じ数字)。
     生成中(`chat:usage` の total)は従来どおり。回帰: `test_streaming_usage.py::TestCarriedTokens`、
     `test_chat_usage.py::test_carried_tokens_*`、`test_response_assembler.py::TestStreamBlocks`。
+    **追補(2026-10-04、UI で再現して確認)**: ken の「2 ターン目で半分に減る」は、1 ターン目の
+    done で live(reasoning 込み)→ carried に切り替わる落差だった(数字は正しい: carried 5692 →
+    次ターン prompt 5714)。表示の定義は据え置き(生成中は reasoning 込み)。直したのは (1) 生成中の
+    IN / OUT が前ターンの確定値だった → live から出す(`chipUsage`)、(2) 新規チャットで最初の usage
+    まで空 → 送信時に `markLiveUsagePending`(send.ts)で「…」。dev で「一瞬消える」ように見えたのは
+    他セッションのファイル編集による vite の全体リロード(アプリの挙動ではない)。
   **tool 結果の画像(`results[].context_images`、`__feed_image__`)は次ターン以降の履歴にも
   再送する**(#142、ken 決定 2026-10-02 — 画像は忘れさせない。画像の多いチャットが高い占有の
   まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE
