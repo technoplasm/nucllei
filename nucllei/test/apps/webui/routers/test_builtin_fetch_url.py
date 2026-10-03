@@ -909,8 +909,8 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch, ext_env):
     )
     assert "redirect (302)" in result and "転送先を辿れなかった" in result
     assert (
-        "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
-        "ユーザーに示すなら [ラベル](" in result
+        "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ、"
+        "ユーザーには [ラベル](" in result
     )
     assert "辿らない" not in result
     assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)

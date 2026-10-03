@@ -714,9 +714,8 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch):
         )
         assert f"redirect ({status})" in result and "転送先を辿れなかった" in result
         assert (
-            "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
-            + LINK_HINT
-            in result
+            "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ、"
+            "ユーザーには [ラベル](" in result
         )
         assert "辿らない" not in result and "リンク切れ" not in result
 

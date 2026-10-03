@@ -82,6 +82,11 @@ NEXT = "次の手: "
 SHOW_AS_LINK = (
     "ユーザーに示すなら [ラベル]({ref}) のリンクにする (ブラウザでは開ける)。"
 )
+# 「分からなければ」に続ける形 (SHOW_AS_LINK をそのまま繋ぐと「分からなければ ユーザーに示すなら…」で
+# 1 文にならない — llens staging 2026-10-04)
+SHOW_AS_LINK_OTHERWISE = (
+    "分からなければ、ユーザーには [ラベル]({ref}) のリンクで示す (ブラウザでは開ける)。"
+)
 # 404 だけはリンクを示しても開けない
 TELL_BROKEN_LINK = "ユーザーにはリンク切れと伝える。"
 
@@ -141,8 +146,8 @@ class RefErrorHints:
     redirect_next: str = (
         "転送先を辿れなかった (転送先が示されていないか、取りに行ける URL ではない)。"
         + NEXT
-        + "転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
-        + SHOW_AS_LINK
+        + "転送先のページを直接指す URL が分かるならそれを渡す。"
+        + SHOW_AS_LINK_OTHERWISE
     )
     # 一般の URL の redirect の転送先がこのサーバ自身 / 回数超過(reason 付き)
     redirect_self: str = (
@@ -160,8 +165,7 @@ class RefErrorHints:
         "ERROR: {ref} のホスト名を解決できない。"
         + NEXT
         + "IP アドレスの URL が分かっているならそれで呼び直す (ホスト名を推測で IP に書き換えない)。"
-        + "分からなければ "
-        + SHOW_AS_LINK
+        + SHOW_AS_LINK_OTHERWISE
     )
     unreachable: str = (
         "ERROR: {ref} のホストに届かない (このサーバからは到達できないか、一時的な障害)。"

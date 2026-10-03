@@ -110,7 +110,7 @@ def test_upstream_status_redirect_reasons_and_plain_status():
     assert _explain(RefError("upstream_status", "x", status=301)) == (
         f"ERROR: {U} は redirect (301) を返した。転送先を辿れなかった (転送先が示されていないか、"
         "取りに行ける URL ではない)。次の手: 転送先のページを直接指す URL が分かるならそれを渡す。"
-        f"分からなければ ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
+        f"分からなければ、ユーザーには [ラベル]({U}) のリンクで示す (ブラウザでは開ける)。"
     )
     assert _explain(
         RefError("upstream_status", "x", status=301), redirect_next="NEXT"
@@ -201,11 +201,14 @@ def test_templates_are_filled_by_replace_not_format():
 # --- 3 本の呼び手の hints を通した文面 (全文で固定) ----------------------------------
 
 _LINK = "ユーザーに示すなら [ラベル]({u}) のリンクにする (ブラウザでは開ける)。"
+_LINK_OTHERWISE = (
+    "分からなければ、ユーザーには [ラベル]({u}) のリンクで示す (ブラウザでは開ける)。"
+)
 _NOT_FOUND = f"ERROR: {U} は存在しない (404 / ファイル無し)。次の手: ユーザーにはリンク切れと伝える。"
 _REDIRECT = (
     f"ERROR: {U} は redirect (302) を返した。転送先を辿れなかった (転送先が示されていないか、"
     "取りに行ける URL ではない)。次の手: 転送先のページを直接指す URL が分かるならそれを渡す。"
-    "分からなければ " + _LINK.format(u=U)
+    + _LINK_OTHERWISE.format(u=U)
 )
 _REDIRECT_SELF = (
     f"ERROR: {U} の redirect (302) の転送先が このサーバ自身 (または同居するサービス) なので"
@@ -222,7 +225,7 @@ _UNREACHABLE = (
 )
 _UNRESOLVABLE = (
     f"ERROR: {U} のホスト名を解決できない。次の手: IP アドレスの URL が分かっているならそれで"
-    "呼び直す (ホスト名を推測で IP に書き換えない)。分からなければ " + _LINK.format(u=U)
+    "呼び直す (ホスト名を推測で IP に書き換えない)。" + _LINK_OTHERWISE.format(u=U)
 )
 _SERVER_SELF = (
     f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
