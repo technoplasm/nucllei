@@ -118,7 +118,7 @@ WRITE_FILE_LIMIT = int(os.getenv("SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 10
 WORKSPACE_ROOT = "/workspace"
 # read-only の参照データの置き場 = **jail 側のパス** (sandbox サービスの RO_MOUNT_ROOT /
 # image_refs の SANDBOX_MOUNT_ROOT と同じ `/ext`。2026-10-03 までは `/mnt`)。nucllei の fs では
-# `image_refs.EXT_DIR` (= DATA_DIR/ext) に同じ物が在る規約で、URL `/ext/{rest}` とも同じ文字列。
+# `image_refs.EXT_DIR` (= EXT_DIR) に同じ物が在る規約で、URL `/ext/{rest}` とも同じ文字列。
 # sandbox の `/files/*` はここを扱えない — write_file / list_workspace は使える手段を
 # 案内して断り、fetch_from_workspace は nucllei 側の同じ置き場 (EXT_DIR) から橋渡しする。
 _RO_MOUNT_ROOT = "/ext"
@@ -864,7 +864,7 @@ class Tools:
 
         行き先・redirect の扱い・失敗理由は resolver 一本 = builtin の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
-        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `DATA_DIR/ext/{rest}` をローカル読み —
+        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `EXT_DIR/{rest}` をローカル読み —
         与えられた host へは接続しない) と、それ以外のスキーム付き http(s) URL
         **どこでも** (一般の URL。登録無しで直接取得。接続先は解決したアドレスに固定、
         redirect は 3 回まで辿る — 一般の Web と同じ扱い。届くかは配備のネットワーク次第、
@@ -873,9 +873,9 @@ class Tools:
         (`unknown_upstream` reason `server_self`)。cookie / 認証ヘッダをどこにも転送しないので、
         リクエスト文脈の無い background 続きターンでも同じに動く。
 
-        - `/ext/{rest}` で nucllei の `DATA_DIR/ext/{rest}` が実在 → コピーせず、sandbox から
+        - `/ext/{rest}` で nucllei の `EXT_DIR/{rest}` が実在 → コピーせず、sandbox から
           見えるパス `/ext/{rest}` (URL と同じ文字列) を返す (`mounted_path_for_url`)。
-          sandbox の `/ext` と nucllei の `DATA_DIR/ext` に同じ物を置くという
+          sandbox の `/ext` と nucllei の `EXT_DIR` に同じ物を置くという
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
         - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は valve `url_max_mb`
@@ -1101,12 +1101,12 @@ class Tools:
         `send_to_workspace(url=)` の「URL の解決先が sandbox から見えるならパスを返す」
         (`mounted_path_for_url`) の逆向き。値の形ではなく解決結果で分かれる:
 
-        - 実体が nucllei 側の `DATA_DIR/ext` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
+        - 実体が nucllei 側の `EXT_DIR` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
           している) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
         - それ以外 → nucllei 自身に bind された同じ置き場から読み (`resolve_path`。境界・上限は
           resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物 (sandbox に
           だけ bind した置き場) は「読めない」になる — 配備は配信したくない物を nucllei 側の
-          `DATA_DIR/ext` に置かないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
+          `EXT_DIR` に置かないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
           「配信範囲の外は添付もしない」は設定ごと無くした)
         """
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く

@@ -69,9 +69,9 @@ BE が行う)。
 
 **URL の解決**(絶対・相対とも `_route_url` 1 箇所):
 
-- path が `/ext/{rest}` なら **`EXT_DIR`(`DATA_DIR/ext`)の `{rest}` をローカル読み**する
-  (`/ext/cage/static/X` ⇔ `data/ext/cage/static/X`。設定は無い — 配備が `EXT_DIR` に置いた
-  (Docker なら `/app/data/ext/<name>` に volume した)ものがそのまま配信される。ken 決定
+- path が `/ext/{rest}` なら **`EXT_DIR`の `{rest}` をローカル読み**する
+  (`/ext/cage/static/X` ⇔ `ext/cage/static/X`。設定は無い — 配備が `EXT_DIR` に置いた
+  (Docker なら `/ext/<name>` に volume した)ものがそのまま配信される。ken 決定
   2026-10-03。同日の朝はコンテナの `/mnt` 固定だったが、nucllei は docker 専用ではなく、
   host 直起動で host の `/mnt` を配信してしまうので `DATA_DIR` の中に改めた)。絶対 URL は
   **host を問わない** — 与えられた host には接続しない。相対 `/ext/{rest}` は「今のサーバの
@@ -151,7 +151,7 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 **sandbox の fs パス**:
 
 - `/ext/...` — sandbox(jail)の read-only の参照用データ(#138。2026-10-03 までは `/mnt`)。
-  これは **sandbox 側のパスの形** で、nucllei は同じ物を `EXT_DIR/...`(`DATA_DIR/ext`)に
+  これは **sandbox 側のパスの形** で、nucllei は同じ物を `EXT_DIR/...`に
   持つ規約なので、そこを読み替えて読む(`local_path_for_sandbox_path`)。resolve() して
   `EXT_DIR` 内でなければ読まない。nucllei 自身の `/ext` や `/mnt` は見ない(host 直起動で
   host の fs を晒さないため)。URL の `/ext/{rest}` と同じ文字列だが、`path=` に来たものは
@@ -218,7 +218,8 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
-from nucllei.env import DATA_DIR, FETCH_MAX_BYTES, SELF_ADDRESSES, SRC_LOG_LEVELS
+from nucllei.env import EXT_DIR as _ENV_EXT_DIR
+from nucllei.env import FETCH_MAX_BYTES, SELF_ADDRESSES, SRC_LOG_LEVELS
 from nucllei.utils.ext_upstreams import (
     MAX_REDIRECTS,
     get_ext_client,
@@ -233,13 +234,14 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # 参照用データ(read-only。#138 / #139)の **root は 2 つ** あって別物(2026-10-03、ken 決定。
 # 同日の朝は nucllei 側も sandbox 側もコンテナの `/mnt` 固定だった):
 #
-# - `EXT_DIR` = `DATA_DIR/ext` — **nucllei 自身がローカルに読む・配信する root**(nucllei の
-#   fs のパス)。ここの `X` がそのまま URL `/ext/X` で配信される。env にしない(配備は DATA_DIR
-#   の中に置くだけ): Docker なら volume を `/app/data/ext/<name>` に bind、host 直起動なら
-#   `data/ext/` にファイルか symlink を置く(root 不要)。固定の `/mnt` を捨てた理由は nucllei が
-#   docker 専用でないこと — host 直起動では `/mnt` に置くのに root が要るし、何より host の
-#   `/mnt`(NFS 等)がログインユーザー全員に黙って配信されてしまう。`DATA_DIR` の中なら
-#   nucllei の持ち物だけ。
+# - `EXT_DIR`(`nucllei.env`。DATA_DIR と同じ作法で、既定はインストールルート直下の `ext/`、
+#   Docker image は Dockerfile が `/ext` にする)— **nucllei 自身がローカルに読む・配信する root**
+#   (nucllei の fs のパス)。ここの `X` がそのまま URL `/ext/X` で配信される。Docker なら volume を
+#   `/ext/<name>` に bind(sandbox と同じ行)、host 直起動なら `ext/` にファイルか symlink を置く
+#   (root 不要)。固定の `/mnt` を捨てた理由は nucllei が docker 専用でないこと — host 直起動では
+#   `/mnt` に置くのに root が要るし、何より host の `/mnt`(NFS 等)がログインユーザー全員に黙って
+#   配信されてしまう。`EXT_DIR` も一度置いたが、書き換わる状態の置き場と読み取り専用の配信物を
+#   同じ木に混ぜない・コンテナ内のパスを sandbox と揃える、で `EXT_DIR` に(ken 2026-10-03 夜)。
 # - `SANDBOX_MOUNT_ROOT` = `/ext` — **sandbox(jail)側の read-only mount の置き場**
 #   (`sandbox/app/main.py` の RO_MOUNT_ROOT)。モデルが `path=` に書く形(`/ext/…`)は
 #   こちらで、nucllei の fs のパスではない(nucllei 自身の `/ext` は見ない)。URL の prefix と
@@ -251,8 +253,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # sandbox の `/ext/<name>` と nucllei の `EXT_DIR/<name>` の両方に置く規約(sandbox 側の
 # bind の有無は nucllei からは確かめられない。実在を見るのは常に `EXT_DIR/X`)。
 # `EXT_DIR` は呼び出し時に読む(import 時に固定しない)ので、テストは module 属性を差し替える。
-EXT_DIR = DATA_DIR / "ext"
-EXT_DIR.mkdir(parents=True, exist_ok=True)
+EXT_DIR = _ENV_EXT_DIR
 SANDBOX_MOUNT_ROOT = "/ext"
 _SANDBOX_MOUNT_PREFIX = SANDBOX_MOUNT_ROOT + "/"
 
@@ -595,14 +596,14 @@ def served_mount(target: Path) -> tuple[Path, Path] | None:
 
     `EXT_DIR` の木は nucllei の持ち物で、配備だけが書く。そこに置かれた **ディレクトリの
     symlink** は配備の意思(Docker の volume と同じ役)なので、辿った先を mount の root として
-    閉じ込める — host 直起動で `data/ext/cage/static → ~/…/cage/data/static` のように
+    閉じ込める — host 直起動で `ext/cage/static → ~/…/cage/data/static` のように
     EXT_DIR の外へ張った symlink を配信するため(2026-10-03)。`EXT_DIR` の実ディレクトリを
     上から辿り、最初に当たったディレクトリ symlink が mount point。それより先(mount の中身 =
     文書側の木)の symlink は mount の外へ出られない(resolve 済みの実体が root の中、という
     従来の判定)。ファイルの symlink は mount にならない(中身の木にある
     `escape.txt → /etc/passwd` と区別がつかないので、常に閉じ込めの対象)— 1 ファイルだけ
     置きたい配備はディレクトリごと張るかコピーする。symlink が無ければ `EXT_DIR` 自身
-    (resolve 済み — Docker では `/app/data` の volume、host では `data/ext` 自体が symlink で
+    (resolve 済み — Docker では `/app/data` の volume、host では `ext/` 自体が symlink で
     ありうる)が root。
     """
     base = Path(EXT_DIR)

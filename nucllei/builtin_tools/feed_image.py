@@ -22,10 +22,10 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   - URL: ブラウザが開くもの。スキーム付きの絶対 URL (既存チャットに残る
     `https://<host>/ext/…`、それ以外の一般の URL — 院内でもインターネットでも。届くかは
     配備のネットワーク次第) と、同一サーバの相対 URL `/ext/{rest}` (配備層の read_doc の
-    図・原本 PDF。nucllei の `DATA_DIR/ext/{rest}` をそのまま配信)。
+    図・原本 PDF。nucllei の `EXT_DIR/{rest}` をそのまま配信)。
   - sandbox の fs パス (`/ext/…` `/workspace/…`)。`/ext/…` は URL と sandbox のパスが同じ
     文字列で同じファイル (唯一の意図した重なり。url に来れば percent-decode して、path に
-    来ればそのまま、どちらも nucllei の `DATA_DIR/ext` を読む)。
+    来ればそのまま、どちらも nucllei の `EXT_DIR` を読む)。
 
 引数 (2026-10-03 ken 決定 — `read_ref` / `ref` への統一 (#141) は不採用。tool 全体で引数名の
 意味を固定する): `url` = URL (絶対、または同一サーバの `/ext/…`・`/api/v1/files/…`)、
@@ -43,7 +43,7 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   読む (send_to_workspace(url=) と同じ扱い)。
 
   参照 → バイトの解決規則は `utils/image_refs.py` が**一箇所で**持つ。URL の上流解決
-  (path が /ext/{rest} なら host を問わず nucllei の `DATA_DIR/ext/{rest}` をローカル読み、
+  (path が /ext/{rest} なら host を問わず nucllei の `EXT_DIR/{rest}` をローカル読み、
   それ以外は一般の URL としてそのホストに直接 — 行き先で絞らず、断るのはこのサーバ自身だけ。
   2026-10-03 ken 決定) も
   traversal 判定もサイズ上限もそこにある — tool 側に allowlist も on/off valve も持たない
@@ -83,6 +83,7 @@ from nucllei.utils.image_refs import (
     resolve_path,
     resolve_url,
     split_page,
+    url_for_mounted_path,
     with_page,
 )
 from nucllei.utils.ref_errors import (
@@ -500,7 +501,15 @@ class Tools:
                 )
             feed(ref)
             if is_path:
-                # sandbox のパスはブラウザに意味が無い — 本文に貼らせない
+                # `/ext/…` で nucllei 側にも実体がある path は同じ文字列が URL (配信されている) —
+                # url= と同じ案内。/workspace や配信されていない /ext (doc 等) はブラウザに
+                # 意味が無いので本文に貼らせない (llens 指摘 2026-10-03)
+                served = await url_for_mounted_path(ref)
+                if served:
+                    return (
+                        f"- {ref} を自分の目に入れた (ユーザーには表示されない。見せるなら本文に"
+                        f" ![…]({served}) を書く — {served} はそのまま配信されている)"
+                    )
                 return (
                     f"- {ref} を自分の目に入れた (ユーザーには表示されない。sandbox のパスは本文に"
                     f"貼れない — {_SHOW_PATH})"

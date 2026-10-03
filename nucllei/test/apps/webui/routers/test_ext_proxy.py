@@ -2,8 +2,8 @@
 
 cage 等が配信する文書内の図・PDF を、同一オリジン相対 URL("/ext/...")としてブラウザが
 session cookie 付きで解決できるようにする静的配信。配信元に設定は無く、nucllei の
-`EXT_DIR` = `DATA_DIR/ext`(`image_refs.EXT_DIR` — テストは tmp_path に差し替える)を
-そのまま配信する: `data/ext/cage/static/X` ⇔ `/ext/cage/static/X`(sandbox も同じ物を
+`EXT_DIR` = `EXT_DIR`(`image_refs.EXT_DIR` — テストは tmp_path に差し替える)を
+そのまま配信する: `ext/cage/static/X` ⇔ `/ext/cage/static/X`(sandbox も同じ物を
 同じ文字列 `/ext/cage/static/X` に見る)。2026-10-03 の朝まではコンテナの `/mnt` 固定だった —
 nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒すので `DATA_DIR` の中に改めた。
 
@@ -91,7 +91,7 @@ class TestExtGate(AbstractPostgresTest):
         assert response.status_code == 200 and response.content == b"nfs"
 
     def test_directory_symlink_in_ext_dir_is_a_mount(self, monkeypatch, tmp_path):
-        """host 直起動の規約: `data/ext/cage/static → <どこか>` のような **ディレクトリの
+        """host 直起動の規約: `ext/cage/static → <どこか>` のような **ディレクトリの
         symlink** は配備が置いた mount(Docker の volume と同じ役)— 先を配信する。ただし
         mount の中身(文書側の木)の symlink は mount の外へ出られず、ファイルの symlink は
         mount にならない(`image_refs.served_mount`)。"""
@@ -168,7 +168,7 @@ class TestExtGate(AbstractPostgresTest):
         assert self._get("/shared/fig.png").status_code == 200
 
     def test_mount_itself_may_be_a_symlink(self, monkeypatch, tmp_path):
-        # host 直起動では data/ext(の下)が symlink でありうる。閉じ込めは resolve 済み同士で比べる
+        # host 直起動では ext/(の下)が symlink でありうる。閉じ込めは resolve 済み同士で比べる
         from nucllei.utils import image_refs
 
         root = self._mount(monkeypatch, tmp_path)

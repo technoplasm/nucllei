@@ -169,6 +169,15 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# `/ext/**` で配信する参照資料の置き場 (read-only、配備者が置く)。DATA_DIR と同じ作法: 既定は
+# インストールルート直下の ext/、Docker image は Dockerfile で `EXT_DIR=/ext` にする (compose には
+# 書かない)。URL `/ext/X` ⇔ `EXT_DIR/X` で、sandbox も同じ物を jail の `/ext` に bind する規約なので
+# コンテナ内のパス・sandbox のパス・URL が同じ文字列になる (ken 決定 2026-10-03 夜)。
+# DATA_DIR の中に置かない理由: DATA_DIR は DB・アップロード・秘密鍵など書き換わる状態の置き場で
+# volume ごとバックアップする対象。読み取り専用の配信物を同じ木に混ぜない。
+EXT_DIR = Path(os.getenv("EXT_DIR", BASE_DIR / "ext")).resolve()
+EXT_DIR.mkdir(parents=True, exist_ok=True)
+
 # 配備先カスタマイズの単一置き場(#84)。規定名のファイルがあれば同梱既定より優先される:
 #   favicon.png(タブ + アプリ内)/ brand.png(起動画面 + auth ロゴ)/
 #   model.png(モデル既定アバター)/ pending.md(承認待ち画面の案内)/
@@ -497,13 +506,12 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 # /ext(参照資料の配信)と url= の一般 URL 取得
 ####################################
 
-# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): `DATA_DIR/ext`
-# (`utils/image_refs.EXT_DIR`。Docker では `/app/data/ext`、host 直起動では `./data/ext`)に
-# 置いたものを、そのままの相対パスで `/ext/<rel>` に read-only 配信する
-# (`data/ext/cage/static/X` ⇔ `/ext/cage/static/X`。ファイルのみ、ディレクトリ一覧は出さない)。
-# 何を配信するかは配備が `DATA_DIR/ext` に何を置くか(volume / symlink)で決める。sandbox は
+# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): `EXT_DIR`(上の DATA/FRONTEND BUILD DIR 節。
+# Docker では `/ext`、host 直起動では `./ext`)に置いたものを、そのままの相対パスで `/ext/<rel>` に
+# read-only 配信する(`ext/cage/static/X` ⇔ `/ext/cage/static/X`。ファイルのみ、ディレクトリ一覧は
+# 出さない)。何を配信するかは配備が `EXT_DIR` に何を置くか(volume / symlink)で決める。sandbox は
 # 同じ物を jail の `/ext` に bind する規約(#138)なので、sandbox のパス `/ext/X` と URL
-# `/ext/X` は同じ文字列で、nucllei の `DATA_DIR/ext/X` に実在すれば同じ実体(utils/image_refs
+# `/ext/X` は同じ文字列で、nucllei の `EXT_DIR/X` に実在すれば同じ実体(utils/image_refs
 # の橋渡し)。nucllei 自身の `/mnt` も `/ext` も見ない — 同日の朝は両側とも `/mnt` 固定だったが、
 # nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒してしまう(ken 指摘 2026-10-03)。
 # 2026-10-03 までの `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信

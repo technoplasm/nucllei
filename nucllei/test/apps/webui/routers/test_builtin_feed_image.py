@@ -113,6 +113,12 @@ def _install(monkeypatch, table, n_pages=5):
     monkeypatch.setattr(mod, "resolve_path", resolver.path)
     monkeypatch.setattr(mod, "detect_kind", _detect_kind)
     monkeypatch.setattr(mod, "pdf_page_count", lambda data: n_pages)
+
+    # 配信されている `/ext/…` だけ URL (同じ文字列) を返す偽物。既定は「配信されていない」
+    async def _served(path):
+        return path if path in getattr(resolver, "served", ()) else None
+
+    monkeypatch.setattr(mod, "url_for_mounted_path", _served)
     return mod, resolver
 
 
@@ -524,11 +530,14 @@ def test_url_of_the_internal_file_endpoint_keeps_the_owner_check(monkeypatch):
 
 
 def test_success_on_a_sandbox_path_does_not_suggest_pasting_it(monkeypatch):
-    """fs (`/ext/…` `/workspace/…`) はブラウザに意味が無い — `![…](/workspace/…)` を勧めない。
-    URL のときだけ本文への再掲を勧める。"""
+    """fs (`/workspace/…`、配信されていない `/ext/…`) はブラウザに意味が無い —
+    `![…](/workspace/…)` を勧めない。URL のときだけ本文への再掲を勧める。"""
     result, fed, _r = _run(monkeypatch, path="/workspace/out/plot.png")
     assert fed == ["/workspace/out/plot.png"] and "](" not in result
     assert "本文に貼れない" in result and SHOW_PATH in result
+    # nucllei 側に無い /ext (doc 等) も同じ (偽物の既定は「配信されていない」)
+    result, fed, _r = _run(monkeypatch, path=FIG_REL)
+    assert "本文に貼れない" in result and "](" not in result
     for ref in (FIG_URL, FIG_REL):
         result, fed, _r = _run(monkeypatch, url=ref)
         assert f"![…]({ref})" in result and "本文に貼れない" not in result, ref
@@ -872,3 +881,21 @@ def test_file_id_owner_check_is_fail_closed(monkeypatch):
         rec = _Rec("f1", owner, "scan.pdf", "application/pdf")
         result, fed, _r = _run_with_files(monkeypatch, {"f1": rec}, file_id="f1")
         assert fed == [] and "アクセス権が無い" in result, owner
+
+
+def test_success_on_a_served_ext_path_suggests_the_same_string_as_url(monkeypatch):
+    """`/ext/…` で nucllei 側にも実体がある path は同じ文字列が URL (配信されている) —
+    url= と同じく本文に `![…](/ext/…)` を書けば見せられる、と案内する (llens 指摘 2026-10-03)。"""
+    mod, resolver = _install(monkeypatch, TABLE)
+    resolver.served = {FIG_REL}
+    fed: list[str] = []
+    result = asyncio.run(
+        mod.Tools().feed_image(
+            path=FIG_REL,
+            __user__={"id": "u1"},
+            __feed_image__=fed.append,
+        )
+    )
+    assert fed == [FIG_REL]
+    assert f"![…]({FIG_REL})" in result and "本文に貼れない" not in result
+    assert "配信されている" in result

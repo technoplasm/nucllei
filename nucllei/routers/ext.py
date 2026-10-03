@@ -8,9 +8,9 @@ PUBLIC_BASE を "/ext/<name>"(相対)にすると文書内の参照が同一オ�
 "https://<自ホスト>/ext/<name>" でも同じに動く。モデルが tool の `url` にそのまま渡す
 ときの解決規則は utils/image_refs.py — 2026-10-03 に「相対 /ext/ は受けない」を覆した)。
 
-配信元に設定は無い(ken 決定 2026-10-03): `image_refs.EXT_DIR`(= `DATA_DIR/ext`。Docker では
-`/app/data/ext`、host 直起動では `./data/ext`)に置いたものを、そのままの相対パスで配信する —
-`/ext/{rel}` ⇔ `EXT_DIR/{rel}`(`data/ext/cage/static/X` ⇔ `/ext/cage/static/X`)。何を配信
+配信元に設定は無い(ken 決定 2026-10-03): `image_refs.EXT_DIR`(= `EXT_DIR`。Docker では
+`/ext`、host 直起動では `./ext`)に置いたものを、そのままの相対パスで配信する —
+`/ext/{rel}` ⇔ `EXT_DIR/{rel}`(`ext/cage/static/X` ⇔ `/ext/cage/static/X`)。何を配信
 するかは配備が `EXT_DIR` に何を置くか(volume / symlink)で決める。sandbox は同じ物を jail の
 `/ext` に bind する規約(#138)なので、モデルが書く sandbox パス `/ext/{rel}` と **同じ文字列で
 同じ実体**。**nucllei 自身の `/mnt` も `/ext` も配信しない** — 同日の朝は `/mnt` 固定だったが、nucllei は docker 専用

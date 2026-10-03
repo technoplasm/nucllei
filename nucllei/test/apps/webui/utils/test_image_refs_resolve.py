@@ -748,7 +748,7 @@ def test_bridge_never_touches_host_mnt_or_ext(monkeypatch, tmp_path):
 def test_bridge_keeps_deployer_names_across_directory_symlink_mounts(
     monkeypatch, tmp_path
 ):
-    """host 直起動の `data/ext/cage/static → <llens>/cage/data/static` のようなディレクトリ
+    """host 直起動の `ext/cage/static → <llens>/cage/data/static` のようなディレクトリ
     symlink は mount(`served_mount`)。橋渡し・resolver が返す `/ext/{rest}` の rest は配備が
     置いた名前(`cage/static/…`)で、symlink の先の実体の名前にはならない。mount の中身の
     symlink は実体に畳む(従来どおり)が、mount の外へは出られない。"""

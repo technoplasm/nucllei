@@ -60,7 +60,7 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 - **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
   原本 raw を `/workspace/imports/`(旧 inputs)に配置
   (`url=` の URL(絶対、または同一サーバの `/ext/…`)も同じ置き場へ — 解決は共有 resolver
-  `utils/image_refs`、nucllei の `DATA_DIR/ext` に実体がある物はコピーせず sandbox のパス
+  `utils/image_refs`、nucllei の `EXT_DIR` に実体がある物はコピーせず sandbox のパス
   `/ext/…`(URL と同じ文字列)を返す。
   **参照の規則**(url = 絶対 URL または同一サーバの `/ext/…`・`/api/v1/files/{id}/content` / path = sandbox の絶対パス(相対は受けない)/
   file_id = 添付・生成物(本文リンクは `/api/v1/files/{id}/content`、tool には file_id で渡す)/
@@ -420,24 +420,24 @@ ken 決定: **「nucllei の `/mnt` に volume したものをそのまま `/ext
 実在すれば、の条件が付く)。改名: `EXT_SELF_ADDRESSES` → `SELF_ADDRESSES`、`EXT_INLINE_MAX_BYTES` →
 `FETCH_MAX_BYTES`。詳細は [[builtin-tools]]「改訂(2026-10-03 夕)」、正本は `README_API.md` §3.8。
 
-## 改訂(2026-10-03 夜)— 配信元は `DATA_DIR/ext`、sandbox の置き場は `/ext`(`/mnt` を捨てる)
+## 改訂(2026-10-03 夜)— 配信元は `EXT_DIR`、sandbox の置き場は `/ext`(`/mnt` を捨てる)
 
 ken 指摘: 上の「nucllei の `/mnt` をそのまま配信」は **host 直起動を忘れていた**。nucllei は
 docker 専用ではなく(dev は host で動く)、固定の `/mnt` だと (a) host 直起動で置くのに root が
 要り、(b) host の `/mnt`(NFS 等)がログイン済み全員に黙って配信される。改めて:
 
-- **nucllei の配信元 = `DATA_DIR/ext`**(`image_refs.EXT_DIR`。image では `/app/data/ext`、host では
-  `./data/ext`。起動時に mkdir)。Docker は volume を `/app/data/ext/<path>` に bind、host 直起動は
-  `data/ext/` にファイルか symlink を置く(dev: `data/ext/cage/static → <llens>/cage/data/static`、
-  [[dev-environment]])。`data/ext` の木に置いた**ディレクトリ symlink は mount 扱い**で先が配信
+- **nucllei の配信元 = `EXT_DIR`**(`image_refs.EXT_DIR`。image では `/ext`、host では
+  `./ext`。起動時に mkdir)。Docker は volume を `/ext/<path>` に bind、host 直起動は
+  `ext/` にファイルか symlink を置く(dev: `ext/cage/static → <llens>/cage/data/static`、
+  [[dev-environment]])。`ext/` の木に置いた**ディレクトリ symlink は mount 扱い**で先が配信
   される(`served_mount`。mount の中身の symlink は外へ出られず、ファイルの symlink は mount に
   ならない)。nucllei 自身の `/mnt` も `/ext` も見ない。
 - **sandbox の read-only 置き場も `/mnt` → `/ext`**(同日 ken 決定): sandbox のパス `/ext/cage/static/X`
-  = URL `/ext/cage/static/X` = nucllei の `data/ext/cage/static/X`。モデルは読み替えを要らない。
+  = URL `/ext/cage/static/X` = nucllei の `ext/cage/static/X`。モデルは読み替えを要らない。
   `/ext/…` は `url=` でも `path=` でも同じファイル(唯一の意図した重なり。url は percent-decode、
   path はそのまま読む — 引数名は読み方だけを決める)。`/mnt/…` は特別扱いしない(他の `/…` と同じ
   `unsupported_form`)。橋渡し `mounted_path_for_url` / `url_for_mounted_path` は文字列としては恒等で、
-  `DATA_DIR/ext/X` の実在確認だけ(日本語名は URL 側が percent-encode)。
+  `EXT_DIR/X` の実在確認だけ(日本語名は URL 側が percent-encode)。
 - 正本は `README_API.md` §3.8。詳細は [[builtin-tools]]「改訂(2026-10-03 夜)」。
 
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`

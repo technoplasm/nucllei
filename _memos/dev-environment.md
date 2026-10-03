@@ -302,19 +302,19 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      LAN 側 IP(`ip -4 addr` の 10.x / 192.168.x)で `http://<LAN IP>:<port>/…` を渡す
      (自分のインターフェースのアドレスは実行時発見で自分自身扱いになる — その場合は
      `SELF_ADDRESSES` ではなく別マシンのサーバを使う)。
-   - **`/ext/**` は nucllei の `DATA_DIR/ext`(dev では `./data/ext`)をそのまま配信する**
+   - **`/ext/**` は nucllei の `EXT_DIR`(dev では `./ext`)をそのまま配信する**
      (2026-10-03、ken 決定。`EXT_UPSTREAMS` / `EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES` は撤去、
      env での差し替えも無い — `image_refs.EXT_DIR` は定数で、起動時に mkdir される)。
      同日の夕に一度「コンテナの `/mnt`」にしたが、nucllei は docker 専用でなく host 直起動の
      dev では root が要るうえ host の `/mnt`(NFS 等)を晒すので、`DATA_DIR` の中に改めた
      (ken 指摘)。docker 無しの dev で cage の図を `/ext/cage/static/X` で見るには、
-     **`data/ext/cage/static` を symlink にする**(root 不要。`data/` は gitignore 済み):
-     `mkdir -p data/ext/cage && ln -s ~/src/github.com/prism-hu/llens/cage/data/static data/ext/cage/static`
-     (2026-10-03 に張ってある)。`data/ext` の木に置いた**ディレクトリの symlink は mount
+     **`ext/cage/static` を symlink にする**(root 不要。`data/` は gitignore 済み):
+     `mkdir -p ext/cage && ln -s ~/src/github.com/prism-hu/llens/cage/data/static ext/cage/static`
+     (2026-10-03 に張ってある)。`ext/` の木に置いた**ディレクトリの symlink は mount
      扱い**で先が配信される(`image_refs.served_mount`。mount の中身の symlink は外へ出られず、
      ファイルの symlink は mount にならない)。sandbox 側は同じ物を jail の **`/ext/cage/static`**
      に bind する規約(#138。2026-10-03 に `/mnt` → `/ext`: sandbox のパスと URL が同じ文字列)。
-     `data/ext` が空なら `/ext/**` は全 404(起動ログ `ext data in … (served at /ext/, sandbox
+     `ext/` が空なら `/ext/**` は全 404(起動ログ `ext data in … (served at /ext/, sandbox
      sees them at /ext/)` / `参照用データは無い` で分かる)。vite dev の proxy に `/ext` が無い件は
      [[builtin-tools]] の該当節。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =

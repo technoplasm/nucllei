@@ -1020,20 +1020,20 @@ llens への申し送り(配備層):
 - 院内 Web(旧 `his=http://…` の http 中継)は `fetch_url(url="http://<原本ホスト>/…")` で直接取る
   (prompt / skill に原本 URL を書く。`/ext/his/…` の形は無い)。
 
-## 改訂(2026-10-03 夜)— 配信元は `DATA_DIR/ext`、sandbox の置き場は `/mnt` → `/ext`
+## 改訂(2026-10-03 夜)— 配信元は `EXT_DIR`、sandbox の置き場は `/mnt` → `/ext`
 
 ken 指摘: 上の「nucllei の `/mnt` をそのまま配信」は host 直起動を忘れていた。nucllei は docker
 専用でなく(dev は host)、固定 `/mnt` だと host 直起動で root が要り、何より host の `/mnt`(NFS 等)
 をログイン済み全員に配信してしまう。同時に ken 決定で sandbox 側の置き場も `/ext` に。
 
 - **root は 2 つ**(`image_refs` 冒頭のコメントが正文):
-  - `EXT_DIR` = `DATA_DIR/ext` — nucllei がローカルに読む・配信する root(image `/app/data/ext`、
-    host `./data/ext`。起動時 mkdir、env 無し)。Docker は volume を `/app/data/ext/<path>` に bind、
-    host は `data/ext/` にファイル / symlink。`data/ext` の木に置いた**ディレクトリ symlink は
+  - `EXT_DIR` = `EXT_DIR` — nucllei がローカルに読む・配信する root(image `/ext`、
+    host `./ext`。起動時 mkdir、DATA_DIR と同じく env。Docker image は /ext)。Docker は volume を `/ext/<path>` に bind、
+    host は `ext/` にファイル / symlink。`ext/` の木に置いた**ディレクトリ symlink は
     mount**(`served_mount`: `EXT_DIR` の実ディレクトリを辿って最初に当たったディレクトリ symlink の
     先を閉じ込めの root にする。mount の中身の symlink は外へ出られない。ファイルの symlink は
     content の `escape.txt → /etc/passwd` と区別がつかないので mount にならない)。これが無いと
-    dev の `data/ext/cage/static → <llens>/…` が「外へ出る symlink」で 404 になる。
+    dev の `ext/cage/static → <llens>/…` が「外へ出る symlink」で 404 になる。
   - `SANDBOX_MOUNT_ROOT` = `/ext` — jail 側の read-only 置き場(sandbox サービス `RO_MOUNT_ROOT`、
     tool 側 `_RO_MOUNT_ROOT`)。モデルが `path=` に書く形で、nucllei の fs ではない。
 - **sandbox のパス = URL = 同じ文字列**: `/ext/cage/static/X` は jail でも、ブラウザでも、`url=` /
@@ -1056,7 +1056,7 @@ ken 指摘: 上の「nucllei の `/mnt` をそのまま配信」は host 直起�
 
 llens への申し送り(配備層。compose の mount 先が変わる):
 
-- nucllei: `- <host>/cage/data/static:/app/data/ext/cage/static:ro`(`/app/data` = DATA_DIR の
+- nucllei: `- <host>/cage/data/static:/ext/cage/static:ro`(`/app/data` = DATA_DIR の
   volume の**中**に bind する。`DATA_DIR` は Dockerfile の `ENV DATA_DIR=/app/data`)。
 - sandbox: `- <host>/cage/data/static:/ext/cage/static:ro`(+ `doc/` 等、sandbox にだけ見せる物も
   `/ext/<name>` に)。**sandbox image を再ビルドして差し替える**(`/mnt` 固定の旧 image は jail に

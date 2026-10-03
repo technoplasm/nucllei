@@ -7,13 +7,13 @@ pydantic stub / importlib のロードは落とし (nucllei の中なので直�
 **実 HTTP は一切叩かない** — ネットワークの境界 `resolve_url` だけを module 属性の差し替えで
 偽装し (`_FakeResolver`。受ける形と許可先の判定は nucllei の `_is_url` / `_route_url` と同じ規則で
 模す。tool はこの判定を resolver に一任する)、ルーティング (`route_of_url`) は**本物**を通す
-(設定は無い — `/ext/{rest}` は nucllei の `DATA_DIR/ext/{rest}`)。HTML は
+(設定は無い — `/ext/{rest}` は nucllei の `EXT_DIR/{rest}`)。HTML は
 `test/fixtures/fetch_url/his_*_excerpt.html` (実サイトの保存 HTML を必要な範囲だけ切り出した
 もの)、PDF は `_pdf_to_text` の差し替えで代用する。
 
 受理規則 (2026-10-03 ken 決定: url = 絶対 URL か同一サーバの相対 URL。引数名だけで解釈) を番兵する:
   - (a) path が /ext/{rest} の URL (相対 `/ext/…` と、host を問わない絶対形。nucllei の
-    `DATA_DIR/ext/{rest}` をローカル読み)、(b) それ以外のスキーム付き http(s) URL = 一般の URL (どこでも
+    `EXT_DIR/{rest}` をローカル読み)、(b) それ以外のスキーム付き http(s) URL = 一般の URL (どこでも
     取りに行く。断るのはこのサーバ自身だけ — 同日の ken 決定)。それ以外の相対 (`/workspace/…`
     `/opt/…` 等) は固定文の ERROR (url が受ける形を添える)
   - 戻り値のリンク一覧は URL 1 本。`/ext/…` のページでも一般の URL でも、そのページ自身の
@@ -211,7 +211,7 @@ class _Loaded:
         self.data = body
         self.content_type = content_type
         self.name = name
-        self.missing = missing  # /ext/{rest} で DATA_DIR/ext に無い物として振る舞う
+        self.missing = missing  # /ext/{rest} で EXT_DIR に無い物として振る舞う
 
 
 class _FakeResolver:
@@ -241,7 +241,7 @@ class _FakeResolver:
             return None, RefError("unsupported_form", "not a URL this server resolves")
         parts = urlsplit(ref)
         if re.match(r"^/ext(?:/.*)?$", parts.path):
-            # DATA_DIR/ext/{rest} のローカル読み (実在は _Env の mounted で模す)
+            # EXT_DIR/{rest} のローカル読み (実在は _Env の mounted で模す)
             if self._loaded is not None and self._loaded.missing:
                 return None, RefError("not_found", "missing")
             return self._loaded, None
@@ -442,7 +442,7 @@ def test_rejects_other_relative_and_non_url_values_with_the_fixed_text(
 
 
 def test_ext_paths_not_mounted_are_dead_links(monkeypatch, ext_env):
-    """DATA_DIR/ext に無い `/ext/…` は resolver の not_found (設定も name の概念も無い —
+    """EXT_DIR に無い `/ext/…` は resolver の not_found (設定も name の概念も無い —
     2026-10-03)。リンク切れとして案内する。"""
     for bad in (f"{ORIGIN}/ext/other/top.aspx", "/ext/other/x", "/ext/", "/ext/CAGE/x"):
         result, resolver = _run(monkeypatch, ext_env, bad, resp=_Loaded(missing=True))

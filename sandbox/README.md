@@ -77,7 +77,7 @@ nsjail jail
 (#138)。**サービス側の設定は無い** — 配備側は compose に volume を足すだけでよい。
 
 置き場の名前が `/ext` なのは (2026-10-03、ken 決定。それまでは `/mnt`)、nucllei が同じ木を
-`DATA_DIR/ext` (image では `/app/data/ext`) から URL `/ext/<rel>` で配信するため — **jail の
+`EXT_DIR` (image では `/ext`) から URL `/ext/<rel>` で配信するため — **jail の
 パスと URL が同じ文字列** になる (`/ext/cage/static/X` は jail から読んでも、ブラウザで開いても、
 nucllei の tool の `url=` / `path=` に渡しても同じ物)。モデルに読み替えをさせない。
 `/mnt` を捨てた理由: docker 固有の慣習で、nucllei 側は host 直起動もあり、host の `/mnt`
@@ -87,7 +87,7 @@ nucllei の tool の `url=` / `path=` に渡しても同じ物)。モデルに�
 services:
   nucllei:
     volumes:
-      - /srv/cage/data/static:/app/data/ext/cage/static:ro  # URL /ext/cage/static/…
+      - /srv/cage/data/static:/ext/cage/static:ro  # URL /ext/cage/static/…
   sandbox:
     volumes:
       - /srv/cage/data/doc:/ext/doc:ro                      # jail からも /ext/doc で見える
@@ -330,13 +330,13 @@ jail に出る (上記「参照用データを jail に見せる」)。
 
 - **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**
   (2026-10-03): `/ext/{rest}` (同一サーバの相対、または絶対 `https://<host>/ext/{rest}` = host 不問) は
-  nucllei の `DATA_DIR/ext/{rest}` そのもの (設定無し — 同日の夕に `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` /
+  nucllei の `EXT_DIR/{rest}` そのもの (設定無し — 同日の夕に `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` /
   `EXT_PUBLIC_BASES` を撤去)、それ以外のスキーム付き http(s) URL は**どこでも**直接取りに行く
   (断るのはこのサーバ自身だけ。cookie は転送しない)。builtin の `fetch_url` / `feed_image` と同じ URL が
   同じように通り、同じ理由で落ちる。上限は valve `url_max_mb` (既定 50 MB)。
-  - **`/ext` 配下にある物はコピーしない**: URL が `/ext/{rest}` で nucllei 側の `DATA_DIR/ext/{rest}` が
+  - **`/ext` 配下にある物はコピーしない**: URL が `/ext/{rest}` で nucllei 側の `EXT_DIR/{rest}` が
     実在すれば、取り込まずに「`/ext/{rest}` として既に sandbox から見えている」とパスを返す (URL と同じ
-    文字列。上限も掛からない)。sandbox の `/ext` と nucllei の `DATA_DIR/ext` に同じ volume を bind する
+    文字列。上限も掛からない)。sandbox の `/ext` と nucllei の `EXT_DIR` に同じ volume を bind する
     規約 (上の「参照用データを jail に見せる (`/ext`)」) に依存する — **nucllei は sandbox 側の bind の
     有無を確かめない**ので、nucllei にだけ bind した配備ではモデルに無いパスを案内することになる。
     必ず両方に bind する。
@@ -354,11 +354,11 @@ jail に出る (上記「参照用データを jail に見せる」)。
   | `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/ext/…` (URL と同じ文字列) を返す | `/workspace/imports/` にコピー |
   | `fetch_from_workspace(path)` | sandbox のパス → 利用者に見せられる URL / file_id | 添付せず `/ext/{name}/…` を返す | Files に登録して添付 (file_id) |
 
-  - `/ext/…` が nucllei 側の `DATA_DIR/ext` にも実在すれば (= `/ext` ゲートが配信している)、その配信 URL
+  - `/ext/…` が nucllei 側の `EXT_DIR` にも実在すれば (= `/ext` ゲートが配信している)、その配信 URL
     (相対 `/ext/…`、パス部は percent-encode 済み — ASCII 名なら path と同じ文字列) を返す。Files には何も作らない。
-    **nucllei の `DATA_DIR/ext` に見えている物は全部 URL になる** — 「利用者に配信する物」(`static/`) と
+    **nucllei の `EXT_DIR` に見えている物は全部 URL になる** — 「利用者に配信する物」(`static/`) と
     「sandbox で読むだけの物」(`doc/`) を分けたい配備は、nucllei 側には `static/` だけを
-    (`…/cage/static:/app/data/ext/cage/static:ro` のように深く) bind し、`doc/` は sandbox にだけ bind する
+    (`…/cage/static:/ext/cage/static:ro` のように深く) bind し、`doc/` は sandbox にだけ bind する
     (2026-10-03 夕に `EXT_FILE_SCOPES` と「利用者に配信しない範囲にある」の断りは撤去。
     nucllei の `README_API.md` §3.8)。
   - nucllei 側に無い `/ext/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の

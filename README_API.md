@@ -159,7 +159,7 @@ is read per request (edits apply without a restart):
 | Var                                                                                                                         | Kind | Default                                  | Effect                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `ENV`                                                                                                                       | env  | `dev` (`prod` in Docker)                 | dev exposes Swagger UI at `/docs`                                                   |
-| `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state; `$DATA_DIR/ext` is the `/ext/**` served root (§3.8)   |
+| `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state; `$EXT_DIR` is the `/ext/**` served root (§3.8)        |
 | `DATABASE_URL`                                                                                                              | env  | `sqlite:///$DATA_DIR/webui.db`           | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten)                   |
 | `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `0` (NullPool) / `0` / `30` / `3600` | Postgres tuning                                                                     |
 | `UVICORN_WORKERS`                                                                                                           | env  | `1`                                      | worker count for `serve` — keep at 1 (multi-worker unsupported)                     |
@@ -249,7 +249,7 @@ separate reasoning block.
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                 |
 | `SELF_ADDRESSES`                                               | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03 |
 | `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)    | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03  |
-| (none for `/ext`)                                              | —    | —                     | `/ext/**` serves `$DATA_DIR/ext` as is (§3.8); there is no `EXT_*` serving configuration since 2026-10-03                                                        |
+| (none for `/ext`)                                              | —    | —                     | `/ext/**` serves `$EXT_DIR` as is (§3.8); there is no `EXT_*` serving configuration since 2026-10-03                                                             |
 
 ### 3.7 Attachments / files / storage
 
@@ -267,12 +267,12 @@ separate reasoning block.
 ### 3.8 External reference gate (`/ext`)
 
 `GET /ext/**` is a session-authenticated, read-only gate that serves **whatever
-is under `$DATA_DIR/ext`** (`image_refs.EXT_DIR`; `/app/data/ext` in the image,
-`./data/ext` on a host install) at the same relative path:
-`data/ext/cage/static/X` ↔ `/ext/cage/static/X`. There is no configuration: the
+is under `$EXT_DIR`** (`image_refs.EXT_DIR`; `/ext` in the image,
+`./ext` on a host install) at the same relative path:
+`ext/cage/static/X` ↔ `/ext/cage/static/X`. There is no configuration: the
 deployment decides what is served by what it puts there — a Docker deployment
-binds volumes at `/app/data/ext/<path>`, a host install puts files or symlinks
-under `data/ext/`. **The sandbox sees the same tree at `/ext`** (its read-only
+binds volumes at `/ext/<path>`, a host install puts files or symlinks
+under `ext/`. **The sandbox sees the same tree at `/ext`** (its read-only
 mount root, #138), so a sandbox path and a `/ext` URL are **the same string**
 naming the same file (`/ext/cage/static/X` in the jail, in the browser, and in
 a tool's `url=` or `path=`). Point the
@@ -284,9 +284,9 @@ as `url` unchanged (see the reference rules below).
 
 - Files only: `FileResponse` (Range / etag / last-modified). The requested path
   is resolved and confined to its **mount** (`image_refs.served_mount`): the
-  resolved `$DATA_DIR/ext` itself, or — walking real directories down from it —
+  resolved `$EXT_DIR` itself, or — walking real directories down from it —
   the first **directory symlink** the deployment placed in that tree
-  (`data/ext/cage/static → ~/…/cage/data/static`), which is served as a mount
+  (`ext/cage/static → ~/…/cage/data/static`), which is served as a mount
   the way a Docker volume is. Symlinks _inside_ mounted content cannot leave
   their mount (→ 404), and a symlink to a single file is never a mount (it is
   indistinguishable from `escape.txt → /etc/passwd` inside content; link a
@@ -295,19 +295,19 @@ as `url` unchanged (see the reference rules below).
   (`application/octet-stream` when unknown). `..`/backslash/control-char paths
   → 400; active types (HTML/SVG/JS) are forced to
   `Content-Disposition: attachment` + `nosniff`. There is no per-user access
-  check — what is placed under `$DATA_DIR/ext` is what is exposed.
-- The startup log lists the top-level entries of `$DATA_DIR/ext` as "served at
+  check — what is placed under `$EXT_DIR` is what is exposed.
+- The startup log lists the top-level entries of `$EXT_DIR` as "served at
   /ext/, sandbox sees them at /ext/".
-- Development without Docker: put a symlink under `data/ext/` (e.g.
-  `data/ext/cage/static → <llens>/cage/data/static`; `data/` is gitignored, no
+- Development without Docker: put a symlink under `ext/` (e.g.
+  `ext/cage/static → <llens>/cage/data/static`; `data/` is gitignored, no
   root needed) — there is no env override of the served root.
 
-> 2026-10-03 (ken): nucllei serves `$DATA_DIR/ext`; the sandbox sees the same
+> 2026-10-03 (ken): nucllei serves `$EXT_DIR`; the sandbox sees the same
 > tree at `/ext`; `/mnt` abandoned. Earlier that day both sides were fixed to
 > the container's `/mnt` — wrong for host installs: nucllei is not Docker-only
 > (dev runs on the host), populating `/mnt` needs root, and a host install
 > would silently serve whatever the host has under `/mnt` (NFS mounts etc.) to
-> every logged-in user. `$DATA_DIR/ext` is nucllei's own directory. The
+> every logged-in user. `$EXT_DIR` is nucllei's own directory. The
 > sandbox mount root moved from `/mnt` to `/ext` at the same time so that the
 > sandbox path and the URL are one string and the model never rewrites one into
 > the other (the one deliberate overlap between `url=` and `path=`; the
@@ -341,7 +341,7 @@ reference is interpreted; the code-side definition is the module docstring of
 - **`path`** — an **absolute** path on the sandbox filesystem (`/workspace/…`,
   `/ext/…`). Entry point: `resolve_path(path, user_id, *, max_bytes=None)`.
   `/ext/{rest}` is accepted by both `url` and `path` and names the same file
-  (`$DATA_DIR/ext/{rest}` on nucllei's side); `url` percent-decodes `rest`,
+  (`$EXT_DIR/{rest}` on nucllei's side); `url` percent-decodes `rest`,
   `path` reads it as given.
   Relative paths are not accepted (since 2026-10-03; they used to be resolved
   against `/workspace`, which turned `path="https://x/y.html"` into
@@ -404,15 +404,15 @@ according to the argument's name, not `resolve_ref`.
 
 | Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http://` / `https://`                           | absolute URL                                      | path `/ext/{rest}` → the local file `$DATA_DIR/ext/{rest}`, **whatever the host** (the host is never connected to). Otherwise it is a **general URL** (below): fetched directly from its host, pinned to the resolved address — **anywhere**, intranet or internet; the only refused destination is this server itself (`unknown_upstream` / `server_self`)             |
-| `/ext/`                                          | same-server URL (= the sandbox's read-only mount) | `/ext/{rest}` → the same local file `$DATA_DIR/ext/{rest}` as the absolute form. Missing, a directory (`/ext/` itself included) or a symlink leaving its mount → `not_found`. A stored `/ext/…` is read as a URL; given as `path` it is the sandbox's `/ext/{rest}` and read locally from the same `$DATA_DIR/ext/{rest}` without percent-decoding (#138)               |
+| `http://` / `https://`                           | absolute URL                                      | path `/ext/{rest}` → the local file `$EXT_DIR/{rest}`, **whatever the host** (the host is never connected to). Otherwise it is a **general URL** (below): fetched directly from its host, pinned to the resolved address — **anywhere**, intranet or internet; the only refused destination is this server itself (`unknown_upstream` / `server_self`)                  |
+| `/ext/`                                          | same-server URL (= the sandbox's read-only mount) | `/ext/{rest}` → the same local file `$EXT_DIR/{rest}` as the absolute form. Missing, a directory (`/ext/` itself included) or a symlink leaving its mount → `not_found`. A stored `/ext/…` is read as a URL; given as `path` it is the sandbox's `/ext/{rest}` and read locally from the same `$EXT_DIR/{rest}` without percent-decoding (#138)                         |
 | `/workspace/`                                    | sandbox filesystem                                | `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                                                                                                               |
 | `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form` |
 | a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                             |
 | anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                      |
 
 **Directories.** `/ext/` and `/ext/{dir}/` are well-formed URLs (`rel` is the
-path under `$DATA_DIR/ext`, possibly empty) but a directory is never served: `not_found`
+path under `$EXT_DIR`, possibly empty) but a directory is never served: `not_found`
 from the resolver, 404 from the gate, no listing.
 
 **General URLs (2026-10-03).** Registered backends are not the only web a
@@ -478,7 +478,7 @@ must be declared there (default empty; the startup log lists both sets as
 - **Redirects are followed, at most 3 times.** The `Location` (absolute or
   relative) is resolved as a URL by the same rules: a general URL → followed
   (pinned again, same self check); a `/ext/{rest}` URL → the local file under
-  `$DATA_DIR/ext` (no further redirect); a `Location` pointing at this server itself →
+  `$EXT_DIR` (no further redirect); a `Location` pointing at this server itself →
   `upstream_status` with the `3xx` status and `reason=redirect_self`; a
   `Location` that is not a URL this server resolves (non-http(s) scheme,
   control characters) → `upstream_status` with the `3xx` status and no reason
@@ -504,7 +504,7 @@ fragment, so every tool treats `…/content#section` alike.
 `route_of_url(url) -> (UrlRoute | None, RefError | None)` runs the same single
 routing step as `resolve_url` and returns it: `UrlRoute(rel, query, origin,
 kind)` plus the properties `relative`, `general` and `page_url`. `kind` is
-`"ext"` (`/ext/{rest}`; `rel` = the path under `$DATA_DIR/ext` as written in the URL,
+`"ext"` (`/ext/{rest}`; `rel` = the path under `$EXT_DIR` as written in the URL,
 i.e. still percent-encoded, no leading `/`, `""` for `/ext/` itself),
 `"general"` (`rel` = the URL path without its leading `/`, `""` for
 `http://h/`) or `"file"` (this server's `/api/v1/files/{id}/content`, relative
@@ -532,19 +532,19 @@ more (until 2026-10-03 `UrlRoute` carried `name`, `public_base` and
 
 **Bridging a URL and a sandbox path.** The same file has the same name on both
 sides since 2026-10-03: URL `/ext/cage/static/X` = sandbox path
-`/ext/cage/static/X` = nucllei's local `$DATA_DIR/ext/cage/static/X`. The model
+`/ext/cage/static/X` = nucllei's local `$EXT_DIR/cage/static/X`. The model
 never has to rewrite anything; what the tool still decides, based on **what the
 reference resolves to** (whether the file exists on nucllei's side), is whether
 to copy / attach or to hand the name back:
 
-| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                                       |
-| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/{rest}` (same string, percent-decoded) when `/ext/{rest}` names a regular file that exists under nucllei's `$DATA_DIR/ext`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                                   |
-| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL (same string, percent-encoded) when `$DATA_DIR/ext/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `$DATA_DIR/ext` and attached — a path that is not there is simply unreadable |
+| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                             |
+| ------------------------------------------ | ---------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/{rest}` (same string, percent-decoded) when `/ext/{rest}` names a regular file that exists under nucllei's `$EXT_DIR`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                              |
+| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL (same string, percent-encoded) when `$EXT_DIR/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `$EXT_DIR` and attached — a path that is not there is simply unreadable |
 
-Both are an existence check on nucllei's own filesystem (`$DATA_DIR/ext`), after
+Both are an existence check on nucllei's own filesystem (`$EXT_DIR`), after
 resolving symlinks and confining to the mount (`served_mount`); the names the
-deployment placed in `$DATA_DIR/ext` (including directory-symlink mounts) are
+deployment placed in `$EXT_DIR` (including directory-symlink mounts) are
 kept in the result, symlinks inside a mount are folded to the real file.
 The path part of the returned URL is percent-encoded, and the URL round-trips
 through `resolve_url` / the `/ext` gate to the same file; because of the
@@ -555,7 +555,7 @@ URLs can be shown to the user (`/ext/…` or `/api/v1/files/{id}/content`); a
 sandbox path means nothing to a browser. Whether the sandbox really binds the
 same volume cannot be verified from nucllei — it is the deployment convention
 (#138). A deployment withholds a file from users by **not putting it under
-nucllei's `$DATA_DIR/ext`** (the sandbox may still see it at its own `/ext`): until
+nucllei's `$EXT_DIR`** (the sandbox may still see it at its own `/ext`): until
 2026-10-03 there was a serving scope (`EXT_FILE_SCOPES`) and a
 `mounted_path_withheld` refusal 「利用者に配信しない範囲にある」 — both gone.
 
@@ -611,14 +611,14 @@ case):
 | `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/ext/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`, `/mnt/…`)                |                                           |
 | `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                |                                           |
 | `unknown_upstream`      | a general URL whose host is this server itself (`reason=server_self`). Until 2026-10-03 it also covered unknown `/ext/{name}/` names (`unknown_name`) and malformed `/ext/` (`not_ext_form`); those reasons are gone — a `/ext/…` that is not mounted is `not_found` | `reason` (see above)                      |
-| `not_found`             | `/ext/{rest}` (URL or sandbox path): missing, a directory (incl. `/ext/` itself), or resolves outside its mount under `$DATA_DIR/ext` (symlink escape); general URL `404`; sandbox `/files/read` `404`                                                               | `status=404` for http                     |
+| `not_found`             | `/ext/{rest}` (URL or sandbox path): missing, a directory (incl. `/ext/` itself), or resolves outside its mount under `$EXT_DIR` (symlink escape); general URL `404`; sandbox `/files/read` `404`                                                                    | `status=404` for http                     |
 | `too_large`             | over the size cap (`max_bytes`, default `FETCH_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                  | `size`, `limit`, `size_exact` (see below) |
 | `upstream_status`       | a general URL answered non-2xx other than 404 — including `3xx` redirects that could not be followed (see `reason`)                                                                                                                                                  | `status`, `reason`                        |
 | `upstream_unreachable`  | general URL connection failure, timeout, `InvalidURL`, or a host name that does not resolve (`reason=unresolvable`)                                                                                                                                                  | `reason`                                  |
 | `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                             | `status` when the sandbox answered        |
 
 `too_large.size_exact` says whether `size` is the real size or only a lower
-bound: `True` when it comes from `stat` (`$DATA_DIR/ext`, sandbox `413`),
+bound: `True` when it comes from `stat` (`$EXT_DIR`, sandbox `413`),
 a fully read workspace file, or an http `Content-Length`; `False` when the http
 stream had no `Content-Length` and was aborted just past `limit` — `size` is
 then the bytes received so far (slightly above `limit`) and the real size is
@@ -631,9 +631,9 @@ size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 | `SELF_ADDRESSES`  | env  | empty              | comma-separated IP addresses (no CIDR) added to the self-deny set of general URL fetches — the host's outward-facing IPs a container cannot discover. Was `EXT_SELF_ADDRESSES` until 2026-10-03       |
 | `FETCH_MAX_BYTES` | env  | `26214400` (25 MB) | default size cap per reference when the resolver reads a URL or a sandbox path (pre-send inlining of context images, and any tool that does not pass its own `max_bytes`). Was `EXT_INLINE_MAX_BYTES` |
 
-There is no variable for `/ext`: it serves `$DATA_DIR/ext`. `builtin_fetch_url` and
+There is no variable for `/ext`: it serves `$EXT_DIR`. `builtin_fetch_url` and
 `builtin_feed_image` (§5.7) are always registered: since 2026-10-03 the `url=`
-argument fetches any `http(s)://` URL (see "General URLs"), so an empty `$DATA_DIR/ext`
+argument fetches any `http(s)://` URL (see "General URLs"), so an empty `$EXT_DIR`
 does not make the tool always fail (until that day `builtin_fetch_url` was
 gated on any of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / the removed
 `EXT_INTRANET_CIDRS`).
@@ -1192,7 +1192,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     list, for browsing web that no document corpus holds. `url` is
     resolved by the shared resolver (`resolve_url`, §3.8) and nothing else —
     the tool has no allowlist and no on/off valve of its own; it accepts
-    `/ext/{rest}` (relative or on any host — nucllei's own `$DATA_DIR/ext/{rest}`),
+    `/ext/{rest}` (relative or on any host — nucllei's own `$EXT_DIR/{rest}`),
     **any other scheme-qualified `http(s)://` URL** (fetched directly —
     intranet or internet, whatever the deployment's network reaches; the only
     refused destination is this server itself, §3.8 "General URLs"), and this
@@ -1263,13 +1263,13 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `fetch_from_workspace(path)` turns a sandbox file into something the user
     can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
     the sandbox, registered as a File and attached to the chat (`file_id`
-    returned). An `/ext/…` file that exists under nucllei's own `$DATA_DIR/ext`
+    returned). An `/ext/…` file that exists under nucllei's own `$EXT_DIR`
     (= the `/ext` gate serves it) is **not copied or attached** — the tool
     answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
     same string as the path for ASCII names, percent-encoded otherwise) and
     tells the model to put that URL in the message (image syntax for images, a
     link otherwise). Any other `/ext/…` path is read by the server from its own
-    `$DATA_DIR/ext` (`resolve_path`: confined to the mount, capped at
+    `$EXT_DIR` (`resolve_path`: confined to the mount, capped at
     `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
     means a path the sandbox sees but nucllei does not is reported as
     unreadable (the deployment withholds by not mounting; §3.8). Failures are
@@ -1287,7 +1287,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `http(s)://…` or same-server `/ext/{rest}` — resolved by the shared
     resolver (`resolve_url`), so exactly the URLs `feed_image` / `fetch_url`
     above can read:
-    `/ext/{rest}` (relative or on any host — nucllei's own `$DATA_DIR/ext/{rest}`,
+    `/ext/{rest}` (relative or on any host — nucllei's own `$EXT_DIR/{rest}`,
     nothing fetched); and any other scheme-qualified `http(s)://` URL (§3.8 "General
     URLs"), fetched directly from its host and pinned to the resolved address,
     redirects followed up to 3 times — wherever the deployment's network
@@ -1305,7 +1305,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     upstreams or the server itself), each with a fixed sentence that never
     inspects the value.
     Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
-    When the URL is `/ext/{rest}` and **`$DATA_DIR/ext/{rest}` exists on
+    When the URL is `/ext/{rest}` and **`$EXT_DIR/{rest}` exists on
     nucllei's side** (`image_refs.mounted_path_for_url`), nothing is copied: the
     tool answers with the sandbox path `/ext/{rest}` (the same string as the
     URL), because the sandbox binds the same tree at its `/ext` (#138) — this

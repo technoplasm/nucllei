@@ -266,7 +266,7 @@ def feed_image(file_id: str) -> None:
     utils/image_refs.py、#97 / #139)もそのまま積める。sink は無検証の設計 —
     検証・実体化(base64、PDF はページ画像化)は送信直前 inline
     (utils/file_images.py)に一任する。file_id はその段で has_read_access_to_file が
-    呼び出しユーザーの read 権を確認し、URL / fs 参照は image_refs が境界(`DATA_DIR/ext` =
+    呼び出しユーザーの read 権を確認し、URL / fs 参照は image_refs が境界(`EXT_DIR` =
     `/ext/` の配信元 / 呼び出しユーザーの workspace)を fail closed で持つ(この push 自体は
     認可しない)。tool 実行文脈外(sink 未設定)では no-op。
 

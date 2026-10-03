@@ -9,7 +9,7 @@ utils/image_refs.py で実体化して data URL にする(File は発行しな�
 先頭で機械的に分かれる):
 
 - スキーム付き URL: path が "/ext/{rest}" なら host を問わず nucllei の `EXT_DIR/{rest}`
-  (= `DATA_DIR/ext/{rest}`)をローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL
+  (= `EXT_DIR/{rest}`)をローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL
   としてそのホストに直接(断るのはこのサーバ自身だけ)
 - "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `EXT_DIR` で解決する
   (2026-10-03 — #139 は「相対 /ext/ は受けない」だったのを覆した)。sandbox の RO マウント
