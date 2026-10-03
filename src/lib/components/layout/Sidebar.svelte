@@ -84,6 +84,11 @@
 	// チャットが表示され続ける。Navbar の new-chat-button(= Chat の initNewChat)まで押す
 	const newChatHandler = async (url = '/') => {
 		selectedChatId = null;
+		// 検索は「過去を探す」、新しいチャットは「次を始める」— ここで文脈が切り替わるので
+		// 検索語と絞り込みを消す (結果を開いただけでは消さない。ken 2026-10-03)
+		searchInput = '';
+		searchText = '';
+		searchResults = null;
 		await goto(url);
 		const newChatButton = document.getElementById('new-chat-button');
 		setTimeout(() => {
@@ -97,6 +102,7 @@
 	// llens(#121): サイドバーのチャット検索。searchText が空でない間は通常一覧の代わりに
 	// サーバ検索(タイトル + 本文の部分一致、`GET /chats/search`)の結果を出す。
 	// ピン留め / 時期見出し / 無限スクロールは通常一覧だけのもので、結果一覧には出さない。
+	let searchInput = $state(''); // 入力欄の値 (ChatSearch に bind — 新しいチャットで空にする)
 	let searchText = $state('');
 	let searchResults: { id: string; title: string }[] | null = $state(null);
 	let searchSeq = 0;
@@ -510,7 +516,12 @@
 
 					<!-- llens(#121): チャット検索(一覧の直上)。入力中は下の一覧が検索結果に切り替わる -->
 					<div class="mt-3">
-						<ChatSearch active={!!searchText} onSearch={searchHandler} onAsk={askInChatHandler} />
+						<ChatSearch
+							bind:value={searchInput}
+							active={!!searchText}
+							onSearch={searchHandler}
+							onAsk={askInChatHandler}
+						/>
 					</div>
 
 					{#if searchText}
