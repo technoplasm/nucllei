@@ -1,6 +1,6 @@
 """参照(URL / sandbox fs パス)のオンデマンド解決の回帰テスト(#97 / #139 / 2026-10-03)。
 
-feed_image が "https://…/ext/..." "/ext/..." "/mnt/..." "/workspace/..." の参照を sink に積むと
+feed_image が "https://…/ext/..." "/ext/..." "/workspace/..." の参照を sink に積むと
 context_images に文字列のまま永続し、送信直前の inline_internal_image_urls が
 utils/image_refs.py で実体化して data URL にする(File は発行しない — Files に
 入るのはユーザーアップロードと sandbox 成果物のみ)。
@@ -8,14 +8,15 @@ utils/image_refs.py で実体化して data URL にする(File は発行しな�
 保存済みの参照文字列(image_url の url)の振り分け(image_refs の module docstring の表。
 先頭で機械的に分かれる):
 
-- スキーム付き URL: path が "/ext/{rest}" なら host を問わず nucllei の `/mnt/{rest}` を
-  ローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL としてそのホストに直接
-  (断るのはこのサーバ自身だけ)
-- "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `/mnt` で解決する
-  (2026-10-03 — #139 は「相対 /ext/ は受けない」だったのを覆した)
-- "/mnt/..." "/workspace/..." = sandbox の fs
-- per-user のアクセス検査はしない(公開範囲は配備が `/mnt` に mount した物 / RO
-  マウント、workspace は呼び出しユーザーのもの、が境界)
+- スキーム付き URL: path が "/ext/{rest}" なら host を問わず nucllei の `EXT_DIR/{rest}`
+  (= `DATA_DIR/ext/{rest}`)をローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL
+  としてそのホストに直接(断るのはこのサーバ自身だけ)
+- "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `EXT_DIR` で解決する
+  (2026-10-03 — #139 は「相対 /ext/ は受けない」だったのを覆した)。sandbox の RO マウント
+  `/ext/{rest}` と同じ文字列なので、保存済み参照としては URL として読めば同じ物に当たる
+- "/workspace/..." = sandbox の fs(呼び出しユーザーの workspace)
+- per-user のアクセス検査はしない(公開範囲は配備が `EXT_DIR` に置いた物、workspace は
+  呼び出しユーザーのもの、が境界)
 - 画像でも PDF でもない・FETCH_MAX_BYTES 超過・上流不達・redirect・root 外・
   不在はすべて失敗 → 既存の "(image unavailable)" 置換に合流(fail closed)
 - PDF は "#page=N"(既定 1)のページを PNG 化する(URL でも同じ)
@@ -86,10 +87,10 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         )
 
     def _mount(self, monkeypatch, tmp_path):
-        """tmp の `/mnt`(= /ext の配信元)。"""
+        """tmp の `EXT_DIR`(= /ext の配信元)。"""
         from nucllei.utils import image_refs
 
-        root = tmp_path / "mnt"
+        root = tmp_path / "data" / "ext"
         (root / "cage" / "figs").mkdir(parents=True)
         (root / "cage" / "figs" / "a.png").write_bytes(PNG_BYTES)
         (root / "cage" / "figs" / "図").mkdir()
@@ -100,7 +101,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         outside = tmp_path / "outside.png"
         outside.write_bytes(PNG_BYTES)
         (root / "cage" / "figs" / "escape.png").symlink_to(outside)
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+        monkeypatch.setattr(image_refs, "EXT_DIR", root)
         return root
 
     def _self(self, monkeypatch):
@@ -173,7 +174,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ), url
 
     def test_mixed_file_and_ext_entries(self, monkeypatch, tmp_path):
-        # file_id 経路(認可検査あり)と "/ext/..." 経路(/mnt)の混在
+        # file_id 経路(認可検査あり)と "/ext/..." 経路(EXT_DIR)の混在
         self._mount(monkeypatch, tmp_path)
         messages = self._messages("/api/v1/files/f-img/content")
         messages[0]["content"].append(
@@ -201,7 +202,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ), url
 
     def test_ext_url_any_host_resolved(self, monkeypatch, tmp_path):
-        # path が /ext/{rest} なら host を問わず /mnt で解決する(与えられた host には接続しない)。
+        # path が /ext/{rest} なら host を問わず EXT_DIR で解決する(与えられた host には接続しない)。
         # 大文字 scheme・port 付きでも同じ
         self._mount(monkeypatch, tmp_path)
         seen = []
@@ -255,7 +256,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
     def test_nothing_mounted_unavailable(self, monkeypatch, tmp_path):
         from nucllei.utils import image_refs
 
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "nowhere")
+        monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "nowhere")
         messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
@@ -273,7 +274,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_closed_forms_unavailable(self, monkeypatch, tmp_path):
-        # 不在・ディレクトリ・/mnt の外へ出る symlink・traversal(encode 済み / NUL)・
+        # 不在・ディレクトリ・EXT_DIR の外へ出る symlink・traversal(encode 済み / NUL)・
         # 制御文字・name の取れない形・"/ext/" でない "/" 始まり・protocol-relative
         self._mount(monkeypatch, tmp_path)
         seen = []
@@ -386,10 +387,11 @@ class TestFileImagesExtInline(AbstractPostgresTest):
 
 
 class TestFileImagesFsRefs(AbstractPostgresTest):
-    """fs 参照("/mnt/..." / "/workspace/...")の解決(#139)。`/ext/...` も同じ `/mnt`。
+    """fs 参照("/ext/..." / "/workspace/...")の解決(#139)。`/ext/...` は sandbox の RO
+    マウントと URL が同じ文字列で、nucllei は `EXT_DIR` を読む(2026-10-03 までは `/mnt`)。
 
-    RO マウントの root は module 属性 `image_refs.RO_MOUNT_ROOT`(呼び出し時に読む)
-    なので tmp_path に差し替える。sandbox は `sandbox_post` を差し替えて切り離す。
+    `EXT_DIR` は module 属性 `image_refs.EXT_DIR`(呼び出し時に読む)なので tmp_path に
+    差し替える。sandbox は `sandbox_post` を差し替えて切り離す。
     """
 
     BASE_PATH = "/api/v1/files"
@@ -405,7 +407,7 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
     def _mount(self, monkeypatch, tmp_path):
         from nucllei.utils import image_refs
 
-        root = tmp_path / "mnt"
+        root = tmp_path / "data" / "ext"
         (root / "cage" / "static").mkdir(parents=True)
         (root / "cage" / "static" / "a.png").write_bytes(PNG_BYTES)
         (root / "cage" / "static" / "doc.pdf").write_bytes(_pdf_bytes(2))
@@ -413,7 +415,7 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         outside = tmp_path / "outside.png"
         outside.write_bytes(PNG_BYTES)
         (root / "cage" / "static" / "escape.png").symlink_to(outside)
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+        monkeypatch.setattr(image_refs, "EXT_DIR", root)
         return root
 
     def _messages(self, url):
@@ -435,71 +437,73 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
     def _url(self, messages):
         return messages[0]["content"][1]["image_url"]["url"]
 
-    # ---- /mnt(RO マウント、nucllei のローカル読み)----
+    # ---- /ext(RO マウント = EXT_DIR、nucllei のローカル読み)----
 
     def test_mount_image_to_data_url(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/a.png"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/a.png"))
         assert self._url(messages) == f"data:image/png;base64,{PNG_B64}"
 
     def test_mount_pdf_page_rasterized(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/doc.pdf#page=2"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/doc.pdf#page=2"))
         url = self._url(messages)
         assert url.startswith("data:image/png;base64,")
         png = base64.b64decode(url.split(",", 1)[1])
         assert png.startswith(b"\x89PNG")
 
     def test_mount_pdf_default_first_page(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/doc.pdf"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/doc.pdf"))
         assert self._url(messages).startswith("data:image/png;base64,")
 
     def test_mount_pdf_page_out_of_range_unavailable(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/doc.pdf#page=3"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/doc.pdf#page=3"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_mount_non_image_unavailable(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/note.txt"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/note.txt"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_mount_missing_unavailable(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static/nope.png"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static/nope.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_mount_directory_unavailable(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
-        messages = self._convert(self._messages(f"{root}/cage/static"))
+        self._mount(monkeypatch, tmp_path)
+        messages = self._convert(self._messages("/ext/cage/static"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_mount_outside_root_unavailable(self, monkeypatch, tmp_path):
         root = self._mount(monkeypatch, tmp_path)
-        # root の外(traversal / symlink 越え / 別の絶対パス)はすべて読まない
+        # root の外(traversal / symlink 越え / nucllei 側の実体のパス / 別の絶対パス /
+        # 旧 `/mnt`)はすべて読まない
         for ref in (
-            f"{root}/cage/../../outside.png",
-            f"{root}/cage/static/escape.png",
+            "/ext/cage/../../outside.png",
+            "/ext/cage/static/escape.png",
+            f"{root}/cage/static/a.png",
             f"{tmp_path}/outside.png",
+            "/mnt/cage/static/a.png",
         ):
             messages = self._convert(self._messages(ref))
             assert messages[0]["content"][1] == UNAVAILABLE, ref
 
     def test_mount_size_limit_unavailable(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
+        self._mount(monkeypatch, tmp_path)
         monkeypatch.setattr(
             "nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1
         )
-        messages = self._convert(self._messages(f"{root}/cage/static/a.png"))
+        messages = self._convert(self._messages("/ext/cage/static/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    # ---- 同じ実体を /ext URL で(/mnt をローカル読み)----
+    # ---- 同じ実体を相対 / 絶対 URL で(EXT_DIR をローカル読み)----
 
     def test_same_file_via_ext_url_and_mount_path(self, monkeypatch, tmp_path):
-        root = self._mount(monkeypatch, tmp_path)
+        self._mount(monkeypatch, tmp_path)
         for ref in (
-            f"{root}/cage/static/a.png",
             "/ext/cage/static/a.png",
             "https://any.host/ext/cage/static/a.png",
         ):
@@ -653,7 +657,7 @@ def test_split_page_on_url_and_path():
         3,
     )
     assert split_page("https://h/x.pdf?rev=2#page=12") == ("https://h/x.pdf?rev=2", 12)
-    assert split_page("/mnt/cage/x.pdf#page=1") == ("/mnt/cage/x.pdf", 1)
+    assert split_page("/ext/cage/x.pdf#page=1") == ("/ext/cage/x.pdf", 1)
     # 末尾の "#page=N" だけを見る — URL 自身の fragment には触らない
     assert split_page("https://h/x.pdf#sec2") == ("https://h/x.pdf#sec2", None)
     assert split_page("https://h/x.pdf#sec2#page=4") == ("https://h/x.pdf#sec2", 4)

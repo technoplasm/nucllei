@@ -1,21 +1,23 @@
 """認証付き参照資料の配信ゲート /ext/** の回帰テスト(#97 / #139 / 2026-10-03 設定撤去)。
 
 cage 等が配信する文書内の図・PDF を、同一オリジン相対 URL("/ext/...")としてブラウザが
-session cookie 付きで解決できるようにする静的配信。配信元に設定は無く、nucllei の `/mnt`
-(`image_refs.RO_MOUNT_ROOT` — テストは tmp_path に差し替える)をそのまま配信する:
-`/mnt/cage/static/X` ⇔ `/ext/cage/static/X`。
+session cookie 付きで解決できるようにする静的配信。配信元に設定は無く、nucllei の
+`EXT_DIR` = `DATA_DIR/ext`(`image_refs.EXT_DIR` — テストは tmp_path に差し替える)を
+そのまま配信する: `data/ext/cage/static/X` ⇔ `/ext/cage/static/X`(sandbox も同じ物を
+同じ文字列 `/ext/cage/static/X` に見る)。2026-10-03 の朝まではコンテナの `/mnt` 固定だった —
+nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒すので `DATA_DIR` の中に改めた。
 
-- `/mnt` が空(何も mount していない)なら全 404
+- `EXT_DIR` が空(何も置いていない)なら全 404。nucllei 自身の `/mnt` `/ext` は見ない
 - セッション認証必須(get_verified_user)。未認証は素通りさせない
 - percent デコード後に ".." セグメント / バックスラッシュを含むパスは 400
 - 制御文字パスは fail-closed(400 か、ASGI 層が先に弾く 404)
-- `/mnt` の外(traversal / symlink 越え)・ディレクトリ(`/ext/` 自体を含む)・不在は 404
+- `EXT_DIR` の外(traversal / symlink 越え)・ディレクトリ(`/ext/` 自体を含む)・不在は 404
 - content-type は拡張子から、アクティブ型(HTML/SVG/JS)は添付 + nosniff
 - FileResponse(Range / etag / last-modified)
 - GET(HEAD は Starlette 既定で同経路)。POST 等は 405
 
 2026-10-03 までの http 中継 backend(`EXT_UPSTREAMS=name=http://…`)と `EXT_FILE_SCOPES` は
-撤去(配備が `/mnt` に mount した物がそのまま配信範囲)。
+撤去(配備が `EXT_DIR` に置いた物がそのまま配信範囲)。
 """
 
 from test.util.abstract_integration_test import AbstractPostgresTest
@@ -26,10 +28,10 @@ class TestExtGate(AbstractPostgresTest):
     BASE_PATH = "/ext"
 
     def _mount(self, monkeypatch, tmp_path):
-        """tmp の `/mnt`。配信される物とされない物を置く。"""
+        """tmp の `EXT_DIR`。配信される物とされない物を置く。"""
         from nucllei.utils import image_refs
 
-        root = tmp_path / "mnt"
+        root = tmp_path / "data" / "ext"
         (root / "cage" / "static" / "figs").mkdir(parents=True)
         (root / "cage" / "static" / "figs" / "a.png").write_bytes(
             b"\x89PNG\r\n\x1a\npng-bytes"
@@ -50,23 +52,69 @@ class TestExtGate(AbstractPostgresTest):
         (root / "shared" / "fig.png").symlink_to(
             root / "cage" / "static" / "figs" / "a.png"
         )
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+        monkeypatch.setattr(image_refs, "EXT_DIR", root)
         return root
 
     def _get(self, path, **kw):
         with mock_webui_user(id="1"):
             return self.fast_api_client.get(self.create_url(path), **kw)
 
-    # ---- /mnt が配信範囲 ----
+    # ---- EXT_DIR が配信範囲 ----
 
     def test_nothing_mounted_is_404(self, monkeypatch, tmp_path):
         from nucllei.utils import image_refs
 
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "nowhere")
+        monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "nowhere")
         assert self._get("/cage/static/figs/a.png").status_code == 404
         with mock_webui_user(id="1"):
             for url in ("/ext/", "/ext"):
                 assert self.fast_api_client.get(url).status_code == 404, url
+
+    def test_host_mnt_is_never_served(self, monkeypatch, tmp_path):
+        """served root は `EXT_DIR` だけ — host(= nucllei プロセス)の `/mnt/X` や `/ext/X` に
+        同名のファイルが在っても `/ext/X` では出ない(host 直起動で NFS 等を晒さない。
+        ken 指摘 2026-10-03)。`EXT_DIR/X` を置いて初めて 200。"""
+        from nucllei.utils import image_refs
+
+        root = tmp_path / "data" / "ext"
+        root.mkdir(parents=True)
+        monkeypatch.setattr(image_refs, "EXT_DIR", root)
+        # 「host の /mnt に在る」を模す: EXT_DIR の外にある物を、URL の rest と同じ相対で用意する
+        host_mnt = tmp_path / "host-mnt" / "x"
+        host_mnt.mkdir(parents=True)
+        (host_mnt / "a.txt").write_text("nfs")
+        probe = "/x/a.txt"
+        assert self._get(probe).status_code == 404
+        # EXT_DIR の中に置けば(symlink でもよい)出る
+        (root / "x").symlink_to(host_mnt)
+        response = self._get(probe)
+        assert response.status_code == 200 and response.content == b"nfs"
+
+    def test_directory_symlink_in_ext_dir_is_a_mount(self, monkeypatch, tmp_path):
+        """host 直起動の規約: `data/ext/cage/static → <どこか>` のような **ディレクトリの
+        symlink** は配備が置いた mount(Docker の volume と同じ役)— 先を配信する。ただし
+        mount の中身(文書側の木)の symlink は mount の外へ出られず、ファイルの symlink は
+        mount にならない(`image_refs.served_mount`)。"""
+        from nucllei.utils import image_refs
+
+        root = tmp_path / "data" / "ext"
+        (root / "cage").mkdir(parents=True)
+        monkeypatch.setattr(image_refs, "EXT_DIR", root)
+        content = tmp_path / "llens" / "cage" / "data" / "static"
+        (content / "figs").mkdir(parents=True)
+        (content / "figs" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nmounted")
+        secret = tmp_path / "secret.txt"
+        secret.write_text("secret")
+        (content / "escape.txt").symlink_to(secret)  # 中身の木から外へ
+        (content / "etc").symlink_to(tmp_path)  # 中身の木のディレクトリ symlink も外へ
+        (root / "cage" / "static").symlink_to(content)  # 配備が置いた mount
+        (root / "one.txt").symlink_to(secret)  # ファイルの symlink は mount にならない
+
+        assert self._get("/cage/static/figs/a.png").content.endswith(b"mounted")
+        assert self._get("/cage/static/escape.txt").status_code == 404
+        assert self._get("/cage/static/etc/secret.txt").status_code == 404
+        assert self._get("/one.txt").status_code == 404
+        assert self._get("/cage/static").status_code == 404
 
     # ---- 認証 ----
 
@@ -101,7 +149,7 @@ class TestExtGate(AbstractPostgresTest):
         assert response.headers.get("accept-ranges") == "bytes"
         assert "etag" in response.headers
         assert "last-modified" in response.headers
-        # 何でも: /mnt に見えている物は全部(cage に限らない)
+        # 何でも: EXT_DIR に見えている物は全部(cage に限らない)
         assert self._get("/shared/memo.txt").content == b"m"
 
     def test_percent_encoded_japanese_path(self, monkeypatch, tmp_path):
@@ -120,13 +168,13 @@ class TestExtGate(AbstractPostgresTest):
         assert self._get("/shared/fig.png").status_code == 200
 
     def test_mount_itself_may_be_a_symlink(self, monkeypatch, tmp_path):
-        # 配備では /mnt(の下)が bind = symlink でありうる。閉じ込めは resolve 済み同士で比べる
+        # host 直起動では data/ext(の下)が symlink でありうる。閉じ込めは resolve 済み同士で比べる
         from nucllei.utils import image_refs
 
         root = self._mount(monkeypatch, tmp_path)
-        link = tmp_path / "mnt-link"
+        link = tmp_path / "ext-link"
         link.symlink_to(root)
-        monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", link)
+        monkeypatch.setattr(image_refs, "EXT_DIR", link)
         assert self._get("/cage/static/figs/a.png").status_code == 200
         assert self._get("/cage/static/escape.txt").status_code == 404
 

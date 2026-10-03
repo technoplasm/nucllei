@@ -77,8 +77,8 @@ def test_missing_mount_root_changes_nothing(monkeypatch, tmp_path):
 
 def test_empty_and_missing_mount_root_give_identical_argv(monkeypatch, tmp_path):
     # 「置き場が空なら挙動不変」= 不在のときと **argv が完全一致**すること。
-    # 置き場由来の引数を prefix で数えるだけだと、`/mnt` を無条件に足す退行を見逃す
-    root = tmp_path / "mnt"
+    # 置き場由来の引数を prefix で数えるだけだと、`/ext` を無条件に足す退行を見逃す
+    root = tmp_path / "ext"
     root.mkdir()
     mod = _load_main(monkeypatch, tmp_path, root)
     empty = _cmd(mod)
@@ -89,7 +89,7 @@ def test_empty_and_missing_mount_root_give_identical_argv(monkeypatch, tmp_path)
 
 def test_entries_only_add_ro_bind_pairs(monkeypatch, tmp_path):
     # 置いたことで増えるのは `--bindmount_ro <path>` の対だけ (他の引数を動かさない)
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc").mkdir(parents=True)
     mod = _load_main(monkeypatch, tmp_path, root)
     with_entry = _cmd(mod)
@@ -103,7 +103,7 @@ def test_entries_only_add_ro_bind_pairs(monkeypatch, tmp_path):
 # 置いたものがそのまま出る
 # ---------------------------------------------------------------------------
 def test_entries_are_bound_at_the_same_path(monkeypatch, tmp_path):
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc").mkdir(parents=True)
     (root / "static").mkdir()
     mod = _load_main(monkeypatch, tmp_path, root)
@@ -113,7 +113,7 @@ def test_entries_are_bound_at_the_same_path(monkeypatch, tmp_path):
 
 def test_single_file_entry_is_bound(monkeypatch, tmp_path):
     # 置くのはディレクトリとは限らない (ファイル 1 本の volume も同じ扱い)
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     root.mkdir()
     (root / "corpus.sqlite").write_text("x")
     mod = _load_main(monkeypatch, tmp_path, root)
@@ -122,7 +122,7 @@ def test_single_file_entry_is_bound(monkeypatch, tmp_path):
 
 def test_entries_are_read_only_never_rw(monkeypatch, tmp_path):
     # **契約**: この口は read-only 専用。rw (`--bindmount`) で足す経路を作らない
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc").mkdir(parents=True)
     mod = _load_main(monkeypatch, tmp_path, root)
     rw = [p for flag, p in _all_binds(mod) if flag == "--bindmount"]
@@ -131,7 +131,7 @@ def test_entries_are_read_only_never_rw(monkeypatch, tmp_path):
 
 def test_only_one_level_deep(monkeypatch, tmp_path):
     # 孫は個別に足さない (「volume 1 本 = 1 エントリ」)。中身は bind した親の下に見える
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc" / "guideline").mkdir(parents=True)
     mod = _load_main(monkeypatch, tmp_path, root)
     assert _ro_binds(mod, root) == [f"{root}/doc"]
@@ -141,7 +141,7 @@ def test_only_one_level_deep(monkeypatch, tmp_path):
 # 飛ばすもの
 # ---------------------------------------------------------------------------
 def test_dotfiles_are_skipped(monkeypatch, tmp_path):
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc").mkdir(parents=True)
     (root / ".DS_Store").write_text("junk")
     mod = _load_main(monkeypatch, tmp_path, root)
@@ -152,7 +152,7 @@ def test_name_with_colon_is_skipped(monkeypatch, tmp_path):
     # ":" は nsjail の `src:dst` 区切り。そのまま渡すと dst を相対パスと解釈して
     # **jail の起動ごと失敗する** = 全ユーザーの全実行が落ちる。名前は配備側が自由に
     # 付けられる (= 外部入力) ので、壊れた symlink と同じく飛ばす
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "a:b").mkdir(parents=True)
     (root / "doc").mkdir()
     mod = _load_main(monkeypatch, tmp_path, root)
@@ -164,7 +164,7 @@ def test_name_with_colon_is_skipped(monkeypatch, tmp_path):
 def test_broken_symlink_is_skipped_with_warning(monkeypatch, tmp_path, capsys):
     # 辿れないパスを nsjail に渡すと jail の起動ごと失敗する = 全ユーザーの全実行が落ちる。
     # 飛ばしたうえで、起動ログに名指しで警告を出す
-    root = tmp_path / "mnt"
+    root = tmp_path / "ext"
     (root / "doc").mkdir(parents=True)
     (root / "dangling").symlink_to(tmp_path / "gone")
     mod = _load_main(monkeypatch, tmp_path, root)

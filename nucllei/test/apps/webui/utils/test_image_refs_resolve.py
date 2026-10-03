@@ -13,6 +13,7 @@ DB は要らないので plain な pytest 関数(AbstractPostgresTest を継承�
 import asyncio
 import base64
 import os
+from pathlib import Path
 
 import httpx
 import pytest
@@ -45,16 +46,22 @@ def _install_transport(monkeypatch, handler):
     monkeypatch.setattr(ext_upstreams, "_client", client)
 
 
+# sandbox 側のパス(= URL と同じ文字列)。nucllei 側の実体は `EXT_DIR`(テストは tmp に
+# 差し替える)で、`_mount` が返す root がそれ。`/mnt` は 2026-10-03 に捨てた
+MOUNTED = "/ext/cage/static/a.png"
+
+
 def _mount(monkeypatch, tmp_path):
+    """tmp の `EXT_DIR`(= `/ext/` の配信元 = sandbox の `/ext` と同じ木)。"""
     from nucllei.utils import image_refs
 
-    root = tmp_path / "mnt"
+    root = tmp_path / "data" / "ext"
     (root / "cage" / "static").mkdir(parents=True)
     (root / "cage" / "static" / "a.png").write_bytes(PNG_BYTES)
     outside = tmp_path / "outside.png"
     outside.write_bytes(PNG_BYTES)
     (root / "cage" / "static" / "escape.png").symlink_to(outside)
-    monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+    monkeypatch.setattr(image_refs, "EXT_DIR", root)
     return root
 
 
@@ -101,8 +108,8 @@ def test_ref_error_shape():
 
 
 def test_success_returns_loaded_and_none(monkeypatch, tmp_path):
-    root = _mount(monkeypatch, tmp_path)
-    loaded, error = _resolve(f"{root}/cage/static/a.png")
+    _mount(monkeypatch, tmp_path)
+    loaded, error = _resolve(MOUNTED)
     assert error is None
     assert loaded is not None and loaded.data == PNG_BYTES
     assert loaded.content_type == "image/png"
@@ -111,9 +118,9 @@ def test_success_returns_loaded_and_none(monkeypatch, tmp_path):
 def test_load_ref_is_thin_wrapper(monkeypatch, tmp_path):
     from nucllei.utils.image_refs import load_ref
 
-    root = _mount(monkeypatch, tmp_path)
-    assert asyncio.run(load_ref(f"{root}/cage/static/a.png", "alice")).data == PNG_BYTES
-    assert asyncio.run(load_ref(f"{root}/cage/static/nope.png", "alice")) is None
+    _mount(monkeypatch, tmp_path)
+    assert asyncio.run(load_ref(MOUNTED, "alice")).data == PNG_BYTES
+    assert asyncio.run(load_ref("/ext/cage/static/nope.png", "alice")) is None
     assert asyncio.run(load_ref("x.png", "alice")) is None
 
 
@@ -144,7 +151,7 @@ def test_unsupported_form_non_string():
 
 
 def test_relative_ext_resolves_like_absolute_file_backend(monkeypatch, tmp_path):
-    """相対 `/ext/{rest}` は「今のサーバの URL」= 絶対 `…/ext/{rest}` と同じ `/mnt` で
+    """相対 `/ext/{rest}` は「今のサーバの URL」= 絶対 `…/ext/{rest}` と同じ `EXT_DIR` で
     解決する。`relative_ext` という失敗 code はもう無い。"""
     _mount(monkeypatch, tmp_path)
     for ref in ("/ext/cage/static/a.png", "/ext/cage/static/a.png?v=1"):
@@ -156,7 +163,7 @@ def test_relative_ext_resolves_like_absolute_file_backend(monkeypatch, tmp_path)
 
 
 def test_relative_ext_stays_closed(monkeypatch, tmp_path):
-    """fail closed は絶対 URL のときと同じ: /mnt に無い物 / /mnt の外へ出る symlink / 不在 /
+    """fail closed は絶対 URL のときと同じ: EXT_DIR に無い物 / EXT_DIR の外へ出る symlink / 不在 /
     traversal。`/ext/…` の失敗は not_found だけ(`unknown_name` / `not_ext_form` は
     2026-10-03 に name の概念ごと無くした)。"""
     _mount(monkeypatch, tmp_path)
@@ -165,7 +172,7 @@ def test_relative_ext_stays_closed(monkeypatch, tmp_path):
     assert _code("/ext/cage/static/nope.png").code == "not_found"
     assert _code("/ext/cage/../outside.png").code == "traversal"
     assert _code("/ext/cage/static/%2e%2e/%2e%2e/outside.png").code == "traversal"
-    # 旧 not_ext_form の形も、ただの /mnt のパス(無い・ディレクトリ)= not_found
+    # 旧 not_ext_form の形も、ただの EXT_DIR のパス(無い・ディレクトリ)= not_found
     for malformed in ("/ext/", "/ext//a.png", "/ext/CAGE/static/a.png"):
         err = _code(malformed)
         assert (err.code, err.reason) == ("not_found", None), malformed
@@ -227,7 +234,7 @@ def test_resolve_url_does_not_read_sandbox_paths(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sandbox, "sandbox_post", spy)
     for value in (
-        f"{root}/cage/static/a.png",
+        f"{root}/cage/static/a.png",  # nucllei 側の実体のパス = URL でも sandbox のパスでもない
         "/workspace/x.png",
         "/api/v1/files/abc/content",
         "/etc/hostname",
@@ -241,31 +248,36 @@ def test_resolve_url_does_not_read_sandbox_paths(monkeypatch, tmp_path):
 
 
 def test_resolve_path_does_not_fetch_urls(monkeypatch, tmp_path):
-    """`path` に URL(絶対・相対 `/ext/…`)が来ても URL としては解決しない。"""
+    """`path` に URL(絶対)が来ても URL としては解決しない。相対 `/ext/…` は sandbox の
+    RO マウントと同じ文字列なので **パスとして** 読める(ネットワークには出ない)。"""
+    from nucllei.utils.image_refs import resolve_path
+
     _mount(monkeypatch, tmp_path)
     _self(monkeypatch)
     seen = []
     _install_transport(monkeypatch, lambda r: seen.append(r) or httpx.Response(200))
     for value in (
-        "/ext/cage/static/a.png",
         f"{SELF}/ext/cage/static/a.png",
         f"{GENERAL}/a.png",
         "/etc/hostname",
+        "/mnt/cage/static/a.png",  # 2026-10-03 までの置き場。もう特別扱いしない
         "x.png",
     ):
         assert _path_code(value).code == "unsupported_form", value
+    loaded, err = asyncio.run(resolve_path(MOUNTED, "alice"))
+    assert err is None and loaded.data == PNG_BYTES
     assert seen == []
 
 
 def test_resolve_url_and_path_succeed_on_their_own_forms(monkeypatch, tmp_path):
     from nucllei.utils.image_refs import resolve_path, resolve_url
 
-    root = _mount(monkeypatch, tmp_path)
+    _mount(monkeypatch, tmp_path)
     _install_sandbox(monkeypatch, {"x.png": PNG_BYTES})
     for url in ("/ext/cage/static/a.png", f"{SELF}/ext/cage/static/a.png"):
         loaded, error = asyncio.run(resolve_url(url))
         assert error is None and loaded.data == PNG_BYTES, url
-    for path in (f"{root}/cage/static/a.png", "/workspace/x.png"):
+    for path in (MOUNTED, "/workspace/x.png"):
         loaded, error = asyncio.run(resolve_path(path, "alice"))
         assert error is None and loaded.data == PNG_BYTES, path
     # 上限は入口によらず同じ引数
@@ -312,7 +324,7 @@ def test_file_id_of_url():
         f"{SELF}/ext/cage/a\x00.png",
         f"{SELF}/ext/cage/%2e%2e/x.png",
         "/workspace/../etc/passwd",
-        "/mnt/cage/static/a\x00.png",
+        "/ext/cage/static/a\x00.png",
     ],
 )
 def test_traversal(monkeypatch, tmp_path, ref):
@@ -340,13 +352,14 @@ def test_unknown_upstream_server_self(monkeypatch):
 
 
 def test_not_found_mount_missing_dir_and_escape(monkeypatch, tmp_path):
-    root = _mount(monkeypatch, tmp_path)
+    """sandbox のパス `/ext/…` として読む側(`resolve_path`)の not_found。"""
+    _mount(monkeypatch, tmp_path)
     for ref in (
-        f"{root}/cage/static/nope.png",
-        f"{root}/cage/static",
-        f"{root}/cage/static/escape.png",  # symlink が root 外へ
+        "/ext/cage/static/nope.png",
+        "/ext/cage/static",
+        "/ext/cage/static/escape.png",  # symlink が EXT_DIR 外へ
     ):
-        assert _code(ref).code == "not_found", ref
+        assert _path_code(ref).code == "not_found", ref
 
 
 def test_not_found_ext(monkeypatch, tmp_path):
@@ -397,9 +410,9 @@ def test_directories_stay_closed(monkeypatch, tmp_path):
 
 
 def test_too_large_file(monkeypatch, tmp_path):
-    root = _mount(monkeypatch, tmp_path)
+    _mount(monkeypatch, tmp_path)
     monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
-    err = _code(f"{root}/cage/static/a.png")
+    err = _code(MOUNTED)
     assert err.code == "too_large"
     assert err.size == len(PNG_BYTES)
     assert err.limit == len(PNG_BYTES) - 1
@@ -550,8 +563,8 @@ def test_workspace_unavailable_sandbox_api_failure(monkeypatch):
 
 
 def test_max_bytes_overrides_env_cap_on_file(monkeypatch, tmp_path):
-    root = _mount(monkeypatch, tmp_path)
-    ref = f"{root}/cage/static/a.png"
+    _mount(monkeypatch, tmp_path)
+    ref = MOUNTED
     # env の上限では落ちるが、呼び手が大きめを指定すれば読める
     monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
     assert _code(ref).code == "too_large"
@@ -593,18 +606,18 @@ def test_max_bytes_applies_to_workspace(monkeypatch):
 def test_load_ref_keeps_env_cap(monkeypatch, tmp_path):
     from nucllei.utils.image_refs import load_ref
 
-    root = _mount(monkeypatch, tmp_path)
+    _mount(monkeypatch, tmp_path)
     monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", len(PNG_BYTES) - 1)
-    assert asyncio.run(load_ref(f"{root}/cage/static/a.png", "alice")) is None
+    assert asyncio.run(load_ref(MOUNTED, "alice")) is None
 
 
-# ---- mounted_path_for_url(URL → sandbox と共有の /mnt パス)----
+# ---- mounted_path_for_url(URL → sandbox のパス。同じ文字列 `/ext/{rest}`)----
 
 
 def test_mounted_path_for_url(monkeypatch, tmp_path):
-    """`/ext/{rest}` で `RO_MOUNT_ROOT/{rest}` が実在する通常ファイルのときだけパスを返す。
-    規則は resolve_url と同じ `_route_url`(/ext/ 形(絶対・相対)— host は問わない)—
-    理由は返さない(None)。"""
+    """`/ext/{rest}` で `EXT_DIR/{rest}` が実在する通常ファイルのときだけ sandbox のパス
+    (= 相対 URL と同じ文字列 `/ext/{rest}`)を返す。規則は resolve_url と同じ `_route_url`
+    (/ext/ 形(絶対・相対)— host は問わない)— 理由は返さない(None)。"""
     from nucllei.utils.image_refs import mounted_path_for_url
 
     root = _mount(monkeypatch, tmp_path)
@@ -613,7 +626,7 @@ def test_mounted_path_for_url(monkeypatch, tmp_path):
     def probe(url):
         return asyncio.run(mounted_path_for_url(url))
 
-    expected = f"{root}/cage/static/a.png"
+    expected = MOUNTED
     assert probe(f"{SELF}/ext/cage/static/a.png?v=1") == expected
     assert probe("http://any.host:8080/ext/cage/static/a.png#page=2") == expected
     # 同一サーバの相対 URL も同じ
@@ -623,19 +636,21 @@ def test_mounted_path_for_url(monkeypatch, tmp_path):
     assert probe("/ext/cage/static/escape.png") is None
     assert probe("/ext/cage/static/%2e%2e/x") is None
     assert probe("/ext/nothere/a.png") is None
-    # 不在 / /mnt の外へ出る symlink / traversal / 一般の URL / URL でない
+    # 不在 / EXT_DIR の外へ出る symlink / traversal / 一般の URL / URL でない
     assert probe(f"{SELF}/ext/cage/static/nope.png") is None
     assert probe(f"{SELF}/ext/cage/static/escape.png") is None
     assert probe(f"{SELF}/ext/cage/static/%2e%2e/x") is None
     assert probe(f"{SELF}/ext/nothere/a.png") is None
     assert probe(f"{GENERAL}/a.png") is None
     assert probe("https://example.com/a.png") is None
-    assert probe(expected) is None
+    assert (
+        probe(f"{root}/cage/static/a.png") is None
+    )  # nucllei 側の実体のパスは URL でない
 
-    # /mnt 自体が無ければ None(= 404)
+    # EXT_DIR 自体が無ければ None(= 404)
     from nucllei.utils import image_refs
 
-    monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "elsewhere")
+    monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "elsewhere")
     assert probe(f"{SELF}/ext/cage/static/a.png") is None
 
 
@@ -660,8 +675,9 @@ def _named_mount(monkeypatch, tmp_path):
 
 
 def test_url_for_mounted_path(monkeypatch, tmp_path):
-    """RO_MOUNT_ROOT 配下の実ファイルだけ URL を返す(前置きの入れ替え + 実在)。
-    値の形ではなく解決結果 — 不在・ディレクトリ・/mnt の外へ出る物は None。"""
+    """sandbox のパス `/ext/{rest}` の実体 `EXT_DIR/{rest}` が実ファイルのときだけ URL を返す
+    (ASCII 名なら同じ文字列、それ以外は percent-encode)。値の形ではなく解決結果 —
+    不在・ディレクトリ・EXT_DIR の外へ出る物は None。"""
     from nucllei.utils.image_refs import url_for_mounted_path
 
     root = _named_mount(monkeypatch, tmp_path)
@@ -669,33 +685,114 @@ def test_url_for_mounted_path(monkeypatch, tmp_path):
     def probe(path):
         return asyncio.run(url_for_mounted_path(path))
 
-    assert probe(f"{root}/cage/static/a.png") == "/ext/cage/static/a.png"
-    # /mnt に見えている物は全部(cage / static に限らない — /ext ゲートが配信している範囲と同じ)
-    assert probe(f"{root}/cage/doc/本文.md") == ("/ext/cage/doc/%E6%9C%AC%E6%96%87.md")
-    assert probe(f"{root}/shared/s.png") == "/ext/shared/s.png"
-    # mount 内を指す symlink は実体の URL
-    assert probe(f"{root}/cage/static/inner.png") == "/ext/cage/static/a.png"
+    assert probe("/ext/cage/static/a.png") == "/ext/cage/static/a.png"
+    # EXT_DIR に見えている物は全部(cage / static に限らない — /ext ゲートが配信している範囲と同じ)
+    assert probe("/ext/cage/doc/本文.md") == ("/ext/cage/doc/%E6%9C%AC%E6%96%87.md")
+    assert probe("/ext/shared/s.png") == "/ext/shared/s.png"
+    # EXT_DIR 内を指す symlink は実体の URL
+    assert probe("/ext/cage/static/inner.png") == "/ext/cage/static/a.png"
 
-    # 不在 / ディレクトリ / mount の外へ出る symlink / `..` / mount の外 / workspace / URL /
-    # 文字列でない
-    assert probe(f"{root}/cage/static/nope.png") is None
-    assert probe(f"{root}/cage/static") is None
-    assert probe(f"{root}/cage/static/escape.png") is None
-    assert probe(f"{root}/cage/static/../static/a.png") is None
+    # 不在 / ディレクトリ / EXT_DIR の外へ出る symlink / `..` / nucllei 側の実体のパス /
+    # 旧 `/mnt` / workspace / 文字列でない
+    assert probe("/ext/cage/static/nope.png") is None
+    assert probe("/ext/cage/static") is None
+    assert probe("/ext/cage/static/escape.png") is None
+    assert probe("/ext/cage/static/../static/a.png") is None
+    assert probe(f"{root}/cage/static/a.png") is None
     assert probe(str(tmp_path / "outside.png")) is None
+    assert probe("/mnt/cage/static/a.png") is None
     assert probe("/workspace/a.png") is None
-    assert probe("/ext/cage/static/a.png") is None
     assert probe(None) is None
 
 
 def test_url_for_mounted_path_needs_mount_root(monkeypatch, tmp_path):
-    # RO_MOUNT_ROOT が別の場所 = sandbox のパスではない → None
+    """EXT_DIR が別の場所なら、同じ `/ext/…` でも nucllei 側に無い = None。"""
     from nucllei.utils import image_refs
     from nucllei.utils.image_refs import url_for_mounted_path
 
-    root = _named_mount(monkeypatch, tmp_path)
-    monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", tmp_path / "elsewhere")
-    assert asyncio.run(url_for_mounted_path(f"{root}/cage/static/a.png")) is None
+    _named_mount(monkeypatch, tmp_path)
+    monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "elsewhere")
+    assert asyncio.run(url_for_mounted_path("/ext/cage/static/a.png")) is None
+
+
+def test_bridge_never_touches_host_mnt_or_ext(monkeypatch, tmp_path):
+    """橋渡しと `/ext` ゲートが見るのは `EXT_DIR` だけ(host 直起動で host の `/mnt` や `/ext`
+    を晒さない — ken 指摘 2026-10-03)。sandbox のパス `/ext/X` は `EXT_DIR/X` にだけ当たる。"""
+    from nucllei.utils import image_refs
+    from nucllei.utils.image_refs import (
+        ext_file_target,
+        local_path_for_sandbox_path,
+        mounted_path_for_url,
+        url_for_mounted_path,
+    )
+
+    root = _mount(monkeypatch, tmp_path)
+    # sandbox `/ext/X` ↔ nucllei `EXT_DIR/X` ↔ URL `/ext/X`
+    assert local_path_for_sandbox_path("/ext/cage/static/a.png") == (
+        root / "cage" / "static" / "a.png"
+    )
+    assert ext_file_target("cage/static/a.png") == root / "cage" / "static" / "a.png"
+    assert local_path_for_sandbox_path("/mnt/cage/static/a.png") is None
+    assert local_path_for_sandbox_path("/ext") is None
+    assert asyncio.run(url_for_mounted_path(MOUNTED)) == MOUNTED
+    assert asyncio.run(mounted_path_for_url(MOUNTED)) == MOUNTED
+    # EXT_DIR を空の場所にすると、たとえ nucllei の fs に /ext/… /mnt/… が在っても見ない
+    monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "empty")
+    assert asyncio.run(url_for_mounted_path(MOUNTED)) is None
+    assert asyncio.run(mounted_path_for_url(MOUNTED)) is None
+    assert _path_code(MOUNTED).code == "not_found"
+    assert _url_code(MOUNTED).code == "not_found"
+    assert not str(ext_file_target("cage/static/a.png")).startswith(("/ext/", "/mnt/"))
+
+
+def test_bridge_keeps_deployer_names_across_directory_symlink_mounts(
+    monkeypatch, tmp_path
+):
+    """host 直起動の `data/ext/cage/static → <llens>/cage/data/static` のようなディレクトリ
+    symlink は mount(`served_mount`)。橋渡し・resolver が返す `/ext/{rest}` の rest は配備が
+    置いた名前(`cage/static/…`)で、symlink の先の実体の名前にはならない。mount の中身の
+    symlink は実体に畳む(従来どおり)が、mount の外へは出られない。"""
+    from nucllei.utils import image_refs
+    from nucllei.utils.image_refs import (
+        mounted_path_for_url,
+        resolve_path,
+        resolve_url,
+        served_mount,
+        url_for_mounted_path,
+    )
+
+    root = tmp_path / "data" / "ext"
+    (root / "cage").mkdir(parents=True)
+    monkeypatch.setattr(image_refs, "EXT_DIR", root)
+    content = tmp_path / "llens" / "static"
+    content.mkdir(parents=True)
+    (content / "a.png").write_bytes(PNG_BYTES)
+    (content / "alias.png").symlink_to(content / "a.png")
+    (content / "escape.png").symlink_to(tmp_path / "outside.png")
+    (tmp_path / "outside.png").write_bytes(PNG_BYTES)
+    (root / "cage" / "static").symlink_to(content)
+
+    assert served_mount(root / "cage" / "static" / "a.png") == (
+        Path("cage/static"),
+        content.resolve(),
+    )
+    assert served_mount(root / "cage" / "nope.png") == (Path(), root.resolve())
+    assert served_mount(tmp_path / "elsewhere") is None
+
+    url = "/ext/cage/static/a.png"
+    assert asyncio.run(url_for_mounted_path(url)) == url
+    assert asyncio.run(mounted_path_for_url(url)) == url
+    # mount の中の symlink は実体に畳む(名前は配備側の prefix のまま)
+    assert asyncio.run(url_for_mounted_path("/ext/cage/static/alias.png")) == url
+    assert asyncio.run(mounted_path_for_url("/ext/cage/static/alias.png")) == url
+    # 読める(url でも path でも)
+    for reader in (lambda: resolve_url(url), lambda: resolve_path(url, "alice")):
+        loaded, err = asyncio.run(reader())
+        assert err is None and loaded.data == PNG_BYTES
+    # mount の外へ出る symlink は無い物
+    assert asyncio.run(url_for_mounted_path("/ext/cage/static/escape.png")) is None
+    assert _url_code("/ext/cage/static/escape.png").code == "not_found"
+    assert _path_code("/ext/cage/static/escape.png").code == "not_found"
 
 
 def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
@@ -719,7 +816,7 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
         "static/図 表/a#b?c%20d.png",
         "doc/本文.md",
     ):
-        path = f"{root}/cage/{rel}"
+        path = f"/ext/cage/{rel}"
         url = asyncio.run(url_for_mounted_path(path))
         assert url is not None, rel
         # markdown のリンク先に置ける形(空白・括弧・# ? % が生で残らない)
@@ -732,7 +829,7 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
         assert err is None and loaded.name == os.path.basename(path), rel
         # /ext ゲート: Starlette は decode 済みの path を渡す
         response = _serve_local(unquote("cage/" + tail))
-        assert str(response.path) == path, rel
+        assert str(response.path) == str(root / "cage" / rel), rel
 
     # URL 側から: encode 済みの URL はそのまま戻る。生の日本語・絶対 URL・query 付きは
     # 同じファイルの正規形(相対・encode 済み・query 無し)に揃う
@@ -743,15 +840,15 @@ def test_mounted_path_and_url_round_trip(monkeypatch, tmp_path):
         f"{SELF}/ext/cage/static/%E5%9B%B3%20%E8%A1%A8/%E6%89%8B%E9%A0%86%201%20(%E6%94%B9).png?v=1",
     ):
         path = asyncio.run(mounted_path_for_url(url))
-        assert path == f"{root}/cage/static/図 表/手順 1 (改).png", url
+        assert path == "/ext/cage/static/図 表/手順 1 (改).png", url
         assert asyncio.run(url_for_mounted_path(path)) == canonical, url
 
 
-# ---- /mnt に無い物は配信されていない(配備が mount しない = 渡さない)----
+# ---- EXT_DIR に無い物は配信されていない(配備が置かない = 渡さない)----
 
 
 def test_unmounted_paths_are_simply_not_served(monkeypatch, tmp_path):
-    """nucllei 側の `/mnt` に無い物に URL は無い(設定で絞る仕組みは無い — 2026-10-03 までの
+    """nucllei 側の `EXT_DIR` に無い物に URL は無い(設定で絞る仕組みは無い — 2026-10-03 までの
     EXT_FILE_SCOPES / `mounted_path_withheld` は撤去)。sandbox のパスとしての読みも同じ
     置き場なので「無い」。"""
     from nucllei.utils.image_refs import (
@@ -761,7 +858,7 @@ def test_unmounted_paths_are_simply_not_served(monkeypatch, tmp_path):
     )
 
     root = _mount(monkeypatch, tmp_path)
-    missing = f"{root}/cage/doc/本文.md"
+    missing = "/ext/cage/doc/本文.md"
     doc_url = "/ext/cage/doc/%E6%9C%AC%E6%96%87.md"
     assert asyncio.run(url_for_mounted_path(missing)) is None
     assert asyncio.run(mounted_path_for_url(doc_url)) is None
@@ -788,7 +885,7 @@ def test_arg_form_constants_are_the_agreed_sentences():
         "`/ext/…`・`/api/v1/files/{id}/content` だけ。"
     )
     assert image_refs.PATH_ARG_FORM == (
-        "path が受けるのは、sandbox の絶対パス (`/workspace/…` `/mnt/…`) だけ。"
+        "path が受けるのは、sandbox の絶対パス (`/workspace/…` `/ext/…`) だけ。"
     )
     assert image_refs.WORKSPACE_PATH_ARG_FORM == (
         "path が受けるのは、sandbox の絶対パス (`/workspace/…`) だけ。"
@@ -814,7 +911,7 @@ def test_stored_ref_kind():
         "/ext/cage/static/a.png": "url",
         "/ext/cage/static/a.pdf#page=3": "url",
         "/workspace/a.png": "path",
-        "/mnt/cage/x.pdf#page=2": "path",
+        "/mnt/cage/x.pdf#page=2": None,  # 2026-10-03 までの置き場。もう特別扱いしない
         "/api/v1/files/abc/content": "file_url",
         "/api/v1/files/abc/content#page=2": "file_url",
         "https://any.host/api/v1/files/abc/content": "file_url",
@@ -838,7 +935,7 @@ def test_history_wire_uses_the_same_dispatch():
         "file-123",
         "/ext/cage/static/a.png",
         "https://llens.test/ext/cage/a.png",
-        "/mnt/cage/x.pdf#page=2",
+        "/workspace/out/x.pdf#page=2",
         "/api/v1/files/abc/content#page=2",
     ]
     block = {
@@ -1344,7 +1441,7 @@ def test_general_unresolvable_host_is_unreachable(monkeypatch):
 
 
 def test_ext_form_wins_over_the_general_rule(monkeypatch, tmp_path):
-    """`/ext/{rest}` 形は host を問わず nucllei の `/mnt` をローカル読み(そのホストには
+    """`/ext/{rest}` 形は host を問わず nucllei の `EXT_DIR` をローカル読み(そのホストには
     繋がない)。同じホストでもその外は一般の URL(直接、redirect は辿る)。"""
     _mount(monkeypatch, tmp_path)
     _self(monkeypatch, dns={**DNS, "his-info.test": ["172.16.3.3"]})
@@ -1481,7 +1578,7 @@ def test_general_redirect_to_an_unresolvable_form_is_a_plain_redirect(monkeypatc
 
 
 def test_general_redirect_into_an_ext_url_reads_the_mount(monkeypatch, tmp_path):
-    """転送先が `/ext/{rest}` 形に当たれば、nucllei の `/mnt` をローカル読み(そのホストには
+    """転送先が `/ext/{rest}` 形に当たれば、nucllei の `EXT_DIR` をローカル読み(そのホストには
     繋がない)。"""
     _mount(monkeypatch, tmp_path)
     _self(monkeypatch)

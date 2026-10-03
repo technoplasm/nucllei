@@ -343,13 +343,13 @@ class TestExecutionResume(AbstractPostgresTest):
         media = (
             # 載せるのはブラウザが画像として開ける物だけ(振り分けは
             # image_refs.stored_ref_kind): file id / 絶対 URL / 同一サーバの "/ext/…"
-            # (cage の図はこの形)。sandbox のパス("/mnt/…" "/workspace/…")と PDF の
+            # (cage の図はこの形)。sandbox のパス("/workspace/…")と PDF の
             # ページ参照("#page=N")、どの形でもない物は落とす
             [
                 "file-123",
                 "https://llens.test/ext/tool/img.png",
                 "/ext/cage/static/図.png",
-                "/mnt/cage/x.pdf#page=2",
+                "/workspace/cage/x.pdf#page=2",
                 "/workspace/a.png",
                 "/api/v1/files/file-123/content#page=2",
                 "/ext/cage/static/doc.pdf#page=3",

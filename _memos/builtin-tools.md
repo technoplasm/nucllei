@@ -387,13 +387,13 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 
 **`path` 引数は sandbox の fs の絶対パス**(2026-10-03、ken 決定「名前 = 形」: `url` = URL
 (絶対、または同一サーバの `/ext/…` — 末尾の「参照の規則の改訂」節)、
-`path` = `/workspace/…` `/mnt/…` の絶対パス、`file_id` = 添付)。`write_file` / `list_workspace` /
+`path` = `/workspace/…` `/ext/…` の絶対パス、`file_id` = 添付)。`write_file` / `list_workspace` /
 `fetch_from_workspace` の 3 本は以前 workspace 相対で、他の tool の戻り値(絶対)をそのまま渡せず、
 `write_file("/workspace/x")` は `/workspace/workspace/x` に黙って書いていた。現行は 3 本とも
 `/workspace/…` を受けて絶対で返す(`list_workspace` の各行も絶対)。**相対パスは受けない**
 (同日中に改めた — 末尾の「両 repo 通しの検証で直したこと」節。当初は「`/workspace` からの相対」
 として通していた)。相対・空・URL・`/workspace` の外は tool 側で固定文で断る
-(`/mnt/…` は sandbox サービスの `/files/*` が扱えないので「run_shell の ls で」と案内)。
+(`/ext/…` は sandbox サービスの `/files/*` が扱えないので「run_shell の ls で」と案内)。
 サービスの wire は workspace 相対のまま(変換は tool 側の `_resolve_workspace_path`)。
 失敗の文面は `SandboxHTTPError.status` で言い分ける(400 path / 404 不在 / 413 上限 / それ以外の
 例外 = 接続不能)。詳細は `sandbox/README.md`「UI tool」。
@@ -506,7 +506,7 @@ ken 決定(同日 2 件)。#139(2026-09-07)の「参照は 3 形・相対 `/ext/
 - **引数の名前で解釈が決まる。値の中身を見て別の引数の意味に読み替えない。**
 - **`url` = ブラウザが開ける URL**: スキーム付きの絶対 URL、または同一サーバの相対 URL
   (`/` 始まり = 今のサーバの URL。実質 `/ext/{name}/…`)→ `image_refs.resolve_url`
-- **`path` = sandbox の fs の絶対パス**(`/workspace/…` `/mnt/…`)→ `image_refs.resolve_path`
+- **`path` = sandbox の fs の絶対パス**(`/workspace/…` `/ext/…`)→ `image_refs.resolve_path`
 - **`file_id` = 添付・生成物**(本文リンクは `/api/v1/files/{id}/content`、tool には file_id で渡す)
 - **受け取った形のまま渡す**(読み替えない・origin を補わない)
 
@@ -522,7 +522,7 @@ fallback・サブエージェント経由で別ホストになる問題)が要�
 決定 2 — **値の中身で判断するのをやめる**。`send_to_workspace` の `_classify_source` /
 `_already_visible` / `_ERR_RELATIVE_EXT` を削除した:
 
-- `url=` は URL として解決するだけ。UUID・`/workspace/…`・`/mnt/…`・サーバに無い経路は
+- `url=` は URL として解決するだけ。UUID・`/workspace/…`・サーバに無い経路は
   どれも同じ「URL として解決できない」+ 固定の案内文(`_URL_ACCEPTS`: url が受ける形 /
   sandbox のファイルは取り込み不要 / 添付は file_id)。値を調べて文面を出し分けない。
 - `file_id=` は file の id として引くだけ。URL が来ても url として処理しない(レコード無し)。
@@ -541,7 +541,7 @@ resolver の入口を分けた: `resolve_url(url, *, max_bytes)`(user を取ら�
 admin 管理で per-user ではない)/ `resolve_path(path, user_id, *, max_bytes)` /
 `resolve_ref(ref, user_id, *, max_bytes)`(**保存済みの参照文字列**専用の薄い dispatcher。
 `context_images` や image_url の url は引数名を持たないので、ここだけは先頭で機械的に振り分ける:
-`http(s)://` と `/ext/` = URL、`/workspace/` `/mnt/` = fs、それ以外は `unsupported_form`)。
+`http(s)://` と `/ext/` = URL、`/workspace/` = fs、それ以外は `unsupported_form`)。
 `resolve_ref` のシグネチャは変えていない(送信直前 inline `file_images.py` が使う)。
 配備層の tool は引数名に応じて `resolve_url` / `resolve_path` を呼ぶ形に追従する(llens 側の作業)。
 
@@ -552,7 +552,9 @@ llens(cage / read_doc)が相対 `/ext/…` を返し始めると、feed が旧 r
 未対応(dev だけの話): vite dev(:5173)の proxy に `/ext` が無いので、dev でホストの `/mnt` に
 資料を置いても FE 経由の `/ext/…` は 404 になる(本番は単一オリジンなので関係ない)。
 
-## fetch_from_workspace(path) が `/mnt/…` を受ける(2026-10-03)— パス → 見せられる形の橋渡し
+## fetch_from_workspace(path) が `/mnt/…`(現 `/ext/…`)を受ける(2026-10-03)— パス → 見せられる形の橋渡し
+
+> この節の `/mnt` は 2026-10-03 夜に `/ext` へ改名(末尾の「改訂(2026-10-03 夜)」)。
 
 埋めた穴: モデルが sandbox の中で見つけたファイルを**利用者に見せる**手段が、`/workspace/…` には
 あった(`fetch_from_workspace` で file_id、`exports/` の自動添付)が、`/mnt/…`(read-only の参照
@@ -1017,4 +1019,48 @@ llens への申し送り(配備層):
   URL の形(`/ext/cage/static/X`)は変わらないので cage の `PUBLIC_BASE=/ext/cage` はそのまま。
 - 院内 Web(旧 `his=http://…` の http 中継)は `fetch_url(url="http://<原本ホスト>/…")` で直接取る
   (prompt / skill に原本 URL を書く。`/ext/his/…` の形は無い)。
+
+## 改訂(2026-10-03 夜)— 配信元は `DATA_DIR/ext`、sandbox の置き場は `/mnt` → `/ext`
+
+ken 指摘: 上の「nucllei の `/mnt` をそのまま配信」は host 直起動を忘れていた。nucllei は docker
+専用でなく(dev は host)、固定 `/mnt` だと host 直起動で root が要り、何より host の `/mnt`(NFS 等)
+をログイン済み全員に配信してしまう。同時に ken 決定で sandbox 側の置き場も `/ext` に。
+
+- **root は 2 つ**(`image_refs` 冒頭のコメントが正文):
+  - `EXT_DIR` = `DATA_DIR/ext` — nucllei がローカルに読む・配信する root(image `/app/data/ext`、
+    host `./data/ext`。起動時 mkdir、env 無し)。Docker は volume を `/app/data/ext/<path>` に bind、
+    host は `data/ext/` にファイル / symlink。`data/ext` の木に置いた**ディレクトリ symlink は
+    mount**(`served_mount`: `EXT_DIR` の実ディレクトリを辿って最初に当たったディレクトリ symlink の
+    先を閉じ込めの root にする。mount の中身の symlink は外へ出られない。ファイルの symlink は
+    content の `escape.txt → /etc/passwd` と区別がつかないので mount にならない)。これが無いと
+    dev の `data/ext/cage/static → <llens>/…` が「外へ出る symlink」で 404 になる。
+  - `SANDBOX_MOUNT_ROOT` = `/ext` — jail 側の read-only 置き場(sandbox サービス `RO_MOUNT_ROOT`、
+    tool 側 `_RO_MOUNT_ROOT`)。モデルが `path=` に書く形で、nucllei の fs ではない。
+- **sandbox のパス = URL = 同じ文字列**: `/ext/cage/static/X` は jail でも、ブラウザでも、`url=` /
+  `path=` でも同じ物(nucllei 側の実体は `EXT_DIR/cage/static/X`)。`/ext/…` は url と path の両方が
+  受ける唯一の意図した重なり — url は percent-decode して読み、path はそのまま fs パスとして読む。
+  `stored_ref_kind("/ext/…")` は `"url"`(保存済みは URL として読む — 同じ物に当たる)。
+  `/mnt/…` はもう何でもない(`unsupported_form`)。`PATH_ARG_FORM` は `(`/workspace/…` `/ext/…`)`。
+- **橋渡し**は文字列としては恒等: `mounted_path_for_url("/ext/X")` → `"/ext/X"`(decode 済み)iff
+  `EXT_DIR/X` が実ファイル、`url_for_mounted_path("/ext/X")` → `"/ext/X"`(encode 済み)iff 同じ。
+  rest は配備が置いた名前(mount point まで)+ mount 内の実体(symlink を畳む)。
+- **sandbox サービス**(`sandbox/app/main.py`)`RO_MOUNT_ROOT = Path("/ext")` — `/ext` 直下の
+  エントリを同じパスで `--bindmount_ro`。**image の再ビルドが要る**(main.py の定数)。
+  `sandbox/README.md`「参照用データを jail に見せる (`/ext`)」。
+- **起動ログ** `log_mounts`: `ext data in <EXT_DIR> (served at /ext/, sandbox sees them at /ext/): cage → /ext/cage`。
+- 担保: `test_ext_proxy.py::test_host_mnt_is_never_served`(EXT_DIR の外は同名でも 404、置けば 200)/
+  `test_directory_symlink_in_ext_dir_is_a_mount`(mount の 3 則)、`test_image_refs_resolve.py::
+  test_bridge_never_touches_host_mnt_or_ext` / `test_bridge_keeps_deployer_names_across_directory_symlink_mounts`、
+  `test_builtin_sandbox.py`(`/ext/…` の往復・percent-encoded を path に渡すと読めない)、
+  `test_builtin_feed_image.py`(`/ext/…` は path でも読める)、sandbox `test_ro_mounts.py`。
+
+llens への申し送り(配備層。compose の mount 先が変わる):
+
+- nucllei: `- <host>/cage/data/static:/app/data/ext/cage/static:ro`(`/app/data` = DATA_DIR の
+  volume の**中**に bind する。`DATA_DIR` は Dockerfile の `ENV DATA_DIR=/app/data`)。
+- sandbox: `- <host>/cage/data/static:/ext/cage/static:ro`(+ `doc/` 等、sandbox にだけ見せる物も
+  `/ext/<name>` に)。**sandbox image を再ビルドして差し替える**(`/mnt` 固定の旧 image は jail に
+  `/mnt` を出す)。
+- cage の `PUBLIC_BASE=/ext/cage`・URL の形は不変。prompt / skill の「sandbox では `/mnt/cage/…`」は
+  `/ext/cage/…` に書き換える。
 

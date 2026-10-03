@@ -116,10 +116,12 @@ WRITE_FILE_LIMIT = int(os.getenv("SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 10
 # この絶対パスで揃える。sandbox サービスの `/files/*` は workspace 相対で受けるので、
 # 変換はここ (tool 側) で持つ — wire を変えないので sandbox image と版がずれても動く。
 WORKSPACE_ROOT = "/workspace"
-# read-only の参照データの置き場 (sandbox / image_refs の RO_MOUNT_ROOT と同じ場所)。
+# read-only の参照データの置き場 = **jail 側のパス** (sandbox サービスの RO_MOUNT_ROOT /
+# image_refs の SANDBOX_MOUNT_ROOT と同じ `/ext`。2026-10-03 までは `/mnt`)。nucllei の fs では
+# `image_refs.EXT_DIR` (= DATA_DIR/ext) に同じ物が在る規約で、URL `/ext/{rest}` とも同じ文字列。
 # sandbox の `/files/*` はここを扱えない — write_file / list_workspace は使える手段を
-# 案内して断り、fetch_from_workspace は nucllei 側の同じ置き場から橋渡しする。
-_RO_MOUNT_ROOT = "/mnt"
+# 案内して断り、fetch_from_workspace は nucllei 側の同じ置き場 (EXT_DIR) から橋渡しする。
+_RO_MOUNT_ROOT = "/ext"
 
 
 def _normalize_sandbox_path(path: str) -> str:
@@ -151,7 +153,7 @@ def _resolve_workspace_path(
     形の誤り (空・相対・URL・/workspace の外) は値を調べて言い分けず、全 tool 共通の形で
     返す: その tool の path が受ける形の固定文 `arg_form` (`image_refs.PATH_ARG_FORM` /
     `WORKSPACE_PATH_ARG_FORM`) + 行き先の規則 `REF_ARGS_RULE`。
-    `/mnt/…` だけは同じ `path` の中の区分 (read-only の参照データ) なので、`ro_hint` で
+    `/ext/…` だけは同じ `path` の中の区分 (read-only の参照データ) なので、`ro_hint` で
     使える手段を案内する。
     """
     abs_path = _normalize_sandbox_path(path)
@@ -344,7 +346,7 @@ def _explain_ref_error(u: str, err) -> str:
 
 
 def _explain_mount_error(abs_path: str, err) -> str:
-    """resolver の RefError をモデル向けの ERROR 文にする (fetch_from_workspace の `/mnt/…` 用)。
+    """resolver の RefError をモデル向けの ERROR 文にする (fetch_from_workspace の `/ext/…` 用)。
 
     文面は解決結果 (RefError.code) で言い分ける。`not_found` は「無い / ディレクトリ /
     read-only の置き場の外を指すリンク」をまとめて言う — resolver がこの 3 つを同じ code に
@@ -435,7 +437,7 @@ class Tools:
         url_max_mb: float = Field(
             default=50.0,
             description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
-            "(http(s) URL はどこでも。同一サーバの /ext/… = sandbox と共有の /mnt 配下にある物は"
+            "(http(s) URL はどこでも。同一サーバの /ext/… = sandbox の /ext/… と同じ物は"
             "コピーしないので、この上限は掛からない)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
@@ -767,7 +769,9 @@ class Tools:
 
         引数は名前のとおりに解釈する (他の tool と共通)。受け取った形のまま渡すこと
         (読み替えない・ホストを補わない)。
-        sandbox のパス (/workspace/… /mnt/…) は既に jail から見えているので取り込み不要。
+        sandbox のパス (/workspace/… /ext/…) は既に jail から見えているので取り込み不要。
+        同一サーバの URL `/ext/…` は sandbox のパス `/ext/…` と同じ文字列で同じファイル
+        (url に渡せばコピーせずそのパスを返す)。
         jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
 
         :param filename: 対象ファイル名 (部分一致)。file_id 未指定時に添付一覧から探す。省略時は全件。
@@ -860,7 +864,7 @@ class Tools:
 
         行き先・redirect の扱い・失敗理由は resolver 一本 = builtin の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
-        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `/mnt/{rest}` をローカル読み —
+        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `DATA_DIR/ext/{rest}` をローカル読み —
         与えられた host へは接続しない) と、それ以外のスキーム付き http(s) URL
         **どこでも** (一般の URL。登録無しで直接取得。接続先は解決したアドレスに固定、
         redirect は 3 回まで辿る — 一般の Web と同じ扱い。届くかは配備のネットワーク次第、
@@ -869,8 +873,9 @@ class Tools:
         (`unknown_upstream` reason `server_self`)。cookie / 認証ヘッダをどこにも転送しないので、
         リクエスト文脈の無い background 続きターンでも同じに動く。
 
-        - `/ext/{rest}` で `/mnt/{rest}` が実在 → コピーせず、sandbox から見える
-          パスを返す (`mounted_path_for_url`)。`/mnt` 配下は sandbox と同じ置き場という
+        - `/ext/{rest}` で nucllei の `DATA_DIR/ext/{rest}` が実在 → コピーせず、sandbox から
+          見えるパス `/ext/{rest}` (URL と同じ文字列) を返す (`mounted_path_for_url`)。
+          sandbox の `/ext` と nucllei の `DATA_DIR/ext` に同じ物を置くという
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
         - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は valve `url_max_mb`
@@ -1002,7 +1007,7 @@ class Tools:
             path,
             WORKSPACE_PATH_ARG_FORM,
             "list_workspace が一覧できるのは /workspace/ 配下だけ。"
-            "/mnt/ は run_shell の ls で見ること "
+            "/ext/ は run_shell の ls で見ること "
             "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
         )
         if err:
@@ -1037,20 +1042,20 @@ class Tools:
     ) -> str:
         """
         sandbox のファイルをユーザーに見せられる形にする: チャットに添付して file_id を返す
-        (exports/ 以外に作ったファイルや過去実行の成果物、/mnt/ で見つけた資料を渡すときに使う)。
-        既に `/ext/…` の URL で配信されているファイルは添付せず、その URL を返す
-        (本文にはその URL を貼る。文書の本文にある URL とは、同じファイルの別表記に
-        なることがある)。sandbox のパスはブラウザでは開けないので、
+        (exports/ 以外に作ったファイルや過去実行の成果物、/ext/ で見つけた資料を渡すときに使う)。
+        `/ext/…` のファイルは sandbox のパスと URL が同じ文字列で、サーバが配信していれば
+        添付せずその URL を返す (本文にはその URL を貼る。日本語名は percent-encode された
+        同じファイルの別表記になる)。/workspace のパスはブラウザでは開けないので、
         パスを本文に貼ったり URL に書き換えたりせず、これに渡すこと。
 
-        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/mnt/…`)。例: /workspace/imports/converted.xlsx
+        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/imports/converted.xlsx
         """
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         from nucllei.utils.image_refs import PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
-        # /workspace か /mnt かは sandbox の fs の区分で、読み出し口が違うだけ
+        # /workspace か /ext かは sandbox の fs の区分で、読み出し口が違うだけ
         normalized = _normalize_sandbox_path(path)
         if _under_ro_mount(normalized):
             return await self._fetch_mounted(
@@ -1091,17 +1096,17 @@ class Tools:
     async def _fetch_mounted(
         self, abs_path: str, user_id: str, chat_id, message_id, __event_emitter__
     ) -> str:
-        """`/mnt/…` (read-only の参照データ) を利用者に見せられる形にする。
+        """`/ext/…` (read-only の参照データ) を利用者に見せられる形にする。
 
         `send_to_workspace(url=)` の「URL の解決先が sandbox から見えるならパスを返す」
         (`mounted_path_for_url`) の逆向き。値の形ではなく解決結果で分かれる:
 
-        - 実体が nucllei 側の `/mnt` にも実在する (= /ext ゲートが `/ext/{rest}` で配信して
-          いる) → コピーも添付もせず、その URL を返す (`url_for_mounted_path`)
+        - 実体が nucllei 側の `DATA_DIR/ext` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
+          している) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
         - それ以外 → nucllei 自身に bind された同じ置き場から読み (`resolve_path`。境界・上限は
           resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物 (sandbox に
           だけ bind した置き場) は「読めない」になる — 配備は配信したくない物を nucllei 側の
-          `/mnt` に mount しないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
+          `DATA_DIR/ext` に置かないことで渡さない (2026-10-03 までの EXT_FILE_SCOPES による
           「配信範囲の外は添付もしない」は設定ごと無くした)
         """
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く

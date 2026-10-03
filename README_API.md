@@ -159,7 +159,7 @@ is read per request (edits apply without a restart):
 | Var                                                                                                                         | Kind | Default                                  | Effect                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `ENV`                                                                                                                       | env  | `dev` (`prod` in Docker)                 | dev exposes Swagger UI at `/docs`                                                   |
-| `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state                                                        |
+| `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                   | root of all persistent state; `$DATA_DIR/ext` is the `/ext/**` served root (§3.8)   |
 | `DATABASE_URL`                                                                                                              | env  | `sqlite:///$DATA_DIR/webui.db`           | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten)                   |
 | `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `0` (NullPool) / `0` / `30` / `3600` | Postgres tuning                                                                     |
 | `UVICORN_WORKERS`                                                                                                           | env  | `1`                                      | worker count for `serve` — keep at 1 (multi-worker unsupported)                     |
@@ -249,7 +249,7 @@ separate reasoning block.
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                 |
 | `SELF_ADDRESSES`                                               | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03 |
 | `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)    | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03  |
-| (none for `/ext`)                                              | —    | —                     | `/ext/**` serves the container's `/mnt` as is (§3.8); there is no `EXT_*` serving configuration since 2026-10-03                                                 |
+| (none for `/ext`)                                              | —    | —                     | `/ext/**` serves `$DATA_DIR/ext` as is (§3.8); there is no `EXT_*` serving configuration since 2026-10-03                                                        |
 
 ### 3.7 Attachments / files / storage
 
@@ -267,11 +267,15 @@ separate reasoning block.
 ### 3.8 External reference gate (`/ext`)
 
 `GET /ext/**` is a session-authenticated, read-only gate that serves **whatever
-is mounted under the container's `/mnt`** (`image_refs.RO_MOUNT_ROOT`) at the
-same relative path: `/mnt/cage/static/X` ↔ `/ext/cage/static/X`. There is no
-configuration: the deployment decides what is served by what it binds under
-`/mnt` in the nucllei container (the sandbox binds the same volumes at its own
-`/mnt`, #138, so a sandbox path and a `/ext` URL name the same file). Point the
+is under `$DATA_DIR/ext`** (`image_refs.EXT_DIR`; `/app/data/ext` in the image,
+`./data/ext` on a host install) at the same relative path:
+`data/ext/cage/static/X` ↔ `/ext/cage/static/X`. There is no configuration: the
+deployment decides what is served by what it puts there — a Docker deployment
+binds volumes at `/app/data/ext/<path>`, a host install puts files or symlinks
+under `data/ext/`. **The sandbox sees the same tree at `/ext`** (its read-only
+mount root, #138), so a sandbox path and a `/ext` URL are **the same string**
+naming the same file (`/ext/cage/static/X` in the jail, in the browser, and in
+a tool's `url=` or `path=`). Point the
 upstream's public base at **`/ext/<name>`** (relative — same-origin, so it keeps
 working whatever origin or scheme the user reached the server by; an absolute
 `https://<nucllei host>/ext/<name>` works too) and in-document references
@@ -279,17 +283,38 @@ resolve in the browser with the session cookie, and are handed back to tools
 as `url` unchanged (see the reference rules below).
 
 - Files only: `FileResponse` (Range / etag / last-modified). The requested path
-  is resolved and confined to the resolved `/mnt` (symlinks pointing outside
-  → 404); directories (including `/ext/` itself) and missing files → 404, no
-  listing; content-type from the extension (`application/octet-stream` when
-  unknown). `..`/backslash/control-char paths → 400; active types
-  (HTML/SVG/JS) are forced to `Content-Disposition: attachment` + `nosniff`.
-  There is no per-user access check — what is mounted is what is exposed.
-- The startup log lists the top-level entries of `/mnt` as "served at /ext/".
-- Development without Docker: the host needs a real `/mnt/<path>` (a symlink
-  is fine) — there is no env override of the mount root.
+  is resolved and confined to its **mount** (`image_refs.served_mount`): the
+  resolved `$DATA_DIR/ext` itself, or — walking real directories down from it —
+  the first **directory symlink** the deployment placed in that tree
+  (`data/ext/cage/static → ~/…/cage/data/static`), which is served as a mount
+  the way a Docker volume is. Symlinks _inside_ mounted content cannot leave
+  their mount (→ 404), and a symlink to a single file is never a mount (it is
+  indistinguishable from `escape.txt → /etc/passwd` inside content; link a
+  directory or copy the file). Directories (including `/ext/` itself) and
+  missing files → 404, no listing; content-type from the extension
+  (`application/octet-stream` when unknown). `..`/backslash/control-char paths
+  → 400; active types (HTML/SVG/JS) are forced to
+  `Content-Disposition: attachment` + `nosniff`. There is no per-user access
+  check — what is placed under `$DATA_DIR/ext` is what is exposed.
+- The startup log lists the top-level entries of `$DATA_DIR/ext` as "served at
+  /ext/, sandbox sees them at /ext/".
+- Development without Docker: put a symlink under `data/ext/` (e.g.
+  `data/ext/cage/static → <llens>/cage/data/static`; `data/` is gitignored, no
+  root needed) — there is no env override of the served root.
 
-> 2026-10-03 (ken): 「nucllei の /mnt に volume したものをそのまま /ext/ で配信する」.
+> 2026-10-03 (ken): nucllei serves `$DATA_DIR/ext`; the sandbox sees the same
+> tree at `/ext`; `/mnt` abandoned. Earlier that day both sides were fixed to
+> the container's `/mnt` — wrong for host installs: nucllei is not Docker-only
+> (dev runs on the host), populating `/mnt` needs root, and a host install
+> would silently serve whatever the host has under `/mnt` (NFS mounts etc.) to
+> every logged-in user. `$DATA_DIR/ext` is nucllei's own directory. The
+> sandbox mount root moved from `/mnt` to `/ext` at the same time so that the
+> sandbox path and the URL are one string and the model never rewrites one into
+> the other (the one deliberate overlap between `url=` and `path=`; the
+> argument name still decides how the value is read — `url` percent-decodes,
+> `path` is taken as a filesystem path).
+>
+> Same day, earlier: 「nucllei の /mnt に volume したものをそのまま /ext/ で配信する」.
 > Until that day `/ext/{name}/**` was configured by `EXT_UPSTREAMS` (per-name
 > http relay or `file://` root), `EXT_FILE_SCOPES` (serving scope under a
 > root) and `EXT_PUBLIC_BASES` (original-site roots for link lists); an
@@ -314,7 +339,10 @@ reference is interpreted; the code-side definition is the module docstring of
   which `file_id_of_url(url)` routes to a file that the caller then reads with
   its own per-user check.
 - **`path`** — an **absolute** path on the sandbox filesystem (`/workspace/…`,
-  `/mnt/…`). Entry point: `resolve_path(path, user_id, *, max_bytes=None)`.
+  `/ext/…`). Entry point: `resolve_path(path, user_id, *, max_bytes=None)`.
+  `/ext/{rest}` is accepted by both `url` and `path` and names the same file
+  (`$DATA_DIR/ext/{rest}` on nucllei's side); `url` percent-decodes `rest`,
+  `path` reads it as given.
   Relative paths are not accepted (since 2026-10-03; they used to be resolved
   against `/workspace`, which turned `path="https://x/y.html"` into
   `/workspace/https:/x/y.html`).
@@ -337,7 +365,7 @@ each carried its own copy of this text; the copies drifted — see §5.7):
 | Constant                  | Text                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `URL_ARG_FORM`            | ``url が受けるのは、スキーム付きの絶対 URL (`http(s)://…`) と、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` だけ。``              |
-| `PATH_ARG_FORM`           | ``path が受けるのは、sandbox の絶対パス (`/workspace/…` `/mnt/…`) だけ。``                                                               |
+| `PATH_ARG_FORM`           | ``path が受けるのは、sandbox の絶対パス (`/workspace/…` `/ext/…`) だけ。``                                                               |
 | `WORKSPACE_PATH_ARG_FORM` | ``path が受けるのは、sandbox の絶対パス (`/workspace/…`) だけ。`` (tools that only handle the workspace: `write_file`, `list_workspace`) |
 | `FILE_ID_ARG_FORM`        | `file_id は添付・生成物の id。`                                                                                                          |
 | `REF_ARGS_RULE`           | `URL は url、sandbox のパスは path、添付・生成物は file_id に、受け取った形のまま渡す (値を書き換えて別の引数に入れ直さない)。`          |
@@ -376,15 +404,15 @@ according to the argument's name, not `resolve_ref`.
 
 | Prefix                                           | Meaning                                           | Resolution                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http://` / `https://`                           | absolute URL                                      | path `/ext/{rest}` → the local file `/mnt/{rest}`, **whatever the host** (the host is never connected to). Otherwise it is a **general URL** (below): fetched directly from its host, pinned to the resolved address — **anywhere**, intranet or internet; the only refused destination is this server itself (`unknown_upstream` / `server_self`)                      |
-| `/ext/`                                          | same-server URL                                   | `/ext/{rest}` → the same local file `/mnt/{rest}` as the absolute form. Missing, a directory (`/ext/` itself included) or a symlink leaving `/mnt` → `not_found`                                                                                                                                                                                                        |
-| `/workspace/`, `/mnt/`                           | sandbox filesystem                                | `/mnt/…` is read locally from the read-only mount root the sandbox binds (#138); `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                              |
+| `http://` / `https://`                           | absolute URL                                      | path `/ext/{rest}` → the local file `$DATA_DIR/ext/{rest}`, **whatever the host** (the host is never connected to). Otherwise it is a **general URL** (below): fetched directly from its host, pinned to the resolved address — **anywhere**, intranet or internet; the only refused destination is this server itself (`unknown_upstream` / `server_self`)             |
+| `/ext/`                                          | same-server URL (= the sandbox's read-only mount) | `/ext/{rest}` → the same local file `$DATA_DIR/ext/{rest}` as the absolute form. Missing, a directory (`/ext/` itself included) or a symlink leaving its mount → `not_found`. A stored `/ext/…` is read as a URL; given as `path` it is the sandbox's `/ext/{rest}` and read locally from the same `$DATA_DIR/ext/{rest}` without percent-decoding (#138)               |
+| `/workspace/`                                    | sandbox filesystem                                | `/workspace/…` goes through the sandbox `/files/read` of the calling user                                                                                                                                                                                                                                                                                               |
 | `/api/v1/files/{id}/content`                     | this server's file delivery URL                   | not read by the resolver (it needs a per-user check): `file_id_of_url(url)` extracts the id (relative, or absolute on any host — same reasoning as `/ext/`), and the caller reads the file with its own check — the pre-send inline step (read access) and `send_to_workspace(url=)` (owner). Passed to `resolve_url` / `resolve_ref` directly it is `unsupported_form` |
 | a bare string (no leading `/`, not `http(s)://`) | a file id (what `__feed_image__(file_id)` stores) | the caller builds `/api/v1/files/{id}/content` from it (history builder, completion notice; the frontend's `contextImageUrl` does the same)                                                                                                                                                                                                                             |
 | anything else (any other `/…`, empty)            | —                                                 | `unsupported_form`                                                                                                                                                                                                                                                                                                                                                      |
 
 **Directories.** `/ext/` and `/ext/{dir}/` are well-formed URLs (`rel` is the
-path under `/mnt`, possibly empty) but a directory is never served: `not_found`
+path under `$DATA_DIR/ext`, possibly empty) but a directory is never served: `not_found`
 from the resolver, 404 from the gate, no listing.
 
 **General URLs (2026-10-03).** Registered backends are not the only web a
@@ -450,7 +478,7 @@ must be declared there (default empty; the startup log lists both sets as
 - **Redirects are followed, at most 3 times.** The `Location` (absolute or
   relative) is resolved as a URL by the same rules: a general URL → followed
   (pinned again, same self check); a `/ext/{rest}` URL → the local file under
-  `/mnt` (no further redirect); a `Location` pointing at this server itself →
+  `$DATA_DIR/ext` (no further redirect); a `Location` pointing at this server itself →
   `upstream_status` with the `3xx` status and `reason=redirect_self`; a
   `Location` that is not a URL this server resolves (non-http(s) scheme,
   control characters) → `upstream_status` with the `3xx` status and no reason
@@ -476,7 +504,7 @@ fragment, so every tool treats `…/content#section` alike.
 `route_of_url(url) -> (UrlRoute | None, RefError | None)` runs the same single
 routing step as `resolve_url` and returns it: `UrlRoute(rel, query, origin,
 kind)` plus the properties `relative`, `general` and `page_url`. `kind` is
-`"ext"` (`/ext/{rest}`; `rel` = the path under `/mnt` as written in the URL,
+`"ext"` (`/ext/{rest}`; `rel` = the path under `$DATA_DIR/ext` as written in the URL,
 i.e. still percent-encoded, no leading `/`, `""` for `/ext/` itself),
 `"general"` (`rel` = the URL path without its leading `/`, `""` for
 `http://h/`) or `"file"` (this server's `/api/v1/files/{id}/content`, relative
@@ -502,18 +530,22 @@ more (until 2026-10-03 `UrlRoute` carried `name`, `public_base` and
 `ext_form`, and the link root was the `EXT_PUBLIC_BASES` root or
 `/ext/{name}`).
 
-**Bridging a URL and a sandbox path.** The same file has both names
-(`/ext/cage/static/X` ⇔ `/mnt/cage/static/X`). The model never rewrites one
-into the other; the tool it calls does, based on **what the reference resolves
-to** (the real file's location), not on the value's shape:
+**Bridging a URL and a sandbox path.** The same file has the same name on both
+sides since 2026-10-03: URL `/ext/cage/static/X` = sandbox path
+`/ext/cage/static/X` = nucllei's local `$DATA_DIR/ext/cage/static/X`. The model
+never has to rewrite anything; what the tool still decides, based on **what the
+reference resolves to** (whether the file exists on nucllei's side), is whether
+to copy / attach or to hand the name back:
 
-| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                    |
-| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the `/mnt/…` path when `/ext/{rest}` names a regular file that exists under nucllei's `/mnt`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                                                     |
-| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL when `/mnt/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `/mnt` and attached (a `file_id`) — a path that is not there is simply unreadable |
+| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                                       |
+| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/{rest}` (same string, percent-decoded) when `/ext/{rest}` names a regular file that exists under nucllei's `$DATA_DIR/ext`, nothing copied; otherwise the bytes are copied to `/workspace/imports/`                                   |
+| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/{rest}` URL (same string, percent-encoded) when `$DATA_DIR/ext/{rest}` exists on nucllei's side, nothing attached; otherwise the file is read from nucllei's `$DATA_DIR/ext` and attached — a path that is not there is simply unreadable |
 
-Both are the prefix swap `/ext/` ⇔ `/mnt/` plus an existence check on
-nucllei's own filesystem, after resolving symlinks and confining to `/mnt`.
+Both are an existence check on nucllei's own filesystem (`$DATA_DIR/ext`), after
+resolving symlinks and confining to the mount (`served_mount`); the names the
+deployment placed in `$DATA_DIR/ext` (including directory-symlink mounts) are
+kept in the result, symlinks inside a mount are folded to the real file.
 The path part of the returned URL is percent-encoded, and the URL round-trips
 through `resolve_url` / the `/ext` gate to the same file; because of the
 encoding it can differ **as a string** from the URL a document's text carries
@@ -522,8 +554,8 @@ for the same file (e.g. raw Japanese `…/forms/参考書式_5.pdf` vs
 URLs can be shown to the user (`/ext/…` or `/api/v1/files/{id}/content`); a
 sandbox path means nothing to a browser. Whether the sandbox really binds the
 same volume cannot be verified from nucllei — it is the deployment convention
-(#138). A deployment withholds a file from users by **not mounting it under
-nucllei's `/mnt`** (the sandbox may still see it at its own `/mnt`): until
+(#138). A deployment withholds a file from users by **not putting it under
+nucllei's `$DATA_DIR/ext`** (the sandbox may still see it at its own `/ext`): until
 2026-10-03 there was a serving scope (`EXT_FILE_SCOPES`) and a
 `mounted_path_withheld` refusal 「利用者に配信しない範囲にある」 — both gone.
 
@@ -576,17 +608,17 @@ case):
 
 | `code`                  | When                                                                                                                                                                                                                                                                 | Extra fields                              |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/mnt/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`)                          |                                           |
+| `unsupported_form`      | not a form the entry point accepts: for `resolve_url`, not an `http(s)://` URL nor same-server `/ext/…`; for `resolve_path`, not `/workspace/…` / `/ext/…`; for `resolve_ref`, neither (relative path, empty, `ftp:`, `//host/…`, `/etc/…`, `/mnt/…`)                |                                           |
 | `traversal`             | `..`, backslash, NUL or other control chars anywhere in the reference                                                                                                                                                                                                |                                           |
 | `unknown_upstream`      | a general URL whose host is this server itself (`reason=server_self`). Until 2026-10-03 it also covered unknown `/ext/{name}/` names (`unknown_name`) and malformed `/ext/` (`not_ext_form`); those reasons are gone — a `/ext/…` that is not mounted is `not_found` | `reason` (see above)                      |
-| `not_found`             | `/ext/{rest}` / `/mnt/…`: missing, a directory (incl. `/ext/` itself), or resolves outside `/mnt` (symlink escape); general URL `404`; sandbox `/files/read` `404`                                                                                                   | `status=404` for http                     |
+| `not_found`             | `/ext/{rest}` (URL or sandbox path): missing, a directory (incl. `/ext/` itself), or resolves outside its mount under `$DATA_DIR/ext` (symlink escape); general URL `404`; sandbox `/files/read` `404`                                                               | `status=404` for http                     |
 | `too_large`             | over the size cap (`max_bytes`, default `FETCH_MAX_BYTES`) on any route (file, http stream, workspace) or over the sandbox's own read limit (`413`)                                                                                                                  | `size`, `limit`, `size_exact` (see below) |
 | `upstream_status`       | a general URL answered non-2xx other than 404 — including `3xx` redirects that could not be followed (see `reason`)                                                                                                                                                  | `status`, `reason`                        |
 | `upstream_unreachable`  | general URL connection failure, timeout, `InvalidURL`, or a host name that does not resolve (`reason=unresolvable`)                                                                                                                                                  | `reason`                                  |
 | `workspace_unavailable` | `/workspace/…` without `SANDBOX_URL`, or the sandbox API failed for a reason other than 404 / 413 (unreachable, 401 token mismatch, 5xx)                                                                                                                             | `status` when the sandbox answered        |
 
 `too_large.size_exact` says whether `size` is the real size or only a lower
-bound: `True` when it comes from `stat` (`/ext`, `/mnt/…`, sandbox `413`),
+bound: `True` when it comes from `stat` (`$DATA_DIR/ext`, sandbox `413`),
 a fully read workspace file, or an http `Content-Length`; `False` when the http
 stream had no `Content-Length` and was aborted just past `limit` — `size` is
 then the bytes received so far (slightly above `limit`) and the real size is
@@ -599,9 +631,9 @@ size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 | `SELF_ADDRESSES`  | env  | empty              | comma-separated IP addresses (no CIDR) added to the self-deny set of general URL fetches — the host's outward-facing IPs a container cannot discover. Was `EXT_SELF_ADDRESSES` until 2026-10-03       |
 | `FETCH_MAX_BYTES` | env  | `26214400` (25 MB) | default size cap per reference when the resolver reads a URL or a sandbox path (pre-send inlining of context images, and any tool that does not pass its own `max_bytes`). Was `EXT_INLINE_MAX_BYTES` |
 
-There is no variable for `/ext`: it serves `/mnt`. `builtin_fetch_url` and
+There is no variable for `/ext`: it serves `$DATA_DIR/ext`. `builtin_fetch_url` and
 `builtin_feed_image` (§5.7) are always registered: since 2026-10-03 the `url=`
-argument fetches any `http(s)://` URL (see "General URLs"), so an empty `/mnt`
+argument fetches any `http(s)://` URL (see "General URLs"), so an empty `$DATA_DIR/ext`
 does not make the tool always fail (until that day `builtin_fetch_url` was
 gated on any of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / the removed
 `EXT_INTRANET_CIDRS`).
@@ -1016,21 +1048,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{rest}`, absolute `https://…/ext/{rest}`, or any http(s) URL), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{rest}`, absolute `https://…/ext/{rest}`, or any http(s) URL — the same-server `/ext/{rest}` is also the sandbox's path), or a sandbox path (`/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### 5.4 Argument & result rendering
 
@@ -1111,8 +1143,8 @@ async def read_doc(self, path: str) -> Markdown:
   images become visible when the model writes
   `![name](/api/v1/files/{id}/content)`. To let the _model_ see an image or a
   PDF page, call `__feed_image__(file_id_or_ref)` (§5.3) — it is injected into
-  the follow-up call; an `/ext/` URL (relative or absolute), any http(s) URL,
-  a `/mnt/…` or a `/workspace/…` reference needs no File
+  the follow-up call; an `/ext/` URL (relative or absolute), any http(s) URL
+  or a `/workspace/…` reference needs no File
   (§3.8 for the reference rules). The model itself does this through the
   builtin `feed_image` tool (§5.7); a deployment does not need a tool of its
   own for it.
@@ -1144,8 +1176,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
     through `__feed_image__` (§5.3). Exactly one reference argument, interpreted
     by name (§3.8): `url` = an absolute URL or a same-server `/ext/{rest}` /
-    `/api/v1/files/{id}/content`, `path` = a sandbox absolute path (`/mnt/…`,
-    `/workspace/…`), `file_id` = an attachment or a generated file (owner
+    `/api/v1/files/{id}/content`, `path` = a sandbox absolute path (`/ext/…`,
+    `/workspace/…`; `/ext/…` is the same file whichever argument it comes in),
+    `file_id` = an attachment or a generated file (owner
     check in the tool; the pre-send inline step checks read access again).
     `filename` is a substring filter on the target's name, `pages` a PDF page
     range (`"3"`, `"4-6"`, `"1-2,7"`). The tool validates what the reference
@@ -1159,7 +1192,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     list, for browsing web that no document corpus holds. `url` is
     resolved by the shared resolver (`resolve_url`, §3.8) and nothing else —
     the tool has no allowlist and no on/off valve of its own; it accepts
-    `/ext/{rest}` (relative or on any host — nucllei's own `/mnt/{rest}`),
+    `/ext/{rest}` (relative or on any host — nucllei's own `$DATA_DIR/ext/{rest}`),
     **any other scheme-qualified `http(s)://` URL** (fetched directly —
     intranet or internet, whatever the deployment's network reaches; the only
     refused destination is this server itself, §3.8 "General URLs"), and this
@@ -1223,19 +1256,20 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     argument lists `/workspace`). Anything that is not a sandbox path the tool
     handles — relative, empty, a URL, outside `/workspace` — gets the common
     fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
-    `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/mnt/…`
+    `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/ext/…`
     (read-only reference data) is refused by `write_file` and `list_workspace`
     with a pointer to `run_shell` (a distinction inside the same `path`
     argument, based on what the path resolves to).
     `fetch_from_workspace(path)` turns a sandbox file into something the user
-    can open, and **also takes `/mnt/…`**: a `/workspace/…` file is read through
+    can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
     the sandbox, registered as a File and attached to the chat (`file_id`
-    returned). A `/mnt/…` file that exists under nucllei's own `/mnt` (= the
-    `/ext` gate serves it) is **not copied or attached** — the tool answers
-    with its relative `/ext/{rest}` URL (`image_refs.url_for_mounted_path`) and
+    returned). An `/ext/…` file that exists under nucllei's own `$DATA_DIR/ext`
+    (= the `/ext` gate serves it) is **not copied or attached** — the tool
+    answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
+    same string as the path for ASCII names, percent-encoded otherwise) and
     tells the model to put that URL in the message (image syntax for images, a
-    link otherwise). Any other `/mnt/…` path is read by the server from its own
-    read-only mount (`resolve_path`: confined to the mount root, capped at
+    link otherwise). Any other `/ext/…` path is read by the server from its own
+    `$DATA_DIR/ext` (`resolve_path`: confined to the mount, capped at
     `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
     means a path the sandbox sees but nucllei does not is reported as
     unreadable (the deployment withholds by not mounting; §3.8). Failures are
@@ -1253,7 +1287,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `http(s)://…` or same-server `/ext/{rest}` — resolved by the shared
     resolver (`resolve_url`), so exactly the URLs `feed_image` / `fetch_url`
     above can read:
-    `/ext/{rest}` (relative or on any host — nucllei's own `/mnt/{rest}`,
+    `/ext/{rest}` (relative or on any host — nucllei's own `$DATA_DIR/ext/{rest}`,
     nothing fetched); and any other scheme-qualified `http(s)://` URL (§3.8 "General
     URLs"), fetched directly from its host and pinned to the resolved address,
     redirects followed up to 3 times — wherever the deployment's network
@@ -1271,10 +1305,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     upstreams or the server itself), each with a fixed sentence that never
     inspects the value.
     Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
-    When the URL is `/ext/{rest}` and **`/mnt/{rest}` exists on nucllei's
-    side** (`image_refs.mounted_path_for_url`), nothing is copied: the tool answers
-    with that `/mnt/…` path, because `/mnt` is the same read-only mount the
-    sandbox binds (#138) — this relies on the deployment binding the same
+    When the URL is `/ext/{rest}` and **`$DATA_DIR/ext/{rest}` exists on
+    nucllei's side** (`image_refs.mounted_path_for_url`), nothing is copied: the
+    tool answers with the sandbox path `/ext/{rest}` (the same string as the
+    URL), because the sandbox binds the same tree at its `/ext` (#138) — this
+    relies on the deployment binding the same
     volume on both sides, which the server cannot verify; the size cap does not
     apply. A `url` that is this server's file delivery URL
     (`/api/v1/files/{id}/content`, relative or absolute) is routed to that file

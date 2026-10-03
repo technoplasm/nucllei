@@ -621,7 +621,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "../escape",
             "/workspace/../etc/passwd",
             "/etc/passwd",
-            "/mnt/server/a.txt",
+            "/ext/server/a.txt",
             "/workspacefoo/a.txt",
             "",
             # 相対パスは受けない (/workspace からの相対として救済しない)
@@ -638,7 +638,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             assert "接続できません" not in out, bad
         # read-only の置き場は理由を言う
         assert "read-only" in asyncio.run(
-            tool.write_file("/mnt/server/a.txt", "x", __user__=user)
+            tool.write_file("/ext/server/a.txt", "x", __user__=user)
         )
         # 形の誤りは値によらず同じ文: 全 tool 共通の形 + この tool の path が受ける形
         from nucllei.utils.image_refs import REF_ARGS_RULE, WORKSPACE_PATH_ARG_FORM
@@ -781,15 +781,15 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 assert out.startswith(
                     f"ERROR: {bad} は sandbox のパスの形でない。"
                 ), bad
-        # /mnt/ は sandbox の /files/* が扱えない — 使える手段を案内して断る
-        out = asyncio.run(tool.list_workspace("/mnt/server42", __user__=user))
+        # /ext/ は sandbox の /files/* が扱えない — 使える手段を案内して断る
+        out = asyncio.run(tool.list_workspace("/ext/server42", __user__=user))
         assert out.startswith("ERROR:") and "run_shell" in out and "ls" in out
         # 見せる手段は fetch_from_workspace(path) — 固定文で案内する
         assert "fetch_from_workspace" in out
-        # fetch_from_workspace は /mnt/ を受ける (sandbox の /files/* は使わず、nucllei 側の
-        # 同じ置き場から読む — 末尾の「fetch_from_workspace(path) の /mnt/…」節)。無ければ不在
+        # fetch_from_workspace は /ext/ を受ける (sandbox の /files/* は使わず、nucllei 側の
+        # 同じ置き場 EXT_DIR から読む — 末尾の「fetch_from_workspace(path) の /ext/…」節)。無ければ不在
         out = asyncio.run(
-            tool.fetch_from_workspace("/mnt/server42/a.png", __user__=user)
+            tool.fetch_from_workspace("/ext/server42/a.png", __user__=user)
         )
         assert out.startswith("ERROR:") and "読めない" in out
         assert tool.calls == []
@@ -889,7 +889,7 @@ class _UrlEnv:
     def mount_root(self, root):
         from nucllei.utils import image_refs
 
-        self.monkeypatch.setattr(image_refs, "RO_MOUNT_ROOT", root)
+        self.monkeypatch.setattr(image_refs, "EXT_DIR", root)
 
     def files(self, tmp_path, records: dict):
         """Files / Storage を差し替える。records = {file_id: (owner, filename, bytes)}。"""
@@ -935,7 +935,7 @@ def test_spec_has_no_request_param_and_no_lan_valve():
     assert not hasattr(mod, "SELF_BASE_URL")
 
 
-# --- resolver 経由の取り込み(一般の URL / /mnt の橋渡し)--------------------------
+# --- resolver 経由の取り込み(一般の URL / /ext の橋渡し)--------------------------
 
 
 def test_general_url_is_fetched_and_copied(monkeypatch):
@@ -954,8 +954,9 @@ def test_general_url_is_fetched_and_copied(monkeypatch):
 
 
 def test_ext_url_is_read_from_the_mount_without_connecting(monkeypatch, tmp_path):
-    # path が /ext/{rest} の URL は host を問わず nucllei の /mnt/{rest} をローカル読み。
-    # 与えられた host にも自オリジンにも接続しない。実在すればコピーせずパスを返す
+    # path が /ext/{rest} の URL は host を問わず nucllei の EXT_DIR/{rest} をローカル読み。
+    # 与えられた host にも自オリジンにも接続しない。実在すればコピーせず sandbox のパス
+    # (= 相対 URL と同じ文字列、decode 済み)を返す
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
@@ -965,9 +966,8 @@ def test_ext_url_is_read_from_the_mount_without_connecting(monkeypatch, tmp_path
         "/ext/cage/static/%E5%9B%B3/a.png",
     ):
         result = env.run(url=url)
-        assert (
-            "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
-        ), url
+        assert "取り込み不要" in result and "/ext/cage/static/図/a.png" in result, url
+        assert str(root) not in result, url  # nucllei 側の実体のパスは見せない
     assert env.gets == [] and env.writes == []
 
 
@@ -1013,7 +1013,7 @@ def test_server_itself_is_not_fetched(monkeypatch):
 
 
 def test_unmounted_ext_path_is_not_found(monkeypatch, tmp_path):
-    # /mnt に無い /ext/… は存在しない(設定も name の概念も無い — 2026-10-03)
+    # EXT_DIR に無い /ext/… は存在しない(設定も name の概念も無い — 2026-10-03)
     env = _UrlEnv(monkeypatch)
     env.mount_root(_cage_mount(tmp_path))
     for url in ("https://llens.test/ext/nosuch/a.png", "/ext/nosuch/a.png", "/ext/"):
@@ -1197,15 +1197,16 @@ def test_traversal_and_malformed_url(monkeypatch, tmp_path):
 
 
 def _cage_mount(tmp_path):
-    root = tmp_path / "mnt"
+    """tmp の EXT_DIR(= /ext の配信元 = sandbox の /ext と同じ木)。"""
+    root = tmp_path / "data" / "ext"
     (root / "cage" / "static" / "図").mkdir(parents=True)
     (root / "cage" / "static" / "図" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
     return root
 
 
 def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
-    """`/ext/{rest}` の実体 = RO_MOUNT_ROOT(/mnt)の `{rest}` = sandbox と同じ置き場(#138)。
-    URL → fs パスの読み替えを tool が橋渡しし、コピーは作らない。"""
+    """`/ext/{rest}` の実体 = EXT_DIR の `{rest}` = sandbox の `/ext/{rest}` と同じ物(#138)。
+    URL → sandbox のパス(同じ文字列)の橋渡しを tool がし、コピーは作らない。"""
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
@@ -1214,20 +1215,20 @@ def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
     result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
     assert not result.startswith("ERROR")
     assert "取り込み不要" in result
-    assert f"{root}/cage/static/図/a.png" in result
+    assert "/ext/cage/static/図/a.png" in result and str(root) not in result
     assert "run_python / run_shell" in result
     assert env.writes == [] and env.gets == []
 
 
 def test_any_mounted_path_is_bridged(monkeypatch, tmp_path):
-    # /mnt に見えている物は全部(cage に限らない)。fragment も query も付いてよい
+    # EXT_DIR に見えている物は全部(cage に限らない)。fragment も query も付いてよい
     root = _cage_mount(tmp_path)
     (root / "shared").mkdir()
     (root / "shared" / "s.pdf").write_bytes(b"%PDF-1")
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
     result = env.run(url="http://any.host/ext/shared/s.pdf?v=1#page=1")
-    assert "取り込み不要" in result and f"{root}/shared/s.pdf" in result
+    assert "取り込み不要" in result and "/ext/shared/s.pdf" in result
     assert env.writes == [] and env.gets == []
 
 
@@ -1242,7 +1243,7 @@ def test_missing_mounted_file_is_not_found(monkeypatch, tmp_path):
 
 
 def test_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
-    # /mnt の外を指す symlink — パスも返さず、読みもしない
+    # EXT_DIR の外を指す symlink — パスも返さず、読みもしない
     root = _cage_mount(tmp_path)
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"x")
@@ -1258,13 +1259,13 @@ def test_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
 
 
 def test_relative_ext_url_under_mount(monkeypatch, tmp_path):
-    # 相対 `/ext/{rest}` は「このサーバの URL」= 絶対形と同じ /mnt で解決する。
-    # 解決先が /mnt 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
+    # 相対 `/ext/{rest}` は「このサーバの URL」= 絶対形と同じ EXT_DIR で解決する。
+    # 解決先が EXT_DIR 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
     result = env.run(url="/ext/cage/static/%E5%9B%B3/a.png")
-    assert "取り込み不要" in result and f"{root}/cage/static/図/a.png" in result
+    assert "取り込み不要" in result and "/ext/cage/static/図/a.png" in result
     assert env.writes == [] and env.gets == []
 
 
@@ -1376,10 +1377,10 @@ def test_no_value_sniffing_helpers_left():
 
 
 # =============================================================================
-# fetch_from_workspace(path) の /mnt/…(sandbox のパス → 利用者に見せられる形)
+# fetch_from_workspace(path) の /ext/…(sandbox のパス → 利用者に見せられる形)
 #
 # send_to_workspace(url=) の「URL → sandbox で開けるパス」の逆向き。値の形ではなく
-# 解決結果で分かれる: 実体が nucllei 側の /mnt にも実在すれば(= /ext で配信されている)URL を
+# 解決結果で分かれる: 実体が nucllei 側の EXT_DIR にも実在すれば(= /ext で配信されている)URL を
 # 返し(コピーも添付もしない)、無ければ添付もできない(読めない)。2026-10-03 までの
 # EXT_FILE_SCOPES(配信範囲の外は添付もしない)は設定ごと撤去。
 # =============================================================================
@@ -1403,8 +1404,7 @@ class _MountEnv(_UrlEnv):
         outside.write_text("secret")
         (self.root / "shared" / "escape.txt").symlink_to(outside)
         self.mount_root(self.root)
-        # tool 側の「/mnt 配下か」の判定も同じ tmp root に向ける
-        monkeypatch.setattr(mod, "_RO_MOUNT_ROOT", str(self.root))
+        # tool 側の「/ext 配下か」は jail 側の形(`/ext/…`)で見る — 差し替え不要
 
         self.registered: list[tuple] = []
         self.displayed: list[str] = []
@@ -1432,7 +1432,7 @@ class _MountEnv(_UrlEnv):
 def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
     env = _MountEnv(monkeypatch, tmp_path)
 
-    out = env.fetch(f"{env.root}/cage/static/図/a.png")
+    out = env.fetch("/ext/cage/static/図/a.png")
     url = "/ext/cage/static/%E5%9B%B3/a.png"
     assert not out.startswith("ERROR") and "添付不要" in out
     # 画像は画像記法で、URL は相対のまま
@@ -1442,35 +1442,37 @@ def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
     assert env.writes == []
 
     # 画像以外はリンク。空白を含む名前も markdown のリンク先に置ける形
-    out = env.fetch(f"{env.root}/cage/static/表 1.csv")
+    out = env.fetch("/ext/cage/static/表 1.csv")
     assert "[表 1.csv](/ext/cage/static/%E8%A1%A8%201.csv)" in out
-    # cage に限らず、/mnt に見えている物はゲートが配信している = URL を返す
-    out = env.fetch(f"{env.root}/cage/doc/本文.md")
+    # cage に限らず、EXT_DIR に見えている物はゲートが配信している = URL を返す
+    out = env.fetch("/ext/cage/doc/本文.md")
     assert "(/ext/cage/doc/%E6%9C%AC%E6%96%87.md)" in out
-    out = env.fetch(f"{env.root}/shared/案内 図.png")
+    out = env.fetch("/ext/shared/案内 図.png")
     assert "![案内 図.png](/ext/shared/%E6%A1%88%E5%86%85%20%E5%9B%B3.png)" in out
-    out = env.fetch(f"{env.root}/shared/memo.txt")
+    out = env.fetch("/ext/shared/memo.txt")
     assert "[memo.txt](/ext/shared/memo.txt)" in out
     assert env.registered == [] and env.emitted == [] and env.displayed == []
 
     # 返した URL は send_to_workspace(url=) に渡すと同じパスに戻る(往復)
     back = env.run(url=url)
-    assert "取り込み不要" in back and f"{env.root}/cage/static/図/a.png" in back
+    assert "取り込み不要" in back and "/ext/cage/static/図/a.png" in back
 
 
 def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_path):
-    """nucllei 側の /mnt に無い物(sandbox にだけ bind した置き場)は URL も無く、読めも
-    しない — 配備は配信したくない物を nucllei 側に mount しないことで渡さない。添付の経路
-    (`_attach`)は /mnt にあって URL にできない物のためだけに残る(実質 resolver が
+    """nucllei 側の EXT_DIR に無い物(sandbox にだけ bind した置き場)は URL も無く、読めも
+    しない — 配備は配信したくない物を nucllei 側に置かないことで渡さない。添付の経路
+    (`_attach`)は EXT_DIR にあって URL にできない物のためだけに残る(実質 resolver が
     not_found で断る)。"""
     env = _MountEnv(monkeypatch, tmp_path)
     for missing in (
-        f"{env.root}/shared/nope.png",
-        f"{env.root}/elsewhere/x.txt",
+        "/ext/shared/nope.png",
+        "/ext/elsewhere/x.txt",
     ):
         out = env.fetch(missing)
         assert out.startswith("ERROR:") and "読めない" in out, missing
-        assert "file_id=" not in out and "/ext/" not in out, missing
+        # URL(markdown のリンク / 画像記法)も file_id も出ない(パスの echo は出る)
+        assert "file_id=" not in out and "](/ext/" not in out, missing
+        assert "添付不要" not in out, missing
     assert env.registered == [] and env.emitted == [] and env.displayed == []
     # sandbox の /files/read は使わない(nucllei 側の同じ置き場を見る)
     assert env.writes == []
@@ -1481,28 +1483,30 @@ def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
 
     # 不在 / ディレクトリ / mount の外へ出る symlink → 読まない(同じ文面 = fail closed)
     for bad in (
-        f"{env.root}/shared/nope.txt",
-        f"{env.root}/shared",
-        f"{env.root}",
-        f"{env.root}/shared/escape.txt",
-        f"{env.root}/cage/static/nope.png",
+        "/ext/shared/nope.txt",
+        "/ext/shared",
+        "/ext",
+        "/ext/shared/escape.txt",
+        "/ext/cage/static/nope.png",
+        # path は fs のパスとして読む(URL と同じ文字列でも percent-decode しない)
+        "/ext/cage/static/%E5%9B%B3/a.png",
     ):
         out = env.fetch(bad)
         assert out.startswith("ERROR:") and "読めない" in out, bad
         assert "大きすぎ" not in out and "上限" not in out, bad
 
     # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない
-    out = env.fetch(f"{env.root}/shared/../../outside.txt")
+    out = env.fetch("/ext/shared/../../outside.txt")
     assert out.startswith("ERROR:") and out.endswith(f"{PATH_ARG_FORM} {REF_ARGS_RULE}")
-    # `..` を畳めば /mnt の中 = 配信されている(URL)
-    out = env.fetch(f"{env.root}/shared/../shared/memo.txt")
+    # `..` を畳めば /ext の中 = 配信されている(URL)
+    out = env.fetch("/ext/shared/../shared/memo.txt")
     assert "添付不要" in out and "(/ext/shared/memo.txt)" in out
 
     # 配信されている物は読まないので上限に掛からない
     monkeypatch.setattr("nucllei.utils.image_refs.FETCH_MAX_BYTES", 3)
     env.emitted.clear()
-    assert "添付不要" in env.fetch(f"{env.root}/cage/static/図/a.png")
-    assert "添付不要" in env.fetch(f"{env.root}/shared/memo.txt")
+    assert "添付不要" in env.fetch("/ext/cage/static/図/a.png")
+    assert "添付不要" in env.fetch("/ext/shared/memo.txt")
     assert env.registered == [] and env.emitted == []
 
 
@@ -1518,11 +1522,13 @@ def test_no_withheld_concept_left():
 
 
 def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
-    """path に URL / file_id が来ても読み替えない — sandbox のパスとして解いて失敗する。"""
+    """path に URL / file_id が来ても読み替えない — sandbox のパスとして解いて失敗する
+    (`/ext/…` は sandbox のパスでもあるので別: 上の told_apart の percent-encoded の例)。"""
     env = _MountEnv(monkeypatch, tmp_path)
     for given in (
-        "/ext/cage/static/%E5%9B%B3/a.png",
+        "https://llens.test/ext/cage/static/%E5%9B%B3/a.png",
         f"/api/v1/files/{FILE_UUID}/content",
+        "/mnt/cage/static/図/a.png",  # 2026-10-03 までの置き場。もう特別扱いしない
     ):
         out = env.fetch(given)
         assert out == (
@@ -1542,7 +1548,7 @@ def test_fetch_from_workspace_spec_mentions_both_outcomes():
         s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )
     assert list(spec["parameters"]["properties"]) == ["path"]
-    assert "/mnt/" in spec["parameters"]["properties"]["path"]["description"]
+    assert "/ext/" in spec["parameters"]["properties"]["path"]["description"]
     # 橋渡しで返る URL は percent-encode される(本文の URL と別表記になりうる)
     assert "別表記" in description
 
@@ -1564,7 +1570,7 @@ def test_reference_params_are_described_in_fixed_words():
         "`/api/v1/files/{id}/content`。"
     )
     workspace_form = "sandbox の絶対パス (`/workspace/…`)。"
-    path_form = "sandbox の絶対パス (`/workspace/…` `/mnt/…`)。"
+    path_form = "sandbox の絶対パス (`/workspace/…` `/ext/…`)。"
     file_id_form = "添付・生成物の id"
 
     sandbox = Tools()

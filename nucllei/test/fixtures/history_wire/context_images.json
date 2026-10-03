@@ -35,7 +35,7 @@
 								"HTTP://llens.test/ext/cage/figs/b.png",
 								"/ext/cage/figs/c.png",
 								"/ext/cage/docs/d.pdf#page=4",
-								"/mnt/cage/x.pdf#page=2",
+								"/workspace/cage/x.pdf#page=2",
 								"/api/v1/files/def/content#page=3"
 							]
 						}
@@ -95,7 +95,7 @@
 						},
 						{ "type": "image_url", "image_url": { "url": "/ext/cage/figs/c.png" } },
 						{ "type": "image_url", "image_url": { "url": "/ext/cage/docs/d.pdf#page=4" } },
-						{ "type": "image_url", "image_url": { "url": "/mnt/cage/x.pdf#page=2" } },
+						{ "type": "image_url", "image_url": { "url": "/workspace/cage/x.pdf#page=2" } },
 						{ "type": "image_url", "image_url": { "url": "/api/v1/files/def/content#page=3" } }
 					]
 				},

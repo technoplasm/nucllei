@@ -171,7 +171,7 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
                     "context_images": [
                         "abc",
                         "https://llens.test/ext/cage/figs/a.png",
-                        "/mnt/cage/x.pdf#page=2",
+                        "/workspace/cage/x.pdf#page=2",
                     ],
                 }
             ],
@@ -190,7 +190,7 @@ def test_convert_context_images_mixed_file_id_and_ext_url():
     assert urls == [
         "/api/v1/files/abc/content",
         "https://llens.test/ext/cage/figs/a.png",
-        "/mnt/cage/x.pdf#page=2",
+        "/workspace/cage/x.pdf#page=2",
     ]
 
 

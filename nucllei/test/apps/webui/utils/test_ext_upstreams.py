@@ -1,6 +1,6 @@
 """/ext の共有ヘルパ(`utils/ext_upstreams.py`)の回帰テスト(#97 / #139 / 2026-10-03)。
 
-- `/ext/**` の配信に設定は無い(2026-10-03 ken 決定): nucllei の `/mnt` をそのまま配信する。
+- `/ext/**` の配信に設定は無い(2026-10-03 ken 決定): nucllei の `DATA_DIR/ext` をそのまま配信する。
   旧 EXT_UPSTREAMS / EXT_FILE_SCOPES / EXT_PUBLIC_BASES(と同日に一度置いた EXT_DIRS)は
   env にもパーサにも helper にも残さない。
 - has_path_traversal: /ext ゲートと resolver が共有する同一判定。percent デコード

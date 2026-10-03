@@ -6,7 +6,7 @@ pydantic stub / importlib のロードは落とし (nucllei の中なので直�
 
 引数の意味 (2026-10-03 ken 決定): url = URL (スキーム付き絶対 URL か同一サーバの相対 `/ext/…`)、
 path = sandbox の絶対パス、file_id = 添付・生成物。**解釈は引数名だけで決める** — 値の形を見て
-別の引数の意味に読み替えない (url="/mnt/…" は URL として解決できない、path="https://…" は
+別の引数の意味に読み替えない (url="/workspace/…" は URL として解決できない、path="https://…" は
 sandbox のパスの形でない、の固定文 ERROR)。
 
 共有 resolver (utils/image_refs: resolve_url / resolve_path / detect_kind / pdf_page_count) は
@@ -91,7 +91,7 @@ class _Resolver:
         self.calls.append(("path", ref))
         self.users.append(user_id)
         self.kwargs.append(kwargs)
-        if not ref.startswith(("/workspace/", "/mnt/")):
+        if not ref.startswith(("/workspace/", "/ext/")):
             return None, RefError("unsupported_form", "not a sandbox path")
         return self._lookup(ref)
 
@@ -128,13 +128,12 @@ HIS_PNG_URL = f"{HIS}/log_write.aspx?LI_URL=fig.png"
 TABLE = {
     FIG_URL: PNG,
     FIG_REL: PNG,
-    "/ext/cage/static/kansen_manual/docs/10-14.pdf": PDF,
-    "/mnt/cage/static/kansen_manual/docs/10-14.pdf": PDF,
+    "/ext/cage/static/kansen_manual/docs/10-14.pdf": PDF,  # url でも path でも同じ物
     "/workspace/out/plot.png": PNG,
     HIS_PDF_URL: PDF,
     HIS_PNG_URL: PNG,
     f"{ORIGIN}/ext/cage/static/kansen_manual/docs/10-14.pdf": PDF,
-    "/mnt/cage/doc/a.md": _Loaded(b"# a", "text/markdown", "a.md"),
+    "/ext/cage/doc/a.md": _Loaded(b"# a", "text/markdown", "a.md"),
 }
 
 URL_FORM = f"{URL_ARG_FORM} {REF_ARGS_RULE}"
@@ -144,8 +143,11 @@ SHOW_PATH = (
 )
 
 
-def _ref_kw(ref):
-    """参照を正の引数名で渡す: URL (スキーム付き / 相対 `/ext/`) は url=、sandbox のパスは path=。"""
+def _ref_kw(ref, arg=None):
+    """参照を正の引数名で渡す: URL (スキーム付き / 相対 `/ext/`) は url=、sandbox のパスは path=。
+    `/ext/…` は両方の形 (同じファイル) なので、path として渡したいテストは `arg="path"` で指定。"""
+    if arg:
+        return {arg: ref}
     r = ref.strip().lower()
     return (
         {"url": ref}
@@ -229,7 +231,7 @@ def test_url_takes_a_same_server_relative_ext_url(monkeypatch):
 def test_path_takes_a_sandbox_absolute_path(monkeypatch):
     for ref in (
         "/workspace/out/plot.png",
-        "/mnt/cage/static/kansen_manual/docs/10-14.pdf",
+        "/ext/cage/static/kansen_manual/docs/10-14.pdf",
     ):
         result, fed, resolver = _run(monkeypatch, path=ref)
         assert resolver.refs == [ref] and resolver.users == ["u1"], ref
@@ -242,21 +244,25 @@ def test_path_takes_a_sandbox_absolute_path(monkeypatch):
 def test_url_given_to_path_is_not_reinterpreted(monkeypatch):
     """path に URL (絶対でも相対 /ext/ でも) → resolve_path に渡り (URL としては取得しない)、
     sandbox のパスの形でない、の固定文。"""
-    for ref in (FIG_URL, HIS_PNG_URL, FIG_REL, "/api/v1/files/abc/content"):
+    for ref in (FIG_URL, HIS_PNG_URL, "/api/v1/files/abc/content"):
         result, fed, resolver = _run(monkeypatch, path=ref)
         assert fed == [] and resolver.calls == [("path", ref)], ref
         assert result == f"ERROR: {ref} は sandbox のパスの形でない。{PATH_FORM}", (
             ref,
             result,
         )
+    # 相対 `/ext/…` は sandbox のパスでもある (同じ文字列・同じファイル) — path として読める
+    result, fed, resolver = _run(monkeypatch, path=FIG_REL)
+    assert resolver.calls == [("path", FIG_REL)] and fed == [FIG_REL]
+    assert not result.startswith("ERROR")
 
 
 def test_sandbox_path_given_to_url_is_not_reinterpreted(monkeypatch):
-    """url に /mnt/… /workspace/… → resolve_url に渡り (sandbox の fs としては読まない)、
-    URL として解決できない、の固定文。"""
+    """url に /workspace/… → resolve_url に渡り (sandbox の fs としては読まない)、
+    URL として解決できない、の固定文。(`/ext/…` は URL でもあるので対象外 — 同じファイル)"""
     for ref in (
         "/workspace/out/plot.png",
-        "/mnt/cage/static/kansen_manual/docs/10-14.pdf",
+        "/mnt/cage/static/kansen_manual/docs/10-14.pdf",  # 旧 RO 置き場。もう何でもない
     ):
         result, fed, resolver = _run(monkeypatch, url=ref)
         assert fed == [] and resolver.calls == [("url", ref)], ref
@@ -271,7 +277,7 @@ def test_error_text_is_fixed_per_argument_not_per_value(monkeypatch):
     他の tool 名・別の引数への誘導を含まない。"""
     for bad in (
         "/workspace/x.png",
-        "/mnt/x.pdf",
+        "/etc/x.pdf",
         "relative/x.png",
         "ftp://h/x.png",
         "//evil.example.com/x.png",
@@ -285,7 +291,7 @@ def test_error_text_is_fixed_per_argument_not_per_value(monkeypatch):
         assert "path=" not in result and "path に" not in result, bad
     for bad in (
         "https://h/x.png",
-        "/ext/cage/x.png",
+        "/mnt/cage/x.png",  # 2026-10-03 までの RO 置き場。もう何でもない
         "relative/x.png",
         "/opt/x.png",
         "/etc/passwd",
@@ -377,7 +383,7 @@ def test_image_size_cap(monkeypatch):
 
 
 def test_pdf_path_pushes_page_refs_without_creating_files(monkeypatch):
-    ref = "/mnt/cage/static/kansen_manual/docs/10-14.pdf"
+    ref = "/ext/cage/static/kansen_manual/docs/10-14.pdf"
     result, fed, _r = _run(monkeypatch, path=ref, pages="2-3", n_pages=10)
     assert fed == [f"{ref}#page=2", f"{ref}#page=3"]
     assert not result.startswith("ERROR")
@@ -392,7 +398,7 @@ def test_pdf_path_without_pages_takes_from_the_top_and_truncates(monkeypatch):
 
 
 def test_pdf_path_pages_beyond_the_end_are_clipped(monkeypatch):
-    ref = "/mnt/cage/static/kansen_manual/docs/10-14.pdf"
+    ref = "/ext/cage/static/kansen_manual/docs/10-14.pdf"
     result, fed, _r = _run(monkeypatch, path=ref, pages="4-9", n_pages=5)
     assert fed == [f"{ref}#page=4", f"{ref}#page=5"]
     assert not result.startswith("ERROR")
@@ -401,7 +407,7 @@ def test_pdf_path_pages_beyond_the_end_are_clipped(monkeypatch):
 def test_page_fragment_in_path_is_honoured(monkeypatch):
     """`…/x.pdf#page=3` の literal (自分が前に積んだ参照) を渡されても壊れない。URL でも同じ。"""
     for ref in (
-        "/mnt/cage/static/kansen_manual/docs/10-14.pdf",
+        "/ext/cage/static/kansen_manual/docs/10-14.pdf",
         f"{ORIGIN}/ext/cage/static/kansen_manual/docs/10-14.pdf",
     ):
         result, fed, resolver = _run(monkeypatch, **_ref_kw(f"{ref}#page=3"), n_pages=5)
@@ -518,7 +524,7 @@ def test_url_of_the_internal_file_endpoint_keeps_the_owner_check(monkeypatch):
 
 
 def test_success_on_a_sandbox_path_does_not_suggest_pasting_it(monkeypatch):
-    """fs (`/mnt/…` `/workspace/…`) はブラウザに意味が無い — `![…](/workspace/…)` を勧めない。
+    """fs (`/ext/…` `/workspace/…`) はブラウザに意味が無い — `![…](/workspace/…)` を勧めない。
     URL のときだけ本文への再掲を勧める。"""
     result, fed, _r = _run(monkeypatch, path="/workspace/out/plot.png")
     assert fed == ["/workspace/out/plot.png"] and "](" not in result
@@ -544,8 +550,8 @@ def test_unsupported_form_from_the_resolver_uses_the_fixed_text_of_the_argument(
     monkeypatch,
 ):
     """resolver が unsupported_form を返したときも、どの引数で来たかで固定文を選ぶ。"""
-    result = _explained(monkeypatch, "unsupported_form", ref="/mnt/x.png")
-    assert result == f"ERROR: /mnt/x.png は sandbox のパスの形でない。{PATH_FORM}"
+    result = _explained(monkeypatch, "unsupported_form", ref="/ext/x.png", arg="path")
+    assert result == f"ERROR: /ext/x.png は sandbox のパスの形でない。{PATH_FORM}"
     result = _explained(monkeypatch, "unsupported_form", ref=f"{ORIGIN}/x.png")
     assert result == f"ERROR: {ORIGIN}/x.png は URL として解決できない。{URL_FORM}"
 
@@ -562,10 +568,10 @@ def test_feed_image_does_not_pass_max_bytes(monkeypatch):
 # モデルが「リンク切れ」と誤報した。code ごとに「何が起きたか + 次の一手」を言う。
 
 
-def _explained(monkeypatch, code, ref=HIS_PDF_URL, **kw):
+def _explained(monkeypatch, code, ref=HIS_PDF_URL, arg=None, **kw):
     kw.setdefault("detail", "")
     result, fed, resolver = _run(
-        monkeypatch, {ref: RefError(code, **kw)}, **_ref_kw(ref)
+        monkeypatch, {ref: RefError(code, **kw)}, **_ref_kw(ref, arg)
     )
     assert resolver.refs == [ref], code
     assert fed == [] and result.startswith("ERROR"), (code, result)
@@ -601,13 +607,14 @@ def test_too_large_names_size_and_limit_in_mb_and_hands_the_url_to_the_user(
 
 
 def test_too_large_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
-    """`/mnt/…` `/workspace/…` はブラウザに意味が無い — 「URL を案内」と言わず、
+    """`/ext/…` `/workspace/…` はブラウザに意味が無い — 「URL を案内」と言わず、
     run_python で直接開いて縮小 / fetch_from_workspace で渡す、を言う。"""
-    for ref in ("/mnt/doc/static/big.png", "/workspace/out/huge.pdf"):
+    for ref in ("/ext/doc/static/big.png", "/workspace/out/huge.pdf"):
         result = _explained(
             monkeypatch,
             "too_large",
             ref=ref,
+            arg="path",
             size=32_646_426,
             limit=25 * 1024 * 1024,
             size_exact=True,
@@ -677,8 +684,8 @@ def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch):
         f"{HIS_PDF_URL} は存在しない (404 / ファイル無し)" in result
         and "リンク切れとして案内" in result
     )
-    result, fed, _r = _run(monkeypatch, path="/mnt/cage/static/missing.png")
-    assert fed == [] and "/mnt/cage/static/missing.png は存在しない" in result
+    result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
+    assert fed == [] and "/ext/cage/static/missing.png は存在しない" in result
     assert "リンク切れ" not in result and "run_shell の ls" in result
 
 
@@ -712,8 +719,8 @@ def test_traversal_code_says_out_of_bounds(monkeypatch):
     """url なら url の形の文、path なら path の形の文を添える (行き先の規則は付けない)。"""
     result = _explained(monkeypatch, "traversal", ref=f"{ORIGIN}/ext/his/../x")
     assert "許可された範囲の外" in result and result.endswith(URL_ARG_FORM)
-    for ref in ("/workspace/../etc/passwd", "/mnt/../secret"):
-        result = _explained(monkeypatch, "traversal", ref=ref)
+    for ref in ("/workspace/../etc/passwd", "/ext/../secret"):
+        result = _explained(monkeypatch, "traversal", ref=ref, arg="path")
         assert "許可された範囲の外" in result and result.endswith(PATH_ARG_FORM), ref
 
 
@@ -763,7 +770,7 @@ def test_general_url_reasons_have_their_own_text(monkeypatch):
 
 def test_non_image_non_pdf_is_an_error_pointing_to_text_tools(monkeypatch):
     """読めた結果がテキストなら、来た引数に応じた読み方 (path → run_shell、url → fetch_url)。"""
-    result, fed, _r = _run(monkeypatch, path="/mnt/cage/doc/a.md")
+    result, fed, _r = _run(monkeypatch, path="/ext/cage/doc/a.md")
     assert fed == [] and result.startswith("ERROR")
     assert "run_shell" in result and "fetch_url" not in result
     table = dict(TABLE)

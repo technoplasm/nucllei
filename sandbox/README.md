@@ -57,7 +57,7 @@ nsjail jail
   - /workspace: ユーザー単位の loopback ext4 を rw bind (下記 quota 参照)
   - /tmp: 256MB tmpfs (RAM-backed・実行ごとに消える。実行中の一時ファイル用。
     跨いで残すなら /workspace へ)
-  - /mnt/<名前>: 配備側が置いた参照用データを read-only bind (既定は空。下記)
+  - /ext/<名前>: 配備側が置いた参照用データを read-only bind (既定は空。下記。2026-10-03 までは /mnt)
   - network namespace: 空 (loopback 含め通信不可)
 ```
 
@@ -70,24 +70,36 @@ nsjail jail
 - UI とのファイル入出力は tool (UI プロセス側) が bytes を持ち運ぶ。
   sandbox サービスは UI に一切アクセスしない (信頼方向は UI → sandbox の一方通行)。
 
-### 参照用データを jail に見せる (`/mnt`)
+### 参照用データを jail に見せる (`/ext`)
 
 「大きな読み取り専用データを丸ごと走査したい」用途 (コーパス横断の集計など) のために、
-**コンテナの `/mnt` 直下に在るものが、同じパスのまま jail へ read-only で bind される**
+**コンテナの `/ext` 直下に在るものが、同じパスのまま jail へ read-only で bind される**
 (#138)。**サービス側の設定は無い** — 配備側は compose に volume を足すだけでよい。
+
+置き場の名前が `/ext` なのは (2026-10-03、ken 決定。それまでは `/mnt`)、nucllei が同じ木を
+`DATA_DIR/ext` (image では `/app/data/ext`) から URL `/ext/<rel>` で配信するため — **jail の
+パスと URL が同じ文字列** になる (`/ext/cage/static/X` は jail から読んでも、ブラウザで開いても、
+nucllei の tool の `url=` / `path=` に渡しても同じ物)。モデルに読み替えをさせない。
+`/mnt` を捨てた理由: docker 固有の慣習で、nucllei 側は host 直起動もあり、host の `/mnt`
+(NFS 等) を晒してしまう (nucllei の `README_API.md` §3.8)。
 
 ```yaml
 services:
+  nucllei:
+    volumes:
+      - /srv/cage/data/static:/app/data/ext/cage/static:ro  # URL /ext/cage/static/…
   sandbox:
     volumes:
-      - /srv/cage/data/doc:/mnt/doc:ro       # jail からも /mnt/doc で見える
-      - /srv/cage/data/static:/mnt/static:ro # 足すぶんだけ並ぶ
+      - /srv/cage/data/doc:/ext/doc:ro                      # jail からも /ext/doc で見える
+      - /srv/cage/data/static:/ext/cage/static:ro           # nucllei と同じ相対パスで
 ```
 
 - **guest 側 = コンテナ側と同じパス**。`host:guest` の対応表を持たないので、複数置いても
   名前順に並ぶだけで衝突しない (同じ名前は同じ 1 つの mount point にしかならない)。
-- **直下 1 階層だけ**を見る (`/mnt/doc` は bind するが `/mnt/doc/guideline` を個別には
-  足さない)。「volume 1 本 = `/mnt` の 1 エントリ」の対応を保つため。
+- **直下 1 階層だけ**を見る (`/ext/doc` は bind するが `/ext/doc/guideline` を個別には
+  足さない)。「volume 1 本 = `/ext` の 1 エントリ」の対応を保つため。深い位置に bind したい
+  (上の `/ext/cage/static`) なら、`/ext/cage` が 1 エントリ = その下は docker が作る中間
+  ディレクトリごと bind される。
 - **何も置かなければ何も足さない** = 従来どおりの jail (これが既定)。
 - **read-only**。compose 側で `:ro` を書き忘れてもコンテナ内が rw になるだけで、jail へは
   `--bindmount_ro` でしか渡らない (jail 内は EROFS)。
@@ -95,7 +107,7 @@ services:
   その判断は配備側が持つ (workspace のユーザー間隔離は従来どおり)。
 - 実体を辿れないもの (壊れた symlink) は**飛ばして警告**する。そのまま渡すと jail の起動ごと
   失敗し全ユーザーの全実行が落ちるため。dot 始まりは無視。
-- 起動ログに bind 一覧が 1 行出る (`[sandbox] 追加 read-only bind: /mnt/doc`)。
+- 起動ログに bind 一覧が 1 行出る (`[sandbox] 追加 read-only bind: /ext/doc`)。
 
 ## セキュリティモデル
 
@@ -118,8 +130,8 @@ services:
     が DAC では守られない。対策としては per-user uid オフセット割当があるが、
     脱出 + α の多段前提であり、利用者が院内医師に限られるため PoC では見送り。
 - **rootfs read-only**: 書けるのは /workspace と /tmp (tmpfs) のみ。
-  配備側が `/mnt` に足した参照用データも read-only (bind した各エントリが EROFS。
-  それを載せている `/` 自体は 16MB の使い捨て tmpfs なので `/mnt` 直下は書ける)。
+  配備側が `/ext` に足した参照用データも read-only (bind した各エントリが EROFS。
+  それを載せている `/` 自体は 16MB の使い捨て tmpfs なので `/ext` 直下は書ける)。
   rlimit (wall/CPU/メモリ/ファイルサイズ/プロセス数) で資源を制限。
   stdout/stderr はパイプなので rlimit_fsize が効かない → サービス側で
   上限バイトまで読んで以降は捨てる (メモリ膨張防止)。
@@ -301,7 +313,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
 
-参照用データの read-only bind には **env が無い** — `/mnt` 直下に置いた volume がそのまま
+参照用データの read-only bind には **env が無い** — `/ext` 直下に置いた volume がそのまま
 jail に出る (上記「参照用データを jail に見せる」)。
 
 ## UI tool (nucllei/builtin_tools/sandbox.py)
@@ -314,21 +326,22 @@ jail に出る (上記「参照用データを jail に見せる」)。
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下の絶対パス。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
-| `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/mnt/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。既に `/ext/…` で配信されている `/mnt/…` のファイルは添付せず、その URL を返す (下記) |
+| `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
 - **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**
   (2026-10-03): `/ext/{rest}` (同一サーバの相対、または絶対 `https://<host>/ext/{rest}` = host 不問) は
-  nucllei の `/mnt/{rest}` そのもの (設定無し — 同日の夕に `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` /
+  nucllei の `DATA_DIR/ext/{rest}` そのもの (設定無し — 同日の夕に `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` /
   `EXT_PUBLIC_BASES` を撤去)、それ以外のスキーム付き http(s) URL は**どこでも**直接取りに行く
   (断るのはこのサーバ自身だけ。cookie は転送しない)。builtin の `fetch_url` / `feed_image` と同じ URL が
   同じように通り、同じ理由で落ちる。上限は valve `url_max_mb` (既定 50 MB)。
-  - **`/mnt` 配下にある物はコピーしない**: URL が `/ext/{rest}` で nucllei 側の `/mnt/{rest}` が実在すれば、
-    取り込まずに「`/mnt/…` として既に sandbox から見えている」とパスを返す (上限も掛からない)。
-    `/mnt` は nucllei と sandbox が同じ volume を bind する置き場という規約
-    (上の「参照用データを jail に見せる (`/mnt`)」) に依存する — **nucllei は sandbox 側の bind の有無を確かめない**
-    ので、nucllei にだけ bind した配備ではモデルに無いパスを案内することになる。必ず両方に bind する。
+  - **`/ext` 配下にある物はコピーしない**: URL が `/ext/{rest}` で nucllei 側の `DATA_DIR/ext/{rest}` が
+    実在すれば、取り込まずに「`/ext/{rest}` として既に sandbox から見えている」とパスを返す (URL と同じ
+    文字列。上限も掛からない)。sandbox の `/ext` と nucllei の `DATA_DIR/ext` に同じ volume を bind する
+    規約 (上の「参照用データを jail に見せる (`/ext`)」) に依存する — **nucllei は sandbox 側の bind の
+    有無を確かめない**ので、nucllei にだけ bind した配備ではモデルに無いパスを案内することになる。
+    必ず両方に bind する。
   - **引数は名前で解釈が決まる。値の中身を見て別の引数に読み替えない**: `url` は URL としてだけ
-    解決し (UUID や `/workspace/…` `/mnt/…` は「URL として解決できない」+ 固定の案内文)、`file_id` に
+    解決し (UUID や `/workspace/…` は「URL として解決できない」+ 固定の案内文)、`file_id` に
     URL が来ても url としては処理しない。`url` の `/api/v1/files/{id}/content` (このサーバのファイル
     配信口。相対・絶対) は URL のルーティングとして file に当たり、file_id と同じ所有者チェックで取り込む。
     規則の定義は nucllei の `README_API.md` §3.8。
@@ -338,17 +351,17 @@ jail に出る (上記「参照用データを jail に見せる」)。
 
   | tool | 向き | 同じ実体が両方にあるとき | そうでないとき |
   |---|---|---|---|
-  | `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/mnt/…` を返す | `/workspace/imports/` にコピー |
+  | `send_to_workspace(url)` | URL → sandbox で開けるパス | コピーせず `/ext/…` (URL と同じ文字列) を返す | `/workspace/imports/` にコピー |
   | `fetch_from_workspace(path)` | sandbox のパス → 利用者に見せられる URL / file_id | 添付せず `/ext/{name}/…` を返す | Files に登録して添付 (file_id) |
 
-  - `/mnt/…` が nucllei 側の `/mnt` にも実在すれば (= `/ext` ゲートが配信している)、その配信 URL
-    (相対 `/ext/…`、パス部は percent-encode 済み) を返す。Files には何も作らない。
-    **nucllei の `/mnt` に見えている物は全部 URL になる** — 「利用者に配信する物」(`static/`) と
+  - `/ext/…` が nucllei 側の `DATA_DIR/ext` にも実在すれば (= `/ext` ゲートが配信している)、その配信 URL
+    (相対 `/ext/…`、パス部は percent-encode 済み — ASCII 名なら path と同じ文字列) を返す。Files には何も作らない。
+    **nucllei の `DATA_DIR/ext` に見えている物は全部 URL になる** — 「利用者に配信する物」(`static/`) と
     「sandbox で読むだけの物」(`doc/`) を分けたい配備は、nucllei 側には `static/` だけを
-    (`…/cage/static:/mnt/cage/static:ro` のように深く) bind し、`doc/` は sandbox にだけ bind する
+    (`…/cage/static:/app/data/ext/cage/static:ro` のように深く) bind し、`doc/` は sandbox にだけ bind する
     (2026-10-03 夕に `EXT_FILE_SCOPES` と「利用者に配信しない範囲にある」の断りは撤去。
     nucllei の `README_API.md` §3.8)。
-  - nucllei 側に無い `/mnt/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
+  - nucllei 側に無い `/ext/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
     `/files/read` は workspace しか扱わない) ので **「読めない」になる** — そのときは `run_shell` で
     `/workspace/` にコピーしてから渡すよう tool が案内する。上限は nucllei の `FETCH_MAX_BYTES`
     (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別。旧 `EXT_INLINE_MAX_BYTES`)。
@@ -360,10 +373,10 @@ jail に出る (上記「参照用データを jail に見せる」)。
   絶対パス 1 つ — 相対を「`/workspace` からの相対」と解くと `path="https://x/y.html"` が
   `/workspace/https:/x/y.html` になる。`list_workspace` の無指定の既定は `/workspace`)。
   相対・空・URL・`/workspace` の外 (`/etc/...`、`..` での脱出) は tool 側で、全 tool 共通の固定文
-  (`README_API.md` §3.8) で断り、`/mnt/...` (read-only の参照
+  (`README_API.md` §3.8) で断り、`/ext/...` (read-only の参照
   データ) は `write_file` / `list_workspace` が「`run_shell` の `ls` で見る。利用者に見せるなら
   `fetch_from_workspace`」と案内して断る — サービスの `/files/*` は workspace しか
-  扱わないため (`fetch_from_workspace` だけは `/mnt/...` を受ける。上の項)。**サービスの wire (`/files/list|read|write` の `path`) は workspace 相対のまま**で、
+  扱わないため (`fetch_from_workspace` だけは `/ext/...` を受ける。上の項)。**サービスの wire (`/files/list|read|write` の `path`) は workspace 相対のまま**で、
   絶対 ↔ 相対の変換は tool 側だけが持つ (sandbox image と nucllei の版がずれても動く)。境界の検査は
   tool 側 (文字列の正規化) とサービス側 (`_safe_path`、symlink 越しの脱出も実 fs で弾く) の二重。
   失敗時の文面は原因で言い分ける: 400 = path の問題、404 = ファイルが無い、413 = 大きすぎる、
@@ -547,7 +560,7 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   dbfread・hl7・pyreadstat・pdfplumber・xlwt 等) が動く / tesseract (jpn) と ocrmypdf で画像だけの
   PDF が検索可能 PDF になる (workspace を汚さない) / zbarimg・exiftool・gs・dot (和文は Noto)・git
   (commit と word-diff。HOME に .gitconfig を作らない)・cv2・tableone・pingouin・h5py・nibabel 等が動く。
-- **参照用データ (`/mnt`)**: volume を入れた配備でのみ確認する — 見えること + 書けないこと
+- **参照用データ (`/ext`)**: volume を入れた配備でのみ確認する — 見えること + 書けないこと
   (EROFS)。何も入れていない配備 (既定) は確認対象が無いので何もしない。
 
 実行: `uv run task sandbox-test` / `python3 sandbox/tests/test_isolation.py` (pytest 不要の

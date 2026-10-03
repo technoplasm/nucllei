@@ -7,7 +7,7 @@ image_url には "/api/v1/files/{id}/content" 形式の内部 URL が入るが�
 読み出して data URL に変換する。
 
 それ以外の **参照文字列**(URL = `https://…/ext/{name}/...`・同一サーバの相対
-`/ext/{name}/...`・一般の URL、および sandbox の fs パス "/mnt/..." /
+`/ext/{name}/...`(sandbox のパスと同じ文字列)・一般の URL、および sandbox の fs パス
 "/workspace/..."、任意で "#page=N")も同じ層で解決する — feed_image が参照文字列を sink に積み、
 context_images に文字列のまま永続し、送信直前のここが実体化する(File は発行
 しない。context_images は次ターン以降の履歴にも再送される(#142)ので、読み出しは
@@ -16,7 +16,7 @@ context_images に文字列のまま永続し、送信直前のここが実体�
 共有。image_url の url は引数名を持たない保存済み文字列なので、先頭で振り分ける
 `resolve_ref` を通す — 表は image_refs の module docstring)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
 (既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
-URL / fs 参照の公開範囲は配備が `/mnt` に mount した物(= `/ext/` の配信元)/
+URL / fs 参照の公開範囲は配備が `DATA_DIR/ext` に置いた物(= `/ext/` の配信元)/
 呼び出しユーザーの workspace が境界で、解決層が fail closed で持つ。
 
 変換できない参照(アクセス不可・削除済み・storage 欠落・root 外・非画像・サイズ超過・
@@ -194,7 +194,7 @@ async def inline_internal_image_urls(messages: list, user) -> list:
                 continue
             else:
                 # 残りは全部 resolver(image_refs)へ — URL(http(s):// / 同一サーバの
-                # "/ext/")と sandbox の fs パス("/workspace/" "/mnt/")だけが解決され、
+                # "/ext/")と sandbox の fs パス("/workspace/")だけが解決され、
                 # それ以外("//host/..." プロトコル相対、ftp: / file: 等の他スキーム、
                 # 相対パス)は None → "(image unavailable)"(fail closed。
                 # URL のまま残すと推論エンジンがリクエストごと落とす)

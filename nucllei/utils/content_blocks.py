@@ -119,7 +119,7 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
       文字列契約で画素を運べないため。エントリの振り分けは `image_refs.stored_ref_kind`
       (保存済み参照の 1 箇所の規則): 裸の文字列(file id)だけ
       `/api/v1/files/{id}/content` に整形し、それ以外(`http(s)://…`・同一サーバの
-      `/ext/…`・sandbox のパス `/mnt/…` `/workspace/…`・
+      `/ext/…`(sandbox のパスと同じ文字列)・sandbox のパス `/workspace/…`・
       `/api/v1/files/{id}/content#page=N`)は参照文字列のまま image_url の url にする。
       実体化(base64)は送信直前 inline_internal_image_urls の 1 回に一任する。
       次ターン以降の履歴では FE expandAssistantToolHistory(chat-messages.ts)が同じ形・
@@ -211,7 +211,7 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
             result_image_urls = [
                 (
                     # 裸の文字列 = file id だけ配信 URL に組む。URL("https://…" と同一
-                    # サーバの "/ext/…")・sandbox のパス("/mnt/…" "/workspace/…")・
+                    # サーバの "/ext/…" = sandbox の同じパス)・sandbox のパス("/workspace/…")・
                     # "/api/v1/files/{id}/content#page=N" は参照文字列のまま — 実体化は
                     # 送信直前の utils/file_images.py
                     f"/api/v1/files/{entry}/content"

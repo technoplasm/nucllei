@@ -17,7 +17,7 @@ doc tool の存在には依存しない)。
 EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、
 行き先で機能を絞らない決定と一緒に外した (EXT_INTRANET_CIDRS も同日に撤去。同日のうちに
 EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_FILE_SCOPES も設定ごと無くし、`/ext/{rest}` は nucllei の
-`/mnt/{rest}` をそのまま配信する形にした — 原本ホストの対応 (docstring の原本ホストのスロット・
+`DATA_DIR/ext/{rest}` をそのまま配信する形にした — 原本ホストの対応 (docstring の原本ホストのスロット・
 ERROR 文の「登録された原本ホストは …」・ヘッダの原本行) はそのとき消えた)。
 
 何のための tool か:
@@ -28,18 +28,19 @@ ERROR 文の「登録された原本ホストは …」・ヘッダの原本行)
   解決は共有 resolver (`image_refs.resolve_url`、feed_image / 送信直前 inline / send_to_workspace と
   共通) に一任する。名前空間は 2 つ (image_refs の module docstring「URL の解決」):
     (a) path が `/ext/{rest}` の URL — 同一サーバの相対 `/ext/…` と、絶対 `https://<host>/ext/…`
-        (既存チャット。host は問わない)。nucllei の `/mnt/{rest}` をローカル読み
+        (既存チャット。host は問わない)。nucllei の `DATA_DIR/ext/{rest}` をローカル読み
+        (sandbox からは同じ物が同じ文字列 `/ext/{rest}` で見える)
     (b) それ以外の絶対 URL — 一般の URL。そのホストに直接取りに行く (自分自身を除く)
   **解釈は引数名だけで決める** (feed_image と同じ): url に来た値は URL として `resolve_url` で
-  解決し、`/mnt/…` `/workspace/…` を sandbox のパスとして読み替えない。URL として解決できない
+  解決し、`/workspace/…` を sandbox のパスとして読み替えない。URL として解決できない
   値は固定文 (`ref_errors.url_error`) の ERROR。値を調べて「それは run_shell で」と出し分けない —
   行き先の案内は prompt / skill の参照規則の側に書く。
   `/api/v1/files/{id}/content` (相対・絶対とも) は URL のルーティングとして file に当たる
   (`file_id_of_url`) — 所有者チェックの上で Storage から読み、同じ変換にかける
   (send_to_workspace(url=) と同じ扱い)。
 
-SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配信するのは nucllei の `/mnt` に
-  mount された物 (設定無し)。一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居する
+SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配信するのは nucllei の
+  `DATA_DIR/ext` に置かれた物 (設定無し)。一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居する
   サービス)」だけを実行時に求めた集合で断る (`ext_upstreams.self_addresses`)。traversal 判定・
   サイズ上限・redirect の規律、受ける形の判定は全部 resolver 側にある。この tool は取得できた
   後にページ自身の URL (`route_of_url(u).page_url`) でリンクを解決するだけ。

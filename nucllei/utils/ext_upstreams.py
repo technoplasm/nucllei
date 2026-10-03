@@ -3,10 +3,11 @@
 "/ext/**" ゲート(routers/ext.py — 人間の目)と context_images の参照解決
 (utils/image_refs.py — モデルの目)が同じ基準を共有する:
 
-- 配信する場所に設定は無い(ken 決定 2026-10-03): コンテナの `/mnt`(`image_refs.RO_MOUNT_ROOT`)
-  に volume したものを、そのままの相対パスで `/ext/<rel>` に配信する
-  (`/mnt/cage/static/X` ⇔ `/ext/cage/static/X`)。閉じ込めは `image_refs` の
-  `_read_confined` と同じ(resolve 済みの実体が `/mnt` の中の通常ファイル)。2026-10-03 までの
+- 配信する場所に設定は無い(ken 決定 2026-10-03): `DATA_DIR/ext`(`image_refs.EXT_DIR`)
+  に置いたものを、そのままの相対パスで `/ext/<rel>` に配信する
+  (`data/ext/cage/static/X` ⇔ `/ext/cage/static/X`。sandbox は同じ物を同じ文字列
+  `/ext/cage/static/X` に見る)。閉じ込めは `image_refs` の `_read_confined` と同じ(resolve 済みの実体が
+  `EXT_DIR` の中の通常ファイル)。2026-10-03 までの
   `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信範囲)・
   `EXT_PUBLIC_BASES`(原本 URL のルート)は、`url=` の一般 URL がどこでも取れるようになった
   のと同じ日に撤去した — http 中継も原本ルートの対応も要らなくなった

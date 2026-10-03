@@ -261,13 +261,13 @@ def feed_image(file_id: str) -> None:
 
     どの tool でも(view_image に限らず)モデルの目に画素を流せる汎用経路。
     引数は file_id 文字列のほか、**参照文字列**(スキーム付き URL
-    `https://…/ext/{name}/...` / 一般の URL、または sandbox の
-    fs パス "/mnt/..." / "/workspace/..."、任意で末尾 "#page=N" — 解決規則は
+    `https://…/ext/{name}/...` / 同一サーバの "/ext/..."(sandbox のパスと同じ文字列)/
+    一般の URL、または sandbox の fs パス "/workspace/..."、任意で末尾 "#page=N" — 解決規則は
     utils/image_refs.py、#97 / #139)もそのまま積める。sink は無検証の設計 —
     検証・実体化(base64、PDF はページ画像化)は送信直前 inline
     (utils/file_images.py)に一任する。file_id はその段で has_read_access_to_file が
-    呼び出しユーザーの read 権を確認し、URL / fs 参照は image_refs が境界(`/mnt` /
-    RO マウント / 呼び出しユーザーの workspace)を fail closed で持つ(この push 自体は
+    呼び出しユーザーの read 権を確認し、URL / fs 参照は image_refs が境界(`DATA_DIR/ext` =
+    `/ext/` の配信元 / 呼び出しユーザーの workspace)を fail closed で持つ(この push 自体は
     認可しない)。tool 実行文脈外(sink 未設定)では no-op。
 
     低レベルプリミティブ: content_type / サイズの検証はしない(file_id しか持たず、

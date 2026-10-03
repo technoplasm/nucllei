@@ -277,7 +277,8 @@ def _notice_files(context_images: list) -> list:
     - `url`(`http(s)://…` と同一サーバの `/ext/{name}/…`)→ url としてそのまま載せる
       (相対 `/ext/…` はブラウザが session cookie で開ける。cage の図はこの形)
     - `file_id`(裸の id)→ `/api/v1/files/{id}/content` に組んで載せる
-    - `path`(`/mnt/…` `/workspace/…`)→ sandbox のパスはブラウザでは開けないので落とす
+    - `path`(`/workspace/…`)→ sandbox の workspace のパスはブラウザでは開けないので落とす
+      (`/ext/…` は URL と同じ文字列なので上の `url` に当たる)
     - `file_url`(`/api/v1/files/{id}/content#page=N` — 添付 PDF のページ参照)と、
       `#page=N` の付いた参照全般 → PDF のページは送信直前に画像化される物で、ブラウザは
       そのまま img として開けないので落とす

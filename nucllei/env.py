@@ -497,12 +497,15 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 # /ext(参照資料の配信)と url= の一般 URL 取得
 ####################################
 
-# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): コンテナの `/mnt`
-# (`utils/image_refs.RO_MOUNT_ROOT`)に volume したものを、そのままの相対パスで
-# `/ext/<rel>` に read-only 配信する(`/mnt/cage/static/X` ⇔ `/ext/cage/static/X`。
-# ファイルのみ、ディレクトリ一覧は出さない)。何を配信するかは配備が `/mnt` に何を mount
-# するかで決める。sandbox も同じ置き場を `/mnt` に bind する規約(#138)なので、sandbox の
-# `/mnt/X` が nucllei 側にも実在すれば URL `/ext/X` と同じ実体(utils/image_refs の橋渡し)。
+# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): `DATA_DIR/ext`
+# (`utils/image_refs.EXT_DIR`。Docker では `/app/data/ext`、host 直起動では `./data/ext`)に
+# 置いたものを、そのままの相対パスで `/ext/<rel>` に read-only 配信する
+# (`data/ext/cage/static/X` ⇔ `/ext/cage/static/X`。ファイルのみ、ディレクトリ一覧は出さない)。
+# 何を配信するかは配備が `DATA_DIR/ext` に何を置くか(volume / symlink)で決める。sandbox は
+# 同じ物を jail の `/ext` に bind する規約(#138)なので、sandbox のパス `/ext/X` と URL
+# `/ext/X` は同じ文字列で、nucllei の `DATA_DIR/ext/X` に実在すれば同じ実体(utils/image_refs
+# の橋渡し)。nucllei 自身の `/mnt` も `/ext` も見ない — 同日の朝は両側とも `/mnt` 固定だったが、
+# nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒してしまう(ken 指摘 2026-10-03)。
 # 2026-10-03 までの `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信
 # 範囲)・`EXT_PUBLIC_BASES`(原本 URL のルート)— と同日に一度置いた `EXT_DIRS` — は撤去。
 # `url=` の一般 URL がどこでも取れるようになり、http 中継と原本ルートの対応は要らなくなった。

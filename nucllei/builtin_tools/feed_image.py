@@ -22,8 +22,10 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   - URL: ブラウザが開くもの。スキーム付きの絶対 URL (既存チャットに残る
     `https://<host>/ext/…`、それ以外の一般の URL — 院内でもインターネットでも。届くかは
     配備のネットワーク次第) と、同一サーバの相対 URL `/ext/{rest}` (配備層の read_doc の
-    図・原本 PDF。nucllei の `/mnt/{rest}` をそのまま配信)。
-  - sandbox の fs パス (`/mnt/…` `/workspace/…`)。
+    図・原本 PDF。nucllei の `DATA_DIR/ext/{rest}` をそのまま配信)。
+  - sandbox の fs パス (`/ext/…` `/workspace/…`)。`/ext/…` は URL と sandbox のパスが同じ
+    文字列で同じファイル (唯一の意図した重なり。url に来れば percent-decode して、path に
+    来ればそのまま、どちらも nucllei の `DATA_DIR/ext` を読む)。
 
 引数 (2026-10-03 ken 決定 — `read_ref` / `ref` への統一 (#141) は不採用。tool 全体で引数名の
 意味を固定する): `url` = URL (絶対、または同一サーバの `/ext/…`・`/api/v1/files/…`)、
@@ -31,7 +33,7 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   **解釈は引数名だけで決める。値の形を見て別の引数の意味に読み替えない。** url は
   `resolve_url`、path は `resolve_path` に**引数名どおりに**渡す (形で振り分ける `resolve_ref`
   は保存済み参照文字列専用で、tool の引数には使わない)。名前どおりに解決できない値
-  (url="/mnt/…" / path="https://…" 等) は resolver が `unsupported_form` を返し、tool はその
+  (url="/workspace/…" / path="https://…" 等) は resolver が `unsupported_form` を返し、tool はその
   引数が受ける形を書いた**固定文**の ERROR にする (`ref_errors.url_error` / `path_error`)。
   値を調べて「それは path に」と出し分けない — 行き先の案内は prompt / skill の参照規則の側に
   書く。失敗理由の言い分け (存在しない / サイズ超過 / redirect / 上流 / 届かない / 許可先の外)
@@ -41,7 +43,7 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   読む (send_to_workspace(url=) と同じ扱い)。
 
   参照 → バイトの解決規則は `utils/image_refs.py` が**一箇所で**持つ。URL の上流解決
-  (path が /ext/{rest} なら host を問わず nucllei の `/mnt/{rest}` をローカル読み、
+  (path が /ext/{rest} なら host を問わず nucllei の `DATA_DIR/ext/{rest}` をローカル読み、
   それ以外は一般の URL としてそのホストに直接 — 行き先で絞らず、断るのはこのサーバ自身だけ。
   2026-10-03 ken 決定) も
   traversal 判定もサイズ上限もそこにある — tool 側に allowlist も on/off valve も持たない
@@ -302,7 +304,8 @@ class Tools:
           `#page=N` 付きの literal はそのまま渡してよい (`pages` を付ければそちらが優先)。
           http(s) の URL は院内でもインターネットでもそのまま渡す — どこに届くかは配備の
           ネットワークが決める (断るのはこのサーバ自身を指す URL だけ)。
-        - path: sandbox のファイルの絶対パス (`/workspace/…` `/mnt/…`)。
+        - path: sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)。`/ext/…` は url でも
+          path でも同じファイル。
         - file_id: 添付・生成物の id。run_python の戻り値やシステム注記の file_id もここ
           (本文リンク `/api/v1/files/{id}/content` しか手元に無ければ url= にそのまま渡す)。
 
@@ -317,7 +320,7 @@ class Tools:
         一手を書く。「読めなかった」を全部リンク切れと言い換えないこと。
 
         :param url: (任意) スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値の literal)。
-        :param path: (任意) sandbox のファイルの絶対パス (`/workspace/…` `/mnt/…`)。
+        :param path: (任意) sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)。
         :param file_id: (任意) 見たい画像・PDF の file_id (UUID)。
         :param filename: (任意) 対象ファイル名の部分一致フィルタ。
         :param pages: (任意) PDF のページ範囲。"3" / "4-6" / "1-2,7" 形式。画像には付けない。
