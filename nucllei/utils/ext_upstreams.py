@@ -18,15 +18,29 @@
 - path traversal 拒否は同一判定(percent デコード後の ".." セグメント・バックスラッシュ)
 - httpx AsyncClient はモジュールで 1 個を共有(リクエスト毎に生成しない)。
   follow_redirects は常に False — 上流の redirect 先(内部 URL)を辿らない・漏らさない
+  (院内の範囲の URL だけは resolver が転送先を範囲内に限って自分で辿る — image_refs)
+- env EXT_INTRANET_CIDRS(院内のアドレス範囲)の判定もここ(`intranet_allowed` /
+  `pin_intranet_address`): 範囲に含めても危ういアドレス(loopback・リンクローカル・
+  docker 既定帯 等)は `INTRANET_DENIED_NETWORKS` として常に除外する。接続先は DNS で
+  解決したアドレスに固定する(ホスト名で接続し直さない — DNS rebinding で範囲の外へ
+  繋がせない)
 """
 
+import asyncio
+import ipaddress
+import socket
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from nucllei.env import EXT_FILE_SCOPES, EXT_PUBLIC_BASES, EXT_UPSTREAMS
+from nucllei.env import (
+    EXT_FILE_SCOPES,
+    EXT_INTRANET_CIDRS,
+    EXT_PUBLIC_BASES,
+    EXT_UPSTREAMS,
+)
 
 # 接続 5s / 読み 30s。上流はローカル(Docker bridge)想定 — 不達・遅延で
 # ワーカーを長く掴ませない。
@@ -173,6 +187,144 @@ def ext_file_withheld(resolved: Path) -> bool:
             return False
         under_a_root = under_a_root or resolved.is_relative_to(backend[1])
     return under_a_root
+
+
+# EXT_INTRANET_CIDRS に含めても **常に除外** するアドレス(院内の範囲として宣言されても
+# 取りに行かない)。配備の設定ミスで nucllei 自身・同じホストの管理口・docker の内部
+# ネットワーク・クラウドのメタデータへ tool から届く口を開けないため。重なりは起動時に
+# WARNING(image_refs.log_mounts)。
+#
+# docker の既定帯は 172.17.0.0/16 **だけ**(bridge の既定)。172.16.0.0/16 は院内の正当な
+# 範囲でありうる(北大の払い出しは 172.16 のセグメント)— /12 全体を拒否しない。
+INTRANET_DENIED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network(
+        "0.0.0.0/8"
+    ),  # "this network"(0.0.0.0 = 自ホスト扱いの OS がある)
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback(nucllei 自身・sandbox API 等)
+    ipaddress.ip_network(
+        "169.254.0.0/16"
+    ),  # リンクローカル(169.254.169.254 = クラウドのメタデータ)
+    ipaddress.ip_network(
+        "172.17.0.0/16"
+    ),  # docker の既定 bridge(cage の API 等の内部通信)
+    ipaddress.ip_network("224.0.0.0/4"),  # multicast
+    ipaddress.ip_network("240.0.0.0/4"),  # 予約 + broadcast 255.255.255.255
+    ipaddress.ip_network("::/128"),  # unspecified
+    ipaddress.ip_network("::1/128"),  # loopback
+    ipaddress.ip_network("fe80::/10"),  # リンクローカル
+    ipaddress.ip_network("ff00::/8"),  # multicast
+    ipaddress.ip_network("fd00:ec2::254/128"),  # AWS IMDS(IPv6)
+)
+
+# 院内の範囲の URL で辿る redirect の上限(一般の Web と同じ扱い — 4 回目は失敗)。
+INTRANET_MAX_REDIRECTS = 3
+
+
+def intranet_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """宣言された院内の範囲(EXT_INTRANET_CIDRS。パース済み)。"""
+    return EXT_INTRANET_CIDRS
+
+
+def intranet_configured() -> bool:
+    """院内の範囲(EXT_INTRANET_CIDRS)が 1 つでも宣言されているか。未設定 = 範囲は無く、
+    名前空間に当たらない絶対 URL は従来どおり `unknown_upstream`(fail closed)。"""
+    return bool(EXT_INTRANET_CIDRS)
+
+
+def _canonical_ip(
+    address: str,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """文字列を IP に。IPv4-mapped IPv6(`::ffff:172.16.0.1`)は IPv4 として扱う(範囲も
+    拒否リストも v4 で書かれている)。zone id(`fe80::1%eth0`)は落として判定する。"""
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def intranet_allowed(address: str) -> bool:
+    """アドレスが **院内の範囲内で、拒否リストに無い** か。範囲の判定の権威はここ 1 箇所。
+    IP でない文字列(ホスト名)は False — 名前は先に `pin_intranet_address` で引く。"""
+    ip = _canonical_ip(address)
+    if ip is None:
+        return False
+    if any(ip in denied for denied in INTRANET_DENIED_NETWORKS):
+        return False
+    return any(ip in network for network in EXT_INTRANET_CIDRS)
+
+
+def intranet_denied(address: str) -> bool:
+    """アドレスが拒否リストに当たるか(範囲の設定とは無関係)。"""
+    ip = _canonical_ip(address)
+    return ip is not None and any(ip in denied for denied in INTRANET_DENIED_NETWORKS)
+
+
+def intranet_overlaps_denied() -> list[tuple[str, str]]:
+    """EXT_INTRANET_CIDRS のうち拒否リストと重なる (設定, 拒否) の組。起動時の WARNING 用。"""
+    hits = []
+    for network in EXT_INTRANET_CIDRS:
+        for denied in INTRANET_DENIED_NETWORKS:
+            if network.version == denied.version and network.overlaps(denied):
+                hits.append((str(network), str(denied)))
+    return hits
+
+
+async def lookup_host(host: str) -> list[str]:
+    """ホスト名を `getaddrinfo` で引いてアドレスの一覧(文字列)にする(OS の解決 =
+    `/etc/hosts` も効く。閉域で hosts に書いてあれば DNS 無しでも通る)。IP リテラルは
+    引かずにそのまま 1 件(`pin_intranet_address` は先に自分で判定するのでここには来ない)。
+    引けなければ空。テストはこの関数を差し替える(実 DNS に出ない)。"""
+    if _canonical_ip(host) is not None:
+        return [host]
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError, OSError):
+        return []
+    addresses: list[str] = []
+    for _family, _type, _proto, _canon, sockaddr in infos:
+        address = sockaddr[0]
+        if address not in addresses:
+            addresses.append(address)
+    return addresses
+
+
+async def pin_intranet_address(host: str) -> tuple[str | None, str]:
+    """URL のホストを DNS で引き、**接続先に固定するアドレス** を決める。
+
+    戻り値は `(address, reason)`。成功なら `(ip, "")`。失敗は `(None, reason)` で、
+    reason は閉じた集合:
+
+    - `"unresolvable"` — DNS で引けない(NXDOMAIN・タイムアウト)。到達不能として扱う
+    - `"outside_intranet"` — 引けたが、院内の範囲(拒否リスト除外後)にあるアドレスが
+      1 つも無い、**または** 1 つでも拒否リストに当たるアドレスが混ざる(範囲内と
+      loopback を同時に返す名前は怪しい — fail closed)
+
+    採るのは範囲内のアドレスのうち最初の 1 つ。呼び手はこの IP に接続し、Host ヘッダ /
+    SNI には元のホスト名を使う(DNS rebinding で 2 度目の解決が範囲の外を指しても、
+    繋ぐ先はここで確かめた 1 つのまま)。
+
+    ホストが IP リテラル(v4 / v6。`[]` は urlsplit が外している)なら名前解決はせず、
+    そのまま範囲判定する — 閉域の本番(DNS 無し)では院内の URL はこの形が普通で、
+    これが主経路。名前は `lookup_host`(getaddrinfo = /etc/hosts も効く)。
+    """
+    if _canonical_ip(host) is not None:
+        # IP リテラル(閉域の本番 — DNS が無い — ではこれが院内の URL の普通の形)は
+        # 引かずにそのまま判定する
+        addresses = [host]
+    else:
+        addresses = await lookup_host(host)
+    if not addresses:
+        return None, "unresolvable"
+    if any(intranet_denied(address) for address in addresses):
+        return None, "outside_intranet"
+    for address in addresses:
+        if intranet_allowed(address):
+            return address.split("%", 1)[0], ""
+    return None, "outside_intranet"
 
 
 def match_public_base(url: str) -> tuple[str, str] | None:

@@ -1203,3 +1203,636 @@ def test_mounted_path_withheld(monkeypatch, tmp_path):
     # http backend は関係しない
     monkeypatch.setitem(EXT_UPSTREAMS, "web", UPSTREAM)
     assert withheld(doc)
+
+
+# ---- 院内の範囲(EXT_INTRANET_CIDRS)— 登録無しで取れる院内の一般 URL ----
+#
+# ken 決定(2026-10-03)「院内 Web も普通に拾えていいよ」。範囲は配備が宣言し、既定は無い。
+# 接続先は DNS で解決したアドレスに固定、redirect は範囲内に限って 3 回まで。
+# DNS は `ext_upstreams.lookup_host` を差し替え、HTTP は MockTransport(実ネットワークに出ない)。
+
+INTRANET = ("172.16.0.0/16",)
+DNS = {
+    "intra.test": ["172.16.5.5"],
+    "intra2.test": ["172.16.7.7"],
+    "dual.test": ["fd00::1", "172.16.9.9"],  # 範囲外の v6 と範囲内の v4
+    "outside.test": ["10.0.0.5"],
+    "internet.test": ["93.184.216.34"],
+    "rebind.test": ["172.16.5.5", "127.0.0.1"],  # 範囲内と loopback を同時に返す
+    "docker.test": ["172.17.0.1"],
+}
+
+
+def _intranet(monkeypatch, cidrs=INTRANET, dns=DNS):
+    import ipaddress
+
+    from nucllei.utils import ext_upstreams
+
+    monkeypatch.setattr(
+        ext_upstreams,
+        "EXT_INTRANET_CIDRS",
+        tuple(ipaddress.ip_network(c) for c in cidrs),
+    )
+
+    async def fake_lookup(host):
+        try:
+            return [host] if ipaddress.ip_address(host) else []
+        except ValueError:
+            return list(dns.get(host, []))
+
+    monkeypatch.setattr(ext_upstreams, "lookup_host", fake_lookup)
+
+
+class _Recorder:
+    """MockTransport の記録: 出た要求(URL・Host ヘッダ・SNI)。"""
+
+    def __init__(self, routes):
+        self.requests: list[httpx.Request] = []
+        self.routes = routes  # 接続先 URL(固定済み IP の形)→ Response か callable
+
+    def __call__(self, request):
+        self.requests.append(request)
+        key = str(request.url)
+        hit = self.routes.get(key)
+        if hit is None:
+            return httpx.Response(599, content=f"unexpected {key}".encode())
+        return hit(request) if callable(hit) else hit
+
+    @property
+    def urls(self):
+        return [str(r.url) for r in self.requests]
+
+    @property
+    def hosts(self):
+        return [r.headers.get("host") for r in self.requests]
+
+
+def _url(url, **kw):
+    from nucllei.utils.image_refs import resolve_url
+
+    return asyncio.run(resolve_url(url, **kw))
+
+
+def test_parse_ext_intranet_cidrs():
+    import ipaddress
+
+    from nucllei.env import parse_ext_intranet_cidrs
+
+    assert parse_ext_intranet_cidrs("") == ()
+    assert parse_ext_intranet_cidrs(None) == ()
+    parsed = parse_ext_intranet_cidrs(
+        " 172.16.0.0/16, 10.105.0.0/16 ,bogus, 172.16.1.0/16, fd00::/8, 192.168.1.7 ,"
+    )
+    assert parsed == (
+        ipaddress.ip_network("172.16.0.0/16"),
+        ipaddress.ip_network("10.105.0.0/16"),
+        ipaddress.ip_network("fd00::/8"),
+        ipaddress.ip_network("192.168.1.7/32"),
+    )
+
+
+def test_denied_networks_exclude_docker_but_not_172_16(monkeypatch):
+    """拒否リストは設定に含めても除外。docker の既定帯は 172.17.0.0/16 **だけ** —
+    北大の払い出し 172.16.x は巻き込まない(/12 で宣言しても 172.16 は通り 172.17 は落ちる)。"""
+    from nucllei.utils.ext_upstreams import (
+        intranet_allowed,
+        intranet_denied,
+        intranet_overlaps_denied,
+    )
+
+    _intranet(monkeypatch, cidrs=("172.16.0.0/16",))
+    assert intranet_allowed("172.16.5.5") and intranet_allowed("172.16.255.254")
+    assert not intranet_allowed("172.17.0.1") and not intranet_allowed("172.15.255.255")
+    assert intranet_overlaps_denied() == []
+
+    _intranet(monkeypatch, cidrs=("172.16.0.0/12",))
+    assert intranet_allowed("172.16.5.5") and intranet_allowed("172.18.0.1")
+    assert not intranet_allowed("172.17.0.1") and not intranet_allowed("172.17.255.1")
+    assert ("172.16.0.0/12", "172.17.0.0/16") in intranet_overlaps_denied()
+
+    # 設定で広げても常に除外される物
+    _intranet(monkeypatch, cidrs=("0.0.0.0/0", "::/0"))
+    for bad in (
+        "127.0.0.1",
+        "127.255.255.255",
+        "169.254.169.254",
+        "169.254.1.1",
+        "172.17.0.1",
+        "0.0.0.0",
+        "224.0.0.1",
+        "255.255.255.255",
+        "::1",
+        "::",
+        "fe80::1",
+        "fe80::1%eth0",
+        "ff02::1",
+        "fd00:ec2::254",
+        "::ffff:127.0.0.1",  # IPv4-mapped は v4 として判定
+        "::ffff:172.17.0.1",
+    ):
+        assert intranet_denied(bad) and not intranet_allowed(bad), bad
+    for ok in (
+        "172.16.5.5",
+        "10.105.2.2",
+        "192.168.0.1",
+        "fd00::1",
+        "::ffff:172.16.5.5",
+    ):
+        assert intranet_allowed(ok) and not intranet_denied(ok), ok
+    assert not intranet_allowed("intra.test")  # ホスト名は先に引く
+    assert not intranet_allowed("")
+    hits = intranet_overlaps_denied()
+    assert ("0.0.0.0/0", "127.0.0.0/8") in hits and ("::/0", "::1/128") in hits
+    # version 違いの重なりは数えない
+    assert all(h[0] != "::/0" or ":" in h[1] for h in hits)
+
+
+def test_intranet_url_is_fetched_pinned_to_the_resolved_address(monkeypatch):
+    """範囲内のホストは登録無しで取れる。接続先は DNS の結果に固定し、Host ヘッダは元の
+    ホスト名(+port)。cookie / 認証は無し。content-type は上流ヘッダ、name は basename。"""
+    _intranet(monkeypatch)
+    rec = _Recorder(
+        {
+            "http://172.16.5.5:8080/docs/%E5%9B%B3/a.png?rev=2": httpx.Response(
+                200, content=PNG_BYTES, headers={"content-type": "image/png"}
+            )
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://intra.test:8080/docs/%E5%9B%B3/a.png?rev=2#frag")
+    assert err is None and loaded.data == PNG_BYTES
+    assert loaded.content_type == "image/png" and loaded.name == "a.png"
+    assert rec.urls == ["http://172.16.5.5:8080/docs/%E5%9B%B3/a.png?rev=2"]
+    assert rec.hosts == ["intra.test:8080"]
+    assert "cookie" not in rec.requests[0].headers
+    assert "authorization" not in rec.requests[0].headers
+    assert rec.requests[0].extensions.get("sni_hostname") is None  # http には不要
+
+
+def test_intranet_https_keeps_sni_for_the_original_host(monkeypatch):
+    _intranet(monkeypatch)
+    rec = _Recorder(
+        {"https://172.16.5.5/x.pdf": httpx.Response(200, content=b"%PDF-1")}
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("https://intra.test/x.pdf")
+    assert err is None and loaded.content_type == "application/pdf"
+    assert rec.hosts == ["intra.test"]
+    assert rec.requests[0].extensions["sni_hostname"] == "intra.test"
+
+
+def test_intranet_ip_literals_and_dual_stack(monkeypatch):
+    """IP リテラルも同じ判定。v4 / v6 の両方を返す名前は範囲内の方を採る。IPv6 リテラルは
+    [] 付きで接続し、ホストにも [] を付ける。root(path 無し)は name が空。"""
+    _intranet(monkeypatch, cidrs=("172.16.0.0/16", "fd00:1::/64"))
+    rec = _Recorder(
+        {
+            "http://172.16.1.1/": httpx.Response(200, content=b"root"),
+            "http://172.16.9.9/p": httpx.Response(200, content=b"dual"),
+            "http://[fd00:1::5]:81/v6": httpx.Response(200, content=b"six"),
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://172.16.1.1")
+    assert err is None and loaded.data == b"root" and loaded.name == ""
+    loaded, err = _url("http://dual.test/p")
+    assert err is None and loaded.data == b"dual"
+    loaded, err = _url("http://[fd00:1::5]:81/v6")
+    assert err is None and loaded.data == b"six"
+    assert rec.hosts == ["172.16.1.1", "dual.test", "[fd00:1::5]:81"]
+
+
+def test_intranet_outside_range_is_unknown_upstream(monkeypatch):
+    """範囲外(他の LAN・インターネット・拒否リスト・範囲内と loopback の混在)は取りに
+    行かない — reason `outside_intranet`。配備が外に出られる環境でも同じ(範囲に足す)。"""
+    _intranet(monkeypatch)
+
+    def boom(request):
+        raise AssertionError(f"must not connect: {request.url}")
+
+    _install_transport(monkeypatch, boom)
+    for u in (
+        "http://outside.test/a.pdf",
+        "https://internet.test/",
+        "http://10.0.0.5/x",
+        "http://127.0.0.1:3000/health",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://docker.test:13303/",
+        "http://172.17.0.1:13303/",
+        "http://rebind.test/x",
+        "http://[::1]/x",
+        "http://[::ffff:127.0.0.1]/x",
+    ):
+        loaded, err = _url(u)
+        assert loaded is None, u
+        assert (err.code, err.reason) == ("unknown_upstream", "outside_intranet"), u
+        assert "EXT_INTRANET_CIDRS" in err.detail
+
+
+def test_intranet_unresolvable_host_is_unreachable(monkeypatch):
+    _intranet(monkeypatch)
+    _install_transport(monkeypatch, lambda r: httpx.Response(200))
+    loaded, err = _url("http://nosuch.test/a")
+    assert loaded is None
+    # 閉域の本番には DNS が無い — tool が「IP で指定」と案内できるよう reason を付ける
+    assert (err.code, err.reason) == ("upstream_unreachable", "unresolvable")
+
+
+def test_intranet_unconfigured_stays_closed(monkeypatch):
+    """未設定なら従来どおり: 名前空間に当たらない絶対 URL は `outside_public_bases`。
+    DNS も引かない。"""
+    from nucllei.utils import ext_upstreams
+
+    monkeypatch.setattr(ext_upstreams, "EXT_INTRANET_CIDRS", ())
+
+    async def no_dns(host):
+        raise AssertionError("must not resolve")
+
+    monkeypatch.setattr(ext_upstreams, "lookup_host", no_dns)
+    _install_transport(monkeypatch, lambda r: httpx.Response(200))
+    for u in ("http://172.16.5.5/a", "http://intra.test/a"):
+        loaded, err = _url(u)
+        assert loaded is None
+        assert (err.code, err.reason) == ("unknown_upstream", "outside_public_bases"), u
+
+
+def test_registered_namespaces_win_over_the_intranet_rule(monkeypatch):
+    """同じホストでも EXT_PUBLIC_BASES の `<base>/` 配下は登録した配信元の規則(backend 経由、
+    redirect は辿らない)。その外は院内の一般 URL(直接、redirect は辿る)。`/ext/{name}/…` 形は
+    host を問わず backend。"""
+    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+
+    _intranet(monkeypatch, dns={**DNS, "his-info.test": ["172.16.3.3"]})
+    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://backend.test/his")
+    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs")
+    rec = _Recorder(
+        {
+            "http://backend.test/his/a.pdf": httpx.Response(
+                302, headers={"location": "http://his-info.test/docs/b.pdf"}
+            ),
+            "http://172.16.3.3/other/a.pdf": httpx.Response(
+                302, headers={"location": "/other/b.pdf"}
+            ),
+            "http://172.16.3.3/other/b.pdf": httpx.Response(200, content=b"b"),
+            "http://172.16.3.3/ext/his/a.pdf": httpx.Response(200, content=b"nope"),
+            "http://backend.test/his/x/a.pdf": httpx.Response(200, content=b"ext"),
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://his-info.test/docs/a.pdf")
+    assert loaded is None and (err.code, err.status, err.reason) == (
+        "upstream_status",
+        302,
+        None,
+    )
+    loaded, err = _url("http://his-info.test/other/a.pdf")
+    assert err is None and loaded.data == b"b"
+    loaded, err = _url("http://his-info.test/ext/his/x/a.pdf")
+    assert err is None and loaded.data == b"ext"
+    assert rec.urls == [
+        "http://backend.test/his/a.pdf",
+        "http://172.16.3.3/other/a.pdf",
+        "http://172.16.3.3/other/b.pdf",
+        "http://backend.test/his/x/a.pdf",
+    ]
+
+
+def test_intranet_redirects_are_followed_inside_the_range(monkeypatch):
+    """3 回までの redirect を辿る(絶対・相対の Location、別の院内ホストへも)。各ホップで
+    DNS 固定。最終応答の content-type / name を採る。"""
+    _intranet(monkeypatch)
+    rec = _Recorder(
+        {
+            "http://172.16.5.5/1": httpx.Response(301, headers={"location": "/2?x=1"}),
+            "http://172.16.5.5/2?x=1": httpx.Response(
+                302, headers={"location": "http://intra2.test/3"}
+            ),
+            "http://172.16.7.7/3": httpx.Response(
+                307, headers={"location": "final.png"}
+            ),
+            "http://172.16.7.7/final.png": httpx.Response(
+                200, content=PNG_BYTES, headers={"content-type": "image/png"}
+            ),
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://intra.test/1")
+    assert err is None and loaded.data == PNG_BYTES and loaded.name == "final.png"
+    assert rec.urls == [
+        "http://172.16.5.5/1",
+        "http://172.16.5.5/2?x=1",
+        "http://172.16.7.7/3",
+        "http://172.16.7.7/final.png",
+    ]
+    assert rec.hosts == ["intra.test", "intra.test", "intra2.test", "intra2.test"]
+
+
+def test_intranet_fourth_redirect_fails(monkeypatch):
+    _intranet(monkeypatch)
+    rec = _Recorder(
+        {
+            f"http://172.16.5.5/{i}": httpx.Response(
+                302, headers={"location": f"/{i + 1}"}
+            )
+            for i in range(1, 6)
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://intra.test/1")
+    assert loaded is None
+    assert (err.code, err.status, err.reason) == (
+        "upstream_status",
+        302,
+        "too_many_redirects",
+    )
+    assert len(rec.urls) == 4  # 元 + 3 回。4 回目の転送先には行かない
+
+
+def test_intranet_redirect_leaving_the_range_stops(monkeypatch):
+    """範囲の外への転送(他 LAN・インターネット・loopback・http(s) でない・traversal)は
+    `upstream_status`(3xx の status、reason `redirect_outside`)で止め、転送先には繋がない。"""
+    _intranet(monkeypatch)
+    for location in (
+        "http://outside.test/x",
+        "https://internet.test/x",
+        "http://127.0.0.1:3000/health",
+        "http://172.17.0.1:13303/",
+        "ftp://intra.test/x",
+        "http://intra2.test/x\\y",  # バックスラッシュ(生の Location を traversal 判定)
+    ):
+        rec = _Recorder(
+            {
+                "http://172.16.5.5/go": httpx.Response(
+                    303, headers={"location": location}
+                )
+            }
+        )
+        _install_transport(monkeypatch, rec)
+        loaded, err = _url("http://intra.test/go")
+        assert loaded is None, location
+        assert (err.code, err.status, err.reason) == (
+            "upstream_status",
+            303,
+            "redirect_outside",
+        ), location
+        assert rec.urls == ["http://172.16.5.5/go"], location
+
+
+def test_intranet_redirect_into_a_registered_upstream_uses_its_backend(monkeypatch):
+    """転送先が登録した配信元に当たれば、その backend で 1 回だけ取る(配信元の規則 —
+    そこから先の redirect は辿らない)。"""
+    from nucllei.env import EXT_PUBLIC_BASES, EXT_UPSTREAMS
+
+    _intranet(monkeypatch)
+    monkeypatch.setitem(EXT_UPSTREAMS, "his", "http://backend.test/his")
+    monkeypatch.setitem(EXT_PUBLIC_BASES, "his", "http://his-info.test/docs")
+    rec = _Recorder(
+        {
+            "http://172.16.5.5/go": httpx.Response(
+                302, headers={"location": "http://his-info.test/docs/a.pdf"}
+            ),
+            "http://backend.test/his/a.pdf": httpx.Response(
+                200, content=b"via backend"
+            ),
+            "http://172.16.5.5/go2": httpx.Response(
+                302, headers={"location": "http://his-info.test/docs/r.pdf"}
+            ),
+            "http://backend.test/his/r.pdf": httpx.Response(
+                302, headers={"location": "http://his-info.test/docs/a.pdf"}
+            ),
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://intra.test/go")
+    assert err is None and loaded.data == b"via backend"
+    loaded, err = _url("http://intra.test/go2")
+    assert loaded is None and (err.code, err.status, err.reason) == (
+        "upstream_status",
+        302,
+        None,
+    )
+    assert rec.urls == [
+        "http://172.16.5.5/go",
+        "http://backend.test/his/a.pdf",
+        "http://172.16.5.5/go2",
+        "http://backend.test/his/r.pdf",
+    ]
+
+
+def test_registered_http_backend_still_does_not_follow_redirects(monkeypatch):
+    """登録した配信元の挙動は変えない: 院内の範囲が設定されていても backend の 3xx は
+    `upstream_status`(reason 無し)で、Location には行かない。"""
+    _intranet(monkeypatch)
+    _enable_cage_http(monkeypatch)
+    rec = _Recorder(
+        {
+            f"{UPSTREAM}/a.png": httpx.Response(
+                302, headers={"location": "http://intra.test/elsewhere.png"}
+            )
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("/ext/cage/a.png")
+    assert loaded is None
+    assert (err.code, err.status, err.reason) == ("upstream_status", 302, None)
+    assert rec.urls == [f"{UPSTREAM}/a.png"]
+
+
+def test_intranet_shares_the_http_limits_and_codes(monkeypatch):
+    """上限(max_bytes / env)・404 → not_found・5xx → upstream_status・接続失敗 →
+    upstream_unreachable は http backend と同じ。"""
+    _intranet(monkeypatch)
+    big = b"x" * 100
+
+    def conn_error(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    rec = _Recorder(
+        {
+            "http://172.16.5.5/big": httpx.Response(
+                200, content=big, headers={"content-length": "100"}
+            ),
+            "http://172.16.5.5/404": httpx.Response(404),
+            "http://172.16.5.5/503": httpx.Response(503),
+            "http://172.16.5.5/down": conn_error,
+        }
+    )
+    _install_transport(monkeypatch, rec)
+    loaded, err = _url("http://intra.test/big", max_bytes=10)
+    assert (err.code, err.size, err.limit, err.size_exact) == (
+        "too_large",
+        100,
+        10,
+        True,
+    )
+    monkeypatch.setattr("nucllei.utils.image_refs.EXT_INLINE_MAX_BYTES", 20)
+    _, err = _url("http://intra.test/big")
+    assert (err.code, err.limit) == ("too_large", 20)
+    _, err = _url("http://intra.test/404")
+    assert (err.code, err.status) == ("not_found", 404)
+    _, err = _url("http://intra.test/503")
+    assert (err.code, err.status, err.reason) == ("upstream_status", 503, None)
+    _, err = _url("http://intra.test/down")
+    assert err.code == "upstream_unreachable"
+
+
+def test_route_of_url_intranet_shape(monkeypatch):
+    """院内の一般 URL は `kind="intranet"`・`name=None`。DNS は引かない(純粋)—
+    範囲外のホストでも候補として返り、実際の判定は resolve_url。未設定なら従来どおり
+    `outside_public_bases`。"""
+    from nucllei.utils import ext_upstreams
+    from nucllei.utils.image_refs import (
+        UrlRoute,
+        mounted_path_for_url,
+        route_of_url,
+    )
+
+    async def no_dns(host):
+        raise AssertionError("route_of_url must not resolve names")
+
+    _intranet(monkeypatch)
+    monkeypatch.setattr(ext_upstreams, "lookup_host", no_dns)
+    _install_transport(monkeypatch, lambda r: httpx.Response(599))
+
+    route, err = route_of_url("http://intra.test:8080/docs/%E5%9B%B3/a.png?rev=2#top")
+    assert err is None
+    assert route == UrlRoute(
+        name=None,
+        rel="docs/%E5%9B%B3/a.png",
+        query="?rev=2",
+        public_base=None,
+        origin="http://intra.test:8080",
+        ext_form=False,
+        kind="intranet",
+    )
+    assert route.intranet and not route.relative
+    assert route.page_url == "http://intra.test:8080/docs/%E5%9B%B3/a.png?rev=2"
+    route, err = route_of_url("https://outside.test")
+    assert err is None and (route.kind, route.rel, route.page_url) == (
+        "intranet",
+        "",
+        "https://outside.test/",
+    )
+    # 登録した配信元の route は従来の形のまま(kind は既定の "upstream"、page_url は None)
+    _enable_cage_http(monkeypatch)
+    route, err = route_of_url("/ext/cage/a.png")
+    assert err is None and (route.kind, route.name, route.intranet) == (
+        "upstream",
+        "cage",
+        False,
+    )
+    assert route.page_url is None
+    # 院内の一般 URL は sandbox に同じ実体を持たない
+    assert asyncio.run(mounted_path_for_url("http://intra.test/a.png")) is None
+    # ホストが無い・port が不正 → unsupported_form
+    for bad in ("http:///x", "http://intra.test:99999/x"):
+        route, err = route_of_url(bad)
+        assert route is None and err.code == "unsupported_form", bad
+    # 未設定なら従来どおり
+    monkeypatch.setattr(ext_upstreams, "EXT_INTRANET_CIDRS", ())
+    route, err = route_of_url("http://intra.test/a.png")
+    assert route is None and (err.code, err.reason) == (
+        "unknown_upstream",
+        "outside_public_bases",
+    )
+
+
+def test_log_mounts_warns_on_overlap_with_denied(monkeypatch, caplog):
+    import logging
+
+    from nucllei.utils import image_refs
+
+    _intranet(monkeypatch, cidrs=("172.16.0.0/12",))
+    with caplog.at_level(logging.INFO, logger=image_refs.log.name):
+        image_refs.log_mounts()
+    text = caplog.text
+    assert "EXT_INTRANET_CIDRS" in text and "172.16.0.0/12" in text
+    assert "WARNING" in text and "172.17.0.0/16" in text
+    caplog.clear()
+    _intranet(monkeypatch, cidrs=("172.16.0.0/16",))
+    with caplog.at_level(logging.INFO, logger=image_refs.log.name):
+        image_refs.log_mounts()
+    assert "172.17.0.0/16" not in caplog.text
+
+
+def test_intranet_ip_literals_without_dns(monkeypatch):
+    """閉域の本番(MiNet)には DNS が無く、院内の URL は IP リテラル(`http://10.x.x.x/…`)が
+    普通 — これが主経路。名前解決を一切呼ばずに範囲判定・接続・redirect が通ること。"""
+    from nucllei.utils import ext_upstreams
+
+    _intranet(monkeypatch, cidrs=("10.0.0.0/8", "fd00:10::/32"))
+
+    async def no_dns(host):
+        raise AssertionError(f"must not resolve names: {host}")
+
+    monkeypatch.setattr(ext_upstreams, "lookup_host", no_dns)
+    rec = _Recorder(
+        {
+            "http://10.1.2.3/his-info/top.aspx": httpx.Response(
+                200, content=b"<html>top</html>", headers={"content-type": "text/html"}
+            ),
+            "http://10.1.2.3:8080/": httpx.Response(200, content=b"root"),
+            "https://10.105.2.2:4000/v1/models": httpx.Response(200, content=b"{}"),
+            "http://10.1.2.3/old.aspx": httpx.Response(
+                301, headers={"location": "http://10.1.2.4/new.aspx"}
+            ),
+            "http://10.1.2.4/new.aspx": httpx.Response(200, content=b"new"),
+            "http://10.1.2.3/leave": httpx.Response(
+                302, headers={"location": "http://192.168.1.1/x"}
+            ),
+            "http://10.1.2.3/loop": httpx.Response(
+                302, headers={"location": "http://127.0.0.1:3000/health"}
+            ),
+            "http://[fd00:10::7]/v6": httpx.Response(200, content=b"v6"),
+        }
+    )
+    _install_transport(monkeypatch, rec)
+
+    loaded, err = _url("http://10.1.2.3/his-info/top.aspx")
+    assert (
+        err is None and loaded.content_type == "text/html" and loaded.name == "top.aspx"
+    )
+    loaded, err = _url("http://10.1.2.3:8080")
+    assert err is None and loaded.data == b"root"
+    loaded, err = _url("https://10.105.2.2:4000/v1/models")
+    assert err is None and loaded.data == b"{}"
+    assert rec.requests[-1].extensions["sni_hostname"] == "10.105.2.2"
+    loaded, err = _url("http://10.1.2.3/old.aspx")
+    assert err is None and loaded.data == b"new" and loaded.name == "new.aspx"
+    loaded, err = _url("http://[fd00:10::7]/v6")
+    assert err is None and loaded.data == b"v6"
+    # 転送先のリテラルが範囲外 / 拒否リスト → redirect_outside(元の status)
+    for u in ("http://10.1.2.3/leave", "http://10.1.2.3/loop"):
+        loaded, err = _url(u)
+        assert loaded is None, u
+        assert (err.code, err.status, err.reason) == (
+            "upstream_status",
+            302,
+            "redirect_outside",
+        ), u
+    # 範囲外のリテラル(他のセグメント・staging の 172.16・loopback)はそもそも繋がない
+    for u in ("http://192.168.1.1/x", "http://172.16.5.5/x", "http://127.0.0.1/x"):
+        loaded, err = _url(u)
+        assert (err.code, err.reason) == ("unknown_upstream", "outside_intranet"), u
+    assert rec.hosts == [
+        "10.1.2.3",
+        "10.1.2.3:8080",
+        "10.105.2.2:4000",
+        "10.1.2.3",
+        "10.1.2.4",
+        "[fd00:10::7]",
+        "10.1.2.3",
+        "10.1.2.3",
+    ]
+
+
+def test_lookup_host_passes_literals_and_uses_getaddrinfo_for_names():
+    """IP リテラルは引かずにそのまま(括弧は urlsplit が外している)。名前は getaddrinfo
+    (= /etc/hosts も効く: localhost は DNS 無しで引ける)。引けない名前は空。"""
+    from nucllei.utils.ext_upstreams import lookup_host
+
+    assert asyncio.run(lookup_host("10.1.2.3")) == ["10.1.2.3"]
+    assert asyncio.run(lookup_host("::1")) == ["::1"]
+    assert asyncio.run(lookup_host("::ffff:10.1.2.3")) == ["::ffff:10.1.2.3"]
+    assert "127.0.0.1" in asyncio.run(lookup_host("localhost"))
+    assert asyncio.run(lookup_host("nosuch.invalid")) == []

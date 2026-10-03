@@ -84,11 +84,60 @@ BE が行う)。
   `upstream_status`)。file backend は root = ディレクトリなので `not_found`(一覧は
   出さない — ゲートも 404)。2026-10-03 までは原本の `<base>/` を上流に問い合わせずに
   `not_found` にしていて、実在するトップページ(上流は 302)が「リンク切れ」と案内された。
-- どれにも当たらなければ失敗 `unknown_upstream`(fail closed。任意の URL を取りに行く
-  口ではない)。
+- どれにも当たらない絶対 URL は、**院内の範囲**(env EXT_INTRANET_CIDRS。下記)に
+  あれば登録無しで取得する。範囲が無い(未設定)か範囲の外なら失敗 `unknown_upstream`
+  (fail closed。任意の URL を取りに行く口ではない — インターネット等、範囲の外の URL は
+  配備が外に出られる環境でも失敗。外に出したければ範囲に足す)。
 - file backend なら root 内をローカル読み、http backend なら httpx で取得
   (content-type は上流ヘッダ)。file backend が配信する範囲は /ext ゲートと同じ判定
   (`ext_upstreams.ext_file_served`: root の中 + env EXT_FILE_SCOPES)— 範囲外は `not_found`。
+
+**院内の範囲**(2026-10-03、ken 決定「院内 Web も普通に拾えていいよ」)。登録した配信元
+(EXT_UPSTREAMS / EXT_PUBLIC_BASES)の外にも院内の Web はあり、配備は env
+**EXT_INTRANET_CIDRS**(CIDR のカンマ区切り。例 `172.16.0.0/16`)でその範囲を宣言できる。
+**既定は空 = 院内の範囲は無い**(範囲は配備ごとに違う。nucllei に既定を焼かない)。
+
+| 名前空間                                   | 誰が決める       | 解決                                          | redirect                 |
+| ------------------------------------------ | ---------------- | --------------------------------------------- | ------------------------ |
+| `/ext/{name}/…`(相対・絶対)              | EXT_UPSTREAMS    | その name の backend(与えられた host は見ない)| 辿らない(`upstream_status`)|
+| EXT_PUBLIC_BASES の `<base>/…`             | EXT_PUBLIC_BASES | その name の backend                          | 辿らない                 |
+| 院内の範囲(設定)— 上記に当たらない絶対 URL | EXT_INTRANET_CIDRS | ホストのアドレス(IP リテラルはそのまま、名前は getaddrinfo)が範囲内なら **そのアドレスに固定して** 直接取得 | 範囲内に限って 3 回まで辿る |
+| それ以外                                   | —                | `unknown_upstream`                            | —                        |
+
+「普通に拾える」の意味: **院内の範囲は一般の Web と同じように辿れる**(ページのリンクは
+そのページ自身の URL を基準に解決し、redirect は追う)。**登録した配信元は配信元の規則に
+従う**(backend 経由、redirect は辿らない — 名前空間が先に当たるので、同じホストでも
+`<base>/` 配下は登録した配信元の規則、その外は院内の一般 URL)。
+
+- **ホストは IP リテラルが主経路**(閉域の本番 MiNet には DNS が無く、院内の URL は
+  `http://10.x.x.x/…` の形が普通)。リテラル(v4 / v6、`[::1]` の括弧付き)は名前解決せずに
+  そのまま範囲判定して接続する。ホスト名のときは `getaddrinfo`(= `/etc/hosts` も効く)で
+  引き、引けなければ `upstream_unreachable`(reason `unresolvable` — tool は「名前を解決
+  できない。DNS が無い環境では IP で指定」と案内する)。
+- **接続先は解決したアドレスに固定する**(`ext_upstreams.pin_intranet_address`)。名前を
+  引いて得たアドレスが範囲内(かつ拒否リストに無い)ならその IP に接続し、Host ヘッダ / SNI
+  には元のホスト名を使う — httpx に名前で繋がせると 2 度目の解決(DNS rebinding)で範囲の
+  外へ出られる。範囲内と拒否リストのアドレスを同時に返す名前は怪しいので取らない。
+- **拒否リスト**(`ext_upstreams.INTRANET_DENIED_NETWORKS`)は設定に含めても常に除外:
+  loopback(127/8・::1)、リンクローカル(169.254/16 = クラウドのメタデータ 169.254.169.254
+  を含む・fe80::/10)、docker の既定 bridge 172.17.0.0/16(**172.16.0.0/16 は巻き込まない**)、
+  0/8・multicast・予約。重なりは起動時 WARNING(`log_mounts`)。
+- **redirect**: 3xx + Location は最大 3 回辿る(`INTRANET_MAX_REDIRECTS`)。転送先は URL と
+  して同じ規則で解決し直す(IP リテラルはそのまま、名前は引いてから範囲判定)— 院内の
+  範囲なら辿る(またアドレスに固定)、登録した配信元に当たればその backend で 1 回だけ取る
+  (配信元の規則 = そこから先は辿らない)、どちらでもない(ホストが範囲の外・http(s) で
+  ない・形が不正・Location に制御文字)なら `upstream_status`(転送を返した 3xx の
+  status、reason `redirect_outside`)で止める。4 回目の redirect は `upstream_status`
+  (reason `too_many_redirects`)。
+- 上限(`max_bytes`)・content-type・404 → `not_found`・2xx 以外 → `upstream_status`・
+  接続失敗 → `upstream_unreachable` は、登録した http backend と同じ。cookie / 認証ヘッダは送らない(共有クライアント)。
+- `route_of_url` は院内の一般 URL を `UrlRoute(kind="intranet", name=None, origin=…, rel=…)`
+  で返す。純粋な関数なので **DNS は引かない** — 「名前空間に当たらず、院内の範囲が設定されて
+  いる絶対 URL」= 院内の規則で解決される候補、という意味。実際に範囲内かは `resolve_url`
+  が決める(範囲外は `unknown_upstream` reason `outside_intranet`)。配備層が
+  `resolve_url` の成功後にリンクのルートを組む用途では、院内の一般 URL のリンクはそのページ
+  自身の URL(`{origin}/{rel}{query}`)を基準に解決する(通常の Web と同じ)。
+- `mounted_path_for_url` / `url_for_mounted_path` / `/ext` ゲートは無関係(file backend の話)。
 - **`/api/v1/files/{id}/content`**(このサーバのファイル配信口。相対、または絶対 — host は
   `/ext/` と同じく問わない: 与えられた host には接続せず Storage から読むので)は、URL の
   ルーティングとしては `file_id_of_url` が id を取り出すところまで。バイトの読み出しは
@@ -165,7 +214,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
@@ -178,12 +227,17 @@ from nucllei.env import (
     SRC_LOG_LEVELS,
 )
 from nucllei.utils.ext_upstreams import (
+    INTRANET_MAX_REDIRECTS,
     ext_backend,
     ext_file_served,
     ext_file_withheld,
     get_ext_client,
     has_path_traversal,
+    intranet_configured,
+    intranet_networks,
+    intranet_overlaps_denied,
     match_public_base,
+    pin_intranet_address,
 )
 
 log = logging.getLogger(__name__)
@@ -280,15 +334,19 @@ class RefError:
       Content-Length(http)。False: Content-Length の無い http stream を打ち切った
       時点の受信量(実サイズは不明で、`size` は limit を少し超えた値になる)。
       too_large 以外の code では常に False(意味を持たない)
-    - `upstream_status` — http backend の 2xx 以外(404 は not_found。3xx = redirect も
-      ここ)。`status` に HTTP status
-    - `upstream_unreachable` — http backend への接続失敗・タイムアウト・InvalidURL
+    - `upstream_status` — http backend / 院内の URL の 2xx 以外(404 は not_found。3xx =
+      redirect もここ。院内の URL では辿れなかった redirect — 内訳は `reason`)。`status` に
+      HTTP status
+    - `upstream_unreachable` — http backend / 院内の URL への接続失敗・タイムアウト・
+      InvalidURL・引けない名前(院内の URL。内訳は `reason`)
     - `workspace_unavailable` — SANDBOX_URL 無し / sandbox API 失敗(404 は not_found、
       413 は too_large に寄せる)
 
     `reason` は code の内訳(code の集合は変えずに、同じ code の中を言い分けるための
-    安定したフィールド)。値はこの閉じた集合で、今は `unknown_upstream` にだけ付く
-    (他の code では None):
+    安定したフィールド)。値はこの閉じた集合で、`unknown_upstream`・`upstream_status`・
+    `upstream_unreachable` に付く(他の code では None):
+
+    `unknown_upstream`:
 
     - `unknown_name` — `/ext/{name}/…` 形(絶対・相対)か EXT_PUBLIC_BASES 配下だが、
       その name が EXT_UPSTREAMS に無い(未知の配信元)
@@ -297,7 +355,22 @@ class RefError:
       `/ext/{name}/`(name の直下)は正しい形で、これには当たらない — backend のルートとして
       解決する(http は上流のルートを GET、file は `not_found`)
     - `outside_public_bases` — どの名前空間にも当たらない絶対 URL(`/ext/{name}/…` 形でも
-      EXT_PUBLIC_BASES 配下でもない = 外部サイト)
+      EXT_PUBLIC_BASES 配下でもない)で、**院内の範囲が設定されていない**(従来どおり)
+    - `outside_intranet` — どの名前空間にも当たらない絶対 URL で、院内の範囲は設定されて
+      いるが、ホストの DNS 解決結果が範囲の外(拒否リストに当たる物を含む)。外部サイト・
+      インターネットの URL はここ。配備が外に出られる環境でも失敗(範囲に足せば取れる)
+
+    `upstream_status`(院内の URL の redirect だけ。http backend の 3xx は None):
+
+    - `redirect_outside` — 転送先が院内の範囲の外(ホストのアドレスが範囲外・どの名前空間
+      にも当たらない・http(s) でない・形が不正)で辿らなかった。`status` は転送を返した
+      応答の 3xx
+    - `too_many_redirects` — redirect が `INTRANET_MAX_REDIRECTS`(3)を超えた
+
+    `upstream_unreachable`(院内の URL だけ。http backend は None):
+
+    - `unresolvable` — URL のホスト名が `getaddrinfo` で引けない(閉域の本番には DNS が
+      無い — tool は「IP で指定」と案内できる。`/etc/hosts` にあれば引ける)
 
     `detail` は人(ログ)向けの 1 行で、**文面は固定ではない**(変わりうる — 分岐に
     使わない)。モデル向け文面は tool 側が `code`(と `reason`)から組む。値を自前で
@@ -317,30 +390,52 @@ class RefError:
 class UrlRoute:
     """URL が **どの backend の何か**(`route_of_url` / `_route_url` の結果)。
 
-    - `name` — EXT_UPSTREAMS の name(存在は確認済み)
+    - `kind` — `"upstream"`(登録した配信元 = EXT_UPSTREAMS の name の物)か
+      `"intranet"`(どの名前空間にも属さない **院内の一般 URL**。EXT_INTRANET_CIDRS が
+      設定された配備だけ。module docstring「院内の範囲」)
+    - `name` — EXT_UPSTREAMS の name(存在は確認済み)。`kind == "intranet"` では None
     - `rel` — name 配下の相対パス(URL に書かれたまま = percent-encoded。先頭 `/`・
       query・fragment を含まない)。name の直下(`/ext/{name}`・`/ext/{name}/`・原本の
-      `<base>`・`<base>/`)は `""`
+      `<base>`・`<base>/`)は `""`。院内の一般 URL では URL の path から先頭 `/` を
+      落とした物(ページのルート `http://h/` は `""`)
     - `query` — `"?a=b"` か `""`
     - `public_base` — その name の原本の公開 URL のルート(EXT_PUBLIC_BASES[name]。
-      末尾スラッシュ無し)。無ければ None
+      末尾スラッシュ無し)。無ければ None(院内の一般 URL も None)
     - `origin` — 入力が絶対 URL なら `"scheme://host[:port]"`(与えられたまま。接続は
-      しない)、同一サーバの相対 URL なら None
+      しない)、同一サーバの相対 URL なら None。院内の一般 URL は常に絶対なので必ず有る
     - `ext_form` — URL の path が `/ext/{name}/…` 形なら True、EXT_PUBLIC_BASES 配下の
-      原本 URL として当たったなら False
+      原本 URL として当たったなら False(院内の一般 URL も False)
+
+    院内の一般 URL のリンクのルートは、そのページ自身の URL `{origin}/{rel}{query}`
+    (`page_url`)— 配信元のルートは無い(通常の Web と同じ)。
     """
 
-    name: str
+    name: str | None
     rel: str
     query: str
     public_base: str | None
     origin: str | None
     ext_form: bool
+    kind: str = "upstream"
 
     @property
     def relative(self) -> bool:
         """入力が同一サーバの相対 URL(スキーム無し)だったか。"""
         return self.origin is None
+
+    @property
+    def intranet(self) -> bool:
+        """院内の一般 URL(どの配信元にも属さない)か。"""
+        return self.kind == "intranet"
+
+    @property
+    def page_url(self) -> str | None:
+        """院内の一般 URL(`kind == "intranet"`)の、絶対 URL としての自分自身(fragment
+        抜き)— ページ内リンクを解決する基準。登録した配信元の URL では None(ルートは
+        `public_base` か `/ext/{name}` で、呼び手が組む — `route_of_url` の docstring)。"""
+        if self.kind != "intranet" or self.origin is None:
+            return None
+        return f"{self.origin}/{self.rel}{self.query}"
 
 
 # 内部の各経路が返す形。成功 (loaded, None) / 失敗 (None, RefError) のどちらか一方。
@@ -533,49 +628,65 @@ async def _load_ext(name: str, path: str, query: str, limit: int) -> _Result:
     return await _fetch_http(f"{target}/{path}{query or ''}", name, path, limit)
 
 
+async def _read_response(
+    response: httpx.Response, label: str, filename: str, limit: int
+) -> _Result:
+    """開いたストリーム応答を LoadedRef にする(http backend と院内の URL で共通)。
+    404 → not_found、それ以外の 2xx 以外(3xx 含む)→ upstream_status、上限超過 →
+    too_large。httpx の例外は呼び手が受ける(upstream_unreachable)。"""
+    if not response.is_success:
+        status = response.status_code
+        log.warning(f"image_refs: ext fetch failed ({label}, status={status})")
+        if status == 404:
+            return _fail("not_found", f"upstream 404 ({label})", status=404)
+        return _fail(
+            "upstream_status", f"upstream returned {status} ({label})", status=status
+        )
+    chunks = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > limit:
+            # 全量バッファせず、超過した時点でストリームを打ち切る。size は
+            # 打ち切り時点の受信量(実サイズの下限)— Content-Length が
+            # 有ればそちらを採る
+            declared_len = response.headers.get("content-length")
+            exact = (declared_len or "").isdigit()
+            size = int(declared_len) if exact else total
+            log.warning(
+                f"image_refs: ext content exceeds size limit "
+                f"({label}, size{'=' if exact else '>='}{size}, limit={limit})"
+            )
+            return _fail(
+                "too_large",
+                f"upstream content exceeds size limit ({label})",
+                size=size,
+                limit=limit,
+                size_exact=exact,
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    return (
+        LoadedRef(
+            data=data,
+            content_type=_content_type_for(
+                data, response.headers.get("content-type"), filename
+            ),
+            name=filename,
+        ),
+        None,
+    )
+
+
 async def _fetch_http(url: str, name: str, path: str, limit: int) -> _Result:
-    """http backend。redirect は辿らない(共有クライアント)。404 → not_found、
-    それ以外の 2xx 以外(3xx 含む)→ upstream_status、上限超過 → too_large、
-    接続失敗 / タイムアウト / InvalidURL → upstream_unreachable。"""
+    """http backend(登録した配信元)。redirect は辿らない(共有クライアント)。
+    404 → not_found、それ以外の 2xx 以外(3xx 含む)→ upstream_status、上限超過 →
+    too_large、接続失敗 / タイムアウト / InvalidURL → upstream_unreachable。"""
     try:
         async with get_ext_client().stream("GET", url) as response:
-            if not response.is_success:
-                status = response.status_code
-                log.warning(
-                    f"image_refs: ext fetch failed (name={name}, status={status})"
-                )
-                if status == 404:
-                    return _fail("not_found", f"upstream 404 (name={name})", status=404)
-                return _fail(
-                    "upstream_status",
-                    f"upstream returned {status} (name={name})",
-                    status=status,
-                )
-            chunks = []
-            total = 0
-            async for chunk in response.aiter_bytes():
-                total += len(chunk)
-                if total > limit:
-                    # 全量バッファせず、超過した時点でストリームを打ち切る。size は
-                    # 打ち切り時点の受信量(実サイズの下限)— Content-Length が
-                    # 有ればそちらを採る
-                    declared_len = response.headers.get("content-length")
-                    exact = (declared_len or "").isdigit()
-                    size = int(declared_len) if exact else total
-                    log.warning(
-                        f"image_refs: ext content exceeds size limit "
-                        f"(name={name}, size{'=' if exact else '>='}{size}, "
-                        f"limit={limit})"
-                    )
-                    return _fail(
-                        "too_large",
-                        f"upstream content exceeds size limit (name={name})",
-                        size=size,
-                        limit=limit,
-                        size_exact=exact,
-                    )
-                chunks.append(chunk)
-            declared = response.headers.get("content-type")
+            return await _read_response(
+                response, f"name={name}", os.path.basename(path), limit
+            )
     except (httpx.HTTPError, httpx.InvalidURL) as e:
         # InvalidURL は httpx.HTTPError の subclass でない(#97 review)。制御文字は
         # has_path_traversal で既に弾いているが、fail closed の約束を破らないよう
@@ -585,16 +696,128 @@ async def _fetch_http(url: str, name: str, path: str, limit: int) -> _Result:
             "upstream_unreachable",
             f"upstream fetch error (name={name}): {type(e).__name__}: {e}",
         )
-    data = b"".join(chunks)
-    filename = os.path.basename(path)
-    return (
-        LoadedRef(
-            data=data,
-            content_type=_content_type_for(data, declared, filename),
-            name=filename,
-        ),
-        None,
+
+
+_REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
+
+
+def _pinned_request(parts, address: str) -> httpx.Request:
+    """院内の URL への要求を、接続先を `address` に固定して組む。URL の host を IP に
+    差し替え、Host ヘッダ(と https の SNI)には元のホスト名を使う。userinfo は落とす
+    (認証情報はどこにも送らない)。path が空(`http://h`)は `/`(ルート)。"""
+    host = parts.hostname or ""
+    netloc_host = f"[{address}]" if ":" in address else address
+    port = f":{parts.port}" if parts.port is not None else ""
+    pinned = parts._replace(
+        netloc=f"{netloc_host}{port}", path=parts.path or "/", fragment=""
+    ).geturl()
+    # Host ヘッダは元の host[:port](IPv6 リテラルは [] 付き)
+    host_header = f"[{host}]" if ":" in host else host
+    return get_ext_client().build_request(
+        "GET",
+        pinned,
+        headers={"Host": f"{host_header}{port}"},
+        extensions={"sni_hostname": host} if parts.scheme == "https" else {},
     )
+
+
+async def _load_intranet(
+    url: str, limit: int, hops: int, redirect_status: int | None
+) -> _Result:
+    """院内の範囲の URL(どの名前空間にも当たらない絶対 URL。`_route_url` が
+    `kind="intranet"` と判定済み)を直接取得する(module docstring「院内の範囲」)。
+
+    - ホストのアドレスを決めて接続を固定(`pin_intranet_address`): IP リテラルはそのまま
+      範囲判定(閉域の本番は DNS が無く、院内の URL は IP リテラルが普通)、名前は
+      `getaddrinfo`(`/etc/hosts` も効く)。範囲外 → `unknown_upstream`(reason
+      `outside_intranet`)、名前が引けない → `upstream_unreachable`(reason `unresolvable`)
+    - 3xx + Location は `_load_url` に転送先を渡して辿る(hops を数える)。転送先は URL と
+      して同じ規則で解決される — 院内ならまた固定して取得、登録した配信元ならその backend、
+      どちらでもなければ `upstream_status`(reason `redirect_outside`)。上限を超えたら
+      `upstream_status`(reason `too_many_redirects`)
+    - `redirect_status` は、この URL が redirect の転送先として来たときの元の 3xx。転送先の
+      ホストが範囲の外なら `outside_intranet` ではなく、元の応答の `upstream_status` +
+      `redirect_outside` で返す(モデルには「転送先が範囲の外」と言える)
+    - 本文の読みは http backend と同じ(`_read_response`)
+    """
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    label = f"intranet host={host}"
+    address, reason = await pin_intranet_address(host)
+    if address is None:
+        if reason == "unresolvable":
+            log.warning(f"image_refs: intranet host does not resolve ({label})")
+            return _fail(
+                "upstream_unreachable",
+                f"host name does not resolve ({label})",
+                reason="unresolvable",
+            )
+        if redirect_status is not None:
+            log.warning(
+                f"image_refs: redirect target is outside EXT_INTRANET_CIDRS ({label}, "
+                f"status={redirect_status})"
+            )
+            return _fail(
+                "upstream_status",
+                f"redirect {redirect_status} to a host outside the intranet ({label})",
+                status=redirect_status,
+                reason="redirect_outside",
+            )
+        log.warning(
+            f"image_refs: intranet host is outside EXT_INTRANET_CIDRS ({label})"
+        )
+        return _fail(
+            "unknown_upstream",
+            f"host resolves outside the intranet ranges EXT_INTRANET_CIDRS ({label})",
+            reason="outside_intranet",
+        )
+    try:
+        request = _pinned_request(parts, address)
+        response = await get_ext_client().send(request, stream=True)
+        try:
+            status = response.status_code
+            location = response.headers.get("location")
+            if status in _REDIRECT_STATUSES and location:
+                if hops >= INTRANET_MAX_REDIRECTS:
+                    log.warning(f"image_refs: too many redirects ({label})")
+                    return _fail(
+                        "upstream_status",
+                        f"more than {INTRANET_MAX_REDIRECTS} redirects ({label})",
+                        status=status,
+                        reason="too_many_redirects",
+                    )
+                # Location は上流が返した生の値 — 制御文字・バックスラッシュは urljoin が
+                # 黙って落とす前に見る(has_path_traversal)。結合後も同じ入口の検査に通す
+                target = urljoin(url, location)
+                if has_path_traversal(location) or _check_url(target) is not None:
+                    route = None
+                else:
+                    route, _ = _route_url(target)
+                if route is None:
+                    log.warning(
+                        f"image_refs: redirect leaves the intranet ({label}, "
+                        f"status={status})"
+                    )
+                    return _fail(
+                        "upstream_status",
+                        f"redirect {status} to a URL outside the intranet ({label})",
+                        status=status,
+                        reason="redirect_outside",
+                    )
+                log.info(f"image_refs: following redirect {status} ({label})")
+            else:
+                return await _read_response(
+                    response, label, os.path.basename(parts.path), limit
+                )
+        finally:
+            await response.aclose()
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        log.exception(f"image_refs: intranet fetch error ({label})")
+        return _fail(
+            "upstream_unreachable",
+            f"intranet fetch error ({label}): {type(e).__name__}: {e}",
+        )
+    return await _load_url(target, limit, hops + 1, status)
 
 
 # sandbox_post が投げる RuntimeError の文面(`sandbox HTTP {status}: {body}`)から
@@ -735,12 +958,15 @@ def _route_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
     else:
         hit = match_public_base(url)
         if hit is None:
-            return None, RefError(
-                "unknown_upstream",
-                "absolute URL is neither an /ext/{name}/ URL nor under "
-                f"EXT_PUBLIC_BASES (external site: {origin})",
-                reason="outside_public_bases",
-            )
+            if not intranet_configured():
+                return None, RefError(
+                    "unknown_upstream",
+                    "absolute URL is neither an /ext/{name}/ URL nor under "
+                    f"EXT_PUBLIC_BASES (external site: {origin}; no "
+                    "EXT_INTRANET_CIDRS configured)",
+                    reason="outside_public_bases",
+                )
+            return _route_intranet(parts, origin, query)
         name, rest = hit
         # rel が空 = 原本のルートそのもの。閉じずに backend へ渡す(module docstring)
         rel, sep, rel_query = rest.split("#", 1)[0].partition("?")
@@ -761,6 +987,34 @@ def _route_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
             public_base=EXT_PUBLIC_BASES.get(name),
             origin=origin,
             ext_form=ext_form,
+        ),
+        None,
+    )
+
+
+def _route_intranet(
+    parts, origin: str, query: str
+) -> tuple[UrlRoute | None, RefError | None]:
+    """どの名前空間にも当たらない絶対 URL を、院内の一般 URL(`kind="intranet"`)として
+    組む(EXT_INTRANET_CIDRS が設定された配備だけ — 呼び手が確認済み)。DNS は引かない
+    (`route_of_url` の純粋さを保つ — 範囲内かどうかは `_load_intranet` が決める)。
+    ホスト名が取れない・port が不正な URL は `unsupported_form`。"""
+    try:
+        host, port = parts.hostname, parts.port
+    except ValueError as e:
+        return None, RefError("unsupported_form", f"malformed URL: {e}")
+    if not host:
+        return None, RefError("unsupported_form", "URL has no host")
+    del port  # 検証のためだけに評価した
+    return (
+        UrlRoute(
+            name=None,
+            rel=parts.path.lstrip("/"),
+            query=query,
+            public_base=None,
+            origin=origin,
+            ext_form=False,
+            kind="intranet",
         ),
         None,
     )
@@ -789,12 +1043,18 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
     ページ内リンクのルートを組む — 原本ルートがある name は入力が相対でも絶対でも
     `route.public_base`(利用者が実際に開けるのは原本の URL。`/ext` ゲートは上流の 3xx を
     502 に落とす)、無ければ相対入力(`route.relative`)は `/ext/{name}`、絶対は
-    `{route.origin}/ext/{name}`。
+    `{route.origin}/ext/{name}`。**院内の一般 URL**(`route.intranet`、`name` は None)に
+    配信元のルートは無く、リンクはそのページ自身の URL(`route.page_url`)を基準に解決する
+    (通常の Web と同じ)。
     URL の分解(`/ext/{name}/…`・EXT_PUBLIC_BASES・EXT_UPSTREAMS)を呼び手に複製させない。
 
     成功は `(UrlRoute, None)`、ルーティングできない URL は `(None, RefError)` —
     `resolve_url` が同じ入力に返すのと同じ code / reason(`unsupported_form` /
-    `traversal` / `unknown_upstream` + reason)。name の直下(`/ext/{name}`・`/ext/{name}/`・
+    `traversal` / `unknown_upstream` + reason)。例外は院内の範囲: **DNS は引かない**ので、
+    EXT_INTRANET_CIDRS が設定された配備では名前空間に当たらない絶対 URL をすべて
+    `kind="intranet"` で返す(= 院内の規則で解決される候補)。実際にホストが範囲内かは
+    `resolve_url` が決める(範囲外は `unknown_upstream` reason `outside_intranet`)—
+    `resolve_url` の成功後に呼ぶ用途ではずれない。name の直下(`/ext/{name}`・`/ext/{name}/`・
     原本の `<base>`・`<base>/`)は成功で、`rel` が `""`。**配信範囲(EXT_FILE_SCOPES)や
     実在は見ない** — 「どこに属するか」だけで、読めるかどうかは `resolve_url` の責務
     (file backend の直下は `resolve_url` では `not_found`)。`/api/v1/files/{id}/content` はここでは
@@ -806,13 +1066,20 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
     return _route_url(url)
 
 
-async def _load_url(url: str, limit: int) -> _Result:
-    """URL(traversal / 制御文字は入口で拒否済み)を backend で解決する。"""
+async def _load_url(
+    url: str, limit: int, hops: int = 0, redirect_status: int | None = None
+) -> _Result:
+    """URL(traversal / 制御文字は入口で拒否済み)を解決する: 登録した配信元は backend、
+    院内の一般 URL は直接取得(`_load_intranet`)。`hops` は院内の URL で辿った redirect の
+    回数、`redirect_status` はこの URL を指した redirect の status(転送先の再解決でだけ
+    付く)。"""
     route, err = _route_url(url)
     if route is None:
         # warning はここで出す(`_route_url` は probe からも呼ばれる — 二重に残さない)
         log.warning(f"image_refs: {err.detail} ({url[:80]!r})")
         return None, err
+    if route.intranet:
+        return await _load_intranet(url, limit, hops, redirect_status)
     return await _load_ext(route.name, route.rel, route.query, limit)
 
 
@@ -850,10 +1117,11 @@ async def mounted_path_for_url(url: str) -> str | None:
     if has_path_traversal(url):
         return None
     route, _ = _route_url(url)
-    if route is None:
+    if route is None or route.intranet:
+        # 院内の一般 URL は配信元を持たない(sandbox に同じ実体は無い)
         return None
     backend = ext_backend(route.name)
-    if backend[0] != "file" or has_path_traversal(route.rel):
+    if backend is None or backend[0] != "file" or has_path_traversal(route.rel):
         return None
     candidate = _ext_file_target(backend[1], route.rel)
     if candidate is None:
@@ -1120,3 +1388,19 @@ def log_mounts() -> None:
                 f"[nucllei] WARNING: EXT_PUBLIC_BASES {name}={base} に対応する "
                 f"EXT_UPSTREAMS が無い({base}/** の参照は解決されない)"
             )
+    if intranet_configured():
+        log.info(
+            "[nucllei] 院内の範囲 (EXT_INTRANET_CIDRS): "
+            + " ".join(str(network) for network in intranet_networks())
+            + " — この範囲のホストの URL は登録無しで取得する"
+        )
+        for network, denied in intranet_overlaps_denied():
+            log.warning(
+                f"[nucllei] WARNING: EXT_INTRANET_CIDRS {network} は常に除外する "
+                f"{denied} と重なる(そのアドレスは院内の範囲でも取りに行かない)"
+            )
+    else:
+        log.info(
+            "[nucllei] 院内の範囲 (EXT_INTRANET_CIDRS) は未設定 — 登録した配信元の外の "
+            "URL は取得しない"
+        )

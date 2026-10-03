@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import os
@@ -605,6 +606,43 @@ def parse_ext_file_scopes(value: str) -> dict[str, tuple[str, ...]]:
 # /ext ゲート・resolver・URL ⇔ sandbox パスの橋渡しのすべてに同じに効く。
 # http backend の name に書いても効かない(起動時に WARNING)。
 EXT_FILE_SCOPES = parse_ext_file_scopes(os.environ.get("EXT_FILE_SCOPES", ""))
+
+
+def parse_ext_intranet_cidrs(
+    value: str,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """`EXT_INTRANET_CIDRS` をパースする。CIDR(`172.16.0.0/16`、`fd00::/8`。prefix 無しの
+    単一アドレスは /32 / /128)のカンマ区切り。不正エントリは log.warning して捨てる
+    (1 エントリの typo で全体を殺さない)。host ビットが立っていても受ける(ネットワーク
+    アドレスに正規化)。重複は 1 つにまとめる。
+
+    拒否リスト(loopback・リンクローカル・docker 既定帯 等)との重なりはここでは見ない —
+    判定時に常に除外され(`utils/ext_upstreams.intranet_allowed`)、起動時に
+    `image_refs.log_mounts` が WARNING を出す。
+    """
+    parsed: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for entry in (value or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            log.warning(f"EXT_INTRANET_CIDRS: ignoring invalid entry {entry!r}")
+            continue
+        if network not in parsed:
+            parsed.append(network)
+    return tuple(parsed)
+
+
+# 院内(イントラネット)のアドレス範囲(例 "172.16.0.0/16")。どの名前空間
+# (`/ext/{name}/…`・EXT_PUBLIC_BASES)にも当たらない絶対 URL でも、ホスト名を DNS で引いた
+# アドレスがこの範囲にあれば、登録無しで取得する(utils/image_refs.py「院内の範囲」。接続は
+# 解決したアドレスに固定、redirect は範囲内に限って 3 回まで)。**既定は空 = 院内の範囲は
+# 無い**(従来どおり fail closed。範囲は配備ごとに違うので nucllei に既定を焼かない)。
+# loopback・リンクローカル(クラウドのメタデータ 169.254.169.254 を含む)・docker 既定帯
+# 172.17.0.0/16 等は、ここに含めても常に除外する(`utils/ext_upstreams.INTRANET_DENIED_NETWORKS`)。
+EXT_INTRANET_CIDRS = parse_ext_intranet_cidrs(os.environ.get("EXT_INTRANET_CIDRS", ""))
 
 # feed(context_images)の参照(絶対 URL / sandbox fs パス)のオンデマンド解決(utils/image_refs.py —
 # ローカル読み / サーバ側 fetch → base64)のサイズ上限。既定 25MB(sandbox 転送上限と同値)。

@@ -1001,7 +1001,8 @@ def test_uppercase_scheme_is_a_url(monkeypatch):
 
 def test_url_outside_allowed_upstreams_is_not_fetched(monkeypatch):
     """挙動変更の番兵: 許可先の外の URL(任意の LAN / 外部サイト)は取りに行かない。
-    旧実装は CIDR 拒否リストだけで LAN の任意ホストを取れた。"""
+    旧実装は CIDR 拒否リストだけで LAN の任意ホストを取れた。院内の範囲
+    (EXT_INTRANET_CIDRS)が未設定の配備の挙動 — 設定した配備は下の test_intranet_*。"""
     env = _UrlEnv(monkeypatch)
     env.http_backend()
     env.public_base()
@@ -1040,6 +1041,94 @@ def test_unknown_upstream_wording_follows_reason(monkeypatch):
     for result in (unknown_name, not_ext_form, outside):
         assert result.startswith("ERROR") and result.endswith(URL_ARG_FORM)
     assert env.gets == [] and env.writes == []
+
+
+def _intranet_env(monkeypatch, env, cidrs=("10.0.0.0/8",), dns=None):
+    import ipaddress
+
+    from nucllei.utils import ext_upstreams
+
+    monkeypatch.setattr(
+        ext_upstreams,
+        "EXT_INTRANET_CIDRS",
+        tuple(ipaddress.ip_network(c) for c in cidrs),
+    )
+
+    async def fake_lookup(host):
+        return list((dns or {}).get(host, []))
+
+    monkeypatch.setattr(ext_upstreams, "lookup_host", fake_lookup)
+
+
+def test_intranet_url_is_imported_when_the_range_is_configured(monkeypatch):
+    """院内の範囲を設定した配備では、登録無しの院内 URL(閉域の本番は IP リテラル)も
+    取り込める。接続先は固定済みのアドレス、Host は元のまま。redirect は範囲内で辿る。"""
+
+    def upstream(request):
+        if request.url.path == "/old":
+            return httpx.Response(302, headers={"location": "http://10.1.2.4/new.pdf"})
+        return httpx.Response(
+            200, content=b"%PDF-1", headers={"content-type": "application/pdf"}
+        )
+
+    env = _UrlEnv(monkeypatch, upstream)
+    _intranet_env(monkeypatch, env)
+    result = env.run(url="http://10.1.2.3/his-info/%E6%A7%98%E5%BC%8F.pdf")
+    assert not result.startswith("ERROR"), result
+    assert env.gets == ["http://10.1.2.3/his-info/%E6%A7%98%E5%BC%8F.pdf"]
+    assert env.sent_headers[0]["host"] == "10.1.2.3"
+    assert env.writes[-1]["payload"]["path"].endswith("imports/様式.pdf")
+    result = env.run(url="http://10.1.2.3/old")
+    assert not result.startswith("ERROR"), result
+    assert env.gets[-2:] == ["http://10.1.2.3/old", "http://10.1.2.4/new.pdf"]
+    assert env.writes[-1]["payload"]["path"].endswith("imports/new.pdf")
+
+
+def test_intranet_wording_follows_reason(monkeypatch):
+    """院内の範囲の外(インターネット等)は固定文で「院内の範囲の外」と言う(値は見ない)。
+    辿れなかった redirect・引けない名前も reason で言い分ける。"""
+
+    def upstream(request):
+        path = request.url.path
+        if path == "/leave":
+            return httpx.Response(302, headers={"location": "https://example.com/x"})
+        if path.startswith("/loop"):
+            n = int(path[len("/loop") :] or 0)
+            return httpx.Response(302, headers={"location": f"/loop{n + 1}"})
+        return httpx.Response(200, content=b"ok")
+
+    env = _UrlEnv(monkeypatch, upstream)
+    _intranet_env(
+        monkeypatch,
+        env,
+        dns={"intra.test": ["10.5.5.5"], "example.com": ["93.184.216.34"]},
+    )
+    for u in (
+        "https://example.com/a.pdf",
+        "http://192.168.1.1/x",
+        "http://127.0.0.1/x",
+    ):
+        result = env.run(url=u)
+        assert result.startswith("ERROR") and "院内の範囲の外" in result, u
+        assert "外部の Web は取りに行かない" in result and result.endswith(
+            URL_ARG_FORM
+        ), u
+        assert "リンク切れ" not in result, u
+    assert env.gets == []
+    outside = env.run(url="http://10.1.2.3/leave")
+    assert "転送先が院内の範囲の外" in outside and "302" in outside
+    loop = env.run(url="http://10.1.2.3/loop")
+    assert "3 回を超えて" in loop
+    assert env.gets.count("http://10.1.2.3/loop") == 1 and len(env.gets) == 1 + 4
+    unresolved = env.run(url="http://nosuch.test/x")
+    assert "ホスト名を解決できない" in unresolved and "IP アドレスで指定" in unresolved
+    named = env.run(url="http://intra.test/x")
+    assert not named.startswith("ERROR")
+    assert (
+        env.gets[-1] == "http://10.5.5.5/x"
+        and env.sent_headers[-1]["host"] == "intra.test"
+    )
+    assert env.writes[-1]["payload"]["path"].endswith("imports/x")
 
 
 def test_too_large_reports_actual_size_and_limit(monkeypatch):

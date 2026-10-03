@@ -312,15 +312,33 @@ def _explain_ref_error(u: str, err) -> str:
         )
     if code == "upstream_status":
         if err.status is not None and 300 <= err.status < 400:
+            # 院内の一般 URL は redirect を辿る (範囲内で 3 回まで) — 辿れなかった内訳は
+            # reason。登録した配信元 (reason 無し) は辿らない
+            if err.reason == "redirect_outside":
+                return (
+                    f"ERROR: {u} は redirect ({err.status}) を返したが、転送先が院内の範囲の外"
+                    " (またはこの配備が取得できない URL) なので辿らなかった。"
+                    "ユーザーには URL をそのまま案内する。"
+                )
+            if err.reason == "too_many_redirects":
+                return (
+                    f"ERROR: {u} は redirect を 3 回を超えて繰り返した (転送のループか、"
+                    "ログインが要るページ)。ユーザーには URL をそのまま案内する。"
+                )
             return (
-                f"ERROR: {u} は redirect ({err.status}) を返した。redirect は辿らないので、"
-                "ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
+                f"ERROR: {u} は redirect ({err.status}) を返した。登録した配信元の redirect は"
+                "辿らないので、ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
             )
         return (
             f"ERROR: {u} の上流が {err.status if err.status is not None else 'エラー'} を"
             "返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
         )
     if code == "upstream_unreachable":
+        if err.reason == "unresolvable":
+            return (
+                f"ERROR: {u} のホスト名を解決できない (この環境に DNS が無い場合は、"
+                "ホスト名ではなく IP アドレスで指定する)。"
+            )
         return (
             f"ERROR: {u} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
             "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
@@ -331,10 +349,16 @@ def _explain_ref_error(u: str, err) -> str:
             what = "は許可先の外 (その配信元はこの配備に設定されていない)。"
         elif err.reason == "not_ext_form":
             what = "は `/ext/<配信元>/<パス>` の形でない。"
+        elif err.reason == "outside_intranet":
+            # 院内の範囲は設定されているが、ホストのアドレスがその外 (インターネット等)
+            what = (
+                "は院内の範囲の外 (この配備が院内として設定したアドレス範囲に無い)。"
+                "外部の Web は取りに行かない。"
+            )
         else:
             what = (
-                "は許可先の外 (この配備が取得を許可している上流の URL ではない)。"
-                "任意の Web / LAN の URL は取りに行かない。"
+                "は許可先の外 (この配備が取得を許可している上流の URL ではなく、院内の"
+                "範囲も設定されていない)。任意の Web / LAN の URL は取りに行かない。"
             )
         return f"ERROR: {u} {what}{URL_ARG_FORM}"
     if code == "traversal":
@@ -439,8 +463,8 @@ class Tools:
         url_max_mb: float = Field(
             default=50.0,
             description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
-            "(取れる URL の範囲は env EXT_UPSTREAMS / EXT_PUBLIC_BASES が決める。"
-            "sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
+            "(取れる URL の範囲は env EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS が"
+            "決める。sandbox と共有の /mnt 配下にある物はコピーしないので、この上限は掛からない)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
 
@@ -864,11 +888,14 @@ class Tools:
 
         許可範囲・redirect の扱い・失敗理由は resolver 一本 = 配備層の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
-        `/ext/{name}/…` (相対、または絶対 = host 不問) と EXT_PUBLIC_BASES 配下の URL で、
-        どちらも EXT_UPSTREAMS の backend 経由 — 与えられた host へは接続せず、redirect も
-        辿らない。
-        **許可先の外の URL は取りに行かない** (`unknown_upstream`)。cookie / 認証ヘッダを
-        どこにも転送しないので、リクエスト文脈の無い background 続きターンでも同じに動く。
+        `/ext/{name}/…` (相対、または絶対 = host 不問) と EXT_PUBLIC_BASES 配下の URL
+        (どちらも EXT_UPSTREAMS の backend 経由 — 与えられた host へは接続せず、redirect も
+        辿らない) と、配備が **院内の範囲** (env EXT_INTRANET_CIDRS) として宣言した
+        アドレスのホストの URL (登録無しで直接取得。接続先は解決したアドレスに固定、
+        redirect は範囲内に限って 3 回まで辿る — 一般の Web と同じ扱い)。
+        **それ以外 (院内の範囲の外・範囲が未設定の配備での登録外) の URL は取りに行かない**
+        (`unknown_upstream`)。cookie / 認証ヘッダをどこにも転送しないので、リクエスト文脈の
+        無い background 続きターンでも同じに動く。
 
         - 解決先が file backend で実体が `/mnt` 配下 → コピーせず、sandbox から見える
           パスを返す (`mounted_path_for_url`)。`/mnt` 配下は sandbox と同じ置き場という

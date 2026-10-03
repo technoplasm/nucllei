@@ -472,7 +472,9 @@ ken 決定: モデルに見える tool の引数は意味を固定する — **`
     ならない(#141「直す `send_to_workspace(ref)`」)。
   - **挙動変更**: 許可先(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`)の外の URL は取り込めない
     (`unknown_upstream`)。旧実装は docker 帯・loopback 以外の LAN を全部取れた。redirect も
-    辿らない(旧 LAN 経路は 3 回まで追った)。
+    辿らない(旧 LAN 経路は 3 回まで追った)。→ **同日中に「院内の範囲」を足した**(末尾の節):
+    配備が `EXT_INTRANET_CIDRS` で院内のアドレス範囲を宣言すれば、その範囲のホストの URL は
+    登録無しで取れ、redirect も範囲内で 3 回まで辿る。未設定なら上記のまま。
   - 取り込み名は URL の basename(decode 済み)。旧実装の Content-Disposition 優先は無くなった
     (`LoadedRef` が応答ヘッダを持たない — 要るなら resolver 側に足す)。
 - **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50)。失敗は `RefError.code` で
@@ -703,3 +705,92 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   主な利用者だった llens doc tool は相対 `/ext/…` に切り替えて origin を補わなくなった。
   llens の現行 tool に `X-Forwarded-*` を読むものは無い(2026-10-03 に grep で確認)。
   利用者が居ないなら撤去の候補。
+
+## 院内の範囲(EXT_INTRANET_CIDRS)— 登録した配信元の外の院内 Web も拾う(2026-10-03)
+
+`send_to_workspace(url=)` を resolver に一本化した結果、許可先(`EXT_UPSTREAMS` /
+`EXT_PUBLIC_BASES`)の外の院内 URL が取り込めなくなっていた(旧 `_fetch_lan` は loopback・
+docker 帯以外の LAN を全部取れ、redirect を 3 回まで追った)。ken:「院内 Web も普通に拾えて
+いいよ」/「プロンプトで外部接続を試みると失敗で」/「院内は全て 172.16 のセグメントで払い
+出してる。閉域の本番は 10. のセグメントに変えてある」/「MiNet(閉域の本番)には DNS も無い」。
+規則の定義は `nucllei/utils/image_refs.py` の module docstring「院内の範囲」、英語の正文は
+`README_API.md` §3.8「The intranet range」(ここは決定の経緯と配備への申し送りだけ)。
+
+決定:
+
+- **配備が範囲を宣言する**: env `EXT_INTRANET_CIDRS`(CIDR のカンマ区切り。prefix 無しは
+  /32・/128。`env.parse_ext_intranet_cidrs`)。**既定は空 = 院内の範囲は無い**(従来どおり
+  fail closed)。範囲は環境ごとに違う(staging は `172.16.0.0/16`、本番の閉域は `10.` の
+  セグメント = `10.0.0.0/8` か運用が決めるもっと狭い範囲)ので nucllei に既定を焼かず、
+  各配備の `.env` に書く。
+- **名前空間が先、院内の範囲は最後**: `/ext/{name}/…`・`EXT_PUBLIC_BASES` 配下は従来どおり
+  登録した配信元の規則(backend 経由、redirect は辿らない — 今日 staging で「転送された」
+  の案内を確認済みの挙動を変えない)。どれにも当たらない絶対 URL だけが院内の規則へ。
+  同じホストでも `<base>/` の中と外で規則が変わる(中 = 配信元、外 = 院内の一般 URL)。
+- **外は失敗のまま**: 範囲の外(インターネット・他 LAN)は `unknown_upstream` に新しい
+  reason `outside_intranet`(範囲未設定の配備は従来の `outside_public_bases`)。配備が外部
+  ネットワークに出られる環境でも範囲に無ければ失敗 — 外に出したければ範囲に足す。
+  `send_to_workspace` の固定文は「院内の範囲の外 (この配備が院内として設定したアドレス
+  範囲に無い)。外部の Web は取りに行かない。」(値は見ない。解決結果に基づく)。
+- **IP リテラルが主経路**: 閉域の本番には DNS が無く、院内の URL は `http://10.x.x.x/…`。
+  リテラル(v4 / v6、`[]` 付き)は名前解決せずにそのまま範囲判定して接続する。ホスト名は
+  `getaddrinfo`(= `/etc/hosts` も効く)。引けなければ `upstream_unreachable` +
+  reason `unresolvable`、tool の固定文は「ホスト名を解決できない (この環境に DNS が無い
+  場合は、ホスト名ではなく IP アドレスで指定する)」。
+- **接続先は解決したアドレスに固定**(`ext_upstreams.pin_intranet_address`): 範囲内の
+  IP に接続し、Host ヘッダ / SNI(https)は元のホスト名。httpx に名前で繋がせない(DNS
+  rebinding で 2 度目の解決が範囲の外を指しても繋ぐ先は変わらない)。範囲内と拒否リストを
+  同時に返す名前は取らない。
+- **拒否リスト**(`ext_upstreams.INTRANET_DENIED_NETWORKS`。設定に含めても常に除外、重なりは
+  起動時 WARNING): `0.0.0.0/8` / `127.0.0.0/8` / `169.254.0.0/16`(クラウドのメタデータ
+  169.254.169.254 を含む)/ **`172.17.0.0/16`(docker の既定 bridge だけ — `172.16.0.0/16` は
+  巻き込まない。/12 で宣言すれば 172.17.x だけ落ちる。テストで固定)** / `224.0.0.0/4` /
+  `240.0.0.0/4` / `::` / `::1` / `fe80::/10` / `ff00::/8` / `fd00:ec2::254`(AWS IMDS v6)。
+  IPv4-mapped IPv6(`::ffff:127.0.0.1`)は v4 として判定。
+  - cage の API(llens の `CAGE_API_BASE`、既定 `http://172.17.0.1:13303`)は tool の内部
+    通信で resolver を通らないので拒否リストと無関係(影響なし)。
+- **redirect**: 院内の URL は 3xx + Location を最大 3 回辿る(`INTRANET_MAX_REDIRECTS`)。
+  転送先は URL として同じ規則で解決し直す(リテラルはそのまま、名前は引いてから範囲判定):
+  院内 → 辿る(また固定)、登録した配信元 → その backend で 1 回だけ(そこから先は辿らない)、
+  どちらでもない(範囲外・拒否リスト・http(s) でない・制御文字)→ `upstream_status`
+  (転送を返した 3xx の status、reason `redirect_outside`)。4 回目 → `upstream_status`
+  reason `too_many_redirects`。登録した http backend の挙動は不変(3xx は reason 無しの
+  `upstream_status`、辿らない)。
+- **上限・種別・404・5xx・接続失敗**は http backend と同じ(`_read_response` を共有)。
+- **`route_of_url`**: 院内の一般 URL は `UrlRoute(kind="intranet", name=None, rel=<path の
+  先頭 / 抜き>, query, public_base=None, origin, ext_form=False)` + property `intranet` /
+  `page_url`(= `{origin}/{rel}{query}`。リンクを解決する基準 — 配信元のルートは無い、
+  通常の Web と同じ)。既存の形は不変(`kind` は既定 `"upstream"`、`page_url` は None)。
+  純粋な関数のまま **DNS は引かない** — 範囲が設定された配備では名前空間に当たらない絶対
+  URL をすべて intranet 候補として返す。範囲内かは `resolve_url` が決める。`resolve_url` の
+  成功後に呼ぶ用途(llens `fetch_url._link_roots`)ではずれない。
+- `mounted_path_for_url` / `url_for_mounted_path` / `/ext` ゲートは無関係(`mounted_path_for_url`
+  は intranet route で None)。
+
+llens への申し送り(配備層):
+
+- compose / `.env` に範囲を足す(環境ごとに値が違う。staging の例):
+
+  ```
+  EXT_INTRANET_CIDRS=172.16.0.0/16
+  # 本番の閉域(10. のセグメント。運用が決めるもっと狭い範囲でもよい。複数はカンマ区切り)
+  # EXT_INTRANET_CIDRS=10.0.0.0/8
+  ```
+
+  本番は DNS が無いので院内の URL は IP リテラル(`http://10.1.2.3/his-info/top.aspx`)。
+  `EXT_PUBLIC_BASES` の原本 URL も本番では IP になりうる。
+- `fetch_url._link_roots`: `route_of_url` が `route.intranet`(`name is None`)を返したら、
+  リンクのルートは `/ext/{name}` でも `public_base` でもなく **そのページ自身の URL
+  `route.page_url`** を基準に `urljoin` で解決する(通常の Web と同じ。`_base_prefix` に
+  `name=None` を渡さない)。今の実装のままだと `link_base = f"{origin}/ext/None"` になる
+  (落ちはしないが壊れたリンクを出す)。
+- ERROR 文の出し分けに新しい reason を足す: `unknown_upstream` / `outside_intranet`
+  (「院内の範囲の外。外部の Web は読めない」)、`upstream_status` / `redirect_outside`・
+  `too_many_redirects`、`upstream_unreachable` / `unresolvable`(「名前を解決できない — DNS
+  の無い環境では IP で指定」)。固定文は nucllei の `send_to_workspace`(`_explain_ref_error`)と
+  揃える。
+- 担保(nucllei): `test_image_refs_resolve.py` 末尾の節(パース / 拒否リストと 172.16 /
+  範囲内の取得と固定・Host・SNI / IP リテラル主経路(DNS を呼ばない)/ 範囲外・拒否・混在 /
+  引けない名前 / 未設定は従来どおり / 名前空間の優先 / redirect 3 回・4 回目・範囲外への転送・
+  配信元への転送 / 配信元は辿らない / 上限・404・5xx・不達 / `route_of_url` の形 /
+  起動 WARNING)、`test_builtin_sandbox.py`(範囲内の取り込みと redirect / 固定文)。
