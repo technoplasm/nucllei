@@ -368,7 +368,9 @@ def test_docstring_names_url_and_path_with_their_fixed_meanings():
     assert "ホストを補わない" in doc
     assert "取り違え" not in doc and "どちらでも" not in doc
     assert "BE 上" not in doc and "添付・生成物" in doc
-    assert "#page=N" in doc and "そちらが優先" in doc
+    # 2026-10-04: `#page=N` の扱い等の細目は README_API §5.7.1 へ移した (毎ターン送る
+    # token の節約)。docstring に残すのは引数の形・戻り値・ERROR の形だけ
+    assert "受け取った形のまま" in doc and '"ERROR: ..."' in doc
     assert "先頭 3 ページと総ページ数が返る" in doc and '"4-6"' in doc
     assert "cage" not in doc.lower() and "棚" not in doc
 
@@ -720,7 +722,7 @@ def test_server_error_status_suggests_retry_or_handing_over_the_url(monkeypatch)
 
 def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(monkeypatch):
     result = _explained(monkeypatch, "upstream_unreachable")
-    assert "院内 Web に届かない" in result and "この配備からは到達できない" in result
+    assert "のホストに届かない" in result and "この配備からは到達できない" in result
     assert "URL をそのまま案内" in result and "リンク切れ" not in result
 
 

@@ -400,7 +400,7 @@ through one shared module, `nucllei/utils/ref_errors.py` (both the form errors
 below and the per-`RefError.code` wording), so the same input fails with the
 same text in every tool. A **deployment-layer tool that takes a `url` / `path`
 / `file_id` argument must import the same constants and use the same wording**
-(until 2026-10-03 `feed_image` / `fetch_url` were deployment tools in llens and
+(until 2026-10-03 `feed_image` / `fetch_url` were deployment-layer tools and
 each carried its own copy of this text; the copies drifted — see §5.7):
 
 | Constant                  | Text                                                                                                                                     |
@@ -1095,6 +1095,16 @@ class Tools:
     the description (before the first `:param`); each `:param` fits on one
     line.** `:return:` is developer documentation at best — prefer a `#`
     comment.
+  - The description is passed through `inspect.cleandoc` — the source
+    indentation is removed (relative indentation and line breaks are kept),
+    so indent docstrings normally. The stored spec (`/api/v1/tools/`, written
+    at sync / create / update) and the per-turn spec use the same cut, so the
+    stored `description` equals what the model gets (before per-turn hooks
+    and the class-docstring note).
+  - The description is re-sent on **every turn** for every mounted function:
+    keep it to what the model needs to decide whether and how to call
+    (purpose, argument forms, return shape, a one-line ERROR shape) and put
+    longer usage guidance in deployment prompts / skills (example: §5.7.1).
 - Methods may be `def` or `async def`; sync methods run in a worker thread, so
   blocking I/O is fine.
 - **Shared notes**: the `Tools` **class docstring** is prepended **once** — to
@@ -1317,8 +1327,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     is as of the latest completed call — the pending tool results of the
     current step are not yet counted. Owner-only (the chat must belong to
     `__user__`); chat path only. Always registered. Moved from
-    prism-hu/llens `tools/context_budget.py` on 2026-10-03: nucllei records
-    usage per call, so the builtin sees the current turn where the llens
+    the deployment layer (`tools/context_budget.py`) on 2026-10-03: nucllei records
+    usage per call, so the builtin sees the current turn where the deployment-layer
     version was one turn stale and needed a hand-written context-size valve.
   - `builtin_feed_image` — `feed_image(url?, path?, file_id?, filename?, pages?)`:
     shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
@@ -1334,7 +1344,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     page count — and then only pushes the reference; **no File or Storage
     object is created** (PDF pages are pushed as `…#page=N` references and
     rasterised at send time). Valves: `max_image_mb` (8), `max_pages` (3).
-    Always registered.
+    Always registered. Usage guidance beyond the docstring: §5.7.1.
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link
     list, for browsing web that no document corpus holds. `url` is
@@ -1364,14 +1374,15 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / the removed `EXT_INTRANET_CIDRS`,
     because without them no URL could resolve). The docstring the model sees
     names no hosts (the "registered original hosts" sentence went away with
-    `EXT_PUBLIC_BASES`).
+    `EXT_PUBLIC_BASES`). Usage guidance beyond the docstring (corpus vs. fetch,
+    `query`, `run_subagent` + `max_mb`, link list): §5.7.1.
     Both tools word their failures per `RefError.code` / `reason` and the fixed
     argument-form sentences through `nucllei/utils/ref_errors.py`, shared with
-    `send_to_workspace`. Until 2026-10-03 they were deployment-layer tools in
-    prism-hu/llens (`nucllei/tools/feed_image.py` / `fetch_url.py`); they moved
+    `send_to_workspace`. Until 2026-10-03 they were deployment-layer tools
+    (`nucllei/tools/feed_image.py` / `fetch_url.py`); they moved
     here because every rule they enforce (resolution, registered upstreams,
     redirects, size caps, link roots) already lived in `utils/image_refs.py`,
-    so the shells in llens only duplicated those rules and their error texts,
+    so the deployment-layer shells only duplicated those rules and their error texts,
     and had to carry "this nucllei version lacks X" branches. What stays in the
     deployment is the env values, the prompts / skills that teach the model
     when to call them, and site knowledge.
@@ -1482,6 +1493,71 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 - **External OpenAPI tool servers**: admin-configured connections whose
   `/openapi.json` operations are exposed as tools and invoked over HTTP (no
   reserved-param injection there).
+
+#### 5.7.1 Builtin tool usage guide (`feed_image` / `fetch_url`)
+
+The docstrings of `feed_image` and `fetch_url` carry only what the model needs
+to decide whether and how to call them — purpose, the accepted form of each
+argument, the return shape and the one-line ERROR shape. They are sent on every
+turn, so the finer guidance was moved here on 2026-10-04 (it cost ~900 tokens
+per turn). A deployment that wants the model to know it carries it in its
+prompts / skill bodies; the text below is a **template** (テンプレート — skill
+を書くときの雛形) that names no deployment: put the deployment's own corpus
+tools, entry URLs and sites in place of the generic wording. The ERROR texts
+the tools return at runtime are unchanged and still carry the per-failure next
+step.
+
+**feed_image**
+
+- 図・レイアウト・印影・手書きなど、文字起こしではなく実際に見て判断するためのもの。
+  このターン内に自分の入力へ入るので、続けて内容を評価・説明・修正できる。
+- ユーザーには何も表示されない。ユーザーに見せるなら、見た上で本文に markdown
+  (`![図: …](URL)`) を書く。Files には登録しないので、ユーザーの添付にも残らない。
+- `url`: tool の戻り値の literal をそのまま渡す (図・原本 PDF・Web の資料)。
+  組み立てない・書き換えない・ホストを補わない。
+  - `#page=N` 付きの literal はそのまま渡してよい (`pages` を付ければそちらが優先。
+    `pages` が無ければ `#page=N` のページを見る)。
+  - http(s) の URL はどのネットワークの URL でもそのまま渡す — どこに届くかは配備の
+    ネットワークが決める (断るのはこのサーバ自身を指す URL だけ)。
+- `path`: `/ext/…` は url でも path でも同じファイル。
+- `file_id`: run_python の戻り値やシステム注記の file_id もここに渡す。本文リンク
+  `/api/v1/files/{id}/content` しか手元に無ければ、それを `url=` にそのまま渡す。
+- 3 つとも省略したときの対象は添付 PDF だけ。直接添付の画像は既に見えているので対象に
+  しない (見直すなら file_id を明示する。docstring にも短く残している)。
+- `pages` は PDF のときだけ意味を持つ (画像はそのまま、PDF は指定ページを画像化して目に入れる)。
+- 中身が画像か PDF かは tool が中身を読んで判定する (拡張子の無い URL でも同じ)。
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect / 上流のエラー / 届かない /
+  このサーバ自身 / sandbox が読めない。ERROR 文がどれかと次の一手を書く。
+  「読めなかった」を全部リンク切れと言い換えないこと。
+
+**fetch_url**
+
+- **配備の文書コーパス tool に収録済みの資料はそちらで引く** — fetch_url で取りに
+  行かない。fetch_url は**コーパスに無い情報を Web から辿る**ための道具。
+- http(s) の URL はどのネットワークの URL でもそのまま渡す (IP アドレス直指定も可。DNS の
+  無い環境では IP で指定する)。**どのホストに届くかは配備のネットワークが決める** — この
+  tool は行き先で断らず、届かなければ「届かない」と返す。断るのはこのサーバ自身を指す URL だけ。
+- 入口 URL は配備の prompt / skill が名乗る。2 枚目からは組み立てず、tool の戻り値に
+  出てきた URL の literal をそのままコピーする (相対ならホストを補わない)。
+- 戻り値のリンク一覧の URL は 1 行に 1 本 — Web のページはそのページ基準の絶対 URL、
+  同一サーバの `/ext/…` のページは同じ形の `/ext/…`。次の fetch_url(url=) / feed_image(url=) /
+  send_to_workspace(url=) にそのまま渡せ、ユーザーにもそのまま案内できる。どちらの用途でも
+  1 文字も変えずにコピーする。
+- 大きいページを丸ごと読むと会話が埋まる。索引ページ (お知らせ一覧など) は必ず `query` を
+  付けて該当行だけ取る (部分一致・大小文字と全角半角は無視。1,000 件級の一覧ページには必ず
+  付ける)。実体ページや PDF は run_subagent に 1 ページ 1 本で投げる。
+- 既定のサイズ上限を超える大きい資料は、サブエージェントの中で `max_mb` を付けて読む
+  (主 context では読まない)。サイズ上限超過の ERROR が出たら run_subagent の子が `max_mb` を
+  付けて読む (中身が要らなければ URL を案内する)。
+- テキスト層の無い PDF (スキャン PDF) は ERROR ではなく、戻り値のヘッダが
+  「種別: PDF / テキスト層が無い …」と言い、feed_image(url=…) を案内する — feed_image で
+  見る。画像も同様に「種別: 画像 …」で feed_image を案内する。テキスト層のある PDF でも
+  読んだのはテキストだけなので、レイアウト・図・表・印影は feed_image で見る。
+- 平文にできない形式 (Excel / Word 等) は ERROR になる。加工が要るなら
+  send_to_workspace(url=…) で sandbox に取り込み、中身が要らなければ URL を案内する。
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect / 上流のエラー / 届かない /
+  このサーバ自身。ERROR 文がどれかと次の一手を書く。「取れなかった」を全部リンク切れと
+  言い換えないこと。
 
 ### 5.8 Subagents (`run_subagent`)
 

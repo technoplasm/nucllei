@@ -618,7 +618,8 @@ def test_resolver_failure_without_a_reason_falls_back_to_the_bundled_text(
     result, resolver = _run(monkeypatch, ext_env, f"{SITE}/index", resp=False)
     assert resolver.refs == [f"{SITE}/index"]
     assert result.startswith(f"ERROR: {SITE}/index を取得できない")
-    assert "redirect" in result and "top.aspx" in result
+    assert "redirect" in result and "ページを直接指す URL を渡すこと" in result
+    assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)
 
 
 def test_fetch_passes_the_valve_size_cap_to_the_resolver_as_max_bytes(
@@ -895,7 +896,8 @@ def test_redirect_status_points_to_a_page_not_a_directory(monkeypatch, ext_env):
     assert (
         "redirect (302)" in result and "ディレクトリではなくページを直接指す" in result
     )
-    assert "top.aspx" in result
+    assert "URL を渡すこと" in result
+    assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)
     assert "リンク切れ" not in result
 
 
@@ -913,7 +915,7 @@ def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(
     monkeypatch, ext_env
 ):
     result = _explained(monkeypatch, ext_env, "upstream_unreachable")
-    assert "院内 Web に届かない" in result and "この配備からは到達できない" in result
+    assert "のホストに届かない" in result and "この配備からは到達できない" in result
     assert "URL をそのまま案内" in result and "リンク切れ" not in result
 
 
@@ -1029,6 +1031,8 @@ def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
     )
     assert result.startswith("ERROR") and "平文にできない形式" in result
     assert u in result
+    # 加工が要るなら sandbox に取り込む (too_large と同じ次の一手。2026-10-04)
+    assert f'send_to_workspace(url="{u}")' in result
     # /ext/ 形 (相対) も入力と同じ形で案内する
     u = "/ext/his/log_write.aspx?LI_URL=x.xls"
     result, _c = _run(

@@ -101,9 +101,7 @@ _IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"}
 
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の外 / 大きすぎる)。"
-_HINT_LITERAL = (
-    "read_doc / fetch_url の戻り値に出た URL の literal をそのまま渡すこと。"
-)
+_HINT_LITERAL = "tool の戻り値に出た URL の literal をそのまま渡すこと。"
 
 # sandbox のファイルをユーザーに見せる方法 (fetch_from_workspace が URL か file_id を返す)。
 _SHOW_PATH = (
@@ -162,12 +160,12 @@ def _hints(is_path: bool) -> RefErrorHints:
             else RefErrorHints.not_found
         ),
         redirect_next=(
-            "redirect は辿らないので、ディレクトリではなくファイルやページを直接指す URL を渡すこと "
-            "(例 '<ルート>/' ではなく '<ルート>/top.aspx')。" + _HINT_LITERAL
+            "redirect は辿らないので、ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
+            + _HINT_LITERAL
         ),
         # 上流不達は URL (一般の URL) でしか起きないが、万一 fs で来ても「URL を案内」とは言わない。
         unreachable=(
-            "ERROR: {ref} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
+            "ERROR: {ref} に届かない (この配備からは到達できない、または一時的な障害)。"
             "run_shell の ls で存在を確認すること。"
             if is_path
             else RefErrorHints.unreachable
@@ -288,48 +286,24 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像・PDF を自分自身の目 (VLM) に入れる。図・レイアウト・印影・手書きなど、
-        文字起こしではなく実際に見て判断するためのもの。このターン内に自分の入力へ入るので、
-        続けて内容を評価・説明・修正できる。**ユーザーには何も表示されない** — ユーザーに
-        見せるなら、見た上で本文に markdown (`![図: …](URL)`) を書く。
+        """画像・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
+        ユーザーには何も表示されず、Files にも登録しない — 見せるなら本文に `![図: …](URL)` を書く。
 
-        画像はそのまま、PDF は `pages` のページを画像化して自分の目に入れる (`pages` は PDF の
-        ときだけ意味を持つ。省略時は先頭 3 ページと総ページ数が返る)。**Files には登録しない** —
-        ユーザーの添付には残らない。
+        対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・
+        ホストを補わない)。3 つとも省略すると、この会話に添付された PDF 全件 (filename で絞り込み。
+        直接添付の画像は既に見えている)。
+        PDF は pages のページ (無ければ url の #page=N、どちらも無ければ先頭 3 ページと総ページ数が返る)。
 
-        見る対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す:
+        戻り値は何を目に入れたかの説明。失敗時は "ERROR: ..." で始まる文 — 何が起きたかと次の一手。
 
-        - url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・
-          `/api/v1/files/{id}/content`。read_doc / fetch_url の戻り値の literal をそのまま (図・原本 PDF・
-          院内 Web の資料)。組み立てない・書き換えない・ホストを補わない。
-          `#page=N` 付きの literal はそのまま渡してよい (`pages` を付ければそちらが優先)。
-          http(s) の URL は院内でもインターネットでもそのまま渡す — どこに届くかは配備の
-          ネットワークが決める (断るのはこのサーバ自身を指す URL だけ)。
-        - path: sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)。`/ext/…` は url でも
-          path でも同じファイル。
-        - file_id: 添付・生成物の id。run_python の戻り値やシステム注記の file_id もここ
-          (本文リンク `/api/v1/files/{id}/content` しか手元に無ければ url= にそのまま渡す)。
-
-        3 つとも省略すると、この会話に添付された PDF 全件が対象 (filename で部分一致の絞り込み)。
-        直接添付の画像は既に見えているので対象にしない (見直すなら file_id を明示)。
-
-        中身が画像か PDF かはこちらが読んで判定する (URL が拡張子を持たない配信口
-        `…/log_write.aspx?…` でも同じ)。
-
-        失敗時は "ERROR: ..." で始まる説明 — 何が起きたか (存在しない / サイズ上限超過 /
-        redirect / 上流のエラー / 届かない / このサーバ自身 / sandbox が読めない) と次の
-        一手を書く。「読めなかった」を全部リンク切れと言い換えないこと。
-
-        :param url: (任意) スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値の literal)。
+        :param url: (任意) スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値の literal をそのまま)。
         :param path: (任意) sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)。
-        :param file_id: (任意) 見たい画像・PDF の file_id (UUID)。
+        :param file_id: (任意) 見たい画像・PDF の file_id (添付・生成物の id。UUID)。
         :param filename: (任意) 対象ファイル名の部分一致フィルタ。
         :param pages: (任意) PDF のページ範囲。"3" / "4-6" / "1-2,7" 形式。画像には付けない。
-        :return: 何を自分の目に入れたかの説明 (ユーザー表示ではない) / 失敗時は "ERROR: ..." で始まる
-                 説明 — 何が起きたか (存在しない / サイズ上限超過 / redirect / 上流のエラー /
-                 届かない / このサーバ自身 / sandbox が読めない) と次の一手を書く。
-                 「読めなかった」を全部リンク切れと言い換えないこと。
         """
+        # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
+        # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
         if __feed_image__ is None:

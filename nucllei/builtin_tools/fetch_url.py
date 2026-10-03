@@ -153,8 +153,7 @@ def _decode(raw: bytes, content_type: str) -> str:
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = (
     "を取得できない (上流不達・不在・redirect・サイズ超過のいずれか。"
-    "redirect は辿らないので、ディレクトリではなくページを直接指すこと "
-    "— 例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
+    "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと)。"
 )
 
 
@@ -349,46 +348,23 @@ class Tools:
         __user__: Optional[dict] = None,
         __progress__=None,
     ) -> Text:
-        """Web のページを 1 枚取得して読める平文にする。HTML はリンク一覧付きの
-        平文、PDF はテキスト層の抽出結果を返す。
+        """Web のページ・文書を 1 枚取得して平文にする (HTML はリンク一覧付き、PDF はテキスト層)。
 
-        **doc に収録済みの資料はこの tool で取りに行かない** (感染対策マニュアル /
-        医療安全管理マニュアル / 電話番号簿 / 病院情報管理システム FAQ)。それらは
-        grep_doc / read_doc の担当で、こちらは**doc に無い情報を Web から辿る**ための道具。
+        url は受け取った形のまま渡す: 2 枚目からは組み立てず、戻り値のリンク一覧などに出た URL の
+        literal を 1 文字も変えずにコピーする (相対ならホストを補わない)。
+        大きいページは query で該当行に絞る (続きは offset)。
 
-        url はスキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。
-        http(s) の URL は院内でもインターネットでもそのまま渡す (IP アドレス直指定も可。DNS の無い
-        環境では IP で指定する)。**どのホストに届くかは配備のネットワークが決める** — この tool は
-        行き先で断らず、届かなければ「届かない」と返す。断るのはこのサーバ自身を指す URL だけ。
-        入口の 1 枚はルートにページ名を続ける (例 `<ルート>/top.aspx`)。2 枚目からは
-        **組み立てず、戻り値や read_doc に出てきた URL の literal をそのままコピーする**
-        (相対ならホストを補わない)。
+        戻り値はヘッダ (url / 種別 / 分量) + 本文 + リンク一覧。
+        失敗時は "ERROR: ..." で始まる文 — 何が起きたかと次の一手。
 
-        戻り値のリンク一覧の URL は 1 行に 1 本 — Web のページはそのページ基準の絶対 URL、
-        同一サーバの `/ext/…` のページは同じ形の `/ext/…`。次の fetch_url(url=) / feed_image(url=) /
-        send_to_workspace(url=) にそのまま渡せ、職員にもそのまま案内できる。どちらの用途でも
-        1 文字も変えずにコピーする。
-
-        大きいページを丸ごと読むと会話が埋まる。索引ページ (お知らせ一覧など) は必ず
-        `query` を付けて該当行だけ取り (部分一致・大小文字と全角半角は無視。1,000 件級の一覧
-        ページには必ず付ける)、実体ページや PDF は run_subagent に 1 ページ 1 本で投げること。
-        既定を超える大きい資料はサブエージェントの中で max_mb を付けて読む (主 context では読まない)。
-
-        失敗時は "ERROR: ..." で始まる説明 — 何が起きたか (存在しない / サイズ上限超過 /
-        redirect / 上流のエラー / 届かない / このサーバ自身) と次の一手を書く。
-        「取れなかった」を全部リンク切れと言い換えないこと。
-
-        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (例 "<ルート>/unyou_mn.aspx"、または戻り値・read_doc に出た URL の literal をそのまま)。
+        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値などに出た URL の literal をそのまま)。
         :param query: (任意) 指定すると、本文行・リンク行のうちこの語を含む行だけを返す。
         :param offset: 何文字目から返すか (0 起点)。続きは戻り値の next_offset を渡す。
         :param limit: 返す文字数 (既定 8000)。valve の max_output_chars で頭打ちになる。
         :param max_mb: (任意) 取得サイズの上限 (MB)。既定を超える資料を読むときだけ (天井あり)。
-        :return: ヘッダ (url / 種別 / 分量) + 本文 + リンク一覧。
-                 失敗時は "ERROR: ..." で始まる説明 — 何が起きたか (存在しない / サイズ上限超過 /
-                 redirect / 上流のエラー / 届かない / このサーバ自身) と次の一手を書く。
-                 サイズ上限超過は run_subagent の子が max_mb を付けて読む (中身が要らなければ URL を
-                 案内)。「取れなかった」を全部リンク切れと言い換えないこと。
         """
+        # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
+        # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
             return "ERROR: ユーザー情報が取得できませんでした。"
 
@@ -462,6 +438,7 @@ class Tools:
         if kind == "other":
             return (
                 f"ERROR: 平文にできない形式 (content-type={media_type or '不明'})。"
+                f'加工が要るなら send_to_workspace(url="{u}") で sandbox に取り込む。'
                 f" 職員にはこの URL を案内する: {page_url or u}"
             )
         if kind == "pdf-noText":

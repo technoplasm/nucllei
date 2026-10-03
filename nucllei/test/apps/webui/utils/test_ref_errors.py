@@ -106,7 +106,7 @@ def test_upstream_status_redirect_reasons_and_plain_status():
     # reason 無しの 3xx: 「何が起きたか」は共通、次の一手は hint
     assert _explain(RefError("upstream_status", "x", status=301)) == (
         f"ERROR: {U} は redirect (301) を返した。redirect は辿らないので、ディレクトリではなく"
-        "ページを直接指すこと (例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
+        "ページを直接指す URL を渡すこと。"
     )
     assert _explain(
         RefError("upstream_status", "x", status=301), redirect_next="NEXT"
@@ -123,10 +123,10 @@ def test_upstream_status_redirect_reasons_and_plain_status():
 def test_upstream_unreachable_with_and_without_reason():
     assert _explain(RefError("upstream_unreachable", "x", reason="unresolvable")) == (
         f"ERROR: {U} のホスト名を解決できない — DNS の無い環境では IP アドレスで指定する "
-        "(例 `http://172.16.132.33/his-info/top.aspx`)。"
+        "(例 `http://192.0.2.10/…`)。"
     )
     assert _explain(RefError("upstream_unreachable", "x")) == (
-        f"ERROR: {U} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
+        f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
         "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
     )
     assert (
@@ -252,17 +252,17 @@ def test_sandbox_wording_is_unchanged():
 def test_feed_image_wording_is_unchanged():
     from nucllei.builtin_tools.feed_image import _explain_ref_error as feed_explain
 
-    literal = "read_doc / fetch_url の戻り値に出た URL の literal をそのまま渡すこと。"
+    literal = "tool の戻り値に出た URL の literal をそのまま渡すこと。"
     cases_url = {
         RefError(
             "not_found", "x"
         ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
         RefError("upstream_status", "x", status=302): (
             f"ERROR: {U} は redirect (302) を返した。redirect は辿らないので、ディレクトリではなく"
-            f"ファイルやページを直接指す URL を渡すこと (例 '<ルート>/' ではなく '<ルート>/top.aspx')。{literal}"
+            f"ファイルやページを直接指す URL を渡すこと。{literal}"
         ),
         RefError("upstream_unreachable", "x"): (
-            f"ERROR: {U} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
+            f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
             "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
         ),
         RefError("unknown_upstream", "x", reason="server_self"): (
@@ -286,7 +286,7 @@ def test_feed_image_wording_is_unchanged():
             "not_found", "x"
         ): f"ERROR: {P} は存在しない (ファイル無し)。run_shell の ls で存在を確認すること。",
         RefError("upstream_unreachable", "x"): (
-            f"ERROR: {P} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
+            f"ERROR: {P} に届かない (この配備からは到達できない、または一時的な障害)。"
             "run_shell の ls で存在を確認すること。"
         ),
         RefError("workspace_unavailable", "x"): (
@@ -333,7 +333,7 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
         ): f"ERROR: {U} は存在しない (404 / ファイル無し)。リンク切れとして案内する。",
         RefError("upstream_status", "x", status=302): (
             f"ERROR: {U} は redirect (302) を返した。redirect は辿らないので、ディレクトリではなく"
-            "ページを直接指すこと (例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
+            "ページを直接指す URL を渡すこと。"
         ),
         RefError("upstream_status", "x", status=302, reason="redirect_self"): (
             f"ERROR: {U} の redirect の転送先が このサーバ自身 (または同居するサービス) なので"
@@ -352,8 +352,7 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
         RefError("unsupported_form", "x"): url_error(U),
         RefError("something_new", "x"): (
             f"ERROR: {U} を取得できない (上流不達・不在・redirect・サイズ超過のいずれか。"
-            "redirect は辿らないので、ディレクトリではなくページを直接指すこと "
-            "— 例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
+            "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと)。"
         ),
     }
     for err, want in cases.items():
@@ -368,3 +367,38 @@ def test_fetch_url_wording_is_unchanged(monkeypatch):
         "pandas 等で加工・集計したいだけなら send_to_workspace(url=…) で sandbox に取り込む "
         "(読むためのテキスト化には使わない)。中身が要らなければ URL をそのまま案内する (ブラウザでは開ける)。"
     )
+
+
+def test_model_visible_texts_name_no_deployment():
+    """モデルに見える文面 (ERROR 文の既定値・tool 固有の言い分け・docstring) は配備を
+    前提にしない — 特定サイトのページ名・本番ホスト・配備層の tool 名を書かない
+    (2026-10-04、ken: nucllei は llens を前提にしない)。"""
+    import dataclasses
+
+    from nucllei.builtin_tools import feed_image, fetch_url
+    from nucllei.utils.ref_errors import RefErrorHints
+
+    texts = [
+        f.default
+        for f in dataclasses.fields(RefErrorHints)
+        if isinstance(f.default, str)
+    ]
+    texts += [
+        feed_image._HINT_LITERAL,
+        fetch_url._ERR_UNEXPLAINED,
+        feed_image.Tools.feed_image.__doc__,
+        fetch_url.Tools.fetch_url.__doc__,
+    ]
+    for is_path in (False, True):
+        h = feed_image._hints(is_path)
+        texts += [h.redirect_next, h.unreachable, h.not_found]
+    for text in texts:
+        for gone in (
+            "top.aspx",
+            "172.16.",
+            "his-info",
+            "院内 Web",
+            "read_doc",
+            "grep_doc",
+        ):
+            assert gone not in text, (gone, text)

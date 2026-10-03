@@ -279,11 +279,11 @@ def get_tools(
                 )
 
                 # TODO: Support Pydantic models as parameters
-                if callable.__doc__ and callable.__doc__.strip() != "":
-                    s = re.split(":(param|return)", callable.__doc__, 1)
-                    spec["description"] = s[0]
-                else:
-                    spec["description"] = function_name
+                # 2026-10-04: 切り出しは保存時 spec(get_tool_specs)と同じ helper —
+                # ソースのインデントを落とす(毎ターン送る token の節約)。
+                spec["description"] = (
+                    tool_description_from_docstring(callable.__doc__) or function_name
+                )
 
                 # llens(#140): ターン依存の spec パッチ(docstring 由来の description の
                 # 後・toolkit 注記の前置の前 — description の置き換えにも注記は付く)
@@ -368,6 +368,25 @@ def get_tools(
     return tools_dict
 
 
+def tool_description_from_docstring(docstring: str | None) -> str:
+    """
+    The model-facing function description: the docstring text before the first
+    `:param` / `:return` (a plain text split — README_API §5.1), with the source
+    indentation removed by `inspect.cleandoc` (relative indentation and line
+    breaks are kept). Empty string when there is no docstring.
+
+    llens(2026-10-04): turn-time (get_tools) and sync-time (get_tool_specs) specs
+    both go through this, so the stored spec equals what the model gets. Before
+    this the turn-time description carried the docstring's source indentation
+    (8 spaces per line — tokens sent every turn), and the stored one was cut
+    by a different (line-based, every line stripped) rule.
+    """
+    if not docstring or not docstring.strip():
+        return ""
+    head = re.split(":(param|return)", docstring, 1)[0]
+    return inspect.cleandoc(head).strip()
+
+
 def parse_description(docstring: str | None) -> str:
     """
     Parse a function's docstring to extract the description.
@@ -378,20 +397,7 @@ def parse_description(docstring: str | None) -> str:
     Returns:
         str: The description.
     """
-
-    if not docstring:
-        return ""
-
-    lines = [line.strip() for line in docstring.strip().split("\n")]
-    description_lines: list[str] = []
-
-    for line in lines:
-        if re.match(r":param", line) or re.match(r":return", line):
-            break
-
-        description_lines.append(line)
-
-    return "\n".join(description_lines)
+    return tool_description_from_docstring(docstring)
 
 
 def parse_docstring(docstring):
@@ -452,10 +458,14 @@ def convert_function_to_pydantic_model(func: Callable) -> type[BaseModel]:
         type_hint = type_hints.get(name, Any)
         default_value = param.default if param.default is not param.empty else ...
 
-        description = function_descriptions.get(name, None)
+        # llens(2026-10-04): 別名にする — v0.6.5 はここで関数の `description` を
+        # 上書きしており、保存時 spec の description が「最後の引数の説明」になっていた
+        param_description = function_descriptions.get(name, None)
 
-        if description:
-            field_defs[name] = type_hint, Field(default_value, description=description)
+        if param_description:
+            field_defs[name] = type_hint, Field(
+                default_value, description=param_description
+            )
         else:
             field_defs[name] = type_hint, default_value
 
@@ -490,6 +500,11 @@ def get_tool_specs(tool_module: object) -> list[dict]:
     for function in get_functions_from_tool(tool_module):
         spec = convert_pydantic_model_to_openai_function_spec(
             convert_function_to_pydantic_model(function)
+        )
+        # 保存時 spec の description はターン時(get_tools)と同じ規則・同じ fallback
+        # (変換器が __doc__ をどう整形するかに依存しない)
+        spec["description"] = (
+            tool_description_from_docstring(function.__doc__) or function.__name__
         )
         # llens(#20): Annotated の表示宣言を標準 JSON Schema(contentMediaType)
         # として保存時 spec にも反映する(strip しない方針)

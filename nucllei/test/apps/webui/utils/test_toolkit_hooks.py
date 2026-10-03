@@ -124,6 +124,19 @@ class TestToolkitHooks(AbstractPostgresTest):
         stored = {s["name"]: s for s in Tools.get_tool_by_id("hooked").specs}
         assert "enum" not in stored["probe"]["parameters"]["properties"]["mode"]
 
+    def test_stored_spec_description_equals_turn_spec(self):
+        """保存時 spec(get_tool_specs)の description はモデルに渡るもの(フック無しの
+        ターン時 spec)と同じ — v0.6.5 は保存時だけ「最後の引数の説明」になっていた
+        (2026-10-04)。"""
+        from nucllei.models.tools import Tools
+
+        loaded = self._load({"allow": True, "explode_overrides": True})
+        stored = {s["name"]: s for s in Tools.get_tool_by_id("hooked").specs}
+        for name in ("probe", "other"):
+            assert stored[name]["description"] == loaded[name]["spec"]["description"]
+        assert stored["probe"]["description"] == "original"
+        assert stored["other"]["description"] == "untouched"
+
     def test_spec_overrides_failure_keeps_static_spec(self):
         loaded = self._load({"allow": True, "explode_overrides": True})
         assert loaded["probe"]["spec"]["description"].strip() == "original"

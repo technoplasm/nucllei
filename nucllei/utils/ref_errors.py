@@ -113,8 +113,7 @@ class RefErrorHints:
     )
     # 3xx(`_REDIRECT_WHAT` に続ける次の一手)
     redirect_next: str = (
-        "redirect は辿らないので、ディレクトリではなくページを直接指すこと "
-        "(例 '<ルート>/' ではなく '<ルート>/top.aspx')。"
+        "redirect は辿らないので、ディレクトリではなくページを直接指す URL を渡すこと。"
     )
     # 一般の URL の redirect の転送先がこのサーバ自身 / 回数超過(reason 付き)
     redirect_self: str = (
@@ -127,10 +126,10 @@ class RefErrorHints:
     )
     unresolvable: str = (
         "ERROR: {ref} のホスト名を解決できない — DNS の無い環境では IP アドレスで指定する "
-        "(例 `http://172.16.132.33/his-info/top.aspx`)。"
+        "(例 `http://192.0.2.10/…`)。"
     )
     unreachable: str = (
-        "ERROR: {ref} の院内 Web に届かない (この配備からは到達できない、または一時的な障害)。"
+        "ERROR: {ref} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
         "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
     )
     # reason → 何が起きたか(`UNKNOWN_UPSTREAM_WHAT` と同じ形)。`extra` は tool が添える
