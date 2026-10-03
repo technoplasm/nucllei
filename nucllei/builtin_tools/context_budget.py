@@ -9,13 +9,16 @@
 (#102)ので、tool ループの途中で呼べば**今ターンの最新呼び出し**の値が読める(llens 版は
 「直前ターン終了時点」で 1 ターン古く、context 長を valve の手書き定数に頼っていた)。
 context 長はまず記録された `context_size`、無ければ `get_model_context_size`(endpoint の
-申告 → `meta.context_size`)で解決し、定数のフォールバックは持たない。
+申告 → `meta.context_size`)、それも無ければ valve `fallback_context_size`(管理画面のツール一覧の
+歯車。既定 0 = 使わない — endpoint が context 長を申告しない接続向けの最後の手段。ken 2026-10-03)。
 
 **認可は owner-only 固定**(`__user__` の chat のみ — builtin_history と同じ)。
 """
 
 import logging
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 from nucllei.models.chats import Chats
 
@@ -31,6 +34,18 @@ def _positive_int(value) -> Optional[int]:
 
 
 class Tools:
+    class Valves(BaseModel):
+        fallback_context_size: int = Field(
+            default=0,
+            description=(
+                "context 長の最後の既定値 (token)。記録された usage にも endpoint の申告にも"
+                "モデルの meta.context_size にも無いときだけ使う。0 なら使わない (残量は出さない)"
+            ),
+        )
+
+    def __init__(self) -> None:
+        self.valves = self.Valves()
+
     async def get_context_budget(
         self,
         __metadata__: Optional[dict] = None,
@@ -90,6 +105,11 @@ class Tools:
             except Exception as e:  # noqa: BLE001 — 解決失敗は「不明」として返す
                 log.debug(f"context_size resolve failed: {e!r}")
 
+        fallback_used = False
+        if context_size is None:
+            context_size = _positive_int(self.valves.fallback_context_size)
+            fallback_used = context_size is not None
+
         note = (
             "このターンの最新のモデル呼び出し時点の実測 usage(入力 + 再送される出力)。"
             "いま実行中のステップの tool 結果はまだ含まれない。"
@@ -102,10 +122,12 @@ class Tools:
                 "context_size": None,
                 "used_pct": None,
                 "note": note
-                + " context 長が不明(endpoint が申告せず、モデルの meta.context_size も未設定)"
+                + " context 長が不明(endpoint が申告せず、モデルの meta.context_size も既定値も未設定)"
                 "のため残量は出せない。",
             }
 
+        if fallback_used:
+            note += " context 長は管理者が設定した既定値(endpoint の申告ではない)。"
         remaining = max(0, context_size - used)
         return {
             "ok": True,

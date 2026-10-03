@@ -1265,7 +1265,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the non-reasoning output that is re-sent, i.e. what the next call starts
     from; falls back to `prompt_tokens`, then `total_tokens`),
     `context_size` = the recorded one, else `get_model_context_size` (endpoint
-    `max_model_len` → the model's `meta.context_size`; no constant fallback),
+    `max_model_len` → the model's `meta.context_size` → the tool valve
+    `fallback_context_size` (admin, tool list gear; default 0 = unused — for
+    connections that do not report a context length; the note then says the
+    size is an admin default)),
     `remaining_tokens`, `used_pct` (one decimal) and a `note`. With no usable
     context size the three derived fields are `null` and the note says why.
     Before the first model call of a chat completes: `{ok: false, error}`.

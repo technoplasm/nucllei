@@ -140,6 +140,46 @@ class TestBuiltinContextBudgetTool(AbstractPostgresTest):
         assert out["used_pct"] is None
         assert "context 長が不明" in out["note"]
 
+    def test_context_size_falls_back_to_the_valve(self):
+        """記録にも endpoint の申告にも meta にも無いときだけ valve fallback_context_size を使い、
+        その旨を note に書く。0 (既定) なら使わない。"""
+        from nucllei.builtin_tools.context_budget import Tools
+
+        chat = self._new_chat()
+        self.Chats.record_usage_by_id_and_message_id(
+            chat.id, "m1", {"prompt_tokens": 1000, "completion_tokens": 5}
+        )
+        request = types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(MODELS={}))
+        )
+        tools = Tools()
+        tools.valves.fallback_context_size = 4000
+        out = _run(
+            tools.get_context_budget(
+                __metadata__={"chat_id": chat.id, "message_id": "m1"},
+                __user__={"id": "owner"},
+                __request__=request,
+                __model__={"id": "m", "info": {}},
+            )
+        )
+        assert out["context_size"] == 4000 and out["remaining_tokens"] == 3000
+        assert out["used_pct"] == 25.0 and "既定値" in out["note"]
+
+        # 記録された context_size があれば valve より優先
+        self.Chats.record_usage_by_id_and_message_id(
+            chat.id,
+            "m1",
+            {"prompt_tokens": 1000, "completion_tokens": 5},
+            context_size=8000,
+        )
+        out = _run(
+            tools.get_context_budget(
+                __metadata__={"chat_id": chat.id, "message_id": "m1"},
+                __user__={"id": "owner"},
+            )
+        )
+        assert out["context_size"] == 8000 and "既定値" not in out["note"]
+
     def test_context_size_resolved_from_model_when_not_recorded(self):
         chat = self._new_chat()
         self.Chats.record_usage_by_id_and_message_id(
