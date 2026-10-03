@@ -14,5 +14,10 @@ yarn.lock
 
 # llens: マシン固有 symlink(他リポジトリ)と vendored バンドルは lint 対象外
 _links
+# ken の個人作業スペース(,始まり。,links は他 repo への symlink で、llens ⇄ nucllei の
+# ループを eslint が辿ると ELOOP で落ちる — 2026-10-03)と、/ext/ で配信する参照資料の置き場
+,*
+/ext
+/data
 nucllei/static
 static

@@ -321,6 +321,10 @@ sandbox/
 .claude/
 # 現行プロジェクトへの symlink(別リポ)。pnpm format が symlink 先まで整形するのを防ぐ
 _links/
+# ken の個人作業スペース(,始まり。,links は他 repo への symlink)と /ext/ 配信物の置き場
+,*/
+/ext/
+/data/
 # vendored な静的アセット(swagger-ui 等)は上流配布物のまま保つ
 nucllei/static/
 static/pyodide/
