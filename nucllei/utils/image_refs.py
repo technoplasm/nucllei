@@ -1390,5 +1390,5 @@ def log_mounts() -> None:
     log.info(
         "[nucllei] url= の一般 URL はどこでも取りに行く(行き先で絞らない)。取りに行かない"
         "のはこのサーバ自身だけ — loopback / リンクローカルに加えて実行時に求めた自分の"
-        f"アドレス: {' '.join(own) or '(無し)'}"
+        f"アドレス (self addresses): {' '.join(own) or '(無し)'}"
     )

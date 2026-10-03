@@ -212,7 +212,6 @@ managed per-group in the DB/UI.
 | `USER_PERMISSIONS_CHAT_FILE_UPLOAD`                 | `true`              | file upload (server-enforced)                                                                                                                                                                               |
 | `USER_PERMISSIONS_CHAT_DELETE` / `_EDIT` / `_SHARE` | `true`              | chat deletion / message editing / share links                                                                                                                                                               |
 | `USER_PERMISSIONS_CHAT_CLONE`                       | `false`             | cloning shared chats                                                                                                                                                                                        |
-| `USER_PERMISSIONS_CHAT_MULTIPLE_MODELS`             | `true`              | multi-model chat                                                                                                                                                                                            |
 | `ADDITIONAL_USER_META`                              | `[]` (RC)           | JSON array `[{"key":"carte_user_id","label":"..."}]` declaring extra string user fields, editable by admins and delivered to tools as `__user__["info"]` — opaque markers for external-system authorization |
 | `DEFAULT_LOCALE`                                    | `""` (RC)           | UI locale (shipped: `ja`, `en`, `zh-CN`)                                                                                                                                                                    |
 | `DEFAULT_MODELS`                                    | unset (RC)          | default model(s) for new chats                                                                                                                                                                              |
@@ -241,14 +240,14 @@ separate reasoning block.
 
 ### 3.6 Tool calling & tasks
 
-| Var                                                            | Kind | Default               | Effect                                                                                |
-| -------------------------------------------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------- |
-| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`                       | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                            |
-| `CHAT_TOOL_EXECUTION_TIMEOUT`                                  | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result |
-| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                    |
-| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                      |
-| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)      |
-| `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`                           | env  | `""`                  | registered upstreams only; `builtin_fetch_url` is always on (§3.8, §5.7)              |
+| Var                                                            | Kind | Default               | Effect                                                                                                                                     |
+| -------------------------------------------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`                       | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                                                                                 |
+| `CHAT_TOOL_EXECUTION_TIMEOUT`                                  | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                      |
+| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                         |
+| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                           |
+| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                           |
+| `EXT_UPSTREAMS` / `EXT_FILE_SCOPES` / `EXT_PUBLIC_BASES`       | env  | `""`                  | `/ext/{name}` upstreams, serving scope of file backends, original-site roots for link lists (§3.8, §5.7). `builtin_fetch_url` is always on |
 
 ### 3.7 Attachments / files / storage
 

@@ -598,7 +598,7 @@ def test_no_public_bases_configured_treats_original_urls_as_general(
 ):
     """env EXT_PUBLIC_BASES が空なら原本 URL はただの一般の URL — そのホストに直接取りに行き、
     リンクはページ自身の URL 基準 (`/ext/` の注意書きは出ない)。/ext/ 形は backend のまま。
-    unknown_upstream の ERROR では原本ホストを「未設定」と名乗る。"""
+    unknown_upstream の ERROR に「原本ホストは未設定」の句は付けない (雑音)。"""
     u = f"{PUBLIC_BASE}/top.aspx"
     result, resolver = _run(monkeypatch, ext_env, u, env_bases={})
     assert not result.startswith("ERROR") and resolver.refs == [u]
@@ -609,7 +609,7 @@ def test_no_public_bases_configured_treats_original_urls_as_general(
     result, resolver = _run(monkeypatch, ext_env, EXT_TOP, env_bases={})
     assert not result.startswith("ERROR") and resolver.refs == [EXT_TOP]
     result, _r = _run(monkeypatch, ext_env, "/ext/nosuch/x", env_bases={})
-    assert result.startswith("ERROR") and "未設定" in result
+    assert result.startswith("ERROR") and "原本ホスト" not in result
 
 
 def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):

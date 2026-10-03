@@ -244,8 +244,11 @@ def _explain_ref_error(u: str, err, ceiling_mb: Optional[float] = None) -> str:
     hints = RefErrorHints(
         too_large=lambda ref, e: _too_large(ref, e, ceiling_mb),
         unexplained=f"ERROR: {{ref}} {_ERR_UNEXPLAINED}",
+        # 原本ホストが無い配備 (llens は file 上流だけ) では「未設定」の句は雑音なので付けない
         unknown_upstream_extra=(
             f"登録された原本ホストは {_describe_bases(EXT_PUBLIC_BASES)}。"
+            if EXT_PUBLIC_BASES
+            else ""
         ),
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
