@@ -98,7 +98,8 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
                 if resp.status == 401:
                     # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
                     # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
-                    # まとめて説明がつく (未設定は「不一致」の一種)
+                    # まとめて説明がつく (未設定は「不一致」の一種)。この detail は
+                    # ログ用 — モデルには `_SANDBOX_AUTH` だけを返す (env 名を出さない)
                     raise SandboxHTTPError(
                         401,
                         "認証に失敗した。nucllei と sandbox の "
@@ -170,7 +171,7 @@ def _resolve_workspace_path(
         "",
         "",
         f"ERROR: {(path or '').strip() or '(空)'} は sandbox のパスの形でない。"
-        f"{arg_form} {REF_ARGS_RULE}",
+        f"{_NEXT}{arg_form} {REF_ARGS_RULE}",
     )
 
 
@@ -180,29 +181,69 @@ _NEXT = "次の手: "
 
 # 画像・音声・動画は display チャネルで tool の枠の下に出る (`_display_markdown`)。
 # それを受けたモデル向けの 1 文 (exports の自動添付と fetch_from_workspace で共通)
-_DISPLAYED = "ユーザーの画面には既に表示されている — 本文に貼り直さない"
+_DISPLAYED = "ユーザーの画面には既に表示されている。" + _NEXT + "本文に貼り直さない"
+
+# sandbox の実行時間の上限 (sandbox サービスの env `SANDBOX_TIMEOUT_MAX_S` の既定。nucllei
+# からは sandbox 側の値を読めないので既定値で言う — `timeouts` の 630 と同じ前提)
+_SANDBOX_TIMEOUT_MAX_S = 600
+
+# sandbox に繋がらない / 401 のときの文面。例外の文・HTTP の detail・env 名はモデルに
+# 出さず、ログに残す (2026-10-04 llens 監査 A17 / A18)
+_SANDBOX_DOWN_NEXT = (
+    _NEXT
+    + "時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
+)
+_SANDBOX_AUTH = (
+    "ERROR: sandbox との認証に失敗した (サーバの設定の問題)。"
+    + _NEXT
+    + "呼び直さない。ユーザーには sandbox が今使えないと伝え、管理者への連絡を勧める。"
+)
 
 
 def _file_link_note(name: str, file_id: str) -> str:
     """display に乗らない添付 (このチャットのファイル一覧にだけ載る) を本文で示すリンク。"""
     label = (name or "").replace("[", "(").replace("]", ")")
-    return f"本文で示すなら [{label}](/api/v1/files/{file_id}/content)"
+    return f"{_NEXT}本文で示すなら [{label}](/api/v1/files/{file_id}/content) と書く"
+
+
+def _exec_error(e: Exception) -> str:
+    """sandbox の実行 (`/exec` `/exec_cell`) の失敗。例外の中身はログだけ。"""
+    log.error(f"[sandbox] exec failed: {e!r}")
+    if isinstance(e, SandboxHTTPError) and e.status == 401:
+        return _SANDBOX_AUTH
+    return "ERROR: sandbox で実行できなかった。" + _SANDBOX_DOWN_NEXT
 
 
 def _files_error(e: Exception, abs_path: str) -> str:
-    """sandbox `/files/*` の失敗をモデル向けの文面にする (原因を言い分ける)。"""
+    """sandbox `/files/*` の失敗をモデル向けの文面にする (原因を言い分ける)。
+    例外の文・detail はログだけ (A17)。"""
+    log.warning(f"[sandbox] /files failed for {abs_path}: {e!r}")
     if not isinstance(e, SandboxHTTPError):
-        return f"ERROR: sandbox に接続できない: {e!r}"
+        return (
+            "ERROR: sandbox に接続できない (起動していないか、応答が無い)。"
+            + _SANDBOX_DOWN_NEXT
+        )
+    if e.status == 401:
+        return _SANDBOX_AUTH
     if e.status == 400:
-        return f"ERROR: {abs_path} は使えない path (sandbox が拒否: {e.detail})。"
+        return (
+            f"ERROR: {abs_path} は使えない path (sandbox が受け付けなかった)。"
+            f"{_NEXT}/workspace/… の絶対パスで渡す。"
+        )
     if e.status == 404:
         return (
             f"ERROR: {abs_path} というファイルは無い (ディレクトリは不可)。"
             f"{_NEXT}list_workspace で確かめる。"
         )
     if e.status == 413:
-        return f"ERROR: {abs_path} は大きすぎて取り出せない ({e.detail})。"
-    return f"ERROR: sandbox がエラーを返した: {e}"
+        return (
+            f"ERROR: {abs_path} は大きすぎて取り出せない。"
+            f"{_NEXT}必要な部分だけを /workspace/ に書き出してから渡す。"
+        )
+    return (
+        f"ERROR: sandbox がエラーを返した (HTTP {e.status})。"
+        f"{_NEXT}1 回だけ呼び直す。続くならユーザーに伝える。"
+    )
 
 
 def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[str]:
@@ -532,7 +573,8 @@ class Tools:
                     line += " " + _file_link_note(name, att["id"])
                 lines.append(line)
             except Exception as e:
-                lines.append(f"- {name}: ファイルの登録に失敗した ({e!r})")
+                log.error(f"[sandbox] register export {name} failed: {e!r}")
+                lines.append(f"- {name}: ファイルの登録に失敗した")
         if attachments:
             await self._persist_and_emit_files(
                 attachments, chat_id, message_id, __event_emitter__
@@ -555,10 +597,20 @@ class Tools:
             "run_shell の rg / head / tail で部分参照する]\n" + text[-tail:]
         )
 
-    def _format_exec_result(self, res: dict, output_lines: list[str]) -> str:
+    def _format_exec_result(
+        self, res: dict, output_lines: list[str], timeout_s: Optional[int] = None
+    ) -> str:
         parts = [f"exit_code={res['exit_code']} ({res['duration_s']}s)"]
         if res.get("timed_out"):
-            parts[0] += " **タイムアウト (timeout_s の秒数を超えたので強制終了した)**"
+            # sandbox は指定値を上限で clamp する — 実際に効いた値で言う
+            n = min(
+                int(timeout_s or self.valves.default_timeout_s), _SANDBOX_TIMEOUT_MAX_S
+            )
+            parts[0] += (
+                f" **タイムアウト (timeout_s={n} 秒を超えたので強制終了した)**"
+                f" {_NEXT}処理を分けるか、timeout_s を上げて呼び直す"
+                f" (上限 {_SANDBOX_TIMEOUT_MAX_S} 秒)。"
+            )
         stdout = res.get("stdout", "")
         stderr = res.get("stderr", "")
         if stdout:
@@ -592,7 +644,10 @@ class Tools:
         stdout = res.get("stdout", "")
         error = res.get("error")
         if res.get("timed_out"):
-            parts.append("**タイムアウト (セルを中断した。変数・import は残っている)**")
+            parts.append(
+                "**タイムアウト (セルを中断した。変数・import は残っている)**"
+                f" {_NEXT}処理を分けるか、timeout_s を上げて続ける。"
+            )
         if stdout:
             parts.append(self._truncate_output(stdout.rstrip("\n")))
             if res.get("stdout_truncated"):
@@ -622,7 +677,7 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         payload = {
             "user_id": __user__["id"],
             "lang": lang,
@@ -632,7 +687,7 @@ class Tools:
         try:
             res = await self._post("/exec", payload, payload["timeout_s"] + 30)
         except Exception as e:
-            return f"ERROR: sandbox 実行に失敗: {e!r}"
+            return _exec_error(e)
         output_lines = await self._register_exports(
             __user__["id"],
             res.get("exports", []),
@@ -640,7 +695,7 @@ class Tools:
             __message_id__,
             __event_emitter__,
         )
-        return self._format_exec_result(res, output_lines)
+        return self._format_exec_result(res, output_lines, payload["timeout_s"])
 
     async def _exec_cell(
         self,
@@ -652,10 +707,10 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         if not __chat_id__:
             return (
-                "ERROR: この呼び出しには会話の id が無く、状態を持つ実行ができない。"
+                "ERROR: この呼び出しにはチャットの id が無く、状態を持つ実行ができない。"
                 f"{_NEXT}単発で足りるなら run_python_once を使う。"
             )
         payload = {
@@ -667,7 +722,7 @@ class Tools:
         try:
             res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
         except Exception as e:
-            return f"ERROR: sandbox 実行に失敗: {e!r}"
+            return _exec_error(e)
         output_lines = await self._register_exports(
             __user__["id"],
             res.get("exports", []),
@@ -786,7 +841,7 @@ class Tools:
         :param url: 取り込むリソース。スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。file_id / filename と排他。
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
 
         url = (url or "").strip()
         file_id = (file_id or "").strip()
@@ -841,7 +896,8 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
-            return "", f"取り込みに失敗した ({e!r})"
+            log.error(f"[sandbox] import {fid} failed: {e!r}")
+            return "", "取り込みに失敗した"
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
             "",
@@ -858,7 +914,9 @@ class Tools:
         """
         line, failure = await self._import_file(fid, None, user_id)
         if failure == _NO_FILE:
-            return f"ERROR: {given} の{_NO_FILE}。{arg_form}"
+            return f"ERROR: {given} の{_NO_FILE}。" + (
+                f"{_NEXT}{arg_form}" if arg_form else ""
+            )
         if failure:
             return f"ERROR: {given} の{failure}。"
         return "取り込み結果:\n" + line
@@ -928,7 +986,10 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
-            return f"ERROR: sandbox へ書き込めない: {e!r}"
+            log.error(f"[sandbox] import write failed for {u}: {e!r}")
+            if isinstance(e, SandboxHTTPError) and e.status == 401:
+                return _SANDBOX_AUTH
+            return "ERROR: sandbox へ書き込めない。"
         return (
             "取り込み結果:\n"
             f"- {name} ({_human_size(len(loaded.data))}) → "
@@ -952,7 +1013,7 @@ class Tools:
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         abs_path, rel, err = _resolve_workspace_path(
@@ -1007,7 +1068,7 @@ class Tools:
         :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。省略時は /workspace
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         abs_path, rel, err = _resolve_workspace_path(
@@ -1060,7 +1121,7 @@ class Tools:
         :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/imports/converted.xlsx
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         from nucllei.utils.image_refs import PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
@@ -1091,7 +1152,8 @@ class Tools:
         try:
             data = base64.b64decode(res["b64"])
         except Exception as e:
-            return f"ERROR: sandbox の応答を読めない: {e!r}"
+            log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
+            return "ERROR: sandbox の応答を読めない。"
         return await self._attach(
             abs_path,
             os.path.basename(res["name"]),
@@ -1112,11 +1174,12 @@ class Tools:
 
         - 実体が nucllei 側の `EXT_DIR` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
           している) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
-        - それ以外 → nucllei 自身に bind された同じ置き場から読み (`resolve_path`。境界・上限は
-          resolver)、/workspace のファイルと同じ手順で添付する。nucllei 側に無い物は
-          「このサーバの /ext に無い」(本当に無いか mount のずれ)。ken 2026-10-04: 配備は
+        - それ以外 → `resolve_path` (境界・上限は resolver) で読めない理由を返す。nucllei 側に
+          無い物は「このサーバの /ext に無い」(本当に無いか mount のずれ)。ken 2026-10-04: 配備は
           nucllei と sandbox に同じ /ext の組を mount し、/ext のファイルは URL で見せるだけ —
-          sandbox 経由で読み出して添付する経路は作らない (要らない file_id を増やさない)
+          sandbox 経由で読み出して添付する経路は作らない (要らない file_id を増やさない)。
+          resolver は読めるのに配信口が URL を出さない境界の差 (通常起きない) のときだけ、
+          nucllei 側の実体を /workspace のファイルと同じ手順で添付する
         """
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
         from nucllei.utils.image_refs import resolve_path, url_for_mounted_path
@@ -1158,7 +1221,8 @@ class Tools:
         try:
             att = _register_bytes_file(user_id, name, data)
         except Exception as e:
-            return f"ERROR: ファイルの登録に失敗した: {e!r}"
+            log.error(f"[sandbox] register {abs_path} failed: {e!r}")
+            return "ERROR: ファイルの登録に失敗した。"
         await self._persist_and_emit_files(
             [att], chat_id, message_id, __event_emitter__
         )

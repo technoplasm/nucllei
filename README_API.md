@@ -413,16 +413,17 @@ each carried its own copy of this text; the copies drifted — see §5.7):
 
 `REF_ARGS_RULE` is the one sentence about where things go, identical in every
 tool (it mentions arguments a given tool may not have — it states the rule, not
-that tool's signature); tools do not add destinations of their own. Errors are
-assembled the same way everywhere:
+that tool's signature); tools do not add destinations of their own. These
+constants are **model-only** (§5.1), so they always come after `次の手: `.
+Errors are assembled the same way everywhere:
 
 - `url` not resolvable as a URL:
-  `ERROR: <value> は URL として解決できない。` + `URL_ARG_FORM` + `" "` + `REF_ARGS_RULE`
+  `ERROR: <value> は URL として解決できない。次の手: ` + `URL_ARG_FORM` + `" "` + `REF_ARGS_RULE`
 - `path` not a sandbox path:
-  `ERROR: <value> は sandbox のパスの形でない。` + `PATH_ARG_FORM` (or
+  `ERROR: <value> は sandbox のパスの形でない。次の手: ` + `PATH_ARG_FORM` (or
   `WORKSPACE_PATH_ARG_FORM`) + `" "` + `REF_ARGS_RULE`
 - `file_id` cannot be read:
-  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
+  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。次の手: ` + `FILE_ID_ARG_FORM`
   — "no such record" and "not yours" are deliberately one sentence (existence
   is not leaked). `read_attachment` returns a dict, so it carries the same
   sentence without the `ERROR: ` prefix in `{ok: False, error}`.
@@ -1135,7 +1136,12 @@ class Tools:
     `run_python`, `run_shell`, `send_to_workspace`, `feed_image`, `fetch_url`,
     …) is conditional — 「〜が使えるなら …」 — because that tool may not be
     mounted; no internal names (codes, env names, storage terms) and nothing
-    deployment-specific. `nucllei/test/apps/webui/utils/test_ref_errors.py`
+    deployment-specific. Anything addressed only to the model — the argument
+    form sentences (`*_ARG_FORM`, `REF_ARGS_RULE`, §3.8), display instructions
+    (「本文に貼り直さない」, 「本文で示すなら …」), 「回答に写さない」 — goes after
+    `次の手: `, never in the fact sentence. Raw exception text, HTTP `detail`,
+    internal URLs and storage paths are logged, not returned (a tool exception
+    reaches the model as its class name + the first 200 characters only). `nucllei/test/apps/webui/utils/test_ref_errors.py`
     audits `ref_errors` / `feed_image` / `fetch_url` / `sandbox` /
     `context_budget` / `attachment_text` for this. Deployment-layer tools should follow
     the same contract.
@@ -1357,10 +1363,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `max_model_len` → the model's `meta.context_size` → the tool valve
     `fallback_context_size` (admin, tool list gear; default 0 = unused — for
     connections that do not report a context length; the note then says the
-    size is an admin default — 「管理者が設定した既定値 (接続の申告ではない)」)),
+    size is an admin default — 「管理者が設定した既定値 (モデルの接続先が返した値ではない)」)),
     `remaining_tokens`, `used_pct` (one decimal) and a `note`. With no usable
     context size the three derived fields are `null` and the note says why
-    (「context 長が分からない (接続が申告せず、既定値も未設定) ので残量は出せない」 — no
+    (「context 長が分からない (モデルの接続先が context 長を返さず、既定値も未設定) ので残量は出せない」 — no
     internal names such as `meta.context_size` in model-visible text).
     Before the first model call of a chat completes: `{ok: false, error}`.
     Within a native tool loop the tool runs between model calls, so the value
@@ -1444,7 +1450,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the same value on both sides — the backend then sends
     `Authorization: Bearer` on every sandbox call and the sandbox rejects
     everything else with 401; a URL-without-token deployment logs a warning at
-    boot. **Both are read from the environment only — never a valve or a DB
+    boot. On a 401 the model only gets 「ERROR: sandbox との認証に失敗した
+    (サーバの設定の問題)。次の手: 呼び直さない。…」 — the token-mismatch
+    explanation (with the env name) goes to the log, as do the exception text
+    and `detail` of every other sandbox failure (the model gets 「sandbox に
+    接続できない」 / 「使えない path」 / 「大きすぎて取り出せない」 / 「HTTP <status>」). **Both are read from the environment only — never a valve or a DB
     row.** The sandbox ships with the server (same git tag) and compose brings
     it up alongside, so there is no legitimate reason to repoint it at runtime;
     keeping the destination out of the DB also means an admin account cannot
@@ -1459,7 +1469,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     argument lists `/workspace`). Anything that is not a sandbox path the tool
     handles — relative, empty, a URL, outside `/workspace` — gets the common
     fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
-    `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/ext/…`
+    `次の手: ` + `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/ext/…`
     (read-only reference data) is refused by `write_file` and `list_workspace`
     with a pointer to `run_shell` (a distinction inside the same `path`
     argument, based on what the path resolves to).
@@ -1469,10 +1479,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     returned). Where the attachment shows up decides the returned note
     (2026-10-04): image / audio / video are also pushed to the display
     channel, i.e. **already on the user's screen** under the tool call, and the
-    result says 「ユーザーの画面には既に表示されている — 本文に貼り直さない」; any
+    result says 「ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない」; any
     other file is only listed in the chat's file pane (`message.files` entries
     of type `file` are not drawn under the message), so the result carries a
-    ready link 「本文で示すなら [<name>](/api/v1/files/<id>/content)」. The
+    ready link 「次の手: 本文で示すなら [<name>](/api/v1/files/<id>/content) と書く」. The
     `exports/` auto-attach of `run_python` / `run_shell` reports each file the
     same way (for media it adds that a `[task]` notification of a background
     run must paste it, since nothing was displayed then). An `/ext/…` file that exists under nucllei's own `$EXT_DIR`
@@ -1584,7 +1594,7 @@ copied into answers just as easily.
 - `pages` は PDF のときだけ意味を持つ (画像はそのまま、PDF は指定ページを画像化して目に入れる)。
 - 中身が画像か PDF かは tool が中身を読んで判定する (拡張子の無い URL でも同じ)。
 - 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 上流のエラー / 届かない /
-  このサーバ自身 / sandbox が読めない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
+  このサーバ自身 / sandbox に繋がらない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
   次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
   言い換えない。
 
@@ -1592,8 +1602,8 @@ copied into answers just as easily.
 
 - **配備の文書コーパス tool に収録済みの資料はそちらで引く** — fetch_url で取りに
   行かない。fetch_url は**コーパスに無い情報を Web から辿る**ための道具。
-- http(s) の URL はどのネットワークの URL でもそのまま渡す (IP アドレス直指定も可。DNS の
-  無い環境では IP で指定する)。**どのホストに届くかは配備のネットワークが決める** — この
+- http(s) の URL はどのネットワークの URL でもそのまま渡す (IP アドレスの URL もそのまま
+  渡せる。ホスト名を推測で IP に書き換えない)。**どのホストに届くかは配備のネットワークが決める** — この
   tool は行き先で断らず、届かなければ「届かない」と返す。断るのはこのサーバ自身を指す URL だけ。
 - 入口 URL は配備の prompt / skill が名乗る。2 枚目からは組み立てず、tool の戻り値に
   出てきた URL の literal をそのままコピーする (相対ならホストを補わない)。
@@ -1672,8 +1682,10 @@ response run concurrently (§5.5) and the turn continues when all are done;
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
-immediately with an error that says how many may run at once and that the
-excess was not started, background included), per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
+immediately with an error that says the server-wide limit (N) was reached and
+that this call was not started — the counter is process-wide, not per caller,
+so the next step is "wait for your own children, else retry later or do it
+yourself"; background included), per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
 (default 1800 s; also the execution timeout when backgrounded). Agent sessions
 never appear in the user's chat list, are read-only over HTTP, and are
 cascade-deleted (running turns stopped) with the parent chat.
@@ -1737,13 +1749,15 @@ reaches a terminal state, the **server** waits for the parent chat to be quiet
 `context_images` as message images) — marks the row `delivered` in the same
 transaction, and starts a continuation turn on the chat's model so the model
 reads the notice and continues on its own. The notice is plain text, not
-markdown: a `[task]` header line (an automatic system notice, not the user;
-results are below so no `await_task` is needed; produced images/files are not
-shown yet, so link them in the answer; do not copy the notice's format into
-the answer), then one section per task starting with a plain
-`task_id: {id} ({tool})` line followed by `status:` and `result:` (fenced) /
-`error:` / `note:` lines. It has no headings and no imperatives because the
-model may echo user-role text into its answer. `await_task`/`stop_task` reports
+markdown: a `[task]` header line (fact: an automatic system notice, not the
+user; results are below; produced images/files are not on screen yet — then,
+after `次の手:`, the model-only part: do not re-collect with `await_task`, link
+produced files to show them, do not copy the notice's format (the `task_id:` /
+`status:` / `note:` lines) into the answer), then one section per task starting
+with a plain `task_id: {id} ({tool})` line followed by `status:` and `result:`
+(fenced) / `error:` / `note:` lines. It has no headings, and its instructions
+sit only in the `次の手:` part, because the model may echo user-role text into
+its answer (§5.1). `await_task`/`stop_task` reports
 also mark rows `delivered` (the result already reached the model's context).
 Unattended chains are limited to `ASYNC_EXEC_RESUME_CHAIN_LIMIT` (default 5)
 consecutive notice turns; the next human message resets the chain. If the
@@ -1796,7 +1810,7 @@ user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
 fails immediately. Tool results — synchronous and background alike — are
 truncated once at the production point at `TOOL_RESULT_MAX_CHARS` (default
 65536; truncation demotes structured rendering to text and appends a marker
-line `(ここで切れている: 全 N 字のうち先頭 MAX 字。次の手: …)` so the model never
+line `(ここで切れている: 全 N 字のうち先頭 MAX 字。次の手: 続きが要るなら offset / query などで範囲を絞って呼び直す)` so the model never
 mistakes a cut result for the whole; the collectors' envelopes are exempt
 because their contents are already truncated at save time). Rows are optionally purged after `ASYNC_EXEC_RETENTION_DAYS` (default 0 =
 keep forever — results stay re-collectable indefinitely). Spawning is
@@ -1805,9 +1819,10 @@ listing still work). Executions are stopped (not deleted) when their chat is
 deleted; a server restart marks in-flight rows `orphaned` — the record
 survives, the computation does not resume. Stopped and orphaned rows carry one
 fixed `error` text each (the same wording in `check_task` / `await_task` and in
-the delivery notice): stopped = side effects may already have completed;
-orphaned = the result was lost, re-run read-only work with the same arguments
-and check before re-running anything that writes or sends.
+the delivery notice): stopped = side effects may already have completed
+(次の手: do not re-run what the user stopped); orphaned = the result was lost,
+re-run read-only work with the same arguments and, for anything that writes or
+sends, check whether a result remains before deciding to re-run.
 
 ---
 

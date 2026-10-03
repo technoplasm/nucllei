@@ -483,7 +483,10 @@ def test_unavailable_tool_call_returns_explicit_message(monkeypatch):
         m for m in completion_calls[0]["messages"] if m.get("role") == "tool"
     ]
     assert len(tool_messages) == 1
-    assert "ツール get_weather は今は使えない" in tool_messages[0]["content"]
+    assert tool_messages[0]["content"] == (
+        "ツール get_weather は今は使えない (このターンの一覧に無い)。"
+        "次の手: 一覧にある tool だけを使う。load_skill が使えて、skill の tool なら先に読み込む。"
+    )
 
 
 ####################################

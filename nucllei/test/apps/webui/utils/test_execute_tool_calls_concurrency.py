@@ -99,7 +99,11 @@ def test_one_failure_does_not_cancel_its_siblings():
     )
     elapsed = time.monotonic() - started
 
-    assert results[0]["content"] == "ERROR: ツール boom の実行中にエラー: 壊れた"
+    # 例外は型名 + 先頭 200 字 + 次の手 (2026-10-04 llens 監査 B5)
+    assert results[0]["content"] == (
+        "ERROR: ツール boom の実行中にエラーが起きた (RuntimeError: 壊れた)。"
+        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+    )
     assert "タイムアウト" in results[1]["content"]
     assert results[2]["content"] == "完走"
     assert sibling_done == [True]
@@ -206,3 +210,15 @@ def test_load_skill_runs_first_so_later_calls_see_loaded_tools():
         )
     )
     assert [r["content"] for r in results] == ["skill body", "loaded"]
+
+
+def test_tool_exception_text_keeps_only_class_and_200_chars():
+    """例外の文は型名と先頭 200 字だけ (内部 URL・パスを長く出さない。全文は log)。"""
+    from nucllei.utils.middleware import tool_exception_text
+
+    assert tool_exception_text("t", ValueError()) == (
+        "ERROR: ツール t の実行中にエラーが起きた (ValueError)。"
+        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+    )
+    long = tool_exception_text("t", RuntimeError("x" * 500))
+    assert f"(RuntimeError: {'x' * 200})。" in long and "x" * 201 not in long

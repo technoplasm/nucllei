@@ -49,20 +49,20 @@ def _explain(err, arg="url", **kw):
 def test_fixed_form_helpers_compose_the_shared_sentences():
     assert (
         url_error("x")
-        == f"ERROR: x は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+        == f"ERROR: x は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
     )
     assert (
         url_error("")
-        == f"ERROR: (空) は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+        == f"ERROR: (空) は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
     )
     assert (
         path_error("x")
-        == f"ERROR: x は sandbox のパスの形でない。{PATH_ARG_FORM} {REF_ARGS_RULE}"
+        == f"ERROR: x は sandbox のパスの形でない。次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
     )
     assert path_error("").startswith("ERROR: (空) は sandbox のパスの形でない。")
     assert (
         file_id_error("f1")
-        == f"ERROR: file_id f1 のレコードが無い、またはアクセス権が無い。{FILE_ID_ARG_FORM}"
+        == f"ERROR: file_id f1 のレコードが無い、またはアクセス権が無い。次の手: {FILE_ID_ARG_FORM}"
     )
     assert mb(32_646_426) == "31.1 MB" and mb(25 * 1024 * 1024) == "25.0 MB"
 
@@ -108,32 +108,32 @@ def test_upstream_status_redirect_reasons_and_plain_status():
     assert _explain(loop, too_many_redirects="TM {ref}") == f"TM {U}"
     # reason 無しの 3xx (転送先が URL として組めない): 前半は共通、続きは hint
     assert _explain(RefError("upstream_status", "x", status=301)) == (
-        f"ERROR: {U} は redirect (301) を返した。転送先が開ける URL ではなかった (http(s) でない・"
-        "形が不正)。次の手: 転送先のページを直接指す URL を渡す。"
+        f"ERROR: {U} は redirect (301) を返した。転送先を辿れなかった (転送先が示されていないか、"
+        "取りに行ける URL ではない)。次の手: 転送先のページを直接指す URL が分かるならそれを渡す。"
+        f"分からなければ ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
     assert _explain(
         RefError("upstream_status", "x", status=301), redirect_next="NEXT"
     ) == (f"ERROR: {U} は redirect (301) を返した。NEXT")
     for status in (401, 403, 500, 503):
         assert _explain(RefError("upstream_status", "x", status=status)) == (
-            f"ERROR: {U} の上流が {status} を返した。次の手: 時間を置いて再試行する。"
+            f"ERROR: {U} の上流が {status} を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
+            " (401 / 403 などは再試行しない)。"
             f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
         )
     assert _explain(RefError("upstream_status", "x")) == (
-        f"ERROR: {U} の上流が エラー を返した。次の手: 時間を置いて再試行する。"
+        f"ERROR: {U} の上流が エラー を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
+        " (401 / 403 などは再試行しない)。"
         f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
 
 
 def test_upstream_unreachable_with_and_without_reason():
-    assert _explain(RefError("upstream_unreachable", "x", reason="unresolvable")) == (
-        f"ERROR: {U} のホスト名を解決できない。次の手: DNS の無い環境では IP アドレスで指定する "
-        "(例 `http://192.0.2.10/…`)。"
+    assert (
+        _explain(RefError("upstream_unreachable", "x", reason="unresolvable"))
+        == _UNRESOLVABLE
     )
-    assert _explain(RefError("upstream_unreachable", "x")) == (
-        f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
-        f"次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開けることがある)。"
-    )
+    assert _explain(RefError("upstream_unreachable", "x")) == _UNREACHABLE
     assert (
         _explain(RefError("upstream_unreachable", "x"), unreachable="UR {ref}")
         == f"UR {U}"
@@ -151,30 +151,36 @@ def test_unsupported_form_and_traversal_follow_the_argument():
     assert _explain(RefError("unsupported_form", "x")) == url_error(U)
     assert _explain(RefError("unsupported_form", "x"), arg="path") == path_error(P)
     trav = "は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
-    assert _explain(RefError("traversal", "x")) == f"ERROR: {U} {trav}{URL_ARG_FORM}"
+    assert (
+        _explain(RefError("traversal", "x"))
+        == f"ERROR: {U} {trav}次の手: {URL_ARG_FORM}"
+    )
     assert (
         _explain(RefError("traversal", "x"), arg="path")
-        == f"ERROR: {P} {trav}{PATH_ARG_FORM}"
+        == f"ERROR: {P} {trav}次の手: {PATH_ARG_FORM}"
     )
 
 
 def test_unknown_upstream_by_reason_with_extra_and_fallback():
     for reason, what in UNKNOWN_UPSTREAM_WHAT.items():
         err = RefError("unknown_upstream", "detail must not leak", reason=reason)
-        assert _explain(err) == f"ERROR: {U} {what}。{URL_ARG_FORM}", reason
+        assert _explain(err) == f"ERROR: {U} {what}。次の手: {URL_ARG_FORM}", reason
         assert "detail must not leak" not in _explain(err)
     # 知らない reason は None の 1 文面。extra は「。」の後、形の文の前
     err = RefError("unknown_upstream", "x", reason="brand_new_reason")
-    assert _explain(err) == f"ERROR: {U} {UNKNOWN_UPSTREAM_WHAT[None]}。{URL_ARG_FORM}"
+    assert (
+        _explain(err)
+        == f"ERROR: {U} {UNKNOWN_UPSTREAM_WHAT[None]}。次の手: {URL_ARG_FORM}"
+    )
     assert _explain(err, unknown_upstream_extra="許可先は X。") == (
-        f"ERROR: {U} {UNKNOWN_UPSTREAM_WHAT[None]}。許可先は X。{URL_ARG_FORM}"
+        f"ERROR: {U} {UNKNOWN_UPSTREAM_WHAT[None]}。次の手: 許可先は X。{URL_ARG_FORM}"
     )
     # 表の差し替え (sandbox は全部を自分の言い方で持つ)
     table = {**UNKNOWN_UPSTREAM_WHAT, "server_self": "は別の言い方"}
     err = RefError("unknown_upstream", "x", reason="server_self")
     assert (
         _explain(err, unknown_upstream=table)
-        == f"ERROR: {U} は別の言い方。{URL_ARG_FORM}"
+        == f"ERROR: {U} は別の言い方。次の手: {URL_ARG_FORM}"
     )
 
 
@@ -197,8 +203,9 @@ def test_templates_are_filled_by_replace_not_format():
 _LINK = "ユーザーに示すなら [ラベル]({u}) のリンクにする (ブラウザでは開ける)。"
 _NOT_FOUND = f"ERROR: {U} は存在しない (404 / ファイル無し)。次の手: ユーザーにはリンク切れと伝える。"
 _REDIRECT = (
-    f"ERROR: {U} は redirect (302) を返した。転送先が開ける URL ではなかった (http(s) でない・"
-    "形が不正)。次の手: 転送先のページを直接指す URL を渡す。"
+    f"ERROR: {U} は redirect (302) を返した。転送先を辿れなかった (転送先が示されていないか、"
+    "取りに行ける URL ではない)。次の手: 転送先のページを直接指す URL が分かるならそれを渡す。"
+    "分からなければ " + _LINK.format(u=U)
 )
 _REDIRECT_SELF = (
     f"ERROR: {U} の redirect (302) の転送先が このサーバ自身 (または同居するサービス) なので"
@@ -210,14 +217,18 @@ _TOO_MANY = (
     + _LINK.format(u=U)
 )
 _UNREACHABLE = (
-    f"ERROR: {U} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
+    f"ERROR: {U} のホストに届かない (このサーバからは到達できないか、一時的な障害)。"
     f"次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開けることがある)。"
+)
+_UNRESOLVABLE = (
+    f"ERROR: {U} のホスト名を解決できない。次の手: IP アドレスの URL が分かっているならそれで"
+    "呼び直す (ホスト名を推測で IP に書き換えない)。分からなければ " + _LINK.format(u=U)
 )
 _SERVER_SELF = (
     f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-    f"{URL_ARG_FORM}"
+    f"次の手: {URL_ARG_FORM}"
 )
-_NOT_ALLOWED = f"ERROR: {U} は取得を許可されていない URL。{URL_ARG_FORM}"
+_NOT_ALLOWED = f"ERROR: {U} は取得を許可されていない URL。次の手: {URL_ARG_FORM}"
 
 
 def test_sandbox_wording():
@@ -242,24 +253,21 @@ def test_sandbox_wording():
         ): _TOO_MANY,
         RefError("upstream_status", "x", status=302): _REDIRECT,
         RefError("upstream_status", "x", status=503): (
-            f"ERROR: {U} の上流が 503 を返した。次の手: 時間を置いて再試行する。"
-            + _LINK.format(u=U)
+            f"ERROR: {U} の上流が 503 を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
+            " (401 / 403 などは再試行しない)。" + _LINK.format(u=U)
         ),
-        RefError("upstream_unreachable", "x", reason="unresolvable"): (
-            f"ERROR: {U} のホスト名を解決できない。次の手: DNS の無い環境では IP アドレスで指定する "
-            "(例 `http://192.0.2.10/…`)。"
-        ),
+        RefError("upstream_unreachable", "x", reason="unresolvable"): _UNRESOLVABLE,
         RefError("upstream_unreachable", "x"): _UNREACHABLE,
         RefError("unknown_upstream", "x", reason="server_self"): _SERVER_SELF,
         # unknown_name / not_ext_form は 2026-10-03 に無くした — 知らない reason は 1 文面
         RefError("unknown_upstream", "x", reason="unknown_name"): _NOT_ALLOWED,
         RefError("unknown_upstream", "x"): _NOT_ALLOWED,
         RefError("traversal", "x"): (
-            f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{URL_ARG_FORM}"
+            f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。次の手: {URL_ARG_FORM}"
         ),
         RefError(
             "unsupported_form", "x"
-        ): f"ERROR: {U} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}",
+        ): f"ERROR: {U} は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}",
         # code (内部名) は出さない
         RefError("something_new", "x"): f"ERROR: {U} を取得できない。",
     }
@@ -288,15 +296,15 @@ def test_feed_image_wording():
             f"ERROR: {P} は存在しない。次の手: run_shell が使えるなら ls で確かめる。"
         ),
         RefError("upstream_unreachable", "x"): (
-            f"ERROR: {P} に届かない (この配備からは到達できない、または一時的な障害)。"
+            f"ERROR: {P} に届かない (このサーバからは到達できないか、一時的な障害)。"
             "次の手: run_shell が使えるなら ls で存在を確かめる。"
         ),
         RefError("workspace_unavailable", "x"): (
-            f"ERROR: {P} は sandbox のファイルだが読めない (sandbox が起動していないか、ファイルが無い)。"
-            "次の手: list_workspace が使えるなら存在を確かめる。"
+            f"ERROR: {P} は sandbox のファイルだが、sandbox に繋がらない (起動していないか、応答が無い)。"
+            "次の手: 時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
         ),
         RefError("traversal", "x"): (
-            f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。{PATH_ARG_FORM}"
+            f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。次の手: {PATH_ARG_FORM}"
         ),
         RefError("unsupported_form", "x"): path_error(P),
     }
@@ -330,7 +338,7 @@ def test_feed_image_wording():
         f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない"
         " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で run_python が使えるなら、このパスを"
         "開いて縮小し、出力を /workspace/… に書いてからその path を feed_image(path=…) に渡す。"
-        "sandbox のファイルなので、ユーザーに見せるなら、fetch_from_workspace が使えるならそれに path を"
+        "sandbox のファイルなので、fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を"
         "渡し、返ったリンクを本文に書く。"
     )
     assert feed_explain(U, RefError("too_large", "x")).startswith(
@@ -354,7 +362,8 @@ def test_fetch_url_wording(monkeypatch):
         RefError("unknown_upstream", "x"): _NOT_ALLOWED,
         RefError("unsupported_form", "x"): url_error(U),
         RefError("something_new", "x"): (
-            f"ERROR: {U} を取得できない (届かない・存在しない・redirect を辿れない・大きすぎる のいずれか)。"
+            f"ERROR: {U} を取得できない (届かない / 存在しない / redirect を辿れない / 大きすぎる"
+            " のいずれか)。次の手: " + _LINK.format(u=U)
         ),
     }
     for err, want in cases.items():
@@ -550,3 +559,83 @@ def test_generated_error_texts_follow_the_wording_rules():
         assert "/ext/" not in rest.replace("`/ext/…`", ""), text
         if "[ラベル](" in text or "リンク切れと伝える" in text:
             assert text.index("次の手: ") < text.index("ユーザー"), text
+        # モデルだけに向けた文 (引数の形・行き先の規則) は次の手の後ろ (llens 監査 A5)
+        _assert_model_only_after_next(text)
+
+
+# llens はモデルに「事実の文だけを伝え、次の手は回答に写さない」と指示する (2026-10-04 監査)。
+# モデルだけに向けた文は必ず `次の手:` の後ろに置く
+_MODEL_ONLY = (
+    URL_ARG_FORM,
+    PATH_ARG_FORM,
+    FILE_ID_ARG_FORM,
+    REF_ARGS_RULE,
+    "本文に貼り直さない",
+    "回答に写さない",
+)
+
+
+def _assert_model_only_after_next(text):
+    for phrase in _MODEL_ONLY:
+        if phrase in text:
+            assert "次の手: " in text, (phrase, text)
+            assert text.index("次の手: ") < text.index(phrase), (phrase, text)
+
+
+def test_model_only_sentences_come_after_next_step():
+    """形の固定文・表示の指示・通知の書式の指示は事実の文に混ぜない (A5 / A19 / B1)。"""
+    from nucllei.builtin_tools import sandbox
+    from nucllei.utils.execution_resume import NOTICE_HEADER
+    from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
+
+    texts = [
+        url_error("x"),
+        url_error(""),
+        path_error("x"),
+        file_id_error("f1"),
+        sandbox._DISPLAYED,
+        sandbox._file_link_note("a.csv", "f1"),
+        NOTICE_HEADER,
+        sandbox._resolve_workspace_path("rel/x", WORKSPACE_PATH_ARG_FORM)[2],
+        sandbox._resolve_workspace_path("https://x/y", PATH_ARG_FORM)[2],
+    ]
+    for text in texts:
+        assert text, texts
+        _assert_model_only_after_next(text)
+    # 表示の指示そのものも次の手の後ろ
+    assert sandbox._file_link_note("a.csv", "f1").startswith("次の手: ")
+    assert NOTICE_HEADER.index("次の手: ") < NOTICE_HEADER.index("await_task")
+
+
+def test_sandbox_error_texts_carry_no_exception_or_env_names():
+    """sandbox の失敗はモデルに例外の文・HTTP の detail・env 名を返さない (A17 / A18)。
+    中身はログにだけ残す。"""
+    import aiohttp
+
+    from nucllei.builtin_tools import sandbox
+
+    secret = "http://sandbox.internal:8000/files/read secret-detail"
+    errors = [
+        aiohttp.ClientConnectionError(secret),
+        TimeoutError(secret),
+        sandbox.SandboxHTTPError(400, secret),
+        sandbox.SandboxHTTPError(401, "SANDBOX_TOKEN が一致していない " + secret),
+        sandbox.SandboxHTTPError(404, secret),
+        sandbox.SandboxHTTPError(413, secret),
+        sandbox.SandboxHTTPError(502, secret),
+    ]
+    texts = []
+    for e in errors:
+        texts += [sandbox._files_error(e, "/workspace/a.txt"), sandbox._exec_error(e)]
+    for text in texts:
+        assert text.startswith("ERROR: "), text
+        assert "次の手: " in text, text
+        for leak in ("secret-detail", "sandbox.internal", "SANDBOX_TOKEN", "Error("):
+            assert leak not in text, (leak, text)
+    auth = sandbox._files_error(sandbox.SandboxHTTPError(401, "x"), "/workspace/a")
+    assert (
+        auth
+        == sandbox._SANDBOX_AUTH
+        == sandbox._exec_error(sandbox.SandboxHTTPError(401, "x"))
+    )
+    assert "呼び直さない" in auth

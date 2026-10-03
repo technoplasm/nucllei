@@ -100,7 +100,7 @@ class Tools:
         # (README_API §5.1)
         user_id = (__user__ or {}).get("id")
         if not user_id:
-            return {"ok": False, "error": "ユーザー文脈が無い。"}
+            return {"ok": False, "error": "ユーザーを特定できない。"}
 
         rec = Files.get_file_by_id(file_id)
         # 所有者チェックは fail-closed(owner が falsy でも拒否 — IDOR 同型の穴を
@@ -116,7 +116,7 @@ class Tools:
                 "ok": False,
                 "error": (
                     f"file_id {file_id} のレコードが無い、またはアクセス権が無い。"
-                    f"{FILE_ID_ARG_FORM}"
+                    f"次の手: {FILE_ID_ARG_FORM}"
                 ),
             }
 

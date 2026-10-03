@@ -127,7 +127,7 @@ class Tools:
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
             return (
-                "指定のチャットは見つからない (読めるのは自分のチャットだけ)。"
+                "ERROR: 指定のチャットは見つからない (読めるのは自分のチャットだけ)。"
                 "次の手: list_history / grep_history で得た chat_id を渡す。"
             )
 

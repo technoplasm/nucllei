@@ -383,7 +383,30 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = asyncio.run(
             tool.run_python("while True: pass", __user__={"id": "u1"}, __chat_id__="c1")
         )
-        assert "タイムアウト" in out and "変数・import は残っている" in out
+        assert (
+            "**タイムアウト (セルを中断した。変数・import は残っている)** 次の手: 処理を"
+            "分けるか、timeout_s を上げて続ける。" in out
+        )
+
+    def test_exec_timeout_names_the_limit_and_the_next_step(self):
+        """exec のタイムアウトは効いた秒数 (sandbox の上限で clamp) と上限を言う (A20)。"""
+        res = {
+            "exit_code": -9,
+            "duration_s": 600,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": True,
+            "exports": [],
+        }
+        for given, n in ((30, 30), (None, 120), (900, 600)):
+            tool = _sandbox({"/exec": res})
+            out = asyncio.run(
+                tool.run_shell("sleep 999", timeout_s=given, __user__={"id": "u1"})
+            )
+            assert (
+                f" **タイムアウト (timeout_s={n} 秒を超えたので強制終了した)** 次の手:"
+                " 処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)。" in out
+            ), (given, out)
 
     def test_run_shell_and_run_python_once_use_exec(self):
         res = {
@@ -485,8 +508,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
             assert seen["headers"] == {}
 
-    def test_401_error_names_the_token_mismatch(self):
-        """401 は原因(両側の SANDBOX_TOKEN 不一致)を言う。トークン値は出さない。"""
+    def test_401_error_says_auth_failed_without_the_env_name(self):
+        """401 はモデルには「認証に失敗した (サーバの設定の問題)」+ 呼び直さない、だけを言う。
+        原因 (両側の SANDBOX_TOKEN 不一致) はログにだけ残す — env 名をモデルに出さない
+        (2026-10-04 llens 監査 A18)。"""
         from nucllei.builtin_tools.sandbox import SandboxHTTPError
 
         tool = _sandbox(
@@ -498,12 +523,17 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             )
         )
         out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
-        assert out.startswith("ERROR:") and "SANDBOX_TOKEN" in out
+        assert out == (
+            "ERROR: sandbox との認証に失敗した (サーバの設定の問題)。次の手: 呼び直さない。"
+            "ユーザーには sandbox が今使えないと伝え、管理者への連絡を勧める。"
+        )
+        assert "SANDBOX_TOKEN" not in out
         # 繋がってはいるので「接続できない」とは言わない
         assert "接続できない" not in out
 
     def test_http_failure_is_graceful(self):
-        """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。"""
+        """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。detail はモデルに
+        出さない (ログだけ。A17)。実行系は「実行できなかった」、/files は status だけ言う。"""
         from nucllei.builtin_tools.sandbox import SandboxHTTPError
 
         tool = _sandbox(error=SandboxHTTPError(502, "bad gateway"))
@@ -515,9 +545,17 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool.list_workspace(__user__={"id": "u1"}),
             tool.fetch_from_workspace("/workspace/a.txt", __user__={"id": "u1"}),
         ]
-        for coro in calls:
-            out = asyncio.run(coro)
-            assert out.startswith("ERROR:") and "502" in out
+        outs = [asyncio.run(coro) for coro in calls]
+        for out in outs:
+            assert out.startswith("ERROR:") and "bad gateway" not in out
+            assert "次の手: " in out
+        for out in outs[:3]:
+            assert out.startswith("ERROR: sandbox で実行できなかった。次の手: "), out
+        for out in outs[3:]:
+            assert out == (
+                "ERROR: sandbox がエラーを返した (HTTP 502)。次の手: 1 回だけ呼び直す。"
+                "続くならユーザーに伝える。"
+            )
 
     def test_exports_are_registered_attached_and_displayed(self):
         """exports/ の差分 → Files 登録 + chat:message:files emit + 画像は display。"""
@@ -564,7 +602,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "plot.png" in out and "file_id=" in out
         assert "転送上限" in out and "huge.bin" in out
         # 画像は画面に出ている — 貼り直させない。上限超過の次の手はモデル向けの行にだけ
-        assert "ユーザーの画面には既に表示されている — 本文に貼り直さない" in out
+        assert (
+            "ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない"
+            " ([task] 通知で受け取ったときは表示されていないので貼る)" in out
+        )
         assert "次の手: 分割・圧縮するか" in out
 
         assert emitted[0]["type"] == "chat:message:files"
@@ -614,7 +655,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         assert out == (
             "ERROR: file_id f-yours のレコードが無い、またはアクセス権が無い。"
-            f"{FILE_ID_ARG_FORM}"
+            f"次の手: {FILE_ID_ARG_FORM}"
         )
         assert tool.calls == []
 
@@ -650,7 +691,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         for bad in ("work/a.txt", "/etc/passwd", "https://x.example/y.html"):
             assert asyncio.run(tool.write_file(bad, "x", __user__=user)) == (
                 f"ERROR: {bad} は sandbox のパスの形でない。"
-                f"{WORKSPACE_PATH_ARG_FORM} {REF_ARGS_RULE}"
+                f"次の手: {WORKSPACE_PATH_ARG_FORM} {REF_ARGS_RULE}"
             )
         assert asyncio.run(tool.write_file("", "x", __user__=user)).startswith(
             "ERROR: (空) は sandbox のパスの形でない。"
@@ -749,7 +790,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 (tool.fetch_from_workspace(bad, __user__=user), PATH_ARG_FORM),
             ):
                 assert asyncio.run(coro) == (
-                    f"ERROR: {bad} は sandbox のパスの形でない。{form} {REF_ARGS_RULE}"
+                    f"ERROR: {bad} は sandbox のパスの形でない。次の手: {form} {REF_ARGS_RULE}"
                 ), bad
         assert tool.calls == []
 
@@ -818,8 +859,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             ]
 
         # sandbox 側の _safe_path が弾いた (symlink 越しの脱出など、tool からは見えない分)
+        # detail はログだけ (A17)
         for out in outs(SandboxHTTPError(400, "path escapes workspace: 'a.txt'")):
-            assert out.startswith("ERROR:") and "path escapes workspace" in out
+            assert out.startswith("ERROR:") and "path escapes workspace" not in out
+            assert "は使えない path (sandbox が受け付けなかった)" in out
             assert "接続できない" not in out
 
         out = outs(SandboxHTTPError(404, "not a file: a.txt"))[2]
@@ -1092,7 +1135,10 @@ def test_general_url_wording_follows_reason(monkeypatch):
     assert "4 回以上続いた" in loop and "[ラベル](http://10.1.2.3/loop)" in loop
     assert env.gets.count("http://10.1.2.3/loop") == 1 and len(env.gets) == 1 + 4
     unresolved = env.run(url="http://nosuch.test/x")
-    assert "ホスト名を解決できない" in unresolved and "IP アドレスで指定" in unresolved
+    assert (
+        "ホスト名を解決できない" in unresolved
+        and "IP アドレスの URL が分かっているならそれで呼び直す" in unresolved
+    )
     named = env.run(url="http://intra.test/x")
     assert not named.startswith("ERROR")
     assert (
@@ -1338,7 +1384,7 @@ def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
         result = env.run(url=bad)
         # 全 tool 共通の形: 値 + 固定文(url が受ける形)+ 行き先の規則(1 文)
         assert result == (
-            f"ERROR: {bad} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+            f"ERROR: {bad} は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
         ), bad
         results[bad] = result.replace(bad, "<value>")
     # 値を調べて文面を出し分けていない
@@ -1361,7 +1407,7 @@ def test_file_id_is_only_ever_a_file_id(monkeypatch, tmp_path):
         result = env.run(file_id=bad)
         assert result == (
             f"ERROR: file_id {bad} のレコードが無い、またはアクセス権が無い。"
-            f"{FILE_ID_ARG_FORM}"
+            f"次の手: {FILE_ID_ARG_FORM}"
         ), bad
     assert env.gets == [] and env.writes == []
     # 正しい file_id は従来どおり
@@ -1548,7 +1594,7 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
     ):
         out = env.fetch(given)
         assert out == (
-            f"ERROR: {given} は sandbox のパスの形でない。{PATH_ARG_FORM} {REF_ARGS_RULE}"
+            f"ERROR: {given} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
         ), given
     assert env.registered == [] and env.writes == []
 

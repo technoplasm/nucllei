@@ -235,7 +235,7 @@ def test_build_source_context_attributes():
             ],
         },
     ]
-    none_body = "(テキスト抽出されていない。中身は file_id で扱う)"
+    none_body = "(テキスト抽出されていない。次の手: 中身が要るなら file_id を受ける tool に渡す)"
     assert build_source_context(sources).split("\n") == [
         '<source id="1" file_id="a">本文</source>',
         '<source id="2" file_id="b" extraction="failed">失敗の理由</source>',

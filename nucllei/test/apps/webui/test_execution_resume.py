@@ -298,9 +298,9 @@ class TestExecutionResume(AbstractPostgresTest):
         text, files = self.resume.build_delivery_notice([row], {})
         assert text == (
             "[task] バックグラウンドタスクの完了通知 (システムからの自動通知。"
-            "ユーザーの発言ではない)。結果は下にある — await_task で取り直さなくてよい。"
-            "成果物の画像・ファイルはまだ表示されていないので、見せるなら本文にリンクを書く。"
-            "この通知の書式は回答に写さない。\n"
+            "ユーザーの発言ではない)。結果は下にあり、成果物の画像・ファイルはまだ画面に"
+            "表示されていない。次の手: await_task で取り直さない。成果物を見せるなら本文に"
+            "リンクを書く。この通知の書式 (task_id: / status: / note: の行) は回答に写さない。\n"
             "\n"
             "task_id: e1 (probe)\n"
             "status: done(duration: 20.05s)\n"
@@ -333,14 +333,15 @@ class TestExecutionResume(AbstractPostgresTest):
             "task_id: s1 (probe)\n"
             "status: stopped\n"
             "note: 止められた (ユーザー操作または stop_task)。"
-            "副作用は完了している可能性がある。" in text
+            "副作用は完了している可能性がある。次の手: ユーザーが止めたなら呼び直さない。"
+            in text
         )
         assert (
             "task_id: o1 (probe)\n"
             "status: orphaned\n"
             "note: サーバーの再起動で結果が失われた。次の手: 読むだけの"
-            "処理なら同じ引数で呼び直す。書き込みや送信を伴う処理は結果を確かめてから。"
-            in text
+            "処理なら同じ引数で呼び直す。書き込みや送信を伴う処理は、結果が残っていないか"
+            "確かめてから呼び直すかを決める。" in text
         )
 
     def test_notice_has_no_heading_or_imperative(self):

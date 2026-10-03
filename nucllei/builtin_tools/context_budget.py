@@ -63,13 +63,13 @@ class Tools:
         """
         user_id = (__user__ or {}).get("id")
         if not user_id:
-            return {"ok": False, "error": "ユーザー文脈が無い。"}
+            return {"ok": False, "error": "ユーザーを特定できない。"}
 
         chat_id = (__metadata__ or {}).get("chat_id")
         if not chat_id:
             return {
                 "ok": False,
-                "error": "会話の id が無い (会話の中からだけ呼べる)。",
+                "error": "チャットの id が無い (チャットの中からだけ呼べる)。",
             }
 
         # owner-only: 他ユーザーの chat_id は「無い」扱い(所有者検証を漏らさない)
@@ -78,7 +78,7 @@ class Tools:
         if not usage:
             return {
                 "ok": False,
-                "error": "この会話の usage がまだ無い(最初のモデル呼び出しの完了前)。",
+                "error": "このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)。",
             }
 
         # 分子: carried_tokens(最後の呼び出しの prompt + 再送される出力 = 次の呼び出しの
@@ -92,7 +92,7 @@ class Tools:
         if used is None:
             return {
                 "ok": False,
-                "error": "この会話の usage に token 数が無い(エンジンが usage を返していない)。",
+                "error": "このチャットの usage に token 数が無い(エンジンが usage を返していない)。",
             }
 
         # context 長: 記録済み > モデルから解決(endpoint 申告 → meta.context_size)。
@@ -125,11 +125,11 @@ class Tools:
                 "context_size": None,
                 "used_pct": None,
                 "note": note
-                + " context 長が分からない (接続が申告せず、既定値も未設定) ので残量は出せない。",
+                + " context 長が分からない (モデルの接続先が context 長を返さず、既定値も未設定) ので残量は出せない。",
             }
 
         if fallback_used:
-            note += " context 長は管理者が設定した既定値 (接続の申告ではない)。"
+            note += " context 長は管理者が設定した既定値 (モデルの接続先が返した値ではない)。"
         remaining = max(0, context_size - used)
         return {
             "ok": True,

@@ -552,9 +552,11 @@ async def run_subagent_turn(
     # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
     if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
         return _error(
-            f"サブエージェントは同時 {SUBAGENT_MAX_CONCURRENCY} 本まで"
-            " (超えた分は起動していない)。"
-            "次の手: 起動済みの分の結果がそろってから残りを呼ぶ。"
+            # _active_turns はプロセス全体の数 (呼び手ごとではない)
+            "サブエージェントの同時実行数がサーバー全体の上限"
+            f" ({SUBAGENT_MAX_CONCURRENCY}) に達している (この分は起動していない)。"
+            "次の手: 自分が起動した分があれば、その結果がそろってから残りを呼ぶ。"
+            "無ければ時間を置いて呼び直すか、自分で処理する。"
         )
     _active_turns += 1
     # 実行中登録した agent session id。None = 未登録。

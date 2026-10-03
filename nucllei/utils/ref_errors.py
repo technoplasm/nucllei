@@ -55,17 +55,17 @@ RefArg = Literal["url", "path"]
 
 def url_error(value: str) -> str:
     """url が URL として解決できない(値を調べて文面を出し分けない)。"""
-    return f"ERROR: {value or '(空)'} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
+    return f"ERROR: {value or '(空)'} は URL として解決できない。{NEXT}{URL_ARG_FORM} {REF_ARGS_RULE}"
 
 
 def path_error(value: str) -> str:
     """path が sandbox のパスの形でない。"""
-    return f"ERROR: {value or '(空)'} は sandbox のパスの形でない。{PATH_ARG_FORM} {REF_ARGS_RULE}"
+    return f"ERROR: {value or '(空)'} は sandbox のパスの形でない。{NEXT}{PATH_ARG_FORM} {REF_ARGS_RULE}"
 
 
 def file_id_error(fid: str) -> str:
     """file が引けない(「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない)。"""
-    return f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い。{FILE_ID_ARG_FORM}"
+    return f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い。{NEXT}{FILE_ID_ARG_FORM}"
 
 
 def mb(n) -> str:
@@ -114,7 +114,7 @@ _REDIRECT_WHAT = "ERROR: {ref} は redirect ({status}) を返した。"
 _UPSTREAM_STATUS = (
     "ERROR: {ref} の上流が {status} を返した。"
     + NEXT
-    + "時間を置いて再試行する。"
+    + "5xx なら時間を置いて 1 回だけ再試行する (401 / 403 などは再試行しない)。"
     + SHOW_AS_LINK
 )
 # traversal(`..` / 制御文字)。添える形の文は arg で選ぶ
@@ -136,11 +136,13 @@ class RefErrorHints:
     not_found: str = (
         "ERROR: {ref} は存在しない (404 / ファイル無し)。" + NEXT + TELL_BROKEN_LINK
     )
-    # reason 無しの 3xx(`_REDIRECT_WHAT` に続ける。転送先が URL として組めなかった)
+    # reason 無しの 3xx(`_REDIRECT_WHAT` に続ける。Location が無い・URL として組めない・
+    # 同一サーバの /ext 以外を指す — どれも「辿れなかった」)
     redirect_next: str = (
-        "転送先が開ける URL ではなかった (http(s) でない・形が不正)。"
+        "転送先を辿れなかった (転送先が示されていないか、取りに行ける URL ではない)。"
         + NEXT
-        + "転送先のページを直接指す URL を渡す。"
+        + "転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
+        + SHOW_AS_LINK
     )
     # 一般の URL の redirect の転送先がこのサーバ自身 / 回数超過(reason 付き)
     redirect_self: str = (
@@ -157,10 +159,12 @@ class RefErrorHints:
     unresolvable: str = (
         "ERROR: {ref} のホスト名を解決できない。"
         + NEXT
-        + "DNS の無い環境では IP アドレスで指定する (例 `http://192.0.2.10/…`)。"
+        + "IP アドレスの URL が分かっているならそれで呼び直す (ホスト名を推測で IP に書き換えない)。"
+        + "分からなければ "
+        + SHOW_AS_LINK
     )
     unreachable: str = (
-        "ERROR: {ref} のホストに届かない (この配備からは到達できない、または一時的な障害)。"
+        "ERROR: {ref} のホストに届かない (このサーバからは到達できないか、一時的な障害)。"
         + NEXT
         + SHOW_AS_LINK.replace("開ける", "開けることがある")
     )
@@ -209,7 +213,7 @@ def explain_ref_error(
         if err.reason == "too_many_redirects":
             return _fill(hints.too_many_redirects, ref, err.status)
         if err.status is not None and 300 <= int(err.status) < 400:
-            return _fill(_REDIRECT_WHAT, ref, err.status) + hints.redirect_next
+            return _fill(_REDIRECT_WHAT + hints.redirect_next, ref, err.status)
         return _fill(_UPSTREAM_STATUS, ref, err.status)
     if code == "upstream_unreachable":
         if err.reason == "unresolvable":
@@ -220,10 +224,14 @@ def explain_ref_error(
     if code == "unknown_upstream":
         table = hints.unknown_upstream
         what = table[err.reason] if err.reason in table else table[None]
-        return f"ERROR: {ref} {what}。{hints.unknown_upstream_extra}{URL_ARG_FORM}"
+        return (
+            f"ERROR: {ref} {what}。{NEXT}{hints.unknown_upstream_extra}{URL_ARG_FORM}"
+        )
     if code == "traversal":
-        return _fill(_TRAVERSAL, ref) + (
-            PATH_ARG_FORM if arg == "path" else URL_ARG_FORM
+        return (
+            _fill(_TRAVERSAL, ref)
+            + NEXT
+            + (PATH_ARG_FORM if arg == "path" else URL_ARG_FORM)
         )
     if code == "workspace_unavailable" and hints.workspace_unavailable is not None:
         return _fill(hints.workspace_unavailable, ref)

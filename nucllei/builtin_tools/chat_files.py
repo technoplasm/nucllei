@@ -82,12 +82,18 @@ class Tools:
         user_id = _require_user_id(__user__)
         chat_id = __chat_id__ or (__metadata__ or {}).get("chat_id")
         if not chat_id:
-            return "現在のチャットを特定できない (チャットの中でだけ使える)。", []
+            return (
+                "ERROR: 現在のチャットを特定できない (チャットの中でだけ使える)。",
+                [],
+            )
 
         # owner-only: 他ユーザーの chat は「見つからない」扱い(history と同じ)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
-            return "チャットが見つからない (一覧できるのは自分のチャットだけ)。", []
+            return (
+                "ERROR: チャットが見つからない (一覧できるのは自分のチャットだけ)。",
+                [],
+            )
 
         ids = list(dict.fromkeys(_iter_chat_file_ids(chat.chat or {})))
         if not ids:

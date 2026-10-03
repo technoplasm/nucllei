@@ -110,7 +110,7 @@ _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の�
 
 # sandbox のファイルをユーザーに見せる方法 (fetch_from_workspace がリンクを返す)。
 _SHOW_PATH = (
-    "ユーザーに見せるなら、fetch_from_workspace が使えるならそれに path を渡し、"
+    "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
     "返ったリンクを本文に書く。"
 )
 
@@ -190,16 +190,17 @@ def _hints(is_path: bool, ref: str = "") -> RefErrorHints:
         ),
         # 上流不達は URL (一般の URL) でしか起きないが、万一 fs で来ても「リンクで示す」とは言わない。
         unreachable=(
-            "ERROR: {ref} に届かない (この配備からは到達できない、または一時的な障害)。"
+            "ERROR: {ref} に届かない (このサーバからは到達できないか、一時的な障害)。"
             + NEXT
             + "run_shell が使えるなら ls で存在を確かめる。"
             if is_path
             else RefErrorHints.unreachable
         ),
+        # sandbox の 404 は not_found に行くので、ここは「繋がらない」だけ
         workspace_unavailable=(
-            "ERROR: {ref} は sandbox のファイルだが読めない (sandbox が起動していないか、ファイルが無い)。"
+            "ERROR: {ref} は sandbox のファイルだが、sandbox に繋がらない (起動していないか、応答が無い)。"
             + NEXT
-            + "list_workspace が使えるなら存在を確かめる。"
+            + "時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
         ),
     )
 
@@ -338,7 +339,7 @@ class Tools:
         # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
         # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
         if __feed_image__ is None:
             # 実行文脈外 (通常起こらない)。参照を push できないので明示エラー。
             return "ERROR: この呼び出しでは画像を目に入れる経路が使えない。"
@@ -453,8 +454,9 @@ class Tools:
             # 送信直前 inline に一任。base64 は戻り境界に載せない。
             feed(fid)
             return (
-                f"- {name} を自分の目に入れた (file_id={fid}。ユーザーには表示されない。"
-                f"見せるなら本文に ![{_md_label(name)}](/api/v1/files/{fid}/content) を書く)"
+                f"- {name} を自分の目に入れた (file_id={fid}。この呼び出しではユーザーに表示していない)。"
+                f"{NEXT}画面にまだ出ていない画像を見せるときだけ、本文に"
+                f" ![{_md_label(name)}](/api/v1/files/{fid}/content) を書く。"
             )
         # PDF は File を作らず、内部 file URL にページを載せた参照で積む
         # (inline 層が送信直前にそのページをラスタライズする)。
@@ -525,13 +527,16 @@ class Tools:
                 if served:
                     return (
                         f"- {ref} を自分の目に入れた (ユーザーには表示されない。このパスは URL"
-                        f"としても配信されている — 見せるなら本文に ![…]({served}) を書く)"
+                        f"としても配信されている)。{NEXT}見せるなら本文に ![…]({served}) を書く。"
                     )
                 return (
                     f"- {ref} を自分の目に入れた (ユーザーには表示されない。sandbox のパスは本文に"
-                    f"貼れない — {_SHOW_PATH})"
+                    f"貼れない)。{NEXT}{_SHOW_PATH}"
                 )
-            return f"- {ref} を自分の目に入れた (ユーザーには表示されない。見せるなら本文に ![…]({ref}) を書く)"
+            return (
+                f"- {ref} を自分の目に入れた (ユーザーには表示されない)。"
+                f"{NEXT}見せるなら本文に ![…]({ref}) を書く。"
+            )
         if kind == "pdf":
             try:
                 n_pages = await asyncio.to_thread(pdf_page_count, loaded.data)
@@ -543,9 +548,9 @@ class Tools:
             f"ERROR: {ref} は画像でも PDF でもない (content-type={loaded.content_type or '不明'})。"
             + NEXT
             + (
-                "テキストなら、run_shell が使えるならそれで読む。"
+                "run_shell が使えるなら、テキストはそれで読む。"
                 if is_path
-                else "テキストなら、fetch_url が使えるなら fetch_url(url=…) で読む。"
+                else "fetch_url が使えるなら、テキストは fetch_url(url=…) で読む。"
             )
         )
 

@@ -142,10 +142,11 @@ TABLE = {
     "/ext/cage/doc/a.md": _Loaded(b"# a", "text/markdown", "a.md"),
 }
 
-URL_FORM = f"{URL_ARG_FORM} {REF_ARGS_RULE}"
-PATH_FORM = f"{PATH_ARG_FORM} {REF_ARGS_RULE}"
+# 形の固定文と行き先の規則はモデルだけに向けた文なので `次の手:` の後ろ (llens 監査 A5)
+URL_FORM = f"次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
+PATH_FORM = f"次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
 SHOW_PATH = (
-    "ユーザーに見せるなら、fetch_from_workspace が使えるならそれに path を渡し、"
+    "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
     "返ったリンクを本文に書く。"
 )
 LINK_HINT = "ユーザーに示すなら [ラベル]("
@@ -451,7 +452,7 @@ def test_unknown_upstream_is_one_fixed_text_without_a_reason(monkeypatch):
         result, fed, resolver = _run(monkeypatch, table, url=bad)
         assert resolver.refs == [bad], bad
         assert fed == [] and result == (
-            f"ERROR: {bad} は取得を許可されていない URL。" + URL_ARG_FORM
+            f"ERROR: {bad} は取得を許可されていない URL。次の手: " + URL_ARG_FORM
         ), (bad, result)
 
 
@@ -522,7 +523,7 @@ def test_url_of_the_internal_file_endpoint_is_read_as_the_file(monkeypatch):
 
 def test_url_of_the_internal_file_endpoint_keeps_the_owner_check(monkeypatch):
     recs = {"f1": _Rec("f1", "someone-else", "scan.pdf", "application/pdf")}
-    fixed = "ERROR: file_id {} のレコードが無い、またはアクセス権が無い。file_id は添付・生成物の id。"
+    fixed = "ERROR: file_id {} のレコードが無い、またはアクセス権が無い。次の手: file_id は添付・生成物の id。"
     result, fed, _r = _run_with_files(monkeypatch, recs, url="/api/v1/files/f1/content")
     assert fed == [] and result == fixed.format("f1"), result
     result, fed, _r = _run_with_files(monkeypatch, {}, url="/api/v1/files/nope/content")
@@ -711,11 +712,12 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch):
         result = _explained(
             monkeypatch, "upstream_status", ref=f"{HIS}/dir", status=status
         )
+        assert f"redirect ({status})" in result and "転送先を辿れなかった" in result
         assert (
-            f"redirect ({status})" in result
-            and "転送先が開ける URL ではなかった" in result
+            "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
+            + LINK_HINT
+            in result
         )
-        assert "次の手: 転送先のページを直接指す URL を渡す。" in result
         assert "辿らない" not in result and "リンク切れ" not in result
 
 
@@ -723,13 +725,17 @@ def test_server_error_status_suggests_retry_or_handing_over_the_url(monkeypatch)
     for status in (500, 503, 403):
         result = _explained(monkeypatch, "upstream_status", status=status)
         assert f"上流が {status} を返した" in result, status
-        assert "時間を置いて再試行" in result and LINK_HINT in result, status
+        assert (
+            "5xx なら時間を置いて 1 回だけ再試行する (401 / 403 などは再試行しない)"
+            in result
+            and LINK_HINT in result
+        ), status
         assert "redirect" not in result, status
 
 
 def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(monkeypatch):
     result = _explained(monkeypatch, "upstream_unreachable")
-    assert "のホストに届かない" in result and "この配備からは到達できない" in result
+    assert "のホストに届かない" in result and "このサーバからは到達できない" in result
     assert LINK_HINT in result and "リンク切れ" not in result
 
 
@@ -742,18 +748,20 @@ def test_traversal_code_says_out_of_bounds(monkeypatch):
         assert "許可された範囲の外" in result and result.endswith(PATH_ARG_FORM), ref
 
 
-def test_workspace_unavailable_points_to_list_workspace(monkeypatch):
+def test_workspace_unavailable_says_sandbox_is_unreachable(monkeypatch):
+    """sandbox の 404 は not_found に行くので、ここは「繋がらない」(A6)。"""
     result = _explained(
         monkeypatch,
         "workspace_unavailable",
         ref="/workspace/out/plot.png",
         detail="sandbox down",
     )
-    assert (
-        "sandbox" in result
-        and "list_workspace" in result
-        and "sandbox down" not in result
+    assert result == (
+        "ERROR: /workspace/out/plot.png は sandbox のファイルだが、sandbox に繋がらない"
+        " (起動していないか、応答が無い)。次の手: 時間を置いて 1 回だけ呼び直す。"
+        "続くならユーザーに sandbox が使えないと伝える。"
     )
+    assert "sandbox down" not in result
 
 
 def test_unknown_code_falls_back_to_the_bundled_text(monkeypatch):
@@ -817,7 +825,7 @@ def test_requires_user_and_feed_channel(monkeypatch):
     mod, resolver = _install(monkeypatch, TABLE)
     assert asyncio.run(
         mod.Tools().feed_image(url=FIG_URL, __feed_image__=lambda r: None)
-    ).startswith("ERROR: ユーザー情報")
+    ).startswith("ERROR: ユーザーを特定できない")
     assert "画像を目に入れる経路が使えない" in asyncio.run(
         mod.Tools().feed_image(url=FIG_URL, __user__={"id": "u1"})
     )
@@ -872,8 +880,12 @@ def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
         monkeypatch, {"f1": rec}, raw=b"\xff\xd8\xff" + b"\0" * 8, file_id="f1"
     )
     assert fed == ["f1"] and "file_id=f1" in result
-    # 見せるなら本文に書く形をそのまま渡す (2026-10-04)
-    assert "見せるなら本文に ![photo.jpg](/api/v1/files/f1/content) を書く" in result
+    # 見せるなら本文に書く形をそのまま渡す — 表示の指示は次の手の後ろ (A9)
+    assert result == (
+        "- photo.jpg を自分の目に入れた (file_id=f1。この呼び出しではユーザーに表示していない)。"
+        "次の手: 画面にまだ出ていない画像を見せるときだけ、本文に"
+        " ![photo.jpg](/api/v1/files/f1/content) を書く。"
+    )
     mod, _r = _install(monkeypatch, TABLE)
     monkeypatch.setattr(
         mod, "Files", types.SimpleNamespace(get_file_by_id=lambda fid: rec)

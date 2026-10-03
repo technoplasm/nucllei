@@ -94,6 +94,7 @@ from nucllei.storage.provider import Storage
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
 from nucllei.utils.ref_errors import (
     NEXT,
+    SHOW_AS_LINK,
     RefErrorHints,
     explain_ref_error,
     file_id_error,
@@ -156,8 +157,12 @@ def _decode(raw: bytes, content_type: str) -> str:
 # 別の toolkit の tool (feed_image / send_to_workspace / run_subagent / read_attachment) は
 # 載っていないことがあるので「〜が使えるなら」と条件付きで書く。
 
-# resolver が理由を付けずに失敗したとき (通常起きない) の文面。
-_ERR_UNEXPLAINED = "を取得できない (届かない・存在しない・redirect を辿れない・大きすぎる のいずれか)。"
+# resolver が理由を付けずに失敗したとき (通常起きない) の文面 (`{ref}` は ref_errors が埋める)。
+_ERR_UNEXPLAINED = (
+    "を取得できない (届かない / 存在しない / redirect を辿れない / 大きすぎる のいずれか)。"
+    + NEXT
+    + SHOW_AS_LINK
+)
 
 
 def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
@@ -371,7 +376,7 @@ class Tools:
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
         # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザー情報が取得できない。"
+            return "ERROR: ユーザーを特定できない。"
 
         u = (url or "").strip()
 
@@ -448,7 +453,7 @@ class Tools:
             )
         if kind == "other":
             return (
-                f"ERROR: 平文にできない形式 (content-type={media_type or '不明'})。"
+                f"ERROR: {u} は平文にできない形式 (content-type={media_type or '不明'})。"
                 + NEXT
                 + f'加工が要るなら、send_to_workspace が使えるなら send_to_workspace(url="{u}")'
                 " で sandbox に取り込む。" + show_as_link(page_url or u)
@@ -460,8 +465,8 @@ class Tools:
             return (
                 head + f"種別: PDF / テキスト層が無い (抽出 {len(body)} 字 < "
                 f"{self.valves.pdf_text_char_threshold} 字)。スキャン画像の PDF。\n"
-                f"{NEXT}{hint}\n"
-                f"ユーザーには原本を [ラベル]({u}) のリンクで示す (要約より確実)。"
+                f"{NEXT}{hint}"
+                f"見られない・読み取れないときは、ユーザーに原本を [ラベル]({u}) のリンクで示す。"
             )
 
         return self._render(head, kind, body, links, query, offset, limit, url=u)
@@ -559,8 +564,8 @@ class Tools:
             # 重い処理ではない (ken 2026-09-07: PDF はできるだけ見る)。
             head += (
                 "テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。"
-                f'{NEXT}feed_image が使えるなら、feed_image(url="{url}", pages="1-3" 等) で'
-                "ユーザーが見るものと同じものを見られる (重くない)。\n"
+                f'{NEXT}feed_image が使えるなら feed_image(url="{url}", pages="1-3" 等) で'
+                "ユーザーが見るものと同じものを見る (重くない)。\n"
             )
         link_header = f"--- リンク ({len(links)} 件) ---" if links else None
         all_lines = list(body) + ([link_header] + links if links else [])

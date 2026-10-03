@@ -521,7 +521,7 @@ def build_load_skill_tool(model, user, load_tools=None):
     spec = {
         "name": "load_skill",
         "description": (
-            "skill を読み込む。作業の手順書 (自分向けの指示) を返す。"
+            "skill を読み込む。作業の手順書 (自分向けの指示) を返すので、それに従って作業する。"
             "手順書の見出しや文言は回答に写さない。使える skill:\n" + listing
         ),
         "parameters": {

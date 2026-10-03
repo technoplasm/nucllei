@@ -45,7 +45,8 @@ SITE = "https://med-info.med.hokudai.ac.jp/his-info"
 ORIGIN = "https://llens.example"
 EXT_TOP = f"{ORIGIN}/ext/his/top.aspx"
 
-URL_FORM = f"{URL_ARG_FORM} {REF_ARGS_RULE}"
+# 形の固定文と行き先の規則は `次の手:` の後ろ (llens 監査 A5)
+URL_FORM = f"次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
 
 
 def _mod():
@@ -491,7 +492,8 @@ def test_root_redirect_is_the_redirect_guidance(monkeypatch, ext_env):
         assert resolver.refs == [u], u
         assert (
             "redirect (302)" in result
-            and "次の手: 転送先のページを直接指す URL を渡す。" in result
+            and "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。"
+            in result
         ), (u, result)
         assert "リンク切れ" not in result, u
 
@@ -575,6 +577,13 @@ def test_pdf_without_text_layer_points_to_feed_image(monkeypatch, ext_env):
     )
     assert "テキスト層が無い" in result
     assert f'feed_image(url="{u}")' in result
+    # 原本のリンクは feed_image で見られないときの代替 (A15)
+    assert result.endswith(
+        "スキャン画像の PDF。\n"
+        f'次の手: feed_image が使えるなら feed_image(url="{u}") でページを見る'
+        ' (pages="3" 等で範囲指定)。見られない・読み取れないときは、ユーザーに原本を'
+        f" [ラベル]({u}) のリンクで示す。"
+    )
 
 
 def test_pdf_without_text_layer_guides_to_feed_image_even_without_pdf_extension(
@@ -898,8 +907,11 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch, ext_env):
     result = _explained(
         monkeypatch, ext_env, "upstream_status", url=f"{SITE}/dir", status=302
     )
-    assert "redirect (302)" in result and "転送先が開ける URL ではなかった" in result
-    assert "次の手: 転送先のページを直接指す URL を渡す。" in result
+    assert "redirect (302)" in result and "転送先を辿れなかった" in result
+    assert (
+        "次の手: 転送先のページを直接指す URL が分かるならそれを渡す。分からなければ "
+        "ユーザーに示すなら [ラベル](" in result
+    )
     assert "辿らない" not in result
     assert "top.aspx" not in result  # 特定サイトのページ名を例に出さない (2026-10-04)
     assert "リンク切れ" not in result
@@ -912,7 +924,8 @@ def test_server_error_status_suggests_retry_or_handing_over_the_url(
         result = _explained(monkeypatch, ext_env, "upstream_status", status=status)
         assert f"上流が {status} を返した" in result, status
         assert (
-            "時間を置いて再試行" in result and "ユーザーに示すなら [ラベル](" in result
+            "5xx なら時間を置いて 1 回だけ再試行する" in result
+            and "ユーザーに示すなら [ラベル](" in result
         ), status
         assert "redirect" not in result, status
 
@@ -921,7 +934,7 @@ def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(
     monkeypatch, ext_env
 ):
     result = _explained(monkeypatch, ext_env, "upstream_unreachable")
-    assert "のホストに届かない" in result and "この配備からは到達できない" in result
+    assert "のホストに届かない" in result and "このサーバからは到達できない" in result
     assert "ユーザーに示すなら [ラベル](" in result and "リンク切れ" not in result
 
 
@@ -1035,8 +1048,7 @@ def test_unsupported_content_type_hands_back_the_page_url(monkeypatch, ext_env):
         u,
         resp=_Loaded(content_type="application/vnd.ms-excel", body=b"\xd0\xcf"),
     )
-    assert result.startswith("ERROR") and "平文にできない形式" in result
-    assert u in result
+    assert result.startswith(f"ERROR: {u} は平文にできない形式 (content-type=")
     # 加工が要るなら sandbox に取り込む (too_large と同じ次の一手。2026-10-04)
     assert f'send_to_workspace(url="{u}")' in result
     # 渡すときは markdown リンク (2026-10-04。裸の URL を「案内」させない)

@@ -69,13 +69,14 @@ EXEC_SPAWN_GRACE_S = 10
 # 事実の文 + モデル向けの「次の手:」)
 ORPHANED_ERROR = (
     "サーバーの再起動で結果が失われた。次の手: 読むだけの処理なら同じ引数で呼び直す。"
-    "書き込みや送信を伴う処理は結果を確かめてから。"
+    "書き込みや送信を伴う処理は、結果が残っていないか確かめてから呼び直すかを決める。"
 )
 SPAWN_FAILED_ERROR = (
     "background 実行を起動できなかった。次の手: background を付けずに呼び直す。"
 )
 STOPPED_ERROR = (
     "止められた (ユーザー操作または stop_task)。副作用は完了している可能性がある。"
+    "次の手: ユーザーが止めたなら呼び直さない。"
 )
 
 # exec runner 内で立つ ContextVar(§6 硬化)。completion_events の DB 書き分岐
@@ -305,7 +306,7 @@ def truncation_marker(original_chars: int) -> str:
     """切詰め済み tool 結果の末尾に付ける印(モデル向け — 事実 + 次の手)。"""
     return (
         f"\n(ここで切れている: 全 {original_chars} 字のうち先頭 "
-        f"{TOOL_RESULT_MAX_CHARS} 字。次の手: 続きが要るなら範囲を絞って呼び直す)"
+        f"{TOOL_RESULT_MAX_CHARS} 字。次の手: 続きが要るなら offset / query などで範囲を絞って呼び直す)"
     )
 
 

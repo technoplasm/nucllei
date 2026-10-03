@@ -722,7 +722,7 @@ class TestAttachmentText(AbstractPostgresTest):
             assert out == {
                 "ok": False,
                 "error": f"file_id {fid} のレコードが無い、またはアクセス権が無い。"
-                f"{FILE_ID_ARG_FORM}",
+                f"次の手: {FILE_ID_ARG_FORM}",
             }
         # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
         self._new_file("owner", "doc-orphan", "orphan.txt", content="x")
