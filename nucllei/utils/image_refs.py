@@ -218,7 +218,6 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
-from nucllei.builtin_tools import sandbox
 from nucllei.env import (
     EXT_FILE_SCOPES,
     EXT_INLINE_MAX_BYTES,
@@ -852,6 +851,11 @@ def _workspace_error(exc: Exception, rel_path: str) -> RefError:
 
 
 async def _load_workspace(rel_path: str, user_id: str, limit: int) -> _Result:
+    # builtin_tools パッケージは feed_image / fetch_url が本 module を import する
+    # (2026-10-03、llens からの移設)— top-level で `builtin_tools` を引くと、どちらを先に
+    # import しても循環になるので、sandbox を使うここでだけ引く
+    from nucllei.builtin_tools import sandbox
+
     if not sandbox.SANDBOX_URL:
         log.warning("image_refs: /workspace reference without SANDBOX_URL")
         return _fail("workspace_unavailable", "SANDBOX_URL is not configured")

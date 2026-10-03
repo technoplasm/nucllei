@@ -92,6 +92,8 @@ enforce_access_control)は #66 のゲートとして維持。また非ストリ�
 - **view_image は builtin から撤去**(`38895a982`、#89 D2 反転)。上の 2026-07-21 節で builtin 化した
   view_image は prism tool **`feed_image`** へ一本化して撤去(builtin は `builtin_history` のみに戻る)。
   `__feed_image__` プリミティブの正規 model-pull 入口は prism tool 側。経緯は [[pr88-display-next]]。
+  → **2026-10-03 に再反転**: `feed_image` は組み込み `builtin_feed_image` として nucllei へ戻った
+  (末尾の「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」節)。
 - **builtin ライフサイクル = prune + prefix 予約**(`6063bd701`、#42)。`sync_builtin_tools()` を
   「upsert + prune」に:`builtin_` prefix を持つのに BUILTIN_TOOLS 未定義の行を起動時に削除
   (コードから外した builtin は DB からも消える。旧 `builtin_view_image` 等の orphan を残さない)。
@@ -304,6 +306,10 @@ llens から引き取った SSRF ガード (CIDR 拒否リスト) のテスト�
 
 ## 追記(2026-08-16)— 現行 builtin 一覧と attachment_text の追加
 
+> **2026-10-03 更新**: この一覧は当時の 3 本。いまは無条件が 4 本(下の 3 本 +
+> `builtin_feed_image`)、env ゲート付きが 2 本(`builtin_sandbox` / `builtin_fetch_url`)。
+> 末尾の「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」節を見ること。
+
 無条件に載る builtin は 3 本(**加えて #114 以降は env ゲート付きの `builtin_sandbox`**。
 真実源は `nucllei/builtin_tools/__init__.py` の BUILTIN_TOOLS):
 
@@ -478,7 +484,8 @@ ken 決定: モデルに見える tool の引数は意味を固定する — **`
   - 取り込み名は URL の basename(decode 済み)。旧実装の Content-Disposition 優先は無くなった
     (`LoadedRef` が応答ヘッダを持たない — 要るなら resolver 側に足す)。
 - **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50)。失敗は `RefError.code` で
-  言い分ける(`_explain_ref_error`。配備層 2 tool と同じ code・同じ言い方)。
+  言い分ける(`_explain_ref_error`。配備層 2 tool と同じ code・同じ言い方 — 同日中に 3 コピーを
+  `utils/ref_errors.py` 1 本にまとめ、2 tool も builtin へ。末尾の節)。
 - **sandbox から既に見えている物はコピーしない**: `image_refs.mounted_path_for_url(url)` が
   「解決先が file backend で実体が `/mnt` 配下」のときそのパスを返し、tool は取り込まずに
   パスを案内する(cage の図・原本 = `EXT_UPSTREAMS=cage=file:///mnt/cage`)。URL → パスの
@@ -769,6 +776,10 @@ docker 帯以外の LAN を全部取れ、redirect を 3 回まで追った)。k
 
 llens への申し送り(配備層):
 
+> **2026-10-03 更新**: 下の 2 項目(`fetch_url._link_roots` の intranet 対応・ERROR 文の reason
+> 追加)は、同日中に `fetch_url` が `builtin_fetch_url` として nucllei へ移ったので **nucllei 側の
+> 仕事になった**(末尾の節)。llens に残る申し送りは `.env` の範囲設定だけ。
+
 - compose / `.env` に範囲を足す(環境ごとに値が違う。staging の例):
 
   ```
@@ -794,3 +805,74 @@ llens への申し送り(配備層):
   引けない名前 / 未設定は従来どおり / 名前空間の優先 / redirect 3 回・4 回目・範囲外への転送・
   配信元への転送 / 配信元は辿らない / 上限・404・5xx・不達 / `route_of_url` の形 /
   起動 WARNING)、`test_builtin_sandbox.py`(範囲内の取り込みと redirect / 固定文)。
+
+## 改訂(2026-10-03、feed_image / fetch_url の builtin 化)— 配備層 2 tool を nucllei へ
+
+ken 決定(2026-10-03)。prism-hu/llens の custom tool `nucllei/tools/feed_image.py` /
+`fetch_url.py` を、nucllei の組み込み **`builtin_feed_image`** / **`builtin_fetch_url`** へ移した
+(`nucllei/builtin_tools/`)。関数名は `feed_image` / `fetch_url` のまま。2026-07-22 節で
+「view_image は builtin から撤去し prism tool `feed_image` へ」とした判断の**再反転**で、
+#114(sandbox)と同じ理由構造。英語の正文は `README_API.md` §5.7(一覧)と §3.8(固定文の節)。
+
+### なぜ移すか
+
+- **規則は既に nucllei にある**: 参照の解決(resolve_url / resolve_path / file_id_of_url)・
+  許可先(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES`)・院内の範囲(`EXT_INTRANET_CIDRS`)・redirect・
+  サイズ上限・リンクのルート(`route_of_url`)は全部 `utils/image_refs.py` / `utils/ext_upstreams.py`
+  が持つ(#139 → #141 で寄せきった)。llens に残っていた 2 tool は「resolver を呼んで結果を
+  文にする殻」だけだった。
+- **殻が repo を跨ぐと規則が二重になる**: `_link_roots` が `/ext/{name}/…` の分解・
+  `match_public_base` を自前で複製していた(上の「参照の規則の改訂」節)、ERROR 文の出し分けが
+  `_explain_ref_error` として feed_image / fetch_url / send_to_workspace の **3 コピー**にあって
+  同じ入力に違う文面を返した、`EXT_INTRANET_CIDRS` を足すたび llens 側に「申し送り」が要った
+  (上の節の `_link_roots` / reason 追加)。
+- **版ずれの分岐が消える**: llens の tool は `resolve_url` / `file_id_of_url` の無い旧 nucllei を
+  try/except で検出して「この nucllei の版では使えない」の固定文を返していた(`_OLD_RESOLVER`)。
+  builtin は nucllei と同じ tag で出荷されるので、この種の交渉が要らない(#114 の「出荷単位が
+  境界」と同じ)。
+- **院内固有物が無い**: 2 tool に LLENS の知識はない(許可先・原本ホスト・院内の範囲は env の値、
+  「doc に収録済みの資料は fetch_url で取らない」等の使い分けは prompt / skill の文)。
+
+### 何が nucllei に来て、何が llens に残るか
+
+| | 帰属 | 実体 |
+|---|---|---|
+| tool(LLM 向け表面・検証・文面) | **nucllei の builtin** | `nucllei/builtin_tools/` の `builtin_feed_image` / `builtin_fetch_url` |
+| ERROR 文(形の固定文 + `RefError.code` / `reason` の言い分け) | **nucllei** | `nucllei/utils/ref_errors.py` 1 本(旧 3 コピーを統合。**文面は変えていない**。`send_to_workspace` も同じ関数を使う) |
+| env の実値(EXT_* を compose で渡す)・prompt / skill・配備固有の知識 | 配備層 `prism-hu/llens` | compose / `.env` / `nucllei/prompts/` / `nucllei/skills/` |
+
+### 固定した設計(再決定しない)
+
+- **id とゲート**: `builtin_feed_image` は**常時登録**(file_id / path 経路は `/ext` 設定が無くても
+  動く)。`builtin_fetch_url` は **`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` の
+  いずれかが設定されているときだけ登録**(3 つとも空なら解決できる URL が無い — 載っていて必ず
+  失敗する builtin より、無い方がよい。`SANDBOX_URL` → `builtin_sandbox` と同じ型。未設定なら
+  起動時 prune で DB からも消える、#42)。
+- **引数**: `feed_image(url | path | file_id, filename?, pages?)` / `fetch_url(url, query?, offset?,
+  limit?, max_mb?)`。参照の規則(#141)は不変 — `url` = 絶対 URL か同一サーバの `/ext/…`・
+  `/api/v1/files/{id}/content`、`path` = sandbox の絶対パス、`file_id` = 添付・生成物。
+  **解釈は引数名だけ**で決め、値の形で読み替えない。
+- **valve は維持**(admin が DB で編集できる tool valve): feed_image `max_image_mb=8` /
+  `max_pages=3`、fetch_url `max_fetch_mb=25` / `max_fetch_mb_ceiling=200` / `max_output_chars=40000` /
+  `pdf_text_char_threshold=100`。許可先の valve は持たない(真実源は env — 2026-09-07 レビューの
+  「valve と docstring の許可先が割れる」を再発させない)。
+- **HTML の平文化は lxml で汎用**: charset は Content-Type にあればそれ、無ければ utf-8
+  (自動判定はしない — his-info で数ページだけ別 encoding に推定され全文化けた実測、llens 時代の
+  メモ)。HTML に markitdown は通さない(レイアウト table をそのまま Markdown 表に起こして
+  膨れる — his-info の実測で markitdown 191K 字 vs 自前変換 70K 字)。PDF のテキスト層は markitdown。
+- **文面は不変**: `ref_errors.py` へ統合しても ERROR 文は 1 文字も変えない(prompt / skill /
+  既存テストが文面を見ている)。
+
+### 経緯の対応
+
+- 2026-07-21: view_image を builtin 化(#89)→ 2026-07-22: 撤回して prism tool `feed_image` へ
+  (「権限チェックは owner チェックで足りるので builtin である必然性が無い」)→ **2026-10-03: 戻す**。
+  当時の論点は「builtin でなくても書ける」だったが、今回の論点は「規則が nucllei にあるのに殻だけ
+  外に置くと二重になる」で、別の基準。
+- 2026-08-26 / 09-04 / 09-07 / 10-03 の llens 側の実測知見(原本 PDF の feed、拡張子でなく
+  content-type / magic bytes で種別判定、valve でなく env を真実源に、utf-8 決め打ち)は
+  各 builtin の dev コメントに持ち込んで保存する(llens の docstring が spec だった)。
+- llens 側: `nucllei/tools/feed_image.py` / `fetch_url.py` は撤去(sync 対象から外す。sandbox と
+  同じく custom の DB 行は `nuc-sync` が prune しないので、既存配備では旧 custom tool の手削除と
+  preset の `meta.toolIds` を `builtin_feed_image` / `builtin_fetch_url` に張り替える admin 作業が要る
+  — [[dev-environment]] の 2026-07-22 追補と同じ罠)。

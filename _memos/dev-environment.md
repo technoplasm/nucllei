@@ -291,6 +291,12 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      **向き先の valve は無い**(`sandbox_url` は 2026-09-05 に廃止 — env のみ)。
      旧 dev DB に `sandbox_url` 行が残っていても無視されるだけで、掃除は要らない。
    - preset への接続(`meta.toolIds` に `builtin_sandbox`)は必要。E2E スクリプトが冪等に張る。
+   - **同型のゲートが `builtin_fetch_url` にもある**(2026-10-03): `EXT_UPSTREAMS` /
+     `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のどれか 1 つでも設定して起動すれば生え、
+     3 つとも空なら prune で消える。`builtin_feed_image` は無条件(file_id / path 経路は
+     `/ext` 設定なしで動く)。dev で院内 Web の代わりに試すなら、ローカルの http サーバを
+     `EXT_UPSTREAMS=x=http://127.0.0.1:<port>` で登録するのが手軽(vite dev の proxy に
+     `/ext` が無い件は [[builtin-tools]] の該当節)。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
      `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは
      `docker build -t nucllei-sandbox:dev ./sandbox`、公開は **`127.0.0.1:13302->8000`**
@@ -364,6 +370,12 @@ NUCLLEI_ORIGIN=http://localhost:3000 python3 scripts/nucllei/sync.py tools/medic
   接続先(外部サービスの URL 等)は生き残る。`access_control` も現状 echo で不変
 - **`tools/sandbox` はもう sync 対象に無い**(#114、2026-09-03)。sandbox tool は nucllei の
   組み込み `builtin_sandbox` になり、llens 側の custom tool は撤去された
+- **`tools/feed_image` / `tools/fetch_url` も sync 対象に無い**(2026-10-03)。組み込み
+  `builtin_feed_image`(常時)/ `builtin_fetch_url`(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` /
+  `EXT_INTRANET_CIDRS` のどれかを設定した起動で生える)になった。dev DB に旧 custom の
+  `feed_image` / `fetch_url` 行が残っていれば手削除し、preset の `meta.toolIds` を builtin id に
+  張り替える(下の 2026-07-22 追補と同じ罠 — `nuc-sync` は custom を prune しない)。
+  詳細は [[builtin-tools]]「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」
 - **配線(preset の meta.toolIds / filterIds / skillIds)は sync.py の責務外** — UI か
   手 API で行う。nucllei 側の fixture 配線だけは `dev/tools/seed.py` が持つ
 - `prompts/llens-*.md` は同 id の preset の `params.system` を**全文置換**する。
@@ -494,6 +506,9 @@ dev 実機(:3000)に prism ツールを載せて検証したときの罠と手�
 - **preset の toolIds は生きた id のみ**。dead id を残すと "tool not available" になる
   (実害: `feed_image` 未登録 + `view_image` dead で feed_image が呼べず、モデルが画像内容を捏造)。
   現行の正: `view_image`→`feed_image`、`doc`→`doc_tool` に差し替え済み。
+  ※ **2026-10-03 更新**: `feed_image` は custom ではなく組み込み `builtin_feed_image` になった
+  (`fetch_url` も `builtin_fetch_url`)。toolIds に書くのは builtin id。`nuc-sync` で入れる
+  ものではない。
 - **改名・撤去された custom tool は手削除**。`nuc-sync` は custom を prune しないので、旧
   `view_image` / `doc` の DB 行が残る。builtin の prune(#42)は `builtin_` prefix 専用で custom は対象外。
   admin API で `DELETE /api/v1/tools/id/{id}/delete`(builtin でなければ通る)。

@@ -248,6 +248,7 @@ separate reasoning block.
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                    |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                      |
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)      |
+| `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS`    | env  | `""`                  | any one set gates `builtin_fetch_url` (§3.8, §5.7)                                    |
 
 ### 3.7 Attachments / files / storage
 
@@ -330,9 +331,15 @@ reference is interpreted; the code-side definition is the module docstring of
 
 **Fixed sentences for argument-form errors.** A tool never inspects the value
 to choose its wording; a form error states what the argument accepts in a fixed
-sentence. The sentences are public constants of `nucllei/utils/image_refs.py`,
-and **deployment-layer tools import these constants and use the same wording**
-(the text was agreed with the llens tools; change both sides together):
+sentence. The sentences are public constants of `nucllei/utils/image_refs.py`.
+The builtin tools that take reference arguments (`builtin_feed_image`,
+`builtin_fetch_url`, `builtin_sandbox` — §5.7) build their errors from them
+through one shared module, `nucllei/utils/ref_errors.py` (both the form errors
+below and the per-`RefError.code` wording), so the same input fails with the
+same text in every tool. A **deployment-layer tool that takes a `url` / `path`
+/ `file_id` argument must import the same constants and use the same wording**
+(until 2026-10-03 `feed_image` / `fetch_url` were deployment tools in llens and
+each carried its own copy of this text; the copies drifted — see §5.7):
 
 | Constant                  | Text                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -471,7 +478,8 @@ network, no filesystem, no logging — and fails with the same `code` / `reason`
 `resolve_url` would give for that input. It does **not** check existence or the
 serving scope (`EXT_FILE_SCOPES`); whether the URL can be read stays
 `resolve_url`'s job. Intended for a tool that, after a successful
-`resolve_url`, needs the root for in-page links without re-implementing the URL routing: a
+`resolve_url`, needs the root for in-page links without re-implementing the URL
+routing (`builtin_fetch_url`'s link list is built this way): a
 name with a public base → that base, whether the input was relative or absolute
 (the public URL is what a user can actually open — the `/ext` gate turns an
 upstream 3xx into a 502); otherwise relative input → `/ext/{name}`, absolute →
@@ -609,6 +617,13 @@ size, and suggest retrying with a larger `max_bytes` (e.g. twice the cap).
 | `EXT_INTRANET_CIDRS`   | env  | empty = no range   | comma-separated CIDRs declaring the deployment's **intranet range** (a bare address is a `/32` / `/128`). Absolute URLs matching no namespace are fetched directly when the host's address is inside, pinned to that address, redirects followed inside the range up to 3 times. **Differs per environment and is set in each deployment's `.env`** — e.g. `172.16.0.0/16` on a staging LAN, `10.0.0.0/8` (or a narrower segment the operators choose) on the production network; several ranges: `10.1.0.0/16,10.2.0.0/16`. Loopback, link-local, `172.17.0.0/16` etc. are always excluded (see "The intranet range"); invalid entries are dropped with a warning |
 | `EXT_FILE_SCOPES`      | env  | empty = whole root | comma-separated `name=subdir` (same format; repeat the name for several): restrict what a **file backend** serves to those directories under its root (e.g. `cage=static`). See "Serving scope" above                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `EXT_INLINE_MAX_BYTES` | env  | `26214400` (25 MB) | size cap per reference when inlining context images (URL and filesystem references alike)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+Setting **any** of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS`
+also registers the builtin `builtin_fetch_url` tool (§5.7) — with all three
+empty there is nothing a URL could resolve to, so the tool is absent rather
+than always failing (the same gate style as `SANDBOX_URL` → `builtin_sandbox`).
+`builtin_feed_image` does not depend on these: it is always registered, since
+`file_id` and `path` references work without any `/ext` configuration.
 
 ### 3.9 Audio (STT / TTS)
 
@@ -1007,21 +1022,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{name}/…`, absolute `https://…/ext/{name}/…`, or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{name}/…`, absolute `https://…/ext/{name}/…`, or one under `EXT_PUBLIC_BASES`), or a sandbox path (`/mnt/…`, `/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### 5.4 Argument & result rendering
 
@@ -1104,7 +1119,9 @@ async def read_doc(self, path: str) -> Markdown:
   PDF page, call `__feed_image__(file_id_or_ref)` (§5.3) — it is injected into
   the follow-up call; an `/ext/` URL (relative or absolute), an
   `EXT_PUBLIC_BASES` URL, a `/mnt/…` or a `/workspace/…` reference needs no File
-  (§3.8 for the reference rules).
+  (§3.8 for the reference rules). The model itself does this through the
+  builtin `feed_image` tool (§5.7); a deployment does not need a tool of its
+  own for it.
 
 ### 5.6 Access control & assignment
 
@@ -1129,13 +1146,64 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     mount it on an agent preset and a subagent (§5.8) can read materials the
     parent references by file_id without the content ever entering the parent's
     context.
+  - `builtin_feed_image` — `feed_image(url?, path?, file_id?, filename?, pages?)`:
+    shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
+    through `__feed_image__` (§5.3). Exactly one reference argument, interpreted
+    by name (§3.8): `url` = an absolute URL or a same-server `/ext/{name}/…` /
+    `/api/v1/files/{id}/content`, `path` = a sandbox absolute path (`/mnt/…`,
+    `/workspace/…`), `file_id` = an attachment or a generated file (owner
+    check in the tool; the pre-send inline step checks read access again).
+    `filename` is a substring filter on the target's name, `pages` a PDF page
+    range (`"3"`, `"4-6"`, `"1-2,7"`). The tool validates what the reference
+    resolves to — kind by content-type / magic bytes (not extension), size,
+    page count — and then only pushes the reference; **no File or Storage
+    object is created** (PDF pages are pushed as `…#page=N` references and
+    rasterised at send time). Valves: `max_image_mb` (8), `max_pages` (3).
+    Always registered.
+  - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
+    fetches one page / document by URL and returns it as plain text plus a link
+    list, for browsing intranet web that no document corpus holds. `url` is
+    resolved by the shared resolver (`resolve_url`, §3.8) and nothing else —
+    the tool has no allowlist and no on/off valve of its own; what it can reach
+    is exactly `/ext/{name}/…` (relative or on any host), URLs under
+    `EXT_PUBLIC_BASES`, URLs inside `EXT_INTRANET_CIDRS`, and this server's
+    `/api/v1/files/{id}/content` (owner check). HTML is flattened in the server
+    with lxml (generic: layout tables are not turned into Markdown tables, the
+    charset is the `Content-Type` one when present, otherwise utf-8 — no
+    detection; markitdown is **not** used for HTML); PDFs go through
+    markitdown's text layer, and a PDF whose text layer is below
+    `pdf_text_char_threshold` characters is reported as scanned so the model
+    turns to `feed_image`. The link list and the `# url` line are rewritten to
+    the URL a user can open — the `EXT_PUBLIC_BASES` root when the name has
+    one, the input's own `/ext/{name}/…` form otherwise, the page's own URL for
+    an intranet page (`route_of_url`, §3.8). `query` keeps only the body and
+    link lines containing it (substring; case- and full/half-width-insensitive);
+    `offset` / `limit` (default 8000 chars) window the text, the result naming
+    the next offset. Valves: `max_fetch_mb` (25; `max_mb` per call may raise it
+    up to `max_fetch_mb_ceiling`, 200), `max_output_chars` (40000; also caps
+    `limit`), `pdf_text_char_threshold` (100).
+    **Registered only when at least one of `EXT_UPSTREAMS` /
+    `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` is set** (§3.8); with all three
+    empty no URL could resolve, so the tool is absent (and an existing row is
+    pruned on the next boot), the same way as `builtin_sandbox` below.
+    Both tools word their failures per `RefError.code` / `reason` and the fixed
+    argument-form sentences through `nucllei/utils/ref_errors.py`, shared with
+    `send_to_workspace`. Until 2026-10-03 they were deployment-layer tools in
+    prism-hu/llens (`nucllei/tools/feed_image.py` / `fetch_url.py`); they moved
+    here because every rule they enforce (resolution, allowlist, intranet range,
+    redirects, size caps, link roots) already lived in `utils/image_refs.py`,
+    so the shells in llens only duplicated those rules and their error texts,
+    and had to carry "this nucllei version lacks X" branches. What stays in the
+    deployment is the env values, the prompts / skills that teach the model
+    when to call them, and site knowledge.
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `list_workspace` /
     `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
-    the three above, it needs an external service to be reachable — a builtin
-    that is listed but always errors would be worse than one that is absent.
+    the always-registered builtins above, it needs an external service to be
+    reachable — a builtin that is listed but always errors would be worse than
+    one that is absent.
     `SANDBOX_TOKEN` is the **optional** shared bearer token of the sandbox API
     and is _not_ part of that gate: sandbox-side authentication is opt-in, so a
     URL-only deployment still works (unauthenticated). When set, it must carry
@@ -1186,7 +1254,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     interpreted by name, as everywhere else (§3.8 reference rules): `file_id` =
     an owned attachment / generated file, `url` = a **URL** — absolute
     `http(s)://…` or same-server `/ext/{name}/…` — resolved by the shared
-    resolver (`resolve_url`), so exactly the URLs the feed tools can read:
+    resolver (`resolve_url`), so exactly the URLs `feed_image` / `fetch_url`
+    above can read:
     `/ext/{name}/…` (relative or on any host) and URLs under
     `EXT_PUBLIC_BASES`, through the `EXT_UPSTREAMS` backend with no redirect
     followed; and, when the deployment declares its intranet range

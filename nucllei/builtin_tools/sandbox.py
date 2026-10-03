@@ -274,101 +274,79 @@ def _safe_import_name(name: str) -> str:
 _NO_FILE = "レコードが無い、またはアクセス権が無い"
 
 
+def _too_large_import(u: str, err) -> str:
+    """send_to_workspace(url=) の too_large: 上限は valve (管理者の設定) で引数では上げられない。"""
+    limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
+    if err.size is None:
+        what = f"{u} は取り込みの上限{limit} を超えている (実サイズは不明)。"
+    elif err.size_exact:
+        what = (
+            f"{u} は {_human_size(err.size)} で、取り込みの上限{limit} を超えている。"
+        )
+    else:
+        # Content-Length の無い stream を打ち切った時点の受信量 = 実サイズの下限
+        what = (
+            f"{u} は少なくとも {_human_size(err.size)} あり、取り込みの上限{limit} を"
+            "超えている (実サイズは不明)。"
+        )
+    return (
+        f"ERROR: {what}sandbox には取り込めない (上限は管理者の設定で、引数では"
+        "上げられない)。リンク切れではない — ユーザーには URL をそのまま案内する "
+        "(ブラウザでは開ける)。"
+    )
+
+
 def _explain_ref_error(u: str, err) -> str:
     """resolver の RefError をモデル向けの ERROR 文にする (send_to_workspace(url=) 用)。
 
-    「何が起きたか + 次にどうするか」。code の集合は `image_refs.RefError` の docstring。
-    配備層の fetch_url / feed_image と同じ code を同じ言い方で言い分ける — 「読めなかった」を
-    全部リンク切れにしない。内部名 (env 名・detail) は出さない (resolver が warning ログに残す)。
-
-    形の誤り (`unsupported_form`) は全 tool 共通の形: 固定文 `image_refs.URL_ARG_FORM`
-    (url が受ける形) + `REF_ARGS_RULE` (行き先の規則)。値を調べて文面を出し分けない —
-    言い分けは解決結果 (`code` / `reason`) だけ。
+    組み立ては全 tool 共通の `utils/ref_errors.explain_ref_error` (feed_image / fetch_url と
+    同じ code を言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool 固有の
+    言い方 (取り込みの上限は valve / 登録した配信元の redirect は辿らない / 上流に届かない)
+    だけを hints で渡す。内部名 (env 名・detail) は出さない (resolver が warning ログに残す)。
     """
-    # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
-    from nucllei.utils.image_refs import REF_ARGS_RULE, URL_ARG_FORM
+    # ref_errors → image_refs は本 module を参照する — 循環を避けて呼び出し時に引く
+    from nucllei.utils.ref_errors import RefErrorHints, explain_ref_error
 
-    code = err.code
-    if code == "too_large":
-        limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
-        if err.size is None:
-            what = f"{u} は取り込みの上限{limit} を超えている (実サイズは不明)。"
-        elif err.size_exact:
-            what = f"{u} は {_human_size(err.size)} で、取り込みの上限{limit} を超えている。"
-        else:
-            # Content-Length の無い stream を打ち切った時点の受信量 = 実サイズの下限
-            what = (
-                f"{u} は少なくとも {_human_size(err.size)} あり、取り込みの上限{limit} を"
-                "超えている (実サイズは不明)。"
-            )
-        return (
-            f"ERROR: {what}sandbox には取り込めない (上限は管理者の設定で、引数では"
-            "上げられない)。リンク切れではない — ユーザーには URL をそのまま案内する "
-            "(ブラウザでは開ける)。"
-        )
-    if code == "not_found":
-        return (
-            f"ERROR: {u} は存在しない (404 / ファイル無し)。リンク切れとして案内する。"
-        )
-    if code == "upstream_status":
-        if err.status is not None and 300 <= err.status < 400:
-            # 院内の一般 URL は redirect を辿る (範囲内で 3 回まで) — 辿れなかった内訳は
-            # reason。登録した配信元 (reason 無し) は辿らない
-            if err.reason == "redirect_outside":
-                return (
-                    f"ERROR: {u} は redirect ({err.status}) を返したが、転送先が院内の範囲の外"
-                    " (またはこの配備が取得できない URL) なので辿らなかった。"
-                    "ユーザーには URL をそのまま案内する。"
-                )
-            if err.reason == "too_many_redirects":
-                return (
-                    f"ERROR: {u} は redirect を 3 回を超えて繰り返した (転送のループか、"
-                    "ログインが要るページ)。ユーザーには URL をそのまま案内する。"
-                )
-            return (
-                f"ERROR: {u} は redirect ({err.status}) を返した。登録した配信元の redirect は"
-                "辿らないので、ディレクトリではなくファイルやページを直接指す URL を渡すこと。"
-            )
-        return (
-            f"ERROR: {u} の上流が {err.status if err.status is not None else 'エラー'} を"
-            "返した。時間を置いて再試行するか、ユーザーに URL をそのまま案内する。"
-        )
-    if code == "upstream_unreachable":
-        if err.reason == "unresolvable":
-            return (
-                f"ERROR: {u} のホスト名を解決できない (この環境に DNS が無い場合は、"
-                "ホスト名ではなく IP アドレスで指定する)。"
-            )
-        return (
-            f"ERROR: {u} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
+    hints = RefErrorHints(
+        too_large=_too_large_import,
+        unexplained="ERROR: {ref} を取得できない ({code})。",
+        redirect_next=(
+            "登録した配信元の redirect は辿らないので、ディレクトリではなくファイルや"
+            "ページを直接指す URL を渡すこと。"
+        ),
+        redirect_outside=(
+            "ERROR: {ref} は redirect ({status}) を返したが、転送先が院内の範囲の外"
+            " (またはこの配備が取得できない URL) なので辿らなかった。"
+            "ユーザーには URL をそのまま案内する。"
+        ),
+        too_many_redirects=(
+            "ERROR: {ref} は redirect を 3 回を超えて繰り返した (転送のループか、"
+            "ログインが要るページ)。ユーザーには URL をそのまま案内する。"
+        ),
+        unresolvable=(
+            "ERROR: {ref} のホスト名を解決できない (この環境に DNS が無い場合は、"
+            "ホスト名ではなく IP アドレスで指定する)。"
+        ),
+        unreachable=(
+            "ERROR: {ref} の上流に届かない (この配備からは到達できない、または一時的な障害)。"
             "ユーザーには URL をそのまま案内する (ブラウザでは開けることがある)。"
-        )
-    if code == "unknown_upstream":
+        ),
         # 内訳は resolver の reason (解決結果) で言い分ける。値は見ない
-        if err.reason == "unknown_name":
-            what = "は許可先の外 (その配信元はこの配備に設定されていない)。"
-        elif err.reason == "not_ext_form":
-            what = "は `/ext/<配信元>/<パス>` の形でない。"
-        elif err.reason == "outside_intranet":
+        unknown_upstream={
+            "unknown_name": "は許可先の外 (その配信元はこの配備に設定されていない)",
+            "not_ext_form": "は `/ext/<配信元>/<パス>` の形でない",
             # 院内の範囲は設定されているが、ホストのアドレスがその外 (インターネット等)
-            what = (
+            "outside_intranet": (
                 "は院内の範囲の外 (この配備が院内として設定したアドレス範囲に無い)。"
-                "外部の Web は取りに行かない。"
-            )
-        else:
-            what = (
+                "外部の Web は取りに行かない"
+            ),
+            None: (
                 "は許可先の外 (この配備が取得を許可している上流の URL ではなく、院内の"
-                "範囲も設定されていない)。任意の Web / LAN の URL は取りに行かない。"
-            )
-        return f"ERROR: {u} {what}{URL_ARG_FORM}"
-    if code == "traversal":
-        return (
-            f"ERROR: {u} は許可された範囲の外を指している (上の階層への参照 `..` や"
-            f"制御文字を含む)。{URL_ARG_FORM}"
-        )
-    if code == "unsupported_form":
-        return f"ERROR: {u} は URL として解決できない。{URL_ARG_FORM} {REF_ARGS_RULE}"
-    return f"ERROR: {u} を取得できない ({code})。"
+                "範囲も設定されていない)。任意の Web / LAN の URL は取りに行かない"
+            ),
+        },
+    )
+    return explain_ref_error(u, err, arg="url", hints=hints)
 
 
 def _explain_mount_error(abs_path: str, err) -> str:

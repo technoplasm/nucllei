@@ -395,6 +395,17 @@ tool も nucllei 製品側に移り、tool は env ゲート付きの組み込�
 「立てるか / quota / 開放範囲 / system prompt」は配備層(llens)の判断で、nucllei が持つのは
 image とその中身の設計 + LLM 向け表面だけ。`SANDBOX_URL` 未設定の配備では tool 自体が生えない。
 
+**追記(2026-10-03)**: 同じ反転が **`feed_image` / `fetch_url`** にも起きた。2026-07-22 に
+prism tool へ寄せた `feed_image`(上の #89 節 6 の view_image の後継)と、院内 Web を 1 ページずつ
+読む `fetch_url` は、組み込み **`builtin_feed_image`**(常時)/ **`builtin_fetch_url`**
+(`EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / `EXT_INTRANET_CIDRS` のいずれかが設定されたとき)に
+なった。理由は sandbox と同型 — 参照の解決・許可先・院内の範囲・サイズ上限の規則は全部
+`utils/image_refs.py` にあり、llens の tool は殻だけで、殻が repo を跨ぐと ERROR 文が 3 コピー
+(feed_image / fetch_url / send_to_workspace)に割れた。文面は `utils/ref_errors.py` 1 本に統合
+(文面は不変)。詳細は [[builtin-tools]]「改訂(2026-10-03、feed_image / fetch_url の builtin 化)」。
+#89 節 5 の「画像判定・上限は呼び出し側 tool の責務」は builtin_feed_image が担う(valve
+`max_image_mb` / `max_pages`)。③gate・PDF→VLM(filter)は引き続き prism 層。
+
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
 
 マイクの音声入力は、区切りが 2 つ以上あった録音を 1 本(長ければ約 60 分ごとに複数本)の音声と
@@ -415,6 +426,8 @@ image とその中身の設計 + LLM 向け表面だけ。`SANDBOX_URL` 未設�
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
   ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、
   ランタイムと設計文書 = 本 repo の `sandbox/` と `sandbox/README.md`。
+  ※ **`feed_image` / `fetch_url` も prism 側に無い**(2026-10-03 で移設): 組み込み
+  `builtin_feed_image` / `builtin_fetch_url`(`nucllei/builtin_tools/`)。
 - 現状 fork のフロー(2026-07-08 第2セッション後): upload=`routers/files.py` → `utils/attachment.py`
   (Attachment dispatch) / 抽出=**prism の Attachment Function が docling 直叩き**(fork の
   `process_file`/`extract_file_text` は撤去済み) / 注入=`utils/middleware.py::chat_completion_files_handler`
