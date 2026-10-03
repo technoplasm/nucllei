@@ -273,6 +273,28 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
 
         out = Tools().grep_history("京都", __user__={"id": "owner"})
         assert [c["title"] for c in out] == ["旅行の計画"]
+        # 一致箇所の抜粋 (発言者 + 前後の文脈) が付く — grep_doc と同じく何がヒットしたか見せる
+        assert out[0]["matches"] == [{"role": "user", "excerpt": "京都に行きたい"}]
+
+    def test_grep_history_excerpts_are_bounded_and_fold_width_case(self):
+        """抜粋は前後 60 文字で切り (… を付ける)、1 チャット最大 3 件。照合は NFKC + casefold
+        (全角半角・大小文字を無視) で、長さが変わらないときは原文のまま見せる。"""
+        from nucllei.builtin_tools.history import Tools
+
+        long = "あ" * 100 + "Report" + "い" * 100
+        self._new_chat(
+            "owner",
+            "長い",
+            [("user", long), ("assistant", "report 1\nreport 2\nreport 3\nreport 4")],
+        )
+        out = Tools().grep_history("report", __user__={"id": "owner"})
+        assert len(out) == 1 and len(out[0]["matches"]) == 3
+        first = out[0]["matches"][0]
+        assert first["role"] == "user" and first["excerpt"].startswith("…")
+        assert "Report" in first["excerpt"] and first["excerpt"].endswith("…")
+        assert len(first["excerpt"]) <= 60 * 2 + len("Report") + 2
+        assert out[0]["matches"][1]["role"] == "assistant"
+        assert "report 1 report 2" in out[0]["matches"][1]["excerpt"]
 
     def test_history_requires_user_context(self):
         import pytest

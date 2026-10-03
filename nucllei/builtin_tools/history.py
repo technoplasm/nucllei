@@ -8,13 +8,66 @@ OWUI の Chats モデル(DB)に密結合するため fork の組み込みツー�
 """
 
 import time
+import unicodedata
 from typing import Optional
 
 from nucllei.models.chats import Chats
-from nucllei.utils.misc import get_message_list, get_messages_content
+from nucllei.utils.misc import (
+    get_content_from_message,
+    get_message_list,
+    get_messages_content,
+)
 from nucllei.utils.tool_render import Markdown
 
 MAX_LIMIT = 50
+# grep_history の抜粋: 1 チャットあたりの最大件数と、一致箇所の前後に付ける文字数
+MAX_MATCHES_PER_CHAT = 3
+MATCH_CONTEXT_CHARS = 60
+
+
+def _fold(s: str) -> str:
+    """照合用の正規化 (NFKC + casefold)。全角半角・大小文字の違いを無視する (DB 側の検索と揃える)。"""
+    return unicodedata.normalize("NFKC", s or "").casefold()
+
+
+def _excerpts(chat, query: str) -> list[dict]:
+    """チャットの現在の枝のメッセージから、query を含む箇所を前後 MATCH_CONTEXT_CHARS 文字つきで
+    最大 MAX_MATCHES_PER_CHAT 件抜く (grep_doc と同じく、一致箇所を見せる — ken 2026-10-03:
+    タイトルと日時だけでは何がヒットしたか分からない)。NFKC + casefold で照合するので、
+    位置は正規化後の文字列で取り、表示も正規化後の文字列から切る (長さが変わる文字があるため)。"""
+    history = (chat.chat or {}).get("history", {})
+    messages_map = history.get("messages", {})
+    current_id = history.get("currentId")
+    if not (current_id and messages_map):
+        return []
+    try:
+        message_list = get_message_list(messages_map, current_id) or []
+    except Exception:  # noqa: BLE001 — 壊れた履歴は抜粋なし (一覧には残す)
+        return []
+    needle = _fold(query)
+    out: list[dict] = []
+    for message in message_list:
+        text = get_content_from_message(message) or ""
+        folded = _fold(text)
+        pos = folded.find(needle)
+        while pos >= 0 and len(out) < MAX_MATCHES_PER_CHAT:
+            start = max(0, pos - MATCH_CONTEXT_CHARS)
+            end = min(len(folded), pos + len(needle) + MATCH_CONTEXT_CHARS)
+            # 正規化で長さが変わらなければ原文から切る (大小文字・全角半角を元のまま見せる)
+            source = text if len(text) == len(folded) else folded
+            excerpt = source[start:end].replace("\n", " ")
+            out.append(
+                {
+                    "role": message.get("role", ""),
+                    "excerpt": ("…" if start > 0 else "")
+                    + excerpt
+                    + ("…" if end < len(folded) else ""),
+                }
+            )
+            pos = folded.find(needle, pos + max(1, len(needle)))
+        if len(out) >= MAX_MATCHES_PER_CHAT:
+            break
+    return out
 
 
 def _fmt_time(epoch: Optional[int]) -> str:
@@ -95,7 +148,9 @@ class Tools:
         limit: int = 20,
         __user__: Optional[dict] = None,
     ) -> list | str:
-        """自分のチャット履歴をテキスト検索し、ヒットした一覧を返す。
+        """自分のチャット履歴をテキスト検索し、ヒットした一覧を返す。各ヒットには一致箇所の
+        抜粋 (`matches`: 発言者と前後の文脈、最大 3 件) が付くので、どのチャットが目的の物かは
+        抜粋で判断し、全文が要るときだけ read_history で読む。
 
         :param query: 検索文字列(タイトル・本文を対象)
         :param limit: 返す件数の上限(省略時 20)
@@ -107,14 +162,18 @@ class Tools:
             return "検索文字列を指定してください。"
 
         chats = Chats.get_chats_by_user_id_and_search_text(user_id, query, limit=limit)
-        items = [
-            {
-                "chat_id": c.id,
-                "title": c.title,
-                "updated_at": _fmt_time(c.updated_at),
-            }
-            for c in chats
-        ]
+        items = []
+        for c in chats:
+            matches = _excerpts(c, query)
+            items.append(
+                {
+                    "chat_id": c.id,
+                    "title": c.title,
+                    "updated_at": _fmt_time(c.updated_at),
+                    # 本文に一致が無い (タイトルだけの一致) は空 — モデルにはその旨が分かる
+                    "matches": matches,
+                }
+            )
         if not items:
             return f"「{query}」に一致するチャットは見つかりませんでした。"
         return items

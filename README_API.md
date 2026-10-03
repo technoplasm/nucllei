@@ -1216,7 +1216,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 - **Builtin tools** ship with the server (`builtin_` id prefix). Only their ACL
   is editable. Currently:
   - `builtin_history` — `list_history` / `read_history` / `grep_history` over
-    the calling user's own chats.
+    the calling user's own chats. `grep_history` hits carry `matches` (up to 3
+    per chat: `{role, excerpt}` with ±60 chars of context around the match,
+    NFKC + casefold matching; empty when only the title matched — 2026-10-03).
   - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
     issued in the current chat, metadata only.
   - `builtin_attachment_text` — `read_attachment(file_id, offset?, max_chars?)`:
