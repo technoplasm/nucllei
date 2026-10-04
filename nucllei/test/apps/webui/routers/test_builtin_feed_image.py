@@ -417,6 +417,47 @@ def test_pdf_path_pages_beyond_the_end_are_clipped(monkeypatch):
     result, fed, _r = _run(monkeypatch, path=ref, pages="4-9", n_pages=5)
     assert fed == [f"{ref}#page=4", f"{ref}#page=5"]
     assert not result.startswith("ERROR")
+    # 落とした分は 1 行添える (旗なし)
+    assert result.endswith("\n  指定のうち p.6-9 は範囲外なので見ていない。")
+
+
+def test_pdf_pages_entirely_out_of_range_is_an_outcome_not_every_page(monkeypatch):
+    """#145: 指定が 1 ページも当たらないとき、全ページを黙って積まない (旧挙動のバグ)。
+    範囲外 = outcome、ページ範囲として読めない指定 = call。file 経路 (file_id=) も同じ。"""
+    ref = "/ext/cage/static/kansen_manual/docs/10-14.pdf"
+    mod, _resolver = _install(monkeypatch, TABLE, n_pages=10)
+
+    def run(**kwargs):
+        fed: list[str] = []
+        err = asyncio.run(
+            call_error(
+                mod.Tools().feed_image(
+                    __user__={"id": "u1"}, __feed_image__=fed.append, **kwargs
+                )
+            )
+        )
+        assert fed == []
+        return err
+
+    err = run(path=ref, pages="12-15")
+    assert err.kind == "outcome"
+    assert err.text == (
+        f"ERROR: {ref} は全 10 ページで、指定の 12-15 は範囲外。"
+        "次の手: 1-10 の範囲で pages を付けて呼び直す。"
+    )
+    # `#page=N` の fragment も同じ (pages 未指定時は fragment が pages になる)
+    assert run(path=f"{ref}#page=11").kind == "outcome"
+    err = run(path=ref, pages="abc")
+    assert err.kind == "call" and "読めない" in err.text
+
+    rec = _Rec("f1", "u1", "scan.pdf", "application/pdf")
+    monkeypatch.setattr(
+        mod, "Files", types.SimpleNamespace(get_file_by_id=lambda fid: rec)
+    )
+    monkeypatch.setattr(mod, "_read_raw", lambda r: b"%PDF-1.7 fake")
+    err = run(file_id="f1", pages="99")
+    assert err.kind == "outcome"
+    assert err.text.startswith("ERROR: scan.pdf は全 10 ページで、指定の 99 は範囲外。")
 
 
 def test_page_fragment_in_path_is_honoured(monkeypatch):

@@ -249,11 +249,23 @@ def _kind(fname: Optional[str], content_type: Optional[str]) -> Optional[str]:
     return None
 
 
-def _parse_pages(spec: Optional[str], n_pages: int) -> list[int]:
-    """ "1-10" / "3" / "1-3,7" を 0-origin のページ番号リストへ。"""
+def _page_span(lo: int, hi: int) -> str:
+    return f"p.{lo}" if lo == hi else f"p.{lo}-{hi}"
+
+
+def _parse_pages(
+    spec: Optional[str], n_pages: int
+) -> tuple[list[int], list[str], bool]:
+    """ "1-10" / "3" / "1-3,7" を 0-origin のページ番号リストへ。
+
+    戻り値は (積むページ, 範囲外で落とした指定 (`p.12-15` 等), 読める指定が 1 つでもあったか)。
+    spec 無しは全ページ。範囲外を黙って全ページに読み替えない (#145 — 旧: 指定が 1 ページも
+    当たらないと全ページを積んでいた)。"""
     if not spec:
-        return list(range(n_pages))
+        return list(range(n_pages)), [], True
     out: list[int] = []
+    dropped: list[str] = []
+    parsed = False
     for part in str(spec).replace(" ", "").split(","):
         if not part:
             continue
@@ -265,10 +277,17 @@ def _parse_pages(spec: Optional[str], n_pages: int) -> list[int]:
                 lo = hi = int(part)
         except ValueError:
             continue
+        if lo > hi:
+            continue
+        parsed = True
+        if lo < 1:
+            dropped.append(_page_span(lo, min(hi, 0)))
+        if hi > n_pages:
+            dropped.append(_page_span(max(lo, n_pages + 1), hi))
         for p in range(max(1, lo), min(n_pages, hi) + 1):
             if (p - 1) not in out:
                 out.append(p - 1)
-    return out or list(range(n_pages))
+    return out, dropped, parsed
 
 
 def _iter_context_files(__files__, __metadata__):
@@ -596,8 +615,20 @@ class Tools:
         )
 
     def _feed_pdf_pages(self, ref: str, label: str, n_pages: int, pages, feed) -> str:
-        """PDF の指定ページを `ref#page=N` の参照で順に push する (File は作らない)。"""
-        wanted = _parse_pages(pages, n_pages)
+        """PDF の指定ページを `ref#page=N` の参照で順に push する (File は作らない)。
+        指定が 1 ページも当たらなければ ToolOutcome (読めない指定だけなら ToolCallError)、
+        一部だけ当たればそのページを積んで、落とした分を結果に 1 行添える (旗なし)。"""
+        wanted, dropped, parsed = _parse_pages(pages, n_pages)
+        if not parsed:
+            raise ToolCallError(
+                f"pages {pages!r} をページ範囲として読めない",
+                '"3" / "4-6" / "1-2,7" の形で pages を付けて呼び直す。',
+            )
+        if not wanted:
+            raise ToolOutcome(
+                f"{label} は全 {n_pages} ページで、指定の {pages} は範囲外",
+                f"1-{n_pages} の範囲で pages を付けて呼び直す。",
+            )
         limit = self.valves.max_pages
         truncated = len(wanted) > limit > 0
         if truncated:
@@ -606,6 +637,8 @@ class Tools:
             feed(with_page(ref, i + 1))
 
         msg = f"- {label} の p.{', p.'.join(str(i + 1) for i in wanted)} を自分の目に入れた (全 {n_pages} ページ。ユーザーには表示されない)"
+        if dropped:
+            msg += f"\n  指定のうち {', '.join(dropped)} は範囲外なので見ていない。"
         if truncated:
             msg += (
                 f"\n  上限 {limit} ページで打ち切った。{NEXT}他のページが要るなら pages で"

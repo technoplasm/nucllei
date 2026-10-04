@@ -1205,6 +1205,11 @@ ken 指示「ツールのエラーも結果として表示できるように。�
     行(画像でも PDF でもない / 実体が読めない / 大きすぎる / PDF が開けない)が緑だった。文面は変えず、
     `_feed_path` が同じ場面で raise する種別(call / fatal / outcome / failure)の旗。複数の添付 PDF は
     1 件も目に入らなかったときだけ(種別が揃えばそれ、混在は failure)。
+  - feed_image の `pages`(バグ修正): 指定が 1 ページも当たらないと**全ページを黙って積んでいた**。
+    当たらない = `ToolOutcome`(`{名前} は全 N ページで、指定の {pages} は範囲外。次の手: 1-N の範囲で
+    pages を付けて呼び直す。`。`#page=N` の fragment も同じ)、ページ範囲として読めない指定 =
+    `ToolCallError`、一部だけ当たる = そのページを積み「指定のうち p.12-15 は範囲外なので見ていない。」を
+    1 行添える(旗なし)。
   - 据え置き(検索・一覧の「0 件」は正当な答え): grep_history / grep_chat_files の一致なし、
     list_history / list_chat_files の「無い」、read_history の「読み出せるメッセージが無い」(チャットは
     ある)。fetch_url の画像 / テキスト層の無い PDF は feed_image への誘導で行き止まりではないので緑のまま
