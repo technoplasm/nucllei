@@ -30,20 +30,22 @@ sandbox のファイルを利用者に見せられる形にする `fetch_from_wo
 失敗する(`unsupported_form`)。救済はしない — 取り違えを吸収すると、名前が意味を
 持たなくなる。
 
-**エラーに添える固定文**: 形の誤りには、値を調べて文面を出し分けず、その引数が受ける形を
-固定の文で添える(下の定数 `URL_ARG_FORM` / `PATH_ARG_FORM` / `WORKSPACE_PATH_ARG_FORM` /
-`FILE_ID_ARG_FORM`。builtin と配備層の tool が同じ文を import して使う)。行き先は
-tool ごとに書かず、**どの tool でも同じ 1 文** `REF_ARGS_RULE` として持つ。組み立ては
-全 tool 共通:
+**エラーに添える固定文**: 形の誤りには、その引数が受ける形を固定の文で添える(下の定数
+`URL_ARG_FORM` / `PATH_ARG_FORM` / `WORKSPACE_PATH_ARG_FORM` / `FILE_ID_ARG_FORM`。builtin と
+配備層の tool が同じ文を import して使う)。行き先は tool ごとに書かず、**どの tool でも同じ
+1 文** `REF_ARGS_RULE` として持つ。`REF_ARGS_RULE`(と file_id の `FILE_ID_ARG_FORM`)は
+**値が別の引数の種類に見えるとき(取り違え)だけ**添える — `ref_args_rule_for`(2026-10-04
+llens staging: 相対パスの path にまで取り違えの規則が付き、関係の無い定型文になっていた)。
+値の中身で解決や救済を変えるのではなく、添える文を誤りの種類で選ぶだけ。組み立ては全 tool 共通:
 
 - url が URL として解決できない:
-  `ERROR: <値> は URL として解決できない。` + `URL_ARG_FORM` + ` ` + `REF_ARGS_RULE`
+  `ERROR: <値> は URL として解決できない。` + `URL_ARG_FORM`(+ ` ` + `REF_ARGS_RULE`)
 - path が sandbox のパスの形でない:
   `ERROR: <値> は sandbox のパスの形でない。` + `PATH_ARG_FORM`(workspace だけを扱う tool は
-  `WORKSPACE_PATH_ARG_FORM`)+ ` ` + `REF_ARGS_RULE`
-- file_id が引けない:
-  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
-  (「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない)
+  `WORKSPACE_PATH_ARG_FORM`)(+ ` ` + `REF_ARGS_RULE`)
+- file_id が引けない: `ref_errors.file_id_error`(「無い」と「権限が無い」を言い分けない —
+  存在の有無を漏らさない。区別できないことを事実の文で言い、次の手で file_id の確かめ方と
+  ユーザーへの伝え方を言う)
 
 解決結果(`RefError.code` / `reason`)に基づく言い分け(存在しない / サイズ超過 / redirect /
 上流 status / 届かない / 許可先の外 / 配信範囲外)は別で、各 code の文面で言う(値は見ない)。
@@ -288,6 +290,42 @@ REF_ARGS_RULE = (
     "URL は url、sandbox のパスは path、添付・生成物は file_id に、受け取った形のまま渡す "
     "(値を書き換えて別の引数に入れ直さない)。"
 )
+
+# file の id(Files のレコード id は uuid4 — routers/files・sandbox の登録とも)
+_FILE_ID_FORM = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+# スキーム付き(`http:` `ftp:` …)か `//host` — URL のつもりで書かれた値
+_URL_LIKE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.\-]*:|//)")
+
+
+def ref_args_rule_for(arg: str, value: str) -> str:
+    """形の誤りのエラーに `REF_ARGS_RULE` を添えるか(module docstring「エラーに添える固定文」)。
+
+    添えるのは **別の引数の値を取り違えて渡したらしい** ときだけ — url に URL でない値
+    (sandbox のパス・id・ファイル名)、path に URL / 配信口 URL / id、file_id に id の形でない値。
+    値が正しい種類で形だけ崩れている(path に相対パス `work/…`・`/tmp/…`、url に `ftp://…`)
+    なら添えない — 取り違えの規則はその誤りと無関係で、正しい次の一手(受ける形)を薄める
+    (llens staging 2026-10-04: write_file の `work/…` に規則が付いていた)。添える・添えないは
+    誤りの種類で決め、tool では分けない。空の値には添えない。戻り値は規則の文か ""。
+    """
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if arg == "url":
+        mixed = not _URL_LIKE.match(v)
+    elif arg == "path":
+        mixed = bool(
+            _URL_LIKE.match(v)
+            or INTERNAL_FILE_URL_PATTERN.match(v)
+            or _FILE_ID_FORM.match(v)
+        )
+    elif arg == "file_id":
+        mixed = not _FILE_ID_FORM.match(v)
+    else:
+        mixed = False
+    return REF_ARGS_RULE if mixed else ""
+
 
 # 同一サーバの相対 URL のうち、この resolver が解決する経路の先頭。
 _EXT_URL_PREFIX = "/ext/"

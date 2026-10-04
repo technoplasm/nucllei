@@ -729,15 +729,20 @@ class TestAttachmentText(AbstractPostgresTest):
         denied = _denied("doc-2", {"id": "intruder"})
         assert "アクセス権" in denied.text
         # 「レコードが無い」と「所有者でない」は同じ文(存在の有無を漏らさない)。
-        # 文面は全 tool 共通の形 + file_id が受ける形の固定文(#145: ToolError の文)
-        from nucllei.utils.image_refs import FILE_ID_ARG_FORM
+        # 文面は全 tool 共通の `ref_errors.file_id_error`(#145: ToolError の文。区別できない
+        # ことを事実で言い、次の手は確かめ方と伝え方 — llens staging 2026-10-04)。テストの id は
+        # UUID の形でないので、受ける形と行き先の規則が前に添わる
+        from nucllei.utils.image_refs import FILE_ID_ARG_FORM, REF_ARGS_RULE
 
         missing = _denied("no-such-id", {"id": "intruder"})
         for out, fid in ((denied, "doc-2"), (missing, "no-such-id")):
             assert out.kind == "call"
             assert out.text == (
-                f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い。"
-                f"次の手: {FILE_ID_ARG_FORM}"
+                f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い"
+                " (どちらなのかは区別できない)。"
+                f"次の手: {FILE_ID_ARG_FORM} {REF_ARGS_RULE} list_chat_files か"
+                " grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+                "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
             )
         # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
         self._new_file("owner", "doc-orphan", "orphan.txt", content="x")

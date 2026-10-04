@@ -47,7 +47,10 @@ ORIGIN = "https://llens.example"
 EXT_TOP = f"{ORIGIN}/ext/his/top.aspx"
 
 # 形の固定文と行き先の規則は `次の手:` の後ろ (llens 監査 A5)
+# 行き先の規則は取り違えらしい値 (スキームの無い値) のときだけ (llens staging 2026-10-04)
 URL_FORM = f"次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
+URL_FORM_ONLY = f"次の手: {URL_ARG_FORM}"
+TRAVERSAL_NEXT = "次の手: `..` や制御文字を含まない URL で呼び直す。"
 
 
 def _mod():
@@ -424,18 +427,20 @@ def test_rejects_other_relative_and_non_url_values_with_the_fixed_text(
     monkeypatch, ext_env
 ):
     """url に来た値は URL として resolver に渡す (tool 側で振り分けを重ねない)。URL として
-    解決できない値は値によらない固定文 (行き先を出し分けない — 案内は prompt / skill 側)。"""
-    for bad in (
-        "/api/v1/files/x",  # `/content` の無い形は file に当てない
-        "/mnt/cage/static/x.pdf",  # 2026-10-03 までの RO 置き場。もう何でもない
-        "/workspace/x.pdf",
-        "/exta/x.aspx",
-        "ext/his/top.aspx",
-        "//evil.example.com/x",
-        "ftp://med-info.med.hokudai.ac.jp/his-info/x",
+    解決できない値は受ける形の固定文 (行き先を出し分けない — 案内は prompt / skill 側)。
+    全 tool 共通の行き先の規則は、スキームの無い値 (取り違えらしい) のときだけ添える。"""
+    for bad, form in (
+        ("/api/v1/files/x", URL_FORM),  # `/content` の無い形は file に当てない
+        # 2026-10-03 までの RO 置き場。もう何でもない
+        ("/mnt/cage/static/x.pdf", URL_FORM),
+        ("/workspace/x.pdf", URL_FORM),
+        ("/exta/x.aspx", URL_FORM),
+        ("ext/his/top.aspx", URL_FORM),
+        ("//evil.example.com/x", URL_FORM_ONLY),
+        ("ftp://med-info.med.hokudai.ac.jp/his-info/x", URL_FORM_ONLY),
     ):
         result, resolver = _run(monkeypatch, ext_env, bad)
-        assert result == f"ERROR: {bad} は URL として解決できない。{URL_FORM}", (
+        assert result == f"ERROR: {bad} は URL として解決できない。{form}", (
             bad,
             result,
         )
@@ -523,7 +528,7 @@ def test_traversal_is_an_error_via_the_resolver(monkeypatch, ext_env):
     for bad in (f"{SITE}/../secret.pdf", f"{ORIGIN}/ext/his/../secret.pdf"):
         result, _r = _run(monkeypatch, ext_env, bad)
         assert result.startswith("ERROR") and "許可された範囲の外" in result, bad
-        assert result.endswith(URL_ARG_FORM), bad
+        assert result.endswith(TRAVERSAL_NEXT), bad
 
 
 def test_trailing_question_mark_does_not_break_links(monkeypatch, ext_env):
@@ -943,7 +948,7 @@ def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(
 def test_unsupported_form_code_uses_the_fixed_text(monkeypatch, ext_env):
     """resolver の unsupported_form も「URL として解決できない」+ 固定文。"""
     result = _explained(monkeypatch, ext_env, "unsupported_form")
-    assert "URL として解決できない" in result and URL_FORM in result
+    assert "URL として解決できない" in result and result.endswith(URL_FORM_ONLY)
 
 
 def test_unknown_upstream_does_not_branch_on_the_detail(monkeypatch, ext_env):
@@ -988,7 +993,7 @@ def test_unknown_upstream_is_told_apart_by_reason(monkeypatch, ext_env):
 
 def test_traversal_code_says_out_of_bounds(monkeypatch, ext_env):
     result = _explained(monkeypatch, ext_env, "traversal", url=f"{SITE}/a.pdf")
-    assert "許可された範囲の外" in result and result.endswith(URL_ARG_FORM)
+    assert "許可された範囲の外" in result and result.endswith(TRAVERSAL_NEXT)
 
 
 def test_unknown_code_falls_back_to_the_bundled_text(monkeypatch, ext_env):

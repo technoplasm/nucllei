@@ -145,8 +145,17 @@ TABLE = {
 }
 
 # 形の固定文と行き先の規則はモデルだけに向けた文なので `次の手:` の後ろ (llens 監査 A5)
+# 行き先の規則 (REF_ARGS_RULE) は取り違えらしい値のときだけ添わる (llens staging 2026-10-04 —
+# url にスキームの無い値、path に URL / id)。正しい種類で形が崩れているだけなら受ける形だけ
 URL_FORM = f"次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
 PATH_FORM = f"次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
+URL_FORM_ONLY = f"次の手: {URL_ARG_FORM}"
+PATH_FORM_ONLY = f"次の手: {PATH_ARG_FORM}"
+NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
+NO_FILE_NEXT = (
+    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
+)
 SHOW_PATH = (
     "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
     "返ったリンクを本文に書く。"
@@ -286,32 +295,34 @@ def test_sandbox_path_given_to_url_is_not_reinterpreted(monkeypatch):
 
 
 def test_error_text_is_fixed_per_argument_not_per_value(monkeypatch):
-    """値を調べて行き先を出し分けない: url の失敗文は値によらず同じ形、path も同じ。
-    他の tool 名・別の引数への誘導を含まない。"""
-    for bad in (
-        "/workspace/x.png",
-        "/etc/x.pdf",
-        "relative/x.png",
-        "ftp://h/x.png",
-        "//evil.example.com/x.png",
+    """値を調べて行き先を出し分けない: url の失敗文は受ける形の固定文、path も同じ。
+    他の tool 名・別の引数への誘導を含まない。行き先の規則 (全 tool 共通の 1 文) は
+    取り違えらしい値のときだけ添える。"""
+    for bad, form in (
+        ("/workspace/x.png", URL_FORM),
+        ("/etc/x.pdf", URL_FORM),
+        ("relative/x.png", URL_FORM),
+        ("ftp://h/x.png", URL_FORM_ONLY),
+        ("//evil.example.com/x.png", URL_FORM_ONLY),
     ):
         result, fed, resolver = _run(monkeypatch, url=bad)
         assert fed == [] and resolver.calls == [("url", bad)], bad
-        assert result == f"ERROR: {bad} は URL として解決できない。{URL_FORM}", (
+        assert result == f"ERROR: {bad} は URL として解決できない。{form}", (
             bad,
             result,
         )
         assert "path=" not in result and "path に" not in result, bad
-    for bad in (
-        "https://h/x.png",
-        "/mnt/cage/x.png",  # 2026-10-03 までの RO 置き場。もう何でもない
-        "relative/x.png",
-        "/opt/x.png",
-        "/etc/passwd",
+    for bad, form in (
+        ("https://h/x.png", PATH_FORM),
+        # 2026-10-03 までの RO 置き場。もう何でもない
+        ("/mnt/cage/x.png", PATH_FORM_ONLY),
+        ("relative/x.png", PATH_FORM_ONLY),
+        ("/opt/x.png", PATH_FORM_ONLY),
+        ("/etc/passwd", PATH_FORM_ONLY),
     ):
         result, fed, resolver = _run(monkeypatch, path=bad)
         assert fed == [] and resolver.calls == [("path", bad)], bad
-        assert result == f"ERROR: {bad} は sandbox のパスの形でない。{PATH_FORM}", (
+        assert result == f"ERROR: {bad} は sandbox のパスの形でない。{form}", (
             bad,
             result,
         )
@@ -344,12 +355,12 @@ def test_url_and_path_together(monkeypatch):
 def test_empty_value_is_the_fixed_text_of_the_argument(monkeypatch):
     result, fed, resolver = _run(monkeypatch, url="  ")
     assert (
-        result == f"ERROR: (空) は URL として解決できない。{URL_FORM}"
+        result == f"ERROR: (空) は URL として解決できない。{URL_FORM_ONLY}"
         and resolver.refs == []
     )
     result, fed, resolver = _run(monkeypatch, path="")
     assert (
-        result == f"ERROR: (空) は sandbox のパスの形でない。{PATH_FORM}"
+        result == f"ERROR: (空) は sandbox のパスの形でない。{PATH_FORM_ONLY}"
         and resolver.refs == []
     )
 
@@ -570,7 +581,15 @@ def test_url_of_the_internal_file_endpoint_is_read_as_the_file(monkeypatch):
 
 def test_url_of_the_internal_file_endpoint_keeps_the_owner_check(monkeypatch):
     recs = {"f1": _Rec("f1", "someone-else", "scan.pdf", "application/pdf")}
-    fixed = "ERROR: file_id {} のレコードが無い、またはアクセス権が無い。次の手: file_id は添付・生成物の id。"
+    # id が UUID の形でない (テストの f1 / nope) ので受ける形と規則も前に添わる
+    fixed = (
+        "ERROR: file_id {} "
+        + NO_FILE
+        + "。次の手: file_id は添付・生成物の id。 "
+        + REF_ARGS_RULE
+        + " "
+        + NO_FILE_NEXT
+    )
     result, fed, _r = _run_with_files(monkeypatch, recs, url="/api/v1/files/f1/content")
     assert fed == [] and result == fixed.format("f1"), result
     result, fed, _r = _run_with_files(monkeypatch, {}, url="/api/v1/files/nope/content")
@@ -612,9 +631,13 @@ def test_unsupported_form_from_the_resolver_uses_the_fixed_text_of_the_argument(
 ):
     """resolver が unsupported_form を返したときも、どの引数で来たかで固定文を選ぶ。"""
     result = _explained(monkeypatch, "unsupported_form", ref="/ext/x.png", arg="path")
-    assert result == f"ERROR: /ext/x.png は sandbox のパスの形でない。{PATH_FORM}"
+    assert result == f"ERROR: /ext/x.png は sandbox のパスの形でない。{PATH_FORM_ONLY}"
     result = _explained(monkeypatch, "unsupported_form", ref=f"{ORIGIN}/x.png")
-    assert result == f"ERROR: {ORIGIN}/x.png は URL として解決できない。{URL_FORM}"
+    assert result == f"ERROR: {ORIGIN}/x.png は URL として解決できない。{URL_FORM_ONLY}"
+    result = _explained(
+        monkeypatch, "unsupported_form", ref="/workspace/x.png", arg="url"
+    )
+    assert result == f"ERROR: /workspace/x.png は URL として解決できない。{URL_FORM}"
 
 
 def test_feed_image_does_not_pass_max_bytes(monkeypatch):
@@ -723,6 +746,11 @@ def test_unreachable_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
     result = _explained(
         monkeypatch, "upstream_unreachable", ref="/workspace/out/plot.png"
     )
+    # 確かめ方は専用の list_workspace (/workspace)。/ext は list_workspace で見られないので ls
+    assert LINK_HINT not in result and "list_workspace が使えるなら" in result
+    result = _explained(
+        monkeypatch, "upstream_unreachable", ref="/ext/a/plot.png", arg="path"
+    )
     assert LINK_HINT not in result and "run_shell が使えるなら ls" in result
 
 
@@ -786,12 +814,16 @@ def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(monkeypatc
 
 
 def test_traversal_code_says_out_of_bounds(monkeypatch):
-    """url なら url の形の文、path なら path の形の文を添える (行き先の規則は付けない)。"""
+    """次の手は呼び直し方 — url なら URL、path なら絶対パスで (行き先の規則は付けない)。"""
     result = _explained(monkeypatch, "traversal", ref=f"{ORIGIN}/ext/his/../x")
-    assert "許可された範囲の外" in result and result.endswith(URL_ARG_FORM)
+    assert "許可された範囲の外" in result and result.endswith(
+        "次の手: `..` や制御文字を含まない URL で呼び直す。"
+    )
     for ref in ("/workspace/../etc/passwd", "/ext/../secret"):
         result = _explained(monkeypatch, "traversal", ref=ref, arg="path")
-        assert "許可された範囲の外" in result and result.endswith(PATH_ARG_FORM), ref
+        assert "許可された範囲の外" in result and result.endswith(
+            "次の手: `..` や制御文字を含まない絶対パス (`/workspace/…` `/ext/…`) で呼び直す。"
+        ), ref
 
 
 def test_workspace_unavailable_says_sandbox_is_unreachable(monkeypatch):

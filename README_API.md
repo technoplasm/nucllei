@@ -415,17 +415,33 @@ each carried its own copy of this text; the copies drifted — see §5.7):
 tool (it mentions arguments a given tool may not have — it states the rule, not
 that tool's signature); tools do not add destinations of their own. These
 constants are **model-only** (§5.1), so they always come after `次の手: `.
-Errors are assembled the same way everywhere:
+`REF_ARGS_RULE` is added **only when the mistake looks like a mix-up between
+arguments** — decided by the kind of error, not by the tool
+(`image_refs.ref_args_rule_for`): a value without a scheme in `url` (a path, an
+id, a file name), a URL / `/api/v1/files/…` / id in `path`, a non-UUID in
+`file_id`. A value of the right kind that is only malformed (a relative
+`work/…` or `/tmp/…` in `path`, `ftp://…` in `url`, an empty value) gets the
+form sentence alone — the general rule is unrelated to that mistake (llens
+staging 2026-10-04). Errors are assembled the same way everywhere:
 
 - `url` not resolvable as a URL:
-  `ERROR: <value> は URL として解決できない。次の手: ` + `URL_ARG_FORM` + `" "` + `REF_ARGS_RULE`
+  `ERROR: <value> は URL として解決できない。次の手: ` + `URL_ARG_FORM` (+ `" "` + `REF_ARGS_RULE`)
 - `path` not a sandbox path:
   `ERROR: <value> は sandbox のパスの形でない。次の手: ` + `PATH_ARG_FORM` (or
-  `WORKSPACE_PATH_ARG_FORM`) + `" "` + `REF_ARGS_RULE`
-- `file_id` cannot be read:
-  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。次の手: ` + `FILE_ID_ARG_FORM`
+  `WORKSPACE_PATH_ARG_FORM`) (+ `" "` + `REF_ARGS_RULE`)
+- `file_id` cannot be read (`ref_errors.file_id_error`):
+  `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)。次の手: `
+  (+ `FILE_ID_ARG_FORM` + `" "` + `REF_ARGS_RULE` + `" "` for a non-UUID value) +
+  `list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。`
   — "no such record" and "not yours" are deliberately one sentence (existence
-  is not leaked). `read_attachment` raises the same error (`ref_errors.file_id_error`).
+  is not leaked); the fact says the two cannot be told apart, and the next step
+  keeps the model from telling the user the file does not exist. Every tool that
+  takes a file (`read_attachment`, `feed_image`, `fetch_url` and
+  `send_to_workspace` for `/api/v1/files/{id}/content`) raises this one error;
+  for a `url=` the URL replaces `file_id <id>` in `send_to_workspace`.
+- `traversal` (`..` / control characters): the next step is how to call again —
+  `` `..` や制御文字を含まない絶対パス (`/workspace/…` `/ext/…`) で呼び直す。`` for
+  `path`, `` `..` や制御文字を含まない URL で呼び直す。`` for `url`.
 
 These helpers (and `ref_errors.explain_ref_error`) return a `ToolError` that
 the tool raises (§5.1 "Failures"); the kind follows the code — `REF_ERROR_KINDS`:
@@ -1589,7 +1605,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     argument lists `/workspace`). Anything that is not a sandbox path the tool
     handles — relative, empty, a URL, outside `/workspace` — gets the common
     fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
-    `次の手: ` + `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM` + `REF_ARGS_RULE`); `/ext/…`
+    `次の手: ` + `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM`, + `REF_ARGS_RULE` only
+    for a URL / id); `/ext/…`
     (read-only reference data) is refused by `write_file` and `list_workspace`
     with a pointer to `run_shell` (a distinction inside the same `path`
     argument, based on what the path resolves to).

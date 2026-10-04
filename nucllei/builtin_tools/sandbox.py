@@ -159,9 +159,10 @@ def _resolve_workspace_path(
     しない。解決できないときは call の ToolError を raise する。
     symlink 越しの脱出はここでは見えない (sandbox 側の `_safe_path` が実 fs で弾く)。
 
-    形の誤り (空・相対・URL・/workspace の外) は値を調べて言い分けず、全 tool 共通の形で
+    形の誤り (空・相対・URL・/workspace の外) は全 tool 共通の `ref_errors.path_error` で
     返す: その tool の path が受ける形の固定文 `arg_form` (`image_refs.PATH_ARG_FORM` /
-    `WORKSPACE_PATH_ARG_FORM`) + 行き先の規則 `REF_ARGS_RULE`。
+    `WORKSPACE_PATH_ARG_FORM`) + 値が URL / id に見える (取り違え) ときだけ行き先の規則
+    `REF_ARGS_RULE`。
     `/ext/…` だけは同じ `path` の中の区分 (read-only の参照データ) なので、`ro_hint` で
     使える手段を案内する。
     """
@@ -175,13 +176,10 @@ def _resolve_workspace_path(
         raise ToolCallError.from_text(
             f"{abs_path} は read-only の参照データ。{ro_hint}"
         )
-    # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
-    from nucllei.utils.image_refs import REF_ARGS_RULE
+    # ref_errors → image_refs は本 module を import する — 循環を避けて呼び出し時に引く
+    from nucllei.utils.ref_errors import path_error
 
-    raise ToolCallError(
-        f"{(path or '').strip() or '(空)'} は sandbox のパスの形でない",
-        f"{arg_form} {REF_ARGS_RULE}",
-    )
+    raise path_error(path, arg_form)
 
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」、常体 (`utils/ref_errors` の module
@@ -347,9 +345,9 @@ def _safe_import_name(name: str) -> str:
     return "" if name in ("", ".", "..") else name
 
 
-# file が引けないときの理由 (レコードが無い / 所有者でない を言い分けない)。file_id の
-# エラーは全 tool 共通で `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` +
-# `image_refs.FILE_ID_ARG_FORM`
+# file が引けないときの理由 (レコードが無い / 所有者でない を言い分けない)。添付一覧の
+# 取り込み報告の行に使う。file_id= / url= で直に指したときのエラーは全 tool 共通の
+# `ref_errors.file_id_error`
 _NO_FILE = "レコードが無い、またはアクセス権が無い"
 
 
@@ -895,11 +893,7 @@ class Tools:
         if url:
             return await self._import_url(url, __user__["id"])
         if file_id:
-            from nucllei.utils.image_refs import FILE_ID_ARG_FORM
-
-            return await self._import_one(
-                file_id, __user__["id"], f"file_id {file_id}", FILE_ID_ARG_FORM
-            )
+            return await self._import_one(file_id, __user__["id"])
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
         imported = 0
@@ -949,20 +943,20 @@ class Tools:
             "",
         )
 
-    async def _import_one(
-        self, fid: str, user_id: str, given: str, arg_form: str = ""
-    ) -> str:
+    async def _import_one(self, fid: str, user_id: str, url: str | None = None) -> str:
         """引数で直に指された file 1 件を取り込む (file_id= / url= の配信口 URL)。
 
-        失敗は ToolError を raise する。`given` はモデルが渡した引数の言い方 (`file_id <値>` / URL)。
-        file が引けないときは全 tool 共通の文 + その引数が受ける形の固定文 `arg_form`
-        (file_id= なら `image_refs.FILE_ID_ARG_FORM`。url= 経由は形の誤りではないので無し)。
+        失敗は ToolError を raise する。`url` は url= の配信口 URL で来たときのその URL
+        (モデルが渡した言い方。None なら `file_id <値>`)。file が引けないときは全 tool 共通の
+        `ref_errors.file_id_error` (file_id= の値が id の形でないときだけ受ける形の文を添える)。
         """
         line, failure = await self._import_file(fid, None, user_id)
         if failure == _NO_FILE:
-            raise ToolCallError(f"{given} の{_NO_FILE}", arg_form or None)
+            from nucllei.utils.ref_errors import file_id_error
+
+            raise file_id_error(fid, given=url)
         if failure:
-            raise ToolFailure(f"{given} の{failure}")
+            raise ToolFailure(f"{url or f'file_id {fid}'} の{failure}")
         return "取り込み結果:\n" + line
 
     # ---- send_to_workspace の url ソース ---------------------------------------

@@ -167,9 +167,10 @@ _EXT_PATH_NOT_FOUND = (
     + NEXT
     + "中身が要るなら sandbox で読んで使う。"
 )
-_WORKSPACE_PATH_NOT_FOUND = (
-    "ERROR: {ref} は存在しない。" + NEXT + "run_shell が使えるなら ls で確かめる。"
-)
+# 確かめ方は専用の list_workspace (sandbox の toolkit。feed_image だけが載っていることもあるので
+# 条件付き — run_shell と同じ toolkit なので、run_shell の ls を案内する場面は無い)
+_LIST_PARENT = "list_workspace が使えるなら、親ディレクトリを一覧してパスを確かめる。"
+_WORKSPACE_PATH_NOT_FOUND = "ERROR: {ref} は存在しない。" + NEXT + _LIST_PARENT
 
 
 def _hints(is_path: bool, ref: str = "") -> RefErrorHints:
@@ -194,7 +195,11 @@ def _hints(is_path: bool, ref: str = "") -> RefErrorHints:
         unreachable=(
             "ERROR: {ref} に届かない (このサーバからは到達できないか、一時的な障害)。"
             + NEXT
-            + "run_shell が使えるなら ls で存在を確かめる。"
+            + (
+                "run_shell が使えるなら ls で存在を確かめる。"
+                if ref.startswith("/ext/")
+                else _LIST_PARENT
+            )
             if is_path
             else RefErrorHints.unreachable
         ),

@@ -54,23 +54,56 @@ def _explain(err, arg="url", **kw):
 # --- 固定文のヘルパ --------------------------------------------------------------
 
 
+FID = "0b7c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
+NO_FILE_NEXT = (
+    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
+)
+
+
 def test_fixed_form_helpers_compose_the_shared_sentences():
-    assert (
-        url_error("x")
-        == f"ERROR: x は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
-    )
+    # 行き先の規則 (REF_ARGS_RULE) は取り違えらしいときだけ (llens staging 2026-10-04)
+    for mixed in ("/workspace/a.png", "x", FID, "a.png"):
+        assert (
+            url_error(mixed)
+            == f"ERROR: {mixed} は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
+        )
+    for malformed in ("ftp://h/a.png", "http:/h"):
+        assert (
+            url_error(malformed)
+            == f"ERROR: {malformed} は URL として解決できない。次の手: {URL_ARG_FORM}"
+        )
     assert (
         url_error("")
-        == f"ERROR: (空) は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
+        == f"ERROR: (空) は URL として解決できない。次の手: {URL_ARG_FORM}"
+    )
+    for mixed in ("https://h/a.png", "/api/v1/files/x/content", FID):
+        assert (
+            path_error(mixed)
+            == f"ERROR: {mixed} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
+        )
+    for malformed in ("x", "work/a.png", "/tmp/a.png"):
+        assert (
+            path_error(malformed)
+            == f"ERROR: {malformed} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM}"
+        )
+    assert (
+        path_error("")
+        == f"ERROR: (空) は sandbox のパスの形でない。次の手: {PATH_ARG_FORM}"
+    )
+    # file_id: 区別できないことを事実で言い、次の手は確かめ方と伝え方。UUID でない値
+    # (取り違えらしい) だけ受ける形と規則を前に添える
+    no_file = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
+    assert (
+        file_id_error(FID) == f"ERROR: file_id {FID} {no_file}。次の手: {NO_FILE_NEXT}"
+    )
+    assert file_id_error("https://h/a.png") == (
+        f"ERROR: file_id https://h/a.png {no_file}。次の手: {FILE_ID_ARG_FORM}"
+        f" {REF_ARGS_RULE} {NO_FILE_NEXT}"
     )
     assert (
-        path_error("x")
-        == f"ERROR: x は sandbox のパスの形でない。次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
-    )
-    assert path_error("").startswith("ERROR: (空) は sandbox のパスの形でない。")
-    assert (
-        file_id_error("f1")
-        == f"ERROR: file_id f1 のレコードが無い、またはアクセス権が無い。次の手: {FILE_ID_ARG_FORM}"
+        file_id_error(FID, given="/api/v1/files/x/content")
+        == f"ERROR: /api/v1/files/x/content {no_file}。次の手: {NO_FILE_NEXT}"
     )
     assert mb(32_646_426) == "31.1 MB" and mb(25 * 1024 * 1024) == "25.0 MB"
 
@@ -167,11 +200,12 @@ def test_unsupported_form_and_traversal_follow_the_argument():
     trav = "は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
     assert (
         _explain(RefError("traversal", "x"))
-        == f"ERROR: {U} {trav}次の手: {URL_ARG_FORM}"
+        == f"ERROR: {U} {trav}次の手: `..` や制御文字を含まない URL で呼び直す。"
     )
     assert (
         _explain(RefError("traversal", "x"), arg="path")
-        == f"ERROR: {P} {trav}次の手: {PATH_ARG_FORM}"
+        == f"ERROR: {P} {trav}次の手: `..` や制御文字を含まない絶対パス"
+        " (`/workspace/…` `/ext/…`) で呼び直す。"
     )
 
 
@@ -287,11 +321,12 @@ def test_sandbox_wording():
         RefError("unknown_upstream", "x", reason="unknown_name"): _NOT_ALLOWED,
         RefError("unknown_upstream", "x"): _NOT_ALLOWED,
         RefError("traversal", "x"): (
-            f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。次の手: {URL_ARG_FORM}"
+            f"ERROR: {U} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
+            "次の手: `..` や制御文字を含まない URL で呼び直す。"
         ),
         RefError(
             "unsupported_form", "x"
-        ): f"ERROR: {U} は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}",
+        ): f"ERROR: {U} は URL として解決できない。次の手: {URL_ARG_FORM}",
         # code (内部名) は出さない
         RefError("something_new", "x"): f"ERROR: {U} を取得できない。",
     }
@@ -319,18 +354,20 @@ def test_feed_image_wording():
         assert feed_explain(U, err) == want, err
     cases_path = {
         RefError("not_found", "x"): (
-            f"ERROR: {P} は存在しない。次の手: run_shell が使えるなら ls で確かめる。"
+            f"ERROR: {P} は存在しない。次の手: list_workspace が使えるなら、親ディレクトリを"
+            "一覧してパスを確かめる。"
         ),
         RefError("upstream_unreachable", "x"): (
             f"ERROR: {P} に届かない (このサーバからは到達できないか、一時的な障害)。"
-            "次の手: run_shell が使えるなら ls で存在を確かめる。"
+            "次の手: list_workspace が使えるなら、親ディレクトリを一覧してパスを確かめる。"
         ),
         RefError("workspace_unavailable", "x"): (
             f"ERROR: {P} は sandbox のファイルだが、sandbox に繋がらない (起動していないか、応答が無い)。"
             "次の手: 時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
         ),
         RefError("traversal", "x"): (
-            f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。次の手: {PATH_ARG_FORM}"
+            f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
+            "次の手: `..` や制御文字を含まない絶対パス (`/workspace/…` `/ext/…`) で呼び直す。"
         ),
         RefError("unsupported_form", "x"): path_error(P),
     }

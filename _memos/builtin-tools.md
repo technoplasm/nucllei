@@ -650,6 +650,14 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   - file_id: `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
     (「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない。`read_attachment` も
     同じ `ref_errors.file_id_error` を raise する — 2026-10-04 #145 で `{ok: False, error}` を廃止)
+  - **2026-10-04 改訂(llens staging のレビュー)**: `REF_ARGS_RULE` は取り違えらしいとき
+    (url にスキーム無し・path に URL / id・file_id に UUID でない値)だけ添える
+    (`image_refs.ref_args_rule_for`。相対パスの path に付いていたのは無関係な定型文だった)。
+    file_id は事実の文に「(どちらなのかは区別できない)」を足し、次の手を説明文
+    (`FILE_ID_ARG_FORM`)から「list_chat_files / grep_chat_files で確かめて渡し直す・ユーザーには
+    開けなかったと伝え、無いとは言い切らない」に替えた(`FILE_ID_ARG_FORM` は UUID でない値の
+    ときだけ前に添える)。traversal の次の手も受ける形の説明文から呼び直し方に。現行の文面は
+    README_API §3.8
   - tool 固有の行き先(「sandbox のファイルは取り込み不要」「添付は file_id= に」)はエラーから
     消した。旧 `_URL_ACCEPTS` は「添付・生成物は file_id= に渡す」と言いつつ
     `/api/v1/files/…` を url で受けていて自己矛盾だった。

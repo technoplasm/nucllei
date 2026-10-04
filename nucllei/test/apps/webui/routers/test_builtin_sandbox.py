@@ -785,12 +785,13 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         tool = _sandbox({"/files/write": {"ok": True}})
         out = _arun(tool.send_to_workspace(file_id="f-yours", __user__={"id": "owner"}))
-        # 「レコードが無い」と同じ文(存在の有無を漏らさない)
-        from nucllei.utils.image_refs import FILE_ID_ARG_FORM
+        # 「レコードが無い」と同じ文(存在の有無を漏らさない)。id が UUID の形でないので
+        # 受ける形と行き先の規則も前に添わる
+        from nucllei.utils.image_refs import FILE_ID_ARG_FORM, REF_ARGS_RULE
 
         assert out == (
-            "ERROR: file_id f-yours のレコードが無い、またはアクセス権が無い。"
-            f"次の手: {FILE_ID_ARG_FORM}"
+            f"ERROR: file_id f-yours {NO_FILE}。"
+            f"次の手: {FILE_ID_ARG_FORM} {REF_ARGS_RULE} {NO_FILE_NEXT}"
         )
         assert tool.calls == []
 
@@ -820,13 +821,18 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "read-only" in _arun(
             tool.write_file("/ext/server/a.txt", "x", __user__=user)
         )
-        # 形の誤りは値によらず同じ文: 全 tool 共通の形 + この tool の path が受ける形
+        # 形の誤りは全 tool 共通の形 + この tool の path が受ける形。行き先の規則は URL を
+        # 渡した (取り違えらしい) ときだけ — 相対パスには付けない (llens staging 2026-10-04)
         from nucllei.utils.image_refs import REF_ARGS_RULE, WORKSPACE_PATH_ARG_FORM
 
-        for bad in ("work/a.txt", "/etc/passwd", "https://x.example/y.html"):
+        for bad, rule in (
+            ("work/a.txt", ""),
+            ("/etc/passwd", ""),
+            ("https://x.example/y.html", f" {REF_ARGS_RULE}"),
+        ):
             assert _arun(tool.write_file(bad, "x", __user__=user)) == (
                 f"ERROR: {bad} は sandbox のパスの形でない。"
-                f"次の手: {WORKSPACE_PATH_ARG_FORM} {REF_ARGS_RULE}"
+                f"次の手: {WORKSPACE_PATH_ARG_FORM}{rule}"
             )
         assert _arun(tool.write_file("", "x", __user__=user)).startswith(
             "ERROR: (空) は sandbox のパスの形でない。"
@@ -1006,13 +1012,15 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         user = {"id": "u1"}
         tool = _sandbox({})
         for bad in ("imports/a.csv", "./imports/a.csv", ".", "https://x.example/y"):
+            # 行き先の規則は URL (取り違えらしい) のときだけ
+            rule = f" {REF_ARGS_RULE}" if bad.startswith("https://") else ""
             for coro, form in (
                 (tool.write_file(bad, "x", __user__=user), WORKSPACE_PATH_ARG_FORM),
                 (tool.list_workspace(bad, __user__=user), WORKSPACE_PATH_ARG_FORM),
                 (tool.fetch_from_workspace(bad, __user__=user), PATH_ARG_FORM),
             ):
                 assert _arun(coro) == (
-                    f"ERROR: {bad} は sandbox のパスの形でない。次の手: {form} {REF_ARGS_RULE}"
+                    f"ERROR: {bad} は sandbox のパスの形でない。次の手: {form}{rule}"
                 ), bad
         assert tool.calls == []
 
@@ -1117,6 +1125,12 @@ from nucllei.utils.image_refs import (  # noqa: E402
     PATH_ARG_FORM,
     REF_ARGS_RULE,
     URL_ARG_FORM,
+)
+
+NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
+NO_FILE_NEXT = (
+    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
 )
 
 
@@ -1573,8 +1587,8 @@ def test_files_content_url_is_routed_to_the_file(monkeypatch, tmp_path):
     env.files(tmp_path, {FILE_UUID: ("someone-else", "secret.xlsx", b"x")})
     given = f"/api/v1/files/{FILE_UUID}/content"
     result = env.run(url=given)
-    # url= 経由は形の誤りではないので、file_id の固定文は添えない
-    assert result == f"ERROR: {given} のレコードが無い、またはアクセス権が無い。"
+    # url= 経由は形の誤りではないので、file_id の固定文は添えない (確かめ方・伝え方は同じ)
+    assert result == f"ERROR: {given} {NO_FILE}。次の手: {NO_FILE_NEXT}"
     assert env.writes == []
 
 
@@ -1583,7 +1597,8 @@ def test_files_content_url_is_routed_to_the_file(monkeypatch, tmp_path):
 
 def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
     """url= に URL でない値(UUID / sandbox のパス / サーバに無い経路 / スキーム無し)が
-    来ても、file_id や path として救済しない。エラーは値によらず同じ文 + 固定の案内。"""
+    来ても、file_id や path として救済しない。エラーは値によらず同じ文 + 固定の案内
+    (行き先の規則はスキームの無い値 = 取り違えらしいときだけ。llens staging 2026-10-04)。"""
     env = _UrlEnv(monkeypatch)
     env.files(tmp_path, {FILE_UUID: ("u1", "report.xlsx", b"xlsx")})
     results = {}
@@ -1595,7 +1610,6 @@ def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
         "/etc/passwd",
         "ext/cage/x.png",
         "his-info.test/docs/a.pdf",
-        "ftp://10.0.0.5/a.pdf",
     ):
         result = env.run(url=bad)
         # 全 tool 共通の形: 値 + 固定文(url が受ける形)+ 行き先の規則(1 文)
@@ -1603,8 +1617,13 @@ def test_url_is_only_ever_resolved_as_a_url(monkeypatch, tmp_path):
             f"ERROR: {bad} は URL として解決できない。次の手: {URL_ARG_FORM} {REF_ARGS_RULE}"
         ), bad
         results[bad] = result.replace(bad, "<value>")
-    # 値を調べて文面を出し分けていない
+    # 値を調べて行き先を出し分けていない
     assert len(set(results.values())) == 1
+    # スキーム付き (URL の種類で形が崩れているだけ) には行き先の規則を付けない
+    bad = "ftp://10.0.0.5/a.pdf"
+    assert env.run(url=bad) == (
+        f"ERROR: {bad} は URL として解決できない。次の手: {URL_ARG_FORM}"
+    )
     assert env.gets == [] and env.writes == []
 
 
@@ -1621,9 +1640,10 @@ def test_file_id_is_only_ever_a_file_id(monkeypatch, tmp_path):
         "/workspace/x",
     ):
         result = env.run(file_id=bad)
+        # UUID の形でない (取り違えらしい) ので、受ける形と行き先の規則も添える
         assert result == (
-            f"ERROR: file_id {bad} のレコードが無い、またはアクセス権が無い。"
-            f"次の手: {FILE_ID_ARG_FORM}"
+            f"ERROR: file_id {bad} {NO_FILE}。"
+            f"次の手: {FILE_ID_ARG_FORM} {REF_ARGS_RULE} {NO_FILE_NEXT}"
         ), bad
     assert env.gets == [] and env.writes == []
     # 正しい file_id は従来どおり
@@ -1775,7 +1795,7 @@ def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
 
     # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない
     out = env.fetch("/ext/shared/../../outside.txt")
-    assert out.startswith("ERROR:") and out.endswith(f"{PATH_ARG_FORM} {REF_ARGS_RULE}")
+    assert out.startswith("ERROR:") and out.endswith(f"次の手: {PATH_ARG_FORM}")
     # `..` を畳めば /ext の中 = 配信されている(URL)
     out = env.fetch("/ext/shared/../shared/memo.txt")
     assert "添付不要" in out and "(/ext/shared/memo.txt)" in out
@@ -1803,14 +1823,16 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
     """path に URL / file_id が来ても読み替えない — sandbox のパスとして解いて失敗する
     (`/ext/…` は sandbox のパスでもあるので別: 上の told_apart の percent-encoded の例)。"""
     env = _MountEnv(monkeypatch, tmp_path)
-    for given in (
-        "https://llens.test/ext/cage/static/%E5%9B%B3/a.png",
-        f"/api/v1/files/{FILE_UUID}/content",
-        "/mnt/cage/static/図/a.png",  # 2026-10-03 までの置き場。もう特別扱いしない
+    for given, rule in (
+        ("https://llens.test/ext/cage/static/%E5%9B%B3/a.png", f" {REF_ARGS_RULE}"),
+        (f"/api/v1/files/{FILE_UUID}/content", f" {REF_ARGS_RULE}"),
+        (FILE_UUID, f" {REF_ARGS_RULE}"),
+        # 2026-10-03 までの置き場。もう特別扱いしない (パスの形の崩れ = 規則は付けない)
+        ("/mnt/cage/static/図/a.png", ""),
     ):
         out = env.fetch(given)
         assert out == (
-            f"ERROR: {given} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM} {REF_ARGS_RULE}"
+            f"ERROR: {given} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM}{rule}"
         ), given
     assert env.registered == [] and env.writes == []
 

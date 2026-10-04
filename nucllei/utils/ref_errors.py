@@ -28,7 +28,9 @@ README_API §5.1「事実の文 + 次の手」)。事実の文はユーザーに
   not_found / unreachable)だけ、呼び手が `RefErrorHints` でその code のテンプレートごと
   差し替える。
 - `arg`(`"url"` / `"path"`)は **どの引数で来たか**(値の形では判定しない)。形の誤り
-  (`unsupported_form`)と traversal で添える固定文(`URL_ARG_FORM` / `PATH_ARG_FORM`)を選ぶ。
+  (`unsupported_form`)で添える固定文(`URL_ARG_FORM` / `PATH_ARG_FORM`)と traversal の
+  呼び直し方を選ぶ。行き先の規則 `REF_ARGS_RULE` は値が別の引数の種類に見える(取り違え)
+  ときだけ添える(`image_refs.ref_args_rule_for`、2026-10-04)。
 
 テンプレートの差し込み語は `{ref}`(参照の literal)・`{status}`(HTTP status)・`{code}`
 (RefError.code。内部名なので builtin の文面では使っていない)の 3 つだけで、`str.replace` で埋める(`URL_ARG_FORM` の `{id}` を
@@ -43,9 +45,9 @@ from typing import Callable, Literal, Mapping
 from nucllei.utils.image_refs import (
     FILE_ID_ARG_FORM,
     PATH_ARG_FORM,
-    REF_ARGS_RULE,
     URL_ARG_FORM,
     RefError,
+    ref_args_rule_for,
 )
 from nucllei.utils.tool_errors import (
     NEXT,
@@ -62,28 +64,52 @@ RefArg = Literal["url", "path"]
 # --- 形の誤り・file の固定文(image_refs の module docstring「エラーに添える固定文」) ------
 
 
+def _with_rule(form: str, arg: str, value: str) -> str:
+    """受ける形の文 + 取り違えらしいときだけ `REF_ARGS_RULE`(`image_refs.ref_args_rule_for`)。"""
+    rule = ref_args_rule_for(arg, value)
+    return f"{form} {rule}" if rule else form
+
+
 def url_error(value: str) -> ToolCallError:
-    """url が URL として解決できない(値を調べて文面を出し分けない)。呼び手が raise する。"""
+    """url が URL として解決できない。受ける形を固定文で添え、値が URL に見えない(パス・id を
+    取り違えたらしい)ときだけ行き先の規則も添える。呼び手が raise する。"""
     return ToolCallError(
         f"{value or '(空)'} は URL として解決できない",
-        f"{URL_ARG_FORM} {REF_ARGS_RULE}",
+        _with_rule(URL_ARG_FORM, "url", value),
     )
 
 
-def path_error(value: str) -> ToolCallError:
-    """path が sandbox のパスの形でない。呼び手が raise する。"""
+def path_error(value: str, arg_form: str = PATH_ARG_FORM) -> ToolCallError:
+    """path が sandbox のパスの形でない。受ける形の文 `arg_form`(workspace だけを扱う tool は
+    `WORKSPACE_PATH_ARG_FORM`)を添え、値が URL / id に見える(取り違えたらしい)ときだけ
+    行き先の規則も添える — 相対パス等、パスとして崩れているだけなら添えない。呼び手が raise する。"""
     return ToolCallError(
-        f"{value or '(空)'} は sandbox のパスの形でない",
-        f"{PATH_ARG_FORM} {REF_ARGS_RULE}",
+        f"{(value or '').strip() or '(空)'} は sandbox のパスの形でない",
+        _with_rule(arg_form, "path", value),
     )
 
 
-def file_id_error(fid: str) -> ToolCallError:
+# file が引けないとき(レコードが無い / アクセス権が無い)の事実の文と次の手。2 つは言い分けない
+# (存在の有無を漏らさない)が、区別できないことは事実の文で言い、ユーザーに「無い」と
+# 言い切らせない(llens staging 2026-10-04)。次の手は file_id の確かめ方(chat_files は別の
+# toolkit なので条件付き)
+NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
+NO_FILE_NEXT = (
+    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
+)
+
+
+def file_id_error(fid: str, *, given: str | None = None) -> ToolCallError:
     """file が引けない(「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない)。
-    呼び手が raise する。"""
-    return ToolCallError(
-        f"file_id {fid} のレコードが無い、またはアクセス権が無い", FILE_ID_ARG_FORM
-    )
+    `given` はモデルが渡した言い方(url= の配信口 URL で来たときはその URL。既定は
+    `file_id <id>`)。file_id 引数の値が id の形でない(URL・パス・ファイル名を取り違えた
+    らしい)ときだけ、受ける形と行き先の規則を前に添える。呼び手が raise する。"""
+    form = ""
+    if given is None:
+        rule = ref_args_rule_for("file_id", fid)
+        form = f"{FILE_ID_ARG_FORM} {rule} " if rule else ""
+    return ToolCallError(f"{given or f'file_id {fid}'} {NO_FILE}", form + NO_FILE_NEXT)
 
 
 def mb(n) -> str:
@@ -142,6 +168,12 @@ _UPSTREAM_STATUS = (
 )
 # traversal(`..` / 制御文字)。添える形の文は arg で選ぶ
 _TRAVERSAL = "ERROR: {ref} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
+# traversal の次の手は呼び直し方 (受ける形の説明文だけでは一手にならない — llens staging
+# 2026-10-04)。値は正しい種類なので取り違えの規則は添えない
+_TRAVERSAL_NEXT_PATH = (
+    "`..` や制御文字を含まない絶対パス (`/workspace/…` `/ext/…`) で呼び直す。"
+)
+_TRAVERSAL_NEXT_URL = "`..` や制御文字を含まない URL で呼び直す。"
 
 
 @dataclass(frozen=True)
@@ -299,7 +331,7 @@ def _explain_text(
         return (
             _fill(_TRAVERSAL, ref)
             + NEXT
-            + (PATH_ARG_FORM if arg == "path" else URL_ARG_FORM)
+            + (_TRAVERSAL_NEXT_PATH if arg == "path" else _TRAVERSAL_NEXT_URL)
         )
     if code == "workspace_unavailable" and hints.workspace_unavailable is not None:
         return _fill(hints.workspace_unavailable, ref)
