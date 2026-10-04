@@ -1161,11 +1161,11 @@ class Tools:
     fact-sentence rules above (user-safe); `next` is the model-only part.
     `kind` says whose problem it is, and the chat UI shows it on the tool card:
 
-    | kind      | meaning                                                                                                                                                       | UI                       |
-    | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, arguments not parseable JSON | amber 「呼び直し」         |
-    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                       | red 「失敗」               |
-    | `outcome` | the call worked but the answer is "none" — not found / 404, out of range, too large                                                                          | same look as a success |
+    | kind      | meaning                                                                                                                                                     | UI                     |
+    | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, arguments not parseable JSON | amber 「呼び直し」     |
+    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                     | red 「失敗」           |
+    | `outcome` | the call worked but the answer is "none" — not found / 404, out of range, too large                                                                         | same look as a success |
 
     The server builds failures it detects itself the same way: unknown tool and
     unparseable `arguments` → `call`; a required argument missing from the call
@@ -1205,6 +1205,7 @@ class Tools:
     if the file must lint outside nucllei.) **A returned string is always a
     normal result** — even one that starts with `ERROR:`; nothing sniffs the
     text. Any other uncaught exception goes the generic `failure` path.
+
   - The description is re-sent on **every turn** for every mounted function:
     keep it to what the model needs to decide whether and how to call
     (purpose, argument forms, return shape, a one-line ERROR shape) and put
