@@ -109,7 +109,12 @@ export default defineConfig({
 				'**/.venv/**',
 				// dev の data/ (uploads・DB) は監視しない — 添付の録音 (mp4/webm) で inotify 上限 (ENOSPC) に当たり vite が落ちる
 				'**/data',
-				'**/data/**'
+				'**/data/**',
+				// backend (Python) は FE から import しない。監視すると .py の保存のたびに全体リロードが
+				// 走り、tmp ファイル (sed の作業ファイル等) で inotify 上限 (ENOSPC) に当たって落ちる (2026-10-04)
+				'**/nucllei/**',
+				'**/ext',
+				'**/ext/**'
 			]
 		}
 	},
