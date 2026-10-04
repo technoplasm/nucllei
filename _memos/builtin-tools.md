@@ -1142,7 +1142,7 @@ ken 指示「ツールのエラーも結果として表示できるように。�
 
 - **形の一本化**: builtin は失敗を文字列 / `{"ok": false, "error"}` で返さず、
   `nucllei/utils/tool_errors.py` の `ToolError(fact, next, kind=…)`(`ToolCallError` /
-  `ToolFailure` / `ToolOutcome`)を raise する。モデルに渡る文は `format_tool_error` 1 箇所で
+  `ToolFailure` / `ToolOutcome` / `ToolFatal`。`ToolViolation` は middleware 専用)を raise する。モデルに渡る文は `format_tool_error` 1 箇所で
   `ERROR: {fact}。次の手: {next}` に組む(`NEXT` は tool_errors が持ち、`ref_errors` は再輸出)。
   `ref_errors` の helper / `explain_ref_error` は `ToolError` を返す(テンプレートの文面はそのまま
   `ToolError.from_text` で事実と次の手に分ける。kind は `REF_ERROR_KINDS`)。**文面は変えていない**
@@ -1150,27 +1150,44 @@ ken 指示「ツールのエラーも結果として表示できるように。�
   context_budget / attachment_text / background の起動失敗)が `ERROR: 同文` になったこと、
   「。」で終わっていなかった文(`preset を使えない: X`)に「。」が付いたこと、一覧に無い tool の
   文に `ERROR: ` が付いたこと。
-- **kind**: `call`(呼び方の誤り — amber「呼び直し」)/ `failure`(実行時の失敗 — 赤「失敗」)/
-  `outcome`(呼べたが答えが「無い」— 見た目は成功と同じ)。定義と表は README_API §5.1「Failures」。
+- **kind**(5 種。2026-10-04 改訂 — ken「あんまり赤はバグとか致命的なものでもないと出ないように
+  したい / ちょっと値が見つからないとかは黄色でいい」「モデルの挙動や規約違反は赤としてみえると
+  こっちもわかりやすい」): amber は `call`(tool の中で見つけた呼び方の誤り「呼び直し」)/
+  `failure`(壊れてはいない実行時の失敗「失敗」)/ `outcome`(呼べたが答えが「無い」「該当なし」—
+  旧: 成功と同じ見た目)、赤は `violation`(モデルの規約違反「規約違反」— 一覧に無い tool・arguments が
+  読めない・必須引数の欠落・署名に無い引数。tool を呼ぶ前に middleware が弾くもの)/ `fatal`
+  (tool / サーバ自体が壊れている「エラー」)。アイコンは種別ごとに別、amber 3 種は同じ色調
+  (FE は `tool-render` の `TOOL_ERROR_LOOKS` + `ToolErrorLabel.svelte`)。モデル向けの文面は種別に
+  よらず不変。定義と表は README_API §5.1「Failures」。
+  - **fatal へ移したもの**(同日。ToolFailure の raise 箇所を見直し、壊れたサーバ・設定・バグだけ):
+    sandbox の認証失敗(鍵の設定の誤り — `_sandbox_auth`)、sandbox `/files/read` の応答が読めない、
+    sandbox のファイル登録失敗、fetch_from_workspace の言い分けられない resolver code、
+    fetch_url の変換器が落ちた、fetch_url の file レコードはあるのに実体が読めない、
+    run_subagent の子セッション行の INSERT 失敗、ref_errors の unexplained(RefError 無し・
+    表に無い code)、捕らえていない例外すべて(`tool_exception_text` — 同期・background とも)。
+    timeout・到達不能・上流の 5xx / 401 / 403・同時数 / 入れ子の上限・multi-worker・spawn の失敗・
+    ユーザー不明・チャット文脈なし・PDF が壊れている / 暗号化(feed_image)は failure のまま。
   llens の判定 (同日) で直したもの: 上流の HTTP 404 / 410 は outcome (他の status は failure)、
   サブエージェントの「セッションは実行中」は call (次の手を「実行中の分の結果を待ってから
   (background なら await_task で受け取ってから) 同じ session_id で続ける」に)、arguments が読めない
   ときの次の手は「引数を正しい JSON で呼び直す。」、feed_image の「対象が見つからない」は
   何も指していない = call / filename で指した添付 PDF が無い = outcome に分けた (文面は同じ)。
 - **wire**: `content_blocks` の `results[i].error_kind`(永続。リロードでも出る)。background は exec 行の
-  `meta.error_kind` → 一覧 API / `execution:done` の `error_kind`。call / failure は `failed`、outcome は
-  `done`(result に文)。FE は本文を解釈せずフラグで見た目を決める(ToolCallBlock / ExecutionBlock)。
-- **サーバ側で組むもの**: 一覧に無い tool・arguments が JSON object として読めない → call。
+  `meta.error_kind` → 一覧 API / `execution:done` / check_task・await_task の per-entry の `error_kind`
+  (per-entry は llens staging の wire 確認で追加)。outcome は `done`(result に文)、それ以外は `failed`。
+  FE は本文を解釈せずフラグで見た目を決める(ToolCallBlock / ExecutionBlock / BackgroundTasksChip。
+  exec 行が failed で種別を持たないときは failure の見た目)。
+- **サーバ側で組むもの**: 一覧に無い tool・arguments が JSON object として読めない → violation。
   **必須引数の欠落**(#145 項目 2 — luna の空 `read_doc` が生の `TypeError` を返した件)は呼ぶ前に
-  callable の署名で検出して call(`ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を
-  付けて呼び直す。`)。spec のフィルタを通ったのに署名に無い引数も call。タイムアウト・その他の例外は
-  failure(例外は型名 + 先頭 200 字。background も同じ式に揃えた — 旧: 生の `str(e)`)。
+  callable の署名で検出して violation(`ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を
+  付けて呼び直す。`)。spec のフィルタを通ったのに署名に無い引数も violation。タイムアウトは failure、
+  その他の例外は fatal(例外は型名 + 先頭 200 字。background も同じ式に揃えた — 旧: 生の `str(e)`)。
 - **JSON を返す tool の線引き**: 中身の無い失敗は raise、中身(部分回答・session_id・切詰め)を
   運ぶ結果は結果のまま(run_subagent の子のエラー / stop、await_task の per-entry の failed 行、
   check_task の不正 id 行)。「一致なし」「空」のように `ERROR:` で返していなかった通常の結果も
   そのまま(文面を変えないため)。
 - **カスタム tool**: `from nucllei.utils.tool_errors import ToolError, ToolCallError, ToolFailure,
-  ToolOutcome` を raise する(DB の tool も plugin loader で import できる)。**返した文字列は常に正常な
+  ToolOutcome, ToolFatal` を raise する(DB の tool も plugin loader で import できる)。**返した文字列は常に正常な
   結果** — `ERROR:` で始まっていてもフラグは立てない(本文の嗅ぎ分けはどこにも置かない。ken 決定
   2026-10-04 — 初版にあった「builtin 以外の `ERROR:` 文字列は failure」の推定は同日に撤去)。
 

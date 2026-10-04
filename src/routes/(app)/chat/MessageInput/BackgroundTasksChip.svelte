@@ -18,7 +18,9 @@
 	} from '$lib/stores/executions.svelte';
 	import { stopChatExecution } from '$lib/apis/chats';
 	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
+	import { executionErrorKind, TOOL_ERROR_LOOKS } from '$lib/utils/tool-render';
 
+	import ToolErrorLabel from '$lib/components/chat/Messages/ToolErrorLabel.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 
@@ -56,10 +58,12 @@
 		return '';
 	};
 
+	// #145: tool のエラー種別(サーバの旗)。見た目とラベルは ExecutionBlock と同じ表
+	// (TOOL_ERROR_LOOKS / ToolErrorLabel)— 赤は violation / fatal だけ
+	const errorKindOf = (entry: ExecutionEntry) => executionErrorKind(entry.status, entry.error_kind);
+
 	const statusLabel = (entry: ExecutionEntry): string => {
 		if (entry.status === 'done') return $i18n.t('Completed');
-		// #145: 呼び方の誤り(error_kind = call)は「失敗」と言い分ける(ExecutionBlock と同じ)
-		if (entry.status === 'failed' && entry.error_kind === 'call') return $i18n.t('Retry needed');
 		if (entry.status === 'failed') return $i18n.t('Failed');
 		if (entry.status === 'stopped') return $i18n.t('Stopped');
 		if (entry.status === 'orphaned') return $i18n.t('Lost on server restart');
@@ -111,12 +115,25 @@
 				align="start"
 			>
 				{#each entries as entry (entry.id)}
+					{@const errorKind = errorKindOf(entry)}
 					<div class="flex items-center gap-2 px-3 py-2 text-sm min-w-0">
-						<span class="i-lucide-terminal size-4 block shrink-0 text-content-muted"></span>
+						{#if errorKind}
+							<span
+								class="{TOOL_ERROR_LOOKS[errorKind].icon} size-4 block shrink-0 {TOOL_ERROR_LOOKS[
+									errorKind
+								].iconClass}"
+							></span>
+						{:else}
+							<span class="i-lucide-terminal size-4 block shrink-0 text-content-muted"></span>
+						{/if}
 						<div class="flex-1 min-w-0">
 							<div class="line-clamp-1 font-medium font-mono">{entry.tool_name}</div>
 							<div class="text-xs text-content-muted tabular-nums line-clamp-1">
-								{statusLabel(entry)}
+								{#if errorKind}
+									<ToolErrorLabel kind={errorKind} />
+								{:else}
+									{statusLabel(entry)}
+								{/if}
 								{#if timeLabel(entry)}
 									· {timeLabel(entry)}
 								{/if}

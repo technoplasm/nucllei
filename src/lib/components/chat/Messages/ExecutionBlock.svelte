@@ -9,9 +9,10 @@
 
 	import { getExecutionEntry } from '$lib/stores/executions.svelte';
 	import { subscribeTick, tickNow } from '$lib/utils/tick.svelte';
-	import type { ResultDisplay } from '$lib/utils/tool-render';
+	import { executionErrorKind, TOOL_ERROR_LOOKS, type ResultDisplay } from '$lib/utils/tool-render';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ToolErrorLabel from './ToolErrorLabel.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -31,13 +32,13 @@
 	const toolName = $derived(entry?.tool_name ?? display.toolName ?? '');
 	// 終端のエラー文言は畳まずに見せる(tooltip だけだと気づけない)
 	const errorText = $derived(entry?.error ?? '');
-	// tool のエラー種別(サーバの旗 — 本文は解釈しない)。failed ∧ call は「呼び直し」(amber)。
-	// outcome は status done で届くので成功の見た目のまま
-	const callError = $derived(status === 'failed' && entry?.error_kind === 'call');
+	// tool のエラー種別(サーバの旗 — 本文は解釈しない)。見た目は ToolCallBlock と同じ表
+	// (TOOL_ERROR_LOOKS)。outcome は status done で届くが「該当なし」(amber)で出す
+	const errorKind = $derived(executionErrorKind(status, entry?.error_kind));
+	const errorLook = $derived(errorKind ? TOOL_ERROR_LOOKS[errorKind] : null);
 
 	const statusLabel = $derived.by(() => {
 		if (status === 'done') return $i18n.t('Completed');
-		if (status === 'failed') return callError ? $i18n.t('Retry needed') : $i18n.t('Failed');
 		if (status === 'stopped') return $i18n.t('Stopped');
 		if (status === 'orphaned') return $i18n.t('Lost on server restart');
 		return $i18n.t('Running...');
@@ -65,22 +66,28 @@
 <div {id} class="flex items-center gap-2 text-sm min-w-0 px-0.5 my-0.5" title={errorText}>
 	{#if running}
 		<Spinner className="size-3.5 shrink-0" />
+	{:else if errorLook}
+		<span class="{errorLook.icon} size-4 block shrink-0 {errorLook.iconClass}"></span>
 	{:else if status === 'done'}
 		<span class="i-lucide-circle-check size-4 block shrink-0 text-green-500 dark:text-green-400"
 		></span>
 	{:else if status === 'stopped'}
 		<span class="i-lucide-circle-stop size-4 block shrink-0 text-content-muted"></span>
-	{:else if callError}
+	{:else}
+		<!-- orphaned(サーバ再起動で失われた)— バグではないので赤にしない -->
 		<span class="i-lucide-circle-alert size-4 block shrink-0 text-amber-500 dark:text-amber-400"
 		></span>
-	{:else}
-		<span class="i-lucide-circle-alert size-4 block shrink-0 text-red-600 dark:text-red-400"></span>
 	{/if}
 
 	{#if toolName}
 		<span class="font-medium font-mono truncate">{toolName}</span>
 	{/if}
-	<span class="text-xs text-content-muted shrink-0 {running ? 'shimmer' : ''}">{statusLabel}</span>
+	{#if errorKind}
+		<ToolErrorLabel kind={errorKind} class="text-xs shrink-0" />
+	{:else}
+		<span class="text-xs text-content-muted shrink-0 {running ? 'shimmer' : ''}">{statusLabel}</span
+		>
+	{/if}
 	{#if timeLabel}
 		<span class="text-xs text-content-subtle tabular-nums shrink-0">{timeLabel}</span>
 	{/if}

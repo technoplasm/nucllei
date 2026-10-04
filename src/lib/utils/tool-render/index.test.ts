@@ -8,6 +8,9 @@ import {
 	formatJSONString,
 	parseToolArguments,
 	parseToolArgumentsStreaming,
+	executionErrorKind,
+	TOOL_ERROR_KINDS,
+	TOOL_ERROR_LOOKS,
 	toolErrorKind
 } from './index';
 
@@ -458,13 +461,51 @@ describe('formatJSONString', () => {
 });
 
 describe('toolErrorKind', () => {
-	it('サーバの旗 3 種だけを受け、それ以外は null(本文は解釈しない)', () => {
+	it('サーバの旗 5 種だけを受け、それ以外は null(本文は解釈しない)', () => {
 		expect(toolErrorKind('call')).toBe('call');
 		expect(toolErrorKind('failure')).toBe('failure');
 		expect(toolErrorKind('outcome')).toBe('outcome');
+		expect(toolErrorKind('violation')).toBe('violation');
+		expect(toolErrorKind('fatal')).toBe('fatal');
 		expect(toolErrorKind(undefined)).toBeNull();
 		expect(toolErrorKind(null)).toBeNull();
 		expect(toolErrorKind('ERROR: x')).toBeNull();
 		expect(toolErrorKind({ kind: 'call' })).toBeNull();
+	});
+});
+
+describe('TOOL_ERROR_LOOKS', () => {
+	const red = (kind: (typeof TOOL_ERROR_KINDS)[number]) =>
+		TOOL_ERROR_LOOKS[kind].iconClass.includes('red');
+
+	it('赤は violation / fatal だけ。ほかの 3 種は同じ amber の色調(2026-10-04 ken)', () => {
+		expect(TOOL_ERROR_KINDS.filter(red)).toEqual(['violation', 'fatal']);
+		const amber = TOOL_ERROR_KINDS.filter((kind) => !red(kind)).map(
+			(kind) => TOOL_ERROR_LOOKS[kind]
+		);
+		expect(amber.map((look) => look.iconClass)).toEqual(Array(3).fill(amber[0].iconClass));
+		expect(amber[0].iconClass).toContain('amber');
+	});
+
+	it('アイコンは種別ごとに別(class icon)', () => {
+		const looks = TOOL_ERROR_KINDS.map((kind) => TOOL_ERROR_LOOKS[kind]);
+		expect(new Set(looks.map((look) => look.icon)).size).toBe(5);
+		for (const look of looks) expect(look.icon).toMatch(/^i-lucide-/);
+	});
+});
+
+describe('executionErrorKind', () => {
+	it('done は outcome のときだけ、failed は種別(無ければ failure)', () => {
+		expect(executionErrorKind('done', undefined)).toBeNull();
+		expect(executionErrorKind('done', 'outcome')).toBe('outcome');
+		expect(executionErrorKind('done', 'fatal')).toBeNull();
+		expect(executionErrorKind('failed', 'call')).toBe('call');
+		expect(executionErrorKind('failed', 'fatal')).toBe('fatal');
+		expect(executionErrorKind('failed', 'violation')).toBe('violation');
+		expect(executionErrorKind('failed', null)).toBe('failure');
+		expect(executionErrorKind('failed', 'outcome')).toBe('failure');
+		expect(executionErrorKind('running', 'call')).toBeNull();
+		expect(executionErrorKind('stopped', null)).toBeNull();
+		expect(executionErrorKind('orphaned', null)).toBeNull();
 	});
 });

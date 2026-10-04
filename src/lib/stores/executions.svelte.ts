@@ -195,7 +195,7 @@ export type ExecutionDonePayload = {
 	finished_at?: number | null;
 	duration?: number | null;
 	error?: string | null;
-	error_kind?: 'call' | 'failure' | 'outcome' | null;
+	error_kind?: 'call' | 'failure' | 'outcome' | 'violation' | 'fatal' | null;
 };
 
 /**

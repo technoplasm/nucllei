@@ -18,6 +18,7 @@
 		formatJSONString,
 		parseToolArgumentsStreaming,
 		toolErrorKind,
+		TOOL_ERROR_LOOKS,
 		type ToolCallRender,
 		type ToolErrorKind
 	} from '$lib/utils/tool-render';
@@ -31,6 +32,7 @@
 	} from '$lib/stores/tool-progress.svelte';
 	import { getExecutionEntry, refreshExecutionsUntilTerminal } from '$lib/stores/executions.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ToolErrorLabel from './ToolErrorLabel.svelte';
 	import HljsCode from '$lib/components/common/HljsCode.svelte';
 	import Markdown from './Markdown.svelte';
 	import SubagentSessionBlock from './SubagentSessionBlock.svelte';
@@ -144,15 +146,10 @@
 	const hasArgs = $derived(argDisplays === null || argDisplays.length > 0);
 
 	// tool のエラー(サーバの旗 error_kind だけで判定 — 本文の "ERROR:" は解釈しない)。
-	// call = 呼び直し(amber)/ failure = 失敗(red)/ outcome = 答えが「無い」(見た目は成功)
+	// call 呼び直し / failure 失敗 / outcome 該当なし は amber、violation 規約違反 /
+	// fatal エラー は赤(見た目の表は tool-render の TOOL_ERROR_LOOKS)
 	const errorKind = $derived(toolErrorKind(result?.error_kind));
-	const errorLabel = $derived(
-		errorKind === 'call'
-			? $i18n.t('Retry needed')
-			: errorKind === 'failure'
-				? $i18n.t('Failed')
-				: ''
-	);
+	const errorLook = $derived(errorKind ? TOOL_ERROR_LOOKS[errorKind] : null);
 
 	// 結果の表示種別: 戻り型宣言(call.render.result)→ backend が実行時の実型から
 	// 同梱した result.render(dict/list → json)→ text(中身からの動的解釈はしない)。
@@ -322,13 +319,9 @@
 				<div>
 					<Spinner className="size-4" />
 				</div>
-			{:else if errorKind === 'call'}
-				<div class="text-amber-500 dark:text-amber-400 shrink-0">
-					<span class="i-lucide-circle-alert size-4 block"></span>
-				</div>
-			{:else if errorKind === 'failure'}
-				<div class="text-red-600 dark:text-red-400 shrink-0">
-					<span class="i-lucide-circle-x size-4 block"></span>
+			{:else if errorLook}
+				<div class="{errorLook.iconClass} shrink-0">
+					<span class="{errorLook.icon} size-4 block"></span>
 				</div>
 			{:else}
 				<div class="text-green-500 dark:text-green-400 shrink-0">
@@ -357,14 +350,8 @@
 				ヘッダは w-fit バッジで open 時は枠の上辺タブに合体するため、長い
 				description で幅が暴れないよう max-w + truncate で頭を押さえる。
 			-->
-			{#if isDone && !execRunning && errorLabel}
-				<div
-					class="font-normal shrink-0 {errorKind === 'call'
-						? 'text-amber-600 dark:text-amber-400'
-						: 'text-red-600 dark:text-red-400'}"
-				>
-					{errorLabel}
-				</div>
+			{#if isDone && !execRunning && errorKind}
+				<ToolErrorLabel kind={errorKind} class="font-normal shrink-0" />
 			{/if}
 			{#if subagentLabel}
 				<div class="max-w-52 truncate font-normal">{subagentLabel}</div>
@@ -438,11 +425,9 @@
 							}}
 						>
 							<span
-								class="i-lucide-corner-down-left size-3 block {errorKind === 'call'
-									? 'text-amber-500'
-									: errorKind === 'failure'
-										? 'text-red-500'
-										: 'text-emerald-500'}"
+								class="i-lucide-corner-down-left size-3 block {errorLook
+									? errorLook.iconClass
+									: 'text-emerald-500'}"
 							></span>
 							Result
 						</div>

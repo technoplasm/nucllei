@@ -178,14 +178,77 @@ export const formatJSONString = (str: unknown): string => {
 
 // tool のエラー種別(BE の ToolError — README_API §5.1)。tool result / exec 行の
 // `error_kind` でサーバが明示する。表示はこの旗だけで決める — 本文("ERROR: …")を
-// 文字列として解釈しない。
-// - call: 呼び方の誤り(引数・tool 名・id)→ 呼び直し(amber)
-// - failure: 実行時の失敗(例外・timeout・到達不能・上限)→ 失敗(red)
-// - outcome: 呼び出しは成功、答えが「無い」(404・範囲外・該当なし)→ 見た目は成功と同じ
-export type ToolErrorKind = 'call' | 'failure' | 'outcome';
+// 文字列として解釈しない。**赤はバグ・致命的なものとモデルの規約違反だけ**、ふつうの
+// 失敗は amber(2026-10-04 ken):
+// - call: tool の中で見つけた呼び方の誤り(値の形・id)→ 呼び直し(amber)
+// - failure: 実行時の失敗(timeout・到達不能・上流のエラー・上限)→ 失敗(amber)
+// - outcome: 呼び出しは成立、答えが「無い」(404・範囲外・該当なし)→ 該当なし(amber)
+// - violation: モデルが呼び出しの規約を破った(一覧に無い tool・読めない arguments・
+//   必須引数の欠落・署名に無い引数)→ 規約違反(red)
+// - fatal: tool / サーバ自体が壊れている(設定・バグ・捕らえていない例外)→ エラー(red)
+export const TOOL_ERROR_KINDS = ['call', 'failure', 'outcome', 'violation', 'fatal'] as const;
+export type ToolErrorKind = (typeof TOOL_ERROR_KINDS)[number];
 
 export const toolErrorKind = (value: unknown): ToolErrorKind | null =>
-	value === 'call' || value === 'failure' || value === 'outcome' ? value : null;
+	(TOOL_ERROR_KINDS as readonly unknown[]).includes(value) ? (value as ToolErrorKind) : null;
+
+// 種別ごとの見た目。icon / 色のクラスは Tailwind が拾えるよう文字列リテラルのまま持つ
+// (組み立てない)。amber の 3 種は同じ色調でアイコンだけ変える。ラベル(呼び直し / 失敗 /
+// 該当なし / 規約違反 / エラー)は i18next-parser が拾える .svelte 側
+// (`components/chat/Messages/ToolErrorLabel.svelte`)が持つ
+export type ToolErrorLook = {
+	icon: string;
+	// ヘッダのアイコン・Result タブの矢印(図形)
+	iconClass: string;
+	// ラベル文字(図形より 1 段濃い — 細い文字でも読めるように)
+	textClass: string;
+};
+
+const AMBER_ICON = 'text-amber-500 dark:text-amber-400';
+const AMBER_TEXT = 'text-amber-600 dark:text-amber-400';
+const RED_ICON = 'text-red-600 dark:text-red-400';
+const RED_TEXT = 'text-red-600 dark:text-red-400';
+
+export const TOOL_ERROR_LOOKS: Record<ToolErrorKind, ToolErrorLook> = {
+	call: {
+		icon: 'i-lucide-rotate-ccw',
+		iconClass: AMBER_ICON,
+		textClass: AMBER_TEXT
+	},
+	failure: {
+		icon: 'i-lucide-circle-alert',
+		iconClass: AMBER_ICON,
+		textClass: AMBER_TEXT
+	},
+	outcome: {
+		icon: 'i-lucide-search-x',
+		iconClass: AMBER_ICON,
+		textClass: AMBER_TEXT
+	},
+	violation: {
+		icon: 'i-lucide-ban',
+		iconClass: RED_ICON,
+		textClass: RED_TEXT
+	},
+	fatal: {
+		icon: 'i-lucide-circle-x',
+		iconClass: RED_ICON,
+		textClass: RED_TEXT
+	}
+};
+
+// exec 行(background)の終端 → 見た目の種別。outcome は status done で届き、それ以外の
+// 種別は failed で届く。failed なのに種別が無い行(spawn の後段で起動できなかった行 —
+// 同じターンの結果は failure)は failure の見た目にする(赤はサーバが fatal と言ったときだけ)
+export const executionErrorKind = (
+	status: string | null | undefined,
+	value: unknown
+): ToolErrorKind | null => {
+	const kind = toolErrorKind(value);
+	if (status === 'done') return kind === 'outcome' ? kind : null;
+	if (status === 'failed') return kind && kind !== 'outcome' ? kind : 'failure';
+	return null;
+};
 
 // #110: execution チャンネルの「封筒」2 種。
 // ① spawn 即返し {ok, task_id, tool_name, status: "running"} — kind=execution の

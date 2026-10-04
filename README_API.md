@@ -430,9 +430,10 @@ Errors are assembled the same way everywhere:
 These helpers (and `ref_errors.explain_ref_error`) return a `ToolError` that
 the tool raises (§5.1 "Failures"); the kind follows the code — `REF_ERROR_KINDS`:
 `not_found` / `too_large` → `outcome`, `unsupported_form` / `unknown_upstream` /
-`traversal` (and the three fixed-form helpers) → `call`, the rest
-(`upstream_status`, `upstream_unreachable`, `workspace_unavailable`, unexplained)
-→ `failure` — except `upstream_status` with HTTP 404 / 410, which is `outcome`
+`traversal` (and the three fixed-form helpers) → `call`, `upstream_status` /
+`upstream_unreachable` / `workspace_unavailable` → `failure`, and an
+unexplained error (no `RefError`, or a code the table does not know — a gap on
+our side) → `fatal` — except `upstream_status` with HTTP 404 / 410, which is `outcome`
 like `not_found` (401 / 403, other 4xx, 5xx and redirects that could not be
 followed stay `failure`).
 
@@ -1157,34 +1158,44 @@ class Tools:
   - **Failures: raise `ToolError`** (#145, 2026-10-04). A failed call is not
     returned as a string or as `{ok: false, error}` — the tool raises
     `nucllei.utils.tool_errors.ToolError(fact, next=None, *, kind=...)` (or a
-    subclass: `ToolCallError` / `ToolFailure` / `ToolOutcome`). The model text
+    subclass: `ToolCallError` / `ToolFailure` / `ToolOutcome` / `ToolFatal`;
+    `ToolViolation` is the server's own). The model text
     is assembled in one place: `ERROR: {fact}。次の手: {next}` (`ERROR: {fact}。`
     without `next`; a trailing 「。」 on `fact` is normalised). `fact` follows the
     fact-sentence rules above (user-safe); `next` is the model-only part.
-    `kind` says whose problem it is, and the chat UI shows it on the tool card:
+    `kind` says whose problem it is, and the chat UI shows it on the tool card.
+    **Red is kept for bugs / broken servers and for the model breaking the call
+    protocol**; ordinary errors are amber (ken 2026-10-04):
 
-    | kind      | meaning                                                                                                                                                                                               | UI                     |
-    | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, a subagent session that is still running, arguments not parseable JSON | amber 「呼び直し」     |
-    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                                                               | red 「失敗」           |
-    | `outcome` | the call worked but the answer is "none" — not found / 404 / 410, out of range, too large, a named attachment that is not there                                                                       | same look as a success |
+    | kind        | meaning                                                                                                                                                                                                            | UI                                    |
+    | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+    | `call`      | a tool found it was called wrong — empty / wrong-form value, bad `task_id` / `session_id` / `file_id`, a subagent session that is still running                                                                    | amber 「呼び直し」 (Retry needed)     |
+    | `failure`   | runtime failure that is not a bug — timeout, sandbox / upstream unreachable, upstream 5xx / 401 / 403, concurrency / depth limits, multi-worker, background start refused, no user / chat context                  | amber 「失敗」 (Failed)               |
+    | `outcome`   | the call worked but the answer is "none" — not found / 404 / 410, out of range, too large, a named attachment that is not there                                                                                    | amber 「該当なし」 (Not found)        |
+    | `violation` | the model broke the call protocol (checked by the server before the tool runs) — tool not in this turn's list, `arguments` not parseable JSON, required argument missing, argument not in the signature            | red 「規約違反」 (Protocol violation) |
+    | `fatal`     | the tool / server itself is broken, not the model's or user's doing — sandbox authentication (misconfigured key), unreadable sandbox response, file registration failed, a converter crash, any uncaught exception | red 「エラー」 (Error)                |
+
+    Each kind has its own icon; the three amber kinds share one tone.
 
     The server builds failures it detects itself the same way: unknown tool and
-    unparseable `arguments` → `call`; a required argument missing from the call
-    (checked against the callable's signature before invoking — reserved
+    unparseable `arguments` → `violation`; a required argument missing from the
+    call (checked against the callable's signature before invoking — reserved
     `__x__` parameters and parameters with defaults are not required) →
-    `call` 「ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を付けて呼び直す。」;
+    `violation` 「ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を付けて呼び直す。」;
     an argument that passed the spec filter but the callable does not accept →
-    `call`; timeout → `failure`; any other exception → `failure` with the class
-    name + the first 200 characters only (the full trace goes to the log).
+    `violation`; timeout → `failure`; any other (uncaught) exception is a bug →
+    `fatal` with the class name + the first 200 characters only (the full
+    trace goes to the log). The model text is the same whatever the kind.
     A JSON-returning tool raises only when there is nothing else to return; a
     result that carries real payload next to a caveat (`run_subagent` stopped
     with a partial answer, a truncated read) stays a normal result.
     **Wire**: the tool result in `content_blocks` (`results[]`, persisted, so a
-    reload shows it) carries `error_kind: "call" | "failure" | "outcome"`
-    next to `content` (the model text); absent on success. Background tasks
-    store it in the execution row's `meta.error_kind` and expose it as
-    `error_kind` in the executions list and the `execution:done` event (§5.9).
+    reload shows it) carries
+    `error_kind: "call" | "failure" | "outcome" | "violation" | "fatal"` next to
+    `content` (the model text); absent on success. Background tasks store it in
+    the execution row's `meta.error_kind` and expose it as `error_kind` in the
+    executions list, the `execution:done` event and the `check_task` /
+    `await_task` entries (§5.9).
     Clients decide by this flag, never by parsing `ERROR:`.
     **Custom tools** import the classes and raise them — the path works inside
     a DB-stored tool (the plugin loader runs it with nucllei importable):
@@ -1206,7 +1217,7 @@ class Tools:
     (`ToolError(fact, next, kind=...)` is the base; guard the import like §5.4
     if the file must lint outside nucllei.) **A returned string is always a
     normal result** — even one that starts with `ERROR:`; nothing sniffs the
-    text. Any other uncaught exception goes the generic `failure` path.
+    text. Any other uncaught exception goes the generic `fatal` path.
 
   - The description is re-sent on **every turn** for every mounted function:
     keep it to what the model needs to decide whether and how to call
@@ -1337,7 +1348,8 @@ async def read_doc(self, path: str) -> Markdown:
   (JSON-serialized). Report a failure by raising `ToolError` (§5.1 "Failures")
   — the fact sentence and `次の手:` steer the model, and the kind is shown in
   the UI. Any other exception is safe too, but reaches the model only as
-  「ツール X の実行中にエラーが起きた (<class>: <first 200 chars>)」 (kind `failure`).
+  「ツール X の実行中にエラーが起きた (<class>: <first 200 chars>)」 (kind `fatal`
+  — an uncaught exception is treated as a bug).
 - Generators are not supported.
 - Per-call timeout `TOOL_EXEC_TIMEOUT_S` (default 300 s) and loop cap
   `TOOL_CALL_MAX_ITERATIONS` (default 30) — see §3.6.
@@ -1788,7 +1800,8 @@ true` is honoured as before (plain synchronous calls already run
 true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   those entries in order. Each entry:
   `{task_id, tool_name, status, started_at, elapsed_s}` plus `progress` while
-  running or `duration`/`error` when terminal. Never returns the result body
+  running or `duration`/`error`/`error_kind` (§5.1, when the row has one) when
+  terminal. Never returns the result body
   and never writes (read-only).
 - `await_task(task_ids, timeout?)` — collect results now. One bounded window
   (default 90 s, clamped to 10–300) covers all ids (max 20 per call);
@@ -1799,7 +1812,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
   (with the original tool's render descriptor when exactly one done task was
   requested, and a one-time replay of `context_images`/`display`
-  side-channels); `failed/stopped/orphaned` → `{ok: false, ..., error}`;
+  side-channels; `error_kind: "outcome"` when the answer was "none");
+  `failed/stopped/orphaned` → `{ok: false, ..., error, error_kind?}`
+  (`error_kind` from the row's `meta.error_kind` — absent for stopped /
+  orphaned);
   still running at the deadline → the running form (partial collection — the
   server delivers the rest later).
 - `stop_task(task_ids)` — force-stop; returns each task's actual state
@@ -1839,13 +1855,14 @@ workspace-export chat attachments emitted after the parent turn ended are not
 re-attached by the delivery notice (files themselves are persisted and listed
 in the result string).
 
-Failures in a background run follow §5.1 "Failures": a `ToolError` of kind
-`call` / `failure` ends the row `failed` with the model text in `error`; an
+Failures in a background run follow §5.1 "Failures": a `ToolError` of any kind
+but `outcome` ends the row `failed` with the model text in `error`; an
 `outcome` ends it `done` with the text as `result` (the call worked — the
 answer is "none"); either way `meta.error_kind` records the kind. A timeout is
-`failed` 「ERROR: ツール X の background 実行が N 秒の上限でタイムアウトした。…」 and
-any other exception is `failed` with the same class-name + 200-character text
-as the synchronous path (the raw exception string is logged, not stored).
+`failed` 「ERROR: ツール X の background 実行が N 秒の上限でタイムアウトした。…」
+(`failure`) and any other exception is `failed` / `fatal` with the same
+class-name + 200-character text as the synchronous path (the raw exception
+string is logged, not stored).
 
 Over HTTP the rows are readable and stoppable by the chat's owner:
 `GET /api/v1/chats/{id}/executions` (object form with `delivered` /
