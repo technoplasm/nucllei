@@ -664,8 +664,8 @@ def _execution_item(execution: ExecutionModel) -> dict:
         # run_subagent の子 agent session(実行中に exec 行 meta へ永続化 — リロード後の
         # カードが子 session へ再リンクする。他の tool / 子の無い行は None)
         "session_id": (execution.meta or {}).get(SUBAGENT_SESSION_META_KEY),
-        # #145: 失敗の種別(call / failure / outcome — utils/tool_errors)。FE は error の
-        # 文面を解釈せずこれで見た目を決める。成功・旧行・stopped / orphaned は None
+        # #145: 失敗の種別(call / failure / outcome / violation / fatal — utils/tool_errors)。
+        # FE は error の文面を解釈せずこれで見た目を決める。成功・旧行・stopped / orphaned は None
         "error_kind": (execution.meta or {}).get(ERROR_KIND_META_KEY),
     }
 

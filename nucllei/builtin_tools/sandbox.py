@@ -39,6 +39,7 @@ from nucllei.utils.tool_errors import (
     ToolError,
     ToolErrorKind,
     ToolFailure,
+    ToolFatal,
     ToolOutcome,
 )
 from nucllei.utils.tool_output import display
@@ -221,7 +222,8 @@ def _err(text: str, kind: ToolErrorKind) -> ToolError:
 
 
 def _sandbox_auth() -> ToolError:
-    return _err(_SANDBOX_AUTH, "failure")
+    # 鍵の設定の誤り = サーバが壊れている (呼び直しても直らない) → fatal
+    return _err(_SANDBOX_AUTH, "fatal")
 
 
 def _exec_error(e: Exception) -> ToolError:
@@ -425,7 +427,8 @@ def _explain_mount_error(abs_path: str, err) -> ToolError:
             "run_shell で /workspace/ に別名でコピーしてからそのパスを渡す。",
         )
     log.info(f"[sandbox] fetch_from_workspace {abs_path}: unexplained {code}")
-    return ToolFailure(f"{abs_path} を読めない")
+    # resolver が返した code をこの tool が言い分けられない = こちらの取りこぼし → fatal
+    return ToolFatal(f"{abs_path} を読めない")
 
 
 def _iter_context_files(__files__, __metadata__):
@@ -1165,7 +1168,7 @@ class Tools:
             data = base64.b64decode(res["b64"])
         except Exception as e:
             log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
-            raise ToolFailure("sandbox の応答を読めない")
+            raise ToolFatal("sandbox の応答を読めない")
         return await self._attach(
             abs_path,
             os.path.basename(res["name"]),
@@ -1234,7 +1237,7 @@ class Tools:
             att = _register_bytes_file(user_id, name, data)
         except Exception as e:
             log.error(f"[sandbox] register {abs_path} failed: {e!r}")
-            raise ToolFailure("ファイルの登録に失敗した")
+            raise ToolFatal("ファイルの登録に失敗した")
         await self._persist_and_emit_files(
             [att], chat_id, message_id, __event_emitter__
         )

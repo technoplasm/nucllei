@@ -48,7 +48,7 @@ from nucllei.utils.completion_events import CompletionEventStream
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
 from nucllei.utils.executions import in_exec
 from nucllei.utils.misc import get_message_list
-from nucllei.utils.tool_errors import ToolCallError, ToolFailure
+from nucllei.utils.tool_errors import ToolCallError, ToolFailure, ToolFatal
 from nucllei.env import (
     SRC_LOG_LEVELS,
     SUBAGENT_MAX_CONCURRENCY,
@@ -646,7 +646,8 @@ async def run_subagent_turn(
                 depth=depth,
             )
             if child is None:
-                raise ToolFailure(
+                # 行の INSERT に失敗した = DB 側が壊れている → fatal
+                raise ToolFatal(
                     "サブエージェントのセッションを作れなかった", "自分で処理する。"
                 )
             child_chat_id = child.id

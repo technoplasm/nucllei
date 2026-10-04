@@ -19,6 +19,7 @@ import importlib
 import types
 
 import httpx
+import pytest
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
@@ -536,6 +537,12 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "SANDBOX_TOKEN" not in out
         # 繋がってはいるので「接続できない」とは言わない
         assert "接続できない" not in out
+        # 鍵の設定の誤り = サーバが壊れている → fatal(赤。2026-10-04 ken)
+        from nucllei.utils.tool_errors import ToolError
+
+        with pytest.raises(ToolError) as e:
+            asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
+        assert e.value.kind == "fatal"
 
     def test_http_failure_is_graceful(self):
         """T11: 接続不能・非 200 とも例外を漏らさず "ERROR: ..." で返す。detail はモデルに

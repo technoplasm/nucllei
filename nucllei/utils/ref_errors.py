@@ -221,7 +221,8 @@ def explain_ref_error(
     `ToolError.from_text` で事実と次の手に分け、kind は code で決める(`REF_ERROR_KINDS`)。
     """
     if err is None:
-        return _tool_error(_fill(hints.unexplained, ref), "failure")
+        # 理由の無い失敗は resolver 側の取りこぼし(通常起きない)= バグ → fatal
+        return _tool_error(_fill(hints.unexplained, ref), "fatal")
     code = err.code or ""
     log.info(f"ref_errors: resolver refused {ref} (arg={arg}): {code} {err.detail}")
     return _tool_error(_explain_text(ref, err, code, arg, hints), _ref_error_kind(err))
@@ -229,7 +230,8 @@ def explain_ref_error(
 
 # RefError.code → ToolError の kind(utils/tool_errors)。答えが「無い」(404・大きすぎる)は
 # outcome、引数の形・取りに行かない相手を指した・範囲外は call、届かない・上流の失敗は failure。
-# 載っていない code(unexplained に落ちるもの)は failure
+# 載っていない code(unexplained に落ちるもの)は fatal — 言い分けられない code はこちらの
+# 取りこぼし(バグ)
 REF_ERROR_KINDS: Mapping[str, ToolErrorKind] = MappingProxyType(
     {
         "too_large": "outcome",
@@ -256,7 +258,7 @@ def _ref_error_kind(err: RefError) -> ToolErrorKind:
                 return "outcome"
         except (TypeError, ValueError):
             pass
-    return REF_ERROR_KINDS.get(err.code or "", "failure")
+    return REF_ERROR_KINDS.get(err.code or "", "fatal")
 
 
 def _tool_error(text: str | ToolError, kind: ToolErrorKind) -> ToolError:

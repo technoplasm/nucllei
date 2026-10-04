@@ -1,9 +1,10 @@
 """utils/tool_errors(#145)— tool の失敗の 1 つの形と、middleware が結果に載せる種別の番兵。
 
 - 文はここ 1 箇所で組む: `ERROR: {fact}。次の手: {next}`(次の手が無ければ `ERROR: {fact}。`)
-- kind は call / failure / outcome の 3 つ。wire の result に `error_kind` として載る
-- execute_tool_calls: ToolError・例外・タイムアウト・一覧に無い tool・読めない arguments・
-  署名と合わない引数(#145 項目 2)を、種別付きの結果にする
+- kind は call / failure / outcome / violation / fatal の 5 つ。wire の result に `error_kind`
+  として載る(赤は violation / fatal だけ — ken 2026-10-04)
+- execute_tool_calls: ToolError・例外(fatal)・タイムアウト(failure)・一覧に無い tool・
+  読めない arguments・署名と合わない引数(#145 項目 2 — violation)を、種別付きの結果にする
 - 旧来の `ERROR:` 文字列を返すカスタム tool は文面そのまま failure にフラグが立つ
 - ref_errors のテンプレートを ToolError に通しても文面は 1 文字も変わらない
 """
@@ -19,7 +20,9 @@ from nucllei.utils.tool_errors import (
     ToolCallError,
     ToolError,
     ToolFailure,
+    ToolFatal,
     ToolOutcome,
+    ToolViolation,
     format_tool_error,
     tool_exception_text,
 )
@@ -71,7 +74,10 @@ def test_kinds_of_the_subclasses():
     assert ToolCallError("x").kind == "call"
     assert ToolFailure("x").kind == "failure"
     assert ToolOutcome("x").kind == "outcome"
+    assert ToolViolation("x").kind == "violation"
+    assert ToolFatal("x").kind == "fatal"
     assert ToolError("x", kind="outcome").kind == "outcome"
+    assert ToolError("x", kind="fatal").kind == "fatal"
     assert ToolCallError("x", kind="failure").kind == "failure"
     with pytest.raises(ValueError):
         ToolError("x", kind="oops")
@@ -159,7 +165,8 @@ def test_ref_error_templates_round_trip_unchanged():
                 ref, err, arg=arg, hints=hints
             ).text == (raw), (arg, err)
         none = ref_errors.explain_ref_error(ref, None, arg=arg, hints=hints)
-        assert none.kind == "failure"
+        # 理由の無い失敗は resolver の取りこぼし = fatal
+        assert none.kind == "fatal"
         assert none.text == hints.unexplained.replace("{ref}", ref).replace(
             "{code}", ""
         )
@@ -181,7 +188,8 @@ def test_ref_error_kinds_by_code():
     arg, hints = hint_sets[1]  # path(workspace_unavailable の文を持つ)
     for err in _CODES:
         got = ref_errors.explain_ref_error(ref, err, arg=arg, hints=hints).kind
-        assert got == expected.get(err.code, "failure"), err
+        # 載っていない code(unexplained に落ちる)は fatal
+        assert got == expected.get(err.code, "fatal"), err
     # 形の固定文は call
     assert ref_errors.url_error("x").kind == "call"
     # upstream_status は status で分ける: 404 / 410 は「無い」= outcome、それ以外は failure
@@ -220,6 +228,7 @@ def test_ref_error_kinds_by_code():
         ToolCallError("引数 x の形が違う", "x を整数で渡す。"),
         ToolFailure("上流に届かない", "時間を置いて呼び直す。"),
         ToolOutcome("一致する行が無い"),
+        ToolFatal("sandbox の応答を読めない"),
     ],
 )
 def test_tool_error_becomes_text_and_kind(error):
@@ -243,12 +252,14 @@ def test_success_has_no_error_kind():
     assert results[0]["render"] == {"kind": "json"}
 
 
-def test_exception_is_a_failure_with_the_class_name_only():
+def test_exception_is_fatal_with_the_class_name_only():
+    """捕らえていない例外はバグ = fatal(赤)。文面は変えない。"""
+
     async def probe():
         raise RuntimeError("http://internal.example/secret " + "y" * 300)
 
     results = _run([_call("{}")], _tool(probe))
-    assert results[0]["error_kind"] == "failure"
+    assert results[0]["error_kind"] == "fatal"
     assert results[0]["content"] == tool_exception_text(
         "probe", RuntimeError("http://internal.example/secret " + "y" * 300)
     )
@@ -270,9 +281,9 @@ def test_timeout_is_a_failure():
     )
 
 
-def test_unknown_tool_is_a_call_error():
+def test_unknown_tool_is_a_violation():
     results = _run([_call("{}", name="ghost")], {})
-    assert results[0]["error_kind"] == "call"
+    assert results[0]["error_kind"] == "violation"
     assert results[0]["content"] == (
         "ERROR: ツール ghost は今は使えない (このターンの一覧に無い)。"
         "次の手: 一覧にある tool だけを使う。"
@@ -281,7 +292,7 @@ def test_unknown_tool_is_a_call_error():
 
 
 @pytest.mark.parametrize("arguments", ["{not json", "[1, 2]", "null", "42"])
-def test_unparseable_arguments_are_a_call_error(arguments):
+def test_unparseable_arguments_are_a_violation(arguments):
     calls = []
 
     async def probe(**kwargs):
@@ -290,7 +301,7 @@ def test_unparseable_arguments_are_a_call_error(arguments):
 
     results = _run([_call(arguments)], _tool(probe))
     assert calls == []  # tool は走らない(旧: 黙って {} で呼んでいた)
-    assert results[0]["error_kind"] == "call"
+    assert results[0]["error_kind"] == "violation"
     assert results[0]["content"] == (
         "ERROR: ツール probe の引数を JSON のオブジェクトとして読めない。"
         "次の手: 引数を正しい JSON で呼び直す。"
@@ -307,7 +318,7 @@ def test_empty_arguments_still_mean_no_arguments(arguments):
     assert "error_kind" not in results[0]
 
 
-def test_missing_required_argument_is_a_call_error():
+def test_missing_required_argument_is_a_violation():
     """#145 項目 2: 必須引数の欠落は生の TypeError ではなく専用の ERROR 文。"""
     calls = []
 
@@ -328,7 +339,7 @@ def test_missing_required_argument_is_a_call_error():
     )
     results = _run([_call("{}", name="read_doc")], tools)
     assert calls == []
-    assert results[0]["error_kind"] == "call"
+    assert results[0]["error_kind"] == "violation"
     assert results[0]["content"] == (
         "ERROR: ツール read_doc の必須の引数 path が無い。次の手: 引数を付けて呼び直す。"
     )
@@ -337,13 +348,13 @@ def test_missing_required_argument_is_a_call_error():
     assert results[0]["content"] == "body" and "error_kind" not in results[0]
 
 
-def test_argument_in_spec_but_not_in_signature_is_a_call_error():
+def test_argument_in_spec_but_not_in_signature_is_a_violation():
     async def probe(a: str):
         return a
 
     tools = _tool(probe, properties={"a": {}, "b": {}})
     results = _run([_call('{"a": "x", "b": "y"}')], tools)
-    assert results[0]["error_kind"] == "call"
+    assert results[0]["error_kind"] == "violation"
     assert results[0]["content"] == (
         "ERROR: ツール probe に引数 b は無い。次の手: その引数を外して呼び直す。"
     )
@@ -394,7 +405,7 @@ class Tools:
 
 def test_custom_db_tool_can_raise_tool_error():
     """配備層のカスタム tool(DB の content を exec でロード)も ToolError を import して
-    raise できる(README_API §5.1)。想定外の例外は汎用の failure 経路。"""
+    raise できる(README_API §5.1)。想定外の例外は汎用の fatal 経路。"""
     from nucllei.utils.plugin import load_tool_module_by_id
     from nucllei.utils.tools import get_async_tool_function_and_apply_extra_params
 
@@ -413,7 +424,7 @@ def test_custom_db_tool_can_raise_tool_error():
     )
 
     results = _run([_call('{"code": "0"}', name="lookup")], tools)
-    assert results[0]["error_kind"] == "failure"
+    assert results[0]["error_kind"] == "fatal"
     assert results[0]["content"] == tool_exception_text("lookup", RuntimeError("boom"))
 
     results = _run([_call('{"code": "12"}', name="lookup")], tools)

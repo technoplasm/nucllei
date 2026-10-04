@@ -108,7 +108,8 @@ _exec_sinks: dict[str, "_ExecSink"] = {}
 # exec 行 meta のキー: run_subagent の子 agent session id(一覧 API が session_id として出す)
 SUBAGENT_SESSION_META_KEY = "subagent_session_id"
 # exec 行 meta のキー: 失敗の種別(#145 — utils/tool_errors の kind。一覧 API・`execution:done`
-# が error_kind として出す)。call / failure は status failed、outcome は status done で終わる
+# が error_kind として出す)。outcome は status done、それ以外(call / failure / violation /
+# fatal)は status failed で終わる
 ERROR_KIND_META_KEY = "error_kind"
 
 
@@ -467,7 +468,7 @@ async def spawn_execution(
 
 
 def _error_outcome(sink: "_ExecSink", text: str, kind: str, duration: float) -> dict:
-    """失敗の終端(#145)。call / failure は failed + error、outcome は done + result。
+    """失敗の終端(#145)。outcome は done + result、それ以外の kind は failed + error。
 
     meta は終端で上書きされるので、走行中に書いた子 session id を載せ直す。
     副産物(context_images / display)は harvest しない(失敗 call は副産物を出さない —
@@ -526,8 +527,8 @@ async def _run_execution(
             # D2: stop / shutdown の cancel。永続化しない(re-raise のみ)
             raise
         except ToolError as e:
-            # #145: tool が宣言した失敗。call / failure は failed、outcome(答えが
-            # 「無い」)は done で結果に文を載せる — 同期経路と同じ見た目の区別
+            # #145: tool が宣言した失敗。outcome(答えが「無い」)は done で結果に文を
+            # 載せ、それ以外は failed — 見た目は error_kind で決まる(同期経路と同じ)
             log.info(f"async execution tool error: {tool_name}: {e!r}")
             outcome = _error_outcome(
                 sink, e.text, e.kind, round(time.monotonic() - started_at, 3)
@@ -548,12 +549,13 @@ async def _run_execution(
                 round(time.monotonic() - started_at, 3),
             )
         except Exception as e:
-            # 同期経路と同じく型名 + 先頭 200 字だけ(全文と stack は log)
+            # 同期経路と同じく型名 + 先頭 200 字だけ(全文と stack は log)。
+            # 捕らえていない例外はバグなので fatal
             log.exception(f"async execution failed: {tool_name} (exec_id={exec_id})")
             outcome = _error_outcome(
                 sink,
                 tool_exception_text(tool_name, e),
-                "failure",
+                "fatal",
                 round(time.monotonic() - started_at, 3),
             )
         else:

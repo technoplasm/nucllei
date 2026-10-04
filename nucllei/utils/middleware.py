@@ -101,9 +101,9 @@ from nucllei.utils.response_assembler import (
 )
 from nucllei.utils.sse import sse_line
 from nucllei.utils.tool_errors import (
-    ToolCallError,
     ToolError,
     ToolFailure,
+    ToolViolation,
     tool_exception_text,
 )
 
@@ -1365,7 +1365,7 @@ def _parse_tool_arguments(tool_name: str, raw) -> tuple[dict, Optional[ToolError
     一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
     _memos/model-frames.md)。Python リテラル風を出すモデル向けのフォールバックとして
     ast.literal_eval を残す(モデル多様性)。空(None・空文字・空白)は引数なし。
-    どちらでも object として読めなければ call の ToolError(#145 — 旧: 黙って {})。
+    どちらでも object として読めなければ violation の ToolError(#145 — 旧: 黙って {})。
     """
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return {}, None
@@ -1382,7 +1382,7 @@ def _parse_tool_arguments(tool_name: str, raw) -> tuple[dict, Optional[ToolError
             log.debug(f"Error parsing tool call arguments: {raw}")
     if isinstance(params, dict):
         return params, None
-    return {}, ToolCallError(
+    return {}, ToolViolation(
         f"ツール {tool_name} の引数を JSON のオブジェクトとして読めない",
         "引数を正しい JSON で呼び直す。",
     )
@@ -1392,7 +1392,7 @@ def _tool_signature_error(tool: dict, tool_name: str, params: dict):
     """呼ぶ前に callable の署名と引数を突き合わせる(#145 項目 2)。
 
     必須の引数が無い / 署名に無い引数がある呼び出しは、callable の生の TypeError
-    (`missing 1 required positional argument`)ではなく call の ToolError にする。
+    (`missing 1 required positional argument`)ではなく violation の ToolError にする(モデルの規約違反)。
     予約引数(`__user__` 等 — 注入される)と `*args` / `**kwargs` は数えない。署名が
     取れない callable(C 実装等)は検査しない。
     """
@@ -1414,14 +1414,14 @@ def _tool_signature_error(tool: dict, tool_name: str, params: dict):
         and name not in params
     ]
     if missing:
-        return ToolCallError(
+        return ToolViolation(
             f"ツール {tool_name} の必須の引数 {', '.join(missing)} が無い",
             "引数を付けて呼び直す。",
         )
     if not accepts_var_kw:
         unknown = [name for name in params if name not in parameters]
         if unknown:
-            return ToolCallError(
+            return ToolViolation(
                 f"ツール {tool_name} に引数 {', '.join(unknown)} は無い",
                 "その引数を外して呼び直す。",
             )
@@ -1501,9 +1501,10 @@ async def _execute_tool_call_sync(
         tool_result, error_kind = error.text, error.kind
     except Exception as e:
         # 例外は型名 + 先頭 200 字だけ(モデルの軌道修正の材料)。全文と stack は log にだけ
-        # 出す — str(e) は内部 URL・パスを含みうる(2026-10-04 llens 監査 B5)
+        # 出す — str(e) は内部 URL・パスを含みうる(2026-10-04 llens 監査 B5)。
+        # 捕らえていない例外はバグなので fatal(赤)
         log.warning(f"tool raised: {tool_name}: {e!r}", exc_info=True)
-        tool_result, error_kind = tool_exception_text(tool_name, e), "failure"
+        tool_result, error_kind = tool_exception_text(tool_name, e), "fatal"
     finally:
         tool_output.current_sink.reset(sink_token)
         # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
@@ -1528,7 +1529,7 @@ async def _execute_one_tool_call(
     # 知りたい(context_images/display の tool_succeeded ゲートとは規律が違う)。
     started_at = time.monotonic()
 
-    # #145: arguments が読めない呼び出しは黙って {} にせず call の ToolError にする
+    # #145: arguments が読めない呼び出しは黙って {} にせず violation の ToolError にする
     # (空文字・空白だけは引数なしとして通す)
     raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
     tool_function_params, arguments_error = _parse_tool_arguments(
@@ -1545,9 +1546,9 @@ async def _execute_one_tool_call(
         # 履歴に残った過去の tool call を真似るケース
         # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
         # 起きうる。黙って None を返さず、モデルが軌道修正
-        # できる明示メッセージを返す(call の ToolError — #145)。
+        # できる明示メッセージを返す(violation の ToolError — #145)。
         log.warning(f"model called unavailable tool '{tool_name}'")
-        error = ToolCallError(
+        error = ToolViolation(
             f"ツール {tool_name} は今は使えない (このターンの一覧に無い)",
             "一覧にある tool だけを使う。"
             "load_skill が使えて、skill の tool なら先に読み込む。",
@@ -1687,8 +1688,8 @@ async def _execute_one_tool_call(
         # 所要時間(#100)。モデル向け履歴は tool_call_id/content しか拾わない
         # ので、これがモデルへ漏れることはない(content_blocks.py)。
         "duration": round(time.monotonic() - started_at, 3),
-        # #145: 失敗の種別(call / failure / outcome — utils/tool_errors)。FE は本文を
-        # 解釈せずこれで見た目を決める。成功時は載せない
+        # #145: 失敗の種別(call / failure / outcome / violation / fatal —
+        # utils/tool_errors)。FE は本文を解釈せずこれで見た目を決める。成功時は載せない
         **({"error_kind": error_kind} if error_kind else {}),
         **({"render": result_render} if result_render else {}),
         **(
@@ -1776,7 +1777,7 @@ async def execute_tool_calls(
                     tool_call.get("function", {}).get("name", ""), e
                 ),
                 "duration": 0.0,
-                "error_kind": "failure",
+                "error_kind": "fatal",
             }
 
     prelude = [

@@ -92,7 +92,7 @@ from pydantic import BaseModel, Field
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
-from nucllei.utils.tool_errors import ToolError, ToolFailure, ToolOutcome
+from nucllei.utils.tool_errors import ToolError, ToolFailure, ToolFatal, ToolOutcome
 from nucllei.utils.ref_errors import (
     NEXT,
     SHOW_AS_LINK,
@@ -433,7 +433,8 @@ class Tools:
             kind, body, links = self._to_lines(raw, content_type, page_url)
         except Exception as e:
             log.error(f"[fetch_url] convert failed ({u}): {e!r}")
-            raise ToolFailure(
+            # 変換器 (PDF / HTML の解析ライブラリ) が想定外に落ちた → fatal
+            raise ToolFatal(
                 f"{u} の中身を平文に変換できなかった", show_as_link(page_url or u)
             )
 
@@ -496,7 +497,8 @@ class Tools:
             raw = await asyncio.to_thread(pathlib.Path(local).read_bytes)
         except Exception as e:  # noqa: BLE001
             log.error(f"[fetch_url] file {fid} read failed: {e!r}")
-            raise ToolFailure(f"file_id {fid} の実体を読めない")
+            # レコードはあるのに実体が読めない = ストレージが壊れている → fatal
+            raise ToolFatal(f"file_id {fid} の実体を読めない")
         if len(raw) > max_bytes:
             raise ToolOutcome(
                 f"このファイルは {mb(len(raw))} で、取得の上限 {cap_mb:.1f} MB を超えている",

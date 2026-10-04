@@ -56,6 +56,7 @@ from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
 from nucllei.utils.tool_errors import ToolCallError
 from nucllei.utils.executions import (
+    ERROR_KIND_META_KEY,
     async_exec_available,
     ensure_execution_liveness,
     get_exec_task,
@@ -330,6 +331,10 @@ def build_exec_tools(user, metadata) -> dict:
                 entry["duration"] = row.duration
             if row.error:
                 entry["error"] = row.error
+            # #145: 失敗の種別(exec 行 meta)。同期の results[i].error_kind と同じ値
+            error_kind = (row.meta or {}).get(ERROR_KIND_META_KEY)
+            if error_kind:
+                entry["error_kind"] = error_kind
         return entry
 
     check_spec = {
@@ -500,15 +505,18 @@ def build_exec_tools(user, metadata) -> dict:
             delivered_ids.append(row.id)
             if row.status != "done":
                 # failed / stopped / orphaned。再 await は冪等(同じ形が返るだけ)
-                entries.append(
-                    {
-                        "ok": False,
-                        "task_id": row.id,
-                        "tool_name": row.tool_name,
-                        "status": row.status,
-                        "error": row.error or "",
-                    }
-                )
+                failed_entry = {
+                    "ok": False,
+                    "task_id": row.id,
+                    "tool_name": row.tool_name,
+                    "status": row.status,
+                    "error": row.error or "",
+                }
+                # #145: 失敗の種別(exec 行 meta)。stopped / orphaned と種別の無い行は載せない
+                error_kind = (row.meta or {}).get(ERROR_KIND_META_KEY)
+                if error_kind:
+                    failed_entry["error_kind"] = error_kind
+                entries.append(failed_entry)
                 continue
             done_rows.append(row)
             meta = row.meta or {}
@@ -532,6 +540,9 @@ def build_exec_tools(user, metadata) -> dict:
                 entry["usage"] = row.usage
             if meta.get("truncated"):
                 entry["truncated"] = True
+            # #145: outcome(答えが「無い」)は done で届く — 種別だけ添える
+            if meta.get(ERROR_KIND_META_KEY):
+                entry["error_kind"] = meta[ERROR_KIND_META_KEY]
             entries.append(entry)
         entries.extend(_over_limit_entry(tid) for tid in over)
 

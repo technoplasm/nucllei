@@ -528,7 +528,8 @@ class TestAsyncExec(AbstractPostgresTest):
             "ERROR: ツール probe の実行中にエラーが起きた (RuntimeError: 壊れた)。"
             "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
         )
-        assert failed.meta["error_kind"] == "failure"
+        # 捕らえていない例外はバグ = fatal(同期経路と同じ)
+        assert failed.meta["error_kind"] == "fatal"
         assert failed.result is None
 
         timed_out = self.Executions.get_execution_by_id(timed_out_id)
@@ -607,11 +608,17 @@ class TestAsyncExec(AbstractPostgresTest):
         return self.Executions.get_execution_by_id(asyncio.run(main()))
 
     def test_runner_records_tool_error_kinds(self):
-        from nucllei.utils.tool_errors import ToolCallError, ToolFailure, ToolOutcome
+        from nucllei.utils.tool_errors import (
+            ToolCallError,
+            ToolFailure,
+            ToolFatal,
+            ToolOutcome,
+        )
 
         for error, status in (
             (ToolCallError("引数 x の形が違う", "x を整数で渡す。"), "failed"),
             (ToolFailure("上流に届かない", "時間を置いて呼び直す。"), "failed"),
+            (ToolFatal("sandbox の応答を読めない"), "failed"),
             # outcome(答えが「無い」)は呼び出しとしては成立 — done で結果に文を載せる
             (ToolOutcome("一致する行が無い"), "done"),
         ):
@@ -1112,6 +1119,45 @@ class TestAsyncExec(AbstractPostgresTest):
             assert entry["error"]
             # terminal 報告 = 配達済み
             assert self._delivered_at(entry["task_id"]) is not None
+            # 種別を持たない行(meta 無し・stopped / orphaned)は error_kind を載せない
+            assert "error_kind" not in entry
+
+    def test_await_and_check_task_entries_carry_the_error_kind(self):
+        """#145(llens staging の wire 確認): background の失敗も同期の results[i] と同じく
+        per-entry に error_kind が載る(exec 行 meta.error_kind から)。outcome は done で届く。"""
+        tools = self._exec_tools()
+        await_task = tools["await_task"]["callable"]
+        check = tools["check_task"]["callable"]
+
+        for exec_id, status, kind in (
+            ("fatal-1", "failed", "fatal"),
+            ("call-1", "failed", "call"),
+            ("outcome-1", "done", "outcome"),
+        ):
+            self._insert(exec_id)
+            text = f"ERROR: {kind}。"
+            assert self.Executions.finish_execution(
+                exec_id,
+                status=status,
+                **({"error": text} if status == "failed" else {"result": text}),
+                meta={"error_kind": kind},
+            )
+        self._insert("plain-1")
+        assert self.Executions.finish_execution("plain-1", status="done", result="ok")
+
+        ids = ["fatal-1", "call-1", "outcome-1", "plain-1"]
+        checked = {t["task_id"]: t for t in asyncio.run(check(task_ids=ids))["tasks"]}
+        out = asyncio.run(await_task(task_ids=ids))
+        awaited = {t["task_id"]: t for t in out["tasks"]}
+        for by_id in (checked, awaited):
+            assert by_id["fatal-1"]["error_kind"] == "fatal"
+            assert by_id["call-1"]["error_kind"] == "call"
+            assert by_id["outcome-1"]["error_kind"] == "outcome"
+            assert "error_kind" not in by_id["plain-1"]
+        assert awaited["fatal-1"]["ok"] is False
+        assert awaited["fatal-1"]["error"] == "ERROR: fatal。"
+        assert awaited["outcome-1"]["ok"] is True
+        assert awaited["outcome-1"]["result"] == "ERROR: outcome。"
 
     def test_await_task_all_invalid_head_with_over_limit_stays_per_entry(self):
         """先頭 20 件が全不正でも 21 件目以降(over)がある場合は全体エラーに
