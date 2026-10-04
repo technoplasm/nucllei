@@ -425,8 +425,14 @@ Errors are assembled the same way everywhere:
 - `file_id` cannot be read:
   `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。次の手: ` + `FILE_ID_ARG_FORM`
   — "no such record" and "not yours" are deliberately one sentence (existence
-  is not leaked). `read_attachment` returns a dict, so it carries the same
-  sentence without the `ERROR: ` prefix in `{ok: False, error}`.
+  is not leaked). `read_attachment` raises the same error (`ref_errors.file_id_error`).
+
+These helpers (and `ref_errors.explain_ref_error`) return a `ToolError` that
+the tool raises (§5.1 "Failures"); the kind follows the code — `REF_ERROR_KINDS`:
+`not_found` / `too_large` → `outcome`, `unsupported_form` / `unknown_upstream` /
+`traversal` (and the three fixed-form helpers) → `call`, the rest
+(`upstream_status`, `upstream_unreachable`, `workspace_unavailable`, unexplained)
+→ `failure`.
 
 Wording that depends on the **resolution result** (missing / oversize /
 redirect that could not be followed / upstream status / unreachable / the
@@ -930,7 +936,7 @@ subagent?}` for a running tool call (§5.5 `__progress__`). The call emits one
   payload of that call. For a background call (§5.9) these are forwarded to the
   spawning turn's stream while it is still open.
 - `execution:done` — `{task_id, tool_call_id, tool_name, status, finished_at,
-duration, error}` when a background task (§5.9) reaches a terminal state
+duration, error, error_kind}` when a background task (§5.9) reaches a terminal state
   (`done|failed|stopped`), sent to every open stream of the chat; the envelope's
   `message_id` is the spawning message.
 
@@ -1062,8 +1068,9 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
 - Executions of a chat (owner only, see §5.9):
   `GET /api/v1/chats/{id}/executions` →
   `{executions: [...], resume_suspended: bool}`. Each row carries
-  `id, tool_name, status, created_at, finished_at, duration, error, delivered`
-  but never the result body. `delivered` is true once the result reached the
+  `id, tool_name, status, created_at, finished_at, duration, error, delivered`,
+  `session_id` (run_subagent's child session) and `error_kind` (§5.1
+  "Failures"; `null` on success / stopped / orphaned) but never the result body. `delivered` is true once the result reached the
   model's context (server-driven delivery notice, `await_task`/`stop_task`
   report, or permanent abandonment on chat deletion); `resume_suspended` is
   true while server-driven delivery is held back by the unattended-chain limit
@@ -1145,6 +1152,59 @@ class Tools:
     audits `ref_errors` / `feed_image` / `fetch_url` / `sandbox` /
     `context_budget` / `attachment_text` for this. Deployment-layer tools should follow
     the same contract.
+  - **Failures: raise `ToolError`** (#145, 2026-10-04). A failed call is not
+    returned as a string or as `{ok: false, error}` — the tool raises
+    `nucllei.utils.tool_errors.ToolError(fact, next=None, *, kind=...)` (or a
+    subclass: `ToolCallError` / `ToolFailure` / `ToolOutcome`). The model text
+    is assembled in one place: `ERROR: {fact}。次の手: {next}` (`ERROR: {fact}。`
+    without `next`; a trailing 「。」 on `fact` is normalised). `fact` follows the
+    fact-sentence rules above (user-safe); `next` is the model-only part.
+    `kind` says whose problem it is, and the chat UI shows it on the tool card:
+
+    | kind      | meaning                                                                                                                                                       | UI                       |
+    | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, arguments not parseable JSON | amber 「呼び直し」         |
+    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                       | red 「失敗」               |
+    | `outcome` | the call worked but the answer is "none" — not found / 404, out of range, too large                                                                          | same look as a success |
+
+    The server builds failures it detects itself the same way: unknown tool and
+    unparseable `arguments` → `call`; a required argument missing from the call
+    (checked against the callable's signature before invoking — reserved
+    `__x__` parameters and parameters with defaults are not required) →
+    `call` 「ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を付けて呼び直す。」;
+    an argument that passed the spec filter but the callable does not accept →
+    `call`; timeout → `failure`; any other exception → `failure` with the class
+    name + the first 200 characters only (the full trace goes to the log).
+    A JSON-returning tool raises only when there is nothing else to return; a
+    result that carries real payload next to a caveat (`run_subagent` stopped
+    with a partial answer, a truncated read) stays a normal result.
+    **Wire**: the tool result in `content_blocks` (`results[]`, persisted, so a
+    reload shows it) carries `error_kind: "call" | "failure" | "outcome"`
+    next to `content` (the model text); absent on success. Background tasks
+    store it in the execution row's `meta.error_kind` and expose it as
+    `error_kind` in the executions list and the `execution:done` event (§5.9).
+    Clients decide by this flag, never by parsing `ERROR:`.
+    **Custom tools** import the classes and raise them — the path works inside
+    a DB-stored tool (the plugin loader runs it with nucllei importable):
+
+    ```python
+    from nucllei.utils.tool_errors import ToolCallError, ToolFailure, ToolOutcome
+
+    class Tools:
+        def read_doc(self, path: str) -> str:
+            """..."""
+            if not path.startswith("/doc/"):
+                raise ToolCallError(f"{path} は文書のパスでない", "/doc/… のパスで呼び直す。")
+            doc = _lookup(path)
+            if doc is None:
+                raise ToolOutcome(f"{path} は存在しない", "一覧から選び直す。")
+            return doc
+    ```
+
+    (`ToolError(fact, next, kind=...)` is the base; guard the import like §5.4
+    if the file must lint outside nucllei.) **A returned string is always a
+    normal result** — even one that starts with `ERROR:`; nothing sniffs the
+    text. Any other uncaught exception goes the generic `failure` path.
   - The description is re-sent on **every turn** for every mounted function:
     keep it to what the model needs to decide whether and how to call
     (purpose, argument forms, return shape, a one-line ERROR shape) and put
@@ -1271,8 +1331,10 @@ async def read_doc(self, path: str) -> Markdown:
 ### 5.5 Return values, events, limits
 
 - Return a `str` (recommended; passed to the model verbatim) or a `dict`/`list`
-  (JSON-serialized). Raising is safe — the exception string becomes the tool
-  result — but prefer returning `"ERROR: ..."` strings to steer the model.
+  (JSON-serialized). Report a failure by raising `ToolError` (§5.1 "Failures")
+  — the fact sentence and `次の手:` steer the model, and the kind is shown in
+  the UI. Any other exception is safe too, but reaches the model only as
+  「ツール X の実行中にエラーが起きた (<class>: <first 200 chars>)」 (kind `failure`).
 - Generators are not supported.
 - Per-call timeout `TOOL_EXEC_TIMEOUT_S` (default 300 s) and loop cap
   `TOOL_CALL_MAX_ITERATIONS` (default 30) — see §3.6.
@@ -1368,7 +1430,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     context size the three derived fields are `null` and the note says why
     (「context 長が分からない (モデルの接続先が context 長を返さず、既定値も未設定) ので残量は出せない」 — no
     internal names such as `meta.context_size` in model-visible text).
-    Before the first model call of a chat completes: `{ok: false, error}`.
+    Before the first model call of a chat completes: an `outcome` ToolError
+    (「このチャットの usage がまだ無い…」).
     Within a native tool loop the tool runs between model calls, so the value
     is as of the latest completed call — the pending tool results of the
     current step are not yet counted. Owner-only (the chat must belong to
@@ -1659,8 +1722,11 @@ shared note, so deployment prompts need not repeat it.
   `{ok, session_id, answer, usage?, truncated?, note?, error?}` — the child's
   final assistant text only (8000 chars max), never the transcript. A truncated
   answer carries `note` (the cut length and "ask for the rest with the same
-  `session_id`"); errors (`ok: false`) follow the §5.1 convention (a fact
-  sentence, then a model-only `次の手:` part). Pass `session_id` instead
+  `session_id`"). A child that errored or was stopped still returns this
+  shape with `ok: false` and `error` (the partial answer and `session_id` are
+  payload); a call that never started a child (empty instruction, bad
+  `session_id` / `preset_id`, concurrency or depth limit, …) raises a §5.1
+  `ToolError` instead. Pass `session_id` instead
   of `preset_id` to send a follow-up instruction to an existing session.
   While it runs, the call's `tool:progress` carries
   `subagent: {session_id, task_id?}` (§4.3 stream events) so a client can follow the
@@ -1769,6 +1835,14 @@ server scans for undelivered rows and resumes delivery. Known v1 limit:
 workspace-export chat attachments emitted after the parent turn ended are not
 re-attached by the delivery notice (files themselves are persisted and listed
 in the result string).
+
+Failures in a background run follow §5.1 "Failures": a `ToolError` of kind
+`call` / `failure` ends the row `failed` with the model text in `error`; an
+`outcome` ends it `done` with the text as `result` (the call worked — the
+answer is "none"); either way `meta.error_kind` records the kind. A timeout is
+`failed` 「ERROR: ツール X の background 実行が N 秒の上限でタイムアウトした。…」 and
+any other exception is `failed` with the same class-name + 200-character text
+as the synchronous path (the raw exception string is logged, not stored).
 
 Over HTTP the rows are readable and stoppable by the chat's owner:
 `GET /api/v1/chats/{id}/executions` (object form with `delivered` /

@@ -12,6 +12,7 @@ tool が「戻り値以外」で何かを届ける口の全量。issue #88 / #89
 | 口 | 誰の目 | いつ届く | 永続 | sync から | モデルに入る |
 |---|---|---|---|---|---|
 | 戻り値(`return`) | モデル | tool 終了時 | ○(results[i].content) | ○ | ○ |
+| 失敗(`raise ToolError` — #145) | モデル + 人間(種別) | tool 終了時 | ○(results[i].content + results[i].error_kind) | ○ | ○(文面) |
 | `__progress__(description, *, current, total, done)` | 人間 | **実行中に即時** | **✗(揮発)** | ○ | ✗ |
 | `__display__(content, kind)` | 人間 | 実行後 harvest | ○(results[i].display) | ○ | ✗ |
 | `__feed_image__(参照文字列: file_id / URL(`http(s)://…`・同一サーバの `/ext/…`)/ sandbox のパス(`/workspace/…` `/mnt/…`)/ `/api/v1/files/{id}/content#page=N`。振り分けは `image_refs.stored_ref_kind`)` | モデル(VLM) | 実行後 harvest | ○(results[i].context_images) | ○ | ○(画素) |

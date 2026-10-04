@@ -265,7 +265,8 @@ sandbox ツール(R2、respx 等で sandbox API をモック):
 - T9: outputs[] → Files/Storage 登録 + `chat:message:files` emit + 画像なら markdown 誘導行。
   truncated エントリは「転送上限超過」報告のみで登録しない
 - T10: import_chat_file — 所有者チェック(他ユーザー file_id は skip)、file_id 直指定経路
-- T11: sandbox HTTP 障害(接続不能・非 200)→ "ERROR: ..." 文字列で graceful(例外を漏らさない)
+- T11: sandbox HTTP 障害(接続不能・非 200)→ `ToolError`(#145 — 文面は "ERROR: ..."。生の例外・
+  detail は漏らさない)
 - T12: spec 生成 — docstring から name/description/parameters が正しく出る + Code("python") render
 
 ~~sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の管轄(カスタム tool
@@ -647,8 +648,8 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   - path: `ERROR: <値> は sandbox のパスの形でない。` + `PATH_ARG_FORM`(または
     `WORKSPACE_PATH_ARG_FORM`)+ ` ` + `REF_ARGS_RULE`
   - file_id: `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い。` + `FILE_ID_ARG_FORM`
-    (「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない。`read_attachment` は
-    dict を返すので `{ok: False, error}` の error に `ERROR: ` 抜きの同文)
+    (「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない。`read_attachment` も
+    同じ `ref_errors.file_id_error` を raise する — 2026-10-04 #145 で `{ok: False, error}` を廃止)
   - tool 固有の行き先(「sandbox のファイルは取り込み不要」「添付は file_id= に」)はエラーから
     消した。旧 `_URL_ACCEPTS` は「添付・生成物は file_id= に渡す」と言いつつ
     `/api/v1/files/…` を url で受けていて自己矛盾だった。
@@ -1134,3 +1135,37 @@ prompt_tokens へのフォールバック・owner-only(他人の chat_id は無�
   user/group 単位で止められない、が理由(issue #140)。
 - `timeouts` クラス属性の非正値(0 / -1)は「システム側上限なし」として per-entry に載るようになった
   (以前は無視して `TOOL_EXEC_TIMEOUT_S`)。
+
+## 改訂(2026-10-04、#145)— tool の失敗は `ToolError` を raise する
+
+ken 指示「ツールのエラーも結果として表示できるように。形式も揃える」。
+
+- **形の一本化**: builtin は失敗を文字列 / `{"ok": false, "error"}` で返さず、
+  `nucllei/utils/tool_errors.py` の `ToolError(fact, next, kind=…)`(`ToolCallError` /
+  `ToolFailure` / `ToolOutcome`)を raise する。モデルに渡る文は `format_tool_error` 1 箇所で
+  `ERROR: {fact}。次の手: {next}` に組む(`NEXT` は tool_errors が持ち、`ref_errors` は再輸出)。
+  `ref_errors` の helper / `explain_ref_error` は `ToolError` を返す(テンプレートの文面はそのまま
+  `ToolError.from_text` で事実と次の手に分ける。kind は `REF_ERROR_KINDS`)。**文面は変えていない**
+  (llens 判定済みのため)— 変わったのは仕組みと、JSON 包みだったもの(subagent / exec_tools /
+  context_budget / attachment_text / background の起動失敗)が `ERROR: 同文` になったこと、
+  「。」で終わっていなかった文(`preset を使えない: X`)に「。」が付いたこと、一覧に無い tool の
+  文に `ERROR: ` が付いたこと。
+- **kind**: `call`(呼び方の誤り — amber「呼び直し」)/ `failure`(実行時の失敗 — 赤「失敗」)/
+  `outcome`(呼べたが答えが「無い」— 見た目は成功と同じ)。定義と表は README_API §5.1「Failures」。
+- **wire**: `content_blocks` の `results[i].error_kind`(永続。リロードでも出る)。background は exec 行の
+  `meta.error_kind` → 一覧 API / `execution:done` の `error_kind`。call / failure は `failed`、outcome は
+  `done`(result に文)。FE は本文を解釈せずフラグで見た目を決める(ToolCallBlock / ExecutionBlock)。
+- **サーバ側で組むもの**: 一覧に無い tool・arguments が JSON object として読めない → call。
+  **必須引数の欠落**(#145 項目 2 — luna の空 `read_doc` が生の `TypeError` を返した件)は呼ぶ前に
+  callable の署名で検出して call(`ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を
+  付けて呼び直す。`)。spec のフィルタを通ったのに署名に無い引数も call。タイムアウト・その他の例外は
+  failure(例外は型名 + 先頭 200 字。background も同じ式に揃えた — 旧: 生の `str(e)`)。
+- **JSON を返す tool の線引き**: 中身の無い失敗は raise、中身(部分回答・session_id・切詰め)を
+  運ぶ結果は結果のまま(run_subagent の子のエラー / stop、await_task の per-entry の failed 行、
+  check_task の不正 id 行)。「一致なし」「空」のように `ERROR:` で返していなかった通常の結果も
+  そのまま(文面を変えないため)。
+- **カスタム tool**: `from nucllei.utils.tool_errors import ToolError, ToolCallError, ToolFailure,
+  ToolOutcome` を raise する(DB の tool も plugin loader で import できる)。**返した文字列は常に正常な
+  結果** — `ERROR:` で始まっていてもフラグは立てない(本文の嗅ぎ分けはどこにも置かない。ken 決定
+  2026-10-04 — 初版にあった「builtin 以外の `ERROR:` 文字列は failure」の推定は同日に撤去)。
+
