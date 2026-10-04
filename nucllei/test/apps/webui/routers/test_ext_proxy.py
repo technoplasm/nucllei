@@ -237,6 +237,25 @@ class TestExtGate(AbstractPostgresTest):
         for path in ("http://evil.com/x", "//evil.com/x", "a@evil.com/x"):
             assert self._get(f"/{path}").status_code == 404, path
 
+    def test_markdown_and_text_are_served_as_plain_text(self, monkeypatch, tmp_path):
+        """#145 項目 1: `.md` / `.txt` はブラウザでそのまま読める text/plain(UTF-8)。
+        mimetypes が `.md` を知らない環境で octet-stream + nosniff になり、リンクを押すと
+        ダウンロードになっていた。アクティブ型ではないので添付にしない(nosniff は残す)。"""
+        root = self._mount(monkeypatch, tmp_path)
+        (root / "cage" / "static" / "doc.md").write_text("# 見出し", encoding="utf-8")
+        (root / "cage" / "static" / "UPPER.MD").write_text("x", encoding="utf-8")
+        for path in (
+            "/cage/static/doc.md",
+            "/cage/static/UPPER.MD",
+            "/shared/memo.txt",
+        ):
+            response = self._get(path)
+            assert response.status_code == 200, path
+            assert response.headers["content-type"] == "text/plain; charset=utf-8", path
+            assert response.headers["x-content-type-options"] == "nosniff", path
+            assert "content-disposition" not in response.headers, path
+        assert self._get("/cage/static/doc.md").content.decode("utf-8") == "# 見出し"
+
     # ---- アクティブ型の実行防止(nosniff + 添付) ----
 
     def test_active_type_forced_to_attachment(self, monkeypatch, tmp_path):

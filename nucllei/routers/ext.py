@@ -21,6 +21,9 @@ PUBLIC_BASE を "/ext/<name>"(相対)にすると文書内の参照が同一オ�
 木に置いたディレクトリ symlink の先)の中に閉じる(mount の中身の symlink 越えは閉じる)—
 resolver(`image_refs.resolve_url`)の `_read_confined` と同じ判定。ディレクトリ・不在は 404
 (一覧は出さない)。content-type は拡張子から、不明は application/octet-stream。
+`.md` / `.txt` は `text/plain; charset=utf-8`(#145 — mimetypes が `.md` を知らない環境では
+octet-stream + nosniff でリンクを押すとダウンロードになっていた。text/markdown も避ける —
+ブラウザが表示せずダウンロードに回すことがある。どちらもアクティブ型ではないので nosniff のまま)。
 2026-10-03 までは `EXT_UPSTREAMS` の値の形で http 中継(httpx ストリーミング)と `file://` root の
 2 backend があり、`EXT_FILE_SCOPES` で root 配下の配信範囲を絞っていた — `url=` の一般 URL が
 どこでも取れるようになり http 中継は要らなくなったので、設定ごと撤去。
@@ -56,6 +59,16 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
 
+# ブラウザでそのまま読ませるテキスト(#145)。拡張子は小文字で比較する
+_PLAIN_TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt"})
+_PLAIN_TEXT_TYPE = "text/plain; charset=utf-8"
+
+
+def _content_type_for(name: str) -> str:
+    if Path(name).suffix.lower() in _PLAIN_TEXT_SUFFIXES:
+        return _PLAIN_TEXT_TYPE
+    return mimetypes.guess_type(name)[0] or "application/octet-stream"
+
 
 # "" は `/ext` 自体(末尾 "/" 無し)。これが無いと SPA の catch-all("/" の mount)に落ちる
 @router.get("")
@@ -84,7 +97,7 @@ def _serve_local(path: str):
     if not resolved.is_relative_to(mount[1]) or not resolved.is_file():
         raise HTTPException(status_code=404, detail="Not found")
 
-    content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    content_type = _content_type_for(resolved.name)
     return FileResponse(
         resolved,
         media_type=content_type,
