@@ -7,7 +7,8 @@ import {
 	classifyToolResult,
 	formatJSONString,
 	parseToolArguments,
-	parseToolArgumentsStreaming
+	parseToolArgumentsStreaming,
+	toolErrorKind
 } from './index';
 
 // tool_call_long_code 実キャプチャ相当: エスケープ済み JSON 文字列の code 引数
@@ -453,5 +454,17 @@ describe('formatJSONString', () => {
 	it('スカラー JSON でも無限再帰しない(旧実装はスタックオーバーフロー頼みだった)', () => {
 		expect(formatJSONString('42')).toBe('"42"');
 		expect(formatJSONString('null')).toBe('"null"');
+	});
+});
+
+describe('toolErrorKind', () => {
+	it('サーバの旗 3 種だけを受け、それ以外は null(本文は解釈しない)', () => {
+		expect(toolErrorKind('call')).toBe('call');
+		expect(toolErrorKind('failure')).toBe('failure');
+		expect(toolErrorKind('outcome')).toBe('outcome');
+		expect(toolErrorKind(undefined)).toBeNull();
+		expect(toolErrorKind(null)).toBeNull();
+		expect(toolErrorKind('ERROR: x')).toBeNull();
+		expect(toolErrorKind({ kind: 'call' })).toBeNull();
 	});
 });

@@ -31,10 +31,13 @@
 	const toolName = $derived(entry?.tool_name ?? display.toolName ?? '');
 	// 終端のエラー文言は畳まずに見せる(tooltip だけだと気づけない)
 	const errorText = $derived(entry?.error ?? '');
+	// tool のエラー種別(サーバの旗 — 本文は解釈しない)。failed ∧ call は「呼び直し」(amber)。
+	// outcome は status done で届くので成功の見た目のまま
+	const callError = $derived(status === 'failed' && entry?.error_kind === 'call');
 
 	const statusLabel = $derived.by(() => {
 		if (status === 'done') return $i18n.t('Completed');
-		if (status === 'failed') return $i18n.t('Failed');
+		if (status === 'failed') return callError ? $i18n.t('Retry needed') : $i18n.t('Failed');
 		if (status === 'stopped') return $i18n.t('Stopped');
 		if (status === 'orphaned') return $i18n.t('Lost on server restart');
 		return $i18n.t('Running...');
@@ -67,6 +70,9 @@
 		></span>
 	{:else if status === 'stopped'}
 		<span class="i-lucide-circle-stop size-4 block shrink-0 text-content-muted"></span>
+	{:else if callError}
+		<span class="i-lucide-circle-alert size-4 block shrink-0 text-amber-500 dark:text-amber-400"
+		></span>
 	{:else}
 		<span class="i-lucide-circle-alert size-4 block shrink-0 text-red-600 dark:text-red-400"></span>
 	{/if}

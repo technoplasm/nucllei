@@ -195,6 +195,7 @@ export type ExecutionDonePayload = {
 	finished_at?: number | null;
 	duration?: number | null;
 	error?: string | null;
+	error_kind?: 'call' | 'failure' | 'outcome' | null;
 };
 
 /**
@@ -224,7 +225,8 @@ export const applyExecutionDone = (chatId: string, payload: ExecutionDonePayload
 		status,
 		finished_at: payload.finished_at ?? current.finished_at ?? Math.floor(Date.now() / 1000),
 		duration: payload.duration ?? current.duration,
-		error: payload.error ?? current.error
+		error: payload.error ?? current.error,
+		error_kind: payload.error_kind ?? current.error_kind ?? null
 	};
 	return true;
 };

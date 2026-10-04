@@ -176,6 +176,17 @@ export const formatJSONString = (str: unknown): string => {
 	return `${JSON.stringify(String(parsed))}`;
 };
 
+// tool のエラー種別(BE の ToolError — README_API §5.1)。tool result / exec 行の
+// `error_kind` でサーバが明示する。表示はこの旗だけで決める — 本文("ERROR: …")を
+// 文字列として解釈しない。
+// - call: 呼び方の誤り(引数・tool 名・id)→ 呼び直し(amber)
+// - failure: 実行時の失敗(例外・timeout・到達不能・上限)→ 失敗(red)
+// - outcome: 呼び出しは成功、答えが「無い」(404・範囲外・該当なし)→ 見た目は成功と同じ
+export type ToolErrorKind = 'call' | 'failure' | 'outcome';
+
+export const toolErrorKind = (value: unknown): ToolErrorKind | null =>
+	value === 'call' || value === 'failure' || value === 'outcome' ? value : null;
+
 // #110: execution チャンネルの「封筒」2 種。
 // ① spawn 即返し {ok, task_id, tool_name, status: "running"} — kind=execution の
 //    状態表示へ(現在状態は exec 行ポーリングが持つ)。

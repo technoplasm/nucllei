@@ -562,6 +562,7 @@
 	"Response notifications cannot be activated as the website permissions have been denied. Please visit your browser settings to grant the necessary access.": "サイトの通知許可が拒否されているため、応答通知を有効にできません。ブラウザ設定から許可してください。",
 	"Response splitting": "応答の分割",
 	"Restore": "復元",
+	"Retry needed": "呼び直し",
 	"Role": "役割",
 	"RTL": "RTL",
 	"Running...": "実行中...",

@@ -17,7 +17,9 @@
 		classifyToolResult,
 		formatJSONString,
 		parseToolArgumentsStreaming,
-		type ToolCallRender
+		toolErrorKind,
+		type ToolCallRender,
+		type ToolErrorKind
 	} from '$lib/utils/tool-render';
 
 	import { formatDurationSeconds } from '$lib/utils/duration';
@@ -51,6 +53,8 @@
 		display?: DisplayItem[];
 		// 所要時間(#100、秒)。成否に関わらず載る
 		duration?: number;
+		// tool のエラー種別(README_API §5.1)。content はモデルに渡した ERROR 文そのもの
+		error_kind?: ToolErrorKind;
 	};
 
 	let {
@@ -139,10 +143,26 @@
 	const argDisplays = $derived(parseToolArgumentsStreaming(args, call?.render?.args));
 	const hasArgs = $derived(argDisplays === null || argDisplays.length > 0);
 
+	// tool のエラー(サーバの旗 error_kind だけで判定 — 本文の "ERROR:" は解釈しない)。
+	// call = 呼び直し(amber)/ failure = 失敗(red)/ outcome = 答えが「無い」(見た目は成功)
+	const errorKind = $derived(toolErrorKind(result?.error_kind));
+	const errorLabel = $derived(
+		errorKind === 'call'
+			? $i18n.t('Retry needed')
+			: errorKind === 'failure'
+				? $i18n.t('Failed')
+				: ''
+	);
+
 	// 結果の表示種別: 戻り型宣言(call.render.result)→ backend が実行時の実型から
-	// 同梱した result.render(dict/list → json)→ text(中身からの動的解釈はしない)
+	// 同梱した result.render(dict/list → json)→ text(中身からの動的解釈はしない)。
+	// エラーの結果は宣言に関わらず text — 本文は ERROR 文で、宣言(subagent 等)の形ではない
 	const resultDisplay = $derived(
-		result ? classifyToolResult(result.content ?? '', call?.render?.result ?? result.render) : null
+		result
+			? errorKind
+				? ({ kind: 'text', value: result.content ?? '' } as const)
+				: classifyToolResult(result.content ?? '', call?.render?.result ?? result.render)
+			: null
 	);
 
 	// #110: background 昇格された呼び出し。spawn は result(running 形)が即存在するため
@@ -302,6 +322,14 @@
 				<div>
 					<Spinner className="size-4" />
 				</div>
+			{:else if errorKind === 'call'}
+				<div class="text-amber-500 dark:text-amber-400 shrink-0">
+					<span class="i-lucide-circle-alert size-4 block"></span>
+				</div>
+			{:else if errorKind === 'failure'}
+				<div class="text-red-600 dark:text-red-400 shrink-0">
+					<span class="i-lucide-circle-x size-4 block"></span>
+				</div>
 			{:else}
 				<div class="text-green-500 dark:text-green-400 shrink-0">
 					<span class="i-lucide-circle-check size-4 block"></span>
@@ -329,6 +357,15 @@
 				ヘッダは w-fit バッジで open 時は枠の上辺タブに合体するため、長い
 				description で幅が暴れないよう max-w + truncate で頭を押さえる。
 			-->
+			{#if isDone && !execRunning && errorLabel}
+				<div
+					class="font-normal shrink-0 {errorKind === 'call'
+						? 'text-amber-600 dark:text-amber-400'
+						: 'text-red-600 dark:text-red-400'}"
+				>
+					{errorLabel}
+				</div>
+			{/if}
 			{#if subagentLabel}
 				<div class="max-w-52 truncate font-normal">{subagentLabel}</div>
 			{:else if progressLabel}
@@ -400,7 +437,13 @@
 								collapseFromBottom();
 							}}
 						>
-							<span class="i-lucide-corner-down-left size-3 block text-emerald-500"></span>
+							<span
+								class="i-lucide-corner-down-left size-3 block {errorKind === 'call'
+									? 'text-amber-500'
+									: errorKind === 'failure'
+										? 'text-red-500'
+										: 'text-emerald-500'}"
+							></span>
 							Result
 						</div>
 					</div>

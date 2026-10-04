@@ -58,6 +58,8 @@
 
 	const statusLabel = (entry: ExecutionEntry): string => {
 		if (entry.status === 'done') return $i18n.t('Completed');
+		// #145: 呼び方の誤り(error_kind = call)は「失敗」と言い分ける(ExecutionBlock と同じ)
+		if (entry.status === 'failed' && entry.error_kind === 'call') return $i18n.t('Retry needed');
 		if (entry.status === 'failed') return $i18n.t('Failed');
 		if (entry.status === 'stopped') return $i18n.t('Stopped');
 		if (entry.status === 'orphaned') return $i18n.t('Lost on server restart');

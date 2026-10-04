@@ -346,6 +346,21 @@ describe('applyExecutionDone', () => {
 		expect(isUndeliveredTerminal(updated!)).toBe(true);
 	});
 
+	it('tool のエラー種別(error_kind)を行へ載せる', async () => {
+		respond([entry('exec-1', 'running')]);
+		await refreshExecutions(CHAT);
+
+		applyExecutionDone(CHAT, {
+			task_id: 'exec-1',
+			status: 'failed',
+			error: 'ERROR: x。次の手: y',
+			error_kind: 'call'
+		});
+		const updated = getExecutionEntry('exec-1');
+		expect(updated?.status).toBe('failed');
+		expect(updated?.error_kind).toBe('call');
+	});
+
 	it('他 chat・未知行・非終端 status は無視する', async () => {
 		respond([entry('exec-1', 'running')]);
 		await refreshExecutions(CHAT);

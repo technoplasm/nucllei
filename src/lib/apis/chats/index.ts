@@ -540,6 +540,9 @@ export type ChatExecutionItem = {
 	finished_at: number | null;
 	duration: number | null;
 	error: string | null;
+	// tool のエラー種別(README_API §5.1)。ToolError で終わった行だけ — call / failure は
+	// status failed、outcome(答えが「無い」)は status done。それ以外は null / 欠落
+	error_kind?: 'call' | 'failure' | 'outcome' | null;
 	// 配達済み(terminal の結果が通知ターン or 回収 tool で消化された)。
 	// 未配達(terminal ∧ !delivered)がチップの未回収バッジ・poll 継続の根拠
 	delivered: boolean;
