@@ -1384,7 +1384,7 @@ def _parse_tool_arguments(tool_name: str, raw) -> tuple[dict, Optional[ToolError
         return params, None
     return {}, ToolCallError(
         f"ツール {tool_name} の引数を JSON のオブジェクトとして読めない",
-        "引数を JSON のオブジェクトにして呼び直す。",
+        "引数を正しい JSON で呼び直す。",
     )
 
 

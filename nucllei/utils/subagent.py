@@ -582,9 +582,10 @@ async def run_subagent_turn(
             # 継続: 既存の子セッションへ追いメッセージ。
             # 並行継続の排他(lost update 防止): 実行中なら待たずに即エラー。
             if session_id in _running_agent_sessions:
-                raise ToolFailure(
+                raise ToolCallError(
                     f"このサブエージェントのセッションは実行中: {session_id}",
-                    "今の実行の結果がそろってから同じ session_id で続ける。",
+                    "実行中の分の結果を待ってから (background で起動したなら await_task で"
+                    "受け取ってから) 同じ session_id で続ける。",
                 )
             _running_agent_sessions.add(session_id)
             running_session_id = session_id

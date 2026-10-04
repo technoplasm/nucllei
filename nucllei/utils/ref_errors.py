@@ -244,7 +244,18 @@ REF_ERROR_KINDS: Mapping[str, ToolErrorKind] = MappingProxyType(
 )
 
 
+# upstream_status のうち「無い」と同じ扱いにする HTTP status(llens 判定 2026-10-04)。
+# 401 / 403・他の 4xx・5xx・redirect の失敗は failure のまま
+UPSTREAM_STATUS_OUTCOME = frozenset({404, 410})
+
+
 def _ref_error_kind(err: RefError) -> ToolErrorKind:
+    if (err.code or "") == "upstream_status" and not err.reason:
+        try:
+            if int(err.status) in UPSTREAM_STATUS_OUTCOME:
+                return "outcome"
+        except (TypeError, ValueError):
+            pass
     return REF_ERROR_KINDS.get(err.code or "", "failure")
 
 

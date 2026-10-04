@@ -184,6 +184,29 @@ def test_ref_error_kinds_by_code():
         assert got == expected.get(err.code, "failure"), err
     # 形の固定文は call
     assert ref_errors.url_error("x").kind == "call"
+    # upstream_status は status で分ける: 404 / 410 は「無い」= outcome、それ以外は failure
+    # (llens 判定 2026-10-04)
+    for status, kind in (
+        (404, "outcome"),
+        (410, "outcome"),
+        (401, "failure"),
+        (403, "failure"),
+        (400, "failure"),
+        (500, "failure"),
+        (503, "failure"),
+        (301, "failure"),
+        (None, "failure"),
+    ):
+        err = RefError("upstream_status", "x", status=status)
+        assert ref_errors.explain_ref_error(ref, err, arg=arg, hints=hints).kind == (
+            kind
+        ), status
+    for reason in ("redirect_self", "too_many_redirects"):
+        err = RefError("upstream_status", "x", status=302, reason=reason)
+        assert (
+            ref_errors.explain_ref_error(ref, err, arg=arg, hints=hints).kind
+            == "failure"
+        )
     assert ref_errors.path_error("x").kind == "call"
     assert ref_errors.file_id_error("f").kind == "call"
 
@@ -270,7 +293,7 @@ def test_unparseable_arguments_are_a_call_error(arguments):
     assert results[0]["error_kind"] == "call"
     assert results[0]["content"] == (
         "ERROR: ツール probe の引数を JSON のオブジェクトとして読めない。"
-        "次の手: 引数を JSON のオブジェクトにして呼び直す。"
+        "次の手: 引数を正しい JSON で呼び直す。"
     )
 
 

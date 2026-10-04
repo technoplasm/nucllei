@@ -22,7 +22,7 @@ max_pages の打ち切り、**File を 1 件も作らない** (Storage / Files �
 import asyncio
 import types
 
-from test.util.tool_errors import call_text
+from test.util.tool_errors import call_error, call_text
 
 from nucllei.utils.image_refs import (
     PATH_ARG_FORM,
@@ -877,6 +877,35 @@ def test_no_args_targets_attached_pdfs_only_not_images(monkeypatch):
         and "file_id" in result
         and "PDF" in result
     )
+
+
+def test_no_target_kind_depends_on_whether_something_was_named(monkeypatch):
+    """「対象が見つからない」は url / path / file_id 無しのときだけ。何も指していない (添付
+    PDF も無い) は call、filename で指したのに一致する添付 PDF が無いは outcome — 文面は同じ
+    (llens 判定 2026-10-04)。file_id の不在は別経路 (file_id_error = call)。"""
+    mod, _resolver = _install(monkeypatch, TABLE, n_pages=1)
+    files = [
+        {
+            "id": "pdf1",
+            "name": "scan.pdf",
+            "file": {"id": "pdf1", "meta": {"content_type": "application/pdf"}},
+        }
+    ]
+
+    def run(**kwargs):
+        return asyncio.run(
+            call_error(
+                mod.Tools().feed_image(
+                    __user__={"id": "u1"}, __feed_image__=lambda r: None, **kwargs
+                )
+            )
+        )
+
+    nothing = run()
+    assert nothing.kind == "call"
+    missing = run(filename="other", __files__=files)
+    assert missing.kind == "outcome"
+    assert missing.text == nothing.text
 
 
 def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):

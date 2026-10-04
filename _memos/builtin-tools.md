@@ -1152,6 +1152,11 @@ ken 指示「ツールのエラーも結果として表示できるように。�
   文に `ERROR: ` が付いたこと。
 - **kind**: `call`(呼び方の誤り — amber「呼び直し」)/ `failure`(実行時の失敗 — 赤「失敗」)/
   `outcome`(呼べたが答えが「無い」— 見た目は成功と同じ)。定義と表は README_API §5.1「Failures」。
+  llens の判定 (同日) で直したもの: 上流の HTTP 404 / 410 は outcome (他の status は failure)、
+  サブエージェントの「セッションは実行中」は call (次の手を「実行中の分の結果を待ってから
+  (background なら await_task で受け取ってから) 同じ session_id で続ける」に)、arguments が読めない
+  ときの次の手は「引数を正しい JSON で呼び直す。」、feed_image の「対象が見つからない」は
+  何も指していない = call / filename で指した添付 PDF が無い = outcome に分けた (文面は同じ)。
 - **wire**: `content_blocks` の `results[i].error_kind`(永続。リロードでも出る)。background は exec 行の
   `meta.error_kind` → 一覧 API / `execution:done` の `error_kind`。call / failure は `failed`、outcome は
   `done`(result に文)。FE は本文を解釈せずフラグで見た目を決める(ToolCallBlock / ExecutionBlock)。

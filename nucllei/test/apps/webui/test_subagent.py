@@ -920,8 +920,13 @@ class TestRunSubagent(AbstractPostgresTest):
             racing = await call_error(
                 tool["callable"](instruction="横入り", session_id=session)
             )
-            assert racing.kind == "failure"
-            assert "実行中" in racing.text
+            # 呼び方の問題(待ってから同じ session_id で続ける)— llens 判定 2026-10-04
+            assert racing.kind == "call"
+            assert racing.text == (
+                f"ERROR: このサブエージェントのセッションは実行中: {session}。"
+                "次の手: 実行中の分の結果を待ってから (background で起動したなら"
+                " await_task で受け取ってから) 同じ session_id で続ける。"
+            )
             assert len(calls) == 2  # 3 本目の子ターンは走っていない
 
             gate_holder["gate"].set()

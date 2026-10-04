@@ -397,11 +397,16 @@ class Tools:
                 targets.append(fid)
 
         if not targets:
-            raise ToolCallError(
+            # ここに来るのは url / path / file_id が無いときだけ (file_id の不在は _feed_file の
+            # file_id_error)。filename で添付を指したのに一致する添付 PDF が無い = 指した物が無い
+            # → outcome、何も指していない (添付 PDF も無い) = 呼び方の問題 → call (llens 判定
+            # 2026-10-04)。文面は同じ
+            raise ToolError(
                 "対象が見つからない。無指定で対象になるのは添付 PDF だけ "
                 "(添付画像は既に自分の目に入っている)",
                 "添付画像を見直すなら file_id を、URL なら url を、sandbox のファイルなら"
                 " path を指定する。",
+                kind="outcome" if filename else "call",
             )
 
         if len(targets) == 1:

@@ -432,7 +432,9 @@ the tool raises (§5.1 "Failures"); the kind follows the code — `REF_ERROR_KIN
 `not_found` / `too_large` → `outcome`, `unsupported_form` / `unknown_upstream` /
 `traversal` (and the three fixed-form helpers) → `call`, the rest
 (`upstream_status`, `upstream_unreachable`, `workspace_unavailable`, unexplained)
-→ `failure`.
+→ `failure` — except `upstream_status` with HTTP 404 / 410, which is `outcome`
+like `not_found` (401 / 403, other 4xx, 5xx and redirects that could not be
+followed stay `failure`).
 
 Wording that depends on the **resolution result** (missing / oversize /
 redirect that could not be followed / upstream status / unreachable / the
@@ -1161,11 +1163,11 @@ class Tools:
     fact-sentence rules above (user-safe); `next` is the model-only part.
     `kind` says whose problem it is, and the chat UI shows it on the tool card:
 
-    | kind      | meaning                                                                                                                                                     | UI                     |
-    | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, arguments not parseable JSON | amber 「呼び直し」     |
-    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                     | red 「失敗」           |
-    | `outcome` | the call worked but the answer is "none" — not found / 404, out of range, too large                                                                         | same look as a success |
+    | kind      | meaning                                                                                                                                                                                               | UI                     |
+    | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+    | `call`    | called wrong — missing / wrong-form argument, unknown tool, not in this turn's list, bad `task_id` / `session_id` / `file_id`, a subagent session that is still running, arguments not parseable JSON | amber 「呼び直し」     |
+    | `failure` | runtime failure — exception, timeout, sandbox / upstream unreachable, upstream 5xx, background start failed, limits hit                                                                               | red 「失敗」           |
+    | `outcome` | the call worked but the answer is "none" — not found / 404 / 410, out of range, too large, a named attachment that is not there                                                                       | same look as a success |
 
     The server builds failures it detects itself the same way: unknown tool and
     unparseable `arguments` → `call`; a required argument missing from the call
