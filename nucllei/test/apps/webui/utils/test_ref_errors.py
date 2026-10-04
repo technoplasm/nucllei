@@ -209,10 +209,16 @@ def test_unsupported_form_and_traversal_follow_the_argument():
     )
 
 
+SERVER_SELF_NEXT = "同じサーバのファイルは `/ext/…` の相対 URL か file_id で渡し直す。"
+
+
 def test_unknown_upstream_by_reason_with_extra_and_fallback():
     for reason, what in UNKNOWN_UPSTREAM_WHAT.items():
         err = RefError("unknown_upstream", "detail must not leak", reason=reason)
-        assert _explain(err) == f"ERROR: {U} {what}。次の手: {URL_ARG_FORM}", reason
+        act = SERVER_SELF_NEXT if reason == "server_self" else ""
+        assert (
+            _explain(err) == f"ERROR: {U} {what}。次の手: {act}{URL_ARG_FORM}"
+        ), reason
         assert "detail must not leak" not in _explain(err)
     # 知らない reason は None の 1 文面。extra は「。」の後、形の文の前
     err = RefError("unknown_upstream", "x", reason="brand_new_reason")
@@ -228,7 +234,7 @@ def test_unknown_upstream_by_reason_with_extra_and_fallback():
     err = RefError("unknown_upstream", "x", reason="server_self")
     assert (
         _explain(err, unknown_upstream=table)
-        == f"ERROR: {U} は別の言い方。次の手: {URL_ARG_FORM}"
+        == f"ERROR: {U} は別の言い方。次の手: {SERVER_SELF_NEXT}{URL_ARG_FORM}"
     )
 
 
@@ -282,7 +288,7 @@ _UNRESOLVABLE = (
 )
 _SERVER_SELF = (
     f"ERROR: {U} は このサーバ自身 (または同居するサービス) を指しているので取りに行かない。"
-    f"次の手: {URL_ARG_FORM}"
+    f"次の手: {SERVER_SELF_NEXT}{URL_ARG_FORM}"
 )
 _NOT_ALLOWED = f"ERROR: {U} は取得を許可されていない URL。次の手: {URL_ARG_FORM}"
 

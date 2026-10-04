@@ -156,6 +156,9 @@ UNKNOWN_UPSTREAM_WHAT: Mapping[str | None, str] = MappingProxyType(
     }
 )
 
+# server_self の次の手の先頭 (行動)。続けて URL_ARG_FORM (受け付ける形の説明)
+_SERVER_SELF_NEXT = "同じサーバのファイルは `/ext/…` の相対 URL か file_id で渡し直す。"
+
 # reason 無しの 3xx(redirect は 3 回まで辿る — ここに来るのは転送先が URL として組めない
 # とき)の「何が起きたか」の前半。続きは `RefErrorHints.redirect_next`
 _REDIRECT_WHAT = "ERROR: {ref} は redirect ({status}) を返した。"
@@ -324,9 +327,9 @@ def _explain_text(
     if code == "unknown_upstream":
         table = hints.unknown_upstream
         what = table[err.reason] if err.reason in table else table[None]
-        return (
-            f"ERROR: {ref} {what}。{NEXT}{hints.unknown_upstream_extra}{URL_ARG_FORM}"
-        )
+        # server_self は説明 (URL_ARG_FORM) の前に行動を置く (llens 判定 2026-10-04)
+        act = _SERVER_SELF_NEXT if err.reason == "server_self" else ""
+        return f"ERROR: {ref} {what}。{NEXT}{act}{hints.unknown_upstream_extra}{URL_ARG_FORM}"
     if code == "traversal":
         return (
             _fill(_TRAVERSAL, ref)
