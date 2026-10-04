@@ -415,6 +415,97 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 " 処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)。" in out
             ), (given, out)
 
+    def test_failed_code_flags_the_result_without_changing_it(self):
+        """#145(ken「sandbox の stderr とかは？実行した python のエラーとか」): 実行した
+        コードの失敗 (exit_code != 0 / セルの例外 / タイムアウト) は結果に failure の旗を
+        立てる。raise しない — 本文 (stdout・traceback・次の手) は旗なしと 1 文字も同じ。
+        exit_code 0 の stderr (warning) と run_shell の非 0 は旗を立てない。"""
+        from nucllei.utils import tool_output
+
+        def run(coro):
+            sink = tool_output.ToolOutputSink()
+
+            async def main():
+                token = tool_output.current_sink.set(sink)
+                try:
+                    return await coro
+                finally:
+                    tool_output.current_sink.reset(token)
+
+            return asyncio.run(main()), sink.error_kind()
+
+        def exec_res(**over):
+            return {
+                "exit_code": 0,
+                "duration_s": 0.1,
+                "stdout": "out\n",
+                "stderr": "",
+                "exports": [],
+                **over,
+            }
+
+        def cell_res(**over):
+            return {"stdout": "out\n", "duration_s": 0.1, "exports": [], **over}
+
+        user = {"id": "u1"}
+        cases = [
+            # (tool 呼び出し, 期待する旗)
+            (
+                lambda: _sandbox(
+                    {"/exec": exec_res(exit_code=1, stderr="Traceback\n")}
+                ).run_python_once("1/0", __user__=user),
+                "failure",
+            ),
+            (
+                lambda: _sandbox(
+                    {"/exec": exec_res(exit_code=-9, timed_out=True)}
+                ).run_python_once("while 1: pass", __user__=user),
+                "failure",
+            ),
+            (
+                lambda: _sandbox(
+                    {"/exec": exec_res(stderr="DeprecationWarning\n")}
+                ).run_python_once("import x", __user__=user),
+                None,
+            ),
+            (
+                lambda: _sandbox({"/exec": exec_res(exit_code=1)}).run_shell(
+                    "grep nothing f", __user__=user
+                ),
+                None,
+            ),
+            (
+                lambda: _sandbox(
+                    {
+                        "/exec_cell": cell_res(
+                            error="ZeroDivisionError: division by zero"
+                        )
+                    }
+                ).run_python("1/0", __user__=user, __chat_id__="c1"),
+                "failure",
+            ),
+            (
+                lambda: _sandbox({"/exec_cell": cell_res(timed_out=True)}).run_python(
+                    "while 1: pass", __user__=user, __chat_id__="c1"
+                ),
+                "failure",
+            ),
+            (
+                lambda: _sandbox({"/exec_cell": cell_res()}).run_python(
+                    "print(1)", __user__=user, __chat_id__="c1"
+                ),
+                None,
+            ),
+        ]
+        for make, expected in cases:
+            flagged_text, kind = run(make())
+            assert kind == expected, flagged_text
+            # 旗の有無で本文は変わらない(sink 無しで呼んだ結果と同じ)
+            assert _arun(make()) == flagged_text
+        # traceback と stdout は結果に残る
+        text, _ = run(cases[4][0]())
+        assert "out" in text and "ZeroDivisionError: division by zero" in text
+
     def test_run_shell_and_run_python_once_use_exec(self):
         res = {
             "exit_code": 0,

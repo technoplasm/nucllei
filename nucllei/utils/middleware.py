@@ -1537,6 +1537,9 @@ async def _execute_one_tool_call(
     )
     tool_result = None
     error_kind = None
+    # 返した結果に tool が付けた失敗の種別(tool_output.mark_error_kind — raise しない)。
+    # raise の error_kind と違い本文・render・副産物はそのまま
+    flagged_error_kind = None
     context_image_file_ids = []
     display_items = []
     result_render_override = None
@@ -1649,6 +1652,7 @@ async def _execute_one_tool_call(
             # #110(§8): await_task が宣言した表示ディスクリプタ
             # (exec 行の render_descriptor)は型由来の render より優先する
             result_render_override = sink.result_render() if tool_succeeded else None
+            flagged_error_kind = sink.error_kind() if tool_succeeded else None
 
     # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
     # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
@@ -1681,6 +1685,9 @@ async def _execute_one_tool_call(
     if error_kind is not None:
         # エラー文は text で描く(戻り型宣言・json の render はパース前提)
         result_render = None
+    elif flagged_error_kind is not None:
+        # 中身のある結果に付いた失敗の旗 — render は残す
+        error_kind = flagged_error_kind
 
     return {
         "tool_call_id": tool_call_id,

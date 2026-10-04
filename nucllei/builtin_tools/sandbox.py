@@ -42,7 +42,7 @@ from nucllei.utils.tool_errors import (
     ToolFatal,
     ToolOutcome,
 )
-from nucllei.utils.tool_output import display
+from nucllei.utils.tool_output import display, mark_error_kind
 from nucllei.utils.tool_render import Code
 
 log = logging.getLogger(__name__)
@@ -621,8 +621,19 @@ class Tools:
         )
 
     def _format_exec_result(
-        self, res: dict, output_lines: list[str], timeout_s: Optional[int] = None
+        self,
+        res: dict,
+        output_lines: list[str],
+        timeout_s: Optional[int] = None,
+        flag_failure: bool = False,
     ) -> str:
+        # 実行したコードが失敗した (exit_code != 0 / タイムアウト) ら結果に failure の旗を
+        # 立てる (#145、ken「sandbox の stderr とかは？実行した python のエラーとか」)。
+        # raise はしない — stdout / traceback / 生成ファイルはモデルに要る。stderr だけ
+        # (exit_code 0 の warning) は通常の結果。run_shell は旗を立てない (grep の
+        # 不一致 = exit 1 のように、非 0 が失敗でないコマンドが多い)
+        if flag_failure and (res.get("exit_code") != 0 or res.get("timed_out")):
+            mark_error_kind("failure")
         parts = [f"exit_code={res['exit_code']} ({res['duration_s']}s)"]
         if res.get("timed_out"):
             # sandbox は指定値を上限で clamp する — 実際に効いた値で言う
@@ -658,6 +669,10 @@ class Tools:
         return "\n".join(parts)
 
     def _format_cell_result(self, res: dict, output_lines: list[str]) -> str:
+        # セルが例外 (error) かタイムアウトで終わったら failure の旗 (raise しない —
+        # `_format_exec_result` と同じ)
+        if res.get("error") or res.get("timed_out"):
+            mark_error_kind("failure")
         parts = []
         if res.get("session_reset"):
             parts.append(
@@ -718,7 +733,9 @@ class Tools:
             __message_id__,
             __event_emitter__,
         )
-        return self._format_exec_result(res, output_lines, payload["timeout_s"])
+        return self._format_exec_result(
+            res, output_lines, payload["timeout_s"], flag_failure=lang == "python"
+        )
 
     async def _exec_cell(
         self,

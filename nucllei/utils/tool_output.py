@@ -93,6 +93,9 @@ class ToolOutputSink:
         self._context_images: list[str] = []
         self._displays: list[dict] = []
         self._result_render: Optional[dict] = None
+        # 結果に付ける失敗の種別(#145 — mark_error_kind)。raise せずに返した結果を
+        # 「失敗」として見せる口
+        self._error_kind: Optional[str] = None
         # --- progress(#100、揮発)---
         self._tool_call_id = tool_call_id
         self._emit_progress = emit_progress
@@ -148,6 +151,24 @@ class ToolOutputSink:
     def result_render(self) -> Optional[dict]:
         with self._lock:
             return dict(self._result_render) if self._result_render else None
+
+    # --- 結果の失敗フラグ(#145)-------------------------------------------
+
+    def mark_error_kind(self, kind: str) -> None:
+        """返す結果に失敗の種別を付ける(raise しない — 本文はそのまま結果になる)。
+
+        `violation` は middleware 専用なので受けない。未知の値は ValueError。
+        """
+        from nucllei.utils.tool_errors import TOOL_ERROR_KINDS
+
+        if kind not in TOOL_ERROR_KINDS or kind == "violation":
+            raise ValueError(f"unknown result error kind: {kind!r}")
+        with self._lock:
+            self._error_kind = kind
+
+    def error_kind(self) -> Optional[str]:
+        with self._lock:
+            return self._error_kind
 
     # --- progress(#100、揮発)-------------------------------------------
 
@@ -399,11 +420,29 @@ def progress(
         log.debug("progress push failed", exc_info=True)
 
 
+def mark_error_kind(kind: str = "failure") -> None:
+    """返す結果を「失敗」として見せる(#145、raise しない版)。
+
+    `ToolError` を raise すると本文は ERROR 文だけになり、副産物(添付・display)も
+    捨てられる。中身のある結果(実行した Python の stdout + traceback、生成ファイル)を
+    そのまま返しつつ、チャットのカードと wire の `results[i].error_kind`(background は
+    exec 行の `meta.error_kind`、行は done のまま)に種別を出したいときに呼ぶ。
+    本文・render・context_images・display は成功時と同じに扱われる。kind は
+    `call` / `failure` / `outcome` / `fatal`(`violation` は middleware 専用)。
+    tool 実行文脈外(sink 未設定)では no-op。
+    """
+    sink = current_sink.get()
+    if sink is None:
+        return
+    sink.mark_error_kind(kind)
+
+
 __all__ = [
     "PROGRESS_THROTTLE_S",
     "ToolOutputSink",
     "current_sink",
     "display",
     "feed_image",
+    "mark_error_kind",
     "progress",
 ]

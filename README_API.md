@@ -1218,6 +1218,31 @@ class Tools:
     if the file must lint outside nucllei.) **A returned string is always a
     normal result** — even one that starts with `ERROR:`; nothing sniffs the
     text. Any other uncaught exception goes the generic `fatal` path.
+    **Flagging a result without raising**: when a call failed but its output
+    is still the model's working data (the run's stdout and traceback, files
+    already attached), return the result as usual and call
+    `nucllei.utils.tool_output.mark_error_kind(kind="failure")` during the
+    call (kinds `call` / `failure` / `outcome` / `fatal`; `violation` is the
+    server's own). The text, `render`, `display` and `context_images` stay
+    exactly as for a success; only `results[i].error_kind` is added (background:
+    the row stays `done` with the result, and `meta.error_kind` carries the
+    kind). A raised `ToolError` wins over a mark. The sandbox uses it: `run_python`
+    / `run_python_once` flag `failure` when the code exits non-zero, a cell
+    raises, or the run times out (stderr with exit code 0 — warnings — is not
+    flagged; `run_shell` does not flag, as a non-zero exit is often not a
+    failure, e.g. `grep` without a match). Custom tools can use it too:
+
+    ```python
+    from nucllei.utils.tool_output import mark_error_kind
+
+    class Tools:
+        def run_job(self, job: str) -> str:
+            """..."""
+            log, ok = _run(job)
+            if not ok:
+                mark_error_kind("failure")  # amber 「失敗」, log still returned
+            return log
+    ```
 
   - The description is re-sent on **every turn** for every mounted function:
     keep it to what the model needs to decide whether and how to call
@@ -1862,7 +1887,8 @@ answer is "none"); either way `meta.error_kind` records the kind. A timeout is
 `failed` 「ERROR: ツール X の background 実行が N 秒の上限でタイムアウトした。…」
 (`failure`) and any other exception is `failed` / `fatal` with the same
 class-name + 200-character text as the synchronous path (the raw exception
-string is logged, not stored).
+string is logged, not stored). A result flagged with `mark_error_kind` ends
+`done` with the result and `meta.error_kind` set.
 
 Over HTTP the rows are readable and stoppable by the chat's owner:
 `GET /api/v1/chats/{id}/executions` (object form with `delivered` /

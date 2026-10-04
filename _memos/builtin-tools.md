@@ -1182,6 +1182,15 @@ ken 指示「ツールのエラーも結果として表示できるように。�
   callable の署名で検出して violation(`ERROR: ツール {tool} の必須の引数 {name} が無い。次の手: 引数を
   付けて呼び直す。`)。spec のフィルタを通ったのに署名に無い引数も violation。タイムアウトは failure、
   その他の例外は fatal(例外は型名 + 先頭 200 字。background も同じ式に揃えた — 旧: 生の `str(e)`)。
+- **raise しない旗**(同日、ken「sandbox の stderr とかは？実行した python のエラーとか」):
+  `tool_output.mark_error_kind(kind="failure")` で返す結果に種別だけを付ける(sink の
+  `error_kind` を middleware / exec runner が harvest)。本文・render・display・context_images は
+  成功時のまま、wire に `results[i].error_kind` が立つ。background は結果があるので `done` +
+  `meta.error_kind`(FE は done でも種別があれば amber)。raise の ToolError が優先。sandbox の
+  run_python / run_python_once が使う: exit_code != 0・セルの error・timed_out で failure
+  (stdout・traceback・生成ファイル・タイムアウトの次の手はモデルに要るので raise しない)。
+  exit_code 0 の stderr(warning)は通常の結果。run_shell は旗を立てない(grep の不一致 = exit 1
+  のように非 0 が失敗でないコマンドが多い)。
 - **JSON を返す tool の線引き**: 中身の無い失敗は raise、中身(部分回答・session_id・切詰め)を
   運ぶ結果は結果のまま(run_subagent の子のエラー / stop、await_task の per-entry の failed 行、
   check_task の不正 id 行)。「一致なし」「空」のように `ERROR:` で返していなかった通常の結果も

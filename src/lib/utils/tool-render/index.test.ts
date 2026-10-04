@@ -495,10 +495,11 @@ describe('TOOL_ERROR_LOOKS', () => {
 });
 
 describe('executionErrorKind', () => {
-	it('done は outcome のときだけ、failed は種別(無ければ failure)', () => {
+	it('done は種別があればそれ(outcome・結果に付けた旗)、failed は種別(無ければ failure)', () => {
 		expect(executionErrorKind('done', undefined)).toBeNull();
 		expect(executionErrorKind('done', 'outcome')).toBe('outcome');
-		expect(executionErrorKind('done', 'fatal')).toBeNull();
+		// run_python の失敗のように結果に旗を付けたもの — done のまま amber
+		expect(executionErrorKind('done', 'failure')).toBe('failure');
 		expect(executionErrorKind('failed', 'call')).toBe('call');
 		expect(executionErrorKind('failed', 'fatal')).toBe('fatal');
 		expect(executionErrorKind('failed', 'violation')).toBe('violation');

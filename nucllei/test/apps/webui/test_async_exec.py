@@ -634,6 +634,21 @@ class TestAsyncExec(AbstractPostgresTest):
             else:
                 assert row.result == error.text and row.error is None
 
+    def test_runner_records_a_marked_result_as_done_with_the_kind(self):
+        """結果に付けた失敗の旗(mark_error_kind)は結果があるので done のまま、種別だけ
+        meta.error_kind に残る(一覧 API・await_task の error_kind に出る)。"""
+        from nucllei.utils import tool_output
+
+        async def probe():
+            tool_output.mark_error_kind("failure")
+            return "exit_code=1\n--- stderr ---\nTraceback"
+
+        row = self._run_to_end(probe)
+        assert row.status == "done"
+        assert row.result == "exit_code=1\n--- stderr ---\nTraceback"
+        assert row.error is None
+        assert row.meta["error_kind"] == "failure"
+
     def test_runner_keeps_the_subagent_session_on_error(self):
         from nucllei.utils import tool_output
         from nucllei.utils.tool_errors import ToolFailure

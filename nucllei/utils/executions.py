@@ -108,8 +108,9 @@ _exec_sinks: dict[str, "_ExecSink"] = {}
 # exec 行 meta のキー: run_subagent の子 agent session id(一覧 API が session_id として出す)
 SUBAGENT_SESSION_META_KEY = "subagent_session_id"
 # exec 行 meta のキー: 失敗の種別(#145 — utils/tool_errors の kind。一覧 API・`execution:done`
-# が error_kind として出す)。outcome は status done、それ以外(call / failure / violation /
-# fatal)は status failed で終わる
+# が error_kind として出す)。raise の outcome は status done、それ以外(call / failure /
+# violation / fatal)は status failed で終わる。結果に付けた旗(tool_output.mark_error_kind)は
+# 結果があるので status done のまま種別だけ載る
 ERROR_KIND_META_KEY = "error_kind"
 
 
@@ -590,6 +591,10 @@ async def _run_execution(
             # (failed / stopped は meta を書かないので走行中の値が残る)
             if sink.subagent_session_id:
                 meta[SUBAGENT_SESSION_META_KEY] = sink.subagent_session_id
+            # #145: 中身のある結果に tool が付けた失敗の旗(mark_error_kind)。結果が
+            # あるので行は done のまま、種別だけ meta に残す
+            if sink.error_kind():
+                meta[ERROR_KIND_META_KEY] = sink.error_kind()
             usage = raw.get("usage") if isinstance(raw, dict) else None
             outcome = {
                 "status": "done",

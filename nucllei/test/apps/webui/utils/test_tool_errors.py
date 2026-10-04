@@ -445,3 +445,48 @@ def test_one_failing_call_does_not_flag_its_siblings():
     assert "error_kind" not in results[0]
     assert results[1]["error_kind"] == "outcome"
     assert results[1]["content"] == "ERROR: 無い。"
+
+
+# --- 結果に付ける旗(tool_output.mark_error_kind — raise しない)--------------------
+
+
+def test_marked_result_keeps_text_render_and_side_channels():
+    """中身のある結果に付けた失敗の旗は error_kind だけを足す — 本文・render・display は
+    成功時と同じ(raise の ToolError だけが render と副産物を落とす)。"""
+    from nucllei.utils import tool_output
+
+    async def probe():
+        tool_output.display("表示")
+        tool_output.mark_error_kind("failure")
+        return {"stdout": "x", "error": "Traceback"}
+
+    results = _run([_call("{}")], _tool(probe))
+    assert results[0]["error_kind"] == "failure"
+    assert results[0]["content"] == '{"stdout": "x", "error": "Traceback"}'
+    assert results[0]["render"] == {"kind": "json"}
+    assert results[0]["display"] == [{"kind": "markdown", "content": "表示"}]
+
+
+def test_marked_result_kind_is_validated_and_noop_outside_a_tool():
+    from nucllei.utils import tool_output
+
+    tool_output.mark_error_kind("failure")  # sink 無し — no-op
+    sink = tool_output.ToolOutputSink()
+    for bad in ("violation", "oops"):
+        with pytest.raises(ValueError):
+            sink.mark_error_kind(bad)
+    assert sink.error_kind() is None
+    sink.mark_error_kind("fatal")
+    assert sink.error_kind() == "fatal"
+
+
+def test_raised_error_wins_over_a_mark():
+    from nucllei.utils import tool_output
+
+    async def probe():
+        tool_output.mark_error_kind("failure")
+        raise ToolFatal("壊れた")
+
+    results = _run([_call("{}")], _tool(probe))
+    assert results[0]["error_kind"] == "fatal"
+    assert results[0]["content"] == "ERROR: 壊れた。"

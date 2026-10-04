@@ -237,15 +237,17 @@ export const TOOL_ERROR_LOOKS: Record<ToolErrorKind, ToolErrorLook> = {
 	}
 };
 
-// exec 行(background)の終端 → 見た目の種別。outcome は status done で届き、それ以外の
-// 種別は failed で届く。failed なのに種別が無い行(spawn の後段で起動できなかった行 —
-// 同じターンの結果は failure)は failure の見た目にする(赤はサーバが fatal と言ったときだけ)
+// exec 行(background)の終端 → 見た目の種別。done で届く種別は raise の outcome と、
+// 結果に付けた旗(BE の tool_output.mark_error_kind — 例: 実行した Python が失敗した
+// run_python。結果があるので done)。それ以外の raise は failed で届く。failed なのに
+// 種別が無い行(spawn の後段で起動できなかった行 — 同じターンの結果は failure)は failure の
+// 見た目にする(赤はサーバが fatal と言ったときだけ)
 export const executionErrorKind = (
 	status: string | null | undefined,
 	value: unknown
 ): ToolErrorKind | null => {
 	const kind = toolErrorKind(value);
-	if (status === 'done') return kind === 'outcome' ? kind : null;
+	if (status === 'done') return kind;
 	if (status === 'failed') return kind && kind !== 'outcome' ? kind : 'failure';
 	return null;
 };
