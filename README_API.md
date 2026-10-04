@@ -954,6 +954,13 @@ The terminal `{usage}` is the merged, persisted `message.usage`:
 | `context_size`      | the model's context window, when known                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `carried_tokens`    | estimated prompt of the **next** call = `prompt_tokens + (completion − reasoning)` of the last call — what this turn carries into the next (text and tool_calls are re-sent, reasoning is not). `reasoning` is the engine's `reasoning_tokens` (top-level or `completion_tokens_details`); when not reported it is **estimated** from the character ratio of the last call's output blocks. Absent when the usage has no `completion_tokens`. The UI's context gauge shows this when present. |
 
+Every model call of the turn — the first one and each tool-loop follow-up — sends
+the model preset's system prompt exactly once, so `prompt_tokens` of the last call
+and `carried_tokens` are comparable with the next turn's first call. (Until
+2026-10-04 the follow-ups accumulated one extra copy per call — 16,600 → 33,201 →
+49,802 … characters on staging — inflating `prompt_tokens`/`carried_tokens` and
+making the gauge drop when the next turn started.)
+
 Companions: `GET /api/tasks/{task_id}/events` (re-attach),
 `POST /api/tasks/stop/{task_id}`, `POST /api/tasks/{task_id}/calls/{call_id}`
 (reply to a tool's `__event_call__` dialog), `GET /api/tasks/chat/{chat_id}`.

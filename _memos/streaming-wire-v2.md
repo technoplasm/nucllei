@@ -92,6 +92,24 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     IN / OUT が前ターンの確定値だった → live から出す(`chipUsage`)、(2) 新規チャットで最初の usage
     まで空 → 送信時に `markLiveUsagePending`(send.ts)で「…」。dev で「一瞬消える」ように見えたのは
     他セッションのファイル編集による vite の全体リロード(アプリの挙動ではない)。
+    **追補 2(2026-10-04、staging で「まだ 2 ターン目の送信直後に大きく落ちる」)**: ゲージの
+    計算ではなく**送信内容のバグ**だった。tool ループの追撃のたびに preset system prompt が
+    1 枚ずつ前置され積み重なっていた(staging 実測、llens-thinking: system 16600 → 33201 →
+    49802 → 66403 → 83004 文字、prompt_tokens qwen 18.7k → 66.6k / luna 22.4k → 72.9k。
+    ターン 2 は 1 枚に戻るので carried 66.5k → 次ターン prompt 35.8k、luna 72.8k → 45.0k)。
+    原因: `misc.add_or_update_system_message` が共有 dict を in-place で書き換えていた —
+    router は `payload = {**form_data}`(浅いコピー)に掛け、初回の `insert` で
+    form_data["messages"] に system dict が入り、追撃 `[*form_data["messages"], ...]` は
+    その dict を共有したまま router に渡るので、毎回同じ dict に前置し直していた。
+    直し: misc の messages 加工 4 関数(system / user / assistant / first-user prepend)と
+    `openai_o1_o3_handler` の role 書き換えを**非破壊**(新しい list・書き換える message だけ
+    新しい dict)にした。ゲージ側(carried / chipUsage)は変更なし。dev 実測(qwen、system
+    6.4k 字の一時 preset + fetch_url 2 回): 修正前 prompt 5243 → 9674 → 14099、carried 14273
+    → 次ターン 5779(落差 −8.5k)/ 修正後 5243 → 5418 → 5587、carried 5750 → 次ターン 5768。
+    回帰: `test_native_tool_calling.py::test_system_prompt_is_not_duplicated_across_tool_loop_calls`
+    (実物の routers.openai を通し、上流へ出た全呼び出しの system が 1 枚・同一)、
+    `utils/test_message_helpers.py`。教訓: **request 経路の messages 加工は非破壊で書く**
+    (form_data は浅いコピーで回り、追撃・subagent・resume と dict を共有する)。
   **tool 結果の画像(`results[].context_images`、`__feed_image__`)は次ターン以降の履歴にも
   再送する**(#142、ken 決定 2026-10-02 — 画像は忘れさせない。画像の多いチャットが高い占有の
   まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE

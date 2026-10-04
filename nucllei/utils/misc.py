@@ -115,17 +115,38 @@ def pop_system_message(messages: list[dict]) -> tuple[Optional[dict], list[dict]
     return get_system_message(messages), remove_system_message(messages)
 
 
+# llens(2026-10-04): 以下 4 つの messages 加工は **非破壊**(新しい list と、書き換える
+# message だけ新しい dict を返す)。旧実装(upstream 由来)は共有 dict を in-place で
+# 書き換えていた — routers/openai.py は `payload = {**form_data}`(浅いコピー)のまま
+# apply_model_system_prompt_to_body を掛け、middleware の tool ループ追撃は
+# `[*form_data["messages"], ...]`(list は新規・要素 dict は共有)で組むため、
+# 初回の insert で form_data["messages"] に入った system dict に、追撃のたびに
+# preset system prompt が前置され続けた(staging 実測: 16600 → 33201 → 49802 → … 文字、
+# prompt_tokens 18.7k → 66.6k。ターン 2 で 1 枚に戻るので UsageChip が送信直後に落ちる)。
+# 呼び出し側は必ず戻り値を代入する(`form_data["messages"] = ...`)。
+
+
 def prepend_to_first_user_message_content(
     content: str, messages: list[dict]
 ) -> list[dict]:
-    for message in messages:
+    messages = list(messages)
+    for index, message in enumerate(messages):
         if message["role"] == "user":
             if isinstance(message["content"], list):
-                for item in message["content"]:
-                    if item["type"] == "text":
-                        item["text"] = f"{content}\n{item['text']}"
+                parts = [
+                    (
+                        {**item, "text": f"{content}\n{item['text']}"}
+                        if item["type"] == "text"
+                        else item
+                    )
+                    for item in message["content"]
+                ]
+                messages[index] = {**message, "content": parts}
             else:
-                message["content"] = f"{content}\n{message['content']}"
+                messages[index] = {
+                    **message,
+                    "content": f"{content}\n{message['content']}",
+                }
             break
     return messages
 
@@ -135,18 +156,20 @@ def add_or_update_system_message(content: str, messages: list[dict]):
     Adds a new system message at the beginning of the messages list
     or updates the existing system message at the beginning.
 
+    Non-destructive: returns a new list; the given list and its message dicts
+    are left untouched (see the note above).
+
     :param msg: The message to be added or appended.
     :param messages: The list of message dictionaries.
     :return: The updated list of message dictionaries.
     """
 
     if messages and messages[0].get("role") == "system":
-        messages[0]["content"] = f"{content}\n{messages[0]['content']}"
-    else:
-        # Insert at the beginning
-        messages.insert(0, {"role": "system", "content": content})
-
-    return messages
+        return [
+            {**messages[0], "content": f"{content}\n{messages[0]['content']}"},
+            *messages[1:],
+        ]
+    return [{"role": "system", "content": content}, *messages]
 
 
 def add_or_update_user_message(content: str, messages: list[dict]):
@@ -154,18 +177,19 @@ def add_or_update_user_message(content: str, messages: list[dict]):
     Adds a new user message at the end of the messages list
     or updates the existing user message at the end.
 
+    Non-destructive: returns a new list (see the note above).
+
     :param msg: The message to be added or appended.
     :param messages: The list of message dictionaries.
     :return: The updated list of message dictionaries.
     """
 
     if messages and messages[-1].get("role") == "user":
-        messages[-1]["content"] = f"{messages[-1]['content']}\n{content}"
-    else:
-        # Insert at the end
-        messages.append({"role": "user", "content": content})
-
-    return messages
+        return [
+            *messages[:-1],
+            {**messages[-1], "content": f"{messages[-1]['content']}\n{content}"},
+        ]
+    return [*messages, {"role": "user", "content": content}]
 
 
 def append_or_update_assistant_message(content: str, messages: list[dict]):
@@ -173,18 +197,19 @@ def append_or_update_assistant_message(content: str, messages: list[dict]):
     Adds a new assistant message at the end of the messages list
     or updates the existing assistant message at the end.
 
+    Non-destructive: returns a new list (see the note above).
+
     :param msg: The message to be added or appended.
     :param messages: The list of message dictionaries.
     :return: The updated list of message dictionaries.
     """
 
     if messages and messages[-1].get("role") == "assistant":
-        messages[-1]["content"] = f"{messages[-1]['content']}\n{content}"
-    else:
-        # Insert at the end
-        messages.append({"role": "assistant", "content": content})
-
-    return messages
+        return [
+            *messages[:-1],
+            {**messages[-1], "content": f"{messages[-1]['content']}\n{content}"},
+        ]
+    return [*messages, {"role": "assistant", "content": content}]
 
 
 def openai_chat_message_template(model: str):

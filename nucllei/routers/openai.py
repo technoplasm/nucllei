@@ -141,12 +141,19 @@ def openai_o1_o3_handler(payload):
     # Fix: o1 and o3 do not support the "system" role directly.
     # For older models like "o1-mini" or "o1-preview", use role "user".
     # For newer o1/o3 models, replace "system" with "developer".
+    # 非破壊(2026-10-04): payload は form_data の浅いコピーで、messages の dict は
+    # tool ループの追撃と共有している — 先頭 dict を書き換えず差し替える
+    # (utils/misc.py add_or_update_system_message の注記と同じ規律)。
     if payload["messages"][0]["role"] == "system":
         model_lower = payload["model"].lower()
         if model_lower.startswith("o1-mini") or model_lower.startswith("o1-preview"):
-            payload["messages"][0]["role"] = "user"
+            role = "user"
         else:
-            payload["messages"][0]["role"] = "developer"
+            role = "developer"
+        payload["messages"] = [
+            {**payload["messages"][0], "role": role},
+            *payload["messages"][1:],
+        ]
 
     return payload
 

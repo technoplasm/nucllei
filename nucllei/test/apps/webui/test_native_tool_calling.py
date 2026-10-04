@@ -121,6 +121,7 @@ async def _drive_tool_call_loop(
     upserts=None,
     omit_default_tool=False,
     initial_response=None,
+    upstream=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
 
@@ -132,6 +133,9 @@ async def _drive_tool_call_loop(
     initial_fixture: 初回応答に使う fixture 名(引数なし/特殊文字引数の検証で差し替える)。
     initial_response: 初回応答そのもの(StreamingResponse または非 stream dict)。
     指定時は initial_fixture より優先(異常系 SSE・非 stream 応答の駆動用)。
+    upstream: 指定時は初回・継続とも ``await upstream(request, form_data, user, fixture名)``
+    で応答を作る(実物の routers.openai を通して上流 payload を検査する用 —
+    _real_router_upstream)。初回も同じ form_data で呼ぶ(本番の main.py と同じ順序)。
     extra_tools: metadata["tools"] に追加登録するツール(get_current_time など)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
@@ -145,6 +149,8 @@ async def _drive_tool_call_loop(
     async def fake_generate_chat_completion(request, form_data, user):
         completion_calls.append(form_data)
         name = followups.pop(0) if followups else "tool_call"
+        if upstream is not None:
+            return await upstream(request, form_data, user, name)
         return _sse_response(name)
 
     if cap is not None:
@@ -216,7 +222,7 @@ async def _drive_tool_call_loop(
         "tools": [{"type": "function", "function": weather_spec}],
     }
     user = types.SimpleNamespace(
-        id="1", email="john.doe@nucllei.local", name="John Doe", role="admin"
+        id="1", email="john.doe@nucllei.local", name="John Doe", role="admin", info=None
     )
     request = types.SimpleNamespace(
         app=types.SimpleNamespace(
@@ -230,6 +236,9 @@ async def _drive_tool_call_loop(
 
     events_stream = CompletionEventStream(chat_id="chat-1", message_id="message-1")
     queue = events_stream.subscribe()
+
+    if initial_response is None and upstream is not None:
+        initial_response = await upstream(request, form_data, user, initial_fixture)
 
     response = await middleware.process_chat_response(
         request,
@@ -706,6 +715,110 @@ def test_followup_preserves_parallel_tool_calls(monkeypatch):
     ]
     # 2 都市それぞれツールが実行されている
     assert len(tool_invocations) == 2
+
+
+####################################
+# preset system prompt は呼び出しごとに 1 枚(tool ループで積み重ならない)
+####################################
+
+
+class _FakeUpstreamResponse:
+    """aiohttp.ClientResponse の代役 — routers.openai が SSE で読む面だけ。"""
+
+    def __init__(self, raw: bytes):
+        self.status = 200
+        self.headers = {"Content-Type": "text/event-stream"}
+
+        async def content():
+            for line in raw.split(b"\n"):
+                yield line + b"\n"
+
+        self.content = content()
+
+    def close(self):
+        pass
+
+    def release(self):
+        pass
+
+
+def _real_router_upstream(monkeypatch, system_prompt):
+    """実物の routers.openai.generate_chat_completion を通す upstream(上流 HTTP だけ代役)。
+
+    preset(models 行)の params.system を掛ける payload 加工(浅いコピー +
+    apply_model_system_prompt_to_body)を本番どおり通し、上流へ出た JSON を記録する。
+    戻り値: (upstream callable, 上流へ出た payload の列)
+    """
+    from nucllei.routers import openai as openai_router
+
+    sent = []
+    pending = []
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def request(self, method, url, data=None, headers=None):
+            sent.append(json.loads(data))
+            return _FakeUpstreamResponse(mf.load_raw(pending.pop(0)))
+
+        async def close(self):
+            pass
+
+    model_info = types.SimpleNamespace(
+        id="kimi-k2.6",
+        base_model_id=None,
+        user_id="1",
+        access_control=None,
+        params=types.SimpleNamespace(model_dump=lambda: {"system": system_prompt}),
+    )
+    monkeypatch.setattr(openai_router.aiohttp, "ClientSession", FakeSession)
+    monkeypatch.setattr(
+        openai_router.Models, "get_model_by_id", lambda model_id: model_info
+    )
+
+    async def upstream(request, form_data, user, fixture):
+        state = request.app.state
+        state.OPENAI_MODELS = {"kimi-k2.6": {"id": "kimi-k2.6", "urlIdx": 0}}
+        state.config.OPENAI_API_BASE_URLS = ["http://upstream.invalid/v1"]
+        state.config.OPENAI_API_KEYS = ["sk-dummy"]
+        state.config.OPENAI_API_CONFIGS = {}
+        pending.append(fixture)
+        return await openai_router.generate_chat_completion(request, form_data, user)
+
+    return upstream, sent
+
+
+def test_system_prompt_is_not_duplicated_across_tool_loop_calls(monkeypatch):
+    """tool ループの各呼び出しで上流に出る system は 1 枚・同一(2026-10-04 staging 実測の回帰)。
+
+    旧実装は add_or_update_system_message が共有 dict を in-place で書き換えていた:
+    初回の insert で form_data["messages"] に system dict が入り、追撃
+    (`[*form_data["messages"], ...]`)のたびに router が同じ dict へ preset system を
+    前置し直す → system が 1 → 2 → 3 枚と積み重なり、prompt_tokens が水増しされて
+    ターン 2 の先頭で UsageChip が落ちた(16600 → 33201 → 49802 文字)。
+    """
+    system_prompt = "あなたは院内アシスタントです。"
+    upstream, sent = _real_router_upstream(monkeypatch, system_prompt)
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["tool_call", "text_basic"],
+            upstream=upstream,
+        )
+    )
+
+    # 初回 + 追撃 2 回 = 上流 3 呼び出し(tool は 2 回実行)
+    assert len(sent) == 3
+    assert len(tool_invocations) == 2
+    for payload in sent:
+        systems = [m for m in payload["messages"] if m["role"] == "system"]
+        assert [m["content"] for m in systems] == [system_prompt]
+        assert payload["messages"][0]["role"] == "system"
+    # 追撃は初回の会話に tool 往復を足しただけ(先頭の system・user は初回と同一)
+    assert sent[1]["messages"][:2] == sent[0]["messages"][:2]
+    assert sent[2]["messages"][:2] == sent[0]["messages"][:2]
 
 
 def test_content_between_parallel_calls_does_not_duplicate_tool_calls_block(
