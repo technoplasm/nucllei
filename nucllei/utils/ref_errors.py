@@ -1,4 +1,7 @@
-"""resolver の `RefError` をモデル向けの ERROR 文にする(全 tool 共通、2026-10-03)。
+"""resolver の `RefError` をモデル向けの ERROR(`ToolError`)にする(全 tool 共通、2026-10-03)。
+
+2026-10-04 (#145): 文字列を返すのをやめ、`utils/tool_errors.ToolError` を返す(呼び手が raise
+する)。文面はそのまま — 組み立ては `ToolError` の 1 箇所、kind は code で決める (`REF_ERROR_KINDS`)。
 
 `utils/image_refs` の resolver(`resolve_url` / `resolve_path`)は失敗理由を
 `RefError`(code + reason + size / limit / status)で返す。それをモデルに見せる文に組むのは
@@ -44,6 +47,12 @@ from nucllei.utils.image_refs import (
     URL_ARG_FORM,
     RefError,
 )
+from nucllei.utils.tool_errors import (
+    NEXT,
+    ToolCallError,
+    ToolError,
+    ToolErrorKind,
+)
 
 log = logging.getLogger(__name__)
 
@@ -53,19 +62,28 @@ RefArg = Literal["url", "path"]
 # --- 形の誤り・file の固定文(image_refs の module docstring「エラーに添える固定文」) ------
 
 
-def url_error(value: str) -> str:
-    """url が URL として解決できない(値を調べて文面を出し分けない)。"""
-    return f"ERROR: {value or '(空)'} は URL として解決できない。{NEXT}{URL_ARG_FORM} {REF_ARGS_RULE}"
+def url_error(value: str) -> ToolCallError:
+    """url が URL として解決できない(値を調べて文面を出し分けない)。呼び手が raise する。"""
+    return ToolCallError(
+        f"{value or '(空)'} は URL として解決できない",
+        f"{URL_ARG_FORM} {REF_ARGS_RULE}",
+    )
 
 
-def path_error(value: str) -> str:
-    """path が sandbox のパスの形でない。"""
-    return f"ERROR: {value or '(空)'} は sandbox のパスの形でない。{NEXT}{PATH_ARG_FORM} {REF_ARGS_RULE}"
+def path_error(value: str) -> ToolCallError:
+    """path が sandbox のパスの形でない。呼び手が raise する。"""
+    return ToolCallError(
+        f"{value or '(空)'} は sandbox のパスの形でない",
+        f"{PATH_ARG_FORM} {REF_ARGS_RULE}",
+    )
 
 
-def file_id_error(fid: str) -> str:
-    """file が引けない(「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない)。"""
-    return f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い。{NEXT}{FILE_ID_ARG_FORM}"
+def file_id_error(fid: str) -> ToolCallError:
+    """file が引けない(「無い」と「権限が無い」を言い分けない — 存在の有無を漏らさない)。
+    呼び手が raise する。"""
+    return ToolCallError(
+        f"file_id {fid} のレコードが無い、またはアクセス権が無い", FILE_ID_ARG_FORM
+    )
 
 
 def mb(n) -> str:
@@ -75,8 +93,8 @@ def mb(n) -> str:
 
 # --- 「事実の文 + 次の手」の共通部品 (module docstring) ---------------------------------
 
-# 次の手 (モデルだけに向けた指示) の始まり。この語より前が事実の文
-NEXT = "次の手: "
+# 次の手 (モデルだけに向けた指示) の始まり (`NEXT`) は utils/tool_errors が持つ — この語より前が
+# 事実の文。旧来の import 先としてここからも再輸出する
 # URL をユーザーに渡すときの言い方 (全 tool 共通の 1 文)。`{ref}` は渡す URL — 裸の相対パス
 # (`/ext/…`) を本文に出させず、必ず markdown リンクにさせる
 SHOW_AS_LINK = (
@@ -194,18 +212,51 @@ def _fill(template: str, ref: str, status=None, code: str = "") -> str:
 
 def explain_ref_error(
     ref: str, err: RefError | None, *, arg: RefArg, hints: RefErrorHints
-) -> str:
-    """`RefError` をモデル向けの ERROR 文に組む(module docstring)。
+) -> ToolError:
+    """`RefError` をモデル向けの `ToolError` に組む(module docstring)。呼び手が raise する。
 
     `err` が None(resolver が理由を付けずに失敗した — 通常起きない)は `hints.unexplained`。
     code の集合は `image_refs.RefError` の docstring。知らない code も `unexplained`
-    (detail は出さない)。
+    (detail は出さない)。文面はテンプレート(`ERROR: 事実。次の手: …`)のまま
+    `ToolError.from_text` で事実と次の手に分け、kind は code で決める(`REF_ERROR_KINDS`)。
     """
     if err is None:
-        return _fill(hints.unexplained, ref)
+        return _tool_error(_fill(hints.unexplained, ref), "failure")
     code = err.code or ""
     log.info(f"ref_errors: resolver refused {ref} (arg={arg}): {code} {err.detail}")
+    return _tool_error(_explain_text(ref, err, code, arg, hints), _ref_error_kind(err))
 
+
+# RefError.code → ToolError の kind(utils/tool_errors)。答えが「無い」(404・大きすぎる)は
+# outcome、引数の形・取りに行かない相手を指した・範囲外は call、届かない・上流の失敗は failure。
+# 載っていない code(unexplained に落ちるもの)は failure
+REF_ERROR_KINDS: Mapping[str, ToolErrorKind] = MappingProxyType(
+    {
+        "too_large": "outcome",
+        "not_found": "outcome",
+        "upstream_status": "failure",
+        "upstream_unreachable": "failure",
+        "unsupported_form": "call",
+        "unknown_upstream": "call",
+        "traversal": "call",
+        "workspace_unavailable": "failure",
+    }
+)
+
+
+def _ref_error_kind(err: RefError) -> ToolErrorKind:
+    return REF_ERROR_KINDS.get(err.code or "", "failure")
+
+
+def _tool_error(text: str | ToolError, kind: ToolErrorKind) -> ToolError:
+    if isinstance(text, ToolError):
+        return text
+    return ToolError.from_text(text, kind=kind)
+
+
+def _explain_text(
+    ref: str, err: RefError, code: str, arg: RefArg, hints: RefErrorHints
+) -> str | ToolError:
     if code == "too_large":
         return hints.too_large(ref, err)
     if code == "not_found":

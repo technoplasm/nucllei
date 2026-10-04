@@ -21,6 +21,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from nucllei.models.chats import Chats
+from nucllei.utils.tool_errors import ToolFailure, ToolOutcome
 
 log = logging.getLogger(__name__)
 
@@ -59,27 +60,23 @@ class Tools:
         出力)。いま実行中のステップの tool 結果はまだ含まれない(次の呼び出しで加算される)。
         残量が少なければ、新しい長尺タスクを避ける・結論を早めに確定する等の判断材料にする。
 
-        :return: {ok, used_tokens, remaining_tokens, context_size, used_pct, note} / 取得不能時は {ok: False, error}
+        :return: {ok, used_tokens, remaining_tokens, context_size, used_pct, note} / 取得不能時は ToolError(ERROR: の文)
         """
         user_id = (__user__ or {}).get("id")
         if not user_id:
-            return {"ok": False, "error": "ユーザーを特定できない。"}
+            raise ToolFailure("ユーザーを特定できない")
 
         chat_id = (__metadata__ or {}).get("chat_id")
         if not chat_id:
-            return {
-                "ok": False,
-                "error": "チャットの id が無い (チャットの中からだけ呼べる)。",
-            }
+            raise ToolFailure("チャットの id が無い (チャットの中からだけ呼べる)")
 
         # owner-only: 他ユーザーの chat_id は「無い」扱い(所有者検証を漏らさない)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         usage = ((chat.meta if chat else None) or {}).get("usage") or None
         if not usage:
-            return {
-                "ok": False,
-                "error": "このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)。",
-            }
+            raise ToolOutcome(
+                "このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)"
+            )
 
         # 分子: carried_tokens(最後の呼び出しの prompt + 再送される出力 = 次の呼び出しの
         # 先頭の量)> prompt_tokens(最後の呼び出しの入力)> total_tokens の順で採る
@@ -90,10 +87,9 @@ class Tools:
                 used = int(value)
                 break
         if used is None:
-            return {
-                "ok": False,
-                "error": "このチャットの usage に token 数が無い(エンジンが usage を返していない)。",
-            }
+            raise ToolOutcome(
+                "このチャットの usage に token 数が無い(エンジンが usage を返していない)"
+            )
 
         # context 長: 記録済み > モデルから解決(endpoint 申告 → meta.context_size)。
         # 定数のフォールバックは持たない — 分からなければ null で返す

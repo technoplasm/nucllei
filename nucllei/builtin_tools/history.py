@@ -17,6 +17,7 @@ from nucllei.utils.misc import (
     get_message_list,
     get_messages_content,
 )
+from nucllei.utils.tool_errors import ToolCallError
 from nucllei.utils.tool_render import Markdown
 
 MAX_LIMIT = 50
@@ -126,9 +127,9 @@ class Tools:
         # owner-only: 他ユーザーの chat_id は「見つからない」扱い(所有者検証を漏らさない)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
-            return (
-                "ERROR: 指定のチャットは見つからない (読めるのは自分のチャットだけ)。"
-                "次の手: list_history / grep_history で得た chat_id を渡す。"
+            raise ToolCallError(
+                "指定のチャットは見つからない (読めるのは自分のチャットだけ)",
+                "list_history / grep_history で得た chat_id を渡す。",
             )
 
         history = chat.chat.get("history", {})
@@ -164,7 +165,9 @@ class Tools:
         limit = max(1, min(limit, MAX_LIMIT))
 
         if not (query or "").strip():
-            return "ERROR: 検索文字列が空。次の手: query に検索文字列を入れて呼び直す。"
+            raise ToolCallError(
+                "検索文字列が空", "query に検索文字列を入れて呼び直す。"
+            )
 
         # 進行中のチャット (__chat_id__) は除く — 「『X』で検索して」という発言自身が X にヒットする
         # (ken 2026-10-03)。除いた分だけ 1 件多く取っておく

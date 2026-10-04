@@ -22,6 +22,8 @@ max_pages の打ち切り、**File を 1 件も作らない** (Storage / Files �
 import asyncio
 import types
 
+from test.util.tool_errors import call_text
+
 from nucllei.utils.image_refs import (
     PATH_ARG_FORM,
     REF_ARGS_RULE,
@@ -177,7 +179,9 @@ def _run(
         tools.valves.max_image_mb = max_image_mb
     fed: list[str] = []
     result = asyncio.run(
-        tools.feed_image(__user__={"id": "u1"}, __feed_image__=fed.append, **kwargs)
+        call_text(
+            tools.feed_image(__user__={"id": "u1"}, __feed_image__=fed.append, **kwargs)
+        )
     )
     return result, fed, resolver
 
@@ -496,7 +500,9 @@ def _run_with_files(
         tools.valves.max_pages = max_pages
     fed: list[str] = []
     result = asyncio.run(
-        tools.feed_image(__user__={"id": "u1"}, __feed_image__=fed.append, **kwargs)
+        call_text(
+            tools.feed_image(__user__={"id": "u1"}, __feed_image__=fed.append, **kwargs)
+        )
     )
     return result, fed, resolver
 
@@ -823,10 +829,10 @@ def test_no_source_at_all_is_an_error(monkeypatch):
 def test_requires_user_and_feed_channel(monkeypatch):
     mod, resolver = _install(monkeypatch, TABLE)
     assert asyncio.run(
-        mod.Tools().feed_image(url=FIG_URL, __feed_image__=lambda r: None)
+        call_text(mod.Tools().feed_image(url=FIG_URL, __feed_image__=lambda r: None))
     ).startswith("ERROR: ユーザーを特定できない")
     assert "画像を目に入れる経路が使えない" in asyncio.run(
-        mod.Tools().feed_image(url=FIG_URL, __user__={"id": "u1"})
+        call_text(mod.Tools().feed_image(url=FIG_URL, __user__={"id": "u1"}))
     )
     assert resolver.refs == []
 
@@ -896,7 +902,11 @@ def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
     tools.valves.max_image_mb = 1
     fed = []
     result = asyncio.run(
-        tools.feed_image(file_id="f1", __user__={"id": "u1"}, __feed_image__=fed.append)
+        call_text(
+            tools.feed_image(
+                file_id="f1", __user__={"id": "u1"}, __feed_image__=fed.append
+            )
+        )
     )
     assert fed == [] and "大きすぎる" in result and "縮小" in result
     assert "次の手: send_to_workspace と run_python が使えるなら" in result
@@ -916,10 +926,12 @@ def test_success_on_a_served_ext_path_suggests_the_same_string_as_url(monkeypatc
     resolver.served = {FIG_REL}
     fed: list[str] = []
     result = asyncio.run(
-        mod.Tools().feed_image(
-            path=FIG_REL,
-            __user__={"id": "u1"},
-            __feed_image__=fed.append,
+        call_text(
+            mod.Tools().feed_image(
+                path=FIG_REL,
+                __user__={"id": "u1"},
+                __feed_image__=fed.append,
+            )
         )
     )
     assert fed == [FIG_REL]

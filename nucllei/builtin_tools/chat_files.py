@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from nucllei.models.chats import Chats
 from nucllei.models.files import Files
 from nucllei.utils.access_control import has_read_access_to_file
+from nucllei.utils.tool_errors import ToolCallError, ToolFailure
 
 DEFAULT_LIMIT = 20
 
@@ -77,27 +78,23 @@ class Tools:
 
     def _collect(
         self, __user__, __chat_id__, __metadata__, query: Optional[str]
-    ) -> tuple[Optional[str], list[dict]]:
-        """(エラーメッセージ | None, 添付アイテム列) を返す共通部。"""
+    ) -> list[dict]:
+        """添付アイテム列を返す共通部。チャットを特定できない・見つからないは ToolError。"""
         user_id = _require_user_id(__user__)
         chat_id = __chat_id__ or (__metadata__ or {}).get("chat_id")
         if not chat_id:
-            return (
-                "ERROR: 現在のチャットを特定できない (チャットの中でだけ使える)。",
-                [],
-            )
+            raise ToolFailure("現在のチャットを特定できない (チャットの中でだけ使える)")
 
         # owner-only: 他ユーザーの chat は「見つからない」扱い(history と同じ)
         chat = Chats.get_chat_by_id_and_user_id(chat_id, user_id)
         if chat is None:
-            return (
-                "ERROR: チャットが見つからない (一覧できるのは自分のチャットだけ)。",
-                [],
+            raise ToolFailure(
+                "チャットが見つからない (一覧できるのは自分のチャットだけ)"
             )
 
         ids = list(dict.fromkeys(_iter_chat_file_ids(chat.chat or {})))
         if not ids:
-            return None, []
+            return []
         records = {f.id: f for f in Files.get_files_by_ids(ids)}
         # has_read_access_to_file は UserModel 外形(.id / .role)を要求する
         user_ns = types.SimpleNamespace(id=user_id, role=(__user__ or {}).get("role"))
@@ -126,7 +123,7 @@ class Tools:
                 # 削除(soft delete/purge)済み — この file_id はもう読み出せない
                 item["deleted"] = True
             items.append(item)
-        return None, items
+        return items
 
     def _render(self, items: list[dict], limit) -> dict:
         # tool 引数は実行時の型検証を通らない(モデルは 5.0 や "5" を出し得る)。
@@ -161,9 +158,7 @@ class Tools:
 
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
         """
-        err, items = self._collect(__user__, __chat_id__, __metadata__, None)
-        if err:
-            return err
+        items = self._collect(__user__, __chat_id__, __metadata__, None)
         if not items:
             return "このチャットに添付ファイルは無い。"
         return self._render(items, limit)
@@ -182,10 +177,10 @@ class Tools:
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
         """
         if not (query or "").strip():
-            return "ERROR: 検索文字列が空。次の手: query に検索文字列を入れて呼び直す。"
-        err, items = self._collect(__user__, __chat_id__, __metadata__, query)
-        if err:
-            return err
+            raise ToolCallError(
+                "検索文字列が空", "query に検索文字列を入れて呼び直す。"
+            )
+        items = self._collect(__user__, __chat_id__, __metadata__, query)
         if not items:
             return f"「{query}」に一致する添付ファイルは見つからなかった。"
         return self._render(items, limit)

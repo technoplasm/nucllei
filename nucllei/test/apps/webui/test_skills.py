@@ -17,6 +17,7 @@ import types
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
+from test.util.tool_errors import call_error
 
 
 def _model_with_skills(*skill_ids, features=None):
@@ -541,9 +542,13 @@ class TestSkills(AbstractPostgresTest):
         result = json.loads(asyncio.run(tool["callable"](skill_id="scales")))
         assert result == {"result": "スケール表: Hanako 用", "tools": []}
 
-        # 未知 command はモデル向けエラーメッセージ(例外にしない)
-        result = asyncio.run(tool["callable"](skill_id="nope"))
-        assert "skill が見つからない: nope" in result
+        # 未知 command は call の ToolError(#145 — middleware が結果の文に変える)
+        error = asyncio.run(call_error(tool["callable"](skill_id="nope")))
+        assert error.kind == "call"
+        assert error.text == (
+            "ERROR: skill が見つからない: nope。"
+            "次の手: load_skill の説明の一覧にある id をそのまま渡す。"
+        )
 
         # render ディスクリプタ(#20): result を skill 表示で描画
         assert tool["render"] == {"result": {"kind": "skill"}}

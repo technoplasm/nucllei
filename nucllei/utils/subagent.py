@@ -34,7 +34,6 @@ enforce は二層(#140):
 """
 
 import asyncio
-import json
 import logging
 
 from fastapi import Request
@@ -49,6 +48,7 @@ from nucllei.utils.completion_events import CompletionEventStream
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
 from nucllei.utils.executions import in_exec
 from nucllei.utils.misc import get_message_list
+from nucllei.utils.tool_errors import ToolCallError, ToolFailure
 from nucllei.env import (
     SRC_LOG_LEVELS,
     SUBAGENT_MAX_CONCURRENCY,
@@ -162,11 +162,6 @@ def _resolve_child_model(request, preset) -> dict | None:
         # チャット実行経路は読まない — 子ターン用の合成では空で足りる
         "actions": [],
     }
-
-
-def _error(message: str) -> str:
-    """エラーは例外にせず tool result 文字列(JSON)で返し、モデルに軌道修正を委ねる。"""
-    return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
 
 
 def _wire_messages_from_history(messages_map: dict, leaf_id: str) -> list:
@@ -534,29 +529,30 @@ async def run_subagent_turn(
     - user: 親ターンのユーザー(UserModel — 子ターンの 3 段へそのまま渡る)
     - parent_chat_id / parent_message_id: 子 chat を紐づける親(__metadata__ 由来)
 
-    戻り値は親への tool result(成功・子側 stop は dict、入力・認可エラーは
-    JSON 文字列 — どちらも例外にしない)。
+    戻り値は親への tool result(成功・子側 stop・子のエラーは dict — 部分回答と
+    session_id を運ぶので結果のまま)。入力・認可・上限のエラーは ToolError を raise する
+    (#145 — 子を起動していないので運ぶ中身が無い)。
     """
     global _active_turns
 
     if not (parent_chat_id and parent_message_id):
-        return _error(
-            "サブエージェントはチャットの中でだけ起動できる (chat_id / message_id が無い)。"
+        raise ToolFailure(
+            "サブエージェントはチャットの中でだけ起動できる (chat_id / message_id が無い)"
         )
 
     if not (instruction or "").strip():
-        return _error(
-            "instruction が空。次の手: 子への指示を instruction に書いて呼び直す。"
+        raise ToolCallError(
+            "instruction が空", "子への指示を instruction に書いて呼び直す。"
         )
 
     # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
     if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
-        return _error(
+        raise ToolFailure(
             # _active_turns はプロセス全体の数 (呼び手ごとではない)
             "サブエージェントの同時実行数がサーバー全体の上限"
-            f" ({SUBAGENT_MAX_CONCURRENCY}) に達している (この分は起動していない)。"
-            "次の手: 自分が起動した分があれば、その結果がそろってから残りを呼ぶ。"
-            "無ければ時間を置いて呼び直すか、自分で処理する。"
+            f" ({SUBAGENT_MAX_CONCURRENCY}) に達している (この分は起動していない)",
+            "自分が起動した分があれば、その結果がそろってから残りを呼ぶ。"
+            "無ければ時間を置いて呼び直すか、自分で処理する。",
         )
     _active_turns += 1
     # 実行中登録した agent session id。None = 未登録。
@@ -569,12 +565,13 @@ async def run_subagent_turn(
         # 同一述語をその場で再評価する(履歴・enum に委ねない)。
         parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
         if parent is None or parent.deleted_at is not None:
-            return _error("親チャットが見つからない。")
+            raise ToolFailure("親チャットが見つからない")
         depth = parent.depth + 1
         if depth > SUBAGENT_MAX_DEPTH:
-            return _error(
+            raise ToolFailure(
                 f"サブエージェントの入れ子は {SUBAGENT_MAX_DEPTH} 段が上限で、"
-                "ここからはサブエージェントを起動できない。次の手: 自分で処理する。"
+                "ここからはサブエージェントを起動できない",
+                "自分で処理する。",
             )
         accessible = {
             m.id: m
@@ -585,9 +582,9 @@ async def run_subagent_turn(
             # 継続: 既存の子セッションへ追いメッセージ。
             # 並行継続の排他(lost update 防止): 実行中なら待たずに即エラー。
             if session_id in _running_agent_sessions:
-                return _error(
-                    f"このサブエージェントのセッションは実行中: {session_id}。"
-                    "次の手: 今の実行の結果がそろってから同じ session_id で続ける。"
+                raise ToolFailure(
+                    f"このサブエージェントのセッションは実行中: {session_id}",
+                    "今の実行の結果がそろってから同じ session_id で続ける。",
                 )
             _running_agent_sessions.add(session_id)
             running_session_id = session_id
@@ -599,16 +596,16 @@ async def run_subagent_turn(
                 or child.kind != "agent"
                 or child.parent_chat_id != parent_chat_id
             ):
-                return _error(
+                raise ToolCallError(
                     f"session_id が不正: {session_id} (続けられるのはこのチャットから"
-                    "起動したサブエージェントのセッションだけ)。"
-                    "次の手: run_subagent の返りの session_id をそのまま渡す。"
+                    "起動したサブエージェントのセッションだけ)",
+                    "run_subagent の返りの session_id をそのまま渡す。",
                 )
             chat_json = child.chat
             target_preset_id = (chat_json.get("models") or [None])[0]
             preset = accessible.get(target_preset_id)
             if preset is None:
-                return _error(f"preset を使えない: {target_preset_id}")
+                raise ToolFailure(f"preset を使えない: {target_preset_id}")
             _, assistant_message_id = _append_turn_messages(
                 chat_json, instruction, preset.id, preset.name
             )
@@ -617,13 +614,14 @@ async def run_subagent_turn(
         else:
             # 新規 spawn
             if not preset_id:
-                return _error(
-                    "preset_id が無い。次の手: 新しく起動するときは preset_id を指定する。"
+                raise ToolCallError(
+                    "preset_id が無い", "新しく起動するときは preset_id を指定する。"
                 )
             preset = accessible.get(preset_id)
             if preset is None:
-                return _error(
-                    f"preset を使えない: {preset_id}。次の手: run_subagent の説明の一覧にある preset_id を渡す。"
+                raise ToolCallError(
+                    f"preset を使えない: {preset_id}",
+                    "run_subagent の説明の一覧にある preset_id を渡す。",
                 )
             # 決定的タイトル(生成タスクは走らせない — agent_session マーカで抑止)
             title = f"{preset.name} — {' '.join(instruction.split())[:40]}"
@@ -647,8 +645,8 @@ async def run_subagent_turn(
                 depth=depth,
             )
             if child is None:
-                return _error(
-                    "サブエージェントのセッションを作れなかった。次の手: 自分で処理する。"
+                raise ToolFailure(
+                    "サブエージェントのセッションを作れなかった", "自分で処理する。"
                 )
             child_chat_id = child.id
             # 新規 id は衝突しない(uuid)が、spawn 完了→実行の間も継続経路
@@ -658,7 +656,7 @@ async def run_subagent_turn(
 
         child_model = _resolve_child_model(request, preset)
         if child_model is None:
-            return _error(f"preset を使えない: {preset.id}")
+            raise ToolFailure(f"preset を使えない: {preset.id}")
 
         # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
         # 結果 JSON にも session_id が載る)。description はモデル向け(check_task の

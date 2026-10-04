@@ -22,6 +22,12 @@ import httpx
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
+from test.util.tool_errors import call_text
+
+
+def _arun(coro):
+    """asyncio.run + ToolError(#145)を `.text` に戻す — 文面は全文比較で番をする。"""
+    return asyncio.run(call_text(coro))
 
 
 def _fake_request():
@@ -305,7 +311,7 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
                 ClientSession=FakeSession, ClientTimeout=lambda total: total
             )
             try:
-                asyncio.run(module._post("/files/list", {"user_id": "u1"}, 30))
+                _arun(module._post("/files/list", {"user_id": "u1"}, 30))
             finally:
                 mod.aiohttp = real
             assert seen["url"] == "http://sandbox.test:8000/files/list"
@@ -347,7 +353,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 }
             }
         )
-        out = asyncio.run(
+        out = _arun(
             tool.run_python(
                 "print(42)",
                 __user__={"id": "u1"},
@@ -363,7 +369,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
     def test_run_python_without_chat_id_points_at_run_python_once(self):
         tool = _sandbox({})
-        out = asyncio.run(tool.run_python("x=1", __user__={"id": "u1"}))
+        out = _arun(tool.run_python("x=1", __user__={"id": "u1"}))
         assert out.startswith("ERROR:")
         assert "run_python_once" in out
         assert tool.calls == []  # HTTP を打たずに手前で止まる
@@ -380,7 +386,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 }
             }
         )
-        out = asyncio.run(
+        out = _arun(
             tool.run_python("while True: pass", __user__={"id": "u1"}, __chat_id__="c1")
         )
         assert (
@@ -400,7 +406,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         }
         for given, n in ((30, 30), (None, 120), (900, 600)):
             tool = _sandbox({"/exec": res})
-            out = asyncio.run(
+            out = _arun(
                 tool.run_shell("sleep 999", timeout_s=given, __user__={"id": "u1"})
             )
             assert (
@@ -417,13 +423,13 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "exports": [],
         }
         tool = _sandbox({"/exec": res})
-        out = asyncio.run(tool.run_shell("echo hello", __user__={"id": "u1"}))
+        out = _arun(tool.run_shell("echo hello", __user__={"id": "u1"}))
         assert tool.calls[0][0] == "/exec"
         assert tool.calls[0][1]["lang"] == "shell"
         assert "exit_code=0" in out and "hello" in out
 
         tool = _sandbox({"/exec": res})
-        asyncio.run(tool.run_python_once("print('hello')", __user__={"id": "u1"}))
+        _arun(tool.run_python_once("print('hello')", __user__={"id": "u1"}))
         assert tool.calls[0][1]["lang"] == "python"
 
     def test_missing_user_context_is_refused_everywhere(self):
@@ -437,7 +443,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool.fetch_from_workspace("/workspace/a.txt"),
             tool.send_to_workspace(),
         ):
-            assert asyncio.run(coro).startswith("ERROR:")
+            assert _arun(coro).startswith("ERROR:")
         assert tool.calls == []
 
     def test_post_sends_bearer_token(self):
@@ -487,7 +493,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             real = mod.aiohttp
             mod.aiohttp = fake_aiohttp
             try:
-                asyncio.run(tool._post("/files/list", {"user_id": "u1"}, 30))
+                _arun(tool._post("/files/list", {"user_id": "u1"}, 30))
             finally:
                 mod.aiohttp = real
 
@@ -502,7 +508,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             real = mod.aiohttp
             mod.aiohttp = fake_aiohttp
             try:
-                asyncio.run(tool._post("/files/list", {"user_id": "u1"}, 30))
+                _arun(tool._post("/files/list", {"user_id": "u1"}, 30))
             finally:
                 mod.aiohttp = real
 
@@ -522,7 +528,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 "(片側だけ未設定の場合も含む。配備の env を確認)",
             )
         )
-        out = asyncio.run(tool.list_workspace(__user__={"id": "u1"}))
+        out = _arun(tool.list_workspace(__user__={"id": "u1"}))
         assert out == (
             "ERROR: sandbox との認証に失敗した (サーバの設定の問題)。次の手: 呼び直さない。"
             "ユーザーには sandbox が今使えないと伝え、管理者への連絡を勧める。"
@@ -545,7 +551,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool.list_workspace(__user__={"id": "u1"}),
             tool.fetch_from_workspace("/workspace/a.txt", __user__={"id": "u1"}),
         ]
-        outs = [asyncio.run(coro) for coro in calls]
+        outs = [_arun(coro) for coro in calls]
         for out in outs:
             assert out.startswith("ERROR:") and "bad gateway" not in out
             assert "次の手: " in out
@@ -587,7 +593,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         sink = ToolOutputSink()
         token = tool_output.current_sink.set(sink)
         try:
-            out = asyncio.run(
+            out = _arun(
                 tool.run_python_once(
                     "…",
                     __user__={"id": "u1"},
@@ -640,16 +646,12 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             )
 
         tool = _sandbox({"/files/write": {"ok": True}})
-        out = asyncio.run(
-            tool.send_to_workspace(file_id="f-mine", __user__={"id": "owner"})
-        )
+        out = _arun(tool.send_to_workspace(file_id="f-mine", __user__={"id": "owner"}))
         assert "/workspace/imports/mine.txt" in out
         assert tool.calls[0][1]["path"] == "imports/mine.txt"
 
         tool = _sandbox({"/files/write": {"ok": True}})
-        out = asyncio.run(
-            tool.send_to_workspace(file_id="f-yours", __user__={"id": "owner"})
-        )
+        out = _arun(tool.send_to_workspace(file_id="f-yours", __user__={"id": "owner"}))
         # 「レコードが無い」と同じ文(存在の有無を漏らさない)
         from nucllei.utils.image_refs import FILE_ID_ARG_FORM
 
@@ -677,23 +679,23 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "/workspace",
             "/workspace/dir/",
         ):
-            out = asyncio.run(tool.write_file(bad, "x", __user__=user))
+            out = _arun(tool.write_file(bad, "x", __user__=user))
             assert out.startswith("ERROR:"), bad
             # tool 側で弾いたのであって、接続の問題ではない
             assert "接続できない" not in out, bad
         # read-only の置き場は理由を言う
-        assert "read-only" in asyncio.run(
+        assert "read-only" in _arun(
             tool.write_file("/ext/server/a.txt", "x", __user__=user)
         )
         # 形の誤りは値によらず同じ文: 全 tool 共通の形 + この tool の path が受ける形
         from nucllei.utils.image_refs import REF_ARGS_RULE, WORKSPACE_PATH_ARG_FORM
 
         for bad in ("work/a.txt", "/etc/passwd", "https://x.example/y.html"):
-            assert asyncio.run(tool.write_file(bad, "x", __user__=user)) == (
+            assert _arun(tool.write_file(bad, "x", __user__=user)) == (
                 f"ERROR: {bad} は sandbox のパスの形でない。"
                 f"次の手: {WORKSPACE_PATH_ARG_FORM} {REF_ARGS_RULE}"
             )
-        assert asyncio.run(tool.write_file("", "x", __user__=user)).startswith(
+        assert _arun(tool.write_file("", "x", __user__=user)).startswith(
             "ERROR: (空) は sandbox のパスの形でない。"
         )
         assert tool.calls == []
@@ -701,14 +703,12 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         from nucllei.builtin_tools import sandbox as mod
 
         big = "a" * (mod.WRITE_FILE_LIMIT + 1)
-        assert asyncio.run(
+        assert _arun(
             tool.write_file("/workspace/big.txt", big, __user__=user)
         ).startswith("ERROR:")
         assert tool.calls == []
 
-        out = asyncio.run(
-            tool.write_file("/workspace/exports/r.html", "<p>", __user__=user)
-        )
+        out = _arun(tool.write_file("/workspace/exports/r.html", "<p>", __user__=user))
         assert "/workspace/exports/r.html に書き込んだ" in out
         # exports/ 直書きは自動添付されない旨をモデルに伝える
         assert "fetch_from_workspace" in out
@@ -740,19 +740,19 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         ]
         for given, rel, absolute in cases:
             tool = _sandbox(responses)
-            out = asyncio.run(tool.write_file(given, "x", __user__=user))
+            out = _arun(tool.write_file(given, "x", __user__=user))
             assert tool.calls[0][0] == "/files/write"
             assert tool.calls[0][1]["path"] == rel, given
             assert f"{absolute} に書き込んだ" in out, given
 
             tool = _sandbox(responses)
-            out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
+            out = _arun(tool.fetch_from_workspace(given, __user__=user))
             assert tool.calls[0][1]["path"] == rel, given
             assert out.startswith(f"{absolute} ("), given
 
         # /workspace/x を /workspace/workspace/x に読み替えない (旧不具合)
         tool = _sandbox(responses)
-        asyncio.run(tool.write_file("/workspace/x.txt", "x", __user__=user))
+        _arun(tool.write_file("/workspace/x.txt", "x", __user__=user))
         assert tool.calls[0][1]["path"] == "x.txt"
 
         # 一覧: 既定 (= /workspace) / 絶対のどちらでも、戻り値の各行は絶対パス
@@ -763,12 +763,12 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             (("/workspace/imports",), "imports"),
         ):
             tool = _sandbox(responses)
-            out = asyncio.run(tool.list_workspace(*args, __user__=user))
+            out = _arun(tool.list_workspace(*args, __user__=user))
             assert tool.calls[0][1]["path"] == rel, args
             assert out == "- /workspace/imports/a.csv (2.0KB)", args
 
         tool = _sandbox({"/files/list": {"entries": []}})
-        out = asyncio.run(tool.list_workspace("/workspace/sub", __user__=user))
+        out = _arun(tool.list_workspace("/workspace/sub", __user__=user))
         assert "/workspace/sub は空 (" in out
 
     def test_relative_paths_are_refused(self):
@@ -789,7 +789,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 (tool.list_workspace(bad, __user__=user), WORKSPACE_PATH_ARG_FORM),
                 (tool.fetch_from_workspace(bad, __user__=user), PATH_ARG_FORM),
             ):
-                assert asyncio.run(coro) == (
+                assert _arun(coro) == (
                     f"ERROR: {bad} は sandbox のパスの形でない。次の手: {form} {REF_ARGS_RULE}"
                 ), bad
         assert tool.calls == []
@@ -808,9 +808,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 },
             }
         )
-        listed = asyncio.run(tool.list_workspace("/workspace/imports", __user__=user))
+        listed = _arun(tool.list_workspace("/workspace/imports", __user__=user))
         assert f"- {given} (" in listed
-        out = asyncio.run(tool.fetch_from_workspace(given, __user__=user))
+        out = _arun(tool.fetch_from_workspace(given, __user__=user))
         assert out.startswith(f"{given} (") and "file_id=" in out
         # 画像・音声・動画でない添付はファイル一覧にだけ載る — 本文で示すリンクを渡す
         assert "本文で示すなら [mine.txt](/api/v1/files/" in out
@@ -825,20 +825,18 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 tool.list_workspace(bad, __user__=user),
                 tool.fetch_from_workspace(bad, __user__=user),
             ):
-                out = asyncio.run(coro)
+                out = _arun(coro)
                 assert out.startswith(
                     f"ERROR: {bad} は sandbox のパスの形でない。"
                 ), bad
         # /ext/ は sandbox の /files/* が扱えない — 使える手段を案内して断る
-        out = asyncio.run(tool.list_workspace("/ext/server42", __user__=user))
+        out = _arun(tool.list_workspace("/ext/server42", __user__=user))
         assert out.startswith("ERROR:") and "run_shell" in out and "ls" in out
         # 見せる手段は fetch_from_workspace(path) — 固定文で案内する
         assert "fetch_from_workspace" in out
         # fetch_from_workspace は /ext/ を受ける (sandbox の /files/* は使わず、nucllei 側の
         # 同じ置き場 EXT_DIR から読む — 末尾の「fetch_from_workspace(path) の /ext/…」節)。無ければ不在
-        out = asyncio.run(
-            tool.fetch_from_workspace("/ext/server42/a.png", __user__=user)
-        )
+        out = _arun(tool.fetch_from_workspace("/ext/server42/a.png", __user__=user))
         assert out.startswith("ERROR:") and "このサーバの /ext に無い" in out
         assert tool.calls == []
 
@@ -851,11 +849,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         def outs(error):
             tool = _sandbox(error=error)
             return [
-                asyncio.run(tool.write_file("/workspace/a.txt", "x", __user__=user)),
-                asyncio.run(tool.list_workspace("/workspace/a", __user__=user)),
-                asyncio.run(
-                    tool.fetch_from_workspace("/workspace/a.txt", __user__=user)
-                ),
+                _arun(tool.write_file("/workspace/a.txt", "x", __user__=user)),
+                _arun(tool.list_workspace("/workspace/a", __user__=user)),
+                _arun(tool.fetch_from_workspace("/workspace/a.txt", __user__=user)),
             ]
 
         # sandbox 側の _safe_path が弾いた (symlink 越しの脱出など、tool からは見えない分)
@@ -958,9 +954,7 @@ class _UrlEnv:
         self.monkeypatch.setattr(mod.Storage, "get_file", staticmethod(lambda p: p))
 
     def run(self, **kwargs):
-        return asyncio.run(
-            self.tools.send_to_workspace(__user__={"id": "u1"}, **kwargs)
-        )
+        return _arun(self.tools.send_to_workspace(__user__={"id": "u1"}, **kwargs))
 
 
 def test_url_exclusive_with_file_id_and_filename(monkeypatch):
@@ -1475,7 +1469,7 @@ class _MountEnv(_UrlEnv):
         async def emit(event):
             self.emitted.append(event)
 
-        return asyncio.run(
+        return _arun(
             self.tools.fetch_from_workspace(
                 path, __user__={"id": "u1"}, __event_emitter__=emit
             )

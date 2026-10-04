@@ -92,6 +92,7 @@ from pydantic import BaseModel, Field
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
+from nucllei.utils.tool_errors import ToolError, ToolFailure, ToolOutcome
 from nucllei.utils.ref_errors import (
     NEXT,
     SHOW_AS_LINK,
@@ -224,8 +225,8 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
     )
 
 
-def _explain_ref_error(u: str, err, ceiling_mb: Optional[float] = None) -> str:
-    """resolver の RefError をモデル向けの ERROR 文にする (組み立ては `utils/ref_errors`)。
+def _explain_ref_error(u: str, err, ceiling_mb: Optional[float] = None) -> ToolError:
+    """resolver の RefError をモデル向けの ToolError にする (組み立ては `utils/ref_errors`)。
 
     この tool 固有の言い方: too_large は run_subagent + max_mb (天井 ceiling_mb)。
     """
@@ -376,7 +377,7 @@ class Tools:
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
         # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
 
         u = (url or "").strip()
 
@@ -394,11 +395,9 @@ class Tools:
         # file_id_of_url は fragment 付きでも id を返す
         fid = file_id_of_url(u)
         if fid:
-            raw, content_type, err = await self._read_file(
+            raw, content_type = await self._read_file(
                 fid, __user__["id"], max_bytes, cap_mb
             )
-            if err:
-                return err
             # 添付・生成物の HTML の相対 href はどの名前空間にも属さない (`/page2.html` に
             # なってしまう) ので、file 経路ではリンク一覧を出さない (page_url 空)
             page_url = ""
@@ -412,15 +411,14 @@ class Tools:
             # 借りない。too_large の ERROR 文は RefError.limit (実際に使われた上限) から MB を出す。
             loaded, err = await resolve_url(u, max_bytes=max_bytes)
             if err is not None or loaded is None:
-                return _explain_ref_error(u, err, ceiling_mb)
+                raise _explain_ref_error(u, err, ceiling_mb)
             if (
                 len(loaded.data) > max_bytes
             ):  # resolver が守るが、念のため (fail closed)
-                return (
-                    f"ERROR: {u} は {mb(len(loaded.data))} で大きすぎる "
-                    f"(この呼び出しの上限 {cap_mb:.1f} MB)。中身は読めない。"
-                    + NEXT
-                    + show_as_link(u)
+                raise ToolOutcome(
+                    f"{u} は {mb(len(loaded.data))} で大きすぎる "
+                    f"(この呼び出しの上限 {cap_mb:.1f} MB)。中身は読めない",
+                    show_as_link(u),
                 )
             content_type = loaded.content_type or ""
             raw = loaded.data
@@ -435,10 +433,8 @@ class Tools:
             kind, body, links = self._to_lines(raw, content_type, page_url)
         except Exception as e:
             log.error(f"[fetch_url] convert failed ({u}): {e!r}")
-            return (
-                f"ERROR: {u} の中身を平文に変換できなかった。"
-                + NEXT
-                + show_as_link(page_url or u)
+            raise ToolFailure(
+                f"{u} の中身を平文に変換できなかった", show_as_link(page_url or u)
             )
 
         media_type = _media_type(content_type)
@@ -452,11 +448,10 @@ class Tools:
                 f'{NEXT}feed_image が使えるなら feed_image(url="{u}") で自分の目で見る。'
             )
         if kind == "other":
-            return (
-                f"ERROR: {u} は平文にできない形式 (content-type={media_type or '不明'})。"
-                + NEXT
-                + f'加工が要るなら、send_to_workspace が使えるなら send_to_workspace(url="{u}")'
-                " で sandbox に取り込む。" + show_as_link(page_url or u)
+            raise ToolOutcome(
+                f"{u} は平文にできない形式 (content-type={media_type or '不明'})",
+                f'加工が要るなら、send_to_workspace が使えるなら send_to_workspace(url="{u}")'
+                " で sandbox に取り込む。" + show_as_link(page_url or u),
             )
         if kind == "pdf-noText":
             # feed_image は拡張子ではなく取得した content-type で PDF を判定する。
@@ -488,31 +483,27 @@ class Tools:
         return route.page_url or ""
 
     async def _read_file(self, fid: str, user_id: str, max_bytes: int, cap_mb: float):
-        """url の `/api/v1/files/{id}/content` を file として読む → (raw, content_type, ERROR 文)。
+        """url の `/api/v1/files/{id}/content` を file として読む → (raw, content_type)。
+        読めないときは ToolError を raise する。
         所有者チェックは feed_image の file_id 経路と同じ (#40 と同クラスの IDOR 封鎖)。
         content_type は Files の meta の生の値 (charset パラメータ付きのことがある)。"""
         rec = await asyncio.to_thread(Files.get_file_by_id, fid)  # v0.6.5 は sync
         if not rec or getattr(rec, "user_id", None) != user_id:
             # レコード無しとアクセス権無しは同じ固定文 (存在の有無を漏らさない)
-            return None, "", file_id_error(fid)
+            raise file_id_error(fid)
         try:
             local = await asyncio.to_thread(Storage.get_file, rec.path)
             raw = await asyncio.to_thread(pathlib.Path(local).read_bytes)
         except Exception as e:  # noqa: BLE001
             log.error(f"[fetch_url] file {fid} read failed: {e!r}")
-            return None, "", f"ERROR: file_id {fid} の実体を読めない。"
+            raise ToolFailure(f"file_id {fid} の実体を読めない")
         if len(raw) > max_bytes:
-            return (
-                None,
-                "",
-                (
-                    f"ERROR: このファイルは {mb(len(raw))} で、取得の上限 {cap_mb:.1f} MB を超えている。"
-                    + NEXT
-                    + "read_attachment が使えるなら read_attachment(file_id=…) で抽出テキストを読む。"
-                ),
+            raise ToolOutcome(
+                f"このファイルは {mb(len(raw))} で、取得の上限 {cap_mb:.1f} MB を超えている",
+                "read_attachment が使えるなら read_attachment(file_id=…) で抽出テキストを読む。",
             )
         meta = getattr(rec, "meta", None) or {}
-        return raw, meta.get("content_type") or "", None
+        return raw, meta.get("content_type") or ""
 
     def _to_lines(self, raw: bytes, content_type: str, page_url: str):
         """取得したバイト列を (種別, 本文行 or 抽出文字列, リンク行) に分解する。
@@ -591,10 +582,9 @@ class Tools:
         limit = max(1, min(int(limit or cap), cap))
         offset = max(0, int(offset or 0))
         if offset >= len(text):
-            return (
-                f"ERROR: offset={offset} は末尾 ({len(text)} 字) を超えている。"
-                + NEXT
-                + "offset を戻すか、query で絞る。"
+            raise ToolOutcome(
+                f"offset={offset} は末尾 ({len(text)} 字) を超えている",
+                "offset を戻すか、query で絞る。",
             )
         shown = text[offset : offset + limit]
         end = offset + len(shown)

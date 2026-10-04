@@ -632,8 +632,11 @@ class TestExecutions(AbstractPostgresTest):
             "error",
             "delivered",
             "session_id",
+            "error_kind",
         }
         assert items[0]["session_id"] is None
+        # #145: 失敗の種別は exec 行 meta.error_kind から(成功・走行中は None)
+        assert items[0]["error_kind"] is None
         assert items[0]["tool_name"] == "run_subagent"
         assert items[0]["status"] == "running"
         assert items[1]["status"] == "done"

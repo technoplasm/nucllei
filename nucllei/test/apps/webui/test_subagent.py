@@ -24,6 +24,12 @@ from starlette.responses import StreamingResponse
 
 from test.util import model_frames as mf
 from test.util.abstract_integration_test import AbstractPostgresTest
+from test.util.tool_errors import call_error
+
+
+def _raised(coro):
+    """run_subagent の入力・認可・上限エラーは ToolError の raise(#145)。それを返す。"""
+    return asyncio.run(call_error(coro))
 
 
 def _sse_response(name: str) -> StreamingResponse:
@@ -563,11 +569,11 @@ class TestRunSubagent(AbstractPostgresTest):
         tool = self._build_tool(
             request=request, model=self._parent_model(("hidden-worker",))
         )
-        failed = json.loads(
-            asyncio.run(tool["callable"](preset_id="hidden-worker", instruction="x"))
-        )
-        assert failed["ok"] is False
-        assert "使えない" in failed["error"]
+        failed = _raised(tool["callable"](preset_id="hidden-worker", instruction="x"))
+        assert failed.kind == "failure"
+        assert "使えない" in failed.text
+        # 次の手の無い事実の文は「。」で閉じる(#145 — ToolError の組み立て)
+        assert failed.text == "ERROR: preset を使えない: hidden-worker。"
 
     def test_session_id_continuation_appends_to_same_child(self, monkeypatch):
         child_calls = self._patch_child_pipeline(
@@ -633,18 +639,14 @@ class TestRunSubagent(AbstractPostgresTest):
             other_parent_child.id,
             foreign_child.id,
         ):
-            result = json.loads(
-                asyncio.run(tool["callable"](instruction="x", session_id=session_id))
-            )
-            assert result["ok"] is False, session_id
+            result = _raised(tool["callable"](instruction="x", session_id=session_id))
+            assert result.kind == "call", session_id
             assert subagent._active_turns == 0  # エラー経路でもカウンタ解放
 
-        # instruction 空 / 新規で preset_id 無しも tool result エラー(例外にしない)
-        assert (
-            json.loads(asyncio.run(tool["callable"](instruction="  ")))["ok"] is False
-        )
-        result = json.loads(asyncio.run(tool["callable"](instruction="x")))
-        assert "preset_id" in result["error"]
+        # instruction 空 / 新規で preset_id 無しも call の ToolError(#145)
+        assert _raised(tool["callable"](instruction="  ")).kind == "call"
+        result = _raised(tool["callable"](instruction="x"))
+        assert "preset_id" in result.text
 
     def test_continuation_rejected_after_cascade_delete(self, monkeypatch):
         # cascade 削除済みの子への追いメッセージは拒否(deleted_at IS NULL 検証)
@@ -657,12 +659,10 @@ class TestRunSubagent(AbstractPostgresTest):
         assert first["ok"] is True
         assert self.Chats.delete_chat_by_id(first["session_id"])
 
-        result = json.loads(
-            asyncio.run(
-                tool["callable"](instruction="続き", session_id=first["session_id"])
-            )
+        result = _raised(
+            tool["callable"](instruction="続き", session_id=first["session_id"])
         )
-        assert result["ok"] is False
+        assert result.kind == "call"
         assert len(child_calls) == 1  # 2 回目の子ターンは走っていない
 
     def test_runtime_reauthorization_denies_revoked_preset(self, monkeypatch):
@@ -670,17 +670,13 @@ class TestRunSubagent(AbstractPostgresTest):
         tool = self._build_tool()
 
         # allowlist 外の preset 名指し → エラー文字列(例外・打ち切りにしない)
-        result = json.loads(
-            asyncio.run(tool["callable"](preset_id="not-allowed", instruction="x"))
-        )
-        assert result["ok"] is False
+        result = _raised(tool["callable"](preset_id="not-allowed", instruction="x"))
+        assert result.kind == "call"
 
         # mount 後に preset が消えても、enum と同一述語の実行時再評価で拒否
         assert self.Models.delete_model_by_id("researcher")
-        result = json.loads(
-            asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
-        )
-        assert result["ok"] is False
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "call"
         # 子 chat は作られていない
         assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
 
@@ -699,11 +695,9 @@ class TestRunSubagent(AbstractPostgresTest):
             )
             db.commit()
 
-        result = json.loads(
-            asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
-        )
-        assert result["ok"] is False
-        assert "自分で処理する" in result["error"]
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "failure"
+        assert "自分で処理する" in result.text
 
     def test_concurrency_limit_returns_error(self, monkeypatch):
         from nucllei.utils import subagent
@@ -714,11 +708,9 @@ class TestRunSubagent(AbstractPostgresTest):
         monkeypatch.setattr(
             subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENCY
         )
-        result = json.loads(
-            asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
-        )
-        assert result["ok"] is False
-        assert "同時" in result["error"]
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "failure"
+        assert "同時" in result.text
         # 超過エラーはカウンタを消費しない(decrement で負にならない)
         assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
 
@@ -925,11 +917,11 @@ class TestRunSubagent(AbstractPostgresTest):
             assert session in subagent._running_agent_sessions
 
             # 実行中 session への並行継続 → 即エラー(子ターンは走らない)
-            racing = json.loads(
-                await tool["callable"](instruction="横入り", session_id=session)
+            racing = await call_error(
+                tool["callable"](instruction="横入り", session_id=session)
             )
-            assert racing["ok"] is False
-            assert "実行中" in racing["error"]
+            assert racing.kind == "failure"
+            assert "実行中" in racing.text
             assert len(calls) == 2  # 3 本目の子ターンは走っていない
 
             gate_holder["gate"].set()
@@ -988,18 +980,14 @@ class TestRunSubagent(AbstractPostgresTest):
         metadata = self._metadata()
         tool_no_ctx = self._build_tool(metadata=metadata)
         metadata.pop("message_id")  # mount 後に文脈が欠けた(防御の固定)
-        result = json.loads(
-            asyncio.run(
-                tool_no_ctx["callable"](preset_id="researcher", instruction="x")
-            )
+        result = _raised(
+            tool_no_ctx["callable"](preset_id="researcher", instruction="x")
         )
-        assert result["ok"] is False
+        assert result.kind == "failure"
 
-        result = json.loads(
-            asyncio.run(tool["callable"](preset_id="researcher", instruction="x"))
-        )
-        assert result["ok"] is False
-        assert "ユーザー" in result["error"]
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "failure"
+        assert "ユーザー" in result.text
         assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
         assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "ghost") == []
 

@@ -4,6 +4,7 @@ import sys
 import asyncio
 import json
 import ast
+import inspect
 import threading
 import time
 
@@ -99,6 +100,12 @@ from nucllei.utils.response_assembler import (
     ContentBlocksAssembler,
 )
 from nucllei.utils.sse import sse_line
+from nucllei.utils.tool_errors import (
+    ToolCallError,
+    ToolError,
+    ToolFailure,
+    tool_exception_text,
+)
 
 from nucllei.tasks import create_task
 
@@ -1352,15 +1359,73 @@ def _make_progress_emitter(events_stream, metadata):
     return emitter_for
 
 
-def tool_exception_text(tool_name: str, e: BaseException) -> str:
-    """tool が例外で落ちたときのモデル向け文面 (事実 + 次の手)。例外は型名と先頭 200 字だけ —
-    全文は呼び手が log に出す (str(e) は内部 URL・パスを含みうる。2026-10-04 llens 監査 B5)。"""
-    msg = (str(e) or "").strip()
-    what = e.__class__.__name__ + (f": {msg[:200]}" if msg else "")
-    return (
-        f"ERROR: ツール {tool_name} の実行中にエラーが起きた ({what})。"
-        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+def _parse_tool_arguments(tool_name: str, raw) -> tuple[dict, Optional[ToolError]]:
+    """tool call の arguments 文字列を dict にする。戻り値は (params, error)。
+
+    一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
+    _memos/model-frames.md)。Python リテラル風を出すモデル向けのフォールバックとして
+    ast.literal_eval を残す(モデル多様性)。空(None・空文字・空白)は引数なし。
+    どちらでも object として読めなければ call の ToolError(#145 — 旧: 黙って {})。
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return {}, None
+    if isinstance(raw, dict):
+        return dict(raw), None
+    params = None
+    try:
+        params = json.loads(raw)
+    except Exception as e:
+        log.debug(e)
+        try:
+            params = ast.literal_eval(raw)
+        except Exception:
+            log.debug(f"Error parsing tool call arguments: {raw}")
+    if isinstance(params, dict):
+        return params, None
+    return {}, ToolCallError(
+        f"ツール {tool_name} の引数を JSON のオブジェクトとして読めない",
+        "引数を JSON のオブジェクトにして呼び直す。",
     )
+
+
+def _tool_signature_error(tool: dict, tool_name: str, params: dict):
+    """呼ぶ前に callable の署名と引数を突き合わせる(#145 項目 2)。
+
+    必須の引数が無い / 署名に無い引数がある呼び出しは、callable の生の TypeError
+    (`missing 1 required positional argument`)ではなく call の ToolError にする。
+    予約引数(`__user__` 等 — 注入される)と `*args` / `**kwargs` は数えない。署名が
+    取れない callable(C 実装等)は検査しない。
+    """
+    try:
+        signature = inspect.signature(tool["callable"])
+    except (TypeError, ValueError):
+        return None
+    parameters = signature.parameters
+    accepts_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+    )
+    missing = [
+        name
+        for name, p in parameters.items()
+        if not name.startswith("__")
+        and p.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        and p.default is inspect.Parameter.empty
+        and name not in params
+    ]
+    if missing:
+        return ToolCallError(
+            f"ツール {tool_name} の必須の引数 {', '.join(missing)} が無い",
+            "引数を付けて呼び直す。",
+        )
+    if not accepts_var_kw:
+        unknown = [name for name in params if name not in parameters]
+        if unknown:
+            return ToolCallError(
+                f"ツール {tool_name} に引数 {', '.join(unknown)} は無い",
+                "その引数を外して呼び直す。",
+            )
+    return None
 
 
 async def _execute_tool_call_sync(
@@ -1373,8 +1438,9 @@ async def _execute_tool_call_sync(
 ):
     """1 件の tool call を同期(このターン内)で実行する(execute_tool_calls の本体)。
 
-    戻り値は (tool_result, tool_succeeded, sink)。sink は close 済みで、呼び出し側が
-    成功時のみ harvest する(context_images / display / result_render)。
+    戻り値は (tool_result, tool_succeeded, sink, error_kind)。sink は close 済みで、呼び出し側が
+    成功時のみ harvest する(context_images / display / result_render)。error_kind は
+    失敗の種別(utils/tool_errors — ToolError の kind、タイムアウト・例外は failure)。
     background 昇格時(#110)はここを通らず spawn_execution が代替する。
     timeout_override は単独 background の同期降格(exec_tools.background_runs_inline)
     が background と同じ上限を渡すための口。
@@ -1396,6 +1462,7 @@ async def _execute_tool_call_sync(
     sink.mark_started()
     tool_succeeded = False
     tool_result = None
+    error_kind = None
     try:
         tool_function = tool["callable"]
         # llens: システム側の権威的タイムアウト(sandbox 等の実行側は
@@ -1419,19 +1486,24 @@ async def _execute_tool_call_sync(
             tool_result = await tool_function(**tool_function_params)
         tool_succeeded = True
 
+    except ToolError as e:
+        # #145: tool が宣言した失敗。文面は ToolError が組む(事実 + 次の手)
+        log.info(f"tool error: {tool_name}: {e!r}")
+        tool_result, error_kind = e.text, e.kind
     except asyncio.TimeoutError:
         log.warning(f"tool execution timed out: {tool_name} " f"(> {tool_timeout}s)")
         # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
-        tool_result = (
-            f"ERROR: ツール {tool_name} の実行が {tool_timeout} 秒の上限でタイムアウトした。"
-            "次の手: 入力を小さく分けて呼び直す。分単位かかる処理で background を付けられるなら"
-            " background: true で呼び直す。"
+        error = ToolFailure(
+            f"ツール {tool_name} の実行が {tool_timeout} 秒の上限でタイムアウトした",
+            "入力を小さく分けて呼び直す。分単位かかる処理で background を付けられるなら"
+            " background: true で呼び直す。",
         )
+        tool_result, error_kind = error.text, error.kind
     except Exception as e:
         # 例外は型名 + 先頭 200 字だけ(モデルの軌道修正の材料)。全文と stack は log にだけ
         # 出す — str(e) は内部 URL・パスを含みうる(2026-10-04 llens 監査 B5)
         log.warning(f"tool raised: {tool_name}: {e!r}", exc_info=True)
-        tool_result = tool_exception_text(tool_name, e)
+        tool_result, error_kind = tool_exception_text(tool_name, e), "failure"
     finally:
         tool_output.current_sink.reset(sink_token)
         # sink を閉じる(#100): 抑制中の進捗を 1 通流し、以後の push を
@@ -1439,7 +1511,7 @@ async def _execute_tool_call_sync(
         # copy_context を持ったまま走り続ける timeout orphan スレッド
         # (上の有界リーク)には効かない — closed フラグがそれを止める。
         sink.close()
-    return tool_result, tool_succeeded, sink
+    return tool_result, tool_succeeded, sink, error_kind
 
 
 async def _execute_one_tool_call(
@@ -1456,26 +1528,14 @@ async def _execute_one_tool_call(
     # 知りたい(context_images/display の tool_succeeded ゲートとは規律が違う)。
     started_at = time.monotonic()
 
-    tool_function_params = {}
-    try:
-        # 一次は厳密 JSON(OpenAI 互換の正規形。Kimi 実測も厳密 JSON —
-        # _memos/model-frames.md)。Python リテラル風を出すモデル向けの
-        # フォールバックとして ast.literal_eval を残す(モデル多様性)。
-        tool_function_params = json.loads(
-            tool_call.get("function", {}).get("arguments", "{}")
-        )
-    except Exception as e:
-        log.debug(e)
-        try:
-            tool_function_params = ast.literal_eval(
-                tool_call.get("function", {}).get("arguments", "{}")
-            )
-        except Exception:
-            log.debug(
-                f"Error parsing tool call arguments: {tool_call.get('function', {}).get('arguments', '{}')}"
-            )
-
+    # #145: arguments が読めない呼び出しは黙って {} にせず call の ToolError にする
+    # (空文字・空白だけは引数なしとして通す)
+    raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+    tool_function_params, arguments_error = _parse_tool_arguments(
+        tool_name, raw_arguments
+    )
     tool_result = None
+    error_kind = None
     context_image_file_ids = []
     display_items = []
     result_render_override = None
@@ -1485,13 +1545,17 @@ async def _execute_one_tool_call(
         # 履歴に残った過去の tool call を真似るケース
         # (skill 削除・権限剥奪・分岐)や manifest 外の名前で
         # 起きうる。黙って None を返さず、モデルが軌道修正
-        # できる明示メッセージを返す(例外にもしない)。
+        # できる明示メッセージを返す(call の ToolError — #145)。
         log.warning(f"model called unavailable tool '{tool_name}'")
-        tool_result = (
-            f"ツール {tool_name} は今は使えない (このターンの一覧に無い)。"
-            "次の手: 一覧にある tool だけを使う。"
-            "load_skill が使えて、skill の tool なら先に読み込む。"
+        error = ToolCallError(
+            f"ツール {tool_name} は今は使えない (このターンの一覧に無い)",
+            "一覧にある tool だけを使う。"
+            "load_skill が使えて、skill の tool なら先に読み込む。",
         )
+        tool_result, error_kind = error.text, error.kind
+    elif arguments_error is not None:
+        log.warning(f"unparseable arguments for tool '{tool_name}': {raw_arguments!r}")
+        tool_result, error_kind = arguments_error.text, arguments_error.kind
     else:
         tool = tools[tool_name]
         spec = tool.get("spec", {})
@@ -1532,25 +1596,41 @@ async def _execute_one_tool_call(
             background_requested = False
             timeout_override = inline_background_timeout(tool)
 
-        if background_requested:
+        signature_error = _tool_signature_error(tool, tool_name, tool_function_params)
+        if signature_error is not None:
+            # #145 項目 2: 必須引数の欠落を callable の生の TypeError にしない
+            log.warning(
+                f"tool '{tool_name}' called with bad arguments: {signature_error!r}"
+            )
+            tool_result, error_kind = signature_error.text, signature_error.kind
+        elif background_requested:
             # llens(#110): execution チャンネルへ昇格(K2)。spawn は exec 行を
             # INSERT して runner task を起動し、即座に running 形(K3)を返す。
             # この running 形が親メッセージの tool result として以後不変
             # (append-only)— 完了の真実は exec 行、回収は await_task /
             # check_task とサーバ駆動配達(execution_resume)。params は
             # unknown-drop 済み(監査
-            # 保存と callable 引数の両方に使われる)。
-            tool_result = await spawn_execution(
-                user_id=metadata["user_id"],
-                chat_id=metadata["chat_id"],
-                message_id=metadata["message_id"],
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                entry=tool,
-                params=tool_function_params,
-            )
+            # 保存と callable 引数の両方に使われる)。起動できない(上限・
+            # multi-worker・起動失敗)は failure の ToolError で来る(#145)。
+            try:
+                tool_result = await spawn_execution(
+                    user_id=metadata["user_id"],
+                    chat_id=metadata["chat_id"],
+                    message_id=metadata["message_id"],
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    entry=tool,
+                    params=tool_function_params,
+                )
+            except ToolError as e:
+                tool_result, error_kind = e.text, e.kind
         else:
-            tool_result, tool_succeeded, sink = await _execute_tool_call_sync(
+            (
+                tool_result,
+                tool_succeeded,
+                sink,
+                error_kind,
+            ) = await _execute_tool_call_sync(
                 tool,
                 tool_name,
                 tool_call_id,
@@ -1597,12 +1677,19 @@ async def _execute_one_tool_call(
         if result_truncated:
             result_render = None
 
+    if error_kind is not None:
+        # エラー文は text で描く(戻り型宣言・json の render はパース前提)
+        result_render = None
+
     return {
         "tool_call_id": tool_call_id,
         "content": tool_result,
         # 所要時間(#100)。モデル向け履歴は tool_call_id/content しか拾わない
         # ので、これがモデルへ漏れることはない(content_blocks.py)。
         "duration": round(time.monotonic() - started_at, 3),
+        # #145: 失敗の種別(call / failure / outcome — utils/tool_errors)。FE は本文を
+        # 解釈せずこれで見た目を決める。成功時は載せない
+        **({"error_kind": error_kind} if error_kind else {}),
         **({"render": result_render} if result_render else {}),
         **(
             {"truncated": True, "original_chars": original_chars}
@@ -1689,6 +1776,7 @@ async def execute_tool_calls(
                     tool_call.get("function", {}).get("name", ""), e
                 ),
                 "duration": 0.0,
+                "error_kind": "failure",
             }
 
     prelude = [

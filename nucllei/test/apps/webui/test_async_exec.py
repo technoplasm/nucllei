@@ -26,6 +26,7 @@ import time
 import pytest
 
 from test.util.abstract_integration_test import AbstractPostgresTest
+from test.util.tool_errors import call_error
 
 
 class TestAsyncExec(AbstractPostgresTest):
@@ -522,12 +523,21 @@ class TestAsyncExec(AbstractPostgresTest):
 
         failed = self.Executions.get_execution_by_id(failed_id)
         assert failed.status == "failed"
-        assert failed.error == "壊れた"
+        # #145: 同期経路と同じ文面 — 例外は型名 + 先頭 200 字だけ(全文は log)
+        assert failed.error == (
+            "ERROR: ツール probe の実行中にエラーが起きた (RuntimeError: 壊れた)。"
+            "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+        )
+        assert failed.meta["error_kind"] == "failure"
         assert failed.result is None
 
         timed_out = self.Executions.get_execution_by_id(timed_out_id)
         assert timed_out.status == "failed"
-        assert "タイムアウト" in timed_out.error
+        assert timed_out.error == (
+            "ERROR: ツール probe の background 実行が 0.05 秒の上限でタイムアウトした。"
+            "次の手: 入力を小さく分けて呼び直す。"
+        )
+        assert timed_out.meta["error_kind"] == "failure"
 
     def test_runner_harvests_usage_images_and_truncates(self, monkeypatch):
         from nucllei.utils import tool_output
@@ -584,15 +594,135 @@ class TestAsyncExec(AbstractPostgresTest):
         # sink は runner 終了で回収される(progress の読み口も消える)
         assert self.executions.get_latest_progress(task_id) is None
 
+    # ---- #145: ToolError の種別は exec 行(error + meta.error_kind)に残る ----
+
+    def _run_to_end(self, callable_, **entry_extra):
+        async def main():
+            spawned = await self._spawn(
+                callable_, entry=self._entry(callable_, **entry_extra)
+            )
+            await self._wait_registry_release(spawned["task_id"])
+            return spawned["task_id"]
+
+        return self.Executions.get_execution_by_id(asyncio.run(main()))
+
+    def test_runner_records_tool_error_kinds(self):
+        from nucllei.utils.tool_errors import ToolCallError, ToolFailure, ToolOutcome
+
+        for error, status in (
+            (ToolCallError("引数 x の形が違う", "x を整数で渡す。"), "failed"),
+            (ToolFailure("上流に届かない", "時間を置いて呼び直す。"), "failed"),
+            # outcome(答えが「無い」)は呼び出しとしては成立 — done で結果に文を載せる
+            (ToolOutcome("一致する行が無い"), "done"),
+        ):
+
+            async def probe(error=error):
+                raise error
+
+            row = self._run_to_end(probe)
+            assert row.status == status, error
+            assert row.meta["error_kind"] == error.kind
+            if status == "failed":
+                assert row.error == error.text and row.result is None
+            else:
+                assert row.result == error.text and row.error is None
+
+    def test_runner_keeps_the_subagent_session_on_error(self):
+        from nucllei.utils import tool_output
+        from nucllei.utils.tool_errors import ToolFailure
+
+        async def probe():
+            tool_output.progress("子", subagent={"session_id": "child-1"})
+            await asyncio.sleep(0.05)
+            raise ToolFailure("子ターンが落ちた")
+
+        row = self._run_to_end(probe)
+        assert row.status == "failed"
+        # 終端の meta 上書きでも子 session への再リンク先を失わない
+        assert row.meta == {"error_kind": "failure", "subagent_session_id": "child-1"}
+
+    def test_runner_returned_error_string_is_a_normal_done(self):
+        """返した文字列は何で始まっても通常の結果(ToolError を raise したときだけ失敗)。"""
+        text = "ERROR: 上流がエラーを返した。次の手: 呼び直す。"
+
+        async def probe():
+            return text
+
+        row = self._run_to_end(probe, tool_id="llens_cage")
+        assert row.status == "done" and row.result == text
+        assert "error_kind" not in (row.meta or {})
+
+    def test_error_kind_reaches_the_list_api_and_execution_done(self, monkeypatch):
+        from nucllei.routers.chats import _execution_item
+        from nucllei.utils import completion_events
+        from nucllei.utils.tool_errors import ToolCallError
+
+        emitted = []
+
+        class _Stream:
+            def emit(self, envelope):
+                emitted.append(envelope)
+
+        monkeypatch.setattr(
+            completion_events, "get_streams_for_chat", lambda chat_id: [_Stream()]
+        )
+
+        async def probe():
+            raise ToolCallError("引数 x の形が違う")
+
+        row = self._run_to_end(probe)
+        item = _execution_item(row)
+        assert item["status"] == "failed"
+        assert item["error"] == "ERROR: 引数 x の形が違う。"
+        assert item["error_kind"] == "call"
+        done = [
+            e["data"]["data"] for e in emitted if e["data"]["type"] == "execution:done"
+        ]
+        assert done and done[-1]["error_kind"] == "call"
+        assert done[-1]["error"] == "ERROR: 引数 x の形が違う。"
+
+    def test_spawn_refusal_is_a_failure_result_in_the_turn(self, monkeypatch):
+        """起動できない background(上限)は failure の結果として同じターンに返る。"""
+        from nucllei.utils.middleware import execute_tool_calls
+
+        async def probe(city: str = ""):
+            return "ok"
+
+        async def other():
+            return "隣"
+
+        monkeypatch.setattr(self.executions, "ASYNC_EXEC_MAX_CONCURRENCY", 1)
+        self.executions._active_execs_by_user["1"] = 1
+        tools = {
+            "probe": self._entry(probe, properties={"city": {"type": "string"}}),
+            "other": self._entry(other, backgroundable=False),
+        }
+        results = asyncio.run(
+            execute_tool_calls(
+                [
+                    self._call({"city": "札幌", "background": True}),
+                    self._call({}, name="other", index=1),
+                ],
+                tools,
+                metadata=self._metadata(),
+            )
+        )
+        assert results[0]["error_kind"] == "failure"
+        assert results[0]["content"].startswith(
+            "ERROR: バックグラウンドタスクの同時数がユーザーごとの上限 (1) に達している"
+        )
+        assert "error_kind" not in results[1]
+        assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
+
     def test_spawn_enforces_concurrency_limits(self, monkeypatch):
         async def probe():
             return "ok"
 
         monkeypatch.setattr(self.executions, "ASYNC_EXEC_MAX_CONCURRENCY", 1)
         self.executions._active_execs_by_user["1"] = 1
-        error = json.loads(asyncio.run(self._spawn(probe)))
-        assert error["ok"] is False
-        assert "ユーザーごとの上限" in error["error"]
+        error = asyncio.run(call_error(self._spawn(probe)))
+        assert error.kind == "failure"
+        assert "ユーザーごとの上限" in error.text
         # 超過エラーは席を消費しない・行も作らない
         assert self.executions._active_execs_by_user == {"1": 1}
         assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
@@ -600,9 +730,9 @@ class TestAsyncExec(AbstractPostgresTest):
         monkeypatch.setattr(self.executions, "ASYNC_EXEC_MAX_TOTAL", 1)
         self.executions._active_execs_by_user.clear()
         self.executions._active_execs_by_user["other"] = 1
-        error = json.loads(asyncio.run(self._spawn(probe)))
-        assert error["ok"] is False
-        assert "サーバー全体の上限" in error["error"]
+        error = asyncio.run(call_error(self._spawn(probe)))
+        assert error.kind == "failure"
+        assert "サーバー全体の上限" in error.text
 
     def test_spawn_is_disabled_for_multi_worker_deployments(self, monkeypatch):
         """D7: registry はプロセス内 — multi-worker では liveness 判定が壊れる。"""
@@ -612,9 +742,12 @@ class TestAsyncExec(AbstractPostgresTest):
 
         monkeypatch.setattr(self.executions, "UVICORN_WORKERS", 2)
         assert self.executions.async_exec_available() is False
-        error = json.loads(asyncio.run(self._spawn(probe)))
-        assert error["ok"] is False
-        assert "multi-worker" in error["error"]
+        error = asyncio.run(call_error(self._spawn(probe)))
+        assert error.kind == "failure"
+        assert error.text == (
+            "ERROR: このサーバー構成 (multi-worker) では background 実行を使えない。"
+            "次の手: background を付けずに呼び直す。"
+        )
         assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
 
     def test_multi_worker_hides_the_spawn_surface_but_recall_still_works(
@@ -836,17 +969,23 @@ class TestAsyncExec(AbstractPostgresTest):
         self._insert("foreign-user", user_id="9")
         self._insert("foreign-chat", chat_id="chat-2")
 
-        # 空・型不正・全不正はエラー文字列(_error 流儀)
+        # 空・型不正・全不正は call の ToolError(#145)
         for task_ids in (None, [], "", 42):
-            result = json.loads(asyncio.run(await_task(task_ids=task_ids)))
-            assert result["ok"] is False, task_ids
-        result = json.loads(
-            asyncio.run(
-                await_task(task_ids=["no-such", "foreign-user", "foreign-chat"])
-            )
+            result = asyncio.run(call_error(await_task(task_ids=task_ids)))
+            assert result.kind == "call", task_ids
+        assert (
+            asyncio.run(call_error(await_task(task_ids=None))).text
+            == "ERROR: task_ids が空。次の手: task_id を配列で渡す。"
         )
-        assert result["ok"] is False
-        assert "有効な task_id が無い" in result["error"]
+        assert (
+            asyncio.run(call_error(await_task(task_ids=42))).text
+            == "ERROR: task_ids の形が違う。次の手: task_id を文字列の配列で渡す。"
+        )
+        result = asyncio.run(
+            call_error(await_task(task_ids=["no-such", "foreign-user", "foreign-chat"]))
+        )
+        assert result.kind == "call"
+        assert "有効な task_id が無い" in result.text
 
     def test_await_task_mixes_results_with_per_entry_errors(self):
         await_task = self._exec_tools()["await_task"]["callable"]
@@ -993,8 +1132,8 @@ class TestAsyncExec(AbstractPostgresTest):
         assert self._delivered_at("valid-21") is None
 
         # over が無い全不正は従来どおり全体エラー(既存挙動の保存)
-        result = json.loads(asyncio.run(await_task(task_ids=["no-such-a"])))
-        assert result["ok"] is False
+        result = asyncio.run(call_error(await_task(task_ids=["no-such-a"])))
+        assert result.kind == "call"
 
     def test_await_task_caps_ids_at_20(self):
         await_task = self._exec_tools()["await_task"]["callable"]
@@ -1259,8 +1398,8 @@ class TestAsyncExec(AbstractPostgresTest):
         assert self.Executions.finish_execution("done-1", status="done", result="ok")
         self._insert("foreign", user_id="9")
 
-        # 空はエラー文字列
-        assert json.loads(asyncio.run(stop_task(task_ids=[])))["ok"] is False
+        # 空は call の ToolError(#145)
+        assert asyncio.run(call_error(stop_task(task_ids=[]))).kind == "call"
 
         out = asyncio.run(stop_task(task_ids=["done-1", "no-such", "foreign"]))
         assert out["tasks"][0] == {

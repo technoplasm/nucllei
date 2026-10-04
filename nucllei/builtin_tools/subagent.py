@@ -96,7 +96,8 @@ class Tools:
         :return: {ok, session_id, answer, truncated?, note?, usage?, error?}
         """
         from nucllei.models.users import Users
-        from nucllei.utils.subagent import _error, run_subagent_turn
+        from nucllei.utils.subagent import run_subagent_turn
+        from nucllei.utils.tool_errors import ToolFailure
 
         user_id = (__user__ or {}).get("id")
         # 子ターンの 3 段(process_chat_payload 等)は UserModel を要求する —
@@ -105,7 +106,9 @@ class Tools:
             await asyncio.to_thread(Users.get_user_by_id, user_id) if user_id else None
         )
         if user is None:
-            return _error("ユーザーを特定できないのでサブエージェントは起動できない。")
+            raise ToolFailure(
+                "ユーザーを特定できないのでサブエージェントは起動できない"
+            )
 
         metadata = __metadata__ or {}
         return await run_subagent_turn(

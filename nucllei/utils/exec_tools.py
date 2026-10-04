@@ -54,6 +54,7 @@ from nucllei.env import (
 )
 from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
+from nucllei.utils.tool_errors import ToolCallError
 from nucllei.utils.executions import (
     async_exec_available,
     ensure_execution_liveness,
@@ -227,11 +228,6 @@ def mount_recall_tools(tools_dict: dict, form_data: dict, user, metadata) -> lis
     return mounted
 
 
-def _error(message: str) -> str:
-    """エラーは例外にせず tool result 文字列(JSON)で返す(subagent.py と同流儀)。"""
-    return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
-
-
 def build_exec_tools(user, metadata) -> dict:
     """回収 builtin `check_task` / `await_task` / `stop_task` を合成する。
 
@@ -265,15 +261,14 @@ def build_exec_tools(user, metadata) -> dict:
         }
 
     def _coerce_ids(task_ids):
-        """(ids, error) — 単一 string は [str] に coerce。順序を保って dedupe。"""
+        """ids — 単一 string は [str] に coerce。順序を保って dedupe。空・形の誤りは
+        call の ToolError(#145 — 呼び出し全体の誤り。per-entry の誤りは返りの形に載る)。"""
         if task_ids is None:
-            return None, _error("task_ids が空。次の手: task_id を配列で渡す。")
+            raise ToolCallError("task_ids が空", "task_id を配列で渡す。")
         if isinstance(task_ids, str):
             task_ids = [task_ids]
         if not isinstance(task_ids, (list, tuple)):
-            return None, _error(
-                "task_ids の形が違う。次の手: task_id を文字列の配列で渡す。"
-            )
+            raise ToolCallError("task_ids の形が違う", "task_id を文字列の配列で渡す。")
         ids = []
         seen = set()
         for tid in task_ids:
@@ -285,8 +280,8 @@ def build_exec_tools(user, metadata) -> dict:
             seen.add(tid)
             ids.append(tid)
         if not ids:
-            return None, _error("task_ids が空。次の手: task_id を配列で渡す。")
-        return ids, None
+            raise ToolCallError("task_ids が空", "task_id を配列で渡す。")
+        return ids
 
     async def _load_rows(ids: list[str]) -> dict:
         """id → 認可済み行(不正 / 他人 / 他 chat は None)。"""
@@ -373,9 +368,7 @@ def build_exec_tools(user, metadata) -> dict:
         # read-only(契約 T2): liveness も書かない。stale な running は boot
         # スイープ / await_task 側のガードが倒す。
         if task_ids:
-            ids, error = _coerce_ids(task_ids)
-            if error is not None:
-                return error
+            ids = _coerce_ids(task_ids)
             over = ids[TASK_IDS_MAX:]
             requested = ids[:TASK_IDS_MAX]
             rows = await _load_rows(requested)
@@ -442,9 +435,7 @@ def build_exec_tools(user, metadata) -> dict:
     }
 
     async def await_task(task_ids=None, timeout: int = AWAIT_TASK_DEFAULT_TIMEOUT):
-        ids, error = _coerce_ids(task_ids)
-        if error is not None:
-            return error
+        ids = _coerce_ids(task_ids)
         over = ids[TASK_IDS_MAX:]
         requested = ids[:TASK_IDS_MAX]
         rows = await _load_rows(requested)
@@ -453,9 +444,9 @@ def build_exec_tools(user, metadata) -> dict:
             # (over)がある場合は除く(#110 敵対検証 5): 21 件目以降に有効 id が
             # 残っているかもしれず、全体エラーにするとモデルが per-entry の
             # 「次の呼び出しで指定」案内を受け取れない — per-entry 形で返す。
-            return _error(
-                "有効な task_id が無い (扱えるのはこのチャットで起動したタスクだけ)。"
-                "次の手: background: true の返りの task_id をそのまま渡す。"
+            raise ToolCallError(
+                "有効な task_id が無い (扱えるのはこのチャットで起動したタスクだけ)",
+                "background: true の返りの task_id をそのまま渡す。",
             )
 
         try:
@@ -602,9 +593,7 @@ def build_exec_tools(user, metadata) -> dict:
     }
 
     async def stop_task(task_ids=None):
-        ids, error = _coerce_ids(task_ids)
-        if error is not None:
-            return error
+        ids = _coerce_ids(task_ids)
         over = ids[TASK_IDS_MAX:]
         requested = ids[:TASK_IDS_MAX]
         rows = await _load_rows(requested)

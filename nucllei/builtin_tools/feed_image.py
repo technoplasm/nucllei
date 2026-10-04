@@ -86,6 +86,7 @@ from nucllei.utils.image_refs import (
     url_for_mounted_path,
     with_page,
 )
+from nucllei.utils.tool_errors import ToolCallError, ToolError, ToolFailure, ToolOutcome
 from nucllei.utils.ref_errors import (
     NEXT,
     RefErrorHints,
@@ -205,8 +206,8 @@ def _hints(is_path: bool, ref: str = "") -> RefErrorHints:
     )
 
 
-def _explain_ref_error(ref: str, err, is_path: bool = False) -> str:
-    """resolver の RefError をモデル向けの ERROR 文にする (組み立ては `utils/ref_errors`)。"""
+def _explain_ref_error(ref: str, err, is_path: bool = False) -> ToolError:
+    """resolver の RefError をモデル向けの ToolError にする (組み立ては `utils/ref_errors`)。"""
     return explain_ref_error(
         ref, err, arg="path" if is_path else "url", hints=_hints(is_path, ref)
     )
@@ -339,32 +340,29 @@ class Tools:
         # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
         # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         if __feed_image__ is None:
             # 実行文脈外 (通常起こらない)。参照を push できないので明示エラー。
-            return "ERROR: この呼び出しでは画像を目に入れる経路が使えない。"
+            raise ToolFailure("この呼び出しでは画像を目に入れる経路が使えない")
 
         # --- url / path ソース (#139): 参照文字列を resolver で読んで検証し、参照を積む ---
         # 扱いは引数名だけで決める (module docstring「引数」。値の形で読み替えない)。
         if url is not None or path is not None:
             if file_id or filename:
-                return (
-                    "ERROR: url / path は file_id / filename と同時に指定できない。"
-                    + NEXT
-                    + "添付・生成物は file_id、URL は url、sandbox のファイルは path の"
-                    "どれか 1 つだけを指定する。"
+                raise ToolCallError(
+                    "url / path は file_id / filename と同時に指定できない",
+                    "添付・生成物は file_id、URL は url、sandbox のファイルは path の"
+                    "どれか 1 つだけを指定する。",
                 )
             u = url.strip() if isinstance(url, str) else ""
             p = path.strip() if isinstance(path, str) else ""
             if u and p:
-                return (
-                    "ERROR: url と path は同時に指定できない。"
-                    + NEXT
-                    + "1 回の呼び出しでどちらか一方だけを渡す。"
-                    f"{REF_ARGS_RULE}"
+                raise ToolCallError(
+                    "url と path は同時に指定できない",
+                    f"1 回の呼び出しでどちらか一方だけを渡す。{REF_ARGS_RULE}",
                 )
             if not (u or p):
-                return url_error("") if url is not None else path_error("")
+                raise url_error("") if url is not None else path_error("")
             if u:
                 # このサーバのファイル配信口 (相対・絶対とも) は URL のルーティングとして
                 # file に当たる — file_id 経路と同じ所有者チェックで読む (module docstring「引数」)。
@@ -399,19 +397,27 @@ class Tools:
                 targets.append(fid)
 
         if not targets:
-            return (
-                "ERROR: 対象が見つからない。無指定で対象になるのは添付 PDF だけ "
-                "(添付画像は既に自分の目に入っている)。"
-                + NEXT
-                + "添付画像を見直すなら file_id を、URL なら url を、sandbox のファイルなら"
-                " path を指定する。"
+            raise ToolCallError(
+                "対象が見つからない。無指定で対象になるのは添付 PDF だけ "
+                "(添付画像は既に自分の目に入っている)",
+                "添付画像を見直すなら file_id を、URL なら url を、sandbox のファイルなら"
+                " path を指定する。",
             )
 
+        if len(targets) == 1:
+            # 1 件 (file_id 指定・添付 PDF 1 件) の失敗は呼び出しの失敗 (ToolError のまま上げる)
+            return await self._feed_file(
+                targets[0], pages, __user__["id"], __feed_image__
+            )
         out: list[str] = []
         for fid in targets:
-            out.append(
-                await self._feed_file(fid, pages, __user__["id"], __feed_image__)
-            )
+            # 複数の添付 PDF: 1 件の失敗で他を落とさない — その行に ERROR 文を置く (旧来どおり)
+            try:
+                out.append(
+                    await self._feed_file(fid, pages, __user__["id"], __feed_image__)
+                )
+            except ToolError as e:
+                out.append(e.text)
 
         # role:tool の content は非空の status 文字列。画素は results[i].context_images 経由で届く。
         return "\n".join(out)
@@ -425,10 +431,10 @@ class Tools:
         # 所有者チェック (#40 と同クラスの IDOR 封鎖): file_id 直指定で他ユーザーのファイルを
         # 覗かせない。レコード無しとアクセス権無しは同じ固定文 (存在の有無を漏らさない)。
         if not rec:
-            return file_id_error(fid)
+            raise file_id_error(fid)
         owner = getattr(rec, "user_id", None)
         if owner != user_id:
-            return file_id_error(fid)
+            raise file_id_error(fid)
 
         meta = getattr(rec, "meta", None) or {}
         name = getattr(rec, "filename", None) or fid
@@ -493,15 +499,14 @@ class Tools:
         else:
             loaded, err = await resolve_url(ref)
         if err is not None or loaded is None:
-            return _explain_ref_error(ref, err, is_path)
+            raise _explain_ref_error(ref, err, is_path)
 
         kind = detect_kind(loaded)
         if kind == "image":
             if pages:
-                return (
-                    "ERROR: pages は PDF のときだけ指定できる (この参照は画像)。"
-                    + NEXT
-                    + "pages を外して呼び直す。"
+                raise ToolCallError(
+                    "pages は PDF のときだけ指定できる (この参照は画像)",
+                    "pages を外して呼び直す。",
                 )
             size = len(loaded.data)
             if size > self.valves.max_image_mb * 1024 * 1024:
@@ -514,9 +519,10 @@ class Tools:
                     else "send_to_workspace と run_python が使えるなら、send_to_workspace(url=…) で"
                     " sandbox に取り込み、run_python で縮小して /workspace/… の path を path= で渡す。"
                 )
-                return (
-                    f"ERROR: {ref} は大きすぎる ({mb(size)} > "
-                    f"{self.valves.max_image_mb:.1f} MB)。{NEXT}{how}"
+                raise ToolOutcome(
+                    f"{ref} は大きすぎる ({mb(size)} > "
+                    f"{self.valves.max_image_mb:.1f} MB)",
+                    how,
                 )
             feed(ref)
             if is_path:
@@ -542,16 +548,17 @@ class Tools:
                 n_pages = await asyncio.to_thread(pdf_page_count, loaded.data)
             except Exception as e:
                 log.error(f"[feed_image] {ref}: {e!r}")
-                return f"ERROR: {ref} は PDF として開けない (壊れているか、暗号化されている)。"
+                raise ToolFailure(
+                    f"{ref} は PDF として開けない (壊れているか、暗号化されている)"
+                )
             return self._feed_pdf_pages(ref, ref, n_pages, pages, feed)
-        return (
-            f"ERROR: {ref} は画像でも PDF でもない (content-type={loaded.content_type or '不明'})。"
-            + NEXT
-            + (
+        raise ToolCallError(
+            f"{ref} は画像でも PDF でもない (content-type={loaded.content_type or '不明'})",
+            (
                 "run_shell が使えるなら、テキストはそれで読む。"
                 if is_path
                 else "fetch_url が使えるなら、テキストは fetch_url(url=…) で読む。"
-            )
+            ),
         )
 
     def _feed_pdf_pages(self, ref: str, label: str, n_pages: int, pages, feed) -> str:

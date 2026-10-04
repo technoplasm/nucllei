@@ -25,6 +25,7 @@ EXT_UPSTREAMS / EXT_PUBLIC_BASES (原本ホスト) は同日に設定ごと撤�
 原本ホストのスロット・ERROR 文の「登録された原本ホストは …」は無い。
 """
 
+from test.util.tool_errors import call_text
 import asyncio
 import contextlib
 import importlib
@@ -264,8 +265,9 @@ class _Env:
         self.tools = mod.Tools()
 
     def run(self, url, **kwargs):
+        # #145: 失敗は ToolError の raise — 文面の番兵は `.text` で全文比較する
         return asyncio.run(
-            self.tools.fetch_url(url=url, __user__={"id": "u1"}, **kwargs)
+            call_text(self.tools.fetch_url(url=url, __user__={"id": "u1"}, **kwargs))
         )
 
 
@@ -559,7 +561,7 @@ def test_ext_page_links_resolve_against_the_page_url(monkeypatch, ext_env):
 
 def test_requires_user(monkeypatch, ext_env):
     env = _Env(monkeypatch, ext_env, _Loaded(body=b"<html></html>"))
-    result = asyncio.run(env.tools.fetch_url(url=f"{SITE}/top.aspx"))
+    result = asyncio.run(call_text(env.tools.fetch_url(url=f"{SITE}/top.aspx")))
     assert result.startswith("ERROR") and env.resolver.refs == []
 
 

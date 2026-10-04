@@ -53,6 +53,11 @@ from nucllei.env import (
 )
 from nucllei.models.executions import ExecutionModel, Executions
 from nucllei.utils import tool_output
+from nucllei.utils.tool_errors import (
+    ToolError,
+    ToolFailure,
+    tool_exception_text,
+)
 from nucllei.utils.tool_output import ToolOutputSink
 
 log = logging.getLogger(__name__)
@@ -102,6 +107,9 @@ _exec_sinks: dict[str, "_ExecSink"] = {}
 
 # exec 行 meta のキー: run_subagent の子 agent session id(一覧 API が session_id として出す)
 SUBAGENT_SESSION_META_KEY = "subagent_session_id"
+# exec 行 meta のキー: 失敗の種別(#145 — utils/tool_errors の kind。一覧 API・`execution:done`
+# が error_kind として出す)。call / failure は status failed、outcome は status done で終わる
+ERROR_KIND_META_KEY = "error_kind"
 
 
 def _call_on_loop(loop, loop_thread_id, fn, *args) -> None:
@@ -142,7 +150,7 @@ def _emit_execution_done(row: Optional[ExecutionModel]) -> None:
     """exec の終端を chat の開いている stream 全部へ流す(ループ上で呼ぶ)。
 
     `execution:done` {task_id, tool_call_id, tool_name, status, finished_at,
-    duration, error}。封筒の message_id は spawn したメッセージ(FE はこれを
+    duration, error, error_kind}。封筒の message_id は spawn したメッセージ(FE はこれを
     既知の message として受け、executions store の行を即座に更新する)。
     装飾 — 失敗は握る(真実は exec 行。FE は 5 秒ポーリングで追いつく)。
     """
@@ -164,6 +172,7 @@ def _emit_execution_done(row: Optional[ExecutionModel]) -> None:
                     "finished_at": row.finished_at,
                     "duration": row.duration,
                     "error": row.error,
+                    "error_kind": (row.meta or {}).get(ERROR_KIND_META_KEY),
                 },
             },
         }
@@ -253,11 +262,6 @@ class _ExecSink(ToolOutputSink):
                 await self._subagent_persist
             except Exception:
                 log.debug("subagent session persist failed", exc_info=True)
-
-
-def _error(message: str) -> str:
-    """エラーは例外にせず tool result 文字列(JSON)で返す(subagent.py と同流儀)。"""
-    return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
 
 
 def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
@@ -360,29 +364,29 @@ async def spawn_execution(
 
     execute_tool_calls の background 分岐から呼ばれる。params は unknown-drop
     (allowed_params フィルタ)済みの実引数であること(そのまま args に監査保存し、
-    callable に渡す)。戻り値は dict(running 形)または _error 文字列 —
-    どちらも middleware の wire 正規化にそのまま乗る。
+    callable に渡す)。戻り値は dict(running 形)。起動できないときは failure の
+    ToolError を raise する(#145 — middleware が結果に変える)。
     """
     if not async_exec_available():
-        return _error(
-            "このサーバー構成 (multi-worker) では background 実行を使えない。"
-            "次の手: background を付けずに呼び直す。"
+        raise ToolFailure(
+            "このサーバー構成 (multi-worker) では background 実行を使えない",
+            "background を付けずに呼び直す。",
         )
 
     # 同時数 check → 同期で increment(check→increment 間に await を挟まない —
     # subagent.py の規律)。超過は即エラー(行を作らない)。
     if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENCY:
-        return _error(
+        raise ToolFailure(
             f"バックグラウンドタスクの同時数がユーザーごとの上限"
-            f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)。"
-            "次の手: 走行中のタスクを await_task で待つか stop_task で止めてから"
-            "呼び直す。急ぐなら background を付けずに呼び直す。"
+            f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)",
+            "走行中のタスクを await_task で待つか stop_task で止めてから"
+            "呼び直す。急ぐなら background を付けずに呼び直す。",
         )
     if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
-        return _error(
+        raise ToolFailure(
             f"バックグラウンドタスクの同時数がサーバー全体の上限"
-            f" ({ASYNC_EXEC_MAX_TOTAL}) に達している (起動していない)。"
-            "次の手: background を付けずに呼び直す。"
+            f" ({ASYNC_EXEC_MAX_TOTAL}) に達している (起動していない)",
+            "background を付けずに呼び直す。",
         )
     _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
 
@@ -439,7 +443,7 @@ async def spawn_execution(
                 )
             except Exception:
                 log.exception(f"failed to mark spawn-failed execution {exec_id}")
-        return _error(SPAWN_FAILED_ERROR)
+        raise ToolFailure.from_text(SPAWN_FAILED_ERROR)
     except BaseException:
         # CancelledError は BaseException 派生 — 上の except では捕らえられない。
         # INSERT の await がキャンセル点で、ここを素通りすると席とセンチネルが
@@ -460,6 +464,21 @@ async def spawn_execution(
 
     # 返りのキーは task_id(契約 T1 — モデル・UI 向けの用語。値は exec 行の id)
     return {"ok": True, "task_id": exec_id, "tool_name": tool_name, "status": "running"}
+
+
+def _error_outcome(sink: "_ExecSink", text: str, kind: str, duration: float) -> dict:
+    """失敗の終端(#145)。call / failure は failed + error、outcome は done + result。
+
+    meta は終端で上書きされるので、走行中に書いた子 session id を載せ直す。
+    副産物(context_images / display)は harvest しない(失敗 call は副産物を出さない —
+    middleware と同じ規律)。
+    """
+    meta: dict = {ERROR_KIND_META_KEY: kind}
+    if sink.subagent_session_id:
+        meta[SUBAGENT_SESSION_META_KEY] = sink.subagent_session_id
+    if kind == "outcome":
+        return {"status": "done", "result": text, "duration": duration, "meta": meta}
+    return {"status": "failed", "error": text, "duration": duration, "meta": meta}
 
 
 async def _run_execution(
@@ -506,26 +525,37 @@ async def _run_execution(
         except asyncio.CancelledError:
             # D2: stop / shutdown の cancel。永続化しない(re-raise のみ)
             raise
+        except ToolError as e:
+            # #145: tool が宣言した失敗。call / failure は failed、outcome(答えが
+            # 「無い」)は done で結果に文を載せる — 同期経路と同じ見た目の区別
+            log.info(f"async execution tool error: {tool_name}: {e!r}")
+            outcome = _error_outcome(
+                sink, e.text, e.kind, round(time.monotonic() - started_at, 3)
+            )
         except (asyncio.TimeoutError, TimeoutError):
             log.warning(
                 f"async execution timed out: {tool_name} (> {tool_timeout}s, "
                 f"exec_id={exec_id})"
             )
-            outcome = {
-                "status": "failed",
-                "error": (
+            outcome = _error_outcome(
+                sink,
+                ToolFailure(
                     f"ツール {tool_name} の background 実行が {tool_timeout} 秒の"
-                    "上限でタイムアウトした。次の手: 入力を小さく分けて呼び直す。"
-                ),
-                "duration": round(time.monotonic() - started_at, 3),
-            }
+                    "上限でタイムアウトした",
+                    "入力を小さく分けて呼び直す。",
+                ).text,
+                "failure",
+                round(time.monotonic() - started_at, 3),
+            )
         except Exception as e:
+            # 同期経路と同じく型名 + 先頭 200 字だけ(全文と stack は log)
             log.exception(f"async execution failed: {tool_name} (exec_id={exec_id})")
-            outcome = {
-                "status": "failed",
-                "error": str(e) or e.__class__.__name__,
-                "duration": round(time.monotonic() - started_at, 3),
-            }
+            outcome = _error_outcome(
+                sink,
+                tool_exception_text(tool_name, e),
+                "failure",
+                round(time.monotonic() - started_at, 3),
+            )
         else:
             duration = round(time.monotonic() - started_at, 3)
             text, render = normalize_tool_result(raw)

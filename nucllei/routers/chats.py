@@ -30,6 +30,7 @@ from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_permission, has_read_access_to_file
 from nucllei.utils import execution_resume
 from nucllei.utils.executions import (
+    ERROR_KIND_META_KEY,
     EXEC_SPAWN_GRACE_S,
     SUBAGENT_SESSION_META_KEY,
     has_exec_registry_entry,
@@ -663,6 +664,9 @@ def _execution_item(execution: ExecutionModel) -> dict:
         # run_subagent の子 agent session(実行中に exec 行 meta へ永続化 — リロード後の
         # カードが子 session へ再リンクする。他の tool / 子の無い行は None)
         "session_id": (execution.meta or {}).get(SUBAGENT_SESSION_META_KEY),
+        # #145: 失敗の種別(call / failure / outcome — utils/tool_errors)。FE は error の
+        # 文面を解釈せずこれで見た目を決める。成功・旧行・stopped / orphaned は None
+        "error_kind": (execution.meta or {}).get(ERROR_KIND_META_KEY),
     }
 
 

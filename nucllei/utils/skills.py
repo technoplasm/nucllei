@@ -15,6 +15,7 @@ from nucllei.models.skills import Skills, normalize_command
 from nucllei.utils.access_control import has_access, has_read_access_to_file
 from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
 from nucllei.utils.task import prompt_template, resolve_base_model_id
+from nucllei.utils.tool_errors import ToolCallError
 
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
@@ -540,9 +541,9 @@ def build_load_skill_tool(model, user, load_tools=None):
     async def load_skill(skill_id: str = ""):
         skill = manifest.get(normalize_command(skill_id))
         if skill is None:
-            return (
-                f"skill が見つからない: {skill_id}。"
-                "次の手: load_skill の説明の一覧にある id をそのまま渡す。"
+            raise ToolCallError(
+                f"skill が見つからない: {skill_id}",
+                "load_skill の説明の一覧にある id をそのまま渡す。",
             )
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:

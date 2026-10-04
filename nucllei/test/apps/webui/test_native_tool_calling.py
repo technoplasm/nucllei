@@ -483,8 +483,9 @@ def test_unavailable_tool_call_returns_explicit_message(monkeypatch):
         m for m in completion_calls[0]["messages"] if m.get("role") == "tool"
     ]
     assert len(tool_messages) == 1
+    # #145: 一覧に無い tool は call の ToolError — 文は ToolError が組むので「ERROR: 」で始まる
     assert tool_messages[0]["content"] == (
-        "ツール get_weather は今は使えない (このターンの一覧に無い)。"
+        "ERROR: ツール get_weather は今は使えない (このターンの一覧に無い)。"
         "次の手: 一覧にある tool だけを使う。load_skill が使えて、skill の tool なら先に読み込む。"
     )
 

@@ -34,6 +34,13 @@ from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL, SANDBOX_WRITE_FILE_LIMIT_BYT
 from nucllei.models.chats import Chats
 from nucllei.models.files import FileForm, Files
 from nucllei.storage.provider import Storage
+from nucllei.utils.tool_errors import (
+    ToolCallError,
+    ToolError,
+    ToolErrorKind,
+    ToolFailure,
+    ToolOutcome,
+)
 from nucllei.utils.tool_output import display
 from nucllei.utils.tool_render import Code
 
@@ -143,12 +150,12 @@ def _under_ro_mount(abs_path: str) -> bool:
 
 def _resolve_workspace_path(
     path: str, arg_form: str, ro_hint: str = ""
-) -> tuple[str, str, str]:
-    """モデルが渡した path を (絶対パス, workspace 相対, エラー文) に解決する。
+) -> tuple[str, str]:
+    """モデルが渡した path を (絶対パス, workspace 相対) に解決する。
 
     受けるのは絶対パス (`/workspace/...`) だけ。`.` / `..` / 重複した `/` は畳んだうえで
     /workspace の外に出るものを断る — `/workspace/workspace/x` に黙って書くような読み替えは
-    しない。エラー時は前 2 つが空で、エラー文だけが入る。
+    しない。解決できないときは call の ToolError を raise する。
     symlink 越しの脱出はここでは見えない (sandbox 側の `_safe_path` が実 fs で弾く)。
 
     形の誤り (空・相対・URL・/workspace の外) は値を調べて言い分けず、全 tool 共通の形で
@@ -159,19 +166,20 @@ def _resolve_workspace_path(
     """
     abs_path = _normalize_sandbox_path(path)
     if abs_path == WORKSPACE_ROOT:
-        return abs_path, ".", ""
+        return abs_path, "."
     if abs_path.startswith(WORKSPACE_ROOT + "/"):
-        return abs_path, abs_path[len(WORKSPACE_ROOT) + 1 :], ""
+        return abs_path, abs_path[len(WORKSPACE_ROOT) + 1 :]
     if _under_ro_mount(abs_path):
-        return "", "", f"ERROR: {abs_path} は read-only の参照データ。{ro_hint}"
+        # ro_hint は事実の続き (+ 次の手) — 組み立て済みの文として分ける
+        raise ToolCallError.from_text(
+            f"{abs_path} は read-only の参照データ。{ro_hint}"
+        )
     # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
     from nucllei.utils.image_refs import REF_ARGS_RULE
 
-    return (
-        "",
-        "",
-        f"ERROR: {(path or '').strip() or '(空)'} は sandbox のパスの形でない。"
-        f"{_NEXT}{arg_form} {REF_ARGS_RULE}",
+    raise ToolCallError(
+        f"{(path or '').strip() or '(空)'} は sandbox のパスの形でない",
+        f"{arg_form} {REF_ARGS_RULE}",
     )
 
 
@@ -206,43 +214,54 @@ def _file_link_note(name: str, file_id: str) -> str:
     return f"{_NEXT}本文で示すなら [{label}](/api/v1/files/{file_id}/content) と書く"
 
 
-def _exec_error(e: Exception) -> str:
-    """sandbox の実行 (`/exec` `/exec_cell`) の失敗。例外の中身はログだけ。"""
+def _err(text: str, kind: ToolErrorKind) -> ToolError:
+    """組み立て済みの `ERROR: 事実。次の手: …` を ToolError にする (呼び手が raise)。
+    この module の文面は定数・テンプレートで持っているので、分けるのは ToolError に任せる。"""
+    return ToolError.from_text(text, kind=kind)
+
+
+def _sandbox_auth() -> ToolError:
+    return _err(_SANDBOX_AUTH, "failure")
+
+
+def _exec_error(e: Exception) -> ToolError:
+    """sandbox の実行 (`/exec` `/exec_cell`) の失敗。例外の中身はログだけ。呼び手が raise する。"""
     log.error(f"[sandbox] exec failed: {e!r}")
     if isinstance(e, SandboxHTTPError) and e.status == 401:
-        return _SANDBOX_AUTH
-    return "ERROR: sandbox で実行できなかった。" + _SANDBOX_DOWN_NEXT
+        return _sandbox_auth()
+    return _err("ERROR: sandbox で実行できなかった。" + _SANDBOX_DOWN_NEXT, "failure")
 
 
-def _files_error(e: Exception, abs_path: str) -> str:
-    """sandbox `/files/*` の失敗をモデル向けの文面にする (原因を言い分ける)。
-    例外の文・detail はログだけ (A17)。"""
+def _files_error(e: Exception, abs_path: str) -> ToolError:
+    """sandbox `/files/*` の失敗をモデル向けの ToolError にする (原因を言い分ける)。
+    例外の文・detail はログだけ (A17)。呼び手が raise する。"""
     log.warning(f"[sandbox] /files failed for {abs_path}: {e!r}")
     if not isinstance(e, SandboxHTTPError):
-        return (
+        return _err(
             "ERROR: sandbox に接続できない (起動していないか、応答が無い)。"
-            + _SANDBOX_DOWN_NEXT
+            + _SANDBOX_DOWN_NEXT,
+            "failure",
         )
     if e.status == 401:
-        return _SANDBOX_AUTH
+        return _sandbox_auth()
     if e.status == 400:
-        return (
-            f"ERROR: {abs_path} は使えない path (sandbox が受け付けなかった)。"
-            f"{_NEXT}/workspace/… の絶対パスで渡す。"
+        return ToolCallError(
+            f"{abs_path} は使えない path (sandbox が受け付けなかった)",
+            "/workspace/… の絶対パスで渡す。",
         )
     if e.status == 404:
-        return (
-            f"ERROR: {abs_path} というファイルは無い (ディレクトリは不可)。"
-            f"{_NEXT}list_workspace で確かめる。"
+        return ToolOutcome(
+            f"{abs_path} というファイルは無い (ディレクトリは不可)",
+            "list_workspace で確かめる。",
         )
     if e.status == 413:
-        return (
-            f"ERROR: {abs_path} は大きすぎて取り出せない。"
-            f"{_NEXT}必要な部分だけを /workspace/ に書き出してから渡す。"
+        return ToolOutcome(
+            f"{abs_path} は大きすぎて取り出せない",
+            "必要な部分だけを /workspace/ に書き出してから渡す。",
         )
-    return (
-        f"ERROR: sandbox がエラーを返した (HTTP {e.status})。"
-        f"{_NEXT}1 回だけ呼び直す。続くならユーザーに伝える。"
+    return ToolFailure(
+        f"sandbox がエラーを返した (HTTP {e.status})",
+        "1 回だけ呼び直す。続くならユーザーに伝える。",
     )
 
 
@@ -355,8 +374,8 @@ def _too_large_import(u: str, err) -> str:
     )
 
 
-def _explain_ref_error(u: str, err) -> str:
-    """resolver の RefError をモデル向けの ERROR 文にする (send_to_workspace(url=) 用)。
+def _explain_ref_error(u: str, err) -> ToolError:
+    """resolver の RefError をモデル向けの ToolError にする (send_to_workspace(url=) 用)。
 
     組み立ては全 tool 共通の `utils/ref_errors.explain_ref_error` (feed_image / fetch_url と
     同じ code を同じ文で言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool
@@ -374,8 +393,8 @@ def _explain_ref_error(u: str, err) -> str:
     return explain_ref_error(u, err, arg="url", hints=hints)
 
 
-def _explain_mount_error(abs_path: str, err) -> str:
-    """resolver の RefError をモデル向けの ERROR 文にする (fetch_from_workspace の `/ext/…` 用)。
+def _explain_mount_error(abs_path: str, err) -> ToolError:
+    """resolver の RefError をモデル向けの ToolError にする (fetch_from_workspace の `/ext/…` 用)。
 
     文面は解決結果 (RefError.code) で言い分ける。`not_found` は「無い / ディレクトリ /
     read-only の置き場の外を指すリンク」をまとめて言う — resolver がこの 3 つを同じ code に
@@ -385,27 +404,28 @@ def _explain_mount_error(abs_path: str, err) -> str:
     if code == "too_large":
         limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
         size = f" {_human_size(err.size)} で、" if err.size is not None else ""
-        return (
-            f"ERROR: {abs_path} は{size}添付できる上限{limit} を超えている "
-            "(上限は管理者の設定で、引数では上げられない)。ファイルは存在する。"
-            f"{_NEXT}run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。"
+        return ToolOutcome(
+            f"{abs_path} は{size}添付できる上限{limit} を超えている "
+            "(上限は管理者の設定で、引数では上げられない)。ファイルは存在する",
+            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。",
         )
     if code == "not_found":
         # nucllei 側の EXT_DIR に無い = 本当に無いか、配備の mount のずれ (sandbox にだけ
         # mount されている)。resolver は分けられないので 1 文で両方を言う。ken 2026-10-04:
         # 配備は nucllei と sandbox に同じ /ext の組を mount する — /ext のファイルは URL で
         # 見せるだけで、取り出し (添付) の経路は作らない (要らない file_id を増やさない)
-        return (
-            f"ERROR: {abs_path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
-            f" mount されている)。{_NEXT}中身が要るなら sandbox で読んで使う。"
+        return ToolOutcome(
+            f"{abs_path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
+            " mount されている)",
+            "中身が要るなら sandbox で読んで使う。",
         )
     if code == "traversal":
-        return (
-            f"ERROR: {abs_path} は使えない path (制御文字やバックスラッシュを含む)。"
-            f"{_NEXT}run_shell で /workspace/ に別名でコピーしてからそのパスを渡す。"
+        return ToolCallError(
+            f"{abs_path} は使えない path (制御文字やバックスラッシュを含む)",
+            "run_shell で /workspace/ に別名でコピーしてからそのパスを渡す。",
         )
     log.info(f"[sandbox] fetch_from_workspace {abs_path}: unexplained {code}")
-    return f"ERROR: {abs_path} を読めない。"
+    return ToolFailure(f"{abs_path} を読めない")
 
 
 def _iter_context_files(__files__, __metadata__):
@@ -677,7 +697,7 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         payload = {
             "user_id": __user__["id"],
             "lang": lang,
@@ -687,7 +707,7 @@ class Tools:
         try:
             res = await self._post("/exec", payload, payload["timeout_s"] + 30)
         except Exception as e:
-            return _exec_error(e)
+            raise _exec_error(e)
         output_lines = await self._register_exports(
             __user__["id"],
             res.get("exports", []),
@@ -707,11 +727,11 @@ class Tools:
         __message_id__,
     ) -> str:
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         if not __chat_id__:
-            return (
-                "ERROR: この呼び出しにはチャットの id が無く、状態を持つ実行ができない。"
-                f"{_NEXT}単発で足りるなら run_python_once を使う。"
+            raise ToolCallError(
+                "この呼び出しにはチャットの id が無く、状態を持つ実行ができない",
+                "単発で足りるなら run_python_once を使う。",
             )
         payload = {
             "user_id": __user__["id"],
@@ -722,7 +742,7 @@ class Tools:
         try:
             res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
         except Exception as e:
-            return _exec_error(e)
+            raise _exec_error(e)
         output_lines = await self._register_exports(
             __user__["id"],
             res.get("exports", []),
@@ -841,14 +861,14 @@ class Tools:
         :param url: 取り込むリソース。スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。file_id / filename と排他。
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
 
         url = (url or "").strip()
         file_id = (file_id or "").strip()
         if url and (file_id or filename):
-            return (
-                "ERROR: url は file_id / filename と同時に指定できない。"
-                f"{_NEXT}どちらか一方だけを指定する。"
+            raise ToolCallError(
+                "url は file_id / filename と同時に指定できない",
+                "どちらか一方だけを指定する。",
             )
 
         # 引数は名前で解釈が決まる — url は URL として、file_id は file の id として解決する。
@@ -908,17 +928,15 @@ class Tools:
     ) -> str:
         """引数で直に指された file 1 件を取り込む (file_id= / url= の配信口 URL)。
 
-        失敗は ERROR で返す。`given` はモデルが渡した引数の言い方 (`file_id <値>` / URL)。
+        失敗は ToolError を raise する。`given` はモデルが渡した引数の言い方 (`file_id <値>` / URL)。
         file が引けないときは全 tool 共通の文 + その引数が受ける形の固定文 `arg_form`
         (file_id= なら `image_refs.FILE_ID_ARG_FORM`。url= 経由は形の誤りではないので無し)。
         """
         line, failure = await self._import_file(fid, None, user_id)
         if failure == _NO_FILE:
-            return f"ERROR: {given} の{_NO_FILE}。" + (
-                f"{_NEXT}{arg_form}" if arg_form else ""
-            )
+            raise ToolCallError(f"{given} の{_NO_FILE}", arg_form or None)
         if failure:
-            return f"ERROR: {given} の{failure}。"
+            raise ToolFailure(f"{given} の{failure}")
         return "取り込み結果:\n" + line
 
     # ---- send_to_workspace の url ソース ---------------------------------------
@@ -972,7 +990,7 @@ class Tools:
         max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
         loaded, err = await resolve_url(u, max_bytes=max_bytes)
         if loaded is None:
-            return _explain_ref_error(u, err)
+            raise _explain_ref_error(u, err)
         # name は URL の basename (percent-encoded のまま)
         name = _safe_import_name(unquote(loaded.name)) or "download"
         try:
@@ -988,8 +1006,8 @@ class Tools:
         except Exception as e:
             log.error(f"[sandbox] import write failed for {u}: {e!r}")
             if isinstance(e, SandboxHTTPError) and e.status == 401:
-                return _SANDBOX_AUTH
-            return "ERROR: sandbox へ書き込めない。"
+                raise _sandbox_auth()
+            raise ToolFailure("sandbox へ書き込めない")
         return (
             "取り込み結果:\n"
             f"- {name} ({_human_size(len(loaded.data))}) → "
@@ -1013,23 +1031,21 @@ class Tools:
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
-        abs_path, rel, err = _resolve_workspace_path(
+        abs_path, rel = _resolve_workspace_path(
             path, WORKSPACE_PATH_ARG_FORM, "書き込めるのは /workspace/ 配下だけ。"
         )
-        if err:
-            return err
         if rel == "." or path.rstrip().endswith("/"):
-            return f"ERROR: {path!r} はディレクトリ。{_NEXT}ファイル名まで指定する。"
+            raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
 
         data = content.encode("utf-8")
         if len(data) > WRITE_FILE_LIMIT:
-            return (
-                f"ERROR: 内容が大きすぎる ({_human_size(len(data))} > "
-                f"{_human_size(WRITE_FILE_LIMIT)})。{_NEXT}分割して複数回に分けるか、"
-                "run_python で生成する。"
+            raise ToolCallError(
+                f"内容が大きすぎる ({_human_size(len(data))} > "
+                f"{_human_size(WRITE_FILE_LIMIT)})",
+                "分割して複数回に分けるか、run_python で生成する。",
             )
 
         try:
@@ -1043,7 +1059,7 @@ class Tools:
                 timeout_s=60,
             )
         except Exception as e:
-            return _files_error(e, abs_path)
+            raise _files_error(e, abs_path)
 
         msg = f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
         if rel.startswith("exports/"):
@@ -1068,18 +1084,16 @@ class Tools:
         :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。省略時は /workspace
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
-        abs_path, rel, err = _resolve_workspace_path(
+        abs_path, rel = _resolve_workspace_path(
             path,
             WORKSPACE_PATH_ARG_FORM,
             "list_workspace が一覧できるのは /workspace/ 配下だけ。"
             f"{_NEXT}`/ext/` は run_shell の ls で見る "
             "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
         )
-        if err:
-            return err
         try:
             res = await self._post(
                 "/files/list",
@@ -1090,7 +1104,7 @@ class Tools:
                 timeout_s=30,
             )
         except Exception as e:
-            return _files_error(e, abs_path)
+            raise _files_error(e, abs_path)
         entries = res.get("entries", [])
         if not entries:
             return f"{abs_path} は空 (ファイルが無いか、ディレクトリが存在しない)。"
@@ -1121,7 +1135,7 @@ class Tools:
         :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/imports/converted.xlsx
         """
         if not __user__ or not __user__.get("id"):
-            return "ERROR: ユーザーを特定できない。"
+            raise ToolFailure("ユーザーを特定できない")
         from nucllei.utils.image_refs import PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
@@ -1135,9 +1149,7 @@ class Tools:
                 __message_id__,
                 __event_emitter__,
             )
-        abs_path, rel, err = _resolve_workspace_path(path, PATH_ARG_FORM)
-        if err:
-            return err
+        abs_path, rel = _resolve_workspace_path(path, PATH_ARG_FORM)
         try:
             res = await self._post(
                 "/files/read",
@@ -1148,12 +1160,12 @@ class Tools:
                 timeout_s=120,
             )
         except Exception as e:
-            return _files_error(e, abs_path)
+            raise _files_error(e, abs_path)
         try:
             data = base64.b64decode(res["b64"])
         except Exception as e:
             log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
-            return "ERROR: sandbox の応答を読めない。"
+            raise ToolFailure("sandbox の応答を読めない")
         return await self._attach(
             abs_path,
             os.path.basename(res["name"]),
@@ -1196,7 +1208,7 @@ class Tools:
             )
         loaded, err = await resolve_path(abs_path, user_id)
         if loaded is None:
-            return _explain_mount_error(abs_path, err)
+            raise _explain_mount_error(abs_path, err)
         return await self._attach(
             abs_path,
             loaded.name,
@@ -1222,7 +1234,7 @@ class Tools:
             att = _register_bytes_file(user_id, name, data)
         except Exception as e:
             log.error(f"[sandbox] register {abs_path} failed: {e!r}")
-            return "ERROR: ファイルの登録に失敗した。"
+            raise ToolFailure("ファイルの登録に失敗した")
         await self._persist_and_emit_files(
             [att], chat_id, message_id, __event_emitter__
         )

@@ -21,26 +21,34 @@ from nucllei.utils.ref_errors import (
     UNKNOWN_UPSTREAM_WHAT,
     RefErrorHints,
     explain_ref_error,
-    file_id_error,
     mb,
-    path_error,
-    url_error,
 )
+from nucllei.utils import ref_errors as _ref_errors
+from test.util.tool_errors import text_of
+
+# #145: ref_errors は ToolError を返す(呼び手が raise)。文面の番兵は `.text` で全文比較する
+url_error = text_of(_ref_errors.url_error)
+path_error = text_of(_ref_errors.path_error)
+file_id_error = text_of(_ref_errors.file_id_error)
 
 U = "https://his.test/docs/a.pdf"
 P = "/workspace/out/a.pdf"
 
 
 def _hints(**kw):
+    # 差し替えテンプレートも `ERROR: 事実。次の手: …` の形で書く(#145 — ToolError.from_text が
+    # 事実と次の手に分けて組み直すので、形の崩れたテンプレートは組み直しで「ERROR: 」「。」が付く)
     kw.setdefault(
-        "too_large", lambda ref, err: f"TOO_LARGE {ref} {err.size} {err.limit}"
+        "too_large", lambda ref, err: f"ERROR: TOO_LARGE {ref} {err.size} {err.limit}。"
     )
-    kw.setdefault("unexplained", "UNEXPLAINED {ref} ({code})")
+    kw.setdefault("unexplained", "ERROR: UNEXPLAINED {ref} ({code})。")
     return RefErrorHints(**kw)
 
 
 def _explain(err, arg="url", **kw):
-    return explain_ref_error(U if arg == "url" else P, err, arg=arg, hints=_hints(**kw))
+    return explain_ref_error(
+        U if arg == "url" else P, err, arg=arg, hints=_hints(**kw)
+    ).text
 
 
 # --- 固定文のヘルパ --------------------------------------------------------------
@@ -71,15 +79,18 @@ def test_fixed_form_helpers_compose_the_shared_sentences():
 
 
 def test_none_and_unknown_codes_fall_back_to_unexplained():
-    assert _explain(None) == f"UNEXPLAINED {U} ()"
+    assert _explain(None) == f"ERROR: UNEXPLAINED {U} ()。"
     assert (
         _explain(RefError("something_new", "secret detail"))
-        == f"UNEXPLAINED {U} (something_new)"
+        == f"ERROR: UNEXPLAINED {U} (something_new)。"
     )
 
 
 def test_too_large_is_delegated_to_the_hint():
-    assert _explain(RefError("too_large", "x", size=3, limit=2)) == f"TOO_LARGE {U} 3 2"
+    assert (
+        _explain(RefError("too_large", "x", size=3, limit=2))
+        == f"ERROR: TOO_LARGE {U} 3 2。"
+    )
 
 
 def test_not_found_default_and_override():
@@ -87,8 +98,8 @@ def test_not_found_default_and_override():
         f"ERROR: {U} は存在しない (404 / ファイル無し)。次の手: ユーザーにはリンク切れと伝える。"
     )
     assert (
-        _explain(RefError("not_found", "x"), arg="path", not_found="NF {ref}")
-        == f"NF {P}"
+        _explain(RefError("not_found", "x"), arg="path", not_found="ERROR: NF {ref}。")
+        == f"ERROR: NF {P}。"
     )
 
 
@@ -98,14 +109,17 @@ def test_upstream_status_redirect_reasons_and_plain_status():
         f"ERROR: {U} の redirect (302) の転送先が このサーバ自身 (または同居するサービス) なので"
         f"辿らなかった。次の手: ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
-    assert _explain(to_self, redirect_self="RS {ref} {status}") == f"RS {U} 302"
+    assert (
+        _explain(to_self, redirect_self="ERROR: RS {ref} {status}。")
+        == f"ERROR: RS {U} 302。"
+    )
     loop = RefError("upstream_status", "x", status=302, reason="too_many_redirects")
     assert _explain(loop) == (
         f"ERROR: {U} は redirect が 4 回以上続いた (辿るのは 3 回まで。転送のループか、ログインが要るページの"
         "ことが多い)。次の手: 転送先のページを直接指す URL を渡す。"
         f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
     )
-    assert _explain(loop, too_many_redirects="TM {ref}") == f"TM {U}"
+    assert _explain(loop, too_many_redirects="ERROR: TM {ref}。") == f"ERROR: TM {U}。"
     # reason 無しの 3xx (転送先が URL として組めない): 前半は共通、続きは hint
     assert _explain(RefError("upstream_status", "x", status=301)) == (
         f"ERROR: {U} は redirect (301) を返した。転送先を辿れなかった (転送先が示されていないか、"
@@ -113,8 +127,8 @@ def test_upstream_status_redirect_reasons_and_plain_status():
         f"分からなければ、ユーザーには [ラベル]({U}) のリンクで示す (ブラウザでは開ける)。"
     )
     assert _explain(
-        RefError("upstream_status", "x", status=301), redirect_next="NEXT"
-    ) == (f"ERROR: {U} は redirect (301) を返した。NEXT")
+        RefError("upstream_status", "x", status=301), redirect_next="NEXT。"
+    ) == (f"ERROR: {U} は redirect (301) を返した。NEXT。")
     for status in (401, 403, 500, 503):
         assert _explain(RefError("upstream_status", "x", status=status)) == (
             f"ERROR: {U} の上流が {status} を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
@@ -135,15 +149,15 @@ def test_upstream_unreachable_with_and_without_reason():
     )
     assert _explain(RefError("upstream_unreachable", "x")) == _UNREACHABLE
     assert (
-        _explain(RefError("upstream_unreachable", "x"), unreachable="UR {ref}")
-        == f"UR {U}"
+        _explain(RefError("upstream_unreachable", "x"), unreachable="ERROR: UR {ref}。")
+        == f"ERROR: UR {U}。"
     )
     assert (
         _explain(
             RefError("upstream_unreachable", "x", reason="unresolvable"),
-            unresolvable="UN {ref}",
+            unresolvable="ERROR: UN {ref}。",
         )
-        == f"UN {U}"
+        == f"ERROR: UN {U}。"
     )
 
 
@@ -186,15 +200,20 @@ def test_unknown_upstream_by_reason_with_extra_and_fallback():
 
 def test_workspace_unavailable_needs_a_hint_or_falls_back():
     err = RefError("workspace_unavailable", "SANDBOX_URL is not configured")
-    assert _explain(err, arg="path") == f"UNEXPLAINED {P} (workspace_unavailable)"
-    assert _explain(err, arg="path", workspace_unavailable="WU {ref}") == f"WU {P}"
+    assert (
+        _explain(err, arg="path") == f"ERROR: UNEXPLAINED {P} (workspace_unavailable)。"
+    )
+    assert (
+        _explain(err, arg="path", workspace_unavailable="ERROR: WU {ref}。")
+        == f"ERROR: WU {P}。"
+    )
 
 
 def test_templates_are_filled_by_replace_not_format():
     """`URL_ARG_FORM` の `{id}` を str.format に噛ませない — hint に `{id}` が入っていても壊れない。"""
     assert (
-        _explain(RefError("not_found", "x"), not_found="{ref} {id} {status}")
-        == f"{U} {{id}} エラー"
+        _explain(RefError("not_found", "x"), not_found="ERROR: {ref} {id} {status}。")
+        == f"ERROR: {U} {{id}} エラー。"
     )
 
 
@@ -237,7 +256,9 @@ _NOT_ALLOWED = f"ERROR: {U} は取得を許可されていない URL。次の手
 def test_sandbox_wording():
     """send_to_workspace(url=): too_large と unexplained 以外は共通の既定文 (2026-10-04 に
     「登録した配信元」「許可先の外」「3 回を超えて」の独自文面を外した)。"""
-    from nucllei.builtin_tools.sandbox import _explain_ref_error as sandbox_explain
+    from nucllei.builtin_tools.sandbox import _explain_ref_error
+
+    sandbox_explain = text_of(_explain_ref_error)
 
     cases = {
         RefError(
@@ -279,7 +300,9 @@ def test_sandbox_wording():
 
 
 def test_feed_image_wording():
-    from nucllei.builtin_tools.feed_image import _explain_ref_error as feed_explain
+    from nucllei.builtin_tools.feed_image import _explain_ref_error
+
+    feed_explain = text_of(_explain_ref_error)
 
     cases_url = {
         RefError("not_found", "x"): _NOT_FOUND,
@@ -314,7 +337,9 @@ def test_feed_image_wording():
     for err, want in cases_path.items():
         assert feed_explain(P, err, True) == want, err
     # `/ext/…` の not_found は fetch_from_workspace と同文 (このサーバの /ext に無い)
-    from nucllei.builtin_tools.sandbox import _explain_mount_error
+    from nucllei.builtin_tools import sandbox
+
+    _explain_mount_error = text_of(sandbox._explain_mount_error)
 
     ext = "/ext/doc/a.pdf"
     assert (
@@ -353,7 +378,7 @@ def test_fetch_url_wording(monkeypatch):
     """原本ホスト (EXT_PUBLIC_BASES) の句は 2026-10-03 に設定ごと無くなった。"""
     from nucllei.builtin_tools import fetch_url
 
-    explain = fetch_url._explain_ref_error
+    explain = text_of(fetch_url._explain_ref_error)
     cases = {
         RefError("not_found", "x"): _NOT_FOUND,
         RefError("upstream_status", "x", status=302): _REDIRECT,
@@ -548,12 +573,12 @@ def test_generated_error_texts_follow_the_wording_rules():
     texts = []
     for err in codes:
         texts += [
-            feed_image._explain_ref_error(ref, err),
-            feed_image._explain_ref_error(ref, err, True),
-            fetch_url._explain_ref_error(ref, err, 200.0),
+            feed_image._explain_ref_error(ref, err).text,
+            feed_image._explain_ref_error(ref, err, True).text,
+            fetch_url._explain_ref_error(ref, err, 200.0).text,
         ]
         if err is not None:
-            texts += [sandbox._explain_ref_error(ref, err)]
+            texts += [sandbox._explain_ref_error(ref, err).text]
     for text in texts:
         for word in _FORBIDDEN:
             assert word not in text, (word, text)
@@ -599,8 +624,8 @@ def test_model_only_sentences_come_after_next_step():
         sandbox._DISPLAYED,
         sandbox._file_link_note("a.csv", "f1"),
         NOTICE_HEADER,
-        sandbox._resolve_workspace_path("rel/x", WORKSPACE_PATH_ARG_FORM)[2],
-        sandbox._resolve_workspace_path("https://x/y", PATH_ARG_FORM)[2],
+        text_of(sandbox._resolve_workspace_path)("rel/x", WORKSPACE_PATH_ARG_FORM),
+        text_of(sandbox._resolve_workspace_path)("https://x/y", PATH_ARG_FORM),
     ]
     for text in texts:
         assert text, texts
@@ -629,16 +654,19 @@ def test_sandbox_error_texts_carry_no_exception_or_env_names():
     ]
     texts = []
     for e in errors:
-        texts += [sandbox._files_error(e, "/workspace/a.txt"), sandbox._exec_error(e)]
+        texts += [
+            sandbox._files_error(e, "/workspace/a.txt").text,
+            sandbox._exec_error(e).text,
+        ]
     for text in texts:
         assert text.startswith("ERROR: "), text
         assert "次の手: " in text, text
         for leak in ("secret-detail", "sandbox.internal", "SANDBOX_TOKEN", "Error("):
             assert leak not in text, (leak, text)
-    auth = sandbox._files_error(sandbox.SandboxHTTPError(401, "x"), "/workspace/a")
+    auth = sandbox._files_error(sandbox.SandboxHTTPError(401, "x"), "/workspace/a").text
     assert (
         auth
         == sandbox._SANDBOX_AUTH
-        == sandbox._exec_error(sandbox.SandboxHTTPError(401, "x"))
+        == sandbox._exec_error(sandbox.SandboxHTTPError(401, "x")).text
     )
     assert "呼び直さない" in auth

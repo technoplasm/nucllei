@@ -9,6 +9,10 @@ import types
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 
+import pytest
+
+from nucllei.utils.tool_errors import ToolError
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -68,9 +72,12 @@ class TestBuiltinContextBudgetTool(AbstractPostgresTest):
 
     def test_no_usage_yet_returns_error(self):
         chat = self._new_chat()
-        out = self._call(chat.id)
-        assert out["ok"] is False
-        assert "usage" in out["error"]
+        with pytest.raises(ToolError) as e:
+            self._call(chat.id)
+        assert e.value.kind == "outcome"
+        assert e.value.text == (
+            "ERROR: このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)。"
+        )
 
     def test_reports_carried_and_context_size(self):
         chat = self._new_chat()
@@ -118,10 +125,13 @@ class TestBuiltinContextBudgetTool(AbstractPostgresTest):
             context_size=100,
         )
         assert self._call(chat.id, user_id="owner")["ok"] is True
-        out = self._call(chat.id, user_id="other")
-        assert out["ok"] is False
+        with pytest.raises(ToolError) as other:
+            self._call(chat.id, user_id="other")
         # 他人の chat_id は「無い」扱い — 存在を漏らさない(usage 無しと同じ文言)
-        assert out == self._call("no-such-chat", user_id="other")
+        with pytest.raises(ToolError) as missing:
+            self._call("no-such-chat", user_id="other")
+        assert other.value.text == missing.value.text
+        assert other.value.kind == missing.value.kind
 
     def test_context_size_unknown_returns_nulls(self):
         chat = self._new_chat()

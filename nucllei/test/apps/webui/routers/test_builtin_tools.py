@@ -11,6 +11,10 @@ import types
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
 
+import pytest
+
+from nucllei.utils.tool_errors import ToolError
+
 
 def _fake_request():
     return types.SimpleNamespace(
@@ -261,9 +265,11 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
 
         chat = self._new_chat("owner", "秘密", [("user", "内緒")])
         # 他人が chat_id を知っていても「見つからない」扱い(所有者検証を漏らさない)
-        out = Tools().read_history(chat.id, __user__={"id": "intruder"})
-        assert "見つからない" in out
-        assert "内緒" not in out
+        with pytest.raises(ToolError) as e:
+            Tools().read_history(chat.id, __user__={"id": "intruder"})
+        assert e.value.kind == "call"
+        assert "見つからない" in e.value.text
+        assert "内緒" not in e.value.text
 
     def test_grep_history_matches_content(self):
         from nucllei.builtin_tools.history import Tools
@@ -481,9 +487,11 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
 
         self._new_file("owner", "f-own", "mine.txt")
         chat = self._new_chat("owner", [[{"type": "file", "id": "f-own"}]])
-        out = Tools().list_chat_files(__user__={"id": "intruder"}, __chat_id__=chat.id)
-        assert "見つからない" in out
-        assert "mine.txt" not in out
+        with pytest.raises(ToolError) as e:
+            Tools().list_chat_files(__user__={"id": "intruder"}, __chat_id__=chat.id)
+        assert e.value.kind == "failure"
+        assert "見つからない" in e.value.text
+        assert "mine.txt" not in e.value.text
 
     def test_foreign_file_id_planted_in_own_chat_is_hidden(self):
         """chat JSON はクライアント制御(#40 と同じ前提)— 他人 file_id を紛れ込ませても
@@ -565,8 +573,9 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
     def test_requires_chat_context_with_metadata_fallback(self):
         from nucllei.builtin_tools.chat_files import Tools
 
-        out = Tools().list_chat_files(__user__={"id": "owner"})
-        assert "チャットの中でだけ" in out
+        with pytest.raises(ToolError) as e:
+            Tools().list_chat_files(__user__={"id": "owner"})
+        assert "チャットの中でだけ" in e.value.text
 
         # __chat_id__ 未注入経路でも __metadata__.chat_id で解決できる
         self._new_file("owner", "f-meta", "meta.txt")
@@ -710,20 +719,26 @@ class TestAttachmentText(AbstractPostgresTest):
         from nucllei.builtin_tools.attachment_text import Tools
 
         self._new_file("owner", "doc-2", "doc.txt", content="secret")
+
         # 他人は拒否
-        denied = Tools().read_attachment("doc-2", __user__={"id": "intruder"})
-        assert denied["ok"] is False and "アクセス権" in denied["error"]
+        def _denied(fid, user):
+            with pytest.raises(ToolError) as e:
+                Tools().read_attachment(fid, __user__=user)
+            return e.value
+
+        denied = _denied("doc-2", {"id": "intruder"})
+        assert "アクセス権" in denied.text
         # 「レコードが無い」と「所有者でない」は同じ文(存在の有無を漏らさない)。
-        # 文面は全 tool 共通の形 + file_id が受ける形の固定文
+        # 文面は全 tool 共通の形 + file_id が受ける形の固定文(#145: ToolError の文)
         from nucllei.utils.image_refs import FILE_ID_ARG_FORM
 
-        missing = Tools().read_attachment("no-such-id", __user__={"id": "intruder"})
+        missing = _denied("no-such-id", {"id": "intruder"})
         for out, fid in ((denied, "doc-2"), (missing, "no-such-id")):
-            assert out == {
-                "ok": False,
-                "error": f"file_id {fid} のレコードが無い、またはアクセス権が無い。"
-                f"次の手: {FILE_ID_ARG_FORM}",
-            }
+            assert out.kind == "call"
+            assert out.text == (
+                f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い。"
+                f"次の手: {FILE_ID_ARG_FORM}"
+            )
         # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
         self._new_file("owner", "doc-orphan", "orphan.txt", content="x")
         from nucllei.internal.db import get_db
@@ -732,11 +747,9 @@ class TestAttachmentText(AbstractPostgresTest):
         with get_db() as db:
             db.query(File).filter_by(id="doc-orphan").update({"user_id": None})
             db.commit()
-        denied = Tools().read_attachment("doc-orphan", __user__={"id": "owner"})
-        assert denied["ok"] is False
+        assert _denied("doc-orphan", {"id": "owner"}).kind == "call"
         # ユーザー文脈なしも拒否
-        denied = Tools().read_attachment("doc-2", __user__=None)
-        assert denied["ok"] is False
+        assert _denied("doc-2", None).text == "ERROR: ユーザーを特定できない。"
 
     def test_raw_text_fallback_and_binary_refusal(self, tmp_path):
         from nucllei.builtin_tools.attachment_text import Tools
@@ -757,10 +770,12 @@ class TestAttachmentText(AbstractPostgresTest):
             ("aud-1", "rec.webm", "audio/webm"),
         ):
             self._new_file("owner", fid, name, content_type=content_type)
-            out = Tools().read_attachment(fid, __user__={"id": "owner"})
-            assert out["ok"] is False and "抽出テキストが無い" in out["error"]
-            assert "feed_image" not in out["error"]
-            outs[fid] = out["error"].replace(fid, "<id>").replace(content_type, "<ct>")
+            with pytest.raises(ToolError) as e:
+                Tools().read_attachment(fid, __user__={"id": "owner"})
+            assert e.value.kind == "outcome"
+            assert "抽出テキストが無い" in e.value.text
+            assert "feed_image" not in e.value.text
+            outs[fid] = e.value.text.replace(fid, "<id>").replace(content_type, "<ct>")
         assert len(set(outs.values())) == 1
 
     def test_sync_registers_builtin_row(self):
