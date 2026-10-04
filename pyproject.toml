@@ -205,7 +205,9 @@ constraint-dependencies = ["setuptools>=78.1.1,<81"]
 # `--forwarded-allow-ips '*'` trusts the local Vite proxy for X-Forwarded-*.
 # `--reload-exclude _links/*`: マシン固有 symlink(現行 llens 参照)の編集で reload が
 # 発火して in-flight リクエスト待ちのまま固まる事故を防ぐ(2026-07-18 実害 2 回)。
-dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --reload-exclude '_links/*' --forwarded-allow-ips '*'"
+# `--reload-dir nucllei`: 既定の監視範囲は cwd 全体(node_modules・.venv・data 込みで inotify を
+# 約 41k 消費)で、vite の監視と合わせて上限 65536 を超え vite が ENOSPC で落ちていた(2026-10-04)。
+dev = "uvicorn nucllei.main:app --host 0.0.0.0 --port 3000 --reload --reload-dir nucllei --reload-exclude '_links/*' --forwarded-allow-ips '*'"
 # backend の CI ゲート相当(pnpm 側の lint:backend / format:backend と同じ実体。
 # format は書き換え、check は pre-push hook / CI と同じ「未整形 + lint を検査のみ」)
 format = "black ."
