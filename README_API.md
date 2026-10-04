@@ -77,9 +77,13 @@ docker run -d -p 8080:8080 -v nucllei-data:/app/data nucllei
     fetch at first use.
 - **Image facts**: `python:3.11-slim-bookworm` runtime; `ffmpeg` (audio), `pandoc`
   and `markitdown[pdf,docx,pptx,xlsx,xls,outlook,epub]` (available to your Attachment Functions), bundled
-  faster-whisper STT. Baked env: `ENV=prod`, `PORT=8080`, `DATA_DIR=/app/data`,
-  `EXT_DIR=/ext` (§3.8), `WHISPER_MODEL_DIR=/app/data/cache/whisper/models`,
-  `HF_HOME=/app/data/cache/hf` (both model caches live under the data volume).
+  faster-whisper STT, and `tiktoken` for your Filters / Tools to count tokens — its
+  `o200k_base` and `cl100k_base` encodings are baked in at build time, so they work
+  offline (other encodings would need a download). Baked env: `ENV=prod`, `PORT=8080`,
+  `DATA_DIR=/app/data`, `EXT_DIR=/ext` (§3.8),
+  `WHISPER_MODEL_DIR=/app/data/cache/whisper/models`, `HF_HOME=/app/data/cache/hf`
+  (both model caches live under the data volume),
+  `TIKTOKEN_CACHE_DIR=/app/tiktoken` (read-only, inside the image).
 - **Port**: `EXPOSE 8080`. `PORT` is consumed by the container CMD / HEALTHCHECK
   shell only; the app itself takes `serve --port`.
 - **Volume contract**: mount `/app/data` (= `DATA_DIR`). It holds the SQLite DB

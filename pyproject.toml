@@ -99,6 +99,11 @@ dependencies = [
 
     "onnxruntime==1.20.1",
 
+    # llens(2026-10-05): Filter / Tool が import して token を数える(large_file_gate 等)。
+    # 符号表は Dockerfile で焼き込む(TIKTOKEN_CACHE_DIR、air-gapped 先は初回 DL 不可)。
+    # 本体は使っていない — 拡張コード向けの同梱依存。
+    "tiktoken",
+
     "PyJWT[crypto]==2.13.0",
     "authlib==1.6.12",
 

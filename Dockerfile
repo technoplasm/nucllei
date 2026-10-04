@@ -54,6 +54,12 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN uv sync --frozen --no-dev --extra stt --no-cache --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
+# tiktoken の符号表の焼き込み(拡張コードの token 計数用。air-gapped 先は初回 DL 不可)。
+# image 内の読み取り専用ディレクトリ — DATA_DIR(volume)の下に置くと mount で隠れる
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken
+RUN python -c "import tiktoken; [tiktoken.get_encoding(n) for n in ('o200k_base', 'cl100k_base')]" && \
+    chmod -R a-w "$TIKTOKEN_CACHE_DIR"
+
 # whisper モデルの焼き込み(air-gapped 先は初回 DL 不可 — 必要なら build 時に指定):
 #   docker build --build-arg PRELOAD_WHISPER_MODEL=small ...
 ARG PRELOAD_WHISPER_MODEL=""
