@@ -47,7 +47,10 @@ import type { ChatHistory } from '$lib/types/chat';
 
 const NEW_ID = 'chat-new';
 
-const makeSend = ({ saveOk = true }: { saveOk?: boolean } = {}) => {
+const makeSend = ({
+	saveOk = true,
+	onStreamLost
+}: { saveOk?: boolean; onStreamLost?: (chatId: string, messageId: string) => void } = {}) => {
 	const seen: Record<string, boolean[]> = { init: [] };
 	const session = {
 		autoScroll: false,
@@ -75,7 +78,8 @@ const makeSend = ({ saveOk = true }: { saveOk?: boolean } = {}) => {
 		events: events as never,
 		t: (k: string) => k,
 		eventTarget: new EventTarget(),
-		scrollToBottom: () => {}
+		scrollToBottom: () => {},
+		onStreamLost
 	});
 	const sendNew = () =>
 		send.sendPrompt(session.history, 'hi', 'u1', { newChat: true }) as Promise<void>;
@@ -85,6 +89,7 @@ const makeSend = ({ saveOk = true }: { saveOk?: boolean } = {}) => {
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.spyOn(console, 'error').mockImplementation(() => {}); // 失敗分岐の想定内ログ
+	vi.spyOn(console, 'warn').mockImplementation(() => {});
 	chatId.set('');
 	resetChatUsage('');
 	resetChatUsage(NEW_ID);
@@ -152,5 +157,60 @@ describe('ChatSend.sendPrompt — 送信時の usage pending(#102)', () => {
 		await expect(sendNew()).rejects.toThrow('create failed');
 
 		expect(isLiveUsagePending('')).toBe(false);
+	});
+});
+
+// ken の実機(モバイル)で、サーバーは正常に完走したターンに
+// error: {content: 'TypeError: network error'} が保存された。SSE の切断は応答の失敗では
+// ない — message.error に書かない(書くと再アタッチ後の done で completed → 保存に乗る)
+describe('ChatSend.sendPrompt — SSE 消費中の切断', () => {
+	const assistantOf = (session: ReturnType<typeof makeSend>['session']) =>
+		Object.values(session.history.messages).find((m) => m.role === 'assistant')!;
+
+	const disconnectAfter = (mutate: (session: ReturnType<typeof makeSend>['session']) => void) => {
+		const lost = vi.fn();
+		const ctx = makeSend({ onStreamLost: lost });
+		vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+		vi.mocked(consumeCompletionStream).mockImplementationOnce(async () => {
+			// 受信済みの本文(イベント適用はライブの history に入る)
+			mutate(ctx.session);
+			throw new TypeError('network error');
+		});
+		return { ...ctx, lost };
+	};
+
+	it('done 受信後の切断は error にせず、受信済みの本文も消さない', async () => {
+		const { session, sendNew, lost } = disconnectAfter((session) => {
+			const m = assistantOf(session);
+			m.content = 'answer';
+			m.done = true;
+		});
+
+		await sendNew();
+		await vi.waitFor(() => expect(console.warn).toHaveBeenCalled());
+
+		const message = assistantOf(session);
+		expect(message.error).toBeUndefined();
+		expect(message.content).toBe('answer');
+		expect(message.done).toBe(true);
+		expect(lost).not.toHaveBeenCalled();
+	});
+
+	it('done 前の切断は error にせず未完のまま置き、追いつきを依頼する', async () => {
+		const { session, sendNew, lost, events } = disconnectAfter((session) => {
+			assistantOf(session).content = 'partial';
+		});
+
+		await sendNew();
+		await vi.waitFor(() => expect(lost).toHaveBeenCalled());
+
+		const message = assistantOf(session);
+		expect(lost).toHaveBeenCalledWith(NEW_ID, message.id);
+		expect(message.error).toBeUndefined();
+		expect(message.content).toBe('partial');
+		expect(message.done).not.toBe(true);
+		// completed(outlet・保存)はここからは駆動しない — 追いつき後の done が担う
+		expect(events.chatCompletedHandler).not.toHaveBeenCalled();
+		expect(isLiveUsagePending(NEW_ID)).toBe(false);
 	});
 });

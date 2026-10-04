@@ -54,6 +54,8 @@
 	import { ChatSession } from './Chat/session.svelte';
 	import { ChatEvents, type EventCallRequest } from './Chat/events';
 	import { ChatSend } from './Chat/send';
+	import { resyncDetachedTurn, type DetachedTurn } from './Chat/detached-turn';
+	import type { ChatMessage } from '$lib/types/chat';
 
 	import MessageInput from './MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
@@ -159,7 +161,60 @@
 			}
 		}
 	});
-	const send = new ChatSend({ session, events, t, eventTarget, scrollToBottom });
+	const send = new ChatSend({
+		session,
+		events,
+		t,
+		eventTarget,
+		scrollToBottom,
+		onStreamLost: (targetChatId, messageId) => {
+			detachedTurn = { chatId: targetChatId, messageId };
+			void resyncDetached();
+		}
+	});
+
+	// done 前に SSE が切れた自ターン(Chat/detached-turn.ts)。message は未完のまま
+	// (生成中表示)置き、表示中に戻ったとき(visibilitychange)と poll tick で追いつく
+	let detachedTurn: DetachedTurn | null = null;
+	let detachedResyncing = false;
+	const resyncDetached = async () => {
+		const turn = detachedTurn;
+		if (!turn || detachedResyncing || document.visibilityState === 'hidden') {
+			return;
+		}
+		detachedResyncing = true;
+		try {
+			const settled = await resyncDetachedTurn(turn, {
+				currentChatId: () => $chatId,
+				isDone: (messageId) => session.history.messages[messageId]?.done === true,
+				attachTasks: attachNewChatTasks,
+				reloadHistory: async (targetChatId) => {
+					const res = await getChatById(targetChatId).catch(() => null);
+					if (!res?.chat?.history || $chatId !== targetChatId) {
+						return;
+					}
+					// loadChat と同じ: 生きた task が無い未完の assistant は done 化する
+					for (const message of Object.values(res.chat.history.messages ?? {})) {
+						if ((message as ChatMessage).role === 'assistant') {
+							(message as ChatMessage).done = true;
+						}
+					}
+					session.history = res.chat.history;
+					session.taskIds = null;
+				}
+			});
+			if (settled && detachedTurn === turn) {
+				detachedTurn = null;
+			}
+		} finally {
+			detachedResyncing = false;
+		}
+	};
+	const onVisibilityChange = () => {
+		if (document.visibilityState === 'visible') {
+			void resyncDetached();
+		}
+	};
 
 	// llens(#110): exec 行の 5 秒ポーリング(SSE push はしない仕様 — 既存慣行)。
 	// 自動再開はサーバ駆動(契約 T3)— FE は状態表示と BE 発ターンの発見だけを持つ。
@@ -175,6 +230,10 @@
 		const targetChatId = $chatId;
 		if (!targetChatId || loading || notFound || isAgentSession) {
 			return;
+		}
+		// done 前に切れた自ターンの追いつき(再アタッチが切れ直した場合の再試行も兼ねる)
+		if (detachedTurn) {
+			void resyncDetached();
 		}
 		// B-2: 連続失敗中は tick を間引く(backend 断で 5 秒固定連打しない)
 		if (isExecutionsRefreshBackedOff(Date.now())) {
@@ -201,26 +260,28 @@
 	// 現れない)が居る tick は全件スキップ — 判定は selectAttachableTaskIds に集約
 	// (fetch の await 中に送信が始まる窓があるため、判定は fetch 解決後に行う)。
 	// 履歴の追いつき自体は未知 message_id 封筒の refetch ゲート(events.ts)が担う
-	const attachNewChatTasks = async (targetChatId: string) => {
+	// 戻り値はサーバーの task 一覧(取得失敗・chat 切替は null)— detached-turn の判定が使う
+	const attachNewChatTasks = async (targetChatId: string): Promise<string[] | null> => {
 		const taskRes = await getTaskIdsByChatId(targetChatId).catch(() => null);
 		if (!taskRes || $chatId !== targetChatId) {
-			return;
+			return null;
 		}
-		const newTaskIds = selectAttachableTaskIds(
-			targetChatId,
-			taskRes.task_ids ?? [],
-			attachedTaskIds
-		);
+		const serverTaskIds: string[] = taskRes.task_ids ?? [];
+		const newTaskIds = selectAttachableTaskIds(targetChatId, serverTaskIds, attachedTaskIds);
 		if (newTaskIds.length === 0) {
-			return;
+			return serverTaskIds;
 		}
 		session.taskIds = taskRes.task_ids;
 		for (const taskId of newTaskIds) {
 			attachedTaskIds.add(taskId);
 			attachToTask(targetChatId, taskId).catch((error) => {
-				console.error('chat task attach failed', taskId, error);
+				// 再アタッチも切れうる(背面化の繰り返し)— ガードから外し、次の tick で
+				// 生きていれば付け直す(スナップショットが先に来るので途中からでも収束する)
+				console.warn('chat task attach failed', taskId, error);
+				attachedTaskIds.delete(taskId);
 			});
 		}
+		return serverTaskIds;
 	};
 
 	$effect(() => {
@@ -373,6 +434,7 @@
 
 	onMount(async () => {
 		window.addEventListener('message', onMessageHandler);
+		document.addEventListener('visibilitychange', onVisibilityChange);
 
 		// 新規チャット画面(chatIdProp なし)へ前のチャットの $chatId を持ち越さない。
 		// /c/<id> からロゴ(href="/")やブラウザの「戻る」で / に来ると、この Chat は
@@ -441,6 +503,7 @@
 		handlerChatIdUnsubscriber();
 		showControlsUnsubscriber?.();
 		window.removeEventListener('message', onMessageHandler);
+		document.removeEventListener('visibilitychange', onVisibilityChange);
 		if (registeredChatId) {
 			unregisterChatHandler(registeredChatId, events.chatEventHandler);
 			registeredChatId = null;

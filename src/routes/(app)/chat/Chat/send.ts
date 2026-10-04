@@ -32,6 +32,8 @@ export class ChatSend {
 	#t: Translate;
 	#eventTarget: EventTarget;
 	#scrollToBottom: () => Promise<void> | void;
+	// done 前に SSE が切れたことの通知(走行中ターンへの追いつきは Chat.svelte が持つ)
+	#onStreamLost: (chatId: string, messageId: string) => void;
 
 	// llens: task 生成前(モデル接続待ち)の completion fetch を stop で中断するための
 	// AbortController 群(複数モデル並列送信に対応して配列)。task 生成後の中断は
@@ -43,19 +45,22 @@ export class ChatSend {
 		events,
 		t,
 		eventTarget,
-		scrollToBottom
+		scrollToBottom,
+		onStreamLost
 	}: {
 		session: ChatSession;
 		events: ChatEvents;
 		t: Translate;
 		eventTarget: EventTarget;
 		scrollToBottom: () => Promise<void> | void;
+		onStreamLost?: (chatId: string, messageId: string) => void;
 	}) {
 		this.#session = session;
 		this.#events = events;
 		this.#t = t;
 		this.#eventTarget = eventTarget;
 		this.#scrollToBottom = scrollToBottom;
+		this.#onStreamLost = onStreamLost ?? (() => {});
 	}
 
 	submitPrompt = async (userPrompt: string, { _raw = false } = {}) => {
@@ -410,11 +415,20 @@ export class ChatSend {
 					session.taskIds = [...(session.taskIds ?? []), taskId];
 				}
 			}).catch((error) => {
-				// 消費中の接続断。タスクはサーバー側で継続する(リロード/再訪で再アタッチ)
-				console.error('completion stream disconnected', error);
+				// 消費中の接続断(モバイルのタブ背面化で fetch が殺される・回線の瞬断等)。
+				// 応答の失敗ではない — タスクはサーバー側で走り続け、最終形はサーバーが
+				// 保存する。message.error には書かない(書くと再アタッチ後の done で
+				// completed → 保存に乗って永続化される)。ここの responseMessage は送信時の
+				// コピーなので、ライブの message へ書き戻しもしない(受信済みの本文を消す)。
 				clearLiveUsage(_chatId, responseMessageId);
-				responseMessage.error = { content: `${error}` };
-				session.history.messages[responseMessageId] = responseMessage;
+				if (session.history.messages[responseMessageId]?.done === true) {
+					// done 受信後(chat:title 待ち等)の切断 — ターンは確定済み
+					console.warn('completion stream disconnected after done', error);
+					return;
+				}
+				// done 前の切断 — 再アタッチ / 読み直しで追いつく(Chat.svelte)
+				console.warn('completion stream disconnected before done', error);
+				this.#onStreamLost(_chatId, responseMessageId);
 			});
 		} else {
 			// llens: task 生成前の失敗(接続エラー等)は done イベントが来ないため、
