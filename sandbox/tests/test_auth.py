@@ -120,7 +120,7 @@ def test_correct_token_passes(monkeypatch, tmp_path):
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
     assert r.status_code == 200
-    assert r.json() == {"entries": []}
+    assert r.json()["entries"] == []
 
 
 def test_healthz_and_metrics_are_public(monkeypatch, tmp_path):
@@ -143,7 +143,7 @@ def test_unset_token_disables_auth(monkeypatch, tmp_path):
     c = TestClient(mod.app)
     r = c.post("/files/list", json={"user_id": "u1", "path": "."})
     assert r.status_code == 200
-    assert r.json() == {"entries": []}
+    assert r.json()["entries"] == []
     # 未知パスも middleware では止めない (routing に落ちて 404)
     assert c.get("/nope").status_code == 404
 

@@ -1226,11 +1226,21 @@ class Tools:
     server's own). The text, `render`, `display` and `context_images` stay
     exactly as for a success; only `results[i].error_kind` is added (background:
     the row stays `done` with the result, and `meta.error_kind` carries the
-    kind). A raised `ToolError` wins over a mark. The sandbox uses it: `run_python`
-    / `run_python_once` flag `failure` when the code exits non-zero, a cell
-    raises, or the run times out (stderr with exit code 0 — warnings — is not
-    flagged; `run_shell` does not flag, as a non-zero exit is often not a
-    failure, e.g. `grep` without a match). Custom tools can use it too:
+    kind). A raised `ToolError` wins over a mark. The builtins use it: `run_python`
+    / `run_python_once` / `run_shell` flag `failure` when the code exits
+    non-zero, a cell raises, or the run times out (stderr with exit code 0 —
+    warnings — is not flagged; for `run_shell` this includes exits that are not
+    really failures, e.g. `grep` without a match, accepted because amber is
+    mild); `list_workspace` on a workspace from a sandbox image without the
+    `exists` field of `/files/list` flags `outcome` on an empty listing (it
+    cannot tell "missing" from "empty"; newer images raise `outcome` for a
+    missing directory and `call` for a file); `send_to_workspace` over the
+    attachment list flags `outcome` / `call` when nothing matched (with / without
+    `filename`) and `failure` when nothing could be imported; `feed_image` on a
+    file (`file_id`, the file URL, attached PDFs) flags the lines that fed
+    nothing — `call` (neither image nor PDF), `fatal` (stored bytes unreadable),
+    `outcome` (too large), `failure` (PDF does not open); with several attached
+    PDFs only when none was fed. Custom tools can use it too:
 
     ```python
     from nucllei.utils.tool_output import mark_error_kind

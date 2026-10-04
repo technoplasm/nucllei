@@ -259,7 +259,8 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
      exports: [...]}`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
   - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
-- `POST /files/list` — `{user_id, path?}` → workspace のファイル一覧
+- `POST /files/list` — `{user_id, path?}` → `{entries, exists, is_dir}` workspace のファイル一覧
+  (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
 - `POST /files/read` — `{user_id, path}` → `{name, size, b64}`
 - `POST /files/write` — `{user_id, path, b64}` → 書き込み (workspace 外へのパスは拒否)
 - `GET /healthz` — `{ok, nsjail, loop}`。`loop` は loop ドライバの実効チェック

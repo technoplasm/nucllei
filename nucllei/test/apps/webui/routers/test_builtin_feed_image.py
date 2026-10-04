@@ -966,3 +966,107 @@ def test_success_on_a_served_ext_path_suggests_the_same_string_as_url(monkeypatc
     assert fed == [FIG_REL]
     assert f"![…]({FIG_REL})" in result and "本文に貼れない" not in result
     assert "配信されている" in result
+
+
+def test_file_lines_that_fed_nothing_are_flagged_without_changing_the_text(
+    monkeypatch,
+):
+    """#145: file 経路 (file_id= / url= の配信口 / 添付 PDF) で目に入れずに返す行は、文面は
+    そのままで種別の旗を立てる — `_feed_path` が同じ場面で raise する種別に揃える
+    (画像でも PDF でもない = call / 実体が読めない = fatal / 大きすぎる = outcome /
+    PDF が開けない = failure)。複数の添付 PDF は 1 件も目に入らなかったときだけ旗。"""
+    from nucllei.utils import tool_output
+
+    def flagged(recs, raw=b"%PDF-1.7 fake", page_count=None, **kwargs):
+        mod, _resolver = _install(monkeypatch, TABLE, n_pages=1)
+        monkeypatch.setattr(
+            mod,
+            "Files",
+            types.SimpleNamespace(get_file_by_id=lambda fid: recs.get(fid)),
+        )
+        monkeypatch.setattr(mod, "_read_raw", lambda r: raw)
+        if page_count is not None:
+            monkeypatch.setattr(mod, "pdf_page_count", page_count)
+        tools = mod.Tools()
+        tools.valves.max_image_mb = 1
+        sink = tool_output.ToolOutputSink()
+        fed: list[str] = []
+
+        async def main():
+            token = tool_output.current_sink.set(sink)
+            try:
+                return await call_text(
+                    tools.feed_image(
+                        __user__={"id": "u1"}, __feed_image__=fed.append, **kwargs
+                    )
+                )
+            finally:
+                tool_output.current_sink.reset(token)
+
+        return asyncio.run(main()), sink.error_kind(), fed
+
+    def broken(data):
+        raise ValueError("encrypted")
+
+    big = b"\xff\xd8\xff" + b"\0" * (2 * 1024 * 1024)
+    cases = [
+        (
+            {"f1": _Rec("f1", "u1", "a.csv", "text/csv")},
+            {},
+            "- a.csv: 画像でも PDF でもないので目に入れなかった",
+            "call",
+        ),
+        (
+            {"f1": _Rec("f1", "u1", "a.pdf", "application/pdf")},
+            {"raw": None},
+            "- a.pdf: ファイルの実体を読めない",
+            "fatal",
+        ),
+        (
+            {"f1": _Rec("f1", "u1", "a.jpg", "image/jpeg")},
+            {"raw": big},
+            None,
+            "outcome",
+        ),
+        (
+            {"f1": _Rec("f1", "u1", "a.pdf", "application/pdf")},
+            {"page_count": broken},
+            "- a.pdf: PDF として開けない (壊れているか、暗号化されている)",
+            "failure",
+        ),
+        (
+            {"f1": _Rec("f1", "u1", "a.pdf", "application/pdf")},
+            {},
+            None,
+            None,
+        ),
+    ]
+    for recs, kw, text, kind in cases:
+        for how in ({"file_id": "f1"}, {"url": "/api/v1/files/f1/content"}):
+            result, got, fed = flagged(recs, **kw, **how)
+            assert got == kind, (recs, how, result)
+            if text is not None:
+                assert result == text
+            assert (fed == []) == (kind is not None)
+
+    # 複数の添付 PDF: 1 件でも目に入れば旗なし、全部だめなら旗
+    files = [
+        {"id": fid, "name": f"{fid}.pdf", "file": {"id": fid, "meta": {}}}
+        for fid in ("p1", "p2")
+    ]
+    ok_and_gone = {"p1": _Rec("p1", "u1", "p1.pdf", "application/pdf")}
+    result, got, fed = flagged(ok_and_gone, __files__=files)
+    assert got is None and len(fed) == 1 and "p2" in result
+    both_broken = {
+        fid: _Rec(fid, "u1", f"{fid}.pdf", "application/pdf") for fid in ("p1", "p2")
+    }
+    _result, got, fed = flagged(both_broken, page_count=broken, __files__=files)
+    assert got == "failure" and fed == []
+    # 全部だめで種別が混在 (レコード無し = call / 開けない = failure) は failure
+    _result, got, fed = flagged(
+        {"p1": both_broken["p1"]}, page_count=broken, __files__=files
+    )
+    assert got == "failure" and fed == []
+    # 全部レコード無し = 同じ種別 (call)
+    _result, got, fed = flagged({}, __files__=files)
+    assert got == "call" and fed == []

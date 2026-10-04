@@ -1143,8 +1143,13 @@ async def exec_cell(req: CellRequest, request: Request):
 async def files_list(req: PathRequest):
     ws = await _workspace(req.user_id)
     base = _safe_path(ws, req.path)
+    # `exists` / `is_dir` は「無い」と「空」と「ファイル」を言い分けるため (#145 — 旧版は
+    # どれも entries=[] で、tool は「空 (ファイルが無いか、ディレクトリが存在しない)」としか
+    # 言えなかった)。追加フィールドなので、これを読まない旧 nucllei とも互換
     if not base.exists():
-        return {"entries": []}
+        return {"entries": [], "exists": False, "is_dir": False}
+    if not base.is_dir():
+        return {"entries": [], "exists": True, "is_dir": False}
     entries = []
     for p in sorted(base.rglob("*")):
         rel = p.relative_to(ws)
@@ -1155,7 +1160,7 @@ async def files_list(req: PathRequest):
             entries.append({"path": str(rel), "size": p.stat().st_size})
         if len(entries) >= 500:
             break
-    return {"entries": entries}
+    return {"entries": entries, "exists": True, "is_dir": True}
 
 
 @app.post("/files/read")

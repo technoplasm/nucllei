@@ -31,6 +31,26 @@ def _arun(coro):
     return asyncio.run(call_text(coro))
 
 
+def _flagged(coro):
+    """sink を張って呼び、(モデルに見える本文, 結果の種別) を返す(#145)。種別は raise された
+    ToolError の kind、無ければ mark_error_kind の旗(実行時と同じく raise が優先)。"""
+    from nucllei.utils import tool_output
+    from nucllei.utils.tool_errors import ToolError
+
+    sink = tool_output.ToolOutputSink()
+
+    async def main():
+        token = tool_output.current_sink.set(sink)
+        try:
+            return await coro, sink.error_kind()
+        except ToolError as e:
+            return e.text, e.kind
+        finally:
+            tool_output.current_sink.reset(token)
+
+    return asyncio.run(main())
+
+
 def _fake_request():
     return types.SimpleNamespace(
         app=types.SimpleNamespace(state=types.SimpleNamespace(TOOLS={}))
@@ -419,20 +439,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         """#145(ken「sandbox の stderr とかは？実行した python のエラーとか」): 実行した
         コードの失敗 (exit_code != 0 / セルの例外 / タイムアウト) は結果に failure の旗を
         立てる。raise しない — 本文 (stdout・traceback・次の手) は旗なしと 1 文字も同じ。
-        exit_code 0 の stderr (warning) と run_shell の非 0 は旗を立てない。"""
-        from nucllei.utils import tool_output
-
-        def run(coro):
-            sink = tool_output.ToolOutputSink()
-
-            async def main():
-                token = tool_output.current_sink.set(sink)
-                try:
-                    return await coro
-                finally:
-                    tool_output.current_sink.reset(token)
-
-            return asyncio.run(main()), sink.error_kind()
+        exit_code 0 の stderr (warning) は旗を立てない。run_shell の非 0 も failure
+        (ken 2026-10-04 — staging で `command not found` (exit 127) が緑だった。grep の
+        不一致 = exit 1 も amber の「失敗」になるのは許容)。"""
+        run = _flagged
 
         def exec_res(**over):
             return {
@@ -472,6 +482,31 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 lambda: _sandbox({"/exec": exec_res(exit_code=1)}).run_shell(
                     "grep nothing f", __user__=user
                 ),
+                "failure",
+            ),
+            (
+                lambda: _sandbox(
+                    {
+                        "/exec": exec_res(
+                            exit_code=127,
+                            stdout="",
+                            stderr="bash: line 1: this_command_does_not_exist:"
+                            " command not found\n",
+                        )
+                    }
+                ).run_shell("this_command_does_not_exist --flag", __user__=user),
+                "failure",
+            ),
+            (
+                lambda: _sandbox(
+                    {"/exec": exec_res(exit_code=-9, timed_out=True)}
+                ).run_shell("sleep 999", __user__=user),
+                "failure",
+            ),
+            (
+                lambda: _sandbox({"/exec": exec_res()}).run_shell(
+                    "echo out", __user__=user
+                ),
                 None,
             ),
             (
@@ -503,7 +538,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             # 旗の有無で本文は変わらない(sink 無しで呼んだ結果と同じ)
             assert _arun(make()) == flagged_text
         # traceback と stdout は結果に残る
-        text, _ = run(cases[4][0]())
+        text, _ = run(cases[7][0]())
         assert "out" in text and "ZeroDivisionError: division by zero" in text
 
     def test_run_shell_and_run_python_once_use_exec(self):
@@ -868,6 +903,95 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         tool = _sandbox({"/files/list": {"entries": []}})
         out = _arun(tool.list_workspace("/workspace/sub", __user__=user))
         assert "/workspace/sub は空 (" in out
+
+    def test_list_workspace_tells_missing_file_and_empty_apart(self):
+        """#145(ken: staging で存在しないディレクトリの一覧が緑の「空」だった): sandbox の
+        `exists` / `is_dir` で「無い」= outcome、「ファイル」= call、「空」= 通常の結果を
+        言い分ける。フィールドを返さない旧 sandbox image では言い分けられないので、旧文面の
+        まま outcome の旗だけ立てる。"""
+        user = {"id": "u1"}
+        listed = {"path": "a.csv", "size": 2048}
+        cases = [
+            (
+                {"entries": [], "exists": False, "is_dir": False},
+                "ERROR: /workspace/そんなディレクトリは無い は存在しない。"
+                "次の手: 親ディレクトリを list_workspace で一覧して、パスを確かめる。",
+                "outcome",
+            ),
+            (
+                {"entries": [], "exists": True, "is_dir": False},
+                "ERROR: /workspace/そんなディレクトリは無い はファイルで、ディレクトリではない。"
+                "次の手: 一覧するならディレクトリを渡す (中身を見るなら run_shell か"
+                " fetch_from_workspace)。",
+                "call",
+            ),
+            (
+                {"entries": [], "exists": True, "is_dir": True},
+                "/workspace/そんなディレクトリは無い は空 (ファイルが無い)。",
+                None,
+            ),
+            (
+                {"entries": [listed], "exists": True, "is_dir": True},
+                "- /workspace/a.csv (2.0KB)",
+                None,
+            ),
+            # 旧 sandbox image (exists / is_dir 無し)
+            (
+                {"entries": []},
+                "/workspace/そんなディレクトリは無い は空"
+                " (ファイルが無いか、ディレクトリが存在しない)。",
+                "outcome",
+            ),
+            ({"entries": [listed]}, "- /workspace/a.csv (2.0KB)", None),
+        ]
+        for res, text, kind in cases:
+            tool = _sandbox({"/files/list": res})
+            got = _flagged(
+                tool.list_workspace(
+                    "/workspace/そんなディレクトリは無い", __user__=user
+                )
+            )
+            assert got == (text, kind), res
+
+    def test_send_to_workspace_flags_nothing_imported(self, tmp_path):
+        """#145: 添付一覧からの取り込みで 1 件も取り込めなかった結果は、文面はそのままで旗。
+        filename で指した添付が無い = outcome / 何も指さず添付も無い = call /
+        対象はあったが全部失敗 = failure / 1 件でも取り込めたら旗なし。"""
+        from nucllei.models.files import FileForm
+
+        src = tmp_path / "a.csv"
+        src.write_text("x,y", encoding="utf-8")
+        self.Files.insert_new_file(
+            "u1",
+            FileForm(
+                id="f-a",
+                filename="a.csv",
+                path=str(src),
+                data={},
+                meta={"name": "a.csv", "content_type": "text/csv", "size": 3},
+            ),
+        )
+        user = {"id": "u1"}
+        files = [
+            {"id": "f-a", "name": "a.csv"},
+            {"id": "f-gone", "name": "gone.csv"},
+        ]
+
+        tool = _sandbox({"/files/write": {"ok": True}})
+        assert _flagged(
+            tool.send_to_workspace(filename="zzz", __user__=user, __files__=files)
+        ) == ("取り込み対象の添付ファイルが無かった。", "outcome")
+        assert _flagged(tool.send_to_workspace(__user__=user, __files__=[])) == (
+            "取り込み対象の添付ファイルが無かった。",
+            "call",
+        )
+        text, kind = _flagged(
+            tool.send_to_workspace(filename="gone", __user__=user, __files__=files)
+        )
+        assert kind == "failure" and "gone.csv: レコードが無い" in text
+        text, kind = _flagged(tool.send_to_workspace(__user__=user, __files__=files))
+        assert kind is None
+        assert "/workspace/imports/a.csv" in text and "gone.csv" in text
 
     def test_relative_paths_are_refused(self):
         """path の形は絶対パス 1 つ。相対を「/workspace からの相対」として通さない

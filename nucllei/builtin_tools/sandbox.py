@@ -625,14 +625,14 @@ class Tools:
         res: dict,
         output_lines: list[str],
         timeout_s: Optional[int] = None,
-        flag_failure: bool = False,
     ) -> str:
         # 実行したコードが失敗した (exit_code != 0 / タイムアウト) ら結果に failure の旗を
         # 立てる (#145、ken「sandbox の stderr とかは？実行した python のエラーとか」)。
         # raise はしない — stdout / traceback / 生成ファイルはモデルに要る。stderr だけ
-        # (exit_code 0 の warning) は通常の結果。run_shell は旗を立てない (grep の
-        # 不一致 = exit 1 のように、非 0 が失敗でないコマンドが多い)
-        if flag_failure and (res.get("exit_code") != 0 or res.get("timed_out")):
+        # (exit_code 0 の warning) は通常の結果。run_shell も同じ (ken 2026-10-04 — staging で
+        # `command not found` (exit 127) が緑だった。grep の不一致 = exit 1 も amber の
+        # 「失敗」になるが、amber は穏やかなので許容)
+        if res.get("exit_code") != 0 or res.get("timed_out"):
             mark_error_kind("failure")
         parts = [f"exit_code={res['exit_code']} ({res['duration_s']}s)"]
         if res.get("timed_out"):
@@ -733,9 +733,7 @@ class Tools:
             __message_id__,
             __event_emitter__,
         )
-        return self._format_exec_result(
-            res, output_lines, payload["timeout_s"], flag_failure=lang == "python"
-        )
+        return self._format_exec_result(res, output_lines, payload["timeout_s"])
 
     async def _exec_cell(
         self,
@@ -904,13 +902,21 @@ class Tools:
             )
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
+        imported = 0
         for fid, fname in _iter_context_files(__files__, __metadata__):
             if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
             line, failure = await self._import_file(fid, fname, __user__["id"])
+            imported += bool(line)
             report.append(line or f"- {fname or fid}: {failure} (取り込まなかった)")
+        # 文面は変えずに旗だけ (#145): filename で指した添付が無い = 指した物が無い → outcome、
+        # 何も指さず添付も無い = 呼び方の問題 → call (feed_image の無指定と同じ線引き)。
+        # 対象はあったが 1 件も取り込めなかった → failure (一部でも取り込めたら通常の結果)
         if not report:
+            mark_error_kind("outcome" if filename else "call")
             return "取り込み対象の添付ファイルが無かった。"
+        if not imported:
+            mark_error_kind("failure")
         return "取り込み結果:\n" + "\n".join(report)
 
     async def _import_file(self, fid: str, fname, user_id: str) -> tuple[str, str]:
@@ -1126,8 +1132,25 @@ class Tools:
         except Exception as e:
             raise _files_error(e, abs_path)
         entries = res.get("entries", [])
+        # 「無い」「ファイル」「空」を言い分ける (#145)。exists / is_dir は sandbox image の
+        # 追加フィールド — 無い (旧 image) ときは言い分けられないので、旧文面のまま outcome の旗
+        exists = res.get("exists")
+        if exists is False:
+            raise ToolOutcome(
+                f"{abs_path} は存在しない",
+                "親ディレクトリを list_workspace で一覧して、パスを確かめる。",
+            )
+        if exists is True and res.get("is_dir") is False:
+            raise ToolCallError(
+                f"{abs_path} はファイルで、ディレクトリではない",
+                "一覧するならディレクトリを渡す (中身を見るなら run_shell か"
+                " fetch_from_workspace)。",
+            )
         if not entries:
-            return f"{abs_path} は空 (ファイルが無いか、ディレクトリが存在しない)。"
+            if exists is None:
+                mark_error_kind("outcome")
+                return f"{abs_path} は空 (ファイルが無いか、ディレクトリが存在しない)。"
+            return f"{abs_path} は空 (ファイルが無い)。"
         # sandbox は workspace 相対で返す — モデルには絶対パスで見せる
         return "\n".join(
             f"- {WORKSPACE_ROOT}/{e['path']} ({_human_size(e['size'])})"

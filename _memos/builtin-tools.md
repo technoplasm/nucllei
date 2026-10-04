@@ -1189,12 +1189,30 @@ ken 指示「ツールのエラーも結果として表示できるように。�
   `meta.error_kind`(FE は done でも種別があれば amber)。raise の ToolError が優先。sandbox の
   run_python / run_python_once が使う: exit_code != 0・セルの error・timed_out で failure
   (stdout・traceback・生成ファイル・タイムアウトの次の手はモデルに要るので raise しない)。
-  exit_code 0 の stderr(warning)は通常の結果。run_shell は旗を立てない(grep の不一致 = exit 1
-  のように非 0 が失敗でないコマンドが多い)。
+  exit_code 0 の stderr(warning)は通常の結果。**run_shell も同じ**(同日 ken 判定 — staging で
+  `command not found` (exit 127) が緑だった。grep の不一致 = exit 1 も amber「失敗」になるが、amber は
+  穏やかなので許容)。
+- **「何も無い」を通常の文で返していた箇所の見直し**(同日、ken が staging で list_workspace の
+  不在ディレクトリが緑の「空」だったのを見て。スイープの結果):
+  - list_workspace: sandbox の `/files/list` に `exists` / `is_dir` を追加(**sandbox image の更新が
+    要る**。追加フィールドなので旧 nucllei とも互換)。不在 = `ToolOutcome`(`{path} は存在しない。
+    次の手: 親ディレクトリを list_workspace で一覧して、パスを確かめる。`)、ファイル = `ToolCallError`、
+    空 = 通常の結果(「空 (ファイルが無い)」)。旧 image(フィールド無し)の空は旧文面のまま outcome の旗。
+  - send_to_workspace(添付一覧から): 文面は変えず旗だけ。filename で指した添付が無い = outcome /
+    何も指さず添付も無い = call(feed_image の無指定と同じ線引き)/ 対象はあったが 1 件も取り込めない
+    = failure(一部でも取り込めたら旗なし)。
+  - feed_image の file 経路(file_id= / url= の配信口 / 添付 PDF): `_feed_file` が目に入れずに返していた
+    行(画像でも PDF でもない / 実体が読めない / 大きすぎる / PDF が開けない)が緑だった。文面は変えず、
+    `_feed_path` が同じ場面で raise する種別(call / fatal / outcome / failure)の旗。複数の添付 PDF は
+    1 件も目に入らなかったときだけ(種別が揃えばそれ、混在は failure)。
+  - 据え置き(検索・一覧の「0 件」は正当な答え): grep_history / grep_chat_files の一致なし、
+    list_history / list_chat_files の「無い」、read_history の「読み出せるメッセージが無い」(チャットは
+    ある)。fetch_url の画像 / テキスト層の無い PDF は feed_image への誘導で行き止まりではないので緑のまま
+    (平文にできない other は既に outcome)。
 - **JSON を返す tool の線引き**: 中身の無い失敗は raise、中身(部分回答・session_id・切詰め)を
   運ぶ結果は結果のまま(run_subagent の子のエラー / stop、await_task の per-entry の failed 行、
-  check_task の不正 id 行)。「一致なし」「空」のように `ERROR:` で返していなかった通常の結果も
-  そのまま(文面を変えないため)。
+  check_task の不正 id 行)。「一致なし」のように `ERROR:` で返していなかった通常の結果も
+  そのまま(文面を変えないため。「無い」が要求した対象の不在だったものは上の見直しで旗 / raise)。
 - **カスタム tool**: `from nucllei.utils.tool_errors import ToolError, ToolCallError, ToolFailure,
   ToolOutcome, ToolFatal` を raise する(DB の tool も plugin loader で import できる)。**返した文字列は常に正常な
   結果** — `ERROR:` で始まっていてもフラグは立てない(本文の嗅ぎ分けはどこにも置かない。ken 決定

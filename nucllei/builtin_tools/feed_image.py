@@ -87,6 +87,7 @@ from nucllei.utils.image_refs import (
     with_page,
 )
 from nucllei.utils.tool_errors import ToolCallError, ToolError, ToolFailure, ToolOutcome
+from nucllei.utils.tool_output import mark_error_kind
 from nucllei.utils.ref_errors import (
     NEXT,
     RefErrorHints,
@@ -372,7 +373,7 @@ class Tools:
                     _base, frag_page = split_page(u)
                     if frag_page is not None and not pages:
                         pages = str(frag_page)
-                    return await self._feed_file(
+                    return await self._feed_one_file(
                         fid, pages, __user__["id"], __feed_image__
                     )
             return await self._feed_path(
@@ -411,25 +412,49 @@ class Tools:
 
         if len(targets) == 1:
             # 1 件 (file_id 指定・添付 PDF 1 件) の失敗は呼び出しの失敗 (ToolError のまま上げる)
-            return await self._feed_file(
+            return await self._feed_one_file(
                 targets[0], pages, __user__["id"], __feed_image__
             )
         out: list[str] = []
+        kinds: list[str] = []
         for fid in targets:
             # 複数の添付 PDF: 1 件の失敗で他を落とさない — その行に ERROR 文を置く (旧来どおり)
             try:
                 out.append(
-                    await self._feed_file(fid, pages, __user__["id"], __feed_image__)
+                    await self._feed_file(
+                        fid, pages, __user__["id"], __feed_image__, kinds
+                    )
                 )
             except ToolError as e:
+                kinds.append(e.kind)
                 out.append(e.text)
+        # 1 件も目に入らなかったときだけ旗 (#145)。種別が揃っていればそれ、混在は failure
+        if len(kinds) == len(targets):
+            mark_error_kind(kinds[0] if len(set(kinds)) == 1 else "failure")
 
         # role:tool の content は非空の status 文字列。画素は results[i].context_images 経由で届く。
         return "\n".join(out)
 
-    async def _feed_file(self, fid: str, pages, user_id: str, feed) -> str:
+    async def _feed_one_file(self, fid: str, pages, user_id: str, feed) -> str:
+        """file 1 件だけを指した呼び出し (file_id= / url= の配信口 / 添付 PDF 1 件)。
+        `_feed_file` が目に入れずに返した行は、文面はそのままで種別の旗を立てる (#145 —
+        旧: 「画像でも PDF でもないので目に入れなかった」等が緑だった)。"""
+        kinds: list[str] = []
+        text = await self._feed_file(fid, pages, user_id, feed, kinds)
+        if kinds:
+            mark_error_kind(kinds[0])
+        return text
+
+    async def _feed_file(
+        self, fid: str, pages, user_id: str, feed, kinds: Optional[list] = None
+    ) -> str:
         """file (添付・生成物) 1 件を所有者チェックの上で積み、報告 1 行を返す。
-        file_id 引数と、url の `/api/v1/files/{id}/content` の両方がここを通る。"""
+        file_id 引数と、url の `/api/v1/files/{id}/content` の両方がここを通る。
+        目に入れずに返す行は、その種別を `kinds` に積む (`_feed_path` が raise する同じ場面の
+        種別に揃える: 画像でも PDF でもない = call / 実体が読めない = fatal /
+        大きすぎる = outcome / PDF が開けない = failure)。"""
+        if kinds is None:
+            kinds = []
         # 同期 DB / ディスク read はワーカースレッドへ退避してイベントループを塞がない
         # (#28)。to_thread を await するため関数自体は async のまま。
         rec = await asyncio.to_thread(Files.get_file_by_id, fid)  # v0.6.5 は sync
@@ -445,16 +470,19 @@ class Tools:
         name = getattr(rec, "filename", None) or fid
         kind = _kind(name, meta.get("content_type"))
         if not kind:
+            kinds.append("call")
             return f"- {name}: 画像でも PDF でもないので目に入れなかった"
 
         raw = await asyncio.to_thread(_read_raw, rec)
         if raw is None:
+            kinds.append("fatal")
             return f"- {name}: ファイルの実体を読めない"
 
         if kind == "image":
             # サイズ検証: 巨大なファイルを提示前に弾く (実体化は送信直前 inline に
             # 寄せるが、上限超過はここで早期に返す)。
             if len(raw) > self.valves.max_image_mb * 1024 * 1024:
+                kinds.append("outcome")
                 return (
                     f"- {name}: 大きすぎる ({mb(len(raw))} > {self.valves.max_image_mb:.1f} MB)。"
                     + NEXT
@@ -475,6 +503,7 @@ class Tools:
             n_pages = await asyncio.to_thread(pdf_page_count, raw)
         except Exception as e:
             log.error(f"[feed_image] {name}: {e!r}")
+            kinds.append("failure")
             return f"- {name}: PDF として開けない (壊れているか、暗号化されている)"
         return self._feed_pdf_pages(
             f"/api/v1/files/{fid}/content", name, n_pages, pages, feed
