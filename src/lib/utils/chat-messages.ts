@@ -145,7 +145,7 @@ export const expandAssistantToolHistory = (
  * チャット履歴(createMessagesList の出力)+ 任意の system 文を、
  * OpenAI 互換 wire のメッセージ配列へ組み立てる(Chat.svelte の送信経路)。
  *
- * - user メッセージの画像 file は image_url パートに展開する。
+ * - user メッセージの画像 file は image_url パートに展開する(本文が空なら text パートは付けない)。
  *   llens(#69): url は正準形 "/api/v1/files/{id}/content"。送信直前に backend の
  *   inline_internal_image_urls が base64 化する(推論エンジンは /content に到達できない)。
  * - assistant は過去ターンの tool 往復を wire 形に復元(#18-2)。tool 結果の画像
@@ -176,10 +176,16 @@ export const buildWireMessages = (
 					{
 						role: 'user',
 						content: [
-							{
-								type: 'text',
-								text: message.content
-							},
+							// 画像だけの発話(本文なし)に空の text パートを付けない —
+							// 空 text を弾く推論エンジン・テンプレートがある
+							...((message.content ?? '').trim()
+								? [
+										{
+											type: 'text',
+											text: message.content
+										}
+									]
+								: []),
 							...message.files
 								.filter((file: any) => file.type === 'image')
 								.map((file: any) => ({

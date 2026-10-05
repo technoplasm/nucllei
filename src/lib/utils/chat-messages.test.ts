@@ -317,6 +317,21 @@ describe('buildWireMessages', () => {
 		]);
 	});
 
+	it('画像だけの発話(本文が空・空白のみ)には空の text パートを付けない', () => {
+		for (const content of ['', '  \n']) {
+			const messages = buildWireMessages(
+				[{ role: 'user', content, files: [{ type: 'image', url: '/api/v1/files/abc/content' }] }],
+				null
+			);
+			expect(messages).toEqual([
+				{
+					role: 'user',
+					content: [{ type: 'image_url', image_url: { url: '/api/v1/files/abc/content' } }]
+				}
+			]);
+		}
+	});
+
 	it('画像なし user はプレーン {role, content} のまま', () => {
 		const messages = buildWireMessages(
 			[{ role: 'user', content: '文書だけ', files: [{ type: 'file', url: '/x' }] }],
