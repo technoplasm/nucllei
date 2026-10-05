@@ -128,6 +128,20 @@ upstream のリリースノート(記述テキストのみ。リンク先・ソ�
 | trusted header のメールと cookie の JWT のユーザーを照合していない — 共有 PC で前の人のセッションのまま次の人が使える。不一致は 401 → 再サインインでヘッダ側のユーザーに入れ替わる | HIGH(なりすまし。共有端末運用に直撃) | 320d39194 | 同上 |
 | OAuth ロール管理で許可 / admin ロールのどちらにも一致しないと DEFAULT_USER_ROLE に落ちてログインできた。fail closed(403)に | MED(OAuth は既定 off) | 320d39194 | 同上 |
 | admin のユーザー追加(`/auths/add`)が返す「新ユーザーとしての token」に exp が無い(恒久資格情報)。SESSION_IDLE_TIMEOUT(無期限設定でも上限 1 時間)で期限付きに | LOW〜MED | 320d39194 | 同上 |
+| tool server(`server:N`)の実行時に接続設定の read ACL を見ていない — 一覧では隠すが、preset の `meta.toolIds` 経由で ACL 外のユーザーも実行できた(下記詳細) | HIGH(共有キーで外部サービスを叩ける) | 8c1ec89ef | `test_get_tools_isolation.py::test_tool_server_execution_enforces_read_acl` |
+
+**tool server(server:N)実行時の ACL 欠落の詳細**(filter / tool 担当の検出・修正。対応する GHSA は特定していない):
+- 症状: 外部 OpenAPI tool server は `GET /api/v1/tools` の一覧では接続設定の
+  `config.access_control`(read)で非 admin から隠していたが、実行経路 `utils/tools.get_tools` の
+  `server:` 分岐は ACL を見ずに spec と callable を載せていた。preset の `meta.toolIds` に
+  `server:N` が載っていれば、ACL 外のユーザーもその preset 経由で tool server を実行できた
+  (`auth_type=bearer` なら admin が設定した共有キーで外部サービスを叩ける)。
+- 修正(8c1ec89ef): `get_tools` の `server:` 分岐で一覧と同じ判定(admin バイパス /
+  `has_access(read, config.access_control)`、None=全員)を実行時にも行い、外れたら載せない。
+  skill 由来(`enforce_access_control=False`)は従来どおり。範囲外・未取得の `server:N` は
+  IndexError / assert でターンを落とさずスキップ。
+- 付随: tool / function の per-user valves endpoint(`/valves/user*`)は参照先 tool の read ACL を
+  見ていなかったが、UserValves 機構ごと撤去(398e5b3d3 / 8c1ec89ef)したため面ごと消滅。
 
 同じ照合で直した #24 外(機能バグ)の分は refs #142: payload(presence_penalty / top_k / min_p /
 repeat_penalty が OpenAI 互換へ送られない・stop 文字列の 1 文字分割)eb7cffb2c、Postgres の NUL 入り

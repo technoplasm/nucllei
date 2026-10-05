@@ -44,7 +44,7 @@ read ACL = 「使える範囲」。`editor` = skill editor。○=可 / −=不�
 | file | owner / admin / 共有 public マーカー / 明示 read ACL | 本人 | − | **owner + admin**(#69) | owner | `chat.file_upload` フラグ。share 時に `access_control.read.public=true`(共有解除でも自動では戻さない)。**#69(2026-07-12)でファイル管理機構が owner に ACL フル編集を開放**(非公開/グループ/全体公開 — 広げる操作も owner 可。エンドポイントは `POST /files/{id}/access_control/update`、非 owner・非 admin は 403)。file の ACL 意味論は他エンティティと逆: `None`=非公開(owner のみ)。詳細 `chat-share-files.md` |
 | API key | 本人 | 本人(ENABLE_API_KEY 時) | − | − | 本人 | endpoint allowlist は 57q6 対策済み |
 | valves(tool/function 全体設定) | − | − | admin | − | − | 7429 対策済み(read も制限) |
-| UserValves(per-user) | 本人 | 本人 | 本人 | − | 本人 | |
+| ~~UserValves(per-user)~~ | − | − | − | − | − | **撤去済み(2026-10-05、398e5b3d3 / 8c1ec89ef)** — 機構ごと削除。`/valves/user*` endpoint が参照先 tool の read ACL を見ていなかった面も同時に消滅(`security-advisories.md` 2026-10-05 節) |
 | User.info(#55 実装済み) | tool へ露出(`__user__.info`) | − | **admin のみ** | − | admin | 宣言キーは `ADDITIONAL_USER_META`(env)。本人書き込み endpoint は撤去済み(G3 解消・2026-07-10) |
 | group | − | admin | admin | − | admin | 複数所属可。権限は OR 合成 |
 
