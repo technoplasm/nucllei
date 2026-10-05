@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, JSON
 from sqlalchemy import cast, or_, func, text
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.types import TypeDecorator
 
 ####################
 # Chat DB Schema
@@ -20,13 +21,51 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 
+def strip_nul(value):
+    """文字列中の NUL(U+0000)を再帰的に取り除く(dict のキー・値、list の要素)。
+
+    Postgres の json 型は \\u0000 を含む文書をそのまま保存できてしまうが、
+    取り出し(->> 等で text へ変換)の時点で "unsupported Unicode escape sequence"
+    になり、チャット検索がその行に触れた瞬間に 500 になる。text 列は NUL を
+    そもそも保存できない。モデル出力・貼り付けに紛れた NUL に意味は無いので、
+    保存時に落とす。
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, dict):
+        return {strip_nul(k): strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [strip_nul(v) for v in value]
+    return value
+
+
+class NulFreeJSON(TypeDecorator):
+    """書き込み時に NUL を落とす JSON(chat 行の全書き込み経路を 1 か所で塞ぐ)。"""
+
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return strip_nul(value)
+
+
+class NulFreeText(TypeDecorator):
+    """書き込み時に NUL を落とす Text(Postgres の text は NUL を保存できない)。"""
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return strip_nul(value)
+
+
 class Chat(Base):
     __tablename__ = "chat"
 
     id = Column(String, primary_key=True)
     user_id = Column(String)
-    title = Column(Text)
-    chat = Column(JSON)
+    title = Column(NulFreeText)
+    chat = Column(NulFreeJSON)
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
@@ -35,7 +74,7 @@ class Chat(Base):
     archived = Column(Boolean, default=False)
     pinned = Column(Boolean, default=False, nullable=True)
 
-    meta = Column(JSON, server_default="{}")
+    meta = Column(NulFreeJSON, server_default="{}")
 
     # llens(#31): soft delete。監査証憑の保全のため行は消さず、削除時刻(epoch 秒)を立てる。
     # ユーザー向けクエリは deleted_at IS NULL で除外し、admin 一覧(#19)では見える。
@@ -946,11 +985,26 @@ class ChatTable:
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
+                # llens: NUL(\u0000)を含む行があると、json の演算子(-> / ->>)が
+                # 文書を解釈した時点で "unsupported Unicode escape sequence" になり
+                # 検索全体が 500 になる。保存時に NUL は落とす(NulFreeJSON)が、
+                # 既に入っている行でも落ちないよう、その行だけ json の生テキストから
+                # \u0000 エスケープを除いてから解釈する(エスケープされた \ の直後の
+                # "u0000" という文字列 = 本文の \u0000 という字面は残す)。
                 query = query.filter(
-                    (Chat.title.ilike(f"%{search_text}%") | text("""
+                    (Chat.title.ilike(f"%{search_text}%") | text(r"""
                             EXISTS (
                                 SELECT 1
-                                FROM json_array_elements(Chat.chat->'messages') AS message
+                                FROM json_array_elements((
+                                    CASE
+                                        WHEN strpos(Chat.chat::text, '\u0000') > 0
+                                        THEN regexp_replace(
+                                            Chat.chat::text,
+                                            '(?<!\\)((?:\\\\)*)\\u0000', '\1', 'g'
+                                        )::json
+                                        ELSE Chat.chat
+                                    END
+                                )->'messages') AS message
                                 WHERE LOWER(message->>'content') LIKE '%' || :search_text || '%'
                             )
                             """)).params(  # Case-insensitive search in title

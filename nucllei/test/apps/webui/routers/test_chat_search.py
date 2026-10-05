@@ -92,3 +92,72 @@ class TestChatSearch(AbstractPostgresTest):
 
     def test_no_match_returns_empty(self):
         assert self._search("存在しない語句xyz") == set()
+
+
+class TestChatSearchNul(AbstractPostgresTest):
+    """NUL(U+0000)を含むメッセージがあってもチャット検索が 500 にならない。
+
+    Postgres の json 型は \\u0000 を含む文書を保存できるが、検索の
+    `message->>'content'`(text 変換)で例外になり検索全体が落ちていた。
+    保存時に NUL を落とし(NulFreeJSON)、既に入っている行も検索側で避ける。
+    """
+
+    BASE_PATH = "/api/v1/chats"
+
+    def _insert(self, title, content):
+        from nucllei.models.chats import ChatForm, Chats
+
+        return Chats.insert_new_chat(
+            "2",
+            ChatForm(
+                chat={
+                    "title": title,
+                    "messages": [{"role": "user", "content": content}],
+                    "history": {"currentId": None, "messages": {}},
+                }
+            ),
+        )
+
+    def _search(self, text):
+        with mock_webui_user(id="2"):
+            response = self.fast_api_client.get(self.create_url(f"/search?text={text}"))
+        assert response.status_code == 200, response.text
+        return {c["id"] for c in response.json()}
+
+    def test_nul_is_stripped_on_save(self):
+        from nucllei.models.chats import Chats
+
+        chat = self._insert("タイ\x00トル", "肺\x00炎の既往")
+        stored = Chats.get_chat_by_id(chat.id)
+        assert stored.title == "タイトル"
+        assert stored.chat["messages"][0]["content"] == "肺炎の既往"
+        assert chat.id in self._search("肺炎")
+
+    def test_search_survives_nul_already_in_db(self):
+        import json
+
+        from sqlalchemy import text
+
+        from nucllei.internal.db import get_db
+
+        poisoned = self._insert("毒入り", "placeholder")
+        normal = self._insert("普通", "肺炎の相談")
+        # 保存時の除去を経ない既存行を再現(生 SQL で \u0000 入りの json を書く)
+        raw = json.dumps(
+            {
+                "title": "毒入り",
+                "messages": [{"role": "user", "content": "肺炎\u0000です"}],
+            }
+        )
+        assert "\\u0000" in raw
+        with get_db() as db:
+            db.execute(
+                text("UPDATE chat SET chat = CAST(:j AS json) WHERE id = :id"),
+                {"j": raw, "id": poisoned.id},
+            )
+            db.commit()
+
+        ids = self._search("肺炎")
+        assert normal.id in ids
+        assert poisoned.id in ids  # JSON 表現のまま照合して拾える
+        assert self._search("存在しない語句xyz") == set()
