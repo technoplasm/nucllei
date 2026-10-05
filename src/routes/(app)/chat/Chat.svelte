@@ -556,14 +556,23 @@
 			}
 		}
 
+		const availableModelIds = $models.map((m) => m.id);
 		session.selectedModels = session.selectedModels.filter((modelId) =>
-			$models.map((m) => m.id).includes(modelId)
+			availableModelIds.includes(modelId)
 		);
 		if (
 			session.selectedModels.length === 0 ||
 			(session.selectedModels.length === 1 && session.selectedModels[0] === '')
 		) {
-			if ($models.length > 0) {
+			// 保存済み(ユーザー既定・URL・前回の選択)のモデルが使えないときは、一覧の先頭
+			// ではなく admin の既定モデルへ落とす。それも使えなければ先頭
+			const adminDefaultModelIds = ($config?.default_models ?? '')
+				.split(',')
+				.map((modelId) => modelId.trim())
+				.filter((modelId) => availableModelIds.includes(modelId));
+			if (adminDefaultModelIds.length > 0) {
+				session.selectedModels = adminDefaultModelIds;
+			} else if ($models.length > 0) {
 				session.selectedModels = [$models[0].id];
 			} else {
 				session.selectedModels = [''];
