@@ -305,9 +305,10 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
    - **`/ext/**` は env `EXT_MOUNTS` 1 本の対応表**(2026-10-05。`name=値` のカンマ区切り、値が
      `http(s)://` なら proxy、絶対パスなら静的配信。表に無い name は 404 — 旧 `EXT_DIR` / `./ext` を
      暗黙に配る方式は撤去)。**dev で cage を中継先にする**: `.env` に
-     `EXT_MOUNTS=cage=http://localhost:13303`(dev の cage は host の :13303 で `uv run cage`。
-     `/ext/cage/static/X` → `http://localhost:13303/static/X`、`/ext/cage/doc/<住所>` は cage が
-     HTML を返す)。cage の HTTP が動いていなければ `/ext/cage/**` は 502(中継先が無い)で正常。
+     `EXT_MOUNTS=cage=http://localhost:13303/ext/cage`(dev の cage は host の :13303 で `uv run cage`。
+     cage の公開ルートは `CAGE_PUBLIC_PREFIX`(既定 `/ext/cage`)の下にあり /ext/cage/ と 1:1 —
+     `/ext/cage/static/X` → `http://localhost:13303/ext/cage/static/X`、`/ext/cage/doc/<住所>` は cage が
+     HTML を返す。llens 99d0fcd 以降、旧ルート `/static/…` は無い)。cage の HTTP が動いていなければ `/ext/cage/**` は 502(中継先が無い)で正常。
      静的に見せたい物があれば `shared=/abs/path` を足す(`./ext/` に置いた物は書かない限り配られない)。
      起動ログ `/ext mounts (EXT_MOUNTS…): /ext/cage/ → proxy …` / `EXT_MOUNTS が空` で分かる。
      sandbox 側は同じ物を jail の `/ext/<name>` に bind する規約(#138)。vite dev の proxy の `/ext`
