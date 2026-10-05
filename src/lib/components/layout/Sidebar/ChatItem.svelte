@@ -134,9 +134,32 @@
 		}
 	};
 
+	// archive API はトグル(archived を反転)— 連打すると往復して戻ってしまうので、
+	// 応答が返るまで次の押下を受けない。表示中のチャットをアーカイブしたら開始画面へ
+	let archiving = false;
 	const archiveChatHandler = async (id: string) => {
-		await archiveChatById(id);
-		onChange?.();
+		if (archiving) {
+			return;
+		}
+		archiving = true;
+		try {
+			const res = await archiveChatById(id).catch((error) => {
+				toast.error(`${error?.detail ?? error}`);
+				return null;
+			});
+			if (!res) {
+				return;
+			}
+			if (res.archived && $chatId === id) {
+				await goto('/');
+
+				await chatId.set('');
+				await tick();
+			}
+			onChange?.();
+		} finally {
+			archiving = false;
+		}
 	};
 
 	const focusEdit = (node: HTMLInputElement) => {
