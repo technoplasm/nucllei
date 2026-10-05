@@ -473,7 +473,19 @@ ken 決定(2026-10-05): 引用(出典表示)は一旦撤去したが(#142 / #146
   既存の本文リンクと同じく新しいタブ。dev の vite proxy に `^/ext(/|$)` を足した(dev では `/ext` が
   SPA に落ちていた)。
 - `/ext` 側: doc の md の HTML 化(見出しアンカー・パンくず・一覧)は **cage が起動時にビルドして出力**し、
-  nucllei は静的配信だけ(ken 決定 2026-10-05、proxy は作らない)。
+  nucllei は静的配信だけ(ken 決定 2026-10-05、proxy は作らない。一度 nucllei 側で md を描画する
+  実装を書いたが捨てた)。nucllei の `/ext` に入れたのは汎用の **URL の契約** 2 点
+  (`routers/ext.py`、正本 `README_API.md` §3.8):
+  - **拡張子の補完**: `/ext/X` が実在のファイルならそのまま、無いかディレクトリなら `X.html` →
+    `X/index.html`、どれも無ければ 404。どの候補も mount の判定で閉じる。一覧は出さない
+    (一覧は cage が index.html として出力する)。
+  - **`.html` / `.htm` は `text/html; charset=utf-8` で inline、必ず厳しい CSP**
+    (`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; base-uri 'none';
+    form-action 'none'; frame-ancestors 'self'`)+ nosniff。従来の「HTML は添付扱い」をここで替えた
+    (stored XSS は CSP で止める。SVG / JS は従来どおり添付)。`CONTENT_SECURITY_POLICY` env を設定した
+    配備ではグローバルの middleware がこの CSP を上書きするので注意。
+  - `/ext/cage/doc` + doc の住所は cage がビルドした HTML のページになる。中身は配備側が置く物。
+  - `.md` / `.txt` は従来どおり text/plain(Accept による分岐はしない)。
 
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
 

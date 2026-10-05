@@ -336,12 +336,32 @@ as `url` unchanged (see the reference rules below).
   the way a Docker volume is. Symlinks _inside_ mounted content cannot leave
   their mount (→ 404), and a symlink to a single file is never a mount (it is
   indistinguishable from `escape.txt → /etc/passwd` inside content; link a
-  directory or copy the file). Directories (including `/ext/` itself) and
-  missing files → 404, no listing; content-type from the extension
-  (`application/octet-stream` when unknown). `..`/backslash/control-char paths
-  → 400; active types (HTML/SVG/JS) are forced to
+  directory or copy the file). Directories (including `/ext/` itself) without
+  an `index.html` and missing files → 404, no listing; content-type from the
+  extension (`application/octet-stream` when unknown; `.md` / `.txt` are
+  `text/plain; charset=utf-8` whatever the `Accept`, #145). `..`/backslash/
+  control-char paths → 400; SVG / JS are forced to
   `Content-Disposition: attachment` + `nosniff`. There is no per-user access
   check — what is placed under `$EXT_DIR` is what is exposed.
+- **URL contract** (2026-10-05, ken; #146 light "cite by link"):
+  - **Extension completion**: if `/ext/X` is an existing file it is served as
+    is; if it is missing or a directory, `X.html` and then `X/index.html` are
+    tried; none → 404. Each candidate is confined to its mount the same way.
+    No directory listing is generated (a deployment that wants one ships it as
+    `index.html`).
+  - **HTML is served inline with a strict CSP**: `.html` / `.htm` →
+    `text/html; charset=utf-8`, `X-Content-Type-Options: nosniff` and
+    `Content-Security-Policy: default-src 'none'; img-src 'self' data:;
+style-src 'unsafe-inline'; base-uri 'none'; form-action 'none';
+frame-ancestors 'self'` (no script, no external loads, no form posts).
+    Note: a deployment-wide `CONTENT_SECURITY_POLICY` env replaces this header
+    via the global security-headers middleware.
+  - **`/ext/cage/doc` + a doc address** (e.g.
+    `/ext/cage/doc/院内マニュアル/医療安全管理マニュアル`) is the HTML page cage
+    builds at startup (`<address>.html` or `<address>/index.html`; section
+    anchors, breadcrumbs and listings are cage's). The content is whatever the
+    deployment puts there; nucllei only serves it statically. The chat body
+    turns `[/ext/…#heading]` into a link (FE, `bracket_ref`).
 - The startup log lists the top-level entries of `$EXT_DIR` as "served at
   /ext/, sandbox sees them at /ext/".
 - Development without Docker: put a symlink under `ext/` (e.g.

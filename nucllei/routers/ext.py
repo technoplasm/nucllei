@@ -20,7 +20,7 @@ PUBLIC_BASE を "/ext/<name>"(相対)にすると文書内の参照が同一オ�
 要求パスは resolve して mount(`image_refs.served_mount`: `EXT_DIR` 自身か、配備が `EXT_DIR` の
 木に置いたディレクトリ symlink の先)の中に閉じる(mount の中身の symlink 越えは閉じる)—
 resolver(`image_refs.resolve_url`)の `_read_confined` と同じ判定。ディレクトリ・不在は 404
-(一覧は出さない)。content-type は拡張子から、不明は application/octet-stream。
+(一覧は出さない — 補完は下記)。content-type は拡張子から、不明は application/octet-stream。
 `.md` / `.txt` は `text/plain; charset=utf-8`(#145 — mimetypes が `.md` を知らない環境では
 octet-stream + nosniff でリンクを押すとダウンロードになっていた。text/markdown も避ける —
 ブラウザが表示せずダウンロードに回すことがある。どちらもアクティブ型ではないので nosniff のまま)。
@@ -28,15 +28,30 @@ octet-stream + nosniff でリンクを押すとダウンロードになってい
 2 backend があり、`EXT_FILE_SCOPES` で root 配下の配信範囲を絞っていた — `url=` の一般 URL が
 どこでも取れるようになり http 中継は要らなくなったので、設定ごと撤去。
 
+URL の契約(2026-10-05 ken 決定、#146 の簡易版「リンクによる引用」):
+
+- **拡張子の補完**: `/ext/X` が実在するファイルならそのまま。無いかディレクトリなら `X.html` →
+  `X/index.html` の順に探し、どれも無ければ 404。解決後も同じ mount の判定で閉じる。ディレクトリの
+  一覧は出さない(一覧が要る配備は index.html として置く)。
+- **`.html` / `.htm` は `text/html; charset=utf-8` で inline に返し、必ず厳しい CSP(`HTML_CSP`)を
+  付ける** — スクリプト・外部読み込み・フォーム送信・base 差し替え・他オリジンへの埋め込みを止める。
+  nosniff は維持。同一オリジンの stored XSS 対策は従来の「添付扱い」から CSP に替わる(SVG / JS は
+  従来どおり添付)。
+- `/ext/cage/doc` + doc の住所(`/院内マニュアル/医療安全管理マニュアル` 等)は、cage が起動時に
+  ビルドした HTML のページ(`<住所>.html` か `<住所>/index.html`)になる。中身は配備側が置く物で、
+  nucllei は静的に配信するだけ(md の描画・見出しアンカー・パンくず・一覧は cage の責務)。
+- `.md` / `.txt` は従来どおり text/plain(Accept による分岐はしない)。
+
 ゲート:
 
 - セッション認証必須(get_verified_user)。per-user のアクセス検査はしない —
   公開範囲は配備が `EXT_DIR` に置いた物。
 - GET(read-only 参照資料の配信)。HEAD は Starlette 既定で GET と同経路、
   それ以外のメソッドは 405。traversal パスは 400。
-- `/ext/` と `/ext/{dir}/`(ディレクトリ)は 404。resolver が同じ入力で返す `not_found` と揃える。
-- content-type は拡張子からだが、アクティブ型(HTML/SVG/JS)は添付扱い +
-  nosniff で実行を止める(#97 review — 同一オリジン配信の stored XSS 対策。
+- `/ext/` と `/ext/{dir}/`(ディレクトリ)は `index.html` が無ければ 404。resolver が同じ入力で
+  返す `not_found` と揃える。
+- content-type は拡張子から。HTML は上記の CSP 付きで inline、それ以外のアクティブ型(SVG/JS)は
+  添付扱い + nosniff で実行を止める(#97 review — 同一オリジン配信の stored XSS 対策。
   /cache と同じ content_hardening を共有)。
 - 資料は Files 意味論(#94 soft delete/purge)の外 — 記録責任は配信元側。
 """
@@ -62,11 +77,21 @@ router = APIRouter()
 # ブラウザでそのまま読ませるテキスト(#145)。拡張子は小文字で比較する
 _PLAIN_TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt"})
 _PLAIN_TEXT_TYPE = "text/plain; charset=utf-8"
+# 配備が置いた HTML(cage がビルドした doc のページ等)。inline で返し、必ず HTML_CSP を付ける
+_HTML_SUFFIXES = frozenset({".html", ".htm"})
+_HTML_TYPE = "text/html; charset=utf-8"
+HTML_CSP = (
+    "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+)
 
 
 def _content_type_for(name: str) -> str:
-    if Path(name).suffix.lower() in _PLAIN_TEXT_SUFFIXES:
+    suffix = Path(name).suffix.lower()
+    if suffix in _PLAIN_TEXT_SUFFIXES:
         return _PLAIN_TEXT_TYPE
+    if suffix in _HTML_SUFFIXES:
+        return _HTML_TYPE
     return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
@@ -79,27 +104,50 @@ async def serve_ext_file(path: str = "", user=Depends(get_verified_user)):
     return _serve_local(path)
 
 
-def _serve_local(path: str):
-    """`EXT_DIR/{path}` を配信する。path は Starlette が decode 済み(`{path:path}` は
-    "//" 由来の先頭 "/" を残しうる — Path の結合は右辺が絶対だと左辺を捨てる
-    (root / "/etc/passwd" = /etc/passwd)ので剥がしてから結合する)。閉じ込めの権威は
-    resolve 済みの実体が、その path の mount(`image_refs.served_mount` — `EXT_DIR` 自身か、
-    配備が `EXT_DIR` の木に置いたディレクトリ symlink の先)の中であること(resolver と同じ)。"""
-    target = Path(image_refs.EXT_DIR) / path.lstrip("/")
+def _confined_file(target: Path) -> Path | None:
+    """`target`(`EXT_DIR` 起点、未 resolve)が配信されるファイルなら resolve 済みの実体。
+    閉じ込めの権威は resolve 済みの実体が、その path の mount(`image_refs.served_mount` —
+    `EXT_DIR` 自身か、配備が `EXT_DIR` の木に置いたディレクトリ symlink の先)の中であること
+    (resolver と同じ)。外・不在・ディレクトリ・判定不能は None。"""
     mount = image_refs.served_mount(target)
     if mount is None:
-        raise HTTPException(status_code=404, detail="Not found")
+        return None
     try:
         resolved = target.resolve()
     except (OSError, RuntimeError, ValueError):
         # 深すぎる symlink ループ等。root の外か中かを判定できないので不在扱い
-        raise HTTPException(status_code=404, detail="Not found")
+        return None
     if not resolved.is_relative_to(mount[1]) or not resolved.is_file():
+        return None
+    return resolved
+
+
+def _serve_local(path: str):
+    """`EXT_DIR/{path}` を配信する。path は Starlette が decode 済み(`{path:path}` は
+    "//" 由来の先頭 "/" を残しうる — Path の結合は右辺が絶対だと左辺を捨てる
+    (root / "/etc/passwd" = /etc/passwd)ので剥がしてから結合する)。
+
+    解決順(URL の契約): `X` → `X.html` → `X/index.html`、どれも mount の中のファイルで
+    なければ 404。`X` がディレクトリでも一覧は出さない。"""
+    rel = path.lstrip("/")
+    target = Path(image_refs.EXT_DIR) / rel
+    candidates = [target]
+    if rel.strip("/"):
+        candidates.append(target.with_name(target.name + ".html"))
+    candidates.append(target / "index.html")
+    for candidate in candidates:
+        resolved = _confined_file(candidate)
+        if resolved is not None:
+            break
+    else:
         raise HTTPException(status_code=404, detail="Not found")
 
     content_type = _content_type_for(resolved.name)
-    return FileResponse(
-        resolved,
-        media_type=content_type,
-        headers=active_content_headers(content_type),
-    )
+    if content_type == _HTML_TYPE:
+        headers = {
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": HTML_CSP,
+        }
+    else:
+        headers = active_content_headers(content_type)
+    return FileResponse(resolved, media_type=content_type, headers=headers)

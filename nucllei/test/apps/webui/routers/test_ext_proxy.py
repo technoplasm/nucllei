@@ -12,7 +12,8 @@ nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒す
 - percent デコード後に ".." セグメント / バックスラッシュを含むパスは 400
 - 制御文字パスは fail-closed(400 か、ASGI 層が先に弾く 404)
 - `EXT_DIR` の外(traversal / symlink 越え)・ディレクトリ(`/ext/` 自体を含む)・不在は 404
-- content-type は拡張子から、アクティブ型(HTML/SVG/JS)は添付 + nosniff
+- content-type は拡張子から。HTML(`.html`/`.htm`)は厳しい CSP 付きで inline、SVG/JS は添付 + nosniff
+- URL の契約(2026-10-05): `X` → `X.html` → `X/index.html` の補完(mount の中に閉じる、一覧は出さない)
 - FileResponse(Range / etag / last-modified)
 - GET(HEAD は Starlette 既定で同経路)。POST 等は 405
 
@@ -259,16 +260,129 @@ class TestExtGate(AbstractPostgresTest):
     # ---- アクティブ型の実行防止(nosniff + 添付) ----
 
     def test_active_type_forced_to_attachment(self, monkeypatch, tmp_path):
+        # HTML は下の CSP 付き inline(2026-10-05)。それ以外のアクティブ型は従来どおり添付
         self._mount(monkeypatch, tmp_path)
-        for path, ct in (
-            ("/cage/static/page.html", "text/html"),
-            ("/cage/static/v.svg", "image/svg+xml"),
+        response = self._get("/cage/static/v.svg")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/svg+xml")
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers.get("content-disposition") == "attachment"
+
+    # ---- URL の契約(2026-10-05): .html の補完と CSP ----
+
+    def _mount_pages(self, monkeypatch, tmp_path):
+        """cage がビルドした doc のページの形: `<住所>.html` / `<住所>/index.html`。
+        `ext/cage/doc` は配備が置いた mount(ディレクトリ symlink)。"""
+        root = self._mount(monkeypatch, tmp_path)
+        doc = tmp_path / "llens" / "cage" / "build" / "doc"
+        (doc / "院内マニュアル" / "医療安全管理マニュアル").mkdir(parents=True)
+        (doc / "院内マニュアル" / "index.html").write_text(
+            "dir-index", encoding="utf-8"
+        )
+        (doc / "院内マニュアル" / "医療安全管理マニュアル" / "index.html").write_text(
+            "anzen-index", encoding="utf-8"
+        )
+        (doc / "院内マニュアル" / "電話番号簿.html").write_text("tel", encoding="utf-8")
+        # X.html と X/index.html が両方ある → X.html が先
+        (doc / "both").mkdir()
+        (doc / "both" / "index.html").write_text("both-dir", encoding="utf-8")
+        (doc / "both.html").write_text("both-file", encoding="utf-8")
+        # 実在のファイル X は補完より先
+        (doc / "plain").write_text("plain-file", encoding="utf-8")
+        (doc / "plain.html").write_text("plain-html", encoding="utf-8")
+        (doc / "nothing").mkdir()
+        (doc / "memo.md").write_text("# memo", encoding="utf-8")
+        outside = tmp_path / "outside-pages"
+        outside.mkdir()
+        (outside / "index.html").write_text("secret", encoding="utf-8")
+        (outside / "s.html").write_text("secret", encoding="utf-8")
+        (doc / "esc").symlink_to(outside)  # mount の中から外へのディレクトリ symlink
+        (doc / "leak.html").symlink_to(outside / "s.html")
+        (root / "cage" / "doc").symlink_to(doc)
+        return doc
+
+    def test_completion_order(self, monkeypatch, tmp_path):
+        self._mount_pages(monkeypatch, tmp_path)
+        cases = {
+            "/cage/doc/院内マニュアル/電話番号簿": "tel",  # X.html
+            "/cage/doc/院内マニュアル/医療安全管理マニュアル": "anzen-index",  # X/index.html
+            "/cage/doc/院内マニュアル/医療安全管理マニュアル/": "anzen-index",
+            "/cage/doc/院内マニュアル": "dir-index",
+            "/cage/doc/both": "both-file",  # X.html が X/index.html より先
+            "/cage/doc/both/": "both-file",
+            "/cage/doc/plain": "plain-file",  # 実在のファイルはそのまま
+            "/cage/doc/院内マニュアル/電話番号簿.html": "tel",
+        }
+        for path, body in cases.items():
+            response = self._get(path)
+            assert response.status_code == 200, path
+            assert response.text == body, path
+        # percent-encoded の住所でも同じ
+        assert (
+            self._get(
+                "/cage/doc/%E9%99%A2%E5%86%85%E3%83%9E%E3%83%8B%E3%83%A5%E3%82%A2%E3%83%AB"
+            ).text
+            == "dir-index"
+        )
+
+    def test_completion_missing_dir_and_outside_404(self, monkeypatch, tmp_path):
+        self._mount_pages(monkeypatch, tmp_path)
+        for path in (
+            "/cage/doc/nothere",
+            "/cage/doc/nothing",  # index.html の無いディレクトリ: 一覧は出さない
+            "/cage/doc/nothing/",
+            "/cage/doc/esc",  # mount の外の index.html
+            "/cage/doc/esc/",
+            "/cage/doc/esc/s",
+            "/cage/doc/leak",  # mount の外を指す X.html
+            "/cage/doc/memo",  # .md は補完しない
+        ):
+            assert self._get(path).status_code == 404, path
+
+    def test_html_gets_strict_csp(self, monkeypatch, tmp_path):
+        from nucllei.routers.ext import HTML_CSP
+
+        self._mount_pages(monkeypatch, tmp_path)
+        assert HTML_CSP == (
+            "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        )
+        for path in (
+            "/cage/static/page.html",
+            "/cage/doc/院内マニュアル",
+            "/cage/doc/院内マニュアル/電話番号簿",
         ):
             response = self._get(path)
             assert response.status_code == 200, path
-            assert response.headers["content-type"].startswith(ct), path
+            assert response.headers["content-type"] == "text/html; charset=utf-8", path
+            assert response.headers["content-security-policy"] == HTML_CSP, path
             assert response.headers["x-content-type-options"] == "nosniff", path
-            assert response.headers.get("content-disposition") == "attachment", path
+            assert "content-disposition" not in response.headers, path
+        # .htm も同じ
+        (tmp_path / "data" / "ext" / "cage" / "static" / "old.htm").write_text("x")
+        response = self._get("/cage/static/old.htm")
+        assert response.headers["content-security-policy"] == HTML_CSP
+        # HTML 以外には付けない
+        for path in ("/cage/static/figs/a.png", "/cage/doc/memo.md"):
+            assert "content-security-policy" not in self._get(path).headers, path
+
+    def test_markdown_unchanged_regardless_of_accept(self, monkeypatch, tmp_path):
+        """`.md` は Accept に関わらず text/plain(HTML 化はしない — cage がビルドする)。"""
+        self._mount_pages(monkeypatch, tmp_path)
+        for accept in ("*/*", "text/html,application/xhtml+xml,*/*;q=0.8"):
+            response = self._get("/cage/doc/memo.md", headers={"accept": accept})
+            assert response.headers["content-type"] == "text/plain; charset=utf-8"
+            assert response.text == "# memo"
+
+    def test_pdf_range_and_etag_unchanged(self, monkeypatch, tmp_path):
+        root = self._mount_pages(monkeypatch, tmp_path)
+        (root / "a.pdf").write_bytes(b"%PDF-1.4 body")
+        full = self._get("/cage/doc/a.pdf")
+        assert full.headers["content-type"] == "application/pdf"
+        assert "etag" in full.headers and full.headers["accept-ranges"] == "bytes"
+        assert "content-security-policy" not in full.headers
+        part = self._get("/cage/doc/a.pdf", headers={"range": "bytes=0-3"})
+        assert part.status_code == 206 and part.content == b"%PDF"
 
     # ---- メソッド ----
 
