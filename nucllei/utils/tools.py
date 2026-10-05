@@ -113,20 +113,36 @@ def get_tools(
     """
     tools_dict = {}
 
-    for tool_id in tool_ids:
+    # 同じ id の重複指定は 1 回だけ読む(自分自身との名前衝突にしない)
+    for tool_id in dict.fromkeys(tool_ids):
         tool = Tools.get_tool_by_id(tool_id)
         if tool is None:
             if tool_id.startswith("server:"):
-                server_idx = int(tool_id.split(":")[1])
-                tool_server_connection = (
-                    request.app.state.config.TOOL_SERVER_CONNECTIONS[server_idx]
+                tool_server_connection, tool_server_data = _resolve_tool_server(
+                    request, tool_id
                 )
-                tool_server_data = None
-                for server in request.app.state.TOOL_SERVERS:
-                    if server["idx"] == server_idx:
-                        tool_server_data = server
-                        break
-                assert tool_server_data is not None
+                if tool_server_data is None:
+                    continue
+
+                # 実行時も一覧(routers/tools.py の GET /tools)と同じ read ACL を見る。
+                # 旧実装は一覧で隠すだけで、meta.toolIds に server:N が載った preset なら
+                # ACL 外のユーザーでも実行できた(admin はバイパス。tool server は
+                # 所有者を持たない — 一覧の user_id も "server:N")。
+                if enforce_access_control and not (
+                    user.role == "admin"
+                    or has_access(
+                        user.id,
+                        "read",
+                        (tool_server_connection.get("config") or {}).get(
+                            "access_control", None
+                        ),
+                    )
+                ):
+                    log.warning(
+                        f"User {user.id} lacks access to tool server {tool_id}; skipping."
+                    )
+                    continue
+
                 specs = tool_server_data.get("specs", [])
 
                 for spec in specs:
@@ -175,14 +191,7 @@ def get_tools(
                     if render:
                         tool_dict["render"] = render
 
-                    # TODO: if collision, prepend toolkit name
-                    if function_name in tools_dict:
-                        log.warning(
-                            f"Tool {function_name} already exists in another tools!"
-                        )
-                        log.warning(f"Discarding {tool_id}.{function_name}")
-                    else:
-                        tools_dict[function_name] = tool_dict
+                    _add_tool(tools_dict, function_name, tool_dict)
             else:
                 continue
         else:
@@ -204,16 +213,21 @@ def get_tools(
                 module, _ = load_tool_module_by_id(tool_id)
                 request.app.state.TOOLS[tool_id] = module
 
-            extra_params["__id__"] = tool_id
-
             # Set valves for the tool
             if hasattr(module, "valves") and hasattr(module, "Valves"):
                 valves = Tools.get_tool_valves_by_id(tool_id) or {}
                 module.valves = module.Valves(**valves)
-            if hasattr(module, "UserValves"):
-                extra_params["__user__"]["valves"] = module.UserValves(  # type: ignore
-                    **Tools.get_user_valves_by_id_and_user_id(tool_id, user.id)
-                )
+
+            # toolkit ごとに新しい extra_params / __user__ を作って束縛する。
+            # 旧実装は呼び手の __user__ dict に UserValves を書き込み、partial がその
+            # 参照を持ったままだったため、全 toolkit が最後に読んだ toolkit の
+            # UserValves を見ていた。UserValves は撤去済み(2026-10-05、feature-triage
+            # 「Filter / tool 機構の縮小」)— pipe 由来などの "valves" キーも落とす。
+            tool_extra_params = {**extra_params, "__id__": tool_id}
+            if isinstance(extra_params.get("__user__"), dict):
+                tool_extra_params["__user__"] = {
+                    k: v for k, v in extra_params["__user__"].items() if k != "valves"
+                }
 
             # llens(#140): toolkit の汎用フック(TOOLKIT_HOOK_NAMES)。read ACL の後に
             # 評価する — ACL は「使えるか」、available は「このターンで意味があるか」
@@ -275,7 +289,7 @@ def get_tools(
                 function_name = spec["name"]
                 tool_function = getattr(module, function_name)
                 callable = get_async_tool_function_and_apply_extra_params(
-                    tool_function, extra_params
+                    tool_function, tool_extra_params
                 )
 
                 # TODO: Support Pydantic models as parameters
@@ -310,8 +324,6 @@ def get_tools(
                     "spec": spec,
                     # Misc info
                     "metadata": {
-                        "file_handler": hasattr(module, "file_handler")
-                        and module.file_handler,
                         "citation": hasattr(module, "citation") and module.citation,
                     },
                 }
@@ -321,7 +333,7 @@ def get_tools(
                 # llens(#110): 非同期実行(background 昇格)への opt-in(設計 D4)。
                 # tool 作者が `Tools` クラス属性 `backgroundable` で宣言する
                 # (tool CRUD は admin 専用 = admin の明示指定): True で全関数、
-                # 関数名の list/tuple/set で個別指定。`file_handler` と同じ
+                # 関数名の list/tuple/set で個別指定。`serial` / `timeouts` と同じ
                 # クラス属性の流儀で、per-entry キー(`timeout` と同型)へ落とす。
                 # 衝突ガード(自前 background 引数・恒久不適格名)は呼び出し面
                 # (utils/exec_tools.entry_is_backgroundable)が判定する。
@@ -356,16 +368,44 @@ def get_tools(
                 if getattr(module, "serial", False) is True:
                     tool_dict["serial"] = True
 
-                # TODO: if collision, prepend toolkit name
-                if function_name in tools_dict:
-                    log.warning(
-                        f"Tool {function_name} already exists in another tools!"
-                    )
-                    log.warning(f"Discarding {tool_id}.{function_name}")
-                else:
-                    tools_dict[function_name] = tool_dict
+                _add_tool(tools_dict, function_name, tool_dict)
 
     return tools_dict
+
+
+def _resolve_tool_server(request: Request, tool_id: str) -> tuple[dict, dict | None]:
+    """`server:<idx>` → (接続設定, 取得済みサーバーデータ)。解決できなければ data=None。
+
+    旧実装は idx の parse 失敗・範囲外・未取得を IndexError / assert で落としていた
+    (preset に古い server:N が残っているだけでターン全体が 500)。
+    """
+    try:
+        server_idx = int(tool_id.split(":", 1)[1])
+        connection = request.app.state.config.TOOL_SERVER_CONNECTIONS[server_idx]
+    except (ValueError, IndexError) as e:
+        log.warning(f"Unknown tool server {tool_id}; skipping: {e}")
+        return {}, None
+    for server in request.app.state.TOOL_SERVERS or []:
+        if server["idx"] == server_idx:
+            return connection, server
+    log.warning(f"Tool server {tool_id} is not loaded; skipping.")
+    return connection, None
+
+
+def _add_tool(tools_dict: dict, function_name: str, tool_dict: dict) -> None:
+    """関数名の衝突は先勝ち(tool_ids の並び = preset の meta.toolIds 順)。
+
+    捨てた側と残した側の両方をログに出す(旧実装は捨てた側しか出さなかった)。
+    """
+    kept = tools_dict.get(function_name)
+    if kept is None:
+        tools_dict[function_name] = tool_dict
+        return
+    log.warning(
+        f"Tool name collision on '{function_name}': keeping "
+        f"{kept['tool_id']}.{function_name} (earlier in tool_ids), discarding "
+        f"{tool_dict['tool_id']}.{function_name}"
+    )
 
 
 def tool_description_from_docstring(docstring: str | None) -> str:
@@ -735,11 +775,14 @@ async def execute_tool_server(
 
         path_params = {}
         query_params = {}
-        body_params = {}
+        body_params = None
 
+        # path / query 以外の引数が body。header / cookie 宣言の引数も body には入れない。
+        non_body_names = set()
         for param in operation.get("parameters", []):
             param_name = param["name"]
             param_in = param["in"]
+            non_body_names.add(param_name)
             if param_name in params:
                 if param_in == "path":
                     path_params[param_name] = params[param_name]
@@ -754,13 +797,15 @@ async def execute_tool_server(
             query_string = "&".join(f"{k}={v}" for k, v in query_params.items())
             final_url = f"{final_url}?{query_string}"
 
-        if operation.get("requestBody", {}).get("content"):
-            if params:
-                body_params = params
-            else:
-                raise Exception(
-                    f"Request body expected for operation '{name}' but none found."
-                )
+        # requestBody: 引数が 1 つでもあれば送る。無いときは required の body だけ
+        # 空 object で送り、任意(required が無い / false)の body は省く。
+        # 旧実装は任意 body でも引数ゼロを例外にしていた(引数を省けない)上、
+        # path / query の引数まで body に重ねて送っていた。
+        request_body = operation.get("requestBody") or {}
+        if request_body.get("content"):
+            body = {k: v for k, v in params.items() if k not in non_body_names}
+            if body or request_body.get("required"):
+                body_params = body
 
         headers = {"Content-Type": "application/json"}
 
