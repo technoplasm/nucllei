@@ -153,5 +153,28 @@ def create_admin(
     typer.echo(f"Created administrator account: {user.email} (id={user.id})")
 
 
+@app.command(name="dedup-tool-calls")
+def dedup_tool_calls(
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Write changes (default: dry-run).")
+    ] = False,
+    database_url: Annotated[
+        Optional[str],
+        typer.Option(help="Default: $DATABASE_URL, else $DATA_DIR/webui.db."),
+    ] = None,
+    backup_dir: Annotated[
+        Optional[Path], typer.Option(help="Default: $DATA_DIR/backups.")
+    ] = None,
+):
+    """一度きりの掃除: 同じ call id の重複 tool_calls ブロックを chat から除去する(refs #142)。
+
+    詳細と本番での流し方は nucllei/maintenance/dedup_tool_calls.py の docstring。
+    nucllei.config を import しない(migration を走らせない)。
+    """
+    from nucllei.maintenance.dedup_tool_calls import run
+
+    run(database_url, apply, backup_dir)
+
+
 if __name__ == "__main__":
     app()
