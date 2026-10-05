@@ -89,14 +89,14 @@ def test_defaults_match_documented_values():
     assert config.AUDIO_STT_SEGMENT_SECONDS == 12
     assert config.AUDIO_STT_SEGMENT_PAUSE_MS == 400
     assert config.AUDIO_STT_SILENCE_THRESHOLD_DB == -45
-    assert config.AUDIO_STT_RECORDING_BITRATE_KBPS == 24
+    assert config.AUDIO_STT_RECORDING_BITRATE_KBPS == 32
     assert config.WHISPER_BEAM_SIZE == 5
     assert app.state.WHISPER_BEAM_SIZE == 5
     assert app.state.AUDIO_STT_INPUT == {
         "segment_seconds": 12,
         "segment_pause_ms": 400,
         "silence_threshold_db": -45,
-        "recording_bitrate_kbps": 24,
+        "recording_bitrate_kbps": 32,
     }
 
 
@@ -157,7 +157,7 @@ class TestAudioSttEnvKnobs(AbstractPostgresTest):
         assert stt["segment_seconds"] == 12
         assert stt["segment_pause_ms"] == 400
         assert stt["silence_threshold_db"] == -45
-        assert stt["recording_bitrate_kbps"] == 24
+        assert stt["recording_bitrate_kbps"] == 32
         # 既存のキーはそのまま
         assert "enable" in stt and "engine" in stt
 
@@ -165,13 +165,13 @@ class TestAudioSttEnvKnobs(AbstractPostgresTest):
             "segment_seconds": 6.0,
             "segment_pause_ms": 300,
             "silence_threshold_db": -55.0,
-            "recording_bitrate_kbps": 32,
+            "recording_bitrate_kbps": 16,
         }
         stt = self.fast_api_client.get("/api/config").json()["audio"]["stt"]
         assert stt["segment_seconds"] == 6.0
         assert stt["segment_pause_ms"] == 300
         assert stt["silence_threshold_db"] == -55.0
-        assert stt["recording_bitrate_kbps"] == 32
+        assert stt["recording_bitrate_kbps"] == 16
 
     def test_config_hides_audio_from_anonymous(self):
         assert "audio" not in self.fast_api_client.get("/api/config").json()

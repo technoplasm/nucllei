@@ -761,7 +761,7 @@ warning. Tune per site (microphone, room noise, CPU speed); background in
 | `AUDIO_STT_SEGMENT_SECONDS`        | env  | `12`    | 4 – 30     | while the user keeps talking, cut a segment at the first pause after this many seconds (forced cut at this + 4 s). Shorter = text appears sooner but more words break at the cuts       |
 | `AUDIO_STT_SEGMENT_PAUSE_MS`       | env  | `400`   | 100 – 2000 | silence length that counts as a pause to cut at. Shorter = fewer forced cuts, but more cuts inside a word                                                                               |
 | `AUDIO_STT_SILENCE_THRESHOLD_DB`   | env  | `-45`   | -90 – -10  | level below which input counts as silence (`AnalyserNode.minDecibels`). Depends on the microphone level: lower it for quiet input, raise it when room noise is never treated as silence |
-| `AUDIO_STT_RECORDING_BITRATE_KBPS` | env  | `24`    | 8 – 128    | bitrate of the full recording kept as an attachment (§4.4)                                                                                                                              |
+| `AUDIO_STT_RECORDING_BITRATE_KBPS` | env  | `32`    | 8 – 128    | bitrate of the full recording kept as an attachment (§4.4)                                                                                                                              |
 | `WHISPER_BEAM_SIZE`                | env  | `5`     | 1 – 10     | beam size of the bundled faster-whisper (ignored by external STT engines). Smaller = faster, less accurate                                                                              |
 
 TTS: `AUDIO_TTS_ENGINE` (RC, `""` = browser speech API; or `openai`, `azure`,
