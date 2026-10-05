@@ -1479,7 +1479,9 @@ async def read_doc(self, path: str) -> Markdown:
   filters alike; emitting it is a no-op. Use `__progress__` instead.
   Types tools actually use: `chat:message:files`
   (attach files to the message), `message` / `replace` (append to / replace the
-  message text), `source`/`citation`, `notification` (toast), `chat:title`.
+  message text), `notification` (toast), `chat:title`. `source` / `citation`
+  (citations under the message) were removed with the citation display; the
+  browser ignores them as unknown types.
 - File outputs: write bytes via `nucllei.storage.provider.Storage.upload_file` +
   `nucllei.models.files.Files.insert_new_file`, then emit `chat:message:files`;
   images become visible when the model writes

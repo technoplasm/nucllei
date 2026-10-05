@@ -21,8 +21,6 @@
 	import FileItem from '$lib/components/common/FileItem.svelte';
 
 	import Error from './Error.svelte';
-	import Citations from './Citations.svelte';
-	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import ContentBlocks from './ContentBlocks.svelte';
 	import MessageEditor from './ResponseMessage/MessageEditor.svelte';
@@ -75,10 +73,6 @@
 		$settings?.chatDirection
 			? ($settings.chatDirection.toLowerCase() as 'ltr' | 'rtl' | 'auto')
 			: undefined
-	);
-
-	const citationsEnabled = $derived(
-		(model?.info?.meta?.capabilities as { citations?: boolean } | undefined)?.citations ?? true
 	);
 
 	let edit = $state(false);
@@ -192,14 +186,6 @@
 											? message.error.content
 											: message.content}
 									/>
-								{/if}
-
-								{#if message.sources && citationsEnabled}
-									<Citations id={message.id} sources={message.sources} />
-								{/if}
-
-								{#if message.code_executions}
-									<CodeExecutions codeExecutions={message.code_executions} />
 								{/if}
 							</div>
 						{/if}

@@ -34,27 +34,6 @@ export interface ChatFile {
 	};
 }
 
-/** citation/source イベントの 1 件(Citations.svelte が集約表示)。 */
-export interface MessageSource {
-	source?: { id?: string; name?: string; url?: string; [key: string]: unknown };
-	document?: string[];
-	metadata?: Record<string, unknown>[];
-	distances?: number[];
-}
-
-/** code_execution source イベント(id で upsert — chat-events.ts)。 */
-export interface CodeExecution {
-	id: string;
-	name?: string;
-	code?: string;
-	language?: string;
-	result?: {
-		error?: string;
-		output?: string;
-		files?: { name: string; url: string }[];
-	};
-}
-
 export interface ChatMessage {
 	id: string;
 	parentId: string | null;
@@ -84,8 +63,6 @@ export interface ChatMessage {
 	/** ユーザー中断(task-cancelled)。完了時保存で永続化される。 */
 	interrupted?: boolean;
 
-	sources?: MessageSource[];
-	code_executions?: CodeExecution[];
 	usage?: Record<string, unknown>;
 
 	/** action 応答の messages が持ち得る付帯情報。FE は読まず wire へ素通しする。 */

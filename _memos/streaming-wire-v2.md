@@ -28,8 +28,8 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
 - **改訂(2026-07-17、#70 C1)**: Chat.svelte は `src/routes/(app)/chat/Chat.svelte` へ
   コロケート移動 + runes 化。純関数層を拡張(いずれも vitest で契約固定):
   - `chat-events.ts applyMessageMutation` — task-cancelled / delta / files /
-    source(code_execution upsert)など「message の状態だけを変える」イベントの適用
-    (status は 2026-08-18 に機構ごと撤去 — `tool-channels.md`)
+    など「message の状態だけを変える」イベントの適用
+    (status は 2026-08-18、source / citation は 2026-10-05 に機構ごと撤去 — `tool-channels.md`)
   - `chat-messages.ts buildWireMessages` — system 注入・画像 image_url 展開・tool 往復復元・
     空 content フィルタの wire 組み立て
   - `chat-messages.ts parseStopSequences` — stop 正規化(upstream の settings 側 stop で

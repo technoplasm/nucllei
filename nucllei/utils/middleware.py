@@ -474,7 +474,6 @@ async def process_chat_payload(
     }
 
     # Initialize events to store additional event to be sent to the client
-    # Initialize contexts and citation
     # llens(#107 仕様変更 2026-08-14): 無効 preset の agent session 子ターンでは
     # model が app.state.MODELS に無い(subagent 側が Model 行から合成して渡す)。
     # 後段の id 引き(get_task_model_id / pipeline inlet / __model__)が KeyError
@@ -776,12 +775,9 @@ async def process_chat_payload(
             stream_options["continuous_usage_stats"] = True
         form_data["stream_options"] = stream_options
 
-    # If there are citations, add them to the data_items
-    sources = [source for source in sources if source.get("source", {}).get("name", "")]
-
-    if len(sources) > 0:
-        events.append({"sources": sources})
-
+    # 添付の sources はモデルへの注入(上の build_source_context)専用。FE への出典
+    # 表示(message.sources の emit)は撤去済み(2026-10-05 ken 決定 — 引用は一旦
+    # 撤去。_memos/feature-triage.md)。
     return form_data, metadata, events
 
 

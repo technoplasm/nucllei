@@ -10,11 +10,10 @@
 		vision: $i18n.t('Model accepts image inputs'),
 		usage: $i18n.t(
 			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'
-		),
-		citations: $i18n.t('Displays citations in the response')
+		)
 	};
 
-	// キーは vision / usage / citations(usage はベースモデル依存でキーごと消える)。
+	// キーは vision / usage(usage はベースモデル依存でキーごと消える)。
 	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	// llens(#140): 旧「サブエージェント」トグル(meta.features.subagent)は撤去 —

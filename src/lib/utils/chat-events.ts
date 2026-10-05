@@ -26,7 +26,6 @@ export interface CompletionData {
 	title?: string;
 	error?: { content: string };
 	usage?: Record<string, unknown>;
-	sources?: unknown[];
 }
 
 export interface ContentBlock {
@@ -63,10 +62,6 @@ export function applyCompletionData(
 	if (data.error) {
 		message.error = { content: data.error.content };
 		result.error = true;
-	}
-
-	if (data.sources) {
-		message.sources = data.sources;
 	}
 
 	if (data.content_blocks) {
@@ -160,33 +155,6 @@ export function applyMessageMutation(
 
 	if (type === 'chat:message:files' || type === 'files') {
 		message.files = data.files;
-		return true;
-	}
-
-	if (type === 'source' || type === 'citation') {
-		if (data?.type === 'code_execution') {
-			// code execution は id で upsert
-			if (!message?.code_executions) {
-				message.code_executions = [];
-			}
-
-			const existingCodeExecutionIndex = message.code_executions.findIndex(
-				(execution: any) => execution.id === data.id
-			);
-
-			if (existingCodeExecutionIndex !== -1) {
-				message.code_executions[existingCodeExecutionIndex] = data;
-			} else {
-				message.code_executions.push(data);
-			}
-		} else {
-			// Regular source.
-			if (message?.sources) {
-				message.sources.push(data);
-			} else {
-				message.sources = [data];
-			}
-		}
 		return true;
 	}
 

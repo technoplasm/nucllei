@@ -293,9 +293,8 @@ export class ChatEvents {
 		}
 	};
 
-	// wire v2: chat:completion の data(スナップショット / delta / done / error / usage /
-	// sources)の message への適用は純関数 applyCompletionData に一元化。ここは
-	// 戻りフラグで副作用(TTS・haptic・自動スクロール・done 時の completed 経路)を駆動する。
+	// wire v2: chat:completion の data(スナップショット / delta / done / error / usage)の
+	// message への適用は純関数 applyCompletionData に一元化。ここは戻りフラグで副作用(TTS・haptic・自動スクロール・done 時の completed 経路)を駆動する。
 	// 高頻度の delta / スナップショットは同期で完結し、done のときだけ Promise を返す。
 	#chatCompletionEventHandler = (
 		data: CompletionData,
@@ -453,8 +452,7 @@ export class ChatEvents {
 				role: m.role,
 				content: m.content,
 				info: m.info ? m.info : undefined,
-				timestamp: m.timestamp,
-				...(m.sources ? { sources: m.sources } : {})
+				timestamp: m.timestamp
 			})),
 			...(event ? { event: event } : {}),
 			model_item: get(models).find((m) => m.id === modelId),

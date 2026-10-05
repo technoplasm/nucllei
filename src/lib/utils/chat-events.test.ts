@@ -101,11 +101,10 @@ describe('applyCompletionData', () => {
 		expect(result.error).toBe(true);
 	});
 
-	it('usage / sources を反映する', () => {
+	it('usage を反映する', () => {
 		const message: any = {};
-		applyCompletionData(message, { usage: { total_tokens: 10 }, sources: [{ source: {} }] });
+		applyCompletionData(message, { usage: { total_tokens: 10 } });
 		expect(message.usage).toEqual({ total_tokens: 10 });
-		expect(message.sources).toHaveLength(1);
 	});
 });
 
@@ -142,18 +141,14 @@ describe('applyMessageMutation', () => {
 		expect(message.files).toEqual([{ id: 'f1' }]);
 	});
 
-	it('source は sources に追記する', () => {
+	it('source / citation は管轄外(引用表示は撤去済み — 未知の型として呼び出し側へ)', () => {
 		const message: any = {};
-		applyMessageMutation('source', { source: { name: 'doc' } }, message);
-		applyMessageMutation('citation', { source: { name: 'doc2' } }, message);
-		expect(message.sources).toHaveLength(2);
-	});
-
-	it('source(code_execution)は id で upsert する', () => {
-		const message: any = {};
-		applyMessageMutation('source', { type: 'code_execution', id: 'x', result: 1 }, message);
-		applyMessageMutation('source', { type: 'code_execution', id: 'x', result: 2 }, message);
-		expect(message.code_executions).toEqual([{ type: 'code_execution', id: 'x', result: 2 }]);
+		expect(applyMessageMutation('source', { source: { name: 'doc' } }, message)).toBe(false);
+		expect(applyMessageMutation('citation', { source: { name: 'doc2' } }, message)).toBe(false);
+		expect(applyMessageMutation('source', { type: 'code_execution', id: 'x' }, message)).toBe(
+			false
+		);
+		expect(message).toEqual({});
 	});
 
 	it('管轄外イベント(chat:completion / chat:title / notification 等)は false', () => {

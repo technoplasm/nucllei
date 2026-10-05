@@ -83,8 +83,7 @@
 	// is_usage_requested と対。旧 addUsage の owned_by 分岐は廃止)。
 	let capabilities = $state<Record<string, boolean | undefined>>({
 		vision: false,
-		usage: true,
-		citations: true
+		usage: true
 	});
 
 	let toolIds = $state<string[]>([]);

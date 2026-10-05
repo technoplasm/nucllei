@@ -783,7 +783,6 @@ export interface ModelMeta {
 	capabilities?: {
 		vision?: boolean;
 		usage?: boolean;
-		citations?: boolean;
 		[key: string]: boolean | undefined;
 	};
 	profile_image_url?: string;
