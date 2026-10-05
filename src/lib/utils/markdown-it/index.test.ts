@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lex, render } from './index';
+import { lex, render, type LexEnv } from './index';
 
 describe('markdown-it lexer (#22 L2)', () => {
 	it('setext トラップを解消: 段落 + 次行 --- が heading に化けない', () => {
@@ -140,5 +140,86 @@ describe('markdown-it lexer (#22 L2)', () => {
 			expect(json).not.toContain('onclick');
 			expect(json).not.toContain('evil');
 		});
+	});
+});
+
+describe('リンクによる簡易引用 [/ext/…] / [file_id](#146 の簡易版)', () => {
+	const FID = '0b6c8c0e-1d2f-4a3b-9c8d-7e6f5a4b3c2d';
+	const env: LexEnv = { fileNames: new Map([[FID, '手順書.pdf']]) };
+	const inline = (src: string, e: LexEnv = env) => lex(src, e)[0].tokens;
+	const links = (src: string, e: LexEnv = env) =>
+		inline(src, e).filter((t: any) => t.type === 'link');
+
+	it('[/ext/…] はリンク。表示は末尾の要素、fragment は › で続ける', () => {
+		const [a, b] = links(
+			'根拠 [/ext/cage/doc/院内マニュアル/医療安全管理マニュアル#医療安全] と [/ext/cage/static/x/15-7.pdf]'
+		);
+		expect(a.href).toBe(
+			'/ext/cage/doc/' +
+				encodeURIComponent('院内マニュアル') +
+				'/' +
+				encodeURIComponent('医療安全管理マニュアル') +
+				'#' +
+				encodeURIComponent('医療安全')
+		);
+		expect(a.tokens[0].text).toBe('医療安全管理マニュアル › 医療安全');
+		expect(a.target).toBeNull(); // 描画側の既定 = 新しいタブ(_blank)
+		expect(b.href).toBe('/ext/cage/static/x/15-7.pdf');
+		expect(b.tokens[0].text).toBe('15-7.pdf');
+	});
+
+	it('percent-encoded の住所も表示はデコードする', () => {
+		const [a] = links('[/ext/a/%E5%9B%B3.png]');
+		expect(a.href).toBe('/ext/a/%E5%9B%B3.png');
+		expect(a.tokens[0].text).toBe('図.png');
+	});
+
+	it('[file_id] はそのチャットの添付に在るときだけリンク(表示はファイル名)', () => {
+		const [a] = links(`添付 [${FID}] を参照`);
+		expect(a.href).toBe(`/api/v1/files/${FID}/content`);
+		expect(a.tokens[0].text).toBe('手順書.pdf');
+		// 不在の id・env 無しは文字のまま
+		const other = 'ffffffff-1d2f-4a3b-9c8d-7e6f5a4b3c2d';
+		expect(links(`[${other}]`)).toHaveLength(0);
+		expect(links(`[${FID}]`, {})).toHaveLength(0);
+		expect(
+			inline(`[${other}]`)
+				.map((t: any) => t.text)
+				.join('')
+		).toBe(`[${other}]`);
+	});
+
+	it('[1] [580] [site-a] は文字のまま', () => {
+		const toks = inline('第3条 [1]、表 [580]、[site-a]。');
+		expect(toks.some((t: any) => t.type === 'link')).toBe(false);
+		expect(toks.map((t: any) => t.text).join('')).toBe('第3条 [1]、表 [580]、[site-a]。');
+	});
+
+	it('[ラベル](url) は普通のリンクのまま(直後の "(" は巻き込まない)', () => {
+		const [a] = links('[/ext/a.pdf](https://e.x/b.pdf)');
+		expect(a.href).toBe('https://e.x/b.pdf');
+		expect(a.tokens[0].text).toBe('/ext/a.pdf');
+		const [b] = links(`[${FID}](https://e.x/c)`);
+		expect(b.href).toBe('https://e.x/c');
+	});
+
+	it('参照リンク定義 [x]: url と [a][b] は巻き込まない', () => {
+		expect(links('[/ext/a.pdf]: https://e.x')).toHaveLength(0);
+		expect(links(`[${FID}]: https://e.x`)).toHaveLength(0);
+		expect(links('[/ext/a.pdf][x]')).toHaveLength(0);
+	});
+
+	it('コード内は対象外', () => {
+		const [p] = lex(`\`[/ext/a.pdf]\` と \`[${FID}]\``, env);
+		expect(p.tokens.some((t: any) => t.type === 'link')).toBe(false);
+		const [c] = lex('```\n[/ext/a.pdf]\n```', env);
+		expect(c.type).toBe('code');
+		expect(c.text).toBe('[/ext/a.pdf]');
+	});
+
+	it('空白を含む・/ext/ で始まらないものは対象外', () => {
+		expect(links('[/ext/a b.pdf]')).toHaveLength(0);
+		expect(links('[/extra/a.pdf]')).toHaveLength(0);
+		expect(links('[ext/a.pdf]')).toHaveLength(0);
 	});
 });

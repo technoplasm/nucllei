@@ -32,6 +32,23 @@
 		}) => void;
 	} = $props();
 
+	// 本文の `[file_id]` をリンクにする根拠: このチャット(history の全メッセージ)の添付
+	// id → 表示名(#146 の簡易版)。添付の集合が変わらない限り同じ Map を返す
+	// (Markdown 側は参照が変わると確定ブロックを lex し直す)
+	let fileNamesCache: { key: string; map: Map<string, string> } | null = null;
+	const fileNames = $derived.by(() => {
+		const entries: [string, string][] = [];
+		for (const message of Object.values(history?.messages ?? {})) {
+			for (const file of message?.files ?? []) {
+				if (!file?.id) continue;
+				entries.push([file.id, file.name ?? file.file?.meta?.name ?? file.file?.filename ?? '']);
+			}
+		}
+		const key = JSON.stringify(entries);
+		if (fileNamesCache?.key !== key) fileNamesCache = { key, map: new Map(entries) };
+		return fileNamesCache.map;
+	});
+
 	let contentContainerElement: HTMLDivElement | null = $state(null);
 	let floatingButtonsElement: { closeHandler: () => void } | null = $state(null);
 
@@ -119,7 +136,7 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	<Markdown {id} {content} {model} {onTaskClick} />
+	<Markdown {id} {content} {model} {fileNames} {onTaskClick} />
 
 	<!-- content div の中に置く(外に置くと space-y の親の下で :last-child 判定を壊し、
 	     最後のブロックにも margin が付く — tailwind v4 の space-y は

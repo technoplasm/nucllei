@@ -94,7 +94,10 @@ export default defineConfig({
 			'/health': BACKEND_PROXY,
 			// llens(#84): app.html の <link rel="manifest"> が叩く BE route(PWA off では {})。
 			// proxy に無いと dev だけ 404 が console に出る
-			'/manifest.json': BACKEND_PROXY
+			'/manifest.json': BACKEND_PROXY,
+			// llens(#97 / #146): 認証付き参照資料の配信(本文の [/ext/…] リンク・図・PDF)。
+			// `/ext` と `/ext/…` だけ(前方一致の `/extXXX` は SPA 側に残す)
+			'^/ext(/|$)': BACKEND_PROXY
 		},
 		watch: {
 			// _links/ ・ ,始まりディレクトリ(個人作業スペース、symlink 置き場を含む)配下の

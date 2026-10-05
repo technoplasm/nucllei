@@ -13,6 +13,7 @@ import type { Token as MDToken } from 'markdown-it/index.js';
 import hljs from 'highlight.js';
 import markdownItAttrs from 'markdown-it-attrs';
 import katexPlugin from './katex';
+import { WEBUI_BASE_URL } from '$lib/constants';
 
 const md = new MarkdownIt({
 	html: true, // 生 HTML は html トークンとして通し、描画側で DOMPurify する
@@ -43,6 +44,77 @@ md.use(markdownItAttrs, { allowedAttributes: ['target', 'download'] });
 // lheading = setext 見出し(段落の次行の ---/=== で遡って h1/h2 になる)。
 // reference = `[foo]: url` の参照リンク定義。どちらもストリーミングで壊れる。
 md.disable(['lheading', 'reference']);
+
+// リンクによる簡易引用(#146 の簡易版、2026-10-05): 本文中の角括弧 1 つだけの参照を
+// リンクにする。対象は中身が次の 2 形のときだけ(それ以外の `[1]` `[580]` `[site-a]` は文字のまま):
+//   1. `/ext/` で始まるパス(`#見出し` の fragment 可)— 表示は末尾の要素(+ ` › 見出し`)、
+//      リンク先はそのまま(`#見出し` で節に飛ばすのは /ext の配信側の責務)
+//   2. file_id(UUID 形)— lex の env.fileNames(そのチャットの添付 id → ファイル名)に
+//      在るときだけ。表示はファイル名、リンク先は `/api/v1/files/{id}/content`
+// 直後が `(` `[` `:` のもの(`[ラベル](url)` / `[a][b]` / 参照リンク定義 `[x]: url`)は
+// 巻き込まない。コード内は backticks / fence が先に取るので対象外。
+const EXT_REF_RE = /^\/ext\/[^\s[\]]+$/;
+const FILE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface LexEnv {
+	/** そのチャットに実在する添付の id → 表示名(`[file_id]` をリンクにする根拠) */
+	fileNames?: Map<string, string>;
+}
+
+function safeDecode(s: string): string {
+	try {
+		return decodeURIComponent(s);
+	} catch {
+		return s;
+	}
+}
+
+/** `/ext/a/b.md#節` → `b.md › 節`(末尾 "/" のディレクトリは最後の要素) */
+export function extRefLabel(ref: string): string {
+	const hash = ref.indexOf('#');
+	const path = hash >= 0 ? ref.slice(0, hash) : ref;
+	const fragment = hash >= 0 ? safeDecode(ref.slice(hash + 1)) : '';
+	const parts = path.split('/').filter(Boolean);
+	const last = safeDecode(parts[parts.length - 1] ?? path);
+	return fragment ? `${last} › ${fragment}` : last;
+}
+
+md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
+	const src = state.src;
+	const start = state.pos;
+	if (src.charCodeAt(start) !== 0x5b /* [ */) return false;
+	const end = src.indexOf(']', start + 1);
+	if (end < 0 || end > state.posMax) return false;
+	const inner = src.slice(start + 1, end);
+	const next = src[end + 1];
+	if (next === '(' || next === '[' || next === ':') return false;
+
+	let href: string;
+	let label: string;
+	if (EXT_REF_RE.test(inner)) {
+		href = state.md.normalizeLink(inner);
+		if (!state.md.validateLink(href)) return false;
+		label = extRefLabel(inner);
+	} else if (FILE_ID_RE.test(inner)) {
+		const name = (state.env as LexEnv | undefined)?.fileNames?.get(inner);
+		if (name === undefined) return false;
+		href = `${WEBUI_BASE_URL}/api/v1/files/${inner}/content`;
+		label = name || inner;
+	} else {
+		return false;
+	}
+
+	if (!silent) {
+		const open = state.push('link_open', 'a', 1);
+		open.attrs = [['href', href]];
+		open.markup = 'bracket_ref';
+		const text = state.push('text', '', 0);
+		text.content = label;
+		state.push('link_close', 'a', -1);
+	}
+	state.pos = end + 1;
+	return true;
+});
 
 // 旧 details 擬似 HTML(<details type="reasoning"> 等)の互換処理
 // (details_block ルーラ + parseDetails)は撤去済み — 旧データ互換を
@@ -374,9 +446,10 @@ md.renderer.rules.katex_block = (tokens, idx) => tokens[idx].content + '\n';
 /**
  * marked.lexer(src) 互換の入口。marked 形のトークン配列を返す。
  * MarkdownTokens.svelte / MarkdownInlineTokens.svelte がそのまま消費できる。
+ * env.fileNames を渡すと `[file_id]` がリンクになる(上の bracket_ref)。
  */
-export function lex(src: string): AnyToken[] {
-	const mdTokens = md.parse(src ?? '', {});
+export function lex(src: string, env: LexEnv = {}): AnyToken[] {
+	const mdTokens = md.parse(src ?? '', env);
 	return convertBlocks(mdTokens).tokens;
 }
 
