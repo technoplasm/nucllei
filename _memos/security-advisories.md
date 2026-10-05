@@ -114,6 +114,31 @@
 9f4f 相当のコア markdown 経路はサニタイズ済みを確認。再検証は #17、視覚スモークは #12 で。
 **継続監視**: v0.10.x の未公開 access-control 修正(下記 embargo 節)。
 
+## 2026-10-05 リリースノート照合で見つかった #24 未記載分(対応済み)
+
+upstream のリリースノート(記述テキストのみ。リンク先・ソースは未閲覧)と v0.6.5 ベースの自コードを
+照合して見つかった穴。いずれも **GHSA としては公開されておらず、本メモ(#24)の棚卸しに載っていなかった**。
+再現は scratchpad の再現スクリプトで確認し、直し方は自前で設計した。各修正に回帰テスト付き。
+
+| 内容 | 深刻度(自己評価) | commit | 回帰テスト |
+|---|---|---|---|
+| parentId が循環した履歴を保存させると `get_message_list` が無限ループし、イベントループごとサーバー全体がハング(DoS)。append-only ガード(#31)は content しか見ず通していた。`get_message_list` に visited ガード + 保存 / 作成 / インポートで「parentId 実在・循環なし・currentId 実在」を検証し 400 | HIGH(一般ユーザーで全体停止) | 573ebbb59 | `test_chats.py::TestChatHistoryValidation`、`test_message_helpers.py` |
+| group の permissions が null(作成時に省略)だと権限合成が落ち、メンバーの API が全て 500。読み側で null を `{}` 扱い、作成・更新時に `{}` へ正規化 | MED(可用性) | d7df6cedd | `test_access_control.py::TestNullGroupPermissions` |
+| trusted header 認証で 2 人目以降が自動登録されない(/signup 経由のため、1 人目で ENABLE_SIGNUP が落ちると 403)。ヘッダ認証専用の登録に分離 | MED(可用性) | 320d39194 | `test_auth_trusted_oauth.py` |
+| trusted header のメールと cookie の JWT のユーザーを照合していない — 共有 PC で前の人のセッションのまま次の人が使える。不一致は 401 → 再サインインでヘッダ側のユーザーに入れ替わる | HIGH(なりすまし。共有端末運用に直撃) | 320d39194 | 同上 |
+| OAuth ロール管理で許可 / admin ロールのどちらにも一致しないと DEFAULT_USER_ROLE に落ちてログインできた。fail closed(403)に | MED(OAuth は既定 off) | 320d39194 | 同上 |
+| admin のユーザー追加(`/auths/add`)が返す「新ユーザーとしての token」に exp が無い(恒久資格情報)。SESSION_IDLE_TIMEOUT(無期限設定でも上限 1 時間)で期限付きに | LOW〜MED | 320d39194 | 同上 |
+
+同じ照合で直した #24 外(機能バグ)の分は refs #142: payload(presence_penalty / top_k / min_p /
+repeat_penalty が OpenAI 互換へ送られない・stop 文字列の 1 文字分割)eb7cffb2c、Postgres の NUL 入り
+メッセージで検索 500 cd4c687c8、音声の外部呼び出しにタイムアウトが無い 333af7b52。
+
+### 受容(対応しない)判断
+
+- **GHSA-h2cw-7qw9-56xr / GHSA-jh9g-8jqw-m2qx(system prompt 露出)** — 一般ユーザーに preset の params
+  (system prompt を含む。`/api/models` の `info.params`)が見える件は **対応しない(受容)**。
+  ken 判断(2026-10-05):「system prompt は見えてもいい。モデル自体があまり隠してもくれないので」
+
 ## 最重要 TOP 3(id と一言理由)
 
 > 2026-07-05 棚卸し時点のスナップショット。現在は 3 件とも対応済み(1 → #36 / 2 → #38 / 3 → #39)。
@@ -181,7 +206,7 @@
 - Ollama 特化(フォークは OpenAI 互換一本 = 未使用想定): GHSA-9rpj-v7hf-vv2w, GHSA-rcvp-6fgw-c7fh。
 - channels(既定オフ, コードは存在確認済み): GHSA-73x5-h92w-xc2j, GHSA-3856-3vxq-m6fc, GHSA-7rjh-px4v-5w55, GHSA-c7wp-3qh5-55pv, GHSA-hmgr-67hw-j2cq, GHSA-5gc6-xhv4-2wg6, GHSA-wwhq-cx22-f7vv, GHSA-jgj3-r8hr-9pjw, GHSA-gh7p-78x6-jw6m(※範囲外 >=0.7.0)。
 - Redis/マルチインスタンス前提: GHSA-3x8w-4f7p-xxc2(tool_servers キャッシュ汚染; tool_servers は保持機能)。
-- その他: GHSA-cache /path traversal **GHSA-j2c8-v969-8r5c(CVE-2026-54014, `/cache/{path}` sibling-prefix path traversal)** は audio/画像キャッシュ配信に効くので Tier2 相当で要注意。GHSA-4r4w-2wgp-w7cj(prompt history IDOR), GHSA-rjmp-vjf2-qf4g(feedback 偽装), GHSA-hr43-rjmr-7wmm(folder mass assignment), GHSA-mqq6-cqcx-38vg(model import 上書き), GHSA-j6w6-986j-2m2m(CSRF image url), GHSA-h2cw-7qw9-56xr/GHSA-jh9g-8jqw-m2qx(system prompt 露出), GHSA-v6qf-75pr-p96m(model ACL query param), GHSA-74h3-cxq7-vc5q(Socket.IO session_id でツール実行; code-interpreter 部分は Pyodide 削除で緩和されるがツール実行面は残る)。
+- その他: GHSA-cache /path traversal **GHSA-j2c8-v969-8r5c(CVE-2026-54014, `/cache/{path}` sibling-prefix path traversal)** は audio/画像キャッシュ配信に効くので Tier2 相当で要注意。GHSA-4r4w-2wgp-w7cj(prompt history IDOR), GHSA-rjmp-vjf2-qf4g(feedback 偽装), GHSA-hr43-rjmr-7wmm(folder mass assignment), GHSA-mqq6-cqcx-38vg(model import 上書き), GHSA-j6w6-986j-2m2m(CSRF image url), GHSA-h2cw-7qw9-56xr/GHSA-jh9g-8jqw-m2qx(system prompt 露出)【2026-10-05 受容 — 上の「受容(対応しない)判断」】, GHSA-v6qf-75pr-p96m(model ACL query param), GHSA-74h3-cxq7-vc5q(Socket.IO session_id でツール実行; code-interpreter 部分は Pyodide 削除で緩和されるがツール実行面は残る)。
 
 ---
 
