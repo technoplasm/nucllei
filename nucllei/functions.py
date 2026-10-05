@@ -62,7 +62,13 @@ async def get_function_models(request):
     pipe_models = []
 
     for pipe in pipes:
-        function_module = get_function_module_by_id(request, pipe.id)
+        # 読み込めない pipe が 1 つあっても /api/models 全体を落とさない — その pipe
+        # だけ飛ばしてログに残す(2026-10-05)
+        try:
+            function_module = get_function_module_by_id(request, pipe.id)
+        except Exception:
+            log.exception(f"skipping pipe function '{pipe.id}' that failed to load")
+            continue
 
         # Check if function is a manifold
         if hasattr(function_module, "pipes"):
@@ -86,8 +92,14 @@ async def get_function_models(request):
             )
 
             for p in sub_pipes:
+                if not (isinstance(p, dict) and p.get("id")):
+                    log.warning(
+                        f"get_function_models: '{pipe.id}' returned a sub pipe "
+                        f"without id: {p!r}"
+                    )
+                    continue
                 sub_pipe_id = f'{pipe.id}.{p["id"]}'
-                sub_pipe_name = p["name"]
+                sub_pipe_name = p.get("name", p["id"])
 
                 if hasattr(function_module, "name"):
                     sub_pipe_name = f"{function_module.name}{sub_pipe_name}"
@@ -293,6 +305,19 @@ async def generate_function_chat_completion(
     if form_data.get("stream", False):
 
         async def stream_content():
+            # 終端は pipe の戻りの型に依らず揃える: 本文の後に finish_reason=stop の
+            # チャンクと `data: [DONE]`(SSE の空行区切りまで)。旧実装は str / sync
+            # Generator でしか終端を出さず(async generator・dict・Iterator は [DONE]
+            # 無し)、出すときも "\n\n" が無く次の行と繋がって壊れた(2026-10-05)。
+            # pipe 自身が StreamingResponse を返したときは、その SSE をそのまま流す。
+            def finish():
+                finish_message = openai_chat_chunk_message_template(
+                    form_data["model"], ""
+                )
+                finish_message["choices"][0]["finish_reason"] = "stop"
+                return sse_line(finish_message) + sse_raw("[DONE]")
+
+            piped_done = False
             try:
                 res = await execute_pipe(pipe, params)
 
@@ -303,32 +328,29 @@ async def generate_function_chat_completion(
                     return
                 if isinstance(res, dict):
                     yield sse_line(res)
-                    return
-
+                elif isinstance(res, str):
+                    yield sse_line(
+                        openai_chat_chunk_message_template(form_data["model"], res)
+                    )
+                elif isinstance(res, AsyncGenerator):
+                    async for line in res:
+                        chunk = process_line(form_data, line)
+                        piped_done = chunk.strip() == "data: [DONE]"
+                        yield chunk
+                elif isinstance(res, Iterator):
+                    for line in res:
+                        chunk = process_line(form_data, line)
+                        piped_done = chunk.strip() == "data: [DONE]"
+                        yield chunk
             except Exception as e:
                 log.error(f"Error: {e}")
                 yield sse_line({"error": {"detail": str(e)}})
+                yield sse_raw("[DONE]")
                 return
 
-            if isinstance(res, str):
-                message = openai_chat_chunk_message_template(form_data["model"], res)
-                yield sse_line(message)
-
-            if isinstance(res, Iterator):
-                for line in res:
-                    yield process_line(form_data, line)
-
-            if isinstance(res, AsyncGenerator):
-                async for line in res:
-                    yield process_line(form_data, line)
-
-            if isinstance(res, str) or isinstance(res, Generator):
-                finish_message = openai_chat_chunk_message_template(
-                    form_data["model"], ""
-                )
-                finish_message["choices"][0]["finish_reason"] = "stop"
-                yield sse_line(finish_message)
-                yield "data: [DONE]"
+            # pipe 自身が最後に `data: [DONE]` を出していれば二重に足さない
+            if not piped_done:
+                yield finish()
 
         return StreamingResponse(stream_content(), media_type="text/event-stream")
     else:

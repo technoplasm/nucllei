@@ -341,6 +341,34 @@ def apply_params_to_form_data(form_data, model):
     return form_data
 
 
+def merge_tool_specs(server_specs: list, existing) -> list:
+    """サーバー側で解決した tool spec に、既に form_data にあった tools を足す。
+
+    既にあった分 = headless の呼び出し側が渡した tools(実行は呼び出し側の仕事 —
+    README_API §4.3)と inlet filter が足した tools。旧実装はサーバー側の tool が
+    1 つでもあると丸ごと上書きして黙って捨てていた(監査 2026-10-05)。
+    同名はサーバー側が勝つ(呼び出し側の spec で実行される tool を差し替えさせない)。
+    チャット経路でモデルがサーバーに無い tool を呼べば、ループは「使えない tool」と
+    明示して返す(execute_tool_calls)。
+    """
+    merged = list(server_specs)
+    names = {
+        (spec.get("function") or {}).get("name")
+        for spec in server_specs
+        if isinstance(spec, dict)
+    }
+    for spec in existing if isinstance(existing, list) else []:
+        if not isinstance(spec, dict):
+            continue
+        name = (spec.get("function") or {}).get("name")
+        if name and name in names:
+            continue
+        if name:
+            names.add(name)
+        merged.append(spec)
+    return merged
+
+
 def get_model_tool_ids(model) -> list[str]:
     """llens(#54): tool はモデル割り当て(meta.toolIds)一本 — サーバー側で解決する。"""
     return (model or {}).get("info", {}).get("meta", {}).get("toolIds", []) or []
@@ -683,13 +711,16 @@ async def process_chat_payload(
         # #110: 適格 tool の spec には共有 background 引数を注入する(spec の
         # コピーに対して — tools_dict 側は汚さず、unknown-drop の基準は元 spec)。
         metadata["tools"] = tools_dict
-        form_data["tools"] = [
-            {
-                "type": "function",
-                "function": spec_for_model(name, tool, allow_background),
-            }
-            for name, tool in tools_dict.items()
-        ]
+        form_data["tools"] = merge_tool_specs(
+            [
+                {
+                    "type": "function",
+                    "function": spec_for_model(name, tool, allow_background),
+                }
+                for name, tool in tools_dict.items()
+            ],
+            form_data.get("tools"),
+        )
 
     try:
         form_data, flags = await chat_completion_files_handler(request, form_data, user)
@@ -801,6 +832,39 @@ async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
     )
 
 
+def parse_generated_title(text: str) -> str:
+    """タイトル生成の応答本文(`{"title": "..."}` を含む想定)からタイトルを取り出す。
+
+    取り出せなければ ""(呼び手が最初の発話にフォールバック)。旧実装は JSON に title が
+    無いと既定値の "New Chat" を返し、フォールバックが効かずに「New Chat」のまま残った
+    (再生成・最初の発話の編集でタイトル生成が JSON の形を外したとき — 2026-10-05)。
+    """
+    text = text or ""
+    candidate = text[text.find("{") : text.rfind("}") + 1]
+    try:
+        parsed = json.loads(candidate)
+    except Exception:
+        return ""
+    title = parsed.get("title") if isinstance(parsed, dict) else None
+    if not isinstance(title, str):
+        return ""
+    title = " ".join(title.split())
+    if title.lower() == "new chat":
+        return ""
+    return title
+
+
+def first_message_title(messages: list) -> str:
+    """最初の発話から作るタイトル(生成に失敗したとき・自動生成 OFF のとき)。"""
+    for m in messages or []:
+        if m.get("role", "user") == "user":
+            content = m.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            break
+    return "New Chat"
+
+
 async def run_response_background_tasks(request, user, metadata, tasks, event_emitter):
     """応答確定後のバックグラウンドタスク(現状はタイトル生成のみ)。"""
     # llens(#107): agent session の子ターンはタイトル生成を走らせない
@@ -824,7 +888,8 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
             res = await generate_title(
                 request,
                 {
-                    "model": message["model"],
+                    "model": message.get("model")
+                    or metadata.get("model", {}).get("id"),
                     "messages": messages,
                     "chat_id": metadata["chat_id"],
                 },
@@ -842,17 +907,9 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
                 else:
                     title_string = ""
 
-                title_string = title_string[
-                    title_string.find("{") : title_string.rfind("}") + 1
-                ]
-
-                try:
-                    title = json.loads(title_string).get("title", "New Chat")
-                except Exception:
-                    title = ""
-
-                if not title:
-                    title = messages[0].get("content", "New Chat")
+                title = parse_generated_title(title_string) or first_message_title(
+                    messages
+                )
 
                 Chats.update_chat_title_by_id(metadata["chat_id"], title)
 
@@ -866,7 +923,7 @@ async def run_response_background_tasks(request, user, metadata, tasks, event_em
             # タイトル自動生成 OFF: 最初のユーザー発話をタイトルにする(仕様 2026-07-17
             # 決定 — New Chat が並ぶよりよい)。emit は DB と同じ値を流す
             # (旧実装は応答本文を流していて表示が食い違った)
-            title = messages[0].get("content", "New Chat")
+            title = first_message_title(messages)
 
             Chats.update_chat_title_by_id(metadata["chat_id"], title)
 
@@ -1169,6 +1226,21 @@ def _live_usage_payload(usage: dict, context_size) -> dict:
     return payload
 
 
+def stream_error_content(error) -> str:
+    """ストリーム中の `{"error": ...}` フレームから表示用の文面を取り出す。
+
+    nucllei 形 {"content"} / OpenAI・SGLang 形 {"message"} / {"detail"} / 素の文字列。
+    どれにも当たらない dict は JSON で(repr にしない)。
+    """
+    if isinstance(error, dict):
+        for key in ("content", "message", "detail"):
+            value = error.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return json.dumps(error, ensure_ascii=False)
+    return str(error)
+
+
 async def consume_model_stream(
     request,
     response,
@@ -1266,15 +1338,18 @@ async def consume_model_stream(
             if not choices:
                 error = data.get("error", {})
                 if error:
-                    # エラー形の一元化: {"error": {"content": str}}
-                    if not isinstance(error, dict) or "content" not in error:
-                        error = {"content": str(error)}
+                    # エラー形の一元化: {"error": {"content": str}}。上流の
+                    # {"message": ...}(OpenAI / SGLang)は message を取り出す
+                    # (dict の repr を見せない)。emit だけでなく DB にも残す —
+                    # リロード後もエラーとして見えるように(途中失敗の except と同じ規律)。
+                    error_data = {"error": {"content": stream_error_content(error)}}
                     await event_emitter(
                         {
                             "type": "chat:completion",
-                            "data": {"error": error},
+                            "data": error_data,
                         }
                     )
+                    await _persist_message_snapshot(metadata, error_data)
                 # #102: usage の主たる永続化点はこの最終フレーム(choices: [])。
                 # チャンクに載る累積 usage(continuous)は下の chat:usage(揮発)で
                 # 流すのみで、ここを通らない限り DB には書かない。
@@ -2248,14 +2323,24 @@ async def process_chat_response(
                         user,
                     )
 
-                    if isinstance(res, StreamingResponse):
-                        followup_tool_calls = await consume_model_stream(
-                            request, res, assembler, **stream_kwargs
-                        )
-                    else:
-                        followup_tool_calls = await ingest_model_response_json(
-                            request, res, assembler, **ingest_kwargs
-                        )
+                    try:
+                        if isinstance(res, StreamingResponse):
+                            followup_tool_calls = await consume_model_stream(
+                                request, res, assembler, **stream_kwargs
+                            )
+                        else:
+                            followup_tool_calls = await ingest_model_response_json(
+                                request, res, assembler, **ingest_kwargs
+                            )
+                    finally:
+                        # 追撃の上流接続を必ず閉じる(初回の応答と同じ扱い)。stop
+                        # (CancelledError)や途中失敗で読み捨てたままにすると、上流
+                        # (SGLang)は接続が残っている限り最後まで生成し続ける。
+                        if (
+                            isinstance(res, StreamingResponse)
+                            and res.background is not None
+                        ):
+                            await res.background()
                     if followup_tool_calls:
                         tool_calls.append(followup_tool_calls)
                 except Exception as e:
@@ -2368,9 +2453,17 @@ async def process_chat_response(
                 }
             )
 
-            await run_response_background_tasks(
-                request, user, metadata, tasks, event_emitter
-            )
+            # タイトル処理は応答の確定(done)の後。ここでの失敗を外側の except に
+            # 落とすと、成功した応答に「Connection to the model was lost」が保存され
+            # done が 2 回飛ぶ — 独立に握ってログだけ残す。
+            try:
+                await run_response_background_tasks(
+                    request, user, metadata, tasks, event_emitter
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("post-response background tasks (title) failed")
         except asyncio.CancelledError:
             # llens: 中断でも open な reasoning を閉じてから保存・emit する。
             # done=false のブロックが DB に残ると「Thinking…」スピナーが

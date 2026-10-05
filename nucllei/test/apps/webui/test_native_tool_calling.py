@@ -1124,12 +1124,16 @@ def test_measure_carried_tokens_times_out(monkeypatch):
 
 # ---- 初回の生成パラメータを追撃・計測にも載せる(監査 2026-10-05)-------------------
 
+# チャット / ユーザー単位の params(apply_params_to_form_data が展開)と、inlet filter が
+# form_data に書き足したもの(reasoning_effort 等)— どちらも追撃の時点では
+# process_chat_payload を通った後の form_data のトップレベルキーとして同じ形で見える。
 _INITIAL_PARAMS = {
     "temperature": 0.1,
     "max_tokens": 50,
     "stop": ["###"],
     "seed": 7,
     "top_p": 0.9,
+    "reasoning_effort": "low",
 }
 
 
@@ -1166,9 +1170,9 @@ def test_measure_carries_initial_call_params_but_stops_at_one_token(monkeypatch)
         "stream": True,
         "stream_options": {"include_usage": True},
         "messages": [{"role": "user", "content": "q"}],
+        **_INITIAL_PARAMS,
         "reasoning_effort": "high",
         "chat_template_kwargs": {"thinking": True},
-        **_INITIAL_PARAMS,
     }
     result, sent = _measure_via_real_router(
         monkeypatch,
@@ -1237,6 +1241,186 @@ def test_followups_and_measure_share_turn_image_cache(monkeypatch):
     assert len(caches) == 3
     assert isinstance(caches[0], dict)
     assert all(c is caches[0] for c in caches)
+
+
+def test_stop_during_followup_closes_upstream_stream(monkeypatch):
+    """追撃の読み取り中に stop しても、追撃の上流接続を閉じる(response.background)。
+    旧実装は初回の応答だけ閉じており、追撃は読み捨てのまま — SGLang は接続が残る限り
+    最後まで生成し続けた(監査 2026-10-05、upstream-triage C/leak_c)。"""
+    from starlette.background import BackgroundTask
+
+    from nucllei import tasks as task_registry
+
+    closed = []
+
+    async def upstream(request, form_data, user, fixture):
+        if fixture != "hang":
+            return _sse_response(fixture)
+
+        async def gen():
+            yield (
+                'data: {"choices":[{"index":0,"delta":{"content":"途中"},'
+                '"finish_reason":null}]}\n\n'
+            )
+            for task_id in task_registry.list_task_ids_by_chat_id("chat-1"):
+                asyncio.get_running_loop().call_soon(
+                    lambda t=task_id: asyncio.ensure_future(task_registry.stop_task(t))
+                )
+            await asyncio.sleep(3600)
+
+        async def close():
+            closed.append(True)
+
+        return StreamingResponse(
+            gen(), media_type="text/event-stream", background=BackgroundTask(close)
+        )
+
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["hang"],
+            upstream=upstream,
+        )
+    )
+
+    assert len(completion_calls) == 1
+    assert closed == [True]
+    assert any(e.get("type") == "task-cancelled" for e in events)
+
+
+def test_stream_error_frame_is_persisted_with_message_text(monkeypatch):
+    """ストリーム途中の `{"error": {...}}` フレームは message を取り出して emit し、DB にも
+    残す(旧実装は emit だけで、表示も dict の repr だった — 監査 2026-10-05)。"""
+    error_frame = json.dumps(
+        {
+            "error": {
+                "object": "error",
+                "message": "Requested token count exceeds the context length",
+                "type": "BadRequestError",
+                "code": 400,
+            }
+        }
+    )
+    upserts = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_response=_sse_response_from_frames([f"data: {error_frame}"]),
+            upserts=upserts,
+        )
+    )
+
+    expected = {"content": "Requested token count exceeds the context length"}
+    emitted = [
+        e["data"]["error"]
+        for e in events
+        if e.get("type") == "chat:completion" and e.get("data", {}).get("error")
+    ]
+    assert emitted == [expected]
+    assert {"error": expected} in upserts
+
+
+def test_stream_error_content_shapes():
+    from nucllei.utils.middleware import stream_error_content
+
+    assert stream_error_content({"content": "a"}) == "a"
+    assert stream_error_content({"message": "b", "type": "x"}) == "b"
+    assert stream_error_content({"detail": "c"}) == "c"
+    assert stream_error_content("d") == "d"
+    assert stream_error_content({"code": 1}) == '{"code": 1}'
+
+
+def test_upstream_error_detail_shapes():
+    """非 stream のエラー本文 → 利用者向け文面。SGLang の `{"object": "error",
+    "message": ...}` は旧実装で拾えず「Server Connection Error」になっていた。"""
+    from nucllei.routers.openai import upstream_error_detail
+
+    assert (
+        upstream_error_detail(
+            {"object": "error", "message": "too long", "type": "BadRequestError"}
+        )
+        == "too long"
+    )
+    assert upstream_error_detail({"error": {"message": "ctx exceeded"}}) == (
+        "ctx exceeded"
+    )
+    assert upstream_error_detail({"error": "plain"}) == "plain"
+    assert upstream_error_detail({"detail": "nope"}) == "nope"
+    assert upstream_error_detail("Bad Gateway") == "Bad Gateway"
+    assert upstream_error_detail({"choices": []}) is None
+    assert upstream_error_detail(None) is None
+
+
+def test_title_failure_after_done_does_not_error_the_response(monkeypatch):
+    """done の後のタイトル処理で例外が出ても、成功した応答にエラーを保存せず、done も
+    1 回だけ(旧実装は外側の except に落ち、「Connection to the model was lost」を保存して
+    done を 2 回出した)。"""
+    from nucllei.utils import middleware
+
+    async def broken_title(*args, **kwargs):
+        raise KeyError("parentId")
+
+    monkeypatch.setattr(middleware, "run_response_background_tasks", broken_title)
+    upserts = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            upserts=upserts,
+        )
+    )
+
+    dones = [
+        e
+        for e in events
+        if e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+    ]
+    assert len(dones) == 1
+    assert not dones[0]["data"].get("error")
+    assert all("error" not in u for u in upserts)
+
+
+def test_parse_generated_title():
+    from nucllei.utils.middleware import first_message_title, parse_generated_title
+
+    assert parse_generated_title('ok {"title": "札幌の天気"} end') == "札幌の天気"
+    # 取り出せないときは "" — 呼び手が最初の発話へフォールバックする
+    # (旧実装は title キー欠落で "New Chat" を返し、フォールバックが効かなかった)
+    assert parse_generated_title('{"name": "x"}') == ""
+    assert parse_generated_title('{"title": "New Chat"}') == ""
+    assert parse_generated_title('{"title": "  "}') == ""
+    assert parse_generated_title('["title"]') == ""
+    assert parse_generated_title("no json") == ""
+    assert parse_generated_title(None) == ""
+
+    assert first_message_title([{"role": "user", "content": "こんにちは"}]) == (
+        "こんにちは"
+    )
+    assert first_message_title([{"role": "user", "content": ""}]) == "New Chat"
+    assert first_message_title([]) == "New Chat"
+
+
+def test_normalize_logit_bias():
+    """logit_bias は文字列(preset / チャットの入力形式)でも OpenAI 仕様の dict でも
+    受け、読めない値は送らない(旧実装は dict で AttributeError、空文字や不正値で
+    全チャットが 400 — 2026-10-05)。"""
+    from nucllei.routers.openai import normalize_logit_bias
+
+    assert normalize_logit_bias("5432:100, 11:-5") == {"5432": 100, "11": -5}
+    assert normalize_logit_bias("7:500") == {"7": 100}
+    assert normalize_logit_bias({"5432": 100, 9: "-200"}) == {"5432": 100, "9": -100}
+    assert normalize_logit_bias({"1": "x", "2": 3}) == {"2": 3}
+    assert normalize_logit_bias("") is None
+    assert normalize_logit_bias("   ") is None
+    assert normalize_logit_bias("garbage") is None
+    assert normalize_logit_bias({}) is None
+    assert normalize_logit_bias(["1:2"]) is None
+    assert normalize_logit_bias(None) is None
 
 
 # ---- 「続きを生成」撤去後: 末尾が assistant の wire(refs #142)--------------------

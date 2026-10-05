@@ -634,6 +634,62 @@ async def verify_connection(
             raise HTTPException(status_code=500, detail=error_detail)
 
 
+def normalize_logit_bias(value) -> Optional[dict]:
+    """logit_bias を OpenAI 仕様の {token_id: bias(-100〜100)} に揃える。
+
+    dict はそのまま(値を int にして範囲に丸める)、文字列は "token:bias, ..." の
+    nucllei 入力形式として読む。読めない値・空は None(送らない)— 1 つの不正な
+    設定で全チャットを 400 にしない。
+    """
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            value = json.loads(convert_logit_bias_input_to_json(value))
+        except Exception as e:
+            log.warning(f"ignoring invalid logit_bias {value!r}: {e}")
+            return None
+    if not isinstance(value, dict):
+        if value is not None:
+            log.warning(f"ignoring invalid logit_bias of type {type(value).__name__}")
+        return None
+    result = {}
+    for token, bias in value.items():
+        try:
+            bias = int(bias)
+        except (TypeError, ValueError):
+            log.warning(f"ignoring invalid logit_bias entry {token!r}: {bias!r}")
+            continue
+        result[str(token).strip()] = max(-100, min(100, bias))
+    return result or None
+
+
+def upstream_error_detail(response) -> Optional[str]:
+    """上流のエラー応答本文から利用者に見せる文面を取り出す(無ければ None)。
+
+    - OpenAI 形 `{"error": {"message": ...}}` / `{"error": "..."}`
+    - SGLang / vLLM の非 stream 形 `{"object": "error", "message": ...}`(旧実装は
+      `error` キーしか見ず「Server Connection Error」になっていた — 2026-10-05)
+    - `{"detail": ...}`(FastAPI 系の上流)/ 素のテキスト本文
+    """
+    if isinstance(response, dict):
+        error = response.get("error")
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("detail")
+            if message:
+                return str(message)
+            return json.dumps(error, ensure_ascii=False)
+        if error:
+            return str(error)
+        for key in ("message", "detail"):
+            if response.get(key):
+                return str(response[key])
+        return None
+    if isinstance(response, str) and response.strip():
+        return response
+    return None
+
+
 @router.post("/chat/completions")
 async def generate_chat_completion(
     request: Request,
@@ -741,11 +797,16 @@ async def generate_chat_completion(
     if "max_tokens" in payload and "max_completion_tokens" in payload:
         del payload["max_tokens"]
 
-    # Convert the modified body back to JSON
+    # logit_bias はチャット params(middleware が dict にしてから来る)・preset params
+    # (文字列 "token:bias,...")・API 利用者(OpenAI 仕様の dict)のどれでも来る。
+    # 旧実装は文字列前提の変換を try の外で掛けており、dict で AttributeError、
+    # preset の不正値(空文字など)で全チャットが 400 になった(2026-10-05)。
     if "logit_bias" in payload:
-        payload["logit_bias"] = json.loads(
-            convert_logit_bias_input_to_json(payload["logit_bias"])
-        )
+        logit_bias = normalize_logit_bias(payload["logit_bias"])
+        if logit_bias:
+            payload["logit_bias"] = logit_bias
+        else:
+            payload.pop("logit_bias")
 
     # llens(#102): このモデルが SGLang 拡張を弾くと学習済みなら送信前に剥がす
     reject_key = f"{url}::{payload['model']}"
@@ -836,12 +897,7 @@ async def generate_chat_completion(
     except Exception as e:
         log.exception(e)
 
-        detail = None
-        if isinstance(response, dict):
-            if "error" in response:
-                detail = f"{response['error']['message'] if 'message' in response['error'] else response['error']}"
-        elif isinstance(response, str):
-            detail = response
+        detail = upstream_error_detail(response)
 
         raise HTTPException(
             status_code=r.status if r else 500,

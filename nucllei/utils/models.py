@@ -162,6 +162,9 @@ async def get_all_models(request, user: UserModel = None):
         else:
             function_module, _, _ = load_function_module_by_id(function_id)
             request.app.state.FUNCTIONS[function_id] = function_module
+        # 旧実装はここで返しておらず、2 回目以降(キャッシュ済み)も初回も None が
+        # 渡って hasattr(None, "actions") — 複数 action の展開が効かなかった
+        return function_module
 
     for model in models:
         action_ids = [
@@ -172,14 +175,19 @@ async def get_all_models(request, user: UserModel = None):
 
         model["actions"] = []
         for action_id in action_ids:
-            action_function = Functions.get_function_by_id(action_id)
-            if action_function is None:
-                raise Exception(f"Action not found: {action_id}")
+            # 読み込めない action が 1 つあっても /api/models 全体を落とさない —
+            # その action だけ飛ばしてログに残す(2026-10-05)
+            try:
+                action_function = Functions.get_function_by_id(action_id)
+                if action_function is None:
+                    raise Exception(f"Action not found: {action_id}")
 
-            function_module = get_function_module_by_id(action_id)
-            model["actions"].extend(
-                get_action_items_from_module(action_function, function_module)
-            )
+                function_module = get_function_module_by_id(action_id)
+                items = get_action_items_from_module(action_function, function_module)
+            except Exception:
+                log.exception(f"skipping action '{action_id}' that failed to load")
+                continue
+            model["actions"].extend(items)
     log.debug(f"get_all_models() returned {len(models)} models")
 
     request.app.state.MODELS = {model["id"]: model for model in models}

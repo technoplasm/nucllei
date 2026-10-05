@@ -899,7 +899,8 @@ curl -N http://HOST/api/chat/completions \
   headless (call `POST /api/chat/completed` yourself if you need them).
 - **Tools are attached but not executed**: the model's configured tools are put in
   the request, so you may receive raw `tool_calls` in the response — executing them
-  is your client's job in this mode. The native execution loop only runs on the
+  is your client's job in this mode. `tools` you pass yourself are kept alongside
+  the configured ones (a configured tool wins when the names clash). The native execution loop only runs on the
   chat-wire path.
 - `tool_ids` and `features` in your payload are silently discarded (tool
   availability is model configuration — §1).
@@ -996,8 +997,11 @@ Companions: `GET /api/tasks/{task_id}/events` (re-attach),
 On this path the native tool loop, skills, and all filter phases run server-side.
 
 **Raw passthrough**: `POST /openai/chat/completions` proxies straight to the
-configured engine — model-preset params and ACL apply, but **no filters, no tools,
-no file injection**. `GET /openai/models` lists raw connection models. Prefer
+configured engine — model-preset params and ACL apply (raw engine models without a
+preset are admin-only; there is no query flag that skips these checks), but **no
+filters, no tools, no file injection**. `logit_bias` may be an OpenAI-style object
+(`{"token_id": bias}`) or the `"token:bias, ..."` string form; an unreadable value is
+dropped rather than failing the request. `GET /openai/models` lists raw connection models. Prefer
 `/api/chat/completions` unless you specifically need an unfiltered proxy.
 
 Reverse-proxy note: SSE must not be buffered (the server sends
