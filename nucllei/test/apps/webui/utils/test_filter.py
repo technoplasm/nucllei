@@ -161,7 +161,13 @@ class TestProcessFilterFunctionsUnit:
         # f1 は inlet を持たないためスキップされ、f2 だけが実行される
         assert body["trace"] == ["f2:inlet"]
 
-    def test_file_handler_strips_files_on_inlet(self):
+    def test_file_handler_attribute_is_ignored(self):
+        """`file_handler = True` は撤去済み(2026-10-05)— 宣言しても添付は残る。
+
+        旧機構は inlet 後に files を丸ごと落とし、添付の無い送信では
+        del form_data["files"] の KeyError で 400 になっていた。添付の間引きは
+        inlet で body を書き換えて行う(DB 層の README テスト参照)。
+        """
         from nucllei.utils.filter import process_filter_functions
 
         class FileHandlerFilter(TraceFilter):
@@ -180,30 +186,20 @@ class TestProcessFilterFunctionsUnit:
                 extra_params={},
             )
         )
-        # file_handler = True のフィルタが files を処理済みとして本体から除去される
-        assert "files" not in body
-        assert "files" not in body["metadata"]
+        assert body["files"] == [{"id": "x"}]
+        assert body["metadata"]["files"] == [{"id": "x"}]
 
-    def test_file_handler_false_keeps_files(self):
-        from nucllei.utils.filter import process_filter_functions
-
-        class NoFileHandlerFilter(TraceFilter):
-            file_handler = False
-
-        request = make_request({"f1": NoFileHandlerFilter("f1")})
+        # 添付の無い送信も通る
         body, _ = run(
             process_filter_functions(
                 request=request,
                 filter_functions=refs("f1"),
                 filter_type="inlet",
-                form_data={
-                    "files": [{"id": "x"}],
-                    "metadata": {"files": [{"id": "x"}]},
-                },
+                form_data={"metadata": {"files": None}},
                 extra_params={},
             )
         )
-        assert body["files"] == [{"id": "x"}]
+        assert body["trace"] == ["f1:inlet"]
 
     def test_exception_propagates(self):
         from nucllei.utils.filter import process_filter_functions
@@ -252,39 +248,52 @@ class TestProcessFilterFunctionsUnit:
         assert captured["id"] == "f1"
         assert captured["emitter"] is emitter
 
-    def test_user_valves_injected(self, monkeypatch):
-        from nucllei.utils import filter as filter_module
+    def test_user_is_a_per_filter_copy_without_valves(self):
+        """__user__ は filter ごとのコピー。UserValves は撤去済み(2026-10-05)。
+
+        旧実装は共有の extra_params["__user__"] に UserValves を書き込み、後続の
+        filter や同じ dict を使う tool / pipe にも見えていた。filter が __user__ を
+        書き換えても呼び手の dict(この後 tool / pipe に渡る)は変わらない。
+        """
+        from pydantic import BaseModel
+
         from nucllei.utils.filter import process_filter_functions
 
-        captured = {}
+        seen = {}
 
-        class UserValvesFilter:
-            from pydantic import BaseModel
-
-            class UserValves(BaseModel):
-                mode: str = "default"
+        class Mutating:
+            class UserValves(BaseModel):  # 宣言しても注入されない
+                secret: str = "f1-default"
 
             def inlet(self, body, __user__):
-                captured["user"] = __user__
+                seen["f1"] = dict(__user__)
+                __user__["valves"] = "written-by-f1"
+                __user__["name"] = "changed"
                 return body
 
-        monkeypatch.setattr(
-            filter_module.Functions,
-            "get_user_valves_by_id_and_user_id",
-            lambda fid, uid: {"mode": "custom"},
-        )
+        class Reader:
+            def inlet(self, body, __user__):
+                seen["f2"] = dict(__user__)
+                return body
 
-        request = make_request({"f1": UserValvesFilter()})
+        shared_user = {"id": "u1", "name": "n", "valves": "stale-from-elsewhere"}
+        request = make_request({"f1": Mutating(), "f2": Reader()})
         run(
             process_filter_functions(
                 request=request,
-                filter_functions=refs("f1"),
+                filter_functions=refs("f1", "f2"),
                 filter_type="inlet",
                 form_data={},
-                extra_params={"__user__": {"id": "u1"}},
+                extra_params={"__user__": shared_user},
             )
         )
-        assert captured["user"]["valves"].mode == "custom"
+        assert seen["f1"] == {"id": "u1", "name": "n"}
+        assert seen["f2"] == {"id": "u1", "name": "n"}
+        assert shared_user == {
+            "id": "u1",
+            "name": "n",
+            "valves": "stale-from-elsewhere",
+        }
 
 
 FILTER_CONTENT_TEMPLATE = """
@@ -309,6 +318,47 @@ class Filter:
     def stream(self, event: dict) -> dict:
         event.setdefault("trace", []).append("{fid}:stream")
         return event
+"""
+
+
+PRIORITY_FILTER_TEMPLATE = """
+from pydantic import BaseModel
+
+
+class Filter:
+    class Valves(BaseModel):
+        priority: int = {priority}
+        label: str = "x"
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    def inlet(self, body: dict) -> dict:
+        return body
+"""
+
+# README_API §7.1 の例(Valves.priority + inlet(body, __user__))に、同節で案内する
+# 添付の間引き(body["files"] / metadata["files"] を inlet で書き換える)を足したもの
+README_FILE_FILTER = """
+from pydantic import BaseModel, Field
+
+
+class Filter:
+    class Valves(BaseModel):
+        priority: int = Field(default=0, description="Lower runs earlier")
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    def inlet(self, body: dict, __user__: dict) -> dict:
+        body["seen_files"] = body.get("files")
+        keep = lambda fs: [f for f in fs if f.get("id") != "drop"]
+        if isinstance(body.get("files"), list):
+            body["files"] = keep(body["files"])
+        md = body.get("metadata")
+        if isinstance(md, dict) and isinstance(md.get("files"), list):
+            md["files"] = keep(md["files"])
+        return body
 """
 
 
@@ -356,6 +406,120 @@ class TestFilterPipelineDB(AbstractPostgresTest):
             "info": {"meta": {"filterIds": ["f_model_a", "f_model_b", "nonexistent"]}}
         }
         assert get_sorted_filter_ids(model) == ["f_model_b", "f_model_a"]
+
+    def _insert_filter_source(self, fid, content):
+        from nucllei.models.functions import FunctionForm
+
+        return self.functions.insert_new_function(
+            user_id="1",
+            type="filter",
+            form_data=FunctionForm(
+                id=fid, name=fid, description="test filter", content=content
+            ),
+        )
+
+    def test_priority_uses_code_default(self):
+        """保存 valves の無い filter は Valves のコード既定 priority で並ぶ。
+
+        旧実装は保存 dict の "priority" だけを読み、未保存なら一律 0 だった。
+        保存値があるフィールドだけが既定を上書きする。
+        """
+        from nucllei.utils.filter import get_sorted_filter_ids
+
+        for fid, prio in (("f_late", 100), ("f_early", -100), ("f_mid", 0)):
+            self._insert_filter_source(
+                fid, PRIORITY_FILTER_TEMPLATE.replace("{priority}", str(prio))
+            )
+        model = {"info": {"meta": {"filterIds": ["f_late", "f_mid", "f_early"]}}}
+        request = make_request()
+        assert get_sorted_filter_ids(model, request) == ["f_early", "f_mid", "f_late"]
+
+        # 保存値は既定を上書きする(部分保存 — 他フィールドはコード既定のまま)
+        self.functions.update_function_valves_by_id("f_late", {"priority": -200})
+        assert get_sorted_filter_ids(model, request) == ["f_late", "f_early", "f_mid"]
+
+    def test_valves_save_keeps_only_explicit_fields(self):
+        """valves 保存は明示したフィールドだけ — null(UI の「Default」)と未指定は
+        保存せず、読み出し時にコード既定が効く(既定を変えれば追従する)。"""
+        from test.util.mock_user import mock_webui_user
+
+        self._insert_filter_source(
+            "f_saved", PRIORITY_FILTER_TEMPLATE.replace("{priority}", "42")
+        )
+        with mock_webui_user(id="9", role="admin"):
+            res = self.fast_api_client.post(
+                self.create_url("/id/f_saved/valves/update"),
+                json={"priority": None, "label": "custom"},
+            )
+        assert res.status_code == 200
+        # 応答は実効値(既定込み)、保存は明示分だけ
+        assert res.json() == {"priority": 42, "label": "custom"}
+        assert self.functions.get_function_valves_by_id("f_saved") == {
+            "label": "custom"
+        }
+
+    def test_same_priority_keeps_filter_ids_order(self):
+        """同 priority は filterIds の並び順(PYTHONHASHSEED 非依存)。
+
+        旧実装は list(set(filterIds)) で順序がハッシュ依存 — 起動ごとに実行順が
+        変わっていた。どの並びで渡しても、そのまま(重複は先勝ちで 1 つ)返る。
+        """
+        import itertools
+
+        from nucllei.utils.filter import get_sorted_filter_ids
+
+        ids = [f"f_same_{c}" for c in "abcde"]
+        for fid in ids:
+            self._insert_filter(fid)
+        request = make_request()
+        for perm in itertools.permutations(ids):
+            model = {"info": {"meta": {"filterIds": list(perm) + [perm[0]]}}}
+            assert get_sorted_filter_ids(model, request) == list(perm)
+
+    def test_readme_filter_thins_attachments(self):
+        """README_API §7.1 の書き方の filter が、添付あり・無しの両方で動く。"""
+        from nucllei.utils.filter import get_sorted_filter_ids, process_filter_functions
+
+        self._insert_filter_source("f_readme", README_FILE_FILTER)
+        request = make_request()
+        model = {"info": {"meta": {"filterIds": ["f_readme"]}}}
+        filter_functions = [
+            self.functions.get_function_by_id(fid)
+            for fid in get_sorted_filter_ids(model, request)
+        ]
+
+        def inlet(form_data):
+            body, _ = run(
+                process_filter_functions(
+                    request=request,
+                    filter_functions=filter_functions,
+                    filter_type="inlet",
+                    form_data=form_data,
+                    extra_params={"__user__": {"id": "1"}},
+                )
+            )
+            return body
+
+        body = inlet(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "metadata": {"files": None},
+            }
+        )
+        assert body["seen_files"] is None
+        assert body["metadata"]["files"] is None
+
+        files = [{"id": "keep"}, {"id": "drop"}]
+        body = inlet(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "files": list(files),
+                "metadata": {"files": list(files)},
+            }
+        )
+        assert body["seen_files"] == [{"id": "keep"}, {"id": "drop"}]
+        assert body["files"] == [{"id": "keep"}]
+        assert body["metadata"]["files"] == [{"id": "keep"}]
 
     def test_pipeline_inlet_llm_outlet_order(self):
         """inlet → (LLM 相当の応答生成) → outlet の一連の流れを固定する。"""

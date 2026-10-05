@@ -280,9 +280,14 @@ async def update_function_valves_by_id(
             Valves = function_module.Valves
 
             try:
+                # null = UI の「Default」。保存は明示したフィールドだけ(exclude_unset)—
+                # 未設定フィールドは読み出し側の Valves(**保存値) でコードの既定値に
+                # 埋まるので、コード側の既定変更(filter の priority 等)が効き続ける。
                 form_data = {k: v for k, v in form_data.items() if v is not None}
                 valves = Valves(**form_data)
-                Functions.update_function_valves_by_id(id, valves.model_dump())
+                Functions.update_function_valves_by_id(
+                    id, valves.model_dump(exclude_unset=True)
+                )
                 return valves.model_dump()
             except Exception as e:
                 log.exception(f"Error updating function values by id {id}: {e}")
@@ -303,81 +308,5 @@ async def update_function_valves_by_id(
         )
 
 
-############################
-# FunctionUserValves
-############################
-
-
-@router.get("/id/{id}/valves/user", response_model=Optional[dict])
-async def get_function_user_valves_by_id(id: str, user=Depends(get_verified_user)):
-    function = Functions.get_function_by_id(id)
-    if function:
-        try:
-            user_valves = Functions.get_user_valves_by_id_and_user_id(id, user.id)
-            return user_valves
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT(e),
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-
-@router.get("/id/{id}/valves/user/spec", response_model=Optional[dict])
-async def get_function_user_valves_spec_by_id(
-    request: Request, id: str, user=Depends(get_verified_user)
-):
-    function = Functions.get_function_by_id(id)
-    if function:
-        function_module = get_function_module(request, id)
-
-        if hasattr(function_module, "UserValves"):
-            UserValves = function_module.UserValves
-            return UserValves.schema()
-        return None
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-
-@router.post("/id/{id}/valves/user/update", response_model=Optional[dict])
-async def update_function_user_valves_by_id(
-    request: Request, id: str, form_data: dict, user=Depends(get_verified_user)
-):
-    function = Functions.get_function_by_id(id)
-
-    if function:
-        function_module = get_function_module(request, id)
-
-        if hasattr(function_module, "UserValves"):
-            UserValves = function_module.UserValves
-
-            try:
-                form_data = {k: v for k, v in form_data.items() if v is not None}
-                user_valves = UserValves(**form_data)
-                Functions.update_user_valves_by_id_and_user_id(
-                    id, user.id, user_valves.model_dump()
-                )
-                return user_valves.model_dump()
-            except Exception as e:
-                log.exception(f"Error updating function user valves by id {id}: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT(e),
-                )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.NOT_FOUND,
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
+# UserValves(per-user 設定)の GET/spec/update は撤去済み(2026-10-05、
+# feature-triage「Filter / tool 機構の縮小」— 設定 UI も利用者も無かった)。
