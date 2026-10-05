@@ -107,6 +107,94 @@ describe('graftLocalTurnOntoServerHistory', () => {
 		expect(merged.currentId).toBe('a1');
 	});
 
+	// 2 タブで古い方を使ったとき: サーバは別タブで u2/a2 まで進んでいる。
+	// 古いタブで a1 を再生成した応答 a1b は u1 の子のまま残る(サーバ先端 a2 の子にしない)
+	it('再生成(枝分かれ)は接ぎ直さず元の user の子に残す', () => {
+		const server = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', ['u2']),
+				msg('u2', 'user', 'a1', ['a2']),
+				msg('a2', 'assistant', 'u2', [])
+			],
+			'a2'
+		);
+		const local = historyOf(
+			[
+				msg('u1', 'user', null, ['a1', 'a1b']),
+				msg('a1', 'assistant', 'u1', []),
+				msg('a1b', 'assistant', 'u1', [])
+			],
+			'a1b'
+		);
+
+		const merged = graftLocalTurnOntoServerHistory(server, local);
+
+		expect(merged.messages['a1b'].parentId).toBe('u1');
+		expect(merged.messages['u1'].childrenIds).toEqual(['a1', 'a1b']);
+		expect(merged.messages['a2'].childrenIds).toEqual([]);
+		// 別タブの続き(u2/a2)は消さない
+		expect(merged.messages['a1'].childrenIds).toEqual(['u2']);
+		expect(merged.currentId).toBe('a1b');
+	});
+
+	it('発話の編集(兄弟 user が居る枝分かれ)も元の親に残す', () => {
+		const server = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', ['u2']),
+				msg('u2', 'user', 'a1', ['a2']),
+				msg('a2', 'assistant', 'u2', [])
+			],
+			'a2'
+		);
+		// 古いタブで u2 を知らないまま、最初の発話 u1 を u1e に編集して送信
+		const local = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', []),
+				msg('u1e', 'user', null, ['a1e']),
+				msg('a1e', 'assistant', 'u1e', [])
+			],
+			'a1e'
+		);
+
+		const merged = graftLocalTurnOntoServerHistory(server, local);
+
+		expect(merged.messages['u1e'].parentId).toBeNull();
+		expect(merged.messages['a1e'].parentId).toBe('u1e');
+		expect(merged.messages['a2'].childrenIds).toEqual([]);
+		expect(merged.currentId).toBe('a1e');
+	});
+
+	it('2 タブで古い方から続きを送ったときは従来どおりサーバ先端へ接ぐ', () => {
+		const server = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', ['u2']),
+				msg('u2', 'user', 'a1', ['a2']),
+				msg('a2', 'assistant', 'u2', [])
+			],
+			'a2'
+		);
+		const local = historyOf(
+			[
+				msg('u1', 'user', null, ['a1']),
+				msg('a1', 'assistant', 'u1', ['u3']),
+				msg('u3', 'user', 'a1', ['a3']),
+				msg('a3', 'assistant', 'u3', [])
+			],
+			'a3'
+		);
+
+		const merged = graftLocalTurnOntoServerHistory(server, local);
+
+		expect(merged.messages['u3'].parentId).toBe('a2');
+		expect(merged.messages['a2'].childrenIds).toEqual(['u3']);
+		expect(merged.messages['a1'].childrenIds).toEqual(['u2']);
+		expect(merged.currentId).toBe('a3');
+	});
+
 	it('入力は破壊しない(server / local とも)', () => {
 		const server = historyOf([msg('u1', 'user', null, [])], 'u1');
 		const local = historyOf(

@@ -12,6 +12,10 @@
  * - サーバに**無い**ローカル末尾鎖(currentId から親方向に辿った未保存分)は、
  *   先頭の parentId をサーバ currentId に差し替えて接ぐ
  * - 末尾鎖が無ければサーバ currentId を採る(配達ターンの先端 = より深い側)
+ * - 末尾鎖が「枝分かれ」(再生成・発話の編集)なら接ぎ直さず元の親に残す。
+ *   接ぎ直すのは会話の続き(手元の先端に新しい user を足した送信)だけ。
+ *   別タブでサーバ側の会話が先へ進んでいるとき、古いタブで再生成した応答を
+ *   サーバ先端(別の assistant)にぶら下げると、無関係な会話の子になってしまう
  */
 import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
@@ -57,7 +61,12 @@ export const graftLocalTurnOntoServerHistory = (
 	}
 
 	if (suffix.length > 0) {
-		const graftParentId = merged.currentId;
+		// 枝分かれでも元の親がサーバに無ければ(壊れた手元履歴)続きとして接ぐ
+		const branchParentId = suffix[0].parentId;
+		const keepBranch =
+			!isContinuation(local, suffix[0], suffixIds) &&
+			(branchParentId === null || !!merged.messages[branchParentId]);
+		const graftParentId = keepBranch ? branchParentId : merged.currentId;
 		const head = { ...JSON.parse(JSON.stringify(suffix[0])), parentId: graftParentId };
 		merged.messages[head.id] = head;
 		for (const message of suffix.slice(1)) {
@@ -72,6 +81,25 @@ export const graftLocalTurnOntoServerHistory = (
 	// 末尾鎖が無ければ merged.currentId(サーバの先端)をそのまま採る
 
 	return merged;
+};
+
+/**
+ * 末尾鎖の先頭 head が「会話の続き」か「枝分かれ」かの判定。
+ *
+ * 続き = 手元の先端に user を足した送信: head が user で、手元の親(root なら root 群)に
+ * 兄弟が居ない。枝分かれ = 再生成(head が assistant — 既存 user の子に応答を足す)と
+ * 発話の編集(head が user だが、編集前の兄弟が同じ親の下に居る)。
+ */
+const isContinuation = (local: ChatHistory, head: ChatMessage, suffixIds: Set<string>): boolean => {
+	if (head.role !== 'user') {
+		return false;
+	}
+	const siblingIds = head.parentId
+		? (local.messages[head.parentId]?.childrenIds ?? [])
+		: Object.values(local.messages)
+				.filter((message) => message.parentId === null)
+				.map((message) => message.id);
+	return siblingIds.every((siblingId) => siblingId === head.id || suffixIds.has(siblingId));
 };
 
 /**
