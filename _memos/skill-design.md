@@ -97,6 +97,14 @@
    tool result(展開済み content)を注入して生成を開始する。
    - モデル自律起動(入口 2)と wire 上も完全対称。モデルは「ロード済み」を履歴で
      知るので冗長ロードが起きない(manifest からの除外ルールは不要 — 撤廃済み)
+   - **冗長ロードの歯止め(2026-10-05、refs #142 監査「同じ内容が重複して context を食う」)**:
+     上は期待で、実装でも止める。`/command` は同じ skill が既にそれより前に載っていれば
+     (先行する `/command` の注入 / 先行履歴の load_skill)exchange を足さない。
+     `load_skill` は読み込み済み(build 時に渡された messages に本文がある / 同じターン内で
+     既に読んだ)なら本文を返さず `LOADED_RESULT`(「skill X は読み込み済み (…)。次の手: 上の
+     手順書に従って作業を続ける。」)を返す。tool の遅延取り込みは冪等なのでそのまま行う。
+     ※ messages の受け渡し(`build_load_skill_tool(..., messages=form_data["messages"])`)は
+     middleware 側の結線が要る — 未結線の間は「同じターン内の 2 回目」だけが効く
    - UI は既存の tool_calls 描画(View Result from load_skill)がそのまま使える。
      当該ターンの発火は synthetic マーカ付き tool_calls ブロックとして応答先頭に
      seed する(モデル向け履歴へは再送しない — 実体は messages 注入済み)
@@ -202,7 +210,8 @@ view_skill/load_skill の 2 本立ては「どちらを呼ぶべきか」をモ�
   同じくステートレスに再導出する(上記「入口 3」)
 - #42 改訂: `/command` の発火は「機能 ON ∧ モデル紐づけ ∧ read 可視」の AND が前提
   (機能 OFF / 未紐づけの skill は生テキストで素通し)。詳細 `_memos/builtin-tools.md`
-- 複数 skill は**和集合**。同一 skill の再発火は冪等
+- 複数 skill は**和集合**。同一 skill の再発火は冪等(実装: 2 回目以降の `/command` は exchange を
+  足さず発火リストにも載せない = その回の発火カードも出ない。load_skill の再ロードは短い結果 — 上記入口 1)
 - 変数({{CURRENT_DATE}} 等)は**毎リクエスト再展開**(「発火時点」への固定は状態が要るので採らない。
   数ターンのドリフトは許容)
 - skill content の後日編集は `/command` 発火分の**モデル向け注入には遡って効く**

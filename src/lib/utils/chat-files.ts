@@ -87,3 +87,28 @@ export const collectChatFiles = (
 
 	return items;
 };
+
+// 送信直前に completion へ載せる files の合流(chat レベル添付 + 直前 user メッセージの
+// type 'file')。dedupe は collectChatFiles と同じく file.id 基準 — JSON 全体の一致で
+// 判定すると、同じ file がメタデータ違い(status / size / collection_name の有無等)で
+// 2 件残り、BE がその本文を system に 2 回注入する(実測 2,031 → 3,529 字)。
+// 先勝ち(chat レベル側の entry を残す)。id の無い entry は従来どおり完全一致でのみ畳む。
+export const mergeRequestFiles = (
+	chatFiles: ChatFile[] | null | undefined,
+	messageFiles: ChatFile[] | null | undefined
+): ChatFile[] => {
+	const merged: ChatFile[] = [];
+	const seen = new Set<string>();
+	for (const file of [
+		...(chatFiles ?? []),
+		...(messageFiles ?? []).filter((item) => item?.type === 'file')
+	]) {
+		const key = file?.id ? `id:${file.id}` : `json:${JSON.stringify(file)}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		merged.push(JSON.parse(JSON.stringify(file)));
+	}
+	return merged;
+};

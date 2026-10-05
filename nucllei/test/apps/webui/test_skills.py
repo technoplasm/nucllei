@@ -289,17 +289,23 @@ class TestSkills(AbstractPostgresTest):
             "1",
             SkillForm(id="seedcmd", name="t", content="指示", access_control=None),
         )
+        past = Skills.insert_new_skill(
+            "1",
+            SkillForm(id="seedpast", name="t", content="過去", access_control=None),
+        )
 
         user = types.SimpleNamespace(id="1", name="Taro")
+        # 過去ターンは別の skill(同じ skill の再発火は冪等で足されない —
+        # test_slash_command_refire_is_idempotent)
         form_data = {
             "messages": [
-                {"role": "user", "content": "/seedcmd 過去ターン"},
+                {"role": "user", "content": "/seedpast 過去ターン"},
                 {"role": "assistant", "content": "了解"},
                 {"role": "user", "content": "/seedcmd 今ターン"},
             ]
         }
         _, activations = apply_skill_command(
-            form_data, user, _model_with_skills(skill.id)
+            form_data, user, _model_with_skills(past.id, skill.id)
         )
 
         seeds = current_skill_activation_seeds(activations)
@@ -642,6 +648,120 @@ class TestSkills(AbstractPostgresTest):
             form_data, user, _model_with_skills(skill.id)
         )
         assert activations[0]["tool_ids"] == ["secret-password"]
+
+    def test_slash_command_refire_is_idempotent(self):
+        """同じ skill の `/command` が 2 回あっても本文は 1 回だけ注入する(冪等)。
+
+        それより前の履歴にモデル自律の load_skill がある skill も足さない。
+        """
+        import json
+
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import apply_skill_command
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(id="twice", name="t", content="指示T", access_control=None),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(skill.id)
+
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "/twice 最初"},
+                {"role": "assistant", "content": "了解"},
+                {"role": "user", "content": "/twice もう一度"},
+            ]
+        }
+        result, activations = apply_skill_command(form_data, user, model)
+        msgs = result["messages"]
+        assert [m["role"] for m in msgs] == [
+            "user",
+            "assistant",  # 合成 call(1 回目だけ)
+            "tool",
+            "assistant",
+            "user",
+        ]
+        bodies = [m for m in msgs if m["role"] == "tool" and "指示T" in m["content"]]
+        assert len(bodies) == 1
+        assert json.loads(msgs[2]["content"])["result"] == "指示T"
+        assert [(a["id"], a["current"]) for a in activations] == [("twice", False)]
+
+        # 先行する履歴にモデル自律の load_skill があれば `/command` は足さない
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "やって"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "functions.load_skill:0",
+                            "type": "function",
+                            "function": {
+                                "name": "load_skill",
+                                "arguments": json.dumps({"skill_id": "twice"}),
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "functions.load_skill:0",
+                    "content": json.dumps({"result": "指示T", "tools": []}),
+                },
+                {"role": "assistant", "content": "done"},
+                {"role": "user", "content": "/twice 続き"},
+            ]
+        }
+        result, activations = apply_skill_command(form_data, user, model)
+        assert len(result["messages"]) == 5
+        assert activations == []
+
+    def test_load_skill_already_loaded_returns_short_result(self):
+        """読み込み済みの skill の load_skill は本文を返さず短い結果を返す。
+
+        同じターン内の 2 回目と、messages(`/command` の合成 exchange)に既にある場合。
+        """
+        import asyncio
+        import json
+
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import (
+            LOADED_RESULT,
+            apply_skill_command,
+            build_load_skill_tool,
+        )
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="once",
+                name="t",
+                description="一度だけ",
+                content="長い手順書本文",
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro")
+        model = _model_with_skills(skill.id)
+        short = LOADED_RESULT.format(skill_id="once")
+        assert "次の手: " in short and "長い手順書本文" not in short
+
+        # 同じターン内の 2 回目
+        tool = build_load_skill_tool(model, user)
+        first = json.loads(asyncio.run(tool["callable"](skill_id="once")))
+        second = json.loads(asyncio.run(tool["callable"](skill_id="/once")))
+        assert first == {"result": "長い手順書本文", "tools": []}
+        assert second == {"result": short, "tools": []}
+
+        # `/command` で注入済み(messages に合成 exchange がある)なら 1 回目から短い結果
+        form_data, _ = apply_skill_command(
+            {"messages": [{"role": "user", "content": "/once 開始"}]}, user, model
+        )
+        tool = build_load_skill_tool(model, user, messages=form_data["messages"])
+        result = json.loads(asyncio.run(tool["callable"](skill_id="once")))
+        assert result == {"result": short, "tools": []}
 
     def test_load_skill_calls_load_tools_hook(self):
         """load_skill 発火時、tool_ids 非空なら load_tools フックが呼ばれる(入口 2)。"""

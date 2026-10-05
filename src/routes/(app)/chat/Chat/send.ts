@@ -15,6 +15,7 @@ import { chatId, chats, config, currentChatPage, models, settings, user } from '
 import type { Model } from '$lib/stores';
 import { createMessagesList, promptTemplate, getPromptVariables } from '$lib/utils';
 import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
+import { mergeRequestFiles } from '$lib/utils/chat-files';
 import { consumeCompletionStream, getActiveTaskIds } from '$lib/utils/completion-streams';
 import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
 import { getChatList } from '$lib/apis/chats';
@@ -301,13 +302,8 @@ export class ChatSend {
 		const userMessage =
 			responseMessage.parentId !== null ? _history.messages[responseMessage.parentId] : undefined;
 
-		let files: ChatFile[] = JSON.parse(JSON.stringify(session.chatFiles));
-		files.push(...(userMessage?.files ?? []).filter((item) => ['file'].includes(item.type)));
-		// Remove duplicates
-		files = files.filter(
-			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
-		);
+		// file.id 基準で合流(メタデータ違いの同一 file を 2 件送らない — chat-files.ts)
+		const files: ChatFile[] = mergeRequestFiles(session.chatFiles, userMessage?.files);
 
 		this.#scrollToBottom();
 		this.#eventTarget.dispatchEvent(
@@ -519,28 +515,6 @@ export class ChatSend {
 			}
 
 			await this.sendPrompt(session.history, userPrompt, userMessage.id);
-		}
-	};
-
-	continueResponse = async () => {
-		const session = this.#session;
-		const _chatId = get(chatId);
-
-		if (
-			session.history.currentId &&
-			session.history.messages[session.history.currentId].done == true
-		) {
-			const responseMessage = session.history.messages[session.history.currentId];
-			responseMessage.done = false;
-			await tick();
-
-			const model = get(models)
-				.filter((m) => m.id === (responseMessage?.selectedModelId ?? responseMessage.model))
-				.at(0);
-
-			if (model) {
-				await this.#sendChatCompletionRequest(session.history, model, responseMessage.id, _chatId);
-			}
 		}
 	};
 

@@ -41,7 +41,6 @@
 		showNextMessage,
 		editMessage,
 		actionMessage,
-		continueResponse,
 		regenerateResponse,
 		addMessages,
 		isLastMessage = true,
@@ -56,8 +55,6 @@
 		editMessage: (id: string, content: string) => void;
 		/** 未使用(親の呼び出し互換のため受け取りだけ維持)。 */
 		actionMessage: (actionId: string, message: ChatMessage) => void;
-		/** 未使用(旧 on:select 死に購読の撤去で不要化。呼び出し互換のため維持)。 */
-		continueResponse: () => void;
 		regenerateResponse: (message: ChatMessage) => void;
 		addMessages: (payload: {
 			modelId: string;
@@ -250,7 +247,6 @@
 						{gotoMessage}
 						{showPreviousMessage}
 						{showNextMessage}
-						{continueResponse}
 						{regenerateResponse}
 						{actionMessage}
 					/>

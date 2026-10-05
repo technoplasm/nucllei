@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { collectChatFiles } from './chat-files';
+import { collectChatFiles, mergeRequestFiles } from './chat-files';
 import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 const historyWith = (files: Record<string, ChatFile[]>): ChatHistory =>
@@ -109,5 +109,33 @@ describe('collectChatFiles', () => {
 	it('パスを伴わない裸の UUID は拾わない(tool 結果の任意 id で誤爆しない)', () => {
 		const items = collectChatFiles([], historyWithContent(`file_id=${UUID} で登録済み`));
 		expect(items).toEqual([]);
+	});
+});
+
+describe('mergeRequestFiles', () => {
+	it('同じ file id はメタデータが違っても 1 件に畳む(先勝ち = chat レベル側)', () => {
+		const merged = mergeRequestFiles(
+			[{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }],
+			[{ type: 'file', id: 'f1', name: 'a.pdf', size: 10, collection_name: 'file-f1' }]
+		);
+		expect(merged).toEqual([{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }]);
+	});
+
+	it('message 側は type file だけを足し、別 id は残す', () => {
+		const merged = mergeRequestFiles(
+			[{ type: 'file', id: 'f1', name: 'a.pdf' }],
+			[
+				{ type: 'image', id: 'img1', name: 'p.png' },
+				{ type: 'file', id: 'f2', name: 'b.txt' }
+			]
+		);
+		expect(merged.map((f) => f.id)).toEqual(['f1', 'f2']);
+	});
+
+	it('入力を変更しない(複製を返す)', () => {
+		const chatFiles = [{ type: 'file', id: 'f1', name: 'a.pdf' }] as ChatFile[];
+		const merged = mergeRequestFiles(chatFiles, null);
+		merged[0].name = 'changed';
+		expect(chatFiles[0].name).toBe('a.pdf');
 	});
 });

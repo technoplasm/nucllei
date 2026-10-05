@@ -26,7 +26,6 @@
 		atSelectedModel = undefined,
 		messages = $bindable([]),
 		sendPrompt,
-		continueResponse,
 		regenerateResponse,
 		chatActionHandler = undefined,
 		addMessages = () => {},
@@ -48,7 +47,6 @@
 			parentId: string,
 			opts?: { modelId?: string | null; newChat?: boolean }
 		) => void | Promise<void>;
-		continueResponse: () => void | Promise<void>;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
 		chatActionHandler?: (
 			chatId: string,
@@ -359,7 +357,6 @@
 							{editMessage}
 							{actionMessage}
 							{regenerateResponse}
-							{continueResponse}
 							{addMessages}
 							{readOnly}
 						/>

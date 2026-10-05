@@ -17,6 +17,13 @@ from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
 from nucllei.utils.task import prompt_template, resolve_base_model_id
 from nucllei.utils.tool_errors import ToolCallError
 
+# 読み込み済みの skill を再ロードしたときの結果(本文は返さない)。tool 結果の文の規約
+# (事実の文 + 「次の手:」— README_API §5.1)に揃える。
+LOADED_RESULT = (
+    "skill {skill_id} は読み込み済み (手順書はこの会話の上にある load_skill の結果)。"
+    "次の手: 上の手順書に従って作業を続ける。"
+)
+
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 
@@ -80,6 +87,11 @@ def apply_skill_command(form_data, user, model):
       紐づく(meta.skillIds)∧ ユーザーに read 可視。モデル設定を唯一の制御面にする
       (従来の「可視ならどのモデルでも発火」から変更 — _memos/builtin-tools.md 1b)。
 
+    - **同一 skill の再発火は冪等**: 同じ skill が既にこの会話へ載っていれば
+      (それより前の `/command` で注入済み、またはそれより前の履歴に load_skill 呼び出しが
+      ある)exchange を足さない — 本文が context に 2 回入らない。発火リストにも載せない
+      (UI の発火カードも出ない。ロード済みなので出すものが無い)。
+
     戻り値は (form_data, 発火リスト)。発火リストの要素は
     {call_id, command, title, content(展開済み), current(最後の user メッセージでの発火か)}。
     current な発火は UI 表示用に応答先頭の tool_calls ブロック(synthetic)にも seed される。
@@ -97,10 +109,13 @@ def apply_skill_command(form_data, user, model):
             last_user_idx = idx
 
     new_messages = []
+    loaded: set[str] = set()  # ここまでに本文が載った skill id(冪等判定)
     for idx, message in enumerate(messages):
         new_messages.append(message)
 
         if message.get("role") != "user":
+            # それより前の履歴にある load_skill(モデル自律の呼び出し)も「載っている」に数える
+            loaded.update(iter_loaded_skill_ids([message]))
             continue
 
         # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
@@ -130,8 +145,10 @@ def apply_skill_command(form_data, user, model):
             skill is None
             or skill.id not in model_skill_ids
             or not is_skill_visible(skill, user)
+            or skill.id in loaded
         ):
             continue
+        loaded.add(skill.id)
 
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
         exchange, activation = synthesize_load_skill_exchange(
@@ -480,7 +497,7 @@ def current_skill_activation_seeds(skill_activations) -> list:
     ]
 
 
-def build_load_skill_tool(model, user, load_tools=None):
+def build_load_skill_tool(model, user, load_tools=None, messages=None):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
     - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
@@ -495,6 +512,12 @@ def build_load_skill_tool(model, user, load_tools=None):
     load_tools(skill) は tool 遅延取り込みの **async** フック(#35 step2b / #28):
     skill.tool_ids が非空なら content を返す前に await され、呼び出し側
     (process_chat_payload)が tools_dict / form_data["tools"] に注入する。
+
+    **読み込み済みの skill は本文を返さない**(冗長ロードで本文が context に 2 回入るのを
+    止める): このリクエストの messages(`/command` の合成 exchange・過去ターンの
+    load_skill 呼び出し — 渡されたときだけ見る)か、同じターン内の先行呼び出しで
+    既に読んだ skill は、短い結果(LOADED_RESULT)を返す。tool の遅延取り込みは
+    冪等なのでそのまま行う。
     """
     if not is_skills_feature_enabled(model):
         return None
@@ -538,6 +561,11 @@ def build_load_skill_tool(model, user, load_tools=None):
         },
     }
 
+    # 本文が既に context にある skill id。履歴分は build 時に 1 回だけ読む
+    # (ターン内の先行呼び出しは load_skill 自身が足す — 同じ tool エントリが
+    # そのターンの native ループで使い回される)。
+    loaded_skill_ids = set(iter_loaded_skill_ids(messages or []))
+
     async def load_skill(skill_id: str = ""):
         skill = manifest.get(normalize_command(skill_id))
         if skill is None:
@@ -545,6 +573,12 @@ def build_load_skill_tool(model, user, load_tools=None):
                 f"skill が見つからない: {skill_id}",
                 "load_skill の説明の一覧にある id をそのまま渡す。",
             )
+        # 判定と記録は await より前(同じターンの並列呼び出しでも本文は 1 回)
+        if skill.id in loaded_skill_ids:
+            result = LOADED_RESULT.format(skill_id=skill.id)
+        else:
+            loaded_skill_ids.add(skill.id)
+            result = activate_skill(skill, user, model)
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
             # load_tools は async フック(#28: 中で get_tools をワーカースレッド実行)
@@ -552,10 +586,7 @@ def build_load_skill_tool(model, user, load_tools=None):
         # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
         # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
         return json.dumps(
-            {
-                "result": activate_skill(skill, user, model),
-                "tools": loaded_tool_names,
-            },
+            {"result": result, "tools": loaded_tool_names},
             ensure_ascii=False,
         )
 

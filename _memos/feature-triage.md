@@ -267,3 +267,17 @@ Folders/RecursiveFolder/FolderMenu)・`chat.folder_id` 列・`folder` テーブ�
   既存 chat JSON から lane メタデータ(modelIdx / user message models)を剥がし、
   chat.models を先頭 1 要素へ正規化する。複数 lane の応答自体は通常の sibling(1/N ナビ)
   として残る(枝は有効な履歴なので消さない)
+
+## 「続きを生成」(Continue Response)の撤去(refs #142、2026-10-05 決定・FE 出荷)
+
+最後の応答の下にあった「続きの応答」ボタン(丸に三角)と FE の `continueResponse` 経路
+(send.ts → Chat → Messages → Message → ResponseMessage → MessageActions の callback prop、
+共有ページの空 stub、i18n キー `Continue Response`、マニュアル 03 の記述)を**機能ごと撤去**。
+
+- 判断の背景(監査「同じ内容が重複して context を食う」): 推論エンジン(SGLang / LiteLLM、
+  `continue_final_message` 未指定)は末尾 assistant を続けず**最初から書き直す**。BE は旧本文を
+  assembler の seed に足して保存するので、「旧本文 + 新全文」が履歴に永久に残る。tool を使った
+  メッセージでは tool 履歴が消える(実測)。**正しく続ける手段が無い機能**なので撤去
+- 戻すなら `continue_final_message`(エンジン側の prefill 継続)対応で作り直す。現行コードの復活はしない
+- BE 側の continue 用コード(`utils/middleware.py` の assembler `initial_content` seed 等)は
+  middleware.py を別作業が編集中のため**後で別途撤去**(FE が呼ばなくなったので死にパス)

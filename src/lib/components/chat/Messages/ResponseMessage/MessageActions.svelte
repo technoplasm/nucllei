@@ -35,7 +35,6 @@
 		gotoMessage,
 		showPreviousMessage,
 		showNextMessage,
-		continueResponse,
 		regenerateResponse,
 		actionMessage
 	}: {
@@ -49,7 +48,6 @@
 		gotoMessage: (message: ChatMessage, index: number) => void;
 		showPreviousMessage: (message: ChatMessage) => void;
 		showNextMessage: (message: ChatMessage) => void;
-		continueResponse: () => void;
 		regenerateResponse: (message: ChatMessage) => void;
 		actionMessage: (actionId: string, message: ChatMessage) => void;
 	} = $props();
@@ -249,22 +247,6 @@
 			{/if}
 
 			{#if !readOnly}
-				{#if isLastMessage}
-					<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
-						<button
-							type="button"
-							id="continue-response-button"
-							class="visible p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black regenerate-response-button"
-							aria-label={$i18n.t('Continue Response')}
-							onclick={() => {
-								continueResponse();
-							}}
-						>
-							<span class="i-lucide-circle-play size-4 block"></span>
-						</button>
-					</Tooltip>
-				{/if}
-
 				<Tooltip content={$i18n.t('Regenerate')} placement="bottom">
 					<button
 						type="button"

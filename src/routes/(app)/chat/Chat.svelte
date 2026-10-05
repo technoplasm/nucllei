@@ -957,7 +957,6 @@
 										selectedModels={session.selectedModels}
 										atSelectedModel={session.atSelectedModel}
 										sendPrompt={send.sendPrompt}
-										continueResponse={send.continueResponse}
 										regenerateResponse={send.regenerateResponse}
 										chatActionHandler={events.chatActionHandler}
 										addMessages={send.addMessages}

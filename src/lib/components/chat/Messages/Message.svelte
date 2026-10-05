@@ -17,7 +17,6 @@
 		editMessage,
 		actionMessage,
 		regenerateResponse,
-		continueResponse,
 		addMessages,
 		readOnly = false
 	}: {
@@ -34,7 +33,6 @@
 			event?: unknown
 		) => void | Promise<void>;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
-		continueResponse: () => void | Promise<void>;
 		addMessages: (data: {
 			modelId: string;
 			parentId: string;
@@ -90,7 +88,6 @@
 				{showNextMessage}
 				{editMessage}
 				{actionMessage}
-				{continueResponse}
 				{regenerateResponse}
 				{addMessages}
 				{readOnly}
