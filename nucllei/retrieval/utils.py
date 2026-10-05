@@ -1,3 +1,4 @@
+import json
 import logging
 
 from nucllei.models.files import Files
@@ -22,9 +23,39 @@ def _dictation_marks(file_object) -> dict:
     }
 
 
+def _file_identity(file) -> str:
+    """重複判定の鍵: file id(無ければ entry の JSON 全体)。"""
+    if isinstance(file, dict):
+        file_id = file.get("id") or (file.get("file") or {}).get("id")
+        if file_id:
+            return f"id:{file_id}"
+    return "json:" + json.dumps(file, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def dedupe_files_by_id(files: list) -> list:
+    """添付 entry を file id で一意にする(先勝ち・順序維持)。
+
+    id が同じでメタデータ(status / itemId / 表示名 等)だけ違う entry は同じファイル —
+    JSON 全体の一致で比べると両方残り、本文が system に 2 回入る(監査 2026-10-05:
+    2,031 → 3,529 字)。id の無い entry だけ従来どおり JSON 全体で比べる。
+    """
+    seen = set()
+    result = []
+    for file in files or []:
+        key = _file_identity(file)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(file)
+    return result
+
+
 def get_sources_from_files(request, files):
     # RAG 撤去(#52): ベクタ検索・チャンク・reranking を廃止。添付は data.content を全文注入する。
     log.debug(f"files: {files}")
+
+    # 呼び手が渡した files が重複していても 1 ファイル 1 source(id 基準)
+    files = dedupe_files_by_id(files)
 
     relevant_contexts = []
 

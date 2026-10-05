@@ -763,6 +763,76 @@ class TestSkills(AbstractPostgresTest):
         result = json.loads(asyncio.run(tool["callable"](skill_id="once")))
         assert result == {"result": short, "tools": []}
 
+    def test_command_then_model_load_skill_injects_body_once(self):
+        """`/command` で入った skill をモデルが同じターンで load_skill しても、本文は
+        context に 1 回だけ(process_chat_payload が build_load_skill_tool に messages を
+        渡す — 渡さないと合成 exchange が見えず、load_skill が本文をもう 1 回返す)。"""
+        import asyncio
+        import json
+
+        from starlette.requests import Request
+
+        from nucllei.main import app
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils import middleware
+        from nucllei.utils.skills import LOADED_RESULT
+
+        body = "【一度だけの手順書本文】"
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="oncecmd",
+                name="t",
+                description="一度だけ",
+                content=body,
+                access_control=None,
+            ),
+        )
+        model = {
+            "id": "skillpreset",
+            "name": "skillpreset",
+            "owned_by": "openai",
+            "info": {"meta": {"skillIds": [skill.id]}},
+        }
+        user = types.SimpleNamespace(
+            id="1", name="Taro", email="t@example.invalid", role="admin", info=None
+        )
+        saved_models = getattr(app.state, "MODELS", None)
+        app.state.MODELS = {"skillpreset": model}
+        try:
+            request = Request(
+                scope={
+                    "type": "http",
+                    "app": app,
+                    "method": "POST",
+                    "path": "/api/chat/completions",
+                    "headers": [],
+                    "query_string": b"",
+                }
+            )
+            form_data = {
+                "model": "skillpreset",
+                "stream": True,
+                "messages": [{"role": "user", "content": "/oncecmd やって"}],
+            }
+            metadata = {"user_id": "1", "model": model}
+            form_data, metadata, _ = asyncio.run(
+                middleware.process_chat_payload(
+                    request, form_data, user, metadata, model, None
+                )
+            )
+            # `/command` の合成 exchange で本文が 1 回入っている
+            sent = json.dumps(form_data["messages"], ensure_ascii=False)
+            assert sent.count(body) == 1
+
+            # 同じターンでモデルが load_skill しても本文は返らない
+            load_skill = metadata["tools"]["load_skill"]["callable"]
+            result = json.loads(asyncio.run(load_skill(skill_id="oncecmd")))
+            assert result["result"] == LOADED_RESULT.format(skill_id="oncecmd")
+            assert body not in result["result"]
+        finally:
+            app.state.MODELS = saved_models
+
     def test_load_skill_calls_load_tools_hook(self):
         """load_skill 発火時、tool_ids 非空なら load_tools フックが呼ばれる(入口 2)。"""
         import asyncio

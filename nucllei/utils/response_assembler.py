@@ -30,14 +30,17 @@ MISMATCH_UNEXPECTED_FINISH = "unexpected_finish"  # ログ観測に留める
 class ContentBlocksAssembler:
     """デルタを content_blocks に畳み込むターンスコープの状態機械。
 
-    - content: text デルタの素朴な累積(webhook 本文・resume 初期値用の派生値)
+    - content: text デルタの素朴な累積(webhook 本文用の派生値)
     - content_blocks: 組み立て中の内部ブロック列(wire 形ではない)
+
+    常に空の text ブロックから始まる(seed_blocks は `/command` 発火の表示用ブロック
+    だけ)。「続きを生成」用の initial_content(既存本文を種にする)は撤去済み(refs #142)。
     """
 
-    def __init__(self, initial_content="", seed_blocks=None, tools=None):
-        self.content = initial_content
+    def __init__(self, seed_blocks=None, tools=None):
+        self.content = ""
         self.content_blocks = list(seed_blocks or [])
-        self.content_blocks.append({"type": "text", "content": initial_content})
+        self.content_blocks.append({"type": "text", "content": ""})
         # 表示ディスクリプタ(render)の解決元。metadata["tools"] と同一オブジェクトを
         # 受け取ることで、ストリーム中の tool 遅延追加(load_skill)も見える。
         self._tools = tools if tools is not None else {}

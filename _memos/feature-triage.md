@@ -279,5 +279,7 @@ Folders/RecursiveFolder/FolderMenu)・`chat.folder_id` 列・`folder` テーブ�
   assembler の seed に足して保存するので、「旧本文 + 新全文」が履歴に永久に残る。tool を使った
   メッセージでは tool 履歴が消える(実測)。**正しく続ける手段が無い機能**なので撤去
 - 戻すなら `continue_final_message`(エンジン側の prefill 継続)対応で作り直す。現行コードの復活はしない
-- BE 側の continue 用コード(`utils/middleware.py` の assembler `initial_content` seed 等)は
-  middleware.py を別作業が編集中のため**後で別途撤去**(FE が呼ばなくなったので死にパス)
+- BE 側の continue 用コード(`utils/middleware.py` の assembler `initial_content` seed・
+  DB の途中回答 / wire 末尾 assistant の読み出し)も撤去済み(2026-10-05)。末尾が assistant の
+  wire(API 利用者が送りうる)は普通の履歴として上流へ渡り、応答は空から組み立てて
+  そのメッセージに入る(旧本文を種にしない — 追撃・計測でも旧本文は 1 回だけ)

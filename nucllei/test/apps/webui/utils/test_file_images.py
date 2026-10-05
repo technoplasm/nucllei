@@ -79,6 +79,43 @@ class TestFileImagesInline(AbstractPostgresTest):
 
         return asyncio.run(inline_internal_image_urls(messages, user))
 
+    def test_cache_reuses_data_url_across_calls(self, monkeypatch):
+        """cache を渡すと呼び出しをまたいで data URL を使い回す(tool ループの追撃で
+        同じ tool 画像を毎周読み直して base64 化していた — 監査 2026-10-05)。"""
+        from nucllei.utils import file_images
+
+        loads = []
+        real_load = file_images._load_file
+
+        def counting_load(file_id, user):
+            loads.append(file_id)
+            return real_load(file_id, user)
+
+        monkeypatch.setattr(file_images, "_load_file", counting_load)
+
+        cache = {}
+        url = "/api/v1/files/f-img/content"
+        first = asyncio.run(
+            file_images.inline_internal_image_urls(
+                self._messages(url), self.alice, cache=cache
+            )
+        )
+        second = asyncio.run(
+            file_images.inline_internal_image_urls(
+                self._messages(url), self.alice, cache=cache
+            )
+        )
+        expected = f"data:image/png;base64,{PNG_B64}"
+        assert first[0]["content"][1]["image_url"]["url"] == expected
+        assert second[0]["content"][1]["image_url"]["url"] == expected
+        assert loads == ["f-img"]
+
+        # cache を渡さなければ従来どおり呼び出しごとに読む
+        asyncio.run(
+            file_images.inline_internal_image_urls(self._messages(url), self.alice)
+        )
+        assert loads == ["f-img", "f-img"]
+
     # ---- 変換される ----
 
     def test_owner_relative_url_converted(self):

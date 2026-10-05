@@ -800,55 +800,40 @@ class TestRunSubagent(AbstractPostgresTest):
     def test_child_task_external_stop_keeps_parent_alive(self, monkeypatch):
         """子 task 側発の cancel(所有者の直接 stop 等)を親 cancel と誤認しない。
 
-        子タスクの入口(post_response_handler の大 try 前の await)を堰き止めて
-        そこへ cancel を配達し、子 task を cancelled で終わらせる。callable は
-        CancelledError を re-raise せず(親ターンを interrupted にせず)、
-        stopped エラー + persisted 済み部分回答を tool result で返す。
-        """
-        import threading
+        子 task が最初の一歩を踏む前に cancel を配達し(post_response_handler の
+        大 try に入る前 — 中で受けた cancel は内部処理されて正常終了になる)、子 task を
+        cancelled で終わらせる。callable は CancelledError を re-raise せず(親ターンを
+        interrupted にせず)、stopped エラー + persisted 済み部分回答を tool result で返す。
 
-        from nucllei import tasks as task_registry
+        (旧版は子タスク先頭の get_message_by_id_and_message_id を堰き止めて cancel を
+        配達していた。その読み出しは「続きを生成」の seed 用で、撤去とともに無くなった
+        — refs #142。)
+        """
+        from nucllei.utils import middleware
 
         self._patch_child_pipeline(monkeypatch)
 
-        orig_get_message = self.Chats.get_message_by_id_and_message_id
-        entered = threading.Event()
-        release = threading.Event()
-        state = {"first": True}
+        orig_create_task = middleware.create_task
+        stopped = {}
 
-        def gated_get_message(chat_id, message_id):
-            # 子タスク先頭の await を堰き止める(2 回目以降 = callable の最終読みは素通し)
-            if state["first"]:
-                state["first"] = False
-                entered.set()
-                release.wait(timeout=30)
-            return orig_get_message(chat_id, message_id)
+        def create_task_then_stop(coroutine, id=None):
+            task_id, task = orig_create_task(coroutine, id=id)
+            if not stopped:
+                # 所有者による子 task の直接 stop(tasks.stop_task の cancel 配達)が
+                # 子 task の最初の一歩より前に届く
+                stopped["chat_id"] = id
+                task.cancel()
+            return task_id, task
 
-        monkeypatch.setattr(
-            self.Chats, "get_message_by_id_and_message_id", gated_get_message
-        )
+        monkeypatch.setattr(middleware, "create_task", create_task_then_stop)
 
         tool = self._build_tool()
 
         async def main():
-            outer = asyncio.create_task(
-                tool["callable"](preset_id="researcher", instruction="調査して")
+            result = await tool["callable"](
+                preset_id="researcher", instruction="調査して"
             )
-            try:
-                assert await asyncio.to_thread(entered.wait, 30)
-                children = await asyncio.to_thread(
-                    self.Chats.get_child_chats_by_parent_id, self.parent.id, "1"
-                )
-                assert children, "child chat not spawned"
-                task_ids = task_registry.list_task_ids_by_chat_id(children[0].id)
-                assert task_ids, "child task not registered"
-                # 所有者による子 task の直接 stop。cancel は大 try 前の await に
-                # 配達され、子 task は cancelled で終了する(内部処理されない)
-                await task_registry.stop_task(task_ids[-1])
-                # 親(callable)は CancelledError にならず正常フローで返る
-                return children[0].id, await outer
-            finally:
-                release.set()
+            return stopped["chat_id"], result
 
         child_id, result = asyncio.run(main())
         assert result["ok"] is False

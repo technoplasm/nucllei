@@ -47,11 +47,11 @@ class TestTextDelta:
         assert a.handle_delta({}) == set()
         assert a.handle_delta({"content": ""}) == set()
 
-    def test_initial_content_seeds_first_text_block(self):
-        a = make_assembler(initial_content="続きから")
-        a.handle_delta({"content": "書く"})
-        assert a.content == "続きから書く"
-        assert a.content_blocks[0]["content"] == "続きから書く"
+    def test_starts_from_empty_text_block(self):
+        # 「続きを生成」の initial_content seed は撤去(refs #142)— 常に空から組む
+        a = make_assembler()
+        assert a.content == ""
+        assert a.content_blocks == [{"type": "text", "content": ""}]
 
 
 class TestReasoningDiscipline:
@@ -545,8 +545,10 @@ class TestStreamBlocks:
         ]
 
     def test_resumed_text_block_prefix_is_excluded(self):
-        # initial_content(resume)は前回の出力 — 今回の追記分だけを数える
-        a = make_assembler(initial_content="既存")
+        # 前のストリームが末尾 text に書いた分は数えない — 今回の追記分だけ
+        a = make_assembler()
+        a.handle_delta({"content": "既存"})
+        a.start_stream()
         a.handle_delta({"content": "追記"})
         assert [(b["type"], b["content"]) for b in a.stream_blocks()] == [
             ("text", "追記")

@@ -937,6 +937,14 @@ example:
  "messages": [{"role": "user", "content": "1+1?"}]}
 ```
 
+The response always starts empty: if `messages` ends with an `assistant`
+message, it is sent to the model as ordinary history (there is no "continue this
+message" mode — the old content is not prepended to the result). Every model call
+of the turn — the first, each tool-loop follow-up, and the turn-end measurement
+below — carries the same generation parameters (`temperature`, `max_tokens`,
+`stop`, `seed`, … from `params` or top-level fields, after inlet filters), except
+that the measurement uses `max_tokens: 1`.
+
 The POST response is an SSE
 subscription to a background task that always runs to completion (disconnecting
 does not cancel). Events are envelopes

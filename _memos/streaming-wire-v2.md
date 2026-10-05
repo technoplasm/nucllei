@@ -197,7 +197,7 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
   「その id が他人のチャットに存在するか」が漏れる。
 - UI は影響を受けない: `send.ts` が `responseMessage`(`role:'assistant'`)を
   `history.messages` へ入れ、`saveChatHandler` で **DB 保存してから** completion を POST する。
-  `continueResponse` も既存の done 済みアシスタントメッセージ id を渡す。
+  (旧 `continueResponse` は 2026-10-05 に撤去 — _memos/feature-triage.md)
 - README_API §4.3 に「assistant message の id」と明記し、chat-wire の最小サンプル
   (`chats/new` → `completions`)を追加した(旧文は「message `id`」としか書いておらず、
   「先に作ったユーザーメッセージの id」と誤読できた — 実際に踏まれた)。

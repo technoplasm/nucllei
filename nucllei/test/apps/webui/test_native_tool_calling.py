@@ -124,6 +124,7 @@ async def _drive_tool_call_loop(
     upstream=None,
     measure_carried=None,
     usage_records=None,
+    form_extra=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
 
@@ -141,9 +142,11 @@ async def _drive_tool_call_loop(
     extra_tools: metadata["tools"] に追加登録するツール(get_current_time など)。
     measure_carried: ターン末の carried_tokens 計測(measure_carried_tokens)の代役。
     None なら計測しない(None を返す — 呼び出し数を数える既存テストに混ざらない)。
-    callable なら ``await measure_carried(request, user, model_id, form_data, blocks)``。
+    callable なら ``await measure_carried(request, user, model_id, form_data, blocks,
+    image_cache=...)``。
     usage_records: 指定時は record_usage の呼び出し(usage)を積み、usage をそのまま
     マージ結果として返す(emit を観測する用)。
+    form_extra: 初回の form_data に重ねるキー(生成パラメータ・messages の差し替え)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from nucllei.utils import middleware
@@ -238,6 +241,7 @@ async def _drive_tool_call_loop(
         "stream": True,
         "messages": [{"role": "user", "content": "札幌の天気は?"}],
         "tools": [{"type": "function", "function": weather_spec}],
+        **(form_extra or {}),
     }
     user = types.SimpleNamespace(
         id="1", email="john.doe@nucllei.local", name="John Doe", role="admin", info=None
@@ -847,7 +851,7 @@ def test_turn_end_measures_carried_tokens_before_done(monkeypatch):
     emit する — done より前(done 後だと完了時保存が推定値で DB を上書きしうる)。"""
     measure_calls = []
 
-    async def measure(request, user, model_id, form_data, content_blocks):
+    async def measure(request, user, model_id, form_data, content_blocks, **kwargs):
         measure_calls.append(
             {
                 "model_id": model_id,
@@ -1118,6 +1122,175 @@ def test_measure_carried_tokens_times_out(monkeypatch):
     assert asyncio.run(run()) is None
 
 
+# ---- 初回の生成パラメータを追撃・計測にも載せる(監査 2026-10-05)-------------------
+
+_INITIAL_PARAMS = {
+    "temperature": 0.1,
+    "max_tokens": 50,
+    "stop": ["###"],
+    "seed": 7,
+    "top_p": 0.9,
+}
+
+
+def test_followups_carry_initial_call_params(monkeypatch):
+    """チャット / ユーザー単位の params(apply_params_to_form_data がトップレベルへ
+    展開したもの)は tool ループの追撃にも初回と同じ値で載る。旧実装は model / stream /
+    tools / messages しか載せず、2 回目以降の呼び出しで temperature 等が黙って落ちた。
+    prompt 変数(variables)は nucllei 内部の値なので追撃に載せない。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["tool_call", "text_basic"],
+            form_extra={**_INITIAL_PARAMS, "variables": {"{{USER_NAME}}": "x"}},
+        )
+    )
+
+    assert len(completion_calls) == 2
+    for body in completion_calls:
+        for key, value in _INITIAL_PARAMS.items():
+            assert body[key] == value, key
+        assert "variables" not in body
+        assert body["model"] == "kimi-k2.6"
+        assert body["stream"] is True
+
+
+def test_measure_carries_initial_call_params_but_stops_at_one_token(monkeypatch):
+    """計測リクエストも初回の生成パラメータを載せる(reasoning_effort / custom の
+    chat_template_kwargs 等は chat template を通じて prompt の token 数を変えうる —
+    「次ターン最初の呼び出しと同じ形」を保つ)。max_tokens だけはチャットの値にも
+    preset の値にも負けず 1。stream_options は載せない(非 stream)。"""
+    form_data = {
+        "model": "kimi-k2.6",
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "messages": [{"role": "user", "content": "q"}],
+        "reasoning_effort": "high",
+        "chat_template_kwargs": {"thinking": True},
+        **_INITIAL_PARAMS,
+    }
+    result, sent = _measure_via_real_router(
+        monkeypatch,
+        form_data,
+        _MEASURE_BLOCKS,
+        {
+            "choices": [{"message": {"content": "x"}}],
+            "usage": {"prompt_tokens": 99, "completion_tokens": 1},
+        },
+    )
+
+    assert result == 99
+    payload = sent[0]
+    assert payload["max_tokens"] == 1
+    assert payload["stream"] is False
+    assert "stream_options" not in payload
+    assert payload["temperature"] == 0.1
+    assert payload["stop"] == ["###"]
+    assert payload["seed"] == 7
+    assert payload["reasoning_effort"] == "high"
+    assert payload["chat_template_kwargs"] == {"thinking": True}
+
+
+def test_followups_and_measure_share_turn_image_cache(monkeypatch):
+    """追撃のたびに同じ tool 画像を読み直さない: 追撃と計測の inline に、ターンで
+    1 つの cache を渡す(実際の使い回しは test_file_images の cache テスト)。"""
+    from nucllei.utils import middleware
+    from nucllei.utils.tool_output import feed_image
+
+    caches = []
+
+    async def fake_inline(messages, user, cache=None):
+        caches.append(cache)
+        return messages
+
+    monkeypatch.setattr(middleware, "inline_internal_image_urls", fake_inline)
+
+    async def measure(request, user, model_id, form_data, content_blocks, **kwargs):
+        caches.append(kwargs.get("image_cache"))
+        return None
+
+    async def get_weather(**kwargs):
+        feed_image("img-file-1")
+        return "天気図を提示しました。"
+
+    spec = {
+        "name": "get_weather",
+        "description": "天気を返す",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }
+    asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["tool_call", "text_basic"],
+            extra_tools={"get_weather": {"spec": spec, "callable": get_weather}},
+            measure_carried=measure,
+        )
+    )
+
+    # 追撃 2 回 + 計測 1 回、すべて同じ dict
+    assert len(caches) == 3
+    assert isinstance(caches[0], dict)
+    assert all(c is caches[0] for c in caches)
+
+
+# ---- 「続きを生成」撤去後: 末尾が assistant の wire(refs #142)--------------------
+
+
+def test_trailing_assistant_wire_is_history_not_seed(monkeypatch):
+    """末尾が assistant の wire(API 利用者が送りうる — 旧「続きを生成」の形)は
+    普通の履歴として扱う。応答は空から組み立て(旧本文を種にしない)、追撃と計測の
+    messages に旧本文は 1 回だけ。旧実装は assembler の initial_content に旧本文を
+    seed し、追撃で wire の assistant と出力側の text の 2 回送り、保存本文にも
+    「旧本文 + 新全文」が残った。"""
+    from nucllei.utils import middleware
+
+    old_text = "【旧本文】途中まで書いた回答。"
+    measured = []
+
+    async def measure(request, user, model_id, form_data, content_blocks, **kwargs):
+        measured.append(
+            middleware.build_carried_measure_messages(
+                form_data["messages"], content_blocks
+            )
+        )
+        return None
+
+    upserts = []
+    events, completion_calls, tool_invocations = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            measure_carried=measure,
+            upserts=upserts,
+            form_extra={
+                "messages": [
+                    {"role": "user", "content": "長い回答を"},
+                    {"role": "assistant", "content": old_text},
+                ]
+            },
+        )
+    )
+
+    assert len(tool_invocations) == 1
+    assert len(completion_calls) == 1
+    followup_text = json.dumps(completion_calls[0]["messages"], ensure_ascii=False)
+    assert followup_text.count("【旧本文】") == 1
+    assert len(measured) == 1
+    assert json.dumps(measured[0], ensure_ascii=False).count("【旧本文】") == 1
+
+    done = _final_done_data(events)
+    assert "【旧本文】" not in json.dumps(done, ensure_ascii=False)
+    for data in upserts:
+        assert "【旧本文】" not in json.dumps(data, ensure_ascii=False)
+
+
 def test_content_between_parallel_calls_does_not_duplicate_tool_calls_block(
     monkeypatch,
 ):
@@ -1221,7 +1394,7 @@ def test_followup_reinjects_pushed_images_as_user_message(monkeypatch):
     from nucllei.utils import middleware
     from nucllei.utils.tool_output import feed_image
 
-    async def fake_inline(messages, user):
+    async def fake_inline(messages, user, cache=None):
         # 追撃 messages に inline が掛かったことを証明するマーカ(内部 URL のみ)。
         for m in messages:
             if isinstance(m.get("content"), list):

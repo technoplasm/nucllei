@@ -38,7 +38,7 @@ from nucllei.utils.webhook import post_webhook
 from nucllei.models.users import UserModel
 from nucllei.models.functions import Functions
 
-from nucllei.retrieval.utils import get_sources_from_files
+from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 
 from nucllei.utils.chat import generate_chat_completion
@@ -49,7 +49,6 @@ from nucllei.utils.misc import (
     get_message_list,
     add_or_update_system_message,
     get_last_user_message,
-    get_last_assistant_message,
     prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
@@ -509,9 +508,10 @@ async def process_chat_payload(
     tool_ids = get_model_tool_ids(model)
     files = form_data.pop("files", None)
 
-    # Remove files duplicates
+    # 重複除去は file id 基準(id の無いものだけ JSON 全体の一致)。メタデータ違いの
+    # 同じ file(status / itemId 等)で本文が system に 2 回入っていた(監査 2026-10-05)。
     if files:
-        files = list({json.dumps(f, sort_keys=True): f for f in files}.values())
+        files = dedupe_files_by_id(files)
 
     metadata = {
         **metadata,
@@ -640,7 +640,11 @@ async def process_chat_payload(
 
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
-    load_skill_tool = build_load_skill_tool(model, user, load_tools=inject_skill_tools)
+    # messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの
+    # skill は本文を再注入しない(46b5ff9ed — 同じターンの冗長ロードで本文が 2 回入る)。
+    load_skill_tool = build_load_skill_tool(
+        model, user, load_tools=inject_skill_tools, messages=form_data["messages"]
+    )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
             log.warning(
@@ -1001,6 +1005,27 @@ async def _record_usage(
     )
 
 
+# 追撃・計測の呼び出しで毎回組み直すキー。form_data のそれ以外のキー(初回の呼び出しに
+# 乗った生成パラメータ — チャット / ユーザー単位の params を apply_params_to_form_data
+# が展開した temperature / max_tokens / stop / seed / top_p … や inlet filter・API
+# 利用者が足したトップレベル引数)は、初回と同じものを載せる。
+# "variables" は prompt 変数(metadata 側で使う nucllei 内部の値)なので載せない。
+PER_CALL_BODY_KEYS = frozenset(
+    {"model", "messages", "tools", "stream", "stream_options", "metadata", "variables"}
+)
+
+
+def initial_call_params(form_data: dict) -> dict:
+    """初回の呼び出しに乗った生成パラメータ(PER_CALL_BODY_KEYS 以外)の写し。
+
+    tool ループの追撃は旧実装で model / stream / tools / messages しか載せておらず、
+    チャット単位の temperature・max_tokens・stop・seed が 2 回目以降の呼び出しで
+    黙って落ちていた(監査 2026-10-05)。preset(models 行)の params は router が
+    毎回 DB から掛けるのでここには入らない(form_data を preset が書き換えない限り)。
+    """
+    return {k: v for k, v in form_data.items() if k not in PER_CALL_BODY_KEYS}
+
+
 def build_carried_measure_messages(messages: list, content_blocks: list) -> list:
     """次ターン最初の呼び出しで送られる messages の写し(計測リクエスト用)。
 
@@ -1019,7 +1044,12 @@ def build_carried_measure_messages(messages: list, content_blocks: list) -> list
 
 
 async def measure_carried_tokens(
-    request, user, model_id: str, form_data: dict, content_blocks: list
+    request,
+    user,
+    model_id: str,
+    form_data: dict,
+    content_blocks: list,
+    image_cache: Optional[dict] = None,
 ) -> Optional[int]:
     """次ターンへ持ち越すコンテキスト量を**実測**する(ken 指示 2026-10-05)。
 
@@ -1041,8 +1071,13 @@ async def measure_carried_tokens(
     - 失敗・タイムアウト・usage 無しは None(呼び手は推定値のまま)。
     """
     messages = build_carried_measure_messages(form_data["messages"], content_blocks)
-    messages = await inline_internal_image_urls(messages, user)
+    messages = await inline_internal_image_urls(messages, user, cache=image_cache)
     body = {
+        # 初回と同じ生成パラメータも載せる — temperature / stop / seed は prompt の
+        # token 数に効かないが、reasoning_effort や custom の chat_template_kwargs 等は
+        # chat template を通じて prompt を変えうる。「次ターン最初の呼び出しと同じ形」を
+        # 保つため除外リストで絞らず全部載せ、max_tokens だけ 1 で上書きする。
+        **initial_call_params(form_data),
         "model": model_id,
         "stream": False,
         "max_tokens": 1,
@@ -1073,7 +1108,15 @@ async def measure_carried_tokens(
 
 
 async def _record_measured_carried(
-    request, user, model, model_id, metadata, form_data, content_blocks, event_emitter
+    request,
+    user,
+    model,
+    model_id,
+    metadata,
+    form_data,
+    content_blocks,
+    event_emitter,
+    image_cache=None,
 ):
     """ターン末: carried_tokens を実測で差し替え、マージ後の usage を emit する。
 
@@ -1087,7 +1130,7 @@ async def _record_measured_carried(
         return
     started = time.monotonic()
     carried = await measure_carried_tokens(
-        request, user, model_id, form_data, content_blocks
+        request, user, model_id, form_data, content_blocks, image_cache=image_cache
     )
     if carried is None:
         return
@@ -2048,22 +2091,7 @@ async def process_chat_response(
     await _persist_message_snapshot(metadata, {"model": model_id})
 
     async def post_response_handler(response, events):
-        message = await asyncio.to_thread(
-            Chats.get_message_by_id_and_message_id,
-            metadata["chat_id"],
-            metadata["message_id"],
-        )
-
         tool_calls = []
-
-        last_assistant_message = None
-        try:
-            if form_data["messages"][-1]["role"] == "assistant":
-                last_assistant_message = get_last_assistant_message(
-                    form_data["messages"]
-                )
-        except Exception:
-            pass
 
         # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
         # 「View Result from load_skill」として応答先頭に表示する。
@@ -2077,12 +2105,12 @@ async def process_chat_response(
         # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
         # parser 有効が接続契約で、常に reasoning_content デルタとして届く
         # (content 中のタグ検出経路は撤去済み — _memos/rendering-design.md §3)。
+        #
+        # 応答は常に空から組み立てる(「続きを生成」は撤去 — refs #142)。DB の
+        # 途中回答や wire 末尾の assistant を種にしない: 末尾が assistant の wire
+        # (API 利用者が送りうる)は普通の履歴としてそのまま上流へ渡り、生成結果だけが
+        # このメッセージに入る(旧本文 + 新全文の二重化を作らない)。
         assembler = ContentBlocksAssembler(
-            initial_content=(
-                message.get("content", "")
-                if message
-                else last_assistant_message if last_assistant_message else ""
-            ),
             seed_blocks=seed_blocks,
             tools=metadata.get("tools", {}),
         )
@@ -2120,6 +2148,9 @@ async def process_chat_response(
                 )
             if response_tool_calls:
                 tool_calls.append(response_tool_calls)
+
+            # inline_internal_image_urls のターン内キャッシュ(追撃・計測で共有)
+            image_cache = {}
 
             # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
             max_tool_call_iterations = TOOL_CALL_MAX_ITERATIONS
@@ -2176,12 +2207,17 @@ async def process_chat_response(
                         *form_data["messages"],
                         *convert_content_blocks_to_messages(assembler.content_blocks),
                     ]
+                    # 同じ tool 画像は追撃のたびに読み直さない(ターン内で data URL を
+                    # 使い回す — image_cache はこのターンだけ生きる)。
                     followup_msgs = await inline_internal_image_urls(
-                        followup_msgs, user
+                        followup_msgs, user, cache=image_cache
                     )
                     res = await generate_chat_completion(
                         request,
                         {
+                            # 初回と同じ生成パラメータ(チャット / ユーザー単位の
+                            # temperature・max_tokens・stop・seed 等)を追撃にも載せる
+                            **initial_call_params(form_data),
                             "model": model_id,
                             # 追撃呼び出しは元リクエストの stream 指定を尊重する
                             # (stream 非対応モデル向けの opt-out を殺さない)
@@ -2278,6 +2314,7 @@ async def process_chat_response(
                 form_data,
                 assembler.content_blocks,
                 event_emitter,
+                image_cache=image_cache,
             )
 
             title = await asyncio.to_thread(

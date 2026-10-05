@@ -201,6 +201,13 @@ async def generate_function_chat_completion(
 
         return params
 
+    # 呼び手の form_data は書き換えない(浅いコピー)。middleware の tool ループは
+    # 初回に渡した form_data を追撃・計測でも使う — 旧実装はここで model を
+    # base_model_id へ、messages を preset system 込みへ、params を preset 値へ
+    # in-place で書き換えていたため、pipe preset の追撃が base pipe 宛て(preset の
+    # params・アクセス判定を経由しない)になり、保存される model も base になっていた。
+    form_data = {**form_data}
+
     model_id = form_data.get("model")
     model_info = Models.get_model_by_id(model_id)
 

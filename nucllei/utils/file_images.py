@@ -115,28 +115,37 @@ async def _materialize(loaded: LoadedRef, page: int | None, label: str) -> str |
     return None
 
 
-async def inline_internal_image_urls(messages: list, user) -> list:
+async def inline_internal_image_urls(
+    messages: list, user, cache: dict | None = None
+) -> list:
     """messages(OpenAI 形式)内の内部参照の image_url パーツを data URL に置換する。
 
     messages を破壊的に書き換えて同じ list を返す。変換できない内部 file URL /
     絶対 URL / "/" 始まり参照パーツ(およびどの名前空間でもない URL)は text
     "(image unavailable)" に置換(冒頭 docstring 参照)。data URL は無変更。
+
+    cache: 呼び出しをまたいで data URL(変換不能の None も)を使い回す dict。tool
+    ループの追撃は毎周 content_blocks から messages を作り直すので、渡さないと同じ
+    tool 画像を追撃のたびに読み直して base64 化する。呼び手(1 ターン = 1 user)が
+    スコープを持つ — ユーザーをまたいで共有しないこと(ACL はロード時に掛かる)。
     """
-    # 同一ターン内で同じ file / 参照を複数回参照しても読み出しは 1 回(結果 None も
+    # 同一呼び出し内で同じ file / 参照を複数回参照しても読み出しは 1 回(結果 None も
     # キャッシュ)。バイト列は参照単位、data URL はページ単位 — PDF の複数ページは
     # 同じ 1 本を読んでページだけ変える(上流 http の PDF をページ数ぶん取りに行かない)。
+    # バイト列は呼び出し内だけ持つ(data URL が揃えば要らない)。
     loaded_cache: dict[str, LoadedRef | None] = {}
-    data_cache: dict[str, str | None] = {}
+    data_cache: dict[str, str | None] = cache if cache is not None else {}
 
     async def materialize(key: str, loader, page: int | None, label: str):
+        page_key = f"{key}#{page}"
+        if page_key in data_cache:
+            return data_cache[page_key]
         if key not in loaded_cache:
             loaded_cache[key] = await loader()
-        page_key = f"{key}#{page}"
-        if page_key not in data_cache:
-            loaded = loaded_cache[key]
-            data_cache[page_key] = (
-                None if loaded is None else await _materialize(loaded, page, label)
-            )
+        loaded = loaded_cache[key]
+        data_cache[page_key] = (
+            None if loaded is None else await _materialize(loaded, page, label)
+        )
         return data_cache[page_key]
 
     async def load(file_id: str, page: int | None) -> str | None:

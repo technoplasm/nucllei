@@ -42,10 +42,6 @@ EXEMPT_FILES = {
 # キーは (相対パス, 正規化した呼び出しソース)。ソースが変わったら再レビューさせる。
 EXEMPT_CALLS = {
     (
-        "utils/middleware.py",
-        "json.dumps(f, sort_keys=True)",
-    ): "dict の重複排除キー。文字列は外へ出ず、決定性だけが要件",
-    (
         "routers/ollama.py",
         "json.dumps(payload)",
     ): "推論バックエンドへの送信ボディ。受け手がデコードするのでトークンに影響しない",
