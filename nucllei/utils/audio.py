@@ -21,13 +21,35 @@ from pathlib import Path
 import requests
 
 from nucllei.config import CACHE_DIR
-from nucllei.env import AIOHTTP_CLIENT_TIMEOUT, SRC_LOG_LEVELS
+from nucllei.env import (
+    AIOHTTP_CLIENT_TIMEOUT,
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+    SRC_LOG_LEVELS,
+)
 from nucllei.models.files import Files
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["AUDIO"])
 
 SPEECH_CACHE_DIR = CACHE_DIR / "audio" / "speech"
+
+# llens: 音声の外部呼び出し(TTS / STT エンジン)のタイムアウト。
+# AIOHTTP_CLIENT_TIMEOUT は既定 None(無期限)で、そのまま requests に渡すと
+# 応答しないエンジンに対して worker スレッドが永久に塞がる。chat completion 経路と
+# 同じ既存 env の connect / sock_read(既定 10 秒 / 300 秒 = 無音区間の上限)を使い、
+# total(AIOHTTP_CLIENT_TIMEOUT)が設定されていれば read はそれも超えない。
+_read_timeout = AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
+if AIOHTTP_CLIENT_TIMEOUT:
+    _read_timeout = min(_read_timeout, AIOHTTP_CLIENT_TIMEOUT)
+# requests 用 (connect, read)
+AUDIO_REQUEST_TIMEOUT = (AIOHTTP_CLIENT_TIMEOUT_CONNECT, _read_timeout)
+# 一覧取得(models / voices)用 — 既存のモデル一覧タイムアウト(既定 10 秒)に揃える
+AUDIO_LIST_TIMEOUT = (
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST or _read_timeout,
+)
 SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -134,7 +156,7 @@ def synthesize_speech(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {config.TTS_OPENAI_API_KEY}",
         },
-        timeout=AIOHTTP_CLIENT_TIMEOUT,
+        timeout=AUDIO_REQUEST_TIMEOUT,
     )
     r.raise_for_status()
 

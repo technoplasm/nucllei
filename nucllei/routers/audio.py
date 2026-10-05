@@ -36,9 +36,16 @@ from nucllei.config import (
 from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import (
     AIOHTTP_CLIENT_TIMEOUT,
+    AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     SRC_LOG_LEVELS,
 )
-from nucllei.utils.audio import SPEECH_CACHE_DIR, synthesize_speech
+from nucllei.utils.audio import (
+    AUDIO_LIST_TIMEOUT,
+    AUDIO_REQUEST_TIMEOUT,
+    SPEECH_CACHE_DIR,
+    synthesize_speech,
+)
 
 router = APIRouter()
 
@@ -331,7 +338,11 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             )
 
         try:
-            timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+            timeout = aiohttp.ClientTimeout(
+                total=AIOHTTP_CLIENT_TIMEOUT,
+                connect=AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+                sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+            )
             async with aiohttp.ClientSession(
                 timeout=timeout, trust_env=True
             ) as session:
@@ -391,7 +402,11 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             data = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{locale}">
                 <voice name="{language}">{payload["input"]}</voice>
             </speak>"""
-            timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+            timeout = aiohttp.ClientTimeout(
+                total=AIOHTTP_CLIENT_TIMEOUT,
+                connect=AIOHTTP_CLIENT_TIMEOUT_CONNECT,
+                sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+            )
             async with aiohttp.ClientSession(
                 timeout=timeout, trust_env=True
             ) as session:
@@ -561,6 +576,7 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                     "model": request.app.state.config.STT_MODEL,
                     **({"prompt": prompt} if prompt else {}),
                 },
+                timeout=AUDIO_REQUEST_TIMEOUT,
             )
 
             r.raise_for_status()
@@ -617,6 +633,7 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                 headers=headers,
                 params=params,
                 data=file_data,
+                timeout=AUDIO_REQUEST_TIMEOUT,
             )
             r.raise_for_status()
             response_data = r.json()
@@ -721,6 +738,7 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                     headers={
                         "Ocp-Apim-Subscription-Key": api_key,
                     },
+                    timeout=AUDIO_REQUEST_TIMEOUT,
                 )
 
             r.raise_for_status()
@@ -896,7 +914,8 @@ def get_available_models(request: Request) -> list[dict]:
         ):
             try:
                 response = requests.get(
-                    f"{request.app.state.config.TTS_OPENAI_API_BASE_URL}/audio/models"
+                    f"{request.app.state.config.TTS_OPENAI_API_BASE_URL}/audio/models",
+                    timeout=AUDIO_LIST_TIMEOUT,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -914,7 +933,7 @@ def get_available_models(request: Request) -> list[dict]:
                     "xi-api-key": request.app.state.config.TTS_API_KEY,
                     "Content-Type": "application/json",
                 },
-                timeout=5,
+                timeout=AUDIO_LIST_TIMEOUT,
             )
             response.raise_for_status()
             models = response.json()
@@ -943,7 +962,8 @@ def get_available_voices(request) -> dict:
         ):
             try:
                 response = requests.get(
-                    f"{request.app.state.config.TTS_OPENAI_API_BASE_URL}/audio/voices"
+                    f"{request.app.state.config.TTS_OPENAI_API_BASE_URL}/audio/voices",
+                    timeout=AUDIO_LIST_TIMEOUT,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -984,7 +1004,7 @@ def get_available_voices(request) -> dict:
                 "Ocp-Apim-Subscription-Key": request.app.state.config.TTS_API_KEY
             }
 
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=AUDIO_LIST_TIMEOUT)
             response.raise_for_status()
             voices = response.json()
 
@@ -1016,6 +1036,7 @@ def get_elevenlabs_voices(api_key: str) -> dict:
                 "xi-api-key": api_key,
                 "Content-Type": "application/json",
             },
+            timeout=AUDIO_LIST_TIMEOUT,
         )
         response.raise_for_status()
         voices_data = response.json()

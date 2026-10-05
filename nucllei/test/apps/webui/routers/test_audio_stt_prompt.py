@@ -109,6 +109,35 @@ class TestTranscriptionPrompt(AbstractPostgresTest):
 
             assert self.post().status_code == 200
             assert "prompt" not in post.call_args.kwargs["data"]
+            # 外部呼び出しは必ず有限のタイムアウト付き(無応答エンジンで塞がらない)
+            connect, read = post.call_args.kwargs["timeout"]
+            assert 0 < connect and 0 < read
+
+
+def test_audio_timeouts_are_finite_by_default():
+    # AIOHTTP_CLIENT_TIMEOUT(total)は既定 None = 無期限。音声はそれをそのまま使わない
+    from nucllei.utils.audio import AUDIO_LIST_TIMEOUT, AUDIO_REQUEST_TIMEOUT
+
+    for timeout in (AUDIO_REQUEST_TIMEOUT, AUDIO_LIST_TIMEOUT):
+        assert all(isinstance(t, (int, float)) and t > 0 for t in timeout)
+
+
+def test_synthesize_speech_passes_timeout(tmp_path, monkeypatch):
+    import nucllei.utils.audio as audio_utils
+
+    monkeypatch.setattr(audio_utils, "SPEECH_CACHE_DIR", tmp_path)
+    config = SimpleNamespace(
+        TTS_ENGINE="openai",
+        TTS_MODEL="m",
+        TTS_VOICE="v",
+        TTS_OPENAI_API_BASE_URL="http://tts.invalid/v1",
+        TTS_OPENAI_API_KEY="k",
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
+    upstream = MagicMock(content=b"mp3")
+    with patch.object(audio_utils.requests, "post", return_value=upstream) as post:
+        audio_utils.synthesize_speech(request, "こんにちは")
+    assert post.call_args.kwargs["timeout"] == audio_utils.AUDIO_REQUEST_TIMEOUT
 
 
 def test_normalize_stt_prompt():
