@@ -14,6 +14,7 @@ from nucllei.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
     append_or_update_assistant_message,
+    get_message_list,
     prepend_to_first_user_message_content,
 )
 
@@ -105,3 +106,24 @@ def test_o1_o3_handler_swaps_system_role_without_mutating_shared_dict():
     assert result["messages"][0] == {"role": "developer", "content": "S"}
     assert result["max_completion_tokens"] == 10
     assert messages[0] == {"role": "system", "content": "S"}
+
+
+def test_get_message_list_terminates_on_parent_cycle():
+    # DoS 回帰: parentId 循環(既に DB にある / 内部経路で作られた)で無限ループしない
+    messages = {
+        "u": {"id": "u", "parentId": "a", "role": "user"},
+        "a": {"id": "a", "parentId": "u", "role": "assistant"},
+    }
+    chain = get_message_list(messages, "a")
+    assert [m["id"] for m in chain] == ["u", "a"]
+
+    messages = {"x": {"id": "x", "parentId": "x"}}
+    assert [m["id"] for m in get_message_list(messages, "x")] == ["x"]
+
+
+def test_get_message_list_treats_missing_parent_key_as_root():
+    messages = {
+        "u": {"id": "u", "role": "user"},
+        "a": {"id": "a", "parentId": "u", "role": "assistant"},
+    }
+    assert [m["id"] for m in get_message_list(messages, "a")] == ["u", "a"]

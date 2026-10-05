@@ -42,14 +42,23 @@ def get_message_list(messages, message_id):
 
     # Reconstruct the chain by following the parentId links
     message_list = []
+    # llens: parentId の循環(A→B→A)で無限ループ → イベントループごとハングする
+    # (保存/インポート経路の検証は routers/chats.py。ここは最後の砦として、
+    # 既に辿ったノードに戻ったら打ち切る)。parentId 欠落は根として扱う。
+    visited = {message_id}
 
-    while current_message:
-        message_list.insert(
-            0, current_message
-        )  # Insert the message at the beginning of the list
-        parent_id = current_message["parentId"]
-        current_message = messages.get(parent_id) if parent_id else None
+    while isinstance(current_message, dict):
+        message_list.append(current_message)
+        parent_id = current_message.get("parentId")
+        if not parent_id:
+            break
+        if parent_id in visited:
+            log.warning("get_message_list: parentId cycle at %s; truncating", parent_id)
+            break
+        visited.add(parent_id)
+        current_message = messages.get(parent_id)
 
+    message_list.reverse()
     return message_list
 
 

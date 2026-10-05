@@ -270,8 +270,62 @@ async def get_user_chat_list_by_user_id(
 ############################
 
 
+def _assert_valid_history(chat_json: dict):
+    """llens: 保存・作成・インポートで受け取る history の木構造を検証する。
+
+    parentId の循環(A→B→A)は、履歴を辿る全経路(get_message_list・FE の再帰)を
+    無限ループさせ、BE ではイベントループごとサーバー全体がハングする(DoS)。
+    受け付ける前に以下を満たさなければ 400:
+    - messages の各要素が dict で、parentId(あれば)が messages に実在する
+    - parentId を辿って循環しない(自己参照を含む)
+    - currentId(あれば)が messages に実在する
+    history を持たない部分更新(title 等のメタのみ)は対象外。
+    """
+
+    def _reject(detail: str):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+    if not isinstance(chat_json, dict) or "history" not in chat_json:
+        return
+    history = chat_json.get("history")
+    if not isinstance(history, dict):
+        _reject("Invalid chat history: history must be an object.")
+    messages = history.get("messages")
+    if messages is None:
+        messages = {}
+    if not isinstance(messages, dict):
+        _reject("Invalid chat history: messages must be an object.")
+
+    for message in messages.values():
+        if not isinstance(message, dict):
+            _reject("Invalid chat history: each message must be an object.")
+        parent_id = message.get("parentId")
+        if parent_id is not None and not isinstance(parent_id, str):
+            _reject("Invalid chat history: parentId must be a string or null.")
+        if parent_id and parent_id not in messages:
+            _reject("Invalid chat history: parentId refers to a missing message.")
+
+    current_id = history.get("currentId")
+    if current_id is not None and not isinstance(current_id, str):
+        _reject("Invalid chat history: currentId must be a string or null.")
+    if current_id and current_id not in messages:
+        _reject("Invalid chat history: currentId refers to a missing message.")
+
+    # 循環検出(O(n)): 各起点から親へ辿り、今回の walk で付けた印に戻れば循環。
+    # 以前の walk の印に当たったら、その先は検証済み(根で終わる)なので打ち切る。
+    walk_of: dict = {}
+    for start in messages:
+        node = start
+        while node and node not in walk_of:
+            walk_of[node] = start
+            node = messages[node].get("parentId")
+        if node and walk_of[node] == start:
+            _reject("Invalid chat history: parentId links form a cycle.")
+
+
 @router.post("/new", response_model=Optional[ChatResponse])
 async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
+    _assert_valid_history(form_data.chat)
     try:
         chat = Chats.insert_new_chat(user.id, form_data)
         return ChatResponse(**chat.model_dump())
@@ -289,6 +343,7 @@ async def create_new_chat(form_data: ChatForm, user=Depends(get_verified_user)):
 
 @router.post("/import", response_model=Optional[ChatResponse])
 async def import_chat(form_data: ChatImportForm, user=Depends(get_verified_user)):
+    _assert_valid_history(form_data.chat)
     try:
         chat = Chats.import_chat(user.id, form_data)
         return ChatResponse(**chat.model_dump())
@@ -805,6 +860,9 @@ async def update_chat_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     _assert_not_agent_session(chat)
+    # 受け取った history(送られてきた場合のみ)の木構造を検証 — 循環・宙ぶらりんの
+    # parentId / currentId は 400。title 等のメタのみの更新は対象外。
+    _assert_valid_history(form_data.chat)
 
     # llens(#110 敵対検証 3): 保存を CAS 化 — 読んだ updated_at を期待値に
     # guarded UPDATE(配達 driver の append_delivery_turn と同じスタンプの取り合い)。

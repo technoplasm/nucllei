@@ -414,6 +414,96 @@ class TestChatAppendOnlyHistory(AbstractPostgresTest):
         assert response.status_code in (404, 405)
 
 
+class TestChatHistoryValidation(AbstractPostgresTest):
+    """llens: 保存 / 作成 / インポートで history の木構造を検証する(DoS 対策)。
+
+    parentId が循環した履歴を一度保存させると、履歴を辿る get_message_list が
+    無限ループしてイベントループごとサーバー全体がハングする。受け付け時点で
+    「parentId 実在・循環なし・currentId 実在」を満たさなければ 400 にする。
+    """
+
+    BASE_PATH = "/api/v1/chats"
+
+    def _history(self):
+        return {
+            "currentId": "m2",
+            "messages": {
+                "m1": {"id": "m1", "parentId": None, "childrenIds": ["m2"]},
+                "m2": {"id": "m2", "parentId": "m1", "childrenIds": []},
+            },
+        }
+
+    def setup_method(self):
+        super().setup_method()
+        from nucllei.models.chats import ChatForm, Chats
+
+        self.chats = Chats
+        chat = self.chats.insert_new_chat(
+            "2", ChatForm(**{"chat": {"title": "t", "history": self._history()}})
+        )
+        self.chat_id = chat.id
+
+    def _post(self, path, history, **extra):
+        with mock_webui_user(id="2"):
+            return self.fast_api_client.post(
+                self.create_url(path),
+                json={"chat": {"title": "t", "history": history}, **extra},
+            )
+
+    def _cycle(self):
+        h = self._history()
+        h["messages"]["m1"]["parentId"] = "m2"  # m1 <-> m2
+        return h
+
+    def _dangling_parent(self):
+        h = self._history()
+        h["messages"]["m2"]["parentId"] = "ghost"
+        return h
+
+    def _missing_current(self):
+        h = self._history()
+        h["currentId"] = "ghost"
+        return h
+
+    def _self_parent(self):
+        h = self._history()
+        h["messages"]["m1"]["parentId"] = "m1"
+        return h
+
+    def test_update_rejects_parent_cycle(self):
+        # append-only ガード(content 不変)は循環を通してしまう — 木構造の検証で 400
+        response = self._post(f"/{self.chat_id}", self._cycle())
+        assert response.status_code == 400
+        stored = self.chats.get_chat_by_id(self.chat_id).chat["history"]
+        assert stored["messages"]["m1"]["parentId"] is None
+
+    def test_update_rejects_self_parent(self):
+        assert self._post(f"/{self.chat_id}", self._self_parent()).status_code == 400
+
+    def test_update_rejects_dangling_parent(self):
+        response = self._post(f"/{self.chat_id}", self._dangling_parent())
+        assert response.status_code == 400
+
+    def test_update_rejects_missing_current_id(self):
+        response = self._post(f"/{self.chat_id}", self._missing_current())
+        assert response.status_code == 400
+
+    def test_update_accepts_valid_history(self):
+        assert self._post(f"/{self.chat_id}", self._history()).status_code == 200
+
+    def test_create_and_import_reject_invalid_history(self):
+        before = len(self.chats.get_chats())
+        for bad in (self._cycle(), self._dangling_parent(), self._missing_current()):
+            assert self._post("/new", bad).status_code == 400
+            assert self._post("/import", bad, meta={}, pinned=False).status_code == 400
+        assert len(self.chats.get_chats()) == before
+
+    def test_create_and_import_accept_valid_history(self):
+        assert self._post("/new", self._history()).status_code == 200
+        response = self._post("/import", self._history(), meta={}, pinned=False)
+        assert response.status_code == 200
+
+
 class TestChatSaveCas(AbstractPostgresTest):
     """llens(#110 敵対検証 3): FE 保存経路(POST /{id})の CAS 化。
 
