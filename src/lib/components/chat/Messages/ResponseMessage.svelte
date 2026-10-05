@@ -23,6 +23,8 @@
 	import Error from './Error.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import ContentBlocks from './ContentBlocks.svelte';
+	import CitationList from './CitationList.svelte';
+	import { CitationScope } from './citations.svelte';
 	import MessageEditor from './ResponseMessage/MessageEditor.svelte';
 	import MessageActions from './ResponseMessage/MessageActions.svelte';
 
@@ -76,6 +78,10 @@
 	);
 
 	let edit = $state(false);
+
+	// 本文の [/ext/…] / [file_id] の番号付き引用(#146 簡易版)。番号はこのメッセージの中で通し、
+	// 本文の番号チップとメッセージ下の出典一覧(CitationList)が共有する
+	const citations = new CitationScope();
 </script>
 
 {#key message.id}
@@ -153,6 +159,7 @@
 										{history}
 										floatingButtons={(message.done ?? false) && !readOnly}
 										{model}
+										{citations}
 										onAddMessages={addMessages}
 									/>
 								{:else if message.content === '' && !message.error}
@@ -176,6 +183,7 @@
 										content={message.content}
 										floatingButtons={(message.done ?? false) && !readOnly}
 										{model}
+										{citations}
 										onAddMessages={addMessages}
 									/>
 								{/if}
@@ -193,6 +201,8 @@
 				</div>
 
 				{#if !edit}
+					<CitationList {citations} />
+
 					<MessageActions
 						{message}
 						{model}

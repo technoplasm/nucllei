@@ -1,0 +1,163 @@
+// 本文の `[/ext/…]` / `[file_id]` による番号付き引用(#146 の簡易版、2026-10-05)。
+//
+// - resolveBracketRef: 角括弧の中身 → 引用(CiteRef)。**「本文の ref → 正規化した URL」を決めるのは
+//   ここ 1 か所だけ**(markdown-it の inline rule `bracket_ref` がここを呼ぶ)。モデルの写し間違いの
+//   自動修正(同じメッセージの tool の結果に近い URL があれば差し替える)を足すならここ。
+// - collectCiteRefs: lex 済みトークン(marked 互換形)から、出てきた順に CiteRef を拾う。
+// - numberCitations: テキストブロックごとの CiteRef 列(メッセージ内の順)を通しで番号付けする。
+//   番号は「ページ」(URL の `#` より前)の初出順。同じページの別の節も同じ番号。
+//   出てきた順に振るので、ストリーミングで本文が伸びても既存の番号は変わらない。
+import { WEBUI_BASE_URL } from '$lib/constants';
+
+// 対象は中身が次の 2 形のときだけ(`[1]` `[580]` `[site-a]` は対象外):
+//   1. `/ext/` で始まるパス(`#見出し` / `#:~:text=引用文` の fragment 可)。doc の住所は半角・全角の
+//      空白や括弧を含む(`01_7-1 消毒・滅菌` 等)ので、`]` と改行以外は中身に許す
+//   2. file_id(UUID 形)— env.fileNames(そのチャットの添付 id → ファイル名)に在るときだけ
+const EXT_REF_RE = /^\/ext\/[^\r\n[\]]+$/;
+const FILE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface CiteEnv {
+	/** そのチャットに実在する添付の id → 表示名(`[file_id]` を引用にする根拠) */
+	fileNames?: Map<string, string>;
+}
+
+/** 本文の 1 箇所の引用 */
+export interface CiteRef {
+	kind: 'ext' | 'file';
+	/** その箇所のリンク先(fragment 付き、normalize 済み) */
+	href: string;
+	/** ページのリンク先(`#` より前、normalize 済み) */
+	pageHref: string;
+	/** 同じ出典の判定キー(ページ単位。decode 済み) */
+	key: string;
+	/** ページの表示名(末尾の要素 / ファイル名) */
+	title: string;
+	/** 節の表示名(`見出し` / `「引用文」`)。ページそのものなら null */
+	section: string | null;
+}
+
+function safeDecode(s: string): string {
+	try {
+		return decodeURIComponent(s);
+	} catch {
+		return s;
+	}
+}
+
+function sectionLabel(fragment: string): string | null {
+	if (!fragment) return null;
+	// Text Fragment(`#:~:text=…`)は見出しではなく引用文 — 「…」で見せる
+	const text = fragment.match(/^:~:text=(.*)$/);
+	return text ? `「${text[1]}」` : fragment;
+}
+
+/**
+ * 角括弧の中身 → 引用。対象外なら null。
+ * normalizeLink は markdown-it の `md.normalizeLink`(percent-encode)を渡す。
+ */
+export function resolveBracketRef(
+	inner: string,
+	env: CiteEnv = {},
+	normalizeLink: (url: string) => string = (url) => url
+): CiteRef | null {
+	if (EXT_REF_RE.test(inner)) {
+		const hash = inner.indexOf('#');
+		const pageUrl = hash >= 0 ? inner.slice(0, hash) : inner;
+		const parts = pageUrl.split('/').filter(Boolean);
+		return {
+			kind: 'ext',
+			href: normalizeLink(inner),
+			pageHref: normalizeLink(pageUrl),
+			key: safeDecode(pageUrl),
+			title: safeDecode(parts[parts.length - 1] ?? pageUrl),
+			section: hash >= 0 ? sectionLabel(safeDecode(inner.slice(hash + 1))) : null
+		};
+	}
+	if (FILE_ID_RE.test(inner)) {
+		const name = env.fileNames?.get(inner);
+		if (name === undefined) return null;
+		const url = `${WEBUI_BASE_URL}/api/v1/files/${inner}/content`;
+		return {
+			kind: 'file',
+			href: url,
+			pageHref: url,
+			key: `file:${inner.toLowerCase()}`,
+			title: name || inner,
+			section: null
+		};
+	}
+	return null;
+}
+
+/** `/ext/a/b.md#節` → `b.md › 節`(番号を振らない場所での 1 行表示) */
+export function citeLabel(ref: Pick<CiteRef, 'title' | 'section'>): string {
+	return ref.section ? `${ref.title} › ${ref.section}` : ref.title;
+}
+
+type AnyToken = { type: string; [key: string]: any };
+
+/** lex 済みトークン(marked 互換形)から、文書順に引用を拾う */
+export function collectCiteRefs(tokens: AnyToken[] | null | undefined, out: CiteRef[] = []) {
+	for (const token of tokens ?? []) {
+		if (!token) continue;
+		if (token.type === 'link' && token.cite) out.push(token.cite as CiteRef);
+		if (Array.isArray(token.tokens)) collectCiteRefs(token.tokens, out);
+		if (Array.isArray(token.items)) collectCiteRefs(token.items, out);
+		if (token.type === 'table') {
+			for (const cell of token.header ?? []) collectCiteRefs(cell?.tokens, out);
+			for (const row of token.rows ?? []) {
+				for (const cell of row ?? []) collectCiteRefs(cell?.tokens, out);
+			}
+		}
+	}
+	return out;
+}
+
+export interface CitationSection {
+	href: string;
+	label: string;
+}
+
+export interface CitationEntry {
+	n: number;
+	kind: CiteRef['kind'];
+	key: string;
+	title: string;
+	pageHref: string;
+	/** 本文で使われた節(初出順・重複なし) */
+	sections: CitationSection[];
+}
+
+export interface Citations {
+	/** ページの key → 番号 */
+	numbers: Map<string, number>;
+	entries: CitationEntry[];
+}
+
+/** ブロックごとの引用列(メッセージ内の順)を通しで番号付けする */
+export function numberCitations(groups: Iterable<CiteRef[]>): Citations {
+	const numbers = new Map<string, number>();
+	const entries: CitationEntry[] = [];
+	for (const refs of groups) {
+		for (const ref of refs) {
+			let n = numbers.get(ref.key);
+			if (n === undefined) {
+				n = entries.length + 1;
+				numbers.set(ref.key, n);
+				entries.push({
+					n,
+					kind: ref.kind,
+					key: ref.key,
+					title: ref.title,
+					pageHref: ref.pageHref,
+					sections: []
+				});
+			}
+			const entry = entries[n - 1];
+			if (ref.section && !entry.sections.some((s) => s.href === ref.href)) {
+				entry.sections.push({ href: ref.href, label: ref.section });
+			}
+		}
+	}
+	return { numbers, entries };
+}

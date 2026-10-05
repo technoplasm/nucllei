@@ -622,6 +622,7 @@
 	"Skills": "技能",
 	"Skills are disabled for this model, so they will not activate (assignments are preserved)": "此模型已禁用技能,因此不会激活(分配将保留)",
 	"Sort by": "排序方式",
+	"Sources": "来源",
 	"Speech recognition error: {{error}}": "语音识别错误：{{error}}",
 	"Speech-to-Text Engine": "语音转文本引擎",
 	"Stop": "停止",

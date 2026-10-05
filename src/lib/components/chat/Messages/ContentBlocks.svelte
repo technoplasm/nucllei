@@ -12,6 +12,7 @@
 	import { getToolProgress } from '$lib/stores/tool-progress.svelte';
 	import type { ChatHistory, ContentBlock } from '$lib/types/chat';
 	import type { ToolCallRender } from '$lib/utils/tool-render';
+	import type { CitationScope } from './citations.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -43,6 +44,7 @@
 		history,
 		model = null,
 		floatingButtons = false,
+		citations = null,
 		onTaskClick = () => {},
 		onAddMessages = () => {}
 	}: {
@@ -52,6 +54,9 @@
 		history: ChatHistory;
 		model?: Model | null;
 		floatingButtons?: boolean;
+		// 本文の引用の番号付け(#146 簡易版)。text ブロックをまたいで通しで振る(ブロック番号順)。
+		// サブエージェントの入れ子(SubagentSessionBlock)には渡さない — 番号はメッセージ本文だけ
+		citations?: CitationScope | null;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
 		onAddMessages?: (payload: {
 			modelId: string;
@@ -117,6 +122,8 @@
 				content={block.content ?? ''}
 				{floatingButtons}
 				{model}
+				{citations}
+				citationSlot={blockIdx}
 				{onTaskClick}
 				{onAddMessages}
 			/>

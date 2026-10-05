@@ -13,7 +13,7 @@ import type { Token as MDToken } from 'markdown-it/index.js';
 import hljs from 'highlight.js';
 import markdownItAttrs from 'markdown-it-attrs';
 import katexPlugin from './katex';
-import { WEBUI_BASE_URL } from '$lib/constants';
+import { resolveBracketRef, citeLabel, type CiteEnv } from '$lib/utils/citations';
 
 const md = new MarkdownIt({
 	html: true, // 生 HTML は html トークンとして通し、描画側で DOMPurify する
@@ -46,42 +46,18 @@ md.use(markdownItAttrs, { allowedAttributes: ['target', 'download'] });
 md.disable(['lheading', 'reference']);
 
 // リンクによる簡易引用(#146 の簡易版、2026-10-05): 本文中の角括弧 1 つだけの参照を
-// リンクにする。対象は中身が次の 2 形のときだけ(それ以外の `[1]` `[580]` `[site-a]` は文字のまま):
-//   1. `/ext/` で始まるパス(`#見出し` の fragment 可)— 表示は末尾の要素(+ ` › 見出し`)、
-//      リンク先はそのまま(`#見出し` で節に飛ばすのは /ext の配信側の責務)
-//   2. file_id(UUID 形)— lex の env.fileNames(そのチャットの添付 id → ファイル名)に
-//      在るときだけ。表示はファイル名、リンク先は `/api/v1/files/{id}/content`
-// 直後が `(` `[` `:` のもの(`[ラベル](url)` / `[a][b]` / 参照リンク定義 `[x]: url`)は
+// 引用リンクにする。対象の判定と URL の正規化は `$lib/utils/citations` の resolveBracketRef
+// (`/ext/` で始まるパスか、env.fileNames に在る file_id)。それ以外の `[1]` `[580]` `[site-a]` は
+// 文字のまま。直後が `(` `[` `:` のもの(`[ラベル](url)` / `[a][b]` / 参照リンク定義 `[x]: url`)は
 // 巻き込まない。コード内は backticks / fence が先に取るので対象外。
-// doc の住所は半角・全角の空白や括弧を含む(`01_7-1 消毒・滅菌` 等)ので、`]` と改行以外は
-// 中身に許す(範囲は角括弧で閉じている。リンク先は normalizeLink が percent-encode する)。
-const EXT_REF_RE = /^\/ext\/[^\r\n[\]]+$/;
-const FILE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export interface LexEnv {
-	/** そのチャットに実在する添付の id → 表示名(`[file_id]` をリンクにする根拠) */
-	fileNames?: Map<string, string>;
-}
-
-function safeDecode(s: string): string {
-	try {
-		return decodeURIComponent(s);
-	} catch {
-		return s;
-	}
-}
+// リンクトークンは markup = 'bracket_ref'、meta.cite に CiteRef を持つ(描画側が番号チップにする。
+// 番号を振らない場所では表示名 `末尾の要素 › 見出し` のリンク)。
+export type LexEnv = CiteEnv;
 
 /** `/ext/a/b.md#節` → `b.md › 節`(末尾 "/" のディレクトリは最後の要素) */
 export function extRefLabel(ref: string): string {
-	const hash = ref.indexOf('#');
-	const path = hash >= 0 ? ref.slice(0, hash) : ref;
-	const fragment = hash >= 0 ? safeDecode(ref.slice(hash + 1)) : '';
-	const parts = path.split('/').filter(Boolean);
-	const last = safeDecode(parts[parts.length - 1] ?? path);
-	if (!fragment) return last;
-	// Text Fragment(`#:~:text=…`)は見出しではなく引用文 — 「…」で見せる
-	const text = fragment.match(/^:~:text=(.*)$/);
-	return text ? `${last} › 「${text[1]}」` : `${last} › ${fragment}`;
+	const cite = resolveBracketRef(ref);
+	return cite ? citeLabel(cite) : ref;
 }
 
 md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
@@ -94,27 +70,18 @@ md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
 	const next = src[end + 1];
 	if (next === '(' || next === '[' || next === ':') return false;
 
-	let href: string;
-	let label: string;
-	if (EXT_REF_RE.test(inner)) {
-		href = state.md.normalizeLink(inner);
-		if (!state.md.validateLink(href)) return false;
-		label = extRefLabel(inner);
-	} else if (FILE_ID_RE.test(inner)) {
-		const name = (state.env as LexEnv | undefined)?.fileNames?.get(inner);
-		if (name === undefined) return false;
-		href = `${WEBUI_BASE_URL}/api/v1/files/${inner}/content`;
-		label = name || inner;
-	} else {
-		return false;
-	}
+	const cite = resolveBracketRef(inner, (state.env ?? {}) as LexEnv, (url) =>
+		state.md.normalizeLink(url)
+	);
+	if (!cite || !state.md.validateLink(cite.href)) return false;
 
 	if (!silent) {
 		const open = state.push('link_open', 'a', 1);
-		open.attrs = [['href', href]];
+		open.attrs = [['href', cite.href]];
 		open.markup = 'bracket_ref';
+		open.meta = { cite };
 		const text = state.push('text', '', 0);
-		text.content = label;
+		text.content = citeLabel(cite);
 		state.push('link_close', 'a', -1);
 	}
 	state.pos = end + 1;
@@ -189,6 +156,8 @@ function convertInline(children: MDToken[] | null): AnyToken[] {
 						// markdown-it-attrs 経由(#87)。無指定は null(描画側の既定 = _blank)
 						target: attr(tok, 'target'),
 						download: attr(tok, 'download'),
+						// 本文の [/ext/…] / [file_id](bracket_ref)なら引用(番号チップの元)
+						cite: tok.markup === 'bracket_ref' ? (tok.meta?.cite ?? null) : null,
 						tokens: []
 					}
 				});

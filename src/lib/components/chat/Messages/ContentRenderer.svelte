@@ -8,6 +8,7 @@
 	import type { ChatHistory } from '$lib/types/chat';
 
 	import Markdown from './Markdown.svelte';
+	import type { CitationScope } from './citations.svelte';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 
 	let {
@@ -16,6 +17,8 @@
 		history,
 		model = null,
 		floatingButtons = true,
+		citations = null,
+		citationSlot = 0,
 		onTaskClick = () => {},
 		onAddMessages = () => {}
 	}: {
@@ -24,6 +27,9 @@
 		history: ChatHistory;
 		model?: Model | null;
 		floatingButtons?: boolean;
+		/** メッセージ単位の引用の番号付け(#146 簡易版)と、その中でのこのブロックの番号 */
+		citations?: CitationScope | null;
+		citationSlot?: number;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
 		onAddMessages?: (payload: {
 			modelId: string;
@@ -136,7 +142,7 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	<Markdown {id} {content} {model} {fileNames} {onTaskClick} />
+	<Markdown {id} {content} {model} {fileNames} {citations} {citationSlot} {onTaskClick} />
 
 	<!-- content div の中に置く(外に置くと space-y の親の下で :last-child 判定を壊し、
 	     最後のブロックにも margin が付く — tailwind v4 の space-y は
