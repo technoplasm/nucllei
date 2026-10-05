@@ -131,6 +131,16 @@ SNAPSHOT_INTERVAL = 2.0
 # 持たない — 最終真値は既存の chat:completion {usage}(最終フレーム)が無条件で届く。
 USAGE_EMIT_INTERVAL = 0.5
 
+# ターン末の carried_tokens 計測リクエスト(measure_carried_tokens)の待ち上限(秒)。
+# done はこの計測の後に出すので、上流が詰まっても done をこれ以上は遅らせない
+# (超えたら推定値のまま)。prefix cache が効けば 1 秒未満で返る。
+CARRIED_MEASURE_TIMEOUT = 10.0
+
+# 計測リクエストで「次ターンの発言」の代わりに置く user message。発言の中身ぶんは
+# 次ターンの送信で足されるので、ここは最小(user ターンの枠 + 1 文字 ≈ 数 token が
+# ゲージに乗る)。
+CARRIED_MEASURE_PLACEHOLDER = "."
+
 
 def _file_entry_is_readable(file: dict, user: UserModel) -> bool:
     file_type = file.get("type")
@@ -970,7 +980,7 @@ async def _record_usage(
     """
     carried = carried_tokens_from_usage(usage, output_blocks)
     if carried is not None:
-        usage = {**usage, "carried_tokens": carried}
+        usage = {**usage, "carried_tokens": carried, "carried_source": "estimated"}
     ctx = get_model_context_size(request, model)
     merged = None
     if metadata.get("chat_id") and metadata.get("message_id"):
@@ -989,6 +999,111 @@ async def _record_usage(
             "data": {"usage": merged},
         }
     )
+
+
+def build_carried_measure_messages(messages: list, content_blocks: list) -> list:
+    """次ターン最初の呼び出しで送られる messages の写し(計測リクエスト用)。
+
+    = このターンに送った messages(process_chat_payload の加工済み — preset system
+    prompt は router が送信直前に 1 枚載せるのでここには入れない)+ このターンの出力を
+    次ターンの履歴と同じ形にしたもの(convert_content_blocks_to_messages — FE
+    expandAssistantToolHistory と同形。reasoning は再送されないので入らない)+
+    次ターンの発言の代わりの最小 user message。新しい list を返す(form_data を
+    書き換えない — 0f7d36494 の教訓)。
+    """
+    return [
+        *messages,
+        *convert_content_blocks_to_messages(content_blocks),
+        {"role": "user", "content": CARRIED_MEASURE_PLACEHOLDER},
+    ]
+
+
+async def measure_carried_tokens(
+    request, user, model_id: str, form_data: dict, content_blocks: list
+) -> Optional[int]:
+    """次ターンへ持ち越すコンテキスト量を**実測**する(ken 指示 2026-10-05)。
+
+    carried_tokens_from_usage の推定(prompt + completion − reasoning)は、
+    reasoning_tokens を報告しない接続(LiteLLM 経由の staging 等)で文字数比に頼り、
+    英語の reasoning と日本語の本文で token あたりの文字数が違うぶん外れる — ゲージが
+    次ターンの先頭で跳ねる・落ちる。ここでは次ターン最初の呼び出しと同じ形の
+    リクエスト(同じ model・同じ router 経路 = preset の params / system prompt 込み・
+    ターン末時点の tools — load_skill で足した tool も次ターンは履歴から再導出される
+    (#101)ので含める)を max_tokens=1 / 非 stream で 1 回流し、返った
+    prompt_tokens をそのまま使う。
+
+    - persist しない・イベントを出さない・filter(inlet / stream / outlet)を通さない
+      (generate_chat_completion を直に呼ぶ — tool ループの追撃と同じ経路)。
+    - preset の params.max_tokens は router で body の max_tokens を上書きするため、
+      max_completion_tokens も 1 で送る(router はその後で max_completion_tokens を
+      max_tokens へ移す — api.openai.com 以外。api.openai.com では
+      max_completion_tokens が残り max_tokens が落ちる。どちらでも 1 token で止まる)。
+    - 失敗・タイムアウト・usage 無しは None(呼び手は推定値のまま)。
+    """
+    messages = build_carried_measure_messages(form_data["messages"], content_blocks)
+    messages = await inline_internal_image_urls(messages, user)
+    body = {
+        "model": model_id,
+        "stream": False,
+        "max_tokens": 1,
+        "max_completion_tokens": 1,
+        "messages": messages,
+    }
+    if form_data.get("tools"):
+        body["tools"] = list(form_data["tools"])
+    try:
+        res = await asyncio.wait_for(
+            generate_chat_completion(request, body, user),
+            timeout=CARRIED_MEASURE_TIMEOUT,
+        )
+    except Exception as e:
+        log.warning(f"carried_tokens measurement failed: {e!r}")
+        return None
+    if not isinstance(res, dict):
+        # stream で返ってきた等(stream 非対応 upstream の想定外応答)— 推定のまま
+        if isinstance(res, StreamingResponse) and res.background is not None:
+            await res.background()
+        log.warning(f"carried_tokens measurement: unexpected response {type(res)}")
+        return None
+    prompt = (res.get("usage") or {}).get("prompt_tokens")
+    if isinstance(prompt, (int, float)) and prompt > 0:
+        return int(prompt)
+    log.warning("carried_tokens measurement: response carried no prompt_tokens")
+    return None
+
+
+async def _record_measured_carried(
+    request, user, model, model_id, metadata, form_data, content_blocks, event_emitter
+):
+    """ターン末: carried_tokens を実測で差し替え、マージ後の usage を emit する。
+
+    done の直前に呼ぶ(done 後だと FE の完了時保存 saveChatHandler が推定値の
+    message.usage で DB を上書きしうる)。計測できなければ何もしない(最後の
+    呼び出しで記録した推定値が残る)。
+    """
+    if not (metadata.get("chat_id") and metadata.get("message_id")):
+        return
+    if not is_usage_requested(model):
+        return
+    started = time.monotonic()
+    carried = await measure_carried_tokens(
+        request, user, model_id, form_data, content_blocks
+    )
+    if carried is None:
+        return
+    log.info(
+        f"carried_tokens measured: {carried} "
+        f"({time.monotonic() - started:.2f}s, chat {metadata['chat_id']})"
+    )
+    merged = await asyncio.to_thread(
+        Chats.record_usage_by_id_and_message_id,
+        metadata["chat_id"],
+        metadata["message_id"],
+        {"carried_tokens": carried, "carried_source": "measured"},
+        context_size=get_model_context_size(request, model),
+    )
+    if merged is not None:
+        await event_emitter({"type": "chat:completion", "data": {"usage": merged}})
 
 
 def _live_usage_payload(usage: dict, context_size) -> dict:
@@ -2150,6 +2265,20 @@ async def process_chat_response(
                         },
                     }
                 )
+
+            # ken 指示 2026-10-05: ゲージの確定値(carried_tokens)を推定から実測へ。
+            # 次ターン最初の呼び出しと同じ形を 1 回流して prompt_tokens を取る —
+            # done の前(完了時保存が推定値で DB を上書きしないように)。
+            await _record_measured_carried(
+                request,
+                user,
+                model,
+                model_id,
+                metadata,
+                form_data,
+                assembler.content_blocks,
+                event_emitter,
+            )
 
             title = await asyncio.to_thread(
                 Chats.get_chat_title_by_id, metadata["chat_id"]

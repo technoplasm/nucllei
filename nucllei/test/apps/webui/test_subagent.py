@@ -1200,6 +1200,13 @@ class TestRunSubagent(AbstractPostgresTest):
             middleware, "generate_chat_completion", fake_parent_completion
         )
 
+        # ターン末の carried_tokens 計測リクエストはこのテストの対象外
+        # (test_native_tool_calling の measure 系が持つ)— 呼び出し数を数えるので外す
+        async def no_measure(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(middleware, "measure_carried_tokens", no_measure)
+
         request = self._request()
         user = self._user()
         metadata = self._metadata()

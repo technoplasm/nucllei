@@ -237,7 +237,13 @@ def test_only_final_usage_frame_is_recorded(monkeypatch):
     )
 
     # carried_tokens(次ターンへ持ち越す量)= prompt + (completion − reasoning)
-    final_usage = {**_usage(28, 4, reasoning=1), "carried_tokens": 28 + (4 - 1)}
+    # 呼び出しごとの記録は推定(carried_source=estimated)— 実測への差し替えは
+    # ターン末の計測リクエスト(TestMeasuredCarriedTokens)
+    final_usage = {
+        **_usage(28, 4, reasoning=1),
+        "carried_tokens": 28 + (4 - 1),
+        "carried_source": "estimated",
+    }
     assert len(record_calls) == 1
     # 生成所要時間(#102)は backend 実測 — 値は環境依存なのでキーの存在と型だけ固定し、
     # DB へ渡る usage と emit される usage で同じ値であることを見る
@@ -271,6 +277,7 @@ def test_usage_on_non_empty_choices_frame_is_recorded(monkeypatch):
         "completion_tokens_details": {"reasoning_tokens": 94, "text_tokens": 7},
         # reasoning は入れ子(completion_tokens_details)からも読む: 26 + (101 − 94)
         "carried_tokens": 33,
+        "carried_source": "estimated",
     }
     assert record_calls[0]["context_size"] == 262144
 
@@ -382,7 +389,11 @@ def test_live_usage_payload_omits_unresolved_optional_keys(monkeypatch):
     duration = record_calls[0]["usage"].pop("duration")
     assert isinstance(duration, float) and duration >= 0
     # reasoning 未報告・出力は text のみ → 出力を丸ごと再送扱い: 22 + 2
-    expected = {**_usage(22, 2), "carried_tokens": 24}
+    expected = {
+        **_usage(22, 2),
+        "carried_tokens": 24,
+        "carried_source": "estimated",
+    }
     assert record_calls == [{"usage": expected, "context_size": None}]
     emitted = _completion_usage_events(events)
     assert len(emitted) == 1

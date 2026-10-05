@@ -122,6 +122,8 @@ async def _drive_tool_call_loop(
     omit_default_tool=False,
     initial_response=None,
     upstream=None,
+    measure_carried=None,
+    usage_records=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
 
@@ -137,6 +139,11 @@ async def _drive_tool_call_loop(
     で応答を作る(実物の routers.openai を通して上流 payload を検査する用 —
     _real_router_upstream)。初回も同じ form_data で呼ぶ(本番の main.py と同じ順序)。
     extra_tools: metadata["tools"] に追加登録するツール(get_current_time など)。
+    measure_carried: ターン末の carried_tokens 計測(measure_carried_tokens)の代役。
+    None なら計測しない(None を返す — 呼び出し数を数える既存テストに混ざらない)。
+    callable なら ``await measure_carried(request, user, model_id, form_data, blocks)``。
+    usage_records: 指定時は record_usage の呼び出し(usage)を積み、usage をそのまま
+    マージ結果として返す(emit を観測する用)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from nucllei.utils import middleware
@@ -183,7 +190,18 @@ async def _drive_tool_call_loop(
     monkeypatch.setattr(
         middleware.Chats,
         "record_usage_by_id_and_message_id",
-        lambda chat_id, message_id, usage, context_size=None: None,
+        lambda chat_id, message_id, usage, context_size=None: (
+            usage_records.append(usage) or dict(usage)
+            if usage_records is not None
+            else None
+        ),
+    )
+
+    async def no_measure(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        middleware, "measure_carried_tokens", measure_carried or no_measure
     )
 
     async def get_weather(**kwargs):
@@ -819,6 +837,285 @@ def test_system_prompt_is_not_duplicated_across_tool_loop_calls(monkeypatch):
     # 追撃は初回の会話に tool 往復を足しただけ(先頭の system・user は初回と同一)
     assert sent[1]["messages"][:2] == sent[0]["messages"][:2]
     assert sent[2]["messages"][:2] == sent[0]["messages"][:2]
+
+
+# ---- ターン末の carried_tokens 実測(ken 指示 2026-10-05)----------------------
+
+
+def test_turn_end_measures_carried_tokens_before_done(monkeypatch):
+    """ターン末に計測リクエストを 1 回流し、実測値で carried_tokens を差し替えて
+    emit する — done より前(done 後だと完了時保存が推定値で DB を上書きしうる)。"""
+    measure_calls = []
+
+    async def measure(request, user, model_id, form_data, content_blocks):
+        measure_calls.append(
+            {
+                "model_id": model_id,
+                "messages": list(form_data["messages"]),
+                "types": [b["type"] for b in content_blocks],
+            }
+        )
+        return 4321
+
+    usage_records = []
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            measure_carried=measure,
+            usage_records=usage_records,
+        )
+    )
+
+    # 計測はターンに 1 回(tool ループの呼び出しごとではない)、最終の blocks で
+    assert len(measure_calls) == 1
+    assert measure_calls[0]["model_id"] == "kimi-k2.6"
+    assert "tool_calls" in measure_calls[0]["types"]
+    # form_data["messages"] は計測で書き換わらない(初回の会話のまま)
+    assert measure_calls[0]["messages"] == [
+        {"role": "user", "content": "札幌の天気は?"}
+    ]
+    assert {"carried_tokens": 4321, "carried_source": "measured"} in usage_records
+
+    completion_events = [e for e in events if e.get("type") == "chat:completion"]
+    measured_at = next(
+        i
+        for i, e in enumerate(completion_events)
+        if (e["data"].get("usage") or {}).get("carried_source") == "measured"
+    )
+    done_at = next(i for i, e in enumerate(completion_events) if e["data"].get("done"))
+    assert measured_at < done_at
+    assert completion_events[measured_at]["data"]["usage"]["carried_tokens"] == 4321
+
+
+def test_turn_end_measure_failure_keeps_estimate(monkeypatch):
+    """計測できなければ(None)何も記録しない — 最後の呼び出しの推定値が残る。"""
+
+    async def measure(*args, **kwargs):
+        return None
+
+    usage_records = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            measure_carried=measure,
+            usage_records=usage_records,
+        )
+    )
+
+    assert all(u.get("carried_source") != "measured" for u in usage_records)
+    assert any(
+        e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+        for e in events
+    )
+
+
+class _FakeJSONUpstreamResponse:
+    """aiohttp.ClientResponse の代役 — routers.openai が非 stream JSON で読む面だけ。"""
+
+    def __init__(self, body: dict):
+        self.status = 200
+        self.headers = {"Content-Type": "application/json"}
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+    async def text(self):
+        return json.dumps(self._body)
+
+    def raise_for_status(self):
+        pass
+
+    def close(self):
+        pass
+
+    def release(self):
+        pass
+
+
+def _measure_via_real_router(monkeypatch, form_data, content_blocks, reply):
+    """measure_carried_tokens を実物の routers.openai に通し、上流へ出た payload を返す。
+
+    preset(models 行)は system と max_tokens=4096 を持つ — router が body の
+    max_tokens を preset 値で上書きしても計測が 1 token で止まることを見る。
+    reply: 上流の応答(dict)か、例外インスタンス(上流の接続失敗)。
+    """
+    from nucllei.routers import openai as openai_router
+    from nucllei.utils import middleware
+
+    sent = []
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def request(self, method, url, data=None, headers=None):
+            sent.append(json.loads(data))
+            if isinstance(reply, Exception):
+                raise reply
+            return _FakeJSONUpstreamResponse(reply)
+
+        async def close(self):
+            pass
+
+    model_info = types.SimpleNamespace(
+        id="kimi-k2.6",
+        base_model_id=None,
+        user_id="1",
+        access_control=None,
+        params=types.SimpleNamespace(
+            model_dump=lambda: {
+                "system": "あなたは院内アシスタントです。",
+                "max_tokens": 4096,
+            }
+        ),
+    )
+    monkeypatch.setattr(openai_router.aiohttp, "ClientSession", FakeSession)
+    monkeypatch.setattr(
+        openai_router.Models, "get_model_by_id", lambda model_id: model_info
+    )
+    monkeypatch.setattr(
+        middleware, "generate_chat_completion", openai_router.generate_chat_completion
+    )
+
+    request = types.SimpleNamespace(
+        app=types.SimpleNamespace(
+            state=types.SimpleNamespace(
+                OPENAI_MODELS={"kimi-k2.6": {"id": "kimi-k2.6", "urlIdx": 0}},
+                config=types.SimpleNamespace(
+                    OPENAI_API_BASE_URLS=["http://upstream.invalid/v1"],
+                    OPENAI_API_KEYS=["sk-dummy"],
+                    OPENAI_API_CONFIGS={},
+                ),
+            )
+        ),
+        state=types.SimpleNamespace(),
+    )
+    user = types.SimpleNamespace(
+        id="1", email="john.doe@nucllei.local", name="John Doe", role="admin", info=None
+    )
+    result = asyncio.run(
+        middleware.measure_carried_tokens(
+            request, user, "kimi-k2.6", form_data, content_blocks
+        )
+    )
+    return result, sent
+
+
+_MEASURE_BLOCKS = [
+    {"type": "reasoning", "content": "考え中の内容(再送しない)", "done": True},
+    {
+        "type": "tool_calls",
+        "calls": [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "arguments": json.dumps({"city": "札幌"}, ensure_ascii=False),
+                },
+            }
+        ],
+        "results": [{"tool_call_id": "call-1", "content": "晴れ"}],
+    },
+    {"type": "reasoning", "content": "結果を見て考える(再送しない)", "done": True},
+    {"type": "text", "content": "札幌は晴れです。"},
+]
+
+
+def test_measure_carried_tokens_sends_next_turn_shape(monkeypatch):
+    """計測リクエスト = 次ターン最初の呼び出しの形: system 1 枚(router が preset を
+    載せる)・reasoning 無し・出力は tool 往復 + text・末尾に最小の user・ターン末の
+    tools・1 token で止める非 stream。返った prompt_tokens をそのまま使う。"""
+    weather_tool = {"type": "function", "function": {"name": "get_weather"}}
+    skill_tool = {"type": "function", "function": {"name": "loaded_by_skill"}}
+    form_data = {
+        "model": "kimi-k2.6",
+        "messages": [{"role": "user", "content": "札幌の天気は?"}],
+        # load_skill で足した tool も次ターンは履歴から再導出される(#101)— 含める
+        "tools": [weather_tool, skill_tool],
+    }
+    original_messages = json.loads(json.dumps(form_data["messages"]))
+
+    result, sent = _measure_via_real_router(
+        monkeypatch,
+        form_data,
+        _MEASURE_BLOCKS,
+        {
+            "choices": [{"message": {"content": "x"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 1234, "completion_tokens": 1},
+        },
+    )
+
+    assert result == 1234
+    assert len(sent) == 1
+    payload = sent[0]
+    assert payload["stream"] is False
+    # preset の max_tokens=4096 に負けない(router が max_completion_tokens を
+    # max_tokens へ戻すときに上書きする — api.openai.com 以外の上流)
+    assert payload["max_tokens"] == 1
+    assert payload["tools"] == [weather_tool, skill_tool]
+    messages = payload["messages"]
+    assert [m["content"] for m in messages if m["role"] == "system"] == [
+        "あなたは院内アシスタントです。"
+    ]
+    assert [m["role"] for m in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
+    assert messages[-1] == {"role": "user", "content": "."}
+    assert "再送しない" not in json.dumps(messages, ensure_ascii=False)
+    assert all("reasoning_content" not in m for m in messages)
+    # form_data は書き換えない(非破壊 — 0f7d36494 の教訓)
+    assert form_data["messages"] == original_messages
+
+
+def test_measure_carried_tokens_returns_none_on_failure(monkeypatch):
+    """上流の失敗・usage 無しは None(呼び手は推定値のまま)。"""
+    form_data = {"model": "kimi-k2.6", "messages": [{"role": "user", "content": "q"}]}
+
+    result, sent = _measure_via_real_router(
+        monkeypatch, form_data, _MEASURE_BLOCKS, ConnectionError("down")
+    )
+    assert result is None and len(sent) == 1
+
+    result, _ = _measure_via_real_router(
+        monkeypatch,
+        form_data,
+        _MEASURE_BLOCKS,
+        {"choices": [{"message": {"content": "x"}}]},
+    )
+    assert result is None
+
+
+def test_measure_carried_tokens_times_out(monkeypatch):
+    """上流が詰まっても CARRIED_MEASURE_TIMEOUT で諦める(done を待たせ続けない)。"""
+    from nucllei.utils import middleware
+
+    async def stalled(request, form_data, user):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(middleware, "generate_chat_completion", stalled)
+    monkeypatch.setattr(middleware, "CARRIED_MEASURE_TIMEOUT", 0.05)
+
+    async def run():
+        return await middleware.measure_carried_tokens(
+            None,
+            None,
+            "kimi-k2.6",
+            {"messages": [{"role": "user", "content": "q"}]},
+            [],
+        )
+
+    assert asyncio.run(run()) is None
 
 
 def test_content_between_parallel_calls_does_not_duplicate_tool_calls_block(

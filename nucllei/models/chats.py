@@ -464,8 +464,10 @@ class ChatTable:
         - message.usage: このターンの実測。native tool ループはターン内に
           複数回モデルを呼ぶため completion_tokens は加算、prompt_tokens は
           最新値で上書き(最後の呼び出しの入力 = ターン終了時点の会話全体)。
-          carried_tokens(次ターンへ持ち越す量 = 最後の呼び出しの prompt +
-          再送される出力。middleware が算出)も最新値で上書き。
+          carried_tokens(次ターンへ持ち越す量。middleware がターン末の計測
+          リクエストで実測し、失敗時は「最後の呼び出しの prompt + 再送される出力」で
+          推定)と carried_source も最新値で上書き。carried_tokens だけの usage
+          (計測結果)は completion / duration を足さずに carried だけ差し替える。
         - meta["usage"]: チャット単位。prompt_tokens は最新、completion_tokens
           は累積(再生成・分岐込みでこの会話が生成した総量)。model の
           context_size(max_model_len)も添えて閲覧側(#19)が使用率を出せる。
@@ -477,7 +479,16 @@ class ChatTable:
         # prompt 同様「最後の呼び出し」の値なので最新で上書き — tool ループの以前の
         # 呼び出しの出力は最新 prompt に含まれており、累積すると二重計上になる。
         carried_tokens = usage.get("carried_tokens")
-        if prompt_tokens is None and completion_tokens is None:
+        # carried_tokens の出所: "measured"(ターン末の計測リクエストの実測)/
+        # "estimated"(carried_tokens_from_usage の推定)。carried と対で上書き。
+        carried_source = usage.get("carried_source")
+        # 計測リクエストの結果は carried_tokens だけの usage で来る(prompt /
+        # completion は足さない — 計測はターンの生成ではない)。
+        if (
+            prompt_tokens is None
+            and completion_tokens is None
+            and carried_tokens is None
+        ):
             return None
 
         def merge(target: dict) -> dict:
@@ -486,6 +497,10 @@ class ChatTable:
                 merged["prompt_tokens"] = prompt_tokens
             if carried_tokens is not None:
                 merged["carried_tokens"] = carried_tokens
+                if carried_source is not None:
+                    merged["carried_source"] = carried_source
+                else:
+                    merged.pop("carried_source", None)
             if completion_tokens is not None:
                 merged["completion_tokens"] = (
                     merged.get("completion_tokens", 0) + completion_tokens

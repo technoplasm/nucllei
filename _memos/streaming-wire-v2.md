@@ -110,6 +110,32 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     (実物の routers.openai を通し、上流へ出た全呼び出しの system が 1 枚・同一)、
     `utils/test_message_helpers.py`。教訓: **request 経路の messages 加工は非破壊で書く**
     (form_data は浅いコピーで回り、追撃・subagent・resume と dict を共有する)。
+    **追補 3(2026-10-05、ken「だいぶゆるやかになった」が staging でまだ 2 ターン目の先頭で落ちる。
+    「算出のためにリクエスト追加で流してもいい」)**: carried を**推定から実測へ**。staging(LiteLLM
+    経由)は reasoning_tokens を報告せず文字数比の推定に落ちる — 英語の reasoning と日本語の本文で
+    token あたりの文字数が違うぶん外れる。ほかにも引き算では拾えない差(送信形の違い全般)が残る。
+    直し: ターン末(tool ループを抜けた後、done の**前**)に `middleware.measure_carried_tokens` が
+    次ターン最初の呼び出しと同じ形 — `form_data["messages"]`(このターンに送った加工済み会話)+
+    `convert_content_blocks_to_messages(出力)`(reasoning 抜き、FE expandAssistantToolHistory と同形)+
+    最小の user `"."` — を、同じ model・同じ router 経路(preset params / system prompt を router が
+    1 枚載せる)・ターン末の tools(load_skill で足した tool も次ターンは履歴から再導出される #101
+    ので含める)で、非 stream・`max_tokens: 1` で 1 回流し、返った `prompt_tokens` を
+    `carried_tokens` に、`carried_source: "measured"` を付けて DB merge + `chat:completion {usage}`
+    で emit する(呼び出しごとの記録は従来どおり推定で `carried_source: "estimated"`)。
+    done の前にしたのは、done 後だと FE の完了時保存(saveChatHandler)が推定値の message.usage で
+    DB を上書きしうるため。上限 `CARRIED_MEASURE_TIMEOUT` = 10 秒、失敗・usage 無しは推定のまま。
+    filter(inlet / stream / outlet)は通さない・persist しない。preset の `params.max_tokens` は
+    router で body を上書きするので `max_completion_tokens: 1` も送る(router が後で max_tokens へ
+    移す)。`"."` の user ターンぶん(数 token)はゲージに乗る — 次ターンの発言で置き換わる量。
+    subagent の子ターンも process_chat_response を通るので同じく実測される。
+    dev 実測(prism-gw、preset `llens`): tool 1 回のターン 実測 carried 3872 → 次ターン prompt 3876
+    (+4)、reasoning 無しで長文 4.2k token のターン 7932 → 7936(+4)。計測 1 回 0.9 秒(長い出力の
+    直後は prefill ぶん 2.5 秒)。回帰: `test_native_tool_calling.py` の
+    `test_turn_end_measures_carried_tokens_before_done` / `..._measure_failure_keeps_estimate` /
+    `test_measure_carried_tokens_sends_next_turn_shape`(実物の routers.openai — system 1 枚・
+    reasoning 無し・末尾 user・ターン末 tools・max_tokens 1)/ `..._returns_none_on_failure` /
+    `..._times_out`。残る誤差: このターンの user message に files 由来の source 注入
+    (`build_source_context`)があると、次ターンの送信形と違いうる(未確認)。
   **tool 結果の画像(`results[].context_images`、`__feed_image__`)は次ターン以降の履歴にも
   再送する**(#142、ken 決定 2026-10-02 — 画像は忘れさせない。画像の多いチャットが高い占有の
   まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE
