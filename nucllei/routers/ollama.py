@@ -959,8 +959,10 @@ async def generate_chat_completion(
     form_data: dict,
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
-    bypass_filter: Optional[bool] = False,
 ):
+    # 2026-10-05: `bypass_filter`(クエリ引数として露出していた)を撤去。内部から True で
+    # 呼ぶ箇所は無く、一般ユーザーが `?bypass_filter=true` を付けるだけで preset の ACL と
+    # admin 専用の生モデル制限を素通りできた。
     metadata = form_data.pop("metadata", None)
     try:
         form_data = GenerateChatCompletionForm(**form_data)
@@ -996,7 +998,7 @@ async def generate_chat_completion(
             )
 
         # Check if user has access to the model
-        if not bypass_filter and user.role == "user":
+        if user.role == "user":
             if not (
                 user.id == model_info.user_id
                 or has_access(
@@ -1007,7 +1009,7 @@ async def generate_chat_completion(
                     status_code=403,
                     detail="Model not found",
                 )
-    elif not bypass_filter:
+    else:
         if user.role != "admin":
             raise HTTPException(
                 status_code=403,

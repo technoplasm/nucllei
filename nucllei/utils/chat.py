@@ -48,7 +48,6 @@ async def generate_chat_completion(
     request: Request,
     form_data: dict,
     user: Any,
-    bypass_filter: bool = False,
 ):
     log.debug(f"generate_chat_completion: {form_data}")
 
@@ -85,13 +84,12 @@ async def generate_chat_completion(
             raise Exception("Model not found")
 
     # Check if user has access to the model
-    if not bypass_filter and user.role == "user":
+    if user.role == "user":
         check_model_access(user, model)
 
     # llens(#48): arena(evaluation)モデルは撲滅済み。owned_by=="arena" の分岐を撤去。
 
     if model.get("pipe"):
-        # Below does not require bypass_filter because this is the only route the uses this function and it is already bypassing the filter
         return await generate_function_chat_completion(
             request, form_data, user=user, models=models
         )
@@ -102,7 +100,6 @@ async def generate_chat_completion(
             request=request,
             form_data=form_data,
             user=user,
-            bypass_filter=bypass_filter,
         )
         if form_data.get("stream"):
             response.headers["content-type"] = "text/event-stream"
@@ -118,7 +115,6 @@ async def generate_chat_completion(
             request=request,
             form_data=form_data,
             user=user,
-            bypass_filter=bypass_filter,
         )
 
 
