@@ -46,7 +46,7 @@
 			prompt: string,
 			parentId: string,
 			opts?: { modelId?: string | null; newChat?: boolean }
-		) => void | Promise<void>;
+		) => unknown;
 		regenerateResponse: (message: ChatMessage) => void | Promise<void>;
 		chatActionHandler?: (
 			chatId: string,

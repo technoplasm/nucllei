@@ -19,12 +19,12 @@ vi.mock('$lib/stores', async () => {
 });
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('$lib/utils', () => ({
-	createMessagesList: () => [],
+	createMessagesList: vi.fn(() => []),
 	promptTemplate: (s: string) => s,
 	getPromptVariables: () => ({})
 }));
 vi.mock('$lib/utils/chat-messages', () => ({
-	buildWireMessages: () => [],
+	buildWireMessages: vi.fn(() => []),
 	parseStopSequences: () => undefined
 }));
 vi.mock('$lib/utils/completion-streams', () => ({
@@ -38,7 +38,10 @@ vi.mock('$lib/constants', () => ({ WEBUI_BASE_URL: '' }));
 vi.mock('./session.svelte', () => ({}));
 vi.mock('./events', () => ({}));
 
+import { toast } from 'svelte-sonner';
 import { chatId } from '$lib/stores';
+import { createMessagesList } from '$lib/utils';
+import { buildWireMessages } from '$lib/utils/chat-messages';
 import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 import { consumeCompletionStream } from '$lib/utils/completion-streams';
 import { isLiveUsagePending, resetChatUsage } from '$lib/stores/live-usage.svelte';
@@ -81,8 +84,7 @@ const makeSend = ({
 		scrollToBottom: () => {},
 		onStreamLost
 	});
-	const sendNew = () =>
-		send.sendPrompt(session.history, 'hi', 'u1', { newChat: true }) as Promise<void>;
+	const sendNew = () => send.sendPrompt(session.history, 'hi', 'u1', { newChat: true });
 	return { send, session, events, seen, sendNew };
 };
 
@@ -154,9 +156,137 @@ describe('ChatSend.sendPrompt — 送信時の usage pending(#102)', () => {
 		const { session, sendNew } = makeSend();
 		session.initChatHandler.mockRejectedValueOnce(new Error('create failed'));
 
-		await expect(sendNew()).rejects.toThrow('create failed');
+		await expect(sendNew()).resolves.toBe(false);
 
 		expect(isLiveUsagePending('')).toBe(false);
+	});
+});
+
+// 送信前の保存が 400 以外(接続断・5xx・認証切れ)で失敗すると、例外が素通りして
+// 未完の応答受け皿が先端に残り、以後の送信が「応答待ち」で弾かれて固まっていた。
+// 入力文・添付(と入力欄の onChange が書く下書き)も消えたままだった
+describe('ChatSend — 送信前の保存が 400 以外で失敗', () => {
+	const existingChat = () => {
+		const ctx = makeSend();
+		chatId.set('chat-1');
+		// 保存済みの u1 → a1 に続けて送る(新規チャットではない)
+		ctx.session.history = {
+			messages: {
+				u1: { id: 'u1', parentId: null, childrenIds: ['a1'], role: 'user', content: 'hi' },
+				a1: {
+					id: 'a1',
+					parentId: 'u1',
+					childrenIds: [],
+					role: 'assistant',
+					content: 'yo',
+					done: true
+				}
+			},
+			currentId: 'a1'
+		} as unknown as ChatHistory;
+		ctx.session.saveChatHandler.mockRejectedValue({ status: 500 });
+		return ctx;
+	};
+
+	it('送信対を取り除いて送信前の先端へ戻し、送信しない', async () => {
+		const ctx = existingChat();
+		const { send, session } = ctx;
+		// submitPrompt と同じ形で user を足してから送る
+		session.history.messages['u2'] = {
+			id: 'u2',
+			parentId: 'a1',
+			childrenIds: [],
+			role: 'user',
+			content: 'next'
+		} as never;
+		session.history.messages['a1'].childrenIds.push('u2');
+		session.history.currentId = 'u2';
+
+		await expect(send.sendPrompt(session.history, 'next', 'u2', { newChat: true })).resolves.toBe(
+			false
+		);
+
+		expect(generateOpenAIChatCompletion).not.toHaveBeenCalled();
+		expect(Object.keys(session.history.messages).sort()).toEqual(['a1', 'u1']);
+		expect(session.history.currentId).toBe('a1');
+		expect(session.history.messages['a1'].childrenIds).toEqual([]);
+		expect(toast.error).toHaveBeenCalledWith(
+			'Failed to save the chat. Your message was restored to the input.'
+		);
+	});
+
+	it('submitPrompt は入力文・添付を入力欄へ戻し、chatFiles を送信前へ戻す', async () => {
+		vi.stubGlobal('document', { getElementById: () => null });
+		try {
+			const { send, session } = existingChat();
+			(session as Record<string, unknown>).saveSessionSelectedModels = () => {};
+			// 先端(a1)までの列 — submitPrompt はこの末尾に user を足す
+			vi.mocked(createMessagesList).mockImplementation(
+				() => [session.history.messages['u1'], session.history.messages['a1']] as never
+			);
+			const file = { type: 'file', id: 'f1', name: 'a.txt', status: 'uploaded' };
+			(session as Record<string, unknown>).files = [file];
+
+			await send.submitPrompt('next');
+
+			expect(session.prompt).toBe('next');
+			expect((session as Record<string, unknown>).files).toEqual([file]);
+			expect(session.chatFiles).toEqual([]);
+			expect(session.history.currentId).toBe('a1');
+			// 固まっていない: もう一度送れる(保存が通れば送信まで進む)
+			session.saveChatHandler.mockResolvedValue({ ok: true });
+			vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+			session.prompt = '';
+			await send.submitPrompt('next');
+			expect(generateOpenAIChatCompletion).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.unstubAllGlobals();
+			vi.mocked(createMessagesList).mockImplementation(() => []);
+		}
+	});
+
+	it('再生成の失敗は応答受け皿だけを取り除き、入力欄には何も入れない', async () => {
+		const { send, session } = existingChat();
+
+		await expect(send.regenerateResponse(session.history.messages['a1'])).resolves.toBeUndefined();
+
+		expect(Object.keys(session.history.messages).sort()).toEqual(['a1', 'u1']);
+		expect(session.history.messages['u1'].childrenIds).toEqual(['a1']);
+		expect(session.history.currentId).toBe('u1');
+		expect(session.prompt).toBe('');
+		expect(toast.error).toHaveBeenCalledWith('Failed to save the chat.');
+	});
+});
+
+// 再生成・最初の発話の編集でも「最初のターン」なのでタイトル生成を頼んでいて、
+// 利用者が手で付けたタイトルを上書きしていた。既定タイトルのときだけ頼む
+describe('ChatSend — タイトル生成の要求', () => {
+	const firstTurn = (title: string | undefined) => {
+		const ctx = makeSend();
+		chatId.set('chat-1');
+		(ctx.session as Record<string, unknown>).chat = title === undefined ? null : { title };
+		vi.mocked(buildWireMessages).mockReturnValue([{ role: 'user', content: 'hi' }] as never);
+		vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+		return ctx;
+	};
+	const requestedTitle = () => {
+		const body = vi.mocked(generateOpenAIChatCompletion).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		return body.background_tasks !== undefined;
+	};
+
+	it('既定タイトル(New Chat)の最初のターンは生成を頼む', async () => {
+		const { send, session } = firstTurn('New Chat');
+		await send.sendPrompt(session.history, 'hi', 'u1');
+		expect(requestedTitle()).toBe(true);
+	});
+
+	it('タイトルが付いていれば最初のターンの再生成・編集でも頼まない', async () => {
+		const { send, session } = firstTurn('手で付けた題');
+		await send.sendPrompt(session.history, 'hi', 'u1');
+		expect(requestedTitle()).toBe(false);
 	});
 });
 

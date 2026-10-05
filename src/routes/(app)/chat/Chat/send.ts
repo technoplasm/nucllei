@@ -15,6 +15,7 @@ import { chatId, chats, config, currentChatPage, models, settings, user } from '
 import type { Model } from '$lib/stores';
 import { createMessagesList, promptTemplate, getPromptVariables } from '$lib/utils';
 import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
+import { stripLocalTurn } from '$lib/utils/history-graft';
 import { mergeRequestFiles } from '$lib/utils/chat-files';
 import { consumeCompletionStream, getActiveTaskIds } from '$lib/utils/completion-streams';
 import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
@@ -128,6 +129,8 @@ export class ChatSend {
 		}
 
 		const _files: ChatFile[] = JSON.parse(JSON.stringify(session.files));
+		// 送信前の保存に失敗したら添付の状態ごと送信前へ戻す(下で巻き戻しに使う)
+		const chatFilesBefore: ChatFile[] = JSON.parse(JSON.stringify(session.chatFiles));
 		session.chatFiles.push(..._files.filter((item) => ['file'].includes(item.type)));
 		session.chatFiles = session.chatFiles.filter(
 			// Remove duplicates — id を持つエントリは file.id で一意化(#69: 再添付は
@@ -169,17 +172,33 @@ export class ChatSend {
 
 		session.saveSessionSelectedModels();
 
-		await this.sendPrompt(session.history, userPrompt, userMessageId, { newChat: true });
+		const sent = await this.sendPrompt(session.history, userPrompt, userMessageId, {
+			newChat: true
+		});
+		if (!sent) {
+			// 送信前の保存に失敗して送信を取りやめた(送信対は sendPrompt が history から
+			// 取り除き済み)。入力文と添付を入力欄へ戻す — 入力欄の onChange が下書き
+			// (localStorage)も書き戻す。送信までに打ち始めた次の入力は上書きしない
+			if (session.prompt === '') {
+				session.prompt = userPrompt;
+			}
+			if (session.files.length === 0) {
+				session.files = _files;
+			}
+			session.chatFiles = chatFilesBefore;
+		}
 	};
 
 	// llens(#108): マルチモデル送信は仕様ごと撤去 — 対象は常に 1 モデル。
 	// modelId 指定(再生成)が無ければ選択中モデルを使う。
+	// 戻り値: 送信前の保存(chat 作成を含む)に失敗して送信を取りやめたら false。
+	// そのとき送信対は history から取り除いてあり、入力欄への復元は呼び出し側が持つ
 	sendPrompt = async (
 		_history: ChatHistory,
 		_prompt: string,
 		parentId: string,
 		{ modelId = null, newChat = false }: { modelId?: string | null; newChat?: boolean } = {}
-	) => {
+	): Promise<boolean> => {
 		const session = this.#session;
 
 		if (session.autoScroll) {
@@ -193,7 +212,8 @@ export class ChatSend {
 		const model = get(models).find((m) => m.id === targetModelId);
 		if (!model) {
 			toast.error(this.#t(`Model {{modelId}} not found`, { modelId: targetModelId }));
-			return;
+			// 保存前の中止(history は未変更)— 入力欄の復元対象ではない
+			return true;
 		}
 
 		const responseMessageId = uuidv4();
@@ -229,35 +249,52 @@ export class ChatSend {
 		}
 
 		// Create new chat if newChat is true and first user message
-		if (
+		const createsChat =
 			newChat &&
 			_history.currentId !== null &&
-			_history.messages[_history.currentId].parentId === null
-		) {
-			const draftChatId = _chatId;
-			try {
-				_chatId = await session.initChatHandler(_history);
-			} finally {
-				clearLiveUsage(draftChatId, responseMessageId);
-			}
-			markLiveUsagePending(_chatId, responseMessageId);
-		}
+			_history.messages[_history.currentId].parentId === null;
+		const draftChatId = _chatId;
 
-		await tick();
-
-		_history = JSON.parse(JSON.stringify(session.history));
 		// Save chat after all messages have been created
 		// llens(#110): BE のサーバ駆動配達(通知ターン append)と競合した 400 は
 		// saveChatHandler が接ぎ直しリカバリする。接ぎ直しが起きたら wire は
 		// merged で組み直す(通知メッセージをモデルに載せる)。恒久失敗は送信中止
-		const saveRes = await session.saveChatHandler(_chatId, _history);
+		let saveRes: { ok: boolean; history?: ChatHistory };
+		try {
+			if (createsChat) {
+				try {
+					_chatId = await session.initChatHandler(_history);
+				} finally {
+					clearLiveUsage(draftChatId, responseMessageId);
+				}
+				markLiveUsagePending(_chatId, responseMessageId);
+			}
+
+			await tick();
+
+			_history = JSON.parse(JSON.stringify(session.history));
+			saveRes = await session.saveChatHandler(_chatId, _history);
+		} catch {
+			// 400 以外の失敗(接続断・5xx・認証切れ)と chat 作成の失敗。送信対を残すと
+			// 未完の応答が先端に居座り、以後の送信が「応答待ち」で弾かれて固まる —
+			// 400 の後始末(saveChatHandler)と同じく送信前の形へ巻き戻す
+			if (session.history.currentId === responseMessageId) {
+				session.history = stripLocalTurn(session.history);
+			}
+			saveRes = { ok: false };
+		}
 		if (!saveRes.ok) {
 			clearLiveUsage(_chatId, responseMessageId);
-			if (session.prompt === '') {
-				session.prompt = _prompt;
-			}
-			toast.error(this.#t('Failed to save the chat. Your message was restored to the input.'));
-			return;
+			// chat 作成直後の保存失敗では、作成済みの chat(user 発話だけ)がサーバーに残る。
+			// $chatId は戻さない — '' に戻すと Chat.svelte の購読が initNewChat を走らせ、
+			// ?q= 付きなら自動再送の繰り返しになる。手元は空に戻してあるので、再送は
+			// root からの送信として新しい chat を作り直す(残った chat には足さない)
+			toast.error(
+				newChat
+					? this.#t('Failed to save the chat. Your message was restored to the input.')
+					: this.#t('Failed to save the chat.')
+			);
+			return false;
 		}
 		if (saveRes.history) {
 			_history = JSON.parse(JSON.stringify(saveRes.history));
@@ -286,6 +323,7 @@ export class ChatSend {
 
 		currentChatPage.set(1);
 		chats.set(await getChatList(get(currentChatPage)));
+		return true;
 	};
 
 	// wire v2: POST /api/chat/completions の応答は SSE。ここでは送信と消費開始までを
@@ -368,7 +406,8 @@ export class ChatSend {
 					(messages.length == 2 &&
 						messages.at(0)?.role === 'system' &&
 						messages.at(1)?.role === 'user')) &&
-				(session.selectedModels[0] === model.id || session.atSelectedModel !== undefined)
+				(session.selectedModels[0] === model.id || session.atSelectedModel !== undefined) &&
+				this.#hasDefaultTitle()
 					? {
 							background_tasks: {
 								title_generation: get(settings)?.title?.auto ?? true
@@ -441,6 +480,16 @@ export class ChatSend {
 
 		await tick();
 		this.#scrollToBottom();
+	};
+
+	// 最初の発話のターン(新規・最初の応答の再生成・最初の発話の編集)でタイトルを
+	// 生成してよいか。付いているタイトルが既定(作成時の「New Chat」)のときだけ —
+	// 利用者が手で付けたタイトルを再生成・編集で上書きしない。手動か自動生成かは
+	// 区別できないため、生成済みのタイトルも保持する。session.chat は直前の保存
+	// (saveChatHandler)の応答なのでサーバの現在値を指す
+	#hasDefaultTitle = (): boolean => {
+		const title = this.#session.chat?.title;
+		return !title || title === 'New Chat' || title === this.#t('New Chat');
 	};
 
 	// HTTP 応答エラー用(fetch catch / res.json 形)。イベント内エラーは
