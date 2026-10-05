@@ -168,6 +168,33 @@ describe('リンクによる簡易引用 [/ext/…] / [file_id](#146 の簡易�
 		expect(b.tokens[0].text).toBe('15-7.pdf');
 	});
 
+	it('doc の住所の空白・全角空白・括弧・・・_ を含んでもリンク。直後の全角「（」で切れる', () => {
+		const cases = [
+			'/ext/cage/doc/院内マニュアル/電話番号簿/01_職員PHS/03_中央診療施設等/08_病理部・病理診断科',
+			'/ext/cage/doc/院内マニュアル/感染対策マニュアル/01_7-1 消毒・滅菌',
+			'/ext/cage/doc/院内マニュアル/薬剤/018_凍結乾燥製剤(溶解剤付き)　調製'
+		];
+		for (const ref of cases) {
+			const toks = inline(`[${ref}]（院内PHS電話番号簿）`);
+			const [a] = toks.filter((t: any) => t.type === 'link');
+			expect(a.href).toBe(
+				ref
+					.split('/')
+					.map((p) => encodeURIComponent(p).replace(/%28/g, '(').replace(/%29/g, ')'))
+					.join('/')
+			);
+			expect(a.tokens[0].text).toBe(ref.split('/').pop());
+			expect(toks[toks.length - 1].text).toBe('（院内PHS電話番号簿）');
+		}
+		// /ext/ で始まらない doc の住所は対象外(文字のまま)
+		expect(links('[/院内マニュアル/電話番号簿/01_職員PHS]')).toHaveLength(0);
+	});
+
+	it('Text Fragment(#:~:text=…)は引用文として「」で見せる', () => {
+		const [a] = links('[/ext/cage/doc/a/01_転落・転倒防止対策#:~:text=再発の防止]');
+		expect(a.tokens[0].text).toBe('01_転落・転倒防止対策 › 「再発の防止」');
+	});
+
 	it('percent-encoded の住所も表示はデコードする', () => {
 		const [a] = links('[/ext/a/%E5%9B%B3.png]');
 		expect(a.href).toBe('/ext/a/%E5%9B%B3.png');
@@ -217,8 +244,8 @@ describe('リンクによる簡易引用 [/ext/…] / [file_id](#146 の簡易�
 		expect(c.text).toBe('[/ext/a.pdf]');
 	});
 
-	it('空白を含む・/ext/ で始まらないものは対象外', () => {
-		expect(links('[/ext/a b.pdf]')).toHaveLength(0);
+	it('/ext/ で始まらないもの・改行をまたぐものは対象外', () => {
+		expect(links('[/ext/a\nb.pdf]')).toHaveLength(0);
 		expect(links('[/extra/a.pdf]')).toHaveLength(0);
 		expect(links('[ext/a.pdf]')).toHaveLength(0);
 	});

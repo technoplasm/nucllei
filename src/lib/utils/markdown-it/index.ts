@@ -53,7 +53,9 @@ md.disable(['lheading', 'reference']);
 //      在るときだけ。表示はファイル名、リンク先は `/api/v1/files/{id}/content`
 // 直後が `(` `[` `:` のもの(`[ラベル](url)` / `[a][b]` / 参照リンク定義 `[x]: url`)は
 // 巻き込まない。コード内は backticks / fence が先に取るので対象外。
-const EXT_REF_RE = /^\/ext\/[^\s[\]]+$/;
+// doc の住所は半角・全角の空白や括弧を含む(`01_7-1 消毒・滅菌` 等)ので、`]` と改行以外は
+// 中身に許す(範囲は角括弧で閉じている。リンク先は normalizeLink が percent-encode する)。
+const EXT_REF_RE = /^\/ext\/[^\r\n[\]]+$/;
 const FILE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface LexEnv {
@@ -76,7 +78,10 @@ export function extRefLabel(ref: string): string {
 	const fragment = hash >= 0 ? safeDecode(ref.slice(hash + 1)) : '';
 	const parts = path.split('/').filter(Boolean);
 	const last = safeDecode(parts[parts.length - 1] ?? path);
-	return fragment ? `${last} › ${fragment}` : last;
+	if (!fragment) return last;
+	// Text Fragment(`#:~:text=…`)は見出しではなく引用文 — 「…」で見せる
+	const text = fragment.match(/^:~:text=(.*)$/);
+	return text ? `${last} › 「${text[1]}」` : `${last} › ${fragment}`;
 }
 
 md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
