@@ -94,15 +94,16 @@ class OAuthManager:
             oauth_allowed_roles = auth_manager_config.OAUTH_ALLOWED_ROLES
             oauth_admin_roles = auth_manager_config.OAUTH_ADMIN_ROLES
             oauth_roles = []
-            # Default/fallback role if no matching roles are found
-            role = auth_manager_config.DEFAULT_USER_ROLE
 
             # Next block extracts the roles from the user data, accepting nested claims of any depth
-            if oauth_claim and oauth_allowed_roles and oauth_admin_roles:
+            if oauth_claim and (oauth_allowed_roles or oauth_admin_roles):
                 claim_data = user_data
-                nested_claims = oauth_claim.split(".")
-                for nested_claim in nested_claims:
-                    claim_data = claim_data.get(nested_claim, {})
+                for nested_claim in oauth_claim.split("."):
+                    claim_data = (
+                        claim_data.get(nested_claim, {})
+                        if isinstance(claim_data, dict)
+                        else {}
+                    )
                 oauth_roles = claim_data if isinstance(claim_data, list) else []
 
             log.debug(f"Oauth Roles claim: {oauth_claim}")
@@ -110,21 +111,24 @@ class OAuthManager:
             log.debug(f"Accepted user roles: {oauth_allowed_roles}")
             log.debug(f"Accepted admin roles: {oauth_admin_roles}")
 
-            # If any roles are found, check if they match the allowed or admin roles
-            if oauth_roles:
-                # If role management is enabled, and matching roles are provided, use the roles
-                for allowed_role in oauth_allowed_roles:
-                    # If the user has any of the allowed roles, assign the role "user"
-                    if allowed_role in oauth_roles:
-                        log.debug("Assigned user the user role")
-                        role = "user"
-                        break
-                for admin_role in oauth_admin_roles:
-                    # If the user has any of the admin roles, assign the role "admin"
-                    if admin_role in oauth_roles:
-                        log.debug("Assigned user the admin role")
-                        role = "admin"
-                        break
+            # admin が優先、次に user。どちらにも一致しなければ拒否する。
+            # llens: 以前は不一致で DEFAULT_USER_ROLE(既定 "user" 等)へ落としていたため、
+            # IdP 側で許可ロールを持たない人にもログイン・権限を与えていた。
+            # ロール管理を有効にした = IdP のロールが権威なので fail closed にする。
+            if any(r in oauth_roles for r in oauth_admin_roles or []):
+                log.debug("Assigned user the admin role")
+                role = "admin"
+            elif any(r in oauth_roles for r in oauth_allowed_roles or []):
+                log.debug("Assigned user the user role")
+                role = "user"
+            else:
+                log.warning(
+                    "OAuth login rejected: no allowed/admin role in claim "
+                    f"'{oauth_claim}'"
+                )
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+                )
         else:
             if not user:
                 # If role management is disabled, use the default role for new users

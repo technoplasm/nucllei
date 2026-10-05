@@ -321,6 +321,45 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
 ############################
 
 
+async def _register_trusted_header_user(request: Request, email: str, name: str):
+    """trusted header 認証の自動登録(初回アクセス時)。
+
+    以前は /signup をそのまま呼んでいたため、1 人目の登録で ENABLE_SIGNUP が
+    False に落ちた後は 2 人目以降が 403 で自動登録されなかった。認証の権威は
+    前段のプロキシ(ヘッダ)なので、フォーム signup の可否設定とは独立に登録する。
+    role は signup と同じ(DEFAULT_USER_ROLE、初回ユーザーのみ admin へアトミック昇格)。
+    """
+    if not validate_email_format(email):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT
+        )
+
+    user = Auths.insert_new_auth(
+        email,
+        get_password_hash(str(uuid.uuid4())),  # 使わない乱数パスワード
+        name,
+        "/user.png",
+        request.app.state.config.DEFAULT_USER_ROLE,
+        promote_first_user_to_admin=True,
+    )
+    if user is None:
+        # 同じメールの同時初回アクセスで先に作られた等 — 呼び出し側の認証に委ねる
+        log.warning("trusted header auto-registration did not insert a user")
+        return
+
+    if request.app.state.config.WEBHOOK_URL:
+        await post_webhook(
+            request.app.state.WEBUI_NAME,
+            request.app.state.config.WEBHOOK_URL,
+            WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
+            {
+                "action": "signup",
+                "message": WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
+                "user": user.model_dump_json(exclude_none=True),
+            },
+        )
+
+
 @router.post("/signin", response_model=SessionUserResponse)
 async def signin(request: Request, response: Response, form_data: SigninForm):
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
@@ -334,13 +373,7 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
                 WEBUI_AUTH_TRUSTED_NAME_HEADER, trusted_email
             )
         if not Users.get_user_by_email(trusted_email.lower()):
-            await signup(
-                request,
-                response,
-                SignupForm(
-                    email=trusted_email, password=str(uuid.uuid4()), name=trusted_name
-                ),
-            )
+            await _register_trusted_header_user(request, trusted_email, trusted_name)
         user = Auths.authenticate_user_by_trusted_header(trusted_email)
     elif WEBUI_AUTH == False:
         admin_email = "admin@localhost"
@@ -573,6 +606,19 @@ async def signout(request: Request, response: Response):
 ############################
 
 
+ADD_USER_TOKEN_MAX_LIFETIME = datetime.timedelta(hours=1)
+
+
+def _add_user_token_expires_delta(request: Request) -> datetime.timedelta:
+    try:
+        expires_delta = parse_duration(request.app.state.config.SESSION_IDLE_TIMEOUT)
+    except Exception:
+        expires_delta = None
+    if not expires_delta or expires_delta > ADD_USER_TOKEN_MAX_LIFETIME:
+        return ADD_USER_TOKEN_MAX_LIFETIME
+    return expires_delta
+
+
 @router.post("/add", response_model=SigninResponse)
 async def add_user(
     request: Request, form_data: AddUserForm, user=Depends(get_admin_user)
@@ -609,7 +655,13 @@ async def add_user(
                     },
                 )
 
-            token = create_token(data={"id": user.id})
+            # llens: 管理者に返る「新ユーザーとしての token」は無期限にしない
+            # (漏れれば恒久的ななりすまし資格情報になる)。セッションと同じ
+            # SESSION_IDLE_TIMEOUT に揃え、無期限設定でも上限 1 時間で切る。
+            token = create_token(
+                data={"id": user.id},
+                expires_delta=_add_user_token_expires_delta(request),
+            )
             return {
                 "token": token,
                 "token_type": "Bearer",

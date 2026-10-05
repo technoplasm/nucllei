@@ -15,6 +15,7 @@ from nucllei.env import (
     WEBUI_SECRET_KEY,
     WEBUI_AUTH_COOKIE_SAME_SITE,
     WEBUI_AUTH_COOKIE_SECURE,
+    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     SRC_LOG_LEVELS,
 )
 from nucllei.utils.misc import parse_duration
@@ -202,6 +203,16 @@ def get_session_expires_at(request: Request) -> Optional[int]:
     return int(exp) if exp is not None else None
 
 
+def _trusted_header_mismatch(request: Request, user) -> bool:
+    """trusted header が設定・送信されていて、JWT のユーザーとメールが違うか。"""
+    if not WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
+        return False
+    trusted_email = request.headers.get(WEBUI_AUTH_TRUSTED_EMAIL_HEADER)
+    if not trusted_email:
+        return False
+    return trusted_email.strip().lower() != (user.email or "").strip().lower()
+
+
 def get_current_user(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -267,6 +278,18 @@ def get_current_user(
     if data is not None and "id" in data:
         user = Users.get_user_by_id(data["id"])
         if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.INVALID_TOKEN,
+            )
+        elif _trusted_header_mismatch(request, user):
+            # llens: trusted header 認証では前段プロキシのヘッダが「今の利用者」の
+            # 権威。共有 PC で前の人の cookie セッションが残ったまま別の人が
+            # 使うと、ヘッダと token のユーザーが食い違う — token 側を通さず 401 に
+            # して再サインイン(signin はヘッダのユーザーで token を発行し直す)へ回す。
+            log.warning(
+                "trusted header email does not match session user; rejecting token"
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.INVALID_TOKEN,
