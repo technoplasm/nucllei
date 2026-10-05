@@ -118,6 +118,23 @@
 	// 送信キー(Enter ⇄ Ctrl+Enter)。切り替え UI は「+」メニュー(InputMenu)にある
 	const ctrlEnterToSend = $derived($settings?.ctrlEnterToSend ?? true);
 
+	// モバイルのタッチ端末は Enter で送らない(onPromptKeydown と同じ判定)
+	const isTouchMobile = () =>
+		$mobile &&
+		('ontouchstart' in window ||
+			navigator.maxTouchPoints > 0 ||
+			// IE/旧 Edge の prefixed プロパティ(lib.dom 未収載)— 型だけ拡張
+			((navigator as Navigator & { msMaxTouchPoints?: number }).msMaxTouchPoints ?? 0) > 0);
+
+	// 入力欄の placeholder は送信キーの設定を示す(キーボードのある端末だけ)
+	const inputPlaceholder = $derived(
+		isTouchMobile()
+			? placeholder || $i18n.t('Send a Message')
+			: ctrlEnterToSend
+				? $i18n.t('Ctrl+Enter to Send')
+				: $i18n.t('Enter to Send')
+	);
+
 	// 設定値は 'LTR' | 'RTL' | 'auto'(大文字)— dir 属性用に小文字化(UserMessage.svelte と同じ)
 	const chatDirection = $derived(
 		$settings?.chatDirection
@@ -211,15 +228,7 @@
 				commandOptionButton?.click();
 			}
 		} else {
-			if (
-				!$mobile ||
-				!(
-					'ontouchstart' in window ||
-					navigator.maxTouchPoints > 0 ||
-					// IE/旧 Edge の prefixed プロパティ(lib.dom 未収載)— 型だけ拡張
-					((navigator as Navigator & { msMaxTouchPoints?: number }).msMaxTouchPoints ?? 0) > 0
-				)
-			) {
+			if (!isTouchMobile()) {
 				if (isComposing) {
 					return;
 				}
@@ -601,7 +610,7 @@
 										dir="auto"
 										bind:this={chatInputElement}
 										class="bg-transparent text-content outline-hidden w-full pt-3 px-1 resize-none"
-										placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
+										placeholder={inputPlaceholder}
 										bind:value={prompt}
 										oncompositionstart={() => (isComposing = true)}
 										oncompositionend={() => (isComposing = false)}
