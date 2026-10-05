@@ -68,7 +68,12 @@ export class ChatSession {
 		sessionStorage.selectedModels = JSON.stringify(this.selectedModels);
 	};
 
-	initChatHandler = async (history: ChatHistory) => {
+	// refreshList: 作成後にサイドバー一覧を取り直すか。直後に saveChatHandler を呼ぶ
+	// 送信経路は false(そちらが取り直す — 送信 1 回で一覧を何度も取らない)
+	initChatHandler = async (
+		history: ChatHistory,
+		{ refreshList = true }: { refreshList?: boolean } = {}
+	) => {
 		let _chatId = get(chatId);
 
 		this.chat = await createNewChat({
@@ -85,8 +90,10 @@ export class ChatSession {
 		_chatId = this.chat.id;
 		await chatId.set(_chatId);
 
-		await chats.set(await getChatList(get(currentChatPage)));
 		currentChatPage.set(1);
+		if (refreshList) {
+			await chats.set(await getChatList(get(currentChatPage)));
+		}
 
 		// upstream 由来: ここの `history` は引数の chat history(window.history ではない)を
 		// 指しており state は常に undefined だった — 挙動を変えず undefined を明示する

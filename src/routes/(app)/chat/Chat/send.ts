@@ -11,7 +11,7 @@ import { get } from 'svelte/store';
 import { toast } from 'svelte-sonner';
 import { v4 as uuidv4 } from 'uuid';
 
-import { chatId, chats, config, currentChatPage, models, settings, user } from '$lib/stores';
+import { chatId, config, models, settings, user } from '$lib/stores';
 import type { Model } from '$lib/stores';
 import { createMessagesList, promptTemplate, getPromptVariables } from '$lib/utils';
 import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
@@ -19,7 +19,6 @@ import { stripLocalTurn } from '$lib/utils/history-graft';
 import { mergeRequestFiles } from '$lib/utils/chat-files';
 import { consumeCompletionStream, getActiveTaskIds } from '$lib/utils/completion-streams';
 import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
-import { getChatList } from '$lib/apis/chats';
 import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 import { stopTask } from '$lib/apis';
 import { WEBUI_BASE_URL } from '$lib/constants';
@@ -41,6 +40,10 @@ export class ChatSend {
 	// AbortController 群(複数モデル並列送信に対応して配列)。task 生成後の中断は
 	// stopTask(サーバ側 cancel)が担う。
 	#completionAbortControllers: AbortController[] = [];
+
+	// 停止の連打ガード。stopTask の応答待ちの間に次の押下が来ると、同じ task を
+	// もう一度止めに行って(既に消えた task への)404 のトーストが出ていた
+	#stopping = false;
 
 	constructor({
 		session,
@@ -263,7 +266,8 @@ export class ChatSend {
 		try {
 			if (createsChat) {
 				try {
-					_chatId = await session.initChatHandler(_history);
+					// 一覧の取り直しは直後の saveChatHandler に任せる(送信 1 回で 1 回)
+					_chatId = await session.initChatHandler(_history, { refreshList: false });
 				} finally {
 					clearLiveUsage(draftChatId, responseMessageId);
 				}
@@ -321,8 +325,7 @@ export class ChatSend {
 		this.#scrollToBottom();
 		await this.#sendChatCompletionRequest(_history, model, responseMessageId, _chatId);
 
-		currentChatPage.set(1);
-		chats.set(await getChatList(get(currentChatPage)));
+		// サイドバー一覧は直前の saveChatHandler が取り直し済み(ここで重ねて取らない)
 		return true;
 	};
 
@@ -508,6 +511,18 @@ export class ChatSend {
 	};
 
 	stopResponse = async () => {
+		if (this.#stopping) {
+			return;
+		}
+		this.#stopping = true;
+		try {
+			await this.#stopResponse();
+		} finally {
+			this.#stopping = false;
+		}
+	};
+
+	#stopResponse = async () => {
 		const session = this.#session;
 
 		// llens: task 生成前(モデル接続待ち)の fetch を先に落とす。これが無いと
@@ -527,7 +542,12 @@ export class ChatSend {
 		if (stopTaskIds.length > 0) {
 			for (const taskId of stopTaskIds) {
 				await stopTask(taskId).catch((error) => {
-					toast.error(`${error}`);
+					// 404(Task not found)は止めに行った時点で task が既に終わっていた —
+					// 停止の目的は果たされているのでエラーにしない(完走直後の押下・
+					// 終端待ちの間の再押下)
+					if (!/not found/i.test(`${error}`)) {
+						toast.error(`${error}`);
+					}
 					return null;
 				});
 			}

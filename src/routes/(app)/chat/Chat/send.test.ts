@@ -43,6 +43,8 @@ import { chatId } from '$lib/stores';
 import { createMessagesList } from '$lib/utils';
 import { buildWireMessages } from '$lib/utils/chat-messages';
 import { generateOpenAIChatCompletion } from '$lib/apis/openai';
+import { stopTask } from '$lib/apis';
+import { getChatList } from '$lib/apis/chats';
 import { consumeCompletionStream } from '$lib/utils/completion-streams';
 import { isLiveUsagePending, resetChatUsage } from '$lib/stores/live-usage.svelte';
 import { ChatSend } from './send';
@@ -342,5 +344,58 @@ describe('ChatSend.sendPrompt — SSE 消費中の切断', () => {
 		// completed(outlet・保存)はここからは駆動しない — 追いつき後の done が担う
 		expect(events.chatCompletedHandler).not.toHaveBeenCalled();
 		expect(isLiveUsagePending(NEW_ID)).toBe(false);
+	});
+});
+
+describe('ChatSend.stopResponse — 停止の連打', () => {
+	it('応答待ちの間の再押下では同じ task を止めに行かない', async () => {
+		const { send, session } = makeSend();
+		session.taskIds = ['t1'];
+		let release: () => void = () => {};
+		vi.mocked(stopTask).mockImplementation(
+			() => new Promise((resolve) => (release = () => resolve(null as never))) as never
+		);
+
+		const first = send.stopResponse();
+		const second = send.stopResponse();
+		release();
+		await Promise.all([first, second]);
+
+		expect(stopTask).toHaveBeenCalledTimes(1);
+	});
+
+	it('既に終わった task の 404(Task not found)はトーストにしない', async () => {
+		const { send, session } = makeSend();
+		session.taskIds = ['t1'];
+		vi.mocked(stopTask).mockRejectedValue('Task not found');
+
+		await send.stopResponse();
+
+		expect(toast.error).not.toHaveBeenCalled();
+		expect(session.taskIds).toBeNull();
+	});
+
+	it('それ以外の停止の失敗はトーストする', async () => {
+		const { send, session } = makeSend();
+		session.taskIds = ['t1'];
+		vi.mocked(stopTask).mockRejectedValue('boom');
+
+		await send.stopResponse();
+
+		expect(toast.error).toHaveBeenCalledWith('boom');
+	});
+});
+
+describe('ChatSend.sendPrompt — サイドバー一覧の取り直し', () => {
+	it('送信経路では一覧を取り直さない(保存側が 1 回取る)。新規 chat の作成でも取らせない', async () => {
+		vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+		const { session, sendNew } = makeSend();
+
+		await sendNew();
+
+		expect(getChatList).not.toHaveBeenCalled();
+		expect(session.initChatHandler).toHaveBeenCalledWith(expect.anything(), {
+			refreshList: false
+		});
 	});
 });
