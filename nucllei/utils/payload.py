@@ -61,24 +61,54 @@ def apply_model_params_to_body(
     return form_data
 
 
+def _unescape(s: str) -> str:
+    """モデル設定の stop に書かれた \\n 等のエスケープを実文字へ。
+
+    素朴な bytes(s, "utf-8").decode("unicode_escape") は非 ASCII を UTF-8 の
+    バイト列ごと latin-1 として読み直すため、日本語の stop(「。」等)が文字化けする。
+    非 latin-1 文字を先に \\uXXXX へ逃がしてから戻すことで、エスケープだけを解く。
+    """
+    try:
+        return s.encode("latin-1", "backslashreplace").decode("unicode_escape")
+    except UnicodeDecodeError:
+        return s  # 末尾の孤立した \\ 等 — 書かれたまま使う
+
+
+def _parse_stop(value) -> list[str]:
+    """stop は文字列 1 つでも配列でも受ける(文字列を 1 文字ずつに割らない)。"""
+    if isinstance(value, str):
+        value = [value]
+    return [_unescape(s) for s in value if isinstance(s, str) and s != ""]
+
+
 # inplace function: form_data is modified
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
+    # top_k / min_p / repetition_penalty は OpenAI 本家には無いが、配下の OpenAI 互換
+    # エンジン(SGLang / vLLM)の拡張パラメータ。モデル編集画面で設定できる値を
+    # 黙って捨てない。repeat_penalty(Ollama 名)は互換エンジン側の名前へ寄せる。
     mappings = {
         "temperature": float,
         "top_p": float,
+        "top_k": int,
+        "min_p": float,
         "max_tokens": int,
         "frequency_penalty": float,
+        "presence_penalty": float,
+        "repetition_penalty": float,
         "reasoning_effort": str,
         "seed": lambda x: x,
-        "stop": lambda x: [bytes(s, "utf-8").decode("unicode_escape") for s in x],
+        "stop": _parse_stop,
         "logit_bias": lambda x: x,
         "response_format": dict,
     }
+    if params and params.get("repeat_penalty") is not None:
+        params = {**params}
+        params.setdefault("repetition_penalty", params["repeat_penalty"])
     form_data = apply_model_params_to_body(params, form_data, mappings)
 
     # llens: custom_params(モデル設定の任意 KV)を body トップレベルへ素通しマージする。
     # SGLang の chat_template_kwargs 等、whitelist(上の mappings)に無い拡張引数の
-    # escape hatch。同名キーは custom 側が勝つ(後勝ち — whitelist 外の top_k 等も
+    # escape hatch。同名キーは custom 側が勝つ(後勝ち — whitelist 外の拡張引数も
     # ここから上書きできる)。
     custom_params = params.get("custom_params")
     if isinstance(custom_params, dict):
@@ -119,7 +149,7 @@ def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
         "presence_penalty": float,
         "frequency_penalty": float,
         "penalize_newline": bool,
-        "stop": lambda x: [bytes(s, "utf-8").decode("unicode_escape") for s in x],
+        "stop": _parse_stop,
         "numa": bool,
         "num_gpu": int,
         "main_gpu": int,
