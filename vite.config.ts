@@ -1,6 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -111,8 +112,10 @@ export default defineConfig({
 				'**/data',
 				'**/data/**',
 				// backend (Python) は FE から import しない。監視すると .py の保存のたびに全体リロードが
-				// 走り、tmp ファイル (sed の作業ファイル等) で inotify 上限 (ENOSPC) に当たって落ちる (2026-10-04)
-				'**/nucllei/**',
+				// 走り、tmp ファイル (sed の作業ファイル等) で inotify 上限 (ENOSPC) に当たって落ちる (2026-10-04)。
+				// repo root からの絶対パスで書く — `**/nucllei/**` は checkout 先 (…/technoplasm/nucllei/) にも
+				// 当たり、全ファイルが監視から外れて変更を拾わなくなっていた (2026-10-05)
+				fileURLToPath(new URL('./nucllei/**', import.meta.url)),
 				'**/ext',
 				'**/ext/**'
 			]
