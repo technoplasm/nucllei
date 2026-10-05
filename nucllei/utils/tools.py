@@ -322,10 +322,6 @@ def get_tools(
                     "tool_id": tool_id,
                     "callable": callable,
                     "spec": spec,
-                    # Misc info
-                    "metadata": {
-                        "citation": hasattr(module, "citation") and module.citation,
-                    },
                 }
                 if render:
                     tool_dict["render"] = render

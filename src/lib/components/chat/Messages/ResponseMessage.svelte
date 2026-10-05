@@ -82,30 +82,6 @@
 	);
 
 	let edit = $state(false);
-
-	const handleSourceClick = async (_id: string, idx: number | string | undefined) => {
-		let sourceButton = document.getElementById(`source-${message.id}-${idx}`);
-		const sourcesCollapsible = document.getElementById(`collapsible-${message.id}`);
-
-		if (sourceButton) {
-			sourceButton.click();
-		} else if (sourcesCollapsible) {
-			// Sources の Collapsible を開いてから source ボタンをクリックする
-			sourcesCollapsible
-				.querySelector('div:first-child')
-				?.dispatchEvent(new PointerEvent('pointerup', {}));
-
-			// DOM 反映を待つ
-			await new Promise((resolve) => {
-				requestAnimationFrame(() => {
-					requestAnimationFrame(resolve);
-				});
-			});
-
-			sourceButton = document.getElementById(`source-${message.id}-${idx}`);
-			sourceButton?.click();
-		}
-	};
 </script>
 
 {#key message.id}
@@ -181,10 +157,8 @@
 										blocks={message.content_blocks ?? []}
 										done={message.done ?? false}
 										{history}
-										sources={message.sources}
 										floatingButtons={(message.done ?? false) && !readOnly}
 										{model}
-										onSourceClick={handleSourceClick}
 										onAddMessages={addMessages}
 									/>
 								{:else if message.content === '' && !message.error}
@@ -206,10 +180,8 @@
 										id={message.id}
 										{history}
 										content={message.content}
-										sources={message.sources}
 										floatingButtons={(message.done ?? false) && !readOnly}
 										{model}
-										onSourceClick={handleSourceClick}
 										onAddMessages={addMessages}
 									/>
 								{/if}

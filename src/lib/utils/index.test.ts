@@ -1,10 +1,16 @@
 // utils/index.ts のうち、壊れた入力・言語差で落ちる/効かないと分かった箇所の回帰テスト。
 // - createMessagesList: parentId が循環した履歴で無限再帰して FE が落ちた
 // - TTS の文分割: 和文は「。」の後に空白が無いため 1 文にもならず、全文を 1 リクエストで送っていた
+// - replaceTokens: 本文の [n] を <source_id> に置換する引用チップを撤去(2026-10-05)— [n] は素の文字列のまま
 
 import { describe, it, expect } from 'vitest';
 
-import { createMessagesList, extractSentencesForAudio, getMessageContentParts } from './index';
+import {
+	createMessagesList,
+	extractSentencesForAudio,
+	getMessageContentParts,
+	replaceTokens
+} from './index';
 import type { ChatHistory, ChatMessage } from '$lib/types/chat';
 
 const msg = (id: string, parentId: string | null, childrenIds: string[] = []): ChatMessage => ({
@@ -119,5 +125,16 @@ describe('TTS の文分割(extractSentencesForAudio)', () => {
 			'次のコードを実行してください。\n```\nprint("a。b")\nprint("c")\n```\nこれで完了です。';
 		const parts = getMessageContentParts(text, 'punctuation');
 		expect(parts).toEqual(['次のコードを実行してください。これで完了です。']);
+	});
+});
+
+describe('replaceTokens', () => {
+	it('本文の [n] には触れない(引用チップ置換は撤去済み)', () => {
+		const content = '根拠は [1] と [2](https://example.com/a.pdf) です';
+		expect(replaceTokens(content, 'M', 'U')).toBe(content);
+	});
+
+	it('{{char}} / {{user}} は従来どおり置換する', () => {
+		expect(replaceTokens('{{char}} → {{user}}', 'M', 'U')).toBe('M → U');
 	});
 });

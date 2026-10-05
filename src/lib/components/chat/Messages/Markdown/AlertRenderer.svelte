@@ -71,14 +71,12 @@
 		alert,
 		id = '',
 		tokenIdx = 0,
-		onTaskClick = undefined,
-		onSourceClick = undefined
+		onTaskClick = undefined
 	}: {
 		alert: AlertData;
 		id?: string;
 		tokenIdx?: number;
 		onTaskClick?: (payload: Record<string, any>) => void;
-		onSourceClick?: (id: string, sourceId?: string) => void;
 	} = $props();
 </script>
 
@@ -108,6 +106,6 @@ Renders the following Markdown as alerts:
 		<span class=" font-medium">{alert.type}</span>
 	</div>
 	<div class="pb-2">
-		<MarkdownTokens id={`${id}-${tokenIdx}`} tokens={alert.tokens} {onTaskClick} {onSourceClick} />
+		<MarkdownTokens id={`${id}-${tokenIdx}`} tokens={alert.tokens} {onTaskClick} />
 	</div>
 </div>

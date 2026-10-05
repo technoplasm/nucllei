@@ -24,6 +24,7 @@
 | チャットの「コントロール」サイドバー | **削除** | Files/Valves/System Prompt 上書き/高度なパラメータの per-chat 制御。一般ユーザーが制御する必要がなく、変に触らせたくない(2026-07-07) |
 | 設定 → 一般 の詳細パラメータ | **撤去** | 既定パラメータをユーザーに編集させない。制御はモデル(管理)側に集約 |
 | 高度なパラメータ UI(`AdvancedParams`) | **モデル編集のみに残す・整形済み** | 上記 2 箇所を撤去した結果、実質モデル編集専用に。#47 で整形出荷(d63d08db1/010b19ab2): ラベル隣接化(2カラム固定にはしない)+ Behavior/Sampling/Mirostat/Ollama のセクション分け・(Ollama) 連呼撤去 |
+| 本文中の引用チップ(`[n]` → `<source_id>`) | **撤去(2026-10-05 ken 決定、refs #142)** | 添付のあるメッセージで本文の `[1]`〜`[N]` を `<source_id>` に置換し、表示名の重複除去で番号を振ってチップ描画していた(`replaceTokens` の sourceIds・`ContentRenderer` の番号付け・`Markdown/Source.svelte`・`onSourceClick` 配管)。7/6 の markdown-it 移行(`07fb37e59`)以降 `source_id` が HTML タグとして通らず**生文字列のまま表示されて壊れていた**うえ、モデルに `[n]` で引用させる指示は nucllei にも llens にも無い(llens は地の文の出典 + 原本 PDF への markdown リンクで引用)。本文の `[1]` は素の文字列、`[1](url)` は普通のリンクとして描画する。BE の tool `metadata.citation`(誰も読まない)も撤去。**残したもの**: メッセージ下の出典一覧(`Citations.svelte` + `CitationsModal`、`message.sources`、`source`/`citation` イベント、モデル能力 `citations` での表示切替)と、添付本文をモデルへ渡す BE の `<source id=.. file_id=..>` ブロック(id 属性も不変) |
 
 ## 制御面の整理(2026-07-07 決定)
 

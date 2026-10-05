@@ -17,22 +17,16 @@
 		id = '',
 		content,
 		model = null,
-		sourceIds = [],
-		onSourceClick = () => {},
 		onTaskClick = () => {}
 	}: {
 		id?: string;
 		content: string;
 		model?: { name?: string } | null;
-		sourceIds?: string[];
-		onSourceClick?: (id: string, sourceId?: string) => void;
 		onTaskClick?: (payload: Record<string, any>) => void;
 	} = $props();
 
 	const processed = $derived(
-		content
-			? replaceTokens(processResponseContent(content), sourceIds, model?.name, $user?.name)
-			: ''
+		content ? replaceTokens(processResponseContent(content), model?.name, $user?.name) : ''
 	);
 
 	// L1 セグメンタ統合(#22 / #14):
@@ -65,7 +59,7 @@
 
 {#key id}
 	{#each segments.stableBlocks as block, i (i)}
-		<MarkdownTokens tokens={block.tokens} id={`${id}-s${i}`} {onTaskClick} {onSourceClick} />
+		<MarkdownTokens tokens={block.tokens} id={`${id}-s${i}`} {onTaskClick} />
 	{/each}
-	<MarkdownTokens tokens={segments.tailTokens} id={`${id}-tail`} {onTaskClick} {onSourceClick} />
+	<MarkdownTokens tokens={segments.tailTokens} id={`${id}-tail`} {onTaskClick} />
 {/key}

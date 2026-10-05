@@ -19,12 +19,7 @@ import { render } from '$lib/utils/markdown-it';
 // Helper functions
 //////////////////////////
 
-export const replaceTokens = (
-	content: string,
-	sourceIds?: string[],
-	char?: string,
-	user?: string
-) => {
+export const replaceTokens = (content: string, char?: string, user?: string) => {
 	const tokens: {
 		regex: RegExp;
 		replacement: string | ((substring: string, ...args: string[]) => string) | undefined;
@@ -70,13 +65,6 @@ export const replaceTokens = (
 						: segment.replace(regex, replacement);
 			}
 		});
-
-		if (Array.isArray(sourceIds)) {
-			sourceIds.forEach((sourceId, idx) => {
-				const regex = new RegExp(`\\[${idx + 1}\\]`, 'g');
-				segment = segment.replace(regex, `<source_id data="${idx + 1}" title="${sourceId}" />`);
-			});
-		}
 
 		return segment;
 	});

@@ -123,7 +123,6 @@
 			<div class="flex text-xs font-medium flex-wrap">
 				{#each citations as citation, idx}
 					<button
-						id={`source-${id}-${idx + 1}`}
 						class="no-toggle outline-hidden flex text-content p-1 bg-white dark:bg-gray-900 rounded-xl max-w-96"
 						onclick={() => {
 							showCitationModal = true;
@@ -203,7 +202,6 @@
 						<div class="flex text-xs font-medium flex-wrap">
 							{#each citations as citation, idx}
 								<button
-									id={`source-${id}-${idx + 1}`}
 									class="no-toggle outline-hidden flex text-content p-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-xl max-w-96"
 									onclick={() => {
 										showCitationModal = true;

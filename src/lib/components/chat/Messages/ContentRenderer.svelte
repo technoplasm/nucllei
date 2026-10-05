@@ -5,7 +5,7 @@
 	import { mobile } from '$lib/stores';
 	import type { Model } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
-	import type { ChatHistory, MessageSource } from '$lib/types/chat';
+	import type { ChatHistory } from '$lib/types/chat';
 
 	import Markdown from './Markdown.svelte';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
@@ -15,9 +15,7 @@
 		content,
 		history,
 		model = null,
-		sources = null,
 		floatingButtons = true,
-		onSourceClick = () => {},
 		onTaskClick = () => {},
 		onAddMessages = () => {}
 	}: {
@@ -25,9 +23,7 @@
 		content: string;
 		history: ChatHistory;
 		model?: Model | null;
-		sources?: MessageSource[] | null;
 		floatingButtons?: boolean;
-		onSourceClick?: (id: string, idx?: number | string) => void;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
 		onAddMessages?: (payload: {
 			modelId: string;
@@ -38,42 +34,6 @@
 
 	let contentContainerElement: HTMLDivElement | null = $state(null);
 	let floatingButtonsElement: { closeHandler: () => void } | null = $state(null);
-
-	// citation マーカー [n] → ソース名の解決テーブル(Markdown の sourceIds)
-	const sourceIds = $derived(
-		(sources ?? []).reduce<string[]>((acc, s) => {
-			const citationsEnabled =
-				((model?.info?.meta?.capabilities as { citations?: boolean } | undefined)?.citations ??
-					true) !== false;
-
-			const ids: string[] = [];
-			(s.document ?? []).forEach((_document, index) => {
-				if (!citationsEnabled) {
-					ids.push('N/A');
-					return;
-				}
-
-				const metadata = s.metadata?.[index];
-				const metadataSource = typeof metadata?.source === 'string' ? metadata.source : 'N/A';
-
-				if (typeof metadata?.name === 'string') {
-					ids.push(metadata.name);
-					return;
-				}
-
-				if (metadataSource.startsWith('http://') || metadataSource.startsWith('https://')) {
-					ids.push(metadataSource);
-				} else {
-					ids.push(s?.source?.name ?? metadataSource);
-				}
-			});
-
-			acc = [...acc, ...ids];
-
-			// remove duplicates
-			return acc.filter((item, index) => acc.indexOf(item) === index);
-		}, [])
-	);
 
 	const updateButtonPosition = (event: MouseEvent) => {
 		const buttonsContainerElement = document.getElementById(`floating-buttons-${id}`);
@@ -159,7 +119,7 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	<Markdown {id} {content} {model} {sourceIds} {onSourceClick} {onTaskClick} />
+	<Markdown {id} {content} {model} {onTaskClick} />
 
 	<!-- content div の中に置く(外に置くと space-y の親の下で :last-child 判定を壊し、
 	     最後のブロックにも margin が付く — tailwind v4 の space-y は

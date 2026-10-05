@@ -10,7 +10,7 @@
 	import { collapseAllSignal, requestCollapseAll } from './collapse-all.svelte';
 	import type { Model } from '$lib/stores';
 	import { getToolProgress } from '$lib/stores/tool-progress.svelte';
-	import type { ChatHistory, ContentBlock, MessageSource } from '$lib/types/chat';
+	import type { ChatHistory, ContentBlock } from '$lib/types/chat';
 	import type { ToolCallRender } from '$lib/utils/tool-render';
 
 	const i18n = getContext('i18n');
@@ -42,10 +42,8 @@
 		done = false,
 		history,
 		model = null,
-		sources = null,
 		floatingButtons = false,
 		onTaskClick = () => {},
-		onSourceClick = () => {},
 		onAddMessages = () => {}
 	}: {
 		id: string;
@@ -53,10 +51,8 @@
 		done?: boolean;
 		history: ChatHistory;
 		model?: Model | null;
-		sources?: MessageSource[] | null;
 		floatingButtons?: boolean;
 		onTaskClick?: (payload: Record<string, unknown>) => void;
-		onSourceClick?: (id: string, idx?: number | string) => void;
 		onAddMessages?: (payload: {
 			modelId: string;
 			parentId: string;
@@ -119,11 +115,9 @@
 				id={`${id}-block-${blockIdx}`}
 				{history}
 				content={block.content ?? ''}
-				{sources}
 				{floatingButtons}
 				{model}
 				{onTaskClick}
-				{onSourceClick}
 				{onAddMessages}
 			/>
 		{:else if block.type === 'tool_calls'}

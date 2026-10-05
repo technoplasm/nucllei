@@ -17,22 +17,18 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import MarkdownTokens from './MarkdownTokens.svelte';
 
-	import Source from './Source.svelte';
-
 	type Token = { type: string; [key: string]: any };
 
 	let {
 		id,
 		tokens,
 		top = true,
-		onTaskClick = () => {},
-		onSourceClick = () => {}
+		onTaskClick = () => {}
 	}: {
 		id: string;
 		tokens: Token[];
 		top?: boolean;
 		onTaskClick?: (payload: Record<string, any>) => void;
-		onSourceClick?: (id: string, sourceId?: string) => void;
 	} = $props();
 
 	const headerComponent = (depth: number) => {
@@ -77,7 +73,7 @@
 		<hr class=" border-line! my-6!" />
 	{:else if token.type === 'heading'}
 		<svelte:element this={headerComponent(token.depth)} dir="auto">
-			<MarkdownInlineTokens id={`${id}-${tokenIdx}-h`} tokens={token.tokens} {onSourceClick} />
+			<MarkdownInlineTokens id={`${id}-${tokenIdx}-h`} tokens={token.tokens} />
 		</svelte:element>
 	{:else if token.type === 'code'}
 		{#if token.raw.includes('```')}
@@ -107,7 +103,6 @@
 											<MarkdownInlineTokens
 												id={`${id}-${tokenIdx}-header-${headerIdx}`}
 												tokens={header.tokens}
-												{onSourceClick}
 											/>
 										</div>
 									</div>
@@ -127,7 +122,6 @@
 											<MarkdownInlineTokens
 												id={`${id}-${tokenIdx}-row-${rowIdx}-${cellIdx}`}
 												tokens={cell.tokens}
-												{onSourceClick}
 											/>
 										</div>
 									</td>
@@ -156,15 +150,10 @@
 	{:else if token.type === 'blockquote'}
 		{@const alert = alertComponent(token)}
 		{#if alert}
-			<AlertRenderer {alert} {id} {tokenIdx} {onTaskClick} {onSourceClick} />
+			<AlertRenderer {alert} {id} {tokenIdx} {onTaskClick} />
 		{:else}
 			<blockquote dir="auto">
-				<MarkdownTokens
-					id={`${id}-${tokenIdx}`}
-					tokens={token.tokens}
-					{onTaskClick}
-					{onSourceClick}
-				/>
+				<MarkdownTokens id={`${id}-${tokenIdx}`} tokens={token.tokens} {onTaskClick} />
 			</blockquote>
 		{/if}
 	{:else if token.type === 'list'}
@@ -195,7 +184,6 @@
 							tokens={item.tokens}
 							top={token.loose}
 							{onTaskClick}
-							{onSourceClick}
 						/>
 					</li>
 				{/each}
@@ -227,7 +215,6 @@
 							tokens={item.tokens}
 							top={token.loose}
 							{onTaskClick}
-							{onSourceClick}
 						/>
 					</li>
 				{/each}
@@ -243,8 +230,6 @@
 		{:else if token.text.includes(`<iframe src="${WEBUI_BASE_URL}/api/v1/files/`)}
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 			{@html sanitizeIframeHtml(token.text)}
-		{:else if token.text.includes(`<source_id`)}
-			<Source {id} {token} onClick={onSourceClick} />
 		{:else}
 			{token.text}
 		{/if}
@@ -264,27 +249,19 @@
 		></iframe>
 	{:else if token.type === 'paragraph'}
 		<p dir="auto">
-			<MarkdownInlineTokens
-				id={`${id}-${tokenIdx}-p`}
-				tokens={token.tokens ?? []}
-				{onSourceClick}
-			/>
+			<MarkdownInlineTokens id={`${id}-${tokenIdx}-p`} tokens={token.tokens ?? []} />
 		</p>
 	{:else if token.type === 'text'}
 		{#if top}
 			<p>
 				{#if token.tokens}
-					<MarkdownInlineTokens id={`${id}-${tokenIdx}-t`} tokens={token.tokens} {onSourceClick} />
+					<MarkdownInlineTokens id={`${id}-${tokenIdx}-t`} tokens={token.tokens} />
 				{:else}
 					{unescapeHtml(token.text)}
 				{/if}
 			</p>
 		{:else if token.tokens}
-			<MarkdownInlineTokens
-				id={`${id}-${tokenIdx}-p`}
-				tokens={token.tokens ?? []}
-				{onSourceClick}
-			/>
+			<MarkdownInlineTokens id={`${id}-${tokenIdx}-p`} tokens={token.tokens ?? []} />
 		{:else}
 			{unescapeHtml(token.text)}
 		{/if}
