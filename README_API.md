@@ -27,9 +27,10 @@ routing and similar behavior are all authored at the _deployment layer_ as Tools
 Skills and Functions, and pushed into the server via the admin API. Design rules
 that shape everything below:
 
-- **The Filter pipeline is the core feature.** Every chat request flows
-  `inlet filters → model (stream filters) → outlet filters`. Deployment policy code
-  (e.g. de-identification) lives in Filters assigned to models.
+- **The Filter pipeline is the core feature.** Every chat request flows through
+  the `inlet` filters assigned to the model before it reaches the engine.
+  Deployment policy code (e.g. de-identification) lives in Filters assigned to
+  models. (`stream` / `outlet` hooks were removed on 2026-10-05.)
 - **Native function calling only.** Tools are exposed through the OpenAI `tools`
   array and executed in a native tool-call loop. There is no prompt-template
   function calling and no tag-detection code-execution backdoor.
@@ -894,9 +895,8 @@ curl -N http://HOST/api/chat/completions \
 - `stream:false` → one OpenAI JSON response; `stream:true` → standard OpenAI SSE
   (`data: {...}` frames, terminated by `data: [DONE]`). A usage chunk is always
   included on streams (the server forces `stream_options.include_usage`).
-- **Inlet and stream Filters run** on this path (model params, system prompt, skill
-  `/command` expansion and attachment auto-load, file context injection too). Outlet filters do not run
-  headless (call `POST /api/chat/completed` yourself if you need them).
+- **Inlet Filters run** on this path (model params, system prompt, skill
+  `/command` expansion and attachment auto-load, file context injection too).
 - **Tools are attached but not executed**: the model's configured tools are put in
   the request, so you may receive raw `tool_calls` in the response — executing them
   is your client's job in this mode. `tools` you pass yourself are kept alongside
@@ -2169,37 +2169,25 @@ class Filter:
         # want injected.
         return body
 
-    def stream(self, event: dict) -> dict:
-        # one parsed SSE chunk; return it (possibly modified),
-        # or return None to drop the chunk. Sees reasoning_content deltas too.
-        return event
-
-    async def outlet(self, body: dict) -> dict:
-        # completed-turn payload {model, chat_id, id, messages:[...]};
-        # messages carry usage/sources/error/interrupted markers.
-        # Observe only (logging / audit): rewriting message content here is
-        # NOT supported — it does not reach the screen or the next turn.
-        return body
 ```
 
-- All three hooks optional. Chain order across filters: ascending
+- `inlet` is the only hook. `stream` and `outlet` methods are **not called**
+  (removed 2026-10-05 together with `POST /api/chat/completed` — no deployment
+  used them; `outlet` had been observation-only). Chain order across filters: ascending
   `Valves(**saved).priority` — expose `priority` as a Valves field; its code
   default applies until an admin sets it (§5.2). Filters with equal priority
   run in the order of the preset's `meta.filterIds`.
-- **Where hooks run**: `inlet` runs on every `/api/chat/completions` call (UI and
-  headless) _before_ tool resolution and built-in file-content injection; `stream`
-  wraps the model stream on both paths (headless: `__event_emitter__`/`__event_call__`
-  are `None` — tolerate that); `outlet` runs when the turn completes on the chat
-  wire (the frontend posts `/api/chat/completed`) — headless clients must call
-  that endpoint themselves to get outlet processing.
+- **Where it runs**: `inlet` runs on every `/api/chat/completions` call (UI and
+  headless) _before_ tool resolution and built-in file-content injection. What it
+  sets on the body (params such as `temperature` / `reasoning_effort`, extra
+  top-level fields) is sent on every model call of the turn, including tool-loop
+  follow-ups — `inlet` itself runs once per request.
 - **What a filter can change**: the request in `inlet` (messages, params,
-  attachment lists) and stream chunks in `stream`. To keep an attachment out of
+  attachment lists). To keep an attachment out of
   the built-in `<source>` injection, remove it from `body["files"]` and
   `body["metadata"]["files"]` in `inlet` (per file — e.g. only oversized ones).
   `file_handler = True` (drop every attachment wholesale) is **not supported**
   (removed 2026-10-05); the attribute is ignored.
-- `outlet` is observation-only — see the comment in the example. Changing the
-  answer text belongs in `stream` (as it is generated) or in the model / prompt.
 
 ### 7.2 Pipe — self-made models
 

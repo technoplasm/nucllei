@@ -1119,7 +1119,7 @@ async def measure_carried_tokens(
     (#101)ので含める)を max_tokens=1 / 非 stream で 1 回流し、返った
     prompt_tokens をそのまま使う。
 
-    - persist しない・イベントを出さない・filter(inlet / stream / outlet)を通さない
+    - persist しない・イベントを出さない・filter(inlet)を通さない
       (generate_chat_completion を直に呼ぶ — tool ループの追撃と同じ経路)。
     - preset の params.max_tokens は router で body の max_tokens を上書きするため、
       max_completion_tokens も 1 で送る(router はその後で max_completion_tokens を
@@ -1248,8 +1248,6 @@ async def consume_model_stream(
     *,
     model,
     metadata,
-    filter_functions,
-    extra_params,
     event_emitter,
 ):
     """モデル応答 SSE を読み切り assembler へ畳み込む。組めた tool calls を返す。
@@ -1319,14 +1317,6 @@ async def consume_model_stream(
 
         try:
             data = json.loads(data)
-
-            data, _ = await process_filter_functions(
-                request=request,
-                filter_functions=filter_functions,
-                filter_type="stream",
-                form_data=data,
-                extra_params=extra_params,
-            )
 
             if not data:
                 continue
@@ -2083,55 +2073,22 @@ async def process_chat_response(
       SSE になる。クライアント切断はタスクに影響しない(再アタッチは
       GET /api/tasks/{task_id}/events)。stream/非 stream ともこの契約に統一。
     - chat メタデータなし(headless API): 現行どおり OpenAI 互換フレームを
-      素通しする(stream filter だけ適用)。
-    """
-    filter_functions = [
-        Functions.get_function_by_id(filter_id)
-        for filter_id in get_sorted_filter_ids(model)
-    ]
+      素通しする(payload 処理の events を先頭に足すだけ)。
 
+    Filter の stream / outlet フックは撤去済み(2026-10-05 — llens の filter は inlet
+    しか使わない。_memos/feature-triage.md)。応答経路で filter は走らない。
+    """
     # --- headless(chat メタデータ無し)経路: 素通し -----------------------
     if events_stream is None:
         if not isinstance(response, StreamingResponse):
             return response
 
-        extra_params = {
-            "__event_emitter__": None,
-            "__event_call__": None,
-            "__user__": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "role": user.role,
-                "info": getattr(user, "info", None) or {},
-            },
-            "__metadata__": metadata,
-            "__request__": request,
-            "__model__": model,
-        }
-
         async def stream_wrapper(original_generator, events):
             for event in events:
-                event, _ = await process_filter_functions(
-                    request=request,
-                    filter_functions=filter_functions,
-                    filter_type="stream",
-                    form_data=event,
-                    extra_params=extra_params,
-                )
-
                 if event:
                     yield sse_line(event)
 
             async for data in original_generator:
-                data, _ = await process_filter_functions(
-                    request=request,
-                    filter_functions=filter_functions,
-                    filter_type="stream",
-                    form_data=data,
-                    extra_params=extra_params,
-                )
-
                 if data:
                     yield data
 
@@ -2143,23 +2100,6 @@ async def process_chat_response(
 
     # --- chat 経路: タスク + SSE 購読 --------------------------------------
     event_emitter = make_event_emitter(events_stream, metadata)
-    event_caller = make_event_call(events_stream)
-
-    extra_params = {
-        "__event_emitter__": event_emitter,
-        "__event_call__": event_caller,
-        "__user__": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
-            "info": getattr(user, "info", None) or {},
-        },
-        "__metadata__": metadata,
-        "__request__": request,
-        "__model__": model,
-    }
 
     model_id = form_data.get("model", "")
 
@@ -2203,8 +2143,6 @@ async def process_chat_response(
             stream_kwargs = {
                 "model": model,
                 "metadata": metadata,
-                "filter_functions": filter_functions,
-                "extra_params": extra_params,
                 "event_emitter": event_emitter,
             }
             ingest_kwargs = {
@@ -2469,7 +2407,7 @@ async def process_chat_response(
             # done=false のブロックが DB に残ると「Thinking…」スピナーが
             # リロード後も回り続ける。順序が要件: 先に task-cancelled で
             # フロントに interrupted マークを立てさせ、その後の done イベントで
-            # completed 経路(outlet filter)が interrupted 込みで走る。
+            # FE の完了時保存が interrupted 込みで走る。
             log.warning("Task was cancelled!")
             assembler.close_open_reasoning_block()
             data = {
@@ -2489,8 +2427,8 @@ async def process_chat_response(
             # message にも永続化し、リロード後もエラーとして見えるようにする。
             log.exception("Chat response task failed mid-stream")
             assembler.close_open_reasoning_block()
-            # done も同時に立てる: フロントの done 経路(completed → outlet
-            # filter)を通し、outlet が message.error で成否を判別できるようにする
+            # done も同時に立てる: フロントの done 経路(完了時保存)を通し、
+            # error 付きのまま保存されるようにする
             data = {
                 "error": {"content": f"Connection to the model was lost: {e}"},
                 "done": True,

@@ -302,10 +302,16 @@ llens(`prism-hu/llens` 35018a3 時点)の実使用:
 - **UserValves**(filter / tool への注入、`/functions|tools/id/{id}/valves/user{,/spec,/update}` の 6 endpoint)。
   設定 UI も無く(FE に呼び出し元なし)、コード既定値しか入らなかった。`__user__` は plugin ごとの
   浅いコピー(`"valves"` キーは落とす)にして、共有 dict 経由の混入も塞いだ。
-  **残: pipe(`functions.py` の get_function_params)と action(`utils/chat.py`)の UserValves 注入**
-  — 別作業中のため未撤去。endpoint が無いので既定値しか入らない死にコード
+  pipe(`functions.py` の get_function_params)と action(`utils/chat.py`)の UserValves 注入も
+  2026-10-05 に撤去(pipe の `__user__` も浅いコピーで `"valves"` を落とす)
 - **Filter の `file_handler = True`**(inlet 後に添付を丸ごと落とす)。添付無しの送信で KeyError → 400
   になっていた。属性は無視される。tool 側の `metadata.file_handler`(読む所が無かった)も削除
+- **Filter の outlet / stream フック**(2026-10-05)。llens の filter は inlet だけ。呼び出し面
+  (middleware の応答ストリーム・headless 素通し、`POST /api/chat/completed` と utils/chat.py の
+  chat_completed、FE の chatCompleted 呼び出しと応答 messages の適用)を撤去。FE のターン末処理
+  (chatCompletedHandler)は完了時保存とサイドバー追従だけになった。`routers/pipelines.py` の
+  process_pipeline_outlet_filter は呼び手が無くなった(pipelines router は温存方針なので残置)。
+  `utils/filter.py` の process_filter_functions は filter_type を汎用に扱うまま(inlet でしか呼ばれない)
 
 残して直したもの:
 - **priority**: `Valves(**保存値).priority` で決める(コード既定が効く)。同 priority は `filterIds` の
@@ -317,8 +323,4 @@ llens(`prism-hu/llens` 35018a3 時点)の実使用:
   ついでに OpenAPI の任意 requestBody を省けない件も修正(path/query 引数を body に重ねない)
 
 仕様から外したもの(コードは残置):
-- **outlet による本文の書き換えはサポートしない**(画面・次ターンに反映されない。outlet は観測専用 —
-  README_API §7.1)。llens は outlet を持たない
-- outlet / stream フック自体も llens 未使用で撤去候補。呼び出し面が `utils/middleware.py` /
-  `utils/chat.py`(別作業中)にあるため今回は手を付けない
 - 外部 OpenAPI tool server も llens 未使用で撤去候補(FE 設定・configs router にまたがる)

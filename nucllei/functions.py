@@ -195,21 +195,18 @@ async def generate_function_chat_completion(
         if extra_params is None:
             extra_params = {}
 
-        pipe_id = get_pipe_id(form_data)
-
         # Get the signature of the function
         sig = inspect.signature(function_module.pipe)
         params = {"body": form_data} | {
             k: v for k, v in extra_params.items() if k in sig.parameters
         }
 
-        if "__user__" in params and hasattr(function_module, "UserValves"):
-            user_valves = Functions.get_user_valves_by_id_and_user_id(pipe_id, user.id)
-            try:
-                params["__user__"]["valves"] = function_module.UserValves(**user_valves)
-            except Exception as e:
-                log.exception(e)
-                params["__user__"]["valves"] = function_module.UserValves()
+        # UserValves は撤去済み(_memos/feature-triage.md)。__user__ は pipe ごとの
+        # 浅いコピーにし、"valves" キーは渡さない(filter / tool と同じ形)。
+        if "__user__" in params:
+            params["__user__"] = {
+                k: v for k, v in params["__user__"].items() if k != "valves"
+            }
 
         return params
 

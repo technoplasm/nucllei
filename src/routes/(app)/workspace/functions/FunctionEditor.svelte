@@ -70,10 +70,6 @@ class Filter:
     def inlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
         # Pre-process the request body before it reaches the model.
         return body
-
-    def outlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
-        # Post-process the response body after the model responds.
-        return body
 `;
 
 	const actionBoilerplate = `from pydantic import BaseModel, Field

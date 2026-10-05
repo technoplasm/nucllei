@@ -30,48 +30,6 @@ export const getModels = async (base: boolean = false) => {
 	return res?.data ?? [];
 };
 
-// llens(#70 C): 実際の送信形(Chat.svelte chatCompletedHandler)に合わせる。
-// messages は message 形の縮約 object 群、model_item は $models のエントリ素通し。
-type ChatCompletedForm = {
-	model?: string;
-	messages: Record<string, unknown>[];
-	model_item?: unknown;
-	chat_id: string;
-	id: string;
-};
-
-export const chatCompleted = async (body: ChatCompletedForm) => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_BASE_URL}/api/chat/completed`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify(body)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.log(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = err;
-			}
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 // llens(#70 C): 実際の送信形(Chat.svelte chatActionHandler)に合わせる。
 type ChatActionForm = {
 	model?: string;

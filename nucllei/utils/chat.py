@@ -18,10 +18,6 @@ from nucllei.routers.ollama import (
     generate_chat_completion as generate_ollama_chat_completion,
 )
 
-from nucllei.routers.pipelines import (
-    process_pipeline_outlet_filter,
-)
-
 from nucllei.models.functions import Functions
 
 
@@ -31,10 +27,6 @@ from nucllei.utils.payload import convert_payload_openai_to_ollama
 from nucllei.utils.response import (
     convert_response_ollama_to_openai,
     convert_streaming_response_ollama_to_openai,
-)
-from nucllei.utils.filter import (
-    get_sorted_filter_ids,
-    process_filter_functions,
 )
 
 from nucllei.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
@@ -122,14 +114,14 @@ chat_completion = generate_chat_completion
 
 
 def _make_buffered_event_handlers():
-    """completed / actions 経路用のイベントバッファ(llens(wire v2))。
+    """actions 経路用のイベントバッファ(llens(wire v2))。
 
     これらのハンドラは completion タスク終了後の別 POST 内で走るため、
     ライブなイベントバス(completion_events)は存在しない。__event_emitter__ は
     ローカルの events リストへ積むだけとし、呼び出し側が応答 JSON の "events" に
     同梱して返す(FE が応答から適用する)。
 
-    completed/actions 経路では __event_call__ は使えない(バッファ応答のため、
+    actions 経路では __event_call__ は使えない(バッファ応答のため、
     クライアントとの双方向往復が成立しない)— 呼ばれたら warning を出して
     None を返す no-op stub を渡す。
     """
@@ -140,74 +132,12 @@ def _make_buffered_event_handlers():
 
     async def __event_call__(event_data):
         log.warning(
-            "__event_call__ は completed/actions 経路では使えない(バッファ応答のため)。"
+            "__event_call__ は actions 経路では使えない(バッファ応答のため)。"
             "None を返す。"
         )
         return None
 
     return events, __event_emitter__, __event_call__
-
-
-async def chat_completed(request: Request, form_data: dict, user: Any):
-    if not request.app.state.MODELS:
-        await get_all_models(request, user=user)
-
-    models = request.app.state.MODELS
-
-    data = form_data
-    model_id = data["model"]
-    if model_id not in models:
-        raise Exception("Model not found")
-
-    model = models[model_id]
-
-    try:
-        data = await process_pipeline_outlet_filter(request, data, user, models)
-    except Exception as e:
-        return Exception(f"Error: {e}")
-
-    metadata = {
-        "chat_id": data["chat_id"],
-        "message_id": data["id"],
-        "user_id": user.id,
-    }
-
-    events, __event_emitter__, __event_call__ = _make_buffered_event_handlers()
-
-    extra_params = {
-        "__event_emitter__": __event_emitter__,
-        "__event_call__": __event_call__,
-        "__user__": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
-            "info": getattr(user, "info", None) or {},
-        },
-        "__metadata__": metadata,
-        "__request__": request,
-        "__model__": model,
-    }
-
-    try:
-        filter_functions = [
-            Functions.get_function_by_id(filter_id)
-            for filter_id in get_sorted_filter_ids(model)
-        ]
-
-        result, _ = await process_filter_functions(
-            request=request,
-            filter_functions=filter_functions,
-            filter_type="outlet",
-            form_data=data,
-            extra_params=extra_params,
-        )
-        if isinstance(result, dict):
-            result = {**result, "events": events}
-        return result
-    except Exception as e:
-        return Exception(f"Error: {e}")
 
 
 async def chat_action(request: Request, action_id: str, form_data: dict, user: Any):
@@ -275,16 +205,6 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
                     # llens(#55): 追加 meta(外部参照権限マーカー)を opaque に露出
                     "info": getattr(user, "info", None) or {},
                 }
-
-                try:
-                    if hasattr(function_module, "UserValves"):
-                        __user__["valves"] = function_module.UserValves(
-                            **Functions.get_user_valves_by_id_and_user_id(
-                                action_id, user.id
-                            )
-                        )
-                except Exception as e:
-                    log.exception(f"Failed to get user values: {e}")
 
                 params = {**params, "__user__": __user__}
 

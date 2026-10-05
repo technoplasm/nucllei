@@ -1,11 +1,11 @@
 /**
  * チャットの受信側(#70 C トラック: Chat.svelte 分割)。
  *
- * wire v2 の SSE イベント封筒(completion-streams)と、completed / actions 応答に
+ * wire v2 の SSE イベント封筒(completion-streams)と、actions 応答に
  * 同梱されるバッファ済みイベントを message へ適用する。message の状態だけを変える
  * イベントは純関数層(chat-events.ts applyMessageMutation)へ委譲し、ここは
  * 副作用(toast・TTS イベント・自動スクロール・__event_call__ ダイアログ・
- * done 時の completed 経路)を駆動する。状態は ChatSession を介して共有する。
+ * done 時の保存経路)を駆動する。状態は ChatSession を介して共有する。
  */
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
@@ -39,7 +39,7 @@ import { refreshChatChildren, refreshCurrentChatChildren } from '$lib/stores/cha
 import { applyExecutionDone, refreshExecutions } from '$lib/stores/executions.svelte';
 import type { CompletionEnvelope, StreamContext } from '$lib/utils/completion-streams';
 import { getChatById, getChatList, updateChatById } from '$lib/apis/chats';
-import { chatCompleted, chatAction } from '$lib/apis';
+import { chatAction } from '$lib/apis';
 
 import { type ChatSession, type Translate } from './session.svelte';
 
@@ -62,7 +62,7 @@ export class ChatEvents {
 		callback: (result: unknown) => Promise<void> | void
 	) => void;
 	// llens(#107 P3): /c/ の agent session 観測モード。true の間は done の
-	// completed / 保存経路(chatCompleted・updateChatById)を駆動しない —
+	// 完了時の保存経路(updateChatById)を駆動しない —
 	// 子ターンの完了処理・永続化は BE の内部 runner(subagent)が持ち、
 	// agent session への updateChatById は BE が 400 で拒否する。
 	#isObserver: () => boolean;
@@ -183,8 +183,8 @@ export class ChatEvents {
 			});
 	};
 
-	// completed / actions の応答 JSON に同梱される events(outlet filter / action の
-	// emit — 封筒なしの {type, data} 形)も SSE と同じ適用関数を通す。
+	// actions の応答 JSON に同梱される events(action の emit — 封筒なしの
+	// {type, data} 形)も SSE と同じ適用関数を通す。
 	applyBufferedEvents = async (
 		events: { type?: string; data?: any }[] | undefined,
 		messageId: string,
@@ -401,12 +401,7 @@ export class ChatEvents {
 			this.#session.taskIds = null;
 			void refreshCurrentChatChildren();
 		} else {
-			await this.chatCompletedHandler(
-				targetChatId,
-				message.model,
-				message.id,
-				createMessagesList(this.#session.history, message.id)
-			);
+			await this.chatCompletedHandler(targetChatId);
 		}
 
 		if (this.#session.autoScroll) {
@@ -418,64 +413,11 @@ export class ChatEvents {
 		this.#onTurnEnd();
 	};
 
-	chatCompletedHandler = async (
-		targetChatId: string,
-		modelId: string | undefined,
-		responseMessageId: string,
-		messages: ChatMessage[]
-	) => {
+	chatCompletedHandler = async (targetChatId: string) => {
 		const session = this.#session;
 
-		const res = await chatCompleted({
-			model: modelId,
-			messages: messages.map((m) => ({
-				id: m.id,
-				role: m.role,
-				content: m.content,
-				info: m.info ? m.info : undefined,
-				timestamp: m.timestamp,
-				...(m.usage ? { usage: m.usage } : {}),
-				...(m.sources ? { sources: m.sources } : {}),
-				// llens: outlet filter が turn の成否を判別できるようにする
-				// (error = 失敗、interrupted = ユーザー中断。どちらも無ければ成功)
-				...(m.error ? { error: m.error } : {}),
-				...(m.interrupted ? { interrupted: true } : {})
-			})),
-			model_item: get(models).find((m) => m.id === modelId),
-			chat_id: targetChatId,
-			id: responseMessageId
-		}).catch((error) => {
-			toast.error(`${error}`);
-			const lastMessage = messages.at(-1);
-			if (lastMessage) {
-				lastMessage.error = { content: error };
-			}
-
-			return null;
-		});
-
-		if (res !== null && res.messages) {
-			// Update chat history with the new messages
-			for (const message of res.messages) {
-				if (message?.id) {
-					// Add null check for message and message.id
-					session.history.messages[message.id] = {
-						...session.history.messages[message.id],
-						...(session.history.messages[message.id].content !== message.content
-							? { originalContent: session.history.messages[message.id].content }
-							: {}),
-						...message
-					};
-				}
-			}
-		}
-
-		// wire v2: outlet filter が emit したイベント(status 等)は応答 JSON の
-		// events に同梱される — SSE と同じ適用関数で処理する
-		if (res !== null) {
-			await this.applyBufferedEvents(res.events, responseMessageId, targetChatId);
-		}
-
+		// Filter の outlet(`/api/chat/completed`)は 2026-10-05 に撤去 — ターン末は
+		// 完了時保存とサイドバーの追従だけ(llens の filter は inlet しか使わない)。
 		await tick();
 
 		if (get(chatId) == targetChatId) {
@@ -540,7 +482,7 @@ export class ChatEvents {
 			}
 		}
 
-		// wire v2: action / outlet filter の emit は応答 JSON の events に同梱される
+		// wire v2: action の emit は応答 JSON の events に同梱される
 		if (res !== null) {
 			await this.applyBufferedEvents(res.events, responseMessageId, targetChatId);
 		}

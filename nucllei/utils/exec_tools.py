@@ -26,7 +26,7 @@ terminal 形を返した行に delivered_at を立てるのは「この返りで
 適格性(設計 D4 — opt-in):
 - tool 行を持つ tool(builtin / DB tool とも)は `Tools` クラス属性 `backgroundable`
   で宣言する: True(全関数)または関数名の list/tuple/set(utils/tools.py の
-  get_tools が per-entry キーへ落とす。`file_handler` と同型)。DB tool の CRUD は
+  get_tools が per-entry キーへ落とす)。DB tool の CRUD は
   admin 専用 = admin の明示指定。builtin では run_subagent(builtin_subagent)と
   sandbox 系が宣言している — #140 で run_subagent も同じ宣言経路に揃え、
   本モジュールに tool 名の特例は無い。

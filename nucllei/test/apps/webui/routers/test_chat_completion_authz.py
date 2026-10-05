@@ -82,23 +82,6 @@ class TestChatCompletionAuthz(AbstractPostgresTest):
         assert r.status_code == 403
         assert "read-only" in r.text
 
-    def test_agent_session_chat_completed_rejected(self):
-        """llens(#107): /api/chat/completed(outlet 実行)も agent session へは 400。"""
-        agent_chat = self._insert_agent_chat(user_id="2")
-
-        with mock_webui_user(id="2", role="user"):
-            r = self.fast_api_client.post(
-                "/api/chat/completed",
-                json={
-                    "chat_id": agent_chat.id,
-                    "id": "pm-1",
-                    "model": "m",
-                    "messages": [],
-                },
-            )
-        assert r.status_code == 400, r.text
-        assert "read-only" in r.text
-
     def test_agent_session_chat_action_rejected(self):
         """llens(#107): /api/chat/actions/{action_id} も agent session へは 400。"""
         agent_chat = self._insert_agent_chat(user_id="2")

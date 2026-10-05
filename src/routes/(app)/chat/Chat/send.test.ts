@@ -341,7 +341,7 @@ describe('ChatSend.sendPrompt — SSE 消費中の切断', () => {
 		expect(message.error).toBeUndefined();
 		expect(message.content).toBe('partial');
 		expect(message.done).not.toBe(true);
-		// completed(outlet・保存)はここからは駆動しない — 追いつき後の done が担う
+		// ターン末の処理(保存)はここからは駆動しない — 追いつき後の done が担う
 		expect(events.chatCompletedHandler).not.toHaveBeenCalled();
 		expect(isLiveUsagePending(NEW_ID)).toBe(false);
 	});

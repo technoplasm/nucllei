@@ -141,8 +141,8 @@ export function applyMessageMutation(
 ): boolean {
 	if (type === 'task-cancelled') {
 		// llens: 中断された応答を done 化してスピナーを止める。interrupted は
-		// 直後に届く done イベント → completed(outlet filter)経路で成否として
-		// 伝搬・永続化される(backend は本イベントの後に done+blocks を emit する)
+		// 直後に届く done イベント → 完了時保存で永続化される(backend は本イベントの
+		// 後に done+blocks を emit する)
 		message.done = true;
 		message.interrupted = true;
 		return true;

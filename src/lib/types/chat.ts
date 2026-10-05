@@ -81,14 +81,14 @@ export interface ChatMessage {
 	// ストリーミング状態
 	done?: boolean;
 	error?: boolean | { content: string };
-	/** ユーザー中断(task-cancelled)。completed outlet へ成否として伝搬。 */
+	/** ユーザー中断(task-cancelled)。完了時保存で永続化される。 */
 	interrupted?: boolean;
 
 	sources?: MessageSource[];
 	code_executions?: CodeExecution[];
 	usage?: Record<string, unknown>;
 
-	/** completed(outlet)応答の messages が持ち得る付帯情報。FE は読まず wire へ素通しする。 */
+	/** action 応答の messages が持ち得る付帯情報。FE は読まず wire へ素通しする。 */
 	info?: unknown;
 
 	/**
@@ -98,7 +98,7 @@ export interface ChatMessage {
 	 */
 	meta?: { system_notice?: string };
 
-	/** filter outlet が content を書き換えたときの原文(Chat.svelte)。 */
+	/** action が content を書き換えたときの原文(events.ts chatActionHandler)。 */
 	originalContent?: string;
 	/** TTS 自動読み上げの送出済み末尾文(Chat.svelte)。 */
 	lastSentence?: string;

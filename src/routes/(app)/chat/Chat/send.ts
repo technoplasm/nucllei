@@ -427,7 +427,7 @@ export class ChatSend {
 			clearLiveUsage(_chatId, responseMessageId);
 			if (abortController.signal.aborted) {
 				// stop によるユーザー中断 — エラーにしない(task-cancelled と同じ扱い)。
-				// completed(outlet)へは下の !res 分岐から interrupted 付きで流れる
+				// ターン末の保存へは下の !res 分岐から interrupted 付きで流れる
 				responseMessage.done = true;
 				responseMessage.interrupted = true;
 			} else {
@@ -470,15 +470,9 @@ export class ChatSend {
 			});
 		} else {
 			// llens: task 生成前の失敗(接続エラー等)は done イベントが来ないため、
-			// ここから completed(outlet filter)を通す — error 付き message が
-			// outlet に渡り、turn の失敗として記録できる
+			// ここからターン末の処理(error 付き message の保存)を通す
 			clearLiveUsage(_chatId, responseMessageId);
-			await this.#events.chatCompletedHandler(
-				_chatId,
-				model.id,
-				responseMessageId,
-				createMessagesList(session.history, responseMessageId)
-			);
+			await this.#events.chatCompletedHandler(_chatId);
 		}
 
 		await tick();

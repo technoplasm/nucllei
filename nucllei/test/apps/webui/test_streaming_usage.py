@@ -177,8 +177,6 @@ async def _consume(monkeypatch, response, model=None, assembler=None):
             else {"id": "kimi-k2.6", "openai": {"max_model_len": 262144}}
         ),
         metadata={"chat_id": "chat-1", "message_id": "message-1"},
-        filter_functions=[],
-        extra_params={},
         event_emitter=event_emitter,
     )
     return events, record_calls

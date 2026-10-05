@@ -203,7 +203,6 @@ from nucllei.utils.models import (
 )
 from nucllei.utils.chat import (
     generate_chat_completion as chat_completion_handler,
-    chat_completed as chat_completed_handler,
     chat_action as chat_action_handler,
 )
 from nucllei.utils.middleware import process_chat_payload, process_chat_response
@@ -861,30 +860,8 @@ generate_chat_completions = chat_completion
 generate_chat_completion = chat_completion
 
 
-@app.post("/api/chat/completed")
-async def chat_completed(
-    request: Request, form_data: dict, user=Depends(get_verified_user)
-):
-    # llens(#107): agent session への outlet 実行も HTTP 経由では拒否
-    # (try の外に置き、except が 400 へラップし直すのを避ける — 所有者検証と同型)
-    _chat_id = form_data.get("chat_id")
-    if _chat_id:
-        _chat = Chats.get_chat_by_id(_chat_id)
-        if _chat is not None and _chat.kind == "agent":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="agent session is read-only",
-            )
-
-    try:
-        form_data.pop("model_item", None)
-
-        return await chat_completed_handler(request, form_data, user)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+# `/api/chat/completed`(Filter の outlet を走らせる完了後 POST)は撤去(2026-10-05)—
+# llens の filter は inlet しか使わず、outlet は観測専用の仕様だった。
 
 
 @app.post("/api/chat/actions/{action_id}")

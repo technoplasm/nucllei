@@ -71,3 +71,44 @@ def test_pipe_preset_does_not_mutate_caller_form_data(monkeypatch):
         assert body["temperature"] == 0.3
         systems = [m for m in body["messages"] if m["role"] == "system"]
         assert [m["content"] for m in systems] == ["【PRESET-SYS】"]
+
+
+def test_pipe_user_has_no_user_valves(monkeypatch):
+    """UserValves は撤去済み — pipe の __user__ に "valves" は入らない(呼び手の
+    __user__ に混ざっていても落とす)。UserValves クラスがあっても読まない。"""
+    from pydantic import BaseModel
+
+    seen = []
+
+    class _UserValvesPipe:
+        class UserValves(BaseModel):
+            secret: str = "default"
+
+        def pipe(self, body: dict, __user__: dict):
+            seen.append(__user__)
+            return "ok"
+
+    monkeypatch.setattr(functions.Models, "get_model_by_id", lambda model_id: None)
+    monkeypatch.setattr(
+        functions,
+        "get_function_module_by_id",
+        lambda request, pipe_id: _UserValvesPipe(),
+    )
+    monkeypatch.setattr(functions, "get_tools", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        functions.Functions,
+        "get_user_valves_by_id_and_user_id",
+        lambda *a: (_ for _ in ()).throw(AssertionError("UserValves を読んだ")),
+        raising=False,
+    )
+    user = types.SimpleNamespace(id="1", name="u", email="u@x", role="user")
+    asyncio.run(
+        functions.generate_function_chat_completion(
+            types.SimpleNamespace(),
+            {"model": "p", "stream": False, "messages": [], "metadata": {}},
+            user=user,
+        )
+    )
+    assert len(seen) == 1
+    assert "valves" not in seen[0]
+    assert seen[0]["id"] == "1"

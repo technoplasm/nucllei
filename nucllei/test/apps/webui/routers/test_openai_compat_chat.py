@@ -115,10 +115,6 @@ class Filter:
             if message.get("role") == "user":
                 message["content"] = message["content"] + " [inlet]"
         return body
-
-    def outlet(self, body: dict) -> dict:
-        body.setdefault("outlet_trace", []).append("e2e-filter")
-        return body
 """
 
 
@@ -434,8 +430,9 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         assert "chunk-2" in response.text
         assert "[DONE]" in response.text
 
-    def test_stream_filter_applies_on_sse(self):
-        """global stream フィルタが SSE チャンクに適用される(issue #3)。"""
+    def test_stream_hook_is_not_run(self):
+        """Filter の stream フックは撤去済み(2026-10-05 — llens の filter は inlet だけ)。
+        stream を持つ filter を割り当てても SSE は素通し。"""
         from nucllei.models.functions import FunctionForm, Functions
 
         # llens(#46): is_active / is_global 撤去。preset の filterIds 割り当てで適用する。
@@ -461,21 +458,12 @@ class TestOpenAICompatChat(AbstractPostgresTest):
                 },
             )
         assert response.status_code == 200, response.text
-        # stream フィルタによる加工が SSE 出力へ反映されている
-        assert "CHUNK-1" in response.text
-        assert "CHUNK-2" in response.text
-        assert "chunk-1" not in response.text
+        assert "chunk-1" in response.text
+        assert "chunk-2" in response.text
+        assert "CHUNK" not in response.text
 
-    def test_outlet_filter_applies_on_completed(self):
-        """/api/chat/completed で outlet フィルタが応答に適用される(preset の filterIds 経由)。"""
-        self._register_e2e_filter()
-        self._create_preset(model_id="filtered-preset", filter_ids=["e2e_filter"])
-
-        # モデル一覧をキャッシュさせる(chat/completed は app.state.MODELS を参照)
-        with mock_webui_user(id="1", role="admin"):
-            response = self.fast_api_client.get("/api/models")
-        assert response.status_code == 200
-
+    def test_chat_completed_endpoint_is_gone(self):
+        """`/api/chat/completed`(outlet を走らせる完了後 POST)は撤去済み(2026-10-05)。"""
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 "/api/chat/completed",
@@ -483,13 +471,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
                     "model": "filtered-preset",
                     "chat_id": "chat-1",
                     "id": "message-1",
-                    "session_id": "session-1",
-                    "messages": [
-                        {"role": "user", "content": "hi [inlet]"},
-                        {"role": "assistant", "content": "echo:hi [inlet]"},
-                    ],
+                    "messages": [],
                 },
             )
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert data["outlet_trace"] == ["e2e-filter"]
+        assert response.status_code in (404, 405), response.text
