@@ -694,8 +694,10 @@ def upstream_error_detail(response) -> Optional[str]:
 async def generate_chat_completion(
     request: Request,
     form_data: dict,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
 ):
+    # 2026-10-05 (refs #24): 生パススルーは filter を通らない(large_file_gate 等を迂回できる)ので
+    # endpoint としては admin 限定。内部経路(utils.chat から関数として直呼び)は user を渡すので影響しない。
     # 2026-10-05: `bypass_filter`(クエリ引数として露出していた)を撤去。内部から True で
     # 呼ぶ箇所は無く、一般ユーザーが `?bypass_filter=true` を付けるだけで preset の ACL と
     # admin 専用の生モデル制限を素通りできた。
@@ -911,10 +913,12 @@ async def generate_chat_completion(
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
+async def proxy(path: str, request: Request, user=Depends(get_admin_user)):
     """
     Deprecated: proxy all requests to OpenAI API
     """
+    # 2026-10-05 (refs #24): 生パススルーは filter を通らない(large_file_gate 等を迂回できる)ので
+    # endpoint としては admin 限定(内部からの関数呼び出しは無い)。
 
     body = await request.body()
 

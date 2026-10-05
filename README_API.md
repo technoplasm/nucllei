@@ -996,13 +996,18 @@ Companions: `GET /api/tasks/{task_id}/events` (re-attach),
 (reply to a tool's `__event_call__` dialog), `GET /api/tasks/chat/{chat_id}`.
 On this path the native tool loop, skills, and all filter phases run server-side.
 
-**Raw passthrough**: `POST /openai/chat/completions` proxies straight to the
+**Raw passthrough (admin only)**: `POST /openai/chat/completions` proxies straight to the
 configured engine — model-preset params and ACL apply (raw engine models without a
 preset are admin-only; there is no query flag that skips these checks), but **no
-filters, no tools, no file injection**. `logit_bias` may be an OpenAI-style object
-(`{"token_id": bias}`) or the `"token:bias, ..."` string form; an unreadable value is
-dropped rather than failing the request. `GET /openai/models` lists raw connection models. Prefer
-`/api/chat/completions` unless you specifically need an unfiltered proxy.
+filters, no tools, no file injection**. Because it skips the policy filters, every raw
+passthrough endpoint requires an **admin** session or API key (a regular user gets
+`401`): `POST /openai/chat/completions`, the `/openai/{path}` catch-all proxy, and
+`POST /ollama/api/chat`, `/ollama/api/generate`, `/ollama/v1/completions`,
+`/ollama/v1/chat/completions` (each also with `/{url_idx}`). Model listings
+(`GET /openai/models`, `/ollama/api/tags`, …) stay open to verified users.
+`logit_bias` may be an OpenAI-style object (`{"token_id": bias}`) or the `"token:bias, ..."` string form; an unreadable value is
+dropped rather than failing the request. `GET /openai/models` lists raw connection models.
+Regular users and integrations use `/api/chat/completions`.
 
 Reverse-proxy note: SSE must not be buffered (the server sends
 `X-Accel-Buffering: no`; make sure nginx honors it).
