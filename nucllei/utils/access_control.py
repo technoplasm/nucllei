@@ -39,7 +39,7 @@ def get_permissions(
         """Combine permissions from multiple groups by taking the most permissive value."""
         for key, value in group_permissions.items():
             if isinstance(value, dict):
-                if key not in permissions:
+                if not isinstance(permissions.get(key), dict):
                     permissions[key] = {}
                 permissions[key] = combine_permissions(permissions[key], value)
             else:
@@ -58,7 +58,9 @@ def get_permissions(
 
     # Combine permissions from all user groups
     for group in user_groups:
-        group_permissions = group.permissions
+        # llens: permissions が null の group(作成時に省略された等)は「上乗せなし」。
+        # None のまま combine に渡すと .items() で落ち、メンバーの API が全て 500 になる。
+        group_permissions = group.permissions or {}
         permissions = combine_permissions(permissions, group_permissions)
 
     # Ensure all fields from default_permissions are present and filled in
@@ -82,7 +84,8 @@ def has_permission(
     def get_permission(permissions: Dict[str, Any], keys: List[str]) -> bool:
         """Traverse permissions dict using a list of keys (from dot-split permission_key)."""
         for key in keys:
-            if key not in permissions:
+            # 途中の階層が dict でない(null 等)なら「無い」扱い = 拒否
+            if not isinstance(permissions, dict) or key not in permissions:
                 return False  # If any part of the hierarchy is missing, deny access
             permissions = permissions[key]  # Traverse one level deeper
 
@@ -94,7 +97,7 @@ def has_permission(
     user_groups = Groups.get_groups_by_member_id(user_id)
 
     for group in user_groups:
-        group_permissions = group.permissions
+        group_permissions = group.permissions or {}  # null の group は上乗せなし
         if get_permission(group_permissions, permission_hierarchy):
             return True
 

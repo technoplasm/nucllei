@@ -117,3 +117,67 @@ class TestAccessControl(AbstractPostgresTest):
         }
         users = get_users_with_access("read", access_control)
         assert {u.id for u in users} == {"naika-bucho", "naika-ippan", "geka-bucho"}
+
+
+class TestNullGroupPermissions(AbstractPostgresTest):
+    """group の permissions が null でもメンバーの API が 500 にならない。
+
+    insert_new_group は form の None を exclude して保存するため、permissions を
+    省略して作った group は DB 上 null になっていた。権限合成(get_permissions /
+    has_permission)が null.items() で落ち、メンバーの session 取得等が全て 500。
+    読み側は null を {} として扱い、作成・更新時に {} へ正規化する。
+    """
+
+    BASE_PATH = "/api/v1/auths"
+
+    def setup_method(self):
+        super().setup_method()
+        from nucllei.models.groups import Groups, GroupForm, GroupUpdateForm
+
+        self.groups = Groups
+        group = Groups.insert_new_group("1", GroupForm(name="g", description=""))
+        self.group_id = group.id
+        Groups.update_group_by_id(
+            group.id, GroupUpdateForm(name="g", description="", user_ids=["member"])
+        )
+
+    def _force_null_permissions(self):
+        # 正規化前に作られた行を再現(ORM 経由で直接 null を書く)
+        from nucllei.internal.db import get_db
+        from nucllei.models.groups import Group
+
+        with get_db() as db:
+            db.query(Group).filter_by(id=self.group_id).update({"permissions": None})
+            db.commit()
+        assert self.groups.get_group_by_id(self.group_id).permissions is None
+
+    def test_insert_without_permissions_stores_empty_dict(self):
+        assert self.groups.get_group_by_id(self.group_id).permissions == {}
+
+    def test_update_normalizes_existing_null(self):
+        from nucllei.models.groups import GroupUpdateForm
+
+        self._force_null_permissions()
+        self.groups.update_group_by_id(
+            self.group_id, GroupUpdateForm(name="g2", description="")
+        )
+        group = self.groups.get_group_by_id(self.group_id)
+        assert group.permissions == {}
+        assert group.user_ids == ["member"]
+
+    def test_permission_helpers_tolerate_null(self):
+        from nucllei.utils.access_control import get_permissions, has_permission
+
+        self._force_null_permissions()
+        defaults = {"chat": {"file_upload": True}}
+        assert get_permissions("member", defaults) == defaults
+        assert has_permission("member", "chat.file_upload", defaults) is True
+        assert has_permission("member", "chat.nonexistent", defaults) is False
+
+    def test_member_session_endpoint_not_500(self):
+        from test.util.mock_user import mock_webui_user
+
+        self._force_null_permissions()
+        with mock_webui_user(id="member"):
+            response = self.fast_api_client.get(self.create_url(""))
+        assert response.status_code == 200

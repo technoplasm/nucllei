@@ -91,6 +91,8 @@ class GroupTable:
             group = GroupModel(
                 **{
                     **form_data.model_dump(exclude_none=True),
+                    # llens: permissions は常に dict で持つ(null だと権限合成が落ちる)
+                    "permissions": form_data.permissions or {},
                     "id": str(uuid.uuid4()),
                     "user_id": user_id,
                     "created_at": int(time.time()),
@@ -153,12 +155,17 @@ class GroupTable:
     ) -> Optional[GroupModel]:
         try:
             with get_db() as db:
-                db.query(Group).filter_by(id=id).update(
-                    {
-                        **form_data.model_dump(exclude_none=True),
-                        "updated_at": int(time.time()),
-                    }
-                )
+                values = {
+                    **form_data.model_dump(exclude_none=True),
+                    "updated_at": int(time.time()),
+                }
+                # llens: permissions は常に dict で持つ。省略時は既存値を保つが、
+                # 既存が null なら {} に正規化する(null だと権限合成が落ちる)。
+                if "permissions" not in values:
+                    current = db.query(Group).filter_by(id=id).first()
+                    if current is not None and current.permissions is None:
+                        values["permissions"] = {}
+                db.query(Group).filter_by(id=id).update(values)
                 db.commit()
                 return self.get_group_by_id(id=id)
         except Exception as e:
