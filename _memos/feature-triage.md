@@ -283,3 +283,42 @@ Folders/RecursiveFolder/FolderMenu)・`chat.folder_id` 列・`folder` テーブ�
   DB の途中回答 / wire 末尾 assistant の読み出し)も撤去済み(2026-10-05)。末尾が assistant の
   wire(API 利用者が送りうる)は普通の履歴として上流へ渡り、応答は空から組み立てて
   そのメッセージに入る(旧本文を種にしない — 追撃・計測でも旧本文は 1 回だけ)
+
+## Filter / tool 機構の縮小(refs #24 / #142、2026-10-05 決定 — ken「filter はほとんど使われていない」)
+
+upstream リリースノート照合で filter / tool のプラグイン機構にバグが複数見つかった(priority・file_handler・
+UserValves の混入・tool server の ACL)。**直す前に llens が実際に使っている範囲を洗い出し、使っていない
+機構は撤去、使っている範囲だけ直す**方針。
+
+llens(`prism-hu/llens` 35018a3 時点)の実使用:
+- Filter は 2 本(`nucllei/functions/large_file_gate.py` / `token_meter.py`)、どちらも **inlet だけ**。
+  `Valves`(**priority をコード既定値で指定** — gate=50 / meter=100、保存値なし)と
+  `__event_emitter__` / `__metadata__` / `__user__`(id 参照のみ)を使う。添付の間引きは inlet で
+  `body["files"]` / `metadata["files"]` を書き換える(gate のコメントに「file_handler は使わない」と明記)
+- tool(`doc` / `emr` / `monitoring` / `audio_tools`)は Valves のみ
+- **UserValves・file_handler・outlet・stream・外部 OpenAPI tool server はどれも未使用**。nucllei に builtin filter は無い
+
+撤去したもの:
+- **UserValves**(filter / tool への注入、`/functions|tools/id/{id}/valves/user{,/spec,/update}` の 6 endpoint)。
+  設定 UI も無く(FE に呼び出し元なし)、コード既定値しか入らなかった。`__user__` は plugin ごとの
+  浅いコピー(`"valves"` キーは落とす)にして、共有 dict 経由の混入も塞いだ。
+  **残: pipe(`functions.py` の get_function_params)と action(`utils/chat.py`)の UserValves 注入**
+  — 別作業中のため未撤去。endpoint が無いので既定値しか入らない死にコード
+- **Filter の `file_handler = True`**(inlet 後に添付を丸ごと落とす)。添付無しの送信で KeyError → 400
+  になっていた。属性は無視される。tool 側の `metadata.file_handler`(読む所が無かった)も削除
+
+残して直したもの:
+- **priority**: `Valves(**保存値).priority` で決める(コード既定が効く)。同 priority は `filterIds` の
+  並び順で安定。旧実装は保存 dict の priority しか見ず、さらに `list(set(...))` が PYTHONHASHSEED
+  依存だったため、valves を保存していない配備では gate / meter とも 0 で**順序が起動ごとに変わっていた**。valves 保存は明示フィールドだけ(`exclude_unset`。UI の
+  「Default」= null は保存しない)— コード既定の変更が保存済み filter / tool にも効く
+- tool の関数名衝突: 先勝ち(`meta.toolIds` 順)は従来どおり、残した側と捨てた側をログに出す
+- tool server(server:N)の実行時 read ACL(一覧と同じ判定)— セキュリティ修正なので未使用でも入れた。
+  ついでに OpenAPI の任意 requestBody を省けない件も修正(path/query 引数を body に重ねない)
+
+仕様から外したもの(コードは残置):
+- **outlet による本文の書き換えはサポートしない**(画面・次ターンに反映されない。outlet は観測専用 —
+  README_API §7.1)。llens は outlet を持たない
+- outlet / stream フック自体も llens 未使用で撤去候補。呼び出し面が `utils/middleware.py` /
+  `utils/chat.py`(別作業中)にあるため今回は手を付けない
+- 外部 OpenAPI tool server も llens 未使用で撤去候補(FE 設定・configs router にまたがる)

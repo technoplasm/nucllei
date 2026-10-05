@@ -1326,7 +1326,7 @@ class Tools:
     which may be the task model); `metadata` is `__metadata__` (`chat_id`,
     `message_id`, …; `{}` outside the chat path).
 
-### 5.2 Valves (admin config) and UserValves (per-user config)
+### 5.2 Valves (admin config)
 
 ```python
 from pydantic import BaseModel, Field
@@ -1335,17 +1335,25 @@ class Tools:
     class Valves(BaseModel):                  # admin-wide; may hold secrets
         service_url: str = Field(default="http://svc:8000", description="Endpoint")
 
-    class UserValves(BaseModel):              # per-user preference
-        verbose: bool = Field(default=False)
-
     def __init__(self):
         self.valves = self.Valves()
 ```
 
 Valves values are stored in the DB and re-injected as `self.valves` before every
-call (admin edits take effect immediately). UserValves arrive per-call as
-`__user__["valves"]` — **a pydantic instance, not a dict**
-(`__user__["valves"].verbose`).
+call (admin edits take effect immediately). Only the fields an admin explicitly
+set are stored — a field left at "Default" in the UI (sent as `null` or omitted)
+is not saved and keeps following the code default, so changing a default in the
+source takes effect without re-saving.
+
+There are **no per-user valves**: `class UserValves` is not read (no settings UI,
+no endpoints, nothing injected — removed 2026-10-05). `__user__` carries the
+caller's identity only; each tool / function gets its own copy, so mutating it
+does not affect other plugins. Per-user behaviour belongs in the tool's own logic
+keyed on `__user__["id"]` (or in group / ACL assignment).
+
+Tool function names share one namespace per turn. On a collision the toolkit
+listed first in the preset's `meta.toolIds` wins; the other is dropped and both
+are named in a server warning — rename one to keep both.
 
 ### 5.3 Reserved (injected) parameters
 
@@ -1355,7 +1363,7 @@ from the model-facing spec, and the model cannot spoof them.
 
 | Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info","valves"?}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `__user__`                      | `{"id","email","name","role","info"}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization (a per-plugin copy)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1705,7 +1713,13 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   don't target either.
 - **External OpenAPI tool servers**: admin-configured connections whose
   `/openapi.json` operations are exposed as tools and invoked over HTTP (no
-  reserved-param injection there).
+  reserved-param injection there). A server is assigned like any tool
+  (`server:<idx>` in `meta.toolIds`), and the connection's
+  `config.access_control` (read) is checked both for listing and at execution —
+  users outside it don't get the server's tools. Arguments declared as `path` /
+  `query` parameters go to the URL; the rest form the JSON body. An optional
+  `requestBody` is omitted when the model passes no body arguments; a
+  `required` one is sent as `{}`.
 
 #### 5.7.1 Builtin tool usage guide (`feed_image` / `fetch_url`)
 
@@ -2119,8 +2133,8 @@ toggle: assignment _is_ activation, so a policy filter (e.g. de-identification)
 must be assigned to **every** model preset it should govern — forgetting one is
 the classic operational mistake.
 
-All function types support `class Valves` / `class UserValves` exactly as tools
-do (§5.2), and the same signature-based reserved-parameter injection (`__user__`,
+All function types support `class Valves` exactly as tools do (§5.2; no
+UserValves), and the same signature-based reserved-parameter injection (`__user__`,
 `__event_emitter__`, `__event_call__`, `__metadata__`, `__request__`, `__model__`,
 `__id__`; availability varies slightly per hook). Sync handlers run in worker
 threads; async is fine everywhere.
@@ -2146,6 +2160,9 @@ class Filter:
         # body = full OpenAI-style payload before the engine sees it.
         # Mutate and return. Raise to reject the request (client gets 400,
         # the error is written into the chat message).
+        # Attachments: body["files"] / body["metadata"]["files"] (absent or None
+        # when the message has none). Rewrite the lists to drop files you don't
+        # want injected.
         return body
 
     def stream(self, event: dict) -> dict:
@@ -2156,19 +2173,29 @@ class Filter:
     async def outlet(self, body: dict) -> dict:
         # completed-turn payload {model, chat_id, id, messages:[...]};
         # messages carry usage/sources/error/interrupted markers.
+        # Observe only (logging / audit): rewriting message content here is
+        # NOT supported — it does not reach the screen or the next turn.
         return body
 ```
 
 - All three hooks optional. Chain order across filters: ascending
-  `valves["priority"]` — expose `priority` as a Valves field so admins can order.
+  `Valves(**saved).priority` — expose `priority` as a Valves field; its code
+  default applies until an admin sets it (§5.2). Filters with equal priority
+  run in the order of the preset's `meta.filterIds`.
 - **Where hooks run**: `inlet` runs on every `/api/chat/completions` call (UI and
   headless) _before_ tool resolution and built-in file-content injection; `stream`
   wraps the model stream on both paths (headless: `__event_emitter__`/`__event_call__`
   are `None` — tolerate that); `outlet` runs when the turn completes on the chat
   wire (the frontend posts `/api/chat/completed`) — headless clients must call
   that endpoint themselves to get outlet processing.
-- A `file_handler = True` attribute on the `Filter` class claims file handling:
-  the built-in `<source>` injection is skipped and your filter owns the files.
+- **What a filter can change**: the request in `inlet` (messages, params,
+  attachment lists) and stream chunks in `stream`. To keep an attachment out of
+  the built-in `<source>` injection, remove it from `body["files"]` and
+  `body["metadata"]["files"]` in `inlet` (per file — e.g. only oversized ones).
+  `file_handler = True` (drop every attachment wholesale) is **not supported**
+  (removed 2026-10-05); the attribute is ignored.
+- `outlet` is observation-only — see the comment in the example. Changing the
+  answer text belongs in `stream` (as it is generated) or in the model / prompt.
 
 ### 7.2 Pipe — self-made models
 
