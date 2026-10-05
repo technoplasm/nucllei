@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from test.util.abstract_integration_test import AbstractPostgresTest
+from test.util.ext_mounts import mount_tree
 from test.util.mock_user import mock_webui_user
 from test.util.tool_errors import call_text
 
@@ -1065,7 +1066,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         # 見せる手段は fetch_from_workspace(path) — 固定文で案内する
         assert "fetch_from_workspace" in out
         # fetch_from_workspace は /ext/ を受ける (sandbox の /files/* は使わず、nucllei 側の
-        # 同じ置き場 EXT_DIR から読む — 末尾の「fetch_from_workspace(path) の /ext/…」節)。無ければ不在
+        # 同じ置き場 静的 mount から読む — 末尾の「fetch_from_workspace(path) の /ext/…」節)。無ければ不在
         out = _arun(tool.fetch_from_workspace("/ext/server42/a.png", __user__=user))
         assert out.startswith("ERROR:") and "このサーバの /ext に無い" in out
         assert tool.calls == []
@@ -1169,9 +1170,8 @@ class _UrlEnv:
         self.tools._post = fake_post
 
     def mount_root(self, root):
-        from nucllei.utils import image_refs
 
-        self.monkeypatch.setattr(image_refs, "EXT_DIR", root)
+        mount_tree(self.monkeypatch, root)
 
     def files(self, tmp_path, records: dict):
         """Files / Storage を差し替える。records = {file_id: (owner, filename, bytes)}。"""
@@ -1234,7 +1234,7 @@ def test_general_url_is_fetched_and_copied(monkeypatch):
 
 
 def test_ext_url_is_read_from_the_mount_without_connecting(monkeypatch, tmp_path):
-    # path が /ext/{rest} の URL は host を問わず nucllei の EXT_DIR/{rest} をローカル読み。
+    # path が /ext/{rest} の URL は host を問わず EXT_MOUNTS の静的 mount の {rest} をローカル読み。
     # 与えられた host にも自オリジンにも接続しない。実在すればコピーせず sandbox のパス
     # (= 相対 URL と同じ文字列、decode 済み)を返す
     root = _cage_mount(tmp_path)
@@ -1293,7 +1293,7 @@ def test_server_itself_is_not_fetched(monkeypatch):
 
 
 def test_unmounted_ext_path_is_not_found(monkeypatch, tmp_path):
-    # EXT_DIR に無い /ext/… は存在しない(設定も name の概念も無い — 2026-10-03)
+    # 静的 mount に無い /ext/… は存在しない(表に無い name か、静的 mount に無い物 — 2026-10-05)
     env = _UrlEnv(monkeypatch)
     env.mount_root(_cage_mount(tmp_path))
     for url in ("https://llens.test/ext/nosuch/a.png", "/ext/nosuch/a.png", "/ext/"):
@@ -1480,7 +1480,7 @@ def test_traversal_and_malformed_url(monkeypatch, tmp_path):
 
 
 def _cage_mount(tmp_path):
-    """tmp の EXT_DIR(= /ext の配信元 = sandbox の /ext と同じ木)。"""
+    """tmp の木を `EXT_MOUNTS` の静的 mount に(= /ext の配信元 = sandbox の /ext と同じ組)。"""
     root = tmp_path / "data" / "ext"
     (root / "cage" / "static" / "図").mkdir(parents=True)
     (root / "cage" / "static" / "図" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
@@ -1488,7 +1488,7 @@ def _cage_mount(tmp_path):
 
 
 def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
-    """`/ext/{rest}` の実体 = EXT_DIR の `{rest}` = sandbox の `/ext/{rest}` と同じ物(#138)。
+    """`/ext/{rest}` の実体 = 静的 mount の `{rest}` = sandbox の `/ext/{rest}` と同じ物(#138)。
     URL → sandbox のパス(同じ文字列)の橋渡しを tool がし、コピーは作らない。"""
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
@@ -1504,7 +1504,7 @@ def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
 
 
 def test_any_mounted_path_is_bridged(monkeypatch, tmp_path):
-    # EXT_DIR に見えている物は全部(cage に限らない)。fragment も query も付いてよい
+    # 静的 mount に見えている物は全部(cage に限らない)。fragment も query も付いてよい
     root = _cage_mount(tmp_path)
     (root / "shared").mkdir()
     (root / "shared" / "s.pdf").write_bytes(b"%PDF-1")
@@ -1526,7 +1526,7 @@ def test_missing_mounted_file_is_not_found(monkeypatch, tmp_path):
 
 
 def test_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
-    # EXT_DIR の外を指す symlink — パスも返さず、読みもしない
+    # 静的 mount の外を指す symlink — パスも返さず、読みもしない
     root = _cage_mount(tmp_path)
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"x")
@@ -1542,8 +1542,8 @@ def test_symlink_escaping_mount_is_not_visible(monkeypatch, tmp_path):
 
 
 def test_relative_ext_url_under_mount(monkeypatch, tmp_path):
-    # 相対 `/ext/{rest}` は「このサーバの URL」= 絶対形と同じ EXT_DIR で解決する。
-    # 解決先が EXT_DIR 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
+    # 相対 `/ext/{rest}` は「このサーバの URL」= 絶対形と同じ 静的 mount で解決する。
+    # 解決先が 静的 mount 配下の実ファイル → コピーせずパスを返す(値の形ではなく解決結果)
     root = _cage_mount(tmp_path)
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
@@ -1669,7 +1669,7 @@ def test_no_value_sniffing_helpers_left():
 # fetch_from_workspace(path) の /ext/…(sandbox のパス → 利用者に見せられる形)
 #
 # send_to_workspace(url=) の「URL → sandbox で開けるパス」の逆向き。値の形ではなく
-# 解決結果で分かれる: 実体が nucllei 側の EXT_DIR にも実在すれば(= /ext で配信されている)URL を
+# 解決結果で分かれる: 実体が nucllei 側の 静的 mount にも実在すれば(= /ext で配信されている)URL を
 # 返し(コピーも添付もしない)、無ければ添付もできない(読めない)。2026-10-03 までの
 # EXT_FILE_SCOPES(配信範囲の外は添付もしない)は設定ごと撤去。
 # =============================================================================
@@ -1733,7 +1733,7 @@ def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
     # 画像以外はリンク。空白を含む名前も markdown のリンク先に置ける形
     out = env.fetch("/ext/cage/static/表 1.csv")
     assert "[表 1.csv](/ext/cage/static/%E8%A1%A8%201.csv)" in out
-    # cage に限らず、EXT_DIR に見えている物はゲートが配信している = URL を返す
+    # cage に限らず、静的 mount に見えている物はゲートが配信している = URL を返す
     out = env.fetch("/ext/cage/doc/本文.md")
     assert "(/ext/cage/doc/%E6%9C%AC%E6%96%87.md)" in out
     out = env.fetch("/ext/shared/案内 図.png")
@@ -1748,9 +1748,9 @@ def test_fetch_mounted_file_served_by_ext_returns_url(monkeypatch, tmp_path):
 
 
 def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_path):
-    """nucllei 側の EXT_DIR に無い物(sandbox にだけ bind した置き場)は URL も無く、読めも
+    """nucllei 側の 静的 mount に無い物(sandbox にだけ bind した置き場)は URL も無く、読めも
     しない — 配備は配信したくない物を nucllei 側に置かないことで渡さない。添付の経路
-    (`_attach`)は EXT_DIR にあって URL にできない物のためだけに残る(実質 resolver が
+    (`_attach`)は 静的 mount にあって URL にできない物のためだけに残る(実質 resolver が
     not_found で断る)。"""
     env = _MountEnv(monkeypatch, tmp_path)
     for missing in (

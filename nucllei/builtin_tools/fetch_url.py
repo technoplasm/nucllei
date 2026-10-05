@@ -16,9 +16,9 @@ doc tool の存在には依存しない)。
 **このサーバ自身 (と同居するサービス)** だけ (resolver の `server_self`)。同日の朝まで
 EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、
 行き先で機能を絞らない決定と一緒に外した (EXT_INTRANET_CIDRS も同日に撤去。同日のうちに
-EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_FILE_SCOPES も設定ごと無くし、`/ext/{rest}` は nucllei の
-`EXT_DIR/{rest}` をそのまま配信する形にした — 原本ホストの対応 (docstring の原本ホストのスロット・
-ERROR 文の「登録された原本ホストは …」・ヘッダの原本行) はそのとき消えた)。
+EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_FILE_SCOPES も設定ごと無くした — 原本ホストの対応 (docstring の
+原本ホストのスロット・ERROR 文の「登録された原本ホストは …」・ヘッダの原本行) はそのとき消えた。
+2026-10-05 から `/ext/<name>` の行き先は env `EXT_MOUNTS` の対応表 (静的 / proxy))。
 
 何のための tool か:
   収録済みの文書コーパス (配備層の doc tool) に無い Web (院内の病院情報管理システム等) を、
@@ -28,8 +28,8 @@ ERROR 文の「登録された原本ホストは …」・ヘッダの原本行)
   解決は共有 resolver (`image_refs.resolve_url`、feed_image / 送信直前 inline / send_to_workspace と
   共通) に一任する。名前空間は 2 つ (image_refs の module docstring「URL の解決」):
     (a) path が `/ext/{rest}` の URL — 同一サーバの相対 `/ext/…` と、絶対 `https://<host>/ext/…`
-        (既存チャット。host は問わない)。nucllei の `EXT_DIR/{rest}` をローカル読み
-        (sandbox からは同じ物が同じ文字列 `/ext/{rest}` で見える)
+        (既存チャット。host は問わない)。`EXT_MOUNTS` の対応表で読む — 静的はローカル読み、
+        proxy は上流へ GET (sandbox からは同じ物が同じ文字列 `/ext/{rest}` で見える規約)
     (b) それ以外の絶対 URL — 一般の URL。そのホストに直接取りに行く (自分自身を除く)
   **解釈は引数名だけで決める** (feed_image と同じ): url に来た値は URL として `resolve_url` で
   解決し、`/workspace/…` を sandbox のパスとして読み替えない。URL として解決できない
@@ -39,8 +39,8 @@ ERROR 文の「登録された原本ホストは …」・ヘッダの原本行)
   (`file_id_of_url`) — 所有者チェックの上で Storage から読み、同じ変換にかける
   (send_to_workspace(url=) と同じ扱い)。
 
-SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配信するのは nucllei の
-  `EXT_DIR` に置かれた物 (設定無し)。一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居する
+SSRF: **tool 側に host allowlist も valve も持たない。** `/ext/` が配信するのは配備が env
+  `EXT_MOUNTS` に書いた物 (静的の dir / proxy の上流 — SSRF の真実源はこの表 1 本)。一般の URL は行き先で絞らず、resolver が「このサーバ自身 (と同居する
   サービス)」だけを実行時に求めた集合で断る (`ext_upstreams.self_addresses`)。traversal 判定・
   サイズ上限・redirect の規律、受ける形の判定は全部 resolver 側にある。この tool は取得できた
   後にページ自身の URL (`route_of_url(u).page_url`) でリンクを解決するだけ。

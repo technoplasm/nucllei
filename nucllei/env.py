@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -156,14 +157,9 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# `/ext/**` で配信する参照資料の置き場 (read-only、配備者が置く)。DATA_DIR と同じ作法: 既定は
-# インストールルート直下の ext/、Docker image は Dockerfile で `EXT_DIR=/ext` にする (compose には
-# 書かない)。URL `/ext/X` ⇔ `EXT_DIR/X` で、sandbox も同じ物を jail の `/ext` に bind する規約なので
-# コンテナ内のパス・sandbox のパス・URL が同じ文字列になる (ken 決定 2026-10-03 夜)。
-# DATA_DIR の中に置かない理由: DATA_DIR は DB・アップロード・秘密鍵など書き換わる状態の置き場で
-# volume ごとバックアップする対象。読み取り専用の配信物を同じ木に混ぜない。
-EXT_DIR = Path(os.getenv("EXT_DIR", BASE_DIR / "ext")).resolve()
-EXT_DIR.mkdir(parents=True, exist_ok=True)
+# `/ext/**` の配信元は下の「/ext」節の `EXT_MOUNTS`(name → 上流 URL / 絶対パス)。2026-10-03〜05 の
+# `EXT_DIR`(この下に置いた物を暗黙に全部配る置き場。既定 ./ext、image では /ext)は 10-05 に撤去した —
+# 入口を 1 つの対応表にしたので、表に無い物は配らない。
 
 # 配備先カスタマイズの単一置き場(#84)。規定名のファイルがあれば同梱既定より優先される:
 #   favicon.png(タブ + アプリ内)/ brand.png(起動画面 + auth ロゴ)/
@@ -523,17 +519,89 @@ OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "nucllei")
 # /ext(参照資料の配信)と url= の一般 URL 取得
 ####################################
 
-# `/ext/**` の配信に設定は無い(ken 決定 2026-10-03): `EXT_DIR`(上の DATA/FRONTEND BUILD DIR 節。
-# Docker では `/ext`、host 直起動では `./ext`)に置いたものを、そのままの相対パスで `/ext/<rel>` に
-# read-only 配信する(`ext/cage/static/X` ⇔ `/ext/cage/static/X`。ファイルのみ、ディレクトリ一覧は
-# 出さない)。何を配信するかは配備が `EXT_DIR` に何を置くか(volume / symlink)で決める。sandbox は
-# 同じ物を jail の `/ext` に bind する規約(#138)なので、sandbox のパス `/ext/X` と URL
-# `/ext/X` は同じ文字列で、nucllei の `EXT_DIR/X` に実在すれば同じ実体(utils/image_refs
-# の橋渡し)。nucllei 自身の `/mnt` も `/ext` も見ない — 同日の朝は両側とも `/mnt` 固定だったが、
-# nucllei は docker 専用でなく、host 直起動で host の `/mnt` を晒してしまう(ken 指摘 2026-10-03)。
-# 2026-10-03 までの `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信
-# 範囲)・`EXT_PUBLIC_BASES`(原本 URL のルート)— と同日に一度置いた `EXT_DIRS` — は撤去。
-# `url=` の一般 URL がどこでも取れるようになり、http 中継と原本ルートの対応は要らなくなった。
+# `/ext/<name>/**` の行き先は env `EXT_MOUNTS` 1 本の対応表(2026-10-05)。値の形で 2 通り:
+#
+# - `http://` / `https://` → **proxy**: 上流へ httpx でストリーミング中継(routers/ext.py)。
+#   `/ext/<name>/<rest>?<q>` ⇔ `<base>/<rest>?<q>`
+# - 絶対パス → **静的配信**: そのディレクトリを read-only で配信(ファイルのみ、一覧なし、
+#   resolve 済みの実体がディレクトリの中に閉じる)。`/ext/<name>/<rest>` ⇔ `<dir>/<rest>`
+#
+# 表に無い name は 404(ゲート)/ not_found(resolver)。`/ext/…` を内部で解決する消費者
+# (`image_refs.resolve_url` / `resolve_path`・file_images・sandbox の橋渡し)も同じ表を引く —
+# 静的の name はファイルを読み、proxy の name は上流へ HTTP GET する。SSRF の真実源もこの表 1 本
+# (proxy の上流は配備が書いた固定の相手なので、url= の一般 URL の自分自身判定は掛けない)。
+#
+# 経緯: ken 2026-10-05「nucはproyxするだけでしょ」「md を静的に生成して html はその場で変換」、
+# 続けて「ext/cage が proxy になればいい / 静的配信はそれで残ってていい / 入口を一つにして、この
+# パスは proxy、このパスは静的、みたいにしたらいい。url を入れるかディレクトリを入れるかで
+# /ext/cage : localhost  /ext/shared : /path/to/shared」。2026-10-03 に `EXT_UPSTREAMS`(http
+# 中継 / `file://` root)・`EXT_FILE_SCOPES`・`EXT_PUBLIC_BASES` を撤去して `EXT_DIR` 一本(置いた物を
+# 暗黙に全部配る)にしたのを改め、値の形で静的と proxy を選べる 1 本の対応表に戻した。目的は doc の
+# 配信(md → HTML・パンくず・index・見出し id)を cage に持たせること。書式は旧 `EXT_UPSTREAMS` の
+# `name=value` カンマ区切りを踏襲し、名前は役割に合わせて `EXT_MOUNTS` に改めた。`EXT_DIR` は撤去
+# (`EXT_FILE_SCOPES`・`EXT_PUBLIC_BASES` も戻さない)。
+
+_EXT_MOUNT_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
+
+
+def parse_ext_mounts(value: str) -> dict[str, str]:
+    """`EXT_MOUNTS` をパースする — `name=value` のカンマ区切り
+    (例 `cage=http://cage:13303,shared=/ext/shared`)。
+
+    - name は `[a-z0-9_-]+`(`/ext/<name>` の 1 セグメント)
+    - value は http/https の絶対 URL(proxy。path を含んでよい。query / fragment / userinfo は
+      不可)か、`/` 始まりの絶対パス(静的配信。`..` セグメント・制御文字・バックスラッシュは不可。
+      `/` 単体は不可 — fs 全体を配る正当な用途は無い)
+    - 末尾 `/` は落とす(連結時の `//` を避ける)
+    - 不正エントリは log.warning して捨てる(1 つの typo で全体を止めない)。同じ name が重なれば
+      後勝ち(warning)
+    """
+    from urllib.parse import urlsplit
+
+    parsed: dict[str, str] = {}
+    for entry in (value or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, target = entry.partition("=")
+        name = name.strip()
+        target = target.strip().rstrip("/")
+        valid = bool(sep) and bool(_EXT_MOUNT_NAME_PATTERN.match(name))
+        if valid and target.startswith(("http://", "https://")):
+            try:
+                parts = urlsplit(target)
+                parts.port  # 範囲外・非数の port は ValueError
+                valid = (
+                    bool(parts.hostname)
+                    and not parts.query
+                    and not parts.fragment
+                    and "@" not in parts.netloc
+                )
+            except ValueError:
+                valid = False
+        elif valid:
+            valid = (
+                target.startswith("/")
+                and target != ""
+                and "\\" not in target
+                and ".." not in target.split("/")
+                and not any(ord(c) < 0x20 or ord(c) == 0x7F for c in target)
+            )
+        if not valid:
+            log.warning(f"EXT_MOUNTS: ignoring invalid entry {entry!r}")
+            continue
+        if name in parsed:
+            log.warning(f"EXT_MOUNTS: duplicate name {name!r}; the last one wins")
+        parsed[name] = target
+    return parsed
+
+
+# `/ext/<name>` の対応表。既定は空 = `/ext/**` は全部 404(配備が compose / .env に書く)。
+EXT_MOUNTS = parse_ext_mounts(os.environ.get("EXT_MOUNTS", ""))
+
+# proxy の上流の読み取りタイムアウト(秒、接続は 5 秒固定)。ゲートは超えたら 504、resolver は
+# upstream_unreachable。
+EXT_PROXY_TIMEOUT_S = env_int("EXT_PROXY_TIMEOUT_S", 30, minimum=1)
 
 
 def parse_self_addresses(raw: str) -> frozenset:

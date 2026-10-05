@@ -16,7 +16,7 @@ context_images に文字列のまま永続し、送信直前のここが実体�
 共有。image_url の url は引数名を持たない保存済み文字列なので、先頭で振り分ける
 `resolve_ref` を通す — 表は image_refs の module docstring)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
 (既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
-URL / fs 参照の公開範囲は配備が `EXT_DIR` に置いた物(= `/ext/` の配信元)/
+URL / fs 参照の公開範囲は配備が `EXT_MOUNTS` に書いた物(= `/ext/` の配信元)/
 呼び出しユーザーの workspace が境界で、解決層が fail closed で持つ。
 
 変換できない参照(アクセス不可・削除済み・storage 欠落・root 外・非画像・サイズ超過・

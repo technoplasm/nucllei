@@ -60,7 +60,7 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 - **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
   原本 raw を `/workspace/imports/`(旧 inputs)に配置
   (`url=` の URL(絶対、または同一サーバの `/ext/…`)も同じ置き場へ — 解決は共有 resolver
-  `utils/image_refs`、nucllei の `EXT_DIR` に実体がある物はコピーせず sandbox のパス
+  `utils/image_refs`、`/ext` の静的 mount に実体がある物はコピーせず sandbox のパス
   `/ext/…`(URL と同じ文字列)を返す。
   **参照の規則**(url = 絶対 URL または同一サーバの `/ext/…`・`/api/v1/files/{id}/content` / path = sandbox の絶対パス(相対は受けない)/
   file_id = 添付・生成物(本文リンクは `/api/v1/files/{id}/content`、tool には file_id で渡す)/
@@ -472,19 +472,44 @@ ken 決定(2026-10-05): 引用(出典表示)は一旦撤去したが(#142 / #146
   `Markdown` の `fileNames` prop で渡す(添付の集合が変わると確定ブロックを lex し直す)。リンクは
   既存の本文リンクと同じく新しいタブ。dev の vite proxy に `^/ext(/|$)` を足した(dev では `/ext` が
   SPA に落ちていた)。
-- `/ext` 側: doc の md の HTML 化(見出しアンカー・パンくず・一覧)は **cage が起動時にビルドして出力**し、
-  nucllei は静的配信だけ(ken 決定 2026-10-05、proxy は作らない。一度 nucllei 側で md を描画する
-  実装を書いたが捨てた)。nucllei の `/ext` に入れたのは汎用の **URL の契約** 2 点
-  (`routers/ext.py`、正本 `README_API.md` §3.8):
-  - **拡張子の補完**: `/ext/X` が実在のファイルならそのまま、無いかディレクトリなら `X.html` →
-    `X/index.html`、どれも無ければ 404。どの候補も mount の判定で閉じる。一覧は出さない
-    (一覧は cage が index.html として出力する)。
-  - **`.html` / `.htm` は `text/html; charset=utf-8` で inline、必ず厳しい CSP**
-    (`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; base-uri 'none';
-    form-action 'none'; frame-ancestors 'self'`)+ nosniff。従来の「HTML は添付扱い」をここで替えた
-    (stored XSS は CSP で止める。SVG / JS は従来どおり添付)。`CONTENT_SECURITY_POLICY` env を設定した
-    配備ではグローバルの middleware がこの CSP を上書きするので注意。
-  - `/ext/cage/doc` + doc の住所は cage がビルドした HTML のページになる。中身は配備側が置く物。
+- `/ext` 側: 同日の午後に一度「cage が HTML を起動時にビルドして出力し、nucllei は静的配信だけ。
+  `X` → `X.html` → `X/index.html` の補完を足す」(d88f67733)にしたが、同日のうちに改めた —
+  ken「nucはproyxするだけでしょ」「md を静的に生成して html はその場で変換」、続けて「ext/cage が
+  proxy になればいい / 静的配信はそれで残ってていい / 入口を一つにして、このパスは proxy、このパスは
+  静的、みたいにしたらいい。url を入れるかディレクトリを入れるかで /ext/cage : localhost
+  /ext/shared : /path/to/shared」。**10-03 の撤去(`EXT_DIR` 一本化)を改め、値の形で静的と proxy を
+  選べる 1 本の対応表に戻した。目的は doc の配信を cage に持たせること**(md → HTML・パンくず・
+  index・見出し id は cage が HTTP で受け持ち、nucllei は中継するだけ)。補完は撤去。正本は
+  `README_API.md` §3.8、実装は `routers/ext.py` / `utils/image_refs.py` / `utils/ext_upstreams.py`。
+  - **env `EXT_MOUNTS`**(書式は 10-03 に撤去した `EXT_UPSTREAMS` の `name=value` カンマ区切りを踏襲し、
+    名前を役割に合わせて改めた): `/ext/<name>` → 値。`http(s)://` は proxy、絶対パスは静的。
+    name は `[a-z0-9_-]+`、不正な行は warning を出して捨てる(1 つの typo で全体を止めない)。表に無い
+    name は 404 — **`EXT_DIR`(置いた物を暗黙に全部配る)は撤去**、image の `EXT_DIR=/ext` も外した。
+    既定は空(= `/ext/**` 全 404)。llens の compose 例: `EXT_MOUNTS=cage=http://cage:13303,shared=/ext/shared`
+    (`shared` は nucllei コンテナの `/ext/shared` に volume した dir)。dev は [[dev-environment]]。
+    proxy の読み取りタイムアウトは `EXT_PROXY_TIMEOUT_S`(既定 30 秒、接続 5 秒固定)。
+  - **proxy の規則**: セッション認証(`get_verified_user`)を通った GET / HEAD だけ。
+    `/ext/<name>/<rest>?<q>` → `<base>/<rest>?<q>`(decode 後に `..`・バックスラッシュ・制御文字は 400。
+    上流へは quote し直して base の外へ出さない。query は scope の `query_string` をそのまま — Starlette の
+    `request.url.query` は decode 済みの path を繋いで再解析するので `%3F` で取り違える)。要求ヘッダは
+    許可リスト(Range / If-Range / If-None-Match / If-Modified-Since / Accept / Accept-Language)、
+    **Cookie / Authorization は転送しない**、Accept-Encoding は identity。応答はステータスを保って
+    ストリーミング(206 / 304 / 404 …)、応答ヘッダも許可リスト(Content-Type / Content-Length /
+    Content-Range / Accept-Ranges / ETag / Last-Modified / Cache-Control / Content-Disposition)—
+    Set-Cookie は落ちる。リダイレクトは追わず、Location が上流の base 配下なら `/ext/<name>/…` に
+    書き換え(ディレクトリの末尾 `/` を付ける 301 を想定)、外は 502。`text/html` には `HTML_CSP` +
+    nosniff を nucllei が付ける(上流の値を上書き)。上流不達は 502、タイムアウトは 504。
+  - **静的の規則**は従来どおり: mount(値の dir を resolve した root)の中に閉じ、一覧も補完も無し、
+    `.html` は CSP 付き inline、`.md` / `.txt` は text/plain、SVG / JS は添付。
+  - **`/ext/…` を内部で解決する消費者も同じ表を引く**(`image_refs.resolve_url` / `resolve_path`、
+    file_images の送信直前 inline、feed_image / fetch_url / send_to_workspace / fetch_from_workspace):
+    静的はファイル、proxy は上流へ HTTP GET(サイズ上限 `FETCH_MAX_BYTES` / 引数の max_bytes、
+    404 → not_found、2xx 以外 → upstream_status、不達 → upstream_unreachable、base 配下の redirect は
+    `/ext/<name>/…` として 3 回まで辿る)。`feed_image(url="/ext/cage/static/…png")` は proxy の先から
+    取れる。SSRF の真実源はこの表 1 本(proxy の上流は配備が書いた固定の相手なので、一般の URL の
+    自分自身判定は掛けない)。橋渡し: URL → sandbox のパスは静的の name だけ(proxy は上流から取り込む —
+    cage が描画した HTML が jail の同じパスに在るとは限らない)、sandbox のパス → URL は静的なら実在、
+    proxy なら上流が HEAD に 2xx を返すとき。
   - `.md` / `.txt` は従来どおり text/plain(Accept による分岐はしない)。
 
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`

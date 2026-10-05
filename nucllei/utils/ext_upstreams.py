@@ -1,16 +1,14 @@
-"""`/ext/**`(#97 / #139)と一般 URL 取得の共有ヘルパ。
+"""`/ext/**`(#97 / #139 / #146)と一般 URL 取得の共有ヘルパ。
 
 "/ext/**" ゲート(routers/ext.py — 人間の目)と context_images の参照解決
 (utils/image_refs.py — モデルの目)が同じ基準を共有する:
 
-- 配信する場所に設定は無い(ken 決定 2026-10-03): `EXT_DIR`(`image_refs.EXT_DIR`)
-  に置いたものを、そのままの相対パスで `/ext/<rel>` に配信する
-  (`ext/cage/static/X` ⇔ `/ext/cage/static/X`。sandbox は同じ物を同じ文字列
-  `/ext/cage/static/X` に見る)。閉じ込めは `image_refs` の `_read_confined` と同じ(resolve 済みの実体が
-  `EXT_DIR` の中の通常ファイル)。2026-10-03 までの
-  `EXT_UPSTREAMS`(http 中継 / `file://` root)・`EXT_FILE_SCOPES`(配信範囲)・
-  `EXT_PUBLIC_BASES`(原本 URL のルート)は、`url=` の一般 URL がどこでも取れるようになった
-  のと同じ日に撤去した — http 中継も原本ルートの対応も要らなくなった
+- **配信の対応表は env `EXT_MOUNTS` 1 本**(`ext_mount`。2026-10-05): `/ext/<name>` → 値。値が
+  `http(s)://` なら上流への中継(proxy)、絶対パスならそのディレクトリの静的配信。表に無い name は
+  どちらの目からも「無い」(ゲートは 404、resolver は not_found)。SSRF の真実源もこの表 1 本 —
+  proxy の上流は配備が書いた固定の相手なので、一般の URL の自分自身判定は掛けない。
+  2026-10-03 に一度「`EXT_DIR` に置いた物をそのまま配る(設定無し)」に一本化したが、10-05 に
+  値の形で静的と proxy を選べる 1 本の対応表に戻した(目的は doc の配信を cage に持たせること)
 - path traversal 拒否は同一判定(percent デコード後の ".." セグメント・バックスラッシュ)
 - httpx AsyncClient はモジュールで 1 個を共有(リクエスト毎に生成しない)。
   follow_redirects は常に False — resolver が転送先を自分で辿る(image_refs。各ホップで
@@ -30,11 +28,84 @@ import ipaddress
 import logging
 import socket
 import time
-from urllib.parse import unquote
+from dataclasses import dataclass
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+
+# ---- /ext の対応表(EXT_MOUNTS)-------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExtMount:
+    """`/ext/<name>` の行き先。`target` は proxy なら上流の base URL(末尾 `/` 無し)、
+    static なら絶対パス(未 resolve — 読むときに resolve して閉じ込めの基準にする)。"""
+
+    name: str
+    target: str
+
+    @property
+    def proxy(self) -> bool:
+        return self.target.startswith(("http://", "https://"))
+
+
+def ext_mount(name: str) -> ExtMount | None:
+    """`/ext/<name>` の行き先(`EXT_MOUNTS`)。無ければ None。env は呼び出し時に引く
+    (テストが `nucllei.env.EXT_MOUNTS` を差し替えられるように)。"""
+    from nucllei import env
+
+    target = env.EXT_MOUNTS.get(name) if name else None
+    return ExtMount(name, target) if target else None
+
+
+def split_ext_rest(rest: str) -> tuple[str, str]:
+    """`/ext/` 以降(decode 済み)を `(name, sub)` に分ける。`"cage/static/x"` →
+    `("cage", "static/x")`、`"cage"` → `("cage", "")`。先頭の `/` は落とす。"""
+    name, _, sub = rest.lstrip("/").partition("/")
+    return name, sub
+
+
+def upstream_url(mount: ExtMount, sub: str, query: str = "") -> str:
+    """proxy の上流 URL `<base>/<sub><query>`。`sub` は decode 済みのパスで、ここで
+    quote し直す(`?` `#` `@` `:` 等は path の中に閉じ、base の外へ出ない)。`query` は
+    `"?a=b"` か `""`(そのまま付ける)。traversal は呼び手が先に弾いていること。"""
+    return f"{mount.target}/{quote(sub, safe='/')}{query}"
+
+
+def under_base(location: str, base: str) -> str | None:
+    """絶対 URL `location` が上流の `base` 配下なら、base からの残り(先頭 `/` 無し・
+    percent-encoded のまま・`?query` 込み)。外(別 scheme / host / base の prefix だけ一致)・
+    残りに traversal があれば None。scheme / host は大文字小文字を区別しない。
+    proxy の redirect の書き換え(ゲート)と辿り(resolver)が共有する。"""
+    try:
+        loc, bas = urlsplit(location), urlsplit(base)
+    except ValueError:
+        return None
+    if (loc.scheme.lower(), loc.netloc.lower()) != (
+        bas.scheme.lower(),
+        bas.netloc.lower(),
+    ):
+        return None
+    if loc.path in (bas.path, bas.path + "/"):
+        rest = ""
+    elif loc.path.startswith(bas.path + "/"):
+        rest = loc.path[len(bas.path) + 1 :]
+    else:
+        return None
+    if has_path_traversal(rest):
+        return None
+    return rest + (f"?{loc.query}" if loc.query else "")
+
+
+def proxy_timeout() -> httpx.Timeout:
+    """proxy の上流への要求のタイムアウト(読み `EXT_PROXY_TIMEOUT_S`、接続 5 秒)。"""
+    from nucllei import env
+
+    return httpx.Timeout(float(env.EXT_PROXY_TIMEOUT_S), connect=5.0)
+
 
 # 接続 5s / 読み 30s。上流はローカル(Docker bridge)想定 — 不達・遅延で
 # ワーカーを長く掴ませない。

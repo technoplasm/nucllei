@@ -316,7 +316,7 @@ _links/
 
 # runtime data(旧 backend/.gitignore から統合 — フラット化 #34)
 /data/*
-# /ext/** で配信する参照資料の置き場 (EXT_DIR の既定、配備者が置く。dev は symlink)
+# 旧 EXT_DIR の既定 (2026-10-05 撤去。dev で EXT_MOUNTS の静的 dir を置くなら使ってよい)
 /ext/
 !/data/readme.txt
 

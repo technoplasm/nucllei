@@ -22,10 +22,10 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   - URL: ブラウザが開くもの。スキーム付きの絶対 URL (既存チャットに残る
     `https://<host>/ext/…`、それ以外の一般の URL — 院内でもインターネットでも。届くかは
     配備のネットワーク次第) と、同一サーバの相対 URL `/ext/{rest}` (配備層の read_doc の
-    図・原本 PDF。nucllei の `EXT_DIR/{rest}` をそのまま配信)。
+    図・原本 PDF。env `EXT_MOUNTS` の対応表で静的配信 / proxy)。
   - sandbox の fs パス (`/ext/…` `/workspace/…`)。`/ext/…` は URL と sandbox のパスが同じ
     文字列で同じファイル (唯一の意図した重なり。url に来れば percent-decode して、path に
-    来ればそのまま、どちらも nucllei の `EXT_DIR` を読む)。
+    来ればそのまま、どちらも `EXT_MOUNTS` の対応表で読む)。
 
 引数 (2026-10-03 ken 決定 — `read_ref` / `ref` への統一 (#141) は不採用。tool 全体で引数名の
 意味を固定する): `url` = URL (絶対、または同一サーバの `/ext/…`・`/api/v1/files/…`)、
@@ -43,7 +43,7 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   読む (send_to_workspace(url=) と同じ扱い)。
 
   参照 → バイトの解決規則は `utils/image_refs.py` が**一箇所で**持つ。URL の上流解決
-  (path が /ext/{rest} なら host を問わず nucllei の `EXT_DIR/{rest}` をローカル読み、
+  (path が /ext/{rest} なら host を問わず `EXT_MOUNTS` の対応表で読み — 静的はファイル、proxy は上流、
   それ以外は一般の URL としてそのホストに直接 — 行き先で絞らず、断るのはこのサーバ自身だけ。
   2026-10-03 ken 決定) も
   traversal 判定もサイズ上限もそこにある — tool 側に allowlist も on/off valve も持たない
@@ -159,7 +159,7 @@ def _too_large(ref: str, err, *, is_path: bool) -> str:
     )
 
 
-# path の not_found: `/ext/…` は nucllei 側の EXT_DIR に無い (fetch_from_workspace と同文。
+# path の not_found: `/ext/…` は nucllei 側の /ext (EXT_MOUNTS) に無い (fetch_from_workspace と同文。
 # ken 2026-10-04: 配備は nucllei と sandbox に同じ /ext を mount する — 無いのは本当に無いか
 # mount のずれ)。`/workspace/…` は sandbox が 404 を返した = 無い
 _EXT_PATH_NOT_FOUND = (

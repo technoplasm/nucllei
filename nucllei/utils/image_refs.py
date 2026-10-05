@@ -71,25 +71,28 @@ BE が行う)。
 
 **URL の解決**(絶対・相対とも `_route_url` 1 箇所):
 
-- path が `/ext/{rest}` なら **`EXT_DIR`の `{rest}` をローカル読み**する
-  (`/ext/cage/static/X` ⇔ `ext/cage/static/X`。設定は無い — 配備が `EXT_DIR` に置いた
-  (Docker なら `/ext/<name>` に volume した)ものがそのまま配信される。ken 決定
-  2026-10-03。同日の朝はコンテナの `/mnt` 固定だったが、nucllei は docker 専用ではなく、
-  host 直起動で host の `/mnt` を配信してしまうので `DATA_DIR` の中に改めた)。絶対 URL は
-  **host を問わない** — 与えられた host には接続しない。相対 `/ext/{rest}` は「今のサーバの
-  URL」= 同じ置き場。閉じ込めは sandbox パス `/ext/{rest}` の読み替えと同じ
-  (`_read_confined`: resolve 済みの実体が `EXT_DIR` の中の通常ファイル。外へ出る
-  symlink・ディレクトリ・不在は `not_found`)。
-- `/ext/` と `/ext/{dir}/`(rest が空・ディレクトリ)も形としては正しく、`not_found`
-  (一覧は出さない — ゲートも 404)。
+- path が `/ext/<name>/<sub>` なら **env `EXT_MOUNTS` の対応表**(`ext_upstreams.ext_mount`)で
+  行き先を決める(2026-10-05): **静的**(値が絶対パス)なら `<dir>/<sub>` をローカル読み、**proxy**
+  (値が `http(s)://`)なら上流の `<base>/<sub>?<query>` へ HTTP GET(`_load_proxy`。サイズ上限・
+  404 → not_found・2xx 以外 → upstream_status・不達 / タイムアウト → upstream_unreachable は一般の
+  URL と同じ。redirect は上流の base 配下だけ `/ext/<name>/…` として辿る — /ext ゲートの書き換えと
+  同じ判定)。表に無い name は `not_found`。/ext ゲート(routers/ext.py)と同じ表・同じ閉じ込め
+  なので、ブラウザで開ける `/ext/…` はモデルも同じ物を読める(`feed_image(url="/ext/cage/static/…png")`
+  が proxy の先から取れる)。絶対 URL は **host を問わない** — 与えられた host には接続しない。
+  相対 `/ext/{rest}` は「今のサーバの URL」= 同じ対応表。静的の閉じ込めは `_read_confined`
+  (resolve 済みの実体が mount の root の中の通常ファイル。外へ出る symlink・ディレクトリ・不在は
+  `not_found`)。
+- `/ext/` と `/ext/<name>/`(rest が空・ディレクトリ)も形としては正しく、静的なら `not_found`
+  (一覧は出さない — ゲートも 404)。proxy の name は上流が返す物次第。
 - `/ext/` 形でない絶対 URL は **一般の URL** として、そのホストに直接取りに行く
   (下記「一般の URL」)。行き先で絞らない — 唯一取りに行かないのは **このサーバ自身
-  (と同居するサービス)** だけ(`unknown_upstream` reason `server_self`)。
-- 2026-10-03 までは EXT_UPSTREAMS(name ごとの http 中継 / `file://` root)・EXT_FILE_SCOPES
-  (root からの相対の配信範囲)・EXT_PUBLIC_BASES(院内 web の原本 URL のルート → その name の
-  backend)の 3 変数があった。`url=` の一般 URL がどこでも取れるようになり、http 中継と原本
-  ルートの対応は要らなくなったので、同日に設定ごと無くした(ken 決定)。URL の形は変わらない
-  (`/ext/cage/static/X`)。
+  (と同居するサービス)** だけ(`unknown_upstream` reason `server_self`)。proxy の上流は
+  `EXT_MOUNTS` に配備が書いた固定の相手なので、この判定は掛けない(SSRF の真実源は表 1 本)。
+- 経緯: 2026-10-03 までは EXT_UPSTREAMS(name ごとの http 中継 / `file://` root)・EXT_FILE_SCOPES・
+  EXT_PUBLIC_BASES の 3 変数があり、同日に `EXT_DIR`(置いた物を暗黙に全部配る)一本にした。
+  2026-10-05 に値の形で静的と proxy を選べる 1 本の対応表 `EXT_MOUNTS` に戻した(ken「入口を一つに
+  して、このパスは proxy、このパスは静的、みたいにしたらいい」。目的は doc の配信を cage に持たせる
+  こと)。URL の形は変わらない(`/ext/cage/static/X`)。
 
 **一般の URL**(2026-10-03、ken 決定)。`url=` はスキーム付きの `http(s)://` URL なら
 **どこでも**取りに行く — 院内でもインターネットでも。「閉域だから外には届かない」は
@@ -100,7 +103,7 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 
 | 名前空間                                   | 誰が決める       | 解決                                          | redirect                 |
 | ------------------------------------------ | ---------------- | --------------------------------------------- | ------------------------ |
-| `/ext/{rest}`(相対・絶対)                | —(`EXT_DIR` の中身)| `EXT_DIR/{rest}` をローカル読み(与えられた host は見ない)| —(ローカル)      |
+| `/ext/<name>/{sub}`(相対・絶対)          | 配備(`EXT_MOUNTS`)| 静的は `<dir>/{sub}` をローカル読み、proxy は `<base>/{sub}` へ GET(与えられた host は見ない)| 静的: —、proxy: base 配下だけ 3 回まで |
 | 一般の URL — `/ext/` 形でない絶対 URL      | —(どこでも)    | ホストのアドレス(IP リテラルはそのまま、名前は getaddrinfo)が自分自身でなければ **そのアドレスに固定して** 直接取得 | 3 回まで辿る(各ホップで同じ判定)|
 
 一般の URL は一般の Web と同じように辿れる(ページのリンクはそのページ自身の URL を基準に
@@ -122,8 +125,8 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
   (10/8 等)は本物の院内なので見ない。限界は `discover_self_addresses` の docstring。
 - **redirect**: 3xx + Location は最大 3 回辿る(`MAX_REDIRECTS`)。転送先は URL として
   同じ規則で解決し直す(IP リテラルはそのまま、名前は引いてから判定)— 一般の URL なら辿る
-  (またアドレスに固定)、`/ext/{rest}` 形なら `EXT_DIR` をローカル読みする(そこから先の
-  redirect は無い)。転送先が自分自身なら `upstream_status`(転送を返した 3xx の
+  (またアドレスに固定)、`/ext/{rest}` 形なら `EXT_MOUNTS` の対応表で読む(静的なら
+  そこから先の redirect は無い)。転送先が自分自身なら `upstream_status`(転送を返した 3xx の
   status、reason `redirect_self`)で止める。転送先が URL として組めない(http(s) でない・
   形が不正・Location に制御文字)なら `upstream_status`(3xx の
   status、reason 無し = 辿らなかった redirect)。4 回目の redirect は `upstream_status`
@@ -137,7 +140,7 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
   (`unknown_upstream` reason `server_self`)。配備層が `resolve_url` の成功後にリンクの
   ルートを組む用途では、一般の URL のリンクはそのページ自身の URL(`{origin}/{rel}{query}`)
   を基準に解決する(通常の Web と同じ)。
-- `mounted_path_for_url` / `url_for_mounted_path` / `/ext` ゲートは無関係(`EXT_DIR` の話)。
+- `mounted_path_for_url` / `url_for_mounted_path` / `/ext` ゲートは無関係(`EXT_MOUNTS` の話)。
 - **`/api/v1/files/{id}/content`**(このサーバのファイル配信口。相対、または絶対 — host は
   `/ext/` と同じく問わない: 与えられた host には接続せず Storage から読むので)は、URL の
   ルーティングとしては `file_id_of_url` が id を取り出すところまで。バイトの読み出しは
@@ -153,10 +156,10 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 **sandbox の fs パス**:
 
 - `/ext/...` — sandbox(jail)の read-only の参照用データ(#138。2026-10-03 までは `/mnt`)。
-  これは **sandbox 側のパスの形** で、nucllei は同じ物を `EXT_DIR/...`に
-  持つ規約なので、そこを読み替えて読む(`local_path_for_sandbox_path`)。resolve() して
-  `EXT_DIR` 内でなければ読まない。nucllei 自身の `/ext` や `/mnt` は見ない(host 直起動で
-  host の fs を晒さないため)。URL の `/ext/{rest}` と同じ文字列だが、`path=` に来たものは
+  これは **sandbox 側のパスの形** で、URL `/ext/...` と同じ物という配備の規約なので、同じ
+  対応表(`EXT_MOUNTS`)で読む — 静的は `<dir>/<sub>`(resolve して root の中でなければ読まない)、
+  proxy は上流へ GET。nucllei 自身の `/ext` や `/mnt` は見ない(host 直起動で host の fs を
+  晒さないため)。URL の `/ext/{rest}` と同じ文字列だが、`path=` に来たものは
   fs のパスとして(percent-decode せずに)読む — 引数名が読み方を決める。
 - `/workspace/...` — sandbox の `/files/read`(呼び出しユーザーの workspace に閉じる)。
   jail 内で作ったものをモデルが見るだけなら、Files に登録する必要は無い。
@@ -170,15 +173,17 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 | URL → sandbox で開けるパス    | `mounted_path_for_url`  | `send_to_workspace(url=)`    |
 | sandbox のパス → 見せられる URL | `url_for_mounted_path` | `fetch_from_workspace(path)` |
 
-どちらも **`EXT_DIR` 配下の実ファイルのときだけ** 値を返す — `/ext/{rest}` ↔
-`/ext/{rest}` は **同じ文字列** で、`EXT_DIR/{rest}` の実在の確認だけ(rest は URL 側が
-percent-encoded、fs 側が decode 済み — なので `url_for_mounted_path` が返す URL は、文書の
-本文にある生の日本語 URL とは文字列が一致しないことがある。同じファイルの別表記)。sandbox の
-`/ext/X` が nucllei の `EXT_DIR/X` に無ければ「このサーバの /ext に無い」(not_found)。配備は
-nucllei と sandbox に**同じ `/ext` を mount する**規約(ken 2026-10-04)なので、通常この場合は
-起きない。`/ext` のファイルは URL で示すだけで、sandbox から汲み出して添付にする経路は持たない
-(生の md などを添付にして file_id を無駄に増やさない)。2026-10-03 までの「配信範囲の外は
-添付もしない」(`mounted_path_withheld`)は撤去済み。
+どちらも **/ext ゲートが同じ文字列で配信している物のときだけ** 値を返す — `/ext/<name>/<sub>` ↔
+`/ext/<name>/<sub>` は **同じ文字列**(sub は URL 側が percent-encoded、fs 側が decode 済み —
+なので `url_for_mounted_path` が返す URL は、文書の本文にある生の日本語 URL とは文字列が一致
+しないことがある。同じファイルの別表記)。静的の name は `<dir>/<sub>` の実在を見る。proxy の
+name は、URL → パスの向きは返さない(上流が返す物 — cage が描画した HTML 等 — が jail の同じ
+パスに在るとは限らない。呼び手は上流から取り込む)、パス → URL の向きは上流が 2xx を返すかを
+HEAD で確かめる。sandbox の `/ext/X` が nucllei 側で配信されていなければ「このサーバの /ext に
+無い」(not_found)。配備は nucllei と sandbox に**同じ組を mount する**規約(ken 2026-10-04)なので、
+通常この場合は起きない。`/ext` のファイルは URL で示すだけで、sandbox から汲み出して添付にする
+経路は持たない(生の md などを添付にして file_id を無駄に増やさない)。2026-10-03 までの
+「配信範囲の外は添付もしない」(`mounted_path_withheld`)は撤去済み。
 利用者に見せられるのは URL だけ(sandbox のパスはブラウザでは開けない)。
 
 **相対 `/ext/…` の経緯**: #139(2026-09-07)は「"/" 始まり = sandbox の fs だけ、`/ext/…` は
@@ -221,30 +226,28 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
-from nucllei.env import EXT_DIR as _ENV_EXT_DIR
 from nucllei.env import FETCH_MAX_BYTES, SELF_ADDRESSES, SRC_LOG_LEVELS
 from nucllei.utils.ext_upstreams import (
     MAX_REDIRECTS,
+    ExtMount,
+    ext_mount,
     get_ext_client,
     has_path_traversal,
     pin_address,
+    proxy_timeout,
     self_addresses,
+    split_ext_rest,
+    under_base,
+    upstream_url,
 )
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
-# 参照用データ(read-only。#138 / #139)の **root は 2 つ** あって別物(2026-10-03、ken 決定。
-# 同日の朝は nucllei 側も sandbox 側もコンテナの `/mnt` 固定だった):
+# `/ext/<name>` の行き先は env `EXT_MOUNTS` 1 本の対応表(`ext_upstreams.ext_mount`。2026-10-05):
+# 値が `http(s)://` なら proxy(上流へ HTTP GET)、絶対パスなら静的(そのディレクトリをローカル読み)。
+# 表に無い name は not_found。/ext ゲート(routers/ext.py)と同じ表・同じ閉じ込め。
 #
-# - `EXT_DIR`(`nucllei.env`。DATA_DIR と同じ作法で、既定はインストールルート直下の `ext/`、
-#   Docker image は Dockerfile が `/ext` にする)— **nucllei 自身がローカルに読む・配信する root**
-#   (nucllei の fs のパス)。ここの `X` がそのまま URL `/ext/X` で配信される。Docker なら volume を
-#   `/ext/<name>` に bind(sandbox と同じ行)、host 直起動なら `ext/` にファイルか symlink を置く
-#   (root 不要)。固定の `/mnt` を捨てた理由は nucllei が docker 専用でないこと — host 直起動では
-#   `/mnt` に置くのに root が要るし、何より host の `/mnt`(NFS 等)がログインユーザー全員に黙って
-#   配信されてしまう。`EXT_DIR` も一度置いたが、書き換わる状態の置き場と読み取り専用の配信物を
-#   同じ木に混ぜない・コンテナ内のパスを sandbox と揃える、で `EXT_DIR` に(ken 2026-10-03 夜)。
 # - `SANDBOX_MOUNT_ROOT` = `/ext` — **sandbox(jail)側の read-only mount の置き場**
 #   (`sandbox/app/main.py` の RO_MOUNT_ROOT)。モデルが `path=` に書く形(`/ext/…`)は
 #   こちらで、nucllei の fs のパスではない(nucllei 自身の `/ext` は見ない)。URL の prefix と
@@ -252,11 +255,9 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 #   jail で開いても、ブラウザで開いても、tool の `url=` / `path=` に渡しても同じ物。これが
 #   唯一の意図した重なりで、引数名は読み方(URL は percent-decode、path はそのまま)だけを決める。
 #
-# 橋渡しは「sandbox の `/ext/X` = URL `/ext/X` ⇔ nucllei の `EXT_DIR/X`」— 配備は同じ物を
-# sandbox の `/ext/<name>` と nucllei の `EXT_DIR/<name>` の両方に置く規約(sandbox 側の
-# bind の有無は nucllei からは確かめられない。実在を見るのは常に `EXT_DIR/X`)。
-# `EXT_DIR` は呼び出し時に読む(import 時に固定しない)ので、テストは module 属性を差し替える。
-EXT_DIR = _ENV_EXT_DIR
+# 橋渡しは「sandbox の `/ext/<name>/X` = URL `/ext/<name>/X`」— 配備は同じ物を sandbox の
+# `/ext/<name>` と `EXT_MOUNTS` の `<name>` に置く規約(sandbox 側の bind の有無は nucllei からは
+# 確かめられない)。2026-10-03〜05 は `EXT_DIR`(置いた物を暗黙に全部配る)だった。
 SANDBOX_MOUNT_ROOT = "/ext"
 _SANDBOX_MOUNT_PREFIX = SANDBOX_MOUNT_ROOT + "/"
 
@@ -267,8 +268,8 @@ WORKSPACE_PREFIX = "/workspace/"
 PDF_RASTER_DPI = 150
 
 # URL の **path 部** "/ext[/{rest}]"(query / fragment は urlsplit で分離済み)。
-# 絶対 URL なら host は問わない(module docstring)。rest は `EXT_DIR` からの相対パス
-# (percent-encoded のまま)。空でもよい(= `EXT_DIR` 自体 = ディレクトリ → not_found)。
+# 絶対 URL なら host は問わない(module docstring)。rest は `<name>/<sub>`
+# (percent-encoded のまま)。空でもよい(name 無し → not_found)。
 EXT_URL_PATH_PATTERN = re.compile(r"^/ext(?:/(.*))?$")
 
 # tool の引数が受ける形の固定文(module docstring「エラーに添える固定文」)。公開名 —
@@ -373,11 +374,12 @@ class RefError:
     - `traversal` — 制御文字・`..`・バックスラッシュ・NUL
     - `unknown_upstream` — 一般の URL の行き先がこのサーバ自身(内訳は `reason`)
     - `not_found` — `/ext/{rest}`(URL / sandbox パスとも)でファイルが無い・ディレクトリ
-      (`/ext/` 自体を含む)・`EXT_DIR` の外へ出る symlink、一般の URL の 404、workspace の 404
+      (`/ext/` 自体を含む)・表に無い name・静的 mount の外へ出る symlink、一般の URL・proxy の
+      上流の 404、workspace の 404
     - `too_large` — サイズ上限超過(file・http・workspace の 3 経路とも)。
       `size` は実サイズ(http stream 打ち切りなら Content-Length か打ち切り時点の
       受信量)、`limit` は上限。`size_exact` は `size` が確定値か下限かの区別 —
-      True: stat(`EXT_DIR` / sandbox 413)・全量読了(workspace)・
+      True: stat(静的 mount / sandbox 413)・全量読了(workspace)・
       Content-Length(http)。False: Content-Length の無い http stream を打ち切った
       時点の受信量(実サイズは不明で、`size` は limit を少し超えた値になる)。
       too_large 以外の code では常に False(意味を持たない)
@@ -431,11 +433,11 @@ class RefError:
 class UrlRoute:
     """URL が **どこの何か**(`route_of_url` / `_route_url` の結果)。
 
-    - `kind` — `"ext"`(`/ext/{rest}` = `EXT_DIR` の `{rest}`)、`"general"`
+    - `kind` — `"ext"`(`/ext/{rest}` = `EXT_MOUNTS` の対応表で読む物)、`"general"`
       (`/ext/` 形でない **一般の URL**。module docstring「一般の URL」)、`"file"`
       (このサーバのファイル配信口 `/api/v1/files/{id}/content` — `route_of_url` だけが返す。
       `resolve_url` は読まない: 権限検査が要るので呼び手が `file_id_of_url` で読む)
-    - `rel` — `"ext"`: `EXT_DIR` からの相対パス(URL に書かれたまま = percent-encoded。先頭 `/`・
+    - `rel` — `"ext"`: `/ext/` 以降の `<name>/<sub>`(URL に書かれたまま = percent-encoded。先頭 `/`・
       query・fragment を含まない。`/ext/` 自体は `""`)。`"general"`: URL の path から先頭 `/` を
       落とした物(ページのルート `http://h/` は `""`)。`"file"`: file の id
     - `query` — `"?a=b"` か `""`
@@ -583,8 +585,8 @@ def _read_confined(
     inside: Callable[[Path], bool], target: Path, label: str, limit: int
 ) -> _Result:
     """resolve した実体が `inside` を満たす通常ファイルだけを読む。blocking — thread で
-    呼ぶ。`inside` は閉じ込め: URL `/ext/{rest}` も sandbox パス `/ext/{rest}` の読み替え先も
-    `EXT_DIR` の mount の中(`served_mount`。/ext ゲート `routers/ext.py` も同じ判定)。"""
+    呼ぶ。`inside` は閉じ込め: URL `/ext/{rest}` も sandbox パス `/ext/{rest}` も、静的 mount の
+    root の中(/ext ゲート `routers/ext.py` の `static_file` と同じ判定)。"""
     try:
         resolved = target.resolve()
     except (OSError, RuntimeError, ValueError):
@@ -628,106 +630,123 @@ def _is_under(root: Path) -> Callable[[Path], bool]:
     return lambda resolved: resolved.is_relative_to(root)
 
 
-def served_mount(target: Path) -> tuple[Path, Path] | None:
-    """`target`(`EXT_DIR` 起点、未 resolve)を読むときの **mount** — `(mount_rel, root)`:
-    `mount_rel` は `EXT_DIR` から mount point までの相対(無ければ `Path()`)、`root` は
-    その resolve 済み(閉じ込めの基準)。`target` が `EXT_DIR` 起点でなければ None。
-
-    `EXT_DIR` の木は nucllei の持ち物で、配備だけが書く。そこに置かれた **ディレクトリの
-    symlink** は配備の意思(Docker の volume と同じ役)なので、辿った先を mount の root として
-    閉じ込める — host 直起動で `ext/cage/static → ~/…/cage/data/static` のように
-    EXT_DIR の外へ張った symlink を配信するため(2026-10-03)。`EXT_DIR` の実ディレクトリを
-    上から辿り、最初に当たったディレクトリ symlink が mount point。それより先(mount の中身 =
-    文書側の木)の symlink は mount の外へ出られない(resolve 済みの実体が root の中、という
-    従来の判定)。ファイルの symlink は mount にならない(中身の木にある
-    `escape.txt → /etc/passwd` と区別がつかないので、常に閉じ込めの対象)— 1 ファイルだけ
-    置きたい配備はディレクトリごと張るかコピーする。symlink が無ければ `EXT_DIR` 自身
-    (resolve 済み — Docker では `/app/data` の volume、host では `ext/` 自体が symlink で
-    ありうる)が root。
-    """
-    base = Path(EXT_DIR)
+def _static_root(mount: ExtMount) -> Path | None:
+    """静的 mount の root(resolve 済み — 閉じ込めの基準)。判定できなければ None。blocking。"""
     try:
-        root = base.resolve()
-        rel = target.relative_to(base)
+        return Path(mount.target).resolve()
     except (OSError, RuntimeError, ValueError):
         return None
-    cur = base
-    for i, part in enumerate(rel.parts):
-        cur = cur / part
-        try:
-            if cur.is_symlink():
-                if cur.is_dir():
-                    return Path(*rel.parts[: i + 1]), cur.resolve()
-                return Path(), root
-            if not cur.is_dir():
-                return Path(), root
-        except (OSError, RuntimeError, ValueError):
-            return None
-    return Path(), root
 
 
-def _inside_served(target: Path) -> Callable[[Path], bool]:
-    """`_read_confined` の `inside`: `target` の mount(`served_mount`)の中か。"""
-    mount = served_mount(target)
-    if mount is None:
-        return lambda _resolved: False
-    return _is_under(mount[1])
-
-
-def _served_file(target: Path) -> tuple[Path, str] | None:
-    """`target`(`EXT_DIR` 起点、未 resolve)が配信される通常ファイルなら
-    `(resolve 済みの実体, 正規形の rest)` — rest は `EXT_DIR` からの相対で、mount point まで
-    は配備が置いた名前、その先は mount の root からの実体(mount の中の symlink は実体に
-    畳む)。それ以外(不在・ディレクトリ・mount の外へ出る symlink)は None。
-    blocking — thread で呼ぶ。`_mounted_file` / `_ext_url_for_file` の共通部。"""
-    mount = served_mount(target)
-    if mount is None:
+def static_file(mount: ExtMount, sub: str) -> tuple[Path, str] | None:
+    """静的 mount の `sub`(decode 済み、mount の root からの相対)が配信される通常ファイルなら
+    `(resolve 済みの実体, 正規形の sub)`。正規形の sub は root からの実体の相対(mount の中の
+    symlink は実体に畳む)。不在・ディレクトリ・root の外へ出る symlink・判定不能は None。
+    blocking — thread で呼ぶ。/ext ゲート(routers/ext.py)・resolver・橋渡しの共通の判定。
+    traversal は呼び手が先に弾いていること。"""
+    root = _static_root(mount)
+    if root is None:
         return None
-    mount_rel, root = mount
     try:
-        resolved = target.resolve()
+        resolved = (root / sub.lstrip("/")).resolve()
     except (OSError, RuntimeError, ValueError):
         return None
     if not resolved.is_relative_to(root) or not resolved.is_file():
         return None
-    return resolved, (mount_rel / resolved.relative_to(root)).as_posix()
+    return resolved, resolved.relative_to(root).as_posix()
 
 
-def local_path_for_sandbox_path(path: str) -> Path | None:
-    """sandbox のパス `/ext/{rest}` → nucllei 側の同じ物 `EXT_DIR/{rest}`(未 resolve)。
-    `/ext/` 配下でなければ None(`/ext` 自体も None — ファイルではない)。percent-decode は
-    しない(fs のパスとして渡された文字列そのまま。URL 側の decode は `ext_file_target`)。
-    橋渡しの「sandbox → ローカル」の向き 1 箇所。実在・閉じ込めは呼び手が resolve して見る。"""
-    if not isinstance(path, str) or not path.startswith(_SANDBOX_MOUNT_PREFIX):
+def _ext_parts(rest: str, *, decode: bool) -> tuple[ExtMount | None, str] | None:
+    """`/ext/` 以降の `rest` を `(mount, sub)` に。URL の rest は percent-decode してから、
+    sandbox のパスはそのまま(`decode`)分ける。decode 前後のどちらかに traversal があれば None。
+    表に無い name は `(None, sub)`。"""
+    if has_path_traversal(rest):
         return None
-    return Path(EXT_DIR) / path[len(_SANDBOX_MOUNT_PREFIX) :]
-
-
-def ext_file_target(path: str) -> Path | None:
-    """URL の `/ext/` 以降の path(percent-encoded のまま)から、読む先のパス(未 resolve、
-    `EXT_DIR` 起点)を作る。decode 後に traversal を含むなら None。
-
-    文書に焼かれた URL は日本語ディレクトリを %E7%A5%9E… で持つ。ブラウザ側 routers/ext.py は
-    Starlette が decode 済みの path を受けるので、同じ URL が同じファイルに当たるようここでも
-    decode してから結合する。traversal 判定は decode 後で見る(念のため再判定)。
-    先頭 "/" は Path 結合で mount を捨てさせるので落とす(routers/ext.py と同じ扱い)。
-    """
-    decoded = unquote(path)
+    decoded = unquote(rest) if decode else rest
     if has_path_traversal(decoded):
         return None
-    return Path(EXT_DIR) / decoded.lstrip("/")
+    name, sub = split_ext_rest(decoded)
+    return ext_mount(name), sub
 
 
-async def _load_ext(rel: str, limit: int) -> _Result:
-    if has_path_traversal(rel):
+async def _load_ext(
+    rest: str, limit: int, *, query: str = "", decode: bool = True, hops: int = 0
+) -> _Result:
+    """`/ext/{rest}` を読む — 静的の name はファイル、proxy の name は上流へ GET
+    (`_load_proxy`)、表に無い name は not_found。"""
+    parts = _ext_parts(rest, decode=decode)
+    if parts is None:
         log.warning("image_refs: rejecting traversal ext path")
         return _fail("traversal", "traversal in ext path")
-    candidate = ext_file_target(rel)
-    if candidate is None:
-        log.warning("image_refs: rejecting traversal ext path")
-        return _fail("traversal", "traversal in ext path")
+    mount, sub = parts
+    label = f"ext:{rest}"
+    if mount is None:
+        log.warning(f"image_refs: no /ext mount for this name ({label})")
+        return _fail("not_found", f"no /ext mount for this name ({label})")
+    if mount.proxy:
+        return await _load_proxy(mount, sub, query, limit, hops)
+    root = await asyncio.to_thread(_static_root, mount)
+    if root is None:
+        return _fail("not_found", f"cannot resolve mount root ({label})")
     return await asyncio.to_thread(
-        _read_confined, _inside_served(candidate), candidate, f"ext:{rel}", limit
+        _read_confined, _is_under(root), root / sub.lstrip("/"), label, limit
+    )
+
+
+async def _load_proxy(
+    mount: ExtMount, sub: str, query: str, limit: int, hops: int
+) -> _Result:
+    """proxy の name を上流へ GET する(`EXT_MOUNTS` の固定の相手 — 自分自身判定は掛けない)。
+    404 → not_found、2xx 以外 → upstream_status、接続失敗・タイムアウト → upstream_unreachable、
+    上限 → too_large(`_read_response`)。redirect は上流の base 配下なら `/ext/<name>/…` として
+    辿る(ゲートの書き換えと同じ判定 `under_base`。`MAX_REDIRECTS` まで)、外なら upstream_status。
+    cookie / 認証ヘッダは送らない(共有クライアント)。"""
+    url = upstream_url(mount, sub, query)
+    label = f"ext proxy name={mount.name}"
+    try:
+        request = get_ext_client().build_request("GET", url, timeout=proxy_timeout())
+        response = await get_ext_client().send(request, stream=True)
+        try:
+            status = response.status_code
+            location = response.headers.get("location")
+            if status not in _REDIRECT_STATUSES:
+                return await _read_response(
+                    response, label, os.path.basename(sub), limit
+                )
+            if hops >= MAX_REDIRECTS:
+                log.warning(f"image_refs: too many redirects ({label})")
+                return _fail(
+                    "upstream_status",
+                    f"more than {MAX_REDIRECTS} redirects ({label})",
+                    status=status,
+                    reason="too_many_redirects",
+                )
+            remainder = (
+                under_base(urljoin(url, location), mount.target)
+                if location and not has_path_traversal(location)
+                else None
+            )
+            if remainder is None:
+                log.warning(
+                    f"image_refs: redirect outside the upstream base ({label}, "
+                    f"status={status})"
+                )
+                return _fail(
+                    "upstream_status",
+                    f"redirect {status} outside the upstream base ({label})",
+                    status=status,
+                )
+        finally:
+            await response.aclose()
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        log.warning(f"image_refs: ext proxy fetch error ({label}): {e!r}")
+        return _fail(
+            "upstream_unreachable",
+            f"ext proxy fetch error ({label}): {type(e).__name__}: {e}",
+        )
+    path, _, q = remainder.partition("?")
+    return await _load_ext(
+        f"{mount.name}/{path}", limit, query=f"?{q}" if q else "", hops=hops + 1
     )
 
 
@@ -816,7 +835,7 @@ async def _load_general(
       `upstream_unreachable`(reason `unresolvable`)。それ以外は行き先で絞らない
     - 3xx + Location は `_load_url` に転送先を渡して辿る(hops を数える)。転送先は URL と
       して同じ規則で解決される — 一般の URL ならまた固定して取得、`/ext/{rest}` なら
-      `EXT_DIR` をローカル読み。転送先が URL として組めなければ `upstream_status`(reason
+      `EXT_MOUNTS` の対応表で読む。転送先が URL として組めなければ `upstream_status`(reason
       無し)、上限を超えたら `upstream_status`(reason `too_many_redirects`)
     - `redirect_status` は、この URL が redirect の転送先として来たときの元の 3xx。転送先が
       自分自身なら `server_self` ではなく、元の応答の `upstream_status` + `redirect_self` で
@@ -986,7 +1005,7 @@ def _is_url(ref: str) -> bool:
 
 def _is_sandbox_path(ref: str) -> bool:
     """`resolve_path` が受ける形か — `/workspace/…` か sandbox の `/ext/…`(sandbox 側の
-    形。nucllei の fs ではない — 読むときは `EXT_DIR` へ読み替える)。"""
+    形。nucllei の fs ではない — 読むときは `EXT_MOUNTS` の対応表で読む)。"""
     return ref.startswith((WORKSPACE_PREFIX, _SANDBOX_MOUNT_PREFIX))
 
 
@@ -1039,7 +1058,7 @@ def _route_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
             )
         return _route_general(parts, origin, query)
     # 自オリジンの表示 URL(相対ならそのまま今のサーバ)。host は見ない(module docstring)。
-    # rest が無い / 空 = `EXT_DIR` 自体(rel "")。他の rel と同じに扱う(読めば not_found)
+    # rest が無い / 空 = name 無し(rel "")。他の rel と同じに扱う(読めば not_found)
     return UrlRoute(rel=match.group(1) or "", query=query, origin=origin), None
 
 
@@ -1112,8 +1131,8 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
 async def _load_url(
     url: str, limit: int, hops: int = 0, redirect_status: int | None = None
 ) -> _Result:
-    """URL(traversal / 制御文字は入口で拒否済み)を解決する: `/ext/{rest}` は `EXT_DIR` を
-    ローカル読み、一般の URL は直接取得(`_load_general`)。`hops` は一般の URL で
+    """URL(traversal / 制御文字は入口で拒否済み)を解決する: `/ext/{rest}` は `EXT_MOUNTS` の
+    対応表で読み(`_load_ext`)、一般の URL は直接取得(`_load_general`)。`hops` は一般の URL で
     辿った redirect の回数、`redirect_status` はこの URL を指した redirect の status(転送先の
     再解決でだけ付く)。"""
     route, err = _route_url(url)
@@ -1123,97 +1142,108 @@ async def _load_url(
         return None, err
     if route.general:
         return await _load_general(url, limit, hops, redirect_status)
-    return await _load_ext(route.rel, limit)
-
-
-def _mounted_file(target: Path) -> str | None:
-    """target(`EXT_DIR` 起点、未 resolve)が配信される通常ファイルなら、sandbox 側の
-    パス `/ext/{rest}`(正規形の rest — `_served_file`)を返す。blocking — thread で呼ぶ。"""
-    served = _served_file(target)
-    if served is None:
-        return None
-    return f"{_SANDBOX_MOUNT_PREFIX}{served[1]}"
+    return await _load_ext(route.rel, limit, query=route.query)
 
 
 async def mounted_path_for_url(url: str) -> str | None:
-    """URL(絶対 / 同一サーバの `/ext/…`)が `/ext/{rest}` 形で、**`EXT_DIR` の `{rest}` が
-    実在する通常ファイル** なら、sandbox 側のパス(`/ext/{rest}` — 相対 URL と同じ文字列。
-    rest は percent-decode 済み・symlink を畳んだ形)を返す。それ以外
-    (一般の URL・不在・ディレクトリ・`EXT_DIR` の外へ出る symlink・traversal・URL でない)は
-    None — 理由は返さない(要る呼び手は `resolve_url` を続けて呼べば同じ規則で RefError が出る)。
+    """URL(絶対 / 同一サーバの `/ext/…`)が `/ext/<name>/<sub>` 形で、name が **静的** の mount
+    かつ `<sub>` が実在する通常ファイルなら、sandbox 側のパス(`/ext/<name>/<sub>` — 相対 URL と
+    同じ文字列。sub は percent-decode 済み・symlink を畳んだ形)を返す。それ以外
+    (一般の URL・proxy の name・表に無い name・不在・ディレクトリ・root の外へ出る symlink・
+    traversal・URL でない)は None — 理由は返さない(要る呼び手は `resolve_url` を続けて呼べば
+    同じ規則で RefError が出る)。
 
     用途は「URL → sandbox の fs パス」の橋渡し(builtin sandbox の `send_to_workspace`):
-    配備は同じ物を sandbox の `/ext/<name>` と nucllei の `EXT_DIR/<name>` の両方に置く規約
-    (#138)なので、URL が指す実体は sandbox からも `/ext/{rest}` で見えていて、コピーする
-    必要が無い。**sandbox 側に同じ bind が実際にあるかは nucllei からは確かめられない** —
-    ここが見るのは nucllei 側の事実(`EXT_DIR/{rest}` が実在)だけで、同じ置き場である
-    ことは配備の規約に依存する。
+    配備は同じ物を sandbox の `/ext/<name>` と `EXT_MOUNTS` の `<name>` に置く規約(#138)なので、
+    URL が指す実体は sandbox からも見えていて、コピーする必要が無い。**proxy の name は None**
+    — 上流が返す物(cage が描画した HTML 等)が jail の同じパスに在るとは限らないので、
+    呼び手は `resolve_url`(上流へ GET)で取り込む。sandbox 側の bind の有無は nucllei からは
+    確かめられない(見るのは nucllei 側の事実だけ)。
     """
     if not isinstance(url, str) or not _is_url(url):
         return None
     if has_path_traversal(url):
         return None
     route, _ = _route_url(url)
-    if route is None or route.kind != "ext" or has_path_traversal(route.rel):
+    if route is None or route.kind != "ext":
         # 一般の URL は配信元を持たない(sandbox に同じ実体は無い)
         return None
-    candidate = ext_file_target(route.rel)
-    if candidate is None:
+    parts = _ext_parts(route.rel, decode=True)
+    if parts is None or parts[0] is None or parts[0].proxy:
         return None
-    return await asyncio.to_thread(_mounted_file, candidate)
-
-
-def _ext_url_for_file(target: Path) -> str | None:
-    """target(`EXT_DIR` 起点、未 resolve)が `EXT_DIR` 配下の通常ファイルなら、その配信 URL
-    (相対 `/ext/{rest}`)を返す。blocking — thread で呼ぶ。
-
-    `_mounted_file` の逆。閉じ込めは同じ判定(resolve 済みの実体が `EXT_DIR` の中)— `..`・
-    symlink で `EXT_DIR` の外へ出る物、不在、ディレクトリは None。rest は percent-encode する
-    (日本語・空白・`#` `?` を含む名前が URL として壊れないように)。組んだ URL は
-    `_route_url` → `ext_file_target` に通して同じファイルに戻ることを確かめてから返す —
-    URL の形の規則をここに二重に持たず、/ext ゲート(`routers/ext.py`)と `resolve_url` が
-    受ける形と往復で一致させるため。ゲートが 400 で断る名前(制御文字・バックスラッシュ)は
-    None(配信されていない扱い)。
-    """
-    served = _served_file(target)
+    mount, sub = parts
+    served = await asyncio.to_thread(static_file, mount, sub)
     if served is None:
         return None
-    resolved, rest = served
-    rest = quote(rest, safe="/")
-    url = f"{_EXT_URL_PREFIX}{rest}"
+    return f"{_SANDBOX_MOUNT_PREFIX}{mount.name}/{served[1]}"
+
+
+async def _proxy_serves(mount: ExtMount, sub: str) -> bool:
+    """proxy の上流が `<base>/<sub>` を 2xx で返すか(HEAD。405 なら GET を開いてすぐ閉じる)。
+    redirect は辿らない(= 配信されていない扱い)。"""
+    client = get_ext_client()
+    url = upstream_url(mount, sub)
+    try:
+        for method in ("HEAD", "GET"):
+            request = client.build_request(method, url, timeout=proxy_timeout())
+            response = await client.send(request, stream=True)
+            await response.aclose()
+            if response.status_code != 405:
+                return response.is_success
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        log.warning(f"image_refs: ext proxy probe failed (name={mount.name}): {e!r}")
+    return False
+
+
+def _static_url(mount: ExtMount, sub: str) -> str | None:
+    """静的 mount の `sub` が配信される通常ファイルなら、その配信 URL(相対
+    `/ext/<name>/<sub>`、sub は実体の正規形を percent-encode)。blocking — thread で呼ぶ。
+    組んだ URL を decode して同じ実体に戻ることを確かめてから返す(ゲートが 400 で断る名前 —
+    制御文字・バックスラッシュ — は None)。"""
+    served = static_file(mount, sub)
+    if served is None:
+        return None
+    resolved, canonical = served
+    url = f"{_EXT_URL_PREFIX}{mount.name}/{quote(canonical, safe='/')}"
     if has_path_traversal(url):
         return None
-    route, _ = _route_url(url)
-    if route is None or (route.kind, route.rel, route.query) != ("ext", rest, ""):
-        return None
-    back = ext_file_target(rest)
-    if back is None or back.resolve() != resolved:
+    back = static_file(mount, unquote(quote(canonical, safe="/")))
+    if back is None or back[0] != resolved:
         return None
     return url
 
 
 async def url_for_mounted_path(path: str) -> str | None:
-    """sandbox の fs パス(`/ext/{rest}`)の実体が **nucllei 側(`EXT_DIR/{rest}`)にも実在する
-    通常ファイル** なら、その URL(同一サーバの相対 `/ext/{rest}` — ASCII 名なら入力と同じ
-    文字列、日本語等は percent-encode 済み)を返す。それ以外
-    (nucllei 側に無い `/ext/…`・ディレクトリ・`EXT_DIR` の外へ出る symlink・`/workspace/…`・
-    パスでない)は None — 理由は返さない(要る呼び手は `resolve_path` を続けて呼べば同じ
-    境界で RefError が出る)。
+    """sandbox の fs パス(`/ext/<name>/<sub>`)が **nucllei の /ext ゲートでも同じ URL で配信
+    されている** なら、その URL(同一サーバの相対 `/ext/<name>/<sub>` — ASCII 名なら入力と同じ
+    文字列、日本語等は percent-encode 済み)を返す:
+
+    - 静的の name: `<dir>/<sub>` が実在する通常ファイル(root の外へ出る symlink は不可)
+    - proxy の name: 上流が `<base>/<sub>` を 2xx で返す(HEAD で確かめる — `_proxy_serves`)
+
+    それ以外(表に無い name・不在・ディレクトリ・`/workspace/…`・パスでない)は None — 理由は
+    返さない(要る呼び手は `resolve_path` を続けて呼べば同じ境界で RefError が出る)。
 
     `mounted_path_for_url` の逆向きで、用途は「sandbox のパス → 利用者に見せられる URL」の
-    橋渡し(builtin sandbox の `fetch_from_workspace`): 同じ実体が既に `/ext/…` で
-    配信されているなら、コピーして file にする必要が無い。前提は `mounted_path_for_url` と
-    同じ配備の規約(#138: sandbox の `/ext/<name>` と nucllei の `EXT_DIR/<name>` に同じ物を
-    置く)—
-    sandbox 側のそのパスが同じ実体かは nucllei からは確かめられない。公開範囲は広げない:
-    返す URL は /ext ゲートが既に配信している物だけ。
+    橋渡し(builtin sandbox の `fetch_from_workspace`): 同じ物が既に `/ext/…` で配信されて
+    いるなら、コピーして file にする必要が無い。前提は配備の規約(#138: sandbox の
+    `/ext/<name>` と `EXT_MOUNTS` の `<name>` に同じ物を置く)— sandbox 側のそのパスが同じ
+    実体かは nucllei からは確かめられない。公開範囲は広げない: 返す URL は /ext ゲートが
+    既に配信している物だけ。
     """
-    if not isinstance(path, str) or has_path_traversal(path):
+    if not isinstance(path, str) or not path.startswith(_SANDBOX_MOUNT_PREFIX):
         return None
-    local = local_path_for_sandbox_path(path)
-    if local is None:
+    parts = _ext_parts(path[len(_SANDBOX_MOUNT_PREFIX) :], decode=False)
+    if parts is None or parts[0] is None:
         return None
-    return await asyncio.to_thread(_ext_url_for_file, local)
+    mount, sub = parts
+    if not sub:
+        return None
+    if mount.proxy:
+        if not await _proxy_serves(mount, sub):
+            return None
+        return f"{_EXT_URL_PREFIX}{mount.name}/{quote(sub, safe='/')}"
+    return await asyncio.to_thread(_static_url, mount, sub)
 
 
 def _reject(ref) -> RefError | None:
@@ -1240,7 +1270,7 @@ async def resolve_url(url: str, *, max_bytes: int | None = None) -> _Result:
     `/ext/{rest}`。値の中身を見て別の意味(sandbox のパス・file_id)に読み替えない —
     URL として解決できないものは `unsupported_form`。`/api/v1/files/{id}/content` は
     呼び手が `file_id_of_url` で先に拾う(module docstring「URL の解決」)。user を
-    取らない: `/ext/` の公開範囲は配備が `EXT_DIR` に置いた物で、per-user ではない。
+    取らない: `/ext/` の公開範囲は配備が `EXT_MOUNTS` に書いた物で、per-user ではない。
 
     戻り値・サイズ上限・失敗 code は `resolve_ref` と同じ。
     """
@@ -1259,7 +1289,7 @@ async def resolve_path(
     """**sandbox の fs の絶対パスとして** 解決する(tool の `path` 引数の入口)。
 
     受けるのは `/workspace/…`(呼び出しユーザーの workspace)と `/ext/…`(sandbox の read-only
-    の参照データ — nucllei 側では `EXT_DIR/…` を読む。module 冒頭の 2 つの root。URL の
+    の参照データ — URL `/ext/…` と同じ `EXT_MOUNTS` の対応表で読む。URL の
     `/ext/{rest}` と同じ文字列だが、ここでは fs のパスとして percent-decode せずに読む)。
     URL が来ても URL としては解決しない — パスとして `unsupported_form`。相対パスも
     `unsupported_form`(`path` の形は絶対パス 1 つ)。
@@ -1278,10 +1308,9 @@ async def resolve_path(
         )
     if path.startswith(WORKSPACE_PREFIX):
         return await _load_workspace(path[len(WORKSPACE_PREFIX) :], user_id, limit)
-    local = local_path_for_sandbox_path(path)
-    return await asyncio.to_thread(
-        _read_confined, _inside_served(local), local, f"mount:{path}", limit
-    )
+    # sandbox の `/ext/<name>/<sub>` は URL `/ext/<name>/<sub>` と同じ物(配備の規約)— 同じ
+    # 対応表で読む(静的はファイル、proxy は上流へ GET)。fs のパスなので percent-decode しない
+    return await _load_ext(path[len(_SANDBOX_MOUNT_PREFIX) :], limit, decode=False)
 
 
 async def resolve_ref(
@@ -1334,26 +1363,27 @@ async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
 
 
 def log_mounts() -> None:
-    """起動時 1 行: `EXT_DIR` に何が見えているか(sandbox の `_log_ro_mounts` と
-    同じ流儀)。配備側が volume / symlink を足すだけで増える口で、env を見ても分からないため。
-    ここに見えている物がそのまま `/ext/<rel>` で配信され、sandbox は同じ物を `/ext/<rel>` に
-    見る規約(2026-10-03)。
-    """
-    root = Path(EXT_DIR)
-    try:
-        names = sorted(n for n in os.listdir(root) if not n.startswith("."))
-    except OSError:
-        names = []
-    if names:
+    """起動時 1 行: `/ext/<name>` の対応表(`EXT_MOUNTS`)と、静的の root が今見えているか。"""
+    from nucllei import env
+
+    if env.EXT_MOUNTS:
+        entries = []
+        for name, target in env.EXT_MOUNTS.items():
+            mount = ExtMount(name, target)
+            if mount.proxy:
+                entries.append(f"/ext/{name}/ → proxy {target}/")
+            else:
+                ok = Path(target).is_dir()
+                entries.append(
+                    f"/ext/{name}/ → static {target}/"
+                    + ("" if ok else " (WARNING: ディレクトリが無い)")
+                )
         log.info(
-            f"[nucllei] ext data in {root} (served at /ext/, sandbox sees them at "
-            f"{SANDBOX_MOUNT_ROOT}/): " + " ".join(f"{n} → /ext/{n}" for n in names)
+            f"[nucllei] /ext mounts (EXT_MOUNTS。sandbox は同じ物を "
+            f"{SANDBOX_MOUNT_ROOT}/<name> に見る規約): " + " / ".join(entries)
         )
     else:
-        log.info(
-            f"[nucllei] {root} に参照用データは無い(/ext/** は全て 404。配備は "
-            f"{root}/<name> に volume / symlink を置く)"
-        )
+        log.info("[nucllei] EXT_MOUNTS が空 — /ext/** は全て 404")
     try:
         own = sorted(str(ip) for ip in self_addresses())
     except (

@@ -35,7 +35,6 @@ FROM python:3.11-slim-bookworm AS base
 ENV ENV=prod \
     PORT=8080 \
     DATA_DIR=/app/data \
-    EXT_DIR=/ext \
     WHISPER_MODEL_DIR=/app/data/cache/whisper/models \
     HF_HOME=/app/data/cache/hf
 

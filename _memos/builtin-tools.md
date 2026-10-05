@@ -1035,6 +1035,10 @@ llens への申し送り(配備層):
 
 ## 改訂(2026-10-03 夜)— 配信元は `EXT_DIR`、sandbox の置き場は `/mnt` → `/ext`
 
+> **2026-10-05 に改めた**: `EXT_DIR`(置いた物を暗黙に全部配る)は撤去し、`/ext/<name>` の行き先は
+> env `EXT_MOUNTS` 1 本の対応表(値が `http(s)://` なら proxy、絶対パスなら静的)。resolver・橋渡しも同じ表を
+> 引く。経緯と規則は [[file-handling]] の 2026-10-05 節、正本は `README_API.md` §3.8。以下は当時の記録。
+
 ken 指摘: 上の「nucllei の `/mnt` をそのまま配信」は host 直起動を忘れていた。nucllei は docker
 専用でなく(dev は host)、固定 `/mnt` だと host 直起動で root が要り、何より host の `/mnt`(NFS 等)
 をログイン済み全員に配信してしまう。同時に ken 決定で sandbox 側の置き場も `/ext` に。

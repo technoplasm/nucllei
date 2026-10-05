@@ -8,14 +8,14 @@ utils/image_refs.py で実体化して data URL にする(File は発行しな�
 保存済みの参照文字列(image_url の url)の振り分け(image_refs の module docstring の表。
 先頭で機械的に分かれる):
 
-- スキーム付き URL: path が "/ext/{rest}" なら host を問わず nucllei の `EXT_DIR/{rest}`
-  (= `EXT_DIR/{rest}`)をローカル読み(設定は無い — 2026-10-03)。それ以外は一般の URL
+- スキーム付き URL: path が "/ext/{rest}" なら host を問わず `EXT_MOUNTS` の静的 mount の `{rest}`
+  (= 静的 mount の `{rest}`)をローカル読み(`EXT_MOUNTS` の静的 mount。proxy の name は上流へ GET — 2026-10-05)。それ以外は一般の URL
   としてそのホストに直接(断るのはこのサーバ自身だけ)
-- "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `EXT_DIR` で解決する
+- "/ext/{rest}" = 同一サーバの相対 URL。絶対形と同じ `EXT_MOUNTS` の静的 mount で解決する
   (2026-10-03 — #139 は「相対 /ext/ は受けない」だったのを覆した)。sandbox の RO マウント
   `/ext/{rest}` と同じ文字列なので、保存済み参照としては URL として読めば同じ物に当たる
 - "/workspace/..." = sandbox の fs(呼び出しユーザーの workspace)
-- per-user のアクセス検査はしない(公開範囲は配備が `EXT_DIR` に置いた物、workspace は
+- per-user のアクセス検査はしない(公開範囲は配備が `EXT_MOUNTS` の静的 mount に置いた物、workspace は
   呼び出しユーザーのもの、が境界)
 - 画像でも PDF でもない・FETCH_MAX_BYTES 超過・上流不達・redirect・root 外・
   不在はすべて失敗 → 既存の "(image unavailable)" 置換に合流(fail closed)
@@ -33,6 +33,7 @@ import httpx
 import pypdfium2 as pdfium
 
 from test.util.abstract_integration_test import AbstractPostgresTest
+from test.util.ext_mounts import mount_tree
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
@@ -87,8 +88,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         )
 
     def _mount(self, monkeypatch, tmp_path):
-        """tmp の `EXT_DIR`(= /ext の配信元)。"""
-        from nucllei.utils import image_refs
+        """tmp の `EXT_MOUNTS` の静的 mount(= /ext の配信元)。"""
 
         root = tmp_path / "data" / "ext"
         (root / "cage" / "figs").mkdir(parents=True)
@@ -101,7 +101,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         outside = tmp_path / "outside.png"
         outside.write_bytes(PNG_BYTES)
         (root / "cage" / "figs" / "escape.png").symlink_to(outside)
-        monkeypatch.setattr(image_refs, "EXT_DIR", root)
+        mount_tree(monkeypatch, root)
         return root
 
     def _self(self, monkeypatch):
@@ -174,7 +174,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ), url
 
     def test_mixed_file_and_ext_entries(self, monkeypatch, tmp_path):
-        # file_id 経路(認可検査あり)と "/ext/..." 経路(EXT_DIR)の混在
+        # file_id 経路(認可検査あり)と "/ext/..." 経路(静的 mount)の混在
         self._mount(monkeypatch, tmp_path)
         messages = self._messages("/api/v1/files/f-img/content")
         messages[0]["content"].append(
@@ -202,7 +202,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
             ), url
 
     def test_ext_url_any_host_resolved(self, monkeypatch, tmp_path):
-        # path が /ext/{rest} なら host を問わず EXT_DIR で解決する(与えられた host には接続しない)。
+        # path が /ext/{rest} なら host を問わず 静的 mount で解決する(与えられた host には接続しない)。
         # 大文字 scheme・port 付きでも同じ
         self._mount(monkeypatch, tmp_path)
         seen = []
@@ -254,9 +254,8 @@ class TestFileImagesExtInline(AbstractPostgresTest):
     # ---- 失敗はすべて "(image unavailable)" に合流 ----
 
     def test_nothing_mounted_unavailable(self, monkeypatch, tmp_path):
-        from nucllei.utils import image_refs
 
-        monkeypatch.setattr(image_refs, "EXT_DIR", tmp_path / "nowhere")
+        mount_tree(monkeypatch, tmp_path / "nowhere")
         messages = self._convert(self._messages(f"{SELF}/ext/cage/figs/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
@@ -274,7 +273,7 @@ class TestFileImagesExtInline(AbstractPostgresTest):
         assert messages[0]["content"][1] == UNAVAILABLE
 
     def test_closed_forms_unavailable(self, monkeypatch, tmp_path):
-        # 不在・ディレクトリ・EXT_DIR の外へ出る symlink・traversal(encode 済み / NUL)・
+        # 不在・ディレクトリ・静的 mount の外へ出る symlink・traversal(encode 済み / NUL)・
         # 制御文字・name の取れない形・"/ext/" でない "/" 始まり・protocol-relative
         self._mount(monkeypatch, tmp_path)
         seen = []
@@ -388,9 +387,9 @@ class TestFileImagesExtInline(AbstractPostgresTest):
 
 class TestFileImagesFsRefs(AbstractPostgresTest):
     """fs 参照("/ext/..." / "/workspace/...")の解決(#139)。`/ext/...` は sandbox の RO
-    マウントと URL が同じ文字列で、nucllei は `EXT_DIR` を読む(2026-10-03 までは `/mnt`)。
+    マウントと URL が同じ文字列で、nucllei は `EXT_MOUNTS` の静的 mount を読む(2026-10-03 までは `/mnt`)。
 
-    `EXT_DIR` は module 属性 `image_refs.EXT_DIR`(呼び出し時に読む)なので tmp_path に
+    `EXT_MOUNTS` は `nucllei.env.EXT_MOUNTS`(呼び出し時に読む)なので tmp_path に
     差し替える。sandbox は `sandbox_post` を差し替えて切り離す。
     """
 
@@ -405,7 +404,6 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         )
 
     def _mount(self, monkeypatch, tmp_path):
-        from nucllei.utils import image_refs
 
         root = tmp_path / "data" / "ext"
         (root / "cage" / "static").mkdir(parents=True)
@@ -415,7 +413,7 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         outside = tmp_path / "outside.png"
         outside.write_bytes(PNG_BYTES)
         (root / "cage" / "static" / "escape.png").symlink_to(outside)
-        monkeypatch.setattr(image_refs, "EXT_DIR", root)
+        mount_tree(monkeypatch, root)
         return root
 
     def _messages(self, url):
@@ -437,7 +435,7 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
     def _url(self, messages):
         return messages[0]["content"][1]["image_url"]["url"]
 
-    # ---- /ext(RO マウント = EXT_DIR、nucllei のローカル読み)----
+    # ---- /ext(RO マウント = 静的 mount、nucllei のローカル読み)----
 
     def test_mount_image_to_data_url(self, monkeypatch, tmp_path):
         self._mount(monkeypatch, tmp_path)
@@ -499,7 +497,7 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         messages = self._convert(self._messages("/ext/cage/static/a.png"))
         assert messages[0]["content"][1] == UNAVAILABLE
 
-    # ---- 同じ実体を相対 / 絶対 URL で(EXT_DIR をローカル読み)----
+    # ---- 同じ実体を相対 / 絶対 URL で(静的 mount をローカル読み)----
 
     def test_same_file_via_ext_url_and_mount_path(self, monkeypatch, tmp_path):
         self._mount(monkeypatch, tmp_path)

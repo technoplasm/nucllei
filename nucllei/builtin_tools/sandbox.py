@@ -126,10 +126,10 @@ WRITE_FILE_LIMIT = SANDBOX_WRITE_FILE_LIMIT_BYTES
 # 変換はここ (tool 側) で持つ — wire を変えないので sandbox image と版がずれても動く。
 WORKSPACE_ROOT = "/workspace"
 # read-only の参照データの置き場 = **jail 側のパス** (sandbox サービスの RO_MOUNT_ROOT /
-# image_refs の SANDBOX_MOUNT_ROOT と同じ `/ext`。2026-10-03 までは `/mnt`)。nucllei の fs では
-# `image_refs.EXT_DIR` (= EXT_DIR) に同じ物が在る規約で、URL `/ext/{rest}` とも同じ文字列。
-# sandbox の `/files/*` はここを扱えない — write_file / list_workspace は使える手段を
-# 案内して断り、fetch_from_workspace は nucllei 側の同じ置き場 (EXT_DIR) から橋渡しする。
+# image_refs の SANDBOX_MOUNT_ROOT と同じ `/ext`。2026-10-03 までは `/mnt`)。jail の
+# `/ext/<name>/X` は URL `/ext/<name>/X` (env `EXT_MOUNTS` の対応表 — 静的 / proxy) と同じ物という
+# 規約。sandbox の `/files/*` はここを扱えない — write_file / list_workspace は使える手段を
+# 案内して断り、fetch_from_workspace は nucllei の /ext が同じ URL で配信していれば橋渡しする。
 _RO_MOUNT_ROOT = "/ext"
 
 
@@ -410,7 +410,7 @@ def _explain_mount_error(abs_path: str, err) -> ToolError:
             "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。",
         )
     if code == "not_found":
-        # nucllei 側の EXT_DIR に無い = 本当に無いか、配備の mount のずれ (sandbox にだけ
+        # nucllei の /ext (EXT_MOUNTS) に無い = 本当に無いか、配備の mount のずれ (sandbox にだけ
         # mount されている)。resolver は分けられないので 1 文で両方を言う。ken 2026-10-04:
         # 配備は nucllei と sandbox に同じ /ext の組を mount する — /ext のファイルは URL で
         # 見せるだけで、取り出し (添付) の経路は作らない (要らない file_id を増やさない)
@@ -967,8 +967,8 @@ class Tools:
 
         行き先・redirect の扱い・失敗理由は resolver 一本 = builtin の fetch_url /
         feed_image と同じ (同じ URL が一方で通り他方で落ちることが無い)。取れるのは
-        `/ext/{rest}` (相対、または絶対 = host 不問。nucllei の `EXT_DIR/{rest}` をローカル読み —
-        与えられた host へは接続しない) と、それ以外のスキーム付き http(s) URL
+        `/ext/{rest}` (相対、または絶対 = host 不問。`EXT_MOUNTS` の対応表で読む — 静的はローカル
+        読み、proxy は上流へ GET。与えられた host へは接続しない) と、それ以外のスキーム付き http(s) URL
         **どこでも** (一般の URL。登録無しで直接取得。接続先は解決したアドレスに固定、
         redirect は 3 回まで辿る — 一般の Web と同じ扱い。届くかは配備のネットワーク次第、
         2026-10-03 ken 決定)。
@@ -976,9 +976,10 @@ class Tools:
         (`unknown_upstream` reason `server_self`)。cookie / 認証ヘッダをどこにも転送しないので、
         リクエスト文脈の無い background 続きターンでも同じに動く。
 
-        - `/ext/{rest}` で nucllei の `EXT_DIR/{rest}` が実在 → コピーせず、sandbox から
-          見えるパス `/ext/{rest}` (URL と同じ文字列) を返す (`mounted_path_for_url`)。
-          sandbox の `/ext` と nucllei の `EXT_DIR` に同じ物を置くという
+        - `/ext/<name>/{sub}` で name が静的の mount かつ `<dir>/{sub}` が実在 → コピーせず、
+          sandbox から見えるパス `/ext/<name>/{sub}` (URL と同じ文字列) を返す
+          (`mounted_path_for_url`。proxy の name は上流から取り込む)。
+          sandbox の `/ext/<name>` と `EXT_MOUNTS` の `<name>` に同じ物を置くという
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
         - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は valve `url_max_mb`
@@ -1221,8 +1222,8 @@ class Tools:
         `send_to_workspace(url=)` の「URL の解決先が sandbox から見えるならパスを返す」
         (`mounted_path_for_url`) の逆向き。値の形ではなく解決結果で分かれる:
 
-        - 実体が nucllei 側の `EXT_DIR` にも実在する (= /ext ゲートが `/ext/{rest}` で配信
-          している) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
+        - nucllei の /ext ゲートが同じ `/ext/{rest}` を配信している (静的は実在、proxy は上流が
+          2xx) → コピーも添付もせず、その URL (同じ文字列) を返す (`url_for_mounted_path`)
         - それ以外 → `resolve_path` (境界・上限は resolver) で読めない理由を返す。nucllei 側に
           無い物は「このサーバの /ext に無い」(本当に無いか mount のずれ)。ken 2026-10-04: 配備は
           nucllei と sandbox に同じ /ext の組を mount し、/ext のファイルは URL で見せるだけ —

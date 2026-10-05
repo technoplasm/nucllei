@@ -93,7 +93,7 @@ BUILTIN_TOOLS = {
     },
     # fetch_url も常に登録(2026-10-03、ken 決定): url= はスキーム付きの http(s) URL なら
     # どこでも取りに行く(届くかは配備のネットワーク次第。取りに行かないのはこのサーバ自身
-    # だけ)ので、EXT_DIR が空でも「必ず失敗する」builtin ではない。同日の朝まで当時の
+    # だけ)ので、EXT_MOUNTS が空でも「必ず失敗する」builtin ではない。同日の朝まで当時の
     # EXT_UPSTREAMS / EXT_PUBLIC_BASES / EXT_INTRANET_CIDRS のいずれかでゲートしていたが、行き先で機能を
     # 絞らない決定と一緒に外した。
     "builtin_fetch_url": {

@@ -291,9 +291,8 @@ async def lifespan(app: FastAPI):
     # llens(#42): 組み込みツールを Tools テーブルへ upsert(specs は repo から再生成)
     await asyncio.to_thread(sync_builtin_tools)
 
-    # llens(#139): 参照用データ(EXT_DIR = /ext/ の配信元。sandbox は同じ物を jail の
-    # /ext に見る)に何が在るかを 1 行(sandbox と同じ流儀)。配備側が volume / symlink を足すだけで
-    # 増える口で、env を見ても分からない。
+    # llens(#139 / #146): /ext/<name> の対応表(EXT_MOUNTS — proxy / 静的。sandbox は同じ物を
+    # jail の /ext/<name> に見る規約)を 1 行(sandbox と同じ流儀)。
     image_refs.log_mounts()
 
     # llens(#110): 前プロセスの走行中 execution は失われている(単一プロセスが
