@@ -596,6 +596,16 @@ export const cleanText = (content: string) => {
 // This regular expression matches code blocks marked by triple backticks
 const codeBlockRegex = /```[\s\S]*?```/g;
 
+// 文の区切り(TTS の分割単位):
+// - 半角 . ! ? の後の空白(英文 — 空白が無い "3.14" や "e.g.x" では切らない)
+// - 全角 。！？ の直後(和文は空白を挟まない)。続く閉じ括弧「」』）」は前の文に含め、
+//   「！？」のような連続は 1 つの区切りとして扱う
+// - 改行(箇条書き・段落。和文は句点なしの見出しや箇条書きが多い)
+const SENTENCE_BOUNDARY = /(?<=[.!?])\s+|(?<=[。！？][」』）]*)(?![。！？」』）])\s*|\s*\n\s*/;
+
+// 和文(かな・漢字を含む)は空白で単語が区切られないため、単語数での短文判定が効かない
+const CJK_REGEX = /[\u3040-\u30ff\u3400-\u9fff]/;
+
 export const extractSentences = (text: string) => {
 	const codeBlocks: string[] = [];
 	let index = 0;
@@ -608,7 +618,7 @@ export const extractSentences = (text: string) => {
 	});
 
 	// Split the modified text into sentences based on common punctuation marks, avoiding these blocks
-	let sentences = text.split(/(?<=[.!?])\s+/);
+	let sentences = text.split(SENTENCE_BOUNDARY);
 
 	// Restore code blocks and process sentences
 	sentences = sentences.map((sentence) => {
@@ -649,10 +659,15 @@ export const extractSentencesForAudio = (text: string) => {
 		const lastIndex = mergedTexts.length - 1;
 		if (lastIndex >= 0) {
 			const previousText = mergedTexts[lastIndex];
-			const wordCount = previousText.split(/\s+/).length;
-			const charCount = previousText.length;
-			if (wordCount < 4 || charCount < 50) {
-				mergedTexts[lastIndex] = previousText + ' ' + currentText;
+			// 短すぎる断片は次の文と合わせて 1 リクエストにする(細切れの音声を避ける)。
+			// 和文は単語数を見ず文字数だけで判定する(1 文字あたりの情報量が多いので閾値も小さく)
+			const isShort = CJK_REGEX.test(previousText)
+				? previousText.length < 20
+				: previousText.split(/\s+/).length < 4 || previousText.length < 50;
+			if (isShort) {
+				// 和文の句点・閉じ括弧の後ろには空白を挟まない(「〜しました。」と…)
+				const separator = /[。！？」』）]$/.test(previousText) ? '' : ' ';
+				mergedTexts[lastIndex] = previousText + separator + currentText;
 			} else {
 				mergedTexts.push(currentText);
 			}
@@ -864,12 +879,21 @@ export const createMessagesList = (
 		return [];
 	}
 
-	const message = history.messages[messageId];
-	if (message?.parentId) {
-		return [...createMessagesList(history, message.parentId), message];
-	} else {
-		return [message];
+	// 親方向へ反復で辿る(再帰だと深い履歴でスタックを食い、parentId が循環した
+	// 壊れた履歴では無限再帰で落ちる)。訪問済みに戻ったらそこで打ち切る
+	const list: ChatMessage[] = [];
+	const visited = new Set<string>();
+	let id: string | null | undefined = messageId;
+	while (id && !visited.has(id)) {
+		visited.add(id);
+		const message: ChatMessage | undefined = history.messages[id];
+		if (!message) {
+			break;
+		}
+		list.push(message);
+		id = message.parentId;
 	}
+	return list.reverse();
 };
 
 export const formatFileSize = (size: unknown) => {
