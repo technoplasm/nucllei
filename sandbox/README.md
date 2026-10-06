@@ -79,7 +79,7 @@ nsjail jail
 置き場の名前が `/ext` なのは (2026-10-03、ken 決定。それまでは `/mnt`)、nucllei が同じ物を
 URL `/ext/<name>/…` で配信するため (2026-10-05 から nucllei 側は env `EXT_MOUNTS` の対応表 —
 `name=http(s)://…` は proxy、`name=/abs/dir` は静的) — **jail の
-パスと URL が同じ文字列** になる (`/ext/cage/static/X` は jail から読んでも、ブラウザで開いても、
+パスと URL が同じ文字列** になる (`/ext/doc-static/X` は jail から読んでも、ブラウザで開いても、
 nucllei の tool の `url=` / `path=` に渡しても同じ物)。モデルに読み替えをさせない。
 `/mnt` を捨てた理由: docker 固有の慣習で、nucllei 側は host 直起動もあり、host の `/mnt`
 (NFS 等) を晒してしまう (nucllei の `README_API.md` §3.8)。
@@ -88,21 +88,21 @@ nucllei の tool の `url=` / `path=` に渡しても同じ物)。モデルに�
 services:
   nucllei:
     environment:
-      # /ext/cage/** は cage の HTTP へ proxy、/ext/shared/** は静的配信
-      EXT_MOUNTS: cage=http://cage:13303,shared=/ext/shared
+      # /ext/doc/**・/ext/doc-static/** は cage の同じパスへ proxy、/ext/shared/** は静的配信
+      EXT_MOUNTS: doc=http://cage:13303/ext/doc,doc-static=http://cage:13303/ext/doc-static,shared=/ext/shared
     volumes:
       - /srv/shared:/ext/shared:ro                    # URL /ext/shared/…
   sandbox:
     volumes:
-      - /srv/cage/data/doc:/ext/doc:ro                      # jail からも /ext/doc で見える
-      - /srv/cage/data/static:/ext/cage/static:ro           # nucllei と同じ相対パスで
+      - /srv/cage/build/doc:/ext/doc:ro                     # cage のビルド出力 = URL /ext/doc/…md と同じ文字列
+      - /srv/cage/data/static:/ext/doc-static:ro            # 図・PDF = URL /ext/doc-static/…
 ```
 
 - **guest 側 = コンテナ側と同じパス**。`host:guest` の対応表を持たないので、複数置いても
   名前順に並ぶだけで衝突しない (同じ名前は同じ 1 つの mount point にしかならない)。
 - **直下 1 階層だけ**を見る (`/ext/doc` は bind するが `/ext/doc/guideline` を個別には
   足さない)。「volume 1 本 = `/ext` の 1 エントリ」の対応を保つため。深い位置に bind したい
-  (上の `/ext/cage/static`) なら、`/ext/cage` が 1 エントリ = その下は docker が作る中間
+  (例えば `/ext/a/b`) なら、`/ext/a` が 1 エントリ = その下は docker が作る中間
   ディレクトリごと bind される。
 - **何も置かなければ何も足さない** = 従来どおりの jail (これが既定)。
 - **read-only**。compose 側で `:ro` を書き忘れてもコンテナ内が rw になるだけで、jail へは

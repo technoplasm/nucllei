@@ -538,6 +538,27 @@ ken 決定(2026-10-05): 引用(出典表示)は一旦撤去したが(#142 / #146
     proxy なら上流が HEAD に 2xx を返すとき。
   - `.md` / `.txt` は従来どおり text/plain(Accept による分岐はしない)。
 
+## 改訂(2026-10-06)— doc の公開 URL は `/ext/doc`・`/ext/doc-static`(`/ext/cage` は廃止)
+
+llens 側が cage の公開ルートを固定の `/ext/doc`(doc の HTML)・`/ext/doc-static`(図・PDF)に変えた
+(`CAGE_PUBLIC_BASE` も撤去)。nucllei の実装は対応表の name が変わるだけで、上の 2026-10-05 節の
+規則(proxy / 静的・閉じ込め・redirect の書き換え)はそのまま。上の節に残る `/ext/cage/…` の例は当時の形。
+
+- **配備**: `EXT_MOUNTS=doc=${CAGE_API_BASE}/ext/doc,doc-static=${CAGE_API_BASE}/ext/doc-static,shared=/ext/shared`。
+  パスはそのまま中継する(`/ext/doc/**` → cage の `/ext/doc/…`)。旧 `/ext/cage` は 404。dev は [[dev-environment]]。
+- **doc の住所の正規形**(cage の契約): リーフは `/ext/doc/<カテゴリ>/…/<名前>.md`(sandbox の実ファイルと
+  同じ文字列)、ディレクトリは `/ext/doc/…/`(末尾 `/`)。cage は正規形に HTML を返し、`.md` 無し・末尾 `/`
+  無し・`…/_index.md` は 302 で正規形へ飛ばす。sandbox にはビルド出力が `/ext/doc`、図・PDF が
+  `/ext/doc-static` に bind される。
+- **橋渡し `url_for_mounted_path`(sandbox のパス → URL)は base の中の redirect を辿る**
+  (`image_refs._proxy_served_rest`): 上流が 3xx で Location が同じ base の中なら飛び先を確かめ直し
+  (`MAX_REDIRECTS` = 3 回まで)、2xx なら **飛び先の** `/ext/<name>/…` を返す。辿らないと
+  `fetch_from_workspace(path="/ext/doc/…/X/_index.md")` が URL にならず `resolve_path` の取り込みに落ち、
+  HTML が添付になる(llens 指摘)。base の外・上限超え・2xx 以外は従来どおり None。
+- **引用の表示名**(FE `citations.ts`): リーフは `.md` を外す(`CQ47.md` → `CQ47`)、`_index.md` は親
+  ディレクトリ名。リンク先は変えない。
+- 正本は `README_API.md` §3.8(「The doc URL contract」)。
+
 ## 改訂(2026-10-03)— 音声入力の通し録音と `meta.dictation`
 
 マイクの音声入力は、区切りが 2 つ以上あった録音を 1 本(長ければ約 60 分ごとに複数本)の音声と

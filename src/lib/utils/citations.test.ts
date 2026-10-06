@@ -18,6 +18,38 @@ const env: CiteEnv = { fileNames: new Map([[FID, '手順書.pdf']]) };
 const A = '/ext/cage/doc/院内マニュアル/感染対策マニュアル/02_14-2_針刺し';
 const B = '/ext/cage/static/kansen_manual/docs/14-2.pdf';
 
+describe('出典の表示名(doc の住所 `/ext/doc/…/<名前>.md` — llens 2026-10-06)', () => {
+	it('リーフは `.md` を外す。リンク先はそのまま', () => {
+		const r = resolveBracketRef('/ext/doc/診療ガイドライン/CQ47.md#推奨')!;
+		expect(r.title).toBe('CQ47');
+		expect(r.href).toBe('/ext/doc/診療ガイドライン/CQ47.md#推奨');
+		expect(r.pageHref).toBe('/ext/doc/診療ガイドライン/CQ47.md');
+	});
+
+	it('`_index.md` は親ディレクトリ名', () => {
+		const r = resolveBracketRef('/ext/doc/院内マニュアル/感染対策/_index.md')!;
+		expect(r.title).toBe('感染対策');
+		expect(r.href).toBe('/ext/doc/院内マニュアル/感染対策/_index.md');
+	});
+
+	it('ディレクトリ(末尾 `/`)はその名前のまま', () => {
+		const r = resolveBracketRef('/ext/doc/院内マニュアル/感染対策/')!;
+		expect(r.title).toBe('感染対策');
+		expect(r.href).toBe('/ext/doc/院内マニュアル/感染対策/');
+	});
+
+	it('percent-encoded の住所も decode して `.md` を外す', () => {
+		const r = resolveBracketRef(
+			`/ext/doc/${encodeURIComponent('図')}/${encodeURIComponent('針刺し')}.md`
+		)!;
+		expect(r.title).toBe('針刺し');
+	});
+
+	it('`.md` 以外の拡張子はそのまま', () => {
+		expect(resolveBracketRef('/ext/doc-static/x/14-2.pdf')!.title).toBe('14-2.pdf');
+	});
+});
+
 describe('Text Fragment の組み直し(staging 2026-10-06: モデルが `text=` を落とす)', () => {
 	const enc = (s: string) => encodeURIComponent(s);
 	const page = A.split('/').map(enc).join('/');

@@ -321,9 +321,9 @@ served implicitly.
 
 ```sh
 # llens compose (nucllei service), e.g.:
-EXT_MOUNTS=cage=http://cage:13303,shared=/ext/shared
+EXT_MOUNTS=doc=${CAGE_API_BASE}/ext/doc,doc-static=${CAGE_API_BASE}/ext/doc-static,shared=/ext/shared
 # dev (host install):
-EXT_MOUNTS=cage=http://localhost:13303,shared=/home/me/ref/shared
+EXT_MOUNTS=doc=http://localhost:13303/ext/doc,doc-static=http://localhost:13303/ext/doc-static,shared=/home/me/ref/shared
 ```
 
 - Format: comma-separated `name=value`, `name` is `[a-z0-9_-]+`; a URL value may
@@ -343,7 +343,7 @@ file, a proxy name GETs the upstream. It is also the SSRF source of truth for
 
 **The sandbox sees the same set at `/ext`** (its read-only mount root, #138), so
 a sandbox path and a `/ext` URL are **the same string** naming the same thing
-(`/ext/cage/static/X` in the jail, in the browser, and in a tool's `url=` or
+(`/ext/doc-static/X` in the jail, in the browser, and in a tool's `url=` or
 `path=`) — by deployment convention: bind into the sandbox at `/ext/<name>`
 what `EXT_MOUNTS` serves at `/ext/<name>`. Point the upstream's public base at
 **`/ext/<name>`** (relative — same-origin, so it keeps working whatever origin
@@ -370,16 +370,25 @@ as `url` unchanged (see the reference rules below).
   `Cache-Control`, `Content-Disposition`. `Set-Cookie` (and everything else) is
   dropped.
 - Redirects are not followed. A `Location` under the upstream base is rewritten
-  to `/ext/<name>/…` and returned with the same status (the expected case is a
-  `301` that adds a directory's trailing `/`); a `Location` outside the base (or
+  to `/ext/<name>/…` and returned with the same status (the expected case is
+  cage's `302` to a doc's canonical address); a `Location` outside the base (or
   a 3xx without one) → 502, so internal URLs never leak.
 - `text/html` gets nucllei's strict CSP and `nosniff` (overriding the
   upstream's); SVG / JS get `Content-Disposition: attachment` + `nosniff`.
 - Upstream unreachable → 502; timeout → 504.
-- **`/ext/cage/doc/<address>#<heading>`** is the HTML page cage renders for a
-  doc address (md → HTML, breadcrumbs, index pages, heading ids are all cage's;
-  nucllei only relays). The chat body turns `[/ext/…#heading]` into a link (FE,
-  `bracket_ref`).
+- **The doc URL contract** (cage's; nucllei only relays — md → HTML,
+  breadcrumbs, index pages and heading ids are all cage's). The canonical
+  address is the same string as the file in the sandbox (cage's build output is
+  bound at `/ext/doc`, figures / PDFs at `/ext/doc-static`):
+  - `/ext/doc/<category>/…/<name>.md#<heading>` → the HTML page of a leaf.
+  - `/ext/doc/…/` (trailing `/`) → the HTML page of a directory.
+  - A non-canonical address (no `.md`, no trailing `/`, `…/_index.md`) → `302`
+    to the canonical one (rewritten to `/ext/doc/…` by the rule above).
+  - `/ext/doc-static/<path>` → the figure / PDF itself.
+
+  The chat body turns `[/ext/…#heading]` into a link (FE, `bracket_ref`); the
+  label drops `.md` (`CQ47.md` → `CQ47`, `…/X/_index.md` → `X`), the link does
+  not.
 
 **Static rules** (`/ext/<name>/<rest>` → `<dir>/<rest>`):
 
@@ -702,16 +711,16 @@ more (until 2026-10-03 `UrlRoute` carried `name`, `public_base` and
 `/ext/{name}`).
 
 **Bridging a URL and a sandbox path.** The same thing has the same name on both
-sides since 2026-10-03: URL `/ext/cage/static/X` = sandbox path
-`/ext/cage/static/X` = what `EXT_MOUNTS` serves at that URL (deployment
+sides since 2026-10-03: URL `/ext/doc-static/X` = sandbox path
+`/ext/doc-static/X` = what `EXT_MOUNTS` serves at that URL (deployment
 convention). The model never has to rewrite anything; what the tool still
 decides, based on **what the reference resolves to**, is whether to copy /
 attach or to hand the name back:
 
-| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/<name>/<sub>` (same string, percent-decoded) when `<name>` is a **static** mount and `<sub>` is a regular file there, nothing copied; otherwise (incl. every proxy name — what cage renders need not exist at the same jail path) the bytes are copied to `/workspace/imports/` |
-| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/<name>/<sub>` URL (same string, percent-encoded) when the `/ext` gate serves it — static: the file exists; proxy: the upstream answers 2xx to a HEAD (GET when HEAD is 405) — nothing attached; otherwise "not on this server's /ext" (below)                                       |
+| Direction                                  | Tool (builtin sandbox)       | Resolver function            | Result                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------ | ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| URL → a path the sandbox can open          | `send_to_workspace(url=)`    | `mounted_path_for_url(url)`  | the sandbox path `/ext/<name>/<sub>` (same string, percent-decoded) when `<name>` is a **static** mount and `<sub>` is a regular file there, nothing copied; otherwise (incl. every proxy name — what cage renders need not exist at the same jail path) the bytes are copied to `/workspace/imports/`                                                                                                                               |
+| sandbox path → something the user can open | `fetch_from_workspace(path)` | `url_for_mounted_path(path)` | the relative `/ext/<name>/<sub>` URL (same string, percent-encoded) when the `/ext` gate serves it — static: the file exists; proxy: the upstream answers 2xx to a HEAD (GET when HEAD is 405), following up to 3 redirects whose `Location` stays under the upstream base and returning the URL **of the redirect target** (cage sends `…/X/_index.md` to `…/X/`) — nothing attached; otherwise "not on this server's /ext" (below) |
 
 For static mounts both directions check nucllei's own filesystem after resolving
 symlinks and confining to the mount root; symlinks inside a mount are folded to

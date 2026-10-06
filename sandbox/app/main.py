@@ -71,7 +71,7 @@ RO_BINDS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt/venv"]
 # (「volume 1 本 = 1 エントリ」)。空 (= 既定) なら何も足さない。
 # 置き場の名前は `/ext` (2026-10-03、ken 決定。それまでは `/mnt`): nucllei が同じ木を
 # `DATA_DIR/ext` から URL `/ext/<rel>` で配信するので、**jail のパスと URL が同じ文字列**
-# になる (`/ext/cage/static/X` は jail でも URL でも同じ物)。モデルが読み替えを要らない。
+# になる (`/ext/doc-static/X` は jail でも URL でも同じ物)。モデルが読み替えを要らない。
 # 全ユーザーに同じものが見える点を含め、詳細は README「参照用データを jail に見せる」。
 RO_MOUNT_ROOT = Path("/ext")
 

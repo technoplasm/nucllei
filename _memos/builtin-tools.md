@@ -1235,3 +1235,13 @@ ken 指示「ツールのエラーも結果として表示できるように。�
   結果** — `ERROR:` で始まっていてもフラグは立てない(本文の嗅ぎ分けはどこにも置かない。ken 決定
   2026-10-04 — 初版にあった「builtin 以外の `ERROR:` 文字列は failure」の推定は同日に撤去)。
 
+## 改訂(2026-10-06)— `fetch_from_workspace` の橋渡しが cage の 302 を辿る / doc の URL は `/ext/doc`
+
+llens が doc の公開 URL を `/ext/doc/…`(リーフ `….md`・ディレクトリ `…/`)・`/ext/doc-static/…` に
+変えた(`/ext/cage` は廃止)。cage は正規形でない住所(`.md` 無し・末尾 `/` 無し・`…/_index.md`)を 302 で
+正規形へ飛ばすので、`url_for_mounted_path` の proxy 判定(HEAD が 2xx か)は base の中の redirect を
+3 回まで辿り、飛び先の `/ext/<name>/…` を返すようにした(`image_refs._proxy_served_rest`)。辿らないと
+`fetch_from_workspace(path="/ext/doc/…/X/_index.md")` が URL にならず取り込みに落ち、HTML が添付になる。
+base の外への redirect・上限超え・2xx 以外は従来どおり「このサーバの /ext に無い」。担保は
+`test_image_refs_resolve.py::test_proxy_bridge_follows_redirects_inside_the_base`。経緯と配備の形は
+[[file-handling]] の 2026-10-06 節。上の節の `/ext/cage/…` の例は当時の形。

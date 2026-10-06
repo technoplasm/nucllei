@@ -117,7 +117,7 @@ export function resolveBracketRef(
 			href,
 			pageHref: normalizeLink(pageUrl),
 			key: safeDecode(pageUrl),
-			title: safeDecode(parts[parts.length - 1] ?? pageUrl),
+			title: pageTitle(parts, pageUrl),
 			section: sectionLabel(fragment)
 		};
 	}
@@ -137,7 +137,20 @@ export function resolveBracketRef(
 	return null;
 }
 
-/** `/ext/a/b.md#節` → `b.md › 節`(番号を振らない場所での 1 行表示) */
+/**
+ * ページの表示名 = 末尾のパス要素(decode 済み)。doc のリーフ `/ext/doc/…/CQ47.md` は `.md` を
+ * 外して `CQ47`、`…/X/_index.md` は親ディレクトリ名 `X`。ディレクトリ(末尾 `/`)はその名前の
+ * まま。表示名だけで、リンク先(href)は変えない。
+ */
+function pageTitle(parts: string[], pageUrl: string): string {
+	const last = parts[parts.length - 1];
+	if (last === undefined) return safeDecode(pageUrl);
+	const name = safeDecode(last);
+	if (name === '_index.md' && parts.length >= 2) return safeDecode(parts[parts.length - 2]);
+	return name.endsWith('.md') && name.length > 3 ? name.slice(0, -3) : name;
+}
+
+/** `/ext/a/b.md#節` → `b › 節`(番号を振らない場所での 1 行表示) */
 export function citeLabel(ref: Pick<CiteRef, 'title' | 'section'>): string {
 	return ref.section ? `${ref.title} › ${ref.section}` : ref.title;
 }

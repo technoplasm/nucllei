@@ -77,7 +77,7 @@ BE が行う)。
   404 → not_found・2xx 以外 → upstream_status・不達 / タイムアウト → upstream_unreachable は一般の
   URL と同じ。redirect は上流の base 配下だけ `/ext/<name>/…` として辿る — /ext ゲートの書き換えと
   同じ判定)。表に無い name は `not_found`。/ext ゲート(routers/ext.py)と同じ表・同じ閉じ込め
-  なので、ブラウザで開ける `/ext/…` はモデルも同じ物を読める(`feed_image(url="/ext/cage/static/…png")`
+  なので、ブラウザで開ける `/ext/…` はモデルも同じ物を読める(`feed_image(url="/ext/doc-static/…png")`
   が proxy の先から取れる)。絶対 URL は **host を問わない** — 与えられた host には接続しない。
   相対 `/ext/{rest}` は「今のサーバの URL」= 同じ対応表。静的の閉じ込めは `_read_confined`
   (resolve 済みの実体が mount の root の中の通常ファイル。外へ出る symlink・ディレクトリ・不在は
@@ -92,7 +92,8 @@ BE が行う)。
   EXT_PUBLIC_BASES の 3 変数があり、同日に `EXT_DIR`(置いた物を暗黙に全部配る)一本にした。
   2026-10-05 に値の形で静的と proxy を選べる 1 本の対応表 `EXT_MOUNTS` に戻した(ken「入口を一つに
   して、このパスは proxy、このパスは静的、みたいにしたらいい」。目的は doc の配信を cage に持たせる
-  こと)。URL の形は変わらない(`/ext/cage/static/X`)。
+  こと)。URL の形は変わらない(`/ext/cage/static/X`)。2026-10-06 に llens 側が公開 URL を
+  `/ext/doc/…`(doc の HTML)・`/ext/doc-static/…`(図・PDF)に変えた(`/ext/cage` は廃止)。
 
 **一般の URL**(2026-10-03、ken 決定)。`url=` はスキーム付きの `http(s)://` URL なら
 **どこでも**取りに行く — 院内でもインターネットでも。「閉域だから外には届かない」は
@@ -179,7 +180,8 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 しないことがある。同じファイルの別表記)。静的の name は `<dir>/<sub>` の実在を見る。proxy の
 name は、URL → パスの向きは返さない(上流が返す物 — cage が描画した HTML 等 — が jail の同じ
 パスに在るとは限らない。呼び手は上流から取り込む)、パス → URL の向きは上流が 2xx を返すかを
-HEAD で確かめる。sandbox の `/ext/X` が nucllei 側で配信されていなければ「このサーバの /ext に
+HEAD で確かめる(base の中への redirect は辿り、飛び先の URL を返す — cage は `…/_index.md` を
+302 で `…/` へ飛ばす)。sandbox の `/ext/X` が nucllei 側で配信されていなければ「このサーバの /ext に
 無い」(not_found)。配備は nucllei と sandbox に**同じ組を mount する**規約(ken 2026-10-04)なので、
 通常この場合は起きない。`/ext` のファイルは URL で示すだけで、sandbox から汲み出して添付にする
 経路は持たない(生の md などを添付にして file_id を無駄に増やさない)。2026-10-03 までの
@@ -251,7 +253,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # - `SANDBOX_MOUNT_ROOT` = `/ext` — **sandbox(jail)側の read-only mount の置き場**
 #   (`sandbox/app/main.py` の RO_MOUNT_ROOT)。モデルが `path=` に書く形(`/ext/…`)は
 #   こちらで、nucllei の fs のパスではない(nucllei 自身の `/ext` は見ない)。URL の prefix と
-#   同じ `/ext` にしてあるので、**sandbox のパスと URL は同じ文字列** — `/ext/cage/static/X` は
+#   同じ `/ext` にしてあるので、**sandbox のパスと URL は同じ文字列** — `/ext/doc-static/X` は
 #   jail で開いても、ブラウザで開いても、tool の `url=` / `path=` に渡しても同じ物。これが
 #   唯一の意図した重なりで、引数名は読み方(URL は percent-decode、path はそのまま)だけを決める。
 #
@@ -1178,21 +1180,44 @@ async def mounted_path_for_url(url: str) -> str | None:
     return f"{_SANDBOX_MOUNT_PREFIX}{mount.name}/{served[1]}"
 
 
-async def _proxy_serves(mount: ExtMount, sub: str) -> bool:
-    """proxy の上流が `<base>/<sub>` を 2xx で返すか(HEAD。405 なら GET を開いてすぐ閉じる)。
-    redirect は辿らない(= 配信されていない扱い)。"""
+async def _proxy_served_rest(mount: ExtMount, sub: str) -> str | None:
+    """proxy の上流が `<base>/<sub>` を(base の中の redirect を辿った先で)2xx で返すなら、
+    その最終的な base からの残り(percent-encoded・`?query` 込み)。HEAD で確かめる(405 なら
+    GET を開いてすぐ閉じる)。
+
+    redirect は `_load_proxy` と同じ判定(`under_base`)で、Location が base 配下なら辿る —
+    cage は doc の正規形でない住所(`…/_index.md`・`.md` 無し・末尾 `/` 無し)を 302 で正規形へ
+    飛ばすので、飛び先で配信されていればその住所を返す(llens 2026-10-06)。base の外への
+    redirect・`MAX_REDIRECTS` を超えた・2xx 以外・不達は None(= 配信されていない扱い)。"""
     client = get_ext_client()
     url = upstream_url(mount, sub)
+    rest = quote(sub, safe="/")
     try:
-        for method in ("HEAD", "GET"):
-            request = client.build_request(method, url, timeout=proxy_timeout())
-            response = await client.send(request, stream=True)
-            await response.aclose()
-            if response.status_code != 405:
-                return response.is_success
+        for _ in range(MAX_REDIRECTS + 1):
+            for method in ("HEAD", "GET"):
+                request = client.build_request(method, url, timeout=proxy_timeout())
+                response = await client.send(request, stream=True)
+                await response.aclose()
+                if response.status_code != 405:
+                    break
+            if response.is_success:
+                return rest
+            location = response.headers.get("location")
+            if response.status_code not in _REDIRECT_STATUSES or not location:
+                return None
+            if has_path_traversal(location):
+                return None
+            target = urljoin(url, location)
+            remainder = under_base(target, mount.target)
+            if remainder is None:
+                return None
+            url, rest = f"{mount.target}/{remainder}", remainder
+        log.warning(
+            f"image_refs: too many redirects in ext proxy probe (name={mount.name})"
+        )
     except (httpx.HTTPError, httpx.InvalidURL) as e:
         log.warning(f"image_refs: ext proxy probe failed (name={mount.name}): {e!r}")
-    return False
+    return None
 
 
 def _static_url(mount: ExtMount, sub: str) -> str | None:
@@ -1219,7 +1244,9 @@ async def url_for_mounted_path(path: str) -> str | None:
     文字列、日本語等は percent-encode 済み)を返す:
 
     - 静的の name: `<dir>/<sub>` が実在する通常ファイル(root の外へ出る symlink は不可)
-    - proxy の name: 上流が `<base>/<sub>` を 2xx で返す(HEAD で確かめる — `_proxy_serves`)
+    - proxy の name: 上流が `<base>/<sub>` を 2xx で返す(HEAD で確かめる — `_proxy_served_rest`)。
+      上流が base の中へ redirect する(cage の `…/_index.md` → `…/` 等)なら辿り、**飛び先の**
+      `/ext/<name>/…` を返す
 
     それ以外(表に無い name・不在・ディレクトリ・`/workspace/…`・パスでない)は None — 理由は
     返さない(要る呼び手は `resolve_path` を続けて呼べば同じ境界で RefError が出る)。
@@ -1240,9 +1267,10 @@ async def url_for_mounted_path(path: str) -> str | None:
     if not sub:
         return None
     if mount.proxy:
-        if not await _proxy_serves(mount, sub):
+        rest = await _proxy_served_rest(mount, sub)
+        if rest is None:
             return None
-        return f"{_EXT_URL_PREFIX}{mount.name}/{quote(sub, safe='/')}"
+        return f"{_EXT_URL_PREFIX}{mount.name}/{rest}"
     return await asyncio.to_thread(_static_url, mount, sub)
 
 

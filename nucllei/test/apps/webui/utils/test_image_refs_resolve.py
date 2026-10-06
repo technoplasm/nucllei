@@ -1957,6 +1957,49 @@ def test_proxy_name_bridges(monkeypatch, tmp_path):
     assert asyncio.run(url_for_mounted_path("/ext/shared/s.png")) == "/ext/shared/s.png"
 
 
+def test_proxy_bridge_follows_redirects_inside_the_base(monkeypatch, tmp_path):
+    """sandbox のパス → URL は、上流が base の中へ redirect するなら辿り、**飛び先の** URL を
+    返す(cage は `…/_index.md` を 302 で `…/` へ飛ばす — llens 2026-10-06。辿らないと
+    `fetch_from_workspace` が取り込みに落ち、HTML が添付になる)。base の外への redirect は
+    今のまま None、ループは `MAX_REDIRECTS` で止まる。"""
+    from nucllei.utils.ext_upstreams import MAX_REDIRECTS
+    from nucllei.utils.image_refs import url_for_mounted_path
+
+    def handler(request):
+        path = request.url.path
+        if path == "/root/doc/X/_index.md":
+            return httpx.Response(302, headers={"location": "/root/doc/X/"})
+        if path == "/root/doc/X/":
+            return httpx.Response(200, content=b"<html></html>")
+        if path == "/root/doc/図/CQ1":
+            return httpx.Response(
+                302, headers={"location": "/root/doc/%E5%9B%B3/CQ1.md"}
+            )
+        if path == "/root/doc/図/CQ1.md":
+            return httpx.Response(200, content=b"<html></html>")
+        if path == "/root/out":
+            return httpx.Response(302, headers={"location": "http://other.test/x"})
+        if path == "/root/sideways":
+            return httpx.Response(302, headers={"location": "/rootx/a"})
+        if path == "/root/loop":
+            return httpx.Response(302, headers={"location": "/root/loop"})
+        return httpx.Response(404)
+
+    seen = _proxy(monkeypatch, tmp_path, handler)
+    assert asyncio.run(url_for_mounted_path("/ext/cage/doc/X/_index.md")) == (
+        "/ext/cage/doc/X/"
+    )
+    assert [r.url.path for r in seen] == ["/root/doc/X/_index.md", "/root/doc/X/"]
+    assert asyncio.run(url_for_mounted_path("/ext/cage/doc/図/CQ1")) == (
+        "/ext/cage/doc/%E5%9B%B3/CQ1.md"
+    )
+    for path in ("/ext/cage/out", "/ext/cage/sideways"):
+        assert asyncio.run(url_for_mounted_path(path)) is None, path
+    seen.clear()
+    assert asyncio.run(url_for_mounted_path("/ext/cage/loop")) is None
+    assert len(seen) == MAX_REDIRECTS + 1
+
+
 def test_log_mounts_lists_the_table(monkeypatch, tmp_path, caplog):
     import logging
 
