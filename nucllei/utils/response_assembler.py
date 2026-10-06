@@ -50,11 +50,14 @@ class ContentBlocksAssembler:
         # 現ストリームの出力範囲(stream_blocks 用)。start_stream で確定する。
         self._stream_start_index = 0
         self._stream_start_text_len = 0
+        # このターンで何回目のモデル呼び出しか(診断ログ用 — refs #142)。
+        self.stream_count = 0
 
     # --- ストリーム境界 -------------------------------------------------
 
     def start_stream(self):
         """ストリーム(モデル呼び出し 1 回)スコープの状態をリセットする。"""
+        self.stream_count += 1
         self._response_tool_calls = []
         self._finish_reason = None
         self.last_frame = {"structural": False, "appends": []}

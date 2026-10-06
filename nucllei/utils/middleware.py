@@ -7,6 +7,7 @@ import ast
 import inspect
 import threading
 import time
+from collections import deque
 
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -1237,6 +1238,160 @@ def stream_error_content(error) -> str:
     return str(error)
 
 
+# --- モデル呼び出しの診断ログ(refs #142) -------------------------------------
+#
+# 1 回のモデル呼び出し(ストリーム 1 本)を読み終えた時点で 1 行だけ出す。挙動は
+# 変えない(観測のみ)。本文は出さない — 長さと状態だけ。異常の疑いがあるときだけ
+# WARNING に上げ、生 SSE の先頭/末尾フレーム(本文 delta は丸め済み)を添える。
+# 読み方は _memos/streaming-wire-v2.md「モデル呼び出しの診断ログ」。
+
+# assembler が解釈する delta のキー。これ以外に値の入ったキーが来たら名前を記録する
+# (上流が tool call を別のキー・形で流していないかを見るため)。
+_KNOWN_DELTA_KEYS = frozenset(
+    {"role", "content", "reasoning_content", "reasoning", "tool_calls"}
+)
+_DIAG_RAW_FRAMES = 3  # 先頭・末尾それぞれ保持するフレーム数
+_DIAG_RAW_FRAME_CHARS = 500  # 生フレーム 1 つの上限文字数
+_DIAG_BODY_CHARS = 40  # 生フレーム中の本文 delta の上限文字数
+_DIAG_SHORT_TEXT_CHARS = 200  # (d) 「text だけで途中終了」とみなす上限
+_DIAG_SENTENCE_ENDS = ("。", ".", "!", "?", "！", "？")
+
+
+def _clip(value, limit):
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "…"
+    return value
+
+
+def _redact_raw_frame(line: str) -> str:
+    """生 SSE 行の本文 delta(content / reasoning / tool 引数)を丸め、全体を切る。"""
+    try:
+        payload = line[len("data:") :].strip() if line.startswith("data:") else line
+        data = json.loads(payload)
+        if isinstance(data, dict):
+            for choice in data.get("choices") or []:
+                delta = choice.get("delta") if isinstance(choice, dict) else None
+                if not isinstance(delta, dict):
+                    continue
+                for key in ("content", "reasoning_content", "reasoning"):
+                    if key in delta:
+                        delta[key] = _clip(delta[key], _DIAG_BODY_CHARS)
+                for tool_call in delta.get("tool_calls") or []:
+                    function = (
+                        tool_call.get("function")
+                        if isinstance(tool_call, dict)
+                        else None
+                    )
+                    if isinstance(function, dict) and "arguments" in function:
+                        function["arguments"] = _clip(
+                            function["arguments"], _DIAG_BODY_CHARS
+                        )
+            line = "data: " + json.dumps(data, ensure_ascii=False)
+    except Exception:
+        pass
+    return _clip(line.strip(), _DIAG_RAW_FRAME_CHARS)
+
+
+class _ModelCallDiag:
+    """1 ストリーム分の診断値を集める。どのメソッドも例外を外へ出さない。"""
+
+    def __init__(self):
+        self.text_chars = 0
+        self.reasoning_chars = 0
+        self.text_tail = ""
+        self.unknown_delta_keys = set()
+        self.completion_tokens = None
+        self.frame_count = 0
+        self.head_frames = []
+        self.tail_frames = deque(maxlen=_DIAG_RAW_FRAMES)
+
+    def observe_line(self, line):
+        try:
+            if self.frame_count < _DIAG_RAW_FRAMES:
+                self.head_frames.append(line)
+            else:
+                self.tail_frames.append(line)
+            self.frame_count += 1
+        except Exception:
+            pass
+
+    def observe_usage(self, usage):
+        try:
+            if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
+                self.completion_tokens = usage["completion_tokens"]
+        except Exception:
+            pass
+
+    def observe_delta(self, delta):
+        try:
+            if not isinstance(delta, dict):
+                return
+            for key, value in delta.items():
+                if key not in _KNOWN_DELTA_KEYS and value not in (None, "", [], {}):
+                    self.unknown_delta_keys.add(key)
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+            if isinstance(reasoning, str):
+                self.reasoning_chars += len(reasoning)
+            content = delta.get("content")
+            if isinstance(content, str) and content:
+                self.text_chars += len(content)
+                self.text_tail = (self.text_tail + content)[-16:]
+        except Exception:
+            pass
+
+    def warning_reasons(self, finish_reason, tool_calls, has_tools):
+        reasons = []
+        if finish_reason == "tool_calls" and not tool_calls:
+            reasons.append("finish_reason=tool_calls but no tool_calls")
+        if not finish_reason:
+            reasons.append("no finish_reason")
+        if finish_reason == "length":
+            reasons.append("finish_reason=length")
+        if (
+            has_tools
+            and not tool_calls
+            and self.reasoning_chars == 0
+            and 0 < self.text_chars < _DIAG_SHORT_TEXT_CHARS
+            and not self.text_tail.rstrip().endswith(_DIAG_SENTENCE_ENDS)
+        ):
+            reasons.append("short text-only reply cut mid-sentence")
+        return reasons
+
+    def log(self, *, metadata, model, call_index, finish_reason, tool_calls):
+        try:
+            names = [
+                ((call or {}).get("function") or {}).get("name")
+                for call in tool_calls or []
+            ]
+            model_id = model.get("id") if isinstance(model, dict) else model
+            line = (
+                f"model call chat_id={metadata.get('chat_id')} "
+                f"message_id={metadata.get('message_id')} call={call_index} "
+                f"model={model_id} finish_reason={finish_reason} "
+                f"text_chars={self.text_chars} "
+                f"reasoning_chars={self.reasoning_chars} "
+                f"tool_calls={len(names)}{names} "
+                f"completion_tokens={self.completion_tokens} "
+                f"unknown_delta_keys={sorted(self.unknown_delta_keys)}"
+            )
+            reasons = self.warning_reasons(
+                finish_reason, tool_calls, bool(metadata.get("tools"))
+            )
+            if not reasons:
+                log.info(line)
+                return
+            head = [_redact_raw_frame(f) for f in self.head_frames]
+            tail = [_redact_raw_frame(f) for f in self.tail_frames]
+            log.warning(
+                f"{line} frames={self.frame_count} "
+                f"head_frames={json.dumps(head, ensure_ascii=False)} "
+                f"tail_frames={json.dumps(tail, ensure_ascii=False)} "
+                f"WARN: {'; '.join(reasons)}"
+            )
+        except Exception as e:
+            log.debug("model call diagnostic log failed: %s", e)
+
+
 async def consume_model_stream(
     request,
     response,
@@ -1296,6 +1451,9 @@ async def consume_model_stream(
 
     await emit_snapshot(persist=False)
 
+    # 診断ログ(refs #142)— 観測のみ。下の処理には一切影響させない。
+    diag = _ModelCallDiag()
+
     async for line in response.body_iterator:
         line = line.decode("utf-8") if isinstance(line, bytes) else line
         data = line
@@ -1307,6 +1465,8 @@ async def consume_model_stream(
         # "data:" is the prefix for each event
         if not data.startswith("data:"):
             continue
+
+        diag.observe_line(line)
 
         # Remove the prefix
         data = data[len("data:") :].strip()
@@ -1340,6 +1500,7 @@ async def consume_model_stream(
                 # チャンクに載る累積 usage(continuous)は下の chat:usage(揮発)で
                 # 流すのみで、ここを通らない限り DB には書かない。
                 usage = data.get("usage", {})
+                diag.observe_usage(usage)
                 if usage:
                     # 生成所要時間(#102): この呼び出しの stream 消費の壁時計を実測して
                     # usage に添える(DB では completion 同様に累積 → ターンの生成時間。
@@ -1362,6 +1523,7 @@ async def consume_model_stream(
             # 最終真値は上の choices: [] フレーム(chat:completion {usage})、
             # それが来ない配備ではストリーム終端の後始末が受け持つ。
             live_usage = data.get("usage")
+            diag.observe_usage(live_usage)
             if live_usage:
                 pending_usage = live_usage
                 if (
@@ -1377,6 +1539,7 @@ async def consume_model_stream(
                     )
 
             assembler.note_finish_reason(choices[0].get("finish_reason"))
+            diag.observe_delta(choices[0].get("delta", {}))
 
             changed = assembler.handle_delta(choices[0].get("delta", {}))
 
@@ -1425,6 +1588,14 @@ async def consume_model_stream(
         )
 
     response_tool_calls, mismatch = assembler.finish_stream()
+
+    diag.log(
+        metadata=metadata,
+        model=model,
+        call_index=getattr(assembler, "stream_count", None),
+        finish_reason=assembler.finish_reason,
+        tool_calls=response_tool_calls,
+    )
 
     if mismatch == MISMATCH_MISSING_TOOL_CALLS:
         # llens(#18-2): "tool_calls" 終了なのにデルタから 1 つも組めていない

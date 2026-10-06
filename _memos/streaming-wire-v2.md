@@ -237,6 +237,13 @@ DB upsert は「構造変化時 + 2 秒スロットル + done/cancel/error 時�
 返す(`ingest_model_response_json`)。tool ループの追撃呼び出しは元リクエストの stream 指定を
 尊重する — 非 stream しかできないモデルでも tool が動く。
 
+## モデル呼び出しの診断ログ(2026-10-06、refs #142)
+
+`consume_model_stream` はストリーム 1 本を読み終えるたびに 1 行出す(本文は出さず長さと状態だけ): `docker logs llens-nucllei 2>&1 | grep 'model call'`。
+形は `model call chat_id=… message_id=… call=N model=… finish_reason=stop text_chars=… reasoning_chars=… tool_calls=1['search_phone'] completion_tokens=… unknown_delta_keys=[]`(`call` はターン内の何回目か)。
+WARNING は (a) `tool_calls` 終了なのに 0 件 / (b) finish_reason 無し / (c) `length` / (d) tool 付きで reasoning も tool call も無い 200 字未満の text が句点で終わらない、のとき。行末の `WARN:` に理由。
+WARNING の行だけ `head_frames=` / `tail_frames=` に生 SSE の先頭・末尾 3 フレーム(各 500 字、本文・tool 引数の delta は 40 字に丸め)を付ける。`grep 'model call' | grep WARN` で拾い、`unknown_delta_keys` と末尾フレームで上流の取りこぼしを見る。
+
 ## テスト
 
 - BE: `test_native_tool_calling.py`(実イベントバス購読 + SSE EOF 完走待ちで駆動)、
