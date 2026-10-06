@@ -66,11 +66,27 @@ function encodeTextDirective(text: string): string {
 	);
 }
 
+/**
+ * 見出しの fragment の先頭のローマ数字の番号(`ⅩⅠ．` `Ⅱ-1 ` 等)を外す。モデルはローマ数字を
+ * 写し間違える(staging 2026-10-06: `ⅩⅠ．予防措置と効果` → `Ⅹ．…`、`Ⅹ．…` → `Ⅺ．…`)ので、
+ * cage が番号付きの見出しに置く「番号を除いた別名」(llens cage/render.py `heading_aliases`、
+ * 番号の形は同ファイルの `_NUM_PREFIX_RE`)に飛ばす。アラビア数字の番号は写し間違えが
+ * 見られず、外すと「1. 概要」「2. 概要」のような別名の衝突で飛べなくなりうるので外さない。
+ * 番号が無ければそのまま返す。
+ */
+const ROMAN_PREFIX_RE =
+	/^(?:[Ⅰ-Ⅻⅰ-ⅻ]+(?:[.．\-－‐](?:[Ⅰ-Ⅻⅰ-ⅻ]+|[0-9０-９]+))*(?:[.．、:：][\s　]*|[\s　]+))/;
+
+function stripRomanNumber(fragment: string): string {
+	const stripped = fragment.replace(ROMAN_PREFIX_RE, '').trim();
+	return stripped || fragment;
+}
+
 function sectionLabel(fragment: string): string | null {
 	if (!fragment) return null;
 	// Text Fragment は見出しではなく引用文 — 「…」で見せる
 	const text = textDirective(fragment);
-	return text !== null ? `「${text}」` : fragment;
+	return text !== null ? `「${text}」` : stripRomanNumber(fragment);
 }
 
 /**
@@ -89,11 +105,13 @@ export function resolveBracketRef(
 		const fragment = hash >= 0 ? safeDecode(inner.slice(hash + 1)) : '';
 		const quote = textDirective(fragment);
 		// 引用文は `#:~:text=<Text Fragment の規則でエンコード>` に組み直す(`text=` 抜けも直す)。
-		// 見出し(`#見出し`)は normalizeLink の percent-encode のまま
+		// 見出し(`#見出し`)は先頭のローマ数字を外した別名へ(stripRomanNumber)、percent-encode は normalizeLink
 		const href =
 			quote !== null
 				? `${normalizeLink(pageUrl)}#:~:text=${encodeTextDirective(quote)}`
-				: normalizeLink(inner);
+				: fragment
+					? normalizeLink(`${pageUrl}#${stripRomanNumber(fragment)}`)
+					: normalizeLink(inner);
 		return {
 			kind: 'ext',
 			href,

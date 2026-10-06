@@ -46,10 +46,23 @@ describe('Text Fragment の組み直し(staging 2026-10-06: モデルが `text=`
 		expect(ref.href).toBe(`${page}#:~:text=${enc('1 回目の予防内服を')}`);
 	});
 
-	it('見出し(#見出し)はそのまま', () => {
-		const r = resolveBracketRef(`${A}#ⅩⅠ．予防措置と効果`)!;
-		expect(r.section).toBe('ⅩⅠ．予防措置と効果');
-		expect(r.href).toBe(`${A}#ⅩⅠ．予防措置と効果`);
+	it('見出しの先頭のローマ数字は外して cage の別名へ(写し間違えても飛べる)', () => {
+		for (const f of [
+			'ⅩⅠ．予防措置と効果',
+			'Ⅹ．予防措置と効果',
+			'Ⅺ．予防措置と効果',
+			'Ⅱ-1 予防措置と効果'
+		]) {
+			const r = resolveBracketRef(`${A}#${f}`)!;
+			expect(r.href).toBe(`${A}#予防措置と効果`);
+			expect(r.section).toBe('予防措置と効果');
+		}
+	});
+
+	it('アラビア数字の番号・番号の無い見出しはそのまま', () => {
+		expect(resolveBracketRef(`${A}#1. 概要`)!.href).toBe(`${A}#1. 概要`);
+		expect(resolveBracketRef(`${A}#Ⅱ型糖尿病`)!.href).toBe(`${A}#Ⅱ型糖尿病`);
+		expect(resolveBracketRef(`${A}#実習生の対応`)!.href).toBe(`${A}#実習生の対応`);
 	});
 });
 
@@ -66,10 +79,11 @@ describe('番号付き引用(#146 の簡易版)', () => {
 			[1, '02_14-2_針刺し'],
 			[2, '14-2.pdf']
 		]);
-		expect(entries[0].sections.map((s) => s.label)).toEqual(['Ⅱ．洗浄法', '「流水」']);
+		// ローマ数字の番号は外して見せ、リンクも番号を除いた別名へ(モデルが写し間違えるので)
+		expect(entries[0].sections.map((s) => s.label)).toEqual(['洗浄法', '「流水」']);
 		// 一覧の行はページ、節の行とチップはその箇所(fragment 付き)へ
 		expect(decodeURI(entries[0].pageHref)).toBe(A);
-		expect(decodeURI(entries[0].sections[0].href)).toBe(`${A}#Ⅱ．洗浄法`);
+		expect(decodeURI(entries[0].sections[0].href)).toBe(`${A}#洗浄法`);
 		expect(entries[1].sections).toEqual([]);
 	});
 
