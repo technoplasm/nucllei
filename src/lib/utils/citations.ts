@@ -44,11 +44,33 @@ function safeDecode(s: string): string {
 	}
 }
 
+/**
+ * Text Fragment(`:~:text=…`)の引用文。モデルは `text=` を落として `#:~:引用文` と書くことが
+ * ある(staging 2026-10-06 — ブラウザは `text=` が無いと何もしない)ので、`:~:` で始まれば
+ * 引用文とみなす。デコード済みの fragment を受ける。引用文でなければ null。
+ */
+function textDirective(fragment: string): string | null {
+	const m = fragment.match(/^:~:(?:text=)?(.*)$/s);
+	return m && m[1] ? m[1] : null;
+}
+
+/**
+ * 引用文を Text Fragment の値としてエンコードする。encodeURIComponent が残す `-` `,` は
+ * 指令の区切り(prefix- / ,textEnd)なので、`&` と合わせて必ず percent-encode する —
+ * 空白・`%`・記号を含む引用文でもそのまま効くように。
+ */
+function encodeTextDirective(text: string): string {
+	return encodeURIComponent(text).replace(
+		/[-,&]/g,
+		(c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')
+	);
+}
+
 function sectionLabel(fragment: string): string | null {
 	if (!fragment) return null;
-	// Text Fragment(`#:~:text=…`)は見出しではなく引用文 — 「…」で見せる
-	const text = fragment.match(/^:~:text=(.*)$/);
-	return text ? `「${text[1]}」` : fragment;
+	// Text Fragment は見出しではなく引用文 — 「…」で見せる
+	const text = textDirective(fragment);
+	return text !== null ? `「${text}」` : fragment;
 }
 
 /**
@@ -64,13 +86,21 @@ export function resolveBracketRef(
 		const hash = inner.indexOf('#');
 		const pageUrl = hash >= 0 ? inner.slice(0, hash) : inner;
 		const parts = pageUrl.split('/').filter(Boolean);
+		const fragment = hash >= 0 ? safeDecode(inner.slice(hash + 1)) : '';
+		const quote = textDirective(fragment);
+		// 引用文は `#:~:text=<Text Fragment の規則でエンコード>` に組み直す(`text=` 抜けも直す)。
+		// 見出し(`#見出し`)は normalizeLink の percent-encode のまま
+		const href =
+			quote !== null
+				? `${normalizeLink(pageUrl)}#:~:text=${encodeTextDirective(quote)}`
+				: normalizeLink(inner);
 		return {
 			kind: 'ext',
-			href: normalizeLink(inner),
+			href,
 			pageHref: normalizeLink(pageUrl),
 			key: safeDecode(pageUrl),
 			title: safeDecode(parts[parts.length - 1] ?? pageUrl),
-			section: hash >= 0 ? sectionLabel(safeDecode(inner.slice(hash + 1))) : null
+			section: sectionLabel(fragment)
 		};
 	}
 	if (FILE_ID_RE.test(inner)) {

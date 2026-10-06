@@ -18,6 +18,41 @@ const env: CiteEnv = { fileNames: new Map([[FID, '手順書.pdf']]) };
 const A = '/ext/cage/doc/院内マニュアル/感染対策マニュアル/02_14-2_針刺し';
 const B = '/ext/cage/static/kansen_manual/docs/14-2.pdf';
 
+describe('Text Fragment の組み直し(staging 2026-10-06: モデルが `text=` を落とす)', () => {
+	const enc = (s: string) => encodeURIComponent(s);
+	const page = A.split('/').map(enc).join('/');
+
+	it('`#:~:引用文`(text= 抜け)は `#:~:text=` に直し、表示は「引用文」', () => {
+		const r = resolveBracketRef(`${A}#:~:曝露後できるだけ早く`)!;
+		expect(r.href).toBe(`${A}#:~:text=${enc('曝露後できるだけ早く')}`);
+		expect(r.section).toBe('「曝露後できるだけ早く」');
+	});
+
+	it('正しい `#:~:text=` も同じ形(二重にしない)', () => {
+		const r = resolveBracketRef(`${A}#:~:text=曝露後できるだけ早く`)!;
+		expect(r.href).toBe(`${A}#:~:text=${enc('曝露後できるだけ早く')}`);
+	});
+
+	it('空白・%・- , & は Text Fragment の規則でエンコード(指令の区切りにしない)', () => {
+		const r = resolveBracketRef(`${A}#:~:おおまかに HBV 30%`)!;
+		expect(r.href.endsWith(`#:~:text=${enc('おおまかに HBV 30%')}`)).toBe(true);
+		const r2 = resolveBracketRef(`${A}#:~:text=1-2 時間, A&B`)!;
+		expect(r2.href.endsWith('#:~:text=1%2D2%20%E6%99%82%E9%96%93%2C%20A%26B')).toBe(true);
+		expect(r2.section).toBe('「1-2 時間, A&B」');
+	});
+
+	it('markdown-it 経由(normalizeLink)でもページ部は percent-encode、引用文は組み直し', () => {
+		const [ref] = collectCiteRefs(lex(`本文 [${A}#:~:1 回目の予防内服を]`));
+		expect(ref.href).toBe(`${page}#:~:text=${enc('1 回目の予防内服を')}`);
+	});
+
+	it('見出し(#見出し)はそのまま', () => {
+		const r = resolveBracketRef(`${A}#ⅩⅠ．予防措置と効果`)!;
+		expect(r.section).toBe('ⅩⅠ．予防措置と効果');
+		expect(r.href).toBe(`${A}#ⅩⅠ．予防措置と効果`);
+	});
+});
+
 describe('番号付き引用(#146 の簡易版)', () => {
 	it('[URL1] [URL1] [URL2] → 1 1 2', () => {
 		expect(chipNumbers([`a [${A}] b [${A}] c [${B}]`])).toEqual([1, 1, 2]);
