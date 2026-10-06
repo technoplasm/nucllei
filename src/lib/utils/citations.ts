@@ -75,7 +75,7 @@ function encodeTextDirective(text: string): string {
  * 番号が無ければそのまま返す。
  */
 const ROMAN_PREFIX_RE =
-	/^(?:[Ⅰ-Ⅻⅰ-ⅻ]+(?:[.．\-－‐](?:[Ⅰ-Ⅻⅰ-ⅻ]+|[0-9０-９]+))*(?:[.．、:：][\s　]*|[\s　]+))/;
+	/^(?:[Ⅰ-Ⅻⅰ-ⅻ]+(?:[.．\-－‐](?:[Ⅰ-Ⅻⅰ-ⅻ]+|[0-9０-９]+))*(?:[.．、:：][\s\u3000]*|[\s\u3000]+))/;
 
 function stripRomanNumber(fragment: string): string {
 	const stripped = fragment.replace(ROMAN_PREFIX_RE, '').trim();
