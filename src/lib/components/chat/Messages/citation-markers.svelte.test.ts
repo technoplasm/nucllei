@@ -43,3 +43,30 @@ describe('リンクによる簡易引用(#146 の簡易版)', () => {
 		expect(body).toContain('[1]。');
 	});
 });
+
+describe('番号チップ(#146 簡易版、2026-10-06 吹き出し化)', () => {
+	it('チップはリンクではなく吹き出しのトリガー — 押してもページは開かない、コピーは「[1]」', async () => {
+		const { CitationScope } = await import('./citations.svelte');
+		const { collectCiteRefs } = await import('$lib/utils/citations');
+		const { lex } = await import('$lib/utils/markdown-it');
+		const content = '根拠 [/ext/cage/doc/a#節] と [/ext/cage/doc/a#:~:text=引用]。';
+		// SSR では $effect が走らないので、Markdown が書き込むはずの引用列を先に入れておく
+		const citations = new CitationScope();
+		citations.set(0, collectCiteRefs(lex(content)));
+		const { body } = render(Markdown, {
+			props: { id: 'm', content, citations, citationSlot: 0 },
+			context: i18nContext()
+		});
+		// 同じページの 2 箇所は同じ番号 1 のチップ 2 つ。どちらも role=button で href を持たない
+		const chips = body.match(/<span[^>]*role="button"[^>]*>/g) ?? [];
+		expect(chips).toHaveLength(2);
+		for (const chip of chips) {
+			expect(chip).toContain('aria-haspopup="dialog"');
+			expect(chip).toContain('aria-expanded="false"');
+			expect(chip).toContain('tabindex="0"');
+			expect(chip).not.toContain('href=');
+		}
+		expect(body).not.toContain('href="/ext/cage/doc/a');
+		expect(body).toContain('<span class="sr-only">[</span>1<span class="sr-only">]</span>');
+	});
+});
