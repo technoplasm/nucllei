@@ -24,6 +24,7 @@ import logging
 import mimetypes
 import os
 import posixpath
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
@@ -43,6 +44,13 @@ from nucllei.utils.ext_acl import (
     ext_visible_groups,
     is_acl_rel,
     sandbox_ext_mounts,
+)
+from nucllei.utils.file_limit import (
+    ADMIN_SETTING,
+    attachment_limit_bytes,
+    format_limit,
+    sandbox_limit_fields,
+    transfer_cap,
 )
 from nucllei.utils.tool_errors import (
     ToolCallError,
@@ -376,6 +384,53 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
     )
 
 
+# ファイルの出入り (send_to_workspace / exports の自動添付 / fetch_from_workspace) の上限は
+# RC `ATTACHMENT_MAX_SIZE_MB` の 1 つ (`utils/file_limit`。チャットへのアップロードと同じ)。
+# sandbox には `file_limit_bytes` で渡し、sandbox は自分の安全上限との小さいほうに従う。
+# 超えたときの文は全経路で同じ形: 上限の値 (MB) と、変えるのは管理者 (どこで) と。
+_LIMIT_BY_ADMIN = f"上限は管理者の設定 ({ADMIN_SETTING}) で、引数では上げられない"
+
+# sandbox の 413 の detail `file too large: N bytes (limit L)`
+_TOO_LARGE_RE = re.compile(r"(\d+) bytes \(limit (\d+)\)")
+
+
+def _limit(user: Optional[dict]) -> Optional[int]:
+    """この user のファイルの出入りの上限 (バイト、None = 無制限)。呼ぶたびに RC を読む。"""
+    return attachment_limit_bytes(None, user)
+
+
+def _too_large_413(
+    e: Exception, limit: Optional[int]
+) -> tuple[Optional[int], Optional[int]]:
+    """sandbox の 413 から (実サイズ, 効いた上限)。拾えなければ (None, こちらの上限)。
+    効いた上限は sandbox の安全上限のこともある (こちらより小さい配備 — 起動時に warning)。"""
+    m = _TOO_LARGE_RE.search(str(getattr(e, "detail", "") or e))
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None, limit
+
+
+def _too_large_transfer(
+    abs_path: str, size: Optional[int], limit: Optional[int]
+) -> ToolError:
+    """取り出し (fetch_from_workspace) の上限超過。ファイルはある。"""
+    what = f" {_human_size(size)} で、" if size is not None else ""
+    return ToolOutcome(
+        f"{abs_path} は{what}添付できる上限 {format_limit(limit)} を超えている"
+        f" ({_LIMIT_BY_ADMIN})。ファイルは存在する",
+        "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。",
+    )
+
+
+def _transfer_error(e: Exception, abs_path: str, limit: Optional[int]) -> ToolError:
+    """fetch_from_workspace の `/files/read` の失敗。413 は上限超過、それ以外は `_files_error`。"""
+    if isinstance(e, SandboxHTTPError) and e.status == 413:
+        log.info(f"[sandbox] {abs_path} exceeds the file limit: {e.detail[:200]}")
+        size, eff = _too_large_413(e, limit)
+        return _too_large_transfer(abs_path, size, eff)
+    return _files_error(e, abs_path)
+
+
 def _unusable_path(abs_path: str) -> ToolError:
     """sandbox `/files/*` の 400 (経路の symlink・`..` 等)。read_file が stat で末端の symlink を
     見つけたときも同じ文で言う (#153)。"""
@@ -581,9 +636,19 @@ def _safe_import_name(name: str) -> str:
 # `ref_errors.file_id_error`
 _NO_FILE = "レコードが無い、またはアクセス権が無い"
 
+# 取り込み (file_id / 配信口 URL) の上限超過の理由。`_import_one` は先頭で見分ける
+_TOO_LARGE_FILE = "取り込みの上限"
+
+
+def _too_large_file(size: Optional[int], limit: Optional[int]) -> str:
+    what = f" (実サイズ {_human_size(size)})" if size is not None else ""
+    return (
+        f"{_TOO_LARGE_FILE} {format_limit(limit)} を超えている{what}。{_LIMIT_BY_ADMIN}"
+    )
+
 
 def _too_large_import(u: str, err) -> str:
-    """send_to_workspace(url=) の too_large: 上限は valve (管理者の設定) で引数では上げられない。"""
+    """send_to_workspace(url=) の too_large: 上限は RC (管理者の設定) で引数では上げられない。"""
     limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
     if err.size is None:
         what = f"{u} は取り込みの上限{limit} を超えている (実サイズは不明)。"
@@ -600,8 +665,8 @@ def _too_large_import(u: str, err) -> str:
     from nucllei.utils.ref_errors import show_as_link
 
     return (
-        f"ERROR: {what}sandbox には取り込めない (上限は管理者の設定で、引数では"
-        f"上げられない)。リンク切れではない。{_NEXT}" + show_as_link(u)
+        f"ERROR: {what}sandbox には取り込めない ({_LIMIT_BY_ADMIN})。"
+        f"リンク切れではない。{_NEXT}" + show_as_link(u)
     )
 
 
@@ -610,7 +675,7 @@ def _explain_ref_error(u: str, err) -> ToolError:
 
     組み立ては全 tool 共通の `utils/ref_errors.explain_ref_error` (feed_image / fetch_url と
     同じ code を同じ文で言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool
-    固有の言い方は too_large (取り込みの上限は valve) と unexplained だけ (2026-10-04 に
+    固有の言い方は too_large (取り込みの上限は RC `ATTACHMENT_MAX_SIZE_MB`) と unexplained だけ (2026-10-04 に
     redirect / 上流不達 / 許可先の独自文面は既定へ揃えた)。内部名 (env 名・detail・code) は
     出さない (resolver が warning ログに残す)。
     """
@@ -633,13 +698,7 @@ def _explain_mount_error(abs_path: str, err) -> ToolError:
     """
     code = err.code
     if code == "too_large":
-        limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
-        size = f" {_human_size(err.size)} で、" if err.size is not None else ""
-        return ToolOutcome(
-            f"{abs_path} は{size}添付できる上限{limit} を超えている "
-            "(上限は管理者の設定で、引数では上げられない)。ファイルは存在する",
-            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから渡す。",
-        )
+        return _too_large_transfer(abs_path, err.size, err.limit)
     if code == "not_found":
         # nucllei の /ext (EXT_MOUNTS) に無い = 本当に無いか、配備の mount のずれ (sandbox にだけ
         # mount されている)。resolver は分けられないので 1 文で両方を言う。ken 2026-10-04:
@@ -734,18 +793,15 @@ class Tools:
     class Valves(BaseModel):
         # 向き先 (SANDBOX_URL) と共有トークン (SANDBOX_TOKEN) は **env 専用** —
         # valve に置かない。理由はモジュール冒頭の SANDBOX_URL のコメント。
+        # ファイルの出入りの上限も valve に置かない — RC `ATTACHMENT_MAX_SIZE_MB` の 1 つ
+        # (`utils/file_limit`。旧 valve `url_max_mb` は廃止。DB の保存値は merge_valves_update が
+        # 「今の Valves に無いキー」として落とす)
         default_timeout_s: int = Field(
             default=120, description="実行 wall clock 既定秒数 (サーバー上限で clamp)"
         )
         max_output_chars: int = Field(
             default=10_000,
             description="stdout/stderr を tool result に載せる上限 (文字)。超過は head+tail 切り詰め。0 = 無効",
-        )
-        url_max_mb: float = Field(
-            default=50.0,
-            description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
-            "(http(s) URL はどこでも。同一サーバの /ext/… = sandbox の /ext/… と同じ物は"
-            "コピーしないので、この上限は掛からない)",
         )
         image_hint: str = Field(
             default=READ_IMAGE_HINT,
@@ -815,23 +871,27 @@ class Tools:
         message_id,
         __event_emitter__,
         expires: Optional[date] = None,
+        limit: Optional[int] = None,
     ) -> list[str]:
         """sandbox の exports 差分を Files に登録・添付し、報告行を返す。
-        `expires` (#149) があり 1 件でも添付したら、workspace 側の写しの期限を 1 行添える。"""
+        `expires` (#149) があり 1 件でも添付したら、workspace 側の写しの期限を 1 行添える。
+        `limit` は渡したファイルの上限 (sandbox が entry に `limit` を返せばそちらが効いた値)。"""
         lines = []
         attachments = []
         for out in exports:
             name = out["name"]
             if out.get("truncated") or "b64" not in out:
-                # 転送上限(FILE_LIMIT、既定 25MB / compose 100MB)超過で未添付。
-                # モデルにも戻り値で明示 + ユーザーにも display で警告(気付けるように)。
+                # 添付の上限 (RC ATTACHMENT_MAX_SIZE_MB と sandbox の安全上限の小さいほう) 超過で
+                # 未添付。モデルにも戻り値で明示 + ユーザーにも display で警告(気付けるように)。
                 # display (人間の目) には事実だけ、次の手はモデル向けの行にだけ付ける
+                eff = out.get("limit") if isinstance(out.get("limit"), int) else limit
                 warn = (
-                    f"{name} ({_human_size(out['size'])}) は転送上限を超えて添付できなかった"
-                    " (workspace には残っている)。"
+                    f"{name} ({_human_size(out['size'])}) は添付の上限 {format_limit(eff)} を"
+                    "超えて添付できなかった (workspace には残っている)。"
                 )
                 lines.append(
-                    f"- ⚠ {warn}{_NEXT}分割・圧縮するか、必要な部分だけ書き出す。"
+                    f"- ⚠ {warn}({_LIMIT_BY_ADMIN}) {_NEXT}分割・圧縮するか、"
+                    "必要な部分だけ書き出す。"
                 )
                 display(f"⚠ {warn}")
                 continue
@@ -984,12 +1044,15 @@ class Tools:
     ) -> str:
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
+        limit = _limit(__user__)
         payload = {
             "user_id": __user__["id"],
             "lang": lang,
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
             "mounts": _ext_mounts(__user__),
+            # exports/ の自動添付の上限
+            **sandbox_limit_fields(limit),
         }
         try:
             res = await self._post("/exec", payload, payload["timeout_s"] + 30)
@@ -1002,6 +1065,7 @@ class Tools:
             __message_id__,
             __event_emitter__,
             _cache_expiry(res),
+            limit,
         )
         return self._format_exec_result(res, output_lines, payload["timeout_s"])
 
@@ -1021,6 +1085,7 @@ class Tools:
                 "この呼び出しにはチャットの id が無く、状態を持つ実行ができない",
                 "単発で足りるなら run_python_once を使う。",
             )
+        limit = _limit(__user__)
         payload = {
             "user_id": __user__["id"],
             "chat_id": __chat_id__,
@@ -1028,6 +1093,8 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
             # 常駐 kernel は bind の一覧が変わると作り直される (session_reset が返る。#152)
             "mounts": _ext_mounts(__user__),
+            # exports/ の自動添付の上限
+            **sandbox_limit_fields(limit),
         }
         try:
             res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
@@ -1040,6 +1107,7 @@ class Tools:
             __message_id__,
             __event_emitter__,
             _cache_expiry(res),
+            limit,
         )
         return self._format_cell_result(res, output_lines)
 
@@ -1168,7 +1236,9 @@ class Tools:
         if url:
             return await self._import_url(url, __user__)
         if file_id:
-            return await self._import_one(file_id, __user__["id"])
+            return await self._import_one(
+                file_id, __user__["id"], limit=_limit(__user__)
+            )
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
         imported = 0
@@ -1176,7 +1246,9 @@ class Tools:
         for fid, fname in _iter_context_files(__files__, __metadata__):
             if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
-            line, failure, exp = await self._import_file(fid, fname, __user__["id"])
+            line, failure, exp = await self._import_file(
+                fid, fname, __user__["id"], _limit(__user__)
+            )
             imported += bool(line)
             expires = exp or expires
             report.append(line or f"- {fname or fid}: {failure} (取り込まなかった)")
@@ -1191,18 +1263,22 @@ class Tools:
         return "取り込み結果:\n" + "\n".join(report) + _imports_expiry_note(expires)
 
     async def _import_file(
-        self, fid: str, fname, user_id: str
+        self, fid: str, fname, user_id: str, limit: Optional[int] = None
     ) -> tuple[str, str, Optional[date]]:
         """file (Files のレコード) 1 件を `/workspace/imports/` に書く。
         戻り値は (成功の報告行, "", 写しの期限日 or None) か ("", 失敗の理由, None)。所有者でないファイルは取り込まない —
         「レコードが無い」と「所有者でない」は同じ理由 `_NO_FILE` で返す (存在の有無を
-        漏らさない。llens の tool と同文)。"""
+        漏らさない。llens の tool と同文)。`limit` はファイルの出入りの上限 (None = 無制限)。"""
         rec = Files.get_file_by_id(fid)
         # 所有者チェック: file_id 直指定で他ユーザーのファイルを取り込ませない
         if not rec or not rec.path or getattr(rec, "user_id", None) != user_id:
             return "", _NO_FILE, None
         try:
             local_path = Storage.get_file(rec.path)
+            size = os.path.getsize(local_path)
+            # 読み込む前に断る (無制限でも sandbox の安全上限を超える物はメモリに載せない)
+            if size > transfer_cap(limit):
+                return "", _too_large_file(size, limit), None
             data = open(local_path, "rb").read()
             name = os.path.basename(fname or rec.filename)
             res = await self._post(
@@ -1211,6 +1287,7 @@ class Tools:
                     "user_id": user_id,
                     "path": f"imports/{name}",
                     "b64": base64.b64encode(data).decode(),
+                    **sandbox_limit_fields(limit),
                 },
                 timeout_s=120,
             )
@@ -1218,6 +1295,10 @@ class Tools:
             log.error(f"[sandbox] import {fid} failed: {e!r}")
             if isinstance(e, SandboxHTTPError) and e.status == 507:
                 return "", f"workspace の容量 (quota) が一杯。{_QUOTA_FULL_NEXT}", None
+            if isinstance(e, SandboxHTTPError) and e.status == 413:
+                # sandbox の安全上限がこちらの上限より小さい配備 (起動時に warning)
+                size_413, eff = _too_large_413(e, limit)
+                return "", _too_large_file(size_413, eff), None
             return "", "取り込みに失敗した", None
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
@@ -1225,18 +1306,29 @@ class Tools:
             _cache_expiry(res),
         )
 
-    async def _import_one(self, fid: str, user_id: str, url: str | None = None) -> str:
+    async def _import_one(
+        self,
+        fid: str,
+        user_id: str,
+        url: str | None = None,
+        limit: Optional[int] = None,
+    ) -> str:
         """引数で直に指された file 1 件を取り込む (file_id= / url= の配信口 URL)。
 
         失敗は ToolError を raise する。`url` は url= の配信口 URL で来たときのその URL
         (モデルが渡した言い方。None なら `file_id <値>`)。file が引けないときは全 tool 共通の
         `ref_errors.file_id_error` (file_id= の値が id の形でないときだけ受ける形の文を添える)。
         """
-        line, failure, expires = await self._import_file(fid, None, user_id)
+        line, failure, expires = await self._import_file(fid, None, user_id, limit)
         if failure == _NO_FILE:
             from nucllei.utils.ref_errors import file_id_error
 
             raise file_id_error(fid, given=url)
+        if failure.startswith(_TOO_LARGE_FILE):
+            raise ToolOutcome(
+                f"{url or f'file_id {fid}'} は{failure}",
+                "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+            )
         if failure:
             raise ToolFailure(f"{url or f'file_id {fid}'} の{failure}")
         return "取り込み結果:\n" + line + _imports_expiry_note(expires)
@@ -1264,7 +1356,8 @@ class Tools:
           sandbox の `/ext/<name>` と `EXT_MOUNTS` の `<name>` に同じ物を置くという
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
-        - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は valve `url_max_mb`
+        - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は RC
+          `ATTACHMENT_MAX_SIZE_MB` (`utils/file_limit`。無制限なら sandbox の安全上限)
         - `/api/v1/files/{id}/content` (このサーバのファイル配信口。本文リンクとして頻出。
           相対、または絶対 = `/ext/` と同じく host 不問) → URL のルーティングとして file に
           当たる (`file_id_of_url`)。HTTP では取りに行かず、file_id 経路と同じ読み出し・
@@ -1282,7 +1375,7 @@ class Tools:
         # fragment は付いていても同じ file に当たる (`file_id_of_url` の規則)
         file_id = file_id_of_url(u)
         if file_id:
-            return await self._import_one(file_id, user_id, u)
+            return await self._import_one(file_id, user_id, u, limit=_limit(user))
 
         # user は ACL (/ext/groups・/ext/public。#152) に使う — 見えない置き場は jail にも無い
         mounted = await mounted_path_for_url(u, user)
@@ -1292,8 +1385,8 @@ class Tools:
                 f"(read-only)。{_NEXT}run_python / run_shell からそのパスで開く。"
             )
 
-        max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
-        loaded, err = await resolve_url(u, max_bytes=max_bytes, user=user)
+        limit = _limit(user)
+        loaded, err = await resolve_url(u, max_bytes=transfer_cap(limit), user=user)
         if loaded is None:
             raise _explain_ref_error(u, err)
         # name は URL の basename (percent-encoded のまま)
@@ -1305,6 +1398,7 @@ class Tools:
                     "user_id": user_id,
                     "path": f"imports/{name}",
                     "b64": base64.b64encode(loaded.data).decode(),
+                    **sandbox_limit_fields(limit),
                 },
                 timeout_s=120,
             )
@@ -1312,6 +1406,12 @@ class Tools:
             log.error(f"[sandbox] import write failed for {u}: {e!r}")
             if isinstance(e, SandboxHTTPError) and e.status == 401:
                 raise _sandbox_auth()
+            if isinstance(e, SandboxHTTPError) and e.status == 413:
+                size, eff = _too_large_413(e, limit)
+                raise ToolOutcome(
+                    f"{u} は{_too_large_file(size, eff)}",
+                    "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+                )
             raise ToolFailure("sandbox へ書き込めない")
         return (
             "取り込み結果:\n"
@@ -1733,17 +1833,19 @@ class Tools:
                 __event_emitter__,
             )
         abs_path, rel = _resolve_workspace_path(path, PATH_ARG_FORM)
+        limit = _limit(__user__)
         try:
             res = await self._post(
                 "/files/read",
                 {
                     "user_id": __user__["id"],
                     "path": rel,
+                    **sandbox_limit_fields(limit),
                 },
                 timeout_s=120,
             )
         except Exception as e:
-            raise _files_error(e, abs_path)
+            raise _transfer_error(e, abs_path, limit)
         try:
             data = base64.b64decode(res["b64"])
         except Exception as e:
@@ -1798,7 +1900,9 @@ class Tools:
             return await self._fetch_ext_via_sandbox(
                 abs_path, acl, user, chat_id, message_id, __event_emitter__
             )
-        loaded, err = await resolve_path(abs_path, user)
+        loaded, err = await resolve_path(
+            abs_path, user, max_bytes=transfer_cap(_limit(user))
+        )
         if loaded is None:
             raise _explain_mount_error(abs_path, err)
         return await self._attach(
@@ -1816,15 +1920,21 @@ class Tools:
     ) -> str:
         if ext_access(user, rel) == "none":
             raise _ext_not_found(abs_path)
+        limit = _limit(user)
         try:
             res = await self._post(
                 "/files/read",
-                {"user_id": user["id"], "path": abs_path, "mounts": _ext_mounts(user)},
+                {
+                    "user_id": user["id"],
+                    "path": abs_path,
+                    "mounts": _ext_mounts(user),
+                    **sandbox_limit_fields(limit),
+                },
                 timeout_s=120,
             )
             data = base64.b64decode(res["b64"])
         except Exception as e:
-            raise _files_error(e, abs_path)
+            raise _transfer_error(e, abs_path, limit)
         return await self._attach(
             abs_path,
             os.path.basename(res.get("name") or abs_path),

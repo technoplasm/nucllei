@@ -75,6 +75,7 @@ from pydantic import BaseModel, Field
 
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
+from nucllei.utils.file_limit import ADMIN_SETTING, attachment_limit_bytes, transfer_cap
 from nucllei.utils.image_refs import (
     REF_ARGS_RULE,
     detect_kind,
@@ -107,6 +108,9 @@ _IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"}
 # 別の toolkit の tool (sandbox の run_python / send_to_workspace / fetch_from_workspace、
 # fetch_url、run_subagent) は載っていないことがあるので「〜が使えるなら」と条件付きで書く。
 
+# path= の取り出しの上限 (RC ATTACHMENT_MAX_SIZE_MB) を変える場所。sandbox の tool と同じ言い方
+_LIMIT_BY_ADMIN = f"上限は管理者の設定 ({ADMIN_SETTING}) で、引数では上げられない"
+
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の外 / 大きすぎる)。"
 
@@ -138,6 +142,9 @@ def _too_large(ref: str, err, *, is_path: bool) -> str:
     else:
         what = f"{ref} は少なくとも {mb(size)} あり、取得の上限"
     what += f" {mb(limit)}" if limit is not None else ""
+    if is_path:
+        # path= の上限は管理者の設定 (ファイルの出入りの上限。utils/file_limit)
+        what += f" ({_LIMIT_BY_ADMIN})"
     # resolver の上限 (既定 25 MB) は画像の上限 (valve max_image_mb、既定 8 MB) より大きいので、
     # ここに来た画像は _feed_path の「run_python でリサイズ」まで届かない。次の一手はここで言う:
     # fs なら sandbox から直接開いて縮小、URL なら send_to_workspace で取り込んでから縮小。
@@ -554,7 +561,12 @@ class Tools:
             pages = str(frag_page)
 
         if is_path:
-            loaded, err = await resolve_path(ref, user)
+            # path= の取り出しの上限は sandbox のファイルの出入りと同じ RC
+            # `ATTACHMENT_MAX_SIZE_MB` (`utils/file_limit`。無制限なら sandbox の安全上限)。
+            # url= は従来どおり resolver の既定 (FETCH_MAX_BYTES)
+            loaded, err = await resolve_path(
+                ref, user, max_bytes=transfer_cap(attachment_limit_bytes(None, user))
+            )
         else:
             loaded, err = await resolve_url(ref, user=user)
         if err is not None or loaded is None:

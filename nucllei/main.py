@@ -36,7 +36,7 @@ from starlette.responses import Response
 
 from nucllei.builtin_tools import sync_builtin_tools
 from nucllei.utils.executions import sweep_executions_on_boot
-from nucllei.utils import execution_resume, image_refs
+from nucllei.utils import execution_resume, file_limit, image_refs
 from nucllei.utils.logger import start_logger
 from nucllei.utils.completion_events import (
     CompletionEventStream,
@@ -305,7 +305,13 @@ async def lifespan(app: FastAPI):
     # models は lazy なので、driver 側がターン起動前に get_all_models 相当を踏む。
     await execution_resume.install(app)
 
+    # 1 ファイルの出入りの上限 (ATTACHMENT_MAX_SIZE_MB) が sandbox の安全上限
+    # (SANDBOX_FILE_LIMIT_BYTES) より大きければ warning(utils/file_limit)。sandbox は同時に
+    # 立ち上がるので background で繋がるまで待つ
+    probe = asyncio.create_task(file_limit.probe_sandbox_safety_limit())
+
     yield
+    probe.cancel()
 
 
 app = FastAPI(

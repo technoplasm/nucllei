@@ -1021,8 +1021,12 @@ async def _load_workspace(rel_path: str, user_id: str, limit: int) -> _Result:
         log.warning("image_refs: rejecting workspace path")
         return _fail("traversal", "traversal in workspace path")
     try:
+        # 上限は sandbox にも渡す (sandbox は自分の安全上限との小さいほう。超えれば 413 →
+        # too_large。大きなファイルを転送してから断らない)
         res = await sandbox.sandbox_post(
-            "/files/read", {"user_id": user_id, "path": rel_path}, 60
+            "/files/read",
+            {"user_id": user_id, "path": rel_path, "file_limit_bytes": limit},
+            60,
         )
         data = base64.b64decode(res["b64"])
     except Exception as e:

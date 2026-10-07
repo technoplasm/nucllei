@@ -1124,8 +1124,10 @@ ATTACHMENT_MAX_COUNT = RuntimeConfig(
     env_int("ATTACHMENT_MAX_COUNT", None, minimum=0),
 )
 
-# 受け入れ上限(MB)。既定 25MB。sandbox の SANDBOX_FILE_LIMIT_BYTES(既定 25MB)とは別 config
-# だが、原本をサンドボックスへ渡す運用では同値に揃えるのが筋。
+# 1 ファイルの上限(MB、0 = 無制限)。既定 25MB。チャットへのアップロードと sandbox のファイルの
+# 出入り(send_to_workspace / exports の自動添付 / fetch_from_workspace / feed_image(path=))の
+# 唯一の情報源 — 読むのは utils/file_limit.attachment_limit_bytes。sandbox の
+# SANDBOX_FILE_LIMIT_BYTES(既定 1 GiB)は OOM 防止の安全上限で、小さいほうが効く。
 ATTACHMENT_MAX_SIZE_MB = RuntimeConfig(
     "ATTACHMENT_MAX_SIZE_MB",
     "attachment.max_size",

@@ -537,8 +537,20 @@ class TestFileImagesFsRefs(AbstractPostgresTest):
         calls = self._install_sandbox(monkeypatch, {"out/plot.png": PNG_BYTES})
         messages = self._convert(self._messages("/workspace/out/plot.png"))
         assert self._url(messages) == f"data:image/png;base64,{PNG_B64}"
-        # 呼び出しユーザーの workspace、prefix を落とした相対 path
-        assert calls == [("/files/read", {"user_id": "alice", "path": "out/plot.png"})]
+        # 呼び出しユーザーの workspace、prefix を落とした相対 path。上限 (resolver の既定
+        # FETCH_MAX_BYTES) も sandbox に渡す — 大きなファイルを転送してから断らない
+        from nucllei.env import FETCH_MAX_BYTES
+
+        assert calls == [
+            (
+                "/files/read",
+                {
+                    "user_id": "alice",
+                    "path": "out/plot.png",
+                    "file_limit_bytes": FETCH_MAX_BYTES,
+                },
+            )
+        ]
 
     def test_workspace_pdf_page(self, monkeypatch):
         self._install_sandbox(monkeypatch, {"out/r.pdf": _pdf_bytes(1)})

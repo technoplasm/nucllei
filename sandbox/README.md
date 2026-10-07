@@ -369,7 +369,13 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `cache_ttl_days` (int) — `imports/` `exports/` `trash/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
     0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
     自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
-- `GET /healthz` — `{ok, nsjail, loop}`。`loop` は loop ドライバの実効チェック
+- `file_limit_bytes` (int、任意) — `/exec` `/exec_cell` `/files/read` `/files/write` (と `/files/*` の
+  他の endpoint でも受けるが使わない): ファイルの出入りの上限 (nucllei の `ATTACHMENT_MAX_SIZE_MB`)。
+  効くのは安全上限 `SANDBOX_FILE_LIMIT_BYTES` との小さいほう。超えると 413
+  `file too large: N bytes (limit L)` (L は効いた上限。nucllei がこの形を読む)、exports では
+  `{truncated: true, limit: L}` (b64 なし)。無ければ (古い nucllei・無制限) 安全上限だけ
+- `GET /healthz` — `{ok, nsjail, loop, file_limit_bytes}`。`file_limit_bytes` は安全上限
+  (`SANDBOX_FILE_LIMIT_BYTES`。`/metrics` の `sandbox_file_limit_bytes` も同じ)。`loop` は loop ドライバの実効チェック
   (`/dev/loop-control` を open して確かめる)。**false なら 503** を返し、compose の
   healthcheck 経由でコンテナが unhealthy になる(`docker ps` で見える)。loop 不能 =
   全 workspace mount が失敗する hard fault のため(典型例と切り分けは
@@ -424,7 +430,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |
-| `SANDBOX_FILE_LIMIT_BYTES` | 26214400 | tool の成果物回収 (fetch_from_workspace / exports 自動添付) の 1 ファイル上限。UI のユーザーアップロード制限とは独立。compose では 100MiB に引き上げ済。read は base64 で JSON に載る (RAM ~2.3x) ため真の無制限にはしない (GB 級は raw ストリーム化が要る) |
+| `SANDBOX_FILE_LIMIT_BYTES` | 1073741824 (1 GiB) | ファイルの出入り (`/files/read` `/files/write`・exports 自動添付・`/exec` の imports) の 1 ファイルの**安全上限** (OOM 防止)。実際の上限は nucllei の `ATTACHMENT_MAX_SIZE_MB` (管理画面の「最大アップロードサイズ」) で、nucllei がリクエストごとに `file_limit_bytes` で渡す — sandbox は**渡された値とこの安全上限の小さいほう**に従う (渡されなければ安全上限だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。read / write は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない (GB 級を恒常的に運ぶなら raw ストリーム化が要る)。値は `/healthz` `/metrics` に出し、nucllei が起動時に読んで自分の上限の方が大きければ warning |
 | `SANDBOX_SESSION_TTL_S` | 43200 (12h) | stateful session の生存上限 (kernel の nsjail time_limit。idle 回収も同値) |
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
@@ -449,7 +455,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
   (2026-10-03): `/ext/{rest}` (同一サーバの相対、または絶対 `https://<host>/ext/{rest}` = host 不問) は
   nucllei の `EXT_MOUNTS` の対応表で読む (2026-10-05。静的の name はファイル、proxy の name は上流へ GET)、それ以外のスキーム付き http(s) URL は**どこでも**直接取りに行く
   (断るのはこのサーバ自身だけ。cookie は転送しない)。builtin の `fetch_url` / `feed_image` と同じ URL が
-  同じように通り、同じ理由で落ちる。上限は valve `url_max_mb` (既定 50 MB)。
+  同じように通り、同じ理由で落ちる。上限は nucllei の `ATTACHMENT_MAX_SIZE_MB` (チャットへのアップロードと同じ。旧 valve `url_max_mb` は廃止)。
   - **`/ext` 配下にある物はコピーしない**: URL が `/ext/<name>/<sub>` で name が静的の mount かつ
     ファイルが実在すれば、取り込まずに「`/ext/<name>/<sub>` として既に sandbox から見えている」とパスを返す
     (URL と同じ文字列。上限も掛からない)。proxy の name は上流から取り込む (cage が描画した HTML 等が
@@ -479,8 +485,8 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
     nucllei の `README_API.md` §3.8)。
   - nucllei 側に無い `/ext/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
     `/files/read` は workspace と `/ext/groups` `/ext/public` しか扱わない。この 2 つは nucllei が配信していなくても sandbox から読んで添付する — #152) ので **「読めない」になる** — そのときは `run_shell` で
-    `/workspace/` にコピーしてから渡すよう tool が案内する。上限は nucllei の `FETCH_MAX_BYTES`
-    (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別。旧 `EXT_INLINE_MAX_BYTES`)。
+    `/workspace/` にコピーしてから渡すよう tool が案内する。上限は他の取り出しと同じ nucllei の
+    `ATTACHMENT_MAX_SIZE_MB` (無制限なら sandbox の安全上限)。
   - 不在・ディレクトリ・置き場の外を指す symlink は同じ「読めない」(fail closed)、上限超過は
     実サイズと上限を言う。`path` に URL が来ても URL としては扱わない。
 - **tool の `path` は jail から見た絶対パス (`/workspace/...`) で揃える**。`send_to_workspace` の

@@ -302,12 +302,40 @@ separate reasoning block.
 
 | Var                              | Kind | Default           | Effect                                                                                                                                                      |
 | -------------------------------- | ---- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATTACHMENT_MAX_SIZE_MB`         | RC   | `25` MB           | upload size cap (server-enforced)                                                                                                                           |
+| `ATTACHMENT_MAX_SIZE_MB`         | RC   | `25` MB           | **the single per-file cap** (server-enforced; `0` = unlimited) for chat uploads and every sandbox file transfer — see "Per-file size limit" below |
 | `ATTACHMENT_MAX_COUNT`           | RC   | unlimited         | max attachments per message                                                                                                                                 |
 | `ATTACHMENT_ALLOWED_EXTENSIONS`  | RC   | `[]` = allow all  | lowercase, dot-less whitelist                                                                                                                               |
 | `ATTACHMENT_FUNCTION_ID`         | RC   | `""` = none       | id of the single global Attachment Function (§7.3); empty ⇒ uploads store raw bytes, no text extraction                                                     |
 | `ATTACHMENT_IMAGE_MAX_DIMENSION` | RC   | unset = no resize | client-side downscale of attached images before upload: if the longest edge exceeds this (px), the image is resized to fit, aspect ratio and MIME preserved |
 | `PASTED_TEXT_CHARACTER_LIMIT`    | RC   | unset = disabled  | pasted plain text longer than this (chars) becomes a `.txt` attachment                                                                                      |
+
+**Per-file size limit.** `ATTACHMENT_MAX_SIZE_MB` (admin: Workspace > Settings > Files,
+"Max Upload Size") is the one source of the per-file cap, read on every request
+(`utils/file_limit.attachment_limit_bytes(request_or_app, user)` — `user` is unused today and
+is where per-user / per-group caps, #147, will plug in). It applies to:
+
+| Path                                                    | Enforced where                                                                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| chat upload `POST /api/v1/files/`                       | nucllei (400)                                                                                                |
+| `send_to_workspace(file_id=…)` / `url=` (incl. `/api/v1/files/{id}/content`) | nucllei before reading / fetching (`url` passes it as the resolver's `max_bytes`) + sandbox `/files/write` |
+| exports auto-attach (`run_python*` / `run_shell`)       | sandbox `/exec` `/exec_cell` (over-limit entries come back `truncated` with the effective `limit`)          |
+| `fetch_from_workspace`                                  | sandbox `/files/read` (413); `/ext/…` read by nucllei uses it as `max_bytes`                                  |
+| `feed_image(path=…)`                                    | resolver `max_bytes` + sandbox `/files/read` (`url=` keeps `FETCH_MAX_BYTES`)                                 |
+
+nucllei sends the cap to the sandbox as `file_limit_bytes` on each of these requests
+(omitted when unlimited). The sandbox applies **the smaller of `file_limit_bytes` and its
+own safety cap** `SANDBOX_FILE_LIMIT_BYTES` (default 1 GiB, OOM guard — transfers are
+base64 in JSON, ~2.3x the file size in RAM); without `file_limit_bytes` (older nucllei,
+unlimited) only the safety cap applies, and the sandbox logs one warning when a requested
+cap exceeds it. The sandbox reports its safety cap on `/healthz` (`file_limit_bytes`) and
+`/metrics` (`sandbox_file_limit_bytes`); nucllei reads it at startup and warns when
+`ATTACHMENT_MAX_SIZE_MB` is larger (or unlimited) — then the sandbox's cap wins on the
+sandbox paths. Over-limit errors name the effective cap in MB and say the admin setting
+above changes it. **Not** governed by this cap: `write_file` / `read_file` and the file
+browser's text editor (`SANDBOX_WRITE_FILE_LIMIT_BYTES`, text for the context), quota, and
+the file browser's upload / download (§4.4 — direct large-file path; its cap will become the
+sandbox safety cap + quota with streaming transfers, separate work). The former valve
+`url_max_mb` is gone (a stored value is dropped by `merge_valves_update` as an unknown key).
 | `STORAGE_PROVIDER`               | env  | `local`           | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
 
 ### 3.8 External reference gate (`/ext`)
@@ -1916,9 +1944,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     limit / redirect — to an unusable target, to the server itself, too many /
     upstream status / unreachable or unresolvable name / the server itself),
     each with a fixed sentence that never inspects the value — the shared
-    defaults of `ref_errors` (§3.8) except `too_large` (the cap is a valve and
-    cannot be raised by an argument).
-    Valve `url_max_mb` (default 50) is the per-file cap passed as `max_bytes`.
+    defaults of `ref_errors` (§3.8) except `too_large` (the cap is the admin
+    setting `ATTACHMENT_MAX_SIZE_MB` and cannot be raised by an argument).
+    The per-file cap is `ATTACHMENT_MAX_SIZE_MB` (§3.7 "Per-file size limit"),
+    passed as `max_bytes` (unlimited → the sandbox's safety cap).
     When the URL is `/ext/<name>/<sub>`, `<name>` is a **static** mount and
     **the file exists there** (`image_refs.mounted_path_for_url`), nothing is copied: the
     tool answers with the sandbox path `/ext/{rest}` (the same string as the

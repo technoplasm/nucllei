@@ -39,10 +39,15 @@ class TestAttachmentGate(AbstractPostgresTest):
         try:
             r = self._upload("big.pdf", b"x" * (2 * 1024 * 1024), "application/pdf")
             assert r.status_code == 400, r.text
-            assert "上限" in r.text
+            assert "上限(1 MB)" in r.text and "最大アップロードサイズ" in r.text
 
             # 上限内は通る
             ok = self._upload("small.pdf", b"x" * 1024, "application/pdf")
+            assert ok.status_code == 200, ok.text
+
+            # 0 = 無制限(sandbox のファイルの出入りと同じ utils/file_limit)
+            app.state.config.ATTACHMENT_MAX_SIZE_MB = 0
+            ok = self._upload("big.pdf", b"x" * (2 * 1024 * 1024), "application/pdf")
             assert ok.status_code == 200, ok.text
         finally:
             app.state.config.ATTACHMENT_MAX_SIZE_MB = 25

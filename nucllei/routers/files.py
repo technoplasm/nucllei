@@ -36,6 +36,11 @@ from nucllei.utils.access_control import (
 )
 from nucllei.utils.attachment import process_attachment_functions
 from nucllei.utils.auth import get_admin_user, get_verified_user
+from nucllei.utils.file_limit import (
+    ADMIN_SETTING,
+    attachment_limit_bytes,
+    format_limit,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 log = logging.getLogger(__name__)
@@ -188,11 +193,13 @@ async def store_uploaded_file(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"許可されていないファイル形式です(.{ext or '拡張子なし'})。",
             )
-        max_size = request.app.state.config.ATTACHMENT_MAX_SIZE_MB  # MB
-        if max_size and file.size and file.size > max_size * 1024 * 1024:
+        # 上限は sandbox のファイルの出入りと同じ 1 つ(utils/file_limit。0 = 無制限)
+        limit = attachment_limit_bytes(request, user)
+        if limit is not None and file.size and file.size > limit:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"ファイルサイズが上限({max_size}MB)を超えています。",
+                detail=f"ファイルサイズが上限({format_limit(limit)})を超えています。"
+                f"上限は管理者が{ADMIN_SETTING}で変えられます。",
             )
 
         contents, file_path = Storage.upload_file(file.file, filename)

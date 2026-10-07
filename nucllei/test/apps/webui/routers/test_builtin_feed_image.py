@@ -643,11 +643,18 @@ def test_unsupported_form_from_the_resolver_uses_the_fixed_text_of_the_argument(
     assert result == f"ERROR: /workspace/x.png は URL として解決できない。{URL_FORM}"
 
 
-def test_feed_image_does_not_pass_max_bytes(monkeypatch):
-    """画像 inline 用の既定上限のまま読む — fetch_url と違い max_bytes を渡さない。"""
-    for ref in (FIG_URL, "/workspace/out/plot.png", HIS_PDF_URL):
+def test_feed_image_url_uses_default_limit_and_path_uses_attachment_limit(monkeypatch):
+    """url= は画像 inline 用の既定上限のまま読む (fetch_url と違い max_bytes を渡さない)。
+    path= の取り出しは sandbox のファイルの出入りと同じ RC ATTACHMENT_MAX_SIZE_MB
+    (utils/file_limit。ken 決定)。"""
+    from nucllei import config
+
+    monkeypatch.setattr(config.ATTACHMENT_MAX_SIZE_MB, "value", 7)
+    for ref in (FIG_URL, HIS_PDF_URL):
         _result, _fed, resolver = _run(monkeypatch, **_ref_kw(ref))
         assert resolver.kwargs == [{}], ref
+    _result, _fed, resolver = _run(monkeypatch, **_ref_kw("/workspace/out/plot.png"))
+    assert resolver.kwargs == [{"max_bytes": 7 * 1024 * 1024}]
 
 
 # --- RefError.code ごとの ERROR 文 (番兵)。文面はモデルがユーザーへ転記する前提 ----------

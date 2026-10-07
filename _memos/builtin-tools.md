@@ -263,7 +263,7 @@ sandbox ツール(R2、respx 等で sandbox API をモック):
   stdout/error/timed_out/session_reset の整形文言(タイムアウト時「変数・import は保持」等)
 - T8: `__chat_id__` 欠落時の run_python → run_python_once 誘導のエラー文
 - T9: outputs[] → Files/Storage 登録 + `chat:message:files` emit + 画像なら markdown 誘導行。
-  truncated エントリは「転送上限超過」報告のみで登録しない
+  truncated エントリは「添付の上限超過」報告のみで登録しない (上限は RC ATTACHMENT_MAX_SIZE_MB — 末尾の節)
 - T10: import_chat_file — 所有者チェック(他ユーザー file_id は skip)、file_id 直指定経路
 - T11: sandbox HTTP 障害(接続不能・非 200)→ `ToolError`(#145 — 文面は "ERROR: ..."。生の例外・
   detail は漏らさない)
@@ -470,7 +470,7 @@ nucllei の出荷物になり「素の nucllei を配る相手にも届く」よ
   valves は `module.Valves(**valves)`(`nucllei/utils/tools.py`)で組み直され、pydantic v2 の
   既定 `extra='ignore'` が未知キーを黙って捨てる。ValidationError にならない。
   **旧データ互換コードは書いていない** — 「落ちない」だけを回帰で固定した。
-- 残る valve: `default_timeout_s` / `max_output_chars` / `url_max_mb` / `debug`
+- 残る valve: `default_timeout_s` / `max_output_chars` / `debug` / hint 3 つ (`url_max_mb` は 2026-10-07 に撤去 — 末尾「ファイルの出入りの上限を 1 つに」)
   (`url_blocked_cidrs` は 2026-10-03 に撤去 — DB に残った値は同じく `extra='ignore'` で捨てられる)。UI 編集は従来どおり効く。
 - 回帰: `test_builtin_sandbox.py::test_destination_is_env_only_and_unreachable_from_db`
   (spec に `sandbox_url` が出ない / `valves/update` に送っても保存されない /
@@ -497,7 +497,7 @@ ken 決定: モデルに見える tool の引数は意味を固定する — **`
     そのホストに直接取りに行き、redirect も 3 回まで辿る。断るのはこのサーバ自身だけ。
   - 取り込み名は URL の basename(decode 済み)。旧実装の Content-Disposition 優先は無くなった
     (`LoadedRef` が応答ヘッダを持たない — 要るなら resolver 側に足す)。
-- **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50)。失敗は `RefError.code` で
+- **上限は valve `url_max_mb` を `max_bytes` に渡す**(既定 50。→ 2026-10-07 に RC `ATTACHMENT_MAX_SIZE_MB` へ — 末尾の節)。失敗は `RefError.code` で
   言い分ける(`_explain_ref_error`。配備層 2 tool と同じ code・同じ言い方 — 同日中に 3 コピーを
   `utils/ref_errors.py` 1 本にまとめ、2 tool も builtin へ。末尾の節)。
 - **sandbox から既に見えている物はコピーしない**: `image_refs.mounted_path_for_url(url)` が
@@ -1368,3 +1368,40 @@ llens 依頼。レシピ等を `run_shell` の `cat` で読んでいて、write_
 - `__init__.py` の BUILTIN_TOOLS の description(管理画面に出る英文の関数一覧)には read_file を
   まだ足していない(触る範囲の外だった)
 
+## ファイルの出入りの上限を 1 つに(2026-10-07、ken 決定・llens 依頼)
+
+情報源は RC **`ATTACHMENT_MAX_SIZE_MB`** の 1 つ(管理画面: ワークスペース > 設定 > ファイルの
+「最大アップロードサイズ」。0 = 無制限)。値は `nucllei/utils/file_limit.py` の
+`attachment_limit_bytes(request_or_app=None, user=None) -> Optional[int]` で毎回読む(キャッシュしない =
+変えるとすぐ効く)。`user` は今は使わない — ユーザー / グループごとの上限 (#147) はここに足す。
+tool は request の無い background 続きターンでも動くよう `None` で呼ぶ(app.state.config は module の
+RuntimeConfig を包むだけなので同じ値)。
+
+- 従う経路: チャットへのアップロード(`routers/files.py`)/ `send_to_workspace` の file_id(Storage を
+  読む前にサイズを見る)と url(resolver の `max_bytes`)/ exports の自動添付 / `fetch_from_workspace`
+  (`/workspace`・`/ext/groups|public` は sandbox、それ以外の `/ext` は resolver の `max_bytes`)/
+  `feed_image(path=)`(resolver の `max_bytes`。url= は従来どおり `FETCH_MAX_BYTES`)。
+- sandbox は設定を読めないので、nucllei が `/exec` `/exec_cell` `/files/read` `/files/write` に
+  **`file_limit_bytes`** を渡す(無制限なら渡さない — `sandbox_limit_fields`)。sandbox は渡された値と
+  安全上限 `SANDBOX_FILE_LIMIT_BYTES`(**既定 1 GiB**、OOM 防止 — base64-in-JSON で約 2.3 倍のメモリ)の
+  小さいほう。渡された値が安全上限を超えると sandbox が warning 1 行(値が変わったときだけ)。
+  413 の文面 `file too large: N bytes (limit L)` の L は効いた上限、exports の truncated entry には
+  `limit` を付ける — nucllei のエラー文はこれを言う(安全上限が勝った配備でも嘘の値を言わない)。
+  `image_refs._load_workspace` も resolver の上限を `file_limit_bytes` で渡す(転送してから断らない)。
+- 安全上限は sandbox の `/healthz`(`file_limit_bytes`)と `/metrics`(`sandbox_file_limit_bytes`)に出す。
+  nucllei は起動時に background で `/healthz` を読み(`probe_sandbox_safety_limit`、繋がるまで 15 秒
+  おきに 20 回)、RC の方が大きい(無制限を含む)と warning — 組 (上限, 安全上限) が変わったときだけ。
+  RC が無制限のとき nucllei 自身がメモリに載せる経路(URL の取得・Storage の読み出し)は安全上限
+  (未取得なら 1 GiB)で抑える(`transfer_cap`)。
+- 超過の文: 上限の値 (MB) +「上限は管理者の設定 (ワークスペース > 設定 > ファイルの「最大アップロードサイズ」)
+  で、引数では上げられない」(`_LIMIT_BY_ADMIN`。feed_image も同文)。
+- valve `url_max_mb` は撤去。DB の保存値は `merge_valves_update` が「今の Valves に無いキー」として落とし、
+  読み出し側も pydantic の `extra='ignore'` で無視する(移行コードなし)。
+- **揃えないもの**: write_file / read_file / ファイルブラウザのテキスト編集(`SANDBOX_WRITE_FILE_LIMIT_BYTES`、
+  1 MiB)、quota、**ファイルブラウザのアップロード・ダウンロード**(ken 決定 2026-10-07 — 1 GB 級の動画などを
+  直接 sandbox に入れる口。上限は後で sandbox の安全上限と quota にする。base64-in-JSON では運べないので
+  ストリーミング化と一緒に別作業。今はアップロード 1 MiB のまま、ダウンロードは安全上限だけ)。
+- 回帰: `nucllei/test/apps/webui/utils/test_file_limit.py`(上限関数・warning・各経路が RC に従う・
+  sandbox に値が渡る)、`test_builtin_sandbox.py::test_valve_url_max_mb_is_gone` /
+  `test_attachment_limit_is_the_resolver_limit`、sandbox 側は `sandbox/tests/test_files_list.py` 末尾
+  (小さいほう・渡されないとき・warning・exports・/healthz /metrics)。

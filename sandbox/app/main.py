@@ -48,12 +48,15 @@ MEM_MB = int(os.environ.get("SANDBOX_MEM_MB", "4096"))
 FSIZE_MB = int(os.environ.get("SANDBOX_FSIZE_MB", "8192"))
 MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "4"))
 STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024)))
-# tool の成果物回収 (/files/read = fetch_from_workspace / exports 自動添付) の単一ファイル上限。
-# nucllei 側のユーザーアップロード制限とは独立 (別レイヤ)。read は base64 で JSON に載せる実装
-# のため、ファイルサイズの ~2.3 倍が service プロセスの RAM に一時的に載る → 真の無制限には
-# しない (巨大ファイルで OOM しうる)。恒久値は compose の SANDBOX_FILE_LIMIT_BYTES。GB 級を
-# 恒常的に出すなら base64-in-JSON をやめて raw ストリーム化する必要がある (現状は未対応)。
-FILE_LIMIT = int(os.environ.get("SANDBOX_FILE_LIMIT_BYTES", str(25 * 1024 * 1024)))
+# ファイルの出入り (/files/read・/files/write・exports 自動添付・/exec の imports) の単一ファイルの
+# **安全上限** (OOM 防止)。実際の上限は nucllei がリクエストごとに `file_limit_bytes` で渡す
+# (情報源は nucllei の RC ATTACHMENT_MAX_SIZE_MB、管理画面で変えるとすぐ効く) — sandbox は
+# 渡された値とこの安全上限の**小さいほう**に従い、渡されなければ (古い nucllei・無制限・
+# ファイルブラウザのアップロード/ダウンロード) 安全上限だけ (`_file_limit`)。read / write は base64 で JSON に載せる実装のため、ファイルサイズの
+# ~2.3 倍が service プロセスの RAM に一時的に載る → 真の無制限にはしない。GB 級を恒常的に
+# 出すなら base64-in-JSON をやめて raw ストリーム化する必要がある (現状は未対応)。
+# 値は /healthz と /metrics に出す (nucllei が起動時に読み、自分の上限の方が大きければ warning)。
+FILE_LIMIT = int(os.environ.get("SANDBOX_FILE_LIMIT_BYTES", str(1024 * 1024 * 1024)))
 
 # stateful run_python の常駐セッション (kernel.py)。TTL は kernel の nsjail time_limit でもある
 # ので実効は「セッション開始から」の絶対上限 (idle 回収も同値。README「回収」参照)。
@@ -495,16 +498,49 @@ def _snapshot_exports(ws: Path) -> dict[str, tuple[int, int]]:
     return snap
 
 
-def _collect_exports(ws: Path, before: dict) -> list[dict]:
-    """exports/ の実行前後差分 (新規 + 更新) を b64 で返す。"""
+# 渡された上限が安全上限を超えていたときの warning を、値が変わったときだけ出すための記録
+_file_limit_warned: Optional[int] = None
+
+
+def _file_limit(requested: Optional[int]) -> int:
+    """このリクエストで効く 1 ファイルの上限: 渡された値 (nucllei の ATTACHMENT_MAX_SIZE_MB) と
+    安全上限 (FILE_LIMIT) の小さいほう。渡されない (古い nucllei・nucllei 側が無制限) なら安全上限。
+    渡された値が安全上限を超えていれば warning を 1 行 (値が変わったときだけ)。"""
+    global _file_limit_warned
+    if requested is None or requested <= 0:
+        return FILE_LIMIT
+    if requested > FILE_LIMIT and requested != _file_limit_warned:
+        _file_limit_warned = requested
+        print(
+            f"[sandbox] WARNING: 呼び出し元の上限 file_limit_bytes={requested} が安全上限 "
+            f"SANDBOX_FILE_LIMIT_BYTES={FILE_LIMIT} を超えている — 安全上限が勝つ "
+            "(揃えるなら SANDBOX_FILE_LIMIT_BYTES を上げる。base64-in-JSON で約 2.3 倍の"
+            "メモリを使う)",
+            flush=True,
+        )
+    return min(requested, FILE_LIMIT)
+
+
+def _too_large(size: int, limit: int) -> HTTPException:
+    # 文面 `file too large: N bytes (limit L)` は nucllei が読む (サイズと効いた上限を拾う)
+    return HTTPException(413, f"file too large: {size} bytes (limit {limit})")
+
+
+def _collect_exports(ws: Path, before: dict, limit: Optional[int] = None) -> list[dict]:
+    """exports/ の実行前後差分 (新規 + 更新) を b64 で返す。`limit` を超える物は b64 なしで
+    `truncated` (と効いた上限 `limit`) — nucllei は添付せず、上限を添えて知らせる。"""
+    if limit is None:
+        limit = FILE_LIMIT
     results = []
     for rel, sig in sorted(_snapshot_exports(ws).items()):
         if before.get(rel) == sig:
             continue
         p = ws / "exports" / rel
         size = sig[1]
-        entry = {"name": rel, "size": size, "truncated": size > FILE_LIMIT}
-        if not entry["truncated"]:
+        entry = {"name": rel, "size": size, "truncated": size > limit}
+        if entry["truncated"]:
+            entry["limit"] = limit
+        else:
             entry["b64"] = base64.b64encode(p.read_bytes()).decode()
         results.append(entry)
     return results
@@ -1166,6 +1202,8 @@ class FileIn(BaseModel):
 
 # `mounts` (#152) は全 endpoint 共通: そのユーザーに見せる `/ext/groups/<g>` `/ext/public` と
 # rw / ro。無ければ (旧 nucllei) どれも見えない = 従来の jail。
+# `file_limit_bytes` はファイルの出入りの上限 (nucllei の ATTACHMENT_MAX_SIZE_MB)。安全上限との
+# 小さいほうが効く (`_file_limit`)。無ければ (旧 nucllei・無制限) 安全上限だけ。
 
 
 class ExecRequest(BaseModel):
@@ -1175,12 +1213,14 @@ class ExecRequest(BaseModel):
     timeout_s: Optional[int] = None
     imports: list[FileIn] = Field(default_factory=list)
     mounts: list[MountIn] = Field(default_factory=list)
+    file_limit_bytes: Optional[int] = None
 
 
 class PathRequest(BaseModel):
     user_id: str
     path: str = "."
     mounts: list[MountIn] = Field(default_factory=list)
+    file_limit_bytes: Optional[int] = None
 
 
 class WriteRequest(BaseModel):
@@ -1188,6 +1228,7 @@ class WriteRequest(BaseModel):
     path: str
     b64: str
     mounts: list[MountIn] = Field(default_factory=list)
+    file_limit_bytes: Optional[int] = None
     # ファイルブラウザ (#150) 用。`expected_mtime` (`/files/read` `/files/stat` が返した値) と
     # 今の mtime が違えば 409 (外で変更された)、`exclusive` は既に在れば 409 (新規作成)。
     # `nofollow` は workspace 相対のパスでも経路の symlink を辿らない (`/ext/...` は常に辿らない)
@@ -1217,6 +1258,7 @@ class CellRequest(BaseModel):
     code: str
     timeout_s: Optional[int] = None
     mounts: list[MountIn] = Field(default_factory=list)
+    file_limit_bytes: Optional[int] = None
 
 
 @app.on_event("startup")
@@ -1250,6 +1292,8 @@ async def healthz():
         "ok": loop_ok,
         "nsjail": os.path.exists("/usr/local/bin/nsjail"),
         "loop": loop_ok,
+        # 1 ファイルの安全上限 (SANDBOX_FILE_LIMIT_BYTES)。nucllei が起動時に読んで自分の上限と比べる
+        "file_limit_bytes": FILE_LIMIT,
     }
     return JSONResponse(body, status_code=200 if loop_ok else 503)
 
@@ -1298,6 +1342,12 @@ async def metrics():
         ),
         ("sandbox_disk_used_bytes", "gauge", "/workspaces 使用バイト", disk_used),
         ("sandbox_disk_total_bytes", "gauge", "/workspaces 総バイト", disk_total),
+        (
+            "sandbox_file_limit_bytes",
+            "gauge",
+            "1 ファイルの安全上限 (SANDBOX_FILE_LIMIT_BYTES)",
+            FILE_LIMIT,
+        ),
     ]
     lines = []
     for name, typ, help_, val in m:
@@ -1320,6 +1370,7 @@ async def _abandon_if_client_gone(request: Request):
 async def exec_code(req: ExecRequest, request: Request):
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
+    limit = _file_limit(req.file_limit_bytes)
     ws = await _workspace(req.user_id)
 
     async with _user_lock(req.user_id), _sem:
@@ -1332,6 +1383,8 @@ async def exec_code(req: ExecRequest, request: Request):
                 data = base64.b64decode(f.b64)
             except binascii.Error:
                 raise HTTPException(400, f"invalid b64 for input: {name}")
+            if len(data) > limit:
+                raise _too_large(len(data), limit)
             dest = ws / "imports" / name
             try:
                 dest.write_bytes(data)
@@ -1390,7 +1443,7 @@ async def exec_code(req: ExecRequest, request: Request):
             "stderr": err.decode("utf-8", errors="replace"),
             "stdout_truncated": out_trunc,
             "stderr_truncated": err_trunc,
-            "exports": _collect_exports(ws, before),
+            "exports": _collect_exports(ws, before, limit),
             "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
@@ -1402,6 +1455,7 @@ async def exec_cell(req: CellRequest, request: Request):
         raise HTTPException(400, "chat_id required for stateful exec")
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
+    limit = _file_limit(req.file_limit_bytes)
     ws = await _workspace(req.user_id)
     binds = await asyncio.to_thread(_prepare_mounts, validated)
     sess, was_reset = await _sessions.get(
@@ -1436,7 +1490,7 @@ async def exec_cell(req: CellRequest, request: Request):
                 "session_reset": True,
                 "duration_s": 0,
                 "stdout_truncated": False,
-                "exports": _collect_exports(ws, before),
+                "exports": _collect_exports(ws, before, limit),
                 "cache_ttl_days": CACHE_TTL_REPORTED,
             }
         duration_s = round(time.monotonic() - t0, 2)
@@ -1451,7 +1505,7 @@ async def exec_cell(req: CellRequest, request: Request):
                 "session_reset": True,
                 "duration_s": duration_s,
                 "stdout_truncated": False,
-                "exports": _collect_exports(ws, before),
+                "exports": _collect_exports(ws, before, limit),
                 "cache_ttl_days": CACHE_TTL_REPORTED,
             }
 
@@ -1462,7 +1516,7 @@ async def exec_cell(req: CellRequest, request: Request):
             "session_reset": was_reset,
             "duration_s": duration_s,
             "stdout_truncated": resp.get("truncated", False),
-            "exports": _collect_exports(ws, before),
+            "exports": _collect_exports(ws, before, limit),
             "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
@@ -1819,7 +1873,9 @@ def _fs_stat(t: _Target) -> dict:
     }
 
 
-def _fs_read(t: _Target) -> dict:
+def _fs_read(t: _Target, limit: Optional[int] = None) -> dict:
+    if limit is None:
+        limit = FILE_LIMIT
     segs = t.segs
     if not segs:
         raise HTTPException(404, f"not a file: {t.path}")
@@ -1837,10 +1893,8 @@ def _fs_read(t: _Target) -> dict:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
             raise HTTPException(404, f"not a file: {t.path}")
-        if st.st_size > FILE_LIMIT:
-            raise HTTPException(
-                413, f"file too large: {st.st_size} bytes (limit {FILE_LIMIT})"
-            )
+        if st.st_size > limit:
+            raise _too_large(st.st_size, limit)
         data = f.read()
     return {
         "name": segs[-1],
@@ -2018,17 +2072,18 @@ async def files_stat(req: PathRequest):
 
 @app.post("/files/read")
 async def files_read(req: ReadRequest):
+    limit = _file_limit(req.file_limit_bytes)
     if _is_ext_path(req.path) or req.nofollow:
         t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
-        return await asyncio.to_thread(_fs_read, t)
+        return await asyncio.to_thread(_fs_read, t, limit)
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
     if not p.is_file():
         raise HTTPException(404, f"not a file: {req.path}")
     st = p.stat()
     size = st.st_size
-    if size > FILE_LIMIT:
-        raise HTTPException(413, f"file too large: {size} bytes (limit {FILE_LIMIT})")
+    if size > limit:
+        raise _too_large(size, limit)
     return {
         "name": p.name,
         "size": size,
@@ -2043,6 +2098,9 @@ async def files_write(req: WriteRequest):
         data = base64.b64decode(req.b64)
     except binascii.Error:
         raise HTTPException(400, "invalid b64")
+    limit = _file_limit(req.file_limit_bytes)
+    if len(data) > limit:
+        raise _too_large(len(data), limit)
     if (
         _is_ext_path(req.path)
         or req.nofollow

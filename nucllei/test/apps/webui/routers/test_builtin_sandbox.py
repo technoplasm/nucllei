@@ -741,7 +741,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool_output.current_sink.reset(token)
 
         assert "plot.png" in out and "file_id=" in out
-        assert "転送上限" in out and "huge.bin" in out
+        assert "添付の上限" in out and "huge.bin" in out
         # 画像は画面に出ている — 貼り直させない。上限超過の次の手はモデル向けの行にだけ
         assert (
             "ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない"
@@ -757,7 +757,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         # 画像は人間の目(display)へ、上限超過の警告も同じチャネルで出す
         shown = [d["content"] for d in sink.displays()]
         assert any(c.startswith("![plot.png](/api/v1/files/") for c in shown)
-        assert any("転送上限" in c for c in shown)
+        assert any("添付の上限" in c for c in shown)
         assert not any("次の手" in c for c in shown)  # 人間の目には事実だけ
 
     def test_send_to_workspace_is_owner_only(self, tmp_path):
@@ -1112,7 +1112,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "期限で消えた" not in out
 
         out = outs(SandboxHTTPError(413, "file too large: 9 bytes (limit 5)"))[2]
-        assert "大きすぎ" in out and "接続できない" not in out
+        assert "添付できる上限 5 B" in out and "接続できない" not in out
 
         for out in outs(ConnectionRefusedError("refused")):
             assert out.startswith("ERROR: sandbox に接続できない")
@@ -1500,6 +1500,14 @@ def test_general_url_wording_follows_reason(monkeypatch):
     assert env.writes[-1]["payload"]["path"].endswith("imports/x")
 
 
+def _set_limit_mb(monkeypatch, mb):
+    """RC `ATTACHMENT_MAX_SIZE_MB` (ファイルの出入りの唯一の上限。0 = 無制限) を差し替える。
+    app.state.config はこの RuntimeConfig をそのまま包むので、管理画面の変更と同じ効き方。"""
+    from nucllei import config
+
+    monkeypatch.setattr(config.ATTACHMENT_MAX_SIZE_MB, "value", mb)
+
+
 def test_too_large_reports_actual_size_and_limit(monkeypatch):
     big = b"x" * (3 * 1024 * 1024)
     env = _UrlEnv(
@@ -1509,11 +1517,12 @@ def test_too_large_reports_actual_size_and_limit(monkeypatch):
         ),
     )
     _self_env(monkeypatch)
-    env.tools.valves.url_max_mb = 1
+    _set_limit_mb(monkeypatch, 1)
     result = env.run(url=f"{INTRA}/big.bin")
     assert result.startswith("ERROR")
-    # 実サイズ(Content-Length)と上限(valve)の両方。リンク切れではないと言う
+    # 実サイズ(Content-Length)と上限(RC)の両方。変えるのは管理者。リンク切れではないと言う
     assert "3.0MB" in result and "上限 1.0MB" in result
+    assert "最大アップロードサイズ" in result
     assert "少なくとも" not in result
     assert "リンク切れではない" in result
     assert env.writes == []
@@ -1526,15 +1535,16 @@ def test_too_large_without_content_length_says_at_least(monkeypatch):
 
     env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=chunks()))
     _self_env(monkeypatch)
-    env.tools.valves.url_max_mb = 1
+    _set_limit_mb(monkeypatch, 1)
     result = env.run(url=f"{INTRA}/stream.bin")
     assert result.startswith("ERROR")
     assert "少なくとも" in result and "実サイズは不明" in result
     assert env.writes == []
 
 
-def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
-    # resolver の既定(FETCH_MAX_BYTES)ではなく valve の値が上限になる
+def test_attachment_limit_is_the_resolver_limit(monkeypatch):
+    # resolver の既定(FETCH_MAX_BYTES)ではなく RC ATTACHMENT_MAX_SIZE_MB が上限になる。
+    # 呼ぶたびに読む(変えるとすぐ効く)。0 = 無制限 → sandbox の安全上限(未取得なら既定 1 GiB)
     seen = {}
 
     async def fake_resolve(url, *, max_bytes=None, user=None):
@@ -1548,11 +1558,28 @@ def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
     # url 引数の入口は resolve_url(保存済み文字列用の resolve_ref は通さない)
     monkeypatch.setattr(image_refs, "resolve_url", fake_resolve)
     env = _UrlEnv(monkeypatch)
-    env.tools.valves.url_max_mb = 100
+    _set_limit_mb(monkeypatch, 100)
     env.run(url="https://llens.test/ext/cage/a.bin")
     assert seen == {
         "url": "https://llens.test/ext/cage/a.bin",
         "max_bytes": 100 * 1024 * 1024,
+    }
+    _set_limit_mb(monkeypatch, 3)
+    env.run(url="https://llens.test/ext/cage/a.bin")
+    assert seen["max_bytes"] == 3 * 1024 * 1024
+    _set_limit_mb(monkeypatch, 0)
+    env.run(url="https://llens.test/ext/cage/a.bin")
+    assert seen["max_bytes"] == 1024 * 1024 * 1024
+
+
+def test_valve_url_max_mb_is_gone():
+    # 上限は RC の 1 つ — valve には無い(DB の保存値は merge_valves_update が落とす)
+    from nucllei.builtin_tools.sandbox import Tools
+    from nucllei.utils.valves import merge_valves_update
+
+    assert "url_max_mb" not in Tools.Valves.model_fields
+    assert merge_valves_update({"url_max_mb": 50, "debug": True}, {}, Tools.Valves) == {
+        "debug": True
     }
 
 
@@ -1616,7 +1643,7 @@ def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
     env = _UrlEnv(monkeypatch)
     env.mount_root(root)
     # サイズ上限は掛からない(コピーしないので)
-    env.tools.valves.url_max_mb = 0.000001
+    _set_limit_mb(monkeypatch, 0.000001)
     result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
     assert not result.startswith("ERROR")
     assert "取り込み不要" in result
