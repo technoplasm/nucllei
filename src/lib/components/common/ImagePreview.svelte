@@ -44,6 +44,14 @@
 		}
 	};
 
+	// body のスクロール止めは、body 直下に portal 中の data-scroll-lock が 1 つも残って
+	// いないときだけ解く (common/Modal.svelte と同じ。重ねたモーダルの下を守る)
+	const releaseScrollLock = () => {
+		if (!document.body.querySelector(':scope > [data-scroll-lock]')) {
+			document.body.style.overflow = 'unset';
+		}
+	};
+
 	// portal: 表示中だけ body 直下へ移す。$effect は DOM 更新後に走るため
 	// (非表示化では {#if} teardown が先で previewElement は null 化済み)、
 	// 後始末は else 分岐ではなく effect cleanup で行う — 要素は閉包で捕まえ、
@@ -60,7 +68,7 @@
 				if (element.parentNode === document.body) {
 					document.body.removeChild(element);
 				}
-				document.body.style.overflow = 'unset';
+				releaseScrollLock();
 			};
 		}
 	});
@@ -69,6 +77,7 @@
 {#if show}
 	<div
 		bind:this={previewElement}
+		data-scroll-lock
 		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black text-white w-full min-h-screen h-screen flex justify-center z-9999 overflow-hidden overscroll-contain"
 	>
 		<div class=" absolute left-0 w-full flex justify-between select-none z-10">

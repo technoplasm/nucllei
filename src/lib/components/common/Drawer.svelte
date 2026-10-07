@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, type Snippet } from 'svelte';
+	import { onDestroy, untrack, type Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { isApp } from '$lib/stores';
 
@@ -28,37 +28,55 @@
 		return modals.length && modals[modals.length - 1] === modalElement;
 	};
 
+	// body のスクロール止めは、body 直下に portal 中の data-scroll-lock が 1 つも残って
+	// いないときだけ解く (common/Modal.svelte と同じ。重ねたモーダルの下を守る)
+	const releaseScrollLock = () => {
+		if (!document.body.querySelector(':scope > [data-scroll-lock]')) {
+			document.body.style.overflow = 'unset';
+		}
+	};
+
 	// Switch.svelte と同じガード: 初期値では発火させず、show が実際に
 	// true → false に変化したときだけ onClose を呼ぶ。
 	let lastShow = show;
 	$effect(() => {
-		if (show && modalElement) {
-			document.body.appendChild(modalElement);
-			window.addEventListener('keydown', handleKeyDown);
-			document.body.style.overflow = 'hidden';
-		} else if (modalElement) {
-			if (lastShow) {
-				onClose?.();
+		if (show !== lastShow) {
+			if (!show) {
+				untrack(() => onClose?.());
 			}
-			window.removeEventListener('keydown', handleKeyDown);
-
-			if (document.body.contains(modalElement)) {
-				document.body.removeChild(modalElement);
-				document.body.style.overflow = 'unset';
-			}
+			lastShow = show;
 		}
-		lastShow = show;
+	});
+
+	// 後始末は cleanup で返す (common/Modal.svelte・ConfirmDialog と同じ形)。要素は
+	// ローカルに取ってから使う。Drawer の要素は {#if} の外なので、閉じている間は
+	// 元の位置からも外しておく (開くと body 直下へ portal する)
+	$effect(() => {
+		const el = modalElement;
+		if (!el) return;
+		if (!show) {
+			el.remove();
+			return;
+		}
+		document.body.appendChild(el);
+		window.addEventListener('keydown', handleKeyDown);
+		document.body.style.overflow = 'hidden';
+		return () => {
+			window.removeEventListener('keydown', handleKeyDown);
+			if (el.parentNode === document.body) {
+				document.body.removeChild(el);
+			}
+			releaseScrollLock();
+		};
 	});
 
 	onDestroy(() => {
 		show = false;
 		window.removeEventListener('keydown', handleKeyDown);
-		if (modalElement) {
-			if (document.body.contains(modalElement)) {
-				document.body.removeChild(modalElement);
-				document.body.style.overflow = 'unset';
-			}
+		if (modalElement && modalElement.parentNode === document.body) {
+			document.body.removeChild(modalElement);
 		}
+		releaseScrollLock();
 	});
 </script>
 
@@ -66,6 +84,7 @@
 
 <div
 	bind:this={modalElement}
+	data-scroll-lock
 	class="modal fixed right-0 {$isApp
 		? ' ml-[4.5rem] max-w-[calc(100%-4.5rem)]'
 		: ''} left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] flex justify-center z-999 overflow-hidden overscroll-contain"

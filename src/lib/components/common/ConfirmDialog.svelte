@@ -56,6 +56,14 @@
 		}
 	};
 
+	// body のスクロール止めは、body 直下に portal 中の data-scroll-lock が 1 つも残って
+	// いないときだけ解く (common/Modal.svelte と同じ。重ねたモーダルの下を守る)
+	const releaseScrollLock = () => {
+		if (!document.body.querySelector(':scope > [data-scroll-lock]')) {
+			document.body.style.overflow = 'unset';
+		}
+	};
+
 	// 後始末は cleanup で返す: 閉じるとき {#if} が先に要素を外して modalElement が null に
 	// なってから effect が走るため、else 分岐では keydown が外れず、閉じた後の Enter が
 	// 最後の onConfirm (削除・上書きアップロード等) を再実行していた (#150 の UI 確認で発覚)
@@ -70,14 +78,14 @@
 			if (el.parentNode === document.body) {
 				document.body.removeChild(el);
 			}
-			document.body.style.overflow = 'unset';
+			releaseScrollLock();
 		};
 	});
 
 	onDestroy(() => {
 		window.removeEventListener('keydown', handleKeyDown);
 		removeModalFromBody();
-		document.body.style.overflow = 'unset';
+		releaseScrollLock();
 	});
 </script>
 
@@ -85,6 +93,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		bind:this={modalElement}
+		data-scroll-lock
 		class=" fixed top-0 right-0 left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] flex justify-center z-99999999 overflow-hidden overscroll-contain"
 		in:fade={{ duration: 10 }}
 		onmousedown={() => {

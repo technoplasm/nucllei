@@ -55,23 +55,38 @@
 		}
 	};
 
-	$effect(() => {
-		if (show && modalElement) {
-			document.body.appendChild(modalElement);
-			window.addEventListener('keydown', handleKeyDown);
-			document.body.style.overflow = 'hidden';
-		} else if (modalElement) {
-			window.removeEventListener('keydown', handleKeyDown);
-			removeModalFromBody();
+	// body のスクロール止めは、body 直下に portal 中の data-scroll-lock (Modal / Drawer /
+	// ConfirmDialog / ImagePreview) が 1 つも残っていないときだけ解く — 重ねたモーダルの
+	// 上だけ閉じたとき、下が開いたままなのにページがスクロールできるようにならないため
+	const releaseScrollLock = () => {
+		if (!document.body.querySelector(':scope > [data-scroll-lock]')) {
 			document.body.style.overflow = 'unset';
 		}
+	};
+
+	// 後始末は cleanup で返す: 閉じるとき {#if} が先に要素を外して modalElement が null に
+	// なってから effect が走るため、else 分岐では keydown が外れず body の overflow: hidden も
+	// 残っていた (ConfirmDialog b0cbbb571 と同じ不具合)。要素はローカルに取ってから使う
+	$effect(() => {
+		const el = modalElement;
+		if (!(show && el)) return;
+		document.body.appendChild(el);
+		window.addEventListener('keydown', handleKeyDown);
+		document.body.style.overflow = 'hidden';
+		return () => {
+			window.removeEventListener('keydown', handleKeyDown);
+			if (el.parentNode === document.body) {
+				document.body.removeChild(el);
+			}
+			releaseScrollLock();
+		};
 	});
 
 	onDestroy(() => {
 		show = false;
 		window.removeEventListener('keydown', handleKeyDown);
 		removeModalFromBody();
-		document.body.style.overflow = 'unset';
+		releaseScrollLock();
 	});
 </script>
 
@@ -79,6 +94,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		bind:this={modalElement}
+		data-scroll-lock
 		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] {containerClassName} flex justify-center z-9999 overflow-y-auto overscroll-contain"
 		in:fade={{ duration: 10 }}
 		onmousedown={() => {
