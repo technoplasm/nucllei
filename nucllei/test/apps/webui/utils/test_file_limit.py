@@ -1,13 +1,17 @@
-"""1 ファイルの出入りの上限 = RC `ATTACHMENT_MAX_SIZE_MB` の 1 つ(`utils/file_limit`、ken 決定)。
+"""1 ファイルの上限は 2 つ(`utils/file_limit` の表、ken 決定)。
 
 固定すること:
-- 上限は呼ぶたびに RC から読む(管理画面で変えるとすぐ効く)。0 / 空 = 無制限 = None
-- sandbox への該当リクエスト(`/exec` `/exec_cell` `/files/read` `/files/write`)に
-  `file_limit_bytes` で渡る。無制限なら渡さない(sandbox の安全上限だけ)
-- 経路: send_to_workspace の file_id / url、exports の自動添付、fetch_from_workspace、
-  feed_image(path=)。超過の文は上限の値と「管理者の設定 (最大アップロードサイズ)」を言う
-- sandbox の安全上限より大きい(無制限を含む)と warning(組が変わったときだけ)
-- ファイルブラウザのアップロードは対象外(ken 決定 2026-10-07 — ここでは見ない)
+- 添付の上限 = RC `ATTACHMENT_MAX_SIZE_MB`。呼ぶたびに RC から読む(管理画面で変えるとすぐ効く)。
+  0 / 空 = 無制限 = None
+- 添付の上限の経路: send_to_workspace(file_id=)、exports の自動添付、fetch_from_workspace。
+  sandbox への該当リクエスト(`/exec` `/exec_cell` `/files/read` `/files/write`)に
+  `file_limit_bytes` で渡る。無制限なら渡さない(sandbox の上限だけ)。超過の文は上限の値と
+  「管理者の設定 (最大アップロードサイズ)」を言う
+- sandbox の上限 = sandbox の `/healthz` の `file_max_size_mb`(読めるまでは既定 1024 MB)。
+  feed_image(path=) はこれと FETCH_MAX_BYTES の小さいほう(send_to_workspace(url=) とファイルブラウザ
+  は test_builtin_sandbox / test_sandbox_files)
+- 添付の上限が sandbox の上限より大きい(無制限を含む)と warning(組が変わったときだけ)
+- 改名した env の旧名(SANDBOX_WRITE_FILE_LIMIT_BYTES)は読まず、warning で新名を案内する
 """
 
 import asyncio
@@ -29,7 +33,7 @@ def limit_mb(monkeypatch):
     from nucllei import config
     from nucllei.utils import file_limit
 
-    monkeypatch.setattr(file_limit, "_sandbox_safety", None)
+    monkeypatch.setattr(file_limit, "_sandbox_limit", None)
     monkeypatch.setattr(file_limit, "_warned", None)
 
     def set_mb(value):
@@ -81,24 +85,24 @@ def test_sandbox_fields_and_format(limit_mb):
     assert format_limit(None) == "無制限"
 
 
-def test_warns_when_over_sandbox_safety_once_per_pair(limit_mb, caplog):
+def test_warns_when_over_sandbox_limit_once_per_pair(limit_mb, caplog):
     from nucllei.utils import file_limit
 
     limit_mb(25)
     with caplog.at_level(logging.WARNING, logger="nucllei.utils.file_limit"):
-        file_limit.set_sandbox_safety_limit(10 * MIB)
-        assert caplog.text.count("安全上限が勝つ") == 1
+        file_limit.set_sandbox_file_limit(10 * MIB)
+        assert caplog.text.count("sandbox の上限が勝つ") == 1
         assert "25 MB" in caplog.text and "10 MB" in caplog.text
         # 同じ組では繰り返さない(毎リクエストで溢れさせない)
         file_limit.sandbox_limit_fields(25 * MIB)
         file_limit.sandbox_limit_fields(25 * MIB)
-        assert caplog.text.count("安全上限が勝つ") == 1
+        assert caplog.text.count("sandbox の上限が勝つ") == 1
         # 無制限も「大きい」
         file_limit.sandbox_limit_fields(None)
-        assert caplog.text.count("安全上限が勝つ") == 2
-        # 安全上限以下なら出さない
+        assert caplog.text.count("sandbox の上限が勝つ") == 2
+        # sandbox の上限以下なら出さない
         file_limit.sandbox_limit_fields(5 * MIB)
-        assert caplog.text.count("安全上限が勝つ") == 2
+        assert caplog.text.count("sandbox の上限が勝つ") == 2
 
 
 def test_no_warning_without_safety_or_under_it(limit_mb, caplog):
@@ -106,9 +110,9 @@ def test_no_warning_without_safety_or_under_it(limit_mb, caplog):
 
     limit_mb(25)
     with caplog.at_level(logging.WARNING, logger="nucllei.utils.file_limit"):
-        file_limit.sandbox_limit_fields(None)  # 安全上限が未取得
-        file_limit.set_sandbox_safety_limit(1024 * MIB)
-    assert "安全上限が勝つ" not in caplog.text
+        file_limit.sandbox_limit_fields(None)  # sandbox の上限が未取得
+        file_limit.set_sandbox_file_limit(1024 * MIB)
+    assert "sandbox の上限が勝つ" not in caplog.text
 
 
 # --- sandbox tool の各経路 ------------------------------------------------------------
@@ -251,8 +255,12 @@ def test_fetch_passes_limit_and_413_says_limit(monkeypatch, limit_mb):
 # --- feed_image(path=) / resolver ------------------------------------------------------
 
 
-def test_feed_image_path_uses_attachment_limit(monkeypatch, limit_mb):
+def test_feed_image_path_uses_sandbox_limit_capped_by_fetch(monkeypatch, limit_mb):
+    # file_id を作らない (参照を積むだけ) ので添付の上限ではなく sandbox の上限。送信直前に
+    # FETCH_MAX_BYTES で読み直すので、その小さいほう
     from nucllei.builtin_tools import feed_image as mod
+    from nucllei.env import FETCH_MAX_BYTES
+    from nucllei.utils import file_limit
     from nucllei.utils.image_refs import RefError
 
     seen = {}
@@ -263,14 +271,70 @@ def test_feed_image_path_uses_attachment_limit(monkeypatch, limit_mb):
 
     monkeypatch.setattr(mod, "resolve_path", fake_path)
     tools = mod.Tools()
-    limit_mb(2)
-    out = _run(
-        tools.feed_image(
-            path="/workspace/a.png", __user__=USER, __feed_image__=lambda r: None
+
+    def call():
+        return _run(
+            tools.feed_image(
+                path="/workspace/a.png", __user__=USER, __feed_image__=lambda r: None
+            )
         )
-    )
+
+    limit_mb(1)  # 添付の上限は効かない
+    out = call()
+    assert seen["max_bytes"] == min(1024 * MIB, FETCH_MAX_BYTES)
+    assert out.startswith("ERROR") and "sandbox の配備の設定" in out
+    assert "最大アップロードサイズ" not in out
+    file_limit.set_sandbox_file_limit(2 * MIB)
+    call()
     assert seen["max_bytes"] == 2 * MIB
-    assert out.startswith("ERROR") and "最大アップロードサイズ" in out
+
+
+def test_renamed_env_only_warns(caplog):
+    from nucllei.utils import file_limit
+
+    with caplog.at_level(logging.WARNING, logger="nucllei.utils.file_limit"):
+        assert file_limit.warn_renamed_env({}) == []
+        assert "廃止" not in caplog.text
+        found = file_limit.warn_renamed_env({"SANDBOX_WRITE_FILE_LIMIT_BYTES": "5"})
+    assert found == ["SANDBOX_WRITE_FILE_LIMIT_BYTES"]
+    assert (
+        "SANDBOX_WRITE_FILE_LIMIT_BYTES は廃止 (読まない)。SANDBOX_TEXT_MAX_SIZE_MB"
+        in caplog.text
+    )
+
+
+def test_probe_reads_file_max_size_mb(monkeypatch, limit_mb):
+    from aiohttp import web
+
+    from nucllei.builtin_tools import sandbox
+    from nucllei.utils import file_limit
+
+    async def main(body):
+        app = web.Application()
+
+        async def healthz(request):
+            return web.json_response(body)
+
+        app.router.add_get("/healthz", healthz)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        monkeypatch.setattr(sandbox, "SANDBOX_URL", f"http://127.0.0.1:{port}")
+        try:
+            return await file_limit.probe_sandbox_file_limit(attempts=1)
+        finally:
+            await runner.cleanup()
+
+    limit_mb(25)
+    assert asyncio.run(main({"ok": True, "file_max_size_mb": 3})) == 3 * MIB
+    assert file_limit.sandbox_file_limit_bytes() == 3 * MIB
+    assert file_limit.sandbox_file_limit_probed() == 3 * MIB
+    # キーの無い sandbox は既定のまま
+    assert asyncio.run(main({"ok": True})) is None
+    assert file_limit.sandbox_file_limit_probed() is None
+    assert file_limit.sandbox_file_limit_bytes() == 1024 * MIB
 
 
 def test_workspace_read_passes_limit_to_sandbox(monkeypatch):

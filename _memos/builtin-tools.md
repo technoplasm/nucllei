@@ -1310,7 +1310,8 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - **nucllei**: `nucllei/routers/sandbox_files.py`(`/api/v1/sandbox/files/*`。API は `README_API.md` §4.4.1)。
   パスは jail の絶対パスで受けて返す(モデルの tool と同じ文字列)。ro への書き換えは sandbox を呼ばずに 403
   (sandbox にも ro の bind で渡るので 2 重)。`.` 始まりのセグメントは 400(dotfile は隠す — list_workspace と同じ)。
-  平文の判定は 1 MiB 以内・UTF-8・NUL 無し。書き込み上限は `SANDBOX_WRITE_FILE_LIMIT_BYTES`。sandbox に
+  平文の判定はテキストの上限(`SANDBOX_TEXT_MAX_SIZE_MB`、既定 1)以内・UTF-8・NUL 無し。保存の上限も同じ。
+  アップロード / ダウンロードは sandbox の `/files/raw` へストリーミングで中継(下の「上限を 2 つに」の節)。sandbox に
   繋がらないときは 500(502/503/504 は画面の「バックエンド不達」バナーが拾うので使わない)。
   `SANDBOX_URL` が無ければ全部 404 + `features.enable_sandbox_files: false`(タブを出さない)。
 - **sandbox**: `/files/ls` `stat` `delete` `rename` `mkdir` `usage` を追加。read は `mtime`、write は
@@ -1343,12 +1344,25 @@ llens 依頼。レシピ等を `run_shell` の `cat` で読んでいて、write_
   sandbox は `/files/stat` → `/files/read`(`nofollow: true`、`/ext` は `mounts` 付き)。どちらも fd 経路で
   経路・末端の symlink を辿らない。stat が symlink を返したら sandbox の 400 と同じ文(`_unusable_path`)、
   無い・ファイルでないは 404 と同じ文(`_no_such_file`)— `_files_error` から切り出して共有
-- バイト上限 `READ_FILE_LIMIT` = `SANDBOX_WRITE_FILE_LIMIT_BYTES`(既定 1 MiB。write_file で書けた物は
-  読み戻せる・ファイルブラウザのエディタと同じ)。**転送前に stat の size で見る**(読んだ後にも再確認 —
-  stat の後に伸びた物)。超えたら outcome「上限を超えている。次の手: 必要な部分だけ書き出してから読む」
-- 文字数は `read_attachment` と同じ offset ページング(既定 40000・上限 60000 字、TOOL_RESULT_MAX_CHARS
-  65536 に収まる)。本文の先頭行に `` `パス` — 文字コード: …、全 N 字 のうち a〜b 字目 ``、続きがあれば
-  末尾に `(続きあり: next_offset=M。…)`。offset が末尾以降は outcome
+- **範囲読み**(2026-10-07 夜に改訂。それまでは `SANDBOX_WRITE_FILE_LIMIT_BYTES` = 1 MiB を超える物を
+  断り、文字位置の offset で全体を decode してから切っていた): ファイル全体の大きさで断らない。stat で
+  総バイト数を取り、先頭 64 KiB(文字コードの判定・CSV の見出し)と 1 ページ分だけを `/files/read` の
+  `offset` / `length` で読む(offset 0 なら 1 回で兼ねる)。読むバイト数は max_chars × 最大バイト/字
+  (UTF-8 4・cp932 2)。範囲読みを知らない古い sandbox(全体を返す)は手元で切る
+- 1 ページ = max_chars 字以内(既定 40000・上限 60000、TOOL_RESULT_MAX_CHARS 65536 に収まる)を
+  **改行(0x0A)まで戻して切る**(`_cut_page`)。UTF-8 も cp932 も 0x0A は多バイト文字の途中に現れない
+  (cp932 の 2 バイト目は 0x40 以上)ので文字を割らない。1 行が max_chars を超えるときだけ文字の境界で
+  切り、本文末尾に「1 行が N 字を超えるので行の途中で切った」。`offset` / `next_offset` は**バイト位置**。
+  先頭行は `` `パス` — 文字コード: …、全 N バイトのうち a〜b バイト目 ``(1 ページで全部なら範囲を書かない)、
+  続きがあれば末尾に `(続きあり: next_offset=M。…)`。offset が末尾以降は outcome、UTF-8 の文字の途中
+  (継続バイト)から始まる offset は call エラー(cp932 は判定できない — 前回の next_offset を渡す約束)
+- `.csv` / `.tsv`: 引用符の外の改行でだけ切る(引用符はページの先頭から数える = 先頭がレコードの切れ目で
+  ある前提。前ページの next_offset ならそう。任意の offset では数え違いうる — docstring とコメントに)。
+  2 ページ目以降は先頭に 1 行目(先頭 64 KiB の最初のレコード)を付け直し、先頭行に
+  「先頭に 1 行目 (見出し) を付け直した (この範囲には含まれない)」。見出しは max_chars の内側で数え、
+  max_chars の半分を超える見出しは付けない。表示は今のまま code(csv)
+- 文字コードは先頭で判定し、各ページはその文字コードで decode する。後のページで decode できない
+  (NUL・不正バイト)ときは binary と同じ文
 - 文字コード: BOM 付き UTF-8 → UTF-8 → cp932 の順に厳密 decode。NUL を含む・どれも通らない = テキストで
   ない。**Python の cp932 は未定義の 1 バイト(0x80 / 0xA0 / 0xFD-0xFF)も文字にする**(Windows 互換)ので、
   その文字(U+0080 / U+F8F0-F8F3)が出たら cp932 とはみなさない。cp932 で読んだら先頭行で
@@ -1369,6 +1383,9 @@ llens 依頼。レシピ等を `run_shell` の `cat` で読んでいて、write_
   まだ足していない(触る範囲の外だった)
 
 ## ファイルの出入りの上限を 1 つに(2026-10-07、ken 決定・llens 依頼)
+
+> 同日夜に「上限を 2 つに」(次の節)で改訂 — url= とファイルブラウザ・feed_image(path=) は sandbox の上限へ、
+> env 名は `*_MAX_SIZE_MB` へ。以下は改訂前の記録(添付の上限の経路の仕組みは今も同じ)。
 
 情報源は RC **`ATTACHMENT_MAX_SIZE_MB`** の 1 つ(管理画面: ワークスペース > 設定 > ファイルの
 「最大アップロードサイズ」。0 = 無制限)。値は `nucllei/utils/file_limit.py` の
@@ -1405,3 +1422,56 @@ RuntimeConfig を包むだけなので同じ値)。
   sandbox に値が渡る)、`test_builtin_sandbox.py::test_valve_url_max_mb_is_gone` /
   `test_attachment_limit_is_the_resolver_limit`、sandbox 側は `sandbox/tests/test_files_list.py` 末尾
   (小さいほう・渡されないとき・warning・exports・/healthz /metrics)。
+
+## 上限を 2 つに・名前を `*_MAX_SIZE_MB` に・ファイルブラウザと url= をストリーミングに(2026-10-07 夜、ken 決定・llens 依頼)
+
+**上限は 2 つで、出入り口ごとにどちらかに固定**(表は `nucllei/utils/file_limit.py` 冒頭と `README_API.md` §3.7):
+
+| 出入り口 | 上限 |
+|---|---|
+| チャットへのアップロード / `send_to_workspace(file_id=)`(添付一覧・`url=/api/v1/files/{id}/content` も)/ exports の自動添付 / `fetch_from_workspace` | 添付の上限 RC `ATTACHMENT_MAX_SIZE_MB`(file_id を作る・運ぶ経路) |
+| ファイルブラウザのアップロード / ダウンロード / `send_to_workspace(url=)` | sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB`(sandbox の env、既定 1024、全員共通) |
+| `feed_image(path=)` | sandbox の上限と `FETCH_MAX_BYTES` の小さいほう |
+
+- **feed_image(path=) の判断**: file_id を作らない(参照文字列を積むだけ)ので sandbox 側。ただし中身を
+  メモリに載せて画像 / PDF・ページ数を検証し、送信直前にも resolver の既定 `FETCH_MAX_BYTES`(25 MB)で
+  読み直す(`utils/file_images`)— sandbox の上限(1 GiB)に合わせるとここで通って送信時に黙って落ちる。
+  なので `min(sandbox の上限, FETCH_MAX_BYTES)`(既定では 25 MB で以前と同じ)。超過の文は「上限は sandbox の
+  配備の設定で、引数では上げられない」(`_LIMIT_BY_DEPLOY`。env 名はモデルに出さない)
+- **env の改名**(MB の整数): nucllei `SANDBOX_WRITE_FILE_LIMIT_BYTES` → **`SANDBOX_TEXT_MAX_SIZE_MB`**(既定 1。
+  write_file の本文 = 壊れたモデルの繰り返し出力の歯止め、とファイルブラウザのテキスト編集。read_file には
+  使わない)、sandbox `SANDBOX_FILE_LIMIT_BYTES` → **`SANDBOX_FILE_MAX_SIZE_MB`**(既定 1024)。旧名は**読まない**
+  (旧データ互換を持たない方針の延長)— 設定されていれば起動時に warning 1 行で新名を案内(nucllei は
+  `file_limit.warn_renamed_env`、sandbox は `_startup`)。公開キーも揃えた: `/healthz` は `file_max_size_mb`、
+  `/metrics` は `sandbox_file_max_size_bytes`。リクエストごとの `file_limit_bytes`(添付の上限を渡す wire の名前)は
+  そのまま
+- nucllei の名前: `TEXT_MAX_BYTES`(旧 `WRITE_FILE_LIMIT`、`READ_FILE_LIMIT` は撤去)、`file_limit` の
+  `sandbox_file_limit_bytes()`(読めていなければ既定 1024 MB)/ `sandbox_file_limit_probed()`(読めていなければ None —
+  画面の事前チェック用)/ `set_sandbox_file_limit` / `probe_sandbox_file_limit`(旧 `*_safety_*`)
+- **sandbox の `/files/raw`**(base64-in-JSON を使わないストリーミングの口。sandbox/README の API 節):
+  `PUT /files/raw?user_id&path&mounts(JSON)&file_limit_bytes&exclusive` — 本文をチャンクで受けて同じディレクトリの
+  `.upload-<uuid>.part` に書き、全部受けてから rename(上書き)/ link + unlink(exclusive。既に在れば 409、
+  競り合っても上書きしない)で確定。Content-Length が上限超えなら本文を読まずに 413、無ければ受けながら数えて
+  413。容量切れ 507。途中の失敗(413・507・切断)では一時ファイルを消し、元のファイルは変わらない。
+  `GET /files/raw` — StreamingResponse(Content-Length、1 MiB ずつ)。パスの扱いは fd 経路(O_NOFOLLOW・
+  新しい段は 65534・ro 403・bind 外 404)。プロセスごと落ちたときだけ `.upload-*.part` が残りうる(一覧に出ない)
+- **nucllei の中継**: `builtin_tools/sandbox.py` の `sandbox_put_raw(params, body, content_length)` /
+  `sandbox_get_raw(params)`(トークンの付け方は `sandbox_post` と共有 `_auth_headers`。総時間では切らず
+  sock_read 300 秒)。ファイルブラウザの upload は spool された UploadFile を `RAW_CHUNK`(1 MiB)ずつ送る
+  (`file.size` を Content-Length に)、download は StreamingResponse でそのまま流す。mounts は query に載せるので
+  その場所を覆う bind だけ渡す。sandbox の上限を読めていれば upload は送る前に 413。413 の detail は
+  `{message, size, limit}`(画面が上限を言う)
+- **権限**: ファイルブラウザのアップロードはグループの `chat.file_upload`(「ファイルアップロードを許可」)が要る
+  (admin は常に可)— 無ければ 403、画面はボタンとドロップを出さない(`/places` の `can_upload`)。新規ファイルの
+  作成とテキストの保存は対象外。`/places` は `text_limit_bytes` / `upload_limit_bytes`(読めていなければ null)/
+  `can_upload` を返す(旧 `write_limit_bytes` は撤去)
+- **send_to_workspace(url=)**: resolver に `sink` を足した(`resolve_url(..., sink=)` → `_load_url` →
+  `_load_general` / `_load_ext` → `_read_response` / `_read_confined` / `_load_proxy`)。sink があれば本文は
+  チャンクのまま sink(`tempfile.TemporaryFile`)へ書き、`LoadedRef` は `spooled=True`・`size`・`data` は型の判定に
+  使う先頭 64 バイトだけ。tool は一時ファイルを `sandbox_put_raw` で `imports/<name>` へ流す(添付の上限は渡さない)。
+  一時ファイルは nucllei のコンテナの既定の temp(`/tmp`)— 1 GiB 級を取り込むならその容量が要る
+- 回帰: `sandbox/tests/test_files_raw.py`(PUT / GET / 範囲読み)、`test_files_list.py`(既定 1024・旧名 warning)、
+  `nucllei/test/.../test_sandbox_files.py`(upload / download の中継・チャンクで送る・権限・上限・`sandbox_put_raw` /
+  `sandbox_get_raw` を本物の HTTP で)、`test_builtin_sandbox.py`(url= が sandbox の上限・一時ファイル経由)、
+  `test_builtin_read_file.py`(範囲読み一式)、`test_file_limit.py`(feed_image(path=)・旧名・probe)、
+  `test_image_refs_resolve.py`(sink)

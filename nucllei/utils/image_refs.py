@@ -226,9 +226,10 @@ import logging
 import mimetypes
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import BinaryIO, Callable
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
@@ -366,9 +367,19 @@ _MAGIC_TYPES = (
 
 @dataclass
 class LoadedRef:
+    """読めた中身。`sink` を渡して読んだ (`spooled`) ときは中身は sink に書いてあり、`data` は
+    型の判定に使った先頭 (`_SNIFF_BYTES`) だけ、`size` が全体のバイト数(send_to_workspace(url=) が
+    1 GiB 級を一時ファイルに落として sandbox へストリーミングで渡すため)。"""
+
     data: bytes
     content_type: str
     name: str
+    size: int | None = None
+    spooled: bool = False
+
+
+# sink に落とすときに手元に残す先頭のバイト数(`_sniff` の magic に足りる長さ)
+_SNIFF_BYTES = 64
 
 
 @dataclass(frozen=True)
@@ -590,7 +601,11 @@ def _content_type_for(data: bytes, declared: str | None, name: str) -> str:
 
 
 def _read_confined(
-    inside: Callable[[Path], bool], target: Path, label: str, limit: int
+    inside: Callable[[Path], bool],
+    target: Path,
+    label: str,
+    limit: int,
+    sink: BinaryIO | None = None,
 ) -> _Result:
     """resolve した実体が `inside` を満たす通常ファイルだけを読む。blocking — thread で
     呼ぶ。`inside` は閉じ込め: URL `/ext/{rest}` も sandbox パス `/ext/{rest}` も、静的 mount の
@@ -619,6 +634,21 @@ def _read_confined(
                 size=size,
                 limit=limit,
                 size_exact=True,
+            )
+        if sink is not None:
+            with resolved.open("rb") as f:
+                head = f.read(_SNIFF_BYTES)
+                sink.write(head)
+                shutil.copyfileobj(f, sink, 1024 * 1024)
+            return (
+                LoadedRef(
+                    data=head,
+                    content_type=_content_type_for(head, None, resolved.name),
+                    name=resolved.name,
+                    size=size,
+                    spooled=True,
+                ),
+                None,
             )
         data = resolved.read_bytes()
     except OSError as e:
@@ -714,6 +744,7 @@ async def _load_ext(
     query: str = "",
     decode: bool = True,
     hops: int = 0,
+    sink: BinaryIO | None = None,
 ) -> _Result:
     """`/ext/{rest}` を読む — 静的の name はファイル、proxy の name は上流へ GET
     (`_load_proxy`)、表に無い name は not_found。`/ext/groups` `/ext/public` は `user` の
@@ -731,7 +762,7 @@ async def _load_ext(
         log.warning(f"image_refs: not visible to this user ({label})")
         return _fail("not_found", f"not visible to this user ({label})")
     if mount.proxy:
-        return await _load_proxy(mount, sub, query, limit, hops, user)
+        return await _load_proxy(mount, sub, query, limit, hops, user, sink)
     root = await asyncio.to_thread(_static_root, mount)
     if root is None:
         return _fail("not_found", f"cannot resolve mount root ({label})")
@@ -739,12 +770,18 @@ async def _load_ext(
     if base is None:
         return _fail("not_found", f"no such place ({label})")
     return await asyncio.to_thread(
-        _read_confined, _is_under(base), root / sub.lstrip("/"), label, limit
+        _read_confined, _is_under(base), root / sub.lstrip("/"), label, limit, sink
     )
 
 
 async def _load_proxy(
-    mount: ExtMount, sub: str, query: str, limit: int, hops: int, user=None
+    mount: ExtMount,
+    sub: str,
+    query: str,
+    limit: int,
+    hops: int,
+    user=None,
+    sink: BinaryIO | None = None,
 ) -> _Result:
     """proxy の name を上流へ GET する(`EXT_MOUNTS` の固定の相手 — 自分自身判定は掛けない)。
     404 → not_found、2xx 以外 → upstream_status、接続失敗・タイムアウト → upstream_unreachable、
@@ -761,7 +798,7 @@ async def _load_proxy(
             location = response.headers.get("location")
             if status not in _REDIRECT_STATUSES:
                 return await _read_response(
-                    response, label, os.path.basename(sub), limit
+                    response, label, os.path.basename(sub), limit, sink
                 )
             if hops >= MAX_REDIRECTS:
                 log.warning(f"image_refs: too many redirects ({label})")
@@ -801,13 +838,19 @@ async def _load_proxy(
         user=user,
         query=f"?{q}" if q else "",
         hops=hops + 1,
+        sink=sink,
     )
 
 
 async def _read_response(
-    response: httpx.Response, label: str, filename: str, limit: int
+    response: httpx.Response,
+    label: str,
+    filename: str,
+    limit: int,
+    sink: BinaryIO | None = None,
 ) -> _Result:
-    """開いたストリーム応答を LoadedRef にする(一般の URL)。
+    """開いたストリーム応答を LoadedRef にする(一般の URL)。`sink` があれば中身はそこへ
+    チャンクのまま書き、メモリには先頭だけを残す(`LoadedRef.spooled`)。
     404 → not_found、それ以外の 2xx 以外(3xx 含む)→ upstream_status、上限超過 →
     too_large。httpx の例外は呼び手が受ける(upstream_unreachable)。"""
     if not response.is_success:
@@ -840,8 +883,26 @@ async def _read_response(
                 limit=limit,
                 size_exact=exact,
             )
-        chunks.append(chunk)
+        if sink is None:
+            chunks.append(chunk)
+            continue
+        if total - len(chunk) < _SNIFF_BYTES:
+            chunks.append(chunk[: _SNIFF_BYTES - (total - len(chunk))])
+        await asyncio.to_thread(sink.write, chunk)
     data = b"".join(chunks)
+    if sink is not None:
+        return (
+            LoadedRef(
+                data=data,
+                content_type=_content_type_for(
+                    data, response.headers.get("content-type"), filename
+                ),
+                name=filename,
+                size=total,
+                spooled=True,
+            ),
+            None,
+        )
     return (
         LoadedRef(
             data=data,
@@ -878,7 +939,12 @@ def _pinned_request(parts, address: str) -> httpx.Request:
 
 
 async def _load_general(
-    url: str, limit: int, hops: int, redirect_status: int | None, user=None
+    url: str,
+    limit: int,
+    hops: int,
+    redirect_status: int | None,
+    user=None,
+    sink: BinaryIO | None = None,
 ) -> _Result:
     """一般の URL(`/ext/` 形でない絶対 URL。`_route_url` が `kind="general"` と
     判定済み)を直接取得する(module docstring「一般の URL」)。
@@ -961,7 +1027,7 @@ async def _load_general(
                 log.info(f"image_refs: following redirect {status} ({label})")
             else:
                 return await _read_response(
-                    response, label, os.path.basename(parts.path), limit
+                    response, label, os.path.basename(parts.path), limit, sink
                 )
         finally:
             await response.aclose()
@@ -971,7 +1037,7 @@ async def _load_general(
             "upstream_unreachable",
             f"general fetch error ({label}): {type(e).__name__}: {e}",
         )
-    return await _load_url(target, limit, hops + 1, status, user=user)
+    return await _load_url(target, limit, hops + 1, status, user=user, sink=sink)
 
 
 # sandbox_post が投げる RuntimeError の文面(`sandbox HTTP {status}: {body}`)から
@@ -1193,6 +1259,7 @@ async def _load_url(
     redirect_status: int | None = None,
     *,
     user=None,
+    sink: BinaryIO | None = None,
 ) -> _Result:
     """URL(traversal / 制御文字は入口で拒否済み)を解決する: `/ext/{rest}` は `EXT_MOUNTS` の
     対応表で読み(`_load_ext`)、一般の URL は直接取得(`_load_general`)。`hops` は一般の URL で
@@ -1204,8 +1271,8 @@ async def _load_url(
         log.warning(f"image_refs: {err.detail} ({url[:80]!r})")
         return None, err
     if route.general:
-        return await _load_general(url, limit, hops, redirect_status, user)
-    return await _load_ext(route.rel, limit, user=user, query=route.query)
+        return await _load_general(url, limit, hops, redirect_status, user, sink)
+    return await _load_ext(route.rel, limit, user=user, query=route.query, sink=sink)
 
 
 async def mounted_path_for_url(url: str, user=None) -> str | None:
@@ -1357,7 +1424,9 @@ def _reject(ref) -> RefError | None:
     return None
 
 
-async def resolve_url(url: str, *, max_bytes: int | None = None, user=None) -> _Result:
+async def resolve_url(
+    url: str, *, max_bytes: int | None = None, user=None, sink: BinaryIO | None = None
+) -> _Result:
     """**URL として** 解決する(tool の `url` 引数の入口)。
 
     受けるのはスキーム付きの絶対 URL(`http(s)://…`)と、同一サーバの相対 URL
@@ -1368,7 +1437,9 @@ async def resolve_url(url: str, *, max_bytes: int | None = None, user=None) -> _
     not_found(redirect の先も同じ)。None なら ACL の置き場は全部見えない(fail closed)。
     それ以外の `/ext/<name>` の公開範囲は配備が `EXT_MOUNTS` に書いた物で、per-user ではない。
 
-    戻り値・サイズ上限・失敗 code は `resolve_ref` と同じ。
+    戻り値・サイズ上限・失敗 code は `resolve_ref` と同じ。`sink`(書ける binary file)を渡すと
+    中身はメモリに貯めずにそこへ書く(`LoadedRef.spooled` — send_to_workspace(url=) が一時ファイルに
+    落とすため)。失敗したときに sink に途中まで書かれていることがある(捨てるのは呼び手)。
     """
     limit = FETCH_MAX_BYTES if max_bytes is None else max_bytes
     err = _check_url(url)
@@ -1376,7 +1447,7 @@ async def resolve_url(url: str, *, max_bytes: int | None = None, user=None) -> _
         if err.code == "unsupported_form":
             log.warning(f"image_refs: not a resolvable URL ({str(url)[:80]!r})")
         return None, err
-    return await _load_url(url, limit, user=user)
+    return await _load_url(url, limit, user=user, sink=sink)
 
 
 async def resolve_path(path: str, user, *, max_bytes: int | None = None) -> _Result:

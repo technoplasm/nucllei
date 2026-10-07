@@ -32,7 +32,7 @@
 ### core(薄い・不可避な分だけ)
 - **① 受け入れゲート**(upload endpoint `POST /files/`): raw を保存し file_id 発番。
   **filter は inlet で動く=upload 後なので、拒否できるのはここだけ**。size / 拡張子の最小限バリデーション。
-  上限は原本をサンドボックスへ b64 転送する `SANDBOX_FILE_LIMIT_BYTES`(既定 25MB)を超える分は
+  上限は原本をサンドボックスへ b64 転送する `SANDBOX_FILE_LIMIT_BYTES`(既定 25MB。※ 2026-10-07 に `SANDBOX_FILE_MAX_SIZE_MB` へ改名・既定 1024 — `builtin-tools.md`「上限を 2 つに」)を超える分は
   そもそも渡せないので、これを受け入れ上限の目安にする(要確定)。
 - **プロバイダ実行機構を filter-callable な内部関数として露出**。core が自動実行はしない。
   - `ensure_extracted(file_id, engine)`: **冪等・キャッシュ付き**。未抽出なら選択プロバイダ(docling/tika 等)で
@@ -245,7 +245,7 @@ xlsx=pandas→md テーブル・html=markdownify)。**OCR は既定で無し**(�
 - **① 受け入れゲート**(c0654415d): upload 入口(Attachment 前)で server-side に拡張子 whitelist +
   サイズ上限を強制。config を **`ATTACHMENT_MAX_SIZE_MB`(既定 25MB)/ `ATTACHMENT_MAX_COUNT` /
   `ATTACHMENT_ALLOWED_EXTENSIONS`(空=全許可)** に統一(旧 RAG_FILE_MAX_* を廃止、`attachment.*` 永続キー)。
-  SANDBOX_FILE_LIMIT_BYTES とは別 config だが 25MB で揃える運用。
+  SANDBOX_FILE_LIMIT_BYTES とは別 config だが 25MB で揃える運用(※ 2026-10-07 改訂: 上限は添付の上限と sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB` の 2 つ — `builtin-tools.md`)。
 - **dead 掃除**(f5e4a2583): Documents の reranking scaffolding + 未使用 import を除去。
 
 **残り**:

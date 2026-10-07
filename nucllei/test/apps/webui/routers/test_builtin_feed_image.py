@@ -643,18 +643,24 @@ def test_unsupported_form_from_the_resolver_uses_the_fixed_text_of_the_argument(
     assert result == f"ERROR: /workspace/x.png は URL として解決できない。{URL_FORM}"
 
 
-def test_feed_image_url_uses_default_limit_and_path_uses_attachment_limit(monkeypatch):
+def test_feed_image_url_uses_default_limit_and_path_uses_sandbox_limit(monkeypatch):
     """url= は画像 inline 用の既定上限のまま読む (fetch_url と違い max_bytes を渡さない)。
-    path= の取り出しは sandbox のファイルの出入りと同じ RC ATTACHMENT_MAX_SIZE_MB
-    (utils/file_limit。ken 決定)。"""
+    path= は file_id を作らないので添付の上限 (RC ATTACHMENT_MAX_SIZE_MB) ではなく sandbox の上限、
+    ただし送信直前に FETCH_MAX_BYTES で読み直すのでその小さいほう (utils/file_limit。ken 決定)。"""
     from nucllei import config
+    from nucllei.env import FETCH_MAX_BYTES
+    from nucllei.utils import file_limit
 
     monkeypatch.setattr(config.ATTACHMENT_MAX_SIZE_MB, "value", 7)
+    monkeypatch.setattr(file_limit, "_sandbox_limit", None)
     for ref in (FIG_URL, HIS_PDF_URL):
         _result, _fed, resolver = _run(monkeypatch, **_ref_kw(ref))
         assert resolver.kwargs == [{}], ref
     _result, _fed, resolver = _run(monkeypatch, **_ref_kw("/workspace/out/plot.png"))
-    assert resolver.kwargs == [{"max_bytes": 7 * 1024 * 1024}]
+    assert resolver.kwargs == [{"max_bytes": min(1024 * 1024 * 1024, FETCH_MAX_BYTES)}]
+    monkeypatch.setattr(file_limit, "_sandbox_limit", 5 * 1024 * 1024)
+    _result, _fed, resolver = _run(monkeypatch, **_ref_kw("/workspace/out/plot.png"))
+    assert resolver.kwargs == [{"max_bytes": 5 * 1024 * 1024}]
 
 
 # --- RefError.code ごとの ERROR 文 (番兵)。文面はモデルがユーザーへ転記する前提 ----------

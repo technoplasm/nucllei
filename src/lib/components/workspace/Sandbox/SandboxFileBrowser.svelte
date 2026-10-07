@@ -53,7 +53,11 @@
 	let places = $state<SandboxPlace[]>([]);
 	let placesLoaded = $state(false);
 	let placesError = $state('');
-	let writeLimit = $state(0);
+	// テキストの上限(保存の 413 の既定の表示)、アップロードの上限(null = サーバーが知らない)、
+	// アップロードの権限(無ければボタンもドロップも出さない — 新規作成・保存は別)
+	let textLimit = $state(0);
+	let uploadLimit = $state<number | null>(null);
+	let canUpload = $state(false);
 
 	let dir = $state(WORKSPACE);
 	let openFile = $state<string | null>(null);
@@ -133,12 +137,17 @@
 					return $i18n.t(
 						'Your workspace is full. Empty the trash (/workspace/trash/) to free up space — deleting elsewhere only moves files there.'
 					);
-				case 413:
+				case 413: {
+					// detail.limit = 効いた上限(アップロードは sandbox の上限、保存はテキストの上限)
+					const limit = (err.detail as { limit?: number | null } | null)?.limit ?? textLimit;
 					return $i18n.t('The file is too large (limit {{SIZE}}).', {
-						SIZE: formatFileSize(writeLimit)
+						SIZE: formatFileSize(limit)
 					});
+				}
 				case 403:
-					return $i18n.t('This location is read-only.');
+					return err.message === 'file upload is not permitted'
+						? $i18n.t('You do not have permission to upload files.')
+						: $i18n.t('This location is read-only.');
 				case 404:
 					return $i18n.t('Not found.');
 				case 409:
@@ -245,7 +254,9 @@
 		try {
 			const res = await getSandboxPlaces();
 			places = res.places;
-			writeLimit = res.write_limit_bytes;
+			textLimit = res.text_limit_bytes;
+			uploadLimit = res.upload_limit_bytes;
+			canUpload = res.can_upload;
 		} catch (err) {
 			placesError =
 				err instanceof SandboxFilesError && err.status === 404
@@ -445,10 +456,10 @@
 		uploading = true;
 		let ok = 0;
 		for (const f of files) {
-			if (writeLimit && f.size > writeLimit) {
+			if (uploadLimit !== null && f.size > uploadLimit) {
 				toast.error(
 					`${f.name}: ${$i18n.t('The file is too large (limit {{SIZE}}).', {
-						SIZE: formatFileSize(writeLimit)
+						SIZE: formatFileSize(uploadLimit)
 					})}`
 				);
 				continue;
@@ -468,7 +479,7 @@
 	};
 
 	const startUpload = (files: File[]) => {
-		if (!rw || files.length === 0) {
+		if (!rw || !canUpload || files.length === 0) {
 			return;
 		}
 		const existing = new Set((listing?.entries ?? []).map((e) => e.name));
@@ -638,19 +649,21 @@
 				</Dropdown>
 				<div class="flex items-center gap-0.5 ml-auto">
 					{#if rw}
-						<button
-							class="whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 mr-1 rounded-full bg-primary text-primary-content font-medium text-sm hover:bg-primary-hover disabled:opacity-50"
-							type="button"
-							disabled={uploading}
-							onclick={() => fileInput?.click()}
-						>
-							{#if uploading}
-								<Spinner className="size-3.5 mr-1" />
-							{:else}
-								<span class="i-lucide-upload size-3.5 block mr-1"></span>
-							{/if}
-							{$i18n.t('Upload')}
-						</button>
+						{#if canUpload}
+							<button
+								class="whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 mr-1 rounded-full bg-primary text-primary-content font-medium text-sm hover:bg-primary-hover disabled:opacity-50"
+								type="button"
+								disabled={uploading}
+								onclick={() => fileInput?.click()}
+							>
+								{#if uploading}
+									<Spinner className="size-3.5 mr-1" />
+								{:else}
+									<span class="i-lucide-upload size-3.5 block mr-1"></span>
+								{/if}
+								{$i18n.t('Upload')}
+							</button>
+						{/if}
 						<Tooltip content={$i18n.t('New folder')}>
 							<button
 								class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
@@ -742,7 +755,7 @@
 		<div
 			class="mt-1 flex-1 rounded-lg {dragOver ? 'ring-2 ring-inset ring-primary bg-surface-hover' : ''}"
 			ondragover={(e) => {
-				if (rw && e.dataTransfer?.types.includes('Files')) {
+				if (rw && canUpload && e.dataTransfer?.types.includes('Files')) {
 					e.preventDefault();
 					dragOver = true;
 				}
@@ -750,7 +763,7 @@
 			ondragleave={() => (dragOver = false)}
 			ondrop={(e) => {
 				dragOver = false;
-				if (!rw) {
+				if (!rw || !canUpload) {
 					return;
 				}
 				e.preventDefault();
@@ -778,7 +791,7 @@
 				</div>
 			{:else if listing && entries.length === 0}
 				<div class="text-sm text-content-subtle py-10 text-center rounded-lg border border-line">
-					{rw
+					{rw && canUpload
 						? $i18n.t('This folder is empty. Drop files here to upload.')
 						: $i18n.t('This folder is empty.')}
 				</div>

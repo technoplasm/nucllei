@@ -7,8 +7,11 @@ sandbox サービスは偽物(`builtin_tools.sandbox.sandbox_post` を差し替�
 - ro の場所への書き換えは sandbox を呼ばずに 403(sandbox にも ro の bind として渡る)
 - `.` 始まり・traversal・相対パスは 400
 - sandbox への payload(本人の user_id・ACL の mounts・workspace は相対パス・nofollow)
-- 平文の判定(UTF-8・NUL 無し・上限内)、上書き競合 409 の中継、書き込み上限 413、
+- 平文の判定(UTF-8・NUL 無し・テキストの上限内)、上書き競合 409 の中継、テキストの保存の上限 413、
   容量切れ 507 の中継、ダウンロードは常に添付
+- アップロード / ダウンロードは sandbox の `/files/raw` へストリーミングで中継(チャンクで送り、
+  全体を bytes にしない)。上限は sandbox の上限(読めていれば送る前に 413)、権限 `chat.file_upload`
+  が無ければ 403
 - SANDBOX_URL の無い配備では全部 404
 - sandbox tool の容量切れの文面に「ファイルブラウザで整理できる」
 """
@@ -57,6 +60,37 @@ class FakeSandbox:
 
         monkeypatch.setattr(sandbox, "sandbox_post", fake_post)
 
+        # `/files/raw`(ストリーミング)。PUT は届いたチャンクをそのまま記録する
+        self.raw_puts = []
+        self.raw_put_response = {"ok": True, "size": 0, "mtime": 1.0}
+        self.raw_get = (None, b"")
+
+        async def fake_put_raw(params, body, content_length=None):
+            chunks = [c async for c in body]
+            self.raw_puts.append(
+                {"params": params, "chunks": chunks, "content_length": content_length}
+            )
+            res = self.raw_put_response
+            if callable(res):
+                return res(params)
+            return {**res, "size": sum(map(len, chunks))}
+
+        async def fake_get_raw(params):
+            self.calls.append(("/files/raw", params))
+            res = self.raw_get
+            if callable(res):
+                res = res(params)
+            length, data = res
+
+            async def chunks():
+                for i in range(0, len(data), 4):
+                    yield data[i : i + 4]
+
+            return length, chunks()
+
+        monkeypatch.setattr(sandbox, "sandbox_put_raw", fake_put_raw)
+        monkeypatch.setattr(sandbox, "sandbox_get_raw", fake_get_raw)
+
     def error(self, status, detail):
         from nucllei.builtin_tools.sandbox import SandboxHTTPError
 
@@ -100,6 +134,11 @@ class TestSandboxFiles(AbstractPostgresTest):
             {"path": "/ext/public", "kind": "public", "rw": False},
             {"path": "/ext/groups/EMR", "kind": "group", "rw": True},
         ]
+        body = r.json()
+        from nucllei.builtin_tools import sandbox
+
+        assert body["text_limit_bytes"] == sandbox.TEXT_MAX_BYTES == 1024 * 1024
+        assert body["can_upload"] is True
         paths = [p["path"] for p in self._get(OUTSIDER, "/places").json()["places"]]
         assert paths == ["/workspace", "/ext/public"]
         places = self._get(ADMIN, "/places").json()["places"]
@@ -261,13 +300,13 @@ class TestSandboxFiles(AbstractPostgresTest):
             content["data"] = data
             body = self._post(MEMBER, "/read", {"path": "/workspace/a.md"}).json()
             assert body["text"] is None and body["reason"] == "binary", data
-        # 上限超えは中身を読まずに too_large
-        from nucllei.routers import sandbox_files
+        # テキストの上限超えは中身を読まずに too_large
+        from nucllei.builtin_tools import sandbox
 
         fake.responses["/files/stat"] = {
             "exists": True,
             "type": "file",
-            "size": sandbox_files.TEXT_LIMIT + 1,
+            "size": sandbox.TEXT_MAX_BYTES + 1,
             "mtime": 1.0,
         }
         n = len(fake.calls)
@@ -313,15 +352,16 @@ class TestSandboxFiles(AbstractPostgresTest):
         fake.responses["/files/write"] = fake.error(507, "workspace quota exceeded")
         r = self._post(MEMBER, "/write", {"path": "/workspace/a.md", "content": "x"})
         assert r.status_code == 507
-        # 上限(SANDBOX_WRITE_FILE_LIMIT_BYTES)
+        # テキストの上限(SANDBOX_TEXT_MAX_SIZE_MB)。detail に上限の値
         from nucllei.builtin_tools import sandbox
 
-        monkeypatch.setattr(sandbox, "WRITE_FILE_LIMIT", 4)
+        monkeypatch.setattr(sandbox, "TEXT_MAX_BYTES", 4)
         n = len(fake.calls)
         r = self._post(
             MEMBER, "/write", {"path": "/workspace/a.md", "content": "12345"}
         )
         assert r.status_code == 413 and len(fake.calls) == n
+        assert r.json()["detail"]["limit"] == 4 and r.json()["detail"]["size"] == 5
         # sandbox に繋がらない → 500(502 は画面のバックエンド不達バナーに使うので返さない)
         fake.responses["/files/write"] = lambda _p: (_ for _ in ()).throw(
             ConnectionError("down")
@@ -329,64 +369,151 @@ class TestSandboxFiles(AbstractPostgresTest):
         r = self._post(MEMBER, "/write", {"path": "/workspace/a.md", "content": "x"})
         assert r.status_code == 500
 
+    def _upload(self, user, dir, name, data, overwrite=None):
+        form = {"dir": dir}
+        if overwrite is not None:
+            form["overwrite"] = "true" if overwrite else "false"
+        with mock_webui_user(**user):
+            return self.fast_api_client.post(
+                self.create_url("/upload"),
+                data=form,
+                files={"file": (name, data, "application/octet-stream")},
+            )
+
     def test_upload(self, monkeypatch):
-        fake = FakeSandbox(monkeypatch, {"/files/write": {"ok": True, "mtime": 1.0}})
-
-        def up(user, dir, name, data, overwrite=None):
-            form = {"dir": dir}
-            if overwrite is not None:
-                form["overwrite"] = "true" if overwrite else "false"
-            with mock_webui_user(**user):
-                return self.fast_api_client.post(
-                    self.create_url("/upload"),
-                    data=form,
-                    files={"file": (name, data, "application/octet-stream")},
-                )
-
+        fake = FakeSandbox(monkeypatch)
+        up = self._upload
         r = up(MEMBER, "/workspace/data", "a.csv", b"x,y")
         assert r.status_code == 200, r.text
-        assert r.json()["path"] == "/workspace/data/a.csv"
-        payload = fake.calls[-1][1]
-        assert payload["path"] == "data/a.csv" and payload["exclusive"] is True
+        assert r.json()["path"] == "/workspace/data/a.csv" and r.json()["size"] == 3
+        put = fake.raw_puts[-1]
+        assert put["params"] == {
+            "user_id": "member1",
+            "path": "data/a.csv",
+            "exclusive": "true",
+        }
+        assert put["content_length"] == 3 and b"".join(put["chunks"]) == b"x,y"
+        # base64-in-JSON の /files/write は使わない
+        assert [c for c in fake.calls if c[0] == "/files/write"] == []
         up(MEMBER, "/workspace", "a.csv", b"x", overwrite=True)
-        assert fake.calls[-1][1]["exclusive"] is False
-        assert fake.calls[-1][1]["path"] == "a.csv"
-        n = len(fake.calls)
+        assert fake.raw_puts[-1]["params"]["exclusive"] == "false"
+        assert fake.raw_puts[-1]["params"]["path"] == "a.csv"
+        # /ext は jail の絶対パスで、mounts はその場所を覆う bind だけ
+        up(MEMBER, "/ext/groups/EMR/sub", "b.csv", b"1")
+        params = fake.raw_puts[-1]["params"]
+        assert params["path"] == "/ext/groups/EMR/sub/b.csv"
+        assert json.loads(params["mounts"]) == [{"path": "/ext/groups/EMR", "rw": True}]
+        n = len(fake.raw_puts)
         assert up(MEMBER, "/workspace", ".bashrc", b"x").status_code == 400
         assert up(MEMBER, "/ext/public", "a.csv", b"x").status_code == 403
         assert up(MEMBER, "/ext/groups/OTHER", "a.csv", b"x").status_code == 404
+        assert len(fake.raw_puts) == n
+        # 既に在る(409)・容量切れ(507)は中継、sandbox の 413 は上限の値ごと
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+        def fail(status, detail):
+            def raise_(_params):
+                raise SandboxHTTPError(status, json.dumps({"detail": detail}))
+
+            return raise_
+
+        fake.raw_put_response = fail(409, {"message": "already exists", "mtime": 1.0})
+        assert up(MEMBER, "/workspace", "a.csv", b"x").status_code == 409
+        fake.raw_put_response = fail(507, "workspace quota exceeded")
+        assert up(MEMBER, "/workspace", "a.csv", b"x").status_code == 507
+        fake.raw_put_response = fail(413, "file too large: 9 bytes (limit 8)")
+        r = up(MEMBER, "/workspace", "a.csv", b"x" * 9)
+        assert r.status_code == 413
+        assert r.json()["detail"]["limit"] == 8 and r.json()["detail"]["size"] == 9
+
+    def test_upload_streams_in_chunks(self, monkeypatch):
+        # 大きめのファイルは spool からチャンクで送る — 全体を 1 つの bytes にしない
         from nucllei.builtin_tools import sandbox
 
-        monkeypatch.setattr(sandbox, "WRITE_FILE_LIMIT", 2)
-        assert up(MEMBER, "/workspace", "a.csv", b"xyz").status_code == 413
-        assert len(fake.calls) == n
-        # 既に在る → 409 を中継
-        monkeypatch.setattr(sandbox, "WRITE_FILE_LIMIT", 1024)
-        fake.responses["/files/write"] = fake.error(
-            409, {"message": "already exists", "mtime": 1.0}
-        )
-        assert up(MEMBER, "/workspace", "a.csv", b"x").status_code == 409
+        fake = FakeSandbox(monkeypatch)
+        monkeypatch.setattr(sandbox, "RAW_CHUNK", 64 * 1024)
+        data = bytes(range(256)) * (3 * 4096 + 7)  # 約 3 MB
+        r = self._upload(MEMBER, "/workspace", "big.bin", data)
+        assert r.status_code == 200, r.text
+        put = fake.raw_puts[-1]
+        assert put["content_length"] == len(data)
+        assert len(put["chunks"]) > 40
+        assert max(map(len, put["chunks"])) <= 64 * 1024
+        assert b"".join(put["chunks"]) == data
+        # 構造: アップロード・ダウンロードの経路に全体を読む呼び出し・base64 が無い
+        import inspect
+
+        from nucllei.routers import sandbox_files
+
+        for fn in (sandbox_files.upload_file, sandbox_files.download_file):
+            src = inspect.getsource(fn)
+            assert "file.read()" not in src and "b64" not in src, fn
+
+    def test_upload_limit_and_permission(self, monkeypatch):
+        from nucllei.utils import file_limit
+
+        fake = FakeSandbox(monkeypatch)
+        # sandbox の上限を読めていれば送る前に 413(画面にも upload_limit_bytes で出す)
+        monkeypatch.setattr(file_limit, "_sandbox_limit", 2)
+        assert self._get(MEMBER, "/places").json()["upload_limit_bytes"] == 2
+        r = self._upload(MEMBER, "/workspace", "a.bin", b"xyz")
+        assert r.status_code == 413 and fake.raw_puts == []
+        assert r.json()["detail"]["limit"] == 2
+        assert self._upload(MEMBER, "/workspace", "a.bin", b"xy").status_code == 200
+        monkeypatch.setattr(file_limit, "_sandbox_limit", None)
+        assert self._get(MEMBER, "/places").json()["upload_limit_bytes"] is None
+
+        # 権限 chat.file_upload が無ければ 403(admin は常に可)。新規作成・保存は対象外
+        perms = self.fast_api_client.app.state.config.USER_PERMISSIONS
+        original = perms
+        perms = {**perms, "chat": {**perms.get("chat", {}), "file_upload": False}}
+        self.fast_api_client.app.state.config.USER_PERMISSIONS = perms
+        try:
+            n = len(fake.raw_puts)
+            r = self._upload(MEMBER, "/workspace", "a.bin", b"x")
+            assert r.status_code == 403 and len(fake.raw_puts) == n
+            assert self._get(MEMBER, "/places").json()["can_upload"] is False
+            assert self._upload(ADMIN, "/workspace", "a.bin", b"x").status_code == 200
+            assert self._get(ADMIN, "/places").json()["can_upload"] is True
+            fake.responses["/files/write"] = {"ok": True, "mtime": 2.0}
+            r = self._post(
+                MEMBER,
+                "/write",
+                {"path": "/workspace/new.md", "content": "x", "exclusive": True},
+            )
+            assert r.status_code == 200
+        finally:
+            self.fast_api_client.app.state.config.USER_PERMISSIONS = original
 
     def test_download_is_attachment(self, monkeypatch):
-        FakeSandbox(
-            monkeypatch,
-            {
-                "/files/read": {
-                    "name": "x.html",
-                    "size": 4,
-                    "b64": base64.b64encode(b"<h1>").decode(),
-                    "mtime": 1.0,
-                }
-            },
-        )
+        fake = FakeSandbox(monkeypatch)
+        fake.raw_get = (10, b"<h1>hello!")
         r = self._get(MEMBER, "/download", path="/ext/groups/EMR/表 1.html")
-        assert r.status_code == 200 and r.content == b"<h1>"
+        assert r.status_code == 200 and r.content == b"<h1>hello!"
+        assert r.headers["content-length"] == "10"
         assert r.headers["content-type"] == "application/octet-stream"
         assert r.headers["content-disposition"].startswith("attachment;")
         assert "%E8%A1%A8%201.html" in r.headers["content-disposition"]
         assert r.headers["x-content-type-options"] == "nosniff"
+        path, params = fake.calls[-1]
+        assert path == "/files/raw" and params["path"] == "/ext/groups/EMR/表 1.html"
+        assert json.loads(params["mounts"]) == [{"path": "/ext/groups/EMR", "rw": True}]
+        fake.raw_get = (2, b"ws")
+        r = self._get(MEMBER, "/download", path="/workspace/a/b.txt")
+        assert r.content == b"ws" and fake.calls[-1][1] == {
+            "user_id": "member1",
+            "path": "a/b.txt",
+        }
         r = self._get(MEMBER, "/download", path="/ext/groups/OTHER/secret.md")
         assert r.status_code == 404
+        # sandbox の 404・413 は中継
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+        def missing(_params):
+            raise SandboxHTTPError(404, json.dumps({"detail": "not found: x"}))
+
+        fake.raw_get = missing
+        assert self._get(MEMBER, "/download", path="/workspace/x").status_code == 404
 
     def test_delete_rename_mkdir_usage(self, monkeypatch):
         fake = FakeSandbox(
@@ -489,3 +616,80 @@ def test_tool_exec_enospc_in_stderr_adds_note():
     tool = _tool({"/exec": {**res, "stderr": "boom"}})
     out = _text(tool.run_shell("x", __user__={"id": "u1"}))
     assert "ファイルブラウザ" not in out
+
+
+def test_raw_client_streams_both_ways(monkeypatch):
+    """`sandbox_put_raw` / `sandbox_get_raw` を本物の HTTP で: PUT は Content-Length 付きで
+    チャンクのまま送り、トークンを付ける。GET は Content-Length を返しチャンクで読める。
+    sandbox の 413 は SandboxHTTPError。"""
+    from aiohttp import web
+
+    from nucllei.builtin_tools import sandbox
+
+    got = {}
+
+    async def put(request):
+        got["headers"] = dict(request.headers)
+        got["query"] = dict(request.query)
+        body = b""
+        async for chunk in request.content.iter_chunked(1 << 20):
+            body += chunk
+        got["body"] = body
+        if request.query.get("path") == "big":
+            return web.json_response(
+                {"detail": "file too large: 9 bytes (limit 8)"}, status=413
+            )
+        return web.json_response({"ok": True, "size": len(body), "mtime": 1.5})
+
+    async def get(request):
+        data = b"z" * (3 * 1024 * 1024 + 5)
+        return web.Response(body=data, content_type="application/octet-stream")
+
+    async def main():
+        app = web.Application()
+        app.router.add_put("/files/raw", put)
+        app.router.add_get("/files/raw", get)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        monkeypatch.setattr(sandbox, "SANDBOX_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setattr(sandbox, "SANDBOX_TOKEN", "tok")
+        try:
+
+            async def body():
+                for i in range(3):
+                    yield bytes([i]) * 1000
+
+            params = sandbox.raw_params(
+                "u1",
+                "/ext/groups/EMR/a",
+                [{"path": "/ext/groups/EMR", "rw": True}],
+                exclusive=True,
+            )
+            res = await sandbox.sandbox_put_raw(params, body(), content_length=3000)
+            assert res == {"ok": True, "size": 3000, "mtime": 1.5}
+            assert got["headers"]["Content-Length"] == "3000"
+            assert got["headers"]["Authorization"] == "Bearer tok"
+            assert got["query"]["exclusive"] == "true"
+            assert json.loads(got["query"]["mounts"]) == [
+                {"path": "/ext/groups/EMR", "rw": True}
+            ]
+            assert got["body"] == b"\x00" * 1000 + b"\x01" * 1000 + b"\x02" * 1000
+            with pytest.raises(sandbox.SandboxHTTPError) as e:
+                await sandbox.sandbox_put_raw(
+                    sandbox.raw_params("u1", "big"), body(), content_length=3000
+                )
+            assert e.value.status == 413 and "limit 8" in e.value.detail
+
+            length, chunks = await sandbox.sandbox_get_raw(
+                sandbox.raw_params("u1", "x")
+            )
+            sizes = [len(c) async for c in chunks]
+            assert length == 3 * 1024 * 1024 + 5 == sum(sizes)
+            assert max(sizes) <= sandbox.RAW_CHUNK
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(main())

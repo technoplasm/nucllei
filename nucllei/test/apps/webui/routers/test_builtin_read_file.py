@@ -1,11 +1,14 @@
 """builtin_sandbox の read_file(#153)の回帰。
 
 sandbox の HTTP(`_post`)だけをモックし、パスの解決・分類・文字コード・ページング・表示種別は
-本物のコードを通す。グループの置き場の可否(実 DB の所属)は `test_ext_acl.py` 側。
+本物のコードを通す。偽の `/files/read` は sandbox と同じく `offset` / `length` の範囲だけを返す
+(読んだバイト数を `tool.read_bytes` に記録 — 大きなファイルでも全体を読まないことを見る)。
+グループの置き場の可否(実 DB の所属)は `test_ext_acl.py` 側。
 """
 
 import asyncio
 import base64
+import re
 
 import pytest
 
@@ -20,6 +23,7 @@ def _tool(data=None, stat=None, error=None):
 
     tool = Tools()
     tool.calls = []
+    tool.read_bytes = 0
 
     async def _post(path, payload, timeout_s):
         tool.calls.append((path, payload))
@@ -30,10 +34,15 @@ def _tool(data=None, stat=None, error=None):
                 return stat
             return {"exists": True, "type": "file", "size": len(data or b"")}
         if path == "/files/read":
+            off, n = payload["offset"], payload["length"]
+            chunk = data[off : off + n]
+            tool.read_bytes += len(chunk)
             return {
                 "name": "x",
                 "size": len(data),
-                "b64": base64.b64encode(data).decode(),
+                "offset": off,
+                "length": len(chunk),
+                "b64": base64.b64encode(chunk).decode(),
             }
         raise AssertionError(path)
 
@@ -61,15 +70,17 @@ def test_utf8_markdown_is_rendered_as_markdown():
     assert out.kind == "markdown" and out.language is None
     assert (
         out.text
-        == "`/workspace/work/recipe.md` — 文字コード: UTF-8、全 9 字\n\n# レシピ\n\n手順"
+        == "`/workspace/work/recipe.md` — 文字コード: UTF-8、全 19 バイト\n\n# レシピ\n\n手順"
     )
-    # workspace は相対で、stat → read(nofollow)の順。mounts は付けない
+    # workspace は相対で、stat → 範囲読み(nofollow)の順。mounts は付けない
     assert [c[0] for c in tool.calls] == ["/files/stat", "/files/read"]
     assert tool.calls[0][1] == {"user_id": "u1", "path": "work/recipe.md"}
     assert tool.calls[1][1] == {
         "user_id": "u1",
         "path": "work/recipe.md",
         "nofollow": True,
+        "offset": 0,
+        "length": 19,
     }
 
 
@@ -106,8 +117,10 @@ def test_non_text_content_is_the_binary_error(data):
 
 
 def test_empty_file():
-    out = _read(_tool(b""), "/workspace/empty.txt")
-    assert out.text == "`/workspace/empty.txt` — 文字コード: UTF-8、全 0 字\n\n"
+    tool = _tool(b"")
+    out = _read(tool, "/workspace/empty.txt")
+    assert out.text == "`/workspace/empty.txt` — 文字コード: UTF-8、全 0 バイト\n\n"
+    assert [c[0] for c in tool.calls] == ["/files/stat"]
 
 
 # ---------------------------------------------------------------------------
@@ -273,63 +286,196 @@ def test_sandbox_errors_use_the_shared_wording():
     assert "sandbox に接続できない" in out
 
 
-def test_byte_limit_is_checked_before_the_transfer(monkeypatch):
-    from nucllei.builtin_tools import sandbox
+# ---------------------------------------------------------------------------
+# 範囲読み・ページング(offset / next_offset はバイト位置)
+# ---------------------------------------------------------------------------
+_NEXT_RE = re.compile(r"\n\n\(続きあり: next_offset=(\d+)。続きは offset=\d+ で読む\)$")
+_MIDLINE = re.compile(
+    r"\n\n\(1 (行|レコード)が \d+ 字を超えるので.*の途中で切った。.*\)$"
+)
 
-    monkeypatch.setattr(sandbox, "READ_FILE_LIMIT", 1024)
-    tool = _tool(stat={"exists": True, "type": "file", "size": 4096})
-    out = _read(tool, "/workspace/big.log")
-    assert out == (
-        "ERROR: /workspace/big.log は 4.0KB で、read_file で読める上限 1.0KB を超えている。"
-        "次の手: run_python / run_shell で必要な部分だけを /workspace/ に書き出してから読む。"
+
+def _page(tool, path, **kw):
+    """(先頭行, 本文, next_offset or None, 途中で切ったか)。"""
+    text = _read(tool, path, **kw).text
+    head, rest = text.split("\n\n", 1)
+    m = _NEXT_RE.search(rest)
+    nxt = None
+    if m:
+        rest = rest[: m.start()]
+        nxt = int(m.group(1))
+    mid = _MIDLINE.search(rest)
+    if mid:
+        rest = rest[: mid.start()]
+    return head, rest, nxt, bool(mid)
+
+
+def _read_all(tool, path, **kw):
+    """next_offset を辿って全ページを集める。[(先頭行, 本文, 途中で切ったか)]"""
+    pages = []
+    offset = 0
+    while True:
+        head, body, nxt, mid = _page(tool, path, offset=offset, **kw)
+        pages.append((head, body, mid))
+        if nxt is None:
+            return pages
+        assert nxt > offset
+        offset = nxt
+
+
+def test_large_file_is_read_by_range_not_whole():
+    # 数十 MB でも全体の大きさで断らず、読むのは先頭の判定分 + 1 ページ分だけ
+    line = "あいうえお,12345\n".encode("utf-8")
+    data = line * 3_000_000
+    tool = _tool(data)
+    head, body, nxt, _ = _page(tool, "/workspace/huge.log")
+    assert head.startswith(
+        f"`/workspace/huge.log` — 文字コード: UTF-8、全 {len(data)} バイトのうち 0〜"
     )
-    assert [c[0] for c in tool.calls] == ["/files/stat"]
-    # stat の後に伸びた物も読んだ後で断る
-    tool = _tool(b"x" * 2048, stat={"exists": True, "type": "file", "size": 10})
-    assert "を超えている" in _read(tool, "/workspace/big.log")
+    assert len(body) <= 40000 and body.endswith("\n")
+    assert nxt == len(body.encode("utf-8")) and nxt % len(line) == 0
+    assert tool.read_bytes <= 40000 * 4
+    # 途中のページ: 判定用の先頭 64 KiB + そのページ分
+    tool.read_bytes = 0
+    n = len(tool.calls)
+    head, body, _, _ = _page(tool, "/workspace/huge.log", offset=2_000_000 * len(line))
+    assert tool.read_bytes <= 64 * 1024 + 40000 * 4
+    assert body.startswith("あいうえお,12345\n")
+    reads = [c[1] for c in tool.calls[n:] if c[0] == "/files/read"]
+    assert [r["offset"] for r in reads] == [0, 2_000_000 * len(line)]
+    assert all(r["length"] <= 40000 * 4 for r in reads)
 
 
-def test_default_byte_limit_pairs_with_write_file():
-    from nucllei.builtin_tools import sandbox
-
-    assert sandbox.READ_FILE_LIMIT == sandbox.WRITE_FILE_LIMIT
-
-
-# ---------------------------------------------------------------------------
-# offset ページング
-# ---------------------------------------------------------------------------
-def test_offset_paging_and_next_offset():
-    text = "あ" * 100_000
+def test_pages_cut_at_line_breaks_and_chain_without_gaps():
+    text = "".join(f"{i:05d} " + "字" * (i % 37) + "\n" for i in range(6000))
     tool = _tool(text.encode("utf-8"))
-    out = _read(tool, "/workspace/long.txt")
-    head, body = out.text.split("\n\n", 1)
+    pages = _read_all(tool, "/workspace/a.txt", max_chars=3000)
+    assert len(pages) > 10
+    assert "".join(b for _, b, _ in pages) == text
+    for _, body, mid in pages:
+        assert body.endswith("\n") and len(body) <= 3000 and not mid
+    assert pages[-1][0].endswith(f"〜{len(text.encode('utf-8'))} バイト目")
+
+
+def test_whole_small_file_has_no_range_in_head():
+    out = _read(_tool(b"a\nb\n"), "/workspace/a.txt")
+    assert out.text == "`/workspace/a.txt` — 文字コード: UTF-8、全 4 バイト\n\na\nb\n"
+
+
+def test_a_line_longer_than_the_page_is_cut_mid_line_and_says_so():
+    text = "x" * 25 + "\n" + "y" * 3
+    tool = _tool(text.encode())
+    out = _read(tool, "/workspace/a.txt", max_chars=10)
     assert (
-        head
-        == "`/workspace/long.txt` — 文字コード: UTF-8、全 100000 字 のうち 0〜40000 字目"
+        "(1 行が 10 字を超えるので行の途中で切った。続きはその途中から始まる)"
+        in out.text
     )
-    assert (
-        body
-        == "あ" * 40000
-        + "\n\n(続きあり: next_offset=40000。続きは offset=40000 で読む)"
-    )
+    pages = _read_all(tool, "/workspace/a.txt", max_chars=10)
+    assert [m for _, _, m in pages] == [True, True, False]
+    assert "".join(b for _, b, _ in pages) == text
 
-    out = _read(tool, "/workspace/long.txt", offset=40000, max_chars=999_999)
-    head, body = out.text.split("\n\n", 1)
-    assert head.endswith("のうち 40000〜100000 字目")
-    assert body == "あ" * 60000  # 上限 60000 字で、続きは無い
-    assert "next_offset" not in out.text
 
-    from nucllei.env import TOOL_RESULT_MAX_CHARS
+@pytest.mark.parametrize("codec", ["utf-8", "cp932"])
+def test_multibyte_chars_survive_page_boundaries(codec):
+    # 改行の無い長い行 (文字の境界で切る) と、改行のある行の両方
+    text = "漢字かな交じりの文" * 50 + "\n" + "表" * 30 + "\n" + "終わり"
+    tool = _tool(text.encode(codec))
+    pages = _read_all(tool, "/workspace/a.txt", max_chars=7)
+    assert "".join(b for _, b, _ in pages) == text
+    label = "UTF-8" if codec == "utf-8" else "cp932"
+    assert all(f"文字コード: {label}" in h for h, _, _ in pages)
 
-    assert len(out.text) <= TOOL_RESULT_MAX_CHARS
 
-    out = _read(tool, "/workspace/long.txt", offset=100_000)
+def test_bom_is_skipped_and_offsets_are_bytes():
+    data = b"\xef\xbb\xbf" + b"a,b\n" * 10
+    tool = _tool(data)
+    pages = _read_all(tool, "/workspace/x.txt", max_chars=9)
+    assert "".join(b for _, b, _ in pages) == "a,b\n" * 10
+    assert pages[0][0].endswith("全 43 バイトのうち 0〜11 バイト目")
+
+
+def test_offset_errors():
+    tool = _tool("あいう\n".encode("utf-8"))
+    out = _read(tool, "/workspace/a.txt", offset=10)
     assert out == (
-        "ERROR: offset 100000 は末尾を越えている (/workspace/long.txt は全 100000 字)。"
-        "次の手: offset を 0〜99999 で渡す。"
+        "ERROR: offset 10 は末尾を越えている (/workspace/a.txt は全 10 バイト)。"
+        "次の手: offset を 0〜9 で渡す。"
     )
-    out = _read(tool, "/workspace/long.txt", offset="x")
+    # UTF-8 の文字の途中は断る
+    out = _read(tool, "/workspace/a.txt", offset=1)
+    assert out.startswith("ERROR: offset 1 は文字の途中")
+    assert "next_offset" in out
+    out = _read(tool, "/workspace/a.txt", offset="x")
     assert out.startswith("ERROR: offset / max_chars が整数でない")
+
+
+def test_decode_failure_after_the_probe_is_binary():
+    from nucllei.builtin_tools.sandbox import READ_BINARY_HINT
+
+    data = b"ok line\n" * 10000 + b"\xff\xfe\x00 broken\n"
+    out = _read(_tool(data), "/workspace/a.txt", offset=80000)
+    assert out.startswith("ERROR: /workspace/a.txt はテキストとして読めない")
+    assert out.endswith(READ_BINARY_HINT)
+
+
+def test_old_sandbox_without_range_is_sliced():
+    # 範囲読みを知らない sandbox は全体を返す — 手元で切る
+    from nucllei.builtin_tools.sandbox import Tools
+
+    data = b"line\n" * 1000
+    tool = Tools()
+
+    async def _post(path, payload, timeout_s):
+        if path == "/files/stat":
+            return {"exists": True, "type": "file", "size": len(data)}
+        return {"name": "x", "size": len(data), "b64": base64.b64encode(data).decode()}
+
+    tool._post = _post
+    head, body, nxt, _ = _page(tool, "/workspace/a.txt", offset=100, max_chars=12)
+    assert body == "line\nline\n" and nxt == 110
+
+
+# ---------------------------------------------------------------------------
+# CSV / TSV(レコードの切れ目で切る・見出しを付け直す)
+# ---------------------------------------------------------------------------
+def test_csv_is_cut_only_between_records_and_header_is_repeated():
+    header = "id,メモ,値\n"
+    rows = [f'{i},"複数行の\nメモ {i}",{i * 3}\n' for i in range(400)]
+    text = header + "".join(rows)
+    tool = _tool(text.encode("utf-8"))
+    pages = _read_all(tool, "/workspace/a.csv", max_chars=500)
+    assert len(pages) > 5
+    first_head, first_body, _ = pages[0]
+    assert "見出し" not in first_head and first_body.startswith(header)
+    rebuilt = first_body
+    for head, body, _ in pages[1:]:
+        assert "先頭に 1 行目 (見出し) を付け直した" in head
+        assert body.startswith(header)
+        rebuilt += body[len(header) :]
+    assert rebuilt == text
+    # どのページも引用符の数が偶数 = レコードの途中で割れていない
+    for _, body, mid in pages:
+        assert body.count('"') % 2 == 0 and body.endswith("\n") and not mid
+    out = _read(tool, "/workspace/a.csv", max_chars=500)
+    assert (out.kind, out.language) == ("code", "csv")
+
+
+def test_tsv_cp932_header_repeated():
+    text = "名前\t値\n" + "".join(f"項目{i}\t{i}\n" for i in range(300))
+    tool = _tool(text.encode("cp932"))
+    pages = _read_all(tool, "/workspace/a.tsv", max_chars=200)
+    assert len(pages) > 3
+    assert all(b.startswith("名前\t値\n") for _, b, _ in pages)
+    assert "cp932" in pages[1][0] and "見出し" in pages[1][0]
+
+
+def test_csv_record_longer_than_the_page_says_record():
+    text = 'a\n"' + "x" * 50 + '"\n'
+    tool = _tool(text.encode())
+    head, body, nxt, mid = _page(tool, "/workspace/a.csv", max_chars=20)
+    assert body == "a\n" and nxt == 2 and not mid  # 最初のレコードの切れ目まで
+    out = _read(tool, "/workspace/a.csv", offset=2, max_chars=20)
+    assert "1 レコードが" in out.text and "レコードの途中で切った" in out.text
 
 
 def test_no_user():

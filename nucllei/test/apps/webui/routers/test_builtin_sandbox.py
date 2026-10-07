@@ -843,7 +843,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         from nucllei.builtin_tools import sandbox as mod
 
-        big = "a" * (mod.WRITE_FILE_LIMIT + 1)
+        big = "a" * (mod.TEXT_MAX_BYTES + 1)
         assert _arun(
             tool.write_file("/workspace/big.txt", big, __user__=user)
         ).startswith("ERROR:")
@@ -1270,6 +1270,32 @@ class _UrlEnv:
 
         self.tools._post = fake_post
 
+        # url= の取り込みは `/files/raw` へストリーミング(`sandbox_put_raw`)。本文を集めて
+        # `/files/write` と同じ形 (path / b64) で記録する — 取り込み先・中身の検査を共通にする
+        from nucllei.builtin_tools import sandbox as mod
+
+        self.raw_response: dict = {}
+        self.raw_error: Exception | None = None
+
+        async def fake_put_raw(params, body, content_length=None):
+            data = b"".join([c async for c in body])
+            self.writes.append(
+                {
+                    "path": "/files/raw",
+                    "payload": {
+                        "path": params["path"],
+                        "b64": base64.b64encode(data).decode(),
+                        "params": params,
+                        "content_length": content_length,
+                    },
+                }
+            )
+            if self.raw_error is not None:
+                raise self.raw_error
+            return self.raw_response
+
+        monkeypatch.setattr(mod, "sandbox_put_raw", fake_put_raw)
+
     def mount_root(self, root):
 
         mount_tree(self.monkeypatch, root)
@@ -1342,11 +1368,7 @@ def test_url_import_tells_cache_expiry(monkeypatch):
     env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
     _self_env(monkeypatch)
 
-    async def fake_post(path, payload, timeout_s):
-        env.writes.append({"path": path, "payload": payload})
-        return {"ok": True, "cache_ttl_days": 30}
-
-    env.tools._post = fake_post
+    env.raw_response = {"ok": True, "cache_ttl_days": 30}
     result = env.run(url=f"{INTRA}/static/docs/10-14.pdf")
     day = datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=30)
     assert result.endswith(
@@ -1500,6 +1522,14 @@ def test_general_url_wording_follows_reason(monkeypatch):
     assert env.writes[-1]["payload"]["path"].endswith("imports/x")
 
 
+def _set_sandbox_limit_mb(monkeypatch, mb):
+    """sandbox の上限 (`/healthz` の file_max_size_mb を読めた値) を差し替える。url= はこれに従う。"""
+    from nucllei.utils import file_limit
+
+    monkeypatch.setattr(file_limit, "_sandbox_limit", mb * 1024 * 1024)
+    monkeypatch.setattr(file_limit, "_warned", None)
+
+
 def _set_limit_mb(monkeypatch, mb):
     """RC `ATTACHMENT_MAX_SIZE_MB` (ファイルの出入りの唯一の上限。0 = 無制限) を差し替える。
     app.state.config はこの RuntimeConfig をそのまま包むので、管理画面の変更と同じ効き方。"""
@@ -1517,12 +1547,12 @@ def test_too_large_reports_actual_size_and_limit(monkeypatch):
         ),
     )
     _self_env(monkeypatch)
-    _set_limit_mb(monkeypatch, 1)
+    _set_sandbox_limit_mb(monkeypatch, 1)
     result = env.run(url=f"{INTRA}/big.bin")
     assert result.startswith("ERROR")
-    # 実サイズ(Content-Length)と上限(RC)の両方。変えるのは管理者。リンク切れではないと言う
+    # 実サイズ(Content-Length)と上限(sandbox の上限)の両方。変えるのは配備。リンク切れではないと言う
     assert "3.0MB" in result and "上限 1.0MB" in result
-    assert "最大アップロードサイズ" in result
+    assert "sandbox の配備の設定" in result and "最大アップロードサイズ" not in result
     assert "少なくとも" not in result
     assert "リンク切れではない" in result
     assert env.writes == []
@@ -1535,41 +1565,92 @@ def test_too_large_without_content_length_says_at_least(monkeypatch):
 
     env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=chunks()))
     _self_env(monkeypatch)
-    _set_limit_mb(monkeypatch, 1)
+    _set_sandbox_limit_mb(monkeypatch, 1)
     result = env.run(url=f"{INTRA}/stream.bin")
     assert result.startswith("ERROR")
     assert "少なくとも" in result and "実サイズは不明" in result
     assert env.writes == []
 
 
-def test_attachment_limit_is_the_resolver_limit(monkeypatch):
-    # resolver の既定(FETCH_MAX_BYTES)ではなく RC ATTACHMENT_MAX_SIZE_MB が上限になる。
-    # 呼ぶたびに読む(変えるとすぐ効く)。0 = 無制限 → sandbox の安全上限(未取得なら既定 1 GiB)
+def test_sandbox_limit_is_the_resolver_limit(monkeypatch):
+    # url= は file_id を作らない経路 — 上限は sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB。/healthz から
+    # 読めていなければ既定 1024 MB)。添付の上限 (RC ATTACHMENT_MAX_SIZE_MB) には従わない。
+    # 中身は一時ファイル (sink) に流す
     seen = {}
 
-    async def fake_resolve(url, *, max_bytes=None, user=None):
+    async def fake_resolve(url, *, max_bytes=None, user=None, sink=None):
         from nucllei.utils.image_refs import RefError
 
-        seen.update(url=url, max_bytes=max_bytes)
+        seen.update(url=url, max_bytes=max_bytes, sink=sink is not None)
         return None, RefError("not_found", "x")
 
-    from nucllei.utils import image_refs
+    from nucllei.utils import file_limit, image_refs
 
     # url 引数の入口は resolve_url(保存済み文字列用の resolve_ref は通さない)
     monkeypatch.setattr(image_refs, "resolve_url", fake_resolve)
+    monkeypatch.setattr(file_limit, "_sandbox_limit", None)
     env = _UrlEnv(monkeypatch)
-    _set_limit_mb(monkeypatch, 100)
+    _set_limit_mb(monkeypatch, 3)
     env.run(url="https://llens.test/ext/cage/a.bin")
     assert seen == {
         "url": "https://llens.test/ext/cage/a.bin",
-        "max_bytes": 100 * 1024 * 1024,
+        "max_bytes": 1024 * 1024 * 1024,
+        "sink": True,
     }
-    _set_limit_mb(monkeypatch, 3)
+    _set_sandbox_limit_mb(monkeypatch, 100)
     env.run(url="https://llens.test/ext/cage/a.bin")
-    assert seen["max_bytes"] == 3 * 1024 * 1024
-    _set_limit_mb(monkeypatch, 0)
-    env.run(url="https://llens.test/ext/cage/a.bin")
-    assert seen["max_bytes"] == 1024 * 1024 * 1024
+    assert seen["max_bytes"] == 100 * 1024 * 1024
+
+
+def test_url_import_streams_through_a_temp_file(monkeypatch):
+    # 上流の本文は resolver が一時ファイルに書き (メモリに貯めない)、sandbox の /files/raw へ
+    # チャンクで送る (Content-Length 付き、base64-in-JSON の /files/write は使わない)
+    async def chunks():
+        for i in range(8):
+            yield bytes([i]) * 300_000
+
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=chunks()))
+    _self_env(monkeypatch)
+    from nucllei.utils import image_refs
+
+    real = image_refs._read_response
+    seen = {}
+
+    async def spy(response, label, filename, limit, sink=None):
+        loaded, err = await real(response, label, filename, limit, sink)
+        seen.update(sink=sink is not None, kept=len(loaded.data), size=loaded.size)
+        return loaded, err
+
+    monkeypatch.setattr(image_refs, "_read_response", spy)
+    result = env.run(url=f"{INTRA}/big.bin")
+    assert not result.startswith("ERROR"), result
+    # 手元に残るのは型の判定に使う先頭だけ
+    assert seen == {"sink": True, "kept": 64, "size": 2_400_000}
+    [w] = env.writes
+    assert w["path"] == "/files/raw"
+    assert w["payload"]["path"] == "imports/big.bin"
+    assert w["payload"]["content_length"] == 2_400_000
+    assert base64.b64decode(w["payload"]["b64"]) == b"".join(
+        bytes([i]) * 300_000 for i in range(8)
+    )
+    # 添付の上限は渡さない (sandbox は自分の上限で見る)
+    assert "file_limit_bytes" not in w["payload"]["params"]
+
+
+def test_url_import_sandbox_errors(monkeypatch):
+    from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"data"))
+    _self_env(monkeypatch)
+    env.raw_error = SandboxHTTPError(
+        413, '{"detail":"file too large: 4 bytes (limit 3)"}'
+    )
+    out = env.run(url=f"{INTRA}/a.bin")
+    assert out.startswith("ERROR") and "取り込みの上限" in out
+    assert "sandbox の配備の設定" in out
+    env.raw_error = SandboxHTTPError(507, "workspace quota exceeded")
+    out = env.run(url=f"{INTRA}/a.bin")
+    assert out.startswith("ERROR") and "容量 (quota) が一杯" in out
 
 
 def test_valve_url_max_mb_is_gone():

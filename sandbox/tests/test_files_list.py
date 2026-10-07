@@ -131,9 +131,9 @@ def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
     assert r.json()["cache_ttl_days"] == 12 and r.json()["stdout"] == "1\n"
 
 
-# --- 1 ファイルの上限: nucllei が渡す `file_limit_bytes` と安全上限の小さいほう ------------------
+# --- 1 ファイルの上限: nucllei が渡す `file_limit_bytes` と sandbox の上限の小さいほう ------------
 # nucllei の RC ATTACHMENT_MAX_SIZE_MB がリクエストごとに来る。sandbox の env
-# SANDBOX_FILE_LIMIT_BYTES (既定 1 GiB) は OOM 防止の安全上限としてだけ残る。
+# SANDBOX_FILE_MAX_SIZE_MB (既定 1024) は b64 の経路では安全上限として効く。
 
 
 def _ws_file(tmp_path, rel, data):
@@ -143,17 +143,37 @@ def _ws_file(tmp_path, rel, data):
     return p
 
 
-def test_safety_limit_default_is_1gib(monkeypatch, tmp_path):
-    monkeypatch.delenv("SANDBOX_FILE_LIMIT_BYTES", raising=False)
+def test_sandbox_limit_default_is_1024_mb(monkeypatch, tmp_path):
+    monkeypatch.delenv("SANDBOX_FILE_MAX_SIZE_MB", raising=False)
     c = _client(monkeypatch, tmp_path)
     mod = sys.modules["sandbox_main_files_test"]
+    assert mod.FILE_MAX_SIZE_MB == 1024
     assert mod.FILE_LIMIT == 1024 * 1024 * 1024
-    # /healthz と /metrics に出す (nucllei が起動時に読んで自分の上限と比べる)
+    # /healthz と /metrics に出す (nucllei が起動時に読む)
     monkeypatch.setattr(mod, "_loop_available", lambda: True)
-    assert c.get("/healthz").json()["file_limit_bytes"] == 1024 * 1024 * 1024
+    assert c.get("/healthz").json()["file_max_size_mb"] == 1024
     monkeypatch.setattr(mod, "WORKSPACES", tmp_path)
     monkeypatch.setattr(mod, "IMAGES", tmp_path / ".images")
-    assert f"sandbox_file_limit_bytes {1024 * 1024 * 1024}" in c.get("/metrics").text
+    assert f"sandbox_file_max_size_bytes {1024 * 1024 * 1024}" in c.get("/metrics").text
+
+
+def test_sandbox_limit_env_is_mb_and_old_name_only_warns(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SANDBOX_FILE_MAX_SIZE_MB", "3")
+    monkeypatch.setenv("SANDBOX_FILE_LIMIT_BYTES", "5")
+    _client(monkeypatch, tmp_path)
+    mod = sys.modules["sandbox_main_files_test"]
+    # 旧名は読み替えない (値は新名のまま)
+    assert mod.FILE_LIMIT == 3 * 1024 * 1024
+    monkeypatch.setattr(mod, "_ensure_loop_nodes", lambda: None)
+    monkeypatch.setattr(mod, "_loop_available", lambda: True)
+    monkeypatch.setattr(mod, "WS_RETENTION_DAYS", 0)
+    monkeypatch.setattr(mod.asyncio, "create_task", lambda coro: coro.close())
+    import asyncio
+
+    asyncio.run(mod._startup())
+    out = capsys.readouterr().out
+    assert "SANDBOX_FILE_LIMIT_BYTES は廃止 (読まない)" in out
+    assert "SANDBOX_FILE_MAX_SIZE_MB" in out
 
 
 def test_read_uses_smaller_of_requested_and_safety(monkeypatch, tmp_path, capsys):
@@ -165,7 +185,7 @@ def test_read_uses_smaller_of_requested_and_safety(monkeypatch, tmp_path, capsys
     def read(**extra):
         return c.post("/files/read", json={"user_id": "u1", "path": "a.bin", **extra})
 
-    # 渡されない (古い nucllei・無制限) → 安全上限だけ
+    # 渡されない (無制限) → sandbox の上限だけ
     assert read().status_code == 200
     # 渡された値が小さければそれ。文面は nucllei が読む形
     r = read(file_limit_bytes=5)
@@ -174,7 +194,7 @@ def test_read_uses_smaller_of_requested_and_safety(monkeypatch, tmp_path, capsys
     assert r.status_code == 413 and "(limit 5)" in r.text
     assert read(file_limit_bytes=6).status_code == 200
     assert "WARNING" not in capsys.readouterr().out
-    # 安全上限を超える値 → 安全上限が勝つ + warning は値が変わったときだけ
+    # sandbox の上限を超える値 → sandbox の上限が勝つ + warning は値が変わったときだけ
     _ws_file(tmp_path, "b.bin", b"x" * 9)
     for _ in range(3):
         r = c.post(
@@ -182,9 +202,9 @@ def test_read_uses_smaller_of_requested_and_safety(monkeypatch, tmp_path, capsys
             json={"user_id": "u1", "path": "b.bin", "file_limit_bytes": 100},
         )
         assert r.status_code == 413 and "(limit 8)" in r.text
-    assert capsys.readouterr().out.count("安全上限が勝つ") == 1
+    assert capsys.readouterr().out.count("sandbox の上限が勝つ") == 1
     read(file_limit_bytes=200)
-    assert capsys.readouterr().out.count("安全上限が勝つ") == 1
+    assert capsys.readouterr().out.count("sandbox の上限が勝つ") == 1
 
 
 def test_write_and_exec_imports_follow_limit(monkeypatch, tmp_path):

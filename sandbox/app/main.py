@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import Headers
 
@@ -48,15 +48,20 @@ MEM_MB = int(os.environ.get("SANDBOX_MEM_MB", "4096"))
 FSIZE_MB = int(os.environ.get("SANDBOX_FSIZE_MB", "8192"))
 MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "4"))
 STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024)))
-# ファイルの出入り (/files/read・/files/write・exports 自動添付・/exec の imports) の単一ファイルの
-# **安全上限** (OOM 防止)。実際の上限は nucllei がリクエストごとに `file_limit_bytes` で渡す
-# (情報源は nucllei の RC ATTACHMENT_MAX_SIZE_MB、管理画面で変えるとすぐ効く) — sandbox は
-# 渡された値とこの安全上限の**小さいほう**に従い、渡されなければ (古い nucllei・無制限・
-# ファイルブラウザのアップロード/ダウンロード) 安全上限だけ (`_file_limit`)。read / write は base64 で JSON に載せる実装のため、ファイルサイズの
-# ~2.3 倍が service プロセスの RAM に一時的に載る → 真の無制限にはしない。GB 級を恒常的に
-# 出すなら base64-in-JSON をやめて raw ストリーム化する必要がある (現状は未対応)。
-# 値は /healthz と /metrics に出す (nucllei が起動時に読み、自分の上限の方が大きければ warning)。
-FILE_LIMIT = int(os.environ.get("SANDBOX_FILE_LIMIT_BYTES", str(1024 * 1024 * 1024)))
+# sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB` (MB の整数、既定 1024): workspace に直接出し入れする
+# 1 ファイルの上限。2 つの役目を持つ —
+#   - ファイルブラウザのアップロード / ダウンロード (`/files/raw`、ストリーミング) と nucllei の
+#     send_to_workspace(url=) の取り込み (同じく `/files/raw`) の上限そのもの
+#   - nucllei がリクエストごとに `file_limit_bytes` で渡す上限 (添付の上限 ATTACHMENT_MAX_SIZE_MB —
+#     `/files/read` `/files/write` の b64・exports 自動添付・`/exec` の imports) の**安全上限**:
+#     渡された値とこの値の**小さいほう**に従う (`_file_limit`)。b64-in-JSON の経路はファイルサイズの
+#     ~2.3 倍が service プロセスの RAM に載るので、真の無制限にはしない
+# 値は /healthz (`file_max_size_mb`) と /metrics (`sandbox_file_max_size_bytes`) に出す (nucllei が
+# 起動時に読む)。旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない (起動時に warning — `_startup`)。
+FILE_MAX_SIZE_MB = int(os.environ.get("SANDBOX_FILE_MAX_SIZE_MB", "1024"))
+FILE_LIMIT = FILE_MAX_SIZE_MB * 1024 * 1024
+# 改名前の env。設定されていても値は読み替えない (旧データ互換を持たない方針の延長)
+_OLD_FILE_LIMIT_ENV = "SANDBOX_FILE_LIMIT_BYTES"
 
 # stateful run_python の常駐セッション (kernel.py)。TTL は kernel の nsjail time_limit でもある
 # ので実効は「セッション開始から」の絶対上限 (idle 回収も同値。README「回収」参照)。
@@ -504,17 +509,18 @@ _file_limit_warned: Optional[int] = None
 
 def _file_limit(requested: Optional[int]) -> int:
     """このリクエストで効く 1 ファイルの上限: 渡された値 (nucllei の ATTACHMENT_MAX_SIZE_MB) と
-    安全上限 (FILE_LIMIT) の小さいほう。渡されない (古い nucllei・nucllei 側が無制限) なら安全上限。
-    渡された値が安全上限を超えていれば warning を 1 行 (値が変わったときだけ)。"""
+    sandbox の上限 (FILE_LIMIT) の小さいほう。渡されない (nucllei 側が無制限・`/files/raw` の
+    ファイルブラウザと url= の取り込み) なら sandbox の上限。
+    渡された値が sandbox の上限を超えていれば warning を 1 行 (値が変わったときだけ)。"""
     global _file_limit_warned
     if requested is None or requested <= 0:
         return FILE_LIMIT
     if requested > FILE_LIMIT and requested != _file_limit_warned:
         _file_limit_warned = requested
         print(
-            f"[sandbox] WARNING: 呼び出し元の上限 file_limit_bytes={requested} が安全上限 "
-            f"SANDBOX_FILE_LIMIT_BYTES={FILE_LIMIT} を超えている — 安全上限が勝つ "
-            "(揃えるなら SANDBOX_FILE_LIMIT_BYTES を上げる。base64-in-JSON で約 2.3 倍の"
+            f"[sandbox] WARNING: 呼び出し元の上限 file_limit_bytes={requested} が sandbox の上限 "
+            f"SANDBOX_FILE_MAX_SIZE_MB={FILE_MAX_SIZE_MB} を超えている — sandbox の上限が勝つ "
+            "(揃えるなら SANDBOX_FILE_MAX_SIZE_MB を上げる。base64-in-JSON で約 2.3 倍の"
             "メモリを使う)",
             flush=True,
         )
@@ -1202,8 +1208,8 @@ class FileIn(BaseModel):
 
 # `mounts` (#152) は全 endpoint 共通: そのユーザーに見せる `/ext/groups/<g>` `/ext/public` と
 # rw / ro。無ければ (旧 nucllei) どれも見えない = 従来の jail。
-# `file_limit_bytes` はファイルの出入りの上限 (nucllei の ATTACHMENT_MAX_SIZE_MB)。安全上限との
-# 小さいほうが効く (`_file_limit`)。無ければ (旧 nucllei・無制限) 安全上限だけ。
+# `file_limit_bytes` はファイルの出入りの上限 (nucllei の ATTACHMENT_MAX_SIZE_MB)。sandbox の上限
+# (SANDBOX_FILE_MAX_SIZE_MB) との小さいほうが効く (`_file_limit`)。無ければ sandbox の上限だけ。
 
 
 class ExecRequest(BaseModel):
@@ -1239,6 +1245,11 @@ class WriteRequest(BaseModel):
 
 class ReadRequest(PathRequest):
     nofollow: bool = False
+    # 範囲読み (nucllei の read_file のページ)。どちらかを渡すと `offset` バイト目から最大 `length`
+    # バイト (`length` 省略は末尾まで) だけを返し、上限は**読む量**に掛かる (ファイル全体の大きさで
+    # 断らない)。応答の `size` はファイル全体のバイト数、`offset` `length` は実際に返した範囲
+    offset: Optional[int] = None
+    length: Optional[int] = None
 
 
 class RenameRequest(BaseModel):
@@ -1265,6 +1276,12 @@ class CellRequest(BaseModel):
 async def _startup():
     _log_auth_state()
     _log_ro_mounts()
+    if _OLD_FILE_LIMIT_ENV in os.environ:
+        print(
+            f"[sandbox] WARNING: {_OLD_FILE_LIMIT_ENV} は廃止 (読まない)。"
+            f"SANDBOX_FILE_MAX_SIZE_MB (MB の整数、今の値 {FILE_MAX_SIZE_MB}) を使う",
+            flush=True,
+        )
     _ensure_loop_nodes()
     if not _loop_available():
         print(
@@ -1292,8 +1309,9 @@ async def healthz():
         "ok": loop_ok,
         "nsjail": os.path.exists("/usr/local/bin/nsjail"),
         "loop": loop_ok,
-        # 1 ファイルの安全上限 (SANDBOX_FILE_LIMIT_BYTES)。nucllei が起動時に読んで自分の上限と比べる
-        "file_limit_bytes": FILE_LIMIT,
+        # sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB)。nucllei が起動時に読む (ファイルブラウザの
+        # アップロードの事前チェック・url= の取り込み・添付の上限との比較)
+        "file_max_size_mb": FILE_MAX_SIZE_MB,
     }
     return JSONResponse(body, status_code=200 if loop_ok else 503)
 
@@ -1343,9 +1361,9 @@ async def metrics():
         ("sandbox_disk_used_bytes", "gauge", "/workspaces 使用バイト", disk_used),
         ("sandbox_disk_total_bytes", "gauge", "/workspaces 総バイト", disk_total),
         (
-            "sandbox_file_limit_bytes",
+            "sandbox_file_max_size_bytes",
             "gauge",
-            "1 ファイルの安全上限 (SANDBOX_FILE_LIMIT_BYTES)",
+            "1 ファイルの上限 (SANDBOX_FILE_MAX_SIZE_MB をバイトで)",
             FILE_LIMIT,
         ),
     ]
@@ -1873,9 +1891,8 @@ def _fs_stat(t: _Target) -> dict:
     }
 
 
-def _fs_read(t: _Target, limit: Optional[int] = None) -> dict:
-    if limit is None:
-        limit = FILE_LIMIT
+def _open_regular(t: _Target) -> tuple[int, os.stat_result]:
+    """`t` の通常ファイルを経路も末端も symlink を辿らずに開く (fd と fstat。呼び手が close)。"""
     segs = t.segs
     if not segs:
         raise HTTPException(404, f"not a file: {t.path}")
@@ -1889,19 +1906,60 @@ def _fs_read(t: _Target, limit: Optional[int] = None) -> dict:
             raise _symlink_or_missing(segs[-1], dfd, t.path)
     finally:
         os.close(dfd)
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
+    try:
+        st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise HTTPException(404, f"not a file: {t.path}")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, st
+
+
+def _read_body(
+    f, st, name: str, limit: int, offset: Optional[int], length: Optional[int]
+) -> dict:
+    """開いたファイルから `/files/read` の応答を作る。範囲指定 (`offset` / `length`) が無ければ
+    全体 (大きさが上限を超えれば 413)、あれば範囲だけ (上限は読む量に掛ける)。"""
+    if offset is None and length is None:
         if st.st_size > limit:
             raise _too_large(st.st_size, limit)
         data = f.read()
+        return {
+            "name": name,
+            "size": len(data),
+            "b64": base64.b64encode(data).decode(),
+            "mtime": _mtime(st),
+        }
+    off = offset or 0
+    if off < 0 or (length is not None and length < 0):
+        raise HTTPException(400, "offset / length must be >= 0")
+    want = max(0, st.st_size - off) if length is None else length
+    if want > limit:
+        raise _too_large(want, limit)
+    f.seek(off)
+    data = f.read(want)
     return {
-        "name": segs[-1],
-        "size": len(data),
+        "name": name,
+        "size": st.st_size,
+        "offset": off,
+        "length": len(data),
         "b64": base64.b64encode(data).decode(),
         "mtime": _mtime(st),
     }
+
+
+def _fs_read(
+    t: _Target,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    length: Optional[int] = None,
+) -> dict:
+    if limit is None:
+        limit = FILE_LIMIT
+    fd, st = _open_regular(t)
+    with os.fdopen(fd, "rb") as f:
+        return _read_body(f, st, t.segs[-1], limit, offset, length)
 
 
 def _conflict(message: str, mtime: Optional[float]) -> HTTPException:
@@ -2075,21 +2133,18 @@ async def files_read(req: ReadRequest):
     limit = _file_limit(req.file_limit_bytes)
     if _is_ext_path(req.path) or req.nofollow:
         t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
-        return await asyncio.to_thread(_fs_read, t, limit)
+        return await asyncio.to_thread(_fs_read, t, limit, req.offset, req.length)
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
     if not p.is_file():
         raise HTTPException(404, f"not a file: {req.path}")
-    st = p.stat()
-    size = st.st_size
-    if size > limit:
-        raise _too_large(size, limit)
-    return {
-        "name": p.name,
-        "size": size,
-        "b64": base64.b64encode(p.read_bytes()).decode(),
-        "mtime": _mtime(st),
-    }
+
+    def read() -> dict:
+        with open(p, "rb") as f:
+            st = os.fstat(f.fileno())
+            return _read_body(f, st, p.name, limit, req.offset, req.length)
+
+    return await asyncio.to_thread(read)
 
 
 @app.post("/files/write")
@@ -2125,6 +2180,186 @@ async def files_write(req: WriteRequest):
         raise
     os.chown(p, JAIL_UID, JAIL_UID)
     return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
+
+
+# ---------------------------------------------------------------------------
+# 生のバイト列の出し入れ (`/files/raw`) — base64-in-JSON を使わないストリーミングの口
+# ---------------------------------------------------------------------------
+# ファイルブラウザのアップロード / ダウンロードと、nucllei の send_to_workspace(url=) の取り込み。
+# 1 GiB 級を運ぶので本文はチャンクで受け / 返し、メモリに載るのはチャンク分だけ。パラメータは
+# query (`user_id` `path` `mounts` = MountIn の配列の JSON、`file_limit_bytes`、PUT は `exclusive`)。
+# パスの扱いは `/files/*` の fd 経路と同じ (経路も末端も symlink を辿らない、新しく作る段は 65534 の
+# 物、`/ext/...` は mounts の bind の中だけ)。上限は `_file_limit` (渡されなければ sandbox の上限)。
+RAW_CHUNK = 1024 * 1024
+# 書き込み途中の一時ファイルの名前。`.` 始まりなので一覧に出ない。確定は rename (上書き) か
+# link + unlink (`exclusive` — 既に在れば 409 で、競り合っても上書きしない)
+_RAW_TMP_PREFIX = ".upload-"
+
+
+def _parse_mounts(raw: str) -> list[MountIn]:
+    try:
+        items = json.loads(raw or "[]")
+        if not isinstance(items, list):
+            raise ValueError("mounts must be a list")
+        return [MountIn(**m) for m in items]
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, f"invalid mounts: {e}")
+
+
+def _raw_open_tmp(t: _Target, exclusive: bool) -> tuple[int, int, str]:
+    """書き先の親を (無い段は作って) 開き、その中に一時ファイルを作る。(親の fd, 一時ファイルの fd,
+    一時ファイルの名前)。先に末端を見て、symlink・ディレクトリは 400、`exclusive` で在れば 409。"""
+    segs = t.segs
+    if not segs:
+        raise HTTPException(400, f"is a directory: {t.path}")
+    dfd = _open_dirs(t.base, segs[:-1], t.path, create=True)
+    try:
+        st = _lstat_at(segs[-1], dfd)
+        if st is not None and stat.S_ISLNK(st.st_mode):
+            raise HTTPException(400, f"path contains a symlink: {t.path}")
+        if st is not None and stat.S_ISDIR(st.st_mode):
+            raise HTTPException(400, f"is a directory: {t.path}")
+        if exclusive and st is not None:
+            raise _conflict("already exists", _mtime(st))
+        tmp = f"{_RAW_TMP_PREFIX}{uuid.uuid4().hex}.part"
+        fd = os.open(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o664,
+            dir_fd=dfd,
+        )
+        try:
+            os.fchown(fd, JAIL_UID, JAIL_UID)
+        except BaseException:
+            os.close(fd)
+            os.unlink(tmp, dir_fd=dfd)
+            raise
+    except BaseException:
+        os.close(dfd)
+        raise
+    return dfd, fd, tmp
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        view = view[n:]
+
+
+def _raw_commit(dfd: int, fd: int, tmp: str, leaf: str, exclusive: bool):
+    """一時ファイルを `leaf` として確定する。戻り値は確定したファイルの fstat。"""
+    st = os.fstat(fd)
+    if exclusive:
+        try:
+            os.link(tmp, leaf, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+        except FileExistsError:
+            raise _conflict("already exists", None)
+        os.unlink(tmp, dir_fd=dfd)
+        return st
+    cur = _lstat_at(leaf, dfd)
+    if cur is not None and stat.S_ISDIR(cur.st_mode):
+        raise HTTPException(400, f"is a directory: {leaf}")
+    # rename は末端が symlink でもリンクそのものを置き換える (向こう側は触らない)
+    os.rename(tmp, leaf, src_dir_fd=dfd, dst_dir_fd=dfd)
+    return st
+
+
+@app.put("/files/raw")
+async def files_raw_put(
+    request: Request,
+    user_id: str,
+    path: str,
+    mounts: str = "[]",
+    file_limit_bytes: Optional[int] = None,
+    exclusive: bool = False,
+):
+    """本文 (application/octet-stream) をそのまま `path` に書く。チャンクで受けて一時ファイルに
+    書き、全部受けてから rename で確定する — 途中で失敗 (上限超過 413・容量切れ 507・切断) したら
+    一時ファイルを消し、元のファイルは変わらない。`exclusive` は既に在れば 409。
+    Content-Length が上限を超えていれば本文を読まずに 413。"""
+    t = await _fs_target(user_id, path, _parse_mounts(mounts), write=True)
+    limit = _file_limit(file_limit_bytes)
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _too_large(int(declared), limit)
+    try:
+        dfd, fd, tmp = await asyncio.to_thread(_raw_open_tmp, t, exclusive)
+    except OSError as e:
+        if _nospace(e):
+            raise HTTPException(507, QUOTA_FULL_DETAIL)
+        raise
+    committed = False
+    total = 0
+    try:
+        try:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > limit:
+                    # size は打ち切った時点の受信量 (実サイズの下限)
+                    raise _too_large(total, limit)
+                await asyncio.to_thread(_write_all, fd, chunk)
+            st = await asyncio.to_thread(
+                _raw_commit, dfd, fd, tmp, t.segs[-1], exclusive
+            )
+            committed = True
+        except OSError as e:
+            if _nospace(e):
+                raise HTTPException(507, QUOTA_FULL_DETAIL)
+            raise
+    finally:
+        os.close(fd)
+        if not committed:
+            try:
+                os.unlink(tmp, dir_fd=dfd)
+            except OSError:
+                pass
+        os.close(dfd)
+    return {
+        "ok": True,
+        "path": _join(t, t.segs),
+        "size": total,
+        "mtime": _mtime(st),
+        "cache_ttl_days": CACHE_TTL_REPORTED,
+    }
+
+
+@app.get("/files/raw")
+async def files_raw_get(
+    user_id: str,
+    path: str,
+    mounts: str = "[]",
+    file_limit_bytes: Optional[int] = None,
+):
+    """`path` の中身をそのまま返す (StreamingResponse、Content-Length 付き)。開いた時点の大きさ
+    までを返す (送っている間に伸びた分は送らない)。上限を超える物は 413。"""
+    t = await _fs_target(user_id, path, _parse_mounts(mounts), write=False)
+    limit = _file_limit(file_limit_bytes)
+    fd, st = await asyncio.to_thread(_open_regular, t)
+    size = st.st_size
+    if size > limit:
+        os.close(fd)
+        raise _too_large(size, limit)
+
+    async def body():
+        remaining = size
+        try:
+            while remaining > 0:
+                chunk = await asyncio.to_thread(os.read, fd, min(RAW_CHUNK, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            os.close(fd)
+
+    return StreamingResponse(
+        body(),
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(size), "X-File-Mtime": repr(_mtime(st))},
+    )
 
 
 @app.post("/files/delete")

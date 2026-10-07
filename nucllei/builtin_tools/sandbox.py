@@ -17,14 +17,17 @@ medical_calculator.py とは質が違う) ことも移設の条件を満たし�
 opt-in で、トークンが無ければ両側とも認証なしで従来どおり繋がるため。
 """
 
+import asyncio
 import base64
 import codecs
 import io
+import json
 import logging
 import mimetypes
 import os
 import posixpath
 import re
+import tempfile
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
@@ -34,7 +37,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from pydantic import BaseModel, Field
 
-from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL, SANDBOX_WRITE_FILE_LIMIT_BYTES
+from nucllei.env import SANDBOX_TEXT_MAX_SIZE_MB, SANDBOX_TOKEN, SANDBOX_URL
 from nucllei.models.chats import Chats
 from nucllei.models.files import FileForm, Files
 from nucllei.storage.provider import Storage
@@ -49,6 +52,7 @@ from nucllei.utils.file_limit import (
     ADMIN_SETTING,
     attachment_limit_bytes,
     format_limit,
+    sandbox_file_limit_bytes,
     sandbox_limit_fields,
     transfer_cap,
 )
@@ -113,31 +117,119 @@ async def sandbox_post(path: str, payload: dict, timeout_s: float) -> dict:
     「無いものを送る」経路を作らない)。
     """
     url = SANDBOX_URL.rstrip("/") + path
-    headers = {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=timeout_s),
-        headers=headers,
+        headers=_auth_headers(),
     ) as session:
         async with session.post(url, json=payload) as resp:
             if resp.status != 200:
-                body = (await resp.text())[:300]
-                if resp.status == 401:
-                    # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
-                    # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
-                    # まとめて説明がつく (未設定は「不一致」の一種)。この detail は
-                    # ログ用 — モデルには `_SANDBOX_AUTH` だけを返す (env 名を出さない)
-                    raise SandboxHTTPError(
-                        401,
-                        "認証に失敗した。nucllei と sandbox の "
-                        "SANDBOX_TOKEN が一致していない "
-                        "(片側だけ未設定の場合も含む。配備の env を確認)",
-                    )
-                raise SandboxHTTPError(resp.status, body)
+                raise await _http_error(resp)
             return await resp.json()
 
 
-# write_file の本文上限 (env `SANDBOX_WRITE_FILE_LIMIT_BYTES`、読み取りは env.py)。
-WRITE_FILE_LIMIT = SANDBOX_WRITE_FILE_LIMIT_BYTES
+def _auth_headers() -> dict:
+    return {"Authorization": f"Bearer {SANDBOX_TOKEN}"} if SANDBOX_TOKEN else {}
+
+
+async def _http_error(resp) -> "SandboxHTTPError":
+    body = (await resp.text())[:300]
+    if resp.status == 401:
+        # 値は出さない。sandbox 側の認証が有効なのに nucllei 側の値が
+        # 違う / 無い、のどちらか = 「両側の SANDBOX_TOKEN 不一致」で
+        # まとめて説明がつく (未設定は「不一致」の一種)。この detail は
+        # ログ用 — モデルには `_SANDBOX_AUTH` だけを返す (env 名を出さない)
+        return SandboxHTTPError(
+            401,
+            "認証に失敗した。nucllei と sandbox の "
+            "SANDBOX_TOKEN が一致していない "
+            "(片側だけ未設定の場合も含む。配備の env を確認)",
+        )
+    return SandboxHTTPError(resp.status, body)
+
+
+# ---- 生のバイト列 (`/files/raw`) — base64-in-JSON を使わないストリーミングの出口 --------------
+# ファイルブラウザのアップロード / ダウンロード (`routers/sandbox_files.py`) と send_to_workspace(url=)
+# の取り込みが使う。1 GiB 級を運ぶので総時間では切らず、無通信の時間 (`sock_read`) だけで切る。
+RAW_CHUNK = 1024 * 1024
+_RAW_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=300)
+
+
+def raw_params(
+    user_id: str,
+    path: str,
+    mounts: Optional[list] = None,
+    file_limit_bytes: Optional[int] = None,
+    **extra,
+) -> dict:
+    """`/files/raw` の query。mounts は MountIn の配列を JSON で (無ければ付けない)。"""
+    params = {"user_id": user_id, "path": path}
+    if mounts:
+        params["mounts"] = json.dumps(mounts, ensure_ascii=False)
+    if file_limit_bytes is not None:
+        params["file_limit_bytes"] = str(int(file_limit_bytes))
+    for k, v in extra.items():
+        params[k] = ("true" if v else "false") if isinstance(v, bool) else str(v)
+    return params
+
+
+async def sandbox_put_raw(
+    params: dict, body: Any, content_length: Optional[int] = None
+) -> dict:
+    """`PUT /files/raw` — 本文 (`body` = bytes を yield する async iterator) をチャンクのまま送る。
+    `content_length` を渡すと Content-Length を付ける (sandbox が本文を読む前に上限で断れる)。
+    失敗は `sandbox_post` と同じく `SandboxHTTPError`。"""
+    url = SANDBOX_URL.rstrip("/") + "/files/raw"
+    headers = {**_auth_headers(), "Content-Type": "application/octet-stream"}
+    if content_length is not None:
+        headers["Content-Length"] = str(int(content_length))
+    async with aiohttp.ClientSession(timeout=_RAW_TIMEOUT) as session:
+        async with session.put(url, params=params, data=body, headers=headers) as resp:
+            if resp.status != 200:
+                raise await _http_error(resp)
+            return await resp.json()
+
+
+async def sandbox_get_raw(params: dict):
+    """`GET /files/raw` を開く。成功なら (Content-Length or None, bytes を yield する async
+    iterator) — iterator を最後まで回すか閉じると接続を閉じる。失敗は `SandboxHTTPError`。"""
+    url = SANDBOX_URL.rstrip("/") + "/files/raw"
+    session = aiohttp.ClientSession(timeout=_RAW_TIMEOUT, headers=_auth_headers())
+    try:
+        resp = await session.get(url, params=params)
+    except BaseException:
+        await session.close()
+        raise
+    if resp.status != 200:
+        try:
+            raise await _http_error(resp)
+        finally:
+            resp.release()
+            await session.close()
+
+    async def chunks():
+        try:
+            async for chunk in resp.content.iter_chunked(RAW_CHUNK):
+                yield chunk
+        finally:
+            resp.release()
+            await session.close()
+
+    length = resp.headers.get("Content-Length")
+    return (int(length) if length and length.isdigit() else None), chunks()
+
+
+async def _iter_file(f, chunk: int = RAW_CHUNK):
+    """開いた binary file を `chunk` ずつ yield する (読みは thread。メモリに載るのは 1 チャンク)。"""
+    while True:
+        data = await asyncio.to_thread(f.read, chunk)
+        if not data:
+            return
+        yield data
+
+
+# テキストの上限 (env `SANDBOX_TEXT_MAX_SIZE_MB`、読み取りは env.py): write_file の本文と、
+# ファイルブラウザのテキスト編集 (開く・保存。`routers/sandbox_files.py`)。read_file には使わない
+TEXT_MAX_BYTES = SANDBOX_TEXT_MAX_SIZE_MB * 1024 * 1024
 
 # jail から見た workspace の置き場 (= jail の cwd)。モデルに見せる `path` は全部
 # この絶対パスで揃える。sandbox サービスの `/files/*` は workspace 相対で受けるので、
@@ -389,6 +481,8 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
 # sandbox には `file_limit_bytes` で渡し、sandbox は自分の安全上限との小さいほうに従う。
 # 超えたときの文は全経路で同じ形: 上限の値 (MB) と、変えるのは管理者 (どこで) と。
 _LIMIT_BY_ADMIN = f"上限は管理者の設定 ({ADMIN_SETTING}) で、引数では上げられない"
+# sandbox の上限 (url= の取り込み)。env 名はモデルに出さない
+_LIMIT_BY_SANDBOX = "上限は sandbox の配備の設定で、引数では上げられない"
 
 # sandbox の 413 の detail `file too large: N bytes (limit L)`
 _TOO_LARGE_RE = re.compile(r"(\d+) bytes \(limit (\d+)\)")
@@ -479,13 +573,31 @@ def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[st
 
 
 # ---- read_file (#153) ---------------------------------------------------------
-# バイト上限は write_file と同じ値 (対 — write_file で書けた物は読み戻せる。ファイルブラウザの
-# エディタも 1MiB)。sandbox から転送する前に `/files/stat` で見る。超えたら固定文の ERROR
-READ_FILE_LIMIT = SANDBOX_WRITE_FILE_LIMIT_BYTES
+# **範囲読み** (ファイル全体の大きさで断らない): `/files/stat` で総バイト数を取り、1 ページ分の
+# バイトだけを `/files/read` の `offset` / `length` で取る。
+#
+# - 文字コードは BOM と先頭 `READ_FILE_PROBE_BYTES` で判定し (`_detect_encoding`)、各ページを
+#   その文字コードで decode する。ページの境界は改行 (0x0A) の直後なので多バイト文字を割らない —
+#   UTF-8 の多バイト文字は 0x80-0xBF / 0xC2-0xF4 だけ、cp932 の 2 バイト目は 0x40-0xFC なので、
+#   どちらも 0x0A は文字の途中に現れない (`"` = 0x22 も同じ。CSV の引用符を数えるのも安全)
+# - 1 ページ = max_chars 字以内で、行の切れ目まで戻して切る (`_cut_page`)。1 行が max_chars を
+#   超えるときだけ行の途中 (文字の境界) で切り、そう書く
+# - `offset` / `next_offset` はバイト位置。任意の offset も受けるが、行の途中から読むことになる。
+#   UTF-8 で文字の途中 (継続バイト) から始まるものは断る。cp932 は判定できないので前回の
+#   next_offset を渡す約束に頼る
+# - `.csv` / `.tsv` は引用符の外の改行 (レコードの切れ目) でだけ切る。引用符はページの先頭から
+#   数える = ページの先頭がレコードの切れ目であることが前提 (前ページの next_offset ならそうなる。
+#   任意の offset ではレコードの途中から数え違うことがある)。2 ページ目以降は先頭に 1 行目 (見出し —
+#   先頭 `READ_FILE_PROBE_BYTES` の中の最初のレコード) を付け直す
 # 1 回で返す文字数の既定と上限 (read_attachment と同じ形・同じ値)。TOOL_RESULT_MAX_CHARS
 # (既定 65536) の一律切詰めより先に自前の窓で返し、続きは offset で取らせる
 READ_FILE_DEFAULT_CHARS = 40000
 READ_FILE_MAX_CHARS = 60000
+# 文字コードの判定 (と CSV の見出し) に読む先頭のバイト数
+READ_FILE_PROBE_BYTES = 64 * 1024
+# 1 字の最大バイト数 (読むバイト数の見積もり: max_chars × これ)
+_MAX_BYTES_PER_CHAR = {"utf-8": 4, "cp932": 2}
+_RECORD_EXTS = frozenset({"csv", "tsv"})
 
 # 読まない物の分類は **拡張子だけ** で決める (中身を嗅いで出し分けない)。中身で分かるのは
 # 「テキストとして decode できない」だけで、それは binary と同じ文になる
@@ -528,31 +640,92 @@ def _read_ext(abs_path: str) -> str:
 _CP932_LOOSE_CHARS = frozenset("\x80\uf8f0\uf8f1\uf8f2\uf8f3")
 
 
-def _decode_text(data: bytes) -> Optional[tuple[str, str]]:
-    """BOM 付き UTF-8 → UTF-8 → cp932 の順に厳密に decode する。(text, 文字コードの言い方)。
-    NUL を含む・どれでも decode できないものは None (= テキストでない)。"""
+class _NotText(Exception):
+    """read_file のページが判定した文字コードで decode できない (NUL・不正なバイト)。"""
+
+
+def _decode_strict(data: bytes, codec: str, final: bool) -> tuple[str, int]:
+    """`data` を `codec` で decode する。`final` でなければ末尾の切れた文字は残す。
+    (text, 使ったバイト数)。NUL・不正なバイト・cp932 の未定義 1 バイトは `_NotText`。"""
     if b"\x00" in data:
-        return None
-    if data.startswith(codecs.BOM_UTF8):
+        raise _NotText()
+    dec = codecs.getincrementaldecoder(codec)()
+    try:
+        text = dec.decode(data, final=final)
+    except UnicodeDecodeError:
+        raise _NotText()
+    if codec == "cp932" and any(c in _CP932_LOOSE_CHARS for c in text):
+        # Python の cp932 は未定義の 1 バイト (0x80 0xA0 0xFD-0xFF) も Windows に倣って
+        # 文字にする — 厳密には cp932 のテキストでない (Latin-1 等を化けたまま読まない)
+        raise _NotText()
+    pending = dec.getstate()[0]
+    return text, len(data) - len(pending)
+
+
+def _detect_encoding(head: bytes, whole: bool) -> Optional[tuple[str, str, int]]:
+    """先頭のバイト列 `head` (`whole` = ファイル全体) から文字コードを決める: BOM 付き UTF-8 →
+    UTF-8 → cp932 の順に厳密に decode できたもの。(codec, 言い方, BOM のバイト数)。
+    どれでも読めない・NUL を含むものは None (= テキストでない)。"""
+    if head.startswith(codecs.BOM_UTF8):
         try:
-            return data[len(codecs.BOM_UTF8) :].decode("utf-8"), "UTF-8 (BOM 付き)"
-        except UnicodeDecodeError:
+            _decode_strict(head[len(codecs.BOM_UTF8) :], "utf-8", whole)
+        except _NotText:
             return None
-    for encoding, label in (
+        return "utf-8", "UTF-8 (BOM 付き)", len(codecs.BOM_UTF8)
+    for codec, label in (
         ("utf-8", "UTF-8"),
         # write_file は UTF-8 で書く — 書き戻すと文字コードが変わることを読んだ時点で言う
         ("cp932", "cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる)"),
     ):
         try:
-            text = data.decode(encoding)
-        except UnicodeDecodeError:
+            _decode_strict(head, codec, whole)
+        except _NotText:
             continue
-        if encoding == "cp932" and any(c in _CP932_LOOSE_CHARS for c in text):
-            # Python の cp932 は未定義の 1 バイト (0x80 0xA0 0xFD-0xFF) も Windows に倣って
-            # 文字にする — 厳密には cp932 のテキストでない (Latin-1 等を化けたまま読まない)
-            return None
-        return text, label
+        return codec, label, 0
     return None
+
+
+_RECORD_SCAN = re.compile(rb'["\n]')
+
+
+def _record_ends(data: bytes) -> list[int]:
+    """引用符の外の改行 (CSV / TSV のレコードの切れ目) の位置。引用符は `data` の先頭から数える
+    (`""` のエスケープは開閉 2 回なので数えるだけで合う)。"""
+    ends = []
+    quoted = False
+    for m in _RECORD_SCAN.finditer(data):
+        if m.group() == b'"':
+            quoted = not quoted
+        elif not quoted:
+            ends.append(m.start())
+    return ends
+
+
+def _cut_page(
+    chunk: bytes, codec: str, max_chars: int, at_eof: bool, records: bool
+) -> tuple[str, int, bool]:
+    """1 ページ分を切る: `chunk` (ページの先頭から読んだバイト列、`at_eof` ならファイル末尾まで) の
+    うち max_chars 字以内を、行の切れ目 (0x0A の直後) まで戻して切る。`records` (CSV / TSV) は
+    引用符の外の改行までだけ戻す。戻れる切れ目が無い (1 行・1 レコードが max_chars を超える) ときだけ
+    文字の境界で切る。(text, 使ったバイト数, 行の途中で切ったか)。
+
+    0x0A は UTF-8 でも cp932 でも多バイト文字の途中に現れない (2 バイト目は 0x40 以上) ので、
+    改行の直後で切れば文字を割らない。decode できないバイトは `_NotText`。"""
+    text, used = _decode_strict(chunk, codec, at_eof)
+    if len(text) <= max_chars and at_eof and used == len(chunk):
+        return text, used, False
+    if len(text) > max_chars:
+        used = len(text[:max_chars].encode(codec))
+    window = chunk[:used]
+    if records:
+        ends = _record_ends(window)
+        cut = ends[-1] + 1 if ends else 0
+    else:
+        cut = window.rfind(b"\n") + 1
+    if cut == 0:
+        # 1 行 (1 レコード) が max_chars を超える — 文字の境界で切る
+        return text[:max_chars], used, True
+    return window[:cut].decode(codec), cut, False
 
 
 def _read_rendered(abs_path: str, text: str) -> Rendered:
@@ -640,15 +813,17 @@ _NO_FILE = "レコードが無い、またはアクセス権が無い"
 _TOO_LARGE_FILE = "取り込みの上限"
 
 
-def _too_large_file(size: Optional[int], limit: Optional[int]) -> str:
+def _too_large_file(
+    size: Optional[int], limit: Optional[int], sandbox: bool = False
+) -> str:
+    """取り込みの上限超過の文。`sandbox` は sandbox の上限 (url=)、そうでなければ添付の上限。"""
     what = f" (実サイズ {_human_size(size)})" if size is not None else ""
-    return (
-        f"{_TOO_LARGE_FILE} {format_limit(limit)} を超えている{what}。{_LIMIT_BY_ADMIN}"
-    )
+    by = _LIMIT_BY_SANDBOX if sandbox else _LIMIT_BY_ADMIN
+    return f"{_TOO_LARGE_FILE} {format_limit(limit)} を超えている{what}。{by}"
 
 
 def _too_large_import(u: str, err) -> str:
-    """send_to_workspace(url=) の too_large: 上限は RC (管理者の設定) で引数では上げられない。"""
+    """send_to_workspace(url=) の too_large: 上限は sandbox の上限 (配備の設定) で引数では上げられない。"""
     limit = f" {_human_size(err.limit)}" if err.limit is not None else ""
     if err.size is None:
         what = f"{u} は取り込みの上限{limit} を超えている (実サイズは不明)。"
@@ -665,7 +840,7 @@ def _too_large_import(u: str, err) -> str:
     from nucllei.utils.ref_errors import show_as_link
 
     return (
-        f"ERROR: {what}sandbox には取り込めない ({_LIMIT_BY_ADMIN})。"
+        f"ERROR: {what}sandbox には取り込めない ({_LIMIT_BY_SANDBOX})。"
         f"リンク切れではない。{_NEXT}" + show_as_link(u)
     )
 
@@ -675,7 +850,7 @@ def _explain_ref_error(u: str, err) -> ToolError:
 
     組み立ては全 tool 共通の `utils/ref_errors.explain_ref_error` (feed_image / fetch_url と
     同じ code を同じ文で言い分ける — 「読めなかった」を全部リンク切れにしない)。この tool
-    固有の言い方は too_large (取り込みの上限は RC `ATTACHMENT_MAX_SIZE_MB`) と unexplained だけ (2026-10-04 に
+    固有の言い方は too_large (取り込みの上限は sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB`) と unexplained だけ (2026-10-04 に
     redirect / 上流不達 / 許可先の独自文面は既定へ揃えた)。内部名 (env 名・detail・code) は
     出さない (resolver が warning ログに残す)。
     """
@@ -1356,8 +1531,9 @@ class Tools:
           sandbox の `/ext/<name>` と `EXT_MOUNTS` の `<name>` に同じ物を置くという
           配備の規約 (#138) に依存する — sandbox 側の bind の有無は nucllei からは
           確かめられない (規約どおりでない配備では、返したパスが jail に無い)
-        - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は RC
-          `ATTACHMENT_MAX_SIZE_MB` (`utils/file_limit`。無制限なら sandbox の安全上限)
+        - それ以外 (一般の URL) → `/workspace/imports/<name>` に書く。上限は sandbox の上限
+          (`SANDBOX_FILE_MAX_SIZE_MB`、`utils/file_limit`)。中身は一時ファイルに流して sandbox の
+          `/files/raw` へストリーミングで書く (1 GiB 級でもメモリに載るのはチャンク分だけ)
         - `/api/v1/files/{id}/content` (このサーバのファイル配信口。本文リンクとして頻出。
           相対、または絶対 = `/ext/` と同じく host 不問) → URL のルーティングとして file に
           当たる (`file_id_of_url`)。HTTP では取りに行かず、file_id 経路と同じ読み出し・
@@ -1385,37 +1561,45 @@ class Tools:
                 f"(read-only)。{_NEXT}run_python / run_shell からそのパスで開く。"
             )
 
-        limit = _limit(user)
-        loaded, err = await resolve_url(u, max_bytes=transfer_cap(limit), user=user)
-        if loaded is None:
-            raise _explain_ref_error(u, err)
-        # name は URL の basename (percent-encoded のまま)
-        name = _safe_import_name(unquote(loaded.name)) or "download"
-        try:
-            res = await self._post(
-                "/files/write",
-                {
-                    "user_id": user_id,
-                    "path": f"imports/{name}",
-                    "b64": base64.b64encode(loaded.data).decode(),
-                    **sandbox_limit_fields(limit),
-                },
-                timeout_s=120,
-            )
-        except Exception as e:
-            log.error(f"[sandbox] import write failed for {u}: {e!r}")
-            if isinstance(e, SandboxHTTPError) and e.status == 401:
-                raise _sandbox_auth()
-            if isinstance(e, SandboxHTTPError) and e.status == 413:
-                size, eff = _too_large_413(e, limit)
-                raise ToolOutcome(
-                    f"{u} は{_too_large_file(size, eff)}",
-                    "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+        # 上限は sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB — file_id を作らない経路。utils/file_limit)。
+        # 1 GiB 級を運ぶので中身は一時ファイルに流し (メモリにはチャンク分だけ)、sandbox の
+        # `/files/raw` へストリーミングで書く (base64-in-JSON を使わない)
+        limit = sandbox_file_limit_bytes()
+        with tempfile.TemporaryFile(prefix="nucllei-import-") as spool:
+            loaded, err = await resolve_url(u, max_bytes=limit, user=user, sink=spool)
+            if loaded is None:
+                raise _explain_ref_error(u, err)
+            # name は URL の basename (percent-encoded のまま)
+            name = _safe_import_name(unquote(loaded.name)) or "download"
+            size = loaded.size if loaded.spooled else len(loaded.data)
+            if not loaded.spooled:
+                spool.write(loaded.data)
+            spool.seek(0)
+            try:
+                res = await sandbox_put_raw(
+                    raw_params(user_id, f"imports/{name}"),
+                    _iter_file(spool),
+                    content_length=size,
                 )
-            raise ToolFailure("sandbox へ書き込めない")
+            except Exception as e:
+                log.error(f"[sandbox] import write failed for {u}: {e!r}")
+                if isinstance(e, SandboxHTTPError) and e.status == 401:
+                    raise _sandbox_auth()
+                if isinstance(e, SandboxHTTPError) and e.status == 507:
+                    raise ToolOutcome(
+                        f"{u} を取り込めない: workspace の容量 (quota) が一杯",
+                        _QUOTA_FULL_NEXT,
+                    )
+                if isinstance(e, SandboxHTTPError) and e.status == 413:
+                    size_413, eff = _too_large_413(e, limit)
+                    raise ToolOutcome(
+                        f"{u} は{_too_large_file(size_413, eff, sandbox=True)}",
+                        "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+                    )
+                raise ToolFailure("sandbox へ書き込めない")
         return (
             "取り込み結果:\n"
-            f"- {name} ({_human_size(len(loaded.data))}) → "
+            f"- {name} ({_human_size(size)}) → "
             f"{WORKSPACE_ROOT}/imports/{name}"
             + _imports_expiry_note(_cache_expiry(res))
         )
@@ -1452,10 +1636,10 @@ class Tools:
             raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
 
         data = content.encode("utf-8")
-        if len(data) > WRITE_FILE_LIMIT:
+        if len(data) > TEXT_MAX_BYTES:
             raise ToolCallError(
                 f"内容が大きすぎる ({_human_size(len(data))} > "
-                f"{_human_size(WRITE_FILE_LIMIT)})",
+                f"{_human_size(TEXT_MAX_BYTES)})",
                 "分割して複数回に分けるか、run_python で生成する。",
             )
 
@@ -1505,10 +1689,10 @@ class Tools:
                 "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
             )
         data = content.encode("utf-8")
-        if len(data) > WRITE_FILE_LIMIT:
+        if len(data) > TEXT_MAX_BYTES:
             raise ToolCallError(
                 f"内容が大きすぎる ({_human_size(len(data))} > "
-                f"{_human_size(WRITE_FILE_LIMIT)})",
+                f"{_human_size(TEXT_MAX_BYTES)})",
                 "分割して複数回に分けるか、run_python で生成する。",
             )
         try:
@@ -1535,12 +1719,14 @@ class Tools:
     ) -> Rendered:
         """
         sandbox のテキストファイルを読む (write_file と対)。UTF-8 (BOM 付き可) と cp932 を読み、
-        読んだ文字コードを先頭行に添える。長いファイルは offset で続きを読む (末尾に
-        next_offset が出る間は続きがある)。画像・PDF・Office 文書などテキストでないものは読まない。
-        ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
+        読んだ文字コードを先頭行に添える。大きなファイルも読める — 1 回に返すのは max_chars 字までで、
+        行の切れ目で切る (1 行が max_chars を超えるときだけ行の途中で切り、そう書く)。末尾に
+        next_offset が出る間は続きがある。.csv / .tsv はレコードの切れ目 (引用符の外の改行) で切り、
+        2 回目以降は先頭に 1 行目 (見出し) を付け直す。画像・PDF・Office 文書などテキストでないものは
+        読まない。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
 
         :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。例: /workspace/work/recipe.md
-        :param offset: 読み始めの文字位置 (省略時 0 = 先頭。続きは前回の next_offset)
+        :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きを読むときは前回の next_offset をそのまま渡す (それ以外の値は行の途中から読むことになり、文字の途中なら断る)
         :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
         if not __user__ or not __user__.get("id"):
@@ -1614,41 +1800,98 @@ class Tools:
             )
         if kind == "symlink":
             raise _unusable_path(abs_path)
-        size = st.get("size")
-        if isinstance(size, int) and size > READ_FILE_LIMIT:
-            raise self._too_large_read(abs_path, size)
-
-        try:
-            res = await self._post("/files/read", payload(nofollow=True), timeout_s=60)
-        except Exception as e:
-            raise _files_error(e, abs_path)
-        try:
-            data = base64.b64decode(res["b64"])
-        except Exception as e:
-            log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
-            raise ToolFatal("sandbox の応答を読めない")
-        if len(data) > READ_FILE_LIMIT:
-            # stat の後に伸びた
-            raise self._too_large_read(abs_path, len(data))
-
-        decoded = _decode_text(data)
-        if decoded is None:
-            raise self._binary_error(abs_path)
-        text, encoding = decoded
-
-        total = len(text)
-        if offset > total or (offset == total and total > 0):
+        size = st.get("size") if isinstance(st.get("size"), int) else 0
+        if offset > size or (offset == size and size > 0):
             raise ToolOutcome(
-                f"offset {offset} は末尾を越えている ({abs_path} は全 {total} 字)",
-                f"offset を 0〜{max(total - 1, 0)} で渡す。",
+                f"offset {offset} は末尾を越えている ({abs_path} は全 {size} バイト)",
+                f"offset を 0〜{max(size - 1, 0)} で渡す。",
             )
-        window = text[offset : offset + max_chars]
-        end = offset + len(window)
-        head = f"`{abs_path}` — 文字コード: {encoding}、全 {total} 字"
-        if offset or end < total:
-            head += f" のうち {offset}〜{end} 字目"
-        body = f"{head}\n\n{window}"
-        if end < total:
+
+        async def read_range(start: int, length: int) -> bytes:
+            """`start` から最大 `length` バイト (ファイル末尾で短くなる)。"""
+            length = max(0, min(length, size - start))
+            if length == 0:
+                return b""
+            try:
+                res = await self._post(
+                    "/files/read",
+                    payload(nofollow=True, offset=start, length=length),
+                    timeout_s=60,
+                )
+            except Exception as e:
+                raise _files_error(e, abs_path)
+            try:
+                data = base64.b64decode(res["b64"])
+            except Exception as e:
+                log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
+                raise ToolFatal("sandbox の応答を読めない")
+            if "offset" not in res:
+                # 範囲読みを知らない sandbox は全体を返す
+                data = data[start : start + length]
+            return data[:length]
+
+        need = max_chars * max(_MAX_BYTES_PER_CHAR.values())
+        # 先頭 (文字コードの判定・CSV の見出し)。offset 0 なら 1 ページ目の読みと兼ねる
+        head = await read_range(
+            0,
+            max(READ_FILE_PROBE_BYTES, need) if offset == 0 else READ_FILE_PROBE_BYTES,
+        )
+        probe = head[:READ_FILE_PROBE_BYTES]
+        detected = _detect_encoding(probe, whole=len(probe) >= size)
+        if detected is None:
+            raise self._binary_error(abs_path)
+        codec, encoding, bom = detected
+        need = max_chars * _MAX_BYTES_PER_CHAR[codec]
+        start = max(offset, bom)
+        records = _read_ext(abs_path) in _RECORD_EXTS
+
+        # CSV / TSV の 2 ページ目以降は見出し (最初のレコード) を付け直す。長すぎる見出しは付けない
+        header = ""
+        if records and start > bom:
+            ends = _record_ends(probe[bom:])
+            if ends:
+                try:
+                    header, _ = _decode_strict(
+                        probe[bom : bom + ends[0] + 1], codec, True
+                    )
+                except _NotText:
+                    header = ""
+                if len(header) > max_chars // 2 or start < bom + ends[0] + 1:
+                    header = ""
+        budget = max_chars - len(header)
+
+        if offset == 0:
+            chunk = head[start : start + need]
+        else:
+            chunk = await read_range(start, need)
+        if codec == "utf-8" and chunk and 0x80 <= chunk[0] <= 0xBF:
+            raise ToolCallError(
+                f"offset {offset} は文字の途中",
+                "offset は 0 か、前回の結果の next_offset をそのまま渡す。",
+            )
+        at_eof = start + len(chunk) >= size
+        try:
+            window, used, midline = _cut_page(chunk, codec, budget, at_eof, records)
+        except _NotText:
+            raise self._binary_error(abs_path)
+        end = start + used
+
+        head_line = f"`{abs_path}` — 文字コード: {encoding}、全 {size} バイト"
+        shown_start = 0 if start == bom else start
+        if shown_start or end < size:
+            head_line += f"のうち {shown_start}〜{end} バイト目"
+        if header:
+            head_line += (
+                "。先頭に 1 行目 (見出し) を付け直した (この範囲には含まれない)"
+            )
+        body = f"{head_line}\n\n{header}{window}"
+        if midline:
+            what = "1 レコード" if records else "1 行"
+            body += (
+                f"\n\n({what}が {budget} 字を超えるので{what[2:]}の途中で切った。"
+                "続きはその途中から始まる)"
+            )
+        if end < size:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
         return _read_rendered(abs_path, body)
 
@@ -1657,13 +1900,6 @@ class Tools:
             f"{abs_path} はテキストとして読めない (Office 文書などのバイナリか、"
             "UTF-8 / cp932 のテキストでない)",
             self.valves.binary_hint,
-        )
-
-    def _too_large_read(self, abs_path: str, size: int) -> ToolError:
-        return ToolOutcome(
-            f"{abs_path} は {_human_size(size)} で、read_file で読める上限"
-            f" {_human_size(READ_FILE_LIMIT)} を超えている",
-            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから読む。",
         )
 
     def _other_ext_error(self, abs_path: str) -> ToolError:

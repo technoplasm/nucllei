@@ -75,7 +75,8 @@ from pydantic import BaseModel, Field
 
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
-from nucllei.utils.file_limit import ADMIN_SETTING, attachment_limit_bytes, transfer_cap
+from nucllei.env import FETCH_MAX_BYTES
+from nucllei.utils.file_limit import sandbox_file_limit_bytes
 from nucllei.utils.image_refs import (
     REF_ARGS_RULE,
     detect_kind,
@@ -108,8 +109,9 @@ _IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"}
 # 別の toolkit の tool (sandbox の run_python / send_to_workspace / fetch_from_workspace、
 # fetch_url、run_subagent) は載っていないことがあるので「〜が使えるなら」と条件付きで書く。
 
-# path= の取り出しの上限 (RC ATTACHMENT_MAX_SIZE_MB) を変える場所。sandbox の tool と同じ言い方
-_LIMIT_BY_ADMIN = f"上限は管理者の設定 ({ADMIN_SETTING}) で、引数では上げられない"
+# path= の取り出しの上限は配備の設定 (sandbox の上限と FETCH_MAX_BYTES の小さいほう)。env 名は
+# モデルに出さない。sandbox の tool の url= と同じ言い方
+_LIMIT_BY_DEPLOY = "上限は sandbox の配備の設定で、引数では上げられない"
 
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の外 / 大きすぎる)。"
@@ -119,6 +121,12 @@ _SHOW_PATH = (
     "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
     "返ったリンクを本文に書く。"
 )
+
+
+def _path_limit() -> int:
+    """feed_image(path=) の上限: sandbox の上限と FETCH_MAX_BYTES (送信直前の読み直しの上限) の
+    小さいほう。大きい方に合わせると、ここで通っても送信直前に読めず黙って画像が落ちる。"""
+    return min(sandbox_file_limit_bytes(), FETCH_MAX_BYTES)
 
 
 def _hand_over(ref: str, is_path: bool) -> str:
@@ -143,8 +151,8 @@ def _too_large(ref: str, err, *, is_path: bool) -> str:
         what = f"{ref} は少なくとも {mb(size)} あり、取得の上限"
     what += f" {mb(limit)}" if limit is not None else ""
     if is_path:
-        # path= の上限は管理者の設定 (ファイルの出入りの上限。utils/file_limit)
-        what += f" ({_LIMIT_BY_ADMIN})"
+        # path= の上限は配備の設定 (`_path_limit`)
+        what += f" ({_LIMIT_BY_DEPLOY})"
     # resolver の上限 (既定 25 MB) は画像の上限 (valve max_image_mb、既定 8 MB) より大きいので、
     # ここに来た画像は _feed_path の「run_python でリサイズ」まで届かない。次の一手はここで言う:
     # fs なら sandbox から直接開いて縮小、URL なら send_to_workspace で取り込んでから縮小。
@@ -561,12 +569,11 @@ class Tools:
             pages = str(frag_page)
 
         if is_path:
-            # path= の取り出しの上限は sandbox のファイルの出入りと同じ RC
-            # `ATTACHMENT_MAX_SIZE_MB` (`utils/file_limit`。無制限なら sandbox の安全上限)。
+            # path= は file_id を作らない (参照文字列を積むだけ) ので、添付の上限ではなく sandbox の
+            # 上限に従う (`utils/file_limit` の表)。ただし中身をメモリに載せて検証し、送信直前にも
+            # resolver の既定 (FETCH_MAX_BYTES) で読み直すので、その小さいほう (`_path_limit`)。
             # url= は従来どおり resolver の既定 (FETCH_MAX_BYTES)
-            loaded, err = await resolve_path(
-                ref, user, max_bytes=transfer_cap(attachment_limit_bytes(None, user))
-            )
+            loaded, err = await resolve_path(ref, user, max_bytes=_path_limit())
         else:
             loaded, err = await resolve_url(ref, user=user)
         if err is not None or loaded is None:

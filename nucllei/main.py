@@ -305,10 +305,12 @@ async def lifespan(app: FastAPI):
     # models は lazy なので、driver 側がターン起動前に get_all_models 相当を踏む。
     await execution_resume.install(app)
 
-    # 1 ファイルの出入りの上限 (ATTACHMENT_MAX_SIZE_MB) が sandbox の安全上限
-    # (SANDBOX_FILE_LIMIT_BYTES) より大きければ warning(utils/file_limit)。sandbox は同時に
-    # 立ち上がるので background で繋がるまで待つ
-    probe = asyncio.create_task(file_limit.probe_sandbox_safety_limit())
+    # sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB) を /healthz から読む — ファイルブラウザの
+    # アップロードの事前チェック・url= の取り込みに使い、添付の上限 (ATTACHMENT_MAX_SIZE_MB) の
+    # 方が大きければ warning(utils/file_limit)。sandbox は同時に立ち上がるので background で待つ
+    probe = asyncio.create_task(file_limit.probe_sandbox_file_limit())
+    # 改名した env (旧名は読まない — 旧データ互換を持たない方針の延長)。新名を案内して 1 行
+    file_limit.warn_renamed_env()
 
     yield
     probe.cancel()

@@ -355,15 +355,15 @@ SANDBOX_URL = os.environ.get("SANDBOX_URL", "").strip()
 # 同名・同値を持ち合うこと。
 SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 
-# write_file の本文上限 (bytes)。モデルの出力なのでそもそも巨大にはならないが、
-# 事故 (ループで巨大文字列を渡す等) で workspace quota を食い潰さないための蓋。
-SANDBOX_WRITE_FILE_LIMIT_BYTES = os.environ.get(
-    "SANDBOX_WRITE_FILE_LIMIT_BYTES", str(1024 * 1024)
-)
+# テキストの上限 (MB の整数、既定 1): write_file の本文の上限 (モデルが壊れて同じ出力を繰り返した
+# ときの歯止め — workspace quota を食い潰さない蓋) と、ファイルブラウザのテキスト編集 (開く・保存) の
+# 上限。read_file は範囲読みなので使わない。旧名 `SANDBOX_WRITE_FILE_LIMIT_BYTES` は読まない
+# (起動時に warning — main.py の lifespan。旧データ互換を持たない方針の延長)。
+SANDBOX_TEXT_MAX_SIZE_MB = os.environ.get("SANDBOX_TEXT_MAX_SIZE_MB", "1")
 try:
-    SANDBOX_WRITE_FILE_LIMIT_BYTES = int(SANDBOX_WRITE_FILE_LIMIT_BYTES)
+    SANDBOX_TEXT_MAX_SIZE_MB = int(SANDBOX_TEXT_MAX_SIZE_MB)
 except ValueError:
-    SANDBOX_WRITE_FILE_LIMIT_BYTES = 1024 * 1024
+    SANDBOX_TEXT_MAX_SIZE_MB = 1
 
 
 ####################################

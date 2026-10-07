@@ -4,7 +4,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 // #150: sandbox のファイルブラウザ(nucllei/routers/sandbox_files.py)。
 // パスは jail の絶対パス(/workspace/… ・/ext/public/… ・/ext/groups/<g>/…)。
 // 失敗は SandboxFilesError(status と detail)で投げる — 画面が 409(外で変更された /
-// 既に在る)・413(大きすぎる)・507(容量が一杯)を言い分けるため。
+// 既に在る)・413(大きすぎる。detail.limit に上限)・507(容量が一杯)を言い分けるため。
 
 const BASE = `${WEBUI_API_BASE_URL}/sandbox/files`;
 
@@ -90,8 +90,18 @@ const postJson = <T>(path: string, body: unknown) =>
 		body: JSON.stringify(body)
 	});
 
-export const getSandboxPlaces = () =>
-	request<{ places: SandboxPlace[]; write_limit_bytes: number }>('/places');
+export type SandboxPlaces = {
+	places: SandboxPlace[];
+	// テキストの上限(エディタで開く・保存。SANDBOX_TEXT_MAX_SIZE_MB)
+	text_limit_bytes: number;
+	// アップロードの上限(sandbox の SANDBOX_FILE_MAX_SIZE_MB)。サーバーが読めていなければ null —
+	// そのときは事前チェックをせず sandbox の 413 で知る
+	upload_limit_bytes: number | null;
+	// アップロードの権限(グループの「ファイルアップロードを許可」= chat.file_upload)
+	can_upload: boolean;
+};
+
+export const getSandboxPlaces = () => request<SandboxPlaces>('/places');
 
 export const getSandboxUsage = () => request<SandboxUsage>('/usage');
 
@@ -111,6 +121,7 @@ export const writeSandboxFile = (
 		exclusive: options.exclusive ?? false
 	});
 
+// サーバーは本文を sandbox へストリーミングで中継する(1 GB 級でも可。上限は upload_limit_bytes)
 export const uploadSandboxFile = (dir: string, file: File, overwrite = false) => {
 	const data = new FormData();
 	data.append('dir', dir);

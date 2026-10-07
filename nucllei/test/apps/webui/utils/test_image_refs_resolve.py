@@ -2017,3 +2017,30 @@ def test_log_mounts_lists_the_table(monkeypatch, tmp_path, caplog):
     assert f"/ext/cage/ → proxy {PROXY_BASE}/" in text
     assert f"/ext/s/ → static {tmp_path / 's'}/" in text
     assert "/ext/gone/" in text and "ディレクトリが無い" in text
+
+
+# --- sink(send_to_workspace(url=) が一時ファイルに落とす)--------------------------------
+def test_sink_receives_the_body_and_only_the_head_is_kept(monkeypatch, tmp_path):
+    import io
+
+    from nucllei.utils.image_refs import resolve_url
+
+    # 静的 mount(ファイルのコピー)
+    _mount(monkeypatch, tmp_path)
+    sink = io.BytesIO()
+    loaded, err = asyncio.run(resolve_url(MOUNTED, user="alice", sink=sink))
+    assert err is None and loaded.spooled and loaded.size == len(PNG_BYTES)
+    assert sink.getvalue() == PNG_BYTES and loaded.content_type == "image/png"
+    # 一般の URL(stream)。上限は sink でも同じく効く
+    body = PNG_BYTES + b"x" * 200_000
+    _install_transport(monkeypatch, lambda r: httpx.Response(200, content=body))
+    _self(monkeypatch)
+    sink = io.BytesIO()
+    loaded, err = asyncio.run(resolve_url(f"{GENERAL}/b.png", sink=sink))
+    assert err is None and loaded.spooled
+    assert sink.getvalue() == body and loaded.size == len(body)
+    assert len(loaded.data) == 64 and loaded.content_type == "image/png"
+    loaded, err = asyncio.run(
+        resolve_url(f"{GENERAL}/b.png", max_bytes=1000, sink=io.BytesIO())
+    )
+    assert loaded is None and err.code == "too_large"

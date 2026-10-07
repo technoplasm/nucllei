@@ -175,9 +175,12 @@ compose/env files):
 | `ENABLE_OLLAMA_API`                                | (default `true` → `false`)   | §3.5                                                                                                                                                                                                                     |
 | `ENABLE_ADMIN_EXPORT` / `ENABLE_ADMIN_CHAT_ACCESS` | _(removed)_                  | admins can always export the DB / all chats and open any user's chat (a narrower admin needs a separate role, not a toggle); `/api/config` no longer exposes `features.enable_admin_export` / `enable_admin_chat_access` |
 
-`SANDBOX_URL` / `SANDBOX_TOKEN` / `SANDBOX_WRITE_FILE_LIMIT_BYTES` keep their names
-but are now read in `nucllei/env.py` like every other env (they used to be read
-inside `builtin_tools/sandbox.py`).
+`SANDBOX_URL` / `SANDBOX_TOKEN` keep their names but are now read in
+`nucllei/env.py` like every other env (they used to be read inside
+`builtin_tools/sandbox.py`). Size caps were renamed to `*_MAX_SIZE_MB` (integer MB,
+2026-10-07): nucllei `SANDBOX_WRITE_FILE_LIMIT_BYTES` → `SANDBOX_TEXT_MAX_SIZE_MB`, sandbox
+`SANDBOX_FILE_LIMIT_BYTES` → `SANDBOX_FILE_MAX_SIZE_MB`. The old names are **not read**
+(no value translation); if one is still set, its process logs one warning naming the new one.
 
 **File-based customization (`/app/custom`)**: brand _text_ comes from env vars
 above; brand _files_ come from a single fixed directory. Mount a host dir
@@ -278,65 +281,80 @@ separate reasoning block.
 
 ### 3.6 Tool calling & tasks
 
-| Var                                                            | Kind | Default               | Effect                                                                                                                                                           |
-| -------------------------------------------------------------- | ---- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                       |
-| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                            |
-| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`               | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                      |
-| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)   | timeout of one `run_subagent` child turn (§5.8)                                                                                                                  |
-| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                   | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                            |
-| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls fail immediately as a tool result (§5.8)                                                       |
-| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)   | timeout of one background execution unless the tool declares its own (§5.9)                                                                                      |
-| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                   |
-| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                    |
-| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                     |
-| `SANDBOX_WRITE_FILE_LIMIT_BYTES`                               | env  | `1048576` (1 MB)      | body cap of `write_file` and size cap of `read_file` (§5.7)                                                                                                      |
-| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                               |
-| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                 |
-| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                 |
-| `SELF_ADDRESSES`                                               | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03 |
-| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)    | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03  |
-| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`           | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                           |
+| Var                                                            | Kind | Default               | Effect                                                                                                                                                                    |
+| -------------------------------------------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                                |
+| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                                     |
+| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`               | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                               |
+| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)   | timeout of one `run_subagent` child turn (§5.8)                                                                                                                           |
+| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                   | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                     |
+| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls fail immediately as a tool result (§5.8)                                                                |
+| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)   | timeout of one background execution unless the tool declares its own (§5.9)                                                                                               |
+| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                            |
+| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
+| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                              |
+| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)     | text cap: body of `write_file` (guard against a looping model) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7) |
+| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                                        |
+| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                          |
+| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                          |
+| `SELF_ADDRESSES`                                               | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03          |
+| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)    | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03           |
+| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`           | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                                    |
 
 ### 3.7 Attachments / files / storage
 
 | Var                              | Kind | Default           | Effect                                                                                                                                                      |
 | -------------------------------- | ---- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATTACHMENT_MAX_SIZE_MB`         | RC   | `25` MB           | **the single per-file cap** (server-enforced; `0` = unlimited) for chat uploads and every sandbox file transfer — see "Per-file size limit" below |
+| `ATTACHMENT_MAX_SIZE_MB`         | RC   | `25` MB           | **attachment cap** (server-enforced; `0` = unlimited) — paths that create or carry a `file_id`, see "Per-file size limits" below                            |
 | `ATTACHMENT_MAX_COUNT`           | RC   | unlimited         | max attachments per message                                                                                                                                 |
 | `ATTACHMENT_ALLOWED_EXTENSIONS`  | RC   | `[]` = allow all  | lowercase, dot-less whitelist                                                                                                                               |
 | `ATTACHMENT_FUNCTION_ID`         | RC   | `""` = none       | id of the single global Attachment Function (§7.3); empty ⇒ uploads store raw bytes, no text extraction                                                     |
 | `ATTACHMENT_IMAGE_MAX_DIMENSION` | RC   | unset = no resize | client-side downscale of attached images before upload: if the longest edge exceeds this (px), the image is resized to fit, aspect ratio and MIME preserved |
 | `PASTED_TEXT_CHARACTER_LIMIT`    | RC   | unset = disabled  | pasted plain text longer than this (chars) becomes a `.txt` attachment                                                                                      |
-
-**Per-file size limit.** `ATTACHMENT_MAX_SIZE_MB` (admin: Workspace > Settings > Files,
-"Max Upload Size") is the one source of the per-file cap, read on every request
-(`utils/file_limit.attachment_limit_bytes(request_or_app, user)` — `user` is unused today and
-is where per-user / per-group caps, #147, will plug in). It applies to:
-
-| Path                                                    | Enforced where                                                                                               |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| chat upload `POST /api/v1/files/`                       | nucllei (400)                                                                                                |
-| `send_to_workspace(file_id=…)` / `url=` (incl. `/api/v1/files/{id}/content`) | nucllei before reading / fetching (`url` passes it as the resolver's `max_bytes`) + sandbox `/files/write` |
-| exports auto-attach (`run_python*` / `run_shell`)       | sandbox `/exec` `/exec_cell` (over-limit entries come back `truncated` with the effective `limit`)          |
-| `fetch_from_workspace`                                  | sandbox `/files/read` (413); `/ext/…` read by nucllei uses it as `max_bytes`                                  |
-| `feed_image(path=…)`                                    | resolver `max_bytes` + sandbox `/files/read` (`url=` keeps `FETCH_MAX_BYTES`)                                 |
-
-nucllei sends the cap to the sandbox as `file_limit_bytes` on each of these requests
-(omitted when unlimited). The sandbox applies **the smaller of `file_limit_bytes` and its
-own safety cap** `SANDBOX_FILE_LIMIT_BYTES` (default 1 GiB, OOM guard — transfers are
-base64 in JSON, ~2.3x the file size in RAM); without `file_limit_bytes` (older nucllei,
-unlimited) only the safety cap applies, and the sandbox logs one warning when a requested
-cap exceeds it. The sandbox reports its safety cap on `/healthz` (`file_limit_bytes`) and
-`/metrics` (`sandbox_file_limit_bytes`); nucllei reads it at startup and warns when
-`ATTACHMENT_MAX_SIZE_MB` is larger (or unlimited) — then the sandbox's cap wins on the
-sandbox paths. Over-limit errors name the effective cap in MB and say the admin setting
-above changes it. **Not** governed by this cap: `write_file` / `read_file` and the file
-browser's text editor (`SANDBOX_WRITE_FILE_LIMIT_BYTES`, text for the context), quota, and
-the file browser's upload / download (§4.4 — direct large-file path; its cap will become the
-sandbox safety cap + quota with streaming transfers, separate work). The former valve
-`url_max_mb` is gone (a stored value is dropped by `merge_valves_update` as an unknown key).
 | `STORAGE_PROVIDER`               | env  | `local`           | `local` \| `s3` \| `gcs` \| `azure` (each with its own credential envs: `S3_*`, `GCS_BUCKET_NAME`+`GOOGLE_APPLICATION_CREDENTIALS_JSON`, `AZURE_STORAGE_*`) |
+
+**Per-file size limits.** There are two caps, and every way a file goes in or out of the
+sandbox / a chat follows exactly one of them (ken, 2026-10-07):
+
+- **attachment cap** — RC `ATTACHMENT_MAX_SIZE_MB` (admin: Workspace > Settings > Files,
+  "Max Upload Size"; `0` = unlimited), read on every request
+  (`utils/file_limit.attachment_limit_bytes(request_or_app, user)` — `user` is unused today and
+  is where per-user / per-group caps, #147, will plug in). For paths that **create or carry a
+  `file_id`**.
+- **sandbox cap** — sandbox env `SANDBOX_FILE_MAX_SIZE_MB` (integer MB, default `1024`, the same
+  for everyone). For paths that put a file **directly into the workspace / show it to the model
+  without a `file_id`**. The sandbox owns the value and reports it on `/healthz`
+  (`file_max_size_mb`) and `/metrics` (`sandbox_file_max_size_bytes`); nucllei reads it at
+  startup (`probe_sandbox_file_limit`; until then it assumes 1024 MB).
+
+| Path                                                                                            | Cap                                                 | Enforced where                                                                                      |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| chat upload `POST /api/v1/files/`                                                               | attachment                                          | nucllei (400)                                                                                       |
+| `send_to_workspace(file_id=…)` (also `url=/api/v1/files/{id}/content`, and the attachment list) | attachment                                          | nucllei before reading + sandbox `/files/write` (`file_limit_bytes`)                                |
+| exports auto-attach (`run_python*` / `run_shell`)                                               | attachment                                          | sandbox `/exec` `/exec_cell` (over-limit entries come back `truncated` with the effective `limit`)  |
+| `fetch_from_workspace`                                                                          | attachment                                          | sandbox `/files/read` (413); `/ext/…` read by nucllei uses it as `max_bytes`                        |
+| file browser upload / download (§4.4.1)                                                         | sandbox                                             | sandbox `/files/raw` (413; nucllei refuses an upload early when it knows the cap), plus quota (507) |
+| `send_to_workspace(url=…)` (other URLs)                                                         | sandbox                                             | resolver `max_bytes` while streaming into a temp file, then sandbox `/files/raw` (413)              |
+| `feed_image(path=…)`                                                                            | sandbox, capped by `FETCH_MAX_BYTES` (smaller wins) | resolver `max_bytes` + sandbox `/files/read` (`url=` keeps `FETCH_MAX_BYTES`)                       |
+
+`feed_image(path=…)` is on the sandbox side because it **does not create a `file_id`** — it only
+pushes the reference string for the model to see. But it holds the bytes in memory to check
+image / PDF and page count, and the reference is read again right before the model call with the
+resolver default `FETCH_MAX_BYTES` (25 MB); a larger cap would let a file pass here and then
+silently drop at send time. So its cap is `min(sandbox cap, FETCH_MAX_BYTES)` — 25 MB by default.
+
+On the attachment paths nucllei sends the cap to the sandbox as `file_limit_bytes` (omitted when
+unlimited); the sandbox applies **the smaller of `file_limit_bytes` and its own cap** (these paths
+are base64 in JSON, ~2.3x the file size in RAM — the sandbox cap is their OOM guard) and logs one
+warning when a requested cap exceeds its own. nucllei warns at startup when
+`ATTACHMENT_MAX_SIZE_MB` is larger than the sandbox cap (or unlimited) — then the sandbox cap
+wins on those paths. The sandbox-cap paths move bytes as **streams** (`/files/raw`; at most a chunk
+in RAM). Over-limit errors name the effective cap in MB; on the attachment paths they say the
+admin setting above changes it, on the sandbox paths that it is the deployment's sandbox setting
+(env names are not shown to the model). **Not** governed by either: `write_file` and the file
+browser's text editor (`SANDBOX_TEXT_MAX_SIZE_MB`), `read_file` (range reads, no size cap), and
+quota. The former valve `url_max_mb` is gone (a stored value is dropped by `merge_valves_update`
+as an unknown key).
 
 ### 3.8 External reference gate (`/ext`)
 
@@ -1266,22 +1284,23 @@ dotfiles are hidden as in `list_workspace`. Symlinks are never followed (the
 sandbox walks each step with `O_NOFOLLOW`); listings show them as `type:"symlink"`
 and delete removes the link itself.
 
-| Endpoint              | Body / query                                   | Returns / notes                                                                                                                                                                                                                    |
-| --------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /places`         | —                                              | `{places:[{path, kind:"workspace"\|"public"\|"group", rw}], write_limit_bytes}` — the workspace first, then the `/ext` places this user can see                                                                                    |
-| `GET /usage`          | —                                              | `{used_bytes, total_bytes, quota_gb}` of the workspace (`/ext` has no quota)                                                                                                                                                       |
-| `POST /list`          | `{path}`                                       | one level: `{path, rw, exists, is_dir, truncated, entries:[{name, path, type:"dir"\|"file"\|"symlink"\|"other", size, mtime, ctime}], cache_ttl_days}`. Dirs first. Each entry directly in `imports/` `exports/` `trash/` (file or folder) expires with its contents at `max(mtime, ctime) + cache_ttl_days` (#149; `ctime` is null with an older sandbox) |
-| `POST /stat`          | `{path}`                                       | `{exists, path, type, size, mtime, rw}`                                                                                                                                                                                            |
-| `POST /read`          | `{path}`                                       | `{path, name, size, mtime, rw, text, reason}` — `text` is the content when it is plain text (≤ 1 MiB, valid UTF-8, no NUL), else `null` with `reason` `too_large` / `binary` (download only)                                       |
-| `GET /download?path=` | —                                              | raw bytes, always `Content-Disposition: attachment` + `application/octet-stream` + `nosniff` (an HTML/SVG never renders on this origin). Capped by the sandbox's `SANDBOX_FILE_LIMIT_BYTES` (413)                                  |
-| `POST /write`         | `{path, content, expected_mtime?, exclusive?}` | save text. `expected_mtime` (from `read`) ≠ current → **409** `{detail:{message:"modified"\|"deleted", mtime}}` (changed outside — e.g. by a sandbox run); `exclusive` and it exists → 409. Returns `{ok, path, size, mtime}`      |
-| `POST /upload`        | multipart `dir`, `file`, `overwrite?` (false)  | one file into `dir`; exists and not `overwrite` → 409                                                                                                                                                                              |
-| `POST /delete`        | `{path}`                                       | file, or folder with its contents (permanent). The place root and the workspace's `imports/` `exports/` `trash/` themselves → 400. The file browser does not call this inside `/workspace` outside `trash/` — it moves the item to `/workspace/trash/<name>` with `/rename` (`-2`, `-3`… before the extension on a clash)                                                                                                                       |
-| `POST /rename`        | `{path, dest}`                                 | rename / move inside the same place only (400 across places); `dest` exists → 409                                                                                                                                                  |
-| `POST /mkdir`         | `{path}`                                       | creates parents too; exists → 409                                                                                                                                                                                                  |
+| Endpoint              | Body / query                                   | Returns / notes                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /places`         | —                                              | `{places:[{path, kind:"workspace"\|"public"\|"group", rw}], text_limit_bytes, upload_limit_bytes, can_upload}` — the workspace first, then the `/ext` places this user can see. `text_limit_bytes` = `SANDBOX_TEXT_MAX_SIZE_MB`; `upload_limit_bytes` = the sandbox cap read from `/healthz` (`null` until known — the UI then skips its pre-check); `can_upload` = permission `chat.file_upload` (admins always)                                                          |
+| `GET /usage`          | —                                              | `{used_bytes, total_bytes, quota_gb}` of the workspace (`/ext` has no quota)                                                                                                                                                                                                                                                                                                                                                                                               |
+| `POST /list`          | `{path}`                                       | one level: `{path, rw, exists, is_dir, truncated, entries:[{name, path, type:"dir"\|"file"\|"symlink"\|"other", size, mtime, ctime}], cache_ttl_days}`. Dirs first. Each entry directly in `imports/` `exports/` `trash/` (file or folder) expires with its contents at `max(mtime, ctime) + cache_ttl_days` (#149; `ctime` is null with an older sandbox)                                                                                                                 |
+| `POST /stat`          | `{path}`                                       | `{exists, path, type, size, mtime, rw}`                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `POST /read`          | `{path}`                                       | `{path, name, size, mtime, rw, text, reason}` — `text` is the content when it is plain text (≤ `SANDBOX_TEXT_MAX_SIZE_MB`, valid UTF-8, no NUL), else `null` with `reason` `too_large` / `binary` (download only)                                                                                                                                                                                                                                                          |
+| `GET /download?path=` | —                                              | raw bytes **streamed** from the sandbox's `GET /files/raw` (with `Content-Length`), always `Content-Disposition: attachment` + `application/octet-stream` + `nosniff` (an HTML/SVG never renders on this origin). Capped by the sandbox cap `SANDBOX_FILE_MAX_SIZE_MB` (413)                                                                                                                                                                                               |
+| `POST /write`         | `{path, content, expected_mtime?, exclusive?}` | save text. `expected_mtime` (from `read`) ≠ current → **409** `{detail:{message:"modified"\|"deleted", mtime}}` (changed outside — e.g. by a sandbox run); `exclusive` and it exists → 409. Returns `{ok, path, size, mtime}`                                                                                                                                                                                                                                              |
+| `POST /upload`        | multipart `dir`, `file`, `overwrite?` (false)  | one file into `dir`; exists and not `overwrite` → 409. Needs the group permission `chat.file_upload` ("Allow File Upload"; admins always) — else **403** (`detail:"file upload is not permitted"`). The spooled upload is **streamed** to the sandbox's `PUT /files/raw` in chunks (never read whole); cap = sandbox cap (413, refused before sending when nucllei knows the cap) + quota (507). Creating a new file and saving text (`/write`) do not need the permission |
+| `POST /delete`        | `{path}`                                       | file, or folder with its contents (permanent). The place root and the workspace's `imports/` `exports/` `trash/` themselves → 400. The file browser does not call this inside `/workspace` outside `trash/` — it moves the item to `/workspace/trash/<name>` with `/rename` (`-2`, `-3`… before the extension on a clash)                                                                                                                                                  |
+| `POST /rename`        | `{path, dest}`                                 | rename / move inside the same place only (400 across places); `dest` exists → 409                                                                                                                                                                                                                                                                                                                                                                                          |
+| `POST /mkdir`         | `{path}`                                       | creates parents too; exists → 409                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-Write size (`write`, `upload`) is capped by `SANDBOX_WRITE_FILE_LIMIT_BYTES`
-(same as the `write_file` tool; 413). A full workspace (quota) is **507**; the
+Text saves (`write`) are capped by `SANDBOX_TEXT_MAX_SIZE_MB` (same as the `write_file`
+tool); uploads / downloads by the sandbox cap. A 413 carries
+`detail:{message, size, limit}` (the effective cap, so the UI can name it). A full workspace (quota) is **507**; the
 sandbox tool's error text for the same case points the user to this tab. The
 sandbox's other refusals (400/403/404/409/413) are relayed; an unreachable or
 failing sandbox is 500 (not 502 — the UI reserves gateway errors for "backend
@@ -1878,11 +1897,20 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `read_file(path, offset=0, max_chars=40000)` (#153) is `write_file`'s
     counterpart: it reads a text file under `/workspace/`, a visible
     `/ext/groups/<g>/` or `/ext/public/` (same ACL, `/files/stat` then
-    `/files/read` with `nofollow`, symlinks refused), up to
-    `SANDBOX_WRITE_FILE_LIMIT_BYTES` (checked on the stat, before the
-    transfer), decoding BOM-UTF-8 → UTF-8 → cp932 strictly and naming the
-    encoding on the first line. Long text pages by `offset` (at most 60000
-    characters per call; `next_offset=` at the end while more remains). Images
+    `/files/read` with `nofollow`, symlinks refused) of **any size**: it takes the
+    byte size from the stat and reads only one page by range (`/files/read`
+    `offset` / `length`) plus the first 64 KiB, where the encoding is decided
+    (BOM-UTF-8 → UTF-8 → cp932, strict; named on the first line together with
+    `全 N バイトのうち a〜b バイト目`). A page holds at most `max_chars` (default
+    40000, max 60000) characters and is **cut back to a line break** (`0x0A`
+    never occurs inside a UTF-8 or cp932 multi-byte character, so pages never
+    split one); only a single line longer than the page is cut mid-line, and the
+    result says so. `offset` / `next_offset=` are **byte** positions — pass the
+    previous `next_offset` as is (another offset reads from mid-line; one inside a
+    UTF-8 character is refused). `.csv` / `.tsv` are cut only at record ends
+    (newlines outside quotes, counted from the page start — which is a record end
+    when it is a previous `next_offset`), and pages after the first get the first
+    record (header) prepended, noted on the first line. Images
     / PDF, Office and other binaries (by extension, or undecodable / NUL) and
     `/ext` proxy mounts get one fixed sentence per category; the "next step"
     of each comes from the valves `image_hint` / `binary_hint` /
@@ -1944,10 +1972,14 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     limit / redirect — to an unusable target, to the server itself, too many /
     upstream status / unreachable or unresolvable name / the server itself),
     each with a fixed sentence that never inspects the value — the shared
-    defaults of `ref_errors` (§3.8) except `too_large` (the cap is the admin
-    setting `ATTACHMENT_MAX_SIZE_MB` and cannot be raised by an argument).
-    The per-file cap is `ATTACHMENT_MAX_SIZE_MB` (§3.7 "Per-file size limit"),
-    passed as `max_bytes` (unlimited → the sandbox's safety cap).
+    defaults of `ref_errors` (§3.8) except `too_large` (the cap is the
+    deployment's sandbox setting and cannot be raised by an argument).
+    The cap is the **sandbox cap** `SANDBOX_FILE_MAX_SIZE_MB` (§3.7 "Per-file size
+    limits" — no `file_id` is created), passed as `max_bytes`; the body is
+    streamed by the resolver into a temp file (`resolve_url(sink=…)`, only the
+    first 64 bytes stay in memory for type sniffing) and then streamed to the
+    sandbox's `PUT /files/raw` — no base64 JSON, so GB-sized files work. A
+    `/api/v1/files/{id}/content` URL is the `file_id` path (attachment cap).
     When the URL is `/ext/<name>/<sub>`, `<name>` is a **static** mount and
     **the file exists there** (`image_refs.mounted_path_for_url`), nothing is copied: the
     tool answers with the sandbox path `/ext/{rest}` (the same string as the

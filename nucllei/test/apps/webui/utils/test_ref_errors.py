@@ -305,7 +305,7 @@ def test_sandbox_wording():
             "too_large", "x", size=3 * 1024 * 1024, limit=1024 * 1024, size_exact=True
         ): (
             f"ERROR: {U} は 3.0MB で、取り込みの上限 1.0MB を超えている。sandbox には取り込めない "
-            "(上限は管理者の設定で、引数では上げられない)。リンク切れではない。次の手: "
+            "(上限は sandbox の配備の設定で、引数では上げられない)。リンク切れではない。次の手: "
             + _LINK.format(u=U)
         ),
         RefError("not_found", "x"): _NOT_FOUND,
@@ -406,7 +406,7 @@ def test_feed_image_wording():
         + _LINK.format(u=U)
     )
     assert feed_explain(P, big, True) == (
-        f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない"
+        f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB (上限は sandbox の配備の設定で、引数では上げられない) を超えている。このままでは自分の目に入れられない"
         " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で run_python が使えるなら、このパスを"
         "開いて縮小し、出力を /workspace/… に書いてからその path を feed_image(path=…) に渡す。"
         "sandbox のファイルなので、fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を"

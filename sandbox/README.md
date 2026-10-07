@@ -333,8 +333,12 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
 - `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir}` ファイル一覧
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
-- `POST /files/read` — `{user_id, path, mounts?, nofollow?}` → `{name, size, b64, mtime}`
+- `POST /files/read` — `{user_id, path, mounts?, nofollow?, offset?, length?}` → `{name, size, b64, mtime}`
   (`mtime` は秒の float — 上書き競合の比較用。#150)
+  - **範囲読み** (nucllei の read_file のページ): `offset` か `length` を渡すと `offset` バイト目から
+    最大 `length` バイト (`length` 省略は末尾まで) だけを返し、`{name, size, offset, length, b64, mtime}`
+    (`size` はファイル全体、`offset` `length` は返した範囲)。上限は**読む量**に掛かる (ファイル全体の
+    大きさでは断らない)。負の値は 400
 - `POST /files/write` — `{user_id, path, b64, mounts?, expected_mtime?, exclusive?, nofollow?}`
   → `{ok, size, cache_ttl_days}` 書き込み (workspace 外へのパスは拒否)。fd で辿る版 (下記) では
   `mtime` も返す
@@ -343,6 +347,21 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     `exclusive`: 既に在れば 409 (新規作成)。`nofollow`: workspace 相対でも経路の symlink を辿らない
   - 容量切れ (ENOSPC / EDQUOT) は **507** (`/exec` の imports 書き込みも同じ)。nucllei の tool は
     「Workspace のファイルブラウザで整理できる」を添える
+- **生のバイト列 `/files/raw`** — base64-in-JSON を使わないストリーミングの口。ファイルブラウザの
+  アップロード / ダウンロードと nucllei の `send_to_workspace(url=)` の取り込みが使う (1 GiB 級を
+  運ぶ。メモリに載るのはチャンク分だけ)。パラメータは query: `user_id` `path` (2 形は下の
+  `/files/*` と同じ)、`mounts` (MountIn の配列の **JSON 文字列**。nucllei はその場所を覆う bind だけを
+  渡す)、`file_limit_bytes` (任意)。パスの扱いは fd で辿る版と同じ (経路も末端も symlink を辿らない・
+  新しい段は 65534 の物・ro は 403・bind 外は 404)
+  - `PUT /files/raw?…&exclusive=` — 本文 (application/octet-stream) をチャンクで受けて同じディレクトリの
+    一時ファイル `.upload-<uuid>.part` (`.` 始まり = 一覧に出ない、65534 の物) に書き、全部受けてから
+    確定する (上書きは `rename`、`exclusive=true` は `link` + `unlink` — 既に在れば 409、競り合っても
+    上書きしない)。上限超過 (Content-Length で本文を読む前に、無ければ受けながら数えて) は **413**、
+    容量切れは **507**、末端が symlink・ディレクトリは 400。**途中で失敗 (413・507・切断) したら一時
+    ファイルを消し、元のファイルは変わらない**。→ `{ok, path, size, mtime, cache_ttl_days}`
+    (プロセスごと落ちたときだけ `.upload-*.part` が残りうる — 一覧に出ず、quota を食うだけ)
+  - `GET /files/raw?…` — 中身を StreamingResponse で返す (`Content-Length`、`X-File-Mtime`、
+    1 MiB ずつ。開いた時点の大きさまで)。上限超過は 413
 - **ファイルブラウザ用 (#150)** — nucllei の `/api/v1/sandbox/files/*` (`nucllei/routers/sandbox_files.py`)
   が呼ぶ。`path` の 2 形 (workspace 相対 / `/ext/...`) と `mounts` は他の `/files/*` と同じ。
   **workspace でも `/ext` でも、包含判定の基準 (workspace の root / bind のディレクトリ) から各段を
@@ -369,13 +388,15 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `cache_ttl_days` (int) — `imports/` `exports/` `trash/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
     0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
     自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
-- `file_limit_bytes` (int、任意) — `/exec` `/exec_cell` `/files/read` `/files/write` (と `/files/*` の
-  他の endpoint でも受けるが使わない): ファイルの出入りの上限 (nucllei の `ATTACHMENT_MAX_SIZE_MB`)。
-  効くのは安全上限 `SANDBOX_FILE_LIMIT_BYTES` との小さいほう。超えると 413
-  `file too large: N bytes (limit L)` (L は効いた上限。nucllei がこの形を読む)、exports では
-  `{truncated: true, limit: L}` (b64 なし)。無ければ (古い nucllei・無制限) 安全上限だけ
-- `GET /healthz` — `{ok, nsjail, loop, file_limit_bytes}`。`file_limit_bytes` は安全上限
-  (`SANDBOX_FILE_LIMIT_BYTES`。`/metrics` の `sandbox_file_limit_bytes` も同じ)。`loop` は loop ドライバの実効チェック
+- `file_limit_bytes` (int、任意) — `/exec` `/exec_cell` `/files/read` `/files/write` `/files/raw` (と
+  `/files/*` の他の endpoint でも受けるが使わない): 呼び出し元の上限 (nucllei の添付の上限
+  `ATTACHMENT_MAX_SIZE_MB`。`/files/raw` には渡さない)。効くのは sandbox の上限
+  `SANDBOX_FILE_MAX_SIZE_MB` との小さいほう。超えると 413 `file too large: N bytes (limit L)`
+  (L は効いた上限。nucllei がこの形を読む)、exports では `{truncated: true, limit: L}` (b64 なし)。
+  無ければ sandbox の上限だけ
+- `GET /healthz` — `{ok, nsjail, loop, file_max_size_mb}`。`file_max_size_mb` は sandbox の上限
+  (`SANDBOX_FILE_MAX_SIZE_MB`。`/metrics` の `sandbox_file_max_size_bytes` はそのバイト数)。nucllei が
+  起動時に読む (ファイルブラウザのアップロードの事前チェック・url= の取り込み)。`loop` は loop ドライバの実効チェック
   (`/dev/loop-control` を open して確かめる)。**false なら 503** を返し、compose の
   healthcheck 経由でコンテナが unhealthy になる(`docker ps` で見える)。loop 不能 =
   全 workspace mount が失敗する hard fault のため(典型例と切り分けは
@@ -430,7 +451,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |
-| `SANDBOX_FILE_LIMIT_BYTES` | 1073741824 (1 GiB) | ファイルの出入り (`/files/read` `/files/write`・exports 自動添付・`/exec` の imports) の 1 ファイルの**安全上限** (OOM 防止)。実際の上限は nucllei の `ATTACHMENT_MAX_SIZE_MB` (管理画面の「最大アップロードサイズ」) で、nucllei がリクエストごとに `file_limit_bytes` で渡す — sandbox は**渡された値とこの安全上限の小さいほう**に従う (渡されなければ安全上限だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。read / write は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない (GB 級を恒常的に運ぶなら raw ストリーム化が要る)。値は `/healthz` `/metrics` に出し、nucllei が起動時に読んで自分の上限の方が大きければ warning |
+| `SANDBOX_FILE_MAX_SIZE_MB` | 1024 | **sandbox の上限** (MB の整数、全員共通): workspace に直接出し入れする 1 ファイルの上限。(1) `/files/raw` (ファイルブラウザのアップロード / ダウンロード、nucllei の `send_to_workspace(url=)`) の上限そのもの、(2) nucllei がリクエストごとに `file_limit_bytes` で渡す添付の上限 (`ATTACHMENT_MAX_SIZE_MB` — `/files/read` `/files/write`・exports 自動添付・`/exec` の imports) の安全上限 — sandbox は**渡された値とこの値の小さいほう**に従う (渡されなければこの値だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。(2) の経路は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない。値は `/healthz` (`file_max_size_mb`) `/metrics` に出し、nucllei が起動時に読む。**旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない** (設定されていれば起動時に warning を 1 行、値は読み替えない) |
 | `SANDBOX_SESSION_TTL_S` | 43200 (12h) | stateful session の生存上限 (kernel の nsjail time_limit。idle 回収も同値) |
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
@@ -447,7 +468,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
 | `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具)。exports/ 自動添付 |
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
-| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
+| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
@@ -486,7 +507,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
   - nucllei 側に無い `/ext/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
     `/files/read` は workspace と `/ext/groups` `/ext/public` しか扱わない。この 2 つは nucllei が配信していなくても sandbox から読んで添付する — #152) ので **「読めない」になる** — そのときは `run_shell` で
     `/workspace/` にコピーしてから渡すよう tool が案内する。上限は他の取り出しと同じ nucllei の
-    `ATTACHMENT_MAX_SIZE_MB` (無制限なら sandbox の安全上限)。
+    `ATTACHMENT_MAX_SIZE_MB` (添付の上限。無制限なら sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB`)。
   - 不在・ディレクトリ・置き場の外を指す symlink は同じ「読めない」(fail closed)、上限超過は
     実サイズと上限を言う。`path` に URL が来ても URL としては扱わない。
 - **tool の `path` は jail から見た絶対パス (`/workspace/...`) で揃える**。`send_to_workspace` の
@@ -711,6 +732,10 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   削除・改名・mkdir・使用量、read の mtime と write の `expected_mtime` (409) / `exclusive`、
   workspace と `/ext` (ro は 403・bind 外は 404) の両方、**symlink を辿らない** (一覧は
   `symlink` で出すだけ・削除はリンクだけ・中間の symlink は 400)、保護された置き場、容量切れの 507。
+- `sandbox/tests/test_files_raw.py` — `/files/raw` と `/files/read` の範囲読み。PUT はチャンクで受けて
+  一時ファイル経由で確定 (上書き・`exclusive` の 409)、上限超過 (Content-Length / chunked)・容量切れで
+  一時ファイルが残らず元のファイルが変わらない、経路・末端の symlink・ro・bind 外、GET の
+  Content-Length と 413、範囲読みはファイル全体の大きさで断らない。
 - `sandbox/tests/test_ro_mounts.py` — 参照用データの read-only bind (#138)。置き場が
   空/不在なら nsjail の引数が増えない (挙動不変)、直下のものが同じパスで名前順に並ぶ、
   **rw では絶対に足さない**、1 階層だけ見る、dot 始まり・壊れた symlink は飛ばす
