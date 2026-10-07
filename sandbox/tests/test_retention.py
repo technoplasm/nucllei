@@ -180,3 +180,126 @@ def test_invalid_names_and_missing_dir(monkeypatch, tmp_path):
 def test_fmt_size(monkeypatch, tmp_path, n, s):
     mod = _load_main(monkeypatch, tmp_path)
     assert mod._fmt_size(n) == s
+
+
+# ---------------------------------------------------------------------------
+# imports/ exports/ のキャッシュ掃除 (`SANDBOX_CACHE_TTL_DAYS`、#149)
+# ---------------------------------------------------------------------------
+
+
+def _file(p: pathlib.Path, age_days=0.0, data=b"x" * 100) -> pathlib.Path:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    t = time.time() - age_days * DAY
+    os.utime(p, (t, t), follow_symlinks=False)
+    return p
+
+
+def _cache_ws(tmp_path) -> dict:
+    """期限切れ / 期限内 / symlink / memory/ 配下を混ぜた workspace を作る。"""
+    ws = tmp_path / "workspaces" / "alice"
+    outside = _file(tmp_path / "outside" / "secret.txt", age_days=90)
+    f = {
+        "ws": ws,
+        "outside": outside,
+        "old_import": _file(ws / "imports" / "old.csv", 31),
+        "new_import": _file(ws / "imports" / "new.csv", 29),
+        "old_nested": _file(ws / "exports" / "sub" / "deep" / "old.png", 40),
+        "old_mixed": _file(ws / "exports" / "mixed" / "old.txt", 40),
+        "new_mixed": _file(ws / "exports" / "mixed" / "new.txt", 1),
+        "old_memory": _file(ws / "memory" / "MEMORY.md", 365),
+        "old_other": _file(ws / "work" / "old.py", 365),
+    }
+    (ws / "exports" / "empty").mkdir()  # 元から空のサブディレクトリは残す
+    # symlink: 外のファイル / 外のディレクトリを指すもの (どちらも辿らず、消さない)
+    link_file = ws / "imports" / "link.txt"
+    link_file.symlink_to(outside)
+    link_dir = ws / "exports" / "linkdir"
+    link_dir.symlink_to(outside.parent)
+    t = time.time() - 90 * DAY
+    os.utime(link_file, (t, t), follow_symlinks=False)
+    os.utime(link_dir, (t, t), follow_symlinks=False)
+    f["link_file"] = link_file
+    f["link_dir"] = link_dir
+    return f
+
+
+def test_cache_ttl_env_default_is_30(monkeypatch, tmp_path):
+    monkeypatch.delenv("SANDBOX_CACHE_TTL_DAYS", raising=False)
+    mod = _load_main(monkeypatch, tmp_path)
+    assert mod.CACHE_TTL_DAYS == 30
+
+
+def test_cache_sweep_removes_only_expired_files(monkeypatch, tmp_path):
+    mod = _load_main(monkeypatch, tmp_path)
+    f = _cache_ws(tmp_path)
+    ws = f["ws"]
+
+    n, b = mod._sweep_cache_dirs(ws)
+    assert (n, b) == (3, 300)
+    for k in ("old_import", "old_nested", "old_mixed"):
+        assert not f[k].exists(), k
+    for k in ("new_import", "new_mixed", "old_memory", "old_other", "outside"):
+        assert f[k].exists(), k
+    # symlink は残り、指す先 (workspace の外) も無事
+    assert f["link_file"].is_symlink() and f["link_dir"].is_symlink()
+    assert (f["outside"].parent / "secret.txt").exists()
+    # 空になったサブディレクトリは消え、imports/ exports/ 自体と元から空のものは残る
+    assert not (ws / "exports" / "sub").exists()
+    assert (ws / "exports" / "mixed").is_dir()
+    assert (ws / "exports" / "empty").is_dir()
+    assert (ws / "imports").is_dir() and (ws / "exports").is_dir()
+
+    # 2 回目は何も消えない
+    assert mod._sweep_cache_dirs(ws) == (0, 0)
+
+
+def test_cache_sweep_disabled_and_symlinked_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("SANDBOX_CACHE_TTL_DAYS", "0")
+    mod = _load_main(monkeypatch, tmp_path)
+    f = _cache_ws(tmp_path)
+    assert mod._sweep_cache_dirs(f["ws"]) == (0, 0)
+    assert f["old_import"].exists()
+
+    # imports/ 自体を外への symlink に差し替えられていても辿らない
+    monkeypatch.setattr(mod, "CACHE_TTL_DAYS", 30)
+    ws = tmp_path / "workspaces" / "bob"
+    ws.mkdir(parents=True)
+    victim = _file(tmp_path / "victim" / "old.bin", 90)
+    (ws / "imports").symlink_to(victim.parent)
+    assert mod._sweep_cache_dirs(ws) == (0, 0)
+    assert victim.exists()
+
+
+def test_cache_sweep_runs_before_umount_in_idle_reaper(monkeypatch, tmp_path, capsys):
+    mod = _load_main(monkeypatch, tmp_path)
+    f = _cache_ws(tmp_path)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        # umount の時点で掃除が済んでいる
+        assert not f["old_import"].exists()
+        calls.append(cmd)
+
+    monkeypatch.setattr(mod, "_run", fake_run)
+    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
+    monkeypatch.setattr(mod, "WS_IDLE_TTL_S", 0)
+    mod._ws_registry["alice"] = time.monotonic() - 10
+
+    assert asyncio.run(mod.reap_idle_workspaces()) == 1
+    assert calls == [["umount", str(f["ws"])]]
+    assert f["new_import"].exists() and f["old_memory"].exists()
+    out = capsys.readouterr().out
+    assert "cache of alice: removed 3 file(s) older than 30 days, 300 B" in out
+
+
+def test_cache_sweep_skipped_with_live_session(monkeypatch, tmp_path):
+    mod = _load_main(monkeypatch, tmp_path)
+    f = _cache_ws(tmp_path)
+    monkeypatch.setattr(mod, "_run", lambda *a, **k: pytest.fail("umount"))
+    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
+    monkeypatch.setattr(mod, "_has_live_session", lambda u: True)
+    monkeypatch.setattr(mod, "WS_IDLE_TTL_S", 0)
+    mod._ws_registry["alice"] = time.monotonic() - 10
+    assert asyncio.run(mod.reap_idle_workspaces()) == 0
+    assert f["old_import"].exists()

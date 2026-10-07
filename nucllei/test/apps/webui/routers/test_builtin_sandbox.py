@@ -1094,12 +1094,110 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         out = outs(SandboxHTTPError(404, "not a file: a.txt"))[2]
         assert "/workspace/a.txt というファイルは無い" in out
+        assert "期限で消えた" not in out
+
+        # #149: imports/ exports/ は期限で消えるキャッシュ — 無いときは戻し方を添える
+        for path in ("/workspace/imports/a.csv", "/workspace/exports/b.png"):
+            tool = _sandbox(error=SandboxHTTPError(404, "not a file"))
+            out = _arun(tool.fetch_from_workspace(path, __user__=user))
+            assert f"{path} というファイルは無い" in out
+            assert "期限で消えた可能性" in out and "send_to_workspace(file_id)" in out
+        tool = _sandbox({"/files/list": {"entries": [], "exists": False}})
+        out = _arun(tool.list_workspace("/workspace/imports", __user__=user))
+        assert "期限で消えた可能性" in out
+        # 名前が似ているだけの別の場所には付けない
+        tool = _sandbox(error=SandboxHTTPError(404, "not a file"))
+        out = _arun(tool.fetch_from_workspace("/workspace/imports2/a", __user__=user))
+        assert "期限で消えた" not in out
 
         out = outs(SandboxHTTPError(413, "file too large: 9 bytes (limit 5)"))[2]
         assert "大きすぎ" in out and "接続できない" not in out
 
         for out in outs(ConnectionRefusedError("refused")):
             assert out.startswith("ERROR: sandbox に接続できない")
+
+    def test_toolkit_note_tells_imports_exports_expire(self):
+        """#149: imports/ exports/ の期限と戻し方は toolkit 共通注記 (クラス docstring) に 1 回だけ。"""
+        from nucllei.builtin_tools.sandbox import Tools
+
+        note = Tools.__doc__
+        assert "imports/" in note and "exports/" in note and "30 日" in note
+        assert "send_to_workspace(file_id)" in note
+
+    def test_import_and_exports_tell_cache_expiry(self, tmp_path):
+        """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を
+        取り込み・exports 自動添付の結果に 1 行添える。キー欠落 (古い sandbox)・0 では添えない。"""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from nucllei.models.files import FileForm
+
+        def day(n):
+            return datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=n)
+
+        src = tmp_path / "exp.txt"
+        src.write_text("中身", encoding="utf-8")
+        self.Files.insert_new_file(
+            "u-exp",
+            FileForm(
+                id="f-exp",
+                filename="exp.txt",
+                path=str(src),
+                data={},
+                meta={"name": "exp.txt", "content_type": "text/plain", "size": 6},
+            ),
+        )
+        user = {"id": "u-exp"}
+        tool = _sandbox({"/files/write": {"ok": True, "cache_ttl_days": 30}})
+        out = _arun(tool.send_to_workspace(file_id="f-exp", __user__=user))
+        assert out == (
+            "取り込み結果:\n- exp.txt (6B) → /workspace/imports/exp.txt\n"
+            f"(/workspace/imports/ の写しは {day(30)} 以降に消える。"
+            "消えたら send_to_workspace で取り込み直す)"
+        )
+        # 添付一覧からの一括取り込みも同じ 1 行
+        tool = _sandbox({"/files/write": {"ok": True, "cache_ttl_days": 3}})
+        out = _arun(
+            tool.send_to_workspace(
+                __user__=user, __files__=[{"id": "f-exp", "name": "exp.txt"}]
+            )
+        )
+        assert out.endswith(
+            f"写しは {day(3)} 以降に消える。消えたら send_to_workspace で取り込み直す)"
+        )
+        for res in ({"ok": True}, {"ok": True, "cache_ttl_days": 0}):
+            tool = _sandbox({"/files/write": res})
+            out = _arun(tool.send_to_workspace(file_id="f-exp", __user__=user))
+            assert "消える" not in out and "/workspace/imports/exp.txt" in out
+
+        def run_exports(extra, exports):
+            res = {
+                "exit_code": 0,
+                "duration_s": 0.1,
+                "stdout": "",
+                "stderr": "",
+                "exports": exports,
+                **extra,
+            }
+            tool = _sandbox({"/exec": res, "/exec_cell": {**res, "stdout": ""}})
+            a = _arun(tool.run_shell("x", __user__={"id": "u1"}))
+            b = _arun(tool.run_python("x", __user__={"id": "u1"}, __chat_id__="c1"))
+            return a, b
+
+        csv = [{"name": "r.csv", "size": 1, "b64": base64.b64encode(b"x").decode()}]
+        for out in run_exports({"cache_ttl_days": 30}, csv):
+            assert (
+                "r.csv (1B) file_id=" in out
+                and f"(添付は Files に残る。/workspace/exports/ の写しは {day(30)} 以降に消える)"
+                in out
+            )
+        for extra in ({}, {"cache_ttl_days": 0}):
+            for out in run_exports(extra, csv):
+                assert "r.csv" in out and "消える" not in out
+        # 1 件も添付できなかった (転送上限超過のみ) なら言わない — 「添付は残る」が嘘になる
+        huge = [{"name": "huge.bin", "size": 10**9, "truncated": True}]
+        for out in run_exports({"cache_ttl_days": 30}, huge):
+            assert "huge.bin" in out and "以降に消える" not in out
 
 
 # =============================================================================
@@ -1231,6 +1329,27 @@ def test_general_url_is_fetched_and_copied(monkeypatch):
     # 戻り値は絶対パス(そのまま run_python / list_workspace / fetch_from_workspace へ)
     assert not result.startswith("ERROR")
     assert "→ /workspace/imports/10-14.pdf" in result
+
+
+def test_url_import_tells_cache_expiry(monkeypatch):
+    # #149: url= の取り込みも `/files/write` の応答 `cache_ttl_days` から期限を 1 行添える
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    env = _UrlEnv(monkeypatch, lambda r: httpx.Response(200, content=b"%PDF-fake"))
+    _self_env(monkeypatch)
+
+    async def fake_post(path, payload, timeout_s):
+        env.writes.append({"path": path, "payload": payload})
+        return {"ok": True, "cache_ttl_days": 30}
+
+    env.tools._post = fake_post
+    result = env.run(url=f"{INTRA}/static/docs/10-14.pdf")
+    day = datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=30)
+    assert result.endswith(
+        f"→ /workspace/imports/10-14.pdf\n(/workspace/imports/ の写しは {day} 以降に消える。"
+        "消えたら send_to_workspace で取り込み直す)"
+    )
 
 
 def test_ext_url_is_read_from_the_mount_without_connecting(monkeypatch, tmp_path):

@@ -59,6 +59,8 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 ### tool(#18 builtin / サンドボックス)
 - **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
   原本 raw を `/workspace/imports/`(旧 inputs)に配置
+  (`imports/`・`exports/` は Files の写しで、最終更新から既定 30 日で sandbox が消す。取り込み・自動添付の結果に期限日を添える — 消えたら
+  `send_to_workspace(file_id)` で戻す。#149、詳細は `_memos/builtin-tools.md`「関数名の現行」節)
   (`url=` の URL(絶対、または同一サーバの `/ext/…`)も同じ置き場へ — 解決は共有 resolver
   `utils/image_refs`、`/ext` の静的 mount に実体がある物はコピーせず sandbox のパス
   `/ext/…`(URL と同じ文字列)を返す。

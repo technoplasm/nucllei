@@ -239,6 +239,17 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `/workspace/imports/` — チャット添付ファイルの取り込み先 (tool の import 操作)
   - `/workspace/exports/` — 書かれた新規/更新ファイルは実行後に tool が自動回収し、
     Files に登録してチャットに添付する
+  - `imports/` と `exports/` は **nucllei Files のキャッシュ** (原本は Files 側。#149):
+    mtime から `SANDBOX_CACHE_TTL_DAYS` (既定 30) 日過ぎたファイルを、idle workspace 回収
+    (`reap_idle_workspaces`) が **umount の直前**に消す (mount lock 保持・実行中でも生存
+    session 中でもない時点)。配下のサブディレクトリ内も対象で、それで空になったサブ
+    ディレクトリも消す (`imports/` `exports/` 自体と元から空のものは残す)。**symlink は
+    辿らず消しもしない** (jail 内から置けるので lstat で判定し、`/workspace` の外に出ない。
+    `imports/` 自体が symlink に差し替えられていたら何もしない)。消えたものは
+    `send_to_workspace(file_id)` で戻せる。回収即削除はしない (作った exports を次の呼び出し
+    で直す使い方を壊すため)。消した件数・バイト数は `[sandbox] cache of <user>: removed …` で
+    1 行出る。回帰は `sandbox/tests/test_retention.py` の `test_cache_*`。値は下の API の応答
+    `cache_ttl_days` で nucllei に渡り、取り込み・自動添付の tool 出力に期限日が添えられる
   - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
     が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
     無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
@@ -257,16 +268,20 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 
 - `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}]}`
   → `{exit_code, timed_out, duration_s, stdout, stderr, stdout_truncated, stderr_truncated,
-     exports: [{name, size, b64?, truncated}]}`
+     exports: [{name, size, b64?, truncated}], cache_ttl_days}`
 - `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?}`
   → `{stdout, error, timed_out, session_reset, duration_s, stdout_truncated,
-     exports: [...]}`
+     exports: [...], cache_ttl_days}`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
   - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
 - `POST /files/list` — `{user_id, path?}` → `{entries, exists, is_dir}` workspace のファイル一覧
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
 - `POST /files/read` — `{user_id, path}` → `{name, size, b64}`
-- `POST /files/write` — `{user_id, path, b64}` → 書き込み (workspace 外へのパスは拒否)
+- `POST /files/write` — `{user_id, path, b64}` → `{ok, size, cache_ttl_days}` 書き込み
+  (workspace 外へのパスは拒否)
+  - `cache_ttl_days` (int) — `imports/` `exports/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
+    0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
+    自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
 - `GET /healthz` — `{ok, nsjail, loop}`。`loop` は loop ドライバの実効チェック
   (`/dev/loop-control` を open して確かめる)。**false なら 503** を返し、compose の
   healthcheck 経由でコンテナが unhealthy になる(`docker ps` で見える)。loop 不能 =
@@ -318,6 +333,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_QUOTA_GB` | 10 | ユーザー単位の workspace 容量上限 (loopback ext4) |
 | `SANDBOX_QUOTA_OVERRIDES` | {} | ユーザー別 quota 上書き `{"<user_id>": GB}` (新規作成時のみ) |
 | `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0 (**= 消さない**) | 最終利用から N 日経った未 mount の workspace `.img` を削除 (上記「disk quota」の保持期限)。mount 中・実行中・session 生存中は飛ばす |
+| `SANDBOX_CACHE_TTL_DAYS` | 30 | `/workspace/imports/` `exports/` (Files のキャッシュ) のファイルを mtime から N 日で消す。idle workspace 回収の umount 直前に実行 (上記「実行モデル」)。0 以下 = 消さない。`memory/` 等の他ディレクトリには触らない |
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |

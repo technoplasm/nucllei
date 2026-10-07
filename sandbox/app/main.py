@@ -277,6 +277,14 @@ WS_IDLE_TTL_S = int(os.environ.get("SANDBOX_WS_IDLE_TTL_S", "3600"))
 # (loop 経由の書込で動くかはカーネル任せなので頼らない)。
 WS_RETENTION_DAYS = int(os.environ.get("SANDBOX_WORKSPACE_RETENTION_DAYS", "0"))
 WS_RETENTION_SWEEP_S = 3600
+# `imports/` `exports/` は nucllei Files のキャッシュ (原本は Files 側。#149)。idle 回収で
+# umount する直前に、mtime から N 日過ぎたファイルを消す (`_sweep_cache_dirs`)。0 以下 = 消さない。
+# 消えたものは `send_to_workspace(file_id)` で戻せる。`memory/` 等の他ディレクトリには触らない。
+# 値は `/exec` `/exec_cell` `/files/write` の応答 `cache_ttl_days` でも返す (0 = 消さない) —
+# nucllei が取り込み・自動添付の tool 出力で「YYYY-MM-DD 以降に消える」を知らせるため。
+CACHE_TTL_DAYS = int(os.environ.get("SANDBOX_CACHE_TTL_DAYS", "30"))
+CACHE_DIRS = ("imports", "exports")
+CACHE_TTL_REPORTED = max(CACHE_TTL_DAYS, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +750,72 @@ def _has_live_session(user_id: str) -> bool:
     return False
 
 
+def _sweep_cache_tree(d: str, cutoff: float) -> tuple[int, int, bool]:
+    """`d` 配下の mtime < cutoff の通常ファイルを消す。戻り値は (件数, バイト数, d が空になったか)。
+    symlink は辿らず消しもしない (jail 内ユーザーが置けるので、`/workspace` の外を指しうる)。
+    判定は lstat 相当 (`follow_symlinks=False`) のみ。"""
+    files = size = 0
+    removed_any = False
+    try:
+        it = os.scandir(d)
+    except OSError:
+        return 0, 0, False
+    with it:
+        entries = list(it)
+    for e in entries:
+        try:
+            if e.is_symlink():
+                continue
+            if e.is_dir(follow_symlinks=False):
+                n, b, emptied = _sweep_cache_tree(e.path, cutoff)
+                files += n
+                size += b
+                if emptied:
+                    # 期限切れを消して空になったサブディレクトリだけ消す (元から空のものは残す)
+                    try:
+                        os.rmdir(e.path)
+                        removed_any = True
+                    except OSError:
+                        pass
+                continue
+            st = e.stat(follow_symlinks=False)
+            if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
+                os.unlink(e.path)
+                files += 1
+                size += st.st_size
+                removed_any = True
+        except OSError:
+            continue  # 消せないものは次回に回す (掃除の失敗で umount を止めない)
+    emptied = False
+    if removed_any:
+        try:
+            emptied = not any(True for _ in os.scandir(d))
+        except OSError:
+            pass
+    return files, size, emptied
+
+
+def _sweep_cache_dirs(ws: Path) -> tuple[int, int]:
+    """workspace の `imports/` `exports/` から `CACHE_TTL_DAYS` 日過ぎたファイルを消す (#149)。
+    `imports/` `exports/` 自体は残す (`_ensure_workspace` が作る)。それ自体が symlink に
+    差し替えられていたら (jail 内から可能) 何もしない。戻り値は (件数, バイト数)。"""
+    if CACHE_TTL_DAYS <= 0:
+        return 0, 0
+    cutoff = time.time() - CACHE_TTL_DAYS * 86400
+    files = size = 0
+    for name in CACHE_DIRS:
+        d = ws / name
+        try:
+            if not stat.S_ISDIR(os.lstat(d).st_mode):
+                continue
+        except OSError:
+            continue
+        n, b, _ = _sweep_cache_tree(str(d), cutoff)
+        files += n
+        size += b
+    return files, size
+
+
 async def reap_idle_workspaces() -> int:
     """idle 超過した workspace を umount して loop を解放する (detach は mount の autoclear 任せ)。
     生存 session 中は umount しない (jail が superblock を掴んだまま次アクセスで同一 .img を
@@ -764,6 +838,18 @@ async def reap_idle_workspaces() -> int:
             if not os.path.ismount(ws):
                 _ws_registry.pop(user, None)
                 continue
+            # imports/ exports/ のキャッシュ掃除 (#149)。ここは mount lock 保持・実行中でも
+            # 生存 session 中でもない = jail が workspace を触っていないことが確定している
+            try:
+                n, b = await asyncio.to_thread(_sweep_cache_dirs, ws)
+                if n:
+                    print(
+                        f"[sandbox] cache of {user}: removed {n} file(s) older than "
+                        f"{CACHE_TTL_DAYS} days, {_fmt_size(b)}",
+                        flush=True,
+                    )
+            except Exception as e:
+                print(f"[sandbox] cache sweep failed for {user}: {e!r}", flush=True)
             try:
                 await asyncio.to_thread(_run, ["umount", str(ws)])
             except RuntimeError as e:
@@ -1071,6 +1157,7 @@ async def exec_code(req: ExecRequest, request: Request):
             "stdout_truncated": out_trunc,
             "stderr_truncated": err_trunc,
             "exports": _collect_exports(ws, before),
+            "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
 
@@ -1112,6 +1199,7 @@ async def exec_cell(req: CellRequest, request: Request):
                 "duration_s": 0,
                 "stdout_truncated": False,
                 "exports": _collect_exports(ws, before),
+                "cache_ttl_days": CACHE_TTL_REPORTED,
             }
         duration_s = round(time.monotonic() - t0, 2)
         sess.last_used = time.monotonic()
@@ -1126,6 +1214,7 @@ async def exec_cell(req: CellRequest, request: Request):
                 "duration_s": duration_s,
                 "stdout_truncated": False,
                 "exports": _collect_exports(ws, before),
+                "cache_ttl_days": CACHE_TTL_REPORTED,
             }
 
         return {
@@ -1136,6 +1225,7 @@ async def exec_cell(req: CellRequest, request: Request):
             "duration_s": duration_s,
             "stdout_truncated": resp.get("truncated", False),
             "exports": _collect_exports(ws, before),
+            "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
 
@@ -1190,7 +1280,7 @@ async def files_write(req: WriteRequest):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)
     os.chown(p, JAIL_UID, JAIL_UID)
-    return {"ok": True, "size": len(data)}
+    return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
 
 
 @app.delete("/workspace/{user_id}")

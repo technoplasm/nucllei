@@ -73,6 +73,11 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       (README の表)。あわせて IPA 導入で和文の既定が IPA に倒れていたのを Noto に戻した
       (64-nucllei-fonts.conf)。回帰は `test_ocr_*` / `test_image_and_doc_*` / `test_research_*`。
       **配備側 (llens) の追従は向こう持ち** = モデル向けの使い分け (OCR は束の一括処理用 等)
+- [x] **`imports/` `exports/` を期限付きキャッシュに** (#149、2026-10-07)。mtime から
+      `SANDBOX_CACHE_TTL_DAYS` (既定 30) 日過ぎたファイルを idle workspace 回収の umount 直前に
+      消す (symlink は辿らない・`memory/` 等には触らない)。回帰は `test_retention.py` の `test_cache_*`。
+      値は `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し、nucllei が取り込み・
+      exports 自動添付の tool 出力に「YYYY-MM-DD 以降に消える」を添える (回帰は `test_files_list.py`)
 
 ## 残課題
 

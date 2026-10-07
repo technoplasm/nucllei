@@ -385,6 +385,13 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 `import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / `list_workspace` /
 **`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
 ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
+両者は Files の原本の**期限付きキャッシュ**で、sandbox が最終更新から既定 30 日(env `SANDBOX_CACHE_TTL_DAYS`)で消す
+(#149、`memory/` 等は消さない)。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え、
+この配下が「無い」ときのエラー文に `send_to_workspace(file_id)` で戻せる旨を足す(`_cache_hint`)。
+実際の期限は sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し(ken 2026-10-07)、
+nucllei が「今日(Asia/Tokyo)+ N 日」を取り込み結果の末尾(`(/workspace/imports/ の写しは YYYY-MM-DD 以降に消える。…)`)と
+exports 自動添付の報告ブロック末尾(`(添付は Files に残る。/workspace/exports/ の写しは YYYY-MM-DD 以降に消える)`、
+1 件でも添付したときだけ)に 1 行添える(`_cache_expiry`)。キーが無い古い sandbox・0 では添えない。
 
 **`path` 引数は sandbox の fs の絶対パス**(2026-10-03、ken 決定「名前 = 形」: `url` = URL
 (絶対、または同一サーバの `/ext/…` — 末尾の「参照の規則の改訂」節)、

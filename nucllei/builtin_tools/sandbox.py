@@ -24,8 +24,10 @@ import mimetypes
 import os
 import posixpath
 import uuid
+from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from pydantic import BaseModel, Field
@@ -207,6 +209,48 @@ _SANDBOX_AUTH = (
 )
 
 
+# imports/ exports/ は Files の写しで、sandbox が最終更新から一定期間で消す (#149)。
+# その配下が「無い」と言われたときに次の手へ足す 1 文
+_CACHE_DIRS = ("imports", "exports")
+_CACHE_GONE = (
+    " imports/ と exports/ は一定期間で消える置き場なので、期限で消えた可能性がある"
+    " (添付・生成物なら原本は Files にあり、send_to_workspace(file_id) で戻せる)。"
+)
+
+
+# 期限日の基準 TZ (sandbox コンテナの TZ に揃える)
+_CACHE_TZ = ZoneInfo("Asia/Tokyo")
+
+
+def _cache_expiry(res) -> Optional[date]:
+    """sandbox 応答の `cache_ttl_days` (#149) から「今日 + N 日」。キーが無い (古い sandbox)・
+    0 以下 (消さない配備)・形が違うときは None — 期限を言わないだけで落とさない。
+    厳密には mtime + N 日を過ぎた後の最初の idle 回収で消えるので、文言は「以降」。"""
+    ttl = res.get("cache_ttl_days") if isinstance(res, dict) else None
+    if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl <= 0:
+        return None
+    return datetime.now(_CACHE_TZ).date() + timedelta(days=ttl)
+
+
+def _imports_expiry_note(expires: Optional[date]) -> str:
+    """取り込み結果の末尾に足す期限の 1 行 (#149)。期限が分からなければ ""。"""
+    if not expires:
+        return ""
+    return (
+        f"\n(/workspace/imports/ の写しは {expires} 以降に消える。"
+        "消えたら send_to_workspace で取り込み直す)"
+    )
+
+
+def _cache_hint(abs_path: str) -> str:
+    """abs_path が `/workspace/imports/…` `/workspace/exports/…` (その dir 自身を含む) なら
+    `_CACHE_GONE`、それ以外は ""。"""
+    rel = abs_path.removeprefix(WORKSPACE_ROOT + "/")
+    if rel == abs_path:
+        return ""
+    return _CACHE_GONE if rel.split("/", 1)[0] in _CACHE_DIRS else ""
+
+
 def _file_link_note(name: str, file_id: str) -> str:
     """display に乗らない添付 (このチャットのファイル一覧にだけ載る) を本文で示すリンク。"""
     label = (name or "").replace("[", "(").replace("]", ")")
@@ -252,7 +296,7 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
     if e.status == 404:
         return ToolOutcome(
             f"{abs_path} というファイルは無い (ディレクトリは不可)",
-            "list_workspace で確かめる。",
+            "list_workspace で確かめる。" + _cache_hint(abs_path),
         )
     if e.status == 413:
         return ToolOutcome(
@@ -454,7 +498,10 @@ def _iter_context_files(__files__, __metadata__):
 class Tools:
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
     3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは
-    自動でチャットに添付される。実行は直列 — run_python は同じ会話内で、
+    自動でチャットに添付される。ただし /workspace/imports/ と /workspace/exports/ は
+    Files にある原本の写しで、最終更新から一定期間 (既定 30 日。取り込み・添付の結果に
+    期限日を添える) で消える — 会話を跨いで残す物は /workspace の別の場所
+    (自分で作るディレクトリ等) に置く。消えた物は send_to_workspace(file_id) で戻せる。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。"""
@@ -462,6 +509,12 @@ class Tools:
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
     # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
+    # imports/ exports/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
+    # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。docstring は静的なので既定で言い、実際の値は
+    # sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返す — 取り込み・
+    # exports 自動添付の結果に「YYYY-MM-DD 以降に消える」を添える (`_cache_expiry`。キーが無い
+    # 古い sandbox・0 では添えない)。send_to_workspace / fetch_from_workspace の docstring には
+    # 複製しない — 「無い」と言われたときの案内は `_cache_hint` がエラー文に足す。
 
     # #110: 非同期実行(background 昇格)への opt-in。時間のかかる Python 実行を
     # background にできるようにする。
@@ -554,8 +607,10 @@ class Tools:
         chat_id,
         message_id,
         __event_emitter__,
+        expires: Optional[date] = None,
     ) -> list[str]:
-        """sandbox の exports 差分を Files に登録・添付し、報告行を返す。"""
+        """sandbox の exports 差分を Files に登録・添付し、報告行を返す。
+        `expires` (#149) があり 1 件でも添付したら、workspace 側の写しの期限を 1 行添える。"""
         lines = []
         attachments = []
         for out in exports:
@@ -600,6 +655,10 @@ class Tools:
             await self._persist_and_emit_files(
                 attachments, chat_id, message_id, __event_emitter__
             )
+            if expires:
+                lines.append(
+                    f"(添付は Files に残る。/workspace/exports/ の写しは {expires} 以降に消える)"
+                )
         return lines
 
     def _truncate_output(self, text: str) -> str:
@@ -730,6 +789,7 @@ class Tools:
             __chat_id__,
             __message_id__,
             __event_emitter__,
+            _cache_expiry(res),
         )
         return self._format_exec_result(res, output_lines, payload["timeout_s"])
 
@@ -765,6 +825,7 @@ class Tools:
             __chat_id__,
             __message_id__,
             __event_emitter__,
+            _cache_expiry(res),
         )
         return self._format_cell_result(res, output_lines)
 
@@ -897,11 +958,13 @@ class Tools:
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
         imported = 0
+        expires = None
         for fid, fname in _iter_context_files(__files__, __metadata__):
             if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
-            line, failure = await self._import_file(fid, fname, __user__["id"])
+            line, failure, exp = await self._import_file(fid, fname, __user__["id"])
             imported += bool(line)
+            expires = exp or expires
             report.append(line or f"- {fname or fid}: {failure} (取り込まなかった)")
         # 文面は変えずに旗だけ (#145): filename で指した添付が無い = 指した物が無い → outcome、
         # 何も指さず添付も無い = 呼び方の問題 → call (feed_image の無指定と同じ線引き)。
@@ -911,22 +974,24 @@ class Tools:
             return "取り込み対象の添付ファイルが無かった。"
         if not imported:
             mark_error_kind("failure")
-        return "取り込み結果:\n" + "\n".join(report)
+        return "取り込み結果:\n" + "\n".join(report) + _imports_expiry_note(expires)
 
-    async def _import_file(self, fid: str, fname, user_id: str) -> tuple[str, str]:
+    async def _import_file(
+        self, fid: str, fname, user_id: str
+    ) -> tuple[str, str, Optional[date]]:
         """file (Files のレコード) 1 件を `/workspace/imports/` に書く。
-        戻り値は (成功の報告行, "") か ("", 失敗の理由)。所有者でないファイルは取り込まない —
+        戻り値は (成功の報告行, "", 写しの期限日 or None) か ("", 失敗の理由, None)。所有者でないファイルは取り込まない —
         「レコードが無い」と「所有者でない」は同じ理由 `_NO_FILE` で返す (存在の有無を
         漏らさない。llens の tool と同文)。"""
         rec = Files.get_file_by_id(fid)
         # 所有者チェック: file_id 直指定で他ユーザーのファイルを取り込ませない
         if not rec or not rec.path or getattr(rec, "user_id", None) != user_id:
-            return "", _NO_FILE
+            return "", _NO_FILE, None
         try:
             local_path = Storage.get_file(rec.path)
             data = open(local_path, "rb").read()
             name = os.path.basename(fname or rec.filename)
-            await self._post(
+            res = await self._post(
                 "/files/write",
                 {
                     "user_id": user_id,
@@ -937,10 +1002,11 @@ class Tools:
             )
         except Exception as e:
             log.error(f"[sandbox] import {fid} failed: {e!r}")
-            return "", "取り込みに失敗した"
+            return "", "取り込みに失敗した", None
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
             "",
+            _cache_expiry(res),
         )
 
     async def _import_one(self, fid: str, user_id: str, url: str | None = None) -> str:
@@ -950,14 +1016,14 @@ class Tools:
         (モデルが渡した言い方。None なら `file_id <値>`)。file が引けないときは全 tool 共通の
         `ref_errors.file_id_error` (file_id= の値が id の形でないときだけ受ける形の文を添える)。
         """
-        line, failure = await self._import_file(fid, None, user_id)
+        line, failure, expires = await self._import_file(fid, None, user_id)
         if failure == _NO_FILE:
             from nucllei.utils.ref_errors import file_id_error
 
             raise file_id_error(fid, given=url)
         if failure:
             raise ToolFailure(f"{url or f'file_id {fid}'} の{failure}")
-        return "取り込み結果:\n" + line
+        return "取り込み結果:\n" + line + _imports_expiry_note(expires)
 
     # ---- send_to_workspace の url ソース ---------------------------------------
     async def _import_url(self, u: str, user_id: str) -> str:
@@ -1015,7 +1081,7 @@ class Tools:
         # name は URL の basename (percent-encoded のまま)
         name = _safe_import_name(unquote(loaded.name)) or "download"
         try:
-            await self._post(
+            res = await self._post(
                 "/files/write",
                 {
                     "user_id": user_id,
@@ -1033,6 +1099,7 @@ class Tools:
             "取り込み結果:\n"
             f"- {name} ({_human_size(len(loaded.data))}) → "
             f"{WORKSPACE_ROOT}/imports/{name}"
+            + _imports_expiry_note(_cache_expiry(res))
         )
 
     async def write_file(
@@ -1133,7 +1200,8 @@ class Tools:
         if exists is False:
             raise ToolOutcome(
                 f"{abs_path} は存在しない",
-                "親ディレクトリを list_workspace で一覧して、パスを確かめる。",
+                "親ディレクトリを list_workspace で一覧して、パスを確かめる。"
+                + _cache_hint(abs_path),
             )
         if exists is True and res.get("is_dir") is False:
             raise ToolCallError(
