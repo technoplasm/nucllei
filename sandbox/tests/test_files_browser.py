@@ -226,13 +226,16 @@ def test_no_space_is_507(env, monkeypatch):
 # ---------------------------------------------------------------------------
 def test_delete(env):
     mod, c, ws, ext = env
-    assert _post(c, "/files/delete", path="notes.md").json() == {"ok": True}
+    # permanent: 完全に消す (ファイルも、フォルダは中身ごと)
+    r = _post(c, "/files/delete", path="notes.md", permanent=True)
+    assert r.json() == {"ok": True, "trashed": False}
     assert not (ws / "notes.md").exists()
     (ws / "data" / "sub").mkdir()
     (ws / "data" / "sub" / "b.txt").write_text("b")
-    assert _post(c, "/files/delete", path="data").status_code == 200
+    assert _post(c, "/files/delete", path="data", permanent=True).status_code == 200
     assert not (ws / "data").exists()
     assert _post(c, "/files/delete", path="data").status_code == 404
+    assert list((ws / "trash").iterdir()) == []
     # 中身は消せるが imports/ exports/ trash/ そのものは消せない
     (ws / "imports" / "a.pdf").write_text("p")
     assert _post(c, "/files/delete", path="imports/a.pdf").status_code == 200
@@ -240,8 +243,91 @@ def test_delete(env):
     assert _post(c, "/files/delete", path="trash/old").status_code == 200
     for p in ("imports", "exports", "trash", ".", "", ".exec", ".hidden"):
         assert _post(c, "/files/delete", path=p).status_code == 400, p
+        assert _post(c, "/files/delete", path=p, permanent=True).status_code == 400, p
     assert (ws / "imports").is_dir() and (ws / ".exec").is_dir()
     assert (ws / "trash").is_dir()
+    assert (ws / "trash" / "a.pdf").exists()  # imports/ の中も既定は trash へ
+
+
+def test_delete_moves_to_trash_by_default(env):
+    # /workspace の中 (trash/ の外) は既定で trash/ の直下へ移す (API でも — llens が API の delete で
+    # 消して trash に入らなかった件)。フォルダは中身ごと、移した先のパスを返す
+    mod, c, ws, ext = env
+    r = _post(c, "/files/delete", path="notes.md")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "trashed": True, "path": "trash/notes.md"}
+    assert not (ws / "notes.md").exists()
+    assert (ws / "trash" / "notes.md").read_text() == "# hi"
+    r = _post(c, "/files/delete", path="data")
+    assert r.json() == {"ok": True, "trashed": True, "path": "trash/data"}
+    assert (ws / "trash" / "data" / "a.csv").read_text() == "x,y"
+    # 深い所のものも trash/ の直下へ (元の階層は持たない)
+    (ws / "w" / "x").mkdir(parents=True)
+    (ws / "w" / "x" / "y.txt").write_text("y")
+    r = _post(c, "/files/delete", path="w/x/y.txt")
+    assert r.json()["path"] == "trash/y.txt"
+    assert (ws / "w" / "x").is_dir() and (ws / "trash" / "y.txt").exists()
+
+
+def test_delete_to_trash_numbers_on_conflict(env):
+    # 同名が在れば拡張子の前に -2, -3… (ファイルブラウザが自前で付けていた規則と同じ)
+    mod, c, ws, ext = env
+    for i in range(3):
+        (ws / "memo.txt").write_text(str(i))
+        r = _post(c, "/files/delete", path="memo.txt")
+        assert r.status_code == 200, r.text
+    assert r.json()["path"] == "trash/memo-3.txt"
+    assert [
+        (ws / "trash" / n).read_text() for n in ("memo.txt", "memo-2.txt", "memo-3.txt")
+    ] == ["0", "1", "2"]
+    # 拡張子が無い・フォルダ・先頭の . は拡張子と見なさない
+    (ws / "trash" / "proj").mkdir()
+    (ws / "proj").mkdir()
+    assert _post(c, "/files/delete", path="proj").json()["path"] == "trash/proj-2"
+    assert mod._trash_name(".bashrc", 2) == ".bashrc-2"
+    assert mod._trash_name("a.tar.gz", 2) == "a.tar-2.gz"
+    # 番号が尽きたら 409 で、元は残す
+    monkey_tries = mod.TRASH_NAME_TRIES
+    try:
+        mod.TRASH_NAME_TRIES = 3
+        (ws / "memo.txt").write_text("last")
+        assert _post(c, "/files/delete", path="memo.txt").status_code == 409
+        assert (ws / "memo.txt").read_text() == "last"
+    finally:
+        mod.TRASH_NAME_TRIES = monkey_tries
+
+
+def test_delete_inside_trash_and_ext_is_permanent(env):
+    mod, c, ws, ext = env
+    (ws / "trash" / "old").mkdir()
+    (ws / "trash" / "old" / "f.txt").write_text("f")
+    r = _post(c, "/files/delete", path="trash/old/f.txt")
+    assert r.json() == {"ok": True, "trashed": False}
+    r = _post(c, "/files/delete", path="trash/old")
+    assert r.json() == {"ok": True, "trashed": False}
+    assert list((ws / "trash").iterdir()) == []
+    (ext / "groups" / "EMR" / "g.txt").write_text("g")
+    r = _post(c, "/files/delete", path="/ext/groups/EMR/g.txt", mounts=MEMBER_MOUNTS)
+    assert r.json() == {"ok": True, "trashed": False}
+    assert not (ext / "groups" / "EMR" / "g.txt").exists()
+    assert list((ws / "trash").iterdir()) == []
+
+
+def test_delete_to_trash_symlink_moves_only_the_link(env):
+    mod, c, ws, ext = env
+    (ws / "link").symlink_to(ext / "groups" / "OTHER")
+    r = _post(c, "/files/delete", path="link")
+    assert r.json()["path"] == "trash/link"
+    assert (ws / "trash" / "link").is_symlink()
+    assert (ext / "groups" / "OTHER" / "secret.txt").read_text() == "other-secret"
+    # trash/ そのものが symlink に差し替えられていたら辿らない (400、元は残る)
+    import shutil
+
+    shutil.rmtree(ws / "trash")
+    (ws / "trash").symlink_to(ext / "groups" / "OTHER")
+    assert _post(c, "/files/delete", path="notes.md").status_code == 400
+    assert (ws / "notes.md").exists()
+    assert sorted(os.listdir(ext / "groups" / "OTHER")) == ["secret.txt"]
 
 
 def test_delete_symlink_removes_only_the_link(env):
@@ -506,6 +592,22 @@ def test_mkdir_owned_by_jail_user(env, owned):
     )
     assert r.status_code == 200, r.text
     assert _real(ext / "groups" / "NEW", ext / "groups" / "NEW" / "x") <= owned()
+
+
+def test_delete_recreates_missing_trash_owned(env, owned):
+    # trash/ が jail で消されていても移せる。作り直す trash/ は jail のユーザーの物 (root 所有の
+    # まま残すと jail がその中で rm / mv できない)。既存の trash/ の所有者は変えない
+    mod, c, ws, ext = env
+    import shutil
+
+    r = _post(c, "/files/delete", path="data/a.csv")
+    assert r.json()["path"] == "trash/a.csv"
+    assert owned() == set()
+    shutil.rmtree(ws / "trash")
+    r = _post(c, "/files/delete", path="notes.md")
+    assert r.status_code == 200, r.text
+    assert (ws / "trash" / "notes.md").exists()
+    assert owned() == _real(ws / "trash")
 
 
 def test_rename_does_not_create_dirs(env, owned):

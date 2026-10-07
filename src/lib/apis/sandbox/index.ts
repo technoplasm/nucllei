@@ -133,7 +133,13 @@ export const uploadSandboxFile = (dir: string, file: File, overwrite = false) =>
 	});
 };
 
-export const deleteSandboxPath = (path: string) => postJson<{ ok: boolean }>('/delete', { path });
+// /workspace の中(trash/ の外)はサーバーが /workspace/trash/ の直下へ移す(同名は -2, -3…)—
+// trashed: true と移した先の path を返す。permanent・trash/ の中・/ext は完全に消す(trashed: false)
+export const deleteSandboxPath = (path: string, options: { permanent?: boolean } = {}) =>
+	postJson<{ ok: boolean; trashed: boolean; path?: string }>('/delete', {
+		path,
+		permanent: options.permanent ?? false
+	});
 
 export const renameSandboxPath = (path: string, dest: string) =>
 	postJson<{ ok: boolean; path: string }>('/rename', { path, dest });

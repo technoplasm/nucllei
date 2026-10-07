@@ -283,8 +283,9 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `/workspace/imports/` — チャット添付ファイルの取り込み先 (tool の import 操作)
   - `/workspace/exports/` — 書かれた新規/更新ファイルは実行後に tool が自動回収し、
     Files に登録してチャットに添付する
-  - `/workspace/trash/` — 消す代わりに移す置き場 (llens の運用もファイルブラウザの
-    /workspace の「削除」も、trash/ の直下へ mv する。選び間違いを取り返せるように)
+  - `/workspace/trash/` — 消す代わりに移す置き場 (llens の運用も `/files/delete` の /workspace
+    での既定 (ファイルブラウザの「削除」もこれ) も、trash/ の直下へ mv する。選び間違いを
+    取り返せるように)
   - `imports/` と `exports/` は **nucllei Files のキャッシュ** (原本は Files 側。#149)、
     `trash/` は消す代わりの置き場。3 つとも同じ規則で、idle workspace 回収
     (`reap_idle_workspaces`) が **umount の直前**に掃除する (mount lock 保持・実行中でも生存
@@ -371,8 +372,14 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     exists, is_dir, truncated, cache_ttl_days}`。1 階層 (再帰しない)、`.` 始まりは出さない、
     `type` は `dir` / `file` / `symlink` / `other`、ディレクトリが先 (名前順)、上限 5000 件
   - `POST /files/stat` — `{user_id, path, mounts?}` → `{exists, path, type, size, mtime}`
-  - `POST /files/delete` — `{user_id, path, mounts?}` → `{ok}`。ディレクトリは中身ごと
-    (`shutil.rmtree(dir_fd=)` = fd ベースで symlink を辿らない)
+  - `POST /files/delete` — `{user_id, path, mounts?, permanent?}`。**workspace の中 (`trash/` の外)
+    は既定で消さずに `trash/` の直下へ移す** → `{ok, trashed: true, path: "trash/<名前>"}`
+    (同名が在れば拡張子の前に `-2` `-3`… — `memo.txt` → `memo-2.txt`、先頭の `.` は拡張子と
+    見なさない。1000 まで埋まっていれば 409。`trash/` が無ければ作る (65534 の物)、symlink に
+    差し替えられていれば 400。rename なので ctime が今になり、期限は移した時から数える)。
+    `permanent: true`・`trash/` の中・`/ext/...` は完全に消す → `{ok, trashed: false}`。
+    ディレクトリは中身ごと (`shutil.rmtree(dir_fd=)` = fd ベースで symlink を辿らない)。
+    llens が API の delete で消して trash に入らなかった件から (2026-10-08、ken 決定)
   - `POST /files/rename` — `{user_id, path, dest, mounts?}` → `{ok, path}`。同じ置き場の中だけ
     (workspace ↔ `/ext`・bind 間は 400)、行き先が在れば 409、自分の中へは 400
   - `POST /files/mkdir` — `{user_id, path, mounts?}` → `{ok, path}`。親も作る、在れば 409

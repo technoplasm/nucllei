@@ -151,7 +151,10 @@
 				case 404:
 					return $i18n.t('Not found.');
 				case 409:
-					return $i18n.t('A file or folder with that name already exists.');
+					// trash へ移す削除で -2…-1000 まで埋まっていた(sandbox の `no free name in trash/`)
+					return err.message.startsWith('no free name')
+						? $i18n.t('Could not find a free name in the trash.')
+						: $i18n.t('A file or folder with that name already exists.');
 				case 0:
 					return $i18n.t('Could not reach the server.');
 				default:
@@ -379,44 +382,13 @@
 	};
 
 	// ---- 削除 ----
-	// /workspace の中(trash/ の外)は trash/ の直下へ移す(選び間違いを取り返せるように。llens の
-	// 運用と同じ)。trash/ の中と /ext は完全に消す
+	// /workspace の中(trash/ の外)はサーバー(sandbox の /files/delete)が trash/ の直下へ移す
+	// (選び間違いを取り返せるように。同名は -2, -3…)。trash/ の中は permanent で完全に消す。
+	// /ext は常に完全に消える
 	let deleteTarget = $state<SandboxEntry | null>(null);
 	let showDeleteConfirm = $state(false);
 	const movesToTrash = (e: SandboxEntry | null) =>
 		!!e && inside(e.path, WORKSPACE) && !inside(e.path, TRASH);
-
-	// 同名があれば末尾に -2, -3…(拡張子があればその前: memo.txt → memo-2.txt)
-	const numberedName = (name: string, n: number) => {
-		const dot = name.lastIndexOf('.');
-		return dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`;
-	};
-
-	const moveToTrash = async (e: SandboxEntry) => {
-		const trash = await listSandboxDir(TRASH);
-		if (!trash.exists) {
-			await makeSandboxDir(TRASH);
-		}
-		const taken = new Set(trash.entries.map((x) => x.name));
-		for (let n = 1; n < 1000; n++) {
-			const name = n === 1 ? e.name : numberedName(e.name, n);
-			if (taken.has(name)) {
-				continue;
-			}
-			try {
-				await renameSandboxPath(e.path, `${TRASH}/${name}`);
-				return name;
-			} catch (err) {
-				// 一覧の後に同名ができた(sandbox の実行・別のタブ)— 次の番号へ
-				if (err instanceof SandboxFilesError && err.status === 409) {
-					taken.add(name);
-					continue;
-				}
-				throw err;
-			}
-		}
-		throw new Error($i18n.t('Could not find a free name in the trash.'));
-	};
 
 	const confirmDelete = async () => {
 		const target = deleteTarget;
@@ -425,13 +397,12 @@
 		}
 		busy = true;
 		try {
-			if (movesToTrash(target)) {
-				const name = await moveToTrash(target);
-				toast.success(
-					$i18n.t('Moved {{NAME}} to the trash', { NAME: `${TRASH}/${name}` })
-				);
+			const res = await deleteSandboxPath(target.path, {
+				permanent: inside(target.path, TRASH)
+			});
+			if (res.trashed && res.path) {
+				toast.success($i18n.t('Moved {{NAME}} to the trash', { NAME: res.path }));
 			} else {
-				await deleteSandboxPath(target.path);
 				toast.success($i18n.t('Deleted {{NAME}}', { NAME: target.name }));
 			}
 			await refresh();

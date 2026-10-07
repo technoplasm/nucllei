@@ -530,10 +530,35 @@ class TestSandboxFiles(AbstractPostgresTest):
                 },
             },
         )
+        # 古い sandbox (`trashed` を返さない = 常に完全削除)
         assert self._post(MEMBER, "/delete", {"path": "/workspace/a.md"}).json() == {
-            "ok": True
+            "ok": True,
+            "trashed": False,
         }
         assert fake.calls[-1][1]["path"] == "a.md"
+        assert fake.calls[-1][1]["permanent"] is False
+        # /workspace の削除は sandbox が trash/ の直下へ移す — 移した先を jail のパスで返す
+        fake.responses["/files/delete"] = {
+            "ok": True,
+            "trashed": True,
+            "path": "trash/a-2.md",
+        }
+        r = self._post(MEMBER, "/delete", {"path": "/workspace/a.md"})
+        assert r.json() == {
+            "ok": True,
+            "trashed": True,
+            "path": "/workspace/trash/a-2.md",
+        }
+        # permanent はそのまま渡す (trash の中で消すときに画面が送る)
+        fake.responses["/files/delete"] = {"ok": True, "trashed": False}
+        r = self._post(
+            MEMBER, "/delete", {"path": "/workspace/trash/a.md", "permanent": True}
+        )
+        assert r.json() == {"ok": True, "trashed": False}
+        assert (fake.calls[-1][1]["path"], fake.calls[-1][1]["permanent"]) == (
+            "trash/a.md",
+            True,
+        )
         r = self._post(
             MEMBER,
             "/rename",

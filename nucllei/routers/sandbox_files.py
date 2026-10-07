@@ -461,13 +461,28 @@ async def _upload_chunks(file: UploadFile):
         yield data
 
 
+class DeleteForm(BaseModel):
+    path: str
+    permanent: bool = False
+
+
 @router.post("/delete")
-async def delete_path(form: PathForm, user=Depends(get_verified_user)):
+async def delete_path(form: DeleteForm, user=Depends(get_verified_user)):
+    """削除。`/workspace` の中(`trash/` の外)は sandbox が既定で `/workspace/trash/` の直下へ移す
+    (同名は `-2` `-3`…)— 応答 `{ok, trashed: true, path: "/workspace/trash/<名前>"}`。
+    `permanent: true`・`trash/` の中・`/ext` は完全に消す(`{ok, trashed: false}`)。
+    `trashed` を返さない古い sandbox は常に完全削除なので `false` として返す。"""
     _require_sandbox()
     place = _resolve(user, form.path)
     _require_rw(place)
-    await _call(user, "/files/delete", {"path": place.sandbox_path})
-    return {"ok": True}
+    res = await _call(
+        user,
+        "/files/delete",
+        {"path": place.sandbox_path, "permanent": form.permanent},
+    )
+    if res.get("trashed") and res.get("path"):
+        return {"ok": True, "trashed": True, "path": _to_jail(place, res["path"])}
+    return {"ok": True, "trashed": False}
 
 
 class RenameForm(BaseModel):

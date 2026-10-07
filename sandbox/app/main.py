@@ -307,7 +307,7 @@ WS_RETENTION_SWEEP_S = 3600
 # nucllei が取り込み・自動添付の tool 出力で「YYYY-MM-DD 以降に消える」を知らせるため。
 CACHE_TTL_DAYS = int(os.environ.get("SANDBOX_CACHE_TTL_DAYS", "30"))
 CACHE_DIRS = ("imports", "exports")
-# `trash/` = 消す代わりに移す置き場 (llens の運用もファイルブラウザの /workspace の削除も、
+# `trash/` = 消す代わりに移す置き場 (llens の運用も `/files/delete` の /workspace での既定も、
 # trash/ の直下へ mv)。期限は同じ `SANDBOX_CACHE_TTL_DAYS`。3 つの置き場とも判定単位は
 # **直下の各エントリ**、時刻はその lstat の max(mtime, ctime) (`_sweep_entries`)。
 TRASH_DIR = "trash"
@@ -1252,6 +1252,11 @@ class ReadRequest(PathRequest):
     length: Optional[int] = None
 
 
+class DeleteRequest(PathRequest):
+    # 既定 (False) は workspace の中 (trash/ の外) を trash/ の直下へ移す。True は完全に消す
+    permanent: bool = False
+
+
 class RenameRequest(BaseModel):
     user_id: str
     path: str
@@ -2017,7 +2022,32 @@ def _fs_write(
     return {"size": len(data), "mtime": _mtime(st)}
 
 
-def _fs_delete(t: _Target) -> None:
+def _trash_name(name: str, n: int) -> str:
+    """trash/ の直下で n 番目に試す名前。1 はそのまま、2 以降は末尾に `-n` (拡張子があれば
+    その前: `memo.txt` → `memo-2.txt`、`data` → `data-2`。先頭の `.` は拡張子と見なさない)。"""
+    if n == 1:
+        return name
+    dot = name.rfind(".")
+    return f"{name[:dot]}-{n}{name[dot:]}" if dot > 0 else f"{name}-{n}"
+
+
+TRASH_NAME_TRIES = 1000
+
+
+def _moves_to_trash(t: _Target, permanent: bool) -> bool:
+    """`/files/delete` が消さずに trash/ の直下へ移すか: workspace の中で trash/ の外、
+    `permanent` でないとき。trash/ の中と `/ext/...` は完全に消す。"""
+    return (
+        not permanent
+        and t.kind == "workspace"
+        and bool(t.segs)
+        and t.segs[0] != TRASH_DIR
+    )
+
+
+def _fs_delete(t: _Target, permanent: bool = False) -> dict:
+    """削除。workspace の中 (trash/ の外) は既定で trash/ の直下へ移し (`_moves_to_trash`)、
+    それ以外と `permanent` は中身ごと完全に消す。symlink はリンクそのものに効く。"""
     import shutil
 
     segs = t.segs
@@ -2027,6 +2057,8 @@ def _fs_delete(t: _Target) -> None:
         st = _lstat_at(segs[-1], dfd)
         if st is None:
             raise HTTPException(404, f"not found: {t.path}")
+        if _moves_to_trash(t, permanent):
+            return _move_to_trash(t, dfd, segs[-1])
         if stat.S_ISDIR(st.st_mode):
             # dir_fd 付きの rmtree は fd ベース (symlink を辿らない版) で消す
             shutil.rmtree(segs[-1], dir_fd=dfd)
@@ -2034,6 +2066,35 @@ def _fs_delete(t: _Target) -> None:
             os.unlink(segs[-1], dir_fd=dfd)  # symlink はリンクそのものを消す
     finally:
         os.close(dfd)
+    return {"ok": True, "trashed": False}
+
+
+def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
+    """`dfd` の中の `leaf` を workspace の trash/ の直下へ移す。同名が在れば `_trash_name` の
+    番号を進める。trash/ が無ければ作る (jail のユーザーの物。jail で消されていても動く)。
+    trash/ が symlink 等に差し替えられていれば辿らない (400)。rename は mv と同じく ctime を
+    今にするので、期限 (`_sweep_entries`) は移した時から数える。"""
+    try:
+        tfd = _open_dirs(t.base, [TRASH_DIR], t.path, create=True)
+    except OSError as e:
+        if _nospace(e):
+            raise HTTPException(507, QUOTA_FULL_DETAIL)
+        raise
+    try:
+        for n in range(1, TRASH_NAME_TRIES + 1):
+            name = _trash_name(leaf, n)
+            if len(os.fsencode(name)) > 255 or _lstat_at(name, tfd) is not None:
+                continue
+            try:
+                os.rename(leaf, name, src_dir_fd=dfd, dst_dir_fd=tfd)
+            except OSError as e:
+                if _nospace(e):
+                    raise HTTPException(507, QUOTA_FULL_DETAIL)
+                raise HTTPException(400, f"cannot move to trash: {t.path}")
+            return {"ok": True, "trashed": True, "path": f"{TRASH_DIR}/{name}"}
+    finally:
+        os.close(tfd)
+    raise HTTPException(409, f"no free name in {TRASH_DIR}/ for: {leaf}")
 
 
 def _fs_rename(t: _Target, d: _Target) -> dict:
@@ -2363,11 +2424,13 @@ async def files_raw_get(
 
 
 @app.post("/files/delete")
-async def files_delete(req: PathRequest):
-    """ファイル・ディレクトリ (中身ごと) を消す。symlink はリンクそのものを消す。"""
+async def files_delete(req: DeleteRequest):
+    """削除。workspace の中 (trash/ の外) は既定で trash/ の直下へ移す (同名は `-2` `-3`…。
+    応答 `{ok, trashed: true, path: "trash/<名前>"}`)。`permanent: true`・trash/ の中・`/ext/...`
+    はファイル・ディレクトリ (中身ごと) を完全に消す (`{ok, trashed: false}`)。symlink は
+    リンクそのものに効く。"""
     t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
-    await asyncio.to_thread(_fs_delete, t)
-    return {"ok": True}
+    return await asyncio.to_thread(_fs_delete, t, req.permanent)
 
 
 @app.post("/files/rename")
