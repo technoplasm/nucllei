@@ -56,16 +56,22 @@
 		}
 	};
 
+	// 後始末は cleanup で返す: 閉じるとき {#if} が先に要素を外して modalElement が null に
+	// なってから effect が走るため、else 分岐では keydown が外れず、閉じた後の Enter が
+	// 最後の onConfirm (削除・上書きアップロード等) を再実行していた (#150 の UI 確認で発覚)
 	$effect(() => {
-		if (show && modalElement) {
-			document.body.appendChild(modalElement);
-			window.addEventListener('keydown', handleKeyDown);
-			document.body.style.overflow = 'hidden';
-		} else if (modalElement) {
+		const el = modalElement;
+		if (!(show && el)) return;
+		document.body.appendChild(el);
+		window.addEventListener('keydown', handleKeyDown);
+		document.body.style.overflow = 'hidden';
+		return () => {
 			window.removeEventListener('keydown', handleKeyDown);
-			removeModalFromBody();
+			if (el.parentNode === document.body) {
+				document.body.removeChild(el);
+			}
 			document.body.style.overflow = 'unset';
-		}
+		};
 	});
 
 	onDestroy(() => {
