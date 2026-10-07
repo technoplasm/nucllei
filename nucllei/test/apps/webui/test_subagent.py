@@ -613,16 +613,18 @@ class TestRunSubagent(AbstractPostgresTest):
         assert child.kind == "agent"
         assert child.chat["history"]["messages"] != {}
 
-        # base が MODELS に無ければ従来どおりエラー
+        # base が MODELS に無ければエラー — allowlist・権限の不一致とは別の文言で、
+        # 土台のモデルが使えないことを言う(staging で原因を取り違えた件)
         request.app.state.MODELS = {}
         tool = self._build_tool(
             request=request, model=self._parent_model(("hidden-worker",))
         )
         failed = _raised(tool["callable"](preset_id="hidden-worker", instruction="x"))
         assert failed.kind == "failure"
-        assert "使えない" in failed.text
-        # 次の手の無い事実の文は「。」で閉じる(#145 — ToolError の組み立て)
-        assert failed.text == "ERROR: preset を使えない: hidden-worker。"
+        assert failed.text == (
+            "ERROR: preset hidden-worker の土台のモデル kimi-base が今は使えない"
+            " (接続先のモデル一覧に無い)。次の手: 自分で処理する。"
+        )
 
     def test_session_id_continuation_appends_to_same_child(self, monkeypatch):
         child_calls = self._patch_child_pipeline(

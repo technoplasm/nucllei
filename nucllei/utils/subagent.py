@@ -658,7 +658,18 @@ async def run_subagent_turn(
 
         child_model = _resolve_child_model(request, preset)
         if child_model is None:
-            raise ToolFailure(f"preset を使えない: {preset.id}")
+            # allowlist・権限は通っている — 土台のモデルが今の接続先のモデル一覧に無い
+            # (接続先が落ちている / モデル名が変わった)。上の「preset を使えない」と
+            # 文言を分け、管理者がどちらを直せばよいか分かるようにする
+            log.warning(
+                f"[subagent] preset {preset.id}: base model {preset.base_model_id!r}"
+                " is not in the connected model list"
+            )
+            raise ToolFailure(
+                f"preset {preset.id} の土台のモデル {preset.base_model_id} が今は使えない"
+                " (接続先のモデル一覧に無い)",
+                "自分で処理する。",
+            )
 
         # 実行中表示(#100)に子 session id を出す(P3 の観測 view の手がかり。
         # 結果 JSON にも session_id が載る)。description はモデル向け(check_task の
