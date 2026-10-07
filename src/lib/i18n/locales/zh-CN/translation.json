@@ -634,6 +634,7 @@
 	"Show": "显示",
 	"Show full path": "显示完整路径",
 	"Show shortcuts": "显示快捷方式",
+	"Showing first {{COUNT}} of {{TOTAL}} rows": "显示前 {{COUNT}} 行(共 {{TOTAL}} 行)",
 	"Sign in": "登录",
 	"Sign in to {{WEBUI_NAME}}": "登录 {{WEBUI_NAME}}",
 	"Sign in to {{WEBUI_NAME}} with LDAP": "使用 LDAP 登录 {{WEBUI_NAME}}",

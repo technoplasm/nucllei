@@ -10,6 +10,7 @@ dev アカウント(`dev@nucllei.local` / `dev`、`_memos/dev-environment.md`)�
 .venv/bin/python dev/e2e/check_skill_result_render.py # 構造化 result の md ハイライト + Tools loaded
 .venv/bin/python dev/e2e/check_sandbox_tools.py       # 組み込み sandbox tool(#18-3 起源、E1〜E6)
 .venv/bin/python dev/e2e/check_skill_feature_gate.py  # 機能「スキル」トグル(#42 E7、後始末で ON に戻す)
+.venv/bin/python dev/e2e/check_result_table.py [dir]  # tool 結果の表(kind=table)の目視 — モデル不要、チャットを API で作って消す
 .venv/bin/python dev/e2e/mock_reasoning_model.py      # モックモデルサーバ(:13399) — think 綴じ込み再現(冒頭 docstring 参照)
 ```
 

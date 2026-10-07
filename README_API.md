@@ -1596,6 +1596,16 @@ async def read_doc(self, path: str) -> Markdown:
   (e.g. a file reader: `.md` → markdown, `.py` → code), return
   `Rendered(text, kind, language=None)` (`kind` = `text` / `markdown` /
   `code`). Only `text` reaches the model. Don't also annotate the return type.
+- **Tables** — return `Rendered(csv_text, kind="table", meta=None)` when the
+  value is known to be a grid (e.g. SQL rows). `csv_text` is RFC 4180 CSV with
+  a header row. `meta` (optional) is a flat dict of scalars (str / int / finite
+  float / bool / None; keys without whitespace, `=` or `"`), shown above the
+  table as `key: value` labels. The model receives the CSV, preceded — when
+  `meta` is given — by one line nucllei builds:
+  `# rows=120 truncated=false duration=0.3s` (bools lowercase, None empty,
+  strings containing whitespace / `=` / `"` / `\` or empty are JSON-quoted).
+  The UI renders at most the first 1000 rows; malformed CSV falls back to text.
+  Dicts / lists are never turned into tables (they stay JSON).
 - **The backend settles each result's display once, after the call**, and puts
   it in `results[i].render` — the UI uses nothing else (`calls[].render` only
   carries `args`). Priority, strongest first: a raised error or a truncated

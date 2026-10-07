@@ -19,6 +19,7 @@
 		parseToolArgumentsStreaming,
 		toolErrorKind,
 		TOOL_ERROR_LOOKS,
+		type RenderDescriptor,
 		type ToolCallRender,
 		type ToolErrorKind
 	} from '$lib/utils/tool-render';
@@ -37,6 +38,7 @@
 	import Markdown from './Markdown.svelte';
 	import SubagentSessionBlock from './SubagentSessionBlock.svelte';
 	import ExecutionBlock from './ExecutionBlock.svelte';
+	import ToolResultTable from './ToolResultTable.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -49,7 +51,7 @@
 	type ToolResult = {
 		tool_call_id: string;
 		content?: string;
-		render?: { kind: string };
+		render?: RenderDescriptor;
 		// display チャネル(#88): tool が __display__ で明示的にユーザーへ見せる表示。
 		// 戻り値(モデル向け)とは別面で collapse 外に常時出す。
 		display?: DisplayItem[];
@@ -480,6 +482,9 @@
 							</div>
 						{:else if resultDisplay.kind === 'code'}
 							<HljsCode lang={resultDisplay.language} code={resultDisplay.value} />
+						{:else if resultDisplay.kind === 'table'}
+							<!-- Rendered(csv, "table", preamble_lines=n): 前置き + CSV の表 -->
+							<ToolResultTable table={resultDisplay} />
 						{:else}
 							<HljsCode lang="json" code={resultDisplay.value} />
 						{/if}

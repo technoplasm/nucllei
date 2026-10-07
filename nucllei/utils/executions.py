@@ -275,7 +275,8 @@ def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
       indent なし — FE は kind=json をパースして整形し直すため空白は表示に寄与しない)
       + render {"kind": "json"}
     - str → そのまま
-    - `tool_render.Rendered` → text と、値が持つ表示種別 {kind, language?}(#153 — 拡張子で
+    - `tool_render.Rendered` → content()(text。table で meta があれば先頭に `# k=v …` の
+      1 行)と、値が持つ表示種別 {kind, language? / meta?}(#153 — 拡張子で
       md / code が決まる read_file 等。モデルへは text だけ)
     - None → 空文字("None" という見かけの出力を作らない)、他は str()
     戻り値は (text, 値の型の render|None)。**表示の確定はここではなく
@@ -283,8 +284,8 @@ def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
     「値の型」だけの情報で、background の exec 行では「result が JSON 直列化済みか」の印に使う。
     """
     if isinstance(raw, Rendered):
-        text = raw.text if isinstance(raw.text, str) else str(raw.text or "")
-        return text, raw.descriptor()
+        # table の meta 行(`# k=v …`)を前に付けた本文は Rendered.content() が組み立てる
+        return raw.content(), raw.descriptor()
     if isinstance(raw, dict) or isinstance(raw, list):
         return json.dumps(raw, ensure_ascii=False), {"kind": "json"}
     if isinstance(raw, str):

@@ -175,11 +175,11 @@ describe('classifyToolResult', () => {
 		expect(display).toEqual({ kind: 'code', language: 'python', value: 'print(1)' });
 	});
 
-	it('未知の kind(旧 table 等)は text に落ちる(解釈しない)', () => {
-		// table 描画は #60 で廃止済み・backend も宣言を出さない。未知 kind の
-		// ディスクリプタが来ても壊れないことだけ担保する。
-		expect(classifyToolResult('{"error": "boom"}', { kind: 'table' }).kind).toBe('text');
-		expect(classifyToolResult('not json', { kind: 'table' }).kind).toBe('text');
+	it('未知の kind は text に落ちる(解釈しない)', () => {
+		// 未知 kind のディスクリプタが来ても壊れないことだけ担保する
+		// (table は 2026-10-07 に CSV 専用で再導入 — csv.test.ts)
+		expect(classifyToolResult('{"error": "boom"}', { kind: 'chart' }).kind).toBe('text');
+		expect(classifyToolResult('not json', { kind: 'chart' }).kind).toBe('text');
 	});
 
 	it('skill 宣言: {result, tools} を分解する(#35)', () => {

@@ -7,6 +7,8 @@
 
 from typing import Optional
 
+import pytest
+
 from nucllei.utils.tool_render import (
     Code,
     Markdown,
@@ -261,6 +263,118 @@ def test_rendered_descriptor():
     assert Rendered("x", "markdown", "python").descriptor() == {"kind": "markdown"}
 
 
+def test_rendered_table_descriptor():
+    """表(2026-10-07): text は CSV、表に添えるメタは meta(dict)で渡す。
+    descriptor は meta があるときだけ meta を持つ。"""
+    from nucllei.utils.tool_render import Rendered
+
+    assert Rendered("a,b\n1,2", "table").descriptor() == {"kind": "table"}
+    meta = {"rows": 120, "truncated": False, "duration": "0.3s"}
+    assert Rendered("a,b\n1,2", "table", meta=meta).descriptor() == {
+        "kind": "table",
+        "meta": {"rows": 120, "truncated": False, "duration": "0.3s"},
+    }
+    # 空の meta は meta 無しと同じ
+    assert Rendered("a\n1", "table", meta={}).descriptor() == {"kind": "table"}
+    # language は table に載せない
+    assert Rendered("a\n1", "table", "csv").descriptor() == {"kind": "table"}
+
+
+def test_rendered_table_content_meta_line():
+    """モデルへの本文は nucllei が組み立てる: meta があれば先頭に `# k=v …` の 1 行 + CSV。"""
+    from nucllei.utils.tool_render import Rendered
+
+    csv_text = "a,b\n1,2\n"
+    assert Rendered(csv_text, "table").content() == csv_text
+    assert Rendered(csv_text, "table", meta={}).content() == csv_text
+    assert (
+        Rendered(
+            csv_text,
+            "table",
+            meta={"rows": 120, "truncated": False, "duration": "0.3s"},
+        ).content()
+        == "# rows=120 truncated=false duration=0.3s\n" + csv_text
+    )
+    # bool は小文字、None は空、float は str()、空白 / = / " / \ / 改行 / 空文字は JSON 文字列
+    line = Rendered(
+        "a\n",
+        "table",
+        meta={
+            "ok": True,
+            "none": None,
+            "f": 1.5,
+            "sp": "a b",
+            "eq": "x=y",
+            "q": 'say "hi"',
+            "bs": "c:\\tmp",
+            "nl": "l1\nl2",
+            "empty": "",
+            "jp": "東京",
+        },
+    ).content()
+    assert line == (
+        '# ok=true none= f=1.5 sp="a b" eq="x=y" q="say \\"hi\\"" '
+        'bs="c:\\\\tmp" nl="l1\\nl2" empty="" jp=東京\na\n'
+    )
+    # meta 行は必ず 1 行
+    assert line.count("\n") == 2
+    # meta の写しを持つ(呼び手の dict を後から書き換えても変わらない)
+    meta = {"rows": 1}
+    rendered = Rendered("a\n1\n", "table", meta=meta)
+    meta["rows"] = 999
+    assert rendered.content() == "# rows=1\na\n1\n"
+    assert rendered.descriptor() == {"kind": "table", "meta": {"rows": 1}}
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"rows": [1, 2]},
+        {"rows": {"a": 1}},
+        {"rows": object()},
+        {"nan": float("nan")},
+        {"inf": float("inf")},
+        {1: "x"},
+        {"": "x"},
+        {"a b": 1},
+        {"a=b": 1},
+        {'a"b': 1},
+        {"a\nb": 1},
+        "rows=1",
+        [("rows", 1)],
+    ],
+)
+def test_rendered_meta_rejects_non_scalar_and_bad_keys(meta):
+    from nucllei.utils.tool_render import Rendered
+
+    with pytest.raises(ValueError):
+        Rendered("a\n1", "table", meta=meta)
+
+
+def test_rendered_meta_only_for_table():
+    from nucllei.utils.tool_render import Rendered
+
+    with pytest.raises(ValueError):
+        Rendered("x", "text", meta={"rows": 1})
+    # None は既定なので他 kind でも通る
+    assert Rendered("x", "markdown", meta=None).descriptor() == {"kind": "markdown"}
+
+
+def test_resolve_result_render_table():
+    """Rendered table は resolve を素通しし、切詰め・エラーでは text に落ちる(既存規則)。"""
+    from nucllei.utils.tool_render import Rendered, resolve_result_render
+
+    raw = Rendered("a,b\n1,2\n3,4", "table", meta={"rows": 2})
+    assert resolve_result_render(raw) == {"kind": "table", "meta": {"rows": 2}}
+    # 静的な宣言より強い
+    assert resolve_result_render(raw, {"kind": "text"}) == {
+        "kind": "table",
+        "meta": {"rows": 2},
+    }
+    assert resolve_result_render(raw, truncated=True) is None
+    assert resolve_result_render(raw, failed=True) is None
+
+
 def test_normalize_tool_result_takes_rendered():
     """同期 middleware と background runner が共有する正規化。モデルへは text だけ。"""
     from nucllei.utils.executions import normalize_tool_result
@@ -273,6 +387,13 @@ def test_normalize_tool_result_takes_rendered():
     assert normalize_tool_result(Rendered("a = 1", "code", "py")) == (
         "a = 1",
         {"kind": "code", "language": "python"},
+    )
+    # table: モデルへは meta 行 + CSV、表示は meta 付きの descriptor
+    assert normalize_tool_result(
+        Rendered("a,b\n1,2", "table", meta={"rows": 1, "truncated": False})
+    ) == (
+        "# rows=1 truncated=false\na,b\n1,2",
+        {"kind": "table", "meta": {"rows": 1, "truncated": False}},
     )
     # 既存の分岐は不変
     assert normalize_tool_result({"a": 1}) == ('{"a": 1}', {"kind": "json"})

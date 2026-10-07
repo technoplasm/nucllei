@@ -27,7 +27,7 @@
 | | 種別 |
 |---|---|
 | **引数(入力)** | `code(language)` / `scalar`(str/num/bool を `key: value`)/ `json`(object/array ツリー) |
-| **結果(出力)** | `text` / `code(language)` / `markdown` / `json`(既定) / `image` / `file` |
+| **結果(出力)** | `text` / `code(language)` / `markdown` / `json`(既定) / `table`(`Rendered` 専用、2026-10-07) / `image` / `file` |
 
 - **追加(2026-07-18): 結果 kind `markdown`(戻り型 `Markdown`)**。md として**レンダリング**して
   見せる(見出し・表・コードフェンス)。`Code("markdown")` = 「md ソースのハイライト」とは
@@ -40,6 +40,7 @@
 - **改訂(2026-07-09、`ada5904e8`): `table` 描画を廃止**。tool 結果は「値を見る」ものであり
   デザイン対象ではない、という判断。`table` 宣言でも json 表示に落とす(`classifyToolResult` から
   table 分類・`tryParseTable` を撤去、`ResultDisplay` の `table` 型も削除)。
+  → **2026-10-07 に CSV 専用・`Rendered` 専用で再導入**(下の「table の再導入」)。
 - 表示の体裁(2026-07-09): 展開時の `Arguments` / `Result` はグレーの pill バッジ、その中身は軽く
   字下げ(ps-2)。ヘッダは done=緑チェック(tool)/ 青チェック(reasoning)、実行中は Spinner。
   応答生成中は `[Spinner] Preparing...`(reasoning の `Thinking...` と同寸で自然に遷移)。
@@ -108,7 +109,7 @@
   1 か所で確定し、同期 middleware(`execute_tool_calls`)と background runner(`executions.py`)が
   同じ関数を通る。優先順(上ほど強い):
   1. エラー(raise 由来の ERROR 文)と切り詰めた結果 → text(`mark_error_kind` の旗だけの結果は render を残す)
-  2. 戻り値 `Rendered(text, kind, language)` → tool が明示した {kind, language}(拡張子で md / code / text が
+  2. 戻り値 `Rendered(text, kind, language, meta)` → tool が明示した {kind, language} / {kind: "table", meta}(拡張子で md / code / text が
      決まる read_file 等。モデルへは text だけ。戻り型 Rendered は静的宣言を作らない)
   3. 静的な宣言(戻り型の Annotated = `tool_dict["render"]["result"]`)。await_task は
      `sink.set_result_render` で、回収した 1 件の確定済み表示(exec 行の `meta.render_descriptor`)に差し替える
@@ -124,6 +125,33 @@
     「中身が文字列なのに kind=json なら text に落とす」読み替えは消した。封筒の剥がし自体は残る(content は
     モデル向けの封筒なので)
   - 旧データの互換は持たない(保存済み結果に render が無ければ text)
+
+## table の再導入(2026-10-07、ken 決定・llens 依頼)
+
+llens の `query_emr`(SQL の結果)のように**格子だと分かっている値**を表で見せる。
+
+- **入口は `Rendered` だけ**: `Rendered(csv_text, kind="table", meta={"rows": 120, "truncated": False, "duration": "0.3s"})`。
+  静的な戻り型 `Table` は戻さない(格子だと分かるのは呼び出しごとの値)。dict / list の自動 json も
+  今までどおりで、表にはしない。
+- **text は CSV**(RFC 4180、1 行目が列名)。`meta` は省略可(既定 None)。値は str / int / float(有限)/
+  bool / None のスカラーだけ、キーは空白・`=`・`"`・改行を含まない str。違反は ValueError。meta は table 専用。
+- **モデルへの本文は nucllei が組み立てる**(`Rendered.content()`、`normalize_tool_result` 経由): meta があれば
+  先頭に 1 行 `# rows=120 truncated=false duration=0.3s`(CSV から見ればコメント行)+ CSV。bool は小文字、
+  None は空(`key=`)、str に空白・改行・`=`・`"`・`\` が入るか空文字なら JSON の文字列リテラルで書く
+  (meta 行は必ず 1 行)。meta が無ければ CSV だけ。
+- **descriptor** は `{"kind": "table", "meta": {...}}`(meta が無い・空なら `{"kind": "table"}`)。
+- **FE**(`tool-render/csv.ts` + `ToolResultTable.svelte`): meta は descriptor から表の上に「キー: 値」の
+  ラベルで並べる。meta があれば本文の先頭 1 行(meta 行)を飛ばし、残りを CSV として読む —
+  **中身の `#` から推測しない**。CSV パーサは自前の小さな RFC 4180 実装(引用符・引用符内の改行・`""`)。
+  閉じない引用符等で壊れていれば text 表示に戻す(列数の不揃いは許容して最大列数に揃える)。
+- 画面: 枠付き、高さ上限(max-h-96)で縦スクロール、見出し行 sticky、列が多ければ横スクロール。
+  セルは折り返さず `max-w-xs` で省略、全文は title。数値列の右寄せはしない(推測しない)。
+  描画は先頭 1000 行(`TABLE_MAX_ROWS`)までで、超えたら「先頭 N 行を表示(全 M 行)」— モデルへの text は不変。
+  応答本文の prose が td/th に効くので `not-prose` で囲む。
+- 切詰め・エラーで text に落ちる既存規則はそのまま。read_file の .csv は従来どおり code(csv)。
+- **撤去理由(2026-07-09)との違い**: 撤去したのは「dict の配列を見つけたら表にする」経路(値の形から
+  表を推測する)。今回は **tool が「この値は格子」と明示**したときだけ表にする — 型に忠実の原則の内側。
+- 目視: `dev/e2e/check_result_table.py`(表の結果を持つチャットを API で作って開き、1280/390 × light/dark を撮る)。
 
 ## 宣言メカニズム
 

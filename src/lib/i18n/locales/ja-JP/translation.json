@@ -634,6 +634,7 @@
 	"Show": "表示",
 	"Show full path": "フルパスを表示",
 	"Show shortcuts": "ショートカット一覧を表示",
+	"Showing first {{COUNT}} of {{TOTAL}} rows": "先頭 {{COUNT}} 行を表示(全 {{TOTAL}} 行)",
 	"Sign in": "サインイン",
 	"Sign in to {{WEBUI_NAME}}": "{{WEBUI_NAME}} にサインイン",
 	"Sign in to {{WEBUI_NAME}} with LDAP": "LDAP で {{WEBUI_NAME}} にサインイン",

@@ -6,10 +6,16 @@
 // フォールバックは「型に忠実」(素の str は scalar、object/array は json)。
 
 import { parsePartialArguments } from './partial';
+import { formatTableMeta, parseCsvTable, type CsvTable } from './csv';
+
+export { formatTableMeta, parseCsv, parseCsvTable, TABLE_MAX_ROWS, type CsvTable } from './csv';
 
 export type RenderDescriptor = {
 	kind: string;
 	language?: string;
+	// kind=table だけ: tool が Rendered(meta=...) で渡したスカラーの dict。あれば本文の
+	// 先頭 1 行は nucllei が組み立てた meta 行(`# k=v …`)
+	meta?: Record<string, string | number | boolean | null>;
 };
 
 // call に付くのは引数の表示だけ(結果の表示は results[].render — #153)
@@ -133,6 +139,9 @@ export type ResultDisplay =
 	| { kind: 'json'; value: string }
 	// md としてレンダリングして見せる(Code("markdown") = md ソースのハイライトとは別契約)
 	| { kind: 'markdown'; value: string }
+	// CSV の表(Rendered(csv, "table", meta=...) のときだけ — csv.ts)。
+	// meta は表の上に並べる「キー: 値」(descriptor の meta から — 本文の meta 行は読まない)
+	| ({ kind: 'table'; meta: [string, string][] } & CsvTable)
 	// load_skill の構造化結果(#35): value = skill 指示本文(markdown)、tools = 導入 tool 名
 	| { kind: 'skill'; value: string; tools: string[] }
 	// run_subagent の構造化結果(#107): 子 agent session の要約。sessionId で
@@ -333,8 +342,9 @@ const parseSingleDoneTaskResult = (content: string): unknown | undefined => {
 // results[].render だけ(#153 — tool_render.resolve_result_render)。無ければ text —
 // 中身を見て JSON かどうかを推測する動的解釈はしない(型に忠実の原則。
 // 2026-07-17 改訂 — 旧実装は非 JSON 文字列をクォート表示、JSON 風文字列を
-// 勝手に整形していた)。tool の結果は「値を見る」ものでありデザイン対象では
-// ないため、table 描画経路は持たない(未知 kind も text に落とす)。
+// 勝手に整形していた)。未知 kind も text に落とす。表(table)は tool が
+// Rendered で「この値は CSV の格子」と明示したときだけ(2026-10-07 再導入。dict / list を
+// 表にする経路は無い)。CSV が壊れていれば text に戻す。
 export const classifyToolResult = (
 	content: string,
 	descriptor?: RenderDescriptor
@@ -432,6 +442,18 @@ export const classifyToolResult = (
 	}
 	if (descriptor?.kind === 'code') {
 		return { kind: 'code', language: descriptor.language || 'plaintext', value: content };
+	}
+	if (descriptor?.kind === 'table') {
+		// meta があれば本文の先頭 1 行(meta 行)を飛ばす。壊れた CSV は text へ
+		const hasMeta =
+			descriptor.meta !== null &&
+			typeof descriptor.meta === 'object' &&
+			Object.keys(descriptor.meta).length > 0;
+		const table = parseCsvTable(content, hasMeta);
+		if (table !== null) {
+			return { kind: 'table', meta: hasMeta ? formatTableMeta(descriptor.meta) : [], ...table };
+		}
+		return { kind: 'text', value: content };
 	}
 	if (descriptor?.kind === 'json') {
 		// backend が実型(dict/list)から同梱。content は json.dumps 済み文字列

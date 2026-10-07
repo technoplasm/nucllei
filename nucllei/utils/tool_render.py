@@ -16,10 +16,13 @@
 **結果の表示は backend が実行後に 1 か所で確定する**(#153、ken 2026-10-07)。
 ``resolve_result_render`` が結果ごとに 1 つ決めて ``results[i].render`` に載せ、フロントは
 それだけを見る(``calls[].render`` は引数の ``args`` だけを運ぶ)。結果の描画が呼び出しごとに
-決まる tool(read_file — 拡張子で md / code / text)は戻り値を ``Rendered(text, kind, language)``
-にする。
+決まる tool(read_file — 拡張子で md / code / text、CSV の表を返す tool — table)は戻り値を
+``Rendered(text, kind, language, meta)`` にする。
 """
 
+import json
+import math
+import re
 from dataclasses import dataclass
 from typing import Annotated, Any, Optional, get_args, get_origin, get_type_hints
 
@@ -38,8 +41,9 @@ def Code(language: str, base: type = str):
 
 
 # 戻り型用の糖衣。モデルへの見え方(直列化テキスト)は変えず、ユーザー表示だけ変える。
-# `Table`(kind="table")は廃止(2026-07-09): tool 結果は「値を見る」ものでデザイン対象では
-# ないため、フロントの table 描画経路ごと撤去した(`ada5904e8`)。
+# 静的な戻り型 `Table` は持たない(2026-07-09 に廃止、2026-10-07 の表の再導入でも戻さない):
+# 格子だと分かるのは呼び出しごとの値なので、表は ``Rendered(csv, "table", meta={...})``
+# だけで出す(dict / list を表にする経路も無い — それは json)。
 Text = Annotated[str, RenderAs(kind="text")]
 
 # md として「レンダリングして」見せる戻り型(doc 系 tool の戻り等)。
@@ -56,17 +60,95 @@ class Rendered:
     ``descriptor()`` に確定する(静的な宣言より強い)。戻り型 Rendered は静的な結果宣言を
     作らない(``extract_render_from_function``) — 値が種別を持つので宣言は意味を持たない。
     切詰め・エラーで text に落ちる規則はそのまま。
+
+    ``kind="table"``(2026-10-07): ``text`` は CSV(RFC 4180、1 行目が列名)。表に添える
+    メタ(件数・切り詰めの有無・所要時間など)は ``meta`` に dict で渡す —
+    ``Rendered(csv, "table", meta={"rows": 120, "truncated": False, "duration": "0.3s"})``。
+    モデルへ渡す本文(``content()``)は nucllei が決まった書式で組み立て、meta があれば
+    先頭に 1 行 ``# rows=120 truncated=false duration=0.3s``(CSV から見ればコメント行)、
+    続けて CSV をそのまま置く。descriptor は ``{"kind": "table", "meta": {...}}`` で、
+    フロントは meta を表の上に「キー: 値」で並べ、meta があれば本文の先頭 1 行を飛ばして
+    残りを CSV として読む(中身の ``#`` を推測しない)。meta は table 専用。
+
+    meta の規則(違反は ValueError — tool 作者の書き間違いを早く落とす):
+
+    - キーは空でない str で、空白・``=``・``"``・改行を含まない(``k=v`` の区切りを壊さない)
+    - 値は str / int / float / bool / None のスカラーだけ(入れ子は書式に載らない)。float は有限
+      (NaN / Infinity は descriptor の JSON に載らない)
+    - 空の dict は meta 無しと同じ(meta 行を出さない)
+
+    meta 行の値の書き方: bool は小文字の ``true`` / ``false``、None は空(``key=``)、
+    int / float は ``str()``。str はそのままだが、空文字・空白(改行を含む)・``=``・``"``・
+    ``\\`` を含むときは JSON の文字列リテラル(``"a b"``、改行は ``\\n``)にする —
+    これで meta 行は必ず 1 行に収まり、``k=v`` を空白で区切って読める。
     """
 
     text: str
     kind: str
     language: Optional[str] = None
+    meta: Optional[dict] = None
+
+    def __post_init__(self):
+        meta = self.meta
+        if meta is None:
+            return
+        if not isinstance(meta, dict):
+            raise ValueError(f"Rendered.meta must be a dict, got {type(meta).__name__}")
+        if self.kind != "table":
+            raise ValueError(
+                f"Rendered.meta is only for kind='table', got kind={self.kind!r}"
+            )
+        for key, value in meta.items():
+            if not isinstance(key, str) or not _META_KEY_RE.fullmatch(key):
+                raise ValueError(f"Rendered.meta key must be a plain str, got {key!r}")
+            if value is not None and not isinstance(value, (str, int, float, bool)):
+                raise ValueError(
+                    f"Rendered.meta[{key!r}] must be str / int / float / bool / None, "
+                    f"got {type(value).__name__}"
+                )
+            if isinstance(value, float) and not math.isfinite(value):
+                # NaN / Infinity は JSON(descriptor の wire)に載らない
+                raise ValueError(
+                    f"Rendered.meta[{key!r}] must be finite, got {value!r}"
+                )
+        # 呼び手の dict を後から書き換えられても表示とモデルの本文がずれないよう写しを持つ。
+        # 空は meta 無しに揃える
+        object.__setattr__(self, "meta", dict(meta) or None)
+
+    def content(self) -> str:
+        """モデルへ渡す本文。table で meta があれば ``# k=v …`` の 1 行 + CSV、それ以外は text。"""
+        text = self.text if isinstance(self.text, str) else str(self.text or "")
+        if not self.meta:
+            return text
+        line = " ".join(
+            f"{key}={_format_meta_value(value)}" for key, value in self.meta.items()
+        )
+        return f"# {line}\n{text}"
 
     def descriptor(self) -> dict:
         descriptor = {"kind": self.kind}
         if self.kind == "code":
             descriptor["language"] = normalize_hljs_language(self.language)
+        elif self.kind == "table" and self.meta:
+            descriptor["meta"] = dict(self.meta)
         return descriptor
+
+
+_META_KEY_RE = re.compile(r'[^\s="]+')
+# 素のまま書くと meta 行の区切りを壊す / 読み違える値(空白・改行・=・"・\)
+_META_QUOTE_RE = re.compile(r'[\s="\\]')
+
+
+def _format_meta_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        if value == "" or _META_QUOTE_RE.search(value):
+            return json.dumps(value, ensure_ascii=False)
+        return value
+    return str(value)
 
 
 def resolve_result_render(
