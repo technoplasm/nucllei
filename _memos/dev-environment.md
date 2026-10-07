@@ -446,6 +446,8 @@ LLENS_STT_SMOKE=1 uv run pytest \
 - ストリーミング描画の検証は `pre.hljs code.language-python` の innerText を数百 ms 間隔で
   サンプリングして単調増加を確認する(#20 で実績)。
 - alert/confirm を出す操作は避ける(セッションがブロックされる)。
+- **この dev 機では chromium が `new_page` で固まる**ことがある — `DISPLAY` を unset し、
+  launch 引数に `--disable-gpu` を付ける(2026-10-07、#150 の UI 確認で発覚)。
 - **claude-in-chrome の描画が編集前に張り付く**ことがある(shell の `curl localhost:5173/src/...` は新コードなのに
   ブラウザだけ古い。no-store でも新規タブ/別オリジンでも直らない場合あり)。原因を「キャッシュ」で流さず、
   **Playwright のクリーンブラウザ**で検証する(MCP が無いセッションでも `.venv` に

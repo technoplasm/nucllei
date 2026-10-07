@@ -511,7 +511,7 @@
 		)}
 />
 
-<div class="flex flex-col gap-1 mt-1.5 h-full min-h-0">
+<div class="flex flex-col gap-1 pt-1.5 h-full min-h-0">
 	<div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5">
 		<div class="text-xl font-medium">{$i18n.t('Sandbox')}</div>
 		{#if usage && place?.kind === 'workspace'}
@@ -680,11 +680,11 @@
 				/>
 			{/key}
 		{:else}
+		<!-- ドロップ先は一覧の下の空きまで含めた領域(flex-1、内容より短くはならない)。枠線は一覧(ul)と
+		     空・エラー表示の側に持つ — 領域に枠を付けると最後の行が画面下まで伸びて見える -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="mt-1 flex-1 min-h-0 rounded-lg border {dragOver
-				? 'border-primary bg-surface-hover'
-				: 'border-line'}"
+			class="mt-1 flex-1 rounded-lg {dragOver ? 'ring-2 ring-inset ring-primary bg-surface-hover' : ''}"
 			ondragover={(e) => {
 				if (rw && e.dataTransfer?.types.includes('Files')) {
 					e.preventDefault();
@@ -702,11 +702,15 @@
 			}}
 		>
 			{#if loading && !listing}
-				<div class="flex justify-center py-10"><Spinner className="size-5" /></div>
+				<div class="flex justify-center py-10 rounded-lg border border-line"><Spinner className="size-5" /></div>
 			{:else if listError}
-				<div class="text-sm text-content-subtle py-10 text-center">{listError}</div>
+				<div class="text-sm text-content-subtle py-10 text-center rounded-lg border border-line">
+					{listError}
+				</div>
 			{:else if listing && !listing.exists}
-				<div class="text-sm text-content-subtle py-10 text-center flex flex-col items-center gap-2">
+				<div
+					class="text-sm text-content-subtle py-10 text-center flex flex-col items-center gap-2 rounded-lg border border-line"
+				>
 					{$i18n.t('This folder does not exist.')}
 					{#if place}
 						<button
@@ -717,13 +721,13 @@
 					{/if}
 				</div>
 			{:else if listing && entries.length === 0}
-				<div class="text-sm text-content-subtle py-10 text-center">
+				<div class="text-sm text-content-subtle py-10 text-center rounded-lg border border-line">
 					{rw
 						? $i18n.t('This folder is empty. Drop files here to upload.')
 						: $i18n.t('This folder is empty.')}
 				</div>
 			{:else if listing}
-				<ul class="divide-y divide-line">
+				<ul class="rounded-lg border border-line divide-y divide-line overflow-hidden">
 					{#each entries as e (e.path)}
 						{@const exp = expiresAt(e)}
 						<li class="group flex items-center gap-2 px-2 py-1.5 hover:bg-surface-hover">
