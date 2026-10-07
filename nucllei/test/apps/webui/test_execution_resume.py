@@ -688,6 +688,21 @@ class TestExecutionResume(AbstractPostgresTest):
         wire = self.resume.build_wire_messages(chat_json, user, None)
         assert wire == [{"role": "system", "content": "J / Unknown"}]
 
+    def test_build_wire_messages_expands_user_role_and_groups(self):
+        from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+
+        group = Groups.insert_new_group("1", GroupForm(name="病理", description=""))
+        Groups.update_group_by_id(
+            group.id, GroupUpdateForm(name="病理", description="", user_ids=["7"])
+        )
+        chat_json = {
+            "params": {"system": "{{USER_ROLE}} [{{USER_GROUPS}}]"},
+            "history": {"currentId": None, "messages": {}},
+        }
+        user = types.SimpleNamespace(id="7", name="J", role="user", settings=None)
+        wire = self.resume.build_wire_messages(chat_json, user, None)
+        assert wire == [{"role": "system", "content": "user [病理]"}]
+
     def test_build_wire_messages_expands_user_image_files(self):
         chat_json = {
             "history": {

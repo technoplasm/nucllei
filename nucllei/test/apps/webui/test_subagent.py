@@ -428,6 +428,55 @@ class TestRunSubagent(AbstractPostgresTest):
         assert child_id not in listed
         assert child_id in {c.id for c in self.Chats.get_chats()}
 
+    def test_child_turn_expands_parent_user_role_and_groups(self, monkeypatch):
+        """子ターンの preset system prompt の {{USER_*}} は親ターンのユーザーの値。
+
+        子の generate_chat_completion に渡る user で、openai ルーターと同じ
+        apply_model_system_prompt_to_body を掛けて確かめる(payload 段は素通し)。
+        """
+        from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+        from nucllei.models.models import ModelForm
+        from nucllei.utils import subagent
+        from nucllei.utils.payload import apply_model_system_prompt_to_body
+
+        for name, user_ids in (("b-team", ["1"]), ("Alpha", ["1"]), ("other", ["9"])):
+            group = Groups.insert_new_group("1", GroupForm(name=name, description=""))
+            Groups.update_group_by_id(
+                group.id,
+                GroupUpdateForm(name=name, description="", user_ids=user_ids),
+            )
+        self.Models.update_model_by_id(
+            "researcher",
+            ModelForm(
+                id="researcher",
+                name="Researcher",
+                meta={"description": "調査担当"},
+                params={"system": "{{USER_NAME}}/{{USER_ROLE}}/[{{USER_GROUPS}}]"},
+                access_control=None,
+            ),
+        )
+        self._patch_child_pipeline(monkeypatch)
+        systems = []
+
+        async def child_completion(request, form_data, user):
+            model_info = self.Models.get_model_by_id(form_data["model"])
+            payload = apply_model_system_prompt_to_body(
+                model_info.params.model_dump(),
+                {"messages": list(form_data["messages"])},
+                form_data.get("metadata"),
+                user,
+                model_info,
+            )
+            systems.append(payload["messages"][0]["content"])
+            return _sse_response("text_basic")
+
+        monkeypatch.setattr(subagent, "generate_chat_completion", child_completion)
+        tool = self._build_tool()
+        result = asyncio.run(tool["callable"](preset_id="researcher", instruction="q"))
+
+        assert result["ok"] is True
+        assert systems == ["John Doe/user/[Alpha, b-team]"]
+
     def test_child_turn_request_inherits_forwarded_headers(self, monkeypatch):
         """子ターンの __request__ は親の scope(headers / scheme / server …)を引き継ぐ —
         tool が X-Forwarded-Proto / X-Forwarded-Host / Host から自オリジンを組める。"""

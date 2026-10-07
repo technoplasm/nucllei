@@ -54,7 +54,11 @@ from nucllei.utils.executions import (
     async_exec_available,
 )
 from nucllei.utils.image_refs import split_page, stored_ref_kind
-from nucllei.utils.task import prompt_template, resolve_base_model_id
+from nucllei.utils.task import (
+    prompt_template,
+    resolve_base_model_id,
+    user_prompt_params,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -435,7 +439,7 @@ def build_wire_messages(chat_json: dict, user, leaf_id: str, model=None) -> list
                 "role": "system",
                 "content": prompt_template(
                     system,
-                    getattr(user, "name", None),
+                    **user_prompt_params(user),
                     base_model_id=resolve_base_model_id(model),
                 ),
             }

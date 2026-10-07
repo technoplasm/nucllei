@@ -47,12 +47,75 @@ def resolve_base_model_id(model: Optional[dict]) -> Optional[str]:
     return info.get("base_model_id") or model.get("id")
 
 
+def _group_name_sort_key(name: str) -> tuple[str, str]:
+    """{{USER_GROUPS}} の並び: casefold した名前 → 元の名前。
+
+    大文字小文字の揺れ(`Lab` / `lab` / `LAB`)で順序が DB の返し順に左右されないよう、
+    まず casefold で比べ、同じなら元の文字列(コードポイント順)で決める — 全順序なので安定。
+    """
+    return (name.casefold(), name)
+
+
+def user_group_names(user_id: Optional[str]) -> list[str]:
+    """{{USER_GROUPS}} の元: user が**所属している**グループの名前(保存値そのまま)。
+
+    admin でも所属している物だけ(全グループではない)。並びは _group_name_sort_key。
+    get_groups_by_member_id は user_ids の文字列 LIKE なので、実際の所属を user_ids で
+    確かめ直す(utils/ext_acl.member_group_names と同じ方式)。user_id が無ければ []。
+    """
+    if not user_id:
+        return []
+    from nucllei.models.groups import Groups
+
+    names = [
+        g.name
+        for g in Groups.get_groups_by_member_id(user_id)
+        if user_id in (g.user_ids or []) and g.name
+    ]
+    return sorted(names, key=_group_name_sort_key)
+
+
+def user_prompt_params(user) -> dict:
+    """prompt_template に渡すユーザー由来の引数(UserModel / {"name", …} の dict / None)。
+
+    {{USER_NAME}} / {{USER_LOCATION}} / {{USER_ROLE}} / {{USER_GROUPS}} の出どころを
+    展開箇所(preset の system prompt・skill・続きターンの wire・タイトル生成)で揃える。
+    location は UserModel なら info.location、dict なら "location" キー。
+    """
+    if user is None:
+        return {}
+    if isinstance(user, dict):
+        get = user.get
+        location = get("location")
+    else:
+
+        def get(key):
+            return getattr(user, key, None)
+
+        info = get("info")
+        location = info.get("location") if isinstance(info, dict) else None
+    return {
+        "user_name": get("name"),
+        "user_location": location,
+        "user_role": get("role"),
+        "user_id": get("id"),
+    }
+
+
 def prompt_template(
     template: str,
     user_name: Optional[str] = None,
     user_location: Optional[str] = None,
     base_model_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> str:
+    """サーバー既知のプロンプト変数を展開する(変数の一覧はここが単一情報源)。
+
+    {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
+    user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
+    グループの DB 照会は {{USER_GROUPS}} が本文にあるときだけ、1 呼び出しにつき 1 回。
+    """
     # Get the current date
     current_date = datetime.now()
 
@@ -85,6 +148,12 @@ def prompt_template(
     # 実際に推論する base model の id(値の引き方は resolve_base_model_id)。
     # 取れなければ "Unknown"
     template = template.replace("{{BASE_MODEL_ID}}", base_model_id or "Unknown")
+
+    template = template.replace("{{USER_ROLE}}", user_role or "Unknown")
+    if "{{USER_GROUPS}}" in template:
+        template = template.replace(
+            "{{USER_GROUPS}}", ", ".join(user_group_names(user_id))
+        )
 
     return template
 
@@ -164,20 +233,12 @@ def replace_messages_variable(
 # {{prompt:middletruncate:8000}}
 
 
-def title_generation_template(
-    template: str, messages: list[dict], user: Optional[dict] = None
-) -> str:
+def title_generation_template(template: str, messages: list[dict], user=None) -> str:
+    """user は UserModel / {"name", "location", …} の dict / None(user_prompt_params)。"""
     prompt = get_last_user_message(messages)
     template = replace_prompt_variable(template, prompt)
     template = replace_messages_variable(template, messages)
 
-    template = prompt_template(
-        template,
-        **(
-            {"user_name": user.get("name"), "user_location": user.get("location")}
-            if user
-            else {}
-        ),
-    )
+    template = prompt_template(template, **user_prompt_params(user))
 
     return template

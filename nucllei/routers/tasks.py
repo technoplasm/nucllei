@@ -139,10 +139,7 @@ async def generate_title(
     content = title_generation_template(
         template,
         messages,
-        {
-            "name": user.name,
-            "location": user.info.get("location") if user.info else None,
-        },
+        user,
     )
 
     payload = {

@@ -499,6 +499,53 @@ class TestSkills(AbstractPostgresTest):
         )
         assert activations[0]["content"] == "on Unknown for Taro"
 
+    def test_user_role_and_groups_expand_in_skill_content(self):
+        """skill 本文の {{USER_ROLE}} / {{USER_GROUPS}}(所属グループのみ・名前順)。
+
+        `/command` と load_skill の両入口。admin でも非所属のグループは入らない。
+        """
+        import asyncio
+        import json
+
+        from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import apply_skill_command, build_load_skill_tool
+
+        for name, user_ids in (("病棟B", ["1"]), ("Alpha", ["1"]), ("他科", ["9"])):
+            group = Groups.insert_new_group("1", GroupForm(name=name, description=""))
+            Groups.update_group_by_id(
+                group.id,
+                GroupUpdateForm(name=name, description="", user_ids=user_ids),
+            )
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="whoami",
+                name="t",
+                description="所属を答える",
+                content="{{USER_ROLE}} in [{{USER_GROUPS}}]",
+                access_control=None,
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro", role="admin")
+        model = _model_with_skills(skill.id)
+        expected = "admin in [Alpha, 病棟B]"
+
+        form_data = {"messages": [{"role": "user", "content": "/whoami"}]}
+        _, activations = apply_skill_command(form_data, user, model)
+        assert activations[0]["content"] == expected
+
+        tool = build_load_skill_tool(model, user)
+        result = json.loads(asyncio.run(tool["callable"](skill_id="whoami")))
+        assert result["result"] == expected
+
+        # 所属なし → 空文字列
+        loner = types.SimpleNamespace(id="5", name="Hanako", role="user")
+        _, activations = apply_skill_command(
+            {"messages": [{"role": "user", "content": "/whoami"}]}, loner, model
+        )
+        assert activations[0]["content"] == "user in []"
+
     def test_build_load_skill_tool(self):
         """load_skill 合成(#35 step2a): skillIds ∩ 可視 ∩ description 有りのみ manifest に載る。"""
         import asyncio

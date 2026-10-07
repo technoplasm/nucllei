@@ -2258,11 +2258,16 @@ POST /api/v1/skills/create
   this" hint.
 - `content` — markdown instructions. Template variables expanded at every
   request: `{{CURRENT_DATE}}`, `{{CURRENT_TIME}}`, `{{CURRENT_DATETIME}}`,
-  `{{CURRENT_WEEKDAY}}`, `{{USER_NAME}}`, `{{BASE_MODEL_ID}}` (id of the base model
+  `{{CURRENT_WEEKDAY}}`, `{{USER_NAME}}`, `{{USER_ROLE}}` (the user's role as
+  stored: `admin` / `user` / …), `{{USER_GROUPS}}` (names of the groups the user
+  **is a member of**, as stored, joined with `", "`; sorted by
+  `(name.casefold(), name)`; empty string if none — admins get only their own
+  memberships, not every group), `{{BASE_MODEL_ID}}` (id of the base model
   that actually runs inference — the selected preset's `base_model_id`; `Unknown`
   if the server cannot resolve it). The same variables are expanded in a preset's
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
-  refers to the child preset's base. There is no call-time parameter mechanism.
+  refers to the child preset's base, while the `{{USER_*}}` variables stay those
+  of the user who started the parent chat. There is no call-time parameter mechanism.
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
 - `auto_load_content_types` — content-type **prefixes** (e.g. `["audio/"]`,

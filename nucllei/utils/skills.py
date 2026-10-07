@@ -14,7 +14,11 @@ from nucllei.models.files import Files
 from nucllei.models.skills import Skills, normalize_command
 from nucllei.utils.access_control import has_access, has_read_access_to_file
 from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
-from nucllei.utils.task import prompt_template, resolve_base_model_id
+from nucllei.utils.task import (
+    prompt_template,
+    resolve_base_model_id,
+    user_prompt_params,
+)
 from nucllei.utils.tool_errors import ToolCallError
 
 # 読み込み済みの skill を再ロードしたときの結果(本文は返さない)。tool 結果の文の規約
@@ -37,7 +41,8 @@ def activate_skill(skill, user, model=None) -> str:
     """skill 発火の単一パス(issue #35): content を展開して返す。
 
     `/command` 起動(apply_skill_command)と load_skill 起動の両方がここを通る。
-    変数はサーバー既知のもののみ({{USER_NAME}} / {{CURRENT_DATE}} / {{BASE_MODEL_ID}} 等。
+    変数はサーバー既知のもののみ({{USER_NAME}} / {{USER_ROLE}} / {{USER_GROUPS}} /
+    {{CURRENT_DATE}} / {{BASE_MODEL_ID}} 等。一覧は utils/task.py prompt_template。
     ブラウザ専用変数は無し。BASE_MODEL_ID は skill を発火させたターンのモデル = model の base)、
     毎リクエスト再展開(発火時点への固定はしない — _memos/skill-design.md「発火の有効範囲」)。
 
@@ -48,7 +53,7 @@ def activate_skill(skill, user, model=None) -> str:
     """
     return prompt_template(
         skill.content,
-        user_name=user.name,
+        **user_prompt_params(user),
         base_model_id=resolve_base_model_id(model),
     )
 

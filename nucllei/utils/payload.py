@@ -1,4 +1,8 @@
-from nucllei.utils.task import prompt_template, prompt_variables_template
+from nucllei.utils.task import (
+    prompt_template,
+    prompt_variables_template,
+    user_prompt_params,
+)
 from nucllei.utils.misc import (
     add_or_update_system_message,
 )
@@ -28,13 +32,7 @@ def apply_model_system_prompt_to_body(
             system = prompt_variables_template(system, variables)
 
     # Legacy (API Usage)
-    if user:
-        template_params = {
-            "user_name": user.name,
-            "user_location": user.info.get("location") if user.info else None,
-        }
-    else:
-        template_params = {}
+    template_params = user_prompt_params(user)
 
     if model_info:
         template_params["base_model_id"] = model_info.base_model_id or model_info.id
