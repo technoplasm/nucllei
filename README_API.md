@@ -1931,7 +1931,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     response); `write_file` knows where it wrote, so a write under
     `/workspace/exports/` attaches that file (no scan). Files put there from
     the file browser (§4.4.1) are not attached: they are in the "before"
-    snapshot of the next run, so they are no diff (one put there *during* a
+    snapshot of the next run, so they are no diff (one put there _during_ a
     tool run is attached as that run's — as designed).
     `fetch_from_workspace(path)` turns a sandbox file into something the user
     can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
