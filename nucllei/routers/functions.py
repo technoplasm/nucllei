@@ -8,6 +8,7 @@ from nucllei.models.functions import (
     Functions,
 )
 from nucllei.utils.plugin import load_function_module_by_id, replace_imports
+from nucllei.utils.valves import merge_valves_update
 from nucllei.config import CACHE_DIR
 from nucllei.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -280,15 +281,12 @@ async def update_function_valves_by_id(
             Valves = function_module.Valves
 
             try:
-                # null = UI の「Default」。保存は明示したフィールドだけ(exclude_unset)—
-                # 未設定フィールドは読み出し側の Valves(**保存値) でコードの既定値に
-                # 埋まるので、コード側の既定変更(filter の priority 等)が効き続ける。
-                form_data = {k: v for k, v in form_data.items() if v is not None}
-                valves = Valves(**form_data)
-                Functions.update_function_valves_by_id(
-                    id, valves.model_dump(exclude_unset=True)
+                # 部分更新: 送らなかったキーは保存値を保ち、null は既定に戻す (utils/valves)
+                stored = merge_valves_update(
+                    Functions.get_function_valves_by_id(id), form_data, Valves
                 )
-                return valves.model_dump()
+                Functions.update_function_valves_by_id(id, stored)
+                return Valves(**stored).model_dump()
             except Exception as e:
                 log.exception(f"Error updating function values by id {id}: {e}")
                 raise HTTPException(

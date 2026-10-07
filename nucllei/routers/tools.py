@@ -10,6 +10,7 @@ from nucllei.models.tools import (
     ToolUserResponse,
     Tools,
 )
+from nucllei.utils.valves import merge_valves_update
 from nucllei.builtin_tools import is_builtin_tool_id, is_reserved_builtin_id
 from nucllei.utils.plugin import load_tool_module_by_id, replace_imports
 from nucllei.config import CACHE_DIR
@@ -398,13 +399,10 @@ async def update_tools_valves_by_id(
     Valves = tools_module.Valves
 
     try:
-        # null = UI の「Default」。保存は明示したフィールドだけ(exclude_unset)—
-        # 未設定フィールドは読み出し側の Valves(**保存値) でコードの既定値に
-        # 埋まるので、コード側の既定変更(filter の priority 等)が効き続ける。
-        form_data = {k: v for k, v in form_data.items() if v is not None}
-        valves = Valves(**form_data)
-        Tools.update_tool_valves_by_id(id, valves.model_dump(exclude_unset=True))
-        return valves.model_dump()
+        # 部分更新: 送らなかったキーは保存値を保ち、null は既定に戻す (utils/valves)
+        stored = merge_valves_update(Tools.get_tool_valves_by_id(id), form_data, Valves)
+        Tools.update_tool_valves_by_id(id, stored)
+        return Valves(**stored).model_dump()
     except Exception as e:
         log.exception(f"Failed to update tool valves by id {id}: {e}")
         raise HTTPException(
