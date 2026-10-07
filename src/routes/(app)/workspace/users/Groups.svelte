@@ -84,6 +84,8 @@
 			toast.success($i18n.t('Group updated successfully'));
 			await setGroups();
 		}
+		// 失敗(名前の重複 409 / 不正な名前 400 等)はモーダルを開いたまま残す
+		return !!res;
 	};
 
 	const deleteGroupHandler = async () => {

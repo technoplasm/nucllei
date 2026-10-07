@@ -10,6 +10,13 @@ from nucllei.models.groups import (
 )
 
 from nucllei.constants import ERROR_MESSAGES
+from nucllei.utils.group_names import (
+    GROUP_NAME_CONFLICT_MESSAGE,
+    GroupNameConflictError,
+    GroupNameError,
+    normalize_group_name_key,
+    validate_group_name,
+)
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
@@ -19,6 +26,30 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 router = APIRouter()
+
+############################
+# Group name checks (#151)
+############################
+
+
+def _check_group_name(name: str, group_id: Optional[str] = None) -> str:
+    """名前を検証(400)し、正規化キーが他グループと重複していないか(409)を見る。
+
+    保存する名前(前後の空白を落としたもの)を返す。DB の unique index が最後の砦で、
+    ここは利用者に分かるエラーを返すための事前チェック。
+    """
+    try:
+        name = validate_group_name(name)
+    except GroupNameError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    existing = Groups.get_group_by_name_key(normalize_group_name_key(name))
+    if existing is not None and existing.id != group_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=GROUP_NAME_CONFLICT_MESSAGE
+        )
+    return name
+
 
 ############################
 # GetFunctions
@@ -40,21 +71,26 @@ async def get_groups(user=Depends(get_verified_user)):
 
 @router.post("/create", response_model=Optional[GroupResponse])
 async def create_new_group(form_data: GroupForm, user=Depends(get_admin_user)):
+    form_data.name = _check_group_name(form_data.name)
     try:
         group = Groups.insert_new_group(user.id, form_data)
-        if group:
-            return group
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error creating group"),
-            )
+    except GroupNameConflictError:
+        # 事前チェックと insert の間に同名が作られた(unique index 違反)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=GROUP_NAME_CONFLICT_MESSAGE
+        )
     except Exception as e:
         log.exception(f"Error creating a new group: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e),
         )
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Error creating group"),
+        )
+    return group
 
 
 ############################
@@ -83,24 +119,36 @@ async def get_group_by_id(id: str, user=Depends(get_admin_user)):
 async def update_group_by_id(
     id: str, form_data: GroupUpdateForm, user=Depends(get_admin_user)
 ):
+    current = Groups.get_group_by_id(id)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
+        )
+    # 検証は改名時だけ(#151 以前の名前のままメンバー・権限を編集できるように)
+    if form_data.name != current.name:
+        form_data.name = _check_group_name(form_data.name, group_id=id)
+
     try:
         if form_data.user_ids:
             form_data.user_ids = Users.get_valid_user_ids(form_data.user_ids)
 
         group = Groups.update_group_by_id(id, form_data)
-        if group:
-            return group
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error updating group"),
-            )
+    except GroupNameConflictError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=GROUP_NAME_CONFLICT_MESSAGE
+        )
     except Exception as e:
         log.exception(f"Error updating group {id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e),
         )
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Error updating group"),
+        )
+    return group
 
 
 ############################

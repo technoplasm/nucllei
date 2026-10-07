@@ -33,7 +33,8 @@
 		users?: any[];
 		group?: any;
 		permissions?: any;
-		onSubmit?: (group: any) => void | Promise<void>;
+		// false を返したら失敗(サーバーのエラーは呼び出し側が toast 済み)— モーダルを閉じず編集を残す
+		onSubmit?: (group: any) => void | boolean | Promise<void | boolean>;
 		onDelete?: () => void;
 	} = $props();
 
@@ -57,7 +58,7 @@
 	const submitHandler = async () => {
 		loading = true;
 
-		await onSubmit({
+		const ok = await onSubmit({
 			name,
 			description,
 			permissions,
@@ -65,7 +66,9 @@
 		});
 
 		loading = false;
-		show = false;
+		if (ok !== false) {
+			show = false;
+		}
 	};
 
 	const init = () => {

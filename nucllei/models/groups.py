@@ -5,10 +5,14 @@ import uuid
 
 from nucllei.internal.db import Base, get_db
 from nucllei.env import SRC_LOG_LEVELS
-
+from nucllei.utils.group_names import (
+    GroupNameConflictError,
+    normalize_group_name_key,
+)
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, JSON, func
+from sqlalchemy.exc import IntegrityError
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -25,6 +29,9 @@ class Group(Base):
     user_id = Column(Text)
 
     name = Column(Text)
+    # llens(#151): 重複判定用の正規化キー(utils/group_names.normalize_group_name_key)。
+    # unique index ix_group_name_key。name を書くときは必ず一緒に書く。
+    name_key = Column(Text, nullable=True, unique=True, index=True)
     description = Column(Text)
 
     data = Column(JSON, nullable=True)
@@ -101,7 +108,10 @@ class GroupTable:
             )
 
             try:
-                result = Group(**group.model_dump())
+                result = Group(
+                    **group.model_dump(),
+                    name_key=normalize_group_name_key(group.name),
+                )
                 db.add(result)
                 db.commit()
                 db.refresh(result)
@@ -110,7 +120,12 @@ class GroupTable:
                 else:
                     return None
 
+            except IntegrityError as e:
+                # llens(#151): name_key の unique 違反は None に化かさず 409 へ
+                db.rollback()
+                raise GroupNameConflictError(group.name) from e
             except Exception:
+                log.exception("Error inserting group")
                 return None
 
     def get_groups(self) -> list[GroupModel]:
@@ -143,6 +158,11 @@ class GroupTable:
         except Exception:
             return None
 
+    def get_group_by_name_key(self, name_key: str) -> Optional[GroupModel]:
+        with get_db() as db:
+            group = db.query(Group).filter_by(name_key=name_key).first()
+            return GroupModel.model_validate(group) if group else None
+
     def get_group_user_ids_by_id(self, id: str) -> Optional[str]:
         group = self.get_group_by_id(id)
         if group:
@@ -165,9 +185,14 @@ class GroupTable:
                     current = db.query(Group).filter_by(id=id).first()
                     if current is not None and current.permissions is None:
                         values["permissions"] = {}
+                if "name" in values:
+                    values["name_key"] = normalize_group_name_key(values["name"])
                 db.query(Group).filter_by(id=id).update(values)
                 db.commit()
                 return self.get_group_by_id(id=id)
+        except IntegrityError as e:
+            # llens(#151): name_key の unique 違反は None に化かさず 409 へ
+            raise GroupNameConflictError(form_data.name) from e
         except Exception as e:
             log.exception(e)
             return None
