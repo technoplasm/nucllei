@@ -395,3 +395,130 @@ def test_ext_symlink_to_other_group_is_not_followed(env):
     # リンクそのものは消せる (向こうは残る)
     assert p("/files/delete", path="/ext/groups/EMR/leak").status_code == 200
     assert (ext / "groups" / "OTHER" / "secret.txt").read_text() == "other-secret"
+
+
+# ---------------------------------------------------------------------------
+# サービスが作るディレクトリの所有者 (llens staging dev-8d20370c9 で発見)
+# ---------------------------------------------------------------------------
+# `/files/write` の親を `p.parent.mkdir(parents=True)` で作り、root 所有 755 のまま残していた
+# (jail = uid 65534 がその中で rm -r / mv できない)。新しく作ったディレクトリは**作った段すべて**
+# 65534 の物にし、既存のディレクトリの所有者は変えない。テストは root で走らないので
+# chown の呼び出しを記録して確かめる (fchown は fd の実体パスを /proc から引く)。
+
+
+@pytest.fixture
+def owned(monkeypatch):
+    calls = []
+
+    def fchown(fd, uid, gid):
+        calls.append((os.path.realpath(f"/proc/self/fd/{fd}"), uid, gid))
+
+    def chown(path, uid, gid, *, dir_fd=None, follow_symlinks=True):
+        if dir_fd is not None:
+            path = os.path.join(os.path.realpath(f"/proc/self/fd/{dir_fd}"), path)
+        calls.append((os.path.realpath(path), uid, gid))
+
+    monkeypatch.setattr(os, "fchown", fchown)
+    monkeypatch.setattr(os, "chown", chown)
+
+    def dirs_owned():
+        return {p for p, uid, gid in calls if uid == gid == 65534 and os.path.isdir(p)}
+
+    return dirs_owned
+
+
+def _real(*ps):
+    return {os.path.realpath(p) for p in ps}
+
+
+def test_write_creates_parents_owned_by_jail_user(env, owned):
+    mod, c, ws, ext = env
+    # tool の write_file (workspace 相対・既定の経路)
+    r = _post(c, "/files/write", path="recipes/外来再診予約/RECIPE.md", b64=_b64("x"))
+    assert r.status_code == 200, r.text
+    assert owned() == _real(ws / "recipes", ws / "recipes" / "外来再診予約")
+    # 既存の親 (data/) の所有者は変えない
+    r = _post(c, "/files/write", path="data/new/b.csv", b64=_b64("x"))
+    assert r.status_code == 200, r.text
+    assert ws / "data" not in {pathlib.Path(p) for p in owned()}
+    assert os.path.realpath(ws / "data" / "new") in owned()
+    # ファイルブラウザの保存 (fd で辿る経路)
+    r = _post(c, "/files/write", path="fb/x/y.txt", b64=_b64("x"), exclusive=True)
+    assert r.status_code == 200, r.text
+    assert _real(ws / "fb", ws / "fb" / "x") <= owned()
+    # /ext/groups/<g> の中
+    r = _post(
+        c,
+        "/files/write",
+        path="/ext/groups/EMR/a/b/c.txt",
+        b64=_b64("x"),
+        mounts=MEMBER_MOUNTS,
+    )
+    assert r.status_code == 200, r.text
+    emr = ext / "groups" / "EMR"
+    assert _real(emr / "a", emr / "a" / "b") <= owned()
+    assert (
+        os.path.realpath(emr) not in owned()
+    )  # 既存のグループのディレクトリは変えない
+
+
+def test_write_to_ext_public_creates_parents_owned(env, owned):
+    mod, c, ws, ext = env
+    r = _post(
+        c,
+        "/files/write",
+        path="/ext/public/p/q.txt",
+        b64=_b64("x"),
+        mounts=[{"path": "/ext/public", "rw": True}],
+    )
+    assert r.status_code == 200, r.text
+    assert owned() == _real(ext / "public" / "p")
+
+
+def test_mkdir_owned_by_jail_user(env, owned):
+    mod, c, ws, ext = env
+    assert _post(c, "/files/mkdir", path="m/n/o").status_code == 200
+    assert owned() == _real(ws / "m", ws / "m" / "n", ws / "m" / "n" / "o")
+    r = _post(c, "/files/mkdir", path="/ext/groups/EMR/d/e", mounts=MEMBER_MOUNTS)
+    assert r.status_code == 200, r.text
+    emr = ext / "groups" / "EMR"
+    assert _real(emr / "d", emr / "d" / "e") <= owned()
+    # 初回の rw bind で作るグループのディレクトリ
+    r = _post(
+        c,
+        "/files/mkdir",
+        path="/ext/groups/NEW/x",
+        mounts=[{"path": "/ext/groups/NEW", "rw": True}],
+    )
+    assert r.status_code == 200, r.text
+    assert _real(ext / "groups" / "NEW", ext / "groups" / "NEW" / "x") <= owned()
+
+
+def test_rename_does_not_create_dirs(env, owned):
+    # 改名・移動は行き先の親を作らない (無ければ 404) — root 所有のディレクトリを残す余地が無い
+    mod, c, ws, ext = env
+    assert _post(c, "/files/rename", path="notes.md", dest="no/x.md").status_code == 404
+    assert not (ws / "no").exists()
+    r = _post(
+        c,
+        "/files/rename",
+        path="/ext/groups/EMR",
+        dest="/ext/groups/EMR/no/x",
+        mounts=MEMBER_MOUNTS,
+    )
+    assert r.status_code == 400
+    assert owned() == set()
+
+
+def test_workspace_imports_dirs_owned(env, owned, monkeypatch, tmp_path):
+    # `/exec` の imports 書き込みは `_ensure_workspace` が用意する imports/ に置く。jail で
+    # 消されていても作り直し、65534 の物にする (既存はそのまま)
+    mod, c, ws, ext = env
+    monkeypatch.setattr(mod, "WORKSPACES", tmp_path / "workspaces")
+    monkeypatch.setattr(mod, "IMAGES", tmp_path / "images")
+    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
+    import shutil
+
+    shutil.rmtree(ws / "imports")
+    assert mod._ensure_workspace("u1") == ws
+    assert owned() == _real(ws / "imports")

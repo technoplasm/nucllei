@@ -424,8 +424,7 @@ def _ensure_workspace(user_id: str) -> Path:
 
     for d in (ws / "imports", ws / "exports", ws / ".exec"):
         if not d.exists():
-            d.mkdir(parents=True)
-            os.chown(d, JAIL_UID, JAIL_UID)
+            _mkdir_owned(str(d))
     return ws
 
 
@@ -641,8 +640,7 @@ def _mount_source(jail_path: str, create: bool) -> Optional[Path]:
         mode = _lstat_mode(cur)
         if mode == 0 and create and i == len(segs) - 1 and i > 0:
             try:
-                os.mkdir(cur, 0o775)
-                os.chown(cur, JAIL_UID, JAIL_UID, follow_symlinks=False)
+                _mkdir_owned(str(cur))
                 print(f"[sandbox] created {jail_path}", flush=True)
             except FileExistsError:
                 pass
@@ -1453,6 +1451,21 @@ async def exec_cell(req: CellRequest, request: Request):
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
+def _mkdir_owned(name: str, dir_fd: Optional[int] = None) -> None:
+    """ディレクトリを 1 段作って jail のユーザー (65534) の物にする。**サービスが新しく作る
+    ディレクトリはすべてこれを通す** — root 所有 755 のままだと jail (実 uid 65534) がその中で
+    rm / mv できない (llens staging で write_file の親が root になった不具合)。作った段を
+    O_NOFOLLOW で開き直して fd に fchown する (作った直後に symlink へ差し替えられても辿らない)。
+    mode 0o775 は既存の書き方どおり (/ext の default ACL の mask を絞らない)。既に在れば
+    FileExistsError をそのまま投げる (呼び手が「在る」の扱いを決める。既存の所有者は変えない)。"""
+    os.mkdir(name, 0o775, dir_fd=dir_fd)
+    fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    try:
+        os.fchown(fd, JAIL_UID, JAIL_UID)
+    finally:
+        os.close(fd)
+
+
 def _ext_target(path: str, mounts: list[MountIn], write: bool):
     """`/ext/...` を (bind のコンテナ側ディレクトリ, bind の jail パス, その下のセグメント) に。
     blocking。"""
@@ -1504,10 +1517,13 @@ def _open_dirs(base: str, segs: list[str], path: str, create: bool = False) -> i
                 if not create:
                     raise HTTPException(404, f"not found: {path}")
                 try:
-                    os.mkdir(seg, 0o775, dir_fd=fd)
-                    os.chown(seg, JAIL_UID, JAIL_UID, dir_fd=fd, follow_symlinks=False)
+                    _mkdir_owned(seg, dir_fd=fd)
                 except FileExistsError:
                     pass
+                except OSError as e:
+                    # 作った直後に symlink 等へ差し替えられた — 下の open が 400/404 に言い分ける
+                    if e.errno not in (errno.ELOOP, errno.ENOTDIR):
+                        raise
                 try:
                     nfd = os.open(seg, _DIR_FLAGS, dir_fd=fd)
                 except OSError:
@@ -1520,6 +1536,11 @@ def _open_dirs(base: str, segs: list[str], path: str, create: bool = False) -> i
     except BaseException:
         os.close(fd)
         raise
+
+
+def _makedirs_owned(base: Path, d: Path, path: str) -> None:
+    """`base` の中の `d` を (無い段を `_mkdir_owned` で作りながら) 用意する。blocking。"""
+    os.close(_open_dirs(str(base), list(d.relative_to(base).parts), path, create=True))
 
 
 def _ext_list(path: str, mounts: list[MountIn]) -> dict:
@@ -1905,10 +1926,9 @@ def _fs_mkdir(t: _Target) -> dict:
         dfd = _open_dirs(t.base, segs[:-1], t.path, create=True)
         try:
             try:
-                os.mkdir(segs[-1], 0o775, dir_fd=dfd)
+                _mkdir_owned(segs[-1], dir_fd=dfd)
             except FileExistsError:
                 raise _conflict("already exists", None)
-            os.chown(segs[-1], JAIL_UID, JAIL_UID, dir_fd=dfd, follow_symlinks=False)
         finally:
             os.close(dfd)
     except OSError as e:
@@ -2003,7 +2023,9 @@ async def files_write(req: WriteRequest):
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
+        # 無い親は 1 段ずつ作って jail のユーザーの物にする (`p.parent.mkdir(parents=True)` は
+        # root 所有で作り、jail がその中で rm / mv できなかった)。p は resolve 済みで ws の中
+        await asyncio.to_thread(_makedirs_owned, ws.resolve(), p.parent, req.path)
         p.write_bytes(data)
     except OSError as e:
         if _nospace(e):

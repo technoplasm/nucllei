@@ -72,6 +72,7 @@ def test_files_write_reports_cache_ttl(monkeypatch, tmp_path):
     """#149: `/files/write` は imports/ exports/ の期限 `cache_ttl_days` を返す
     (nucllei が取り込みの tool 出力で「YYYY-MM-DD 以降に消える」を知らせる)。0 = 消さない。"""
     monkeypatch.setattr(os, "chown", lambda *a, **k: None)
+    monkeypatch.setattr(os, "fchown", lambda *a, **k: None)
     for env, want in ((None, 30), ("5", 5), ("0", 0), ("-3", 0)):
         if env is None:
             monkeypatch.delenv("SANDBOX_CACHE_TTL_DAYS", raising=False)

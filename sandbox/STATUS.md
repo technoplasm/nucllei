@@ -88,6 +88,9 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       (違えば 409) / `exclusive` / `nofollow` を受ける。workspace でも `/ext` でも経路の symlink を
       O_NOFOLLOW で辿らない。容量切れは 507。回帰は `test_files_browser.py`。
       **実機 (コンテナ) での確認は未** — image の再ビルド・配備は統合側
+- [x] **サービスが作るディレクトリを 65534 所有に** (2026-10-07、llens staging dev-8d20370c9 で発見)。
+      `/files/write` の既定経路が親を `mkdir(parents=True)` で root 755 のまま作り、jail がその中で
+      rm / mv できなかった。mkdir はすべて `_mkdir_owned` (作った段を O_NOFOLLOW で開いて fchown) を通す。回帰は `test_files_browser.py`
 
 ## 残課題
 
