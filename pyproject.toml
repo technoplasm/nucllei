@@ -132,7 +132,7 @@ version = "0.0.0"
 # CLI の正式な入口(typer app)。editable install されるので venv からそのまま叩ける:
 #   uv run nucllei --help
 #   uv run nucllei serve --port 8080
-#   uv run nucllei create-admin --email a@llens.local --name A --password dev
+#   uv run nucllei create-admin --email a@nucllei.local --name A --password dev
 # Docker の CMD も同じ入口(`nucllei serve`)。
 [project.scripts]
 nucllei = "nucllei:app"
@@ -233,9 +233,9 @@ licenses = "python scripts/generate_licenses.py"
 release = "python scripts/tag.py"
 
 # CLI 本体は console script(`uv run nucllei --help`、[project.scripts])。ここに置くのは
-# repo 雑務タスクだけ。以下は慣例 dev admin(dev@llens.local / dev)を一発で作る
+# repo 雑務タスクだけ。以下は慣例 dev admin(dev@nucllei.local / dev)を一発で作る
 # dev 専用エイリアス — 一般の admin 作成は `uv run nucllei create-admin --email ...`。
-create-dev-admin = "nucllei create-admin --email dev@llens.local --name dev --password dev"
+create-dev-admin = "nucllei create-admin --email dev@nucllei.local --name dev --password dev"
 
 # ----- sandbox (sandbox/ = ghcr.io/technoplasm/nucllei-sandbox。設計は sandbox/README.md) -----
 # `[tool.pytest.ini_options]` の testpaths は `nucllei/test` だけなので、sandbox/tests は

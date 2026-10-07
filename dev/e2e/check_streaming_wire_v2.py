@@ -9,7 +9,7 @@ Playwright のクリーンブラウザで以下を検証する:
      続きが流れ込み完走する
 
 実行: .venv/bin/python dev/e2e/check_streaming_wire_v2.py
-前提: dev アカウント(dev@llens.local / dev)と preset モデルが 1 つ以上
+前提: dev アカウント(dev@nucllei.local / dev)と preset モデルが 1 つ以上
 (_memos/dev-environment.md)。
 """
 
@@ -19,7 +19,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 BASE = "http://localhost:5173"
-EMAIL = "dev@llens.local"
+EMAIL = "dev@nucllei.local"
 PASSWORD = "dev"
 
 PROMPT_STREAM = "1から30までの数字を1行ずつ、コメント付きで出力する Python コードを書いて。説明も付けて。"

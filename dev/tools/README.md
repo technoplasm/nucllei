@@ -15,7 +15,7 @@ nucllei 側の dev fixture — レンダリング/tool call 表示デバッグ�
 # 1) admin トークン取得
 TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auths/signin \
   -H 'Content-Type: application/json' \
-  -d '{"email":"dev@llens.local","password":"dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+  -d '{"email":"dev@nucllei.local","password":"dev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 
 # 2) render_probe を登録し llens-thinking の toolIds に追加(builtin_subagent も)、
 #    sub-worker preset を作って subagentPresetIds に配線

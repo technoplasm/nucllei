@@ -421,7 +421,7 @@ class TestAuths(AbstractPostgresTest):
             [
                 "create-admin",
                 "--email",
-                "Ops@Llens.Local",
+                "Ops@Nucllei.Local",
                 "--name",
                 "Ops",
                 "--password",
@@ -429,7 +429,7 @@ class TestAuths(AbstractPostgresTest):
             ],
         )
         assert result.exit_code == 0, result.output
-        admin = self.users.get_user_by_email("ops@llens.local")
+        admin = self.users.get_user_by_email("ops@nucllei.local")
         assert admin is not None
         assert admin.role == "admin"
         assert admin.name == "Ops"
@@ -440,7 +440,7 @@ class TestAuths(AbstractPostgresTest):
             [
                 "create-admin",
                 "--email",
-                "ops@llens.local",
+                "ops@nucllei.local",
                 "--password",
                 "supersecret1",
             ],
@@ -450,10 +450,10 @@ class TestAuths(AbstractPostgresTest):
         # 短いパスワードも受理する(#62: 下限制限なし)
         short = runner.invoke(
             cli_app,
-            ["create-admin", "--email", "new@llens.local", "--password", "short"],
+            ["create-admin", "--email", "new@nucllei.local", "--password", "short"],
         )
         assert short.exit_code == 0, short.output
-        assert self.users.get_user_by_email("new@llens.local") is not None
+        assert self.users.get_user_by_email("new@nucllei.local") is not None
 
         # 不正な email 形式は拒否
         bad = runner.invoke(
