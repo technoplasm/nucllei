@@ -6,6 +6,8 @@
  *      ポーリング(操作なし)には付かない = タブを開いたまま離席しても延命されない。
  *   2. 画面側 — サーバで切れても、アイドル中のチャットはリクエストを 1 本も出さない。
  *      startIdleWatch() が経過時間を見て自分でログイン画面へ逃がす。
+ *   3. 延命の境界(#154)— keepalive はサーバが返す期限の実際の残りで判断する。
+ *      複数タブは最終操作時刻を共有し、どのタブでも操作が無いときだけ切る。
  *
  * jsdom は依存に無いので(オフライン配備の repo に増やさない)、
  * モジュール読み込み前に必要なグローバルだけを差し込む。
@@ -17,6 +19,8 @@ type Listener = (...args: unknown[]) => void;
 let windowListeners: Record<string, Listener[]>;
 let documentListeners: Record<string, Listener[]>;
 let fetchMock: ReturnType<typeof vi.fn<Parameters<typeof fetch>, Promise<Response>>>;
+// タブ間で共有される localStorage(同じブラウザの別タブ = 同じ Map)
+let localStore: Map<string, string>;
 
 const makeTarget = (bag: Record<string, Listener[]>) => ({
 	addEventListener: (type: string, fn: Listener) => {
@@ -33,7 +37,13 @@ const fire = (bag: Record<string, Listener[]>, type: string) => {
 	}
 };
 
-const loadModule = async () => {
+/**
+ * モジュールを読み込む(= タブを 1 つ開く)。
+ * `secondTab: true` なら localStorage と fetch(= cookie を持つサーバ)を前のタブと共有したまま、
+ * 別のモジュール状態・別の window リスナでもう 1 つ開く。前のタブのリスナは `windowListeners`
+ * を読み込み前に退避しておけば発火できる。
+ */
+const loadModule = async ({ secondTab = false } = {}) => {
 	vi.resetModules();
 	windowListeners = {};
 	documentListeners = {};
@@ -56,9 +66,17 @@ const loadModule = async () => {
 		removeItem: (k: string) => store.delete(k)
 	});
 
-	fetchMock = vi.fn<Parameters<typeof fetch>, Promise<Response>>(
-		async () => new Response('{}', { status: 200 })
-	);
+	if (!secondTab) {
+		localStore = new Map();
+		fetchMock = vi.fn<Parameters<typeof fetch>, Promise<Response>>(
+			async () => new Response('{}', { status: 200 })
+		);
+	}
+	vi.stubGlobal('localStorage', {
+		setItem: (k: string, v: string) => localStore.set(k, v),
+		getItem: (k: string) => localStore.get(k) ?? null,
+		removeItem: (k: string) => localStore.delete(k)
+	});
 	vi.stubGlobal('fetch', fetchMock);
 
 	return await import('./fetch');
@@ -81,6 +99,51 @@ const sentActivityHeader = (call: number, headerName: string) => {
 	const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
 	return init?.headers ? new Headers(init.headers).get(headerName) : null;
 };
+
+/**
+ * cookie セッションを持つ BE の振る舞い(nucllei/utils/auth.py)を模す:
+ *   - 期限(exp、epoch 秒)を過ぎたリクエストは 401(延命しない)
+ *   - 操作ヘッダ付きで、残りが TTL/2 以下なら再発行(exp = 今 + TTL)
+ *   - 操作ヘッダ付きの応答には今の exp を期限ヘッダで返す(`expiresHeader: false` = 古い BE)
+ *   - signout で cookie が消える
+ * `expiredAt` は「操作中なのにサーバ側が切れた」瞬間(切れなければ null)。
+ */
+const fakeBackend = (ttlSeconds: number, { expiresHeader = true } = {}) => {
+	const state = {
+		exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+		signedOut: false,
+		expiredAt: null as number | null
+	};
+	fetchMock.mockImplementation(async (input, init) => {
+		const now = Date.now() / 1000;
+		if (String(input).endsWith('/auths/signout')) {
+			state.signedOut = true;
+			return new Response('{}', { status: 200 });
+		}
+		if (state.signedOut || now >= state.exp) {
+			state.expiredAt ??= now;
+			return new Response('{}', { status: 401 });
+		}
+		const headers = new Headers();
+		if (init?.headers && new Headers(init.headers).get('X-Nucllei-Activity')) {
+			if (state.exp - now <= ttlSeconds / 2) {
+				state.exp = Math.floor(now) + ttlSeconds;
+			}
+			if (expiresHeader) {
+				headers.set('X-Nucllei-Session-Expires', String(state.exp));
+			}
+		}
+		return new Response('{}', { status: 200, headers });
+	});
+	return state;
+};
+
+/** `/auths/` 宛の keepalive(signout 以外)の本数。 */
+const keepaliveCalls = () =>
+	fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/auths/'));
+
+/** サーバ時計の「今」の残り(秒)。 */
+const serverRemaining = (state: { exp: number }) => state.exp - Date.now() / 1000;
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -363,6 +426,7 @@ describe('FE 側アイドルタイマ', () => {
 
 	it('半減期を過ぎるまでは keepalive を出さない(操作し続けても増やさない)', async () => {
 		const { startIdleWatch, apiFetch } = await loadModule();
+		fakeBackend(3600);
 
 		// 通常の API 呼び出しがヘッダを運んだ = ここが起点
 		fire(windowListeners, 'click');
@@ -380,14 +444,15 @@ describe('FE 側アイドルタイマ', () => {
 
 	it('操作が続いても keepalive は半減期ごとに 1 本(操作のたびには出さない)', async () => {
 		const { startIdleWatch, apiFetch } = await loadModule();
+		const backend = fakeBackend(3600);
 
 		fire(windowListeners, 'click');
 		await apiFetch('/api/v1/chats/');
 		startIdleWatch(3600);
 
-		// 3 時間ぶん、15 秒ごとにホイールを回し続ける
+		// 3 時間ぶん、15 秒ごとにホイールを回し続ける(keepalive の応答 = 新しい期限を受け取る)
 		for (let i = 0; i < 720; i++) {
-			vi.advanceTimersByTime(15000);
+			await vi.advanceTimersByTimeAsync(15000);
 			fire(windowListeners, 'wheel');
 		}
 
@@ -397,6 +462,7 @@ describe('FE 側アイドルタイマ', () => {
 		for (const call of keepalives) {
 			expect(String(call[0])).toContain('/auths/');
 		}
+		expect(backend.expiredAt).toBeNull();
 	});
 
 	it('stopIdleWatch でリスナが残らない', async () => {
@@ -408,5 +474,224 @@ describe('FE 側アイドルタイマ', () => {
 
 		expect(documentListeners['visibilitychange'] ?? []).toHaveLength(0);
 		expect(location.href).toBe('http://localhost/c/abc');
+	});
+});
+
+describe('延命の境界(#154)', () => {
+	/**
+	 * staging で起きた形: TTL 20 分。年齢 TTL/2 の直前(9:55)に操作ヘッダ付きの API が出る
+	 * (BE は残りが半分を超えているので再発行しない)。その後は API を出さない操作
+	 * (ホイールで読む)だけが 20 秒おきに続く。
+	 * 旧実装は「最後にヘッダを送ってから TTL/2」の時計を 9:55 で 0 に戻すので、次の
+	 * keepalive は 19:55 以降 = 20:00 の操作で、その時点でサーバ側は切れていた。
+	 */
+	const ttl = 1200;
+	const scenario = async (expiresHeader: boolean) => {
+		const { startIdleWatch, apiFetch } = await loadModule();
+		const backend = fakeBackend(ttl, { expiresHeader });
+		startIdleWatch(ttl);
+
+		// ログイン直後の操作 + API(ヘッダを 1 本運ぶ)
+		fire(windowListeners, 'click');
+		await apiFetch('/api/v1/chats/');
+		await settle();
+
+		await vi.advanceTimersByTimeAsync(595 * 1000);
+		fire(windowListeners, 'click');
+		await apiFetch('/api/v1/chats/'); // 年齢 595 秒 = 半減期の 5 秒前
+		await settle();
+		expect(backend.exp - Math.floor(Date.now() / 1000)).toBe(ttl - 595); // 再発行されていない
+
+		// 40 分間、リクエストを生まない操作だけが続く(年齢 600, 620, … 秒。旧実装の
+		// 延命の窓 [1195, 1200) には操作が入らない — 窓が 5 秒しかないこと自体が不具合)
+		await vi.advanceTimersByTimeAsync(5 * 1000);
+		fire(windowListeners, 'wheel');
+		await settle();
+		for (let i = 0; i < 120; i++) {
+			await vi.advanceTimersByTimeAsync(20 * 1000);
+			fire(windowListeners, 'wheel');
+			await settle();
+			expect(serverRemaining(backend)).toBeGreaterThan(0);
+		}
+		return backend;
+	};
+
+	it('(a) 半減期の直前にヘッダを運んでも、残りが半分を切った後の操作で延命して切れない', async () => {
+		const backend = await scenario(true);
+
+		expect(backend.expiredAt).toBeNull();
+		expect(location.href).toBe('http://localhost/c/abc');
+		// 残りが半分を切った最初の操作(年齢 600 秒)で 1 本出ている
+		expect(keepaliveCalls().length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('(a) keepalive は半減期ごと程度で、操作のたびには出さない', async () => {
+		await scenario(true);
+
+		// 最初の 1 本(期限不明)+ 40 分 / 半減期 10 分 ≒ 4〜5 本。120 回の操作ぶんではない
+		expect(keepaliveCalls().length).toBeLessThanOrEqual(6);
+	});
+
+	it('(d) 期限ヘッダを返さない古い BE では TTL/4 間隔にフォールバックして切れない', async () => {
+		const backend = await scenario(false);
+
+		expect(backend.expiredAt).toBeNull();
+		expect(location.href).toBe('http://localhost/c/abc');
+		// TTL/4 = 5 分間隔: 40 分で 8〜9 本程度(操作のたびではない)
+		expect(keepaliveCalls().length).toBeLessThanOrEqual(12);
+	});
+
+	it('BE が再発行しなかった keepalive の後、操作のたびに出し続けない(連打防止)', async () => {
+		const { startIdleWatch, noteInteraction } = await loadModule();
+		// 再発行しない BE(時計のずれ・TTL 変更の直後などの模擬): 期限は常に残り 1 分
+		fetchMock.mockImplementation(
+			async () =>
+				new Response('{}', {
+					status: 200,
+					headers: {
+						'X-Nucllei-Session-Expires': String(Math.floor(Date.now() / 1000) + 60)
+					}
+				})
+		);
+		startIdleWatch(1200);
+
+		for (let i = 0; i < 60; i++) {
+			await vi.advanceTimersByTimeAsync(1000);
+			noteInteraction();
+		}
+		// 60 秒間に操作 60 回 → TTL/8 = 150 秒の間隔なので 1 本だけ
+		expect(keepaliveCalls()).toHaveLength(1);
+	});
+
+	it('期限が無い設定(SESSION_IDLE_TIMEOUT = -1)では keepalive も共有の書き込みも無い', async () => {
+		const { startIdleWatch, apiFetch } = await loadModule();
+
+		startIdleWatch(null);
+		for (let i = 0; i < 10; i++) {
+			vi.advanceTimersByTime(3600 * 1000);
+			fire(windowListeners, 'wheel');
+		}
+		await apiFetch('/api/v1/chats/');
+
+		expect(fetchMock.mock.calls).toHaveLength(1); // 自分で出した 1 本だけ
+		expect(location.href).toBe('http://localhost/c/abc');
+	});
+});
+
+describe('複数タブ(#154)', () => {
+	it('(b) 放置タブ B が TTL を過ぎても、A で操作中なら B は signout しない', async () => {
+		const tabA = await loadModule();
+		const backend = fakeBackend(60);
+		tabA.startIdleWatch(60);
+		const listenersA = windowListeners;
+
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(60);
+
+		// A だけで 10 秒おきに操作し続ける(B は一度も触らない)。5 分 = TTL の 5 倍
+		for (let i = 0; i < 30; i++) {
+			await vi.advanceTimersByTimeAsync(10 * 1000);
+			fire(listenersA, 'keydown');
+			await settle();
+		}
+		// B の背面復帰(visibilitychange)でも切れない
+		fire(documentListeners, 'visibilitychange');
+		await settle();
+
+		expect(signoutCalls()).toHaveLength(0);
+		expect(location.href).toBe('http://localhost/c/abc');
+		expect(backend.expiredAt).toBeNull();
+	});
+
+	it('(b) signout の直前に共有の最終操作時刻を読み直す(B のタイマの tick 直前に A で操作)', async () => {
+		const tabA = await loadModule();
+		tabA.startIdleWatch(60);
+		const listenersA = windowListeners;
+
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(60);
+
+		// B の起点から 59 秒後に A で操作 → B の 60 秒目の判定時点では A の操作から 1 秒
+		vi.advanceTimersByTime(59 * 1000);
+		fire(listenersA, 'click');
+		vi.advanceTimersByTime(16 * 1000);
+		await settle();
+
+		expect(signoutCalls()).toHaveLength(0);
+		expect(location.href).toBe('http://localhost/c/abc');
+	});
+
+	it('(c) どのタブでも操作が無ければ、従来どおりアイドルで切れる', async () => {
+		const tabA = await loadModule();
+		tabA.startIdleWatch(60);
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(60);
+
+		vi.advanceTimersByTime(76 * 1000);
+		await settle();
+
+		expect(signoutCalls().length).toBeGreaterThanOrEqual(1);
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('(c) A の操作が止まれば、そこから TTL で B も切れる', async () => {
+		const tabA = await loadModule();
+		tabA.startIdleWatch(60);
+		const listenersA = windowListeners;
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(60);
+
+		vi.advanceTimersByTime(50 * 1000);
+		fire(listenersA, 'click'); // 最後の操作(t=50)
+		vi.advanceTimersByTime(55 * 1000);
+		expect(signoutCalls()).toHaveLength(0);
+
+		vi.advanceTimersByTime(20 * 1000); // t=125 > 50 + 60
+		await settle();
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('サーバの期限もタブ間で共有する(B が知った延命を A の判断に使う)', async () => {
+		const tabA = await loadModule();
+		const backend = fakeBackend(1200);
+		tabA.startIdleWatch(1200);
+		const listenersA = windowListeners;
+		fire(listenersA, 'click'); // A: 期限不明なので 1 本(期限を知る)
+		await settle();
+
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(1200);
+
+		// 半減期を過ぎてから B で操作 → B が延命し、新しい期限を共有に書く
+		await vi.advanceTimersByTimeAsync(700 * 1000);
+		fire(windowListeners, 'click');
+		await settle();
+		const before = keepaliveCalls().length;
+		expect(serverRemaining(backend)).toBeGreaterThan(1100);
+
+		// A は古い期限(残り 500 秒)ではなく共有の期限を見るので、出さない
+		fire(listenersA, 'click');
+		await settle();
+		expect(keepaliveCalls()).toHaveLength(before);
+	});
+
+	it('localStorage が例外を投げても、タブ単独の判定で動く', async () => {
+		const { startIdleWatch } = await loadModule();
+		vi.stubGlobal('localStorage', {
+			getItem: () => {
+				throw new DOMException('denied', 'SecurityError');
+			},
+			setItem: () => {
+				throw new DOMException('denied', 'SecurityError');
+			}
+		});
+		startIdleWatch(60);
+		fire(windowListeners, 'keydown');
+		vi.advanceTimersByTime(30 * 1000);
+		expect(location.href).toBe('http://localhost/c/abc');
+
+		vi.advanceTimersByTime(46 * 1000);
+		await settle();
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 	});
 });

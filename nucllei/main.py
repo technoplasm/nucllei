@@ -211,6 +211,7 @@ from nucllei.utils.access_control import has_access
 
 from nucllei.utils.auth import (
     apply_session_renewal,
+    SESSION_EXPIRES_HEADER,
     session_idle_timeout_seconds,
     get_http_authorization_cred,
     decode_token,
@@ -590,7 +591,8 @@ async def check_url(request: Request, call_next):
     # 認証依存関数(utils/auth.py の mark_session_renewal)が request.state に
     # 積んだ token をここで Set-Cookie する。依存関数の sub-response では
     # StreamingResponse を返す endpoint(chat completion 等)で header が
-    # 捨てられるため、middleware で書く。
+    # 捨てられるため、middleware で書く。操作ヘッダ付きのリクエストには今の
+    # token の期限(X-Nucllei-Session-Expires)も同じ理由でここで付ける(#154)。
     apply_session_renewal(request, response)
     process_time = int(time.time()) - start_time
     response.headers["X-Process-Time"] = str(process_time)
@@ -603,6 +605,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 同一オリジンの FE には不要だが、別オリジンから使う配備でも延命の期限が読めるように
+    expose_headers=[SESSION_EXPIRES_HEADER],
 )
 
 

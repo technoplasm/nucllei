@@ -1008,7 +1008,13 @@ or refresh a token — see below),
 **Session idle timeout.** `SESSION_IDLE_TIMEOUT` (§3.3) is an _idle_ timeout, not an
 absolute deadline: the session is extended only on requests the browser marks as
 human-driven (an `X-Nucllei-Activity: 1` header the web UI adds after a keypress,
-click or tap), and only once the token is past half its lifetime. Background
+click or tap), and only once the token is past half its lifetime. Every response to
+a request carrying `X-Nucllei-Activity` also carries `X-Nucllei-Session-Expires: <exp>`
+— the current token's expiry as epoch seconds, whether or not it was just renewed
+(absent on requests without the activity header, on API-key requests and when the
+timeout is unlimited); the UI uses it to send a keep-alive once less than half the
+lifetime remains, and shares its last-input time across tabs so an idle tab never
+signs out a tab that is still in use. Background
 polling therefore never keeps a session alive, so leaving a tab open at an unattended
 shared terminal does not keep the user logged in. `GET /api/v1/auths/` does **not**
 refresh the session (that would let a page reload extend it forever), and API-key

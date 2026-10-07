@@ -121,6 +121,14 @@ def get_http_authorization_cred(auth_header: Optional[str]):
 
 SESSION_ACTIVITY_HEADER = "X-Nucllei-Activity"
 
+# 操作ヘッダ付きのリクエストへの応答に、**延命したかどうかに関わらず**今の token の
+# 期限(`exp`、epoch 秒)を載せるヘッダ(#154)。FE はこれで「残りが半分を切ったか」を
+# 実際の期限で判断する。以前は FE が「最後にヘッダを送ってから TTL/2」の自前の時計で
+# keepalive を出していたため、年齢 TTL/2 の直前にヘッダを運ぶと(再発行されないのに)
+# FE の時計だけ戻り、次の keepalive が年齢 TTL 近くまで出ず期限に間に合わなかった。
+# ヘッダの無いリクエスト(ポーリング等)には付けない — 延命の判断材料を配る必要がない。
+SESSION_EXPIRES_HEADER = "X-Nucllei-Session-Expires"
+
 
 def session_idle_timeout_seconds(jwt_expires_in) -> Optional[int]:
     """`SESSION_IDLE_TIMEOUT` をアイドルタイムアウトの秒数に直す。無期限なら None。
@@ -148,29 +156,39 @@ def mark_session_renewal(request: Request, user_id: str, token_data: dict) -> No
         request.app.state.config.SESSION_IDLE_TIMEOUT
     )
     if not lifetime:
-        # `-1` / `0` = 無期限。アイドルタイムアウトも無い
+        # `-1` / `0` = 無期限。アイドルタイムアウトも無い(期限ヘッダも付けない)
         return
 
     expires_delta = timedelta(seconds=lifetime)
     exp = token_data.get("exp")
     if exp is not None and (exp - time.time()) > lifetime / 2:
-        # まだ寿命の半分以上残っている — 発行しない
+        # まだ寿命の半分以上残っている — 発行しない。期限は今の token のものを返す
+        request.state.session_expires_at = int(exp)
         return
     # exp が無い token(無期限だった頃に発行されたもの)は、ここで初めて
     # 期限付きに切り替える = 設定変更が次の操作から効く
 
-    request.state.renewed_session_token = create_token(
-        data={"id": user_id}, expires_delta=expires_delta
-    )
-    request.state.renewed_session_expires_at = int(time.time() + lifetime)
+    token = create_token(data={"id": user_id}, expires_delta=expires_delta)
+    # cookie の期限・応答ヘッダの期限は token の exp そのもの(別に時刻を取ると
+    # 秒の境目で 1 ずれる)
+    expires_at = int(decode_token(token)["exp"])
+    request.state.renewed_session_token = token
+    request.state.renewed_session_expires_at = expires_at
+    request.state.session_expires_at = expires_at
 
 
 def apply_session_renewal(request: Request, response: Response) -> None:
-    """`mark_session_renewal()` が積んだ token を cookie に書く。
+    """`mark_session_renewal()` が積んだ token を cookie に、期限を応答ヘッダに書く。
 
     cookie 属性は `routers/auths.py` の発行箇所と同一でなければならない
     (80/443 併用の配備で `samesite` / `secure` がずれると壊れる)。
+    期限ヘッダ(`SESSION_EXPIRES_HEADER`)は操作ヘッダ付きのリクエストにだけ、
+    再発行したかどうかに関わらず付く(再発行したなら新しい token の exp)。
     """
+    expires_at = getattr(request.state, "session_expires_at", None)
+    if expires_at is not None:
+        response.headers[SESSION_EXPIRES_HEADER] = str(expires_at)
+
     token = getattr(request.state, "renewed_session_token", None)
     if not token:
         return

@@ -16,6 +16,9 @@ CORE 領域(認証)なので、延命が起きる条件・**起きない**条件
 - アイドル失効の後始末(#137): FE が切ったとき `GET /auths/signout` でサーバ側セッション
   (= httpOnly cookie)を落とせること — 認証無しで通り、cookie を発行時と同じ属性で消す。
   その後 cookie 無しの `GET /auths/` は 401/403(= `/auth` がアプリへ戻さない)。
+- 期限ヘッダ(#154): 操作ヘッダ付きの応答には、延命したかどうかに関わらず今の token の
+  `exp` を `X-Nucllei-Session-Expires` で返す(FE が実際の残り時間で keepalive を判断する)。
+  ヘッダ無しのリクエスト・無期限設定では付けない。
 """
 
 import time
@@ -26,6 +29,7 @@ import pytest
 from test.util.abstract_integration_test import AbstractPostgresTest
 
 ACTIVITY_HEADER = "X-Nucllei-Activity"
+EXPIRES_HEADER = "X-Nucllei-Session-Expires"
 
 
 def _set_cookie_header(response):
@@ -252,6 +256,111 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         assert "httponly" in renewal_attrs
         assert renewal_attrs.get("samesite") == "lax"
         assert "secure" not in renewal_attrs  # 既定(HTTP 配備)
+
+    # ---- 期限ヘッダ(#154: FE が実際の残り時間で延命を判断する) ----
+
+    def test_expires_header_on_renewal_matches_the_new_cookie(self):
+        """再発行した応答の期限ヘッダは、新しい cookie(token)の exp と一致する。"""
+        from email.utils import parsedate_to_datetime
+
+        from nucllei.main import app
+        from nucllei.utils.auth import decode_token
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+        self._login_with(user, remaining=timedelta(minutes=5))
+
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        new_exp = decode_token(_issued_token(response))["exp"]
+        assert response.headers[EXPIRES_HEADER] == str(new_exp)
+
+        # cookie の Expires も同じ時刻(秒の境目でずれない)
+        expires = next(
+            part.split("=", 1)[1]
+            for part in _set_cookie_header(response).split(";")
+            if part.strip().lower().startswith("expires=")
+        )
+        assert int(parsedate_to_datetime(expires).timestamp()) == new_exp
+
+    def test_expires_header_without_renewal_is_the_current_exp(self):
+        """延命しなかった応答でも、今の token の exp を返す(Set-Cookie は無し)。
+
+        これが無いと FE は「年齢 TTL/2 の直前にヘッダを運んだが再発行されなかった」ことを
+        知り得ず、自前の時計を戻して次の延命が期限に間に合わなくなる(#154 の主因)。
+        """
+        from nucllei.main import app
+        from nucllei.utils.auth import decode_token
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+        token = self._login_with(user, remaining=timedelta(minutes=31))
+
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        assert _set_cookie_header(response) is None
+        assert response.headers[EXPIRES_HEADER] == str(decode_token(token)["exp"])
+
+    def test_expires_header_on_other_endpoints(self):
+        """認証依存関数の共通処理なので、`/auths/` 以外の endpoint でも付く。"""
+        from nucllei.main import app
+        from nucllei.utils.auth import decode_token
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+        token = self._login_with(user, remaining=timedelta(minutes=50))
+
+        response = self.fast_api_client.get(
+            "/api/v1/chats/", headers={ACTIVITY_HEADER: "1"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.headers[EXPIRES_HEADER] == str(decode_token(token)["exp"])
+
+    def test_no_expires_header_without_activity_header(self):
+        """操作ヘッダの無いリクエスト(ポーリング等)には付けない。"""
+        from nucllei.main import app
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+        self._login_with(user, remaining=timedelta(minutes=5))
+
+        response = self._get_me(activity=False)
+        assert response.status_code == 200, response.text
+        assert EXPIRES_HEADER not in response.headers
+
+    def test_no_expires_header_when_unlimited(self):
+        """既定(無期限)では付けない = 既定の挙動は不変。"""
+        user = self._create_user()
+        self._login_with(user, remaining=timedelta(minutes=5))
+
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        assert EXPIRES_HEADER not in response.headers
+
+    def test_no_expires_header_for_expired_or_api_key_sessions(self):
+        """期限切れ(401/403)・API キー経路には付けない(cookie セッション限定)。"""
+        from nucllei.main import app
+        from nucllei.models.users import Users
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "1h"
+        user = self._create_user()
+
+        self._login_with(user, remaining=timedelta(seconds=-10))
+        response = self._get_me(activity=True)
+        assert response.status_code in (401, 403), response.text
+        assert EXPIRES_HEADER not in response.headers
+
+        self.fast_api_client.cookies.clear()
+        Users.update_user_api_key_by_id(user.id, "sk-idle-expires-test")
+        response = self.fast_api_client.get(
+            self.create_url(""),
+            headers={
+                "Authorization": "Bearer sk-idle-expires-test",
+                ACTIVITY_HEADER: "1",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert EXPIRES_HEADER not in response.headers
 
     # ---- signout(#137: FE のアイドル失効からの明示的な失効) ------
 

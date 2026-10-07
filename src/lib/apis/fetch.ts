@@ -23,8 +23,12 @@
  *   - 画面側: サーバで切れても、アイドル中のチャットはリクエストを 1 本も出さないため
  *     前の人の画面が残り続ける。startIdleWatch() が経過時間を見て自分でログイン画面へ逃がす。
  *   - 逆に「操作はしているがリクエストが出ない」(スクロールして読む・長文を打つ)ときは、
- *     **操作した瞬間に、半減期に 1 本だけ**延命のリクエスト(sendKeepalive)を出す。
+ *     **操作した瞬間に、サーバの期限の残りが半分を切っていれば 1 本だけ**延命のリクエスト
+ *     (sendKeepalive)を出す。残りはサーバが返す期限(SESSION_EXPIRES_HEADER)で測る(#154)。
  *     操作が無ければ 1 本も出ない。
+ *   - 複数タブ(#154): 最終操作時刻とサーバの期限は localStorage でタブ間に共有する。
+ *     cookie は全タブ共通なので、アイドル判定は「**どのタブでも**操作が無い」ときだけ —
+ *     放置タブのアイドル判定が signout で作業中のタブを道連れにしない。
  *   - 「人の操作」には、マイクの音声入力で発話を検出している間も含める(noteInteraction を
  *     VoiceRecording が呼ぶ)。録音バーが開いているだけの無音は含めない。
  */
@@ -41,18 +45,105 @@ export const SESSION_EXPIRED_FLAG = 'llens:session-expired';
  */
 export const ACTIVITY_HEADER = 'X-Nucllei-Activity';
 
+/**
+ * 操作ヘッダ付きのリクエストへの応答に BE が載せる「今の token の期限」(`exp`、epoch 秒)。
+ * 延命(再発行)したかどうかに関わらず付く。BE 側は nucllei/utils/auth.py の SESSION_EXPIRES_HEADER。
+ */
+export const SESSION_EXPIRES_HEADER = 'X-Nucllei-Session-Expires';
+
+// タブ間で共有する値(localStorage)。どちらもこのブラウザの時計での epoch ミリ秒。
+export const SHARED_INTERACTION_KEY = 'nucllei:idle:last-interaction';
+export const SHARED_EXPIRES_KEY = 'nucllei:idle:session-expires';
+
 let sessionExpired = false;
 let verifying: Promise<void> | null = null;
 
 // 最後の延命以降に人の操作があったか(リクエストにヘッダを付けたら降ろす)
 let interacted = false;
 // 最後に活動ヘッダを**実際に運べた**時刻(keepalive でも通常の API 呼び出しでもよい)。
-// keepalive を出すかの判定に使う。`0` = このタブではまだ 1 本も運べていない。
+// サーバの期限が分からない(期限ヘッダを返さない古い BE)ときの keepalive の判定にだけ使う。
+// `0` = このタブではまだ 1 本も運べていない。
 let lastActivitySentAt = 0;
+// 最後に keepalive を出した時刻(連打防止 — sendKeepalive の説明)
+let lastKeepaliveAt = 0;
+// 最後に知ったサーバの期限(このブラウザの時計に直した epoch ミリ秒。`0` = 不明)。
+// 他タブが知った値は readShared() で取り込む。
+let knownExpiresAt = 0;
 // 最後に人の操作があった時刻(FE 側アイドルタイマの起点)。
 // 残り時間ではなく**時刻の差**で判定するので、スリープ・背面タブでタイマが
-// 飛んでも復帰時点で正しく評価できる。
+// 飛んでも復帰時点で正しく評価できる。他タブの操作は readShared() で取り込む。
 let lastInteractionAt = Date.now();
+// localStorage への書き込みの間引き(keydown のたびに全タブへ storage イベントを撒かない)
+let lastSharedWriteAt = 0;
+const SHARED_WRITE_MIN_MS = 1000;
+
+/* ---------------------------------------------------------------- *
+ * タブ間共有(#154)
+ *
+ * cookie(= サーバのセッション)はタブ間で 1 つなのに、最終操作時刻がタブごとだと
+ * 放置タブ B のアイドル判定が signout で cookie を消し、作業中のタブ A を道連れにする。
+ * 判断の直前(アイドル判定・keepalive)に localStorage を読み直して取り込む —
+ * `storage` イベントを待つより単純で、イベントの取りこぼしも起きない。
+ * localStorage はプライベートモード・ポリシー等で例外になりうるので必ず try/catch し、
+ * 使えなければタブ単独の判定(従来どおり)に落ちる。
+ * ---------------------------------------------------------------- */
+
+const readSharedNumber = (key: string): number => {
+	try {
+		const value = Number(localStorage.getItem(key));
+		return Number.isFinite(value) && value > 0 ? value : 0;
+	} catch {
+		return 0;
+	}
+};
+
+const writeShared = (key: string, value: number) => {
+	try {
+		localStorage.setItem(key, String(value));
+	} catch {
+		// 共有できないだけ(タブ単独で判定する)
+	}
+};
+
+/** 他タブの最終操作時刻・サーバの期限を取り込む。 */
+const readShared = () => {
+	// 未来の時刻は信用しない(同じ時計なので本来起きない)
+	const interaction = Math.min(readSharedNumber(SHARED_INTERACTION_KEY), Date.now());
+	if (interaction > lastInteractionAt) {
+		lastInteractionAt = interaction;
+	}
+	// 期限は「最後に知った値」をそのまま採る(max にしない)。cookie は 1 つなので最新の
+	// 応答が正。古い値が残っていても、期限は延命・再ログインで延びる一方なので
+	// 古い値は短め = keepalive を早めに出す安全側にしか倒れない。
+	const expires = readSharedNumber(SHARED_EXPIRES_KEY);
+	if (expires) {
+		knownExpiresAt = expires;
+	}
+};
+
+const shareInteraction = () => {
+	if (lastInteractionAt - lastSharedWriteAt < SHARED_WRITE_MIN_MS) {
+		return;
+	}
+	lastSharedWriteAt = lastInteractionAt;
+	writeShared(SHARED_INTERACTION_KEY, lastInteractionAt);
+};
+
+/**
+ * 応答の期限ヘッダを覚える。サーバの時計とずれていても残り時間が正しくなるよう、
+ * 応答の `Date`(あれば)との差を手元の時計に足し直す。
+ */
+const noteServerExpiry = (res: Response) => {
+	const raw = res.headers?.get?.(SESSION_EXPIRES_HEADER);
+	const exp = raw ? Number(raw) : NaN;
+	if (!Number.isFinite(exp) || exp <= 0) {
+		return;
+	}
+	const serverNow = Date.parse(res.headers.get('Date') ?? '');
+	const remainingMs = exp * 1000 - (Number.isFinite(serverNow) ? serverNow : Date.now());
+	knownExpiresAt = Date.now() + remainingMs;
+	writeShared(SHARED_EXPIRES_KEY, knownExpiresAt);
+};
 
 /**
  * 「人の操作があった」と記録する(アイドルタイマの起点を進め、次のリクエストに延命ヘッダを付ける)。
@@ -66,6 +157,7 @@ let lastInteractionAt = Date.now();
 export const noteInteraction = () => {
 	interacted = true;
 	lastInteractionAt = Date.now();
+	shareInteraction();
 	// 延命の 1 本は**操作した瞬間**に出す(理由は sendKeepalive の説明)
 	sendKeepalive();
 };
@@ -236,13 +328,25 @@ let idleTimeoutSeconds: number | null = null;
  * (E2E で実測: wheel だけ 150 秒 → 次のクリックで追い出し。2026-09-05)。
  *
  * 出す条件:
- *   1. 最後に**ヘッダを運べた**時刻から `idleTimeoutSeconds / 2`(= BE が再発行を
- *      始める半減期)以上経っている。普通に API を叩いている間はここで弾かれるので、
- *      チャットを使っているだけでは追加のリクエストは出ない。
- *      判定間隔で刻むと 4 リクエスト/分になるが、半減期で刻めば `1d` なら 12 時間に
- *      1 本、`30m` なら 15 分に 1 本(院内の多人数配備では無視できない — ken 2026-09-05)。
+ *   1. **サーバの期限の残りが `idleTimeoutSeconds / 2`(= BE が再発行する境目)以下**。
+ *      残りは BE が操作ヘッダ付きの応答に載せる期限(SESSION_EXPIRES_HEADER)で測る。
+ *      普通に API を叩いている間は(その応答で期限が延びるので)ここで弾かれ、追加の
+ *      リクエストは出ない。`1d` なら 12 時間に 1 本、`30m` なら 15 分に 1 本程度
+ *      (院内の多人数配備では無視できない — ken 2026-09-05)。
+ *      **以前は「最後にヘッダを運んでから TTL/2」の自前の時計だった(#154)。** 年齢 TTL/2 の
+ *      直前にヘッダを運ぶと BE は再発行しないのに FE の時計だけ 0 に戻り、次の keepalive が
+ *      年齢 TTL 近くまで出ない — 延命の窓が数秒しかなく、操作中でも切れていた。
+ *      実際の残りで測れば、残りが半分を切った後の最初の操作で必ず 1 本出る
+ *      (窓は常に TTL/2 ある)。
+ *      期限が分からない(期限ヘッダを返さない古い BE・まだ 1 本も運べていない)ときは、
+ *      最後にヘッダを運んでから TTL/4 で出す(半減期の直前に運んでも、TTL/4 後 = 年齢
+ *      3TTL/4 で必ず再発行される = 窓は TTL/4)。
  *   2. 呼ばれるのが `noteInteraction()` からだけ = 人が操作した瞬間。
  *      **無操作なら 1 本も出ない** — 「ポーリングでは延命しない」の要はここで守られる。
+ *      他タブの操作(共有の最終操作時刻)でも出さない — そのタブ自身が操作の瞬間に出す。
+ *   3. 直前の keepalive から TTL/8 以上経っている(連打防止)。普段は 1 本で期限が延びて
+ *      1. で弾かれるが、時計のずれ・管理画面での TTL 変更などで BE が再発行しなかったとき、
+ *      キーを叩くたびに出続けないように。
  *
  * **アイドル判定のタイマからは呼ばない。** タイマの tick で出すと、操作から最大
  * 半減期ぶん遅れて再発行が走り、サーバの期限が FE のアイドル期限を**追い越す**。
@@ -251,16 +355,41 @@ let idleTimeoutSeconds: number | null = null;
  * tick で延命 t=26.2s → FE 追い出し t=71.2s → `/auth` が `/` へ戻す。2026-09-05)。
  * 操作した瞬間に出せば `lastActivitySentAt <= lastInteractionAt` が常に成り立ち、
  * サーバのセッションは必ず FE の期限**以前**に死ぬ。
+ *
+ * #154 の変更後もこの不変条件は崩れない:
+ *   - 期限ヘッダで変わるのは「操作の瞬間に**出すかどうか**」だけで、「**いつ**出すか」は
+ *     今までどおり操作の瞬間(noteInteraction の同期呼び出し)だけ。期限ヘッダ・共有値を
+ *     読んでもサーバの期限は 1 秒も延びない。
+ *   - タブ間共有で FE の期限は「全タブの最終操作 + TTL」になる。keepalive はあるタブ自身の
+ *     操作の瞬間 t に出て、サーバの期限を t + TTL にする。t はそのまま共有の最終操作時刻に
+ *     入る(noteInteraction が先に記録する)ので、t + TTL ≤ 共有の最終操作 + TTL = FE の期限。
+ *     他タブの操作を取り込んだだけ(storage の読み直し)では keepalive を出さない。
+ *   - それでも漏れがあれば(通常リクエストが後から操作ヘッダを運ぶ等)、アイドル失効時の
+ *     signout(#137)がサーバ側を構成的に落とす。
  */
 const sendKeepalive = () => {
 	if (!idleTimeoutSeconds) {
 		return;
 	}
-	// lastActivitySentAt === 0 = このタブではまだ 1 本も運べていない
-	// (開き直した直後など。手元の cookie が既に半分を過ぎている可能性があるので出す)
-	if (Date.now() - lastActivitySentAt < (idleTimeoutSeconds / 2) * 1000) {
+	const ttlMs = idleTimeoutSeconds * 1000;
+	const now = Date.now();
+	if (now - lastKeepaliveAt < ttlMs / 8) {
 		return;
 	}
+	readShared();
+	if (knownExpiresAt) {
+		// サーバの期限は TTL より先には無い(管理画面で TTL を縮めた直後などの古い値を丸める)
+		const remaining = Math.min(knownExpiresAt - now, ttlMs);
+		if (remaining > ttlMs / 2) {
+			return;
+		}
+	} else if (now - lastActivitySentAt < ttlMs / 4) {
+		// 期限が分からない — 保守的に TTL/4 間隔。lastActivitySentAt === 0 = このタブでは
+		// まだ 1 本も運べていない(開き直した直後など。手元の cookie が既に半分を過ぎて
+		// いる可能性があるので出す)
+		return;
+	}
+	lastKeepaliveAt = now;
 	void apiFetch(`${WEBUI_API_BASE_URL}/auths/`, {
 		method: 'GET',
 		headers: { Accept: 'application/json' }
@@ -301,12 +430,17 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 
 	// 起点はこの瞬間(ページ読み込み自体が人の操作)
 	lastInteractionAt = Date.now();
+	shareInteraction();
 	idleTimeoutSeconds = timeoutSeconds;
 
 	const check = () => {
 		if (sessionExpired) {
 			return;
 		}
+		// 判定の直前に他タブの最終操作を取り込む(#154)。アイドル扱いは「どのタブでも
+		// 操作が無い」ときだけ — 下の signout は全タブ共通の cookie を消すので、
+		// 放置タブの判定だけで作業中のタブを道連れにしない。
+		readShared();
 		if (Date.now() - lastInteractionAt >= timeoutSeconds * 1000) {
 			stopIdleWatch();
 			handleSessionExpired('idle');
@@ -342,6 +476,9 @@ export const apiFetch: typeof fetch = async (input, init) => {
 	} else if (get(backendUnreachable)) {
 		backendUnreachable.set(false);
 	}
+
+	// 操作ヘッダ付きの応答には今のサーバの期限が載る(keepalive の判断に使う)
+	noteServerExpiry(res);
 
 	// ログイン済みセッションでの 401/403 はセッション失効の可能性 — me で裏取りする
 	if ((res.status === 401 || res.status === 403) && get(user)) {
