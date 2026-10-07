@@ -12,6 +12,12 @@
 両者はここで正規化ディスクリプタ ``{kind, language}``(language は hljs 言語 id)
 に落ち、``calls[].render`` としてイベント/永続化に同梱される。フロントは dumb に
 ディスクリプタ通り描画するだけ。
+
+**結果の表示は backend が実行後に 1 か所で確定する**(#153、ken 2026-10-07)。
+``resolve_result_render`` が結果ごとに 1 つ決めて ``results[i].render`` に載せ、フロントは
+それだけを見る(``calls[].render`` は引数の ``args`` だけを運ぶ)。結果の描画が呼び出しごとに
+決まる tool(read_file — 拡張子で md / code / text)は戻り値を ``Rendered(text, kind, language)``
+にする。
 """
 
 from dataclasses import dataclass
@@ -42,6 +48,61 @@ Text = Annotated[str, RenderAs(kind="text")]
 Markdown = Annotated[str, RenderAs(kind="markdown")]
 
 
+@dataclass(frozen=True)
+class Rendered:
+    """結果の表示種別を呼び出しごとに持つ戻り値(#153)。モデルへは ``text`` だけが渡る。
+
+    ``normalize_tool_result`` が text に落とし、表示は ``resolve_result_render`` が
+    ``descriptor()`` に確定する(静的な宣言より強い)。戻り型 Rendered は静的な結果宣言を
+    作らない(``extract_render_from_function``) — 値が種別を持つので宣言は意味を持たない。
+    切詰め・エラーで text に落ちる規則はそのまま。
+    """
+
+    text: str
+    kind: str
+    language: Optional[str] = None
+
+    def descriptor(self) -> dict:
+        descriptor = {"kind": self.kind}
+        if self.kind == "code":
+            descriptor["language"] = normalize_hljs_language(self.language)
+        return descriptor
+
+
+def resolve_result_render(
+    raw: Any,
+    static: Optional[dict] = None,
+    *,
+    failed: bool = False,
+    truncated: bool = False,
+) -> Optional[dict]:
+    """結果の表示 ``results[i].render`` を確定する唯一の場所(同期 middleware と background
+    runner が共有)。``None`` は text(フロントの既定)。優先順(上ほど強い):
+
+    1. エラー(raise 由来の ERROR 文 — ``failed``)と切り詰めた結果 → text。JSON や宣言の
+       描画はパース前提なので壊れた本文に当てない。``mark_error_kind`` の旗だけの結果は
+       failed ではない(本文は通常の結果なので render を残す)
+    2. ``Rendered`` → tool が明示した {kind, language}
+    3. 静的な宣言 ``static``(戻り型の Annotated = ``tool_dict["render"]["result"]``。
+       await_task は ``sink.set_result_render`` で実 tool の確定済みの表示に差し替える)
+    4. dict / list → json
+    5. どれでもなければ text
+
+    宣言(3)を dict / list(4)より上に置くのは、宣言の多くが dict の形への宣言だから
+    (run_subagent の ``subagent``・load_skill の ``skill``・await_task の封筒への持ち上げ)。
+    逆にすると dict を返すそれらが全部 json に落ちる。
+    """
+    if failed or truncated:
+        return None
+    if isinstance(raw, Rendered):
+        return raw.descriptor()
+    if isinstance(static, dict) and static.get("kind"):
+        return dict(static)
+    if isinstance(raw, (dict, list)):
+        return {"kind": "json"}
+    return None
+
+
 ####################################
 # 言語 id / media type の正規化テーブル
 ####################################
@@ -62,6 +123,74 @@ def normalize_hljs_language(language: Optional[str]) -> str:
     if not lang:
         return "plaintext"
     return HLJS_ALIASES.get(lang, lang)
+
+
+# ファイルの拡張子 → hljs id(read_file の code 表示、#153)。ここに無い拡張子は code に
+# しない(推測しない — 呼び手が text で出す)。md は code ではなく markdown 描画なので載せない。
+# csv / tsv は hljs に言語が無いが、ヘッダの言語名として素通しする(フロントが plaintext に落とす)
+EXTENSION_TO_HLJS = {
+    **{
+        ext: ext
+        for ext in (
+            "py",
+            "sql",
+            "sh",
+            "bash",
+            "zsh",
+            "js",
+            "ts",
+            "json",
+            "yaml",
+            "csv",
+            "tsv",
+            "toml",
+            "ini",
+            "xml",
+            "html",
+            "css",
+            "scss",
+            "r",
+            "go",
+            "java",
+            "c",
+            "cpp",
+            "php",
+            "lua",
+            "swift",
+            "diff",
+        )
+    },
+    "yml": "yaml",
+    "mjs": "javascript",
+    "cjs": "javascript",
+    "jsx": "javascript",
+    "tsx": "typescript",
+    "jsonl": "json",
+    "ipynb": "json",
+    "htm": "html",
+    "svg": "xml",
+    "cfg": "ini",
+    "conf": "ini",
+    "rb": "ruby",
+    "rs": "rust",
+    "h": "c",
+    "cc": "cpp",
+    "hpp": "cpp",
+    "cs": "csharp",
+    "kt": "kotlin",
+    "pl": "perl",
+    "tex": "latex",
+    "patch": "diff",
+    "ps1": "powershell",
+    "bat": "dos",
+}
+
+
+def hljs_language_for_extension(ext: Optional[str]) -> Optional[str]:
+    """拡張子(``.py`` / ``py``、大文字小文字は問わない)→ hljs id。表に無ければ None。"""
+    key = (ext or "").strip().lower().lstrip(".")
+    lang = EXTENSION_TO_HLJS.get(key)
+    return normalize_hljs_language(lang) if lang else None
 
 
 # media type → hljs id。慣用プレフィックス(text/x- 等)は素通し、不明は plaintext
@@ -117,6 +246,9 @@ def hljs_to_media_type(language: Optional[str]) -> str:
 
 def _descriptor_from_annotation(annotation: Any) -> Optional[dict]:
     if get_origin(annotation) is not Annotated:
+        return None
+    if get_args(annotation)[0] is Rendered:
+        # 値が自分の表示種別を持つ型 — 静的な宣言は付けない(FE が値の render より優先するため)
         return None
     for meta in get_args(annotation)[1:]:
         if isinstance(meta, RenderAs):

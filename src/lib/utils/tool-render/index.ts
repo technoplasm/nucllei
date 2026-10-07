@@ -1,5 +1,6 @@
 // tool 引数/結果の型駆動レンダリング(issue #20)の純ロジック。
-// 仕様: _memos/tool-arg-render.md。バックエンドが calls[].render に同梱した
+// 仕様: _memos/tool-arg-render.md。引数はバックエンドが calls[].render.args に同梱した、
+// 結果はバックエンドが実行後に確定して results[].render に載せた(#153)
 // 正規化ディスクリプタ {kind, language} の通りに描画内容を決める。
 // フロントは dumb — 引数名・値の長さからの推測はしない。
 // フォールバックは「型に忠実」(素の str は scalar、object/array は json)。
@@ -11,9 +12,9 @@ export type RenderDescriptor = {
 	language?: string;
 };
 
+// call に付くのは引数の表示だけ(結果の表示は results[].render — #153)
 export type ToolCallRender = {
 	args?: Record<string, RenderDescriptor>;
-	result?: RenderDescriptor;
 };
 
 export type ArgDisplay = {
@@ -255,8 +256,9 @@ export const executionErrorKind = (
 // #110: execution チャンネルの「封筒」2 種。
 // ① spawn 即返し {ok, task_id, tool_name, status: "running"} — kind=execution の
 //    状態表示へ(現在状態は exec 行ポーリングが持つ)。
-// ② await_task の返り {"tasks":[ENTRY...]} — 要求 id がちょうど 1 件 ∧ done ∧
-//    render 宣言ありのときだけ中身(ENTRY.result)を descriptor で描き直す。
+// ② await_task の返り {"tasks":[ENTRY...]} — 要求 id がちょうど 1 件 ∧ done のとき、
+//    BE は results[].render を実 tool の確定済みの表示(text を含む)に差し替えてくる
+//    (#153)ので、中身(ENTRY.result)をその descriptor で描き直す。
 //    複数件・running(時間切れ)・terminal 非 done は剥がさず通常描画(JSON のまま)。
 //    check_task / stop_task も {"tasks":[...]} だが結果本文(result)を持たないため
 //    剥がし条件に合わず、自然に通常描画になる。
@@ -326,9 +328,9 @@ const parseSingleDoneTaskResult = (content: string): unknown | undefined => {
 	return record.result;
 };
 
-// tool 結果(文字列)をディスクリプタで出し分ける。ディスクリプタは
-// ①戻り型宣言(calls[].render.result)または ②backend が実行時の実型から
-// 同梱したもの(dict/list → {kind:"json"})。どちらも無ければ text —
+// tool 結果(文字列)をディスクリプタで出し分ける。ディスクリプタは backend が実行後に
+// 優先順(エラー・切詰め → text、Rendered、戻り型宣言、dict/list → json)で 1 つに確定した
+// results[].render だけ(#153 — tool_render.resolve_result_render)。無ければ text —
 // 中身を見て JSON かどうかを推測する動的解釈はしない(型に忠実の原則。
 // 2026-07-17 改訂 — 旧実装は非 JSON 文字列をクォート表示、JSON 風文字列を
 // 勝手に整形していた)。tool の結果は「値を見る」ものでありデザイン対象では
@@ -338,8 +340,7 @@ export const classifyToolResult = (
 	descriptor?: RenderDescriptor
 ): ResultDisplay => {
 	// #110: execution の封筒は shape で判定し、descriptor 分岐より**先**に置く。
-	// この call に付く descriptor は実 tool(subagent 等)のものであって封筒の形を
-	// 表さない。spawn 即返しは状態表示(kind=execution)へ。
+	// spawn 即返しは状態表示(kind=execution)へ。
 	const spawn = parseSpawnEnvelope(content);
 	if (spawn !== null) {
 		return {
@@ -348,22 +349,17 @@ export const classifyToolResult = (
 			...(spawn.toolName ? { toolName: spawn.toolName } : {})
 		};
 	}
-	// await_task の回収形 {"tasks":[...]}: 要求 id がちょうど 1 件 ∧ done ∧
-	// render 宣言ありのときだけ剥がし、中身に descriptor を適用する(BE は
-	// results[].render を実 tool の宣言で上書きしてくる — この条件のときだけ)。
-	// 複数件・running・非 done は剥がさない — 通常描画(runtime の json render)。
+	// await_task の回収形 {"tasks":[...]}: 要求 id がちょうど 1 件 ∧ done なら剥がし、
+	// 中身に descriptor を適用する(BE がこの条件のときだけ results[].render を実 tool の
+	// 確定済みの表示に差し替えてくる)。複数件・running・非 done は剥がさない — 封筒の
+	// json のまま通常描画。
 	if (descriptor !== undefined) {
 		const raw = parseSingleDoneTaskResult(content);
 		if (raw !== undefined) {
 			// 中身がさらに封筒でも剥がせるよう再帰する。中身は必ず封筒より短いので
 			// 停止する(文字列は JSON が自身を含み得ない)。
 			const inner = typeof raw === 'string' ? raw : JSON.stringify(raw);
-			// 中身が**文字列**なのに kind=json は、封筒 dict 由来の型 render が
-			// そのまま来た(または切詰めで render が降格された)ケース — 実 tool が
-			// json を宣言していれば BE は object を返す。宣言なし扱い(= text)に落とす
-			const innerDescriptor =
-				typeof raw === 'string' && descriptor?.kind === 'json' ? undefined : descriptor;
-			return classifyToolResult(inner, innerDescriptor);
+			return classifyToolResult(inner, descriptor);
 		}
 	}
 	if (descriptor?.kind === 'skill') {

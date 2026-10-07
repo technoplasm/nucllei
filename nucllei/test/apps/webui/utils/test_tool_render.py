@@ -236,3 +236,77 @@ def test_get_tool_specs_injects_content_media_type():
     assert props["code"]["type"] == "string"
     assert props["code"]["contentMediaType"] == "text/x-python"
     assert "contentMediaType" not in props["timeout"]
+
+
+####################################
+# 値が表示種別を持つ戻り値(Rendered、#153)
+####################################
+
+
+def test_rendered_descriptor():
+    from nucllei.utils.tool_render import Rendered
+
+    assert Rendered("x", "markdown").descriptor() == {"kind": "markdown"}
+    assert Rendered("x", "text").descriptor() == {"kind": "text"}
+    # code の language は hljs id に正規化(alias・空は plaintext)
+    assert Rendered("x", "code", "sh").descriptor() == {
+        "kind": "code",
+        "language": "bash",
+    }
+    assert Rendered("x", "code").descriptor() == {
+        "kind": "code",
+        "language": "plaintext",
+    }
+    # code 以外の language は載せない
+    assert Rendered("x", "markdown", "python").descriptor() == {"kind": "markdown"}
+
+
+def test_normalize_tool_result_takes_rendered():
+    """同期 middleware と background runner が共有する正規化。モデルへは text だけ。"""
+    from nucllei.utils.executions import normalize_tool_result
+    from nucllei.utils.tool_render import Rendered
+
+    assert normalize_tool_result(Rendered("# a", "markdown")) == (
+        "# a",
+        {"kind": "markdown"},
+    )
+    assert normalize_tool_result(Rendered("a = 1", "code", "py")) == (
+        "a = 1",
+        {"kind": "code", "language": "python"},
+    )
+    # 既存の分岐は不変
+    assert normalize_tool_result({"a": 1}) == ('{"a": 1}', {"kind": "json"})
+    assert normalize_tool_result("s") == ("s", None)
+    assert normalize_tool_result(None) == ("", None)
+
+
+def test_rendered_return_type_is_not_a_static_declaration():
+    """戻り型 Rendered は静的な結果宣言を作らない(FE は calls[].render.result を値の
+    render より優先するため、宣言があると呼び出しごとの種別が負ける)。"""
+    from typing import Annotated
+
+    from nucllei.utils.tool_render import RenderAs, Rendered
+
+    def plain(path: str) -> Rendered:
+        return Rendered("", "text")
+
+    def annotated(path: str) -> Annotated[Rendered, RenderAs(kind="markdown")]:
+        return Rendered("", "text")
+
+    assert extract_render_from_function(plain) == {}
+    assert extract_render_from_function(annotated) == {}
+
+
+def test_hljs_language_for_extension():
+    from nucllei.utils.tool_render import hljs_language_for_extension
+
+    assert hljs_language_for_extension(".PY") == "python"
+    assert hljs_language_for_extension("sh") == "bash"
+    assert hljs_language_for_extension("yml") == "yaml"
+    assert hljs_language_for_extension("tsx") == "typescript"
+    assert hljs_language_for_extension("csv") == "csv"
+    # 表に無い物・md は code にしない(推測しない)
+    assert hljs_language_for_extension("md") is None
+    assert hljs_language_for_extension("txt") is None
+    assert hljs_language_for_extension("") is None
+    assert hljs_language_for_extension(None) is None

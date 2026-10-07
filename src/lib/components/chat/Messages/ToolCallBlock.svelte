@@ -151,18 +151,12 @@
 	const errorKind = $derived(toolErrorKind(result?.error_kind));
 	const errorLook = $derived(errorKind ? TOOL_ERROR_LOOKS[errorKind] : null);
 
-	// 結果の表示種別: 戻り型宣言(call.render.result)→ backend が実行時の実型から
-	// 同梱した result.render(dict/list → json)→ text(中身からの動的解釈はしない)。
-	// エラーの結果は宣言を使わない — raise の ERROR 文は render 無し(→ text)で届き、
-	// 結果に旗を付けたもの(mark_error_kind — 中身は通常の結果)は result.render が残る
+	// 結果の表示種別は backend が実行後に確定した result.render だけで決める(#153 —
+	// エラー・切詰め → text、Rendered、戻り型宣言、dict/list → json の優先順は BE の
+	// resolve_result_render)。無ければ text(中身からの動的解釈はしない)。raise の ERROR 文は
+	// render 無しで届き、結果に旗を付けたもの(mark_error_kind)は render が残る
 	const resultDisplay = $derived(
-		result
-			? errorKind
-				? result.render
-					? classifyToolResult(result.content ?? '', result.render)
-					: ({ kind: 'text', value: result.content ?? '' } as const)
-				: classifyToolResult(result.content ?? '', call?.render?.result ?? result.render)
-			: null
+		result ? classifyToolResult(result.content ?? '', result.render) : null
 	);
 
 	// #110: background 昇格された呼び出し。spawn は result(running 形)が即存在するため

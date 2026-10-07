@@ -172,3 +172,101 @@ def test_list_result_has_no_image_side_channel_key():
     assert "files" not in results[0]
     assert "context_images" not in results[0]
     assert json.loads(results[0]["content"]) == ["a", "b"]
+
+
+def test_rendered_result_carries_its_own_render(monkeypatch):
+    """#153: `Rendered(text, kind, language)` は値が表示種別を持つ戻り値。content は text だけ
+    (モデルへも text だけ)、results[].render に {kind, language?}。切詰め・エラーでは落ちる
+    (既存の規則がそのまま効く)。"""
+    from nucllei.utils import executions
+    from nucllei.utils.tool_errors import ToolOutcome
+    from nucllei.utils.tool_render import Rendered
+
+    async def returns_markdown():
+        return Rendered("# 見出し\n\n本文", "markdown")
+
+    async def returns_code():
+        return Rendered("print(1)\n", "code", "py")
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_markdown)))
+    assert results[0]["content"] == "# 見出し\n\n本文"
+    assert results[0]["render"] == {"kind": "markdown"}
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_code)))
+    assert results[0]["content"] == "print(1)\n"
+    assert results[0]["render"] == {"kind": "code", "language": "python"}
+
+    async def raises():
+        raise ToolOutcome("無い")
+
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(raises)))
+    assert results[0]["error_kind"] == "outcome"
+    assert "render" not in results[0]
+
+    monkeypatch.setattr(executions, "TOOL_RESULT_MAX_CHARS", 5)
+    results = asyncio.run(execute_tool_calls([_call("{}")], _tool(returns_markdown)))
+    assert results[0]["truncated"] is True
+    assert "render" not in results[0]
+
+
+def test_result_render_priority_on_the_sync_path(monkeypatch):
+    """#153: 結果の表示は backend が 1 つに確定する(resolve_result_render)。
+    エラー・切詰め → text、Rendered > 静的な宣言 > dict(json) > text。"""
+    from nucllei.utils import tool_output
+    from nucllei.utils.tool_render import Rendered
+
+    def declared(callable_, result):
+        tools = _tool(callable_)
+        tools["probe"]["render"] = {"result": result}
+        return tools
+
+    def run(tools):
+        return asyncio.run(execute_tool_calls([_call("{}")], tools))[0]
+
+    async def as_dict():
+        return {"ok": True}
+
+    async def as_rendered():
+        return Rendered("# a", "markdown")
+
+    async def as_str():
+        return "s"
+
+    async def flagged():
+        tool_output.mark_error_kind("outcome")
+        return {"hits": []}
+
+    # 宣言あり + dict → 宣言(subagent / skill は dict の形への宣言)
+    assert run(declared(as_dict, {"kind": "subagent"}))["render"] == {
+        "kind": "subagent"
+    }
+    # 宣言あり + Rendered → Rendered
+    assert run(declared(as_rendered, {"kind": "text"}))["render"] == {
+        "kind": "markdown"
+    }
+    # 宣言あり + str → 宣言
+    assert run(declared(as_str, {"kind": "code", "language": "sql"}))["render"] == {
+        "kind": "code",
+        "language": "sql",
+    }
+    # 宣言なし + dict → json、宣言なし + str → text(render なし)
+    assert run(_tool(as_dict))["render"] == {"kind": "json"}
+    assert "render" not in run(_tool(as_str))
+    # 旗だけの結果は render を残す(宣言なし dict → json)
+    out = run(_tool(flagged))
+    assert out["error_kind"] == "outcome" and out["render"] == {"kind": "json"}
+
+    async def raises():
+        from nucllei.utils.tool_errors import ToolOutcome
+
+        raise ToolOutcome("無い")
+
+    # エラーは宣言があっても text
+    out = run(declared(raises, {"kind": "subagent"}))
+    assert out["error_kind"] == "outcome" and "render" not in out
+
+    from nucllei.utils import executions
+
+    monkeypatch.setattr(executions, "TOOL_RESULT_MAX_CHARS", 3)
+    out = run(declared(as_dict, {"kind": "subagent"}))
+    assert out["truncated"] is True and "render" not in out

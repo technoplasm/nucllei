@@ -102,6 +102,29 @@
   applyContentUpdate)は死んでいた — 全層から撤去済み(2026-07-17、`a16cd8b3f`)。
   本文編集は MessageEditor 経路のみ。
 
+- **改訂(2026-10-07、#153): 結果の kind は backend が優先順で確定し、FE は `results[].render`
+  だけを見る**(ken 決定)。それまでは FE が「`calls[].render.result`(静的宣言)→ `results[i].render`
+  (値の型)→ text」を選んでいた(`ToolCallBlock.svelte`)。今は `tool_render.resolve_result_render`
+  1 か所で確定し、同期 middleware(`execute_tool_calls`)と background runner(`executions.py`)が
+  同じ関数を通る。優先順(上ほど強い):
+  1. エラー(raise 由来の ERROR 文)と切り詰めた結果 → text(`mark_error_kind` の旗だけの結果は render を残す)
+  2. 戻り値 `Rendered(text, kind, language)` → tool が明示した {kind, language}(拡張子で md / code / text が
+     決まる read_file 等。モデルへは text だけ。戻り型 Rendered は静的宣言を作らない)
+  3. 静的な宣言(戻り型の Annotated = `tool_dict["render"]["result"]`)。await_task は
+     `sink.set_result_render` で、回収した 1 件の確定済み表示(exec 行の `meta.render_descriptor`)に差し替える
+  4. dict / list → json
+  5. どれでもなければ text(render を載せない)
+  - **宣言(3)を dict(4)より上に置く**: 宣言の多くは dict の形への宣言(run_subagent の `subagent`・
+    load_skill の `skill`)で、await_task の持ち上げも dict の封筒への差し替え。逆にするとそれらが json に落ちる
+  - `calls[].render` は **`args` だけ**を運ぶ(`response_assembler._attach_tool_renders`)。`render.result` は
+    フロントへ送らない
+  - background: exec 行の `meta.render_descriptor` = 確定済みの表示、`meta.render` = 値の型の印(json なら
+    await_task が生 object に戻す)。await_task は 1 件 ∧ done なら確定済み表示を必ず持ち上げる(text も
+    `{kind:"text"}` で — 持ち上げないと封筒 dict が json に確定し、中身を text で描けない)。これで FE の
+    「中身が文字列なのに kind=json なら text に落とす」読み替えは消した。封筒の剥がし自体は残る(content は
+    モデル向けの封筒なので)
+  - 旧データの互換は持たない(保存済み結果に render が無ければ text)
+
 ## 宣言メカニズム
 
 **ネイティブ Python tool** — `Annotated` に描画マーカーを載せる。実行時/型的には素の `str`:

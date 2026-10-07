@@ -148,6 +148,7 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
                 "run_shell",
                 "send_to_workspace",
                 "write_file",
+                "read_file",
                 "list_workspace",
                 "fetch_from_workspace",
             }
@@ -1997,8 +1998,9 @@ def test_reference_params_are_described_in_fixed_words():
     assert file_id_form in described(sandbox, "send_to_workspace", "file_id")
     assert workspace_form in described(sandbox, "write_file", "path")
     assert workspace_form in described(sandbox, "list_workspace", "path")
+    assert workspace_form in described(sandbox, "read_file", "path")
     assert path_form in described(sandbox, "fetch_from_workspace", "path")
     assert file_id_form in described(AttachmentTools(), "read_attachment", "file_id")
     # 「相対も通る」は消えている
-    for name in ("write_file", "list_workspace", "fetch_from_workspace"):
+    for name in ("write_file", "read_file", "list_workspace", "fetch_from_workspace"):
         assert "相対" not in described(sandbox, name, "path"), name

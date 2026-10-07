@@ -366,11 +366,26 @@ class TestRenderDescriptors:
         tools = {}
         a = make_assembler(tools=tools)
         a.handle_delta(tool_call_delta(id="c1", name="t", arguments=""))
-        tools["t"] = {"render": {"result": {"kind": "skill"}}}
+        tools["t"] = {
+            "render": {
+                "args": {"code": {"kind": "code", "language": "python"}},
+                "result": {"kind": "skill"},
+            }
+        }
         a.handle_delta(tool_call_delta(arguments="{}"))
 
         calls, _ = a.finish_stream()
-        assert calls[0]["render"] == {"result": {"kind": "skill"}}
+        # 結果の宣言は送らない(#153 — 結果の表示は results[].render に backend が確定する)
+        assert calls[0]["render"] == {
+            "args": {"code": {"kind": "code", "language": "python"}}
+        }
+
+    def test_result_declaration_is_not_sent(self):
+        tools = {"t": {"render": {"result": {"kind": "markdown"}}}}
+        a = make_assembler(tools=tools)
+        a.handle_delta(tool_call_delta(id="c1", name="t", arguments="{}"))
+        calls, _ = a.finish_stream()
+        assert "render" not in calls[0]
 
     def test_existing_render_not_overwritten(self):
         tools = {"t": {"render": {"kind": "b"}}}

@@ -18,6 +18,7 @@ opt-in で、トークンが無ければ両側とも認証なしで従来どお�
 """
 
 import base64
+import codecs
 import io
 import logging
 import mimetypes
@@ -52,7 +53,7 @@ from nucllei.utils.tool_errors import (
     ToolOutcome,
 )
 from nucllei.utils.tool_output import display, mark_error_kind
-from nucllei.utils.tool_render import Code
+from nucllei.utils.tool_render import Code, Rendered, hljs_language_for_extension
 
 log = logging.getLogger(__name__)
 
@@ -349,22 +350,10 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
         )
     if e.status == 401:
         return _sandbox_auth()
-    if e.status == 400 and _under_ro_mount(abs_path):
-        # #152: /ext/groups・/ext/public の経路上の symlink は sandbox が辿らない
-        return ToolCallError(
-            f"{abs_path} は使えない path (経路に symlink を含む等で sandbox が受け付けなかった)",
-            "symlink を経由しない実際のパスで渡す。",
-        )
     if e.status == 400:
-        return ToolCallError(
-            f"{abs_path} は使えない path (sandbox が受け付けなかった)",
-            "/workspace/… の絶対パスで渡す。",
-        )
+        return _unusable_path(abs_path)
     if e.status == 404:
-        return ToolOutcome(
-            f"{abs_path} というファイルは無い (ディレクトリは不可)",
-            "list_workspace で確かめる。" + _cache_hint(abs_path),
-        )
+        return _no_such_file(abs_path)
     if e.status == 403:
         # ro の置き場への書き込み (#152)。tool 側で先に断るので通常は来ない
         return ToolCallError(
@@ -383,6 +372,29 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
     return ToolFailure(
         f"sandbox がエラーを返した (HTTP {e.status})",
         "1 回だけ呼び直す。続くならユーザーに伝える。",
+    )
+
+
+def _unusable_path(abs_path: str) -> ToolError:
+    """sandbox `/files/*` の 400 (経路の symlink・`..` 等)。read_file が stat で末端の symlink を
+    見つけたときも同じ文で言う (#153)。"""
+    if _under_ro_mount(abs_path):
+        # #152: /ext/groups・/ext/public の経路上の symlink は sandbox が辿らない
+        return ToolCallError(
+            f"{abs_path} は使えない path (経路に symlink を含む等で sandbox が受け付けなかった)",
+            "symlink を経由しない実際のパスで渡す。",
+        )
+    return ToolCallError(
+        f"{abs_path} は使えない path (sandbox が受け付けなかった)",
+        "/workspace/… の絶対パスで渡す。",
+    )
+
+
+def _no_such_file(abs_path: str) -> ToolError:
+    """sandbox `/files/*` の 404 (無い・ファイルでない)。read_file の stat の「無い」も同じ文。"""
+    return ToolOutcome(
+        f"{abs_path} というファイルは無い (ディレクトリは不可)",
+        "list_workspace で確かめる。" + _cache_hint(abs_path),
     )
 
 
@@ -408,6 +420,94 @@ def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[st
     if ct.startswith("video/"):
         return f'<video controls src="{url}"></video>'
     return None
+
+
+# ---- read_file (#153) ---------------------------------------------------------
+# バイト上限は write_file と同じ値 (対 — write_file で書けた物は読み戻せる。ファイルブラウザの
+# エディタも 1MiB)。sandbox から転送する前に `/files/stat` で見る。超えたら固定文の ERROR
+READ_FILE_LIMIT = SANDBOX_WRITE_FILE_LIMIT_BYTES
+# 1 回で返す文字数の既定と上限 (read_attachment と同じ形・同じ値)。TOOL_RESULT_MAX_CHARS
+# (既定 65536) の一律切詰めより先に自前の窓で返し、続きは offset で取らせる
+READ_FILE_DEFAULT_CHARS = 40000
+READ_FILE_MAX_CHARS = 60000
+
+# 読まない物の分類は **拡張子だけ** で決める (中身を嗅いで出し分けない)。中身で分かるのは
+# 「テキストとして decode できない」だけで、それは binary と同じ文になる
+_READ_IMAGE_EXTS = frozenset(
+    {"png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "ico", "pdf"}
+)
+_READ_BINARY_EXTS = frozenset(
+    {
+        # Office / 文書
+        "doc", "docx", "docm", "xls", "xlsx", "xlsm", "xlsb", "ppt", "pptx",
+        "odt", "ods", "odp", "msg", "epub",
+        # 圧縮・実行物・データ
+        "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar", "jar", "whl",
+        "exe", "dll", "so", "bin", "class", "pyc", "o", "a",
+        "sqlite", "sqlite3", "db", "parquet", "feather", "pkl", "pickle",
+        "npy", "npz", "h5", "hdf5", "rds", "rdata", "sav", "dta",
+        # 音声・動画・フォント
+        "mp3", "wav", "m4a", "aac", "flac", "ogg", "mp4", "mov", "avi", "mkv",
+        "webm", "ttf", "otf", "woff", "woff2",
+    }
+)  # fmt: skip
+_MARKDOWN_EXTS = frozenset({"md", "markdown"})
+
+# 案内の既定文 (次の手)。行き先は valve で配備側が上書きする — 配備層の tool / skill 名
+# (llens の read_doc・file-conversion 等) は nucllei の builtin が知らないので既定文に入れない。
+# feed_image は nucllei の builtin なので名指ししてよい
+READ_IMAGE_HINT = "中身を見る必要があるなら feed_image の path に同じパスを渡す。"
+READ_BINARY_HINT = "テキストに変換したファイルを /workspace/ に作ってから、そのファイルを read_file で読む。"
+READ_PROXY_MOUNT_HINT = (
+    "その置き場の資料を読む専用の手段があればそれを使う"
+    " (ユーザーに見せるだけなら fetch_from_workspace でリンクにする)。"
+)
+
+
+def _read_ext(abs_path: str) -> str:
+    return posixpath.splitext(posixpath.basename(abs_path))[1].lower().lstrip(".")
+
+
+# Python の cp932 codec が未定義の 1 バイト (0x80 / 0xA0 / 0xFD / 0xFE / 0xFF) に当てる文字
+_CP932_LOOSE_CHARS = frozenset("\x80\uf8f0\uf8f1\uf8f2\uf8f3")
+
+
+def _decode_text(data: bytes) -> Optional[tuple[str, str]]:
+    """BOM 付き UTF-8 → UTF-8 → cp932 の順に厳密に decode する。(text, 文字コードの言い方)。
+    NUL を含む・どれでも decode できないものは None (= テキストでない)。"""
+    if b"\x00" in data:
+        return None
+    if data.startswith(codecs.BOM_UTF8):
+        try:
+            return data[len(codecs.BOM_UTF8) :].decode("utf-8"), "UTF-8 (BOM 付き)"
+        except UnicodeDecodeError:
+            return None
+    for encoding, label in (
+        ("utf-8", "UTF-8"),
+        # write_file は UTF-8 で書く — 書き戻すと文字コードが変わることを読んだ時点で言う
+        ("cp932", "cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる)"),
+    ):
+        try:
+            text = data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if encoding == "cp932" and any(c in _CP932_LOOSE_CHARS for c in text):
+            # Python の cp932 は未定義の 1 バイト (0x80 0xA0 0xFD-0xFF) も Windows に倣って
+            # 文字にする — 厳密には cp932 のテキストでない (Latin-1 等を化けたまま読まない)
+            return None
+        return text, label
+    return None
+
+
+def _read_rendered(abs_path: str, text: str) -> Rendered:
+    """拡張子から結果の表示種別を決める: md → markdown、コード・データ → code(言語)、他 → text。"""
+    ext = _read_ext(abs_path)
+    if ext in _MARKDOWN_EXTS:
+        return Rendered(text, "markdown")
+    language = hljs_language_for_extension(ext)
+    if language:
+        return Rendered(text, "code", language)
+    return Rendered(text, "text")
 
 
 # 描画注釈(#20 型駆動レンダリング): 実行時/LLM 的には素の str のまま、
@@ -593,7 +693,7 @@ class Tools:
     待ちが長すぎると失敗する)。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
     `/ext/public/` は全員の共有の置き場 (読むだけ)。どちらも実行を跨いで残り、write_file /
-    list_workspace / fetch_from_workspace でも同じパスで扱える。"""
+    read_file / list_workspace / fetch_from_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
@@ -642,6 +742,20 @@ class Tools:
             description="send_to_workspace(url=) で sandbox に取り込む 1 ファイルの上限 MB "
             "(http(s) URL はどこでも。同一サーバの /ext/… = sandbox の /ext/… と同じ物は"
             "コピーしないので、この上限は掛からない)",
+        )
+        image_hint: str = Field(
+            default=READ_IMAGE_HINT,
+            description="read_file が画像・PDF を断るときの次の手 (モデル向け。見る手段の案内)",
+        )
+        binary_hint: str = Field(
+            default=READ_BINARY_HINT,
+            description="read_file が Office 文書等のテキストでないファイルを断るときの次の手 "
+            "(モデル向け。変換の手段の案内)",
+        )
+        proxy_mount_hint: str = Field(
+            default=READ_PROXY_MOUNT_HINT,
+            description="read_file が /ext の proxy の置き場 (EXT_MOUNTS の http(s) の物) を断る"
+            "ときの次の手 (モデル向け。その資料を読む手段の案内)",
         )
         debug: bool = Field(default=False, description="詳細ログ")
 
@@ -1307,6 +1421,165 @@ class Tools:
         except Exception as e:
             raise _files_error(e, abs_path)
         return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
+
+    async def read_file(
+        self,
+        path: str,
+        offset: int = 0,
+        max_chars: int = READ_FILE_DEFAULT_CHARS,
+        __user__: Optional[dict] = None,
+    ) -> Rendered:
+        """
+        sandbox のテキストファイルを読む (write_file と対)。UTF-8 (BOM 付き可) と cp932 を読み、
+        読んだ文字コードを先頭行に添える。長いファイルは offset で続きを読む (末尾に
+        next_offset が出る間は続きがある)。画像・PDF・Office 文書などテキストでないものは読まない。
+        ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
+
+        :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。例: /workspace/work/recipe.md
+        :param offset: 読み始めの文字位置 (省略時 0 = 先頭。続きは前回の next_offset)
+        :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
+        """
+        if not __user__ or not __user__.get("id"):
+            raise ToolFailure("ユーザーを特定できない")
+        try:
+            offset = max(0, int(offset))
+            max_chars = max(1, min(int(max_chars), READ_FILE_MAX_CHARS))
+        except (TypeError, ValueError):
+            raise ToolCallError("offset / max_chars が整数でない", "整数で渡す。")
+        from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
+
+        normalized = _normalize_sandbox_path(path)
+        acl = _acl_rel(normalized)
+        mounts = None
+        if acl is not None:
+            # /ext/groups/<g>/… /ext/public/… (#152): 可否は ACL、読み出しと経路の symlink の
+            # 拒否は sandbox (`/files/*` の `/ext/...` + mounts)
+            abs_path = target = normalized
+            if len(acl.split("/")) <= _acl_place_depth(acl) or path.rstrip().endswith(
+                "/"
+            ):
+                if acl == GROUPS:
+                    raise ToolCallError(
+                        f"{abs_path} はグループの置き場の一覧",
+                        "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+                    )
+                if ext_access(__user__, acl) == "none":
+                    raise _ext_not_found(abs_path)
+                raise ToolCallError(
+                    f"{path!r} はディレクトリ", "ファイル名まで指定する。"
+                )
+            if ext_access(__user__, acl) == "none":
+                raise _ext_not_found(abs_path)
+            mounts = _ext_mounts(__user__)
+        elif _under_ro_mount(normalized):
+            raise self._other_ext_error(normalized)
+        else:
+            abs_path, target = _resolve_workspace_path(path, WORKSPACE_PATH_ARG_FORM)
+            if target == "." or path.rstrip().endswith("/"):
+                raise ToolCallError(
+                    f"{path!r} はディレクトリ", "ファイル名まで指定する。"
+                )
+
+        # 読まない物は拡張子で先に断る (sandbox に問い合わせない)
+        ext = _read_ext(abs_path)
+        if ext in _READ_IMAGE_EXTS:
+            raise ToolCallError(
+                f"{abs_path} は画像・PDF で、read_file はテキストしか読まない",
+                self.valves.image_hint,
+            )
+        if ext in _READ_BINARY_EXTS:
+            raise self._binary_error(abs_path)
+
+        def payload(**extra) -> dict:
+            body = {"user_id": __user__["id"], "path": target, **extra}
+            if mounts is not None:
+                body["mounts"] = mounts
+            return body
+
+        # 大きさは転送前に見る。stat は経路も末端も symlink を辿らない (sandbox の fd 経路)
+        try:
+            st = await self._post("/files/stat", payload(), timeout_s=30)
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        kind = st.get("type")
+        if not st.get("exists") or kind == "other":
+            raise _no_such_file(abs_path)
+        if kind == "dir":
+            raise ToolCallError(
+                f"{abs_path} はディレクトリ", "list_workspace で中を一覧する。"
+            )
+        if kind == "symlink":
+            raise _unusable_path(abs_path)
+        size = st.get("size")
+        if isinstance(size, int) and size > READ_FILE_LIMIT:
+            raise self._too_large_read(abs_path, size)
+
+        try:
+            res = await self._post("/files/read", payload(nofollow=True), timeout_s=60)
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        try:
+            data = base64.b64decode(res["b64"])
+        except Exception as e:
+            log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
+            raise ToolFatal("sandbox の応答を読めない")
+        if len(data) > READ_FILE_LIMIT:
+            # stat の後に伸びた
+            raise self._too_large_read(abs_path, len(data))
+
+        decoded = _decode_text(data)
+        if decoded is None:
+            raise self._binary_error(abs_path)
+        text, encoding = decoded
+
+        total = len(text)
+        if offset > total or (offset == total and total > 0):
+            raise ToolOutcome(
+                f"offset {offset} は末尾を越えている ({abs_path} は全 {total} 字)",
+                f"offset を 0〜{max(total - 1, 0)} で渡す。",
+            )
+        window = text[offset : offset + max_chars]
+        end = offset + len(window)
+        head = f"`{abs_path}` — 文字コード: {encoding}、全 {total} 字"
+        if offset or end < total:
+            head += f" のうち {offset}〜{end} 字目"
+        body = f"{head}\n\n{window}"
+        if end < total:
+            body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
+        return _read_rendered(abs_path, body)
+
+    def _binary_error(self, abs_path: str) -> ToolError:
+        return ToolCallError(
+            f"{abs_path} はテキストとして読めない (Office 文書などのバイナリか、"
+            "UTF-8 / cp932 のテキストでない)",
+            self.valves.binary_hint,
+        )
+
+    def _too_large_read(self, abs_path: str, size: int) -> ToolError:
+        return ToolOutcome(
+            f"{abs_path} は {_human_size(size)} で、read_file で読める上限"
+            f" {_human_size(READ_FILE_LIMIT)} を超えている",
+            "run_python / run_shell で必要な部分だけを /workspace/ に書き出してから読む。",
+        )
+
+    def _other_ext_error(self, abs_path: str) -> ToolError:
+        """read_file の `/ext/<groups・public 以外>`。sandbox の `/files/*` はこの置き場を扱えない。
+        nucllei の EXT_MOUNTS で proxy の物 (cage の `/ext/doc` 等) は、その置き場を読む手段
+        (配備側が valve で案内) へ。それ以外は run_shell へ。"""
+        from nucllei.utils.ext_upstreams import ext_mount, split_ext_rest
+
+        name, _ = split_ext_rest(abs_path[len(_RO_MOUNT_ROOT) :])
+        mount = ext_mount(name)
+        if mount is not None and mount.proxy:
+            return ToolCallError(
+                f"{abs_path} はサーバが中継する資料の置き場で、read_file では読まない",
+                self.valves.proxy_mount_hint,
+            )
+        return ToolCallError(
+            f"{abs_path} は read_file では読めない (読めるのは `/workspace/…` と、見える"
+            " `/ext/groups/<グループ名>/…`・`/ext/public/…`)",
+            "中身が要るなら run_shell の cat で読む。",
+        )
 
     async def list_workspace(
         self,

@@ -454,6 +454,62 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(tool.write_file("/ext/public/x.md", "x", __user__=ADMIN))
         assert "書き込んだ" in out
 
+    def test_read_file(self):
+        """#153: read_file も同じ ACL — 見えない置き場は「無い」(sandbox に問い合わせない)、
+        public は一般ユーザーでも読める (ro)、読むときは mounts + nofollow。"""
+        body = "手順".encode("utf-8")
+        responses = {
+            "/files/stat": {"exists": True, "type": "file", "size": len(body)},
+            "/files/read": {"name": "r.md", "b64": base64.b64encode(body).decode()},
+        }
+        tool = _tool(responses)
+        out = _text(tool.read_file("/ext/groups/EMR/recipes/r.md", __user__=MEMBER))
+        assert out.kind == "markdown" and out.text.endswith("\n\n手順")
+        assert [c[0] for c in tool.calls] == ["/files/stat", "/files/read"]
+        stat_payload, read_payload = tool.calls[0][1], tool.calls[1][1]
+        assert (
+            stat_payload["path"]
+            == read_payload["path"]
+            == "/ext/groups/EMR/recipes/r.md"
+        )
+        assert {"path": "/ext/groups/EMR", "rw": True} in read_payload["mounts"]
+        assert read_payload["nofollow"] is True
+
+        tool = _tool(responses)
+        out = _text(tool.read_file("/ext/public/p.md", __user__=OUTSIDER))
+        assert out.text.endswith("手順")
+        assert tool.calls[1][1]["mounts"] == [{"path": "/ext/public", "rw": False}]
+
+        tool = _tool({})
+        for path in (
+            "/ext/groups/OTHER/secret.md",
+            "/ext/groups/EMR/../OTHER/secret.md",
+        ):
+            out = _text(tool.read_file(path, __user__=MEMBER))
+            assert out.startswith("ERROR: /ext/groups/OTHER/secret.md は無い"), out
+        out = _text(tool.read_file("/ext/groups/OTHER", __user__=MEMBER))
+        assert "は無い" in out
+        out = _text(tool.read_file("/ext/groups", __user__=MEMBER))
+        assert "グループの置き場の一覧" in out
+        out = _text(tool.read_file("/ext/groups/EMR/", __user__=MEMBER))
+        assert "ディレクトリ" in out
+        assert tool.calls == []
+
+        # 経路の symlink は sandbox が 400 で断る — write_file と同じ文
+        from nucllei.builtin_tools.sandbox import SandboxHTTPError
+
+        tool = _tool({})
+
+        async def _post(path, payload, timeout_s):
+            raise SandboxHTTPError(400, "path contains a symlink")
+
+        tool._post = _post
+        out = _text(tool.read_file("/ext/groups/EMR/dir/secret.md", __user__=MEMBER))
+        assert out == (
+            "ERROR: /ext/groups/EMR/dir/secret.md は使えない path (経路に symlink を含む等で"
+            " sandbox が受け付けなかった)。次の手: symlink を経由しない実際のパスで渡す。"
+        )
+
     def test_list_workspace(self):
         tool = _tool({})
         out = _text(tool.list_workspace("/ext/groups", __user__=MEMBER))

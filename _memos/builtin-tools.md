@@ -382,7 +382,7 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 ### 関数名の現行(旧メモの記述との対応)
 
 `run_python`(stateful)/ `run_python_once` / `run_shell` / **`send_to_workspace`**(旧
-`import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / `list_workspace` /
+`import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / **`read_file`**(#153)/ `list_workspace` /
 **`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
 ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
 両者は Files の原本の**期限付きキャッシュ**で、sandbox が最終更新から既定 30 日(env `SANDBOX_CACHE_TTL_DAYS`)で消す
@@ -1321,3 +1321,39 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - 回帰: `nucllei/test/apps/webui/routers/test_sandbox_files.py`、`sandbox/tests/test_files_browser.py`。
 - 未了: 実機(sandbox コンテナ)での確認・画面の目視は統合側。workspace 相対の tool 経路(`_safe_path`)の
   TOCTOU(resolve と open の間に jail が symlink を差し替える)は既存のまま — 塞ぐなら tool 側も `nofollow` に寄せる。
+
+## read_file(2026-10-07、#153)— sandbox のテキストを ACL どおりに読む(write_file と対)
+
+llens 依頼。レシピ等を `run_shell` の `cat` で読んでいて、write_file と経路が別(ACL・symlink 拒否・
+上限が揃わない)・日本語パスの引用符で誤る・cp932 が化ける・結果欄で md が整形されない、の 4 点。
+
+- `read_file(path, offset=0, max_chars=40000)`。path は `/workspace/…` と、見える `/ext/groups/<g>/…`・
+  `/ext/public/…`(判定は `ext_acl`、見えない = `_ext_not_found` の「無い」で sandbox に問い合わせない)。
+  sandbox は `/files/stat` → `/files/read`(`nofollow: true`、`/ext` は `mounts` 付き)。どちらも fd 経路で
+  経路・末端の symlink を辿らない。stat が symlink を返したら sandbox の 400 と同じ文(`_unusable_path`)、
+  無い・ファイルでないは 404 と同じ文(`_no_such_file`)— `_files_error` から切り出して共有
+- バイト上限 `READ_FILE_LIMIT` = `SANDBOX_WRITE_FILE_LIMIT_BYTES`(既定 1 MiB。write_file で書けた物は
+  読み戻せる・ファイルブラウザのエディタと同じ)。**転送前に stat の size で見る**(読んだ後にも再確認 —
+  stat の後に伸びた物)。超えたら outcome「上限を超えている。次の手: 必要な部分だけ書き出してから読む」
+- 文字数は `read_attachment` と同じ offset ページング(既定 40000・上限 60000 字、TOOL_RESULT_MAX_CHARS
+  65536 に収まる)。本文の先頭行に `` `パス` — 文字コード: …、全 N 字 のうち a〜b 字目 ``、続きがあれば
+  末尾に `(続きあり: next_offset=M。…)`。offset が末尾以降は outcome
+- 文字コード: BOM 付き UTF-8 → UTF-8 → cp932 の順に厳密 decode。NUL を含む・どれも通らない = テキストで
+  ない。**Python の cp932 は未定義の 1 バイト(0x80 / 0xA0 / 0xFD-0xFF)も文字にする**(Windows 互換)ので、
+  その文字(U+0080 / U+F8F0-F8F3)が出たら cp932 とはみなさない。cp932 で読んだら先頭行で
+  「write_file で書き戻すと UTF-8 になる」と言う
+- 読まない物は**分類ごとの固定文**の call エラー(拡張子で先に断る — sandbox に問い合わせない。中身で
+  分かるのは decode 失敗だけで、それは binary と同じ文):
+  | 分類 | 判定 | 次の手(valve で上書き) | 既定文 |
+  |---|---|---|---|
+  | 画像・PDF | 拡張子 | `image_hint` | feed_image の path に同じパスを渡す |
+  | Office 等のバイナリ | 拡張子・decode 失敗 | `binary_hint` | テキストに変換したファイルを /workspace/ に作ってから read_file |
+  | `/ext` の proxy mount | `EXT_MOUNTS` の値が http(s) | `proxy_mount_hint` | 専用の手段があればそれ(見せるだけなら fetch_from_workspace) |
+  既定文に配備層の tool / skill 名(read_doc・file-conversion)は入れない — llens が valve で行き先を書く。
+  それ以外の `/ext/<name>`(静的・未登録)は sandbox の `/files/*` が扱えないので「run_shell の cat で」
+- 表示は拡張子で決める: `.md` `.markdown` → markdown、コード・データ(`tool_render.EXTENSION_TO_HLJS`)→
+  code(language)、それ以外 → text。戻り値 `tool_render.Rendered` で、backend が `results[i].render` に
+  確定する(`_memos/tool-arg-render.md` の #153 改訂)
+- `__init__.py` の BUILTIN_TOOLS の description(管理画面に出る英文の関数一覧)には read_file を
+  まだ足していない(触る範囲の外だった)
+

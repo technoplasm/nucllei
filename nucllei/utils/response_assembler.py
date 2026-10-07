@@ -394,11 +394,15 @@ class ContentBlocksAssembler:
         name が届いた時点で付与(Kimi は初回フレームで id/name が確定する)。
         content_blocks の snapshot は calls をそのまま通すので、ここで付けば
         イベント・永続化(リロード)双方に render が乗る。
+
+        載せるのは引数の表示(``args``)だけ。結果の表示は backend が実行後に確定して
+        ``results[i].render`` に載せる(#153 — ``tool_render.resolve_result_render``)ので、
+        静的な戻り型宣言(``render.result``)はフロントへ送らない。
         """
         for tool_call in calls:
             if "render" in tool_call:
                 continue
             tool_name = tool_call.get("function", {}).get("name", "")
-            tool_render = (self._tools.get(tool_name) or {}).get("render")
-            if tool_render:
-                tool_call["render"] = tool_render
+            args = ((self._tools.get(tool_name) or {}).get("render") or {}).get("args")
+            if args:
+                tool_call["render"] = {"args": args}

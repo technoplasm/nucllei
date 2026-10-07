@@ -59,6 +59,7 @@ from nucllei.utils.tool_errors import (
     tool_exception_text,
 )
 from nucllei.utils.tool_output import ToolOutputSink
+from nucllei.utils.tool_render import Rendered, resolve_result_render
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -274,9 +275,16 @@ def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
       indent なし — FE は kind=json をパースして整形し直すため空白は表示に寄与しない)
       + render {"kind": "json"}
     - str → そのまま
+    - `tool_render.Rendered` → text と、値が持つ表示種別 {kind, language?}(#153 — 拡張子で
+      md / code が決まる read_file 等。モデルへは text だけ)
     - None → 空文字("None" という見かけの出力を作らない)、他は str()
-    戻り値は (text, render|None)。
+    戻り値は (text, 値の型の render|None)。**表示の確定はここではなく
+    `tool_render.resolve_result_render`**(宣言・エラー・切詰めを含めた優先順)。この render は
+    「値の型」だけの情報で、background の exec 行では「result が JSON 直列化済みか」の印に使う。
     """
+    if isinstance(raw, Rendered):
+        text = raw.text if isinstance(raw.text, str) else str(raw.text or "")
+        return text, raw.descriptor()
     if isinstance(raw, dict) or isinstance(raw, list):
         return json.dumps(raw, ensure_ascii=False), {"kind": "json"}
     if isinstance(raw, str):
@@ -563,22 +571,24 @@ async def _run_execution(
             duration = round(time.monotonic() - started_at, 3)
             text, render = normalize_tool_result(raw)
             meta: dict = {}
-            if render is not None:
-                meta["render"] = render
-            # 戻り値宣言(FE の描画ディスクリプタ)— await 時に results[].render へ
-            # パススルーされる(subagent 描画に必須)
-            render_descriptor = (entry.get("render") or {}).get("result")
-            if render_descriptor:
-                meta["render_descriptor"] = render_descriptor
-            # 切詰めは生産点で一度だけ(契約 M0 — 同期経路と共通のヘルパ)。
-            # 切詰めで JSON が壊れるため render は text に降格(不正 JSON を
-            # FE / json.loads に渡さない)。descriptor 描画もパース前提なので同時に落とす
+            # 切詰めは生産点で一度だけ(契約 M0 — 同期経路と共通のヘルパ)
             text, truncated, original_chars = truncate_tool_result(text)
             if truncated:
                 meta["truncated"] = True
                 meta["original_chars"] = original_chars
-                meta.pop("render", None)
-                meta.pop("render_descriptor", None)
+            elif render is not None:
+                # 値の型の印(json なら await_task が生 object に戻す)。切詰めで JSON が
+                # 壊れたら付けない(不正 JSON を json.loads に渡さない)
+                meta["render"] = render
+            # 確定した表示(#153 — 同期経路と同じ resolve_result_render)。await_task が
+            # 1 件回収のとき results[].render へ持ち上げる(subagent / Rendered の描画)
+            render_descriptor = resolve_result_render(
+                raw,
+                (entry.get("render") or {}).get("result"),
+                truncated=truncated,
+            )
+            if render_descriptor:
+                meta["render_descriptor"] = render_descriptor
             # 成功時のみ harvest(snapshot — 失敗 call は副産物を出さない規律は
             # middleware と同じ。failed 経路はこの分岐に来ない)
             context_images = sink.context_images()

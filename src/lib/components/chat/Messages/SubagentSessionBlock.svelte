@@ -1,6 +1,6 @@
 <script lang="ts">
 	// 親 tool ブロック内の子 agent session インライン表示(#107 P3)。
-	// run_subagent の結果(render.result.kind="subagent" → ResultDisplay 'subagent')から
+	// run_subagent の結果(results[].render.kind="subagent" → ResultDisplay 'subagent')から
 	// 子 chat を遅延 fetch し、transcript を読み取り専用で描く。ToolCallBlock の
 	// {#if open} の内側に置かれるため「開くまで fetch しない」が自然に効く。
 	//

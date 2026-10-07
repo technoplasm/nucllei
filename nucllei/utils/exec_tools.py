@@ -520,7 +520,7 @@ def build_exec_tools(user, metadata) -> dict:
                 continue
             done_rows.append(row)
             meta = row.meta or {}
-            # 保存 render が json なら生 object に戻す(二重エスケープ回避 — §8)
+            # 保存 render(値の型の印)が json なら生 object に戻す(二重エスケープ回避 — §8)
             result_value = row.result
             if (meta.get("render") or {}).get("kind") == "json" and result_value:
                 try:
@@ -566,12 +566,14 @@ def build_exec_tools(user, metadata) -> dict:
         # 戻り値宣言(render_descriptor)の sink 上書きは「要求 id がちょうど
         # 1 件 ∧ done」のみ(契約 M1 — 複数回収の envelope に単一 tool の
         # descriptor を当てると他 entry の描画まで乗っ取るため)。
+        # 持ち上げるのは runner が確定した表示(#153 — resolve_result_render)。確定が text
+        # (meta に無い = str の結果・切詰め)でも text を持ち上げる — 封筒は dict なので、
+        # 持ち上げないと封筒ごと json に確定してしまい、中身の text を描けない
         if len(requested) == 1 and not over and len(done_rows) == 1:
             render_descriptor = (done_rows[0].meta or {}).get("render_descriptor")
-            if render_descriptor:
-                sink = tool_output.current_sink.get()
-                if sink is not None:
-                    sink.set_result_render(render_descriptor)
+            sink = tool_output.current_sink.get()
+            if sink is not None:
+                sink.set_result_render(render_descriptor or {"kind": "text"})
 
         # terminal 形で返した全行に delivered_at(契約 M1 — この返りでモデルの
         # 文脈に結果が載った = サーバ駆動配達は不要。running 形は立てない)。

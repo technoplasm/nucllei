@@ -1420,6 +1420,84 @@ class TestAsyncExec(AbstractPostgresTest):
         # 中身は実 tool の生 object のまま(二重エスケープしない)= descriptor の対象
         assert entry["result"] == {"ok": True, "session_id": "c1", "answer": "2"}
 
+    def test_rendered_result_survives_background_and_await_task(self):
+        """#153: background で `Rendered` を返した tool の表示種別(markdown / code)が
+        exec 行に残り、await_task の回収(封筒 dict)でも results[].render に届く。
+        回収形は封筒の json(値の型)なので、値の render は render_descriptor 側で持ち上げる。"""
+        from nucllei.utils.middleware import execute_tool_calls
+        from nucllei.utils.tool_render import Rendered
+
+        async def probe():
+            return Rendered("# 手順\n\n1. a", "markdown")
+
+        row = self._run_to_end(probe)
+        assert row.status == "done"
+        assert row.result == "# 手順\n\n1. a"
+        assert row.meta["render"] == {"kind": "markdown"}
+        assert row.meta["render_descriptor"] == {"kind": "markdown"}
+
+        async def code():
+            return Rendered("SELECT 1", "code", "sql")
+
+        row2 = self._run_to_end(code)
+        assert row2.meta["render_descriptor"] == {"kind": "code", "language": "sql"}
+
+        results = asyncio.run(
+            execute_tool_calls(
+                [self._call({"task_ids": [row.id]}, name="await_task")],
+                self._exec_tools(),
+                metadata=self._metadata(),
+            )
+        )
+        assert results[0]["render"] == {"kind": "markdown"}
+        entry = json.loads(results[0]["content"])["tasks"][0]
+        # 中身は文字列のまま(json の生 object 戻しは kind=json のときだけ)
+        assert entry["result"] == "# 手順\n\n1. a"
+
+    def test_background_resolves_with_the_same_priority(self):
+        """#153: runner も resolve_result_render で確定する — Rendered > 宣言 > dict(json)
+        > text、切詰めは text(descriptor なし)。"""
+        from nucllei.utils.tool_render import Rendered
+
+        async def rendered():
+            return Rendered("x", "markdown")
+
+        async def as_dict():
+            return {"ok": True, "session_id": "s", "answer": "a"}
+
+        async def as_str():
+            return "plain"
+
+        declared = {"render": {"result": {"kind": "subagent"}}}
+        row = self._run_to_end(rendered, **declared)
+        assert row.meta["render_descriptor"] == {"kind": "markdown"}
+        row = self._run_to_end(as_dict, **declared)
+        assert row.meta["render_descriptor"] == {"kind": "subagent"}
+        assert row.meta["render"] == {"kind": "json"}  # 値の型の印(生 object 戻し用)
+        row = self._run_to_end(as_dict)
+        assert row.meta["render_descriptor"] == {"kind": "json"}
+        row = self._run_to_end(as_str)
+        assert "render_descriptor" not in (row.meta or {})
+
+    def test_await_task_lifts_text_for_a_single_str_result(self):
+        """確定が text の行でも 1 件回収なら text を持ち上げる — 封筒(dict)の json に
+        確定させない(FE は封筒を剥がして中身を text で描く)。"""
+        from nucllei.utils.middleware import execute_tool_calls
+
+        async def as_str():
+            return "plain"
+
+        row = self._run_to_end(as_str)
+        results = asyncio.run(
+            execute_tool_calls(
+                [self._call({"task_ids": [row.id]}, name="await_task")],
+                self._exec_tools(),
+                metadata=self._metadata(),
+            )
+        )
+        assert results[0]["render"] == {"kind": "text"}
+        assert json.loads(results[0]["content"])["tasks"][0]["result"] == "plain"
+
     # ---- stop_task(契約 T2 — 強制終了・冪等)----
 
     def test_stop_task_stops_running_and_reports_terminal_state(self):

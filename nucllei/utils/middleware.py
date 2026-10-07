@@ -77,6 +77,7 @@ from nucllei.utils.executions import (
     spawn_execution,
     truncate_tool_result,
 )
+from nucllei.utils.tool_render import resolve_result_render
 from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
@@ -1933,6 +1934,9 @@ async def _execute_one_tool_call(
     context_image_file_ids = []
     display_items = []
     result_render_override = None
+    # background に昇格した call の結果は spawn の封筒(running 形)— 実 tool の静的な宣言は
+    # 封筒には当てない(中身は await_task が持ち上げる)
+    spawned = False
 
     if tool_name not in tools:
         # llens(#18-2): tools 配列に無い tool の呼び出し。
@@ -2006,6 +2010,7 @@ async def _execute_one_tool_call(
             # unknown-drop 済み(監査
             # 保存と callable 引数の両方に使われる)。起動できない(上限・
             # multi-worker・起動失敗)は failure の ToolError で来る(#145)。
+            spawned = True
             try:
                 tool_result = await spawn_execution(
                     user_id=metadata["user_id"],
@@ -2044,19 +2049,10 @@ async def _execute_one_tool_call(
             result_render_override = sink.result_render() if tool_succeeded else None
             flagged_error_kind = sink.error_kind() if tool_succeeded else None
 
-    # wire 契約: content は常に文字列。表示種別は実型から決めて同梱する
-    # (フロントに「JSON に見えるか」の動的解釈をさせない — 型に忠実の原則)。
-    # dict/list だけ kind=json を明示し、それ以外は省略(フロント既定 = text)。
-    # 戻り型宣言(calls[].render.result)があればフロントはそちらを優先する。
-    # 正規化は executions.normalize_tool_result と共有(#110 契約 M0 —
-    # ensure_ascii=False / indent なしの根拠はそちらの docstring)。
-    tool_result, result_render = normalize_tool_result(tool_result)
-
-    # llens(#110 §8): await_task の render_descriptor パススルー。exec 行に
-    # 保存された実 tool の戻り値宣言(sink.set_result_render 経由)が、
-    # 型由来の render(kind=json)より優先する(subagent 等の描画復元)。
-    if result_render_override:
-        result_render = result_render_override
+    # wire 契約: content は常に文字列。正規化は executions.normalize_tool_result と共有
+    # (#110 契約 M0 — ensure_ascii=False / indent なしの根拠はそちらの docstring)。
+    raw_result = tool_result
+    tool_result, _ = normalize_tool_result(tool_result)
 
     # llens(#110 契約 M0): 切詰めは結果の生産点で一度だけ — 同期 tool は
     # ここが生産点(background は runner の保存時)。回収 builtin
@@ -2069,14 +2065,24 @@ async def _execute_one_tool_call(
         tool_result, result_truncated, original_chars = truncate_tool_result(
             tool_result
         )
-        if result_truncated:
-            result_render = None
 
-    if error_kind is not None:
-        # エラー文は text で描く(戻り型宣言・json の render はパース前提)
-        result_render = None
-    elif flagged_error_kind is not None:
-        # 中身のある結果に付いた失敗の旗 — render は残す
+    # 結果の表示は backend がここで 1 つに確定する(#153 — 優先順は
+    # tool_render.resolve_result_render、background runner と同じ関数)。フロントは
+    # results[].render だけを見る(中身から JSON かを推測しない — 型に忠実の原則)。
+    # 静的な宣言は戻り型の Annotated(tool_dict["render"]["result"])。await_task は
+    # exec 行に保存された実 tool の確定済み表示(sink.set_result_render)で差し替える
+    static_render = result_render_override
+    if static_render is None and tool_name in tools and not spawned:
+        static_render = (tools[tool_name].get("render") or {}).get("result")
+    result_render = resolve_result_render(
+        raw_result,
+        static_render,
+        # raise 由来のエラー文は text(json / 宣言の描画はパース前提)。
+        # mark_error_kind の旗だけの結果(flagged)は通常の結果なので render を残す
+        failed=error_kind is not None,
+        truncated=result_truncated,
+    )
+    if error_kind is None and flagged_error_kind is not None:
         error_kind = flagged_error_kind
 
     return {

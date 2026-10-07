@@ -290,7 +290,7 @@ separate reasoning block.
 | `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                   |
 | `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                    |
 | `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                     |
-| `SANDBOX_WRITE_FILE_LIMIT_BYTES`                               | env  | `1048576` (1 MB)      | body cap of the sandbox `write_file` tool (§5.7)                                                                                                                 |
+| `SANDBOX_WRITE_FILE_LIMIT_BYTES`                               | env  | `1048576` (1 MB)      | body cap of `write_file` and size cap of `read_file` (§5.7)                                                                                                      |
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                               |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                 |
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                 |
@@ -1592,6 +1592,17 @@ async def read_doc(self, path: str) -> Markdown:
   highlighted markdown _source_. Use it for doc-reading tools that return md.
 - Un-annotated arguments render by JSON type (scalars as `key: value`,
   structures as a tree). Streaming partial-argument rendering is automatic.
+- **Per-call result rendering** — when the right display depends on the call
+  (e.g. a file reader: `.md` → markdown, `.py` → code), return
+  `Rendered(text, kind, language=None)` (`kind` = `text` / `markdown` /
+  `code`). Only `text` reaches the model. Don't also annotate the return type.
+- **The backend settles each result's display once, after the call**, and puts
+  it in `results[i].render` — the UI uses nothing else (`calls[].render` only
+  carries `args`). Priority, strongest first: a raised error or a truncated
+  result → text; a `Rendered` value → its kind; the return-type declaration
+  (`-> Text` / `-> Markdown` / …); a dict / list → JSON; otherwise text
+  (`tool_render.resolve_result_render`, shared by the synchronous and the
+  background paths).
 - External OpenAPI tools get the same treatment by declaring
   `"contentMediaType": "text/x-python"` (etc.) on string parameters.
 - Tool sources usually live in your harness repo, where `nucllei` is not
@@ -1786,7 +1797,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     whether it appears in a turn is the row ACL × the preset's `meta.toolIds`
     × the preset's delegation allowlist (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
-    `send_to_workspace` / `write_file` / `list_workspace` /
+    `send_to_workspace` / `write_file` / `read_file` / `list_workspace` /
     `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
@@ -1823,6 +1834,20 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (read-only reference data) is refused by `write_file` and `list_workspace`
     with a pointer to `run_shell` (a distinction inside the same `path`
     argument, based on what the path resolves to).
+    `read_file(path, offset=0, max_chars=40000)` (#153) is `write_file`'s
+    counterpart: it reads a text file under `/workspace/`, a visible
+    `/ext/groups/<g>/` or `/ext/public/` (same ACL, `/files/stat` then
+    `/files/read` with `nofollow`, symlinks refused), up to
+    `SANDBOX_WRITE_FILE_LIMIT_BYTES` (checked on the stat, before the
+    transfer), decoding BOM-UTF-8 → UTF-8 → cp932 strictly and naming the
+    encoding on the first line. Long text pages by `offset` (at most 60000
+    characters per call; `next_offset=` at the end while more remains). Images
+    / PDF, Office and other binaries (by extension, or undecodable / NUL) and
+    `/ext` proxy mounts get one fixed sentence per category; the "next step"
+    of each comes from the valves `image_hint` / `binary_hint` /
+    `proxy_mount_hint`, so a deployment can point at its own tools. The result
+    renders by extension (`.md` markdown, code / data as highlighted code,
+    else text) via `Rendered` (§5.4).
     `fetch_from_workspace(path)` turns a sandbox file into something the user
     can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
     the sandbox, registered as a File and attached to the chat (`file_id`
@@ -2088,8 +2113,8 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   `ASYNC_EXEC_RETENTION_DAYS`; the tool description states the configured
   period). Per entry: done →
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
-  (with the original tool's render descriptor when exactly one done task was
-  requested, and a one-time replay of `context_images`/`display`
+  (with the original tool's settled result display — text included — when
+  exactly one done task was requested, and a one-time replay of `context_images`/`display`
   side-channels; `error_kind: "outcome"` when the answer was "none");
   `failed/stopped/orphaned` → `{ok: false, ..., error, error_kind?}`
   (`error_kind` from the row's `meta.error_kind` — absent for stopped /

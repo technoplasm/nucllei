@@ -272,9 +272,9 @@ describe('classifyToolResult', () => {
 		});
 	});
 
-	it('execution: await_task の {"tasks":[...]} は 1 件 ∧ done ∧ render 宣言ありのとき剥がす(#110)', () => {
-		// BE は results[].render を実 tool の宣言(render_descriptor)で上書きしてくる
-		// のは「要求 id ちょうど 1 件 ∧ done」のときだけ(契約 §M1)。
+	it('execution: await_task の {"tasks":[...]} は 1 件 ∧ done のとき剥がす(#110)', () => {
+		// BE が results[].render を実 tool の確定済みの表示(render_descriptor — text を含む、
+		// #153)で差し替えてくるのは「要求 id ちょうど 1 件 ∧ done」のときだけ(契約 §M1)。
 		// descriptor が指すのは封筒ではなく **result の中身**
 		const inner = {
 			ok: true,
@@ -323,16 +323,10 @@ describe('classifyToolResult', () => {
 			language: 'python',
 			value: 'print(1)'
 		});
-		// 中身が dict の tool + 宣言なし: 封筒由来の kind=json は中身に効かせてよい
+		// 中身が dict の tool: BE は確定済みの kind=json を持ち上げてくる
 		expect(classifyToolResult(wrap({ a: 1 }), { kind: 'json' })).toEqual({
 			kind: 'json',
 			value: JSON.stringify({ a: 1 }, null, 2)
-		});
-		// 中身が**文字列**での kind=json は封筒 dict 由来(または切詰めの降格)—
-		// 実 tool が json を宣言していれば BE は object を返す。text に落とす
-		expect(classifyToolResult(wrap('ただの文字列'), { kind: 'json' })).toEqual({
-			kind: 'text',
-			value: 'ただの文字列'
 		});
 	});
 
