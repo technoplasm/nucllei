@@ -100,7 +100,9 @@ def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
     # nsjail の代わりに exports/ へ 1 つ書くだけのコマンド
     out_file = tmp_path / "u1" / "exports" / "r.txt"
     monkeypatch.setattr(
-        mod, "_nsjail_cmd", lambda ws, t, argv: ["sh", "-c", f"echo hi > {out_file}"]
+        mod,
+        "_nsjail_cmd",
+        lambda ws, t, argv, binds=(): ["sh", "-c", f"echo hi > {out_file}"],
     )
     r = c.post("/exec", json={"user_id": "u1", "lang": "shell", "code": "x"})
     assert r.status_code == 200, r.text
@@ -118,7 +120,7 @@ def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
         def _recv(self):
             return {"stdout": "1\n"}
 
-    async def fake_get(user_id, chat_id):
+    async def fake_get(user_id, chat_id, *a, **k):
         return FakeSession(), False
 
     monkeypatch.setattr(mod._sessions, "get", fake_get)

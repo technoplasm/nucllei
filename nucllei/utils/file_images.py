@@ -160,7 +160,7 @@ async def inline_internal_image_urls(
         # 置換の文面は理由を問わず同じ("(image unavailable)" — 存在有無を漏らさない)
         # だが、ログには code を残す。「リンク切れ」と「サイズ超過」を運用で見分ける
         # ためで、image_refs 側の warning と合わせて読む
-        loaded, error = await resolve_ref(ref, user.id)
+        loaded, error = await resolve_ref(ref, user)
         if error is not None:
             log.warning(
                 f"file_images: reference unavailable (ref={ref[:120]!r}, "

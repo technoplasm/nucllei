@@ -412,8 +412,53 @@ frame-ancestors 'self'` + `X-Content-Type-Options: nosniff` (no script, no
   external loads, no form posts). Note: a deployment-wide
   `CONTENT_SECURITY_POLICY` env replaces this header via the global
   security-headers middleware.
-- There is no per-user access check — what `EXT_MOUNTS` names is what is
-  exposed to every logged-in user.
+- No per-user access check **except for the two ACL names below** — for every
+  other name, what `EXT_MOUNTS` names is what is exposed to every logged-in
+  user.
+
+**Group ACL — `/ext/groups/<group>` and `/ext/public`** (#152). Two reserved
+names carry a per-user ACL. Configure them like any other row
+(`EXT_MOUNTS=…,groups=/ext/groups,public=/ext/public`; static is the expected
+form, a proxy value is gated the same way) and bind the same host directories
+into the sandbox at `/ext/groups` and `/ext/public`. The decision lives in one
+place, `nucllei/utils/ext_acl.py`, and the gate, the reference resolver, the
+sandbox tool and the file browser all call it:
+
+| Path                        | Regular user                          | Admin (`role == "admin"`) |
+| --------------------------- | ------------------------------------- | ------------------------- |
+| `/ext/groups/<group>/…`     | members: rw; everyone else: invisible | rw (all groups)           |
+| `/ext/groups` (the listing) | only the groups they belong to        | all groups                |
+| `/ext/public/…`             | ro                                    | rw                        |
+| `/ext/<other>/…` (doc, …)   | ro                                    | ro                        |
+
+- The directory name **is** the group name (membership from
+  `Groups.get_groups_by_member_id`). Names that fail
+  `utils/group_names.validate_group_name` (#151; e.g. an older `rank:部長`) are
+  neither bound nor served, and a warning is logged.
+- The gate: invisible → **404, the same as absent** (existence is not leaked);
+  `/ext/groups` and `/ext/groups/<g>/` themselves → 404 (no listing over HTTP).
+  Responses under both names carry `Cache-Control: private, no-cache` (an
+  upstream's value is overridden). Static files under `/ext/groups/<g>/` are
+  confined to `<dir>/<g>`, not `<dir>`, so a symlink a member planted in the
+  jail cannot reach another group; a group directory that is itself a symlink
+  is not served.
+- The resolver: `resolve_url(url, *, max_bytes=None, user=None)`,
+  `resolve_path(path, user, …)`, `resolve_ref(ref, user, …)`,
+  `mounted_path_for_url(url, user=None)`, `url_for_mounted_path(path, user=None)`
+  apply the same ACL (also to redirects that land on `/ext/groups/…`).
+  Invisible → `not_found`. **Without `user`, both names are invisible** (fail
+  closed); other names keep working without a user. `user` may be a `UserModel`,
+  a tool's `__user__` dict, or a user-id string (role unknown, so a regular
+  user).
+- The sandbox: nucllei sends the mounts in every `/exec`, `/exec_cell` and
+  `/files/*` request (`mounts: [{"path": "/ext/groups/<g>", "rw": true},
+{"path": "/ext/public", "rw": false}, …]`). The sandbox does not interpret
+  the ACL: it checks only that each path is safe and binds exactly what it is
+  given (see `sandbox/README.md`). `write_file`, `list_workspace` and
+  `fetch_from_workspace` accept `/ext/groups/…` and `/ext/public/…` within the
+  same rights.
+- A shared chat opened by a non-member shows 404 for images and citations that
+  point into a group; that is accepted behaviour.
 - The startup log lists the table (`/ext/<name>/ → proxy <base>/` /
   `→ static <dir>/`, warning when a static dir is missing).
 

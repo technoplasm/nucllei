@@ -400,8 +400,9 @@ class Tools:
                     return await self._feed_one_file(
                         fid, pages, __user__["id"], __feed_image__
                     )
+            # user は dict ごと渡す — /ext/groups・/ext/public の ACL に role が要る (#152)
             return await self._feed_path(
-                p or u, pages, __user__["id"], __feed_image__, is_path=bool(p)
+                p or u, pages, __user__, __feed_image__, is_path=bool(p)
             )
 
         targets: list[str] = []
@@ -534,7 +535,7 @@ class Tools:
         )
 
     async def _feed_path(
-        self, value: str, pages, user_id: str, feed, *, is_path: bool
+        self, value: str, pages, user: dict, feed, *, is_path: bool
     ) -> str:
         """url / path の値を resolver (`utils/image_refs`) で読んで検証し、積む。
 
@@ -553,9 +554,9 @@ class Tools:
             pages = str(frag_page)
 
         if is_path:
-            loaded, err = await resolve_path(ref, user_id)
+            loaded, err = await resolve_path(ref, user)
         else:
-            loaded, err = await resolve_url(ref)
+            loaded, err = await resolve_url(ref, user=user)
         if err is not None or loaded is None:
             raise _explain_ref_error(ref, err, is_path)
 
@@ -587,7 +588,7 @@ class Tools:
                 # `/ext/…` で nucllei 側にも実体がある path は同じ文字列が URL (配信されている) —
                 # url= と同じ案内。/workspace や配信されていない /ext (doc 等) はブラウザに
                 # 意味が無いので本文に貼らせない (llens 指摘 2026-10-03)
-                served = await url_for_mounted_path(ref)
+                served = await url_for_mounted_path(ref, user)
                 if served:
                     return (
                         f"- {ref} を自分の目に入れた (ユーザーには表示されない。このパスは URL"

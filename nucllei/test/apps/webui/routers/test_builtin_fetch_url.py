@@ -230,7 +230,7 @@ class _FakeResolver:
         self.refs: list[str] = []
         self.max_bytes: list = []  # resolve ごとに渡された max_bytes
 
-    async def resolve(self, ref, *, max_bytes=None):
+    async def resolve(self, ref, *, max_bytes=None, user=None):
         self.refs.append(ref)
         self.max_bytes.append(max_bytes)
         return await self._decide(ref)
@@ -1207,7 +1207,7 @@ def test_general_route_resolves_links_like_ordinary_web(monkeypatch, ext_env):
         ),
     )
 
-    async def resolve(u, max_bytes=None):
+    async def resolve(u, max_bytes=None, user=None):
         return _Loaded(body=_HREF_FORMS), None
 
     monkeypatch.setattr(mod, "resolve_url", resolve)

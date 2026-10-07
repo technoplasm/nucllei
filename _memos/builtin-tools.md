@@ -1252,3 +1252,43 @@ llens が doc の公開 URL を `/ext/doc/…`(リーフ `….md`・ディレク
 base の外への redirect・上限超え・2xx 以外は従来どおり「このサーバの /ext に無い」。担保は
 `test_image_refs_resolve.py::test_proxy_bridge_follows_redirects_inside_the_base`。経緯と配備の形は
 [[file-handling]] の 2026-10-06 節。上の節の `/ext/cage/…` の例は当時の形。
+
+## `/ext` のグループ別 ACL(2026-10-07、#152)— `/ext/groups/<g>` はメンバー rw・`/ext/public` は admin だけ rw
+
+仕様は #152 本文(ken と llens で合意)。jail の見え方は rw / ro / 見えない の 3 値で、jail のパス = URL の
+`/ext/...` は同じ文字列のまま。
+
+- **ACL の判定は `nucllei/utils/ext_acl.py` 1 か所**。sandbox tool・`/ext` ゲート(`serve_ext`)・resolver
+  (`image_refs`)・ファイルブラウザ(#150)がこれを呼ぶ:
+  - `ext_access(user, rel) -> "rw" | "ro" | "none"`(`rel` は `/ext/` 以降、decode 済み)/
+    `ext_path_access(user, "/ext/...")`
+  - `ext_visible_groups(user) -> list[str]`(`/ext/groups` 直下の一覧。admin は全グループ)
+  - `sandbox_ext_mounts(user) -> [{"path": "/ext/public", "rw": bool}, {"path": "/ext/groups/<g>", "rw": True}, …]`
+  - `is_group_dir_name(name)`(= #151 の `validate_group_name` を通り、名前が変わらない)、`is_acl_rel(rel)`、
+    `confine_depth(name)`(静的配信の閉じ込めが root から何段下か。groups = 1)
+  - `user` は `UserModel` / tool の `__user__` dict / user id 文字列(role 不明 = 一般)/ None(ACL の置き場は
+    全部 none。他の name は従来どおり ro)
+- グループのメンバー判定は `Groups.get_groups_by_member_id`(LIKE なので `user_ids` で確かめ直す)。
+  #151 より前の `:` 入り等の名前は bind も配信もしない(warning 1 行)。admin は role だけで決まる。
+- **sandbox との契約**: `/exec` `/exec_cell` `/files/*` に `mounts`。sandbox は ACL を解釈せず、形・
+  セグメント・経路の symlink だけを見る(`sandbox/README.md`「グループ・全体の共有の置き場」)。`/files/*` の
+  `path` は workspace 相対のほか、`/ext/groups/…` `/ext/public/…` の絶対パスも受ける(bind の中だけ、
+  経路の symlink は O_NOFOLLOW で拒否)。常駐 kernel は bind の指紋が変わると作り直し `session_reset`。
+- **tool**: run_* は毎回 `mounts` を付ける(所属を引けなければ実行しない — 黙って外すと kernel が作り直される)。
+  `write_file` / `list_workspace` / `fetch_from_workspace` は `/ext/groups/…` `/ext/public/…` を同じ権限で扱う。
+  `list_workspace("/ext/groups")` は見えるグループの一覧を ACL から返す。見えない置き場は「無い」と同じ文。
+  `fetch_from_workspace` は nucllei が配信していれば URL、配信していなければ sandbox の `/files/read` で添付。
+- **resolver**: `resolve_url(url, *, max_bytes=None, user=None)`・`resolve_path(path, user, …)`(旧 `user_id`)・
+  `resolve_ref(ref, user, …)`・`mounted_path_for_url(url, user=None)`・`url_for_mounted_path(path, user=None)`。
+  見えない物は `not_found`(redirect の先も)。呼び手(feed_image / fetch_url / send_to_workspace /
+  fetch_from_workspace / 送信直前 inline の `file_images`)はすべて user を渡す。配備層の tool が user 無しで
+  呼ぶと groups / public は見えない(fail closed)。
+- **ゲート**: 見えない物は 404(不在と同じ)、`/ext/groups` 直下も 404、両 name の応答に
+  `Cache-Control: private, no-cache`。静的の閉じ込めは `<root>/<グループ名>`(メンバーが jail で作った他グループへの
+  symlink を辿らない。グループのディレクトリ自体が symlink なら配信しない)。
+- **配備**: env の新設は無い。nucllei は `EXT_MOUNTS=…,groups=/ext/groups,public=/ext/public`(予約名 2 つ)、
+  sandbox は compose で `./groups:/ext/groups`・`./public:/ext/public`(rw)を足すだけ。ホスト側の所有権
+  (jail は uid 65534 で書く)は llens。
+- 回帰: `nucllei/test/apps/webui/routers/test_ext_acl.py`(実 DB の Groups)、`sandbox/tests/test_ext_mounts.py`。
+- 未了: グループ改名時のディレクトリの追従(旧名のディレクトリが残り、メンバーからは見えなくなる。admin には
+  見える)、共有チャットを非メンバーが開いたときの 404 は仕様。

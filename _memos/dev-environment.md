@@ -315,6 +315,13 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      起動ログ `/ext mounts (EXT_MOUNTS…): /ext/doc/ → proxy …` / `EXT_MOUNTS が空` で分かる。
      sandbox 側は同じ物を jail の `/ext/<name>` に bind する規約(#138)。vite dev の proxy の `/ext`
      は [[file-handling]] の 2026-10-05 節。
+   - **グループ・全体の共有の置き場**(#152): `groups` と `public` は予約名で、per-user の ACL が掛かる
+     (メンバー rw・非メンバーは見えない・admin は全部 rw / public は admin だけ rw。[[builtin-tools]] 末尾)。
+     dev で試すなら host にディレクトリを作り `EXT_MOUNTS` に
+     `groups=/abs/path/groups,public=/abs/path/public` を足す(env の新設は無い)。sandbox コンテナ側は
+     llens の compose に `./groups:/ext/groups`・`./public:/ext/public`(rw)が要る — 無ければ jail には
+     出ない(tool の `fetch_from_workspace` / `list_workspace` は sandbox の `/files/*` に行って 404)。
+     jail は uid 65534 で書くので、host のディレクトリは 65534 が書けること(llens は setfacl)。
    - **sandbox コンテナ**は本 repo の `sandbox/` がソース(出荷 image =
      `ghcr.io/technoplasm/nucllei-sandbox`。#114 で llens から移設)。手元ビルドは
      `docker build -t nucllei-sandbox:dev ./sandbox`、公開は **`127.0.0.1:13302->8000`**

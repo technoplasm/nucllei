@@ -78,6 +78,11 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       消す (symlink は辿らない・`memory/` 等には触らない)。回帰は `test_retention.py` の `test_cache_*`。
       値は `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し、nucllei が取り込み・
       exports 自動添付の tool 出力に「YYYY-MM-DD 以降に消える」を添える (回帰は `test_files_list.py`)
+- [x] **グループ・全体の共有の置き場** (#152、2026-10-07)。`/ext/groups/<g>` `/ext/public` を
+      nucllei が渡す `mounts` どおりに 1 つずつ rw / ro で bind (丸ごとは bind しない)。kernel は
+      bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを
+      経路の symlink を O_NOFOLLOW で拒否しながら扱う。回帰は `test_ext_mounts.py`。
+      **実機 (コンテナ) での確認は未** — compose の volume 追加 (llens) 待ち
 
 ## 残課題
 

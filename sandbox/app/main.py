@@ -74,6 +74,19 @@ RO_BINDS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt/venv"]
 # になる (`/ext/doc-static/X` は jail でも URL でも同じ物)。モデルが読み替えを要らない。
 # 全ユーザーに同じものが見える点を含め、詳細は README「参照用データを jail に見せる」。
 RO_MOUNT_ROOT = Path("/ext")
+# jail 側の置き場のパス (= URL の `/ext`)。コンテナ側は `RO_MOUNT_ROOT` (本番は同じ `/ext`。
+# テストは RO_MOUNT_ROOT だけを tmp に差し替える)
+JAIL_EXT_ROOT = "/ext"
+
+# 置き場の直下のうち、**リクエストごとに bind する**名前 (#152)。名前 → その下に要る
+# セグメント数 (`groups` は `/ext/groups/<グループ名>` を 1 つずつ、`public` は `/ext/public`
+# そのもの)。ここに挙げた名前は直下の自動 read-only bind (`_scan_ro_mount_root`) から外す —
+# `/ext/groups` を丸ごと bind すると他グループが見えてしまうため。誰に何を rw / ro で見せるかは
+# 呼び出し元 (nucllei) がユーザーの権限で決めて `mounts` で渡し、sandbox は ACL を解釈しない
+# (パスとして安全か = この形・各セグメントが妥当・経路に symlink が無い、だけを見る)。
+REQUEST_MOUNT_ROOTS = {"groups": 1, "public": 0}
+# 1 リクエストの `mounts` の上限 (admin は全グループ rw なのでグループ数ぶん来る)
+MAX_REQUEST_MOUNTS = 1024
 
 # jail の / は tmpfs で新規なので /dev が無い。最低限のデバイスノードを bind する
 # (これが無いと dd if=/dev/zero や /dev/urandom を使うコードが失敗する)
@@ -510,7 +523,8 @@ def _scan_ro_mount_root() -> tuple[list[str], list[str]]:
         return [], []
     binds, skipped = [], []
     for name in names:
-        if name.startswith("."):
+        if name.startswith(".") or name in REQUEST_MOUNT_ROOTS:
+            # リクエストごとに bind する置き場 (#152) は丸ごとは出さない
             continue
         p = str(RO_MOUNT_ROOT / name)
         ok = ":" not in name and os.path.exists(p)
@@ -532,11 +546,145 @@ def _log_ro_mounts() -> None:
             "(実体を辿れない = 壊れた symlink か、名前に ':' を含む)",
             flush=True,
         )
+    present = [
+        n
+        for n in sorted(REQUEST_MOUNT_ROOTS)
+        if stat.S_ISDIR(_lstat_mode(RO_MOUNT_ROOT / n))
+    ]
+    if present:
+        print(
+            "[sandbox] リクエストごとの bind (呼び出し元が mounts で指定): "
+            + " ".join(f"{JAIL_EXT_ROOT}/{n}" for n in present),
+            flush=True,
+        )
 
 
-def _jail_base(ws: Path, wall_s: int) -> list[str]:
+# ---------------------------------------------------------------------------
+# リクエストごとの bind (`/ext/groups/<g>` `/ext/public`。#152)
+# ---------------------------------------------------------------------------
+class MountIn(BaseModel):
+    """呼び出し元が決めた 1 つの bind。`path` は jail のパス (`/ext/groups/<g>` か `/ext/public`)、
+    `rw` は書けるか。見せないものは渡さない (= jail に存在しない)。"""
+
+    path: str
+    rw: bool = False
+
+
+# パスのセグメントとして拒否する Unicode 一般カテゴリ (nucllei の `utils/ext_acl.py` /
+# `utils/group_names.py` と同じ規則): 制御文字・書式文字・サロゲート・行 / 段落区切り
+_BAD_SEGMENT_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def _safe_segment(seg) -> bool:
+    """bind の 1 セグメント (グループ名) として安全か。グループ名はそのままディレクトリ名に
+    なるので、ここで弾くのは「パスとして壊れるもの」だけ: 空・前後の空白・`.` 始まり (`.` `..`
+    を含む)・`/` `\\` `:` (nsjail の `src:dst` 区切り)・制御 / 書式文字・UTF-8 で 255 バイト超。"""
+    import unicodedata
+
+    if not isinstance(seg, str) or not seg or seg != seg.strip():
+        return False
+    if seg.startswith(".") or any(c in "/\\:" for c in seg):
+        return False
+    if any(unicodedata.category(c) in _BAD_SEGMENT_CATEGORIES for c in seg):
+        return False
+    try:
+        return len(seg.encode("utf-8")) <= 255
+    except UnicodeEncodeError:
+        return False
+
+
+def _validate_mounts(mounts: list[MountIn]) -> list[tuple[str, bool]]:
+    """`mounts` を検証して `[(jail のパス, rw)]` (パス順・重複なし) にする。不正は 400。
+
+    受けるのは `REQUEST_MOUNT_ROOTS` の形だけ (`/ext/groups/<g>` と `/ext/public`)。
+    `/ext/groups` そのもの・`/ext/doc` 等の自動 bind の名前・深い位置は受けない。
+    同じパスが rw と ro で 2 回来たら (呼び出し元の矛盾) 400。"""
+    if len(mounts) > MAX_REQUEST_MOUNTS:
+        raise HTTPException(400, f"too many mounts (> {MAX_REQUEST_MOUNTS})")
+    out: dict[str, bool] = {}
+    prefix = JAIL_EXT_ROOT + "/"
+    for m in mounts:
+        p = m.path
+        if not isinstance(p, str) or not p.startswith(prefix):
+            raise HTTPException(400, f"invalid mount path: {p!r}")
+        segs = p[len(prefix) :].split("/")
+        depth = REQUEST_MOUNT_ROOTS.get(segs[0])
+        if depth is None or len(segs) != 1 + depth:
+            raise HTTPException(400, f"invalid mount path: {p!r}")
+        if not all(_safe_segment(s) for s in segs):
+            raise HTTPException(400, f"invalid mount path: {p!r}")
+        if p in out and out[p] != m.rw:
+            raise HTTPException(400, f"conflicting mount: {p!r}")
+        out[p] = bool(m.rw)
+    return sorted(out.items())
+
+
+def _lstat_mode(p) -> int:
+    try:
+        return os.lstat(p).st_mode
+    except OSError:
+        return 0
+
+
+def _mount_source(jail_path: str, create: bool) -> Optional[Path]:
+    """jail のパス `/ext/<...>` に対応するコンテナ側のディレクトリ (`RO_MOUNT_ROOT/<...>`)。
+    **経路のどこにも symlink を許さない** (各セグメントを lstat。置き場の根 `RO_MOUNT_ROOT`
+    だけは配備側の物なので辿ってよい)。無ければ None — ただし `create` (rw の bind) なら
+    末端の 1 段 (グループのディレクトリ) だけ作って jail のユーザーの物にする (所属グループの
+    置き場が初回から書けるように。`/ext/groups` `/ext/public` 自体は作らない = 配備側が置く)。
+    blocking。"""
+    segs = jail_path[len(JAIL_EXT_ROOT) + 1 :].split("/")
+    cur = RO_MOUNT_ROOT
+    for i, seg in enumerate(segs):
+        cur = cur / seg
+        mode = _lstat_mode(cur)
+        if mode == 0 and create and i == len(segs) - 1 and i > 0:
+            try:
+                os.mkdir(cur, 0o775)
+                os.chown(cur, JAIL_UID, JAIL_UID, follow_symlinks=False)
+                print(f"[sandbox] created {jail_path}", flush=True)
+            except FileExistsError:
+                pass
+            except OSError as e:
+                print(f"[sandbox] cannot create {jail_path}: {e!r}", flush=True)
+                return None
+            mode = _lstat_mode(cur)
+        if not stat.S_ISDIR(mode):
+            # 無い・symlink・ファイル。symlink は辿らない (他グループへ向けた差し替えを bind しない)
+            if stat.S_ISLNK(mode):
+                print(
+                    f"[sandbox] WARNING: {cur} は symlink なので bind しません",
+                    flush=True,
+                )
+            return None
+    return cur
+
+
+def _prepare_mounts(validated: list[tuple[str, bool]]) -> list[tuple[str, str, bool]]:
+    """検証済みの `[(jail のパス, rw)]` を nsjail に渡す `[(コンテナ側, jail 側, rw)]` にする。
+    実体が無いもの (置き場が無い配備・ro で未作成) は黙って飛ばす — nsjail は存在しない src で
+    jail の起動ごと失敗するため。blocking (thread で呼ぶ)。"""
+    binds = []
+    for jail_path, rw in validated:
+        src = _mount_source(jail_path, create=rw)
+        if src is not None:
+            binds.append((str(src), jail_path, rw))
+    return binds
+
+
+def _mounts_fingerprint(binds: list[tuple[str, str, bool]]) -> str:
+    """常駐 kernel が作られたときの jail の見え方の指紋 (jail のパスと rw だけ)。
+    違うリクエストが来たら kernel を作り直す (所属・権限が変わったら古い bind を持ち続けない)。"""
+    import hashlib
+
+    data = json.dumps([[dst, rw] for _src, dst, rw in binds])
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+
+def _jail_base(ws: Path, wall_s: int, binds=()) -> list[str]:
     """stateless exec と常駐 kernel で共通の nsjail 引数。wall_s は --time_limit
-    (プロセスの生存上限。stateless は実行秒、kernel はセッション TTL のバックストップ)。"""
+    (プロセスの生存上限。stateless は実行秒、kernel はセッション TTL のバックストップ)。
+    `binds` はリクエストごとの bind `[(コンテナ側, jail 側, rw)]` (`_prepare_mounts`)。"""
     cmd = [
         "nsjail",
         "--mode",
@@ -591,6 +739,12 @@ def _jail_base(ws: Path, wall_s: int) -> list[str]:
     # nsjail は `src` だけ渡すと dst = src なので、`src:dst` の対応表は要らない
     for p in _scan_ro_mount_root()[0]:
         cmd += ["--bindmount_ro", p]
+    # リクエストごとの bind (#152)。src と dst が同じなら src だけ (本番は常にこちら)
+    for src, dst, rw in binds:
+        cmd += [
+            "--bindmount" if rw else "--bindmount_ro",
+            src if src == dst else f"{src}:{dst}",
+        ]
     for p in DEV_BINDS:
         if os.path.exists(p):
             cmd += ["--bindmount", p]  # rw (デバイスノード)
@@ -599,17 +753,17 @@ def _jail_base(ws: Path, wall_s: int) -> list[str]:
     return cmd
 
 
-def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str]) -> list[str]:
+def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str], binds=()) -> list[str]:
     # stateless: プロセス = 1 実行。time_limit と rlimit_cpu を実行秒に張る。
-    cmd = _jail_base(ws, timeout_s)
+    cmd = _jail_base(ws, timeout_s, binds)
     cmd += ["--rlimit_cpu", str(timeout_s)]
     return cmd + ["--"] + argv
 
 
-def _kernel_nsjail_cmd(ws: Path) -> list[str]:
+def _kernel_nsjail_cmd(ws: Path, binds=()) -> list[str]:
     # stateful: 常駐 kernel。生存上限はセッション TTL (バックストップ)。per-cell の
     # timeout は kernel が SIGALRM で内部処理するので rlimit_cpu は張らない。
-    cmd = _jail_base(ws, SESSION_TTL_S)
+    cmd = _jail_base(ws, SESSION_TTL_S, binds)
     return cmd + ["--", f"{VENV_BIN}/python", "-u", KERNEL_PATH]
 
 
@@ -634,10 +788,12 @@ async def _read_capped(stream: asyncio.StreamReader) -> tuple[bytes, bool]:
 class Session:
     """(user_id, chat_id) ごとの常駐 kernel プロセス。framed protocol で通信。"""
 
-    def __init__(self, user_id: str, chat_id: str, proc):
+    def __init__(self, user_id: str, chat_id: str, proc, mounts_fp: str = ""):
         self.user_id = user_id
         self.chat_id = chat_id
         self.proc = proc
+        # 起動時の jail の見え方 (`_mounts_fingerprint`。#152)。違う見え方の要求が来たら作り直す
+        self.mounts_fp = mounts_fp
         self.lock = asyncio.Lock()  # 1 セッション = 直列実行
         self.last_used = time.monotonic()
         self.alive = True
@@ -681,12 +837,19 @@ class SessionManager:
     def _key(self, user_id, chat_id):
         return (user_id, chat_id)
 
-    async def get(self, user_id: str, chat_id: str) -> tuple[Session, bool]:
-        """既存 or 新規の Session を返す。2 要素目 = 新規作成 (reset) したか。"""
+    async def get(
+        self, user_id: str, chat_id: str, binds=(), mounts_fp: str = ""
+    ) -> tuple[Session, bool]:
+        """既存 or 新規の Session を返す。2 要素目 = 新規作成 (reset) したか。
+
+        `binds` / `mounts_fp` はリクエストごとの bind とその指紋 (#152)。生きている session でも
+        指紋が違えば (グループの所属・admin 権限が変わった等) 落として作り直し、reset を返す —
+        常駐 kernel は起動時の bind を持ち続けるので、そのままだと外れたグループが見え続ける。"""
         async with self._lock:
             key = self._key(user_id, chat_id)
             sess = self._sessions.get(key)
-            if sess is not None and sess.alive and sess.proc.poll() is None:
+            alive = sess is not None and sess.alive and sess.proc.poll() is None
+            if alive and sess.mounts_fp == mounts_fp:
                 return sess, False
             # 死んでいた/初回 → 掃除して作り直し
             if sess is not None:
@@ -699,13 +862,13 @@ class SessionManager:
             ws = await _workspace(user_id)
             proc = await asyncio.to_thread(
                 lambda: subprocess.Popen(
-                    _kernel_nsjail_cmd(ws),
+                    _kernel_nsjail_cmd(ws, binds),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                 )
             )
-            sess = Session(user_id, chat_id, proc)
+            sess = Session(user_id, chat_id, proc, mounts_fp)
             self._sessions[key] = sess
             return sess, was_reset
 
@@ -971,23 +1134,30 @@ class FileIn(BaseModel):
     b64: str
 
 
+# `mounts` (#152) は全 endpoint 共通: そのユーザーに見せる `/ext/groups/<g>` `/ext/public` と
+# rw / ro。無ければ (旧 nucllei) どれも見えない = 従来の jail。
+
+
 class ExecRequest(BaseModel):
     user_id: str
     lang: Literal["python", "shell"]
     code: str
     timeout_s: Optional[int] = None
     imports: list[FileIn] = Field(default_factory=list)
+    mounts: list[MountIn] = Field(default_factory=list)
 
 
 class PathRequest(BaseModel):
     user_id: str
     path: str = "."
+    mounts: list[MountIn] = Field(default_factory=list)
 
 
 class WriteRequest(BaseModel):
     user_id: str
     path: str
     b64: str
+    mounts: list[MountIn] = Field(default_factory=list)
 
 
 class CellRequest(BaseModel):
@@ -995,6 +1165,7 @@ class CellRequest(BaseModel):
     chat_id: str
     code: str
     timeout_s: Optional[int] = None
+    mounts: list[MountIn] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -1097,6 +1268,7 @@ async def _abandon_if_client_gone(request: Request):
 @app.post("/exec")
 async def exec_code(req: ExecRequest, request: Request):
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
+    validated = _validate_mounts(req.mounts)
     ws = await _workspace(req.user_id)
 
     async with _user_lock(req.user_id), _sem:
@@ -1123,11 +1295,12 @@ async def exec_code(req: ExecRequest, request: Request):
         else:
             argv = ["/bin/bash", jail_script]
 
+        binds = await asyncio.to_thread(_prepare_mounts, validated)
         before = _snapshot_exports(ws)
         t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
-                *_nsjail_cmd(ws, timeout_s, argv),
+                *_nsjail_cmd(ws, timeout_s, argv, binds=binds),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1167,8 +1340,12 @@ async def exec_cell(req: CellRequest, request: Request):
     if not req.chat_id:
         raise HTTPException(400, "chat_id required for stateful exec")
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
+    validated = _validate_mounts(req.mounts)
     ws = await _workspace(req.user_id)
-    sess, was_reset = await _sessions.get(req.user_id, req.chat_id)
+    binds = await asyncio.to_thread(_prepare_mounts, validated)
+    sess, was_reset = await _sessions.get(
+        req.user_id, req.chat_id, binds, _mounts_fingerprint(binds)
+    )
 
     async with sess.lock, _sem:
         await _abandon_if_client_gone(request)
@@ -1229,8 +1406,208 @@ async def exec_cell(req: CellRequest, request: Request):
         }
 
 
+# ---------------------------------------------------------------------------
+# /files/* の `/ext/...` (リクエストごとの bind の中。#152)
+# ---------------------------------------------------------------------------
+# `path` が `/` 始まりなら jail の絶対パス `/ext/groups/<g>/…` `/ext/public/…` として扱い、
+# **そのリクエストの `mounts` に在る bind の中**だけを読み書きする (無ければ 404 = 見えない、
+# ro に書けば 403)。包含判定の基準はその bind のディレクトリ (= グループのディレクトリ) で、
+# **経路上の symlink は 1 つも辿らない** — 各段を `O_NOFOLLOW` 付きで dir fd から開き直す
+# (openat 系)。jail 内で作った `/ext/groups/EMR/x -> ../OTHER/secret` のような symlink を
+# サービス側 (コンテナの名前空間 = 全グループが在る) で辿って他グループへ抜ける穴を塞ぐため。
+# resolve() してから包含判定する方式は判定と open の間に差し替えられる (TOCTOU) ので使わない。
+# workspace 相対の `path` (`/` 始まりでない) は従来どおり `_safe_path`。
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _ext_target(path: str, mounts: list[MountIn], write: bool):
+    """`/ext/...` を (bind のコンテナ側ディレクトリ, bind の jail パス, その下のセグメント) に。
+    blocking。"""
+    validated = _validate_mounts(mounts)
+    prefix = JAIL_EXT_ROOT + "/"
+    if not path.startswith(prefix):
+        raise HTTPException(
+            400, f"path must be workspace-relative or under /ext: {path!r}"
+        )
+    segs = path[len(prefix) :].rstrip("/").split("/")
+    if any(s in ("", ".", "..") or "\x00" in s for s in segs):
+        raise HTTPException(400, f"invalid path: {path!r}")
+    best = None
+    for jail_path, rw in validated:
+        msegs = jail_path[len(prefix) :].split("/")
+        if segs[: len(msegs)] == msegs and (best is None or len(msegs) > len(best[1])):
+            best = (jail_path, msegs, rw)
+    if best is None:
+        # bind されていない = jail に存在しない (他グループ・未所属) — 不在と同じ
+        raise HTTPException(404, f"not found: {path}")
+    jail_path, msegs, rw = best
+    if write and not rw:
+        raise HTTPException(403, f"read-only: {jail_path}")
+    src = _mount_source(jail_path, create=write)
+    if src is None:
+        raise HTTPException(404, f"not found: {path}")
+    return src, jail_path, segs[len(msegs) :]
+
+
+def _symlink_or_missing(name: str, dir_fd: int, path: str) -> HTTPException:
+    """open が失敗した段の言い分け: symlink なら 400、それ以外は 404。"""
+    try:
+        if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+            return HTTPException(400, f"path contains a symlink: {path}")
+    except OSError:
+        pass
+    return HTTPException(404, f"not found: {path}")
+
+
+def _open_dirs(base: str, segs: list[str], path: str, create: bool = False) -> int:
+    """`base` から `segs` を 1 段ずつ O_NOFOLLOW で開き、最後のディレクトリの fd を返す
+    (呼び手が close)。`create` なら無い段を作る (jail のユーザーの物にする)。"""
+    fd = os.open(base, _DIR_FLAGS)
+    try:
+        for seg in segs:
+            try:
+                nfd = os.open(seg, _DIR_FLAGS, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise HTTPException(404, f"not found: {path}")
+                try:
+                    os.mkdir(seg, 0o775, dir_fd=fd)
+                    os.chown(seg, JAIL_UID, JAIL_UID, dir_fd=fd, follow_symlinks=False)
+                except FileExistsError:
+                    pass
+                try:
+                    nfd = os.open(seg, _DIR_FLAGS, dir_fd=fd)
+                except OSError:
+                    raise _symlink_or_missing(seg, fd, path)
+            except OSError:
+                raise _symlink_or_missing(seg, fd, path)
+            os.close(fd)
+            fd = nfd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _ext_list(path: str, mounts: list[MountIn]) -> dict:
+    src, jail_path, segs = _ext_target(path, mounts, write=False)
+    try:
+        fd = _open_dirs(str(src), segs[:-1], path) if segs else None
+    except HTTPException as e:
+        if e.status_code == 404:
+            return {"entries": [], "exists": False, "is_dir": False}
+        raise
+    try:
+        if segs:
+            leaf = segs[-1]
+            try:
+                mode = os.stat(leaf, dir_fd=fd, follow_symlinks=False).st_mode
+            except FileNotFoundError:
+                return {"entries": [], "exists": False, "is_dir": False}
+            if stat.S_ISLNK(mode):
+                raise HTTPException(400, f"path contains a symlink: {path}")
+            if not stat.S_ISDIR(mode):
+                return {"entries": [], "exists": True, "is_dir": False}
+            top = os.open(leaf, _DIR_FLAGS, dir_fd=fd)
+        else:
+            top = os.open(str(src), _DIR_FLAGS)
+    finally:
+        if fd is not None:
+            os.close(fd)
+    base = jail_path + ("/" + "/".join(segs) if segs else "")
+    entries = []
+    try:
+        # follow_symlinks=False: ディレクトリ symlink にも降りない。symlink のファイルも出さない
+        for dirpath, dirnames, filenames, dfd in os.fwalk(
+            ".", dir_fd=top, follow_symlinks=False
+        ):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            rel_dir = "" if dirpath == "." else dirpath[2:] + "/"
+            for name in sorted(filenames):
+                if name.startswith("."):
+                    continue
+                try:
+                    st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    continue
+                entries.append({"path": f"{base}/{rel_dir}{name}", "size": st.st_size})
+                if len(entries) >= 500:
+                    break
+            if len(entries) >= 500:
+                break
+    finally:
+        os.close(top)
+    return {"entries": entries, "exists": True, "is_dir": True}
+
+
+def _ext_read(path: str, mounts: list[MountIn]) -> dict:
+    src, _jail_path, segs = _ext_target(path, mounts, write=False)
+    if not segs:
+        raise HTTPException(404, f"not a file: {path}")
+    dfd = _open_dirs(str(src), segs[:-1], path)
+    try:
+        try:
+            fd = os.open(
+                segs[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd
+            )
+        except OSError:
+            raise _symlink_or_missing(segs[-1], dfd, path)
+    finally:
+        os.close(dfd)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise HTTPException(404, f"not a file: {path}")
+        if st.st_size > FILE_LIMIT:
+            raise HTTPException(
+                413, f"file too large: {st.st_size} bytes (limit {FILE_LIMIT})"
+            )
+        data = f.read()
+    return {
+        "name": segs[-1],
+        "size": len(data),
+        "b64": base64.b64encode(data).decode(),
+    }
+
+
+def _ext_write(path: str, mounts: list[MountIn], data: bytes) -> None:
+    src, _jail_path, segs = _ext_target(path, mounts, write=True)
+    if not segs:
+        raise HTTPException(400, f"is a directory: {path}")
+    dfd = _open_dirs(str(src), segs[:-1], path, create=True)
+    try:
+        try:
+            fd = os.open(
+                segs[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o664,
+                dir_fd=dfd,
+            )
+        except IsADirectoryError:
+            raise HTTPException(400, f"is a directory: {path}")
+        except OSError:
+            raise _symlink_or_missing(segs[-1], dfd, path)
+    finally:
+        os.close(dfd)
+    with os.fdopen(fd, "wb") as f:
+        os.fchown(f.fileno(), JAIL_UID, JAIL_UID)
+        f.write(data)
+
+
+def _is_ext_path(path: str) -> bool:
+    """`/files/*` の `path` が jail の絶対パス (= `/ext/...` の扱い) か。workspace 相対は `/` 無し。"""
+    return path.startswith("/")
+
+
 @app.post("/files/list")
 async def files_list(req: PathRequest):
+    if _is_ext_path(req.path):
+        if not _USER_ID_RE.match(req.user_id):
+            raise HTTPException(400, f"invalid user_id: {req.user_id!r}")
+        return await asyncio.to_thread(_ext_list, req.path, req.mounts)
     ws = await _workspace(req.user_id)
     base = _safe_path(ws, req.path)
     # `exists` / `is_dir` は「無い」と「空」と「ファイル」を言い分けるため (#145 — 旧版は
@@ -1255,6 +1632,10 @@ async def files_list(req: PathRequest):
 
 @app.post("/files/read")
 async def files_read(req: PathRequest):
+    if _is_ext_path(req.path):
+        if not _USER_ID_RE.match(req.user_id):
+            raise HTTPException(400, f"invalid user_id: {req.user_id!r}")
+        return await asyncio.to_thread(_ext_read, req.path, req.mounts)
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
     if not p.is_file():
@@ -1271,12 +1652,17 @@ async def files_read(req: PathRequest):
 
 @app.post("/files/write")
 async def files_write(req: WriteRequest):
-    ws = await _workspace(req.user_id)
-    p = _safe_path(ws, req.path)
     try:
         data = base64.b64decode(req.b64)
     except binascii.Error:
         raise HTTPException(400, "invalid b64")
+    if _is_ext_path(req.path):
+        if not _USER_ID_RE.match(req.user_id):
+            raise HTTPException(400, f"invalid user_id: {req.user_id!r}")
+        await asyncio.to_thread(_ext_write, req.path, req.mounts, data)
+        return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
+    ws = await _workspace(req.user_id)
+    p = _safe_path(ws, req.path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)
     os.chown(p, JAIL_UID, JAIL_UID)

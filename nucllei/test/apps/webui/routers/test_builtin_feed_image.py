@@ -66,6 +66,7 @@ class _Resolver:
         self.refs: list[str] = []
         self.calls: list[tuple[str, str]] = []
         self.users: list[str] = []
+        self.url_users: list = []  # resolve_url の user= (#152 — ACL に使う)
         self.kwargs: list[dict] = (
             []
         )  # resolver に渡されたキーワード (feed_image は何も渡さない)
@@ -78,9 +79,10 @@ class _Resolver:
             return None, hit
         return hit, None
 
-    async def url(self, ref, **kwargs):
+    async def url(self, ref, user=None, **kwargs):
         self.refs.append(ref)
         self.calls.append(("url", ref))
+        self.url_users.append(user)
         self.kwargs.append(kwargs)
         if not (
             ref.lower().startswith(("http://", "https://")) or ref.startswith("/ext/")
@@ -88,10 +90,11 @@ class _Resolver:
             return None, RefError("unsupported_form", "not a URL this server resolves")
         return self._lookup(ref)
 
-    async def path(self, ref, user_id, **kwargs):
+    async def path(self, ref, user, **kwargs):
         self.refs.append(ref)
         self.calls.append(("path", ref))
-        self.users.append(user_id)
+        # #152: user は dict ごと (role が ACL に要る)。id で比べる
+        self.users.append(user["id"] if isinstance(user, dict) else user)
         self.kwargs.append(kwargs)
         if not ref.startswith(("/workspace/", "/ext/")):
             return None, RefError("unsupported_form", "not a sandbox path")
@@ -117,7 +120,7 @@ def _install(monkeypatch, table, n_pages=5):
     monkeypatch.setattr(mod, "pdf_page_count", lambda data: n_pages)
 
     # 配信されている `/ext/…` だけ URL (同じ文字列) を返す偽物。既定は「配信されていない」
-    async def _served(path):
+    async def _served(path, user=None):
         return path if path in getattr(resolver, "served", ()) else None
 
     monkeypatch.setattr(mod, "url_for_mounted_path", _served)

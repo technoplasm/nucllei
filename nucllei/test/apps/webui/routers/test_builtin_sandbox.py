@@ -1534,7 +1534,7 @@ def test_valve_url_max_mb_is_the_resolver_limit(monkeypatch):
     # resolver の既定(FETCH_MAX_BYTES)ではなく valve の値が上限になる
     seen = {}
 
-    async def fake_resolve(url, *, max_bytes=None):
+    async def fake_resolve(url, *, max_bytes=None, user=None):
         from nucllei.utils.image_refs import RefError
 
         seen.update(url=url, max_bytes=max_bytes)

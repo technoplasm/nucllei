@@ -409,7 +409,7 @@ class Tools:
                 __progress__(f"取得中: {u}")
             # サイズ上限は max_bytes で渡す — 文書を読む用途なので画像 inline 用の既定上限を
             # 借りない。too_large の ERROR 文は RefError.limit (実際に使われた上限) から MB を出す。
-            loaded, err = await resolve_url(u, max_bytes=max_bytes)
+            loaded, err = await resolve_url(u, max_bytes=max_bytes, user=__user__)
             if err is not None or loaded is None:
                 raise _explain_ref_error(u, err, ceiling_mb)
             if (

@@ -58,6 +58,8 @@ nsjail jail
   - /tmp: 256MB tmpfs (RAM-backed・実行ごとに消える。実行中の一時ファイル用。
     跨いで残すなら /workspace へ)
   - /ext/<名前>: 配備側が置いた参照用データを read-only bind (既定は空。下記。2026-10-03 までは /mnt)
+  - /ext/groups/<グループ名> / /ext/public: リクエストごとに nucllei が指定した物だけを rw / ro で
+    bind (グループ別 ACL。下記「グループ・全体の共有の置き場」。#152)
   - network namespace: 空 (loopback 含め通信不可)
 ```
 
@@ -112,6 +114,40 @@ services:
 - 実体を辿れないもの (壊れた symlink) は**飛ばして警告**する。そのまま渡すと jail の起動ごと
   失敗し全ユーザーの全実行が落ちるため。dot 始まりは無視。
 - 起動ログに bind 一覧が 1 行出る (`[sandbox] 追加 read-only bind: /ext/doc`)。
+- **`groups` と `public` は例外** (直下に在っても丸ごとは bind しない — 下の節)。
+
+### グループ・全体の共有の置き場 (`/ext/groups/<g>` `/ext/public`。#152)
+
+本番機ローカルの、git にも image にも入らない共有の置き場 (レシピ・EMR の表ノート等)。
+jail からの見え方は **rw / ro / 見えない の 3 値**:
+
+| jail のパス (= URL) | 一般ユーザー | admin | コンテナ側 |
+|---|---|---|---|
+| `/ext/groups/<グループ名>/` | メンバーは rw、それ以外は**見えない** (bind しない) | 全グループ rw | `/ext/groups/<グループ名>` |
+| `/ext/public/` | ro | rw | `/ext/public` |
+
+- **ACL は nucllei が決める** (`nucllei/utils/ext_acl.py` 1 か所。nucllei の `README_API.md` §3.8)。
+  nucllei は `/exec` `/exec_cell` `/files/*` のリクエストに `mounts` (下の API) を付け、
+  sandbox はそれを**解釈せず**、パスとして安全かだけを見て bind する:
+  - 受ける形は `/ext/groups/<1 セグメント>` と `/ext/public` だけ (`REQUEST_MOUNT_ROOTS`)。
+    `/ext/groups` そのもの・深い位置・他の名前 → 400
+  - 各セグメント: 空・前後の空白・`.` 始まり (`.` `..` を含む)・`/` `\` `:` (nsjail の
+    `src:dst` 区切り)・制御 / 書式文字・UTF-8 で 255 バイト超 → 400 (nucllei の
+    `utils/group_names.validate_group_name` と同じ規則を自前で持つ — image が別なので import しない)
+  - コンテナ側の経路を各段 lstat し、**symlink が 1 つでもあれば bind しない** (ログに warning)
+  - 実体が無いもの: ro は黙って飛ばす (nsjail は存在しない src で jail ごと落ちる)、rw は末端の
+    グループのディレクトリだけ作って jail のユーザー (65534) の物にする。`/ext/groups` `/ext/public`
+    自体は作らない (配備側が置く)
+  - `mounts` が無い (旧 nucllei) リクエストでは、どちらも見えない
+- **`/ext/groups` は丸ごと bind しない** — 直下の自動 read-only bind (`_scan_ro_mount_root`) から
+  `groups` `public` を外す。他グループは ro でも jail に存在しない。
+- **常駐 kernel (`/exec_cell`) は bind の指紋** (jail のパスと rw) を持ち、違う見え方の要求が来たら
+  作り直して `session_reset` を返す (所属が外れたグループを見せ続けない)。
+- 書き込みは jail の実 uid 65534 で行うので、**ホスト側の所有権 (setfacl 等) は配備側** (llens) が
+  持つ。容量上限は掛けない (loopback は使わない)。
+- compose (配備側) は volume を 2 本足すだけ: `./groups:/ext/groups`・`./public:/ext/public`
+  (どちらも **rw** — `:ro` を付けると rw の bind も EROFS になる)。nucllei 側にも同じ組を
+  `EXT_MOUNTS=…,groups=/ext/groups,public=/ext/public` で見せる。
 
 ## セキュリティモデル
 
@@ -128,7 +164,15 @@ services:
   コンテナ名前空間では一切動かず (必ず jail 内)、privileged が意味を持つのは
   nsjail 脱出に成功した後だけ。sandbox コンテナ内で jail 外実行は絶対にしない。
 - **ユーザー間の隔離は mount ns**: 実行時に当該ユーザーの workspace だけを bind する
-  ため、他ユーザーの領域は jail 内に存在しない (見えない・触れない)。
+  ため、他ユーザーの領域は jail 内に存在しない (見えない・触れない)。グループの置き場も
+  同じで、見せてよい `/ext/groups/<g>` だけを 1 つずつ bind する (#152)。
+- **サービス側で symlink を辿らない** (#152): jail のユーザーは rw の置き場に任意の symlink を
+  作れる (`/ext/groups/EMR/x -> ../OTHER/secret`)。jail の中では他グループが bind されていないので
+  無害だが、サービス (コンテナの名前空間 = 全グループが在る) が `/files/*` でそれを辿ると抜けられる。
+  `/files/*` の `/ext/...` は包含判定の基準を**その bind のディレクトリ**にし、経路の各段を dir fd から
+  `O_NOFOLLOW` で開き直す (openat 系。resolve → 判定 → open の TOCTOU も無い)。symlink に当たれば 400。
+  workspace 側の `/files/*` は従来どおり `_safe_path` (resolve して workspace の外なら 400) で、
+  workspace に置いた「グループの置き場を指す symlink」もそこで弾かれる。
   jail 内 uid は全ユーザー共通の 65534。
   - 残懸念 (受容済み): nsjail 脱出ができた場合、同一 uid のため他ユーザーの workspace
     が DAC では守られない。対策としては per-user uid オフセット割当があるが、
@@ -266,19 +310,28 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 `Authorization: Bearer <SANDBOX_TOKEN>` が要る** (無い/違う → 401)。未設定の配備では
 認証は掛からない (opt-in。上の「セキュリティモデル」参照)。
 
-- `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}]}`
+- 全 endpoint 共通の `mounts?: [{path, rw}]` (#152) — そのユーザーに見せる `/ext/groups/<g>` と
+  `/ext/public` と、書けるか。nucllei が ACL で決める (上の「グループ・全体の共有の置き場」)。
+  不正な形 → 400、同じパスが rw と ro で来たら 400、上限 1024 件
+- `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}], mounts?}`
   → `{exit_code, timed_out, duration_s, stdout, stderr, stdout_truncated, stderr_truncated,
      exports: [{name, size, b64?, truncated}], cache_ttl_days}`
-- `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?}`
+- `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?, mounts?}` (bind の指紋が
+  前回と違えば kernel を作り直し `session_reset: true`)
   → `{stdout, error, timed_out, session_reset, duration_s, stdout_truncated,
      exports: [...], cache_ttl_days}`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
   - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
-- `POST /files/list` — `{user_id, path?}` → `{entries, exists, is_dir}` workspace のファイル一覧
+- `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir}` ファイル一覧
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
-- `POST /files/read` — `{user_id, path}` → `{name, size, b64}`
-- `POST /files/write` — `{user_id, path, b64}` → `{ok, size, cache_ttl_days}` 書き込み
+- `POST /files/read` — `{user_id, path, mounts?}` → `{name, size, b64}`
+- `POST /files/write` — `{user_id, path, b64, mounts?}` → `{ok, size, cache_ttl_days}` 書き込み
   (workspace 外へのパスは拒否)
+  - `/files/*` の `path` は 2 形 (#152): **workspace 相対** (`imports/a.csv`。従来どおり。一覧の
+    `entries[].path` も workspace 相対) と、**jail の絶対パス `/ext/groups/<g>/…` `/ext/public/…`**
+    (その要求の `mounts` に在る bind の中だけ。`entries[].path` も絶対パス)。bind に無い → 404
+    (見えない = 無い)、ro に書く → 403、経路に symlink → 400、`..` 等 → 400、`/ext` 外の絶対パス
+    → 400。書いたファイル・作ったディレクトリは jail のユーザー (65534) の物
   - `cache_ttl_days` (int) — `imports/` `exports/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
     0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
     自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
@@ -343,7 +396,8 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
 
 参照用データの read-only bind には **env が無い** — `/ext` 直下に置いた volume がそのまま
-jail に出る (上記「参照用データを jail に見せる」)。
+jail に出る (上記「参照用データを jail に見せる」)。グループ・全体の置き場 (#152) も env は無く、
+置き場はコンテナの `/ext/groups` `/ext/public` 固定 (配備側は volume を足すだけ)。
 
 ## UI tool (nucllei/builtin_tools/sandbox.py)
 
@@ -353,8 +407,8 @@ jail に出る (上記「参照用データを jail に見せる」)。
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
 | `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具)。exports/ 自動添付 |
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
-| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下の絶対パス。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
-| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
+| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (`SANDBOX_WRITE_FILE_LIMIT_BYTES`) |
+| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
 - **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**
@@ -390,7 +444,7 @@ jail に出る (上記「参照用データを jail に見せる」)。
     (2026-10-03 夕に `EXT_FILE_SCOPES` と「利用者に配信しない範囲にある」の断りは撤去。
     nucllei の `README_API.md` §3.8)。
   - nucllei 側に無い `/ext/…` は添付の経路に落ちるが、nucllei 自身の置き場から読む (sandbox の
-    `/files/read` は workspace しか扱わない) ので **「読めない」になる** — そのときは `run_shell` で
+    `/files/read` は workspace と `/ext/groups` `/ext/public` しか扱わない。この 2 つは nucllei が配信していなくても sandbox から読んで添付する — #152) ので **「読めない」になる** — そのときは `run_shell` で
     `/workspace/` にコピーしてから渡すよう tool が案内する。上限は nucllei の `FETCH_MAX_BYTES`
     (既定 25 MB。`/workspace` 側の `SANDBOX_FILE_LIMIT_BYTES` とは別。旧 `EXT_INLINE_MAX_BYTES`)。
   - 不在・ディレクトリ・置き場の外を指す symlink は同じ「読めない」(fail closed)、上限超過は
@@ -403,8 +457,8 @@ jail に出る (上記「参照用データを jail に見せる」)。
   相対・空・URL・`/workspace` の外 (`/etc/...`、`..` での脱出) は tool 側で、全 tool 共通の固定文
   (`README_API.md` §3.8) で断り、`/ext/...` (read-only の参照
   データ) は `write_file` / `list_workspace` が「`run_shell` の `ls` で見る。利用者に見せるなら
-  `fetch_from_workspace`」と案内して断る — サービスの `/files/*` は workspace しか
-  扱わないため (`fetch_from_workspace` だけは `/ext/...` を受ける。上の項)。**サービスの wire (`/files/list|read|write` の `path`) は workspace 相対のまま**で、
+  `fetch_from_workspace`」と案内して断る — サービスの `/files/*` は workspace (と #152 の `/ext/groups` `/ext/public`) しか
+  扱わないため (`fetch_from_workspace` だけは `/ext/...` を受ける。上の項)。**サービスの wire (`/files/list|read|write` の `path`) は workspace 相対のまま** (#152 の `/ext/groups` `/ext/public` だけは jail の絶対パスで渡す)で、
   絶対 ↔ 相対の変換は tool 側だけが持つ (sandbox image と nucllei の版がずれても動く)。境界の検査は
   tool 側 (文字列の正規化) とサービス側 (`_safe_path`、symlink 越しの脱出も実 fs で弾く) の二重。
   失敗時の文面は原因で言い分ける: 400 = path の問題、404 = ファイルが無い、413 = 大きすぎる、
@@ -608,6 +662,11 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   `/HEALTHZ` `/healthz/../files/list` 等はすべて 401 — 免除判定を prefix 一致や自前の
   正規化に変えたら落ちる) と、**非 ASCII トークンは起動ログで名指しする**ことも見る。
   形状のテストは httpx がクライアント側で URL を畳んでしまうため ASGI を直接叩く。
+- `sandbox/tests/test_ext_mounts.py` — グループ・全体の共有の置き場 (#152)。`mounts` の検証
+  (受ける形・危険なセグメント・rw/ro の矛盾)、`groups` `public` を丸ごと bind しない、rw/ro の
+  nsjail 引数・無い置き場は飛ばす・rw のグループのディレクトリは作る・symlink のグループは bind しない、
+  `/files/*` の `/ext/...` (ro は 403・bind 外は 404・**他グループへの symlink を読み・書き・一覧・
+  中間ディレクトリのどれでも辿らない**・workspace からの symlink も弾く)、kernel の指紋による作り直し。
 - `sandbox/tests/test_ro_mounts.py` — 参照用データの read-only bind (#138)。置き場が
   空/不在なら nsjail の引数が増えない (挙動不変)、直下のものが同じパスで名前順に並ぶ、
   **rw では絶対に足さない**、1 階層だけ見る、dot 始まり・壊れた symlink は飛ばす

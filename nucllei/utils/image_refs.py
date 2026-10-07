@@ -145,14 +145,19 @@ prompt / skill に書く文であって、tool のゲートではない(届く�
 - **`/api/v1/files/{id}/content`**(このサーバのファイル配信口。相対、または絶対 — host は
   `/ext/` と同じく問わない: 与えられた host には接続せず Storage から読むので)は、URL の
   ルーティングとしては `file_id_of_url` が id を取り出すところまで。バイトの読み出しは
-  per-user の権限検査が要る(`resolve_url` は user を取らない — `/ext/` の公開範囲は
-  admin 管理で per-user ではない)ので、呼び手が自分の検査で読む: 送信直前 inline
+  per-user の権限検査が要る(`resolve_url` の `user` は `/ext/groups` `/ext/public` の ACL
+  — #152、`utils/ext_acl` — にだけ使い、file の権限は見ない)ので、呼び手が自分の検査で読む: 送信直前 inline
   (`file_images.py`、読み取り権限)と `send_to_workspace(url=)`(所有者)。`resolve_url` に
   そのまま渡せば `unsupported_form`。**fragment は末尾の `#page=N` だけが意味を持つ**
   (`split_page`)。それ以外の fragment は無視して同じ file に当てる(fragment は
   サーバに送られない、ブラウザ側だけの情報 — どの tool でも同じ)。
 - **URL がどこに属するか**だけが要る呼び手(配備層の fetch_url がリンク一覧のルートを
   組む)は `route_of_url` を使う — 同じ `_route_url` の結果を返すだけで、読まない。
+
+**`/ext/groups/<g>` と `/ext/public` の ACL**(#152): どの入口(`resolve_url` / `resolve_path` /
+`resolve_ref` / 橋渡し 2 つ)も `user` を取り、`utils/ext_acl.ext_access` が none の物は
+`not_found`(不在と同じ — 存在を漏らさない。redirect の先も同じ)。`user` 無しは見えない
+(fail closed)。静的配信の閉じ込めは `/ext/groups` だけ `<root>/<グループ名>`(`_confine_base`)。
 
 **sandbox の fs パス**:
 
@@ -229,6 +234,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 import httpx
 
 from nucllei.env import FETCH_MAX_BYTES, SELF_ADDRESSES, SRC_LOG_LEVELS
+from nucllei.utils.ext_acl import confine_depth, ext_access, is_group_dir_name
 from nucllei.utils.ext_upstreams import (
     MAX_REDIRECTS,
     ExtMount,
@@ -649,13 +655,36 @@ def static_file(mount: ExtMount, sub: str) -> tuple[Path, str] | None:
     root = _static_root(mount)
     if root is None:
         return None
+    base = _confine_base(mount, root, sub)
+    if base is None:
+        return None
     try:
         resolved = (root / sub.lstrip("/")).resolve()
     except (OSError, RuntimeError, ValueError):
         return None
-    if not resolved.is_relative_to(root) or not resolved.is_file():
+    if not resolved.is_relative_to(base) or not resolved.is_file():
         return None
     return resolved, resolved.relative_to(root).as_posix()
+
+
+def _confine_base(mount: ExtMount, root: Path, sub: str) -> Path | None:
+    """閉じ込めの基準。通常は mount の root、`/ext/groups` は `<root>/<グループ名>`(#152 —
+    グループの中の symlink で他グループへ出させない。`ext_acl.confine_depth`)。グループの
+    ディレクトリ自体が symlink・名前として使えない・無いときは None。blocking。"""
+    depth = confine_depth(mount.name)
+    if not depth:
+        return root
+    head = sub.lstrip("/").split("/")[:depth]
+    if len(head) < depth or not all(is_group_dir_name(h) for h in head):
+        return None
+    base = root.joinpath(*head)
+    try:
+        # 段ごとに symlink でないこと(resolve の結果が字面どおり = 経路に symlink が無い)
+        if base.resolve() != base or not base.is_dir():
+            return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return base
 
 
 def _ext_parts(rest: str, *, decode: bool) -> tuple[ExtMount | None, str] | None:
@@ -671,11 +700,24 @@ def _ext_parts(rest: str, *, decode: bool) -> tuple[ExtMount | None, str] | None
     return ext_mount(name), sub
 
 
+def _visible(user, mount: ExtMount, sub: str) -> bool:
+    """`/ext/<name>/<sub>` がこの user に見えるか(`ext_acl.ext_access` が none でない。#152)。
+    見えない物は呼び手が「無い」と同じ扱いにする(存在を漏らさない)。"""
+    return ext_access(user, f"{mount.name}/{sub}") != "none"
+
+
 async def _load_ext(
-    rest: str, limit: int, *, query: str = "", decode: bool = True, hops: int = 0
+    rest: str,
+    limit: int,
+    *,
+    user=None,
+    query: str = "",
+    decode: bool = True,
+    hops: int = 0,
 ) -> _Result:
     """`/ext/{rest}` を読む — 静的の name はファイル、proxy の name は上流へ GET
-    (`_load_proxy`)、表に無い name は not_found。"""
+    (`_load_proxy`)、表に無い name は not_found。`/ext/groups` `/ext/public` は `user` の
+    ACL(`ext_acl`)で見えなければ not_found(#152)。"""
     parts = _ext_parts(rest, decode=decode)
     if parts is None:
         log.warning("image_refs: rejecting traversal ext path")
@@ -685,18 +727,24 @@ async def _load_ext(
     if mount is None:
         log.warning(f"image_refs: no /ext mount for this name ({label})")
         return _fail("not_found", f"no /ext mount for this name ({label})")
+    if not _visible(user, mount, sub):
+        log.warning(f"image_refs: not visible to this user ({label})")
+        return _fail("not_found", f"not visible to this user ({label})")
     if mount.proxy:
-        return await _load_proxy(mount, sub, query, limit, hops)
+        return await _load_proxy(mount, sub, query, limit, hops, user)
     root = await asyncio.to_thread(_static_root, mount)
     if root is None:
         return _fail("not_found", f"cannot resolve mount root ({label})")
+    base = await asyncio.to_thread(_confine_base, mount, root, sub)
+    if base is None:
+        return _fail("not_found", f"no such place ({label})")
     return await asyncio.to_thread(
-        _read_confined, _is_under(root), root / sub.lstrip("/"), label, limit
+        _read_confined, _is_under(base), root / sub.lstrip("/"), label, limit
     )
 
 
 async def _load_proxy(
-    mount: ExtMount, sub: str, query: str, limit: int, hops: int
+    mount: ExtMount, sub: str, query: str, limit: int, hops: int, user=None
 ) -> _Result:
     """proxy の name を上流へ GET する(`EXT_MOUNTS` の固定の相手 — 自分自身判定は掛けない)。
     404 → not_found、2xx 以外 → upstream_status、接続失敗・タイムアウト → upstream_unreachable、
@@ -748,7 +796,11 @@ async def _load_proxy(
         )
     path, _, q = remainder.partition("?")
     return await _load_ext(
-        f"{mount.name}/{path}", limit, query=f"?{q}" if q else "", hops=hops + 1
+        f"{mount.name}/{path}",
+        limit,
+        user=user,
+        query=f"?{q}" if q else "",
+        hops=hops + 1,
     )
 
 
@@ -826,7 +878,7 @@ def _pinned_request(parts, address: str) -> httpx.Request:
 
 
 async def _load_general(
-    url: str, limit: int, hops: int, redirect_status: int | None
+    url: str, limit: int, hops: int, redirect_status: int | None, user=None
 ) -> _Result:
     """一般の URL(`/ext/` 形でない絶対 URL。`_route_url` が `kind="general"` と
     判定済み)を直接取得する(module docstring「一般の URL」)。
@@ -919,7 +971,7 @@ async def _load_general(
             "upstream_unreachable",
             f"general fetch error ({label}): {type(e).__name__}: {e}",
         )
-    return await _load_url(target, limit, hops + 1, status)
+    return await _load_url(target, limit, hops + 1, status, user=user)
 
 
 # sandbox_post が投げる RuntimeError の文面(`sandbox HTTP {status}: {body}`)から
@@ -1131,7 +1183,12 @@ def route_of_url(url: str) -> tuple[UrlRoute | None, RefError | None]:
 
 
 async def _load_url(
-    url: str, limit: int, hops: int = 0, redirect_status: int | None = None
+    url: str,
+    limit: int,
+    hops: int = 0,
+    redirect_status: int | None = None,
+    *,
+    user=None,
 ) -> _Result:
     """URL(traversal / 制御文字は入口で拒否済み)を解決する: `/ext/{rest}` は `EXT_MOUNTS` の
     対応表で読み(`_load_ext`)、一般の URL は直接取得(`_load_general`)。`hops` は一般の URL で
@@ -1143,11 +1200,11 @@ async def _load_url(
         log.warning(f"image_refs: {err.detail} ({url[:80]!r})")
         return None, err
     if route.general:
-        return await _load_general(url, limit, hops, redirect_status)
-    return await _load_ext(route.rel, limit, query=route.query)
+        return await _load_general(url, limit, hops, redirect_status, user)
+    return await _load_ext(route.rel, limit, user=user, query=route.query)
 
 
-async def mounted_path_for_url(url: str) -> str | None:
+async def mounted_path_for_url(url: str, user=None) -> str | None:
     """URL(絶対 / 同一サーバの `/ext/…`)が `/ext/<name>/<sub>` 形で、name が **静的** の mount
     かつ `<sub>` が実在する通常ファイルなら、sandbox 側のパス(`/ext/<name>/<sub>` — 相対 URL と
     同じ文字列。sub は percent-decode 済み・symlink を畳んだ形)を返す。それ以外
@@ -1174,6 +1231,9 @@ async def mounted_path_for_url(url: str) -> str | None:
     if parts is None or parts[0] is None or parts[0].proxy:
         return None
     mount, sub = parts
+    if not _visible(user, mount, sub):
+        # #152: user に見えない置き場(他グループ)は jail にも無い
+        return None
     served = await asyncio.to_thread(static_file, mount, sub)
     if served is None:
         return None
@@ -1238,7 +1298,7 @@ def _static_url(mount: ExtMount, sub: str) -> str | None:
     return url
 
 
-async def url_for_mounted_path(path: str) -> str | None:
+async def url_for_mounted_path(path: str, user=None) -> str | None:
     """sandbox の fs パス(`/ext/<name>/<sub>`)が **nucllei の /ext ゲートでも同じ URL で配信
     されている** なら、その URL(同一サーバの相対 `/ext/<name>/<sub>` — ASCII 名なら入力と同じ
     文字列、日本語等は percent-encode 済み)を返す:
@@ -1266,6 +1326,8 @@ async def url_for_mounted_path(path: str) -> str | None:
     mount, sub = parts
     if not sub:
         return None
+    if not _visible(user, mount, sub):
+        return None  # #152: user に配信されない物の URL は返さない
     if mount.proxy:
         rest = await _proxy_served_rest(mount, sub)
         if rest is None:
@@ -1291,14 +1353,16 @@ def _reject(ref) -> RefError | None:
     return None
 
 
-async def resolve_url(url: str, *, max_bytes: int | None = None) -> _Result:
+async def resolve_url(url: str, *, max_bytes: int | None = None, user=None) -> _Result:
     """**URL として** 解決する(tool の `url` 引数の入口)。
 
     受けるのはスキーム付きの絶対 URL(`http(s)://…`)と、同一サーバの相対 URL
     `/ext/{rest}`。値の中身を見て別の意味(sandbox のパス・file_id)に読み替えない —
     URL として解決できないものは `unsupported_form`。`/api/v1/files/{id}/content` は
-    呼び手が `file_id_of_url` で先に拾う(module docstring「URL の解決」)。user を
-    取らない: `/ext/` の公開範囲は配備が `EXT_MOUNTS` に書いた物で、per-user ではない。
+    呼び手が `file_id_of_url` で先に拾う(module docstring「URL の解決」)。
+    `user`(#152)は `/ext/groups` `/ext/public` の ACL(`utils/ext_acl`)に使う — 見えない物は
+    not_found(redirect の先も同じ)。None なら ACL の置き場は全部見えない(fail closed)。
+    それ以外の `/ext/<name>` の公開範囲は配備が `EXT_MOUNTS` に書いた物で、per-user ではない。
 
     戻り値・サイズ上限・失敗 code は `resolve_ref` と同じ。
     """
@@ -1308,12 +1372,10 @@ async def resolve_url(url: str, *, max_bytes: int | None = None) -> _Result:
         if err.code == "unsupported_form":
             log.warning(f"image_refs: not a resolvable URL ({str(url)[:80]!r})")
         return None, err
-    return await _load_url(url, limit)
+    return await _load_url(url, limit, user=user)
 
 
-async def resolve_path(
-    path: str, user_id: str, *, max_bytes: int | None = None
-) -> _Result:
+async def resolve_path(path: str, user, *, max_bytes: int | None = None) -> _Result:
     """**sandbox の fs の絶対パスとして** 解決する(tool の `path` 引数の入口)。
 
     受けるのは `/workspace/…`(呼び出しユーザーの workspace)と `/ext/…`(sandbox の read-only
@@ -1321,6 +1383,10 @@ async def resolve_path(
     `/ext/{rest}` と同じ文字列だが、ここでは fs のパスとして percent-decode せずに読む)。
     URL が来ても URL としては解決しない — パスとして `unsupported_form`。相対パスも
     `unsupported_form`(`path` の形は絶対パス 1 つ)。
+
+    `user` は呼び出しユーザー — `UserModel` / tool の `__user__` dict / user id の文字列
+    (#152 までは user id だけを取っていた。文字列は role 不明 = 一般ユーザー扱い)。
+    workspace はその user のもの、`/ext/groups` `/ext/public` は ACL(`utils/ext_acl`)で決まる。
 
     戻り値・サイズ上限・失敗 code は `resolve_ref` と同じ。
     """
@@ -1335,15 +1401,25 @@ async def resolve_path(
             f"not a sandbox path (/workspace/ or {_SANDBOX_MOUNT_PREFIX})",
         )
     if path.startswith(WORKSPACE_PREFIX):
-        return await _load_workspace(path[len(WORKSPACE_PREFIX) :], user_id, limit)
+        return await _load_workspace(
+            path[len(WORKSPACE_PREFIX) :], _user_id_of(user), limit
+        )
     # sandbox の `/ext/<name>/<sub>` は URL `/ext/<name>/<sub>` と同じ物(配備の規約)— 同じ
     # 対応表で読む(静的はファイル、proxy は上流へ GET)。fs のパスなので percent-decode しない
-    return await _load_ext(path[len(_SANDBOX_MOUNT_PREFIX) :], limit, decode=False)
+    return await _load_ext(
+        path[len(_SANDBOX_MOUNT_PREFIX) :], limit, user=user, decode=False
+    )
 
 
-async def resolve_ref(
-    ref: str, user_id: str, *, max_bytes: int | None = None
-) -> _Result:
+def _user_id_of(user) -> str | None:
+    if isinstance(user, str) or user is None:
+        return user
+    if isinstance(user, dict):
+        return user.get("id")
+    return getattr(user, "id", None)
+
+
+async def resolve_ref(ref: str, user, *, max_bytes: int | None = None) -> _Result:
     """**保存済みの参照文字列**(`#page` を含まない)をバイト列にする。
 
     引数名を持たない文字列(`context_images` のエントリ・image_url の url)の入口で、
@@ -1372,9 +1448,9 @@ async def resolve_ref(
         return None, err
     kind = stored_ref_kind(ref)
     if kind == "url":
-        return await resolve_url(ref, max_bytes=max_bytes)
+        return await resolve_url(ref, max_bytes=max_bytes, user=user)
     if kind == "path":
-        return await resolve_path(ref, user_id, max_bytes=max_bytes)
+        return await resolve_path(ref, user, max_bytes=max_bytes)
     log.warning(f"image_refs: unsupported reference form ({ref[:80]!r})")
     return _fail(
         "unsupported_form",
@@ -1383,10 +1459,10 @@ async def resolve_ref(
     )
 
 
-async def load_ref(ref: str, user_id: str) -> LoadedRef | None:
+async def load_ref(ref: str, user) -> LoadedRef | None:
     """`resolve_ref` の薄い wrapper — 解決できなければ None(理由を要らない呼び手向け)。
     上限は従来どおり FETCH_MAX_BYTES(引数は増やさない)。"""
-    loaded, _ = await resolve_ref(ref, user_id)
+    loaded, _ = await resolve_ref(ref, user)
     return loaded
 
 

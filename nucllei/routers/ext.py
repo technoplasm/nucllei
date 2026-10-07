@@ -50,8 +50,13 @@ nucllei は中継するだけ。同じ日に一度入れた静的配信の `X` �
 
 共通のゲート:
 
-- セッション認証必須(get_verified_user)。per-user のアクセス検査はしない —
-  公開範囲は配備が `EXT_MOUNTS` に書いた物。
+- セッション認証必須(get_verified_user)。per-user のアクセス検査は `/ext/groups` `/ext/public`
+  だけ(#152。判定は `utils/ext_acl.ext_access` 1 か所): `/ext/groups/<g>/…` はメンバーと admin に
+  だけ配信し、それ以外は不在と同じ 404(`/ext/groups` 直下の一覧も 404 — 一覧は出さない)。
+  `/ext/public/…` は全員に配信。この 2 つの応答には `Cache-Control: private, no-cache`
+  (共有キャッシュに載せず、所属が外れたら次の取得で 404 になる)。グループの中は
+  `<root>/<グループ名>` に閉じる(中の symlink で他グループへ出させない)。
+  それ以外の name の公開範囲は配備が `EXT_MOUNTS` に書いた物。
 - `..` 等の traversal パスは 400(proxy・静的とも)。
 - 資料は Files 意味論(#94 soft delete/purge)の外 — 記録責任は配信元側。
 - 全体の `CONTENT_SECURITY_POLICY` env を設定した配備では、グローバルの middleware が
@@ -75,6 +80,7 @@ from nucllei.env import SRC_LOG_LEVELS
 from nucllei.utils import image_refs
 from nucllei.utils.auth import get_verified_user
 from nucllei.utils.content_hardening import active_content_headers
+from nucllei.utils.ext_acl import ext_access, is_acl_rel
 from nucllei.utils.ext_upstreams import (
     ExtMount,
     ext_mount,
@@ -156,15 +162,27 @@ async def serve_ext(request: Request, path: str = "", user=Depends(get_verified_
     mount = ext_mount(name)
     if mount is None:
         raise HTTPException(status_code=404, detail="Not found")
+    extra = {}
+    if is_acl_rel(name):
+        # #152: 見えない物は不在と同じ 404(存在を漏らさない)。admin は ext_access が rw
+        if ext_access(user, f"{name}/{rest}") == "none":
+            raise HTTPException(status_code=404, detail="Not found")
+        extra = dict(_ACL_CACHE_HEADERS)
     if mount.proxy:
-        return await _proxy(request, mount, rest)
-    return await _serve_static(mount, rest)
+        return await _proxy(request, mount, rest, extra)
+    return await _serve_static(mount, rest, extra)
+
+
+# per-user の ACL が掛かる置き場(/ext/groups・/ext/public)の応答に付ける。共有キャッシュに
+# 載せず、毎回サーバに確かめさせる(所属が外れたら次の取得で 404)
+# 小文字: 中継の応答ヘッダ(小文字の dict)の上流の cache-control を上書きするため
+_ACL_CACHE_HEADERS = {"cache-control": "private, no-cache"}
 
 
 # ---- proxy -------------------------------------------------------------------
 
 
-async def _proxy(request: Request, mount: ExtMount, rest: str):
+async def _proxy(request: Request, mount: ExtMount, rest: str, extra=None):
     # scope の query_string をそのまま使う(`request.url.query` は decode 済みの path を繋いで
     # 再解析するので、path に `%3F` があるとそこから先を query と取り違える)
     query = request.scope.get("query_string", b"").decode("latin-1")
@@ -209,7 +227,7 @@ async def _proxy(request: Request, mount: ExtMount, rest: str):
             raise HTTPException(status_code=502, detail="Upstream error")
         return Response(
             status_code=upstream.status_code,
-            headers={"Location": f"/ext/{mount.name}/{remainder}"},
+            headers={"Location": f"/ext/{mount.name}/{remainder}", **(extra or {})},
         )
 
     out = {
@@ -222,6 +240,7 @@ async def _proxy(request: Request, mount: ExtMount, rest: str):
         # 符号化後の長さは使えない(Content-Encoding は許可リストの外で元から落ちる)
         out.pop("content-length", None)
     out.update(_hardening_headers(upstream.headers.get("content-type")))
+    out.update(extra or {})
     return StreamingResponse(
         upstream.aiter_bytes(),
         status_code=upstream.status_code,
@@ -233,7 +252,7 @@ async def _proxy(request: Request, mount: ExtMount, rest: str):
 # ---- 静的 --------------------------------------------------------------------
 
 
-async def _serve_static(mount: ExtMount, rest: str):
+async def _serve_static(mount: ExtMount, rest: str, extra=None):
     """`<dir>/{rest}` を配信する(rest は Starlette が decode 済み)。閉じ込め・不在・
     ディレクトリの判定は resolver と共有の `image_refs.static_file`。"""
     served = await asyncio.to_thread(image_refs.static_file, mount, rest)
@@ -242,5 +261,7 @@ async def _serve_static(mount: ExtMount, rest: str):
     resolved = served[0]
     content_type = _content_type_for(resolved.name)
     return FileResponse(
-        resolved, media_type=content_type, headers=_hardening_headers(content_type)
+        resolved,
+        media_type=content_type,
+        headers={**_hardening_headers(content_type), **(extra or {})},
     )

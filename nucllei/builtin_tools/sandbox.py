@@ -36,6 +36,13 @@ from nucllei.env import SANDBOX_TOKEN, SANDBOX_URL, SANDBOX_WRITE_FILE_LIMIT_BYT
 from nucllei.models.chats import Chats
 from nucllei.models.files import FileForm, Files
 from nucllei.storage.provider import Storage
+from nucllei.utils.ext_acl import (
+    GROUPS,
+    ext_access,
+    ext_visible_groups,
+    is_acl_rel,
+    sandbox_ext_mounts,
+)
 from nucllei.utils.tool_errors import (
     ToolCallError,
     ToolError,
@@ -149,6 +156,40 @@ def _normalize_sandbox_path(path: str) -> str:
 
 def _under_ro_mount(abs_path: str) -> bool:
     return abs_path == _RO_MOUNT_ROOT or abs_path.startswith(_RO_MOUNT_ROOT + "/")
+
+
+# /ext のうちグループ別 ACL の掛かる置き場 (#152): `/ext/groups/<g>` (メンバー rw・他は見えない・
+# admin は全部 rw) と `/ext/public` (一般 ro・admin rw)。判定は `utils/ext_acl` 1 か所で、
+# jail への bind 一覧 (`mounts`) も同じ関数から作る。sandbox の `/files/*` はこの置き場を
+# jail の絶対パス + `mounts` で扱う (包含判定と symlink の拒否は sandbox 側)。
+_GROUPS_ROOT = f"{_RO_MOUNT_ROOT}/{GROUPS}"
+
+
+def _acl_rel(abs_path: str) -> Optional[str]:
+    """`/ext/groups/…` `/ext/public/…` なら `/ext/` 以降 (`groups/EMR/a.md`)、それ以外は None。"""
+    if not abs_path.startswith(_RO_MOUNT_ROOT + "/"):
+        return None
+    rel = abs_path[len(_RO_MOUNT_ROOT) + 1 :]
+    return rel if is_acl_rel(rel) else None
+
+
+def _acl_place_depth(rel: str) -> int:
+    """置き場そのもののセグメント数 (`groups/<g>` = 2、`public` = 1)。これより浅いものは
+    置き場の外 (`/ext/groups` 自体)、同じならディレクトリそのもの。"""
+    return 2 if rel.split("/", 1)[0] == GROUPS else 1
+
+
+def _ext_mounts(user: dict) -> list[dict]:
+    """jail に bind する `/ext/groups/<g>` `/ext/public` の一覧 (`ext_acl.sandbox_ext_mounts`)。
+    所属を引けないときは実行しない (黙って外すと常駐 kernel が作り直され、変数が消える)。"""
+    try:
+        return sandbox_ext_mounts(user)
+    except Exception as e:
+        log.error(f"[sandbox] ext mounts for {user.get('id')} failed: {e!r}")
+        raise ToolFailure(
+            "グループの所属を確かめられない",
+            "1 回だけ呼び直す。続くならユーザーに伝える。",
+        )
 
 
 def _resolve_workspace_path(
@@ -288,6 +329,12 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
         )
     if e.status == 401:
         return _sandbox_auth()
+    if e.status == 400 and _under_ro_mount(abs_path):
+        # #152: /ext/groups・/ext/public の経路上の symlink は sandbox が辿らない
+        return ToolCallError(
+            f"{abs_path} は使えない path (経路に symlink を含む等で sandbox が受け付けなかった)",
+            "symlink を経由しない実際のパスで渡す。",
+        )
     if e.status == 400:
         return ToolCallError(
             f"{abs_path} は使えない path (sandbox が受け付けなかった)",
@@ -298,6 +345,12 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
             f"{abs_path} というファイルは無い (ディレクトリは不可)",
             "list_workspace で確かめる。" + _cache_hint(abs_path),
         )
+    if e.status == 403:
+        # ro の置き場への書き込み (#152)。tool 側で先に断るので通常は来ない
+        return ToolCallError(
+            f"{abs_path} は read-only",
+            "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
+        )
     if e.status == 413:
         return ToolOutcome(
             f"{abs_path} は大きすぎて取り出せない",
@@ -306,6 +359,15 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
     return ToolFailure(
         f"sandbox がエラーを返した (HTTP {e.status})",
         "1 回だけ呼び直す。続くならユーザーに伝える。",
+    )
+
+
+def _ext_not_found(abs_path: str) -> ToolError:
+    """ACL の置き場 (#152) で見えない / 無いもの。所属していないグループの置き場は在っても
+    「無い」と同じに言う (存在を漏らさない)。"""
+    return ToolOutcome(
+        f"{abs_path} は無い (所属していないグループの置き場は見えない)",
+        "list_workspace で `/ext/groups` を一覧して、使える置き場を確かめる。",
     )
 
 
@@ -504,7 +566,10 @@ class Tools:
     (自分で作るディレクトリ等) に置く。消えた物は send_to_workspace(file_id) で戻せる。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
-    待ちが長すぎると失敗する)。"""
+    待ちが長すぎると失敗する)。
+    `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
+    `/ext/public/` は全員の共有の置き場 (読むだけ)。どちらも実行を跨いで残り、write_file /
+    list_workspace / fetch_from_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
@@ -778,6 +843,7 @@ class Tools:
             "lang": lang,
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
+            "mounts": _ext_mounts(__user__),
         }
         try:
             res = await self._post("/exec", payload, payload["timeout_s"] + 30)
@@ -814,6 +880,8 @@ class Tools:
             "chat_id": __chat_id__,
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
+            # 常駐 kernel は bind の一覧が変わると作り直される (session_reset が返る。#152)
+            "mounts": _ext_mounts(__user__),
         }
         try:
             res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
@@ -952,7 +1020,7 @@ class Tools:
         # 値の形を見て別の引数に読み替えない (url= に UUID / sandbox のパス、file_id= に URL が
         # 来ても救済しない。それぞれの解決が失敗し、受ける形を固定文で返す)。
         if url:
-            return await self._import_url(url, __user__["id"])
+            return await self._import_url(url, __user__)
         if file_id:
             return await self._import_one(file_id, __user__["id"])
         # 添付一覧から (filename の部分一致、省略時は全件)
@@ -1026,7 +1094,7 @@ class Tools:
         return "取り込み結果:\n" + line + _imports_expiry_note(expires)
 
     # ---- send_to_workspace の url ソース ---------------------------------------
-    async def _import_url(self, u: str, user_id: str) -> str:
+    async def _import_url(self, u: str, user: dict) -> str:
         """`url` を **URL として** 共有 resolver (`utils/image_refs`) で解決して取り込む。
         受ける形はスキーム付きの絶対 URL と、同一サーバの相対 URL (`/` 始まり = このサーバの
         URL として、サーバが実際に持つ経路に当てる)。値の形から別の意味には読み替えない。
@@ -1062,12 +1130,14 @@ class Tools:
             resolve_url,
         )
 
+        user_id = user["id"]
         # fragment は付いていても同じ file に当たる (`file_id_of_url` の規則)
         file_id = file_id_of_url(u)
         if file_id:
             return await self._import_one(file_id, user_id, u)
 
-        mounted = await mounted_path_for_url(u)
+        # user は ACL (/ext/groups・/ext/public。#152) に使う — 見えない置き場は jail にも無い
+        mounted = await mounted_path_for_url(u, user)
         if mounted:
             return (
                 f"取り込み不要: {u} は sandbox から {mounted} として既に見えている "
@@ -1075,7 +1145,7 @@ class Tools:
             )
 
         max_bytes = int(self.valves.url_max_mb * 1024 * 1024)
-        loaded, err = await resolve_url(u, max_bytes=max_bytes)
+        loaded, err = await resolve_url(u, max_bytes=max_bytes, user=user)
         if loaded is None:
             raise _explain_ref_error(u, err)
         # name は URL の basename (percent-encoded のまま)
@@ -1115,15 +1185,20 @@ class Tools:
         クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
         既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
 
-        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。例: /workspace/work/index.html
+        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` にも書ける。例: /workspace/work/index.html
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
+        acl = _acl_rel(_normalize_sandbox_path(path))
+        if acl is not None:
+            return await self._write_ext(path, acl, content, __user__)
         abs_path, rel = _resolve_workspace_path(
-            path, WORKSPACE_PATH_ARG_FORM, "書き込めるのは /workspace/ 配下だけ。"
+            path,
+            WORKSPACE_PATH_ARG_FORM,
+            "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ。",
         )
         if rel == "." or path.rstrip().endswith("/"):
             raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
@@ -1160,6 +1235,49 @@ class Tools:
             )
         return msg
 
+    async def _write_ext(self, path: str, rel: str, content: str, user: dict) -> str:
+        """write_file の `/ext/groups/<g>/…` `/ext/public/…` (#152)。可否は ACL、実際の書き込みと
+        経路の symlink の拒否は sandbox (`/files/write` の `/ext/...`)。"""
+        abs_path = f"{_RO_MOUNT_ROOT}/{rel}"
+        if len(rel.split("/")) <= _acl_place_depth(rel) or path.rstrip().endswith("/"):
+            if rel == GROUPS:
+                raise ToolCallError(
+                    f"{abs_path} はグループの置き場の一覧",
+                    "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+                )
+            if ext_access(user, rel) == "none":
+                raise _ext_not_found(abs_path)
+            raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
+        access = ext_access(user, rel)
+        if access == "none":
+            raise _ext_not_found(abs_path)
+        if access != "rw":
+            raise ToolCallError(
+                f"{abs_path} は read-only (書けるのは管理者だけ)",
+                "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
+            )
+        data = content.encode("utf-8")
+        if len(data) > WRITE_FILE_LIMIT:
+            raise ToolCallError(
+                f"内容が大きすぎる ({_human_size(len(data))} > "
+                f"{_human_size(WRITE_FILE_LIMIT)})",
+                "分割して複数回に分けるか、run_python で生成する。",
+            )
+        try:
+            await self._post(
+                "/files/write",
+                {
+                    "user_id": user["id"],
+                    "path": abs_path,
+                    "b64": base64.b64encode(data).decode(),
+                    "mounts": _ext_mounts(user),
+                },
+                timeout_s=60,
+            )
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
+
     async def list_workspace(
         self,
         path: str = WORKSPACE_ROOT,
@@ -1169,16 +1287,22 @@ class Tools:
         sandbox の /workspace 配下のファイル一覧を絶対パスで返す (実行を跨いで永続する領域)。
         返ったパスは他の tool の path にそのまま渡せる。
 
-        :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。省略時は /workspace
+        :param path: 一覧するディレクトリ。sandbox の絶対パス (`/workspace/…`)。共有の置き場 `/ext/groups` `/ext/groups/<グループ名>/…` `/ext/public/…` も一覧できる。省略時は /workspace
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
+        normalized = _normalize_sandbox_path(path)
+        if normalized == _GROUPS_ROOT:
+            return self._list_groups(__user__)
+        acl = _acl_rel(normalized)
+        if acl is not None:
+            return await self._list_ext(normalized, acl, __user__)
         abs_path, rel = _resolve_workspace_path(
             path,
             WORKSPACE_PATH_ARG_FORM,
-            "list_workspace が一覧できるのは /workspace/ 配下だけ。"
+            "list_workspace が一覧できるのは `/workspace/` 配下と `/ext/groups`・`/ext/public` だけ。"
             f"{_NEXT}`/ext/` は run_shell の ls で見る "
             "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
         )
@@ -1220,6 +1344,52 @@ class Tools:
             for e in entries
         )
 
+    def _list_groups(self, user: dict) -> str:
+        """`/ext/groups` 直下 = この user に見えるグループの置き場 (#152。ACL の `ext_visible_groups`)。"""
+        try:
+            names = ext_visible_groups(user)
+        except Exception as e:
+            log.error(f"[sandbox] visible groups for {user.get('id')} failed: {e!r}")
+            raise ToolFailure("グループの所属を確かめられない")
+        if not names:
+            return f"{_GROUPS_ROOT} に見える置き場は無い (所属しているグループが無い)。"
+        return "\n".join(
+            f"- {_GROUPS_ROOT}/{n}/ (グループの共有の置き場。書ける)" for n in names
+        )
+
+    async def _list_ext(self, abs_path: str, rel: str, user: dict) -> str:
+        """list_workspace の `/ext/groups/<g>/…` `/ext/public/…` (#152)。"""
+        access = ext_access(user, rel)
+        if access == "none":
+            raise _ext_not_found(abs_path)
+        try:
+            res = await self._post(
+                "/files/list",
+                {"user_id": user["id"], "path": abs_path, "mounts": _ext_mounts(user)},
+                timeout_s=30,
+            )
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        if res.get("exists") is False:
+            raise ToolOutcome(
+                f"{abs_path} は存在しない",
+                "親ディレクトリを list_workspace で一覧して、パスを確かめる。",
+            )
+        if res.get("is_dir") is False:
+            raise ToolCallError(
+                f"{abs_path} はファイルで、ディレクトリではない",
+                "一覧するならディレクトリを渡す (中身を見るなら run_shell か"
+                " fetch_from_workspace)。",
+            )
+        ro = "" if access == "rw" else " (read-only — 書けるのは管理者だけ)"
+        entries = res.get("entries", [])
+        if not entries:
+            return f"{abs_path} は空 (ファイルが無い){ro}。"
+        lines = [f"- {e['path']} ({_human_size(e['size'])})" for e in entries]
+        if ro:
+            lines.append(f"({abs_path}{ro})")
+        return "\n".join(lines)
+
     async def fetch_from_workspace(
         self,
         path: str,
@@ -1250,7 +1420,7 @@ class Tools:
         if _under_ro_mount(normalized):
             return await self._fetch_mounted(
                 normalized,
-                __user__["id"],
+                __user__,
                 __chat_id__,
                 __message_id__,
                 __event_emitter__,
@@ -1283,7 +1453,7 @@ class Tools:
         )
 
     async def _fetch_mounted(
-        self, abs_path: str, user_id: str, chat_id, message_id, __event_emitter__
+        self, abs_path: str, user: dict, chat_id, message_id, __event_emitter__
     ) -> str:
         """`/ext/…` (read-only の参照データ) を利用者に見せられる形にする。
 
@@ -1302,7 +1472,9 @@ class Tools:
         # image_refs は本 module を import する — 循環を避けて呼び出し時に引く
         from nucllei.utils.image_refs import resolve_path, url_for_mounted_path
 
-        url = await url_for_mounted_path(abs_path)
+        user_id = user["id"]
+        # user は ACL (/ext/groups・/ext/public。#152) に使う — 見えない物の URL は返らない
+        url = await url_for_mounted_path(abs_path, user)
         if url:
             name = os.path.basename(abs_path)
             is_image = (mimetypes.guess_type(name)[0] or "").startswith("image/")
@@ -1312,7 +1484,14 @@ class Tools:
                 f"(ユーザーのブラウザがそのまま開ける)。{_NEXT}ユーザーに見せるときは、"
                 f"これを 1 文字も変えずに本文に書く: {link}"
             )
-        loaded, err = await resolve_path(abs_path, user_id)
+        acl = _acl_rel(abs_path)
+        if acl is not None:
+            # nucllei が配信していない (EXT_MOUNTS に groups / public が無い) 配備でも、jail に
+            # bind している物は sandbox から読んで添付する
+            return await self._fetch_ext_via_sandbox(
+                abs_path, acl, user, chat_id, message_id, __event_emitter__
+            )
+        loaded, err = await resolve_path(abs_path, user)
         if loaded is None:
             raise _explain_mount_error(abs_path, err)
         return await self._attach(
@@ -1320,6 +1499,30 @@ class Tools:
             loaded.name,
             loaded.data,
             user_id,
+            chat_id,
+            message_id,
+            __event_emitter__,
+        )
+
+    async def _fetch_ext_via_sandbox(
+        self, abs_path, rel, user, chat_id, message_id, __event_emitter__
+    ) -> str:
+        if ext_access(user, rel) == "none":
+            raise _ext_not_found(abs_path)
+        try:
+            res = await self._post(
+                "/files/read",
+                {"user_id": user["id"], "path": abs_path, "mounts": _ext_mounts(user)},
+                timeout_s=120,
+            )
+            data = base64.b64decode(res["b64"])
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        return await self._attach(
+            abs_path,
+            os.path.basename(res.get("name") or abs_path),
+            data,
+            user["id"],
             chat_id,
             message_id,
             __event_emitter__,
