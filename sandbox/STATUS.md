@@ -83,6 +83,11 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを
       経路の symlink を O_NOFOLLOW で拒否しながら扱う。回帰は `test_ext_mounts.py`。
       **実機 (コンテナ) での確認は未** — compose の volume 追加 (llens) 待ち
+- [x] **ファイルブラウザ用の `/files/*`** (#150、2026-10-07)。`/files/ls` `stat` `delete` `rename`
+      `mkdir` `usage` を追加、`/files/read` は `mtime` を返し `/files/write` は `expected_mtime`
+      (違えば 409) / `exclusive` / `nofollow` を受ける。workspace でも `/ext` でも経路の symlink を
+      O_NOFOLLOW で辿らない。容量切れは 507。回帰は `test_files_browser.py`。
+      **実機 (コンテナ) での確認は未** — image の再ビルド・配備は統合側
 
 ## 残課題
 

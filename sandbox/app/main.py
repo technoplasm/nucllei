@@ -6,6 +6,7 @@
 import asyncio
 import base64
 import binascii
+import errno
 import hmac
 import json
 import os
@@ -16,7 +17,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -1158,6 +1159,27 @@ class WriteRequest(BaseModel):
     path: str
     b64: str
     mounts: list[MountIn] = Field(default_factory=list)
+    # ファイルブラウザ (#150) 用。`expected_mtime` (`/files/read` `/files/stat` が返した値) と
+    # 今の mtime が違えば 409 (外で変更された)、`exclusive` は既に在れば 409 (新規作成)。
+    # `nofollow` は workspace 相対のパスでも経路の symlink を辿らない (`/ext/...` は常に辿らない)
+    expected_mtime: Optional[float] = None
+    exclusive: bool = False
+    nofollow: bool = False
+
+
+class ReadRequest(PathRequest):
+    nofollow: bool = False
+
+
+class RenameRequest(BaseModel):
+    user_id: str
+    path: str
+    dest: str
+    mounts: list[MountIn] = Field(default_factory=list)
+
+
+class UsageRequest(BaseModel):
+    user_id: str
 
 
 class CellRequest(BaseModel):
@@ -1282,12 +1304,22 @@ async def exec_code(req: ExecRequest, request: Request):
             except binascii.Error:
                 raise HTTPException(400, f"invalid b64 for input: {name}")
             dest = ws / "imports" / name
-            dest.write_bytes(data)
+            try:
+                dest.write_bytes(data)
+            except OSError as e:
+                if _nospace(e):
+                    raise HTTPException(507, QUOTA_FULL_DETAIL)
+                raise
             os.chown(dest, JAIL_UID, JAIL_UID)
 
         ext = "py" if req.lang == "python" else "sh"
         script = ws / ".exec" / f"{uuid.uuid4().hex[:8]}.{ext}"
-        script.write_text(req.code, encoding="utf-8")
+        try:
+            script.write_text(req.code, encoding="utf-8")
+        except OSError as e:
+            if _nospace(e):
+                raise HTTPException(507, QUOTA_FULL_DETAIL)
+            raise
         os.chown(script, JAIL_UID, JAIL_UID)
         jail_script = f"/workspace/.exec/{script.name}"
         if req.lang == "python":
@@ -1543,24 +1575,213 @@ def _ext_list(path: str, mounts: list[MountIn]) -> dict:
     return {"entries": entries, "exists": True, "is_dir": True}
 
 
-def _ext_read(path: str, mounts: list[MountIn]) -> dict:
-    src, _jail_path, segs = _ext_target(path, mounts, write=False)
+def _is_ext_path(path: str) -> bool:
+    """`/files/*` の `path` が jail の絶対パス (= `/ext/...` の扱い) か。workspace 相対は `/` 無し。"""
+    return path.startswith("/")
+
+
+# ---------------------------------------------------------------------------
+# fd で辿るファイル操作 (workspace と `/ext/...` 共通。#150 ファイルブラウザ)
+# ---------------------------------------------------------------------------
+# 包含判定の基準 (`base` = workspace の root か bind のディレクトリ) から `segs` を 1 段ずつ
+# O_NOFOLLOW で開く (`_open_dirs`)。経路のどこにも symlink を許さず、末端の symlink も辿らない
+# (削除・改名は symlink そのものに効く)。`/files/ls` `/files/stat` `/files/delete`
+# `/files/rename` `/files/mkdir` は常にこれ、`/files/read` `/files/write` は `/ext/...` と
+# `nofollow: true` のときこれ (workspace 相対の既定は従来どおり `_safe_path` — tool の挙動を変えない)。
+
+# 容量切れ (workspace の quota = loopback ext4 の満杯)。HTTP 507 で返し、呼び手 (nucllei) が
+# 「ファイルブラウザで整理できる」と言い分ける
+_NOSPACE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT})
+QUOTA_FULL_DETAIL = "workspace quota exceeded (No space left on device)"
+
+# 一覧の 1 ディレクトリあたりの上限 (超えたら `truncated: true`)
+LS_LIMIT = 5000
+
+
+class _Target(NamedTuple):
+    base: str  # 包含判定の基準 (コンテナ側のディレクトリ)
+    segs: list  # base から下のセグメント
+    path: str  # 要求のパス (エラー文用)
+    kind: str  # "workspace" | "ext"
+    prefix: str  # 応答のパスの頭 (workspace は ""、ext は bind の jail パス)
+
+
+def _ws_segs(path: str) -> list[str]:
+    """workspace 相対の `path` をセグメントに。`.` と空は落とし、`..`・NUL は 400。"""
+    segs = [s for s in path.split("/") if s not in ("", ".")]
+    if any(s == ".." or "\x00" in s for s in segs):
+        raise HTTPException(400, f"invalid path: {path!r}")
+    return segs
+
+
+async def _fs_target(
+    user_id: str, path: str, mounts: list[MountIn], write: bool
+) -> _Target:
+    if _is_ext_path(path):
+        if not _USER_ID_RE.match(user_id):
+            raise HTTPException(400, f"invalid user_id: {user_id!r}")
+        src, jail_path, segs = await asyncio.to_thread(_ext_target, path, mounts, write)
+        return _Target(str(src), segs, path, "ext", jail_path)
+    segs = _ws_segs(path)
+    ws = await _workspace(user_id)
+    return _Target(str(ws), segs, path, "workspace", "")
+
+
+def _join(t: _Target, segs: list[str]) -> str:
+    rel = "/".join(segs)
+    if t.kind == "workspace":
+        return rel or "."
+    return t.prefix + ("/" + rel if rel else "")
+
+
+def _mtime(st) -> float:
+    """上書き競合の比較に使う mtime (秒・float)。JSON → JS → JSON で値が変わらない float で返す
+    (ns の int は JS の Number で丸まる)。比較は `_same_mtime`。"""
+    return st.st_mtime_ns / 1e9
+
+
+def _same_mtime(a: float, b: float) -> bool:
+    return abs(a - b) < 1e-6
+
+
+def _kind_of(mode: int) -> str:
+    if stat.S_ISDIR(mode):
+        return "dir"
+    if stat.S_ISREG(mode):
+        return "file"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    return "other"
+
+
+def _check_mutable(t: _Target, segs: list[str], what: str) -> None:
+    """ファイルブラウザの書き換え (削除・改名・mkdir) で触らせないもの: 置き場の root そのもの、
+    `.` 始まり (一覧に出さない内部・隠しファイル)、workspace 直下の `imports/` `exports/`
+    (sandbox が実行のたびに使う置き場。消すと取り込みが落ちる)。"""
     if not segs:
-        raise HTTPException(404, f"not a file: {path}")
-    dfd = _open_dirs(str(src), segs[:-1], path)
+        raise HTTPException(400, f"cannot {what} the root: {t.path}")
+    if any(s.startswith(".") for s in segs):
+        raise HTTPException(400, f"hidden path: {t.path}")
+    if t.kind == "workspace" and len(segs) == 1 and segs[0] in CACHE_DIRS:
+        raise HTTPException(400, f"protected directory: {segs[0]}")
+
+
+def _nospace(e: OSError) -> bool:
+    return e.errno in _NOSPACE_ERRNOS
+
+
+def _lstat_at(name: str, dfd: int):
+    try:
+        return os.stat(name, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def _open_parent(t: _Target, segs: list[str], create: bool = False):
+    """末端の親ディレクトリの fd (呼び手が close)。無ければ None (create なら作る)。"""
+    try:
+        return _open_dirs(t.base, segs[:-1], t.path, create=create)
+    except HTTPException as e:
+        if e.status_code == 404 and not create:
+            return None
+        raise
+
+
+def _fs_ls(t: _Target) -> dict:
+    """1 階層の一覧 (再帰しない)。`.` 始まりは出さない (list_workspace と同じ)。symlink は
+    辿らず `type: "symlink"` で出す。"""
+    missing = {"entries": [], "exists": False, "is_dir": False, "truncated": False}
+    segs = t.segs
+    if segs:
+        pfd = _open_parent(t, segs)
+        if pfd is None:
+            return missing
+        try:
+            st = _lstat_at(segs[-1], pfd)
+            if st is None:
+                return missing
+            if not stat.S_ISDIR(st.st_mode):
+                return {
+                    "entries": [],
+                    "exists": True,
+                    "is_dir": False,
+                    "truncated": False,
+                }
+            fd = os.open(segs[-1], _DIR_FLAGS, dir_fd=pfd)
+        finally:
+            os.close(pfd)
+    else:
+        fd = os.open(t.base, _DIR_FLAGS)
+    entries = []
+    truncated = False
+    try:
+        with os.scandir(fd) as it:
+            for de in it:
+                if de.name.startswith("."):
+                    continue
+                if len(entries) >= LS_LIMIT:
+                    truncated = True
+                    break
+                try:
+                    st = de.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                entries.append(
+                    {
+                        "name": de.name,
+                        "path": _join(t, segs + [de.name]),
+                        "type": _kind_of(st.st_mode),
+                        "size": st.st_size if stat.S_ISREG(st.st_mode) else 0,
+                        "mtime": _mtime(st),
+                    }
+                )
+    finally:
+        os.close(fd)
+    entries.sort(key=lambda e: (e["type"] != "dir", e["name"]))
+    return {"entries": entries, "exists": True, "is_dir": True, "truncated": truncated}
+
+
+def _fs_stat(t: _Target) -> dict:
+    segs = t.segs
+    if not segs:
+        st = os.stat(t.base, follow_symlinks=False)
+    else:
+        pfd = _open_parent(t, segs)
+        if pfd is None:
+            return {"exists": False}
+        try:
+            st = _lstat_at(segs[-1], pfd)
+        finally:
+            os.close(pfd)
+        if st is None:
+            return {"exists": False}
+    return {
+        "exists": True,
+        "path": _join(t, segs),
+        "type": _kind_of(st.st_mode),
+        "size": st.st_size if stat.S_ISREG(st.st_mode) else 0,
+        "mtime": _mtime(st),
+    }
+
+
+def _fs_read(t: _Target) -> dict:
+    segs = t.segs
+    if not segs:
+        raise HTTPException(404, f"not a file: {t.path}")
+    dfd = _open_dirs(t.base, segs[:-1], t.path)
     try:
         try:
             fd = os.open(
                 segs[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd
             )
         except OSError:
-            raise _symlink_or_missing(segs[-1], dfd, path)
+            raise _symlink_or_missing(segs[-1], dfd, t.path)
     finally:
         os.close(dfd)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
-            raise HTTPException(404, f"not a file: {path}")
+            raise HTTPException(404, f"not a file: {t.path}")
         if st.st_size > FILE_LIMIT:
             raise HTTPException(
                 413, f"file too large: {st.st_size} bytes (limit {FILE_LIMIT})"
@@ -1570,36 +1791,131 @@ def _ext_read(path: str, mounts: list[MountIn]) -> dict:
         "name": segs[-1],
         "size": len(data),
         "b64": base64.b64encode(data).decode(),
+        "mtime": _mtime(st),
     }
 
 
-def _ext_write(path: str, mounts: list[MountIn], data: bytes) -> None:
-    src, _jail_path, segs = _ext_target(path, mounts, write=True)
+def _conflict(message: str, mtime: Optional[float]) -> HTTPException:
+    return HTTPException(409, {"message": message, "mtime": mtime})
+
+
+def _fs_write(
+    t: _Target, data: bytes, expected_mtime: Optional[float], exclusive: bool
+) -> dict:
+    segs = t.segs
     if not segs:
-        raise HTTPException(400, f"is a directory: {path}")
-    dfd = _open_dirs(str(src), segs[:-1], path, create=True)
+        raise HTTPException(400, f"is a directory: {t.path}")
     try:
+        dfd = _open_dirs(t.base, segs[:-1], t.path, create=True)
         try:
-            fd = os.open(
-                segs[-1],
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC,
-                0o664,
-                dir_fd=dfd,
-            )
-        except IsADirectoryError:
-            raise HTTPException(400, f"is a directory: {path}")
-        except OSError:
-            raise _symlink_or_missing(segs[-1], dfd, path)
+            leaf = segs[-1]
+            st = _lstat_at(leaf, dfd)
+            if st is not None and stat.S_ISLNK(st.st_mode):
+                raise HTTPException(400, f"path contains a symlink: {t.path}")
+            if st is not None and stat.S_ISDIR(st.st_mode):
+                raise HTTPException(400, f"is a directory: {t.path}")
+            if exclusive and st is not None:
+                raise _conflict("already exists", _mtime(st))
+            if expected_mtime is not None and (
+                st is None or not _same_mtime(_mtime(st), expected_mtime)
+            ):
+                # 開いた後に外 (jail の実行・別のタブ) で変更・削除された
+                raise _conflict(
+                    "modified" if st is not None else "deleted",
+                    _mtime(st) if st is not None else None,
+                )
+            flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+            flags |= os.O_EXCL if exclusive else os.O_TRUNC
+            try:
+                fd = os.open(leaf, flags, 0o664, dir_fd=dfd)
+            except FileExistsError:
+                raise _conflict("already exists", None)
+            except IsADirectoryError:
+                raise HTTPException(400, f"is a directory: {t.path}")
+            except OSError as e:
+                if _nospace(e):
+                    raise
+                raise _symlink_or_missing(leaf, dfd, t.path)
+        finally:
+            os.close(dfd)
+        with os.fdopen(fd, "wb") as f:
+            os.fchown(f.fileno(), JAIL_UID, JAIL_UID)
+            f.write(data)
+            f.flush()
+            st = os.fstat(f.fileno())
+    except OSError as e:
+        if _nospace(e):
+            raise HTTPException(507, QUOTA_FULL_DETAIL)
+        raise
+    return {"size": len(data), "mtime": _mtime(st)}
+
+
+def _fs_delete(t: _Target) -> None:
+    import shutil
+
+    segs = t.segs
+    _check_mutable(t, segs, "delete")
+    dfd = _open_dirs(t.base, segs[:-1], t.path)
+    try:
+        st = _lstat_at(segs[-1], dfd)
+        if st is None:
+            raise HTTPException(404, f"not found: {t.path}")
+        if stat.S_ISDIR(st.st_mode):
+            # dir_fd 付きの rmtree は fd ベース (symlink を辿らない版) で消す
+            shutil.rmtree(segs[-1], dir_fd=dfd)
+        else:
+            os.unlink(segs[-1], dir_fd=dfd)  # symlink はリンクそのものを消す
     finally:
         os.close(dfd)
-    with os.fdopen(fd, "wb") as f:
-        os.fchown(f.fileno(), JAIL_UID, JAIL_UID)
-        f.write(data)
 
 
-def _is_ext_path(path: str) -> bool:
-    """`/files/*` の `path` が jail の絶対パス (= `/ext/...` の扱い) か。workspace 相対は `/` 無し。"""
-    return path.startswith("/")
+def _fs_rename(t: _Target, d: _Target) -> dict:
+    """同じ置き場 (workspace の中・同じ bind の中) での改名・移動。行き先に在れば 409。"""
+    if (t.kind, t.base) != (d.kind, d.base):
+        raise HTTPException(400, f"cannot move across places: {t.path} -> {d.path}")
+    _check_mutable(t, t.segs, "rename")
+    _check_mutable(d, d.segs, "rename")
+    if d.segs[: len(t.segs)] == t.segs:
+        raise HTTPException(400, f"cannot move into itself: {t.path} -> {d.path}")
+    sfd = _open_dirs(t.base, t.segs[:-1], t.path)
+    try:
+        if _lstat_at(t.segs[-1], sfd) is None:
+            raise HTTPException(404, f"not found: {t.path}")
+        dfd = _open_dirs(d.base, d.segs[:-1], d.path)
+        try:
+            if _lstat_at(d.segs[-1], dfd) is not None:
+                raise _conflict("already exists", None)
+            try:
+                os.rename(t.segs[-1], d.segs[-1], src_dir_fd=sfd, dst_dir_fd=dfd)
+            except OSError as e:
+                if _nospace(e):
+                    raise HTTPException(507, QUOTA_FULL_DETAIL)
+                raise HTTPException(400, f"cannot rename: {t.path} -> {d.path}")
+        finally:
+            os.close(dfd)
+    finally:
+        os.close(sfd)
+    return {"ok": True, "path": _join(d, d.segs)}
+
+
+def _fs_mkdir(t: _Target) -> dict:
+    segs = t.segs
+    _check_mutable(t, segs, "create")
+    try:
+        dfd = _open_dirs(t.base, segs[:-1], t.path, create=True)
+        try:
+            try:
+                os.mkdir(segs[-1], 0o775, dir_fd=dfd)
+            except FileExistsError:
+                raise _conflict("already exists", None)
+            os.chown(segs[-1], JAIL_UID, JAIL_UID, dir_fd=dfd, follow_symlinks=False)
+        finally:
+            os.close(dfd)
+    except OSError as e:
+        if _nospace(e):
+            raise HTTPException(507, QUOTA_FULL_DETAIL)
+        raise
+    return {"ok": True, "path": _join(t, segs)}
 
 
 @app.post("/files/list")
@@ -1630,23 +1946,40 @@ async def files_list(req: PathRequest):
     return {"entries": entries, "exists": True, "is_dir": True}
 
 
+@app.post("/files/ls")
+async def files_ls(req: PathRequest):
+    """1 階層の一覧 (#150 ファイルブラウザ)。`/files/list` (再帰・ファイルだけ) と違い、
+    ディレクトリも出し、種類・サイズ・mtime を返す。"""
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
+    res = await asyncio.to_thread(_fs_ls, t)
+    # imports/ exports/ の残り期限 (mtime + N 日) を呼び手が出せるように (#149)
+    return {**res, "cache_ttl_days": CACHE_TTL_REPORTED}
+
+
+@app.post("/files/stat")
+async def files_stat(req: PathRequest):
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
+    return await asyncio.to_thread(_fs_stat, t)
+
+
 @app.post("/files/read")
-async def files_read(req: PathRequest):
-    if _is_ext_path(req.path):
-        if not _USER_ID_RE.match(req.user_id):
-            raise HTTPException(400, f"invalid user_id: {req.user_id!r}")
-        return await asyncio.to_thread(_ext_read, req.path, req.mounts)
+async def files_read(req: ReadRequest):
+    if _is_ext_path(req.path) or req.nofollow:
+        t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
+        return await asyncio.to_thread(_fs_read, t)
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
     if not p.is_file():
         raise HTTPException(404, f"not a file: {req.path}")
-    size = p.stat().st_size
+    st = p.stat()
+    size = st.st_size
     if size > FILE_LIMIT:
         raise HTTPException(413, f"file too large: {size} bytes (limit {FILE_LIMIT})")
     return {
         "name": p.name,
         "size": size,
         "b64": base64.b64encode(p.read_bytes()).decode(),
+        "mtime": _mtime(st),
     }
 
 
@@ -1656,17 +1989,62 @@ async def files_write(req: WriteRequest):
         data = base64.b64decode(req.b64)
     except binascii.Error:
         raise HTTPException(400, "invalid b64")
-    if _is_ext_path(req.path):
-        if not _USER_ID_RE.match(req.user_id):
-            raise HTTPException(400, f"invalid user_id: {req.user_id!r}")
-        await asyncio.to_thread(_ext_write, req.path, req.mounts, data)
-        return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
+    if (
+        _is_ext_path(req.path)
+        or req.nofollow
+        or req.exclusive
+        or req.expected_mtime is not None
+    ):
+        t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
+        res = await asyncio.to_thread(
+            _fs_write, t, data, req.expected_mtime, req.exclusive
+        )
+        return {"ok": True, **res, "cache_ttl_days": CACHE_TTL_REPORTED}
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(data)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    except OSError as e:
+        if _nospace(e):
+            raise HTTPException(507, QUOTA_FULL_DETAIL)
+        raise
     os.chown(p, JAIL_UID, JAIL_UID)
     return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
+
+
+@app.post("/files/delete")
+async def files_delete(req: PathRequest):
+    """ファイル・ディレクトリ (中身ごと) を消す。symlink はリンクそのものを消す。"""
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
+    await asyncio.to_thread(_fs_delete, t)
+    return {"ok": True}
+
+
+@app.post("/files/rename")
+async def files_rename(req: RenameRequest):
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
+    d = await _fs_target(req.user_id, req.dest, req.mounts, write=True)
+    return await asyncio.to_thread(_fs_rename, t, d)
+
+
+@app.post("/files/mkdir")
+async def files_mkdir(req: PathRequest):
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
+    return await asyncio.to_thread(_fs_mkdir, t)
+
+
+@app.post("/files/usage")
+async def files_usage(req: UsageRequest):
+    """workspace の使用量 (quota = loopback ext4 の容量)。`/ext` は容量上限を持たないので対象外。"""
+    ws = await _workspace(req.user_id)
+    st = await asyncio.to_thread(os.statvfs, ws)
+    return {
+        "used_bytes": (st.f_blocks - st.f_bfree) * st.f_frsize,
+        "total_bytes": st.f_blocks * st.f_frsize,
+        "quota_gb": QUOTA_OVERRIDES.get(req.user_id, QUOTA_GB),
+        "cache_ttl_days": CACHE_TTL_REPORTED,
+    }
 
 
 @app.delete("/workspace/{user_id}")

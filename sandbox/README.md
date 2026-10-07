@@ -324,9 +324,34 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
 - `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir}` ファイル一覧
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
-- `POST /files/read` — `{user_id, path, mounts?}` → `{name, size, b64}`
-- `POST /files/write` — `{user_id, path, b64, mounts?}` → `{ok, size, cache_ttl_days}` 書き込み
-  (workspace 外へのパスは拒否)
+- `POST /files/read` — `{user_id, path, mounts?, nofollow?}` → `{name, size, b64, mtime}`
+  (`mtime` は秒の float — 上書き競合の比較用。#150)
+- `POST /files/write` — `{user_id, path, b64, mounts?, expected_mtime?, exclusive?, nofollow?}`
+  → `{ok, size, cache_ttl_days}` 書き込み (workspace 外へのパスは拒否)。fd で辿る版 (下記) では
+  `mtime` も返す
+  - `expected_mtime` (#150): `read` / `stat` で得た mtime と今の mtime が違えば **409**
+    `{detail: {message: "modified" | "deleted", mtime}}` (開いた後に jail の実行等が書き換えた・消した)。
+    `exclusive`: 既に在れば 409 (新規作成)。`nofollow`: workspace 相対でも経路の symlink を辿らない
+  - 容量切れ (ENOSPC / EDQUOT) は **507** (`/exec` の imports 書き込みも同じ)。nucllei の tool は
+    「Workspace のファイルブラウザで整理できる」を添える
+- **ファイルブラウザ用 (#150)** — nucllei の `/api/v1/sandbox/files/*` (`nucllei/routers/sandbox_files.py`)
+  が呼ぶ。`path` の 2 形 (workspace 相対 / `/ext/...`) と `mounts` は他の `/files/*` と同じ。
+  **workspace でも `/ext` でも、包含判定の基準 (workspace の root / bind のディレクトリ) から各段を
+  `O_NOFOLLOW` で開き直して辿る** (`_open_dirs`。symlink を 1 つも辿らない — 削除・改名は
+  symlink そのものに効く)。`.` 始まりのセグメントは書き換え不可 (400)
+  - `POST /files/ls` — `{user_id, path, mounts?}` → `{entries: [{name, path, type, size, mtime}],
+    exists, is_dir, truncated, cache_ttl_days}`。1 階層 (再帰しない)、`.` 始まりは出さない、
+    `type` は `dir` / `file` / `symlink` / `other`、ディレクトリが先 (名前順)、上限 5000 件
+  - `POST /files/stat` — `{user_id, path, mounts?}` → `{exists, path, type, size, mtime}`
+  - `POST /files/delete` — `{user_id, path, mounts?}` → `{ok}`。ディレクトリは中身ごと
+    (`shutil.rmtree(dir_fd=)` = fd ベースで symlink を辿らない)
+  - `POST /files/rename` — `{user_id, path, dest, mounts?}` → `{ok, path}`。同じ置き場の中だけ
+    (workspace ↔ `/ext`・bind 間は 400)、行き先が在れば 409、自分の中へは 400
+  - `POST /files/mkdir` — `{user_id, path, mounts?}` → `{ok, path}`。親も作る、在れば 409
+  - `POST /files/usage` — `{user_id}` → `{used_bytes, total_bytes, quota_gb, cache_ttl_days}`
+    (workspace の loopback ext4 の `statvfs`。`/ext` は容量上限を持たないので対象外)
+  - 置き場の root そのもの・workspace 直下の `imports/` `exports/` (実行のたびに使う) は
+    消せない・改名できない (400)。ro の bind への書き換えは 403
   - `/files/*` の `path` は 2 形 (#152): **workspace 相対** (`imports/a.csv`。従来どおり。一覧の
     `entries[].path` も workspace 相対) と、**jail の絶対パス `/ext/groups/<g>/…` `/ext/public/…`**
     (その要求の `mounts` に在る bind の中だけ。`entries[].path` も絶対パス)。bind に無い → 404
@@ -667,6 +692,10 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   nsjail 引数・無い置き場は飛ばす・rw のグループのディレクトリは作る・symlink のグループは bind しない、
   `/files/*` の `/ext/...` (ro は 403・bind 外は 404・**他グループへの symlink を読み・書き・一覧・
   中間ディレクトリのどれでも辿らない**・workspace からの symlink も弾く)、kernel の指紋による作り直し。
+- `sandbox/tests/test_files_browser.py` — ファイルブラウザ用の `/files/*` (#150)。一覧・stat・
+  削除・改名・mkdir・使用量、read の mtime と write の `expected_mtime` (409) / `exclusive`、
+  workspace と `/ext` (ro は 403・bind 外は 404) の両方、**symlink を辿らない** (一覧は
+  `symlink` で出すだけ・削除はリンクだけ・中間の symlink は 400)、保護された置き場、容量切れの 507。
 - `sandbox/tests/test_ro_mounts.py` — 参照用データの read-only bind (#138)。置き場が
   空/不在なら nsjail の引数が増えない (挙動不変)、直下のものが同じパスで名前順に並ぶ、
   **rw では絶対に足さない**、1 階層だけ見る、dot 始まり・壊れた symlink は飛ばす

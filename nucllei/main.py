@@ -55,6 +55,7 @@ from nucllei.routers import (
     ext,
     groups,
     files,
+    sandbox_files,
     functions,
     models,
     skills,
@@ -622,6 +623,10 @@ app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+# sandbox のファイルブラウザ(#150)。SANDBOX_URL の無い配備では全 endpoint 404
+app.include_router(
+    sandbox_files.router, prefix="/api/v1/sandbox/files", tags=["sandbox_files"]
+)
 
 # 認証付き上流プロキシ(#97)。SPA/static mount より前に並べる(明示ルート優先)。
 app.include_router(ext.router, prefix="/ext", tags=["ext"])
@@ -1062,6 +1067,8 @@ async def get_app_config(request: Request):
                     # llens: enable_admin_export / enable_admin_chat_access は撤去
                     # (管理者は常にすべてできる — ken 決定 2026-10-03)
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
+                    # #150: Workspace の sandbox ファイルブラウザ(SANDBOX_URL のある配備だけ)
+                    "enable_sandbox_files": sandbox_files.enabled(),
                 }
                 if user is not None
                 else {}

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
-	import { WEBUI_NAME, showSidebar, user } from '$lib/stores';
+	import { WEBUI_NAME, config, showSidebar, user } from '$lib/stores';
 	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -14,9 +14,15 @@
 	// llens: workspace 上部メニューは宣言的に定義する。並び・ラベル・表示条件(show)はこの配列だけで
 	// 管理し、マークアップは下の {#each} 一箇所。ラベルは $i18n.t(label) で翻訳する。
 	// (#48 Knowledge はメニュー撤去 / #69 Files は全ユーザー / #19 Chats は admin のチャット閲覧)
+	// #150: sandbox のファイルブラウザは SANDBOX_URL のある配備だけ(全ログインユーザー。
+	// 開ける場所の権限はサーバーが ACL で決める)
+	const sandboxFilesEnabled = $derived(
+		!!($config?.features as { enable_sandbox_files?: boolean } | undefined)?.enable_sandbox_files
+	);
 	const WORKSPACE_TABS = [
 		{ label: 'Models', path: 'models', show: (u: any) => u?.role === 'admin' },
 		{ label: 'Files', path: 'files', show: (_u: any) => true },
+		{ label: 'Sandbox', path: 'sandbox', show: (_u: any) => sandboxFilesEnabled },
 		{
 			label: 'Skills',
 			path: 'skills',
@@ -31,6 +37,9 @@
 	const visibleWorkspaceTabs = $derived(WORKSPACE_TABS.filter((t) => t.show($user)));
 
 	onMount(async () => {
+		if ($page.url.pathname.includes('/workspace/sandbox') && !sandboxFilesEnabled) {
+			goto('/');
+		}
 		if ($user?.role !== 'admin') {
 			const path = $page.url.pathname;
 			// llens(#66): 3層化 — Models/Tools/Functions/Settings/Users は admin 専用。

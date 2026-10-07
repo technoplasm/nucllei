@@ -1212,6 +1212,54 @@ What extraction happens at upload is entirely up to the deployment's single
 **Attachment Function** (§7.3). With none configured, files are stored raw and the
 model sees the attachment marked as unextracted.
 
+### 4.4.1 Sandbox file browser (`/api/v1/sandbox/files/*`)
+
+The Workspace → **Sandbox** tab (#150) lets a user look into the sandbox places
+directly — browse, download, upload, delete, rename/move, create folders and
+files, and edit plain text — without going through the model. Present only when
+`SANDBOX_URL` is set (`GET /api/config` → `features.enable_sandbox_files`);
+otherwise every endpoint is 404. Session auth (`get_verified_user`); always the
+caller's own workspace — there is no way to open another user's.
+
+Paths are the **jail paths** the model's tools use (`/workspace/notes.md`,
+`/ext/groups/EMR/recipes/a.md`), in requests and responses alike. Which places a
+user can open is the `/ext` ACL of §3.8 (`utils/ext_acl.py`, nothing separate):
+
+| Place                | User                                    | Admin         |
+| -------------------- | --------------------------------------- | ------------- |
+| `/workspace/…`       | own workspace, rw                       | own, rw       |
+| `/ext/public/…`      | ro                                      | rw            |
+| `/ext/groups/<g>/…`  | members rw, others 404 (does not exist) | all groups rw |
+| other `/ext/<name>/` | 404 (not part of the browser)           | 404           |
+
+Writes to a ro place are 403 (and the sandbox gets the place as a ro bind, so it
+is refused twice). Any `.`-prefixed segment, `..`, or a relative path is 400 —
+dotfiles are hidden as in `list_workspace`. Symlinks are never followed (the
+sandbox walks each step with `O_NOFOLLOW`); listings show them as `type:"symlink"`
+and delete removes the link itself.
+
+| Endpoint              | Body / query                                   | Returns / notes                                                                                                                                                                                                                    |
+| --------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /places`         | —                                              | `{places:[{path, kind:"workspace"\|"public"\|"group", rw}], write_limit_bytes}` — the workspace first, then the `/ext` places this user can see                                                                                    |
+| `GET /usage`          | —                                              | `{used_bytes, total_bytes, quota_gb}` of the workspace (`/ext` has no quota)                                                                                                                                                       |
+| `POST /list`          | `{path}`                                       | one level: `{path, rw, exists, is_dir, truncated, entries:[{name, path, type:"dir"\|"file"\|"symlink"\|"other", size, mtime}], cache_ttl_days}`. Dirs first. `imports/` `exports/` files expire at `mtime + cache_ttl_days` (#149) |
+| `POST /stat`          | `{path}`                                       | `{exists, path, type, size, mtime, rw}`                                                                                                                                                                                            |
+| `POST /read`          | `{path}`                                       | `{path, name, size, mtime, rw, text, reason}` — `text` is the content when it is plain text (≤ 1 MiB, valid UTF-8, no NUL), else `null` with `reason` `too_large` / `binary` (download only)                                       |
+| `GET /download?path=` | —                                              | raw bytes, always `Content-Disposition: attachment` + `application/octet-stream` + `nosniff` (an HTML/SVG never renders on this origin). Capped by the sandbox's `SANDBOX_FILE_LIMIT_BYTES` (413)                                  |
+| `POST /write`         | `{path, content, expected_mtime?, exclusive?}` | save text. `expected_mtime` (from `read`) ≠ current → **409** `{detail:{message:"modified"\|"deleted", mtime}}` (changed outside — e.g. by a sandbox run); `exclusive` and it exists → 409. Returns `{ok, path, size, mtime}`      |
+| `POST /upload`        | multipart `dir`, `file`, `overwrite?` (false)  | one file into `dir`; exists and not `overwrite` → 409                                                                                                                                                                              |
+| `POST /delete`        | `{path}`                                       | file, or folder with its contents. The place root and the workspace's `imports/` `exports/` themselves → 400                                                                                                                       |
+| `POST /rename`        | `{path, dest}`                                 | rename / move inside the same place only (400 across places); `dest` exists → 409                                                                                                                                                  |
+| `POST /mkdir`         | `{path}`                                       | creates parents too; exists → 409                                                                                                                                                                                                  |
+
+Write size (`write`, `upload`) is capped by `SANDBOX_WRITE_FILE_LIMIT_BYTES`
+(same as the `write_file` tool; 413). A full workspace (quota) is **507**; the
+sandbox tool's error text for the same case points the user to this tab. The
+sandbox's other refusals (400/403/404/409/413) are relayed; an unreachable or
+failing sandbox is 500 (not 502 — the UI reserves gateway errors for "backend
+down"). There is no path from here into a conversation: putting a file in a chat
+is `exports/` (§5.7).
+
 ### 4.5 Deploying extensions programmatically
 
 All extension kinds are DB rows, so a harness repo can push them via API (this is

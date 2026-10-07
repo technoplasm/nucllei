@@ -1292,3 +1292,32 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - 回帰: `nucllei/test/apps/webui/routers/test_ext_acl.py`(実 DB の Groups)、`sandbox/tests/test_ext_mounts.py`。
 - 未了: グループ改名時のディレクトリの追従(旧名のディレクトリが残り、メンバーからは見えなくなる。admin には
   見える)、共有チャットを非メンバーが開いたときの 404 は仕様。
+
+## sandbox のファイルブラウザ(2026-10-07、#150)— Workspace → Sandbox
+
+利用者がモデルを介さずに sandbox の置き場を見て・整理し・平文を編集する口。会話へ添付する経路は作らない
+(会話に載せるのは exports/ 一本 — #150 の 2026-10-07 のコメント)。
+
+- **開ける場所 = #152 の ACL そのもの**: 本人の `/workspace`(rw)・`/ext/public`(一般 ro / admin rw)・
+  `/ext/groups/<g>`(メンバー rw、admin は全部)。一覧は `sandbox_ext_mounts(user)` から作り、可否は
+  `ext_path_access`。`/ext/doc` 等はブラウザの対象外(404)。admin が他人の workspace を見る機能は無い。
+- **nucllei**: `nucllei/routers/sandbox_files.py`(`/api/v1/sandbox/files/*`。API は `README_API.md` §4.4.1)。
+  パスは jail の絶対パスで受けて返す(モデルの tool と同じ文字列)。ro への書き換えは sandbox を呼ばずに 403
+  (sandbox にも ro の bind で渡るので 2 重)。`.` 始まりのセグメントは 400(dotfile は隠す — list_workspace と同じ)。
+  平文の判定は 1 MiB 以内・UTF-8・NUL 無し。書き込み上限は `SANDBOX_WRITE_FILE_LIMIT_BYTES`。sandbox に
+  繋がらないときは 500(502/503/504 は画面の「バックエンド不達」バナーが拾うので使わない)。
+  `SANDBOX_URL` が無ければ全部 404 + `features.enable_sandbox_files: false`(タブを出さない)。
+- **sandbox**: `/files/ls` `stat` `delete` `rename` `mkdir` `usage` を追加。read は `mtime`、write は
+  `expected_mtime`(違えば 409 = 外で変更された)/ `exclusive` / `nofollow`。新しい操作は workspace でも `/ext` でも
+  `_open_dirs`(O_NOFOLLOW で 1 段ずつ)で辿る。**既存の tool 経路(workspace 相対の `/files/read` `/files/write`)は
+  `nofollow` を付けない限り従来どおり `_safe_path`(resolve して包含判定)** — tool の挙動は変えていない。
+  容量切れ(ENOSPC)は 507 にし、tool の文面に「Workspace のファイルブラウザ(Workspace → Sandbox)で整理できる」。
+  jail 内の実行で `No space left on device` が出たときも run_* の結果に同じ 1 行を足す。
+- **画面**: `src/lib/components/workspace/Sandbox/`(一覧 `SandboxFileBrowser` / 1 ファイル `SandboxFileView`)。
+  場所・ディレクトリ・開いているファイルは URL のクエリ(`?path=&file=`)。平文は CodeEditor(言語は拡張子から
+  `@codemirror/language-data`)、md はプレビュー(`chat/Messages/Markdown.svelte`)。保存は開いたときの mtime を
+  付けて 409 なら「エディタの外で変更された」モーダル(編集を続ける / 再読み込み / 上書き)。`imports/` `exports/` の
+  ファイルに残り期限(mtime + `cache_ttl_days`)、`/workspace` では quota の使用量。
+- 回帰: `nucllei/test/apps/webui/routers/test_sandbox_files.py`、`sandbox/tests/test_files_browser.py`。
+- 未了: 実機(sandbox コンテナ)での確認・画面の目視は統合側。workspace 相対の tool 経路(`_safe_path`)の
+  TOCTOU(resolve と open の間に jail が symlink を差し替える)は既存のまま — 塞ぐなら tool 側も `nofollow` に寄せる。

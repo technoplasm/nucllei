@@ -250,6 +250,22 @@ _SANDBOX_AUTH = (
 )
 
 
+# workspace の容量 (quota) が一杯で書けなかったとき (sandbox は HTTP 507、jail の中の実行は
+# stderr の `No space left on device`) に足す次の手。利用者が自分で片付けられる場所を言う (#150)
+_QUOTA_FULL_NEXT = (
+    "不要なファイルを run_shell の rm で消してから呼び直すか、ユーザーに容量が一杯だと伝える"
+    " (ユーザーは Workspace のファイルブラウザ (Workspace → Sandbox) で使用量を見て整理できる)。"
+)
+_QUOTA_FULL_MARKERS = ("No space left on device", "Disk quota exceeded")
+
+
+def _quota_full_note(*texts) -> str:
+    """実行の出力が容量切れを示していれば足す 1 行、そうでなければ ""。"""
+    if any(m in (t or "") for t in texts for m in _QUOTA_FULL_MARKERS):
+        return f"※ workspace の容量 (quota) が一杯の可能性がある。{_NEXT}{_QUOTA_FULL_NEXT}"
+    return ""
+
+
 # imports/ exports/ は Files の写しで、sandbox が最終更新から一定期間で消す (#149)。
 # その配下が「無い」と言われたときに次の手へ足す 1 文
 _CACHE_DIRS = ("imports", "exports")
@@ -314,6 +330,10 @@ def _exec_error(e: Exception) -> ToolError:
     log.error(f"[sandbox] exec failed: {e!r}")
     if isinstance(e, SandboxHTTPError) and e.status == 401:
         return _sandbox_auth()
+    if isinstance(e, SandboxHTTPError) and e.status == 507:
+        return ToolFailure(
+            "workspace の容量 (quota) が一杯で実行できなかった", _QUOTA_FULL_NEXT
+        )
     return _err("ERROR: sandbox で実行できなかった。" + _SANDBOX_DOWN_NEXT, "failure")
 
 
@@ -350,6 +370,10 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
         return ToolCallError(
             f"{abs_path} は read-only",
             "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
+        )
+    if e.status == 507:
+        return ToolFailure(
+            f"{abs_path} に書けない (workspace の容量 (quota) が一杯)", _QUOTA_FULL_NEXT
         )
     if e.status == 413:
         return ToolOutcome(
@@ -783,6 +807,8 @@ class Tools:
                 parts.append("(stderr はサーバー転送上限でも切り詰め)")
         if not stdout and not stderr:
             parts.append("(出力なし)")
+        if note := _quota_full_note(stderr, stdout):
+            parts.append(note)
         if output_lines:
             parts.append(
                 "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
@@ -818,6 +844,8 @@ class Tools:
             )
         if not stdout and not error and not res.get("timed_out"):
             parts.append("(出力なし)")
+        if note := _quota_full_note(str(error or ""), stdout):
+            parts.append(note)
         if output_lines:
             parts.append(
                 "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
@@ -1070,6 +1098,8 @@ class Tools:
             )
         except Exception as e:
             log.error(f"[sandbox] import {fid} failed: {e!r}")
+            if isinstance(e, SandboxHTTPError) and e.status == 507:
+                return "", f"workspace の容量 (quota) が一杯。{_QUOTA_FULL_NEXT}", None
             return "", "取り込みに失敗した", None
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
