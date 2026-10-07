@@ -29,7 +29,11 @@
 	} from '$lib/apis/sandbox';
 	import { formatFileSize } from '$lib/utils';
 
+	import { DropdownMenu } from 'bits-ui';
+
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownContent from '$lib/components/common/DropdownContent.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import UsageGauge from '$lib/components/common/UsageGauge.svelte';
@@ -66,12 +70,10 @@
 	const place = $derived(placeOf(dir));
 	const rw = $derived(!!place?.rw && !!listing?.rw);
 
-	const placeLabel = (p: SandboxPlace) =>
-		p.kind === 'workspace'
-			? $i18n.t('My workspace')
-			: p.kind === 'public'
-				? $i18n.t('Public')
-				: (p.path.split('/').pop() ?? p.path);
+	// workspace の root の lost+found は ext4 の産物なので一覧に出さない
+	const entries = $derived(
+		(listing?.entries ?? []).filter((e) => !(dir === WORKSPACE && e.name === 'lost+found'))
+	);
 
 	const placeIcon = (p: SandboxPlace | null) =>
 		p?.kind === 'public'
@@ -80,20 +82,44 @@
 				? 'i-lucide-users'
 				: 'i-lucide-hard-drive';
 
-	// パンくず: 場所の root から今のディレクトリまで
+	// 場所の切り替え(パンくずとは別のコントロール。ラベルは実パス)
+	let showPlaces = $state(false);
+	// 書けるかは一覧の応答(listing.rw)まで見る。一覧が来る前は場所の rw で判断
+	const readOnly = $derived(!!place && (listing ? !rw : !place.rw));
+
+	// パンくず: 実パスに見える形 `/ext/public / recipes / x.md`。先頭は場所の root を割らずに 1 要素、
+	// ファイルを開いているときは末尾にファイル名。末尾(今いる所)はクリック不可。
+	// 深いときは「root / … / 末尾 2 つ」に畳み、… で全部を出す。
+	const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
+	const crumbBase = $derived(openFile ? parentOf(openFile) : dir);
 	const crumbs = $derived.by(() => {
-		if (!place) {
+		const p = placeOf(crumbBase);
+		if (!p) {
 			return [];
 		}
-		const out = [{ label: placeLabel(place), path: place.path }];
-		const rest = dir.slice(place.path.length).split('/').filter(Boolean);
-		let acc = place.path;
-		for (const seg of rest) {
+		const out = [{ label: p.path, path: p.path }];
+		let acc = p.path;
+		for (const seg of crumbBase.slice(p.path.length).split('/').filter(Boolean)) {
 			acc = `${acc}/${seg}`;
 			out.push({ label: seg, path: acc });
 		}
+		if (openFile) {
+			out.push({ label: openFile.split('/').pop() ?? openFile, path: openFile });
+		}
 		return out;
 	});
+	const CRUMB_COLLAPSE_OVER = 4;
+	let crumbsExpanded = $state(false);
+	$effect(() => {
+		void crumbBase;
+		crumbsExpanded = false;
+	});
+	// null = 畳んだ中間(…)
+	const visibleCrumbs = $derived(
+		!crumbsExpanded && crumbs.length > CRUMB_COLLAPSE_OVER
+			? [crumbs[0], null, ...crumbs.slice(-2)]
+			: crumbs
+	);
 
 	const errorMessage = (err: unknown): string => {
 		if (err instanceof SandboxFilesError) {
@@ -131,18 +157,28 @@
 		goto(`?${sp}`, { keepFocus: true, noScroll: true });
 	};
 
-	const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
-
 	const applyLocation = async (pathParam: string | null, fileParam: string | null) => {
 		let nextDir = pathParam || WORKSPACE;
 		if (fileParam && !pathParam) {
 			nextDir = parentOf(fileParam);
 		}
-		if (!placeOf(nextDir)) {
-			nextDir = WORKSPACE;
+		// 見えない場所(非メンバーのグループ等)と存在しない場所は区別せず、同じ案内で /workspace へ。
+		// URL も実際に出す場所へ置き換える(履歴は積まない)
+		if (!placeOf(nextDir) || (fileParam && !placeOf(fileParam))) {
+			// 場所一覧が取れていない(placesError)ときは何もしない — 置き換えても同じ判定でループする
+			if (!placeOf(WORKSPACE)) {
+				return;
+			}
+			toast.error($i18n.t('This location cannot be opened.'));
+			goto(`?${new URLSearchParams({ path: WORKSPACE })}`, {
+				replaceState: true,
+				keepFocus: true,
+				noScroll: true
+			});
+			return;
 		}
 		const wasFile = openFile;
-		openFile = fileParam && placeOf(fileParam) ? fileParam : null;
+		openFile = fileParam || null;
 		// ファイルを閉じて一覧へ戻ったときも読み直す(保存でサイズ・更新日時が変わっている)
 		if (nextDir !== dir || !listing || (wasFile && !openFile)) {
 			dir = nextDir;
@@ -236,6 +272,12 @@
 			COUNT: days
 		});
 	};
+
+	// 「1.0 MB · 2026-10-07 16:34」(区切りは前後に空白。テンプレートの改行に頼らない)
+	const entryMeta = (e: SandboxEntry) =>
+		[e.type === 'file' ? formatFileSize(e.size) : null, formatMtime(e.mtime)]
+			.filter(Boolean)
+			.join(' · ');
 
 	const entryIcon = (e: SandboxEntry) => {
 		if (e.type === 'dir') {
@@ -488,114 +530,130 @@
 		<div class="flex justify-center py-10"><Spinner className="size-5" /></div>
 	{:else if placesError}
 		<div class="text-sm text-content-subtle py-10 text-center">{placesError}</div>
-	{:else if openFile}
-		{#key openFile}
-			<SandboxFileView
-				path={openFile}
-				expiresAt={(() => {
-					const e = listing?.entries.find((x) => x.path === openFile);
-					return e ? expiresAt(e) : null;
-				})()}
-				{errorMessage}
-				onDirtyChange={(d) => (fileDirty = d)}
-				onClose={(force) => {
-					if (force) {
-						skipDirtyCheck = true;
-					}
-					navigate(dir);
-				}}
-			/>
-		{/key}
 	{:else}
-		<!-- 場所 + 操作。狭幅では 2 行に折り返す -->
-		<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-2">
-			<div class="flex items-center gap-1.5 min-w-0">
-				<span class="{placeIcon(place)} size-4 block shrink-0 text-content-muted"></span>
-				<select
-					class="bg-surface-form hover:bg-surface-hover max-w-[14rem] px-2 py-1 pr-6 rounded-xs text-sm outline-hidden"
-					value={place?.path ?? WORKSPACE}
-					aria-label={$i18n.t('Location')}
-					onchange={(e) => navigate(e.currentTarget.value)}
-				>
-					{#each places as p (p.path)}
-						<option value={p.path}
-							>{placeLabel(p)}{p.rw ? '' : ` (${$i18n.t('Read-only')})`}</option
-						>
-					{/each}
-				</select>
-				{#if place && !rw && listing}
+		{#if !openFile}
+			<!-- 場所の切り替え + 操作。狭幅では 2 行に折り返す -->
+			<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-2">
+				<Dropdown bind:show={showPlaces}>
 					<span
-						class="text-[0.65rem] px-1.5 py-px rounded-full bg-surface-muted text-content-muted shrink-0"
-						>{$i18n.t('Read-only')}</span
+						class="flex items-center gap-1.5 min-w-0 max-w-[calc(100vw-2rem)] sm:max-w-md px-2 py-1 rounded-lg bg-surface-form hover:bg-surface-hover text-sm"
 					>
-				{/if}
-			</div>
-
-			<div class="flex items-center gap-0.5 ml-auto">
-				{#if rw}
-					<button
-						class="whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 mr-1 rounded-full bg-primary text-primary-content font-medium text-sm hover:bg-primary-hover disabled:opacity-50"
-						type="button"
-						disabled={uploading}
-						onclick={() => fileInput?.click()}
-					>
-						{#if uploading}
-							<Spinner className="size-3.5 mr-1" />
-						{:else}
-							<span class="i-lucide-upload size-3.5 block mr-1"></span>
+						<span class="sr-only">{$i18n.t('Location')}:</span>
+						<span class="{placeIcon(place)} size-4 block shrink-0 text-content-muted"></span>
+						<span class="font-mono truncate">{place?.path ?? WORKSPACE}</span>
+						{#if readOnly}
+							<span
+								class="i-lucide-lock size-3.5 block shrink-0 text-content-muted"
+								title={$i18n.t('Read-only')}
+							></span>
+							<span class="sr-only">({$i18n.t('Read-only')})</span>
 						{/if}
-						{$i18n.t('Upload')}
-					</button>
-					<Tooltip content={$i18n.t('New folder')}>
+						<span class="i-lucide-chevron-down size-3.5 block shrink-0 text-content-subtle"></span>
+					</span>
+					{#snippet content()}
+						<DropdownContent
+							className="min-w-[14rem] max-w-[calc(100vw-2rem)] sm:max-w-md rounded-xl px-1 py-1.5 border border-line z-50 bg-surface-raised text-content shadow-sm"
+							sideOffset={4}
+							align="start"
+						>
+							{#each places as p (p.path)}
+								<DropdownMenu.Item
+									class="flex gap-2 items-center px-3 py-2 text-sm cursor-pointer hover:bg-surface-hover rounded-md"
+									onSelect={() => navigate(p.path)}
+								>
+									<span class="{placeIcon(p)} size-4 block shrink-0 text-content-muted"></span>
+									<span class="font-mono flex-1 min-w-0 break-all">{p.path}</span>
+									{#if !p.rw}
+										<span
+											class="i-lucide-lock size-3.5 block shrink-0 text-content-muted"
+											title={$i18n.t('Read-only')}
+										></span>
+										<span class="sr-only">({$i18n.t('Read-only')})</span>
+									{/if}
+									<span
+										class="i-lucide-check size-4 block shrink-0 {p.path === place?.path
+											? ''
+											: 'invisible'}"
+									></span>
+								</DropdownMenu.Item>
+							{/each}
+						</DropdownContent>
+					{/snippet}
+				</Dropdown>
+				<div class="flex items-center gap-0.5 ml-auto">
+					{#if rw}
+						<button
+							class="whitespace-nowrap inline-flex items-center py-0.5 pl-2 pr-3 mr-1 rounded-full bg-primary text-primary-content font-medium text-sm hover:bg-primary-hover disabled:opacity-50"
+							type="button"
+							disabled={uploading}
+							onclick={() => fileInput?.click()}
+						>
+							{#if uploading}
+								<Spinner className="size-3.5 mr-1" />
+							{:else}
+								<span class="i-lucide-upload size-3.5 block mr-1"></span>
+							{/if}
+							{$i18n.t('Upload')}
+						</button>
+						<Tooltip content={$i18n.t('New folder')}>
+							<button
+								class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
+								type="button"
+								aria-label={$i18n.t('New folder')}
+								disabled={busy}
+								onclick={() => openNameDialog('mkdir')}
+							>
+								<span class="i-lucide-folder-plus size-4 block"></span>
+							</button>
+						</Tooltip>
+						<Tooltip content={$i18n.t('New file')}>
+							<button
+								class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
+								type="button"
+								aria-label={$i18n.t('New file')}
+								disabled={busy}
+								onclick={() => openNameDialog('newfile')}
+							>
+								<span class="i-lucide-file-plus size-4 block"></span>
+							</button>
+						</Tooltip>
+					{/if}
+					<Tooltip content={$i18n.t('Refresh')}>
 						<button
 							class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
 							type="button"
-							aria-label={$i18n.t('New folder')}
-							disabled={busy}
-							onclick={() => openNameDialog('mkdir')}
+							aria-label={$i18n.t('Refresh')}
+							onclick={() => refresh()}
 						>
-							<span class="i-lucide-folder-plus size-4 block"></span>
+							<span class="i-lucide-refresh-cw size-4 block {loading ? 'animate-spin' : ''}"></span>
 						</button>
 					</Tooltip>
-					<Tooltip content={$i18n.t('New file')}>
-						<button
-							class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
-							type="button"
-							aria-label={$i18n.t('New file')}
-							disabled={busy}
-							onclick={() => openNameDialog('newfile')}
-						>
-							<span class="i-lucide-file-plus size-4 block"></span>
-						</button>
-					</Tooltip>
-				{/if}
-				<Tooltip content={$i18n.t('Refresh')}>
-					<button
-						class="p-1.5 rounded-lg text-content-muted hover:bg-surface-hover"
-						type="button"
-						aria-label={$i18n.t('Refresh')}
-						onclick={() => refresh()}
-					>
-						<span class="i-lucide-refresh-cw size-4 block {loading ? 'animate-spin' : ''}"></span>
-					</button>
-				</Tooltip>
+				</div>
 			</div>
-		</div>
+		{/if}
 
-		<!-- パンくず -->
+		<!-- パンくず: 実パスに見える形。先頭は場所の root を 1 要素で、末尾(今いる所)はクリック不可 -->
 		<nav
-			class="flex items-center gap-0.5 text-sm px-0.5 overflow-x-auto scrollbar-none whitespace-nowrap"
+			class="flex flex-wrap items-baseline px-0.5 font-mono text-[0.8125rem] leading-6"
 			aria-label={$i18n.t('Breadcrumb')}
 		>
-			{#each crumbs as c, i (c.path)}
+			{#each visibleCrumbs as c, i}
 				{#if i > 0}
-					<span class="i-lucide-chevron-right size-3.5 block shrink-0 text-content-subtle"></span>
+					<span class="px-1 text-content-subtle select-none" aria-hidden="true">/</span>
 				{/if}
-				{#if i === crumbs.length - 1}
-					<span class="px-1 font-medium">{c.label}</span>
+				{#if c === null}
+					<button
+						class="px-0.5 rounded-md text-content-muted hover:text-content hover:bg-surface-hover"
+						type="button"
+						title={crumbBase}
+						aria-label={$i18n.t('Show full path')}
+						onclick={() => (crumbsExpanded = true)}>…</button
+					>
+				{:else if i === visibleCrumbs.length - 1}
+					<span class="font-medium text-content break-all" aria-current="page">{c.label}</span>
 				{:else}
 					<button
-						class="px-1 rounded-md text-content-muted hover:text-content hover:bg-surface-hover"
+						class="text-left break-all rounded-md text-content-muted hover:text-content hover:underline"
 						type="button"
 						onclick={() => navigate(c.path)}>{c.label}</button
 					>
@@ -603,6 +661,25 @@
 			{/each}
 		</nav>
 
+		{#if openFile}
+			{#key openFile}
+				<SandboxFileView
+					path={openFile}
+					expiresAt={(() => {
+						const e = listing?.entries.find((x) => x.path === openFile);
+						return e ? expiresAt(e) : null;
+					})()}
+					{errorMessage}
+					onDirtyChange={(d) => (fileDirty = d)}
+					onClose={(force) => {
+						if (force) {
+							skipDirtyCheck = true;
+						}
+						navigate(dir);
+					}}
+				/>
+			{/key}
+		{:else}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="mt-1 flex-1 min-h-0 rounded-lg border {dragOver
@@ -633,13 +710,13 @@
 					{$i18n.t('This folder does not exist.')}
 					{#if place}
 						<button
-							class="text-sm underline text-content-muted hover:text-content"
+							class="text-sm font-mono underline text-content-muted hover:text-content"
 							type="button"
-							onclick={() => navigate(place.path)}>{placeLabel(place)}</button
+							onclick={() => navigate(place.path)}>{place.path}</button
 						>
 					{/if}
 				</div>
-			{:else if listing && listing.entries.length === 0}
+			{:else if listing && entries.length === 0}
 				<div class="text-sm text-content-subtle py-10 text-center">
 					{rw
 						? $i18n.t('This folder is empty. Drop files here to upload.')
@@ -647,7 +724,7 @@
 				</div>
 			{:else if listing}
 				<ul class="divide-y divide-line">
-					{#each listing.entries as e (e.path)}
+					{#each entries as e (e.path)}
 						{@const exp = expiresAt(e)}
 						<li class="group flex items-center gap-2 px-2 py-1.5 hover:bg-surface-hover">
 							<button
@@ -665,10 +742,7 @@
 										>{e.name}</span
 									>
 									<span class="block text-xs text-content-subtle truncate">
-										{#if e.type === 'file'}{formatFileSize(e.size)} ·
-										{/if}{formatMtime(e.mtime)}
-										{#if exp}
-											· <span
+										{entryMeta(e)}{#if exp}{' · '}<span
 												class={exp * 1000 - Date.now() < 3 * 86400000
 													? 'text-amber-600 dark:text-amber-400'
 													: ''}>{expiryLabel(exp)}</span
@@ -736,6 +810,7 @@
 					{ COUNT: listing.cache_ttl_days }
 				)}
 			</div>
+		{/if}
 		{/if}
 	{/if}
 </div>

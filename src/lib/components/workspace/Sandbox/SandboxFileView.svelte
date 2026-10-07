@@ -142,31 +142,32 @@
 		>
 			<span class="i-lucide-arrow-left size-4 block"></span>
 		</button>
-		<div class="flex-1 min-w-0">
-			<div class="text-sm font-medium truncate flex items-center gap-1.5">
-				{name}
-				{#if dirty}
-					<span class="size-1.5 rounded-full bg-amber-500 shrink-0" title={$i18n.t('Unsaved')}
-					></span>
-				{/if}
-				{#if file && !file.rw}
-					<span
-						class="text-[0.65rem] px-1.5 py-px rounded-full bg-surface-muted text-content-muted shrink-0"
-						>{$i18n.t('Read-only')}</span
-					>
-				{/if}
-			</div>
-			<div class="text-xs text-content-subtle truncate">
-				{path}
-				{#if file}
-					· {formatFileSize(file.size)} · {formatMtime(file.mtime)}
-				{/if}
-				{#if expiresAt}
-					· {$i18n.t('Expires {{DATE}}', {
+		<!-- ファイル名・パスは親のパンくずが出す。ここは状態と属性だけ -->
+		<div
+			class="flex-1 min-w-fit flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-content-subtle"
+		>
+			{#if dirty}
+				<span class="flex items-center gap-1 text-amber-600 dark:text-amber-400 shrink-0">
+					<span class="size-1.5 rounded-full bg-amber-500"></span>
+					{$i18n.t('Unsaved')}
+				</span>
+			{/if}
+			{#if file && !file.rw}
+				<span class="flex items-center gap-1 text-content-muted shrink-0">
+					<span class="i-lucide-lock size-3 block"></span>
+					{$i18n.t('Read-only')}
+				</span>
+			{/if}
+			{#if file}
+				<span class="whitespace-nowrap">{formatFileSize(file.size)} · {formatMtime(file.mtime)}</span>
+			{/if}
+			{#if expiresAt}
+				<span class="whitespace-nowrap"
+					>{$i18n.t('Expires {{DATE}}', {
 						DATE: dayjs(expiresAt * 1000).format('YYYY-MM-DD')
-					})}
-				{/if}
-			</div>
+					})}</span
+				>
+			{/if}
 		</div>
 
 		<div class="flex items-center gap-0.5 ml-auto">
@@ -251,7 +252,7 @@
 			</a>
 		</div>
 	{:else if isMarkdown && mode === 'preview'}
-		<div class="flex-1 min-h-0 overflow-auto rounded-lg border border-line p-3 markdown-prose text-sm">
+		<div class="flex-1 min-h-0 overflow-auto rounded-lg border border-line p-3 w-full min-w-full markdown-prose text-sm">
 			<Markdown id={`sandbox-preview-${editorKey}`} content={draft} />
 		</div>
 	{:else if editable}
