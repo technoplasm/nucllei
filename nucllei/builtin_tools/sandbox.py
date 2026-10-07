@@ -254,7 +254,8 @@ _SANDBOX_AUTH = (
 # workspace の容量 (quota) が一杯で書けなかったとき (sandbox は HTTP 507、jail の中の実行は
 # stderr の `No space left on device`) に足す次の手。利用者が自分で片付けられる場所を言う (#150)
 _QUOTA_FULL_NEXT = (
-    "不要なファイルを run_shell の rm で消してから呼び直すか、ユーザーに容量が一杯だと伝える"
+    "/workspace/trash/ を空にすると空く (trash に移しただけでは空かない) — run_shell の rm で"
+    " trash の中や不要なファイルを消してから呼び直すか、ユーザーに容量が一杯だと伝える"
     " (ユーザーは Workspace のファイルブラウザ (Workspace → Sandbox) で使用量を見て整理できる)。"
 )
 _QUOTA_FULL_MARKERS = ("No space left on device", "Disk quota exceeded")
@@ -685,9 +686,11 @@ class Tools:
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
     3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは
     自動でチャットに添付される。ただし /workspace/imports/ と /workspace/exports/ は
-    Files にある原本の写しで、最終更新から一定期間 (既定 30 日。取り込み・添付の結果に
-    期限日を添える) で消える — 会話を跨いで残す物は /workspace の別の場所
-    (自分で作るディレクトリ等) に置く。消えた物は send_to_workspace(file_id) で戻せる。実行は直列 — run_python は同じ会話内で、
+    Files にある原本の写しで、直下に置いたもの (ファイルでもフォルダでも 1 つ) は置いてから
+    (最後に触ってから) 一定期間 (既定 30 日。取り込み・添付の結果に期限日を添える) で中身ごと
+    消える — 会話を跨いで残す物は /workspace の別の場所 (自分で作るディレクトリ等) に置く。
+    消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
+    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。
@@ -698,8 +701,9 @@ class Tools:
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
     # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
-    # imports/ exports/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
-    # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。docstring は静的なので既定で言い、実際の値は
+    # imports/ exports/ trash/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
+    # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。単位は直下のエントリ、時刻は max(mtime, ctime)
+    # (mv で ctime が今になる = 移した日から数える)。docstring は静的なので既定で言い、実際の値は
     # sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返す — 取り込み・
     # exports 自動添付の結果に「YYYY-MM-DD 以降に消える」を添える (`_cache_expiry`。キーが無い
     # 古い sandbox・0 では添えない)。send_to_workspace / fetch_from_workspace の docstring には

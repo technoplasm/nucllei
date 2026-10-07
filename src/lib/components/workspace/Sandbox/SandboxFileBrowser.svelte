@@ -42,8 +42,13 @@
 	const i18n = getContext('i18n');
 
 	const WORKSPACE = '/workspace';
-	// imports/ exports/ は Files の写しで、最終更新から cache_ttl_days 日で消える(#149)
-	const CACHE_DIRS = [`${WORKSPACE}/imports/`, `${WORKSPACE}/exports/`];
+	// imports/ exports/ は Files の写し(#149)、trash/ は /workspace の「削除」の移し先。3 つとも
+	// 直下のエントリ(ファイルでもフォルダでも 1 つ)が max(mtime, ctime) から cache_ttl_days 日で
+	// 中身ごと消える(sandbox の `_sweep_entries`)。mv は mtime を変えず ctime を今にする
+	const TRASH = `${WORKSPACE}/trash`;
+	const CACHE_DIRS = [`${WORKSPACE}/imports`, `${WORKSPACE}/exports`];
+	const EXPIRING_DIRS = [...CACHE_DIRS, TRASH];
+	const inside = (path: string, d: string) => path === d || path.startsWith(`${d}/`);
 
 	let places = $state<SandboxPlace[]>([]);
 	let placesLoaded = $state(false);
@@ -126,7 +131,7 @@
 			switch (err.status) {
 				case 507:
 					return $i18n.t(
-						'Your workspace is full. Delete files you no longer need to free up space.'
+						'Your workspace is full. Empty the trash (/workspace/trash/) to free up space — deleting elsewhere only moves files there.'
 					);
 				case 413:
 					return $i18n.t('The file is too large (limit {{SIZE}}).', {
@@ -251,15 +256,12 @@
 	});
 
 	// ---- 表示の補助 ----
-	const isCached = (e: SandboxEntry) =>
-		e.type === 'file' && CACHE_DIRS.some((d) => e.path.startsWith(d));
-
 	const expiresAt = (e: SandboxEntry) => {
 		const ttl = listing?.cache_ttl_days ?? 0;
-		if (!ttl || !e.mtime || !isCached(e)) {
+		if (!ttl || !e.mtime || !EXPIRING_DIRS.includes(parentOf(e.path))) {
 			return null;
 		}
-		return e.mtime + ttl * 86400;
+		return Math.max(e.mtime, e.ctime ?? 0) + ttl * 86400;
 	};
 
 	const expiryLabel = (ts: number) => {
@@ -366,8 +368,44 @@
 	};
 
 	// ---- 削除 ----
+	// /workspace の中(trash/ の外)は trash/ の直下へ移す(選び間違いを取り返せるように。llens の
+	// 運用と同じ)。trash/ の中と /ext は完全に消す
 	let deleteTarget = $state<SandboxEntry | null>(null);
 	let showDeleteConfirm = $state(false);
+	const movesToTrash = (e: SandboxEntry | null) =>
+		!!e && inside(e.path, WORKSPACE) && !inside(e.path, TRASH);
+
+	// 同名があれば末尾に -2, -3…(拡張子があればその前: memo.txt → memo-2.txt)
+	const numberedName = (name: string, n: number) => {
+		const dot = name.lastIndexOf('.');
+		return dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`;
+	};
+
+	const moveToTrash = async (e: SandboxEntry) => {
+		const trash = await listSandboxDir(TRASH);
+		if (!trash.exists) {
+			await makeSandboxDir(TRASH);
+		}
+		const taken = new Set(trash.entries.map((x) => x.name));
+		for (let n = 1; n < 1000; n++) {
+			const name = n === 1 ? e.name : numberedName(e.name, n);
+			if (taken.has(name)) {
+				continue;
+			}
+			try {
+				await renameSandboxPath(e.path, `${TRASH}/${name}`);
+				return name;
+			} catch (err) {
+				// 一覧の後に同名ができた(sandbox の実行・別のタブ)— 次の番号へ
+				if (err instanceof SandboxFilesError && err.status === 409) {
+					taken.add(name);
+					continue;
+				}
+				throw err;
+			}
+		}
+		throw new Error($i18n.t('Could not find a free name in the trash.'));
+	};
 
 	const confirmDelete = async () => {
 		const target = deleteTarget;
@@ -376,8 +414,15 @@
 		}
 		busy = true;
 		try {
-			await deleteSandboxPath(target.path);
-			toast.success($i18n.t('Deleted {{NAME}}', { NAME: target.name }));
+			if (movesToTrash(target)) {
+				const name = await moveToTrash(target);
+				toast.success(
+					$i18n.t('Moved {{NAME}} to the trash', { NAME: `${TRASH}/${name}` })
+				);
+			} else {
+				await deleteSandboxPath(target.path);
+				toast.success($i18n.t('Deleted {{NAME}}', { NAME: target.name }));
+			}
 			await refresh();
 		} catch (err) {
 			toast.error(errorMessage(err));
@@ -487,11 +532,22 @@
 
 <ConfirmDialog
 	bind:show={showDeleteConfirm}
-	title={$i18n.t('Delete {{NAME}}?', { NAME: deleteTarget?.name ?? '' })}
-	message={deleteTarget?.type === 'dir'
-		? $i18n.t('The folder and everything inside it will be deleted. This cannot be undone.')
-		: $i18n.t('This cannot be undone.')}
-	confirmLabel={$i18n.t('Delete')}
+	title={movesToTrash(deleteTarget)
+		? $i18n.t('Move {{NAME}} to the trash?', { NAME: deleteTarget?.name ?? '' })
+		: inside(deleteTarget?.path ?? '', TRASH)
+			? $i18n.t('Delete {{NAME}} permanently?', { NAME: deleteTarget?.name ?? '' })
+			: $i18n.t('Delete {{NAME}}?', { NAME: deleteTarget?.name ?? '' })}
+	message={movesToTrash(deleteTarget)
+		? listing?.cache_ttl_days
+			? $i18n.t(
+					'It will be moved to /workspace/trash/ and deleted automatically {{COUNT}} days later. Until then you can move it back.',
+					{ COUNT: listing.cache_ttl_days }
+				)
+			: $i18n.t('It will be moved to /workspace/trash/. You can move it back from there.')
+		: deleteTarget?.type === 'dir'
+			? $i18n.t('The folder and everything inside it will be deleted. This cannot be undone.')
+			: $i18n.t('This cannot be undone.')}
+	confirmLabel={movesToTrash(deleteTarget) ? $i18n.t('Move to trash') : $i18n.t('Delete')}
 	onConfirm={confirmDelete}
 />
 
@@ -516,7 +572,7 @@
 		<div class="text-xl font-medium">{$i18n.t('Sandbox')}</div>
 		{#if usage && place?.kind === 'workspace'}
 			<Tooltip
-				content={$i18n.t('Workspace usage (quota). Delete files you no longer need to free space.')}
+				content={$i18n.t('Workspace usage (quota). Space is freed when items are deleted from the trash (/workspace/trash/).')}
 			>
 				<div class="flex items-center gap-1.5 text-xs text-content-muted">
 					<UsageGauge current={usage.used_bytes} total={usage.total_bytes} class="size-4" />
@@ -746,7 +802,11 @@
 										>{e.name}</span
 									>
 									<span class="block text-xs text-content-subtle truncate">
-										{entryMeta(e)}{#if exp}{' · '}<span
+										{entryMeta(e)}{#if e.path === TRASH && e.type === 'dir'}{' · '}{listing.cache_ttl_days
+												? $i18n.t('Deleted items, removed {{COUNT}} days after they are moved here', {
+														COUNT: listing.cache_ttl_days
+													})
+												: $i18n.t('Deleted items')}{/if}{#if exp}{' · '}<span
 												class={exp * 1000 - Date.now() < 3 * 86400000
 													? 'text-amber-600 dark:text-amber-400'
 													: ''}>{expiryLabel(exp)}</span
@@ -807,12 +867,23 @@
 			{/if}
 		</div>
 
-		{#if place?.kind === 'workspace' && listing?.cache_ttl_days && (dir === `${WORKSPACE}/imports` || dir === `${WORKSPACE}/exports` || dir.startsWith(`${WORKSPACE}/imports/`) || dir.startsWith(`${WORKSPACE}/exports/`))}
+		{#if place?.kind === 'workspace' && listing?.cache_ttl_days && CACHE_DIRS.some((d) => inside(dir, d))}
 			<div class="text-xs text-content-subtle px-0.5 pb-1">
 				ⓘ {$i18n.t(
-					'Files here are copies of chat attachments and outputs, and are deleted {{COUNT}} days after their last change. The originals stay in Files.',
+					'Files here are copies of chat attachments and outputs. Each item directly in this folder (a file or a folder) is deleted with everything inside {{COUNT}} days after it was put here or last changed. The originals stay in Files.',
 					{ COUNT: listing.cache_ttl_days }
 				)}
+			</div>
+		{:else if place?.kind === 'workspace' && inside(dir, TRASH)}
+			<div class="text-xs text-content-subtle px-0.5 pb-1">
+				ⓘ {listing?.cache_ttl_days
+					? $i18n.t(
+							'Deleting in /workspace moves items here. Each item directly in this folder is deleted with everything inside {{COUNT}} days after it was moved here. Deleting here removes it permanently.',
+							{ COUNT: listing.cache_ttl_days }
+						)
+					: $i18n.t(
+							'Deleting in /workspace moves items here. Deleting here removes it permanently.'
+						)}
 			</div>
 		{/if}
 		{/if}

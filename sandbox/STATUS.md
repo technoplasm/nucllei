@@ -78,6 +78,12 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       消す (symlink は辿らない・`memory/` 等には触らない)。回帰は `test_retention.py` の `test_cache_*`。
       値は `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し、nucllei が取り込み・
       exports 自動添付の tool 出力に「YYYY-MM-DD 以降に消える」を添える (回帰は `test_files_list.py`)
+- [x] **`/workspace/trash/`** (2026-10-07、ken 決定・llens 依頼)。`rm -r` の代わりに trash/ の直下へ
+      mv する置き場 (`_ensure_workspace` が作る・ファイルブラウザから消せない/改名できない)。
+      あわせて掃除の規則を imports/ exports/ trash/ で統一: **直下のエントリ単位**で、その lstat の
+      max(mtime, ctime) から `SANDBOX_CACHE_TTL_DAYS` 日で丸ごと消す (中身の時刻は見ない。rename が
+      ctime を今にするのを ext4 / tmpfs で確認 — `test_rename_updates_ctime`)。旧「ファイル単位の
+      mtime」は廃止。回帰は `test_retention.py`。**実機 (コンテナ) の掃除は未確認** — image の更新待ち
 - [x] **グループ・全体の共有の置き場** (#152、2026-10-07)。`/ext/groups/<g>` `/ext/public` を
       nucllei が渡す `mounts` どおりに 1 つずつ rw / ro で bind (丸ごとは bind しない)。kernel は
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを

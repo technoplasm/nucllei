@@ -201,6 +201,8 @@ async def list_dir(form: PathForm, user=Depends(get_verified_user)):
             "type": e.get("type", "file"),
             "size": e.get("size", 0),
             "mtime": e.get("mtime"),
+            # 古い sandbox は返さない (None)。画面は max(mtime, ctime) で期限を出す
+            "ctime": e.get("ctime"),
         }
         for e in res.get("entries", [])
         if not str(e.get("name", "")).startswith(".")

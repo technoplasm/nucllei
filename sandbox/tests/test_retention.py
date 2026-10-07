@@ -183,7 +183,10 @@ def test_fmt_size(monkeypatch, tmp_path, n, s):
 
 
 # ---------------------------------------------------------------------------
-# imports/ exports/ のキャッシュ掃除 (`SANDBOX_CACHE_TTL_DAYS`、#149)
+# imports/ exports/ trash/ の掃除 (`SANDBOX_CACHE_TTL_DAYS`、#149)
+# 規則は 3 つとも同じ: 直下のエントリ単位、そのエントリの lstat の max(mtime, ctime)。
+# ctime は utime で過去にできない (utime 自体が ctime を今にする) ので、期限切れは
+# 「今 + N 日」の時点 (`now=`) で掃除して作る
 # ---------------------------------------------------------------------------
 
 
@@ -195,33 +198,50 @@ def _file(p: pathlib.Path, age_days=0.0, data=b"x" * 100) -> pathlib.Path:
     return p
 
 
-def _cache_ws(tmp_path) -> dict:
-    """期限切れ / 期限内 / symlink / memory/ 配下を混ぜた workspace を作る。"""
-    ws = tmp_path / "workspaces" / "alice"
-    outside = _file(tmp_path / "outside" / "secret.txt", age_days=90)
-    f = {
-        "ws": ws,
-        "outside": outside,
-        "old_import": _file(ws / "imports" / "old.csv", 31),
-        "new_import": _file(ws / "imports" / "new.csv", 29),
-        "old_nested": _file(ws / "exports" / "sub" / "deep" / "old.png", 40),
-        "old_mixed": _file(ws / "exports" / "mixed" / "old.txt", 40),
-        "new_mixed": _file(ws / "exports" / "mixed" / "new.txt", 1),
-        "old_memory": _file(ws / "memory" / "MEMORY.md", 365),
-        "old_other": _file(ws / "work" / "old.py", 365),
-    }
-    (ws / "exports" / "empty").mkdir()  # 元から空のサブディレクトリは残す
-    # symlink: 外のファイル / 外のディレクトリを指すもの (どちらも辿らず、消さない)
-    link_file = ws / "imports" / "link.txt"
-    link_file.symlink_to(outside)
-    link_dir = ws / "exports" / "linkdir"
-    link_dir.symlink_to(outside.parent)
-    t = time.time() - 90 * DAY
-    os.utime(link_file, (t, t), follow_symlinks=False)
-    os.utime(link_dir, (t, t), follow_symlinks=False)
-    f["link_file"] = link_file
-    f["link_dir"] = link_dir
-    return f
+def _later(days):
+    return time.time() + days * DAY
+
+
+def _ws(tmp_path, user="alice") -> pathlib.Path:
+    ws = tmp_path / "workspaces" / user
+    for d in ("imports", "exports", "trash"):
+        (ws / d).mkdir(parents=True)
+    return ws
+
+
+@pytest.mark.parametrize("where", ["tmp_path", "source_tree"])
+def test_rename_updates_ctime(tmp_path, where):
+    """判定の前提: rename (mv) は移した物の mtime を変えないが ctime を今にする。
+    Linux の ext4 (workspace の sparse loopback と同じ fs) と tmpfs で成り立つ (2026-10-07 に
+    両方で確認)。tmp_path は tmpfs のことが多いので、ディスク上 (多くは ext4) の source tree
+    でも確かめる。ctime は過去にできないので「前より進んだ」で見る。"""
+    import shutil
+    import tempfile
+
+    base = (
+        tmp_path
+        if where == "tmp_path"
+        else pathlib.Path(tempfile.mkdtemp(dir=pathlib.Path(__file__).parent))
+    )
+    try:
+        old = time.time() - 60 * DAY
+        f = _file(base / "src" / "f.txt", 60)
+        d = base / "src" / "d"
+        d.mkdir()
+        os.utime(d, (old, old))
+        (base / "trash").mkdir()
+        before_f, before_d = os.lstat(f).st_ctime_ns, os.lstat(d).st_ctime_ns
+        time.sleep(0.05)  # ctime は coarse clock (jiffy 単位) なので刻みを跨ぐ
+        os.rename(f, base / "trash" / "f.txt")
+        os.rename(d, base / "trash" / "d")
+        st_f = os.lstat(base / "trash" / "f.txt")
+        st_d = os.lstat(base / "trash" / "d")
+        assert st_f.st_ctime_ns > before_f and st_d.st_ctime_ns > before_d
+        assert st_f.st_mtime < time.time() - 59 * DAY  # mtime は古いまま
+        assert st_d.st_mtime < time.time() - 59 * DAY
+    finally:
+        if where != "tmp_path":
+            shutil.rmtree(base)
 
 
 def test_cache_ttl_env_default_is_30(monkeypatch, tmp_path):
@@ -230,76 +250,132 @@ def test_cache_ttl_env_default_is_30(monkeypatch, tmp_path):
     assert mod.CACHE_TTL_DAYS == 30
 
 
-def test_cache_sweep_removes_only_expired_files(monkeypatch, tmp_path):
+def test_sweep_removes_whole_top_level_entries(monkeypatch, tmp_path):
     mod = _load_main(monkeypatch, tmp_path)
-    f = _cache_ws(tmp_path)
-    ws = f["ws"]
+    ws = _ws(tmp_path)
+    _file(ws / "imports" / "a.csv", data=b"x" * 100)
+    _file(ws / "exports" / "sub" / "deep" / "b.png", data=b"x" * 50)
+    (ws / "exports" / "empty").mkdir()
+    _file(ws / "trash" / "memo.txt", data=b"x" * 10)
+    _file(ws / "trash" / "proj" / "c.txt", data=b"x" * 5)
+    other = _file(ws / "memory" / "MEMORY.md", 365)
 
-    n, b = mod._sweep_cache_dirs(ws)
-    assert (n, b) == (3, 300)
-    for k in ("old_import", "old_nested", "old_mixed"):
-        assert not f[k].exists(), k
-    for k in ("new_import", "new_mixed", "old_memory", "old_other", "outside"):
-        assert f[k].exists(), k
-    # symlink は残り、指す先 (workspace の外) も無事
-    assert f["link_file"].is_symlink() and f["link_dir"].is_symlink()
-    assert (f["outside"].parent / "secret.txt").exists()
-    # 空になったサブディレクトリは消え、imports/ exports/ 自体と元から空のものは残る
-    assert not (ws / "exports" / "sub").exists()
-    assert (ws / "exports" / "mixed").is_dir()
-    assert (ws / "exports" / "empty").is_dir()
-    assert (ws / "imports").is_dir() and (ws / "exports").is_dir()
-
-    # 2 回目は何も消えない
-    assert mod._sweep_cache_dirs(ws) == (0, 0)
+    # 期限内 (29 日後) は何も消えない
+    assert mod._sweep_cache_dirs(ws, now=_later(29)) == (0, 0)
+    assert mod._sweep_trash(ws, now=_later(29)) == (0, 0)
+    # 31 日後: 直下のエントリが中身ごと消え、置き場の root は残る。他の場所には触らない
+    assert mod._sweep_cache_dirs(ws, now=_later(31)) == (3, 150)
+    assert mod._sweep_trash(ws, now=_later(31)) == (2, 15)
+    for d in ("imports", "exports", "trash"):
+        assert (ws / d).is_dir() and list((ws / d).iterdir()) == [], d
+    assert other.exists()
 
 
-def test_cache_sweep_disabled_and_symlinked_root(monkeypatch, tmp_path):
+def test_sweep_ignores_contents_times(monkeypatch, tmp_path):
+    # 中身の時刻は見ない: 新しいファイルを含むフォルダも、直下のエントリが古ければ丸ごと消え、
+    # 古いファイルを含むフォルダも、直下のエントリが新しければ残る
+    mod = _load_main(monkeypatch, tmp_path)
+    ws = _ws(tmp_path)
+    fresh = _file(ws / "exports" / "proj" / "new.txt")
+    later = _later(31)
+    os.utime(fresh, (later, later))  # 中のファイルだけ「31 日後に触った」
+    assert mod._sweep_cache_dirs(ws, now=later) == (1, 100)
+    assert not (ws / "exports" / "proj").exists()
+
+
+def test_old_contents_moved_today_survive(monkeypatch, tmp_path):
+    # 2 か月前のファイルを含むフォルダ (フォルダ自身の mtime も古い) や 2 か月前のファイルを
+    # 今 trash に移しても消えない — mv は mtime を変えないが、直下のエントリの ctime が今になる
+    mod = _load_main(monkeypatch, tmp_path)
+    ws = _ws(tmp_path)
+    old = time.time() - 60 * DAY
+    _file(ws / "work" / "proj" / "old.csv", 60)
+    os.utime(ws / "work" / "proj", (old, old))
+    old_file = _file(ws / "work" / "old.bin", 60)
+    os.rename(ws / "work" / "proj", ws / "trash" / "proj")
+    os.rename(old_file, ws / "trash" / "old.bin")
+    assert os.lstat(ws / "trash" / "proj").st_mtime < time.time() - 59 * DAY
+
+    assert mod._sweep_trash(ws) == (0, 0)
+    assert (ws / "trash" / "proj" / "old.csv").exists()
+    assert (ws / "trash" / "old.bin").exists()
+    # 移した日から 31 日後には消える
+    assert mod._sweep_trash(ws, now=_later(31)) == (2, 200)
+
+
+def test_sweep_disabled(monkeypatch, tmp_path):
     monkeypatch.setenv("SANDBOX_CACHE_TTL_DAYS", "0")
     mod = _load_main(monkeypatch, tmp_path)
-    f = _cache_ws(tmp_path)
-    assert mod._sweep_cache_dirs(f["ws"]) == (0, 0)
-    assert f["old_import"].exists()
-
-    # imports/ 自体を外への symlink に差し替えられていても辿らない
-    monkeypatch.setattr(mod, "CACHE_TTL_DAYS", 30)
-    ws = tmp_path / "workspaces" / "bob"
-    ws.mkdir(parents=True)
-    victim = _file(tmp_path / "victim" / "old.bin", 90)
-    (ws / "imports").symlink_to(victim.parent)
-    assert mod._sweep_cache_dirs(ws) == (0, 0)
-    assert victim.exists()
+    ws = _ws(tmp_path)
+    f = _file(ws / "imports" / "a.csv")
+    t = _file(ws / "trash" / "a.csv")
+    assert mod._sweep_cache_dirs(ws, now=_later(400)) == (0, 0)
+    assert mod._sweep_trash(ws, now=_later(400)) == (0, 0)
+    assert f.exists() and t.exists()
 
 
-def test_cache_sweep_runs_before_umount_in_idle_reaper(monkeypatch, tmp_path, capsys):
+def test_sweep_does_not_follow_symlinks(monkeypatch, tmp_path):
     mod = _load_main(monkeypatch, tmp_path)
-    f = _cache_ws(tmp_path)
+    ws = _ws(tmp_path)
+    outside = _file(tmp_path / "outside" / "secret.txt", 90)
+    (ws / "trash" / "d").mkdir()
+    (ws / "trash" / "d" / "inner_link").symlink_to(outside.parent)  # 中の symlink
+    (ws / "trash" / "link").symlink_to(outside.parent)  # 直下の symlink (dir を指す)
+    (ws / "imports" / "flink").symlink_to(outside)  # 直下の symlink (file を指す)
+
+    assert mod._sweep_trash(ws, now=_later(31)) == (2, 0)
+    assert mod._sweep_cache_dirs(ws, now=_later(31)) == (1, 0)
+    assert not (ws / "trash" / "link").is_symlink()
+    assert not (ws / "imports" / "flink").is_symlink()
+    assert outside.read_bytes() == b"x" * 100  # 指す先は無事
+
+    # 置き場そのものが外への symlink に差し替えられていたら何もしない
+    ws2 = tmp_path / "workspaces" / "bob"
+    ws2.mkdir()
+    for d in ("imports", "exports", "trash"):
+        (ws2 / d).symlink_to(outside.parent)
+    assert mod._sweep_cache_dirs(ws2, now=_later(400)) == (0, 0)
+    assert mod._sweep_trash(ws2, now=_later(400)) == (0, 0)
+    assert outside.exists()
+
+
+def _reaper_setup(mod, monkeypatch, later, run=None):
+    real_c, real_t = mod._sweep_cache_dirs, mod._sweep_trash
+    monkeypatch.setattr(mod, "_sweep_cache_dirs", lambda ws: real_c(ws, now=later))
+    monkeypatch.setattr(mod, "_sweep_trash", lambda ws: real_t(ws, now=later))
+    monkeypatch.setattr(mod, "_run", run or (lambda *a, **k: None))
+    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
+    monkeypatch.setattr(mod, "WS_IDLE_TTL_S", 0)
+    mod._ws_registry["alice"] = time.monotonic() - 10
+
+
+def test_sweep_runs_before_umount_in_idle_reaper(monkeypatch, tmp_path, capsys):
+    mod = _load_main(monkeypatch, tmp_path)
+    ws = _ws(tmp_path)
+    imp = _file(ws / "imports" / "a.csv")
+    _file(ws / "exports" / "b.png", data=b"x" * 200)
+    _file(ws / "trash" / "proj" / "c.txt", data=b"x" * 10)
     calls = []
 
     def fake_run(cmd, **kw):
-        # umount の時点で掃除が済んでいる
-        assert not f["old_import"].exists()
+        assert not imp.exists()  # umount の時点で掃除が済んでいる
         calls.append(cmd)
 
-    monkeypatch.setattr(mod, "_run", fake_run)
-    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
-    monkeypatch.setattr(mod, "WS_IDLE_TTL_S", 0)
-    mod._ws_registry["alice"] = time.monotonic() - 10
-
+    _reaper_setup(mod, monkeypatch, _later(31), fake_run)
     assert asyncio.run(mod.reap_idle_workspaces()) == 1
-    assert calls == [["umount", str(f["ws"])]]
-    assert f["new_import"].exists() and f["old_memory"].exists()
+    assert calls == [["umount", str(ws)]]
     out = capsys.readouterr().out
-    assert "cache of alice: removed 3 file(s) older than 30 days, 300 B" in out
+    assert (
+        "cache of alice: removed entries older than 30 days — "
+        "imports/exports: 2, 300 B; trash: 1, 10 B" in out
+    )
 
 
-def test_cache_sweep_skipped_with_live_session(monkeypatch, tmp_path):
+def test_sweep_skipped_with_live_session(monkeypatch, tmp_path):
     mod = _load_main(monkeypatch, tmp_path)
-    f = _cache_ws(tmp_path)
-    monkeypatch.setattr(mod, "_run", lambda *a, **k: pytest.fail("umount"))
-    monkeypatch.setattr(mod.os.path, "ismount", lambda p: True)
+    ws = _ws(tmp_path)
+    imp = _file(ws / "imports" / "a.csv")
+    _reaper_setup(mod, monkeypatch, _later(31), lambda *a, **k: pytest.fail("umount"))
     monkeypatch.setattr(mod, "_has_live_session", lambda u: True)
-    monkeypatch.setattr(mod, "WS_IDLE_TTL_S", 0)
-    mod._ws_registry["alice"] = time.monotonic() - 10
     assert asyncio.run(mod.reap_idle_workspaces()) == 0
-    assert f["old_import"].exists()
+    assert imp.exists()

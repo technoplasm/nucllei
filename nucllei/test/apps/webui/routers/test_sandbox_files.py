@@ -125,6 +125,7 @@ class TestSandboxFiles(AbstractPostgresTest):
                             "type": "file",
                             "size": 3,
                             "mtime": 2.5,
+                            "ctime": 4.0,
                         },
                     ],
                     "exists": True,
@@ -143,6 +144,8 @@ class TestSandboxFiles(AbstractPostgresTest):
             "/workspace/a.md",
         ]
         assert body["cache_ttl_days"] == 30
+        # ctime は中継し、返さない古い sandbox では None
+        assert [e["ctime"] for e in body["entries"]] == [None, 4.0]
         path, payload = fake.calls[0]
         assert path == "/files/ls" and payload["path"] == "."
         assert payload["user_id"] == "member1"
@@ -467,6 +470,7 @@ def test_tool_quota_full_points_to_file_browser(status):
     tool = _tool({"/files/write": err, "/exec": err})
     out = _text(tool.write_file("/workspace/a.txt", "x", __user__={"id": "u1"}))
     assert "容量" in out and "ファイルブラウザ" in out, out
+    assert "/workspace/trash/ を空にすると空く" in out, out
     out = _text(tool.run_shell("ls", __user__={"id": "u1"}))
     assert "容量" in out and "ファイルブラウザ" in out, out
 

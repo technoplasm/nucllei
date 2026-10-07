@@ -1124,6 +1124,8 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         note = Tools.__doc__
         assert "imports/" in note and "exports/" in note and "30 日" in note
         assert "send_to_workspace(file_id)" in note
+        # 消すときは rm せず trash/ の直下へ移す (同じ規則で消える)
+        assert "/workspace/trash/" in note and "直下" in note
 
     def test_import_and_exports_tell_cache_expiry(self, tmp_path):
         """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を

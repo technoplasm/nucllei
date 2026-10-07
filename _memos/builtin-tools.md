@@ -385,8 +385,14 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 `import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / **`read_file`**(#153)/ `list_workspace` /
 **`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
 ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
-両者は Files の原本の**期限付きキャッシュ**で、sandbox が最終更新から既定 30 日(env `SANDBOX_CACHE_TTL_DAYS`)で消す
-(#149、`memory/` 等は消さない)。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え、
+両者は Files の原本の**期限付きキャッシュ**で、sandbox が既定 30 日(env `SANDBOX_CACHE_TTL_DAYS`)で消す
+(#149、`memory/` 等は消さない)。**`/workspace/trash/`**(2026-10-07、ken 決定・llens 依頼)は `rm -r` の代わりに
+直下へ mv する置き場で、同じ期限で消える。3 つとも規則は同じ(ken 決定 2026-10-07、単純さ優先): 単位は**直下の
+エントリ**(ファイルでもフォルダでも 1 つ)、時刻はその lstat の **max(mtime, ctime)**、過ぎたら中身ごと消す(中身の
+時刻は見ない)。ctime を見るのは mv が mtime を変えず ctime だけを今にするから(ext4 / tmpfs で確認、
+`sandbox/tests/test_retention.py::test_rename_updates_ctime`)— 古いファイルを含むフォルダを今日移しても即消えない。
+旧「ファイル単位の mtime」は廃止。toolkit 共通注記に「消すときは rm せず trash/ の直下へ mv」、容量切れ(507 /
+No space left)の文面に「/workspace/trash/ を空にすると空く」。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え、
 この配下が「無い」ときのエラー文に `send_to_workspace(file_id)` で戻せる旨を足す(`_cache_hint`)。
 実際の期限は sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し(ken 2026-10-07)、
 nucllei が「今日(Asia/Tokyo)+ N 日」を取り込み結果の末尾(`(/workspace/imports/ の写しは YYYY-MM-DD 以降に消える。…)`)と
@@ -1317,7 +1323,12 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
   場所・ディレクトリ・開いているファイルは URL のクエリ(`?path=&file=`)。平文は CodeEditor(言語は拡張子から
   `@codemirror/language-data`)、md はプレビュー(`chat/Messages/Markdown.svelte`)。保存は開いたときの mtime を
   付けて 409 なら「エディタの外で変更された」モーダル(編集を続ける / 再読み込み / 上書き)。`imports/` `exports/` の
-  ファイルに残り期限(mtime + `cache_ttl_days`)、`/workspace` では quota の使用量。
+  直下の行に残り期限(max(mtime, ctime) + `cache_ttl_days`。ctime は `/files/ls` の entries が返す — 古い sandbox は無しで
+  mtime だけ。対象に `trash/` も)、`/workspace` では quota の使用量。
+- **削除**(2026-10-07): `/workspace` の中(`trash/` の外)は `trash/` の直下への移動(`/files/rename`。trash/ が無い
+  古い sandbox では先に mkdir)。同名があれば `-2` `-3`…(拡張子の前。llens の運用と同じ)、一覧の後にできた同名は 409 で
+  次の番号へ。`trash/` の中と `/ext` は完全削除(確認ダイアログの文言で区別)。`trash/` は `imports/` `exports/` と同じく
+  sandbox が作り、消せない・改名できない。移しただけでは容量は空かないので、507 の文言と使用量の tooltip は「trash を空に」。
 - 回帰: `nucllei/test/apps/webui/routers/test_sandbox_files.py`、`sandbox/tests/test_files_browser.py`。
 - 未了: 実機(sandbox コンテナ)での確認・画面の目視は統合側。workspace 相対の tool 経路(`_safe_path`)の
   TOCTOU(resolve と open の間に jail が symlink を差し替える)は既存のまま — 塞ぐなら tool 側も `nofollow` に寄せる。

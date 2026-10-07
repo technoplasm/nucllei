@@ -59,6 +59,7 @@ def env(monkeypatch, tmp_path):
     ws = ws_root / "u1"
     (ws / "imports").mkdir(parents=True)
     (ws / "exports").mkdir()
+    (ws / "trash").mkdir()
     (ws / ".exec").mkdir()
     (ws / "data").mkdir()
     (ws / "data" / "a.csv").write_text("x,y")
@@ -96,11 +97,13 @@ def test_ls_one_level_hides_dotfiles_and_dirs_first(env):
         ("data", "dir"),
         ("exports", "dir"),
         ("imports", "dir"),
+        ("trash", "dir"),
         ("notes.md", "file"),
     ]
     notes = body["entries"][-1]
     assert notes["path"] == "notes.md" and notes["size"] == 4
     assert notes["mtime"] == pytest.approx((ws / "notes.md").stat().st_mtime)
+    assert notes["ctime"] == pytest.approx((ws / "notes.md").stat().st_ctime)
     sub = _post(c, "/files/ls", path="data").json()
     assert [e["path"] for e in sub["entries"]] == ["data/a.csv"]
     assert _post(c, "/files/ls", path="nope").json()["exists"] is False
@@ -230,12 +233,15 @@ def test_delete(env):
     assert _post(c, "/files/delete", path="data").status_code == 200
     assert not (ws / "data").exists()
     assert _post(c, "/files/delete", path="data").status_code == 404
-    # 中身は消せるが imports/ exports/ そのものは消せない
+    # 中身は消せるが imports/ exports/ trash/ そのものは消せない
     (ws / "imports" / "a.pdf").write_text("p")
     assert _post(c, "/files/delete", path="imports/a.pdf").status_code == 200
-    for p in ("imports", "exports", ".", "", ".exec", ".hidden"):
+    (ws / "trash" / "old").mkdir()
+    assert _post(c, "/files/delete", path="trash/old").status_code == 200
+    for p in ("imports", "exports", "trash", ".", "", ".exec", ".hidden"):
         assert _post(c, "/files/delete", path=p).status_code == 400, p
     assert (ws / "imports").is_dir() and (ws / ".exec").is_dir()
+    assert (ws / "trash").is_dir()
 
 
 def test_delete_symlink_removes_only_the_link(env):
@@ -266,6 +272,14 @@ def test_rename(env):
     assert _post(c, "/files/rename", path="data/a.csv", dest="no/x").status_code == 404
     assert _post(c, "/files/rename", path="data", dest="data/in").status_code == 400
     assert _post(c, "/files/rename", path="imports", dest="imp").status_code == 400
+    assert _post(c, "/files/rename", path="trash", dest="t").status_code == 400
+    assert _post(c, "/files/rename", path="data", dest="trash").status_code == 400
+    # ファイルブラウザの /workspace の削除 = trash/ の直下へ移す (同名は呼び手が -2 等を付ける)
+    r = _post(c, "/files/rename", path="data", dest="trash/data")
+    assert r.status_code == 200, r.text
+    assert (ws / "trash" / "data" / "a.csv").exists()
+    r = _post(c, "/files/rename", path="trash/data", dest="data")
+    assert r.status_code == 200, r.text  # trash から戻せる
     assert _post(c, "/files/rename", path="data", dest=".data").status_code == 400
     assert _post(c, "/files/rename", path="nope", dest="x").status_code == 404
     # workspace → /ext は置き場をまたぐので不可

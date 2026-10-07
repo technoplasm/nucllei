@@ -292,12 +292,19 @@ WS_IDLE_TTL_S = int(os.environ.get("SANDBOX_WS_IDLE_TTL_S", "3600"))
 WS_RETENTION_DAYS = int(os.environ.get("SANDBOX_WORKSPACE_RETENTION_DAYS", "0"))
 WS_RETENTION_SWEEP_S = 3600
 # `imports/` `exports/` は nucllei Files のキャッシュ (原本は Files 側。#149)。idle 回収で
-# umount する直前に、mtime から N 日過ぎたファイルを消す (`_sweep_cache_dirs`)。0 以下 = 消さない。
+# umount する直前に、直下のエントリのうち max(mtime, ctime) から N 日過ぎたものを丸ごと消す
+# (`_sweep_cache_dirs`)。0 以下 = 消さない。
 # 消えたものは `send_to_workspace(file_id)` で戻せる。`memory/` 等の他ディレクトリには触らない。
 # 値は `/exec` `/exec_cell` `/files/write` の応答 `cache_ttl_days` でも返す (0 = 消さない) —
 # nucllei が取り込み・自動添付の tool 出力で「YYYY-MM-DD 以降に消える」を知らせるため。
 CACHE_TTL_DAYS = int(os.environ.get("SANDBOX_CACHE_TTL_DAYS", "30"))
 CACHE_DIRS = ("imports", "exports")
+# `trash/` = 消す代わりに移す置き場 (llens の運用もファイルブラウザの /workspace の削除も、
+# trash/ の直下へ mv)。期限は同じ `SANDBOX_CACHE_TTL_DAYS`。3 つの置き場とも判定単位は
+# **直下の各エントリ**、時刻はその lstat の max(mtime, ctime) (`_sweep_entries`)。
+TRASH_DIR = "trash"
+# workspace 直下で sandbox が用意し、ファイルブラウザから消させない・改名させないもの
+PROTECTED_DIRS = (*CACHE_DIRS, TRASH_DIR)
 CACHE_TTL_REPORTED = max(CACHE_TTL_DAYS, 0)
 
 
@@ -422,7 +429,7 @@ def _ensure_workspace(user_id: str) -> Path:
         _run(["mount", "-o", "loop,discard", str(img), str(ws)])
         os.chown(ws, JAIL_UID, JAIL_UID)
 
-    for d in (ws / "imports", ws / "exports", ws / ".exec"):
+    for d in (ws / "imports", ws / "exports", ws / TRASH_DIR, ws / ".exec"):
         if not d.exists():
             _mkdir_owned(str(d))
     return ws
@@ -912,70 +919,91 @@ def _has_live_session(user_id: str) -> bool:
     return False
 
 
-def _sweep_cache_tree(d: str, cutoff: float) -> tuple[int, int, bool]:
-    """`d` 配下の mtime < cutoff の通常ファイルを消す。戻り値は (件数, バイト数, d が空になったか)。
-    symlink は辿らず消しもしない (jail 内ユーザーが置けるので、`/workspace` の外を指しうる)。
-    判定は lstat 相当 (`follow_symlinks=False`) のみ。"""
-    files = size = 0
-    removed_any = False
+def _age_time(st) -> float:
+    """期限判定の時刻 = max(mtime, ctime)。mv (rename) は mtime を変えないが ctime は今にする
+    (Linux の ext4 / tmpfs で確認済み — `test_retention.py` の `test_rename_updates_ctime`)。
+    ctime は利用者が utime で過去にできないので、「古い物を今移した」は新しいと見なされる。"""
+    return max(st.st_mtime, st.st_ctime)
+
+
+def _tree_bytes(name: str, dfd: int) -> int:
+    """`dfd` の中のディレクトリ `name` 配下の通常ファイルの合計バイト数 (symlink は辿らない)。"""
+    total = 0
+    for _root, _dirs, fnames, rfd in os.fwalk(name, dir_fd=dfd, follow_symlinks=False):
+        for f in fnames:
+            try:
+                st = os.stat(f, dir_fd=rfd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+    return total
+
+
+def _sweep_entries(d: Path, cutoff: float) -> tuple[int, int]:
+    """`d` (`imports/` `exports/` `trash/`) の**直下のエントリ**のうち、自身の lstat の
+    max(mtime, ctime) < cutoff のものを丸ごと (ディレクトリなら中身ごと) 消す。中身の時刻は
+    見ない (単純さ優先 — ken 決定 2026-10-07)。mv は中のファイルの mtime を変えないので、
+    ファイル単位で見ると「2 か月前のファイルを含むフォルダを今日 trash に移した」が即消える。
+    直下エントリの ctime は rename で今になるので、移した日から数えられる。
+    `d` 自体は残し、`d` が symlink に差し替えられていたら (jail 内から可能) 何もしない
+    (O_NOFOLLOW で開く)。中は fd ベースで消す (`shutil.rmtree(dir_fd=)` は symlink を辿らない
+    実装、直下の symlink はリンクそのものを unlink)。戻り値は (エントリ数, 通常ファイルのバイト数)。"""
+    import shutil
+
     try:
-        it = os.scandir(d)
+        dfd = os.open(str(d), _DIR_FLAGS)
     except OSError:
-        return 0, 0, False
-    with it:
-        entries = list(it)
-    for e in entries:
-        try:
-            if e.is_symlink():
-                continue
-            if e.is_dir(follow_symlinks=False):
-                n, b, emptied = _sweep_cache_tree(e.path, cutoff)
-                files += n
+        return 0, 0  # 無い・symlink・ディレクトリでない
+    count = size = 0
+    try:
+        for name in os.listdir(dfd):
+            try:
+                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+                if _age_time(st) >= cutoff:
+                    continue
+                if stat.S_ISDIR(st.st_mode):
+                    b = _tree_bytes(name, dfd)
+                    shutil.rmtree(name, dir_fd=dfd)
+                else:
+                    b = st.st_size if stat.S_ISREG(st.st_mode) else 0
+                    os.unlink(name, dir_fd=dfd)
+                count += 1
                 size += b
-                if emptied:
-                    # 期限切れを消して空になったサブディレクトリだけ消す (元から空のものは残す)
-                    try:
-                        os.rmdir(e.path)
-                        removed_any = True
-                    except OSError:
-                        pass
-                continue
-            st = e.stat(follow_symlinks=False)
-            if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
-                os.unlink(e.path)
-                files += 1
-                size += st.st_size
-                removed_any = True
-        except OSError:
-            continue  # 消せないものは次回に回す (掃除の失敗で umount を止めない)
-    emptied = False
-    if removed_any:
-        try:
-            emptied = not any(True for _ in os.scandir(d))
-        except OSError:
-            pass
-    return files, size, emptied
+            except OSError:
+                continue  # 消せないものは次回に回す (掃除の失敗で umount を止めない)
+    finally:
+        os.close(dfd)
+    return count, size
 
 
-def _sweep_cache_dirs(ws: Path) -> tuple[int, int]:
-    """workspace の `imports/` `exports/` から `CACHE_TTL_DAYS` 日過ぎたファイルを消す (#149)。
-    `imports/` `exports/` 自体は残す (`_ensure_workspace` が作る)。それ自体が symlink に
-    差し替えられていたら (jail 内から可能) 何もしない。戻り値は (件数, バイト数)。"""
+def _cutoff(now: Optional[float]) -> Optional[float]:
     if CACHE_TTL_DAYS <= 0:
+        return None
+    return (time.time() if now is None else now) - CACHE_TTL_DAYS * 86400
+
+
+def _sweep_cache_dirs(ws: Path, now: Optional[float] = None) -> tuple[int, int]:
+    """workspace の `imports/` `exports/` の直下のエントリで `CACHE_TTL_DAYS` 日過ぎたものを
+    消す (#149、規則は `_sweep_entries`)。戻り値は (エントリ数, バイト数)。"""
+    cutoff = _cutoff(now)
+    if cutoff is None:
         return 0, 0
-    cutoff = time.time() - CACHE_TTL_DAYS * 86400
-    files = size = 0
+    n = b = 0
     for name in CACHE_DIRS:
-        d = ws / name
-        try:
-            if not stat.S_ISDIR(os.lstat(d).st_mode):
-                continue
-        except OSError:
-            continue
-        n, b, _ = _sweep_cache_tree(str(d), cutoff)
-        files += n
-        size += b
-    return files, size
+        c, s = _sweep_entries(ws / name, cutoff)
+        n += c
+        b += s
+    return n, b
+
+
+def _sweep_trash(ws: Path, now: Optional[float] = None) -> tuple[int, int]:
+    """`trash/` の直下のエントリで `CACHE_TTL_DAYS` 日過ぎたものを消す (規則は `_sweep_entries`。
+    名前は見ない)。戻り値は (エントリ数, バイト数)。"""
+    cutoff = _cutoff(now)
+    if cutoff is None:
+        return 0, 0
+    return _sweep_entries(ws / TRASH_DIR, cutoff)
 
 
 async def reap_idle_workspaces() -> int:
@@ -1002,12 +1030,15 @@ async def reap_idle_workspaces() -> int:
                 continue
             # imports/ exports/ のキャッシュ掃除 (#149)。ここは mount lock 保持・実行中でも
             # 生存 session 中でもない = jail が workspace を触っていないことが確定している
+            # trash/ も同じ期限で (直下のエントリ単位)。ログは 1 行にまとめる
             try:
                 n, b = await asyncio.to_thread(_sweep_cache_dirs, ws)
-                if n:
+                tn, tb = await asyncio.to_thread(_sweep_trash, ws)
+                if n or tn:
                     print(
-                        f"[sandbox] cache of {user}: removed {n} file(s) older than "
-                        f"{CACHE_TTL_DAYS} days, {_fmt_size(b)}",
+                        f"[sandbox] cache of {user}: removed entries older than "
+                        f"{CACHE_TTL_DAYS} days — imports/exports: {n}, {_fmt_size(b)}; "
+                        f"trash: {tn}, {_fmt_size(tb)}",
                         flush=True,
                     )
             except Exception as e:
@@ -1678,12 +1709,12 @@ def _kind_of(mode: int) -> str:
 def _check_mutable(t: _Target, segs: list[str], what: str) -> None:
     """ファイルブラウザの書き換え (削除・改名・mkdir) で触らせないもの: 置き場の root そのもの、
     `.` 始まり (一覧に出さない内部・隠しファイル)、workspace 直下の `imports/` `exports/`
-    (sandbox が実行のたびに使う置き場。消すと取り込みが落ちる)。"""
+    (sandbox が実行のたびに使う置き場。消すと取り込みが落ちる) と `trash/` (消す代わりの移し先)。"""
     if not segs:
         raise HTTPException(400, f"cannot {what} the root: {t.path}")
     if any(s.startswith(".") for s in segs):
         raise HTTPException(400, f"hidden path: {t.path}")
-    if t.kind == "workspace" and len(segs) == 1 and segs[0] in CACHE_DIRS:
+    if t.kind == "workspace" and len(segs) == 1 and segs[0] in PROTECTED_DIRS:
         raise HTTPException(400, f"protected directory: {segs[0]}")
 
 
@@ -1754,6 +1785,9 @@ def _fs_ls(t: _Target) -> dict:
                         "type": _kind_of(st.st_mode),
                         "size": st.st_size if stat.S_ISREG(st.st_mode) else 0,
                         "mtime": _mtime(st),
+                        # imports/ exports/ trash/ の直下は max(mtime, ctime) + N 日で消える
+                        # (`_sweep_entries`)。呼び手が残り期限を出すため
+                        "ctime": st.st_ctime_ns / 1e9,
                     }
                 )
     finally:

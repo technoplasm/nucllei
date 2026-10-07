@@ -20,6 +20,8 @@ export type SandboxEntry = {
 	type: 'dir' | 'file' | 'symlink' | 'other';
 	size: number;
 	mtime: number | null;
+	// 古い sandbox は返さない(null)。imports/ exports/ trash/ の直下は max(mtime, ctime) + N 日で消える
+	ctime?: number | null;
 };
 
 export type SandboxListing = {

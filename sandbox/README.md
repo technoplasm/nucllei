@@ -283,17 +283,26 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `/workspace/imports/` — チャット添付ファイルの取り込み先 (tool の import 操作)
   - `/workspace/exports/` — 書かれた新規/更新ファイルは実行後に tool が自動回収し、
     Files に登録してチャットに添付する
-  - `imports/` と `exports/` は **nucllei Files のキャッシュ** (原本は Files 側。#149):
-    mtime から `SANDBOX_CACHE_TTL_DAYS` (既定 30) 日過ぎたファイルを、idle workspace 回収
-    (`reap_idle_workspaces`) が **umount の直前**に消す (mount lock 保持・実行中でも生存
-    session 中でもない時点)。配下のサブディレクトリ内も対象で、それで空になったサブ
-    ディレクトリも消す (`imports/` `exports/` 自体と元から空のものは残す)。**symlink は
-    辿らず消しもしない** (jail 内から置けるので lstat で判定し、`/workspace` の外に出ない。
-    `imports/` 自体が symlink に差し替えられていたら何もしない)。消えたものは
-    `send_to_workspace(file_id)` で戻せる。回収即削除はしない (作った exports を次の呼び出し
-    で直す使い方を壊すため)。消した件数・バイト数は `[sandbox] cache of <user>: removed …` で
-    1 行出る。回帰は `sandbox/tests/test_retention.py` の `test_cache_*`。値は下の API の応答
-    `cache_ttl_days` で nucllei に渡り、取り込み・自動添付の tool 出力に期限日が添えられる
+  - `/workspace/trash/` — 消す代わりに移す置き場 (llens の運用もファイルブラウザの
+    /workspace の「削除」も、trash/ の直下へ mv する。選び間違いを取り返せるように)
+  - `imports/` と `exports/` は **nucllei Files のキャッシュ** (原本は Files 側。#149)、
+    `trash/` は消す代わりの置き場。3 つとも同じ規則で、idle workspace 回収
+    (`reap_idle_workspaces`) が **umount の直前**に掃除する (mount lock 保持・実行中でも生存
+    session 中でもない時点):
+    - 単位は**直下のエントリ** (ファイルでもフォルダでも 1 つ)。そのエントリ自身の lstat の
+      **max(st_mtime, st_ctime)** から `SANDBOX_CACHE_TTL_DAYS` (既定 30) 日過ぎたら、
+      中身ごと丸ごと消す。フォルダの中身の時刻は見ない (単純さ優先 — ken 決定 2026-10-07)
+    - ctime を見るのは、mv (rename) が mtime を変えず ctime だけを今にするから — 「2 か月前の
+      ファイル (を含むフォルダ) を今日 trash に移した」が即消えず、移した日から数えられる
+      (Linux の ext4 / tmpfs で確認済み、`test_rename_updates_ctime`)。名前は見ない
+    - 置き場の root 自体は残す (`_ensure_workspace` が作る)。**symlink は辿らない** (直下の
+      symlink はリンクそのものを消す。中は `shutil.rmtree(dir_fd=)` = fd ベース。置き場自体が
+      symlink に差し替えられていたら何もしない — jail 内から置けるので)
+    - 消えた imports/exports は `send_to_workspace(file_id)` で戻せる。回収即削除はしない
+      (作った exports を次の呼び出しで直す使い方を壊すため)。消した数・バイト数は
+      `[sandbox] cache of <user>: removed entries older than N days — imports/exports: …; trash: …`
+      の 1 行。回帰は `sandbox/tests/test_retention.py`。値は下の API の応答
+      `cache_ttl_days` で nucllei に渡り、取り込み・自動添付の tool 出力に期限日が添えられる
   - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
     が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
     無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
@@ -350,14 +359,14 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `POST /files/mkdir` — `{user_id, path, mounts?}` → `{ok, path}`。親も作る、在れば 409
   - `POST /files/usage` — `{user_id}` → `{used_bytes, total_bytes, quota_gb, cache_ttl_days}`
     (workspace の loopback ext4 の `statvfs`。`/ext` は容量上限を持たないので対象外)
-  - 置き場の root そのもの・workspace 直下の `imports/` `exports/` (実行のたびに使う) は
-    消せない・改名できない (400)。ro の bind への書き換えは 403
+  - 置き場の root そのもの・workspace 直下の `imports/` `exports/` (実行のたびに使う)・
+    `trash/` (消す代わりの移し先) は消せない・改名できない (400)。ro の bind への書き換えは 403
   - `/files/*` の `path` は 2 形 (#152): **workspace 相対** (`imports/a.csv`。従来どおり。一覧の
     `entries[].path` も workspace 相対) と、**jail の絶対パス `/ext/groups/<g>/…` `/ext/public/…`**
     (その要求の `mounts` に在る bind の中だけ。`entries[].path` も絶対パス)。bind に無い → 404
     (見えない = 無い)、ro に書く → 403、経路に symlink → 400、`..` 等 → 400、`/ext` 外の絶対パス
     → 400。書いたファイル・作ったディレクトリは jail のユーザー (65534) の物
-  - `cache_ttl_days` (int) — `imports/` `exports/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
+  - `cache_ttl_days` (int) — `imports/` `exports/` `trash/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
     0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
     自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
 - `GET /healthz` — `{ok, nsjail, loop}`。`loop` は loop ドライバの実効チェック
@@ -411,7 +420,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_QUOTA_GB` | 10 | ユーザー単位の workspace 容量上限 (loopback ext4) |
 | `SANDBOX_QUOTA_OVERRIDES` | {} | ユーザー別 quota 上書き `{"<user_id>": GB}` (新規作成時のみ) |
 | `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0 (**= 消さない**) | 最終利用から N 日経った未 mount の workspace `.img` を削除 (上記「disk quota」の保持期限)。mount 中・実行中・session 生存中は飛ばす |
-| `SANDBOX_CACHE_TTL_DAYS` | 30 | `/workspace/imports/` `exports/` (Files のキャッシュ) のファイルを mtime から N 日で消す。idle workspace 回収の umount 直前に実行 (上記「実行モデル」)。0 以下 = 消さない。`memory/` 等の他ディレクトリには触らない |
+| `SANDBOX_CACHE_TTL_DAYS` | 30 | `/workspace/imports/` `exports/` (Files のキャッシュ) と `trash/` の直下のエントリを、その max(mtime, ctime) から N 日で丸ごと消す。idle workspace 回収の umount 直前に実行 (上記「実行モデル」)。0 以下 = 消さない。`memory/` 等の他ディレクトリには触らない |
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |
