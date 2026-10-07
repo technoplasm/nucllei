@@ -1696,7 +1696,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 ### 5.7 Builtin tools, code execution, tool servers
 
 - **Builtin tools** ship with the server (`builtin_` id prefix). Only their ACL
-  is editable. Currently:
+  and Valves are editable (Valves via `POST /api/v1/tools/id/builtin_<name>/valves/update`,
+  admin; values survive restarts — the startup sync does not touch them). Currently:
   - `builtin_history` — `list_history` / `read_history` / `grep_history` over
     the calling user's own chats. `grep_history` hits carry `matches` (up to 3
     per chat: `{role, excerpt}` with ±60 chars of context around the match,
