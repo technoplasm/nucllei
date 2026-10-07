@@ -851,8 +851,78 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         out = _arun(tool.write_file("/workspace/exports/r.html", "<p>", __user__=user))
         assert "/workspace/exports/r.html に書き込んだ" in out
-        # exports/ 直書きは自動添付されない旨をモデルに伝える
-        assert "fetch_from_workspace" in out
+
+    def test_write_file_to_exports_attaches(self, monkeypatch):
+        """exports/ に書いたら run_* と同じく Files に登録してこの会話に添付する (ken 2026-10-08)。
+        書いた先で判定 (前後の走査はしない)。exports/ の外は添付しない。上限超過は添付せず報告。"""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        user = {"id": "u-wf"}
+        cur = {}
+
+        def fake_get(chat_id, message_id):
+            return cur.get((chat_id, message_id))
+
+        def fake_upsert(chat_id, message_id, data):
+            cur[(chat_id, message_id)] = data
+
+        from nucllei.builtin_tools import sandbox as mod
+
+        monkeypatch.setattr(mod.Chats, "get_message_by_id_and_message_id", fake_get)
+        monkeypatch.setattr(
+            mod.Chats, "upsert_message_to_chat_by_id_and_message_id", fake_upsert
+        )
+
+        def write(path, content):
+            emitted = []
+
+            async def emitter(event):
+                emitted.append(event)
+
+            tool = _sandbox({"/files/write": {"ok": True, "cache_ttl_days": 30}})
+            out = _arun(
+                tool.write_file(
+                    path,
+                    content,
+                    __user__=user,
+                    __event_emitter__=emitter,
+                    __chat_id__="c1",
+                    __message_id__="m1",
+                )
+            )
+            return out, emitted
+
+        out, emitted = write("/workspace/exports/sub/r.html", "<p>hi</p>")
+        assert out.startswith("/workspace/exports/sub/r.html に書き込んだ (9B)。\n")
+        assert (
+            "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---"
+            in out
+        )
+        assert "- sub/r.html (9B) file_id=" in out
+        day = datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=30)
+        assert f"/workspace/exports/ の写しは {day} 以降に消える" in out
+        # 旧い案内 (添付されない、fetch_from_workspace を呼ぶ) は出ない
+        assert "添付されない" not in out and "fetch_from_workspace" not in out
+        assert [e["type"] for e in emitted] == ["chat:message:files"]
+        files = emitted[0]["data"]["files"]
+        assert [f["name"] for f in files] == ["r.html"]
+        rec = self.Files.get_file_by_id(files[0]["id"])
+        assert rec is not None and rec.user_id == "u-wf"
+        assert cur[("c1", "m1")]["files"] == files
+
+        # exports/ の外は添付しない
+        out, emitted = write("/workspace/work/r.html", "<p>")
+        assert out == "/workspace/work/r.html に書き込んだ (3B)。"
+        assert emitted == []
+
+        # 添付の上限超過は添付せず報告 (workspace には書けている)
+        _set_limit_mb(monkeypatch, 5 / (1024 * 1024))
+        out, emitted = write("/workspace/exports/big.txt", "x" * 6)
+        assert "/workspace/exports/big.txt に書き込んだ" in out
+        assert "big.txt (6B) は添付の上限 5 B を超えて添付できなかった" in out
+        assert "file_id=" not in out and "以降に消える" not in out
+        assert emitted == []
 
     def test_workspace_paths_are_absolute_in_and_out(self):
         """3 本とも /workspace/ の絶対パスだけを受け、戻り値も絶対。sandbox の wire

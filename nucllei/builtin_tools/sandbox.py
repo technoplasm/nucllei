@@ -1609,6 +1609,9 @@ class Tools:
         path: str,
         content: str,
         __user__: Optional[dict] = None,
+        __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
+        __chat_id__: Optional[str] = None,
+        __message_id__: Optional[str] = None,
     ) -> str:
         """
         テキストファイルを sandbox の /workspace に直接書く。HTML・Markdown・CSV・
@@ -1644,7 +1647,7 @@ class Tools:
             )
 
         try:
-            await self._post(
+            res = await self._post(
                 "/files/write",
                 {
                     "user_id": __user__["id"],
@@ -1657,15 +1660,32 @@ class Tools:
             raise _files_error(e, abs_path)
 
         msg = f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
-        if rel.startswith("exports/"):
-            # exports/ の自動添付は「実行の後始末」で回収する仕組みなので、
-            # 実行を伴わない write_file では発火しない (取りこぼしの typical case)
-            msg += (
-                " exports/ の自動添付は run_python / run_shell の実行後に回収する仕組みなので、"
-                f"この書き込みだけでは添付されない。{_NEXT}ユーザーに渡すなら"
-                " fetch_from_workspace を呼ぶ。"
-            )
-        return msg
+        if not rel.startswith("exports/"):
+            return msg
+        # exports/ に書いたらこの会話に添付する (sandbox を書き換えうる tool の共通の規則。
+        # run_* は sandbox の実行前後の差分、write_file は書いた先が分かるので手元の本文から
+        # `_collect_exports` と同じ形の 1 件を組む。上限超過は b64 なしの truncated)
+        limit = _limit(__user__)
+        name = rel[len("exports/") :]
+        entry = {"name": name, "size": len(data)}
+        if limit is not None and len(data) > limit:
+            entry.update(truncated=True, limit=limit)
+        else:
+            entry["b64"] = base64.b64encode(data).decode()
+        output_lines = await self._register_exports(
+            __user__["id"],
+            [entry],
+            __chat_id__,
+            __message_id__,
+            __event_emitter__,
+            _cache_expiry(res),
+            limit,
+        )
+        return (
+            msg
+            + "\n--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
+            + "\n".join(output_lines)
+        )
 
     async def _write_ext(self, path: str, rel: str, content: str, user: dict) -> str:
         """write_file の `/ext/groups/<g>/…` `/ext/public/…` (#152)。可否は ACL、実際の書き込みと

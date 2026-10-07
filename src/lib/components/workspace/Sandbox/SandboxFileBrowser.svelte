@@ -46,7 +46,8 @@
 	// 直下のエントリ(ファイルでもフォルダでも 1 つ)が max(mtime, ctime) から cache_ttl_days 日で
 	// 中身ごと消える(sandbox の `_sweep_entries`)。mv は mtime を変えず ctime を今にする
 	const TRASH = `${WORKSPACE}/trash`;
-	const CACHE_DIRS = [`${WORKSPACE}/imports`, `${WORKSPACE}/exports`];
+	const EXPORTS = `${WORKSPACE}/exports`;
+	const CACHE_DIRS = [`${WORKSPACE}/imports`, EXPORTS];
 	const EXPIRING_DIRS = [...CACHE_DIRS, TRASH];
 	const inside = (path: string, d: string) => path === d || path.startsWith(`${d}/`);
 
@@ -868,6 +869,15 @@
 					: $i18n.t(
 							'Deleting in /workspace moves items here. Deleting here removes it permanently.'
 						)}
+			</div>
+		{/if}
+		{#if place?.kind === 'workspace' && inside(dir, EXPORTS)}
+			<!-- 添付するのは sandbox を書き換えうる tool の前後だけ。ここで置いた物は次の実行前の記録に
+			     入るので差分にならない (ken 決定 2026-10-08) -->
+			<div class="text-xs text-content-subtle px-0.5 pb-1">
+				ⓘ {$i18n.t(
+					'Files put here are not attached to a conversation. To pass one to a conversation, ask the model in the chat.'
+				)}
 			</div>
 		{/if}
 		{/if}

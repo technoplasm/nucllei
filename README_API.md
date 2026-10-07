@@ -331,7 +331,7 @@ sandbox / a chat follows exactly one of them (ken, 2026-10-07):
 | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | chat upload `POST /api/v1/files/`                                                               | attachment                                          | nucllei (400)                                                                                       |
 | `send_to_workspace(file_id=…)` (also `url=/api/v1/files/{id}/content`, and the attachment list) | attachment                                          | nucllei before reading + sandbox `/files/write` (`file_limit_bytes`)                                |
-| exports auto-attach (`run_python*` / `run_shell`)                                               | attachment                                          | sandbox `/exec` `/exec_cell` (over-limit entries come back `truncated` with the effective `limit`)  |
+| exports auto-attach (`run_python*` / `run_shell` / `write_file`)                                | attachment                                          | sandbox `/exec` `/exec_cell` (over-limit entries come back `truncated` with the effective `limit`)  |
 | `fetch_from_workspace`                                                                          | attachment                                          | sandbox `/files/read` (413); `/ext/…` read by nucllei uses it as `max_bytes`                        |
 | file browser upload / download (§4.4.1)                                                         | sandbox                                             | sandbox `/files/raw` (413; nucllei refuses an upload early when it knows the cap), plus quota (507) |
 | `send_to_workspace(url=…)` (other URLs)                                                         | sandbox                                             | resolver `max_bytes` while streaming into a temp file, then sandbox `/files/raw` (413)              |
@@ -1923,6 +1923,16 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     `proxy_mount_hint`, so a deployment can point at its own tools. The result
     renders by extension (`.md` markdown, code / data as highlighted code,
     else text) via `Rendered` (§5.4).
+    **`exports/` auto-attach**: every tool that can change the sandbox
+    attaches to the chat what it added to or changed in `/workspace/exports/`
+    (registered as a File, same report lines and attachment cap as below).
+    `run_python` / `run_python_once` / `run_shell` use the sandbox's
+    before/after diff of the run (`exports` in the `/exec` `/exec_cell`
+    response); `write_file` knows where it wrote, so a write under
+    `/workspace/exports/` attaches that file (no scan). Files put there from
+    the file browser (§4.4.1) are not attached: they are in the "before"
+    snapshot of the next run, so they are no diff (one put there *during* a
+    tool run is attached as that run's — as designed).
     `fetch_from_workspace(path)` turns a sandbox file into something the user
     can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
     the sandbox, registered as a File and attached to the chat (`file_id`
@@ -1933,7 +1943,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     other file is only listed in the chat's file pane (`message.files` entries
     of type `file` are not drawn under the message), so the result carries a
     ready link 「次の手: 本文で示すなら [<name>](/api/v1/files/<id>/content) と書く」. The
-    `exports/` auto-attach of `run_python` / `run_shell` reports each file the
+    `exports/` auto-attach reports each file the
     same way (for media it adds that a `[task]` notification of a background
     run must paste it, since nothing was displayed then). An `/ext/…` file that the `/ext` gate serves
     (static: exists in the mount; proxy: the upstream answers 2xx) is **not copied or attached** — the tool

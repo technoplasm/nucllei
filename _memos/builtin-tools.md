@@ -399,6 +399,15 @@ nucllei が「今日(Asia/Tokyo)+ N 日」を取り込み結果の末尾(`(/work
 exports 自動添付の報告ブロック末尾(`(添付は Files に残る。/workspace/exports/ の写しは YYYY-MM-DD 以降に消える)`、
 1 件でも添付したときだけ)に 1 行添える(`_cache_expiry`)。キーが無い古い sandbox・0 では添えない。
 
+**exports/ の自動添付の規則**(ken 決定 2026-10-08): sandbox を書き換えうる tool(`run_python` /
+`run_python_once` / `run_shell` / `write_file`)は、exports/ に増えた・変わったものをその会話に添付する。
+run_* は sandbox の実行前後の差分(`_snapshot_exports` / `_collect_exports`)、write_file は書いた先が
+分かるので前後の走査はせず、書いた先が `/workspace/exports/` の下なら手元の本文から `_collect_exports` と
+同じ形の 1 件を組んで `_register_exports` に渡す(上限・期限の行も run_* と同じ。旧「write_file では添付
+されない。fetch_from_workspace を呼ぶ」の案内は廃止)。ファイルブラウザで置いたものは添付しない(次の実行前の
+記録に入るので差分にならない。tool の実行中に置いたものはその tool の分として添付される — 仕様どおり)。
+ブラウザの exports/ には「ここに置いても会話には添付されない。チャットでモデルに頼む」と注記する。
+
 **`path` 引数は sandbox の fs の絶対パス**(2026-10-03、ken 決定「名前 = 形」: `url` = URL
 (絶対、または同一サーバの `/ext/…` — 末尾の「参照の規則の改訂」節)、
 `path` = `/workspace/…` `/ext/…` の絶対パス、`file_id` = 添付)。`write_file` / `list_workspace` /
