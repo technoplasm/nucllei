@@ -95,9 +95,15 @@ def _group_names(groups, label: str) -> list[str]:
         if is_group_dir_name(name):
             names.append(name)
         else:
+            try:
+                validate_group_name(name)
+                why = "前後に空白がある"
+            except GroupNameError as e:
+                why = str(e)
             log.warning(
                 f"ext_acl: group {getattr(g, 'id', '?')} の名前 {name!r} は"
                 f" /ext/groups のディレクトリ名にできないので{label}しない"
+                f"(現行のグループ名の規則に違反: {why} — 管理画面で改名すれば有効になる)"
             )
     return sorted(set(names))
 

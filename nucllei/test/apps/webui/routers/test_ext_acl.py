@@ -37,7 +37,7 @@ def _make_groups():
         return g
 
     make("EMR", ["member1"])
-    make("内科 外来", ["member1", "outsider9"])
+    make("内科外来", ["member1", "outsider9"])
     make("OTHER", ["other1"])
     # #151 より前に作られうる、ディレクトリ名にできない名前(model 直叩きなら入る)
     make("rank:部長", ["member1"])
@@ -51,7 +51,7 @@ def _tree(monkeypatch, tmp_path):
     for d in (
         "groups/EMR/recipes",
         "groups/OTHER",
-        "groups/内科 外来",
+        "groups/内科外来",
         "public",
         "doc",
     ):
@@ -59,7 +59,7 @@ def _tree(monkeypatch, tmp_path):
     (root / "groups/EMR/recipes/a.md").write_text("emr")
     (root / "groups/EMR/fig.png").write_bytes(b"\x89PNG\r\n\x1a\nemr")
     (root / "groups/OTHER/secret.md").write_text("other-secret")
-    (root / "groups/内科 外来/n.md").write_text("naika")
+    (root / "groups/内科外来/n.md").write_text("naika")
     (root / "public/p.md").write_text("pub")
     (root / "doc/d.md").write_text("doc")
     # jail の中で作れる「他グループへの symlink」
@@ -95,7 +95,7 @@ class TestExtAcl(AbstractPostgresTest):
             # (user, rel, want)
             (MEMBER, "groups/EMR/a.md", "rw"),
             (MEMBER, "groups/EMR", "rw"),
-            (MEMBER, "groups/内科 外来/x", "rw"),
+            (MEMBER, "groups/内科外来/x", "rw"),
             (MEMBER, "groups/OTHER/secret.md", "none"),
             (MEMBER, "groups/NOPE/x", "none"),
             (MEMBER, "groups/rank:部長/x", "none"),  # 名前がパスにできない
@@ -141,22 +141,22 @@ class TestExtAcl(AbstractPostgresTest):
     def test_visible_groups_and_sandbox_mounts(self):
         from nucllei.utils.ext_acl import ext_visible_groups, sandbox_ext_mounts
 
-        assert ext_visible_groups(MEMBER) == ["EMR", "内科 外来"]
+        assert ext_visible_groups(MEMBER) == ["EMR", "内科外来"]
         assert ext_visible_groups(OUTSIDER) == []
-        assert ext_visible_groups(ADMIN) == ["EMR", "OTHER", "内科 外来"]
+        assert ext_visible_groups(ADMIN) == ["EMR", "OTHER", "内科外来"]
         assert ext_visible_groups(None) == []
 
         assert sandbox_ext_mounts(MEMBER) == [
             {"path": "/ext/public", "rw": False},
             {"path": "/ext/groups/EMR", "rw": True},
-            {"path": "/ext/groups/内科 外来", "rw": True},
+            {"path": "/ext/groups/内科外来", "rw": True},
         ]
         assert sandbox_ext_mounts(OUTSIDER) == [{"path": "/ext/public", "rw": False}]
         assert sandbox_ext_mounts(ADMIN) == [
             {"path": "/ext/public", "rw": True},
             {"path": "/ext/groups/EMR", "rw": True},
             {"path": "/ext/groups/OTHER", "rw": True},
-            {"path": "/ext/groups/内科 外来", "rw": True},
+            {"path": "/ext/groups/内科外来", "rw": True},
         ]
         assert sandbox_ext_mounts(None) == []
 
@@ -196,10 +196,8 @@ class TestServeExtAcl(AbstractPostgresTest):
         r = self._get(MEMBER, "/ext/groups/EMR/recipes/a.md")
         assert r.status_code == 200 and r.text == "emr"
         assert r.headers["cache-control"] == "private, no-cache"
-        # 日本語・空白のグループ名(percent-encoded)
-        r = self._get(
-            MEMBER, "/ext/groups/%E5%86%85%E7%A7%91%20%E5%A4%96%E6%9D%A5/n.md"
-        )
+        # 日本語のグループ名(percent-encoded)
+        r = self._get(MEMBER, "/ext/groups/%E5%86%85%E7%A7%91%E5%A4%96%E6%9D%A5/n.md")
         assert r.status_code == 200 and r.text == "naika"
 
         # 非メンバー: 在るファイルも無いファイルも同じ 404(存在を漏らさない)
@@ -248,9 +246,9 @@ class TestServeExtAcl(AbstractPostgresTest):
 
     def test_group_dir_symlink_is_not_served(self, monkeypatch, tmp_path):
         root = _tree(monkeypatch, tmp_path)
-        (root / "groups/内科 外来").rename(root / "groups/old")
-        (root / "groups/内科 外来").symlink_to(root / "groups/OTHER")
-        r = self._get(MEMBER, "/ext/groups/内科 外来/secret.md")
+        (root / "groups/内科外来").rename(root / "groups/old")
+        (root / "groups/内科外来").symlink_to(root / "groups/OTHER")
+        r = self._get(MEMBER, "/ext/groups/内科外来/secret.md")
         assert r.status_code == 404
 
     def test_proxy_mount_is_gated_too(self, monkeypatch, tmp_path):
@@ -423,7 +421,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert tool.calls[0][1]["mounts"] == [
             {"path": "/ext/public", "rw": False},
             {"path": "/ext/groups/EMR", "rw": True},
-            {"path": "/ext/groups/内科 外来", "rw": True},
+            {"path": "/ext/groups/内科外来", "rw": True},
         ]
         assert {"path": "/ext/groups/OTHER", "rw": True} in tool.calls[1][1]["mounts"]
         assert {"path": "/ext/public", "rw": True} in tool.calls[1][1]["mounts"]
@@ -513,7 +511,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
     def test_list_workspace(self):
         tool = _tool({})
         out = _text(tool.list_workspace("/ext/groups", __user__=MEMBER))
-        assert "/ext/groups/EMR/" in out and "内科 外来" in out and "OTHER" not in out
+        assert "/ext/groups/EMR/" in out and "内科外来" in out and "OTHER" not in out
         out = _text(tool.list_workspace("/ext/groups", __user__=OUTSIDER))
         assert "無い" in out
 
@@ -587,7 +585,11 @@ class TestSandboxToolAcl(AbstractPostgresTest):
     "name,ok",
     [
         ("EMR", True),
-        ("内科 外来", True),
+        ("内科外来", True),
+        ("内科 外来", False),  # 空白はグループ名に使えない
+        ("内科　外来", False),
+        ("a,b", False),  # カンマも(USER_GROUPS の区切り)
+        ("a，b", False),
         ("rank:部長", False),
         (".hidden", False),
         ("..", False),

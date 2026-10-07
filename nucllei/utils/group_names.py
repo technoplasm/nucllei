@@ -8,6 +8,9 @@
   (`group.name_key` の unique index + router の事前チェック → `GroupNameConflictError` = 409)
 
 正規化は重複判定にだけ使い、保存する名前は入力のまま(前後の空白だけ落とす)。
+カンマと空白は名前のどこにも使えない(前後の空白は落としてから判定する)— テンプレート変数
+`{{USER_GROUPS}}` の区切り(`, `)を曖昧にしないためと、シェルでパスを扱うときの事故防止。
+カンマは NFKC 後の形で判定する(全角の `，` 等も弾く)。
 #152 はここを import して使う — 検証規則を 2 か所に書かない。
 """
 
@@ -24,6 +27,22 @@ FORBIDDEN_GROUP_NAME_CHARS = frozenset("/\\:")
 # Cc = 制御文字(NUL・改行・タブ・DEL・C1)、Cf = 書式文字(ゼロ幅・書字方向制御・BOM 等)、
 # Cs = サロゲート(UTF-8 に符号化できない)、Zl / Zp = 行・段落区切り
 FORBIDDEN_GROUP_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+# `{{USER_GROUPS}}` の区切り・シェルでの事故防止のため名前のどこにも使えない文字。
+# カンマは NFKC 後の形で判定する(`，` U+FF0C 等も弾く)。空白は Unicode の Zs
+# (U+0020・U+3000 全角空白・U+00A0 NBSP 等)と str.isspace() の真になる文字全般
+# (\t \n 等は Cc でも弾いている)。
+FORBIDDEN_GROUP_NAME_SEPARATORS_MESSAGE = (
+    "グループ名に使えない文字が含まれています: カンマ・空白"
+    "(全角のカンマ・全角空白・ノーブレークスペース等も含みます。"
+    "前後の空白は自動で削ります)。"
+    "テンプレート変数 {{USER_GROUPS}} の区切り(「, 」)と紛れないよう、"
+    "またグループ別ディレクトリをシェルで扱うときの事故を防ぐためです。"
+)
+
+
+def _is_space(ch: str) -> bool:
+    return ch.isspace() or unicodedata.category(ch) == "Zs"
 
 
 class GroupNameError(ValueError):
@@ -67,6 +86,11 @@ def validate_group_name(name: str) -> str:
             raise GroupNameError(
                 f"グループ名に制御文字・書式文字(U+{ord(ch):04X})は使えません。"
             )
+
+    # NFKC で `,` や空白になる文字(全角カンマ・全角空白等)も弾くため、正規化後の形も見る
+    nfkc = unicodedata.normalize("NFKC", name)
+    if any(ch == "," or _is_space(ch) for s in (name, nfkc) for ch in s):
+        raise GroupNameError(FORBIDDEN_GROUP_NAME_SEPARATORS_MESSAGE)
 
     if name.startswith("."):
         # `.` と `..` もここで落ちる

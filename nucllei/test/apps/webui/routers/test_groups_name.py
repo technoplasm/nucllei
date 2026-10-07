@@ -4,6 +4,8 @@
 
 - 正規化(NFKC → 前後の空白除去 → casefold)した名前の重複は 409
 - パスとして危険な名前は 400
+- カンマ・空白は名前のどこにも使えない(`{{USER_GROUPS}}` の区切り・シェルでの事故防止)。
+  カンマは NFKC 後で判定(`，` も弾く)、前後の空白は削って保存
 - 検証は作成時・改名時だけ(名前を変えない更新は #151 以前の名前でも通す)
 - DB の unique index(name_key)は model を直接叩いても効き、None に化けない
 """
@@ -60,6 +62,17 @@ def test_normalize_key_equates(a, b):
         " .hidden",  # 前後空白を落とした後で先頭 .
         "a" * 256,
         "あ" * 86,  # 258 バイト
+        # カンマ・空白(`{{USER_GROUPS}}` の区切り・シェルでの事故防止)
+        "a,b",
+        ",",
+        "a，b",  # 全角カンマ (NFKC で ,)
+        "a﹐b",  # 小書きカンマ U+FE50 (NFKC で ,)
+        "rank 部長",  # 途中の半角空白
+        "rank　部長",  # 全角空白 U+3000
+        "rank\u00a0部長",  # NBSP
+        "rank\u2009部長",  # thin space (Zs)
+        "rank\u1680部長",  # Ogham space mark (Zs)
+        "  a b  ",  # 前後を削っても途中に残る
     ],
 )
 def test_validate_rejects(name):
@@ -71,7 +84,10 @@ def test_validate_rejects(name):
     "name,stored",
     [
         ("内科", "内科"),
-        ("  rank 部長  ", "rank 部長"),
+        ("  rank部長  ", "rank部長"),
+        ("　内科　", "内科"),  # 前後の全角空白は削る
+        ("\u00a0内科\u00a0", "内科"),  # 前後の NBSP も削る
+        ("\t内科\n", "内科"),
         ("a.b", "a.b"),
         ("a..", "a.."),
         ("rank：部長", "rank：部長"),  # 全角コロンはファイル名として無害
@@ -81,6 +97,14 @@ def test_validate_rejects(name):
 )
 def test_validate_accepts_and_strips(name, stored):
     assert validate_group_name(name) == stored
+
+
+@pytest.mark.parametrize("name", ["a,b", "a，b", "a b", "a　b", "a\u00a0b"])
+def test_validate_comma_space_message(name):
+    with pytest.raises(GroupNameError) as ei:
+        validate_group_name(name)
+    msg = str(ei.value)
+    assert "カンマ" in msg and "空白" in msg and "{{USER_GROUPS}}" in msg
 
 
 # ---- API ----
@@ -103,9 +127,9 @@ class TestGroupNameApi(AbstractPostgresTest):
             )
 
     def test_create_stores_name_as_entered_but_stripped(self):
-        r = self._create("  Naika 内科  ")
+        r = self._create("  Naika内科  ")
         assert r.status_code == 200, r.text
-        assert r.json()["name"] == "Naika 内科"
+        assert r.json()["name"] == "Naika内科"
 
     def test_create_duplicate_normalized_is_409(self):
         assert self._create("Naika").status_code == 200
@@ -115,7 +139,8 @@ class TestGroupNameApi(AbstractPostgresTest):
             assert "同じ名前" in r.json()["detail"]
 
     @pytest.mark.parametrize(
-        "name", ["a/b", "a\\b", "a:b", "..", ".x", "", "a​b", "a" * 256]
+        "name",
+        ["a/b", "a\\b", "a:b", "..", ".x", "", "a​b", "a" * 256, "a,b", "a b", "a　b"],
     )
     def test_create_dangerous_name_is_400(self, name):
         r = self._create(name)
