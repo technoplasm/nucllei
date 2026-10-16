@@ -43,6 +43,7 @@ from nucllei.models.files import FileForm, Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.ext_acl import (
     GROUPS,
+    PUBLIC,
     ext_access,
     ext_visible_groups,
     is_acl_rel,
@@ -439,6 +440,18 @@ def _exec_error(e: Exception) -> ToolError:
     return _err("ERROR: sandbox で実行できなかった。" + _SANDBOX_DOWN_NEXT, "failure")
 
 
+def _read_only(abs_path: str) -> ToolError:
+    """read-only の置き場への書き込みを断る文。どこに書き直すかは利用者の意図と skill の規則で
+    決まり tool には分からない — 代わりの書き先は勧めず、起きたことだけを言う。「書けるのは
+    管理者だけ」は `/ext/public` のときだけ正しい (`/ext/doc` 等 ACL 外の置き場は管理者も ro)。"""
+    public = f"{_RO_MOUNT_ROOT}/{PUBLIC}"
+    admin_only = abs_path == public or abs_path.startswith(public + "/")
+    return ToolCallError(
+        f"{abs_path} は read-only" + (" (書けるのは管理者だけ)" if admin_only else ""),
+        "この置き場には書けないとユーザーに伝える (別の置き場に書くかはユーザーが決める)。",
+    )
+
+
 def _files_error(e: Exception, abs_path: str) -> ToolError:
     """sandbox `/files/*` の失敗をモデル向けの ToolError にする (原因を言い分ける)。
     例外の文・detail はログだけ (A17)。呼び手が raise する。"""
@@ -457,10 +470,7 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
         return _no_such_file(abs_path)
     if e.status == 403:
         # ro の置き場への書き込み (#152)。tool 側で先に断るので通常は来ない
-        return ToolCallError(
-            f"{abs_path} は read-only",
-            "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
-        )
+        return _read_only(abs_path)
     if e.status == 507:
         return ToolFailure(
             f"{abs_path} に書けない (workspace の容量 (quota) が一杯)", _QUOTA_FULL_NEXT
@@ -1704,10 +1714,7 @@ class Tools:
         if access == "none":
             raise _ext_not_found(abs_path)
         if access != "rw":
-            raise ToolCallError(
-                f"{abs_path} は read-only (書けるのは管理者だけ)",
-                "自分の `/workspace/` か、所属グループの `/ext/groups/<グループ名>/` に書く。",
-            )
+            raise _read_only(abs_path)
         data = content.encode("utf-8")
         if len(data) > TEXT_MAX_BYTES:
             raise ToolCallError(

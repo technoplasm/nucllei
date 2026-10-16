@@ -1184,6 +1184,22 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = outs(SandboxHTTPError(413, "file too large: 9 bytes (limit 5)"))[2]
         assert "添付できる上限 5 B" in out and "接続できない" not in out
 
+        # 403 = read-only の置き場 (#152)。代わりの書き先は勧めない (どこに書くかは利用者が
+        # 決める)。「管理者だけ」は /ext/public のときだけ (/ext/doc 等は管理者も ro)
+        from nucllei.builtin_tools.sandbox import _files_error
+
+        for path, admin_only in (
+            ("/workspace/a.txt", False),
+            ("/ext/doc/a.md", False),
+            ("/ext/public/a.md", True),
+            ("/ext/publicx/a.md", False),
+        ):
+            out = _files_error(SandboxHTTPError(403, "read-only"), path).text
+            assert out.startswith(f"ERROR: {path} は read-only"), out
+            assert ("書けるのは管理者だけ" in out) is admin_only, out
+            assert "別の置き場に書くかはユーザーが決める" in out
+            assert "/workspace/` か" not in out and "/ext/groups/<" not in out
+
         for out in outs(ConnectionRefusedError("refused")):
             assert out.startswith("ERROR: sandbox に接続できない")
 

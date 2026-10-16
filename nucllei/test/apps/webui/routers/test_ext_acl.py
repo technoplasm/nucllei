@@ -443,6 +443,11 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert "は無い" in out and tool.calls == []
         out = _text(tool.write_file("/ext/public/x.md", "x", __user__=MEMBER))
         assert "read-only" in out and tool.calls == []
+        # /ext/public は管理者なら書ける。代わりの書き先は勧めない (利用者が決める)
+        assert "書けるのは管理者だけ" in out
+        assert (
+            "別の置き場に書くかはユーザーが決める" in out and "/ext/groups/<" not in out
+        )
         out = _text(tool.write_file("/ext/groups/EMR", "x", __user__=MEMBER))
         assert "ディレクトリ" in out and tool.calls == []
         out = _text(tool.write_file("/ext/groups/EMR/../OTHER/x", "x", __user__=MEMBER))
