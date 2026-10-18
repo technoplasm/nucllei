@@ -257,3 +257,80 @@ class TestFileImagesInline(AbstractPostgresTest):
         assert self._convert(messages, self.alice) == [
             {"role": "user", "content": "/api/v1/files/f-img/content"}
         ]
+
+
+# ---- 上書きされうる参照(sandbox のパス・/ext/)は cache でも読み直す ----------------
+
+
+def _ref_messages(url):
+    return [
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}
+    ]
+
+
+def _fake_resolver(monkeypatch, contents, reads):
+    """resolve_ref の代役: contents[ref] を毎回その時点の中身で返す(上書きを模す)。"""
+    from nucllei.utils import file_images
+    from nucllei.utils.image_refs import LoadedRef
+
+    async def fake_resolve_ref(ref, user, **kwargs):
+        reads.append(ref)
+        return LoadedRef(data=contents[ref], content_type="image/png", name=ref), None
+
+    monkeypatch.setattr(file_images, "resolve_ref", fake_resolve_ref)
+
+
+def _data_url(raw):
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
+def test_cache_rereads_overwritten_workspace_path(monkeypatch):
+    """同じターンで同じ path を描き直して feed_image し直すと、新しい中身が届く
+    (参照文字列で使い回して古い画像を送っていた — llens 2026-10-19)。"""
+    from nucllei.utils.file_images import inline_internal_image_urls
+
+    ref = "/workspace/plot.png"
+    old, new = PNG_BYTES + b"-old", PNG_BYTES + b"-new"
+    contents, reads = {ref: old}, []
+    _fake_resolver(monkeypatch, contents, reads)
+
+    cache = {}
+    first = asyncio.run(
+        inline_internal_image_urls(_ref_messages(ref), None, cache=cache)
+    )
+    contents[ref] = new
+    second = asyncio.run(
+        inline_internal_image_urls(_ref_messages(ref), None, cache=cache)
+    )
+    assert first[0]["content"][0]["image_url"]["url"] == _data_url(old)
+    assert second[0]["content"][0]["image_url"]["url"] == _data_url(new)
+    assert reads == [ref, ref]
+
+
+def test_cache_reuses_conversion_for_unchanged_content(monkeypatch):
+    """中身が同じなら読み直しても変換(base64・SVG 描画・PDF ラスタ化)はし直さない。
+    /ext/ も上書きされうる側。http(s) はターン内で使い回す(読み直さない)。"""
+    from nucllei.utils import file_images
+
+    conversions = []
+    real = file_images._materialize
+
+    async def counting(loaded, page, label, name):
+        conversions.append(name)
+        return await real(loaded, page, label, name)
+
+    monkeypatch.setattr(file_images, "_materialize", counting)
+    ext, http = "/ext/maps/a.png", "https://example.org/a.png"
+    contents, reads = {ext: PNG_BYTES, http: PNG_BYTES}, []
+    _fake_resolver(monkeypatch, contents, reads)
+
+    cache = {}
+    for _ in range(2):
+        for ref in (ext, http):
+            asyncio.run(
+                file_images.inline_internal_image_urls(
+                    _ref_messages(ref), None, cache=cache
+                )
+            )
+    assert reads == [ext, http, ext]
+    assert conversions == [ext, http]

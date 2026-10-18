@@ -1845,6 +1845,14 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     page count — and then only pushes the reference; **no File or Storage
     object is created** (PDF pages are pushed as `…#page=N` references and
     rasterised at send time). Valves: `max_image_mb` (8), `max_pages` (3).
+    Because only the reference is kept, what the model sees is the target's
+    content **at send time**: a `path` / `/ext/` reference is read again for
+    every model call, also within one turn, so redrawing a file and calling
+    `feed_image` with the same path shows the new picture — and the earlier
+    results that pushed that path show the new content too (re-sent history
+    has no snapshot). Only the conversion is reused when the content is
+    unchanged. A `file_id` never changes, and an `http(s)://` URL is read once
+    per turn.
     Always registered. Usage guidance beyond the docstring: §5.7.1.
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link

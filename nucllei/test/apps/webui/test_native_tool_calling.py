@@ -1247,6 +1247,68 @@ def test_followups_and_measure_share_turn_image_cache(monkeypatch):
     assert all(c is caches[0] for c in caches)
 
 
+def test_followup_sends_overwritten_workspace_image(monkeypatch):
+    """同じターンで同じ path を描き直して feed_image し直すと、2 回目の追撃には新しい
+    画像が載る — ターンの image_cache が参照文字列で古い data URL を使い回していた
+    (llens 2026-10-19、MiMo / GLM / DeepSeek が「古い画像に見える」と描き直しを重ねた)。"""
+    import base64
+
+    from nucllei.utils import file_images
+    from nucllei.utils.image_refs import LoadedRef
+    from nucllei.utils.tool_output import feed_image
+
+    ref = "/workspace/plot.png"
+    png = b"\x89PNG\r\n\x1a\n"
+    contents = {}
+
+    async def fake_resolve_ref(r, user, **kwargs):
+        return LoadedRef(data=contents[r], content_type="image/png", name=r), None
+
+    monkeypatch.setattr(file_images, "resolve_ref", fake_resolve_ref)
+
+    drawn = iter([png + b"v1", png + b"v2"])
+
+    async def draw(**kwargs):
+        contents[ref] = next(drawn)
+        feed_image(ref)
+        return "描いた"
+
+    spec = {
+        "name": "get_weather",
+        "description": "描く",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }
+    _, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["tool_call", "text_basic"],
+            extra_tools={"get_weather": {"spec": spec, "callable": draw}},
+        )
+    )
+    assert len(completion_calls) == 2
+
+    def image_urls(form_data):
+        return [
+            p["image_url"]["url"]
+            for m in form_data["messages"]
+            if m.get("role") == "user" and isinstance(m.get("content"), list)
+            for p in m["content"]
+            if p.get("type") == "image_url"
+        ]
+
+    def data_url(raw):
+        return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+    assert image_urls(completion_calls[0]) == [data_url(png + b"v1")]
+    # 2 回目の追撃: 同じ path の過去の結果も今の中身(上書き後)で届く — 仕様(README_API)
+    assert image_urls(completion_calls[1]) == [data_url(png + b"v2")] * 2
+
+
 def test_stop_during_followup_closes_upstream_stream(monkeypatch):
     """追撃の読み取り中に stop しても、追撃の上流接続を閉じる(response.background)。
     旧実装は初回の応答だけ閉じており、追撃は読み捨てのまま — SGLang は接続が残る限り

@@ -196,6 +196,11 @@ async def inline_internal_image_urls(
     ループの追撃は毎周 content_blocks から messages を作り直すので、渡さないと同じ
     tool 画像を追撃のたびに読み直して base64 化する。呼び手(1 ターン = 1 user)が
     スコープを持つ — ユーザーをまたいで共有しないこと(ACL はロード時に掛かる)。
+    使い回すのは中身が変わらない参照だけ: file id(不変)と http(s) の URL(ターン内は
+    同じ物とみなす)。sandbox のパス(`/workspace/…`)と同一サーバの `/ext/…` は同じ
+    ターンの中でも上書きされうる(描き直して同じ path で feed_image し直す)ので、
+    呼び出しごとに読み直し、変換結果だけを中身のハッシュで使い回す — 参照文字列で
+    使い回すと古い画像が届いていた(llens 2026-10-19)。
     """
     # 同一呼び出し内で同じ file / 参照を複数回参照しても読み出しは 1 回(結果 None も
     # キャッシュ)。バイト列は参照単位、data URL はページ単位 — PDF の複数ページは
@@ -256,8 +261,26 @@ async def inline_internal_image_urls(
 
     async def load_reference(ref: str, page: int | None) -> str | None:
         # 注記に出す名前は参照そのもの(モデルが知っている形 — 次の手に使える)
+        if ref.startswith(("http://", "https://")):
+            return await materialize(
+                f"ref:{ref}", lambda: resolve(ref), page, f"ref={ref}", name=ref
+            )
+        # 上書きされうる参照(sandbox のパス・/ext/): 読むのは毎回(呼び出し内は 1 回)、
+        # data URL は参照 + 中身のハッシュで引く — 同じ中身なら変換し直さない(参照も
+        # キーに入れるのは、変換できないときの注記に出す名前が参照ごとに違うため)
+        read_key = f"read:{ref}"
+        if read_key not in loaded_cache:
+            loaded_cache[read_key] = await resolve(ref)
+        loaded = loaded_cache[read_key]
+        if loaded is None:
+            return None
+        digest = hashlib.sha256(loaded.data).hexdigest()
         return await materialize(
-            f"ref:{ref}", lambda: resolve(ref), page, f"ref={ref}", name=ref
+            f"content:{ref}:{digest}",
+            lambda: asyncio.sleep(0, loaded),
+            page,
+            f"ref={ref}",
+            name=ref,
         )
 
     for message in messages or []:
