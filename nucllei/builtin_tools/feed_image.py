@@ -408,7 +408,7 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像 (PNG / JPEG / WebP / GIF / BMP)・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
+        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
         ユーザーには何も表示されず、Files にも登録しない — 見せるなら本文に `![図: …](URL)` を書く。
 
         対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・

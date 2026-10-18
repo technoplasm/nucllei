@@ -387,6 +387,18 @@ def test_docstring_names_url_and_path_with_their_fixed_meanings():
     assert "cage" not in doc.lower() and "棚" not in doc
 
 
+def test_docstring_lists_the_accepted_image_formats():
+    """docstring の形式一覧は実装の正 (`VLM_IMAGE_TYPES` + `CONVERTED_IMAGE_TYPES`) と同じ。
+    SVG / TIFF / AVIF も渡せると書いていないと、モデルが自分で PNG にする遠回りをする (staging)。
+    変換の仕組みはモデルに見せない。"""
+    m = _mod()
+    first = m.Tools.feed_image.__doc__.strip().splitlines()[0]
+    assert f"画像 ({m._IMAGE_NAMES})・PDF" in first
+    assert "SVG" in m._IMAGE_NAMES and "AVIF" in m._IMAGE_NAMES
+    doc = m.Tools.feed_image.__doc__
+    assert "resvg" not in doc and "Pillow" not in doc and "変換" not in doc
+
+
 def test_image_path_rejects_pages(monkeypatch):
     result, fed, _r = _run(monkeypatch, path="/workspace/out/plot.png", pages="1-3")
     assert fed == [] and result.startswith("ERROR") and "PDF" in result
