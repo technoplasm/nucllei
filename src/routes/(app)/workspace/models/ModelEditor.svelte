@@ -81,9 +81,12 @@
 	// llens(#70): vision は既定 OFF(2026-07-15。画像入力は明示的に有効化したモデルだけ)。
 	// usage は既定 ON — stream_options を弾く互換 API 向けの opt-out(backend の
 	// is_usage_requested と対。旧 addUsage の owned_by 分岐は廃止)。
+	// preserve_reasoning は既定 ON — tool ループの追撃に同じターンの reasoning_content を
+	// 載せ直す(backend の is_reasoning_preserved と対、2026-10-19)。
 	let capabilities = $state<Record<string, boolean | undefined>>({
 		vision: false,
-		usage: true
+		usage: true,
+		preserve_reasoning: true
 	});
 
 	let toolIds = $state<string[]>([]);

@@ -78,11 +78,25 @@ def _model_facing_text(blocks: list) -> str:
     """text ブロックをモデル向け履歴の 1 assistant content に落とす。
 
     v0.6.5 の serialize_content_blocks 由来の join 規約(各ブロック strip +
-    改行区切り)を踏襲。reasoning はここに来る前に除外されている。
+    改行区切り)を踏襲。reasoning は読まない(載せるときは _model_facing_reasoning で
+    reasoning_content の欄へ — content には混ぜない)。
     """
     return "".join(
         f"{block['content'].strip()}\n" for block in blocks if block["type"] == "text"
     ).strip()
+
+
+def _model_facing_reasoning(blocks: list) -> str:
+    """reasoning ブロックを 1 assistant の reasoning_content に落とす。
+
+    次の tool_calls までの区間に reasoning が複数あれば改行区切りで 1 本にする。
+    UI 用のマークアップ(<details> 等)は付けない — 本文だけ。
+    """
+    return "\n\n".join(
+        block["content"].strip()
+        for block in blocks
+        if block["type"] == "reasoning" and (block.get("content") or "").strip()
+    )
 
 
 def _call_arguments_are_sendable(call: dict) -> bool:
@@ -102,12 +116,18 @@ def _call_arguments_are_sendable(call: dict) -> bool:
         return False
 
 
-def convert_content_blocks_to_messages(content_blocks: list) -> list:
+def convert_content_blocks_to_messages(
+    content_blocks: list, keep_reasoning: bool = False
+) -> list:
     """組み立て済み content_blocks を tool ループ再送用のモデル向け履歴へ変換する。
 
-    - reasoning はモデルへ再送しない(llens #18-2): 自ターンの思考内容が
-      次呼び出しのプロンプトへ漏れるため。履歴に載るのは実際に出力された
-      text / tool_calls / tool 結果のみ。
+    - reasoning は content に**混ぜない**(llens #18-2: UI 用の
+      <details type="reasoning"> ごと漏れていた不具合)。keep_reasoning=True のときだけ、
+      各 assistant の reasoning_content 欄に本文を載せる(2026-10-19 — 同じターンの
+      tool ループ追撃で、モデルが直前の自分の思考を失わないため。preset の
+      capabilities.preserve_reasoning、middleware.is_reasoning_preserved)。
+      既定 False は次ターン以降の履歴と同じ形(FE expandAssistantToolHistory も
+      reasoning を送らない)— 続きターン・subagent・carried 計測はこちらを使う。
     - synthetic ブロック(`/command` 発火の UI 表示用 #35)はスキップ:
       実体の tool exchange は form_data["messages"] に注入済みで、変換すると
       二重になる。
@@ -181,6 +201,7 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                     ],
                 }
             )
+            _attach_reasoning(messages[-1], temp_blocks, keep_reasoning)
 
             results_by_call_id = {
                 result.get("tool_call_id"): result
@@ -240,6 +261,8 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
 
     if temp_blocks:
         content = _model_facing_text(temp_blocks)
+        # reasoning だけの末尾(本文なし)は従来どおり assistant を作らない —
+        # 末尾 assistant は上流で prefill 扱いになりうる
         if content:
             messages.append(
                 {
@@ -247,5 +270,19 @@ def convert_content_blocks_to_messages(content_blocks: list) -> list:
                     "content": content,
                 }
             )
+            _attach_reasoning(messages[-1], temp_blocks, keep_reasoning)
 
     return messages
+
+
+def _attach_reasoning(message: dict, blocks: list, keep_reasoning: bool) -> None:
+    """keep_reasoning のときだけ、区間の reasoning を reasoning_content に載せる。
+
+    欄名は reasoning_content(SGLang / DeepSeek / Kimi / MiMo の応答 delta と同じ名前 —
+    chat template がこの欄を読む)。空なら欄ごと付けない。
+    """
+    if not keep_reasoning:
+        return
+    reasoning = _model_facing_reasoning(blocks)
+    if reasoning:
+        message["reasoning_content"] = reasoning

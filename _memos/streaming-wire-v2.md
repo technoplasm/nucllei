@@ -262,6 +262,24 @@ WARNING の行だけ `head_frames=` / `tail_frames=` に生 SSE の先頭・末�
   キャプチャしてからテストファーストで実装する(推測実装しない)。
 - リバースプロキシは SSE の応答バッファリング禁止が前提(応答ヘッダ `X-Accel-Buffering: no`
   は付与済み。nginx 側でも尊重されること)。
-- tool ループの追撃では reasoning_content を再送しない(#18-2 以来の挙動)。upstream v0.9.0 は
-  保持する方向に直した(リリースノートのみ確認)が、nucllei は Kimi の挙動を優先して現状維持
-  (ken 決定 2026-10-05「Kimi は特殊なので、あまりいじらない」)。
+- **tool ループの追撃では、同じターンの reasoning を reasoning_content 欄で載せ直す**
+  (ken 決定 2026-10-19 — 2026-10-05 の「Kimi は特殊なので、あまりいじらない」= 再送しない、を覆した)。
+  - 形: `convert_content_blocks_to_messages(blocks, keep_reasoning=True)` が、各 assistant
+    (tool_calls 付き・末尾 text)に「その区間の reasoning 本文」を `reasoning_content` で付ける
+    (区間に複数あれば空行区切り、空なら欄ごと付けない)。**content には混ぜない・マークアップを
+    付けない**(e3552d5ab の回帰 — `<details type="reasoning">` ごと content に漏れていた件)。
+    これまで捨てていた理由の 2 件(e3552d5ab の漏れ、3ae10c091 の「思考中…」が閉じない)はどちらも
+    表示とマークアップの不具合で、正しい欄で送り直すことの害ではなかった。
+  - 範囲は**同じターンの追撃だけ**。ターンをまたぐ履歴(FE `expandAssistantToolHistory`・続きターンの
+    `execution_resume.build_wire_messages`・subagent の再構成・carried 計測)は従来どおり送らない
+    (DeepSeek V3.2 の template と同じ「ループ内だけ残す」)。
+  - 切り替えは preset の `meta.capabilities.preserve_reasoning`(既定 ON、キー不在も ON。
+    `middleware.is_reasoning_preserved`。model editor の Capabilities に「思考の保持」)。OFF で旧挙動。
+  - 実測(2026-10-19、prism-gw 越し、assistant(tool_calls)+ tool の追撃 1 回): glm-5.3-flash /
+    openrouter の mimo-v2.6-pro・kimi-k2.6・deepseek-v4.1-flash / claude-sonnet-4-6 / gpt-5.6-luna /
+    gemini-3.8-flash / codex/gpt-5.6-luna はすべて reasoning_content 付きで 200(prompt_tokens が増える
+    のは glm / mimo / kimi / deepseek / gemini — template が読んでいる。claude / gpt は不変 = 無視)。
+    **deepseek-v4.1-flash は reasoning_content が無いと 400**(「The `reasoning_content` in the
+    thinking mode must be passed back to the API」)— 旧挙動では DeepSeek の tool ループが追撃で
+    止まっていた。ターンをまたぐ履歴(新しい user の前の tool 往復)は reasoning 無しで 200。
+    SGLang の Kimi(prism-llens:13300)はこのマシンから届かず未確認。

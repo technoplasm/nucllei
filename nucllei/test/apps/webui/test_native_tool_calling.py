@@ -125,6 +125,7 @@ async def _drive_tool_call_loop(
     measure_carried=None,
     usage_records=None,
     form_extra=None,
+    model_meta=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
 
@@ -147,6 +148,7 @@ async def _drive_tool_call_loop(
     usage_records: 指定時は record_usage の呼び出し(usage)を積み、usage をそのまま
     マージ結果として返す(emit を観測する用)。
     form_extra: 初回の form_data に重ねるキー(生成パラメータ・messages の差し替え)。
+    model_meta: 指定時は model["info"]["meta"] に置く(preset の capabilities 等)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from nucllei.utils import middleware
@@ -255,6 +257,8 @@ async def _drive_tool_call_loop(
         )
     )
     model = {"id": "kimi-k2.6", "name": "kimi-k2.6"}
+    if model_meta is not None:
+        model["info"] = {"meta": model_meta}
 
     events_stream = CompletionEventStream(chat_id="chat-1", message_id="message-1")
     queue = events_stream.subscribe()
@@ -1423,6 +1427,36 @@ def test_normalize_logit_bias():
     assert normalize_logit_bias(None) is None
 
 
+def test_carried_measure_drops_reasoning_across_turns(monkeypatch):
+    """追撃には reasoning_content が載るが、次ターンの形(carried 計測の messages)には
+    載らない — 「ループ内だけ保持」(2026-10-19。FE expandAssistantToolHistory も
+    reasoning を送らない)。"""
+    from nucllei.utils import middleware
+
+    measured = []
+
+    async def measure(request, user, model_id, form_data, content_blocks, **kwargs):
+        measured.append(
+            middleware.build_carried_measure_messages(
+                form_data["messages"], content_blocks
+            )
+        )
+        return None
+
+    _, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="reasoning_then_tool",
+            measure_carried=measure,
+        )
+    )
+    assert _assistant_tool_calls_message(completion_calls[0])["reasoning_content"]
+    assert len(measured) == 1
+    assert all("reasoning_content" not in m for m in measured[0])
+
+
 # ---- 「続きを生成」撤去後: 末尾が assistant の wire(refs #142)--------------------
 
 
@@ -1630,13 +1664,27 @@ def test_followup_reinjects_pushed_images_as_user_message(monkeypatch):
     assert injected == ["INLINED:/api/v1/files/img-file-1/content"]
 
 
+def _reasoning_text(data):
+    """final data の content_blocks で、最初の tool_calls より前の reasoning 本文
+    (複数なら空行区切り)— 追撃の assistant(tool_calls)に載るべき区間。"""
+    texts = []
+    for b in data["content_blocks"]:
+        if b["type"] == "tool_calls":
+            break
+        if b["type"] == "reasoning":
+            texts.append(b["content"].strip())
+    return "\n\n".join(texts)
+
+
 def test_reasoning_not_leaked_into_followup_content(monkeypatch):
-    """reasoning はモデルへの継続リクエストの assistant content に漏らさない(#18-2)。
+    """追撃の assistant(tool_calls)は reasoning を reasoning_content 欄で載せ直し、
+    content には漏らさない(#18-2 の回帰 + 2026-10-19 の保持)。
 
     reasoning_then_tool は reasoning + 実応答 text + tool call を含む。継続リクエストの
     assistant メッセージ content には実応答 text だけが載り、UI 用の
-    <details type="reasoning"> マークアップは含まれないこと。ただし UI への emit
-    (chat:completion の content_blocks)には reasoning が残っていること。
+    <details type="reasoning"> マークアップも reasoning 本文も含まれないこと。
+    reasoning は本文だけが reasoning_content に載る(既定 = preserve_reasoning ON)。
+    UI への emit(chat:completion の content_blocks)にも reasoning が残っていること。
     """
     events, completion_calls, _ = asyncio.run(
         _drive_tool_call_loop(
@@ -1650,8 +1698,14 @@ def test_reasoning_not_leaked_into_followup_content(monkeypatch):
 
     assistant = _assistant_tool_calls_message(completion_calls[0])
     assert assistant is not None
-    # モデル向け履歴に reasoning の UI マークアップが漏れていない
-    assert '<details type="reasoning"' not in (assistant.get("content") or "")
+    reasoning = _reasoning_text(_final_done_data(events))
+    assert reasoning
+    # モデル向け履歴に reasoning の UI マークアップも本文も漏れていない
+    content = assistant.get("content") or ""
+    assert '<details type="reasoning"' not in content
+    assert reasoning not in content
+    # reasoning は reasoning_content 欄に本文だけで載る
+    assert assistant["reasoning_content"] == reasoning
 
     # UI への emit(content_blocks)には reasoning が残っている(表示は維持)。
     # content 文字列は text join 派生値なので reasoning を含まない(#17 L0)
@@ -1688,6 +1742,31 @@ def test_open_reasoning_not_leaked_into_followup_content(monkeypatch):
     assert assistant is not None
     content = assistant.get("content") or ""
     assert '<details type="reasoning"' not in content
+    # 閉じる前に tool_calls へ直行した reasoning も reasoning_content で載る
+    reasoning = _reasoning_text(_final_done_data(events))
+    assert reasoning
+    assert reasoning not in content
+    assert assistant["reasoning_content"] == reasoning
+
+
+def test_followup_drops_reasoning_when_preserve_reasoning_off(monkeypatch):
+    """preset の capabilities.preserve_reasoning=False では追撃に reasoning を載せない
+    (reasoning_content を受け付けない上流向けの opt-out — 2026-10-19 以前の形)。"""
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            initial_fixture="reasoning_then_tool",
+            model_meta={"capabilities": {"preserve_reasoning": False}},
+        )
+    )
+    assert len(completion_calls) == 1
+    assert all("reasoning_content" not in m for m in completion_calls[0]["messages"])
+    assistant = _assistant_tool_calls_message(completion_calls[0])
+    assert '<details type="reasoning"' not in (assistant.get("content") or "")
+    # 表示は不変
+    assert _reasoning_text(_final_done_data(events))
 
 
 def _reasoning_states(data):

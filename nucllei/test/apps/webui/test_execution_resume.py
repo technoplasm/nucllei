@@ -745,6 +745,68 @@ class TestExecutionResume(AbstractPostgresTest):
             # 空 assistant(応答先)は落ちる
         ]
 
+    def test_build_wire_messages_drops_reasoning(self):
+        """続きターンの履歴(ターンをまたぐ)には reasoning を載せない — 追撃だけが
+        reasoning_content を持つ(2026-10-19、FE expandAssistantToolHistory と同じ)。"""
+        chat_json = {
+            "history": {
+                "currentId": "a2",
+                "messages": {
+                    "u1": {
+                        "id": "u1",
+                        "parentId": None,
+                        "role": "user",
+                        "content": "q",
+                    },
+                    "a1": {
+                        "id": "a1",
+                        "parentId": "u1",
+                        "role": "assistant",
+                        "content": "答え",
+                        "content_blocks": [
+                            {"type": "reasoning", "content": "考え", "done": True},
+                            {
+                                "type": "tool_calls",
+                                "calls": [
+                                    {
+                                        "id": "c1",
+                                        "type": "function",
+                                        "function": {"name": "p", "arguments": ""},
+                                    }
+                                ],
+                                "results": [{"tool_call_id": "c1", "content": "ok"}],
+                            },
+                            {"type": "reasoning", "content": "まとめ", "done": True},
+                            {"type": "text", "content": "答え"},
+                        ],
+                    },
+                    "u2": {
+                        "id": "u2",
+                        "parentId": "a1",
+                        "role": "user",
+                        "content": "次",
+                    },
+                    "a2": {
+                        "id": "a2",
+                        "parentId": "u2",
+                        "role": "assistant",
+                        "content": "",
+                    },
+                },
+            }
+        }
+        user = types.SimpleNamespace(name="J", settings=None)
+        wire = self.resume.build_wire_messages(chat_json, user, "a2")
+        assert [m["role"] for m in wire] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+        ]
+        assert all("reasoning_content" not in m for m in wire)
+        assert all("考え" not in (m.get("content") or "") for m in wire)
+
     def test_convert_content_blocks_repairs_broken_tool_calls(self):
         """壊れ arguments の call 除去・result 欠落 call への [interrupted] 合成
         (FE expandAssistantToolHistory と同等 — 契約 M5)。"""

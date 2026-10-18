@@ -11,7 +11,8 @@
 //   画像を忘れない)。エントリは参照文字列(file id / スキーム付き URL / "/" 始まり)で、
 //   実体化(base64)は送信直前の backend inline_internal_image_urls。形はバックエンドと
 //   共有 fixture(nucllei/test/fixtures/history_wire/context_images.json)で固定している
-// - reasoning はモデルへ再送しない(バックエンドと同じ規律)
+// - reasoning はモデルへ再送しない(ターンをまたぐ履歴 — バックエンドの続きターン・carried 計測と同じ。
+//   reasoning_content を載せ直すのは同じターンの tool ループ追撃だけで、それは BE が組む — README_API 4.3)
 // - synthetic な tool_calls(`/command` 発火の合成 exchange、#35)はスキップする
 //   — 実体は inlet が毎リクエスト再注入するため、ここで送ると二重になる
 

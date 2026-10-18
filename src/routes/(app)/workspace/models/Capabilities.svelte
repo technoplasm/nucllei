@@ -10,10 +10,14 @@
 		vision: $i18n.t('Model accepts image inputs'),
 		usage: $i18n.t(
 			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'
+		),
+		preserve_reasoning: $i18n.t(
+			"Resend this turn's reasoning (reasoning_content) on the follow-up requests of the tool loop, so the model keeps its own thinking across tool calls. Turn this off only for OpenAI-compatible APIs that reject or misread reasoning_content"
 		)
 	};
 
-	// キーは vision / usage(usage はベースモデル依存でキーごと消える)。
+	// キーは vision / usage / preserve_reasoning(usage はベースモデル依存でキーごと消える)。
+	// preserve_reasoning は既定 ON(backend の is_reasoning_preserved と対 — 2026-10-19)。
 	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	// llens(#140): 旧「サブエージェント」トグル(meta.features.subagent)は撤去 —

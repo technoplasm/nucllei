@@ -1054,6 +1054,12 @@ A model preset is where all capability wiring happens (`meta` fields):
 `toolIds` (tools available to the model), `filterIds` / `actionIds` (functions),
 `skillIds` + `features.skills` (skills), plus params and system prompt.
 
+`meta.capabilities.preserve_reasoning` (default on; the model editor's
+Capabilities, "Preserve reasoning") controls whether the tool loop's follow-up
+calls carry the turn's reasoning back to the model — see "Reasoning in the
+history" under 4.3. Turn it off only for an OpenAI-compatible API that rejects or
+misreads `reasoning_content` on assistant messages.
+
 `params.custom_params` (editable in the model editor's Advanced tab, "Custom")
 is a free-form key/value escape hatch merged **top-level** into the outbound
 OpenAI-compatible request body — use it for engine extensions outside the
@@ -1130,6 +1136,29 @@ of the turn — the first, each tool-loop follow-up, and the turn-end measuremen
 below — carries the same generation parameters (`temperature`, `max_tokens`,
 `stop`, `seed`, … from `params` or top-level fields, after inlet filters), except
 that the measurement uses `max_tokens: 1`.
+
+**Reasoning in the history.** Within one turn, each tool-loop follow-up call
+re-sends the turn's own output so far: every `assistant` message with
+`tool_calls` (and a trailing text message) carries the reasoning produced before
+it as `reasoning_content` — the plain text only, never mixed into `content` and
+without markup (consecutive reasoning blocks are joined with a blank line; an
+empty one adds no field). Reasoning models read it back through their chat
+template (MiMo, Kimi, GLM, DeepSeek; DeepSeek's thinking mode returns 400 when it
+is missing on a tool-call follow-up). Across turns it is dropped: the history
+before a new user message — what the UI sends, a server-driven continuation turn,
+a subagent's later turns, the `carried_tokens` measurement — has no reasoning
+(the "keep it inside the loop" shape of DeepSeek V3.2's template). A trailing
+`assistant` message sent in `messages` is ordinary history of an earlier turn, so
+send no `reasoning_content` there either. The UI follows the same rule: a turn
+stopped in the middle of its tool loop is finished as far as the history goes
+(there is no "continue this message" mode), so the next message and a
+regeneration rebuild the history without its reasoning
+(`expandAssistantToolHistory` never sends reasoning). There is no "keep across
+turns" setting — DeepSeek, the one model that refuses a tool-call follow-up
+without reasoning, accepts history of earlier turns without it (checked
+2026-10-19), and adding it would also need the UI's history builder to send it. With
+`meta.capabilities.preserve_reasoning: false` the follow-ups carry no reasoning
+at all.
 
 The POST response is an SSE
 subscription to a background task that always runs to completion (disconnecting

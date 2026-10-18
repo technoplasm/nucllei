@@ -410,6 +410,22 @@ def is_continuous_usage_requested(model) -> bool:
     return capabilities.get("continuous_usage", True) is not False
 
 
+def is_reasoning_preserved(model) -> bool:
+    """tool ループの追撃に、同じターンの reasoning を reasoning_content で載せ直すか
+    (2026-10-19 ken 決定)。
+
+    既定 ON(キー不在は有効)。推論モデル(MiMo / Kimi / DeepSeek 等)は tool を呼ぶ
+    たびに直前の思考を失うと、同じ調べ直しや方針のぶれが起きる。preset の
+    capabilities.preserve_reasoning=False のときだけ載せない(reasoning_content を
+    受け付けない・読まない上流向けの opt-out)。
+    対象は同じターンの追撃だけ — 次ターン以降の履歴(FE expandAssistantToolHistory)と
+    続きターン・subagent の再構成には載せない(convert_content_blocks_to_messages の既定)。
+    """
+    meta = (model or {}).get("info", {}).get("meta", {}) or {}
+    capabilities = meta.get("capabilities") or {}
+    return capabilities.get("preserve_reasoning", True) is not False
+
+
 async def process_chat_payload(
     request, form_data, user, metadata, model, events_stream
 ):
@@ -2395,9 +2411,14 @@ async def process_chat_response(
                     # 1 箇所で足りる」は追撃を見落としていた)ため、合流後にもう一度
                     # 掛ける。followup_msgs は毎周新規 list なので content_blocks の原本を
                     # 汚さず、内部 URL 非一致は無変更=二重掛けでも冪等。
+                    # 同じターンの reasoning は reasoning_content 欄で載せ直す(preset の
+                    # capabilities.preserve_reasoning、既定 ON — is_reasoning_preserved)。
                     followup_msgs = [
                         *form_data["messages"],
-                        *convert_content_blocks_to_messages(assembler.content_blocks),
+                        *convert_content_blocks_to_messages(
+                            assembler.content_blocks,
+                            keep_reasoning=is_reasoning_preserved(model),
+                        ),
                     ]
                     # 同じ tool 画像は追撃のたびに読み直さない(ターン内で data URL を
                     # 使い回す — image_cache はこのターンだけ生きる)。
