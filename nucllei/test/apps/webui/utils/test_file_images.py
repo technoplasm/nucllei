@@ -172,8 +172,10 @@ class TestFileImagesInline(AbstractPostgresTest):
             f"data:image/png;base64,{PNG_B64}"
         )
 
-    def test_mime_fallback_from_extension(self):
-        # meta.content_type が無い場合は拡張子から推定
+    def test_image_url_type_from_bytes_not_extension(self):
+        # image_url の型は実バイト(magic)で決める — meta.content_type が無く拡張子が .jpg でも、
+        # 中身が PNG なら image/png(2026-10-18: 上流は申告と中身の食い違いも受けない)。
+        # 拡張子への fallback が効くのは magic を持たない SVG だけ(test_file_images_convert)
         with open(f"{self._upload_dir()}/f-jpg_y.jpg", "wb") as f:
             f.write(PNG_BYTES)
         self.Files.insert_new_file(
@@ -190,7 +192,7 @@ class TestFileImagesInline(AbstractPostgresTest):
             self._messages("/api/v1/files/f-jpg/content"), self.alice
         )
         url = messages[0]["content"][1]["image_url"]["url"]
-        assert url.startswith("data:image/jpeg;base64,")
+        assert url == f"data:image/png;base64,{PNG_B64}"
 
     def _upload_dir(self):
         from nucllei.config import UPLOAD_DIR

@@ -64,9 +64,12 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
     `log_write.aspx?...&LI_URL=x.pdf`) で、拡張子判定では院内資料を目で見る経路が
     丸ごと無かった。今は resolver の detect_media_type が同じ規律 (fetch_url は content-type と
     先頭バイトで自前判定)。
-  - 2026-10-18: 画像の判定を `image/*` 全体から VLM に渡せる形式の一覧 (`_VLM_IMAGE_TYPES`) に
-    絞った。モデルが描いた SVG を通し、次のモデル呼び出しが上流の 400 でターンごと止まった
-    (staging)。送信直前の inline は画像を変換しないので、TIFF も同じ理由で断る。
+  - 2026-10-18: 画像の判定を `image/*` 全体から VLM に渡せる形式の一覧に絞った。モデルが描いた
+    SVG を通し、次のモデル呼び出しが上流の 400 でターンごと止まった (staging)。同日、SVG / TIFF /
+    AVIF は送信直前の inline (`utils/file_images`) で PNG に変換する形にして、ここでは通すように
+    戻した (保証は inline の 1 箇所 — チャットの添付・DB から送り直される履歴も同じ所を通るため)。
+    断るのは送信直前にも描けない形式だけ。一覧は `utils/image_refs` (`VLM_IMAGE_TYPES` /
+    `CONVERTED_IMAGE_TYPES`)。
 """
 
 import asyncio
@@ -82,7 +85,10 @@ from nucllei.storage.provider import Storage
 from nucllei.env import FETCH_MAX_BYTES
 from nucllei.utils.file_limit import sandbox_file_limit_bytes
 from nucllei.utils.image_refs import (
+    CONVERTED_IMAGE_TYPES,
     REF_ARGS_RULE,
+    VLM_IMAGE_TYPES,
+    base_media_type,
     detect_media_type,
     file_id_of_url,
     pdf_page_count,
@@ -107,31 +113,15 @@ from nucllei.utils.ref_errors import (
 
 log = logging.getLogger(__name__)
 
-# 目に入れてよい画像の形式 (型 → 拡張子)。判定の一覧はここ 1 箇所 — file_id / path / url の
-# 3 経路とも `_kind` を通す。送信直前の inline (`utils/file_images`) は画像を変換せずにそのまま
-# data URL にするので、ここで通した形式がそのまま上流に届く。`image/*` 全体で通すと、上流が
-# 受けない形式 (SVG・TIFF 等) で次のモデル呼び出しが 400 になり、ターンごと止まる
-# (staging 2026-10-18: mimo-v2.6-pro が SVG に "only bmp/gif/png/jpeg/webp are supported")。
-# PDF は別 (送信直前にページを PNG にする)。
-# 値は (モデル向けの文に出す名前, 拡張子)。
-_VLM_IMAGE_TYPES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "image/png": ("PNG", ("png",)),
-    "image/jpeg": ("JPEG", ("jpg", "jpeg")),
-    "image/webp": ("WebP", ("webp",)),
-    "image/gif": ("GIF", ("gif",)),
-    "image/bmp": ("BMP", ("bmp",)),
-}
-# 同じ形式の別名 (Files メタの content-type はアップロード元の申告のまま)
-_TYPE_ALIASES = {
-    "image/jpg": "image/jpeg",
-    "image/pjpeg": "image/jpeg",
-    "image/x-ms-bmp": "image/bmp",
-    "image/x-bmp": "image/bmp",
-}
+# 目に入れてよい画像の形式 (型 → (モデル向けの文に出す名前, 拡張子))。一覧の正は `utils/image_refs`
+# (送信直前の inline と共有 — 2 箇所で持たない)。VLM にそのまま渡せる 5 形式と、送信直前に PNG に
+# 変換して渡す形式 (SVG / TIFF / AVIF) の両方を通す。3 経路 (file_id / path / url) とも `_kind` を通す。
+# それ以外の image/* (HEIC 等) は送信直前にも描けないので、ここで断る (`_unsupported_image`)。
+_IMAGE_TYPES = {**VLM_IMAGE_TYPES, **CONVERTED_IMAGE_TYPES}
 # 拡張子 → 型 (mimetypes は配備の /etc/mime.types 次第で webp 等を知らないことがあるので、
 # 許す形式の拡張子は上の一覧から引く)
-_TYPE_OF_EXT = {ext: t for t, (_name, exts) in _VLM_IMAGE_TYPES.items() for ext in exts}
-_VLM_IMAGE_NAMES = " / ".join(name for name, _exts in _VLM_IMAGE_TYPES.values())
+_TYPE_OF_EXT = {ext: t for t, (_name, exts) in _IMAGE_TYPES.items() for ext in exts}
+_IMAGE_NAMES = " / ".join(name for name, _exts in _IMAGE_TYPES.values())
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」(`utils/ref_errors` の module docstring)。
 # 別の toolkit の tool (sandbox の run_python / send_to_workspace / fetch_from_workspace、
@@ -281,30 +271,25 @@ def _read_raw(rec) -> Optional[bytes]:
         return None
 
 
-def _base_type(content_type: Optional[str]) -> str:
-    base = (content_type or "").split(";")[0].strip().lower()
-    return _TYPE_ALIASES.get(base, base)
-
-
 def _media_type_of_file(fname: Optional[str], content_type: Optional[str]) -> str:
     """file_id 経路の型: Files メタの content-type、画像でも PDF でもなければ拡張子から
     (url / path 経路の resolver の `detect_media_type` と同じ順。メタには magic が無い)。"""
-    ct = _base_type(content_type)
+    ct = base_media_type(content_type)
     if ct.startswith("image/") or ct == "application/pdf":
         return ct
     if fname:
         ext = os.path.splitext(fname)[1].lower().lstrip(".")
-        return _TYPE_OF_EXT.get(ext) or _base_type(mimetypes.guess_type(fname)[0])
+        return _TYPE_OF_EXT.get(ext) or base_media_type(mimetypes.guess_type(fname)[0])
     return ""
 
 
 def _kind(media_type: Optional[str]) -> Optional[str]:
     """'pdf' / 'image' (目に入れてよい形式) / 'unsupported' (画像だが VLM に渡せない形式) /
-    None (画像でも PDF でもない)。3 経路の判定はすべてここ (`_VLM_IMAGE_TYPES`)。"""
-    t = _base_type(media_type)
+    None (画像でも PDF でもない)。3 経路の判定はすべてここ (`_IMAGE_TYPES`)。"""
+    t = base_media_type(media_type)
     if t == "application/pdf":
         return "pdf"
-    if t in _VLM_IMAGE_TYPES:
+    if t in _IMAGE_TYPES:
         return "image"
     if t.startswith("image/"):
         return "unsupported"
@@ -312,28 +297,18 @@ def _kind(media_type: Optional[str]) -> Optional[str]:
 
 
 def _unsupported_image(label: str, media_type: str, *, source: str) -> ToolCallError:
-    """VLM に渡せない画像形式の ERROR。次の手は「sandbox で PNG にして path= で渡す」。
+    """送信直前にも描けない画像形式 (`_IMAGE_TYPES` の外の image/*、HEIC 等) の ERROR。
+    次の手は「sandbox で PNG にして path= で渡す」。
 
     source は来た経路 ("path" / "url" / "file_id")。path 以外は先に send_to_workspace で sandbox に
-    取り込む。変換の道具は sandbox の jail にあるものだけを挙げる (sandbox/Dockerfile:
-    SVG は LibreOffice (soffice) — rsvg-convert / cairosvg / ImageMagick は入っていない。
-    それ以外は venv の Pillow)。"""
-    t = _base_type(media_type)
-    accepted = f"渡せるのは {_VLM_IMAGE_NAMES} の画像と PDF"
+    取り込む。変換の道具は sandbox の venv の Pillow。"""
+    t = base_media_type(media_type)
+    accepted = f"渡せるのは {_IMAGE_NAMES} の画像と PDF"
     if source == "path":
         fetch, src = "", "このパス"
     else:
         fetch = f"send_to_workspace({source}=…) で sandbox に取り込み、"
         src = "取り込んだパス"
-    if t == "image/svg+xml":
-        need = "send_to_workspace と run_shell" if fetch else "run_shell"
-        return ToolCallError(
-            f"{label} は SVG で、画像として目に入れられない ({accepted})",
-            f"{need} が使えるなら、{fetch}{src}を"
-            " `soffice --headless --convert-to png --outdir /workspace/<出力先> <SVG のパス>`"
-            " で PNG にし (rsvg-convert / cairosvg は無い)、できた /workspace/….png を"
-            " feed_image(path=…) に渡す。自分で描く図なら、最初から PNG で書き出す。",
-        )
     need = "send_to_workspace と run_python" if fetch else "run_python"
     return ToolCallError(
         f"{label} は {t} で、この形式のままでは目に入れられない ({accepted})",

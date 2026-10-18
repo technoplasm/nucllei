@@ -1152,7 +1152,9 @@ def test_file_lines_that_fed_nothing_are_flagged_without_changing_the_text(
     assert got == "call" and fed == []
 
 
-# --- 画像の形式: VLM に渡せる形式だけを通す (staging 2026-10-18 の SVG で上流 400) ---------
+# --- 画像の形式: 送信直前に送れる形にできる形式だけを通す (staging 2026-10-18 の SVG で上流 400) ---
+# VLM にそのまま渡せる 5 形式と、送信直前の inline で PNG に変換する SVG / TIFF / AVIF は積む。
+# それ以外の image/* (HEIC 等) は送信直前にも描けないので断る。
 
 SVG = _Loaded(
     b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>',
@@ -1204,58 +1206,70 @@ def test_accepted_image_formats_pass_by_file_id(monkeypatch):
         assert fed == ["f1"], (name, ct, result)
 
 
-def test_svg_is_refused_with_how_to_convert_on_every_route(monkeypatch):
-    """SVG は上流が受けないので積まずに ERROR (call)。次の手は jail にある soffice で PNG にして
+HEIC = _Loaded(b"\0\0\0\x18ftypheic" + b"\0" * 8, "image/heic", "photo.heic")
+
+
+def test_svg_and_tiff_are_fed_on_every_route(monkeypatch):
+    """SVG / TIFF は積む (PNG にするのは送信直前の inline — `utils/file_images`)。path・url・
+    file_id のどれでも、file_id はメタが曖昧なら拡張子で。"""
+    table = {
+        **TABLE,
+        "/workspace/out/fig.svg": SVG,
+        f"{ORIGIN}/fig.svg": SVG,
+        "/workspace/out/scan.tif": TIFF,
+    }
+    for kw in (
+        {"path": "/workspace/out/fig.svg"},
+        {"url": f"{ORIGIN}/fig.svg"},
+        {"path": "/workspace/out/scan.tif"},
+    ):
+        result, fed, _r = _run(monkeypatch, table, **kw)
+        assert fed == list(kw.values()), (kw, result)
+        assert "を自分の目に入れた" in result
+
+    for name, ct, raw in (
+        ("fig.svg", "image/svg+xml", SVG.data),
+        ("fig.svg", "application/octet-stream", SVG.data),
+        ("scan.tiff", "image/tiff", TIFF.data),
+        ("scan.tif", "image/tif", TIFF.data),  # 別名
+        ("a.avif", "image/avif", b"\0" * 16),
+    ):
+        rec = _Rec("f1", "u1", name, ct)
+        result, fed, _r = _run_with_files(
+            monkeypatch, {"f1": rec}, raw=raw, file_id="f1"
+        )
+        assert fed == ["f1"], (name, ct, result)
+
+
+def test_formats_that_cannot_be_drawn_are_refused_with_how_to_convert(monkeypatch):
+    """送信直前にも描けない形式 (HEIC 等) は積まずに ERROR (call)。次の手は Pillow で PNG にして
     path= で渡す。path 以外は先に send_to_workspace で取り込む。"""
-    mod, _resolver = _install(monkeypatch, {**TABLE, "/workspace/out/fig.svg": SVG})
+    mod, _resolver = _install(monkeypatch, {**TABLE, "/workspace/out/photo.heic": HEIC})
     fed: list[str] = []
     err = asyncio.run(
         call_error(
             mod.Tools().feed_image(
-                path="/workspace/out/fig.svg",
+                path="/workspace/out/photo.heic",
                 __user__={"id": "u1"},
                 __feed_image__=fed.append,
             )
         )
     )
     assert fed == [] and err.kind == "call"
-    assert err.text.startswith("ERROR: /workspace/out/fig.svg は SVG で")
-    assert "PNG / JPEG / WebP / GIF / BMP" in err.text
+    assert err.text.startswith("ERROR: /workspace/out/photo.heic は image/heic で")
+    assert "PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF" in err.text
     nxt = err.text.split("次の手: ", 1)[1]
-    assert "soffice --headless --convert-to png" in nxt and "feed_image(path=…)" in nxt
+    assert "Pillow" in nxt and "feed_image(path=…)" in nxt
     assert "send_to_workspace" not in nxt
 
-    table = {**TABLE, f"{ORIGIN}/fig.svg": SVG}
-    result, fed, _r = _run(monkeypatch, table, url=f"{ORIGIN}/fig.svg")
-    assert fed == [] and result.startswith("ERROR") and "SVG" in result
-    assert "send_to_workspace(url=…)" in result and "soffice" in result
-
-    # file_id: メタの型でも、メタが曖昧なときの拡張子でも
-    for ct in ("image/svg+xml", "application/octet-stream"):
-        rec = _Rec("f1", "u1", "fig.svg", ct)
-        result, fed, _r = _run_with_files(
-            monkeypatch, {"f1": rec}, raw=SVG.data, file_id="f1"
-        )
-        assert fed == [] and result.startswith("ERROR: fig.svg は SVG で"), ct
-        assert "send_to_workspace(file_id=…)" in result and "soffice" in result
-    # url の /api/v1/files/{id}/content は file として読む — 取り込みは url= で言う
-    rec = _Rec("f1", "u1", "fig.svg", "image/svg+xml")
+    rec = _Rec("f1", "u1", "photo.heic", "image/heic")
     result, fed, _r = _run_with_files(
-        monkeypatch, {"f1": rec}, raw=SVG.data, url="/api/v1/files/f1/content"
+        monkeypatch, {"f1": rec}, raw=HEIC.data, file_id="f1"
+    )
+    assert fed == [] and result.startswith("ERROR: photo.heic は image/heic で")
+    assert "send_to_workspace(file_id=…)" in result
+    # url の /api/v1/files/{id}/content は file として読む — 取り込みは url= で言う
+    result, fed, _r = _run_with_files(
+        monkeypatch, {"f1": rec}, raw=HEIC.data, url="/api/v1/files/f1/content"
     )
     assert fed == [] and "send_to_workspace(url=…)" in result
-
-
-def test_other_image_formats_like_tiff_are_refused(monkeypatch):
-    """TIFF 等は送信直前に変換していない (inline はそのまま data URL) ので断る。次の手は Pillow。"""
-    table = {**TABLE, "/workspace/out/scan.tif": TIFF}
-    result, fed, _r = _run(monkeypatch, table, path="/workspace/out/scan.tif")
-    assert fed == [] and result.startswith(
-        "ERROR: /workspace/out/scan.tif は image/tiff で"
-    )
-    assert "Pillow" in result and "feed_image(path=…)" in result
-    rec = _Rec("f1", "u1", "scan.tiff", "image/tiff")
-    result, fed, _r = _run_with_files(
-        monkeypatch, {"f1": rec}, raw=TIFF.data, file_id="f1"
-    )
-    assert fed == [] and result.startswith("ERROR") and "image/tiff" in result

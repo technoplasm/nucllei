@@ -75,6 +75,10 @@ dependencies = [
     # バインディング。#139 から fork 本体も使う(utils/image_refs.py — feed した PDF の
     # ページを送信直前に画像化する)。配備層 Function(llens pdf_vision 等)も同じ同梱物を使う。
     "pypdfium2==4.30.1",
+    # SVG ラスタライズ。pypdfium2 と同じ理由(pip のみで完結し cairo / librsvg 等の system deps を
+    # 要らない resvg バインディング、manylinux abi3 wheel)。fork 本体が使う(utils/image_refs.py —
+    # 送信直前に SVG を PNG にする。VLM の上流は bmp/gif/png/jpeg/webp しか受けない)。
+    "resvg-py==0.5.0",
     "fpdf2==2.8.2",
     # --- ここから下は「同梱するだけ」の道具箱 -------------------------------
     # **fork 本体は import しない**。配備層の tool / function が import して使うために

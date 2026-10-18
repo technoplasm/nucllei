@@ -15,7 +15,8 @@ context_images に文字列のまま永続し、送信直前のここが実体�
 とおり "(image unavailable)" に落ちる)。「参照 → バイト」の規則は `utils/image_refs.py` 一箇所(tool 側と
 共有。image_url の url は引数名を持たない保存済み文字列なので、先頭で振り分ける
 `resolve_ref` を通す — 表は image_refs の module docstring)で、ここは種別で分岐するだけ: 画像はそのまま data URL、PDF は指定ページ
-(既定 1)を PNG に画像化して data URL。per-user のアクセス検査は file_id 経路だけ —
+(既定 1)を PNG に画像化して data URL、SVG / TIFF / AVIF は PNG に変換して data URL(上流の VLM は
+png / jpeg / webp / gif / bmp しか受けない — 載せる形式の保証はここ 1 箇所、`_materialize`)。per-user のアクセス検査は file_id 経路だけ —
 URL / fs 参照の公開範囲は配備が `EXT_MOUNTS` に書いた物(= `/ext/` の配信元)/
 呼び出しユーザーの workspace が境界で、解決層が fail closed で持つ。
 
@@ -23,7 +24,10 @@ URL / fs 参照の公開範囲は配備が `EXT_MOUNTS` に書いた物(= `/ext/
 不達・どの名前空間にも当たらない絶対 URL)は、URL のまま残すとモデル側がリクエストごと
 落とし該当チャットが恒久的に失敗するため、text パーツ "(image unavailable)" に置換する。
 全経路とも同一の置換にすることで、payload からアクセス不可と不存在を区別できない
-(存在有無をモデル経由で漏らさない)。data URL・文字列 content のメッセージは触らない。それ以外の形
+(存在有無をモデル経由で漏らさない)。読めたが画像に変換できなかったもの(壊れた SVG・描画の
+打ち切り・上記以外の image/*)だけは "(<名前>: 画像に変換できなかった (形式 …))" の注記にする
+(読めた後なので存在は漏れない — 何が渡らなかったかをモデルが言える)。文字列 content のメッセージと、
+VLM に渡せる形式の data URL は触らない(それ以外の形式の data URL は中身を読んで同じ出口を通す)。それ以外の形
 ("//host/..." プロトコル相対、http(s) 以外のスキーム、相対パス、"/ext/" でも sandbox でも
 ない "/" 始まり)も unavailable に倒す —
 headless API(`/api/chat/completions`)の image_url に外部 URL を渡した場合も同じ。
@@ -34,19 +38,27 @@ headless API(`/api/chat/completions`)の image_url に外部 URL を渡した場
 
 import asyncio
 import base64
+import binascii
+import hashlib
 import logging
 import mimetypes
+from urllib.parse import unquote_to_bytes
 
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.access_control import has_read_access_to_file
 from nucllei.utils.image_refs import (
+    CONVERTED_IMAGE_TYPES,
     INTERNAL_FILE_URL_PATTERN as INTERNAL_FILE_URL_PATTERN,  # utils/skills.py が引く
+    VLM_IMAGE_TYPES,
     LoadedRef,
-    detect_kind,
+    base_media_type,
+    convert_image_to_png,
+    detect_media_type,
     file_id_of_url,
     rasterize_pdf_page,
     resolve_ref,
+    sniff_vlm_image_type,
     split_page,
 )
 from nucllei.env import SRC_LOG_LEVELS
@@ -57,8 +69,38 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 UNAVAILABLE_IMAGE_TEXT = "(image unavailable)"
 
 
+class _Note(str):
+    """image_url パーツの代わりに置く text(画像として送れなかった注記)。
+
+    `_materialize` の戻り値は data URL か、これか、None("(image unavailable)")。ターン内
+    キャッシュに同じ dict で載せるので、data URL と型で見分ける。"""
+
+
+def _unconvertible_note(name: str, media_type: str) -> _Note:
+    return _Note(f"({name}: 画像に変換できなかった (形式 {media_type}))")
+
+
 def _to_data_url(content_type: str, raw: bytes) -> str:
     return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _data_url_media_type(url: str) -> str:
+    return base_media_type(url[5:].split(",", 1)[0].split(";", 1)[0])
+
+
+def _decode_data_url(url: str) -> LoadedRef | None:
+    """data URL の中身を読む(blocking — thread で呼ぶ)。読めなければ None。"""
+    header, sep, payload = url[5:].partition(",")
+    if not sep:
+        return None
+    try:
+        if ";base64" in header.lower():
+            raw = base64.b64decode(payload, validate=False)
+        else:
+            raw = unquote_to_bytes(payload)
+    except (ValueError, binascii.Error):
+        return None
+    return LoadedRef(data=raw, content_type=_data_url_media_type(url), name="")
 
 
 def _load_file(file_id: str, user) -> LoadedRef | None:
@@ -91,28 +133,54 @@ def _load_file(file_id: str, user) -> LoadedRef | None:
     return LoadedRef(data=raw, content_type=content_type, name=file.filename or "")
 
 
-async def _materialize(loaded: LoadedRef, page: int | None, label: str) -> str | None:
-    """読めたバイト列を data URL にする。画像はそのまま、PDF は指定ページ(既定 1)を PNG 化。
+async def _materialize(
+    loaded: LoadedRef, page: int | None, label: str, name: str
+) -> str | None:
+    """読めたバイト列を data URL にする。VLM に渡せる形式 (`VLM_IMAGE_TYPES`) の画像は
+    そのまま、PDF は指定ページ(既定 1)を PNG 化、SVG / TIFF / AVIF (`CONVERTED_IMAGE_TYPES`)
+    は PNG に変換。変換できなかったもの・それ以外の画像は注記 (`_Note`) を返す。画像でも PDF
+    でもなければ None。
 
     file_id 経路と "/" 参照経路の共通の出口 — 添付 PDF も feed_image が
     "/api/v1/files/{id}/content#page=N" で積む(File を作らない、#139)ので、
-    ページ画像化は経路によらずここ 1 箇所。
+    ページ画像化は経路によらずここ 1 箇所。上流が受けない形式を image_url に載せない保証も
+    ここ 1 箇所に置く: チャットの添付、feed_image の context_images、DB から送り直される履歴の
+    画像はどれもここを通る。image_url に載せる型は実バイト (magic) で決める — 申告が SVG で
+    中身が PNG なら PNG として送り、申告が PNG で中身が違えば画像として送らない。
     """
-    kind = detect_kind(loaded)
-    if kind == "image":
-        return _to_data_url(loaded.content_type, loaded.data)
-    if kind == "pdf":
+    media_type = detect_media_type(loaded)
+    if media_type == "application/pdf":
         try:
             png = await asyncio.to_thread(rasterize_pdf_page, loaded.data, page or 1)
         except Exception:
             log.exception(f"file_images: pdf rasterize failed ({label}, page={page})")
             return None
         return _to_data_url("image/png", png)
-    log.warning(
-        f"file_images: reference is neither image nor pdf ({label}, "
-        f"content_type={loaded.content_type!r})"
-    )
-    return None
+    vlm_type = sniff_vlm_image_type(loaded.data)
+    if vlm_type:
+        return _to_data_url(vlm_type, loaded.data)
+    if media_type is None:
+        log.warning(
+            f"file_images: reference is neither image nor pdf ({label}, "
+            f"content_type={loaded.content_type!r})"
+        )
+        return None
+    if media_type in CONVERTED_IMAGE_TYPES:
+        try:
+            png = await convert_image_to_png(loaded.data, media_type)
+        except Exception as e:
+            log.warning(
+                f"file_images: image conversion failed ({label}, "
+                f"media_type={media_type}): {e!r}"
+            )
+        else:
+            return _to_data_url("image/png", png)
+    else:
+        log.warning(
+            f"file_images: image type not accepted by the model ({label}, "
+            f"media_type={media_type})"
+        )
+    return _unconvertible_note(name, media_type)
 
 
 async def inline_internal_image_urls(
@@ -122,7 +190,7 @@ async def inline_internal_image_urls(
 
     messages を破壊的に書き換えて同じ list を返す。変換できない内部 file URL /
     絶対 URL / "/" 始まり参照パーツ(およびどの名前空間でもない URL)は text
-    "(image unavailable)" に置換(冒頭 docstring 参照)。data URL は無変更。
+    "(image unavailable)" に置換(冒頭 docstring 参照)。VLM に渡せる形式の data URL は無変更。
 
     cache: 呼び出しをまたいで data URL(変換不能の None も)を使い回す dict。tool
     ループの追撃は毎周 content_blocks から messages を作り直すので、渡さないと同じ
@@ -136,7 +204,7 @@ async def inline_internal_image_urls(
     loaded_cache: dict[str, LoadedRef | None] = {}
     data_cache: dict[str, str | None] = cache if cache is not None else {}
 
-    async def materialize(key: str, loader, page: int | None, label: str):
+    async def materialize(key: str, loader, page: int | None, label: str, name=None):
         page_key = f"{key}#{page}"
         if page_key in data_cache:
             return data_cache[page_key]
@@ -144,7 +212,9 @@ async def inline_internal_image_urls(
             loaded_cache[key] = await loader()
         loaded = loaded_cache[key]
         data_cache[page_key] = (
-            None if loaded is None else await _materialize(loaded, page, label)
+            None
+            if loaded is None
+            else await _materialize(loaded, page, label, name or loaded.name or label)
         )
         return data_cache[page_key]
 
@@ -176,8 +246,19 @@ async def inline_internal_image_urls(
             )
         return loaded
 
+    async def load_data_url(url: str) -> str | None:
+        return await materialize(
+            f"data:{hashlib.sha256(url.encode()).hexdigest()}",
+            lambda: asyncio.to_thread(_decode_data_url, url),
+            None,
+            "data URL",
+        )
+
     async def load_reference(ref: str, page: int | None) -> str | None:
-        return await materialize(f"ref:{ref}", lambda: resolve(ref), page, f"ref={ref}")
+        # 注記に出す名前は参照そのもの(モデルが知っている形 — 次の手に使える)
+        return await materialize(
+            f"ref:{ref}", lambda: resolve(ref), page, f"ref={ref}", name=ref
+        )
 
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None
@@ -198,9 +279,12 @@ async def inline_internal_image_urls(
             file_id = file_id_of_url(ref)
             if file_id:
                 data_url = await load(file_id, page)
-            elif ref.startswith("data:"):
-                # 既に実体(送信できる形)— 触らない
-                continue
+            elif url.startswith("data:"):
+                # 既に実体。VLM に渡せる形式ならそのまま送る(触らない)。それ以外
+                # (headless API の data:image/svg+xml 等)は中身を読んで同じ出口へ
+                if _data_url_media_type(url) in VLM_IMAGE_TYPES:
+                    continue
+                data_url = await load_data_url(url)
             else:
                 # 残りは全部 resolver(image_refs)へ — URL(http(s):// / 同一サーバの
                 # "/ext/")と sandbox の fs パス("/workspace/")だけが解決され、
@@ -208,10 +292,11 @@ async def inline_internal_image_urls(
                 # 相対パス)は None → "(image unavailable)"(fail closed。
                 # URL のまま残すと推論エンジンがリクエストごと落とす)
                 data_url = await load_reference(ref, page)
-            if data_url is None:
+            if data_url is None or isinstance(data_url, _Note):
+                text = UNAVAILABLE_IMAGE_TEXT if data_url is None else str(data_url)
                 part.clear()
                 part["type"] = "text"
-                part["text"] = UNAVAILABLE_IMAGE_TEXT
+                part["text"] = text
                 continue
 
             if isinstance(image_url, dict):

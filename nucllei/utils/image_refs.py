@@ -361,8 +361,46 @@ _MAGIC_TYPES = (
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
     (b"BM", "image/bmp"),
+    (b"II*\x00", "image/tiff"),
+    (b"MM\x00*", "image/tiff"),
     (b"%PDF", "application/pdf"),
 )
+
+# VLM に画像として渡せる形式 (型 → (モデル向けの文に出す名前, 拡張子))。送信直前の inline
+# (`utils/file_images`) はこの 5 形式だけを image_url にする — 上流はそれ以外を受けず、
+# 次のモデル呼び出しが 400 でターンごと止まる (staging 2026-10-18: mimo-v2.6-pro が SVG に
+# "only bmp/gif/png/jpeg/webp are supported")。どの形式も magic を持つので、型は実バイトで決める。
+VLM_IMAGE_TYPES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "image/png": ("PNG", ("png",)),
+    "image/jpeg": ("JPEG", ("jpg", "jpeg")),
+    "image/webp": ("WebP", ("webp",)),
+    "image/gif": ("GIF", ("gif",)),
+    "image/bmp": ("BMP", ("bmp",)),
+}
+# 送信直前に PNG にして渡す形式 (`convert_image_to_png`。PDF のページを `rasterize_pdf_page` で
+# 画像にするのと同じ位置づけ)。SVG は resvg、それ以外は Pillow で描く。AVIF はチャット入力の
+# 画像扱いの一覧 (FE の inputFilesHandler) に入っていて、そのまま上流に届くと同じ 400 になる。
+CONVERTED_IMAGE_TYPES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "image/svg+xml": ("SVG", ("svg",)),
+    "image/tiff": ("TIFF", ("tif", "tiff")),
+    "image/avif": ("AVIF", ("avif",)),
+}
+# 同じ形式の別名 (Files メタの content-type はアップロード元の申告のまま)
+_IMAGE_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-ms-bmp": "image/bmp",
+    "image/x-bmp": "image/bmp",
+    "image/svg": "image/svg+xml",
+    "image/tif": "image/tiff",
+    "image/x-tiff": "image/tiff",
+}
+
+
+def base_media_type(content_type: str | None) -> str:
+    """パラメータを除いた小文字の型。同じ形式の別名は正の名前に寄せる。"""
+    base = (content_type or "").split(";")[0].strip().lower()
+    return _IMAGE_TYPE_ALIASES.get(base, base)
 
 
 @dataclass
@@ -555,10 +593,17 @@ def detect_media_type(loaded: LoadedRef) -> str | None:
         loaded.content_type,
         mimetypes.guess_type(loaded.name)[0],
     ):
-        base = (content_type or "").split(";")[0].strip().lower()
+        base = base_media_type(content_type)
         if base.startswith("image/") or base == "application/pdf":
             return base
     return None
+
+
+def sniff_vlm_image_type(data: bytes) -> str | None:
+    """実バイトが VLM に渡せる形式 (`VLM_IMAGE_TYPES`) ならその型、でなければ None。
+    申告 (content-type・拡張子) は見ない — 5 形式とも magic を持つ。"""
+    sniffed = _sniff(data)
+    return sniffed if sniffed in VLM_IMAGE_TYPES else None
 
 
 def detect_kind(loaded: LoadedRef) -> str | None:
@@ -597,6 +642,196 @@ def rasterize_pdf_page(data: bytes, page: int) -> bytes:
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return buf.getvalue()
+
+
+# 変換 (`convert_image_to_png`) で描く画像の長辺の上限 / 下限 (px)。上限は巨大な width / height の
+# SVG・TIFF でメモリを食い尽くさないため (送信のたびに base64 で載るので大きすぎても困る)。
+# 下限はアイコン級の SVG (24px 等) をモデルが読める大きさに描くため (ベクタなので劣化しない —
+# ラスタの TIFF は拡大しない)。
+CONVERTED_IMAGE_MAX_SIDE = 2048
+CONVERTED_SVG_MIN_SIDE = 512
+# SVG を描く子プロセスの待ち上限 (秒)。超えたら kill して変換失敗に落とす (resvg の描画は
+# 中断できないので thread ではなく子プロセスで描く)。
+SVG_RENDER_TIMEOUT = 10.0
+# 子プロセスのアドレス空間の上限 (バイト)。長辺の上限で画素は抑えているが、フィルタ等の
+# 中間バッファの暴走に備えた底
+_SVG_RENDER_MEMORY_LIMIT = 1024 * 1024 * 1024
+
+_SVG_NS = "http://www.w3.org/2000/svg"
+# SVG の中から読んでよい参照: 文書内 (`#id`) と、ラスタ画像の data URL だけ。それ以外
+# (`file://`・`http(s)://`・相対 / 絶対パス、入れ子の SVG の data URL) は属性ごと落とす —
+# resvg は既定で相対・絶対パスの画像をサーバのファイルから読む (実測)。入れ子の SVG は
+# 中の参照を同じ設定で読むので data URL でも通さない。
+_SVG_SAFE_HREF = re.compile(
+    r"^(?:#|data:image/(?:png|jpeg|jpg|gif|webp)[;,])", re.IGNORECASE
+)
+# SVG の長さの単位 → px (CSS の絶対単位。em / ex は既定のフォントサイズ 16px で概算)
+_SVG_UNITS = {
+    "": 1.0,
+    "px": 1.0,
+    "pt": 4 / 3,
+    "pc": 16.0,
+    "in": 96.0,
+    "cm": 96 / 2.54,
+    "mm": 96 / 25.4,
+    "q": 96 / 101.6,
+    "em": 16.0,
+    "ex": 8.0,
+}
+_SVG_LENGTH = re.compile(
+    r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*([a-z]*)\s*$", re.I
+)
+
+# 子プロセスで動かす描画。標準入力の SVG を描いて PNG を標準出力へ。cwd と resources_dir は
+# 空の一時ディレクトリ (参照は `_prepare_svg` で落としてあるが、念のため相対パスの解決先も空にする)。
+_SVG_RENDER_SCRIPT = """
+import resource, sys
+limit = int(sys.argv[2])
+resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+import resvg_py
+svg = sys.stdin.buffer.read().decode("utf-8")
+png = resvg_py.svg_to_bytes(svg_string=svg, background="#ffffff", resources_dir=sys.argv[1])
+sys.stdout.buffer.write(png)
+"""
+
+
+def _svg_length(value: str | None) -> float | None:
+    """width / height の値を px にする。% や読めない値は None。"""
+    match = _SVG_LENGTH.match(value or "")
+    if not match:
+        return None
+    factor = _SVG_UNITS.get(match.group(2).lower())
+    if factor is None:
+        return None
+    px = float(match.group(1)) * factor
+    return px if px > 0 and px != float("inf") else None
+
+
+def _prepare_svg(data: bytes) -> str:
+    """描く前の SVG を整える (blocking — thread で呼ぶ)。読めなければ ValueError。
+
+    - 外部参照を落とす (`_SVG_SAFE_HREF` 以外の href / xlink:href。`<image>` `<feImage>` `<use>` 等の
+      要素を問わない)。parser は標準の expat: 内部実体は展開してから見る (実体に参照を隠せない)、
+      外部実体は読まない。DOCTYPE ごと書き出さない (resvg には展開後の木だけを渡す)
+    - 描く大きさを決めて root の width / height に書く (長辺を `CONVERTED_SVG_MIN_SIDE`〜
+      `CONVERTED_IMAGE_MAX_SIDE` に収める)。元の大きさは width / height、無ければ viewBox から。
+      viewBox が無ければ元の大きさで足す (width / height を書き換えても絵が拡縮されるように)
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise ValueError(f"svg parse failed: {e}") from e
+    if root.tag != f"{{{_SVG_NS}}}svg":
+        raise ValueError(f"root is not <svg> ({root.tag[:80]!r})")
+
+    for element in root.iter():
+        for attr in [a for a in element.attrib if a.rsplit("}", 1)[-1] == "href"]:
+            if not _SVG_SAFE_HREF.match(element.attrib[attr].strip()):
+                del element.attrib[attr]
+
+    view_box = None
+    parts = re.split(r"[\s,]+", (root.get("viewBox") or "").strip())
+    if len(parts) == 4:
+        try:
+            nums = [float(x) for x in parts]
+        except ValueError:
+            nums = None
+        if nums and nums[2] > 0 and nums[3] > 0:
+            view_box = nums
+    width, height = _svg_length(root.get("width")), _svg_length(root.get("height"))
+    if view_box:
+        aspect = view_box[2] / view_box[3]
+        if width is None and height is None:
+            width, height = view_box[2], view_box[3]
+        elif width is None:
+            width = height * aspect
+        elif height is None:
+            height = width / aspect
+    if width is None or height is None:
+        # 大きさの手がかりが無い (% 指定で viewBox も無い等) — ブラウザの既定の大きさ
+        width, height = width or 300.0, height or 150.0
+    if not view_box:
+        root.set("viewBox", f"0 0 {width:g} {height:g}")
+
+    long_side = max(width, height)
+    scale = min(CONVERTED_IMAGE_MAX_SIDE / long_side, 1.0)
+    if long_side < CONVERTED_SVG_MIN_SIDE:
+        scale = CONVERTED_SVG_MIN_SIDE / long_side
+    root.set("width", str(max(1, round(width * scale))))
+    root.set("height", str(max(1, round(height * scale))))
+    ET.register_namespace("", _SVG_NS)
+    ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
+    return ET.tostring(root, encoding="unicode")
+
+
+async def _render_svg(data: bytes) -> bytes:
+    """SVG を PNG にする。子プロセスで描き、`SVG_RENDER_TIMEOUT` を超えたら kill する。"""
+    import sys
+    import tempfile
+
+    svg = await asyncio.to_thread(_prepare_svg, data)
+    with tempfile.TemporaryDirectory(prefix="svg-render-") as empty_dir:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",
+            "-c",
+            _SVG_RENDER_SCRIPT,
+            empty_dir,
+            str(_SVG_RENDER_MEMORY_LIMIT),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=empty_dir,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(svg.encode("utf-8")), SVG_RENDER_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise TimeoutError(f"svg render exceeded {SVG_RENDER_TIMEOUT:g}s")
+    if proc.returncode != 0 or not stdout.startswith(b"\x89PNG"):
+        tail = stderr.decode("utf-8", "replace").strip().splitlines()[-1:]
+        raise ValueError(
+            f"svg render failed (exit={proc.returncode}): {tail[0] if tail else ''}"
+        )
+    return stdout
+
+
+def _raster_to_png(data: bytes) -> bytes:
+    """TIFF / AVIF を PNG にする (blocking — thread で呼ぶ)。先頭のページだけ、長辺は
+    `CONVERTED_IMAGE_MAX_SIDE` まで縮める (拡大はしない)。読めなければ例外。
+
+    Pillow が開いてよい形式を絞る (`formats`) — 申告と中身が食い違っても、ここで想定外の
+    decoder (EPS は ghostscript を起こす等) に渡さない。画素数は Pillow の
+    `MAX_IMAGE_PIXELS` を超えたら断る (既定では 2 倍まで警告だけで開いてしまう)。"""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data), formats=("TIFF", "AVIF")) as image:
+        if image.width * image.height > (Image.MAX_IMAGE_PIXELS or float("inf")):
+            raise ValueError(f"image too large ({image.width}x{image.height})")
+        image.thumbnail((CONVERTED_IMAGE_MAX_SIDE, CONVERTED_IMAGE_MAX_SIDE))
+        if image.mode not in ("1", "L", "LA", "P", "RGB", "RGBA"):
+            image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def convert_image_to_png(data: bytes, media_type: str) -> bytes:
+    """`CONVERTED_IMAGE_TYPES` の画像を PNG にする。描けなければ例外 (呼び手が注記に落とす)。
+
+    SVG は resvg (子プロセス・外部参照なし・時間と画素の上限付き — `_render_svg`)、TIFF / AVIF は
+    Pillow (thread)。どちらも event loop を塞がない (PDF の `rasterize_pdf_page` と同じ)。"""
+    media_type = base_media_type(media_type)
+    if media_type == "image/svg+xml":
+        return await _render_svg(data)
+    if media_type in CONVERTED_IMAGE_TYPES:
+        return await asyncio.to_thread(_raster_to_png, data)
+    raise ValueError(f"not a convertible image type: {media_type!r}")
 
 
 def _content_type_for(data: bytes, declared: str | None, name: str) -> str:
