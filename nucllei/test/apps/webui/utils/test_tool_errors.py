@@ -371,6 +371,82 @@ def test_var_keyword_callable_skips_the_signature_check():
     assert "error_kind" not in results[0]
 
 
+# --- 引数を型の注釈に揃える(2026-10-18、run_shell の timeout_s="120" で落ちた件) ---------
+
+
+def _typed_probe(calls):
+    from typing import Annotated, Optional
+
+    def probe(
+        n: int = 0,
+        t: Optional[int] = None,
+        x: float = 0.0,
+        flag: bool = False,
+        tagged: Annotated[Optional[int], "meta"] = None,
+        s: str = "",
+        __user__=None,
+    ):
+        calls.append(dict(n=n, t=t, x=x, flag=flag, tagged=tagged, s=s))
+        return "ok"
+
+    from nucllei.utils.tools import get_async_tool_function_and_apply_extra_params
+
+    # 実際の tool と同じ包み方(sync はスレッドで — partial の奥の注釈を読めること)
+    wrapped = get_async_tool_function_and_apply_extra_params(
+        probe, {"__user__": {"id": "u1"}}
+    )
+    names = ("n", "t", "x", "flag", "tagged", "s")
+    return _tool(wrapped, properties={k: {} for k in names})
+
+
+def test_string_numbers_are_coerced_to_the_annotated_type():
+    calls = []
+    tools = _typed_probe(calls)
+    arguments = (
+        '{"n": " 120 ", "t": "-3", "x": "1.5", "flag": "TRUE", "tagged": "7",'
+        ' "s": "42"}'
+    )
+    results = _run([_call(arguments)], tools)
+    assert results[0]["content"] == "ok" and "error_kind" not in results[0]
+    assert calls == [dict(n=120, t=-3, x=1.5, flag=True, tagged=7, s="42")]
+
+    # str 以外の値・None には触らない(広げない)
+    calls.clear()
+    results = _run([_call('{"n": 5, "t": null, "flag": false}')], tools)
+    assert calls == [dict(n=5, t=None, x=0.0, flag=False, tagged=None, s="")]
+
+
+@pytest.mark.parametrize(
+    "arguments, name, label",
+    [
+        ('{"n": "abc"}', "n", ("整数", "整数で")),
+        ('{"t": "1.5"}', "t", ("整数", "整数で")),
+        ('{"x": "nan"}', "x", ("数値", "数値で")),
+        ('{"flag": "yes"}', "flag", (" true か false", " true か false で")),
+        ('{"flag": "1"}', "flag", (" true か false", " true か false で")),
+    ],
+)
+def test_uncoercible_string_is_a_call_error(arguments, name, label):
+    what, how = label
+    calls = []
+    results = _run([_call(arguments)], _typed_probe(calls))
+    assert calls == []  # tool は走らない
+    assert results[0]["error_kind"] == "call"
+    value = arguments.split('": ')[1].rstrip("}")
+    assert results[0]["content"] == (
+        f"ERROR: ツール probe の引数 {name} は{what} ({value.replace(chr(34), chr(39))}"
+        f" は読めない)。次の手: {name} を{how}渡して呼び直す。"
+    )
+
+
+def test_unannotated_callable_is_passed_through():
+    async def probe(**kwargs):
+        return kwargs
+
+    results = _run([_call('{"b": "1"}')], _tool(probe, properties={"b": {}}))
+    assert results[0]["content"] == '{"b": "1"}'
+
+
 def test_returned_error_leading_string_is_a_normal_result():
     """返した文字列は何で始まっても通常の結果(ken 決定 — `ERROR:` の文字列を失敗と
     見なす読み替えはしない)。失敗を伝えるなら ToolError を raise する。"""
@@ -429,6 +505,64 @@ def test_custom_db_tool_can_raise_tool_error():
 
     results = _run([_call('{"code": "12"}', name="lookup")], tools)
     assert results[0]["content"] == "found 12" and "error_kind" not in results[0]
+
+
+_CUSTOM_TYPED_TOOL_SOURCE = """
+from typing import Optional, Union
+
+
+class Tools:
+    def search(
+        self,
+        query: str,
+        offset: int = 0,
+        regex: bool = True,
+        max_rows: Optional[int] = None,
+        either: Union[int, str] = 0,
+        loose=None,
+        __user__: dict = None,
+    ) -> str:
+        \"\"\"検索する。\"\"\"
+        return repr((query, offset, regex, max_rows, either, loose))
+"""
+
+
+def test_custom_db_tool_arguments_are_coerced_too():
+    """配備層のカスタム tool(DB の content を exec でロード)も同じ呼び出し口で揃える。
+    XML 形式の tool call を返すモデル(値がすべて文字列)で `regex: bool` に "false" が
+    来ると、揃えなければ真として逆の動きをする。str の引数・注釈の無い引数・複数の型の
+    Union には触らない。"""
+    from nucllei.utils.plugin import load_tool_module_by_id
+    from nucllei.utils.tools import get_async_tool_function_and_apply_extra_params
+
+    module, _ = load_tool_module_by_id(
+        "custom_search", content=_CUSTOM_TYPED_TOOL_SOURCE
+    )
+    callable_ = get_async_tool_function_and_apply_extra_params(
+        module.search, {"__user__": {"id": "u1"}}
+    )
+    names = ("query", "offset", "regex", "max_rows", "either", "loose")
+    tools = _tool(
+        callable_,
+        name="search",
+        properties={k: {} for k in names},
+        tool_id="custom_search",
+    )
+
+    arguments = (
+        '{"query": "120", "offset": "5", "regex": "False", "max_rows": "10",'
+        ' "either": "7", "loose": "8"}'
+    )
+    results = _run([_call(arguments, name="search")], tools)
+    assert "error_kind" not in results[0], results[0]
+    assert results[0]["content"] == repr(("120", 5, False, 10, "7", "8"))
+
+    results = _run([_call('{"query": "q", "regex": "yes"}', name="search")], tools)
+    assert results[0]["error_kind"] == "call"
+    assert results[0]["content"] == (
+        "ERROR: ツール search の引数 regex は true か false ('yes' は読めない)。"
+        "次の手: regex を true か false で渡して呼び直す。"
+    )
 
 
 def test_one_failing_call_does_not_flag_its_siblings():

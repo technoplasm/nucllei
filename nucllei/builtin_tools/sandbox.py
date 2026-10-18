@@ -428,8 +428,28 @@ def _sandbox_auth() -> ToolError:
     return _err(_SANDBOX_AUTH, "fatal")
 
 
+def _is_transport_error(e: Exception) -> bool:
+    """sandbox に届かなかった・応答が来なかった失敗 (接続の拒否・切断・タイムアウト)。
+    aiohttp の例外と OSError (ConnectionRefusedError・TimeoutError を含む) がこれにあたる。
+    それ以外 (nucllei 側の TypeError / ValueError 等) は内部エラー — 「時間を置いて呼び直す」
+    では直らないので、接続の失敗として案内しない。"""
+    return isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError, OSError))
+
+
+def _internal_error(e: Exception, where: str) -> ToolError:
+    """nucllei 側 (この tool の中) の想定外の例外。詳細 (例外の文・traceback) はログだけ
+    (A17)。sandbox が使えないとは言わない — 呼び直しても同じところで落ちる。"""
+    log.error(f"[sandbox] internal error in {where}: {e!r}", exc_info=e)
+    return ToolFatal(
+        "sandbox ツールの内部でエラーが起きた (サーバ側の不具合)",
+        "同じ引数で呼び直さない。ユーザーにツールの不具合で実行できなかったと伝える。",
+    )
+
+
 def _exec_error(e: Exception) -> ToolError:
     """sandbox の実行 (`/exec` `/exec_cell`) の失敗。例外の中身はログだけ。呼び手が raise する。"""
+    if not isinstance(e, SandboxHTTPError) and not _is_transport_error(e):
+        return _internal_error(e, "exec")
     log.error(f"[sandbox] exec failed: {e!r}")
     if isinstance(e, SandboxHTTPError) and e.status == 401:
         return _sandbox_auth()
@@ -455,6 +475,8 @@ def _read_only(abs_path: str) -> ToolError:
 def _files_error(e: Exception, abs_path: str) -> ToolError:
     """sandbox `/files/*` の失敗をモデル向けの ToolError にする (原因を言い分ける)。
     例外の文・detail はログだけ (A17)。呼び手が raise する。"""
+    if not isinstance(e, SandboxHTTPError) and not _is_transport_error(e):
+        return _internal_error(e, f"/files ({abs_path})")
     log.warning(f"[sandbox] /files failed for {abs_path}: {e!r}")
     if not isinstance(e, SandboxHTTPError):
         return _err(
@@ -1239,8 +1261,11 @@ class Tools:
             # exports/ の自動添付の上限
             **sandbox_limit_fields(limit),
         }
+        # HTTP の待ちは実行の上限 + 余裕。計算は try の外 — ここで落ちるのは nucllei 側の
+        # 不具合で、sandbox に届かなかった (_exec_error) とは言わない
+        http_timeout = payload["timeout_s"] + 30
         try:
-            res = await self._post("/exec", payload, payload["timeout_s"] + 30)
+            res = await self._post("/exec", payload, http_timeout)
         except Exception as e:
             raise _exec_error(e)
         output_lines = await self._register_exports(
@@ -1281,8 +1306,9 @@ class Tools:
             # exports/ の自動添付の上限
             **sandbox_limit_fields(limit),
         }
+        http_timeout = payload["timeout_s"] + 30  # 計算は try の外 (_exec と同じ)
         try:
-            res = await self._post("/exec_cell", payload, payload["timeout_s"] + 30)
+            res = await self._post("/exec_cell", payload, http_timeout)
         except Exception as e:
             raise _exec_error(e)
         output_lines = await self._register_exports(

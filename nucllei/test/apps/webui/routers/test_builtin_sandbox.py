@@ -561,6 +561,87 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         _arun(tool.run_python_once("print('hello')", __user__={"id": "u1"}))
         assert tool.calls[0][1]["lang"] == "python"
 
+    def test_run_shell_accepts_timeout_as_a_string(self):
+        """staging (dev-1d3bf0224): モデルが `"timeout_s": "120"` を渡すと `+ 30` が TypeError で
+        落ち、接続の失敗として「時間を置いて呼び直す」が返っていた。共通の呼び出し口
+        (execute_tool_calls) が注釈 Optional[int] に揃えるので普通に動く。直せない値は
+        呼び方の誤り (call) で、sandbox には送らない。"""
+        from nucllei.utils.middleware import execute_tool_calls
+        from nucllei.utils.tools import get_async_tool_function_and_apply_extra_params
+
+        res = {
+            "exit_code": 0,
+            "duration_s": 0.2,
+            "stdout": "hello\n",
+            "stderr": "",
+            "exports": [],
+        }
+        tool = _sandbox({"/exec": res})
+        callable_ = get_async_tool_function_and_apply_extra_params(
+            tool.run_shell, {"__user__": {"id": "u1"}}
+        )
+        tools = {
+            "run_shell": {
+                "callable": callable_,
+                "spec": {
+                    "name": "run_shell",
+                    "parameters": {"properties": {"command": {}, "timeout_s": {}}},
+                },
+            }
+        }
+
+        def run(arguments):
+            call = {
+                "id": "functions.run_shell:0",
+                "function": {"name": "run_shell", "arguments": arguments},
+            }
+            return asyncio.run(execute_tool_calls([call], tools))[0]
+
+        result = run('{"command": "echo hello", "timeout_s": "120"}')
+        assert "error_kind" not in result, result
+        assert "exit_code=0" in result["content"] and "hello" in result["content"]
+        assert tool.calls[0][1]["timeout_s"] == 120
+        assert tool.calls[0][2] == 150
+
+        tool.calls.clear()
+        result = run('{"command": "echo hello", "timeout_s": "abc"}')
+        assert tool.calls == []
+        assert result["error_kind"] == "call"
+        assert result["content"] == (
+            "ERROR: ツール run_shell の引数 timeout_s は整数 ('abc' は読めない)。"
+            "次の手: timeout_s を整数で渡して呼び直す。"
+        )
+
+    def test_internal_errors_are_not_reported_as_sandbox_down(self):
+        """nucllei 側の例外 (TypeError 等) は「sandbox で実行できなかった / 時間を置いて
+        呼び直す」にしない — 呼び直しても同じところで落ちる。例外の文はモデルに出さない (A17)。
+        接続の失敗 (OSError・aiohttp・タイムアウト) の文面は従来どおり。"""
+        user = {"id": "u1"}
+        internal = (
+            "ERROR: sandbox ツールの内部でエラーが起きた (サーバ側の不具合)。次の手: "
+            "同じ引数で呼び直さない。ユーザーにツールの不具合で実行できなかったと伝える。"
+        )
+        for error in (
+            TypeError('can only concatenate str (not "int") to str'),
+            ValueError("bad json"),
+        ):
+            tool = _sandbox(error=error)
+            for coro in (
+                tool.run_shell("x", __user__=user),
+                tool.run_python("x", __user__=user, __chat_id__="c1"),
+                tool.list_workspace(__user__=user),
+            ):
+                text, kind = _flagged(coro)
+                assert text == internal and kind == "fatal", text
+
+        for error in (ConnectionRefusedError("refused"), asyncio.TimeoutError()):
+            tool = _sandbox(error=error)
+            text, kind = _flagged(tool.run_shell("x", __user__=user))
+            assert text.startswith(
+                "ERROR: sandbox で実行できなかった。次の手: 時間を置いて"
+            )
+            assert kind == "failure"
+
     def test_missing_user_context_is_refused_everywhere(self):
         tool = _sandbox({})
         for coro in (

@@ -1,19 +1,25 @@
 import inspect
 import logging
+import math
 import re
 import aiohttp
 import asyncio
 import yaml
 
 from pydantic import BaseModel
+from types import UnionType
 from typing import (
+    Annotated,
     Any,
     Awaitable,
     Callable,
+    get_args,
+    get_origin,
     get_type_hints,
     Dict,
     List,
     Optional,
+    Union,
 )
 from functools import update_wrapper, partial
 
@@ -30,6 +36,7 @@ from nucllei.models.tools import Tools
 from nucllei.models.users import UserModel
 from nucllei.utils.access_control import has_access
 from nucllei.utils.plugin import load_tool_module_by_id
+from nucllei.utils.tool_errors import ToolCallError
 from nucllei.utils.tool_render import (
     apply_render_to_spec,
     extract_render_from_function,
@@ -61,6 +68,96 @@ def get_async_tool_function_and_apply_extra_params(
 
         update_wrapper(new_function, function)
         return new_function
+
+
+# 引数を型の注釈に揃える(2026-10-18、staging で run_shell に `"timeout_s": "120"` が来て
+# nucllei 側の `+ 30` が TypeError で落ちた件)。モデルは数値を文字列で渡すことがある。
+# 揃えるのは **str で来た値を int / float / bool(と Optional[...] / Annotated[...] で包んだもの)
+# に直す** ことだけ。pydantic の検証(lax)は使わない: str の引数に来た数値を弾く・bool に
+# "yes" / "1" / "on" まで通す等、受け付ける形が今より広くも狭くもなるため。
+# int は符号付きの十進整数、float は有限の数、bool は "true" / "false"(大小文字は問わない)
+# だけを読む。それ以外の str は呼び方の誤り(call)として返す。str 以外の値には触らない。
+_INT_RE = re.compile(r"[+-]?\d+")
+# 型 → (「引数 x は…」に続く語, 「x を…渡して」に続く語)
+_SCALAR_LABELS = {
+    int: ("整数", "整数で"),
+    float: ("数値", "数値で"),
+    bool: (" true か false", " true か false で"),
+}
+
+
+def _scalar_target(hint) -> Optional[type]:
+    """注釈から揃える先の型(int / float / bool)。それ以外・複数の型の Union は None。"""
+    if get_origin(hint) is Annotated:
+        hint = get_args(hint)[0]
+    if get_origin(hint) in (Union, UnionType):
+        args = [a for a in get_args(hint) if a is not type(None)]
+        if len(args) != 1:
+            return None
+        hint = args[0]
+        if get_origin(hint) is Annotated:
+            hint = get_args(hint)[0]
+    return hint if hint in _SCALAR_LABELS else None
+
+
+def _parse_scalar(target: type, value: str):
+    """str を target に読む。読めなければ ValueError。"""
+    text = value.strip()
+    if target is bool:
+        if text.lower() in ("true", "false"):
+            return text.lower() == "true"
+        raise ValueError(value)
+    if target is int:
+        if _INT_RE.fullmatch(text):
+            return int(text)
+        raise ValueError(value)
+    number = float(text)  # 読めなければ ValueError
+    if not math.isfinite(number):
+        raise ValueError(value)
+    return number
+
+
+def _type_hints_of(function: Callable) -> dict:
+    """tool の callable(partial・update_wrapper で包まれていてよい)の引数の型注釈。
+    取れなければ {}(揃えない)。"""
+    target = function
+    for _ in range(4):
+        target = inspect.unwrap(target)
+        if isinstance(target, partial):
+            target = target.func
+        else:
+            break
+    try:
+        return get_type_hints(target, include_extras=True)
+    except Exception:
+        return {}
+
+
+def coerce_tool_arguments(function: Callable, tool_name: str, params: dict):
+    """モデルが渡した引数を型の注釈に揃える。戻り値は (揃えた params, error)。
+
+    error は直せない値があったときの ToolCallError(呼び方の誤り — 呼び直せば直る)。
+    注釈の無い callable(tool server の `**kwargs` 等)はそのまま返す。
+    """
+    hints = _type_hints_of(function)
+    if not hints:
+        return params, None
+    coerced = dict(params)
+    for name, value in params.items():
+        if not isinstance(value, str):
+            continue
+        target = _scalar_target(hints.get(name))
+        if target is None:
+            continue
+        try:
+            coerced[name] = _parse_scalar(target, value)
+        except ValueError:
+            what, how = _SCALAR_LABELS[target]
+            return params, ToolCallError(
+                f"ツール {tool_name} の引数 {name} は{what} ({value[:40]!r} は読めない)",
+                f"{name} を{how}渡して呼び直す。",
+            )
+    return coerced, None
 
 
 # llens(#140): `Tools` クラスの汎用フック名。get_tools がターンごとに呼ぶ予約名で、

@@ -82,7 +82,7 @@ from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
 )
-from nucllei.utils.tools import get_tools
+from nucllei.utils.tools import coerce_tool_arguments, get_tools
 from nucllei.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
@@ -1995,6 +1995,12 @@ async def _execute_one_tool_call(
             timeout_override = inline_background_timeout(tool)
 
         signature_error = _tool_signature_error(tool, tool_name, tool_function_params)
+        if signature_error is None:
+            # 型の注釈に揃える("120" → 120 等)。直せない値は call の ToolError。
+            # background の spawn にも揃えた値が渡る(監査保存と runner の呼び出し)
+            tool_function_params, signature_error = coerce_tool_arguments(
+                tool["callable"], tool_name, tool_function_params
+            )
         if signature_error is not None:
             # #145 項目 2: 必須引数の欠落を callable の生の TypeError にしない
             log.warning(
