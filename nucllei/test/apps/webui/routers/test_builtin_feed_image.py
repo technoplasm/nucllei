@@ -9,8 +9,8 @@ path = sandbox の絶対パス、file_id = 添付・生成物。**解釈は引�
 別の引数の意味に読み替えない (url="/workspace/…" は URL として解決できない、path="https://…" は
 sandbox のパスの形でない、の固定文 ERROR)。
 
-共有 resolver (utils/image_refs: resolve_url / resolve_path / detect_kind / pdf_page_count) は
-module 属性の差し替えで偽装する — 解決規則 (許可 root / 上流 / traversal / サイズ上限) の正しさは
+共有 resolver (utils/image_refs: resolve_url / resolve_path / pdf_page_count) は
+module 属性の差し替えで偽装する (型の判定 detect_media_type は純関数なので本物を使う) — 解決規則 (許可 root / 上流 / traversal / サイズ上限) の正しさは
 test_image_refs_resolve.py が見る。ここで見るのは tool の振る舞いだけ:
 引数名どおりの resolver に渡すこと (url → resolve_url、path → resolve_path、url の
 /api/v1/files/{id}/content は file として所有者チェックで読む・file_id との排他)、
@@ -46,14 +46,6 @@ class _Loaded:
         self.data = data
         self.content_type = content_type
         self.name = name
-
-
-def _detect_kind(loaded):
-    if loaded.data[:5] == b"%PDF-" or loaded.content_type == "application/pdf":
-        return "pdf"
-    if loaded.content_type.startswith("image/"):
-        return "image"
-    return None
 
 
 class _Resolver:
@@ -116,7 +108,6 @@ def _install(monkeypatch, table, n_pages=5):
     monkeypatch.setattr(mod, "Storage", _NoStorage())
     monkeypatch.setattr(mod, "resolve_url", resolver.url)
     monkeypatch.setattr(mod, "resolve_path", resolver.path)
-    monkeypatch.setattr(mod, "detect_kind", _detect_kind)
     monkeypatch.setattr(mod, "pdf_page_count", lambda data: n_pages)
 
     # 配信されている `/ext/…` だけ URL (同じ文字列) を返す偽物。既定は「配信されていない」
@@ -1159,3 +1150,112 @@ def test_file_lines_that_fed_nothing_are_flagged_without_changing_the_text(
     # 全部レコード無し = 同じ種別 (call)
     _result, got, fed = flagged({}, __files__=files)
     assert got == "call" and fed == []
+
+
+# --- 画像の形式: VLM に渡せる形式だけを通す (staging 2026-10-18 の SVG で上流 400) ---------
+
+SVG = _Loaded(
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>',
+    "image/svg+xml",
+    "fig.svg",
+)
+TIFF = _Loaded(b"II*\x00" + b"\0" * 16, "image/tiff", "scan.tif")
+# 通す形式 (magic と型を本物の detect_media_type に通す)
+OK_IMAGES = {
+    "png": _Loaded(b"\x89PNG\r\n\x1a\n" + b"\0" * 16, "image/png", "a.png"),
+    "jpeg": _Loaded(b"\xff\xd8\xff" + b"\0" * 16, "image/jpeg", "a.jpg"),
+    "webp": _Loaded(b"RIFF\0\0\0\0WEBPVP8 " + b"\0" * 8, "image/webp", "a.webp"),
+    "gif": _Loaded(b"GIF89a" + b"\0" * 16, "image/gif", "a.gif"),
+    "bmp": _Loaded(b"BM" + b"\0" * 16, "image/bmp", "a.bmp"),
+}
+
+
+def test_accepted_image_formats_and_pdf_pass_on_every_route(monkeypatch):
+    """png / jpeg / webp / gif / bmp と PDF は path・url の両方で今までどおり積む。"""
+    table = dict(TABLE)
+    for ext, loaded in OK_IMAGES.items():
+        table[f"/workspace/out/a.{ext}"] = loaded
+        table[f"{ORIGIN}/a.{ext}"] = loaded
+    for ext in OK_IMAGES:
+        for kw in ({"path": f"/workspace/out/a.{ext}"}, {"url": f"{ORIGIN}/a.{ext}"}):
+            result, fed, _r = _run(monkeypatch, table, **kw)
+            assert fed == list(kw.values()), (ext, kw, result)
+            assert "を自分の目に入れた" in result
+    result, fed, _r = _run(
+        monkeypatch, path="/ext/cage/static/kansen_manual/docs/10-14.pdf", pages="2"
+    )
+    assert fed == ["/ext/cage/static/kansen_manual/docs/10-14.pdf#page=2"]
+
+
+def test_accepted_image_formats_pass_by_file_id(monkeypatch):
+    for name, ct in (
+        ("a.png", "image/png"),
+        ("a.jpg", "image/jpeg"),
+        ("a.jpg", "image/jpg"),  # 別名
+        ("a.webp", "image/webp"),
+        ("a.gif", "image/gif"),
+        ("a.bmp", "image/x-ms-bmp"),  # 別名
+        ("a.webp", "application/octet-stream"),  # メタが曖昧なら拡張子
+    ):
+        rec = _Rec("f1", "u1", name, ct)
+        result, fed, _r = _run_with_files(
+            monkeypatch, {"f1": rec}, raw=b"\0" * 16, file_id="f1"
+        )
+        assert fed == ["f1"], (name, ct, result)
+
+
+def test_svg_is_refused_with_how_to_convert_on_every_route(monkeypatch):
+    """SVG は上流が受けないので積まずに ERROR (call)。次の手は jail にある soffice で PNG にして
+    path= で渡す。path 以外は先に send_to_workspace で取り込む。"""
+    mod, _resolver = _install(monkeypatch, {**TABLE, "/workspace/out/fig.svg": SVG})
+    fed: list[str] = []
+    err = asyncio.run(
+        call_error(
+            mod.Tools().feed_image(
+                path="/workspace/out/fig.svg",
+                __user__={"id": "u1"},
+                __feed_image__=fed.append,
+            )
+        )
+    )
+    assert fed == [] and err.kind == "call"
+    assert err.text.startswith("ERROR: /workspace/out/fig.svg は SVG で")
+    assert "PNG / JPEG / WebP / GIF / BMP" in err.text
+    nxt = err.text.split("次の手: ", 1)[1]
+    assert "soffice --headless --convert-to png" in nxt and "feed_image(path=…)" in nxt
+    assert "send_to_workspace" not in nxt
+
+    table = {**TABLE, f"{ORIGIN}/fig.svg": SVG}
+    result, fed, _r = _run(monkeypatch, table, url=f"{ORIGIN}/fig.svg")
+    assert fed == [] and result.startswith("ERROR") and "SVG" in result
+    assert "send_to_workspace(url=…)" in result and "soffice" in result
+
+    # file_id: メタの型でも、メタが曖昧なときの拡張子でも
+    for ct in ("image/svg+xml", "application/octet-stream"):
+        rec = _Rec("f1", "u1", "fig.svg", ct)
+        result, fed, _r = _run_with_files(
+            monkeypatch, {"f1": rec}, raw=SVG.data, file_id="f1"
+        )
+        assert fed == [] and result.startswith("ERROR: fig.svg は SVG で"), ct
+        assert "send_to_workspace(file_id=…)" in result and "soffice" in result
+    # url の /api/v1/files/{id}/content は file として読む — 取り込みは url= で言う
+    rec = _Rec("f1", "u1", "fig.svg", "image/svg+xml")
+    result, fed, _r = _run_with_files(
+        monkeypatch, {"f1": rec}, raw=SVG.data, url="/api/v1/files/f1/content"
+    )
+    assert fed == [] and "send_to_workspace(url=…)" in result
+
+
+def test_other_image_formats_like_tiff_are_refused(monkeypatch):
+    """TIFF 等は送信直前に変換していない (inline はそのまま data URL) ので断る。次の手は Pillow。"""
+    table = {**TABLE, "/workspace/out/scan.tif": TIFF}
+    result, fed, _r = _run(monkeypatch, table, path="/workspace/out/scan.tif")
+    assert fed == [] and result.startswith(
+        "ERROR: /workspace/out/scan.tif は image/tiff で"
+    )
+    assert "Pillow" in result and "feed_image(path=…)" in result
+    rec = _Rec("f1", "u1", "scan.tiff", "image/tiff")
+    result, fed, _r = _run_with_files(
+        monkeypatch, {"f1": rec}, raw=TIFF.data, file_id="f1"
+    )
+    assert fed == [] and result.startswith("ERROR") and "image/tiff" in result

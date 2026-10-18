@@ -3,7 +3,7 @@
 
 配備層 (prism-hu/llens の `tools/feed_image.py`) から本体へ移設した (2026-10-03、#141)。
 判断の根拠は sandbox と同じ**依存の向き**: この tool は `utils/image_refs` の resolver
-(resolve_url / resolve_path / file_id_of_url / detect_kind / split_page / with_page) と
+(resolve_url / resolve_path / file_id_of_url / detect_media_type / split_page / with_page) と
 `models.files` / `storage.provider` を掴んでいて、配備側に置く限り「相手の nucllei がその
 API を持っているか」を try/except で交渉し続けるしかなかった (旧 nucllei 向けの
 `_OLD_RESOLVER` 固定文・公開定数のローカル同文がその痕跡)。builtin なら nucllei と同じ
@@ -62,12 +62,16 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
   - 2026-09-04: 種別判定を拡張子から content-type / magic bytes に移した。院内の配信口は
     拡張子を持たない形が普通 (病院情報管理システムの資料リンクは全て
     `log_write.aspx?...&LI_URL=x.pdf`) で、拡張子判定では院内資料を目で見る経路が
-    丸ごと無かった。今は resolver の detect_kind が同じ規律 (fetch_url は content-type と
+    丸ごと無かった。今は resolver の detect_media_type が同じ規律 (fetch_url は content-type と
     先頭バイトで自前判定)。
+  - 2026-10-18: 画像の判定を `image/*` 全体から VLM に渡せる形式の一覧 (`_VLM_IMAGE_TYPES`) に
+    絞った。モデルが描いた SVG を通し、次のモデル呼び出しが上流の 400 でターンごと止まった
+    (staging)。送信直前の inline は画像を変換しないので、TIFF も同じ理由で断る。
 """
 
 import asyncio
 import logging
+import mimetypes
 import os
 from typing import Callable, Optional
 
@@ -79,7 +83,7 @@ from nucllei.env import FETCH_MAX_BYTES
 from nucllei.utils.file_limit import sandbox_file_limit_bytes
 from nucllei.utils.image_refs import (
     REF_ARGS_RULE,
-    detect_kind,
+    detect_media_type,
     file_id_of_url,
     pdf_page_count,
     resolve_path,
@@ -103,7 +107,31 @@ from nucllei.utils.ref_errors import (
 
 log = logging.getLogger(__name__)
 
-_IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"}
+# 目に入れてよい画像の形式 (型 → 拡張子)。判定の一覧はここ 1 箇所 — file_id / path / url の
+# 3 経路とも `_kind` を通す。送信直前の inline (`utils/file_images`) は画像を変換せずにそのまま
+# data URL にするので、ここで通した形式がそのまま上流に届く。`image/*` 全体で通すと、上流が
+# 受けない形式 (SVG・TIFF 等) で次のモデル呼び出しが 400 になり、ターンごと止まる
+# (staging 2026-10-18: mimo-v2.6-pro が SVG に "only bmp/gif/png/jpeg/webp are supported")。
+# PDF は別 (送信直前にページを PNG にする)。
+# 値は (モデル向けの文に出す名前, 拡張子)。
+_VLM_IMAGE_TYPES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "image/png": ("PNG", ("png",)),
+    "image/jpeg": ("JPEG", ("jpg", "jpeg")),
+    "image/webp": ("WebP", ("webp",)),
+    "image/gif": ("GIF", ("gif",)),
+    "image/bmp": ("BMP", ("bmp",)),
+}
+# 同じ形式の別名 (Files メタの content-type はアップロード元の申告のまま)
+_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-ms-bmp": "image/bmp",
+    "image/x-bmp": "image/bmp",
+}
+# 拡張子 → 型 (mimetypes は配備の /etc/mime.types 次第で webp 等を知らないことがあるので、
+# 許す形式の拡張子は上の一覧から引く)
+_TYPE_OF_EXT = {ext: t for t, (_name, exts) in _VLM_IMAGE_TYPES.items() for ext in exts}
+_VLM_IMAGE_NAMES = " / ".join(name for name, _exts in _VLM_IMAGE_TYPES.values())
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」(`utils/ref_errors` の module docstring)。
 # 別の toolkit の tool (sandbox の run_python / send_to_workspace / fetch_from_workspace、
@@ -253,20 +281,65 @@ def _read_raw(rec) -> Optional[bytes]:
         return None
 
 
-def _kind(fname: Optional[str], content_type: Optional[str]) -> Optional[str]:
-    """'pdf' / 'image' / None を返す (file_id 経路の Files メタ用)。"""
-    ct = (content_type or "").lower()
-    if ct == "application/pdf":
-        return "pdf"
-    if ct.startswith("image/"):
-        return "image"
+def _base_type(content_type: Optional[str]) -> str:
+    base = (content_type or "").split(";")[0].strip().lower()
+    return _TYPE_ALIASES.get(base, base)
+
+
+def _media_type_of_file(fname: Optional[str], content_type: Optional[str]) -> str:
+    """file_id 経路の型: Files メタの content-type、画像でも PDF でもなければ拡張子から
+    (url / path 経路の resolver の `detect_media_type` と同じ順。メタには magic が無い)。"""
+    ct = _base_type(content_type)
+    if ct.startswith("image/") or ct == "application/pdf":
+        return ct
     if fname:
         ext = os.path.splitext(fname)[1].lower().lstrip(".")
-        if ext == "pdf":
-            return "pdf"
-        if ext in _IMAGE_EXTS:
-            return "image"
+        return _TYPE_OF_EXT.get(ext) or _base_type(mimetypes.guess_type(fname)[0])
+    return ""
+
+
+def _kind(media_type: Optional[str]) -> Optional[str]:
+    """'pdf' / 'image' (目に入れてよい形式) / 'unsupported' (画像だが VLM に渡せない形式) /
+    None (画像でも PDF でもない)。3 経路の判定はすべてここ (`_VLM_IMAGE_TYPES`)。"""
+    t = _base_type(media_type)
+    if t == "application/pdf":
+        return "pdf"
+    if t in _VLM_IMAGE_TYPES:
+        return "image"
+    if t.startswith("image/"):
+        return "unsupported"
     return None
+
+
+def _unsupported_image(label: str, media_type: str, *, source: str) -> ToolCallError:
+    """VLM に渡せない画像形式の ERROR。次の手は「sandbox で PNG にして path= で渡す」。
+
+    source は来た経路 ("path" / "url" / "file_id")。path 以外は先に send_to_workspace で sandbox に
+    取り込む。変換の道具は sandbox の jail にあるものだけを挙げる (sandbox/Dockerfile:
+    SVG は LibreOffice (soffice) — rsvg-convert / cairosvg / ImageMagick は入っていない。
+    それ以外は venv の Pillow)。"""
+    t = _base_type(media_type)
+    accepted = f"渡せるのは {_VLM_IMAGE_NAMES} の画像と PDF"
+    if source == "path":
+        fetch, src = "", "このパス"
+    else:
+        fetch = f"send_to_workspace({source}=…) で sandbox に取り込み、"
+        src = "取り込んだパス"
+    if t == "image/svg+xml":
+        need = "send_to_workspace と run_shell" if fetch else "run_shell"
+        return ToolCallError(
+            f"{label} は SVG で、画像として目に入れられない ({accepted})",
+            f"{need} が使えるなら、{fetch}{src}を"
+            " `soffice --headless --convert-to png --outdir /workspace/<出力先> <SVG のパス>`"
+            " で PNG にし (rsvg-convert / cairosvg は無い)、できた /workspace/….png を"
+            " feed_image(path=…) に渡す。自分で描く図なら、最初から PNG で書き出す。",
+        )
+    need = "send_to_workspace と run_python" if fetch else "run_python"
+    return ToolCallError(
+        f"{label} は {t} で、この形式のままでは目に入れられない ({accepted})",
+        f"{need} が使えるなら、{fetch}{src}を Pillow で開いて PNG で /workspace/… に保存し"
+        " (Image.open(…).save(….png))、その path を feed_image(path=…) に渡す。",
+    )
 
 
 def _page_span(lo: int, hi: int) -> str:
@@ -360,7 +433,7 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
+        """画像 (PNG / JPEG / WebP / GIF / BMP)・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
         ユーザーには何も表示されず、Files にも登録しない — 見せるなら本文に `![図: …](URL)` を書く。
 
         対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・
@@ -413,7 +486,7 @@ class Tools:
                     if frag_page is not None and not pages:
                         pages = str(frag_page)
                     return await self._feed_one_file(
-                        fid, pages, __user__["id"], __feed_image__
+                        fid, pages, __user__["id"], __feed_image__, source="url"
                     )
             # user は dict ごと渡す — /ext/groups・/ext/public の ACL に role が要る (#152)
             return await self._feed_path(
@@ -431,7 +504,7 @@ class Tools:
                 ).get("content_type")
                 # 無指定は添付 PDF だけ (docstring)。添付画像は既にモデルの入力に入っている
                 # ので、ここで拾うと同じ画像を二重に食わせる。
-                if _kind(fname, ct) != "pdf":
+                if _kind(_media_type_of_file(fname, ct)) != "pdf":
                     continue
                 if filename and (not fname or filename.lower() not in fname.lower()):
                     continue
@@ -475,24 +548,34 @@ class Tools:
         # role:tool の content は非空の status 文字列。画素は results[i].context_images 経由で届く。
         return "\n".join(out)
 
-    async def _feed_one_file(self, fid: str, pages, user_id: str, feed) -> str:
+    async def _feed_one_file(
+        self, fid: str, pages, user_id: str, feed, *, source: str = "file_id"
+    ) -> str:
         """file 1 件だけを指した呼び出し (file_id= / url= の配信口 / 添付 PDF 1 件)。
         `_feed_file` が目に入れずに返した行は、文面はそのままで種別の旗を立てる (#145 —
         旧: 「画像でも PDF でもないので目に入れなかった」等が緑だった)。"""
         kinds: list[str] = []
-        text = await self._feed_file(fid, pages, user_id, feed, kinds)
+        text = await self._feed_file(fid, pages, user_id, feed, kinds, source=source)
         if kinds:
             mark_error_kind(kinds[0])
         return text
 
     async def _feed_file(
-        self, fid: str, pages, user_id: str, feed, kinds: Optional[list] = None
+        self,
+        fid: str,
+        pages,
+        user_id: str,
+        feed,
+        kinds: Optional[list] = None,
+        *,
+        source: str = "file_id",
     ) -> str:
         """file (添付・生成物) 1 件を所有者チェックの上で積み、報告 1 行を返す。
         file_id 引数と、url の `/api/v1/files/{id}/content` の両方がここを通る。
         目に入れずに返す行は、その種別を `kinds` に積む (`_feed_path` が raise する同じ場面の
         種別に揃える: 画像でも PDF でもない = call / 実体が読めない = fatal /
-        大きすぎる = outcome / PDF が開けない = failure)。"""
+        大きすぎる = outcome / PDF が開けない = failure)。VLM に渡せない画像形式は
+        raise (`_unsupported_image`、call)。source は来た引数 (次の手の send_to_workspace に使う)。"""
         if kinds is None:
             kinds = []
         # 同期 DB / ディスク read はワーカースレッドへ退避してイベントループを塞がない
@@ -508,7 +591,10 @@ class Tools:
 
         meta = getattr(rec, "meta", None) or {}
         name = getattr(rec, "filename", None) or fid
-        kind = _kind(name, meta.get("content_type"))
+        media_type = _media_type_of_file(name, meta.get("content_type"))
+        kind = _kind(media_type)
+        if kind == "unsupported":
+            raise _unsupported_image(name, media_type, source=source)
         if not kind:
             kinds.append("call")
             return f"- {name}: 画像でも PDF でもないので目に入れなかった"
@@ -579,7 +665,12 @@ class Tools:
         if err is not None or loaded is None:
             raise _explain_ref_error(ref, err, is_path)
 
-        kind = detect_kind(loaded)
+        media_type = detect_media_type(loaded)
+        kind = _kind(media_type)
+        if kind == "unsupported":
+            raise _unsupported_image(
+                ref, media_type, source="path" if is_path else "url"
+            )
         if kind == "image":
             if pages:
                 raise ToolCallError(

@@ -544,19 +544,29 @@ def _sniff(data: bytes) -> str | None:
     return None
 
 
-def detect_kind(loaded: LoadedRef) -> str | None:
-    """ "image" / "pdf" / None。magic bytes 優先、次に content-type、次に拡張子。"""
+def detect_media_type(loaded: LoadedRef) -> str | None:
+    """種別を決めた型(`image/*` か `application/pdf`、パラメータを除いた小文字)。どちらでも
+    なければ None。magic bytes 優先、次に content-type、次に拡張子。
+
+    `image/*` は形式を絞らない — どの形式をモデルに渡すかは呼び手が決める(feed_image は
+    VLM に渡せる形式だけを通す)。"""
     for content_type in (
         _sniff(loaded.data),
         loaded.content_type,
         mimetypes.guess_type(loaded.name)[0],
     ):
         base = (content_type or "").split(";")[0].strip().lower()
-        if base.startswith("image/"):
-            return "image"
-        if base == "application/pdf":
-            return "pdf"
+        if base.startswith("image/") or base == "application/pdf":
+            return base
     return None
+
+
+def detect_kind(loaded: LoadedRef) -> str | None:
+    """ "image" / "pdf" / None(`detect_media_type` の大分類)。"""
+    media_type = detect_media_type(loaded)
+    if media_type is None:
+        return None
+    return "pdf" if media_type == "application/pdf" else "image"
 
 
 def pdf_page_count(data: bytes) -> int:
