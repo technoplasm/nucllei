@@ -45,6 +45,15 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl jq ffmpeg pandoc && \
     rm -rf /var/lib/apt/lists/*
 
+# フォント: 送信直前に描く SVG (resvg) と PDF のページ (pdfium) の和文。一覧は sandbox と共通の
+# sandbox/fonts.apt.txt (sandbox に足したフォントが本体で取り残されないように)。resvg も pdfium も
+# fontconfig を通さず /usr/share/fonts を直に探す (resvg の既定の書体名は image_refs の
+# _SVG_FONT_FAMILIES、pdfium は埋め込みのない和文の代替に IPA 等を名前で探す)
+COPY sandbox/fonts.apt.txt /tmp/fonts.apt.txt
+RUN apt-get update && \
+    sed 's/#.*//' /tmp/fonts.apt.txt | xargs apt-get install -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* /tmp/fonts.apt.txt
+
 # python 依存は uv.lock に忠実に /app/.venv へ(--extra stt = 内蔵 faster-whisper、#53)。
 # この層はソース未 COPY なので --no-install-project(依存だけ入れてレイヤーキャッシュを最大化)
 RUN pip3 install --no-cache-dir uv

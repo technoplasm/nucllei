@@ -222,6 +222,7 @@ tool のスイッチはモデルが届く範囲を変えない(意味の無い�
 import asyncio
 import base64
 import io
+import json
 import logging
 import mimetypes
 import os
@@ -682,15 +683,32 @@ _SVG_LENGTH = re.compile(
     r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*([a-z]*)\s*$", re.I
 )
 
+# resvg の既定の書体 (font-family の指定なし / 総称名 / 見つからない名前の行き先)。resvg は
+# システムのフォント (/usr/share/fonts 等) を直に読み、fontconfig の別名は見ない — 既定の
+# Times New Roman / Arial / Courier New は image に無いので、そのままでは文字が 1 つも描かれない
+# (実測: dev-c28aa89e4 で和文・欧文とも 0 画素)。名前の無い書体を指すと resvg は総称名
+# (serif) に落とすので、`font_family` (指定なし) も serif と同じにする (ブラウザの既定と同じ)。
+# 書体は IPA (Dockerfile が sandbox/fonts.apt.txt から入れる。欧文の字形も持つ)。
+# IPA が無い環境 (ホストの dev 等) では文字が描かれないだけで、変換そのものは通る
+_SVG_FONT_FAMILIES = {
+    "font_family": "IPAPMincho",
+    "serif_family": "IPAPMincho",
+    "sans_serif_family": "IPAPGothic",
+    "monospace_family": "IPAGothic",
+}
+
 # 子プロセスで動かす描画。標準入力の SVG を描いて PNG を標準出力へ。cwd と resources_dir は
 # 空の一時ディレクトリ (参照は `_prepare_svg` で落としてあるが、念のため相対パスの解決先も空にする)。
+# 書体は argv[3] の JSON (`_SVG_FONT_FAMILIES`)
 _SVG_RENDER_SCRIPT = """
-import resource, sys
+import json, resource, sys
 limit = int(sys.argv[2])
 resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 import resvg_py
 svg = sys.stdin.buffer.read().decode("utf-8")
-png = resvg_py.svg_to_bytes(svg_string=svg, background="#ffffff", resources_dir=sys.argv[1])
+png = resvg_py.svg_to_bytes(
+    svg_string=svg, background="#ffffff", resources_dir=sys.argv[1], **json.loads(sys.argv[3])
+)
 sys.stdout.buffer.write(png)
 """
 
@@ -780,6 +798,7 @@ async def _render_svg(data: bytes) -> bytes:
             _SVG_RENDER_SCRIPT,
             empty_dir,
             str(_SVG_RENDER_MEMORY_LIMIT),
+            json.dumps(_SVG_FONT_FAMILIES, ensure_ascii=False),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

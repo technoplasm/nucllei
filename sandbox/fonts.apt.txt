@@ -1,0 +1,15 @@
+# フォントの apt パッケージ一覧 (単一情報源)。sandbox/Dockerfile と repo root の Dockerfile (nucllei 本体)
+# の両方がここを読んで入れる — sandbox に足したフォントが本体で取り残されないように 1 か所にまとめる。
+# どちらの build context (sandbox/ と repo root) からも COPY できるよう sandbox/ に置く。
+# 書式: 1 行 1 パッケージ、# 以降はコメント。参照していることは nucllei/test の test_font_packages が見る。
+#
+# - sandbox: jail 内の soffice / weasyprint / matplotlib 等の和文 (和文の既定と MS 明朝 / ゴシックの
+#   代替の向き先は sandbox/Dockerfile の 64-nucllei-fonts.conf)
+# - 本体: 送信直前に描く SVG (resvg) と PDF のページ (pdfium) の和文 (nucllei/utils/image_refs.py)
+fontconfig
+fonts-dejavu-core
+fonts-noto-cjk
+fonts-ipafont
+# 以下は sandbox では依存 (ghostscript / LibreOffice) で入っていたもの。両 image のフォントを揃えるため明示する
+fonts-urw-base35
+fonts-opensymbol

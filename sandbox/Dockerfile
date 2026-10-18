@@ -34,10 +34,16 @@ RUN apt-get update \
         unzip zip nkf file poppler-utils \
         ffmpeg libsndfile1 \
         libpango-1.0-0 libpangoft2-1.0-0 \
-        fonts-noto-cjk fontconfig \
         e2fsprogs mount util-linux \
- && rm -rf /var/lib/apt/lists/* \
- && fc-cache -f  # フォントキャッシュを焼いておく (jail からは /var 非 bind のため)
+ && rm -rf /var/lib/apt/lists/*
+
+# フォント (fonts-noto-cjk・fonts-ipafont 等)。一覧は fonts.apt.txt が単一情報源 (本体の Dockerfile も
+# 同じファイルを読む)。fc-cache はフォントキャッシュを焼いておくため (jail からは /var 非 bind のため)
+COPY fonts.apt.txt /tmp/fonts.apt.txt
+RUN apt-get update \
+ && sed 's/#.*//' /tmp/fonts.apt.txt | xargs apt-get install -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* /tmp/fonts.apt.txt \
+ && fc-cache -f
 
 # Office 系は別層 (重いので、上の層を変えずに足し引きできるように)
 RUN apt-get update \
@@ -52,7 +58,7 @@ RUN apt-get update \
 #   + unrtf: RTF → テキスト / HTML
 #   + p7zip-full / unar / lhasa / cabextract: 7z・rar 等 / 汎用展開 (lsar) / LZH / .cab
 #   + sqlite3 / libxml2-utils (xmllint) / dos2unix / qpdf (PDF の復号・分割・修復)
-#   + fonts-ipafont: 「ＭＳ 明朝 / ＭＳ ゴシック」指定の古い Word を soffice で PDF 化するとき、
+#   + fonts-ipafont (パッケージは fonts.apt.txt で入れる): 「ＭＳ 明朝 / ＭＳ ゴシック」指定の古い Word を soffice で PDF 化するとき、
 #     字幅の合う代替に落とす (Noto CJK だと字幅がずれて改行位置が原本と変わる)。
 #     代替の向き先は下の 64-nucllei-fonts.conf。fc-cache は最初の層と同じ理由で焼いておく。
 #     IPA を入れると Debian の 65-nonlatin.conf が和文の既定 (sans-serif / serif の lang=ja) を
@@ -65,7 +71,6 @@ RUN apt-get update \
         mdbtools unrtf \
         p7zip-full unar lhasa cabextract \
         sqlite3 libxml2-utils dos2unix qpdf \
-        fonts-ipafont \
  && rm -rf /var/lib/apt/lists/* \
  && printf '%s\n' \
         '<?xml version="1.0"?>' \
