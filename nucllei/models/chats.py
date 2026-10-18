@@ -69,6 +69,11 @@ class Chat(Base):
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+    # CAS のバージョン(append_delivery_turn / update_chat_by_id_guarded が期待値に使う)。
+    # 書き込みのたびに +1(_bump)。updated_at は表示・並び順用の素の時刻で、CAS には使わない
+    # — 旧実装は updated_at を max(now, 旧値+1) で兼用し、1 秒に 2 回以上書かれる chat の
+    # updated_at が実時刻より先へ進み続けて一覧の上に居座った(2026-10-19)。
+    version = Column(BigInteger, nullable=False, server_default="0", default=0)
 
     share_id = Column(Text, unique=True, nullable=True)
     archived = Column(Boolean, default=False)
@@ -100,6 +105,9 @@ class ChatModel(BaseModel):
 
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
+    version: int = (
+        0  # CAS のバージョン(Chat.version)。API 応答(ChatResponse)には出さない
+    )
 
     share_id: Optional[str] = None
     archived: bool = False
@@ -213,16 +221,17 @@ def append_turn_messages(
     return user_message_id, assistant_message_id
 
 
-def _monotonic_updated_at(previous: Optional[int]) -> int:
-    """chat 行の updated_at を厳密単調増加させる(#110 敵対検証 2)。
+def _bump(chat_item: "Chat") -> None:
+    """chat 行の書き込み点で updated_at を今の時刻に、version を +1 にする。
 
-    updated_at は append_delivery_turn / update_chat_by_id_guarded の CAS が
-    バージョンスタンプとして使う。秒粒度の int(time.time()) をそのまま書くと、
-    同秒内の介在書き込みで値が変わらず CAS が偽成功する(ABA)。chat 行へ
-    updated_at を書く**全書き込み点**は max(now, 旧値 + 1) で必ず前進させること。
+    同秒 ABA 防止(#110 敵対検証 2)は version が守る: CAS(append_delivery_turn /
+    update_chat_by_id_guarded)は version を期待値にするので、秒粒度の updated_at が
+    同秒内の介在書き込みで変わらなくても偽成功しない。chat 行を書く**全書き込み点**で
+    呼ぶこと。updated_at は素の時刻(実時刻を超えない — 旧 max(now, 旧値+1) は 1 秒に
+    2 回以上書かれる chat で実時刻より先へ進み続けた、2026-10-19)。
     """
-    now = int(time.time())
-    return max(now, (previous or 0) + 1)
+    chat_item.updated_at = int(time.time())
+    chat_item.version = (chat_item.version or 0) + 1
 
 
 def _chat_snippet(chat_json: Optional[dict], limit: int = 120) -> str:
@@ -311,8 +320,8 @@ class ChatTable:
                 chat_item = db.get(Chat, id)
                 chat_item.chat = chat
                 chat_item.title = chat["title"] if "title" in chat else "New Chat"
-                # 同秒 ABA 防止(#110 敵対検証 2)— CAS のスタンプは必ず前進させる
-                chat_item.updated_at = _monotonic_updated_at(chat_item.updated_at)
+                # CAS の version を前進させる(同秒 ABA 防止 — #110 敵対検証 2)
+                _bump(chat_item)
                 db.commit()
                 db.refresh(chat_item)
 
@@ -321,11 +330,11 @@ class ChatTable:
             return None
 
     def update_chat_by_id_guarded(
-        self, id: str, chat: dict, expected_updated_at: int
+        self, id: str, chat: dict, expected_version: int
     ) -> tuple[str, Optional["ChatModel"]]:
         """FE 保存経路の CAS 版 update(#110 敵対検証 3 — append_delivery_turn と同型)。
 
-        呼び出し側が読んだ updated_at を期待値に guarded UPDATE する。配達 driver の
+        呼び出し側が読んだ version(ChatModel.version)を期待値に guarded UPDATE する。配達 driver の
         append_delivery_turn と同じバージョンスタンプを取り合うので、保存の
         read-modify-write の間に driver append(notice 追記)が挟まっても
         無言で上書き(notice 消失)しない。無ガード版 update_chat_by_id は
@@ -342,12 +351,13 @@ class ChatTable:
                     return ("missing", None)
                 rowcount = (
                     db.query(Chat)
-                    .filter_by(id=id, updated_at=expected_updated_at)
+                    .filter_by(id=id, version=expected_version)
                     .update(
                         {
                             "chat": chat,
                             "title": chat["title"] if "title" in chat else "New Chat",
-                            "updated_at": _monotonic_updated_at(expected_updated_at),
+                            "updated_at": int(time.time()),
+                            "version": expected_version + 1,
                         },
                         synchronize_session=False,
                     )
@@ -428,10 +438,10 @@ class ChatTable:
         """サーバ駆動配達の CAS 追記(#110 契約 M2)。
 
         単一 DB トランザクションで:
-        1. chat 行を読む(updated_at を CAS の期待値として控える)
+        1. chat 行を読む(version を CAS の期待値として控える)
         2. history / messages に notice(user)+ 空 assistant 対を append
            (append_turn_messages — currentId 更新・線形 messages 同期込み)
-        3. `UPDATE chat SET chat=?, updated_at=? WHERE id=? AND updated_at=読値`
+        3. `UPDATE chat SET chat=?, updated_at=now, version=読値+1 WHERE id=? AND version=読値`
            の guarded UPDATE(FE 保存・別ターンの書き込みとの同着は CAS で検出)
         4. 同一トランザクションで execution 行の delivered_at を確定
 
@@ -450,7 +460,7 @@ class ChatTable:
                 row = db.get(Chat, chat_id)
                 if row is None or row.deleted_at is not None:
                     return ("missing", None)
-                expected_updated_at = row.updated_at
+                expected_version = row.version
 
                 # deepcopy: JSON カラムの ORM インスタンスを in-place 変異させない
                 # (CAS 負けで rollback するとき部分変更を持ち越さないため)
@@ -458,13 +468,16 @@ class ChatTable:
                 append_turn_messages(chat_json, notice_message, assistant_message)
 
                 now = int(time.time())
-                # CAS スタンプは必ず前進させる(同秒 ABA 防止 — 敵対検証 2)
-                new_updated_at = _monotonic_updated_at(expected_updated_at)
+                # CAS は version で比較・前進させる(同秒 ABA 防止 — 敵対検証 2)
                 rowcount = (
                     db.query(Chat)
-                    .filter_by(id=chat_id, updated_at=expected_updated_at)
+                    .filter_by(id=chat_id, version=expected_version)
                     .update(
-                        {"chat": chat_json, "updated_at": new_updated_at},
+                        {
+                            "chat": chat_json,
+                            "updated_at": now,
+                            "version": expected_version + 1,
+                        },
                         synchronize_session=False,
                     )
                 )
@@ -578,8 +591,8 @@ class ChatTable:
                 chat_item.meta = meta
                 flag_modified(chat_item, "meta")
 
-                # 同秒 ABA 防止(敵対検証 2)— chat 行の全書き込み点で前進させる
-                chat_item.updated_at = _monotonic_updated_at(chat_item.updated_at)
+                # CAS の version を前進させる(同秒 ABA 防止 — 敵対検証 2。全書き込み点で)
+                _bump(chat_item)
                 db.commit()
                 # マージ後の message.usage を返す(#102): 呼び手(middleware)は
                 # これをそのまま emit する — FE の message.usage と DB が常に一致し、
@@ -636,7 +649,7 @@ class ChatTable:
                 shared_chat.chat = chat.chat
 
                 # 共有コピー行は CAS 対象ではないが、書き込み点の規律は揃える
-                shared_chat.updated_at = _monotonic_updated_at(shared_chat.updated_at)
+                _bump(shared_chat)
                 db.commit()
                 db.refresh(shared_chat)
 
@@ -672,8 +685,8 @@ class ChatTable:
             with get_db() as db:
                 chat = db.get(Chat, id)
                 chat.pinned = not chat.pinned
-                # 同秒 ABA 防止(敵対検証 2)
-                chat.updated_at = _monotonic_updated_at(chat.updated_at)
+                # CAS の version を前進させる(同秒 ABA 防止 — 敵対検証 2)
+                _bump(chat)
                 db.commit()
                 db.refresh(chat)
                 return ChatModel.model_validate(chat)
@@ -685,8 +698,8 @@ class ChatTable:
             with get_db() as db:
                 chat = db.get(Chat, id)
                 chat.archived = not chat.archived
-                # 同秒 ABA 防止(敵対検証 2)
-                chat.updated_at = _monotonic_updated_at(chat.updated_at)
+                # CAS の version を前進させる(同秒 ABA 防止 — 敵対検証 2)
+                _bump(chat)
                 db.commit()
                 db.refresh(chat)
                 return ChatModel.model_validate(chat)

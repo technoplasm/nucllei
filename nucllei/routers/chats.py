@@ -864,7 +864,7 @@ async def update_chat_by_id(
     # parentId / currentId は 400。title 等のメタのみの更新は対象外。
     _assert_valid_history(form_data.chat)
 
-    # llens(#110 敵対検証 3): 保存を CAS 化 — 読んだ updated_at を期待値に
+    # llens(#110 敵対検証 3): 保存を CAS 化 — 読んだ version を期待値に
     # guarded UPDATE(配達 driver の append_delivery_turn と同じスタンプの取り合い)。
     # 無ガードの read-modify-write だと、read と write の間に driver が notice を
     # 追記した場合、FE の古い履歴で丸ごと上書きされ notice が無言で消える。
@@ -874,7 +874,7 @@ async def update_chat_by_id(
         updated_chat = {**chat.chat, **form_data.chat}
         _assert_message_history_preserved(chat.chat, updated_chat)  # 通らねば 400
         cas_status, updated = Chats.update_chat_by_id_guarded(
-            id, updated_chat, chat.updated_at
+            id, updated_chat, chat.version
         )
         if cas_status == "ok":
             return ChatResponse(**updated.model_dump())

@@ -1,7 +1,7 @@
 """サーバ駆動配達 driver(#110 契約 T3 / M2〜M5)の回帰。
 
 - append_delivery_turn(models 層): user+assistant 対 append・currentId 更新・
-  線形 messages 同期・同一トランザクションでの delivered_at 確定・updated_at CAS
+  線形 messages 同期・同一トランザクションでの delivered_at 確定・version CAS
   (負けは "conflict" — 再試行可能)・chat 不在は "missing"
 - notice 書式(契約 M4 — テストで固定): ヘッダ・status 別文言・~フェンス長・
   display 併記・files(file id 形 / "/" URL 形)
@@ -204,7 +204,7 @@ class TestExecutionResume(AbstractPostgresTest):
         assert self.Executions.get_execution_by_id("e2").delivered_at is not None
 
     def test_append_delivery_turn_cas_detects_concurrent_write(self, monkeypatch):
-        """読値の updated_at と guarded UPDATE の間に他の書き手が入ったら
+        """読値の version と guarded UPDATE の間に他の書き手が入ったら
         "conflict"(何も書かない — 再読して呼び直せる)。"""
         from nucllei.internal.db import get_db
         from nucllei.models import chats as chats_module
@@ -212,7 +212,7 @@ class TestExecutionResume(AbstractPostgresTest):
 
         chat = self._insert_chat()
         self._insert_exec("e1", chat.id)
-        # updated_at を過去へ(同秒 CAS の盲点を避けて決定的にする)
+        # updated_at を過去へ(updated_at は CAS に関わらない — version だけで決まる)
         with get_db() as db:
             db.query(Chat).filter_by(id=chat.id).update({"updated_at": 1000})
             db.commit()
@@ -245,10 +245,9 @@ class TestExecutionResume(AbstractPostgresTest):
     ):
         """介在書き込みが読値と**同秒**でも CAS は偽成功しない(敵対検証 2)。
 
-        updated_at は秒粒度の int なので、全書き込み点が厳密単調増加
-        (max(now, 旧値+1))で前進させないと、同秒の介在コミットでスタンプが
-        変わらず guarded UPDATE が通ってしまう(ABA — 介在分の上書き消失)。
-        既存テストのように updated_at を過去へ巻き戻さず、同秒のまま縛る。
+        updated_at は秒粒度の int なので、これを CAS に使うと同秒の介在コミットで
+        値が変わらず guarded UPDATE が通ってしまう(ABA — 介在分の上書き消失)。CAS は
+        全書き込み点で +1 する version で比較する。updated_at を巻き戻さず同秒のまま縛る。
         """
         from nucllei.models import chats as chats_module
 

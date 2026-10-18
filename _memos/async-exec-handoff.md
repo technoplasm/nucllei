@@ -49,9 +49,12 @@
 ## 実装の勘所(次セッション向けメモ)
 
 - 配達 driver の設計不変条件: **notice 追記と delivered_at 確定は同一トランザクション**
-  (`append_delivery_turn`、updated_at CAS)。delivered_at は一度立てたら戻さない。
+  (`append_delivery_turn`、version CAS)。delivered_at は一度立てたら戻さない。
   claim はプロセス内(D7 単一プロセス前提)。
-- chat 行の updated_at は**厳密単調増加**(同秒 ABA 対策)。FE 保存 endpoint も CAS 化
+- chat 行の CAS は **`chat.version`**(全書き込み点で +1、同秒 ABA 対策)。updated_at は素の時刻で
+  CAS に使わない — 当初は updated_at を max(now, 旧値+1) で兼用し、1 秒に 2 回以上書かれる chat の
+  updated_at が実時刻より先へずれて一覧の上に居座った(2026-10-19、migration ac4c52211a8e で分離・
+  未来の値を丸め)。FE 保存 endpoint も CAS 化
   (負け → 再読 → append-only 再検証 → 再試行 3 回 → 400)。
 - 非表示タブは poll 休止 → 復帰後 `deliveredAdvanced` 増分で history refetch(実 E2E で発見・修正)。
 - `visibilityState=hidden` の窓(claude-in-chrome 含む)では poll が止まるのは仕様。

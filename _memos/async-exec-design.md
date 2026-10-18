@@ -410,7 +410,7 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
 - `nucllei/utils/execution_resume.py`: タスク終了 wake → 静穏確認(chat にターン非走行)→
   連鎖上限(`ASYNC_EXEC_RESUME_CHAIN_LIMIT`=5、meta.system_notice の遡行)→
   **notice(結果全文差し込み・固定書式・meta.system_notice)+ 空 assistant を
-  `append_delivery_turn`(updated_at CAS・delivered_at 同一 txn)で追記** →
+  `append_delivery_turn`(version CAS・delivered_at 同一 txn — 当初は updated_at CAS、2026-10-19 に chat.version へ分離)で追記** →
   続きターンを内部起動(subagent 駆動系 `start_internal_turn` の共有化)。
 - exec 行の `delivered_at` が配達状態の事実(FE の履歴推測 handled 判定は削除)。
   await_task / stop_task の報告・cascade(chat 削除)も delivered を立てる。
@@ -432,7 +432,7 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
 - 設計批評 3 レンズ(並行性 / wire・永続化 / 要件忠実性)→ FATAL 6 件を実装前に裁定
   (chat 文書 CAS・claim プロトコル・切詰め衝突・FE 可視性・save-400・恒久断念)。
 - 実装後の敵対検証レビュー(5 レンズ find → 反証 verify、21 指摘 → 9 確定)→ 全修正
-  (updated_at 単調増加・FE 保存 CAS 化・cascade レース・content_blocks 'calls' 両形受け 等)。
+  (updated_at 単調増加 — 2026-10-19 に chat.version へ置き換え・FE 保存 CAS 化・cascade レース・content_blocks 'calls' 両形受け 等)。
 - 実機 E2E(dev・llens-thinking + sandbox run_shell): チップ表示/停止・
   **タブ完全クローズ中の配達**(notice + 続きターン)・stopped 通知配達を実測。
 

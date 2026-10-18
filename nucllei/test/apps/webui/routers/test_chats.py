@@ -511,7 +511,8 @@ class TestChatSaveCas(AbstractPostgresTest):
     (append_delivery_turn)が挟まっても、無ガード上書きで notice が無言で
     消えない: CAS 負け → 再読 → append-only 検証を新鮮な chat で再評価し、
     通れば再試行・通らなければ 400(FE の save-400 リカバリに乗る)。
-    あわせて updated_at の厳密単調増加(敵対検証 2 — 同秒 ABA 防止)も縛る。
+    あわせて CAS の version の厳密単調増加(敵対検証 2 — 同秒 ABA 防止)と、updated_at が
+    実時刻を超えないこと(旧 max(now, 旧値+1) の未来ずれ、2026-10-19)も縛る。
     """
 
     BASE_PATH = "/api/v1/chats"
@@ -551,7 +552,7 @@ class TestChatSaveCas(AbstractPostgresTest):
         original = self.chats.update_chat_by_id_guarded
         state = {"first": True}
 
-        def racing_guarded(id, chat, expected_updated_at):
+        def racing_guarded(id, chat, expected_version):
             if state["first"]:
                 state["first"] = False
                 status, _ = self.chats.append_delivery_turn(
@@ -565,7 +566,7 @@ class TestChatSaveCas(AbstractPostgresTest):
                     [],
                 )
                 assert status == "ok"
-            return original(id, chat, expected_updated_at)
+            return original(id, chat, expected_version)
 
         monkeypatch.setattr(self.chats, "update_chat_by_id_guarded", racing_guarded)
 
@@ -615,24 +616,108 @@ class TestChatSaveCas(AbstractPostgresTest):
         assert response.status_code == 200
         assert self.chats.get_chat_by_id(self.chat_id).title == "plain"
 
-    def test_updated_at_is_strictly_monotonic_within_a_second(self):
-        """chat 行への連続書き込みは同秒でも updated_at が必ず前進する
-        (敵対検証 2 — CAS のバージョンスタンプが秒粒度で ABA しない)。"""
+    def test_version_is_strictly_monotonic_within_a_second(self):
+        """chat 行への連続書き込みは同秒でも version が必ず前進する
+        (敵対検証 2 — CAS のバージョンが秒粒度で ABA しない)。"""
         chat = self.chats.get_chat_by_id(self.chat_id)
-        stamps = [chat.updated_at]
+        versions = [chat.version]
 
         updated = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
-        stamps.append(updated.updated_at)
+        versions.append(updated.version)
         updated = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
-        stamps.append(updated.updated_at)
+        versions.append(updated.version)
         updated = self.chats.toggle_chat_pinned_by_id(self.chat_id)
-        stamps.append(updated.updated_at)
+        versions.append(updated.version)
         updated = self.chats.toggle_chat_archive_by_id(self.chat_id)
-        stamps.append(updated.updated_at)
+        versions.append(updated.version)
         assert self.chats.record_usage_by_id_and_message_id(
             self.chat_id, "m2", {"prompt_tokens": 1, "completion_tokens": 1}
         )
-        stamps.append(self.chats.get_chat_by_id(self.chat_id).updated_at)
+        versions.append(self.chats.get_chat_by_id(self.chat_id).version)
+        status, updated = self.chats.update_chat_by_id_guarded(
+            self.chat_id, dict(chat.chat), versions[-1]
+        )
+        assert status == "ok"
+        versions.append(updated.version)
 
-        assert stamps == sorted(stamps)
-        assert len(set(stamps)) == len(stamps), stamps  # 同秒でも重複しない
+        assert versions == list(range(versions[0], versions[0] + len(versions)))
+
+    def test_updated_at_never_runs_ahead_of_wall_clock(self):
+        """1 秒の間に何度書いても updated_at は実時刻を超えない — 旧実装は max(now,
+        旧値+1) で進め、長いターンの chat が実時刻より先へずれて一覧の上に居座った
+        (staging で約 2 時間先、2026-10-19)。"""
+        import time
+
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        for _ in range(20):
+            self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
+            self.chats.record_usage_by_id_and_message_id(
+                self.chat_id, "m2", {"prompt_tokens": 1, "completion_tokens": 1}
+            )
+        fresh = self.chats.get_chat_by_id(self.chat_id)
+        assert fresh.updated_at <= int(time.time())
+        assert fresh.version >= chat.version + 40
+
+    def test_guarded_update_conflicts_on_same_second_write(self):
+        """読んだ後の介在書き込みが同秒(updated_at が同じ値)でも、guarded UPDATE は
+        conflict になる(version で比較 — 敵対検証 2)。"""
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        intervening = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
+        if intervening.updated_at != chat.updated_at:
+            # 秒の境目をまたいだ — 同秒の条件を作り直す
+            chat = intervening
+            intervening = self.chats.update_chat_by_id(self.chat_id, dict(chat.chat))
+        status, updated = self.chats.update_chat_by_id_guarded(
+            self.chat_id, {**chat.chat, "title": "stale"}, chat.version
+        )
+        assert status == "conflict"
+        assert updated is None
+        assert self.chats.get_chat_by_id(self.chat_id).title != "stale"
+
+
+# ---- migration ac4c52211a8e(chat.version と未来の updated_at の丸め)----
+
+
+def _chat_version_migration():
+    import importlib.util
+    import pathlib
+
+    versions = pathlib.Path(__file__).resolve().parents[4] / "migrations" / "versions"
+    path = next(versions.glob("*_ac4c52211a8e_*.py"))
+    spec = importlib.util.spec_from_file_location("migration_ac4c52211a8e", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_migration_adds_version_and_clamps_future_updated_at():
+    """sqlite に migration 直前の chat 表を作って upgrade を当てる: version は 0 で
+    埋まり、実時刻より未来の updated_at だけが migration 時点の時刻に丸まる。"""
+    import time
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    now = int(time.time())
+    rows = {"past": now - 3600, "future": now + 7200}
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("CREATE TABLE chat (id TEXT PRIMARY KEY, updated_at BIGINT)")
+        )
+        for cid, updated_at in rows.items():
+            conn.execute(
+                sa.text("INSERT INTO chat (id, updated_at) VALUES (:id, :u)"),
+                {"id": cid, "u": updated_at},
+            )
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            _chat_version_migration().upgrade()
+        result = {
+            r.id: (r.updated_at, r.version)
+            for r in conn.execute(sa.text("SELECT id, updated_at, version FROM chat"))
+        }
+    assert result["past"] == (now - 3600, 0)
+    assert now <= result["future"][0] <= int(time.time())
+    assert result["future"][1] == 0
