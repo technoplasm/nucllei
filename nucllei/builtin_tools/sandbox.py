@@ -2055,7 +2055,7 @@ class Tools:
         /workspace のパスを本文に貼ったり URL に書き換えたりしない。
         `/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。
 
-        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。
+        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…`)。
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
@@ -2063,7 +2063,7 @@ class Tools:
         # では添付しない: 添付は子の chat (kind="agent"、ユーザーに見えない) のメッセージに付き、
         # display も購読者の居ない子のストリームに流れるだけ。ユーザーに渡すのは親 (主エージェント)
         _refuse_in_subagent(__metadata__)
-        from nucllei.utils.image_refs import PATH_ARG_FORM
+        from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
         # /workspace か /ext かは sandbox の fs の区分で、読み出し口が違うだけ
@@ -2076,7 +2076,7 @@ class Tools:
                 __message_id__,
                 __event_emitter__,
             )
-        abs_path, rel = _resolve_workspace_path(path, PATH_ARG_FORM)
+        abs_path, rel = _resolve_workspace_path(path, WORKSPACE_PATH_ARG_FORM)
         limit = _limit(__user__)
         try:
             res = await self._post(

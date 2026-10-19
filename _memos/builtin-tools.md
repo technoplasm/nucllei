@@ -678,7 +678,9 @@ llens(配備層の tool)と通しで検証して見つかった nucllei 側の�
   `write_file(path="https://x/y.html")` が `/workspace/https:/x/y.html` を作る。
   `list_workspace` の無指定の既定は `/workspace`。llens の `query_emr(save_to=)` も絶対のみ。
 - **固定文を公開定数にした**(llens と文面を合意。`image_refs.py`): `URL_ARG_FORM` /
-  `PATH_ARG_FORM` / `WORKSPACE_PATH_ARG_FORM`(`write_file` / `list_workspace` 用)/
+  `PATH_ARG_FORM` / `WORKSPACE_PATH_ARG_FORM`(`write_file` / `list_workspace` 用。2026-10-19 から
+  `fetch_from_workspace` も — `/ext/…` は受けるが、呼ばずにリンクする物なので説明・ERROR で受け付ける例に
+  出さない。`:param path` に `/ext/…` があると desc だけ読んだモデルが渡すのを正当と読んだ、llens 指摘)/
   `FILE_ID_ARG_FORM` / `REF_ARGS_RULE`(行き先の規則。全 tool 共通の 1 文)。配備層の tool は
   これを import して同じ文面を使う。エラーの組み立ては全 tool 共通:
   - url: `ERROR: <値> は URL として解決できない。` + `URL_ARG_FORM` + ` ` + `REF_ARGS_RULE`

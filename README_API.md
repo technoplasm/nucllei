@@ -578,13 +578,13 @@ same text in every tool. A **deployment-layer tool that takes a `url` / `path`
 (until 2026-10-03 `feed_image` / `fetch_url` were deployment-layer tools and
 each carried its own copy of this text; the copies drifted — see §5.7):
 
-| Constant                  | Text                                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `URL_ARG_FORM`            | ``url が受けるのは、スキーム付きの絶対 URL (`http(s)://…`) と、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` だけ。``              |
-| `PATH_ARG_FORM`           | ``path が受けるのは、sandbox の絶対パス (`/workspace/…` `/ext/…`) だけ。``                                                               |
-| `WORKSPACE_PATH_ARG_FORM` | ``path が受けるのは、sandbox の絶対パス (`/workspace/…`) だけ。`` (tools that only handle the workspace: `write_file`, `list_workspace`) |
-| `FILE_ID_ARG_FORM`        | `file_id は添付・生成物の id。`                                                                                                          |
-| `REF_ARGS_RULE`           | `URL は url、sandbox のパスは path、添付・生成物は file_id に、受け取った形のまま渡す (値を書き換えて別の引数に入れ直さない)。`          |
+| Constant                  | Text                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `URL_ARG_FORM`            | ``url が受けるのは、スキーム付きの絶対 URL (`http(s)://…`) と、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` だけ。``                                                                                                                                                          |
+| `PATH_ARG_FORM`           | ``path が受けるのは、sandbox の絶対パス (`/workspace/…` `/ext/…`) だけ。``                                                                                                                                                                                                           |
+| `WORKSPACE_PATH_ARG_FORM` | ``path が受けるのは、sandbox の絶対パス (`/workspace/…`) だけ。`` (tools that only handle the workspace: `write_file`, `list_workspace`; also `fetch_from_workspace`, which still accepts `/ext/…` but must not advertise it — a `/ext/…` path is already a URL to link, 2026-10-19) |
+| `FILE_ID_ARG_FORM`        | `file_id は添付・生成物の id。`                                                                                                                                                                                                                                                      |
+| `REF_ARGS_RULE`           | `URL は url、sandbox のパスは path、添付・生成物は file_id に、受け取った形のまま渡す (値を書き換えて別の引数に入れ直さない)。`                                                                                                                                                      |
 
 `REF_ARGS_RULE` is the one sentence about where things go, identical in every
 tool (it mentions arguments a given tool may not have — it states the rule, not

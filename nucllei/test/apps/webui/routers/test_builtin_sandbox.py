@@ -1090,7 +1090,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         (`https://x/y.html` が `/workspace/https:/x/y.html` になる、を作らない)。
         エラーは値によらず同じ形 (全 tool 共通) + その tool の path が受ける形の固定文。"""
         from nucllei.utils.image_refs import (
-            PATH_ARG_FORM,
             REF_ARGS_RULE,
             WORKSPACE_PATH_ARG_FORM,
         )
@@ -1103,7 +1102,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             for coro, form in (
                 (tool.write_file(bad, "x", __user__=user), WORKSPACE_PATH_ARG_FORM),
                 (tool.list_workspace(bad, __user__=user), WORKSPACE_PATH_ARG_FORM),
-                (tool.fetch_from_workspace(bad, __user__=user), PATH_ARG_FORM),
+                (
+                    tool.fetch_from_workspace(bad, __user__=user),
+                    WORKSPACE_PATH_ARG_FORM,
+                ),
             ):
                 assert _arun(coro) == (
                     f"ERROR: {bad} は sandbox のパスの形でない。次の手: {form}{rule}"
@@ -1374,9 +1376,9 @@ FILE_UUID = "0b54ed0c-6f0b-4b5c-9d0e-3f6f3f0a1c11"
 # url が受ける形の固定文(値を調べて出し分けない。llens の tool と共有する公開定数)
 from nucllei.utils.image_refs import (  # noqa: E402
     FILE_ID_ARG_FORM,
-    PATH_ARG_FORM,
     REF_ARGS_RULE,
     URL_ARG_FORM,
+    WORKSPACE_PATH_ARG_FORM,
 )
 
 NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
@@ -2202,7 +2204,9 @@ def test_fetch_mounted_file_failures_are_told_apart(monkeypatch, tmp_path):
 
     # `..` は畳んでから解く。mount の外へ出れば sandbox のパスの形でない
     out = env.fetch("/ext/shared/../../outside.txt")
-    assert out.startswith("ERROR:") and out.endswith(f"次の手: {PATH_ARG_FORM}")
+    assert out.startswith("ERROR:") and out.endswith(
+        f"次の手: {WORKSPACE_PATH_ARG_FORM}"
+    )
     # `..` を畳めば /ext の中 = 配信されている(URL)
     out = env.fetch("/ext/shared/../shared/memo.txt")
     assert "添付不要" in out and "(/ext/shared/memo.txt)" in out
@@ -2239,7 +2243,7 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
     ):
         out = env.fetch(given)
         assert out == (
-            f"ERROR: {given} は sandbox のパスの形でない。次の手: {PATH_ARG_FORM}{rule}"
+            f"ERROR: {given} は sandbox のパスの形でない。次の手: {WORKSPACE_PATH_ARG_FORM}{rule}"
         ), given
     assert env.registered == [] and env.writes == []
 
@@ -2266,7 +2270,8 @@ def test_fetch_from_workspace_spec_mentions_both_outcomes():
         s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )
     assert list(spec["parameters"]["properties"]) == ["path"]
-    assert "/ext/" in spec["parameters"]["properties"]["path"]["description"]
+    # `/ext/…` は受けるが、受け付ける例には出さない (呼ばずにリンクする物。llens 2026-10-19)
+    assert "/ext/" not in spec["parameters"]["properties"]["path"]["description"]
     # docstring の例パスは消した (モデルが例のパスをそのまま使う。監査 (5))
     assert "例:" not in spec["parameters"]["properties"]["path"]["description"]
 
@@ -2326,7 +2331,6 @@ def test_reference_params_are_described_in_fixed_words():
         "`/api/v1/files/{id}/content`。"
     )
     workspace_form = "sandbox の絶対パス (`/workspace/…`)。"
-    path_form = "sandbox の絶対パス (`/workspace/…` `/ext/…`)。"
     file_id_form = "添付・生成物の id"
 
     sandbox = Tools()
@@ -2335,7 +2339,9 @@ def test_reference_params_are_described_in_fixed_words():
     assert workspace_form in described(sandbox, "write_file", "path")
     assert workspace_form in described(sandbox, "list_workspace", "path")
     assert workspace_form in described(sandbox, "read_file", "path")
-    assert path_form in described(sandbox, "fetch_from_workspace", "path")
+    assert workspace_form in described(sandbox, "fetch_from_workspace", "path")
+    # /ext/… は URL のままリンクするので、受け付ける例として出さない
+    assert "/ext/" not in described(sandbox, "fetch_from_workspace", "path")
     assert file_id_form in described(AttachmentTools(), "read_attachment", "file_id")
     # 「相対も通る」は消えている
     for name in ("write_file", "read_file", "list_workspace", "fetch_from_workspace"):
