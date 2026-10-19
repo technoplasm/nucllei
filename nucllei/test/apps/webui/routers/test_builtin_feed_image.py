@@ -152,7 +152,7 @@ NO_FILE_NEXT = (
 )
 SHOW_PATH = (
     "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
-    "返ったリンクを本文に書く。"
+    "その戻り値に従う。"
 )
 LINK_HINT = "ユーザーに示すなら [ラベル]("
 

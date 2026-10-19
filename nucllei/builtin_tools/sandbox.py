@@ -419,7 +419,7 @@ def _cache_hint(abs_path: str) -> str:
 def _file_link_note(name: str, file_id: str) -> str:
     """display に乗らない添付 (このチャットのファイル一覧にだけ載る) を本文で示すリンク。"""
     label = (name or "").replace("[", "(").replace("]", ")")
-    return f"{_NEXT}本文で示すなら [{label}](/api/v1/files/{file_id}/content) と書く"
+    return f"{_NEXT}本文に [{label}](/api/v1/files/{file_id}/content) と書く"
 
 
 def _err(text: str, kind: ToolErrorKind) -> ToolError:
@@ -977,7 +977,8 @@ class Tools:
     から一定期間 (既定 30 日。取り込みの結果に期限日を添える) で消える — 会話を跨いで残す物は
     /workspace の別の場所 (自分で作るディレクトリ等) に置く。
     消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
-    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。実行は直列 — run_python は同じ会話内で、
+    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。例外は配備の決まり
+    (system prompt) に従う。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。

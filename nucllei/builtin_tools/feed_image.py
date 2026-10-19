@@ -134,10 +134,11 @@ _LIMIT_BY_DEPLOY = "上限は sandbox の配備の設定で、引数では上げ
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の外 / 大きすぎる)。"
 
-# sandbox のファイルをユーザーに見せる方法 (fetch_from_workspace がリンクを返す)。
+# sandbox のファイルをユーザーに見せる方法。fetch_from_workspace の戻り値は 2 形 (画像等は
+# 「既に表示されている」・それ以外は本文に書くリンク) なので、リンクを組ませずに戻り値に従わせる。
 _SHOW_PATH = (
     "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
-    "返ったリンクを本文に書く。"
+    "その戻り値に従う。"
 )
 
 
@@ -409,7 +410,7 @@ class Tools:
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
         """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
-        ユーザーには何も表示されず、Files にも登録しない — 見せるなら本文に `![図: …](URL)` を書く。
+        ユーザーには何も表示されず、Files にも登録しない — 本文に `![図: …](URL)` を書いて見せてよいのは url で渡したものに限る (それ以外は戻り値に従う)。
 
         対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・
         ホストを補わない)。3 つとも省略すると、この会話に添付された PDF 全件 (filename で絞り込み。

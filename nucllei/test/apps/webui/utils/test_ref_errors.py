@@ -410,7 +410,7 @@ def test_feed_image_wording():
         " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で run_python が使えるなら、このパスを"
         "開いて縮小し、出力を /workspace/… に書いてからその path を feed_image(path=…) に渡す。"
         "sandbox のファイルなので、fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を"
-        "渡し、返ったリンクを本文に書く。"
+        "渡し、その戻り値に従う。"
     )
     assert feed_explain(U, RefError("too_large", "x")).startswith(
         f"ERROR: {U} は 取得の上限 を超えている。このままでは自分の目に入れられない"

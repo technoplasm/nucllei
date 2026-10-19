@@ -1455,7 +1455,7 @@ class Tools:
     mounted; no internal names (codes, env names, storage terms) and nothing
     deployment-specific. Anything addressed only to the model — the argument
     form sentences (`*_ARG_FORM`, `REF_ARGS_RULE`, §3.8), display instructions
-    (「本文に貼り直さない」, 「本文で示すなら …」), 「回答に写さない」 — goes after
+    (「本文に貼り直さない」, 「本文に … と書く」), 「回答に写さない」 — goes after
     `次の手: `, never in the fact sentence. Raw exception text, HTTP `detail`,
     internal URLs and storage paths are logged, not returned (a tool exception
     reaches the model as its class name + the first 200 characters only). `nucllei/test/apps/webui/utils/test_ref_errors.py`
@@ -1977,7 +1977,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     result says 「ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない」; any
     other file is only listed in the chat's file pane (`message.files` entries
     of type `file` are not drawn under the message), so the result carries a
-    ready link 「次の手: 本文で示すなら [<name>](/api/v1/files/<id>/content) と書く」.
+    ready link 「次の手: 本文に [<name>](/api/v1/files/<id>/content) と書く」.
     The File keeps the sandbox path it came from in `meta.source`. An `/ext/…` file that the `/ext` gate serves
     (static: exists in the mount; proxy: the upstream answers 2xx) is **not copied or attached** — the tool
     answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the

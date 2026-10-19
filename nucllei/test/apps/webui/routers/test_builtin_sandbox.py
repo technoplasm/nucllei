@@ -1056,7 +1056,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         out = _arun(tool.fetch_from_workspace(given, __user__=user))
         assert out.startswith(f"{given} (") and "file_id=" in out
         # 画像・音声・動画でない添付はファイル一覧にだけ載る — 本文で示すリンクを渡す
-        assert "本文で示すなら [mine.txt](/api/v1/files/" in out
+        assert "次の手: 本文に [mine.txt](/api/v1/files/" in out
         assert "画面には既に表示されている" not in out
         assert [c[1]["path"] for c in tool.calls] == ["imports", "imports/mine.txt"]
 
@@ -1091,7 +1091,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert rec.meta["name"] == "a.csv" and rec.meta["size"] == 3
         assert "source" not in emitted[0]["data"]["files"][0]["file"]["meta"]
         # 戻り値は表示されないファイル = 本文で示すリンクの書き方
-        assert "次の手: 本文で示すなら [a.csv](/api/v1/files/" in out
+        assert "次の手: 本文に [a.csv](/api/v1/files/" in out
 
     def test_fetch_refuses_in_subagent_session(self):
         """サブエージェントの子ターン (metadata の agent_session — utils/subagent が立てる) では
@@ -1225,6 +1225,8 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "send_to_workspace(file_id)" in note
         # 消すときは rm せず trash/ の直下へ移す (同じ規則で消える)
         assert "/workspace/trash/" in note and "直下" in note
+        # 例外 (LLENS の記憶・電子カルテの抽出物は rm 等) は配備の system prompt が決める
+        assert "例外は配備の決まり" in note
 
     def test_import_tells_cache_expiry(self, tmp_path):
         """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を
