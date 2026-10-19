@@ -692,7 +692,7 @@
 	"System": "システム",
 	"System Prompt": "システムプロンプト",
 	"Table View": "テーブル表示",
-	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools": "ツールに Subagent(builtin_subagent)を割り当てたときだけ有効になります",
+	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools, or a skill that has it as a tool is assigned under Skills. Via a skill, the skill access control decides who can use it": "ツールに Subagent(builtin_subagent)を割り当てるか、それを tool に持つスキルを割り当てたときだけ有効になります。スキル経由の場合、使える人はそのスキルの公開範囲で決まります",
 	"Talk to model": "モデルと話す",
 	"Talking to {{modelName}}": "{{modelName}} と会話中",
 	"Tap to interrupt": "タップで中断",

@@ -7,8 +7,11 @@
 	// llens(#107): run_subagent の委任先 preset の紐づけ(SkillsSelector 同型)。
 	// 一覧の供給元は workspace の getModels()(/api/v1/models/ = preset のみ)。
 	// 編集中の preset 自身も一覧に出す(選択可 — 実行時は depth 上限が守る)。
-	// llens(#140): ここは「どこへ飛べるか」の層。「使えるか」は builtin_subagent を
-	// toolIds に入れるか(+ tool 行の ACL)— 未割り当てでも紐づけは編集でき、効かない旨だけ示す。
+	// llens(#140): ここは「どこへ飛べるか」の層。「使えるか」は run_subagent が生えるか —
+	// builtin_subagent を toolIds に直接入れる(+ tool 行の ACL)か、tool_ids に builtin_subagent を
+	// 持つ skill を skillIds に入れて load_skill で生やす(使える人は skill の access_control で絞る)。
+	// toolAssigned はそのどちらかが成り立つか(ModelEditor が isToolReachableFromPreset で判定)。
+	// 未割り当てでも紐づけは編集でき、効かない旨だけ示す。
 	let {
 		presets = [],
 		selectedPresetIds = $bindable([]),
@@ -53,7 +56,9 @@
 			? 'text-content-subtle'
 			: 'text-yellow-600 dark:text-yellow-500'}"
 	>
-		{$i18n.t('Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools')}
+		{$i18n.t(
+			'Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools, or a skill that has it as a tool is assigned under Skills. Via a skill, the skill access control decides who can use it'
+		)}
 	</div>
 
 	<div class="flex flex-col mt-1">

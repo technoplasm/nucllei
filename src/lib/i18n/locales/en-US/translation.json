@@ -692,7 +692,7 @@
 	"System": "",
 	"System Prompt": "",
 	"Table View": "",
-	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools": "",
+	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools, or a skill that has it as a tool is assigned under Skills. Via a skill, the skill access control decides who can use it": "",
 	"Talk to model": "",
 	"Talking to {{modelName}}": "",
 	"Tap to interrupt": "",

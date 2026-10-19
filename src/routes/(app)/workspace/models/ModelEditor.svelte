@@ -11,6 +11,7 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
+	import { isToolReachableFromPreset } from '$lib/utils/skills';
 
 	import AdvancedParams from './AdvancedParams.svelte';
 	import ToolsSelector from './ToolsSelector.svelte';
@@ -609,7 +610,12 @@
 									<SubagentPresetsSelector
 										bind:selectedPresetIds={subagentPresetIds}
 										presets={workspaceModels}
-										toolAssigned={toolIds.includes('builtin_subagent')}
+										toolAssigned={isToolReachableFromPreset('builtin_subagent', {
+											toolIds,
+											skillIds,
+											skillList: $skills,
+											featureSkills
+										})}
 									/>
 								</div>
 

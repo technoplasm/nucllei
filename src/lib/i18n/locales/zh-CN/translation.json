@@ -692,7 +692,7 @@
 	"System": "系统",
 	"System Prompt": "系统提示词 (System Prompt)",
 	"Table View": "表格视图",
-	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools": "仅在“工具”中分配了 Subagent(builtin_subagent)时生效",
+	"Takes effect only when the Subagent tool (builtin_subagent) is assigned under Tools, or a skill that has it as a tool is assigned under Skills. Via a skill, the skill access control decides who can use it": "仅在“工具”中分配了 Subagent(builtin_subagent)，或分配了将其作为工具的技能时生效。通过技能使用时，可使用的人由该技能的公开范围决定",
 	"Talk to model": "与模型交谈",
 	"Talking to {{modelName}}": "正在与 {{modelName}} 交谈",
 	"Tap to interrupt": "点击以中断",

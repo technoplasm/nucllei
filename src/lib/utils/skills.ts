@@ -30,3 +30,34 @@ export const findSkillByCommand = <T extends SkillLike>(
 	}
 	return skillList.find((s) => s.id === command) ?? null;
 };
+
+// preset の編集画面で「この tool がこの preset で生えうるか」を判定する(llens: run_subagent の
+// skill 方式)。生える経路は 2 つ:
+// - preset の toolIds に直接入っている
+// - preset に紐づけた skill(meta.skillIds)の tool_ids に入っていて、機能「スキル」が ON
+//   (OFF だと load_skill も /command も止まり、skill 経由では生えない — nucllei/utils/skills.py)
+// skillList は store の skills(GET /api/v1/skills/ の応答、tool_ids を含む)。
+// skillIds に載っていても一覧に無い skill(削除済み・不可視)は数えない。
+// 「誰が使えるか」(skill の access_control・tool 行の ACL)はここでは見ない。
+export const isToolReachableFromPreset = (
+	toolId: string,
+	{
+		toolIds = [],
+		skillIds = [],
+		skillList = [],
+		featureSkills = true
+	}: {
+		toolIds?: string[];
+		skillIds?: string[];
+		skillList?: { id: string; tool_ids?: string[] | null }[] | null;
+		featureSkills?: boolean;
+	}
+): boolean => {
+	if (toolIds.includes(toolId)) {
+		return true;
+	}
+	if (!featureSkills || !skillList) {
+		return false;
+	}
+	return skillList.some((s) => skillIds.includes(s.id) && (s.tool_ids ?? []).includes(toolId));
+};

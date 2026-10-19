@@ -799,8 +799,10 @@ export interface ModelMeta {
 	};
 	skillIds?: string[];
 	// llens(#107/#140): サブエージェント preset の allowlist(ModelEditor が保存)。run_subagent
-	// 自体は builtin_subagent を toolIds に入れたときだけ載り、委任先は meta.subagentPresetIds ∩
-	// アクセス可 — nucllei/builtin_tools/subagent.py・nucllei/utils/subagent.py)
+	// 自体は builtin_subagent を toolIds に入れたとき、または tool_ids に builtin_subagent を持つ
+	// skill を skillIds に入れて load_skill したときだけ載る(使えるか = toolIds なら tool 行の ACL、
+	// skill 経由なら skill の access_control)。委任先は meta.subagentPresetIds ∩ アクセス可 —
+	// nucllei/builtin_tools/subagent.py・nucllei/utils/subagent.py)
 	subagentPresetIds?: string[];
 }
 

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { findSkillByCommand, matchSkillCommand } from './skills';
+import { findSkillByCommand, isToolReachableFromPreset, matchSkillCommand } from './skills';
 
 describe('matchSkillCommand: 行頭一致', () => {
 	it('先頭行の行頭 /command は command を返す(先頭 / なし)', () => {
@@ -60,5 +60,59 @@ describe('findSkillByCommand', () => {
 
 	it('行頭でない /command は null', () => {
 		expect(findSkillByCommand(skills, 'x /summarize')).toBeNull();
+	});
+});
+
+describe('isToolReachableFromPreset: toolIds 直か、紐づけた skill の tool_ids 経由', () => {
+	const skillList = [
+		{ id: 'subagent', tool_ids: ['builtin_subagent'] },
+		{ id: 'summarize', tool_ids: [] },
+		{ id: 'legacy', tool_ids: null }
+	];
+
+	it('toolIds に直接あれば true(skill を見ない)', () => {
+		expect(
+			isToolReachableFromPreset('builtin_subagent', {
+				toolIds: ['builtin_subagent'],
+				featureSkills: false
+			})
+		).toBe(true);
+	});
+
+	it('紐づけた skill の tool_ids にあれば true', () => {
+		expect(
+			isToolReachableFromPreset('builtin_subagent', {
+				skillIds: ['summarize', 'subagent'],
+				skillList
+			})
+		).toBe(true);
+	});
+
+	it('その skill を紐づけていなければ false', () => {
+		expect(
+			isToolReachableFromPreset('builtin_subagent', {
+				skillIds: ['summarize', 'legacy'],
+				skillList
+			})
+		).toBe(false);
+	});
+
+	it('機能「スキル」が OFF なら skill 経由は数えない', () => {
+		expect(
+			isToolReachableFromPreset('builtin_subagent', {
+				skillIds: ['subagent'],
+				skillList,
+				featureSkills: false
+			})
+		).toBe(false);
+	});
+
+	it('skillIds にあっても一覧に無い skill(削除済み・未取得)は数えない', () => {
+		expect(
+			isToolReachableFromPreset('builtin_subagent', { skillIds: ['subagent'], skillList: null })
+		).toBe(false);
+		expect(isToolReachableFromPreset('builtin_subagent', { skillIds: ['gone'], skillList })).toBe(
+			false
+		);
 	});
 });
