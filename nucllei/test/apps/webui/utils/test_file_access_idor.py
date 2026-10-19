@@ -145,3 +145,91 @@ class TestFileAccessIDOR(AbstractPostgresTest):
 
         files = [{"id": "f-alice"}]
         assert filter_files_by_user_access(files, self.admin) == files
+
+    # ---- process_chat_payload: inlet が見る files ----
+
+    def test_inlet_sees_only_readable_files_in_body_and_metadata(self, monkeypatch):
+        """他人の file_id を files に入れて送っても、Filter の inlet が見る
+        body["files"] / body["metadata"]["files"] / __metadata__["files"] のどれにも
+        その id が無い(main.py は絞る前の一覧を metadata["files"] に入れて渡す —
+        inlet 前に絞った一覧へ揃っていなければならない)。自分のファイルは残る。"""
+        import asyncio
+        import types
+
+        from starlette.requests import Request
+
+        from nucllei.main import app
+        from nucllei.utils import middleware
+
+        self.Files.insert_new_file(
+            "bob",
+            self.FileForm(
+                id="f-bob",
+                filename="b.txt",
+                path="/data/b.txt",
+                meta={},
+                data={"content": "bob-own"},
+            ),
+        )
+
+        seen = {}
+
+        class SpyFilter:
+            def inlet(self, body, __metadata__=None):
+                seen["body_files"] = body.get("files")
+                seen["body_metadata_files"] = (body.get("metadata") or {}).get("files")
+                seen["dunder_metadata_files"] = (__metadata__ or {}).get("files")
+                return body
+
+        monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda m: ["spy"])
+        monkeypatch.setattr(
+            middleware.Functions,
+            "get_function_by_id",
+            lambda fid: types.SimpleNamespace(id=fid),
+        )
+
+        model = {"id": "idor", "name": "idor", "owned_by": "openai", "info": {}}
+        saved_models = getattr(app.state, "MODELS", None)
+        saved_spy = app.state.FUNCTIONS.get("spy")
+        app.state.MODELS = {"idor": model}
+        app.state.FUNCTIONS["spy"] = SpyFilter()
+        try:
+            request = Request(
+                scope={
+                    "type": "http",
+                    "app": app,
+                    "method": "POST",
+                    "path": "/api/chat/completions",
+                    "headers": [],
+                    "query_string": b"",
+                }
+            )
+            files = [
+                {"type": "file", "id": "f-alice"},
+                {"type": "file", "id": "f-bob"},
+            ]
+            form_data = {
+                "model": "idor",
+                "stream": True,
+                "messages": [{"role": "user", "content": "読んで"}],
+                "files": files,
+            }
+            # main.py chat_completion と同じ形: 絞る前の一覧を metadata にも入れる
+            metadata = {"user_id": "bob", "model": model, "files": files}
+            form_data["metadata"] = metadata
+            asyncio.run(
+                middleware.process_chat_payload(
+                    request, form_data, self.bob, metadata, model, None
+                )
+            )
+        finally:
+            app.state.MODELS = saved_models
+            if saved_spy is None:
+                app.state.FUNCTIONS.pop("spy", None)
+            else:
+                app.state.FUNCTIONS["spy"] = saved_spy
+
+        for key in ("body_files", "body_metadata_files", "dunder_metadata_files"):
+            ids = [f.get("id") for f in seen[key] or []]
+            assert "f-alice" not in ids, key
+            assert ids == ["f-bob"], key

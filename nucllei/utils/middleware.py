@@ -525,6 +525,15 @@ async def process_chat_payload(
     # 偽装 file_id / collection がソース解決に到達しないようにする。
     if form_data.get("files"):
         form_data["files"] = filter_files_by_user_access(form_data["files"], user)
+    # 絞った一覧を metadata["files"] にも入れる。呼び手(main.py chat_completion)は
+    # 絞る前のクライアント申告を metadata["files"] に入れて渡してくるが、後段の
+    # pipeline / Filter の inlet は body["metadata"]["files"] も読み(llens
+    # large_file_gate は content_type・サイズを注記に出す)、Filter には __metadata__
+    # としても同じ dict が渡る。inlet より前に絞る前の一覧が見えないよう、ここで
+    # 両方を同じ list に揃える(inlet 後の作り直しより前に効かせる)。
+    metadata["files"] = form_data.get("files")
+    if isinstance(form_data.get("metadata"), dict):
+        form_data["metadata"]["files"] = metadata["files"]
 
     # 添付による skill の自動ロード(入口 3 — _memos/skill-design.md)。条件
     # (content_type の前方一致)に合う添付があれば `/command` と同じ合成 exchange を
