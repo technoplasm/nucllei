@@ -276,7 +276,14 @@ class TestRunSubagent(AbstractPostgresTest):
         )
         # クラス docstring(運用規律)が toolkit 注記として 1 回前置される
         assert spec["description"].startswith("【Subagent ツール群 共通】")
-        assert "同時 4 本まで" in spec["description"]
+        # 同時数はサーバー全体の上限(ほかの利用者の分も数える — _active_turns は
+        # プロセス全体の数)。並べたサブエージェントどうしは同時、sandbox の tool は順番
+        assert (
+            "同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も数える)"
+            in spec["description"]
+        )
+        assert "サブエージェントどうしは同時に走り" in spec["description"]
+        assert "sandbox で実行する tool は並べても同時には走らず" in spec["description"]
         # per-tool timeout(クラス属性 timeouts)と表示ディスクリプタ(戻り型の Annotated)
         assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S
         assert tool["render"] == {"result": {"kind": "subagent"}}
@@ -427,6 +434,99 @@ class TestRunSubagent(AbstractPostgresTest):
         assert self.parent.id in listed
         assert child_id not in listed
         assert child_id in {c.id for c in self.Chats.get_chats()}
+
+    def test_child_turn_names_only_the_child_tools(self, monkeypatch):
+        """子ターンの tool 実行では、ERROR・次の手で名指ししてよい tool(tool_in_turn)は
+        子の tool 一覧になる(親ターンの一覧を持ち込まない — 2026-10-19 llens 監査 (13))。"""
+        from nucllei.utils import middleware, subagent
+        from nucllei.utils.tool_errors import tool_in_turn, turn_tools
+
+        seen = {}
+
+        async def probe():
+            seen["probe"] = tool_in_turn("probe")
+            seen["parent_only"] = tool_in_turn("parent_only")
+            seen["run_subagent"] = tool_in_turn("run_subagent")
+            return "ok"
+
+        child_tools = {
+            "probe": {
+                "callable": probe,
+                "spec": {"name": "probe", "parameters": {"properties": {}}},
+            }
+        }
+
+        def tool_call_response():
+            frames = [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "functions.probe:0",
+                                        "index": 0,
+                                        "type": "function",
+                                        "function": {
+                                            "name": "probe",
+                                            "arguments": "{}",
+                                        },
+                                    }
+                                ],
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+
+            async def gen():
+                for frame in frames:
+                    yield "data: " + json.dumps(frame) + "\n"
+                yield "data: [DONE]\n"
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+
+        async def child_completion(request, form_data, user):
+            return tool_call_response()
+
+        async def followup_completion(request, form_data, user):
+            return _sse_response("text_basic")
+
+        async def fake_payload(
+            request, form_data, user, metadata, model, events_stream
+        ):
+            metadata["tools"] = child_tools
+            form_data["tools"] = [
+                {"type": "function", "function": entry["spec"]}
+                for entry in child_tools.values()
+            ]
+            return form_data, metadata, []
+
+        async def no_measure(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(subagent, "generate_chat_completion", child_completion)
+        monkeypatch.setattr(middleware, "generate_chat_completion", followup_completion)
+        monkeypatch.setattr(middleware, "process_chat_payload", fake_payload)
+        monkeypatch.setattr(middleware, "get_sorted_filter_ids", lambda model: [])
+        monkeypatch.setattr(middleware, "measure_carried_tokens", no_measure)
+        tool = self._build_tool()
+
+        async def main():
+            # 親ターンの一覧(run_subagent を呼んだ側)を立てた中で子を走らせる
+            with turn_tools(["run_subagent", "parent_only"]):
+                return await tool["callable"](
+                    preset_id="researcher", instruction="probe を呼んで"
+                )
+
+        result = asyncio.run(main())
+        assert result["ok"] is True
+        assert seen == {"probe": True, "parent_only": False, "run_subagent": False}
 
     def test_child_turn_expands_parent_user_role_and_groups(self, monkeypatch):
         """子ターンの preset system prompt の {{USER_*}} は親ターンのユーザーの値。

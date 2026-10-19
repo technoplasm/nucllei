@@ -56,7 +56,11 @@ from nucllei.utils import tool_output
 from nucllei.utils.tool_errors import (
     ToolError,
     ToolFailure,
+    current_turn_tools,
+    reset_turn_tools,
+    set_turn_tools,
     tool_exception_text,
+    tool_in_turn,
 )
 from nucllei.utils.tool_output import ToolOutputSink
 from nucllei.utils.tool_render import Rendered, resolve_result_render
@@ -74,7 +78,8 @@ EXEC_SPAWN_GRACE_S = 10
 # notice(execution_resume)の status 行の両方でこの 1 つを使う(2026-10-04 監査で統一:
 # 事実の文 + モデル向けの「次の手:」)
 ORPHANED_ERROR = (
-    "サーバーの再起動で結果が失われた。次の手: 読むだけの処理なら同じ引数で呼び直す。"
+    "実行中にサーバーが再起動し、このタスクは途中で失われた (status の orphaned は"
+    "この意味。結果は無い)。次の手: 読むだけの処理なら同じ引数で呼び直す。"
     "書き込みや送信を伴う処理は、結果が残っていないか確かめてから呼び直すかを決める。"
 )
 SPAWN_FAILED_ERROR = (
@@ -293,7 +298,9 @@ def normalize_tool_result(raw) -> tuple[str, Optional[dict]]:
     return ("" if raw is None else str(raw)), None
 
 
-def truncate_tool_result(text: str) -> tuple[str, bool, int]:
+def truncate_tool_result(
+    text: str, spec: Optional[dict] = None
+) -> tuple[str, bool, int]:
     """tool 結果の共通切詰め(契約 M0 — TOOL_RESULT_MAX_CHARS)。
 
     適用は**結果の生産点で一度だけ**: 同期 tool は execute_tool_calls の wire
@@ -305,23 +312,43 @@ def truncate_tool_result(text: str) -> tuple[str, bool, int]:
 
     黙って切らない(2026-10-04 監査): 切った先頭の後ろに事実 + 次の手の印を
     付ける — モデルが途中までの結果を全量と誤読しないため。印の分だけ
-    TOOL_RESULT_MAX_CHARS を僅かに超える。
+    TOOL_RESULT_MAX_CHARS を僅かに超える。`spec` はその tool の spec(次の手の
+    言い方を引数で選ぶ — `truncation_marker`)。
     """
     original_chars = len(text)
     if original_chars <= TOOL_RESULT_MAX_CHARS:
         return text, False, original_chars
     return (
-        text[:TOOL_RESULT_MAX_CHARS] + truncation_marker(original_chars),
+        text[:TOOL_RESULT_MAX_CHARS] + truncation_marker(original_chars, spec),
         True,
         original_chars,
     )
 
 
-def truncation_marker(original_chars: int) -> str:
-    """切詰め済み tool 結果の末尾に付ける印(モデル向け — 事実 + 次の手)。"""
+def truncation_marker(original_chars: int, spec: Optional[dict] = None) -> str:
+    """切詰め済み tool 結果の末尾に付ける印(モデル向け — 事実 + 次の手)。
+
+    次の手は tool の spec の引数で選ぶ(2026-10-19 llens 監査 (6) — 範囲を指す引数の
+    無い tool に「offset / query で絞る」と言っていた): `offset` があれば続きから、
+    `query` があれば絞り込み、どちらも無ければ出力を絞るか、ファイルに書いて
+    read_file で読む(read_file はこのターンに出ているときだけ名指し — tool_in_turn)。
+    """
+    properties = ((spec or {}).get("parameters") or {}).get("properties") or {}
+    has_offset = "offset" in properties
+    has_query = "query" in properties
+    if has_offset and has_query:
+        step = "offset で続きから、または query で範囲を絞って呼び直す"
+    elif has_offset:
+        step = "offset で続きから呼び直す"
+    elif has_query:
+        step = "query で範囲を絞って呼び直す"
+    elif tool_in_turn("read_file"):
+        step = "出力を絞って呼び直すか、出力をファイルに書いて read_file で読む"
+    else:
+        step = "出力を絞って呼び直す"
     return (
         f"\n(ここで切れている: 全 {original_chars} 字のうち先頭 "
-        f"{TOOL_RESULT_MAX_CHARS} 字。次の手: 続きが要るなら offset / query などで範囲を絞って呼び直す)"
+        f"{TOOL_RESULT_MAX_CHARS} 字。次の手: 続きが要るなら{step})"
     )
 
 
@@ -380,7 +407,7 @@ async def spawn_execution(
     """
     if not async_exec_available():
         raise ToolFailure(
-            "このサーバー構成 (multi-worker) では background 実行を使えない",
+            "このサーバーの構成では background 実行を使えない",
             "background を付けずに呼び直す。",
         )
 
@@ -390,8 +417,7 @@ async def spawn_execution(
         raise ToolFailure(
             f"バックグラウンドタスクの同時数がユーザーごとの上限"
             f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)",
-            "走行中のタスクを await_task で待つか stop_task で止めてから"
-            "呼び直す。急ぐなら background を付けずに呼び直す。",
+            _user_limit_next(),
         )
     if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
         raise ToolFailure(
@@ -402,6 +428,9 @@ async def spawn_execution(
     _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
 
     exec_id = str(uuid.uuid4())
+    # spawn したターンの tool の名前(runner は別 task — ERROR・次の手で名指ししてよい
+    # tool を runner の中でも同じにする。2026-10-19 llens 監査 (13))
+    turn_tool_names = current_turn_tools()
     # INSERT より先にセンチネル登録(誤 orphan 防止: liveness ガードは
     # 「registry に無い running 行」を倒すため、行が見えた時点で registry に居る)
     _exec_tasks[exec_id] = None
@@ -434,6 +463,7 @@ async def spawn_execution(
                 params,
                 chat_id=chat_id,
                 message_id=message_id,
+                turn_tool_names=turn_tool_names,
             ),
             id=f"exec:{chat_id}",
         )
@@ -473,8 +503,41 @@ async def spawn_execution(
     else:
         _exec_tasks[exec_id] = task_id
 
-    # 返りのキーは task_id(契約 T1 — モデル・UI 向けの用語。値は exec 行の id)
-    return {"ok": True, "task_id": exec_id, "tool_name": tool_name, "status": "running"}
+    # 返りのキーは task_id(契約 T1 — モデル・UI 向けの用語。値は exec 行の id)。
+    # note は spawn 直後の案内(2026-10-19 llens 監査 — FE は task_id / status で読むので
+    # キーが増えても封筒の判定は変わらない)
+    return {
+        "ok": True,
+        "task_id": exec_id,
+        "tool_name": tool_name,
+        "status": "running",
+        "note": _spawned_note(),
+    }
+
+
+def _user_limit_next() -> str:
+    """ユーザーごとの同時数上限の次の手(回収 tool はこのターンに出ているときだけ名指し)。"""
+    waits = [name for name in ("await_task", "stop_task") if tool_in_turn(name)]
+    if waits == ["await_task", "stop_task"]:
+        first = "走行中のタスクを await_task で待つか stop_task で止めてから呼び直す。"
+    elif waits == ["await_task"]:
+        first = "走行中のタスクを await_task で待ってから呼び直す。"
+    elif waits == ["stop_task"]:
+        first = "走行中のタスクを stop_task で止めてから呼び直す。"
+    else:
+        first = ""
+    return first + "急ぐなら background を付けずに呼び直す。"
+
+
+def _spawned_note() -> str:
+    """spawn 直後の running 形に添える案内(事実 + 次の手)。"""
+    note = (
+        "バックグラウンドで実行を始めた (まだ結果は無い)。次の手: 結果は完了時に"
+        "通知で届くので、待たずに別の作業を進める。"
+    )
+    if tool_in_turn("await_task"):
+        note += "今すぐ要るときだけ await_task で受け取る。"
+    return note
 
 
 def _error_outcome(sink: "_ExecSink", text: str, kind: str, duration: float) -> dict:
@@ -501,8 +564,12 @@ async def _run_execution(
     *,
     chat_id: Optional[str] = None,
     message_id: Optional[str] = None,
+    turn_tool_names: frozenset = frozenset(),
 ) -> None:
     """runner: callable を走らせ、終端(done/failed)を guarded UPDATE で書く。
+
+    turn_tool_names は spawn したターンの tool の名前(tool_errors.set_turn_tools で立て直す —
+    ERROR・次の手で名指ししてよい tool を同期実行と同じにする)。
 
     CancelledError では**一切永続化しない**(D2 — stopped は stop 経路が CAS 済み。
     shutdown の一斉 cancel を stopped と誤記録しない)。DB 書き自体の失敗も握って
@@ -520,6 +587,7 @@ async def _run_execution(
     _exec_sinks[exec_id] = sink
     sink_token = tool_output.current_sink.set(sink)
     exec_token = in_exec.set(True)
+    turn_tools_token = set_turn_tools(turn_tool_names)
     started_at = time.monotonic()
     outcome: Optional[dict] = None
     tool_timeout = entry.get("timeout") or ASYNC_EXEC_TIMEOUT_S
@@ -573,7 +641,9 @@ async def _run_execution(
             text, render = normalize_tool_result(raw)
             meta: dict = {}
             # 切詰めは生産点で一度だけ(契約 M0 — 同期経路と共通のヘルパ)
-            text, truncated, original_chars = truncate_tool_result(text)
+            text, truncated, original_chars = truncate_tool_result(
+                text, entry.get("spec")
+            )
             if truncated:
                 meta["truncated"] = True
                 meta["original_chars"] = original_chars
@@ -616,6 +686,7 @@ async def _run_execution(
             }
     finally:
         # cancel 経路もここだけ通る: ContextVar reset / sink close のみ(D2)
+        reset_turn_tools(turn_tools_token)
         in_exec.reset(exec_token)
         tool_output.current_sink.reset(sink_token)
         sink.close()

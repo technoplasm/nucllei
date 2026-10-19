@@ -75,7 +75,8 @@ class Tools:
         usage = ((chat.meta if chat else None) or {}).get("usage") or None
         if not usage:
             raise ToolOutcome(
-                "このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)"
+                "このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)",
+                "残量は分からないものとして作業を続ける。次のステップで 1 回だけ呼び直してよい。",
             )
 
         # 分子: carried_tokens(最後の呼び出しの prompt + 再送される出力 = 次の呼び出しの
@@ -88,7 +89,8 @@ class Tools:
                 break
         if used is None:
             raise ToolOutcome(
-                "このチャットの usage に token 数が無い(エンジンが usage を返していない)"
+                "このチャットの usage に token 数が無い(エンジンが usage を返していない)",
+                "残量は分からないものとして作業を続ける (呼び直しても変わらない)。",
             )
 
         # context 長: 記録済み > モデルから解決(endpoint 申告 → meta.context_size)。

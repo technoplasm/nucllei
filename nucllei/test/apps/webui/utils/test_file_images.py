@@ -21,7 +21,10 @@ from test.util.abstract_integration_test import AbstractPostgresTest
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 PNG_B64 = base64.b64encode(PNG_BYTES).decode("ascii")
 
-UNAVAILABLE = {"type": "text", "text": "(image unavailable)"}
+UNAVAILABLE = {
+    "type": "text",
+    "text": "(ここにあった画像は読み込めなかった — 中身は見えていない)",
+}
 
 
 class TestFileImagesInline(AbstractPostgresTest):

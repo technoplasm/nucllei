@@ -74,6 +74,7 @@ base64 化してモデルへ再投入する。base64 は戻り境界にも DB �
 
 import asyncio
 import logging
+import math
 import mimetypes
 import os
 from typing import Callable, Optional
@@ -98,7 +99,13 @@ from nucllei.utils.image_refs import (
     url_for_mounted_path,
     with_page,
 )
-from nucllei.utils.tool_errors import ToolCallError, ToolError, ToolFailure, ToolOutcome
+from nucllei.utils.tool_errors import (
+    ToolCallError,
+    ToolError,
+    ToolFailure,
+    ToolOutcome,
+    tool_in_turn,
+)
 from nucllei.utils.tool_output import mark_error_kind
 from nucllei.utils.ref_errors import (
     NEXT,
@@ -124,22 +131,51 @@ _TYPE_OF_EXT = {ext: t for t, (_name, exts) in _IMAGE_TYPES.items() for ext in e
 _IMAGE_NAMES = " / ".join(name for name, _exts in _IMAGE_TYPES.values())
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」(`utils/ref_errors` の module docstring)。
-# 別の toolkit の tool (sandbox の run_python / send_to_workspace / fetch_from_workspace、
-# fetch_url、run_subagent) は載っていないことがあるので「〜が使えるなら」と条件付きで書く。
+# 別の toolkit の tool (sandbox の run_python / run_shell / send_to_workspace / fetch_from_workspace /
+# list_workspace / read_file、fetch_url、run_subagent) は、このターンに出ているときだけ名指しする
+# (`tool_in_turn`、2026-10-19 llens 監査 (13) — 「〜が使えるなら」をやめた)。無い tool の文は出さず、
+# 残る手で言うか文を省く。文は呼び出しのたびに組む (ターンの tool はターンごとに違う)。
 
-# path= の取り出しの上限は配備の設定 (sandbox の上限と FETCH_MAX_BYTES の小さいほう)。env 名は
-# モデルに出さない。sandbox の tool の url= と同じ言い方
-_LIMIT_BY_DEPLOY = "上限は sandbox の配備の設定で、引数では上げられない"
+
+def _have(*names: str) -> bool:
+    """名前の tool がすべてこのターンに出ているか (次の手で名指ししてよいか)。"""
+    return all(tool_in_turn(n) for n in names)
+
+
+# path= の取り出しの上限は sandbox の上限と FETCH_MAX_BYTES の小さいほう。env 名も「配備」も
+# モデルに出さない
+_LIMIT_BY_SETTING = "上限は sandbox の設定で決まり、引数では上げられない"
 
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面。
 _ERR_UNEXPLAINED = "を読めない (存在しない / 許可された場所の外 / 大きすぎる)。"
 
-# sandbox のファイルをユーザーに見せる方法。fetch_from_workspace の戻り値は 2 形 (画像等は
-# 「既に表示されている」・それ以外は本文に書くリンク) なので、リンクを組ませずに戻り値に従わせる。
-_SHOW_PATH = (
-    "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
-    "その戻り値に従う。"
-)
+# 引数なし (url / path / file_id 無し) で添付 PDF をまとめて見るときの、全添付 PDF 合わせたページ数の
+# 上限 (2026-10-19 ken 決定、llens 監査 (12))。1 件あたりの上限 (valve max_pages) はそのまま効く —
+# これは添付 PDF の件数が多いときに積むページが件数倍に膨らむのを止める枠
+_ATTACHED_PDF_PAGES = 10
+
+# PDF の要るページだけを画像にする例 (sandbox の poppler-utils)。出力名は総ページ数の桁で
+# ゼロ埋めされるので、名前は言わず「できた PNG」と言う
+_PDFTOPPM = "pdftoppm -f 3 -l 3 -r 100 -png {src} /workspace/page"
+
+
+def _show_path() -> str:
+    """sandbox のファイルをユーザーに見せる方法。fetch_from_workspace の戻り値は 2 形 (画像等は
+    「既に表示されている」・それ以外は本文に書くリンク) なので、リンクを組ませずに戻り値に従わせる。
+    fetch_from_workspace がこのターンに無ければ見せる手が無いので空。"""
+    if not tool_in_turn("fetch_from_workspace"):
+        return ""
+    return (
+        "ユーザーに見せるときは fetch_from_workspace に path を渡し、その戻り値に従う。"
+    )
+
+
+def _list_parent() -> str:
+    """パスの確かめ方 (sandbox の list_workspace / run_shell。このターンにあるものだけ)。"""
+    names = [n for n in ("list_workspace", "run_shell") if tool_in_turn(n)]
+    if not names:
+        return ""
+    return f"{' か '.join(names)} で親ディレクトリを一覧してパスを確かめる。"
 
 
 def _path_limit() -> int:
@@ -152,8 +188,21 @@ def _hand_over(ref: str, is_path: bool) -> str:
     """「中身は読めない」の後の次の一手 (渡し方)。URL ならブラウザで開けるのでリンクで
     示せるが、sandbox の fs パスはブラウザに意味が無い (リンクにしろとは言わない)。"""
     if is_path:
-        return "sandbox のファイルなので、" + _SHOW_PATH
+        show = _show_path()
+        return "sandbox のファイルなので、" + show if show else ""
     return show_as_link(ref)
+
+
+def _suggest_mb(err) -> int:
+    """fetch_url の max_mb に入れる具体的な値 (fetch_url の too_large と同じ求め方)。実サイズが
+    分かっていればそれを超える整数 MB、分からなければ上限 (無ければ FETCH_MAX_BYTES) の 2 倍。"""
+    mib = 1024 * 1024
+    size, limit = err.size, err.limit
+    if size is not None and err.size_exact is True:
+        return int(size // mib) + 1
+    limit = limit if limit is not None else FETCH_MAX_BYTES
+    seen = size if size is not None else limit
+    return max(int(seen // mib) + 1, math.ceil(limit / mib) * 2)
 
 
 def _too_large(ref: str, err, *, is_path: bool) -> str:
@@ -170,78 +219,95 @@ def _too_large(ref: str, err, *, is_path: bool) -> str:
         what = f"{ref} は少なくとも {mb(size)} あり、取得の上限"
     what += f" {mb(limit)}" if limit is not None else ""
     if is_path:
-        # path= の上限は配備の設定 (`_path_limit`)
-        what += f" ({_LIMIT_BY_DEPLOY})"
+        # path= の上限は設定 (`_path_limit`)
+        what += f" ({_LIMIT_BY_SETTING})"
     # resolver の上限 (既定 25 MB) は画像の上限 (valve max_image_mb、既定 8 MB) より大きいので、
     # ここに来た画像は _feed_path の「run_python でリサイズ」まで届かない。次の一手はここで言う:
-    # fs なら sandbox から直接開いて縮小、URL なら send_to_workspace で取り込んでから縮小。
+    # 画像は縮小、PDF は pdftoppm で要るページだけを画像に (2026-10-19 llens 監査 (6))。fs なら
+    # sandbox から直接、URL なら send_to_workspace で取り込んでから
+    steps: list[str] = []
     if is_path:
-        shrink = (
-            "画像で run_python が使えるなら、このパスを開いて縮小し、出力を /workspace/… に"
-            "書いてからその path を feed_image(path=…) に渡す。"
-        )
+        if _have("run_python"):
+            steps.append(
+                "画像なら run_python でこのパスを開いて縮小し、出力を /workspace/… に"
+                "書いてからその path を feed_image(path=…) に渡す。"
+            )
+        if _have("run_shell"):
+            steps.append(
+                "PDF なら run_shell の pdftoppm で要るページだけを PNG にし"
+                f" (例: {_PDFTOPPM.format(src=ref)})、できた PNG の path を"
+                " feed_image(path=…) に渡す。"
+            )
     else:
-        shrink = (
-            "画像で send_to_workspace と run_python が使えるなら、send_to_workspace(url=…) で"
-            " sandbox に取り込み、run_python で縮小してから /workspace/… の path を"
-            " feed_image(path=…) に渡す。PDF のテキストが要り、run_subagent と fetch_url が"
-            "使えるなら、run_subagent の子が fetch_url を max_mb 付きで読む。"
-        )
+        if _have("send_to_workspace", "run_python"):
+            steps.append(
+                "画像なら send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小してから"
+                " /workspace/… の path を feed_image(path=…) に渡す。"
+            )
+        if _have("send_to_workspace", "run_shell"):
+            steps.append(
+                "PDF なら send_to_workspace(url=…) で sandbox に取り込み、run_shell の pdftoppm で"
+                f"要るページだけを PNG にし (例: {_PDFTOPPM.format(src='取り込んだパス')})、"
+                "できた PNG の path を feed_image(path=…) に渡す。"
+            )
+        if _have("fetch_url"):
+            fetch = f'fetch_url(url="{ref}", max_mb={_suggest_mb(err)})'
+            if _have("run_subagent"):
+                steps.append(
+                    f"PDF のテキストが要るなら、run_subagent に URL と指示を渡し、子が {fetch} で読む。"
+                )
+            else:
+                steps.append(
+                    f"PDF のテキストが要るなら、{fetch} に query か小さい limit を付けて区切って読む。"
+                )
+    steps.append(_hand_over(ref, is_path))
+    nxt = "".join(steps)
     return (
         f"ERROR: {what} を超えている。このままでは自分の目に入れられない"
-        f" (PDF は pages を絞っても上限は変わらない)。{NEXT}{shrink}{_hand_over(ref, is_path)}"
+        f" (PDF は pages を絞っても上限は変わらない)。"
+        + (f"{NEXT}{nxt}" if nxt else "")
     )
 
 
-# path の not_found: `/ext/…` は nucllei 側の /ext (EXT_MOUNTS) に無い (fetch_from_workspace と同文。
-# ken 2026-10-04: 配備は nucllei と sandbox に同じ /ext を mount する — 無いのは本当に無いか
-# mount のずれ)。`/workspace/…` は sandbox が 404 を返した = 無い
-_EXT_PATH_NOT_FOUND = (
-    "ERROR: {ref} はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)。"
-    + NEXT
-    + "中身が要るなら sandbox で読んで使う。"
-)
-# 確かめ方は専用の list_workspace (sandbox の toolkit。feed_image だけが載っていることもあるので
-# 条件付き — run_shell と同じ toolkit なので、run_shell の ls を案内する場面は無い)
-_LIST_PARENT = "list_workspace が使えるなら、親ディレクトリを一覧してパスを確かめる。"
-_WORKSPACE_PATH_NOT_FOUND = "ERROR: {ref} は存在しない。" + NEXT + _LIST_PARENT
+def _path_not_found(ref: str) -> str:
+    """path の not_found。`/ext/…` は受け取った literal を書き換えた (組み立てた) ことが多いので
+    まずそれを確かめさせる (2026-10-19 llens 監査 (6) — mount の話はモデルに出さない)。
+    `/workspace/…` は sandbox が 404 を返した = 無い。"""
+    if ref.startswith("/ext/"):
+        names = [n for n in ("list_workspace", "run_shell") if tool_in_turn(n)]
+        nxt = "受け取った literal のまま渡したか確かめ" + (
+            f"、{' か '.join(names)} で親ディレクトリを一覧する。" if names else "る。"
+        )
+        return "ERROR: {ref} は存在しない。" + NEXT + nxt
+    nxt = _list_parent()
+    return "ERROR: {ref} は存在しない。" + (NEXT + nxt if nxt else "")
 
 
 def _hints(is_path: bool, ref: str = "") -> RefErrorHints:
     """この tool の言い分け (`utils/ref_errors`)。path (sandbox の fs パス) で来たものには
     「リンクで示す」と言わない — ブラウザに意味が無い。is_path は**どの引数で来たか**
-    (値の形では判定しない)。url で来たものは共通の既定文 (redirect も既定 — 3 回まで辿る)。"""
+    (値の形では判定しない)。url で来たものは共通の既定文 (redirect も既定 — 3 回まで辿る)。
+    次の手の tool 名はこのターンにあるものだけ (呼び出しのたびに組む)。"""
+    listing = _list_parent()
     return RefErrorHints(
         too_large=lambda ref, err: _too_large(ref, err, is_path=is_path),
         unexplained=f"ERROR: {{ref}} {_ERR_UNEXPLAINED}",
         # path は置き場 (sandbox の fs の 2 つの root) で言い分ける — 値の形で別の引数に
         # 読み替えるのではなく、同じ path の中の区分 (sandbox の `_RO_MOUNT_ROOT` と同じ)
-        not_found=(
-            (
-                _EXT_PATH_NOT_FOUND
-                if ref.startswith("/ext/")
-                else _WORKSPACE_PATH_NOT_FOUND
-            )
-            if is_path
-            else RefErrorHints.not_found
-        ),
+        not_found=_path_not_found(ref) if is_path else RefErrorHints.not_found,
         # 上流不達は URL (一般の URL) でしか起きないが、万一 fs で来ても「リンクで示す」とは言わない。
         unreachable=(
             "ERROR: {ref} に届かない (このサーバからは到達できないか、一時的な障害)。"
-            + NEXT
-            + (
-                "run_shell が使えるなら ls で存在を確かめる。"
-                if ref.startswith("/ext/")
-                else _LIST_PARENT
-            )
+            + (NEXT + listing if listing else "")
             if is_path
             else RefErrorHints.unreachable
         ),
-        # sandbox の 404 は not_found に行くので、ここは「繋がらない」だけ
+        # sandbox の 404 は not_found に行くので、ここは「繋がらない」だけ。待たせない
+        # (「時間を置いて」はモデルには測れない — 2026-10-19 llens 監査 (6))
         workspace_unavailable=(
             "ERROR: {ref} は sandbox のファイルだが、sandbox に繋がらない (起動していないか、応答が無い)。"
             + NEXT
-            + "時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
+            + "1 回だけ呼び直す。続くなら sandbox を使わずに進め、ユーザーには sandbox が使えないと伝える。"
         ),
     )
 
@@ -299,7 +365,9 @@ def _kind(media_type: Optional[str]) -> Optional[str]:
 
 def _unsupported_image(label: str, media_type: str, *, source: str) -> ToolCallError:
     """送信直前にも描けない画像形式 (`_IMAGE_TYPES` の外の image/*、HEIC 等) の ERROR。
-    次の手は「sandbox で PNG にして path= で渡す」。
+    次の手は「sandbox で PNG にして path= で渡す」、開けなければ (sandbox が無ければ最初から)
+    ユーザーに JPEG / PNG で添付し直してもらう (2026-10-19 llens 監査 (6) — sandbox の Pillow は
+    HEIC を開けないことがある)。
 
     source は来た経路 ("path" / "url" / "file_id")。path 以外は先に send_to_workspace で sandbox に
     取り込む。変換の道具は sandbox の venv の Pillow。"""
@@ -307,15 +375,54 @@ def _unsupported_image(label: str, media_type: str, *, source: str) -> ToolCallE
     accepted = f"渡せるのは {_IMAGE_NAMES} の画像と PDF"
     if source == "path":
         fetch, src = "", "このパス"
+        can_convert = _have("run_python")
     else:
         fetch = f"send_to_workspace({source}=…) で sandbox に取り込み、"
         src = "取り込んだパス"
-    need = "send_to_workspace と run_python" if fetch else "run_python"
+        can_convert = _have("send_to_workspace", "run_python")
+    ask = "ユーザーに JPEG か PNG で添付し直してもらう。"
+    if can_convert:
+        nxt = (
+            f"{fetch}run_python で{src}を Pillow で開いて PNG で /workspace/… に保存し"
+            " (Image.open(…).save(….png))、その path を feed_image(path=…) に渡す。"
+            f"開けなければ、{ask}"
+        )
+    else:
+        nxt = ask
     return ToolCallError(
-        f"{label} は {t} で、この形式のままでは目に入れられない ({accepted})",
-        f"{need} が使えるなら、{fetch}{src}を Pillow で開いて PNG で /workspace/… に保存し"
-        " (Image.open(…).save(….png))、その path を feed_image(path=…) に渡す。",
+        f"{label} は {t} で、この形式のままでは目に入れられない ({accepted})", nxt
     )
+
+
+def _not_image_next(*, source: str, ref: str = "", fid: str = "") -> str:
+    """画像でも PDF でもないものを渡されたときの次の手 (このターンにある tool だけ。無ければ空)。
+    テキストの読み方 (来た経路に合う tool) と、Office 文書等を sandbox の soffice で PDF にして
+    path= で見せ直す手 (2026-10-19 llens 監査 (6))。種類は決めつけない (「〜なら」で言う)。
+    source は来た経路 ("path" / "url" / "file_id"、file の配信口 URL は "url" + fid)。"""
+    steps: list[str] = []
+    if source == "path":
+        if _have("read_file"):
+            steps.append("テキストなら read_file(path=…) で読む。")
+        if _have("run_shell"):
+            steps.append(
+                "Office 文書等のレイアウトを見るなら、run_shell で PDF に変換し"
+                f" (例: soffice --headless --convert-to pdf --outdir /workspace {ref})、"
+                "できた PDF の path を feed_image(path=…) に渡す。"
+            )
+        return "".join(steps)
+    if fid:
+        if _have("read_attachment"):
+            steps.append(f'テキストなら read_attachment(file_id="{fid}") で読む。')
+    elif _have("fetch_url"):
+        steps.append("テキストなら fetch_url(url=…) で読む。")
+    if _have("send_to_workspace", "run_shell"):
+        steps.append(
+            f"Office 文書等のレイアウトを見るなら、send_to_workspace({source}=…) で sandbox に"
+            "取り込み、run_shell で PDF に変換し"
+            " (例: soffice --headless --convert-to pdf --outdir /workspace 取り込んだパス)、"
+            "できた PDF の path を feed_image(path=…) に渡す。"
+        )
+    return "".join(steps)
 
 
 def _page_span(lo: int, hi: int) -> str:
@@ -409,12 +516,12 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、このターン内で実際に見て判断する (図・レイアウト・印影・手書き)。
-        ユーザーには何も表示されず、Files にも登録しない — 本文に `![図: …](URL)` を書いて見せてよいのは url で渡したものに限る (それ以外は戻り値に従う)。
+        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、実際に見て判断する (図・レイアウト・印影・手書き)。入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。
+        ユーザーには何も表示されず、新しいファイルも作らない — 本文に `![図: …](URL)` を書いて見せてよいのは url で渡したものに限る (それ以外は戻り値に従う)。
 
         対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・
-        ホストを補わない)。3 つとも省略すると、この会話に添付された PDF 全件 (filename で絞り込み。
-        直接添付の画像は既に見えている)。
+        ホストを補わない)。3 つとも省略すると、この会話に添付された PDF を全部合わせて先頭から 10 ページまで
+        (filename で絞り込み。直接添付の画像は既に見えている。続きは file_id と pages で)。
         PDF は pages のページ (無ければ url の #page=N、どちらも無ければ先頭 3 ページと総ページ数が返る)。
 
         戻り値は何を目に入れたかの説明。失敗時は "ERROR: ..." で始まる文 — 何が起きたか (事実) と、
@@ -470,6 +577,9 @@ class Tools:
             )
 
         targets: list[str] = []
+        # 引数なし (添付 PDF をまとめて見る) は全添付 PDF 合わせて _ATTACHED_PDF_PAGES ページまで
+        # (2026-10-19 ken 決定、llens 監査 (12))。残りページ数を _feed_pdf_pages が減らしていく
+        budget: Optional[list[int]] = None if file_id else [_ATTACHED_PDF_PAGES]
         if file_id:
             targets.append(file_id)
         else:
@@ -494,15 +604,14 @@ class Tools:
             raise ToolError(
                 "対象が見つからない。無指定で対象になるのは添付 PDF だけ "
                 "(添付画像は既に自分の目に入っている)",
-                "添付画像を見直すなら file_id を、URL なら url を、sandbox のファイルなら"
-                " path を指定する。",
+                "URL なら url を、sandbox のファイルなら path を指定する。",
                 kind="outcome" if filename else "call",
             )
 
         if len(targets) == 1:
             # 1 件 (file_id 指定・添付 PDF 1 件) の失敗は呼び出しの失敗 (ToolError のまま上げる)
             return await self._feed_one_file(
-                targets[0], pages, __user__["id"], __feed_image__
+                targets[0], pages, __user__["id"], __feed_image__, budget=budget
             )
         out: list[str] = []
         kinds: list[str] = []
@@ -511,7 +620,7 @@ class Tools:
             try:
                 out.append(
                     await self._feed_file(
-                        fid, pages, __user__["id"], __feed_image__, kinds
+                        fid, pages, __user__["id"], __feed_image__, kinds, budget=budget
                     )
                 )
             except ToolError as e:
@@ -525,13 +634,22 @@ class Tools:
         return "\n".join(out)
 
     async def _feed_one_file(
-        self, fid: str, pages, user_id: str, feed, *, source: str = "file_id"
+        self,
+        fid: str,
+        pages,
+        user_id: str,
+        feed,
+        *,
+        source: str = "file_id",
+        budget: Optional[list[int]] = None,
     ) -> str:
         """file 1 件だけを指した呼び出し (file_id= / url= の配信口 / 添付 PDF 1 件)。
         `_feed_file` が目に入れずに返した行は、文面はそのままで種別の旗を立てる (#145 —
         旧: 「画像でも PDF でもないので目に入れなかった」等が緑だった)。"""
         kinds: list[str] = []
-        text = await self._feed_file(fid, pages, user_id, feed, kinds, source=source)
+        text = await self._feed_file(
+            fid, pages, user_id, feed, kinds, source=source, budget=budget
+        )
         if kinds:
             mark_error_kind(kinds[0])
         return text
@@ -545,13 +663,15 @@ class Tools:
         kinds: Optional[list] = None,
         *,
         source: str = "file_id",
+        budget: Optional[list[int]] = None,
     ) -> str:
         """file (添付・生成物) 1 件を所有者チェックの上で積み、報告 1 行を返す。
         file_id 引数と、url の `/api/v1/files/{id}/content` の両方がここを通る。
         目に入れずに返す行は、その種別を `kinds` に積む (`_feed_path` が raise する同じ場面の
         種別に揃える: 画像でも PDF でもない = call / 実体が読めない = fatal /
         大きすぎる = outcome / PDF が開けない = failure)。VLM に渡せない画像形式は
-        raise (`_unsupported_image`、call)。source は来た引数 (次の手の send_to_workspace に使う)。"""
+        raise (`_unsupported_image`、call)。source は来た引数 (次の手の send_to_workspace に使う)。
+        budget は引数なしで添付 PDF をまとめて見るときの残りページ数 (`_feed_pdf_pages`)。"""
         if kinds is None:
             kinds = []
         # 同期 DB / ディスク read はワーカースレッドへ退避してイベントループを塞がない
@@ -573,7 +693,17 @@ class Tools:
             raise _unsupported_image(name, media_type, source=source)
         if not kind:
             kinds.append("call")
-            return f"- {name}: 画像でも PDF でもないので目に入れなかった"
+            nxt = _not_image_next(source=source, fid=fid)
+            return f"- {name}: 画像でも PDF でもないので目に入れなかった" + (
+                f"。{NEXT}{nxt}" if nxt else ""
+            )
+        if kind == "pdf" and budget is not None and budget[0] <= 0:
+            # 引数なしの枠 (全添付 PDF 合わせて _ATTACHED_PDF_PAGES ページ) を使い切った。
+            # 失敗ではない (旗を立てない) — 続きの取り方だけを言う
+            return (
+                f"- {name}: 添付 PDF をまとめて見るのは合わせて {_ATTACHED_PDF_PAGES} ページまで"
+                f'なので、見ていない。{NEXT}見るなら file_id="{fid}" に pages を付けて呼び直す。'
+            )
 
         raw = await asyncio.to_thread(_read_raw, rec)
         if raw is None:
@@ -585,12 +715,13 @@ class Tools:
             # 寄せるが、上限超過はここで早期に返す)。
             if len(raw) > self.valves.max_image_mb * 1024 * 1024:
                 kinds.append("outcome")
-                return (
-                    f"- {name}: 大きすぎる ({mb(len(raw))} > {self.valves.max_image_mb:.1f} MB)。"
-                    + NEXT
-                    + "send_to_workspace と run_python が使えるなら、send_to_workspace(file_id=…)"
-                    " で sandbox に取り込んで縮小し、/workspace/… の path を feed_image(path=…) に渡す。"
-                )
+                line = f"- {name}: 大きすぎる ({mb(len(raw))} > {self.valves.max_image_mb:.1f} MB)。"
+                if _have("send_to_workspace", "run_python"):
+                    line += (
+                        f"{NEXT}send_to_workspace({source}=…) で sandbox に取り込み、run_python で"
+                        "縮小して、/workspace/… の path を feed_image(path=…) に渡す。"
+                    )
+                return line
             # 汎用 tool-push: 実行中 tool-call の sink に file_id を積む。実体化は
             # 送信直前 inline に一任。base64 は戻り境界に載せない。
             feed(fid)
@@ -608,7 +739,13 @@ class Tools:
             kinds.append("failure")
             return f"- {name}: PDF として開けない (壊れているか、暗号化されている)"
         return self._feed_pdf_pages(
-            f"/api/v1/files/{fid}/content", name, n_pages, pages, feed
+            f"/api/v1/files/{fid}/content",
+            name,
+            n_pages,
+            pages,
+            feed,
+            fid=fid if budget is not None else None,
+            budget=budget,
         )
 
     async def _feed_path(
@@ -657,13 +794,20 @@ class Tools:
             if size > self.valves.max_image_mb * 1024 * 1024:
                 # resolver の上限 (既定 25 MB) 以下・画像の上限 (既定 8 MB) 超の帯。縮小の手順は
                 # 参照の形で違う: fs は run_python が直接開ける、URL は先に取り込む。
-                how = (
-                    "run_python が使えるなら、このパスを開いて縮小し、/workspace/… に書いた path を"
-                    " path= で渡す。"
-                    if is_path
-                    else "send_to_workspace と run_python が使えるなら、send_to_workspace(url=…) で"
-                    " sandbox に取り込み、run_python で縮小して /workspace/… の path を path= で渡す。"
-                )
+                if is_path:
+                    how = (
+                        "run_python でこのパスを開いて縮小し、/workspace/… に書いた path を"
+                        " path= で渡す。"
+                        if _have("run_python")
+                        else None
+                    )
+                else:
+                    how = (
+                        "send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小して"
+                        " /workspace/… の path を path= で渡す。"
+                        if _have("send_to_workspace", "run_python")
+                        else None
+                    )
                 raise ToolOutcome(
                     f"{ref} は大きすぎる ({mb(size)} > "
                     f"{self.valves.max_image_mb:.1f} MB)",
@@ -680,9 +824,9 @@ class Tools:
                         f"- {ref} を自分の目に入れた (ユーザーには表示されない。このパスは URL"
                         f"としても配信されている)。{NEXT}見せるなら本文に ![…]({served}) を書く。"
                     )
-                return (
-                    f"- {ref} を自分の目に入れた (ユーザーには表示されない。sandbox のパスは本文に"
-                    f"貼れない)。{NEXT}{_SHOW_PATH}"
+                show = _show_path()
+                return f"- {ref} を自分の目に入れた (ユーザーには表示されない。sandbox のパスは本文に" "貼れない)。" + (
+                    f"{NEXT}{show}" if show else ""
                 )
             return (
                 f"- {ref} を自分の目に入れた (ユーザーには表示されない)。"
@@ -699,17 +843,28 @@ class Tools:
             return self._feed_pdf_pages(ref, ref, n_pages, pages, feed)
         raise ToolCallError(
             f"{ref} は画像でも PDF でもない (content-type={loaded.content_type or '不明'})",
-            (
-                "run_shell が使えるなら、テキストはそれで読む。"
-                if is_path
-                else "fetch_url が使えるなら、テキストは fetch_url(url=…) で読む。"
-            ),
+            _not_image_next(source="path" if is_path else "url", ref=ref) or None,
         )
 
-    def _feed_pdf_pages(self, ref: str, label: str, n_pages: int, pages, feed) -> str:
+    def _feed_pdf_pages(
+        self,
+        ref: str,
+        label: str,
+        n_pages: int,
+        pages,
+        feed,
+        *,
+        fid: Optional[str] = None,
+        budget: Optional[list[int]] = None,
+    ) -> str:
         """PDF の指定ページを `ref#page=N` の参照で順に push する (File は作らない)。
         指定が 1 ページも当たらなければ ToolOutcome (読めない指定だけなら ToolCallError)、
-        一部だけ当たればそのページを積んで、落とした分を結果に 1 行添える (旗なし)。"""
+        一部だけ当たればそのページを積んで、落とした分を結果に 1 行添える (旗なし)。
+
+        1 件あたりの上限は valve max_pages。budget (引数なしで添付 PDF をまとめて見るときの
+        残りページ数、全添付 PDF 合わせて `_ATTACHED_PDF_PAGES`) があればそれでも打ち切り、
+        積んだ分を減らす。fid があれば続きの取り方を file_id で言う (添付 PDF が複数のとき
+        pages だけでは全件に効くため)。"""
         wanted, dropped, parsed = _parse_pages(pages, n_pages)
         if not parsed:
             raise ToolCallError(
@@ -725,15 +880,28 @@ class Tools:
         truncated = len(wanted) > limit > 0
         if truncated:
             wanted = wanted[:limit]
+        by_budget = budget is not None and len(wanted) > budget[0]
+        if by_budget:
+            wanted = wanted[: max(0, budget[0])]
+        if budget is not None:
+            budget[0] -= len(wanted)
         for i in wanted:
             feed(with_page(ref, i + 1))
 
         msg = f"- {label} の p.{', p.'.join(str(i + 1) for i in wanted)} を自分の目に入れた (全 {n_pages} ページ。ユーザーには表示されない)"
         if dropped:
             msg += f"\n  指定のうち {', '.join(dropped)} は範囲外なので見ていない。"
-        if truncated:
+        again = (
+            f'file_id="{fid}" に pages を付けて' if fid else "pages で範囲を指定して"
+        )
+        if by_budget:
             msg += (
-                f"\n  上限 {limit} ページで打ち切った。{NEXT}他のページが要るなら pages で"
-                "範囲を指定して呼び直す。"
+                f"\n  添付 PDF をまとめて見るのは合わせて {_ATTACHED_PDF_PAGES} ページまでなので"
+                f"打ち切った。{NEXT}続きが要るなら {again}呼び直す。"
+            )
+        elif truncated:
+            msg += (
+                f"\n  上限 {limit} ページで打ち切った。{NEXT}他のページが要るなら {again}"
+                "呼び直す。"
             )
         return msg

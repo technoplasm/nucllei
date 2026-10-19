@@ -2,6 +2,7 @@ import logging
 import sys
 
 import asyncio
+import html
 import json
 import ast
 import inspect
@@ -106,6 +107,8 @@ from nucllei.utils.tool_errors import (
     ToolFailure,
     ToolViolation,
     tool_exception_text,
+    tool_in_turn,
+    turn_tools,
 )
 
 from nucllei.tasks import create_task
@@ -238,6 +241,64 @@ def filter_files_by_user_access(files: list, user: UserModel) -> list:
     return accessible
 
 
+def _source_is_text(doc_meta: dict, file_id) -> bool:
+    """本文の無い `<source>` の添付が、read_attachment が raw を decode して読む型か。
+
+    判定は read_attachment と同じ関数(`attachment_text._is_text_ct`)を使う — 「読める」と
+    書いたのに read_attachment が断る、を作らない。content_type は sources の metadata に
+    あればそれ、無ければ Files.meta から引く(本文の無い添付にだけ走る)。
+    """
+    from nucllei.builtin_tools.attachment_text import _is_text_ct
+
+    ct = doc_meta.get("content_type")
+    if not ct and file_id:
+        try:
+            from nucllei.models.files import Files
+
+            rec = Files.get_file_by_id(str(file_id))
+            ct = ((rec.meta or {}) if rec else {}).get("content_type")
+        except Exception:
+            log.exception(f"source content_type lookup failed (file_id={file_id})")
+            ct = None
+    return _is_text_ct(ct or "")
+
+
+def _no_text_note(file_id=None, text_readable: bool = False) -> str:
+    """本文の無い `<source>`(extraction="none" / "failed")の本文 — 事実 + 次の手。
+
+    次の手で名指しする tool は、このターンでモデルに出ているものだけ
+    (`tool_errors.tool_in_turn` — 呼び手が `turn_tools` を立てる。2026-10-19 llens 監査 (3) / (13))。
+
+    `text_readable`(none で content_type が text 系 — read_attachment が raw を decode して
+    読む型。`_source_is_text`)のときは「読めない」と言わず read_attachment を名指しする。
+    PDF のページを見る feed_image はこの型には当てはまらないので出さない。failed は
+    read_attachment も outcome で断るので従来どおり「読めない」。
+    """
+    if text_readable:
+        nexts = []
+        if tool_in_turn("read_attachment") and file_id:
+            nexts.append(f'中身は read_attachment(file_id="{file_id}") で読める')
+        if tool_in_turn("send_to_workspace"):
+            nexts.append("加工・変換は send_to_workspace で取り込む")
+    else:
+        steps = []
+        if tool_in_turn("feed_image"):
+            steps.append("PDF のページは feed_image で見る")
+        if tool_in_turn("send_to_workspace"):
+            steps.append("加工・変換は send_to_workspace で取り込む")
+        nexts = []
+        if steps:
+            if len(steps) == 2:
+                steps[0] = steps[0].removesuffix("見る") + "見て"
+            nexts.append("中身が要るなら、" + "、".join(steps))
+        if tool_in_turn("read_attachment"):
+            nexts.append("read_attachment では読めない")
+    note = "文字が抜き出されていない — 本文はこの会話に入っていない"
+    if nexts:
+        note += "。次の手: " + "。".join(nexts)
+    return f"({note})"
+
+
 def build_source_context(sources: list[dict]) -> str:
     """添付の sources をモデルへ注入する `<source …>` タグ列に組む。
 
@@ -246,19 +307,27 @@ def build_source_context(sources: list[dict]) -> str:
     `dictation="true"` の印を足す — 読み直すかどうかの判断と tool は配備側の仕事。
     長い録音が複数のファイルに分かれたときだけ、どれを読み直すか決められるように
     `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
+
+    2026-10-19(llens 監査 (3)): 連番の `id="N"`(引用チップの名残 — 読む箇所は無い)を
+    やめて `name="ファイル名"`(属性値としてエスケープ)を載せる。本文の無いファイル
+    (none / failed)は同じ注記(`_no_text_note` — 次の手の tool はこのターンに出ている
+    ものだけ)で、failed の例外の文はモデルに出さない(log にだけ残す)。none でも
+    content_type が text 系なら read_attachment で読めるので、そう書く(2026-10-19)。
     """
     context_string = ""
-    citated_file_idx = {}
     for source in sources:
         if "document" in source:
             for doc_context, doc_meta in zip(source["document"], source["metadata"]):
+                doc_meta = doc_meta or {}
                 file_id = doc_meta.get("file_id")
-                if file_id not in citated_file_idx:
-                    citated_file_idx[file_id] = len(citated_file_idx) + 1
                 status = doc_meta.get("extraction_status")
-                attrs = f'id="{citated_file_idx[file_id]}"'
+                attrs = []
                 if file_id:
-                    attrs += f' file_id="{file_id}"'
+                    attrs.append(f'file_id="{html.escape(str(file_id), quote=True)}"')
+                name = doc_meta.get("name") or doc_meta.get("source")
+                if isinstance(name, str) and name.strip():
+                    attrs.append(f'name="{html.escape(name.strip(), quote=True)}"')
+                attrs = " ".join(attrs)
                 if doc_meta.get("dictation"):
                     attrs += ' dictation="true"'
                     parts = doc_meta.get("dictation_parts")
@@ -266,13 +335,22 @@ def build_source_context(sources: list[dict]) -> str:
                         attrs += f' part="{int(doc_meta.get("dictation_part") or 0)}" parts="{parts}"'
                 if status == "failed":
                     attrs += ' extraction="failed"'
-                    body = doc_context or ""
+                    # 例外の文(attachment が content に入れたもの)は内部のパス・URL を
+                    # 含みうる — モデルには出さず log にだけ残す
+                    log.info(
+                        f"source extraction failed (file_id={file_id}): "
+                        f"{(doc_context or '')[:200]!r}"
+                    )
+                    body = _no_text_note()
                 elif not (doc_context or "").strip() and status != "success":
                     attrs += ' extraction="none"'
-                    body = "(テキスト抽出されていない。次の手: 中身が要るなら file_id を受ける tool に渡す)"
+                    body = _no_text_note(
+                        html.escape(str(file_id), quote=True) if file_id else None,
+                        text_readable=_source_is_text(doc_meta, file_id),
+                    )
                 else:
                     body = doc_context
-                context_string += f"<source {attrs}>{body}</source>\n"
+                context_string += f"<source {attrs.strip()}>{body}</source>\n"
 
     return context_string.strip()
 
@@ -747,7 +825,9 @@ async def process_chat_payload(
 
     # If context is not empty, insert it into the messages
     if len(sources) > 0:
-        context_string = build_source_context(sources)
+        # 本文の無い添付の次の手は、このターンに出している tool だけを名指しする
+        with turn_tools(tools_dict.keys()):
+            context_string = build_source_context(sources)
         prompt = get_last_user_message(form_data["messages"])
 
         if prompt is None:
@@ -1842,6 +1922,7 @@ async def _execute_tool_call_sync(
     tool_function_params,
     progress_emitter_for,
     timeout_override=None,
+    background_available=False,
 ):
     """1 件の tool call を同期(このターン内)で実行する(execute_tool_calls の本体)。
 
@@ -1850,7 +1931,9 @@ async def _execute_tool_call_sync(
     失敗の種別(utils/tool_errors — ToolError の kind、タイムアウト・例外は failure)。
     background 昇格時(#110)はここを通らず spawn_execution が代替する。
     timeout_override は単独 background の同期降格(exec_tools.background_runs_inline)
-    が background と同じ上限を渡すための口。
+    が background と同じ上限を渡すための口。background_available はこの tool に
+    このターンで background を付けられるか — タイムアウトの次の手で background を
+    勧めるのはそのときだけ(2026-10-19 llens 監査 (6))。
     """
     # llens(#89): tool-call ごとの出力 sink を張る。tool が
     # __feed_image__(file_id) を呼ぶと sink に file_id が積まれ、呼び出し側で
@@ -1902,8 +1985,12 @@ async def _execute_tool_call_sync(
         # モデル向け文字列は日本語(_memos/model-frames.md の言語規約)
         error = ToolFailure(
             f"ツール {tool_name} の実行が {tool_timeout} 秒の上限でタイムアウトした",
-            "入力を小さく分けて呼び直す。分単位かかる処理で background を付けられるなら"
-            " background: true で呼び直す。",
+            "入力を小さく分けて呼び直す。"
+            + (
+                "分単位かかる処理なら background: true を付けて呼び直す。"
+                if background_available
+                else ""
+            ),
         )
         tool_result, error_kind = error.text, error.kind
     except Exception as e:
@@ -1964,7 +2051,11 @@ async def _execute_one_tool_call(
         error = ToolViolation(
             f"ツール {tool_name} は今は使えない (このターンの一覧に無い)",
             "一覧にある tool だけを使う。"
-            "load_skill が使えて、skill の tool なら先に読み込む。",
+            + (
+                "skill の tool なら先に load_skill で読み込む。"
+                if tool_in_turn("load_skill")
+                else ""
+            ),
         )
         tool_result, error_kind = error.text, error.kind
     elif arguments_error is not None:
@@ -1986,9 +2077,11 @@ async def _execute_one_tool_call(
             k: v for k, v in tool_function_params.items() if k in allowed_params
         }
 
-        if background_requested and not (
-            entry_is_backgroundable(tool_name, tool) and exec_spawn_context_ok(metadata)
-        ):
+        # この tool にこのターンで background を付けられるか(spec への注入と同じ述語)
+        background_available = entry_is_backgroundable(
+            tool_name, tool
+        ) and exec_spawn_context_ok(metadata)
+        if background_requested and not background_available:
             # 不適格 tool / 文脈(agent session・chat 文脈なし)への指定は
             # 無視して同期実行(§7)
             log.warning(
@@ -2058,6 +2151,9 @@ async def _execute_one_tool_call(
                 tool_function_params,
                 progress_emitter_for,
                 timeout_override=timeout_override,
+                # 単独の background が同期へ降格した call(timeout_override あり)は既に
+                # background の上限で走った — 付け直しても同じ上限なので勧めない
+                background_available=background_available and timeout_override is None,
             )
             # 失敗/タイムアウトした tool の push は再注入しない(失敗 call は
             # 副産物を出さない — content=エラー文言と画像が混在する不整合を
@@ -2085,7 +2181,7 @@ async def _execute_one_tool_call(
     original_chars = 0
     if tool_name not in EXEC_RECALL_TOOL_NAMES:
         tool_result, result_truncated, original_chars = truncate_tool_result(
-            tool_result
+            tool_result, (tools.get(tool_name) or {}).get("spec")
         )
 
     # 結果の表示は backend がここで 1 つに確定する(#153 — 優先順は
@@ -2183,14 +2279,20 @@ async def execute_tool_calls(
 
     async def run(index):
         tool_call = calls[index]
+        # このターンでモデルに出ている tool の名前を立てる(2026-10-19 llens 監査 (13) —
+        # ERROR・次の手で別の tool を名指しするのはここにあるものだけ。tool_errors.tool_in_turn)。
+        # 呼び出し時点の tools_dict から取るので、load_skill(prelude で先に済む)が
+        # 足した tool も入る。ContextVar なので sync tool の to_thread にも、background の
+        # spawn(executions.spawn_execution が runner へ持ち越す)にも届く
         try:
-            results[index] = await _execute_one_tool_call(
-                tool_call,
-                tools,
-                progress_emitter_for=progress_emitter_for,
-                metadata=metadata,
-                call_count=len(calls),
-            )
+            with turn_tools(tools.keys()):
+                results[index] = await _execute_one_tool_call(
+                    tool_call,
+                    tools,
+                    progress_emitter_for=progress_emitter_for,
+                    metadata=metadata,
+                    call_count=len(calls),
+                )
         except Exception as e:
             # 隔離: 想定外の失敗(spawn の後段・正規化等)もこの call の result に
             # 閉じる。逐次時代はターンごと落ちていたが、並行では兄弟 call を

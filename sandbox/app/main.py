@@ -1473,13 +1473,18 @@ async def exec_cell(req: CellRequest, request: Request):
             # 応答なし/パイプ破損 → セッションを落として次回作り直し (namespace 消失)
             await _sessions.drop(sess)
             hard = isinstance(e, asyncio.TimeoutError)
+            if not hard:
+                # 例外の中身はログだけ — error はモデルに届く文 (常体・内部の repr を出さない。
+                # 2026-10-19 llens 監査 (7))
+                print(f"[sandbox] exec_cell: kernel I/O failed: {e!r}", flush=True)
             return {
                 "stdout": "",
                 "error": (
-                    "セルが応答せず中断不能だったため実行環境を再起動しました "
-                    "(変数・import は失われました)"
+                    "セルが応答せず中断できないので実行環境を強制終了した"
+                    " (変数・import は失われた)"
                     if hard
-                    else f"実行環境との通信に失敗しました: {e!r}"
+                    else "実行環境との通信に失敗したので実行環境を作り直す"
+                    " (変数・import は失われた)"
                 ),
                 "timed_out": hard,
                 "session_reset": True,
@@ -1494,7 +1499,7 @@ async def exec_cell(req: CellRequest, request: Request):
             await _sessions.drop(sess)
             return {
                 "stdout": "",
-                "error": "実行環境が異常終了しました (変数・import は失われました)",
+                "error": "実行環境が異常終了した (変数・import は失われた)",
                 "timed_out": False,
                 "session_reset": True,
                 "duration_s": duration_s,
@@ -1647,6 +1652,7 @@ def _ext_list(path: str, mounts: list[MountIn]) -> dict:
             os.close(fd)
     base = jail_path + ("/" + "/".join(segs) if segs else "")
     entries = []
+    truncated = False
     try:
         # follow_symlinks=False: ディレクトリ symlink にも降りない。symlink のファイルも出さない
         for dirpath, dirnames, filenames, dfd in os.fwalk(
@@ -1663,14 +1669,15 @@ def _ext_list(path: str, mounts: list[MountIn]) -> dict:
                     continue
                 if not stat.S_ISREG(st.st_mode):
                     continue
-                entries.append({"path": f"{base}/{rel_dir}{name}", "size": st.st_size})
-                if len(entries) >= 500:
+                if len(entries) >= LIST_LIMIT:
+                    truncated = True
                     break
-            if len(entries) >= 500:
+                entries.append({"path": f"{base}/{rel_dir}{name}", "size": st.st_size})
+            if truncated:
                 break
     finally:
         os.close(top)
-    return {"entries": entries, "exists": True, "is_dir": True}
+    return {"entries": entries, "exists": True, "is_dir": True, "truncated": truncated}
 
 
 def _is_ext_path(path: str) -> bool:
@@ -1694,6 +1701,9 @@ QUOTA_FULL_DETAIL = "workspace quota exceeded (No space left on device)"
 
 # 一覧の 1 ディレクトリあたりの上限 (超えたら `truncated: true`)
 LS_LIMIT = 5000
+# `/files/list` (再帰・ファイルだけ。list_workspace) の件数の上限。超えたら `truncated: true`
+# (追加フィールドなので、これを読まない旧 nucllei とも互換。2026-10-19 llens 監査)
+LIST_LIMIT = 500
 
 
 class _Target(NamedTuple):
@@ -2130,16 +2140,18 @@ async def files_list(req: PathRequest):
     if not base.is_dir():
         return {"entries": [], "exists": True, "is_dir": False}
     entries = []
+    truncated = False
     for p in sorted(base.rglob("*")):
         rel = p.relative_to(ws)
         # `.` 始まりの要素 (.exec / .cache 等の内部・隠しファイル) は見せない
         if any(part.startswith(".") for part in rel.parts):
             continue
         if p.is_file():
+            if len(entries) >= LIST_LIMIT:
+                truncated = True
+                break
             entries.append({"path": str(rel), "size": p.stat().st_size})
-        if len(entries) >= 500:
-            break
-    return {"entries": entries, "exists": True, "is_dir": True}
+    return {"entries": entries, "exists": True, "is_dir": True, "truncated": truncated}
 
 
 @app.post("/files/ls")

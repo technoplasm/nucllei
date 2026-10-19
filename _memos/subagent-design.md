@@ -178,3 +178,28 @@ exec 行の 5 秒ポーリングでしか終端を知らず、スピナーが子
   従来どおり ExecutionBlock のみ(子 transcript は await_task / 配達側のカードで見える)。
   カードを手で畳むと子ブロックは unmount され、ヘッダのラベルは最後の段階で止まる
   (完了表示の権威は結果 / exec 行のまま)
+
+## skill 経由の run_subagent(2026-10-19、llens の依頼・ken 決定)
+
+ken の決定で、llens はサブエージェントを**skill の公開範囲で絞って**配る(preset の toolIds に
+`builtin_subagent` を入れず、tool_ids に `builtin_subagent` を持つ skill を preset の skillIds に入れる)。
+nucllei 側は実装不要だった(HEAD 5d28c6cea で書き捨てテストで実証):
+
+- `load_skill`(/command・自動ロードも)を呼んだそのターンの途中から `run_subagent` が生える
+  (middleware の skill tool 注入は `get_tools(enforce_access_control=False)`)。次のターン・続きターンは
+  `replay_skill_tool_ids` で復元。backgroundable / timeout / background 引数 / await_task 等も付く。
+- 認可は「preset の skillIds ∧ skill の read 可視性」だけ。`builtin_subagent` の tool 行の ACL は**この経路では
+  効かない**。skill の可視性判定は admin を特別扱いしない(管理者にも使わせるなら skill の ACL に入れる)。
+- 二層目は従来どおり: `meta.subagentPresetIds` が空だと `available()` が False で、load_skill は本文だけ返して
+  `tools: []`。子 preset の skillIds にその skill を入れない(手順書だけ届いて tool が無い食い違い)。
+- 使えない人に `run_subagent` の名前を見せない: ERROR・次の手で別の tool を名指しするのはそのターンに出ている
+  tool だけ(`tool_errors.tool_in_turn` — `builtin-tools.md`「モデル向け文面の監査(2026-10-19)」)。skill を
+  読み込んでいない人には fetch_url / feed_image の too_large でも名前が出ない。
+- FE: preset 編集の SubagentPresetsSelector の黄色い警告は、`toolIds` か、割り当てた skill の `tool_ids`
+  (機能「スキル」が ON のとき)のどちらかに `builtin_subagent` があれば出さない
+  (`src/lib/utils/skills.ts::isToolReachableFromPreset`)。説明文も「…それを tool に持つスキルを割り当てたときだけ
+  有効。スキル経由の場合、使える人はそのスキルの公開範囲で決まる」に。手順書 `docs/manual/11_models.md`。
+- docstring の文面(同日、llens 監査 (8)・(10)): 同時数は「サーバー全体で 4 本まで (ほかの利用者の分も数える)」
+  (`_active_turns` はプロセス内の数 — worker が複数なら worker ごと)、超過の次の手から「時間を置いて」を消し
+  「1 回だけ呼び直し、それでも同じなら自分で処理する」。サブエージェントどうしは並べると同時、sandbox の tool
+  どうしは並べても順番待ち、を分けて書く。

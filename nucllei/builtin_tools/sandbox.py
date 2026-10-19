@@ -64,6 +64,7 @@ from nucllei.utils.tool_errors import (
     ToolFailure,
     ToolFatal,
     ToolOutcome,
+    tool_in_turn,
 )
 from nucllei.utils.tool_output import display, mark_error_kind
 from nucllei.utils.tool_render import Code, Rendered, hljs_language_for_extension
@@ -328,7 +329,10 @@ def _resolve_workspace_path(
 
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」、常体 (`utils/ref_errors` の module
-# docstring)。この toolkit に無い tool は「〜が使えるなら」と条件付きで書く。
+# docstring)。この toolkit に無い tool は、このターンに出ているとき (`tool_in_turn`) だけ
+# 名指しする — 「〜が使えるなら」とは書かない (2026-10-19 llens 監査 (13))。同じ toolkit の
+# tool (run_python / run_shell / read_file / write_file / list_workspace / send_to_workspace /
+# fetch_from_workspace) は toolkit ごと出るので名指ししてよい。
 _NEXT = "次の手: "
 
 # 画像・音声・動画は display チャネルで tool の枠の下に出る (`_display_markdown`)。
@@ -341,11 +345,23 @@ _DISPLAYED = "ユーザーの画面には既に表示されている。" + _NEXT
 # からは sandbox 側の値を読めないので既定値で言う — `timeouts` の 630 と同じ前提)
 _SANDBOX_TIMEOUT_MAX_S = 600
 
+
+def _timeout_next(n: int, then: str) -> str:
+    """タイムアウトの次の手。効いた秒数 `n` が既に上限なら「上げて」とは言わない。"""
+    if n >= _SANDBOX_TIMEOUT_MAX_S:
+        return (
+            f"処理を分けて{then} (timeout_s は既に上限の {_SANDBOX_TIMEOUT_MAX_S} 秒)。"
+        )
+    return (
+        f"処理を分けるか、timeout_s を上げて{then} (上限 {_SANDBOX_TIMEOUT_MAX_S} 秒)。"
+    )
+
+
 # sandbox に繋がらない / 401 のときの文面。例外の文・HTTP の detail・env 名はモデルに
 # 出さず、ログに残す (2026-10-04 llens 監査 A17 / A18)
 _SANDBOX_DOWN_NEXT = (
-    _NEXT
-    + "時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
+    _NEXT + "1 回だけ呼び直す。続くなら sandbox を使わずにできる範囲で自分で処理し、"
+    "無理ならユーザーに sandbox が今使えないと伝える。"
 )
 _SANDBOX_AUTH = (
     "ERROR: sandbox との認証に失敗した (サーバの設定の問題)。"
@@ -355,11 +371,13 @@ _SANDBOX_AUTH = (
 
 
 # workspace の容量 (quota) が一杯で書けなかったとき (sandbox は HTTP 507、jail の中の実行は
-# stderr の `No space left on device`) に足す次の手。利用者が自分で片付けられる場所を言う (#150)
+# stderr の `No space left on device`) に足す次の手。利用者が自分で片付けられる場所を言う (#150)。
+# モデルには消させない (2026-10-19 llens 監査 (1) — 旧文は run_shell の rm を勧めていた)。
+# 画面の名前は ja-JP の translation.json の表記 (サイドバー「ワークスペース」→ タブ「サンドボックス」)
 _QUOTA_FULL_NEXT = (
-    "/workspace/trash/ を空にすると空く (trash に移しただけでは空かない) — run_shell の rm で"
-    " trash の中や不要なファイルを消してから呼び直すか、ユーザーに容量が一杯だと伝える"
-    " (ユーザーは Workspace のファイルブラウザ (Workspace → Sandbox) で使用量を見て整理できる)。"
+    "自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く"
+    " (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。"
+    "ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。"
 )
 _QUOTA_FULL_MARKERS = ("No space left on device", "Disk quota exceeded")
 
@@ -378,7 +396,7 @@ def _quota_full_note(*texts) -> str:
 _CACHE_DIRS = ("imports", "exports")
 _CACHE_GONE = (
     " imports/ と exports/ は一定期間で消える置き場なので、期限で消えた可能性がある"
-    " (添付・生成物なら原本は Files にあり、send_to_workspace(file_id) で戻せる)。"
+    " (添付やユーザーに渡したファイルなら原本が残っていて、send_to_workspace(file_id) で戻せる)。"
 )
 
 
@@ -519,7 +537,7 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
 # 超えたときの文は全経路で同じ形: 上限の値 (MB) と、変えるのは管理者 (どこで) と。
 _LIMIT_BY_ADMIN = f"上限は管理者の設定 ({ADMIN_SETTING}) で、引数では上げられない"
 # sandbox の上限 (url= の取り込み)。env 名はモデルに出さない
-_LIMIT_BY_SANDBOX = "上限は sandbox の配備の設定で、引数では上げられない"
+_LIMIT_BY_SANDBOX = "上限は sandbox の設定で、引数では上げられない"
 
 # sandbox の 413 の detail `file too large: N bytes (limit L)`
 _TOO_LARGE_RE = re.compile(r"(\d+) bytes \(limit (\d+)\)")
@@ -593,6 +611,17 @@ def _refuse_in_subagent(metadata: Optional[dict]) -> None:
             "ここはサブエージェントの会話で、添付してもユーザーには見えない",
             "書いたファイルの絶対パスを主エージェントへの結果に書く。渡すのは主エージェント。",
         )
+
+
+def _list_truncated_note(res: dict, entries: list) -> list[str]:
+    """list_workspace の一覧が sandbox の件数の上限で打ち切られていれば末尾に足す行。
+    `truncated` は sandbox image の追加フィールド — 無い (古い sandbox) ときは何も足さない。"""
+    if res.get("truncated") is not True:
+        return []
+    return [
+        f"{len(entries)} 件で打ち切った。{_NEXT}下の階層のディレクトリを path に渡して、"
+        "絞って一覧する。"
+    ]
 
 
 def _ext_not_found(abs_path: str) -> ToolError:
@@ -671,8 +700,13 @@ _MARKDOWN_EXTS = frozenset({"md", "markdown"})
 
 # 案内の既定文 (次の手)。行き先は valve で配備側が上書きする — 配備層の tool / skill 名
 # (llens の read_doc・file-conversion 等) は nucllei の builtin が知らないので既定文に入れない。
-# feed_image は nucllei の builtin なので名指ししてよい
+# feed_image は nucllei の builtin なので名指ししてよい — ただしこのターンに出ているときだけ
+# (`tool_in_turn`。出ていなければ既定文の代わりに `READ_IMAGE_NO_FEED_HINT`)
 READ_IMAGE_HINT = "中身を見る必要があるなら feed_image の path に同じパスを渡す。"
+READ_IMAGE_NO_FEED_HINT = (
+    "PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを"
+    "書き出し、そのファイルを read_file で読む。"
+)
 READ_BINARY_HINT = "テキストに変換したファイルを /workspace/ に作ってから、そのファイルを read_file で読む。"
 READ_PROXY_MOUNT_HINT = (
     "その置き場の資料を読む専用の手段があればそれを使う"
@@ -864,6 +898,8 @@ _NO_FILE = "レコードが無い、またはアクセス権が無い"
 
 # 取り込み (file_id / 配信口 URL) の上限超過の理由。`_import_one` は先頭で見分ける
 _TOO_LARGE_FILE = "取り込みの上限"
+# 取り込み先の容量切れの理由 (次の手 `_QUOTA_FULL_NEXT` は呼び手が末尾に 1 回だけ足す)
+_QUOTA_FULL = "workspace の容量 (quota) が一杯"
 
 
 def _too_large_file(
@@ -873,6 +909,29 @@ def _too_large_file(
     what = f" (実サイズ {_human_size(size)})" if size is not None else ""
     by = _LIMIT_BY_SANDBOX if sandbox else _LIMIT_BY_ADMIN
     return f"{_TOO_LARGE_FILE} {format_limit(limit)} を超えている{what}。{by}"
+
+
+# 取り込めない (上限超過) ファイルを sandbox に入れずに読む tool。引数ごとに (tool, 何を読むか)。
+# 名指しはこのターンに出ている物だけ (`tool_in_turn`)
+_READERS_WITHOUT_SANDBOX = {
+    "file_id": (("read_attachment", "テキスト"), ("feed_image", "画像・PDF")),
+    "url": (("fetch_url", "ページ・文書"), ("feed_image", "画像・PDF")),
+}
+
+
+def _without_sandbox_next(arg: str) -> str:
+    """取り込みの上限を超えたときの次の手 (`arg` = モデルが渡した引数 file_id / url)。"""
+    named = [
+        f"{name} ({what})"
+        for name, what in _READERS_WITHOUT_SANDBOX[arg]
+        if tool_in_turn(name)
+    ]
+    if not named:
+        return "sandbox には取り込めないとユーザーに伝える。"
+    return (
+        f"sandbox に入れずに、同じ {arg} を {'・'.join(named)} に渡して読む。"
+        "読めなければユーザーに伝える。"
+    )
 
 
 def _too_large_import(u: str, err) -> str:
@@ -933,9 +992,8 @@ def _explain_mount_error(abs_path: str, err) -> ToolError:
         # 配備は nucllei と sandbox に同じ /ext の組を mount する — /ext のファイルは URL で
         # 見せるだけで、取り出し (添付) の経路は作らない (要らない file_id を増やさない)
         return ToolOutcome(
-            f"{abs_path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
-            " mount されている)",
-            "中身が要るなら sandbox で読んで使う。",
+            f"{abs_path} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)",
+            "中身が要るなら run_python / run_shell でそのパスを開いて使う。",
         )
     if code == "traversal":
         return ToolCallError(
@@ -972,20 +1030,20 @@ def _iter_context_files(__files__, __metadata__):
 class Tools:
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
     3 ツール共有で実行を跨いで永続する。ここに作ったファイルはそのままではユーザーに
-    見えない — 渡すときは fetch_from_workspace を呼ぶ。/workspace/imports/ は Files にある
+    見えない — 渡すときは fetch_from_workspace を呼ぶ。/workspace/imports/ は添付などの
     原本の写しで、imports/ の直下に置いたものは 1 つずつ (フォルダは中身ごと)、最後に触って
     から一定期間 (既定 30 日。取り込みの結果に期限日を添える) で消える — 会話を跨いで残す物は
     /workspace の別の場所 (自分で作るディレクトリ等) に置く。
     消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
-    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。例外は配備の決まり
-    (system prompt) に従う。実行は直列 — run_python は同じ会話内で、
+    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。例外は system prompt の
+    決まりに従う。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
     `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
     `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / read_file /
-    list_workspace / fetch_from_workspace でも同じパスで扱える。"""
+    list_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
@@ -1107,8 +1165,8 @@ class Tools:
         return (
             text[:head]
             + f"\n⋮ [切り詰め: 全 {len(text)} 字中 先頭 {head} 字 + 末尾 {tail} 字だけを表示した。"
-            f"{_NEXT}全文が要るなら出力を /workspace のファイルに書き出し、"
-            "run_shell の rg / head / tail で部分参照する]\n" + text[-tail:]
+            f"{_NEXT}全文が要るなら出力を /workspace のファイルに書き出し read_file で読む"
+            " (探すだけなら rg で絞る)]\n" + text[-tail:]
         )
 
     def _format_exec_result(self, res: dict, timeout_s: Optional[int] = None) -> str:
@@ -1128,8 +1186,7 @@ class Tools:
             )
             parts[0] += (
                 f" **タイムアウト (timeout_s={n} 秒を超えたので強制終了した)**"
-                f" {_NEXT}処理を分けるか、timeout_s を上げて呼び直す"
-                f" (上限 {_SANDBOX_TIMEOUT_MAX_S} 秒)。"
+                f" {_NEXT}{_timeout_next(n, '呼び直す')}"
             )
         stdout = res.get("stdout", "")
         stderr = res.get("stderr", "")
@@ -1151,23 +1208,36 @@ class Tools:
             parts.append(note)
         return "\n".join(parts)
 
-    def _format_cell_result(self, res: dict) -> str:
+    def _format_cell_result(self, res: dict, timeout_s: Optional[int] = None) -> str:
         # セルが例外 (error) かタイムアウトで終わったら failure の旗 (raise しない —
         # `_format_exec_result` と同じ)
         if res.get("error") or res.get("timed_out"):
             mark_error_kind("failure")
         parts = []
-        if res.get("session_reset"):
+        stdout = res.get("stdout", "")
+        error = res.get("error")
+        killed = res.get("timed_out") and res.get("session_reset")
+        if killed:
+            # 応答しないセルを kernel ごと落とした (sandbox の error 文も同じことを言う —
+            # 重ねて出さない。2026-10-19 llens 監査 (7): 旧版は「リセットされた」「変数は残って
+            # いる」「再起動しました」が 1 つの結果に並んでいた)
+            error = None
+            parts.append(
+                "**タイムアウト (実行環境を強制終了した。変数・import は失われた)**"
+                f" {_NEXT}処理を分けて定義からやり直す。"
+            )
+        elif res.get("session_reset"):
             parts.append(
                 "※ 実行環境がリセットされ、以前の変数・import は失われた。"
                 f"{_NEXT}必要なら定義し直してから続ける。"
             )
-        stdout = res.get("stdout", "")
-        error = res.get("error")
-        if res.get("timed_out"):
+        if res.get("timed_out") and not killed:
+            n = min(
+                int(timeout_s or self.valves.default_timeout_s), _SANDBOX_TIMEOUT_MAX_S
+            )
             parts.append(
                 "**タイムアウト (セルを中断した。変数・import は残っている)**"
-                f" {_NEXT}処理を分けるか、timeout_s を上げて続ける。"
+                f" {_NEXT}{_timeout_next(n, '続ける')}"
             )
         if stdout:
             parts.append(self._truncate_output(stdout.rstrip("\n")))
@@ -1226,7 +1296,7 @@ class Tools:
             res = await self._post("/exec_cell", payload, http_timeout)
         except Exception as e:
             raise _exec_error(e)
-        return self._format_cell_result(res)
+        return self._format_cell_result(res, payload["timeout_s"])
 
     # =========================================================================
     # 実行系
@@ -1272,7 +1342,7 @@ class Tools:
     ) -> str:
         """
         サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
-        pandoc, weasyprint, unzip / zip, nkf, file, poppler-utils (pdftotext / pdfinfo),
+        pandoc, weasyprint, unar (書庫の展開) / zip, nkf, file, poppler-utils (pdftotext / pdfinfo),
         ffmpeg / ffprobe, python が利用可能。
 
         :param command: 実行する bash コマンド (スクリプト可)
@@ -1301,10 +1371,11 @@ class Tools:
 
         引数は名前のとおりに解釈する (他の tool と共通)。受け取った形のまま渡すこと
         (読み替えない・ホストを補わない)。
-        sandbox のパス (`/workspace/…` `/ext/…`) は既に jail から見えているので取り込み不要。
+        sandbox のパス (`/workspace/…` `/ext/…`) は既に sandbox から見えているので取り込み不要。
         同一サーバの URL `/ext/…` は sandbox のパス `/ext/…` と同じ文字列で同じファイル
-        (url に渡せばコピーせずそのパスを返す)。
-        jail はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
+        (url に渡すと、sandbox から見えている物はコピーせずそのパスを返し、サーバが中継する
+        資料は imports/ にコピーする)。
+        sandbox はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
 
         :param filename: 対象ファイル名 (部分一致)。file_id 未指定時に添付一覧から探す。省略時は全件。
         :param file_id: 取り込むファイル。添付・生成物の id (添付一覧に出ていなくても、分かっていれば取り込める)。
@@ -1333,6 +1404,7 @@ class Tools:
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
         imported = 0
+        quota_full = False
         expires = None
         for fid, fname in _iter_context_files(__files__, __metadata__):
             if filename and (not fname or filename.lower() not in fname.lower()):
@@ -1341,6 +1413,7 @@ class Tools:
                 fid, fname, __user__["id"], _limit(__user__)
             )
             imported += bool(line)
+            quota_full = quota_full or failure == _QUOTA_FULL
             expires = exp or expires
             report.append(line or f"- {fname or fid}: {failure} (取り込まなかった)")
         # 文面は変えずに旗だけ (#145): filename で指した添付が無い = 指した物が無い → outcome、
@@ -1351,7 +1424,11 @@ class Tools:
             return "取り込み対象の添付ファイルが無かった。"
         if not imported:
             mark_error_kind("failure")
-        return "取り込み結果:\n" + "\n".join(report) + _imports_expiry_note(expires)
+        out = "取り込み結果:\n" + "\n".join(report) + _imports_expiry_note(expires)
+        if quota_full:
+            # 1 つの結果に「次の手:」は末尾の 1 か所だけ (行の中には書かない)
+            out += f"\n{_NEXT}{_QUOTA_FULL_NEXT}"
+        return out
 
     async def _import_file(
         self, fid: str, fname, user_id: str, limit: Optional[int] = None
@@ -1385,7 +1462,8 @@ class Tools:
         except Exception as e:
             log.error(f"[sandbox] import {fid} failed: {e!r}")
             if isinstance(e, SandboxHTTPError) and e.status == 507:
-                return "", f"workspace の容量 (quota) が一杯。{_QUOTA_FULL_NEXT}", None
+                # 次の手は報告の末尾に 1 回だけ (send_to_workspace) / ToolFailure (_import_one)
+                return "", _QUOTA_FULL, None
             if isinstance(e, SandboxHTTPError) and e.status == 413:
                 # sandbox の安全上限がこちらの上限より小さい配備 (起動時に warning)
                 size_413, eff = _too_large_413(e, limit)
@@ -1418,7 +1496,11 @@ class Tools:
         if failure.startswith(_TOO_LARGE_FILE):
             raise ToolOutcome(
                 f"{url or f'file_id {fid}'} は{failure}",
-                "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+                _without_sandbox_next("url" if url else "file_id"),
+            )
+        if failure == _QUOTA_FULL:
+            raise ToolFailure(
+                f"{url or f'file_id {fid}'} を取り込めない: {failure}", _QUOTA_FULL_NEXT
             )
         if failure:
             raise ToolFailure(f"{url or f'file_id {fid}'} の{failure}")
@@ -1473,8 +1555,8 @@ class Tools:
         mounted = await mounted_path_for_url(u, user)
         if mounted:
             return (
-                f"取り込み不要: {u} は sandbox から {mounted} として既に見えている "
-                f"(read-only)。{_NEXT}run_python / run_shell からそのパスで開く。"
+                f"取り込み不要: {u} は sandbox から同じパス {mounted} で見えているので"
+                f"取り込まない。{_NEXT}run_python / run_shell でそのパスを開く。"
             )
 
         # 上限は sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB — file_id を作らない経路。utils/file_limit)。
@@ -1510,7 +1592,7 @@ class Tools:
                     size_413, eff = _too_large_413(e, limit)
                     raise ToolOutcome(
                         f"{u} は{_too_large_file(size_413, eff, sandbox=True)}",
-                        "sandbox に入れずに使える tool があればそれを使う。無ければユーザーに伝える。",
+                        _without_sandbox_next("url"),
                     )
                 raise ToolFailure("sandbox へ書き込めない")
         return (
@@ -1533,7 +1615,7 @@ class Tools:
         クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
         既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
 
-        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` にも書ける。例: /workspace/work/index.html
+        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` にも書ける (管理者はすべてのグループの置き場と `/ext/public/…` にも書ける)。
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
@@ -1546,7 +1628,8 @@ class Tools:
         abs_path, rel = _resolve_workspace_path(
             path,
             WORKSPACE_PATH_ARG_FORM,
-            "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ。",
+            "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ"
+            " (管理者はすべてのグループの置き場と `/ext/public/` にも書ける)。",
         )
         if rel == "." or path.rstrip().endswith("/"):
             raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
@@ -1556,7 +1639,7 @@ class Tools:
             raise ToolCallError(
                 f"内容が大きすぎる ({_human_size(len(data))} > "
                 f"{_human_size(TEXT_MAX_BYTES)})",
-                "分割して複数回に分けるか、run_python で生成する。",
+                "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
             )
 
         try:
@@ -1596,7 +1679,7 @@ class Tools:
             raise ToolCallError(
                 f"内容が大きすぎる ({_human_size(len(data))} > "
                 f"{_human_size(TEXT_MAX_BYTES)})",
-                "分割して複数回に分けるか、run_python で生成する。",
+                "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
             )
         try:
             await self._post(
@@ -1628,7 +1711,7 @@ class Tools:
         2 回目以降は先頭に 1 行目 (見出し) を付け直す。画像・PDF・Office 文書などテキストでないものは
         読まない。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
 
-        :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。例: /workspace/work/recipe.md
+        :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。
         :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きを読むときは前回の next_offset をそのまま渡す (それ以外の値は行の途中から読むことになり、文字の途中なら断る)
         :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
@@ -1644,6 +1727,9 @@ class Tools:
         normalized = _normalize_sandbox_path(path)
         acl = _acl_rel(normalized)
         mounts = None
+        # `/ext/<groups・public 以外>` は read_file では読まないが、断る文は拡張子の判定の後
+        # (画像・Office 等はその案内のほうが先に要る — 2026-10-19 llens 監査 (6))
+        other_ext = False
         if acl is not None:
             # /ext/groups/<g>/… /ext/public/… (#152): 可否は ACL、読み出しと経路の symlink の
             # 拒否は sandbox (`/files/*` の `/ext/...` + mounts)
@@ -1665,7 +1751,8 @@ class Tools:
                 raise _ext_not_found(abs_path)
             mounts = _ext_mounts(__user__)
         elif _under_ro_mount(normalized):
-            raise self._other_ext_error(normalized)
+            abs_path = target = normalized
+            other_ext = True
         else:
             abs_path, target = _resolve_workspace_path(path, WORKSPACE_PATH_ARG_FORM)
             if target == "." or path.rstrip().endswith("/"):
@@ -1678,10 +1765,12 @@ class Tools:
         if ext in _READ_IMAGE_EXTS:
             raise ToolCallError(
                 f"{abs_path} は画像・PDF で、read_file はテキストしか読まない",
-                self.valves.image_hint,
+                self._image_hint(),
             )
         if ext in _READ_BINARY_EXTS:
             raise self._binary_error(abs_path)
+        if other_ext:
+            raise self._other_ext_error(abs_path)
 
         def payload(**extra) -> dict:
             body = {"user_id": __user__["id"], "path": target, **extra}
@@ -1798,6 +1887,14 @@ class Tools:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
         return _read_rendered(abs_path, body)
 
+    def _image_hint(self) -> str:
+        """画像・PDF を断るときの次の手。valve が既定のままで feed_image がこのターンに無ければ、
+        名指しせずに sandbox の中で済む手を言う (配備が valve で書いた文はそのまま)。"""
+        hint = self.valves.image_hint
+        if hint == READ_IMAGE_HINT and not tool_in_turn("feed_image"):
+            return READ_IMAGE_NO_FEED_HINT
+        return hint
+
     def _binary_error(self, abs_path: str) -> ToolError:
         return ToolCallError(
             f"{abs_path} はテキストとして読めない (Office 文書などのバイナリか、"
@@ -1808,7 +1905,8 @@ class Tools:
     def _other_ext_error(self, abs_path: str) -> ToolError:
         """read_file の `/ext/<groups・public 以外>`。sandbox の `/files/*` はこの置き場を扱えない。
         nucllei の EXT_MOUNTS で proxy の物 (cage の `/ext/doc` 等) は、その置き場を読む手段
-        (配備側が valve で案内) へ。それ以外は run_shell へ。"""
+        (配備側が valve で案内) へ。それ以外はテキストを /workspace へコピーして read_file、
+        データは run_python へ。拡張子 (画像・Office 等) の案内はこれより先に read_file が出す。"""
         from nucllei.utils.ext_upstreams import ext_mount, split_ext_rest
 
         name, _ = split_ext_rest(abs_path[len(_RO_MOUNT_ROOT) :])
@@ -1821,7 +1919,8 @@ class Tools:
         return ToolCallError(
             f"{abs_path} は read_file では読めない (読めるのは `/workspace/…` と、見える"
             " `/ext/groups/<グループ名>/…`・`/ext/public/…`)",
-            "中身が要るなら run_shell の cat で読む。",
+            "テキストなら run_shell の cp で /workspace/ にコピーしてから read_file で読む。"
+            "CSV・JSON などのデータを集計するなら run_python でそのパスを開く。",
         )
 
     async def list_workspace(
@@ -1886,8 +1985,11 @@ class Tools:
             return f"{abs_path} は空 (ファイルが無い)。"
         # sandbox は workspace 相対で返す — モデルには絶対パスで見せる
         return "\n".join(
-            f"- {WORKSPACE_ROOT}/{e['path']} ({_human_size(e['size'])})"
-            for e in entries
+            [
+                f"- {WORKSPACE_ROOT}/{e['path']} ({_human_size(e['size'])})"
+                for e in entries
+            ]
+            + _list_truncated_note(res, entries)
         )
 
     def _list_groups(self, user: dict) -> str:
@@ -1934,7 +2036,7 @@ class Tools:
         lines = [f"- {e['path']} ({_human_size(e['size'])})" for e in entries]
         if ro:
             lines.append(f"({abs_path}{ro})")
-        return "\n".join(lines)
+        return "\n".join(lines + _list_truncated_note(res, entries))
 
     async def fetch_from_workspace(
         self,
@@ -1950,11 +2052,9 @@ class Tools:
         ユーザーに見えず、ブラウザでも開けない)。チャットに添付し、画像・音声・動画はその場で
         ユーザーの画面に表示される。本文に何を書くか (書かないか) は戻り値が言う。
         /workspace のパスを本文に貼ったり URL に書き換えたりしない。
-        `/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書いてよい
-        (`/ext/doc/…` は doc の出典の形で示す)。呼んだ場合は、サーバが配信していれば添付せず
-        そのリンクを返す (日本語名は percent-encode された同じファイルの別表記になる)。
+        `/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。
 
-        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/out/report.xlsx
+        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")

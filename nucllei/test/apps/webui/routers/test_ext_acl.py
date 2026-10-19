@@ -449,6 +449,14 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         )
         out = _text(tool.write_file("/ext/groups/EMR", "x", __user__=MEMBER))
         assert "ディレクトリ" in out and tool.calls == []
+        # ACL の外の /ext (/ext/doc 等) は管理者も書けない。書ける場所の案内に管理者の権限も書く (監査 (11))
+        out = _text(tool.write_file("/ext/doc/x.md", "x", __user__=MEMBER))
+        assert out == (
+            "ERROR: /ext/doc/x.md は read-only の参照データ。書き込めるのは `/workspace/` 配下と、"
+            "所属グループの `/ext/groups/<グループ名>/` だけ (管理者はすべてのグループの置き場と"
+            " `/ext/public/` にも書ける)。"
+        )
+        assert tool.calls == []
         out = _text(tool.write_file("/ext/groups/EMR/../OTHER/x", "x", __user__=MEMBER))
         assert "は無い" in out and tool.calls == []
 
@@ -531,6 +539,22 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(tool.list_workspace("/ext/groups/EMR", __user__=MEMBER))
         assert out == "- /ext/groups/EMR/a.md (3B)"
         assert tool.calls[0][1]["path"] == "/ext/groups/EMR"
+        # 件数の上限で打ち切った (sandbox の truncated。2026-10-19 llens 監査) — read-only の注記の後
+        tool = _tool(
+            {
+                "/files/list": {
+                    "entries": [{"path": "/ext/public/a.md", "size": 3}],
+                    "exists": True,
+                    "is_dir": True,
+                    "truncated": True,
+                }
+            }
+        )
+        out = _text(tool.list_workspace("/ext/public", __user__=OUTSIDER))
+        assert out == (
+            "- /ext/public/a.md (3B)\n(/ext/public (read-only — 書けるのは管理者だけ))\n"
+            "1 件で打ち切った。次の手: 下の階層のディレクトリを path に渡して、絞って一覧する。"
+        )
         tool = _tool({})
         out = _text(tool.list_workspace("/ext/groups/OTHER", __user__=MEMBER))
         assert "は無い" in out and tool.calls == []

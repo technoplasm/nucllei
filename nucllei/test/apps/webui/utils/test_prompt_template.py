@@ -52,7 +52,16 @@ def test_existing_variables_unchanged():
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)
     assert re.fullmatch(r"\d{2}:\d{2}:\d{2} [AP]M", time)
     assert datetime_.startswith(date)
-    assert weekday.endswith("day")
+    # 曜日は日本語で固定(ロケールに依らない — 2026-10-19 llens 監査)
+    assert weekday in (
+        "月曜日",
+        "火曜日",
+        "水曜日",
+        "木曜日",
+        "金曜日",
+        "土曜日",
+        "日曜日",
+    )
     assert (name, location) == ("Taro", "Sapporo")
 
     assert prompt_template("{{USER_NAME}}|{{USER_LOCATION}}") == "Unknown|Unknown"

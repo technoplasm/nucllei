@@ -14,7 +14,8 @@ README_API §5.1「事実の文 + 次の手」)。事実の文はユーザーに
 (内部名・env 名・`detail` は出さない。`detail` は log に残す)、配備は自分のモデルに「事実は
 伝え、次の手は伝えない」と言える。常体(だ・である)で書く。ユーザーに渡すリンクは
 `[ラベル](URL)` の markdown で書かせる(裸の相対パスを本文に出させない — `SHOW_AS_LINK`)。
-同じ toolkit に無い tool を次の手に挙げるときは「〜が使えるなら」と条件付きで書く。「読めなかった」を
+次の手で別の tool を名指しするのは、そのターンでモデルに出ている tool だけ(`tool_errors.tool_in_turn`。
+2026-10-19 llens 監査 (13) で「〜が使えるなら」の条件付きの書き方をやめた)。「読めなかった」を
 全部リンク切れと言い換えさせないために、code / reason ごとに言い分ける(実走 2026-09-06:
 32.6 MB の PDF が上限に当たったのを束ねた 1 文のせいでモデルが「リンク切れ」と誤報した)。
 
@@ -54,6 +55,7 @@ from nucllei.utils.tool_errors import (
     ToolCallError,
     ToolError,
     ToolErrorKind,
+    tool_in_turn,
 )
 
 log = logging.getLogger(__name__)
@@ -92,12 +94,21 @@ def path_error(value: str, arg_form: str = PATH_ARG_FORM) -> ToolCallError:
 # file が引けないとき(レコードが無い / アクセス権が無い)の事実の文と次の手。2 つは言い分けない
 # (存在の有無を漏らさない)が、区別できないことは事実の文で言い、ユーザーに「無い」と
 # 言い切らせない(llens staging 2026-10-04)。次の手は file_id の確かめ方(chat_files は別の
-# toolkit なので条件付き)
+# toolkit — このターンに出ているものだけ名指しする。`_no_file_next`)
 NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
-NO_FILE_NEXT = (
-    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+_NO_FILE_TELL = (
     "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
 )
+
+
+def _no_file_next() -> str:
+    """file が引けないときの次の手。file_id の確かめ方は、このターンに出ている tool で言う。"""
+    finders = [n for n in ("list_chat_files", "grep_chat_files") if tool_in_turn(n)]
+    if finders:
+        check = f"{' か '.join(finders)} でこのチャットの file_id を確かめて渡し直す。"
+    else:
+        check = "会話に出ている file_id を確かめて渡し直す。"
+    return check + _NO_FILE_TELL
 
 
 def file_id_error(fid: str, *, given: str | None = None) -> ToolCallError:
@@ -109,7 +120,9 @@ def file_id_error(fid: str, *, given: str | None = None) -> ToolCallError:
     if given is None:
         rule = ref_args_rule_for("file_id", fid)
         form = f"{FILE_ID_ARG_FORM} {rule} " if rule else ""
-    return ToolCallError(f"{given or f'file_id {fid}'} {NO_FILE}", form + NO_FILE_NEXT)
+    return ToolCallError(
+        f"{given or f'file_id {fid}'} {NO_FILE}", form + _no_file_next()
+    )
 
 
 def mb(n) -> str:
@@ -162,13 +175,43 @@ _SERVER_SELF_NEXT = "同じサーバのファイルは `/ext/…` の相対 URL 
 # reason 無しの 3xx(redirect は 3 回まで辿る — ここに来るのは転送先が URL として組めない
 # とき)の「何が起きたか」の前半。続きは `RefErrorHints.redirect_next`
 _REDIRECT_WHAT = "ERROR: {ref} は redirect ({status}) を返した。"
-# 2xx / 3xx / 404 以外の上流 status。3 本とも同文
-_UPSTREAM_STATUS = (
-    "ERROR: {ref} の上流が {status} を返した。"
-    + NEXT
-    + "5xx なら時間を置いて 1 回だけ再試行する (401 / 403 などは再試行しない)。"
-    + SHOW_AS_LINK
-)
+
+
+def _upstream_status_text(ref: str, status) -> str:
+    """2xx / 3xx 以外の HTTP status(3 本とも同文)。次の手は status で言い分ける
+    (2026-10-19 llens 監査 (6) — 旧「5xx なら時間を置いて 1 回だけ再試行」はモデルが時間を
+    置けず、4xx まで呼び直させていた)。4xx は呼び直しても同じ、5xx だけ 1 回呼び直す。"""
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        code = None
+    link = SHOW_AS_LINK
+    if code is None:
+        what = "HTTP のエラーを返した"
+        act = "呼び直しても同じことが多い。"
+    elif code in UPSTREAM_STATUS_OUTCOME:
+        what = f"HTTP {code} を返した (ページが無い)"
+        act = "呼び直しても同じ。"
+        link = TELL_BROKEN_LINK
+    elif code in (401, 403):
+        what = f"HTTP {code} を返した (ログインか権限が要るページ)"
+        act = "呼び直しても同じ。"
+        link = SHOW_AS_LINK.replace("開ける", "開けることがある")
+    elif code == 429:
+        what = f"HTTP {code} を返した (アクセスが多すぎるとして断られた)"
+        act = "続けて呼び直さない。"
+    elif 400 <= code < 500:
+        what = f"HTTP {code} を返した (要求を受け付けなかった)"
+        act = "同じ URL で呼び直しても同じ。"
+    elif 500 <= code < 600:
+        what = f"HTTP {code} を返した (相手のサーバー側の障害)"
+        act = "1 回だけ呼び直し、同じならやめる。"
+    else:
+        what = f"HTTP {code} を返した"
+        act = "呼び直しても同じことが多い。"
+    return f"ERROR: {ref} は {what}。{NEXT}{act}{link.replace('{ref}', ref)}"
+
+
 # traversal(`..` / 制御文字)。添える形の文は arg で選ぶ
 _TRAVERSAL = "ERROR: {ref} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
 # traversal の次の手は呼び直し方 (受ける形の説明文だけでは一手にならない — llens staging
@@ -317,7 +360,7 @@ def _explain_text(
             return _fill(hints.too_many_redirects, ref, err.status)
         if err.status is not None and 300 <= int(err.status) < 400:
             return _fill(_REDIRECT_WHAT + hints.redirect_next, ref, err.status)
-        return _fill(_UPSTREAM_STATUS, ref, err.status)
+        return _upstream_status_text(ref, err.status)
     if code == "upstream_unreachable":
         if err.reason == "unresolvable":
             return _fill(hints.unresolvable, ref)

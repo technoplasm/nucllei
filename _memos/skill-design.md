@@ -344,3 +344,15 @@ tool result = 展開済み content の全シーケンス。
 - **step2 の前**: tool call ストリーミング堅牢化 + tool ロード async 化(#18/#28 のチャット経路分)
   — 遅延評価は native ループへの動的 tools 追加なので、ループが固まってから載せる方が手戻りがない
 - レンダリング刷新(#17〜)は tool 基盤の後(ユーザー決定 2026-07-05)
+
+## 追記(2026-10-19)— skill が持つ builtin tool と、次の手の名指し
+
+- skill の `tool_ids` に builtin(例: `builtin_subagent`)を入れると、load_skill で生えた時点から使える。
+  この経路の認可は skill の可視性だけで、tool 行の ACL は効かない(skill tool 注入は
+  `get_tools(enforce_access_control=False)`)。llens はこれでサブエージェントを skill の公開範囲で配る —
+  詳細は `subagent-design.md`「skill 経由の run_subagent」。
+- tool が返す ERROR・次の手で別の tool を名指しするのは、そのターンでモデルに出ている tool だけになった
+  (`tool_errors.tool_in_turn`)。load_skill が同じ応答の前段(prelude)で足した tool も入るので、skill を読み込んだ
+  ターンからは名指しされ、読み込んでいない人には名前が出ない。`builtin-tools.md`「モデル向け文面の監査」。
+- `{{CURRENT_WEEKDAY}}` は日本語(月曜日…日曜日)で固定した(`utils/task.py`。strftime の %A はプロセスの
+  ロケール次第で英語だった)。手順書 `docs/manual/13_skills.md` も「曜日 (例: `月曜日`)」に。

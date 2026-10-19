@@ -92,7 +92,13 @@ from pydantic import BaseModel, Field
 from nucllei.models.files import Files
 from nucllei.storage.provider import Storage
 from nucllei.utils.image_refs import file_id_of_url, resolve_url, route_of_url
-from nucllei.utils.tool_errors import ToolError, ToolFailure, ToolFatal, ToolOutcome
+from nucllei.utils.tool_errors import (
+    ToolError,
+    ToolFailure,
+    ToolFatal,
+    ToolOutcome,
+    tool_in_turn,
+)
 from nucllei.utils.ref_errors import (
     NEXT,
     SHOW_AS_LINK,
@@ -155,8 +161,9 @@ def _decode(raw: bytes, content_type: str) -> str:
 
 
 # モデルに返す文は「事実の文 + `次の手:` 以降」(`utils/ref_errors` の module docstring)。
-# 別の toolkit の tool (feed_image / send_to_workspace / run_subagent / read_attachment) は
-# 載っていないことがあるので「〜が使えるなら」と条件付きで書く。
+# 別の toolkit の tool (feed_image / send_to_workspace / run_subagent / read_attachment) は、
+# このターンに出ているときだけ名指しする (`tool_in_turn`、2026-10-19 llens 監査 (13) —
+# 「〜が使えるなら」をやめた)。無い tool の文は出さず、残る手で言うか文を省く。
 
 # resolver が理由を付けずに失敗したとき (通常起きない) の文面 (`{ref}` は ref_errors が埋める)。
 _ERR_UNEXPLAINED = (
@@ -166,9 +173,11 @@ _ERR_UNEXPLAINED = (
 )
 
 
-def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
+def _too_large(
+    u: str, err, ceiling_mb: Optional[float], cap_mb: Optional[float] = None
+) -> str:
     """too_large の全文。ceiling_mb は引数 max_mb で引き上げられる天井 (valve) — 次の一手を
-    決めるのに使う。
+    決めるのに使う。cap_mb はこの呼び出しの上限 (resolver が limit を返さなかったときの提案の基準)。
 
     resolver の size / size_exact の意味:
       size_exact=True  … size は実サイズ (Content-Length / fs の stat / Files レコード)。
@@ -213,25 +222,52 @@ def _too_large(u: str, err, ceiling_mb: Optional[float]) -> str:
         )
         what = f"{u} は少なくとも {mb(seen)} あり、取得の上限 {mb(limit)} を超えている (実サイズは不明)。"
     else:
-        suggest, more = "<X を超える値>", ""
+        # size も limit も来ない (通常起きない)。この呼び出しの上限の 2 倍を具体値で出す —
+        # 「<X を超える値>」のようなプレースホルダはモデルがその字のまま入れる (2026-10-19 llens
+        # 監査 (6))。上限も分からなければ天井
+        if cap_mb:
+            n = math.ceil(cap_mb) * 2
+        elif ceiling_mb:
+            n = int(ceiling_mb)
+        else:
+            n = 50
+        if ceiling_mb is not None:
+            n = min(n, int(ceiling_mb))
+        suggest = str(n)
+        more = (
+            f"足りなければさらに上げる (天井 {ceiling_mb:.1f} MB)。"
+            if ceiling_mb is not None
+            else "足りなければさらに上げる。"
+        )
         what = f"{u} は取得の上限を超えている (実サイズは不明)。"
-    return (
-        f"ERROR: {what}{NEXT}この会話では読まない。run_subagent が使えるなら URL と指示を渡し、"
-        f'子が fetch_url(url="{u}", max_mb={suggest}) で読む (子は offset で続きを取れる)。'
-        f"{more}"
-        "pandas 等で加工・集計したいだけなら、send_to_workspace が使えるなら"
-        " send_to_workspace(url=…) で sandbox に取り込む (読むためのテキスト化には使わない)。"
-        f"{hand_over}"
+    fetch = f'fetch_url(url="{u}", max_mb={suggest})'
+    if tool_in_turn("run_subagent"):
+        read = (
+            "この会話では読まない。run_subagent に URL と指示を渡し、"
+            f"子が {fetch} で読む (子は offset で続きを取れる)。"
+        )
+    else:
+        # 子に任せられないなら自分で読むが、主 context を守るため区切る (llens 監査 (6))
+        read = f"{fetch} に query か小さい limit を付けて区切って読む (続きは offset)。"
+    shape = (
+        "pandas 等で加工・集計したいだけなら send_to_workspace(url=…) で sandbox に取り込む"
+        " (読むためのテキスト化には使わない)。"
+        if tool_in_turn("send_to_workspace")
+        else ""
     )
+    return f"ERROR: {what}{NEXT}{read}{more}{shape}{hand_over}"
 
 
-def _explain_ref_error(u: str, err, ceiling_mb: Optional[float] = None) -> ToolError:
+def _explain_ref_error(
+    u: str, err, ceiling_mb: Optional[float] = None, cap_mb: Optional[float] = None
+) -> ToolError:
     """resolver の RefError をモデル向けの ToolError にする (組み立ては `utils/ref_errors`)。
 
-    この tool 固有の言い方: too_large は run_subagent + max_mb (天井 ceiling_mb)。
+    この tool 固有の言い方: too_large は max_mb (天井 ceiling_mb) で読み直す — run_subagent が
+    このターンにあれば子に任せる。
     """
     hints = RefErrorHints(
-        too_large=lambda ref, e: _too_large(ref, e, ceiling_mb),
+        too_large=lambda ref, e: _too_large(ref, e, ceiling_mb, cap_mb),
         unexplained=f"ERROR: {{ref}} {_ERR_UNEXPLAINED}",
     )
     return explain_ref_error(u, err, arg="url", hints=hints)
@@ -362,7 +398,7 @@ class Tools:
 
         url は受け取った形のまま渡す: 2 枚目からは組み立てず、戻り値のリンク一覧などに出た URL の
         literal を 1 文字も変えずにコピーする (相対ならホストを補わない)。
-        大きいページは query で該当行に絞る (続きは offset)。
+        大きいページは query で該当行に絞る (続きは同じ query のまま offset)。
 
         戻り値はヘッダ (url / 種別 / 分量) + 本文 + リンク一覧。
         失敗時は "ERROR: ..." で始まる文 — 何が起きたか (事実) と、「次の手:」以降に自分が次に
@@ -371,7 +407,7 @@ class Tools:
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値などに出た URL の literal をそのまま)。
         :param query: (任意) 指定すると、本文行・リンク行のうちこの語を含む行だけを返す。
         :param offset: 何文字目から返すか (0 起点)。続きは戻り値の next_offset を渡す。
-        :param limit: 返す文字数 (既定 8000)。配備の上限で頭打ちになる。
+        :param limit: 返す文字数 (既定 8000)。上限を超える値は上限で頭打ちになる。
         :param max_mb: (任意) 取得サイズの上限 (MB)。既定を超える資料を読むときだけ (天井あり)。
         """
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
@@ -396,7 +432,7 @@ class Tools:
         fid = file_id_of_url(u)
         if fid:
             raw, content_type = await self._read_file(
-                fid, __user__["id"], max_bytes, cap_mb
+                fid, __user__["id"], max_bytes, cap_mb, ceiling_mb
             )
             # 添付・生成物の HTML の相対 href はどの名前空間にも属さない (`/page2.html` に
             # なってしまう) ので、file 経路ではリンク一覧を出さない (page_url 空)
@@ -411,7 +447,7 @@ class Tools:
             # 借りない。too_large の ERROR 文は RefError.limit (実際に使われた上限) から MB を出す。
             loaded, err = await resolve_url(u, max_bytes=max_bytes, user=__user__)
             if err is not None or loaded is None:
-                raise _explain_ref_error(u, err, ceiling_mb)
+                raise _explain_ref_error(u, err, ceiling_mb, cap_mb)
             if (
                 len(loaded.data) > max_bytes
             ):  # resolver が守るが、念のため (fail closed)
@@ -444,25 +480,40 @@ class Tools:
             # url でそのまま受けて自分の目に入れられる (2026-09-04 に拡張子判定をやめたので、
             # 拡張子を持たない配信口の画像もそのまま渡せる)。ここで原本 URL だけを
             # 返すと、モデルは見られるものを見ずにユーザーへ丸投げする。
+            # feed_image がこのターンに無ければ、残る手はユーザーへのリンクだけ
+            look = (
+                f'feed_image(url="{u}") で自分の目で見る。'
+                if tool_in_turn("feed_image")
+                else show_as_link(u)
+            )
             return (
                 head + f"種別: 画像 (content-type={media_type})。平文にはできない。\n"
-                f'{NEXT}feed_image が使えるなら feed_image(url="{u}") で自分の目で見る。'
+                f"{NEXT}{look}"
             )
         if kind == "other":
+            shape = (
+                f'加工が要るなら send_to_workspace(url="{u}") で sandbox に取り込む。'
+                if tool_in_turn("send_to_workspace")
+                else ""
+            )
             raise ToolOutcome(
                 f"{u} は平文にできない形式 (content-type={media_type or '不明'})",
-                f'加工が要るなら、send_to_workspace が使えるなら send_to_workspace(url="{u}")'
-                " で sandbox に取り込む。" + show_as_link(page_url or u),
+                shape + show_as_link(page_url or u),
             )
         if kind == "pdf-noText":
             # feed_image は拡張子ではなく取得した content-type で PDF を判定する。
             # log_write.aspx のような拡張子を持たない配信口でもそのまま渡してよい。
-            hint = f'feed_image が使えるなら feed_image(url="{u}") でページを見る (pages="3" 等で範囲指定)。'
+            if tool_in_turn("feed_image"):
+                hint = (
+                    f'feed_image(url="{u}") でページを見る (pages="3" 等で範囲指定)。'
+                    f"見られない・読み取れないときは、ユーザーに原本を [ラベル]({u}) のリンクで示す。"
+                )
+            else:
+                hint = f"ユーザーに原本を [ラベル]({u}) のリンクで示す。"
             return (
                 head + f"種別: PDF / テキスト層が無い (抽出 {len(body)} 字 < "
                 f"{self.valves.pdf_text_char_threshold} 字)。スキャン画像の PDF。\n"
                 f"{NEXT}{hint}"
-                f"見られない・読み取れないときは、ユーザーに原本を [ラベル]({u}) のリンクで示す。"
             )
 
         return self._render(head, kind, body, links, query, offset, limit, url=u)
@@ -483,7 +534,14 @@ class Tools:
             return ""
         return route.page_url or ""
 
-    async def _read_file(self, fid: str, user_id: str, max_bytes: int, cap_mb: float):
+    async def _read_file(
+        self,
+        fid: str,
+        user_id: str,
+        max_bytes: int,
+        cap_mb: float,
+        ceiling_mb: Optional[float] = None,
+    ):
         """url の `/api/v1/files/{id}/content` を file として読む → (raw, content_type)。
         読めないときは ToolError を raise する。
         所有者チェックは feed_image の file_id 経路と同じ (#40 と同クラスの IDOR 封鎖)。
@@ -500,9 +558,22 @@ class Tools:
             # レコードはあるのに実体が読めない = ストレージが壊れている → fatal
             raise ToolFatal(f"file_id {fid} の実体を読めない")
         if len(raw) > max_bytes:
+            # 次の手: 抽出テキストで足りるなら read_attachment (このターンにあれば)、原本のまま
+            # 要るなら天井の内側で max_mb を上げる (どちらも無ければ次の手なし)
+            steps = []
+            if tool_in_turn("read_attachment"):
+                steps.append(
+                    f'抽出テキストで足りるなら read_attachment(file_id="{fid}") で読む。'
+                )
+            need = int(len(raw) // (1024 * 1024)) + 1
+            if ceiling_mb is None or need <= ceiling_mb:
+                steps.append(
+                    f"このまま読むなら max_mb={need} を付け、query か小さい limit で区切って"
+                    "呼び直す。"
+                )
             raise ToolOutcome(
                 f"このファイルは {mb(len(raw))} で、取得の上限 {cap_mb:.1f} MB を超えている",
-                "read_attachment が使えるなら read_attachment(file_id=…) で抽出テキストを読む。",
+                "".join(steps) or None,
             )
         meta = getattr(rec, "meta", None) or {}
         return raw, meta.get("content_type") or ""
@@ -553,13 +624,17 @@ class Tools:
     def _render(self, head, kind, body, links, query, offset, limit, url=None):
         """行の集合をモデルに返す 1 本の文字列へ (query 絞り込み → offset/limit で刻む)。"""
         if kind == "pdf" and url:
-            # 読んだのはテキスト層だけ。ユーザーが開いて見るものと同じものを見る経路は feed_image で、
-            # 重い処理ではない (ken 2026-09-07: PDF はできるだけ見る)。
-            head += (
-                "テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。"
-                f'{NEXT}feed_image が使えるなら feed_image(url="{url}", pages="1-3" 等) で'
-                "ユーザーが見るものと同じものを見る (重くない)。\n"
-            )
+            # 読んだのはテキスト層だけ。ユーザーが開いて見るものと同じものを見る経路は feed_image。
+            # 旧方針 (ken 2026-09-07: PDF はできるだけ見る、「重くない」) は 2026-10-19 ken 決定で
+            # 上書き: 文字で足りないときだけ見る (添付 PDF と揃える)。目に入れた画像は以降のターンにも
+            # context に残るので「重くない」とは言わない。feed_image がこのターンに無ければ次の手は出さない
+            head += "テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。"
+            if tool_in_turn("feed_image"):
+                head += (
+                    f"{NEXT}文字で足りないとき (表や記入欄の並び・図・手書き・印影が関わる) だけ、"
+                    f'feed_image(url="{url}", pages="N") で要るページを見る。'
+                )
+            head += "\n"
         link_header = f"--- リンク ({len(links)} 件) ---" if links else None
         all_lines = list(body) + ([link_header] + links if links else [])
         total_lines = len(body) + len(links)
@@ -596,9 +671,12 @@ class Tools:
         head += note
         head += f"表示: {offset}-{end} 字"
         if more:
+            # query で絞った結果を刻んでいるので、続きも同じ query で取る (offset は絞った後の
+            # 文字位置 — query を落とすと別の位置になる。2026-10-19 llens 監査 (6))
+            again = f'query="{query}", ' if query else ""
             head += (
-                f" (続きあり)\n続きは fetch_url(url=..., offset={end}) で取る。"
-                f"next_offset={end}"
+                f" (続きあり)\n続きは fetch_url(url=..., {again}offset={end}) で取る"
+                f"{' (同じ query を渡す)' if query else ''}。next_offset={end}"
             )
         else:
             head += " (末尾まで)"

@@ -1502,3 +1502,89 @@ RuntimeConfig を包むだけなので同じ値)。
   `sandbox_get_raw` を本物の HTTP で)、`test_builtin_sandbox.py`(url= が sandbox の上限・一時ファイル経由)、
   `test_builtin_read_file.py`(範囲読み一式)、`test_file_limit.py`(feed_image(path=)・旧名・probe)、
   `test_image_refs_resolve.py`(sink)
+
+## モデル向け文面の監査(2026-10-19、llens の依頼・ken 了承)— 次の手は「そのターンで使える tool」だけ名指し
+
+llens が staging で各モデルにハーネス (tool の docstring・戻り値・ERROR) をレビューさせ、食い違いを
+(1)〜(13)・(a)・軽微で依頼してきた。llens に返した変更一覧(旧 → 新、path:line)は作業時に
+llens へ送った `audit-wording-changes.md`。正本の契約は `README_API.md` §5.1(文面の規約・「Naming
+other tools」)/ §4.3(`<source>`)/ §5.7・§5.7.1(各 tool)/ §5.8 / §5.9。ここには決定と理由だけ残す。
+
+- **「〜が使えるなら」をやめ、そのターンでモデルに出ている tool だけを名指しする**((13)、ken 了承)。
+  2026-10-04 の規約(別 toolkit の tool は「〜が使えるなら」と条件付きで書く — `ref_errors` の module
+  docstring・README_API §5.1)を**上書き**。理由: 使えない tool の名前がモデルに見え(呼んで violation
+  になる・ユーザーに「〜を使えば」と書く)、さらに ken の決定でサブエージェントは skill の公開範囲で
+  絞る(llens: `run_subagent` を skill の tool_ids で生やす)ので、公開範囲の外の人に名前を出したくない。
+  - 仕組み: `utils/tool_errors.py` の ContextVar(`tool_in_turn(name)` / `turn_tools(names)` /
+    `set_turn_tools` / `reset_turn_tools` / `current_turn_tools`)。middleware の `execute_tool_calls` が
+    call ごとに**呼び出し時点の tools dict**から立てる(同じ応答の load_skill が足した tool も入る。sync
+    tool の to_thread にも ContextVar で届く)。background は spawn 時点の集合を runner へ持ち越す
+    (`spawn_execution` → `_run_execution(turn_tool_names=…)`)。サブエージェントの子ターンは子の
+    middleware が子の tools で立てる。`<source>` の注記も `process_chat_payload` が同じ集合で組む。
+    ターンの外は空集合 = 何も名指ししない(fail closed)。
+  - 文面は呼び出しのたびに組む(モジュール定数にしない)。無い tool の文は出さず、残る手で言うか
+    (ユーザーへのリンク・「ユーザーに伝える」)、何も無ければ `次の手:` ごと省く。**同じ toolkit の tool は
+    toolkit ごと載るので確かめずに名指ししてよい**(sandbox 内の run_shell / read_file / list_workspace 等)。
+  - 例外: `[task]` 完了通知の「fetch_from_workspace が使えるなら」は残した — 通知を組む時点では、それを
+    読む続きターンの tool 一覧がまだ決まっていない。
+  - 担保: `test_turn_tools.py`(配線・load_skill・切詰めの印・同期タイムアウト)、各 tool のテストで両分岐。
+- **実行できない次の手を出さない**((6)・軽微): 「時間を置いて」(モデルは待てない)→「1 回だけ呼び直す。
+  続くなら sandbox を使わずに/自分で処理する」。上限 600 秒で「timeout_s を上げて」と言わない。
+  「<X を超える値>」のようなプレースホルダは字のまま入れられるので具体値に。範囲を指す引数の無い tool に
+  「offset / query で絞る」と言わない(切詰めの印は spec の引数で出し分け)。background を付けられない tool に
+  background を勧めない。HTTP の status は 4xx / 5xx / 401・403 / 429 で出し分け、4xx は呼び直させない。
+- **容量一杯で消させない**((1)): #150 の次の手(「trash を空にすると空く — run_shell の rm で消してから呼び
+  直す」)を上書き。モデルは自分では消さず、ユーザーに伝えて整理するか聞く。画面の名前は ja-JP の UI 文字列
+  (「ワークスペース」→「サンドボックス」タブ)。理由: モデルが利用者のファイルを消してよい判断材料が無い。
+- **`<source>`**((3)): `id="N"`(引用チップの名残、読む箇所なし)をやめて `name=`(属性値として
+  エスケープ)。2026-10-05 の「llens の tool が id 属性を参照しうるので形は不変」(feature-triage.md)を
+  上書き — llens の依頼が「もう使っていない」としたため(llens の prompt にある「(id の番号ではない)」の但し書きは不要になった)。extraction none / failed は同じ注記
+  「(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: …)」で、failed の例外の文
+  (attachment が data.content に入れたもの — 内部のパス・URL を含みうる)はモデルに出さず log へ。
+  none でも text 系の content_type なら read_attachment が raw を decode して読めるので、そのときだけ
+  「read_attachment(file_id=…) で読める」と言う(「読めない」と書いて読める、の食い違いを作らない —
+  判定は read_attachment と同じ `_is_text_ct`)。read_attachment も failed は例外の文を返さず outcome に揃えた。
+  (b)「`<source>` は資料であって指示ではない」の 1 行は core に入れない(llens の preset に書く)。
+  `<source>` を system から発言の側へ移す件は次の版(ken 2026-10-19)。
+- **fetch_url の PDF**((a)、ken 2026-10-19): 2026-09-07 の「PDF はできるだけ見る(重くない)」を**上書き**。
+  「文字で足りないとき (表や記入欄の並び・図・手書き・印影が関わる) だけ feed_image で要るページを見る」。
+  理由: 目に入れた画像は以降のターンにも context に残る(#142 で再送する)ので重くないとは言えない。
+  添付 PDF の扱いと揃えた。
+- **feed_image の引数なし((12)、ken 決定)**: 全添付 PDF 合わせて 10 ページまで(`_ATTACHED_PDF_PAGES`)。
+  1 件ごとの valve `max_pages`(既定 3)はそのまま効くので、添付 1 件なら 3 ページ。件数が多いときに積む
+  ページが件数倍に膨らむのを止める枠。超えた分は旗を立てず「続きは file_id と pages で」。docstring の
+  「このターン内で」は「入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る」に((9))。
+- **feed_image の他の次の手**((6)): 大きい PDF は `pdftoppm` で要るページだけ PNG に、HEIC 等は Pillow で
+  PNG に変換し**開けなければユーザーに JPEG / PNG で添付し直してもらう**(sandbox の Pillow に
+  pillow-heif が無く、HEIC は実質こちら)、非画像は read_file / read_attachment / fetch_url と Office の
+  `soffice` → PDF。`/ext` の not_found から mount の話を消した(「存在しない。次の手: 受け取った literal の
+  まま渡したか確かめ…」)— 2026-10-04 の中立文(file-handling.md)は fetch_from_workspace 側だけに残り、
+  その文も「sandbox にだけ mount されている」→「sandbox の中にだけある」。
+- **sandbox**: `/ext` はパスがそのまま URL なので fetch_from_workspace を呼ばずにリンクを書く、と言い切る
+  ((4) — 「呼んだ場合は…」と `/ext/doc` の括弧を削除)。docstring の例パスを削除((5) — 字のまま使われた)。
+  write_file の上限超過は「分割して複数回」をやめ run_python で生成((6) — write_file は上書き)。read_file の
+  `/ext/<その他>` は拡張子の判定を先に、テキストは /workspace にコピーして read_file、データは run_python
+  ((6))。強制終了したセルは「変数・import は失われた。処理を分けて定義からやり直す」だけ((7) — sandbox の
+  error と重ねない。sandbox 側の文は常体、例外の repr は log へ)。write_file の説明に管理者の権限((11))。
+  list_workspace は sandbox の `/files/list` の `truncated`(500 件、追加フィールド)で打ち切りを言う。
+  run_shell の説明の unzip → unar。取り込み一覧の容量切れは行に「次の手:」を書かず末尾に 1 回。
+- **run_subagent の同時数**((8)・(10)): 「同時 4 本まで」→「サーバー全体で 4 本まで (ほかの利用者の分も
+  数える)」。数はプロセス内カウンタなので、worker が複数なら worker ごと(docstring は「サーバー全体」と言う —
+  単一 worker の前提)。サブエージェントどうしは並べると同時、sandbox の tool どうしは並べても順番待ち、を分けて書いた。
+- **内部語を出さない**(軽微): Files / 配備 / mount / 上流 / multi-worker / chat_id / message_id を事実の文と
+  見える docstring から外した。「(image unavailable)」→「(ここにあった画像は読み込めなかった — 中身は見えていない)」、
+  tool 結果の画像の text パート「(直前の tool 結果の画像)」→「(以下の画像はユーザーの添付ではない — 直前の tool
+  の結果として読み込んだ画像)」(role が user なので添付と取り違えさせない。FE と同文・共有 fixture)。
+  `{{CURRENT_WEEKDAY}}` は日本語固定(strftime の %A はロケール次第で英語)。
+- **次の手の無い ERROR に次の手**(軽微): context_budget の 2 つ、read_attachment の「抽出テキストが無い」、
+  サブエージェントの「親チャットが無い」、汎用の例外(「引数に誤りがあれば直して 1 回だけ。続くならこの tool は
+  使わずに進め、ユーザーに伝える」)。history / chat_files の ValueError は ToolFailure に(fatal → failure)。
+- **background の案内**(軽微): spawn 直後の running 形に `note`(結果は通知で届く・今すぐ要るときだけ
+  await_task)、stop_task が既に終わっていた行に `note`(止めていない・await_task で受け取る — この報告で
+  delivered になるので通知では届かない)、ORPHANED の文に status の意味、await_task の「ターンを終えること」・
+  stop_task の「撃って」を言い換え。
+- 未対応で残したもの: fetch_from_workspace の `/ext` の戻り値「1 文字も変えずに本文に書く: [name](url)」は proxy
+  でも同じ((4) の一部 — docstring で「呼ばない」と言い切ったので、呼ばれるのは例外的な場合だけ)。
+  `EXT_MOUNTS` に groups / public が無い配備では、docstring どおりに書いた `/ext/groups/…` のリンクが開けない
+  (呼べば sandbox 経由で添付される経路は残っている)。`sandbox/README.md` の `/files/list` の応答に
+  `truncated` は未記載。

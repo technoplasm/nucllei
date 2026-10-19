@@ -157,15 +157,29 @@ def test_kind_follows_the_extension(name, kind, language):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("name", ["fig.png", "scan.PDF", "photo.jpeg"])
 def test_image_and_pdf_point_to_feed_image(name):
-    from nucllei.builtin_tools.sandbox import READ_IMAGE_HINT
+    """feed_image を名指しするのは、このターンに出ているときだけ (2026-10-19 llens 監査 (13))。
+    出ていなければ sandbox の中で済む手 (pdftotext / tesseract → read_file) を言う。"""
+    from nucllei.builtin_tools.sandbox import READ_IMAGE_HINT, READ_IMAGE_NO_FEED_HINT
+    from nucllei.utils.tool_errors import turn_tools
 
     tool = _tool(b"x")
-    out = _read(tool, f"/workspace/{name}")
+    with turn_tools(["feed_image", "read_file"]):
+        out = _read(tool, f"/workspace/{name}")
     assert out == (
         f"ERROR: /workspace/{name} は画像・PDF で、read_file はテキストしか読まない。"
         f"次の手: {READ_IMAGE_HINT}"
     )
     assert "feed_image" in READ_IMAGE_HINT
+    out = _read(tool, f"/workspace/{name}")
+    assert out == (
+        f"ERROR: /workspace/{name} は画像・PDF で、read_file はテキストしか読まない。"
+        "次の手: PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ に"
+        "テキストを書き出し、そのファイルを read_file で読む。"
+    )
+    assert "feed_image" not in READ_IMAGE_NO_FEED_HINT
+    # 配備が valve で書いた文はそのまま (feed_image の有無で差し替えない)
+    tool.valves.image_hint = "配備の案内。"
+    assert _read(tool, f"/workspace/{name}").endswith("次の手: 配備の案内。")
     assert tool.calls == []
 
 
@@ -234,7 +248,17 @@ def test_other_ext_places_are_refused(monkeypatch, tmp_path):
     for path in ("/ext/shared/a.md", "/ext/unknown/a.md", "/ext"):
         out = _read(tool, path)
         assert out.startswith(f"ERROR: {path} は read_file では読めない"), out
-        assert "run_shell" in out
+        # テキストは /workspace へコピーして read_file、データは run_python (2026-10-19 llens 監査 (6))
+        assert out.endswith(
+            "次の手: テキストなら run_shell の cp で /workspace/ にコピーしてから read_file で"
+            "読む。CSV・JSON などのデータを集計するなら run_python でそのパスを開く。"
+        ), out
+        assert "cat" not in out
+    # 拡張子の判定が先 (画像・Office 等はその案内)
+    out = _read(tool, "/ext/shared/table.xlsx")
+    assert out.startswith("ERROR: /ext/shared/table.xlsx はテキストとして読めない"), out
+    out = _read(tool, "/ext/shared/fig.png")
+    assert out.startswith("ERROR: /ext/shared/fig.png は画像・PDF で"), out
     assert tool.calls == []
 
 

@@ -211,6 +211,30 @@ def _b64(s: bytes) -> str:
     return base64.b64encode(s).decode()
 
 
+def test_ext_list_says_truncated(monkeypatch, tmp_path):
+    """`/ext/...` の一覧も件数の上限 (`LIST_LIMIT`) で打ち切ったら `truncated: true`。"""
+    mod, ext = _load(monkeypatch, tmp_path)
+    monkeypatch.setattr(mod, "LIST_LIMIT", 2)
+    c = _client(mod, tmp_path)
+    d = ext / "groups" / "EMR" / "many"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(2):
+        (d / f"{i}.md").write_text("x")
+
+    def listed():
+        r = c.post(
+            "/files/list",
+            json={"user_id": "u1", "path": "/ext/groups/EMR/many", "mounts": EMR_RW},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert len(listed()["entries"]) == 2 and listed()["truncated"] is False
+    (d / "2.md").write_text("x")
+    res = listed()
+    assert len(res["entries"]) == 2 and res["truncated"] is True
+
+
 def test_files_roundtrip_inside_rw_group(monkeypatch, tmp_path):
     mod, ext = _load(monkeypatch, tmp_path)
     c = _client(mod, tmp_path)
@@ -246,6 +270,7 @@ def test_files_roundtrip_inside_rw_group(monkeypatch, tmp_path):
         "entries": [{"path": "/ext/groups/EMR/recipes/a.md", "size": 5}],
         "exists": True,
         "is_dir": True,
+        "truncated": False,
     }
     r = c.post(
         "/files/list", json={"user_id": "u1", "path": "/ext/public", "mounts": EMR_RW}

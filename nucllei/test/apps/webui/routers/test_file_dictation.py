@@ -149,17 +149,121 @@ class TestFileDictation(AbstractPostgresTest):
 
         lines = context.split("\n")
         assert lines[0].startswith(
-            f'<source id="1" file_id="{dictated}" dictation="true" extraction="none">'
+            f'<source file_id="{dictated}" name="rec.webm" dictation="true" '
+            'extraction="none">'
         )
         # 普通の音声添付には印が付かない(それ以外の属性は同じ)
         assert lines[1].startswith(
-            f'<source id="2" file_id="{plain}" extraction="none">'
+            f'<source file_id="{plain}" name="memo.webm" extraction="none">'
         )
         # 分かれていない録音には part / parts を載せない
         assert "part=" not in context
         # 区間一覧・本文は prompt に入れない
         assert "一つ目" not in context
         assert "start_sec" not in context
+
+    def test_text_attachment_without_extraction_points_to_read_attachment(self):
+        """抽出の無い添付でも text 系(read_attachment が raw を decode して読む型)なら、
+        「読めない」と言わず read_attachment を名指しする。content_type は sources の
+        metadata に無いので Files.meta から引く(2026-10-19)。"""
+        from nucllei.retrieval.utils import get_sources_from_files
+        from nucllei.utils.middleware import build_source_context
+        from nucllei.utils.tool_errors import turn_tools
+
+        text = self._upload(name="memo.txt", content_type="text/plain").json()["id"]
+        audio = self._upload(name="memo.webm").json()["id"]
+        sources = get_sources_from_files(
+            request=None,
+            files=[{"type": "file", "id": text}, {"type": "file", "id": audio}],
+        )
+        fact = "文字が抜き出されていない — 本文はこの会話に入っていない"
+        with turn_tools(["feed_image", "read_attachment"]):
+            lines = build_source_context(sources).split("\n")
+        assert lines == [
+            f'<source file_id="{text}" name="memo.txt" extraction="none">'
+            f'({fact}。次の手: 中身は read_attachment(file_id="{text}") で読める)</source>',
+            f'<source file_id="{audio}" name="memo.webm" extraction="none">'
+            f"({fact}。次の手: 中身が要るなら、PDF のページは feed_image で見る。"
+            "read_attachment では読めない)</source>",
+        ]
+
+    def test_payload_names_only_the_tools_of_the_turn(self, monkeypatch):
+        """process_chat_payload が組む `<source>` の次の手は、このターンでモデルに出す tool
+        (tools_dict)だけを名指しする(2026-10-19 llens 監査 (3) / (13))。"""
+        import asyncio
+        import types
+
+        from starlette.requests import Request
+
+        from nucllei.main import app
+        from nucllei.utils import middleware
+
+        plain = self._upload(name="memo.webm").json()["id"]
+
+        async def feed_image(ref: str = ""):
+            return ""
+
+        def fake_get_tools(request, tool_ids, user, extra_params, **kwargs):
+            return {
+                "feed_image": {
+                    "callable": feed_image,
+                    "spec": {
+                        "name": "feed_image",
+                        "parameters": {"properties": {"ref": {"type": "string"}}},
+                    },
+                }
+            }
+
+        monkeypatch.setattr(middleware, "get_tools", fake_get_tools)
+        model = {
+            "id": "tp",
+            "name": "tp",
+            "owned_by": "openai",
+            "info": {"meta": {"toolIds": ["builtin_feed_image"]}},
+        }
+        user = types.SimpleNamespace(
+            id="1", name="Taro", email="t@example.invalid", role="admin", info=None
+        )
+        saved_models = getattr(app.state, "MODELS", None)
+        app.state.MODELS = {"tp": model}
+        try:
+            request = Request(
+                scope={
+                    "type": "http",
+                    "app": app,
+                    "method": "POST",
+                    "path": "/api/chat/completions",
+                    "headers": [],
+                    "query_string": b"",
+                }
+            )
+            form_data = {
+                "model": "tp",
+                "stream": True,
+                "messages": [{"role": "user", "content": "読んで"}],
+                "files": [{"type": "file", "id": plain}],
+            }
+            form_data, metadata, _ = asyncio.run(
+                middleware.process_chat_payload(
+                    request,
+                    form_data,
+                    user,
+                    {"user_id": "1", "model": model},
+                    model,
+                    None,
+                )
+            )
+        finally:
+            app.state.MODELS = saved_models
+
+        system = form_data["messages"][0]
+        assert system["role"] == "system"
+        assert (
+            f'<source file_id="{plain}" name="memo.webm" extraction="none">'
+            "(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: 中身が要るなら、"
+            "PDF のページは feed_image で見る)</source>"
+        ) in system["content"]
+        assert "send_to_workspace" not in system["content"]
 
     def test_source_tag_of_a_split_recording_carries_part(self):
         # 長い録音が 2 本に分かれたとき: どれを読み直すか決められるよう、全ファイルに
@@ -187,12 +291,12 @@ class TestFileDictation(AbstractPostgresTest):
         lines = build_source_context(sources).split("\n")
 
         assert lines[0].startswith(
-            f'<source id="1" file_id="{first}" dictation="true" part="1" parts="2" '
-            'extraction="none">'
+            f'<source file_id="{first}" name="rec.webm" dictation="true" part="1" '
+            'parts="2" extraction="none">'
         )
         assert lines[1].startswith(
-            f'<source id="2" file_id="{second}" dictation="true" part="2" parts="2" '
-            'extraction="none">'
+            f'<source file_id="{second}" name="rec.webm" dictation="true" part="2" '
+            'parts="2" extraction="none">'
         )
 
 
@@ -235,13 +339,125 @@ def test_build_source_context_attributes():
             ],
         },
     ]
-    none_body = "(テキスト抽出されていない。次の手: 中身が要るなら file_id を受ける tool に渡す)"
+    # ターンの tool が立っていない(名指しできる tool が無い)ときは事実だけ。
+    # failed の例外の文(「失敗の理由」)はモデルに出さない(log にだけ残す)
+    none_body = "(文字が抜き出されていない — 本文はこの会話に入っていない)"
     assert build_source_context(sources).split("\n") == [
-        '<source id="1" file_id="a">本文</source>',
-        '<source id="2" file_id="b" extraction="failed">失敗の理由</source>',
-        f'<source id="3" file_id="c" dictation="true" extraction="none">{none_body}</source>',
-        '<source id="4" file_id="d" dictation="true">書き起こし</source>',
-        '<source id="5" file_id="e" dictation="true" part="2" parts="3" extraction="none">'
+        '<source file_id="a">本文</source>',
+        f'<source file_id="b" extraction="failed">{none_body}</source>',
+        f'<source file_id="c" dictation="true" extraction="none">{none_body}</source>',
+        '<source file_id="d" dictation="true">書き起こし</source>',
+        '<source file_id="e" dictation="true" part="2" parts="3" extraction="none">'
         f"{none_body}</source>",
-        f'<source id="6" file_id="f" dictation="true" extraction="none">{none_body}</source>',
+        f'<source file_id="f" dictation="true" extraction="none">{none_body}</source>',
     ]
+
+
+def test_build_source_context_name_attribute_is_escaped():
+    """`name=` はファイル名(属性値としてエスケープ)。連番の `id=` は載せない。"""
+    from nucllei.utils.middleware import build_source_context
+
+    sources = [
+        {
+            "document": ["本文"],
+            "metadata": [
+                {
+                    "file_id": "a",
+                    "name": 'a"b<c>&d.pdf',
+                    "extraction_status": "success",
+                }
+            ],
+        }
+    ]
+    assert build_source_context(sources) == (
+        '<source file_id="a" name="a&quot;b&lt;c&gt;&amp;d.pdf">本文</source>'
+    )
+
+
+def test_no_text_note_names_only_tools_in_turn():
+    """本文の無い添付の次の手は、このターンに出ている tool だけを名指しする(llens 監査 (3) / (13))。"""
+    from nucllei.utils.middleware import build_source_context
+    from nucllei.utils.tool_errors import turn_tools
+
+    sources = [
+        {
+            "document": ["", "Traceback: /srv/secret/path"],
+            "metadata": [
+                {"file_id": "n", "extraction_status": None},
+                {"file_id": "f", "extraction_status": "failed"},
+            ],
+        }
+    ]
+    only_none = [
+        {"document": [""], "metadata": [{"file_id": "n", "extraction_status": None}]}
+    ]
+    fact = "文字が抜き出されていない — 本文はこの会話に入っていない"
+
+    with turn_tools(["feed_image", "send_to_workspace", "read_attachment"]):
+        lines = build_source_context(sources).split("\n")
+    full = (
+        f"({fact}。次の手: 中身が要るなら、PDF のページは feed_image で見て、"
+        "加工・変換は send_to_workspace で取り込む。read_attachment では読めない)"
+    )
+    assert lines == [
+        f'<source file_id="n" extraction="none">{full}</source>',
+        f'<source file_id="f" extraction="failed">{full}</source>',
+    ]
+    assert "secret" not in "\n".join(lines)
+
+    with turn_tools(["feed_image"]):
+        assert build_source_context(only_none) == (
+            f'<source file_id="n" extraction="none">({fact}。次の手: 中身が要るなら、'
+            "PDF のページは feed_image で見る)</source>"
+        )
+    with turn_tools(["send_to_workspace", "run_python"]):
+        assert build_source_context(only_none) == (
+            f'<source file_id="n" extraction="none">({fact}。次の手: 中身が要るなら、'
+            "加工・変換は send_to_workspace で取り込む)</source>"
+        )
+    with turn_tools(["read_attachment"]):
+        assert build_source_context(only_none) == (
+            f'<source file_id="n" extraction="none">({fact}。次の手: '
+            "read_attachment では読めない)</source>"
+        )
+
+
+def test_no_text_note_text_type_points_to_read_attachment():
+    """none で content_type が text 系なら read_attachment で読めると書く。判定は
+    read_attachment と同じ関数(`attachment_text._is_text_ct`)。failed は text 系でも
+    「読めない」のまま(read_attachment も outcome で断る)。"""
+    from nucllei.utils.middleware import build_source_context
+    from nucllei.utils.tool_errors import turn_tools
+
+    fact = "文字が抜き出されていない — 本文はこの会話に入っていない"
+
+    def one(ct, status=None):
+        return [
+            {
+                "document": [""],
+                "metadata": [
+                    {"file_id": "t", "extraction_status": status, "content_type": ct}
+                ],
+            }
+        ]
+
+    with turn_tools(["feed_image", "send_to_workspace", "read_attachment"]):
+        for ct in ("text/plain", "text/csv", "application/json", "application/ld+json"):
+            assert build_source_context(one(ct)) == (
+                f'<source file_id="t" extraction="none">({fact}。次の手: 中身は '
+                'read_attachment(file_id="t") で読める。'
+                "加工・変換は send_to_workspace で取り込む)</source>"
+            ), ct
+        assert build_source_context(one("text/plain", "failed")) == (
+            f'<source file_id="t" extraction="failed">({fact}。次の手: 中身が要るなら、'
+            "PDF のページは feed_image で見て、加工・変換は send_to_workspace で取り込む。"
+            "read_attachment では読めない)</source>"
+        )
+        assert "read_attachment では読めない" in build_source_context(
+            one("application/pdf")
+        )
+    # read_attachment がこのターンに無ければ名指ししない
+    with turn_tools(["feed_image"]):
+        assert build_source_context(one("text/plain")) == (
+            f'<source file_id="t" extraction="none">({fact})</source>'
+        )

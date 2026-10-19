@@ -542,3 +542,28 @@ subagent の所要時間調査(1 応答に子 2 本 / background + await_task �
 - 画像・音声・動画は `fetch_from_workspace` の添付と同時に画面に表示され、戻り値が「既に表示されている。
   本文に貼り直さない」と言う。それ以外はファイル一覧に添付され、戻り値が本文に書くリンクを示す。
 - 詳細(exports/ の扱い・meta.source)は `_memos/builtin-tools.md`「exports/ の自動添付の廃止」。
+
+## 追補 10(2026-10-19、llens 監査)— モデル向けの案内と、runner が名指しする tool
+
+- **runner は spawn したターンの tool 一覧を持ち越す**: ERROR・次の手で別の tool を名指しするのは、そのターンで
+  モデルに出ている tool だけになった(`tool_errors.tool_in_turn`、`builtin-tools.md`「モデル向け文面の監査」)。
+  runner は別 task なので、`spawn_execution` が `current_turn_tools()` を取り、`_run_execution(turn_tool_names=…)`
+  が `set_turn_tools` / `reset_turn_tools` で立て直す(同期実行と同じ文面になる)。
+- **spawn 直後の running 形に `note`**:「バックグラウンドで実行を始めた (まだ結果は無い)。次の手: 結果は完了時に
+  通知で届くので、待たずに別の作業を進める。今すぐ要るときだけ await_task で受け取る。」(後半は await_task が
+  ターンにあるときだけ)。FE は task_id / status で封筒を判定するのでキーが増えても変わらない。
+- **stop_task の per-entry `note`**: 止める前に done / failed だった行は「止める前に終わっていた (止めていない)。
+  次の手: 結果が要るなら await_task で受け取る。」— stop_task の報告で delivered になり、通知では届かないため。
+  orphaned は行の error(ORPHANED_ERROR)を添える。説明の「撃って」→「指定しても今の状態を返すだけで、何も
+  変えない (その結果は await_task で受け取る)」。
+- **ORPHANED_ERROR** に status の意味を足した(「実行中にサーバーが再起動し、このタスクは途中で失われた
+  (status の orphaned はこの意味。結果は無い)」)。check_task の include_done の説明にも orphaned の意味。
+- **await_task** の「running が返ったら…報告してターンを終えること」→「まだ実行中だとユーザーに伝えて応答を
+  終える (結果は完了時に届くので、待つために呼び直さない)」。
+- **切詰めの印(T5)** の次の手は tool の spec の引数で出し分け(offset / query / どちらも無ければ「出力を絞るか、
+  ファイルに書いて read_file で読む」— read_file はターンにあるときだけ)。`truncate_tool_result(text, spec)`。
+- **multi-worker** の拒否文は内部語をやめ「このサーバーの構成では background 実行を使えない」。ユーザーごとの
+  上限の次の手は await_task / stop_task のうちターンにあるものだけ名指し。
+- 同期タイムアウトの「background: true で呼び直す」は、その tool にそのターンで background を付けられるときだけ
+  (単独 background の同期降格は既に background の上限で走ったので勧めない)。
+- `[task]` 通知の「fetch_from_workspace が使えるなら」は残す(通知を組む時点で続きターンの tool が未定)。

@@ -102,7 +102,8 @@ def test_one_failure_does_not_cancel_its_siblings():
     # 例外は型名 + 先頭 200 字 + 次の手 (2026-10-04 llens 監査 B5)
     assert results[0]["content"] == (
         "ERROR: ツール boom の実行中にエラーが起きた (RuntimeError: 壊れた)。"
-        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+        "次の手: 引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は"
+        "使わずに進め、ユーザーには失敗したことを伝える。"
     )
     assert "タイムアウト" in results[1]["content"]
     assert results[2]["content"] == "完走"
@@ -218,7 +219,8 @@ def test_tool_exception_text_keeps_only_class_and_200_chars():
 
     assert tool_exception_text("t", ValueError()) == (
         "ERROR: ツール t の実行中にエラーが起きた (ValueError)。"
-        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+        "次の手: 引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は"
+        "使わずに進め、ユーザーには失敗したことを伝える。"
     )
     long = tool_exception_text("t", RuntimeError("x" * 500))
     assert f"(RuntimeError: {'x' * 200})。" in long and "x" * 201 not in long

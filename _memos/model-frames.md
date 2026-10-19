@@ -179,3 +179,7 @@ kimi-k2.6 は llens の SGLang 透過なので、届くフレームは**素の�
   (tool の name 等)は英語** — 「モデルが読む文字列」だけがこの規約の対象。
 - backend の HTTPException detail(例: files.py のアップロード拒否)は FE の
   i18n を通らず素通しでトーストに出るため、これも日本語のまま(ユーザー向け)。
+- 2026-10-19(llens 監査)に残っていた英語を直した: 画像の代わりの注記「(image unavailable)」→
+  「(ここにあった画像は読み込めなかった — 中身は見えていない)」、`{{CURRENT_WEEKDAY}}`(strftime の %A —
+  ロケール次第で英語)→ 日本語の曜日。sandbox の `/exec_cell` の error は敬体 → 常体
+  (tool の文は常体 — README_API §5.1)。

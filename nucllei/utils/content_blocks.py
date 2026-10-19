@@ -14,6 +14,13 @@ from nucllei.utils.image_refs import stored_ref_kind
 # chat-messages.ts expandAssistantToolHistory と同文 — 中断で途切れた履歴の修復)
 INTERRUPTED_TOOL_RESULT = "[interrupted: this tool call produced no result]"
 
+# tool 結果の画像を運ぶ user メッセージの text パート(FE chat-messages.ts の
+# TOOL_RESULT_IMAGES_TEXT と同文 — 共有 fixture history_wire/context_images.json で固定)。
+# role は user なので、ユーザーの添付と取り違えないことを本文で言う(2026-10-19 llens 監査)
+TOOL_RESULT_IMAGES_TEXT = (
+    "(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)"
+)
+
 
 def serialize_text_blocks(content_blocks: list) -> str:
     """text ブロックのみを join した派生 content。
@@ -247,7 +254,7 @@ def convert_content_blocks_to_messages(
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "(直前の tool 結果の画像)"},
+                            {"type": "text", "text": TOOL_RESULT_IMAGES_TEXT},
                             *(
                                 {"type": "image_url", "image_url": {"url": url}}
                                 for url in result_image_urls

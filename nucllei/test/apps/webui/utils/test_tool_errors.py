@@ -95,7 +95,8 @@ def test_from_text_splits_at_the_first_next():
 def test_tool_exception_text_is_a_failure_sentence():
     assert tool_exception_text("t", ValueError("x" * 500)) == (
         f"ERROR: ツール t の実行中にエラーが起きた (ValueError: {'x' * 200})。"
-        "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+        "次の手: 引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は"
+        "使わずに進め、ユーザーには失敗したことを伝える。"
     )
 
 
@@ -274,20 +275,32 @@ def test_timeout_is_a_failure():
 
     results = _run([_call("{}")], _tool(probe, timeout=0.05))
     assert results[0]["error_kind"] == "failure"
+    # background を付けられない tool(この probe は backgroundable でない)には勧めない
+    # (2026-10-19 llens 監査 (6))。付けられる場合は test_timeout_offers_background_*
     assert results[0]["content"] == (
         "ERROR: ツール probe の実行が 0.05 秒の上限でタイムアウトした。"
-        "次の手: 入力を小さく分けて呼び直す。分単位かかる処理で background を付けられるなら"
-        " background: true で呼び直す。"
+        "次の手: 入力を小さく分けて呼び直す。"
     )
 
 
 def test_unknown_tool_is_a_violation():
     results = _run([_call("{}", name="ghost")], {})
     assert results[0]["error_kind"] == "violation"
+    # load_skill がこのターンに無ければ名指ししない(2026-10-19 llens 監査 (13))
     assert results[0]["content"] == (
         "ERROR: ツール ghost は今は使えない (このターンの一覧に無い)。"
         "次の手: 一覧にある tool だけを使う。"
-        "load_skill が使えて、skill の tool なら先に読み込む。"
+    )
+
+
+def test_unknown_tool_names_load_skill_only_when_it_is_in_the_turn():
+    async def load_skill(name: str = ""):
+        return "ok"
+
+    results = _run([_call("{}", name="ghost")], _tool(load_skill, name="load_skill"))
+    assert results[0]["content"] == (
+        "ERROR: ツール ghost は今は使えない (このターンの一覧に無い)。"
+        "次の手: 一覧にある tool だけを使う。skill の tool なら先に load_skill で読み込む。"
     )
 
 

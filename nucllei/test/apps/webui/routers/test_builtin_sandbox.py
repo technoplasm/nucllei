@@ -396,23 +396,60 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert tool.calls == []  # HTTP を打たずに手前で止まる
 
     def test_timeout_result_says_state_is_kept(self):
-        tool = _sandbox(
-            {
-                "/exec_cell": {
-                    "stdout": "",
-                    "error": None,
-                    "timed_out": True,
-                    "duration_s": 120,
-                }
-            }
-        )
+        tool_res = {
+            "stdout": "",
+            "error": None,
+            "timed_out": True,
+            "duration_s": 120,
+        }
+        tool = _sandbox({"/exec_cell": tool_res})
         out = _arun(
             tool.run_python("while True: pass", __user__={"id": "u1"}, __chat_id__="c1")
         )
         assert (
             "**タイムアウト (セルを中断した。変数・import は残っている)** 次の手: 処理を"
-            "分けるか、timeout_s を上げて続ける。" in out
+            "分けるか、timeout_s を上げて続ける (上限 600 秒)。" in out
         )
+        # 既に上限なら「上げて」とは言わない (2026-10-19 llens 監査 (6))
+        tool = _sandbox({"/exec_cell": tool_res})
+        out = _arun(
+            tool.run_python(
+                "while True: pass",
+                timeout_s=600,
+                __user__={"id": "u1"},
+                __chat_id__="c1",
+            )
+        )
+        assert (
+            "**タイムアウト (セルを中断した。変数・import は残っている)** 次の手: 処理を"
+            "分けて続ける (timeout_s は既に上限の 600 秒)。" in out
+        )
+
+    def test_hard_timeout_reset_says_only_state_is_lost(self):
+        """応答しないセルを sandbox が実行環境ごと落とした (timed_out + session_reset) ときは
+        「変数・import は失われた。次の手: 処理を分けて定義からやり直す」だけを言う — 旧版は
+        「リセットされた」「変数・import は残っている」と sandbox の error 文が 1 つの結果に
+        並んでいた (2026-10-19 llens 監査 (7))。"""
+        tool = _sandbox(
+            {
+                "/exec_cell": {
+                    "stdout": "",
+                    "error": "セルが応答せず中断できないので実行環境を強制終了した"
+                    " (変数・import は失われた)",
+                    "timed_out": True,
+                    "session_reset": True,
+                    "duration_s": 0,
+                }
+            }
+        )
+        out, kind = _flagged(
+            tool.run_python("while True: pass", __user__={"id": "u1"}, __chat_id__="c1")
+        )
+        assert out == (
+            "**タイムアウト (実行環境を強制終了した。変数・import は失われた)**"
+            " 次の手: 処理を分けて定義からやり直す。\n(0s)"
+        )
+        assert kind == "failure"
 
     def test_exec_timeout_names_the_limit_and_the_next_step(self):
         """exec のタイムアウトは効いた秒数 (sandbox の上限で clamp) と上限を言う (A20)。"""
@@ -423,7 +460,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "stderr": "",
             "timed_out": True,
         }
-        for given, n in ((30, 30), (None, 120), (900, 600)):
+        for given, n in ((30, 30), (None, 120)):
             tool = _sandbox({"/exec": res})
             out = _arun(
                 tool.run_shell("sleep 999", timeout_s=given, __user__={"id": "u1"})
@@ -432,6 +469,17 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 f" **タイムアウト (timeout_s={n} 秒を超えたので強制終了した)** 次の手:"
                 " 処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)。" in out
             ), (given, out)
+        # 既に上限 (600 / clamp される 900) なら「上げて」とは言わない (2026-10-19 llens 監査 (6))
+        for given in (600, 900):
+            tool = _sandbox({"/exec": res})
+            out = _arun(
+                tool.run_shell("sleep 999", timeout_s=given, __user__={"id": "u1"})
+            )
+            assert (
+                " **タイムアウト (timeout_s=600 秒を超えたので強制終了した)** 次の手:"
+                " 処理を分けて呼び直す (timeout_s は既に上限の 600 秒)。" in out
+            ), (given, out)
+            assert "上げて" not in out
 
     def test_failed_code_flags_the_result_without_changing_it(self):
         """#145(ken「sandbox の stderr とかは？実行した python のエラーとか」): 実行した
@@ -630,8 +678,11 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         for error in (ConnectionRefusedError("refused"), asyncio.TimeoutError()):
             tool = _sandbox(error=error)
             text, kind = _flagged(tool.run_shell("x", __user__=user))
-            assert text.startswith(
-                "ERROR: sandbox で実行できなかった。次の手: 時間を置いて"
+            # 「時間を置いて」は言わない (2026-10-19 llens 監査 (6))
+            assert text == (
+                "ERROR: sandbox で実行できなかった。次の手: 1 回だけ呼び直す。続くなら"
+                " sandbox を使わずにできる範囲で自分で処理し、無理ならユーザーに sandbox が"
+                "今使えないと伝える。"
             )
             assert kind == "failure"
 
@@ -962,6 +1013,28 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 "outcome",
             ),
             ({"entries": [listed]}, "- /workspace/a.csv (2.0KB)", None),
+            # 件数の上限で打ち切った (sandbox の truncated。2026-10-19 llens 監査)
+            (
+                {
+                    "entries": [listed],
+                    "exists": True,
+                    "is_dir": True,
+                    "truncated": True,
+                },
+                "- /workspace/a.csv (2.0KB)\n1 件で打ち切った。次の手: 下の階層の"
+                "ディレクトリを path に渡して、絞って一覧する。",
+                None,
+            ),
+            (
+                {
+                    "entries": [listed],
+                    "exists": True,
+                    "is_dir": True,
+                    "truncated": False,
+                },
+                "- /workspace/a.csv (2.0KB)",
+                None,
+            ),
         ]
         for res, text, kind in cases:
             tool = _sandbox({"/files/list": res})
@@ -1225,8 +1298,13 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "send_to_workspace(file_id)" in note
         # 消すときは rm せず trash/ の直下へ移す (同じ規則で消える)
         assert "/workspace/trash/" in note and "直下" in note
-        # 例外 (LLENS の記憶・電子カルテの抽出物は rm 等) は配備の system prompt が決める
-        assert "例外は配備の決まり" in note
+        # 例外 (LLENS の記憶・電子カルテの抽出物は rm 等) は配備の system prompt が決める。
+        # 「配備」「Files」はモデルに見せない内部語 (2026-10-19 llens 監査)
+        assert "例外は system prompt の決まりに従う" in note
+        assert "配備" not in note and "Files" not in note
+        # /ext を fetch_from_workspace で扱うとは言わない (パスがそのまま URL。監査 (4))
+        assert "list_workspace でも同じパスで扱える" in note
+        assert "list_workspace / fetch_from_workspace でも" not in note
 
     def test_import_tells_cache_expiry(self, tmp_path):
         """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を
@@ -1303,7 +1381,9 @@ from nucllei.utils.image_refs import (  # noqa: E402
 
 NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
 NO_FILE_NEXT = (
-    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    # ターンの tool が立っていない (chat_files を名指ししない) ときの文 (ref_errors.file_id_error。
+    # 2026-10-19 llens 監査 (13) — 名指しの出し分けは test_ref_errors)
+    "会話に出ている file_id を確かめて渡し直す。"
     "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
 )
 
@@ -1624,7 +1704,10 @@ def test_too_large_reports_actual_size_and_limit(monkeypatch):
     assert result.startswith("ERROR")
     # 実サイズ(Content-Length)と上限(sandbox の上限)の両方。変えるのは配備。リンク切れではないと言う
     assert "3.0MB" in result and "上限 1.0MB" in result
-    assert "sandbox の配備の設定" in result and "最大アップロードサイズ" not in result
+    assert (
+        "上限は sandbox の設定で" in result and "最大アップロードサイズ" not in result
+    )
+    assert "配備" not in result
     assert "少なくとも" not in result
     assert "リンク切れではない" in result
     assert env.writes == []
@@ -1717,9 +1800,25 @@ def test_url_import_sandbox_errors(monkeypatch):
     env.raw_error = SandboxHTTPError(
         413, '{"detail":"file too large: 4 bytes (limit 3)"}'
     )
+    from nucllei.utils.tool_errors import turn_tools
+
     out = env.run(url=f"{INTRA}/a.bin")
     assert out.startswith("ERROR") and "取り込みの上限" in out
-    assert "sandbox の配備の設定" in out
+    assert "上限は sandbox の設定で" in out and "配備" not in out
+    # 次の手で別の toolkit の tool を名指しするのは、このターンに出ている物だけ (監査 (13))
+    assert out.endswith("次の手: sandbox には取り込めないとユーザーに伝える。"), out
+    assert "fetch_url" not in out and "feed_image" not in out and "あれば" not in out
+    with turn_tools(["fetch_url", "feed_image"]):
+        out = env.run(url=f"{INTRA}/a.bin")
+    assert out.endswith(
+        "次の手: sandbox に入れずに、同じ url を fetch_url (ページ・文書)・"
+        "feed_image (画像・PDF) に渡して読む。読めなければユーザーに伝える。"
+    ), out
+    with turn_tools(["feed_image"]):
+        out = env.run(url=f"{INTRA}/a.bin")
+    assert (
+        "同じ url を feed_image (画像・PDF) に渡して" in out and "fetch_url" not in out
+    )
     env.raw_error = SandboxHTTPError(507, "workspace quota exceeded")
     out = env.run(url=f"{INTRA}/a.bin")
     assert out.startswith("ERROR") and "容量 (quota) が一杯" in out
@@ -1741,8 +1840,8 @@ def test_failure_reasons_are_told_apart(monkeypatch):
         (httpx.Response(404), ("存在しない", "リンク切れ")),
         # Location の無い 3xx は辿れない redirect
         (httpx.Response(302), ("redirect", "302")),
-        (httpx.Response(401), ("上流が 401",)),
-        (httpx.Response(503), ("上流が 503",)),
+        (httpx.Response(401), ("HTTP 401",)),
+        (httpx.Response(503), ("HTTP 503",)),
     ]
     for response, expected in cases:
         env = _UrlEnv(monkeypatch, lambda r, response=response: response)
@@ -1799,9 +1898,13 @@ def test_mounted_file_returns_path_without_copy(monkeypatch, tmp_path):
     _set_limit_mb(monkeypatch, 0.000001)
     result = env.run(url="https://llens.test/ext/cage/static/%E5%9B%B3/a.png")
     assert not result.startswith("ERROR")
-    assert "取り込み不要" in result
-    assert "/ext/cage/static/図/a.png" in result and str(root) not in result
-    assert "run_python / run_shell" in result
+    # 「(read-only)」は言わない — /ext/groups 等の書ける置き場もある (2026-10-19 llens 監査 (4))
+    assert result == (
+        "取り込み不要: https://llens.test/ext/cage/static/%E5%9B%B3/a.png は sandbox から"
+        "同じパス /ext/cage/static/図/a.png で見えているので取り込まない。"
+        "次の手: run_python / run_shell でそのパスを開く。"
+    )
+    assert str(root) not in result
     assert env.writes == [] and env.gets == []
 
 
@@ -2062,10 +2165,10 @@ def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_
         out = env.fetch(missing)
         # 本当に無いか、配備の mount のずれ (sandbox にだけ mount)。「渡さない」とも
         # 「/workspace にコピーして渡す」とも言わない (ken 2026-10-04: /ext は URL で見せる
-        # だけ — 同じ組を nucllei と sandbox に mount する)
+        # だけ — 同じ組を nucllei と sandbox に mount する)。「mount」はモデルに見せない (2026-10-19)
         assert out == (
-            f"ERROR: {missing} はこのサーバの /ext に無い (存在しないか、sandbox にだけ"
-            " mount されている)。次の手: 中身が要るなら sandbox で読んで使う。"
+            f"ERROR: {missing} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけ"
+            "ある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。"
         ), missing
         assert "渡さない" not in out and "コピー" not in out, missing
         # URL(markdown のリンク / 画像記法)も file_id も出ない(パスの echo は出る)
@@ -2142,24 +2245,66 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
 def test_fetch_from_workspace_spec_mentions_both_outcomes():
     """モデルに見える説明(docstring の :param より前)と引数。引数は path だけ。
     2026-10-19: ユーザーへ渡す経路はこれ一本 (exports/ の自動添付は廃止)。`/ext/…` は
-    パスがそのまま URL なので呼ばずにリンクを書いてよい (呼べば配信されているリンクを返す)。"""
+    パスがそのまま URL なので呼ばずにリンクを書く (言い切り。「呼んだ場合は…」と LLENS の語
+    「doc の出典」は消した — 同日 llens 監査 (4))。"""
     from nucllei.builtin_tools.sandbox import Tools
     from nucllei.utils.tools import get_tool_specs
 
     description = Tools.fetch_from_workspace.__doc__.split(":param")[0]
     assert "ユーザーに渡すときに使う" in description and "添付" in description
+    flat = description.replace("\n", "").replace("        ", "")
     assert (
-        "/ext/" in description
-        and "呼ばずにそのパスで本文にリンクを書いてよい" in description
+        "`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。"
+        in flat
     )
+    assert "呼んだ場合" not in flat and "書いてよい" not in flat
+    assert "doc" not in flat and "別表記" not in flat
     assert "exports" not in description
     spec = next(
         s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )
     assert list(spec["parameters"]["properties"]) == ["path"]
     assert "/ext/" in spec["parameters"]["properties"]["path"]["description"]
-    # 橋渡しで返る URL は percent-encode される(本文の URL と別表記になりうる)
-    assert "別表記" in description
+    # docstring の例パスは消した (モデルが例のパスをそのまま使う。監査 (5))
+    assert "例:" not in spec["parameters"]["properties"]["path"]["description"]
+
+
+def test_docstrings_drop_example_paths_and_internal_words():
+    """2026-10-19 llens 監査 (4)(5)(11) と軽微: モデルに見える spec (get_tool_specs の出力) から
+    例のパスと内部語 (jail・Files・配備・mount) を外し、write_file に管理者の権限を書き、
+    run_shell の展開は unar を挙げ、send_to_workspace の `/ext` は実装どおりに言う。"""
+    from nucllei.builtin_tools.sandbox import Tools
+    from nucllei.utils.tools import get_tool_specs
+
+    specs = {s["name"]: s for s in get_tool_specs(Tools())}
+
+    def path_desc(name):
+        return specs[name]["parameters"]["properties"]["path"]["description"]
+
+    for name in ("write_file", "read_file", "fetch_from_workspace"):
+        assert "例:" not in path_desc(name), name
+    assert "/workspace/work/" not in path_desc("write_file")
+    assert "/workspace/out/" not in path_desc("fetch_from_workspace")
+    # write_file: 管理者はすべてのグループの置き場と /ext/public/ に書ける (クラス docstring と同じ言い方)
+    assert (
+        "(管理者はすべてのグループの置き場と `/ext/public/…` にも書ける)"
+        in path_desc("write_file")
+    )
+    assert "unar (書庫の展開) / zip" in specs["run_shell"]["description"]
+    assert "unzip" not in specs["run_shell"]["description"]
+    send = specs["send_to_workspace"]["description"].replace("\n", "")
+    assert "jail" not in send
+    assert "サーバが中継する資料は imports/ にコピーする" in send
+    for spec in specs.values():
+        text = json_dumps(spec)
+        for word in ("jail", "Files", "配備", "mount"):
+            assert word not in text, (spec["name"], word)
+
+
+def json_dumps(obj):
+    import json
+
+    return json.dumps(obj, ensure_ascii=False)
 
 
 def test_reference_params_are_described_in_fixed_words():

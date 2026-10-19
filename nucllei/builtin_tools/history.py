@@ -17,7 +17,7 @@ from nucllei.utils.misc import (
     get_message_list,
     get_messages_content,
 )
-from nucllei.utils.tool_errors import ToolCallError
+from nucllei.utils.tool_errors import ToolCallError, ToolFailure
 from nucllei.utils.tool_render import Markdown
 
 MAX_LIMIT = 50
@@ -80,7 +80,8 @@ def _fmt_time(epoch: Optional[int]) -> str:
 def _require_user_id(__user__: Optional[dict]) -> str:
     user_id = (__user__ or {}).get("id")
     if not user_id:
-        raise ValueError("ユーザーを特定できないので履歴は読めない。")
+        # 失敗は ToolError で返す (README_API §5.1。旧: ValueError = 汎用の例外経路で fatal 扱い)
+        raise ToolFailure("ユーザーを特定できないので履歴は読めない")
     return user_id
 
 

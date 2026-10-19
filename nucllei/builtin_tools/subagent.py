@@ -9,7 +9,14 @@ tool 行の read ACL(AccessControlModal)も `meta.toolIds` の割り当ても効
 二層:
 - **使えるか** = この builtin 行の access_control + 親 preset の `meta.toolIds`
   (get_tools の per-user enforce)。旧 `meta.features.subagent` はここへ吸収して撤去
-  (migration `e7b3c90d2f14`)
+  (migration `e7b3c90d2f14`)。もう 1 つの経路が **skill**: skill の frontmatter
+  `tool_ids` に `builtin_subagent` を入れると load_skill で生える(middleware の
+  `inject_skill_tools` → `get_tools(enforce_access_control=False)`、次のターンは
+  `utils/skills.replay_skill_tool_ids`)。この経路では Tools 行の ACL は効かず、認可は
+  「親 preset の `meta.skillIds` ∧ skill の read 可視性(admin も特別扱いしない)」。
+  どちらの経路も前提は親 preset の `meta.subagentPresetIds` が空でないこと(下の
+  `available`)。子ターンは depth 判定で生えない(2026-10-19 llens 確認。FE の
+  SubagentPresetsSelector も skill 経由を数える)
 - **どこへ飛べるか** = 親 preset の `meta.subagentPresetIds` ∩ アクセス可 preset
   (`utils/subagent.py` — 変更なし)
 
@@ -50,7 +57,7 @@ class Tools:
     - 使う: 長大な資料・多数のページを読んで結論だけ欲しいとき / 互いに独立した調べものを並行させたいとき
     - 使わない: 自分で数手で済む作業、会話の流れに強く依存する判断(子はこの会話を見ていない)
     - instruction は単独で完結させる: 目的・対象・返してほしい形を書く。開かせたいもの(/workspace や /ext のパス・URL・file_id・doc の path)は受け取った形のまま書き、中身は貼らない
-    - 並行させるなら 1 回の応答の中に tool call を並べる(同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true(結果は完了時に通知で届く。今すぐ要るときだけ await_task)。同時 4 本まで・超過は即エラー — 5 本以上なら 4 本ずつ、先の分がそろってから次
+    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。sandbox で実行する tool は並べても同時には走らず、1 本ずつ順番に走る。待たずに別の作業を進めたいときだけ background: true(結果は完了時に通知で届く。今すぐ要るときだけ await_task)。同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も数える)・超過は即エラー — 5 本以上なら 4 本ずつ、先の分がそろってから次
     - 結果は子のまとめであって原文ではない。根拠が要る点・食い違いは自分で確かめる。追加の質問は session_id で同じ子に続ける
     """
 
@@ -134,7 +141,8 @@ def _base_description() -> str:
 # 食い違わないよう、既定値以外ならクラス docstring の数値を差し替える。
 if SUBAGENT_MAX_CONCURRENCY != 4:
     Tools.__doc__ = (Tools.__doc__ or "").replace(
-        "同時 4 本まで・超過は即エラー — 5 本以上なら 4 本ずつ",
-        f"同時 {SUBAGENT_MAX_CONCURRENCY} 本まで・超過は即エラー — "
-        f"{SUBAGENT_MAX_CONCURRENCY + 1} 本以上なら {SUBAGENT_MAX_CONCURRENCY} 本ずつ",
+        "サーバー全体で 4 本まで(ほかの利用者の分も数える)・超過は即エラー — 5 本以上なら 4 本ずつ",
+        f"サーバー全体で {SUBAGENT_MAX_CONCURRENCY} 本まで(ほかの利用者の分も数える)・"
+        f"超過は即エラー — {SUBAGENT_MAX_CONCURRENCY + 1} 本以上なら "
+        f"{SUBAGENT_MAX_CONCURRENCY} 本ずつ",
     )

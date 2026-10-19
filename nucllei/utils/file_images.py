@@ -66,7 +66,9 @@ from nucllei.env import SRC_LOG_LEVELS
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
-UNAVAILABLE_IMAGE_TEXT = "(image unavailable)"
+# 画像の代わりに置く注記(2026-10-19 llens 監査 — 英語の「(image unavailable)」をやめた。理由は
+# 言い分けない — 存在の有無を漏らさない。理由は log に残る)
+UNAVAILABLE_IMAGE_TEXT = "(ここにあった画像は読み込めなかった — 中身は見えていない)"
 
 
 class _Note(str):

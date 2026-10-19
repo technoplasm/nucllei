@@ -340,7 +340,8 @@ class TestExecutionResume(AbstractPostgresTest):
         assert (
             "task_id: o1 (probe)\n"
             "status: orphaned\n"
-            "note: サーバーの再起動で結果が失われた。次の手: 読むだけの"
+            "note: 実行中にサーバーが再起動し、このタスクは途中で失われた (status の orphaned は"
+            "この意味。結果は無い)。次の手: 読むだけの"
             "処理なら同じ引数で呼び直す。書き込みや送信を伴う処理は、結果が残っていないか"
             "確かめてから呼び直すかを決める。" in text
         )

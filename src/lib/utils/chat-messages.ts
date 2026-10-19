@@ -43,7 +43,8 @@ export type WireMessage = {
 };
 
 // tool 結果の画像を運ぶ user メッセージの text パート(content_blocks.py と同文)
-const TOOL_RESULT_IMAGES_TEXT = '(直前の tool 結果の画像)';
+const TOOL_RESULT_IMAGES_TEXT =
+	'(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)';
 
 // context_images のエントリ → image_url の url(content_blocks.py と同分岐):
 // スキーム付き URL と "/" 始まり(fs 参照・"/api/v1/files/{id}/content#page=N")は

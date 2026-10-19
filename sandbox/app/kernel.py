@@ -107,9 +107,9 @@ def _run(code: str, timeout: float) -> dict:
                 print(repr(val))
     except _CellTimeout:
         timed_out = True
-        err = f"CellTimeout: セルが {timeout:g} 秒の上限を超えたため中断しました"
+        err = f"CellTimeout: セルが {timeout:g} 秒の上限を超えたので中断した"
     except SystemExit:
-        err = "SystemExit (無視しました。プロセスは継続します)"
+        err = "SystemExit (無視した — プロセスは続いている)"
     except BaseException:
         err = _format_error()
     finally:

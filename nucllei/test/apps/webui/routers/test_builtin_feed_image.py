@@ -22,6 +22,7 @@ max_pages の打ち切り、**File を 1 件も作らない** (Storage / Files �
 import asyncio
 import types
 
+import pytest
 from test.util.tool_errors import call_error, call_text
 
 from nucllei.utils.image_refs import (
@@ -30,6 +31,30 @@ from nucllei.utils.image_refs import (
     URL_ARG_FORM,
     RefError,
 )
+from nucllei.utils.tool_errors import turn_tools
+
+# 次の手で別の tool を名指しするのは、このターンに出ている tool だけ (2026-10-19 llens 監査 (13))。
+# 既定は全部出ている前提で文面を見る。無いときの出し分けは `turn_tools([...])` を入れ子にして見る
+ALL_TOOLS = (
+    "feed_image",
+    "fetch_url",
+    "run_subagent",
+    "read_attachment",
+    "list_chat_files",
+    "grep_chat_files",
+    "run_python",
+    "run_shell",
+    "send_to_workspace",
+    "fetch_from_workspace",
+    "list_workspace",
+    "read_file",
+)
+
+
+@pytest.fixture(autouse=True)
+def _all_tools_in_turn():
+    with turn_tools(ALL_TOOLS):
+        yield
 
 
 def _mod():
@@ -147,12 +172,11 @@ URL_FORM_ONLY = f"次の手: {URL_ARG_FORM}"
 PATH_FORM_ONLY = f"次の手: {PATH_ARG_FORM}"
 NO_FILE = "のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)"
 NO_FILE_NEXT = (
-    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "list_chat_files か grep_chat_files でこのチャットの file_id を確かめて渡し直す。"
     "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
 )
 SHOW_PATH = (
-    "fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を渡し、"
-    "その戻り値に従う。"
+    "ユーザーに見せるときは fetch_from_workspace に path を渡し、その戻り値に従う。"
 )
 LINK_HINT = "ユーザーに示すなら [ラベル]("
 
@@ -765,12 +789,27 @@ def test_unreachable_on_a_sandbox_path_does_not_talk_about_urls(monkeypatch):
     result = _explained(
         monkeypatch, "upstream_unreachable", ref="/workspace/out/plot.png"
     )
-    # 確かめ方は専用の list_workspace (/workspace)。/ext は list_workspace で見られないので ls
-    assert LINK_HINT not in result and "list_workspace が使えるなら" in result
+    # 確かめ方はこのターンにある list_workspace / run_shell (/workspace も /ext も同じ)
+    listing = (
+        "次の手: list_workspace か run_shell で親ディレクトリを一覧してパスを確かめる。"
+    )
+    assert LINK_HINT not in result and result.endswith(listing)
     result = _explained(
         monkeypatch, "upstream_unreachable", ref="/ext/a/plot.png", arg="path"
     )
-    assert LINK_HINT not in result and "run_shell が使えるなら ls" in result
+    assert LINK_HINT not in result and result.endswith(listing)
+    with turn_tools(["list_workspace"]):
+        result = _explained(
+            monkeypatch, "upstream_unreachable", ref="/workspace/out/plot.png"
+        )
+    assert result.endswith(
+        "次の手: list_workspace で親ディレクトリを一覧してパスを確かめる。"
+    )
+    with turn_tools([]):
+        result = _explained(
+            monkeypatch, "upstream_unreachable", ref="/workspace/out/plot.png"
+        )
+    assert "次の手" not in result and result.endswith("一時的な障害)。")
 
 
 def test_image_over_the_image_cap_tells_how_to_shrink_by_ref_shape(monkeypatch):
@@ -792,12 +831,28 @@ def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch):
         and "次の手: ユーザーにはリンク切れと伝える。" in result
     )
     result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
-    # `/ext/…` は fetch_from_workspace と同文 (ken 2026-10-04)
+    # `/ext/…` は literal を書き換えていないかをまず確かめさせる。mount の話はしない
+    # (2026-10-19 llens 監査 (6))
     assert fed == [] and result == (
-        "ERROR: /ext/cage/static/missing.png はこのサーバの /ext に無い (存在しないか、"
-        "sandbox にだけ mount されている)。次の手: 中身が要るなら sandbox で読んで使う。"
+        "ERROR: /ext/cage/static/missing.png は存在しない。次の手: 受け取った literal のまま"
+        "渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。"
     )
-    assert "リンク切れ" not in result
+    assert "リンク切れ" not in result and "mount" not in result
+    with turn_tools(["run_shell"]):
+        result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
+    assert result.endswith("確かめ、run_shell で親ディレクトリを一覧する。")
+    with turn_tools([]):
+        result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
+    assert result.endswith("次の手: 受け取った literal のまま渡したか確かめる。")
+    # `/workspace/…` は親ディレクトリの一覧だけ
+    result, fed, _r = _run(monkeypatch, path="/workspace/out/missing.png")
+    assert result == (
+        "ERROR: /workspace/out/missing.png は存在しない。次の手: list_workspace か run_shell"
+        " で親ディレクトリを一覧してパスを確かめる。"
+    )
+    with turn_tools([]):
+        result, fed, _r = _run(monkeypatch, path="/workspace/out/missing.png")
+    assert result == "ERROR: /workspace/out/missing.png は存在しない。"
 
 
 def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch):
@@ -815,15 +870,17 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch):
 
 
 def test_server_error_status_suggests_retry_or_handing_over_the_url(monkeypatch):
-    for status in (500, 503, 403):
+    # 文面は utils/ref_errors (2026-10-19 llens 監査 (6) で status ごとに言い分けた — 5xx だけ
+    # 1 回呼び直す。「上流」「時間を置いて」は言わない)
+    for status in (500, 503):
         result = _explained(monkeypatch, "upstream_status", status=status)
-        assert f"上流が {status} を返した" in result, status
-        assert (
-            "5xx なら時間を置いて 1 回だけ再試行する (401 / 403 などは再試行しない)"
-            in result
-            and LINK_HINT in result
-        ), status
-        assert "redirect" not in result, status
+        assert f"HTTP {status} を返した" in result, status
+        assert "次の手: 1 回だけ呼び直し、同じならやめる。" in result, status
+        assert LINK_HINT in result and "redirect" not in result, status
+        assert "上流" not in result and "時間を置いて" not in result, status
+    result = _explained(monkeypatch, "upstream_status", status=403)
+    assert "HTTP 403 を返した" in result and "次の手: 呼び直しても同じ。" in result
+    assert LINK_HINT in result
 
 
 def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(monkeypatch):
@@ -853,11 +910,13 @@ def test_workspace_unavailable_says_sandbox_is_unreachable(monkeypatch):
         ref="/workspace/out/plot.png",
         detail="sandbox down",
     )
+    # 「時間を置いて」は言わない — モデルは時間を置けない (2026-10-19 llens 監査 (6))
     assert result == (
         "ERROR: /workspace/out/plot.png は sandbox のファイルだが、sandbox に繋がらない"
-        " (起動していないか、応答が無い)。次の手: 時間を置いて 1 回だけ呼び直す。"
-        "続くならユーザーに sandbox が使えないと伝える。"
+        " (起動していないか、応答が無い)。次の手: 1 回だけ呼び直す。"
+        "続くなら sandbox を使わずに進め、ユーザーには sandbox が使えないと伝える。"
     )
+    assert "時間を置いて" not in result
     assert "sandbox down" not in result
 
 
@@ -892,14 +951,35 @@ def test_general_url_reasons_have_their_own_text(monkeypatch):
 
 
 def test_non_image_non_pdf_is_an_error_pointing_to_text_tools(monkeypatch):
-    """読めた結果がテキストなら、来た引数に応じた読み方 (path → run_shell、url → fetch_url)。"""
+    """読めた結果がテキストなら、来た引数に応じた読み方 (path → read_file、url → fetch_url)。
+    Office 文書等は sandbox の soffice で PDF にして path= で見せ直す (2026-10-19 llens 監査 (6))。
+    名指しはこのターンにある tool だけ。"""
     result, fed, _r = _run(monkeypatch, path="/ext/cage/doc/a.md")
-    assert fed == [] and result.startswith("ERROR")
-    assert "run_shell" in result and "fetch_url" not in result
+    assert fed == [] and result == (
+        "ERROR: /ext/cage/doc/a.md は画像でも PDF でもない (content-type=text/markdown)。"
+        "次の手: テキストなら read_file(path=…) で読む。Office 文書等のレイアウトを見るなら、"
+        "run_shell で PDF に変換し (例: soffice --headless --convert-to pdf --outdir /workspace"
+        " /ext/cage/doc/a.md)、できた PDF の path を feed_image(path=…) に渡す。"
+    )
+    assert "fetch_url" not in result
+    with turn_tools(["read_file"]):
+        result, fed, _r = _run(monkeypatch, path="/ext/cage/doc/a.md")
+    assert result.endswith("次の手: テキストなら read_file(path=…) で読む。")
+    with turn_tools([]):
+        result, fed, _r = _run(monkeypatch, path="/ext/cage/doc/a.md")
+    assert result.endswith("(content-type=text/markdown)。")
     table = dict(TABLE)
     table["/ext/cage/doc/a.md"] = _Loaded(b"# a", "text/markdown", "a.md")
     result, fed, _r = _run(monkeypatch, table, url="/ext/cage/doc/a.md")
-    assert fed == [] and "fetch_url(url=…)" in result and "run_shell" not in result
+    assert fed == [] and "テキストなら fetch_url(url=…) で読む。" in result
+    assert (
+        "send_to_workspace(url=…) で sandbox に取り込み、run_shell で PDF に変換"
+        in result
+    )
+    assert "read_file" not in result
+    with turn_tools(["fetch_url"]):
+        result, fed, _r = _run(monkeypatch, table, url="/ext/cage/doc/a.md")
+    assert result.endswith("次の手: テキストなら fetch_url(url=…) で読む。")
 
 
 def test_path_exclusive_with_file_id_and_filename(monkeypatch):
@@ -961,13 +1041,13 @@ def test_no_args_targets_attached_pdfs_only_not_images(monkeypatch):
     ]
     result, fed, _r = _run_with_files(monkeypatch, recs, n_pages=1, __files__=files)
     assert fed == ["/api/v1/files/pdf1/content#page=1"] and "photo.jpg" not in result
-    # 画像だけの添付なら「対象なし」— file_id を明示すれば見られる旨を言う
+    # 画像だけの添付なら「対象なし」。添付画像は既に見えているので file_id で見直させない
+    # (2026-10-19 llens 監査 (6))
     result, fed, _r = _run_with_files(monkeypatch, recs, n_pages=1, __files__=files[:1])
-    assert (
-        fed == []
-        and result.startswith("ERROR")
-        and "file_id" in result
-        and "PDF" in result
+    assert fed == [] and result == (
+        "ERROR: 対象が見つからない。無指定で対象になるのは添付 PDF だけ"
+        " (添付画像は既に自分の目に入っている)。次の手: URL なら url を、sandbox のファイル"
+        "なら path を指定する。"
     )
 
 
@@ -1030,7 +1110,20 @@ def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
         )
     )
     assert fed == [] and "大きすぎる" in result and "縮小" in result
-    assert "次の手: send_to_workspace と run_python が使えるなら" in result
+    assert result == (
+        "- photo.jpg: 大きすぎる (2.0 MB > 1.0 MB)。次の手: send_to_workspace(file_id=…) で"
+        " sandbox に取り込み、run_python で縮小して、/workspace/… の path を"
+        " feed_image(path=…) に渡す。"
+    )
+    with turn_tools(["run_python"]):
+        result = asyncio.run(
+            call_text(
+                tools.feed_image(
+                    file_id="f1", __user__={"id": "u1"}, __feed_image__=fed.append
+                )
+            )
+        )
+    assert result == "- photo.jpg: 大きすぎる (2.0 MB > 1.0 MB)。"
 
 
 def test_file_id_owner_check_is_fail_closed(monkeypatch):
@@ -1105,7 +1198,7 @@ def test_file_lines_that_fed_nothing_are_flagged_without_changing_the_text(
         (
             {"f1": _Rec("f1", "u1", "a.csv", "text/csv")},
             {},
-            "- a.csv: 画像でも PDF でもないので目に入れなかった",
+            None,
             "call",
         ),
         (
@@ -1285,3 +1378,224 @@ def test_formats_that_cannot_be_drawn_are_refused_with_how_to_convert(monkeypatc
         monkeypatch, {"f1": rec}, raw=HEIC.data, url="/api/v1/files/f1/content"
     )
     assert fed == [] and "send_to_workspace(url=…)" in result
+
+
+# --- 次の手はこのターンにある tool だけ (2026-10-19 llens 監査 (13)) ------------------------
+
+
+def test_too_large_next_steps_name_only_tools_in_this_turn(monkeypatch):
+    """too_large: 画像は縮小、PDF は pdftoppm で要るページを画像に、テキストは fetch_url に
+    具体的な max_mb (run_subagent があれば子に任せる)。無い tool は名指ししない。"""
+    big = dict(size=32_646_426, limit=25 * 1024 * 1024, size_exact=True)
+    result = _explained(monkeypatch, "too_large", **big)
+    nxt = result.split("次の手: ", 1)[1]
+    assert nxt == (
+        "画像なら send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小してから"
+        " /workspace/… の path を feed_image(path=…) に渡す。PDF なら send_to_workspace(url=…)"
+        " で sandbox に取り込み、run_shell の pdftoppm で要るページだけを PNG にし (例: pdftoppm"
+        " -f 3 -l 3 -r 100 -png 取り込んだパス /workspace/page)、できた PNG の path を"
+        " feed_image(path=…) に渡す。PDF のテキストが要るなら、run_subagent に URL と指示を渡し、"
+        f'子が fetch_url(url="{HIS_PDF_URL}", max_mb=32) で読む。'
+        f"ユーザーに示すなら [ラベル]({HIS_PDF_URL}) のリンクにする (ブラウザでは開ける)。"
+    )
+    assert "使えるなら" not in result
+    # run_subagent が無ければ自分で区切って読む
+    with turn_tools(["fetch_url"]):
+        result = _explained(monkeypatch, "too_large", **big)
+    assert (
+        f'次の手: PDF のテキストが要るなら、fetch_url(url="{HIS_PDF_URL}", max_mb=32) に query か'
+        "小さい limit を付けて区切って読む。" in result
+    )
+    assert "run_subagent" not in result and "send_to_workspace" not in result
+    # 実サイズが分からなければ上限の 2 倍 (具体値)
+    with turn_tools(["fetch_url"]):
+        result = _explained(monkeypatch, "too_large", limit=25 * 1024 * 1024)
+    assert "max_mb=50)" in result
+    # 何も無ければリンクだけ
+    with turn_tools([]):
+        result = _explained(monkeypatch, "too_large", **big)
+    assert result.split("次の手: ", 1)[1] == (
+        f"ユーザーに示すなら [ラベル]({HIS_PDF_URL}) のリンクにする (ブラウザでは開ける)。"
+    )
+    # path: sandbox から直接 (取り込まない)。fetch_from_workspace が無ければ渡し方も言わない
+    ref = "/workspace/out/huge.pdf"
+    result = _explained(monkeypatch, "too_large", ref=ref, arg="path", **big)
+    assert "上限は sandbox の設定で決まり、引数では上げられない" in result
+    assert "配備" not in result
+    assert result.split("次の手: ", 1)[1] == (
+        "画像なら run_python でこのパスを開いて縮小し、出力を /workspace/… に書いてからその path を"
+        " feed_image(path=…) に渡す。PDF なら run_shell の pdftoppm で要るページだけを PNG にし"
+        f" (例: pdftoppm -f 3 -l 3 -r 100 -png {ref} /workspace/page)、できた PNG の path を"
+        " feed_image(path=…) に渡す。sandbox のファイルなので、" + SHOW_PATH
+    )
+    with turn_tools([]):
+        result = _explained(monkeypatch, "too_large", ref=ref, arg="path", **big)
+    assert "次の手" not in result and result.endswith("上限は変わらない)。")
+
+
+def test_success_on_a_sandbox_path_without_fetch_from_workspace(monkeypatch):
+    with turn_tools([]):
+        result, fed, _r = _run(monkeypatch, path="/workspace/out/plot.png")
+    assert fed == ["/workspace/out/plot.png"]
+    assert result == (
+        "- /workspace/out/plot.png を自分の目に入れた (ユーザーには表示されない。sandbox の"
+        "パスは本文に貼れない)。"
+    )
+
+
+def test_image_over_the_image_cap_without_sandbox_has_no_next_step(monkeypatch):
+    with turn_tools([]):
+        for kw in ({"path": "/workspace/out/plot.png"}, _ref_kw(HIS_PNG_URL)):
+            result, fed, _r = _run(monkeypatch, **kw, max_image_mb=0.000001)
+            assert fed == [] and "大きすぎる" in result and "次の手" not in result, kw
+
+
+def test_unsupported_image_asks_the_user_when_it_cannot_be_converted(monkeypatch):
+    """HEIC 等: sandbox で PNG にする手 (開けなければユーザーに添付し直してもらう)。sandbox が
+    無ければ最初からユーザーに頼む (2026-10-19 llens 監査 (6))。"""
+    mod, _resolver = _install(monkeypatch, {**TABLE, "/workspace/out/photo.heic": HEIC})
+
+    def run():
+        return asyncio.run(
+            call_error(
+                mod.Tools().feed_image(
+                    path="/workspace/out/photo.heic",
+                    __user__={"id": "u1"},
+                    __feed_image__=lambda r: None,
+                )
+            )
+        )
+
+    assert run().text.split("次の手: ", 1)[1] == (
+        "run_python でこのパスを Pillow で開いて PNG で /workspace/… に保存し"
+        " (Image.open(…).save(….png))、その path を feed_image(path=…) に渡す。"
+        "開けなければ、ユーザーに JPEG か PNG で添付し直してもらう。"
+    )
+    with turn_tools([]):
+        err = run()
+    assert err.kind == "call"
+    assert (
+        err.text.split("次の手: ", 1)[1]
+        == "ユーザーに JPEG か PNG で添付し直してもらう。"
+    )
+    # file_id は取り込みが要る — send_to_workspace が無ければ頼むだけ
+    rec = _Rec("f1", "u1", "photo.heic", "image/heic")
+    with turn_tools(["run_python"]):
+        result, fed, _r = _run_with_files(
+            monkeypatch, {"f1": rec}, raw=HEIC.data, file_id="f1"
+        )
+    assert result.endswith("次の手: ユーザーに JPEG か PNG で添付し直してもらう。")
+
+
+def test_file_that_is_not_an_image_or_pdf_names_only_tools_in_this_turn(monkeypatch):
+    """file 経路の「画像でも PDF でもない」行: テキストは read_attachment、Office 文書等は
+    sandbox で PDF にする (取り込みは来た引数で)。無い tool は名指ししない。"""
+    recs = {"f1": _Rec("f1", "u1", "a.docx", "application/vnd.openxmlformats")}
+    result, fed, _r = _run_with_files(monkeypatch, recs, file_id="f1")
+    assert fed == [] and result == (
+        "- a.docx: 画像でも PDF でもないので目に入れなかった。次の手: テキストなら"
+        ' read_attachment(file_id="f1") で読む。Office 文書等のレイアウトを見るなら、'
+        "send_to_workspace(file_id=…) で sandbox に取り込み、run_shell で PDF に変換し"
+        " (例: soffice --headless --convert-to pdf --outdir /workspace 取り込んだパス)、"
+        "できた PDF の path を feed_image(path=…) に渡す。"
+    )
+    result, fed, _r = _run_with_files(monkeypatch, recs, url="/api/v1/files/f1/content")
+    assert (
+        "send_to_workspace(url=…)" in result
+        and 'read_attachment(file_id="f1")' in result
+    )
+    with turn_tools(["send_to_workspace"]):
+        result, fed, _r = _run_with_files(monkeypatch, recs, file_id="f1")
+    assert result == "- a.docx: 画像でも PDF でもないので目に入れなかった"
+
+
+# --- 引数なしは全添付 PDF 合わせて先頭 10 ページまで (2026-10-19 ken 決定、llens 監査 (12)) ----
+
+
+def _attached_pdfs(n):
+    recs = {
+        f"p{i}": _Rec(f"p{i}", "u1", f"p{i}.pdf", "application/pdf")
+        for i in range(1, n + 1)
+    }
+    files = [
+        {
+            "id": fid,
+            "name": rec.filename,
+            "file": {"id": fid, "meta": {"content_type": "application/pdf"}},
+        }
+        for fid, rec in recs.items()
+    ]
+    return recs, files
+
+
+def test_no_args_feeds_at_most_ten_pages_across_attached_pdfs(monkeypatch):
+    """1 件あたりは valve max_pages (既定 3) のまま、全添付 PDF 合わせて 10 ページで止める。
+    枠を使い切った PDF は見ずに、file_id と pages での続きの取り方を言う (旗は立てない)。"""
+    from nucllei.utils import tool_output
+
+    recs, files = _attached_pdfs(5)
+    mod, _resolver = _install(monkeypatch, TABLE, n_pages=5)
+    monkeypatch.setattr(
+        mod, "Files", types.SimpleNamespace(get_file_by_id=lambda fid: recs.get(fid))
+    )
+    monkeypatch.setattr(mod, "_read_raw", lambda r: b"%PDF-1.7 fake")
+    sink = tool_output.ToolOutputSink()
+    fed: list[str] = []
+
+    async def main():
+        token = tool_output.current_sink.set(sink)
+        try:
+            return await call_text(
+                mod.Tools().feed_image(
+                    __user__={"id": "u1"}, __feed_image__=fed.append, __files__=files
+                )
+            )
+        finally:
+            tool_output.current_sink.reset(token)
+
+    result = asyncio.run(main())
+    assert len(fed) == 10 and sink.error_kind() is None
+    assert fed[-1] == "/api/v1/files/p4/content#page=1"
+    lines = result.split("\n")
+    assert lines[0].startswith("- p1.pdf の p.1, p.2, p.3 を自分の目に入れた")
+    assert '他のページが要るなら file_id="p1" に pages を付けて呼び直す。' in result
+    assert (
+        "  添付 PDF をまとめて見るのは合わせて 10 ページまでなので打ち切った。"
+        '次の手: 続きが要るなら file_id="p4" に pages を付けて呼び直す。' in lines
+    )
+    assert lines[-1] == (
+        "- p5.pdf: 添付 PDF をまとめて見るのは合わせて 10 ページまでなので、見ていない。"
+        '次の手: 見るなら file_id="p5" に pages を付けて呼び直す。'
+    )
+
+
+def test_ten_page_budget_applies_only_without_a_target(monkeypatch):
+    """1 件の添付 PDF でも枠は 10 ページ (max_pages を上げていても)。file_id で指したときは
+    枠を掛けない (max_pages だけ)。"""
+    recs, files = _attached_pdfs(1)
+    result, fed, _r = _run_with_files(
+        monkeypatch, recs, n_pages=30, max_pages=20, __files__=files
+    )
+    assert len(fed) == 10 and "合わせて 10 ページまでなので打ち切った" in result
+    assert '続きが要るなら file_id="p1" に pages を付けて呼び直す。' in result
+    result, fed, _r = _run_with_files(
+        monkeypatch, recs, n_pages=30, max_pages=20, file_id="p1"
+    )
+    assert len(fed) == 20 and "上限 20 ページで打ち切った" in result
+    assert "他のページが要るなら pages で範囲を指定して呼び直す。" in result
+
+
+def test_spec_description_carries_the_new_sentences():
+    """モデルに届く spec (get_tool_specs) の description に、以降のターンに残ること・引数なしの
+    10 ページ枠が載り、内部語 (Files) が載らない。"""
+    from nucllei.utils.tools import get_tool_specs
+
+    spec = next(s for s in get_tool_specs(_mod().Tools()) if s["name"] == "feed_image")
+    desc = spec["description"]
+    assert (
+        "入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。"
+        in desc
+    )
+    assert "このターン内で" not in desc
+    assert "全部合わせて先頭から 10 ページまで" in desc
+    assert "Files" not in desc and "新しいファイルも作らない" in desc

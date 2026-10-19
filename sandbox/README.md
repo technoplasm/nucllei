@@ -334,7 +334,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
   - 応答の `exports` (`/workspace/exports/` の実行前後差分を b64 で返していた) は 2026-10-19 に
     廃止。古い nucllei は `res.get("exports", [])` で読むので、キーが無くても落ちない
-- `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir}` ファイル一覧
+- `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir, truncated}` ファイル一覧 (`entries` は 500 件で打ち切り、そのとき `truncated: true`。2026-10-19)
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
 - `POST /files/read` — `{user_id, path, mounts?, nofollow?, offset?, length?}` → `{name, size, b64, mtime}`
   (`mtime` は秒の float — 上書き競合の比較用。#150)

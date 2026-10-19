@@ -323,6 +323,123 @@ class TestAsyncExec(AbstractPostgresTest):
         assert row.meta["render"] == {"kind": "json"}
         assert row.duration >= 0
 
+    def test_background_runner_keeps_the_spawning_turn_tools(self):
+        """runner は別 task — spawn 時点のターンの tool の名前を持ち越して立てる
+        (ERROR・次の手で名指ししてよい tool を同期実行と同じにする。2026-10-19 llens
+        監査 (13))。spawn 直後の running 形には案内(note)が付き、await_task はこの
+        ターンに出ているときだけ名指しする。"""
+        from nucllei.utils.middleware import execute_tool_calls
+        from nucllei.utils.tool_errors import tool_in_turn
+
+        seen = {}
+
+        async def probe(city: str = ""):
+            # spawn の後で tools_dict が変わっても、runner が見るのは spawn 時点の一覧
+            await asyncio.sleep(0.05)
+            seen["other"] = tool_in_turn("other")
+            seen["await_task"] = tool_in_turn("await_task")
+            seen["late"] = tool_in_turn("late")
+            return "ok"
+
+        async def other():
+            return "隣の同期 call"
+
+        tools = {
+            "probe": self._entry(probe, properties={"city": {"type": "string"}}),
+            "other": self._entry(other, backgroundable=False),
+            **self._exec_tools(),
+        }
+
+        async def main():
+            results = await execute_tool_calls(
+                [
+                    self._call({"city": "札幌", "background": True}),
+                    self._call({}, name="other", index=1),
+                ],
+                tools,
+                metadata=self._metadata(),
+            )
+            tools["late"] = self._entry(other, backgroundable=False)
+            payload = json.loads(results[0]["content"])
+            await self._wait_registry_release(payload["task_id"])
+            return payload
+
+        payload = asyncio.run(main())
+        assert seen == {"other": True, "await_task": True, "late": False}
+        assert payload["note"] == (
+            "バックグラウンドで実行を始めた (まだ結果は無い)。次の手: 結果は完了時に"
+            "通知で届くので、待たずに別の作業を進める。今すぐ要るときだけ await_task で"
+            "受け取る。"
+        )
+
+    def test_recall_specs_wording(self):
+        """回収 tool の説明(モデルに届く spec)— 2026-10-19 llens 監査の言い換え。"""
+        tools = self._exec_tools()
+        await_desc = tools["await_task"]["spec"]["description"]
+        assert "ターンを終えること" not in await_desc
+        assert (
+            "running が返ったら、まだ実行中だとユーザーに伝えて応答を終える"
+            "(結果は完了時に届くので、待つために呼び直さない)。"
+        ) in await_desc
+        stop_desc = tools["stop_task"]["spec"]["description"]
+        assert "撃" not in stop_desc
+        assert (
+            "終了済みのタスクを指定しても今の状態を返すだけで、何も変えない"
+            "(その結果は await_task で受け取る)。"
+        ) in stop_desc
+        include_done = tools["check_task"]["spec"]["parameters"]["properties"][
+            "include_done"
+        ]["description"]
+        assert (
+            "orphaned は実行中にサーバーが再起動して途中で失われたもの" in include_done
+        )
+
+    def test_spawn_note_without_await_task_in_the_turn(self):
+        async def probe():
+            return "ok"
+
+        async def main():
+            spawned = await self._spawn(probe)
+            await self._wait_registry_release(spawned["task_id"])
+            return spawned
+
+        assert asyncio.run(main())["note"] == (
+            "バックグラウンドで実行を始めた (まだ結果は無い)。次の手: 結果は完了時に"
+            "通知で届くので、待たずに別の作業を進める。"
+        )
+
+    def test_stop_task_on_finished_rows_says_how_to_get_the_result(self):
+        """止める前に終わっていた行には「止めていない」と受け取り方(await_task が
+        このターンに出ているとき)。orphaned は意味(ORPHANED_ERROR)を添える。"""
+        from nucllei.utils.tool_errors import turn_tools
+
+        stop_task = self._exec_tools()["stop_task"]["callable"]
+        self._insert("done-1")
+        assert self.Executions.finish_execution("done-1", status="done", result="ok")
+        self._insert("failed-1")
+        assert self.Executions.finish_execution(
+            "failed-1", status="failed", error="ERROR: x。"
+        )
+        self._insert("orphan-1")
+        assert self.Executions.finish_execution(
+            "orphan-1", status="orphaned", error=self.executions.ORPHANED_ERROR
+        )
+
+        async def main():
+            with turn_tools(["check_task", "await_task", "stop_task"]):
+                return await stop_task(task_ids=["done-1", "failed-1", "orphan-1"])
+
+        out = asyncio.run(main())
+        finished = (
+            "止める前に終わっていた (止めていない)。次の手: 結果が要るなら await_task で"
+            "受け取る。"
+        )
+        assert [e.get("note") for e in out["tasks"]] == [
+            finished,
+            finished,
+            self.executions.ORPHANED_ERROR,
+        ]
+
     def test_lone_background_call_runs_inline(self, monkeypatch):
         """2026-10-04: 応答に call が 1 本だけなら background: true でも同期で走る。
 
@@ -526,7 +643,8 @@ class TestAsyncExec(AbstractPostgresTest):
         # #145: 同期経路と同じ文面 — 例外は型名 + 先頭 200 字だけ(全文は log)
         assert failed.error == (
             "ERROR: ツール probe の実行中にエラーが起きた (RuntimeError: 壊れた)。"
-            "次の手: 引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。"
+            "次の手: 引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は"
+            "使わずに進め、ユーザーには失敗したことを伝える。"
         )
         # 捕らえていない例外はバグ = fatal(同期経路と同じ)
         assert failed.meta["error_kind"] == "fatal"
@@ -767,7 +885,7 @@ class TestAsyncExec(AbstractPostgresTest):
         error = asyncio.run(call_error(self._spawn(probe)))
         assert error.kind == "failure"
         assert error.text == (
-            "ERROR: このサーバー構成 (multi-worker) では background 実行を使えない。"
+            "ERROR: このサーバーの構成では background 実行を使えない。"
             "次の手: background を付けずに呼び直す。"
         )
         assert self.Executions.get_executions_by_chat_id(self.CHAT_ID) == []
@@ -1544,7 +1662,9 @@ class TestAsyncExec(AbstractPostgresTest):
         assert out["tasks"][0] == {
             "task_id": "done-1",
             "tool_name": "probe",
-            "status": "done",  # 終了済みに撃っても現状を返すだけ(冪等)
+            "status": "done",  # 終了済みを指定しても現状を返すだけ(冪等)
+            # 止めていないことを言う。await_task はこのターンに無いので名指ししない
+            "note": "止める前に終わっていた (止めていない)。",
         }
         for entry in out["tasks"][1:]:
             assert "task_id が不正" in entry["error"]

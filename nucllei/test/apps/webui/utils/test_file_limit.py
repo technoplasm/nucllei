@@ -280,7 +280,9 @@ def test_feed_image_path_uses_sandbox_limit_capped_by_fetch(monkeypatch, limit_m
     limit_mb(1)  # 添付の上限は効かない
     out = call()
     assert seen["max_bytes"] == min(1024 * MIB, FETCH_MAX_BYTES)
-    assert out.startswith("ERROR") and "sandbox の配備の設定" in out
+    # 「配備」はモデルに見せない内部語 (2026-10-19 llens 監査。文面は feed_image の担当)
+    assert out.startswith("ERROR") and "上限は sandbox の設定で" in out
+    assert "配備" not in out
     assert "最大アップロードサイズ" not in out
     file_limit.set_sandbox_file_limit(2 * MIB)
     call()

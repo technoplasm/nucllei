@@ -77,6 +77,28 @@ class TestBuiltinContextBudgetTool(AbstractPostgresTest):
         assert e.value.kind == "outcome"
         assert e.value.text == (
             "ERROR: このチャットの usage がまだ無い(最初のモデル呼び出しの完了前)。"
+            "次の手: 残量は分からないものとして作業を続ける。次のステップで 1 回だけ呼び直してよい。"
+        )
+
+    def test_usage_without_token_counts_returns_error_with_next_step(self, monkeypatch):
+        """次の手の無い ERROR に次の手を足した (2026-10-19 llens 監査)。"""
+        import types
+
+        from nucllei.builtin_tools import context_budget
+
+        monkeypatch.setattr(
+            context_budget.Chats,
+            "get_chat_by_id_and_user_id",
+            lambda chat_id, user_id: types.SimpleNamespace(
+                meta={"usage": {"context_size": 1000}}
+            ),
+        )
+        with pytest.raises(ToolError) as e:
+            self._call("c1")
+        assert e.value.kind == "outcome"
+        assert e.value.text == (
+            "ERROR: このチャットの usage に token 数が無い(エンジンが usage を返していない)。"
+            "次の手: 残量は分からないものとして作業を続ける (呼び直しても変わらない)。"
         )
 
     def test_reports_carried_and_context_size(self):

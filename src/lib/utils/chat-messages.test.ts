@@ -252,7 +252,10 @@ describe('expandAssistantToolHistory: tool 結果の画像の再送(#142)', () =
 		expect(messages.at(-1)).toEqual({
 			role: 'user',
 			content: [
-				{ type: 'text', text: '(直前の tool 結果の画像)' },
+				{
+					type: 'text',
+					text: '(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)'
+				},
 				{ type: 'image_url', image_url: { url: '/api/v1/files/img-a/content' } }
 			]
 		});
@@ -404,7 +407,10 @@ describe('buildWireMessages', () => {
 		expect(messages[3]).toEqual({
 			role: 'user',
 			content: [
-				{ type: 'text', text: '(直前の tool 結果の画像)' },
+				{
+					type: 'text',
+					text: '(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)'
+				},
 				{ type: 'image_url', image_url: { url: '/api/v1/files/abc/content' } }
 			]
 		});

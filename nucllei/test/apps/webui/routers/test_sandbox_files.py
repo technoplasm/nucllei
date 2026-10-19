@@ -13,7 +13,8 @@ sandbox サービスは偽物(`builtin_tools.sandbox.sandbox_post` を差し替�
   全体を bytes にしない)。上限は sandbox の上限(読めていれば送る前に 413)、権限 `chat.file_upload`
   が無ければ 403
 - SANDBOX_URL の無い配備では全部 404
-- sandbox tool の容量切れの文面に「ファイルブラウザで整理できる」
+- sandbox tool の容量切れの文面: 自分では消さず、ユーザーに伝えて画面の「ワークスペース」→
+  「サンドボックス」タブで整理してもらう (2026-10-19 llens 監査 (1) — 旧文は rm を勧めていた)
 """
 
 import asyncio
@@ -614,17 +615,64 @@ def _text(coro):
     return asyncio.run(call_text(coro))
 
 
+# 容量切れの次の手 (507 の全経路で同じ文)。画面の名前は ja-JP の表記 (サイドバー「ワークスペース」、
+# タブ「サンドボックス」)
+QUOTA_NEXT = (
+    "次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く"
+    " (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。"
+    "ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。"
+)
+
+
+def _import_fixture(monkeypatch, tmp_path):
+    """send_to_workspace(file_id / 添付) が読む Files・Storage を偽物にする (DB に依存しない)。"""
+    import types
+
+    from nucllei.builtin_tools import sandbox
+
+    src = tmp_path / "a.csv"
+    src.write_text("x", encoding="utf-8")
+    rec = types.SimpleNamespace(path=str(src), user_id="u1", filename="a.csv")
+    monkeypatch.setattr(
+        sandbox.Files, "get_file_by_id", lambda fid: rec if fid == "f1" else None
+    )
+    monkeypatch.setattr(sandbox.Storage, "get_file", lambda path: path)
+
+
 @pytest.mark.parametrize("status", [507])
-def test_tool_quota_full_points_to_file_browser(status):
+def test_tool_quota_full_points_to_file_browser(status, monkeypatch, tmp_path):
+    """507 の全経路 (実行・write_file・file_id の取り込み・添付一覧の取り込み) が同じ次の手を
+    言う。rm は勧めない。添付一覧の報告では「次の手:」は末尾に 1 回だけ (行の中に書かない)。
+    url= の取り込みは test_builtin_sandbox の test_url_import_sandbox_errors。"""
     from nucllei.builtin_tools.sandbox import SandboxHTTPError
 
+    _import_fixture(monkeypatch, tmp_path)
     err = SandboxHTTPError(status, "workspace quota exceeded")
     tool = _tool({"/files/write": err, "/exec": err})
-    out = _text(tool.write_file("/workspace/a.txt", "x", __user__={"id": "u1"}))
-    assert "容量" in out and "ファイルブラウザ" in out, out
-    assert "/workspace/trash/ を空にすると空く" in out, out
-    out = _text(tool.run_shell("ls", __user__={"id": "u1"}))
-    assert "容量" in out and "ファイルブラウザ" in out, out
+    user = {"id": "u1"}
+    out = _text(tool.write_file("/workspace/a.txt", "x", __user__=user))
+    assert out == (
+        "ERROR: /workspace/a.txt に書けない (workspace の容量 (quota) が一杯)。"
+        + QUOTA_NEXT
+    )
+    out = _text(tool.run_shell("ls", __user__=user))
+    assert (
+        out == "ERROR: workspace の容量 (quota) が一杯で実行できなかった。" + QUOTA_NEXT
+    )
+    out = _text(tool.send_to_workspace(file_id="f1", __user__=user))
+    assert out == (
+        "ERROR: file_id f1 を取り込めない: workspace の容量 (quota) が一杯。"
+        + QUOTA_NEXT
+    )
+    out = _text(
+        tool.send_to_workspace(__user__=user, __files__=[{"id": "f1", "name": "a.csv"}])
+    )
+    assert out == (
+        "取り込み結果:\n- a.csv: workspace の容量 (quota) が一杯 (取り込まなかった)\n"
+        + QUOTA_NEXT
+    )
+    for text in (out,):
+        assert text.count("次の手:") == 1 and " rm" not in text
 
 
 def test_tool_exec_enospc_in_stderr_adds_note():
@@ -636,10 +684,12 @@ def test_tool_exec_enospc_in_stderr_adds_note():
     }
     tool = _tool({"/exec": res})
     out = _text(tool.run_shell("dd", __user__={"id": "u1"}))
-    assert "ファイルブラウザ" in out, out
+    assert out.endswith(
+        "※ workspace の容量 (quota) が一杯の可能性がある。" + QUOTA_NEXT
+    ), out
     tool = _tool({"/exec": {**res, "stderr": "boom"}})
     out = _text(tool.run_shell("x", __user__={"id": "u1"}))
-    assert "ファイルブラウザ" not in out
+    assert "容量" not in out
 
 
 def test_raw_client_streams_both_ways(monkeypatch):

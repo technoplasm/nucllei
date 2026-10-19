@@ -45,7 +45,8 @@ def _human_size(n: Optional[int]) -> Optional[str]:
 def _require_user_id(__user__: Optional[dict]) -> str:
     user_id = (__user__ or {}).get("id")
     if not user_id:
-        raise ValueError("ユーザーを特定できないので添付ファイルは一覧できない。")
+        # 失敗は ToolError で返す (README_API §5.1。旧: ValueError = 汎用の例外経路で fatal 扱い)
+        raise ToolFailure("ユーザーを特定できないので添付ファイルは一覧できない")
     return user_id
 
 
@@ -155,6 +156,7 @@ class Tools:
         ユーザーのアップロードと tool が添付した成果物の両方が対象。過去に発行された
         file_id を思い出す用途に使い、得た file_id は file_id を受け取る他の tool に
         そのまま渡せる。返るのはメタデータのみ(中身は読まない)。
+        deleted: true の付いたものは削除済みで、その file_id はもう開けない (渡しても読めない)。
 
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
         """
@@ -172,6 +174,7 @@ class Tools:
         __metadata__: Optional[dict] = None,
     ) -> dict | str:
         """このチャットの添付ファイルをファイル名で検索する(部分一致・大小文字無視)。
+        deleted: true の付いたものは削除済みで、その file_id はもう開けない。
 
         :param query: 検索文字列(ファイル名に対する部分一致)
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)

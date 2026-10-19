@@ -109,6 +109,12 @@ BUILTIN_TOOLS = {
     # 旧 meta.features.subagent は「この行を preset の toolIds に入れるか」に吸収した。
     # 委任先(meta.subagentPresetIds)が空・アクセス可 preset ゼロ・depth 超過のターンは
     # Tools.available が落とすので、割り当てても「呼ぶと必ず失敗する」ことは無い。
+    # 生える経路は 2 つ: (a) preset の toolIds に入れる(この行の access_control が効く)/
+    # (b) skill の frontmatter `tool_ids` に入れて load_skill で生やす(inject_skill_tools →
+    # get_tools(enforce_access_control=False)、次のターンは replay_skill_tool_ids)。(b) では
+    # この行の ACL は効かず、認可は preset の skillIds ∧ skill の read 可視性(admin も特別扱い
+    # しない)。どちらも前提は preset の meta.subagentPresetIds が空でないこと。子ターンは depth
+    # 判定で生えない(2026-10-19 llens 確認。FE の SubagentPresetsSelector も (b) を数える)。
     "builtin_subagent": {
         "module": subagent,
         "name": "Subagent",

@@ -537,7 +537,8 @@ async def run_subagent_turn(
 
     if not (parent_chat_id and parent_message_id):
         raise ToolFailure(
-            "サブエージェントはチャットの中でだけ起動できる (chat_id / message_id が無い)"
+            "サブエージェントはチャットの中でだけ起動できる (この呼び出しには親になるチャットが無い)",
+            "自分で処理する。",
         )
 
     if not (instruction or "").strip():
@@ -548,11 +549,13 @@ async def run_subagent_turn(
     # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
     if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
         raise ToolFailure(
-            # _active_turns はプロセス全体の数 (呼び手ごとではない)
+            # _active_turns はプロセス全体の数 (呼び手ごとではない — 全ユーザー・入れ子の
+            # 子の分も数える)
             "サブエージェントの同時実行数がサーバー全体の上限"
-            f" ({SUBAGENT_MAX_CONCURRENCY}) に達している (この分は起動していない)",
-            "自分が起動した分があれば、その結果がそろってから残りを呼ぶ。"
-            "無ければ時間を置いて呼び直すか、自分で処理する。",
+            f" ({SUBAGENT_MAX_CONCURRENCY}、ほかの利用者の分も数える) に達している"
+            " (この分は起動していない)",
+            "自分が起動した分が走っているなら、その結果がそろってから残りを呼ぶ。"
+            "そうでなければ 1 回だけ呼び直し、それでも同じなら自分で処理する。",
         )
     _active_turns += 1
     # 実行中登録した agent session id。None = 未登録。
@@ -565,7 +568,7 @@ async def run_subagent_turn(
         # 同一述語をその場で再評価する(履歴・enum に委ねない)。
         parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
         if parent is None or parent.deleted_at is not None:
-            raise ToolFailure("親チャットが見つからない")
+            raise ToolFailure("親チャットが見つからない", "自分で処理する。")
         depth = parent.depth + 1
         if depth > SUBAGENT_MAX_DEPTH:
             raise ToolFailure(

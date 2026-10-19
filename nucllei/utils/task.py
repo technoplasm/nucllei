@@ -102,6 +102,10 @@ def user_prompt_params(user) -> dict:
     }
 
 
+# datetime.weekday() の順(月曜 = 0)
+_WEEKDAYS_JA = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
+
+
 def prompt_template(
     template: str,
     user_name: Optional[str] = None,
@@ -122,7 +126,9 @@ def prompt_template(
     # Format the date to YYYY-MM-DD
     formatted_date = current_date.strftime("%Y-%m-%d")
     formatted_time = current_date.strftime("%I:%M:%S %p")
-    formatted_weekday = current_date.strftime("%A")
+    # 曜日は日本語で固定(2026-10-19 llens 監査 — strftime("%A") はプロセスのロケール次第で
+    # 英語になっていた。モデル向けの文は日本語 — _memos/model-frames.md)
+    formatted_weekday = _WEEKDAYS_JA[current_date.weekday()]
 
     template = template.replace("{{CURRENT_DATE}}", formatted_date)
     template = template.replace("{{CURRENT_TIME}}", formatted_time)

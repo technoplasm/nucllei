@@ -54,7 +54,7 @@ from nucllei.env import (
 )
 from nucllei.models.executions import Executions
 from nucllei.utils import tool_output
-from nucllei.utils.tool_errors import ToolCallError
+from nucllei.utils.tool_errors import NEXT, ToolCallError, tool_in_turn
 from nucllei.utils.executions import (
     ERROR_KIND_META_KEY,
     async_exec_available,
@@ -242,6 +242,22 @@ def build_exec_tools(user, metadata) -> dict:
     """
     parent_chat_id = (metadata or {}).get("chat_id")
 
+    def _stop_note(row):
+        """stop_task の per-entry に添える案内(止める前に終わっていた行だけ)。
+
+        done / failed は止めていない — 結果はこの返りの後は通知で届かない(terminal を
+        報告した行は delivered になる)ので、受け取り方を言う(2026-10-19 llens 監査)。
+        orphaned は意味(ORPHANED_ERROR — 行の error)をそのまま添える。
+        """
+        if row.status in ("done", "failed"):
+            note = "止める前に終わっていた (止めていない)。"
+            if tool_in_turn("await_task"):
+                note += f"{NEXT}結果が要るなら await_task で受け取る。"
+            return note
+        if row.status == "orphaned":
+            return row.error or None
+        return None
+
     def _invalid_entry(task_id: str) -> dict:
         # 他人・他 chat の行は「存在しない」と同じ応答(存在を漏らさない)
         return {
@@ -361,7 +377,8 @@ def build_exec_tools(user, metadata) -> dict:
                     "type": "boolean",
                     "description": (
                         "true で終了済み(done/failed/stopped/orphaned)も新しい順に"
-                        f"列挙する(最大 {CHECK_TASK_LIST_LIMIT} 件)。"
+                        f"列挙する(最大 {CHECK_TASK_LIST_LIMIT} 件)。orphaned は実行中に"
+                        "サーバーが再起動して途中で失われたもの(結果は無い)。"
                     ),
                 },
             },
@@ -413,7 +430,8 @@ def build_exec_tools(user, metadata) -> dict:
             f"{AWAIT_TASK_DEFAULT_TIMEOUT})の 1 回の待ちで全 id をカバーし、"
             '時間切れのタスクは status: "running" で返る(終わった分だけの部分回収)。'
             "完了時は結果が自動で届く(通知ターン)ため、今すぐ結果が必要なとき"
-            "だけ使う — running が返ったら実行中である旨を報告してターンを終えること。"
+            "だけ使う。running が返ったら、まだ実行中だとユーザーに伝えて応答を終える"
+            "(結果は完了時に届くので、待つために呼び直さない)。"
         ),
         "parameters": {
             "type": "object",
@@ -586,8 +604,9 @@ def build_exec_tools(user, metadata) -> dict:
         "name": "stop_task",
         "description": (
             "バックグラウンドタスク(task_ids)を強制終了する。停止後の実状態を"
-            "返す。終了済みのタスクに撃っても現状を返すだけ(冪等)。停止しても"
-            "副作用は完了している可能性がある。"
+            "返す。終了済みのタスクを指定しても今の状態を返すだけで、何も変えない"
+            "(その結果は await_task で受け取る)。停止しても副作用は完了している"
+            "可能性がある。"
         ),
         "parameters": {
             "type": "object",
@@ -619,9 +638,15 @@ def build_exec_tools(user, metadata) -> dict:
             # 停止の権威は endpoint 側の CAS(D2)— stop_execution が
             # stopped へ CAS し、勝ったときだけ task を cancel する。冪等。
             row = await stop_execution(tid) or rows[tid]
-            entries.append(
-                {"task_id": row.id, "tool_name": row.tool_name, "status": row.status}
-            )
+            entry = {
+                "task_id": row.id,
+                "tool_name": row.tool_name,
+                "status": row.status,
+            }
+            note = _stop_note(row)
+            if note:
+                entry["note"] = note
+            entries.append(entry)
             if row.status != "running":
                 delivered_ids.append(row.id)
         entries.extend(_over_limit_entry(tid) for tid in over)

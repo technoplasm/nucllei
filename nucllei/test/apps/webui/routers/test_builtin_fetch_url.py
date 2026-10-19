@@ -37,6 +37,26 @@ from urllib.parse import urlsplit
 import pytest
 
 from nucllei.utils.image_refs import REF_ARGS_RULE, URL_ARG_FORM, RefError
+from nucllei.utils.tool_errors import turn_tools
+
+# 次の手で別の tool を名指しするのは、このターンに出ている tool だけ (2026-10-19 llens 監査 (13))。
+# 既定は全部出ている前提で文面を見る。無いときの出し分けは `turn_tools([...])` を入れ子にして見る
+ALL_TOOLS = (
+    "fetch_url",
+    "feed_image",
+    "run_subagent",
+    "read_attachment",
+    "send_to_workspace",
+    "run_python",
+    "run_shell",
+)
+
+
+@pytest.fixture(autouse=True)
+def _all_tools_in_turn():
+    with turn_tools(ALL_TOOLS):
+        yield
+
 
 _FIXTURES = pathlib.Path(__file__).resolve().parents[3] / "fixtures" / "fetch_url"
 
@@ -587,10 +607,23 @@ def test_pdf_without_text_layer_points_to_feed_image(monkeypatch, ext_env):
     # 原本のリンクは feed_image で見られないときの代替 (A15)
     assert result.endswith(
         "スキャン画像の PDF。\n"
-        f'次の手: feed_image が使えるなら feed_image(url="{u}") でページを見る'
+        f'次の手: feed_image(url="{u}") でページを見る'
         ' (pages="3" 等で範囲指定)。見られない・読み取れないときは、ユーザーに原本を'
         f" [ラベル]({u}) のリンクで示す。"
     )
+    # feed_image がこのターンに無ければ、残る手は原本のリンクだけ
+    with turn_tools([]):
+        result, _c = _run(
+            monkeypatch,
+            ext_env,
+            u,
+            pdf_text="",
+            resp=_Loaded(content_type="application/pdf", body=b"%PDF-1.7 scan"),
+        )
+    assert result.endswith(
+        f"スキャン画像の PDF。\n次の手: ユーザーに原本を [ラベル]({u}) のリンクで示す。"
+    )
+    assert "feed_image" not in result
 
 
 def test_pdf_without_text_layer_guides_to_feed_image_even_without_pdf_extension(
@@ -786,8 +819,8 @@ def test_too_large_names_size_and_limit_in_mb_and_sends_a_subagent_with_max_mb(
     )
     assert f"{_PDF_URL} は 31.1 MB で、取得の上限 25.0 MB を超えている" in result
     assert (
-        "次の手: この会話では読まない。" in result
-        and "run_subagent が使えるなら" in result
+        "次の手: この会話では読まない。run_subagent に URL と指示を渡し、子が" in result
+        and "使えるなら" not in result
     )
     assert (
         f'fetch_url(url="{_PDF_URL}", max_mb=32)' in result
@@ -899,7 +932,10 @@ def test_too_large_without_numbers_still_says_it_is_the_size_cap(monkeypatch, ex
     assert (
         "取得の上限" in result and "超えている" in result and "実サイズは不明" in result
     )
-    assert "run_subagent" in result and "max_mb=<X を超える値>" in result
+    # プレースホルダは出さない — この呼び出しの上限 (既定 25 MB) の 2 倍を具体値で
+    # (2026-10-19 llens 監査 (6))
+    assert "run_subagent" in result and "max_mb=50)" in result and "<" not in result
+    assert "足りなければさらに上げる (天井 200.0 MB)" in result
     assert "ユーザーに示すなら [ラベル](" in result
 
 
@@ -927,14 +963,16 @@ def test_unfollowable_redirect_asks_for_the_target_page(monkeypatch, ext_env):
 def test_server_error_status_suggests_retry_or_handing_over_the_url(
     monkeypatch, ext_env
 ):
-    for status in (500, 503, 403):
+    # 文面は utils/ref_errors (2026-10-19 llens 監査 (6) で status ごとに言い分けた — 5xx だけ
+    # 1 回呼び直す。「上流」「時間を置いて」は言わない)
+    for status in (500, 503):
         result = _explained(monkeypatch, ext_env, "upstream_status", status=status)
-        assert f"上流が {status} を返した" in result, status
-        assert (
-            "5xx なら時間を置いて 1 回だけ再試行する" in result
-            and "ユーザーに示すなら [ラベル](" in result
-        ), status
-        assert "redirect" not in result, status
+        assert f"HTTP {status} を返した" in result, status
+        assert "次の手: 1 回だけ呼び直し、同じならやめる。" in result, status
+        assert "ユーザーに示すなら [ラベル](" in result and "redirect" not in result
+        assert "上流" not in result and "時間を置いて" not in result, status
+    result = _explained(monkeypatch, ext_env, "upstream_status", status=403)
+    assert "HTTP 403 を返した" in result and "次の手: 呼び直しても同じ。" in result
 
 
 def test_unreachable_upstream_says_the_web_is_not_reachable_from_here(
@@ -1285,3 +1323,119 @@ def test_builtin_specs_have_the_expected_function_names_and_valves():
         tools, frontmatter = pkg.load_builtin_tool("builtin_fetch_url")
         assert isinstance(tools, fetch.Tools) and frontmatter == {}
         assert tools.valves.max_fetch_mb == 25.0
+
+
+# --- 2026-10-19 llens 監査: 次の手はこのターンにある tool だけ・続きは同じ query で ------------
+
+
+def test_too_large_without_run_subagent_reads_it_here_in_slices(monkeypatch, ext_env):
+    """run_subagent が無ければ、自分で max_mb=N を付けて query か小さい limit で区切って読む。
+    send_to_workspace が無ければ取り込みの文も出さない。"""
+    big = dict(size=32_646_426, limit=25 * 1024 * 1024, size_exact=True)
+    with turn_tools(["fetch_url"]):
+        result = _explained(monkeypatch, ext_env, "too_large", **big)
+    assert result == (
+        f"ERROR: {_PDF_URL} は 31.1 MB で、取得の上限 25.0 MB を超えている。次の手: "
+        f'fetch_url(url="{_PDF_URL}", max_mb=32) に query か小さい limit を付けて区切って読む'
+        " (続きは offset)。中身が要らなければ、ユーザーに示すなら"
+        f" [ラベル]({_PDF_URL}) のリンクにする (ブラウザでは開ける)。"
+    )
+
+
+def test_continuation_keeps_the_query(monkeypatch, ext_env):
+    """query で絞った結果の続きは、同じ query で offset を渡す (offset は絞った後の位置)。"""
+    result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", query="令和", limit=10)
+    assert (
+        '続きは fetch_url(url=..., query="令和", offset=10) で取る (同じ query を渡す)。'
+        "next_offset=10" in result
+    )
+    result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", limit=10)
+    assert "続きは fetch_url(url=..., offset=10) で取る。next_offset=10" in result
+
+
+def test_pdf_text_note_looks_only_when_text_is_not_enough(monkeypatch, ext_env):
+    """テキスト層のある PDF: 見るのは文字で足りないときだけ (2026-10-19 ken 決定 — 旧「重くない」
+    は消した。目に入れた画像は以降のターンにも残る)。feed_image が無ければ次の手は出さない。"""
+    u = f"{SITE}/a.pdf"
+    kw = dict(
+        pdf_text="本文" * 100,
+        resp=_Loaded(content_type="application/pdf", body=b"%PDF-1.7"),
+    )
+    result, _c = _run(monkeypatch, ext_env, u, **kw)
+    assert (
+        "テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。次の手: 文字で足りない"
+        "とき (表や記入欄の並び・図・手書き・印影が関わる) だけ、"
+        f'feed_image(url="{u}", pages="N") で要るページを見る。\n' in result
+    )
+    assert "重くない" not in result
+    with turn_tools([]):
+        result, _c = _run(monkeypatch, ext_env, u, **kw)
+    assert "見ていない。\n種別: pdf" in result and "feed_image" not in result
+
+
+def test_image_and_unsupported_type_without_the_tools(monkeypatch, ext_env):
+    """画像: feed_image が無ければリンクで示す。平文にできない形式: send_to_workspace が無ければ
+    取り込みの文を出さない。"""
+    u = f"{SITE}/fig.png"
+    with turn_tools([]):
+        result, _c = _run(
+            monkeypatch,
+            ext_env,
+            u,
+            resp=_Loaded(content_type="image/png", body=b"\x89PNG\r\n\x1a\n"),
+        )
+    assert result.endswith(
+        f"平文にはできない。\n次の手: ユーザーに示すなら [ラベル]({u}) のリンクにする"
+        " (ブラウザでは開ける)。"
+    )
+    u = f"{SITE}/x.xls"
+    with turn_tools([]):
+        result, _c = _run(
+            monkeypatch,
+            ext_env,
+            u,
+            resp=_Loaded(content_type="application/vnd.ms-excel", body=b"\xd0\xcf"),
+        )
+    assert "send_to_workspace" not in result
+    assert result.endswith(
+        f"次の手: ユーザーに示すなら [ラベル]({u}) のリンクにする (ブラウザでは開ける)。"
+    )
+
+
+def test_internal_file_over_the_cap_names_read_attachment_only_in_turn(
+    monkeypatch, ext_env, tmp_path
+):
+    big = tmp_path / "big.txt"
+    big.write_bytes(b"x" * 4096)
+    recs = {"f1": _Rec("f1", "u1", "big.txt", "text/plain", "stored/big.txt")}
+    files = {"stored/big.txt": str(big)}
+    mod = _mod()
+    env = _Env(monkeypatch, ext_env, _Loaded(body=b""))
+    env.tools.valves.max_fetch_mb = 0.001
+    monkeypatch.setattr(
+        mod, "Files", types.SimpleNamespace(get_file_by_id=lambda fid: recs.get(fid))
+    )
+    monkeypatch.setattr(
+        mod, "Storage", types.SimpleNamespace(get_file=lambda path: files[path])
+    )
+    result = env.run("/api/v1/files/f1/content")
+    assert result == (
+        "ERROR: このファイルは 0.0 MB で、取得の上限 0.0 MB を超えている。次の手: 抽出テキストで"
+        '足りるなら read_attachment(file_id="f1") で読む。このまま読むなら max_mb=1 を付け、'
+        "query か小さい limit で区切って呼び直す。"
+    )
+    with turn_tools([]):
+        result = env.run("/api/v1/files/f1/content")
+    assert "read_attachment" not in result and "max_mb=1" in result
+
+
+def test_spec_description_has_no_deployment_word():
+    from nucllei.utils.tools import get_tool_specs
+
+    spec = next(s for s in get_tool_specs(_mod().Tools()) if s["name"] == "fetch_url")
+    assert "配備" not in str(spec)
+    assert "続きは同じ query のまま offset" in spec["description"]
+    assert (
+        spec["parameters"]["properties"]["limit"]["description"]
+        == "返す文字数 (既定 8000)。上限を超える値は上限で頭打ちになる。"
+    )

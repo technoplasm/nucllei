@@ -55,8 +55,10 @@ def _explain(err, arg="url", **kw):
 
 
 FID = "0b7c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
+# ターンの tool が立っていない (chat_files を名指ししない) ときの次の手。名指しは
+# test_file_id_error_names_chat_files_only_in_turn
 NO_FILE_NEXT = (
-    "list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+    "会話に出ている file_id を確かめて渡し直す。"
     "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
 )
 
@@ -106,6 +108,28 @@ def test_fixed_form_helpers_compose_the_shared_sentences():
         == f"ERROR: /api/v1/files/x/content {no_file}。次の手: {NO_FILE_NEXT}"
     )
     assert mb(32_646_426) == "31.1 MB" and mb(25 * 1024 * 1024) == "25.0 MB"
+
+
+def test_file_id_error_names_chat_files_only_in_turn():
+    """file_id の確かめ方は、このターンに出ている chat_files の tool だけで言う (llens 監査 (13))。"""
+    from nucllei.utils.tool_errors import turn_tools
+
+    tell = (
+        "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
+    )
+    with turn_tools(["list_chat_files", "grep_chat_files", "feed_image"]):
+        assert file_id_error(FID).endswith(
+            "次の手: list_chat_files か grep_chat_files でこのチャットの file_id を"
+            "確かめて渡し直す。" + tell
+        )
+    with turn_tools(["grep_chat_files"]):
+        assert file_id_error(FID).endswith(
+            "次の手: grep_chat_files でこのチャットの file_id を確かめて渡し直す。"
+            + tell
+        )
+    with turn_tools(["feed_image"]):
+        assert file_id_error(FID).endswith(f"次の手: {NO_FILE_NEXT}")
+    assert "使えるなら" not in file_id_error(FID)
 
 
 # --- code ごとの分岐 ----------------------------------------------------------------
@@ -162,16 +186,36 @@ def test_upstream_status_redirect_reasons_and_plain_status():
     assert _explain(
         RefError("upstream_status", "x", status=301), redirect_next="NEXT。"
     ) == (f"ERROR: {U} は redirect (301) を返した。NEXT。")
-    for status in (401, 403, 500, 503):
+    # 2026-10-19 llens 監査 (6): status で言い分ける。4xx は呼び直しても同じ、5xx だけ
+    # 1 回呼び直す (「時間を置いて」は言わない — モデルは時間を置けない)。「上流」は使わない
+    link = f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
+    for status in (401, 403):
         assert _explain(RefError("upstream_status", "x", status=status)) == (
-            f"ERROR: {U} の上流が {status} を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
-            " (401 / 403 などは再試行しない)。"
-            f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
+            f"ERROR: {U} は HTTP {status} を返した (ログインか権限が要るページ)。"
+            "次の手: 呼び直しても同じ。"
+            f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開けることがある)。"
+        )
+    for status in (404, 410):
+        assert _explain(RefError("upstream_status", "x", status=status)) == (
+            f"ERROR: {U} は HTTP {status} を返した (ページが無い)。"
+            "次の手: 呼び直しても同じ。ユーザーにはリンク切れと伝える。"
+        )
+    assert _explain(RefError("upstream_status", "x", status=429)) == (
+        f"ERROR: {U} は HTTP 429 を返した (アクセスが多すぎるとして断られた)。"
+        "次の手: 続けて呼び直さない。" + link
+    )
+    assert _explain(RefError("upstream_status", "x", status=400)) == (
+        f"ERROR: {U} は HTTP 400 を返した (要求を受け付けなかった)。"
+        "次の手: 同じ URL で呼び直しても同じ。" + link
+    )
+    for status in (500, 503):
+        assert _explain(RefError("upstream_status", "x", status=status)) == (
+            f"ERROR: {U} は HTTP {status} を返した (相手のサーバー側の障害)。"
+            "次の手: 1 回だけ呼び直し、同じならやめる。" + link
         )
     assert _explain(RefError("upstream_status", "x")) == (
-        f"ERROR: {U} の上流が エラー を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
-        " (401 / 403 などは再試行しない)。"
-        f"ユーザーに示すなら [ラベル]({U}) のリンクにする (ブラウザでは開ける)。"
+        f"ERROR: {U} は HTTP のエラーを返した。次の手: 呼び直しても同じことが多い。"
+        + link
     )
 
 
@@ -305,7 +349,7 @@ def test_sandbox_wording():
             "too_large", "x", size=3 * 1024 * 1024, limit=1024 * 1024, size_exact=True
         ): (
             f"ERROR: {U} は 3.0MB で、取り込みの上限 1.0MB を超えている。sandbox には取り込めない "
-            "(上限は sandbox の配備の設定で、引数では上げられない)。リンク切れではない。次の手: "
+            "(上限は sandbox の設定で、引数では上げられない)。リンク切れではない。次の手: "
             + _LINK.format(u=U)
         ),
         RefError("not_found", "x"): _NOT_FOUND,
@@ -317,8 +361,8 @@ def test_sandbox_wording():
         ): _TOO_MANY,
         RefError("upstream_status", "x", status=302): _REDIRECT,
         RefError("upstream_status", "x", status=503): (
-            f"ERROR: {U} の上流が 503 を返した。次の手: 5xx なら時間を置いて 1 回だけ再試行する"
-            " (401 / 403 などは再試行しない)。" + _LINK.format(u=U)
+            f"ERROR: {U} は HTTP 503 を返した (相手のサーバー側の障害)。"
+            "次の手: 1 回だけ呼び直し、同じならやめる。" + _LINK.format(u=U)
         ),
         RefError("upstream_unreachable", "x", reason="unresolvable"): _UNRESOLVABLE,
         RefError("upstream_unreachable", "x"): _UNREACHABLE,
@@ -358,18 +402,17 @@ def test_feed_image_wording():
     }
     for err, want in cases_url.items():
         assert feed_explain(U, err) == want, err
+    # ターンの外 (tool_in_turn が全部 False) なので、別の toolkit の tool は名指ししない
+    # (2026-10-19 llens 監査 (13))。ある場合の文は test_builtin_feed_image.py が固定する
     cases_path = {
-        RefError("not_found", "x"): (
-            f"ERROR: {P} は存在しない。次の手: list_workspace が使えるなら、親ディレクトリを"
-            "一覧してパスを確かめる。"
-        ),
+        RefError("not_found", "x"): f"ERROR: {P} は存在しない。",
         RefError("upstream_unreachable", "x"): (
             f"ERROR: {P} に届かない (このサーバからは到達できないか、一時的な障害)。"
-            "次の手: list_workspace が使えるなら、親ディレクトリを一覧してパスを確かめる。"
         ),
         RefError("workspace_unavailable", "x"): (
             f"ERROR: {P} は sandbox のファイルだが、sandbox に繋がらない (起動していないか、応答が無い)。"
-            "次の手: 時間を置いて 1 回だけ呼び直す。続くならユーザーに sandbox が使えないと伝える。"
+            "次の手: 1 回だけ呼び直す。続くなら sandbox を使わずに進め、ユーザーには sandbox が"
+            "使えないと伝える。"
         ),
         RefError("traversal", "x"): (
             f"ERROR: {P} は許可された範囲の外を指している (上の階層への参照 `..` や制御文字を含む)。"
@@ -385,13 +428,17 @@ def test_feed_image_wording():
     _explain_mount_error = text_of(sandbox._explain_mount_error)
 
     ext = "/ext/doc/a.pdf"
-    assert (
-        feed_explain(ext, RefError("not_found", "x"), True)
-        == _explain_mount_error(ext, RefError("not_found", "x"))
-        == (
-            f"ERROR: {ext} はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount"
-            " されている)。次の手: 中身が要るなら sandbox で読んで使う。"
-        )
+    # 2026-10-19 llens 監査: sandbox 側は内部語「mount」を外した。feed_image 側の同文
+    # (feed_image.py の _EXT_NOT_FOUND 相当) は feed_image の担当が追従する — 揃ったら
+    # 3 つの等式に戻す
+    assert _explain_mount_error(ext, RefError("not_found", "x")) == (
+        f"ERROR: {ext} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。"
+        "次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。"
+    )
+    # feed_image 側は llens 監査 (6) の文 (literal を確かめさせる。mount の話はしない) で、
+    # sandbox 側とは同文にしていない (2026-10-19 — 揃えるかは llens / ken の判断待ち)
+    assert feed_explain(ext, RefError("not_found", "x"), True) == (
+        f"ERROR: {ext} は存在しない。次の手: 受け取った literal のまま渡したか確かめる。"
     )
     # too_large (url / path)
     big = RefError(
@@ -399,18 +446,11 @@ def test_feed_image_wording():
     )
     assert feed_explain(U, big) == (
         f"ERROR: {U} は 31.1 MB あり、取得の上限 25.0 MB を超えている。このままでは自分の目に入れられない"
-        " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で send_to_workspace と run_python が"
-        "使えるなら、send_to_workspace(url=…) で sandbox に取り込み、run_python で縮小してから"
-        " /workspace/… の path を feed_image(path=…) に渡す。PDF のテキストが要り、run_subagent と"
-        " fetch_url が使えるなら、run_subagent の子が fetch_url を max_mb 付きで読む。"
-        + _LINK.format(u=U)
+        " (PDF は pages を絞っても上限は変わらない)。次の手: " + _LINK.format(u=U)
     )
     assert feed_explain(P, big, True) == (
-        f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB (上限は sandbox の配備の設定で、引数では上げられない) を超えている。このままでは自分の目に入れられない"
-        " (PDF は pages を絞っても上限は変わらない)。次の手: 画像で run_python が使えるなら、このパスを"
-        "開いて縮小し、出力を /workspace/… に書いてからその path を feed_image(path=…) に渡す。"
-        "sandbox のファイルなので、fetch_from_workspace が使えるなら、ユーザーに見せるときはそれに path を"
-        "渡し、その戻り値に従う。"
+        f"ERROR: {P} は 31.1 MB あり、取得の上限 25.0 MB (上限は sandbox の設定で決まり、引数では上げられない) を超えている。このままでは自分の目に入れられない"
+        " (PDF は pages を絞っても上限は変わらない)。"
     )
     assert feed_explain(U, RefError("too_large", "x")).startswith(
         f"ERROR: {U} は 取得の上限 を超えている。このままでは自分の目に入れられない"
@@ -443,12 +483,12 @@ def test_fetch_url_wording(monkeypatch):
     big = RefError(
         "too_large", "x", size=32_646_426, limit=25 * 1024 * 1024, size_exact=True
     )
+    # ターンの外 (run_subagent / send_to_workspace 無し): 自分で区切って読む (llens 監査 (6))。
+    # ある場合の文は test_builtin_fetch_url.py が固定する
     assert explain(U, big, 200.0) == (
-        f"ERROR: {U} は 31.1 MB で、取得の上限 25.0 MB を超えている。次の手: この会話では読まない。"
-        f'run_subagent が使えるなら URL と指示を渡し、子が fetch_url(url="{U}", max_mb=32) で読む'
-        " (子は offset で続きを取れる)。pandas 等で加工・集計したいだけなら、send_to_workspace が"
-        "使えるなら send_to_workspace(url=…) で sandbox に取り込む (読むためのテキスト化には使わない)。"
-        "中身が要らなければ、" + _LINK.format(u=U)
+        f"ERROR: {U} は 31.1 MB で、取得の上限 25.0 MB を超えている。次の手: "
+        f'fetch_url(url="{U}", max_mb=32) に query か小さい limit を付けて区切って読む'
+        " (続きは offset)。中身が要らなければ、" + _LINK.format(u=U)
     )
 
 

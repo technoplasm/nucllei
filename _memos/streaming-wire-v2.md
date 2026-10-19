@@ -141,9 +141,13 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
   まま続く代償は受け入れる)。FE `expandAssistantToolHistory`(chat-messages.ts)と BE
   `convert_content_blocks_to_messages`(ターン内の追撃 / execution_resume / subagent)は同じ形 —
   tool メッセージ群の直後に `{role:'user', content:[{text:'(直前の tool 結果の画像)'}, image_url…]}`
+  (2026-10-19 に text を「(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)」へ —
+  role が user なのでユーザーの添付と取り違えさせない。BE `content_blocks.TOOL_RESULT_IMAGES_TEXT` と
+  FE `chat-messages.ts` の同名定数、共有 fixture で固定。llens 監査)
   を挟む。url は参照文字列のまま(file id は `/api/v1/files/{id}/content`、スキーム付き URL と
   "/" 始まりはそのまま)で、実体化は毎ターン送信直前の `inline_internal_image_urls`
-  (解決できなくなった参照 — 削除済み file 等 — は "(image unavailable)" に落ち、チャットは続く)。
+  (解決できなくなった参照 — 削除済み file 等 — は "(image unavailable)" に落ち、チャットは続く。
+  2026-10-19 に「(ここにあった画像は読み込めなかった — 中身は見えていない)」へ — モデル向けは日本語)。
   両側の形は共有 fixture `nucllei/test/fixtures/history_wire/context_images.json` で固定
   (vitest `chat-messages.test.ts` / pytest `test_tool_output.py`)。
   修正前は FE だけが `context_images` を読まず、画像を見た次のターンでモデルが画像を忘れ、

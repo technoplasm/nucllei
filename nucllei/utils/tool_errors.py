@@ -37,7 +37,9 @@ middleware(同期実行)と exec runner(background)が `ToolError` を受けて�
 失敗扱いにはしない(テキストの嗅ぎ分けはどこにも置かない — ken 決定 2026-10-04)。
 """
 
-from typing import Literal, Optional, get_args
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterable, Iterator, Literal, Optional, get_args
 
 ToolErrorKind = Literal["call", "failure", "outcome", "violation", "fatal"]
 TOOL_ERROR_KINDS: tuple[str, ...] = get_args(ToolErrorKind)
@@ -46,6 +48,45 @@ TOOL_ERROR_KINDS: tuple[str, ...] = get_args(ToolErrorKind)
 # NEXT は ref_errors が再輸出する(旧来の import 先)
 ERROR_PREFIX = "ERROR: "
 NEXT = "次の手: "
+
+
+# このターンでモデルに出ている tool の名前 (spec の name)。ERROR・次の手で別の tool を名指し
+# するのは、ここにあるものだけ (2026-10-19 llens 監査 (13) — 「〜が使えるなら」をやめ、使えない
+# tool の名前をモデルに見せない)。middleware / exec runner がターンの tool 一覧から立てる。
+# 未設定 (ターンの外) は空 = どの tool も名指ししない
+_turn_tool_names: ContextVar[frozenset] = ContextVar(
+    "nucllei_turn_tool_names", default=frozenset()
+)
+
+
+def tool_in_turn(name: str) -> bool:
+    """`name` の tool がこのターンでモデルに出ているか (次の手で名指ししてよいか)。"""
+    return name in _turn_tool_names.get()
+
+
+def current_turn_tools() -> frozenset:
+    """いま立っているターンの tool の名前 (background の spawn が runner へ持ち越す用)。"""
+    return _turn_tool_names.get()
+
+
+def set_turn_tools(names: Iterable[str]):
+    """`turn_tools` の with を使えない呼び手用 (exec runner の try/finally)。戻り値の token を
+    `reset_turn_tools` に渡して戻す。"""
+    return _turn_tool_names.set(frozenset(names))
+
+
+def reset_turn_tools(token) -> None:
+    _turn_tool_names.reset(token)
+
+
+@contextmanager
+def turn_tools(names: Iterable[str]) -> Iterator[None]:
+    """このターンの tool の名前を立てる (middleware / exec runner・テスト用)。"""
+    token = set_turn_tools(names)
+    try:
+        yield
+    finally:
+        reset_turn_tools(token)
 
 
 def _strip_period(fact: str) -> str:
@@ -139,5 +180,6 @@ def tool_exception_text(tool_name: str, e: BaseException) -> str:
     what = e.__class__.__name__ + (f": {msg[:200]}" if msg else "")
     return format_tool_error(
         f"ツール {tool_name} の実行中にエラーが起きた ({what})",
-        "引数を見直して 1 回だけ呼び直す。続くならユーザーに失敗を伝える。",
+        "引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は"
+        "使わずに進め、ユーザーには失敗したことを伝える。",
     )

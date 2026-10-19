@@ -58,15 +58,50 @@ def test_missing_file_empty_and_listed_are_told_apart(monkeypatch, tmp_path):
 
     assert listed("nope") == {"entries": [], "exists": False, "is_dir": False}
     assert listed("data/a.csv") == {"entries": [], "exists": True, "is_dir": False}
-    assert listed("empty") == {"entries": [], "exists": True, "is_dir": True}
+    assert listed("empty") == {
+        "entries": [],
+        "exists": True,
+        "is_dir": True,
+        "truncated": False,
+    }
     # `.` 始まりしか無いディレクトリは「空」(見せるファイルが無い)
-    assert listed("hidden_only") == {"entries": [], "exists": True, "is_dir": True}
+    assert listed("hidden_only") == {
+        "entries": [],
+        "exists": True,
+        "is_dir": True,
+        "truncated": False,
+    }
     assert listed("data") == {
         "entries": [{"path": "data/a.csv", "size": 3}],
         "exists": True,
         "is_dir": True,
+        "truncated": False,
     }
     assert listed(".")["entries"] == [{"path": "data/a.csv", "size": 3}]
+
+
+def test_list_says_truncated_only_when_more_files_remain(monkeypatch, tmp_path):
+    """件数の上限 (`LIST_LIMIT`) で打ち切ったら `truncated: true` (2026-10-19 llens 監査 —
+    nucllei の list_workspace がそれを読んで「N 件で打ち切った」と言う)。ちょうど上限の件数は
+    打ち切りではない。追加フィールドなので読まない旧 nucllei とも互換。"""
+    c = _client(monkeypatch, tmp_path)
+    mod = sys.modules["sandbox_main_files_test"]
+    monkeypatch.setattr(mod, "LIST_LIMIT", 3)
+    ws = tmp_path / "u1"
+    (ws / "d").mkdir(parents=True)
+    for i in range(3):
+        (ws / "d" / f"{i}.txt").write_text("x")
+
+    def listed():
+        r = c.post("/files/list", json={"user_id": "u1", "path": "d"})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    res = listed()
+    assert len(res["entries"]) == 3 and res["truncated"] is False
+    (ws / "d" / "3.txt").write_text("x")
+    res = listed()
+    assert len(res["entries"]) == 3 and res["truncated"] is True
 
 
 def test_files_write_reports_cache_ttl(monkeypatch, tmp_path):
@@ -148,7 +183,9 @@ def test_exec_and_exec_cell_report_cache_ttl_without_exports(monkeypatch, tmp_pa
     r = c.post("/exec_cell", json={"user_id": "u1", "chat_id": "c1", "code": "1"})
     assert r.status_code == 200, r.text
     assert r.json()["session_reset"] and "exports" not in r.json()
-    assert not hasattr(mod, "_collect_exports") and not hasattr(mod, "_snapshot_exports")
+    assert not hasattr(mod, "_collect_exports") and not hasattr(
+        mod, "_snapshot_exports"
+    )
 
 
 # --- 1 ファイルの上限: nucllei が渡す `file_limit_bytes` と sandbox の上限の小さいほう ------------

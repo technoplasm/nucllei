@@ -75,7 +75,7 @@
 | `{{CURRENT_DATE}}`     | 今日の日付 (例: `2026-10-03`)                                                        |
 | `{{CURRENT_TIME}}`     | 現在の時刻                                                                           |
 | `{{CURRENT_DATETIME}}` | 日付と時刻                                                                           |
-| `{{CURRENT_WEEKDAY}}`  | 曜日 (英語)                                                                          |
+| `{{CURRENT_WEEKDAY}}`  | 曜日 (例: `月曜日`)                                                                  |
 | `{{USER_NAME}}`        | 利用者の名前                                                                         |
 | `{{USER_ROLE}}`        | 利用者の権限 (`admin` / `user` など)                                                 |
 | `{{USER_GROUPS}}`      | 利用者が所属しているグループの名前を `, ` でつないだもの (名前順。所属が無ければ空)  |

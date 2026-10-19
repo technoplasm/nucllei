@@ -463,6 +463,13 @@ md 等)を添付して要らない file_id を増やさない — sandbox 経由
   「{path} はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)。
   次の手: 中身が要るなら sandbox で読んで使う。」— 「渡さない」とも「/workspace にコピーして
   渡す」とも言わない(resolver は「無い」と「sandbox にだけ在る」を分けられない)。
+  **2026-10-19 改訂(llens 監査)**: fetch_from_workspace の文は「{path} はこのサーバの /ext に無い
+  (存在しないか、sandbox の中にだけある)。次の手: 中身が要るなら run_python / run_shell でそのパスを
+  開いて使う。」(「mount」は内部語、「sandbox で読んで」は手になっていなかった)。feed_image(path=) は
+  mount の話をやめ「{path} は存在しない。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か
+  run_shell で親ディレクトリを一覧する。」(読めない `/ext` は書き換えた literal であることが多い)。
+  docstring は「`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く」と言い切る。
+  経緯は `builtin-tools.md`「モデル向け文面の監査(2026-10-19)」。
 - 同日、tool がモデルに返す文を「事実の文 + `次の手:`」の形に揃えた(README_API §5.1)。
   添付の報告は、画像・音声・動画なら「ユーザーの画面には既に表示されている — 本文に貼り直さない」、
   それ以外(チャットのファイル一覧にだけ載る)は「本文に [名前](/api/v1/files/{id}/content) と書く」。
@@ -580,6 +587,9 @@ llens 側が cage の公開ルートを固定の `/ext/doc`(doc の HTML)・`/ex
   `audio/*` のみ)。任意の meta を受ける口は作っていない。
 - `<source>` タグは `utils/middleware.py::build_source_context` に切り出した。属性は
   `id` / `file_id` / `dictation="true"`(+ 分かれた録音だけ `part` / `parts`)/ `extraction`。
+  **2026-10-19(llens 監査 (3))**: `id`(連番)をやめ `file_id` / `name`(ファイル名)/ … の順に。
+  none / failed の本文は「(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: …)」の注記
+  (次の手の tool はそのターンにあるものだけ。failed の例外の文は出さない)。
   音声はふつう未抽出なので `extraction="none"` + file_id 告知のまま、印だけが増える。
 - Attachment フックは他の添付と同じく発火する(`__event__="upload"`)。音声をどう扱うかは
   配備の Attachment 次第。

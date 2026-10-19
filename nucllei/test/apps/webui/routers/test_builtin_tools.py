@@ -324,8 +324,33 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
 
         from nucllei.builtin_tools.history import Tools
 
-        with pytest.raises(ValueError):
+        # ToolError (failure) で返す — 旧 ValueError は汎用の例外経路で fatal (赤) になっていた
+        with pytest.raises(ToolError) as e:
             Tools().list_history(__user__=None)
+        assert e.value.kind == "failure"
+        assert e.value.text == "ERROR: ユーザーを特定できないので履歴は読めない。"
+        from nucllei.builtin_tools.chat_files import Tools as ChatFiles
+
+        with pytest.raises(ToolError) as e:
+            ChatFiles().list_chat_files(__user__=None, __chat_id__="c1")
+        assert e.value.kind == "failure"
+        assert (
+            e.value.text
+            == "ERROR: ユーザーを特定できないので添付ファイルは一覧できない。"
+        )
+
+    def test_chat_files_spec_explains_deleted(self):
+        """戻り値の deleted: true の意味がモデルに届く (spec の description)。"""
+        from nucllei.builtin_tools.chat_files import Tools
+        from nucllei.utils.tools import get_tool_specs
+
+        specs = {s["name"]: s for s in get_tool_specs(Tools())}
+        for name in ("list_chat_files", "grep_chat_files"):
+            desc = specs[name]["description"]
+            assert (
+                "deleted: true の付いたものは削除済みで、その file_id はもう開けない"
+                in desc
+            )
 
     def test_result_carries_json_render_kind(self):
         """builtin tool の結果に render {kind:"json"} が付く(#99)。
@@ -740,8 +765,10 @@ class TestAttachmentText(AbstractPostgresTest):
             assert out.text == (
                 f"ERROR: file_id {fid} のレコードが無い、またはアクセス権が無い"
                 " (どちらなのかは区別できない)。"
-                f"次の手: {FILE_ID_ARG_FORM} {REF_ARGS_RULE} list_chat_files か"
-                " grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。"
+                # 確かめ方の tool はこのターンにあるものだけ (ref_errors._no_file_next — ここでは
+                # ターンの外なので名指ししない)
+                f"次の手: {FILE_ID_ARG_FORM} {REF_ARGS_RULE} 会話に出ている file_id を"
+                "確かめて渡し直す。"
                 "ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。"
             )
         # owner が falsy な行も拒否(fail-closed — files.user_id は nullable カラム)
@@ -782,6 +809,71 @@ class TestAttachmentText(AbstractPostgresTest):
             assert "feed_image" not in e.value.text
             outs[fid] = e.value.text.replace(fid, "<id>").replace(content_type, "<ct>")
         assert len(set(outs.values())) == 1
+        # 次の手はこのターンにある tool だけ (2026-10-19 llens 監査)。無ければ読めないと伝える
+        assert outs["img-1"] == (
+            "ERROR: file_id <id> には抽出テキストが無い(content_type=<ct>)。次の手: この file_id を"
+            "読み直さない。中身が要る話なら、読めないことをユーザーに伝える。"
+        )
+        # ある tool は種類を「〜なら」で条件にして名指しする (決めつけない — 種類で文を変えない)
+        from nucllei.utils.tool_errors import turn_tools
+
+        with turn_tools(["feed_image", "send_to_workspace"]):
+            with pytest.raises(ToolError) as e:
+                Tools().read_attachment("aud-1", __user__={"id": "owner"})
+        assert e.value.text.split("次の手: ", 1)[1] == (
+            '画像・PDF なら feed_image(file_id="aud-1") で見る。それ以外で中身が要るなら'
+            ' send_to_workspace(file_id="aud-1") で sandbox に取り込み、形式に合った道具で扱う。'
+        )
+
+    def test_failed_extraction_is_not_returned_as_the_body(self, tmp_path):
+        """抽出が失敗したファイルの data.content は attachment の例外の文 (`utils/attachment.py`)。
+        本文として返さず、「文字が抜き出されていない」の outcome にする (middleware の
+        `<source extraction="failed">` と同じ扱い。text 系でも raw は読まない — 2026-10-19)。"""
+        from nucllei.builtin_tools.attachment_text import Tools
+        from nucllei.utils.tool_errors import turn_tools
+
+        raw = tmp_path / "note.txt"
+        raw.write_text("生テキスト", encoding="utf-8")
+        self._new_file("owner", "bad-1", "note.txt", path=str(raw))
+        self.Files.update_file_data_by_id(
+            "bad-1",
+            {
+                "content": "RuntimeError: /srv/secret/x.py http://internal",
+                "status": "failed",
+            },
+        )
+        with pytest.raises(ToolError) as e:
+            Tools().read_attachment("bad-1", __user__={"id": "owner"})
+        assert e.value.kind == "outcome"
+        assert e.value.text == (
+            "ERROR: file_id bad-1 は文字が抜き出されていない (抽出に失敗した。"
+            "content_type=text/plain)。次の手: この file_id を読み直さない。中身が要る話なら、"
+            "読めないことをユーザーに伝える。"
+        )
+        assert "secret" not in e.value.text and "生テキスト" not in e.value.text
+        with turn_tools(["feed_image", "send_to_workspace"]):
+            with pytest.raises(ToolError) as e:
+                Tools().read_attachment("bad-1", __user__={"id": "owner"})
+        assert e.value.text.split("次の手: ", 1)[1] == (
+            '画像・PDF なら feed_image(file_id="bad-1") で見る。それ以外で中身が要るなら'
+            ' send_to_workspace(file_id="bad-1") で sandbox に取り込み、形式に合った道具で扱う。'
+        )
+
+    def test_read_attachment_spec_says_when_to_call(self):
+        """docstring は「いつ呼ぶか」に絞った (2026-10-19 llens 監査 (2))。spec に届く形で固定。"""
+        from nucllei.builtin_tools.attachment_text import Tools
+        from nucllei.utils.tools import get_tool_specs
+
+        (spec,) = get_tool_specs(Tools())
+        assert spec["description"] == (
+            "添付・生成物の抽出テキストを file_id から区切って読む (自分のファイルのみ)。\n"
+            "本文が既にこの会話に入っている添付 (`<source>` にあるもの) には呼ばない。\n"
+            "使うのは、本文が会話に入っていない file_id (大きすぎて読み込まれなかった添付・\n"
+            "tool やサブエージェントが作ったもの・instruction で file_id だけ渡されたもの)"
+            " を読むときだけ。\n"
+            "長い文書は offset で続きを取る (next_offset が返る間は続きがある)。\n"
+            "テキスト層が無いファイルは読めない — 見るなら feed_image。"
+        )
 
     def test_sync_registers_builtin_row(self):
         from nucllei.builtin_tools import sync_builtin_tools

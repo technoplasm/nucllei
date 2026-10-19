@@ -607,7 +607,9 @@ staging 2026-10-04). Errors are assembled the same way everywhere:
 - `file_id` cannot be read (`ref_errors.file_id_error`):
   `ERROR: file_id <id> のレコードが無い、またはアクセス権が無い (どちらなのかは区別できない)。次の手: `
   (+ `FILE_ID_ARG_FORM` + `" "` + `REF_ARGS_RULE` + `" "` for a non-UUID value) +
-  `list_chat_files か grep_chat_files が使えるなら、このチャットの file_id を確かめて渡し直す。ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。`
+  `list_chat_files か grep_chat_files でこのチャットの file_id を確かめて渡し直す。ユーザーには「このファイルは開けなかった」と伝え、存在しないとは言い切らない。`
+  (only the finders that are on the turn are named — §5.1; with neither,
+  `会話に出ている file_id を確かめて渡し直す。` + the same last sentence)
   — "no such record" and "not yours" are deliberately one sentence (existence
   is not leaked); the fact says the two cannot be told apart, and the next step
   keeps the model from telling the user the file does not exist. Every tool that
@@ -627,6 +629,24 @@ unexplained error (no `RefError`, or a code the table does not know — a gap on
 our side) → `fatal` — except `upstream_status` with HTTP 404 / 410, which is `outcome`
 like `not_found` (401 / 403, other 4xx, 5xx and redirects that could not be
 followed stay `failure`).
+
+The `upstream_status` text is worded per HTTP status (2026-10-19 — the old
+single sentence 「上流が {status} を返した。次の手: 5xx なら時間を置いて 1 回だけ
+再試行する …」 asked for a wait the model cannot make and led it to retry 4xx
+too): `ERROR: <url> は HTTP <status> を返した (<meaning>)。次の手: <act>` + the
+link sentence —
+
+| Status    | `(<meaning>)`                        | `<act>`                              | Link sentence                                         |
+| --------- | ------------------------------------ | ------------------------------------ | ----------------------------------------------------- |
+| 404 / 410 | `(ページが無い)`                     | `呼び直しても同じ。`                 | `TELL_BROKEN_LINK`                                    |
+| 401 / 403 | `(ログインか権限が要るページ)`       | `呼び直しても同じ。`                 | `SHOW_AS_LINK` with 「開ける」 → 「開けることがある」 |
+| 429       | `(アクセスが多すぎるとして断られた)` | `続けて呼び直さない。`               | `SHOW_AS_LINK`                                        |
+| other 4xx | `(要求を受け付けなかった)`           | `同じ URL で呼び直しても同じ。`      | `SHOW_AS_LINK`                                        |
+| 5xx       | `(相手のサーバー側の障害)`           | `1 回だけ呼び直し、同じならやめる。` | `SHOW_AS_LINK`                                        |
+| other     | none (`HTTP <status> を返した`)      | `呼び直しても同じことが多い。`       | `SHOW_AS_LINK`                                        |
+
+A non-numeric status reads 「HTTP のエラーを返した」. The word 「上流」 is no
+longer used in model-facing text.
 
 Wording that depends on the **resolution result** (missing / oversize /
 redirect that could not be followed / upstream status / unreachable / the
@@ -828,9 +848,15 @@ files are shown to users **by URL only** — there is no extraction path that
 reads a sandbox-only `/ext` file and attaches it (it would only mint needless
 file_ids; raw corpus files are rarely what a user wants). A `/ext` path that
 nucllei does not serve is therefore a true not-found or a mount
-mismatch, and `fetch_from_workspace` / `feed_image(path=)` say so in one
-neutral sentence: `ERROR: <path> はこのサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)。次の手: 中身が要るなら sandbox で読んで使う。`
-(no "withheld" wording, no "copy it to `/workspace` and attach" route). Until
+mismatch. `fetch_from_workspace` says so in one neutral sentence:
+`ERROR: <path> はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。`
+(no "withheld" wording, no "copy it to `/workspace` and attach" route; until
+2026-10-19 the fact said 「sandbox にだけ mount されている」 and the step
+「sandbox で読んで使う」 — "mount" is an internal word and the step named no
+tool). `feed_image(path=)` no longer talks about mounts at all (2026-10-19):
+an `/ext/…` path it cannot read is most often a literal the model rewrote, so
+it says `ERROR: <path> は存在しない。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。`
+(only the listing tools on the turn are named — §5.1). Until
 2026-10-03 there was a serving scope (`EXT_FILE_SCOPES`) and a
 `mounted_path_withheld` refusal 「利用者に配信しない範囲にある」 — both gone.
 
@@ -849,7 +875,10 @@ the trailing `#page=N` is parsed, so it does not collide with a URL's own
 fragment). Resolved references are inlined as base64 right before the model
 call: images as-is, PDFs rasterized page by page (default page 1) — no File is
 created. Anything outside those roots, oversize, missing, or neither image nor
-PDF becomes `(image unavailable)` — as does any other `image_url` form
+PDF becomes the note `(ここにあった画像は読み込めなかった — 中身は見えていない)`
+(`file_images.UNAVAILABLE_IMAGE_TEXT`; English 「(image unavailable)」 until
+2026-10-19 — model-facing text is Japanese, and the reason is never told apart,
+so existence is not leaked) — as does any other `image_url` form
 (protocol-relative `//host/…`, non-http(s) schemes, relative paths, any other
 `/…`), including
 an external URL passed in `image_url` on the headless `/api/chat/completions`
@@ -867,7 +896,7 @@ value actually used. `load_ref(ref, user_id)` is a thin wrapper over
 human/log message **whose wording is not stable — never branch on it or
 re-parse the value to guess what happened**; tools build the model-facing
 wording from `code` and, where a code has a breakdown, `reason` (the inline
-step above still emits the same `(image unavailable)` for every code and only
+step above still emits the same unavailable-image note for every code and only
 logs the reason). The `code` set is closed — do not add to it. `reason` is a
 stable field for telling cases of one code apart without growing that set; its
 values are a closed set too, carried by `unknown_upstream`, `upstream_status`
@@ -1095,12 +1124,25 @@ curl -N http://HOST/api/chat/completions \
 - `tool_ids` and `features` in your payload are silently discarded (tool
   availability is model configuration — §1).
 - `files` entries are ACL-checked against the caller, and each file's extracted
-  text is injected into the system message as a `<source id=".." file_id="..">`
+  text is injected into the system message as a `<source file_id=".." name="..">`
   block (full text — there is no RAG retrieval step). Attributes, in this order:
-  `id` (1-based index in this request), `file_id`, then for a voice-dictation
+  `file_id`, `name` (the file name, HTML-escaped as an attribute value; omitted
+  when the file has none), then for a voice-dictation
   recording (§4.4) `dictation="true"` — plus `part=".." parts=".."` only when the
   recording was split into two or more files — then `extraction="failed"` /
-  `extraction="none"` when the file has no extracted text.
+  `extraction="none"` when the file has no extracted text. Until 2026-10-19 the
+  first attribute was `id="N"` (1-based index in the request — a leftover of
+  the removed citation chips that nothing read); it is gone, so a prompt that
+  told the model "the `id` is not the file id" no longer needs to.
+  A file without extracted text carries a fixed note instead of a body (the
+  exception text of a failed extraction is logged, never shown to the model):
+  `(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: 中身が要るなら、PDF のページは feed_image で見て、加工・変換は send_to_workspace で取り込む。read_attachment では読めない)`.
+  The next steps name only tools on the turn (§5.1) — each clause is dropped
+  when its tool is absent, and with none of the three the note ends after the
+  fact. For `extraction="none"` with a text content type (the types
+  `read_attachment` decodes raw — `attachment_text._is_text_ct`) the next
+  steps are `中身は read_attachment(file_id="…") で読める。加工・変換は send_to_workspace で取り込む`
+  instead (no `feed_image`, no 「読めない」).
 
 **Chat-wire mode** (`chat_id` + the **assistant** message `id` present) — the UI's
 own wire, usable by API clients that want the conversation to exist in the UI.
@@ -1449,11 +1491,13 @@ class Tools:
     the 次の手 part". Rules: plain style (だ / である, no です / ます); a link the
     model may hand to the user is written as a markdown link `[ラベル](URL)`,
     never as a bare path (`ref_errors.SHOW_AS_LINK` / `show_as_link(url)`);
-    a next step that names a tool from another toolkit (`run_subagent`,
-    `run_python`, `run_shell`, `send_to_workspace`, `feed_image`, `fetch_url`,
-    …) is conditional — 「〜が使えるなら …」 — because that tool may not be
-    mounted; no internal names (codes, env names, storage terms) and nothing
-    deployment-specific. Anything addressed only to the model — the argument
+    a next step **names another tool only when that tool is on this turn**
+    (see "Naming other tools" below); no internal names (codes, env names,
+    storage terms — 「Files」「配備」「mount」「上流」「multi-worker」
+    「chat_id」, 2026-10-19) and nothing deployment-specific; no step the model
+    cannot carry out (「時間を置いて」 — a model cannot wait; 「timeout_s を
+    上げて」 when it is already at the cap; a placeholder such as 「<X を超える
+    値>」 that would be copied literally — give a concrete value). Anything addressed only to the model — the argument
     form sentences (`*_ARG_FORM`, `REF_ARGS_RULE`, §3.8), display instructions
     (「本文に貼り直さない」, 「本文に … と書く」), 「回答に写さない」 — goes after
     `次の手: `, never in the fact sentence. Raw exception text, HTTP `detail`,
@@ -1462,6 +1506,54 @@ class Tools:
     audits `ref_errors` / `feed_image` / `fetch_url` / `sandbox` /
     `context_budget` / `attachment_text` for this. Deployment-layer tools should follow
     the same contract.
+  - **Naming other tools: only the ones on this turn** (2026-10-19, llens
+    audit (13)). A next step that points at another tool (`run_subagent`,
+    `feed_image`, `fetch_url`, `send_to_workspace`, `read_attachment`,
+    `list_chat_files`, `await_task`, `load_skill`, …) names it only when
+    `nucllei.utils.tool_errors.tool_in_turn(name)` is true — i.e. the tool is
+    in the spec list the model got on this turn. A step whose tool is absent
+    is dropped or replaced by what is left (a link for the user, 「ユーザーに
+    伝える」); when nothing is left the ERROR carries no `次の手:` at all. Until
+    2026-10-19 such steps were conditional — 「run_subagent が使えるなら …」 —
+    which showed a model the names of tools it could not call, and a
+    deployment that hands a tool out through a skill's access control (llens:
+    `run_subagent` via `load_skill`) does not want the name shown to users
+    outside it. The server sets the turn's tool names (a `ContextVar`) around
+    every synchronous tool call, from the turn's tool dict at call time — so a
+    tool a `load_skill` added earlier in the same response counts; it reaches
+    sync tools run in a worker thread; a background run (§5.9) carries the set
+    of the turn that spawned it; a subagent's child turn has its own set (its
+    own tools); outside a turn the set is empty, so nothing is named. The
+    attachment `<source>` notes (§4.3) are built with the same set. Tools of
+    the **same toolkit** are mounted together and may be named directly (the
+    sandbox texts name `run_shell` / `read_file` / `list_workspace` without a
+    check). Build the text at call time (the set differs per turn), never in
+    a module constant. A custom tool does the same:
+
+    ```python
+    from nucllei.utils.tool_errors import ToolOutcome, tool_in_turn
+
+    class Tools:
+        def read_doc(self, path: str) -> str:
+            """..."""
+            doc = _lookup(path)
+            if doc is None:
+                nxt = None  # no 次の手 when no tool applies
+                if tool_in_turn("search_docs"):
+                    nxt = "search_docs で正しいパスを探して呼び直す。"
+                raise ToolOutcome(f"{path} は存在しない", nxt)
+            return doc
+    ```
+
+    Tests set the names with the context manager
+    `tool_errors.turn_tools(["search_docs", …])` (a background-style runner that
+    cannot use `with` has `set_turn_tools(names)` / `reset_turn_tools(token)`;
+    `current_turn_tools()` reads the set). The regression tests are
+    `nucllei/test/apps/webui/utils/test_turn_tools.py` (wiring) and the
+    per-tool tests (both branches of each text). The `[task]` delivery notice
+    (§5.9) is the one exception: it is assembled before the continuation turn
+    has a tool list, so it keeps 「fetch_from_workspace が使えるなら」.
+
   - **Failures: raise `ToolError`** (#145, 2026-10-04). A failed call is not
     returned as a string or as `{ok: false, error}` — the tool raises
     `nucllei.utils.tool_errors.ToolError(fact, next=None, *, kind=...)` (or a
@@ -1632,21 +1724,21 @@ Declare any of these in a method signature (with a default, e.g.
 `__user__: Optional[dict] = None`) and the server injects it. They are stripped
 from the model-facing spec, and the model cannot spoof them.
 
-| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__user__`                      | `{"id","email","name","role","info"}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization (a per-plugin copy)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes `(image unavailable)`); `ref` is a file_id, a URL (same-server `/ext/{rest}`, absolute `https://…/ext/{rest}`, or any http(s) URL — the same-server `/ext/{rest}` is also the sandbox's path), or a sandbox path (`/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
-| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.). In a resumed turn (§5.9 server-driven delivery) it is an internal request with no incoming origin — no `Host` / `X-Forwarded-*` — so a tool cannot build absolute URLs from it there; keep URLs relative                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Parameter                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__user__`                      | `{"id","email","name","role","info"}` — `info` is the opaque extra-metadata dict (§3.4) for external-system authorization (a per-plugin copy)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `__event_emitter__`             | `async fn(event)` — push UI events mid-call (§5.5); `None` on the headless API path. **`status` is gone platform-wide** — use `__progress__`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message (its text part, `(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)` — `content_blocks.TOOL_RESULT_IMAGES_TEXT`, same in the frontend; 「(直前の tool 結果の画像)」 until 2026-10-19 — says it is not a user attachment) for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes the note `(ここにあった画像は読み込めなかった — 中身は見えていない)`); `ref` is a file_id, a URL (same-server `/ext/{rest}`, absolute `https://…/ext/{rest}`, or any http(s) URL — the same-server `/ext/{rest}` is also the sandbox's path), or a sandbox path (`/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
+| `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `__files__`                     | the chat's attachment refs (already ACL-filtered)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `__messages__`                  | the outbound message list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `__metadata__`                  | request metadata (chat/message ids, files, skill activations, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `__request__`                   | the FastAPI `Request` (→ `request.app.state.config` etc.). In a resumed turn (§5.9 server-driven delivery) it is an internal request with no incoming origin — no `Host` / `X-Forwarded-*` — so a tool cannot build absolute URLs from it there; keep URLs relative                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `__model__`                     | a model dict — note: for tools this is the _task_ model, not necessarily the chat model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### 5.4 Argument & result rendering
 
@@ -1796,14 +1888,27 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     per chat: `{role, excerpt}` with ±60 chars of context around the match,
     NFKC + casefold matching; empty when only the title matched — 2026-10-03).
   - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
-    issued in the current chat, metadata only.
+    issued in the current chat, metadata only. An entry with `deleted: true` is
+    a deleted file whose `file_id` no longer opens — the docstrings say so
+    (2026-10-19). Without a user both tools (and `builtin_history`) raise a
+    `failure` ToolError (until 2026-10-19 a bare `ValueError`, i.e. `fatal`).
   - `builtin_attachment_text` — `read_attachment(file_id, offset?, max_chars?)`:
     the extracted text of an owned attachment (`Files.data.content` written by
     the deployment's Attachment function — §7; text-typed files fall back to a
     raw decode). Owner-only by direct file_id, deliberately **not** chat-scoped:
     mount it on an agent preset and a subagent (§5.8) can read materials the
     parent references by file_id without the content ever entering the parent's
-    context.
+    context. The docstring (2026-10-19) says **when** to call it: only for a
+    `file_id` whose text is not already in the conversation (too large to be
+    loaded, made by a tool or a subagent, handed over by `file_id` in an
+    instruction) — never for an attachment already in a `<source>` block; the
+    return shape moved to a code comment. A file whose extraction **failed**
+    is an `outcome` 「file_id … は文字が抜き出されていない (抽出に失敗した。content_type=…)」
+    — the exception text the Attachment function stored in `data.content` is
+    logged, not returned (until 2026-10-19 it was returned as the text). Both
+    "no text" outcomes end with the next step 「画像・PDF なら feed_image(file_id="…") で見る。それ以外で中身が要るなら send_to_workspace(file_id="…") で sandbox に取り込み、形式に合った道具で扱う。」
+    (each clause only when its tool is on the turn; with neither, 「この
+    file_id を読み直さない。中身が要る話なら、読めないことをユーザーに伝える。」).
   - `builtin_context_budget` — `get_context_budget()`: the current chat's
     measured context usage, for the model to check how much room it has left
     in a long piece of work (tool chains, long reasoning). Reads the usage
@@ -1822,7 +1927,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (「context 長が分からない (モデルの接続先が context 長を返さず、既定値も未設定) ので残量は出せない」 — no
     internal names such as `meta.context_size` in model-visible text).
     Before the first model call of a chat completes: an `outcome` ToolError
-    (「このチャットの usage がまだ無い…」).
+    (「このチャットの usage がまだ無い…。次の手: 残量は分からないものとして作業を続ける。次のステップで 1 回だけ呼び直してよい。」);
+    usage without token counts: 「…次の手: 残量は分からないものとして作業を続ける (呼び直しても変わらない)。」
+    (both got a next step on 2026-10-19).
     Within a native tool loop the tool runs between model calls, so the value
     is as of the latest completed call — the pending tool results of the
     current step are not yet counted. Owner-only (the chat must belong to
@@ -1851,7 +1958,37 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     results that pushed that path show the new content too (re-sent history
     has no snapshot). Only the conversion is reused when the content is
     unchanged. A `file_id` never changes, and an `http(s)://` URL is read once
-    per turn.
+    per turn. A fed image stays in the context on **later turns** too (the
+    reference is re-sent with the history), so the docstring tells the model to
+    narrow a PDF to the pages it needs (2026-10-19; it used to say 「このターン内で」).
+    **No reference argument** (`url` / `path` / `file_id` all omitted) feeds the
+    chat's attached PDFs (optionally filtered by `filename`), **at most 10 pages
+    in total across all of them** (`_ATTACHED_PDF_PAGES`, ken 2026-10-19) on top
+    of the per-file valve `max_pages` — so with the default `max_pages` = 3 a
+    single attached PDF still gives 3 pages, and 10 is the cap when several are
+    attached. Pages over the budget are cut with
+    「添付 PDF をまとめて見るのは合わせて 10 ページまでなので打ち切った。次の手: 続きが要るなら file_id="…" に pages を付けて呼び直す。」,
+    and a PDF reached after the budget is spent gets the line
+    「- <name>: 添付 PDF をまとめて見るのは合わせて 10 ページまでなので、見ていない。次の手: 見るなら file_id="…" に pages を付けて呼び直す。」
+    (not flagged — nothing failed). The no-argument "nothing found" error no
+    longer suggests re-feeding an attached image by `file_id` (attached images
+    are already in view).
+    Next steps on failures (2026-10-19, tools named only when on the turn —
+    §5.1): an oversize **PDF** is turned into page images with `pdftoppm`
+    (`run_shell`, e.g. `pdftoppm -f 3 -l 3 -r 100 -png <path> /workspace/page`;
+    a URL is first imported with `send_to_workspace`), an oversize image is
+    shrunk with `run_python`; for an oversize URL the text route is
+    `fetch_url(url=…, max_mb=<concrete MB>)` — by a `run_subagent` child, or,
+    without `run_subagent`, by the model itself with `query` or a small
+    `limit`. A format the VLM cannot take (HEIC, …) is converted to PNG with
+    Pillow in `run_python`, and **if that does not open it (or there is no
+    sandbox) the user is asked to attach a JPEG / PNG instead**. Neither image
+    nor PDF: text is read with `read_file` (path), `read_attachment` (file) or
+    `fetch_url` (URL), and an Office document's layout is seen by converting it
+    to PDF with `soffice --headless --convert-to pdf` in `run_shell` and
+    feeding that path. A sandbox that does not answer: 「1 回だけ呼び直す。続く
+    なら sandbox を使わずに進め、ユーザーには sandbox が使えないと伝える。」 (no
+    「時間を置いて」).
     Always registered. Usage guidance beyond the docstring: §5.7.1.
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link
@@ -1878,6 +2015,23 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the next offset. Valves: `max_fetch_mb` (25; `max_mb` per call may raise it
     up to `max_fetch_mb_ceiling`, 200), `max_output_chars` (40000; also caps
     `limit`), `pdf_text_char_threshold` (100).
+    A PDF with a text layer is returned with the note
+    「テキスト層を読んだだけで、レイアウト・図・表・印影は見ていない。次の手: 文字で足りないとき (表や記入欄の並び・図・手書き・印影が関わる) だけ、feed_image(url="…", pages="N") で要るページを見る。」
+    (the `次の手` only when `feed_image` is on the turn). **ken 2026-10-19
+    overrides 2026-09-07** (「PDF はできるだけ見る」, the note said 「…で
+    ユーザーが見るものと同じものを見る (重くない)」): a fed page stays in the
+    context on later turns, so it is not "light" — look only when the text
+    is not enough, as for attached PDFs. A cut result names the next window
+    **with the same `query`** (`続きは fetch_url(url=..., query="…", offset=N) で取る (同じ query を渡す)`
+    — the offset counts the filtered text). Oversize (`too_large`): the
+    suggested `max_mb` is always a concrete number (never a placeholder) —
+    over the real size when known, else twice the cap, within the ceiling —
+    and the step is 「run_subagent に URL と指示を渡し、子が fetch_url(url=…, max_mb=N) で読む」
+    when `run_subagent` is on the turn, else 「fetch_url(url=…, max_mb=N) に query か小さい limit を付けて区切って読む (続きは offset)」;
+    a file URL (`/api/v1/files/{id}/content`) over the cap points at
+    `read_attachment(file_id=…)` (when on the turn) and at `max_mb=N` within
+    the ceiling. An image or a scanned PDF names `feed_image` only when it is
+    on the turn; otherwise the step is the link for the user.
     **Always registered** (since 2026-10-03; before that it was gated on any
     of `EXT_UPSTREAMS` / `EXT_PUBLIC_BASES` / the removed `EXT_INTRANET_CIDRS`,
     because without them no URL could resolve). The docstring the model sees
@@ -1897,7 +2051,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   - `builtin_subagent` — `run_subagent(preset_id?, instruction, session_id?)`:
     delegates one turn to a child agent session (§5.8). Always registered;
     whether it appears in a turn is the row ACL × the preset's `meta.toolIds`
-    × the preset's delegation allowlist (`meta.subagentPresetIds`, §5.8).
+    (or a skill that carries it — §5.8) × the preset's delegation allowlist
+    (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `read_file` / `list_workspace` /
     `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
@@ -1958,7 +2113,43 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     of each comes from the valves `image_hint` / `binary_hint` /
     `proxy_mount_hint`, so a deployment can point at its own tools. The result
     renders by extension (`.md` markdown, code / data as highlighted code,
-    else text) via `Rendered` (§5.4).
+    else text) via `Rendered` (§5.4). For an `/ext/<name>/…` outside
+    `groups` / `public` the extension check comes first (an image or an Office
+    file gets that category's sentence), and only then the refusal, whose next
+    step (non-proxy) is 「テキストなら run_shell の cp で /workspace/ にコピーしてから read_file で読む。CSV・JSON などのデータを集計するなら run_python でそのパスを開く。」
+    (was 「run_shell の cat で読む」, 2026-10-19). When `image_hint` is the
+    default and `feed_image` is not on the turn, the image / PDF refusal says
+    「PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを書き出し、そのファイルを read_file で読む。」
+    instead (a deployment's own valve text is kept as is).
+    **Wording of the sandbox texts (2026-10-19, llens audit)**: a full
+    workspace (HTTP 507 / `No space left on device`) ends with
+    「次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。」
+    — the model never deletes to make room (it used to be told to `rm` inside
+    `trash/`); in `send_to_workspace`'s per-file report it is one line
+    「- <name>: workspace の容量 (quota) が一杯 (取り込まなかった)」 per file
+    and the 次の手 once at the end. A cut run output ends with
+    「…全文が要るなら出力を /workspace のファイルに書き出し read_file で読む (探すだけなら rg で絞る)」
+    (was `rg / head / tail`). A timeout says 「処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)」,
+    or, when the effective timeout is already 600 s, 「処理を分けて呼び直す (timeout_s は既に上限の 600 秒)」
+    (`run_python` cells: 「…続ける」). A `run_python` cell that did not answer
+    and was killed with its kernel reports only
+    「**タイムアウト (実行環境を強制終了した。変数・import は失われた)** 次の手: 処理を分けて定義からやり直す。」
+    (the sandbox's own `error` for that case is dropped — before, "reset",
+    "variables are kept" and "restarted" appeared in one result); the
+    sandbox's `/exec_cell` errors are plain style and no longer carry the
+    exception `repr` (logged instead). `write_file` over the text cap says
+    「run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。」
+    (was 「分割して複数回に分ける」). `write_file`'s `path` description and
+    refusal state that **admins can also write to every group's place and to
+    `/ext/public/`**. `list_workspace` appends
+    「N 件で打ち切った。次の手: 下の階層のディレクトリを path に渡して、絞って一覧する。」
+    when the sandbox's `/files/list` reports `truncated: true` (500 files —
+    the field is new in the sandbox image; an older image without it gets no
+    line). `run_shell`'s docstring lists `unar` (archive extraction) in place
+    of `unzip`. A sandbox that does not answer: 「1 回だけ呼び直す。続くなら sandbox を使わずにできる範囲で自分で処理し、無理ならユーザーに sandbox が今使えないと伝える。」
+    The docstrings carry no example paths any more (`/workspace/work/index.html`
+    and the like were copied literally), and the toolkit note and
+    `send_to_workspace` say 「sandbox」 rather than 「jail」 / 「Files」.
     **No implicit attachment** (2026-10-19): nothing a tool writes is attached
     on its own — `run_python*` / `run_shell` / `write_file` results carry no
     "generated files" part, and writing to `/workspace/exports/` attaches
@@ -1983,16 +2174,24 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
     same string as the path for ASCII names, percent-encoded otherwise) and
     returns it ready to paste (`![name](/ext/…)` for images, `[name](/ext/…)`
-    otherwise). Any other `/ext/…` path is read by the server through
+    otherwise). Since 2026-10-19 the docstring tells the model not to call it
+    for `/ext/…` at all — 「`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。」
+    (the earlier 「呼んだ場合は…」 sentence and the `/ext/doc` citation remark
+    are gone; the toolkit note no longer lists `fetch_from_workspace` among the
+    tools that take `/ext` paths). The call path above is unchanged. Caveat: a
+    deployment whose `EXT_MOUNTS` does not serve `groups` / `public` cannot
+    open such a link — there the call (which attaches the file read through
+    the sandbox, below) is the only way, but the docstring no longer says so. Any other `/ext/…` path is read by the server through
     `EXT_MOUNTS` (`resolve_path`: confined to the mount, capped at
     `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
     means a path the sandbox sees but nucllei does not is reported as
     unreadable (the deployment withholds by not mounting; §3.8). Failures are
     worded per `RefError.code`: unreadable (missing, a directory, or a link
     leaving the mount — one wording, fail closed) vs. over the cap (with actual
-    size and limit). The unreadable wording (2026-10-04) is the neutral
-    「このサーバの /ext に無い (存在しないか、sandbox にだけ mount されている)」
-    sentence of §3.8 "Bridging" — `/ext` files are shown by URL only.
+    size and limit). The unreadable wording is the neutral
+    「このサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。」
+    sentence of §3.8 "Bridging" (2026-10-04; 「sandbox にだけ mount されている」 /
+    「sandbox で読んで使う」 until 2026-10-19) — `/ext` files are shown by URL only.
     `path` is only ever a sandbox path — a URL or a file URL in it is refused
     as "not a sandbox path" (fixed sentence). The returned
     `/ext/…` URL is percent-encoded, so it may be a different spelling of the
@@ -2022,7 +2221,14 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     upstream status / unreachable or unresolvable name / the server itself),
     each with a fixed sentence that never inspects the value — the shared
     defaults of `ref_errors` (§3.8) except `too_large` (the cap is the
-    deployment's sandbox setting and cannot be raised by an argument).
+    deployment's sandbox setting and cannot be raised by an argument; the
+    text says 「上限は sandbox の設定で、引数では上げられない」 — 「配備」 is not
+    used in model text since 2026-10-19). A file (`file_id` / file URL) over
+    the import cap, or a URL refused by the sandbox's own cap (413), names the
+    tools that read without the sandbox (2026-10-19 — was 「sandbox に入れずに
+    使える tool があればそれを使う」): 「sandbox に入れずに、同じ file_id を read_attachment (テキスト)・feed_image (画像・PDF) に渡して読む。読めなければユーザーに伝える。」
+    (`url`: `fetch_url (ページ・文書)`・`feed_image (画像・PDF)`; only the ones on
+    the turn; with none, 「sandbox には取り込めないとユーザーに伝える。」).
     The cap is the **sandbox cap** `SANDBOX_FILE_MAX_SIZE_MB` (§3.7 "Per-file size
     limits" — no `file_id` is created), passed as `max_bytes`; the body is
     streamed by the resolver into a temp file (`resolve_url(sink=…)`, only the
@@ -2032,7 +2238,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     When the URL is `/ext/<name>/<sub>`, `<name>` is a **static** mount and
     **the file exists there** (`image_refs.mounted_path_for_url`), nothing is copied: the
     tool answers with the sandbox path `/ext/{rest}` (the same string as the
-    URL), because the sandbox binds the same tree at its `/ext` (#138) — this
+    URL) — 「取り込み不要: <url> は sandbox から同じパス <path> で見えているので取り込まない。次の手: run_python / run_shell でそのパスを開く。」
+    (no 「(read-only)」 any more: group places are writable) — because the sandbox binds the same tree at its `/ext` (#138) — this
     relies on the deployment binding the same
     volume on both sides, which the server cannot verify; the size cap does not
     apply. A `url` that is this server's file delivery URL
@@ -2079,9 +2286,10 @@ copied into answers just as easily.
 **feed_image**
 
 - 図・レイアウト・印影・手書きなど、文字起こしではなく実際に見て判断するためのもの。
-  このターン内に自分の入力へ入るので、続けて内容を評価・説明・修正できる。
+  呼んだ直後から自分の入力へ入るので、続けて内容を評価・説明・修正できる。入れた画像は
+  以降のターンにも残る (context を使い続ける) ので、PDF は pages で要るページに絞る。
 - ユーザーには何も表示されない。ユーザーに見せるなら、見た上で本文に markdown
-  (`![図: …](URL)`) を書く。Files には登録しないので、ユーザーの添付にも残らない。
+  (`![図: …](URL)`) を書く (url で渡したものに限る)。新しいファイルは作らないので、ユーザーの添付にも残らない。
 - `url`: tool の戻り値の literal をそのまま渡す (図・原本 PDF・Web の資料)。
   組み立てない・書き換えない・ホストを補わない。
   - `#page=N` 付きの literal はそのまま渡してよい (`pages` を付ければそちらが優先。
@@ -2093,12 +2301,13 @@ copied into answers just as easily.
   要らない file_id を増やさない。
 - `file_id`: run_python の戻り値やシステム注記の file_id もここに渡す。本文リンク
   `/api/v1/files/{id}/content` しか手元に無ければ、それを `url=` にそのまま渡す。
-- 3 つとも省略したときの対象は添付 PDF だけ。直接添付の画像は既に見えているので対象に
-  しない (見直すなら file_id を明示する。docstring にも短く残している)。
+- 3 つとも省略したときの対象は添付 PDF だけで、全部合わせて先頭から 10 ページまで
+  (1 件あたりの上限 `max_pages` も効く)。続きは file_id と pages を付けて呼ぶ。直接添付の
+  画像は既に見えているので対象にしない。
 - `pages` は PDF のときだけ意味を持つ (画像はそのまま、PDF は指定ページを画像化して目に入れる)。
 - 中身が画像か PDF かは tool が中身を読んで判定する (拡張子の無い URL でも同じ)。
-- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 上流のエラー / 届かない /
-  このサーバ自身 / sandbox に繋がらない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 相手のサーバーが HTTP のエラーを
+  返した / 届かない / このサーバ自身 / sandbox に繋がらない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
   次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
   言い換えない。
 
@@ -2121,14 +2330,18 @@ copied into answers just as easily.
 - 既定のサイズ上限を超える大きい資料は、サブエージェントの中で `max_mb` を付けて読む
   (この会話では読まない)。サイズ上限超過の ERROR が出たら run_subagent の子が `max_mb` を
   付けて読む (中身が要らなければ、ユーザーには URL を `[ラベル](URL)` のリンクで示す)。
+  run_subagent が無い配備・preset では、ERROR の次の手のとおり自分で `max_mb` を付け、`query` か
+  小さい `limit` で区切って読む。
 - テキスト層の無い PDF (スキャン PDF) は ERROR ではなく、戻り値のヘッダが
   「種別: PDF / テキスト層が無い …」と言い、次の手に feed_image(url=…) を挙げる — feed_image で
-  見る。画像も同様に「種別: 画像 …」で feed_image を挙げる。テキスト層のある PDF でも
-  読んだのはテキストだけなので、レイアウト・図・表・印影は feed_image で見る。
+  見る。画像も同様に「種別: 画像 …」で feed_image を挙げる。テキスト層のある PDF は
+  読んだのはテキストだけだが、文字で足りないとき (表や記入欄の並び・図・手書き・印影が関わる)
+  だけ feed_image で要るページを見る (2026-10-19 ken 決定 — 見た画像は以降のターンにも残る)。
+- `query` で絞った結果の続きは、同じ `query` のまま `offset` を渡す (offset は絞った後の位置)。
 - 平文にできない形式 (Excel / Word 等) は ERROR になる。加工が要るなら
   send_to_workspace(url=…) で sandbox に取り込み、中身が要らなければ URL をリンクで示す。
-- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 上流のエラー / 届かない /
-  このサーバ自身。ERROR 文は事実と `次の手:` を書く。「取れなかった」を全部リンク切れと
+- 失敗の種類: 存在しない / サイズ上限超過 / redirect を辿れない / 相手のサーバーが HTTP のエラーを
+  返した / 届かない / このサーバ自身。ERROR 文は事実と `次の手:` を書く。「取れなかった」を全部リンク切れと
   言い換えない。
 
 ### 5.8 Subagents (`run_subagent`)
@@ -2143,6 +2356,22 @@ layers decide whether it appears in a turn:
    flag (migration `e7b3c90d2f14` added `builtin_subagent` to `toolIds` of
    every preset whose flag was not `false` and whose allowlist was non-empty,
    then deleted the flag).
+   **Or through a skill** (llens, 2026-10-19): a skill whose `tool_ids`
+   contain `builtin_subagent`, assigned to the preset (`meta.skillIds`), adds
+   `run_subagent` when it is loaded (`load_skill` / `/command` / attachment —
+   §6.3) — from the middle of the turn that loads it, and on later turns and
+   continuation turns by replay. Then the skill decides who may use it: the
+   preset's `meta.skillIds` ∧ the skill's read visibility (`access_control`);
+   the `builtin_subagent` row ACL is **not** checked on this route (skill
+   tools load without the per-user tool ACL), and skill visibility does not
+   special-case admins — put them in the skill's ACL too. Layer 2 still
+   applies: with an empty `meta.subagentPresetIds` the `available` hook hides
+   the tool and the skill loads with `tools: []`. The preset editor's
+   delegation picker treats either route as "assigned" (no amber warning) —
+   `isToolReachableFromPreset` in `src/lib/utils/skills.ts` (`toolIds`, or a
+   skill in `skillIds` whose `tool_ids` has it while the Skills capability is
+   on). Because next steps name only the tools on the turn (§5.1), a user who
+   has not loaded the skill never sees the name `run_subagent` in an ERROR.
 2. **Where it may delegate** — the parent preset's `meta.subagentPresetIds`
    (agent presets) ∩ presets the user can access (owner or read ACL;
    `is_active=false` presets stay spawnable). The tool's `available` hook
@@ -2189,10 +2418,17 @@ response run concurrently (§5.5) and the turn continues when all are done;
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
-immediately with an error that says the server-wide limit (N) was reached and
-that this call was not started — the counter is process-wide, not per caller,
-so the next step is "wait for your own children, else retry later or do it
-yourself"; background included), per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
+immediately with an error that says the server-wide limit (N, 「ほかの利用者の
+分も数える」) was reached and that this call was not started — the counter is
+process-wide (every user and nested children; per worker process when
+`UVICORN_WORKERS > 1`), not per caller, so the next step is
+「自分が起動した分が走っているなら、その結果がそろってから残りを呼ぶ。そうでなければ 1 回だけ呼び直し、それでも同じなら自分で処理する。」
+(2026-10-19 — it said 「時間を置いて呼び直す」); background included). The
+docstring says the same (「同時に走れるのはサーバー全体で 4 本まで (ほかの利用者の分も数える)」)
+and that subagents placed in one response run **concurrently**, while sandbox
+tools placed in one response run **one at a time** (§5.5 `serial`). A call
+with no parent chat or a missing parent chat fails with 「次の手: 自分で処理する。」.
+Per-call timeout `SUBAGENT_TURN_TIMEOUT_S`
 (default 1800 s; also the execution timeout when backgrounded). Agent sessions
 never appear in the user's chat list, are read-only over HTTP, and are
 cascade-deleted (running turns stopped) with the parent chat.
@@ -2206,7 +2442,10 @@ completions), the server injects a shared `background: boolean` parameter into
 the model-facing spec of every eligible tool.
 
 - `background: true` → the call returns
-  `{ok, task_id, tool_name, status: "running"}` immediately and that running
+  `{ok, task_id, tool_name, status: "running", note}` immediately (`note`,
+  2026-10-19: 「バックグラウンドで実行を始めた (まだ結果は無い)。次の手: 結果は完了時に通知で届くので、待たずに別の作業を進める。今すぐ要るときだけ await_task で受け取る。」 —
+  the last sentence only when `await_task` is on the turn; clients read
+  `task_id` / `status`, so the extra key changes nothing for them) and that running
   form stays in the parent message's tool result forever (append-only); the
   truth about completion lives in the execution row
   (`running|done|failed|stopped|orphaned`). The execution keeps running after
@@ -2246,7 +2485,16 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   server delivers the rest later).
 - `stop_task(task_ids)` — force-stop; returns each task's actual state
   afterwards. Idempotent on already-terminal tasks. Side effects may already
-  have completed.
+  have completed. An entry that had already finished carries `note`
+  (2026-10-19): `done` / `failed` → 「止める前に終わっていた (止めていない)。次の手: 結果が要るなら await_task で受け取る。」
+  (the step only when `await_task` is on the turn — the row is marked
+  delivered by this report, so no notice will bring the result later);
+  `orphaned` → the row's fixed `error` (below). The description no longer
+  says 「撃って」: 「終了済みのタスクを指定しても今の状態を返すだけで、何も変えない (その結果は await_task で受け取る)」.
+  `await_task`'s description says what to do with `running`:
+  「まだ実行中だとユーザーに伝えて応答を終える (結果は完了時に届くので、待つために呼び直さない)」
+  (was 「…報告してターンを終えること」), and `check_task`'s `include_done`
+  explains `orphaned` (「実行中にサーバーが再起動して途中で失われたもの (結果は無い)」).
 
 All three collectors are builtin pseudo-tools, mounted automatically whenever
 an eligible tool is on the turn or the chat has execution rows (independent of
@@ -2277,10 +2525,10 @@ continuation turn cannot start (engine down), the notice stays in history and
 the turn is retried with backoff; if the chat's model is unresolvable, the
 notice still gets read on the next user turn. Deleting the chat stops its
 executions and marks them delivered (permanent abandonment). On boot the
-server scans for undelivered rows and resumes delivery. Known v1 limit:
-workspace-export chat attachments emitted after the parent turn ended are not
-re-attached by the delivery notice (files themselves are persisted and listed
-in the result string).
+server scans for undelivered rows and resumes delivery. A background run
+attaches nothing to the chat (the workspace-export auto-attachment was removed
+2026-10-19); files it writes stay in `/workspace` until the model hands them
+over with `fetch_from_workspace`.
 
 Failures in a background run follow §5.1 "Failures": a `ToolError` of any kind
 but `outcome` ends the row `failed` with the model text in `error`; an
@@ -2329,22 +2577,41 @@ A non-positive value (`0` / `-1`) means no system-side limit for the
 synchronous call (since 2026-10-03; earlier it was ignored).
 Concurrency: `ASYNC_EXEC_MAX_CONCURRENCY` (default 4 per
 user) and `ASYNC_EXEC_MAX_TOTAL` (default 16 per process); exceeding either
-fails immediately. Tool results — synchronous and background alike — are
+fails immediately (the per-user error's next step names `await_task` /
+`stop_task` only when they are on the turn, then 「急ぐなら background を付けずに呼び直す。」).
+A background run carries the tool names of the turn that spawned it
+(§5.1 "Naming other tools"), so its ERROR texts name the same tools a
+synchronous run would. A synchronous call that hits its timeout
+(`TOOL_EXEC_TIMEOUT_S` / per-entry) gets 「入力を小さく分けて呼び直す。」 plus
+「分単位かかる処理なら background: true を付けて呼び直す。」 only when that tool
+can take `background` on this turn (and not for a lone background call that
+already ran inline with the background timeout). Tool results — synchronous and background alike — are
 truncated once at the production point at `TOOL_RESULT_MAX_CHARS` (default
 65536; truncation demotes structured rendering to text and appends a marker
-line `(ここで切れている: 全 N 字のうち先頭 MAX 字。次の手: 続きが要るなら offset / query などで範囲を絞って呼び直す)` so the model never
-mistakes a cut result for the whole; the collectors' envelopes are exempt
+line `(ここで切れている: 全 N 字のうち先頭 MAX 字。次の手: 続きが要るなら<step>)` so the model never
+mistakes a cut result for the whole — `<step>` follows the tool's own
+arguments (2026-10-19; it used to say 「offset / query などで範囲を絞って」
+for every tool): `offset で続きから、または query で範囲を絞って呼び直す` /
+`offset で続きから呼び直す` / `query で範囲を絞って呼び直す` when the spec has
+those parameters, else `出力を絞って呼び直すか、出力をファイルに書いて read_file で読む`
+(`read_file` only when on the turn; otherwise `出力を絞って呼び直す`); the collectors' envelopes are exempt
 because their contents are already truncated at save time). Rows are optionally purged after `ASYNC_EXEC_RETENTION_DAYS` (default 0 =
 keep forever — results stay re-collectable indefinitely). Spawning is
-single-process only: with `UVICORN_WORKERS > 1` it is refused (collection and
-listing still work). Executions are stopped (not deleted) when their chat is
+single-process only: with `UVICORN_WORKERS > 1` it is refused with
+「このサーバーの構成では background 実行を使えない。次の手: background を付けずに呼び直す。」
+(the fact no longer says "multi-worker") — collection and listing still work. Executions are stopped (not deleted) when their chat is
 deleted; a server restart marks in-flight rows `orphaned` — the record
 survives, the computation does not resume. Stopped and orphaned rows carry one
 fixed `error` text each (the same wording in `check_task` / `await_task` and in
 the delivery notice): stopped = side effects may already have completed
-(次の手: do not re-run what the user stopped); orphaned = the result was lost,
-re-run read-only work with the same arguments and, for anything that writes or
-sends, check whether a result remains before deciding to re-run.
+(次の手: do not re-run what the user stopped); orphaned =
+「実行中にサーバーが再起動し、このタスクは途中で失われた (status の orphaned はこの意味。結果は無い)。」
+(2026-10-19 — it said 「サーバーの再起動で結果が失われた」, which did not say
+what the status word means), then re-run read-only work with the same
+arguments and, for anything that writes or sends, check whether a result
+remains before deciding to re-run. A tool that raises an uncaught exception
+gets the next step 「引数に誤りがあれば直して 1 回だけ呼び直す。同じエラーが続くならこの tool は使わずに進め、ユーザーには失敗したことを伝える。」
+(synchronous and background alike).
 
 ---
 
@@ -2379,7 +2646,9 @@ POST /api/v1/skills/create
   this" hint.
 - `content` — markdown instructions. Template variables expanded at every
   request: `{{CURRENT_DATE}}`, `{{CURRENT_TIME}}`, `{{CURRENT_DATETIME}}`,
-  `{{CURRENT_WEEKDAY}}`, `{{USER_NAME}}`, `{{USER_ROLE}}` (the user's role as
+  `{{CURRENT_WEEKDAY}}` (Japanese — `月曜日` … `日曜日`, whatever the server
+  locale; until 2026-10-19 it was `strftime("%A")`, English on the usual
+  locale), `{{USER_NAME}}`, `{{USER_ROLE}}` (the user's role as
   stored: `admin` / `user` / …), `{{USER_GROUPS}}` (names of the groups the user
   **is a member of**, as stored, joined with `", "`; sorted by
   `(name.casefold(), name)`; empty string if none — admins get only their own
