@@ -2165,10 +2165,12 @@ def test_fetch_mounted_file_not_in_nucllei_mount_is_unreadable(monkeypatch, tmp_
         out = env.fetch(missing)
         # 本当に無いか、配備の mount のずれ (sandbox にだけ mount)。「渡さない」とも
         # 「/workspace にコピーして渡す」とも言わない (ken 2026-10-04: /ext は URL で見せる
-        # だけ — 同じ組を nucllei と sandbox に mount する)。「mount」はモデルに見せない (2026-10-19)
+        # だけ — 同じ組を nucllei と sandbox に mount する)。「mount」はモデルに見せない (2026-10-19)。
+        # 文は feed_image(path=) と共通 (`ref_errors.ext_not_found`、2026-10-19 llens 決定)。
+        # ターンの外なので tool を名指ししない (名指しありの文は test_ref_errors が固定する)
         assert out == (
             f"ERROR: {missing} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけ"
-            "ある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。"
+            "ある)。次の手: 受け取った literal のまま渡したか確かめる。"
         ), missing
         assert "渡さない" not in out and "コピー" not in out, missing
         # URL(markdown のリンク / 画像記法)も file_id も出ない(パスの echo は出る)

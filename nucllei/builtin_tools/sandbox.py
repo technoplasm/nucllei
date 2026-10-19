@@ -991,10 +991,11 @@ def _explain_mount_error(abs_path: str, err) -> ToolError:
         # mount されている)。resolver は分けられないので 1 文で両方を言う。ken 2026-10-04:
         # 配備は nucllei と sandbox に同じ /ext の組を mount する — /ext のファイルは URL で
         # 見せるだけで、取り出し (添付) の経路は作らない (要らない file_id を増やさない)
-        return ToolOutcome(
-            f"{abs_path} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)",
-            "中身が要るなら run_python / run_shell でそのパスを開いて使う。",
-        )
+        # 文は feed_image(path=) と共通 (`ref_errors.ext_not_found`、2026-10-19 llens 決定で揃えた)。
+        # ref_errors → image_refs は本 module を参照する — 循環を避けて呼び出し時に引く
+        from nucllei.utils.ref_errors import ext_not_found
+
+        return ext_not_found(abs_path)
     if code == "traversal":
         return ToolCallError(
             f"{abs_path} は使えない path (制御文字やバックスラッシュを含む)",

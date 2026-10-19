@@ -848,15 +848,19 @@ files are shown to users **by URL only** — there is no extraction path that
 reads a sandbox-only `/ext` file and attaches it (it would only mint needless
 file_ids; raw corpus files are rarely what a user wants). A `/ext` path that
 nucllei does not serve is therefore a true not-found or a mount
-mismatch. `fetch_from_workspace` says so in one neutral sentence:
-`ERROR: <path> はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。`
-(no "withheld" wording, no "copy it to `/workspace` and attach" route; until
-2026-10-19 the fact said 「sandbox にだけ mount されている」 and the step
-「sandbox で読んで使う」 — "mount" is an internal word and the step named no
-tool). `feed_image(path=)` no longer talks about mounts at all (2026-10-19):
-an `/ext/…` path it cannot read is most often a literal the model rewrote, so
-it says `ERROR: <path> は存在しない。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。`
-(only the listing tools on the turn are named — §5.1). Until
+mismatch. `fetch_from_workspace` and `feed_image(path=)` say so in one
+shared neutral sentence (`utils/ref_errors.ext_not_found`):
+`ERROR: <path> はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。`
+(no "withheld" wording, no "copy it to `/workspace` and attach" route; only
+the listing tools on the turn are named — §5.1 — and with neither it ends at
+「…確かめる。」). An unreadable `/ext/…` path is most often a literal the model
+rewrote, hence the step. History: until 2026-10-19 the fact said 「sandbox
+にだけ mount されている」 and the step 「sandbox で読んで使う」 ("mount" is an
+internal word and the step named no tool); earlier on 2026-10-19 the two tools
+briefly diverged (`feed_image` said 「存在しない」, `fetch_from_workspace`
+said 「中身が要るなら run_python / run_shell でそのパスを開いて使う」) until
+llens decided to align them — both read nucllei's `/ext`, so neither may
+claim the file does not exist. Until
 2026-10-03 there was a serving scope (`EXT_FILE_SCOPES`) and a
 `mounted_path_withheld` refusal 「利用者に配信しない範囲にある」 — both gone.
 
@@ -2189,9 +2193,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     worded per `RefError.code`: unreadable (missing, a directory, or a link
     leaving the mount — one wording, fail closed) vs. over the cap (with actual
     size and limit). The unreadable wording is the neutral
-    「このサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。」
-    sentence of §3.8 "Bridging" (2026-10-04; 「sandbox にだけ mount されている」 /
-    「sandbox で読んで使う」 until 2026-10-19) — `/ext` files are shown by URL only.
+    「このサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。」
+    sentence of §3.8 "Bridging", shared with `feed_image(path=)` (2026-10-04;
+    「sandbox にだけ mount されている」 / 「sandbox で読んで使う」 until
+    2026-10-19, then aligned with `feed_image` by llens decision) — `/ext`
+    files are shown by URL only.
     `path` is only ever a sandbox path — a URL or a file URL in it is refused
     as "not a sandbox path" (fixed sentence). The returned
     `/ext/…` URL is percent-encoded, so it may be a different spelling of the

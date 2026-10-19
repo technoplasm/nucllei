@@ -422,24 +422,33 @@ def test_feed_image_wording():
     }
     for err, want in cases_path.items():
         assert feed_explain(P, err, True) == want, err
-    # `/ext/…` の not_found は fetch_from_workspace と同文 (このサーバの /ext に無い)
+    # `/ext/…` の not_found は feed_image(path=) と fetch_from_workspace で同文
+    # (`ref_errors.ext_not_found`。2026-10-19 llens 決定で揃えた — 事実は「このサーバの /ext に
+    # 無い」、次の手は literal の確かめと、このターンにある tool での親ディレクトリの一覧)
     from nucllei.builtin_tools import sandbox
+    from nucllei.utils.tool_errors import turn_tools
 
     _explain_mount_error = text_of(sandbox._explain_mount_error)
 
     ext = "/ext/doc/a.pdf"
-    # 2026-10-19 llens 監査: sandbox 側は内部語「mount」を外した。feed_image 側の同文
-    # (feed_image.py の _EXT_NOT_FOUND 相当) は feed_image の担当が追従する — 揃ったら
-    # 3 つの等式に戻す
-    assert _explain_mount_error(ext, RefError("not_found", "x")) == (
-        f"ERROR: {ext} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。"
-        "次の手: 中身が要るなら run_python / run_shell でそのパスを開いて使う。"
-    )
-    # feed_image 側は llens 監査 (6) の文 (literal を確かめさせる。mount の話はしない) で、
-    # sandbox 側とは同文にしていない (2026-10-19 — 揃えるかは llens / ken の判断待ち)
-    assert feed_explain(ext, RefError("not_found", "x"), True) == (
-        f"ERROR: {ext} は存在しない。次の手: 受け取った literal のまま渡したか確かめる。"
-    )
+    fact = f"ERROR: {ext} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)。"
+    for tools, nxt in (
+        ([], "受け取った literal のまま渡したか確かめる。"),
+        (
+            ["run_shell"],
+            "受け取った literal のまま渡したか確かめ、run_shell で親ディレクトリを一覧する。",
+        ),
+        (
+            ["list_workspace", "run_shell"],
+            "受け取った literal のまま渡したか確かめ、list_workspace か run_shell で"
+            "親ディレクトリを一覧する。",
+        ),
+    ):
+        with turn_tools(tools):
+            via_feed = feed_explain(ext, RefError("not_found", "x"), True)
+            via_fetch = _explain_mount_error(ext, RefError("not_found", "x"))
+            shared = _ref_errors.ext_not_found(ext).text
+        assert via_feed == via_fetch == shared == f"{fact}次の手: {nxt}", tools
     # too_large (url / path)
     big = RefError(
         "too_large", "x", size=32_646_426, limit=25 * 1024 * 1024, size_exact=True

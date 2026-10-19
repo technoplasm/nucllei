@@ -832,9 +832,11 @@ def test_not_found_is_the_only_code_that_says_dead_link(monkeypatch):
     )
     result, fed, _r = _run(monkeypatch, path="/ext/cage/static/missing.png")
     # `/ext/…` は literal を書き換えていないかをまず確かめさせる。mount の話はしない
-    # (2026-10-19 llens 監査 (6))
+    # (2026-10-19 llens 監査 (6))。事実の文は fetch_from_workspace と同じ — nucllei の /ext に
+    # 無いだけで「存在しない」とは言い切らない (2026-10-19 llens 決定)
     assert fed == [] and result == (
-        "ERROR: /ext/cage/static/missing.png は存在しない。次の手: 受け取った literal のまま"
+        "ERROR: /ext/cage/static/missing.png はこのサーバの /ext に無い (存在しないか、"
+        "sandbox の中にだけある)。次の手: 受け取った literal のまま"
         "渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。"
     )
     assert "リンク切れ" not in result and "mount" not in result

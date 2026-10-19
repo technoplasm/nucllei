@@ -55,6 +55,7 @@ from nucllei.utils.tool_errors import (
     ToolCallError,
     ToolError,
     ToolErrorKind,
+    ToolOutcome,
     tool_in_turn,
 )
 
@@ -122,6 +123,21 @@ def file_id_error(fid: str, *, given: str | None = None) -> ToolCallError:
         form = f"{FILE_ID_ARG_FORM} {rule} " if rule else ""
     return ToolCallError(
         f"{given or f'file_id {fid}'} {NO_FILE}", form + _no_file_next()
+    )
+
+
+def ext_not_found(ref: str) -> ToolOutcome:
+    """`/ext/…` の path が nucllei 側の /ext に無い (feed_image(path=) と fetch_from_workspace の
+    共通文。2026-10-19 llens 決定で 2 つを揃えた)。どちらも nucllei の /ext を読む — 本当に無いか、
+    sandbox にだけ mount されているかは分けられないので「存在しない」と言い切らない (mount の語は
+    出さない)。`/ext/…` は受け取った literal を書き換えた (組み立てた) ことが多いので、次の手は
+    まずそれを確かめさせ、親ディレクトリの一覧はこのターンにある tool だけで言う。呼び手が raise する。"""
+    names = [n for n in ("list_workspace", "run_shell") if tool_in_turn(n)]
+    nxt = "受け取った literal のまま渡したか確かめ" + (
+        f"、{' か '.join(names)} で親ディレクトリを一覧する。" if names else "る。"
+    )
+    return ToolOutcome(
+        f"{ref} はこのサーバの /ext に無い (存在しないか、sandbox の中にだけある)", nxt
     )
 
 

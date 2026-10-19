@@ -111,6 +111,7 @@ from nucllei.utils.ref_errors import (
     NEXT,
     RefErrorHints,
     explain_ref_error,
+    ext_not_found,
     file_id_error,
     mb,
     path_error,
@@ -270,15 +271,12 @@ def _too_large(ref: str, err, *, is_path: bool) -> str:
 
 
 def _path_not_found(ref: str) -> str:
-    """path の not_found。`/ext/…` は受け取った literal を書き換えた (組み立てた) ことが多いので
-    まずそれを確かめさせる (2026-10-19 llens 監査 (6) — mount の話はモデルに出さない)。
+    """path の not_found (テンプレート — `{ref}` は `ref_errors` が埋める)。`/ext/…` は
+    fetch_from_workspace と同じ文 (`ref_errors.ext_not_found`。2026-10-19 llens 決定で揃えた —
+    nucllei 側の /ext に無いだけで、sandbox にはあるかもしれない)。
     `/workspace/…` は sandbox が 404 を返した = 無い。"""
     if ref.startswith("/ext/"):
-        names = [n for n in ("list_workspace", "run_shell") if tool_in_turn(n)]
-        nxt = "受け取った literal のまま渡したか確かめ" + (
-            f"、{' か '.join(names)} で親ディレクトリを一覧する。" if names else "る。"
-        )
-        return "ERROR: {ref} は存在しない。" + NEXT + nxt
+        return ext_not_found("{ref}").text
     nxt = _list_parent()
     return "ERROR: {ref} は存在しない。" + (NEXT + nxt if nxt else "")
 

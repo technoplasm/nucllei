@@ -1560,6 +1560,13 @@ other tools」)/ §4.3(`<source>`)/ §5.7・§5.7.1(各 tool)/ §5.8 / §5.9。�
   `soffice` → PDF。`/ext` の not_found から mount の話を消した(「存在しない。次の手: 受け取った literal の
   まま渡したか確かめ…」)— 2026-10-04 の中立文(file-handling.md)は fetch_from_workspace 側だけに残り、
   その文も「sandbox にだけ mount されている」→「sandbox の中にだけある」。
+  **同日のうちに 2 つを揃えた(llens 決定)**: 事実の文は fetch_from_workspace の形「<path> はこのサーバの
+  /ext に無い (存在しないか、sandbox の中にだけある)」(feed_image も nucllei 側の /ext を読むので「存在
+  しない」と言い切らない)、次の手は feed_image の形「受け取った literal のまま渡したか確かめ、list_workspace
+  か run_shell で親ディレクトリを一覧する。」(名指しは tool_in_turn。どちらも無ければ「…確かめる。」)。
+  fetch_from_workspace の旧い次の手「中身が要るなら run_python / run_shell でそのパスを開いて使う」は廃止。
+  文は `utils/ref_errors.ext_not_found` の 1 か所で組み、feed_image(`_path_not_found`)と sandbox
+  (`_explain_mount_error`)の両方が使う。担保は `test_ref_errors.py` の等式(tool の有無 3 通りで同文)。
 - **sandbox**: `/ext` はパスがそのまま URL なので fetch_from_workspace を呼ばずにリンクを書く、と言い切る
   ((4) — 「呼んだ場合は…」と `/ext/doc` の括弧を削除)。docstring の例パスを削除((5) — 字のまま使われた)。
   write_file の上限超過は「分割して複数回」をやめ run_python で生成((6) — write_file は上書き)。read_file の
