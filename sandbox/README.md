@@ -281,12 +281,14 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   変数は残らない。会話状態から独立した単発処理・シェル用。
 - **workspace が永続状態**: `/workspace` はユーザー単位で永続 (stateful/stateless 共有)。
   - `/workspace/imports/` — チャット添付ファイルの取り込み先 (tool の import 操作)
-  - `/workspace/exports/` — 書かれた新規/更新ファイルは実行後に tool が自動回収し、
-    Files に登録してチャットに添付する
+  - `/workspace/exports/` — **旧**: 実行前後の差分を tool が自動回収し、チャットに添付していた。
+    2026-10-19 に廃止 (ken 決定) — sandbox は差分を取らず、exec の応答に `exports` は無い。
+    新しい workspace には作らない。利用者へ渡すのは `fetch_from_workspace` (`/files/read`) だけ。
+    本番の既存 workspace に残る写しを期限で消すため、下の期限付き掃除の対象には残す
   - `/workspace/trash/` — 消す代わりに移す置き場 (llens の運用も `/files/delete` の /workspace
     での既定 (ファイルブラウザの「削除」もこれ) も、trash/ の直下へ mv する。選び間違いを
     取り返せるように)
-  - `imports/` と `exports/` は **nucllei Files のキャッシュ** (原本は Files 側。#149)、
+  - `imports/` と `exports/` (旧・上記) は **nucllei Files のキャッシュ** (原本は Files 側。#149)、
     `trash/` は消す代わりの置き場。3 つとも同じ規則で、idle workspace 回収
     (`reap_idle_workspaces`) が **umount の直前**に掃除する (mount lock 保持・実行中でも生存
     session 中でもない時点):
@@ -296,14 +298,14 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     - ctime を見るのは、mv (rename) が mtime を変えず ctime だけを今にするから — 「2 か月前の
       ファイル (を含むフォルダ) を今日 trash に移した」が即消えず、移した日から数えられる
       (Linux の ext4 / tmpfs で確認済み、`test_rename_updates_ctime`)。名前は見ない
-    - 置き場の root 自体は残す (`_ensure_workspace` が作る)。**symlink は辿らない** (直下の
+    - 置き場の root 自体は残す (`imports/` `trash/` は `_ensure_workspace` が作る。`exports/` は
+      在れば見る)。**symlink は辿らない** (直下の
       symlink はリンクそのものを消す。中は `shutil.rmtree(dir_fd=)` = fd ベース。置き場自体が
       symlink に差し替えられていたら何もしない — jail 内から置けるので)
-    - 消えた imports/exports は `send_to_workspace(file_id)` で戻せる。回収即削除はしない
-      (作った exports を次の呼び出しで直す使い方を壊すため)。消した数・バイト数は
+    - 消えた imports は `send_to_workspace(file_id)` で戻せる。消した数・バイト数は
       `[sandbox] cache of <user>: removed entries older than N days — imports/exports: …; trash: …`
       の 1 行。回帰は `sandbox/tests/test_retention.py`。値は下の API の応答
-      `cache_ttl_days` で nucllei に渡り、取り込み・自動添付の tool 出力に期限日が添えられる
+      `cache_ttl_days` で nucllei に渡り、取り込みの tool 出力に期限日が添えられる
   - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
     が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
     無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
@@ -325,13 +327,13 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   不正な形 → 400、同じパスが rw と ro で来たら 400、上限 1024 件
 - `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}], mounts?}`
   → `{exit_code, timed_out, duration_s, stdout, stderr, stdout_truncated, stderr_truncated,
-     exports: [{name, size, b64?, truncated}], cache_ttl_days}`
+     cache_ttl_days}`
 - `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?, mounts?}` (bind の指紋が
   前回と違えば kernel を作り直し `session_reset: true`)
-  → `{stdout, error, timed_out, session_reset, duration_s, stdout_truncated,
-     exports: [...], cache_ttl_days}`
+  → `{stdout, error, timed_out, session_reset, duration_s, stdout_truncated, cache_ttl_days}`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
-  - `exports` は `/workspace/exports/` の実行前後差分 (新規 + 更新)
+  - 応答の `exports` (`/workspace/exports/` の実行前後差分を b64 で返していた) は 2026-10-19 に
+    廃止。古い nucllei は `res.get("exports", [])` で読むので、キーが無くても落ちない
 - `POST /files/list` — `{user_id, path?, mounts?}` → `{entries, exists, is_dir}` ファイル一覧
   (`exists` / `is_dir` は「無い」「空」「ディレクトリでなくファイル」を言い分けるため — #145)
 - `POST /files/read` — `{user_id, path, mounts?, nofollow?, offset?, length?}` → `{name, size, b64, mtime}`
@@ -385,22 +387,24 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `POST /files/mkdir` — `{user_id, path, mounts?}` → `{ok, path}`。親も作る、在れば 409
   - `POST /files/usage` — `{user_id}` → `{used_bytes, total_bytes, quota_gb, cache_ttl_days}`
     (workspace の loopback ext4 の `statvfs`。`/ext` は容量上限を持たないので対象外)
-  - 置き場の root そのもの・workspace 直下の `imports/` `exports/` (実行のたびに使う)・
-    `trash/` (消す代わりの移し先) は消せない・改名できない (400)。ro の bind への書き換えは 403
+  - 置き場の root そのもの・workspace 直下の `imports/` (実行のたびに使う)・
+    `trash/` (消す代わりの移し先) は消せない・改名できない (400)。`exports/` (旧) は保護しない。ro の bind への書き換えは 403
   - `/files/*` の `path` は 2 形 (#152): **workspace 相対** (`imports/a.csv`。従来どおり。一覧の
     `entries[].path` も workspace 相対) と、**jail の絶対パス `/ext/groups/<g>/…` `/ext/public/…`**
     (その要求の `mounts` に在る bind の中だけ。`entries[].path` も絶対パス)。bind に無い → 404
     (見えない = 無い)、ro に書く → 403、経路に symlink → 400、`..` 等 → 400、`/ext` 外の絶対パス
     → 400。書いたファイル・作ったディレクトリは jail のユーザー (65534) の物
   - `cache_ttl_days` (int) — `imports/` `exports/` `trash/` の期限 = `SANDBOX_CACHE_TTL_DAYS` (0 以下は
-    0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込み・exports
-    自動添付の tool 出力に添える (キーが無い古い sandbox・0 では添えない)
-- `file_limit_bytes` (int、任意) — `/exec` `/exec_cell` `/files/read` `/files/write` `/files/raw` (と
+    0 = 消さない。#149)。書いた先を問わず常に返す。nucllei は「今日 + N 日」を取り込みの tool
+    出力に添える (キーが無い古い sandbox・0 では添えない)
+- `file_limit_bytes` (int、任意) — `/exec` (の `imports`) `/files/read` `/files/write` `/files/raw` (と
   `/files/*` の他の endpoint でも受けるが使わない): 呼び出し元の上限 (nucllei の添付の上限
   `ATTACHMENT_MAX_SIZE_MB`。`/files/raw` には渡さない)。効くのは sandbox の上限
   `SANDBOX_FILE_MAX_SIZE_MB` との小さいほう。超えると 413 `file too large: N bytes (limit L)`
-  (L は効いた上限。nucllei がこの形を読む)、exports では `{truncated: true, limit: L}` (b64 なし)。
-  無ければ sandbox の上限だけ
+  (L は効いた上限。nucllei がこの形を読む)。無ければ sandbox の上限だけ
+  - 以前は exports の自動添付の上限として `/exec` `/exec_cell` にも渡っていた (2026-10-19 廃止。
+    今の nucllei は送らない)。古い nucllei が送ってきても 422 にしない: `/exec` は `imports` の上限
+    として受け、`/exec_cell` はモデルに欄が無く pydantic の既定 (extra="ignore") で捨てる
 - `GET /healthz` — `{ok, nsjail, loop, file_max_size_mb}`。`file_max_size_mb` は sandbox の上限
   (`SANDBOX_FILE_MAX_SIZE_MB`。`/metrics` の `sandbox_file_max_size_bytes` はそのバイト数)。nucllei が
   起動時に読む (ファイルブラウザのアップロードの事前チェック・url= の取り込み)。`loop` は loop ドライバの実効チェック
@@ -458,7 +462,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |
-| `SANDBOX_FILE_MAX_SIZE_MB` | 1024 | **sandbox の上限** (MB の整数、全員共通): workspace に直接出し入れする 1 ファイルの上限。(1) `/files/raw` (ファイルブラウザのアップロード / ダウンロード、nucllei の `send_to_workspace(url=)`) の上限そのもの、(2) nucllei がリクエストごとに `file_limit_bytes` で渡す添付の上限 (`ATTACHMENT_MAX_SIZE_MB` — `/files/read` `/files/write`・exports 自動添付・`/exec` の imports) の安全上限 — sandbox は**渡された値とこの値の小さいほう**に従う (渡されなければこの値だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。(2) の経路は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない。値は `/healthz` (`file_max_size_mb`) `/metrics` に出し、nucllei が起動時に読む。**旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない** (設定されていれば起動時に warning を 1 行、値は読み替えない) |
+| `SANDBOX_FILE_MAX_SIZE_MB` | 1024 | **sandbox の上限** (MB の整数、全員共通): workspace に直接出し入れする 1 ファイルの上限。(1) `/files/raw` (ファイルブラウザのアップロード / ダウンロード、nucllei の `send_to_workspace(url=)`) の上限そのもの、(2) nucllei がリクエストごとに `file_limit_bytes` で渡す添付の上限 (`ATTACHMENT_MAX_SIZE_MB` — `/files/read` `/files/write`・`/exec` の imports) の安全上限 — sandbox は**渡された値とこの値の小さいほう**に従う (渡されなければこの値だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。(2) の経路は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない。値は `/healthz` (`file_max_size_mb`) `/metrics` に出し、nucllei が起動時に読む。**旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない** (設定されていれば起動時に warning を 1 行、値は読み替えない) |
 | `SANDBOX_SESSION_TTL_S` | 43200 (12h) | stateful session の生存上限 (kernel の nsjail time_limit。idle 回収も同値) |
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
@@ -471,9 +475,9 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 
 | メソッド | 役割 |
 |---|---|
-| `run_python(code, timeout_s?)` | **stateful**。会話ごとの常駐 kernel で永続 namespace 実行 (`/exec_cell`)。exports/ 自動添付 |
+| `run_python(code, timeout_s?)` | **stateful**。会話ごとの常駐 kernel で永続 namespace 実行 (`/exec_cell`) |
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
-| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具)。exports/ 自動添付 |
+| `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具) |
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
@@ -534,14 +538,13 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 - `write_file` は本文を function calling の引数として受け取るので、`run_python` の
   文字列や `run_shell` のヒアドキュメントを経由しない。裸の HTML/CSV/テンプレートを
   書かせるときのクォート事故 (本文中の `"""` や `EOF` 行で壊れる) を構造的に潰すのが目的で、
-  利便性より failure mode の削減が主眼。**`exports/` に書いても自動添付はされない**
-  (添付は実行の後始末で回収する仕組みのため) — tool の戻り値でその旨を返し
-  `fetch_from_workspace` に誘導する。
+  利便性より failure mode の削減が主眼。
 - 実行中の経過秒数は nucllei が tool のブロックに自動表示する (llens #100)。tool 側から
   秒を流さない — 起点も粒度も違う時計が 2 つ並ぶ。段階のある処理だけ
   `__progress__("何をしているか")` で中身を伝える (LLM には見えない、UI のみ)。
-- 画像・成果物の基本経路は `/workspace/exports/` 保存 → tool が file_id 発行して
-  自動添付。画像・音声・動画は display チャネル (#88) で tool 枠下に自動表示され、
+- 画像・成果物の基本経路は workspace に保存 → `fetch_from_workspace(path)` で Files に登録して
+  添付 (`/workspace/exports/` の自動添付は 2026-10-19 に廃止)。画像・音声・動画は display チャネル
+  (#88) で tool 枠下に自動表示され、
   本文への貼り直しは prompt で禁止 (例外: background 完了通知で届いた成果物は自動表示に
   乗らないので本文にリンク/`![]()` を書く)。
 

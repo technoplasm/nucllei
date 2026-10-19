@@ -633,7 +633,6 @@ def test_tool_exec_enospc_in_stderr_adds_note():
         "duration_s": 0.1,
         "stdout": "",
         "stderr": "OSError: [Errno 28] No space left on device",
-        "exports": [],
     }
     tool = _tool({"/exec": res})
     out = _text(tool.run_shell("dd", __user__={"id": "u1"}))

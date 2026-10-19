@@ -3,9 +3,10 @@
 固定すること:
 - 添付の上限 = RC `ATTACHMENT_MAX_SIZE_MB`。呼ぶたびに RC から読む(管理画面で変えるとすぐ効く)。
   0 / 空 = 無制限 = None
-- 添付の上限の経路: send_to_workspace(file_id=)、exports の自動添付、fetch_from_workspace。
-  sandbox への該当リクエスト(`/exec` `/exec_cell` `/files/read` `/files/write`)に
-  `file_limit_bytes` で渡る。無制限なら渡さない(sandbox の上限だけ)。超過の文は上限の値と
+- 添付の上限の経路: send_to_workspace(file_id=)、fetch_from_workspace。
+  sandbox への該当リクエスト(`/files/read` `/files/write`)に `file_limit_bytes` で渡る
+  (実行 `/exec` `/exec_cell` には渡さない — exports/ の自動添付は廃止)。無制限なら渡さない
+  (sandbox の上限だけ)。超過の文は上限の値と
   「管理者の設定 (最大アップロードサイズ)」を言う
 - sandbox の上限 = sandbox の `/healthz` の `file_max_size_mb`(読めるまでは既定 1024 MB)。
   feed_image(path=) はこれと FETCH_MAX_BYTES の小さいほう(send_to_workspace(url=) とファイルブラウザ
@@ -140,7 +141,7 @@ class _Env:
         monkeypatch.setattr(mod, "_ext_mounts", lambda user: [])
         self.registered: list[tuple[str, bytes]] = []
 
-        def fake_register(user_id, name, data):
+        def fake_register(user_id, name, data, source=None):
             self.registered.append((name, data))
             return {
                 "id": "fid",
@@ -161,39 +162,36 @@ class _Env:
 USER = {"id": "u1", "role": "user"}
 
 
-def test_exec_passes_limit_and_unlimited_omits_it(monkeypatch, limit_mb):
-    env = _Env(monkeypatch, {"/exec": {"exit_code": 0, "duration_s": 0.1}})
+def test_exec_sends_no_limit_and_attaches_nothing(monkeypatch, limit_mb):
+    """exports/ の自動添付は廃止 (2026-10-19、llens 依頼): run_* は添付の上限を sandbox に
+    送らず、応答に古い sandbox の `exports` が載っていても登録・添付せず、結果に生成ファイルの
+    節を出さない (ユーザーへ渡すのは fetch_from_workspace 一本)。"""
+    old_exports = [
+        {"name": "ok.txt", "size": 2, "b64": base64.b64encode(b"hi").decode()},
+        {"name": "big.bin", "size": 9 * MIB, "truncated": True, "limit": 4 * MIB},
+    ]
+    env = _Env(
+        monkeypatch,
+        {
+            "/exec": {"exit_code": 0, "duration_s": 0.1, "exports": old_exports},
+            "/exec_cell": {"stdout": "", "duration_s": 0, "exports": old_exports},
+        },
+    )
     limit_mb(4)
-    _run(env.tools.run_shell(command="true", __user__=USER))
-    assert env.payload("/exec")[-1]["file_limit_bytes"] == 4 * MIB
-    # 変えるとすぐ効く
-    limit_mb(0)
-    _run(env.tools.run_shell(command="true", __user__=USER))
-    assert "file_limit_bytes" not in env.payload("/exec")[-1]
-
-
-def test_exec_cell_passes_limit(monkeypatch, limit_mb):
-    env = _Env(monkeypatch, {"/exec_cell": {"stdout": "", "duration_s": 0}})
-    limit_mb(6)
-    _run(env.tools.run_python(code="1", __user__=USER, __chat_id__="c1"))
-    assert env.payload("/exec_cell")[-1]["file_limit_bytes"] == 6 * MIB
-
-
-def test_exports_over_limit_say_limit_and_admin(monkeypatch, limit_mb):
-    res = {
-        "exit_code": 0,
-        "duration_s": 0.1,
-        "exports": [
-            {"name": "big.bin", "size": 9 * MIB, "truncated": True, "limit": 4 * MIB},
-            {"name": "ok.txt", "size": 2, "b64": base64.b64encode(b"hi").decode()},
-        ],
-    }
-    env = _Env(monkeypatch, {"/exec": res})
-    limit_mb(4)
-    out = _run(env.tools.run_shell(command="true", __user__=USER))
-    assert "big.bin" in out and "添付の上限 4 MB" in out
-    assert "最大アップロードサイズ" in out
-    assert [n for n, _ in env.registered] == ["ok.txt"]
+    outs = [
+        _run(env.tools.run_shell(command="true", __user__=USER)),
+        _run(env.tools.run_python_once(code="1", __user__=USER)),
+        _run(env.tools.run_python(code="1", __user__=USER, __chat_id__="c1")),
+    ]
+    for path in ("/exec", "/exec_cell"):
+        for payload in env.payload(path):
+            assert "file_limit_bytes" not in payload
+    assert len(env.payload("/exec")) == 2 and len(env.payload("/exec_cell")) == 1
+    assert env.registered == []
+    for out in outs:
+        assert "生成ファイル" not in out and "exports" not in out
+        assert "ok.txt" not in out and "big.bin" not in out
+        assert "添付" not in out
 
 
 def test_send_file_id_over_limit_is_not_read(monkeypatch, limit_mb, tmp_path):

@@ -271,6 +271,22 @@ def test_sweep_removes_whole_top_level_entries(monkeypatch, tmp_path):
     assert other.exists()
 
 
+def test_exports_stays_in_sweep_after_auto_attach_removed(monkeypatch, tmp_path):
+    """exports/ の自動回収 (チャットへの自動添付) は廃止したが (2026-10-19)、本番の workspace に
+    残っている写しを期限で消すため、exports/ は掃除の対象のまま (ken 決定)。新しい workspace には
+    作らず、ファイルブラウザからは消せる (保護しない)。"""
+    mod = _load_main(monkeypatch, tmp_path)
+    assert "exports" in mod.CACHE_DIRS
+    assert "exports" not in mod.PROTECTED_DIRS
+    ws = _ws(tmp_path)
+    _file(ws / "exports" / "old.png", data=b"x" * 7)
+    assert mod._sweep_cache_dirs(ws, now=_later(31)) == (1, 7)
+    assert list((ws / "exports").iterdir()) == []
+    # exports/ が無い (新しい workspace) 場合も掃除は落ちない
+    (ws / "exports").rmdir()
+    assert mod._sweep_cache_dirs(ws, now=_later(31)) == (0, 0)
+
+
 def test_sweep_ignores_contents_times(monkeypatch, tmp_path):
     # 中身の時刻は見ない: 新しいファイルを含むフォルダも、直下のエントリが古ければ丸ごと消え、
     # 古いファイルを含むフォルダも、直下のエントリが新しければ残る

@@ -332,7 +332,9 @@ def _resolve_workspace_path(
 _NEXT = "次の手: "
 
 # 画像・音声・動画は display チャネルで tool の枠の下に出る (`_display_markdown`)。
-# それを受けたモデル向けの 1 文 (exports の自動添付と fetch_from_workspace で共通)
+# それを受けたモデル向けの 1 文 (fetch_from_workspace の添付)。fetch_from_workspace は
+# backgroundable でない (同期でしか走らない) ので display は必ずその場で画面に出る —
+# [task] 通知 (画面に出ていない display) 向けの但し書きは要らない
 _DISPLAYED = "ユーザーの画面には既に表示されている。" + _NEXT + "本文に貼り直さない"
 
 # sandbox の実行時間の上限 (sandbox サービスの env `SANDBOX_TIMEOUT_MAX_S` の既定。nucllei
@@ -370,7 +372,9 @@ def _quota_full_note(*texts) -> str:
 
 
 # imports/ exports/ は Files の写しで、sandbox が最終更新から一定期間で消す (#149)。
-# その配下が「無い」と言われたときに次の手へ足す 1 文
+# その配下が「無い」と言われたときに次の手へ足す 1 文。exports/ の自動添付は廃止した
+# (2026-10-19) が、本番の各ユーザーの exports/ に既存の写しが残っていて期限掃除に任せる
+# (ken 決定) ので、そこを指されたときの案内として残す
 _CACHE_DIRS = ("imports", "exports")
 _CACHE_GONE = (
     " imports/ と exports/ は一定期間で消える置き場なので、期限で消えた可能性がある"
@@ -385,7 +389,8 @@ _CACHE_TZ = ZoneInfo("Asia/Tokyo")
 def _cache_expiry(res) -> Optional[date]:
     """sandbox 応答の `cache_ttl_days` (#149) から「今日 + N 日」。キーが無い (古い sandbox)・
     0 以下 (消さない配備)・形が違うときは None — 期限を言わないだけで落とさない。
-    厳密には mtime + N 日を過ぎた後の最初の idle 回収で消えるので、文言は「以降」。"""
+    厳密には mtime + N 日を過ぎた後の最初の idle 回収で消えるので、文言は「以降」。
+    使うのは取り込み (`/files/write` `/files/raw` の応答) だけ。"""
     ttl = res.get("cache_ttl_days") if isinstance(res, dict) else None
     if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl <= 0:
         return None
@@ -508,7 +513,7 @@ def _files_error(e: Exception, abs_path: str) -> ToolError:
     )
 
 
-# ファイルの出入り (send_to_workspace / exports の自動添付 / fetch_from_workspace) の上限は
+# ファイルの出入り (send_to_workspace(file_id=) / fetch_from_workspace) の上限は
 # RC `ATTACHMENT_MAX_SIZE_MB` の 1 つ (`utils/file_limit`。チャットへのアップロードと同じ)。
 # sandbox には `file_limit_bytes` で渡し、sandbox は自分の安全上限との小さいほうに従う。
 # 超えたときの文は全経路で同じ形: 上限の値 (MB) と、変えるのは管理者 (どこで) と。
@@ -580,6 +585,16 @@ def _no_such_file(abs_path: str) -> ToolError:
     )
 
 
+def _refuse_in_subagent(metadata: Optional[dict]) -> None:
+    """サブエージェントの子ターン (metadata の `agent_session`。`utils/subagent` が立てる —
+    `utils/exec_tools` の spawn 判定と同じ印) なら、ユーザーへ渡す操作を断る。"""
+    if (metadata or {}).get("agent_session"):
+        raise ToolCallError(
+            "ここはサブエージェントの会話で、添付してもユーザーには見えない",
+            "書いたファイルの絶対パスを主エージェントへの結果に書く。渡すのは主エージェント。",
+        )
+
+
 def _ext_not_found(abs_path: str) -> ToolError:
     """ACL の置き場 (#152) で見えない / 無いもの。所属していないグループの置き場は在っても
     「無い」と同じに言う (存在を漏らさない)。"""
@@ -592,7 +607,8 @@ def _ext_not_found(abs_path: str) -> ToolError:
 def _display_markdown(name: str, file_id: str, content_type: str) -> Optional[str]:
     """content_type から display チャネル用の markdown を返す(image/audio/video)。
     それ以外(DL 提供のみ)は None。<audio>/<video> は sanitizeChatHtml が許可済(#87)。
-    exports/ に置いた成果物が「同じ経路」で自動表示に乗るための唯一の分岐点。"""
+    fetch_from_workspace で渡したファイルを画面に出すか (`_DISPLAYED`) リンクを書かせるか
+    (`_file_link_note`) の唯一の分岐点。"""
     url = f"/api/v1/files/{file_id}/content"
     ct = (content_type or "").lower()
     if ct.startswith("image/"):
@@ -660,7 +676,7 @@ READ_IMAGE_HINT = "中身を見る必要があるなら feed_image の path に�
 READ_BINARY_HINT = "テキストに変換したファイルを /workspace/ に作ってから、そのファイルを read_file で読む。"
 READ_PROXY_MOUNT_HINT = (
     "その置き場の資料を読む専用の手段があればそれを使う"
-    " (ユーザーに見せるだけなら fetch_from_workspace でリンクにする)。"
+    " (ユーザーに見せるだけなら、そのパスをそのまま本文のリンクに書く)。"
 )
 
 
@@ -805,12 +821,21 @@ def _attachment_dict(file_id: str, name: str, content_type: str, size: int) -> d
     }
 
 
-def _register_bytes_file(user_id: str, display_name: str, data: bytes) -> dict:
-    """bytes を Storage + Files に登録し、添付 dict を返す。"""
+def _register_bytes_file(
+    user_id: str, display_name: str, data: bytes, source: Optional[str] = None
+) -> dict:
+    """bytes を Storage + Files に登録し、添付 dict を返す。
+
+    `source` は由来の sandbox の絶対パス (`/workspace/out/a.csv` / `/ext/groups/x/y.pdf`)。
+    Files の `meta.source` に残す (どこから渡したファイルかを後から辿れるように。
+    添付 dict の meta には載せない — 画面・モデルには出さない)。"""
     file_id = str(uuid.uuid4())
     content_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
     stored_name = f"{file_id}_{display_name}"
     contents, path = Storage.upload_file(io.BytesIO(data), stored_name)
+    meta = {"name": display_name, "content_type": content_type, "size": len(data)}
+    if source:
+        meta["source"] = source
     Files.insert_new_file(
         user_id,
         FileForm(
@@ -819,11 +844,7 @@ def _register_bytes_file(user_id: str, display_name: str, data: bytes) -> dict:
                 "filename": display_name,
                 "path": path,
                 "data": {},
-                "meta": {
-                    "name": display_name,
-                    "content_type": content_type,
-                    "size": len(data),
-                },
+                "meta": meta,
             }
         ),
     )
@@ -950,36 +971,39 @@ def _iter_context_files(__files__, __metadata__):
 # -----------------------------------------------------------------------------
 class Tools:
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
-    3 ツール共有で実行を跨いで永続し、/workspace/exports/ に保存したファイルは
-    自動でチャットに添付される。ただし /workspace/imports/ と /workspace/exports/ は
-    Files にある原本の写しで、直下に置いたもの (ファイルでもフォルダでも 1 つ) は置いてから
-    (最後に触ってから) 一定期間 (既定 30 日。取り込み・添付の結果に期限日を添える) で中身ごと
-    消える — 会話を跨いで残す物は /workspace の別の場所 (自分で作るディレクトリ等) に置く。
+    3 ツール共有で実行を跨いで永続する。ここに作ったファイルはそのままではユーザーに
+    見えない — 渡すときは fetch_from_workspace を呼ぶ。/workspace/imports/ は Files にある
+    原本の写しで、imports/ の直下に置いたものは 1 つずつ (フォルダは中身ごと)、最後に触って
+    から一定期間 (既定 30 日。取り込みの結果に期限日を添える) で消える — 会話を跨いで残す物は
+    /workspace の別の場所 (自分で作るディレクトリ等) に置く。
     消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
     /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
-    `/ext/public/` は全員の共有の置き場 (読むだけ)。どちらも実行を跨いで残り、write_file /
-    read_file / list_workspace / fetch_from_workspace でも同じパスで扱える。"""
+    `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
+    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / read_file /
+    list_workspace / fetch_from_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
     # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
-    # imports/ exports/ trash/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
+    # imports/ trash/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
     # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。単位は直下のエントリ、時刻は max(mtime, ctime)
     # (mv で ctime が今になる = 移した日から数える)。docstring は静的なので既定で言い、実際の値は
-    # sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返す — 取り込み・
-    # exports 自動添付の結果に「YYYY-MM-DD 以降に消える」を添える (`_cache_expiry`。キーが無い
-    # 古い sandbox・0 では添えない)。send_to_workspace / fetch_from_workspace の docstring には
-    # 複製しない — 「無い」と言われたときの案内は `_cache_hint` がエラー文に足す。
+    # sandbox が `/files/write` 等の応答 `cache_ttl_days` で返す — 取り込みの結果に
+    # 「YYYY-MM-DD 以降に消える」を添える (`_cache_expiry`。キーが無い古い sandbox・0 では
+    # 添えない)。send_to_workspace / fetch_from_workspace の docstring には複製しない —
+    # 「無い」と言われたときの案内は `_cache_hint` がエラー文に足す。
+    # exports/ (2026-10-19 まで: 置くと暗黙にチャットへ添付された置き場) は廃止 — ユーザーへ
+    # 渡す経路は fetch_from_workspace 一本 (llens 依頼・ken 了承)。表示されたか・本文に何を
+    # 書くかは fetch_from_workspace の戻り値が毎回言う。既存の exports/ は期限掃除に任せる。
 
     # #110: 非同期実行(background 昇格)への opt-in。時間のかかる Python 実行を
-    # background にできるようにする。
-    # 既知の v1 制約: ターン終了後に完了した実行では exports の添付 UI
-    # (chat:message:files)は出ない — 実体は Files に永続済みで、tool result
-    # 文字列にも列挙される(`_memos/async-exec-design.md` §6)。
+    # background にできるようにする。run_* は Files にもチャットにも何も足さない
+    # (渡すのは同期でしか走らない fetch_from_workspace) ので、ターン終了後に完了しても
+    # 失う表示は無い。
     backgroundable = ("run_python", "run_python_once", "run_shell")
 
     # #110 P4: per-entry timeout(`timeouts` クラス属性)。sandbox サービスは
@@ -1038,7 +1062,7 @@ class Tools:
         """
         return await sandbox_post(path, payload, timeout_s)
 
-    # ---- exports/ の回収 → Files 登録 + チャット添付 ---------------------------
+    # ---- 添付 (fetch_from_workspace) → メッセージの files への反映 -----------------
     async def _persist_and_emit_files(
         self,
         attachments,
@@ -1070,71 +1094,6 @@ class Tools:
                 }
             )
 
-    async def _register_exports(
-        self,
-        user_id,
-        exports,
-        chat_id,
-        message_id,
-        __event_emitter__,
-        expires: Optional[date] = None,
-        limit: Optional[int] = None,
-    ) -> list[str]:
-        """sandbox の exports 差分を Files に登録・添付し、報告行を返す。
-        `expires` (#149) があり 1 件でも添付したら、workspace 側の写しの期限を 1 行添える。
-        `limit` は渡したファイルの上限 (sandbox が entry に `limit` を返せばそちらが効いた値)。"""
-        lines = []
-        attachments = []
-        for out in exports:
-            name = out["name"]
-            if out.get("truncated") or "b64" not in out:
-                # 添付の上限 (RC ATTACHMENT_MAX_SIZE_MB と sandbox の安全上限の小さいほう) 超過で
-                # 未添付。モデルにも戻り値で明示 + ユーザーにも display で警告(気付けるように)。
-                # display (人間の目) には事実だけ、次の手はモデル向けの行にだけ付ける
-                eff = out.get("limit") if isinstance(out.get("limit"), int) else limit
-                warn = (
-                    f"{name} ({_human_size(out['size'])}) は添付の上限 {format_limit(eff)} を"
-                    "超えて添付できなかった (workspace には残っている)。"
-                )
-                lines.append(
-                    f"- ⚠ {warn}({_LIMIT_BY_ADMIN}) {_NEXT}分割・圧縮するか、"
-                    "必要な部分だけ書き出す。"
-                )
-                display(f"⚠ {warn}")
-                continue
-            try:
-                att = _register_bytes_file(
-                    user_id, os.path.basename(name), base64.b64decode(out["b64"])
-                )
-                attachments.append(att)
-                line = f"- {name} ({_human_size(out['size'])}) file_id={att['id']}。"
-                # #88: 画像/音声/動画は display チャネルで tool 枠下に自動表示(モデルの
-                # 貼り付けに依存しない)。それ以外はチャットのファイル一覧(右ペイン —
-                # message.files の type 'file' は本文の下には描かれない)にだけ載るので、
-                # 本文で示すリンクを渡す。background 完了の [task] 通知では display の
-                # 中身がモデルに渡り、画面には出ていない(execution_resume)ので貼らせる。
-                md = _display_markdown(
-                    name, att["id"], att["file"]["meta"]["content_type"]
-                )
-                if md:
-                    display(md)
-                    line += f" {_DISPLAYED} ([task] 通知で受け取ったときは表示されていないので貼る)"
-                else:
-                    line += " " + _file_link_note(name, att["id"])
-                lines.append(line)
-            except Exception as e:
-                log.error(f"[sandbox] register export {name} failed: {e!r}")
-                lines.append(f"- {name}: ファイルの登録に失敗した")
-        if attachments:
-            await self._persist_and_emit_files(
-                attachments, chat_id, message_id, __event_emitter__
-            )
-            if expires:
-                lines.append(
-                    f"(添付は Files に残る。/workspace/exports/ の写しは {expires} 以降に消える)"
-                )
-        return lines
-
     def _truncate_output(self, text: str) -> str:
         """context 保護の切り詰め。sandbox サービス側の 512KB cap (transport/OOM 保護) とは
         別物で、こちらは tool result が会話 context を食い潰さないための上限。
@@ -1151,15 +1110,10 @@ class Tools:
             "run_shell の rg / head / tail で部分参照する]\n" + text[-tail:]
         )
 
-    def _format_exec_result(
-        self,
-        res: dict,
-        output_lines: list[str],
-        timeout_s: Optional[int] = None,
-    ) -> str:
+    def _format_exec_result(self, res: dict, timeout_s: Optional[int] = None) -> str:
         # 実行したコードが失敗した (exit_code != 0 / タイムアウト) ら結果に failure の旗を
         # 立てる (#145、ken「sandbox の stderr とかは？実行した python のエラーとか」)。
-        # raise はしない — stdout / traceback / 生成ファイルはモデルに要る。stderr だけ
+        # raise はしない — stdout / traceback はモデルに要る。stderr だけ
         # (exit_code 0 の warning) は通常の結果。run_shell も同じ (ken 2026-10-04 — staging で
         # `command not found` (exit 127) が緑だった。grep の不一致 = exit 1 も amber の
         # 「失敗」になるが、amber は穏やかなので許容)
@@ -1194,14 +1148,9 @@ class Tools:
             parts.append("(出力なし)")
         if note := _quota_full_note(stderr, stdout):
             parts.append(note)
-        if output_lines:
-            parts.append(
-                "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
-                + "\n".join(output_lines)
-            )
         return "\n".join(parts)
 
-    def _format_cell_result(self, res: dict, output_lines: list[str]) -> str:
+    def _format_cell_result(self, res: dict) -> str:
         # セルが例外 (error) かタイムアウトで終わったら failure の旗 (raise しない —
         # `_format_exec_result` と同じ)
         if res.get("error") or res.get("timed_out"):
@@ -1231,35 +1180,20 @@ class Tools:
             parts.append("(出力なし)")
         if note := _quota_full_note(str(error or ""), stdout):
             parts.append(note)
-        if output_lines:
-            parts.append(
-                "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
-                + "\n".join(output_lines)
-            )
         parts.append(f"({res.get('duration_s', 0)}s)")
         return "\n".join(parts)
 
-    async def _exec(
-        self,
-        lang,
-        code,
-        timeout_s,
-        __user__,
-        __event_emitter__,
-        __chat_id__,
-        __message_id__,
-    ) -> str:
+    async def _exec(self, lang, code, timeout_s, __user__) -> str:
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
-        limit = _limit(__user__)
+        # 添付の上限 (`file_limit_bytes`) は送らない — 実行はファイルを持ち出さない
+        # (ユーザーへ渡すのは fetch_from_workspace の `/files/read`)
         payload = {
             "user_id": __user__["id"],
             "lang": lang,
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
             "mounts": _ext_mounts(__user__),
-            # exports/ の自動添付の上限
-            **sandbox_limit_fields(limit),
         }
         # HTTP の待ちは実行の上限 + 余裕。計算は try の外 — ここで落ちるのは nucllei 側の
         # 不具合で、sandbox に届かなかった (_exec_error) とは言わない
@@ -1268,26 +1202,9 @@ class Tools:
             res = await self._post("/exec", payload, http_timeout)
         except Exception as e:
             raise _exec_error(e)
-        output_lines = await self._register_exports(
-            __user__["id"],
-            res.get("exports", []),
-            __chat_id__,
-            __message_id__,
-            __event_emitter__,
-            _cache_expiry(res),
-            limit,
-        )
-        return self._format_exec_result(res, output_lines, payload["timeout_s"])
+        return self._format_exec_result(res, payload["timeout_s"])
 
-    async def _exec_cell(
-        self,
-        code,
-        timeout_s,
-        __user__,
-        __event_emitter__,
-        __chat_id__,
-        __message_id__,
-    ) -> str:
+    async def _exec_cell(self, code, timeout_s, __user__, __chat_id__) -> str:
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         if not __chat_id__:
@@ -1295,7 +1212,6 @@ class Tools:
                 "この呼び出しにはチャットの id が無く、状態を持つ実行ができない",
                 "単発で足りるなら run_python_once を使う。",
             )
-        limit = _limit(__user__)
         payload = {
             "user_id": __user__["id"],
             "chat_id": __chat_id__,
@@ -1303,24 +1219,13 @@ class Tools:
             "timeout_s": timeout_s or self.valves.default_timeout_s,
             # 常駐 kernel は bind の一覧が変わると作り直される (session_reset が返る。#152)
             "mounts": _ext_mounts(__user__),
-            # exports/ の自動添付の上限
-            **sandbox_limit_fields(limit),
         }
         http_timeout = payload["timeout_s"] + 30  # 計算は try の外 (_exec と同じ)
         try:
             res = await self._post("/exec_cell", payload, http_timeout)
         except Exception as e:
             raise _exec_error(e)
-        output_lines = await self._register_exports(
-            __user__["id"],
-            res.get("exports", []),
-            __chat_id__,
-            __message_id__,
-            __event_emitter__,
-            _cache_expiry(res),
-            limit,
-        )
-        return self._format_cell_result(res, output_lines)
+        return self._format_cell_result(res)
 
     # =========================================================================
     # 実行系
@@ -1330,9 +1235,7 @@ class Tools:
         code: PythonCode,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
-        __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __chat_id__: Optional[str] = None,
-        __message_id__: Optional[str] = None,
     ) -> str:
         """
         サーバーの隔離環境で Python コードを実行する。この会話の中では変数・import・関数
@@ -1342,18 +1245,13 @@ class Tools:
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120、上限 600)
         """
-        return await self._exec_cell(
-            code, timeout_s, __user__, __event_emitter__, __chat_id__, __message_id__
-        )
+        return await self._exec_cell(code, timeout_s, __user__, __chat_id__)
 
     async def run_python_once(
         self,
         code: PythonCode,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
-        __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-        __chat_id__: Optional[str] = None,
-        __message_id__: Optional[str] = None,
     ) -> str:
         """
         サーバーの隔離環境で Python コードを 1 回だけ実行する (状態を持たない使い捨て)。
@@ -1363,24 +1261,13 @@ class Tools:
         :param code: 実行する Python コード
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
         """
-        return await self._exec(
-            "python",
-            code,
-            timeout_s,
-            __user__,
-            __event_emitter__,
-            __chat_id__,
-            __message_id__,
-        )
+        return await self._exec("python", code, timeout_s, __user__)
 
     async def run_shell(
         self,
         command: ShellCommand,
         timeout_s: Optional[int] = None,
         __user__: Optional[dict] = None,
-        __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-        __chat_id__: Optional[str] = None,
-        __message_id__: Optional[str] = None,
     ) -> str:
         """
         サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
@@ -1390,15 +1277,7 @@ class Tools:
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
         """
-        return await self._exec(
-            "shell",
-            command,
-            timeout_s,
-            __user__,
-            __event_emitter__,
-            __chat_id__,
-            __message_id__,
-        )
+        return await self._exec("shell", command, timeout_s, __user__)
 
     # =========================================================================
     # ファイル操作 utils
@@ -1645,9 +1524,6 @@ class Tools:
         path: str,
         content: str,
         __user__: Optional[dict] = None,
-        __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
-        __chat_id__: Optional[str] = None,
-        __message_id__: Optional[str] = None,
     ) -> str:
         """
         テキストファイルを sandbox の /workspace に直接書く。HTML・Markdown・CSV・
@@ -1683,7 +1559,7 @@ class Tools:
             )
 
         try:
-            res = await self._post(
+            await self._post(
                 "/files/write",
                 {
                     "user_id": __user__["id"],
@@ -1694,34 +1570,7 @@ class Tools:
             )
         except Exception as e:
             raise _files_error(e, abs_path)
-
-        msg = f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
-        if not rel.startswith("exports/"):
-            return msg
-        # exports/ に書いたらこの会話に添付する (sandbox を書き換えうる tool の共通の規則。
-        # run_* は sandbox の実行前後の差分、write_file は書いた先が分かるので手元の本文から
-        # `_collect_exports` と同じ形の 1 件を組む。上限超過は b64 なしの truncated)
-        limit = _limit(__user__)
-        name = rel[len("exports/") :]
-        entry = {"name": name, "size": len(data)}
-        if limit is not None and len(data) > limit:
-            entry.update(truncated=True, limit=limit)
-        else:
-            entry["b64"] = base64.b64encode(data).decode()
-        output_lines = await self._register_exports(
-            __user__["id"],
-            [entry],
-            __chat_id__,
-            __message_id__,
-            __event_emitter__,
-            _cache_expiry(res),
-            limit,
-        )
-        return (
-            msg
-            + "\n--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---\n"
-            + "\n".join(output_lines)
-        )
+        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
 
     async def _write_ext(self, path: str, rel: str, content: str, user: dict) -> str:
         """write_file の `/ext/groups/<g>/…` `/ext/public/…` (#152)。可否は ACL、実際の書き込みと
@@ -2000,7 +1849,7 @@ class Tools:
             WORKSPACE_PATH_ARG_FORM,
             "list_workspace が一覧できるのは `/workspace/` 配下と `/ext/groups`・`/ext/public` だけ。"
             f"{_NEXT}`/ext/` は run_shell の ls で見る "
-            "(見つけたファイルをユーザーに見せるなら fetch_from_workspace にそのパスを渡す)。",
+            "(見つけたファイルをユーザーに見せるなら、そのパスをそのまま本文のリンクに書く)。",
         )
         try:
             res = await self._post(
@@ -2026,8 +1875,8 @@ class Tools:
         if exists is True and res.get("is_dir") is False:
             raise ToolCallError(
                 f"{abs_path} はファイルで、ディレクトリではない",
-                "一覧するならディレクトリを渡す (中身を見るなら run_shell か"
-                " fetch_from_workspace)。",
+                "一覧するならディレクトリを渡す (中身を読むなら read_file、ユーザーに"
+                "渡すなら fetch_from_workspace)。",
             )
         if not entries:
             if exists is None:
@@ -2074,8 +1923,8 @@ class Tools:
         if res.get("is_dir") is False:
             raise ToolCallError(
                 f"{abs_path} はファイルで、ディレクトリではない",
-                "一覧するならディレクトリを渡す (中身を見るなら run_shell か"
-                " fetch_from_workspace)。",
+                "一覧するならディレクトリを渡す (中身を読むなら read_file、ユーザーに"
+                "渡すなら fetch_from_workspace)。",
             )
         ro = "" if access == "rw" else " (read-only — 書けるのは管理者だけ)"
         entries = res.get("entries", [])
@@ -2093,21 +1942,25 @@ class Tools:
         __event_emitter__: Optional[Callable[[Any], Awaitable[None]]] = None,
         __chat_id__: Optional[str] = None,
         __message_id__: Optional[str] = None,
+        __metadata__: Optional[dict] = None,
     ) -> str:
         """
-        sandbox のファイルをユーザーに見せられる形にする: チャットに添付して file_id と本文用の
-        リンクを返す (exports/ 以外に作ったファイルや過去実行の成果物、`/ext/` で見つけた資料を
-        渡すときに使う)。
-        画像・音声・動画は添付と同時にユーザーの画面に表示される (本文に貼り直さない)。
-        `/ext/…` のファイルは sandbox のパスと URL が同じ文字列で、サーバが配信していれば
-        添付せずその URL のリンクを返す (本文にはそれをそのまま書く。日本語名は percent-encode
-        された同じファイルの別表記になる)。/workspace のパスはブラウザでは開けないので、
-        パスを本文に貼ったり URL に書き換えたりせず、これに渡すこと。
+        sandbox で作ったファイルをユーザーに渡すときに使う (/workspace のファイルはそのままでは
+        ユーザーに見えず、ブラウザでも開けない)。チャットに添付し、画像・音声・動画はその場で
+        ユーザーの画面に表示される。本文に何を書くか (書かないか) は戻り値が言う。
+        /workspace のパスを本文に貼ったり URL に書き換えたりしない。
+        `/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書いてよい
+        (`/ext/doc/…` は doc の出典の形で示す)。呼んだ場合は、サーバが配信していれば添付せず
+        そのリンクを返す (日本語名は percent-encode された同じファイルの別表記になる)。
 
-        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/imports/converted.xlsx
+        :param path: 対象ファイル。sandbox の絶対パス (`/workspace/…` `/ext/…`)。例: /workspace/out/report.xlsx
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
+        # サブエージェントの子ターン (`utils/subagent` が metadata に `agent_session` を立てる)
+        # では添付しない: 添付は子の chat (kind="agent"、ユーザーに見えない) のメッセージに付き、
+        # display も購読者の居ない子のストリームに流れるだけ。ユーザーに渡すのは親 (主エージェント)
+        _refuse_in_subagent(__metadata__)
         from nucllei.utils.image_refs import PATH_ARG_FORM
 
         # path は sandbox のパスとしてだけ解く (URL / file_id には読み替えない)。置き場が
@@ -2244,9 +2097,10 @@ class Tools:
         message_id,
         __event_emitter__,
     ) -> str:
-        """バイト列を Files に登録してチャットに添付し、モデル向けの報告文を返す。"""
+        """バイト列を Files に登録してチャットに添付し、モデル向けの報告文を返す。
+        由来のパス `abs_path` は Files の `meta.source` に残す。"""
         try:
-            att = _register_bytes_file(user_id, name, data)
+            att = _register_bytes_file(user_id, name, data, source=abs_path)
         except Exception as e:
             log.error(f"[sandbox] register {abs_path} failed: {e!r}")
             raise ToolFatal("ファイルの登録に失敗した")
@@ -2257,8 +2111,9 @@ class Tools:
             f"{abs_path} ({_human_size(len(data))}) をこのチャットのファイル一覧に添付した"
             f" (file_id={att['id']})。"
         )
-        # #88: 画像/音声/動画は display で枠下に自動表示(exports/ 自動回収と同じ経路)。
-        # それ以外はファイル一覧にだけ載る — 本文で示すリンクを渡す(_register_exports と同じ)
+        # #88: 画像/音声/動画は display で枠下に表示する — fetch_from_workspace は同期でしか
+        # 走らない (backgroundable でない) ので、いまこの場で画面に出る (`_DISPLAYED`)。
+        # それ以外はファイル一覧にだけ載る — 本文で示すリンクを渡す (`_file_link_note`)
         md = _display_markdown(name, att["id"], att["file"]["meta"]["content_type"])
         if md:
             display(md)

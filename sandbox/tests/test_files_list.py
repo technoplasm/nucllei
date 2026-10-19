@@ -5,7 +5,7 @@
 `exists` / `is_dir` は追加フィールド — 読まない旧 nucllei とも互換。
 
 あわせて `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` (#149 — imports/ exports/
-の期限を nucllei に渡す) もここで見る。
+の期限を nucllei に渡す) と、exports/ の自動回収を廃止したこと (2026-10-19) もここで見る。
 
 `test_auth.py` と同じく main.py を直接 import する (コンテナ不要)。
 
@@ -88,9 +88,11 @@ def test_files_write_reports_cache_ttl(monkeypatch, tmp_path):
         assert r.json() == {"ok": True, "size": 1, "cache_ttl_days": want}
 
 
-def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
-    """#149: exports を返す `/exec` `/exec_cell` も `cache_ttl_days` を返す (自動添付の
-    tool 出力で workspace 側の写しの期限を知らせるため)。nsjail / kernel は差し替える。"""
+def test_exec_and_exec_cell_report_cache_ttl_without_exports(monkeypatch, tmp_path):
+    """#149: `/exec` `/exec_cell` は `cache_ttl_days` を返す。exports/ の実行前後差分の回収
+    (チャットへの自動添付) は廃止 (2026-10-19) — exports/ に書いても応答に `exports` キーは出ない。
+    古い nucllei が送る `file_limit_bytes` (自動添付の上限だった) は 422 にせず受け流す。
+    nsjail / kernel は差し替える。"""
     import asyncio
 
     monkeypatch.setenv("SANDBOX_CACHE_TTL_DAYS", "12")
@@ -106,11 +108,16 @@ def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
         "_nsjail_cmd",
         lambda ws, t, argv, binds=(): ["sh", "-c", f"echo hi > {out_file}"],
     )
-    r = c.post("/exec", json={"user_id": "u1", "lang": "shell", "code": "x"})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["cache_ttl_days"] == 12
-    assert [e["name"] for e in body["exports"]] == ["r.txt"]
+    for extra in ({}, {"file_limit_bytes": 5}):
+        out_file.unlink(missing_ok=True)
+        r = c.post(
+            "/exec", json={"user_id": "u1", "lang": "shell", "code": "x", **extra}
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["cache_ttl_days"] == 12
+        assert "exports" not in body
+        assert out_file.read_text() == "hi\n"  # 書けてはいる (回収しないだけ)
 
     class FakeSession:
         lock = asyncio.Lock()
@@ -126,9 +133,22 @@ def test_exec_and_exec_cell_report_cache_ttl(monkeypatch, tmp_path):
         return FakeSession(), False
 
     monkeypatch.setattr(mod._sessions, "get", fake_get)
+    for extra in ({}, {"file_limit_bytes": 5}):
+        r = c.post(
+            "/exec_cell",
+            json={"user_id": "u1", "chat_id": "c1", "code": "1", **extra},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["cache_ttl_days"] == 12 and body["stdout"] == "1\n"
+        assert "exports" not in body
+    # kernel が落ちた (EOF) 応答にも出ない
+    monkeypatch.setattr(mod._sessions, "drop", lambda sess: asyncio.sleep(0))
+    monkeypatch.setattr(FakeSession, "_recv", lambda self: None)
     r = c.post("/exec_cell", json={"user_id": "u1", "chat_id": "c1", "code": "1"})
     assert r.status_code == 200, r.text
-    assert r.json()["cache_ttl_days"] == 12 and r.json()["stdout"] == "1\n"
+    assert r.json()["session_reset"] and "exports" not in r.json()
+    assert not hasattr(mod, "_collect_exports") and not hasattr(mod, "_snapshot_exports")
 
 
 # --- 1 ファイルの上限: nucllei が渡す `file_limit_bytes` と sandbox の上限の小さいほう ------------
@@ -230,19 +250,3 @@ def test_write_and_exec_imports_follow_limit(monkeypatch, tmp_path):
         },
     )
     assert r.status_code == 413 and "(limit 5)" in r.text
-
-
-def test_exports_over_limit_are_truncated_with_limit(monkeypatch, tmp_path):
-    _client(monkeypatch, tmp_path)
-    mod = sys.modules["sandbox_main_files_test"]
-    ws = tmp_path / "u1"
-    _ws_file(tmp_path, "exports/big.bin", b"x" * 6)
-    _ws_file(tmp_path, "exports/ok.txt", b"hi")
-    out = {e["name"]: e for e in mod._collect_exports(ws, {}, mod._file_limit(5))}
-    assert out["big.bin"]["truncated"] and out["big.bin"]["limit"] == 5
-    assert "b64" not in out["big.bin"]
-    assert out["ok.txt"]["b64"] == base64.b64encode(b"hi").decode()
-    # 渡されない → 安全上限
-    monkeypatch.setattr(mod, "FILE_LIMIT", 4)
-    out = {e["name"]: e for e in mod._collect_exports(ws, {}, mod._file_limit(None))}
-    assert out["big.bin"]["limit"] == 4 and "b64" in out["ok.txt"]

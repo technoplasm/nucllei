@@ -329,7 +329,6 @@
 	"File size should not exceed {{maxSize}} MB.": "ファイルサイズが上限 ({{maxSize}} MB) を超えています。",
 	"Files": "ファイル",
 	"Files here are copies of chat attachments and outputs. Each item directly in this folder (a file or a folder) is deleted with everything inside {{COUNT}} days after it was put here or last changed. The originals stay in Files.": "ここにあるのはチャットの添付・生成物の写しです。このフォルダの直下に置いたもの (ファイルでもフォルダでも 1 つ) は、置いてから (最後に変更してから) {{COUNT}} 日で中身ごと消えます。原本は「ファイル」に残ります。",
-	"Files put here are not attached to a conversation. To pass one to a conversation, ask the model in the chat.": "ここに置いても会話には添付されません。会話に渡すときはチャットでモデルに頼んでください。",
 	"Files in this chat": "チャット内ファイル",
 	"Filter": "フィルター",
 	"Filter by uploader": "アップロード者で絞り込み",

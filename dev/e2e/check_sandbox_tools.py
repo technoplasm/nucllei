@@ -14,8 +14,11 @@
 3. preset(`MODEL_ID`)に `builtin_sandbox` が接続されている
    — 未接続ならこのスクリプトが接続して MODELS キャッシュを張り直す(冪等)
 
-E1 計算 / E2 stateful(x=42 → 84)/ E3 exports 自動添付 / E4 timeout(変数保持)/
-E5 shell / E6 添付取り込み(send_to_workspace)
+E1 計算 / E2 stateful(x=42 → 84)/ E3 fetch_from_workspace で渡す(添付 + meta.source)/
+E4 timeout(変数保持)/ E5 shell / E6 添付取り込み(send_to_workspace)
+
+E3 は 2026-10-19 まで「exports/ に書くと自動添付」を見ていた。自動添付は廃止され、利用者へ渡すのは
+`fetch_from_workspace` 一本になった(`_memos/builtin-tools.md`「exports/ の自動添付の廃止」)。
 """
 
 import io
@@ -216,25 +219,38 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/sandbox_e2e_chat1.png", full_page=True)
 
     # ---- chat 2: E3 / E5 --------------------------------------------------
-    # exports/ = 実行前後の差分を tool が回収して添付する置き場(旧 outputs/ から改名)。
+    # 利用者へ渡すのは fetch_from_workspace だけ(暗黙の添付は無い)。添付はメッセージの files に入り、
+    # Files の meta.source に由来の sandbox パスが残る。
     new_chat()
     chat_id, chat = send_and_wait(
-        "run_python で、ヘッダ a,b と行 1,2 だけの CSV を exports/result.csv に保存して",
+        "run_python で、ヘッダ a,b と行 1,2 だけの CSV を /workspace/result.csv に保存して、"
+        "fetch_from_workspace でダウンロードできるようにして",
         1,
     )
     asst = last_assistant(chat)
     calls, reply = describe(asst)
     files = asst.get("files") or []
+    csv_files = [
+        f
+        for f in files
+        if (f.get("name") or f.get("file", {}).get("filename", "")).endswith(
+            "result.csv"
+        )
+    ]
     check(
-        "E3 exports 自動添付",
-        "run_python" in calls
-        and any(
-            (f.get("name") or f.get("file", {}).get("filename", "")).endswith(
-                "result.csv"
-            )
-            for f in files
-        ),
-        f"files={[f.get('name') for f in files]}",
+        "E3a fetch_from_workspace で添付",
+        "run_python" in calls and "fetch_from_workspace" in calls and bool(csv_files),
+        f"calls={calls} files={[f.get('name') for f in files]}",
+    )
+    source = None
+    if csv_files:
+        source = (
+            (_req("GET", f"/api/v1/files/{csv_files[0]['id']}") or {}).get("meta") or {}
+        ).get("source")
+    check(
+        "E3b meta.source に由来のパス",
+        source == "/workspace/result.csv",
+        f"source={source!r}",
     )
 
     _, chat = send_and_wait(

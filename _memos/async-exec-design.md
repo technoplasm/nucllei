@@ -153,7 +153,7 @@ exec は callable に焼き込まれた親ターンのオブジェクトを持�
 | `__feed_image__` / `__display__` | closed チェック無しで死に sink に積まれ消失 | 自前 sink → exec 行 meta へ harvest → await 時 replay |
 | `__event_emitter__` の DB 分岐(message/replace — completion_events.py:199-243) | stream 生死と無関係に親メッセージを変異(append-only 破り) | **`_in_exec` ContextVar が立っていたら DB 分岐を全面スキップ**(ターン中の `_persist_message_snapshot` との RMW 競合も同時に塞ぐ)。加えて closed ガードも追加 |
 | `__event_call__`(completion_events.py:132) | closed 後は future が永遠に未解決 = timeout まで hang | `call()` 冒頭で closed なら即 RuntimeError。`close()`(:100-109)の pending は cancel でなく `set_exception(RuntimeError)`(in-flight を failed に落とし、cancel 経路の意味論汚染を防ぐ) |
-| `chat:message:files`(sandbox exports 添付 — completion_events.py:255) | closed で無音消失 | v1 既知制約: 添付 UI は出ないが実体は Files に永続済み・tool result 文字列に列挙される。回収拡張は v2 |
+| `chat:message:files`(sandbox exports 添付 — completion_events.py:255) | closed で無音消失 | v1 既知制約: 添付 UI は出ないが実体は Files に永続済み・tool result 文字列に列挙される。回収拡張は v2 → **2026-10-19 解消**: exports の自動添付そのものを廃止(追補 9) |
 
 正規化は middleware.py:1244-1257 を `_normalize_tool_result(raw)` に抽出して共有(挙動不変リファクタ)。
 切詰めは `EXEC_RESULT_MAX_CHARS`(既定 65536)。超過時は **render を text に降格** +
@@ -283,14 +283,15 @@ tag 後に llens P4(userspace subagent.py の builtin 置換・プロンプト�
 - ターン中の chat JSON RMW 競合は ContextVar 遮断(§6)で emitter 経路のみ塞いだ。tool 独自の DB 書き
   (sandbox tool の files upsert 等)は tool 側の宿題(#114 以降その tool も本 repo の
   `nucllei/builtin_tools/sandbox.py`)。
-- sandbox exports の添付 UI はターン終了後出ない(実体・result 文字列は残る — §6)。
+- ~~sandbox exports の添付 UI はターン終了後出ない(実体・result 文字列は残る — §6)。~~ → 2026-10-19 に
+  exports の自動添付ごと廃止(追補 9)。
   複数タブの自動再開二重送信は秒未満の窓が残る(await の冪等性で無害化 — ムダ 1 turn)。
 - default executor(min(32, cpu+4))は遅い sync tool が並ぶと逼迫しうる(専用 executor 隔離は v2)。
 
 ## 14. Open questions(ken 判断待ち)
 
 1. **backgroundable の opt-in 粒度**(DB/tool server の admin 設定)。— 推奨: v1 は run_subagent のみ適格。
-2. **sandbox run_python の適格化**(exports 添付 UI 消失の許容)。— 推奨: llens P4 で適格化 + 制約明記。
+2. **sandbox run_python の適格化**(exports 添付 UI 消失の許容 — 2026-10-19 に自動添付ごと廃止、追補 9)。— 推奨: llens P4 で適格化 + 制約明記。
 3. **同時数の既定**: per-user 4 / total 16 / 超過即エラー。— 推奨: この既定(admin 口は別 issue 化)。
 4. **保持と切詰めの既定**: RETENTION_DAYS=0(GC しない)/ MAX_CHARS=65536。— 推奨: この既定(安全側)。
 5. **ユーザー停止した exec も自動再開で通知するか**。— 推奨: する(stopped の報告文で閉じさせる)。
@@ -417,6 +418,7 @@ dev で実際に非同期 tool を使ったモデルからのフィードバッ�
 - 結果は**例外なし全文差し込み**(T4 — 長さで落とさない。切詰めは保存時のみ)。
   context_images は notice の files 添付(VLM 本来の経路)、display は本文併記。
   sandbox exports(chat:message:files)の添付 UI は v1 制約のまま(実体は Files に永続)。
+  → 2026-10-19 に exports の自動添付ごと廃止(追補 9)。
 - FE に残るのはチップ(表示・停止)・ExecutionBlock・poll・BE 発ターンの発見
   (tick で task attach + delivered 増分での refetch)。B-1/B-4 は機構ごと消滅・根治。
 
@@ -524,3 +526,19 @@ subagent の所要時間調査(1 応答に子 2 本 / background + await_task �
   load_skill prelude)/ `test_async_exec.py::test_lone_background_call_runs_inline`
   (+ 昇格テストは隣に同期 call を並べる形へ)/ `test_openai_compat_chat.py::
   test_consecutive_completions_do_not_refetch_models`。
+
+## 追補 9(2026-10-19 廃止、llens の依頼・ken 了承)— sandbox exports/ の自動添付を廃止
+
+§6 の「`chat:message:files`(sandbox exports 添付)はターン終了後に添付 UI が出ない」既知制約は、
+制約を直すのではなく**自動添付そのものを廃止**して消した。利用者へ渡す経路は builtin tool
+`fetch_from_workspace(path)` 一本。
+
+- 理由 — 暗黙の添付が、音声・動画のプレイヤーの二重表示、[task] 通知と await_task で「貼る / 貼らない」の書き方が反転、サブエージェントが exports/ に書くと子のチャットに添付、EMR の個票の写しが exports/ に残る、等の食い違いを生んだ。
+  どれも「どこに書いたか」で暗黙に添付が決まり、モデルが渡したつもりかどうかと食い違うことから来ていた。
+- 現行: run_python / run_shell 等の結果に「生成ファイル (exports/)」は出ず、exports/ に書いても何も添付されない。
+  background で走った実行も同じで、完了通知 [task] は「成果物は作業場所にある。渡すなら fetch_from_workspace を
+  呼ぶ」の形。続きターンでモデルが呼べば、そのターンの tool call として添付・表示される(ターン終了後に emit して
+  消える経路が無くなった)。
+- 画像・音声・動画は `fetch_from_workspace` の添付と同時に画面に表示され、戻り値が「既に表示されている。
+  本文に貼り直さない」と言う。それ以外はファイル一覧に添付され、戻り値が本文に書くリンクを示す。
+- 詳細(exports/ の扱い・meta.source)は `_memos/builtin-tools.md`「exports/ の自動添付の廃止」。

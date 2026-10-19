@@ -1125,7 +1125,7 @@ ATTACHMENT_MAX_COUNT = RuntimeConfig(
 )
 
 # 1 ファイルの上限(MB、0 = 無制限)。既定 25MB。チャットへのアップロードと sandbox のファイルの
-# うち file_id を作る経路(send_to_workspace(file_id=) / exports の自動添付 / fetch_from_workspace)の
+# うち file_id を作る経路(send_to_workspace(file_id=) / fetch_from_workspace)の
 # 情報源 — 読むのは utils/file_limit.attachment_limit_bytes。ファイルブラウザと
 # send_to_workspace(url=) は sandbox の SANDBOX_FILE_MAX_SIZE_MB(既定 1024)に従う(README_API §3.7)。
 ATTACHMENT_MAX_SIZE_MB = RuntimeConfig(

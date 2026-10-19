@@ -53,7 +53,7 @@ STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024))
 #   - ファイルブラウザのアップロード / ダウンロード (`/files/raw`、ストリーミング) と nucllei の
 #     send_to_workspace(url=) の取り込み (同じく `/files/raw`) の上限そのもの
 #   - nucllei がリクエストごとに `file_limit_bytes` で渡す上限 (添付の上限 ATTACHMENT_MAX_SIZE_MB —
-#     `/files/read` `/files/write` の b64・exports 自動添付・`/exec` の imports) の**安全上限**:
+#     `/files/read` `/files/write` の b64・`/exec` の imports) の**安全上限**:
 #     渡された値とこの値の**小さいほう**に従う (`_file_limit`)。b64-in-JSON の経路はファイルサイズの
 #     ~2.3 倍が service プロセスの RAM に載るので、真の無制限にはしない
 # 値は /healthz (`file_max_size_mb`) と /metrics (`sandbox_file_max_size_bytes`) に出す (nucllei が
@@ -304,7 +304,10 @@ WS_RETENTION_SWEEP_S = 3600
 # (`_sweep_cache_dirs`)。0 以下 = 消さない。
 # 消えたものは `send_to_workspace(file_id)` で戻せる。`memory/` 等の他ディレクトリには触らない。
 # 値は `/exec` `/exec_cell` `/files/write` の応答 `cache_ttl_days` でも返す (0 = 消さない) —
-# nucllei が取り込み・自動添付の tool 出力で「YYYY-MM-DD 以降に消える」を知らせるため。
+# nucllei が取り込みの tool 出力で「YYYY-MM-DD 以降に消える」を知らせるため。
+# `exports/` は実行後の自動回収 (チャットへの自動添付) を廃止した (2026-10-19、ken 決定)。
+# 新しい workspace には作らず、ファイルブラウザからも消せる (`PROTECTED_DIRS` から外す) が、
+# 既存の workspace に残っている写しを期限で消すため掃除の対象 (`CACHE_DIRS`) には残す。
 CACHE_TTL_DAYS = int(os.environ.get("SANDBOX_CACHE_TTL_DAYS", "30"))
 CACHE_DIRS = ("imports", "exports")
 # `trash/` = 消す代わりに移す置き場 (llens の運用も `/files/delete` の /workspace での既定も、
@@ -312,7 +315,7 @@ CACHE_DIRS = ("imports", "exports")
 # **直下の各エントリ**、時刻はその lstat の max(mtime, ctime) (`_sweep_entries`)。
 TRASH_DIR = "trash"
 # workspace 直下で sandbox が用意し、ファイルブラウザから消させない・改名させないもの
-PROTECTED_DIRS = (*CACHE_DIRS, TRASH_DIR)
+PROTECTED_DIRS = ("imports", TRASH_DIR)
 CACHE_TTL_REPORTED = max(CACHE_TTL_DAYS, 0)
 
 
@@ -437,7 +440,7 @@ def _ensure_workspace(user_id: str) -> Path:
         _run(["mount", "-o", "loop,discard", str(img), str(ws)])
         os.chown(ws, JAIL_UID, JAIL_UID)
 
-    for d in (ws / "imports", ws / "exports", ws / TRASH_DIR, ws / ".exec"):
+    for d in (ws / "imports", ws / TRASH_DIR, ws / ".exec"):
         if not d.exists():
             _mkdir_owned(str(d))
     return ws
@@ -493,16 +496,6 @@ def _user_lock(user_id: str) -> asyncio.Lock:
     return _user_locks[user_id]
 
 
-def _snapshot_exports(ws: Path) -> dict[str, tuple[int, int]]:
-    out = ws / "exports"
-    snap = {}
-    for p in out.rglob("*"):
-        if p.is_file():
-            st = p.stat()
-            snap[str(p.relative_to(out))] = (st.st_mtime_ns, st.st_size)
-    return snap
-
-
 # 渡された上限が安全上限を超えていたときの warning を、値が変わったときだけ出すための記録
 _file_limit_warned: Optional[int] = None
 
@@ -530,26 +523,6 @@ def _file_limit(requested: Optional[int]) -> int:
 def _too_large(size: int, limit: int) -> HTTPException:
     # 文面 `file too large: N bytes (limit L)` は nucllei が読む (サイズと効いた上限を拾う)
     return HTTPException(413, f"file too large: {size} bytes (limit {limit})")
-
-
-def _collect_exports(ws: Path, before: dict, limit: Optional[int] = None) -> list[dict]:
-    """exports/ の実行前後差分 (新規 + 更新) を b64 で返す。`limit` を超える物は b64 なしで
-    `truncated` (と効いた上限 `limit`) — nucllei は添付せず、上限を添えて知らせる。"""
-    if limit is None:
-        limit = FILE_LIMIT
-    results = []
-    for rel, sig in sorted(_snapshot_exports(ws).items()):
-        if before.get(rel) == sig:
-            continue
-        p = ws / "exports" / rel
-        size = sig[1]
-        entry = {"name": rel, "size": size, "truncated": size > limit}
-        if entry["truncated"]:
-            entry["limit"] = limit
-        else:
-            entry["b64"] = base64.b64encode(p.read_bytes()).decode()
-        results.append(entry)
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1192,8 @@ class ExecRequest(BaseModel):
     timeout_s: Optional[int] = None
     imports: list[FileIn] = Field(default_factory=list)
     mounts: list[MountIn] = Field(default_factory=list)
+    # `imports` の 1 ファイルの上限 (exports の自動添付は 2026-10-19 に廃止したので、もうそちらには
+    # 効かない。今の nucllei は送らない = sandbox の上限だけ)
     file_limit_bytes: Optional[int] = None
 
 
@@ -1269,12 +1244,13 @@ class UsageRequest(BaseModel):
 
 
 class CellRequest(BaseModel):
+    # `file_limit_bytes` は持たない (exports の自動添付の上限だった。2026-10-19 廃止)。古い
+    # nucllei が送ってきても pydantic の既定 (extra="ignore") で黙って捨てる = 422 にしない
     user_id: str
     chat_id: str
     code: str
     timeout_s: Optional[int] = None
     mounts: list[MountIn] = Field(default_factory=list)
-    file_limit_bytes: Optional[int] = None
 
 
 @app.on_event("startup")
@@ -1383,7 +1359,7 @@ async def _abandon_if_client_gone(request: Request):
 
     tool 側は待ち時間込みで timeout_s+30 秒しか待たず ERROR を返す。ここで確認しないと
     切れた要求が lock 取得後にそのまま走り (結果は誰にも返らない)、モデルの再試行と
-    合わせて同じコードが 2 回実行される (exports の二重生成、kernel なら namespace 副作用)。
+    合わせて同じコードが 2 回実行される (書いたファイルの二重生成、kernel なら namespace 副作用)。
     """
     if await request.is_disconnected():
         raise HTTPException(499, "client disconnected while waiting for lock")
@@ -1433,7 +1409,6 @@ async def exec_code(req: ExecRequest, request: Request):
             argv = ["/bin/bash", jail_script]
 
         binds = await asyncio.to_thread(_prepare_mounts, validated)
-        before = _snapshot_exports(ws)
         t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1466,7 +1441,6 @@ async def exec_code(req: ExecRequest, request: Request):
             "stderr": err.decode("utf-8", errors="replace"),
             "stdout_truncated": out_trunc,
             "stderr_truncated": err_trunc,
-            "exports": _collect_exports(ws, before, limit),
             "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
@@ -1478,8 +1452,7 @@ async def exec_cell(req: CellRequest, request: Request):
         raise HTTPException(400, "chat_id required for stateful exec")
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
-    limit = _file_limit(req.file_limit_bytes)
-    ws = await _workspace(req.user_id)
+    await _workspace(req.user_id)
     binds = await asyncio.to_thread(_prepare_mounts, validated)
     sess, was_reset = await _sessions.get(
         req.user_id, req.chat_id, binds, _mounts_fingerprint(binds)
@@ -1488,7 +1461,6 @@ async def exec_cell(req: CellRequest, request: Request):
     async with sess.lock, _sem:
         await _abandon_if_client_gone(request)
         sess.last_used = time.monotonic()
-        before = _snapshot_exports(ws)
         t0 = time.monotonic()
         try:
             await asyncio.to_thread(sess._send, req.code, float(timeout_s))
@@ -1513,7 +1485,6 @@ async def exec_cell(req: CellRequest, request: Request):
                 "session_reset": True,
                 "duration_s": 0,
                 "stdout_truncated": False,
-                "exports": _collect_exports(ws, before, limit),
                 "cache_ttl_days": CACHE_TTL_REPORTED,
             }
         duration_s = round(time.monotonic() - t0, 2)
@@ -1528,7 +1499,6 @@ async def exec_cell(req: CellRequest, request: Request):
                 "session_reset": True,
                 "duration_s": duration_s,
                 "stdout_truncated": False,
-                "exports": _collect_exports(ws, before, limit),
                 "cache_ttl_days": CACHE_TTL_REPORTED,
             }
 
@@ -1539,7 +1509,6 @@ async def exec_cell(req: CellRequest, request: Request):
             "session_reset": was_reset,
             "duration_s": duration_s,
             "stdout_truncated": resp.get("truncated", False),
-            "exports": _collect_exports(ws, before, limit),
             "cache_ttl_days": CACHE_TTL_REPORTED,
         }
 
@@ -1785,7 +1754,7 @@ def _kind_of(mode: int) -> str:
 
 def _check_mutable(t: _Target, segs: list[str], what: str) -> None:
     """ファイルブラウザの書き換え (削除・改名・mkdir) で触らせないもの: 置き場の root そのもの、
-    `.` 始まり (一覧に出さない内部・隠しファイル)、workspace 直下の `imports/` `exports/`
+    `.` 始まり (一覧に出さない内部・隠しファイル)、workspace 直下の `imports/`
     (sandbox が実行のたびに使う置き場。消すと取り込みが落ちる) と `trash/` (消す代わりの移し先)。"""
     if not segs:
         raise HTTPException(400, f"cannot {what} the root: {t.path}")
@@ -2179,7 +2148,7 @@ async def files_ls(req: PathRequest):
     ディレクトリも出し、種類・サイズ・mtime を返す。"""
     t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
     res = await asyncio.to_thread(_fs_ls, t)
-    # imports/ exports/ の残り期限 (mtime + N 日) を呼び手が出せるように (#149)
+    # imports/ exports/ trash/ の残り期限 (mtime + N 日) を呼び手が出せるように (#149)
     return {**res, "cache_ttl_days": CACHE_TTL_REPORTED}
 
 

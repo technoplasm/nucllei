@@ -371,7 +371,7 @@ class Tools:
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値などに出た URL の literal をそのまま)。
         :param query: (任意) 指定すると、本文行・リンク行のうちこの語を含む行だけを返す。
         :param offset: 何文字目から返すか (0 起点)。続きは戻り値の next_offset を渡す。
-        :param limit: 返す文字数 (既定 8000)。valve の max_output_chars で頭打ちになる。
+        :param limit: 返す文字数 (既定 8000)。配備の上限で頭打ちになる。
         :param max_mb: (任意) 取得サイズの上限 (MB)。既定を超える資料を読むときだけ (天井あり)。
         """
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・

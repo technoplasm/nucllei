@@ -372,7 +372,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                     "error": None,
                     "timed_out": False,
                     "duration_s": 0.1,
-                    "exports": [],
                 }
             }
         )
@@ -381,7 +380,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 "print(42)",
                 __user__={"id": "u1"},
                 __chat_id__="c1",
-                __message_id__="m1",
             )
         )
         path, payload, _ = tool.calls[0]
@@ -405,7 +403,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                     "error": None,
                     "timed_out": True,
                     "duration_s": 120,
-                    "exports": [],
                 }
             }
         )
@@ -425,7 +422,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "stdout": "",
             "stderr": "",
             "timed_out": True,
-            "exports": [],
         }
         for given, n in ((30, 30), (None, 120), (900, 600)):
             tool = _sandbox({"/exec": res})
@@ -452,7 +448,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 "duration_s": 0.1,
                 "stdout": "out\n",
                 "stderr": "",
-                "exports": [],
                 **over,
             }
 
@@ -549,7 +544,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "duration_s": 0.2,
             "stdout": "hello\n",
             "stderr": "",
-            "exports": [],
         }
         tool = _sandbox({"/exec": res})
         out = _arun(tool.run_shell("echo hello", __user__={"id": "u1"}))
@@ -574,7 +568,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             "duration_s": 0.2,
             "stdout": "hello\n",
             "stderr": "",
-            "exports": [],
         }
         tool = _sandbox({"/exec": res})
         callable_ = get_async_tool_function_and_apply_extra_params(
@@ -779,68 +772,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
                 "続くならユーザーに伝える。"
             )
 
-    def test_exports_are_registered_attached_and_displayed(self):
-        """exports/ の差分 → Files 登録 + chat:message:files emit + 画像は display。"""
-        from nucllei.utils import tool_output
-        from nucllei.utils.tool_output import ToolOutputSink
-
-        png = base64.b64encode(b"\x89PNG fake").decode()
-        tool = _sandbox(
-            {
-                "/exec": {
-                    "exit_code": 0,
-                    "duration_s": 0.1,
-                    "stdout": "",
-                    "stderr": "",
-                    "exports": [
-                        {"name": "plot.png", "size": 9, "b64": png},
-                        # 転送上限超過は登録せず報告のみ
-                        {"name": "huge.bin", "size": 10**9, "truncated": True},
-                    ],
-                }
-            }
-        )
-
-        emitted = []
-
-        async def emitter(event):
-            emitted.append(event)
-
-        sink = ToolOutputSink()
-        token = tool_output.current_sink.set(sink)
-        try:
-            out = _arun(
-                tool.run_python_once(
-                    "…",
-                    __user__={"id": "u1"},
-                    __event_emitter__=emitter,
-                    __chat_id__="c1",
-                    __message_id__="m1",
-                )
-            )
-        finally:
-            tool_output.current_sink.reset(token)
-
-        assert "plot.png" in out and "file_id=" in out
-        assert "添付の上限" in out and "huge.bin" in out
-        # 画像は画面に出ている — 貼り直させない。上限超過の次の手はモデル向けの行にだけ
-        assert (
-            "ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない"
-            " ([task] 通知で受け取ったときは表示されていないので貼る)" in out
-        )
-        assert "次の手: 分割・圧縮するか" in out
-
-        assert emitted[0]["type"] == "chat:message:files"
-        files = emitted[0]["data"]["files"]
-        assert [f["name"] for f in files] == ["plot.png"]
-        assert self.Files.get_file_by_id(files[0]["id"]) is not None
-
-        # 画像は人間の目(display)へ、上限超過の警告も同じチャネルで出す
-        shown = [d["content"] for d in sink.displays()]
-        assert any(c.startswith("![plot.png](/api/v1/files/") for c in shown)
-        assert any("添付の上限" in c for c in shown)
-        assert not any("次の手" in c for c in shown)  # 人間の目には事実だけ
-
     def test_send_to_workspace_is_owner_only(self, tmp_path):
         from nucllei.models.files import FileForm
 
@@ -930,80 +861,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         ).startswith("ERROR:")
         assert tool.calls == []
 
+        # exports/ も普通の置き場 — 書くだけで添付しない (自動添付は 2026-10-19 に廃止)
         out = _arun(tool.write_file("/workspace/exports/r.html", "<p>", __user__=user))
-        assert "/workspace/exports/r.html に書き込んだ" in out
-
-    def test_write_file_to_exports_attaches(self, monkeypatch):
-        """exports/ に書いたら run_* と同じく Files に登録してこの会話に添付する (ken 2026-10-08)。
-        書いた先で判定 (前後の走査はしない)。exports/ の外は添付しない。上限超過は添付せず報告。"""
-        from datetime import datetime, timedelta
-        from zoneinfo import ZoneInfo
-
-        user = {"id": "u-wf"}
-        cur = {}
-
-        def fake_get(chat_id, message_id):
-            return cur.get((chat_id, message_id))
-
-        def fake_upsert(chat_id, message_id, data):
-            cur[(chat_id, message_id)] = data
-
-        from nucllei.builtin_tools import sandbox as mod
-
-        monkeypatch.setattr(mod.Chats, "get_message_by_id_and_message_id", fake_get)
-        monkeypatch.setattr(
-            mod.Chats, "upsert_message_to_chat_by_id_and_message_id", fake_upsert
-        )
-
-        def write(path, content):
-            emitted = []
-
-            async def emitter(event):
-                emitted.append(event)
-
-            tool = _sandbox({"/files/write": {"ok": True, "cache_ttl_days": 30}})
-            out = _arun(
-                tool.write_file(
-                    path,
-                    content,
-                    __user__=user,
-                    __event_emitter__=emitter,
-                    __chat_id__="c1",
-                    __message_id__="m1",
-                )
-            )
-            return out, emitted
-
-        out, emitted = write("/workspace/exports/sub/r.html", "<p>hi</p>")
-        assert out.startswith("/workspace/exports/sub/r.html に書き込んだ (9B)。\n")
-        assert (
-            "--- 生成ファイル (exports/) — このチャットのファイル一覧に添付した ---"
-            in out
-        )
-        assert "- sub/r.html (9B) file_id=" in out
-        day = datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=30)
-        assert f"/workspace/exports/ の写しは {day} 以降に消える" in out
-        # 旧い案内 (添付されない、fetch_from_workspace を呼ぶ) は出ない
-        assert "添付されない" not in out and "fetch_from_workspace" not in out
-        assert [e["type"] for e in emitted] == ["chat:message:files"]
-        files = emitted[0]["data"]["files"]
-        assert [f["name"] for f in files] == ["r.html"]
-        rec = self.Files.get_file_by_id(files[0]["id"])
-        assert rec is not None and rec.user_id == "u-wf"
-        assert cur[("c1", "m1")]["files"] == files
-
-        # exports/ の外は添付しない
-        out, emitted = write("/workspace/work/r.html", "<p>")
-        assert out == "/workspace/work/r.html に書き込んだ (3B)。"
-        assert emitted == []
-
-        # 添付の上限超過は添付せず報告 (workspace には書けている)
-        _set_limit_mb(monkeypatch, 5 / (1024 * 1024))
-        out, emitted = write("/workspace/exports/big.txt", "x" * 6)
-        assert "/workspace/exports/big.txt に書き込んだ" in out
-        assert "big.txt (6B) は添付の上限 5 B を超えて添付できなかった" in out
-        assert "file_id=" not in out and "以降に消える" not in out
-        assert emitted == []
+        assert out == "/workspace/exports/r.html に書き込んだ (3B)。"
 
     def test_workspace_paths_are_absolute_in_and_out(self):
         """3 本とも /workspace/ の絶対パスだけを受け、戻り値も絶対。sandbox の wire
@@ -1080,8 +940,8 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             (
                 {"entries": [], "exists": True, "is_dir": False},
                 "ERROR: /workspace/そんなディレクトリは無い はファイルで、ディレクトリではない。"
-                "次の手: 一覧するならディレクトリを渡す (中身を見るなら run_shell か"
-                " fetch_from_workspace)。",
+                "次の手: 一覧するならディレクトリを渡す (中身を読むなら read_file、ユーザーに"
+                "渡すなら fetch_from_workspace)。",
                 "call",
             ),
             (
@@ -1200,6 +1060,69 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "画面には既に表示されている" not in out
         assert [c[1]["path"] for c in tool.calls] == ["imports", "imports/mine.txt"]
 
+    def test_fetch_records_the_source_path(self):
+        """fetch_from_workspace で添付した Files の meta.source に由来の sandbox の絶対パスを残す
+        (添付 dict の meta には載せない — 画面・モデルには出さない)。"""
+        import re
+
+        user = {"id": "u-src"}
+        tool = _sandbox(
+            {
+                "/files/read": {
+                    "name": "a.csv",
+                    "size": 3,
+                    "b64": base64.b64encode(b"x,y").decode(),
+                }
+            }
+        )
+        emitted = []
+
+        async def emitter(event):
+            emitted.append(event)
+
+        out = _arun(
+            tool.fetch_from_workspace(
+                "/workspace/out/a.csv", __user__=user, __event_emitter__=emitter
+            )
+        )
+        fid = re.search(r"file_id=([0-9a-f-]+)", out).group(1)
+        rec = self.Files.get_file_by_id(fid)
+        assert rec.meta["source"] == "/workspace/out/a.csv"
+        assert rec.meta["name"] == "a.csv" and rec.meta["size"] == 3
+        assert "source" not in emitted[0]["data"]["files"][0]["file"]["meta"]
+        # 戻り値は表示されないファイル = 本文で示すリンクの書き方
+        assert "次の手: 本文で示すなら [a.csv](/api/v1/files/" in out
+
+    def test_fetch_refuses_in_subagent_session(self):
+        """サブエージェントの子ターン (metadata の agent_session — utils/subagent が立てる) では
+        添付しない: 子の chat はユーザーに見えない。sandbox にも触らない。"""
+        tool = _sandbox({"/files/read": {"name": "a.csv", "size": 1, "b64": "eA=="}})
+        for path in ("/workspace/out/a.csv", "/ext/groups/g/a.pdf", "/ext/doc/x.md"):
+            text, kind = _flagged(
+                tool.fetch_from_workspace(
+                    path,
+                    __user__={"id": "u1"},
+                    __chat_id__="child",
+                    __metadata__={"chat_id": "child", "agent_session": True},
+                )
+            )
+            assert kind == "call"
+            assert text == (
+                "ERROR: ここはサブエージェントの会話で、添付してもユーザーには見えない。"
+                "次の手: 書いたファイルの絶対パスを主エージェントへの結果に書く。"
+                "渡すのは主エージェント。"
+            )
+        assert tool.calls == []
+        # 親 (通常のターン) はそのまま添付する
+        out = _arun(
+            tool.fetch_from_workspace(
+                "/workspace/out/a.csv",
+                __user__={"id": "u1"},
+                __metadata__={"chat_id": "parent"},
+            )
+        )
+        assert "file_id=" in out
+
     def test_list_and_fetch_refuse_paths_outside_workspace(self):
         tool = _sandbox({})
         user = {"id": "u1"}
@@ -1215,8 +1138,9 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         # /ext/ は sandbox の /files/* が扱えない — 使える手段を案内して断る
         out = _arun(tool.list_workspace("/ext/server42", __user__=user))
         assert out.startswith("ERROR:") and "run_shell" in out and "ls" in out
-        # 見せる手段は fetch_from_workspace(path) — 固定文で案内する
-        assert "fetch_from_workspace" in out
+        # `/ext/…` はパスがそのまま URL — 見せるならそのパスでリンクを書く (固定文)
+        assert "そのパスをそのまま本文のリンクに書く" in out
+        assert "fetch_from_workspace" not in out
         # fetch_from_workspace は /ext/ を受ける (sandbox の /files/* は使わず、nucllei 側の
         # 同じ置き場 静的 mount から読む — 末尾の「fetch_from_workspace(path) の /ext/…」節)。無ければ不在
         out = _arun(tool.fetch_from_workspace("/ext/server42/a.png", __user__=user))
@@ -1284,19 +1208,27 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         for out in outs(ConnectionRefusedError("refused")):
             assert out.startswith("ERROR: sandbox に接続できない")
 
-    def test_toolkit_note_tells_imports_exports_expire(self):
-        """#149: imports/ exports/ の期限と戻し方は toolkit 共通注記 (クラス docstring) に 1 回だけ。"""
+    def test_toolkit_note_tells_imports_expire(self):
+        """#149: imports/ の期限と戻し方は toolkit 共通注記 (クラス docstring) に 1 回だけ。
+        exports/ は 2026-10-19 に廃止 — 置き場として案内しない。渡すのは fetch_from_workspace。"""
         from nucllei.builtin_tools.sandbox import Tools
 
-        note = Tools.__doc__
-        assert "imports/" in note and "exports/" in note and "30 日" in note
+        import re
+
+        note = re.sub(r"\s*\n\s*", "", Tools.__doc__)  # docstring の折り返しを繋ぐ
+        assert "imports/" in note and "30 日" in note
+        assert "exports" not in note and "自動" not in note
+        assert "fetch_from_workspace を呼ぶ" in note
+        # 管理者の例外 (ext_acl: admin は全グループ・/ext/public が rw)
+        assert "管理者はすべてのグループの置き場と" in note
+        assert "`/ext/public/` に書ける" in note
         assert "send_to_workspace(file_id)" in note
         # 消すときは rm せず trash/ の直下へ移す (同じ規則で消える)
         assert "/workspace/trash/" in note and "直下" in note
 
-    def test_import_and_exports_tell_cache_expiry(self, tmp_path):
+    def test_import_tells_cache_expiry(self, tmp_path):
         """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を
-        取り込み・exports 自動添付の結果に 1 行添える。キー欠落 (古い sandbox)・0 では添えない。"""
+        取り込みの結果に 1 行添える。キー欠落 (古い sandbox)・0 では添えない。"""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
 
@@ -1339,35 +1271,6 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             tool = _sandbox({"/files/write": res})
             out = _arun(tool.send_to_workspace(file_id="f-exp", __user__=user))
             assert "消える" not in out and "/workspace/imports/exp.txt" in out
-
-        def run_exports(extra, exports):
-            res = {
-                "exit_code": 0,
-                "duration_s": 0.1,
-                "stdout": "",
-                "stderr": "",
-                "exports": exports,
-                **extra,
-            }
-            tool = _sandbox({"/exec": res, "/exec_cell": {**res, "stdout": ""}})
-            a = _arun(tool.run_shell("x", __user__={"id": "u1"}))
-            b = _arun(tool.run_python("x", __user__={"id": "u1"}, __chat_id__="c1"))
-            return a, b
-
-        csv = [{"name": "r.csv", "size": 1, "b64": base64.b64encode(b"x").decode()}]
-        for out in run_exports({"cache_ttl_days": 30}, csv):
-            assert (
-                "r.csv (1B) file_id=" in out
-                and f"(添付は Files に残る。/workspace/exports/ の写しは {day(30)} 以降に消える)"
-                in out
-            )
-        for extra in ({}, {"cache_ttl_days": 0}):
-            for out in run_exports(extra, csv):
-                assert "r.csv" in out and "消える" not in out
-        # 1 件も添付できなかった (転送上限超過のみ) なら言わない — 「添付は残る」が嘘になる
-        huge = [{"name": "huge.bin", "size": 10**9, "truncated": True}]
-        for out in run_exports({"cache_ttl_days": 30}, huge):
-            assert "huge.bin" in out and "以降に消える" not in out
 
 
 # =============================================================================
@@ -2095,7 +1998,7 @@ class _MountEnv(_UrlEnv):
         self.registered: list[tuple] = []
         self.displayed: list[str] = []
 
-        def fake_register(user_id, name, data):
+        def fake_register(user_id, name, data, source=None):
             self.registered.append((user_id, name, data))
             content_type = mod.mimetypes.guess_type(name)[0] or "x/y"
             return mod._attachment_dict("fid-1", name, content_type, len(data))
@@ -2235,12 +2138,19 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
 
 
 def test_fetch_from_workspace_spec_mentions_both_outcomes():
-    """モデルに見える説明(docstring の :param より前)と引数。引数は path だけ。"""
+    """モデルに見える説明(docstring の :param より前)と引数。引数は path だけ。
+    2026-10-19: ユーザーへ渡す経路はこれ一本 (exports/ の自動添付は廃止)。`/ext/…` は
+    パスがそのまま URL なので呼ばずにリンクを書いてよい (呼べば配信されているリンクを返す)。"""
     from nucllei.builtin_tools.sandbox import Tools
     from nucllei.utils.tools import get_tool_specs
 
     description = Tools.fetch_from_workspace.__doc__.split(":param")[0]
-    assert "file_id" in description and "/ext/" in description
+    assert "ユーザーに渡すときに使う" in description and "添付" in description
+    assert (
+        "/ext/" in description
+        and "呼ばずにそのパスで本文にリンクを書いてよい" in description
+    )
+    assert "exports" not in description
     spec = next(
         s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )

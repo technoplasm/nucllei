@@ -33,7 +33,8 @@
   テキストの保存は対象外
 - quota の使用量(`usage`)は `/workspace` だけ(`/ext` は容量上限を持たない)
 - `SANDBOX_URL` が無い配備では全部 404(画面も Workspace のタブを出さない — `features.enable_sandbox_files`)
-- 会話へ添付する経路は持たない(会話に載せるのは exports/ 一本 — #150 の 2026-10-07 の整理)
+- 会話へ添付する経路は持たない(会話に載せるのはモデルの fetch_from_workspace 一本 — 2026-10-19、
+  exports/ の自動添付は廃止)
 """
 
 import base64

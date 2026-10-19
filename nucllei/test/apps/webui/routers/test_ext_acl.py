@@ -413,7 +413,6 @@ class TestSandboxToolAcl(AbstractPostgresTest):
             "duration_s": 0.1,
             "stdout": "",
             "stderr": "",
-            "exports": [],
         }
         tool = _tool({"/exec": res, "/exec_cell": {**res, "error": None}})
         _text(tool.run_shell("ls", __user__=MEMBER))

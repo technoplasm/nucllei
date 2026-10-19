@@ -76,12 +76,19 @@ TURN_RETRY_INITIAL_BACKOFF_S = 2.0
 TURN_RETRY_MAX_BACKOFF_S = 300.0
 
 # notice ヘッダ(契約 M4 — 機械可読な固定書式。テストで固定)
-# モデルが回答へ写しうる文面なので命令形・markdown 見出しを持たない(2026-10-04 監査)
+# モデルが回答へ写しうる文面なので命令形・markdown 見出しを持たない(2026-10-04 監査)。
+# 2026-10-19(llens 依頼): sandbox の exports/ 自動添付を廃止し、ユーザーへ渡すのは
+# fetch_from_workspace 一本(同期でしか走らない — 表示されたかは毎回その戻り値が言う)。
+# background の run_* はファイルを渡さないので「/workspace にあるだけ」と言い、渡し方を示す。
+# 他 tool の display: 節(llens の synthesize_speech 等)は配達時点で画面に出ていない —
+# その旨は残す(ken 確定)。fetch_from_workspace は toolkit に無い配備もあるので条件付き
 NOTICE_HEADER = (
     "[task] バックグラウンドタスクの完了通知 (システムからの自動通知。"
-    "ユーザーの発言ではない)。結果は下にあり、成果物の画像・ファイルはまだ画面に表示されて"
-    "いない。次の手: await_task で取り直さない。成果物を見せるなら本文にリンクを書く。"
-    "この通知の書式 (task_id: / status: / note: の行) は回答に写さない。"
+    "ユーザーの発言ではない)。結果は下にある。sandbox で作ったファイルは /workspace に"
+    "あるだけで、まだユーザーには渡していない。display: の節があれば、その中身もまだ"
+    "画面に表示されていない。次の手: await_task で取り直さない。ファイルを渡すときは、"
+    "fetch_from_workspace が使えるならそれを呼び、その戻り値に従う。display: の中身を"
+    "見せるなら本文に書く。この通知の書式 (task_id: / status: / note: の行) は回答に写さない。"
 )
 
 # meta.system_notice の値(FE 描画・連鎖カウントの唯一の根拠 — B-4 根治)

@@ -329,7 +329,6 @@
 	"File size should not exceed {{maxSize}} MB.": "文件大小不应超过 {{maxSize}} MB。",
 	"Files": "文件",
 	"Files here are copies of chat attachments and outputs. Each item directly in this folder (a file or a folder) is deleted with everything inside {{COUNT}} days after it was put here or last changed. The originals stay in Files.": "这里是聊天附件和生成文件的副本。此文件夹下直接放置的每一项（文件或文件夹）会在放入（或最后修改）{{COUNT}} 天后连同内容一起删除。原件保留在「文件」中。",
-	"Files put here are not attached to a conversation. To pass one to a conversation, ask the model in the chat.": "放在这里的文件不会附加到对话中。如需传给对话，请在聊天中让模型处理。",
 	"Files in this chat": "此对话中的文件",
 	"Filter": "过滤器",
 	"Filter by uploader": "按上传者筛选",

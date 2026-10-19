@@ -297,9 +297,11 @@ class TestExecutionResume(AbstractPostgresTest):
         text, files = self.resume.build_delivery_notice([row], {})
         assert text == (
             "[task] バックグラウンドタスクの完了通知 (システムからの自動通知。"
-            "ユーザーの発言ではない)。結果は下にあり、成果物の画像・ファイルはまだ画面に"
-            "表示されていない。次の手: await_task で取り直さない。成果物を見せるなら本文に"
-            "リンクを書く。この通知の書式 (task_id: / status: / note: の行) は回答に写さない。\n"
+            "ユーザーの発言ではない)。結果は下にある。sandbox で作ったファイルは /workspace に"
+            "あるだけで、まだユーザーには渡していない。display: の節があれば、その中身もまだ"
+            "画面に表示されていない。次の手: await_task で取り直さない。ファイルを渡すときは、"
+            "fetch_from_workspace が使えるならそれを呼び、その戻り値に従う。display: の中身を"
+            "見せるなら本文に書く。この通知の書式 (task_id: / status: / note: の行) は回答に写さない。\n"
             "\n"
             "task_id: e1 (probe)\n"
             "status: done(duration: 20.05s)\n"

@@ -570,3 +570,6 @@ dev 実機(:3000)に prism ツールを載せて検証したときの罠と手�
   いま手元で焼くなら **nucllei repo で** `docker build -t nucllei-sandbox:dev ./sandbox`。
   llens の compose は `build:` を持たず ghcr の image を引くだけになっている。
   `/exec` 応答キーが `outputs`→`exports` に変わったのを確認(スモーク: exports/ に書いて応答 keys を見る)。
+  ※ **2026-10-19**: exports/ の自動添付を廃止し、`/exec` `/exec_cell` の応答から `exports` キー(実行前後差分の
+  回収)も消えた。このスモークはもう使えない — 渡す経路は `fetch_from_workspace`(`_memos/builtin-tools.md`
+  「exports/ の自動添付の廃止」)。

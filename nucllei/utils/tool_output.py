@@ -424,7 +424,7 @@ def mark_error_kind(kind: str = "failure") -> None:
     """返す結果を「失敗」として見せる(#145、raise しない版)。
 
     `ToolError` を raise すると本文は ERROR 文だけになり、副産物(添付・display)も
-    捨てられる。中身のある結果(実行した Python の stdout + traceback、生成ファイル)を
+    捨てられる。中身のある結果(実行した Python の stdout + traceback)を
     そのまま返しつつ、チャットのカードと wire の `results[i].error_kind`(background は
     exec 行の `meta.error_kind`、行は done のまま)に種別を出したいときに呼ぶ。
     本文・render・context_images・display は成功時と同じに扱われる。kind は

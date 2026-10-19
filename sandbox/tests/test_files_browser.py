@@ -7,7 +7,8 @@
   403、bind に無いものは 404
 - **経路上の symlink を辿らない** — 一覧は symlink を `type: "symlink"` で出すだけ、削除はリンク
   そのものを消し (向こう側は残る)、中間の symlink は 400
-- 置き場の root・`.` 始まり・workspace 直下の `imports/` `exports/` は消せない / 改名できない
+- 置き場の root・`.` 始まり・workspace 直下の `imports/` `trash/` は消せない / 改名できない
+  (`exports/` は自動添付の廃止 (2026-10-19) で保護を外した — 残っている古い写しごと消せる)
 - 容量切れ (ENOSPC) は 507
 
 `test_files_list.py` と同じく main.py を直接 import する (コンテナ不要)。
@@ -236,17 +237,23 @@ def test_delete(env):
     assert not (ws / "data").exists()
     assert _post(c, "/files/delete", path="data").status_code == 404
     assert list((ws / "trash").iterdir()) == []
-    # 中身は消せるが imports/ exports/ trash/ そのものは消せない
+    # 中身は消せるが imports/ trash/ そのものは消せない
     (ws / "imports" / "a.pdf").write_text("p")
     assert _post(c, "/files/delete", path="imports/a.pdf").status_code == 200
     (ws / "trash" / "old").mkdir()
     assert _post(c, "/files/delete", path="trash/old").status_code == 200
-    for p in ("imports", "exports", "trash", ".", "", ".exec", ".hidden"):
+    for p in ("imports", "trash", ".", "", ".exec", ".hidden"):
         assert _post(c, "/files/delete", path=p).status_code == 400, p
         assert _post(c, "/files/delete", path=p, permanent=True).status_code == 400, p
     assert (ws / "imports").is_dir() and (ws / ".exec").is_dir()
     assert (ws / "trash").is_dir()
     assert (ws / "trash" / "a.pdf").exists()  # imports/ の中も既定は trash へ
+    # exports/ は保護しない (自動添付の廃止後に残る古い置き場。2026-10-19)
+    assert _post(c, "/files/delete", path="exports").json() == {
+        "ok": True,
+        "trashed": True,
+        "path": "trash/exports",
+    }
 
 
 def test_delete_moves_to_trash_by_default(env):

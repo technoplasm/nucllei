@@ -17,7 +17,8 @@
 
 > 当時の実測(コンテナは llens 側でビルドした `llens/sandbox:poc`、host `127.0.0.1:3000`)。
 > **現在**: image は `ghcr.io/technoplasm/nucllei-sandbox`(ソースは本 repo の `sandbox/`)、
-> host 公開は `127.0.0.1:13302`、`outputs`/`inputs` は `exports`/`imports` に改名済み。
+> host 公開は `127.0.0.1:13302`、`outputs`/`inputs` は `exports`/`imports` に改名済み。下の `outputs[]`
+> (実行前後差分の回収)は 2026-10-19 に exports/ の自動添付ごと廃止(「exports/ の自動添付の廃止」)。
 > API の単一情報源は `sandbox/README.md`。
 
 - `GET /healthz` → `{ok, nsjail: true}`
@@ -272,7 +273,7 @@ sandbox ツール(R2、respx 等で sandbox API をモック):
 ~~sandbox tool 内部(T7〜T12)の単体は、tool 本体が prism-hu/llens 側の管轄(カスタム tool
 として配布)のため fork 側 CI には載せない~~ → **#114 で本 repo に来た**(2026-09-03)。
 `nucllei/test/apps/webui/routers/test_builtin_sandbox.py` が T7〜T12 相当を全部持ち、
-CI の `uv run pytest` で毎回走る(env ゲート・prune・valves 編集・exports 登録/添付・
+CI の `uv run pytest` で毎回走る(env ゲート・prune・valves 編集・exports 登録/添付(2026-10-19 廃止)・
 send_to_workspace の owner-only、および url= 経路の回帰 — 2026-10-03 に resolver 経由へ書き直し、
 llens から引き取った SSRF ガード (CIDR 拒否リスト) のテストは経路ごと撤去)。
 **tool と一緒にテストも移設した**のが要点 — tool だけ移して担保を配備層に残さない。
@@ -284,13 +285,13 @@ llens から引き取った SSRF ガード (CIDR 拒否リスト) のテスト�
   import_chat_file の実読み出し。
   ※ **#114(2026-09-03)で対象を組み込み `builtin_sandbox` に切り替え**、命名も現行へ追随
   (outputs → **exports**、import_chat_file → **send_to_workspace**)。チェック項目 E1〜E6 は
-  そのまま。手動 tool 登録の前提は消え、代わりに「`SANDBOX_URL` 付きで起動しているか」を
+  そのまま(E3 は 2026-10-19 の exports 自動添付の廃止で「fetch_from_workspace で渡す」に書き換え)。手動 tool 登録の前提は消え、代わりに「`SANDBOX_URL` 付きで起動しているか」を
   preflight で先に落とす(モデルが tool を呼ばないだけの読み取りにくい FAIL を防ぐ)。
 - **`check_skill_feature_gate.py`(#42 E7)— 2/2 PASS(2026-07-06)**:
   機能スキル OFF で `/kansai` 非発火(load_skill 呼ばれない)、ON で発火。終了時に既定へ戻す。
 
 答え合わせ方式(check_lazy_tools.py と同パターン):
-- E1 計算 / E2 stateful / E3 outputs 自動添付 / E4 timeout(変数保持)/ E5 shell /
+- E1 計算 / E2 stateful / E3 outputs 自動添付(現 fetch_from_workspace で渡す)/ E4 timeout(変数保持)/ E5 shell /
   E6 添付取り込み / E7 機能スキルトグル
 
 ## 4. 進め方
@@ -384,7 +385,8 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 `run_python`(stateful)/ `run_python_once` / `run_shell` / **`send_to_workspace`**(旧
 `import_chat_file` → `export_to_workspace` を経て現名)/ `write_file` / **`read_file`**(#153)/ `list_workspace` /
 **`fetch_from_workspace`**(旧 `export_workspace_file` → `import_from_workspace` を経て現名)。
-ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs)。
+ファイル置き場は `/workspace/imports/` と `/workspace/exports/`(旧 inputs/outputs。exports/ は 2026-10-19 に
+自動添付を廃止し、残った写しが期限で消えるだけの置き場 — 下の「exports/ の自動添付の廃止」)。
 両者は Files の原本の**期限付きキャッシュ**で、sandbox が既定 30 日(env `SANDBOX_CACHE_TTL_DAYS`)で消す
 (#149、`memory/` 等は消さない)。**`/workspace/trash/`**(2026-10-07、ken 決定・llens 依頼)は `rm -r` の代わりに
 直下へ mv する置き場で、同じ期限で消える。3 つとも規則は同じ(ken 決定 2026-10-07、単純さ優先): 単位は**直下の
@@ -397,7 +399,7 @@ No space left)の文面に「/workspace/trash/ を空にすると空く」。モ
 実際の期限は sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し(ken 2026-10-07)、
 nucllei が「今日(Asia/Tokyo)+ N 日」を取り込み結果の末尾(`(/workspace/imports/ の写しは YYYY-MM-DD 以降に消える。…)`)と
 exports 自動添付の報告ブロック末尾(`(添付は Files に残る。/workspace/exports/ の写しは YYYY-MM-DD 以降に消える)`、
-1 件でも添付したときだけ)に 1 行添える(`_cache_expiry`)。キーが無い古い sandbox・0 では添えない。
+1 件でも添付したときだけ — 2026-10-19 の自動添付の廃止で報告ブロックごと消えた)に 1 行添える(`_cache_expiry`)。キーが無い古い sandbox・0 では添えない。
 
 **exports/ の自動添付の規則**(ken 決定 2026-10-08): sandbox を書き換えうる tool(`run_python` /
 `run_python_once` / `run_shell` / `write_file`)は、exports/ に増えた・変わったものをその会話に添付する。
@@ -407,6 +409,19 @@ run_* は sandbox の実行前後の差分(`_snapshot_exports` / `_collect_expor
 されない。fetch_from_workspace を呼ぶ」の案内は廃止)。ファイルブラウザで置いたものは添付しない(次の実行前の
 記録に入るので差分にならない。tool の実行中に置いたものはその tool の分として添付される — 仕様どおり)。
 ブラウザの exports/ には「ここに置いても会話には添付されない。チャットでモデルに頼む」と注記する。
+
+**exports/ の自動添付の廃止**(2026-10-19、llens の依頼・ken 了承): 上の規則はまるごと廃止。利用者へ渡す経路は
+`fetch_from_workspace(path)` 一本にする。理由 — 暗黙の添付が、音声・動画のプレイヤーの二重表示(自動添付の表示と、モデルが本文に貼り直した分)、background 完了の [task] 通知と await_task で「貼る / 貼らない」の書き方が反転、サブエージェントが exports/ に書くと親でなく子のチャットに添付される、EMR の個票の写しが exports/ に残る、等の食い違いを生んだ。
+どれも「どこに書いたか」で暗黙に添付が決まり、モデルが渡したつもりかどうかと食い違うことから来ていた。
+現行: run_* / write_file の結果に「生成ファイル (exports/)」は出ず、exports/ に書いても何も添付されない。渡すときは
+モデルが `fetch_from_workspace` を呼ぶ(画像・音声・動画は添付と同時に画面に表示され、戻り値が「既に表示されている。
+本文に貼り直さない」と言う。それ以外はファイル一覧に添付され、戻り値が本文に書くリンクを示す)。`/ext/…` は
+パスがそのまま URL なので呼ばずにリンクにしてよい。添付の Files の `meta.source` に由来の sandbox パスを残す。
+background 完了の [task] 通知は「成果物は作業場所にある。渡すなら fetch_from_workspace を呼ぶ」の形。
+`/workspace/exports/` 自体は期限付き掃除の対象に残す(既存の写しは期限で消える)が、新しい workspace には作らず、
+ファイルブラウザからの削除・改名の保護(sandbox の `PROTECTED_DIRS`)からも外す。
+`imports/`(send_to_workspace の先)と `trash/` は変えない。ファイルブラウザの exports/ の注記(上)は撤去し、
+imports/ と共通の期限の注記だけを残した。
 
 **`path` 引数は sandbox の fs の絶対パス**(2026-10-03、ken 決定「名前 = 形」: `url` = URL
 (絶対、または同一サーバの `/ext/…` — 末尾の「参照の規則の改訂」節)、
@@ -1311,7 +1326,8 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 ## sandbox のファイルブラウザ(2026-10-07、#150)— Workspace → Sandbox
 
 利用者がモデルを介さずに sandbox の置き場を見て・整理し・平文を編集する口。会話へ添付する経路は作らない
-(会話に載せるのは exports/ 一本 — #150 の 2026-10-07 のコメント)。
+(会話に載せるのは exports/ 一本 — #150 の 2026-10-07 のコメント。2026-10-19 に exports/ の自動添付を廃止し、
+会話に渡すのはモデルが呼ぶ `fetch_from_workspace` 一本になった)。
 
 - **開ける場所 = #152 の ACL そのもの**: 本人の `/workspace`(rw)・`/ext/public`(一般 ro / admin rw)・
   `/ext/groups/<g>`(メンバー rw、admin は全部)。一覧は `sandbox_ext_mounts(user)` から作り、可否は
@@ -1406,7 +1422,7 @@ tool は request の無い background 続きターンでも動くよう `None` �
 RuntimeConfig を包むだけなので同じ値)。
 
 - 従う経路: チャットへのアップロード(`routers/files.py`)/ `send_to_workspace` の file_id(Storage を
-  読む前にサイズを見る)と url(resolver の `max_bytes`)/ exports の自動添付 / `fetch_from_workspace`
+  読む前にサイズを見る)と url(resolver の `max_bytes`)/ exports の自動添付(2026-10-19 廃止)/ `fetch_from_workspace`
   (`/workspace`・`/ext/groups|public` は sandbox、それ以外の `/ext` は resolver の `max_bytes`)/
   `feed_image(path=)`(resolver の `max_bytes`。url= は従来どおり `FETCH_MAX_BYTES`)。
 - sandbox は設定を読めないので、nucllei が `/exec` `/exec_cell` `/files/read` `/files/write` に
@@ -1440,7 +1456,7 @@ RuntimeConfig を包むだけなので同じ値)。
 
 | 出入り口 | 上限 |
 |---|---|
-| チャットへのアップロード / `send_to_workspace(file_id=)`(添付一覧・`url=/api/v1/files/{id}/content` も)/ exports の自動添付 / `fetch_from_workspace` | 添付の上限 RC `ATTACHMENT_MAX_SIZE_MB`(file_id を作る・運ぶ経路) |
+| チャットへのアップロード / `send_to_workspace(file_id=)`(添付一覧・`url=/api/v1/files/{id}/content` も)/ `fetch_from_workspace`(exports の自動添付は 2026-10-19 廃止) | 添付の上限 RC `ATTACHMENT_MAX_SIZE_MB`(file_id を作る・運ぶ経路) |
 | ファイルブラウザのアップロード / ダウンロード / `send_to_workspace(url=)` | sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB`(sandbox の env、既定 1024、全員共通) |
 | `feed_image(path=)` | sandbox の上限と `FETCH_MAX_BYTES` の小さいほう |
 

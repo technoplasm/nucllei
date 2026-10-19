@@ -3,7 +3,7 @@
 	// /ext/public・/ext/groups/<g> だけ(一覧はサーバーの /places — 判定は nucllei/utils/ext_acl.py)。
 	// 書けない場所では書き換えのボタン自体を出さない(サーバーも 403 で止める)。
 	// 場所・ディレクトリ・開いているファイルは URL のクエリ(?path= &file=)に持つ — 戻るボタンと再読み込みで戻れる。
-	// 会話へ添付する経路は作らない(会話に載せるのは exports/ 一本)。
+	// 会話へ添付する経路は作らない(会話に渡すのはモデルが呼ぶ fetch_from_workspace 一本 — 2026-10-19)。
 	import { getContext, onMount, untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
@@ -42,12 +42,12 @@
 	const i18n = getContext('i18n');
 
 	const WORKSPACE = '/workspace';
-	// imports/ exports/ は Files の写し(#149)、trash/ は /workspace の「削除」の移し先。3 つとも
+	// imports/ は Files の写し(#149)、exports/ は以前の自動添付の置き場(2026-10-19 廃止、残った写しは
+	// 期限で消える)、trash/ は /workspace の「削除」の移し先。3 つとも
 	// 直下のエントリ(ファイルでもフォルダでも 1 つ)が max(mtime, ctime) から cache_ttl_days 日で
 	// 中身ごと消える(sandbox の `_sweep_entries`)。mv は mtime を変えず ctime を今にする
 	const TRASH = `${WORKSPACE}/trash`;
-	const EXPORTS = `${WORKSPACE}/exports`;
-	const CACHE_DIRS = [`${WORKSPACE}/imports`, EXPORTS];
+	const CACHE_DIRS = [`${WORKSPACE}/imports`, `${WORKSPACE}/exports`];
 	const EXPIRING_DIRS = [...CACHE_DIRS, TRASH];
 	const inside = (path: string, d: string) => path === d || path.startsWith(`${d}/`);
 
@@ -869,15 +869,6 @@
 					: $i18n.t(
 							'Deleting in /workspace moves items here. Deleting here removes it permanently.'
 						)}
-			</div>
-		{/if}
-		{#if place?.kind === 'workspace' && inside(dir, EXPORTS)}
-			<!-- 添付するのは sandbox を書き換えうる tool の前後だけ。ここで置いた物は次の実行前の記録に
-			     入るので差分にならない (ken 決定 2026-10-08) -->
-			<div class="text-xs text-content-subtle px-0.5 pb-1">
-				ⓘ {$i18n.t(
-					'Files put here are not attached to a conversation. To pass one to a conversation, ask the model in the chat.'
-				)}
 			</div>
 		{/if}
 		{/if}

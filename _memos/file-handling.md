@@ -59,7 +59,7 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
 ### tool(#18 builtin / サンドボックス)
 - **④ 取り込み**: モデルが `send_to_workspace(file_id)`(起草時の名は `import_chat_file`)を呼ぶ →
   原本 raw を `/workspace/imports/`(旧 inputs)に配置
-  (`imports/`・`exports/` は Files の写しで、最終更新から既定 30 日で sandbox が消す。取り込み・自動添付の結果に期限日を添える — 消えたら
+  (`imports/`・`exports/` は Files の写しで、最終更新から既定 30 日で sandbox が消す。取り込みの結果に期限日を添える — 消えたら
   `send_to_workspace(file_id)` で戻す。#149、詳細は `_memos/builtin-tools.md`「関数名の現行」節)
   (`url=` の URL(絶対、または同一サーバの `/ext/…`)も同じ置き場へ — 解決は共有 resolver
   `utils/image_refs`、`/ext` の静的 mount に実体がある物はコピーせず sandbox のパス
@@ -72,6 +72,14 @@ filter 関数から OWUI 内部関数を叩くと選択プロバイダが動く�
   python/shell で分割読み(docx は py 直読、docling 結果ではなく raw を読む)→ 結果だけ context に戻す。
   **core のファイル経路は無関与**。**実体は組み込み `nucllei/builtin_tools/sandbox.py`**
   (2026-09-03、#114 で配備層 llens のカスタム tool から移設 — 下の 2026-09-03 節)。
+- **⑤ 利用者へ渡す**: モデルが `fetch_from_workspace(path)` を呼ぶ → sandbox のファイルを Files に登録して添付
+  (`meta.source` に由来の sandbox パス)。画像・音声・動画は添付と同時に画面に表示、それ以外はファイル一覧に添付して
+  戻り値が本文のリンクを示す。`/ext/…` はパスがそのまま URL なので呼ばずにリンクにしてよい。
+  **2026-10-19 廃止(llens の依頼、ken 了承)**: それまでの `/workspace/exports/` に書くと run_* / write_file が
+  暗黙に添付する経路。理由 — 暗黙の添付が、音声・動画のプレイヤーの二重表示、[task] 通知と await_task で
+  「貼る / 貼らない」の書き方が反転、サブエージェントが exports/ に書くと子のチャットに添付、EMR の個票の写しが
+  exports/ に残る、等の食い違いを生んだ。exports/ は残った写しを期限で消すだけの置き場(新しくは作らない)。
+  詳細は `_memos/builtin-tools.md`「exports/ の自動添付の廃止」。
 
 ## 抽出タイミング(反転の実体)
 

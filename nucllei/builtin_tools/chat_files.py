@@ -2,8 +2,8 @@
 
 モデルが file_id を知る手段は発行時の tool 戻り値テキストだけで、長い会話で
 コンテキストから落ちると取り戻せない。その再発見手段として、現在のチャットで
-file_id 発行済みの添付(ユーザーのアップロード・tool の exports/ 自動回収・
-fetch_from_workspace 等)を一覧・名前検索する(#42 history と同じ owner-only 型)。
+file_id 発行済みの添付(ユーザーのアップロード・fetch_from_workspace 等)を
+一覧・名前検索する(#42 history と同じ owner-only 型)。
 
 スコープは**現在チャット限定**(`__chat_id__` + owner-only)。ユーザーの Files
 全件を列挙する経路は意図的に作らない — 1 チャットから他チャットのファイルを

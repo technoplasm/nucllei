@@ -4,7 +4,6 @@
 |---|---|
 | チャットへのアップロード (`routers/files.py`) | 添付の上限 |
 | `send_to_workspace(file_id=)` (添付一覧からの取り込みも) | 添付の上限 |
-| exports の自動添付 | 添付の上限 |
 | `fetch_from_workspace` | 添付の上限 |
 | ファイルブラウザのアップロード / ダウンロード (`routers/sandbox_files.py`) | sandbox の上限 |
 | `send_to_workspace(url=)` | sandbox の上限 |
@@ -12,8 +11,8 @@
 
 - **添付の上限** = RC `ATTACHMENT_MAX_SIZE_MB` (`attachment_limit_bytes`)。file_id を作る・file_id から
   運ぶ経路。管理画面 (ワークスペース > 設定 > ファイルの「最大アップロードサイズ」) で変えるとすぐ効く —
-  値はリクエストのたびにここで読む (キャッシュしない)。sandbox を通る経路 (`/exec` `/exec_cell`
-  `/files/read` `/files/write`) には `file_limit_bytes` で渡す (`sandbox_limit_fields`)。sandbox は
+  値はリクエストのたびにここで読む (キャッシュしない)。sandbox を通る経路 (`/files/read`
+  `/files/write`) には `file_limit_bytes` で渡す (`sandbox_limit_fields`)。sandbox は
   渡された値と自分の上限の小さいほうに従う
 - **sandbox の上限** = sandbox の env `SANDBOX_FILE_MAX_SIZE_MB` (既定 1024、全員共通)。workspace に
   直接出し入れする経路 (file_id を作らない)。sandbox が持つ値で、nucllei は起動時に `/healthz` から
@@ -136,7 +135,7 @@ def warn_if_over_sandbox_limit(limit_bytes: Optional[int]) -> None:
     log.warning(
         f"[file_limit] ATTACHMENT_MAX_SIZE_MB ({format_limit(limit_bytes)}) は sandbox の上限 "
         f"SANDBOX_FILE_MAX_SIZE_MB ({format_limit(cap)}) より大きい — sandbox を通る経路 "
-        "(send_to_workspace(file_id=)・exports の自動添付・fetch_from_workspace) では "
+        "(send_to_workspace(file_id=)・fetch_from_workspace) では "
         "sandbox の上限が勝つ。揃えるなら sandbox の SANDBOX_FILE_MAX_SIZE_MB を上げる"
         " (これらの経路は base64-in-JSON で約 2.3 倍のメモリを使う)"
     )

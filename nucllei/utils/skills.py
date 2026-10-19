@@ -551,6 +551,7 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None):
         "name": "load_skill",
         "description": (
             "skill を読み込む。作業の手順書 (自分向けの指示) を返すので、それに従って作業する。"
+            "skill によっては読み込むと tool が増える (戻り値の tools)。"
             "手順書の見出しや文言は回答に写さない。使える skill:\n" + listing
         ),
         "parameters": {

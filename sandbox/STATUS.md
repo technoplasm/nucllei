@@ -12,7 +12,7 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
 - [x] per-user disk quota (sparse loopback ext4, thin + discard + hard cap)。privileged 採用
 - [x] stateful `run_python` (会話ごと常駐 kernel, 永続 namespace, SIGALRM でセル中断,
       idle 回収 + session 上限)。`run_python_once` / `run_shell` は stateless
-- [x] ファイル入出力 (send_to_workspace / exports 自動添付 / fetch_from_workspace)、画像 inline・
+- [x] ファイル入出力 (send_to_workspace / fetch_from_workspace)、画像 inline・
       文書リンクの使い分け指示
 - [x] パッケージ構成確定 (requirements.txt)、BLAS スレッド固定、日本語フォント既定化
 - [x] 利用指針を system prompt に集約、docstring 縮小
@@ -76,8 +76,8 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
 - [x] **`imports/` `exports/` を期限付きキャッシュに** (#149、2026-10-07)。mtime から
       `SANDBOX_CACHE_TTL_DAYS` (既定 30) 日過ぎたファイルを idle workspace 回収の umount 直前に
       消す (symlink は辿らない・`memory/` 等には触らない)。回帰は `test_retention.py` の `test_cache_*`。
-      値は `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し、nucllei が取り込み・
-      exports 自動添付の tool 出力に「YYYY-MM-DD 以降に消える」を添える (回帰は `test_files_list.py`)
+      値は `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し、nucllei が取り込みの
+      tool 出力に「YYYY-MM-DD 以降に消える」を添える (回帰は `test_files_list.py`)
 - [x] **`/workspace/trash/`** (2026-10-07、ken 決定・llens 依頼)。`rm -r` の代わりに trash/ の直下へ
       mv する置き場 (`_ensure_workspace` が作る・ファイルブラウザから消せない/改名できない)。
       あわせて掃除の規則を imports/ exports/ trash/ で統一: **直下のエントリ単位**で、その lstat の
@@ -97,6 +97,14 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
 - [x] **サービスが作るディレクトリを 65534 所有に** (2026-10-07、llens staging dev-8d20370c9 で発見)。
       `/files/write` の既定経路が親を `mkdir(parents=True)` で root 755 のまま作り、jail がその中で
       rm / mv できなかった。mkdir はすべて `_mkdir_owned` (作った段を O_NOFOLLOW で開いて fchown) を通す。回帰は `test_files_browser.py`
+- [x] **exports/ の自動回収 (チャットへの自動添付) を廃止** (2026-10-19、ken 了承)。`/exec`
+      `/exec_cell` は実行前後の差分を取らず、応答に `exports` を返さない。利用者へ渡すのは
+      `fetch_from_workspace` (`/files/read`) だけ。`exports/` は新しい workspace に作らず、ファイル
+      ブラウザの保護からも外したが、本番に残る写しを期限で消すため掃除 (`CACHE_DIRS`) の対象には
+      残す。古い nucllei が `/exec_cell` に送る `file_limit_bytes` は extra として捨てる (422 にしない)、
+      `/exec` は `imports` の上限として受ける。回帰は `test_files_list.py` (応答に `exports` が無い・
+      `file_limit_bytes` 付きでも 200) と `test_retention.py` (`exports` は掃除の対象のまま)。
+      **実機 (コンテナ) での確認は未** — image の再ビルド・配備は統合側
 
 ## 残課題
 
