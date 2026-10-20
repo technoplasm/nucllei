@@ -51,6 +51,8 @@ def _load(monkeypatch, tmp_path):
     # テストは root ではないので、jail のユーザーへの chown は素通しにする
     monkeypatch.setattr(os, "chown", lambda *a, **k: None)
     monkeypatch.setattr(os, "fchown", lambda *a, **k: None)
+    # jail ごとの pids cgroup は起動時に用意されている扱い (nsjail は各テストで差し替える)
+    monkeypatch.setattr(mod, "_jail_cgroup_error", None)
     return mod, ext
 
 

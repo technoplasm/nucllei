@@ -39,6 +39,8 @@ def _client(monkeypatch, tmp_path):
         return ws
 
     monkeypatch.setattr(mod, "_workspace", fake_workspace)
+    # jail ごとの pids cgroup は起動時に用意されている扱い (nsjail は各テストで差し替える)
+    monkeypatch.setattr(mod, "_jail_cgroup_error", None)
     return TestClient(mod.app)
 
 
@@ -224,6 +226,8 @@ def test_sandbox_limit_env_is_mb_and_old_name_only_warns(monkeypatch, tmp_path, 
     monkeypatch.setattr(mod, "_ensure_loop_nodes", lambda: None)
     monkeypatch.setattr(mod, "_loop_available", lambda: True)
     monkeypatch.setattr(mod, "WS_RETENTION_DAYS", 0)
+    # ホストの cgroup を組み替えない (コンテナ内の root で走らせても)
+    monkeypatch.setattr(mod, "_setup_jail_cgroup", lambda: None)
     monkeypatch.setattr(mod.asyncio, "create_task", lambda coro: coro.close())
     import asyncio
 

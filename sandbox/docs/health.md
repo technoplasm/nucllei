@@ -130,10 +130,25 @@ loop ドライバ自体が使えない状態は、①〜④ が守る「リソ�
 - **C5 との切り分け**: mount 失敗はどちらも 503「同時利用ユーザー数の上限」に丸まる。
   healthz の `loop:false` なら混雑ではなく恒久障害なので、再試行の案内は当てにならない。
 
+## ⑥ jail ごとの pids cgroup(healthz、2026-10-20)
+
+プロセス数の上限は jail ごとの pids cgroup(`SANDBOX_JAIL_PIDS_MAX`、既定 128)。起動時に
+コンテナの cgroup を `service/`(サービス)と `jails/`(nsjail の親)に分けて用意する(仕組みは
+README「jail ごとのプロセス数上限」)。それまでの `--rlimit_nproc 128` は uid 単位の共有の枠で、
+常駐 kernel が溜まると全実行が fork 不能になった(staging。サービスを再起動するまで直らなかった)。
+
+- **用意できなかったら**: jail を起こさない(上限なしで動かさない)。`/exec` `/exec_cell` は 503、
+  healthz は `{ok:false, jail_cgroup:false, jail_cgroup_error:"…"}` + **503** → unhealthy。
+  起動ログに `[sandbox] ERROR: jail ごとの pids cgroup を用意できない (…)`。
+- **典型例**: compose で `cgroup: host`(cgroupns=host)にした / privileged を外した /
+  `SANDBOX_JAIL_PIDS_MAX` を 0 以下にした。
+- **残骸**: SIGKILL された nsjail が残した空の `jails/NSJAIL.<pid>` は起動時と reaper(5 分ごと)で消す。
+
 ## env 一覧(既定で運用可)
 
 | env | 既定 | 意味 |
 |---|---|---|
+| `SANDBOX_JAIL_PIDS_MAX` | 128 | jail 1 つあたりのプロセス数(スレッド込み)の上限(⑥)。1 以上。LibreOffice が ~40 使うので 64 未満にしない |
 | `SANDBOX_LOOP_NODES` | 256 | loop ノード上限。実効は host snap ぶん(~14)引いた ≈242。壁を上げる保険に増やせる(根治は ①) |
 | `SANDBOX_WS_IDLE_TTL_S` | 3600 | この秒数 idle で workspace を umount。`TIMEOUT_MAX_S`(600)より長く `SESSION_TTL_S`(43200)より短く |
 | `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0(= 消さない) | この日数使われていない未 mount の `.img` を削除(⑤)。本番 NAS では既定のまま、消してよい配備で 180〜365 |

@@ -46,6 +46,13 @@ MEM_MB = int(os.environ.get("SANDBOX_MEM_MB", "4096"))
 # 単一ファイルの rlimit_fsize。ディスク総量の本来の上限は per-user quota (ext4 cap) 側なので、
 # ここは quota を跨がない範囲で大きめにし、大きな成果物ファイルを妨げないようにする
 FSIZE_MB = int(os.environ.get("SANDBOX_FSIZE_MB", "8192"))
+# jail 1 つあたりのプロセス数 (スレッド込み) の上限 = その jail の pids cgroup の pids.max。
+# 2026-10-20 までは `--rlimit_nproc 128` だったが、RLIMIT_NPROC は実 uid 単位で数える
+# (user namespace を作らないので**全 jail・ホスト全体の uid 65534 で 1 つの枠**)。常駐 kernel が
+# BLAS 等のスレッドで数本ずつ持つため、kernel が ~18 個生きると全 chat・全ユーザーの次の fork が
+# `Resource temporarily unavailable` で落ちた。jail ごとの cgroup にして枠を jail に閉じる
+# (README「リソース制限」)。jail の cgroup は起動時に `_setup_jail_cgroup` が用意する
+JAIL_PIDS_MAX = int(os.environ.get("SANDBOX_JAIL_PIDS_MAX", "128"))
 MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "4"))
 STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024)))
 # sandbox の上限 `SANDBOX_FILE_MAX_SIZE_MB` (MB の整数、既定 1024): workspace に直接出し入れする
@@ -526,6 +533,160 @@ def _too_large(size: int, limit: int) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
+# jail ごとの pids cgroup (SANDBOX_JAIL_PIDS_MAX)
+# ---------------------------------------------------------------------------
+# コンテナは cgroup namespace が private (Docker の cgroup v2 既定) で、自分の cgroup が
+# `/sys/fs/cgroup` に見える前提。起動時にこう組み替える:
+#   /sys/fs/cgroup            subtree_control に +pids (プロセスを置かない)
+#   ├── service/              サービス自身 (uvicorn・nsjail の親・mkfs 等。docker exec も runc が
+#   │                         PID 1 の cgroup = ここへ入れる)
+#   └── jails/                subtree_control に +pids。nsjail の --cgroupv2_mount
+#       └── NSJAIL.<pid>/     nsjail が jail ごとに作り pids.max を書き、終了時に消す
+# cgroup v2 の「プロセスを持つ cgroup の下で controller を配れない」(no internal processes) ため、
+# 先に root のプロセスを leaf (service/) へ移してから +pids を書く。nsjail 自身にも同じ救済
+# (EBUSY なら自分だけ NSJAIL_SELF.<pid> へ移る) があるが、uvicorn が root に残るので通らず、
+# 移った先の cgroup も消さない — なので nsjail には触らせず、ここで先に済ませておく
+# (jails/ の subtree_control に pids が既にあれば nsjail は書き込みを試みない)。
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+CGROUP_SERVICE = "service"
+CGROUP_JAILS = "jails"
+JAIL_CGROUP_DIR = CGROUP_ROOT / CGROUP_JAILS
+# 起動時の設定に失敗した理由 (None = 使える)。失敗していれば jail を 1 つも起こさない
+# (`_require_jail_cgroup`) — 上限なしの jail を黙って動かすより、全実行を 503 にして
+# /healthz で見えるようにする (fail-closed)
+_jail_cgroup_error: Optional[str] = "起動処理 (_startup) がまだ走っていない"
+
+
+def _own_cgroup() -> str:
+    """このプロセスの cgroup v2 のパス (`/proc/self/cgroup` の `0::<path>`)。"""
+    for line in Path("/proc/self/cgroup").read_text().splitlines():
+        if line.startswith("0::"):
+            return line[3:]
+    raise RuntimeError("cgroup v2 ではない (/proc/self/cgroup に 0:: の行が無い)")
+
+
+def _controllers(path: Path) -> set[str]:
+    """`cgroup.controllers` / `cgroup.subtree_control` の中身 (書いた形の `+pids` も読める)。"""
+    return {t.lstrip("+") for t in path.read_text().split()}
+
+
+def _enable_pids(cg: Path) -> None:
+    (cg / "cgroup.subtree_control").write_text("+pids")
+
+
+def _setup_jail_cgroup(root: Path = CGROUP_ROOT, own: Optional[str] = None) -> None:
+    """jail 用の pids cgroup を用意する (上の図)。冪等。失敗は RuntimeError / OSError。"""
+    if JAIL_PIDS_MAX < 1:
+        raise RuntimeError(
+            f"SANDBOX_JAIL_PIDS_MAX={JAIL_PIDS_MAX} は使えない (1 以上。上限なしにはできない)"
+        )
+    own = _own_cgroup() if own is None else own
+    # 自分の cgroup が namespace の root (= コンテナの cgroup) のときだけ触る。サービスの
+    # 再起動で既に service/ に居るならそれも可。それ以外 (cgroupns=host・ホスト上の
+    # テスト実行など) は、自分の物ではない階層を組み替えることになるので断る
+    if own not in ("/", f"/{CGROUP_SERVICE}"):
+        raise RuntimeError(
+            f"自分の cgroup が {own!r} (namespace の root ではない)。"
+            "コンテナを cgroupns=private (Docker の cgroup v2 既定) で動かす"
+        )
+    if "pids" not in _controllers(root / "cgroup.controllers"):
+        raise RuntimeError(f"pids controller が {root}/cgroup.controllers に無い")
+    service = root / CGROUP_SERVICE
+    service.mkdir(exist_ok=True)
+    for _ in range(10):
+        # root に居るプロセス (起動直後の自分・docker exec で入ってきたもの) を全部 leaf へ
+        for pid in (root / "cgroup.procs").read_text().split():
+            try:
+                (service / "cgroup.procs").write_text(pid)
+            except ProcessLookupError:  # 移す前に終わった
+                pass
+        try:
+            _enable_pids(root)
+            break
+        except OSError as e:
+            if e.errno != errno.EBUSY:  # EBUSY = 移している間に誰か入ってきた。やり直す
+                raise
+    else:
+        raise RuntimeError(
+            f"{root} のプロセスを {service} へ移しきれない (EBUSY が続く)"
+        )
+    jails = root / CGROUP_JAILS
+    jails.mkdir(exist_ok=True)
+    _enable_pids(jails)
+    if "pids" not in _controllers(jails / "cgroup.subtree_control"):
+        raise RuntimeError(f"{jails}/cgroup.subtree_control に pids が入らない")
+    _sweep_jail_cgroups(jails)
+
+
+def _pid_running(pid: str) -> bool:
+    """pid が居て zombie ではない (`/proc/<pid>/stat` の状態が Z / X ではない)。"""
+    try:
+        st = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return st.rpartition(")")[2].split()[0] not in ("Z", "X")
+
+
+def _sweep_jail_cgroups(jails: Path = JAIL_CGROUP_DIR) -> int:
+    """nsjail が消し損ねた jail の cgroup を消す。消した数を返す。
+
+    nsjail は jail の終了を待ち取ったときに `NSJAIL.<jail の pid>` を消すが、nsjail 自身が
+    kill されると (常駐 kernel の回収・`/exec` のバックストップは SIGKILL) 空のまま残る
+    (jail は PDEATHSIG で道連れになる)。その pid がまだ動いているものは触らない — nsjail が作って
+    pid を入れるまでの間を消すと、その jail の起動が失敗するため。zombie は終わった扱い (親の
+    nsjail が死ぬと jail の init は PID 1 = uvicorn の子になり、誰にも待ち取られず zombie で残る)。
+    中にプロセスが居る cgroup は rmdir が EBUSY で断るので、pid が使い回されていても壊さない。"""
+    removed = 0
+    try:
+        entries = list(jails.iterdir())
+    except FileNotFoundError:
+        return 0
+    for d in entries:
+        prefix, _, pid = d.name.partition(".")
+        if prefix not in ("NSJAIL", "NSJAIL_SELF") or not pid.isdigit():
+            continue
+        if _pid_running(pid):
+            continue
+        try:
+            d.rmdir()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def _init_jail_cgroup() -> None:
+    """起動時に 1 回。結果を `_jail_cgroup_error` に残し、ログに出す。"""
+    global _jail_cgroup_error
+    try:
+        _setup_jail_cgroup()
+    except Exception as e:
+        _jail_cgroup_error = f"{type(e).__name__}: {e}"
+        print(
+            f"[sandbox] ERROR: jail ごとの pids cgroup を用意できない ({_jail_cgroup_error})。"
+            "jail を起こさない — /exec /exec_cell は 503、/healthz も 503 になる",
+            flush=True,
+        )
+        return
+    _jail_cgroup_error = None
+    print(
+        f"[sandbox] jail のプロセス数上限: jail ごとに {JAIL_PIDS_MAX} "
+        f"(pids cgroup {JAIL_CGROUP_DIR}/NSJAIL.<pid>、SANDBOX_JAIL_PIDS_MAX)",
+        flush=True,
+    )
+
+
+def _require_jail_cgroup() -> None:
+    """jail を起こす前に必ず通す。cgroup が無ければ 503 (上限なしの jail を作らない)。"""
+    if _jail_cgroup_error is not None:
+        raise HTTPException(
+            503,
+            "sandbox の設定不良でコードを実行できない "
+            f"(jail ごとのプロセス数上限の cgroup が無い: {_jail_cgroup_error})",
+        )
+
+
+# ---------------------------------------------------------------------------
 # nsjail 実行
 # ---------------------------------------------------------------------------
 def _scan_ro_mount_root() -> tuple[list[str], list[str]]:
@@ -731,8 +892,19 @@ def _jail_base(ws: Path, wall_s: int, binds=()) -> list[str]:
         str(MEM_MB),
         "--rlimit_fsize",
         str(FSIZE_MB),
+        # プロセス数 (スレッド込み) の上限は jail ごとの pids cgroup で掛ける (JAIL_PIDS_MAX)。
+        # RLIMIT_NPROC は実 uid 単位 = 全 jail とホストの uid 65534 で共有の枠になり、常駐
+        # kernel が溜まると無関係な chat の fork まで落ちたので使わない。nsjail の既定
+        # (サービスの soft 値を継ぐ) にも任せず inf と明示する — 配備の ulimit が共有の枠として
+        # 戻ってこないように。全体の上限は jail 数 (SESSION_MAX + MAX_CONCURRENCY) × これで
+        # 決まり、コンテナ自体の pids.max (compose の pids_limit) も外側で効く
+        "--use_cgroupv2",
+        "--cgroupv2_mount",
+        str(JAIL_CGROUP_DIR),
+        "--cgroup_pids_max",
+        str(JAIL_PIDS_MAX),
         "--rlimit_nproc",
-        "128",
+        "inf",
         "--rlimit_nofile",
         "256",
         # ルート tmpfs を 16MB に固定。既定 (未指定) だと RAM の半分 (このホストで 756GB)
@@ -776,6 +948,7 @@ def _jail_base(ws: Path, wall_s: int, binds=()) -> list[str]:
 
 def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str], binds=()) -> list[str]:
     # stateless: プロセス = 1 実行。time_limit と rlimit_cpu を実行秒に張る。
+    _require_jail_cgroup()
     cmd = _jail_base(ws, timeout_s, binds)
     cmd += ["--rlimit_cpu", str(timeout_s)]
     return cmd + ["--"] + argv
@@ -784,6 +957,7 @@ def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str], binds=()) -> list[str
 def _kernel_nsjail_cmd(ws: Path, binds=()) -> list[str]:
     # stateful: 常駐 kernel。生存上限はセッション TTL (バックストップ)。per-cell の
     # timeout は kernel が SIGALRM で内部処理するので rlimit_cpu は張らない。
+    _require_jail_cgroup()
     cmd = _jail_base(ws, SESSION_TTL_S, binds)
     return cmd + ["--", f"{VENV_BIN}/python", "-u", KERNEL_PATH]
 
@@ -1157,6 +1331,10 @@ async def _reaper_loop():
         try:
             await _sessions.reap_idle()
             await reap_idle_workspaces()
+            if (
+                _jail_cgroup_error is None
+            ):  # 用意できていない階層 (自分の物でない) には触らない
+                await asyncio.to_thread(_sweep_jail_cgroups)
         except Exception as e:
             print(f"[sandbox] reaper error: {e!r}", flush=True)
 
@@ -1257,6 +1435,7 @@ class CellRequest(BaseModel):
 async def _startup():
     _log_auth_state()
     _log_ro_mounts()
+    _init_jail_cgroup()
     if _OLD_FILE_LIMIT_ENV in os.environ:
         print(
             f"[sandbox] WARNING: {_OLD_FILE_LIMIT_ENV} は廃止 (読まない)。"
@@ -1286,15 +1465,23 @@ async def healthz():
     # loop 不能は全実行が 5xx になる hard fault なので healthz でも落とす
     # (compose healthcheck は非 200 で unhealthy になり docker ps で見える)
     loop_ok = _loop_available()
+    # jail ごとの pids cgroup が無ければ jail を起こさない (全実行が 503) ので、これも hard fault
+    cgroup_ok = _jail_cgroup_error is None
+    ok = loop_ok and cgroup_ok
     body = {
-        "ok": loop_ok,
+        "ok": ok,
         "nsjail": os.path.exists("/usr/local/bin/nsjail"),
         "loop": loop_ok,
+        "jail_cgroup": cgroup_ok,
+        # jail 1 つあたりのプロセス数 (スレッド込み) の上限 (SANDBOX_JAIL_PIDS_MAX)
+        "jail_pids_max": JAIL_PIDS_MAX,
         # sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB)。nucllei が起動時に読む (ファイルブラウザの
         # アップロードの事前チェック・url= の取り込み・添付の上限との比較)
         "file_max_size_mb": FILE_MAX_SIZE_MB,
     }
-    return JSONResponse(body, status_code=200 if loop_ok else 503)
+    if not cgroup_ok:
+        body["jail_cgroup_error"] = _jail_cgroup_error
+    return JSONResponse(body, status_code=200 if ok else 503)
 
 
 @app.get("/metrics")
@@ -1367,6 +1554,7 @@ async def _abandon_if_client_gone(request: Request):
 
 @app.post("/exec")
 async def exec_code(req: ExecRequest, request: Request):
+    _require_jail_cgroup()  # 先に断る (imports を書く前に。本命は _nsjail_cmd の中)
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
     limit = _file_limit(req.file_limit_bytes)
@@ -1450,6 +1638,7 @@ async def exec_cell(req: CellRequest, request: Request):
     """stateful run_python: (user, chat) の常駐 kernel で永続 namespace 実行。"""
     if not req.chat_id:
         raise HTTPException(400, "chat_id required for stateful exec")
+    _require_jail_cgroup()  # 既存 session の作り直し・追い出しより前に断る
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
     await _workspace(req.user_id)

@@ -22,6 +22,8 @@ localhost:8000/exec を叩く (`docker exec` 越し)。追加依存なし (docke
 import json
 import os
 import subprocess
+import threading
+import time
 
 CONTAINER = os.environ.get("SANDBOX_CONTAINER", "llens-sandbox")
 USER_ID = "isolationtest"  # _USER_ID_RE に合う専用テストユーザー
@@ -43,10 +45,11 @@ _CLIENT = (
 )
 
 
-def run(lang: str, code: str, timeout_s: int = 30) -> dict:
-    """jail 内で code を実行し /exec の JSON を返す。lang は "python" | "shell"。"""
+def run(lang: str, code: str, timeout_s: int = 30, user_id: str = USER_ID) -> dict:
+    """jail 内で code を実行し /exec の JSON を返す。lang は "python" | "shell"。
+    同じ user の /exec はサービス側で直列になるので、jail を並べたいときは user_id を変える。"""
     payload = json.dumps(
-        {"user_id": USER_ID, "lang": lang, "code": code, "timeout_s": timeout_s}
+        {"user_id": user_id, "lang": lang, "code": code, "timeout_s": timeout_s}
     )
     p = subprocess.run(
         ["docker", "exec", "-i", CONTAINER, "/opt/app/bin/python", "-c", _CLIENT],
@@ -204,6 +207,87 @@ def test_pid_namespace_hides_host_processes():
     my_pid, visible = (int(x) for x in line.split())
     assert my_pid <= 3
     assert visible <= 5
+
+
+# ---------------------------------------------------------------------------
+# プロセス数の上限は jail ごと (pids cgroup。SANDBOX_JAIL_PIDS_MAX)
+# ---------------------------------------------------------------------------
+# 2026-10-20 まで `--rlimit_nproc 128` で、RLIMIT_NPROC は実 uid 単位 = 全 jail (とホストの
+# uid 65534) で 1 つの枠だった。常駐 kernel が溜まると無関係な chat の fork が全部落ちた。
+def _healthz() -> dict:
+    p = subprocess.run(
+        [
+            "docker",
+            "exec",
+            CONTAINER,
+            "/opt/app/bin/python",
+            "-c",
+            "import urllib.request,sys;sys.stdout.write(urllib.request.urlopen("
+            "'http://localhost:8000/healthz',timeout=10).read().decode())",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return json.loads(p.stdout)
+
+
+def test_no_shared_per_uid_process_ceiling():
+    # jail に RLIMIT_NPROC (実 uid 単位 = jail 間で共有の枠) を掛けていない。上限は下の cgroup 側
+    assert (
+        out(
+            "python",
+            "import resource;print(resource.getrlimit(resource.RLIMIT_NPROC)"
+            "==(resource.RLIM_INFINITY,)*2)",
+        ).strip()
+        == "True"
+    )
+
+
+# fork できるだけ fork して、子は寝かせたまま枠を握る。スレッドで作ると 1 本ごとに malloc arena
+# 等で仮想メモリを食い、pids より先に rlimit_as (SANDBOX_MEM_MB) で止まりうるので、プロセスで数える
+# (pids cgroup はスレッドもプロセスも 1 つと数える — 本番で溢れたのは kernel のスレッド)
+_FORK_BOMB = (
+    "import os,time\n"
+    "n=0\n"
+    "while True:\n"
+    "    try: pid=os.fork()\n"
+    "    except OSError: break\n"
+    "    if pid==0:\n"
+    "        time.sleep({hold}); os._exit(0)\n"
+    "    n+=1\n"
+    "print(n,flush=True)\n"
+    "time.sleep({hold})\n"
+)
+
+
+def test_fork_bomb_is_capped_per_jail_and_other_jails_keep_working():
+    # 1 つの jail が fork できるだけ fork する → その jail の pids.max で止まる。
+    # 止まっている (枠を使い切ったまま握っている) 間に、別の jail は普通に fork できる。
+    h = _healthz()
+    assert h.get("jail_cgroup") is True, h
+    pids_max = h["jail_pids_max"]
+    bomb = {}
+    t = threading.Thread(
+        target=lambda: bomb.update(
+            run("python", _FORK_BOMB.format(hold=8), user_id=USER_ID + "-bomb")
+        )
+    )
+    t.start()
+    time.sleep(4)  # bomb が枠を使い切るまで
+    r = run(
+        "shell",
+        "for i in $(seq 20); do /bin/true || echo FAIL; done; "
+        'python -c \'import subprocess;print(subprocess.run(["echo","ok"],'
+        "capture_output=True,text=True).stdout.strip())'",
+    )
+    assert r["exit_code"] == 0 and "FAIL" not in r["stdout"], r
+    assert r["stdout"].strip().endswith("ok"), r
+    t.join(timeout=60)
+    assert bomb.get("exit_code") == 0, bomb
+    n = int(bomb["stdout"].split()[0])
+    # 親の python (pid ns の init) の分だけ 1 つ少ない
+    assert n == pids_max - 1, (n, pids_max)
 
 
 # ---------------------------------------------------------------------------

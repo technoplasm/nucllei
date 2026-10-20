@@ -180,7 +180,8 @@ jail からの見え方は **rw / ro / 見えない の 3 値**:
 - **rootfs read-only**: 書けるのは /workspace と /tmp (tmpfs) のみ。
   配備側が `/ext` に足した参照用データも read-only (bind した各エントリが EROFS。
   それを載せている `/` 自体は 16MB の使い捨て tmpfs なので `/ext` 直下は書ける)。
-  rlimit (wall/CPU/メモリ/ファイルサイズ/プロセス数) で資源を制限。
+  rlimit (wall/CPU/メモリ/ファイルサイズ) と jail ごとの pids cgroup (プロセス数。下の
+  「リソース制限」) で資源を制限。
   stdout/stderr はパイプなので rlimit_fsize が効かない → サービス側で
   上限バイトまで読んで以降は捨てる (メモリ膨張防止)。
 - **監査ログ**: sandbox 側では取らない。tool の入出力 (= 実行コードと結果) は
@@ -405,7 +406,10 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - 以前は exports の自動添付の上限として `/exec` `/exec_cell` にも渡っていた (2026-10-19 廃止。
     今の nucllei は送らない)。古い nucllei が送ってきても 422 にしない: `/exec` は `imports` の上限
     として受け、`/exec_cell` はモデルに欄が無く pydantic の既定 (extra="ignore") で捨てる
-- `GET /healthz` — `{ok, nsjail, loop, file_max_size_mb}`。`file_max_size_mb` は sandbox の上限
+- `GET /healthz` — `{ok, nsjail, loop, jail_cgroup, jail_pids_max, file_max_size_mb}`
+  (+ `jail_cgroup` が false のときだけ `jail_cgroup_error`)。`jail_cgroup` は jail ごとの pids cgroup
+  が起動時に用意できたか、`jail_pids_max` はその上限 (`SANDBOX_JAIL_PIDS_MAX`)。**false なら 503**
+  (下の「jail ごとのプロセス数上限」)。`file_max_size_mb` は sandbox の上限
   (`SANDBOX_FILE_MAX_SIZE_MB`。`/metrics` の `sandbox_file_max_size_bytes` はそのバイト数)。nucllei が
   起動時に読む (ファイルブラウザのアップロードの事前チェック・url= の取り込み)。`loop` は loop ドライバの実効チェック
   (`/dev/loop-control` を open して確かめる)。**false なら 503** を返し、compose の
@@ -455,6 +459,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_TIMEOUT_MAX_S` | 600 | wall clock 上限 (指定値はこれで clamp) |
 | `SANDBOX_MEM_MB` | 4096 | rlimit_as |
 | `SANDBOX_FSIZE_MB` | 8192 | rlimit_fsize (1 ファイルの書込上限。disk 総量は quota 側が本来の上限) |
+| `SANDBOX_JAIL_PIDS_MAX` | 128 | **jail 1 つあたり**のプロセス数 (スレッド込み) の上限 = jail ごとの pids cgroup の `pids.max` (下の「jail ごとのプロセス数上限」)。1 以上 (0 = 上限なしは受け付けず、起動時に設定エラー = 全実行 503)。LibreOffice の変換が 1 jail で ~40 使うので 64 未満にはしない |
 | `SANDBOX_QUOTA_GB` | 10 | ユーザー単位の workspace 容量上限 (loopback ext4) |
 | `SANDBOX_QUOTA_OVERRIDES` | {} | ユーザー別 quota 上書き `{"<user_id>": GB}` (新規作成時のみ) |
 | `SANDBOX_WORKSPACE_RETENTION_DAYS` | 0 (**= 消さない**) | 最終利用から N 日経った未 mount の workspace `.img` を削除 (上記「disk quota」の保持期限)。mount 中・実行中・session 生存中は飛ばす |
@@ -466,6 +471,47 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_SESSION_TTL_S` | 43200 (12h) | stateful session の生存上限 (kernel の nsjail time_limit。idle 回収も同値) |
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
+
+### jail ごとのプロセス数上限 (pids cgroup。2026-10-20)
+
+- **何を数えるか**: jail 1 つ (stateless の 1 実行、または常駐 kernel 1 つ) の中のプロセスと
+  スレッドの合計。`SANDBOX_JAIL_PIDS_MAX` (既定 128) に達すると、その jail の中の fork /
+  スレッド生成だけが `Resource temporarily unavailable` で失敗する。**他の jail には影響しない**。
+- **以前は `--rlimit_nproc 128` だった**。RLIMIT_NPROC は実 uid 単位で数える (user namespace を
+  作らないので、全 jail と、ホスト上の他のコンテナを含む uid 65534 で 1 つの枠)。常駐 kernel は
+  BLAS 等のスレッドを数本ずつ持つので、kernel が ~18 個生きると**全 chat・全ユーザーの次の実行**
+  (soffice・run_shell・`/ext/bin/*` 等) が fork できなくなった (staging、E2E 40〜50 chat で発生。
+  再起動で直る)。今は RLIMIT_NPROC を `inf` と明示し (nsjail の既定 = サービスの soft 値の継承にも
+  任せない — 配備の ulimit が共有の枠として戻らないように)、上限は jail ごとの cgroup だけにした。
+- **全体の上限**: jail の数が SESSION_MAX (常駐 kernel) + MAX_CONCURRENCY (stateless) で決まるので、
+  最悪でも (64 + 4) × 128。さらにコンテナ自体の `pids.max` (compose の `pids_limit`、無指定なら
+  Docker / systemd の既定) が外側で効く。全体を絞りたければそこで絞る。
+- **仕組み**: 起動時 (`_setup_jail_cgroup`) に、コンテナの cgroup (`/sys/fs/cgroup`) を次の形にする。
+  cgroup v2 は「プロセスを持つ cgroup の下には controller を配れない」ので、先にサービスの
+  プロセスを leaf へ移す。
+
+  ```
+  /sys/fs/cgroup          subtree_control +pids (プロセスを置かない)
+  ├── service/            uvicorn・nsjail の親・mkfs 等 (docker exec / healthcheck も runc がここへ入れる)
+  └── jails/              subtree_control +pids。nsjail の --cgroupv2_mount
+      └── NSJAIL.<pid>/   nsjail が jail ごとに作って pids.max を書き、jail の終了で消す
+  ```
+
+  nsjail にも「EBUSY なら自分を子 cgroup へ移す」救済があるが、uvicorn が root に残るので通らず、
+  移った先の cgroup も消さない。なのでサービスが先に済ませ、nsjail には触らせない。
+- **前提**: `privileged` と **cgroup namespace が private** (Docker の cgroup v2 の既定。compose で
+  `cgroup: host` にしない)。自分の cgroup が namespace の root でなければ、自分の物ではない階層を
+  組み替えることになるので**何も書かずに失敗扱い**にする。
+- **用意できなかったら (fail-closed)**: 起動は止めない (ファイルブラウザ等 jail を使わない
+  endpoint とログ・`/healthz` を生かして原因を見られるように) が、**jail を 1 つも起こさない** —
+  `/exec` `/exec_cell` は 503 (`sandbox の設定不良でコードを実行できない (…理由)`)、`/healthz` は
+  `jail_cgroup:false` + `jail_cgroup_error` で 503 (= compose healthcheck で unhealthy)、
+  起動ログに `[sandbox] ERROR: jail ごとの pids cgroup を用意できない (…)`。上限なしの jail を黙って
+  動かすことはしない (nsjail 側も、cgroup を作れなければその jail を起こさずに終わる)。
+- **掃除**: nsjail は自分が作った `NSJAIL.<pid>` を jail の終了時に消すが、nsjail 自身が SIGKILL
+  されると (常駐 kernel の回収・`/exec` のバックストップ) 空のまま残る。起動時と reaper (5 分ごと) で、
+  pid が居ない (または zombie の) ものを rmdir する。nsjail が作って pid を入れる途中のもの
+  (pid が動いている) には触らない。
 
 参照用データの read-only bind には **env が無い** — `/ext` 直下に置いた volume がそのまま
 jail に出る (上記「参照用データを jail に見せる」)。グループ・全体の置き場 (#152) も env は無く、
@@ -702,6 +748,10 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 
 - **権限昇格**: uid/gid=65534(nobody) / `setuid(0)` 拒否 / rootfs (/usr /etc /opt/venv) read-only /
   ホスト `/workspaces` (他ユーザー領域) 不可視。
+- **プロセス数の上限が jail ごと**: jail に RLIMIT_NPROC (uid 単位の共有の枠) が無い / 1 つの jail で
+  fork bomb するとちょうど `SANDBOX_JAIL_PIDS_MAX` で止まり (`/healthz` の `jail_pids_max` を読む)、
+  その間も別の jail は fork できる。**稼働中の配備に向けると、その数の nobody プロセスを数秒作る**
+  (同じホストに旧版の sandbox = `--rlimit_nproc 128` が居ると、その間そちらの実行を詰まらせうる)。
 - **デバイス・ハードウェア・システムの見え方**: /dev は 5 ノード (null/zero/full/random/urandom)
   のみ / ホストの block・GPU デバイス (sda/loop/nvme/mem/kmsg/nvidia/dm) 不可視 / 無ネットワーク
   (外部接続不可) / `df` は quota (既定 10GB) を返しホスト実容量は見えない / PID namespace 独立
@@ -726,6 +776,12 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 
 - `sandbox/tests/test_session_manager.py` — kernel 起動を偽物にして、SessionManager の
   リセット通知 (TTL 満了 / 追い出し / drop の非二重) と lock 待ち中の client 切断検知。
+- `sandbox/tests/test_jail_cgroup.py` — jail ごとのプロセス数上限。nsjail の引数 (pids cgroup・
+  RLIMIT_NPROC は `inf`、stateless と kernel の両方)、起動時の cgroup の組み替え (tmp を cgroup に
+  見立てて、root のプロセスを service/ へ 1 つずつ移す・`+pids`・EBUSY のやり直し・namespace の
+  root でなければ何も書かない・pids 無し / 上限 0 は失敗)、fail-closed (`/exec` `/exec_cell` 503・
+  kernel を起こさない・`/healthz` 503)、残骸の掃除 (居ない / zombie の pid だけ)。cgroupfs 自体の
+  挙動は `test_isolation.py` 側。
 - `sandbox/tests/test_auth.py` — 共有トークン認証 (#132)。トークンを設定したとき
   ヘッダ無し / 誤トークン / 別スキーム / 未知パスが 401、正しい Bearer が通る、
   `/healthz` `/metrics` は公開、そして**トークン未設定なら認証が掛からず素通しする**

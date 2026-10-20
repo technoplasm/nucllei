@@ -22,6 +22,11 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       jail の中から権限昇格 (nobody / setuid 拒否 / rootfs ro) とデバイス・システムの
       見え方 (dev 5 ノードのみ / ホスト block・GPU 不可視 / 無ネットワーク / df=quota /
       PID ns) を実際に突く。稼働中の privileged コンテナ必須 (無ければ skip)
+- [x] **プロセス数の上限を jail ごとに** (2026-10-20)。`--rlimit_nproc 128` (実 uid 単位 = 全 jail で
+      共有の枠。常駐 kernel ~18 個で全実行が fork 不能になった) をやめ、jail ごとの pids cgroup
+      (`SANDBOX_JAIL_PIDS_MAX`、既定 128) に。cgroup を用意できなければ jail を起こさない (503・healthz 503)。
+      実機: 60 kernel 常駐 (uid のタスク 240) でも新しい実行が通る / fork bomb は 1 jail の 128 で止まり
+      他の jail・既存 kernel は動く / SIGKILL された nsjail の残骸 cgroup の掃除
 - [x] `write_file` tool (モデルが書いたテキストを直接 workspace へ)。裸の HTML/CSV を
       run_python の文字列や run_shell のヒアドキュメントに埋めるクォート事故を構造的に潰す
 - [x] HTML/CSS → PDF (weasyprint + libpango)。`pandoc --pdf-engine=weasyprint` で md → PDF も。
