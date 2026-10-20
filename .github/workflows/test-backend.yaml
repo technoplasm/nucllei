@@ -37,14 +37,16 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # STT テストが音声形式判定に ffprobe を使う(本番 Docker イメージにも同梱)
       - name: Install ffmpeg
         run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        # setup-uv は v8 から major/minor の浮動タグ (@v10 等) を出さない (immutable release のみ)。
+        # 上げるときは github.com/astral-sh/setup-uv/releases の完全な版を書く
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: '3.12'
           enable-cache: true
