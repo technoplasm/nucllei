@@ -108,7 +108,14 @@ def get_http_authorization_cred(auth_header: Optional[str]):
 #      機械的なリクエストにはヘッダが付かないので、**タブを開いたまま離席しても
 #      延命されない**(将来ポーリングが増えても自動的に安全側になる —
 #      endpoint の除外リストを持たないのが要点)。
-#   2. 現在の token が**寿命の半分を過ぎている**こと。毎リクエスト発行しない。
+#   2. 現在の token の年齢が**延命の刻み**(`session_renew_step_seconds()` =
+#      min(60 秒, 寿命/10))以上であること。毎リクエストは発行しない(刻みに 1 回まで)。
+#      **以前は「寿命の半分を過ぎている」だった**(2026-10-20 に変更)。半分のままだと、
+#      残りが半分より多いときの操作はサーバの期限を延ばさず、そこで席を立つとサーバ側は
+#      FE の期限(最後の操作 + TTL)より最大 TTL/2 早く切れていた — 実効のアイドル
+#      タイムアウトが TTL/2〜TTL の間でぶれ、右上のリングに残りがあるのに次の操作で
+#      ログイン画面へ飛ぶ(「ログアウトの暴発」)。刻みにすれば、サーバの期限は
+#      最後の操作 + TTL から刻み以内に収まる。
 #
 # `SESSION_IDLE_TIMEOUT` が `-1` / `0`(無期限)のときは何もしない(既定は現状維持)。
 # **cookie セッション限定** — API キー(`sk-`)経路は延命しない。
@@ -122,9 +129,9 @@ def get_http_authorization_cred(auth_header: Optional[str]):
 SESSION_ACTIVITY_HEADER = "X-Nucllei-Activity"
 
 # 操作ヘッダ付きのリクエストへの応答に、**延命したかどうかに関わらず**今の token の
-# 期限(`exp`、epoch 秒)を載せるヘッダ(#154)。FE はこれで「残りが半分を切ったか」を
-# 実際の期限で判断する。以前は FE が「最後にヘッダを送ってから TTL/2」の自前の時計で
-# keepalive を出していたため、年齢 TTL/2 の直前にヘッダを運ぶと(再発行されないのに)
+# 期限(`exp`、epoch 秒)を載せるヘッダ(#154)。FE はこれで「延命が要るか(年齢が刻みを
+# 過ぎたか)」を実際の期限で判断し、残り時間のリングにも使う。以前は FE が
+# 「最後にヘッダを送ってから TTL/2」の自前の時計で keepalive を出していたため、年齢 TTL/2 の直前にヘッダを運ぶと(再発行されないのに)
 # FE の時計だけ戻り、次の keepalive が年齢 TTL 近くまで出ず期限に間に合わなかった。
 # ヘッダの無いリクエスト(ポーリング等)には付けない — 延命の判断材料を配る必要がない。
 SESSION_EXPIRES_HEADER = "X-Nucllei-Session-Expires"
@@ -141,6 +148,23 @@ def session_idle_timeout_seconds(jwt_expires_in) -> Optional[int]:
         # 設定値が壊れている — 無期限として扱う(延命もタイマも動かさない)
         return None
     return int(expires_delta.total_seconds()) if expires_delta else None
+
+
+# 延命の刻みの上限(秒)。FE(`src/lib/apis/fetch.ts` の `renewStepMs`)と同じ式。
+SESSION_RENEW_STEP_MAX_SECONDS = 60
+
+
+def session_renew_step_seconds(lifetime: float) -> float:
+    """token を再発行する年齢の刻み(秒) = min(60 秒, 寿命/10)。
+
+    - 60 秒: サーバの期限が FE の期限(最後の操作 + TTL)より早く切れるずれの上限で、
+      操作が続いている間の再発行(と FE の keepalive)は 1 分に 1 回まで。
+      実用の TTL(数十分〜1 日)では TTL の数 % 以下のずれ = リングは操作で
+      ほぼ満タンに戻る。
+    - 寿命/10: TTL が 10 分未満(検証用の 1〜数分など)でも、ずれを TTL の 1 割に抑える
+      (TTL/2 にすると TTL 60 秒で 30 秒 = 半分ずれる)。
+    """
+    return min(SESSION_RENEW_STEP_MAX_SECONDS, lifetime / 10)
 
 
 def mark_session_renewal(request: Request, user_id: str, token_data: dict) -> None:
@@ -161,8 +185,9 @@ def mark_session_renewal(request: Request, user_id: str, token_data: dict) -> No
 
     expires_delta = timedelta(seconds=lifetime)
     exp = token_data.get("exp")
-    if exp is not None and (exp - time.time()) > lifetime / 2:
-        # まだ寿命の半分以上残っている — 発行しない。期限は今の token のものを返す
+    renew_after = lifetime - session_renew_step_seconds(lifetime)
+    if exp is not None and (exp - time.time()) > renew_after:
+        # 発行してから刻み(最大 60 秒)経っていない — 発行しない。期限は今の token のものを返す
         request.state.session_expires_at = int(exp)
         return
     # exp が無い token(無期限だった頃に発行されたもの)は、ここで初めて

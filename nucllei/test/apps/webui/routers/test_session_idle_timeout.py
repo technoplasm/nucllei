@@ -9,7 +9,9 @@ CORE 領域(認証)なので、延命が起きる条件・**起きない**条件
 - 延命するのは「人の操作を伴うリクエスト」(FE が `X-Nucllei-Activity` を付ける)だけ。
   ヘッダの無いリクエスト(チャット画面の 5 秒ポーリング等)では延命しない
   = タブを開いたまま離席しても永久ログインにならない。
-- 発行するのは token が**寿命の半分**を過ぎたときだけ(毎リクエスト発行しない)。
+- 発行するのは token の年齢が**延命の刻み**(min(60 秒, 寿命/10))を過ぎたときだけ
+  (毎リクエストは発行しない)。以前は「寿命の半分を過ぎたとき」で、残りが半分より多いときの
+  操作がサーバの期限を延ばさず、席を立つと FE の期限より最大 TTL/2 早く切れていた。
 - API キー(`sk-`)経路では延命しない(cookie セッション限定)。
 - `SESSION_IDLE_TIMEOUT` が `-1`(既定 = 無期限)なら何もしない = 既定の挙動は不変。
 - 延命 cookie の属性は signin の発行箇所と同一(80/443 併用の配備で壊れないこと)。
@@ -152,17 +154,79 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
         exp = decode_token(new_token)["exp"]
         assert 3500 < exp - int(time.time()) <= 3600
 
-    def test_no_renewal_while_more_than_half_the_lifetime_remains(self):
-        """毎リクエスト発行しない — 半分を過ぎるまでは何もしない。"""
+    def test_no_renewal_while_younger_than_the_step(self):
+        """毎リクエスト発行しない — 発行から刻み(1h なら 60 秒)が経つまでは何もしない。
+
+        期限ヘッダは今の token の exp のまま返す。
+        """
         from nucllei.main import app
+        from nucllei.utils.auth import decode_token
 
         app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
-        self._login_with(user, remaining=timedelta(minutes=59))
+        token = self._login_with(user, remaining=timedelta(minutes=59, seconds=30))
 
         response = self._get_me(activity=True)
         assert response.status_code == 200, response.text
         assert _set_cookie_header(response) is None
+        assert response.headers[EXPIRES_HEADER] == str(decode_token(token)["exp"])
+
+    def test_renews_past_the_step_even_with_more_than_half_remaining(self):
+        """年齢が刻みを過ぎていれば、残りが半分より多くても再発行する(ログアウトの暴発)。
+
+        TTL 20 分、発行 0:00 → 9:00 に操作(年齢 9 分、残り 11 分 = 半分より多い)。
+        旧実装(半分を過ぎたら再発行)はここで再発行せず、そのまま 12 分席を立って 21:00 に
+        戻ると、FE の期限(9:00 + 20 分 = 29:00、リングは残り 8 分)より前の 20:00 で
+        サーバ側が切れていて、次の操作で 401 → ログイン画面だった。
+        """
+        from nucllei.main import app
+        from nucllei.utils.auth import decode_token
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "20m"
+        user = self._create_user()
+        old_token = self._login_with(user, remaining=timedelta(minutes=11))
+
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        assert _set_cookie_header(response) is not None
+        new_exp = decode_token(_issued_token(response))["exp"]
+        assert new_exp > decode_token(old_token)["exp"]
+        # 期限は「操作した今 + TTL」= 9:00 + 20 分(FE の期限と一致)
+        assert 1190 < new_exp - int(time.time()) <= 1200
+        assert response.headers[EXPIRES_HEADER] == str(new_exp)
+
+    def test_no_renewal_past_the_step_without_activity_header(self):
+        """刻みを過ぎていても、操作ヘッダが無ければ再発行しない(ポーリングでは延命しない)。"""
+        from nucllei.main import app
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "20m"
+        user = self._create_user()
+        self._login_with(user, remaining=timedelta(minutes=11))
+
+        response = self._get_me(activity=False)
+        assert response.status_code == 200, response.text
+        assert _set_cookie_header(response) is None
+        assert EXPIRES_HEADER not in response.headers
+
+    def test_step_scales_down_for_short_timeouts(self):
+        """TTL が 10 分未満なら刻みは TTL/10(60 秒では 6 秒)— ずれを TTL の 1 割に抑える。"""
+        from nucllei.main import app
+
+        app.state.config.SESSION_IDLE_TIMEOUT = "60s"
+        user = self._create_user()
+
+        # 年齢 3 秒(< 6 秒)— 発行しない
+        self._login_with(user, remaining=timedelta(seconds=57))
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        assert _set_cookie_header(response) is None
+
+        # 年齢 10 秒(> 6 秒)— 残りは半分より多いが発行する
+        self.fast_api_client.cookies.clear()
+        self._login_with(user, remaining=timedelta(seconds=50))
+        response = self._get_me(activity=True)
+        assert response.status_code == 200, response.text
+        assert _set_cookie_header(response) is not None
 
     def test_renewal_is_not_limited_to_the_auths_endpoint(self):
         """延命は認証依存関数(= 全 endpoint 共通)で起きる。
@@ -286,7 +350,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
     def test_expires_header_without_renewal_is_the_current_exp(self):
         """延命しなかった応答でも、今の token の exp を返す(Set-Cookie は無し)。
 
-        これが無いと FE は「年齢 TTL/2 の直前にヘッダを運んだが再発行されなかった」ことを
+        これが無いと FE は「ヘッダを運んだが再発行されなかった(年齢が刻み未満)」ことを
         知り得ず、自前の時計を戻して次の延命が期限に間に合わなくなる(#154 の主因)。
         """
         from nucllei.main import app
@@ -294,7 +358,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
 
         app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
-        token = self._login_with(user, remaining=timedelta(minutes=31))
+        token = self._login_with(user, remaining=timedelta(minutes=59, seconds=50))
 
         response = self._get_me(activity=True)
         assert response.status_code == 200, response.text
@@ -308,7 +372,7 @@ class TestSessionIdleTimeout(AbstractPostgresTest):
 
         app.state.config.SESSION_IDLE_TIMEOUT = "1h"
         user = self._create_user()
-        token = self._login_with(user, remaining=timedelta(minutes=50))
+        token = self._login_with(user, remaining=timedelta(minutes=59, seconds=50))
 
         response = self.fast_api_client.get(
             "/api/v1/chats/", headers={ACTIVITY_HEADER: "1"}
@@ -455,3 +519,14 @@ def test_session_idle_timeout_seconds(expiry, expected):
     from nucllei.utils.auth import session_idle_timeout_seconds
 
     assert session_idle_timeout_seconds(expiry) == expected
+
+
+@pytest.mark.parametrize(
+    "lifetime,expected",
+    [(86400, 60), (3600, 60), (1200, 60), (600, 60), (300, 30), (60, 6)],
+)
+def test_session_renew_step_seconds(lifetime, expected):
+    """延命の刻み = min(60 秒, 寿命/10)(FE の renewStepMs と同じ式)。"""
+    from nucllei.utils.auth import session_renew_step_seconds
+
+    assert session_renew_step_seconds(lifetime) == expected

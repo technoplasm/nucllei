@@ -23,9 +23,9 @@
  *   - 画面側: サーバで切れても、アイドル中のチャットはリクエストを 1 本も出さないため
  *     前の人の画面が残り続ける。startIdleWatch() が経過時間を見て自分でログイン画面へ逃がす。
  *   - 逆に「操作はしているがリクエストが出ない」(スクロールして読む・長文を打つ)ときは、
- *     **操作した瞬間に、サーバの期限の残りが半分を切っていれば 1 本だけ**延命のリクエスト
- *     (sendKeepalive)を出す。残りはサーバが返す期限(SESSION_EXPIRES_HEADER)で測る(#154)。
- *     操作が無ければ 1 本も出ない。
+ *     **操作した瞬間に、サーバの token の年齢が延命の刻み(renewStepMs = min(60 秒, TTL/10))を
+ *     過ぎていれば 1 本だけ**延命のリクエスト(sendKeepalive)を出す。年齢はサーバが返す期限
+ *     (SESSION_EXPIRES_HEADER)で測る(#154)。操作が無ければ 1 本も出ない。
  *   - 複数タブ(#154): 最終操作時刻とサーバの期限は localStorage でタブ間に共有する。
  *     cookie は全タブ共通なので、アイドル判定は「**どのタブでも**操作が無い」ときだけ —
  *     放置タブのアイドル判定が signout で作業中のタブを道連れにしない。
@@ -33,6 +33,8 @@
  *     VoiceRecording が呼ぶ)。録音バーが開いているだけの無音は含めない。
  *   - 残り時間は getIdleRemaining() が出す。失効の判定と画面右上のリング(IdleTimeoutRing)が
  *     同じこれを使い、判定は残りがちょうど 0 になる時刻に予約する — リングが 0 になる瞬間に切れる。
+ *     残りは「FE の期限(最後の操作 + TTL)」と「知っているサーバの期限」の**早い方** —
+ *     サーバ側が先に切れるなら、その時間をリングに出さない。
  */
 import { get } from 'svelte/store';
 
@@ -56,21 +58,31 @@ export const SESSION_EXPIRES_HEADER = 'X-Nucllei-Session-Expires';
 // タブ間で共有する値(localStorage)。どちらもこのブラウザの時計での epoch ミリ秒。
 export const SHARED_INTERACTION_KEY = 'nucllei:idle:last-interaction';
 export const SHARED_EXPIRES_KEY = 'nucllei:idle:session-expires';
+export const SHARED_EXTENSION_KEY = 'nucllei:idle:extension-requested';
 
 let sessionExpired = false;
 let verifying: Promise<void> | null = null;
 
 // 最後の延命以降に人の操作があったか(リクエストにヘッダを付けたら降ろす)
 let interacted = false;
+// このタブで最後に人の操作があった時刻(他タブの操作は含まない)。古くなった操作を
+// 後のリクエストに運ばせないために使う(withActivityHeader)
+let localInteractionAt = 0;
 // 最後に活動ヘッダを**実際に運べた**時刻(keepalive でも通常の API 呼び出しでもよい)。
 // サーバの期限が分からない(期限ヘッダを返さない古い BE)ときの keepalive の判定にだけ使う。
 // `0` = このタブではまだ 1 本も運べていない。
 let lastActivitySentAt = 0;
 // 最後に keepalive を出した時刻(連打防止 — sendKeepalive の説明)
 let lastKeepaliveAt = 0;
+// 全タブで最後に keepalive(= 延命が要るときだけ出す 1 本)を出した時刻。応答を待つ間は
+// サーバの期限を残り時間に使わない(idleSnapshot)。他タブの値は readShared() で取り込む
+let extensionRequestedAt = 0;
 // 最後に知ったサーバの期限(このブラウザの時計に直した epoch ミリ秒。`0` = 不明)。
 // 他タブが知った値は readShared() で取り込む。
 let knownExpiresAt = 0;
+// サーバの時計 − このブラウザの時計(ミリ秒)。同一オリジンの応答の `Date` から測る。
+// サーバが返す期限(epoch 秒)を手元の時計に直すのに使う(`0` = ずれ無しとみなす)
+let serverClockOffsetMs = 0;
 // 最後に人の操作があった時刻(FE 側アイドルタイマの起点)。
 // 残り時間ではなく**時刻の差**で判定するので、スリープ・背面タブでタイマが
 // 飛んでも復帰時点で正しく評価できる。他タブの操作は readShared() で取り込む。
@@ -107,6 +119,14 @@ const writeShared = (key: string, value: number) => {
 	}
 };
 
+const removeShared = (key: string) => {
+	try {
+		localStorage.removeItem(key);
+	} catch {
+		// 共有できないだけ
+	}
+};
+
 /** 他タブの最終操作時刻・サーバの期限を取り込む。 */
 const readShared = () => {
 	// 未来の時刻は信用しない(同じ時計なので本来起きない)
@@ -115,11 +135,17 @@ const readShared = () => {
 		lastInteractionAt = interaction;
 	}
 	// 期限は「最後に知った値」をそのまま採る(max にしない)。cookie は 1 つなので最新の
-	// 応答が正。古い値が残っていても、期限は延命・再ログインで延びる一方なので
-	// 古い値は短め = keepalive を早めに出す安全側にしか倒れない。
+	// 応答が正。同じセッションの中では期限は延命で延びる一方なので、古い値は短め =
+	// keepalive を早めに出す側に倒れる。前のセッション(ログアウト → 再ログイン)の値が
+	// 残っている場合は、監視の開始時に seedServerExpiry() が新しいセッションの期限で上書きする
+	// (残り時間はサーバの期限も見るので、古い値のままだとログイン直後に追い出してしまう)。
 	const expires = readSharedNumber(SHARED_EXPIRES_KEY);
 	if (expires) {
 		knownExpiresAt = expires;
+	}
+	const extension = Math.min(readSharedNumber(SHARED_EXTENSION_KEY), Date.now());
+	if (extension > extensionRequestedAt) {
+		extensionRequestedAt = extension;
 	}
 };
 
@@ -132,18 +158,31 @@ const shareInteraction = () => {
 };
 
 /**
- * 応答の期限ヘッダを覚える。サーバの時計とずれていても残り時間が正しくなるよう、
- * 応答の `Date`(あれば)との差を手元の時計に足し直す。
+ * 同一オリジンの応答の `Date` でサーバとの時計のずれを測り直す。サーバの時計と
+ * ずれていても残り時間が正しくなるよう、サーバが返す期限はこれで手元の時計に直す。
+ * (`Date` は秒単位なので 1 秒程度の誤差はある — 期限を長めに見る向き)
  */
+const noteServerClock = (input: RequestInfo | URL, res: Response) => {
+	if (res.status === 304 || !isSameOrigin(input)) {
+		return;
+	}
+	const serverNow = Date.parse(res.headers?.get?.('Date') ?? '');
+	if (Number.isFinite(serverNow)) {
+		serverClockOffsetMs = serverNow - Date.now();
+	}
+};
+
+/** サーバの epoch 秒を、このブラウザの時計の epoch ミリ秒に直す。 */
+const serverSecondsToLocalMs = (epochSeconds: number) => epochSeconds * 1000 - serverClockOffsetMs;
+
+/** 応答の期限ヘッダを覚える(全タブへ共有する)。 */
 const noteServerExpiry = (res: Response) => {
 	const raw = res.headers?.get?.(SESSION_EXPIRES_HEADER);
 	const exp = raw ? Number(raw) : NaN;
 	if (!Number.isFinite(exp) || exp <= 0) {
 		return;
 	}
-	const serverNow = Date.parse(res.headers.get('Date') ?? '');
-	const remainingMs = exp * 1000 - (Number.isFinite(serverNow) ? serverNow : Date.now());
-	knownExpiresAt = Date.now() + remainingMs;
+	knownExpiresAt = serverSecondsToLocalMs(exp);
 	writeShared(SHARED_EXPIRES_KEY, knownExpiresAt);
 };
 
@@ -159,6 +198,7 @@ const noteServerExpiry = (res: Response) => {
 export const noteInteraction = () => {
 	interacted = true;
 	lastInteractionAt = Date.now();
+	localInteractionAt = lastInteractionAt;
 	shareInteraction();
 	// 延命の 1 本は**操作した瞬間**に出す(理由は sendKeepalive の説明)
 	sendKeepalive();
@@ -192,6 +232,17 @@ const withActivityHeader = (
 		return init;
 	}
 	interacted = false;
+	// 操作から刻み(renewStepMs)より後のリクエストには運ばせない。運ぶと BE はその
+	// リクエストの時刻から TTL で再発行し、サーバの期限が FE の期限(操作 + TTL)を
+	// 追い越す(#137 の signout が後で落とすが、追い越し自体を刻み以内に抑える)。
+	// 運ばなくても失うものは無い — 延命が要る操作なら、その瞬間に keepalive が出ている
+	// (出ていない = その時点で token の年齢が刻み未満 = サーバの期限のずれは刻み以内)。
+	if (
+		idleTimeoutSeconds &&
+		Date.now() - localInteractionAt > renewStepMs(idleTimeoutSeconds * 1000)
+	) {
+		return init;
+	}
 	lastActivitySentAt = Date.now();
 
 	const headers = new Headers(
@@ -322,6 +373,66 @@ let idleResumeHook: (() => void) | null = null;
 // 監視中のアイドルタイムアウト秒数(null = 無期限 / 未ログイン = keepalive も出さない)
 let idleTimeoutSeconds: number | null = null;
 
+/**
+ * 延命の刻み(ミリ秒) = min(60 秒, TTL/10)。BE(nucllei/utils/auth.py の
+ * `session_renew_step_seconds`)と同じ式 — BE は token の年齢がこれを過ぎた操作ヘッダ付きの
+ * リクエストで再発行し、FE はサーバの残りが `TTL − 刻み` 以下のときの操作で keepalive を出す。
+ * サーバの期限は FE の期限(最後の操作 + TTL)から刻み以内に収まり、操作が続く間の延命は
+ * 刻みに 1 本まで。以前は TTL/2 で、残りが半分より多いときの操作がサーバを延ばさず、
+ * 席を立つとサーバ側が最大 TTL/2 早く切れていた(リングに残りがあるのにログイン画面へ飛ぶ)。
+ */
+export const renewStepMs = (ttlMs: number): number => Math.min(60 * 1000, ttlMs / 10);
+
+/**
+ * 延命の応答を待つ上限。どこかのタブが keepalive(延命が要るときだけ出す)を出したのに
+ * 新しいサーバの期限をまだ知らない間は、サーバの期限を残り時間に使わない(リングは操作の
+ * 瞬間に満タンへ戻り、期限ちょうどの操作で応答待ちの間に切ることもしない — 応答が届けば
+ * 延びた期限で判断する)。これを過ぎても届かなければ、知っているサーバの期限で判断する
+ * (延命が届かなかった = サーバ側は切れている)。
+ */
+const EXTENSION_PENDING_MS = 10 * 1000;
+
+type IdleSnapshot = {
+	remainingMs: number;
+	timeoutMs: number;
+	/** 残りの計算が切り替わる(延命の応答待ちが終わる)までの時間。無ければ Infinity */
+	switchInMs: number;
+};
+
+/**
+ * 残り時間の計算本体(getIdleRemaining と失効の判定が共有する)。
+ *
+ * 期限 = 「FE の期限(全タブの最終操作 + TTL)」と「知っているサーバの期限」の早い方。
+ * サーバの期限は延命(操作ヘッダ付きの応答)で FE の期限から刻み以内に追いつくので、
+ * 普段は FE の期限から刻み以内の値になる。サーバの期限を知らない(古い BE・期限なしの token)
+ * ときは FE の期限だけで判断する(従来どおり)。
+ */
+const idleSnapshot = (): IdleSnapshot | null => {
+	if (!idleTimeoutSeconds) {
+		return null;
+	}
+	readShared();
+	const now = Date.now();
+	const timeoutMs = idleTimeoutSeconds * 1000;
+	let deadline = lastInteractionAt + timeoutMs;
+	let switchInMs = Infinity;
+	if (knownExpiresAt) {
+		// keepalive を出したのに、延びた期限をまだ知らない。応答待ちの間はサーバの期限を
+		// 使わない(応答が来れば knownExpiresAt が出した時刻 + TTL 近くへ進み、外れる。
+		// BE が再発行しない年齢 = 刻み未満だったなら、最初から外れている)。ページ読み込み
+		// (FE の期限の起点だが延命はしない)はこれに当たらない
+		const awaitingExtension =
+			now - extensionRequestedAt < EXTENSION_PENDING_MS &&
+			knownExpiresAt < extensionRequestedAt + timeoutMs - renewStepMs(timeoutMs);
+		if (awaitingExtension) {
+			switchInMs = extensionRequestedAt + EXTENSION_PENDING_MS - now;
+		} else {
+			deadline = Math.min(deadline, knownExpiresAt);
+		}
+	}
+	return { remainingMs: Math.max(0, deadline - now), timeoutMs, switchInMs };
+};
+
 export type IdleRemaining = {
 	/** アイドル失効までの残り(ミリ秒、0 以上)。0 = 今まさに切れる */
 	remainingMs: number;
@@ -330,23 +441,19 @@ export type IdleRemaining = {
 };
 
 /**
- * アイドル失効までの残り時間。**失効の判定(checkIdle)と画面の表示(IdleTimeoutRing)が
- * 同じこれを使う** — 表示が 0 になる瞬間と、ログイン画面へ逃がす瞬間を一致させるため。
+ * アイドル失効までの残り時間。**失効の判定(startIdleWatch の check)と画面の表示
+ * (IdleTimeoutRing)が同じこれを使う** — 表示が 0 になる瞬間と、ログイン画面へ逃がす瞬間を
+ * 一致させるため。
  *
- * 残りは「全タブの最終操作時刻 + TTL − 今」。他タブの操作は読む直前に localStorage から
- * 取り込む(#154)ので、どのタブで計算しても同じ値になり、どこかのタブで操作すれば全タブで
- * 満タンに戻る。監視していない(無期限・未ログイン・失効後)なら null。
+ * 残りは「全タブの最終操作時刻 + TTL」と「知っているサーバの期限」の早い方 − 今(idleSnapshot)。
+ * 他タブの操作・他タブが知ったサーバの期限は読む直前に localStorage から取り込む(#154)ので、
+ * どのタブで計算しても同じ値になり、どこかのタブで操作すれば全タブで(ほぼ)満タンに戻る
+ * (サーバの期限は FE の期限から最大で刻みぶん手前 = 実用の TTL で数 %)。
+ * 監視していない(無期限・未ログイン・失効後)なら null。
  */
 export const getIdleRemaining = (): IdleRemaining | null => {
-	if (!idleTimeoutSeconds) {
-		return null;
-	}
-	readShared();
-	const timeoutMs = idleTimeoutSeconds * 1000;
-	return {
-		remainingMs: Math.max(0, lastInteractionAt + timeoutMs - Date.now()),
-		timeoutMs
-	};
+	const snapshot = idleSnapshot();
+	return snapshot ? { remainingMs: snapshot.remainingMs, timeoutMs: snapshot.timeoutMs } : null;
 };
 
 /**
@@ -358,23 +465,26 @@ export const getIdleRemaining = (): IdleRemaining | null => {
  * (E2E で実測: wheel だけ 150 秒 → 次のクリックで追い出し。2026-09-05)。
  *
  * 出す条件:
- *   1. **サーバの期限の残りが `idleTimeoutSeconds / 2`(= BE が再発行する境目)以下**。
- *      残りは BE が操作ヘッダ付きの応答に載せる期限(SESSION_EXPIRES_HEADER)で測る。
- *      普通に API を叩いている間は(その応答で期限が延びるので)ここで弾かれ、追加の
- *      リクエストは出ない。`1d` なら 12 時間に 1 本、`30m` なら 15 分に 1 本程度
- *      (院内の多人数配備では無視できない — ken 2026-09-05)。
- *      **以前は「最後にヘッダを運んでから TTL/2」の自前の時計だった(#154)。** 年齢 TTL/2 の
+ *   1. **サーバの期限の残りが `TTL − 刻み`(renewStepMs = min(60 秒, TTL/10)。= BE が
+ *      再発行する境目)以下**。残りは BE が操作ヘッダ付きの応答に載せる期限
+ *      (SESSION_EXPIRES_HEADER)で測る。普通に API を叩いている間は(その応答で期限が
+ *      延びるので)ここで弾かれ、追加のリクエストは出ない。操作だけが続く間は刻みに 1 本
+ *      (`30m` でも `1d` でも 1 分に 1 本まで。操作が無ければ 0 本)。
+ *      **以前は境目が TTL/2 だった(2026-10-20 に変更)。** 残りが半分より多いときの操作は
+ *      サーバを延ばさず、そこで席を立つとサーバ側は FE の期限(操作 + TTL)より最大 TTL/2
+ *      早く切れた — 戻ってリングに残りがあっても次の操作で 401 → ログイン画面(「ログアウトの
+ *      暴発」)。刻みにすれば、サーバの期限は FE の期限から刻み以内に収まる。
+ *      **その前は「最後にヘッダを運んでから TTL/2」の自前の時計だった(#154)。** 境目の
  *      直前にヘッダを運ぶと BE は再発行しないのに FE の時計だけ 0 に戻り、次の keepalive が
- *      年齢 TTL 近くまで出ない — 延命の窓が数秒しかなく、操作中でも切れていた。
- *      実際の残りで測れば、残りが半分を切った後の最初の操作で必ず 1 本出る
- *      (窓は常に TTL/2 ある)。
+ *      遅れて期限に間に合わなかった。実際の残りで測れば、境目を過ぎた後の最初の操作で
+ *      必ず 1 本出る。
  *      期限が分からない(期限ヘッダを返さない古い BE・まだ 1 本も運べていない)ときは、
- *      最後にヘッダを運んでから TTL/4 で出す(半減期の直前に運んでも、TTL/4 後 = 年齢
- *      3TTL/4 で必ず再発行される = 窓は TTL/4)。
+ *      最後にヘッダを運んでから TTL/4 で出す(古い BE の半減期の直前に運んでも、TTL/4 後 =
+ *      年齢 3TTL/4 で必ず再発行される = 窓は TTL/4)。
  *   2. 呼ばれるのが `noteInteraction()` からだけ = 人が操作した瞬間。
  *      **無操作なら 1 本も出ない** — 「ポーリングでは延命しない」の要はここで守られる。
  *      他タブの操作(共有の最終操作時刻)でも出さない — そのタブ自身が操作の瞬間に出す。
- *   3. 直前の keepalive から TTL/8 以上経っている(連打防止)。普段は 1 本で期限が延びて
+ *   3. 直前の keepalive から刻み以上経っている(連打防止)。普段は 1 本で期限が延びて
  *      1. で弾かれるが、時計のずれ・管理画面での TTL 変更などで BE が再発行しなかったとき、
  *      キーを叩くたびに出続けないように。
  *
@@ -394,38 +504,80 @@ export const getIdleRemaining = (): IdleRemaining | null => {
  *     操作の瞬間 t に出て、サーバの期限を t + TTL にする。t はそのまま共有の最終操作時刻に
  *     入る(noteInteraction が先に記録する)ので、t + TTL ≤ 共有の最終操作 + TTL = FE の期限。
  *     他タブの操作を取り込んだだけ(storage の読み直し)では keepalive を出さない。
- *   - それでも漏れがあれば(通常リクエストが後から操作ヘッダを運ぶ等)、アイドル失効時の
+ *   - 通常リクエストが後から操作ヘッダを運ぶ漏れは、操作から刻みを過ぎたら運ばせない
+ *     (withActivityHeader)ので、追い越しても刻み以内。それでも残る分はアイドル失効時の
  *     signout(#137)がサーバ側を構成的に落とす。
+ * 境目を TTL/2 → `TTL − 刻み` にしても(2026-10-20)同じ — 変わったのは「出すかどうか」の
+ * しきい値と連打防止の間隔だけで、出す瞬間は操作の瞬間のまま。残り時間(idleSnapshot)が
+ * サーバの期限を見るのも読むだけで、サーバの期限は延ばさない。
  */
 const sendKeepalive = () => {
 	if (!idleTimeoutSeconds) {
 		return;
 	}
 	const ttlMs = idleTimeoutSeconds * 1000;
+	const stepMs = renewStepMs(ttlMs);
 	const now = Date.now();
-	if (now - lastKeepaliveAt < ttlMs / 8) {
+	if (now - lastKeepaliveAt < stepMs) {
 		return;
 	}
 	readShared();
 	if (knownExpiresAt) {
 		// サーバの期限は TTL より先には無い(管理画面で TTL を縮めた直後などの古い値を丸める)
 		const remaining = Math.min(knownExpiresAt - now, ttlMs);
-		if (remaining > ttlMs / 2) {
+		if (remaining > ttlMs - stepMs) {
 			return;
 		}
 	} else if (now - lastActivitySentAt < ttlMs / 4) {
 		// 期限が分からない — 保守的に TTL/4 間隔。lastActivitySentAt === 0 = このタブでは
-		// まだ 1 本も運べていない(開き直した直後など。手元の cookie が既に半分を過ぎて
+		// まだ 1 本も運べていない(開き直した直後など。手元の cookie が既に刻みを過ぎて
 		// いる可能性があるので出す)
 		return;
 	}
 	lastKeepaliveAt = now;
+	extensionRequestedAt = now;
+	writeShared(SHARED_EXTENSION_KEY, extensionRequestedAt);
 	void apiFetch(`${WEBUI_API_BASE_URL}/auths/`, {
 		method: 'GET',
 		headers: { Accept: 'application/json' }
 	}).catch(() => {
 		// 不達・失効の面倒は apiFetch 側(B2/B3)が見る
 	});
+};
+
+/**
+ * 監視の開始時(ページ読み込み・ログイン直後)に、今のセッションの期限を `$user.expires_at`
+ * (`GET /auths/` か signin の応答 = 今の cookie の exp)から知る。
+ *
+ * - **前のセッションの期限を引きずらない**: localStorage の期限は前のセッション(ログアウト →
+ *   再ログイン)のものでありうる。古い(早い)期限のまま残り時間に使うと、ログイン直後に
+ *   リングが 0 になって追い出す。新しいセッションの期限は必ずそれより後なので、遅い方を採る。
+ *   同じセッションのまま張り直した(管理画面で TTL を変えた等)ときは、`$user` の値の方が
+ *   古い — これも遅い方を採れば延命後の期限が残る。
+ * - `expires_at` が無い(期限なしで発行された token。TTL を後から有限にした直後)なら、
+ *   サーバはまだ期限を持たない — 知っている期限は捨てる(FE の期限だけで判断。次の操作ヘッダ
+ *   付きのリクエストで期限付きに再発行され、その応答で知る)。
+ * - ページ読み込みは FE の期限の起点になるが、サーバの期限は延ばさない(`GET /auths/` は
+ *   再発行しない)。ここで実際の期限を知っておけば、読み込んだだけで席を立ってもリングは
+ *   サーバの残りを出す。
+ */
+const seedServerExpiry = () => {
+	const session = get(user);
+	if (!session) {
+		return;
+	}
+	const exp = session.expires_at;
+	if (typeof exp !== 'number' || !(exp > 0)) {
+		knownExpiresAt = 0;
+		removeShared(SHARED_EXPIRES_KEY);
+		return;
+	}
+	readShared();
+	const seeded = serverSecondsToLocalMs(exp);
+	if (seeded > knownExpiresAt) {
+		knownExpiresAt = seeded;
+		writeShared(SHARED_EXPIRES_KEY, knownExpiresAt);
+	}
 };
 
 export const stopIdleWatch = () => {
@@ -462,6 +614,7 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 	lastInteractionAt = Date.now();
 	shareInteraction();
 	idleTimeoutSeconds = timeoutSeconds;
+	seedServerExpiry();
 
 	const check = () => {
 		if (sessionExpired) {
@@ -470,7 +623,7 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 		// 判定の直前に他タブの最終操作を取り込む(#154 — getIdleRemaining が読み直す)。
 		// アイドル扱いは「どのタブでも操作が無い」ときだけ — 下の signout は全タブ共通の
 		// cookie を消すので、放置タブの判定だけで作業中のタブを道連れにしない。
-		const idle = getIdleRemaining();
+		const idle = idleSnapshot();
 		if (!idle) {
 			return;
 		}
@@ -479,16 +632,17 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 			handleSessionExpired('idle');
 			return;
 		}
-		scheduleCheck(idle.remainingMs);
+		scheduleCheck(Math.min(idle.remainingMs, idle.switchInMs));
 	};
-	// 次の判定は「残り時間ちょうど」か IDLE_CHECK_MS 後の早い方。期限ちょうどに判定するので、
-	// 画面のリングが 0 になる瞬間に切れる(以前の 15 秒間隔だと最大 15 秒遅れていた)。
-	// 時刻差で判定するのは変わらない — スリープ等でタイマが遅れても、起きた時点で正しく評価する。
-	const scheduleCheck = (remainingMs: number) => {
+	// 次の判定は「残り時間ちょうど」(延命の応答待ちが終わるならその時刻)か IDLE_CHECK_MS 後の
+	// 早い方。期限ちょうどに判定するので、画面のリングが 0 になる瞬間に切れる(以前の 15 秒間隔
+	// だと最大 15 秒遅れていた)。時刻差で判定するのは変わらない — スリープ等でタイマが遅れても、
+	// 起きた時点で正しく評価する。
+	const scheduleCheck = (waitMs: number) => {
 		if (idleTimer) {
 			clearTimeout(idleTimer);
 		}
-		idleTimer = setTimeout(check, Math.min(IDLE_CHECK_MS, remainingMs));
+		idleTimer = setTimeout(check, Math.min(IDLE_CHECK_MS, waitMs));
 	};
 
 	scheduleCheck(timeoutSeconds * 1000);
@@ -521,7 +675,8 @@ export const apiFetch: typeof fetch = async (input, init) => {
 		backendUnreachable.set(false);
 	}
 
-	// 操作ヘッダ付きの応答には今のサーバの期限が載る(keepalive の判断に使う)
+	// 操作ヘッダ付きの応答には今のサーバの期限が載る(keepalive の判断・残り時間に使う)
+	noteServerClock(input, res);
 	noteServerExpiry(res);
 
 	// ログイン済みセッションでの 401/403 はセッション失効の可能性 — me で裏取りする

@@ -1040,21 +1040,25 @@ or refresh a token — see below),
 **Session idle timeout.** `SESSION_IDLE_TIMEOUT` (§3.3) is an _idle_ timeout, not an
 absolute deadline: the session is extended only on requests the browser marks as
 human-driven (an `X-Nucllei-Activity: 1` header the web UI adds after a keypress,
-click or tap), and only once the token is past half its lifetime. Every response to
+click or tap), and only once the token is older than the renewal step of
+`min(60 s, timeout / 10)` — so while someone is active the server-side expiry stays within
+that step of "last input + timeout" (at most one re-issue per step). Every response to
 a request carrying `X-Nucllei-Activity` also carries `X-Nucllei-Session-Expires: <exp>`
 — the current token's expiry as epoch seconds, whether or not it was just renewed
 (absent on requests without the activity header, on API-key requests and when the
-timeout is unlimited); the UI uses it to send a keep-alive once less than half the
-lifetime remains, and shares its last-input time across tabs so an idle tab never
-signs out a tab that is still in use. Background
+timeout is unlimited); the UI uses it to send a keep-alive on input once the token is
+older than that step (at most one per step, never without input), and shares its
+last-input time and the known expiry across tabs so an idle tab never signs out a tab
+that is still in use. Background
 polling therefore never keeps a session alive, so leaving a tab open at an unattended
 shared terminal does not keep the user logged in. `GET /api/v1/auths/` does **not**
 refresh the session (that would let a page reload extend it forever), and API-key
 requests are never extended — they carry their own credential. `/api/config`
 exposes the value as `session_idle_timeout` (seconds, `null` when unlimited) so the
 UI can send the user back to the login screen once it elapses (the web UI also shows the
-remaining idle time as a ring in the top-right corner, computed from the same shared
-last-input time, and checks the deadline at that exact moment). When the UI's own idle
+remaining idle time as a ring in the top-right corner — the earlier of "shared last-input
+time + timeout" and the known server-side expiry, so it never shows time the session no
+longer has — and checks that same deadline at that exact moment). When the UI's own idle
 timer fires it first calls `GET /api/v1/auths/signout` and only then navigates to
 `/auth`, so a client-side expiry always ends the server-side session too (#137) —
 `/auth` can never bounce the next person back into the previous user's chats because

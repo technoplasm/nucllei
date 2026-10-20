@@ -8,6 +8,8 @@
  *      startIdleWatch() が経過時間を見て自分でログイン画面へ逃がす。
  *   3. 延命の境界(#154)— keepalive はサーバが返す期限の実際の残りで判断する。
  *      複数タブは最終操作時刻を共有し、どのタブでも操作が無いときだけ切る。
+ *   4. 延命の刻み(ログアウトの暴発、2026-10-20)— token の年齢が刻み(min(60 秒, TTL/10))を
+ *      過ぎた後の操作で延命し、残り時間(リング・失効の判定)はサーバの期限との早い方。
  *
  * jsdom は依存に無いので(オフライン配備の repo に増やさない)、
  * モジュール読み込み前に必要なグローバルだけを差し込む。
@@ -103,12 +105,18 @@ const sentActivityHeader = (call: number, headerName: string) => {
 /**
  * cookie セッションを持つ BE の振る舞い(nucllei/utils/auth.py)を模す:
  *   - 期限(exp、epoch 秒)を過ぎたリクエストは 401(延命しない)
- *   - 操作ヘッダ付きで、残りが TTL/2 以下なら再発行(exp = 今 + TTL)
+ *   - 操作ヘッダ付きで、token の年齢が刻み(min(60 秒, TTL/10))以上なら再発行(exp = 今 + TTL)。
+ *     `renewal: 'half'` = 2026-10-20 より前の BE(残りが TTL/2 以下のときだけ再発行)
  *   - 操作ヘッダ付きの応答には今の exp を期限ヘッダで返す(`expiresHeader: false` = 古い BE)
  *   - signout で cookie が消える
  * `expiredAt` は「操作中なのにサーバ側が切れた」瞬間(切れなければ null)。
  */
-const fakeBackend = (ttlSeconds: number, { expiresHeader = true } = {}) => {
+const fakeBackend = (
+	ttlSeconds: number,
+	{ expiresHeader = true, renewal = 'step' as 'step' | 'half' } = {}
+) => {
+	const renewAtRemaining =
+		renewal === 'half' ? ttlSeconds / 2 : ttlSeconds - Math.min(60, ttlSeconds / 10);
 	const state = {
 		exp: Math.floor(Date.now() / 1000) + ttlSeconds,
 		signedOut: false,
@@ -126,7 +134,7 @@ const fakeBackend = (ttlSeconds: number, { expiresHeader = true } = {}) => {
 		}
 		const headers = new Headers();
 		if (init?.headers && new Headers(init.headers).get('X-Nucllei-Activity')) {
-			if (state.exp - now <= ttlSeconds / 2) {
+			if (state.exp - now <= renewAtRemaining) {
 				state.exp = Math.floor(now) + ttlSeconds;
 			}
 			if (expiresHeader) {
@@ -424,25 +432,29 @@ describe('FE 側アイドルタイマ', () => {
 		expect(fetchMock.mock.calls).toHaveLength(1);
 	});
 
-	it('半減期を過ぎるまでは keepalive を出さない(操作し続けても増やさない)', async () => {
+	it('token の年齢が刻み(1h なら 60 秒)を過ぎるまでは keepalive を出さない', async () => {
 		const { startIdleWatch, apiFetch } = await loadModule();
 		fakeBackend(3600);
 
-		// 通常の API 呼び出しがヘッダを運んだ = ここが起点
+		// 通常の API 呼び出しがヘッダを運んだ = 期限を知る(token は発行したて)
 		fire(windowListeners, 'click');
 		await apiFetch('/api/v1/chats/');
 		startIdleWatch(3600);
 
-		// 15 秒ごとにホイールを回し続けるが、まだ半減期(1800 秒)に届かない
-		for (let i = 0; i < 100; i++) {
-			vi.advanceTimersByTime(15000);
+		// 15 秒ごとにホイールを回すが、年齢 45 秒まではまだ刻み(60 秒)に届かない
+		for (let i = 0; i < 3; i++) {
+			await vi.advanceTimersByTimeAsync(15000);
 			fire(windowListeners, 'wheel');
 		}
-
 		expect(fetchMock.mock.calls).toHaveLength(1); // 最初の 1 本だけ
+
+		// 年齢 60 秒 = サーバの残りが TTL − 刻み 以下 → 操作の瞬間に 1 本
+		await vi.advanceTimersByTimeAsync(15000);
+		fire(windowListeners, 'wheel');
+		expect(keepaliveCalls()).toHaveLength(1);
 	});
 
-	it('操作が続いても keepalive は半減期ごとに 1 本(操作のたびには出さない)', async () => {
+	it('操作が続いても keepalive は刻みごとに 1 本(操作のたびには出さない)', async () => {
 		const { startIdleWatch, apiFetch } = await loadModule();
 		const backend = fakeBackend(3600);
 
@@ -456,9 +468,9 @@ describe('FE 側アイドルタイマ', () => {
 			fire(windowListeners, 'wheel');
 		}
 
-		// 10800 秒 / 半減期 1800 秒 = 6 本。操作のたびに出すと 720 本になってしまう
+		// 10800 秒 / 刻み 60 秒 = 180 本(1 分に 1 本)。操作のたびに出すと 720 本になってしまう
 		const keepalives = fetchMock.mock.calls.slice(1);
-		expect(keepalives).toHaveLength(6);
+		expect(keepalives).toHaveLength(180);
 		for (const call of keepalives) {
 			expect(String(call[0])).toContain('/auths/');
 		}
@@ -480,15 +492,16 @@ describe('FE 側アイドルタイマ', () => {
 describe('延命の境界(#154)', () => {
 	/**
 	 * staging で起きた形: TTL 20 分。年齢 TTL/2 の直前(9:55)に操作ヘッダ付きの API が出る
-	 * (BE は残りが半分を超えているので再発行しない)。その後は API を出さない操作
+	 * (半減期の BE は残りが半分を超えているので再発行しない)。その後は API を出さない操作
 	 * (ホイールで読む)だけが 20 秒おきに続く。
 	 * 旧実装は「最後にヘッダを送ってから TTL/2」の時計を 9:55 で 0 に戻すので、次の
 	 * keepalive は 19:55 以降 = 20:00 の操作で、その時点でサーバ側は切れていた。
+	 * 今の BE(刻み)では 9:55 の操作そのもので延びる。
 	 */
 	const ttl = 1200;
-	const scenario = async (expiresHeader: boolean) => {
+	const scenario = async (expiresHeader: boolean, renewal: 'step' | 'half' = 'step') => {
 		const { startIdleWatch, apiFetch } = await loadModule();
-		const backend = fakeBackend(ttl, { expiresHeader });
+		const backend = fakeBackend(ttl, { expiresHeader, renewal });
 		startIdleWatch(ttl);
 
 		// ログイン直後の操作 + API(ヘッダを 1 本運ぶ)
@@ -500,7 +513,8 @@ describe('延命の境界(#154)', () => {
 		fire(windowListeners, 'click');
 		await apiFetch('/api/v1/chats/'); // 年齢 595 秒 = 半減期の 5 秒前
 		await settle();
-		expect(backend.exp - Math.floor(Date.now() / 1000)).toBe(ttl - 595); // 再発行されていない
+		// 半減期の BE は再発行しない / 今の BE は刻み(60 秒)を過ぎているので延びる
+		expect(backend.exp - Math.floor(Date.now() / 1000)).toBe(renewal === 'half' ? ttl - 595 : ttl);
 
 		// 40 分間、リクエストを生まない操作だけが続く(年齢 600, 620, … 秒。旧実装の
 		// 延命の窓 [1195, 1200) には操作が入らない — 窓が 5 秒しかないこと自体が不具合)
@@ -525,15 +539,24 @@ describe('延命の境界(#154)', () => {
 		expect(keepaliveCalls().length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('(a) keepalive は半減期ごと程度で、操作のたびには出さない', async () => {
+	it('(a) keepalive は刻み(60 秒)ごと程度で、操作のたびには出さない', async () => {
 		await scenario(true);
 
-		// 最初の 1 本(期限不明)+ 40 分 / 半減期 10 分 ≒ 4〜5 本。120 回の操作ぶんではない
-		expect(keepaliveCalls().length).toBeLessThanOrEqual(6);
+		// 40 分 / 刻み 1 分 ≒ 40 本(+ 最初の数本)。20 秒おき 120 回の操作ぶんではない
+		const count = keepaliveCalls().length;
+		expect(count).toBeGreaterThanOrEqual(35);
+		expect(count).toBeLessThanOrEqual(43);
+	});
+
+	it('(a) 半減期でしか再発行しない BE が相手でも、残りが半分を切った後の操作で延命して切れない', async () => {
+		const backend = await scenario(true, 'half');
+
+		expect(backend.expiredAt).toBeNull();
+		expect(location.href).toBe('http://localhost/c/abc');
 	});
 
 	it('(d) 期限ヘッダを返さない古い BE では TTL/4 間隔にフォールバックして切れない', async () => {
-		const backend = await scenario(false);
+		const backend = await scenario(false, 'half');
 
 		expect(backend.expiredAt).toBeNull();
 		expect(location.href).toBe('http://localhost/c/abc');
@@ -556,10 +579,12 @@ describe('延命の境界(#154)', () => {
 		startIdleWatch(1200);
 
 		for (let i = 0; i < 60; i++) {
-			await vi.advanceTimersByTimeAsync(1000);
+			if (i > 0) {
+				await vi.advanceTimersByTimeAsync(1000);
+			}
 			noteInteraction();
 		}
-		// 60 秒間に操作 60 回 → TTL/8 = 150 秒の間隔なので 1 本だけ
+		// 59 秒間に操作 60 回 → 刻み(60 秒)の間隔なので 1 本だけ
 		expect(keepaliveCalls()).toHaveLength(1);
 	});
 
@@ -763,3 +788,217 @@ describe('getIdleRemaining(右上の残り時間リング)', () => {
 		expect(tabA.getIdleRemaining()?.remainingMs).toBe(60 * 1000);
 	});
 });
+
+describe('延命の刻みと残り時間(ログアウトの暴発、2026-10-20)', () => {
+	const ttl = 1200; // 20 分。刻み = min(60 秒, TTL/10) = 60 秒
+
+	/** ログイン直後の状態(`$user.expires_at` = 今の cookie の exp)で監視を始める。 */
+	const loggedIn = async (backendOptions = {}) => {
+		const mod = await loadModule();
+		const backend = fakeBackend(ttl, backendOptions);
+		const { user } = await import('$lib/stores');
+		user.set({ id: '1', expires_at: backend.exp } as never);
+		mod.startIdleWatch(ttl);
+		return { ...mod, backend };
+	};
+
+	it('残りが半分より多いときに操作して席を立っても、サーバ側が先に切れない(9:00 に操作 → 21:00 に戻る)', async () => {
+		// 旧実装: 発行 0:00、9:00 に操作(残り 11 分 = 半分より多い)では延命せず、
+		// サーバは 20:00 に切れる。21:00 に戻るとリングは残り 8 分(9:00 + 20 分 − 21:00)
+		// なのに、次の操作で 401 → ログイン画面だった。
+		const { getIdleRemaining, apiFetch, backend } = await loggedIn();
+		// ログイン直後の操作 + API(ヘッダを運び、期限 = 0:00 + 20 分を知る。年齢 0 なので延びない)
+		fire(windowListeners, 'click');
+		await apiFetch('/api/v1/chats/');
+		await settle();
+		const before = keepaliveCalls().length;
+
+		await vi.advanceTimersByTimeAsync(9 * 60 * 1000);
+		fire(windowListeners, 'click');
+		await settle();
+		// 年齢 9 分 > 刻み → 操作の瞬間に 1 本(旧実装は残りが半分より多いので出さなかった)
+		expect(keepaliveCalls()).toHaveLength(before + 1);
+
+		await vi.advanceTimersByTimeAsync(12 * 60 * 1000); // 12 分離席 → 21:00
+		const remaining = getIdleRemaining()?.remainingMs ?? 0;
+		expect(remaining).toBe(8 * 60 * 1000);
+		// サーバ側にもリングと同じだけ残っている
+		expect(serverRemaining(backend) * 1000).toBeGreaterThanOrEqual(remaining - 1000);
+
+		fire(windowListeners, 'click');
+		await settle();
+		expect(backend.expiredAt).toBeNull();
+		expect(location.href).toBe('http://localhost/c/abc');
+		expect(getIdleRemaining()?.remainingMs).toBeGreaterThanOrEqual((ttl - 1) * 1000);
+	});
+
+	it('サーバの期限は FE の期限(最後の操作 + TTL)から刻み以内、かつそれを越えない', async () => {
+		const { backend } = await loggedIn();
+		const stepSeconds = 60;
+
+		// 7 秒おきの操作を 2 時間(操作の間隔は刻みと揃えない)
+		let lastInteraction = Date.now();
+		for (let i = 0; i < 1000; i++) {
+			await vi.advanceTimersByTimeAsync(7 * 1000);
+			fire(windowListeners, i % 2 ? 'wheel' : 'keydown');
+			lastInteraction = Date.now();
+			await settle();
+			const feDeadline = lastInteraction / 1000 + ttl;
+			expect(backend.exp).toBeLessThanOrEqual(feDeadline);
+			expect(backend.exp).toBeGreaterThan(feDeadline - stepSeconds - 1);
+		}
+		// 7000 秒 / 60 秒 ≒ 117 本 — 操作 1000 回ぶんではない
+		expect(keepaliveCalls().length).toBeLessThanOrEqual(7000 / 60 + 1);
+		expect(backend.expiredAt).toBeNull();
+	});
+
+	it('keepalive のしきい値は「サーバの残り ≤ TTL − 刻み」(年齢 59 秒では出さず 61 秒で出す)', async () => {
+		await loggedIn();
+
+		await vi.advanceTimersByTimeAsync(59 * 1000);
+		fire(windowListeners, 'click');
+		expect(keepaliveCalls()).toHaveLength(0);
+
+		await vi.advanceTimersByTimeAsync(2 * 1000);
+		fire(windowListeners, 'click');
+		expect(keepaliveCalls()).toHaveLength(1);
+	});
+
+	it('BE が延ばさなくても、keepalive は刻み(60 秒)に 1 本まで', async () => {
+		const { backend } = await loggedIn();
+		// 何をしても期限が延びない BE(時計のずれ等の模擬)
+		fetchMock.mockImplementation(
+			async () =>
+				new Response('{}', {
+					status: 200,
+					headers: { 'X-Nucllei-Session-Expires': String(backend.exp) }
+				})
+		);
+
+		await vi.advanceTimersByTimeAsync(120 * 1000);
+		for (let i = 0; i < 180; i++) {
+			fire(windowListeners, 'keydown');
+			await vi.advanceTimersByTimeAsync(1000);
+		}
+		// t = 120〜299 秒の操作 180 回 → 120, 180, 240 の 3 本
+		expect(keepaliveCalls()).toHaveLength(3);
+	});
+
+	it('残り時間はサーバの期限との早い方 — サーバ側が先に切れるなら、その瞬間にログイン画面へ', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loadModule();
+		const backend = fakeBackend(ttl);
+		// サーバの期限は残り 30 秒のセッションでページを開いた(GET /auths/ は延命しない =
+		// ページ読み込みは FE の期限の起点になるが、サーバの期限は延びない)
+		backend.exp = Math.floor(Date.now() / 1000) + 30;
+		const { user } = await import('$lib/stores');
+		user.set({ id: '1', expires_at: backend.exp } as never);
+		startIdleWatch(ttl);
+
+		// FE の期限(今 + 20 分)ではなくサーバの残り 30 秒を出す
+		expect(getIdleRemaining()?.remainingMs).toBe(30 * 1000);
+
+		vi.advanceTimersByTime(30 * 1000 - 1);
+		await settle();
+		expect(signoutCalls()).toHaveLength(0);
+		vi.advanceTimersByTime(1);
+		await settle();
+		expect(signoutCalls()).toHaveLength(1);
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('延命が要る操作をした瞬間にリングは満タンへ戻り、応答待ちの間は切らない', async () => {
+		const { getIdleRemaining, backend } = await loggedIn();
+		// 残り 2 秒まで放置
+		await vi.advanceTimersByTimeAsync((ttl - 2) * 1000);
+		expect(getIdleRemaining()?.remainingMs).toBe(2000);
+
+		// keepalive の応答が 5 秒遅れる BE
+		const respond = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation(async (input, init) => {
+			const res = respond(input, init); // 到着時点(期限前)で延命される
+			await new Promise((resolve) => setTimeout(resolve, 5000));
+			return res;
+		});
+		fire(windowListeners, 'click');
+		expect(getIdleRemaining()?.remainingMs).toBe(ttl * 1000); // 応答前でも満タン
+
+		// 知っている期限(2 秒後)を過ぎても、応答待ちの間は切らない
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(signoutCalls()).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(3000); // 応答が届いた
+		expect(signoutCalls()).toHaveLength(0);
+		expect(backend.expiredAt).toBeNull();
+		expect(getIdleRemaining()?.remainingMs).toBeGreaterThan((ttl - 10) * 1000);
+	});
+
+	it('延命の応答が届かなければ、待ちの上限(10 秒)の後に知っている期限で切る', async () => {
+		const { getIdleRemaining } = await loggedIn();
+		await vi.advanceTimersByTimeAsync((ttl - 2) * 1000);
+		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+
+		fire(windowListeners, 'click');
+		await vi.advanceTimersByTimeAsync(10 * 1000 - 1);
+		expect(signoutCalls()).toHaveLength(0);
+		expect(getIdleRemaining()?.remainingMs).toBe(ttl * 1000 - (10 * 1000 - 1));
+		await vi.advanceTimersByTimeAsync(1);
+		expect(signoutCalls()).toHaveLength(1);
+	});
+
+	it('操作から刻みより後のリクエストには操作ヘッダを運ばせない(サーバの期限が FE の期限を追い越さない)', async () => {
+		const { apiFetch, backend, ACTIVITY_HEADER } = await loggedIn();
+
+		// 年齢 30 秒の操作(刻み未満なので keepalive は出ない)— 運ぶ役は次のリクエスト
+		await vi.advanceTimersByTimeAsync(30 * 1000);
+		fire(windowListeners, 'click');
+		expect(keepaliveCalls()).toHaveLength(0);
+
+		// 操作から 61 秒後のリクエスト(ポーリング等)には付けない
+		await vi.advanceTimersByTimeAsync(61 * 1000);
+		await apiFetch('/api/v1/chats/');
+		expect(sentActivityHeader(fetchMock.mock.calls.length - 1, ACTIVITY_HEADER)).toBeNull();
+		const feDeadline = Date.now() / 1000 - 61 + ttl;
+		expect(backend.exp).toBeLessThanOrEqual(feDeadline);
+
+		// 操作の直後のリクエストには付く
+		fire(windowListeners, 'keydown'); // 年齢 91 秒 → keepalive がヘッダを運ぶ
+		expect(sentActivityHeader(fetchMock.mock.calls.length - 1, ACTIVITY_HEADER)).toBe('1');
+	});
+
+	it('前のセッションの期限が localStorage に残っていても、ログイン直後に追い出さない', async () => {
+		const mod = await loadModule();
+		// 前のセッション(1 時間前に切れた)の期限
+		localStore.set(SHARED_EXPIRES_KEY_FOR_TEST, String(Date.now() - 3600 * 1000));
+		const { user } = await import('$lib/stores');
+		user.set({ id: '1', expires_at: Math.floor(Date.now() / 1000) + ttl } as never);
+		mod.startIdleWatch(ttl);
+
+		expect(mod.getIdleRemaining()?.remainingMs).toBe(ttl * 1000);
+		await vi.advanceTimersByTimeAsync(60 * 1000);
+		expect(signoutCalls()).toHaveLength(0);
+		expect(location.href).toBe('http://localhost/c/abc');
+	});
+
+	it('期限なしの token(expires_at = null)なら、残っている期限は捨てて FE の期限で判断する', async () => {
+		const mod = await loadModule();
+		localStore.set(SHARED_EXPIRES_KEY_FOR_TEST, String(Date.now() - 3600 * 1000));
+		const { user } = await import('$lib/stores');
+		user.set({ id: '1', expires_at: null } as never);
+		mod.startIdleWatch(ttl);
+
+		expect(mod.getIdleRemaining()?.remainingMs).toBe(ttl * 1000);
+		expect(localStore.has(SHARED_EXPIRES_KEY_FOR_TEST)).toBe(false);
+	});
+
+	it('同じセッションで張り直しても($user の期限が古い)、延命後の期限を捨てない', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loggedIn();
+		await vi.advanceTimersByTimeAsync(300 * 1000);
+		fire(windowListeners, 'click'); // 延命 → 期限は今 + 20 分
+		await settle();
+
+		// 管理画面で TTL を保存した等で startIdleWatch が張り直される($user はページ読み込み時のまま)
+		startIdleWatch(ttl);
+		expect(getIdleRemaining()?.remainingMs).toBe(ttl * 1000);
+	});
+});
+
+const SHARED_EXPIRES_KEY_FOR_TEST = 'nucllei:idle:session-expires';
