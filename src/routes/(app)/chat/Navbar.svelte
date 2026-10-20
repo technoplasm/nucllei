@@ -19,6 +19,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Menu from './NavbarMenu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
+	import IdleTimeoutRing from '$lib/components/layout/IdleTimeoutRing.svelte';
 	import Banner from '$lib/components/common/Banner.svelte';
 
 	const i18n = getContext('i18n');
@@ -90,6 +91,10 @@
 				</div>
 
 				<div class="self-start flex flex-none items-center text-content-muted">
+					<!-- アイドルタイムアウトまでの残り時間(リング + m:ss)。右上のボタン群の左端 = 「…」の左。
+					     隠れている間も枠は取ったまま(opacity だけ)なので、出し入れで並びは動かない -->
+					<IdleTimeoutRing />
+
 					{#if shareEnabled && chat && chat.id}
 						<Menu
 							{chat}
@@ -185,13 +190,6 @@
 							</button>
 						</UserMenu>
 					{/if}
-
-					<!-- 右上の残り時間リング(IdleTimeoutRing、fixed)の分を空ける。この行の右端の余白
-					     (px-1.5 + px-1 = 0.625rem)はリングの right と同じなので差し引く -->
-					<div
-						class="shrink-0"
-						style="width: max(0px, calc(var(--idle-ring-reserve, 0px) - 0.625rem))"
-					></div>
 				</div>
 			</div>
 		</div>

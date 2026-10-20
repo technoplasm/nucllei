@@ -6,10 +6,13 @@
  */
 
 /** 残りが全長のこの割合を切ったら、ホバーしなくても常に出す。 */
-export const IDLE_RING_PINNED_FRACTION = 1 / 3;
+export const IDLE_RING_PINNED_FRACTION = 1 / 2;
 
-/** 最後のこの時間は警告色にする(全長の 1/3 より長くはしない = 常に見えている間だけ)。 */
-export const IDLE_RING_WARNING_MS = 60 * 1000;
+/** 残りが全長のこの割合を切ったら黄色(注意)。 */
+export const IDLE_RING_CAUTION_FRACTION = 1 / 4;
+
+/** 残りが全長のこの割合を切ったら赤(警告)。 */
+export const IDLE_RING_DANGER_FRACTION = 1 / 8;
 
 /** リングの残量(1 = 満タン、0 = 失効)。 */
 export const idleRingFraction = (remainingMs: number, timeoutMs: number): number => {
@@ -19,13 +22,13 @@ export const idleRingFraction = (remainingMs: number, timeoutMs: number): number
 	return Math.min(1, Math.max(0, remainingMs / timeoutMs));
 };
 
-/** 残りが全長の 1/3 を切った = ホバーしなくても常に出す。 */
+/** 残りが全長の 1/2 を切った = ホバーしなくても常に出す。 */
 export const isIdleRingPinned = (remainingMs: number, timeoutMs: number): boolean =>
 	remainingMs < timeoutMs * IDLE_RING_PINNED_FRACTION;
 
 /**
  * リング(と残り時間の文字)を見せるか。普段は隠し、ホバー(またはキーボードのフォーカス)で
- * 見せる。残りが 1/3 を切ったら常に見せる。
+ * 見せる。残りが 1/2 を切ったら常に見せる。
  */
 export const isIdleRingVisible = ({
 	remainingMs,
@@ -37,9 +40,23 @@ export const isIdleRingVisible = ({
 	hovered: boolean;
 }): boolean => hovered || isIdleRingPinned(remainingMs, timeoutMs);
 
-/** 最後の 1 分(全長が短ければその 1/3)は警告色。 */
-export const isIdleRingWarning = (remainingMs: number, timeoutMs: number): boolean =>
-	remainingMs <= Math.min(IDLE_RING_WARNING_MS, timeoutMs * IDLE_RING_PINNED_FRACTION);
+/** 色の段階。`normal` = 普段の色(muted)、`caution` = 黄、`danger` = 赤。 */
+export type IdleRingLevel = 'normal' | 'caution' | 'danger';
+
+/**
+ * 色の段階は全長に対する割合だけで決める(TTL 20m なら 1/2 = 10:00 で常に出る・色は普段のまま →
+ * 1/4 = 5:00 で黄 → 1/8 = 2:30 で赤)。境目は「切ったら」(未満)— 表示の秒は切り上げなので、
+ * 文字がちょうど `5:00` になった瞬間に黄へ変わる(常に出る 1/2 と同じ規則)。
+ */
+export const idleRingLevel = (remainingMs: number, timeoutMs: number): IdleRingLevel => {
+	if (remainingMs < timeoutMs * IDLE_RING_DANGER_FRACTION) {
+		return 'danger';
+	}
+	if (remainingMs < timeoutMs * IDLE_RING_CAUTION_FRACTION) {
+		return 'caution';
+	}
+	return 'normal';
+};
 
 /**
  * 残り時間の表示。1 時間未満は `m:ss`(`12:34` / `0:05`)、以上は `h:mm:ss`(`3:59:59`)。
@@ -65,3 +82,12 @@ export const msUntilNextIdleTick = (remainingMs: number): number => {
 	const toBoundary = remainingMs % 1000;
 	return toBoundary > 0 ? toBoundary : 1000;
 };
+
+/**
+ * 残り時間の文字が取りうる最も長い形(全長 `timeoutMs` の表示の数字を `0` にしたもの。
+ * `10m` → `00:00`、`2h` → `0:00:00`)。リングの枠はこの文字の幅を常に確保する —
+ * 残りは全長を超えないので、表示が変わっても・出し入れしても枠の幅は変わらず、
+ * 右上の並びもその左の見出しも動かない。
+ */
+export const idleRingWidestText = (timeoutMs: number): string =>
+	formatIdleRemaining(timeoutMs).replace(/\d/g, '0');

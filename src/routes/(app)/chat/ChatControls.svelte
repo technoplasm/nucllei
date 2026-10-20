@@ -192,7 +192,7 @@
 						</div>
 					{:else}
 						<!-- llens(#69): CallOverlay 以外はこのチャットのファイル一覧 -->
-						<ChatFiles {history} {chatFiles} reserveTopRight />
+						<ChatFiles {history} {chatFiles} />
 					{/if}
 				</div>
 			</div>

@@ -17,13 +17,8 @@
 	// クリックで getFileById(data 込み)→ FileItemModal。
 	const i18n = getContext('i18n');
 
-	// reserveTopRight: 画面右上に接する置き方(大画面の右ペイン)のとき、見出しの右端に
-	// 残り時間リング(IdleTimeoutRing)の分を空ける。下から出る Drawer はリングより手前なので不要
-	let {
-		history = null,
-		chatFiles = [],
-		reserveTopRight = false
-	}: { history?: ChatHistory | null; chatFiles?: ChatFile[]; reserveTopRight?: boolean } = $props();
+	let { history = null, chatFiles = [] }: { history?: ChatHistory | null; chatFiles?: ChatFile[] } =
+		$props();
 
 	const items = $derived(collectChatFiles(chatFiles, history));
 
@@ -60,13 +55,7 @@
 {/if}
 
 <div class="flex flex-col w-full">
-	<!-- reserveTopRight: 右ペインの枠(border 1px + px-4 = 1.0625rem)はリングの right より内側なので差し引く -->
-	<div
-		class="flex items-center justify-between mb-1.5"
-		style={reserveTopRight
-			? 'padding-right: max(0px, calc(var(--idle-ring-reserve, 0px) - 1.0625rem))'
-			: undefined}
-	>
+	<div class="flex items-center justify-between mb-1.5">
 		<div class="text-sm font-medium text-content">
 			{$i18n.t('Files in this chat')}
 		</div>

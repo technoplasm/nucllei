@@ -290,11 +290,14 @@
 		<div
 			class="flex w-full text-left px-0.5 outline-hidden bg-transparent truncate {triggerClassName} justify-between font-medium focus:outline-hidden"
 		>
-			{#if selectedModel}
-				{selectedModel.label}
-			{:else}
-				{placeholder}
-			{/if}
+			<!-- 狭い幅(右上のボタン群に押される 390px 等)では名前を … で切り、▼ は残す -->
+			<span class="min-w-0 truncate">
+				{#if selectedModel}
+					{selectedModel.label}
+				{:else}
+					{placeholder}
+				{/if}
+			</span>
 			<span class="i-lucide-chevron-down size-3 block self-center ml-2 shrink-0"></span>
 		</div>
 	</DropdownMenu.Trigger>

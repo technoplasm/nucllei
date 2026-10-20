@@ -4,6 +4,7 @@
 	import { overlayScrollbar } from '$lib/actions/overlay-scrollbars';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import IdleTimeoutRing from '$lib/components/layout/IdleTimeoutRing.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -115,8 +116,11 @@
 
 				<!-- <div class="flex items-center text-xl font-semibold">{$i18n.t('Workspace')}</div> -->
 
-				<!-- 右上の残り時間リング(IdleTimeoutRing、fixed)の分を空ける -->
-				<div class="ml-auto shrink-0" style="width: var(--idle-ring-reserve, 0px)"></div>
+				<!-- 右上のボタン群(今はアイドルタイムアウトの残り時間だけ)。chat の Navbar と同じく
+				     群の左端に置く。隠れている間も枠は取ったまま(opacity だけ)なので並びは動かない -->
+				<div class="ml-auto flex flex-none items-center px-1.5 text-content-muted">
+					<IdleTimeoutRing />
+				</div>
 			</div>
 		</nav>
 
