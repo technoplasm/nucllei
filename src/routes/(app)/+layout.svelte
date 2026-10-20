@@ -14,6 +14,7 @@
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from './SettingsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import IdleTimeoutRing from '$lib/components/layout/IdleTimeoutRing.svelte';
 
 	let { children } = $props();
 
@@ -138,6 +139,11 @@
 </script>
 
 <SettingsModal bind:show={$showSettings} />
+
+<!-- アイドルタイムアウトまでの残り時間(右上)。アプリの全画面で同じ位置に出す -->
+{#if loaded}
+	<IdleTimeoutRing />
+{/if}
 
 <div class="app relative">
 	<div

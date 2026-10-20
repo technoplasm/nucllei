@@ -1052,7 +1052,9 @@ shared terminal does not keep the user logged in. `GET /api/v1/auths/` does **no
 refresh the session (that would let a page reload extend it forever), and API-key
 requests are never extended — they carry their own credential. `/api/config`
 exposes the value as `session_idle_timeout` (seconds, `null` when unlimited) so the
-UI can send the user back to the login screen once it elapses. When the UI's own idle
+UI can send the user back to the login screen once it elapses (the web UI also shows the
+remaining idle time as a ring in the top-right corner, computed from the same shared
+last-input time, and checks the deadline at that exact moment). When the UI's own idle
 timer fires it first calls `GET /api/v1/auths/signout` and only then navigates to
 `/auth`, so a client-side expiry always ends the server-side session too (#137) —
 `/auth` can never bounce the next person back into the previous user's chats because

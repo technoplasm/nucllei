@@ -834,6 +834,7 @@
 	"You do not have permission to upload files": "你没有上传文件的权限",
 	"You do not have permission to upload files.": "你没有上传文件的权限。",
 	"You have no archived conversations.": "没有已归档的对话。",
+	"You will be signed out automatically in {{time}} without any activity. Click to extend.": "如无操作，将在 {{time}} 后自动退出登录。点击可延长。",
 	"You're now logged in.": "已登录。",
 	"Your account has been disabled. Please contact the administrator for details.": "您的账号已被禁用。详情请联系管理员。",
 	"Your account status is currently pending activation.": "您的账号当前状态为待激活。",

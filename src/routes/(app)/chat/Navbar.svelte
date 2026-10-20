@@ -185,6 +185,13 @@
 							</button>
 						</UserMenu>
 					{/if}
+
+					<!-- 右上の残り時間リング(IdleTimeoutRing、fixed)の分を空ける。この行の右端の余白
+					     (px-1.5 + px-1 = 0.625rem)はリングの right と同じなので差し引く -->
+					<div
+						class="shrink-0"
+						style="width: max(0px, calc(var(--idle-ring-reserve, 0px) - 0.625rem))"
+					></div>
 				</div>
 			</div>
 		</div>

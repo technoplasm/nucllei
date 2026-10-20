@@ -114,6 +114,9 @@
 				</div>
 
 				<!-- <div class="flex items-center text-xl font-semibold">{$i18n.t('Workspace')}</div> -->
+
+				<!-- 右上の残り時間リング(IdleTimeoutRing、fixed)の分を空ける -->
+				<div class="ml-auto shrink-0" style="width: var(--idle-ring-reserve, 0px)"></div>
 			</div>
 		</nav>
 

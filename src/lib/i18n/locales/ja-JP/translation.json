@@ -834,6 +834,7 @@
 	"You do not have permission to upload files": "ファイルをアップロードする権限がありません",
 	"You do not have permission to upload files.": "ファイルをアップロードする権限がありません。",
 	"You have no archived conversations.": "これまでにアーカイブされた会話はありません。",
+	"You will be signed out automatically in {{time}} without any activity. Click to extend.": "操作がないと、あと {{time}} で自動的にログアウトします。クリックすると延長します。",
 	"You're now logged in.": "ログインしました。",
 	"Your account has been disabled. Please contact the administrator for details.": "このアカウントは無効化されています。詳細は管理者にお問い合わせください。",
 	"Your account status is currently pending activation.": "あなたのアカウント状態は現在登録認証待ちです。",

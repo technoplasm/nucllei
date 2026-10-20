@@ -31,6 +31,8 @@
  *     放置タブのアイドル判定が signout で作業中のタブを道連れにしない。
  *   - 「人の操作」には、マイクの音声入力で発話を検出している間も含める(noteInteraction を
  *     VoiceRecording が呼ぶ)。録音バーが開いているだけの無音は含めない。
+ *   - 残り時間は getIdleRemaining() が出す。失効の判定と画面右上のリング(IdleTimeoutRing)が
+ *     同じこれを使い、判定は残りがちょうど 0 になる時刻に予約する — リングが 0 になる瞬間に切れる。
  */
 import { get } from 'svelte/store';
 
@@ -310,14 +312,42 @@ const markUnreachable = () => {
  * FE 側アイドルタイマ(共有 PC の離席対策)
  * ---------------------------------------------------------------- */
 
-// 経過判定の間隔。TTL そのものではないので設定にはしない
-// (時刻差で判定するため、この粒度が遅れの上限になるだけ)
+// 経過判定の間隔の上限。TTL そのものではないので設定にはしない。
+// 期限そのものは残り時間ちょうどに判定を予約する(scheduleIdleCheck)ので、この粒度は
+// 「他タブの操作を取り込み直す間隔」の上限になるだけ(期限を過ぎてからの遅れにはならない)
 const IDLE_CHECK_MS = 15000;
 
-let idleTimer: ReturnType<typeof setInterval> | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let idleResumeHook: (() => void) | null = null;
 // 監視中のアイドルタイムアウト秒数(null = 無期限 / 未ログイン = keepalive も出さない)
 let idleTimeoutSeconds: number | null = null;
+
+export type IdleRemaining = {
+	/** アイドル失効までの残り(ミリ秒、0 以上)。0 = 今まさに切れる */
+	remainingMs: number;
+	/** アイドルタイムアウトの全長(ミリ秒) = `SESSION_IDLE_TIMEOUT` */
+	timeoutMs: number;
+};
+
+/**
+ * アイドル失効までの残り時間。**失効の判定(checkIdle)と画面の表示(IdleTimeoutRing)が
+ * 同じこれを使う** — 表示が 0 になる瞬間と、ログイン画面へ逃がす瞬間を一致させるため。
+ *
+ * 残りは「全タブの最終操作時刻 + TTL − 今」。他タブの操作は読む直前に localStorage から
+ * 取り込む(#154)ので、どのタブで計算しても同じ値になり、どこかのタブで操作すれば全タブで
+ * 満タンに戻る。監視していない(無期限・未ログイン・失効後)なら null。
+ */
+export const getIdleRemaining = (): IdleRemaining | null => {
+	if (!idleTimeoutSeconds) {
+		return null;
+	}
+	readShared();
+	const timeoutMs = idleTimeoutSeconds * 1000;
+	return {
+		remainingMs: Math.max(0, lastInteractionAt + timeoutMs - Date.now()),
+		timeoutMs
+	};
+};
 
 /**
  * 「操作したのに、ヘッダを運ぶリクエストが出ていない」ときに出す延命用の 1 本。
@@ -401,7 +431,7 @@ const sendKeepalive = () => {
 export const stopIdleWatch = () => {
 	idleTimeoutSeconds = null;
 	if (idleTimer) {
-		clearInterval(idleTimer);
+		clearTimeout(idleTimer);
 		idleTimer = null;
 	}
 	if (idleResumeHook) {
@@ -437,18 +467,32 @@ export const startIdleWatch = (timeoutSeconds?: number | null) => {
 		if (sessionExpired) {
 			return;
 		}
-		// 判定の直前に他タブの最終操作を取り込む(#154)。アイドル扱いは「どのタブでも
-		// 操作が無い」ときだけ — 下の signout は全タブ共通の cookie を消すので、
-		// 放置タブの判定だけで作業中のタブを道連れにしない。
-		readShared();
-		if (Date.now() - lastInteractionAt >= timeoutSeconds * 1000) {
+		// 判定の直前に他タブの最終操作を取り込む(#154 — getIdleRemaining が読み直す)。
+		// アイドル扱いは「どのタブでも操作が無い」ときだけ — 下の signout は全タブ共通の
+		// cookie を消すので、放置タブの判定だけで作業中のタブを道連れにしない。
+		const idle = getIdleRemaining();
+		if (!idle) {
+			return;
+		}
+		if (idle.remainingMs <= 0) {
 			stopIdleWatch();
 			handleSessionExpired('idle');
+			return;
 		}
+		scheduleCheck(idle.remainingMs);
+	};
+	// 次の判定は「残り時間ちょうど」か IDLE_CHECK_MS 後の早い方。期限ちょうどに判定するので、
+	// 画面のリングが 0 になる瞬間に切れる(以前の 15 秒間隔だと最大 15 秒遅れていた)。
+	// 時刻差で判定するのは変わらない — スリープ等でタイマが遅れても、起きた時点で正しく評価する。
+	const scheduleCheck = (remainingMs: number) => {
+		if (idleTimer) {
+			clearTimeout(idleTimer);
+		}
+		idleTimer = setTimeout(check, Math.min(IDLE_CHECK_MS, remainingMs));
 	};
 
-	idleTimer = setInterval(check, IDLE_CHECK_MS);
-	// 背面タブ・スリープ復帰では interval が飛んでいるので、復帰時点でも評価する
+	scheduleCheck(timeoutSeconds * 1000);
+	// 背面タブ・スリープ復帰ではタイマが飛んでいるので、復帰時点でも評価する
 	idleResumeHook = () => {
 		if (document.visibilityState === 'visible') {
 			check();

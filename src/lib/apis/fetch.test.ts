@@ -695,3 +695,71 @@ describe('複数タブ(#154)', () => {
 		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
 	});
 });
+
+describe('getIdleRemaining(右上の残り時間リング)', () => {
+	it('監視していない(無期限・未ログイン)なら null', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loadModule();
+
+		expect(getIdleRemaining()).toBeNull();
+		startIdleWatch(null);
+		expect(getIdleRemaining()).toBeNull();
+	});
+
+	it('最後の操作からの残りを返し、操作で満タンに戻る', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loadModule();
+		startIdleWatch(60);
+
+		expect(getIdleRemaining()).toEqual({ remainingMs: 60 * 1000, timeoutMs: 60 * 1000 });
+		vi.advanceTimersByTime(20 * 1000);
+		expect(getIdleRemaining()?.remainingMs).toBe(40 * 1000);
+
+		fire(windowListeners, 'keydown');
+		expect(getIdleRemaining()?.remainingMs).toBe(60 * 1000);
+	});
+
+	it('ホバー(カーソルを重ねるだけ)では戻らない', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loadModule();
+		startIdleWatch(60);
+		vi.advanceTimersByTime(20 * 1000);
+
+		for (const type of ['pointerenter', 'pointerover', 'mouseover', 'mouseenter', 'mousemove']) {
+			fire(windowListeners, type);
+		}
+		expect(getIdleRemaining()?.remainingMs).toBe(40 * 1000);
+	});
+
+	it('残りが 0 になる瞬間にログイン画面へ逃がす(表示と失効がずれない)', async () => {
+		const { startIdleWatch, getIdleRemaining } = await loadModule();
+		startIdleWatch(60);
+		// 判定の周期(15 秒)とずれた時刻に操作する — 期限は 67 秒目
+		vi.advanceTimersByTime(7 * 1000);
+		fire(windowListeners, 'keydown');
+
+		vi.advanceTimersByTime(60 * 1000 - 1);
+		expect(getIdleRemaining()?.remainingMs).toBe(1);
+		await settle();
+		expect(signoutCalls()).toHaveLength(0);
+
+		vi.advanceTimersByTime(1);
+		await settle();
+		expect(signoutCalls()).toHaveLength(1);
+		expect(location.href).toBe('/auth?redirect=%2Fc%2Fabc');
+	});
+
+	it('他タブの操作で全タブの残りが満タンに戻る(どのタブで見ても同じ値)', async () => {
+		const tabA = await loadModule();
+		tabA.startIdleWatch(60);
+		const listenersA = windowListeners;
+
+		const tabB = await loadModule({ secondTab: true });
+		tabB.startIdleWatch(60);
+
+		vi.advanceTimersByTime(30 * 1000);
+		expect(tabA.getIdleRemaining()?.remainingMs).toBe(30 * 1000);
+		expect(tabB.getIdleRemaining()?.remainingMs).toBe(30 * 1000);
+
+		fire(listenersA, 'click');
+		expect(tabB.getIdleRemaining()?.remainingMs).toBe(60 * 1000);
+		expect(tabA.getIdleRemaining()?.remainingMs).toBe(60 * 1000);
+	});
+});

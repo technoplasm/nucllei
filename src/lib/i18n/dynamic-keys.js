@@ -18,7 +18,7 @@
 // - chat/ShortcutsModal.svelte: SHORTCUT_COLUMNS / COMMAND_ROWS の label
 // - chat/ModelSelector/Selector.svelte: タブ(All / Local / External)
 // - workspace/models/FunctionsSelector.svelte: section.label(Filter / Action)
-// - workspace/models/Capabilities.svelte: t(capability)(vision / usage)
+// - workspace/models/Capabilities.svelte: t(capability)(vision / usage / preserve_reasoning)
 // - workspace/settings/Audio.svelte: TTS split(値の先頭を大文字化して t() に渡す)
 // - layout/Sidebar.svelte: t(chat.time_range)(getTimeRange の固定 4 値。月名・年は
 //   toLocaleString 由来のロケール依存ランタイム値なので登録しない)
@@ -146,6 +146,7 @@
 // t('You do not have permission to upload files.')
 // t('admin')
 // t('pending')
+// t('preserve_reasoning')
 // t('usage')
 // t('user')
 // t('vision')
