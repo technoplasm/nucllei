@@ -68,7 +68,8 @@
 			<div class="mt-1 text-xs text-content-subtle leading-relaxed">
 				Nucllei is a foundation platform for AI agent harnesses, forked from
 				<span class="whitespace-nowrap">Open WebUI</span> v0.6.5 (BSD-3-Clause). All modifications and
-				additions are Copyright © Technoplasm, Inc. All rights reserved.
+				additions are Copyright © Technoplasm, Inc., licensed under the PolyForm Noncommercial
+				License 1.0.0 with additional permissions (see LICENSE in the repository).
 			</div>
 		</div>
 

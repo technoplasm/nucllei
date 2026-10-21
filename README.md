@@ -73,8 +73,10 @@ image pipeline without cutting a tag, run that workflow via `workflow_dispatch`
 
 ## License
 
-Nucllei is a fork of Open WebUI v0.6.5. Upstream code is licensed under the
-[BSD-3-Clause License](./LICENSE.open-webui).
-
-All modifications and additions are Copyright © Technoplasm, Inc. All rights reserved.
-See [LICENSE](./LICENSE).
+Nucllei is source-available under the
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+with additional permissions — see [LICENSE](./LICENSE). It is free for noncommercial use,
+including self-deployment by hospitals, universities, research and public institutions for
+their own staff. Vendors that deploy, operate, host, or maintain it for others as a business
+need a commercial license: contact Technoplasm, Inc. (see the repository's GitHub page).
+Upstream code is Open WebUI v0.6.5, [BSD-3-Clause](./LICENSE.open-webui); that notice is retained.

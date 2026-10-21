@@ -2,6 +2,7 @@
 	"name": "nucllei",
 	"version": "0.6.5",
 	"private": true,
+	"license": "SEE LICENSE IN LICENSE",
 	"packageManager": "pnpm@11.3.0",
 	"scripts": {
 		"dev": "vite dev --host",
