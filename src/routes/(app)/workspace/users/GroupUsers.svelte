@@ -15,10 +15,9 @@
 	const filteredUsers = $derived(
 		users
 			.filter((user) => {
-				if (user?.role === 'admin') {
-					return false;
-				}
-
+				// 管理者も候補に出す(ken 指示 2026-10-21。以前は role === 'admin' を隠していたが
+				// BE は元々 target の role を見ていない。admin の所属が効くのは {{USER_GROUPS}} だけ:
+				// 権限は所属に関係なく全部通り、/ext/groups は admin には全グループ見える)
 				if (query === '') {
 					return true;
 				}
@@ -90,9 +89,14 @@
 								</div>
 							</Tooltip>
 
-							{#if userIds.includes(user.id)}
-								<Badge type="success" content={$i18n.t('member')} />
-							{/if}
+							<div class="flex items-center gap-1.5">
+								{#if user.role === 'admin'}
+									<Badge type="info" content={$i18n.t('admin')} />
+								{/if}
+								{#if userIds.includes(user.id)}
+									<Badge type="success" content={$i18n.t('member')} />
+								{/if}
+							</div>
 						</div>
 					</div>
 				{/each}
