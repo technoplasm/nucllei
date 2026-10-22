@@ -3,7 +3,7 @@
 	import { WEBUI_NAME, config } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
-	import OPEN_WEBUI_LICENSE from '../../../../LICENSE.open-webui?raw';
+	import OPEN_WEBUI_LICENSE from '../../../../licenses/open-webui.txt?raw';
 
 	const i18n = getContext('i18n');
 
@@ -31,8 +31,8 @@
 	});
 
 	// fork base の BSD-3-Clause 全文。文字列リテラルで埋め込むと本文をカラム 0 に
-	// 置く必要がありエディタのインデント検出が壊れるため、リポジトリ直下の
-	// LICENSE.open-webui をビルド時に取り込む(?raw — 真実源はファイル 1 本)。
+	// 置く必要がありエディタのインデント検出が壊れるため、
+	// licenses/open-webui.txt をビルド時に取り込む(?raw — 真実源はファイル 1 本)。
 </script>
 
 <div class="flex flex-col h-full justify-between space-y-3 text-sm mb-6">

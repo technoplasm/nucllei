@@ -218,7 +218,7 @@ message_reaction の 5 テーブル drop、backend 228 passed、実機スモー�
 
 **ライセンス画面(設定 > ライセンス)の記載方針(2026-07-17 決定、2098d81f9)**:
 UI に載せるのは「配布物に実体が同梱され、表記義務があるもの」だけ —
-① Upstream License = Open WebUI BSD-3-Clause 全文(`LICENSE.open-webui` を ?raw で取り込み。
+① Upstream License = Open WebUI BSD-3-Clause 全文(`licenses/open-webui.txt` を ?raw で取り込み。
 文字列リテラル埋め込みはカラム 0 本文がエディタのインデント検出を壊すため禁止)、
 ② Third-Party Licenses = フォント(OFL-1.1)のみ。licenses.json から自動抽出(license が
 OFL で始まる frontend パッケージ)なのでフォント入れ替えに追従する。

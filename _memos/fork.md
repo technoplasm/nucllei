@@ -26,11 +26,11 @@ Open WebUI を基点とした自己ホスト型 LLM チャット製品「llens�
   将来的に大学からの譲渡を引き出す方向で調整中。
   → **この帰属・ライセンスの詳細は調整中であり、本文書では論点化しない。** 一旦この前提で進める。
   （追記 2026-07-17: リポジトリ上の形は確定 — 本体 LICENSE = Technoplasm, Inc. 専有、
-  upstream BSD 全文は `LICENSE.open-webui` に退避、About タブに fork 帰属表記。#2 #58。
+  upstream BSD 全文は `LICENSE.open-webui` に退避(2026-10-22 に `licenses/open-webui.txt` へ移設)、About タブに fork 帰属表記。#2 #58。
   組織間の調整そのものは引き続き本文書の外）
   （追記 2026-10-22: 公開ライセンスを決定 — 本体 LICENSE = **PolyForm Noncommercial License 1.0.0**
   （原文を無改変で収録）+ Technoplasm, Inc. による追加許諾 2 項。upstream の BSD-3-Clause 表記は
-  `LICENSE.open-webui` のまま維持。追加許諾: (1) 医療機関・大学・研究機関・公的機関は、営利/非営利を
+  `licenses/open-webui.txt` に置く(2026-10-22 に直下の `LICENSE.open-webui` から移設 — 直下に BSD 全文があると GitHub が About 欄に「BSD-3-Clause」と出し、本体が BSD に見えるため。ken 指示)。追加許諾: (1) 医療機関・大学・研究機関・公的機関は、営利/非営利を
   問わず自施設に導入し自組織の職員が使ってよい。(2) 第三者のために業として導入・運用・ホスティング・
   保守すること、その他ライセンス本文が許さない商用利用は、Technoplasm, Inc. の商用ライセンスが別途必要。
   意図: 病院・大学・研究機関・公的機関は自分で入れて無料で使える、趣味・研究目的も無料、

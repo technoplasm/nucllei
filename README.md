@@ -79,4 +79,4 @@ with additional permissions — see [LICENSE](./LICENSE). It is free for noncomm
 including self-deployment by hospitals, universities, research and public institutions for
 their own staff. Vendors that deploy, operate, host, or maintain it for others as a business
 need a commercial license: contact Technoplasm, Inc. (see the repository's GitHub page).
-Upstream code is Open WebUI v0.6.5, [BSD-3-Clause](./LICENSE.open-webui); that notice is retained.
+Upstream code is Open WebUI v0.6.5, [BSD-3-Clause](./licenses/open-webui.txt); that notice is retained.

@@ -74,7 +74,7 @@ pnpm licenses list
   文書抽出 markitdown 一本化(#52)で langchain-community ごと撤去済み。extract_msg の
   GPL 連鎖を「入れない」判断自体は不変(markitdown の extras にも含めない)。
 - **LICENSE 再構成(2026-07-16、#2 #58)**: 本体 `LICENSE` = Technoplasm, Inc. 専有、
-  upstream BSD-3-Clause 全文は `LICENSE.open-webui` へ退避(表示保持義務を充足)。
+  upstream BSD-3-Clause 全文は `LICENSE.open-webui` へ退避(表示保持義務を充足。2026-10-22 に `licenses/open-webui.txt` へ移設 — GitHub が直下の LICENSE* を全部拾って About に BSD-3-Clause と出すため)。
   About タブに fork 帰属表記 + 依存ライセンス一覧(static/licenses.json)を表示。
 
 ## 追記(2026-07-20)
