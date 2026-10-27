@@ -388,7 +388,7 @@ def test_exec_passes_binds_and_rejects_bad_mounts(monkeypatch, tmp_path):
     (tmp_path / "workspaces" / "u1" / "exports").mkdir()
     seen = {}
 
-    def fake_cmd(ws, t, argv, binds=()):
+    def fake_cmd(ws, t, argv, binds=(), env=None):
         seen["binds"] = binds
         return ["true"]
 
@@ -436,7 +436,9 @@ def test_kernel_is_recreated_when_mounts_change(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mod, "_workspace", fake_workspace)
     monkeypatch.setattr(
-        mod, "_kernel_nsjail_cmd", lambda ws, binds=(): seen.append(binds) or ["true"]
+        mod,
+        "_kernel_nsjail_cmd",
+        lambda ws, binds=(), env=None: seen.append(binds) or ["true"],
     )
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **k: FakeProc())
     mgr = mod.SessionManager()
@@ -454,5 +456,156 @@ def test_kernel_is_recreated_when_mounts_change(monkeypatch, tmp_path):
         # rw → ro の変化も別の指紋
         ro = [(a[0][0], a[0][1], False)]
         assert mod._mounts_fingerprint(ro) != mod._mounts_fingerprint(a)
+
+    asyncio.new_event_loop().run_until_complete(scenario())
+
+
+# ---------------------------------------------------------------------------
+# 所属とロールの env (`NUCLLEI_USER_GROUPS` / `NUCLLEI_USER_ROLE`。2026-10-27 llens 依頼)
+# ---------------------------------------------------------------------------
+def _envs_of(cmd):
+    """nsjail の引数から `--env K=V` を dict で拾う。"""
+    return dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "--env")
+
+
+def test_user_env_validation(monkeypatch, tmp_path):
+    mod, _ = _load(monkeypatch, tmp_path)
+    assert mod._user_env(None, None) == {}
+    # 所属なしは空文字で定義する (未定義 = 古い nucllei と区別する)
+    assert mod._user_env([], "user") == {
+        "NUCLLEI_USER_GROUPS": "",
+        "NUCLLEI_USER_ROLE": "user",
+    }
+    assert mod._user_env(["内科", "EMR"], None) == {"NUCLLEI_USER_GROUPS": "内科,EMR"}
+    for role in ("admin", "user", "pending"):
+        assert mod._user_env(None, role) == {"NUCLLEI_USER_ROLE": role}
+    bad_groups = ["a,b", "", "a\nb", "a\x00b", "a​b", "あ" * 86]
+    for g in bad_groups:
+        with pytest.raises(mod.HTTPException) as ei:
+            mod._user_env([g], "user")
+        assert ei.value.status_code == 400, g
+    for role in ("disabled", "root", "", "Admin"):
+        with pytest.raises(mod.HTTPException) as ei:
+            mod._user_env([], role)
+        assert ei.value.status_code == 400, role
+
+
+def test_user_env_in_nsjail_args(monkeypatch, tmp_path):
+    mod, _ = _load(monkeypatch, tmp_path)
+    ws = pathlib.Path("/workspaces/u")
+    env = mod._user_env(["内科", "EMR"], "admin")
+    got = _envs_of(mod._jail_base(ws, 60, (), env))
+    assert got["NUCLLEI_USER_GROUPS"] == "内科,EMR"
+    assert got["NUCLLEI_USER_ROLE"] == "admin"
+    assert got["HOME"] == "/workspace"  # JAIL_ENV はそのまま
+    plain = _envs_of(mod._jail_base(ws, 60))
+    assert "NUCLLEI_USER_GROUPS" not in plain and "NUCLLEI_USER_ROLE" not in plain
+    monkeypatch.setattr(mod, "_require_jail_cgroup", lambda: None)
+    for cmd in (
+        mod._nsjail_cmd(ws, 30, ["true"], env=env),
+        mod._kernel_nsjail_cmd(ws, env=env),
+    ):
+        assert _envs_of(cmd)["NUCLLEI_USER_GROUPS"] == "内科,EMR"
+
+
+def test_exec_passes_user_env_for_python_and_shell(monkeypatch, tmp_path):
+    mod, _ = _load(monkeypatch, tmp_path)
+    c = _client(mod, tmp_path)
+    (tmp_path / "workspaces" / "u1" / ".exec").mkdir(parents=True)
+    seen = []
+
+    def fake_cmd(ws, t, argv, binds=(), env=None):
+        seen.append(env)
+        return ["true"]
+
+    monkeypatch.setattr(mod, "_nsjail_cmd", fake_cmd)
+    body = {"user_id": "u1", "code": "x", "user_groups": ["EMR"], "user_role": "user"}
+    for lang in ("python", "shell"):
+        r = c.post("/exec", json={**body, "lang": lang})
+        assert r.status_code == 200, r.text
+    want = {"NUCLLEI_USER_GROUPS": "EMR", "NUCLLEI_USER_ROLE": "user"}
+    assert seen == [want, want]
+    # 項目を送らない (古い nucllei) なら env を足さない
+    r = c.post("/exec", json={"user_id": "u1", "lang": "shell", "code": "x"})
+    assert r.status_code == 200 and seen[-1] == {}
+    # 不正な値は 400 で、実行しない
+    n = len(seen)
+    for extra in ({"user_groups": ["a,b"]}, {"user_role": "root"}):
+        r = c.post(
+            "/exec", json={"user_id": "u1", "lang": "shell", "code": "x", **extra}
+        )
+        assert r.status_code == 400, extra
+    assert len(seen) == n
+
+
+def test_exec_cell_passes_user_env_and_fingerprint(monkeypatch, tmp_path):
+    mod, _ = _load(monkeypatch, tmp_path)
+    c = _client(mod, tmp_path)
+    (tmp_path / "workspaces" / "u1").mkdir(parents=True)
+    seen = {}
+
+    async def fake_get(user_id, chat_id, binds=(), mounts_fp="", env=None):
+        seen.update(binds=binds, fp=mounts_fp, env=env)
+        raise mod.HTTPException(418, "stop here")
+
+    monkeypatch.setattr(mod._sessions, "get", fake_get)
+    monkeypatch.setattr(mod, "_require_jail_cgroup", lambda: None)
+    body = {"user_id": "u1", "chat_id": "c1", "code": "x"}
+    r = c.post("/exec_cell", json={**body, "user_groups": [], "user_role": "pending"})
+    assert r.status_code == 418, r.text
+    env = {"NUCLLEI_USER_GROUPS": "", "NUCLLEI_USER_ROLE": "pending"}
+    assert seen["env"] == env
+    assert seen["fp"] == mod._mounts_fingerprint(seen["binds"], env)
+    r = c.post("/exec_cell", json={**body, "user_groups": ["a\nb"]})
+    assert r.status_code == 400
+
+
+def test_kernel_is_recreated_when_user_env_changes(monkeypatch, tmp_path):
+    mod, _ = _load(monkeypatch, tmp_path)
+
+    class FakeProc:
+        def __init__(self):
+            self._rc = None
+            self.stdin = types.SimpleNamespace(write=lambda b: None, flush=lambda: None)
+            self.stdout = None
+
+        def poll(self):
+            return self._rc
+
+        def kill(self):
+            self._rc = -9
+
+    seen = []
+
+    async def fake_workspace(user_id):
+        return tmp_path / user_id
+
+    monkeypatch.setattr(mod, "_workspace", fake_workspace)
+    monkeypatch.setattr(
+        mod,
+        "_kernel_nsjail_cmd",
+        lambda ws, binds=(), env=None: seen.append(env) or ["true"],
+    )
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **k: FakeProc())
+    mgr = mod.SessionManager()
+    binds = [("/x/EMR", "/ext/groups/EMR", True)]
+    before = mod._user_env(["EMR"], "user")
+    after = mod._user_env(["EMR", "内科"], "user")
+    promoted = mod._user_env(["EMR"], "admin")
+
+    def fp(env):
+        return mod._mounts_fingerprint(binds, env)
+
+    async def scenario():
+        s1, r1 = await mgr.get("u", "c", binds, fp(before), before)
+        s2, r2 = await mgr.get("u", "c", binds, fp(before), before)
+        assert (r1, r2) == (False, False) and s1 is s2
+        # 所属が変わった直後の実行で古い env の kernel を使い回さない
+        s3, r3 = await mgr.get("u", "c", binds, fp(after), after)
+        assert r3 is True and s3 is not s1 and seen[-1] == after
+        # ロールだけの変化も別の指紋
+        assert fp(promoted) != fp(before)
+        # env を送らない (古い nucllei) ときの指紋は従来どおり bind だけ
+        assert mod._mounts_fingerprint(binds, {}) == mod._mounts_fingerprint(binds)
 
     asyncio.new_event_loop().run_until_complete(scenario())

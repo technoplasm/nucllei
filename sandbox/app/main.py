@@ -860,19 +860,78 @@ def _prepare_mounts(validated: list[tuple[str, bool]]) -> list[tuple[str, str, b
     return binds
 
 
-def _mounts_fingerprint(binds: list[tuple[str, str, bool]]) -> str:
-    """常駐 kernel が作られたときの jail の見え方の指紋 (jail のパスと rw だけ)。
-    違うリクエストが来たら kernel を作り直す (所属・権限が変わったら古い bind を持ち続けない)。"""
+# ---------------------------------------------------------------------------
+# 呼び出し元のユーザーの所属とロールを jail の env で渡す (2026-10-27、llens 依頼・ken 指示)
+# ---------------------------------------------------------------------------
+# jail の中のプログラム (配備側の CLI 等) が「このユーザーはどのグループに属し、どのロールか」を
+# 知る口。それまで llens の skill はグループ名を {{USER_GROUPS}} でコマンドの引数に埋めていて、
+# 名前の記号でコマンドが壊れる / 展開される余地があった。env なら引用も展開も通らない。
+#
+# - `NUCLLEI_USER_GROUPS`: 所属するグループ名のカンマ区切り (nucllei の {{USER_GROUPS}} と同じ順。
+#   管理者でも所属している物だけ)。所属なしは空文字で**定義する** — 未定義 = 呼び出し元が
+#   この項目を送らない古い nucllei、と区別できるように
+# - `NUCLLEI_USER_ROLE`: `admin` / `user` / `pending`
+#
+# sandbox は ACL を解釈しない (mounts と同じ) — 呼び出し元が送った値を形だけ検証して渡す。
+# 項目が無い要求 (古い nucllei) では env を定義しない。
+USER_ENV_GROUPS = "NUCLLEI_USER_GROUPS"
+USER_ENV_ROLE = "NUCLLEI_USER_ROLE"
+USER_ROLES = frozenset({"admin", "user", "pending"})
+
+
+def _user_env(groups: Optional[list[str]], role: Optional[str]) -> dict[str, str]:
+    """`user_groups` / `user_role` を検証して jail の env にする。不正は 400。
+
+    グループ名は区切りの `,` と制御・書式文字 (`_BAD_SEGMENT_CATEGORIES`) を含まない
+    1〜255 バイトの文字列だけを受ける (nucllei のグループ名の規則はもっと厳しい —
+    ここは env の値として壊れないことだけを見る)。nsjail の `--env K=V` は argv で渡るので
+    シェルの引用は関係しない。"""
+    import unicodedata
+
+    env: dict[str, str] = {}
+    if groups is not None:
+        if len(groups) > MAX_REQUEST_MOUNTS:
+            raise HTTPException(400, f"too many user_groups (> {MAX_REQUEST_MOUNTS})")
+        for g in groups:
+            if (
+                not isinstance(g, str)
+                or not g
+                or "," in g
+                or any(unicodedata.category(c) in _BAD_SEGMENT_CATEGORIES for c in g)
+            ):
+                raise HTTPException(400, f"invalid user_groups entry: {g!r}")
+            try:
+                if len(g.encode("utf-8")) > 255:
+                    raise HTTPException(400, f"invalid user_groups entry: {g!r}")
+            except UnicodeEncodeError:
+                raise HTTPException(400, f"invalid user_groups entry: {g!r}")
+        env[USER_ENV_GROUPS] = ",".join(groups)
+    if role is not None:
+        if role not in USER_ROLES:
+            raise HTTPException(400, f"invalid user_role: {role!r}")
+        env[USER_ENV_ROLE] = role
+    return env
+
+
+def _mounts_fingerprint(
+    binds: list[tuple[str, str, bool]], env: Optional[dict[str, str]] = None
+) -> str:
+    """常駐 kernel が作られたときの jail の見え方の指紋 (jail のパスと rw、と所属・ロールの env)。
+    違うリクエストが来たら kernel を作り直す (所属・権限が変わったら古い bind・古い env を持ち
+    続けない — env は kernel の起動時に固定されるので、所属が変わった直後の実行で古い値が残る)。"""
     import hashlib
 
-    data = json.dumps([[dst, rw] for _src, dst, rw in binds])
-    return hashlib.sha256(data.encode()).hexdigest()[:16]
+    data = [[dst, rw] for _src, dst, rw in binds]
+    if env:
+        data = {"binds": data, "env": sorted(env.items())}
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
-def _jail_base(ws: Path, wall_s: int, binds=()) -> list[str]:
+def _jail_base(ws: Path, wall_s: int, binds=(), env=None) -> list[str]:
     """stateless exec と常駐 kernel で共通の nsjail 引数。wall_s は --time_limit
     (プロセスの生存上限。stateless は実行秒、kernel はセッション TTL のバックストップ)。
-    `binds` はリクエストごとの bind `[(コンテナ側, jail 側, rw)]` (`_prepare_mounts`)。"""
+    `binds` はリクエストごとの bind `[(コンテナ側, jail 側, rw)]` (`_prepare_mounts`)、
+    `env` はリクエストごとの env (`_user_env`。`JAIL_ENV` に足す)。"""
     cmd = [
         "nsjail",
         "--mode",
@@ -949,22 +1008,26 @@ def _jail_base(ws: Path, wall_s: int, binds=()) -> list[str]:
             cmd += ["--bindmount", p]  # rw (デバイスノード)
     for k, v in JAIL_ENV.items():
         cmd += ["--env", f"{k}={v}"]
+    for k, v in (env or {}).items():
+        cmd += ["--env", f"{k}={v}"]
     return cmd
 
 
-def _nsjail_cmd(ws: Path, timeout_s: int, argv: list[str], binds=()) -> list[str]:
+def _nsjail_cmd(
+    ws: Path, timeout_s: int, argv: list[str], binds=(), env=None
+) -> list[str]:
     # stateless: プロセス = 1 実行。time_limit と rlimit_cpu を実行秒に張る。
     _require_jail_cgroup()
-    cmd = _jail_base(ws, timeout_s, binds)
+    cmd = _jail_base(ws, timeout_s, binds, env)
     cmd += ["--rlimit_cpu", str(timeout_s)]
     return cmd + ["--"] + argv
 
 
-def _kernel_nsjail_cmd(ws: Path, binds=()) -> list[str]:
+def _kernel_nsjail_cmd(ws: Path, binds=(), env=None) -> list[str]:
     # stateful: 常駐 kernel。生存上限はセッション TTL (バックストップ)。per-cell の
     # timeout は kernel が SIGALRM で内部処理するので rlimit_cpu は張らない。
     _require_jail_cgroup()
-    cmd = _jail_base(ws, SESSION_TTL_S, binds)
+    cmd = _jail_base(ws, SESSION_TTL_S, binds, env)
     return cmd + ["--", f"{VENV_BIN}/python", "-u", KERNEL_PATH]
 
 
@@ -1039,13 +1102,14 @@ class SessionManager:
         return (user_id, chat_id)
 
     async def get(
-        self, user_id: str, chat_id: str, binds=(), mounts_fp: str = ""
+        self, user_id: str, chat_id: str, binds=(), mounts_fp: str = "", env=None
     ) -> tuple[Session, bool]:
         """既存 or 新規の Session を返す。2 要素目 = 新規作成 (reset) したか。
 
         `binds` / `mounts_fp` はリクエストごとの bind とその指紋 (#152)。生きている session でも
         指紋が違えば (グループの所属・admin 権限が変わった等) 落として作り直し、reset を返す —
-        常駐 kernel は起動時の bind を持ち続けるので、そのままだと外れたグループが見え続ける。"""
+        常駐 kernel は起動時の bind を持ち続けるので、そのままだと外れたグループが見え続ける。
+        `env` (所属・ロール。`_user_env`) も起動時に固定されるので指紋に含める (呼び出し側)。"""
         async with self._lock:
             key = self._key(user_id, chat_id)
             sess = self._sessions.get(key)
@@ -1063,7 +1127,7 @@ class SessionManager:
             ws = await _workspace(user_id)
             proc = await asyncio.to_thread(
                 lambda: subprocess.Popen(
-                    _kernel_nsjail_cmd(ws, binds),
+                    _kernel_nsjail_cmd(ws, binds, env),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
@@ -1461,6 +1525,10 @@ class ExecRequest(BaseModel):
     timeout_s: Optional[int] = None
     imports: list[FileIn] = Field(default_factory=list)
     mounts: list[MountIn] = Field(default_factory=list)
+    # 所属グループとロール (jail の env `NUCLLEI_USER_GROUPS` / `NUCLLEI_USER_ROLE`。`_user_env`)。
+    # 送らない (None) 古い nucllei では env を定義しない
+    user_groups: Optional[list[str]] = None
+    user_role: Optional[str] = None
     # `imports` の 1 ファイルの上限 (exports の自動添付は 2026-10-19 に廃止したので、もうそちらには
     # 効かない。今の nucllei は送らない = sandbox の上限だけ)
     file_limit_bytes: Optional[int] = None
@@ -1520,6 +1588,9 @@ class CellRequest(BaseModel):
     code: str
     timeout_s: Optional[int] = None
     mounts: list[MountIn] = Field(default_factory=list)
+    # ExecRequest と同じ (jail の env。常駐 kernel の指紋にも入る)
+    user_groups: Optional[list[str]] = None
+    user_role: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -1650,6 +1721,7 @@ async def exec_code(req: ExecRequest, request: Request):
     _require_jail_cgroup()  # 先に断る (imports を書く前に。本命は _nsjail_cmd の中)
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
+    env = _user_env(req.user_groups, req.user_role)
     limit = _file_limit(req.file_limit_bytes)
     ws = await _workspace(req.user_id)
 
@@ -1693,7 +1765,7 @@ async def exec_code(req: ExecRequest, request: Request):
         t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
-                *_nsjail_cmd(ws, timeout_s, argv, binds=binds),
+                *_nsjail_cmd(ws, timeout_s, argv, binds=binds, env=env),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1734,10 +1806,11 @@ async def exec_cell(req: CellRequest, request: Request):
     _require_jail_cgroup()  # 既存 session の作り直し・追い出しより前に断る
     timeout_s = max(1, min(req.timeout_s or TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S))
     validated = _validate_mounts(req.mounts)
+    env = _user_env(req.user_groups, req.user_role)
     await _workspace(req.user_id)
     binds = await asyncio.to_thread(_prepare_mounts, validated)
     sess, was_reset = await _sessions.get(
-        req.user_id, req.chat_id, binds, _mounts_fingerprint(binds)
+        req.user_id, req.chat_id, binds, _mounts_fingerprint(binds, env), env
     )
 
     async with sess.lock, _sem:

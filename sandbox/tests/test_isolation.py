@@ -45,11 +45,24 @@ _CLIENT = (
 )
 
 
-def run(lang: str, code: str, timeout_s: int = 30, user_id: str = USER_ID) -> dict:
+def run(
+    lang: str,
+    code: str,
+    timeout_s: int = 30,
+    user_id: str = USER_ID,
+    extra: dict | None = None,
+) -> dict:
     """jail 内で code を実行し /exec の JSON を返す。lang は "python" | "shell"。
-    同じ user の /exec はサービス側で直列になるので、jail を並べたいときは user_id を変える。"""
+    同じ user の /exec はサービス側で直列になるので、jail を並べたいときは user_id を変える。
+    `extra` は要求の body に足す項目 (`user_groups` 等)。"""
     payload = json.dumps(
-        {"user_id": user_id, "lang": lang, "code": code, "timeout_s": timeout_s}
+        {
+            "user_id": user_id,
+            "lang": lang,
+            "code": code,
+            "timeout_s": timeout_s,
+            **(extra or {}),
+        }
     )
     p = subprocess.run(
         ["docker", "exec", "-i", CONTAINER, "/opt/app/bin/python", "-c", _CLIENT],
@@ -242,6 +255,24 @@ def test_no_shared_per_uid_process_ceiling():
         ).strip()
         == "True"
     )
+
+
+def test_user_env_reaches_jail():
+    # 所属とロール (`user_groups` / `user_role`) は jail の env で見える。所属なしは空文字で
+    # 定義され、項目を送らない (古い nucllei) ときは未定義のまま
+    show = 'printf "%s|%s" "${NUCLLEI_USER_GROUPS-UNSET}" "${NUCLLEI_USER_ROLE-UNSET}"'
+    extra = {"user_groups": ["内科", "EMR"], "user_role": "user"}
+    r = run("shell", show, extra=extra)
+    assert r["exit_code"] == 0 and r["stdout"] == "内科,EMR|user", r
+    py = (
+        "import os;print(os.environ.get('NUCLLEI_USER_GROUPS','UNSET')"
+        "+'|'+os.environ.get('NUCLLEI_USER_ROLE','UNSET'),end='')"
+    )
+    r = run("python", py, extra=extra)
+    assert r["exit_code"] == 0 and r["stdout"] == "内科,EMR|user", r
+    r = run("shell", show, extra={"user_groups": [], "user_role": "admin"})
+    assert r["stdout"] == "|admin", r
+    assert run("shell", show)["stdout"] == "UNSET|UNSET"
 
 
 # fork できるだけ fork して、子は寝かせたまま枠を握る。スレッドで作ると 1 本ごとに malloc arena

@@ -100,6 +100,10 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを
       経路の symlink を O_NOFOLLOW で拒否しながら扱う。回帰は `test_ext_mounts.py`。
       **実機 (コンテナ) での確認は未** — compose の volume 追加 (llens) 待ち
+- [x] **所属とロールを jail の env で渡す** (2026-10-27、llens 依頼・ken 指示)。`/exec` `/exec_cell` の
+      `user_groups` `user_role` を `NUCLLEI_USER_GROUPS` (カンマ区切り、所属なしは空文字で定義) /
+      `NUCLLEI_USER_ROLE` にする。送られなければ未定義、不正は 400。常駐 kernel の指紋に含める。
+      回帰は `test_ext_mounts.py`。**隔離テスト `test_user_env_reaches_jail` は未実行** — image 待ち
 - [x] **ファイルブラウザ用の `/files/*`** (#150、2026-10-07)。`/files/ls` `stat` `delete` `rename`
       `mkdir` `usage` を追加、`/files/read` は `mtime` を返し `/files/write` は `expected_mtime`
       (違えば 409) / `exclusive` / `nofollow` を受ける。workspace でも `/ext` でも経路の symlink を

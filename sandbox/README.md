@@ -149,6 +149,29 @@ jail からの見え方は **rw / ro / 見えない の 3 値**:
   (どちらも **rw** — `:ro` を付けると rw の bind も EROFS になる)。nucllei 側にも同じ組を
   `EXT_MOUNTS=…,groups=/ext/groups,public=/ext/public` で見せる。
 
+### ユーザーの所属とロールを jail の env で渡す (2026-10-27、llens 依頼・ken 指示)
+
+jail の中のプログラム (配備側の CLI 等) が、呼び出したユーザーの所属とロールを引数なしで知る口。
+nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandbox はそれを nsjail の
+`--env` で渡す (argv なのでシェルの引用・展開は通らない)。
+
+| env | 値 |
+|---|---|
+| `NUCLLEI_USER_GROUPS` | 所属するグループ名のカンマ区切り (nucllei の `{{USER_GROUPS}}` と同じ順)。**管理者でも所属している物だけ** (全グループではない — bind とは違う)。**所属なしは空文字で定義する** |
+| `NUCLLEI_USER_ROLE` | `admin` / `user` / `pending` |
+
+- **未定義 = 古い nucllei / 古い sandbox** (項目を送らない・知らない)。空文字の `NUCLLEI_USER_GROUPS` は
+  「所属なし」で、未定義とは別。読む側は未定義のときだけ従来の手 (引数等) に戻ればよい。
+- nucllei は現行のグループ名の規則を通らない名前 (#151 より前に作られた `:`・カンマ・空白・シェル記号
+  入り等) を `NUCLLEI_USER_GROUPS` から落とす (warning 1 行。改名すれば入る)。カンマ区切りを機械が
+  読む契約なので。新しい名前はカンマを最初から使えない。
+- sandbox は値を解釈せず形だけ見る: グループ名に `,`・制御 / 書式文字・空・255 バイト超、ロールが
+  上の 3 つ以外 → 400 (実行しない)。
+- 常駐 kernel は env を起動時に固定するので、**bind の指紋に所属とロールを含める** — どちらかが
+  変われば作り直して `session_reset` を返す (所属が変わった直後の `run_python` に古い値を残さない)。
+- 回帰: `test_ext_mounts.py` (検証・nsjail の引数・`/exec` の python / shell・`/exec_cell`・指紋)、
+  隔離テスト `test_user_env_reaches_jail` (実 jail の中で値が見える・未定義との区別)。
+
 ## セキュリティモデル
 
 病院イントラ設置なので、守るべきは (1) ユーザーコードからイントラ他ホストへの到達
@@ -335,11 +358,14 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 - 全 endpoint 共通の `mounts?: [{path, rw}]` (#152) — そのユーザーに見せる `/ext/groups/<g>` と
   `/ext/public` と、書けるか。nucllei が ACL で決める (上の「グループ・全体の共有の置き場」)。
   不正な形 → 400、同じパスが rw と ro で来たら 400、上限 1024 件
-- `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}], mounts?}`
+- `/exec` `/exec_cell` 共通の `user_groups?: [str]` `user_role?: "admin"|"user"|"pending"` — jail の env
+  `NUCLLEI_USER_GROUPS` (カンマ区切り、`[]` は空文字) / `NUCLLEI_USER_ROLE` にする (上の「ユーザーの所属と
+  ロールを jail の env で渡す」)。送らなければ定義しない。不正 → 400
+- `POST /exec` — stateless。`{user_id, lang: "python"|"shell", code, timeout_s?, imports?: [{name, b64}], mounts?, user_groups?, user_role?}`
   → `{exit_code, timed_out, duration_s, stdout, stderr, stdout_truncated, stderr_truncated,
      cache_ttl_days}`
-- `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?, mounts?}` (bind の指紋が
-  前回と違えば kernel を作り直し `session_reset: true`)
+- `POST /exec_cell` — stateful。`{user_id, chat_id, code, timeout_s?, mounts?, user_groups?, user_role?}`
+  (bind と所属・ロールの指紋が前回と違えば kernel を作り直し `session_reset: true`)
   → `{stdout, error, timed_out, session_reset, duration_s, stdout_truncated, cache_ttl_days}`
   - `imports` は実行前に `/workspace/imports/` へ書かれる (basename のみ有効)
   - 応答の `exports` (`/workspace/exports/` の実行前後差分を b64 で返していた) は 2026-10-19 に

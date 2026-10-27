@@ -41,7 +41,9 @@ def _load_main(monkeypatch, tmp_path):
         return tmp_path / user_id
 
     monkeypatch.setattr(mod, "_workspace", fake_workspace)
-    monkeypatch.setattr(mod, "_kernel_nsjail_cmd", lambda ws, binds=(): ["true"])
+    monkeypatch.setattr(
+        mod, "_kernel_nsjail_cmd", lambda ws, binds=(), env=None: ["true"]
+    )
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **k: FakeProc())
     return mod
 

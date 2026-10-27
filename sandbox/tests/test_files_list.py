@@ -143,7 +143,7 @@ def test_exec_and_exec_cell_report_cache_ttl_without_exports(monkeypatch, tmp_pa
     monkeypatch.setattr(
         mod,
         "_nsjail_cmd",
-        lambda ws, t, argv, binds=(): ["sh", "-c", f"echo hi > {out_file}"],
+        lambda ws, t, argv, binds=(), env=None: ["sh", "-c", f"echo hi > {out_file}"],
     )
     for extra in ({}, {"file_limit_bytes": 5}):
         out_file.unlink(missing_ok=True)
