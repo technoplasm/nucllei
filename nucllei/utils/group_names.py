@@ -10,7 +10,8 @@
 正規化は重複判定にだけ使い、保存する名前は入力のまま(前後の空白だけ落とす)。
 カンマと空白は名前のどこにも使えない(前後の空白は落としてから判定する)— テンプレート変数
 `{{USER_GROUPS}}` の区切り(`, `)を曖昧にしないためと、シェルでパスを扱うときの事故防止。
-カンマは NFKC 後の形で判定する(全角の `，` 等も弾く)。
+カンマは NFKC 後の形で判定する(全角の `，` 等も弾く)。シェルのメタ文字(`"` `$` `` ` `` 等)も
+弾く — `{{USER_GROUPS}}` が run_shell のコマンドに埋め込まれるため(こちらは ASCII の形だけ)。
 #152 はここを import して使う — 検証規則を 2 か所に書かない。
 """
 
@@ -22,6 +23,13 @@ MAX_GROUP_NAME_BYTES = 255
 
 # 名前に含めてはいけない文字(パス区切り・nsjail の bind 指定の区切り)
 FORBIDDEN_GROUP_NAME_CHARS = frozenset("/\\:")
+
+# シェルのメタ文字(2026-10-27、llens 依頼): 配備側の skill が `{{USER_GROUPS}}` を run_shell の
+# コマンド (`--groups "…"`) に埋めるので、`"` で引用が壊れ、`$( )` や `` ` `` で展開される。
+# 引用符・展開・区切り・リダイレクト・グロブ・履歴展開・コメントに効く ASCII の記号を弾く。
+# 見るのは入力そのままの形だけ — 全角の「（）」「！」等はシェルにとってただの文字なので通す
+# (NFKC で ASCII になるが、日本語のグループ名に普通に使われる)。
+FORBIDDEN_GROUP_NAME_SHELL_CHARS = frozenset("\"'$`;|&<>(){}!*?[]~#")
 
 # 拒否する Unicode 一般カテゴリ:
 # Cc = 制御文字(NUL・改行・タブ・DEL・C1)、Cf = 書式文字(ゼロ幅・書字方向制御・BOM 等)、
@@ -81,6 +89,16 @@ def validate_group_name(name: str) -> str:
             raise GroupNameError(
                 "グループ名に「/」「\\」「:」は使えません"
                 "(グループ別ディレクトリの名前になるため)。"
+            )
+        if ch in FORBIDDEN_GROUP_NAME_SHELL_CHARS:
+            raise GroupNameError(
+                f"グループ名に記号「{ch}」は使えません"
+                "(使えない記号: "
+                + " ".join(sorted(FORBIDDEN_GROUP_NAME_SHELL_CHARS))
+                + ")。"
+                "グループ名はテンプレート変数 {{USER_GROUPS}} としてシェルのコマンドに"
+                "埋め込まれることがあり、これらの記号はコマンドを壊したり展開されたりするためです。"
+                "全角の記号(「（）」「！」等)は使えます。"
             )
         if unicodedata.category(ch) in FORBIDDEN_GROUP_NAME_CATEGORIES:
             raise GroupNameError(

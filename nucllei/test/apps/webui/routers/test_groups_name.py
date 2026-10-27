@@ -73,6 +73,11 @@ def test_normalize_key_equates(a, b):
         "rank\u2009部長",  # thin space (Zs)
         "rank\u1680部長",  # Ogham space mark (Zs)
         "  a b  ",  # 前後を削っても途中に残る
+        # シェルのメタ文字(`{{USER_GROUPS}}` が run_shell のコマンドに埋め込まれる)
+        *[f"内科{c}外来" for c in "\"'$`;|&<>(){}!*?[]~#"],
+        "$(id)",
+        "`id`",
+        'a"b',
     ],
 )
 def test_validate_rejects(name):
@@ -91,6 +96,9 @@ def test_validate_rejects(name):
         ("a.b", "a.b"),
         ("a..", "a.."),
         ("rank：部長", "rank：部長"),  # 全角コロンはファイル名として無害
+        ("病理（細胞診）", "病理（細胞診）"),  # 全角の記号はシェルにとってただの文字
+        ("至急！＃１", "至急！＃１"),
+        ("a-b_c.d+e=f@g%h^i", "a-b_c.d+e=f@g%h^i"),  # 弾かない ASCII 記号
         ("a" * 255, "a" * 255),
         ("あ" * 85, "あ" * 85),  # 255 バイト
     ],
@@ -105,6 +113,14 @@ def test_validate_comma_space_message(name):
         validate_group_name(name)
     msg = str(ei.value)
     assert "カンマ" in msg and "空白" in msg and "{{USER_GROUPS}}" in msg
+
+
+@pytest.mark.parametrize("ch", list("\"'$`;|&<>(){}!*?[]~#"))
+def test_validate_shell_char_message(ch):
+    with pytest.raises(GroupNameError) as ei:
+        validate_group_name(f"a{ch}b")
+    msg = str(ei.value)
+    assert f"「{ch}」" in msg and "{{USER_GROUPS}}" in msg
 
 
 # ---- API ----
