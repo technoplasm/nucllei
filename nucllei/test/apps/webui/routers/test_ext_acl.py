@@ -514,6 +514,63 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert "置き換えた" in out
         assert {"path": "/ext/public", "rw": True} in tool.calls[2][1]["mounts"]
 
+    def test_remove_file(self):
+        """remove_file (2026-10-27) は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
+        断り、書ける置き場は mounts 付きで `/files/trash` に渡す (移す先は置き場の trash/)。"""
+        tool = _tool(
+            {
+                "/files/trash": {
+                    "ok": True,
+                    "trashed": True,
+                    "path": "/ext/groups/EMR/trash/r.md",
+                    "cache_ttl_days": 30,
+                }
+            }
+        )
+        out = _text(tool.remove_file("/ext/groups/EMR/recipes/r.md", __user__=MEMBER))
+        assert out.startswith(
+            "/ext/groups/EMR/recipes/r.md を /ext/groups/EMR/trash/r.md へ移した。"
+        ), out
+        assert "mv /ext/groups/EMR/trash/r.md /ext/groups/EMR/recipes/r.md" in out
+        [(ep, payload)] = tool.calls
+        assert ep == "/files/trash"
+        assert payload["path"] == "/ext/groups/EMR/recipes/r.md"
+        assert {"path": "/ext/groups/EMR", "rw": True} in payload["mounts"]
+
+        # フォルダも渡せる
+        tool = _tool(
+            {"/files/trash": {"ok": True, "path": "/ext/groups/EMR/trash/recipes"}}
+        )
+        out = _text(tool.remove_file("/ext/groups/EMR/recipes/", __user__=MEMBER))
+        assert (
+            "へ移した" in out and tool.calls[0][1]["path"] == "/ext/groups/EMR/recipes"
+        )
+
+        # 見えない置き場は「無い」、public は一般ユーザーには ro、置き場そのもの・その trash/ は断る
+        tool = _tool({})
+        for path in ("/ext/groups/OTHER/x.md", "/ext/groups/EMR/../OTHER/x.md"):
+            out = _text(tool.remove_file(path, __user__=MEMBER))
+            assert "は無い" in out, out
+        out = _text(tool.remove_file("/ext/public/x.md", __user__=MEMBER))
+        assert "read-only" in out and "書けるのは管理者だけ" in out
+        out = _text(tool.remove_file("/ext/groups/EMR", __user__=MEMBER))
+        assert "置き場そのもので、remove_file では移せない" in out
+        out = _text(tool.remove_file("/ext/groups", __user__=MEMBER))
+        assert "グループの置き場の一覧" in out
+        out = _text(tool.remove_file("/ext/groups/EMR/trash/r.md", __user__=MEMBER))
+        assert "ゴミ箱の中にある" in out
+        out = _text(tool.remove_file("/ext/groups/EMR/trash", __user__=MEMBER))
+        assert "ゴミ箱そのもの" in out
+        out = _text(tool.remove_file("/ext/doc/x.md", __user__=MEMBER))
+        assert out == _text(tool.write_file("/ext/doc/x.md", "a", __user__=MEMBER))
+        assert tool.calls == []
+
+        # 管理者は /ext/public も移せる (/ext/public/trash/ へ)
+        tool = _tool({"/files/trash": {"ok": True, "path": "/ext/public/trash/x.md"}})
+        out = _text(tool.remove_file("/ext/public/x.md", __user__=ADMIN))
+        assert out.startswith("/ext/public/x.md を /ext/public/trash/x.md へ移した。")
+        assert {"path": "/ext/public", "rw": True} in tool.calls[0][1]["mounts"]
+
     def test_read_file(self):
         """#153: read_file も同じ ACL — 見えない置き場は「無い」(sandbox に問い合わせない)、
         public は一般ユーザーでも読める (ro)、読むときは mounts + nofollow。"""

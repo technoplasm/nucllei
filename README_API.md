@@ -2064,7 +2064,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (or a skill that carries it — §5.8) × the preset's delegation allowlist
     (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
-    `send_to_workspace` / `write_file` / `edit_file` / `read_file` /
+    `send_to_workspace` / `write_file` / `edit_file` / `remove_file` / `read_file` /
     `list_workspace` / `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
@@ -2161,6 +2161,31 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     write is not detected (the sandbox has no conditional write).
     `write_file`'s and `read_file`'s docstrings point at `edit_file` for
     partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
+    `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
+    **moves** a file or a folder (with its contents) to the trash of the place
+    it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,
+    `/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<name>`, `/ext/public/…` →
+    `/ext/public/trash/<name>` (flat; a taken name gets `-2`, `-3`… before the
+    extension, never overwritten). Path resolution and ACL are `write_file`'s
+    (same refusals for read-only / not-visible places), except that a folder
+    (also with a trailing `/`) is accepted and the place itself (`/workspace`,
+    `/ext/groups/<g>`, `/ext/public`) is refused. Refused before asking the
+    sandbox: the trash itself and anything in it (next step: nothing to do, it
+    empties itself; ask the user to empty it sooner), a name starting with `.`,
+    and `/workspace/imports`. The sandbox endpoint is the new
+    `POST /files/trash` — `/files/delete` is unchanged (its `/ext` delete stays
+    permanent, so the workspace file browser behaves as before); a sandbox
+    without `/files/trash` (FastAPI's `{"detail":"Not Found"}` 404) is
+    reported as 「sandbox が古く、remove_file に対応していない (sandbox の更新が要る)」
+    instead of silently deleting. A final symlink is refused (「… は symlink で、remove_file では移さない (リンク先も移さない)」).
+    The result is 「<path> を <trash path> へ移した。移してから N 日で自動で消える。」
+    (N = the sandbox's `cache_ttl_days`; the sentence is dropped when it is 0
+    or missing) and the restore line
+    「戻すなら run_shell で `mv '<trash path>' '<path>'` を実行する。」 (shell-quoted).
+    The toolkit note now says 「ファイルを消すときは rm せず remove_file でその置き場のゴミ箱 (`trash/`) へ移す」.
+    The sandbox empties `/ext/groups/*/trash/` and `/ext/public/trash/` with
+    the same rule as `/workspace/trash/` (`SANDBOX_CACHE_TTL_DAYS`, per
+    top-level entry, max(mtime, ctime)) every hour.
     **Wording of the sandbox texts (2026-10-19, llens audit)**: a full
     workspace (HTTP 507 / `No space left on device`) ends with
     「次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。」

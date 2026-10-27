@@ -27,6 +27,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import shlex
 import tempfile
 import uuid
 from datetime import date, datetime, timedelta
@@ -332,7 +333,7 @@ def _resolve_workspace_path(
 # モデルに返す文は「事実の文 + `次の手:` 以降」、常体 (`utils/ref_errors` の module
 # docstring)。この toolkit に無い tool は、このターンに出ているとき (`tool_in_turn`) だけ
 # 名指しする — 「〜が使えるなら」とは書かない (2026-10-19 llens 監査 (13))。同じ toolkit の
-# tool (run_python / run_shell / read_file / write_file / edit_file / list_workspace /
+# tool (run_python / run_shell / read_file / write_file / edit_file / remove_file / list_workspace /
 # send_to_workspace / fetch_from_workspace) は toolkit ごと出るので名指ししてよい。
 _NEXT = "次の手: "
 
@@ -602,6 +603,60 @@ def _no_such_file(abs_path: str) -> ToolError:
         f"{abs_path} というファイルは無い (ディレクトリは不可)",
         "list_workspace で確かめる。" + _cache_hint(abs_path),
     )
+
+
+def _place_itself(abs_path: str) -> ToolError:
+    """remove_file に置き場そのもの (`/workspace` `/ext/groups/<g>` `/ext/public`) が来た。"""
+    return ToolCallError(
+        f"{abs_path} は置き場そのもので、remove_file では移せない",
+        "中のファイル・フォルダを指定する。",
+    )
+
+
+# remove_file (2026-10-27、ken 決定・llens 依頼): 移す先は置き場ごとの `trash/` (sandbox の
+# `/files/trash`)。sandbox の期限は `SANDBOX_CACHE_TTL_DAYS` (既定 30。応答の `cache_ttl_days`)。
+# workspace 直下で sandbox が使う置き場 (sandbox の `PROTECTED_DIRS` のうち trash 以外) と
+# `.` 始まりは sandbox も断る (`_check_mutable`) — 先に言い分けるために同じ範囲をここにも持つ
+_TRASH_DIR = "trash"
+_WORKSPACE_SYSTEM_DIRS = ("imports",)
+_TRASH_INSIDE_NEXT = (
+    "何もしなくてよい (ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消える)。"
+    "すぐ空けたいならユーザーに頼む。"
+)
+# 古い sandbox (`/files/trash` が無い) の 404 は FastAPI の既定の本文 — 「ファイルが無い」の
+# 404 (`not found: <path>`) と本文で見分ける
+_ROUTE_NOT_FOUND = '{"detail":"Not Found"}'
+
+
+def _trash_error(e: Exception, abs_path: str) -> ToolError:
+    """`/files/trash` の失敗。古い sandbox・無い (ディレクトリも可)・末端の symlink・名前切れ を
+    言い分け、他は `_files_error`。"""
+    if isinstance(e, SandboxHTTPError):
+        detail = (e.detail or "").strip()
+        if e.status == 404 and detail == _ROUTE_NOT_FOUND:
+            log.error(
+                "[sandbox] /files/trash is missing — the sandbox image is outdated"
+            )
+            return ToolFailure(
+                "sandbox が古く、remove_file に対応していない (sandbox の更新が要る)",
+                "ファイルはそのまま残っている。ユーザーに伝え、管理者への連絡を勧める。",
+            )
+        if e.status == 404:
+            return ToolOutcome(
+                f"{abs_path} は無い",
+                "list_workspace で確かめる。" + _cache_hint(abs_path),
+            )
+        if e.status == 400 and "is a symlink" in detail:
+            return ToolCallError(
+                f"{abs_path} は symlink で、remove_file では移さない (リンク先も移さない)",
+                "リンク先を移すなら、その実際のパスを渡す。",
+            )
+        if e.status == 409:
+            return ToolOutcome(
+                f"ゴミ箱に {posixpath.basename(abs_path)} と同じ名前のものが多すぎて移せない",
+                "ファイルはそのまま残っている。ユーザーに伝え、ゴミ箱を空にしてもらう。",
+            )
+    return _files_error(e, abs_path)
 
 
 def _refuse_in_subagent(metadata: Optional[dict]) -> None:
@@ -1088,15 +1143,15 @@ class Tools:
     から一定期間 (既定 30 日。取り込みの結果に期限日を添える) で消える — 会話を跨いで残す物は
     /workspace の別の場所 (自分で作るディレクトリ等) に置く。
     消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
-    /workspace/trash/ の直下へ mv する (同じ規則で既定 30 日後に消える)。例外は system prompt の
-    決まりに従う。実行は直列 — run_python は同じ会話内で、
+    remove_file でその置き場のゴミ箱 (`trash/`) へ移す (同じ規則で既定 30 日後に消える)。
+    例外は system prompt の決まりに従う。実行は直列 — run_python は同じ会話内で、
     run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
     しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
     待ちが長すぎると失敗する)。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
     `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
-    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / edit_file / read_file /
-    list_workspace でも同じパスで扱える。"""
+    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / edit_file / remove_file /
+    read_file / list_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
@@ -1685,26 +1740,33 @@ class Tools:
         await self._write_bytes(abs_path, target, ext, data, __user__)
         return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
 
-    def _write_target(self, path: str, user: dict) -> tuple[str, str, bool]:
-        """write_file / edit_file の書き先を解決し、書けないものは断る (sandbox に問い合わせない)。
-        (絶対パス, sandbox の `/files/*` に渡す path, `/ext/groups/<g>/…` `/ext/public/…` か)。
-        workspace は相対 (`work/a.md`)、ext は jail の絶対パスで渡す (#152)。可否は ACL、実際の
-        書き込みと経路の symlink の拒否は sandbox。"""
+    def _write_target(
+        self, path: str, user: dict, allow_dir: bool = False
+    ) -> tuple[str, str, bool]:
+        """write_file / edit_file / remove_file の書き先を解決し、書けないものは断る (sandbox に
+        問い合わせない)。(絶対パス, sandbox の `/files/*` に渡す path, `/ext/groups/<g>/…`
+        `/ext/public/…` か)。workspace は相対 (`work/a.md`)、ext は jail の絶対パスで渡す (#152)。
+        可否は ACL、実際の書き込みと経路の symlink の拒否は sandbox。`allow_dir` (remove_file) は
+        末尾 `/` のディレクトリも受け、置き場そのもの (`/workspace` `/ext/groups/<g>` `/ext/public`)
+        だけを断る。"""
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         acl = _acl_rel(_normalize_sandbox_path(path))
         if acl is not None:
             abs_path = f"{_RO_MOUNT_ROOT}/{acl}"
-            if len(acl.split("/")) <= _acl_place_depth(acl) or path.rstrip().endswith(
-                "/"
-            ):
+            place = len(acl.split("/")) <= _acl_place_depth(acl)
+            if place or (path.rstrip().endswith("/") and not allow_dir):
                 if acl == GROUPS:
                     raise ToolCallError(
                         f"{abs_path} はグループの置き場の一覧",
-                        "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+                        "`/ext/groups/<グループ名>/<名前>` まで指定する。"
+                        if allow_dir
+                        else "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
                     )
                 if ext_access(user, acl) == "none":
                     raise _ext_not_found(abs_path)
+                if allow_dir:
+                    raise _place_itself(abs_path)
                 raise ToolCallError(
                     f"{path!r} はディレクトリ", "ファイル名まで指定する。"
                 )
@@ -1720,7 +1782,10 @@ class Tools:
             "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ"
             " (管理者はすべてのグループの置き場と `/ext/public/` にも書ける)。",
         )
-        if rel == "." or path.rstrip().endswith("/"):
+        if allow_dir:
+            if rel == ".":
+                raise _place_itself(abs_path)
+        elif rel == "." or path.rstrip().endswith("/"):
             raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
         return abs_path, rel, False
 
@@ -1880,6 +1945,68 @@ class Tools:
         return (
             f"{abs_path} の {where}を置き換えた (文字コード: {encoding}、"
             f"{_human_size(len(out))})。\n\n" + _edit_excerpt(edited, first, last)
+        )
+
+    async def remove_file(
+        self,
+        path: str,
+        __user__: Optional[dict] = None,
+    ) -> str:
+        """
+        sandbox のファイル・フォルダをゴミ箱へ移す (完全には消さない。フォルダは中身ごと)。
+        移す先はその置き場のゴミ箱の直下で、`/workspace/…` は `/workspace/trash/`、
+        `/ext/groups/<グループ名>/…` は `/ext/groups/<グループ名>/trash/`、`/ext/public/…` は
+        `/ext/public/trash/` (元のフォルダ構成は持たず、同じ名前があれば `-2` `-3` … を付ける)。
+        ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消え、それまでは run_shell の mv で戻せる。
+        ファイルを消すときは run_shell の rm ではなくこちらを使う。ゴミ箱の中のものは扱わない。
+
+        :param path: 移すファイルかフォルダ。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` のものも移せる (管理者はすべてのグループの置き場と `/ext/public/…` のものも移せる)。
+        """
+        if not __user__ or not __user__.get("id"):
+            raise ToolFailure("ユーザーを特定できない")
+        abs_path, target, ext = self._write_target(path, __user__, allow_dir=True)
+        if ext:
+            acl = abs_path[len(_RO_MOUNT_ROOT) + 1 :]
+            segs = acl.split("/")[_acl_place_depth(acl) :]
+        else:
+            segs = target.split("/")
+        if segs[0] == _TRASH_DIR:
+            where = "ゴミ箱そのもの" if len(segs) == 1 else "ゴミ箱の中にある"
+            raise ToolCallError(
+                f"{abs_path} は{where}で、remove_file では扱わない", _TRASH_INSIDE_NEXT
+            )
+        if any(seg.startswith(".") for seg in segs):
+            raise ToolCallError(
+                f"{abs_path} は名前が . で始まり、remove_file では扱わない",
+                "ユーザーに伝える (消すかはユーザーが決める)。",
+            )
+        if not ext and len(segs) == 1 and segs[0] in _WORKSPACE_SYSTEM_DIRS:
+            raise ToolCallError(
+                f"{abs_path} は sandbox が使う置き場で、remove_file では移せない",
+                "中のファイル・フォルダを指定する。",
+            )
+
+        payload = {"user_id": __user__["id"], "path": target}
+        if ext:
+            payload["mounts"] = _ext_mounts(__user__)
+        try:
+            res = await self._post("/files/trash", payload, timeout_s=60)
+        except Exception as e:
+            raise _trash_error(e, abs_path)
+        moved = res.get("path") if isinstance(res, dict) else None
+        if not isinstance(moved, str) or not moved:
+            log.error(f"[sandbox] bad /files/trash response for {abs_path}: {res!r}")
+            raise ToolFatal("sandbox の応答を読めない")
+        trash_path = moved if moved.startswith("/") else f"{WORKSPACE_ROOT}/{moved}"
+        ttl = res.get("cache_ttl_days")
+        expiry = (
+            f"移してから {ttl} 日で自動で消える。"
+            if isinstance(ttl, int) and not isinstance(ttl, bool) and ttl > 0
+            else ""
+        )
+        return (
+            f"{abs_path} を {trash_path} へ移した。{expiry}\n"
+            f"戻すなら run_shell で `mv {shlex.quote(trash_path)} {shlex.quote(abs_path)}` を実行する。"
         )
 
     async def read_file(
