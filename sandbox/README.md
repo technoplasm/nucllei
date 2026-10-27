@@ -526,6 +526,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具) |
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
+| `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
