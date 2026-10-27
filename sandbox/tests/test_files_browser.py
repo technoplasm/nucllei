@@ -406,6 +406,145 @@ def test_usage(env):
 
 
 # ---------------------------------------------------------------------------
+# /files/trash (nucllei の remove_file。2026-10-27) — どの置き場もその trash/ の直下へ、完全には消さない
+# ---------------------------------------------------------------------------
+def test_trash_workspace(env):
+    mod, c, ws, ext = env
+    r = _post(c, "/files/trash", path="notes.md")
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "ok": True,
+        "trashed": True,
+        "path": "trash/notes.md",
+        "cache_ttl_days": mod.CACHE_TTL_REPORTED,
+    }
+    assert (ws / "trash" / "notes.md").read_text() == "# hi"
+    # フォルダは中身ごと、深い所も trash/ の直下へ (元の階層は持たない)
+    (ws / "data" / "sub").mkdir()
+    (ws / "data" / "sub" / "b.txt").write_text("b")
+    assert _post(c, "/files/trash", path="data/sub").json()["path"] == "trash/sub"
+    assert (ws / "trash" / "sub" / "b.txt").read_text() == "b"
+    assert (ws / "data" / "a.csv").exists()
+    # imports/ の中は移せる (imports/ そのものは不可)
+    (ws / "imports" / "a.pdf").write_text("p")
+    assert (
+        _post(c, "/files/trash", path="imports/a.pdf").json()["path"] == "trash/a.pdf"
+    )
+    assert _post(c, "/files/trash", path="nope.md").status_code == 404
+
+
+def test_trash_numbers_on_conflict(env):
+    mod, c, ws, ext = env
+    for i in range(3):
+        (ws / "memo.txt").write_text(str(i))
+        r = _post(c, "/files/trash", path="memo.txt")
+        assert r.status_code == 200, r.text
+    assert r.json()["path"] == "trash/memo-3.txt"
+    assert [
+        (ws / "trash" / n).read_text() for n in ("memo.txt", "memo-2.txt", "memo-3.txt")
+    ] == ["0", "1", "2"]
+    tries = mod.TRASH_NAME_TRIES
+    try:
+        mod.TRASH_NAME_TRIES = 3
+        (ws / "memo.txt").write_text("last")
+        assert _post(c, "/files/trash", path="memo.txt").status_code == 409
+        assert (ws / "memo.txt").read_text() == "last"
+    finally:
+        mod.TRASH_NAME_TRIES = tries
+
+
+def test_trash_refuses_and_never_deletes(env):
+    mod, c, ws, ext = env
+    (ws / "trash" / "old").mkdir()
+    (ws / "trash" / "old" / "f.txt").write_text("f")
+    # trash/ の中・trash/ そのもの・置き場の root・imports/・. 始まりは 400 (何も消えない)
+    for p in (
+        "trash/old/f.txt",
+        "trash/old",
+        "trash",
+        "imports",
+        ".",
+        "",
+        ".exec",
+        ".hidden",
+    ):
+        assert _post(c, "/files/trash", path=p).status_code == 400, p
+    assert (ws / "trash" / "old" / "f.txt").read_text() == "f"
+    assert (
+        (ws / "imports").is_dir()
+        and (ws / ".exec").is_dir()
+        and (ws / ".hidden").exists()
+    )
+    # 末端の symlink は断る (リンクも向こうも残る)
+    (ws / "link").symlink_to(ext / "groups" / "OTHER")
+    assert _post(c, "/files/trash", path="link").status_code == 400
+    assert (ws / "link").is_symlink()
+    assert (ext / "groups" / "OTHER" / "secret.txt").read_text() == "other-secret"
+    # 中間の symlink も辿らない
+    assert _post(c, "/files/trash", path="link/secret.txt").status_code == 400
+    # trash/ が symlink に差し替えられていたら移さない (元は残る)
+    import shutil
+
+    shutil.rmtree(ws / "trash")
+    (ws / "trash").symlink_to(ext / "groups" / "OTHER")
+    assert _post(c, "/files/trash", path="notes.md").status_code == 400
+    assert (ws / "notes.md").exists()
+    assert sorted(os.listdir(ext / "groups" / "OTHER")) == ["secret.txt"]
+
+
+def test_trash_ext_group_and_public(env, owned):
+    mod, c, ws, ext = env
+    g = ext / "groups" / "EMR"
+    (g / "recipes").mkdir()
+    (g / "recipes" / "r.md").write_text("r")
+    r = _post(
+        c, "/files/trash", path="/ext/groups/EMR/recipes/r.md", mounts=MEMBER_MOUNTS
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["path"] == "/ext/groups/EMR/trash/r.md"
+    assert (g / "trash" / "r.md").read_text() == "r"
+    # 作った trash/ は jail のユーザーの物
+    assert _real(g / "trash") <= owned()
+    # 同名は -2、フォルダは中身ごと
+    (g / "recipes" / "r.md").write_text("r2")
+    r = _post(
+        c, "/files/trash", path="/ext/groups/EMR/recipes/r.md", mounts=MEMBER_MOUNTS
+    )
+    assert r.json()["path"] == "/ext/groups/EMR/trash/r-2.md"
+    r = _post(c, "/files/trash", path="/ext/groups/EMR/recipes", mounts=MEMBER_MOUNTS)
+    assert r.json()["path"] == "/ext/groups/EMR/trash/recipes"
+    # trash/ そのもの・中・置き場の root は 400、ro の public は 403、bind に無いグループは 404
+    for p in ("/ext/groups/EMR/trash", "/ext/groups/EMR/trash/r.md", "/ext/groups/EMR"):
+        assert (
+            _post(c, "/files/trash", path=p, mounts=MEMBER_MOUNTS).status_code == 400
+        ), p
+    r = _post(c, "/files/trash", path="/ext/public/readme.md", mounts=MEMBER_MOUNTS)
+    assert r.status_code == 403
+    r = _post(
+        c, "/files/trash", path="/ext/groups/OTHER/secret.txt", mounts=MEMBER_MOUNTS
+    )
+    assert r.status_code == 404
+    assert (ext / "public" / "readme.md").exists()
+    assert (ext / "groups" / "OTHER" / "secret.txt").exists()
+    # admin (public を rw で渡される) は /ext/public/trash/ へ
+    admin = [{"path": "/ext/public", "rw": True}]
+    r = _post(c, "/files/trash", path="/ext/public/readme.md", mounts=admin)
+    assert r.json()["path"] == "/ext/public/trash/readme.md"
+    assert (ext / "public" / "trash" / "readme.md").read_text() == "pub"
+    # workspace の trash/ には何も入らない
+    assert list((ws / "trash").iterdir()) == []
+
+
+def test_delete_semantics_unchanged_by_trash(env):
+    # /files/delete の /ext は従来どおり完全に消す (ファイルブラウザの挙動は変えない)
+    mod, c, ws, ext = env
+    (ext / "groups" / "EMR" / "g.txt").write_text("g")
+    r = _post(c, "/files/delete", path="/ext/groups/EMR/g.txt", mounts=MEMBER_MOUNTS)
+    assert r.json() == {"ok": True, "trashed": False}
+    assert not (ext / "groups" / "EMR" / "trash").exists()
+
+
+# ---------------------------------------------------------------------------
 # /ext/... (リクエストの bind の中だけ)
 # ---------------------------------------------------------------------------
 def test_ext_rw_group(env):

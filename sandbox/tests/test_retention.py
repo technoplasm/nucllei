@@ -355,6 +355,62 @@ def test_sweep_does_not_follow_symlinks(monkeypatch, tmp_path):
     assert outside.exists()
 
 
+def _ext(mod, monkeypatch, tmp_path) -> pathlib.Path:
+    ext = tmp_path / "ext"
+    for d in ("groups/EMR/trash", "groups/OTHER", "public/trash"):
+        (ext / d).mkdir(parents=True)
+    monkeypatch.setattr(mod, "RO_MOUNT_ROOT", ext)
+    return ext
+
+
+def test_ext_trash_sweep(monkeypatch, tmp_path):
+    # 共有の置き場の trash/ (/ext/groups/<g>/trash/ と /ext/public/trash/) も同じ規則 (2026-10-27)
+    mod = _load_main(monkeypatch, tmp_path)
+    ext = _ext(mod, monkeypatch, tmp_path)
+    _file(ext / "groups" / "EMR" / "trash" / "r.md", data=b"x" * 10)
+    _file(ext / "groups" / "EMR" / "trash" / "recipes" / "a.md", data=b"x" * 5)
+    _file(ext / "public" / "trash" / "p.md", data=b"x" * 3)
+    keep = _file(ext / "groups" / "EMR" / "notes.md", 365)  # trash/ の外には触らない
+    keep2 = _file(ext / "public" / "readme.md", 365)
+    _file(ext / "groups" / "OTHER" / "trash.md", 365)  # trash/ の無い置き場
+
+    assert mod._sweep_ext_trash(now=_later(29)) == (0, 0)
+    assert mod._sweep_ext_trash(now=_later(31)) == (3, 18)
+    assert list((ext / "groups" / "EMR" / "trash").iterdir()) == []
+    assert list((ext / "public" / "trash").iterdir()) == []
+    assert keep.exists() and keep2.exists()
+    assert (ext / "groups" / "OTHER" / "trash.md").exists()
+
+
+def test_ext_trash_sweep_does_not_follow_symlinks(monkeypatch, tmp_path):
+    mod = _load_main(monkeypatch, tmp_path)
+    ext = _ext(mod, monkeypatch, tmp_path)
+    outside = _file(tmp_path / "outside" / "secret.txt", 90)
+    # グループの置き場・trash/ そのものが外への symlink なら辿らない
+    (ext / "groups" / "LEAK").symlink_to(outside.parent)
+    (ext / "groups" / "OTHER" / "trash").symlink_to(outside.parent)
+    # trash/ の直下の symlink はリンクそのものだけ消える
+    (ext / "groups" / "EMR" / "trash" / "link").symlink_to(outside.parent)
+    assert mod._sweep_ext_trash(now=_later(400)) == (1, 0)
+    assert outside.read_bytes() == b"x" * 100
+    # groups / public が無い・置き場の根が無いときも落ちない
+    import shutil
+
+    shutil.rmtree(ext / "public")
+    assert mod._sweep_ext_trash(now=_later(400)) == (0, 0)
+    monkeypatch.setattr(mod, "RO_MOUNT_ROOT", tmp_path / "none")
+    assert mod._sweep_ext_trash(now=_later(400)) == (0, 0)
+
+
+def test_ext_trash_sweep_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("SANDBOX_CACHE_TTL_DAYS", "0")
+    mod = _load_main(monkeypatch, tmp_path)
+    ext = _ext(mod, monkeypatch, tmp_path)
+    f = _file(ext / "public" / "trash" / "p.md")
+    assert mod._sweep_ext_trash(now=_later(400)) == (0, 0)
+    assert f.exists()
+
+
 def _reaper_setup(mod, monkeypatch, later, run=None):
     real_c, real_t = mod._sweep_cache_dirs, mod._sweep_trash
     monkeypatch.setattr(mod, "_sweep_cache_dirs", lambda ws: real_c(ws, now=later))

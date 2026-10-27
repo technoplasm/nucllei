@@ -307,6 +307,15 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
       `[sandbox] cache of <user>: removed entries older than N days — imports/exports: …; trash: …`
       の 1 行。回帰は `sandbox/tests/test_retention.py`。値は下の API の応答
       `cache_ttl_days` で nucllei に渡り、取り込みの tool 出力に期限日が添えられる
+  - **共有の置き場の `trash/`** (`/ext/groups/<g>/trash/` `/ext/public/trash/`。`/files/trash` が
+    作る) も同じ規則 (`SANDBOX_CACHE_TTL_DAYS`、直下のエントリ単位、max(mtime, ctime)) で消える。
+    workspace と違って idle 回収が無いので、起動直後と 1 時間ごとの周期タスク (`_ext_trash_loop`、
+    `SANDBOX_CACHE_TTL_DAYS` ≤ 0 なら起動しない) が掃除する。置き場の根 (`/ext`) の下は
+    `groups` `public` `<g>` `trash` を 1 段ずつ O_NOFOLLOW で開く (jail から書ける場所の symlink で
+    コンテナの他の場所を消させない)。ログは
+    `[sandbox] ext trash: removed entries older than N days — <件数>, <サイズ>` の 1 行。
+    `/ext` の置き場の `trash/` はファイルブラウザからは保護していない (workspace の `trash/` と違い
+    消せる・改名できる。FE の挙動を変えないため)
   - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
     が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
     無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
@@ -383,6 +392,18 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     `permanent: true`・`trash/` の中・`/ext/...` は完全に消す → `{ok, trashed: false}`。
     ディレクトリは中身ごと (`shutil.rmtree(dir_fd=)` = fd ベースで symlink を辿らない)。
     llens が API の delete で消して trash に入らなかった件から (2026-10-08、ken 決定)
+  - `POST /files/trash` — `{user_id, path, mounts?}`。nucllei の builtin `remove_file` 用
+    (2026-10-27、ken 決定・llens 依頼)。**どの置き場でも消さずに、その置き場の `trash/` の直下へ
+    移す**: workspace → `trash/<名前>`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<名前>`、
+    `/ext/public/…` → `/ext/public/trash/<名前>` → `{ok, trashed: true, path, cache_ttl_days}`
+    (`path` は workspace なら相対、`/ext` は jail の絶対パス)。名前の番号・409・`trash/` の作成と
+    symlink の 400 は `/files/delete` と同じ。ファイルもディレクトリ (中身ごと) も受ける。400 で
+    断るもの: 置き場の root・`.` 始まり・workspace 直下の `imports/` (`_check_mutable`)、置き場の
+    `trash/` そのものとその中、末端の symlink (`is a symlink: …`)。ro の bind は 403、bind に無い
+    ものは 404。**`/files/delete` の意味は変えていない** (`/ext` は完全削除のまま = ファイル
+    ブラウザの挙動は不変) — 新しい nucllei と古い sandbox の組み合わせで `/ext` のファイルが黙って
+    完全に消えないよう、別の endpoint にした (古い sandbox は 404 で止まり、nucllei は「sandbox の
+    更新が要る」と言う)
   - `POST /files/rename` — `{user_id, path, dest, mounts?}` → `{ok, path}`。同じ置き場の中だけ
     (workspace ↔ `/ext`・bind 間は 400)、行き先が在れば 409、自分の中へは 400
   - `POST /files/mkdir` — `{user_id, path, mounts?}` → `{ok, path}`。親も作る、在れば 409
@@ -527,6 +548,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
 | `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
+| `remove_file(path)` | ファイル・フォルダ (中身ごと) をその置き場のゴミ箱の直下へ移す (`/files/trash`)。`/workspace/…` → `/workspace/trash/`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/`、`/ext/public/…` → `/ext/public/trash/`。完全には消さない。同名は `-2` `-3`…。ゴミ箱の中・ゴミ箱そのもの・置き場の root・`.` 始まり・`/workspace/imports` と末端の symlink は断る。`path` の範囲は `write_file` と同じ |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 

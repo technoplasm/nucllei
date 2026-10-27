@@ -101,6 +101,8 @@ JAIL_EXT_ROOT = "/ext"
 # 呼び出し元 (nucllei) がユーザーの権限で決めて `mounts` で渡し、sandbox は ACL を解釈しない
 # (パスとして安全か = この形・各セグメントが妥当・経路に symlink が無い、だけを見る)。
 REQUEST_MOUNT_ROOTS = {"groups": 1, "public": 0}
+GROUPS_PLACE = "groups"
+PUBLIC_PLACE = "public"
 # 1 リクエストの `mounts` の上限 (admin は全グループ rw なのでグループ数ぶん来る)
 MAX_REQUEST_MOUNTS = 1024
 
@@ -320,7 +322,11 @@ CACHE_DIRS = ("imports", "exports")
 # `trash/` = 消す代わりに移す置き場 (llens の運用も `/files/delete` の /workspace での既定も、
 # trash/ の直下へ mv)。期限は同じ `SANDBOX_CACHE_TTL_DAYS`。3 つの置き場とも判定単位は
 # **直下の各エントリ**、時刻はその lstat の max(mtime, ctime) (`_sweep_entries`)。
+# 共有の置き場 `/ext/groups/<g>/trash/` `/ext/public/trash/` も同じ名前・同じ規則
+# (`/files/trash` が作る。掃除は `_ext_trash_loop`。2026-10-27、ken 決定・llens 依頼)
 TRASH_DIR = "trash"
+# 共有の置き場の trash/ の期限掃除の間隔 (workspace の trash/ は idle 回収のついでなので別)
+EXT_TRASH_SWEEP_S = 3600
 # workspace 直下で sandbox が用意し、ファイルブラウザから消させない・改名させないもの
 PROTECTED_DIRS = ("imports", TRASH_DIR)
 CACHE_TTL_REPORTED = max(CACHE_TTL_DAYS, 0)
@@ -1138,31 +1144,36 @@ def _sweep_entries(d: Path, cutoff: float) -> tuple[int, int]:
     `d` 自体は残し、`d` が symlink に差し替えられていたら (jail 内から可能) 何もしない
     (O_NOFOLLOW で開く)。中は fd ベースで消す (`shutil.rmtree(dir_fd=)` は symlink を辿らない
     実装、直下の symlink はリンクそのものを unlink)。戻り値は (エントリ数, 通常ファイルのバイト数)。"""
-    import shutil
-
     try:
         dfd = os.open(str(d), _DIR_FLAGS)
     except OSError:
         return 0, 0  # 無い・symlink・ディレクトリでない
-    count = size = 0
     try:
-        for name in os.listdir(dfd):
-            try:
-                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
-                if _age_time(st) >= cutoff:
-                    continue
-                if stat.S_ISDIR(st.st_mode):
-                    b = _tree_bytes(name, dfd)
-                    shutil.rmtree(name, dir_fd=dfd)
-                else:
-                    b = st.st_size if stat.S_ISREG(st.st_mode) else 0
-                    os.unlink(name, dir_fd=dfd)
-                count += 1
-                size += b
-            except OSError:
-                continue  # 消せないものは次回に回す (掃除の失敗で umount を止めない)
+        return _sweep_dir_fd(dfd, cutoff)
     finally:
         os.close(dfd)
+
+
+def _sweep_dir_fd(dfd: int, cutoff: float) -> tuple[int, int]:
+    """`_sweep_entries` の本体: 開いたディレクトリ `dfd` の直下を掃除する (`dfd` は閉じない)。"""
+    import shutil
+
+    count = size = 0
+    for name in os.listdir(dfd):
+        try:
+            st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            if _age_time(st) >= cutoff:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                b = _tree_bytes(name, dfd)
+                shutil.rmtree(name, dir_fd=dfd)
+            else:
+                b = st.st_size if stat.S_ISREG(st.st_mode) else 0
+                os.unlink(name, dir_fd=dfd)
+            count += 1
+            size += b
+        except OSError:
+            continue  # 消せないものは次回に回す (掃除の失敗で umount を止めない)
     return count, size
 
 
@@ -1193,6 +1204,86 @@ def _sweep_trash(ws: Path, now: Optional[float] = None) -> tuple[int, int]:
     if cutoff is None:
         return 0, 0
     return _sweep_entries(ws / TRASH_DIR, cutoff)
+
+
+def _open_dir_at(name: str, dir_fd: int) -> Optional[int]:
+    """`dir_fd` の中のディレクトリ `name` を O_NOFOLLOW で開く。無い・symlink・ディレクトリで
+    ないなら None。"""
+    try:
+        return os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    except OSError:
+        return None
+
+
+def _sweep_trash_in(place_fd: int, cutoff: float) -> tuple[int, int]:
+    """置き場 (`place_fd`) の `trash/` の直下を掃除する。trash/ が無い・symlink なら何もしない。"""
+    tfd = _open_dir_at(TRASH_DIR, place_fd)
+    if tfd is None:
+        return 0, 0
+    try:
+        return _sweep_dir_fd(tfd, cutoff)
+    finally:
+        os.close(tfd)
+
+
+def _sweep_ext_trash(now: Optional[float] = None) -> tuple[int, int]:
+    """共有の置き場の `trash/` (`/ext/groups/<g>/trash/` `/ext/public/trash/`) の直下で
+    `CACHE_TTL_DAYS` 日過ぎたものを消す (規則は workspace の trash/ と同じ `_sweep_entries`)。
+    置き場の根 `RO_MOUNT_ROOT` は配備側の物なので辿るが、その下 (`groups` `public` `<g>` `trash`)
+    は 1 段ずつ O_NOFOLLOW で開く — jail から書ける場所の symlink でコンテナの他の場所を
+    消させない (`_mount_source` と同じ考え)。`.` 始まりのグループ名は見ない。
+    戻り値は (エントリ数, バイト数)。"""
+    cutoff = _cutoff(now)
+    if cutoff is None:
+        return 0, 0
+    try:
+        root = os.open(str(RO_MOUNT_ROOT), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError:
+        return 0, 0
+    n = b = 0
+    try:
+        places: list[int] = []
+        pfd = _open_dir_at(PUBLIC_PLACE, root)
+        if pfd is not None:
+            places.append(pfd)
+        gfd = _open_dir_at(GROUPS_PLACE, root)
+        if gfd is not None:
+            try:
+                for name in sorted(os.listdir(gfd)):
+                    if name.startswith("."):
+                        continue
+                    fd = _open_dir_at(name, gfd)
+                    if fd is not None:
+                        places.append(fd)
+            finally:
+                os.close(gfd)
+        for fd in places:
+            try:
+                c, s = _sweep_trash_in(fd, cutoff)
+                n += c
+                b += s
+            finally:
+                os.close(fd)
+    finally:
+        os.close(root)
+    return n, b
+
+
+async def _ext_trash_loop():
+    """起動直後に 1 回、以降 `EXT_TRASH_SWEEP_S` ごとに共有の置き場の trash/ を掃除する。
+    `CACHE_TTL_DAYS` > 0 のときだけ起動。"""
+    while True:
+        try:
+            n, b = await asyncio.to_thread(_sweep_ext_trash)
+            if n:
+                print(
+                    f"[sandbox] ext trash: removed entries older than "
+                    f"{CACHE_TTL_DAYS} days — {n}, {_fmt_size(b)}",
+                    flush=True,
+                )
+        except Exception as e:
+            print(f"[sandbox] ext trash sweep error: {e!r}", flush=True)
+        await asyncio.sleep(EXT_TRASH_SWEEP_S)
 
 
 async def reap_idle_workspaces() -> int:
@@ -1458,6 +1549,8 @@ async def _startup():
             flush=True,
         )
         asyncio.create_task(_retention_loop())
+    if CACHE_TTL_DAYS > 0:
+        asyncio.create_task(_ext_trash_loop())
 
 
 @app.get("/healthz")
@@ -2238,8 +2331,10 @@ def _fs_delete(t: _Target, permanent: bool = False) -> dict:
 
 
 def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
-    """`dfd` の中の `leaf` を workspace の trash/ の直下へ移す。同名が在れば `_trash_name` の
+    """`dfd` の中の `leaf` を置き場 (`t.base` = workspace か `/ext` の bind) の trash/ の直下へ
+    移す。同名が在れば `_trash_name` の
     番号を進める。trash/ が無ければ作る (jail のユーザーの物。jail で消されていても動く)。
+    応答の `path` は workspace なら相対 (`trash/<名前>`)、`/ext` なら jail の絶対パス。
     trash/ が symlink 等に差し替えられていれば辿らない (400)。rename は mv と同じく ctime を
     今にするので、期限 (`_sweep_entries`) は移した時から数える。"""
     try:
@@ -2259,10 +2354,32 @@ def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
                 if _nospace(e):
                     raise HTTPException(507, QUOTA_FULL_DETAIL)
                 raise HTTPException(400, f"cannot move to trash: {t.path}")
-            return {"ok": True, "trashed": True, "path": f"{TRASH_DIR}/{name}"}
+            return {"ok": True, "trashed": True, "path": _join(t, [TRASH_DIR, name])}
     finally:
         os.close(tfd)
     raise HTTPException(409, f"no free name in {TRASH_DIR}/ for: {leaf}")
+
+
+def _fs_trash(t: _Target) -> dict:
+    """ゴミ箱へ移す (`/files/trash`)。workspace も `/ext` の bind も、その置き場の trash/ の直下へ。
+    **完全には消さない** (`/files/delete` と違い、どの置き場・どの条件でも)。断るもの:
+    `_check_mutable` の範囲 (置き場の root・`.` 始まり・workspace 直下の `imports/` `trash/`)、
+    置き場の trash/ そのものとその中、末端の symlink (400)。"""
+    segs = t.segs
+    _check_mutable(t, segs, "trash")
+    if segs[0] == TRASH_DIR:
+        raise HTTPException(400, f"already in {TRASH_DIR}/: {t.path}")
+    dfd = _open_dirs(t.base, segs[:-1], t.path)
+    try:
+        st = _lstat_at(segs[-1], dfd)
+        if st is None:
+            raise HTTPException(404, f"not found: {t.path}")
+        if stat.S_ISLNK(st.st_mode):
+            raise HTTPException(400, f"is a symlink: {t.path}")
+        res = _move_to_trash(t, dfd, segs[-1])
+    finally:
+        os.close(dfd)
+    return {**res, "cache_ttl_days": CACHE_TTL_REPORTED}
 
 
 def _fs_rename(t: _Target, d: _Target) -> dict:
@@ -2601,6 +2718,20 @@ async def files_delete(req: DeleteRequest):
     リンクそのものに効く。"""
     t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
     return await asyncio.to_thread(_fs_delete, t, req.permanent)
+
+
+@app.post("/files/trash")
+async def files_trash(req: PathRequest):
+    """ゴミ箱へ移す (nucllei の builtin `remove_file`。2026-10-27、ken 決定・llens 依頼)。
+    ファイルもディレクトリ (中身ごと) も、その置き場の trash/ の直下へ: workspace は
+    `trash/<名前>`、`/ext/groups/<g>/…` は `/ext/groups/<g>/trash/<名前>`、`/ext/public/…` は
+    `/ext/public/trash/<名前>` (元の階層は持たない。同名は `-2` `-3`…、尽きたら 409)。
+    応答 `{ok, trashed: true, path, cache_ttl_days}` (`path` は workspace なら相対)。
+    `/files/delete` の既定 (`/ext` は完全に消す) は変えない — 新しい nucllei と古い sandbox の
+    組み合わせで `/ext` のファイルが黙って完全に消えないよう、別の endpoint にした (古い
+    sandbox は 404 で止まる)。"""
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
+    return await asyncio.to_thread(_fs_trash, t)
 
 
 @app.post("/files/rename")

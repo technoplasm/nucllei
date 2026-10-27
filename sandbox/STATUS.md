@@ -89,6 +89,12 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       max(mtime, ctime) から `SANDBOX_CACHE_TTL_DAYS` 日で丸ごと消す (中身の時刻は見ない。rename が
       ctime を今にするのを ext4 / tmpfs で確認 — `test_rename_updates_ctime`)。旧「ファイル単位の
       mtime」は廃止。回帰は `test_retention.py`。**実機 (コンテナ) の掃除は未確認** — image の更新待ち
+- [x] **`/files/trash` と共有の置き場の `trash/`** (2026-10-27、ken 決定・llens 依頼)。nucllei の
+      `remove_file` 用に、どの置き場のものもその置き場の `trash/` の直下へ移す endpoint を新設
+      (`/files/delete` は不変 — 古い sandbox で `/ext` が黙って完全削除されないよう別 endpoint)。
+      `/ext/groups/*/trash` `/ext/public/trash` は 1 時間ごとの周期タスクで同じ期限の掃除。
+      回帰は `test_files_browser.py` (`test_trash_*`) と `test_retention.py` (`test_ext_trash_*`)。
+      **実機 (コンテナ) は未確認** — image の更新待ち
 - [x] **グループ・全体の共有の置き場** (#152、2026-10-07)。`/ext/groups/<g>` `/ext/public` を
       nucllei が渡す `mounts` どおりに 1 つずつ rw / ro で bind (丸ごとは bind しない)。kernel は
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを
