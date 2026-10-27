@@ -2071,6 +2071,25 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the always-registered builtins above, it needs an external service to be
     reachable — a builtin that is listed but always errors would be worse than
     one that is absent.
+    **Jail environment (2026-10-27).** Every `run_python` / `run_python_once` /
+    `run_shell` request carries the caller's groups and role
+    (`user_groups: [...]`, `user_role`), and the sandbox exposes them inside the
+    jail as two environment variables, so programs in the jail (a deployment's
+    CLI, for instance) need not take group names as command-line arguments:
+    - `NUCLLEI_USER_GROUPS` — the names of the groups the user **belongs to**,
+      comma-separated, in the same order as `{{USER_GROUPS}}`. Admins get only
+      their own memberships, not every group. **No membership is the empty
+      string; the variable is still defined.** Undefined means a sandbox or
+      nucllei too old to pass it. A name that fails the current group-name rule
+      (one created before #151, e.g. with a comma, a space or a shell
+      metacharacter) is left out with a warning in the log, because the value
+      is a comma-separated contract read by programs; `{{USER_GROUPS}}` keeps
+      the stored names unchanged. Commas are already forbidden in new names.
+    - `NUCLLEI_USER_ROLE` — `admin`, `user` or `pending` (the role string as
+      stored). Any other role is not sent, so the variable is undefined.
+    The stateful kernel is recreated (`session_reset`) when either value
+    changes, as it is for a change in the `/ext` mounts. A subagent runs as the
+    same user, so it sees the same values. Old sandboxes ignore the two fields.
     `SANDBOX_TOKEN` is the **optional** shared bearer token of the sandbox API
     and is _not_ part of that gate: sandbox-side authentication is opt-in, so a
     URL-only deployment still works (unauthenticated). When set, it must carry

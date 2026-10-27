@@ -425,6 +425,30 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert {"path": "/ext/groups/OTHER", "rw": True} in tool.calls[1][1]["mounts"]
         assert {"path": "/ext/public", "rw": True} in tool.calls[1][1]["mounts"]
 
+    def test_exec_and_cell_send_user_groups_and_role(self):
+        """jail の env NUCLLEI_USER_GROUPS / NUCLLEI_USER_ROLE の元 (2026-10-27、llens 依頼)。
+        所属は {{USER_GROUPS}} と同じ順で、#151 より前の不正な名前 (rank:部長) は落とす。
+        管理者でも所属分だけ (全グループではない)。所属なしは []。"""
+        res = {"exit_code": 0, "duration_s": 0.1, "stdout": "", "stderr": ""}
+        tool = _tool({"/exec": res, "/exec_cell": {**res, "error": None}})
+        _text(tool.run_shell("ls", __user__=MEMBER))
+        _text(tool.run_python_once("1", __user__=MEMBER))
+        _text(tool.run_python("1", __user__=MEMBER, __chat_id__="c1"))
+        _text(tool.run_shell("ls", __user__=ADMIN))
+        _text(tool.run_shell("ls", __user__=OUTSIDER))
+        _text(tool.run_shell("ls", __user__={"id": "member1", "role": "disabled"}))
+        member = {"user_groups": ["EMR", "内科外来"], "user_role": "user"}
+        for path, payload in tool.calls[:3]:
+            got = {k: payload.get(k) for k in ("user_groups", "user_role")}
+            assert got == member, (path, payload)
+        assert [p for p, _ in tool.calls[:3]] == ["/exec", "/exec", "/exec_cell"]
+        assert tool.calls[3][1]["user_groups"] == [] and (
+            tool.calls[3][1]["user_role"] == "admin"
+        )
+        assert tool.calls[4][1]["user_groups"] == []
+        # sandbox の知らないロールは送らない (400 で実行ごと落とさない)
+        assert "user_role" not in tool.calls[5][1]
+
     def test_write_file(self):
         tool = _tool({"/files/write": {"ok": True, "size": 2}})
         out = _text(

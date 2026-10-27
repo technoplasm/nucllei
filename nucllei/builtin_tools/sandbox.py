@@ -284,6 +284,51 @@ def _acl_place_depth(rel: str) -> int:
     return 2 if rel.split("/", 1)[0] == GROUPS else 1
 
 
+# sandbox が jail の env (`NUCLLEI_USER_ROLE`) で渡せるロール (sandbox の `USER_ROLES` と同じ)
+_SANDBOX_USER_ROLES = frozenset({"admin", "user", "pending"})
+
+
+def _user_env_fields(user: dict) -> dict:
+    """実行要求 (`/exec` `/exec_cell`) に足す所属とロール。sandbox が jail の env
+    `NUCLLEI_USER_GROUPS` (カンマ区切り) / `NUCLLEI_USER_ROLE` にする (2026-10-27、llens 依頼)。
+
+    所属は {{USER_GROUPS}} と同じ `user_group_names` (同じ順・管理者でも所属分だけ) から、
+    現行のグループ名の規則 (`is_group_dir_name`) を通らない名前を落としたもの。env はカンマ区切りで
+    機械に読ませる契約なので、#151 より前に作られた不正な名前 (カンマ・空白・記号入り) を混ぜると
+    読み手が壊れる ({{USER_GROUPS}} 側は今までどおり保存値のまま)。所属なしは `[]` (= 空文字で定義)。
+    ロールが sandbox の知らない値なら送らない (400 で実行ごと落とさない)。"""
+    from nucllei.utils.ext_acl import is_group_dir_name
+    from nucllei.utils.task import user_group_names
+
+    try:
+        names = user_group_names(user.get("id"))
+    except Exception as e:
+        log.error(f"[sandbox] group names for {user.get('id')} failed: {e!r}")
+        raise ToolFailure(
+            "グループの所属を確かめられない",
+            "1 回だけ呼び直す。続くならユーザーに伝える。",
+        )
+    groups = []
+    for name in names:
+        if is_group_dir_name(name):
+            groups.append(name)
+        else:
+            log.warning(
+                f"[sandbox] group name {name!r} of {user.get('id')} は"
+                f" NUCLLEI_USER_GROUPS に入れない(現行のグループ名の規則に違反"
+                f" — 管理画面で改名すれば入る)"
+            )
+    fields: dict = {"user_groups": groups}
+    role = user.get("role")
+    if role in _SANDBOX_USER_ROLES:
+        fields["user_role"] = role
+    else:
+        log.warning(
+            f"[sandbox] role {role!r} of {user.get('id')} は NUCLLEI_USER_ROLE に入れない"
+        )
+    return fields
+
+
 def _ext_mounts(user: dict) -> list[dict]:
     """jail に bind する `/ext/groups/<g>` `/ext/public` の一覧 (`ext_acl.sandbox_ext_mounts`)。
     所属を引けないときは実行しない (黙って外すと常駐 kernel が作り直され、変数が消える)。"""
@@ -1373,6 +1418,8 @@ class Tools:
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
             "mounts": _ext_mounts(__user__),
+            # jail の env NUCLLEI_USER_GROUPS / NUCLLEI_USER_ROLE (古い sandbox は無視する)
+            **_user_env_fields(__user__),
         }
         # HTTP の待ちは実行の上限 + 余裕。計算は try の外 — ここで落ちるのは nucllei 側の
         # 不具合で、sandbox に届かなかった (_exec_error) とは言わない
@@ -1396,8 +1443,10 @@ class Tools:
             "chat_id": __chat_id__,
             "code": code,
             "timeout_s": timeout_s or self.valves.default_timeout_s,
-            # 常駐 kernel は bind の一覧が変わると作り直される (session_reset が返る。#152)
+            # 常駐 kernel は bind の一覧が変わると作り直される (session_reset が返る。#152)。
+            # 所属・ロール (jail の env) も同じく、変わると作り直される
             "mounts": _ext_mounts(__user__),
+            **_user_env_fields(__user__),
         }
         http_timeout = payload["timeout_s"] + 30  # 計算は try の外 (_exec と同じ)
         try:
