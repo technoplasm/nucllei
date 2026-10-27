@@ -148,6 +148,7 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
                 "run_shell",
                 "send_to_workspace",
                 "write_file",
+                "edit_file",
                 "read_file",
                 "list_workspace",
                 "fetch_from_workspace",

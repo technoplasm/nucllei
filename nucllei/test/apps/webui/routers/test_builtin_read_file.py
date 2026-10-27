@@ -94,8 +94,8 @@ def test_bom_utf8_is_stripped_and_reported():
 def test_cp932_is_decoded_and_says_so():
     out = _read(_tool("品名,数量\nりんご,3\n".encode("cp932")), "/workspace/a.txt")
     assert (
-        "文字コード: cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる)"
-        in out.text
+        "文字コード: cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる。"
+        "edit_file は cp932 のまま直す)" in out.text
     )
     assert out.text.endswith("品名,数量\nりんご,3\n")
     assert out.kind == "text"

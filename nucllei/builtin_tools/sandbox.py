@@ -229,8 +229,9 @@ async def _iter_file(f, chunk: int = RAW_CHUNK):
         yield data
 
 
-# テキストの上限 (env `SANDBOX_TEXT_MAX_SIZE_MB`、読み取りは env.py): write_file の本文と、
-# ファイルブラウザのテキスト編集 (開く・保存。`routers/sandbox_files.py`)。read_file には使わない
+# テキストの上限 (env `SANDBOX_TEXT_MAX_SIZE_MB`、読み取りは env.py): write_file の本文、
+# edit_file で直すファイル (直す前と後の両方) と、ファイルブラウザのテキスト編集 (開く・保存。
+# `routers/sandbox_files.py`)。read_file には使わない
 TEXT_MAX_BYTES = SANDBOX_TEXT_MAX_SIZE_MB * 1024 * 1024
 
 # jail から見た workspace の置き場 (= jail の cwd)。モデルに見せる `path` は全部
@@ -331,8 +332,8 @@ def _resolve_workspace_path(
 # モデルに返す文は「事実の文 + `次の手:` 以降」、常体 (`utils/ref_errors` の module
 # docstring)。この toolkit に無い tool は、このターンに出ているとき (`tool_in_turn`) だけ
 # 名指しする — 「〜が使えるなら」とは書かない (2026-10-19 llens 監査 (13))。同じ toolkit の
-# tool (run_python / run_shell / read_file / write_file / list_workspace / send_to_workspace /
-# fetch_from_workspace) は toolkit ごと出るので名指ししてよい。
+# tool (run_python / run_shell / read_file / write_file / edit_file / list_workspace /
+# send_to_workspace / fetch_from_workspace) は toolkit ごと出るので名指ししてよい。
 _NEXT = "次の手: "
 
 # 画像・音声・動画は display チャネルで tool の枠の下に出る (`_display_markdown`)。
@@ -714,6 +715,52 @@ READ_PROXY_MOUNT_HINT = (
 )
 
 
+# edit_file (llens 依頼・ken 指示 2026-10-27)。一致は decode 後の文字列で文字どおり 1 か所
+# — CRLF・空白・近いものへ寄せない。一致が無いときに CRLF の違いだけは事実の文で言う
+_EDIT_SHOW_MATCHES = 5
+# 結果に添える置き換え後の前後: 前後 2 行ずつ、全体で 10 行まで
+_EDIT_CONTEXT_LINES = 2
+_EDIT_EXCERPT_MAX_LINES = 10
+_EDIT_BINARY_NEXT = "edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。"
+_EDIT_TOO_LARGE_NEXT = "run_python でファイルを開いて置き換える。"
+
+
+def _match_starts(text: str, needle: str) -> list[int]:
+    """`needle` の一致の開始位置 (重なる一致も数える — `aa` は `aaa` に 2 か所)。"""
+    starts = []
+    i = text.find(needle)
+    while i != -1:
+        starts.append(i)
+        i = text.find(needle, i + 1)
+    return starts
+
+
+def _encodable(c: str, codec: str) -> bool:
+    try:
+        c.encode(codec)
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _edit_excerpt(text: str, first: int, last: int) -> str:
+    """置き換え後の `first`〜`last` 行目と前後を行番号付きで (全体で
+    `_EDIT_EXCERPT_MAX_LINES` 行まで。長い置き換えは先頭側を見せて残りは `…`)。"""
+    lines = text.split("\n")
+    start = max(1, first - _EDIT_CONTEXT_LINES)
+    end = min(len(lines), last + _EDIT_CONTEXT_LINES)
+    cut = end - start + 1 > _EDIT_EXCERPT_MAX_LINES
+    if cut:
+        end = start + _EDIT_EXCERPT_MAX_LINES - 1
+    width = len(str(end))
+    out = [
+        f"{n:>{width}} | {lines[n - 1].rstrip(chr(13))}" for n in range(start, end + 1)
+    ]
+    if cut:
+        out.append(" " * width + " | …")
+    return "\n".join(out)
+
+
 def _read_ext(abs_path: str) -> str:
     return posixpath.splitext(posixpath.basename(abs_path))[1].lower().lstrip(".")
 
@@ -757,7 +804,12 @@ def _detect_encoding(head: bytes, whole: bool) -> Optional[tuple[str, str, int]]
     for codec, label in (
         ("utf-8", "UTF-8"),
         # write_file は UTF-8 で書く — 書き戻すと文字コードが変わることを読んだ時点で言う
-        ("cp932", "cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる)"),
+        # (edit_file は読んだ文字コードのまま書き戻す)
+        (
+            "cp932",
+            "cp932 (Shift_JIS 系。write_file で書き戻すと UTF-8 になる。"
+            "edit_file は cp932 のまま直す)",
+        ),
     ):
         try:
             _decode_strict(head, codec, whole)
@@ -1043,7 +1095,7 @@ class Tools:
     待ちが長すぎると失敗する)。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
     `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
-    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / read_file /
+    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / edit_file / read_file /
     list_workspace でも同じパスで扱える。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
@@ -1615,17 +1667,53 @@ class Tools:
         run_python の文字列や run_shell のヒアドキュメントに本文を埋め込むと
         クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
         既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
+        既存ファイルの一部だけを直すなら edit_file を使う (全文を書き直さない)。
 
         :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` にも書ける (管理者はすべてのグループの置き場と `/ext/public/…` にも書ける)。
         :param content: ファイルの中身 (テキストそのまま)
         """
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
+        abs_path, target, ext = self._write_target(path, __user__)
+        data = content.encode("utf-8")
+        if len(data) > TEXT_MAX_BYTES:
+            raise ToolCallError(
+                f"内容が大きすぎる ({_human_size(len(data))} > "
+                f"{_human_size(TEXT_MAX_BYTES)})",
+                "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
+            )
+        await self._write_bytes(abs_path, target, ext, data, __user__)
+        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
+
+    def _write_target(self, path: str, user: dict) -> tuple[str, str, bool]:
+        """write_file / edit_file の書き先を解決し、書けないものは断る (sandbox に問い合わせない)。
+        (絶対パス, sandbox の `/files/*` に渡す path, `/ext/groups/<g>/…` `/ext/public/…` か)。
+        workspace は相対 (`work/a.md`)、ext は jail の絶対パスで渡す (#152)。可否は ACL、実際の
+        書き込みと経路の symlink の拒否は sandbox。"""
         from nucllei.utils.image_refs import WORKSPACE_PATH_ARG_FORM
 
         acl = _acl_rel(_normalize_sandbox_path(path))
         if acl is not None:
-            return await self._write_ext(path, acl, content, __user__)
+            abs_path = f"{_RO_MOUNT_ROOT}/{acl}"
+            if len(acl.split("/")) <= _acl_place_depth(acl) or path.rstrip().endswith(
+                "/"
+            ):
+                if acl == GROUPS:
+                    raise ToolCallError(
+                        f"{abs_path} はグループの置き場の一覧",
+                        "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+                    )
+                if ext_access(user, acl) == "none":
+                    raise _ext_not_found(abs_path)
+                raise ToolCallError(
+                    f"{path!r} はディレクトリ", "ファイル名まで指定する。"
+                )
+            access = ext_access(user, acl)
+            if access == "none":
+                raise _ext_not_found(abs_path)
+            if access != "rw":
+                raise _read_only(abs_path)
+            return abs_path, abs_path, True
         abs_path, rel = _resolve_workspace_path(
             path,
             WORKSPACE_PATH_ARG_FORM,
@@ -1634,68 +1722,165 @@ class Tools:
         )
         if rel == "." or path.rstrip().endswith("/"):
             raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
+        return abs_path, rel, False
 
-        data = content.encode("utf-8")
-        if len(data) > TEXT_MAX_BYTES:
-            raise ToolCallError(
-                f"内容が大きすぎる ({_human_size(len(data))} > "
-                f"{_human_size(TEXT_MAX_BYTES)})",
-                "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
-            )
-
+    async def _write_bytes(
+        self, abs_path: str, target: str, ext: bool, data: bytes, user: dict
+    ) -> None:
+        """`_write_target` の書き先へ `/files/write` で書く (ext は jail に bind する置き場の一覧付き)。"""
+        payload = {
+            "user_id": user["id"],
+            "path": target,
+            "b64": base64.b64encode(data).decode(),
+        }
+        if ext:
+            payload["mounts"] = _ext_mounts(user)
         try:
-            await self._post(
-                "/files/write",
-                {
-                    "user_id": __user__["id"],
-                    "path": rel,
-                    "b64": base64.b64encode(data).decode(),
-                },
-                timeout_s=60,
-            )
+            await self._post("/files/write", payload, timeout_s=60)
         except Exception as e:
             raise _files_error(e, abs_path)
-        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
 
-    async def _write_ext(self, path: str, rel: str, content: str, user: dict) -> str:
-        """write_file の `/ext/groups/<g>/…` `/ext/public/…` (#152)。可否は ACL、実際の書き込みと
-        経路の symlink の拒否は sandbox (`/files/write` の `/ext/...`)。"""
-        abs_path = f"{_RO_MOUNT_ROOT}/{rel}"
-        if len(rel.split("/")) <= _acl_place_depth(rel) or path.rstrip().endswith("/"):
-            if rel == GROUPS:
-                raise ToolCallError(
-                    f"{abs_path} はグループの置き場の一覧",
-                    "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+    async def edit_file(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        __user__: Optional[dict] = None,
+    ) -> str:
+        """
+        sandbox のテキストファイルの一部だけを書き換える。ファイルの中で old_text とちょうど 1 か所だけ
+        一致する部分を new_text に置き換えて書き戻す。一致が 0 か所・2 か所以上のときは何も書かずに断る。
+        一致は空白・改行・インデントまで含めて文字どおりに見る — read_file で現物を見て、そこから写す。
+        文字コード (UTF-8・BOM 付き UTF-8・cp932) は元のまま保つ。既存ファイルの一部だけを直すなら、
+        write_file で全文を書き直さずこちらを使う。末尾に足すときは、最後の行を old_text に含め、
+        new_text にその行と足す行を書く。新しいファイルは作らない (作るのは write_file)。テキスト専用。
+
+        :param path: 直すファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` も直せる (管理者はすべてのグループの置き場と `/ext/public/…` も直せる)。
+        :param old_text: 置き換える部分。ファイルの中の文字列そのまま (空白・改行も含めて、ファイルの中で 1 か所だけに一致すること)
+        :param new_text: 置き換え後の文字列 (空なら old_text の部分を消す)
+        """
+        if not __user__ or not __user__.get("id"):
+            raise ToolFailure("ユーザーを特定できない")
+        abs_path, target, ext = self._write_target(path, __user__)
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            raise ToolCallError("old_text / new_text が文字列でない", "文字列で渡す。")
+        if old_text == "":
+            raise ToolCallError(
+                "old_text が空",
+                "末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。",
+            )
+        # 読まない物は拡張子で先に断る (read_file と同じ分類。sandbox に問い合わせない)
+        if _read_ext(abs_path) in _READ_IMAGE_EXTS | _READ_BINARY_EXTS:
+            raise self._binary_error(abs_path, _EDIT_BINARY_NEXT)
+
+        mounts = _ext_mounts(__user__) if ext else None
+
+        def payload(**extra) -> dict:
+            body = {"user_id": __user__["id"], "path": target, **extra}
+            if mounts is not None:
+                body["mounts"] = mounts
+            return body
+
+        # 大きさは転送前に見る。stat は経路も末端も symlink を辿らない (read_file と同じ)
+        try:
+            st = await self._post("/files/stat", payload(), timeout_s=30)
+        except Exception as e:
+            raise _files_error(e, abs_path)
+        kind = st.get("type")
+        if not st.get("exists") or kind == "other":
+            raise _no_such_file(abs_path)
+        if kind == "dir":
+            raise ToolCallError(
+                f"{abs_path} はディレクトリ", "ファイル名まで指定する。"
+            )
+        if kind == "symlink":
+            raise _unusable_path(abs_path)
+        size = st.get("size") if isinstance(st.get("size"), int) else 0
+        if size > TEXT_MAX_BYTES:
+            raise ToolCallError(
+                f"{abs_path} は edit_file で直せる大きさを超えている ({_human_size(size)} > "
+                f"{_human_size(TEXT_MAX_BYTES)})",
+                _EDIT_TOO_LARGE_NEXT,
+            )
+
+        data = b""
+        if size:
+            try:
+                res = await self._post(
+                    "/files/read",
+                    payload(nofollow=True, offset=0, length=size),
+                    timeout_s=60,
                 )
-            if ext_access(user, rel) == "none":
-                raise _ext_not_found(abs_path)
-            raise ToolCallError(f"{path!r} はディレクトリ", "ファイル名まで指定する。")
-        access = ext_access(user, rel)
-        if access == "none":
-            raise _ext_not_found(abs_path)
-        if access != "rw":
-            raise _read_only(abs_path)
-        data = content.encode("utf-8")
-        if len(data) > TEXT_MAX_BYTES:
+            except Exception as e:
+                raise _files_error(e, abs_path)
+            try:
+                data = base64.b64decode(res["b64"])
+            except Exception as e:
+                log.error(f"[sandbox] bad /files/read response for {abs_path}: {e!r}")
+                raise ToolFatal("sandbox の応答を読めない")
+            # 範囲読みを知らない sandbox は全体を返す — stat の後に伸びていても stat の大きさで切る
+            data = data[:size]
+
+        detected = _detect_encoding(data, whole=True)
+        if detected is None:
+            raise self._binary_error(abs_path, _EDIT_BINARY_NEXT)
+        codec, _, bom = detected
+        text = data[bom:].decode(codec)
+
+        starts = _match_starts(text, old_text)
+        if not starts:
+            crlf = "\r\n" in text and "\n" in old_text and "\r\n" not in old_text
             raise ToolCallError(
-                f"内容が大きすぎる ({_human_size(len(data))} > "
-                f"{_human_size(TEXT_MAX_BYTES)})",
-                "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
+                f"{abs_path} に old_text と一致する箇所が無い"
+                + (" (このファイルの改行は CRLF)" if crlf else ""),
+                "read_file で現物を見て、空白・改行まで含めて old_text を写し直す。",
             )
+        if len(starts) > 1:
+            lines = sorted({text.count("\n", 0, i) + 1 for i in starts})
+            shown = ", ".join(str(n) for n in lines[:_EDIT_SHOW_MATCHES])
+            if len(lines) > _EDIT_SHOW_MATCHES:
+                shown += ", …"
+            raise ToolCallError(
+                f"{abs_path} に old_text と一致する箇所が {len(starts)} か所ある"
+                f" ({shown} 行目)",
+                "前後の行を old_text に含めて、一致が 1 か所になるようにする。",
+            )
+
+        pos = starts[0]
+        edited = text[:pos] + new_text + text[pos + len(old_text) :]
         try:
-            await self._post(
-                "/files/write",
-                {
-                    "user_id": user["id"],
-                    "path": abs_path,
-                    "b64": base64.b64encode(data).decode(),
-                    "mounts": _ext_mounts(user),
-                },
-                timeout_s=60,
+            out = data[:bom] + edited.encode(codec)
+        except UnicodeEncodeError:
+            bad = "".join(
+                dict.fromkeys(c for c in new_text if not _encodable(c, codec))
             )
-        except Exception as e:
-            raise _files_error(e, abs_path)
-        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
+            raise ToolCallError(
+                f"{abs_path} は cp932 のファイルで、new_text に cp932 で表せない文字がある"
+                f" ({bad[:20]})",
+                "cp932 にある文字に置き換えて呼び直す (ファイルを UTF-8 に変えてよいかはユーザーが決める)。",
+            )
+        if len(out) > TEXT_MAX_BYTES:
+            raise ToolCallError(
+                f"置き換えた結果が大きすぎる ({_human_size(len(out))} > "
+                f"{_human_size(TEXT_MAX_BYTES)})",
+                _EDIT_TOO_LARGE_NEXT,
+            )
+        # 読んでから書くまでの間に他 (別の会話・ファイルブラウザ・run_*) が書いた分は検出しない
+        # (sandbox の /files/write に条件付き書き込みが無い。直す範囲は 1 か所なので割り切る)
+        await self._write_bytes(abs_path, target, ext, out, __user__)
+
+        first = text.count("\n", 0, pos) + 1
+        # 末尾の改行は次の行を始めない (`"b\n"` に置き換えたら 1 行)
+        touched = new_text[:-1] if new_text.endswith("\n") else new_text
+        last = first + touched.count("\n")
+        where = f"{first} 行目" if first == last else f"{first}〜{last} 行目"
+        encoding = {"utf-8": "UTF-8", "cp932": "cp932"}[codec] + (
+            " (BOM 付き)" if bom else ""
+        )
+        return (
+            f"{abs_path} の {where}を置き換えた (文字コード: {encoding}、"
+            f"{_human_size(len(out))})。\n\n" + _edit_excerpt(edited, first, last)
+        )
 
     async def read_file(
         self,
@@ -1710,7 +1895,8 @@ class Tools:
         行の切れ目で切る (1 行が max_chars を超えるときだけ行の途中で切り、そう書く)。末尾に
         next_offset が出る間は続きがある。.csv / .tsv はレコードの切れ目 (引用符の外の改行) で切り、
         2 回目以降は先頭に 1 行目 (見出し) を付け直す。画像・PDF・Office 文書などテキストでないものは
-        読まない。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
+        読まない。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。読んだファイルの
+        一部だけを直すなら edit_file を使う。
 
         :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。
         :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きを読むときは前回の next_offset をそのまま渡す (それ以外の値は行の途中から読むことになり、文字の途中なら断る)
@@ -1896,11 +2082,15 @@ class Tools:
             return READ_IMAGE_NO_FEED_HINT
         return hint
 
-    def _binary_error(self, abs_path: str) -> ToolError:
+    def _binary_error(
+        self, abs_path: str, next_step: Optional[str] = None
+    ) -> ToolError:
+        """テキストでない物を断る文。次の手は read_file では valve (`binary_hint`)、edit_file は
+        読む手段でなく直す手段を言う (`_EDIT_BINARY_NEXT`)。"""
         return ToolCallError(
             f"{abs_path} はテキストとして読めない (Office 文書などのバイナリか、"
             "UTF-8 / cp932 のテキストでない)",
-            self.valves.binary_hint,
+            next_step or self.valves.binary_hint,
         )
 
     def _other_ext_error(self, abs_path: str) -> ToolError:

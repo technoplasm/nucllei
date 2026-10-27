@@ -4,7 +4,7 @@ jail のパスと URL は同じ文字列(`/ext/...`)。この module は「こ�
 rw / ro / 見えない のどれか」を決め、次の全員がそれに従う:
 
 - sandbox tool(`builtin_tools/sandbox.py`)— jail に bind する一覧(`sandbox_ext_mounts`)と、
-  write_file / list_workspace / fetch_from_workspace の可否
+  write_file / edit_file / list_workspace / fetch_from_workspace の可否
 - `/ext` ゲート(`routers/ext.py` の `serve_ext`)— 見えない物は不在と同じ 404
 - 参照の resolver(`utils/image_refs.py` の `resolve_url` / `resolve_path` / 橋渡し)—
   URL 取得・feed_image・sandbox のパス ↔ URL

@@ -21,7 +21,7 @@
   検証し、送信直前にもう一度 resolver (`FETCH_MAX_BYTES`) で読むので、その小さいほう
 - 添付の上限が sandbox の上限より大きい (無制限を含む) なら warning (`warn_if_over_sandbox_limit`)
 
-揃えないもの: write_file の本文とファイルブラウザのテキスト編集 (env `SANDBOX_TEXT_MAX_SIZE_MB`)、
+揃えないもの: write_file の本文・edit_file で直すファイルとファイルブラウザのテキスト編集 (env `SANDBOX_TEXT_MAX_SIZE_MB`)、
 quota。read_file は範囲読みでファイル全体の大きさを問わない。
 """
 

@@ -464,6 +464,56 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(tool.write_file("/ext/public/x.md", "x", __user__=ADMIN))
         assert "書き込んだ" in out
 
+    def test_edit_file(self):
+        """edit_file (2026-10-27) は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
+        断り、書ける置き場は mounts 付きで stat → 読み (nofollow) → 書き戻す。"""
+        body = "- 手順 1\n".encode("utf-8")
+        responses = {
+            "/files/stat": {"exists": True, "type": "file", "size": len(body)},
+            "/files/read": {"name": "r.md", "b64": base64.b64encode(body).decode()},
+            "/files/write": {"ok": True},
+        }
+        tool = _tool(responses)
+        out = _text(
+            tool.edit_file(
+                "/ext/groups/EMR/recipes/r.md", "手順 1", "手順 2", __user__=MEMBER
+            )
+        )
+        assert out.startswith("/ext/groups/EMR/recipes/r.md の 1 行目を置き換えた"), out
+        assert [c[0] for c in tool.calls] == [
+            "/files/stat",
+            "/files/read",
+            "/files/write",
+        ]
+        for _, payload in tool.calls:
+            assert payload["path"] == "/ext/groups/EMR/recipes/r.md"
+            assert {"path": "/ext/groups/EMR", "rw": True} in payload["mounts"]
+        assert tool.calls[1][1]["nofollow"] is True
+        written = base64.b64decode(tool.calls[2][1]["b64"]).decode("utf-8")
+        assert written == "- 手順 2\n"
+
+        # 見えない置き場は「無い」、public は一般ユーザーには ro、置き場そのものはディレクトリ
+        tool = _tool({})
+        for path in (
+            "/ext/groups/OTHER/x.md",
+            "/ext/groups/EMR/../OTHER/x.md",
+        ):
+            out = _text(tool.edit_file(path, "a", "b", __user__=MEMBER))
+            assert "は無い" in out, out
+        out = _text(tool.edit_file("/ext/public/x.md", "a", "b", __user__=MEMBER))
+        assert "read-only" in out and "書けるのは管理者だけ" in out
+        out = _text(tool.edit_file("/ext/groups/EMR", "a", "b", __user__=MEMBER))
+        assert "ディレクトリ" in out
+        out = _text(tool.edit_file("/ext/doc/x.md", "a", "b", __user__=MEMBER))
+        assert out == _text(tool.write_file("/ext/doc/x.md", "a", __user__=MEMBER))
+        assert tool.calls == []
+
+        # 管理者は /ext/public も直せる
+        tool = _tool(responses)
+        out = _text(tool.edit_file("/ext/public/x.md", "手順 1", "x", __user__=ADMIN))
+        assert "置き換えた" in out
+        assert {"path": "/ext/public", "rw": True} in tool.calls[2][1]["mounts"]
+
     def test_read_file(self):
         """#153: read_file も同じ ACL — 見えない置き場は「無い」(sandbox に問い合わせない)、
         public は一般ユーザーでも読める (ro)、読むときは mounts + nofollow。"""

@@ -293,7 +293,7 @@ separate reasoning block.
 | `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                            |
 | `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
 | `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                              |
-| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)     | text cap: body of `write_file` (guard against a looping model) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7) |
+| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)     | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7) |
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                                        |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                          |
 | `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                          |
@@ -2064,8 +2064,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (or a skill that carries it — §5.8) × the preset's delegation allowlist
     (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
-    `send_to_workspace` / `write_file` / `read_file` / `list_workspace` /
-    `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
+    `send_to_workspace` / `write_file` / `edit_file` / `read_file` /
+    `list_workspace` / `fetch_from_workspace`. **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
     the always-registered builtins above, it needs an external service to be
@@ -2131,6 +2131,36 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     default and `feed_image` is not on the turn, the image / PDF refusal says
     「PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを書き出し、そのファイルを read_file で読む。」
     instead (a deployment's own valve text is kept as is).
+    `edit_file(path, old_text, new_text)` (2026-10-27, requested by llens) edits
+    part of an existing text file: it replaces the **one** occurrence of
+    `old_text` with `new_text` and writes the file back. Path resolution, ACL
+    (`/workspace/`, a writable `/ext/groups/<g>/`, `/ext/public/` for admins),
+    the directory / read-only / not-visible refusals and the write itself
+    (`/files/write`, with `mounts` for `/ext`) are **shared with `write_file`**
+    (one resolver), so the two never disagree. It reads the whole file the way
+    `read_file` does (`/files/stat` then `/files/read` with `nofollow`,
+    symlinks refused), decides the encoding on the whole file (BOM-UTF-8 →
+    UTF-8 → cp932, strict) and **writes back in the same encoding** (BOM kept,
+    cp932 stays cp932; a `new_text` character cp932 cannot represent is refused
+    rather than switching the file to UTF-8). Matching is a literal match on
+    the decoded text — no whitespace / CRLF normalisation, no nearest match.
+    0 matches → 「… に old_text と一致する箇所が無い」 (plus
+    「(このファイルの改行は CRLF)」 when the file has CRLF and `old_text` uses
+    bare `\n`), next step 「read_file で現物を見て、空白・改行まで含めて old_text を写し直す。」;
+    2 or more (overlapping matches count) → 「… が N か所ある (a, b, … 行目)」
+    (up to 5 line numbers), next step 「前後の行を old_text に含めて、一致が 1 か所になるようにする。」.
+    An empty `old_text` is refused (no append mode): 「末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。」.
+    Image / Office / other binary extensions are refused before asking the
+    sandbox, undecodable content after reading, both with `read_file`'s fact
+    sentence and the next step 「edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。」.
+    The file before and the result after the edit are capped by
+    `SANDBOX_TEXT_MAX_SIZE_MB`. The result is
+    「<path> の N 行目 (N〜M 行目) を置き換えた (文字コード: …、size)。」
+    followed by the edited lines with line numbers (2 lines of context each
+    side, at most 10 lines). A write by someone else between the read and the
+    write is not detected (the sandbox has no conditional write).
+    `write_file`'s and `read_file`'s docstrings point at `edit_file` for
+    partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
     **Wording of the sandbox texts (2026-10-19, llens audit)**: a full
     workspace (HTTP 507 / `No space left on device`) ends with
     「次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。」
