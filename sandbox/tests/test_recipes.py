@@ -233,3 +233,45 @@ def test_trash_name_invalid(env, name):
     r = _post(c, "/files/trash", path="recipes/集計/RECIPE.md", name=name)
     assert r.status_code == 400
     assert (ws / "recipes" / "集計" / "RECIPE.md").exists()
+
+
+def test_index_entries_and_stat_many(env):
+    mod, c, ws, ext = env
+    d = _recipe(ws, "前処理")
+    (d / "prep.sh").write_text("echo hi")
+    (ws / "notes.md").write_text("n")
+    os.symlink(ws / "notes.md", d / "link.md")
+    r = _post(c, "/recipes/index", places=["/workspace"])
+    item = _place(r.json(), "/workspace")["recipes"][0]
+    assert item["entries"] == {
+        "RECIPE.md": "file",
+        "prep.sh": "file",
+        "link.md": "symlink",
+    }
+    _recipe(ext / "groups" / "EMR", "抽出")
+    r = _post(
+        c,
+        "/files/stat_many",
+        paths=[
+            "/workspace/notes.md",
+            "/workspace/無い.md",
+            "/workspace/recipes/前処理",
+            "/workspace/recipes/前処理/link.md",
+            "/ext/groups/EMR/recipes/抽出/RECIPE.md",
+            "/ext/groups/OTHER/recipes/secret/RECIPE.md",
+            "/etc/passwd",
+            "/workspace/../etc",
+        ],
+        mounts=MEMBER_MOUNTS,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["results"] == {
+        "/workspace/notes.md": "file",
+        "/workspace/無い.md": None,
+        "/workspace/recipes/前処理": "dir",
+        "/workspace/recipes/前処理/link.md": "symlink",
+        "/ext/groups/EMR/recipes/抽出/RECIPE.md": "file",
+        "/ext/groups/OTHER/recipes/secret/RECIPE.md": None,
+        "/etc/passwd": None,
+        "/workspace/../etc": None,
+    }

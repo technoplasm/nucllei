@@ -98,7 +98,8 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
 - [x] **レシピ用の endpoint** (2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)。
       nucllei の builtin `load_recipe` / `save_recipe` / `edit_recipe` と `{{USER_RECIPES}}` 用に
       `POST /recipes/index` (各層の `recipes/<名前>/RECIPE.md` の先頭を 1 回で) と
-      `POST /recipes/folder` (フォルダの中身を本文ごと。symlink は `skipped`) を足し、`/files/trash`
+      `POST /recipes/folder` (フォルダの中身を本文ごと。symlink は `skipped`)、`POST /files/stat_many`
+      (参照先の有無をまとめて) を足し、`/files/trash`
       に `name` (ゴミ箱での名前) を足した。判定は nucllei 側。回帰は `test_recipes.py`。
       **実機 (コンテナ) は未確認** — image の更新待ち
 - [x] **グループ・全体の共有の置き場** (#152、2026-10-07)。`/ext/groups/<g>` `/ext/public` を

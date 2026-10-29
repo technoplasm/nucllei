@@ -436,11 +436,15 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `POST /recipes/index` — `{user_id, places, mounts?, head_bytes?}` (2026-10-30、llens 依頼)。
     nucllei の `{{USER_RECIPES}}` (見えるレシピの一覧を system prompt に出す) 用。`places` は層の
     jail のパス (`/workspace` / `/ext/groups/<g>` / `/ext/public`) で、各層の `recipes/` の直下を
-    `{places: [{place, exists, recipes: [{name, type, md: {type, size, head_b64, truncated} | null}]}]}`
-    で返す (`.` 始まりは出さない・1 層 500 件まで、`head_bytes` は既定 16KB・上限 64KB)。symlink の
+    `{places: [{place, exists, recipes: [{name, type, md: {type, size, head_b64, truncated} | null,
+    entries: {<直下の名前>: <種類>}}]}]}` で返す (`.` 始まりは出さない・1 層 500 件まで、`head_bytes` は既定 16KB・上限 64KB)。symlink の
     フォルダ・RECIPE.md は辿らず種類だけ。bind に無い層・不正な place はその層の `error` (status) に
     して他の層は返す。毎リクエスト走るので 1 回で全部返す (100 件の層で 1 秒未満を
     `test_recipes.py` で見る)。判定 (名前の規則・frontmatter) は nucllei の `utils/recipes.py`
+  - `POST /files/stat_many` — `{user_id, paths, mounts?}` → `{results: {<path>: "file" | "dir" |
+    "symlink" | "other" | null}}` (2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`) を 500 件まで
+    まとめて stat する (経路も末端も symlink を辿らない、`null` は無い・見えない)。nucllei の
+    `{{USER_RECIPES}}` が全レシピの on_load の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
   - `POST /recipes/folder` — `{user_id, path, mounts?, limit_bytes?}`。レシピのフォルダの中身を
     再帰で返す: `{exists, is_dir, files: [{rel, size, b64, mtime}], skipped: [{rel, why}], dirs,
     truncated}` (付属を含む。200 ファイルまで)。symlink・普通のファイルでないものは辿らず

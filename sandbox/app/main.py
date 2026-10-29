@@ -1586,6 +1586,14 @@ class RecipeIndexRequest(BaseModel):
     head_bytes: int = 16384
 
 
+class StatManyRequest(BaseModel):
+    # 複数のパスの種類をまとめて (nucllei の {{USER_RECIPES}} が on_load の参照先の有無を 1 回で
+    # 調べる。2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`)
+    user_id: str
+    paths: list[str] = Field(default_factory=list)
+    mounts: list[MountIn] = Field(default_factory=list)
+
+
 class RecipeFolderRequest(PathRequest):
     # レシピのフォルダの中身 (付属を含む全ファイルの本文と、持っていかないもの)。nucllei の
     # save_recipe / edit_recipe / load_recipe が検査と写しに使う (2026-10-30)
@@ -2898,6 +2906,21 @@ def _recipe_md_head(dfd: int, head: int) -> Optional[dict]:
     }
 
 
+def _dir_entry_kinds(dfd: int) -> dict:
+    """フォルダ直下の {名前: 種類} (symlink は辿らない。200 件まで)。shell / python の付属の有無を
+    nucllei が見るのに使う。"""
+    out = {}
+    with os.scandir(dfd) as it:
+        for de in it:
+            if len(out) >= RECIPE_FOLDER_FILES_LIMIT:
+                break
+            try:
+                out[de.name] = _kind_of(de.stat(follow_symlinks=False).st_mode)
+            except OSError:
+                continue
+    return out
+
+
 def _recipes_index_place(t: _Target, head: int) -> dict:
     """1 つの層の `recipes/` の直下。`t.segs` は `[…, "recipes"]`。"""
     segs = t.segs
@@ -2934,6 +2957,7 @@ def _recipes_index_place(t: _Target, head: int) -> dict:
                 else:
                     try:
                         item["md"] = _recipe_md_head(dfd, head)
+                        item["entries"] = _dir_entry_kinds(dfd)
                     finally:
                         os.close(dfd)
             recipes.append(item)
@@ -2967,6 +2991,33 @@ async def recipes_index(req: RecipeIndexRequest):
             res = {"exists": False, "recipes": [], "error": e.status_code}
         out.append({"place": place, **res})
     return {"places": out}
+
+
+STAT_MANY_LIMIT = 500
+
+
+@app.post("/files/stat_many")
+async def files_stat_many(req: StatManyRequest):
+    """複数のパスの種類 `{results: {<path>: "file" | "dir" | "symlink" | "other" | null}}`。
+    `null` は無い・見えない (bind に無い・不正なパス)。経路も末端も symlink を辿らない。
+    500 件まで (超えた分は返さない)。"""
+    out: dict = {}
+    for path in req.paths[:STAT_MANY_LIMIT]:
+        try:
+            if path == "/workspace" or path.startswith("/workspace/"):
+                rel = path[len("/workspace") :].lstrip("/") or "."
+                t = await _fs_target(req.user_id, rel, req.mounts, write=False)
+            elif path.startswith("/ext/"):
+                t = await _fs_target(req.user_id, path, req.mounts, write=False)
+            else:
+                out[path] = None
+                continue
+            st = await asyncio.to_thread(_fs_stat, t)
+        except HTTPException:
+            out[path] = None
+            continue
+        out[path] = st.get("type") if st.get("exists") else None
+    return {"results": out}
 
 
 def _fs_recipe_folder(t: _Target, limit: int) -> dict:
