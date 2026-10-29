@@ -95,6 +95,12 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       `/ext/groups/*/trash` `/ext/public/trash` は 1 時間ごとの周期タスクで同じ期限の掃除。
       回帰は `test_files_browser.py` (`test_trash_*`) と `test_retention.py` (`test_ext_trash_*`)。
       **実機 (コンテナ) は未確認** — image の更新待ち
+- [x] **レシピ用の endpoint** (2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)。
+      nucllei の builtin `load_recipe` / `save_recipe` / `edit_recipe` と `{{USER_RECIPES}}` 用に
+      `POST /recipes/index` (各層の `recipes/<名前>/RECIPE.md` の先頭を 1 回で) と
+      `POST /recipes/folder` (フォルダの中身を本文ごと。symlink は `skipped`) を足し、`/files/trash`
+      に `name` (ゴミ箱での名前) を足した。判定は nucllei 側。回帰は `test_recipes.py`。
+      **実機 (コンテナ) は未確認** — image の更新待ち
 - [x] **グループ・全体の共有の置き場** (#152、2026-10-07)。`/ext/groups/<g>` `/ext/public` を
       nucllei が渡す `mounts` どおりに 1 つずつ rw / ro で bind (丸ごとは bind しない)。kernel は
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを

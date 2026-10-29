@@ -1569,6 +1569,29 @@ class DeleteRequest(PathRequest):
     permanent: bool = False
 
 
+class TrashRequest(PathRequest):
+    # ゴミ箱での名前 (省略時は元の名前)。nucllei の save_recipe が前の版の RECIPE.md を
+    # `<レシピ名>.RECIPE.md` として移すのに使う (2026-10-30、llens 依頼)。同名は `-2` `-3`… の
+    # 規則のまま。`/` `.` 始まり・NUL・255 バイト超は 400
+    name: Optional[str] = None
+
+
+class RecipeIndexRequest(BaseModel):
+    # `{{USER_RECIPES}}` の一覧 (nucllei、2026-10-30)。`places` は層の jail のパス
+    # (`/workspace` / `/ext/groups/<g>` / `/ext/public`)。各層の `recipes/<名前>/RECIPE.md` の先頭
+    # `head_bytes` バイトとフォルダの種類を 1 回で返す
+    user_id: str
+    places: list[str] = Field(default_factory=list)
+    mounts: list[MountIn] = Field(default_factory=list)
+    head_bytes: int = 16384
+
+
+class RecipeFolderRequest(PathRequest):
+    # レシピのフォルダの中身 (付属を含む全ファイルの本文と、持っていかないもの)。nucllei の
+    # save_recipe / edit_recipe / load_recipe が検査と写しに使う (2026-10-30)
+    limit_bytes: Optional[int] = None
+
+
 class RenameRequest(BaseModel):
     user_id: str
     path: str
@@ -2403,7 +2426,9 @@ def _fs_delete(t: _Target, permanent: bool = False) -> dict:
     return {"ok": True, "trashed": False}
 
 
-def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
+def _move_to_trash(
+    t: _Target, dfd: int, leaf: str, dest_name: Optional[str] = None
+) -> dict:
     """`dfd` の中の `leaf` を置き場 (`t.base` = workspace か `/ext` の bind) の trash/ の直下へ
     移す。同名が在れば `_trash_name` の
     番号を進める。trash/ が無ければ作る (jail のユーザーの物。jail で消されていても動く)。
@@ -2418,7 +2443,7 @@ def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
         raise
     try:
         for n in range(1, TRASH_NAME_TRIES + 1):
-            name = _trash_name(leaf, n)
+            name = _trash_name(dest_name or leaf, n)
             if len(os.fsencode(name)) > 255 or _lstat_at(name, tfd) is not None:
                 continue
             try:
@@ -2433,7 +2458,20 @@ def _move_to_trash(t: _Target, dfd: int, leaf: str) -> dict:
     raise HTTPException(409, f"no free name in {TRASH_DIR}/ for: {leaf}")
 
 
-def _fs_trash(t: _Target) -> dict:
+def _valid_trash_name(name: str) -> str:
+    """`/files/trash` の `name` (ゴミ箱での名前)。1 セグメントのファイル名だけ受ける。"""
+    if (
+        not name
+        or "/" in name
+        or "\x00" in name
+        or name.startswith(".")
+        or len(os.fsencode(name)) > 255
+    ):
+        raise HTTPException(400, f"invalid trash name: {name!r}")
+    return name
+
+
+def _fs_trash(t: _Target, dest_name: Optional[str] = None) -> dict:
     """ゴミ箱へ移す (`/files/trash`)。workspace も `/ext` の bind も、その置き場の trash/ の直下へ。
     **完全には消さない** (`/files/delete` と違い、どの置き場・どの条件でも)。断るもの:
     `_check_mutable` の範囲 (置き場の root・`.` 始まり・workspace 直下の `imports/` `trash/`)、
@@ -2449,7 +2487,7 @@ def _fs_trash(t: _Target) -> dict:
             raise HTTPException(404, f"not found: {t.path}")
         if stat.S_ISLNK(st.st_mode):
             raise HTTPException(400, f"is a symlink: {t.path}")
-        res = _move_to_trash(t, dfd, segs[-1])
+        res = _move_to_trash(t, dfd, segs[-1], dest_name)
     finally:
         os.close(dfd)
     return {**res, "cache_ttl_days": CACHE_TTL_REPORTED}
@@ -2794,7 +2832,7 @@ async def files_delete(req: DeleteRequest):
 
 
 @app.post("/files/trash")
-async def files_trash(req: PathRequest):
+async def files_trash(req: TrashRequest):
     """ゴミ箱へ移す (nucllei の builtin `remove_file`。2026-10-27、ken 決定・llens 依頼)。
     ファイルもディレクトリ (中身ごと) も、その置き場の trash/ の直下へ: workspace は
     `trash/<名前>`、`/ext/groups/<g>/…` は `/ext/groups/<g>/trash/<名前>`、`/ext/public/…` は
@@ -2802,9 +2840,10 @@ async def files_trash(req: PathRequest):
     応答 `{ok, trashed: true, path, cache_ttl_days}` (`path` は workspace なら相対)。
     `/files/delete` の既定 (`/ext` は完全に消す) は変えない — 新しい nucllei と古い sandbox の
     組み合わせで `/ext` のファイルが黙って完全に消えないよう、別の endpoint にした (古い
-    sandbox は 404 で止まる)。"""
+    sandbox は 404 で止まる)。`name` を渡すとゴミ箱ではその名前にする (同名の規則は同じ)。"""
+    dest_name = _valid_trash_name(req.name) if req.name is not None else None
     t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
-    return await asyncio.to_thread(_fs_trash, t)
+    return await asyncio.to_thread(_fs_trash, t, dest_name)
 
 
 @app.post("/files/rename")
@@ -2818,6 +2857,215 @@ async def files_rename(req: RenameRequest):
 async def files_mkdir(req: PathRequest):
     t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
     return await asyncio.to_thread(_fs_mkdir, t)
+
+
+# ---------------------------------------------------------------------------
+# レシピ (nucllei の builtin load_recipe / save_recipe / edit_recipe と {{USER_RECIPES}}。
+# 2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)
+# ---------------------------------------------------------------------------
+# 置き場は `<層>/recipes/<名前>/RECIPE.md` (+ 同じフォルダの付属)。層は workspace と
+# `/ext/groups/<g>` `/ext/public` (リクエストの mounts の bind)。どちらも fd で辿り、経路も末端も
+# symlink を辿らない (`/files/*` と同じ作法)。判定 (名前の規則・frontmatter・患者データ…) は
+# nucllei の `utils/recipes.py` が持ち、ここは中身を運ぶだけ。
+
+RECIPES_DIR = "recipes"
+RECIPE_MD = "RECIPE.md"
+# 1 層あたりのレシピの数・1 フォルダあたりのファイル数の上限 (超えた分は `truncated: true`)
+RECIPE_INDEX_LIMIT = 500
+RECIPE_FOLDER_FILES_LIMIT = 200
+RECIPE_HEAD_MAX = 65536
+
+
+def _recipe_md_head(dfd: int, head: int) -> Optional[dict]:
+    """フォルダ (`dfd`) の直下の RECIPE.md の種類と先頭 `head` バイト。無ければ None。"""
+    st = _lstat_at(RECIPE_MD, dfd)
+    if st is None:
+        return None
+    kind = _kind_of(st.st_mode)
+    if kind != "file":
+        return {"type": kind, "size": 0}
+    try:
+        fd = os.open(RECIPE_MD, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+    except OSError:
+        return {"type": "symlink", "size": 0}
+    with os.fdopen(fd, "rb") as f:
+        data = f.read(head + 1)
+    return {
+        "type": "file",
+        "size": st.st_size,
+        "head_b64": base64.b64encode(data[:head]).decode(),
+        "truncated": len(data) > head,
+    }
+
+
+def _recipes_index_place(t: _Target, head: int) -> dict:
+    """1 つの層の `recipes/` の直下。`t.segs` は `[…, "recipes"]`。"""
+    segs = t.segs
+    pfd = _open_parent(t, segs)
+    if pfd is None:
+        return {"exists": False, "recipes": []}
+    try:
+        st = _lstat_at(segs[-1], pfd)
+        if st is None:
+            return {"exists": False, "recipes": []}
+        if not stat.S_ISDIR(st.st_mode):
+            return {"exists": True, "type": _kind_of(st.st_mode), "recipes": []}
+        rfd = os.open(segs[-1], _DIR_FLAGS, dir_fd=pfd)
+    finally:
+        os.close(pfd)
+    recipes = []
+    truncated = False
+    try:
+        with os.scandir(rfd) as it:
+            names = sorted(de.name for de in it if not de.name.startswith("."))
+        for name in names:
+            if len(recipes) >= RECIPE_INDEX_LIMIT:
+                truncated = True
+                break
+            st = _lstat_at(name, rfd)
+            if st is None:
+                continue
+            item = {"name": name, "type": _kind_of(st.st_mode)}
+            if stat.S_ISDIR(st.st_mode):
+                try:
+                    dfd = os.open(name, _DIR_FLAGS, dir_fd=rfd)
+                except OSError:
+                    item["type"] = "symlink"
+                else:
+                    try:
+                        item["md"] = _recipe_md_head(dfd, head)
+                    finally:
+                        os.close(dfd)
+            recipes.append(item)
+    finally:
+        os.close(rfd)
+    return {"exists": True, "type": "dir", "recipes": recipes, "truncated": truncated}
+
+
+@app.post("/recipes/index")
+async def recipes_index(req: RecipeIndexRequest):
+    """各層 (`places`) の `recipes/<名前>/` と、その RECIPE.md の先頭。応答
+    `{places: [{place, exists, recipes: [{name, type, md: {type, size, head_b64, truncated} | null}]}]}`。
+    層ごとの失敗 (bind に無い等) はその層の `error` (HTTP の status) にして他の層は返す。"""
+    head = max(0, min(int(req.head_bytes or 0), RECIPE_HEAD_MAX))
+    out = []
+    for place in req.places:
+        try:
+            if place in ("/workspace", "workspace", "."):
+                t = await _fs_target(req.user_id, RECIPES_DIR, req.mounts, write=False)
+            elif place.startswith("/ext/"):
+                t = await _fs_target(
+                    req.user_id,
+                    f"{place.rstrip('/')}/{RECIPES_DIR}",
+                    req.mounts,
+                    write=False,
+                )
+            else:
+                raise HTTPException(400, f"invalid place: {place!r}")
+            res = await asyncio.to_thread(_recipes_index_place, t, head)
+        except HTTPException as e:
+            res = {"exists": False, "recipes": [], "error": e.status_code}
+        out.append({"place": place, **res})
+    return {"places": out}
+
+
+def _fs_recipe_folder(t: _Target, limit: int) -> dict:
+    """フォルダの中身を再帰で (付属を含む)。経路も末端も symlink を辿らない。ファイルは本文ごと、
+    symlink・普通のファイルでないものは `skipped`。合計が `limit` を超えたら 413。"""
+    segs = t.segs
+    if not segs:
+        raise HTTPException(400, f"not a recipe folder: {t.path}")
+    pfd = _open_parent(t, segs)
+    if pfd is None:
+        return {"exists": False, "is_dir": False, "files": [], "skipped": []}
+    try:
+        st = _lstat_at(segs[-1], pfd)
+        if st is None:
+            return {"exists": False, "is_dir": False, "files": [], "skipped": []}
+        if not stat.S_ISDIR(st.st_mode):
+            return {
+                "exists": True,
+                "is_dir": False,
+                "type": _kind_of(st.st_mode),
+                "files": [],
+                "skipped": [],
+            }
+        top = os.open(segs[-1], _DIR_FLAGS, dir_fd=pfd)
+    finally:
+        os.close(pfd)
+    files, skipped, dirs = [], [], []
+    total = 0
+    truncated = False
+    try:
+        for dirpath, dirnames, filenames, dfd in os.fwalk(
+            ".", dir_fd=top, follow_symlinks=False
+        ):
+            rel_dir = "" if dirpath == "." else dirpath[2:] + "/"
+            # fwalk(follow_symlinks=False) は symlink のディレクトリを dirnames に入れるが降りない。
+            # 持っていかないものとして記録する
+            real_dirs = []
+            for name in sorted(dirnames):
+                lst = _lstat_at(name, dfd)
+                if lst is not None and stat.S_ISLNK(lst.st_mode):
+                    skipped.append({"rel": rel_dir + name, "why": "symlink"})
+                else:
+                    real_dirs.append(name)
+                    dirs.append(rel_dir + name)
+            dirnames[:] = real_dirs
+            for name in sorted(filenames):
+                rel = rel_dir + name
+                lst = _lstat_at(name, dfd)
+                if lst is None:
+                    continue
+                if stat.S_ISLNK(lst.st_mode):
+                    skipped.append({"rel": rel, "why": "symlink"})
+                    continue
+                if not stat.S_ISREG(lst.st_mode):
+                    skipped.append({"rel": rel, "why": "other"})
+                    continue
+                if len(files) >= RECIPE_FOLDER_FILES_LIMIT:
+                    truncated = True
+                    continue
+                total += lst.st_size
+                if total > limit:
+                    raise _too_large(total, limit)
+                try:
+                    fd = os.open(
+                        name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd
+                    )
+                except OSError:
+                    skipped.append({"rel": rel, "why": "symlink"})
+                    continue
+                with os.fdopen(fd, "rb") as f:
+                    data = f.read(limit + 1)
+                files.append(
+                    {
+                        "rel": rel,
+                        "size": len(data),
+                        "b64": base64.b64encode(data).decode(),
+                        "mtime": _mtime(lst),
+                    }
+                )
+    finally:
+        os.close(top)
+    return {
+        "exists": True,
+        "is_dir": True,
+        "path": _join(t, segs),
+        "files": files,
+        "skipped": skipped,
+        "dirs": dirs,
+        "truncated": truncated,
+    }
+
+
+@app.post("/recipes/folder")
+async def recipes_folder(req: RecipeFolderRequest):
+    """レシピのフォルダの中身 (付属を含む全ファイルの本文 b64・持っていかないもの `skipped`・
+    サブフォルダ `dirs`)。上限は `limit_bytes` (省略時 FILE_LIMIT) で、合計が超えたら 413。"""
+    limit = FILE_LIMIT if req.limit_bytes is None else max(0, int(req.limit_bytes))
+    t = await _fs_target(req.user_id, req.path, req.mounts, write=False)
+    return await asyncio.to_thread(_fs_recipe_folder, t, limit)
 
 
 @app.post("/files/usage")
