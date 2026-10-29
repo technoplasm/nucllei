@@ -11,10 +11,9 @@ export type SkillItem = {
 	tool_ids?: string[];
 	// 自動ロード条件: content_type の前方一致リスト(例 ['audio/'])。空 = 自動ロードしない
 	auto_load_content_types?: string[];
-	// llens#22: 読み込まれたら一緒に読み込む skill の id。省略 = 更新で既存値を保つ
-	requires?: string[];
-	// llens#22: 読み込まれたらサーバが chat につき 1 回実行する tool(固定引数)。
-	// 非空の保存は admin のみ。省略 = 更新で既存値を保つ
+	// llens#22: 読み込まれたときに書いた順に処理する手順(固定引数)。load_skill の要素は別の
+	// skill を一緒に読み込み、それ以外の tool はサーバが chat につき 1 回実行する。load_skill
+	// 以外を含む保存は admin のみ。省略 = 更新で既存値を保つ
 	on_load?: SkillOnLoad[];
 	access_control?: null | object;
 };

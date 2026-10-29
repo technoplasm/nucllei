@@ -48,11 +48,13 @@
 	// 正規化(小文字化・空要素と重複の除去)はバックエンドが行う。
 	let autoLoadContentTypes = $state('');
 
-	// llens#22: requires(一緒に読み込む skill の id)はカンマ区切り、on_load(読み込み時に
-	// サーバが 1 回実行する tool)は JSON の配列で編集する。on_load は admin のみ
-	// (バックエンドの admin ゲートと整合)— 非 admin の保存では送らない = 既存値を保つ。
-	let requires = $state('');
+	// llens#22: on_load(読み込み時に書いた順に処理する手順)は JSON の配列で編集する。
+	// load_skill の要素(別の skill を一緒に読み込む)だけなら誰でも書けるが、それ以外の tool
+	// (サーバが実行する)を含むものは admin のみ(バックエンドの admin ゲートと整合)。
+	// 非 admin が開いた skill に tool の要素が入っていれば欄は読み取り専用で、保存では
+	// 送らない(= 既存値を保つ。その skill はバックエンドが非 admin の更新を断る)。
 	let onLoadText = $state('');
+	let onLoadLocked = $state(false);
 
 	let accessControl = $state<any>({});
 
@@ -82,9 +84,16 @@
 			return;
 		}
 
-		if ($user?.role === 'admin' && parseOnLoad(onLoadText) === null) {
-			toast.error($i18n.t('On load must be a JSON array.'));
-			return;
+		if (!onLoadLocked) {
+			const parsed = parseOnLoad(onLoadText);
+			if (parsed === null) {
+				toast.error($i18n.t('On load must be a JSON array.'));
+				return;
+			}
+			if ($user?.role !== 'admin' && hasToolEntries(parsed)) {
+				toast.error($i18n.t('Only admins can set tools other than load_skill in On load.'));
+				return;
+			}
 		}
 
 		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
@@ -106,15 +115,18 @@
 			content,
 			tool_ids: toolIds,
 			auto_load_content_types: autoLoadContentTypes.split(',').map((type) => type.trim()),
-			requires: requires
-				.split(',')
-				.map((skillId) => skillId.trim())
-				.filter((skillId) => skillId !== ''),
-			...($user?.role === 'admin' ? { on_load: parseOnLoad(onLoadText) } : {}),
+			...(onLoadLocked ? {} : { on_load: parseOnLoad(onLoadText) }),
 			access_control: accessControl
 		});
 		loading = false;
 	};
+
+	// load_skill 以外の tool(サーバが実行する)の要素があるか — あれば admin のみ
+	const hasToolEntries = (entries: unknown[]) =>
+		entries.some(
+			(entry) =>
+				!entry || typeof entry !== 'object' || (entry as { tool?: unknown }).tool !== 'load_skill'
+		);
 
 	// 空欄は [](on_load 無し)。配列でない・JSON でないものは null(保存させない)。
 	// 要素の形(tool・args)の検証はバックエンドが行い、400 の detail を toast に出す
@@ -145,8 +157,8 @@
 			_content = content;
 			toolIds = skill?.tool_ids ?? [];
 			autoLoadContentTypes = (skill?.auto_load_content_types ?? []).join(', ');
-			requires = (skill?.requires ?? []).join(', ');
 			onLoadText = (skill?.on_load ?? []).length ? JSON.stringify(skill.on_load, null, 2) : '';
+			onLoadLocked = $user?.role !== 'admin' && hasToolEntries(skill?.on_load ?? []);
 
 			accessControl = skill?.access_control ?? null;
 		}
@@ -258,21 +270,31 @@
 		</div>
 
 		<div class="flex items-start gap-2 my-2">
-			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-requires">
-				{$i18n.t('Requires')}
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-on-load">
+				{$i18n.t('On load')}
 			</label>
 			<div class="flex-1 min-w-0">
-				<input
-					id="skill-requires"
-					class="w-full text-sm py-1 px-2 bg-surface-form rounded-xs outline-hidden"
-					placeholder="base, recipes"
-					bind:value={requires}
-				/>
-				<div class="text-xs text-content-muted mt-0.5">
-					{$i18n.t(
-						'Skills loaded together with this one, whichever way it is loaded (comma-separated skill IDs). They do not need to be assigned to the model.'
-					)}
-				</div>
+				{#if onLoadLocked}
+					<pre
+						id="skill-on-load"
+						class="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs whitespace-pre-wrap break-all text-content-muted">{onLoadText}</pre>
+					<div class="text-xs text-content-muted mt-0.5">
+						{$i18n.t('Only admins can change this, because it runs tools other than load_skill.')}
+					</div>
+				{:else}
+					<Textarea
+						id="skill-on-load"
+						className="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
+						placeholder={'[{"tool": "load_skill", "args": {"skill_id": "recipes"}}]'}
+						bind:value={onLoadText}
+						rows={2}
+					/>
+					<div class="text-xs text-content-muted mt-0.5">
+						{$i18n.t(
+							'Steps run in order when this skill is loaded (JSON array). load_skill loads another skill together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill.'
+						)}
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -302,26 +324,6 @@
 					{/if}
 					<div class="text-xs text-content-muted mt-0.5">
 						{$i18n.t('Only admins can create or update skills with tools attached.')}
-					</div>
-				</div>
-			</div>
-
-			<div class="flex items-start gap-2 my-2">
-				<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-on-load">
-					{$i18n.t('On load')}
-				</label>
-				<div class="flex-1 min-w-0">
-					<Textarea
-						id="skill-on-load"
-						className="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
-						placeholder={'[{"tool": "read_file", "args": {"path": "/ext/groups/…/notes.md"}}]'}
-						bind:value={onLoadText}
-						rows={2}
-					/>
-					<div class="text-xs text-content-muted mt-0.5">
-						{$i18n.t(
-							'Tools the server runs once per chat when this skill is loaded, with these fixed arguments (JSON array). The results are added to the chat as tool calls.'
-						)}
 					</div>
 				</div>
 			</div>
