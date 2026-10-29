@@ -69,6 +69,8 @@ from nucllei.utils.tool_errors import (
 )
 from nucllei.utils.tool_output import display, mark_error_kind
 from nucllei.utils.tool_render import Code, Rendered, hljs_language_for_extension
+from nucllei.utils.recipes import is_recipe_md_path
+from nucllei.builtin_tools.recipe_tools import RecipeTools
 
 log = logging.getLogger(__name__)
 
@@ -725,6 +727,15 @@ def _list_truncated_note(res: dict, entries: list) -> list[str]:
     ]
 
 
+def _recipe_md_refused(abs_path: str) -> ToolError:
+    """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。"""
+    return ToolCallError(
+        f"{abs_path} はレシピの本体 (RECIPE.md) で、write_file / edit_file では書かない",
+        "新しく作る・丸ごと書き直すなら save_recipe、一部を直すなら edit_recipe を使う"
+        " (同じフォルダの付属は write_file / edit_file で書いてよい)。",
+    )
+
+
 def _ext_not_found(abs_path: str) -> ToolError:
     """ACL の置き場 (#152) で見えない / 無いもの。所属していないグループの置き場は在っても
     「無い」と同じに言う (存在を漏らさない)。"""
@@ -1180,7 +1191,7 @@ def _iter_context_files(__files__, __metadata__):
 # -----------------------------------------------------------------------------
 # Tool 本体
 # -----------------------------------------------------------------------------
-class Tools:
+class Tools(RecipeTools):
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
     3 ツール共有で実行を跨いで永続する。ここに作ったファイルはそのままではユーザーに
     見えない — 渡すときは fetch_from_workspace を呼ぶ。/workspace/imports/ は添付などの
@@ -1196,7 +1207,10 @@ class Tools:
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
     `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
     `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / edit_file / remove_file /
-    read_file / list_workspace でも同じパスで扱える。"""
+    read_file / list_workspace でも同じパスで扱える。
+    レシピ (利用者が残す手順。`<層>/recipes/<名前>/RECIPE.md` と同じフォルダの付属) は
+    load_recipe で読み込み、save_recipe で作る・丸ごと書き直す、edit_recipe で一部を直す
+    (RECIPE.md を write_file / edit_file で書かない。付属は write_file / edit_file で書く)。"""
 
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
     # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
@@ -1779,6 +1793,8 @@ class Tools:
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__)
+        if is_recipe_md_path(abs_path):
+            raise _recipe_md_refused(abs_path)
         data = content.encode("utf-8")
         if len(data) > TEXT_MAX_BYTES:
             raise ToolCallError(
@@ -1876,6 +1892,8 @@ class Tools:
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__)
+        if is_recipe_md_path(abs_path):
+            raise _recipe_md_refused(abs_path)
         if not isinstance(old_text, str) or not isinstance(new_text, str):
             raise ToolCallError("old_text / new_text が文字列でない", "文字列で渡す。")
         if old_text == "":
@@ -2248,6 +2266,8 @@ class Tools:
             )
         if end < size:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
+        if is_recipe_md_path(abs_path):
+            body += "\n\nレシピは load_recipe(path) で読み込む。"
         return _read_rendered(abs_path, body)
 
     def _image_hint(self) -> str:

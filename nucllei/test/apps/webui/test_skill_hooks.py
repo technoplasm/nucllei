@@ -237,6 +237,92 @@ class TestSkillHooks(AbstractPostgresTest):
                 )
             assert response.status_code == 400, (extra, response.text)
 
+    def test_shorthand_on_load_is_normalized(self):
+        """レシピと同じ短い記法 (skill / recipe / read) を受けて正規形にする (2026-10-30)。
+        shell / python は付属の無い skill では 400。JSON 形の run_shell は今までどおり admin が書ける。"""
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={
+                    "id": "short",
+                    "name": "s",
+                    "content": "c",
+                    "on_load": [
+                        {"skill": "/emr"},
+                        {"recipe": "/ext/groups/EMR/recipes/抽出/RECIPE.md"},
+                        {"read": "/ext/groups/EMR/notes/./全体.md"},
+                        {"tool": "run_shell", "args": {"command": "ls"}},
+                    ],
+                },
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["on_load"] == [
+            {"tool": "load_skill", "args": {"skill_id": "emr"}},
+            {"tool": "load_recipe", "args": {"path": "/ext/groups/EMR/recipes/抽出"}},
+            {"tool": "read_file", "args": {"path": "/ext/groups/EMR/notes/全体.md"}},
+            {"tool": "run_shell", "args": {"command": "ls"}},
+        ]
+        for bad in (
+            [{"shell": "prep.sh"}],
+            [{"python": "calc.py"}],
+            [{"read": "notes.md"}],
+            [{"recipe": "/workspace/notes/x"}],
+            [{"recipe": "共通"}],
+            [{"skill": ""}],
+            [{"tool": "load_recipe", "args": {"path": "/x"}}],
+            [{"tool": "load_recipe", "args": {"path": "/workspace/recipes/a", "x": 1}}],
+        ):
+            with mock_webui_user(id="1", role="admin"):
+                response = self.fast_api_client.post(
+                    self.create_url("/create"),
+                    json={"id": "bad", "name": "b", "content": "c", "on_load": bad},
+                )
+            assert response.status_code == 400, (bad, response.text)
+
+    def test_editor_may_set_skill_and_recipe_but_not_read(self):
+        from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+        from nucllei.models.users import Users
+
+        Users.insert_new_user(
+            id="8", name="editor2", email="e2@hospital.example", role="user"
+        )
+        group = Groups.insert_new_group(
+            "1",
+            GroupForm(
+                name="skill-editors-2",
+                description="",
+                permissions={"workspace": {"skills": True}},
+            ),
+        )
+        Groups.update_group_by_id(
+            group.id,
+            GroupUpdateForm(
+                name=group.name, description=group.description, user_ids=["8"]
+            ),
+        )
+        with mock_webui_user(id="8", role="user"):
+            response = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={
+                    "id": "chain",
+                    "name": "c",
+                    "content": "c",
+                    "on_load": [{"skill": "emr"}, {"recipe": "/workspace/recipes/a"}],
+                },
+            )
+            assert response.status_code == 200, response.text
+            # read は実際に tool を実行する要素 — admin のみ
+            response = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={
+                    "id": "reader",
+                    "name": "r",
+                    "content": "c",
+                    "on_load": [{"read": "/ext/public/a.md"}],
+                },
+            )
+            assert response.status_code == 401
+
     def test_on_load_tools_are_admin_only_load_skill_is_not(self):
         from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
         from nucllei.models.users import Users

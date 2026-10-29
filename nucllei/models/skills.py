@@ -119,16 +119,28 @@ class SkillFieldError(ValueError):
 ON_LOAD_SKILL_TOOL = "load_skill"
 
 
+# on_load でレシピを読み込む要素の tool 名(2026-10-30)。実行される tool の要素だが、読むのは
+# 利用者の read 権限の範囲だけなので、load_skill と同じく skill editor も書ける
+ON_LOAD_RECIPE_TOOL = "load_recipe"
+
+
 def is_on_load_skill_entry(entry) -> bool:
     """on_load の要素が「別の skill を一緒に読み込む」(load_skill)か。"""
     return isinstance(entry, dict) and entry.get("tool") == ON_LOAD_SKILL_TOOL
 
 
 def on_load_tool_entries(on_load) -> list[dict]:
-    """on_load のうち、サーバが本当に実行する要素(load_skill 以外)。権限の判定に使う —
-    これが 1 つでもあれば admin のみ(tool_ids と同じ扱い)。load_skill の要素だけなら
-    skill editor も書ける(読み込み先は発火時に利用者の read ACL で判定する)。"""
-    return [e for e in on_load or [] if not is_on_load_skill_entry(e)]
+    """on_load のうち、権限の判定で数える要素(load_skill・load_recipe 以外)。これが 1 つでも
+    あれば admin のみ(tool_ids と同じ扱い)。load_skill / load_recipe の要素だけなら skill editor
+    も書ける(読み込み先は発火時に利用者の read 権限で判定する)。"""
+    return [
+        e
+        for e in on_load or []
+        if not (
+            isinstance(e, dict)
+            and e.get("tool") in (ON_LOAD_SKILL_TOOL, ON_LOAD_RECIPE_TOOL)
+        )
+    ]
 
 
 def normalize_on_load(value, skill_id: str) -> list[dict]:
@@ -142,10 +154,22 @@ def normalize_on_load(value, skill_id: str) -> list[dict]:
         raise SkillFieldError(
             'on_load は [{"tool": <tool 名>, "args": {…}}] の配列で指定する'
         )
+    from nucllei.utils.recipes import (
+        RecipePathError,
+        normalize_skill_on_load_shorthand,
+        parse_recipe_path,
+    )
+
     normalized = []
     for n, item in enumerate(value):
         if not isinstance(item, dict):
             raise SkillFieldError(f"on_load[{n}] は object で指定する")
+        # 短い記法(`{"skill": <id>}` `{"recipe": <path>}` `{"read": <path>}` — レシピの
+        # frontmatter と同じ。2026-10-30)は正規形へ。shell / python は付属の無い skill では不可
+        try:
+            item = normalize_skill_on_load_shorthand(item)
+        except ValueError as e:
+            raise SkillFieldError(f"on_load[{n}]: {e}")
         unknown = set(item) - {"tool", "args"}
         if unknown:
             raise SkillFieldError(
@@ -176,6 +200,15 @@ def normalize_on_load(value, skill_id: str) -> list[dict]:
                     f"on_load[{n}] の load_skill に自分自身は指定できない"
                 )
             args = {"skill_id": target}
+        elif tool == ON_LOAD_RECIPE_TOOL:
+            if set(args) - {"path"} or not isinstance(args.get("path"), str):
+                raise SkillFieldError(
+                    f"on_load[{n}] の load_recipe の args は path (レシピのフォルダ) だけ"
+                )
+            try:
+                args = {"path": parse_recipe_path(args["path"]).folder}
+            except RecipePathError as e:
+                raise SkillFieldError(f"on_load[{n}] の load_recipe: {e}")
         normalized.append({"tool": tool, "args": args})
     return normalized
 
@@ -234,6 +267,15 @@ class SkillsTable:
                 return SkillModel.model_validate(skill)
         except Exception:
             return None
+
+    def get_skills_by_ids(self, ids) -> list[SkillModel]:
+        """id の集合の skill をまとめて 1 回の問い合わせで(無い id は落とす)。"""
+        ids = [normalize_command(i) for i in ids or [] if isinstance(i, str)]
+        if not ids:
+            return []
+        with get_db() as db:
+            rows = db.query(Skill).filter(Skill.id.in_(ids)).all()
+            return [SkillModel.model_validate(r) for r in rows]
 
     def get_skills(self) -> list[SkillUserResponse]:
         with get_db() as db:

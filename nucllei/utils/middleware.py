@@ -45,6 +45,7 @@ from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 from nucllei.utils.chat import generate_chat_completion
 from nucllei.utils.task import (
+    ensure_user_recipes,
     get_task_model_id,
 )
 from nucllei.utils.misc import (
@@ -59,7 +60,8 @@ from nucllei.utils.skills import (
     apply_skill_command,
     apply_skill_on_load,
     build_load_skill_tool,
-    drain_load_skill_followups,
+    make_followup_drain,
+    reachable_skill_contents,
     current_skill_activation_seeds,
     replay_skill_tool_ids,
     skill_activation_seed_block,
@@ -512,6 +514,13 @@ async def process_chat_payload(
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
 
+    # {{USER_RECIPES}}(見えるレシピの一覧 — sandbox に聞く)を、このモデルで読み込まれうる
+    # skill の本文にあれば先に取っておく(同期の prompt_template が展開する。2026-10-30)。
+    # preset の system prompt の分は、それを当てる直前(routers/openai 等)で同じく取る
+    await ensure_user_recipes(
+        user, *(await asyncio.to_thread(reachable_skill_contents, model))
+    )
+
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 合成の load_skill tool exchange(call + 展開済み content の result)を
     # ヒットした user メッセージの直後へ注入する。
@@ -730,13 +739,18 @@ async def process_chat_payload(
     # このターンの tools_dict にある物だけ(モデルの tool の read ACL・skill の tool を
     # 通った物)、実行はモデルの call と同じ execute_tool_calls。応答には synthetic でない
     # tool_calls ブロックとして残す(次のリクエストからは履歴の実体 — 再実行しない)。
+    def on_load_execute(calls):
+        return execute_tool_calls(
+            calls, tools_dict, events_stream=events_stream, metadata=metadata
+        )
+
     on_load_blocks = await apply_skill_on_load(
         skill_activations,
         form_data["messages"],
         tools_dict,
-        lambda calls: execute_tool_calls(
-            calls, tools_dict, events_stream=events_stream, metadata=metadata
-        ),
+        on_load_execute,
+        # on_load の load_recipe が積むレシピの後続(その on_load)をこの位置に続ける
+        drain=make_followup_drain(tools_dict, metadata, on_load_execute),
     )
     if on_load_blocks:
         metadata["skill_on_load_blocks"] = on_load_blocks
@@ -2530,13 +2544,18 @@ async def process_chat_response(
                 # llens#22: load_skill が積んだ後続(on_load の load_skill と tool の要素)を
                 # 同じ応答の tool 往復として続けて足す(通常のブロック — 保存されて
                 # 次のリクエストからは履歴の実体になる)
-                followup_calls, followup_results = await drain_load_skill_followups(
-                    tools.get("load_skill"),
+                # load_recipe が積んだ後続(レシピの on_load — 2026-10-30)も同じく、書いた順・
+                # 深さ優先に
+                drain_followups = make_followup_drain(
                     tools,
+                    metadata,
                     lambda calls: execute_tool_calls(
                         calls, tools, events_stream=events_stream, metadata=metadata
                     ),
                 )
+                followup_pairs = await drain_followups()
+                followup_calls = [c for c, _ in followup_pairs]
+                followup_results = [r for _, r in followup_pairs]
                 if followup_calls:
                     assembler.append_tool_exchange(followup_calls, followup_results)
 

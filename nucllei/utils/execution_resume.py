@@ -55,6 +55,7 @@ from nucllei.utils.executions import (
 )
 from nucllei.utils.image_refs import split_page, stored_ref_kind
 from nucllei.utils.task import (
+    ensure_user_recipes,
     prompt_template,
     resolve_base_model_id,
     user_prompt_params,
@@ -828,6 +829,7 @@ async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> No
     if model is None:
         raise _PermanentTurnFailure(f"model '{model_id}' is not resolvable")
 
+    await ensure_user_recipes(user, ((chat_json.get("params") or {}).get("system")))
     wire_messages = build_wire_messages(chat_json, user, assistant_id, model)
     params = _merged_params(chat_json, user)
     chat_files = chat_json.get("files") or []

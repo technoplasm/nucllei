@@ -30,6 +30,7 @@ from nucllei.constants import ERROR_MESSAGES
 from nucllei.env import SRC_LOG_LEVELS
 
 
+from nucllei.utils.task import ensure_user_recipes
 from nucllei.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
@@ -717,6 +718,8 @@ async def generate_chat_completion(
 
         params = model_info.params.model_dump()
         payload = apply_model_params_to_body_openai(params, payload)
+        # {{USER_RECIPES}} は sandbox に聞く(非同期)ので先に取る(2026-10-30)
+        await ensure_user_recipes(user, params.get("system"))
         payload = apply_model_system_prompt_to_body(
             params, payload, metadata, user, model_info
         )

@@ -176,5 +176,57 @@ def dedup_tool_calls(
     run(database_url, apply, backup_dir)
 
 
+@app.command(name="recipe-check")
+def recipe_check(
+    paths: Annotated[
+        list[str],
+        typer.Argument(
+            help="jail のパス: /ext・/ext/groups・/ext/groups/<g>・/ext/public・レシピのフォルダ"
+        ),
+    ],
+    ext_root: Annotated[
+        str,
+        typer.Option(help="jail の /ext に当たるホストのディレクトリ (既定 /ext)。"),
+    ] = "/ext",
+    today: Annotated[
+        Optional[str], typer.Option(help="今日 (YYYY-MM-DD。試験用)。")
+    ] = None,
+):
+    """共有の層 (/ext/groups・/ext/public) のレシピを、save_recipe / edit_recipe と同じ判定で点検する。
+
+    1 所見 1 行で `stop|note|unchecked<TAB><レシピのフォルダ><TAB><所見>` を出す (何も直さない)。
+    個人の /workspace は対象外 (ホストから読めず、利用者の層は点検しない — ken 2026-10-30)。
+    終了コード: 0 = 止める所見なし、1 = 止める所見あり、2 = 使い方の誤り。
+    サーバの設定 (DB・秘密鍵) は使わない。配備層の表は env `RECIPE_RESTRICTED_TOOLS` /
+    `RECIPE_MEMO_KEYS` (nucllei の README_API)。
+    """
+    import datetime as dt
+
+    from nucllei.utils.recipes import RecipePathError, lint_folder, lint_targets
+
+    try:
+        day = dt.date.fromisoformat(today) if today else dt.date.today()
+    except ValueError:
+        typer.echo(f"--today が YYYY-MM-DD でない: {today}", err=True)
+        raise typer.Exit(code=2)
+    root = ext_root.rstrip("/") or "/"
+    stops = 0
+    count = 0
+    for path in paths:
+        try:
+            targets = lint_targets(path, root)
+        except RecipePathError as e:
+            typer.echo(f"{e} — {e.next}", err=True)
+            raise typer.Exit(code=2)
+        for jail_path, real_path in targets:
+            count += 1
+            for line in lint_folder(jail_path, real_path, day):
+                typer.echo(line)
+                if line.startswith("stop\t"):
+                    stops += 1
+    typer.echo(f"{count} 件のレシピを点検、止める所見 {stops} 件", err=True)
+    raise typer.Exit(code=1 if stops else 0)
+
+
 if __name__ == "__main__":
     app()

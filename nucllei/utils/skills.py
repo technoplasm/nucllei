@@ -144,6 +144,29 @@ def activate_skill(skill, user, model=None) -> str:
     )
 
 
+def reachable_skill_contents(model) -> list[str]:
+    """このモデルで読み込まれうる skill の本文(meta.skillIds と、その on_load の load_skill で
+    辿れるもの)。{{USER_RECIPES}} を先に取るかの判定に使う(ensure_user_recipes)。"""
+    if not is_skills_feature_enabled(model):
+        return []
+    seen: set = set()
+    contents = []
+    queue = list(get_model_skill_ids(model))
+    while queue and len(seen) < 200:
+        skill_id = normalize_command(str(queue.pop(0)))
+        if not skill_id or skill_id in seen:
+            continue
+        seen.add(skill_id)
+        skill = Skills.get_skill_by_id(skill_id)
+        if skill is None:
+            continue
+        contents.append(skill.content or "")
+        for entry in skill.on_load or []:
+            if is_on_load_skill_entry(entry):
+                queue.append(str((entry.get("args") or {}).get("skill_id") or ""))
+    return contents
+
+
 def is_skills_feature_enabled(model) -> bool:
     """モデル(preset)の機能「スキル」が有効か(issue #42)。
 
@@ -437,7 +460,9 @@ async def run_on_load_entry(skill_id, n, entry, tools, done_ids: set, execute):
     return call, (await execute([call]))[0]
 
 
-async def apply_skill_on_load(activations, messages, tools, execute) -> list:
+async def apply_skill_on_load(
+    activations, messages, tools, execute, drain=None
+) -> list:
     """`/command`・自動ロード(と on_load の load_skill で入った skill)の on_load の tool の
     要素を、書いた順に実行して差し込む(llens#22)。
 
@@ -497,6 +522,11 @@ async def apply_skill_on_load(activations, messages, tools, execute) -> list:
             if ran is not None:
                 calls.append(ran[0])
                 results.append(ran[1])
+                # 実行した tool が積んだ後続 (load_recipe のレシピの on_load 等) をこの位置に
+                if drain is not None:
+                    for c, r in await drain():
+                        calls.append(c)
+                        results.append(r)
         flush()
     return blocks
 
@@ -912,7 +942,7 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None):
     }
 
 
-async def drain_load_skill_followups(entry, tools, execute):
+async def drain_load_skill_followups(entry, tools, execute, drain=None):
     """load_skill が積んだ後続(on_load — llens#22)を書いた順に取り出して
     (calls, results) にする。native ループが load_skill を含む応答の実行後に呼ぶ。
 
@@ -961,7 +991,95 @@ async def drain_load_skill_followups(entry, tools, execute):
             if ran is not None:
                 calls.append(ran[0])
                 results.append(ran[1])
+                if drain is not None:
+                    for c, r in await drain():
+                        calls.append(c)
+                        results.append(r)
     return calls, results
+
+
+# load_recipe (builtin_sandbox) が積む後続 — レシピの frontmatter の on_load (2026-10-30)。
+# 置き場は request の metadata(tool は `__metadata__` で受ける)。要素は
+# `{"call_id": "recipe:<フォルダ>:on_load:<n>", "tool": <名前>, "args": {…}, "recipe": <フォルダ>}`。
+RECIPE_FOLLOWUPS_KEY = "_recipe_followups"
+RECIPE_ON_LOAD_DONE_KEY = "_recipe_on_load_done"
+# 後続の入れ子 (レシピ → skill → レシピ …) の深さの上限。循環は「読み込み済み」で止まるので保険
+FOLLOWUP_MAX_DEPTH = 16
+
+
+def _recipe_followup_unavailable(call: dict, recipe: str) -> dict:
+    name = call["function"]["name"]
+    error = ToolFailure(
+        f"レシピ {recipe} の読み込み時に実行する {name} は使えない"
+        " (このターンの tool の一覧に無い)",
+        "その結果無しでレシピに従う。",
+    )
+    return {
+        "tool_call_id": call["id"],
+        "content": error.text,
+        "duration": 0.0,
+        "error_kind": error.kind,
+    }
+
+
+def make_followup_drain(tools: dict, metadata: dict, execute):
+    """load_skill / load_recipe が積んだ後続を、書いた順・深さ優先に実行して [(call, result)] で
+    返す関数を作る(native ループと apply_skill_on_load が使う)。後続の中で実行した tool が
+    さらに積んだもの(レシピ → skill → …)はその位置で続ける。"""
+    depth = 0
+
+    async def drain() -> list:
+        nonlocal depth
+        if depth >= FOLLOWUP_MAX_DEPTH:
+            log.warning("load_skill / load_recipe の後続の入れ子が深すぎるので止めた")
+            return []
+        depth += 1
+        try:
+            pairs = []
+            entry = tools.get("load_skill")
+            if entry and entry.get("followups"):
+                calls, results = await drain_load_skill_followups(
+                    entry, tools, execute, drain=drain
+                )
+                pairs += list(zip(calls, results))
+            pending = list(metadata.get(RECIPE_FOLLOWUPS_KEY) or [])
+            if pending:
+                metadata[RECIPE_FOLLOWUPS_KEY] = []
+            done = metadata.setdefault(RECIPE_ON_LOAD_DONE_KEY, set())
+            for item in pending:
+                call_id = item["call_id"]
+                if call_id in done:
+                    continue
+                done.add(call_id)
+                name = item["tool"]
+                call = {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(
+                            item.get("args") or {}, ensure_ascii=False
+                        ),
+                    },
+                }
+                args_render = ((tools.get(name) or {}).get("render") or {}).get("args")
+                if args_render:
+                    call["render"] = {"args": args_render}
+                if name not in tools:
+                    log.warning(
+                        f"レシピ {item.get('recipe')} の on_load の tool {name!r} はこのターンに無い"
+                    )
+                    pairs.append(
+                        (call, _recipe_followup_unavailable(call, item.get("recipe")))
+                    )
+                    continue
+                pairs.append((call, (await execute([call]))[0]))
+                pairs += await drain()
+            return pairs
+        finally:
+            depth -= 1
+
+    return drain
 
 
 def skill_activation_seed_block(skill_activations) -> dict:

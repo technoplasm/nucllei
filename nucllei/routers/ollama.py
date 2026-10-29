@@ -37,6 +37,7 @@ from nucllei.models.models import Models
 from nucllei.utils.misc import (
     calculate_sha256,
 )
+from nucllei.utils.task import ensure_user_recipes
 from nucllei.utils.payload import (
     apply_model_params_to_body_ollama,
     apply_model_params_to_body_openai,
@@ -997,6 +998,7 @@ async def generate_chat_completion(
             payload["options"] = apply_model_params_to_body_ollama(
                 params, payload["options"]
             )
+            await ensure_user_recipes(user, params.get("system"))
             payload = apply_model_system_prompt_to_body(
                 params, payload, metadata, user, model_info
             )
@@ -1186,6 +1188,7 @@ async def generate_openai_chat_completion(
 
         if params:
             payload = apply_model_params_to_body_openai(params, payload)
+            await ensure_user_recipes(user, params.get("system"))
             payload = apply_model_system_prompt_to_body(
                 params, payload, metadata, user, model_info
             )
