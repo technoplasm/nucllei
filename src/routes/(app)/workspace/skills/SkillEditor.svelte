@@ -48,6 +48,12 @@
 	// 正規化(小文字化・空要素と重複の除去)はバックエンドが行う。
 	let autoLoadContentTypes = $state('');
 
+	// llens#22: requires(一緒に読み込む skill の id)はカンマ区切り、on_load(読み込み時に
+	// サーバが 1 回実行する tool)は JSON の配列で編集する。on_load は admin のみ
+	// (バックエンドの admin ゲートと整合)— 非 admin の保存では送らない = 既存値を保つ。
+	let requires = $state('');
+	let onLoadText = $state('');
+
 	let accessControl = $state<any>({});
 
 	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。
@@ -76,6 +82,11 @@
 			return;
 		}
 
+		if ($user?.role === 'admin' && parseOnLoad(onLoadText) === null) {
+			toast.error($i18n.t('On load must be a JSON array.'));
+			return;
+		}
+
 		// 編集で id が変わったら、割り当て・valves がちぎれる旨を確認してから差し替える。
 		if (edit && id !== originalId) {
 			showRenameConfirm = true;
@@ -95,9 +106,26 @@
 			content,
 			tool_ids: toolIds,
 			auto_load_content_types: autoLoadContentTypes.split(',').map((type) => type.trim()),
+			requires: requires
+				.split(',')
+				.map((skillId) => skillId.trim())
+				.filter((skillId) => skillId !== ''),
+			...($user?.role === 'admin' ? { on_load: parseOnLoad(onLoadText) } : {}),
 			access_control: accessControl
 		});
 		loading = false;
+	};
+
+	// 空欄は [](on_load 無し)。配列でない・JSON でないものは null(保存させない)。
+	// 要素の形(tool・args)の検証はバックエンドが行い、400 の detail を toast に出す
+	const parseOnLoad = (text: string): unknown[] | null => {
+		if (text.trim() === '') return [];
+		try {
+			const value = JSON.parse(text);
+			return Array.isArray(value) ? value : null;
+		} catch {
+			return null;
+		}
 	};
 
 	const validateCommandString = (inputString: string) => {
@@ -117,6 +145,8 @@
 			_content = content;
 			toolIds = skill?.tool_ids ?? [];
 			autoLoadContentTypes = (skill?.auto_load_content_types ?? []).join(', ');
+			requires = (skill?.requires ?? []).join(', ');
+			onLoadText = (skill?.on_load ?? []).length ? JSON.stringify(skill.on_load, null, 2) : '';
 
 			accessControl = skill?.access_control ?? null;
 		}
@@ -227,6 +257,25 @@
 			</div>
 		</div>
 
+		<div class="flex items-start gap-2 my-2">
+			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-requires">
+				{$i18n.t('Requires')}
+			</label>
+			<div class="flex-1 min-w-0">
+				<input
+					id="skill-requires"
+					class="w-full text-sm py-1 px-2 bg-surface-form rounded-xs outline-hidden"
+					placeholder="base, recipes"
+					bind:value={requires}
+				/>
+				<div class="text-xs text-content-muted mt-0.5">
+					{$i18n.t(
+						'Skills loaded together with this one, whichever way it is loaded (comma-separated skill IDs). They do not need to be assigned to the model.'
+					)}
+				</div>
+			</div>
+		</div>
+
 		{#if $user?.role === 'admin'}
 			<div class="flex items-start gap-2 my-2">
 				<div class="w-24 shrink-0 text-sm font-semibold pt-0.5">{$i18n.t('Tools')}</div>
@@ -253,6 +302,26 @@
 					{/if}
 					<div class="text-xs text-content-muted mt-0.5">
 						{$i18n.t('Only admins can create or update skills with tools attached.')}
+					</div>
+				</div>
+			</div>
+
+			<div class="flex items-start gap-2 my-2">
+				<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-on-load">
+					{$i18n.t('On load')}
+				</label>
+				<div class="flex-1 min-w-0">
+					<Textarea
+						id="skill-on-load"
+						className="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
+						placeholder={'[{"tool": "read_file", "args": {"path": "/ext/groups/…/notes.md"}}]'}
+						bind:value={onLoadText}
+						rows={2}
+					/>
+					<div class="text-xs text-content-muted mt-0.5">
+						{$i18n.t(
+							'Tools the server runs once per chat when this skill is loaded, with these fixed arguments (JSON array). The results are added to the chat as tool calls.'
+						)}
 					</div>
 				</div>
 			</div>

@@ -216,6 +216,8 @@ export type Skill = {
 	content: string;
 	tool_ids: string[];
 	auto_load_content_types: string[];
+	requires: string[];
+	on_load: { tool: string; args: Record<string, unknown> }[];
 	access_control?: null | object;
 	created_at: number;
 	updated_at: number;
