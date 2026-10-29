@@ -1,9 +1,9 @@
 {
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w' 或 '-1' 表示无过期时间。",
 	"(no description)": "(无描述)",
-	"Only admins can change this, because it runs tools other than load_skill.": "此设置会运行 load_skill 以外的工具，只有管理员可以更改。",
-	"Only admins can set tools other than load_skill in On load.": "只有管理员可以在“加载时”中设置 load_skill 以外的工具。",
-	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill.": "加载此技能时按顺序执行的步骤(JSON 数组)。load_skill 会同时加载另一个技能;其他工具由服务器在每个聊天中按此处的固定参数只执行一次,结果会保留在聊天中。只有管理员可以设置 load_skill 以外的工具。",
+	"Only admins can change this, because it runs tools other than load_skill and load_recipe.": "此设置会运行 load_skill 和 load_recipe 以外的工具，只有管理员可以更改。",
+	"Only admins can set tools other than load_skill and load_recipe in On load.": "只有管理员可以在“加载时”中设置 load_skill 和 load_recipe 以外的工具。",
+	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill and load_recipe loads a recipe together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill and load_recipe.": "加载此技能时按顺序执行的步骤(JSON 数组)。load_skill 会同时加载另一个技能,load_recipe 会同时加载一个配方;其他工具由服务器在每个聊天中按此处的固定参数只执行一次,结果会保留在聊天中。只有管理员可以设置 load_skill 和 load_recipe 以外的工具。",
 	"{{COUNT}} hidden lines": "{{COUNT}} 行被隐藏",
 	"{{DURATION}} seconds": "{{DURATION}} 秒",
 	"{{n}} files selected": "已选择 {{n}} 个文件",

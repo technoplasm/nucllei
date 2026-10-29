@@ -1,9 +1,9 @@
 {
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "",
 	"(no description)": "",
-	"Only admins can change this, because it runs tools other than load_skill.": "",
-	"Only admins can set tools other than load_skill in On load.": "",
-	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill.": "",
+	"Only admins can change this, because it runs tools other than load_skill and load_recipe.": "",
+	"Only admins can set tools other than load_skill and load_recipe in On load.": "",
+	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill and load_recipe loads a recipe together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill and load_recipe.": "",
 	"{{COUNT}} hidden lines": "",
 	"{{DURATION}} seconds": "",
 	"{{n}} files selected": "",

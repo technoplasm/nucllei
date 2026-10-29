@@ -1,9 +1,9 @@
 {
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w' または '-1' で無期限。",
 	"(no description)": "(説明なし)",
-	"Only admins can change this, because it runs tools other than load_skill.": "load_skill 以外のツールを実行する設定なので、変更できるのは管理者だけです。",
-	"Only admins can set tools other than load_skill in On load.": "「読み込み時」に load_skill 以外のツールを設定できるのは管理者だけです。",
-	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill.": "このスキルが読み込まれたときに、書いた順に処理する手順です(JSON の配列)。load_skill は別のスキルを一緒に読み込みます。それ以外のツールは、ここに書いた固定の引数でサーバーがチャットにつき 1 回だけ実行し、結果がチャットに残ります。load_skill 以外のツールを設定できるのは管理者だけです。",
+	"Only admins can change this, because it runs tools other than load_skill and load_recipe.": "load_skill・load_recipe 以外のツールを実行する設定なので、変更できるのは管理者だけです。",
+	"Only admins can set tools other than load_skill and load_recipe in On load.": "「読み込み時」に load_skill・load_recipe 以外のツールを設定できるのは管理者だけです。",
+	"Steps run in order when this skill is loaded (JSON array). load_skill loads another skill and load_recipe loads a recipe together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill and load_recipe.": "このスキルが読み込まれたときに、書いた順に処理する手順です(JSON の配列)。load_skill は別のスキルを、load_recipe はレシピを一緒に読み込みます。それ以外のツールは、ここに書いた固定の引数でサーバーがチャットにつき 1 回だけ実行し、結果がチャットに残ります。load_skill・load_recipe 以外のツールを設定できるのは管理者だけです。",
 	"{{COUNT}} hidden lines": "{{COUNT}} 行を非表示",
 	"{{DURATION}} seconds": "{{DURATION}}秒",
 	"{{n}} files selected": "{{n}} 件のファイルを選択中",

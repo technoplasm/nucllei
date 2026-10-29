@@ -91,7 +91,9 @@
 				return;
 			}
 			if ($user?.role !== 'admin' && hasToolEntries(parsed)) {
-				toast.error($i18n.t('Only admins can set tools other than load_skill in On load.'));
+				toast.error(
+					$i18n.t('Only admins can set tools other than load_skill and load_recipe in On load.')
+				);
 				return;
 			}
 		}
@@ -121,12 +123,18 @@
 		loading = false;
 	};
 
-	// load_skill 以外の tool(サーバが実行する)の要素があるか — あれば admin のみ
-	const hasToolEntries = (entries: unknown[]) =>
-		entries.some(
-			(entry) =>
-				!entry || typeof entry !== 'object' || (entry as { tool?: unknown }).tool !== 'load_skill'
-		);
+	// load_skill・load_recipe 以外の tool(サーバが実行する)の要素があるか — あれば admin のみ。
+	// バックエンド(models/skills.py の on_load_tool_entries)と同じ規則で、短い記法の
+	// `{"skill": …}` `{"recipe": …}` も読み込みとして数える(`{"read": …}` は read_file = tool)
+	const LOADING_TOOLS = ['load_skill', 'load_recipe'];
+	const LOADING_SHORT_KEYS = ['skill', 'recipe'];
+	const isLoadingEntry = (entry: unknown) => {
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+		const keys = Object.keys(entry);
+		if (keys.length === 1 && LOADING_SHORT_KEYS.includes(keys[0])) return true;
+		return LOADING_TOOLS.includes((entry as { tool?: unknown }).tool as string);
+	};
+	const hasToolEntries = (entries: unknown[]) => entries.some((entry) => !isLoadingEntry(entry));
 
 	// 空欄は [](on_load 無し)。配列でない・JSON でないものは null(保存させない)。
 	// 要素の形(tool・args)の検証はバックエンドが行い、400 の detail を toast に出す
@@ -279,7 +287,9 @@
 						id="skill-on-load"
 						class="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs whitespace-pre-wrap break-all text-content-muted">{onLoadText}</pre>
 					<div class="text-xs text-content-muted mt-0.5">
-						{$i18n.t('Only admins can change this, because it runs tools other than load_skill.')}
+						{$i18n.t(
+							'Only admins can change this, because it runs tools other than load_skill and load_recipe.'
+						)}
 					</div>
 				{:else}
 					<Textarea
@@ -291,7 +301,7 @@
 					/>
 					<div class="text-xs text-content-muted mt-0.5">
 						{$i18n.t(
-							'Steps run in order when this skill is loaded (JSON array). load_skill loads another skill together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill.'
+							'Steps run in order when this skill is loaded (JSON array). load_skill loads another skill and load_recipe loads a recipe together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill and load_recipe.'
 						)}
 					</div>
 				{/if}
